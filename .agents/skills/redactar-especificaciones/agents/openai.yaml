@@ -1,0 +1,4 @@
+interface:
+  display_name: "Redactar especificaciones"
+  short_description: "Especificaciones claras de análisis genético"
+  default_prompt: "Usa $redactar-especificaciones para redactar o revisar esta especificación en castellano y con lenguaje claro."
