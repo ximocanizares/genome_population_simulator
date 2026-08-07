@@ -1,0 +1,4 @@
+interface:
+  display_name: "Redactar texto técnico"
+  short_description: "Escribe documentación técnica clara en castellano"
+  default_prompt: "Usa $redactar-texto-tecnico para redactar o revisar este texto técnico en castellano claro, preciso y adaptado a sus lectores."

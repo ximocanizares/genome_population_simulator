@@ -1,182 +1,148 @@
 ---
 name: planificar-implementaciones
-description: Convertir una especificación ya acordada de un proyecto de análisis genético en un plan de implementación ordenado, dividido en cambios pequeños y verificables. Usar al crear, revisar o actualizar el orden de desarrollo, los hitos, las dependencias, las pausas de revisión y las pruebas necesarias antes de empezar a programar o durante el seguimiento de la implementación.
+description: Convertir una especificación y una arquitectura ya acordadas de un proyecto de análisis genético en un plan de implementación ordenado, trazable y verificable. Usar al crear, revisar o actualizar hitos, dependencias, cambios pequeños, pausas de revisión y pruebas, respetando el lenguaje y las herramientas que se hayan elegido sin introducir nuevas decisiones de diseño.
 ---
 
 # Planificar implementaciones
 
 ## Objetivo
 
-Convertir un diseño ya acordado en un orden de trabajo que pueda ejecutarse paso
-a paso. El plan debe indicar qué se construirá, en qué orden, de qué decisión de
-la especificación procede y cómo se comprobará.
+Convertir el diseño acordado en una secuencia de cambios pequeños que otra
+persona pueda ejecutar sin decidir durante la implementación qué debía hacer el
+sistema.
 
-Redactar el plan en castellano claro para genetistas. No dar por supuestos
-conocimientos avanzados de programación, arquitectura de software, pruebas o
-estadística.
+Redactar el plan en castellano claro para genetistas y desarrolladores. Explicar
+los términos de software que condicionen el orden o la comprobación del trabajo.
 
-## Límite principal
+## Puerta de entrada
 
-No tomar decisiones de diseño dentro del plan de implementación. Si falta una
-decisión que cambia lo que se debe construir, detener esa parte del plan y
-devolver la cuestión a la especificación.
+No empezar el plan completo hasta disponer de:
 
-No presentar como decidido un supuesto elegido solo para poder continuar.
-Puede avanzarse con partes independientes, pero el plan completo no estará
-listo mientras queden decisiones necesarias sin resolver.
+- una especificación vigente, sin decisiones funcionales críticas abiertas;
+- una arquitectura que defina componentes, responsabilidades, contratos,
+  flujos de datos e invariantes;
+- el lenguaje, las herramientas y las versiones necesarias para escribir
+  comandos concretos, si el plan llega a ese nivel.
 
-## Antes de escribir el plan
+No resolver decisiones de diseño dentro del plan. Si falta una decisión que
+cambia lo que debe construirse, devolverla al documento correspondiente y
+continuar solo con las partes independientes.
 
-1. Leer por completo la especificación y los documentos que explican cómo se
-   organizan las partes del sistema, es decir, su arquitectura técnica.
-2. Comprobar que el alcance, el comportamiento esperado y las decisiones
-   técnicas necesarias están cerrados.
-3. Identificar las secciones concretas que justifican cada parte del trabajo.
-4. Localizar componentes existentes que deban reutilizarse.
-5. Anotar las decisiones abiertas y resolverlas en la especificación antes de
-   planificar el trabajo que dependa de ellas.
-6. Respetar las herramientas y versiones ya acordadas. En este proyecto, los
-   pasos de Python deben usar `uv` salvo que la especificación indique un cambio.
+## Preparación
+
+1. Leer completamente la especificación, la arquitectura y las decisiones que
+   las complementen.
+2. Inspeccionar el repositorio para localizar componentes reutilizables,
+   convenciones, pruebas y comandos existentes.
+3. Crear un mapa de dependencias entre capacidades, componentes y formatos.
+4. Señalar los cambios capaces de producir resultados incorrectos sin un fallo
+   visible, por ejemplo coordenadas, fase, genotipos, muestras o referencias.
+5. Confirmar que cada elemento aplazado tiene un destino explícito.
+
+No suponer ningún lenguaje, gestor de dependencias, compilador ni herramienta
+mientras no se haya elegido en la arquitectura o en una decisión posterior
+aprobada.
 
 ## Estructura del plan
 
-Mantener esta estructura, salvo que el proyecto ya tenga una plantilla más
-específica:
+Mantener, salvo que exista una plantilla acordada:
 
-1. **Cabecera y estado.** Indicar título, fecha, estado del plan y documentos de
-   diseño de los que procede. Aclarar que el plan ordena la implementación y no
-   sustituye a la especificación.
-2. **Alcance incluido y excluido.** Enumerar qué se construirá y qué no. Asociar
-   cada elemento excluido con un plan posterior o indicar expresamente que no
-   está previsto.
-3. **Criterios para decidir el orden.** Explicar brevemente por qué los hitos
-   siguen esa secuencia.
-4. **Requisitos previos.** Indicar qué debe existir y poder comprobarse antes
-   del primer paso.
-5. **Hitos y pasos.** Dividir el trabajo en grupos de pasos pequeños que puedan
-   implementarse, probarse y confirmarse por separado.
-6. **Pausas de revisión.** Añadir una revisión obligatoria al terminar cada
-   hito, antes de continuar con el siguiente.
-7. **Resumen de comprobaciones.** Incluir una tabla que relacione cada hito con
-   las pruebas o evidencias que demostrarán que funciona.
-8. **Trabajo posterior.** Indicar qué queda para otros planes para que ninguna
-   tarea desaparezca sin explicación.
+1. cabecera, fecha, estado y documentos de origen;
+2. alcance incluido, excluido y trabajo posterior;
+3. criterios usados para ordenar el trabajo;
+4. requisitos previos y decisiones bloqueantes;
+5. hitos con pasos pequeños y dependencias explícitas;
+6. pausa de revisión al cerrar cada hito;
+7. matriz final de hitos y evidencias de validación.
 
-## Cómo escribir cada paso
+## Formato de cada paso
 
-Usar una casilla por cada cambio que pueda quedar registrado como una unidad.
-Esta unidad se denomina *commit* en el sistema de control de versiones:
+Usar una casilla por cambio independiente:
 
 ```markdown
-- ☐ A1. Resultado concreto que debe construirse.
-  - Depende de: pasos anteriores necesarios, o «ninguno».
-  - Procede de: sección concreta de la especificación o de la arquitectura.
-  - Se comprueba con: prueba o evidencia esperada.
+- ☐ A1. Resultado concreto y observable.
+  - Depende de: A0 o «ninguno».
+  - Procede de: especificación §X y arquitectura §Y.
+  - Cambia: rutas, componentes o interfaces previstos.
+  - Se comprueba con: comando, prueba y evidencia esperada.
 ```
 
 Aplicar estas reglas:
 
-- Describir un resultado observable, no una actividad imprecisa como
-  «trabajar en el adaptador».
-- Hacer cada paso lo bastante pequeño para implementarlo, revisarlo, probarlo
-  y registrarlo sin mezclar cambios independientes.
-- Indicar siempre sus dependencias. No confiar solo en el orden de la lista.
-- Citar siempre la sección de diseño que lo justifica. Un paso sin origen suele
-  señalar una decisión de diseño ausente.
-- Indicar cómo se comprobará. Evitar pasos cuya finalización dependa únicamente
-  de una opinión.
-- Actualizar la casilla de `☐` a `✅` solo cuando el cambio y sus pruebas estén
-  terminados.
+- describir un resultado, no una actividad imprecisa;
+- limitar el paso a una unidad que pueda implementarse, revisar y validar por
+  separado;
+- citar siempre el origen; un paso sin origen suele ocultar diseño nuevo;
+- declarar dependencias aunque el orden de la lista parezca evidente;
+- indicar archivos o componentes concretos cuando la arquitectura permita
+  conocerlos;
+- usar comprobaciones reales del proyecto, no marcadores genéricos;
+- cambiar `☐` por `✅` solo después de completar el cambio y sus pruebas.
 
-## Criterios para ordenar el trabajo
+Un paso puede corresponder a un *commit*, pero el plan no autoriza por sí solo a
+crear commits ni a publicar cambios. Respetar siempre la autorización del
+usuario y el flujo de trabajo del repositorio.
 
-Elegir solo los criterios que se apliquen y explicarlos en el plan:
+## Orden de trabajo
 
-- Definir primero las estructuras de datos y la forma en que se comunican las
-  partes del sistema, es decir, sus tipos e interfaces, cuando las necesiten
-  los pasos posteriores.
-- Probar primero la lógica principal de forma aislada y conectar después los
-  archivos, procesos externos y demás entradas y salidas.
-- Construir primero la versión más sencilla cuando pueda servir como referencia
-  para comprobar versiones posteriores.
-- Reutilizar funciones, reglas y constantes existentes antes de proponer una
-  segunda implementación.
-- Ejecutar antes las comprobaciones rápidas cuando no cambien el significado
-  del resultado.
-- Avanzar de forma incremental: completar y revisar un hito antes de empezar el
-  siguiente.
+Elegir y explicar solo los criterios pertinentes:
 
-En proyectos de análisis genético, separar en su propio paso y en su propio
-registro cualquier cambio que pueda producir un resultado incorrecto sin
-provocar un error visible. Algunos ejemplos habituales son la conversión de
-coordenadas, la interpretación de genotipos, la asociación de muestras y la
-normalización de variantes. Indicar qué prueba de referencia protege ese
-cambio.
+- establecer primero contratos, formatos y estructuras que necesiten los pasos
+  posteriores;
+- probar la lógica central de forma aislada antes de conectar archivos,
+  procesos externos o interfaces;
+- construir una versión sencilla de referencia antes de optimizaciones o
+  variantes complejas;
+- reutilizar componentes existentes antes de crear implementaciones paralelas;
+- ejecutar pronto las comprobaciones rápidas que detecten errores estructurales;
+- cerrar y revisar un hito antes de apoyar otro sobre él.
 
-## Comprobación de los hitos
+Aislar en pasos propios los cambios con riesgo de error silencioso y protegerlos
+con una verdad conocida, un caso sintético independiente o una referencia
+externa adecuada. No aceptar como única prueba que una parte del sistema se
+compare consigo misma.
 
-Definir pruebas que puedan demostrar el resultado esperado. Preferir, cuando
-exista, una verdad conocida, un conjunto de referencia o una implementación ya
-validada. Una prueba que solo compara una parte del sistema consigo misma no es
-suficiente para demostrar que el resultado biológico es correcto.
+## Validación
 
 Combinar según corresponda:
 
-- pruebas pequeñas para reglas aisladas;
-- pruebas de integración para comprobar el recorrido completo;
-- casos sintéticos con verdad conocida;
-- comparación con una herramienta o resultado de referencia;
-- repetición de casos guardados que antes revelaron un fallo;
-- comprobación de la interfaz de línea de órdenes y de sus diagnósticos.
+- pruebas unitarias de reglas aisladas;
+- pruebas de integración de recorridos completos;
+- casos sintéticos con verdad conocida y semillas reproducibles;
+- pruebas de formatos e interoperabilidad con herramientas externas;
+- pruebas de regresión para fallos ya encontrados;
+- comprobaciones de errores, diagnósticos y casos límite;
+- medidas de rendimiento solo cuando exista un requisito medible.
 
-La tabla final debe tener, como mínimo, estas columnas:
+Definir para cada comprobación el comando, el resultado esperado y la evidencia
+que se conservará. Usar únicamente el gestor de dependencias, compilador,
+entorno y comandos elegidos por el proyecto.
 
-| Hito | Qué queda construido | Cómo se demuestra |
-|---|---|---|
-| A | Resultado del hito | Pruebas o evidencia concreta |
-
-## Pausas de revisión
-
-Cerrar cada hito con un bloque como este:
+Cerrar cada hito con una pausa explícita:
 
 ```markdown
-> Revisión del hito A: comprobar los cambios y sus pruebas. No continuar hasta
-> confirmar el resultado.
+> Revisión del hito A: comprobar los cambios y sus evidencias. No continuar
+> hasta confirmar el resultado.
 ```
 
-La pausa permite corregir pronto un error de enfoque y evita que los hitos
-posteriores se apoyen en una base no revisada.
+La matriz final debe incluir al menos:
 
-## Lenguaje y términos técnicos
+| Hito | Resultado construido | Evidencia | Riesgo protegido |
+|---|---|---|---|
+| A | Resultado del hito | Pruebas o comprobación concreta | Riesgo principal |
 
-- Escribir frases cortas, directas y en voz activa.
-- Explicar un término técnico la primera vez que aparezca si puede resultar
-  confuso para un genetista.
-- Desarrollar las siglas no habituales en su primera aparición.
-- Explicar primero para qué sirve un elemento y después dar su nombre técnico.
-- Mantener los nombres técnicos necesarios para que el plan sea preciso.
-- Distinguir claramente un requisito obligatorio de una recomendación o una
-  posibilidad futura.
+## Comprobación final
 
-## Revisión final
+- Confirmar que el plan no decide comportamiento ni arquitectura nuevos.
+- Comprobar que cada paso tiene dependencia, origen, cambio y validación.
+- Verificar que los pasos respetan el orden técnico real.
+- Confirmar que los riesgos silenciosos tienen pruebas independientes.
+- Revisar que cada hito termina con una pausa y una evidencia observable.
+- Verificar que el trabajo excluido conserva un destino.
+- Confirmar que herramientas y comandos coinciden con las decisiones vigentes.
+- Eliminar pasos demasiado grandes, duplicados o imposibles de verificar.
+- Comprobar que el texto está en castellano y es comprensible para sus dos
+  públicos.
 
-Antes de dar el plan por terminado, comprobar:
-
-- que la especificación y la arquitectura resuelven las decisiones necesarias;
-- que el alcance incluido y excluido está claro;
-- que ningún trabajo excluido se ha perdido sin indicar su destino;
-- que cada paso tiene casilla, dependencia, origen y comprobación;
-- que los pasos están ordenados por sus dependencias;
-- que cada paso es una unidad pequeña que puede revisarse y registrarse;
-- que los cambios con riesgo de errores silenciosos están aislados y protegidos
-  por una prueba de referencia;
-- que cada hito termina con una pausa de revisión;
-- que la tabla final explica cómo se demostrará cada hito;
-- que el plan puede ejecutarse sin tomar nuevas decisiones de diseño;
-- que las herramientas, sus versiones y los comandos respetan lo acordado en
-  la especificación, incluido el uso de `uv` en este proyecto;
-- que el texto está en castellano claro y resulta comprensible para un
-  genetista.
-
-El plan está listo cuando otra persona puede ejecutarlo de principio a fin sin
-tener que decidir durante la implementación qué debía hacer el sistema.
+El plan está listo cuando puede ejecutarse de principio a fin sin inventar
+decisiones y cada avance puede demostrarse antes de continuar.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Redactar arquitectura"
+  short_description: "Define una arquitectura clara y trazable"
+  default_prompt: "Usa $redactar-arquitectura para convertir la especificación acordada en una arquitectura técnica clara, verificable e independiente del lenguaje."
