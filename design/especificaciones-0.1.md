@@ -2,8 +2,10 @@
 
 - **Versión:** 0.1
 - **Estado:** borrador actualizado
-- **Fecha:** 6 de agosto de 2026
-- **Fuentes disponibles:** `README.md` e información confirmada por el usuario
+- **Fecha:** 7 de agosto de 2026
+- **Fuentes disponibles:** `README.md`, información confirmada por el usuario y
+  la decisión posterior de usar Rust recogida en
+  [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
 
 ## 1. Estado y finalidad del documento
 
@@ -15,6 +17,16 @@ La versión 0.1 sigue siendo un borrador. Los requisitos de esta versión son
 obligatorios, pero todavía no se han acordado todos sus detalles ni todos los
 casos que permitirán comprobar los resultados.
 
+La sección 4 es la fuente normativa de requisitos funcionales. Las secciones 2,
+5 y 6 los resumen y la sección 7 propone criterios de aceptación preliminares.
+Si una redacción resumida difiere de un requisito identificado, prevalece el
+requisito y debe corregirse el resumen. Esta regla aclara la fuente que debe
+consultarse; no autoriza a ignorar contradicciones entre requisitos.
+
+El núcleo del sistema se desarrollará en Rust. Esta elección ya está confirmada
+para el producto y no determina por sí sola la arquitectura, los *crates*, la
+versión del lenguaje, los formatos, los esquemas ni los algoritmos.
+
 ## 2. Objetivo del proyecto
 
 El sistema debe generar una colección coherente de datos genómicos simulados a
@@ -22,22 +34,25 @@ partir de un fichero general de configuración. Cuando se use la vía evolutiva 
 la vía de familias y poblaciones segregantes, el fichero general referenciará
 además un fichero de configuración poblacional propio del escenario. La colección
 generada estará formada por una o más referencias, cada una guardada en un único
-fichero FASTA, el estado genotípico faseado y reconstruible de los individuos,
+fichero FASTA, los estados genotípicos completos que sean obligatorios para la
+vía utilizada, el historial necesario para reconstruir su procedencia,
 copias de las configuraciones utilizadas, un manifiesto general y, cuando haya
-eventos técnicos, un manifiesto por evento. De
-forma predeterminada incluirá también un FASTQ final —o una pareja de FASTQ— y
-un fichero estructurado de procedencia por grupo de lectura, además de los BAM o
-CRAM obtenidos al mapear esas lecturas, salvo que se desactiven expresamente los
-alineamientos. La
-configuración podrá solicitar además VCF de verdad o usar un modo directo de
-alineamientos sintéticos que no requiere FASTQ.
+eventos, un manifiesto por evento. Cada salida asociada a una observación debe
+solicitarse mediante un evento
+explícito. Dentro de un evento que active alineamientos, el valor predeterminado
+será generar CRAM mediante el modo realista; este modo conserva un FASTQ final
+—o una pareja de FASTQ— y un fichero estructurado de procedencia por grupo de
+lectura antes de mapearlos. La configuración podrá solicitar un VCF de verdad
+sin activar FASTQ, BAM ni CRAM, o usar un modo directo de alineamientos
+sintéticos que no requiere FASTQ.
 
 El uso principal es preparar datos para probar programas de detección y
-genotipado de SNP. Por ello, el comportamiento predeterminado simula las
-lecturas desde los haplotipos, aplica la contaminación y los errores de
-demultiplexado, conserva el FASTQ final resultante y mapea esas mismas lecturas
-para generar BAM o CRAM. La configuración puede desactivar
-explícitamente esas salidas sin alterar el resultado mínimo.
+genotipado de SNP. Por ello, cuando un evento solicita alineamientos sin
+sustituir los valores predeterminados, simula las lecturas desde los haplotipos,
+aplica la contaminación y los errores de demultiplexado, conserva el FASTQ final
+resultante y mapea esas mismas lecturas para generar CRAM. Una ejecución sin
+eventos no genera por omisión ninguna salida asociada a eventos y conserva el
+resultado mínimo obligatorio.
 
 El sistema debe poder representar por separado la contaminación biológica,
 producida al mezclar material o lecturas de otras fuentes, y la contaminación
@@ -45,11 +60,13 @@ técnica entre muestras procesadas en una misma tanda de secuenciación o conjun
 de bibliotecas multiplexadas. Multiplexar consiste en secuenciar juntas varias
 bibliotecas y distinguir después sus muestras mediante índices.
 
-Cada evento de muestreo que genere datos técnicos constituye un experimento de
-secuenciación independiente. Usa una única tecnología, un único perfil y un
-único mapeador, y produce sus propias lecturas y resultados. Una misma ejecución
-biológica puede contener varios eventos con tecnologías o mapeadores distintos,
-pero no reutiliza FASTQ entre ellos ni tiene como objetivo comparar mapeadores.
+Cada evento que genere FASTQ, BAM o CRAM constituye un experimento de
+secuenciación independiente. Usa una única tecnología, un único perfil y,
+cuando genera alineamientos, un único mapeador, y produce sus propias lecturas y
+resultados. Un evento que solo materialice verdad genotípica o VCF no requiere
+tecnología, perfil, biblioteca ni mapeador. Una misma ejecución biológica puede
+contener varios eventos con tecnologías o mapeadores distintos, pero no
+reutiliza FASTQ entre ellos ni tiene como objetivo comparar mapeadores.
 
 La primera versión simulará exclusivamente secuenciación del genoma completo
 (WGS, *whole-genome sequencing*) de DNA genómico. Podrá usar lecturas cortas
@@ -84,10 +101,10 @@ referencia inicial sea simulada. El único FASTA de cada referencia podrá
 contener uno o varios de estos cromosomas o *scaffolds*.
 
 Una referencia estructural es una nueva referencia creada a partir de otra
-referencia disponible previamente. Solo se diferencia de su referencia de origen
-por las duplicaciones, deleciones, inversiones y translocaciones solicitadas. El sistema debe
-poder mantener disponibles dos o más referencias estructurales y conservar el
-origen y los cambios de cada una.
+referencia disponible previamente. Solo se diferencia de su referencia de
+origen por las duplicaciones, deleciones, inversiones y translocaciones
+solicitadas. El sistema debe poder mantener disponibles dos o más referencias
+estructurales y conservar el origen y los cambios de cada una.
 
 La verdad conocida es la información exacta, definida durante la simulación,
 sobre los genotipos reales de los individuos simulados. El VCF de verdad debe
@@ -250,8 +267,7 @@ Un fichero estructurado organiza la información en campos y grupos que un
 programa puede identificar y leer, en lugar de presentarla como texto libre. No
 se fija aquí su formato ni su esquema, es decir, las reglas que definirán sus
 campos, tipos y relaciones. Esta decisión se tomará durante la planificación de
-la implementación, después o al mismo tiempo que la elección del lenguaje, porque
-depende de ella.
+la implementación teniendo en cuenta que el núcleo se desarrollará en Rust.
 
 El fichero general contiene las decisiones que afectan a la totalidad de la
 ejecución. Un fichero de configuración poblacional describe un escenario
@@ -339,8 +355,8 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
 - **REQ-CONF-27.** Al repetir una ejecución con la misma semilla, las mismas
   configuraciones, las mismas entradas y la misma versión del programa, el
   sistema debe reproducir las mismas decisiones aleatorias y la misma simulación
-  biológica. Este requisito no exige que los archivos sean idénticos bit a bit
-  cuando contengan metadatos no biológicos que puedan variar.
+  biológica. Esta es la garantía mínima de reproducibilidad y corresponde al
+  nivel biológico definido en REQ-CONF-111.
 - **REQ-CONF-28.** Cada región de generación de variantes debe identificar una
   referencia estructural concreta, uno de sus cromosomas o *scaffolds* y un
   intervalo de coordenadas basado en 1 y cerrado, es decir, con los dos extremos
@@ -495,11 +511,14 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   forma predeterminada. Si se activan, la configuración debe permitir definir
   sus tipos, tasas y distribuciones globalmente y por locus, fase o subpoblación según
   las precedencias aplicables.
-- **REQ-CONF-64.** La generación de alineamientos finales debe estar activada de
-  forma predeterminada en formato CRAM. La configuración debe permitir elegir
-  BAM como alternativa o desactivar expresamente los alineamientos. El VCF de
-  verdad debe ser opcional. Ninguna de estas salidas, ni los FASTQ exigidos por
-  el modo realista, forma parte del mínimo obligatorio de toda ejecución.
+- **REQ-CONF-64.** Todo evento que solicite alineamientos debe generarlos de
+  forma predeterminada en formato CRAM. La configuración del evento debe
+  permitir elegir BAM como alternativa o no solicitar alineamientos. Una
+  ejecución sin eventos no debe crear un evento implícito ni generar
+  alineamientos por omisión. El VCF de verdad debe ser opcional y debe poder
+  solicitarse sin FASTQ, BAM ni CRAM. Ninguna de estas salidas, ni los FASTQ
+  exigidos por el modo realista, forma parte del mínimo obligatorio de toda
+  ejecución.
 - **REQ-CONF-65.** Antes de simular, el sistema debe comprobar que cada secuencia
   tiene una ploidía efectiva. Debe rechazar valores no enteros, menores que 1 o
   mayores que 10, o secuencias sin valor efectivo, e identificar la secuencia y
@@ -545,7 +564,11 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
 - **REQ-CONF-75.** Una muestra debe admitir cero, una o varias fuentes de
   contaminación sustitutiva. Para cada fuente, la configuración debe expresar
   la contribución como proporción, cobertura equivalente o número de lecturas o
-  parejas que sustituirán datos propios, con una unidad explícita.
+  parejas que sustituirán datos propios, con una unidad explícita. Cuando se
+  combinen unidades distintas, todas las contribuciones deben convertirse de
+  forma conjunta a las unidades indivisibles de la biblioteca antes de elegir
+  las lecturas: lecturas individuales para *single-end* o lecturas largas y
+  parejas completas para *paired-end*.
 - **REQ-CONF-76.** Cuando una fuente contaminante se cuantifique por número en
   datos *paired-end*, el valor debe contar pares completos, no lecturas sueltas.
   La configuración de esta operación no debe permitir solicitar pares
@@ -649,12 +672,17 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   regla. Debe permitir sustituir el valor general para *scaffolds* concretos,
   conservando la unidad elegida.
 - **REQ-CONF-101.** Una misma ejecución biológica debe poder definir cero, uno o
-  varios eventos de muestreo con salidas técnicas. Cada evento debe tener un
-  identificador único, su propia selección de individuos, tecnología, perfil,
-  bibliotecas, mapeador, referencias de mapeo, salidas y subsemilla.
-- **REQ-CONF-102.** Dentro de un evento debe seleccionarse exactamente una
-  tecnología, un perfil tecnológico y un mapeador. Eventos distintos pueden
-  usar valores distintos sin compartir lecturas ni resultados técnicos.
+  varios eventos de observación o muestreo. Cada salida asociada a una
+  observación, incluido un VCF, FASTQ, BAM o CRAM, debe pertenecer a un evento
+  explícito con identificador único, selección de individuos, referencias
+  aplicables, salidas y subsemilla. Cero eventos significa que no se genera
+  ninguna salida asociada a eventos; no debe crearse un evento implícito.
+- **REQ-CONF-102.** Un evento que genere FASTQ, BAM o CRAM debe seleccionar
+  exactamente una tecnología y un perfil tecnológico. Cuando genere BAM o CRAM
+  debe seleccionar además exactamente un mapeador conforme al modo configurado.
+  Un evento que solo solicite verdad genotípica o VCF no debe requerir
+  tecnología, perfil, bibliotecas ni mapeador. Eventos distintos pueden usar
+  valores distintos sin compartir lecturas ni resultados técnicos.
 - **REQ-CONF-103.** La configuración debe permitir solicitar de forma
   independiente, para cada evento, su VCF de verdad, sus FASTQ y sus BAM o CRAM,
   respetando las dependencias entre el modo realista, el modo directo y las
@@ -700,10 +728,37 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   personalizadas. Añadir una clase de regla distinta debe requerir ampliar el
   programa y su especificación, no introducir código desde la configuración.
 
-- **REQ-TEC-01.** Cada experimento de secuenciación y cada evento de muestreo que
-  genere datos debe seleccionar exactamente una tecnología. No debe mezclar
+- **REQ-CONF-111.** La reproducibilidad debe declararse y comprobarse en cuatro
+  niveles separados: decisiones biológicas; lecturas y decisiones técnicas
+  aleatorias; equivalencia semántica de las salidas; e identidad binaria de los
+  ficheros. Alcanzar un nivel no debe implicar automáticamente los siguientes.
+- **REQ-CONF-112.** El nivel biológico debe garantizar las mismas decisiones y
+  la misma verdad biológica con la misma semilla, configuraciones efectivas,
+  entradas, perfiles y versión del simulador. Las decisiones de muestreo y de
+  cada evento deben usar flujos o subsemillas aislados para que añadir o retirar
+  una observación técnica no altere la trayectoria biológica.
+- **REQ-CONF-113.** El nivel de lecturas y decisiones técnicas aleatorias debe
+  garantizar las mismas secuencias, calidades, procedencias y artefactos
+  simulados cuando coincidan la subsemilla del evento, la versión del simulador,
+  las configuraciones efectivas, las entradas, los perfiles y las dependencias
+  que intervienen en esas decisiones.
+- **REQ-CONF-114.** La equivalencia semántica debe evaluarse sobre el contenido
+  lógico de cada salida y no sobre sus bytes. Para salidas producidas por una
+  herramienta externa solo podrá declararse cuando coincidan su versión,
+  parámetros y las demás condiciones que el simulador haya verificado como
+  compatibles. El manifiesto debe declarar las condiciones comprobadas y si el
+  nivel se alcanzó o no se garantiza.
+- **REQ-CONF-115.** La identidad binaria no debe garantizarse de forma general.
+  Solo podrá declararse para una clase de salida y unas condiciones concretas si
+  se ha verificado expresamente. Las diferencias limitadas a compresión,
+  ordenación equivalente o metadatos no biológicos no invalidan por sí mismas
+  los niveles anteriores.
+
+- **REQ-TEC-01.** Cada experimento de secuenciación y cada evento que genere
+  FASTQ, BAM o CRAM debe seleccionar exactamente una tecnología. No debe mezclar
   lecturas cortas tipo Illumina y lecturas largas PacBio HiFi dentro del mismo
-  evento o experimento.
+  evento o experimento. Un evento que solo produzca verdad genotípica o VCF no
+  constituye un experimento de secuenciación.
 - **REQ-TEC-02.** Un experimento puede contener varias bibliotecas, tandas o
   carriles, pero todos deben usar el mismo tipo tecnológico y ser compatibles
   con el perfil de lecturas y el mapeo seleccionados.
@@ -795,14 +850,16 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   FASTA real suministrado.
 - **REQ-REF-13.** El FASTA suministrado debe ser legible, contener al menos una
   secuencia no vacía y tener identificadores de secuencia no vacíos y únicos.
+  El identificador debe ser el primer elemento no vacío de la cabecera después
+  de `>`, terminado por el primer espacio o carácter de separación. El resto de
+  la cabecera debe conservarse por separado como descripción completa y no debe
+  participar en la comprobación de unicidad.
 - **REQ-REF-14.** Las secuencias del FASTA suministrado deben contener únicamente
-  símbolos válidos de la nomenclatura de DNA de la Unión Internacional de
-  Química Pura y Aplicada (IUPAC): A, C, G, T, R, Y, S, W, K, M, B, D, H, V y
-  N. Se deben aceptar tanto mayúsculas como minúsculas. Los códigos de
-  ambigüedad representan posiciones en las que puede haber más de una base.
+  A, C, G, T y N. Se deben aceptar tanto mayúsculas como minúsculas. N es el
+  único símbolo admitido para una base desconocida o no determinada.
 - **REQ-REF-15.** El FASTA suministrado no debe contener símbolos que representen
-  huecos (*gaps*) ni ningún otro símbolo distinto de los admitidos en
-  REQ-REF-14.
+  huecos (*gaps*), códigos IUPAC de ambigüedad distintos de N ni ningún otro
+  símbolo diferente de los admitidos en REQ-REF-14.
 - **REQ-REF-16.** Si el FASTA suministrado incumple cualquiera de estos
   requisitos, el sistema debe detener la ejecución antes de generar resultados
   y explicar claramente los errores detectados.
@@ -826,6 +883,14 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   autocontenido.
 - **REQ-REF-22.** Cada secuencia debe clasificarse explícitamente como cromosoma
   o *scaffold* en la configuración efectiva y en la salida estructurada.
+- **REQ-REF-23.** Toda secuencia de DNA suministrada mediante la configuración,
+  un catálogo, un motivo, una inserción u otra entrada estructurada, y toda
+  secuencia generada por el simulador, debe usar exclusivamente A, C, G, T y N,
+  sin distinguir mayúsculas de minúsculas durante la validación. Cualquier otro
+  símbolo debe rechazarse antes de usar la secuencia e identificarse en el
+  diagnóstico. El tratamiento de N por cada operación queda sujeto a la
+  decisión funcional específica registrada como pendiente; aceptar N no
+  autoriza a resolverla aleatoriamente de forma implícita.
 
 La copia permite reunir en el directorio de resultados todos los archivos
 necesarios para utilizar la simulación. Así se podrán exportar juntos a otros
@@ -2391,7 +2456,9 @@ a una probabilidad mayor de error.
 - **REQ-DAT-18.** Los FASTQ del modo realista deben conservar la secuencia, la
   calidad, el identificador de cada lectura y su emparejamiento cuando exista.
   El sistema debe conservar los mismos identificadores y pares al mapearlos y no
-  debe descartar las lecturas no mapeadas que produzca el mapeador.
+  debe descartar las lecturas no mapeadas que produzca el mapeador. Cada lectura
+  *single-end* o larga, y cada pareja *paired-end* considerada como una unidad,
+  debe tener una identidad técnica única dentro del evento.
 - **REQ-DAT-19.** En el modo directo, el sistema debe generar BAM o CRAM
   sintéticos sin simular ni mapear FASTQ previamente. Cada archivo y su
   descripción en el manifiesto deben identificar claramente este origen
@@ -2423,7 +2490,8 @@ a una probabilidad mayor de error.
   cada referencia seleccionada. En modo directo deben aplicarse reglas
   equivalentes sobre los registros sintéticos y conservarse su procedencia.
 - **REQ-DAT-26.** El sistema debe conservar en la verdad y el manifiesto el
-  identificador y el origen de las lecturas contaminantes. Esta información debe
+  identificador de cada instancia contaminante y el identificador estable de la
+  lectura o pareja de origen. Esta información debe
   mantenerse fuera del FASTQ y del BAM o CRAM cuando exponerla aportaría al
   programa evaluado más metadatos de contaminación que los de un archivo real.
 - **REQ-DAT-27.** Cuando se contabilice la contaminación realizada en datos
@@ -2463,16 +2531,17 @@ a una probabilidad mayor de error.
 - **REQ-DAT-34.** Por cada FASTQ final, el sistema debe generar un fichero
   estructurado de procedencia que identifique cada lectura contaminante o, en
   datos *paired-end*, la pareja completa como una unidad, e indique su fuente
-  real y el mecanismo que la introdujo. Los mecanismos deben distinguir, como
+  real, la instancia de origen y el mecanismo que la introdujo. Los mecanismos deben distinguir, como
   mínimo, contaminación biológica, cruce entre bibliotecas, reasignación por
   índices y otros mecanismos configurados.
 - **REQ-DAT-35.** El fichero de procedencia debe referirse a las lecturas o
-  parejas mediante sus identificadores y no debe duplicar sus secuencias ni sus
+  parejas mediante sus identificadores técnicos únicos y enlazar por separado
+  su identificador estable de origen. No debe duplicar sus secuencias ni sus
   calidades. Junto con el FASTQ final y el manifiesto, debe permitir reconstruir
   la verdad conocida de la contaminación.
 - **REQ-DAT-36.** Las lecturas contaminantes que permanezcan en el FASTQ final
-  deben registrarse individualmente por identificador de lectura o de pareja y
-  con su origen. Para las lecturas descartadas o sin asignar no deben conservarse
+  deben registrarse individualmente por identificador técnico de lectura o de
+  pareja y con su origen. Para las lecturas descartadas o sin asignar no deben conservarse
   secuencias ni enumerarse identificadores; el fichero de procedencia debe
   registrar únicamente recuentos agregados, desglosados como mínimo por muestra
   y por causa u origen cuando se conozcan.
@@ -2595,6 +2664,27 @@ a una probabilidad mayor de error.
 - **REQ-DAT-67.** En el modo directo, las banderas, RNEXT y PNEXT, TLEN, CIGAR,
   orientación y estado *proper-pair* deben ser internamente coherentes con la
   anomalía simulada y los alineamientos de ambos miembros.
+- **REQ-DAT-68.** Una instancia de lectura debe ser una observación concreta
+  presente en una biblioteca. Su identificador técnico debe ser único dentro de
+  su evento. Los dos miembros de una pareja deben compartir el nombre de pareja
+  exigido por el formato y diferenciarse mediante sus indicadores de miembro;
+  ese nombre de pareja no debe identificar otra pareja del mismo evento.
+- **REQ-DAT-69.** La contaminación biológica debe crear en la receptora una
+  instancia nueva con identificador técnico nuevo y un vínculo al identificador
+  estable de la lectura o pareja donante. La instancia original debe permanecer
+  en la donante. Una misma unidad de origen no debe copiarse dos veces dentro de
+  una misma biblioteca receptora; puede originar una instancia en otra
+  receptora compatible. Una duplicación adicional dentro de la receptora solo
+  debe aparecer mediante un mecanismo de duplicación configurado y trazable.
+- **REQ-DAT-70.** Una reasignación técnica por demultiplexado debe transferir la
+  misma instancia y conservar su identificador: debe retirarla de la donante e
+  incorporarla a la receptora sin crear otra. El fichero de procedencia debe
+  distinguir sin ambigüedad una copia biológica de una transferencia técnica.
+- **REQ-DAT-71.** El sistema debe validar antes de combinar FASTQ o producir el
+  BAM o CRAM final que no existan colisiones de identificadores técnicos dentro
+  del evento. Una colisión debe ser un error; no debe resolverse renombrando una
+  lectura sin actualizar de forma atómica FASTQ, BAM o CRAM, verdad,
+  procedencia y manifiesto.
 
 - **REQ-WGS-01.** Cada biblioteca debe declarar exactamente uno de dos objetivos
   excluyentes: cobertura media o número de lecturas. Declarar ambos o ninguno
@@ -2650,7 +2740,9 @@ a una probabilidad mayor de error.
   representar una sustitución completa o intercambio de muestra.
 - **REQ-CONT-03.** Con varias fuentes, sus contribuciones deben sumarse y no
   superar el 100 % ni el número de lecturas o parejas disponibles. Un exceso
-  debe detener la ejecución como error de configuración.
+  debe detener la ejecución como error de configuración. Esta comprobación debe
+  realizarse después de convertir conjuntamente todas las unidades conforme a
+  REQ-CONT-15 y antes de seleccionar lecturas.
 - **REQ-CONT-04.** Toda fuente debe ser compatible con la tecnología, el perfil
   y la disposición de lecturas de la biblioteca receptora. No deben mezclarse
   lecturas cortas y largas, perfiles tecnológicos incompatibles ni disposiciones
@@ -2665,7 +2757,9 @@ a una probabilidad mayor de error.
   simétrica y la diagonal representa lecturas propias, no contaminación.
 - **REQ-CONT-07.** Las entradas de cada receptora en la matriz, sumadas a sus
   fuentes externas, deben respetar el límite total del 100 %. Antes de generar
-  deben validarse identificadores, compatibilidad, unidades y sumas.
+  deben validarse identificadores, compatibilidad, unidades y sumas. La diagonal
+  debe representar el remanente propio de la receptora después de las
+  contribuciones contaminantes, no una fuente adicional que vuelva a sumarse.
 - **REQ-CONT-08.** Si se configura una tasa total sin matriz, los donantes deben
   elegirse reproduciblemente entre las demás muestras compatibles de la tanda y
   ponderarse por su número disponible de lecturas o parejas. Una matriz explícita
@@ -2693,6 +2787,23 @@ a una probabilidad mayor de error.
   deben registrar objetivos, lecturas propias retiradas, contaminantes
   incorporadas, lecturas transferidas, descartadas o sin asignar, totales finales
   y cobertura final realizada.
+- **REQ-CONT-15.** Las contribuciones expresadas como proporción, cobertura
+  equivalente o número deben convertirse conjuntamente después de conocer el
+  número limpio realizado de unidades de la biblioteca receptora. Una
+  proporción debe aplicarse a ese número limpio. Un número debe conservar su
+  valor entero. Una cobertura equivalente debe convertirse usando las bases que
+  aportan las unidades contaminantes y el mismo denominador biológico que la
+  cobertura objetivo del evento. En *paired-end*, las bases y el recuento deben
+  corresponder siempre a parejas completas.
+- **REQ-CONT-16.** La asignación entera conjunta debe elegir, entre las
+  soluciones que respeten los límites y la disponibilidad, la que minimice la
+  desviación global respecto a todas las contribuciones convertidas. El total
+  entero de unidades contaminantes debe ser el entero más próximo a la suma de
+  los objetivos convertidos. Los empates deben resolverse de forma reproducible
+  con la subsemilla del evento. Deben registrarse por fuente el valor y la unidad
+  originales, el objetivo convertido, el recuento entero realizado, la
+  desviación y cualquier empate. Si no existe una asignación válida, el evento
+  debe rechazarse antes de modificar los FASTQ finales.
 
 Un grupo de lectura reúne lecturas obtenidas para una combinación concreta de
 muestra, biblioteca y tanda o carril de secuenciación. En BAM o CRAM se describe
@@ -2711,7 +2822,9 @@ mediante una entrada `@RG` de la cabecera y la etiqueta `RG` de cada registro.
 - **REQ-RG-04.** Los identificadores de muestra, biblioteca, tanda, carril y
   grupo de lectura deben ser consistentes entre FASTQ, BAM o CRAM, manifiesto y
   ficheros de procedencia. El identificador de grupo debe distinguir evento,
-  biblioteca, tanda y carril.
+  biblioteca, tanda y carril. Los identificadores técnicos de lectura deben
+  cumplir además la unicidad y los vínculos de origen de REQ-DAT-68 a
+  REQ-DAT-71.
 - **REQ-RG-05.** Dentro de cada conjunto definido por una referencia de mapeo,
   el sistema debe generar un único BAM o CRAM final por individuo que combine
   todas sus bibliotecas, tandas y carriles y preserve sus grupos de lectura. No
@@ -2988,6 +3101,9 @@ cobertura realizada coincidan exactamente con su objetivo.
 - **REQ-VAL-16.** La validación de contaminación debe comprobar límites,
   compatibilidad, matriz o reparto automático, sustituciones biológicas,
   transferencias técnicas, descartes, totales por tanda y cobertura final.
+  También debe comprobar la conversión conjunta de unidades, el carácter óptimo de
+  la asignación entera, sus desviaciones y la resolución reproducible de
+  empates conforme a REQ-CONT-15 y REQ-CONT-16.
 - **REQ-VAL-17.** La validación poblacional debe comprobar N objetivo, N
   realizado, su desviación y su aviso, además de Ne objetivo o su ausencia y Ne
   realizado en cada subpoblación y generación. Debe
@@ -3050,12 +3166,18 @@ cobertura realizada coincidan exactamente con su objetivo.
   que el conjunto elegible debe detener el evento sin reemplazo ni reducción
   silenciosa del tamaño.
 - **REQ-VAL-25.** La validación técnica debe comprobar que cada evento usa una
-  sola tecnología, un perfil y un mapeador, que sus FASTQ no proceden de otro
-  evento y que, dentro del evento, los mismos FASTQ y mapeador se aplicaron a
-  todas las referencias seleccionadas.
+  sola tecnología y un perfil cuando genera FASTQ, BAM o CRAM, y un solo
+  mapeador cuando genera alineamientos. Debe comprobar que sus FASTQ no proceden
+  de otro evento y que, dentro del evento, los mismos FASTQ y mapeador se
+  aplicaron a todas las referencias seleccionadas. Un evento que solo solicite
+  verdad genotípica o VCF debe validarse sin exigirle parámetros de
+  secuenciación.
 - **REQ-VAL-26.** La validación debe comprobar la unicidad global y coherencia de
   cada grupo de lectura, que distingue evento, biblioteca, tanda y carril, y que
   `SM` y las columnas del VCF conservan el identificador biológico estable.
+  También debe comprobar la unicidad de cada instancia de lectura dentro del
+  evento y la coherencia de sus vínculos de origen, copias biológicas,
+  transferencias técnicas y duplicados configurados.
 - **REQ-VAL-27.** La validación estructural debe comprobar el convenio de
   coordenadas, los límites terminales, los puntos de ruptura y orientaciones de
   cada variante estructural, y el límite acumulado de copias locales por copia
@@ -3187,15 +3309,33 @@ cobertura realizada coincidan exactamente con su objetivo.
   proceda. Debe rechazar scripts, código, funciones personalizadas y reglas no
   reconocidas, además de cualquier selección basada en evidencia técnica
   posterior.
+- **REQ-VAL-42.** La validación del resultado mínimo debe comprobar por vía el
+  alcance de los estados genotípicos completos de REQ-SAL-02 y distinguirlos de
+  los historiales resumidos. La ausencia de un estado completo obligatorio o la
+  presentación de un resumen como estado completo debe ser un error.
+- **REQ-VAL-43.** La validación de estados debe comprobar la jerarquía de
+  ejecución, evento, conjunto y artefacto de REQ-SAL-21 a REQ-SAL-26. Ninguna
+  unidad debe marcarse como completa si una salida obligatoria subordinada está
+  incompleta o fallida, ni debe publicarse o exportarse un artefacto parcial
+  como válido.
+- **REQ-VAL-44.** Toda afirmación de reproducibilidad debe validarse y registrarse
+  en el nivel correspondiente de REQ-CONF-111 a REQ-CONF-115. No debe declararse
+  identidad binaria a partir de una comprobación limitada a igualdad biológica
+  o semántica.
+- **REQ-VAL-45.** La validación de un FASTA debe interpretar como identificador
+  el primer elemento de la cabecera, comprobar su unicidad y conservar la
+  descripción completa. Debe rechazar cualquier símbolo de secuencia distinto
+  de A, C, G, T y N, sin distinguir mayúsculas de minúsculas.
 
 ### 4.7. Manifiestos de la ejecución y de sus eventos
 
 Los manifiestos son ficheros estructurados de salida que registran lo que el
 sistema utilizó y generó. La raíz contiene el manifiesto general de la ejecución
-y cada evento técnico tiene además el suyo.
+y cada evento explícito tiene además el suyo, aunque solo materialice verdad o
+VCF y no constituya un experimento de secuenciación.
 
 - **REQ-MAN-01.** El sistema debe generar un manifiesto general para cada
-  ejecución y un manifiesto adicional para cada evento técnico.
+  ejecución y un manifiesto adicional para cada evento explícito.
 - **REQ-MAN-02.** El manifiesto debe ser un fichero estructurado y legible por el
   programa.
 - **REQ-MAN-03.** El manifiesto debe identificar cuál de las tres vías de
@@ -3519,8 +3659,11 @@ y cada evento técnico tiene además el suyo.
   capas de mutación de novo.
 - **REQ-MAN-69.** Debe identificar las entradas, comprobaciones, perfiles,
   herramientas, versiones, parámetros efectivos y dependencias relevantes para
-  regenerar decisiones, y declarar la compatibilidad entre versiones cuando
-  exista sin presuponerla.
+  regenerar decisiones, y declarar por separado los niveles de reproducibilidad
+  biológica, técnica aleatoria, semántica y binaria de REQ-CONF-111 a
+  REQ-CONF-115. Para cada nivel debe indicar si está garantizado, no garantizado
+  o no es aplicable, las condiciones comprobadas y la compatibilidad entre
+  versiones cuando exista sin presuponerla.
 - **REQ-MAN-70.** Cuando se use el modelo de equilibrio de Hardy-Weinberg o F
   para inicializar una población, debe registrar la ploidía, las frecuencias
   alélicas de entrada y realizadas y las probabilidades, frecuencias y recuentos
@@ -3542,8 +3685,11 @@ y cada evento técnico tiene además el suyo.
   recursos comunes, las subsemillas y el manifiesto propio de cada evento.
 - **REQ-MAN-73.** Cada evento debe tener un directorio y un manifiesto propios.
   Este manifiesto debe registrar su identificador, selección de individuos,
-  tecnología y perfil únicos, bibliotecas, mapeador único, referencias de
-  mapeo, subsemilla y salidas solicitadas, generadas, omitidas o fallidas.
+  referencias, subsemilla y salidas solicitadas, generadas, omitidas o fallidas.
+  Cuando el evento genere FASTQ, BAM o CRAM debe registrar su tecnología, perfil
+  y bibliotecas; cuando genere alineamientos debe registrar además su mapeador
+  único. Un evento que solo materialice verdad o VCF no debe inventar esos
+  campos técnicos como si se hubieran aplicado.
 - **REQ-MAN-74.** Dentro de un evento, el manifiesto debe separar los resultados
   por referencia de mapeo y relacionar cada BAM, CRAM o VCF exclusivamente con
   su conjunto. Debe conservar los identificadores biológicos de muestra, sin
@@ -3586,10 +3732,29 @@ y cada evento técnico tiene además el suyo.
   condiciones y combinación lógica, la cantidad exacta o proporción solicitada,
   los elegibles, la semilla cuando corresponda, los seleccionados y la cantidad
   o proporción realizada.
+- **REQ-MAN-83.** El manifiesto general y cada manifiesto de evento deben
+  registrar los estados incompleto, completo o fallido que correspondan a la
+  ejecución, el evento, cada conjunto y cada artefacto. Para todo fallo deben
+  enlazar el diagnóstico y distinguir los resultados publicados y validados de
+  los temporales, incompletos o fallidos.
+- **REQ-MAN-84.** El manifiesto debe indicar qué estados genotípicos completos se
+  materializaron conforme a REQ-SAL-02, qué generaciones conservaron solo un
+  historial resumido y qué configuraciones o muestreos solicitaron
+  materializaciones adicionales. No debe describir un resumen como si fuera un
+  estado genotípico completo.
+- **REQ-MAN-85.** Para cada conversión conjunta de contaminación, el manifiesto
+  debe registrar las unidades originales, los objetivos convertidos, la
+  asignación entera, las desviaciones y los empates resueltos con la subsemilla.
+  Para cada instancia contaminante o transferida debe conservar el identificador
+  técnico único y su vínculo con el origen conforme a REQ-DAT-68 a REQ-DAT-70.
+- **REQ-MAN-86.** Para cada secuencia FASTA, el manifiesto o la salida
+  estructurada de referencias debe conservar el identificador formado por el
+  primer elemento de la cabecera y la descripción completa restante, además del
+  resultado de validar el alfabeto A, C, G, T y N.
 
 El formato y el esquema del manifiesto se elegirán durante la planificación de
-la implementación, después o al mismo tiempo que el lenguaje. Esta decisión no
-forma parte de la especificación funcional.
+la implementación teniendo en cuenta que el núcleo se desarrollará en Rust.
+Esta decisión no forma parte de la especificación funcional.
 
 ### 4.8. Resultado mínimo de una ejecución
 
@@ -3597,15 +3762,21 @@ forma parte de la especificación funcional.
   referencia inicial o derivada y los índices que requieran las operaciones que
   se hayan ejecutado.
 - **REQ-SAL-02.** Toda ejecución válida debe producir un fichero de verdad con el
-  estado genotípico completo, faseado y reconstruible de los individuos y
-  poblaciones que correspondan.
+  estado genotípico completo, faseado y reconstruible exigido por cada vía. En
+  creación directa debe materializar el estado completo de todos los individuos
+  creados. En evolución debe materializar las poblaciones inicial y final y
+  todos los individuos de las generaciones o muestreos solicitados, mientras el
+  resto de generaciones conserva el historial resumido de REQ-REP-20. En
+  familias y poblaciones segregantes debe materializar todos los individuos de
+  todos los eventos y poblaciones intermedias conforme a REQ-CRU-15.
 - **REQ-SAL-03.** Toda ejecución válida debe guardar en el directorio de
   resultados una copia de todos los ficheros de configuración realmente usados.
 - **REQ-SAL-04.** Toda ejecución válida debe producir el manifiesto general
   completo y todos los manifiestos de evento que correspondan.
 - **REQ-SAL-05.** Una ejecución solo debe terminar con éxito cuando haya
   producido todas las salidas mínimas y todas las salidas activadas, ya sea de
-  forma predeterminada o por solicitud expresa.
+  forma predeterminada o por solicitud expresa, y todos sus eventos y conjuntos
+  obligatorios estén completos conforme a REQ-SAL-21 a REQ-SAL-26.
 - **REQ-SAL-06.** Si no se solicita VCF, la verdad genotípica debe seguir siendo
   accesible y reconstruible mediante el fichero de verdad obligatorio. Su
   formato y esquema técnicos todavía no están definidos.
@@ -3642,7 +3813,7 @@ forma parte de la especificación funcional.
   salida detallada de recombinación y origen por segmentos exigida en
   REQ-REC-11 a REQ-REC-13. Esta salida no debe extenderse a todos los individuos
   históricos por el mero hecho de generar resúmenes de cada generación.
-- **REQ-SAL-17.** Cada evento con salidas técnicas debe producir su propio
+- **REQ-SAL-17.** Cada evento explícito debe producir su propio
   directorio y manifiesto, separado de los demás eventos y organizado por
   referencia de mapeo cuando haya varias.
 - **REQ-SAL-18.** La raíz de la ejecución debe producir un manifiesto general y
@@ -3657,6 +3828,36 @@ forma parte de la especificación funcional.
   dos resúmenes estructurados y diferenciados: el de la población completa y
   sus subpoblaciones relevantes, y el de la muestra exportada. Ambos deben
   conservarse aunque no se generen salidas técnicas.
+- **REQ-SAL-21.** La ejecución, cada evento, cada conjunto y cada artefacto
+  generado deben tener un estado explícito. Como mínimo deben distinguirse los
+  estados incompleto, completo y fallido. El manifiesto general debe conservar
+  el estado de la ejecución y enlazar los estados y diagnósticos de sus unidades
+  subordinadas.
+- **REQ-SAL-22.** Todo artefacto debe construirse en un área temporal y
+  publicarse de forma atómica en los resultados solo después de superar sus
+  comprobaciones obligatorias. Un artefacto incompleto o fallido no debe
+  presentarse como salida válida ni poder exportarse. Su diagnóstico sí debe
+  conservarse cuando sea posible sin confundirlo con el artefacto solicitado.
+- **REQ-SAL-23.** Un conjunto solo debe marcarse como completo cuando todos los
+  artefactos activados para su referencia estén publicados y validados. El fallo
+  de uno debe marcar el conjunto como fallido, sin publicar una versión
+  parcial del artefacto afectado.
+- **REQ-SAL-24.** Un evento solo debe marcarse como completo cuando sus salidas
+  propias y todos sus conjuntos obligatorios estén completos. Un conjunto
+  completo que no dependa del resultado fallido de otro debe conservar su estado
+  y puede seguir siendo exportable, aunque el evento o la ejecución global
+  terminen con estado fallido. La exportación debe declarar el fallo global y no
+  presentar el paquete como una ejecución completa.
+- **REQ-SAL-25.** La ejecución solo debe marcarse como completa y exitosa cuando
+  todas las salidas mínimas y activadas, eventos y conjuntos obligatorios estén
+  completos. Un fallo no debe borrar ni invalidar retroactivamente artefactos o
+  conjuntos ya publicados y validados que sean independientes, pero el
+  manifiesto general debe registrar la ejecución como fallida y la causa.
+- **REQ-SAL-26.** Si la validación previa de la configuración o de una entrada
+  impide iniciar la simulación, no debe publicarse ningún resultado. Las copias
+  de trabajo creadas durante la validación deben permanecer en el área temporal
+  o eliminarse de forma segura. El sistema debe emitir un diagnóstico que no se
+  presente como manifiesto de una ejecución completa.
 
 ### 4.9. Escala y prioridades de uso
 
@@ -3692,16 +3893,19 @@ El flujo funcional describe la relación entre los resultados, no el orden
 técnico en que deberá implementarse el sistema.
 
 1. El programa lee el fichero general de configuración y obtiene de él la vía
-   de creación, los eventos técnicos con una única tecnología cada uno y,
+   de creación, cero, uno o varios eventos explícitos y,
    cuando se haya proporcionado, la semilla aleatoria. Si no se ha proporcionado una semilla,
    genera una antes de iniciar la simulación. Antes de simular, comprueba que
    cada cromosoma o *scaffold* tenga una ploidía efectiva entera de 1 a 10 y
-   rechaza cualquier valor o ausencia no admitidos. También rechaza la mezcla de
-   tecnologías o los perfiles, bibliotecas o parámetros de mapeo incompatibles.
-   Comprueba que el protocolo sea WGS de DNA genómico, que cada biblioteca elija
-   exclusivamente cobertura o número de lecturas y que declare su preparación
-   sin PCR o con amplificación. Rechaza paneles, amplicones, GBS y otros
-   protocolos de captura o reducción de representación.
+   rechaza cualquier valor o ausencia no admitidos. No crea eventos implícitos:
+   una ejecución sin eventos no genera VCF, FASTQ, BAM ni CRAM. Un evento que
+   solo solicite verdad genotípica o VCF no necesita parámetros de
+   secuenciación. Si un evento genera FASTQ, BAM o CRAM, también rechaza la
+   mezcla de tecnologías o los perfiles, bibliotecas o parámetros de mapeo
+   incompatibles. Comprueba entonces que el protocolo sea WGS de DNA genómico,
+   que cada biblioteca elija exclusivamente cobertura o número de lecturas y
+   que declare su preparación sin PCR o con amplificación. Rechaza paneles,
+   amplicones, GBS y otros protocolos de captura o reducción de representación.
 2. Si se ha seleccionado la vía evolutiva o la vía de familias y poblaciones
    segregantes, el programa obtiene del fichero general la referencia al
    fichero de configuración poblacional propio del escenario y lee este segundo
@@ -3729,9 +3933,10 @@ técnico en que deberá implementarse el sistema.
    motivos, copias e interrupciones realizados. Si la referencia es suministrada,
    el programa valida el FASTA real indicado antes de iniciar la simulación. Solo
    lo utiliza como referencia inicial si es legible, contiene al menos una
-   secuencia no vacía, todos sus identificadores de secuencia son no vacíos y
-   únicos, y sus secuencias contienen únicamente los símbolos IUPAC de DNA
-   admitidos, en mayúsculas o minúsculas. Si la validación falla, el programa
+   secuencia no vacía, el primer elemento de cada cabecera es un identificador
+   no vacío y único, y sus secuencias contienen únicamente A, C, G, T y N, en
+   mayúsculas o minúsculas. El resto de cada cabecera se conserva como
+   descripción. Si la validación falla, el programa
    detiene la ejecución sin generar resultados y explica claramente los errores
    detectados. Si la validación es correcta, copia el FASTA al directorio de
    resultados y utiliza esa copia, sin modificar el archivo original.
@@ -3946,13 +4151,14 @@ técnico en que deberá implementarse el sistema.
    por el sistema. El identificador no se reutiliza y acompaña al individuo en sus
    relaciones parentales, observaciones y muestras. El sistema guarda el estado
    completo, faseado, con su dosis y reconstruible en el fichero de verdad
-   obligatorio, aunque no se solicite VCF.
-11. Salvo que se desactiven expresamente, se generan alineamientos finales en
-    CRAM o, si se selecciona, BAM. El fichero
-    general selecciona una o varias referencias de mapeo entre las disponibles y
-    el modo de obtención. Cada biblioteca WGS elige cobertura media o número de
-    lecturas, nunca ambos, y preparación sin PCR de forma predeterminada o WGS
-    amplificada de forma opcional. En el modo realista se simulan lecturas cortas
+   obligatorio para las entidades exigidas por la vía conforme a REQ-SAL-02,
+   aunque no se solicite VCF.
+11. Para cada evento explícito que solicite alineamientos se generan en CRAM o,
+    si se selecciona, BAM. El fichero general selecciona una o varias referencias
+    de mapeo entre las disponibles y el modo de obtención. Cada biblioteca WGS
+    elige cobertura media o número de lecturas, nunca ambos, y preparación sin
+    PCR de forma predeterminada o WGS amplificada de forma opcional. En el modo
+    realista se simulan lecturas cortas
     tipo Illumina, *single-end* o *paired-end*, o lecturas largas PacBio HiFi,
     desde los haplotipos faseados con el perfil tecnológico o empírico WGS
     efectivo, los parámetros y la semilla.
@@ -3980,6 +4186,11 @@ técnico en que deberá implementarse el sistema.
     sus fragmentos y puntos de unión reales. Si se solicitaron restos de
     adaptadores, se añaden con los parámetros efectivos y se conservan las
     lecturas y los intervalos afectados.
+    Antes de elegir lecturas contaminantes, todas las contribuciones expresadas
+    como proporción, cobertura equivalente o número se convierten conjuntamente
+    a un reparto entero de lecturas o parejas completas. La asignación minimiza
+    la desviación global y resuelve reproduciblemente los empates con la
+    subsemilla del evento.
     La contaminación biológica sustituye de forma reproducible lecturas propias
     de la receptora por lecturas representativas de fuentes compatibles; no
     reduce los datos de la donante. Puede seguir una matriz dirigida o repartir
@@ -3989,7 +4200,10 @@ técnico en que deberá implementarse el sistema.
     pareja reasignada de la donante a la receptora sin duplicarla. Las lecturas
     descartadas o sin asignar no se reemplazan y reducen la cobertura final.
     Los FASTQ externos compatibles solo se admiten como fuentes en este modo
-    realista. Después se guarda
+    realista. Cada copia biológica recibe una identidad técnica nueva y un
+    vínculo estable con su lectura de origen; una transferencia técnica conserva
+    la identidad de la instancia y la retira de la biblioteca donante. Después
+    se crea
     un FASTQ final, o una pareja para datos *paired-end*, por individuo,
     biblioteca y tanda o carril; no se concatenan ni se conserva otro FASTQ
     limpio. Para cada FASTQ o pareja se genera un fichero de procedencia que
@@ -4231,14 +4445,17 @@ técnico en que deberá implementarse el sistema.
     integridad antes y después.
 
 La ejecución termina con éxito solo cuando existen un FASTA por referencia y
-sus índices necesarios, el fichero de verdad genotípica faseada y reconstruible,
-las copias de todas las configuraciones usadas, los manifiestos completos y todas
-las salidas activadas. CRAM se genera por defecto, BAM es la alternativa
-configurable y los alineamientos no son obligatorios si se desactivan
-expresamente. En el modo realista, el FASTQ final
-o pareja de FASTQ y el fichero de procedencia de cada grupo de lectura son
-salidas obligatorias dependientes; en el modo directo no son necesarios. El VCF
-solo se genera si se solicita.
+sus índices necesarios, los estados completos y los historiales obligatorios
+para la vía, las copias de todas las configuraciones usadas, los manifiestos
+completos y todas las salidas activadas. Toda salida de observación requiere un
+evento explícito. Dentro de un evento que solicite alineamientos, CRAM es el
+formato predeterminado y BAM la alternativa configurable. En el modo realista,
+el FASTQ final o pareja de FASTQ y el fichero de procedencia de cada grupo de
+lectura son salidas obligatorias dependientes; en el modo directo no son
+necesarios. Un evento puede solicitar únicamente verdad genotípica o VCF sin
+tecnología, biblioteca ni mapeador. La ejecución, sus eventos, conjuntos y
+artefactos solo se publican como completos conforme a la jerarquía y atomicidad
+de REQ-SAL-21 a REQ-SAL-26.
 
 Todas las salidas deben describir la misma simulación, aunque no utilicen una
 misma referencia. Dentro de cada conjunto, todos los archivos deben usar
@@ -4251,9 +4468,9 @@ salidas y los manifiestos conservan la información necesaria para relacionarlas
 
 | Entrada | Contenido confirmado | Información pendiente |
 |---|---|---|
-| Fichero general de configuración | Fichero estructurado con referencia, ploidía global de 1 a 10 y sustituciones por secuencia, vía, cambios, semilla, parámetros, umbral entre clases, eventos, referencias de mapeo y salidas. Cada evento técnico exige WGS de DNA genómico, una tecnología y perfil, preparación sin PCR o amplificada, un mapeador y exactamente un objetivo de cobertura o número por biblioteca. Configura errores, duplicados, contaminación sustitutiva, matriz o tasa total, bibliotecas, tandas y, cuando corresponda, reproducción, selección, migración, mutación y recombinación. CRAM está activado por defecto y BAM es la alternativa. En modo realista se activan FASTQ; VCF se solicita expresamente por evento | Representación técnica de intervalos; distribuciones adicionales; límites prácticos de recursos; formato y esquema generales |
+| Fichero general de configuración | Fichero estructurado con referencia, ploidía global de 1 a 10 y sustituciones por secuencia, vía, cambios, semilla, parámetros, umbral entre clases, cero, uno o varios eventos explícitos, referencias aplicables y salidas. Cada evento que genere FASTQ, BAM o CRAM exige WGS de DNA genómico, una tecnología y perfil, preparación sin PCR o amplificada y exactamente un objetivo de cobertura o número por biblioteca; si genera alineamientos exige además un mapeador. Un evento que solo solicite verdad o VCF no requiere esos parámetros. Configura errores, duplicados, contaminación sustitutiva, matriz o tasa total, bibliotecas, tandas y, cuando corresponda, reproducción, selección, migración, mutación y recombinación. Dentro de un evento con alineamientos, CRAM es predeterminado y BAM la alternativa. En modo realista se activan FASTQ; VCF se solicita expresamente por evento. Sin eventos no se generan salidas de observación | Representación técnica de intervalos; distribuciones adicionales; límites prácticos de recursos; formato y esquema generales |
 | Fichero de configuración poblacional | Un fichero estructurado y legible por el programa para cada escenario evolutivo o de familias y poblaciones segregantes. En la vía evolutiva contiene fases, N objetivo, Ne objetivo, política de extinción por N=0, subpoblaciones, migraciones, procesos ordenados, eventos demográficos, inicialización, recombinación y muestreos. División, fundación, migración y selección de descendientes comparten el catálogo declarativo confirmado, sin código personalizado. Cada locus o bloque y subpoblación usa modo probabilístico predeterminado o controlado explícito. La inicialización admite equilibrio de Hardy-Weinberg, distribuciones explícitas, bloques de haplotipos con LD y F global o por subpoblación. En la vía de familias define parentales referenciados o expresos y un grafo dirigido acíclico de eventos. Un parental expreso declara cambios faseados por copia respecto a una referencia compatible; lo no declarado permanece como referencia. Los descendientes posteriores pueden seleccionarse por identificador, al azar, por pertenencia o por estado genético en uno o varios loci, con Y, O y NO, usando un número exacto o una proporción probabilística. Un individuo puede alimentar varias ramas sin duplicar su identidad. Cada población intermedia puede solicitar BAM o CRAM y VCF | Tolerancias técnicas; metadatos de muestreo; formato del estado genotípico intermedio; formato y esquema del catálogo común, de parentales expresos, del grafo y de las reglas de selección |
-| FASTA real de la referencia inicial | Secuencia real que se usará como referencia inicial cuando se elija el modo suministrado. Debe ser un FASTA legible, contener al menos una secuencia no vacía y tener identificadores de secuencia no vacíos y únicos. Sus secuencias solo pueden contener A, C, G, T y los códigos de ambigüedad IUPAC R, Y, S, W, K, M, B, D, H, V y N, en mayúsculas o minúsculas; no se admiten huecos ni otros símbolos. El sistema lo valida antes de iniciar la simulación y, si detecta errores, detiene la ejecución sin generar resultados y los explica con claridad. Si es válido, lo copia al directorio de resultados, usa la copia y no modifica el original | Ninguna decisión funcional pendiente sobre su validación, tratamiento o conservación |
+| FASTA real de la referencia inicial | Secuencia real que se usará como referencia inicial cuando se elija el modo suministrado. Debe ser un FASTA legible y contener al menos una secuencia no vacía. El identificador de secuencia es el primer elemento no vacío de la cabecera, debe ser único y el resto se conserva como descripción. Las secuencias solo pueden contener A, C, G, T y N, en mayúsculas o minúsculas; no se admiten huecos, otros códigos IUPAC ni ningún otro símbolo. El sistema lo valida antes de iniciar la simulación y, si detecta errores, detiene la ejecución sin generar resultados y los explica con claridad. Si es válido, lo copia al directorio de resultados, usa la copia y no modifica el original | Queda pendiente definir el tratamiento operativo de N por cada clase de operación |
 | FASTQ externos de contaminación | Fuentes permitidas únicamente en modo realista. Deben ser compatibles con tecnología, perfil y disposición de la biblioteca receptora; se validan y copian antes de usarse, se preservan los pares y no se modifican los originales. En modo directo solo se admiten fuentes simuladas con verdad conocida | Validaciones concretas y datos técnicos de integridad |
 | FASTQ real WGS y referencia para calibración | Entrada opcional de lecturas cortas tipo Illumina o largas PacBio HiFi usada para estimar un perfil empírico WGS de longitud, calidades, errores y otros parámetros tecnológicos. La referencia permite intentar separar errores de secuenciación, variantes reales, regiones ambiguas y errores de mapeo | Validaciones y método técnico de estimación |
 | Perfil empírico reutilizable | Fichero estructurado producido por una calibración anterior y seleccionable como perfil efectivo sin volver a analizar ni necesitar su FASTQ real de origen | Formato y esquema aplazados a la planificación de la implementación |
@@ -4270,9 +4487,9 @@ vía evolutiva o en la vía de familias y poblaciones segregantes.
 | FASTA de las referencias | Un único FASTA por cada referencia inicial o derivada; el archivo contiene uno o varios cromosomas o *scaffolds*. Cuando la referencia inicial es suministrada, este archivo es la copia guardada en el directorio de resultados y utilizada por la ejecución; el original no se modifica | Ninguna decisión funcional pendiente sobre su organización, tratamiento o conservación |
 | Índices de las referencias | Ningún índice, uno o varios por referencia, según los tipos que necesiten las operaciones o los formatos utilizados | Tipos de índice exigidos por cada operación y herramientas de indexación |
 | Estructura de los individuos y grupos | Individuos con identificadores estables y exactamente 1–10 haplotipos por cromosoma o *scaffold* según su ploidía efectiva común entre individuos. El estado asigna todas las variantes a copias concretas y conserva fase, dosis, linaje y origen de segmentos. Las repeticiones en tándem conservan secuencia, motivo, copias, pureza e interrupciones | Representación técnica de intervalos, distribuciones adicionales, tolerancia alélica, modelos y reglas de cruces; estructura interna e identificadores |
-| Fichero obligatorio de verdad | Estado genotípico completo, faseado y reconstruible de todos los individuos y poblaciones. Para lecturas conserva secuencia original frente a observada, posiciones y haplotipos de origen, duplicados, adaptadores, quimeras, anomalías de pareja y categorías sintéticas. Existe aunque no se solicite VCF y sigue siendo la fuente completa cuando este omite posiciones invariantes | Formato, esquema y organización de la verdad de lecturas aplazados a la planificación |
+| Fichero obligatorio de verdad | Estado genotípico completo, faseado y reconstruible con alcance mínimo específico por vía: todos los individuos creados en la vía directa; población inicial, final y generaciones o muestreos solicitados en evolución, con resúmenes del resto; y todos los individuos de todos los eventos y poblaciones intermedias en familias. Para lecturas conserva secuencia original frente a observada, posiciones y haplotipos de origen, duplicados, adaptadores, quimeras, anomalías de pareja y categorías sintéticas. Existe aunque no se solicite VCF y sigue siendo la fuente completa cuando este omite posiciones invariantes | Formato, esquema y organización de la verdad de lecturas aplazados a la planificación |
 | Copias de las configuraciones | Copia en el directorio de resultados de cada fichero general o poblacional realmente utilizado | Organización y nombres técnicos |
-| Directorios de eventos | Un directorio independiente por evento técnico, con su manifiesto, selección de individuos, salidas y subsemilla. Dentro del evento, los resultados BAM, CRAM y VCF se separan por referencia de mapeo | Nombres y estructura técnica de directorios |
+| Directorios de eventos | Un directorio independiente por evento explícito, con su manifiesto, selección de individuos, salidas y subsemilla. Dentro del evento, los resultados BAM, CRAM y VCF se separan por referencia. Los eventos que solo generan verdad o VCF no necesitan tecnología, biblioteca ni mapeador | Nombres y estructura técnica de directorios |
 | Población final y muestreos evolutivos | En la vía evolutiva se conserva la población final y, para cada muestreo no destructivo, el estado genotípico faseado y al menos generación, fase evolutiva o escenario, subpoblación, identificadores y referencia estructural. Cada individuo muestreado incluye una salida detallada de puntos de recombinación y segmentos trazables hasta la copia haplotípica fundadora, con coordenadas y orientación relacionables, copias duplicadas e inserciones nuevas identificadas por separado, deleciones trazables y capas de mutación de novo. No es obligatorio conservar poblaciones intermedias completas. Por defecto no se generan BAM, CRAM ni VCF, pero cada evento puede solicitarlos | Metadatos adicionales de cada observación; formato y esquema de la traza detallada |
 | Resúmenes poblacional y muestral de cada evento | Dos resúmenes estructurados y separados por muestreo y generación. El poblacional describe la población completa y las subpoblaciones relevantes; el muestral usa solo los individuos exportados. Ambos identifican inequívocamente ámbito, población o subpoblación y número de individuos, e incluyen frecuencias alélicas, heterocigosidad, F, N y Ne cuando correspondan. N muestral no se presenta como N objetivo ni N realizado de la población y ninguna estadística muestral se presenta como poblacional | Formato y esquema técnicos; organización de loci en el resumen |
 | Poblaciones intermedias de cruces | Estado genotípico faseado, haplotipos, origen de segmentos y metadatos de todos los individuos de todos los eventos y poblaciones intermedias, aunque no sean seleccionados. Por defecto no se generan BAM, CRAM ni VCF; cada población puede solicitarlos para todos sus individuos con las reglas de conjuntos por referencia | Formato del estado genotípico, metadatos adicionales y sintaxis del catálogo común de selección |
@@ -4287,7 +4504,7 @@ vía evolutiva o en la vía de familias y poblaciones segregantes.
 | Resultado de validación interna | Uno o varios ficheros estructurados que comparan resultados con la verdad y la configuración. Para WGS incluyen objetivo de biblioteca, cobertura total y por copia, soporte alélico sin exigir balance exacto, sesgos y contaminación; para evolución incluyen inicialización Hardy-Weinberg y LD, F objetivo y realizado, N objetivo y realizado, Ne objetivo y realizado, reproducción, selección, migración, mutación, recombinación y linaje de muestreos. Registran objetivos, observaciones, tolerancias y decisiones. Las incoherencias lógicas detienen; las desviaciones estadísticas advierten salvo elevación a error. Las desviaciones de N y Ne acordadas no detienen por sí mismas | Formato, esquema, métricas y tolerancias concretas |
 | VCF de verdad multimuesta por referencia | Salida opcional única por conjunto, construida desde el estado genotípico faseado y nunca inferida desde FASTQ o BAM/CRAM. Contiene todos sus individuos y solo loci donde alguna muestra tiene un alelo no de referencia; no contiene posiciones invariantes, bloques gVCF ni VCF individuales como salidas principales. Cada referencia tiene registros e identificadores de variante independientes, sin correspondencias registro a registro con otros VCF. Se ordena por la referencia y coordenada, se comprime con BGZF y se indexa mediante TBI o CSI por defecto; el texto sin comprimir es configurable. `GT` conserva genotipo, fase y ploidía reales aunque falte evidencia. No contiene `DP`, `AD`, `GQ`, `PL` ni otros campos `FORMAT` observados o inferidos; esas métricas van al informe de validación. Todo registro válido usa `QUAL=.` y `FILTER=PASS`, convención documentada en la cabecera. Un registro que no pueda representarse mediante el VCF y su complemento cuando corresponda, o que no sea validable, detiene el conjunto | Metadatos biológicos o estructurales concretos, criterio de tamaño manejable, normalización, cabecera y versión VCF |
 | Complemento estructurado de verdad | Fichero generado solo cuando uno o más casos no pueden representarse sin pérdida en VCF. Conserva secuencia o cambio, haplotipo, fase, coordenadas y genotipo completos. Cada caso comparte con el VCF un identificador estable local al conjunto, y el manifiesto enlaza complemento, VCF, referencia y conjunto. No enlaza variantes de referencias distintas | Formato, esquema y campos concretos aplazados a la planificación |
-| Manifiestos general y de eventos | La raíz contiene un manifiesto estructurado con vía, semilla, versión, configuraciones resueltas, referencias y recursos comunes, subsemillas y enlaces a eventos. Cada evento tiene directorio y manifiesto propios con selección de individuos, tecnología y perfil únicos, bibliotecas, grupos, mapeador, referencias y salidas separadas por conjunto. Los manifiestos conservan parámetros y resultados biológicos y técnicos, validaciones, estimaciones, advertencias, consumo y sumas de comprobación. Los identificadores de variante son locales a cada conjunto y no enlazan referencias distintas | Formato, esquema y algoritmo de suma de comprobación aplazados a la planificación de la implementación |
+| Manifiestos general y de eventos | La raíz contiene un manifiesto estructurado con vía, semilla, versión, configuraciones resueltas, referencias y recursos comunes, subsemillas y enlaces a eventos. Cada evento tiene directorio y manifiesto propios con selección de individuos, parámetros técnicos cuando procedan, referencias y salidas separadas por conjunto. Los manifiestos conservan parámetros y resultados biológicos y técnicos, los cuatro niveles separados de reproducibilidad, estados y diagnósticos de ejecución, evento, conjunto y artefacto, validaciones, estimaciones, advertencias, consumo y sumas de comprobación. Los identificadores de variante son locales a cada conjunto y no enlazan referencias distintas | Formato, esquema y algoritmo de suma de comprobación aplazados a la planificación de la implementación |
 | Paquete exportado de evento | Copia autocontenida de un evento con su manifiesto, configuración, salidas y las referencias e índices comunes que necesita. Las sumas de comprobación se validan antes y después de exportarlo | Formato técnico del paquete y algoritmo de suma de comprobación |
 
 Solo se conserva el alineamiento final de cada experimento. Los controles sin
@@ -4304,7 +4521,7 @@ pendientes.
 |---|---|---|
 | **ACE-01. Configuración sin cambiar el código** | El programa puede leer ficheros generales con distinto número, tamaño o composición de cromosomas o *scaffolds* y generar las referencias simuladas correspondientes sin modificar el código. Cuando se selecciona la vía evolutiva o la vía de familias y poblaciones segregantes, el fichero general referencia el fichero de configuración poblacional del escenario y el programa usa ambos | Formato, esquema y casos de prueba |
 | **ACE-02. Tamaños del genoma simulado** | Cada cromosoma o *scaffold* tiene el tamaño configurado y el tamaño total corresponde a los tamaños de todas sus secuencias | Casos de prueba y comprobación exacta |
-| **ACE-03. Modos de referencia inicial** | El sistema puede simular la referencia inicial desde la configuración o utilizar un FASTA real suministrado. Un FASTA legible, con al menos una secuencia no vacía, identificadores no vacíos y únicos, y únicamente los símbolos IUPAC de DNA admitidos en mayúsculas o minúsculas supera la validación. El sistema lo copia al directorio de resultados, usa esa copia como referencia inicial y deja el original sin cambios. Un archivo ilegible, sin ninguna secuencia no vacía, con identificadores vacíos o repetidos, con huecos o con otros símbolos hace que la ejecución se detenga antes de generar resultados y que se expliquen claramente los errores detectados | Casos de prueba detallados |
+| **ACE-03. Modos de referencia inicial** | El sistema puede simular la referencia inicial desde la configuración o utilizar un FASTA real suministrado. Un FASTA legible, con al menos una secuencia no vacía y cuyo primer elemento no vacío de cada cabecera sea un identificador único supera la validación si sus secuencias contienen exclusivamente A, C, G, T y N en mayúsculas o minúsculas. La descripción restante de la cabecera se conserva por separado. El sistema copia el FASTA al directorio de resultados, usa esa copia y deja el original sin cambios. Un archivo ilegible, sin secuencias no vacías, con identificadores vacíos o repetidos, huecos, otros códigos IUPAC o cualquier otro símbolo hace que la ejecución se detenga antes de generar resultados y explique los errores | Tratamiento operativo de N por clase de operación; casos de prueba detallados |
 | **ACE-04. Un FASTA por referencia** | Cada referencia inicial o derivada conserva toda su secuencia en un único FASTA, que contiene uno o varios cromosomas o *scaffolds* | Casos de prueba |
 | **ACE-05. Índices de las referencias** | Cada referencia tiene cero, uno o varios índices y dispone de todos los tipos que necesitan las operaciones o los formatos que la usan | Tipos exigidos por cada operación y herramientas de indexación |
 | **ACE-06. Creación de referencias estructurales** | Se pueden crear dos o más referencias estructurales a partir de referencias disponibles previamente, incluida una referencia inicial suministrada | Casos de prueba, tamaños y reglas exactas |
@@ -4323,8 +4540,8 @@ pendientes.
 | **ACE-19. Cabecera del VCF** | La cabecera o los metadatos estándar de cada VCF permiten identificar sin ambigüedad la referencia, el conjunto y las muestras mediante sus identificadores biológicos estables, y cumplen la versión oficial elegida | Versión exacta de VCF, catálogo concreto de campos y casos de prueba |
 | **ACE-20. Separación por referencia** | Cuando se generan BAM, CRAM o VCF, existe un conjunto independiente por cada referencia de mapeo seleccionada. Cada conjunto usa una sola referencia, todos contienen las mismas muestras solicitadas y ninguno mezcla archivos referidos a genomas distintos. En modo realista, dentro del evento todos usan los mismos FASTQ y el único mapeador del evento | Forma de organizar los conjuntos |
 | **ACE-21. Coherencia de las salidas** | Las referencias, los individuos y cada conjunto de BAM o CRAM y VCF de verdad se pueden relacionar sin ambigüedad y describen la misma simulación | Identificadores y comprobaciones de consistencia |
-| **ACE-22. Manifiestos** | Cada ejecución genera un manifiesto general y uno por evento técnico. Identifican vía, configuraciones, semillas y subsemillas, versión, parámetros efectivos, referencias y recursos comunes, individuos y todos los archivos. Cada evento registra su modo, tecnología, perfil, contaminación, FASTQ, mapeador único, versión, comando y resultados separados por referencia. También conservan evolución, cruces, ploidía, validaciones y la trazabilidad exigida | Formatos, esquemas y casos de prueba |
-| **ACE-23. Reproducibilidad biológica** | Toda ejecución usa una semilla. Si la configuración no la proporciona, el programa la genera antes de simular y el manifiesto la identifica como generada. Dos ejecuciones con la misma semilla, configuraciones, entradas y versión del programa toman las mismas decisiones aleatorias y producen la misma simulación biológica. No se exige identidad bit a bit de archivos cuando solo difieran metadatos no biológicos | Estrategia de subsemillas y flujos aleatorios; garantías entre versiones o plataformas; casos de prueba |
+| **ACE-22. Manifiestos** | Cada ejecución genera un manifiesto general y uno por evento explícito. Identifican vía, configuraciones, semillas y subsemillas, versión, parámetros efectivos, referencias y recursos comunes, individuos y todos los archivos. Cada evento registra sus salidas y, cuando proceda, modo, tecnología, perfil, contaminación, FASTQ, mapeador único, versión y comando. También conservan evolución, cruces, ploidía, validaciones, los niveles de reproducibilidad declarados y el estado y diagnóstico de cada unidad | Formatos, esquemas y casos de prueba |
+| **ACE-23. Niveles de reproducibilidad** | Toda ejecución usa una semilla. Si la configuración no la proporciona, el programa la genera antes de simular y el manifiesto la identifica como generada. Con iguales semilla, configuración efectiva, entradas, perfiles y versión, se garantiza la misma simulación biológica y se aíslan sus flujos de los eventos técnicos. Las mismas lecturas, calidades, procedencias y artefactos se garantizan además cuando coinciden la subsemilla y las dependencias técnicas aplicables. La equivalencia semántica se declara solo bajo condiciones verificadas y la identidad binaria no se promete de forma general. El manifiesto separa los cuatro niveles y nunca infiere uno superior desde otro inferior | Estrategia técnica de subsemillas; condiciones verificables por herramienta, versión o plataforma; casos de prueba |
 | **ACE-24. Muestreos evolutivos** | La configuración puede solicitar muestreos mediante generación y número o proporción. Se conservan por defecto el estado genotípico y los metadatos mínimos, sin BAM, CRAM ni VCF. Cada evento guarda por separado un resumen de la población completa y subpoblaciones relevantes y otro calculado solo desde la muestra. Ambos identifican ámbito e incluyen frecuencias alélicas, heterocigosidad, F, N y Ne cuando corresponden; ninguna medida muestral se presenta como poblacional. El muestreo no modifica individuos ni la trayectoria evolutiva | Formato de resúmenes; estrategia técnica de flujos aleatorios; casos de prueba |
 | **ACE-25. Identidad individual** | Todo individuo tiene un identificador único, estable y no reutilizable dentro de la ejecución. Los duplicados aportados por la configuración se rechazan. El mismo identificador relaciona genotipo, generación y subpoblación de origen, parentales o linaje, muestreos, BAM o CRAM, VCF y manifiesto, y se distingue de los identificadores de evento y conjunto | Sintaxis técnica de los identificadores y casos de prueba |
 | **ACE-26. Estructura poblacional dinámica** | División reparte progenitores entre hijas exclusivas; fusión reúne orígenes; fundación transfiere fundadores y deja continuar al origen. División y fundación usan el catálogo declarativo común. Cada nueva subpoblación tiene N objetivo independiente y registra conjunto fundador, N objetivo y realizado. En fusión, el modo probabilístico usa elegibles o pesos; el controlado garantiza recuentos parentales exactos. Ninguno garantiza porcentaje exacto de bases: se calcula ascendencia genómica realizada con traza haplotípica | Casos de prueba del catálogo común y de cada evento |
@@ -4335,7 +4552,7 @@ pendientes.
 | **ACE-31. Repeticiones en tándem** | La configuración admite loci concretos o generación aleatoria y regional con motivo no vacío de longitud libre, copias o longitud, pureza e interrupciones. Se mantienen fase y verdad en secuencias y BAM o CRAM. El VCF usa alelos explícitos cuando son manejables o simbólicos para tramos largos o complejos, pero en ambos casos expone motivo, copias por alelo o haplotipo, longitud, pureza e interrupciones y permite reconstruir el genotipo sin depender solo del manifiesto | Campos VCF concretos, criterio técnico de tamaño manejable, límites de recursos y casos de prueba |
 | **ACE-32. Mutación de repeticiones en tándem** | El modelo escalonado predeterminado gana o pierde unidades completas y permite configurar tasa, sesgo y distribución del tamaño del cambio, además de modelos alternativos. Sus parámetros pueden variar por los ámbitos acordados. Las mutaciones internas de interrupciones, pureza o motivo están desactivadas por defecto y solo se aplican si se configuran. Cada evento es reproducible, faseado y trazable | Fórmulas y distribuciones concretas, modelos alternativos y casos de prueba |
 | **ACE-33. Verdad complementaria sin pérdida** | Si un caso complejo no puede representarse completamente en VCF, se genera un complemento estructurado con identificador compartido y el VCF y el manifiesto lo enlazan. A partir del VCF y el complemento se reconstruyen sin pérdida la secuencia o cambio, coordenadas, haplotipo, fase y genotipo. Si todos los casos son representables, el complemento no se genera | Formato, esquema y casos de reconstrucción |
-| **ACE-34. Resultado mínimo y salidas dependientes** | Toda ejecución exitosa produce FASTA e índices necesarios, verdad genotípica faseada, copias de configuraciones y manifiesto. CRAM se genera por defecto, BAM es la alternativa y los alineamientos pueden desactivarse sin incumplir el mínimo. En modo realista también existen obligatoriamente los FASTQ finales y ficheros de procedencia de todos sus grupos; el modo directo no los requiere. Una calibración produce su perfil empírico reutilizable. El VCF solo existe si se solicita. La ejecución falla si falta una salida mínima o activada | Formato del fichero de verdad, organización de copias y casos de fallo |
+| **ACE-34. Resultado mínimo y salidas dependientes** | Toda ejecución exitosa produce FASTA e índices necesarios, la verdad completa obligatoria para su vía, los historiales o resúmenes exigidos, copias de configuraciones y manifiesto. Toda salida de observación requiere un evento explícito y cero eventos no crea ninguno implícito. Un evento puede solicitar solo verdad o VCF sin parámetros técnicos. Cuando solicita alineamientos, CRAM es predeterminado y BAM la alternativa; en modo realista también son obligatorios sus FASTQ finales y ficheros de procedencia, mientras el modo directo no los requiere. Una calibración produce su perfil empírico reutilizable. La ejecución falla si falta una salida mínima o activada | Formato del fichero de verdad, organización de copias y casos de fallo |
 | **ACE-35. Escala y prioridad de la primera versión** | Se pueden configurar, sin límites funcionales codificados, distintos números y tamaños de secuencias, individuos y generaciones. La validación prioriza escenarios pequeños y reproducibles. Los escenarios mayores están limitados por los recursos disponibles y no se presupone rendimiento ilimitado | Casos pequeños prioritarios, mediciones de recursos y pruebas de escalabilidad sin umbrales fijados |
 | **ACE-36. Estimación de recursos** | Antes de ejecutar se muestran estimaciones aproximadas de volumen y almacenamiento de salidas, memoria y tiempo. Un escenario grande provoca una advertencia clara, pero no se bloquea solo por ella. Una configuración inválida o la imposibilidad inevitable de producir el mínimo sí impiden iniciar y explican la causa. El manifiesto conserva estimaciones, advertencias y consumo real medible | Modelos, umbrales y pruebas de calibración de las estimaciones |
 | **ACE-37. Tecnologías de lectura** | Con BAM o CRAM activos se pueden representar lecturas cortas tipo Illumina, *single-end* y *paired-end*, y lecturas largas PacBio HiFi. Cada modalidad tiene un perfil predeterminado validado y ajustable; también admite calibración empírica desde FASTQ y referencia. En modo realista las lecturas proceden de haplotipos faseados y resultados y manifiesto registran tecnología y perfil efectivos. Oxford Nanopore y PacBio CLR se rechazan en v1 y quedan para futuras ampliaciones | Distribuciones, parámetros, tasas y valores cuantitativos exactos; datos de validación y casos de prueba |
@@ -4343,11 +4560,11 @@ pendientes.
 | **ACE-39. Un mapeador por experimento** | Un experimento usa exactamente un mapeador, minimap2 salvo selección compatible distinta, contra todas sus referencias. Para minimap2, el perfil elige automáticamente el *preset* y los valores predeterminados, y las sustituciones se advierten y validan. El manifiesto conserva herramienta, versión, comando completo y parámetros efectivos | Versión de minimap2, *presets* y valores exactos, catálogo inicial de alternativas, comprobaciones técnicas de compatibilidad y casos de opciones incompatibles |
 | **ACE-40. Independencia de eventos técnicos** | Dos eventos pueden usar mapeadores o tecnologías distintos sobre las mismas muestras biológicas, pero cada uno genera sus propias lecturas y usa un solo mapeador. No se reutilizan FASTQ entre eventos ni se presentan como comparación de mapeadores | Organización, identificadores y casos con varios eventos |
 | **ACE-41. Cobertura configurable** | La cobertura media objetivo en «x» puede configurarse globalmente y sustituirse por individuo, cromosoma o *scaffold* y región, incluidos valores altos, bajos o cero. Los conflictos del mismo nivel se rechazan; la realización es aproximadamente Poisson antes de sesgos, se refleja en FASTQ del modo realista o BAM/CRAM del directo y se registra cuando se mide | Tolerancias y casos estadísticos |
-| **ACE-42. Contaminación trazable** | Una muestra admite una fracción total de contaminación biológica entre 0 % y 100 %, repartida entre una o varias fuentes mediante matriz dirigida o selección automática. Cada lectura o pareja contaminante sustituye una propia; la donante no pierde datos. El modo directo aplica reglas funcionalmente equivalentes. La selección es reproducible, y verdad y manifiesto conservan origen, objetivo, realizado, retiradas y totales finales | Unidades exactas de matriz, validaciones y casos de prueba |
+| **ACE-42. Contaminación trazable** | Una muestra admite una fracción total de contaminación biológica entre 0 % y 100 %, repartida entre una o varias fuentes mediante matriz dirigida o selección automática. Proporciones, coberturas equivalentes y números se convierten conjuntamente a lecturas o parejas completas y se asignan enteramente minimizando la desviación global; los empates se resuelven con la subsemilla y se registran. Cada unidad contaminante sustituye una propia; la donante no pierde datos. El modo directo aplica reglas funcionalmente equivalentes. Verdad y manifiesto conservan origen, objetivo, conversión, realizado, retiradas y totales finales | Validaciones y casos de prueba |
 | **ACE-43. Contaminación *paired-end*** | En datos *paired-end* se seleccionan y sustituyen parejas completas de una misma fuente. Ambos *mates* se incorporan juntos con nombres, indicadores, orientación y relación coherentes, sin crear huérfanos; el manifiesto registra parejas propias retiradas y contaminantes incorporadas | Casos de prueba de emparejamiento |
 | **ACE-44. FASTQ contaminante externo** | Los FASTQ externos solo se admiten en modo realista. Se validan y copian al directorio de resultados antes de usarse. La ejecución usa la copia, conserva intacto el original y realiza un submuestreo reproducible que respeta la fracción y el emparejamiento. El manifiesto relaciona ubicación original, copia, validación y lecturas seleccionadas. Configurarlos en modo directo es un error previo | Validaciones exactas y datos técnicos de integridad |
 | **ACE-45. Contaminación técnica por índices** | Una tanda multiplexada puede usar índices simples, duales combinatorios o UDI y simular de forma reproducible asignaciones erróneas, incluido *index hopping*. Una lectura o pareja reasignada desaparece de la donante y entra en la receptora sin duplicarse. Las descartadas o sin asignar no se reemplazan y reducen la cobertura. Se conserva la procedencia verdadera, sin generar señales, BCL ni lecturas i5/i7 detalladas | Casos de prueba por estrategia de índices y resultado |
-| **ACE-46. FASTQ final y procedencia sin duplicación** | En modo realista existe un FASTQ final, o pareja *paired-end*, por individuo, biblioteca y tanda o carril después de contaminación y demultiplexado, sin concatenación ni copia limpia adicional. Un fichero estructurado enlazado identifica por lectura o pareja las contaminantes presentes, su fuente y mecanismo, sin copiar secuencias ni calidades. Las descartadas o sin asignar aparecen solo como recuentos agregados por muestra y causa u origen conocido | Formato, esquema y casos de reconstrucción de la verdad de contaminación |
+| **ACE-46. FASTQ final, identidad y procedencia** | En modo realista existe un FASTQ final, o pareja *paired-end*, por individuo, biblioteca y tanda o carril después de contaminación y demultiplexado, sin concatenación ni copia limpia adicional. Cada lectura o pareja es una instancia técnica única dentro del evento. Una copia biológica recibe identidad nueva y enlaza su origen; una transferencia por demultiplexado conserva la identidad y abandona la donante; solo un mecanismo de duplicación configurado puede crear copias adicionales. Un fichero estructurado enlazado conserva esas relaciones sin copiar secuencias ni calidades. Las descartadas o sin asignar aparecen solo como recuentos agregados por muestra y causa u origen conocido | Formato, esquema y casos de reconstrucción de la verdad de contaminación |
 | **ACE-47. Perfiles de error y calidades** | Cada tecnología usa un perfil de errores identificado y versionado, homogéneo salvo sustituciones globales o por individuo, secuencia o región. Las calidades del FASTQ son probabilísticamente coherentes con los errores y se propagan a BAM/CRAM. La verdad distingue secuencia original y observada | Perfiles exactos, modelos por posición o contexto y casos estadísticos |
 | **ACE-48. Calibración empírica reutilizable** | Un FASTQ real y su referencia permiten estimar longitud, calidad y errores, con advertencias sobre variantes, regiones ambiguas, mapeo y fiabilidad. El perfil solo se aplica si se selecciona y se guarda como artefacto estructurado, versionado y reutilizable sin el FASTQ original; el manifiesto lo enlaza | Método de estimación, formato, esquema y medidas concretas de calidad |
 | **ACE-49. Duplicados de PCR y ópticos** | Los perfiles pertinentes generan por separado duplicados de PCR y ópticos con tasas sustituibles; en *paired-end* se duplica la pareja completa. La verdad conserva tipo y origen. BAM/CRAM los entrega marcados por defecto y permite una salida sin marcar; el manifiesto registra estado, método y cantidades esperadas y realizadas | Modelos exactos, procedimiento de marcado y casos de prueba |
@@ -4358,8 +4575,8 @@ pendientes.
 | **ACE-54. Lecturas quiméricas** | Un perfil puede generar quimeras con frecuencia configurable. Todos los fragmentos pertenecen al mismo individuo y biblioteca, pero pueden proceder de cromosomas, *scaffolds*, haplotipos o copias diferentes. La verdad conserva origen, coordenadas, orientación y uniones; el mapeador resuelve el modo realista y el modo directo produce alineamientos divididos coherentes | Distribuciones de fragmentos y casos de prueba |
 | **ACE-55. Anomalías *paired-end*** | Se pueden configurar parejas con orientación anómala, inserto inesperado o un miembro no alineado, incluidas combinaciones. Las normales siguen el perfil; en modo realista decide el mapeador y en modo directo banderas, RNEXT/PNEXT, TLEN, CIGAR, orientación y *proper-pair* son coherentes. La verdad y el manifiesto conservan estado, fragmento y cantidades | Distribuciones y casos de prueba por combinación |
 | **ACE-56. Grupos de lectura y archivo por individuo** | Los identificadores únicos de muestra, biblioteca, tanda o carril, plataforma y grupo son consistentes entre FASTQ, `@RG`/`RG` de BAM o CRAM, procedencia y manifiesto. Los FASTQ permanecen separados por grupo. Cada conjunto por referencia contiene un único BAM o CRAM final por individuo con todos sus grupos, y nunca mezcla referencias ni exige productos finales separados por biblioteca | Campos exactos de `@RG`, validaciones y casos con múltiples grupos |
-| **ACE-57. Una tecnología por experimento** | Cada evento o experimento usa una sola tecnología experimental y mantiene compatibles todos sus perfiles, bibliotecas, tandas, carriles, mapeo y resultados. No mezcla lecturas cortas tipo Illumina y lecturas largas PacBio HiFi ni perfiles incompatibles. Eventos separados pueden usar las mismas muestras y verdad, pero producen lecturas independientes con identificadores y versiones trazables | Sintaxis de identificadores y casos de incompatibilidad |
-| **ACE-58. CRAM predeterminado y referencia exacta** | Sin otra elección, cada individuo recibe un CRAM final; BAM puede seleccionarse como alternativa. Cada CRAM está ligado por cabecera y manifiesto a la copia FASTA exacta almacenada entre los recursos comunes, protegida por identificadores y comprobaciones de integridad; no puede asociarse a otra referencia. Una exportación del evento sí copia ese FASTA al paquete autocontenido | Campos, comprobaciones de integridad y casos de referencia incorrecta |
+| **ACE-57. Una tecnología por experimento** | Cada experimento o evento que genere FASTQ, BAM o CRAM usa una sola tecnología experimental y mantiene compatibles todos sus perfiles, bibliotecas, tandas, carriles, mapeo y resultados. No mezcla lecturas cortas tipo Illumina y lecturas largas PacBio HiFi ni perfiles incompatibles. Un evento que solo materializa verdad o VCF no necesita tecnología. Eventos separados pueden usar las mismas muestras y verdad, pero producen lecturas independientes con identificadores y versiones trazables | Sintaxis de identificadores y casos de incompatibilidad |
+| **ACE-58. CRAM predeterminado y referencia exacta** | Dentro de un evento que solicite alineamientos, cada individuo recibe un CRAM final salvo que se seleccione BAM como alternativa. Cada CRAM está ligado por cabecera y manifiesto a la copia FASTA exacta almacenada entre los recursos comunes, protegida por identificadores y comprobaciones de integridad; no puede asociarse a otra referencia. Una exportación del evento sí copia ese FASTA al paquete autocontenido | Campos, comprobaciones de integridad y casos de referencia incorrecta |
 | **ACE-59. Orden, índice y validación** | Cada BAM o CRAM final se entrega ordenado por coordenadas de forma predeterminada y con un índice compatible elegido según formato, tamaño y necesidad. La configuración y el manifiesto registran formato, orden e índice, y el resultado no se considera completo si alineamiento, índice y referencia no superan la validación conjunta | Herramientas, tipos exactos de índice y casos límite de tamaño |
 | **ACE-60. VCF multimuesta por referencia** | Cada conjunto solicitado contiene un único VCF de verdad multimuesta con todos sus individuos y exactamente los mismos identificadores usados en BAM/CRAM, grupos de lectura, genotipos y manifiesto. No incluye individuos de otra referencia y no exige VCF individuales como productos principales | Casos de coherencia de identificadores y organización |
 | **ACE-61. VCF ordenado, comprimido e indexado** | Por defecto, el VCF sigue el orden de secuencias de la referencia y las coordenadas dentro de cada una, está comprimido con BGZF y tiene un índice TBI o CSI compatible. Puede solicitarse texto sin comprimir. La ejecución falla si VCF, compresión, índice, cabecera y referencia no superan la validación correspondiente | Selección TBI/CSI, herramientas y casos límite |
@@ -4379,7 +4596,7 @@ pendientes.
 | **ACE-75. Plantillas y sistemas de cruce** | Existen plantillas F1, F2, retrocruce, autofecundación y pedigrí simple. F2 permite autofecundar F1 o cruzar F1. RIL, introgresión y MAGIC se expresan con cruces personalizados. El sistema admite especies autógamas y alógamas y registra modo, parentales y descendientes | Sintaxis del sistema general y casos por plantilla |
 | **ACE-76. Apareamiento mixto y contribución parental** | La autofecundación es una probabilidad reproducible de 0–100 % por evento, sustituible por población, subpoblación y fase. Los demás eventos eligen uniformemente dos supervivientes distintos, sin ponderación por parentesco, distancia o genotipo. Un parental puede reproducirse varias veces bajo límites o distribuciones configurados | Distribuciones y tolerancias de tasas realizadas |
 | **ACE-77. N, Ne y descendencia** | N objetivo es obligatorio al iniciar y fija la descendencia que se intenta crear; un cuello de botella lo reduce y una expansión lo aumenta, sin modificar adultos ya creados. Si un resultado aleatorio impide alcanzarlo, se conservan N realizado, desviación y aviso sin detener. Ne objetivo puede ser absoluto o Ne/N o faltar; Ne realizado usa progenitores con descendencia y desigualdad de contribuciones, nunca heterocigosidad, endogamia o LD. Su desviación tampoco detiene | Fórmulas de Ne reproductivo y F realizado, adaptación por ploidía y casos incompatibles |
-| **ACE-78. Generaciones e historial reproducible** | Las generaciones son discretas y no solapadas. Los individuos parentales solo existen como población activa en su generación y los sustituye la descendencia; un cambio de N no los elimina retrospectivamente. Se conservan genotipos completos de población inicial, final y generaciones solicitadas, y un historial resumido de todas. La regeneración exige misma semilla, configuración, entradas, perfiles, versión y dependencias | Esquema del historial y política técnica de compatibilidad |
+| **ACE-78. Generaciones e historial reproducible** | Las generaciones son discretas y no solapadas. Los individuos parentales solo existen como población activa en su generación y los sustituye la descendencia; un cambio de N no los elimina retrospectivamente. Se conservan genotipos completos de la población inicial, final y generaciones o muestreos solicitados, y un historial resumido de todas las demás. La regeneración biológica exige misma semilla, configuración efectiva, entradas, perfiles y versión; los niveles técnicos superiores aplican además las condiciones de ACE-23 | Esquema del historial y política técnica de compatibilidad |
 | **ACE-79. Mutaciones evolutivas** | SNP, inserciones, deleciones y SV usan tasas independientes por base y generación; las repeticiones usan su clase y modelo propios. SNP admite espectro validado y modelo simétrico predeterminado, sin contexto vecino. Indels tienen distribuciones de longitud que favorecen tamaños cortos y respetan el umbral. Cada mutación surge después de recombinación en un haplotipo descendiente y conserva origen y transmisión | Distribuciones cuantitativas, tasas predeterminadas y casos estadísticos |
 | **ACE-80. TE configurados, no evolución autónoma** | Un catálogo TE validado procede de FASTA o simulación. Se insertan TE al construir referencias o mediante eventos exactos o aleatorios en individuos concretos. No existen tasas de movilización, actividad ni transposición espontánea. Las inserciones presentes se heredan normalmente y se representan en verdad y VCF/complemento | Esquema del catálogo y casos de herencia |
 | **ACE-81. Construcción trazable de eventos TE** | Un evento solicitado admite orientación, truncamiento, duplicación de sitio diana, copia completa, copiar-pegar o cortar-pegar y reglas de destino. Conserva secuencias fuente/final, copias, coordenadas, haplotipo, sitio diana y linaje. Sin destino válido advierte o falla según política, pero no crea una inserción inválida | Formato de reglas, pesos y casos complejos VCF/complemento |
@@ -4394,14 +4611,14 @@ pendientes.
 | **ACE-90. Endogamia inicial** | F se configura para la población completa o se sustituye por subpoblación, siempre entre 0 y 1 y nunca para ploidía 1, locus, región o bloque. Para cualquier ploidía mayor que 1 progresa desde Hardy-Weinberg en F=0 hasta homocigosis completa en F=1, sin modelos específicos de herencia polisómica o disómica. No fuerza ROH ni un valor exacto por individuo. Una distribución local explícita prevalece. F realizado compara heterocigosidad observada y esperada por subpoblación y generación; puede ser negativo sin constituir error | Fórmula exacta de F realizado, adaptación por ploidía y tolerancias |
 | **ACE-91. Fundadores trazables** | Todos los individuos de la población inicial son fundadores con identificadores estables propios. Cada copia haplotípica también tiene identificador propio aunque su secuencia coincida con otra, y toda traza posterior alcanza una copia fundadora concreta | Formato de identificadores y casos de reconstrucción |
 | **ACE-92. Selección de muestreos** | Un evento admite identificadores explícitos, selección aleatoria sin reemplazo o ambas, además de estratos no solapados por subpoblación, grupos y filtros de genotipo. Los explícitos se incorporan primero y se excluyen del sorteo. Duplicados, individuos incompatibles, estratos ambiguos o tamaños mayores que los elegibles detienen el evento sin reemplazo ni reducción silenciosa | Sintaxis de filtros y estratos y casos de prueba |
-| **ACE-93. Eventos técnicos independientes** | Una ejecución biológica admite varios eventos, cada uno con identificador, selección, subsemilla, tecnología, perfil, mapeador, FASTQ y degradaciones propios. El mismo individuo conserva genotipo, fase y ascendencia entre eventos, pero las lecturas y alineamientos se materializan de nuevo e independientemente | Estrategia técnica de subsemillas y casos multievento |
-| **ACE-94. Organización y exportación de eventos** | La raíz conserva una sola copia verificable de cada referencia e índice y un manifiesto general. Cada evento tiene directorio y manifiesto propios y separa resultados por referencia. Su exportación produce un paquete autocontenido con los recursos necesarios y valida las sumas de comprobación antes y después | Esquema, algoritmo de suma y formato del paquete |
+| **ACE-93. Eventos explícitos independientes** | Una ejecución biológica admite cero, uno o varios eventos explícitos con identificador, selección, referencias, salidas y subsemilla. Solo los eventos que generan FASTQ, BAM o CRAM necesitan una tecnología y perfil; los que generan alineamientos necesitan además un mapeador. Un evento que solo materializa verdad o VCF carece de esos requisitos técnicos. El mismo individuo conserva genotipo, fase y ascendencia entre eventos, pero las lecturas y alineamientos se materializan de nuevo e independientemente | Estrategia técnica de subsemillas y casos multievento |
+| **ACE-94. Organización, atomicidad y exportación** | La raíz conserva una sola copia verificable de cada referencia e índice y un manifiesto general. Cada evento tiene directorio y manifiesto propios y separa resultados por referencia. Ejecución, evento, conjunto y artefacto distinguen estados incompleto, completo y fallido. Cada artefacto se publica atómicamente tras validarse; un conjunto solo está completo con todos sus artefactos activados y el éxito global exige todas las unidades obligatorias completas. Los conjuntos completos independientes se conservan y pueden exportarse declarando cualquier fallo global. La exportación produce un paquete autocontenido y valida las sumas antes y después | Esquema, algoritmo de suma y formato del paquete |
 | **ACE-95. Coordenadas y límites estructurales** | La configuración usa coordenadas basadas en 1 e intervalos cerrados; cada formato externo usa su convención oficial mediante conversión documentada. Cada duplicación usa el estado inmediatamente anterior para interpretar origen y destino y conserva las correspondencias posteriores. Una fuente completa puede insertar la copia dentro de la misma secuencia; una fuente parcial solo puede usar un destino adyacente o externo a su intervalo. Inserciones, deleciones, inversiones y puntos de ruptura respetan las reglas terminales, y toda translocación conserva subeventos, segmentos y orientaciones sin vaciar una secuencia | Representación técnica y casos límite |
 | **ACE-96. Límite local de copias** | El máximo local predeterminado y provisional es 10 copias totales, incluida la original, por familia de copia e intervalo fundador dentro de cada copia haplotípica. Se contabiliza de forma acumulada y separada de ploidía y repeticiones en tándem. Un valor mayor requiere configuración explícita, genera una advertencia y activa una estimación previa de memoria, almacenamiento y volumen de datos. Si supera el presupuesto configurado se rechaza; si no, continúa. No existe otro máximo absoluto fijo y el valor predeterminado debe revisarse mediante pruebas de rendimiento | Pruebas de rendimiento y casos acumulativos y de presupuesto |
 | **ACE-97. Reproducción de familias** | Cada evento tiene un parental para autofecundación o dos para cruzamiento sexual; otras cardinalidades se rechazan. El orden de los dos parentales no cambia el resultado biológico y los diseños con tres o más fundadores forman un grafo de eventos. Clonación, apomixis y dobles haploides se rechazan | Casos por tipo de evento y grafo |
 | **ACE-98. Segregación y mutación familiar** | La transmisión elige con igual probabilidad una copia compatible de cada bivalente, sin conversión génica, distorsión de segregación ni impulso meiótico. Un heterocigoto para una translocación no puede reproducirse. Las mutaciones de novo están desactivadas por defecto y, al activarse, usan el motor evolutivo y conservan tasa, evento y traza | Casos mendelianos, estructurales y de mutación |
 | **ACE-99. Independencia VCF entre referencias** | Cada referencia produce un VCF construido directamente en su secuencia y coordenadas, con un espacio propio de identificadores. Muestras biológicas pueden compartir identificador, pero VCF, complemento y manifiestos no contienen identificadores globales ni correspondencias registro a registro entre variantes de referencias diferentes | Casos con dos referencias y revisión de metadatos |
-| **ACE-100. Identidad técnica y biológica** | `SM` de BAM/CRAM y las columnas del VCF usan el identificador biológico estable. El grupo de lectura es único en toda la ejecución, distingue evento, biblioteca, tanda y carril y coincide entre FASTQ, BAM/CRAM, procedencia y manifiesto | Campos de `@RG` y casos de colisión |
+| **ACE-100. Identidad técnica y biológica** | `SM` de BAM/CRAM y las columnas del VCF usan el identificador biológico estable. El grupo de lectura es único en toda la ejecución, distingue evento, biblioteca, tanda y carril y coincide entre FASTQ, BAM/CRAM, procedencia y manifiesto. Cada instancia de lectura o pareja tiene identidad única dentro del evento y su procedencia distingue copia biológica, transferencia técnica y duplicación configurada sin colisiones | Campos de `@RG`, representación técnica de los vínculos y casos de colisión |
 | **ACE-101. VCF estable entre eventos** | Dos eventos con los mismos individuos, referencia y verdad producen VCF con idénticos identificadores locales, coordenadas, REF, ALT y genotipos aunque cambien tecnología, subsemilla, FASTQ, BAM/CRAM o degradaciones | Casos con eventos técnicos diferentes |
 | **ACE-102. ALT fijados y multialélicos** | Un ALT fijado en todas las muestras se incluye porque difiere de la referencia. Varios ALT representables en el mismo locus se reúnen en un registro multialélico normalizado y `GT` conserva ploidía, dosis y fase. Los casos no representables usan el complemento sin pérdida | Casos fijados, multialélicos, poliploides y solapados |
 | **ACE-103. Variantes pequeñas solapadas** | SNP e *indels* pueden solaparse en una copia haplotípica. Los explícitos exigen un orden, se aplican secuencialmente y usan el estado inmediatamente anterior como marco de coordenadas. La verdad actual y el VCF derivan de la secuencia final; el historial marca cada evento como activo, modificado o eliminado. Un objetivo ya eliminado detiene la configuración; no se ignora ni recoloca. Un SNP eliminado por una deleción no se emite como variante actual. Haplotipos distintos se resuelven independientemente y sus alelos finales pueden coexistir como ALT con fase y dosis. Varios eventos de un haplotipo que formen un alelo final se emiten como una sola variante o ALT compleja normalizada y usan complemento si hace falta | Casos secuenciales, multialélicos, complejos, de eliminación y de error |
@@ -4414,20 +4631,47 @@ hasta que se resuelvan los aspectos pendientes.
 
 ## 8. Decisiones abiertas
 
-No queda ninguna decisión funcional abierta identificada para el alcance de la
-versión 1. Los formatos, valores cuantitativos, algoritmos, sintaxis, versiones,
-tolerancias técnicas y casos de prueba que todavía deben concretarse se recogen
-en la sección 9 como decisiones de planificación. Añadir un comportamiento o una
-clase de regla no confirmados requerirá revisar expresamente la especificación.
+La especificación funcional de la versión 1 no está cerrada. La revisión
+[revision-adversarial-especificaciones-0.1.md](./revision-adversarial-especificaciones-0.1.md)
+mantiene al final las preguntas que requieren valoración. Como mínimo, siguen
+abiertas las decisiones sobre:
+
+- el denominador y las etapas de la cobertura;
+- el reparto de información entre VCF y complemento;
+- el tratamiento operativo de N por cada clase de operación, las colisiones
+  aleatorias y las precedencias cruzadas de configuración;
+- si las inserciones de elementos transponibles pueden crear referencias
+  derivadas;
+- la mezcla de referencias estructurales en unidades reproductivas y la
+  compatibilidad estructural en reproducción;
+- la semántica verificable del tamaño poblacional N, Ne, selección, tasas
+  mutacionales, F en poliploides y catálogos de modelos alternativos;
+- la calibración empírica;
+- la relación entre eventos complejos y registros VCF, y las reglas
+  cuantitativas de validación;
+- el ámbito real de las sustituciones por individuo, la cardinalidad de las
+  entidades técnicas y la política de trazabilidad para escenarios grandes.
+
+Estas decisiones cambian entradas aceptadas, resultados o errores observables y
+no deben cerrarse como meros detalles de implementación. Añadir un
+comportamiento o una clase de regla no confirmados requerirá revisar
+expresamente esta especificación.
+
 ## 9. Decisiones técnicas aplazadas a la planificación de la implementación
+
+Esta sección solo delimita elecciones de representación e implementación. No
+resuelve ninguna de las decisiones funcionales de la sección 8. Cuando un
+párrafo menciona a la vez una cuestión funcional abierta y una elección
+técnica, primero debe resolverse la cuestión funcional; después podrá elegirse
+la técnica sin cambiar el comportamiento aprobado.
 
 **Formato y esquema de los ficheros de configuración y los manifiestos.** El
 formato y el esquema del fichero general, de los ficheros de configuración
 poblacional y de los manifiestos se elegirán durante la planificación de la
-implementación, después o al mismo tiempo que el lenguaje, porque dependen de
-esa elección. Todos deberán seguir siendo estructurados y legibles por el
-programa. Tampoco se fija todavía un lenguaje o una sintaxis para describir el
-catálogo declarativo común, los cruces personalizados, los parentales expresos y
+implementación teniendo en cuenta que el núcleo se desarrollará en Rust. Todos
+deberán seguir siendo estructurados y legibles por el programa. Tampoco se fija
+todavía una sintaxis para describir el catálogo declarativo común, los cruces
+personalizados, los parentales expresos y
 las condiciones de selección. Su significado, capacidad expresiva y validación
 funcional ya están confirmados. La sintaxis elegida no podrá ejecutar scripts,
 código ni funciones personalizadas.
@@ -4450,12 +4694,12 @@ determinar cuáles reproducen mejor las propiedades esperadas en cada escenario.
 Todavía deben planificarse las distribuciones candidatas, los criterios de
 comparación, los conjuntos de referencia y las pruebas estadísticas; no se
 presupone una distribución universalmente mejor. Poisson será el punto de
-partida cuando proceda, pero deberán evaluarse alternativas antes de fijar
-perfiles estables. También se decidirá la estrategia de subsemillas o flujos
-aleatorios independientes y qué garantías se pueden mantener entre versiones
-del programa y plataformas distintas. Estas elecciones conservarán las medias
-esperadas configurables, los resultados realizados y la reproducibilidad con
-semilla ya exigidos.
+  partida cuando proceda, pero deberán evaluarse alternativas antes de fijar
+  perfiles estables. También se decidirá la estrategia técnica de subsemillas o
+  flujos aleatorios independientes y cómo demostrar las garantías separadas de
+  REQ-CONF-111 a REQ-CONF-115 entre versiones del programa, dependencias y
+  plataformas. Estas elecciones conservarán las medias esperadas configurables,
+  los resultados realizados y los niveles de reproducibilidad ya exigidos.
 
 **Tolerancias numéricas.** Durante la implementación se fijarán el valor
 predeterminado y la precisión de la tolerancia general usada cuando frecuencias
@@ -4528,9 +4772,10 @@ duplicados, adaptadores, sesgo GC, quimeras, anomalías *paired-end* y las
 categorías y MAPQ sintéticos del modo directo. Estos valores se validarán con
 datos adecuados para Illumina-like y PacBio HiFi. La elección cuantitativa no
 elimina el requisito de que cada degradación sea simulable, configurable y
-trazable en v1. Tampoco cambia que minimap2 es el mapeador predeterminado,
-sustituible por configuración, que cada evento usa exactamente un mapeador ni
-que herramienta, versión y parámetros efectivos deben quedar trazados.
+  trazable en v1. Tampoco cambia que minimap2 es el mapeador predeterminado,
+  sustituible por configuración, que cada evento que genere alineamientos usa
+  exactamente un mapeador ni que herramienta, versión y parámetros efectivos
+  deben quedar trazados.
 
 **Calibración empírica WGS y verdad de lecturas.** Se elegirán el método de
 estimación, las medidas de calidad y los esquemas del perfil WGS reutilizable
@@ -4576,37 +4821,39 @@ traza interna de bivalentes. La implementación deberá respetar el mínimo
 confirmado para cromosomas y la regla general con sustituciones por *scaffold*,
 usando exclusivamente cM o bases dentro de una misma regla.
 
-Salvo la elección funcional de minimap2 como mapeador predeterminado, esta
-especificación no elige formatos, índices, lenguaje, otras herramientas,
-algoritmos, bibliotecas ni arquitectura. La sección 8 confirma que no quedan
-decisiones funcionales abiertas identificadas para el alcance de v1.
+Además de confirmar Rust para el núcleo y minimap2 como mapeador predeterminado,
+esta especificación no elige formatos, índices, otras herramientas, algoritmos,
+*crates*, versión del lenguaje ni arquitectura. La sección 8 enumera las
+familias de decisiones funcionales que siguen abiertas para el alcance de v1.
 
 ## 10. Próximos pasos de diseño
 
-1. Concretar durante la planificación las tolerancias técnicas, la sintaxis del
+1. Resolver las decisiones funcionales abiertas de la sección 8 antes de
+   planificar la fase que bloquea cada una.
+2. Concretar durante la planificación las tolerancias técnicas, la sintaxis del
    catálogo declarativo común y los metadatos adicionales de muestreo. También
    se elegirán las fórmulas de F realizado y Ne reproductivo y su adaptación por
    ploidía, sin reabrir su significado funcional.
-2. Definir la representación técnica de intervalos, el catálogo y los parámetros
+3. Definir la representación técnica de intervalos, el catálogo y los parámetros
    de distribuciones alternativas a Poisson y las pruebas y criterios
    estadísticos para compararlas antes de fijar perfiles estables.
-3. Elegir durante la planificación la sintaxis del grafo de cruces, de los
+4. Elegir durante la planificación la sintaxis del grafo de cruces, de los
    parentales expresos y de las condiciones de selección ya confirmadas.
-4. Concretar y validar con datos adecuados los perfiles Illumina-like
+5. Concretar y validar con datos adecuados los perfiles Illumina-like
    *single-end* y *paired-end* y PacBio HiFi, la versión, *presets* y parámetros
    de minimap2, el catálogo inicial de mapeadores compatibles, la calibración
    empírica y las tolerancias del muestreo uniforme y la cobertura
    aproximadamente Poisson.
-5. Definir el algoritmo de sumas de comprobación, los esquemas de los
+6. Definir el algoritmo de sumas de comprobación, los esquemas de los
    manifiestos general y de evento y el formato de exportación autocontenida.
-6. Definir las unidades y la representación de la contaminación, las
+7. Definir las unidades y la representación de la contaminación, las
    validaciones de FASTQ externos y los casos de concordancia entre modos.
-7. Completar los perfiles cuantitativos de errores, calidades, duplicados,
+8. Completar los perfiles cuantitativos de errores, calidades, duplicados,
    adaptadores, sesgo GC, quimeras, anomalías *paired-end* y demás degradaciones
    WGS admitidas.
-8. Definir los campos de cabecera y las versiones de SAM/BAM, CRAM y VCF que
+9. Definir los campos de cabecera y las versiones de SAM/BAM, CRAM y VCF que
    identificarán referencia, muestra, evento, biblioteca, tanda o carril y grupo
    de lectura.
-9. Completar los casos de prueba restantes y tomar las decisiones de
+10. Completar los casos de prueba restantes y tomar las decisiones de
     implementación cuando el comportamiento esperado esté suficientemente
     definido.
