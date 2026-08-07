@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ejecutar plan Rust"
+  short_description: "Ejecuta planes Rust paso a paso y con revisión"
+  default_prompt: "Usa $ejecutar-plan-rust para ejecutar este plan de implementación Rust paso a paso, validando y revisando cada cambio."

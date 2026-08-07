@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implementar funcionalidad Rust"
+  short_description: "Implementa funcionalidades Rust con pruebas rigurosas"
+  default_prompt: "Usa $implementar-funcionalidad-rust para implementar esta funcionalidad del simulador en Rust con tipos de dominio, pruebas y validación real."

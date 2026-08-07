@@ -1,0 +1,4 @@
+interface:
+  display_name: "Revisar código Rust"
+  short_description: "Revisa corrección, diseño y pruebas de código Rust"
+  default_prompt: "Usa $revisar-codigo-rust para revisar este cambio Rust y producir hallazgos concretos, priorizados y verificables."

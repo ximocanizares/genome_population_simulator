@@ -1,6 +1,6 @@
 ---
 name: redactar-arquitectura
-description: Convertir una especificación funcional ya acordada de un proyecto de análisis genético en una arquitectura técnica clara, trazable e independiente del lenguaje. Usar al definir o revisar componentes, responsabilidades, contratos, flujos de datos, invariantes, errores, reutilización y límites del sistema antes de planificar la implementación.
+description: Convertir una especificación funcional ya acordada del simulador genómico en una arquitectura técnica Rust clara y trazable. Usar al definir o revisar componentes, tipos de dominio, responsabilidades, contratos, flujos de datos, invariantes, errores, reutilización, dependencias y límites del sistema antes de planificar la implementación.
 ---
 
 # Redactar arquitectura
@@ -26,8 +26,11 @@ Trabajar a partir de una especificación vigente. Antes de diseñar:
 Si falta una decisión funcional, devolverla a la especificación. No disfrazar
 una preferencia técnica de requisito acordado.
 
-Mientras no se haya elegido lenguaje, describir contratos, datos y dependencias
-sin sintaxis, bibliotecas, tipos o herramientas propios de un lenguaje.
+El núcleo del simulador está acordado en Rust. Diseñar sus contratos y tipos
+aprovechando las garantías del lenguaje, pero no seleccionar crates, versiones o
+herramientas concretas sin relacionarlas con un requisito y comprobar su
+compatibilidad. Reservar Python, si se aprueba más adelante, para tareas
+auxiliares de calibración o análisis, no para el núcleo de simulación.
 
 ## Trazabilidad
 
@@ -133,8 +136,9 @@ sin construir abstracciones para casos que todavía no están definidos.
 - Preferir interfaces pequeñas basadas en necesidades observables.
 - No optimizar sin un requisito y una medida; sí dejar visibles los límites de
   recursos y los puntos donde medir.
-- No seleccionar dependencias o herramientas por costumbre. Registrar esas
-  elecciones cuando se conozcan sus requisitos.
+- No seleccionar dependencias o herramientas por costumbre. Para cada crate o
+  componente nativo, registrar el requisito, la alternativa considerada, la
+  compatibilidad y el coste de distribución.
 
 ## Comprobación final
 

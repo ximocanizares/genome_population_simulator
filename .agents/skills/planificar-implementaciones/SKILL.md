@@ -21,8 +21,8 @@ No empezar el plan completo hasta disponer de:
 - una especificación vigente, sin decisiones funcionales críticas abiertas;
 - una arquitectura que defina componentes, responsabilidades, contratos,
   flujos de datos e invariantes;
-- el lenguaje, las herramientas y las versiones necesarias para escribir
-  comandos concretos, si el plan llega a ese nivel.
+- las herramientas, bibliotecas y versiones necesarias para escribir comandos
+  concretos, si el plan llega a ese nivel. El núcleo ya está acordado en Rust.
 
 No resolver decisiones de diseño dentro del plan. Si falta una decisión que
 cambia lo que debe construirse, devolverla al documento correspondiente y
@@ -39,9 +39,10 @@ continuar solo con las partes independientes.
    visible, por ejemplo coordenadas, fase, genotipos, muestras o referencias.
 5. Confirmar que cada elemento aplazado tiene un destino explícito.
 
-No suponer ningún lenguaje, gestor de dependencias, compilador ni herramienta
-mientras no se haya elegido en la arquitectura o en una decisión posterior
-aprobada.
+Planificar el núcleo en Rust y usar Cargo como base de compilación y pruebas.
+No suponer crates, versiones, características, herramientas auxiliares ni código
+Python mientras no se hayan elegido en la arquitectura o en una decisión
+posterior aprobada.
 
 ## Estructura del plan
 
@@ -115,8 +116,10 @@ Combinar según corresponda:
 - medidas de rendimiento solo cuando exista un requisito medible.
 
 Definir para cada comprobación el comando, el resultado esperado y la evidencia
-que se conservará. Usar únicamente el gestor de dependencias, compilador,
-entorno y comandos elegidos por el proyecto.
+que se conservará. Incluir como base `cargo fmt --check`, Clippy sin avisos y las
+pruebas pertinentes, además de cualquier validación genómica o de formatos que
+exija el hito. Usar únicamente el compilador, entorno y comandos elegidos por el
+proyecto.
 
 Cerrar cada hito con una pausa explícita:
 
