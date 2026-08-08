@@ -356,6 +356,13 @@ Distingue también subpoblación activa, extinción
 planificada y extinción por resultado. Una recolonización crea una identidad
 nueva.
 
+Las probabilidades y frecuencias configurables cruzan la frontera de admisión
+como `f64` finitos dentro de `[0,1]`. Sus colecciones normalizables conservan
+identidad y categoría suficientes para establecer el orden canónico; ni su
+posición física ni el reparto de trabajo adquieren semántica. La configuración
+efectiva consume únicamente los valores ya validados y normalizados junto con
+su registro de auditoría.
+
 ### 5.5. Eventos y resultados
 
 Un evento de muestreo crea una observación no destructiva del estado biológico.
@@ -379,7 +386,7 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 
 | Componente | Responsabilidad única | Entradas y salidas | Datos que posee o consulta |
 |---|---|---|---|
-| Admisión de configuración | Leer TOML, conservar su texto exacto, construir `DeclaredConfig` y resolver `EffectiveConfig` mediante la matriz de ejes y la dominancia normativa | Ficheros TOML y entradas declaradas → configuración efectiva con procedencia o diagnósticos localizables | Posee `DeclaredConfig`, ubicaciones y `EffectiveConfig`; consulta catálogos de capacidades |
+| Admisión de configuración | Leer TOML, conservar su texto exacto, validar y normalizar colecciones numéricas y resolver `DeclaredConfig` en `EffectiveConfig` mediante la matriz de ejes y dominancia | Ficheros TOML y entradas declaradas → configuración efectiva con procedencia, auditoría numérica o diagnósticos localizables | Posee `DeclaredConfig`, ubicaciones, `EffectiveConfig` y registros de suma/normalización; consulta catálogos de capacidades |
 | Identidad de ejecución | Validar IDs aportados, derivar IDs automáticos tipados y comprobar sus ámbitos | Configuración validada, raíz, digest y causas estables → identidades, etiquetas y contexto o colisión | Posee registro, catálogo normativo de campos y prefijos y vectores BLAKE3; no posee datos biológicos |
 | Aleatoriedad reproducible | Obtener o validar la raíz de 256 bits, derivar subsemillas y proporcionar un ChaCha12 local por ámbito nombrado | Raíz, origen, versión y componentes estables → generador auditable | Posee el esquema binario, catálogo normativo de ámbitos y vectores BLAKE3; no posee un RNG global ni interpreta decisiones biológicas |
 | Catálogo de referencias | Validar, copiar, simular y derivar referencias mediante un contrato independiente del adaptador FASTA | FASTA de texto sin comprimir o configuración → referencias disponibles, copia exacta e índices necesarios | Posee identidades, cabeceras crudas, secuencias internas normalizadas, linaje y recursos exactos; usa `noodles-fasta` solo tras el contrato |
@@ -423,6 +430,11 @@ Los componentes no registran dos veces la misma regla. Admisión decide
 precedencias de configuración; coordenadas decide conversiones; identidad
 decide unicidad; el motor genómico decide validez estructural; el orquestador
 generacional decide el orden; el ensamblador decide completitud.
+
+Admisión posee además el contrato numérico común: representación `f64`, validez
+de intervalos, orden canónico, suma compensada de Neumaier, tolerancia absoluta
+y normalización. Los consumidores no vuelven a sumar con otro orden o algoritmo
+ni normalizan por su cuenta.
 
 Una interfaz de dominio recibe el tipo de identificador de la categoría que
 espera. Convertir desde texto solo ocurre en la admisión o en un adaptador; una
@@ -473,7 +485,7 @@ exige que la persona usuaria los instale.
 
 | Componente | Errores propios principales | Comprobación aislada mínima |
 |---|---|---|
-| Admisión de configuración | Sintaxis TOML, clave o campo duplicado o desconocido, versión de esquema ausente, precedencia conflictiva, combinación inválida, referencia inexistente y solicitud fuera de v1 | Resolver configuraciones general y de escenario mínimas; conservar el TOML exacto; y rechazar duplicados, desconocidos, combinaciones inválidas y alternativas fuera de v1 con archivo y ubicación precisos |
+| Admisión de configuración | Sintaxis TOML; clave/campo desconocido o duplicado; versión ausente; precedencia conflictiva; `f64` no finito o fuera de intervalo; tolerancia inválida; suma no positiva/no finita o delta excesivo; referencia inexistente y solicitud fuera de v1 | Resolver casos mínimos y conservar TOML; probar tolerancias 0, `1e-9`, `1e-6` y fuera de rango, `delta == t` y valores inmediatamente dentro/fuera, NaN/infinito, cero total, reorden físico y rechazo; comprobar vectores Neumaier, recomputación, decimal round-trip y registro antes/después |
 | Identidad de ejecución | Sintaxis inválida, categoría o ámbito incorrectos, colisión o reutilización | Probar sintaxis y sensibilidad, etiquetas repetidas, vectores normativos del contexto ID, material binario y Base32 sin relleno; causas mínimas del ID de ejecución; colisiones y cruces de tipos; y rechazo de cambios de catálogo sin nueva versión |
 | Aleatoriedad reproducible | Raíz mal codificada, CSPRNG fallido, ámbito desconocido, codificación ambigua, identificador inestable o estado no regenerable | Probar raíces y subsemillas de exactamente 64 hex minúsculos, generación por CSPRNG y registro de origen, vectores normativos del contexto subseed y enteros big-endian; reconstruir ámbitos y demostrar independencia al añadir o reordenar observaciones |
 | Catálogo de referencias | FASTA comprimido o inválido, secuencia vacía, identificador de primer elemento vacío o repetido, símbolo distinto de A/C/G/T/N, linaje cíclico o derivación imposible | Copiar sin cambiar bytes mientras se valida y calcula SHA-256; separar identificador, descripción y cabecera cruda; conservar una descripción no UTF-8 reversiblemente; comprobar escritura canónica e índices bajo demanda; conservar `N` con coordenada y longitud; y reconstruir una referencia pequeña desde su origen y cambios |
@@ -522,6 +534,24 @@ validadores de identidad, referencias, combinaciones y reglas; el resolvedor
 produce `EffectiveConfig`, validada, heredada y resuelta e inmutable en su
 ámbito, conservando la regla ganadora y su procedencia. El catálogo de entradas
 copiadas y el plan de ejecución solo se crean tras esa frontera.
+
+Al construir `EffectiveConfig`, admisión representa como `f64` cada probabilidad,
+frecuencia y tolerancia general y exige que sea finita. Los valores pertenecen a
+`[0,1]`; la tolerancia absoluta pertenece inclusivamente a `[0, 1e-6]` y, si no
+se declara, vale `1e-9`. Cada colección se ordena canónicamente por identidad
+estable y categoría y se suma con Neumaier, sin reducción paralela ni orden
+físico accidental. Se calcula `delta = abs(suma - 1)` y se acepta el borde
+`delta <= tolerancia`. Si la suma aceptada es positiva, finita y normalizable,
+se divide cada valor por ella y se recomputan suma y delta con igual algoritmo y
+orden. Entrada inválida, delta excesivo, suma no positiva/no finita o resultado
+no normalizable detienen la admisión antes de simular.
+
+El registro numérico conserva tolerancia efectiva, definición del orden,
+algoritmo Neumaier y versión del contrato, suma y delta y valores antes y después;
+se incorpora a configuración efectiva y manifiesto. Todo `f64` se serializa en
+decimal de modo que su lectura recupere exactamente el mismo valor. Estas
+condiciones forman parte de la reproducibilidad. La tolerancia general no
+sustituye `0,5/C` ni otra tolerancia específica.
 
 El estimador de recursos consulta el plan y las salidas activadas sin modificar
 la configuración. La raíz v1 contiene exactamente 256 bits y se representa en
@@ -718,6 +748,7 @@ responsables y puntos de control.
 | Solo los motores biológicos escriben en el repositorio de verdad | Interfaces de dominio y repositorio de verdad | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73 y REQ-CRU-01 a REQ-CRU-45 |
 | Los componentes técnicos observan instantáneas y no mutan genotipo, genealogía ni trayectoria | Orquestador de eventos y vistas de solo lectura | REQ-TEC-01 a REQ-TEC-10 y REQ-DAT-01 a REQ-DAT-73 |
 | `DeclaredConfig` conserva lo escrito y su ubicación; `EffectiveConfig` es inmutable durante cada ámbito de uso y mantiene la procedencia de la resolución | Adaptador TOML y resolvedor de configuración | REQ-CONF-01 a REQ-CONF-123 y REQ-MAN-01 a REQ-MAN-88 |
+| Toda probabilidad, frecuencia y tolerancia general es un `f64` finito válido; las colecciones se suman y normalizan una sola vez con Neumaier y orden canónico, y conservan auditoría decimal de ida/vuelta exacta | Admisión de configuración y frontera `DeclaredConfig` → `EffectiveConfig` | REQ-CONF-106/107, REQ-VAL-40, REQ-MAN-81 y ACE-105 |
 | Todo manifiesto declara versión y clase, cumple su esquema y conserva directamente el contenido REQ-MAN obligatorio | Escritor de manifiestos y validación de publicación | REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-04/17/18 |
 | Todo documento estructurado propio usa una clase inequívoca y la versión de esquema conocida `"1"`, incluidos los diagnósticos JSON; una versión distinta se rechaza antes de interpretar su contenido | Adaptadores de entrada y escritores de documentos | REQ-CONF-01/10/111 a REQ-CONF-115 y REQ-MAN-02/69/73 |
 | Las decisiones aleatorias consumen ChaCha12 locales derivados con los contextos, material binario y catálogo normativos; ningún consumidor afecta el estado de otro | Proveedor de aleatoriedad y motores consumidores | REQ-CONF-03 a REQ-CONF-08, REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
@@ -854,7 +885,7 @@ de significado.
 
 | Categoría pública mínima | Contexto que debe aportar la arquitectura | Fuente de la consecuencia funcional |
 |---|---|---|
-| Configuración o esquema | Fichero TOML, clase, versión encontrada y admitidas, campo, valor, ruta, ubicación y reglas implicadas; en duplicados, todas las ubicaciones | REQ-CONF-01 a REQ-CONF-123 y REQ-VAL-01 a REQ-VAL-51 |
+| Configuración o esquema | Fichero TOML, clase, versión, campo, valor, ruta y ubicación; en duplicados, todas las ubicaciones; en validación numérica, colección, identidad/categoría, tolerancia, orden, suma, delta, algoritmo/versión y condición incumplida | REQ-CONF-01 a REQ-CONF-123 y REQ-VAL-01 a REQ-VAL-51 |
 | Entrada o formato | Ruta, formato, posición, identificador, valor encontrado y contrato incumplido | REQ-FMT-01 a REQ-FMT-07, REQ-REF-01 a REQ-REF-23 y REQ-VAL-01 a REQ-VAL-51 |
 | Validación de dominio o biología | Entidad, generación o evento, estado previo identificable e invariante de dominio | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73, REQ-CRU-01 a REQ-CRU-45, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17, REQ-REC-01 a REQ-REC-29 y REQ-MUT-01 a REQ-MUT-15 |
 | Recursos | Estimación, medida o límite, unidad, ámbito y operación impedida | REQ-NOF-01 a REQ-NOF-08 y REQ-VAL-01 a REQ-VAL-51 |
@@ -922,7 +953,7 @@ sección solo organiza las capas técnicas de comprobación.
 | Capa | Propósito técnico | Evidencia |
 |---|---|---|
 | Dominio unitario | Probar tipos, transformaciones e invariantes sin E/S ni procesos externos | Casos TEST de cada REQ biológico y sus ACE |
-| Frontera de componente | Probar traducción de identidades, coordenadas, configuración y errores con dobles de dependencias | Vectores normativos de ambos contextos BLAKE3, raíz, material big-endian y Base32; tipos de ID no intercambiables; catálogo diagnóstico y documento JSON único; comparadores separados de verdad lógica y contenido técnico; y TEST de cada familia |
+| Frontera de componente | Probar traducción de identidades, coordenadas, configuración y errores con dobles de dependencias | Vectores normativos BLAKE3 e IDs; vectores Neumaier con orden canónico, bordes inclusivos, normalización y decimal round-trip; tipos no intercambiables; catálogo diagnóstico y JSON único; comparadores de verdad y contenido técnico; TEST de cada familia |
 | Adaptador | Comprobar lectura, escritura e invocación contra contratos externos | TOML desconocido o duplicado con ubicación; clase/versión inválida; FASTA con `samtools faidx`; SHA-256 con `sha256sum`; manifiestos, configuración efectiva y diagnósticos con otra implementación JSON Schema; `.tar.gz` por listado/extracción; descriptores OCI por inspección/arranque; VCF/BAM/CRAM en sus fases; casos válidos, truncados, corruptos y de borde |
 | Propiedad y estadística | Explorar espacios amplios sin confundir variación aleatoria con un invariante | Vectores de derivación por ámbito, independencia al añadir o reordenar observaciones y casos TEST asociados a REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
 | Recorrido completo | Demostrar que las fronteras componen un paquete trazable | Rechazo previo sin destino, fallo controlado final y SIGKILL provisional; carreras no-clobber y FS sin soporte; comparadores semánticos y de bytes; pruebas WSL2/ext4 y publicación en Ubuntu 24.04 LTS nativo y OCI fijado por digest, incluido su FS, señales, permisos, recursos y procesos externos |
@@ -1057,7 +1088,10 @@ de sus bytes; la imagen OCI se identifica por sus descriptores y un archivo OCI
 exportado tiene su propio SHA-256.
 Los diagnósticos, la publicación atómica, los escenarios iniciales y la
 validación independiente quedan fijados por DTC-044 a DTC-047. Esta arquitectura
-no selecciona silenciosamente otros crates, conversores futuros, formatos aún
+aplica además DTC-049 para `f64`, suma Neumaier, tolerancia absoluta general y
+normalización auditada de probabilidades y frecuencias; DTPD-110 solo conserva
+distribuciones y tolerancias poblacionales específicas posteriores. No se
+seleccionan silenciosamente otros crates, conversores futuros, formatos aún
 abiertos, versiones de estándares genómicos, reglas de paralelismo ni objetivos
 cuantitativos de rendimiento. Tampoco amplía la garantía a versiones del
 simulador o plataformas no verificadas ni promete identidad binaria.
