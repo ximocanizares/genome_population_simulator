@@ -7,6 +7,16 @@
 - **SHA-256 del documento revisado:** `8d72785a27cc6903a6979aac46f7a0e1d966d0ab7e769549188eac9301d4d18b`
 - **Estado:** informe para revisión; no modifica ni sustituye la especificación
 
+Este informe es diagnóstico y derivado. La cobertura REQ→ACE→fase→prueba se
+mantiene en
+[trazabilidad-requisitos-0.1.md](./trazabilidad-requisitos-0.1.md).
+Las exclusiones funcionales recuperables se centralizan en
+[registro-ampliaciones-futuras-0.1.md](./registro-ampliaciones-futuras-0.1.md).
+Los ataques, alternativas y decisiones históricas que siguen explican cómo se
+cerraron ambigüedades, pero no constituyen requisitos ni compiten con la sección
+4 de la especificación. Si una formulación histórica difiere del contrato
+vigente, se corrige este informe y prevalece el REQ correspondiente.
+
 ## 1. Objetivo y método
 
 Esta revisión intenta romper el contrato funcional antes de implementarlo. No
@@ -34,26 +44,25 @@ La severidad usada es:
 
 ## 2. Resultado general
 
-La especificación contiene una base funcional extensa y útil, pero todavía no
-puede considerarse un contrato funcional cerrado. La afirmación de la sección 8
-de que no quedan decisiones funcionales abiertas es demasiado fuerte.
+La especificación contiene una base funcional extensa y útil. Tras incorporar
+las 27 decisiones y auditar de nuevo los hallazgos, no permanece abierta ninguna
+cuestión funcional para v1.
 
 La comprobación mecánica ofrece resultados positivos:
 
-- existen 730 definiciones `REQ` y no hay identificadores duplicados;
+- existen 788 definiciones `REQ` y no hay identificadores duplicados;
 - toda mención con forma `REQ-…` corresponde a un requisito definido;
-- los criterios `ACE-01` a `ACE-106` forman una secuencia completa, sin saltos
+- los criterios `ACE-01` a `ACE-111` forman una secuencia completa, sin saltos
   ni duplicados;
 - la separación entre verdad genotípica y evidencia técnica está expresada de
   forma consistente en la mayor parte del documento;
 - la independencia de los conjuntos referidos a genomas distintos está
   reiterada y resulta inequívoca como intención general.
 
-Los riesgos se concentran en la interacción entre requisitos. Los casos más
-urgentes son la cobertura cuando un evento se mapea contra varias referencias,
-el alcance del fichero obligatorio de verdad, la generación aleatoria de
-variantes incompatibles, la precedencia entre configuraciones, el significado
-operativo de N y Ne, y los límites entre VCF y complemento de verdad.
+Los riesgos funcionales ya tienen contratos observables. RAD-028 queda cerrado
+tras auditar semánticamente las 788 filas de trazabilidad, RAD-031 por el
+registro auditado de ampliaciones y RAD-029 tras subordinar los resúmenes y
+documentos derivados a los REQ sin mantener contratos paralelos.
 
 ## 3. Hallazgos bloqueantes
 
@@ -77,8 +86,7 @@ realmente sigan abiertas. Distinguir la versión 0.1 del documento de la versió
 ### RAD-002. La sección 8 cierra decisiones funcionales que siguen abiertas
 
 **Evidencia:** la sección 8 declara que no queda ninguna decisión funcional
-abierta. Sin embargo, requisitos como REQ-TE-12 dejan elegir entre advertencia y
-error; REQ-REP-07 exige límites o distribuciones de descendencia sin fijar su
+abierta. Sin embargo, REQ-REP-07 exige límites o distribuciones de descendencia sin fijar su
 semántica mínima; REQ-CONF-44 permite órdenes alternativos sin enumerar todas
 las dependencias; y diversos requisitos exigen «otras distribuciones» u «otros
 modelos admitidos» sin definir un catálogo mínimo.
@@ -90,6 +98,12 @@ una opción por no pertenecer a su catálogo.
 **Decisión necesaria:** reabrir la sección 8 y trasladar a ella toda decisión
 que cambie entradas aceptadas, salidas o errores observables. Mantener en la
 sección 9 solo elecciones que no alteren el contrato funcional.
+
+**Estado: resuelto.** La decisión 17 cerró los catálogos probabilísticos y de
+repeticiones citados; la decisión 20 retiró los límites o distribuciones de
+descendencia parental; y la decisión 25 eliminó los órdenes generacionales
+alternativos de v1. La sección 8 conserva explícitas las cuestiones que siguen
+abiertas y la sección 9 se limita a elecciones técnicas.
 
 **Bloquea:** cierre de la especificación y F0.
 
@@ -138,6 +152,12 @@ que se generen eventos y FASTQ distintos.
 
 **Bloquea:** F0, F3 y F4.
 
+**Estado: resuelto.** El objetivo usa como denominador la longitud haploide de
+la referencia estructural del individuo, sumando cada secuencia una sola vez y
+sin ploidía. Haplotipos y referencias de mapeo no lo cambian. El mismo FASTQ se
+mapea contra todas las referencias y su cobertura alineada es una observación,
+no otro objetivo.
+
 ### RAD-005. El alcance del fichero obligatorio de verdad es contradictorio
 
 **Evidencia:** REQ-SAL-02 y la tabla de salidas hablan del estado completo de
@@ -178,7 +198,13 @@ de operaciones debe ser cerrada y coherente en todas las secciones.
 
 **Bloquea:** F2 y F5.
 
-### RAD-007. No se define la biología de los símbolos IUPAC ambiguos
+**Estado: resuelto.** V1 elimina los elementos transponibles como clase
+funcional. No admite catálogos, familias, mecanismos, destinos, identidad ni
+metadatos TE. Una región preexistente copiada es una duplicación segmentaria
+genérica; una secuencia nueva es una inserción genérica; un FASTA real se trata
+como bases sin anotación TE. Todo modelado específico se aplaza.
+
+### RAD-007. [RESUELTO] No se define la biología de los símbolos IUPAC ambiguos
 
 **Evidencia:** REQ-REF-14 admite R, Y, S, W, K, M, B, D, H, V y N en un FASTA
 real. Después, el simulador debe crear haplotipos, mutaciones, lecturas, alelos
@@ -193,7 +219,13 @@ concreta.
 **Decisión necesaria:** definir para cada operación si las bases ambiguas se
 preservan, se enmascaran, se excluyen del espacio válido o se resuelven mediante
 una decisión aleatoria trazable. Debe quedar definido qué REF se permite emitir
-y cómo afectan a cobertura, variantes y calibración.
+y cómo afectan a cobertura y variantes.
+
+**Estado: resuelto.** V1 solo admite A/C/G/T/N y la pregunta 27 fija `N` como
+base desconocida que siempre se conserva. SNP, selección y motivos repetidos la
+excluyen; las operaciones estructurales pueden transportarla; WGS la representa
+con Phred 0, GC la excluye y cobertura la cuenta; VCF nunca emite un SNP con
+`REF=N` ni inventa una base y usa complemento cuando haga falta.
 
 **Bloquea:** F2 y F3.
 
@@ -217,7 +249,16 @@ indicarse qué número se registra como muestreado, aceptado y finalmente activo
 
 **Bloquea:** F2 y F5.
 
-### RAD-009. No existe un orden total de precedencia entre todos los ámbitos configurables
+**Estado: resuelto.** En v1 se aplican primero los eventos explícitos en su
+orden declarado. Después se sortean los recuentos por clase y se procesan, en
+orden fijo, duplicaciones, deleciones, inversiones, translocaciones,
+repeticiones en tándem, *indels* y SNP. Cada evento se elige solo entre destinos
+válidos en el estado actual y actualiza ese espacio; no se reintentan candidatos
+inválidos ni existe un límite de intentos. Si faltan destinos para completar el
+recuento, la generación falla sin reducción silenciosa ni advertencia y registra
+los números sorteado, aceptado antes del fallo y finalmente activo.
+
+### RAD-009. Precedencia entre ámbitos configurables
 
 **Evidencia:** se definen precedencias global, por secuencia, región e individuo,
 y en otros lugares por población, subpoblación, fase, generación y locus. Se
@@ -230,12 +271,13 @@ su locus está dentro de una región específica y la fase redefine el mismo
 parámetro. No puede saberse cuál prevalece. Dos esquemas de configuración pueden
 resolverlo de forma distinta sin contradecir una regla local.
 
-**Decisión necesaria:** crear una matriz normativa por familia de parámetros con
-origen permitido, precedencia, herencia temporal, regla de empate y error por
-conflicto. Definir también qué significa que dos valores del mismo nivel sean
-«compatibles».
+**Decisión aceptada:** REQ-CONF-116 a REQ-CONF-123 definen regla base,
+selectores por familia, jerarquías internas y dominancia parcial. No hay
+prioridad implícita entre ejes: varias máximas incomparables se rechazan aunque
+coincidan en valor. También se rechazan duplicados exactos, regiones solapadas y
+selectores no permitidos; REQ-VAL-51 y ACE-111 hacen observable el contrato.
 
-**Bloquea:** F0 y F1.
+**Estado:** Resuelto.
 
 ### RAD-010. N objetivo y Ne objetivo pueden quedar funcionalmente sin efecto
 
@@ -257,6 +299,13 @@ no aplicó el objetivo.
 
 **Bloquea:** arquitectura del motor poblacional y F7.
 
+**Estado: resuelto.** N objetivo fija exactamente los intentos reproductivos;
+cada éxito crea un descendiente y cada fallo conserva una causa. Los parentales
+pueden reutilizarse sin límite. Una imposibilidad previa se rechaza y una
+aleatoria conserva los descendientes, la desviación y el aviso; N=0 aplica su
+política específica. Ne objetivo se rechaza en v1 y Ne realizado se registra
+cuando es evaluable.
+
 ### RAD-011. El VCF debe contener toda la verdad y a la vez puede delegarla al complemento
 
 **Evidencia:** REQ-VER-22 exige que el propio VCF exponga sin pérdida motivo,
@@ -274,6 +323,13 @@ duplicarse. Sustituir «el propio VCF» por una regla inequívoca sobre el par
 VCF–complemento si esa es la intención.
 
 **Bloquea:** F2, F3 y F5.
+
+**Estado: resuelto.** El VCF conserva una representación estándar válida e
+interoperable y expone todo lo que admita sin pérdida la versión oficial
+seleccionada. Cuando falta detalle, todos los registros aplicables enlazan
+mediante campos `INFO` declarados la única entrada complementaria del caso. El
+complemento, no el manifiesto, conserva lo perdido; la verdad estructurada
+obligatoria sigue siendo la fuente canónica completa.
 
 ### RAD-012. No está definido si una población puede mezclar referencias estructurales
 
@@ -326,6 +382,12 @@ SV, o solo a posiciones válidas para cada clase. Tampoco define cómo cambia el
 denominador tras deleciones y duplicaciones. Debe fijarse antes de F7 para que la
 media esperada sea reproducible y comparable.
 
+**Estado: resuelto.** Cada clase cuenta sus
+oportunidades válidas en todas las copias haplotípicas descendientes actuales y
+usa tasa×oportunidades como media Poisson. Ploidía, duplicaciones y deleciones
+modifican el espacio; destinos condicionados no multiplican el denominador. La
+pregunta 27 define además cuándo `N` queda excluida sin reabrir el denominador.
+
 ### RAD-015. La selección tiene casos matemáticos y de identidad de locus sin resultado
 
 REQ-SEL-13 normaliza por la aptitud máxima, pero no resuelve el caso en que todas
@@ -333,6 +395,12 @@ las aptitudes sean cero. Además, un locus ligado a una referencia estructural
 puede estar eliminado, duplicado o ser ambiguo en individuos basados en otra
 estructura. Deben definirse la respuesta a máximo cero y la semántica de
 genotipo o dosis del locus en esos casos antes de F7.
+
+**Estado: resuelto.** V1 usa un único SNP bialélico identificado y protegido,
+presente una vez por copia aplicable, y exige valores para todas las dosis. Los
+eventos incompatibles se rechazan o excluyen del espacio aleatorio. Una
+identidad, dosis o aptitud inválida, o un máximo cero, detiene antes de
+supervivencia y no se interpreta como extinción.
 
 ### RAD-016. Las unidades de contaminación no tienen conversión ni redondeo común
 
@@ -351,6 +419,11 @@ El documento usa «cobertura objetivo», «realizada» y «final» sin una tabla
 indique en qué etapa se mide cada una. Deben definirse al menos cobertura WGS
 básica, posterior a sesgos, posterior a contaminación/demultiplexado y observada
 tras mapeo, sin convertirlas en un único valor.
+
+**Estado: resuelto.** Se registran por separado la cobertura objetivo, la WGS
+básica anterior a sesgos y artefactos, la final del FASTQ después de todos los
+efectos técnicos con bases propias y contaminantes separadas y la alineada
+observada para cada referencia de mapeo.
 
 ### RAD-018. La identidad de lecturas puede colisionar o reutilizarse sin regla
 
@@ -385,6 +458,12 @@ no admite ninguna otra; otra puede considerar obligatorio un catálogo amplio.
 Cada capacidad debe indicar si v1 exige una lista mínima, un mecanismo de
 extensión futura o ambas cosas.
 
+**Estado: resuelto.** V1 admite únicamente Poisson para los recuentos de
+variantes aleatorias y el modelo escalonado simple de una unidad para mutaciones
+de repeticiones en tándem. La tasa y el sesgo entre expansión y contracción
+siguen siendo configurables. Otra distribución, otro modelo o un salto de varias
+unidades se rechazan antes de simular; las alternativas se aplazan expresamente.
+
 ### RAD-021. Hardy-Weinberg y F en poliploides no determinan una distribución única
 
 La especificación exige un modelo para ploidías mayores que dos, declara que no
@@ -393,6 +472,14 @@ condiciones no determinan por sí solas las probabilidades de todas las dosis
 intermedias ni el comportamiento de F entre cero y uno. Elegir esa fórmula
 cambia genotipos observables y no es solo una decisión interna. Debe aprobarse
 el modelo funcional y ejemplos numéricos antes de F6.
+
+**Estado: resuelto.** V1 separa Hardy-Weinberg del modelo automático F. HWE usa
+la distribución binomial bialélica o multinomial multialélica para ploidías
+1–10. F automático se limita a diploides, con fórmulas bialélicas y
+multialélicas explícitas; se rechaza en ploidía 1 o mayor que 2. Una distribución
+explícita prevalece localmente. F realizado solo se calcula en diploides y se
+registra como «no aplicable» en las demás ploidías. Los modelos F poliploides se
+aplazan.
 
 ### RAD-022. «Compatibilidad estructural» y transmisión de secuencias no reproductivas son vagas
 
@@ -404,6 +491,17 @@ qué ocurre si no pueden formarse todos los bivalentes. Tampoco queda claro si u
 rechazo general de REQ-CRU-24. Debe existir una tabla por tipo estructural,
 ploidía y clase de secuencia antes de F5–F8.
 
+**Estado: resuelto.** V1 solo reproduce secuencias de ploidía par 2–10, igual en
+los parentales, y exige que todas sus copias tengan los mismos segmentos
+estructurales, orden, orientación, número de copias y puntos de ruptura. SNP,
+*indels* pequeños y repeticiones pueden diferir. Cualquier SV heterocigota o
+diferencia estructural invalida al individuo o pareja completos; una SV fijada
+idéntica se admite aunque proceda de historias distintas. Los bivalentes se
+forman al azar y los *scaffolds* sin recombinación transmiten copias intactas.
+Una SV de novo se conserva, pero hace incompatible a su portador para un uso
+parental posterior mientras no cumpla el invariante. La compatibilidad parcial
+queda futura.
+
 ### RAD-023. La relación entre un evento complejo, sus registros VCF y el complemento no tiene cardinalidad
 
 Una translocación puede requerir varios BND y una variante compleja puede
@@ -412,6 +510,13 @@ producir varios registros. REQ-VER-25 habla de un identificador compartido con
 sea posible. Falta definir relaciones uno-a-uno, uno-a-varios y varios-a-uno,
 además de una normalización canónica suficiente para cumplir REQ-VER-46 entre
 eventos. Debe cerrarse antes de F3 y F5.
+
+**Estado: resuelto.** Un caso de verdad produce uno o varios registros VCF y,
+solo si pierde detalle, exactamente una entrada complementaria. Todos los
+registros que necesiten ese detalle enlazan la misma entrada y cada registro
+enlazado pertenece a un solo caso. Una nueva adyacencia usa normalmente dos BND;
+una translocación recíproca puede contener dos adyacencias y necesitar cuatro,
+sin una cardinalidad universal por translocación.
 
 ### RAD-024. La calibración empírica es obligatoria como capacidad, pero no tiene resultado mínimo verificable
 
@@ -422,6 +527,13 @@ insuficiente es advertencia o error ni qué significa que un perfil sea válido
 para reutilizarlo. Es una capacidad funcional amplia que necesita un contrato
 mínimo antes de F4.
 
+**Estado: resuelto.** La calibración empírica automática se aplaza por completo
+fuera de v1. No se aceptan FASTQ y referencia de calibración ni perfiles
+empíricos reutilizables, no se infieren tecnología o parámetros y no se genera
+el artefacto. Esos campos se rechazan antes de simular. Los perfiles
+incorporados de Illumina y PacBio HiFi y sus sustituciones explícitas se
+mantienen.
+
 ### RAD-025. Las validaciones estadísticas aún no pueden aceptar ni rechazar una ejecución
 
 Expresiones como «aproximadamente Poisson», «compatible dentro de tolerancias»,
@@ -430,6 +542,13 @@ requisitos obligatorios. La sección 9 aplaza métricas y tolerancias, pero esta
 determinan advertencias, errores y éxito observable. Debe aprobarse por cada
 comprobación el ámbito, estadístico, tamaño mínimo, tolerancia y consecuencia
 antes de implementar la fase correspondiente.
+
+**Estado: resuelto.** V1 separa invariantes deterministas de magnitudes
+aleatorias. Las incoherencias exactas detienen el ámbito afectado. Cobertura,
+soporte alélico y tasas realizadas se informan sin tolerancias de aceptación ni
+opción de elevarlas a error; una medida no calculable figura como «no evaluable»
+con causa. Tras la decisión 20, solo N conserva su aviso específico no
+invalidante; Ne no tiene objetivo en v1.
 
 ### RAD-026. Las sustituciones por individuo abarcan entidades que todavía no existen
 
@@ -440,6 +559,13 @@ aclara qué parámetros admiten realmente sustitución individual, cómo se nomb
 un descendiente futuro ni si la regla pretende limitarse a fundadores,
 individuos directos o selecciones declarativas. Debe acotarse en F1, F7 y F8.
 
+**Estado: resuelto.** En v1, una sustitución por identificador individual solo
+puede dirigirse a un individuo directo, fundador o parental expreso ya existente
+durante la validación. Un identificador inexistente es un error. Los
+descendientes futuros usan sus ámbitos poblacional, temporal y espacial, y
+seleccionarlos después no modifica retroactivamente su creación. Las reglas para
+descendientes futuros y la preasignación de sus identificadores se aplazan.
+
 ## 5. Hallazgos de severidad media
 
 ### RAD-027. «Evento», «experimento», «tanda» y «carril» necesitan un modelo cardinal explícito
@@ -449,13 +575,27 @@ de experimentos que contienen varias bibliotecas, tandas o carriles. Una tabla
 de entidades y cardinalidades evitaría diferencias en directorios, subsemillas,
 perfiles, grupos de lectura y manifiestos.
 
+**Estado: resuelto.** En v1, el evento que genera FASTQ, BAM o CRAM es también
+su único experimento de secuenciación y no recibe otra identidad. Contiene una
+única tanda y exactamente una biblioteca y un grupo de lectura por individuo.
+Todas las bibliotecas se procesan conjuntamente. Otra biblioteca, tanda, perfil,
+tecnología o control requiere otro evento. Los carriles y las cardinalidades
+mayores se aplazan.
+
 ### RAD-028. Los criterios de aceptación no trazan cada obligación
 
-Los 730 requisitos se condensan en 106 criterios cualitativos. Muchos `ACE`
+Los 770 requisitos se condensan en 109 criterios cualitativos. Muchos `ACE`
 agrupan decenas de obligaciones y no indican los `REQ` que cubren. Conviene crear
 una matriz `REQ → ACE → fase → prueba`, permitir varios casos por requisito y
 detectar requisitos sin evidencia. Los `ACE` actuales pueden conservarse como
 escenarios de alto nivel.
+
+**Estado: resuelto.**
+[trazabilidad-requisitos-0.1.md](./trazabilidad-requisitos-0.1.md) cubre los 788
+REQ mediante 788 filas explícitas, sin huecos mecánicos. Dos auditorías
+complementarias revisaron 412 y 376 filas y corrigieron asignaciones ACE, hitos
+y evidencias falsas o genéricas. Cada fila conserva un TEST planificado; ninguna
+se presenta como prueba ejecutada.
 
 ### RAD-029. El mismo contrato está repetido en demasiadas secciones normativas
 
@@ -465,15 +605,27 @@ terminología. Debe declararse qué sección es normativa cuando dos redacciones
 difieran y convertir el flujo y las tablas en resúmenes referenciados, no en una
 segunda fuente de requisitos.
 
-### RAD-030. La trazabilidad exhaustiva puede contradecir la prioridad de escala
+**Estado: resuelto.** La sección 4 de la especificación es la única fuente
+normativa. Sus secciones 5–6 son ahora mapas conceptuales derivados que remiten
+a rangos REQ y ACE sin repetir valores, cardinalidades, órdenes, errores ni
+excepciones. Las secciones 7–12 de arquitectura conservan componentes,
+fronteras, estados, dirección de dependencias y estrategia técnica, y remiten al
+contrato funcional exacto cuando describen un efecto observable. Este informe
+se declara histórico y no normativo. Los ACE conservan solo evidencia de
+aceptación y los DTC la justificación técnica, ambos subordinados al REQ.
+
+### RAD-030. [RESUELTO] La trazabilidad exhaustiva puede contradecir la prioridad de escala
 
 El manifiesto relaciona cada individuo histórico; la verdad técnica conserva
 información por lectura; los muestreos trazan segmentos hasta fundadores; y los
 cruces guardan todos los individuos intermedios. Todo es coherente con ejemplos
 pequeños, pero puede dominar memoria y almacenamiento en poblaciones grandes.
-Antes de F9 debe distinguirse qué información debe estar indexada y consultable,
-qué puede transmitirse como flujo, y qué agregados son suficientes sin perder
-la verdad obligatoria.
+La pregunta 26 fija un único contrato obligatorio: evolución materializa los
+estados completos inicial, final y solicitados y resume las generaciones
+restantes; familias materializa todos sus individuos; cada lectura final
+conserva detalle y los descartes solo agregados. La representación interna puede
+optimizarse, pero la escala no reduce el contrato: un presupuesto insuficiente
+se rechaza antes de simular.
 
 ### RAD-031. Los requisitos futuros no siempre tienen un destino recuperable
 
@@ -483,6 +635,14 @@ futuro que preserve el motivo del aplazamiento y los requisitos afectados, en
 especial ploidías impares reproductivas, cromosomas sexuales, multivalentes,
 selección adicional, tecnologías aplazadas y protocolos no WGS.
 
+**Estado: resuelto.**
+[registro-ampliaciones-futuras-0.1.md](./registro-ampliaciones-futuras-0.1.md)
+conserva DTF-001..036 con fuente, motivo/estado, destino post-v1 y dependencias;
+distingue estas ampliaciones funcionales de DTP/DTPD. La auditoría clasificó
+291 apariciones: 142 DTF, 16 DTP, 36 DTPD y 97 históricas o diagnósticas. Los
+trece grupos antes huérfanos se incorporaron como DTF-024..036; quedan cero
+exclusiones funcionales futuras huérfanas.
+
 ### RAD-032. La semántica de identificador FASTA e integridad de entradas queda demasiado tarde
 
 Se exigen identificadores de secuencia únicos, pero no se define si el
@@ -491,6 +651,50 @@ se exige aún una huella de las entradas en el contrato de reproducibilidad,
 aunque el manifiesto prevé datos de integridad. Esta decisión puede ser técnica,
 pero debe cerrarse antes de aceptar FASTA, FASTQ, mapas o catálogos reales en
 F1–F4.
+
+### 5.1. Auditoría vigente de los 32 hallazgos
+
+Esta clasificación contrasta cada ataque con los requisitos y criterios
+vigentes. «Resuelto» exige una regla observable; una pregunta marcada como
+hecha no basta por sí sola.
+
+| RAD | Estado auditado | Evidencia vigente breve |
+|---|---|---|
+| RAD-001 | Resuelto | La cabecera de la especificación y DTC-001 confirman Rust para el núcleo y distinguen documento 0.1, producto v1 y decisiones técnicas pendientes |
+| RAD-002 | Resuelto | La sección 8 declara cerradas las 27 decisiones funcionales y limita las elecciones restantes a planificación sin cambiar el contrato |
+| RAD-003 | Resuelto | REQ-CONF-101 exige evento explícito para toda observación, interpreta cero eventos como cero salidas asociadas y REQ-CONF-102/103 permite verdad o VCF sin entidades técnicas |
+| RAD-004 | Resuelto | REQ-WGS-04/11 fija la longitud haploide estructural como único denominador y separa la cobertura alineada por referencia; REQ-DAT-22 reutiliza el mismo FASTQ |
+| RAD-005 | Resuelto | REQ-SAL-02 enumera el estado completo por vía; REQ-REC-11/12 limita el linaje evolutivo exportado y REQ-CRU-15 materializa todas las familias |
+| RAD-006 | Resuelto | REQ-TE-01..14 están retirados y DTC-019 reclasifica copias e inserciones mediante operaciones genéricas |
+| RAD-007 | Resuelto | REQ-REF-14/23, REQ-IND-58/59, REQ-DAT-72/73, REQ-WGS-14 y REQ-VER-47 fijan alfabeto y semántica completa de `N` |
+| RAD-008 | Resuelto | REQ-IND-54..57 fija explícitos primero, orden de clases, espacio válido actualizado, ausencia de reintentos y fallo por insuficiencia |
+| RAD-009 | Resuelto | REQ-CONF-116..123 fija matriz por familias, jerarquías internas, dominancia, conflictos, solapamientos, separación biológica/técnica y procedencia; REQ-VAL-51 y ACE-111 lo verifican |
+| RAD-010 | Resuelto | REQ-REP-08..16/26 convierte N objetivo en intentos trazables, rechaza imposibilidad previa y retira Ne objetivo; Ne realizado conserva resultado o causa |
+| RAD-011 | Resuelto | REQ-VER-19..26 separa VCF estándar interoperable, complemento único cuando hay pérdida y verdad estructurada canónica |
+| RAD-012 | Resuelto | REQ-IND-53, REQ-MIG-09 y REQ-CRU-44 exigen una referencia estructural común por unidad reproductiva y rechazan mezclas antes de reproducir |
+| RAD-013 | Resuelto | REQ-SAL-21..26 define estados, publicación atómica, conservación de conjuntos independientes y ausencia de resultados publicados tras fallo previo |
+| RAD-014 | Resuelto | REQ-MUT-01 y REQ-MUT-13..15 definen oportunidades actuales por clase, copia y ámbito, incluidos los casos de `N` |
+| RAD-015 | Resuelto | REQ-SEL-01..17 fija identidad, dosis, protección, aptitud válida y error previo ante máximo cero o locus ambiguo |
+| RAD-016 | Resuelto | REQ-CONT-15/16 fija momento, denominador, unidades completas, redondeo conjunto, empates y fallo si no existe asignación válida |
+| RAD-017 | Resuelto | REQ-WGS-11 separa objetivo, WGS básica, FASTQ final y cobertura alineada por referencia, con bases propias y contaminantes |
+| RAD-018 | Resuelto | REQ-DAT-68..71 fija unicidad por evento, copia biológica, transferencia técnica y rechazo de colisiones sin renombrado incoherente |
+| RAD-019 | Resuelto | REQ-CONF-111..115 separa reproducción biológica, técnica, equivalencia semántica e identidad binaria y REQ-MAN-69 registra sus condiciones |
+| RAD-020 | Resuelto | REQ-CONF-25/61 y REQ-VAL-48 limitan v1 a Poisson y salto unitario, y rechazan alternativas antes de simular |
+| RAD-021 | Resuelto | REQ-EVO-33/34 y REQ-EVO-46..52 fijan HWE en ploidía 1–10, F automático solo diploide y F realizado no aplicable fuera de diploides |
+| RAD-022 | Resuelto | REQ-CRU-23..31 y REQ-REC-03..08 exigen ploidía par igual y estado estructural canónico idéntico, sin compatibilidad parcial |
+| RAD-023 | Resuelto | REQ-VER-24..26 y REQ-VER-42 fijan caso→uno o varios registros→cero o una entrada, incluida la cardinalidad BND por adyacencia |
+| RAD-024 | Resuelto | REQ-CONF-85..87, REQ-DAT-41..45 y REQ-SAL-10 retirados rechazan calibración y perfiles empíricos en v1 |
+| RAD-025 | Resuelto | REQ-VAL-10..13 separa error determinista de informe estadístico sin tolerancias de aceptación y conserva «no evaluable» con causa |
+| RAD-026 | Resuelto | REQ-CONF-17/18 limita sustituciones individuales a entidades preexistentes y prohíbe aplicación retroactiva a descendientes |
+| RAD-027 | Resuelto | REQ-CONF-102, REQ-TEC-01..04 y REQ-RG-01..07 fijan evento/experimento, tanda, biblioteca, grupo de lectura y exclusión de carriles |
+| RAD-028 | Resuelto | Las 788 filas REQ explícitas fueron auditadas en lotes de 412 y 376; no hay huecos, ACE/hitos inexistentes ni pruebas presentadas como superadas |
+| RAD-029 | Resuelto | Especificación §§5–6 son mapas derivados; arquitectura §§7–12 conserva solo composición técnica con referencias REQ/ACE; el informe histórico se declara no normativo |
+| RAD-030 | Resuelto | REQ-SAL-02/16, REQ-DAT-40, REQ-MAN-16/26/84 y REQ-NOF-05/06 fijan un contrato único y rechazo previo sin degradación |
+| RAD-031 | Resuelto | DTF-001..036 y la auditoría de 291 apariciones dejan 0 exclusiones funcionales futuras huérfanas y separan DTP/DTPD técnicos |
+| RAD-032 | Resuelto | REQ-REF-13 y REQ-VAL-45 usan el primer elemento de cabecera; REQ-MAN-76 exige sumas de los ficheros enlazados, incluidas copias de entradas |
+
+No queda ninguna cuestión funcional abierta ni ningún hallazgo RAD pendiente.
+RAD-028, RAD-029 y RAD-031 quedan resueltos con evidencia documental auditable.
 
 ## 6. Casos adversariales mínimos que deberían añadirse
 
@@ -510,11 +714,18 @@ Estos casos no eligen la solución. Fuerzan a que la decisión quede observable.
 7. Una población con individuos basados en referencias que difieren por una
    inversión y un locus seleccionado dentro de ella.
 8. Una función de selección que asigna aptitud cero a todos los genotipos.
-9. Un Ne objetivo incompatible con los límites de descendencia, y otro posible
-   pero difícil de aproximar.
-10. Una repetición compleja cuya pureza e interrupciones no caben completamente
-    en un único registro VCF.
-11. Una translocación que necesita varios BND y un único caso complementario.
+9. Una generación que completa sus N intentos con N descendientes; otra con
+   éxitos parciales y fallos aleatorios trazados; una imposibilidad detectable
+   antes de simular; un N realizado igual a 0 bajo cada política; y una
+   configuración con Ne objetivo rechazada, mientras Ne realizado se registra
+   o queda «no evaluable» con causa.
+10. Un caso completamente representable sin complemento y una repetición
+    compleja representada por un registro VCF más una entrada complementaria;
+    todos sus campos `INFO` adicionales están declarados en la cabecera.
+11. Una nueva adyacencia representada por dos BND más una entrada complementaria
+    y una translocación recíproca representada por los cuatro BND de sus dos
+    adyacencias más una sola entrada. El mismo evento contra dos referencias
+    produce VCF y espacios de identificadores separados.
 12. Contaminación combinada como porcentaje, cobertura y número de parejas, con
     redondeos que compiten por las últimas lecturas disponibles.
 13. La misma lectura biológica copiada a dos receptoras y posteriormente
@@ -523,38 +734,64 @@ Estos casos no eligen la solución. Fuerzan a que la decisión quede observable.
     conjunto ya generado correctamente.
 15. Una generación evolutiva no guardada por completo que sea ancestro de un
     individuo muestreado varias generaciones después.
+16. Una configuración de recuentos aleatorios con Poisson reproducible y otra
+    que solicita binomial negativa y se rechaza identificando parámetro y valor.
+17. Dos mutaciones de repetición en tándem, una expansión y una contracción de
+    una unidad, y una tercera que solicita un salto de dos unidades y se rechaza.
+18. Tres configuraciones que aportan, respectivamente, FASTQ y referencia de
+    calibración, una solicitud de estimación y un perfil empírico reutilizable:
+    todas se rechazan antes de simular identificando el campo. Una ejecución con
+    un perfil incorporado y sustituciones permitidas completa sin generar ni
+    enlazar ningún artefacto de perfil empírico.
+19. Una cobertura aleatoria muy desviada se informa y permite completar; una
+    lectura con procedencia imposible hace fallar su ámbito; una métrica sin
+    unidades suficientes figura como «no evaluable» con causa; y N desviado
+    produce su aviso no invalidante.
+20. Para una misma tasa, comparar una, dos y cuatro copias haplotípicas; una
+    región duplicada y otra eliminada; dos regiones configuradas solapadas; y un
+    evento con destino o extremos condicionados. Comprobar además que dos copias
+    actuales del mismo locus repetido aportan dos oportunidades.
+21. Un SNP bialélico seleccionado válido en varias ploidías; un evento explícito
+    solapante rechazado y uno aleatorio que nunca lo elige; máximo cero y
+    aptitudes negativa o no finita; locus ausente o duplicado; y una
+    recombinación que transmite el locus conservando su identidad única.
+22. Inicializaciones HWE haploide, diploide y poliploide, bialélicas y
+    multialélicas; F diploide igual a 0, intermedio e igual a 1; F rechazado en
+    P=1 y P>2; distribución explícita poliploide que prevalece; y F realizado
+    «no aplicable» fuera de diploides.
+23. Parentales diploides y tetraploides estructuralmente idénticos; SNP,
+    *indels* pequeños y repeticiones distintos que se admiten; una deleción,
+    duplicación, inversión, inserción estructural y translocación heterocigotas
+    que se rechazan; una SV fijada idéntica que se admite; ploidía impar y
+    desigual; un *scaffold* sin recombinación; y una SV de novo cuyo portador se
+    intenta usar después como parental.
+24. Una generación con las ocho etapas aplicadas; otra con una etapa opcional
+    omitida en su posición; una configuración con orden alternativo rechazada;
+    varios eventos demográficos con orden interno explícito; y un historial que
+    distingue etapas aplicadas y omitidas y conserva ambos órdenes.
+25. Una evolución con una generación solicitada y otra no materializada; una
+    familia cuyos individuos intermedios se conservan íntegramente; una lectura
+    final reconstruible y una descartada representada solo en agregados; y un
+    preflight cuyo presupuesto insuficiente rechaza sin reducir trazabilidad ni
+    salidas. El manifiesto enumera los individuos materializados y de familias,
+    pero no listas completas de generaciones evolutivas resumidas.
+26. Un SNP explícito sobre `N` y un motivo repetido con `N` rechazados; una SV
+    que contiene `N`; inserciones aleatoria y explícita; herencia y recombinación;
+    una lectura con `N` y Phred 0; una ventana compuesta solo por `N`; cobertura
+    que la cuenta; un caso VCF/complemento; y la comprobación de que ninguna
+    operación resolvió ni creó `N` silenciosamente.
 
-## 7. Orden recomendado de resolución
+## 7. Estado del orden de resolución
 
-Antes de cerrar F0:
-
-1. RAD-001, RAD-002 y RAD-029: fijar las fuentes normativas y el estado real de
-   las decisiones.
-2. RAD-003, RAD-004, RAD-005, RAD-009, RAD-012 y RAD-013: cerrar el modelo de
-   ejecución, referencias, verdad, configuración y fallos.
-3. RAD-019 y RAD-027: fijar el contrato de reproducibilidad y las entidades
-   técnicas.
-
-Antes de F2–F5:
-
-1. RAD-006, RAD-007 y RAD-008: cerrar referencias, ambigüedad y colisiones.
-2. RAD-011, RAD-018 y RAD-023: cerrar la relación entre verdad, lecturas, VCF y
-   complemento.
-3. RAD-016, RAD-017, RAD-024 y RAD-025: definir magnitudes y aceptación del
-   realismo técnico.
-
-Antes de F6–F8:
-
-1. RAD-010, RAD-014, RAD-015, RAD-021 y RAD-022: cerrar el significado
-   cuantitativo de población, selección, recombinación y poliploidía.
-2. RAD-020 y RAD-026: delimitar catálogos y ámbitos configurables de v1.
+Las acciones funcionales y documentales recomendadas por este informe están
+incorporadas. Las fases de implementación deben convertir la evidencia
+planificada de la matriz de trazabilidad en pruebas sin alterar los REQ.
 
 ## 8. Conclusión
 
 No se recomienda reducir el alcance de manera automática a partir de este
-informe. Sí se recomienda corregir primero las contradicciones que impiden saber
-qué resultado es válido y convertir las decisiones funcionales restantes en
-preguntas explícitas.
+informe. Las contradicciones funcionales identificadas ya tienen una decisión
+observable para v1.
 
 La especificación puede seguir siendo la base del proyecto. Para considerarla
 cerrada deberá permitir que, ante cada caso adversarial anterior, exista una
@@ -562,23 +799,22 @@ cerrada deberá permitir que, ante cada caso adversarial anterior, exista una
 
 Tras contrastar este informe con las decisiones posteriores, se ha corregido
 RAD-001 en la especificación. También se han corregido la declaración de cierre
-de RAD-002 y la ausencia de prioridad normativa de RAD-029. Las decisiones 1,
-2, 5, 6, 9, 11, 15 y 16 de la sección siguiente se han aceptado e incorporado a
-la especificación; RAD-003, RAD-005, RAD-013, RAD-016, RAD-018, RAD-019 y la
-semántica funcional del identificador FASTA de RAD-032 quedan resueltos.
-RAD-007 queda resuelto respecto al alfabeto permitido, pero mantiene pendiente
-el tratamiento operativo de N. RAD-028 y RAD-031 continúan como mejoras
-documentales: crear una matriz de trazabilidad y un registro recuperable de
-ampliaciones futuras no exige elegir ahora un comportamiento del simulador. Los
-demás hallazgos que cambian resultados, entradas aceptadas o errores se plantean
-a continuación sin presuponer una respuesta.
+de RAD-002 y la ausencia de prioridad normativa de RAD-029. Las decisiones 1 a
+27 de la sección siguiente se han aceptado e
+incorporado a la especificación; RAD-002, RAD-003, RAD-004, RAD-005, RAD-012, RAD-013,
+RAD-006, RAD-007, RAD-008, RAD-011, RAD-016, RAD-017, RAD-018,
+RAD-009, RAD-010, RAD-014, RAD-015, RAD-019, RAD-020, RAD-021, RAD-022, RAD-023, RAD-024, RAD-025, RAD-026, RAD-027, RAD-030 y RAD-032 quedan resueltos.
+RAD-028 y RAD-031 quedan resueltos mediante la matriz auditada y el registro de
+expresiones diferidas. RAD-029 queda resuelto al sustituir los focos extensos
+por mapas derivados, limitar la arquitectura a decisiones técnicas y declarar
+este historial no normativo. No queda ninguna cuestión funcional abierta. Las
+decisiones aceptadas se conservan a continuación para mantener su trazabilidad.
 
-## Decisiones pendientes de valoración
+## Registro de decisiones valoradas
 
-Las preguntas se ordenan por la primera fase que bloquean. Las marcadas como
-**HECHA** contienen una decisión aceptada e incorporada a la especificación; las
-demás conservan una **propuesta** que todavía no es una decisión vigente. La
-numeración se mantiene estable para conservar la trazabilidad de la revisión.
+Las preguntas se ordenan por la primera fase que bloqueaban. Todas están
+marcadas como **HECHA** y conservan la decisión aceptada incorporada a la
+especificación. La numeración se mantiene estable para conservar trazabilidad.
 
 ### Antes de F0 y F1
 
@@ -613,7 +849,7 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
    muestreos solicitados, con historial resumido del resto; en familias, todos
    los individuos de todos los eventos y poblaciones intermedias.
 
-3. **¿Cuál es la precedencia total entre ámbitos configurables?** (RAD-009;
+3. **[HECHA] ¿Cuál es la precedencia total entre ámbitos configurables?** (RAD-009;
    REQ-CONF-18, REQ-CONF-29 a REQ-CONF-34, REQ-CONF-62, REQ-CONF-73 y
    REQ-CONF-84; ACE-10 y ACE-17).
    **Contexto:** pueden coincidir valores globales, poblacionales, por
@@ -621,12 +857,19 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
    **Opciones:** un orden total común; una matriz de precedencias por familia de
    parámetros; o prohibir combinaciones de ejes no enumeradas. **Consecuencias:**
    cambia el valor efectivo o el rechazo de una misma configuración.
-   **Propuesta:** aprobar una matriz por familia, con procedencia permitida,
-   herencia temporal, empate y conflicto explícitos.
+   **Decisión aceptada:** cada familia enumera sus ejes permitidos. Dentro de un
+   eje rigen las jerarquías de REQ-CONF-117, sin prioridad entre ejes distintos.
+   Las reglas aplicables se resuelven por dominancia: una única máxima gana y
+   varias máximas incomparables se rechazan, aunque coincidan en valor. También
+   se rechazan duplicados, regiones solapadas y selectores no permitidos. Una
+   regla combinada puede dominar reglas parciales. La configuración efectiva y
+   el manifiesto conservan regla ganadora, selectores y procedencia; un evento
+   técnico nunca sustituye parámetros biológicos.
 
-4. **¿Puede una unidad reproductiva mezclar individuos basados en referencias
+4. **[HECHA] ¿Puede una unidad reproductiva mezclar individuos basados en referencias
    estructurales distintas?** (RAD-012; REQ-IND-02 y requisitos de selección,
-   recombinación, migración y cruces; ACE-82, ACE-85, ACE-88 y ACE-97).
+   recombinación, migración y cruces; ACE-82, ACE-83, ACE-85, ACE-88 y
+   ACE-97).
    **Contexto:** mapear contra varias referencias no define cómo reproducir
    estructuras diferentes. **Opciones:** prohibir la mezcla en v1; admitir solo
    clases de diferencias declaradas compatibles; o definir referencia de la
@@ -634,6 +877,13 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
    afecta poblaciones válidas, genotipos y reproducción. **Propuesta:** prohibir
    en v1 la mezcla dentro de una unidad reproductiva y mantener independiente
    el mapeo contra varias referencias.
+   **Decisión aceptada:** en v1, todos los individuos de una unidad reproductiva
+   deben usar la misma referencia estructural. La regla se aplica a los
+   conjuntos reproductores de las subpoblaciones, los cruces y los eventos
+   demográficos o migratorios que los formen. Las unidades reproductivamente
+   aisladas pueden usar referencias distintas y un individuo puede mapearse
+   contra varias referencias. La reproducción entre referencias estructurales
+   distintas se aplaza a futuras implementaciones.
 
 5. **[HECHA] ¿Cuál es la unidad atómica ante un fallo?** (RAD-013; REQ-FMT-04,
    REQ-FMT-07, REQ-SAL-05 y REQ-MAN-73; ACE-94).
@@ -666,7 +916,7 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
    y dependencias aplicables; la equivalencia semántica solo se declara bajo
    condiciones verificadas y no existe una garantía binaria general.
 
-7. **¿Qué cardinalidades relacionan evento, experimento, biblioteca, tanda y
+7. **[HECHA] ¿Qué cardinalidades relacionan evento, experimento, biblioteca, tanda y
    carril?** (RAD-027; REQ-CONF-101 a REQ-CONF-103, REQ-TEC-01 a REQ-TEC-04 y
    requisitos REQ-RG; ACE-93 y ACE-100).
    **Contexto:** el texto equipara a veces evento y experimento, pero admite
@@ -676,8 +926,16 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
    configuración, identificadores, grupos de lectura y manifiestos.
    **Propuesta:** usar una sola entidad técnica superior por evento y declarar
    cardinalidades exactas de sus componentes.
+   **Decisión aceptada:** en v1, un evento que genera FASTQ, BAM o CRAM es
+   también su único experimento de secuenciación, sin identidad separada. Tiene
+   exactamente una tanda y una biblioteca por individuo; todas las bibliotecas
+   se tratan conjuntamente y comparten tecnología, perfil y, cuando proceda,
+   mapeador. Cada individuo tiene un grupo de lectura y, en modo realista, un
+   FASTQ o pareja. Otra biblioteca, tanda, perfil, tecnología o control exige
+   otro evento. Un evento solo de verdad o VCF no es un experimento y no tiene
+   entidades técnicas. Los carriles y las cardinalidades mayores se aplazan.
 
-8. **¿A qué individuos pueden aplicarse sustituciones individuales?**
+8. **[HECHA] ¿A qué individuos pueden aplicarse sustituciones individuales?**
    (RAD-026; REQ-CONF-17, REQ-CONF-18 y requisitos dependientes; ACE-10).
    **Contexto:** muchos descendientes todavía no existen ni tienen identificador
    al leer la configuración. **Opciones:** limitar sustituciones a individuos
@@ -686,6 +944,14 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
    expresividad y la resolución previa de la configuración. **Propuesta:**
    distinguir sustitución por identificador existente de reglas declarativas
    aplicables a descendientes futuros.
+   **Decisión aceptada:** en v1, una sustitución por identificador individual
+   solo puede aplicarse a individuos directos, fundadores o parentales expresos
+   declarados y existentes antes de iniciar cualquier simulación. Un
+   identificador inexistente durante la validación es un error. Los descendientes
+   futuros usan los valores de sus ámbitos poblacional, temporal y espacial;
+   seleccionarlos después no cambia retroactivamente su creación. Las reglas
+   específicas sobre descendientes futuros y la preasignación de identificadores
+   se aplazan.
 
 9. **[HECHA] ¿Qué parte de una cabecera FASTA constituye el identificador de
    secuencia?** (RAD-032; REQ-REF-13; ACE-03).
@@ -701,7 +967,7 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
 
 ### Antes de F2 a F5
 
-10. **¿Qué denominador fija la cobertura objetivo y qué coberturas realizadas
+10. **[HECHA] ¿Qué denominador fija la cobertura objetivo y qué coberturas realizadas
     se informan?** (RAD-004 y RAD-017; REQ-CONF-72 a REQ-CONF-74,
     REQ-WGS-04 y REQ-DAT-22; ACE-17 y ACE-20).
     **Contexto:** un FASTQ compartido no puede satisfacer el mismo objetivo
@@ -712,6 +978,14 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     número de bases y las medidas posteriores. **Propuesta:** un denominador
     biológico único anterior al mapeo y medidas separadas antes de sesgos,
     después de artefactos y después del mapeo.
+    **Decisión aceptada:** cada biblioteca usa la longitud haploide de la
+    referencia estructural del individuo: cada cromosoma o *scaffold* se suma una
+    vez, sin ploidía. Haplotipos y referencias de mapeo no cambian el denominador;
+    las regiones usan la referencia estructural. Se registran por separado el
+    objetivo, la cobertura WGS básica antes de sesgos y artefactos, la final del
+    FASTQ con bases propias y contaminantes separadas y la alineada observada por
+    referencia. El mismo FASTQ se mapea contra todas las referencias y la
+    cobertura alineada nunca es otro objetivo.
 
 11. **[HECHA] ¿Qué alfabeto de DNA admite el simulador?**
     (RAD-007; REQ-REF-14 y requisitos de generación, lectura y VCF; ACE-03).
@@ -720,9 +994,9 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     suministradas o generadas solo pueden contener A, C, G, T y N, sin distinguir
     mayúsculas de minúsculas. Se rechazan los demás códigos IUPAC, los huecos y
     cualquier otro símbolo. Esta decisión cierra el alfabeto; la semántica de N
-    en cada operación se separa como decisión 27.
+    en cada operación se resuelve en la decisión 27.
 
-12. **¿Pueden las inserciones de elementos transponibles crear referencias
+12. **[HECHA] ¿Pueden las inserciones de elementos transponibles crear referencias
     derivadas?** (RAD-006; REQ-REF-09 y REQ-TE-03; ACE-07 y ACE-80).
     **Contexto:** una referencia estructural solo admite cuatro clases de cambio,
     mientras que los TE pueden insertarse “al construir referencias”.
@@ -732,21 +1006,35 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     válidas y cómo se registra su linaje. **Propuesta:** admitir inserciones TE
     solicitadas como cambio trazable de una referencia derivada y actualizar de
     forma conjunta la definición, REQ-REF-09, el flujo y ACE-07.
+    **Decisión aceptada:** v1 elimina los elementos transponibles como clase
+    funcional propia. No hay catálogo FASTA de TE, familias, mecanismos de copiar
+    o cortar y pegar, reglas de destino, identidad ni metadatos específicos. Una
+    región preexistente que se copie se trata como duplicación segmentaria
+    genérica; una secuencia nueva puede ser una inserción genérica; un FASTA real
+    se interpreta como bases sin anotación TE. Todo modelado específico se aplaza.
 
-13. **¿Cómo se resuelven colisiones y ausencia de sitios válidos durante la
-    generación aleatoria?** (RAD-008 y la política de REQ-TE-12 citada por
-    RAD-002; requisitos estructurales; ACE-10, ACE-81, ACE-87 y ACE-103).
+13. **[HECHA] ¿Cómo se resuelven colisiones y ausencia de sitios válidos durante la
+    generación aleatoria?** (RAD-008; REQ-IND-54 a REQ-IND-57; ACE-10, ACE-87,
+    ACE-103 y ACE-107).
     **Contexto:** eventos explícitos y aleatorios pueden competir o agotar una
     región. **Opciones:** remuestrear hasta un límite y fallar; aceptar menos
     eventos con advertencia; o aplicar una política configurable por clase.
     Debe fijarse también el orden entre clases. **Consecuencias:** cambia verdad,
-    consumo aleatorio y número realizado. **Propuesta:** aplicar primero eventos
-    explícitos, definir un orden de clases y un límite reproducible de intentos,
-    con fallo predeterminado cuando no pueda cumplirse el contrato solicitado.
+    consumo aleatorio y número realizado.
+    **Decisión aceptada:** primero se aplican los eventos explícitos en su orden
+    declarado. Después se sortea el recuento aleatorio por clase y se procesan,
+    en orden fijo, duplicaciones, deleciones, inversiones, translocaciones,
+    repeticiones en tándem, *indels* y SNP. Cada evento se elige exclusivamente
+    entre destinos válidos en el estado inmediatamente anterior y actualiza el
+    espacio tras aceptarse; no hay reintentos sobre candidatos inválidos ni
+    límite arbitrario. Si faltan destinos para completar el recuento sorteado,
+    la generación falla sin reducirlo silenciosamente. Se registran los números
+    sorteado, aceptado antes del fallo y finalmente activo.
 
-14. **¿Cómo se reparte la verdad entre VCF y complemento y qué cardinalidad
-    une sus registros?** (RAD-011 y RAD-023; REQ-VER-22, REQ-VER-24 a
-    REQ-VER-26 y REQ-VER-44 a REQ-VER-46; ACE-80, ACE-99, ACE-102 y ACE-103).
+14. **[HECHA] ¿Cómo se reparte la verdad entre VCF y complemento y qué cardinalidad
+    une sus registros?** (RAD-011 y RAD-023; REQ-VER-04, REQ-VER-19 a
+    REQ-VER-26, REQ-VER-42 y REQ-VER-44 a REQ-VER-46; ACE-33, ACE-99,
+    ACE-102, ACE-103 y ACE-108).
     **Contexto:** algunos eventos no caben sin pérdida en un registro VCF y una
     translocación puede requerir varios BND. **Opciones:** exigir toda la
     información en VCF; definir un mínimo VCF y detalle exclusivo en complemento;
@@ -754,6 +1042,18 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     afecta validez, reconstrucción e identificadores uno-a-varios o
     varios-a-uno. **Propuesta:** definir un núcleo VCF interoperable y un
     complemento enlazado con cardinalidades y normalización canónicas.
+    **Decisión aceptada:** cada conjunto solicitado genera exactamente un VCF
+    multimuesta referido a una sola referencia, sin separarlo por individuo,
+    clase ni complejidad. Cumple estrictamente la versión oficial que se elija
+    en planificación y usa la representación estándar más completa. Un caso
+    produce uno o varios registros y, solo si pierde detalle,
+    una única entrada complementaria; todos los registros que necesitan ese
+    detalle incluyen campos `INFO` declarados con una descripción breve y el
+    mismo identificador local. El VCF sigue siendo válido e interoperable por sí
+    mismo, mientras la reconstrucción completa del caso usa el par enlazado. Una
+    nueva adyacencia usa normalmente dos BND relacionados y una translocación
+    recíproca puede necesitar cuatro para sus dos adyacencias. El fichero
+    obligatorio de verdad sigue siendo la fuente canónica completa.
 
 15. **[HECHA] ¿Cómo se convierten y redondean las unidades de contaminación?**
     (RAD-016; REQ-CONF-75, REQ-CONT-02 y REQ-CONT-03; ACE-42 y ACE-43).
@@ -788,18 +1088,28 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     copia dos veces el mismo origen en una biblioteca receptora salvo mediante
     un mecanismo de duplicación configurado, y toda colisión es un error.
 
-17. **¿Qué significa que v1 admita “otras distribuciones” u “otros modelos”?**
-    (RAD-020; REQ-CONF-25, REQ-DIR-04, REQ-CONF-61 y requisitos análogos;
-    ACE-10 y ACE-79).
+17. **[HECHA] ¿Qué significa que v1 admita “otras distribuciones” u “otros modelos”?**
+    (RAD-020; REQ-CONF-25, REQ-CONF-61/62, REQ-DIR-04 y REQ-VAL-48;
+    ACE-10, ACE-32, ACE-79 y ACE-109).
     **Contexto:** no se sabe si una alternativa concreta es obligatoria.
     **Opciones:** fijar un catálogo mínimo de v1; exigir solo un mecanismo de
     extensión futura; o eliminar la obligación de alternativas hasta una fase
     posterior. **Consecuencias:** cambia las configuraciones que toda
     implementación conforme debe aceptar. **Propuesta:** enumerar por capacidad
     el catálogo mínimo de v1 y separar explícitamente extensiones futuras.
+    **Decisión aceptada:** el recuento realizado de variantes aleatorias usa
+    exclusivamente Poisson. Los eventos explícitos y el modo controlado
+    aplicable expresan resultados concretos, no distribuciones alternativas. Las
+    mutaciones de repeticiones en tándem usan exclusivamente el modelo escalonado
+    simple: cada evento añade o elimina una unidad completa y conserva
+    configurable el sesgo entre expansión y contracción. Otra distribución,
+    otro modelo o un salto de varias unidades se rechazan antes de simular e
+    identifican parámetro y valor. Distribuciones adicionales y saltos mayores
+    quedan para versiones futuras.
 
-18. **¿Cuál es el contrato mínimo de calibración empírica?** (RAD-024;
-    REQ-DAT-41 a REQ-DAT-45; ACE-48).
+18. **[HECHA] ¿Cuál es el contrato mínimo de calibración empírica?** (RAD-024;
+    REQ-CONF-85 a REQ-CONF-87, REQ-DAT-41 a REQ-DAT-45 y
+    REQ-VAL-49; ACE-48).
     **Contexto:** “otros parámetros útiles” e “intentar separar” no permiten
     validar un perfil. **Opciones:** exigir un conjunto mínimo fijo de
     estimaciones; perfiles parciales con campos y fiabilidad declarados; o
@@ -807,8 +1117,16 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     resultados obligatorios y reutilización del perfil. **Propuesta:** admitir
     perfiles parciales solo con campos mínimos, métricas de fiabilidad y causas
     de parámetros no estimables.
+    **Decisión aceptada:** la calibración empírica automática se aplaza por
+    completo fuera de v1. Se rechazan antes de simular los FASTQ y referencias
+    de calibración, las solicitudes de estimación o inferencia y los perfiles
+    empíricos reutilizables, identificando el campo y la exclusión. V1 no infiere
+    tecnología ni parámetros, no separa variantes y errores desde esos datos y
+    no genera artefactos empíricos. Se mantienen los perfiles incorporados de
+    Illumina y PacBio HiFi y sus sustituciones explícitas. Contrato de entrada,
+    esquema, fiabilidad, separación y reutilización quedan para el futuro.
 
-19. **¿Qué reglas cuantitativas convierten una validación estadística en éxito,
+19. **[HECHA] ¿Qué reglas cuantitativas convierten una validación estadística en éxito,
     advertencia o error?** (RAD-025; REQ-VAL-01, REQ-VAL-04 a REQ-VAL-06,
     REQ-VAL-10, REQ-VAL-12 y REQ-VAL-13; ACE-64 y ACE-65).
     **Contexto:** expresiones como “aproximadamente” o “cuando sea posible” no
@@ -818,10 +1136,19 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     **Propuesta:** definir antes de cada fase ámbito, estadístico, tamaño mínimo,
     tolerancia y consecuencia predeterminada, permitiendo elevar advertencias a
     error cuando ya esté autorizado.
+    **Decisión aceptada:** v1 separa validaciones deterministas y resultados
+    estadísticos. Toda incoherencia exacta detiene e impide completar su ámbito.
+    Cobertura, soporte alélico, errores, contaminación, duplicados y demás
+    magnitudes aleatorias se registran con ámbito, esperado, realizado, tamaño
+    observado, desviaciones absoluta y relativa y explicación, sin tolerancia de
+    aceptación ni opción de elevarlas a error. Una medida no calculable figura
+    como «no evaluable» con causa. N conserva su aviso específico no invalidante
+    y N=0 aplica su política propia; Ne no tiene objetivo en v1. Umbrales, intervalos,
+    categorías y escalamiento quedan para versiones futuras.
 
 ### Antes de F6 a F8
 
-20. **¿Qué condiciones demuestran que N y Ne objetivo se intentaron aplicar?**
+20. **[HECHA] ¿Qué condiciones demuestran que N y Ne objetivo se intentaron aplicar?**
     (RAD-010 y la indefinición de REQ-REP-07 citada por RAD-002; REQ-REP-08,
     REQ-REP-14, REQ-REP-15 y REQ-REP-26; ACE-76 y ACE-77).
     **Contexto:** una advertencia no distingue imposibilidad aleatoria de un
@@ -831,8 +1158,18 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     es válida o defecto. **Propuesta:** fijar invariantes y evidencia de intento,
     mantener la desviación aleatoria como aviso y tratar como error no aplicar
     el objetivo o sus restricciones.
+    **Decisión aceptada:** N objetivo es el número exacto de intentos
+    reproductivos por generación y subpoblación; cada éxito crea un descendiente
+    y los parentales pueden reutilizarse sin límite. Se procesan los N intentos o
+    se registra inequívocamente la imposibilidad común de los restantes, con
+    éxitos, fallos y causas. Una imposibilidad previa se rechaza; una aleatoria
+    conserva descendientes, N realizado, desviación y aviso, y N=0 aplica su
+    política. Ne objetivo absoluto o Ne/N se rechaza antes de simular. Ne
+    realizado se calcula solo como Ne reproductivo cuando es evaluable, sin
+    objetivo, desviación ni aviso; en otro caso conserva la causa. El control de
+    Ne y los límites o distribuciones parentales quedan para el futuro.
 
-21. **¿Cuál es el espacio de oportunidades de cada tasa de mutación?**
+21. **[HECHA] ¿Cuál es el espacio de oportunidades de cada tasa de mutación?**
     (RAD-014; REQ-MUT-01 y requisitos relacionados; ACE-79).
     **Contexto:** no se sabe si la tasa usa longitud haploide, todas las copias,
     longitud actual tras SV o solo posiciones válidas. **Opciones:** bases de
@@ -841,8 +1178,19 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     deleciones o duplicaciones. **Propuesta:** definir por clase el conjunto de
     sitios válidos en el estado haplotípico inmediatamente anterior y registrar
     su tamaño.
+    **Decisión aceptada:** una tasa evolutiva se aplica por oportunidad válida y
+    generación en todas las copias haplotípicas descendientes actuales, justo
+    antes de cada clase. Ploidía y duplicaciones aportan copias; las deleciones
+    no. Los ámbitos efectivos no solapan oportunidades. La media es
+    tasa×oportunidades y el recuento se sortea una vez; después se actualizan los
+    destinos válidos sin volver a sortear. Cada clase usa candidatos propios y,
+    si necesita varios extremos o fuente/destino, solo cuenta el ancla inicial.
+    Cada locus repetido actual es una oportunidad. Se registran tasa, espacio,
+    media y recuentos sorteado, aceptado y activo. Conforme a Q27, `N` se excluye
+    cuando la clase necesita una base concreta, pero no por estar dentro de un
+    intervalo puramente estructural.
 
-22. **¿Qué ocurre cuando la aptitud máxima es cero o el locus de selección no
+22. **[HECHA] ¿Qué ocurre cuando la aptitud máxima es cero o el locus de selección no
     tiene una identidad inequívoca?** (RAD-015; REQ-SEL-13 y requisitos de locus;
     ACE-82).
     **Contexto:** no se puede normalizar por cero y una estructura puede
@@ -851,18 +1199,42 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     **Consecuencias:** cambia supervivencia, N y trayectoria. **Propuesta:**
     rechazar antes de reproducir cuando la función o la identidad del locus no
     produzcan aptitudes definidas para todos los elegibles.
+    **Decisión aceptada:** v1 usa un único SNP bialélico identificado por
+    referencia estructural, secuencia, coordenada e ID, presente exactamente una
+    vez por copia aplicable y protegido frente a todo cambio solapante. Para
+    ploidías 1–10 se declaran valores para todas las dosis alternativas. Los
+    eventos explícitos incompatibles se rechazan y los aleatorios excluyen el
+    locus. Antes de supervivencia, cada elegible debe tener identidad, dosis,
+    carácter y aptitud inequívocos; las aptitudes son finitas, no negativas y al
+    menos una es positiva. Máximo cero o dato ausente, múltiple, ambiguo,
+    negativo o no finito detiene con diagnóstico y no equivale a supervivencia
+    uniforme ni extinción. La recombinación puede transmitir el locus sin perder
+    su identidad. Otras clases de locus quedan para versiones futuras.
 
-23. **¿Qué distribución de dosis representa Hardy-Weinberg con F en
+23. **[HECHA] ¿Qué distribución de dosis representa Hardy-Weinberg con F en
     poliploides?** (RAD-021; REQ-EVO-33, REQ-EVO-34 y REQ-EVO-46 a
-    REQ-EVO-48; ACE-88 y ACE-90).
+    REQ-EVO-52; ACE-88, ACE-90 y ACE-104).
     **Contexto:** los extremos F=0 y F=1 no determinan los valores intermedios en
     ploidías mayores que dos. **Opciones:** aprobar una fórmula explícita;
     restringir F a diploides en v1; o exigir distribuciones de dosis explícitas
     para poliploides. **Consecuencias:** cambia los genotipos iniciales.
     **Propuesta:** no inferir una fórmula; restringir temporalmente F a los casos
     con modelo aprobado y usar distribución explícita en los demás.
+    **Decisión aceptada:** Hardy-Weinberg y F automático son modelos distintos.
+    HWE se admite en ploidías 1–10 y usa la distribución binomial por dosis en
+    loci bialélicos o la multinomial por composición en multialélicos, sin
+    sustituir los modos probabilístico y controlado ya definidos. F automático
+    solo se admite en diploides: para dos alelos usa
+    `P(AA)=p²+Fpq`, `P(AB)=2pq(1-F)` y `P(BB)=q²+Fpq`; para varios alelos usa
+    `P(ii)=p_i²+F p_i(1-p_i)` y `P(ij)=2(1-F)p_i p_j` con `i<j`. F debe estar
+    entre 0 y 1; F=0 equivale a HWE y F=1 produce homocigosis completa. F en
+    P=1 o P>2 se rechaza antes de simular con ámbito y ploidía. Los poliploides
+    usan HWE sin F o una distribución explícita, que prevalece localmente. F
+    realizado solo se calcula en diploides y figura como «no aplicable» en las
+    demás ploidías. Los modelos automáticos F poliploides, la herencia
+    polisómica o disómica y sus estimadores se aplazan.
 
-24. **¿Qué combinaciones estructurales y ploidías pueden reproducirse?**
+24. **[HECHA] ¿Qué combinaciones estructurales y ploidías pueden reproducirse?**
     (RAD-022; requisitos REQ-REC y REQ-CRU, incluido REQ-CRU-24; ACE-85 y
     ACE-98).
     **Contexto:** “compatibilidad estructural”, intervalos colineales y
@@ -872,8 +1244,23 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     de compatibilidad. **Consecuencias:** cambia qué cruces se aceptan y cómo se
     transmiten secuencias. **Propuesta:** aprobar una tabla cerrada de casos v1 y
     rechazar cualquier combinación no enumerada.
+    **Decisión aceptada:** cruces, autofecundación y evolución reproductiva solo
+    admiten ploidía par 2, 4, 6, 8 o 10 por cromosoma o *scaffold*, igual entre
+    parentales. Todas las copias reproductivas deben compartir segmentos
+    estructurales, orden, orientación, número de copias y puntos de ruptura; no
+    se exige el mismo ID histórico si el estado canónico es inequívocamente
+    idéntico. SNP, *indels* pequeños y repeticiones pueden diferir. Toda
+    deleción, duplicación, inversión, inserción estructural o translocación debe
+    estar fijada idénticamente en todas las copias y parentales; cualquier
+    heterocigosis estructural invalida la opción reproductiva. Los bivalentes se
+    forman al azar, cada parental aporta la mitad y un *scaffold* sin
+    recombinación transmite copias intactas. Una incompatibilidad explícita se
+    rechaza antes de simular; una realizada en evolución excluye la opción y
+    causa los fallos de intento previstos por Q20. Una SV de novo se conserva,
+    pero su portador no puede reproducirse después mientras sea incompatible.
+    La compatibilidad parcial y sus consecuencias quedan futuras.
 
-25. **¿Qué órdenes alternativos de procesos generacionales son válidos?**
+25. **[HECHA] ¿Qué órdenes alternativos de procesos generacionales son válidos?**
     (RAD-002 y RAD-009; REQ-CONF-44, REQ-CONF-45 y REQ-REP-24; ACE-84).
     **Contexto:** permitir reordenación sin enumerar dependencias admite
     trayectorias incompatibles. **Opciones:** solo el orden predeterminado en v1;
@@ -881,10 +1268,20 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     orden topológico. **Consecuencias:** cambia la población resultante y las
     configuraciones aceptadas. **Propuesta:** empezar con el orden
     predeterminado y admitir únicamente alternativas enumeradas y justificadas.
+    **Decisión aceptada:** v1 solo admite, en este orden, demografía y N objetivo;
+    migración; selección de viabilidad; elección parental y reproducción;
+    segregación y recombinación; mutación de novo; cálculo y registro de N
+    realizado, Ne realizado y frecuencias; y muestreos y salidas. La
+    configuración no puede reordenarlas y cualquier solicitud alternativa se
+    rechaza antes de simular identificando el valor y la regla. Una etapa
+    opcional desactivada se omite sin mover las demás. Varios eventos
+    demográficos conservan un orden interno total explícito dentro de la primera
+    etapa. Historial y manifiesto registran etapas aplicadas u omitidas y el
+    orden efectivo. Otros órdenes y grafos de dependencias quedan futuros.
 
 ### Antes de F9
 
-26. **¿Qué trazabilidad detallada es obligatoria en escenarios grandes?**
+26. **[HECHA] ¿Qué trazabilidad detallada es obligatoria en escenarios grandes?**
     (RAD-030; REQ-CRU-15, REQ-REC-11 a REQ-REC-13, REQ-DAT-40,
     REQ-MAN-16 y REQ-MAN-26; ACE-14, ACE-86 y ACE-94).
     **Contexto:** conservar detalle por lectura, individuo y segmento puede
@@ -895,10 +1292,27 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     **Propuesta:** definir un núcleo de verdad reconstruible obligatorio y
     niveles de materialización que nunca eliminen la trazabilidad exigida para
     resultados publicados.
+    **Decisión aceptada:** v1 ofrece un único contrato obligatorio y no niveles
+    configurables. En evolución materializa estado completo de la población
+    inicial, final y generaciones o muestreos solicitados; las demás
+    generaciones exportan resúmenes. Solo los individuos de esas
+    materializaciones exportan recombinación y origen por segmento hasta copia
+    fundadora, con mutaciones de novo en capas, aunque la ejecución conserva
+    internamente lo necesario para reconstruirlo. En familias materializa el
+    estado faseado y metadatos de todos los individuos de todos los eventos y
+    poblaciones intermedias. Cada lectura o pareja del FASTQ final conserva
+    origen y diferencia entre secuencia verdadera y observada; las descartadas
+    o no asignadas solo conservan recuentos agregados por muestra y causa u
+    origen conocido. El manifiesto enumera individuos materializados y de
+    familias, y representa las demás generaciones evolutivas mediante
+    resúmenes. Si el preflight determina que el presupuesto no permite el
+    mínimo, esta trazabilidad y las salidas activadas, rechaza antes de simular;
+    nunca degrada el detalle. La persona usuaria debe reducir solicitudes.
+    Formatos y esquemas permanecen pendientes de planificación.
 
 ### Cuestión residual tras fijar el alfabeto
 
-27. **¿Cómo debe tratar cada operación las posiciones que contienen N?**
+27. **[HECHA] ¿Cómo debe tratar cada operación las posiciones que contienen N?**
     (cuestión residual de RAD-007; REQ-REF-14, REQ-REF-23 y requisitos de
     generación, lectura y VCF; ACE-03).
     **Contexto:** N es el único símbolo admitido para una base desconocida, pero
@@ -908,7 +1322,19 @@ numeración se mantiene estable para conservar la trazabilidad de la revisión.
     **Opciones:** excluir N de todas las operaciones que requieran una base
     concreta; conservarla en lecturas y regiones sin variantes; o aprobar una
     política distinta y explícita para cada operación. **Consecuencias:** afecta
-    mutaciones, variantes, lecturas, cobertura, calibración y VCF. **Propuesta:**
+    mutaciones, variantes, lecturas, cobertura y VCF. **Propuesta:**
     definir una tabla normativa por operación y prohibir toda resolución
     aleatoria implícita de N. Esta cuestión se revisará junto con las demás
     decisiones pendientes.
+    **Decisión aceptada:** `N` es una base desconocida que se conserva, ocupa
+    coordenada y longitud y nunca se resuelve. No puede ser origen o destino SNP,
+    locus seleccionado ni motivo repetido; sí puede permanecer dentro de una
+    operación puramente estructural y de una inserción explícita o copiada. Las
+    inserciones aleatorias contienen solo A/C/G/T. Se transmite sin cambios por
+    herencia y recombinación. WGS puede muestrearla: aparece como `N` con Phred 0
+    y se propaga al alineamiento; el modelo de error no la resuelve ni crea otras
+    `N`. GC usa `(G+C)/(A+C+G+T)` y una ventana sin bases conocidas no recibe
+    corrección. `N` cuenta en longitud y cobertura y se resume por separado. VCF
+    no emite SNP con `REF=N`; otros casos usan `N` solo si el estándar elegido lo
+    permite sin pérdida y, si no, el complemento de Q14. Verdad, validación y
+    manifiesto conservan `N`, sus exclusiones y la ausencia de resolución.

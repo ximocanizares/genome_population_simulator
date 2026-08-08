@@ -9,19 +9,25 @@
 
 ## 1. Estado y finalidad del documento
 
-Este documento define el objetivo general y los requisitos confirmados hasta
-ahora. También identifica las decisiones que faltan antes de poder cerrar la
-especificación y planificar la implementación.
+Este documento define el objetivo general y los requisitos funcionales
+confirmados para v1. Las elecciones técnicas pendientes se separan del contrato.
 
-La versión 0.1 sigue siendo un borrador. Los requisitos de esta versión son
-obligatorios, pero todavía no se han acordado todos sus detalles ni todos los
-casos que permitirán comprobar los resultados.
+La versión 0.1 sigue siendo un borrador documental. Sus requisitos son
+obligatorios y las 27 preguntas funcionales de la revisión están resueltas; aún
+deben planificarse representaciones técnicas y convertirse los ACE en pruebas.
 
 La sección 4 es la fuente normativa de requisitos funcionales. Las secciones 2,
 5 y 6 los resumen y la sección 7 propone criterios de aceptación preliminares.
 Si una redacción resumida difiere de un requisito identificado, prevalece el
 requisito y debe corregirse el resumen. Esta regla aclara la fuente que debe
 consultarse; no autoriza a ignorar contradicciones entre requisitos.
+
+La cobertura completa REQ→ACE→fase→prueba se mantiene, sin repetir el contrato,
+en [trazabilidad-requisitos-0.1.md](./trazabilidad-requisitos-0.1.md).
+Toda capacidad funcional aplazada se identifica y encamina en
+[registro-ampliaciones-futuras-0.1.md](./registro-ampliaciones-futuras-0.1.md);
+las menciones de futuro de este documento heredan el DTF asociado a su rango de
+requisitos.
 
 El núcleo del sistema se desarrollará en Rust. Esta elección ya está confirmada
 para el producto y no determina por sí sola la arquitectura, los *crates*, la
@@ -61,12 +67,16 @@ de bibliotecas multiplexadas. Multiplexar consiste en secuenciar juntas varias
 bibliotecas y distinguir después sus muestras mediante índices.
 
 Cada evento que genere FASTQ, BAM o CRAM constituye un experimento de
-secuenciación independiente. Usa una única tecnología, un único perfil y,
-cuando genera alineamientos, un único mapeador, y produce sus propias lecturas y
-resultados. Un evento que solo materialice verdad genotípica o VCF no requiere
-tecnología, perfil, biblioteca ni mapeador. Una misma ejecución biológica puede
-contener varios eventos con tecnologías o mapeadores distintos, pero no
-reutiliza FASTQ entre ellos ni tiene como objetivo comparar mapeadores.
+secuenciación independiente y es el único experimento de ese evento, sin una
+identidad adicional. Contiene exactamente una tanda de secuenciación y una
+biblioteca por individuo seleccionado. Todas las bibliotecas se procesan juntas
+en esa tanda y comparten la única tecnología, el único perfil y, cuando se
+generan alineamientos, el único mapeador del evento. Un evento que solo
+materialice verdad genotípica o VCF no constituye un experimento de
+secuenciación y no tiene tecnología, perfil, biblioteca, tanda ni mapeador. Una
+misma ejecución biológica puede contener varios eventos con tecnologías,
+perfiles o mapeadores distintos, pero no reutiliza FASTQ entre ellos ni tiene
+como objetivo comparar mapeadores.
 
 La primera versión simulará exclusivamente secuenciación del genoma completo
 (WGS, *whole-genome sequencing*) de DNA genómico. Podrá usar lecturas cortas
@@ -140,6 +150,12 @@ permitir conocer la vía de creación, los ficheros de configuración utilizados
 los parámetros realmente aplicados, el origen y los cambios de las referencias,
 y los nombres y las rutas de los archivos generados.
 
+V1 tiene un único contrato obligatorio de trazabilidad. No ofrece niveles de
+detalle configurables ni reduce automáticamente la verdad, la procedencia o los
+metadatos exigidos cuando aumenta el tamaño del escenario. La escala solo puede
+cambiar qué materializaciones y salidas solicita la persona usuaria antes de
+ejecutar, nunca el contenido mínimo de una salida ya activada.
+
 ## 3. Fuera del alcance del proyecto
 
 Este proyecto se limita a generar los datos simulados y su verdad conocida. No
@@ -148,37 +164,50 @@ callers*. Tampoco comparará sus resultados con la verdad conocida, calculará
 medidas de eficacia o fiabilidad ni evaluará herramientas externas.
 
 La ejecución de esas herramientas, la comparación de resultados y su evaluación
-pertenecerán a otro proyecto. Ese proyecto podrá utilizar los datos y el VCF de
+pertenecerán a otro proyecto (DTF-024). Ese proyecto podrá utilizar los datos y el VCF de
 verdad generados por este simulador, pero no forma parte de esta
 especificación.
 
 También quedan fuera de alcance la llamada de variantes y genotipos, la
 imputación de genotipos ausentes, el faseado inferido y la corrección de
 genotipos a partir de lecturas o alineamientos. Esas operaciones corresponden a
-programas externos. La cobertura, la contaminación, los errores, la calidad y
+programas externos (DTF-024). La cobertura, la contaminación, los errores, la calidad y
 la ambigüedad del mapeo solo afectan a FASTQ, BAM o CRAM y no modifican la verdad
 genotípica simulada.
 
 En esta primera versión quedan fuera de alcance las diferencias de ploidía del
 mismo cromosoma o *scaffold* entre individuos, incluidos los modelos de
 cromosomas sexuales con ploidía individual distinta y las aneuploidías
-individuales. Podrán estudiarse como trabajo futuro.
+individuales. Podrán estudiarse como trabajo futuro (DTF-003).
 
 También quedan fuera de alcance los datos crudos del instrumento de
 secuenciación, sus señales, los archivos BCL y la generación detallada de
 lecturas de índice i5 o i7. La contaminación técnica se representará mediante
 el efecto final del demultiplexado, no mediante la simulación completa del
-instrumento.
+instrumento (DTF-025).
+
+La primera versión no modela carriles de secuenciación ni crea un carril
+implícito. Tampoco permite varias tandas dentro de un evento ni varias
+bibliotecas del mismo individuo dentro de ese evento. Dividir una tanda en
+carriles, repartir una biblioteca entre varios carriles o tandas y representar
+réplicas de biblioteca del mismo individuo queda para futuras ampliaciones
+(DTF-012).
+
+También quedan para futuras ampliaciones las reglas específicas que apliquen
+sustituciones individuales a descendientes todavía no creados y la
+preasignación de sus identificadores (DTF-013). En v1, seleccionar un descendiente después
+de crearlo solo lo elige para una operación posterior; no cambia los parámetros
+que intervinieron en su creación.
 
 En esta versión también quedan fuera de alcance las lecturas quiméricas formadas
 por fragmentos de individuos o bibliotecas diferentes. Los intercambios de
 lecturas entre muestras se representan exclusivamente mediante contaminación o
-errores de demultiplexado.
+errores de demultiplexado (DTF-026).
 
 Quedan para futuras implementaciones los paneles dirigidos, la secuenciación de
 amplicones obtenidos por PCR, la genotipificación por secuenciación (GBS,
 *genotyping-by-sequencing*) y los demás protocolos de captura o reducción de
-representación. Los duplicados de PCR de una biblioteca WGS amplificada sí
+representación (DTF-002). Los duplicados de PCR de una biblioteca WGS amplificada sí
 pertenecen al alcance: son un artefacto de su preparación, no una secuenciación
 dirigida por PCR.
 
@@ -187,13 +216,13 @@ y pérdida alélica completa (*allele dropout*). El desequilibrio alélico es un
 soporte de lecturas desproporcionado respecto a la dosis; la pérdida alélica
 completa es la ausencia de lecturas de un alelo que sí existe en el genotipo.
 No deben confundirse con variaciones aleatorias del soporte ni con el
-desequilibrio de ligamiento entre loci.
+desequilibrio de ligamiento entre loci (DTF-027).
 
 La primera versión usa generaciones discretas y no solapadas. No modela edades,
 supervivencia entre generaciones ni reproducción entre cohortes distintas.
 Tampoco incluye selección por fecundidad, selección poligénica o epistasis,
 elección de pareja por parentesco, distancia genética o genotipo, ni tasas de
-mutación SNP dependientes del contexto de bases vecinas.
+mutación SNP dependientes del contexto de bases vecinas (DTF-028 y DTF-029).
 
 En este modelo, un cambio demográfico de N no elimina individuos de una
 generación que ya existe. Fija el número objetivo de descendientes que formarán
@@ -204,7 +233,8 @@ descendencia.
 La primera versión tampoco modela un componente ambiental del carácter
 cuantitativo ni un parámetro de heredabilidad. La heredabilidad describe qué
 parte de la variación observada de un carácter se asocia con diferencias
-genéticas en una población. Estos modelos quedan para futuras ampliaciones. En
+genéticas en una población. Estos modelos quedan para futuras ampliaciones
+(DTF-030). En
 esta versión, el valor del carácter usado para seleccionar coincide con el valor
 genético asignado al genotipo o a la combinación de dosis.
 
@@ -212,36 +242,77 @@ La selección cuantitativa de la primera versión es exclusivamente direccional:
 puede favorecer valores mayores o valores menores del carácter. Quedan para
 futuras ampliaciones la selección estabilizadora, que favorece valores próximos
 a un óptimo intermedio, y la selección disruptiva, que favorece ambos extremos
-frente a los valores intermedios.
+frente a los valores intermedios (DTF-006).
 
-Los elementos transponibles (TE) se introducirán mediante eventos solicitados y
-conocidos para estudiar su efecto sobre programas externos. No se modelarán
-copias activas o inactivas, tasas de movilización ni transposición espontánea a
-lo largo de las generaciones. Las inserciones ya presentes sí se heredarán,
-segregarán y recombinarán como las demás variantes.
+El único locus de selección de v1 debe ser un SNP bialélico presente exactamente
+una vez en cada copia haplotípica aplicable. La selección sobre *indels*,
+repeticiones, inserciones, variantes estructurales, loci multialélicos o loci con
+número variable de copias queda para futuras ampliaciones (DTF-019).
+
+La primera versión no modela elementos transponibles (TE) como clase funcional.
+No admite catálogos, familias, actividad, movilización, mecanismos de copiar o
+cortar y pegar, reglas de destino ni metadatos específicos de TE. Un FASTA real
+se trata como una secuencia de bases sin anotación TE. Copiar una región
+preexistente se representa como duplicación segmentaria genérica y añadir una
+secuencia nueva, como inserción genérica. Todo modelado específico de TE queda
+para futuras ampliaciones (DTF-007).
+
+También quedan para versiones futuras las distribuciones de recuentos de
+variantes aleatorias distintas de Poisson, incluidas opciones como la binomial
+negativa o la Poisson inflada con ceros, y los modelos de mutación de repeticiones
+en tándem que permitan saltos de varias unidades. V1 no acepta esos parámetros
+ni reserva para ellos una semántica implícita (DTF-014 y DTF-015).
+
+Los órdenes generacionales alternativos y los grafos configurables de
+dependencias entre procesos quedan para versiones futuras. V1 conserva un orden
+único; desactivar una etapa opcional solo la omite y no desplaza las demás
+(DTF-022).
+
+La calibración empírica automática desde datos reales queda completamente fuera
+de v1. El sistema no acepta FASTQ y referencia para estimar un perfil, no
+infiere tecnología ni parámetros desde esos datos y no genera ni reutiliza
+ficheros de perfil empírico. Se mantienen los perfiles tecnológicos
+incorporados y versionados para lecturas cortas tipo Illumina y PacBio HiFi,
+así como las sustituciones explícitas de parámetros ya permitidas. Una futura
+ampliación deberá definir el contrato mínimo de entrada, el esquema del
+artefacto, las métricas y umbrales de fiabilidad, la separación entre variantes,
+errores, regiones ambiguas y errores de mapeo, y las reglas de reutilización
+(DTF-016).
 
 En reproducción sexual genérica quedan para futuras versiones las ploidías
 impares, los multivalentes, la doble reducción y la preferencia de apareamiento
-por subgenoma. También se aplazan la interferencia entre entrecruzamientos y los
-gametos desequilibrados producidos por recombinación en regiones estructuralmente
-incompatibles. Los modelos específicos de herencia polisómica o disómica para
-aplicar F también quedan para futuras ampliaciones.
+por subgenoma. También se aplazan la interferencia entre entrecruzamientos, la
+reproducción de heterocigotos estructurales, los emparejamientos complejos, la
+compatibilidad parcial, la recombinación limitada a intervalos colineales entre
+estructuras distintas, los gametos desequilibrados y la fertilidad reducida.
+Los modelos automáticos de F para ploidías distintas de 2, los
+modelos específicos de herencia polisómica o disómica y sus estimadores de F
+realizado quedan para futuras ampliaciones (DTF-004, DTF-005, DTF-020 y
+DTF-021).
 
 La primera versión solo modela entrecruzamientos como recombinación. La
 conversión génica queda para futuras versiones y no debe confundirse con una
 translocación no recíproca. También quedan fuera la distorsión de segregación y
 el impulso meiótico (*meiotic drive*), que alteran la probabilidad de transmitir
-alelos o copias y son distintos de la selección de viabilidad.
+alelos o copias y son distintos de la selección de viabilidad (DTF-005 y
+DTF-031).
 
 La reproducción de la primera versión se limita a autofecundación y cruzamiento
 sexual. La reproducción clonal, la apomixis y la producción de dobles haploides
 quedan para futuras ampliaciones. Tampoco se modelan cruces recíprocos, herencia
 citoplasmática ni efectos maternos o paternos; los parentales son simétricos y no
-se asignan sexos.
+se asignan sexos (DTF-032).
+
+La primera versión tampoco reproduce entre sí individuos cuya estructura se
+describa respecto a referencias estructurales distintas. Definir la referencia
+de la descendencia, la identidad común de los loci y los mapas de recombinación
+entre esas referencias queda para futuras ampliaciones (DTF-011). Esta exclusión no impide
+mantener subpoblaciones reproductivamente aisladas basadas en referencias
+distintas ni mapear un mismo individuo contra varias referencias disponibles.
 
 La composición de variantes estructurales anidadas o de eventos que modifican
 una estructura creada previamente en la misma copia haplotípica y su linaje
-queda para versiones futuras. Esta exclusión no impide eventos no solapados o
+queda para versiones futuras (DTF-033). Esta exclusión no impide eventos no solapados o
 adyacentes en un mismo haplotipo ni solapamientos situados en haplotipos
 distintos.
 
@@ -252,11 +323,11 @@ o de cromosomas o *scaffolds* completos; y los cambios de ploidía o pérdidas
 cromosómicas asociados. En una duplicación parcial dentro de la misma secuencia,
 también queda fuera insertar la copia dentro de su intervalo fuente. Esta
 prohibición no afecta a la excepción confirmada para una fuente que abarque la
-secuencia completa. También se aplazan la generación de bloques de LD a partir
-de estadísticos objetivo y el cálculo interno de D, D' o r².
+secuencia completa (DTF-034). También se aplazan la generación de bloques de LD a partir
+de estadísticos objetivo y el cálculo interno de D, D' o r² (DTF-035).
 
 El VCF de verdad predeterminado no pretende describir posiciones invariantes ni
-emitir bloques gVCF. La representación completa de genotipos y haplotipos
+emitir bloques gVCF (DTF-036). La representación completa de genotipos y haplotipos
 corresponde al fichero estructurado obligatorio de verdad.
 
 ## 4. Requisitos confirmados
@@ -317,10 +388,17 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   poblacional que corresponda.
 - **REQ-CONF-17.** Los parámetros de generación aleatoria deben poder definirse
   como valores globales y, cuando se desee, como valores específicos para un
-  individuo.
-- **REQ-CONF-18.** Un valor específico de un individuo debe sustituir al valor
-  global solo para ese individuo. Los demás individuos deben conservar el valor
-  global.
+  individuo declarado y existente antes de iniciar cualquier simulación. En v1,
+  estos individuos son los individuos de creación directa, los fundadores y los
+  parentales definidos expresamente.
+- **REQ-CONF-18.** Durante la validación previa, toda sustitución por individuo
+  debe referirse a un identificador existente de una de las categorías admitidas
+  por REQ-CONF-17. Un identificador inexistente debe ser un error. El valor
+  específico sustituye a los valores de ámbitos más generales solo para ese
+  individuo; no se hereda como sustitución individual por sus descendientes. Los
+  descendientes futuros deben recibir los valores que correspondan a sus ámbitos
+  poblacional, temporal y espacial. Seleccionarlos después de su creación no
+  debe modificar retroactivamente los parámetros con los que se generaron.
 - **REQ-CONF-19.** En una población, la configuración debe poder indicar una
   frecuencia alélica como proporción poblacional. Para un individuo concreto no
   debe usar una frecuencia alélica, sino la presencia o ausencia del alelo, su
@@ -340,14 +418,18 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   como una cantidad media esperada, no como un número exacto de eventos. Cuando
   se configure una densidad, el sistema debe obtener la cantidad media esperada
   multiplicando la densidad por la longitud válida del ámbito al que se aplica.
-- **REQ-CONF-24.** El número realizado de eventos debe obtenerse al azar a partir
-  de la cantidad media esperada mediante una distribución probabilística y puede
-  variar entre ejecuciones.
-- **REQ-CONF-25.** La distribución de Poisson debe ser la predeterminada para
-  obtener el número realizado. La configuración debe permitir seleccionar otras
-  distribuciones probabilísticas y sus parámetros por separado para cada clase
-  de variante y para cada región configurada, respetando las sustituciones por
-  individuo definidas en REQ-CONF-18.
+  Un conjunto exacto de cambios debe declararse mediante eventos explícitos; los
+  recuentos alélicos exactos deben usar el modo controlado. Ninguno constituye
+  otra distribución probabilística de recuentos.
+- **REQ-CONF-24.** El número realizado o sorteado de eventos debe obtenerse al
+  azar a partir de la cantidad media esperada mediante una distribución
+  probabilística y puede variar entre ejecuciones.
+- **REQ-CONF-25.** En v1, la distribución de Poisson debe ser la única
+  distribución probabilística admitida para obtener el número realizado o
+  sorteado de variantes aleatorias, por clase, región e individuo según las
+  sustituciones aplicables. Una configuración que seleccione otra distribución
+  debe rechazarse antes de simular e identificar el parámetro y el valor no
+  admitido.
 - **REQ-CONF-26.** Toda ejecución debe usar una semilla aleatoria, es decir, un
   valor que determina las decisiones tomadas al azar. El fichero general debe
   permitir proporcionar una semilla. Si no se proporciona, el sistema debe
@@ -361,26 +443,24 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   referencia estructural concreta, uno de sus cromosomas o *scaffolds* y un
   intervalo de coordenadas basado en 1 y cerrado, es decir, con los dos extremos
   incluidos. El formato técnico del intervalo todavía no está definido.
-- **REQ-CONF-29.** Los valores espaciales deben seguir, como mínimo, la jerarquía
-  de ámbito global del genoma, cromosoma o *scaffold* y región. Para un parámetro
-  y una clase de variante, el valor del ámbito más específico debe sustituir al
-  del ámbito más general que lo contiene.
-- **REQ-CONF-30.** Si dos regiones del mismo nivel se solapan y asignan valores
-  incompatibles al mismo parámetro y a la misma clase de variante, el sistema
-  debe rechazar la configuración antes de iniciar la simulación. El diagnóstico
-  debe identificar las dos regiones y el parámetro en conflicto. Un
-  solapamiento con valores compatibles no debe considerarse un conflicto.
-- **REQ-CONF-31.** La precedencia espacial de REQ-CONF-29 debe aplicarse junto
-  con la precedencia por individuo de REQ-CONF-18. El sistema debe determinar el
-  valor efectivo después de considerar ambas jerarquías.
+- **REQ-CONF-29.** La especificidad espacial debe ordenarse como locus puntual,
+  región, cromosoma o *scaffold* y ausencia de selector espacial, pero solo para
+  las familias que admitan cada nivel conforme a REQ-CONF-121. Esta jerarquía
+  interna no establece prioridad frente a otro eje.
+- **REQ-CONF-30.** Dos regiones solapadas para el mismo parámetro y los mismos
+  selectores no espaciales deben rechazarse antes de simular, aunque sus valores
+  coincidan. No debe suponerse que la región de menor longitud es más específica.
+- **REQ-CONF-31.** Cuando coincidan sustituciones de ejes distintos, incluidas
+  una espacial y una individual, el valor efectivo debe resolverse mediante la
+  relación de dominancia de REQ-CONF-118. No debe combinarse ni priorizarse un
+  eje de forma implícita.
 - **REQ-CONF-32.** Cuando una población combine un objetivo de frecuencia
   alélica con presencia, ausencia, genotipos o dosis alélicas fijados para
   individuos concretos, estos valores individuales deben tratarse como
   restricciones obligatorias y tener prioridad sobre el objetivo poblacional.
 - **REQ-CONF-33.** Cada fase evolutiva debe indicar, como mínimo, su número de
-  generaciones, los valores o cambios de N objetivo y de Ne objetivo, el
-  modelo de apareamiento y los parámetros evolutivos que se usarán durante la
-  fase. El Ne objetivo puede constar como no configurado; el Ne realizado no es
+  generaciones, los valores o cambios de N objetivo, el modelo de apareamiento
+  y los parámetros evolutivos que se usarán durante la fase. Ne realizado no es
   una entrada.
 - **REQ-CONF-34.** Una fase debe poder sustituir valores generales de la
   configuración durante su propio intervalo. Al terminar la fase, esas
@@ -406,10 +486,11 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   ese identificador no debe reutilizarse aunque la subpoblación se extinga o se fusione.
   La configuración debe rechazarse antes de simular si repite un identificador.
 - **REQ-CONF-40.** Para la población completa y, cuando corresponda, para cada
-  subpoblación, N objetivo y Ne objetivo deben poder configurarse de forma independiente
-  y variar mediante valores por generación o mediante fases o tramos
-  configurados. Las reglas de obligatoriedad, herencia y expresión de ambos
-  valores se definen en la sección 4.3.5.
+  subpoblación, N objetivo debe poder variar mediante valores por generación o
+  mediante fases o tramos configurados. V1 debe rechazar antes de simular todo
+  Ne objetivo, absoluto o expresado como Ne/N, en cualquier ámbito. El
+  diagnóstico debe identificar campo y valor y explicar que el control de Ne
+  queda fuera de v1.
 - **REQ-CONF-41.** La configuración debe permitir definir migración mediante una
   relación dirigida por cada par de subpoblaciones origen y destino. Cada fase
   o intervalo debe elegir de forma excluyente proporciones o números exactos de
@@ -422,7 +503,7 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   subpoblación. La división y la fundación deben usar el catálogo declarativo
   común de REQ-CONF-108 y realizar la selección sin reemplazo.
   Para una fusión debe permitir indicar dos o más orígenes y una única
-  subpoblación nueva. Debe permitir definir N objetivo, Ne objetivo, selección,
+  subpoblación nueva. Debe permitir definir N objetivo, selección,
   autofecundación, apareamiento, migración y los demás parámetros aplicables a
   las subpoblaciones resultantes. Para la contribución de una fusión debe elegir
   un modo probabilístico con pesos por origen o un modo controlado con recuentos
@@ -432,13 +513,16 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   parametrizar por fase, generación y subpoblación, cuando corresponda, la selección, la
   deriva genética, la mutación y la migración. También debe poder incluir otros
   procesos evolutivos que el sistema admita.
-- **REQ-CONF-44.** El fichero de configuración poblacional debe permitir
-  reordenar los procesos opcionales dentro de una generación solo cuando se
-  respeten las dependencias biológicas y estructurales obligatorias. Si no se
-  indica un orden, debe aplicarse la secuencia predeterminada de REQ-REP-24.
-- **REQ-CONF-45.** Antes de simular, el sistema debe rechazar una secuencia que
-  contenga procesos desconocidos o combinaciones incompatibles y explicar los
-  procesos y el conflicto detectados.
+- **REQ-CONF-44.** V1 no debe permitir reordenar las categorías de procesos de
+  una generación. Debe aplicar siempre la secuencia obligatoria de REQ-REP-24.
+  Cualquier campo, lista o valor que solicite un orden alternativo debe
+  rechazarse antes de simular e identificar el orden solicitado y la regla fija
+  de v1.
+- **REQ-CONF-45.** Antes de simular, el sistema debe rechazar procesos
+  desconocidos, combinaciones incompatibles y toda solicitud de orden
+  generacional alternativo. El diagnóstico debe explicar los procesos, valores
+  y conflicto detectados. El orden interno explícito de varios eventos
+  demográficos conforme a REQ-CONF-105 no constituye una alternativa.
 - **REQ-CONF-46.** La configuración debe elegir para toda la ejecución uno de
   dos modos excluyentes de recombinación: una tasa uniforme para todo el genoma,
   expresada en centimorgan por megabase (cM/Mb), o un mapa completo con
@@ -498,14 +582,19 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
 - **REQ-CONF-60.** La longitud del motivo debe ser completamente configurable y
   no debe limitarse a 1–6 pb. El sistema debe rechazar un motivo vacío o una
   longitud declarada que no coincida con la longitud de su secuencia, e
-  identificar el locus y el error antes de simular.
-- **REQ-CONF-61.** La configuración debe permitir definir para las repeticiones
-  en tándem la tasa de mutación, el sesgo entre expansión y contracción y la
-  distribución del número de unidades ganadas o perdidas. Debe poder seleccionar
-  otros modelos admitidos además del modelo escalonado predeterminado.
-- **REQ-CONF-62.** El modelo y sus parámetros deben poder definirse globalmente,
-  por locus o región y, en la vía evolutiva, por fase o subpoblación, aplicando las
-  precedencias espaciales, individuales y temporales ya establecidas.
+  identificar el locus y el error antes de simular. Un motivo que contenga `N`
+  tampoco es un locus de repetición modelado válido y debe rechazarse antes de
+  simular.
+- **REQ-CONF-61.** En v1, toda mutación de una repetición en tándem debe usar el
+  modelo escalonado simple: añadir exactamente una unidad completa del motivo o
+  eliminar exactamente una. La tasa de mutación y el sesgo o probabilidad entre
+  expansión y contracción deben seguir siendo configurables. No debe existir una
+  distribución configurable del número de unidades ganadas o perdidas.
+- **REQ-CONF-62.** La tasa y el sesgo entre expansión y contracción deben poder
+  definirse globalmente, por locus o región y, en la vía evolutiva, por fase o
+  subpoblación, aplicando REQ-CONF-116 a REQ-CONF-121. Una configuración que seleccione otro modelo o un salto de
+  varias unidades debe rechazarse antes de simular e identificar el parámetro y
+  el valor no admitido.
 - **REQ-CONF-63.** Las mutaciones internas que introducen, eliminan o modifican
   interrupciones y cambian la pureza o el motivo deben estar desactivadas de
   forma predeterminada. Si se activan, la configuración debe permitir definir
@@ -536,10 +625,10 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   junto con BAM o CRAM. En el modo directo no deben ser necesarios. Una
   configuración incompatible con estas dependencias debe rechazarse antes de
   generar datos.
-- **REQ-CONF-69.** Un experimento de mapeo debe seleccionar exactamente un
+- **REQ-CONF-69.** Un evento con alineamientos debe seleccionar exactamente un
   mapeador, es decir, un programa que alinea lecturas contra una referencia. El
   predeterminado debe ser minimap2. La configuración puede elegir otro mapeador
-  compatible y sus parámetros, pero no varios dentro del mismo experimento.
+  compatible y sus parámetros, pero no varios dentro del mismo evento.
 - **REQ-CONF-70.** Cuando el mapeador sea minimap2, el perfil de tecnología debe
   seleccionar automáticamente el *preset* y los parámetros predeterminados
   apropiados para lecturas cortas tipo Illumina o lecturas largas PacBio HiFi.
@@ -547,20 +636,24 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   las opciones desconocidas o incompatibles, además de advertir de cada
   sustitución.
 - **REQ-CONF-71.** Si se seleccionan varias referencias de mapeo dentro de un
-  experimento, el único mapeador seleccionado debe aplicarse a todas. La
+  evento, el único mapeador seleccionado debe aplicarse a todas. La
   primera versión no debe reutilizar FASTQ entre eventos para comparar
   mapeadores; cada evento debe generar sus propias lecturas.
 - **REQ-CONF-72.** La cobertura debe configurarse como una cobertura media
-  objetivo en «x», de forma global y con sustituciones por individuo,
-  cromosoma o *scaffold* y región. Debe admitir valores altos, bajos o cero.
+  objetivo en «x» para cada biblioteca, de forma global y con sustituciones por
+  individuo, cromosoma o *scaffold* y región. Debe admitir valores altos, bajos
+  o cero. El denominador debe ser la longitud haploide de la referencia
+  estructural del individuo definida en REQ-WGS-04.
 - **REQ-CONF-73.** Las sustituciones de cobertura deben aplicar la precedencia ya
-  acordada: región sobre cromosoma o *scaffold* y este sobre el valor global,
-  junto con la sustitución por individuo cuando corresponda. Dos valores
-  incompatibles en ámbitos solapados del mismo nivel deben rechazarse antes de
-  simular, identificando los ámbitos y el conflicto.
+  acordada en REQ-CONF-116 a REQ-CONF-121: región sobre cromosoma o *scaffold*
+  dentro del eje espacial, sin prioridad implícita frente al individuo. Los
+  conflictos y solapamientos deben rechazarse conforme a REQ-CONF-118 a
+  REQ-CONF-120.
 - **REQ-CONF-74.** Cada región de cobertura debe identificar la referencia
   estructural del individuo, el cromosoma o *scaffold* y el intervalo sobre el
-  que se interpreta.
+  que se interpreta. Su longitud y sus coordenadas deben proceder de esa
+  referencia estructural, no de un haplotipo realizado ni de una referencia de
+  mapeo.
 - **REQ-CONF-75.** Una muestra debe admitir cero, una o varias fuentes de
   contaminación sustitutiva. Para cada fuente, la configuración debe expresar
   la contribución como proporción, cobertura equivalente o número de lecturas o
@@ -578,10 +671,11 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   directo solo puede ser un individuo o población simulados con verdad conocida.
   La configuración debe identificar sin ambigüedad la fuente, su tecnología,
   perfil y disposición *single-end* o *paired-end*.
-- **REQ-CONF-78.** La contaminación técnica debe configurarse por tanda de
-  secuenciación o conjunto de bibliotecas multiplexadas, identificando sus
-  muestras, bibliotecas e índices. Debe distinguirse expresamente de la
-  contaminación biológica definida por fuentes de lecturas.
+- **REQ-CONF-78.** Cada evento que genere FASTQ, BAM o CRAM debe declarar
+  exactamente una tanda de secuenciación. La contaminación técnica debe
+  configurarse dentro de esa tanda, identificando todas sus muestras,
+  bibliotecas e índices. Debe distinguirse expresamente de la contaminación
+  biológica definida por fuentes de lecturas.
 - **REQ-CONF-79.** La configuración debe admitir índices simples, índices duales
   combinatorios e índices duales únicos (UDI, *Unique Dual Indexes*), en los que
   cada biblioteca usa una combinación exclusiva de dos índices.
@@ -602,18 +696,20 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   proporcione sustituciones.
 - **REQ-CONF-84.** La configuración debe permitir sustituir el perfil de errores
   globalmente y por individuo, cromosoma o *scaffold* y región. Debe aplicar la
-  misma precedencia por especificidad y el mismo rechazo de conflictos del mismo
-  nivel establecidos para la cobertura.
-- **REQ-CONF-85.** La configuración debe permitir proporcionar opcionalmente un
-  FASTQ real de WGS de DNA genómico y la referencia correspondiente para estimar
-  un perfil empírico de simulación WGS.
-- **REQ-CONF-86.** La configuración debe distinguir entre estimar un perfil
-  empírico y seleccionarlo como perfil efectivo. La calibración no debe sustituir
-  al perfil tecnológico predeterminado salvo que la persona usuaria lo seleccione
-  expresamente.
-- **REQ-CONF-87.** La configuración debe permitir seleccionar como entrada un
-  fichero de perfil empírico generado por una ejecución anterior, sin requerir
-  de nuevo el FASTQ real del que se estimó.
+  misma dominancia y los mismos rechazos de REQ-CONF-116 a REQ-CONF-121.
+- **REQ-CONF-85.** Antes de iniciar cualquier simulación, la configuración debe
+  rechazar todo FASTQ, referencia u otro campo declarado como entrada para
+  calibración empírica automática. El diagnóstico debe identificar el campo y
+  explicar que esa capacidad queda fuera de v1.
+- **REQ-CONF-86.** Antes de iniciar cualquier simulación, la configuración debe
+  rechazar toda solicitud de estimar, inferir o generar un perfil empírico,
+  incluida la inferencia de tecnología o parámetros desde datos reales. El
+  diagnóstico debe identificar el parámetro y explicar que queda fuera de v1.
+- **REQ-CONF-87.** Antes de iniciar cualquier simulación, la configuración debe
+  rechazar la selección o reutilización de un fichero de perfil empírico como
+  perfil efectivo. Este rechazo no debe impedir seleccionar los perfiles
+  tecnológicos incorporados para Illumina o PacBio HiFi ni aplicar las
+  sustituciones explícitas permitidas a sus parámetros.
 - **REQ-CONF-88.** La preparación WGS predeterminada debe ser sin PCR. Un perfil
   WGS amplificado debe permitir configurar por separado la tasa de duplicados de
   PCR, originados al representar varias veces una misma molécula amplificada, y
@@ -678,11 +774,14 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   aplicables, salidas y subsemilla. Cero eventos significa que no se genera
   ninguna salida asociada a eventos; no debe crearse un evento implícito.
 - **REQ-CONF-102.** Un evento que genere FASTQ, BAM o CRAM debe seleccionar
-  exactamente una tecnología y un perfil tecnológico. Cuando genere BAM o CRAM
-  debe seleccionar además exactamente un mapeador conforme al modo configurado.
-  Un evento que solo solicite verdad genotípica o VCF no debe requerir
-  tecnología, perfil, bibliotecas ni mapeador. Eventos distintos pueden usar
-  valores distintos sin compartir lecturas ni resultados técnicos.
+  exactamente una tecnología, un perfil tecnológico y una tanda. Debe declarar
+  exactamente una biblioteca por cada individuo seleccionado y tratar juntas
+  todas las bibliotecas dentro de la única tanda. Cuando genere BAM o CRAM debe
+  seleccionar además exactamente un mapeador conforme al modo configurado. Un
+  evento que solo solicite verdad genotípica o VCF no constituye un experimento
+  de secuenciación y no debe declarar tecnología, perfil, bibliotecas, tanda ni
+  mapeador. Eventos distintos pueden usar valores distintos sin compartir
+  lecturas ni resultados técnicos.
 - **REQ-CONF-103.** La configuración debe permitir solicitar de forma
   independiente, para cada evento, su VCF de verdad, sus FASTQ y sus BAM o CRAM,
   respetando las dependencias entre el modo realista, el modo directo y las
@@ -690,8 +789,8 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
 - **REQ-CONF-104.** La configuración evolutiva debe indicar si permite que una
   subpoblación se extinga cuando un resultado de la simulación produce N
   realizado igual a 0. El valor global predeterminado debe ser desactivado y
-  debe poder sustituirse por subpoblación y fase evolutiva; el ámbito más
-  específico debe prevalecer. Esta opción es distinta de programar un evento
+  debe poder sustituirse por subpoblación y fase evolutiva conforme a la
+  dominancia de REQ-CONF-118. Esta opción es distinta de programar un evento
   explícito de extinción.
 - **REQ-CONF-105.** Si una generación contiene varios eventos demográficos, la
   configuración debe indicar su orden total de forma explícita y sin
@@ -754,21 +853,80 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   ordenación equivalente o metadatos no biológicos no invalidan por sí mismas
   los niveles anteriores.
 
-- **REQ-TEC-01.** Cada experimento de secuenciación y cada evento que genere
-  FASTQ, BAM o CRAM debe seleccionar exactamente una tecnología. No debe mezclar
-  lecturas cortas tipo Illumina y lecturas largas PacBio HiFi dentro del mismo
-  evento o experimento. Un evento que solo produzca verdad genotípica o VCF no
-  constituye un experimento de secuenciación.
-- **REQ-TEC-02.** Un experimento puede contener varias bibliotecas, tandas o
-  carriles, pero todos deben usar el mismo tipo tecnológico y ser compatibles
-  con el perfil de lecturas y el mapeo seleccionados.
+- **REQ-CONF-116.** Cada parámetro debe tener un valor general o predeterminado,
+  o una regla base sin selectores, salvo que su familia exija expresamente otra
+  forma. Una sustitución debe contener uno o más selectores admitidos para su
+  familia y solo debe aplicarse cuando todos coincidan con el objeto y el estado
+  evaluados.
+- **REQ-CONF-117.** La especificidad dentro de cada eje debe ordenarse así:
+  generación sobre fase sobre ausencia; subpoblación sobre población sobre
+  ausencia; locus sobre región sobre secuencia sobre ausencia; evento técnico
+  concreto sobre ausencia; e individuo concreto sobre ausencia. En un eje
+  nominal ya admitido, como grupo o bloque, una coincidencia concreta debe ser
+  más específica que su ausencia. No debe existir prioridad implícita entre
+  ejes distintos.
+- **REQ-CONF-118.** Una regla A debe dominar a otra B cuando sea igual o más
+  específica en todos los ejes admitidos y aplicables y estrictamente más
+  específica en al menos uno. Tras reunir las reglas aplicables se deben retirar
+  las dominadas. Una única regla máxima determina el valor efectivo. Varias
+  máximas incomparables deben causar un rechazo previo aunque sus valores
+  coincidan; el diagnóstico debe identificar parámetro, objeto o ámbito y todas
+  las reglas en conflicto. El conflicto solo se resuelve eliminando una regla o
+  añadiendo una regla combinada que coincida en los ejes necesarios y domine a
+  las anteriores.
+- **REQ-CONF-119.** Dos reglas del mismo parámetro con exactamente los mismos
+  selectores deben rechazarse antes de simular aunque expresen el mismo valor.
+- **REQ-CONF-120.** Un selector no admitido por la familia del parámetro debe
+  rechazarse antes de simular e identificar el campo y el ámbito no permitido.
+  Una regla base continúa hasta que otra regla aplicable la sustituya; una regla
+  de fase solo actúa dentro de esa fase y una de generación solo en esa
+  generación. Una sustitución individual se limita a los individuos
+  preexistentes de REQ-CONF-17 y REQ-CONF-18: no se hereda a descendientes
+  futuros ni modifica retroactivamente su creación.
+- **REQ-CONF-121.** Las familias de parámetros deben admitir únicamente los ejes
+  de esta matriz normativa; cada celda se limita a los parámetros para los que
+  los requisitos de esa familia ya declaran una sustitución:
+
+  | Familia | Ejes de sustitución admitidos en v1 | Herencia o vigencia |
+  | --- | --- | --- |
+  | Estructura y ploidía | secuencia | toda la ejecución |
+  | Creación, frecuencias y mutación | individuo preexistente; población o subpoblación; fase o generación; secuencia, región o locus; grupo o bloque cuando esté definido | base hasta sustitución; fase y generación en su intervalo; individuo sin herencia a descendientes |
+  | Demografía, migración, reproducción y selección | población o subpoblación; fase o generación; locus solo para condiciones genéticas ya admitidas; grupo cuando esté definido | base hasta sustitución; fase y generación en su intervalo |
+  | Recombinación | grupo y secuencia | toda la ejecución o el grupo declarado |
+  | WGS, cobertura, perfiles y errores | evento técnico, individuo, secuencia y región | dentro del evento técnico; una regla sin evento conserva su vigencia declarada |
+  | Contaminación y demultiplexado | evento técnico e individuo o muestra representada por su biblioteca | solo dentro de la tanda del evento técnico |
+  | Salidas y eventos de observación | evento técnico; individuo como miembro seleccionado, no como modificación biológica | solo dentro del evento técnico |
+
+- **REQ-CONF-122.** Los parámetros biológicos no deben admitir el evento
+  técnico como selector. Un evento técnico materializa la verdad ya existente y
+  ninguna sustitución técnica puede cambiar genotipo, genealogía, trayectoria
+  biológica ni verdad. Los eventos demográficos o reproductivos conservan sus
+  campos y ejes biológicos y no deben interpretarse como eventos técnicos.
+- **REQ-CONF-123.** La configuración efectiva debe registrar, para cada
+  parámetro y objeto evaluado, el valor efectivo, la regla ganadora y la
+  procedencia y selectores de esa regla. Ante un rechazo por ambigüedad, el
+  diagnóstico debe conservar todas las reglas máximas en conflicto.
+
+- **REQ-TEC-01.** Cada evento que genere FASTQ, BAM o CRAM constituye también su
+  único experimento de secuenciación, sin una identidad de experimento separada,
+  y debe seleccionar exactamente una tecnología. No debe mezclar lecturas
+  cortas tipo Illumina y lecturas largas PacBio HiFi dentro del mismo evento.
+  Un evento que solo produzca verdad genotípica o VCF no constituye un
+  experimento de secuenciación.
+- **REQ-TEC-02.** Cada experimento debe contener exactamente una tanda y una o
+  varias bibliotecas: exactamente una por cada individuo seleccionado. Todas las
+  bibliotecas deben tratarse conjuntamente en la tanda y ser compatibles con la
+  tecnología, el perfil de lecturas y el mapeo seleccionados para el evento. La
+  primera versión no debe admitir carriles.
 - **REQ-TEC-03.** La configuración debe permitir crear experimentos separados
   por tecnología a partir de la misma simulación biológica, incluidos eventos de
   muestreo distintos, con trazabilidad entre ellos y sin mezclar sus archivos ni
-  reutilizar sus lecturas.
+  reutilizar sus lecturas. Otra biblioteca del mismo individuo, otra tanda, otro
+  perfil o tecnología y todo control independiente deben declararse mediante
+  otro evento.
 - **REQ-TEC-04.** El mapeador, el *preset* y sus parámetros deben ser
   compatibles con la única tecnología del experimento y aplicarse de forma
-  coherente a todas sus bibliotecas, tandas, carriles y referencias.
+  coherente a todas sus bibliotecas, a su única tanda y a todas sus referencias.
 - **REQ-TEC-05.** Dos perfiles que requieran modelos de error, calidades o
   parámetros de mapeo distintos deben considerarse tecnologías experimentales
   diferentes aunque pertenezcan al mismo fabricante. Cada tecnología admitida
@@ -785,8 +943,8 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   secuenciación dirigida por PCR.
 - **REQ-TEC-09.** La primera versión solo debe admitir lecturas cortas tipo
   Illumina, *single-end* o *paired-end*, y lecturas largas PacBio HiFi. Debe
-  rechazar Oxford Nanopore y PacBio CLR como tecnologías de simulación o
-  calibración e indicar que quedan aplazadas a futuras ampliaciones.
+  rechazar Oxford Nanopore y PacBio CLR como tecnologías de simulación e indicar
+  que quedan aplazadas a futuras ampliaciones.
 - **REQ-TEC-10.** La configuración efectiva y el manifiesto deben registrar el
   tipo de preparación WGS, el perfil, sus valores predeterminados y todas las
   sustituciones aplicadas.
@@ -856,7 +1014,10 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   participar en la comprobación de unicidad.
 - **REQ-REF-14.** Las secuencias del FASTA suministrado deben contener únicamente
   A, C, G, T y N. Se deben aceptar tanto mayúsculas como minúsculas. N es el
-  único símbolo admitido para una base desconocida o no determinada.
+  único símbolo admitido para una base desconocida o no determinada. Debe
+  conservarse exactamente, ocupar su coordenada y contar en la longitud de la
+  secuencia; nunca debe resolverse al azar ni sustituirse silenciosamente por
+  A, C, G o T.
 - **REQ-REF-15.** El FASTA suministrado no debe contener símbolos que representen
   huecos (*gaps*), códigos IUPAC de ambigüedad distintos de N ni ningún otro
   símbolo diferente de los admitidos en REQ-REF-14.
@@ -888,9 +1049,9 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   secuencia generada por el simulador, debe usar exclusivamente A, C, G, T y N,
   sin distinguir mayúsculas de minúsculas durante la validación. Cualquier otro
   símbolo debe rechazarse antes de usar la secuencia e identificarse en el
-  diagnóstico. El tratamiento de N por cada operación queda sujeto a la
-  decisión funcional específica registrada como pendiente; aceptar N no
-  autoriza a resolverla aleatoriamente de forma implícita.
+  diagnóstico. Las bases `N` de referencias, haplotipos, secuencias explícitas
+  o copias deben conservarse con su posición; toda secuencia nueva generada
+  aleatoriamente debe contener solo A, C, G y T.
 
 La copia permite reunir en el directorio de resultados todos los archivos
 necesarios para utilizar la simulación. Así se podrán exportar juntos a otros
@@ -938,10 +1099,10 @@ la parte restante corresponde a interrupciones. La variabilidad describe las
 diferencias entre haplotipos, individuos o poblaciones en el número de copias y
 en el patrón de interrupciones.
 
-El modelo escalonado de mutación cambia una repetición en tándem mediante la
-ganancia o pérdida de unidades completas del motivo. Es el modelo predeterminado,
-pero no se fijan todavía las fórmulas de sus parámetros ni las distribuciones
-alternativas admitidas.
+El modelo escalonado simple de mutación cambia una repetición en tándem mediante
+la ganancia o pérdida de exactamente una unidad completa del motivo por evento.
+Es el único modelo de v1. Puede configurarse la probabilidad relativa de
+expansión frente a contracción, pero no el tamaño del salto.
 
 - **REQ-IND-01.** El sistema debe crear individuos que contengan SNP, *indels*,
   variantes estructurales y repeticiones en tándem respecto a una referencia.
@@ -983,14 +1144,14 @@ alternativas admitidas.
   Los demás individuos deben conservar la configuración global.
 - **REQ-IND-16.** Para cada clase de variante, ámbito general o región e
   individuo al que se aplique la generación aleatoria, el sistema debe conservar
-  tanto la cantidad media esperada como el número realizado de eventos.
+  la cantidad media esperada, el número realizado o sorteado, el número aceptado
+  antes de un posible fallo y el número finalmente activo.
 - **REQ-IND-17.** El número realizado debe ser entero y puede diferir de la
   cantidad media esperada y entre ejecuciones que no estén obligadas a repetir
   las mismas decisiones aleatorias.
-- **REQ-IND-18.** El número realizado debe obtenerse con la distribución de
-  Poisson de forma predeterminada. Cuando la configuración seleccione otra
-  distribución probabilística para una clase de variante o una región, el
-  sistema debe usar esa distribución y sus parámetros.
+- **REQ-IND-18.** El número realizado de variantes aleatorias debe obtenerse
+  exclusivamente con la distribución de Poisson. La misma semilla,
+  configuración, entradas y versión deben reproducir el mismo recuento.
 - **REQ-IND-19.** Las coordenadas de una región de generación deben interpretarse
   sobre la referencia estructural que corresponde al individuo o a la población
   a los que se aplica.
@@ -998,9 +1159,8 @@ alternativas admitidas.
   distinta de su referencia estructural, la región de generación no debe
   reinterpretarse en las coordenadas de la referencia de mapeo.
 - **REQ-IND-21.** Al generar eventos, el sistema debe aplicar el valor espacial
-  más específico disponible dentro de la jerarquía genoma, cromosoma o
-  *scaffold* y región, junto con la sustitución específica del individuo cuando
-  exista.
+  aplicable conforme a la jerarquía interna espacial de REQ-CONF-117 y resolver
+  su coincidencia con una sustitución individual mediante REQ-CONF-118.
 - **REQ-IND-22.** Cada locus con frecuencias objetivo debe usar exactamente un
   modo. El modo probabilístico, predeterminado, interpreta las frecuencias como
   probabilidades y muestrea la realización de forma estocástica después de
@@ -1017,7 +1177,8 @@ alternativas admitidas.
   ser un error. Todo empate entre soluciones óptimas debe resolverse al azar con
   la semilla, de forma reproducible, para evitar un sesgo sistemático. Una vez
   fijados los recuentos, las copias alélicas deben distribuirse aleatoriamente
-  entre individuos, condicionadas al modelo elegido: Hardy-Weinberg, F o una
+  entre individuos, condicionadas al modelo elegido: Hardy-Weinberg binomial o
+  multinomial para ploidías 1–10, F automático solo en diploides o una
   distribución explícita. Las restricciones incompatibles deben producir un
   error.
 - **REQ-IND-24.** Para cada objetivo poblacional, el sistema debe registrar el
@@ -1037,12 +1198,15 @@ alternativas admitidas.
   aplicable o, en caso contrario, el perfil general.
 - **REQ-IND-28.** El estado genotípico interno de cada individuo debe representar
   por separado cada copia cromosómica o haplotipo según su ploidía y conservar la
-  fase hasta el final de la simulación.
+  fase hasta el final de la simulación. Toda `N` heredada o incorporada mediante
+  una secuencia explícita o copiada debe conservarse sin interpretarse como un
+  alelo concreto.
 - **REQ-IND-29.** Cada SNP, *indel* y variante estructural debe asignarse a uno o
   varios haplotipos concretos del individuo, según su genotipo.
 - **REQ-IND-30.** Los haplotipos de un descendiente deben reconstruirse a partir
   de los haplotipos parentales y los eventos de recombinación, conservando el
-  origen parental de sus segmentos.
+  origen parental de sus segmentos. La recombinación debe transportar sin
+  cambios las `N` incluidas en un segmento estructuralmente válido.
 - **REQ-IND-31.** El sistema debe aplicar el umbral efectivo de longitud de forma
   coherente al generar y clasificar inserciones y deleciones y al calcular sus
   cantidades y estadísticas por clase.
@@ -1054,10 +1218,14 @@ alternativas admitidas.
   de copias o longitud total.
 - **REQ-IND-34.** La generación aleatoria o regional de repeticiones en tándem debe usar
   la semilla de la ejecución y conservar los parámetros y resultados realizados
-  con el mismo nivel de trazabilidad que las demás clases de variación.
+  con el mismo nivel de trazabilidad que las demás clases de variación. Un motivo
+  que contenga `N` o un locus cuyo motivo no pueda determinarse sin `N` debe
+  excluirse de los candidatos aleatorios.
 - **REQ-IND-35.** Cada evento de mutación de una repetición en tándem debe usar la
   semilla de la ejecución, asignarse a un haplotipo concreto y actualizar su
-  estado genotípico con las unidades ganadas o perdidas.
+  estado genotípico añadiendo exactamente una unidad completa del motivo o
+  eliminando exactamente una, según el sesgo efectivo entre expansión y
+  contracción.
 - **REQ-IND-36.** Cuando estén activadas, las mutaciones internas de una
   repetición en tándem deben afectar a un haplotipo concreto y actualizar de
   forma trazable el patrón de interrupciones, la pureza o el motivo realizado.
@@ -1134,6 +1302,47 @@ alternativas admitidas.
   fuente original, la copia insertada y las coordenadas posteriores cuando
   exista tal correspondencia. Esta regla no elimina las demás restricciones de
   composición y solapamiento de variantes estructurales.
+- **REQ-IND-53.** En la primera versión, todos los individuos de una misma
+  unidad reproductiva deben tener la misma referencia estructural. Una unidad
+  reproductiva es el conjunto de individuos que pueden elegirse como parentales
+  para producir una misma descendencia: el conjunto reproductor de una
+  subpoblación en una generación o los parentales de un evento de cruce. Las
+  subpoblaciones o ramas que no intercambien individuos ni se reproduzcan entre
+  sí pueden usar referencias estructurales distintas. Antes de iniciar la
+  simulación o ejecutar un evento demográfico que forme una unidad
+  reproductiva, el sistema debe rechazar cualquier mezcla e identificar los
+  individuos, las referencias y el evento afectados. Esta regla no limita las
+  referencias de mapeo que puedan seleccionarse para observar esos individuos.
+- **REQ-IND-54.** Al combinar cambios explícitos y aleatorios, el sistema debe
+  aplicar primero todos los eventos explícitos en el orden en que se declararon.
+  Cada evento explícito debe recibir el estado producido por el anterior.
+- **REQ-IND-55.** Después de los eventos explícitos, el sistema debe sortear por
+  separado el número realizado de eventos aleatorios de cada clase y procesar
+  las clases en este orden fijo: duplicaciones, deleciones, inversiones,
+  translocaciones, repeticiones en tándem, *indels* y SNP. Los elementos
+  transponibles no forman una clase de v1.
+- **REQ-IND-56.** Cada evento aleatorio debe elegir su ubicación y, cuando
+  proceda, su origen exclusivamente entre los candidatos válidos en el estado
+  inmediatamente anterior. Tras aceptar un evento, el sistema debe actualizar
+  el espacio válido antes de elegir el siguiente. No debe sortear candidatos
+  inválidos para reintentarlos ni imponer un límite arbitrario de intentos.
+- **REQ-IND-57.** Si el espacio válido actualizado no permite completar el
+  número sorteado de una clase, la generación debe fallar sin reducir
+  silenciosamente el resultado ni convertir la insuficiencia en advertencia. El
+  diagnóstico y el manifiesto deben conservar por clase el número sorteado, el
+  aceptado antes del fallo y el finalmente activo, sin publicar la generación
+  fallida como verdad completa.
+- **REQ-IND-58.** `N` no debe ser origen ni destino de un SNP. Un SNP explícito
+  sobre `N` debe rechazarse y la generación aleatoria debe excluir esa posición;
+  el modelo SNP solo puede producir A, C, G o T. Una deleción, duplicación,
+  inversión, translocación, desplazamiento u otra operación puramente
+  estructural puede contener `N` en el interior de su intervalo y debe
+  conservarla al copiar o mover el segmento. Una `N` solo invalida un ancla,
+  extremo o candidato cuando la operación necesita conocer allí una base
+  concreta.
+- **REQ-IND-59.** Una inserción aleatoria nueva debe contener solo A, C, G y T.
+  Una inserción configurada explícitamente o copiada desde una secuencia
+  existente puede contener `N` y debe conservarla exactamente.
 
 El identificador de individuo distingue a una entidad biológica simulada. Es
 distinto del identificador de un evento de muestreo, que distingue una
@@ -1149,8 +1358,11 @@ el estado interno y a través de la herencia y la recombinación.
 La cantidad media esperada es el promedio de eventos que se obtendría al repetir
 muchas veces la generación aleatoria con los mismos parámetros. No exige que
 cada ejecución produzca ese número exacto y puede no ser un número entero. El
-número realizado es el número entero de eventos obtenido en una ejecución
-concreta.
+número realizado o sorteado es el número entero de eventos obtenido de la
+distribución en una ejecución concreta. Debe distinguirse del número aceptado,
+que cuenta los eventos situados antes de un posible fallo, y del número
+finalmente activo, que cuenta los que permanecen en la verdad después de aplicar
+los eventos posteriores.
 
 La densidad relaciona la cantidad media esperada con una longitud de secuencia y
 puede expresarse por base, kilobase o megabase. Una kilobase equivale a mil bases
@@ -1162,10 +1374,10 @@ de una densidad se obtiene multiplicando esa densidad por la longitud válida de
 propia unidad.
 
 Una distribución probabilística asigna probabilidades a los posibles números
-realizados a partir de la cantidad media esperada. La distribución de Poisson es
-la opción predeterminada. Podrán seleccionarse otras distribuciones por clase de
-variante y por región, pero el catálogo y los parámetros admitidos todavía no
-se han definido.
+realizados a partir de la cantidad media esperada. En v1, la distribución de
+Poisson es la única admitida para el recuento de variantes aleatorias. Los
+eventos explícitos y el modo controlado expresan resultados concretos y no son
+distribuciones probabilísticas alternativas.
 
 Una distribución espacial uniforme reparte los eventos sin favorecer unas
 posiciones válidas sobre otras dentro del ámbito que se determine. Una región
@@ -1203,8 +1415,9 @@ la ejecución.
   densidad cero, tanto globales como específicas por individuo.
 - **REQ-DIR-04.** En la creación directa o aleatoria de individuos, las
   diferencias de número de copias de las repeticiones en tándem deben poder
-  generarse con el modelo escalonado predeterminado o con otro modelo admitido
-  seleccionado en la configuración.
+  generarse exclusivamente con el modelo escalonado simple. Cada mutación debe
+  añadir o eliminar una unidad completa; la configuración solo puede cambiar el
+  sesgo entre ambas direcciones.
 - **REQ-DIR-05.** La creación directa debe aplicar mutaciones internas de
   repeticiones en tándem solo cuando se hayan activado expresamente.
 
@@ -1219,22 +1432,20 @@ distribuciones genotípicas explícitas. Estas condiciones iniciales son distint
 de las desviaciones que aparezcan después por autofecundación, endogamia,
 selección, deriva u otros procesos evolutivos.
 
-El coeficiente de endogamia inicial F es una opción de comodidad para aumentar
-la homocigosis esperada respecto al equilibrio de Hardy-Weinberg. Para cualquier
-ploidía mayor que 1, F=0 conserva las probabilidades genotípicas de ese
-equilibrio. Al aumentar F, debe crecer progresivamente la probabilidad de que
-las copias homólogas de un individuo porten el mismo alelo. F=1 produce
-homocigosis completa en cada locus. En este documento, F es una expectativa
-genómica de la población o de una subpoblación, no un valor exacto por
-individuo, locus o bloque ni una longitud esperada de tramos de homocigosis
-(ROH, *runs of homozygosity*). La primera versión no distingue modelos
-específicos de herencia polisómica o disómica para aplicar F. El F realizado se
-estima comparando la heterocigosidad observada con la esperada según las
-frecuencias alélicas, por subpoblación y generación registrada. En poliploides,
-un individuo se considera heterocigoto cuando sus copias homólogas no portan
-todas el mismo alelo. El resultado puede diferir del F configurado y ser
-negativo cuando hay más heterocigotos de los esperados; ese valor se conserva y
-no constituye un error.
+El equilibrio de Hardy-Weinberg y el coeficiente automático de endogamia F son
+opciones distintas. Hardy-Weinberg se admite para ploidías 1–10. En un locus
+bialélico con frecuencia alternativa `p` y ploidía `P`, la probabilidad de dosis
+`k` es `C(P,k) p^k (1-p)^(P-k)`, donde `C(P,k)` es el coeficiente binomial que
+cuenta las formas de distribuir `k` copias alternativas entre `P` copias; en un
+locus multialélico se usa la distribución multinomial equivalente sobre las
+composiciones válidas. El modelo automático F
+solo se admite en diploides. Con dos alelos de frecuencias `p` y `q`, usa
+`P(AA)=p²+Fpq`, `P(AB)=2pq(1-F)` y `P(BB)=q²+Fpq`. En un locus multialélico
+diploide, para cada alelo `i` usa `P(ii)=p_i²+F p_i(1-p_i)` y para cada par
+`i<j`, `P(ij)=2(1-F)p_i p_j`. F=0 coincide con Hardy-Weinberg y F=1 produce
+homocigosis completa. En haploides y poliploides solo se admite Hardy-Weinberg
+sin F o una distribución explícita. F realizado se calcula únicamente en
+diploides; en las demás ploidías figura como «no aplicable».
 
 La endogamia es el apareamiento entre individuos emparentados. La tasa de
 mutación describe con qué frecuencia aparecen cambios genéticos nuevos. Los
@@ -1257,17 +1468,14 @@ ya creada. Una fase evolutiva es un intervalo de una o más generaciones que
 comparte el tamaño o cambio demográfico, el modelo de apareamiento y los demás
 parámetros configurados para ese intervalo.
 
-El tamaño N objetivo es el número de descendientes que el sistema intenta crear
-para una población o subpoblación. N realizado es el tamaño censal obtenido, es
-decir, el número de individuos que se crearon realmente. Ambos pueden diferir si
-la migración, la selección u otro resultado aleatorio dejan progenitores
-insuficientes durante la ejecución. El
-tamaño efectivo, representado por Ne, es un parámetro que gobierna la intensidad
-de la deriva genética y la endogamia y puede diferir de N. En cada fase y
-generación se distinguen N objetivo, N realizado, Ne objetivo y Ne realizado. El
-Ne objetivo es el valor estadístico que el esquema reproductivo intenta
-aproximar cuando se ha configurado. El Ne realizado es el valor estimado después
-de la reproducción. En la primera versión será exclusivamente un Ne
+El tamaño N objetivo es el número de intentos reproductivos que deben efectuarse
+para una población o subpoblación. Cada intento exitoso crea exactamente un
+descendiente; N realizado es el número de descendientes creados. Ambos pueden
+diferir si la migración, la selección o el propio sorteo reproductivo dejan sin
+opciones válidas uno o más intentos. El tamaño efectivo, representado por Ne,
+describe el efecto de la contribución reproductiva y puede diferir de N. V1 no
+admite Ne objetivo. Ne realizado es el valor estimado después de la
+reproducción y será exclusivamente un Ne
 reproductivo: se estimará a partir de los progenitores que dejaron descendencia
 y de la desigualdad o varianza de sus contribuciones. No se estimará a partir de
 la pérdida de heterocigosidad, el incremento de endogamia ni el desequilibrio de
@@ -1277,9 +1485,9 @@ demográficos o evolutivos propios y que pueden estar conectados por migración.
 En este documento, «población» designa siempre el conjunto completo simulado. Si
 solo existe un grupo reproductivo, la población contiene una única
 subpoblación. La migración es el paso de un individuo de una subpoblación a otra.
-N objetivo guía la descendencia y N realizado registra su resultado. Ne
-objetivo puede expresarse como valor absoluto o relativo a N, o constar como no
-configurado. Ne realizado se calcula siempre.
+N objetivo fija los intentos y N realizado registra sus éxitos. Ne realizado se
+calcula siempre que sea evaluable; en caso contrario se registra como «no
+evaluable» junto con la causa.
 La migración se aplica mediante rutas dirigidas entre pares de subpoblaciones y
 se resuelve una sola vez dentro de cada generación.
 
@@ -1376,17 +1584,19 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   estructural que corresponde a cada uno.
 - **REQ-EVO-14.** Un muestreo solo debe producir BAM o CRAM y VCF de verdad si el
   evento los solicita expresamente. Cada evento debe constituir una unidad de
-  exportación y un experimento tecnológico independiente.
+  exportación y, cuando genere FASTQ, BAM o CRAM, su único experimento de
+  secuenciación independiente.
 - **REQ-EVO-15.** La creación, reproducción, muestreo y desaparición de
   individuos deben conservar sus identificadores estables y las relaciones con
   sus parentales cuando existan.
-- **REQ-EVO-16.** N objetivo y Ne objetivo deben poder variar de manera independiente entre
-  generaciones, fases o tramos para representar expansiones, reducciones y
-  cuellos de botella. El sistema debe aplicar en cada intervalo los valores que
-  resulten de la configuración, sin asumir que N y Ne objetivo sean iguales.
-- **REQ-EVO-17.** Cada subpoblación debe poder tener sus propios N objetivo, Ne objetivo,
+- **REQ-EVO-16.** N objetivo debe poder variar entre generaciones, fases o
+  tramos para representar expansiones, reducciones y cuellos de botella. El
+  sistema debe aplicar en cada intervalo el valor efectivo de intentos
+  reproductivos que resulte de la configuración.
+- **REQ-EVO-17.** Cada subpoblación debe poder tener su propio N objetivo,
   modelo de apareamiento y demás parámetros evolutivos, variables por
-  generación, fase o tramo. También debe calcular su Ne realizado.
+  generación, fase o tramo. También debe calcular su Ne realizado cuando sea
+  evaluable o registrar la causa si no lo es.
 - **REQ-EVO-18.** El sistema debe aplicar la migración direccional configurada
   por pares de origen y destino mediante proporciones o números exactos, según el
   único modo elegido para la fase. Cada migrante debe salir del conjunto
@@ -1428,18 +1638,19 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   activadas. La deriva genética debe emerger del muestreo finito de parentales,
   gametos, copias y descendientes; no debe existir un segundo paso que modifique
   artificialmente las frecuencias alélicas bajo la etiqueta «deriva».
-- **REQ-EVO-24.** La intensidad de la deriva debe resultar de N, del esquema que
-  intenta aproximar Ne objetivo, de la contribución reproductiva realizada y de
-  la estructura poblacional. El sistema debe registrar las frecuencias alélicas
-  realizadas por generación para poder observarla.
+- **REQ-EVO-24.** La intensidad de la deriva debe resultar de N, de la
+  contribución reproductiva realizada y de la estructura poblacional, sin un
+  objetivo de Ne ni un paso adicional. El sistema debe registrar las
+  frecuencias alélicas realizadas por generación para poder observarla.
 - **REQ-EVO-25.** En la primera versión, la selección debe ser exclusivamente de
-  viabilidad y usar un único locus estable para toda la ejecución. Los valores
-  genéticos por genotipo o dosis y la función que transforma el valor del
-  carácter en aptitud pueden variar por fase, intervalo y subpoblación.
-- **REQ-EVO-26.** En cada generación, el sistema debe aplicar los procesos en el
-  orden predeterminado de REQ-REP-24 o en otro orden válido que respete todas sus
-  dependencias obligatorias. Debe rechazar antes de simular cualquier orden que
-  las infrinja.
+  viabilidad y usar un único SNP bialélico estable para toda la ejecución. Los
+  valores genéticos por dosis del alelo alternativo y la función que transforma
+  el valor del carácter en aptitud pueden variar por fase, intervalo y
+  subpoblación sin cambiar la identidad del locus.
+- **REQ-EVO-26.** En cada generación, el sistema debe aplicar exclusivamente el
+  orden obligatorio de REQ-REP-24. Un proceso opcional desactivado o no
+  aplicable debe omitirse en su etapa sin mover, adelantar ni reinterpretar las
+  demás.
 - **REQ-EVO-27.** La vía evolutiva debe simular explícitamente la recombinación al
   formar descendientes, usando la semilla de la ejecución y la tasa uniforme o
   el mapa completo y los parámetros efectivos generales o del grupo
@@ -1450,9 +1661,9 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
 - **REQ-EVO-29.** La evolución debe conservar de generación en generación los
   haplotipos, su fase y el origen de los segmentos heredados o recombinados.
 - **REQ-EVO-30.** Cuando la mutación de repeticiones en tándem esté activa, la
-  evolución debe aplicar por defecto el modelo escalonado o el modelo alternativo
-  configurado, con los parámetros efectivos de la fase, la subpoblación, la región y el
-  locus.
+  evolución debe aplicar exclusivamente el modelo escalonado simple, con la tasa
+  y el sesgo entre expansión y contracción efectivos de la fase, la
+  subpoblación, la región y el locus.
 - **REQ-EVO-31.** Las mutaciones internas de repeticiones en tándem solo deben
   aplicarse en la evolución cuando estén activadas, usando sus tipos, tasas y
   distribuciones efectivos.
@@ -1460,9 +1671,10 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   Cada subpoblación debe poder elegir una distribución inicial distinta. La suma
   de sus tamaños debe coincidir con el N total de la población.
 - **REQ-EVO-33.** El equilibrio de Hardy-Weinberg debe ser un modo opcional de
-  inicialización por locus. Debe obtener las probabilidades de dosificación
-  alélica a partir de las frecuencias alélicas y usar un modelo apropiado para
-  todas las ploidías admitidas, no una fórmula limitada a diploides.
+  inicialización por locus para ploidías 1–10. En un locus bialélico con
+  frecuencia alternativa `p` y ploidía `P`, la dosis `k` debe seguir
+  `C(P,k) p^k (1-p)^(P-k)`. En loci multialélicos debe usar la distribución
+  multinomial equivalente sobre todas las composiciones de dosis válidas.
 - **REQ-EVO-34.** Cuando se use Hardy-Weinberg, los genotipos deben muestrearse
   de forma reproducible. El modo probabilístico no debe forzar recuentos
   exactos. El modo controlado puede fijar recuentos alélicos, pero debe distribuir
@@ -1525,40 +1737,40 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   seguir el efecto de la recombinación y otros procesos biológicos. No debe
   presentarse como evaluación de programas externos ni de *SNP callers*.
 - **REQ-EVO-46.** La inicialización debe admitir un coeficiente de endogamia F
-  como opción automática para aumentar la homocigosis esperada. Debe poder
-  definirse para la población completa y sustituirse por subpoblación; no debe
-  poder definirse por locus, región o bloque.
+  como opción automática exclusivamente en diploides. Debe poder definirse para
+  la población completa y sustituirse por subpoblación; no debe poder definirse
+  por locus, región o bloque.
 - **REQ-EVO-47.** F debe estar entre 0 y 1, inclusive. F=0 debe corresponder al
-  modelo de Hardy-Weinberg. Al aumentar F debe crecer progresivamente la
-  probabilidad de que las copias homólogas de un individuo porten el mismo
-  alelo. F=1 debe producir homocigosis completa en cada locus. Los valores fuera
-  del intervalo deben ser un error.
-- **REQ-EVO-48.** El modelo automático de F debe admitirse para todas las
-  ploidías mayores que 1 y respetar el significado funcional de REQ-EVO-47. La
-  primera versión no debe introducir modelos distintos de F según una herencia
-  polisómica o disómica. Esos modelos quedan fuera de alcance. Configurar F para
-  ploidía 1 debe ser un error claro.
+  modelo de Hardy-Weinberg y F=1 debe producir homocigosis completa. En un locus
+  bialélico diploide con frecuencias `p` y `q` deben usarse
+  `P(AA)=p²+Fpq`, `P(AB)=2pq(1-F)` y `P(BB)=q²+Fpq`. Los valores de F fuera del
+  intervalo deben ser un error.
+- **REQ-EVO-48.** En un locus multialélico diploide, el modelo automático F debe
+  usar `P(ii)=p_i²+F p_i(1-p_i)` para cada homocigoto y
+  `P(ij)=2(1-F)p_i p_j` para cada heterocigoto con `i<j`. Configurar F para
+  ploidía 1 o mayor que 2 debe rechazarse antes de simular, identificando ámbito
+  y ploidía. V1 no debe inferir una adaptación poliploide.
 - **REQ-EVO-49.** Una distribución genotípica explícita por locus o bloque debe
   sustituir localmente al modelo general de F. Ambos métodos solo son
   incompatibles si intentan aplicarse al mismo locus o bloque. F debe seguir
-  aplicándose al resto del genoma.
+  aplicándose al resto de los loci diploides. En haploides y poliploides debe
+  admitirse Hardy-Weinberg sin F o una distribución explícita de dosis o
+  genotipos; la distribución explícita prevalece localmente.
 - **REQ-EVO-50.** F debe ser un objetivo esperado de la población o
-  subpoblación, no un valor exacto por individuo. La homocigosis realizada debe
-  poder variar estocásticamente entre individuos y regiones. Para fijar un
-  individuo concreto deben usarse genotipos completos con fase.
+  subpoblación diploide, no un valor exacto por individuo. La homocigosis
+  realizada debe poder variar estocásticamente. Para fijar un individuo concreto
+  deben usarse genotipos completos con fase.
 - **REQ-EVO-51.** El modo automático de F solo debe ajustar las probabilidades
   genotípicas y el exceso esperado de homocigosis. No debe generar por sí solo
   tramos realistas de homocigosis. Los ROH deben surgir de pedigrí, de
   autofecundación o de evolución con recombinación.
 - **REQ-EVO-52.** El sistema debe registrar el F objetivo general o por
-  subpoblación, su procedencia, el valor efectivo y el F realizado por
-  subpoblación y generación registrada. Debe estimar este último comparando la
-  heterocigosidad observada con la esperada según las frecuencias alélicas. En
-  poliploides, debe contar como heterocigoto todo individuo cuyas copias
-  homólogas no sean todas del mismo alelo. Un valor realizado negativo debe
-  registrarse como posible exceso de heterocigotos y no tratarse como error. La
-  fórmula técnica exacta se elegirá durante la planificación sin cambiar este
-  significado funcional.
+  subpoblación diploide, su procedencia, el valor efectivo y el F realizado por
+  subpoblación y generación registrada. Debe estimar este último únicamente en
+  diploides, comparando heterocigosidad observada y esperada según las
+  frecuencias alélicas. Un valor negativo debe conservarse como posible exceso
+  de heterocigotos. En ploidía 1 o mayor que 2 debe registrar F realizado como
+  «no aplicable», nunca como cero ni como una estimación adaptada.
 - **REQ-EVO-53.** Todos los individuos de la generación inicial deben
   considerarse fundadores. Cada fundador debe tener un identificador estable y
   copias haplotípicas propias con identificadores estables, aunque comparta
@@ -1611,7 +1823,9 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   individuos usados. El resumen muestral debe denominar N muestral al número de
   individuos seleccionados, sin confundirlo con N objetivo ni N realizado de la
   población. F
-  muestral debe estimarse con las frecuencias y la heterocigosidad de la muestra.
+  muestral debe estimarse con las frecuencias y la heterocigosidad de la muestra
+  solo en diploides; en ploidía 1 o mayor que 2 debe figurar como «no
+  aplicable».
   Ne muestral, cuando pueda calcularse, debe ser reproductivo y usar solo los
   progenitores que aportaron descendientes a la muestra y sus contribuciones
   observadas en ella. Toda medida no aplicable debe identificarse como tal y
@@ -1623,7 +1837,7 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   sistema debe conservar para cada individuo y haplotipo su subpoblación de
   procedencia y su linaje anterior y posterior a la fusión.
 - **REQ-EVO-67.** La subpoblación fusionada debe poder configurar sus propios N objetivo,
-  Ne objetivo, selección, tasa de autofecundación y modelo reproductivo. Por
+  selección, tasa de autofecundación y modelo reproductivo. Por
   defecto, cualquier individuo elegible debe poder cruzarse con otro elegible
   de cualquier subpoblación de origen. Las restricciones de compatibilidad
   configuradas pueden limitar las parejas admisibles, pero no deben ponderar
@@ -1781,6 +1995,8 @@ técnicas que puedan estar incompletas o degradadas.
 - **REQ-CRU-15.** El sistema debe conservar obligatoriamente el estado genotípico
   faseado y los metadatos de todos los individuos de todos los eventos y
   poblaciones intermedias, aunque no sean seleccionados ni vuelvan a utilizarse.
+  Debe materializarlos como parte de la verdad de familias; el tamaño del
+  escenario no puede reducir este alcance.
 - **REQ-CRU-16.** Una población intermedia solo debe producir BAM o CRAM y VCF de
   verdad si su configuración los solicita expresamente. Cuando se soliciten,
   deben incluir a todos los individuos de esa población.
@@ -1805,16 +2021,19 @@ técnicas que puedan estar incompletas o degradadas.
   que se reproducen por autofecundación, y alógamos, que cruzan individuos
   distintos, de forma coherente con los cruces personalizados y el modelo
   poblacional.
-- **REQ-CRU-23.** Toda inserción de elemento transponible presente en un
-  haplotipo parental debe heredarse según la segregación, la ploidía y la
-  recombinación, conservando su fase, identificador de evento o copia y linaje.
-  No debe tratarse como una anotación que se pierde al cruzar.
+- **REQ-CRU-23.** SNP, *indels* menores que el umbral estructural y repeticiones
+  en tándem pueden diferir entre copias haplotípicas y parentales compatibles.
+  Deben heredarse como alelos según la segregación, la ploidía y la
+  recombinación, conservando fase y linaje.
 - **REQ-CRU-24.** Los cruces, la autofecundación y la evolución con reproducción
-  sexual genérica solo deben admitir cromosomas con ploidía par en la primera
-  versión. La configuración debe rechazarse antes de simular si cualquiera de
-  los cromosomas reproductivos tiene ploidía impar.
+  sexual genérica solo deben admitir ploidía par 2, 4, 6, 8 o 10 en cada
+  cromosoma o *scaffold* reproductivo. Los parentales de un evento deben tener
+  la misma ploidía efectiva en cada secuencia. Una ploidía impar o desigual
+  detectable en la configuración o en parentales explícitos debe rechazarse
+  antes de simular, identificando secuencia, parentales y valores.
 - **REQ-CRU-25.** Cada parental debe aportar la mitad de las copias de cada
-  cromosoma al descendiente, de modo que se mantenga su ploidía par.
+  cromosoma o *scaffold* al descendiente, de modo que este conserve la misma
+  ploidía par efectiva de sus parentales.
 - **REQ-CRU-26.** Los parentales de un cruzamiento deben ser simétricos: cambiar
   su orden no debe cambiar el modelo biológico. La primera versión no debe asignar
   sexos ni modelar cruces recíprocos, herencia citoplasmática o efectos maternos
@@ -1829,15 +2048,28 @@ técnicas que puedan estar incompletas o degradadas.
 - **REQ-CRU-29.** La primera versión solo debe admitir autofecundación y
   cruzamiento sexual. Debe rechazar reproducción clonal, apomixis y producción de
   dobles haploides como modos reproductivos.
-- **REQ-CRU-30.** Las translocaciones pueden estar presentes en referencias,
-  individuos y lecturas. Antes de reproducir, las copias homólogas deben ser
-  estructuralmente compatibles. Un individuo heterocigoto para una translocación
-  no debe poder reproducirse en la primera versión y debe producir un error de
-  validación claro.
+- **REQ-CRU-30.** Antes de reproducir, todas las copias haplotípicas de cada
+  cromosoma o *scaffold* reproductivo de ambos parentales deben tener exactamente
+  el mismo estado estructural canónico: segmentos estructurales, orden,
+  orientación, número de copias y puntos de ruptura. Esta regla se aplica a
+  deleciones, duplicaciones, inversiones, inserciones clasificadas como
+  estructurales y translocaciones. Un estado estructural puede ser compatible
+  aunque sus copias procedan de eventos históricos con identificadores distintos,
+  siempre que la equivalencia sea inequívoca y se conserve cada historia. Una
+  diferencia o heterocigosis estructural dentro de un individuo o entre
+  parentales impide usar el individuo o la pareja como opción reproductiva en
+  v1; no debe intentarse una recombinación parcial.
 - **REQ-CRU-31.** Las mutaciones de novo deben estar disponibles en familias y
   poblaciones segregantes mediante el mismo motor usado en evolución, pero
   desactivadas de forma predeterminada. Su activación debe ser explícita y debe
-  registrar tasas, eventos realizados y trazabilidad con las mismas reglas.
+  registrar tasas, eventos realizados y trazabilidad con las mismas reglas. Una
+  variante estructural de novo puede existir en un descendiente y en una
+  generación observada. Su portador no debe usarse como parental posterior
+  mientras el estado estructural no sea idéntico en todas sus copias y en los
+  demás parentales requeridos. V1 no debe rechazar una tasa de SV de novo solo
+  porque existan generaciones posteriores ni inventar un mecanismo de fijación;
+  debe aplicar la compatibilidad al intento posterior y registrar la causa si
+  excluye al portador.
 - **REQ-CRU-32.** El catálogo funcional de selección de descendientes de la
   primera versión debe ser el catálogo declarativo común de REQ-CONF-108.
 - **REQ-CRU-33.** Las condiciones de selección deben poder combinarse mediante
@@ -1891,8 +2123,12 @@ técnicas que puedan estar incompletas o degradadas.
   individuo ya creado se use después como parental en uno o varios eventos.
 - **REQ-CRU-44.** Cada autofecundación debe tener exactamente un parental y cada
   cruzamiento sexual exactamente dos. Antes de ejecutar el evento, el sistema
-  debe comprobar la compatibilidad de sus parentales en referencia, ploidía y
-  estructura conforme a las reglas reproductivas de la primera versión.
+  debe comprobar que sus parentales usan la misma referencia estructural y que
+  son compatibles en ploidía y estado estructural canónico conforme a
+  REQ-CRU-24 y REQ-CRU-30. Un parental explícito incompatible debe rechazarse
+  antes de simular; en evolución, cada intento debe considerar únicamente
+  individuos o parejas compatibles y registrar la incompatibilidad estructural
+  cuando no queden opciones válidas.
 - **REQ-CRU-45.** Toda regla de selección y toda salida solicitada en el grafo
   debe referirse a resultados que puedan producirse según sus dependencias,
   cardinalidades y datos disponibles. Una regla o salida imposible debe
@@ -1903,11 +2139,20 @@ técnicas que puedan estar incompletas o degradadas.
 
 #### 4.3.5. Reproducción y dinámica generacional
 
+El estado estructural canónico de una copia haplotípica describe sus segmentos
+estructurales, orden, orientación, número de copias y puntos de ruptura, sin
+depender de los identificadores históricos de los eventos que lo produjeron.
+En v1, una secuencia solo es reproductivamente compatible si tiene ploidía par
+2, 4, 6, 8 o 10 y todas sus copias haplotípicas en todos los parentales
+requeridos presentan exactamente el mismo estado estructural canónico. SNP,
+*indels* menores que el umbral estructural y repeticiones en tándem pueden
+diferir entre copias y se transmiten como alelos; no cambian esa equivalencia.
+
 - **REQ-REP-01.** El sistema de apareamiento debe admitir reproducción mixta
   mediante una tasa de autofecundación entre 0 % y 100 %, inclusive.
 - **REQ-REP-02.** La tasa de autofecundación debe poder definirse por población,
-  subpoblación, fase o intervalo de generaciones. El valor del ámbito más específico
-  debe sustituir al más general durante su intervalo.
+  subpoblación, fase o intervalo de generaciones. El valor efectivo debe
+  resolverse conforme a REQ-CONF-116 a REQ-CONF-121.
 - **REQ-REP-03.** La tasa de autofecundación debe interpretarse como la
   probabilidad aplicada a cada evento reproductivo, no como una cuota exacta de
   eventos por generación. Las decisiones deben ser aleatorias y reproducibles.
@@ -1916,20 +2161,24 @@ técnicas que puedan estar incompletas o degradadas.
   individuos distintos entre los supervivientes elegibles de la población o
   subpoblación y generación.
 - **REQ-REP-05.** La elegibilidad puede depender de selección de viabilidad,
-  pertenencia a la población o disponibilidad. La primera versión no debe
+  pertenencia a la población, disponibilidad y compatibilidad reproductiva de
+  REQ-CRU-24 y REQ-CRU-30. La exclusión por incompatibilidad estructural debe
+  identificarse como tal y no presentarse como selección de viabilidad. La primera versión no debe
   ponderar la elección por parentesco, distancia genética, genotipo ni
   apareamiento selectivo. Se exceptúan los pesos por subpoblación de origen
   configurados para una fusión conforme a REQ-EVO-67.
 - **REQ-REP-06.** Un individuo debe poder participar en varios eventos
   reproductivos y producir varios descendientes en una generación.
-- **REQ-REP-07.** La configuración debe permitir definir límites o una
-  distribución del número de descendientes por parental. Estos parámetros deben
-  coordinarse con N y con Ne cuando exista un objetivo para este último.
+- **REQ-REP-07 (retirado).** Límites o distribuciones configurables del número de
+  descendientes por parental; capacidad aplazada fuera de v1. En v1 los
+  parentales pueden reutilizarse sin límite de descendientes.
 - **REQ-REP-08.** N debe ser el objetivo configurado del tamaño de cada
   nueva generación y subpoblación. En una transición reproductiva, el N efectivo
-  debe fijar cuántos descendientes se intentarán crear para la generación
-  siguiente. Un resultado aleatorio puede impedir alcanzarlo conforme a
-  REQ-REP-26.
+  debe fijar exactamente cuántos intentos reproductivos se procesan. Cada intento
+  debe seleccionar reproduciblemente el tipo de apareamiento y los parentales
+  solo entre opciones válidas, incluida la compatibilidad de ploidía y
+  estructura, y, si tiene éxito, crear exactamente un descendiente. Un resultado aleatorio puede impedir que todos tengan éxito
+  conforme a REQ-REP-26.
 - **REQ-REP-09.** N debe ser obligatorio al crear cada población o subpoblación inicial.
   Si se omite en una generación o fase posterior, debe heredarse el último valor
   efectivo.
@@ -1939,33 +2188,29 @@ técnicas que puedan estar incompletas o degradadas.
   siguiente y una expansión debe aumentarlo. El historial debe
   distinguir valores heredados y cambios, así como la generación en la que cada
   valor determina la descendencia.
-- **REQ-REP-11.** Para cada fase y subpoblación, Ne puede configurarse como valor
-  objetivo absoluto o como proporción Ne/N. Ambas formas son mutuamente
-  excluyentes. Aunque no se configure un objetivo, el sistema debe representar
-  este campo como «sin objetivo» para distinguirlo del Ne realizado.
-- **REQ-REP-12.** La proporción Ne/N debe ser válida y convertirse en un Ne
-  objetivo usando el N efectivo de la fase o intervalo.
-- **REQ-REP-13.** Si Ne se omite, el sistema no debe intentar alcanzar un Ne
-  objetivo ni advertir por desviación. Debe calcular el Ne realizado que emerja
-  de la reproducción.
-- **REQ-REP-14.** Cuando exista, Ne objetivo debe guiar el esquema reproductivo
-  para aproximar la desigualdad de contribución necesaria. El sistema debe
-  calcular Ne realizado exclusivamente como Ne reproductivo, a partir de los
+- **REQ-REP-11 (retirado).** Configuración de Ne objetivo absoluto; capacidad
+  aplazada fuera de v1.
+- **REQ-REP-12 (retirado).** Configuración de un cociente Ne/N objetivo;
+  capacidad aplazada fuera de v1.
+- **REQ-REP-13.** El sistema no debe intentar alcanzar un Ne objetivo ni emitir
+  una desviación respecto a él. Debe calcular el Ne realizado que emerja de la
+  reproducción cuando sea evaluable o registrar «no evaluable» y la causa.
+- **REQ-REP-14.** El sistema debe calcular Ne realizado exclusivamente como Ne
+  reproductivo, a partir de los
   progenitores que dejaron descendencia y de la desigualdad o varianza de sus
   contribuciones. No debe usar estimadores basados en pérdida de
   heterocigosidad, incremento de endogamia o desequilibrio de ligamiento. La
-  fórmula concreta y su adaptación por ploidía se elegirán durante la
-  planificación sin cambiar este significado funcional.
-- **REQ-REP-15.** El sistema debe cuantificar y advertir cualquier desviación
-  entre Ne objetivo y Ne realizado. Esta desviación no debe invalidar el
-  resultado, detener la simulación ni poder elevarse a error. Una configuración
-  estructuralmente imposible o incoherente entre N, Ne objetivo y los límites o
-  distribuciones de descendencia sí debe rechazarse antes de simular.
+  fórmula concreta se elegirá durante la planificación sin cambiar este
+  significado funcional.
+- **REQ-REP-15 (retirado).** Desviación y advertencia entre Ne objetivo y Ne
+  realizado; no existen en v1 porque Ne objetivo no se admite.
 - **REQ-REP-16.** El historial y el manifiesto deben registrar por generación y
-  subpoblación los parentales, descendientes, distribución familiar, tasa de
-  autofecundación objetivo, número esperado y realizado de autofecundaciones, N,
-  forma original de Ne, Ne objetivo o su ausencia, Ne realizado y la desviación
-  cuantificada con su advertencia cuando exista un objetivo.
+  subpoblación los parentales, descendientes, tasa de autofecundación objetivo,
+  número esperado y realizado de autofecundaciones, N objetivo, número de
+  intentos, éxitos y fallos por causa, N realizado, su desviación y aviso, y Ne
+  realizado o su estado «no evaluable» con causa. Debe registrar por separado
+  las exclusiones y los fallos debidos a ploidía o estructura reproductiva
+  incompatible, sin etiquetarlos como selección de viabilidad.
 - **REQ-REP-17.** Cada generación reproductiva debe crear la siguiente, que
   sustituye a la anterior como población activa. No deben modelarse edades,
   supervivencia individual entre generaciones ni reproducción entre cohortes.
@@ -1979,7 +2224,8 @@ técnicas que puedan estar incompletas o degradadas.
   población inicial, la final y las generaciones o muestreos solicitados
   expresamente, no los de todas las generaciones intermedias.
 - **REQ-REP-20.** Toda generación debe producir un historial estructurado
-  resumido de demografía, procesos, N objetivo, N realizado, Ne objetivo, Ne realizado,
+  resumido de demografía, procesos, N objetivo, intentos, éxitos, fallos por
+  causa, N realizado, Ne realizado o su causa de no evaluación,
   reproducción, eventos, frecuencias alélicas y muestreos.
 - **REQ-REP-21.** La configuración debe permitir marcar una generación adicional
   para conservar su estado genotípico completo y solicitar opcionalmente sus BAM
@@ -1991,102 +2237,111 @@ técnicas que puedan estar incompletas o degradadas.
 - **REQ-REP-23.** No debe garantizarse reproducción idéntica entre versiones que
   cambien algoritmos o flujos aleatorios, salvo que una versión declare y cumpla
   expresamente una compatibilidad concreta.
-- **REQ-REP-24.** El orden predeterminado de cada generación debe ser: eventos
-  demográficos y determinación del N de la descendencia siguiente; migración;
-  selección de viabilidad;
-  elección de parentales y reproducción; segregación y recombinación; mutaciones
-  de novo en los haplotipos descendientes; cálculo y registro de N realizado,
-  Ne realizado y frecuencias; comparación con N objetivo y Ne objetivo; y muestreo y salidas
-  solicitadas. La deriva debe emerger durante la reproducción.
+- **REQ-REP-24.** El orden obligatorio y único de cada generación debe ser:
+  (1) eventos demográficos y determinación de N objetivo; (2) migración;
+  (3) selección de viabilidad; (4) elección de parentales y reproducción;
+  (5) segregación y recombinación; (6) mutaciones de novo en los haplotipos
+  descendientes; (7) cálculo y registro de N realizado, Ne realizado y
+  frecuencias; y (8) muestreos y salidas solicitadas. La deriva debe emerger
+  durante la reproducción. Una etapa opcional desactivada o no aplicable debe
+  registrarse como omitida sin cambiar la posición de las demás.
   Cuando haya varios eventos demográficos, su orden interno no debe ser
-  predeterminado: debe proceder de la secuencia explícita exigida por
-  REQ-CONF-105.
-- **REQ-REP-25.** La configuración solo debe poder reordenar procesos opcionales
-  si mantiene las dependencias obligatorias. En particular, la mutación de novo
-  debe ocurrir después de la segregación y recombinación y antes del registro y
-  muestreo de la nueva generación.
+  implícito: debe proceder de la secuencia explícita exigida por REQ-CONF-105.
+  Este orden interno no altera las ocho etapas.
+- **REQ-REP-25.** La configuración no debe admitir órdenes alternativos ni un
+  grafo configurable de dependencias entre las ocho etapas. En particular, la
+  mutación de novo debe ocurrir después de la segregación y recombinación y antes
+  del cálculo y registro y de los muestreos y salidas.
 - **REQ-REP-26.** Si la migración, la selección u otro resultado aleatorio de la
-  ejecución impiden alcanzar N objetivo, el sistema debe conservar la
-  subpoblación con el N realizado que haya podido generar. Debe registrar N
-  objetivo, N realizado, su desviación y una advertencia. Esta desviación no
-  debe detener la simulación ni declarar automáticamente una extinción. Una
-  configuración estructuralmente imposible que pueda detectarse antes de
-  ejecutar sí debe rechazarse. Si N realizado es 0, debe aplicarse REQ-SEL-09.
+  ejecución o del propio apareamiento impiden completar N con éxito, el sistema
+  debe conservar los descendientes creados. Debe procesar los N intentos o
+  registrar inequívocamente que los restantes son imposibles por la misma
+  ausencia de opciones válidas. Por intento o causa agregable inequívoca debe
+  registrar éxito o fallo y su causa, además de N objetivo, total de intentos,
+  N realizado, desviación y advertencia no invalidante. Una imposibilidad
+  estructural detectable antes de ejecutar debe rechazarse entonces. Si la
+  incompatibilidad solo aparece en el estado realizado de una generación, los
+  parentales o parejas incompatibles no deben considerarse opciones válidas y
+  la ausencia de alternativas debe registrarse como causa del fallo. Si N
+  realizado es 0, debe aplicarse REQ-SEL-09.
 
 #### 4.3.6. Selección de viabilidad
 
 Un carácter cuantitativo es una característica expresada mediante un valor
-numérico. En esta versión puede depender del genotipo de un único locus, incluso
-si ese locus tiene varios alelos; no convierte el modelo en selección
-poligénica. Una función direccional asigna mayor aptitud de forma sistemática
+numérico. En esta versión depende de la dosis alternativa de un único SNP
+bialélico; no convierte el modelo en selección poligénica. Una función
+direccional asigna mayor aptitud de forma sistemática
 hacia uno de los dos sentidos del carácter: valores mayores o valores menores.
 
 - **REQ-SEL-01.** La primera versión debe usar un único locus seleccionado para
   toda la ejecución. Configurar loci distintos entre fases, intervalos,
   poblaciones o subpoblaciones debe ser un error.
-- **REQ-SEL-02.** El locus seleccionado puede ser un SNP, *indel*,
-  microsatélite o repetición en tándem, inserción de TE o variante estructural,
-  siempre que tenga identificador estable y genotipo o dosis inequívocos. Puede
-  ser bialélico o multialélico.
-- **REQ-SEL-03.** La configuración debe referenciar el locus por su identificador
-  y referencia estructural, no solo mediante una coordenada ambigua, y debe
-  admitir ploidías de 1 a 10 en los genotipos que describe.
-- **REQ-SEL-04.** Debe asignarse un valor genético numérico a cada genotipo
-  completo o combinación de dosis pertinente, incluidos los genotipos
-  multialélicos. El valor genético representa la contribución del genotipo y no
-  debe confundirse con la aptitud.
-- **REQ-SEL-05.** Un conjunto incompleto de valores genéticos para los genotipos
-  o combinaciones de dosis debe aportar una regla predeterminada explícita. Si no
-  la aporta, el sistema debe rechazar la configuración. La representación
-  concreta de esa regla se decidirá con el esquema de configuración.
+- **REQ-SEL-02.** El locus seleccionado debe ser exclusivamente un SNP
+  bialélico. V1 debe rechazar como locus de selección un *indel*, una repetición,
+  una inserción, una variante estructural, un locus multialélico o un locus con
+  número variable de copias.
+- **REQ-SEL-03.** La configuración debe identificar el locus mediante referencia
+  estructural, cromosoma o *scaffold*, coordenada e identificador estable. Debe
+  existir exactamente una vez en cada copia haplotípica aplicable, para ploidías
+  de 1 a 10, y su base de referencia debe ser A, C, G o T, nunca `N`.
+- **REQ-SEL-04.** El genotipo seleccionado debe expresarse como la dosis del
+  alelo alternativo, desde 0 hasta la ploidía aplicable. La configuración debe
+  asignar un valor genético numérico inequívoco a cada dosis posible de cada
+  ámbito o ploidía que pueda aparecer.
+- **REQ-SEL-05.** Debe rechazarse antes de simular cualquier ámbito con una dosis
+  posible sin valor genético explícito. V1 no debe completar valores mediante
+  una regla implícita ni extrapolar desde otras dosis.
 - **REQ-SEL-06.** Los valores genéticos y la función de aptitud del mismo locus
   pueden variar por fase, intervalo y subpoblación. El valor más específico debe
   prevalecer y el locus no debe cambiar.
 - **REQ-SEL-07.** La supervivencia debe decidirse de forma estocástica y
   reproducible para cada individuo. La reproducción posterior debe elegir
   uniformemente entre los supervivientes elegibles.
-- **REQ-SEL-08.** Deben registrarse los valores genéticos y del carácter, las
-  aptitudes antes y después de normalizar, las decisiones de supervivencia y los
-  supervivientes por genotipo y generación.
+- **REQ-SEL-08.** Deben registrarse la dosis, los valores genético y del
+  carácter, las aptitudes antes y después de normalizar, las decisiones de
+  supervivencia y los supervivientes por dosis y generación.
 - **REQ-SEL-09.** Si quedan cero individuos o menos parentales elegibles de los
-  necesarios, el sistema no debe declarar automáticamente una extinción ni
-  detenerse por una desviación positiva de N realizado respecto a cero. Debe
-  aplicar REQ-REP-26. Si N realizado es 0, nunca debe conservar una
-  subpoblación activa vacía. Si la configuración permite la extinción por
-  resultado en la subpoblación y fase aplicables, debe declararla y registrarla
-  como distinta de una extinción planificada. Si no la permite, debe detener
-  inmediatamente toda la simulación con un error de ejecución. En ese caso no
-  debe omitirse ningún evento ni continuar ninguna otra rama.
+  necesarios tras una selección válida, el sistema no debe declarar
+  automáticamente una extinción. Debe aplicar REQ-REP-26 y, si N realizado es
+  0, la política de extinción por resultado aplicable. Un fallo de identidad,
+  dosis o aptitud del locus no debe interpretarse como extinción.
 - **REQ-SEL-10.** Tras una extinción configurada explícitamente, N deja de ser
-  aplicable. Una referencia posterior incompatible y detectable de antemano
-  debe ser un error. Tras una
-  extinción por resultado autorizada, los eventos dependientes deben omitirse
-  conforme a REQ-EVO-72. Una fundación o recolonización posterior válida debe
-  crear otra subpoblación con un identificador nuevo; no debe reactivar la
-  extinguida.
-- **REQ-SEL-11.** El único locus seleccionado debe poder representar un carácter
-  cuantitativo mediante los valores genéticos asociados a sus genotipos o
-  combinaciones de dosis. El límite de un único locus debe mantenerse.
-- **REQ-SEL-12.** El sistema debe mantener por separado el valor genético, el
-  valor del carácter y la aptitud relativa de cada individuo. Una función
-  configurable debe transformar el valor del carácter en una aptitud relativa
-  no negativa.
-- **REQ-SEL-13.** Las aptitudes relativas producidas por la función deben
-  normalizarse respecto al máximo, cuya probabilidad de supervivencia será 1;
-  las demás probabilidades deben ser proporcionales.
+  aplicable. Tras una extinción por resultado autorizada, los eventos
+  dependientes deben omitirse conforme a REQ-EVO-72. Una fundación o
+  recolonización posterior válida debe crear otra subpoblación con un
+  identificador nuevo; no debe reactivar la extinguida.
+- **REQ-SEL-11.** El locus debe quedar protegido durante toda la ejecución.
+  Ninguna mutación, *indel*, repetición, deleción, duplicación, inversión,
+  translocación u otro cambio puede eliminarlo, copiarlo, moverlo, solaparlo o
+  sustituir su identidad. La recombinación puede transmitirlo cuando conserva
+  su identidad única.
+- **REQ-SEL-12.** El sistema debe mantener por separado dosis, valor genético,
+  valor del carácter y aptitud de cada individuo. Toda aptitud calculada debe
+  ser finita y no negativa.
+- **REQ-SEL-13.** Inmediatamente antes de decidir supervivencia, cada individuo
+  elegible debe tener locus único, dosis, valor genético, carácter y aptitud
+  inequívocos, y al menos uno debe tener aptitud estrictamente positiva. Si el
+  máximo es 0 o cualquier locus, dosis o aptitud es ausente, múltiple, ambiguo,
+  negativo o no finito, el sistema debe detenerse antes de seleccionar o
+  reproducir. El diagnóstico debe identificar generación, población o
+  subpoblación, locus y genotipos o dosis afectados. No debe sustituirse por
+  supervivencia uniforme ni presentarse como extinción.
 - **REQ-SEL-14.** En la primera versión, el valor del carácter debe coincidir
-  exactamente con el valor genético asignado al genotipo o combinación de dosis.
-  La configuración no debe admitir ruido ambiental, efectos ambientales ni un
-  parámetro de heredabilidad.
-- **REQ-SEL-15.** La función de aptitud cuantitativa debe ser direccional y la
-  configuración debe elegir exactamente un sentido: favorecer valores mayores o
-  favorecer valores menores del carácter. Al favorecer valores mayores, un valor
-  mayor no debe recibir menor aptitud que uno inferior. Al favorecer valores
-  menores, un valor menor no debe recibir menor aptitud que uno superior.
-- **REQ-SEL-16.** La primera versión debe rechazar funciones estabilizadoras, con
-  un óptimo intermedio favorecido, y funciones disruptivas, que favorezcan ambos
-  extremos frente a valores intermedios. No debe aproximarlas silenciosamente
-  mediante una función direccional.
+  exactamente con el valor genético asignado a la dosis. La configuración no
+  debe admitir ruido ambiental, efectos ambientales ni heredabilidad.
+- **REQ-SEL-15.** La función de aptitud debe ser direccional y la configuración
+  debe elegir exactamente un sentido: favorecer valores mayores o favorecer
+  valores menores del carácter. Al favorecer valores mayores, un valor mayor no
+  debe recibir menor aptitud que uno inferior; en el sentido contrario debe
+  cumplirse la relación inversa.
+- **REQ-SEL-16.** La primera versión debe rechazar funciones estabilizadoras o
+  disruptivas. No debe aproximarlas silenciosamente mediante una función
+  direccional.
+- **REQ-SEL-17.** Todo evento explícito que pueda afectar al locus protegido debe
+  rechazarse antes de simular e identificar la operación incompatible. El locus
+  y toda operación que pueda volverlo ambiguo deben quedar excluidos de los
+  espacios válidos de eventos aleatorios conforme a REQ-IND-54 a REQ-IND-57 y
+  REQ-MUT-13 a REQ-MUT-15.
 
 #### 4.3.7. Migración
 
@@ -2145,12 +2400,25 @@ hacia uno de los dos sentidos del carácter: valores mayores o valores menores.
   encadenar movimientos como A→B→C. En la generación siguiente ese individuo ya
   no existe como población activa. Solo sus descendientes pueden ser candidatos
   a las migraciones configuradas para la nueva generación.
+- **REQ-MIG-09.** Después de aplicar conjuntamente las rutas migratorias y antes
+  de reproducir, todos los individuos del conjunto reproductor de cada
+  subpoblación deben usar la misma referencia estructural. Antes de simular, el
+  sistema debe rechazar cualquier combinación de rutas que pueda incumplir esta
+  regla e identificar las rutas, las subpoblaciones, los individuos o grupos y
+  las referencias afectados. Las subpoblaciones basadas en referencias
+  estructurales distintas pueden coexistir en la primera versión, pero deben
+  permanecer reproductivamente aisladas y no intercambiar migrantes.
 
 #### 4.3.8. Mutaciones evolutivas
 
-- **REQ-MUT-01.** Las tasas evolutivas de SNP, inserciones, deleciones y
-  variantes estructurales deben expresarse por base y generación, por separado,
-  con valores globales y sustituciones por cromosoma o *scaffold* y región.
+- **REQ-MUT-01.** Las tasas evolutivas de SNP, inserciones, deleciones y de cada
+  clase de variante estructural deben expresarse por oportunidad válida y
+  generación, por separado, con valores globales y sustituciones por cromosoma
+  o *scaffold* y región. Para cada clase y ámbito efectivo, después de
+  segregación y recombinación y justo antes de procesar esa clase, el número de
+  oportunidades debe contarse sobre todas las copias haplotípicas descendientes
+  en su estado actual. La media de Poisson debe ser la tasa efectiva multiplicada
+  por ese número.
 - **REQ-MUT-02.** Cada mutación nueva debe aplicarse a una copia o haplotipo
   concreto ya segregado y recombinado de un individuo de la nueva generación.
   No debe modificar retrospectivamente al parental.
@@ -2158,7 +2426,8 @@ hacia uno de los dos sentidos del carácter: valores mayores o valores menores.
   posición, haplotipo, tipo, origen de novo y transmisión posterior.
 - **REQ-MUT-04.** El modelo de SNP debe permitir un espectro o matriz válida con
   las probabilidades de cada sustitución, incluida la relación entre
-  transiciones y transversiones.
+  transiciones y transversiones. El espectro solo debe usar A, C, G y T como
+  bases de origen y destino y nunca debe producir `N`.
 - **REQ-MUT-05.** Si no se proporciona un espectro, debe usarse un modelo
   simétrico documentado entre las tres bases alternativas posibles.
 - **REQ-MUT-06.** Las probabilidades del espectro deben validarse, admitir
@@ -2176,60 +2445,63 @@ hacia uno de los dos sentidos del carácter: valores mayores o valores menores.
   manteniendo la regla predeterminada de 50 pb.
 - **REQ-MUT-10.** Una inserción puede usar una secuencia nueva generada según una
   composición configurada, una secuencia concreta, una copia de una región del
-  mismo genoma o una secuencia repetida, incluido un elemento transponible.
+  mismo genoma o una secuencia repetida. Copiar una región preexistente debe
+  clasificarse como duplicación segmentaria genérica; ninguna de estas
+  operaciones debe atribuir semántica de elemento transponible. La secuencia
+  nueva aleatoria solo debe contener A, C, G y T; una secuencia concreta o
+  copiada puede conservar `N`.
 - **REQ-MUT-11.** Las repeticiones en tándem deben formar una clase mutacional
   independiente, con tasa por locus y generación o reglas globales o regionales,
-  junto con expansión o contracción, sesgo, tamaño de paso, pureza e
-  interrupciones opcionales.
+  junto con un sesgo configurable entre expansión y contracción. Cada evento
+  debe cambiar exactamente una unidad completa. La pureza y las interrupciones
+  opcionales se rigen por sus requisitos propios y no cambian el tamaño de este
+  paso. Un locus cuyo motivo contenga `N` no es elegible ni cuenta como
+  oportunidad.
 - **REQ-MUT-12.** El historial, el manifiesto y la verdad deben conservar por
-  clase y ámbito las tasas, el número esperado y realizado de eventos y sus
-  transmisiones posteriores.
+  clase y ámbito la tasa efectiva, el número de oportunidades válidas, la media
+  de Poisson, el número sorteado, el número aceptado antes de un posible fallo,
+  el número finalmente activo y sus transmisiones posteriores.
+- **REQ-MUT-13.** Cada copia haplotípica actual debe aportar sus propias
+  oportunidades: una región duplicada cuenta una vez por cada copia actual y una
+  región eliminada no cuenta. SNP, inserciones, deleciones y cada clase
+  estructural deben usar sus propios candidatos válidos. En una clase que
+  necesite fuente y destino, varios extremos o un intervalo, solo el ancla, punto
+  o intervalo inicial válido determina el número de oportunidades; los demás
+  elementos se eligen condicionados entre destinos válidos y no multiplican el
+  denominador. Cada locus de repetición actual y elegible de cada copia es una
+  oportunidad.
+- **REQ-MUT-14.** Las precedencias de ámbitos deben producir espacios efectivos
+  disjuntos conforme a REQ-CONF-116 a REQ-CONF-121 para no contar dos veces una oportunidad situada en regiones
+  solapadas. El recuento se sortea una sola vez al inicio de cada clase. Después,
+  cada evento actualiza el espacio válido conforme a REQ-IND-54 a REQ-IND-57,
+  sin volver a sortear el recuento por los cambios ocurridos dentro de esa clase.
+- **REQ-MUT-15.** Una oportunidad solo debe contarse si es válida según todas
+  las reglas de su clase. Una posición con `N` no cuenta para SNP ni para una
+  operación cuyo ancla exija conocer una base concreta. Su presencia dentro de
+  un intervalo no invalida una operación puramente estructural que pueda
+  conservarla sin interpretarla.
 
-#### 4.3.9. Elementos transponibles configurados
+#### 4.3.9. Requisitos de elementos transponibles retirados de v1
 
-- **REQ-TE-01.** El catálogo de TE debe poder suministrarse mediante FASTA o ser
-  generado por el simulador. Todo catálogo debe relacionar familias o tipos con
-  sus secuencias.
-- **REQ-TE-02.** Un FASTA externo de TE debe validarse con reglas de secuencia
-  compatibles, copiarse a resultados, usarse desde la copia y conservar intacto
-  el original. El catálogo simulado también debe guardarse como FASTA.
-- **REQ-TE-03.** Los TE deben poder insertarse al construir referencias y como
-  variantes configuradas en individuos concretos. La primera versión no debe
-  simular transposición espontánea, tasas de movilización ni estados activo o
-  inactivo durante la evolución.
-- **REQ-TE-04.** Una inserción explícita en un individuo debe indicar individuo,
-  haplotipo o copia, familia o secuencia de TE y las demás propiedades del
-  evento, sin asignarse por frecuencia poblacional.
-- **REQ-TE-05.** Cada inserción individual debe elegir de forma excluyente una
-  coordenada exacta o una selección aleatoria reproducible entre los sitios
-  permitidos por la familia.
-- **REQ-TE-06.** Una coordenada exacta debe validarse contra la referencia
-  estructural, el haplotipo, los solapamientos y las reglas de destino. El modo
-  aleatorio debe registrar los candidatos, la regla, la semilla y la posición.
-- **REQ-TE-07.** Cada familia puede definir orientación directa o inversa,
-  truncamiento y duplicación del sitio diana, además del caso simple de copia
-  completa sin modificación ni duplicación del sitio diana.
-- **REQ-TE-08.** Un evento debe conservar la secuencia fuente y final, el
-  fragmento retenido, la orientación y la longitud y secuencia del sitio diana
-  original o modificado.
-- **REQ-TE-09.** Un evento solicitado puede ser de copiar y pegar, conservando la
-  copia donante, o de cortar y pegar, eliminándola. En este último caso,
-  eliminación e inserción deben formar un único evento compuesto y trazable.
-- **REQ-TE-10.** Cortar y pegar debe actuar en el mismo haplotipo o copia salvo
-  que el evento solicitado defina otra regla válida. Debe conservar los
-  identificadores, coordenadas y secuencias de las copias donante y nueva.
-- **REQ-TE-11.** Cada familia puede definir regiones permitidas, excluidas o
-  favorecidas y motivos diana con pesos. Sin reglas, el destino debe elegirse
-  uniformemente entre sitios válidos de la referencia o haplotipo efectivo.
-- **REQ-TE-12.** Las reglas de destino deben actualizarse tras cambios de
-  coordenadas. Si no existe un sitio válido, debe aplicarse la política
-  configurada de advertencia o error sin crear una inserción inválida.
-- **REQ-TE-13.** Cada copia debe tener identificador estable y conservar familia,
-  tipo, secuencia fuente, copia de origen, haplotipo, posición, orientación,
-  generación cuando corresponda y descendencia.
-- **REQ-TE-14.** La verdad, el VCF y su complemento deben representar sin pérdida
-  la inserción y, en eventos compuestos, la eliminación asociada. Deben usar la
-  representación VCF estándar cuando sea suficiente.
+Los identificadores siguientes se conservan únicamente para mantener la
+trazabilidad con revisiones anteriores. No expresan capacidades funcionales de
+v1 y no deben aceptarse como campos de configuración ni producir metadatos o
+salidas específicos.
+
+- **REQ-TE-01 (retirado).** Catálogo de TE suministrado o simulado.
+- **REQ-TE-02 (retirado).** FASTA externo o generado de TE.
+- **REQ-TE-03 (retirado).** Inserción específica de TE en referencias o individuos.
+- **REQ-TE-04 (retirado).** Propiedades específicas de una inserción TE.
+- **REQ-TE-05 (retirado).** Selección de destino propia de TE.
+- **REQ-TE-06 (retirado).** Validación y registro del destino TE.
+- **REQ-TE-07 (retirado).** Orientación, truncamiento y sitio diana de TE.
+- **REQ-TE-08 (retirado).** Secuencia fuente y final específica de TE.
+- **REQ-TE-09 (retirado).** Mecanismos de copiar o cortar y pegar TE.
+- **REQ-TE-10 (retirado).** Reglas entre copias donante y nueva de TE.
+- **REQ-TE-11 (retirado).** Regiones y motivos diana por familia TE.
+- **REQ-TE-12 (retirado).** Actualización y ausencia de destinos TE.
+- **REQ-TE-13 (retirado).** Identidad y metadatos propios de copias TE.
+- **REQ-TE-14 (retirado).** Representación específica de TE en verdad o VCF.
 
 #### 4.3.10. Recombinación de la primera versión
 
@@ -2239,25 +2511,31 @@ hacia uno de los dos sentidos del carácter: valores mayores o valores menores.
 - **REQ-REC-02.** La primera versión no debe modelar interferencia entre
   entrecruzamientos. Sus posiciones deben generarse de forma independiente según
   la tasa uniforme o el mapa completo y la semilla.
-- **REQ-REC-03.** En copias homólogas con inversiones, duplicaciones o deleciones
-  heterocigotas, solo deben permitirse entrecruzamientos en intervalos colineales
-  y homólogos.
-- **REQ-REC-04.** Las regiones estructuralmente incompatibles deben excluirse del
-  espacio recombinante y registrarse. No deben generarse gametos desequilibrados
-  por pérdida o ganancia de segmentos ni modelarse la fertilidad reducida.
-- **REQ-REC-05.** Para cromosomas con ploidía par mayor que dos, cada meiosis debe
-  formar bivalentes. Cada bivalente debe recombinar conforme a la tasa o mapa y
+- **REQ-REC-03.** La recombinación solo debe comenzar cuando todas las copias
+  haplotípicas reproductivas de ambos parentales tengan el mismo estado
+  estructural canónico conforme a REQ-CRU-30. V1 no debe recombinar intervalos
+  colineales de copias estructuralmente diferentes ni tratar esa compatibilidad
+  parcial como suficiente.
+- **REQ-REC-04.** Una diferencia estructural debe invalidar al individuo o a la
+  pareja como opción reproductiva completa, no solo excluir una región del
+  espacio recombinante. V1 no debe generar gametos desequilibrados ni modelar
+  emparejamientos complejos, fertilidad reducida o compatibilidad parcial.
+- **REQ-REC-05.** Para cada cromosoma o *scaffold* compatible de ploidía par 2,
+  4, 6, 8 o 10, cada meiosis debe formar la mitad de bivalentes que de copias.
+  Cada bivalente debe recombinar conforme a la tasa o mapa cuando corresponda y
   aportar una copia reconstruida al gameto.
-- **REQ-REC-06.** Las copias estructuralmente compatibles deben emparejarse al
-  azar para formar bivalentes, de manera reproducible mediante la semilla. Los
-  emparejamientos y haplotipos transmitidos deben quedar trazados internamente.
+- **REQ-REC-06.** Como todas las copias de una secuencia reproductiva tienen la
+  misma estructura, deben emparejarse al azar para formar bivalentes, de manera
+  reproducible mediante la semilla. Los emparejamientos, los estados
+  estructurales comparados y los haplotipos transmitidos deben quedar trazados.
 - **REQ-REC-07.** La primera versión no debe aplicar preferencia de
   apareamiento por subgenoma, emparejamiento homeólogo preferente, multivalentes
   ni doble reducción.
 - **REQ-REC-08.** Cada parental debe aportar la mitad de la ploidía al
-  descendiente. El método técnico para generar las posiciones de los
-  entrecruzamientos se concretará por separado sin alterar las reglas
-  funcionales acordadas.
+  descendiente. Los *scaffolds* deben seguir la misma segregación. Cuando a un
+  *scaffold* no le corresponda recombinación por su umbral efectivo, la copia
+  elegida de cada bivalente debe transmitirse intacta. El método técnico para
+  generar las posiciones se concretará por separado sin alterar estas reglas.
 - **REQ-REC-09.** Sin interferencia, el número de entrecruzamientos por bivalente
   y cromosoma debe obtenerse mediante una distribución de Poisson cuya media se
   derive de su longitud genética en centimorgan o Morgan. Las posiciones deben
@@ -2270,11 +2548,13 @@ hacia uno de los dos sentidos del carácter: valores mayores o valores menores.
   física en bases, conforme a REQ-CONF-100. Cada *scaffold* debe conservar la
   regla efectiva y si procede del valor general o de una sustitución específica.
 - **REQ-REC-11.** La salida detallada de recombinación debe generarse solo para
-  los individuos incluidos en muestreos solicitados. Para cada uno debe indicar
-  los puntos de recombinación y el origen parental de cada segmento. Las demás
-  generaciones deben conservar resúmenes, no una exportación individual de todos
-  sus segmentos.
-- **REQ-REC-12.** Para cada segmento de un individuo muestreado, el origen debe
+  los individuos incluidos en muestreos o materializaciones adicionales
+  solicitados expresamente. Para cada uno debe indicar los puntos de
+  recombinación y el origen parental de cada segmento. Las demás generaciones
+  deben conservar resúmenes, no una exportación individual de todos sus
+  segmentos.
+- **REQ-REC-12.** Para cada segmento de un individuo incluido en la salida de
+  REQ-REC-11, el origen debe
   poder reconstruirse hasta el individuo fundador y su copia haplotípica
   concreta. El sistema debe conservar internamente durante la evolución el
   historial suficiente para producir esa salida cuando se solicite el muestreo.
@@ -2325,7 +2605,7 @@ hacia uno de los dos sentidos del carácter: valores mayores o valores menores.
   entrecruzamientos como mecanismo de recombinación. No debe modelar conversión
   génica ni interpretarla como una translocación no recíproca.
 - **REQ-REC-22.** La segregación debe ser mendeliana. Dentro de cada bivalente,
-  cada copia estructuralmente compatible debe tener la misma probabilidad de
+  cada copia del mismo estado estructural canónico debe tener la misma probabilidad de
   transmisión, de forma reproducible mediante la semilla.
 - **REQ-REC-23.** La primera versión no debe modelar distorsión de segregación ni
   impulso meiótico. Estas exclusiones no deben alterar ni confundirse con la
@@ -2409,7 +2689,7 @@ a una probabilidad mayor de error.
   estructural distinta de la que corresponde a la muestra.
 - **REQ-DAT-04.** Cada BAM o CRAM debe incluir en su propia cabecera o metadatos
   estándar la información necesaria para identificar sin ambigüedad la
-  referencia de mapeo, la muestra, el evento, la biblioteca, la tanda o carril y
+  referencia de mapeo, la muestra, el evento, la biblioteca, la tanda y
   cada grupo de lectura, directamente o mediante sus relaciones documentadas.
 - **REQ-DAT-05.** El sistema debe permitir introducir errores, contaminación,
   cobertura baja o cero, mala calidad de mapeo y otras degradaciones en los
@@ -2466,9 +2746,9 @@ a una probabilidad mayor de error.
 - **REQ-DAT-20.** Los FASTQ, BAM y CRAM de ambos modos deben cumplir los
   estándares de sus formatos y la versión oficial que se elija durante la
   planificación. El modo directo no debe requerir FASTQ.
-- **REQ-DAT-21.** Cada experimento de mapeo debe usar exactamente un mapeador. Si
+- **REQ-DAT-21.** Cada evento con alineamientos debe usar exactamente un mapeador. Si
   la configuración no elige otro compatible, debe usar minimap2.
-- **REQ-DAT-22.** Si un experimento selecciona varias referencias de mapeo, debe
+- **REQ-DAT-22.** Si un evento selecciona varias referencias de mapeo, debe
   aplicar el mismo mapeador y los mismos FASTQ a cada referencia y producir
   conjuntos independientes. El mapeador puede ser distinto entre eventos, pero
   cada evento debe generar sus FASTQ propios y no reutilizarlos para comparar
@@ -2480,10 +2760,12 @@ a una probabilidad mayor de error.
   detectar opciones desconocidas o incompatibles cuando sea posible.
 - **REQ-DAT-24.** La cobertura realizada debe ser estocástica y aproximarse a la
   cobertura media objetivo efectiva de cada individuo, cromosoma o *scaffold* y
-  región. En el modo realista debe aplicarse al generar los FASTQ; en el modo
-  directo, al generar los BAM o CRAM sintéticos. Las regiones se interpretan en
-  la referencia estructural del individuo. No debe forzarse una profundidad
-  exacta en cada base.
+  región durante el muestreo WGS básico, antes de sesgos y artefactos. En el
+  modo realista debe aplicarse al generar las lecturas; en el modo directo, al
+  generar los BAM o CRAM sintéticos. Las regiones se interpretan en la
+  referencia estructural del individuo. No debe forzarse una profundidad exacta
+  en cada base. La cobertura final del FASTQ y la cobertura alineada observada
+  contra cada referencia deben medirse después y no constituyen nuevos objetivos.
 - **REQ-DAT-25.** En el modo realista, las lecturas contaminantes de todas las
   fuentes biológicas configuradas deben sustituir lecturas propias de la muestra
   antes del mapeo. El único mapeador debe procesar el resultado completo contra
@@ -2510,8 +2792,8 @@ a una probabilidad mayor de error.
   pares huérfanos.
 - **REQ-DAT-29.** El sistema debe aplicar y registrar por separado la
   contaminación biológica y la técnica. La contaminación técnica debe ocurrir
-  entre muestras pertenecientes a la misma tanda o conjunto de bibliotecas
-  multiplexadas configurado.
+  entre las muestras y bibliotecas procesadas conjuntamente en la única tanda
+  del evento.
 - **REQ-DAT-30.** La contaminación técnica debe poder producir dos resultados:
   lecturas transferidas de una muestra a otra, que desaparecen de la donante sin
   duplicarse, y lecturas que quedan sin asignar o son filtradas. La procedencia y
@@ -2525,13 +2807,15 @@ a una probabilidad mayor de error.
   esquema de índices. Debe conservar internamente la procedencia verdadera de
   cada lectura como parte de la verdad conocida.
 - **REQ-DAT-33.** En el modo realista, el sistema debe conservar un único FASTQ
-  final, o una pareja de FASTQ para datos *paired-end*, por combinación de
-  individuo, biblioteca y tanda o carril. No debe guardar además una copia limpia
-  anterior a la contaminación o a los errores de demultiplexado.
+  final, o una pareja de FASTQ para datos *paired-end*, por individuo y evento.
+  Este archivo corresponde a la única biblioteca de ese individuo y a la única
+  tanda del evento. No debe guardar además una copia limpia anterior a la
+  contaminación o a los errores de demultiplexado.
 - **REQ-DAT-34.** Por cada FASTQ final, el sistema debe generar un fichero
-  estructurado de procedencia que identifique cada lectura contaminante o, en
-  datos *paired-end*, la pareja completa como una unidad, e indique su fuente
-  real, la instancia de origen y el mecanismo que la introdujo. Los mecanismos deben distinguir, como
+  estructurado de procedencia que identifique cada lectura presente o, en datos
+  *paired-end*, la pareja completa como una unidad, e indique su origen y fuente
+  reales. Para una lectura contaminante debe registrar además la instancia de
+  origen y el mecanismo que la introdujo. Los mecanismos deben distinguir, como
   mínimo, contaminación biológica, cruce entre bibliotecas, reasignación por
   índices y otros mecanismos configurados.
 - **REQ-DAT-35.** El fichero de procedencia debe referirse a las lecturas o
@@ -2548,7 +2832,8 @@ a una probabilidad mayor de error.
 - **REQ-DAT-37.** El sistema debe aplicar el perfil de errores efectivo de la
   tecnología y su versión al generar las lecturas. Debe conservar el perfil
   predeterminado y todas las sustituciones globales o específicas realmente
-  aplicadas.
+  aplicadas. En v1, el modelo de error no debe resolver una `N` de la plantilla
+  ni generar nuevas `N` como error o llamada ausente.
 - **REQ-DAT-38.** Las puntuaciones de calidad por base del FASTQ deben generarse
   de forma coherente con el modelo de errores efectivo: una base de menor
   calidad debe tener mayor probabilidad de ser errónea conforme a la
@@ -2558,31 +2843,21 @@ a una probabilidad mayor de error.
   puntuaciones de calidad deben reflejar conjuntamente esos patrones.
 - **REQ-DAT-40.** El mapeo debe propagar correctamente a BAM o CRAM las
   puntuaciones de calidad del FASTQ final. La verdad conocida debe conservar,
-  para cada lectura simulada, la diferencia entre la secuencia original y la
-  observada para identificar los errores introducidos.
-- **REQ-DAT-41.** A partir del FASTQ real y su referencia correspondiente, el
-  sistema debe estimar, según la información disponible, un perfil WGS con
-  distribuciones de longitud de lectura, calidad por base y posición, tipos y
-  tasas de error y otros parámetros tecnológicos útiles para la simulación. En
-  la primera versión, esta calibración debe limitarse a lecturas cortas tipo
-  Illumina y lecturas largas PacBio HiFi.
-- **REQ-DAT-42.** La estimación debe intentar separar los errores de
-  secuenciación de las variantes reales, las regiones ambiguas y los errores de
-  mapeo. Debe documentar sus limitaciones y advertir cuando la referencia o los
-  datos no permitan una estimación fiable.
-- **REQ-DAT-43.** Si la configuración selecciona el perfil empírico estimado, sus
-  parámetros y versión deben convertirse en el perfil efectivo reproducible al
-  que se aplicarán las sustituciones de ámbito configuradas. Si no lo selecciona,
-  el sistema debe mantener el perfil tecnológico predeterminado.
-- **REQ-DAT-44.** Cada perfil empírico estimado debe guardarse en los resultados
-  como un fichero estructurado reutilizable. Debe contener la versión de su
-  esquema, los parámetros estimados, la tecnología declarada o inferida, la
-  referencia y los datos de entrada usados, el método y la versión de las
-  herramientas, las advertencias y las medidas de calidad de la estimación.
-- **REQ-DAT-45.** Una simulación posterior debe poder usar el fichero de perfil
-  empírico sin volver a analizar ni necesitar el FASTQ original. El formato
-  concreto del artefacto se decidirá durante la planificación de la
-  implementación.
+  para cada lectura o pareja presente en el FASTQ final, su origen o procedencia
+  y la diferencia entre la secuencia verdadera de origen y la observada para
+  identificar los errores introducidos. Las descartadas o sin asignar se rigen
+  por los recuentos agregados de REQ-DAT-36 y no por este detalle individual.
+- **REQ-DAT-41 (retirado).** Estimación de perfiles WGS desde un FASTQ real y su
+  referencia; capacidad aplazada fuera de v1.
+- **REQ-DAT-42 (retirado).** Separación automática de errores de secuenciación,
+  variantes reales, regiones ambiguas y errores de mapeo durante la calibración;
+  capacidad aplazada fuera de v1.
+- **REQ-DAT-43 (retirado).** Conversión de un perfil empírico estimado en perfil
+  efectivo; capacidad aplazada fuera de v1.
+- **REQ-DAT-44 (retirado).** Generación de un fichero estructurado de perfil
+  empírico; artefacto excluido de v1.
+- **REQ-DAT-45 (retirado).** Reutilización de un perfil empírico sin sus FASTQ
+  originales; capacidad aplazada fuera de v1.
 - **REQ-DAT-46.** El sistema debe generar por separado duplicados de PCR y
   duplicados ópticos con las tasas efectivas del perfil tecnológico, únicamente
   cuando el mecanismo sea pertinente para ese perfil. Los duplicados de PCR
@@ -2606,7 +2881,10 @@ a una probabilidad mayor de error.
   intervalo de secuencia de adaptador añadido.
 - **REQ-DAT-52.** Cuando el sesgo de contenido GC esté activo, la probabilidad de
   obtener lecturas de una región debe modificarse conforme a la curva o relación
-  y a la intensidad efectivas del perfil tecnológico.
+  y a la intensidad efectivas del perfil tecnológico. El contenido GC debe
+  calcularse como `(G+C)/(A+C+G+T)`, excluyendo `N` del numerador y del
+  denominador. Si un fragmento no contiene ninguna base conocida, no debe
+  aplicársele corrección ni sesgo GC y el caso debe registrarse.
 - **REQ-DAT-53.** El sesgo de contenido GC debe combinarse de forma reproducible
   con la cobertura objetivo y las sustituciones regionales sin ocultar ninguna
   excepción explícita. La cobertura realizada debe poder resumirse por
@@ -2685,6 +2963,14 @@ a una probabilidad mayor de error.
   del evento. Una colisión debe ser un error; no debe resolverse renombrando una
   lectura sin actualizar de forma atómica FASTQ, BAM o CRAM, verdad,
   procedencia y manifiesto.
+- **REQ-DAT-72.** Las regiones que contienen `N` deben seguir siendo elegibles
+  para el muestreo WGS. Cada `N` de la plantilla incluida en una lectura debe
+  aparecer como `N` en FASTQ con calidad Phred 0 y propagarse sin sustitución al
+  BAM o CRAM correspondiente.
+- **REQ-DAT-73.** La verdad de lecturas y los informes deben permitir comprobar
+  que ninguna `N` de plantilla se resolvió silenciosamente y que el modelo de
+  error no creó nuevas `N`. Deben registrar el número o la proporción de `N` en
+  las lecturas por biblioteca y ámbito pertinente.
 
 - **REQ-WGS-01.** Cada biblioteca debe declarar exactamente uno de dos objetivos
   excluyentes: cobertura media o número de lecturas. Declarar ambos o ninguno
@@ -2696,8 +2982,12 @@ a una probabilidad mayor de error.
   equivalente del indicador no elegido cuando sea posible: número de lecturas o
   parejas para un objetivo de cobertura, y cobertura para un objetivo numérico.
 - **REQ-WGS-04.** La cobertura en «x» debe definirse como el número de bases de
-  lecturas generadas dividido por la longitud haploide de la referencia
-  seleccionada, con independencia de la ploidía del individuo.
+  lecturas generado para la biblioteca dividido por la longitud haploide de la
+  referencia estructural del individuo. Esta longitud es la suma de cada
+  cromosoma o *scaffold* de la referencia una sola vez, sin multiplicarla por la
+  ploidía. Las posiciones `N` cuentan en esta longitud. Las diferencias de
+  longitud realizadas en los haplotipos y las
+  referencias seleccionadas para el mapeo no deben cambiar el denominador.
 - **REQ-WGS-05.** Antes de sesgos y degradaciones, el modelo WGS predeterminado
   debe elegir de forma uniforme y reproducible las posiciones iniciales de los
   fragmentos o lecturas entre las copias cromosómicas accesibles.
@@ -2712,7 +3002,8 @@ a una probabilidad mayor de error.
   ser proporcional a su ploidía.
 - **REQ-WGS-08.** El sesgo GC, las regiones con cobertura especial, los límites
   de secuencia y las demás degradaciones deben aplicarse después del muestreo
-  WGS básico, de forma documentada y con las precedencias ya acordadas.
+  WGS básico, de forma documentada y con la dominancia de REQ-CONF-116 a
+  REQ-CONF-121.
 - **REQ-WGS-09.** Antes de esos efectos, los haplotipos y alelos deben contribuir
   en proporción a su dosis y ploidía. Por ejemplo, 40× totales en un tetraploide
   uniforme deben producir aproximadamente 10× por copia.
@@ -2721,15 +3012,26 @@ a una probabilidad mayor de error.
   Las diferencias realizadas solo deben proceder del muestreo aleatorio, la
   cobertura y los errores, sesgos y resultados de mapeo admitidos.
 - **REQ-WGS-11.** El manifiesto y el informe de validación deben registrar la
-  cobertura total respecto a la longitud haploide y, cuando pueda medirse, la
-  cobertura realizada por cromosoma y copia o haplotipo.
+  referencia estructural y la longitud haploide usadas como denominador y
+  distinguir, por biblioteca y ámbito aplicable: la cobertura objetivo; la
+  cobertura WGS básica realizada antes de sesgos y artefactos; la cobertura
+  final del FASTQ después de sesgos, duplicados, contaminación, demultiplexado y
+  descartes, separando bases propias y contaminantes; y la cobertura alineada
+  observada contra cada referencia de mapeo. Esta última no debe presentarse
+  como otro objetivo. Cuando pueda medirse, también debe registrarse la cobertura
+  realizada por cromosoma y copia o haplotipo. Deben registrar además el número
+  o la proporción de `N` pertinente para interpretar cada medida.
 - **REQ-WGS-12.** Solo debe conservarse el BAM o CRAM final que contiene las
   degradaciones configuradas. No debe guardarse simultáneamente una versión
   limpia del mismo experimento.
-- **REQ-WGS-13.** Un control sin degradaciones debe ser otro experimento que
+- **REQ-WGS-13.** Un control sin degradaciones debe ser otro evento que
   reutilice la misma verdad genotípica, referencias y muestras, y la semilla o
   flujo pertinente, con las degradaciones desactivadas. El manifiesto debe
-  enlazar los experimentos relacionados sin mezclar sus resultados.
+  enlazar los eventos relacionados sin mezclar sus resultados.
+- **REQ-WGS-14.** Las posiciones `N` deben ser elegibles para el muestreo y
+  contar tanto como posiciones cubiertas como bases de lectura al calcular la
+  cobertura. No deben excluirse del numerador ni del denominador; los resúmenes
+  de `N` de REQ-WGS-11 permiten interpretar la medida.
 
 - **REQ-CONT-01.** La contaminación biológica debe ser sustitutiva: por cada
   lectura o pareja contaminante incorporada a la receptora debe retirarse una
@@ -2805,36 +3107,38 @@ a una probabilidad mayor de error.
   desviación y cualquier empate. Si no existe una asignación válida, el evento
   debe rechazarse antes de modificar los FASTQ finales.
 
-Un grupo de lectura reúne lecturas obtenidas para una combinación concreta de
-muestra, biblioteca y tanda o carril de secuenciación. En BAM o CRAM se describe
-mediante una entrada `@RG` de la cabecera y la etiqueta `RG` de cada registro.
+Un grupo de lectura reúne las lecturas obtenidas para un individuo dentro de un
+evento técnico. Como v1 asigna a ese individuo una sola biblioteca y al evento
+una sola tanda, existe exactamente un grupo de lectura por individuo y evento.
+En BAM o CRAM se describe mediante una entrada `@RG` de la cabecera y la etiqueta
+`RG` de cada registro.
 
 - **REQ-RG-01.** Los BAM o CRAM deben incluir grupos de lectura coherentes que
-  identifiquen como mínimo la muestra o individuo, la biblioteca, la tanda o
-  carril cuando corresponda y la plataforma o tecnología.
-- **REQ-RG-02.** Un mismo individuo debe poder tener varias bibliotecas, tandas o
-  carriles, cada uno con un identificador único y parámetros propios
-  configurables.
+  identifiquen como mínimo el evento, la muestra o individuo, su única
+  biblioteca, la única tanda y la plataforma o tecnología.
+- **REQ-RG-02.** Cada individuo seleccionado por un evento técnico debe tener
+  exactamente una biblioteca, un grupo de lectura y, en el modo realista, un
+  FASTQ final o una pareja de FASTQ. Solicitar otra biblioteca del mismo
+  individuo debe requerir otro evento.
 - **REQ-RG-03.** Antes de generar lecturas, el sistema debe rechazar las
-  colisiones de identificadores de grupos de lectura, bibliotecas, tandas o
-  carriles e identificar los valores en conflicto. El identificador de grupo de
-  lectura debe ser único en toda la ejecución.
-- **REQ-RG-04.** Los identificadores de muestra, biblioteca, tanda, carril y
+  colisiones de identificadores de grupos de lectura, bibliotecas o tandas e
+  identificar los valores en conflicto. El identificador de grupo de lectura
+  debe ser único en toda la ejecución.
+- **REQ-RG-04.** Los identificadores de muestra, biblioteca, tanda y
   grupo de lectura deben ser consistentes entre FASTQ, BAM o CRAM, manifiesto y
   ficheros de procedencia. El identificador de grupo debe distinguir evento,
-  biblioteca, tanda y carril. Los identificadores técnicos de lectura deben
+  biblioteca y tanda. Los identificadores técnicos de lectura deben
   cumplir además la unicidad y los vínculos de origen de REQ-DAT-68 a
   REQ-DAT-71.
 - **REQ-RG-05.** Dentro de cada conjunto definido por una referencia de mapeo,
-  el sistema debe generar un único BAM o CRAM final por individuo que combine
-  todas sus bibliotecas, tandas y carriles y preserve sus grupos de lectura. No
-  debe mezclar referencias ni requerir como producto principal archivos finales
-  separados por biblioteca; los intermedios técnicos quedan fuera de las
-  salidas principales.
-- **REQ-RG-06.** Los FASTQ finales deben entregarse separados por individuo,
-  biblioteca y tanda o carril, sin concatenarlos como producto principal. Cada
-  archivo o pareja de archivos debe conservar su propio perfil y parámetros y
-  corresponder a un único grupo de lectura del BAM o CRAM final combinado.
+  el sistema debe generar un único BAM o CRAM final por individuo y preservar
+  su único grupo de lectura del evento. No debe mezclar referencias ni requerir
+  como producto principal archivos finales separados por biblioteca; los
+  intermedios técnicos quedan fuera de las salidas principales.
+- **REQ-RG-06.** Los FASTQ finales deben entregarse separados por individuo y
+  evento, sin concatenarlos como producto principal. Cada archivo o pareja debe
+  conservar su perfil y parámetros y corresponder al único grupo de lectura de
+  ese individuo en el BAM o CRAM final.
 - **REQ-RG-07.** El campo de muestra `SM` de BAM o CRAM y la columna de muestra
   del VCF deben usar el identificador biológico estable del individuo. El evento
   debe identificarse mediante el directorio, el manifiesto y el grupo de lectura,
@@ -2847,6 +3151,12 @@ ampliación de la especificación.
 
 ### 4.5. VCF de verdad y coherencia de las salidas
 
+Un caso de verdad es una diferencia biológica individual o compuesta respecto a
+la referencia de mapeo de un conjunto. Puede necesitar uno o varios registros
+VCF para expresarse. Un punto de ruptura (*breakend*, BND) representa uno de los
+extremos de una nueva adyacencia entre segmentos; por ello una nueva adyacencia
+suele necesitar dos registros BND relacionados.
+
 - **REQ-VER-01.** Cuando la configuración solicite VCF de verdad, el sistema debe
   generarlo con los genotipos reales simulados de los SNP, *indels*, variantes
   estructurales y repeticiones en tándem de los individuos incluidos.
@@ -2856,14 +3166,17 @@ ampliación de la especificación.
   referencia de mapeo seleccionada para su conjunto y, cuando existan BAM o CRAM
   correspondientes, al mismo genoma que esos archivos.
 - **REQ-VER-04.** Cuando se solicite VCF, el sistema debe generar uno de verdad
-  independiente para cada referencia de mapeo seleccionada.
+  independiente para cada conjunto definido por el evento y una referencia de
+  mapeo. No debe generar VCF separados por individuo, clase de variante ni caso
+  complejo.
 - **REQ-VER-05.** Cada conjunto debe usar exactamente una referencia de mapeo.
   Todos los BAM, CRAM o VCF que existan en él deben estar referidos a esa misma
   referencia. No se deben mezclar datos referidos a genomas distintos.
 - **REQ-VER-06.** Cada VCF de verdad debe incluir en su propia cabecera o
   metadatos estándar la información necesaria para identificar sin ambigüedad la
-  referencia usada y el conjunto al que pertenece. Debe cumplir la versión
-  oficial de VCF que se elija durante la planificación.
+  referencia usada y el conjunto al que pertenece. Debe cumplir estrictamente
+  la versión oficial de VCF que se elija durante la planificación; esta
+  especificación no fija todavía una versión concreta.
 - **REQ-VER-07.** Los genotipos de todas las clases de variante deben expresarse
   respecto a la referencia usada por el conjunto correspondiente.
 - **REQ-VER-08.** Cuando se generen varios conjuntos, cada VCF de verdad debe
@@ -2908,45 +3221,56 @@ ampliación de la especificación.
   conjunto. REF es el alelo de referencia y ALT el alelo alternativo.
 - **REQ-VER-18.** Las variantes estructurales deben usar alelos simbólicos cuando
   corresponda y los campos estándar SVTYPE, END y SVLEN para indicar el tipo, la
-  posición final y la diferencia de longitud.
+  posición final y la diferencia de longitud. Toda variante debe usar la
+  representación estándar más completa que corresponda y cada campo estándar
+  debe conservar su semántica oficial.
 - **REQ-VER-19.** Una variante compleja debe conservar información suficiente
-  para reconstruir el cambio real simulado. Ninguna limitación de representación
-  debe provocar una pérdida silenciosa de la verdad.
+  para reconstruir el cambio real simulado. El VCF debe seguir siendo estándar,
+  válido e interoperable por sí mismo. Cuando el estándar no pueda conservar
+  todo el detalle, la reconstrucción completa debe usar el VCF junto con el
+  complemento enlazado; ninguna limitación debe provocar una pérdida silenciosa
+  de la verdad.
 - **REQ-VER-20.** Los alelos de repeticiones en tándem deben usar REF y ALT
   explícitos cuando su tamaño sea manejable y una representación simbólica para
   tramos largos o complejos.
 - **REQ-VER-21.** El VCF de verdad debe reflejar los cambios de copias y, cuando
   estén activadas, las mutaciones internas de interrupciones, pureza o motivo en
   el haplotipo afectado.
-- **REQ-VER-22.** En ambas representaciones, el propio VCF debe exponer sin
-  pérdida el motivo, el número de copias de cada alelo o haplotipo, la longitud,
-  la pureza y las interrupciones, mantener la fase y permitir reconstruir el
-  genotipo real simulado. Esos detalles no deben conservarse únicamente en el
-  manifiesto.
+- **REQ-VER-22.** En ambas representaciones, el VCF debe exponer mediante campos
+  estándar o adicionales válidos todo el motivo, número de copias, longitud,
+  pureza, interrupciones y fase que permita expresar sin pérdida la versión
+  oficial seleccionada. El detalle restante debe conservarse en la única entrada
+  complementaria del caso, nunca únicamente en el manifiesto.
 - **REQ-VER-23.** La cabecera del VCF debe documentar los campos estándar o
-  adicionales empleados para representar las repeticiones en tándem. Los campos
-  concretos se elegirán durante la planificación de la implementación.
+  adicionales empleados para representar las repeticiones en tándem y cualquier
+  enlace con el complemento. Todo campo `INFO` adicional debe declararse en la
+  cabecera conforme al estándar. Los nombres concretos se elegirán durante la
+  planificación y no forman parte todavía del contrato funcional.
 - **REQ-VER-24.** Si cualquier variante o genotipo complejo no puede
-  representarse completamente y sin pérdida en VCF, el sistema debe generar un
-  fichero estructurado complementario de verdad. No debe generarlo cuando todos
-  los casos sean plenamente representables, salvo que una opción futura lo
-  solicite expresamente.
-- **REQ-VER-25.** Cada caso conservado en el complemento debe tener un
-  identificador estable compartido con su registro VCF. El VCF debe referenciar
-  ese identificador y el fichero complementario correspondiente.
-- **REQ-VER-26.** El complemento debe conservar toda la información necesaria
-  para reconstruir la secuencia o cambio real, el haplotipo y la fase, las
-  coordenadas y el genotipo simulado.
+  representarse completamente y sin pérdida en VCF, el sistema debe generar una
+  única entrada en un fichero estructurado complementario para ese caso. No debe
+  crear una entrada para un caso plenamente representable ni generar el fichero
+  cuando ningún caso lo necesite.
+- **REQ-VER-25.** Un caso de verdad debe corresponder a uno o varios registros
+  VCF y, solo cuando exista pérdida de detalle, a exactamente una entrada
+  complementaria. Todos los registros del caso que necesiten ese detalle deben
+  incluir en `INFO` una descripción breve de lo no representable y un
+  identificador local estable que enlace la misma entrada. Cada registro
+  enlazado debe pertenecer a una sola entrada y a un solo caso.
+- **REQ-VER-26.** El complemento debe conservar todo el detalle que se perdería
+  en VCF y que sea necesario para reconstruir la secuencia o cambio real, el
+  haplotipo y la fase, las coordenadas y el genotipo simulado. El manifiesto debe
+  enlazar los artefactos, pero no sustituir ese detalle. El fichero estructurado
+  obligatorio de verdad sigue siendo la fuente canónica completa.
 - **REQ-VER-27.** El VCF o, cuando corresponda, el fichero de verdad obligatorio
   debe conservar la dosis alélica para la ploidía efectiva de 1 a 10 copias.
 - **REQ-VER-28.** Por cada conjunto definido por una referencia de mapeo, el
-  sistema debe generar un único VCF de verdad multimuesta con todos los
-  individuos del conjunto como columnas. Sus identificadores deben coincidir
-  exactamente con los usados en BAM o CRAM, grupos de lectura, genotipos
-  completos y manifiesto.
+  sistema debe generar, cuando se solicite, exactamente un VCF de verdad
+  multimuesta con todos los individuos del conjunto como columnas. Sus
+  identificadores deben coincidir exactamente con los usados en BAM o CRAM,
+  grupos de lectura, genotipos completos y manifiesto.
 - **REQ-VER-29.** Un VCF de verdad no debe incluir individuos alineados contra
-  otra referencia ni mezclar conjuntos. Los VCF individuales no deben formar
-  parte de la salida principal.
+  otra referencia ni mezclar conjuntos. No deben generarse VCF individuales.
 - **REQ-VER-30.** El VCF multimuesta de verdad debe incluir únicamente loci en
   los que al menos una muestra tenga un alelo no de referencia respecto a la
   referencia de mapeo del conjunto. No debe incluir registros para posiciones
@@ -2996,10 +3320,14 @@ ampliación de la especificación.
   expresa la ausencia intencionada de una calidad probabilística y que
   `FILTER=PASS` identifica un registro verdadero que ha superado las
   comprobaciones estructurales aplicables.
-- **REQ-VER-42.** Las translocaciones deben representarse mediante registros BND
-  o alelos simbólicos cuando permitan expresar el evento sin pérdida. Cuando no
-  sea suficiente, el VCF debe enlazar un complemento de verdad que conserve el
-  evento compuesto, sus puntos de ruptura, segmentos y orientaciones.
+- **REQ-VER-42.** Las translocaciones deben usar la representación estándar más
+  completa que corresponda. Una nueva adyacencia representada mediante BND debe
+  contener sus dos puntos de ruptura, normalmente como dos registros relacionados
+  mediante `MATEID`, `EVENT` u otros campos estándar aplicables. Una translocación
+  recíproca puede contener dos nuevas adyacencias y requerir cuatro BND; no debe
+  imponerse una cardinalidad universal de dos registros por translocación.
+  Cuando el VCF no conserve todo el evento compuesto, todos los registros que
+  necesiten ese detalle deben enlazar su única entrada complementaria.
 - **REQ-VER-43.** El VCF debe incluir toda diferencia respecto a la referencia
   del conjunto cuando al menos una muestra tenga un alelo alternativo, aunque
   ese alelo esté fijado en todas las muestras. Una variante respecto a la
@@ -3022,6 +3350,12 @@ ampliación de la especificación.
   identificadores locales de variante, coordenadas, REF, ALT y genotipos. Las
   diferencias de subsemilla, tecnología, FASTQ, BAM, CRAM o degradaciones
   técnicas no deben cambiar el VCF de verdad.
+- **REQ-VER-47.** El VCF no debe emitir un SNP con `REF=N` ni inventar una base
+  concreta para representarlo. Otros cambios deben conservar `N` en `REF` o
+  `ALT` solo cuando la versión oficial seleccionada permita una representación
+  estándar válida y sin pérdida. Cuando no sea posible, debe aplicarse la única
+  entrada complementaria del caso conforme a REQ-VER-24 a REQ-VER-26. La verdad
+  estructurada canónica debe conservar siempre cada `N` exactamente.
 
 Cuando se genera, el VCF de verdad recoge los genotipos definidos por la
 simulación, no una estimación basada en la evidencia observada. Su finalidad
@@ -3033,13 +3367,16 @@ esos conjuntos deben permanecer separados.
 ### 4.6. Validación interna de lecturas y alineamientos
 
 En esta sección, el soporte alélico es la cantidad o proporción de lecturas que
-contienen un alelo concreto. Una tolerancia estocástica es el intervalo aceptable
-de variación causado por el azar de la simulación; no exige que una tasa o una
-cobertura realizada coincidan exactamente con su objetivo.
+contienen un alelo concreto. Una comprobación determinista evalúa una regla
+exacta que siempre debe cumplirse, como la coherencia de una referencia, una
+identidad o una procedencia. Un resultado estadístico describe una magnitud que
+puede diferir de su objetivo por el muestreo aleatorio. En v1 estos dos tipos no
+comparten una política de aceptación.
 
 - **REQ-VAL-01.** Siempre que se generen FASTQ o BAM o CRAM, el sistema debe
-  comprobar internamente que reflejan de forma estadísticamente coherente la
-  verdad biológica simulada y los artefactos configurados.
+  comprobar internamente sus invariantes deterministas contra la verdad
+  biológica simulada y producir por separado informes estadísticos de las
+  magnitudes aleatorias y los artefactos configurados.
 - **REQ-VAL-02.** La validación debe usar el genoma, los haplotipos, la ploidía,
   los genotipos y la procedencia verdadera de las lecturas definidos por la
   simulación. No debe ejecutar un *SNP caller* ni llamar, imputar, fasear,
@@ -3048,15 +3385,19 @@ cobertura realizada coincidan exactamente con su objetivo.
   individuos y haplotipos correctos, salvo las procedencias diferentes que la
   configuración introduzca expresamente como contaminación u otro artefacto.
 - **REQ-VAL-04.** La validación debe comparar la cobertura objetivo con la
-  cobertura realizada en los ámbitos aplicables, incluidas las sustituciones por
-  individuo, cromosoma o *scaffold* y región.
+  cobertura WGS básica realizada en los ámbitos aplicables, incluidas las
+  sustituciones por individuo, cromosoma o *scaffold* y región. Debe comprobar
+  por separado la cobertura final del FASTQ y la cobertura alineada observada
+  contra cada referencia, sin compararlas como objetivos equivalentes.
 - **REQ-VAL-05.** La validación debe comprobar que el soporte alélico observado
-  es compatible, dentro de tolerancias estocásticas, con la dosis alélica y la
-  ploidía simuladas y con los efectos configurados que puedan alterarlo. No debe
-  exigir un balance exacto entre alelos o copias.
+  se informa junto con la dosis alélica, la ploidía simulada y los efectos
+  configurados que puedan alterarlo. No debe exigir un balance exacto entre
+  alelos o copias ni usar la desviación estadística para aceptar o rechazar el
+  resultado.
 - **REQ-VAL-06.** La validación debe comparar los valores objetivo y realizados
   de errores de secuenciación, contaminación biológica y técnica, duplicados y
-  las demás degradaciones activadas, usando las tolerancias que correspondan.
+  las demás degradaciones activadas. Estas diferencias se informan y no se
+  someten a tolerancias de aceptación en v1.
 - **REQ-VAL-07.** Para datos *paired-end*, la validación debe comprobar la
   coherencia entre ambos miembros de cada pareja, incluidos origen, orientación,
   distancia, estado de alineamiento y anomalías configuradas.
@@ -3069,32 +3410,41 @@ cobertura realizada coincidan exactamente con su objetivo.
   perfil, artefacto o decisión aleatoria registrada de la simulación.
 - **REQ-VAL-10.** La validación debe producir uno o varios resultados
   estructurados que indiquen las comprobaciones realizadas, los objetivos, los
-  valores observados, las tolerancias aplicadas, las desviaciones detectadas y
-  su explicación cuando exista. El manifiesto debe enlazar estos resultados con
-  los FASTQ, BAM o CRAM, muestras, grupos y conjuntos a los que se refieren.
+  valores observados y las desviaciones detectadas. Para cada resultado
+  estadístico debe registrar como mínimo el ámbito, el objetivo o valor esperado,
+  el valor realizado, el tamaño de la muestra o número de unidades observadas,
+  las desviaciones absoluta y relativa y los parámetros o la explicación
+  pertinentes. El manifiesto debe enlazar estos resultados con los FASTQ, BAM o
+  CRAM, muestras, grupos y conjuntos a los que se refieren.
 - **REQ-VAL-11.** Toda inconsistencia estructural o lógica debe tratarse como un
   error que detiene la ejecución e impide marcar como completo el conjunto
   afectado. Esto incluye, como mínimo, archivos inválidos, referencias
-  incorrectas, identificadores incompatibles, genotipos imposibles y cabeceras o
-  índices incoherentes.
-- **REQ-VAL-12.** Una desviación estadística fuera de las tolerancias
-  configuradas debe producir una advertencia de forma predeterminada. La
-  configuración debe permitir elevar estas desviaciones a errores que detengan
-  la ejecución e impidan marcar como completo el conjunto afectado. Se exceptúa
-  las desviaciones entre N objetivo y N realizado y entre Ne objetivo y Ne
-  realizado: deben advertirse, pero nunca elevarse a error ni detener la
-  simulación por sí mismas. El caso N realizado igual a 0 aplica la política de
-  REQ-CONF-104 y no debe confundirse con elevar una desviación estadística.
+  incorrectas, identificadores incompatibles, genotipos imposibles, cabeceras o
+  índices incoherentes, lecturas o parejas con procedencia o haplotipo imposible
+  y artefactos observados sin explicación en la configuración, la verdad o una
+  decisión trazada.
+- **REQ-VAL-12.** Las diferencias atribuibles al muestreo aleatorio en cobertura,
+  soporte alélico, tasas realizadas de errores, contaminación, duplicados y
+  demás degradaciones deben registrarse como resultados estadísticos. En v1 no
+  se comparan con tolerancias de aceptación, no se clasifican como error y no
+  detienen la ejecución; la configuración no puede elevarlas a error. Las
+  desviaciones entre N objetivo y N realizado conservan su advertencia explícita
+  no invalidante. N realizado igual a 0 aplica además la política de
+  REQ-CONF-104. Ne realizado no se compara con un objetivo en v1.
 - **REQ-VAL-13.** Para cada comprobación estadística, el resultado estructurado y
-  el manifiesto deben registrar la tolerancia, el valor esperado, el valor
-  realizado y la decisión aplicada: conforme, advertencia o error. Para N y Ne
-  deben registrar la desviación cuantificada y la advertencia no invalidante,
-  sin aplicar una política que pueda convertirla en error. N realizado igual a
-  0 se resuelve además conforme a REQ-CONF-104.
+  el manifiesto deben registrar los campos mínimos de REQ-VAL-10 sin asignar una
+  categoría de aceptación por tolerancia. Si una medida no puede calcularse,
+  debe registrarse como «no evaluable» junto con la causa, nunca como cero ni
+  como éxito o error. Para N deben registrar la desviación cuantificada y la
+  advertencia no invalidante; N realizado igual a 0 se resuelve además conforme
+  a REQ-CONF-104. Ne realizado se registra sin objetivo ni advertencia de
+  desviación, o como «no evaluable» con causa.
 - **REQ-VAL-14.** La validación WGS debe comprobar el objetivo excluyente de cada
-  biblioteca, la cobertura calculada respecto a la longitud haploide, la
-  distribución aproximadamente Poisson anterior a sesgos y el reparto realizado
-  por cromosoma y copia o haplotipo.
+  biblioteca, el denominador obtenido al sumar una vez las secuencias de la
+  referencia estructural, la distribución aproximadamente Poisson anterior a
+  sesgos y el reparto realizado por cromosoma y copia o haplotipo. También debe
+  comprobar que haplotipos y referencias de mapeo no alteraron el denominador y
+  que las cuatro medidas de REQ-WGS-11 permanecen separadas.
 - **REQ-VAL-15.** La validación debe distinguir una variación aleatoria admisible
   del soporte alélico de un modelo intencionado de desequilibrio o pérdida
   alélica, que no existe en la primera versión.
@@ -3104,26 +3454,36 @@ cobertura realizada coincidan exactamente con su objetivo.
   También debe comprobar la conversión conjunta de unidades, el carácter óptimo de
   la asignación entera, sus desviaciones y la resolución reproducible de
   empates conforme a REQ-CONT-15 y REQ-CONT-16.
-- **REQ-VAL-17.** La validación poblacional debe comprobar N objetivo, N
-  realizado, su desviación y su aviso, además de Ne objetivo o su ausencia y Ne
-  realizado en cada subpoblación y generación. Debe
+- **REQ-VAL-17.** La validación poblacional debe comprobar N objetivo, intentos,
+  éxitos y fallos por causa, N realizado, su desviación y su aviso, además de Ne
+  realizado o su estado «no evaluable» con causa en cada subpoblación y
+  generación. Debe
   comprobar que Ne realizado procede solo de los progenitores con descendencia
-  y de la desigualdad o varianza de sus contribuciones. Cuando haya objetivo,
-  debe cuantificar cualquier desviación y emitir una advertencia no invalidante.
+  y de la desigualdad o varianza de sus contribuciones.
   También debe comprobar autofecundaciones esperadas y realizadas, contribución
-  familiar, rutas de migración, supervivencia y extinciones con las
-  tolerancias y políticas acordadas. Para el locus seleccionado debe validar
-  todos los genotipos o combinaciones de dosis bialélicos o multialélicos, sus
-  valores genéticos, valores del carácter, aptitudes y probabilidades de
-  supervivencia. Debe comprobar que el valor del carácter coincide con el valor
-  genético y que no se aplicaron ruido ambiental ni heredabilidad. También debe
-  comprobar el sentido direccional configurado y que las aptitudes respetan el
-  orden esperado; una función estabilizadora o disruptiva debe rechazarse.
+  familiar, rutas de migración, supervivencia y extinciones con las políticas
+  acordadas. Para el SNP bialélico seleccionado debe validar su identidad única,
+  protección y dosis alternativa para ploidías 1–10, la presencia de todos los
+  valores genéticos exigidos y la finitud y no negatividad de las aptitudes.
+  Antes de seleccionar debe comprobar que existe al menos una aptitud positiva.
+  También debe comprobar que el carácter coincide con el valor genético, que no
+  se aplicaron ruido ambiental ni heredabilidad y que la función respeta el
+  sentido direccional. Cualquier ausencia, duplicación, ambigüedad, valor no
+  finito, aptitud negativa o máximo cero debe constar como error previo a la
+  supervivencia, nunca como extinción.
 - **REQ-VAL-18.** La validación de mutación y recombinación debe comprobar tasas
-  y eventos esperados o realizados, orden recombinación→mutación, mapas
-  completos, intervalos recombinantes válidos y emparejamientos bivalentes
+  efectivas, oportunidades válidas, medias Poisson y eventos sorteados,
+  aceptados y activos por clase y ámbito. Debe comprobar que la ploidía y las
+  copias actuales cuentan, que ámbitos solapados no duplican oportunidades, que
+  destinos o extremos condicionados no multiplican el denominador y que el
+  recuento solo se sorteó al inicio de la clase. Debe comprobar además el orden
+  recombinación→mutación, mapas completos, ploidías pares iguales, equivalencia
+  estructural canónica antes de formar bivalentes y emparejamientos
   reproducibles. Debe comprobar también el mínimo de un entrecruzamiento en cada
-  cromosoma y en los *scaffolds* que superen su umbral efectivo.
+  cromosoma y en los *scaffolds* que superen su umbral efectivo, y que los
+  *scaffolds* sin recombinación transmitieron intactas las copias elegidas. Para
+  `N` debe comprobar las exclusiones de oportunidades específicas de cada clase
+  sin excluir intervalos puramente estructurales que puedan conservarla.
 - **REQ-VAL-19.** Para cada individuo muestreado, la validación debe comprobar
   que los segmentos reconstruyen sin interrupciones su genoma, que cada segmento
   alcanza una copia haplotípica fundadora y que las mutaciones de novo se
@@ -3132,10 +3492,11 @@ cobertura realizada coincidan exactamente con su objetivo.
   orientación entre los segmentos actuales y fundadores que sean relacionables.
 - **REQ-VAL-20.** Cuando la población inicial use el modelo de equilibrio de
   Hardy-Weinberg, la validación debe comparar las frecuencias y recuentos
-  genotípicos y alélicos esperados y realizados según la ploidía. Debe tratar la
-  variación finita como estocástica y no exigir recuentos genotípicos exactos.
-  En modo controlado debe comprobar por separado los recuentos alélicos fijados
-  y la distribución genotípica aleatoria condicionada.
+  genotípicos y alélicos esperados y realizados según las fórmulas binomial o
+  multinomial de REQ-EVO-33 para ploidías 1–10. Debe tratar la variación finita
+  como estocástica y no exigir recuentos genotípicos exactos. En modo controlado
+  debe comprobar por separado los recuentos alélicos fijados y la distribución
+  genotípica aleatoria condicionada.
 - **REQ-VAL-21.** La validación de la población inicial debe comprobar si se usó
   asignación independiente o bloques con LD y que los haplotipos resultantes
   conservan la fase. Cuando se configure LD, debe comparar las frecuencias
@@ -3151,14 +3512,12 @@ cobertura realizada coincidan exactamente con su objetivo.
   frecuencias alélicas derivadas son compatibles con los genotipos, dosis o
   haplotipos aportados.
 - **REQ-VAL-23.** La validación debe comprobar que F se aplicó solo en su ámbito
-  global o de subpoblación, que no se usó con ploidía 1 ni en ámbitos locales y
-  que toda distribución genotípica explícita prevaleció en su locus o bloque.
-  Debe comprobar que F=0 conserva las probabilidades de Hardy-Weinberg, que la
-  homocigosis crece al aumentar F y que F=1 produce homocigosis completa. Por
-  subpoblación y generación registrada, debe comparar la heterocigosidad
-  observada y esperada según las frecuencias alélicas para obtener F realizado.
-  En poliploides, debe considerar heterocigoto al individuo cuyas copias no sean
-  todas del mismo alelo. Un F realizado negativo debe conservarse y no marcarse
+  global o de subpoblación diploide, que no se usó con ploidía 1 o mayor que 2
+  ni en ámbitos locales y que toda distribución explícita prevaleció en su locus
+  o bloque. Debe comprobar las fórmulas bialélica o multialélica de
+  REQ-EVO-47/48, incluidos F=0, un valor intermedio y F=1. F realizado debe
+  calcularse solo en diploides; para las demás ploidías debe figurar como «no
+  aplicable». Un F realizado diploide negativo debe conservarse y no marcarse
   como error.
 - **REQ-VAL-24.** Cada evento de muestreo debe validar antes de generar datos que
   sus individuos explícitos y aleatorios existen, pertenecen a la generación y
@@ -3167,13 +3526,14 @@ cobertura realizada coincidan exactamente con su objetivo.
   silenciosa del tamaño.
 - **REQ-VAL-25.** La validación técnica debe comprobar que cada evento usa una
   sola tecnología y un perfil cuando genera FASTQ, BAM o CRAM, y un solo
-  mapeador cuando genera alineamientos. Debe comprobar que sus FASTQ no proceden
-  de otro evento y que, dentro del evento, los mismos FASTQ y mapeador se
-  aplicaron a todas las referencias seleccionadas. Un evento que solo solicite
-  verdad genotípica o VCF debe validarse sin exigirle parámetros de
-  secuenciación.
+  mapeador cuando genera alineamientos. Debe comprobar que contiene exactamente
+  una tanda y una biblioteca por individuo, que todas sus bibliotecas se tratan
+  conjuntamente y que sus FASTQ no proceden de otro evento. Dentro del evento,
+  los mismos FASTQ y mapeador deben aplicarse a todas las referencias
+  seleccionadas. Un evento que solo solicite verdad genotípica o VCF debe
+  rechazarse si declara tecnología, perfil, biblioteca, tanda o mapeador.
 - **REQ-VAL-26.** La validación debe comprobar la unicidad global y coherencia de
-  cada grupo de lectura, que distingue evento, biblioteca, tanda y carril, y que
+  cada grupo de lectura, que distingue evento, biblioteca y tanda, y que
   `SM` y las columnas del VCF conservan el identificador biológico estable.
   También debe comprobar la unicidad de cada instancia de lectura dentro del
   evento y la coherencia de sus vínculos de origen, copias biológicas,
@@ -3189,15 +3549,23 @@ cobertura realizada coincidan exactamente con su objetivo.
 - **REQ-VAL-28.** Para cada VCF debe comprobarse que se incluyeron los ALT
   fijados, que los ALT representables de un locus se reunieron en un registro
   multialélico y que ploidía, dosis y fase se conservaron. También debe comprobar
-  que los espacios de identificadores no crean enlaces entre referencias.
+  que los espacios de identificadores no crean enlaces entre referencias, que
+  el archivo cumple la versión oficial seleccionada y que todos los campos
+  estándar mantienen su semántica.
 - **REQ-VAL-29.** Cuando varios eventos compartan individuos, referencia y verdad
   genotípica, la validación debe comprobar la identidad de identificadores
   locales de variante, coordenadas, REF, ALT y genotipos entre sus VCF, sin
   exigir identidad de FASTQ, BAM, CRAM o degradaciones.
 - **REQ-VAL-30.** La validación de familias debe comprobar la cardinalidad y el
   tipo de cada evento, la simetría de los parentales de un cruzamiento, la
-  compatibilidad estructural reproductiva y la trazabilidad de las mutaciones de
-  novo cuando estén activadas. Para seleccionar descendientes debe comprobar los
+  ploidía par e igual por secuencia, la identidad del estado estructural canónico
+  de todas las copias reproductivas y la trazabilidad de las mutaciones de novo
+  cuando estén activadas. Debe aceptar diferencias en SNP, *indels* pequeños y
+  repeticiones, y rechazar heterocigosis o diferencias en cada clase de variante
+  estructural. Una SV fijada de forma estructuralmente idéntica debe ser
+  compatible aunque conserve historias distintas. Una SV de novo debe quedar
+  trazada y, si su portador alimenta otro evento, este debe aplicar de nuevo la
+  regla de compatibilidad. Para seleccionar descendientes debe comprobar los
   criterios sobre la verdad biológica, las combinaciones lógicas, el ámbito
   elegible y la cantidad exacta o proporción solicitada. También debe comprobar
   el sorteo sin reemplazo, el uso reproducible de la semilla y la política de
@@ -3290,10 +3658,12 @@ cobertura realizada coincidan exactamente con su objetivo.
   los tamaños reproductores antes y después de migrar, el N objetivo aplicado a
   la descendencia y que la migración no modificó ese objetivo por sí sola.
 - **REQ-VAL-39.** Para cada generación con varios eventos demográficos, la
-  validación debe comprobar que existió un orden explícito único, que cada evento
-  recibió el estado producido por el anterior y que se respetaron todas las
-  dependencias. Un orden ausente, ambiguo o imposible debe constar como rechazo
-  de configuración anterior a la simulación.
+  validación debe comprobar que existió un orden interno explícito único, que
+  cada evento recibió el estado producido por el anterior y que se respetaron
+  todas las dependencias. Para toda generación debe comprobar además que las
+  ocho etapas siguieron REQ-REP-24, con cada etapa aplicada u omitida en su lugar.
+  Un orden demográfico ausente, ambiguo o imposible o una solicitud de orden de
+  procesos alternativo debe constar como rechazo previo a la simulación.
 - **REQ-VAL-40.** Para cada conjunto de frecuencias o probabilidades que deba
   sumar 1, la validación debe comprobar la suma original, la tolerancia general
   efectiva y la decisión de normalizar o rechazar. Cuando se normalice, debe
@@ -3311,8 +3681,9 @@ cobertura realizada coincidan exactamente con su objetivo.
   posterior.
 - **REQ-VAL-42.** La validación del resultado mínimo debe comprobar por vía el
   alcance de los estados genotípicos completos de REQ-SAL-02 y distinguirlos de
-  los historiales resumidos. La ausencia de un estado completo obligatorio o la
-  presentación de un resumen como estado completo debe ser un error.
+  los historiales resumidos. La ausencia de un estado completo obligatorio, la
+  presentación de un resumen como estado completo o cualquier reducción
+  automática del detalle obligatorio por escala debe ser un error.
 - **REQ-VAL-43.** La validación de estados debe comprobar la jerarquía de
   ejecución, evento, conjunto y artefacto de REQ-SAL-21 a REQ-SAL-26. Ninguna
   unidad debe marcarse como completa si una salida obligatoria subordinada está
@@ -3326,6 +3697,51 @@ cobertura realizada coincidan exactamente con su objetivo.
   el primer elemento de la cabecera, comprobar su unicidad y conservar la
   descripción completa. Debe rechazar cualquier símbolo de secuencia distinto
   de A, C, G, T y N, sin distinguir mayúsculas de minúsculas.
+- **REQ-VAL-46.** Para toda generación aleatoria de cambios, la validación debe
+  comprobar que los explícitos se aplicaron primero y en orden, que las clases
+  aleatorias siguieron el orden fijo de REQ-IND-55 y que cada evento se eligió
+  del espacio válido actualizado. Debe comprobar por clase los números sorteado,
+  aceptado antes del fallo y finalmente activo. La insuficiencia de destinos
+  debe constar como fallo, nunca como reducción silenciosa, advertencia ni
+  agotamiento de un número de reintentos.
+- **REQ-VAL-47.** La validación de verdad debe comprobar que cada conjunto
+  solicitado contiene exactamente un VCF multimuesta y que referencias distintas
+  producen VCF independientes. Para cada caso debe comprobar la cardinalidad
+  entre caso, registros y complemento, las declaraciones de todo campo `INFO`
+  adicional y la validez de los enlaces locales. Debe cubrir como mínimo un caso
+  representable sin complemento, un caso complejo representable mediante un
+  registro y una entrada complementaria, una nueva adyacencia con dos BND y una
+  entrada, y una translocación recíproca con todos sus BND necesarios y una
+  entrada. En cada caso complejo, el par VCF y complemento debe reconstruir todo
+  el detalle conservado por la verdad canónica.
+- **REQ-VAL-48.** La validación debe comprobar que todo recuento de variantes
+  aleatorias se obtuvo mediante Poisson y fue reproducible con la misma semilla,
+  configuración, entradas y versión. Para cada mutación de repetición en tándem
+  debe comprobar que el cambio fue exactamente una unidad completa y que su
+  dirección respetó el sesgo efectivo. Debe constar como rechazo previo a la
+  simulación cualquier distribución distinta, modelo alternativo o salto de
+  varias unidades, identificando parámetro y valor.
+- **REQ-VAL-49.** La admisión debe comprobar que ninguna configuración solicita
+  calibración empírica, aporta FASTQ o referencia para calibrarla ni selecciona
+  un perfil empírico reutilizable. Cualquiera de esos campos debe rechazarse
+  antes de simular con un diagnóstico que identifique el campo y la exclusión de
+  v1. Una ejecución válida con un perfil tecnológico incorporado y
+  sustituciones permitidas no debe producir ningún artefacto de perfil empírico
+  ni enlace a él en sus manifiestos.
+- **REQ-VAL-50.** La validación debe comprobar que ninguna `N` se resolvió,
+  sustituyó ni creó silenciosamente. Debe cubrir como mínimo: rechazo de SNP y
+  locus seleccionado sobre `N`; exclusión de un motivo de repetición con `N`;
+  una SV cuyo intervalo contiene `N`; inserciones aleatoria y explícita;
+  herencia y recombinación; una lectura con `N` y Phred 0 propagada a BAM o
+  CRAM; una ventana compuesta solo por `N` sin sesgo GC; cobertura que la cuenta;
+  y representación VCF o complemento sin inventar bases.
+- **REQ-VAL-51.** La admisión debe comprobar la resolución de sustituciones de
+  REQ-CONF-116 a REQ-CONF-123 antes de simular. Debe cubrir la herencia de la
+  regla base, cada jerarquía interna, una regla combinada dominante, conflictos
+  entre región y subpoblación y entre individuo y región, duplicados exactos,
+  regiones solapadas aunque compartan valor, selectores no permitidos y la
+  separación entre parámetros biológicos y técnicos. Cada rechazo debe incluir
+  el parámetro, el objeto y las reglas o selectores causantes.
 
 ### 4.7. Manifiestos de la ejecución y de sus eventos
 
@@ -3361,10 +3777,10 @@ VCF y no constituya un experimento de secuenciación.
   seleccionadas e identificar el conjunto independiente generado para cada una.
 - **REQ-MAN-10.** El manifiesto debe distinguir los valores globales de los
   parámetros de generación aleatoria, los valores específicos definidos para
-  individuos concretos y el valor efectivo aplicado a cada individuo afectado
-  por una sustitución. También debe distinguir los valores definidos para el
+  individuos declarados y existentes antes de la simulación y el valor efectivo
+  aplicado a cada individuo afectado por una sustitución. También debe distinguir los valores definidos para el
   genoma, el cromosoma o *scaffold* y la región, y el valor efectivo resultante
-  de aplicar la precedencia espacial y por individuo. Para cada clase de
+  de aplicar REQ-CONF-116 a REQ-CONF-123. Para cada clase de
   variante debe registrar si se utilizó una cantidad media esperada o una
   densidad y, en el segundo caso, si la densidad se expresó por base, kilobase o
   megabase. También debe registrar si se aplicó una distribución espacial
@@ -3372,8 +3788,9 @@ VCF y no constituya un experimento de secuenciación.
   cero.
 - **REQ-MAN-11.** Para cada clase de variante, ámbito general o región e
   individuo al que corresponda, el manifiesto debe registrar la cantidad media
-  esperada y el número realizado de eventos, junto con la distribución
-  probabilística y los parámetros realmente utilizados.
+  esperada, el número realizado o sorteado, el número aceptado antes de un
+  posible fallo y el número finalmente activo, junto con la distribución
+  Poisson y su media efectiva.
 - **REQ-MAN-12.** Para cada región configurada, el manifiesto debe registrar la
   referencia estructural, el cromosoma o *scaffold* y el intervalo indicados.
   Esta procedencia no debe convertirse en una correspondencia entre registros
@@ -3394,15 +3811,19 @@ VCF y no constituya un experimento de secuenciación.
   seleccionados y la semilla o el flujo aleatorio que corresponda. También debe
   indicar el estado genotípico y los metadatos conservados, si se solicitaron
   salidas adicionales y cuáles fueron los BAM, CRAM o VCF generados.
-- **REQ-MAN-16.** Para cada individuo, el manifiesto debe relacionar su
-  identificador estable, su generación de origen, sus parentales cuando existan,
-  sus observaciones y los archivos generados que le correspondan. Debe distinguir
-  los identificadores de individuo, evento de muestreo y conjunto.
-- **REQ-MAN-17.** En una ejecución evolutiva, el manifiesto debe registrar las
-  trayectorias configuradas de N objetivo y Ne objetivo, así como N objetivo, N
-  realizado y su desviación, Ne objetivo o su ausencia, Ne realizado y su
-  desviación por generación, fase o tramo. Debe hacerlo para la población
-  completa y para cada subpoblación cuando corresponda.
+- **REQ-MAN-16.** El manifiesto debe enumerar individualmente a cada individuo
+  cuyo estado completo se materialice y a todos los individuos de familias y
+  poblaciones segregantes. Para cada uno debe relacionar identificador estable,
+  generación de origen, parentales cuando existan, observaciones y archivos.
+  Las generaciones evolutivas no materializadas deben aparecer mediante sus
+  resúmenes, no mediante listas individuales completas. Debe distinguir los
+  identificadores de individuo, evento de muestreo y conjunto.
+- **REQ-MAN-17.** En una ejecución evolutiva, el manifiesto debe registrar la
+  trayectoria configurada de N objetivo y, por generación, fase o tramo, N
+  objetivo, intentos, éxitos, fallos por causa, N realizado, desviación y aviso.
+  Debe registrar Ne realizado o «no evaluable» con causa, sin Ne objetivo ni
+  desviación asociada. Debe hacerlo para la población completa y para cada
+  subpoblación cuando corresponda.
 - **REQ-MAN-18.** El manifiesto debe registrar la estructura de subpoblaciones, sus
   identificadores y parámetros, la pertenencia de los individuos por generación
   u observación y las migraciones direccionales configuradas y realizadas. Para
@@ -3434,11 +3855,14 @@ VCF y no constituya un experimento de secuenciación.
   subpoblación nueva con el ámbito recolonizado sin unir sus identificadores ni
   sus historias.
 - **REQ-MAN-20.** El manifiesto debe registrar qué procesos evolutivos estuvieron
-  activos o inactivos y los parámetros y valores efectivos aplicados por fase,
-  generación y subpoblación cuando corresponda.
+  activos, desactivados o no aplicables y los parámetros y valores efectivos
+  aplicados por fase, generación y subpoblación cuando corresponda. Cada proceso
+  omitido debe conservar su etapa fija y la causa de omisión.
 - **REQ-MAN-21.** El manifiesto debe registrar el orden efectivo en que se
-  aplicaron los procesos dentro de cada escenario o fase e indicar si procedía
-  de la configuración o de la secuencia predeterminada.
+  aplicaron las ocho etapas de cada generación, que siempre debe ser el orden
+  fijo de REQ-REP-24. Debe distinguir en cada etapa lo aplicado de lo omitido
+  por estar desactivado o no ser aplicable, y registrar por separado el orden
+  interno explícito de los eventos demográficos cuando haya varios.
 - **REQ-MAN-22.** El manifiesto debe registrar si se usó una tasa uniforme o un
   mapa de recombinación, la referencia estructural, las tasas, el mapa y los
   parámetros efectivos y los resúmenes generacionales de recombinación. Para cada
@@ -3465,8 +3889,8 @@ VCF y no constituya un experimento de secuenciación.
   caso debe registrar las proporciones solicitada y realizada.
 - **REQ-MAN-26.** Para cada población intermedia de cruces, el manifiesto debe
   identificar el estado genotípico y los metadatos conservados de todos sus
-  individuos, si se solicitaron salidas adicionales y cuáles fueron los BAM,
-  CRAM o VCF generados.
+  individuos y enumerarlos individualmente, si se solicitaron salidas
+  adicionales y cuáles fueron los BAM, CRAM o VCF generados.
 - **REQ-MAN-27.** El manifiesto o el estado genotípico trazable debe conservar la
   fase, los haplotipos y el origen de los segmentos heredados o recombinados. El
   manifiesto debe registrar cada limitación de representación en un VCF, su causa
@@ -3479,14 +3903,17 @@ VCF y no constituya un experimento de secuenciación.
   debe conservar los valores realizados de pureza, interrupciones y variabilidad
   por haplotipo, individuo o población cuando corresponda.
 - **REQ-MAN-30.** Para cada mutación de repetición en tándem, el manifiesto debe
-  registrar el modelo, los parámetros efectivos, el locus y haplotipo afectados,
-  las unidades ganadas o perdidas y, cuando estén activadas, las modificaciones
-  internas de interrupciones, pureza o motivo.
+  registrar el modelo escalonado simple, la tasa y el sesgo efectivos, el locus
+  y haplotipo afectados y si añadió o eliminó exactamente una unidad completa.
+  Cuando estén activadas, debe registrar por separado las modificaciones internas
+  de interrupciones, pureza o motivo.
 - **REQ-MAN-31.** Cuando exista un fichero complementario de verdad, el
   manifiesto debe enlazarlo con el VCF, la referencia de mapeo y el conjunto
-  correspondientes y conservar los identificadores compartidos de los casos
-  dentro de ese conjunto. Esos identificadores son locales al conjunto y no
-  deben enlazar variantes entre referencias.
+  correspondientes y conservar los identificadores locales de los casos y sus
+  relaciones uno-a-varios con los registros VCF. Debe registrar exactamente una
+  entrada por caso con pérdida de detalle, sin usar el manifiesto para almacenar
+  el detalle que corresponde al complemento. Esos identificadores son locales
+  al conjunto y no deben enlazar variantes entre referencias.
 - **REQ-MAN-32.** El manifiesto debe distinguir las salidas mínimas, las
   activadas de forma predeterminada, las solicitadas expresamente y las
   desactivadas, y registrar todos los archivos generados para satisfacerlas.
@@ -3495,7 +3922,9 @@ VCF y no constituya un experimento de secuenciación.
   pueda medirse, el consumo real de la ejecución. Para duplicaciones debe incluir
   el máximo local efectivo, si se elevó sobre el valor predeterminado, el
   presupuesto de recursos configurado y el resultado de compararlo con la
-  estimación previa.
+  estimación previa. La estimación debe incluir el contrato obligatorio de
+  trazabilidad y dejar constancia de cualquier rechazo previo por no poder
+  producirlo, sin registrar un nivel reducido alternativo.
 - **REQ-MAN-34.** Para cada conjunto y cada FASTQ, el manifiesto debe
   registrar si se usó el modo realista o el directo, la tecnología, el perfil,
   los parámetros efectivos y la semilla o el flujo aleatorio aplicable. En el
@@ -3504,15 +3933,15 @@ VCF y no constituya un experimento de secuenciación.
   manifiesto debe registrar su procedencia, las muestras y lecturas que contiene
   y los BAM o CRAM para los que se usó. También debe relacionar cada conjunto
   con sus FASTQ y su referencia de mapeo.
-- **REQ-MAN-36.** Para cada experimento de mapeo, el manifiesto debe registrar el
+- **REQ-MAN-36.** Para cada evento con alineamientos, el manifiesto debe registrar el
   nombre y la versión del único mapeador, el comando efectivo completo y sus
   parámetros, cada referencia y los FASTQ usados. Cuando se use minimap2, debe
   distinguir el *preset*, los valores predeterminados y las sustituciones de la
   configuración.
 - **REQ-MAN-37.** Para la cobertura, el manifiesto debe registrar el objetivo y
-  la cobertura realizada por ámbito y muestra cuando pueda medirse, incluidos
-  los valores globales y las sustituciones efectivas por individuo, cromosoma o
-  *scaffold* y región.
+  las coberturas WGS básica, final del FASTQ y alineada observada por referencia,
+  por ámbito y muestra cuando puedan medirse. Debe incluir los valores globales
+  y las sustituciones efectivas por individuo, cromosoma o *scaffold* y región.
 - **REQ-MAN-38.** Para cada fuente contaminante, el manifiesto debe registrar su
   identificador y origen, la fracción objetivo, la fracción realizada y los
   recuentos de lecturas o parejas propias retiradas y contaminantes incorporadas,
@@ -3538,14 +3967,10 @@ VCF y no constituya un experimento de secuenciación.
   la tecnología, el nombre y la versión del perfil predeterminado, la tasa y los
   tipos de error representados, todas las sustituciones configuradas y los
   valores efectivos por individuo, cromosoma o *scaffold* y región.
-- **REQ-MAN-43.** Cuando se calibre un perfil empírico, el manifiesto debe
-  identificar el FASTQ real y su referencia, registrar los parámetros estimados,
-  las limitaciones y advertencias de fiabilidad y si el perfil fue seleccionado
-  como efectivo o solo estimado.
-- **REQ-MAN-44.** El manifiesto debe identificar y enlazar el fichero de perfil
-  empírico generado, su versión de esquema, la tecnología, las entradas, el
-  método y las versiones de las herramientas, las medidas de calidad y las
-  advertencias de la estimación.
+- **REQ-MAN-43 (retirado).** Registro en el manifiesto de entradas y resultados
+  de calibración empírica; capacidad aplazada fuera de v1.
+- **REQ-MAN-44 (retirado).** Enlace desde el manifiesto a un fichero de perfil
+  empírico; artefacto excluido de v1.
 - **REQ-MAN-45.** Para los duplicados de PCR y ópticos, el manifiesto debe
   registrar por separado el perfil, la tasa y los valores predeterminados o
   sustituidos realmente usados, las cantidades esperadas y realizadas y la
@@ -3560,7 +3985,8 @@ VCF y no constituya un experimento de secuenciación.
   perfil, la curva o relación, la intensidad, si fue anulado y la regla efectiva
   de combinación con la cobertura objetivo y las excepciones regionales. También
   debe registrar la cobertura realizada mediante intervalos o resúmenes
-  apropiados.
+  apropiados. Debe registrar cuántos fragmentos carecían de bases conocidas y
+  no recibieron corrección GC.
 - **REQ-MAN-49.** El manifiesto debe identificar las regiones configuradas o
   generadas para producir baja mapeabilidad, su relación con repeticiones o
   variantes estructurales y el mapeador y la referencia que determinaron los
@@ -3576,15 +4002,15 @@ VCF y no constituya un experimento de secuenciación.
   las tasas configuradas y las cantidades realizadas por tipo y combinación, y
   relacionarlas con la verdad de fragmento y estado de origen.
 - **REQ-MAN-53.** El manifiesto debe registrar cada grupo de lectura, su muestra
-  o individuo, biblioteca, tanda o carril, plataforma o tecnología, parámetros
+  o individuo, biblioteca, tanda, plataforma o tecnología, parámetros
   efectivos y archivos asociados mediante los mismos identificadores usados en
   FASTQ, BAM o CRAM y ficheros de procedencia. Debe relacionar todos los grupos
   del individuo con su único BAM o CRAM final dentro de cada conjunto y
   referencia de mapeo. Debe enlazar cada FASTQ final separado con su grupo de
   lectura y con el BAM o CRAM final de destino.
 - **REQ-MAN-54.** El manifiesto debe identificar la única tecnología de cada
-  experimento, sus bibliotecas, tandas, carriles, perfil y mapeo compatibles, y
-  enlazar los experimentos que usen las mismas muestras y verdad
+  evento técnico, su única tanda, su única biblioteca por individuo y su perfil
+  y mapeo compatibles. Debe enlazar los eventos que usen las mismas muestras y verdad
   genotípica sin mezclar sus archivos. Debe registrar el identificador y la
   versión exactos del perfil, incluidos la química y el procesamiento cuando
   formen parte de la definición tecnológica.
@@ -3605,36 +4031,41 @@ VCF y no constituya un experimento de secuenciación.
 - **REQ-MAN-59.** El manifiesto debe enlazar cada resultado estructurado de la
   validación interna con los FASTQ, BAM o CRAM, muestras, grupos de lectura y
   conjuntos comprobados, y resumir las desviaciones detectadas y sus
-  explicaciones registradas. Para cada comprobación estadística debe conservar
-  la tolerancia, el valor esperado, el valor realizado y la decisión aplicada.
-  También debe identificar los conjuntos que no se marcaron como completos por
-  un error estructural, lógico o estadístico elevado a error.
+  explicaciones registradas. Para cada resultado estadístico debe conservar el
+  ámbito, el objetivo o valor esperado, el valor realizado, el tamaño de muestra
+  o número de unidades observadas, las desviaciones absoluta y relativa y la
+  explicación o los parámetros pertinentes. Si no se pudo calcular, debe
+  registrar «no evaluable» y la causa. También debe identificar los conjuntos
+  que no se marcaron como completos por una incoherencia determinista.
 - **REQ-MAN-60.** Para cada biblioteca WGS, el manifiesto debe registrar la
   preparación sin PCR o con amplificación, el objetivo original de cobertura o
   número de lecturas, el indicador equivalente realizado y el perfil y las
   sustituciones aplicados.
 - **REQ-MAN-61.** El manifiesto debe registrar la definición de cobertura usada,
-  la cobertura total respecto a la longitud haploide y, cuando pueda medirse, la
-  cobertura por cromosoma y copia o haplotipo antes y después de sesgos y
-  degradaciones.
+  la referencia estructural y la longitud haploide del denominador, la cobertura
+  objetivo, la WGS básica anterior a sesgos y artefactos, la final del FASTQ con
+  bases propias y contaminantes separadas y la alineada observada por cada
+  referencia de mapeo. Cuando pueda medirse, debe desglosar también la cobertura
+  por cromosoma y copia o haplotipo. La cobertura alineada no debe etiquetarse
+  como objetivo.
 - **REQ-MAN-62.** Para la contaminación debe registrar la matriz objetivo y
   realizada o los pesos del reparto automático, los límites comprobados y, por
   fuente y mecanismo, lecturas propias retiradas, contaminantes incorporadas,
   transferidas, descartadas, totales finales y cobertura final.
-- **REQ-MAN-63.** Cuando un experimento sin degradaciones actúe como control de
+- **REQ-MAN-63.** Cuando un evento sin degradaciones actúe como control de
   otro, el manifiesto debe enlazar ambos mediante la verdad, referencias,
   muestras biológicas y relación experimental, manteniendo separados sus
   archivos. Cada evento debe conservar su propia subsemilla y generar sus
   propias lecturas.
 - **REQ-MAN-64.** El manifiesto debe enlazar el historial resumido de cada
-  generación y registrar N objetivo heredado o modificado, N realizado, su
-  desviación y aviso, la transición en que el objetivo determinó la descendencia,
-  la forma original y el objetivo de Ne o su ausencia, Ne realizado, desviación y advertencia cuando
-  haya objetivo, apareamientos, progenitores con descendencia, descendientes,
-  distribución familiar y estados genotípicos completos conservados.
+  generación y registrar N objetivo heredado o modificado, intentos, éxitos y
+  fallos por causa, N realizado, desviación y aviso, y la transición en que el
+  objetivo determinó la descendencia. Debe registrar Ne realizado o «no
+  evaluable» con causa, apareamientos, progenitores con descendencia,
+  descendientes y estados genotípicos completos conservados.
 - **REQ-MAN-65.** Debe registrar la tasa de autofecundación, sus valores
-  esperados y realizados, el único locus seleccionado, sus alelos, genotipos o
-  combinaciones de dosis, valores genéticos, valores del carácter, función de
+  esperados y realizados, la referencia, secuencia, coordenada e identificador
+  del único SNP seleccionado, sus dosis, valores genéticos, valores del carácter, función de
   aptitud, aptitudes antes y después de normalizar,
   supervivientes, extinciones, el modo y los valores de migración solicitados y
   realizados por ruta y las rutas individuales. Debe registrar que el valor del
@@ -3643,15 +4074,18 @@ VCF y no constituya un experimento de secuenciación.
   También debe registrar el sentido direccional elegido y los parámetros
   efectivos de la función.
 - **REQ-MAN-66.** Debe registrar las tasas y espectros de mutación, eventos
-  esperados y realizados, mutaciones de novo por haplotipo, transmisión y orden
-  efectivo de procesos de cada generación.
-- **REQ-MAN-67.** Debe enlazar el catálogo FASTA de TE y conservar por copia o
-  evento sus identificadores, fuente, familia, mecanismo, secuencias, orientación,
-  truncamiento, sitio diana, ubicación, haplotipo y linaje.
+  realizados, mutaciones de novo por haplotipo, transmisión y orden efectivo de
+  procesos de cada generación. Por clase y ámbito debe incluir tasa efectiva,
+  oportunidades válidas, media Poisson y recuentos sorteado, aceptado y activo.
+  Para `N` debe incluir las oportunidades excluidas por necesitar una base
+  concreta y distinguirlas de los intervalos estructurales que la conservaron.
+- **REQ-MAN-67 (retirado).** La primera versión no genera ni enlaza catálogos,
+  copias, familias, mecanismos ni metadatos específicos de TE.
 - **REQ-MAN-68.** Debe registrar el modo y unidades de recombinación, los mapas
-  completos o tasas efectivas y los recuentos agregados de intervalos
-  bloqueados, bivalentes formados y entrecruzamientos realizados en los
-  resúmenes generacionales. Para cada secuencia debe registrar su clasificación
+  completos o tasas efectivas, los estados estructurales canónicos comparados,
+  los individuos o parejas excluidos por incompatibilidad, los bivalentes
+  formados y los entrecruzamientos realizados en los resúmenes generacionales.
+  Para cada secuencia debe registrar su clasificación
   como cromosoma o *scaffold*, si se aplicó el mínimo de un entrecruzamiento y,
   en los *scaffolds*, la unidad y el umbral efectivos y su procedencia general o
   específica. Para los individuos muestreados debe enlazar la salida detallada
@@ -3668,10 +4102,12 @@ VCF y no constituya un experimento de secuenciación.
   para inicializar una población, debe registrar la ploidía, las frecuencias
   alélicas de entrada y realizadas y las probabilidades, frecuencias y recuentos
   genotípicos esperados y realizados por locus y población o subpoblación. Si se
-  usa F, debe registrar su objetivo y el F realizado por subpoblación y
-  generación registrada, incluidas las estimaciones negativas. Debe identificar
-  el modo y, en el controlado, distinguir los recuentos alélicos fijados de la
-  distribución genotípica aleatoria condicionada.
+  usa F en diploides, debe registrar su objetivo y el F realizado por
+  subpoblación y generación, incluidas estimaciones negativas. Para ploidía 1 o
+  mayor que 2 debe registrar F realizado como «no aplicable». Debe identificar
+  HWE, F diploide o distribución explícita y, en el modo controlado, distinguir
+  los recuentos alélicos fijados de la distribución genotípica aleatoria
+  condicionada.
 - **REQ-MAN-71.** Para cada población inicial, debe registrar si se usó
   asignación independiente o bloques con LD. Cuando se configure LD, debe
   registrar los bloques, su especificación objetivo, las frecuencias conjuntas
@@ -3686,10 +4122,11 @@ VCF y no constituya un experimento de secuenciación.
 - **REQ-MAN-73.** Cada evento debe tener un directorio y un manifiesto propios.
   Este manifiesto debe registrar su identificador, selección de individuos,
   referencias, subsemilla y salidas solicitadas, generadas, omitidas o fallidas.
-  Cuando el evento genere FASTQ, BAM o CRAM debe registrar su tecnología, perfil
-  y bibliotecas; cuando genere alineamientos debe registrar además su mapeador
-  único. Un evento que solo materialice verdad o VCF no debe inventar esos
-  campos técnicos como si se hubieran aplicado.
+  Cuando el evento genere FASTQ, BAM o CRAM debe registrar que constituye su
+  único experimento de secuenciación, su tecnología, perfil, tanda y la
+  biblioteca única de cada individuo; cuando genere alineamientos debe registrar
+  además su mapeador único. Un evento que solo materialice verdad o VCF no debe
+  contener esos campos técnicos como si se hubieran aplicado.
 - **REQ-MAN-74.** Dentro de un evento, el manifiesto debe separar los resultados
   por referencia de mapeo y relacionar cada BAM, CRAM o VCF exclusivamente con
   su conjunto. Debe conservar los identificadores biológicos de muestra, sin
@@ -3699,12 +4136,13 @@ VCF y no constituya un experimento de secuenciación.
   referenciarlos mediante su ruta y un identificador verificable, sin crear
   copias redundantes dentro de cada evento.
 - **REQ-MAN-76.** El manifiesto general y cada manifiesto de evento deben incluir
-  sumas de comprobación de los ficheros que enlazan y el algoritmo utilizado.
+  sumas de comprobación de todos los ficheros que enlazan, incluidas las copias
+  utilizadas de configuraciones y entradas, y el algoritmo utilizado.
   El sistema debe comprobar esas sumas antes y después de exportar un evento.
   El algoritmo concreto se decidirá durante la planificación de la
   implementación.
 - **REQ-MAN-77.** Los identificadores de grupo de lectura deben ser únicos en
-  toda la ejecución y distinguir evento, biblioteca, tanda y carril. El
+  toda la ejecución y distinguir evento, biblioteca y tanda. El
   manifiesto debe relacionarlos de forma coherente con FASTQ, BAM o CRAM y
   procedencia, mientras `SM` conserva el identificador biológico del individuo.
 - **REQ-MAN-78.** Si el mismo individuo participa en varios eventos, el
@@ -3741,7 +4179,8 @@ VCF y no constituya un experimento de secuenciación.
   materializaron conforme a REQ-SAL-02, qué generaciones conservaron solo un
   historial resumido y qué configuraciones o muestreos solicitaron
   materializaciones adicionales. No debe describir un resumen como si fuera un
-  estado genotípico completo.
+  estado genotípico completo ni declarar un nivel configurable o una degradación
+  automática de trazabilidad.
 - **REQ-MAN-85.** Para cada conversión conjunta de contaminación, el manifiesto
   debe registrar las unidades originales, los objetivos convertidos, la
   asignación entera, las desviaciones y los empates resueltos con la subsemilla.
@@ -3751,6 +4190,16 @@ VCF y no constituya un experimento de secuenciación.
   estructurada de referencias debe conservar el identificador formado por el
   primer elemento de la cabecera y la descripción completa restante, además del
   resultado de validar el alfabeto A, C, G, T y N.
+- **REQ-MAN-87.** El manifiesto debe registrar, por referencia, biblioteca y
+  operación pertinente, el número o la proporción de `N`, sus exclusiones de
+  oportunidades, los fragmentos sin bases conocidas y la comprobación de que
+  no se resolvió ni se creó ninguna `N` de forma implícita. Debe enlazar los
+  casos VCF que necesiten complemento para conservarla sin pérdida.
+- **REQ-MAN-88.** El manifiesto y la configuración efectiva deben registrar,
+  para cada valor sustituido, el parámetro y objeto, la regla ganadora, sus
+  selectores y su procedencia. Una ejecución rechazada por máximas incomparables
+  debe conservar esa misma información para todas las reglas máximas en el
+  diagnóstico de admisión.
 
 El formato y el esquema del manifiesto se elegirán durante la planificación de
 la implementación teniendo en cuenta que el núcleo se desarrollará en Rust.
@@ -3768,7 +4217,9 @@ Esta decisión no forma parte de la especificación funcional.
   todos los individuos de las generaciones o muestreos solicitados, mientras el
   resto de generaciones conserva el historial resumido de REQ-REP-20. En
   familias y poblaciones segregantes debe materializar todos los individuos de
-  todos los eventos y poblaciones intermedias conforme a REQ-CRU-15.
+  todos los eventos y poblaciones intermedias conforme a REQ-CRU-15. Este es el
+  único alcance obligatorio de v1: no debe admitir niveles configurables ni
+  reducirlo automáticamente por el tamaño del escenario.
 - **REQ-SAL-03.** Toda ejecución válida debe guardar en el directorio de
   resultados una copia de todos los ficheros de configuración realmente usados.
 - **REQ-SAL-04.** Toda ejecución válida debe producir el manifiesto general
@@ -3785,34 +4236,37 @@ Esta decisión no forma parte de la especificación funcional.
   activadas necesarias para que el experimento sea autocontenido y exportable.
 - **REQ-SAL-08.** En el modo realista, una ejecución solo debe terminar con
   éxito si existe por cada grupo de lectura su FASTQ final —o pareja de FASTQ— y
-  su fichero estructurado de procedencia enlazado desde el manifiesto.
+  su fichero estructurado de procedencia enlazado desde el manifiesto. Debe
+  existir exactamente un grupo y un FASTQ o pareja por individuo y evento.
 - **REQ-SAL-09.** Cuando se simulen lecturas, la verdad conocida debe conservar
   las diferencias entre la secuencia original y la observada y la procedencia de
   los duplicados, aunque su organización técnica dentro de los ficheros de
   verdad todavía no esté definida.
-- **REQ-SAL-10.** Cuando se estime un perfil empírico, su fichero estructurado
-  reutilizable debe formar parte de las salidas activadas necesarias para que la
-  ejecución termine con éxito.
+- **REQ-SAL-10 (retirado).** Fichero estructurado reutilizable de perfil
+  empírico como salida activada; artefacto excluido de v1.
 - **REQ-SAL-11.** Todo BAM o CRAM final debe incluir su índice compatible entre
   las salidas activadas. Una ejecución no debe terminar con éxito si falla la
   validación conjunta del alineamiento, el índice y la referencia.
 - **REQ-SAL-12.** Cuando se solicite VCF, la salida activada debe incluir el VCF
   multimuesta comprimido con BGZF y su índice compatible, salvo que se solicite
-  expresamente la alternativa de texto sin comprimir. La ejecución no debe
-  terminar con éxito si falla la validación correspondiente.
+  expresamente la alternativa de texto sin comprimir. Debe incluir también el
+  único fichero complementario del conjunto cuando al menos un caso lo necesite.
+  La ejecución no debe terminar con éxito si falta una entrada obligatoria o
+  falla la validación correspondiente.
 - **REQ-SAL-13.** Siempre que la ejecución genere FASTQ o BAM o CRAM, los
   resultados estructurados de su validación interna deben formar parte de las
   salidas activadas y estar enlazados desde el manifiesto.
-- **REQ-SAL-14.** Cuando se utilice un catálogo de TE, su FASTA suministrado o
-  generado debe formar parte de las salidas activadas y quedar enlazado desde el
-  manifiesto. La copia suministrada debe conservar intacto el original.
+- **REQ-SAL-14 (retirado).** La primera versión no admite un catálogo FASTA de
+  TE como entrada ni como salida activada.
 - **REQ-SAL-15.** Toda ejecución evolutiva debe producir el historial
   estructurado resumido de todas sus generaciones y los estados genotípicos
   completos exigidos por REQ-REP-19 y REQ-REP-21.
 - **REQ-SAL-16.** Cada muestreo evolutivo debe producir para sus individuos la
   salida detallada de recombinación y origen por segmentos exigida en
-  REQ-REC-11 a REQ-REC-13. Esta salida no debe extenderse a todos los individuos
-  históricos por el mero hecho de generar resúmenes de cada generación.
+  REQ-REC-11 a REQ-REC-13. La misma obligación se aplica a una materialización
+  adicional solicitada expresamente. Esta salida no debe extenderse a todos los
+  individuos históricos por el mero hecho de generar resúmenes de cada
+  generación.
 - **REQ-SAL-17.** Cada evento explícito debe producir su propio
   directorio y manifiesto, separado de los demás eventos y organizado por
   referencia de mapeo cuando haya varias.
@@ -3874,12 +4328,17 @@ Esta decisión no forma parte de la especificación funcional.
   frente a los casos pequeños.
 - **REQ-NOF-05.** Antes de ejecutar, el sistema debe estimar de forma aproximada
   el volumen de las salidas y el almacenamiento, la memoria y el tiempo
-  necesarios, usando la configuración y los recursos que pueda detectar.
+  necesarios, usando la configuración y los recursos que pueda detectar. La
+  estimación debe incluir el único contrato obligatorio de trazabilidad y todas
+  las salidas activadas.
 - **REQ-NOF-06.** Si el escenario parece grande para los recursos disponibles,
   el sistema debe mostrar advertencias claras. Una advertencia no debe bloquear
   por sí sola. Debe impedirse el inicio si la configuración es inválida, falta
   inevitablemente un requisito mínimo o una estimación supera un presupuesto de
-  recursos configurado, explicando la causa.
+  recursos configurado, explicando la causa. No debe continuar con menos detalle
+  ni elegir otro nivel de trazabilidad. Para poder ejecutar, la persona usuaria
+  deberá reducir materializaciones, muestreos, individuos, lecturas u otras
+  salidas solicitadas hasta que la estimación permita cumplir el mínimo.
 - **REQ-NOF-07.** Las estimaciones no deben presentarse como exactas. Los modelos
   y umbrales de advertencia se elegirán y validarán durante la implementación.
 - **REQ-NOF-08.** Para reducir el almacenamiento, el sistema no debe conservar
@@ -3887,628 +4346,67 @@ Esta decisión no forma parte de la especificación funcional.
   el fichero de procedencia. Las estimaciones de espacio deben reflejar esta
   política.
 
-## 5. Flujo funcional confirmado
+## 5. Mapa conceptual del flujo
 
-El flujo funcional describe la relación entre los resultados, no el orden
-técnico en que deberá implementarse el sistema.
+Esta sección es un resumen **derivado e informativo** para recorrer el sistema
+de principio a fin. El contrato funcional reside exclusivamente en los
+requisitos de la sección 4; ante cualquier diferencia, prevalece el requisito
+identificado allí. Los criterios ACE citados en la tabla indican cómo se
+observará el resultado, sin crear obligaciones adicionales.
 
-1. El programa lee el fichero general de configuración y obtiene de él la vía
-   de creación, cero, uno o varios eventos explícitos y,
-   cuando se haya proporcionado, la semilla aleatoria. Si no se ha proporcionado una semilla,
-   genera una antes de iniciar la simulación. Antes de simular, comprueba que
-   cada cromosoma o *scaffold* tenga una ploidía efectiva entera de 1 a 10 y
-   rechaza cualquier valor o ausencia no admitidos. No crea eventos implícitos:
-   una ejecución sin eventos no genera VCF, FASTQ, BAM ni CRAM. Un evento que
-   solo solicite verdad genotípica o VCF no necesita parámetros de
-   secuenciación. Si un evento genera FASTQ, BAM o CRAM, también rechaza la
-   mezcla de tecnologías o los perfiles, bibliotecas o parámetros de mapeo
-   incompatibles. Comprueba entonces que el protocolo sea WGS de DNA genómico,
-   que cada biblioteca elija exclusivamente cobertura o número de lecturas y
-   que declare su preparación sin PCR o con amplificación. Rechaza paneles,
-   amplicones, GBS y otros protocolos de captura o reducción de representación.
-2. Si se ha seleccionado la vía evolutiva o la vía de familias y poblaciones
-   segregantes, el programa obtiene del fichero general la referencia al
-   fichero de configuración poblacional propio del escenario y lee este segundo
-   fichero. Conserva una copia en resultados de todos los ficheros de
-   configuración realmente usados. Con toda la configuración disponible, estima
-   el volumen y almacenamiento de las salidas, la memoria y el tiempo necesarios
-   según los recursos detectables. Advierte si el escenario parece grande, pero
-   solo impide iniciarlo si la configuración es inválida o no puede satisfacerse
-   inevitablemente un requisito mínimo, indicando la causa. Si se han indicado
-   FASTQ externos como fuentes contaminantes, los valida y los copia al
-   directorio de resultados antes de usarlos. La ejecución usa las copias y no
-   modifica los originales. Si se han proporcionado un FASTQ real y su
-   referencia para calibración, estima el perfil empírico, documenta sus
-   limitaciones y advertencias y guarda un fichero estructurado reutilizable. El
-   perfil solo sustituye al tecnológico predeterminado si la configuración lo
-   selecciona expresamente; también puede seleccionarse un perfil empírico
-   generado en una ejecución anterior.
-   Si se aporta un catálogo FASTA de elementos transponibles, lo valida, lo
-   copia a resultados y usa la copia sin modificar el original. Si el catálogo
-   debe simularse, genera y conserva su FASTA enlazado.
-3. Si la referencia inicial debe simularse, el programa genera sus cromosomas o
-   *scaffolds* con los tamaños y la composición configurados, y obtiene el tamaño
-   total a partir de sus tamaños individuales. Cuando se hayan configurado
-   repeticiones en tándem concretas o aleatorias, incorpora a la secuencia sus
-   motivos, copias e interrupciones realizados. Si la referencia es suministrada,
-   el programa valida el FASTA real indicado antes de iniciar la simulación. Solo
-   lo utiliza como referencia inicial si es legible, contiene al menos una
-   secuencia no vacía, el primer elemento de cada cabecera es un identificador
-   no vacío y único, y sus secuencias contienen únicamente A, C, G, T y N, en
-   mayúsculas o minúsculas. El resto de cada cabecera se conserva como
-   descripción. Si la validación falla, el programa
-   detiene la ejecución sin generar resultados y explica claramente los errores
-   detectados. Si la validación es correcta, copia el FASTA al directorio de
-   resultados y utiliza esa copia, sin modificar el archivo original.
-4. El sistema conserva si la referencia inicial fue simulada o suministrada y,
-   cuando proceda, la procedencia original del FASTA y el nombre o la ruta de la
-   copia utilizada.
-5. Toda la secuencia de la referencia inicial se guarda en un único FASTA, que
-   puede contener uno o varios cromosomas o *scaffolds*. No se genera ningún
-   índice si las operaciones y los formatos posteriores no lo necesitan; en
-   caso contrario, se generan todos los tipos necesarios.
-6. A partir de una referencia ya disponible, se crea una nueva referencia
-   estructural aplicando solo las duplicaciones, deleciones, inversiones y
-   translocaciones solicitadas.
-7. Toda la secuencia de la referencia derivada se guarda en un único FASTA. Se
-   conservan su referencia de origen y los cambios aplicados, y se generan los
-   tipos de índice que necesiten las operaciones o los formatos usados. Los
-   pasos 6 y 7 pueden repetirse para disponer de dos o más referencias
-   estructurales.
-8. Los ficheros de configuración indican si los cambios se definirán de forma
-   concreta o se crearán al azar. Para la generación aleatoria conservan los
-   valores globales y los valores específicos de cada individuo. Un valor
-   individual sustituye al global solo para ese individuo. Toda cantidad
-   configurada es una cantidad media esperada; cuando se usa una densidad, la
-   media se deriva de la densidad y de la longitud válida del ámbito. El sistema
-   obtiene al azar un número realizado, que puede diferir de la media, usando la
-   distribución de Poisson de forma predeterminada u otra distribución y sus
-   parámetros seleccionados para la clase de variante y la región. Para cada
-   clase se puede aplicar una distribución espacial uniforme o configurar
-   regiones con una cantidad media esperada o densidad mayor o menor que el
-   valor general, incluidas regiones con densidad cero. Cada región identifica
-   una referencia estructural, un cromosoma o *scaffold* y un intervalo, y se
-   interpreta sobre la referencia estructural correspondiente al individuo o la
-   población. Los valores espaciales siguen la jerarquía genoma, cromosoma o
-   *scaffold* y región: el ámbito más específico sustituye al más general, junto
-   con la sustitución por individuo cuando exista. Antes de simular, el sistema
-   rechaza los valores incompatibles asignados por regiones del mismo nivel que
-   se solapen e identifica ambas regiones y el parámetro en conflicto. En las
-   poblaciones, la frecuencia alélica se expresa como una proporción
-   poblacional; para un individuo se usa la presencia o ausencia, el genotipo o
-   la dosis alélica según su ploidía. Los valores fijados para individuos son
-   restricciones obligatorias. El sistema asigna los alelos de los demás
-   individuos para aproximarse al objetivo poblacional dentro de la tolerancia
-   admitida. Si no existe una asignación válida, rechaza la configuración antes
-   de simular, identifica la incompatibilidad y no modifica los valores
-   individuales. Para inserciones y deleciones aplica el umbral configurado o,
-   si se omitió, 50 pb, tanto al generar como al clasificar y calcular
-   estadísticas. Las repeticiones en tándem pueden definirse en loci concretos o
-   generarse al azar y por regiones; su motivo, copias o longitud, pureza,
-   interrupciones y variabilidad se aplican por haplotipo, individuo o población
-   con las sustituciones configuradas. Los cambios de copias usan el modelo
-   escalonado de ganancia o pérdida de unidades completas de forma predeterminada
-   u otro modelo seleccionado. Las mutaciones internas que cambian
-   interrupciones, pureza o motivo solo se aplican si se activan expresamente.
-9. El sistema aplica la vía seleccionada:
+| Etapa conceptual | Pregunta que permite seguir el flujo | Fuente normativa | Comprobación principal |
+|---|---|---|---|
+| Admisión | ¿La petición y sus ficheros forman una ejecución inequívoca? | REQ-CONF-01 a REQ-CONF-123, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 | ACE-01, ACE-23, ACE-35, ACE-36, ACE-105 y ACE-111 |
+| Referencias | ¿Qué secuencias y sistemas de coordenadas sostienen la verdad? | REQ-REF-01 a REQ-REF-23 | ACE-02 a ACE-08, ACE-95 y ACE-110 |
+| Construcción de individuos | ¿Qué genomas faseados existen antes de observarlos? | REQ-IND-01 a REQ-IND-59, REQ-DIR-01 a REQ-DIR-05 y REQ-MUT-01 a REQ-MUT-15 | ACE-09 a ACE-12, ACE-28 a ACE-32, ACE-79 a ACE-81, ACE-95, ACE-96, ACE-103, ACE-107 y ACE-109 a ACE-111 |
+| Inicialización poblacional | ¿Qué población inicial se deriva de las frecuencias y restricciones declaradas? | REQ-EVO-01 a REQ-EVO-52 y REQ-POB-01 a REQ-POB-03 | ACE-11, ACE-13, ACE-26, ACE-88 a ACE-90, ACE-104 y ACE-105 |
+| Evolución | ¿Cómo cambia el estado poblacional entre generaciones? | REQ-EVO-53 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 | ACE-13, ACE-24 a ACE-28 y ACE-76 a ACE-87 |
+| Familias y cruces | ¿Qué individuos intermedios y descendientes forman cada familia? | REQ-CRU-01 a REQ-CRU-45, junto con las reglas aplicables de REQ-REP-01 a REQ-REP-26 y REQ-REC-01 a REQ-REC-29 | ACE-14, ACE-27, ACE-75, ACE-85, ACE-87, ACE-97, ACE-98 y ACE-106 |
+| Observación técnica | ¿Qué evidencia se genera a partir de una verdad ya fijada? | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 | ACE-15 a ACE-17, ACE-37 a ACE-59, ACE-68 a ACE-74, ACE-93, ACE-94 y ACE-100 |
+| Verdad interoperable | ¿Cómo se proyecta la verdad canónica a cada referencia y formato solicitado? | REQ-VER-01 a REQ-VER-47 | ACE-18 a ACE-21, ACE-24, ACE-25, ACE-30, ACE-31, ACE-60 a ACE-63, ACE-66, ACE-100, ACE-101 y ACE-108 |
+| Cierre | ¿Cómo se decide que los resultados están completos y trazables? | REQ-VAL-01 a REQ-VAL-51, REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a REQ-SAL-26 | ACE-22 a ACE-24, ACE-33, ACE-34, ACE-36, ACE-46 a ACE-49, ACE-60 a ACE-67, ACE-78, ACE-86, ACE-92 a ACE-108 |
 
-   - crea directamente individuos con los cambios configurados, incluidas
-     inserciones de TE en un haplotipo nombrado y en una coordenada exacta o un
-     sitio permitido elegido reproduciblemente;
-   - crea una población inicial desde una referencia y simula su evolución
-     generación a generación mediante las fases ordenadas del fichero de
-     configuración poblacional; la salida de cada fase alimenta a la siguiente.
-     Cada locus o bloque y subpoblación inicial elige entre el modo probabilístico
-     predeterminado y el modo controlado explícito, sin mezclarlos dentro de la
-     misma unidad. Puede usar
-     equilibrio de Hardy-Weinberg para cualquier ploidía, frecuencias explícitas
-     de genotipo o dosis fuera del equilibrio, o genotipos multilocus
-     completamente faseados. Por defecto asigna loci independientemente. El LD
-     se define mediante bloques no solapados de haplotipos y frecuencias
-     conjuntas, o recuentos controlados que suman las copias disponibles; fuera
-     de ellos los loci son independientes. El coeficiente de
-     endogamia F puede definirse globalmente o sustituirse por subpoblación, pero
-     no por locus, región o bloque. Para ploidías mayores que 1, F progresa desde
-     las probabilidades de Hardy-Weinberg en F=0 hasta la homocigosis completa en
-     F=1, sin modelos específicos de herencia polisómica o disómica. El F
-     realizado se obtiene por subpoblación y generación registrada comparando
-     heterocigosidad observada y esperada; puede ser negativo y se conserva sin
-     error. Todos los individuos iniciales son fundadores con identificadores
-     estables de individuo y copia haplotípica.
-     N objetivo es obligatorio al iniciar cada población o subpoblación y se hereda hasta que un
-     valor o evento demográfico lo cambia. Ne objetivo puede ser un valor, una
-     proporción Ne/N o quedar sin configurar; siempre se calcula Ne realizado
-     como Ne reproductivo a partir de los progenitores que dejaron descendencia
-     y de la desigualdad de sus contribuciones. Un cambio de N fija el número de
-     descendientes de la generación siguiente: un cuello de botella lo reduce y
-     una expansión lo aumenta, sin eliminar retrospectivamente progenitores ya
-     creados. Cada generación aplica, por defecto, eventos demográficos,
-     migración dirigida, selección de viabilidad, elección de parentales,
-     reproducción, segregación y recombinación, mutación de novo en la
-     descendencia, cálculo de N realizado, Ne realizado y frecuencias,
-     comparación con N objetivo y Ne objetivo, y muestreos o salidas. Cualquier desviación de Ne se
-     cuantifica y advierte, pero no invalida ni detiene la simulación. La deriva
-     surge del muestreo finito y no se aplica como un paso adicional.
-     Una división reparte sin reemplazo todos los progenitores del origen entre
-     hijas viables. División, fundación, migración y selección de descendientes
-     usan el mismo catálogo declarativo de identificadores, azar, pertenencia y
-     condiciones genéticas combinables, con cantidad exacta o proporcional. No
-     admiten scripts, código ni funciones personalizadas. Cada hija tiene su
-     propio N objetivo, independiente de los
-     progenitores recibidos, y la suma puede representar expansión o
-     contracción. Una fusión reúne todos los orígenes en una población nueva
-     con parámetros propios y un N objetivo independiente del conjunto
-     reproductor reunido. Su contribución predeterminada por origen es
-     probabilística y proporcional a los progenitores elegibles, con pesos
-     configurables. El modo controlado alternativo garantiza recuentos
-     parentales exactos, no porcentajes exactos de bases ancestrales. Se
-     registran por separado las contribuciones parentales y la ascendencia
-     genómica realizada con trazabilidad haplotípica. Una fundación
-     transfiere sus fundadores a una
-     población nueva con N objetivo independiente y deja que el origen continúe
-     con los restantes. Ambas pueden expandirse o contraerse en su primera
-     descendencia. Una
-     extinción no genera descendencia y termina la subpoblación; una
-     recolonización posterior usa otro identificador y otra historia. Todos los
-     eventos conservan la procedencia individual y haplotípica aplicable. Si
-     coinciden varios eventos demográficos, la configuración aporta un orden
-     explícito obligatorio y cada evento opera sobre el estado dejado por el
-     anterior; las dependencias inválidas se rechazan antes de simular.
-     Cada fase usa exclusivamente proporciones o recuentos exactos de migración
-     por pares dirigidos. La selección usa el catálogo declarativo común. Las
-     rutas salientes se resuelven conjuntamente y sin
-     reemplazo antes de selección y reproducción. En modo proporcional, las
-     rutas son categorías excluyentes y la permanencia tiene probabilidad uno
-     menos la suma de tasas; el recuento realizado es aleatorio y reproducible.
-     La selección usa el mismo locus estable durante toda la ejecución. Asigna
-     valores genéticos a sus genotipos o dosis y conserva por separado el valor
-     del carácter, aunque en esta versión ambos valores coinciden. No añade ruido
-     ambiental ni usa heredabilidad. Una función configurable obtiene la aptitud
-     relativa y favorece, según se indique, valores mayores o valores menores.
-     No admite selección estabilizadora ni disruptiva. Los valores y la función
-     pueden variar por fase o subpoblación. La reproducción
-     aplica de forma probabilística la autofecundación configurada y, en los
-     demás eventos, elige uniformemente dos supervivientes distintos. Genera el
-     número de descendientes que permiten los progenitores e intenta alcanzar N
-     objetivo. Registra N realizado, su desviación, la distribución de
-     descendencia y Ne realizado. No usa para estimar este último la pérdida de
-     heterocigosidad, el aumento de endogamia ni el LD. Una desviación de N
-     advierte sin detener. Si N realizado es 0, declara una extinción por
-     resultado solo cuando la política efectiva lo permite; en otro caso produce
-     un error que detiene inmediatamente toda la simulación, sin omisiones ni
-     continuación de otras ramas. Una extinción autorizada omite de forma
-     atómica y transitiva los eventos dependientes, registra la cadena de causas
-     y deja continuar las ramas independientes. Los
-     individuos de la generación parental dejan de ser población activa cuando
-     los sustituye la descendencia con el N realizado de cada subpoblación.
-     La recombinación usa el único modo global elegido. En poliploides pares
-     forma al azar bivalentes entre copias estructuralmente compatibles, bloquea
-     intervalos no colineales y conserva los haplotipos transmitidos. El número
-     de entrecruzamientos sigue Poisson según la longitud genética; cada
-     cromosoma recibe al menos uno y cada *scaffold* lo recibe solo si supera su
-     umbral efectivo en cM o bases. El umbral es general y admite sustituciones
-     por *scaffold* sin mezclar unidades.
-     El sistema mantiene internamente el linaje de segmentos hasta la copia
-     haplotípica fundadora. Solo los individuos muestreados exportan puntos de
-     recombinación, segmentos, coordenadas actuales y fundadoras, orientación,
-     copias duplicadas y capas separadas de mutaciones de novo; las demás
-     generaciones producen resúmenes.
-     Después
-     aplica las mutaciones de novo por base y generación a copias descendientes,
-     incluidas las reglas separadas para SNP, inserciones, deleciones, variantes
-     estructurales y repeticiones en tándem. No moviliza TE espontáneamente; los
-     TE ya presentes se heredan como cualquier otra variante.
-     Antes de simular rechaza un orden con dependencias incompatibles, una
-     ploidía reproductiva impar o un mapa incompleto o inválido. Durante el
-     proceso selecciona de forma explícita, aleatoria o combinada y conserva el
-     estado de los individuos de los muestreos solicitados, junto con su
-     generación y subpoblación o población de origen. La selección aleatoria es
-     sin reemplazo dentro del evento y puede estratificarse mediante grupos no
-     solapados y filtros de genotipo.
-     Los muestreos no eliminan ni modifican individuos y su aleatoriedad se
-     mantiene separada para que no cambien la evolución. Por defecto se conserva
-     su estado genotípico y los metadatos mínimos de la observación, sin generar
-     BAM, CRAM ni VCF. Cada evento conserva por separado un resumen de la
-     población completa y las subpoblaciones relevantes y otro de la muestra
-     exportada. Ambos identifican inequívocamente su ámbito e incluyen
-     frecuencias alélicas, heterocigosidad, F, N y Ne cuando correspondan. Si un
-     evento solicita archivos técnicos, constituye un
-     experimento técnico independiente con tecnología, perfil, mapeador,
-     subsemilla, directorio y manifiesto propios. Sus individuos siguen
-     las referencias de mapeo y los conjuntos independientes de los pasos 11 a
-     16. Todas las generaciones producen un historial resumido; solo se conserva
-     el estado completo de la inicial, la final y las solicitadas; o
-   - crea una familia o población segregante desde uno o más parentales según
-     los cruces predefinidos o descritos por el usuario. Cada evento admite un
-     parental en autofecundación o dos en cruzamiento sexual; los diseños con
-     tres o más fundadores se expresan como una secuencia de eventos. El orden de
-     los dos parentales no cambia el resultado biológico. Cada parental referencia
-     por su identificador estable a un individuo disponible o se define
-     expresamente en el fichero poblacional con las reglas comunes; antes de
-     simular se comprueban su existencia, unicidad y compatibilidad. El sistema
-     valida que el grafo dirigido de eventos no tenga ciclos ni referencias u
-     órdenes temporales incorrectos, ejecuta cada evento según sus dependencias y
-     número de descendientes y permite que esa descendencia alimente eventos
-     posteriores. Los parentales posteriores se eligen mediante el catálogo
-     declarativo común, que se valida antes de aplicarse. El sistema conserva
-     el estado genotípico y los metadatos de todos los individuos intermedios,
-     seleccionados o no. Por defecto no genera para ellos BAM, CRAM ni VCF, pero
-     una población intermedia puede solicitarlos y entonces sigue los conjuntos
-     y la validación de los pasos 11 a 16. Las plantillas iniciales son F1, F2,
-     retrocruce, autofecundación y pedigrí simple. F2 permite autofecundar F1 o
-     cruzar individuos F1; RIL, introgresión y MAGIC se expresan mediante cruces
-     personalizados. Simula la recombinación con la tasa uniforme o los mapas
-     completos generales o específicos de grupo y conserva los
-     haplotipos faseados y el origen de los segmentos en toda la descendencia.
-     Cuando el escenario admite mutaciones durante la transmisión, aplica el
-     modelo de repeticiones en tándem y solo incluye mutaciones internas si están
-     activadas.
+La relación conceptual entre etapas es: primero se admite una petición, luego se
+construye o recupera la verdad biológica, después se materializa la evidencia
+técnica solicitada y, por último, se valida y publica el conjunto. Esta frase
+solo facilita la lectura; los órdenes, condiciones, cardinalidades, errores y
+excepciones aplicables son los que define la sección 4.
 
-10. Todos los individuos reciben la misma ploidía efectiva de 1 a 10 copias para
-   cada cromosoma o *scaffold*, obtenida del valor global y sus sustituciones.
-   Para cada individuo se conserva la referencia que corresponde a su estructura
-   y un identificador único y estable, aportado por la persona usuaria o generado
-   por el sistema. El identificador no se reutiliza y acompaña al individuo en sus
-   relaciones parentales, observaciones y muestras. El sistema guarda el estado
-   completo, faseado, con su dosis y reconstruible en el fichero de verdad
-   obligatorio para las entidades exigidas por la vía conforme a REQ-SAL-02,
-   aunque no se solicite VCF.
-11. Para cada evento explícito que solicite alineamientos se generan en CRAM o,
-    si se selecciona, BAM. El fichero general selecciona una o varias referencias
-    de mapeo entre las disponibles y el modo de obtención. Cada biblioteca WGS
-    elige cobertura media o número de lecturas, nunca ambos, y preparación sin
-    PCR de forma predeterminada o WGS amplificada de forma opcional. En el modo
-    realista se simulan lecturas cortas
-    tipo Illumina, *single-end* o *paired-end*, o lecturas largas PacBio HiFi,
-    desde los haplotipos faseados con el perfil tecnológico o empírico WGS
-    efectivo, los parámetros y la semilla.
-    Las posiciones iniciales se eligen uniformemente entre las copias accesibles.
-    La cobertura se calcula sobre la longitud haploide y se reparte en proporción
-    al número y longitud de las copias, de modo que cada copia recibe una
-    cobertura semejante antes de excepciones. La cobertura local es estocástica
-    y aproximadamente Poisson; no se fuerza una profundidad por base.
-    Los alelos contribuyen según dosis y ploidía, sin sesgo alélico o *allele
-    dropout* forzados. Después se aplican la curva de sesgo GC, las regiones con
-    cobertura especial, los límites de secuencia y las demás degradaciones con
-    su precedencia documentada. Se aplican las tasas y tipos de error
-    efectivos, homogéneos salvo las sustituciones configuradas e incluidos los
-    patrones por posición o contexto admitidos, y se generan puntuaciones de
-    calidad probabilísticamente coherentes. La verdad
-    conserva las diferencias entre las secuencias originales y observadas. En la
-    preparación WGS sin PCR no se generan duplicados de PCR. Si se elige un
-    perfil amplificado, se generan sus duplicados y sesgos configurados. Los
-    duplicados ópticos se tratan por separado; en
-    *paired-end* se duplica la pareja completa y siempre se conserva la relación
-    con la lectura o pareja de origen. Las parejas normales siguen el perfil y
-    las proporciones configuradas generan orientación anómala, inserto inesperado
-    o un miembro no alineado, conservando fragmento y estado de origen. También
-    se generan con la frecuencia efectiva las lecturas quiméricas y se conservan
-    sus fragmentos y puntos de unión reales. Si se solicitaron restos de
-    adaptadores, se añaden con los parámetros efectivos y se conservan las
-    lecturas y los intervalos afectados.
-    Antes de elegir lecturas contaminantes, todas las contribuciones expresadas
-    como proporción, cobertura equivalente o número se convierten conjuntamente
-    a un reparto entero de lecturas o parejas completas. La asignación minimiza
-    la desviación global y resuelve reproduciblemente los empates con la
-    subsemilla del evento.
-    La contaminación biológica sustituye de forma reproducible lecturas propias
-    de la receptora por lecturas representativas de fuentes compatibles; no
-    reduce los datos de la donante. Puede seguir una matriz dirigida o repartir
-    una tasa total entre donantes de la tanda ponderados por su número de
-    lecturas. La suma no supera el 100 %. En *paired-end* siempre actúa sobre
-    parejas completas. Por separado, el demultiplexado transfiere cada lectura o
-    pareja reasignada de la donante a la receptora sin duplicarla. Las lecturas
-    descartadas o sin asignar no se reemplazan y reducen la cobertura final.
-    Los FASTQ externos compatibles solo se admiten como fuentes en este modo
-    realista. Cada copia biológica recibe una identidad técnica nueva y un
-    vínculo estable con su lectura de origen; una transferencia técnica conserva
-    la identidad de la instancia y la retira de la biblioteca donante. Después
-    se crea
-    un FASTQ final, o una pareja para datos *paired-end*, por individuo,
-    biblioteca y tanda o carril; no se concatenan ni se conserva otro FASTQ
-    limpio. Para cada FASTQ o pareja se genera un fichero de procedencia que
-    enumera por identificador las lecturas o parejas contaminantes presentes y
-    registra solo recuentos
-    agregados de las descartadas o sin asignar, sin duplicar secuencias ni
-    calidades. No se simulan señales, BCL ni lecturas i5 o i7 detalladas. A
-    continuación, un único mapeador procesa el FASTQ final de cada muestra contra
-    cada referencia seleccionada. Las lecturas de regiones repetitivas,
-    duplicadas o altamente homólogas parten de sus posiciones y haplotipos
-    verdaderos; el mapeador determina sus alineamientos y MAPQ sin que el sistema
-    los sobrescriba. Por defecto es minimap2; su *preset* y valores
-    predeterminados se derivan del perfil de lecturas y las sustituciones
-    configuradas prevalecen tras advertirse y validarse cuando sea posible. Las
-    calidades del FASTQ se propagan al BAM o CRAM y los duplicados se marcan o no
-    según la configuración. Las lecturas se asignan a grupos coherentes de
-    muestra, biblioteca, tanda o carril y tecnología. En el modo directo se
-    generan BAM o CRAM sintéticos con las mismas reglas funcionales de cobertura,
-    sustitución biológica, matriz o reparto automático, transferencia por
-    índices y descarte, claramente etiquetados y sin crear ni mapear FASTQ. Solo
-    pueden usar fuentes contaminantes simuladas con verdad conocida. Cada lectura
-    se asigna a la categoría configurada de
-    alineamiento correcto, incorrecto, múltiple o ausente, con MAPQ, campos,
-    banderas, CIGAR y alineamientos secundarios o suplementarios coherentes. Las
-    lecturas quiméricas y las anomalías *paired-end* mantienen esa coherencia con
-    sus fragmentos y estados de origen. La referencia de mapeo puede diferir de
-    la estructura de una muestra.
-12. Se pueden introducir las demás degradaciones confirmadas en los datos de
-    lecturas o alineamientos según el modo utilizado.
-13. Si se solicita VCF, para cada referencia de mapeo seleccionada se genera un
-    único VCF de verdad multimuesta, independiente de los demás conjuntos, con
-    todos sus individuos como columnas y los genotipos simulados de SNP,
-    *indels*, variantes estructurales y repeticiones en tándem, expresados
-    respecto a la referencia del conjunto. El VCF se construye directamente
-    desde el estado genotípico faseado de la simulación y nunca mediante llamada,
-    imputación, faseado o corrección a partir de FASTQ, BAM o CRAM. Por ello,
-    conserva el genotipo completo y la fase real de cada muestra aunque su
-    cobertura sea nula o baja o sus lecturas presenten contaminación, errores,
-    calidad baja, ausencia de alineamiento o mapeo incorrecto, múltiple o
-    ambiguo. Ninguno de esos casos convierte un genotipo verdadero en ausente.
-    `GT` conserva la fase y ploidía reales. No se añaden campos `FORMAT`
-    derivados de evidencia o inferencia, como `DP`, `AD`, `GQ` o `PL`; la
-    cobertura, el soporte alélico y las calidades se registran en los resultados
-    de validación de FASTQ, BAM o CRAM. Todo registro válido usa `QUAL=.` y
-    `FILTER=PASS`, y la cabecera documenta que no se estima una calidad
-    probabilística. Un registro que no pueda representarse mediante el VCF y su
-    complemento cuando corresponda, o que no sea validable, detiene la creación
-    del conjunto y no se emite como `PASS`.
-    Solo incluye loci donde al menos una muestra tiene un alelo no de referencia,
-    aunque ese alelo esté fijado en todas las muestras;
-    no añade posiciones invariantes ni
-    bloques gVCF de forma predeterminada. El fichero estructurado obligatorio
-    conserva la verdad completa. El VCF se refiere al mismo genoma que los BAM o
-    CRAM correspondientes cuando existan. Cada VCF se construye directamente
-    contra la secuencia y las coordenadas de su referencia, con identificadores
-    de variante locales y sin correspondencias registro a registro con los VCF
-    de otras referencias. El VCF expresa genotipos faseados cuando el formato permite
-    representar el caso. Si el propio registro no admite la fase completa, el
-    complemento la conserva sin pérdida y la limitación queda identificada; no
-    se convierte silenciosamente en una pérdida de verdad. La clasificación de
-    inserciones y deleciones usa el mismo umbral efectivo que la generación. Los
-    SNP e *indels* usan REF y ALT explícitos y normalizados. Los ALT
-    representables de un mismo locus se reúnen en un único registro multialélico
-    que conserva ploidía, dosis y fase. Las variantes estructurales usan alelos
-    simbólicos y SVTYPE, END y SVLEN cuando corresponda. Las variantes
-    complejas y las repeticiones en tándem conservan información suficiente para
-    reconstruir el cambio y el alelo real simulados. Si un caso no cabe sin
-    pérdida en VCF, se genera un fichero complementario de verdad; el registro
-    VCF lo referencia mediante un identificador estable compartido. Si todos los
-    casos son representables, no se genera ese complemento. El VCF se ordena
-    según la referencia y por coordenada, se comprime con BGZF y se indexa con
-    TBI o CSI de forma predeterminada; el texto sin comprimir solo se entrega si
-    se solicita. Antes de completarlo se validan el contenido, la compresión y el
-    índice aplicables, la cabecera y la referencia.
-14. Cada BAM, CRAM y VCF incluye en su cabecera o metadatos estándar la
-    información necesaria para identificar la referencia, la muestra, el evento,
-    la biblioteca, la tanda o carril y el grupo de lectura que correspondan.
-    `SM` y las columnas de muestra conservan el identificador biológico estable y
-    cada identificador `RG` es único en toda la ejecución.
-15. Cuando se solicitan estas salidas, los pasos 11 a 14 producen un conjunto
-    independiente por cada referencia de mapeo seleccionada. Todos los conjuntos
-    contienen las mismas muestras, usan el único mapeador del evento cuando
-    corresponde y no mezclan datos de referencias distintas. Los FASTQ del modo
-    realista pertenecen exclusivamente al evento y se usan contra todas sus
-    referencias seleccionadas; no se reutilizan entre eventos. Dentro de cada
-    conjunto se entrega un único BAM o CRAM final por
-    individuo, que combina todas sus bibliotecas, tandas y carriles y preserva
-    sus grupos de lectura. Solo se conserva este archivo final con las
-    degradaciones configuradas. Un control limpio es otro evento enlazado que
-    usa la misma verdad, referencias y muestras, pero tiene su propia subsemilla,
-    genera lecturas nuevas y mantiene separados sus resultados. Los resultados
-    del evento contienen una única tecnología experimental; las mismas muestras
-    y verdad pueden alimentar otros eventos técnicos enlazados, que generan
-    nuevas lecturas y mantienen separados sus archivos.
-    Cada alineamiento final se ordena por coordenadas por defecto, se acompaña de
-    un índice compatible y se valida junto con el índice y la referencia. Cuando
-    el formato es CRAM, el conjunto enlaza el FASTA exacto almacenado entre los
-    recursos comunes. El VCF multimuesta usa los mismos identificadores de individuo y no
-    incluye muestras de otros conjuntos.
-16. Cuando se generan FASTQ o BAM o CRAM, el sistema los valida contra la verdad
-    de origen de las lecturas y los artefactos configurados, sin ejecutar un
-    *SNP caller* ni inferir genotipos desde los alineamientos. Comprueba la
-    procedencia desde los haplotipos, el objetivo de cada biblioteca, la
-    cobertura total y por copia, y el soporte alélico esperado según dosis y
-    ploidía sin exigir balance exacto. Comprueba también las tasas realizadas de
-    errores, contaminación,
-    duplicación y demás degradaciones, la coherencia de las parejas y la
-    compatibilidad de alineamientos, referencias y grupos de lectura. Las
-    desviaciones intencionadas deben quedar explicadas por la configuración o
-    por una decisión aleatoria registrada. El resultado estructurado conserva
-    objetivos, valores observados, tolerancias, desviaciones, explicaciones y la
-    decisión aplicada. Una incoherencia estructural o lógica detiene la ejecución
-    y el conjunto afectado no se marca como completo. Una desviación estadística
-    fuera de tolerancia genera una advertencia de forma predeterminada, salvo que
-    la configuración la eleve a error y detenga la ejecución. La desviación
-    entre Ne objetivo y Ne realizado es una excepción: siempre se cuantifica y
-    advierte, pero nunca detiene la simulación. En simulaciones poblacionales
-    valida además N objetivo y realizado, Ne objetivo y realizado, reproducción, selección,
-    migración, eventos de estructura poblacional, mutación, orden de procesos y
-    recombinación. Para cada muestreo comprueba por separado el resumen
-    poblacional y el muestral y rechaza cualquier confusión de ámbito.
-17. El sistema genera el manifiesto general y los manifiestos de evento con la
-    vía utilizada, el fichero general y
-    cada fichero de configuración poblacional utilizado, los parámetros
-    realmente aplicados, el origen y los cambios de las referencias, y los
-    nombres o las rutas de los archivos generados. También registra los valores
-    globales de generación aleatoria, si cada clase usó una cantidad media
-    esperada o una densidad, la unidad de densidad cuando proceda, la cantidad
-    media esperada y el número realizado por clase, ámbito o región e individuo
-    cuando corresponda, y la distribución probabilística y sus parámetros
-    realmente usados. Registra además la distribución espacial uniforme o las
-    regiones configuradas, sus referencias estructurales, cromosomas o
-    *scaffolds* e intervalos, los valores de cada nivel espacial, las
-    sustituciones individuales y los valores efectivos después de aplicar ambas
-    precedencias. Conserva también la semilla usada, si fue
-    suministrada o generada automáticamente, la versión del programa, las
-    referencias de mapeo seleccionadas y el conjunto generado para cada una.
-    Para cada objetivo de frecuencia alélica poblacional, registra la frecuencia
-    objetivo, las restricciones individuales y la frecuencia realizada.
-    En la vía evolutiva, registra además las fases en su orden, su duración y sus
-    parámetros efectivos, y cada muestreo con su generación, tamaño o proporción
-    solicitados, individuos seleccionados y semilla o flujo aleatorio aplicable.
-    Para cada muestreo indica el estado genotípico y los metadatos conservados,
-    enlaza por separado los resúmenes poblacional y muestral e indica las salidas
-    adicionales solicitadas y los archivos que se generaron.
-    También relaciona cada identificador estable de individuo con su generación
-    de origen, sus parentales cuando existan, sus observaciones y sus archivos,
-    distinguiéndolo de los identificadores de evento y conjunto.
-    Registra las trayectorias de N objetivo y realizado y de Ne objetivo y
-    realizado, sus desviaciones y advertencias, la estructura y los parámetros de las
-    subpoblaciones, la pertenencia individual, las migraciones configuradas y
-    realizadas por par y los eventos de división, fusión, fundación, extinción o
-    recolonización con sus subpoblaciones, individuos, procedencias y resultados.
-    Conserva además qué procesos evolutivos estuvieron activos y sus parámetros
-    y valores efectivos por fase, generación y subpoblación, así como su orden efectivo
-    y si procedía de la configuración o de la secuencia predeterminada.
-    Registra el modo, las tasas, los mapas y los parámetros efectivos de
-    recombinación y los eventos realizados necesarios para seguir el origen de
-    los genotipos descendientes, incluidos el grupo y el perfil efectivo usados
-    para cada individuo o evento.
-    En familias y poblaciones segregantes, distingue los parentales referenciados
-    de los definidos en la configuración y conserva su identificador,
-    referencia, genotipo faseado por copia y linaje. Para los parentales expresos
-    conserva los cambios asignados y el estado de referencia no modificado.
-    Registra también los eventos del grafo en el orden realizado y los
-    identificadores estables de sus fuentes, parentales y descendientes. Si un
-    individuo alimenta varias ramas, mantiene una sola identidad y distingue los
-    gametos y descendientes nuevos de cada evento.
-    Para cada selección registra la población candidata, los identificadores o
-    condiciones y su combinación lógica, la semilla o flujo aplicable y los
-    individuos elegibles y elegidos. Distingue el número exacto de la proporción
-    probabilística y registra las proporciones solicitada y realizada. Para cada
-    población intermedia identifica los estados y metadatos conservados y las
-    salidas opcionales solicitadas y generadas.
-    Conserva la fase, los haplotipos y el origen de los segmentos y registra toda
-    limitación de representación en VCF y el complemento que preserva la verdad.
-    Registra también el umbral efectivo usado para clasificar inserciones y
-    deleciones. Para las
-    repeticiones en tándem registra los objetivos, las distribuciones y los valores
-    realizados de motivo, copias o longitud, pureza, interrupciones y
-    variabilidad, junto con cada evento de mutación, el modelo y los parámetros
-    efectivos y el haplotipo afectado.
-    Registra las estimaciones de volumen, almacenamiento, memoria y tiempo, las
-    advertencias emitidas y el consumo real cuando pueda medirse.
-    Para las lecturas y BAM o CRAM conserva el modo realista o directo, la
-    tecnología, el perfil, los parámetros efectivos y la semilla o flujo
-    aleatorio aplicable. Para el perfil de errores conserva su nombre, versión,
-    tasas, tipos y sustituciones efectivas. Si se estimó un perfil empírico,
-    registra sus entradas, parámetros, limitaciones y medidas de calidad, y
-    enlaza el artefacto estructurado reutilizable. Para los duplicados conserva
-    por tipo las tasas, cantidades esperadas y realizadas, lecturas o parejas de
-    origen y si se entregaron marcados; cuando se marcaron, identifica el método
-    o la herramienta. Para los restos de adaptadores registra el estado, los
-    parámetros y las cantidades realizadas. Para el sesgo GC conserva la curva,
-    intensidad, combinación con la cobertura y resúmenes de cobertura realizada.
-    Identifica las regiones de baja mapeabilidad y la referencia y el mapeador
-    que produjeron sus alineamientos y MAPQ. Relaciona cada FASTQ con su
-    procedencia y con los conjuntos que lo utilizaron. Para cada mapeo registra
-    el único mapeador, su
-    versión, el comando efectivo completo, la referencia y los FASTQ. Si es
-    minimap2, distingue el *preset*, los valores predeterminados y las
-    sustituciones. También conserva los objetivos y valores realizados de
-    cobertura y, para cada contaminación, las fuentes, la matriz o reparto
-    automático, las fracciones objetivo y realizadas y los recuentos de lecturas
-    propias retiradas y contaminantes incorporadas. En datos *paired-end*
-    registra parejas completas. Registra por separado la contaminación técnica
-    con su tanda, bibliotecas, muestras, índices, tasas, procedencias, errores y
-    cantidades configuradas y realizadas de lecturas transferidas, sin asignar
-    o filtradas, incluidos los totales y la cobertura finales.
-    Enlaza cada FASTQ final con su fichero de procedencia, indica que no se
-    conservó una copia limpia y resume las lecturas o parejas contaminantes y los
-    recuentos agregados de descartes o lecturas sin asignar por muestra y causa u
-    origen conocido.
-    Para cada FASTQ contaminante externo conserva la ubicación original, la
-    copia utilizada, su validación y los datos de integridad definidos.
-    Cuando exista un complemento de verdad, enlaza sus casos con el VCF, la
-    referencia y el conjunto mediante identificadores locales a ese conjunto.
-    Enlaza también cada resultado de validación interna con los FASTQ, BAM o
-    CRAM, muestras, grupos de lectura y conjuntos comprobados, y resume las
-    desviaciones detectadas y sus explicaciones. Para cada comprobación
-    estadística conserva la tolerancia, el valor esperado, el valor realizado y
-    la decisión aplicada, e identifica los conjuntos que no quedaron completos.
-    Para WGS registra preparación, objetivo de biblioteca, cobertura total y por
-    copia y experimentos de control enlazados. Para evolución enlaza el historial
-    generacional y registra reproducción, selección, migración, mutación y
-    recombinación. Para la población inicial registra el modelo de
-    Hardy-Weinberg, F objetivo y realizado, valores esperados y realizados y el
-    método independiente o por bloques con LD, con sus haplotipos faseados. Para
-    contaminación registra matriz o pesos, sustituciones,
-    transferencias, descartes, totales y cobertura final. Para TE enlaza el
-    catálogo y la verdad completa de cada evento.
-    Cuando la referencia inicial sea suministrada, registra además la procedencia
-    original del FASTA y el nombre o la ruta de la copia utilizada. El
-    manifiesto es estructurado y legible por el programa. La raíz conserva el
-    manifiesto general y una sola copia verificable de cada referencia e índice;
-    cada evento conserva su directorio y manifiesto propios, con resultados
-    separados por referencia y sumas de comprobación. La exportación de un
-    evento copia sus recursos necesarios a un paquete autocontenido y valida su
-    integridad antes y después.
+La correspondencia completa requisito por requisito con criterio, hito y prueba
+planificada se mantiene en
+[trazabilidad-requisitos-0.1.md](trazabilidad-requisitos-0.1.md).
 
-La ejecución termina con éxito solo cuando existen un FASTA por referencia y
-sus índices necesarios, los estados completos y los historiales obligatorios
-para la vía, las copias de todas las configuraciones usadas, los manifiestos
-completos y todas las salidas activadas. Toda salida de observación requiere un
-evento explícito. Dentro de un evento que solicite alineamientos, CRAM es el
-formato predeterminado y BAM la alternativa configurable. En el modo realista,
-el FASTQ final o pareja de FASTQ y el fichero de procedencia de cada grupo de
-lectura son salidas obligatorias dependientes; en el modo directo no son
-necesarios. Un evento puede solicitar únicamente verdad genotípica o VCF sin
-tecnología, biblioteca ni mapeador. La ejecución, sus eventos, conjuntos y
-artefactos solo se publican como completos conforme a la jerarquía y atomicidad
-de REQ-SAL-21 a REQ-SAL-26.
+## 6. Mapa de entradas y salidas
 
-Todas las salidas deben describir la misma simulación, aunque no utilicen una
-misma referencia. Dentro de cada conjunto, todos los archivos deben usar
-exactamente la misma referencia. El flujo termina cuando se han generado esas
-salidas y los manifiestos conservan la información necesaria para relacionarlas.
-
-## 6. Entradas y salidas confirmadas
+Esta sección también es **derivada e informativa**. Agrupa la interfaz por la
+pregunta científica que resuelve, sin volver a definir campos, formatos,
+valores, obligatoriedad ni relaciones entre objetos.
 
 ### 6.1. Entradas
 
-| Entrada | Contenido confirmado | Información pendiente |
+| Grupo de entrada | Finalidad conceptual | Contrato aplicable |
 |---|---|---|
-| Fichero general de configuración | Fichero estructurado con referencia, ploidía global de 1 a 10 y sustituciones por secuencia, vía, cambios, semilla, parámetros, umbral entre clases, cero, uno o varios eventos explícitos, referencias aplicables y salidas. Cada evento que genere FASTQ, BAM o CRAM exige WGS de DNA genómico, una tecnología y perfil, preparación sin PCR o amplificada y exactamente un objetivo de cobertura o número por biblioteca; si genera alineamientos exige además un mapeador. Un evento que solo solicite verdad o VCF no requiere esos parámetros. Configura errores, duplicados, contaminación sustitutiva, matriz o tasa total, bibliotecas, tandas y, cuando corresponda, reproducción, selección, migración, mutación y recombinación. Dentro de un evento con alineamientos, CRAM es predeterminado y BAM la alternativa. En modo realista se activan FASTQ; VCF se solicita expresamente por evento. Sin eventos no se generan salidas de observación | Representación técnica de intervalos; distribuciones adicionales; límites prácticos de recursos; formato y esquema generales |
-| Fichero de configuración poblacional | Un fichero estructurado y legible por el programa para cada escenario evolutivo o de familias y poblaciones segregantes. En la vía evolutiva contiene fases, N objetivo, Ne objetivo, política de extinción por N=0, subpoblaciones, migraciones, procesos ordenados, eventos demográficos, inicialización, recombinación y muestreos. División, fundación, migración y selección de descendientes comparten el catálogo declarativo confirmado, sin código personalizado. Cada locus o bloque y subpoblación usa modo probabilístico predeterminado o controlado explícito. La inicialización admite equilibrio de Hardy-Weinberg, distribuciones explícitas, bloques de haplotipos con LD y F global o por subpoblación. En la vía de familias define parentales referenciados o expresos y un grafo dirigido acíclico de eventos. Un parental expreso declara cambios faseados por copia respecto a una referencia compatible; lo no declarado permanece como referencia. Los descendientes posteriores pueden seleccionarse por identificador, al azar, por pertenencia o por estado genético en uno o varios loci, con Y, O y NO, usando un número exacto o una proporción probabilística. Un individuo puede alimentar varias ramas sin duplicar su identidad. Cada población intermedia puede solicitar BAM o CRAM y VCF | Tolerancias técnicas; metadatos de muestreo; formato del estado genotípico intermedio; formato y esquema del catálogo común, de parentales expresos, del grafo y de las reglas de selección |
-| FASTA real de la referencia inicial | Secuencia real que se usará como referencia inicial cuando se elija el modo suministrado. Debe ser un FASTA legible y contener al menos una secuencia no vacía. El identificador de secuencia es el primer elemento no vacío de la cabecera, debe ser único y el resto se conserva como descripción. Las secuencias solo pueden contener A, C, G, T y N, en mayúsculas o minúsculas; no se admiten huecos, otros códigos IUPAC ni ningún otro símbolo. El sistema lo valida antes de iniciar la simulación y, si detecta errores, detiene la ejecución sin generar resultados y los explica con claridad. Si es válido, lo copia al directorio de resultados, usa la copia y no modifica el original | Queda pendiente definir el tratamiento operativo de N por cada clase de operación |
-| FASTQ externos de contaminación | Fuentes permitidas únicamente en modo realista. Deben ser compatibles con tecnología, perfil y disposición de la biblioteca receptora; se validan y copian antes de usarse, se preservan los pares y no se modifican los originales. En modo directo solo se admiten fuentes simuladas con verdad conocida | Validaciones concretas y datos técnicos de integridad |
-| FASTQ real WGS y referencia para calibración | Entrada opcional de lecturas cortas tipo Illumina o largas PacBio HiFi usada para estimar un perfil empírico WGS de longitud, calidades, errores y otros parámetros tecnológicos. La referencia permite intentar separar errores de secuenciación, variantes reales, regiones ambiguas y errores de mapeo | Validaciones y método técnico de estimación |
-| Perfil empírico reutilizable | Fichero estructurado producido por una calibración anterior y seleccionable como perfil efectivo sin volver a analizar ni necesitar su FASTQ real de origen | Formato y esquema aplazados a la planificación de la implementación |
-| Catálogo FASTA de elementos transponibles | Entrada opcional con familias o tipos de TE. Se valida, copia a resultados y usa desde la copia sin modificar el original. Como alternativa, el simulador genera y conserva el catálogo | Propiedades estructuradas exactas del catálogo y validaciones específicas |
+| Petición y configuración | Identificar la ejecución y resolver los parámetros efectivos | REQ-CONF-01 a REQ-CONF-123, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 |
+| Secuencias y referencias | Establecer las bases y coordenadas sobre las que se construye y compara la verdad | REQ-REF-01 a REQ-REF-23 y las entradas de REQ-DAT-01 a REQ-DAT-73 |
+| Individuos, poblaciones y familias | Declarar el material biológico inicial y las relaciones que deben simularse | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73, REQ-POB-01 a REQ-POB-03 y REQ-CRU-01 a REQ-CRU-45 |
+| Procesos biológicos | Especificar creación, mutación, migración, reproducción, selección y recombinación | REQ-DIR-01 a REQ-DIR-05, REQ-MUT-01 a REQ-MUT-15, REQ-MIG-01 a REQ-MIG-09, REQ-REP-01 a REQ-REP-26, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 |
+| Eventos y condiciones técnicas | Solicitar observaciones, perfiles, artefactos y tratamientos técnicos admitidos | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 |
 
-El FASTA real solo es una entrada cuando se elige una referencia inicial
-suministrada. El fichero de configuración poblacional solo es una entrada en la
-vía evolutiva o en la vía de familias y poblaciones segregantes.
+La asignación exacta de cada entrada a sus ACE se consulta en la matriz de
+trazabilidad; esta agrupación no sustituye esa correspondencia individual.
 
 ### 6.2. Salidas
 
-| Salida | Contenido confirmado | Información pendiente |
+| Grupo de salida | Finalidad conceptual | Contrato aplicable |
 |---|---|---|
-| FASTA de las referencias | Un único FASTA por cada referencia inicial o derivada; el archivo contiene uno o varios cromosomas o *scaffolds*. Cuando la referencia inicial es suministrada, este archivo es la copia guardada en el directorio de resultados y utilizada por la ejecución; el original no se modifica | Ninguna decisión funcional pendiente sobre su organización, tratamiento o conservación |
-| Índices de las referencias | Ningún índice, uno o varios por referencia, según los tipos que necesiten las operaciones o los formatos utilizados | Tipos de índice exigidos por cada operación y herramientas de indexación |
-| Estructura de los individuos y grupos | Individuos con identificadores estables y exactamente 1–10 haplotipos por cromosoma o *scaffold* según su ploidía efectiva común entre individuos. El estado asigna todas las variantes a copias concretas y conserva fase, dosis, linaje y origen de segmentos. Las repeticiones en tándem conservan secuencia, motivo, copias, pureza e interrupciones | Representación técnica de intervalos, distribuciones adicionales, tolerancia alélica, modelos y reglas de cruces; estructura interna e identificadores |
-| Fichero obligatorio de verdad | Estado genotípico completo, faseado y reconstruible con alcance mínimo específico por vía: todos los individuos creados en la vía directa; población inicial, final y generaciones o muestreos solicitados en evolución, con resúmenes del resto; y todos los individuos de todos los eventos y poblaciones intermedias en familias. Para lecturas conserva secuencia original frente a observada, posiciones y haplotipos de origen, duplicados, adaptadores, quimeras, anomalías de pareja y categorías sintéticas. Existe aunque no se solicite VCF y sigue siendo la fuente completa cuando este omite posiciones invariantes | Formato, esquema y organización de la verdad de lecturas aplazados a la planificación |
-| Copias de las configuraciones | Copia en el directorio de resultados de cada fichero general o poblacional realmente utilizado | Organización y nombres técnicos |
-| Directorios de eventos | Un directorio independiente por evento explícito, con su manifiesto, selección de individuos, salidas y subsemilla. Dentro del evento, los resultados BAM, CRAM y VCF se separan por referencia. Los eventos que solo generan verdad o VCF no necesitan tecnología, biblioteca ni mapeador | Nombres y estructura técnica de directorios |
-| Población final y muestreos evolutivos | En la vía evolutiva se conserva la población final y, para cada muestreo no destructivo, el estado genotípico faseado y al menos generación, fase evolutiva o escenario, subpoblación, identificadores y referencia estructural. Cada individuo muestreado incluye una salida detallada de puntos de recombinación y segmentos trazables hasta la copia haplotípica fundadora, con coordenadas y orientación relacionables, copias duplicadas e inserciones nuevas identificadas por separado, deleciones trazables y capas de mutación de novo. No es obligatorio conservar poblaciones intermedias completas. Por defecto no se generan BAM, CRAM ni VCF, pero cada evento puede solicitarlos | Metadatos adicionales de cada observación; formato y esquema de la traza detallada |
-| Resúmenes poblacional y muestral de cada evento | Dos resúmenes estructurados y separados por muestreo y generación. El poblacional describe la población completa y las subpoblaciones relevantes; el muestral usa solo los individuos exportados. Ambos identifican inequívocamente ámbito, población o subpoblación y número de individuos, e incluyen frecuencias alélicas, heterocigosidad, F, N y Ne cuando correspondan. N muestral no se presenta como N objetivo ni N realizado de la población y ninguna estadística muestral se presenta como poblacional | Formato y esquema técnicos; organización de loci en el resumen |
-| Poblaciones intermedias de cruces | Estado genotípico faseado, haplotipos, origen de segmentos y metadatos de todos los individuos de todos los eventos y poblaciones intermedias, aunque no sean seleccionados. Por defecto no se generan BAM, CRAM ni VCF; cada población puede solicitarlos para todos sus individuos con las reglas de conjuntos por referencia | Formato del estado genotípico, metadatos adicionales y sintaxis del catálogo común de selección |
-| Historial generacional | Resumen estructurado obligatorio de demografía, procesos, N objetivo y realizado, Ne objetivo y reproductivo realizado, F objetivo y realizado, reproducción, selección, migración, mutación, recombinación, frecuencias, extinciones, eventos ejecutados u omitidos y muestreos de cada generación. Los genotipos completos se conservan para población inicial, final y generaciones solicitadas. El resumen no exporta el detalle individual de segmentos de toda la población | Formato, esquema, fórmulas concretas de Ne reproductivo y F realizado y sus adaptaciones por ploidía |
-| Catálogo FASTA de elementos transponibles | Copia validada del catálogo suministrado o FASTA generado, enlazado con familias, copias y eventos de TE de la verdad completa | Esquema estructurado de propiedades del catálogo |
-| CRAM o BAM de las muestras | CRAM es predeterminado y BAM la alternativa configurable. En cada conjunto por referencia existe un único archivo final por individuo con todos sus grupos y las degradaciones configuradas; no se guarda además una versión limpia. Un control sin degradaciones es otro experimento enlazado con resultados separados. Se entrega ordenado e indexado, con calidades y duplicados marcados salvo solicitud contraria. Cada CRAM se enlaza a la copia FASTA exacta. En modo directo queda etiquetado como sintético | Perfiles y versiones; cabecera y procedimiento de marcado de duplicados |
-| Índice del alineamiento final | Índice CRAI, BAI o CSI compatible con el CRAM o BAM final, su tamaño y sus necesidades. Alineamiento, índice y referencia deben superar una validación conjunta | Selección técnica del tipo y herramientas de indexación |
-| FASTQ finales de lecturas | Un archivo, o una pareja para *paired-end*, por individuo, biblioteca y tanda o carril cuando BAM o CRAM usan el modo realista. Cada salida conserva su perfil y parámetros y corresponde a un grupo de lectura del BAM/CRAM combinado; no se concatena como producto principal. Contiene errores, calidades, duplicados y contaminación después del demultiplexado. No se guarda otra copia limpia, no se reutiliza entre eventos y no es necesaria en modo directo | Organización técnica y validaciones concretas |
-| Fichero de procedencia de lecturas | Fichero estructurado por cada FASTQ final o pareja. Identifica por lectura o pareja las contaminantes presentes, su fuente real y el mecanismo que las introdujo, sin duplicar secuencias ni calidades. Para lecturas descartadas o sin asignar conserva solo recuentos agregados por muestra y causa u origen conocido. Permite reconstruir la verdad de la contaminación junto con el FASTQ y el manifiesto | Formato y esquema aplazados a la planificación de la implementación |
-| Copias de FASTQ externos | Copia de cada FASTQ suministrado como fuente contaminante. La simulación usa estas copias y deja intactos los originales, para que el experimento sea autocontenido y exportable | Organización y datos técnicos de integridad |
-| Perfil empírico estimado | Artefacto estructurado y reutilizable con versión de esquema, parámetros, tecnología, referencia y datos de entrada, método y versiones de herramientas, advertencias y medidas de calidad. Permite simular después sin el FASTQ real original | Formato y esquema aplazados a la planificación de la implementación |
-| Resultado de validación interna | Uno o varios ficheros estructurados que comparan resultados con la verdad y la configuración. Para WGS incluyen objetivo de biblioteca, cobertura total y por copia, soporte alélico sin exigir balance exacto, sesgos y contaminación; para evolución incluyen inicialización Hardy-Weinberg y LD, F objetivo y realizado, N objetivo y realizado, Ne objetivo y realizado, reproducción, selección, migración, mutación, recombinación y linaje de muestreos. Registran objetivos, observaciones, tolerancias y decisiones. Las incoherencias lógicas detienen; las desviaciones estadísticas advierten salvo elevación a error. Las desviaciones de N y Ne acordadas no detienen por sí mismas | Formato, esquema, métricas y tolerancias concretas |
-| VCF de verdad multimuesta por referencia | Salida opcional única por conjunto, construida desde el estado genotípico faseado y nunca inferida desde FASTQ o BAM/CRAM. Contiene todos sus individuos y solo loci donde alguna muestra tiene un alelo no de referencia; no contiene posiciones invariantes, bloques gVCF ni VCF individuales como salidas principales. Cada referencia tiene registros e identificadores de variante independientes, sin correspondencias registro a registro con otros VCF. Se ordena por la referencia y coordenada, se comprime con BGZF y se indexa mediante TBI o CSI por defecto; el texto sin comprimir es configurable. `GT` conserva genotipo, fase y ploidía reales aunque falte evidencia. No contiene `DP`, `AD`, `GQ`, `PL` ni otros campos `FORMAT` observados o inferidos; esas métricas van al informe de validación. Todo registro válido usa `QUAL=.` y `FILTER=PASS`, convención documentada en la cabecera. Un registro que no pueda representarse mediante el VCF y su complemento cuando corresponda, o que no sea validable, detiene el conjunto | Metadatos biológicos o estructurales concretos, criterio de tamaño manejable, normalización, cabecera y versión VCF |
-| Complemento estructurado de verdad | Fichero generado solo cuando uno o más casos no pueden representarse sin pérdida en VCF. Conserva secuencia o cambio, haplotipo, fase, coordenadas y genotipo completos. Cada caso comparte con el VCF un identificador estable local al conjunto, y el manifiesto enlaza complemento, VCF, referencia y conjunto. No enlaza variantes de referencias distintas | Formato, esquema y campos concretos aplazados a la planificación |
-| Manifiestos general y de eventos | La raíz contiene un manifiesto estructurado con vía, semilla, versión, configuraciones resueltas, referencias y recursos comunes, subsemillas y enlaces a eventos. Cada evento tiene directorio y manifiesto propios con selección de individuos, parámetros técnicos cuando procedan, referencias y salidas separadas por conjunto. Los manifiestos conservan parámetros y resultados biológicos y técnicos, los cuatro niveles separados de reproducibilidad, estados y diagnósticos de ejecución, evento, conjunto y artefacto, validaciones, estimaciones, advertencias, consumo y sumas de comprobación. Los identificadores de variante son locales a cada conjunto y no enlazan referencias distintas | Formato, esquema y algoritmo de suma de comprobación aplazados a la planificación de la implementación |
-| Paquete exportado de evento | Copia autocontenida de un evento con su manifiesto, configuración, salidas y las referencias e índices comunes que necesita. Las sumas de comprobación se validan antes y después de exportarlo | Formato técnico del paquete y algoritmo de suma de comprobación |
+| Verdad biológica y genealogía | Conservar el estado canónico y la procedencia necesarios para interpretar la simulación | REQ-VER-01 a REQ-VER-47 y los requisitos de procedencia de REQ-IND-01 a REQ-IND-59, REQ-CRU-01 a REQ-CRU-45 y REQ-REC-01 a REQ-REC-29 |
+| Evidencia técnica | Entregar los artefactos solicitados sin convertirlos en fuente de verdad | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 |
+| Validación e informes | Hacer observables las comprobaciones deterministas y los resultados estadísticos | REQ-VAL-01 a REQ-VAL-51 |
+| Manifiestos y paquete publicado | Relacionar configuración efectiva, verdad, evidencia, procedencia y estado de cada artefacto | REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a REQ-SAL-26 |
 
-Solo se conserva el alineamiento final de cada experimento. Los controles sin
-degradaciones se generan como experimentos relacionados y separados.
+La matriz de trazabilidad asigna a cada salida sus ACE concretos. Los requisitos
+citados determinan qué salida existe en cada caso y qué contenido debe
+conservar; esta clasificación no añade una salida ni permite omitir otra.
 
 ## 7. Criterios de aceptación preliminares
 
@@ -4521,52 +4419,52 @@ pendientes.
 |---|---|---|
 | **ACE-01. Configuración sin cambiar el código** | El programa puede leer ficheros generales con distinto número, tamaño o composición de cromosomas o *scaffolds* y generar las referencias simuladas correspondientes sin modificar el código. Cuando se selecciona la vía evolutiva o la vía de familias y poblaciones segregantes, el fichero general referencia el fichero de configuración poblacional del escenario y el programa usa ambos | Formato, esquema y casos de prueba |
 | **ACE-02. Tamaños del genoma simulado** | Cada cromosoma o *scaffold* tiene el tamaño configurado y el tamaño total corresponde a los tamaños de todas sus secuencias | Casos de prueba y comprobación exacta |
-| **ACE-03. Modos de referencia inicial** | El sistema puede simular la referencia inicial desde la configuración o utilizar un FASTA real suministrado. Un FASTA legible, con al menos una secuencia no vacía y cuyo primer elemento no vacío de cada cabecera sea un identificador único supera la validación si sus secuencias contienen exclusivamente A, C, G, T y N en mayúsculas o minúsculas. La descripción restante de la cabecera se conserva por separado. El sistema copia el FASTA al directorio de resultados, usa esa copia y deja el original sin cambios. Un archivo ilegible, sin secuencias no vacías, con identificadores vacíos o repetidos, huecos, otros códigos IUPAC o cualquier otro símbolo hace que la ejecución se detenga antes de generar resultados y explique los errores | Tratamiento operativo de N por clase de operación; casos de prueba detallados |
+| **ACE-03. Modos de referencia inicial** | El sistema puede simular la referencia inicial desde la configuración o utilizar un FASTA real suministrado. Un FASTA legible, con al menos una secuencia no vacía y cuyo primer elemento no vacío de cada cabecera sea un identificador único supera la validación si sus secuencias contienen exclusivamente A, C, G, T y N en mayúsculas o minúsculas. `N` se conserva exactamente, ocupa coordenada y cuenta en la longitud; nunca se resuelve. La descripción restante de la cabecera se conserva por separado. El sistema copia el FASTA al directorio de resultados, usa esa copia y deja el original sin cambios. Un archivo ilegible, sin secuencias no vacías, con identificadores vacíos o repetidos, huecos, otros códigos IUPAC o cualquier otro símbolo hace que la ejecución se detenga antes de generar resultados y explique los errores | Casos de alfabeto, integridad y conservación de `N` |
 | **ACE-04. Un FASTA por referencia** | Cada referencia inicial o derivada conserva toda su secuencia en un único FASTA, que contiene uno o varios cromosomas o *scaffolds* | Casos de prueba |
 | **ACE-05. Índices de las referencias** | Cada referencia tiene cero, uno o varios índices y dispone de todos los tipos que necesitan las operaciones o los formatos que la usan | Tipos exigidos por cada operación y herramientas de indexación |
 | **ACE-06. Creación de referencias estructurales** | Se pueden crear dos o más referencias estructurales a partir de referencias disponibles previamente, incluida una referencia inicial suministrada | Casos de prueba, tamaños y reglas exactas |
 | **ACE-07. Diferencias entre referencias** | Cada nueva referencia estructural difiere de su referencia de origen solo por las duplicaciones, deleciones, inversiones y translocaciones solicitadas | Casos de prueba y comprobación de cada cambio |
 | **ACE-08. Origen de las referencias** | Para cada referencia estructural se pueden conocer su referencia de origen y los cambios que las distinguen | Forma de representar y consultar la relación |
 | **ACE-09. Clases de variante** | Se pueden crear individuos con SNP, *indels*, variantes estructurales y repeticiones en tándem respecto a cualquiera de las referencias disponibles | Casos de prueba por clase |
-| **ACE-10. Creación de cambios** | Para SNP, *indels* y variantes estructurales por separado, la configuración permite indicar una cantidad media esperada o una densidad por base, kilobase o megabase; la densidad se convierte en una media usando la longitud válida. El número realizado es entero, puede diferir de la media y se obtiene con Poisson de forma predeterminada o con otra distribución seleccionada por clase y región. Los valores espaciales siguen la jerarquía genoma, cromosoma o *scaffold* y región, junto con las sustituciones por individuo. El ámbito más específico prevalece y una configuración con valores incompatibles en regiones solapadas del mismo nivel se rechaza antes de simular identificando ambas regiones y el parámetro. Los valores alélicos fijados tienen prioridad. El modo probabilístico es predeterminado; el controlado, solo explícito, optimiza conjuntamente recuentos enteros, aplica la tolerancia y resuelve empates con la semilla | Formato técnico de coordenadas; catálogo y parámetros de distribuciones adicionales; pruebas estadísticas de las medias |
+| **ACE-10. Creación de cambios** | Para SNP, *indels* y variantes estructurales por separado, la configuración permite indicar una cantidad media esperada o una densidad por base, kilobase o megabase; la densidad se convierte en una media usando la longitud válida. El número realizado es entero, puede diferir de la media y se obtiene exclusivamente con Poisson. Los valores espaciales y por individuo se resuelven mediante la dominancia de ACE-111. Las sustituciones por identificador individual solo admiten individuos directos, fundadores o parentales expresos existentes durante la validación; un identificador inexistente se rechaza. No se heredan como sustituciones por los descendientes ni se aplican retroactivamente tras seleccionarlos. Los valores alélicos fijados son restricciones obligatorias. El modo probabilístico usa Poisson; los eventos explícitos y el modo controlado expresan resultados concretos y no son otras distribuciones | Formato técnico de coordenadas y pruebas estadísticas de las medias y reproducibilidad |
 | **ACE-11. Ploidía** | La configuración admite un valor global y sustituciones por cromosoma o *scaffold*, cada uno entero de 1 a 10. Toda secuencia tiene un valor efectivo idéntico en todos los individuos. Los valores no enteros, fuera de rango o ausentes se rechazan antes de simular. Estado genotípico y VCF representan exactamente sus haplotipos y dosis | Casos de prueba de límites y sustituciones |
 | **ACE-12. Creación directa** | Se pueden crear directamente individuos con cambios concretos o aleatorios indicados en la configuración | Casos de prueba |
-| **ACE-13. Vía evolutiva** | Cada escenario usa fases ordenadas y generaciones discretas no solapadas. N objetivo guía la descendencia y N realizado registra el tamaño obtenido; una desviación aleatoria advierte sin detener. Ne objetivo es estadístico y opcional; Ne realizado siempre se calcula como Ne reproductivo. El orden predeterminado es demografía, migración, selección de viabilidad, reproducción, segregación y recombinación, mutación de novo, registro y muestreo. La deriva surge del muestreo finito | Algoritmos, fórmulas, tolerancias técnicas y pruebas de cada proceso |
-| **ACE-14. Familias y poblaciones segregantes** | Cada escenario representa los cruces como un grafo dirigido acíclico con fuentes, orden y número de descendientes. Un ciclo es una dependencia imposible de un resultado posterior, no reutilizar un parental: autofecundación, retrocruce y ramas múltiples son válidos cuando cada evento produce descendientes nuevos. Antes de simular se validan identificadores, existencia y precedencia de referencias, creación única de descendientes, cardinalidad parental, compatibilidad y producibilidad de reglas y salidas. Existen plantillas F1, F2, retrocruce, autofecundación y pedigrí simple; los demás diseños se expresan como cruces personalizados. Un parental expreso declara sus cambios por copia respecto a una referencia compatible; lo no declarado permanece como referencia y una fase incompleta se rechaza. La descendencia alimenta eventos posteriores por identificador, selección aleatoria, pertenencia o estado genético en uno o varios loci, combinables con Y, O y NO. Un número exacto usa sorteo sin reemplazo si sobran elegibles y falla si faltan; una proporción es una probabilidad individual y produce un recuento aleatorio reproducible. Todo se evalúa sobre la verdad biológica. Un individuo puede alimentar varias ramas con la misma identidad y genotipo, mientras cada evento forma gametos independientes y descendientes nuevos. Se conservan los estados intermedios y el manifiesto reconstruye eventos y linajes | Sintaxis del grafo, de los parentales expresos y de las condiciones; casos de prueba |
+| **ACE-13. Vía evolutiva** | Cada escenario usa fases ordenadas y generaciones discretas no solapadas. N objetivo fija los intentos reproductivos y N realizado registra los descendientes creados; una desviación aleatoria advierte sin detener. Ne objetivo se rechaza y Ne realizado se calcula como Ne reproductivo cuando es evaluable. El orden único es demografía/N objetivo, migración, viabilidad, elección parental/reproducción, segregación/recombinación, mutación de novo, cálculo y registro de N/Ne/frecuencias, y muestreo/salidas. La deriva surge del muestreo finito | Casos de las ocho etapas, etapa opcional omitida y registro efectivo |
+| **ACE-14. Familias y poblaciones segregantes** | Cada escenario representa los cruces como un grafo dirigido acíclico con fuentes, orden y número de descendientes. Un ciclo es una dependencia imposible de un resultado posterior, no reutilizar un parental: autofecundación, retrocruce y ramas múltiples son válidos cuando cada evento produce descendientes nuevos. Antes de simular se validan identificadores, existencia y precedencia de referencias, creación única de descendientes, cardinalidad parental, ploidía par e igual, identidad estructural canónica y producibilidad de reglas y salidas. Existen plantillas F1, F2, retrocruce, autofecundación y pedigrí simple; los demás diseños se expresan como cruces personalizados. Un parental expreso declara sus cambios por copia respecto a una referencia compatible; lo no declarado permanece como referencia y una fase incompleta se rechaza. La descendencia alimenta eventos posteriores por identificador, selección aleatoria, pertenencia o estado genético en uno o varios loci, combinables con Y, O y NO. Un número exacto usa sorteo sin reemplazo si sobran elegibles y falla si faltan; una proporción es una probabilidad individual y produce un recuento aleatorio reproducible. Todo se evalúa sobre la verdad biológica. Un individuo puede alimentar varias ramas con la misma identidad y genotipo, mientras cada evento forma gametos independientes y descendientes nuevos. Se materializan el estado faseado y los metadatos de todos los individuos y poblaciones intermedias, y el manifiesto los enumera para reconstruir eventos y linajes | Familia completa, sintaxis del grafo, parentales, condiciones y casos reproductivos |
 | **ACE-15. Referencia de mapeo** | Cuando están activos BAM o CRAM, la configuración selecciona una o varias referencias de mapeo, incluida una distinta de la estructura de una muestra. Para cada referencia se generan los archivos de todas las muestras incluidas en un conjunto independiente | Cardinalidad de archivos dentro de cada conjunto y comprobaciones técnicas |
-| **ACE-16. Cabecera de BAM y CRAM** | La cabecera y sus grupos de lectura permiten identificar sin ambigüedad referencia, muestra, evento, biblioteca, tanda o carril y grupo. `SM` conserva el identificador biológico estable y cada identificador `RG` es único en toda la ejecución. El archivo cumple la versión oficial elegida | Versiones exactas de SAM/BAM y CRAM, catálogo concreto de campos y casos de prueba |
-| **ACE-17. Degradaciones** | Se pueden generar datos afectados por errores, contaminación, cobertura baja o cero y mala calidad de mapeo. La cobertura media objetivo admite sustituciones por individuo, secuencia y región con la precedencia acordada; antes de sesgos, la realizada es estocástica y aproximadamente Poisson, no exacta por base, y queda registrada cuando se mide | Tolerancias estadísticas; definición, intensidad y comprobación de las demás degradaciones |
+| **ACE-16. Cabecera de BAM y CRAM** | La cabecera y su grupo de lectura permiten identificar sin ambigüedad referencia, muestra, evento, biblioteca, tanda y grupo. `SM` conserva el identificador biológico estable y cada identificador `RG` es único en toda la ejecución. El archivo cumple la versión oficial elegida | Versiones exactas de SAM/BAM y CRAM, catálogo concreto de campos y casos de prueba |
+| **ACE-17. Degradaciones** | Se pueden generar datos afectados por errores, contaminación, cobertura baja o cero y mala calidad de mapeo. La cobertura media objetivo admite sustituciones por individuo, secuencia y región con la precedencia acordada; antes de sesgos, la WGS básica realizada es estocástica y aproximadamente Poisson, no exacta por base. `N` permanece elegible, cuenta en cobertura, aparece con Phred 0 y no la resuelve el modelo de error. El contenido GC excluye `N` y una ventana sin bases conocidas no recibe corrección. Se registran por separado objetivo, WGS básica, final del FASTQ con bases propias y contaminantes, y alineada por referencia | Intensidad, métricas y comprobación de las demás degradaciones; casos de `N` |
 | **ACE-18. VCF de verdad** | Cuando se solicita VCF, existe uno independiente por referencia de mapeo con los genotipos y dosis de las mismas muestras biológicas, expresados contra esa referencia. Cada VCF se construye directamente, usa identificadores de variante locales y no expone correspondencias registro a registro con otros VCF | Casos por referencia y comprobación de espacios de identificadores independientes |
 | **ACE-19. Cabecera del VCF** | La cabecera o los metadatos estándar de cada VCF permiten identificar sin ambigüedad la referencia, el conjunto y las muestras mediante sus identificadores biológicos estables, y cumplen la versión oficial elegida | Versión exacta de VCF, catálogo concreto de campos y casos de prueba |
 | **ACE-20. Separación por referencia** | Cuando se generan BAM, CRAM o VCF, existe un conjunto independiente por cada referencia de mapeo seleccionada. Cada conjunto usa una sola referencia, todos contienen las mismas muestras solicitadas y ninguno mezcla archivos referidos a genomas distintos. En modo realista, dentro del evento todos usan los mismos FASTQ y el único mapeador del evento | Forma de organizar los conjuntos |
 | **ACE-21. Coherencia de las salidas** | Las referencias, los individuos y cada conjunto de BAM o CRAM y VCF de verdad se pueden relacionar sin ambigüedad y describen la misma simulación | Identificadores y comprobaciones de consistencia |
 | **ACE-22. Manifiestos** | Cada ejecución genera un manifiesto general y uno por evento explícito. Identifican vía, configuraciones, semillas y subsemillas, versión, parámetros efectivos, referencias y recursos comunes, individuos y todos los archivos. Cada evento registra sus salidas y, cuando proceda, modo, tecnología, perfil, contaminación, FASTQ, mapeador único, versión y comando. También conservan evolución, cruces, ploidía, validaciones, los niveles de reproducibilidad declarados y el estado y diagnóstico de cada unidad | Formatos, esquemas y casos de prueba |
 | **ACE-23. Niveles de reproducibilidad** | Toda ejecución usa una semilla. Si la configuración no la proporciona, el programa la genera antes de simular y el manifiesto la identifica como generada. Con iguales semilla, configuración efectiva, entradas, perfiles y versión, se garantiza la misma simulación biológica y se aíslan sus flujos de los eventos técnicos. Las mismas lecturas, calidades, procedencias y artefactos se garantizan además cuando coinciden la subsemilla y las dependencias técnicas aplicables. La equivalencia semántica se declara solo bajo condiciones verificadas y la identidad binaria no se promete de forma general. El manifiesto separa los cuatro niveles y nunca infiere uno superior desde otro inferior | Estrategia técnica de subsemillas; condiciones verificables por herramienta, versión o plataforma; casos de prueba |
-| **ACE-24. Muestreos evolutivos** | La configuración puede solicitar muestreos mediante generación y número o proporción. Se conservan por defecto el estado genotípico y los metadatos mínimos, sin BAM, CRAM ni VCF. Cada evento guarda por separado un resumen de la población completa y subpoblaciones relevantes y otro calculado solo desde la muestra. Ambos identifican ámbito e incluyen frecuencias alélicas, heterocigosidad, F, N y Ne cuando corresponden; ninguna medida muestral se presenta como poblacional. El muestreo no modifica individuos ni la trayectoria evolutiva | Formato de resúmenes; estrategia técnica de flujos aleatorios; casos de prueba |
+| **ACE-24. Muestreos evolutivos** | La configuración puede solicitar muestreos mediante generación y número o proporción. Se conservan por defecto el estado genotípico y los metadatos mínimos, sin BAM, CRAM ni VCF. Cada evento guarda por separado un resumen de la población completa y subpoblaciones relevantes y otro calculado solo desde la muestra. Ambos identifican ámbito e incluyen frecuencias alélicas, heterocigosidad, F calculado solo en diploides o «no aplicable», N y Ne cuando corresponden; ninguna medida muestral se presenta como poblacional. El muestreo no modifica individuos ni la trayectoria evolutiva | Formato de resúmenes; estrategia técnica de flujos aleatorios; casos de prueba |
 | **ACE-25. Identidad individual** | Todo individuo tiene un identificador único, estable y no reutilizable dentro de la ejecución. Los duplicados aportados por la configuración se rechazan. El mismo identificador relaciona genotipo, generación y subpoblación de origen, parentales o linaje, muestreos, BAM o CRAM, VCF y manifiesto, y se distingue de los identificadores de evento y conjunto | Sintaxis técnica de los identificadores y casos de prueba |
 | **ACE-26. Estructura poblacional dinámica** | División reparte progenitores entre hijas exclusivas; fusión reúne orígenes; fundación transfiere fundadores y deja continuar al origen. División y fundación usan el catálogo declarativo común. Cada nueva subpoblación tiene N objetivo independiente y registra conjunto fundador, N objetivo y realizado. En fusión, el modo probabilístico usa elegibles o pesos; el controlado garantiza recuentos parentales exactos. Ninguno garantiza porcentaje exacto de bases: se calcula ascendencia genómica realizada con traza haplotípica | Casos de prueba del catálogo común y de cada evento |
-| **ACE-27. Recombinación** | La vía evolutiva y la de familias simulan recombinación al formar descendientes. Toda la ejecución usa una tasa uniforme o mapas completos, sin interferencia. Cada individuo pertenece a cero o a un grupo configurable y usa su perfil específico o el general. Solo recombinan intervalos colineales; en poliploides pares se forman bivalentes al azar entre copias compatibles. Los mapas no válidos y las pertenencias múltiples se rechazan | Formato técnico de mapas y posiciones; casos de prueba estructurales |
-| **ACE-28. Fase y haplotipos** | El estado interno separa todas las copias cromosómicas según la ploidía, asigna cada variante a haplotipos concretos y conserva fase y origen de segmentos durante evolución, recombinación, cruces, muestreos y poblaciones intermedias. Los VCF emiten genotipos faseados cuando el registro puede representarlos; cualquier limitación usa un complemento enlazado que conserva la fase sin pérdida | Estructura de datos, algoritmo y casos que requieren complemento |
+| **ACE-27. Recombinación** | La vía evolutiva y la de familias simulan recombinación al formar descendientes. Toda la ejecución usa una tasa uniforme o mapas completos, sin interferencia. Cada individuo pertenece a cero o a un grupo configurable y usa su perfil específico o el general. Solo se forman bivalentes entre copias con estado estructural canónico idéntico; una diferencia estructural invalida al individuo o pareja completos. En ploidías pares 2–10, las copias se emparejan al azar y cada parental aporta la mitad. Los mapas no válidos y las pertenencias múltiples se rechazan | Casos diploide/tetraploide idénticos; variantes pequeñas permitidas; SV heterocigota; ploidía impar/desigual |
+| **ACE-28. Fase y haplotipos** | El estado interno separa todas las copias cromosómicas según la ploidía, asigna cada variante a haplotipos concretos y conserva fase y origen de segmentos durante evolución, recombinación, cruces, muestreos y poblaciones intermedias. Los VCF emiten genotipos faseados cuando el registro puede representarlos; cualquier limitación usa la única entrada complementaria del caso para conservar la fase sin pérdida | Estructura de datos, algoritmo y casos que requieren complemento |
 | **ACE-29. Umbral entre *indels* y variantes estructurales** | Sin configuración se usan 50 pb: una inserción o deleción menor de 50 pb es *indel* y una igual o mayor es variante estructural. Otro umbral configurado se aplica de forma coherente a generación, estadísticas, VCF y manifiesto. Otros tipos estructurales conservan su clase | Casos límite y pruebas de coherencia |
-| **ACE-30. Representación VCF** | SNP e *indels* usan REF/ALT explícitos y normalizados respecto a la referencia del conjunto. Varios ALT representables del mismo locus forman un único registro multialélico cuyo `GT` conserva ploidía, dosis y fase. Los solapamientos pequeños se representan desde la secuencia haplotípica final. Las variantes estructurales usan alelos simbólicos y SVTYPE, END y SVLEN cuando corresponde. Las variantes complejas conservan información reconstruible y ninguna pérdida de verdad es silenciosa | Versión exacta VCF, normalización técnica y casos complejos |
-| **ACE-31. Repeticiones en tándem** | La configuración admite loci concretos o generación aleatoria y regional con motivo no vacío de longitud libre, copias o longitud, pureza e interrupciones. Se mantienen fase y verdad en secuencias y BAM o CRAM. El VCF usa alelos explícitos cuando son manejables o simbólicos para tramos largos o complejos, pero en ambos casos expone motivo, copias por alelo o haplotipo, longitud, pureza e interrupciones y permite reconstruir el genotipo sin depender solo del manifiesto | Campos VCF concretos, criterio técnico de tamaño manejable, límites de recursos y casos de prueba |
-| **ACE-32. Mutación de repeticiones en tándem** | El modelo escalonado predeterminado gana o pierde unidades completas y permite configurar tasa, sesgo y distribución del tamaño del cambio, además de modelos alternativos. Sus parámetros pueden variar por los ámbitos acordados. Las mutaciones internas de interrupciones, pureza o motivo están desactivadas por defecto y solo se aplican si se configuran. Cada evento es reproducible, faseado y trazable | Fórmulas y distribuciones concretas, modelos alternativos y casos de prueba |
-| **ACE-33. Verdad complementaria sin pérdida** | Si un caso complejo no puede representarse completamente en VCF, se genera un complemento estructurado con identificador compartido y el VCF y el manifiesto lo enlazan. A partir del VCF y el complemento se reconstruyen sin pérdida la secuencia o cambio, coordenadas, haplotipo, fase y genotipo. Si todos los casos son representables, el complemento no se genera | Formato, esquema y casos de reconstrucción |
-| **ACE-34. Resultado mínimo y salidas dependientes** | Toda ejecución exitosa produce FASTA e índices necesarios, la verdad completa obligatoria para su vía, los historiales o resúmenes exigidos, copias de configuraciones y manifiesto. Toda salida de observación requiere un evento explícito y cero eventos no crea ninguno implícito. Un evento puede solicitar solo verdad o VCF sin parámetros técnicos. Cuando solicita alineamientos, CRAM es predeterminado y BAM la alternativa; en modo realista también son obligatorios sus FASTQ finales y ficheros de procedencia, mientras el modo directo no los requiere. Una calibración produce su perfil empírico reutilizable. La ejecución falla si falta una salida mínima o activada | Formato del fichero de verdad, organización de copias y casos de fallo |
+| **ACE-30. Representación VCF** | SNP e *indels* usan REF/ALT explícitos y normalizados respecto a la referencia del conjunto. Nunca se emite un SNP con `REF=N`. Otros cambios conservan `N` en REF/ALT solo si el estándar elegido lo permite sin pérdida; en otro caso usan complemento sin inventar una base. Varios ALT representables del mismo locus forman un único registro multialélico cuyo `GT` conserva ploidía, dosis y fase. Los solapamientos pequeños se representan desde la secuencia haplotípica final. Las variantes estructurales usan la representación estándar más completa y campos estándar con su semántica oficial. El VCF cumple estrictamente la versión oficial seleccionada y sigue siendo válido e interoperable aunque un caso requiera complemento | Versión exacta VCF, normalización técnica y casos complejos con `N` |
+| **ACE-31. Repeticiones en tándem** | La configuración admite loci concretos o generación aleatoria y regional con motivo no vacío de longitud libre, copias o longitud, pureza e interrupciones; un motivo con `N` se rechaza o excluye. Se mantienen fase y verdad en secuencias y BAM o CRAM. El VCF usa alelos explícitos cuando son manejables o simbólicos para tramos largos o complejos y expone cuanto admita sin pérdida el estándar; el resto se conserva en la única entrada complementaria del caso y nunca solo en el manifiesto | Campos VCF concretos, criterio técnico de tamaño manejable, límites de recursos y casos de prueba |
+| **ACE-32. Mutación de repeticiones en tándem** | El único modelo de v1 es el escalonado simple: cada mutación añade exactamente una unidad completa o elimina exactamente una. La tasa y el sesgo o probabilidad entre expansión y contracción son configurables en los ámbitos acordados; el tamaño del salto no lo es. Las mutaciones internas de interrupciones, pureza o motivo están desactivadas por defecto y solo se aplican si se configuran. Cada evento es reproducible, faseado y trazable | Casos de expansión, contracción, sesgo, ámbitos y rechazo de saltos múltiples |
+| **ACE-33. Verdad complementaria sin pérdida** | Si un caso complejo no puede representarse completamente en VCF, se genera exactamente una entrada complementaria con todo el detalle perdido. Uno o varios registros del caso la enlazan mediante un identificador local estable y una descripción breve en campos `INFO` declarados. Cada registro enlazado pertenece a una sola entrada y caso. A partir del VCF y el complemento se reconstruyen sin pérdida secuencia o cambio, coordenadas, haplotipo, fase y genotipo. Si todos los casos son representables, el complemento no se genera | Formato, esquema y casos de reconstrucción |
+| **ACE-34. Resultado mínimo y salidas dependientes** | Toda ejecución exitosa produce FASTA e índices necesarios, la verdad completa obligatoria para su vía, los historiales o resúmenes exigidos, copias de configuraciones y manifiesto. Toda salida de observación requiere un evento explícito y cero eventos no crea ninguno implícito. Un evento puede solicitar solo verdad o VCF sin parámetros técnicos. Cuando solicita alineamientos, CRAM es predeterminado y BAM la alternativa; en modo realista también son obligatorios sus FASTQ finales y ficheros de procedencia, mientras el modo directo no los requiere. V1 no produce perfiles empíricos. La ejecución falla si falta una salida mínima o activada | Formato del fichero de verdad, organización de copias y casos de fallo |
 | **ACE-35. Escala y prioridad de la primera versión** | Se pueden configurar, sin límites funcionales codificados, distintos números y tamaños de secuencias, individuos y generaciones. La validación prioriza escenarios pequeños y reproducibles. Los escenarios mayores están limitados por los recursos disponibles y no se presupone rendimiento ilimitado | Casos pequeños prioritarios, mediciones de recursos y pruebas de escalabilidad sin umbrales fijados |
-| **ACE-36. Estimación de recursos** | Antes de ejecutar se muestran estimaciones aproximadas de volumen y almacenamiento de salidas, memoria y tiempo. Un escenario grande provoca una advertencia clara, pero no se bloquea solo por ella. Una configuración inválida o la imposibilidad inevitable de producir el mínimo sí impiden iniciar y explican la causa. El manifiesto conserva estimaciones, advertencias y consumo real medible | Modelos, umbrales y pruebas de calibración de las estimaciones |
-| **ACE-37. Tecnologías de lectura** | Con BAM o CRAM activos se pueden representar lecturas cortas tipo Illumina, *single-end* y *paired-end*, y lecturas largas PacBio HiFi. Cada modalidad tiene un perfil predeterminado validado y ajustable; también admite calibración empírica desde FASTQ y referencia. En modo realista las lecturas proceden de haplotipos faseados y resultados y manifiesto registran tecnología y perfil efectivos. Oxford Nanopore y PacBio CLR se rechazan en v1 y quedan para futuras ampliaciones | Distribuciones, parámetros, tasas y valores cuantitativos exactos; datos de validación y casos de prueba |
+| **ACE-36. Estimación de recursos** | Antes de ejecutar se estiman volumen, almacenamiento, memoria y tiempo incluyendo la trazabilidad obligatoria y todas las salidas. Un escenario grande solo advierte, pero una configuración inválida, un mínimo imposible o un presupuesto configurado superado impiden iniciar y explican la causa. Nunca se degrada el detalle ni se elige otro nivel; la persona usuaria debe reducir materializaciones, muestreos, individuos, lecturas u otras salidas. El manifiesto conserva estimaciones, advertencias y consumo medible | Caso suficiente, preflight insuficiente y comprobación de ausencia de degradación |
+| **ACE-37. Tecnologías de lectura** | Con BAM o CRAM activos se pueden representar lecturas cortas tipo Illumina, *single-end* y *paired-end*, y lecturas largas PacBio HiFi. Cada modalidad tiene un perfil tecnológico incorporado, identificado, versionado, validado y ajustable mediante las sustituciones explícitas permitidas. En modo realista las lecturas proceden de haplotipos faseados y resultados y manifiesto registran tecnología y perfil efectivos. Oxford Nanopore y PacBio CLR se rechazan en v1 y quedan para futuras ampliaciones | Distribuciones, parámetros, tasas y valores cuantitativos exactos; datos de validación y casos de prueba |
 | **ACE-38. Modos de alineamiento** | En el modo realista predeterminado se guardan los FASTQ finales después de aplicar errores, contaminación y demultiplexado, y los BAM o CRAM contienen esas mismas lecturas, incluidos pares, identificadores y registros no mapeados producidos por el mapeador. En el modo directo no se generan FASTQ previos y los alineamientos estándar quedan claramente etiquetados como sintéticos | Organización y casos de prueba por modo |
-| **ACE-39. Un mapeador por experimento** | Un experimento usa exactamente un mapeador, minimap2 salvo selección compatible distinta, contra todas sus referencias. Para minimap2, el perfil elige automáticamente el *preset* y los valores predeterminados, y las sustituciones se advierten y validan. El manifiesto conserva herramienta, versión, comando completo y parámetros efectivos | Versión de minimap2, *presets* y valores exactos, catálogo inicial de alternativas, comprobaciones técnicas de compatibilidad y casos de opciones incompatibles |
+| **ACE-39. Un mapeador por evento técnico** | Un evento con alineamientos usa exactamente un mapeador, minimap2 salvo selección compatible distinta, contra todas sus referencias. Para minimap2, el perfil elige automáticamente el *preset* y los valores predeterminados, y las sustituciones se advierten y validan. El manifiesto conserva herramienta, versión, comando completo y parámetros efectivos | Versión de minimap2, *presets* y valores exactos, catálogo inicial de alternativas, comprobaciones técnicas de compatibilidad y casos de opciones incompatibles |
 | **ACE-40. Independencia de eventos técnicos** | Dos eventos pueden usar mapeadores o tecnologías distintos sobre las mismas muestras biológicas, pero cada uno genera sus propias lecturas y usa un solo mapeador. No se reutilizan FASTQ entre eventos ni se presentan como comparación de mapeadores | Organización, identificadores y casos con varios eventos |
-| **ACE-41. Cobertura configurable** | La cobertura media objetivo en «x» puede configurarse globalmente y sustituirse por individuo, cromosoma o *scaffold* y región, incluidos valores altos, bajos o cero. Los conflictos del mismo nivel se rechazan; la realización es aproximadamente Poisson antes de sesgos, se refleja en FASTQ del modo realista o BAM/CRAM del directo y se registra cuando se mide | Tolerancias y casos estadísticos |
+| **ACE-41. Cobertura configurable** | La cobertura media objetivo en «x» puede configurarse globalmente y sustituirse por individuo, cromosoma o *scaffold* y región, incluidos valores altos, bajos o cero. Su denominador es la suma de cada secuencia de la referencia estructural una sola vez, sin ploidía; ni los haplotipos realizados ni las referencias de mapeo lo cambian. Los conflictos del mismo nivel se rechazan. La WGS básica es aproximadamente Poisson antes de sesgos. La cobertura final del FASTQ separa bases propias y contaminantes, y cada referencia informa su cobertura alineada como observación, no como objetivo | Métricas y casos estadísticos por las cuatro medidas |
 | **ACE-42. Contaminación trazable** | Una muestra admite una fracción total de contaminación biológica entre 0 % y 100 %, repartida entre una o varias fuentes mediante matriz dirigida o selección automática. Proporciones, coberturas equivalentes y números se convierten conjuntamente a lecturas o parejas completas y se asignan enteramente minimizando la desviación global; los empates se resuelven con la subsemilla y se registran. Cada unidad contaminante sustituye una propia; la donante no pierde datos. El modo directo aplica reglas funcionalmente equivalentes. Verdad y manifiesto conservan origen, objetivo, conversión, realizado, retiradas y totales finales | Validaciones y casos de prueba |
 | **ACE-43. Contaminación *paired-end*** | En datos *paired-end* se seleccionan y sustituyen parejas completas de una misma fuente. Ambos *mates* se incorporan juntos con nombres, indicadores, orientación y relación coherentes, sin crear huérfanos; el manifiesto registra parejas propias retiradas y contaminantes incorporadas | Casos de prueba de emparejamiento |
 | **ACE-44. FASTQ contaminante externo** | Los FASTQ externos solo se admiten en modo realista. Se validan y copian al directorio de resultados antes de usarse. La ejecución usa la copia, conserva intacto el original y realiza un submuestreo reproducible que respeta la fracción y el emparejamiento. El manifiesto relaciona ubicación original, copia, validación y lecturas seleccionadas. Configurarlos en modo directo es un error previo | Validaciones exactas y datos técnicos de integridad |
 | **ACE-45. Contaminación técnica por índices** | Una tanda multiplexada puede usar índices simples, duales combinatorios o UDI y simular de forma reproducible asignaciones erróneas, incluido *index hopping*. Una lectura o pareja reasignada desaparece de la donante y entra en la receptora sin duplicarse. Las descartadas o sin asignar no se reemplazan y reducen la cobertura. Se conserva la procedencia verdadera, sin generar señales, BCL ni lecturas i5/i7 detalladas | Casos de prueba por estrategia de índices y resultado |
-| **ACE-46. FASTQ final, identidad y procedencia** | En modo realista existe un FASTQ final, o pareja *paired-end*, por individuo, biblioteca y tanda o carril después de contaminación y demultiplexado, sin concatenación ni copia limpia adicional. Cada lectura o pareja es una instancia técnica única dentro del evento. Una copia biológica recibe identidad nueva y enlaza su origen; una transferencia por demultiplexado conserva la identidad y abandona la donante; solo un mecanismo de duplicación configurado puede crear copias adicionales. Un fichero estructurado enlazado conserva esas relaciones sin copiar secuencias ni calidades. Las descartadas o sin asignar aparecen solo como recuentos agregados por muestra y causa u origen conocido | Formato, esquema y casos de reconstrucción de la verdad de contaminación |
+| **ACE-46. FASTQ final, identidad y procedencia** | En modo realista existe un FASTQ final, o pareja *paired-end*, por individuo y evento después de contaminación y demultiplexado. Corresponde a la única biblioteca del individuo y a la única tanda, sin concatenación ni copia limpia adicional. Cada lectura o pareja final es una instancia técnica única y conserva origen/procedencia y diferencia entre secuencia verdadera y observada. Una copia biológica recibe identidad nueva; una transferencia conserva la identidad y abandona la donante; solo una duplicación configurada crea copias adicionales. El fichero enlazado no duplica secuencias ni calidades. Las descartadas o sin asignar aparecen solo como recuentos agregados por muestra y causa u origen conocido | Lectura final reconstruible frente a descarte agregado; formato y esquema |
 | **ACE-47. Perfiles de error y calidades** | Cada tecnología usa un perfil de errores identificado y versionado, homogéneo salvo sustituciones globales o por individuo, secuencia o región. Las calidades del FASTQ son probabilísticamente coherentes con los errores y se propagan a BAM/CRAM. La verdad distingue secuencia original y observada | Perfiles exactos, modelos por posición o contexto y casos estadísticos |
-| **ACE-48. Calibración empírica reutilizable** | Un FASTQ real y su referencia permiten estimar longitud, calidad y errores, con advertencias sobre variantes, regiones ambiguas, mapeo y fiabilidad. El perfil solo se aplica si se selecciona y se guarda como artefacto estructurado, versionado y reutilizable sin el FASTQ original; el manifiesto lo enlaza | Método de estimación, formato, esquema y medidas concretas de calidad |
+| **ACE-48. Calibración empírica fuera de v1** | Una configuración que aporte FASTQ o referencia para calibración, solicite estimar o inferir un perfil o seleccione un perfil empírico reutilizable se rechaza antes de simular. El error identifica el campo y explica que la capacidad queda fuera de v1. Una ejecución válida con un perfil incorporado de Illumina o PacBio HiFi y ajustes explícitos permitidos no genera un fichero de perfil empírico ni lo enlaza desde el manifiesto | Casos por clase de campo rechazado y comprobación de ausencia del artefacto |
 | **ACE-49. Duplicados de PCR y ópticos** | Los perfiles pertinentes generan por separado duplicados de PCR y ópticos con tasas sustituibles; en *paired-end* se duplica la pareja completa. La verdad conserva tipo y origen. BAM/CRAM los entrega marcados por defecto y permite una salida sin marcar; el manifiesto registra estado, método y cantidades esperadas y realizadas | Modelos exactos, procedimiento de marcado y casos de prueba |
 | **ACE-50. Restos de adaptadores** | Los restos de adaptadores están desactivados por defecto y solo se añaden por solicitud expresa con secuencia o perfil, frecuencia, longitud residual y extremo efectivos. La verdad identifica lectura e intervalo añadido y el manifiesto conserva estado, parámetros y cantidad realizada | Perfiles y casos de prueba concretos |
 | **ACE-51. Sesgo de cobertura por GC** | El perfil puede relacionar contenido GC y probabilidad de lectura; la configuración modifica su intensidad o lo anula. El efecto se combina de forma documentada con la cobertura objetivo y las excepciones regionales, y el manifiesto conserva parámetros y resúmenes de cobertura realizada | Curvas, regla de combinación e intervalos de resumen concretos |
@@ -4574,88 +4472,73 @@ pendientes.
 | **ACE-53. Alineamientos sintéticos coherentes** | En modo directo, las proporciones de lecturas correctas, mal alineadas, multimapeadas y no alineadas y sus distribuciones de MAPQ son configurables. Se rechazan proporciones, MAPQ o combinaciones inválidas; banderas, CIGAR, campos y alineamientos secundarios o suplementarios concuerdan con la categoría y la verdad conserva origen y categoría | Distribuciones predeterminadas y casos de validación por formato |
 | **ACE-54. Lecturas quiméricas** | Un perfil puede generar quimeras con frecuencia configurable. Todos los fragmentos pertenecen al mismo individuo y biblioteca, pero pueden proceder de cromosomas, *scaffolds*, haplotipos o copias diferentes. La verdad conserva origen, coordenadas, orientación y uniones; el mapeador resuelve el modo realista y el modo directo produce alineamientos divididos coherentes | Distribuciones de fragmentos y casos de prueba |
 | **ACE-55. Anomalías *paired-end*** | Se pueden configurar parejas con orientación anómala, inserto inesperado o un miembro no alineado, incluidas combinaciones. Las normales siguen el perfil; en modo realista decide el mapeador y en modo directo banderas, RNEXT/PNEXT, TLEN, CIGAR, orientación y *proper-pair* son coherentes. La verdad y el manifiesto conservan estado, fragmento y cantidades | Distribuciones y casos de prueba por combinación |
-| **ACE-56. Grupos de lectura y archivo por individuo** | Los identificadores únicos de muestra, biblioteca, tanda o carril, plataforma y grupo son consistentes entre FASTQ, `@RG`/`RG` de BAM o CRAM, procedencia y manifiesto. Los FASTQ permanecen separados por grupo. Cada conjunto por referencia contiene un único BAM o CRAM final por individuo con todos sus grupos, y nunca mezcla referencias ni exige productos finales separados por biblioteca | Campos exactos de `@RG`, validaciones y casos con múltiples grupos |
-| **ACE-57. Una tecnología por experimento** | Cada experimento o evento que genere FASTQ, BAM o CRAM usa una sola tecnología experimental y mantiene compatibles todos sus perfiles, bibliotecas, tandas, carriles, mapeo y resultados. No mezcla lecturas cortas tipo Illumina y lecturas largas PacBio HiFi ni perfiles incompatibles. Un evento que solo materializa verdad o VCF no necesita tecnología. Eventos separados pueden usar las mismas muestras y verdad, pero producen lecturas independientes con identificadores y versiones trazables | Sintaxis de identificadores y casos de incompatibilidad |
+| **ACE-56. Grupo de lectura y archivo por individuo** | Cada individuo tiene exactamente una biblioteca, un grupo de lectura y, en modo realista, un FASTQ o pareja dentro del evento. Los identificadores de muestra, biblioteca, tanda, plataforma y grupo son consistentes entre FASTQ, `@RG`/`RG` de BAM o CRAM, procedencia y manifiesto. Cada conjunto por referencia contiene un único BAM o CRAM final por individuo con ese grupo y nunca mezcla referencias | Campos exactos de `@RG`, validaciones y casos de cardinalidad inválida |
+| **ACE-57. Una tecnología y una tanda por experimento** | Cada evento que genere FASTQ, BAM o CRAM constituye su único experimento de secuenciación, sin identidad separada, y contiene una tecnología, un perfil, exactamente una tanda y una biblioteca por individuo. Todas las bibliotecas se procesan conjuntamente y, si existen alineamientos, comparten mapeador. Otra biblioteca del individuo, tanda, perfil, tecnología o control exige otro evento. Los carriles se rechazan en v1. Un evento que solo materializa verdad o VCF no es un experimento y no admite campos técnicos | Casos válidos y rechazos por cardinalidad, carril o campo técnico indebido |
 | **ACE-58. CRAM predeterminado y referencia exacta** | Dentro de un evento que solicite alineamientos, cada individuo recibe un CRAM final salvo que se seleccione BAM como alternativa. Cada CRAM está ligado por cabecera y manifiesto a la copia FASTA exacta almacenada entre los recursos comunes, protegida por identificadores y comprobaciones de integridad; no puede asociarse a otra referencia. Una exportación del evento sí copia ese FASTA al paquete autocontenido | Campos, comprobaciones de integridad y casos de referencia incorrecta |
 | **ACE-59. Orden, índice y validación** | Cada BAM o CRAM final se entrega ordenado por coordenadas de forma predeterminada y con un índice compatible elegido según formato, tamaño y necesidad. La configuración y el manifiesto registran formato, orden e índice, y el resultado no se considera completo si alineamiento, índice y referencia no superan la validación conjunta | Herramientas, tipos exactos de índice y casos límite de tamaño |
-| **ACE-60. VCF multimuesta por referencia** | Cada conjunto solicitado contiene un único VCF de verdad multimuesta con todos sus individuos y exactamente los mismos identificadores usados en BAM/CRAM, grupos de lectura, genotipos y manifiesto. No incluye individuos de otra referencia y no exige VCF individuales como productos principales | Casos de coherencia de identificadores y organización |
+| **ACE-60. VCF multimuesta por referencia** | Cada conjunto solicitado contiene exactamente un VCF de verdad multimuesta con todos sus individuos y los mismos identificadores usados en BAM/CRAM, grupos de lectura, genotipos y manifiesto. No incluye individuos de otra referencia y no genera VCF individuales ni archivos separados por clase o complejidad | Casos de coherencia de identificadores y organización |
 | **ACE-61. VCF ordenado, comprimido e indexado** | Por defecto, el VCF sigue el orden de secuencias de la referencia y las coordenadas dentro de cada una, está comprimido con BGZF y tiene un índice TBI o CSI compatible. Puede solicitarse texto sin comprimir. La ejecución falla si VCF, compresión, índice, cabecera y referencia no superan la validación correspondiente | Selección TBI/CSI, herramientas y casos límite |
 | **ACE-62. Solo loci diferentes de la referencia en VCF** | El VCF contiene un registro cuando al menos una muestra del conjunto tiene un alelo no de referencia, aunque ese ALT esté fijado en todas las muestras. No emite posiciones idénticas a la referencia ni bloques gVCF por defecto; el fichero estructurado de genotipos y haplotipos conserva la verdad completa | Casos invariantes de referencia, ALT fijado, loci polimórficos, multialélicos y distintas ploidías |
 | **ACE-63. VCF independiente de la evidencia observada** | El VCF se construye desde el estado genotípico faseado de la simulación, nunca mediante inferencia desde FASTQ, BAM o CRAM. En cada locus incluido conserva el genotipo completo y la fase real de todas las muestras aunque tengan cobertura cero, contaminación, errores, calidad baja o mapeo ausente, incorrecto, múltiple o ambiguo; esos casos no producen genotipos ausentes. Una limitación de representación se conserva mediante el complemento de verdad y no se confunde con falta de evidencia | Casos con cobertura cero y degradaciones combinadas; comprobación de independencia respecto a FASTQ y BAM/CRAM |
-| **ACE-64. Validación interna contra la verdad** | Siempre que existen FASTQ o BAM/CRAM, existe un resultado estructurado enlazado desde el manifiesto. Sin ejecutar un *SNP caller*, compara con la verdad de origen la procedencia desde haplotipos, cobertura, soporte alélico según dosis y ploidía, tasas de errores, contaminación, duplicados y demás degradaciones, coherencia de parejas, y alineamientos, referencias y grupos de lectura. Registra objetivos, valores observados, tolerancias y desviaciones, y toda desviación intencionada queda explicada por la configuración o una decisión aleatoria trazable | Tolerancias, métodos estadísticos y formato y esquema del informe |
-| **ACE-65. Consecuencias de la validación** | Un archivo inválido, una referencia incorrecta, identificadores incompatibles, un genotipo imposible o cabeceras o índices incoherentes detienen la ejecución. Una desviación estadística puede elevarse a error, salvo las de N y Ne, que se advierten sin detener. N realizado=0 aplica la política específica: desactivada detiene inmediatamente toda la simulación sin omisiones; activada registra extinción por resultado y permite omisiones dependientes. Informe y manifiesto registran esperado, realizado y decisión | Casos de prueba de cada clase de fallo y sintaxis de la política configurable |
+| **ACE-64. Validación interna contra la verdad** | Siempre que existen FASTQ o BAM/CRAM, existe un resultado estructurado enlazado desde el manifiesto. Sin ejecutar un *SNP caller*, comprueba contra la verdad las procedencias, parejas, alineamientos, referencias e identidades, e informa cobertura, soporte alélico, errores, contaminación, duplicados y demás magnitudes aleatorias. Cada resultado estadístico registra ámbito, esperado, realizado, tamaño observado, desviaciones absoluta y relativa y explicación; si no puede calcularse, figura como «no evaluable» con causa | Métodos estadísticos, formato, esquema y casos de medida no evaluable |
+| **ACE-65. Consecuencias de la validación** | Un archivo, formato, índice o cabecera inválidos, una referencia o identificadores incompatibles, un genotipo imposible, una procedencia o haplotipo imposible o un artefacto sin explicación trazada detienen la ejecución e impiden completar el ámbito afectado. Una cobertura u otra magnitud aleatoria desviada se informa y permite completar, sin tolerancia de aceptación ni opción de elevarla a error. N desviado conserva un aviso no invalidante. Ne realizado no tiene objetivo; N realizado=0 aplica su política específica | Cobertura desviada que completa, procedencia imposible que falla, medida no evaluable y aviso de N |
 | **ACE-66. Contenido genotípico del VCF verdadero** | En cada locus incluido, `GT` coincide con el genotipo real simulado y conserva fase y ploidía aunque la cobertura sea cero o las lecturas estén degradadas. El VCF no contiene `DP`, `AD`, `GQ`, `PL` ni ningún otro campo `FORMAT` derivado de observaciones o inferencias. La cobertura, el soporte alélico, las calidades y métricas equivalentes aparecen en los resultados de validación de FASTQ/BAM/CRAM, no en el VCF | Casos con distintas ploidías, cobertura cero y degradaciones; inspección de campos `FORMAT` |
 | **ACE-67. QUAL y FILTER del VCF verdadero** | Todos los registros válidos usan `QUAL=.` y `FILTER=PASS`. La cabecera explica que no se estima una calidad probabilística y que `PASS` identifica un registro verdadero validado estructuralmente. Si un registro no puede representarse mediante el VCF y su complemento cuando corresponda, o no puede validarse, se produce un error estructural, se detiene la creación del conjunto, este no se marca como completo y el registro no se emite como `PASS` | Casos de cabecera válida, complemento enlazado, registro no representable y fallo de validación |
 | **ACE-68. Alcance WGS y preparación** | La primera versión acepta exclusivamente WGS de DNA genómico con lecturas cortas tipo Illumina o largas PacBio HiFi en experimentos separados. Rechaza Oxford Nanopore, PacBio CLR, paneles, amplicones, GBS y captura o reducción de representación. La preparación predeterminada es sin PCR; una preparación WGS amplificada puede generar duplicados de PCR y sesgos configurados y queda identificada en configuración y manifiesto | Casos de rechazo por tecnología y protocolo |
-| **ACE-69. Objetivo y muestreo de bibliotecas WGS** | Cada biblioteca declara cobertura o número de lecturas, pero no ambos ni ninguno; en *paired-end* se cuentan parejas. Se deriva el indicador equivalente. La cobertura usa bases de lectura divididas por longitud haploide. Las posiciones se muestrean uniformemente y de forma reproducible y la profundidad previa a sesgos es aproximadamente Poisson, sin profundidad exacta por base | Tolerancias, prueba estadística y modelos futuros alternativos |
-| **ACE-70. Ploidía, copias y soporte alélico WGS** | Sin excepciones, las lecturas se reparten por longitud y número de copias, cada copia recibe cobertura semejante y la profundidad cromosómica total es proporcional a su ploidía. Los alelos contribuyen según dosis; la validación admite variación aleatoria y no exige balance exacto. No existen parámetros de sesgo alélico o *allele dropout* forzados | Tolerancias y resúmenes por copia o haplotipo |
+| **ACE-69. Objetivo y muestreo de bibliotecas WGS** | Cada biblioteca declara cobertura o número de lecturas, pero no ambos ni ninguno; en *paired-end* se cuentan parejas. Se deriva el indicador equivalente. La cobertura usa bases de lectura divididas por la longitud haploide de la referencia estructural, sumando cada secuencia una vez; `N` cuenta tanto en longitud como en bases y posiciones muestreadas y se resume por separado. Las posiciones se muestrean uniformemente y de forma reproducible y la profundidad previa a sesgos es aproximadamente Poisson, sin profundidad exacta por base. El mismo FASTQ se mapea contra todas las referencias seleccionadas y sus coberturas alineadas no redefinen el objetivo | Prueba estadística, casos con `N` y modelos futuros alternativos |
+| **ACE-70. Ploidía, copias y soporte alélico WGS** | Sin excepciones, las lecturas se reparten por longitud y número de copias, cada copia recibe cobertura semejante y la profundidad cromosómica total es proporcional a su ploidía. Los alelos contribuyen según dosis; la validación admite variación aleatoria y no exige balance exacto. No existen parámetros de sesgo alélico o *allele dropout* forzados | Métricas y resúmenes por copia o haplotipo |
 | **ACE-71. Un único alineamiento final** | Cada evento conserva solo su BAM/CRAM final con las degradaciones configuradas. Un control sin degradaciones es otro evento que usa la misma verdad, referencias y muestras, pero tiene subsemilla, lecturas y archivos propios; los manifiestos enlazan su relación experimental | Identificadores técnicos de eventos relacionados |
 | **ACE-72. Contaminación biológica sustitutiva** | Cada lectura o pareja contaminante sustituye una propia de la receptora sin reducir los datos de la donante. La fracción total admite 0–100 %; varias fuentes no pueden superar el 100 % ni los datos disponibles. El 100 % representa sustitución completa. Exceder límites detiene antes de generar | Unidades exactas de matriz y casos límite |
 | **ACE-73. Fuentes y reparto de contaminación** | Las fuentes son compatibles con tecnología, perfil y disposición. Una matriz dirigida puede definir aportes no simétricos; su diagonal es propia. Sin matriz, donantes compatibles de la tanda se ponderan por datos disponibles. La matriz prevalece. Los FASTQ externos validados solo se admiten en modo realista; en directo son error | Validaciones técnicas de FASTQ y casos de matriz |
 | **ACE-74. Transferencia y descarte por índices** | Una lectura o pareja reasignada por índices sale de la donante y entra en la receptora sin duplicarse. Las descartadas o sin asignar no se reemplazan y reducen cobertura. El modo directo aplica reglas equivalentes mediante alineamientos sintéticos. Informe y manifiesto conservan objetivos, transferencias, descartes, totales y cobertura final | Casos por estrategia de índices y concordancia funcional entre modos |
 | **ACE-75. Plantillas y sistemas de cruce** | Existen plantillas F1, F2, retrocruce, autofecundación y pedigrí simple. F2 permite autofecundar F1 o cruzar F1. RIL, introgresión y MAGIC se expresan con cruces personalizados. El sistema admite especies autógamas y alógamas y registra modo, parentales y descendientes | Sintaxis del sistema general y casos por plantilla |
-| **ACE-76. Apareamiento mixto y contribución parental** | La autofecundación es una probabilidad reproducible de 0–100 % por evento, sustituible por población, subpoblación y fase. Los demás eventos eligen uniformemente dos supervivientes distintos, sin ponderación por parentesco, distancia o genotipo. Un parental puede reproducirse varias veces bajo límites o distribuciones configurados | Distribuciones y tolerancias de tasas realizadas |
-| **ACE-77. N, Ne y descendencia** | N objetivo es obligatorio al iniciar y fija la descendencia que se intenta crear; un cuello de botella lo reduce y una expansión lo aumenta, sin modificar adultos ya creados. Si un resultado aleatorio impide alcanzarlo, se conservan N realizado, desviación y aviso sin detener. Ne objetivo puede ser absoluto o Ne/N o faltar; Ne realizado usa progenitores con descendencia y desigualdad de contribuciones, nunca heterocigosidad, endogamia o LD. Su desviación tampoco detiene | Fórmulas de Ne reproductivo y F realizado, adaptación por ploidía y casos incompatibles |
-| **ACE-78. Generaciones e historial reproducible** | Las generaciones son discretas y no solapadas. Los individuos parentales solo existen como población activa en su generación y los sustituye la descendencia; un cambio de N no los elimina retrospectivamente. Se conservan genotipos completos de la población inicial, final y generaciones o muestreos solicitados, y un historial resumido de todas las demás. La regeneración biológica exige misma semilla, configuración efectiva, entradas, perfiles y versión; los niveles técnicos superiores aplican además las condiciones de ACE-23 | Esquema del historial y política técnica de compatibilidad |
-| **ACE-79. Mutaciones evolutivas** | SNP, inserciones, deleciones y SV usan tasas independientes por base y generación; las repeticiones usan su clase y modelo propios. SNP admite espectro validado y modelo simétrico predeterminado, sin contexto vecino. Indels tienen distribuciones de longitud que favorecen tamaños cortos y respetan el umbral. Cada mutación surge después de recombinación en un haplotipo descendiente y conserva origen y transmisión | Distribuciones cuantitativas, tasas predeterminadas y casos estadísticos |
-| **ACE-80. TE configurados, no evolución autónoma** | Un catálogo TE validado procede de FASTA o simulación. Se insertan TE al construir referencias o mediante eventos exactos o aleatorios en individuos concretos. No existen tasas de movilización, actividad ni transposición espontánea. Las inserciones presentes se heredan normalmente y se representan en verdad y VCF/complemento | Esquema del catálogo y casos de herencia |
-| **ACE-81. Construcción trazable de eventos TE** | Un evento solicitado admite orientación, truncamiento, duplicación de sitio diana, copia completa, copiar-pegar o cortar-pegar y reglas de destino. Conserva secuencias fuente/final, copias, coordenadas, haplotipo, sitio diana y linaje. Sin destino válido advierte o falla según política, pero no crea una inserción inválida | Formato de reglas, pesos y casos complejos VCF/complemento |
-| **ACE-82. Selección de viabilidad** | Toda la ejecución usa como máximo un locus estable, bialélico o multialélico, que puede ser SNP, indel, repetición, TE o SV con genotipo/dosis inequívocos para ploidías 1–10. Cada genotipo o combinación de dosis recibe un valor genético y el valor del carácter coincide con él. Una función direccional configurable favorece valores mayores o menores y los transforma en aptitudes relativas no negativas, que se normalizan y producen supervivencia estocástica. Se rechazan funciones estabilizadoras o disruptivas. No se admiten ruido ambiental ni heredabilidad. Los valores pueden variar por fase o subpoblación sin cambiar el locus. No hay selección poligénica, epistasis ni fecundidad directa | Regla para genotipos no enumerados y casos por ploidía, dirección y función de aptitud |
-| **ACE-83. Extinción y migración** | La extinción planificada invalida dependencias posteriores detectables. Con N realizado=0, la política global desactivada puede sustituirse por fase y subpoblación: desactivada detiene toda la simulación; activada registra extinción por resultado y omite atómica y transitivamente eventos dependientes con cadenas de causas, mientras continúan ramas independientes. Recolonizar crea otro ID. La migración simultánea usa pares proporcionales o exactos, sin reemplazo ni A→B→C, cambia conjuntos reproductores pero no N objetivo | Reglas técnicas de asignación conjunta y casos de prueba |
-| **ACE-84. Deriva y orden generacional** | La deriva emerge del muestreo finito y no existe un paso artificial adicional. El orden predeterminado es demografía, migración, viabilidad, reproducción, segregación/recombinación, mutación de novo, registro y muestreo. Varios eventos demográficos de una generación exigen un orden total explícito; cada uno recibe el estado del anterior. Un orden ausente, ambiguo o imposible se rechaza antes de simular | Casos de orden válido e inválido |
-| **ACE-85. Recombinación, bivalentes y estructura** | Toda la ejecución usa tasa uniforme en cM/Mb o mapa físico/genético completo. Sin interferencia, los entrecruzamientos por bivalente siguen Poisson según la longitud genética. Cada cromosoma recibe al menos uno. Un *scaffold* lo recibe si supera un umbral general, sustituible por secuencia, expresado exclusivamente en cM o bases; manifiesto y validación conservan regla, valor y procedencia efectivos. Solo recombinan intervalos colineales. Los poliploides pares forman al azar bivalentes compatibles, sin preferencia de subgenoma, multivalentes ni doble reducción | Método exacto de posiciones, validación de mapas y casos estructurales |
-| **ACE-86. Linaje detallado de individuos muestreados** | Solo los individuos incluidos en muestreos exportan los puntos de recombinación y el origen de cada segmento. Cada segmento se reconstruye hasta el individuo y la copia haplotípica fundadores. Las mutaciones de novo forman capas separadas con identidad, individuo y generación de aparición. Los resúmenes generacionales no exportan el detalle de todos los individuos | Formato y esquema de la salida detallada; casos de reconstrucción |
-| **ACE-87. Trazabilidad y límites estructurales** | Las coordenadas actuales se relacionan con las fundadoras cuando existe correspondencia, conservando orientación. Cada copia duplicada y cada inserción nueva tiene identificador estable; las deleciones conservan el intervalo fundador ausente. En una copia haplotípica se permiten eventos estructurales no solapados, incluso adyacentes, pero se rechaza solapamiento, anidamiento o modificación de una estructura previa. La única excepción entre fuente y destino de un mismo evento es la duplicación cuya fuente abarca la secuencia completa. Haplotipos distintos pueden solaparse. SNP e indels se permiten en segmentos modificados, salvo si solapan o atraviesan un punto de ruptura; la adyacencia se permite | Formato de relaciones estructurales y casos de validación |
-| **ACE-88. Modelos de población inicial** | Cada locus o bloque y subpoblación usa modo probabilístico predeterminado o controlado explícito sin mezclarlos dentro de la unidad. Admite Hardy-Weinberg en ploidías 1–10, frecuencias explícitas de genotipo o dosis y genotipos multilocus faseados. En Hardy-Weinberg controlado se fijan recuentos alélicos, pero los genotipos se distribuyen aleatoriamente condicionados al modelo. Frecuencias y recuentos suman, respectivamente, 1 y el total aplicable; los datos incompatibles se rechazan | Tolerancias numéricas y casos por ploidía y modo |
+| **ACE-76. Apareamiento mixto y contribución parental** | La autofecundación es una probabilidad reproducible de 0–100 % por evento, sustituible por población, subpoblación y fase. Cada intento elige reproduciblemente el tipo y parentales solo entre opciones con ploidía y estructura reproductivas compatibles; fuera de la autofecundación usa dos supervivientes distintos, sin ponderación por parentesco, distancia o genotipo. La incompatibilidad se registra como causa reproductiva, no como selección de viabilidad. Un parental puede reutilizarse sin límite de descendientes en v1 | Tasas realizadas; opción estructural inválida; ausencia de pareja compatible |
+| **ACE-77. N, Ne y descendencia** | N objetivo es obligatorio al iniciar y fija el número de intentos reproductivos; cada éxito crea un descendiente. Se procesan N intentos o se registra inequívocamente la imposibilidad común de los restantes. Se conservan éxitos, fallos y causas, N realizado, desviación y aviso. Una imposibilidad previa se rechaza y N=0 aplica su política. Ne objetivo, absoluto o Ne/N, se rechaza antes de simular; Ne realizado usa progenitores con descendencia y desigualdad de contribuciones, nunca heterocigosidad, endogamia o LD, y si no es evaluable conserva la causa | N alcanzado/parcial, imposibilidad previa, N=0, rechazo de Ne objetivo y Ne realizado/no evaluable |
+| **ACE-78. Generaciones e historial reproducible** | Las generaciones son discretas y no solapadas. Los individuos parentales solo existen como población activa en su generación y los sustituye la descendencia; un cambio de N no los elimina retrospectivamente. Se materializan estados completos de población inicial, final y generaciones o muestreos solicitados, y solo resúmenes de las demás. La información interna permite reconstruir el linaje detallado solicitado sin exportar antepasados intermedios. No hay niveles de trazabilidad ni reducción por escala. La regeneración biológica exige misma semilla, configuración efectiva, entradas, perfiles y versión | Evolución materializada y no materializada; esquema del historial |
+| **ACE-79. Mutaciones evolutivas** | SNP, inserciones, deleciones y cada SV usan tasas independientes por oportunidad válida y generación. Tras recombinación, cada clase cuenta en todas las copias actuales sus candidatos propios: la ploidía y cada duplicación aumentan oportunidades, una deleción las elimina y un ancla o intervalo inicial cuenta una vez aunque el evento necesite destinos o extremos condicionados. Los ámbitos efectivos no se solapan. La media es tasa×oportunidades y el recuento Poisson se sortea una vez antes de actualizar candidatos evento a evento. `N` se excluye de SNP, motivos de repetición y anclas que necesitan base concreta, pero no de intervalos estructurales que la conservan. Cada locus repetido elegible muta una unidad | Casos de ploidía, duplicación, deleción, región solapada, destino condicionado, locus repetido y exclusiones de `N` |
+| **ACE-80. Sin semántica de elementos transponibles en v1** | La configuración rechaza catálogos, familias, actividad, movilización, mecanismos de copiar o cortar y pegar, reglas de destino y metadatos específicos de TE. Un FASTA real se trata como bases sin anotación TE | Casos de rechazo y comprobación de ausencia de campos y salidas TE |
+| **ACE-81. Clasificación genérica de copias e inserciones** | Copiar una región preexistente, aunque biológicamente corresponda a un TE, se representa como duplicación segmentaria genérica. Añadir una secuencia nueva se representa como inserción genérica. Verdad, VCF y manifiesto no les atribuyen familia, mecanismo ni metadatos TE | Casos de duplicación e inserción sin anotación TE |
+| **ACE-82. Selección de viabilidad** | Toda la ejecución usa exactamente un SNP bialélico seleccionado sobre A, C, G o T, nunca `N`, identificado por referencia estructural, secuencia, coordenada e ID, y presente una vez por copia aplicable. Para ploidías 1–10, cada dosis alternativa posible tiene valor genético explícito. El locus queda protegido: un evento explícito solapante se rechaza y uno aleatorio nunca lo elige; la recombinación puede transmitirlo sin perder identidad. Antes de seleccionar, cada elegible tiene dosis, carácter y aptitud inequívocos; las aptitudes son finitas, no negativas y alguna es positiva. Máximo cero, aptitud negativa/no finita o locus ausente/duplicado detienen antes de supervivencia y no son extinción. Se rechazan otras clases de locus y funciones no direccionales | SNP válido por varias ploidías; `N` rechazada; solapamiento explícito/aleatorio; máximo cero; aptitud inválida; locus ausente/duplicado; recombinación conservadora |
+| **ACE-83. Extinción y migración** | La extinción planificada invalida dependencias posteriores detectables. Con N realizado=0, la política global desactivada puede sustituirse por fase y subpoblación: desactivada detiene toda la simulación; activada registra extinción por resultado y omite atómica y transitivamente eventos dependientes con cadenas de causas, mientras continúan ramas independientes. Recolonizar crea otro ID. La migración simultánea usa pares proporcionales o exactos, sin reemplazo ni A→B→C, cambia conjuntos reproductores pero no N objetivo. Antes de simular se rechaza cualquier combinación de rutas que pueda dejar individuos basados en referencias estructurales distintas dentro de una unidad reproductiva; las subpoblaciones basadas en referencias distintas solo pueden coexistir si permanecen reproductivamente aisladas | Reglas técnicas de asignación conjunta y casos con referencias iguales y distintas |
+| **ACE-84. Deriva y orden generacional** | La deriva emerge del muestreo finito y no existe un paso artificial adicional. Las ocho etapas de REQ-REP-24 tienen un orden único y no configurable. Una etapa opcional desactivada se omite en su posición. Cualquier campo, lista o valor con otro orden se rechaza antes de simular e identifica lo solicitado y la regla v1. Varios eventos demográficos exigen un orden total explícito dentro de la primera etapa y cada uno recibe el estado del anterior. El historial conserva etapas aplicadas y omitidas y ambos órdenes | Todas las etapas; una opcional omitida; alternativa rechazada; varios eventos demográficos; registro efectivo |
+| **ACE-85. Recombinación, bivalentes y estructura** | Toda la ejecución usa tasa uniforme en cM/Mb o mapa físico/genético completo. Sin interferencia, los entrecruzamientos por bivalente siguen Poisson según la longitud genética. Cada cromosoma recibe al menos uno. Un *scaffold* lo recibe si supera un umbral general, sustituible por secuencia, expresado exclusivamente en cM o bases; si no le corresponde recombinación, transmite intacta la copia elegida. Manifiesto y validación conservan regla, valor y procedencia. Las ploidías pares forman al azar bivalentes solo cuando todas las copias y parentales comparten la estructura canónica, sin preferencia de subgenoma, multivalentes, doble reducción ni compatibilidad parcial | Método exacto de posiciones; mapas; *scaffold* intacto; SV fijada idéntica y cada SV heterocigota |
+| **ACE-86. Linaje detallado de individuos muestreados** | Solo los individuos incluidos en muestreos o materializaciones adicionales solicitados exportan puntos de recombinación y origen de cada segmento. Cada segmento alcanza al individuo y copia haplotípica fundadores y las mutaciones de novo forman capas separadas. La ejecución conserva internamente lo necesario aunque no exporte antepasados intermedios; los resúmenes no enumeran ese detalle | Evolución muestreada/no muestreada y reconstrucción a través de un antepasado no materializado |
+| **ACE-87. Trazabilidad y límites estructurales** | Las coordenadas actuales se relacionan con las fundadoras cuando existe correspondencia, conservando orientación. Cada copia duplicada y cada inserción nueva tiene identificador estable; las deleciones conservan el intervalo fundador ausente. En una copia haplotípica se permiten eventos estructurales no solapados, incluso adyacentes, pero se rechaza solapamiento, anidamiento o modificación de una estructura previa. La única excepción entre fuente y destino de un mismo evento es la duplicación cuya fuente abarca la secuencia completa. Haplotipos distintos pueden solaparse. SNP e indels se permiten en segmentos modificados, salvo si solapan o atraviesan un punto de ruptura; la adyacencia se permite. Historias distintas pueden producir el mismo estado estructural canónico sin perder su trazabilidad | Formato de relaciones y equivalencia canónica; casos de historias distintas |
+| **ACE-88. Modelos de población inicial** | Cada locus o bloque y subpoblación usa modo probabilístico predeterminado o controlado explícito sin mezclarlos dentro de la unidad. Admite Hardy-Weinberg en ploidías 1–10: binomial por dosis en loci bialélicos y multinomial por composición en multialélicos. También admite frecuencias explícitas de genotipo o dosis y genotipos multilocus faseados. En Hardy-Weinberg controlado se fijan recuentos alélicos, pero los genotipos se distribuyen aleatoriamente condicionados al modelo, sin exigir recuentos genotípicos exactos salvo configuración explícita. Frecuencias y recuentos suman, respectivamente, 1 y el total aplicable; los datos incompatibles se rechazan | Casos HWE haploide, diploide y poliploide, bialélico y multialélico, por modo |
 | **ACE-89. LD y fase iniciales** | Por defecto, la población inicial asigna loci independientemente. El LD usa bloques no solapados con haplotipos y frecuencias conjuntas probabilísticas por defecto o recuentos controlados por subpoblación que suman C. Las frecuencias haplotípicas son la fuente de verdad y de ellas se derivan las alélicas; una frecuencia alélica aportada solo valida y una discrepancia fuera de tolerancia es error. Los recuentos se distribuyen entre individuos condicionados al modelo o plantillas. Los bloques conservan fase e identificador a lo largo de las generaciones, sin generar ni calcular D, D' o r² | Formato técnico de bloques, tolerancias y casos de prueba |
-| **ACE-90. Endogamia inicial** | F se configura para la población completa o se sustituye por subpoblación, siempre entre 0 y 1 y nunca para ploidía 1, locus, región o bloque. Para cualquier ploidía mayor que 1 progresa desde Hardy-Weinberg en F=0 hasta homocigosis completa en F=1, sin modelos específicos de herencia polisómica o disómica. No fuerza ROH ni un valor exacto por individuo. Una distribución local explícita prevalece. F realizado compara heterocigosidad observada y esperada por subpoblación y generación; puede ser negativo sin constituir error | Fórmula exacta de F realizado, adaptación por ploidía y tolerancias |
+| **ACE-90. Endogamia inicial** | F automático se configura para la población completa o se sustituye por subpoblación exclusivamente diploide, siempre entre 0 y 1 y nunca por locus, región o bloque. Usa las fórmulas bialélica o multialélica de REQ-EVO-47/48: F=0 coincide con Hardy-Weinberg, un valor intermedio modifica las probabilidades según esas fórmulas y F=1 produce homocigosis completa. F en ploidía 1 o mayor que 2 se rechaza antes de simular con ámbito y ploidía. En poliploides se usa HWE sin F o una distribución explícita local, que prevalece. F realizado se calcula solo en diploides, puede ser negativo sin constituir error y figura como «no aplicable» en las demás ploidías | Casos F=0, intermedio y 1; rechazo P=1 y P>2; distribución explícita poliploide; F realizado no aplicable |
 | **ACE-91. Fundadores trazables** | Todos los individuos de la población inicial son fundadores con identificadores estables propios. Cada copia haplotípica también tiene identificador propio aunque su secuencia coincida con otra, y toda traza posterior alcanza una copia fundadora concreta | Formato de identificadores y casos de reconstrucción |
 | **ACE-92. Selección de muestreos** | Un evento admite identificadores explícitos, selección aleatoria sin reemplazo o ambas, además de estratos no solapados por subpoblación, grupos y filtros de genotipo. Los explícitos se incorporan primero y se excluyen del sorteo. Duplicados, individuos incompatibles, estratos ambiguos o tamaños mayores que los elegibles detienen el evento sin reemplazo ni reducción silenciosa | Sintaxis de filtros y estratos y casos de prueba |
 | **ACE-93. Eventos explícitos independientes** | Una ejecución biológica admite cero, uno o varios eventos explícitos con identificador, selección, referencias, salidas y subsemilla. Solo los eventos que generan FASTQ, BAM o CRAM necesitan una tecnología y perfil; los que generan alineamientos necesitan además un mapeador. Un evento que solo materializa verdad o VCF carece de esos requisitos técnicos. El mismo individuo conserva genotipo, fase y ascendencia entre eventos, pero las lecturas y alineamientos se materializan de nuevo e independientemente | Estrategia técnica de subsemillas y casos multievento |
-| **ACE-94. Organización, atomicidad y exportación** | La raíz conserva una sola copia verificable de cada referencia e índice y un manifiesto general. Cada evento tiene directorio y manifiesto propios y separa resultados por referencia. Ejecución, evento, conjunto y artefacto distinguen estados incompleto, completo y fallido. Cada artefacto se publica atómicamente tras validarse; un conjunto solo está completo con todos sus artefactos activados y el éxito global exige todas las unidades obligatorias completas. Los conjuntos completos independientes se conservan y pueden exportarse declarando cualquier fallo global. La exportación produce un paquete autocontenido y valida las sumas antes y después | Esquema, algoritmo de suma y formato del paquete |
+| **ACE-94. Organización, atomicidad y exportación** | La raíz conserva una sola copia verificable de cada referencia e índice y un manifiesto general. Cada evento tiene directorio y manifiesto propios y separa resultados por referencia. Ejecución, evento, conjunto y artefacto distinguen estados incompleto, completo y fallido. Cada artefacto se publica atómicamente tras validarse; el éxito exige todas las unidades y la trazabilidad obligatoria completas. No se publica ni exporta una versión degradada por recursos. Los conjuntos completos independientes se conservan y el paquete autocontenido valida sus sumas antes y después | Preflight insuficiente, ausencia de degradación, esquema, sumas y formato |
 | **ACE-95. Coordenadas y límites estructurales** | La configuración usa coordenadas basadas en 1 e intervalos cerrados; cada formato externo usa su convención oficial mediante conversión documentada. Cada duplicación usa el estado inmediatamente anterior para interpretar origen y destino y conserva las correspondencias posteriores. Una fuente completa puede insertar la copia dentro de la misma secuencia; una fuente parcial solo puede usar un destino adyacente o externo a su intervalo. Inserciones, deleciones, inversiones y puntos de ruptura respetan las reglas terminales, y toda translocación conserva subeventos, segmentos y orientaciones sin vaciar una secuencia | Representación técnica y casos límite |
 | **ACE-96. Límite local de copias** | El máximo local predeterminado y provisional es 10 copias totales, incluida la original, por familia de copia e intervalo fundador dentro de cada copia haplotípica. Se contabiliza de forma acumulada y separada de ploidía y repeticiones en tándem. Un valor mayor requiere configuración explícita, genera una advertencia y activa una estimación previa de memoria, almacenamiento y volumen de datos. Si supera el presupuesto configurado se rechaza; si no, continúa. No existe otro máximo absoluto fijo y el valor predeterminado debe revisarse mediante pruebas de rendimiento | Pruebas de rendimiento y casos acumulativos y de presupuesto |
-| **ACE-97. Reproducción de familias** | Cada evento tiene un parental para autofecundación o dos para cruzamiento sexual; otras cardinalidades se rechazan. El orden de los dos parentales no cambia el resultado biológico y los diseños con tres o más fundadores forman un grafo de eventos. Clonación, apomixis y dobles haploides se rechazan | Casos por tipo de evento y grafo |
-| **ACE-98. Segregación y mutación familiar** | La transmisión elige con igual probabilidad una copia compatible de cada bivalente, sin conversión génica, distorsión de segregación ni impulso meiótico. Un heterocigoto para una translocación no puede reproducirse. Las mutaciones de novo están desactivadas por defecto y, al activarse, usan el motor evolutivo y conservan tasa, evento y traza | Casos mendelianos, estructurales y de mutación |
+| **ACE-97. Reproducción de familias** | Cada evento tiene un parental para autofecundación o dos para cruzamiento sexual; otras cardinalidades se rechazan. Todos los parentales usan la misma referencia estructural, ploidía par e igual y estado estructural canónico idéntico en cada secuencia reproductiva. El orden de dos parentales no cambia el modelo y los diseños con tres o más fundadores forman un grafo. Clonación, apomixis, dobles haploides, referencias distintas y parentales estructuralmente heterocigotos se rechazan | Casos por tipo, diploide/tetraploide, ploidía impar/desigual, estructura y referencia |
+| **ACE-98. Segregación y mutación familiar** | La transmisión elige con igual probabilidad una copia de cada bivalente estructuralmente idéntico, sin conversión génica, distorsión ni impulso meiótico. SNP, *indels* pequeños y repeticiones distintas se transmiten como alelos. Deleción, duplicación, inversión, inserción estructural o translocación heterocigotas impiden reproducir; el mismo estado estructural fijado en todas las copias y parentales sí se admite aunque tenga historias distintas. Una SV de novo puede existir en la descendencia, pero el portador queda fuera de intentos posteriores mientras sea incompatible; su exclusión y los fallos resultantes se registran conforme a N | Casos por clase SV, SV fijada, SV de novo con reproducción posterior y variantes pequeñas |
 | **ACE-99. Independencia VCF entre referencias** | Cada referencia produce un VCF construido directamente en su secuencia y coordenadas, con un espacio propio de identificadores. Muestras biológicas pueden compartir identificador, pero VCF, complemento y manifiestos no contienen identificadores globales ni correspondencias registro a registro entre variantes de referencias diferentes | Casos con dos referencias y revisión de metadatos |
-| **ACE-100. Identidad técnica y biológica** | `SM` de BAM/CRAM y las columnas del VCF usan el identificador biológico estable. El grupo de lectura es único en toda la ejecución, distingue evento, biblioteca, tanda y carril y coincide entre FASTQ, BAM/CRAM, procedencia y manifiesto. Cada instancia de lectura o pareja tiene identidad única dentro del evento y su procedencia distingue copia biológica, transferencia técnica y duplicación configurada sin colisiones | Campos de `@RG`, representación técnica de los vínculos y casos de colisión |
+| **ACE-100. Identidad técnica y biológica** | `SM` de BAM/CRAM y las columnas del VCF usan el identificador biológico estable. Cada individuo tiene un grupo de lectura por evento, único en toda la ejecución, que distingue evento, biblioteca y tanda y coincide entre FASTQ, BAM/CRAM, procedencia y manifiesto. Cada instancia de lectura o pareja tiene identidad única dentro del evento y su procedencia distingue copia biológica, transferencia técnica y duplicación configurada sin colisiones | Campos de `@RG`, representación técnica de los vínculos y casos de colisión |
 | **ACE-101. VCF estable entre eventos** | Dos eventos con los mismos individuos, referencia y verdad producen VCF con idénticos identificadores locales, coordenadas, REF, ALT y genotipos aunque cambien tecnología, subsemilla, FASTQ, BAM/CRAM o degradaciones | Casos con eventos técnicos diferentes |
 | **ACE-102. ALT fijados y multialélicos** | Un ALT fijado en todas las muestras se incluye porque difiere de la referencia. Varios ALT representables en el mismo locus se reúnen en un registro multialélico normalizado y `GT` conserva ploidía, dosis y fase. Los casos no representables usan el complemento sin pérdida | Casos fijados, multialélicos, poliploides y solapados |
 | **ACE-103. Variantes pequeñas solapadas** | SNP e *indels* pueden solaparse en una copia haplotípica. Los explícitos exigen un orden, se aplican secuencialmente y usan el estado inmediatamente anterior como marco de coordenadas. La verdad actual y el VCF derivan de la secuencia final; el historial marca cada evento como activo, modificado o eliminado. Un objetivo ya eliminado detiene la configuración; no se ignora ni recoloca. Un SNP eliminado por una deleción no se emite como variante actual. Haplotipos distintos se resuelven independientemente y sus alelos finales pueden coexistir como ALT con fase y dosis. Varios eventos de un haplotipo que formen un alelo final se emiten como una sola variante o ALT compleja normalizada y usan complemento si hace falta | Casos secuenciales, multialélicos, complejos, de eliminación y de error |
-| **ACE-104. Modos de frecuencia alélica** | Cada locus o bloque usa exclusivamente modo probabilístico o controlado. El probabilístico es predeterminado, muestrea desde las probabilidades y registra esperado y realizado sin tolerancia controlada. El controlado, solo explícito, elige un vector de recuentos que suma C y minimiza conjuntamente la desviación; exige 0,5/C o una tolerancia más estricta. Después distribuye copias aleatoriamente entre individuos condicionado a Hardy-Weinberg, F o la distribución explícita. En bloques LD controla recuentos haplotípicos por subpoblación. Restricciones incompatibles detienen y los empates se resuelven con la semilla y se registran | Casos por ploidía, multialelismo, bloques, modelo y restricciones |
+| **ACE-104. Modos de frecuencia alélica** | Cada locus o bloque usa exclusivamente modo probabilístico o controlado. El probabilístico es predeterminado, muestrea desde las probabilidades y registra esperado y realizado sin tolerancia controlada. El controlado, solo explícito, elige un vector de recuentos que suma C y minimiza conjuntamente la desviación; exige 0,5/C o una tolerancia más estricta. Después distribuye copias aleatoriamente entre individuos condicionado a Hardy-Weinberg binomial o multinomial, F automático diploide o la distribución explícita. En bloques LD controla recuentos haplotípicos por subpoblación. Restricciones incompatibles detienen y los empates se resuelven con la semilla y se registran | Casos por ploidía, multialelismo, bloques, modelo y restricciones |
 | **ACE-105. Normalización de probabilidades y frecuencias** | Todo conjunto que deba sumar 1 se compara con una tolerancia general configurable. Una desviación dentro de ella se normaliza y registra con valores y suma antes y después; una desviación mayor o una suma no normalizable produce un error. El valor predeterminado se fija en implementación. Esta tolerancia no sustituye `0,5/C` ni otras tolerancias específicas con otra finalidad | Valor predeterminado, precisión numérica y casos dentro, fuera y no normalizables |
 | **ACE-106. Catálogo declarativo común** | División, fundación, migración y selección de descendientes usan el mismo catálogo: identificadores, azar, población o grupo, alelo, genotipo, dosis o haplotipo en uno o varios loci, Y/O/NO y cantidad exacta o proporcional. Las proporciones son probabilidades individuales reproducibles y los números exactos seleccionan sin reemplazo o fallan por insuficiencia. Las reglas usan la verdad biológica. Scripts, código, funciones personalizadas y reglas desconocidas se rechazan; una regla nueva exige ampliar el programa y la especificación | Sintaxis técnica de las reglas y casos compartidos por los cuatro procesos |
+| **ACE-107. Colisiones en la generación aleatoria** | Los eventos explícitos se aplican primero en su orden declarado. Después, cada clase cuenta su espacio inicial de oportunidades, sortea una vez su recuento Poisson y se procesa en el orden duplicaciones, deleciones, inversiones, translocaciones, repeticiones en tándem, *indels* y SNP. Cada evento se elige solo entre candidatos válidos en el estado anterior y actualiza el espacio para el siguiente, sin reintentar candidatos inválidos, volver a sortear ni aplicar un límite de intentos. Si faltan destinos para completar el recuento, la generación falla sin aceptar menos ni advertir; se registran oportunidades, media y números sorteado, aceptado antes del fallo y finalmente activo | Casos con colisiones, agotamiento progresivo, denominador inicial y diferencia entre los tres recuentos |
+| **ACE-108. Cardinalidad entre verdad, VCF y complemento** | Cada conjunto solicitado contiene exactamente un VCF multimuesta estándar. Un caso plenamente representable no crea una entrada complementaria. Un caso complejo puede usar un registro VCF y una entrada complementaria. Una nueva adyacencia usa normalmente dos BND relacionados y, si pierde detalle, ambos enlazan una entrada; una translocación recíproca usa los BND necesarios para sus dos adyacencias, que pueden ser cuatro, y una sola entrada si pierde detalle. Todos los campos `INFO` adicionales están declarados en la cabecera. Dos referencias producen VCF y espacios de identificadores separados | Casos representable, complejo de un registro, par BND, translocación recíproca y dos referencias; validación con la versión oficial seleccionada |
+| **ACE-109. Poisson y modelo escalonado simple** | Todo recuento de variantes aleatorias usa exclusivamente Poisson y se reproduce con la misma semilla, configuración, entradas y versión. Los cambios concretos se expresan mediante eventos explícitos o el modo controlado aplicable, no como otra distribución. Cada mutación de repetición en tándem añade una unidad completa o elimina una, conforme al sesgo configurado. Seleccionar otra distribución de recuentos, otro modelo de repetición o un salto de varias unidades se rechaza antes de simular e identifica parámetro y valor | Casos Poisson reproducibles, eventos explícitos, expansión y contracción unitarias, valores de sesgo y rechazos de alternativas |
+| **ACE-110. Conservación de la base desconocida N** | `N` se conserva y nunca se resuelve. No puede ser SNP, locus seleccionado ni motivo de repetición; sí puede permanecer dentro de una SV o secuencia explícita/copiada. Las inserciones aleatorias y errores solo generan A/C/G/T. Se hereda y recombina sin cambios. WGS puede muestrearla, FASTQ la representa con Phred 0, BAM/CRAM la propaga, GC la excluye de su denominador y cobertura la cuenta. VCF nunca emite SNP con `REF=N` y usa complemento cuando el estándar no conserve otro caso sin pérdida. Validación y manifiesto prueban exclusiones, resúmenes y ausencia de resolución | SNP sobre `N`; SV con `N`; inserciones aleatoria y expresa; herencia; lectura Q0; ventana toda `N`; cobertura; VCF/complemento; ausencia de resolución |
+| **ACE-111. Sustituciones y precedencia entre ejes** | Cada parámetro parte de su regla base y solo admite los selectores de su familia. Una regla aplica cuando coinciden todos sus selectores; se eliminan las dominadas y una única máxima fija el valor. Una regla combinada domina las reglas parciales. Sin esa regla combinada, región frente a subpoblación e individuo frente a región son máximas incomparables y se rechazan aunque compartan valor; también se rechazan reglas duplicadas, regiones solapadas con iguales selectores no espaciales y selectores no admitidos. Generación domina fase, subpoblación domina población, locus domina región y secuencia, y una coincidencia concreta domina la ausencia dentro de los demás ejes. Un evento técnico nunca sustituye biología. Configuración efectiva y manifiesto conservan valor, regla ganadora, selectores y procedencia | Herencia base; todas las jerarquías internas; regla combinada; los dos conflictos cruzados; duplicado igual; regiones solapadas; selector no permitido; separación biológica/técnica; procedencia |
 
-Estos criterios son cualitativos. No deben interpretarse como pruebas cerradas
-hasta que se resuelvan los aspectos pendientes.
+Estos criterios son cualitativos y deberán convertirse en pruebas durante la
+planificación de la implementación.
 
-## 8. Decisiones abiertas
+## 8. Estado de las decisiones funcionales
 
-La especificación funcional de la versión 1 no está cerrada. La revisión
+Las 27 preguntas funcionales de la revisión
 [revision-adversarial-especificaciones-0.1.md](./revision-adversarial-especificaciones-0.1.md)
-mantiene al final las preguntas que requieren valoración. Como mínimo, siguen
-abiertas las decisiones sobre:
-
-- el denominador y las etapas de la cobertura;
-- el reparto de información entre VCF y complemento;
-- el tratamiento operativo de N por cada clase de operación, las colisiones
-  aleatorias y las precedencias cruzadas de configuración;
-- si las inserciones de elementos transponibles pueden crear referencias
-  derivadas;
-- la mezcla de referencias estructurales en unidades reproductivas y la
-  compatibilidad estructural en reproducción;
-- la semántica verificable del tamaño poblacional N, Ne, selección, tasas
-  mutacionales, F en poliploides y catálogos de modelos alternativos;
-- la calibración empírica;
-- la relación entre eventos complejos y registros VCF, y las reglas
-  cuantitativas de validación;
-- el ámbito real de las sustituciones por individuo, la cardinalidad de las
-  entidades técnicas y la política de trazabilidad para escenarios grandes.
-
-Estas decisiones cambian entradas aceptadas, resultados o errores observables y
-no deben cerrarse como meros detalles de implementación. Añadir un
-comportamiento o una clase de regla no confirmados requerirá revisar
-expresamente esta especificación.
+están resueltas para v1. Añadir otro comportamiento, selector o clase de regla
+requerirá revisar expresamente esta especificación; las elecciones restantes de
+la sección 9 son técnicas y no pueden reabrir la semántica funcional confirmada.
 
 ## 9. Decisiones técnicas aplazadas a la planificación de la implementación
 
@@ -4689,13 +4572,10 @@ que cada referencia pueda tener cero, uno o varios índices según sus
 necesidades.
 
 **Generación aleatoria y reproducibilidad.** Durante la implementación y la
-validación se comparará Poisson con otras distribuciones probabilísticas para
-determinar cuáles reproducen mejor las propiedades esperadas en cada escenario.
-Todavía deben planificarse las distribuciones candidatas, los criterios de
-comparación, los conjuntos de referencia y las pruebas estadísticas; no se
-presupone una distribución universalmente mejor. Poisson será el punto de
-  partida cuando proceda, pero deberán evaluarse alternativas antes de fijar
-  perfiles estables. También se decidirá la estrategia técnica de subsemillas o
+validación se elegirán el algoritmo y las pruebas estadísticas que materialicen
+la única distribución Poisson admitida para los recuentos de variantes
+aleatorias. No se evaluará otra distribución como opción de v1. También se
+decidirá la estrategia técnica de subsemillas o
   flujos aleatorios independientes y cómo demostrar las garantías separadas de
   REQ-CONF-111 a REQ-CONF-115 entre versiones del programa, dependencias y
   plataformas. Estas elecciones conservarán las medias esperadas configurables,
@@ -4717,15 +4597,15 @@ referencias distintas se construirán de forma independiente y no se definirá u
 algoritmo de correspondencia entre sus registros.
 
 **Ejecución de los procesos evolutivos.** Se elegirán los algoritmos que apliquen
-la secuencia predeterminada confirmada, N objetivo y realizado, Ne objetivo y realizado,
+la secuencia obligatoria confirmada, N objetivo, intentos y realizado, y Ne realizado,
 selección, migración, eventos de
 subpoblaciones, reproducción y recombinación. Se concretarán la fórmula de Ne
-reproductivo, su adaptación por ploidía y las reglas cuantitativas con las que el
-esquema reproductivo intentará aproximar Ne objetivo. La fórmula solo podrá usar
+reproductivo y las reglas para declarar cuándo no es evaluable. La fórmula solo podrá usar
 los progenitores con descendencia y la desigualdad o varianza de sus
-contribuciones. También se concretarán la fórmula de F realizado y su adaptación
-por ploidía. Esta deberá comparar la heterocigosidad observada y esperada según
-las frecuencias alélicas, y conservar resultados negativos. Estas decisiones
+contribuciones. También se concretará la fórmula de F realizado exclusivamente
+para diploides. Esta deberá comparar la heterocigosidad observada y esperada
+según las frecuencias alélicas, y conservar resultados negativos; en ploidía 1
+o mayor que 2 el resultado seguirá siendo «no aplicable». Estas decisiones
 técnicas no deben cambiar los significados funcionales ni las consecuencias de
 validación acordadas.
 
@@ -4741,17 +4621,21 @@ los individuos históricos.
 **Representación VCF y complemento de verdad.** Se elegirán la versión oficial
 exacta de VCF, su catálogo concreto de campos de cabecera, las reglas de
 normalización, los campos para repeticiones en tándem, el criterio técnico de
-tamaño manejable y el formato y esquema del complemento estructurado. La
-validación deberá demostrar reconstrucción sin pérdida a partir de las salidas
-enlazadas. El esquema debe respetar la identificación inequívoca de referencia,
-conjunto y muestras, usar `GT` con fase y ploidía reales y excluir `DP`, `AD`,
-`GQ`, `PL` y cualquier otro campo `FORMAT` derivado de observaciones o
-inferencias.
+tamaño manejable, los nombres de los campos `INFO` adicionales y el formato y
+esquema del complemento estructurado. No podrán alterarse la cardinalidad entre
+casos, registros y entradas ni la semántica oficial de campos estándar. La
+validación deberá demostrar la validez independiente del VCF y la reconstrucción
+sin pérdida a partir de las salidas enlazadas. El esquema debe respetar la
+identificación inequívoca de referencia, conjunto y muestras, usar `GT` con fase
+y ploidía reales y excluir `DP`, `AD`, `GQ`, `PL` y cualquier otro campo
+`FORMAT` derivado de observaciones o inferencias.
 
-**Repeticiones en tándem.** Se elegirán las fórmulas y distribuciones concretas
-del modelo escalonado, los modelos alternativos y los modelos opcionales de
-mutaciones internas. Los límites prácticos de longitud y número de loci
-dependerán de los recursos, no de un límite funcional de motivo.
+**Repeticiones en tándem.** Se elegirá la representación técnica de la tasa y del
+sesgo entre expansión y contracción del modelo escalonado simple. Cada mutación
+seguirá cambiando exactamente una unidad completa. También se concretarán los
+modelos opcionales de mutaciones internas ya admitidos. Los límites prácticos de
+longitud y número de loci dependerán de los recursos, no de un límite funcional
+de motivo.
 
 **Estimación de recursos.** Se elegirán y calibrarán los modelos que estimen
 almacenamiento, memoria y tiempo y los umbrales que generan advertencias. Las
@@ -4777,25 +4661,30 @@ elimina el requisito de que cada degradación sea simulable, configurable y
   exactamente un mapeador ni que herramienta, versión y parámetros efectivos
   deben quedar trazados.
 
-**Calibración empírica WGS y verdad de lecturas.** Se elegirán el método de
-estimación, las medidas de calidad y los esquemas del perfil WGS reutilizable
-y de la verdad que relaciona secuencia original y observada, duplicados,
-adaptadores, quimeras, posición real y estado de pareja. También se elegirá el
-formato del fichero de procedencia de contaminación, sin duplicar las lecturas.
+**Verdad y procedencia de lecturas.** Se elegirán los esquemas de la verdad que
+relaciona secuencia original y observada, duplicados, adaptadores, quimeras,
+posición real y estado de pareja. También se elegirá el formato del fichero de
+procedencia de todas las lecturas finales, incluidos origen, diferencias y
+contaminación, sin duplicar las lecturas; los descartes conservarán solo los
+agregados confirmados. La estimación
+automática desde datos reales, el contrato de entrada, el esquema del perfil
+empírico, sus métricas de fiabilidad y su reutilización no son decisiones de
+planificación de v1, sino trabajo futuro.
 
 **Validación interna contra la verdad.** Se elegirán las métricas, métodos
-estadísticos, ámbitos de agregación, tolerancias y esquema de los resultados
-estructurados que comparan FASTQ y BAM o CRAM con la verdad de origen. También se
-planificará cómo aplicar la política confirmada de errores estructurales o
-lógicos, advertencias estadísticas predeterminadas y elevación configurable a
-error. No se ejecutarán *SNP callers* para realizar esta validación.
+estadísticos, ámbitos de agregación y esquema de los resultados estructurados
+que comparan FASTQ y BAM o CRAM con la verdad de origen. Las comprobaciones
+deterministas aplicarán errores; las magnitudes aleatorias se informarán sin
+tolerancias de aceptación y sin elevarse a error. Umbrales, intervalos
+estadísticos, categorías de aceptación y escalamiento configurable quedan para
+una versión futura. No se ejecutarán *SNP callers* para realizar esta validación.
 
 **SAM/BAM, CRAM y grupos de lectura.** Se elegirán las versiones oficiales
 exactas de SAM/BAM y CRAM, el catálogo concreto de campos de cabecera, el
 procedimiento para marcar duplicados y la forma técnica de combinar grupos en el
 único archivo final por individuo y referencia. Estas elecciones deben mantener
 la identificación inequívoca de referencia, muestra, evento, biblioteca, tanda
-o carril y grupo de lectura; `SM` como identificador biológico estable; y el
+y grupo de lectura; `SM` como identificador biológico estable; y el
 identificador `RG` único en toda la ejecución. Todos los archivos deberán
 cumplir la versión oficial elegida.
 
@@ -4809,15 +4698,14 @@ principal de fuentes de la misma tanda, la prioridad de una matriz dirigida
 sobre la tasa total ponderada por lecturas, el efecto final del demultiplexado ni
 la procedencia por identificadores y recuentos ya confirmados.
 
-**Mutación y elementos transponibles.** Se elegirán las tasas predeterminadas,
-las distribuciones cuantitativas de longitud de *indels*, el formato del espectro
-SNP y el esquema del catálogo y los eventos TE. Estas decisiones no podrán
-introducir dependencia de contexto SNP ni transposición espontánea en la primera
-versión.
+**Mutación.** Se elegirán las tasas predeterminadas, las distribuciones
+cuantitativas de longitud de *indels* y el formato del espectro SNP. Estas
+decisiones no podrán introducir dependencia de contexto SNP ni semántica
+específica de elementos transponibles en la primera versión.
 
 **Recombinación y reproducción poliploide.** Se elegirá el formato de los mapas,
-la generación técnica de posiciones, la validación de intervalos colineales y la
-traza interna de bivalentes. La implementación deberá respetar el mínimo
+la generación técnica de posiciones, la comprobación de equivalencia del estado
+estructural canónico y la traza interna de bivalentes. La implementación deberá respetar el mínimo
 confirmado para cromosomas y la regla general con sustituciones por *scaffold*,
 usando exclusivamente cM o bases dentro de una misma regla.
 
@@ -4832,17 +4720,18 @@ familias de decisiones funcionales que siguen abiertas para el alcance de v1.
    planificar la fase que bloquea cada una.
 2. Concretar durante la planificación las tolerancias técnicas, la sintaxis del
    catálogo declarativo común y los metadatos adicionales de muestreo. También
-   se elegirán las fórmulas de F realizado y Ne reproductivo y su adaptación por
-   ploidía, sin reabrir su significado funcional.
-3. Definir la representación técnica de intervalos, el catálogo y los parámetros
-   de distribuciones alternativas a Poisson y las pruebas y criterios
-   estadísticos para compararlas antes de fijar perfiles estables.
+   se elegirán la fórmula diploide de F realizado y la fórmula de Ne
+   reproductivo, sin reabrir su significado funcional ni adaptar F a otras
+   ploidías.
+3. Definir la representación técnica de intervalos y las pruebas estadísticas
+   del recuento Poisson de variantes aleatorias y del paso unitario de las
+   repeticiones en tándem.
 4. Elegir durante la planificación la sintaxis del grafo de cruces, de los
    parentales expresos y de las condiciones de selección ya confirmadas.
 5. Concretar y validar con datos adecuados los perfiles Illumina-like
    *single-end* y *paired-end* y PacBio HiFi, la versión, *presets* y parámetros
-   de minimap2, el catálogo inicial de mapeadores compatibles, la calibración
-   empírica y las tolerancias del muestreo uniforme y la cobertura
+   de minimap2, el catálogo inicial de mapeadores compatibles y las tolerancias
+   del muestreo uniforme y la cobertura
    aproximadamente Poisson.
 6. Definir el algoritmo de sumas de comprobación, los esquemas de los
    manifiestos general y de evento y el formato de exportación autocontenida.
@@ -4852,7 +4741,7 @@ familias de decisiones funcionales que siguen abiertas para el alcance de v1.
    adaptadores, sesgo GC, quimeras, anomalías *paired-end* y demás degradaciones
    WGS admitidas.
 9. Definir los campos de cabecera y las versiones de SAM/BAM, CRAM y VCF que
-   identificarán referencia, muestra, evento, biblioteca, tanda o carril y grupo
+   identificarán referencia, muestra, evento, biblioteca, tanda y grupo
    de lectura.
 10. Completar los casos de prueba restantes y tomar las decisiones de
     implementación cuando el comportamiento esperado esté suficientemente

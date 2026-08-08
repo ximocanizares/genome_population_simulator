@@ -10,6 +10,13 @@
   [decisiones-tecnicas-0.1.md](./decisiones-tecnicas-0.1.md)
 - **Lenguaje del núcleo:** Rust, según la especificación y la hoja de ruta 0.1
 
+Este documento es derivado: organiza técnicamente los requisitos normativos sin
+ampliarlos ni sustituirlos. La cobertura completa se consulta en
+[trazabilidad-requisitos-0.1.md](./trazabilidad-requisitos-0.1.md).
+Las capacidades post-v1 se remiten al
+[registro de ampliaciones futuras](./registro-ampliaciones-futuras-0.1.md);
+las elecciones DTP/DTPD siguen siendo planificación técnica, no funciones.
+
 ## 1. Finalidad y estado
 
 Este documento define cómo se divide el sistema y qué contratos deben mantener
@@ -47,19 +54,20 @@ Toda salida asociada a una observación se organiza mediante un evento explícit
 Una ejecución puede declarar cero eventos y, en ese caso, no se crea ninguno de
 forma implícita. Todo evento tiene identidad, selección de individuos,
 referencias aplicables, salidas y subsemilla. Solo los eventos que producen
-FASTQ, BAM o CRAM requieren tecnología, perfil y bibliotecas; solo los que
-producen alineamientos requieren además un mapeador. Por tanto, un evento puede
-materializar únicamente verdad genotípica o VCF sin parámetros técnicos de
-secuenciación.
+FASTQ, BAM o CRAM constituyen su único experimento de secuenciación y requieren
+tecnología, perfil, exactamente una tanda y una biblioteca por individuo; solo
+los que producen alineamientos requieren además un mapeador. Todas las
+bibliotecas se procesan juntas dentro de la tanda. Por tanto, un evento puede
+materializar únicamente verdad genotípica o VCF sin parámetros ni entidades
+técnicas de secuenciación.
 
 ### 2.2. Fronteras externas
 
 Son fronteras del sistema:
 
 - los ficheros estructurados de configuración general y poblacional;
-- FASTA de referencia y de elementos transponibles;
-- FASTQ suministrados para contaminación o calibración;
-- perfiles empíricos reutilizables;
+- FASTA de referencia;
+- FASTQ suministrados para contaminación;
 - los estándares FASTA, FASTQ, SAM/BAM, CRAM y VCF;
 - minimap2 como mapeador predeterminado y los mapeadores compatibles que se
   autoricen en el futuro;
@@ -79,11 +87,13 @@ la imputación, el faseado inferido ni la evaluación de herramientas externas.
 Tampoco se incluyen las capacidades funcionales excluidas en la sección 3 de la
 especificación, entre ellas señales de instrumento, BCL, paneles dirigidos,
 Oxford Nanopore, PacBio CLR, aneuploidía individual, reproducción clonal,
-conversión génica y transposición espontánea.
+conversión génica, calibración empírica automática y todo modelado específico de
+elementos transponibles. V1 no define una frontera de entrada para FASTQ y
+referencia de calibración ni para perfiles empíricos reutilizables.
 
 Python no forma parte del núcleo. Solo podrá incorporarse más adelante como
-herramienta auxiliar de calibración o análisis si se aprueba una decisión
-técnica que defina su frontera, distribución y reproducibilidad.
+herramienta auxiliar de análisis si se aprueba una decisión técnica que defina
+su frontera, distribución y reproducibilidad.
 
 ## 3. Principios arquitectónicos
 
@@ -95,9 +105,15 @@ técnica que defina su frontera, distribución y reproducibilidad.
    ruta o de una posición implícita.
 3. **Las referencias no se mezclan.** Un conjunto de resultados pertenece a
    una única referencia de mapeo y sus identificadores de variante son locales.
+   En v1, una unidad reproductiva contiene únicamente individuos basados en la
+   misma referencia estructural, aunque puedan observarse contra varias
+   referencias de mapeo.
 4. **La configuración se resuelve antes de simular.** Se aplican valores
-   predeterminados y precedencias, se validan incompatibilidades y se obtiene
-   una configuración efectiva inmutable para la ejecución.
+   base y la dominancia parcial de REQ-CONF-116 a REQ-CONF-123, se validan
+   máximas incomparables, duplicados, solapamientos y selectores no permitidos y se obtiene
+   una configuración efectiva inmutable para la ejecución. Las sustituciones por
+   identificador individual solo pueden resolverse contra individuos directos,
+   fundadores o parentales expresos que ya existan en esta fase.
 5. **Los estados inválidos no cruzan fronteras.** Los identificadores,
    coordenadas, ploidías, proporciones y relaciones se representan mediante
    valores validados o producen errores explícitos.
@@ -157,13 +173,16 @@ categorías distintas no son intercambiables aunque su texto coincida.
 | Copia haplotípica | Distinta aunque tenga la misma secuencia que otra | Individuo, secuencia, índice de copia, ploidía, segmentos y fundador |
 | Población y subpoblación | Identidades no reutilizables | Generación, miembros, estado activa/extinguida y relaciones demográficas |
 | Evento biológico | Identifica muestreo, cruce, mutación o cambio demográfico según su categoría | Entradas, orden, resultado y causas de omisión o fallo |
-| Evento explícito | Unidad de observación independiente | Individuos, referencias, subsemilla y salidas; tecnología, perfil, bibliotecas y mapeador solo cuando procedan |
-| Experimento de secuenciación | Condición de un evento que genera FASTQ, BAM o CRAM; no es otra identidad de evento | Tecnología y perfil; bibliotecas y, si genera alineamientos, mapeador |
-| Biblioteca, tanda y carril | Únicos dentro del ámbito definido por el esquema futuro | Evento, muestra, tecnología, perfil e índices técnicos |
-| Grupo de lectura | Único en toda la ejecución | Evento, individuo, biblioteca, tanda o carril y archivos asociados |
+| Evento explícito | Unidad de observación independiente | Individuos, referencias, subsemilla y salidas; tecnología, perfil, tanda, bibliotecas y mapeador solo cuando procedan |
+| Experimento de secuenciación | Condición de un evento que genera FASTQ, BAM o CRAM; es el único experimento del evento y no posee otra identidad | Tecnología, perfil, una tanda, una biblioteca por individuo y, si genera alineamientos, mapeador |
+| Tanda | Única dentro de un evento de secuenciación | Evento, tecnología, perfil y todas las bibliotecas procesadas conjuntamente |
+| Biblioteca | Única para un individuo dentro del evento | Evento, tanda, individuo, tecnología, perfil, objetivo WGS e índices técnicos |
+| Grupo de lectura | Único en toda la ejecución y único para el individuo dentro del evento | Evento, individuo, biblioteca, tanda y archivos asociados |
 | Instancia de lectura | Observación concreta con identidad técnica única dentro del evento; una pareja constituye una unidad y comparte el nombre exigido por el formato | Biblioteca actual, miembros cuando sea pareja, origen estable y mecanismo de copia o transferencia |
 | Conjunto | Local a un evento y una referencia de mapeo | Mismas muestras que los demás conjuntos del evento y resultados de esa referencia |
-| Variante VCF | Local a un conjunto | Referencia, registro VCF y complemento de verdad si existe |
+| Caso de verdad | Local a un conjunto | Diferencia biológica simple o compuesta y uno o varios registros VCF |
+| Registro VCF | Local a un conjunto y a un caso de verdad | Referencia, representación estándar y, si pierde detalle, una única entrada complementaria |
+| Entrada complementaria | Única para un caso que pierde detalle en VCF | Identificador local estable, registros enlazados y detalle completo no representable |
 
 La sintaxis y el mecanismo de generación de identificadores quedan pendientes.
 El contrato exige unicidad, estabilidad, categoría y ausencia de reutilización.
@@ -206,6 +225,19 @@ número de copias que indica su ploidía efectiva. Cada copia contiene una caden
 ordenada de segmentos y eventos suficiente para materializar su secuencia,
 conservar fase y dosis y alcanzar un origen fundador o un evento de inserción.
 
+El motor genómico aplica primero los eventos explícitos en su orden declarado.
+Después recibe un recuento sorteado por clase y procesa, en orden fijo,
+duplicaciones, deleciones, inversiones, translocaciones, repeticiones en tándem,
+*indels* y SNP. Para cada evento consulta el espacio válido del estado actual y
+lo actualiza tras aceptarlo. La ausencia de destinos suficientes es un error del
+motor, no una advertencia ni una autorización para producir menos eventos.
+
+El recuento sorteado de variantes aleatorias procede exclusivamente de Poisson.
+Los eventos explícitos y el modo controlado aplicable entregan resultados
+concretos y no implementan otra distribución. Las mutaciones de repeticiones en
+tándem usan el modelo escalonado simple: cada evento añade o elimina una unidad
+completa según el sesgo efectivo entre ambas direcciones.
+
 La **verdad biológica** comprende referencias, haplotipos, genotipos,
 parentescos, poblaciones, transmisiones, mutaciones y observaciones. Es la única
 fuente autorizada para generar el fichero obligatorio de verdad y los VCF.
@@ -214,6 +246,8 @@ La **verdad técnica de lecturas** conserva el origen real de fragmentos,
 secuencias original y observada, errores, duplicados, contaminaciones,
 quimeras, descartes agregados y categoría sintética cuando corresponda. Esta
 verdad se deriva de la biológica y del evento técnico, pero no la sustituye.
+También distingue cobertura objetivo, WGS básica anterior a artefactos, final
+del FASTQ y alineada observada por referencia de mapeo.
 
 El alcance mínimo de los estados genotípicos completos depende de la vía:
 
@@ -235,8 +269,9 @@ La descendencia crea otra generación y sustituye a la anterior. Los individuos
 históricos mantienen identidad y linaje, pero no reaparecen como miembros de una
 generación posterior.
 
-El estado de una subpoblación distingue N objetivo, N realizado, Ne objetivo o
-ausente y Ne realizado. Distingue también subpoblación activa, extinción
+El estado de una subpoblación distingue N objetivo, intentos reproductivos,
+éxitos, fallos por causa, N realizado y Ne realizado o «no evaluable» con causa.
+Distingue también subpoblación activa, extinción
 planificada y extinción por resultado. Una recolonización crea una identidad
 nueva.
 
@@ -245,7 +280,9 @@ nueva.
 Un evento de muestreo crea una observación no destructiva del estado biológico.
 Todo evento es explícito y puede producir solo verdad, solo VCF o evidencia
 técnica. Cuando genera FASTQ, BAM o CRAM constituye además un experimento de
-secuenciación. Cada evento produce cero o más conjuntos, uno por referencia
+secuenciación, sin otra identidad, con exactamente una tanda y una biblioteca
+por individuo. Todas las bibliotecas se procesan juntas en la tanda. Cada evento
+produce cero o más conjuntos, uno por referencia
 aplicable. Los FASTQ pertenecen al evento y no a un conjunto concreto, porque
 dentro del evento las mismas lecturas pueden mapearse contra varias referencias.
 
@@ -261,16 +298,17 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 
 | Componente | Responsabilidad única | Entradas y salidas | Datos que posee o consulta |
 |---|---|---|---|
-| Admisión de configuración | Leer, combinar, validar y resolver configuración general y poblacional | Ficheros y entradas declaradas → configuración efectiva o diagnósticos | Posee modelos de entrada y configuración efectiva; consulta catálogos de capacidades |
+| Admisión de configuración | Leer, combinar, validar y resolver configuración general y poblacional mediante la matriz de ejes y la dominancia normativa | Ficheros y entradas declaradas → configuración efectiva con procedencia o diagnósticos con reglas máximas | Posee modelos de entrada y configuración efectiva; consulta catálogos de capacidades |
 | Identidad de ejecución | Crear y comprobar identidades tipadas y el contexto común | Configuración validada → identidad y contexto | Posee el registro de identidades; no posee datos biológicos |
 | Aleatoriedad reproducible | Proporcionar flujos independientes por ámbito | Semilla y claves de ámbito → flujo aleatorio auditable | Posee la jerarquía de ámbitos y el registro de semillas; no interpreta decisiones biológicas |
 | Catálogo de referencias | Validar, copiar, simular y derivar referencias | FASTA o configuración → referencias disponibles | Posee identidades, secuencias, linaje y recursos exactos de referencia |
 | Coordenadas y transformaciones | Validar intervalos y convertir convenios sin ambigüedad | Coordenadas etiquetadas → coordenadas validadas o correspondencias | Posee reglas de conversión; consulta referencias y segmentos |
 | Motor de verdad genómica | Crear y transformar haplotipos y eventos | Referencia, cambios y flujos aleatorios → estado faseado | Posee el estado genotípico, eventos, segmentos y correspondencias |
 | Creación directa | Traducir la vía directa a operaciones del motor genómico | Configuración efectiva → individuos | Posee solo el estado de progreso; el motor posee la verdad resultante |
-| Inicialización poblacional | Crear fundadores, frecuencias, genotipos, LD y F inicial | Configuración poblacional → población inicial | Posee estadísticas solicitadas/realizadas; entrega verdad al repositorio biológico |
-| Reproducción y recombinación | Formar gametos, bivalentes y descendencia trazable | Progenitores, mapas/tasas y flujo → descendientes | Posee eventos de transmisión; consulta verdad parental |
-| Dinámica evolutiva | Ejecutar generaciones y procesos en orden válido | Población y fases → población final e historial | Posee estado generacional y resúmenes; delega cambios genómicos |
+| Inicialización poblacional | Crear fundadores, frecuencias, genotipos, LD, HWE y F diploide inicial | Configuración poblacional → población inicial o error previo | Posee estadísticas solicitadas/realizadas y el estado «no aplicable» de F fuera de diploides; entrega verdad al repositorio biológico |
+| Reproducción y recombinación | Validar ploidía y estructura canónica, formar bivalentes, gametos y descendencia trazable | Progenitores, mapas/tasas y flujo → descendientes o incompatibilidad reproductiva | Posee eventos de transmisión y comparaciones estructurales; consulta verdad parental |
+| Dinámica evolutiva | Ejecutar las ocho etapas generacionales en su orden fijo | Población y fases → población final e historial de etapas aplicadas u omitidas | Posee estado generacional y resúmenes; delega cambios genómicos |
+| Selección de viabilidad | Evaluar el SNP bialélico protegido y decidir supervivencia | Individuos elegibles, dosis y función → supervivientes o error | Posee evaluaciones y decisiones; consulta identidad única, dosis y valores genéticos |
 | Grafo de familias | Validar y ejecutar el grafo declarativo de cruces | Grafo y parentales → poblaciones intermedias y finales | Posee dependencias y resultados del grafo; consulta selección y reproducción |
 | Selección declarativa | Evaluar el catálogo común sobre verdad biológica | Reglas y elegibles → seleccionados y auditoría | No posee genotipos; posee evaluación y resultado de selección |
 | Muestreo y resúmenes | Crear observaciones no destructivas y ámbitos estadísticos | Generación y regla → muestra, resumen poblacional y muestral | Posee observaciones y resúmenes; consulta verdad e historial |
@@ -279,11 +317,11 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 | Artefactos y demultiplexado | Convertir conjuntamente la contaminación y aplicar errores, duplicados, adaptadores y reasignaciones | Lecturas y configuración → FASTQ finales y procedencia | Posee transformaciones técnicas e identidades de instancia; consulta fuentes compatibles |
 | Alineamiento | Ejecutar el mapeador sobre el FASTQ final | FASTQ y referencia → alineamientos observados | Posee invocación, salida, diagnóstico y metadatos del proceso |
 | Alineamiento directo | Crear registros sintéticos coherentes sin FASTQ | Verdad y perfil directo → alineamientos sintéticos | Posee categorías y registros sintéticos; no llama a un mapeador |
-| Materialización de verdad | Escribir verdad obligatoria, VCF y complemento | Estado faseado y referencia de conjunto → artefactos de verdad | No altera el dominio; posee la representación materializada |
+| Materialización de verdad | Aplicar el único contrato obligatorio de trazabilidad y escribir verdad, VCF y complemento | Estado faseado, historial y referencia de conjunto → artefactos de verdad y resúmenes | No altera el dominio; materializa el detalle exigido por vía sin ofrecer niveles ni degradarlo por escala |
 | Ensamblado de resultados | Organizar recursos comunes, eventos y conjuntos | Artefactos validados → estructura de resultados | Posee catálogo lógico de artefactos y estados de completitud |
 | Validación interna | Comparar configuración, verdad y evidencia | Objetivos y resultados → informe, aviso o error | Posee evidencias de comprobación; no corrige resultados |
-| Manifiestos y exportación | Registrar procedencia y crear paquetes autocontenidos | Catálogo de artefactos y ejecución → manifiestos/paquete | Posee representaciones de auditoría, enlaces e integridad |
-| Estimación y observación de recursos | Estimar y medir tiempo, memoria y almacenamiento | Configuración/ejecución → estimaciones y medidas | Posee mediciones; no decide modelos biológicos |
+| Manifiestos y exportación | Registrar procedencia y crear paquetes autocontenidos | Catálogo de artefactos y ejecución → manifiestos/paquete | Enumera individuos materializados y de familias; resume generaciones evolutivas no materializadas y posee enlaces e integridad |
+| Estimación y observación de recursos | Estimar y medir tiempo, memoria y almacenamiento | Configuración, trazabilidad y salidas activadas → estimaciones y medidas | Posee mediciones; no decide modelos biológicos ni reduce resultados para ajustarlos al presupuesto |
 
 ### 6.2. Contratos comunes de los componentes
 
@@ -308,6 +346,15 @@ generacional decide el orden; el ensamblador decide completitud.
 - Creación directa, inicialización, evolución y familias pueden depender del
   motor genómico, aleatoriedad, identidad y selección declarativa.
 - Reproducción es compartida por evolución y familias; no se duplica por vía.
+- Reproducción compara por secuencia la ploidía y el estado estructural canónico
+  de todas las copias antes de formar bivalentes. La equivalencia no depende de
+  que las historias compartan identificadores, pero no elimina ninguna traza.
+- El motor genómico debe consultar la identidad del locus seleccionado para
+  rechazar eventos explícitos solapantes y excluirlo de los espacios aleatorios;
+  no puede moverlo, copiarlo ni eliminarlo.
+- Reproducción y dinámica evolutiva deben rechazar antes de formar descendencia
+  cualquier unidad reproductiva que mezcle referencias estructurales. Esta
+  validación no restringe las referencias de mapeo de un evento explícito.
 - Simulación WGS, artefactos, alineamiento y modo directo pueden consultar
   verdad e identidades, pero no llamar a componentes que cambien genotipos.
 - Materialización VCF depende del estado faseado y de la referencia del
@@ -329,340 +376,242 @@ salida inválida, código de error, interrupción y versión incompatible.
 
 | Componente | Errores propios principales | Comprobación aislada mínima |
 |---|---|---|
-| Admisión de configuración | Sintaxis, campo desconocido, precedencia conflictiva y referencia inexistente | Resolver una configuración mínima y rechazar conflictos con diagnósticos que señalen ambos ámbitos |
+| Admisión de configuración | Sintaxis, campo desconocido, precedencia conflictiva, distribución o modelo no admitidos, referencia inexistente y solicitud de calibración empírica | Resolver una configuración mínima y rechazar conflictos, calibración o perfiles empíricos y demás alternativas fuera de v1 con diagnósticos que señalen parámetro, valor y ámbitos |
 | Identidad de ejecución | Identidad duplicada, categoría incorrecta o reutilización | Crear identidades por categoría y demostrar colisiones y referencias cruzadas inválidas |
 | Aleatoriedad reproducible | Ámbito desconocido, clave duplicada o estado no regenerable | Repetir decisiones por ámbito y demostrar que añadir un muestreo no cambia el flujo evolutivo |
-| Catálogo de referencias | FASTA inválido, identificador de primer elemento repetido, símbolo distinto de A/C/G/T/N, linaje cíclico o derivación imposible | Separar identificador y descripción, validar el alfabeto y reconstruir una referencia pequeña desde su origen y cambios |
+| Catálogo de referencias | FASTA inválido, identificador de primer elemento repetido, símbolo distinto de A/C/G/T/N, linaje cíclico o derivación imposible | Separar identificador y descripción, validar el alfabeto, conservar `N` con coordenada y longitud y reconstruir una referencia pequeña desde su origen y cambios |
 | Coordenadas y transformaciones | Convenio ausente, intervalo fuera de límites o correspondencia inexistente | Probar extremos, inserciones, inversiones y conversiones de ida y vuelta donde sean definidas |
-| Motor de verdad genómica | Evento solapado prohibido, objetivo eliminado, punto de ruptura o ploidía inválidos | Materializar haplotipos conocidos y comparar exactamente secuencia, fase, dosis e historial |
+| Motor de verdad genómica | Evento solapado prohibido, objetivo eliminado, destinos válidos insuficientes, punto de ruptura o ploidía inválidos | Materializar haplotipos conocidos; rechazar SNP o motivo sobre `N`, conservarla dentro de SV e inserciones explícitas y agotar de forma controlada el espacio válido |
 | Creación directa | Individuo incompleto o cambio incompatible | Crear individuos pequeños con cambios concretos y aleatorios controlados |
-| Inicialización poblacional | Frecuencias, recuentos, F, LD o restricciones incompatibles | Enumerar casos pequeños y comprobar sumas, fase y resultados por modo |
-| Reproducción y recombinación | Ploidía impar, parental incompatible, mapa incompleto o bivalente imposible | Usar casos mendelianos con puntos de recombinación conocidos y origen reconstruible |
-| Dinámica evolutiva | Orden inválido, población activa vacía no autorizada o evento demográfico imposible | Ejecutar pocas generaciones enumerables y comprobar estado antes/después de cada proceso |
+| Inicialización poblacional | Frecuencias, recuentos, F fuera de [0,1], F en ploidía distinta de 2, LD o restricciones incompatibles | Enumerar HWE haploide, diploide y poliploide bialélico/multialélico; comprobar F diploide 0, intermedio y 1; rechazar F en P=1 y P>2; probar distribución explícita poliploide y F realizado «no aplicable» |
+| Reproducción y recombinación | Referencias distintas, ploidía impar o desigual, estado estructural no idéntico, mapa incompleto o bivalente imposible | Probar diploides y tetraploides idénticos; SNP, *indels* pequeños y repeticiones distintos; cada clase SV heterocigota; SV fijada con historias distintas; *scaffold* intacto; SV de novo seguida de otro intento |
+| Dinámica evolutiva | Orden alternativo solicitado, población activa vacía no autorizada, mezcla de referencias estructurales tras migración o evento demográfico imposible | Ejecutar las ocho etapas, omitir una opcional en su posición, rechazar otro orden, ordenar varios eventos demográficos y comprobar el historial efectivo |
+| Selección de viabilidad | Locus ausente, múltiple, ambiguo o situado sobre `N`; dosis sin valor; aptitud negativa, no finita o máximo cero | Probar varias ploidías, rechazo de `N`, fallos antes de supervivencia y recombinación que conserva la identidad única |
 | Grafo de familias | Ciclo real, fuente futura, cardinalidad o salida imposible | Validar grafos válidos ramificados y ciclos transitivos mínimos |
 | Selección declarativa | Regla desconocida, conjunto ambiguo o elegibles insuficientes | Evaluar Y/O/NO y cantidades exactas/proporcionales sobre un catálogo de verdad fijo |
 | Muestreo y resúmenes | Duplicado, estratos solapados, tamaño excesivo o ámbito estadístico confundido | Comparar resumen poblacional y muestral y demostrar observación no destructiva |
 | Orquestación de eventos | Evento implícito, parámetro técnico indebido, tecnología múltiple, perfil o mapeador incompatible y referencia ajena | Construir eventos solo de verdad y eventos técnicos independientes, y comprobar requisitos condicionales y aislamiento |
-| Simulación WGS | Objetivo ausente/doble, perfil incompatible, identidad repetida o fragmento imposible | Comprobar recuentos, cobertura haploide, aporte por copia e identidades únicas antes de sesgos |
-| Artefactos y demultiplexado | Conversión conjunta inviable, exceso de contaminación, colisión de identidad o par huérfano | Resolver una asignación entera conocida y rastrear copias biológicas, transferencias, duplicados y descartes |
+| Simulación WGS | Objetivo ausente/doble, perfil incompatible, identidad repetida o fragmento imposible | Comprobar recuentos, cobertura haploide, aporte por copia y muestreo de `N` con Phred 0 antes de sesgos |
+| Artefactos y demultiplexado | Conversión conjunta inviable, exceso de contaminación, colisión de identidad o par huérfano | Resolver una asignación entera conocida; reconstruir origen y diferencia verdadera/observada de cada lectura final, y comprobar agregados de descartes |
 | Alineamiento | Herramienta ausente, versión incompatible, código no cero o salida inválida | Sustituir el proceso externo y comprobar comando, contexto y propagación de cada fallo |
 | Alineamiento directo | Proporciones, MAPQ, banderas, CIGAR o pares incoherentes | Generar un caso por categoría y validarlo contra la referencia y verdad de origen |
-| Materialización de verdad | Alelo no reconstruible, normalización ambigua o pérdida de fase | Reconstruir cada caso desde VCF y complemento y compararlo con el haplotipo final |
+| Materialización de verdad | VCF no conforme, SNP con `REF=N`, alelo no reconstruible, cardinalidad ambigua, enlace roto o pérdida de fase | Validar casos sin/con complemento, BND, dos referencias y cambios con `N`; reconstruir cada caso enlazado sin inventar una base y compararlo con la verdad canónica |
 | Ensamblado de resultados | Artefacto activado ausente o mezcla de referencias | Intentar cerrar conjuntos completos e incompletos y verificar estados resultantes |
 | Validación interna | Evidencia insuficiente, invariante rota o desviación fuera de política | Inyectar resultados conocidos y comprobar conforme, aviso y error sin corrección automática |
-| Manifiestos y exportación | Enlace roto, identidad incoherente o integridad fallida | Recorrer todos los enlaces de un evento mínimo y verificar el paquete antes/después |
-| Estimación y observación de recursos | Dato no medible, estimación inválida o presupuesto excedido | Comparar estimación y medida en casos registrados sin presentar la estimación como exacta |
+| Manifiestos y exportación | Enlace roto, identidad incoherente o integridad fallida | Comprobar la enumeración de una familia completa y de los individuos evolutivos materializados, junto con los resúmenes no materializados; recorrer enlaces y verificar el paquete |
+| Estimación y observación de recursos | Dato no medible, estimación inválida o presupuesto excedido | Comparar estimación y medida y rechazar antes de simular un caso insuficiente sin degradar trazabilidad ni salidas |
 
 ## 7. Flujos de datos y ejecución
 
+Esta sección describe la **composición técnica** de los componentes. No redefine
+el comportamiento funcional: las condiciones, órdenes, cardinalidades y
+errores observables pertenecen a los REQ de la especificación, y los ACE
+indican cómo comprobarlos.
+
 ### 7.1. Admisión y preparación
 
-1. Se leen los ficheros declarados sin iniciar la simulación.
-2. Se validan sintaxis, categorías, identificadores, referencias cruzadas,
-   ploidías, ámbitos, reglas y dependencias.
-   Para FASTA se separan el primer elemento de cabecera, usado como
-   identificador, y su descripción; para toda secuencia se valida el alfabeto
-   `A`, `C`, `G`, `T` y `N`. Si una operación aún no tiene definida su conducta
-   ante `N`, no debe inventarla durante la validación.
-3. Se aplican predeterminados y precedencias para crear una configuración
-   efectiva. Se conservan valor original, valor efectivo y procedencia.
-4. Se validan y copian las entradas que deben conservarse. La ejecución usa las
-   copias aprobadas y no modifica los originales.
-5. Se genera o acepta la semilla raíz y se registran los ámbitos aleatorios.
-6. Se estiman recursos. Un presupuesto excedido rechaza; una estimación grande
-   sin presupuesto excedido advierte.
-7. Solo entonces se crea el contexto de ejecución preparado.
+Los adaptadores de entrada entregan representaciones sin normalizar al
+componente de admisión. Este coordina validadores de sintaxis, identidad,
+referencias y reglas; el resolvedor de configuración produce una vista efectiva
+inmutable y conserva la procedencia de su resolución. El catálogo de entradas
+copiadas y el plan de ejecución solo se crean tras esa frontera.
 
-Un error de esta fase no produce una ejecución marcada como iniciada o completa.
+El estimador de recursos consulta el plan y las salidas activadas sin modificar
+la configuración. La identidad de ejecución y el gestor de aleatoriedad se
+inyectan después en los motores de dominio. El contrato funcional de esta
+frontera está en REQ-CONF-01 a REQ-CONF-123, REQ-FMT-01 a REQ-FMT-07,
+REQ-NOF-01 a REQ-NOF-08 y REQ-VAL-01 a REQ-VAL-51; se comprueba
+principalmente mediante ACE-01, ACE-23, ACE-35, ACE-36, ACE-64, ACE-65,
+ACE-105 y ACE-111.
 
-### 7.2. Referencias y verdad biológica
+### 7.2. Referencias y estado biológico
 
-1. El catálogo crea o incorpora la referencia inicial.
-2. Cada referencia derivada se produce desde una referencia ya disponible y
-   conserva el orden de transformaciones.
-3. La vía elegida crea individuos directamente, inicializa y evoluciona una
-   población, o ejecuta el grafo de familias.
-4. Todas las vías entregan el mismo contrato de individuos faseados y
-   reconstruibles.
-5. Se materializa el alcance obligatorio de verdad de cada vía: todos los
-   individuos directos; población inicial, final y generaciones o muestreos
-   solicitados en evolución; y todos los individuos y poblaciones intermedias de
-   familias. Las generaciones evolutivas restantes conservan resúmenes.
-6. El estado completo requerido y los historiales resumidos se entregan a
-   materialización y persistencia sin pasar por el recorrido técnico.
+El catálogo de referencias es responsable de identidad, metadatos y acceso a
+secuencias. El servicio de coordenadas y transformaciones es la única frontera
+que traduce posiciones entre una referencia estructural, sus estados derivados
+y las referencias de mapeo. Los motores biológicos reciben estas interfaces y
+producen cambios de estado, nunca rutas de fichero ni registros de un formato
+externo.
 
-### 7.3. Generación evolutiva
+El repositorio de verdad conserva estados faseados, genealogía, procedencia y
+capas de cambio. Creación directa, inicialización poblacional, reproducción,
+recombinación, dinámica evolutiva y mutación acceden a él mediante operaciones
+de dominio explícitas. El orquestador decide qué componente invocar; los
+componentes no se llaman entre sí para alterar el orden funcional.
 
-El orquestador resuelve los eventos demográficos en su orden explícito y aplica
-las dependencias funcionales de REQ-REP-24. Migraciones salientes se calculan
-desde el mismo estado inicial y se aplican conjuntamente. La selección de
-viabilidad precede a la reproducción. La segregación y recombinación preceden a
-las mutaciones de novo. Registro y muestreo observan el estado resultante.
+Las fuentes normativas son REQ-REF-01 a REQ-REF-23, REQ-IND-01 a
+REQ-IND-59, REQ-DIR-01 a REQ-DIR-05, REQ-EVO-01 a REQ-EVO-73,
+REQ-POB-01 a REQ-POB-03, REQ-CRU-01 a REQ-CRU-45, REQ-REP-01 a
+REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17,
+REQ-REC-01 a REQ-REC-29 y REQ-MUT-01 a REQ-MUT-15. Sus recorridos se
+aceptan con ACE-02 a ACE-14, ACE-24 a ACE-32, ACE-75 a ACE-91, ACE-95 a
+ACE-98, ACE-103 a ACE-107 y ACE-109 a ACE-111 según la asignación individual
+de la matriz de trazabilidad.
 
-Una extinción por resultado autorizada omite de forma atómica los eventos
-dependientes y conserva una cadena causal. Si no está autorizada, detiene toda la
-ejecución. Las ramas independientes solo continúan en el primer caso.
+### 7.3. Observación técnica
 
-### 7.4. Admisión de un evento explícito
+La orquestación de eventos recibe una vista de solo lectura de la verdad y crea
+un contexto técnico aislado. Simulación WGS, artefactos, demultiplexado y
+alineamiento trabajan sobre ese contexto; los adaptadores de procesos externos
+solo traducen invocaciones y resultados, y no adquieren autoridad para cambiar
+la verdad.
 
-Todo evento fija identidad, individuos, referencias, salidas y subsemilla. Si
-solo solicita verdad o VCF, la orquestación no exige ni inventa tecnología,
-perfil, biblioteca o mapeador. Si solicita FASTQ, BAM o CRAM, valida tecnología,
-perfil y bibliotecas. Si solicita alineamientos, valida además un único mapeador
-y aplica CRAM como formato predeterminado dentro del evento, salvo elección de
-BAM. Sin eventos no se ejecuta este flujo.
+Los FASTQ y demás evidencias nacen en el contexto del evento. Las vistas de
+verdad interoperable nacen del repositorio canónico y del contexto de una
+referencia, no de inferencias sobre las lecturas. Ambas ramas se reúnen
+únicamente al ensamblar y validar el conjunto de resultados.
 
-### 7.5. Evento de secuenciación en modo realista
+Esta frontera implementa REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07,
+REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14, REQ-CONT-01 a
+REQ-CONT-16 y REQ-VER-01 a REQ-VER-47. La comprobación funcional se
+distribuye entre ACE-15 a ACE-21, ACE-30, ACE-31, ACE-37 a ACE-63,
+ACE-66 y ACE-68 a ACE-74.
 
-1. El evento fija individuos, tecnología, perfil, bibliotecas, referencias,
-   mapeador y subsemilla.
-2. La simulación WGS selecciona fragmentos desde los haplotipos en proporción a
-   dosis, ploidía y longitud antes de sesgos.
-3. Después de conocer el número limpio realizado de unidades de cada biblioteca,
-   todas las contribuciones de contaminación se convierten conjuntamente a
-   lecturas o parejas completas. La asignación entera válida minimiza la
-   desviación global; su total es el entero más próximo a la suma convertida y
-   los empates se resuelven con la subsemilla. Si no existe solución, el evento
-   falla antes de modificar los FASTQ finales.
-4. Se aplican perfiles, errores, calidades, artefactos, contaminación biológica
-   y demultiplexado en el orden funcional acordado. Una copia biológica recibe
-   identidad técnica nueva y enlaza su unidad de origen; una transferencia por
-   demultiplexado conserva la misma identidad y cambia de biblioteca. Solo una
-   duplicación configurada puede crear otra instancia adicional.
-5. Se conserva un FASTQ final o pareja por grupo de lectura y un fichero de
-   procedencia sin duplicar secuencias ni calidades.
-6. El mismo FASTQ final se entrega al único mapeador del evento contra cada
-   referencia seleccionada.
-7. Cada referencia produce un conjunto independiente. Por individuo y conjunto
-   se combina un único alineamiento final con sus grupos de lectura.
-8. El resultado se ordena, indexa y valida según las decisiones de formato.
+### 7.4. Cierre y publicación
 
-### 7.6. Evento de secuenciación en modo directo
+Cada productor entrega un artefacto provisional acompañado de identidad,
+referencia, procedencia y métricas técnicas. El ensamblador forma conjuntos
+coherentes; los validadores consumen vistas de solo lectura y emiten resultados
+estructurados. El escritor del manifiesto recibe hechos ya producidos y no
+reconstruye decisiones desde nombres o mensajes.
 
-El modo directo omite FASTQ y mapeador. Genera registros sintéticos desde la
-verdad conocida, aplica las mismas reglas funcionales de cobertura,
-contaminación y reasignación, y conserva categoría, origen y parámetros. Sus
-campos, banderas, CIGAR, MAPQ y relaciones de pareja deben ser coherentes con la
-categoría. El manifiesto lo identifica inequívocamente como sintético.
-
-Las identidades técnicas de lectura o pareja siguen las mismas reglas de
-unicidad, copia y transferencia que en el modo realista, aunque no exista FASTQ.
-
-### 7.7. Verdad por referencia
-
-Para cada conjunto, el materializador compara directamente los haplotipos de
-las muestras con la referencia de mapeo de ese conjunto. Crea un VCF multimuesta
-local y, solo cuando haga falta, un complemento estructurado. Nunca traduce un
-VCF de otra referencia y nunca consulta FASTQ, BAM o CRAM para decidir un
-genotipo.
-
-Dos eventos con las mismas muestras, referencia y verdad deben producir el
-mismo resultado lógico de verdad aunque cambie su evidencia técnica. La
-estrategia para lograr identificadores locales estables queda pendiente.
-
-### 7.8. Validación, cierre y exportación
-
-1. Cada productor construye su artefacto en un área temporal y mantiene su
-   estado `incompleto`.
-2. Se validan estructura, referencia, identidades técnicas, índices y
-   relaciones.
-3. Las comprobaciones estadísticas registran objetivo, observado, tolerancia y
-   decisión. N y Ne nunca se elevan a error por su desviación aislada.
-4. Cada artefacto validado se publica atómicamente y pasa a `completo`; si
-   falla, pasa a `fallido` y no se publica una versión parcial.
-5. Un conjunto solo queda completo con todos sus artefactos activados. Un evento
-   solo queda completo con sus salidas propias y conjuntos obligatorios. La
-   ejecución solo queda completa cuando lo están todas las salidas mínimas y
-   activadas, eventos y conjuntos obligatorios.
-6. Un fallo superior no borra artefactos o conjuntos completos e independientes;
-   pueden exportarse declarando el fallo global, sin presentar el paquete como
-   ejecución completa.
-7. La exportación copia los recursos comunes necesarios y vuelve a validar la
-   integridad antes y después del paquete.
+La publicación es la última frontera. Solo ella mueve un conjunto desde el
+espacio provisional al espacio publicado, mediante una operación recuperable y
+atómica desde la perspectiva del consumidor. Los estados y efectos funcionales
+de cierre están en REQ-VAL-01 a REQ-VAL-51, REQ-MAN-01 a REQ-MAN-88 y
+REQ-SAL-01 a REQ-SAL-26, con ACE-22 a ACE-24, ACE-33, ACE-34, ACE-36,
+ACE-46 a ACE-67, ACE-78, ACE-86, ACE-92 a ACE-108.
 
 ## 8. Invariantes de frontera
 
-### 8.1. Identidad y referencia
+Los invariantes de esta sección protegen la dirección de dependencias. Su
+contenido funcional procede de los REQ citados; aquí solo se asignan
+responsables y puntos de control.
 
-- Un identificador pertenece a una sola categoría y no se reutiliza.
-- Cada dato posicional identifica referencia, secuencia y convenio.
-- Cada conjunto contiene una única referencia de mapeo.
-- Los conjuntos de un evento contienen las mismas muestras biológicas.
-- Los identificadores de variante no enlazan registros entre referencias.
-- Todo CRAM se relaciona con el FASTA exacto contra el que se mapeó.
+| Invariante arquitectónico | Responsable y frontera de control | Fuente funcional |
+|---|---|---|
+| Toda entidad cruza fronteras con identidad tipada, no inferida de un nombre físico | Identidad de ejecución, catálogos y ensamblador de resultados | REQ-CONF-01 a REQ-CONF-14, REQ-TEC-01 a REQ-TEC-10 y REQ-MAN-01 a REQ-MAN-88 |
+| Toda coordenada viaja asociada a su referencia y convenio | Catálogo de referencias y servicio de coordenadas | REQ-REF-01 a REQ-REF-23 y REQ-VER-01 a REQ-VER-47 |
+| Solo los motores biológicos escriben en el repositorio de verdad | Interfaces de dominio y repositorio de verdad | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73 y REQ-CRU-01 a REQ-CRU-45 |
+| Los componentes técnicos observan instantáneas y no mutan genotipo, genealogía ni trayectoria | Orquestador de eventos y vistas de solo lectura | REQ-TEC-01 a REQ-TEC-10 y REQ-DAT-01 a REQ-DAT-73 |
+| La configuración efectiva es inmutable durante cada ámbito de uso y mantiene procedencia | Resolvedor de configuración | REQ-CONF-15 a REQ-CONF-123 y REQ-MAN-01 a REQ-MAN-88 |
+| Las decisiones aleatorias consumen flujos identificados por ámbito | Gestor de aleatoriedad y motores consumidores | REQ-CONF-03 a REQ-CONF-08, REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
+| Un artefacto conserva estado explícito desde su producción provisional hasta su publicación | Productores, validadores, ensamblador y publicador | REQ-VAL-01 a REQ-VAL-51, REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a REQ-SAL-26 |
+| Verdad canónica, vistas interoperables y evidencia técnica permanecen como clases distintas | Repositorio de verdad, materializador VCF y productores técnicos | REQ-VER-01 a REQ-VER-47, REQ-DAT-01 a REQ-DAT-73 y REQ-SAL-01 a REQ-SAL-26 |
 
-### 8.2. Ploidía, fase y procedencia
-
-- La ploidía efectiva de una secuencia es un entero de 1 a 10 e igual para todos
-  los individuos de la ejecución.
-- La reproducción sexual genérica solo acepta ploidía par en v1.
-- Cada individuo tiene exactamente tantas copias por secuencia como indique su
-  ploidía.
-- Toda variante se asigna a copias concretas y la dosis deriva de esa
-  asignación.
-- Cada segmento heredado alcanza una copia fundadora concreta; una inserción
-  nueva alcanza su evento creador.
-- Una mutación de novo no borra el origen del segmento sobre el que apareció.
-
-### 8.3. Transformaciones genómicas
-
-- Los eventos explícitos se aplican en orden y usan el estado inmediatamente
-  anterior como marco.
-- Un objetivo eliminado produce error; no se recoloca ni se ignora.
-- Las variantes estructurales anidadas o que modifican otra estructura previa en
-  el mismo linaje se rechazan en v1.
-- Adyacencia no equivale a solapamiento.
-- Los límites terminales, puntos de ruptura, orientación y máximo local de
-  copias se validan antes de publicar verdad.
-
-### 8.4. Aleatoriedad y reproducibilidad
-
-- Toda decisión aleatoria pertenece a un ámbito identificable.
-- Cambiar o retirar un muestreo no cambia la trayectoria evolutiva.
-- Dos eventos técnicos tienen flujos independientes aunque compartan individuo.
-- La misma semilla, configuración, entradas y versión reproduce las mismas
-  decisiones biológicas dentro de la garantía finalmente aprobada.
-- No se promete identidad bit a bit, compatibilidad entre versiones,
-  reproducibilidad entre plataformas ni independencia del paralelismo hasta
-  resolver las decisiones correspondientes.
-
-### 8.5. Verdad y evidencia
-
-- La evidencia técnica nunca modifica verdad, fase o genotipo.
-- VCF se deriva exclusivamente de la verdad faseada.
-- Cobertura cero, contaminación o mal mapeo no convierten un genotipo verdadero
-  en ausente.
-- Los campos observacionales no se incorporan como genotipo inferido al VCF de
-  verdad.
-- Toda desviación técnica intencionada se explica mediante configuración,
-  perfil, artefacto o decisión aleatoria registrada.
-
-### 8.6. Integridad de resultados
-
-- Un artefacto activado que falta impide el cierre con éxito.
-- Un alineamiento final, su índice y su referencia se validan conjuntamente.
-- VCF, compresión, índice, cabecera y referencia se validan conjuntamente.
-- Los FASTQ de un evento no se reutilizan en otro evento.
-- El fichero de procedencia no duplica secuencias ni calidades.
-- Una salida provisional o fallida nunca aparece como completa en el
-  manifiesto.
+Ningún adaptador de formato, proceso externo, manifiesto o escritor de salida
+puede saltarse estas fronteras. Los casos observables son los ACE asignados a
+cada REQ en
+[trazabilidad-requisitos-0.1.md](trazabilidad-requisitos-0.1.md).
 
 ## 9. Configuración, persistencia y resultados
 
-### 9.1. Cuatro clases de información
+### 9.1. Clases de información
 
-1. **Configuración declarada:** lo escrito por la persona usuaria, conservado
-   sin reinterpretación retrospectiva.
-2. **Configuración efectiva:** resultado validado de predeterminados,
-   precedencias y normalizaciones; queda fijada antes de su ámbito de uso.
-3. **Estado interno:** referencias, verdad, eventos e historial necesarios para
-   continuar y reconstruir la simulación.
-4. **Resultados publicados:** artefactos validados, manifiestos e informes que
-   otras herramientas pueden consumir.
+La arquitectura separa cuatro almacenes lógicos para impedir que una
+representación derive autoridad de otra:
 
-Los formatos físicos de estas cuatro clases pueden ser distintos. La elección
-queda pendiente y deberá permitir versionado de esquema y lectura por programa.
+| Clase | Propietario | Mutabilidad y uso |
+|---|---|---|
+| Configuración declarada | Adaptador de entrada | Se conserva para auditoría; no es consultada directamente por los motores |
+| Configuración efectiva | Resolvedor de configuración | Vista inmutable que consumen orquestadores y motores |
+| Estado interno y verdad | Repositorios de dominio | Evoluciona solo mediante operaciones biológicas y conserva lo necesario para reconstrucción |
+| Resultados publicados | Ensamblador, validadores y publicador | Se hacen visibles al exterior después del cierre del conjunto |
 
-### 9.2. Organización lógica
+Los contenidos exigidos a estas clases están en REQ-CONF-01 a REQ-CONF-123,
+REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a
+REQ-SAL-26. Esta separación no decide sus esquemas físicos.
 
-La raíz de la ejecución contiene configuración efectiva, verdad obligatoria,
-manifiesto general y recursos comunes. Cada referencia y sus índices se
-almacenan una vez como recurso común verificable. Cada evento posee un ámbito
-separado y, dentro de él, un ámbito por referencia de mapeo para BAM, CRAM, VCF e
-índices. Los FASTQ y su procedencia permanecen en el ámbito del evento y grupo
-de lectura.
+### 9.2. Espacios lógicos
 
-Esta organización es lógica. Los nombres de directorio, extensiones concretas,
-esquemas y formato de paquete no quedan decididos por este documento.
+La raíz de ejecución, los recursos compartidos, los eventos y las referencias
+de mapeo son espacios lógicos distintos. Las identidades tipadas enlazan esos
+espacios; las rutas, extensiones o nombres físicos son responsabilidad de los
+adaptadores de persistencia. Así se puede cambiar el empaquetado sin alterar el
+dominio ni usar una convención de directorios como clave biológica.
 
 ### 9.3. Escritura y recuperación
 
-Las escrituras de artefactos grandes pueden ser incrementales, pero su
-publicación es atómica desde la perspectiva del manifiesto: o el artefacto
-validado está disponible o figura como fallido/incompleto. La política concreta
-de archivos temporales, reanudación y limpieza queda pendiente.
+Los productores pueden escribir por flujo o por fragmentos. Cada artefacto pasa
+por estados internos explícitos —provisional, validado, fallido o publicado— y
+el manifiesto se construye a partir de esas transiciones. El mecanismo concreto
+de temporales, reanudación y limpieza sigue siendo una decisión técnica de
+planificación; los efectos observables de completitud pertenecen a REQ-VAL-01 a
+REQ-VAL-51, REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a REQ-SAL-26.
 
 ## 10. Errores y observabilidad
 
-### 10.1. Categorías
+### 10.1. Estrategia de errores
 
-| Categoría | Ejemplos | Efecto |
+Los componentes devuelven errores tipados de su propio vocabulario. El
+orquestador añade ejecución, etapa y entidad; los adaptadores añaden ruta,
+herramienta o posición cuando corresponda. Una capa puede traducir un error al
+vocabulario de la capa superior, pero conserva la causa y no repara ni
+reclasifica el resultado por su cuenta.
+
+| Origen técnico | Contexto que debe aportar la arquitectura | Fuente de la consecuencia funcional |
 |---|---|---|
-| Configuración | Identidad duplicada, ploidía inválida, ciclo, orden ambiguo, proporciones incompatibles | Rechazo antes de simular |
-| Entrada | FASTA/FASTQ ilegible, símbolos inválidos, pares incoherentes | Rechazo del ámbito antes de generar resultados dependientes |
-| Dominio biológico | Objetivo eliminado, estructura incompatible, parentales insuficientes | Detención del evento biológico o ejecución según el requisito |
-| Resultado aleatorio previsto | N o Ne realizado distinto del objetivo | Conservación del resultado y advertencia; N=0 aplica su política específica |
-| Extinción autorizada | Dependencia desaparecida por N=0 permitido | Omisión atómica y causal de la rama dependiente |
-| Recursos | Presupuesto configurado excedido o agotamiento durante ejecución | Rechazo previo o fallo explícito; nunca resultado parcial completo |
-| Proceso externo | Ejecutable ausente, versión incompatible, código no cero, salida inválida | Fallo del evento/conjunto y de la ejecución si la salida era obligatoria |
-| Formato e integridad | Cabecera, índice, referencia o suma incompatibles | El artefacto o conjunto no se marca completo |
-| Estadístico | Desviación fuera de tolerancia | Advertencia predeterminada o error configurable, salvo excepciones N/Ne |
-| Defecto interno | Invariante imposible rota | Detención segura con contexto; no se intenta continuar silenciosamente |
+| Admisión o entrada | Campo, valor, ubicación y reglas implicadas | REQ-CONF-01 a REQ-CONF-123, REQ-FMT-01 a REQ-FMT-07, REQ-REF-01 a REQ-REF-23 y REQ-VAL-01 a REQ-VAL-51 |
+| Motor de dominio | Entidad, generación o evento y estado previo identificable | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73, REQ-CRU-01 a REQ-CRU-45, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17, REQ-REC-01 a REQ-REC-29 y REQ-MUT-01 a REQ-MUT-15 |
+| Productor técnico o proceso externo | Evento, herramienta, versión, invocación y artefacto afectado | REQ-TEC-01 a REQ-TEC-10, REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14, REQ-CONT-01 a REQ-CONT-16 y REQ-VAL-01 a REQ-VAL-51 |
+| Materialización o publicación | Conjunto, referencia, artefactos y enlaces implicados | REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-88, REQ-SAL-01 a REQ-SAL-26 y REQ-VAL-01 a REQ-VAL-51 |
+| Defecto de invariante interno | Componente, operación y contexto reproducible | REQ-VAL-01 a REQ-VAL-51 |
+
+La clasificación observable entre rechazo, fallo, aviso, resultado estadístico y
+estado no evaluable es exclusivamente la de REQ-VAL-01 a REQ-VAL-51 y sus
+ACE; esta tabla no introduce otra política.
 
 ### 10.2. Registro observable
 
-El sistema emite eventos estructurados de progreso y diagnóstico, además de
-mensajes comprensibles. Cada registro contiene ejecución, fase, componente,
-entidad, gravedad y contexto. Las invocaciones externas conservan herramienta,
-versión, parámetros efectivos, código de salida y diagnósticos, con una política
-pendiente para datos sensibles o excesivamente voluminosos.
+Los componentes emiten eventos estructurados a un colector común. El sobre
+técnico contiene identidad de ejecución, fase, componente, entidad, gravedad y
+correlación causal. La carga útil procede del componente responsable. Los
+mensajes para personas se renderizan desde ese registro y no son la única fuente
+de diagnóstico.
 
-Se observan, como mínimo, tiempo, memoria, almacenamiento, recuentos de
-individuos, haplotipos, variantes, lecturas y artefactos por las fronteras que
-los producen. No se fijan todavía umbrales cuantitativos ni objetivos de
-rendimiento.
+La observación de tiempo, memoria, almacenamiento y cantidades de dominio se
+sitúa en las fronteras que producen o consumen esos recursos. La selección de
+métricas, política de datos sensibles y umbrales de rendimiento se mantiene en
+las decisiones de planificación, sin modificar los criterios funcionales.
 
 ## 11. Estrategia de comprobación
 
-### 11.1. Pruebas de dominio
+La matriz
+[trazabilidad-requisitos-0.1.md](trazabilidad-requisitos-0.1.md) es el índice
+obligatorio entre cada REQ, sus ACE, el hito y la evidencia prevista. Esta
+sección solo organiza las capas técnicas de comprobación.
 
-- ejemplos pequeños que reconstruyen cada haplotipo base por base;
-- propiedades de ploidía, fase, dosis, orden y unicidad;
-- transformación y composición permitida de variantes;
-- casos mendelianos y poliploides controlados;
-- poblaciones pequeñas con resultados enumerables;
-- invariancia de trayectoria al añadir o retirar muestreos;
-- selección declarativa sobre verdad, nunca sobre evidencia;
-- aislamiento entre referencias y entre eventos técnicos.
+| Capa | Propósito técnico | Evidencia |
+|---|---|---|
+| Dominio unitario | Probar tipos, transformaciones e invariantes sin E/S ni procesos externos | Casos TEST de cada REQ biológico y sus ACE |
+| Frontera de componente | Probar traducción de identidades, coordenadas, configuración y errores con dobles de dependencias | Casos TEST de REQ-CONF-01 a REQ-CONF-123, REQ-REF-01 a REQ-REF-23 y REQ-VAL-01 a REQ-VAL-51, además de la familia del componente |
+| Adaptador | Comprobar lectura, escritura e invocación contra contratos externos | Casos TEST de REQ-FMT-01 a REQ-FMT-07, REQ-DAT-01 a REQ-DAT-73, REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a REQ-SAL-26 |
+| Propiedad y estadística | Explorar espacios amplios sin confundir variación aleatoria con un invariante | Casos TEST asociados a REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
+| Recorrido completo | Demostrar que las fronteras componen un paquete trazable | ACE e hitos enlazados por la matriz |
 
-### 11.2. Pruebas estadísticas
-
-Las pruebas estadísticas comparan distribuciones y agregados en múltiples
-réplicas y registran semilla, tamaño del caso, estadístico y tolerancia. No
-exigen exactitud a una realización estocástica. Las tolerancias y tamaños de
-muestra se decidirán antes de implementar cada modelo.
-
-### 11.3. Pruebas de contratos externos
-
-Cada formato se comprueba con un validador independiente cuando exista una
-opción aprobada. Se prueban cabeceras, coordenadas, orden, compresión, índices,
-referencias, grupos de lectura, pares y casos no mapeados. La selección de
-validadores y sus versiones queda en el registro técnico.
-
-### 11.4. Recorridos completos
-
-La hoja de ruta define el crecimiento del recorrido: F1 prueba configuración,
-semilla, identidad y referencia; F2 añade verdad faseada; F3 añade FASTQ,
-mapeo y alineamiento; F4 amplía realismo técnico; F5–F8 amplían biología; F9
-consolida escala e interoperabilidad.
-
-Cada cierre demuestra una verdad independiente del productor. Un archivo que
-solo puede validarse volviendo a leer el mismo estado o mediante el mismo
-algoritmo no basta para detectar errores biológicamente plausibles.
+Los validadores independientes y versiones concretas se eligen en la
+planificación. La prueba del productor nunca sustituye por sí sola a una
+comprobación independiente cuando el hito exige interoperabilidad.
 
 ## 12. Recursos y evolución prevista
 
-Las secuencias y haplotipos se exponen mediante contratos que permiten evitar
-copias completas y materializar por tramos, pero la representación concreta se
-elige con medidas. La E/S admite escritura secuencial y procesamiento por
-unidades independientes sin exigir que todo resida en memoria. Estas son
-capacidades de frontera, no una promesa de rendimiento.
+Las interfaces de secuencia, haplotipo, lecturas y artefactos admiten acceso por
+tramos y escritura incremental. La representación interna, el tamaño de bloque,
+la concurrencia y la política de caché se eligen con medidas; no forman parte
+del contrato funcional. El estimador y el observador de recursos comparten
+unidades, pero permanecen separados para poder comparar estimación y uso real.
 
-La arquitectura deja puntos de extensión para nuevos perfiles, mapeadores,
-formatos, modelos mutacionales y tecnologías. Cada extensión requiere una
-capacidad funcional aprobada, un adaptador o estrategia con identidad versionada
-y pruebas de compatibilidad. No se construyen hoy contratos para tecnologías o
-modelos excluidos de v1.
+Los puntos de extensión se sitúan en adaptadores de formatos y herramientas,
+estrategias de dominio expresamente aprobadas y productores de artefactos. Una
+extensión no puede entrar por una rama genérica y eludir identidad, validación,
+trazabilidad o versionado.
+
+Las capacidades funcionales fuera de v1 se registran únicamente en
+[registro-ampliaciones-futuras-0.1.md](registro-ampliaciones-futuras-0.1.md);
+las decisiones técnicas aún pendientes se mantienen en la sección 10 de
+[decisiones-tecnicas-0.1.md](decisiones-tecnicas-0.1.md). Esta arquitectura no
+anticipa esos comportamientos con entidades implícitas ni los presenta como
+obligaciones vigentes.
 
 ## 13. Trazabilidad de requisitos a responsables
 
@@ -679,7 +628,6 @@ modelos excluidos de v1.
 | REQ-SEL | Dinámica evolutiva: selección de viabilidad | Motor genómico y validación comprueban locus, dosis, función y supervivencia |
 | REQ-MIG | Dinámica evolutiva: migración | Selección declarativa e historial prueban asignación conjunta y pertenencia |
 | REQ-MUT | Motor de verdad genómica | Evolución, familias y validación prueban orden, tasas y transmisión |
-| REQ-TE | Motor genómico y catálogo de referencias | Materialización de verdad y manifiestos prueban secuencia, evento y linaje |
 | REQ-REC | Reproducción y recombinación | Coordenadas, motor genómico y salida detallada prueban bivalentes y segmentos |
 | REQ-DAT, REQ-WGS | Simulación WGS y alineamiento | Artefactos, modo directo y validación técnica prueban origen y coherencia |
 | REQ-CONT | Artefactos y demultiplexado | Procedencia y validación prueban sustitución, transferencias y totales |
@@ -689,7 +637,7 @@ modelos excluidos de v1.
 | REQ-SAL | Ensamblado de resultados | Validación y manifiestos deciden completitud y exportabilidad |
 | REQ-NOF | Estimación y observación de recursos | Todos los componentes exponen medidas sin imponer límites funcionales fijos |
 
-Los criterios ACE-01 a ACE-106 se distribuyen siguiendo esta matriz. Antes de
+Los criterios ACE-01 a ACE-111 se distribuyen siguiendo esta matriz. Antes de
 planificar cada fase, sus criterios se convertirán en casos concretos y se
 enlazarán con el componente y la frontera que aportan la evidencia.
 

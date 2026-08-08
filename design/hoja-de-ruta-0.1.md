@@ -7,6 +7,13 @@
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Lenguaje del núcleo:** Rust
 
+Esta hoja es un instrumento derivado de planificación y no crea obligaciones
+funcionales distintas de la especificación. La asignación exhaustiva de REQ,
+ACE, fase y prueba prevista está en
+[trazabilidad-requisitos-0.1.md](./trazabilidad-requisitos-0.1.md).
+Las capacidades excluidas de v1 y su destino post-v1 se mantienen en
+[registro-ampliaciones-futuras-0.1.md](./registro-ampliaciones-futuras-0.1.md).
+
 ## 1. Finalidad
 
 Esta hoja de ruta divide el desarrollo en fases que produzcan resultados
@@ -114,12 +121,14 @@ cree una ejecución identificada y produzca resultados trazables y repetibles.
 - **F1.1. Base del proyecto.** Disponer del proyecto Cargo, comprobaciones de
   formato, análisis estático, pruebas y política inicial de dependencias.
 - **F1.2. Configuración validada.** Leer la configuración mínima, aplicar valores
-  predeterminados y rechazar estados incompatibles antes de simular.
+  base, resolver sustituciones mediante la matriz y la dominancia de
+  REQ-CONF-116 a REQ-CONF-123 y rechazar antes de simular máximas
+  incomparables, duplicados, regiones solapadas y selectores no permitidos.
 - **F1.3. Aleatoriedad reproducible.** Registrar la semilla y demostrar la
   repetición de un caso mínimo con entradas y versión idénticas.
 - **F1.4. Identidad y resultados.** Crear identificadores, directorios,
-  configuración efectiva y manifiesto mínimo sin confundir referencias,
-  muestras o eventos.
+  configuración efectiva y manifiesto mínimo con regla ganadora, selectores y
+  procedencia, sin confundir referencias, muestras o eventos.
 - **F1.5. Referencia mínima.** Aceptar una referencia pequeña simulada o
   suministrada y conservar su FASTA e identidad verificable.
 
@@ -146,21 +155,28 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
 **Hitos:**
 
 - **F2.1. Estado haplotípico.** Representar copias cromosómicas, fase, dosis y
-  procedencia sin duplicar innecesariamente secuencias completas.
+  procedencia sin duplicar innecesariamente secuencias completas; conservar `N`
+  como base desconocida con coordenada y longitud.
 - **F2.2. Variantes pequeñas.** Aplicar SNP e *indels* exactos y aleatorios con
-  coordenadas y orden definidos.
+  coordenadas y orden definidos; los recuentos aleatorios usan exclusivamente
+  Poisson. Rechazar SNP sobre `N`, excluirla de sus oportunidades y conservarla
+  en intervalos que no necesitan interpretarla.
 - **F2.3. Individuos directos.** Construir individuos desde la configuración y
   reconstruir la secuencia de cada haplotipo.
 - **F2.4. Verdad estructurada.** Guardar el genotipo real y la información
   necesaria para reconstruirlo independientemente del VCF.
-- **F2.5. VCF de verdad mínimo.** Producir un VCF multimuesta ordenado, derivado
-  del estado real y sin campos inferidos de lecturas.
+- **F2.5. VCF de verdad mínimo.** Producir exactamente un VCF multimuesta
+  estándar por conjunto, ordenado, derivado del estado real y sin campos
+  inferidos de lecturas. No emitir SNP con `REF=N` ni inventar una base; aplicar
+  complemento si otro cambio no conserva `N` sin pérdida en la versión elegida.
 
 **Resultado de salida:** referencia, individuos faseados, verdad estructurada y
 VCF verdadero coherentes.
 
 **Evidencia de cierre:** casos sintéticos independientes reconstruyen las
-secuencias esperadas y demuestran coordenadas, alelos, fase y dosis.
+secuencias esperadas y demuestran coordenadas, alelos, fase y dosis. Incluyen un
+SNP rechazado sobre `N`, una inserción aleatoria sin `N`, una explícita que la
+conserva y un caso VCF/complemento sin resolución implícita.
 
 > Revisión de F2: validar la verdad biológica antes de generar una sola lectura.
 
@@ -178,7 +194,8 @@ mapeador.
 **Hitos:**
 
 - **F3.1. Lecturas desde haplotipos.** Generar FASTQ con cobertura o número de
-  lecturas y contribución proporcional a dosis y ploidía.
+  lecturas y contribución proporcional a dosis y ploidía. Las regiones con `N`
+  son muestreables y la lectura la conserva con Phred 0.
 - **F3.2. Mapeo.** Ejecutar minimap2 contra la referencia elegida, registrar
   versión y parámetros y detectar cualquier fallo del proceso.
 - **F3.3. Alineamiento final.** Producir BAM o CRAM ordenado e indexado con
@@ -218,15 +235,17 @@ poblaciones pueden alimentar este mismo recorrido sin crear otra implementación
 - **F4.2. Cobertura, longitud, error y calidad.** Aplicar perfiles validados y
   sustituciones configurables por los ámbitos permitidos.
 - **F4.3. Artefactos WGS.** Simular duplicados, adaptadores, sesgo GC, quimeras y
-  anomalías *paired-end* incluidas en la primera versión.
+  anomalías *paired-end* incluidas en la primera versión. El contenido GC
+  excluye `N`; una ventana sin bases conocidas no recibe corrección y se registra.
 - **F4.4. Contaminación biológica.** Sustituir lecturas según fuentes, unidades y
   matrices dirigidas compatibles.
 - **F4.5. Demultiplexado técnico.** Representar reasignaciones y descartes por
   índices y conservar la procedencia sin duplicar secuencias.
 - **F4.6. Modo directo.** Producir alineamientos sintéticos coherentes sin FASTQ
   y demostrar concordancia funcional con el modo realista donde corresponda.
-- **F4.7. Calibración desde datos reales.** Estimar perfiles reutilizables desde
-  FASTQ y referencia suministrados sin copiar las lecturas concretas.
+- **F4.7 (retirado de v1). Calibración desde datos reales.** No se implementa en
+  esta versión. La admisión rechaza antes de simular FASTQ o referencia de
+  calibración, solicitudes de estimación y perfiles empíricos reutilizables.
 
 **Resultado de salida:** eventos WGS configurables, trazables y separados por
 tecnología, referencia y muestra, disponibles desde una etapa temprana del
@@ -238,6 +257,13 @@ técnica.
 
 > Revisión de F4: aprobar los perfiles y artefactos antes de ampliar las clases
 > de variación y los modelos poblacionales.
+
+La calibración empírica automática queda en la hoja de trabajo futura, sin
+bloquear F4. Antes de recuperarla deberán acordarse el contrato mínimo de
+entrada, la separación entre variantes y errores, el esquema reutilizable, las
+métricas y umbrales de fiabilidad y las reglas de reutilización. Los perfiles
+incorporados de Illumina y PacBio HiFi y sus sustituciones explícitas sí forman
+parte de F4.
 
 ### F5. Referencias y variación complejas
 
@@ -251,13 +277,18 @@ separación estricta entre referencias.
 - **F5.1. Referencias estructurales.** Crear referencias derivadas mediante
   duplicaciones, deleciones, inversiones y translocaciones permitidas.
 - **F5.2. Variantes estructurales individuales.** Representar cambios
-  estructurales en haplotipos y conservar sus efectos finales.
+  estructurales en haplotipos y conservar sus efectos finales, incluidas las `N`
+  internas de intervalos copiados, eliminados, invertidos o desplazados.
 - **F5.3. Ploidía general.** Admitir la ploidía confirmada por cromosoma o
   *scaffold* sin diferencias entre individuos.
-- **F5.4. Repeticiones y elementos transponibles.** Añadir repeticiones en
-  tándem y eventos configurados de elementos transponibles dentro del alcance.
-- **F5.5. Variantes solapadas.** Resolver cambios secuenciales, variantes
-  eliminadas y alelos finales complejos.
+- **F5.4. Repeticiones en tándem.** Añadir repeticiones en tándem dentro del
+  alcance y su modelo escalonado simple de expansión o contracción de una unidad
+  completa por mutación. Los elementos transponibles no son una clase funcional
+  de v1.
+- **F5.5. Variantes solapadas y complemento.** Resolver cambios secuenciales,
+  variantes eliminadas y alelos finales complejos. Cuando un caso pierda detalle
+  en VCF, enlazar sus registros con una única entrada complementaria y demostrar
+  la reconstrucción completa del par.
 - **F5.6. Varios conjuntos de referencia.** Mapear las mismas muestras contra
   referencias diferentes y producir BAM/CRAM y VCF independientes.
 
@@ -265,7 +296,8 @@ separación estricta entre referencias.
 independientes por referencia.
 
 **Evidencia de cierre:** pruebas con verdad conocida demuestran transformaciones,
-límites, solapamientos y ausencia de mezcla entre referencias.
+límites, solapamientos y ausencia de mezcla entre referencias, incluida una SV
+que contiene `N` y la conserva donde corresponda.
 
 > Revisión de F5: confirmar que la complejidad estructural no rompe la verdad
 > mínima ni el realismo técnico establecido en F4.
@@ -281,10 +313,12 @@ evolución a lo largo de generaciones.
 
 - **F6.1. Creación probabilística y controlada.** Generar alelos, genotipos,
   dosis y recuentos según el modo seleccionado.
-- **F6.2. Frecuencias y Hardy-Weinberg.** Aplicar y comprobar los modelos
-  confirmados para las ploidías admitidas.
-- **F6.3. Endogamia inicial.** Aplicar F en los ámbitos permitidos y registrar
-  valores esperados y realizados.
+- **F6.2. Frecuencias y Hardy-Weinberg.** Aplicar y comprobar la distribución
+  binomial bialélica y la multinomial multialélica en ploidías 1–10, tanto en
+  modo probabilístico como controlado.
+- **F6.3. Endogamia inicial.** Aplicar las fórmulas confirmadas de F automático
+  solo en diploides, probar F=0, valores intermedios y F=1, rechazar F en P=1 o
+  P>2 y registrar F realizado como «no aplicable» fuera de diploides.
 - **F6.4. Desequilibrio de ligamiento.** Crear bloques no solapados mediante
   haplotipos y frecuencias conjuntas, conservando la fase.
 - **F6.5. Grupos y subpoblaciones.** Asignar identidades, pertenencias y
@@ -311,28 +345,52 @@ configurado de los procesos.
 
 **Hitos:**
 
-- **F7.1. Reproducción y recombinación.** Formar descendencia, bivalentes y
-  entrecruzamientos con fase y procedencia reconstruibles.
+- **F7.1. Reproducción y recombinación.** Validar ploidía par e igual y estado
+  estructural canónico idéntico, formar bivalentes al azar y transmitir la mitad
+  de copias de cada parental con fase y procedencia reconstruibles. Incluir
+  *scaffolds* sin recombinación y portadores de SV de novo incompatibles después.
 - **F7.2. Mutación heredable.** Introducir SNP, *indels*, variantes estructurales
-  y repeticiones según sus modelos y momentos confirmados.
-- **F7.3. Tamaño poblacional.** Gestionar N y Ne objetivos y realizados,
-  contribuciones parentales y avisos.
-- **F7.4. Selección y deriva.** Aplicar selección direccional de viabilidad y
-  muestreo aleatorio en el orden configurado.
+  y repeticiones según sus modelos y momentos confirmados. Contar por clase las
+  oportunidades válidas en todas las copias descendientes actuales, registrar
+  tasa, espacio, media Poisson y recuentos sorteado, aceptado y activo. Excluir
+  `N` de SNP, motivos repetidos y anclas que exigen base concreta sin excluirla
+  del interior de intervalos puramente estructurales.
+- **F7.3. Tamaño poblacional.** Procesar N intentos reproductivos, registrar
+  éxitos, fallos y N realizado, y calcular Ne reproductivo realizado cuando sea
+  evaluable. Ne objetivo y el control de contribuciones parentales quedan fuera
+  de v1.
+- **F7.4. Selección y deriva.** Aplicar selección direccional de viabilidad sobre
+  un único SNP bialélico protegido, validar todas las dosis y aptitudes antes de
+  supervivencia, rechazar un locus sobre `N` y demostrar los fallos por identidad
+  o máximo cero. La deriva
+  surge del muestreo aleatorio en el orden configurado.
 - **F7.5. Migración y subpoblaciones.** Ejecutar migraciones simultáneas,
   divisiones, fusiones, fundaciones y extinciones.
 - **F7.6. Fases evolutivas.** Variar parámetros y encadenar episodios como
-  panmixia, cuellos de botella o migración.
+  panmixia, cuellos de botella o migración sin alterar el orden generacional
+  fijo. Registrar cada etapa aplicada u omitida y el orden interno de varios
+  eventos demográficos.
 - **F7.7. Observaciones.** Muestrear generaciones sin alterar la trayectoria y
-  guardar historia, genotipos y salidas opcionales.
+  materializar estado completo y linaje detallado para población inicial,
+  final y generaciones o muestreos solicitados; conservar solo resúmenes de las
+  generaciones restantes, manteniendo internamente lo necesario para reconstruir
+  los individuos materializados.
 
 **Resultado de salida:** poblaciones evolucionadas reproducibles con linaje
 hasta los fundadores.
 
 **Evidencia de cierre:** casos pequeños permiten reconstruir cada transmisión y
 casos estadísticos comprueban que los procesos realizados concuerdan con sus
-parámetros dentro de las tolerancias acordadas. Una muestra evolutiva puede
-producir los resultados técnicos de F4 sin modificar su verdad genotípica.
+parámetros mediante informes de esperado, realizado, tamaño observado y
+desviación, sin usar una realización aleatoria para aceptar o rechazar la
+ejecución. Una muestra evolutiva puede producir los resultados técnicos de F4
+sin modificar su verdad genotípica.
+También debe demostrar las ocho etapas completas, la omisión de una etapa
+opcional en su posición, el rechazo previo de un orden alternativo y la
+trazabilidad de varios eventos demográficos ordenados dentro de su etapa.
+Debe incluir una generación materializada y otra no materializada y demostrar
+que esta última solo se enumera mediante su resumen sin impedir reconstruir el
+linaje solicitado.
 
 > Revisión de F7: comprobar exactitud y consumo de recursos antes de añadir
 > grafos de cruces complejos.
@@ -349,19 +407,26 @@ conservar todos los individuos y haplotipos intermedios.
 - **F8.1. Grafo de cruces.** Validar parentales, ciclos, dependencias y reglas
   declarativas antes de generar descendencia.
 - **F8.2. Cruces básicos.** Implementar autofecundación, cruzamiento sexual,
-  F2 y retrocruce como composiciones verificables.
+  F2 y retrocruce como composiciones verificables que rechazan parentales con
+  ploidía impar o desigual o con diferencias estructurales.
 - **F8.3. Selección de descendientes.** Elegir por identificador, azar,
   pertenencia, genotipo, dosis o haplotipo mediante el catálogo común.
 - **F8.4. Diseños complejos.** Expresar pedigrís, líneas de introgresión y MAGIC
   mediante el mismo modelo, sin código ejecutable en la configuración.
-- **F8.5. Poblaciones intermedias.** Conservar sus genotipos y generar FASTQ,
+- **F8.5. Poblaciones intermedias.** Materializar el estado faseado completo y
+  los metadatos de todos sus individuos en todos los eventos; generar FASTQ,
   BAM/CRAM o VCF únicamente cuando se solicite.
 
 **Resultado de salida:** familias y poblaciones segregantes reconstruibles desde
 sus fundadores y cruces.
 
-**Evidencia de cierre:** casos mendelianos y poliploides controlados demuestran
-parentesco, segregación, fase, recombinación y selección de descendientes.
+**Evidencia de cierre:** casos diploides y tetraploides con estructura idéntica,
+variantes pequeñas permitidas, cada clase de SV heterocigota, una SV fijada,
+ploidías inválidas, un *scaffold* sin recombinación y una SV de novo seguida de
+otro cruce demuestran parentesco, compatibilidad, segregación, fase,
+recombinación y selección de descendientes.
+La evidencia debe comprobar que una familia conserva y enumera todos sus
+individuos, incluidos los intermedios que no alimentan una salida técnica.
 
 > Revisión de F8: validar los grafos, los cruces y su integración con los
 > eventos técnicos antes de la consolidación.
@@ -378,13 +443,17 @@ publicarse.
 **Hitos:**
 
 - **F9.1. Escenarios de rendimiento.** Fijar casos representativos y medir CPU,
-  memoria, almacenamiento, individuos, generaciones y lecturas por segundo.
+  memoria, almacenamiento, individuos, generaciones y lecturas por segundo con
+  el contrato único de trazabilidad y todas las salidas activadas.
 - **F9.2. Representación compacta.** Optimizar, con evidencia, haplotipos,
   segmentos, genotipos, historia y materialización de secuencias.
 - **F9.3. Paralelismo reproducible.** Escalar por unidades independientes sin
   cambiar resultados con la misma semilla.
 - **F9.4. Presupuesto de recursos.** Estimar memoria, almacenamiento y tiempo,
-  emitir avisos y rechazar ejecuciones que superen límites configurados.
+  emitir avisos y rechazar antes de simular ejecuciones que no puedan cumplir el
+  mínimo, la trazabilidad y las salidas activadas. Nunca reducir detalle de
+  forma automática; el escenario deberá pedir menos materializaciones,
+  muestreos, individuos, lecturas u otras salidas.
 - **F9.5. Interoperabilidad.** Validar versiones, cabeceras, compresión, índices
   y compatibilidad de FASTA, FASTQ, BAM, CRAM y VCF.
 - **F9.6. Exportación autocontenida.** Empaquetar eventos con referencias,
@@ -410,7 +479,7 @@ bloqueantes abiertos.
 | F2 | Verdad genómica mínima | Reconstrucción independiente de haplotipos y VCF | Genotipos, fase o coordenadas incorrectos |
 | F3 | Primer recorrido extremo a extremo | Validación FASTQ, BAM/CRAM y procedencia | Alineamientos incoherentes con la verdad |
 | F4 | Realismo técnico WGS | Comparación de parámetros solicitados y realizados | Alterar la verdad con artefactos técnicos |
-| F5 | Variación y referencias complejas | Casos estructurales y aislamiento por referencia | Mezcla de referencias o pérdida de linaje |
+| F5 | Variación y referencias complejas | Casos estructurales, VCF más complemento y aislamiento por referencia | Mezcla de referencias o pérdida de linaje o detalle complejo |
 | F6 | Población inicial | Recuentos y pruebas estadísticas reproducibles | Frecuencias, LD o F mal representados |
 | F7 | Evolución poblacional | Reconstrucción de transmisiones y medidas realizadas | Orden evolutivo o genealogía incorrectos |
 | F8 | Familias y segregantes | Casos mendelianos y grafos validados | Cruces o selección de descendientes erróneos |
