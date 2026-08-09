@@ -1,0 +1,1 @@
+{"diagnostic_kind":"gps_diagnostics","schema_version":"1","exit_code":2,"diagnostics":[{"code":"GPS-CONF-005","category":"CONF","severity":"error","message":"La versión de esquema declarada no está admitida.","context":{"accepted":"1","found":"2","location":"line 2, column 18, bytes 41..44","path":"tests/fixtures/config/invalid-version-two.toml"}}]}

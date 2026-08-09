@@ -1,0 +1,10 @@
+config_kind = "scenario"
+schema_version = "1"
+id = "evolution-small"
+route = "evolution"
+
+[[phases]]
+id = "phase-1"
+
+[[events]]
+id = "sample-generation-10"

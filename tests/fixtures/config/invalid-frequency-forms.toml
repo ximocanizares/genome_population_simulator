@@ -1,0 +1,20 @@
+config_kind = "general"
+schema_version = "1"
+route = "direct"
+
+[reference]
+kind = "simulated"
+id = "ref"
+default_ploidy = 2
+composition = [{ id = "A", category = "base", value = 1.0 }]
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 100
+
+[[frequency_sets]]
+id = "alleles"
+mode = "probabilistic"
+values = [{ id = "A", category = "allele", value = 0.5 }]
+counts = [{ id = "A", category = "allele", count = 1 }]

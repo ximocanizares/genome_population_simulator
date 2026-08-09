@@ -1,0 +1,3 @@
+config_kind = "scenario"
+schema_version = "1"
+route = "direct"

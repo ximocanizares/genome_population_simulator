@@ -6,4 +6,8 @@
 
 pub mod adapters;
 pub mod application;
+pub mod configuration;
+pub mod diagnostics;
 pub mod domain;
+pub mod numeric;
+pub mod rules;

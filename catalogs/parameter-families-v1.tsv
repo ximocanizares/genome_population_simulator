@@ -1,0 +1,10 @@
+# parameter_catalog_version=1
+# parameter|family|biological|allowed_axes|allowed_spatial_levels|value_domain
+ploidy|structure_ploidy|true|spatial|sequence|integer_1_10
+variant_rate|creation_frequency_mutation|true|individual;population;temporal;spatial;group;block|sequence;region;locus|finite_non_negative_real
+selfing_rate|demography_reproduction_selection|true|population;temporal|none|probability_f64_0_1
+recombination_rate|recombination|true|spatial;group|sequence|finite_non_negative_real
+coverage|wgs_coverage_profile_error|false|technical_event;individual;spatial|sequence;region|finite_non_negative_real
+error_rate|wgs_coverage_profile_error|false|technical_event;individual;spatial|sequence;region|probability_f64_0_1
+contamination_rate|contamination_demultiplexing|false|technical_event;individual|none|probability_f64_0_1
+output_enabled|outputs_observation|false|technical_event;individual|none|boolean

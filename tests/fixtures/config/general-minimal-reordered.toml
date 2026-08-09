@@ -1,0 +1,19 @@
+schema_version = "1"
+route = "direct"
+config_kind = "general"
+
+[reference]
+composition = [
+  { category = "base", value = 0.25, id = "A" },
+  { value = 0.25, id = "C", category = "base" },
+  { id = "G", value = 0.25, category = "base" },
+  { category = "base", id = "T", value = 0.25 },
+]
+default_ploidy = 2
+id = "ref-main"
+kind = "simulated"
+
+[[reference.sequences]]
+length = 1000
+class = "chromosome"
+id = "chr1"

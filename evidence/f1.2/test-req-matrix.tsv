@@ -1,0 +1,37 @@
+test_id	requirement	status	milestone	evidence	verified_behavior
+TEST-REQ-CONF-01	REQ-CONF-01	pass	F1.2	tests/declared_config.rs::reordered_toml_has_the_same_declared_semantics_but_keeps_its_own_bytes	TOML estructurado se admite y conserva bytes y semántica declarada
+TEST-REQ-CONF-04	REQ-CONF-04	pass	F1.2	tests/config_validation.rs::simulated_reference_preserves_sequence_count_lengths_classes_and_composition	referencia simulada conserva cantidad, tamaños, clases y composición declarados
+TEST-REQ-CONF-05	REQ-CONF-05	pass	F1.2	tests/config_validation.rs::known_sum_classes_and_zero_explicit_events_are_preserved	tamaño total es la suma exacta comprobada de las secuencias
+TEST-REQ-CONF-07	REQ-CONF-07	pass	F1.2	tests/cli_config_diagnostics.rs::valid_validation_is_read_only_even_with_an_output_argument	las tres vías se seleccionan y admiten de extremo a extremo
+TEST-REQ-CONF-09	REQ-CONF-09	pass	F1.2	tests/cli_config_diagnostics.rs::valid_validation_is_read_only_even_with_an_output_argument	vías evolutiva y familiar enlazan su escenario y la directa no lo inventa
+TEST-REQ-CONF-10	REQ-CONF-10	pass	F1.2	tests/declared_config.rs::scenario_lists_preserve_normative_order_and_explicit_identity	envolturas de escenario estructuradas conservan identidad y orden normativo
+TEST-REQ-CONF-13	REQ-CONF-13	reassigned	F9.7	-	no puede cerrarse hasta comprobar todos los parámetros añadidos en hitos posteriores
+TEST-REQ-CONF-14	REQ-CONF-14	pass	F1.2	tests/effective_config.rs::changing_a_toml_parameter_changes_the_effective_value_without_code_changes	editar solo TOML cambia el valor efectivo sin modificar código
+TEST-REQ-CONF-16	REQ-CONF-16	reassigned	F9.7	-	no puede cerrarse hasta comprobar todos los parámetros aleatorios de la versión
+TEST-REQ-CONF-17	REQ-CONF-17	reassigned	F9.7	-	requiere verificar conjuntamente individuos directos, fundadores y parentales de todas las vías
+TEST-REQ-CONF-18	REQ-CONF-18	reassigned	F9.7	-	requiere verificar existencia y categoría junto con consumo, no herencia y ausencia de modificación retroactiva en descendientes reales
+TEST-REQ-CONF-20	REQ-CONF-20	reassigned	F2.3	-	requiere modelar cantidad o densidad, unidad y consumo efectivo por individuo
+TEST-REQ-CONF-22	REQ-CONF-22	reassigned	F2.3	-	requiere modelar distribuciones y regiones de creación directa por individuo
+TEST-REQ-CONF-24	REQ-CONF-24	reassigned	F2.2	-	requiere sortear y observar el número realizado de eventos
+TEST-REQ-CONF-29	REQ-CONF-29	pass	F1.2	tests/rule_dominance.rs::every_internal_hierarchy_resolves_in_an_applicable_context_without_cross_axis_priority	locus, región, secuencia y ausencia se resuelven en un contexto aplicable sin prioridad entre ejes
+TEST-REQ-CONF-30	REQ-CONF-30	pass	F1.2	tests/rule_validation.rs::closed_regions_reject_partial_total_and_boundary_overlap	solapes parciales, totales y de borde cerrado se rechazan y la adyacencia se admite
+TEST-REQ-CONF-31	REQ-CONF-31	pass	F1.2	tests/rule_dominance.rs::spatial_and_individual_rules_require_a_combined_rule_for_their_intersection	reglas espacial e individual son incomparables y solo su combinación explícita domina con cualquier orden
+TEST-REQ-CONF-32	REQ-CONF-32	reassigned	F6.2	-	requiere aplicar restricciones individuales a objetivos poblacionales de frecuencia
+TEST-REQ-CONF-43	REQ-CONF-43	reassigned	F7.6	-	requiere modelar y consumir activación de procesos por fase, generación y subpoblación
+TEST-REQ-CONF-65	REQ-CONF-65	pass	F1.2	tests/cli_config_diagnostics.rs::ploidy_rejections_cover_absent_non_integer_below_and_above_bounds_with_sequence_identity	ploidía ausente, no entera, menor que uno o mayor que diez se rechaza identificando referencia y secuencia
+TEST-REQ-CONF-83	REQ-CONF-83	reassigned	F4.2	-	requiere aplicar homogéneamente un perfil versionado durante generación de lecturas
+TEST-REQ-CONF-84	REQ-CONF-84	reassigned	F4.2	-	requiere modelar y aplicar sustituciones completas del perfil de errores
+TEST-REQ-CONF-106	REQ-CONF-106	pass	F1.2	tests/numeric_normalization.rs::inclusive_edge_inside_and_outside_are_distinct;tests/numeric_normalization.rs::decimal_rendering_round_trips_every_recorded_f64_exactly	borde inclusivo decide normalización o rechazo y conserva valores, sumas y deltas anteriores y posteriores
+TEST-REQ-CONF-116	REQ-CONF-116	reassigned	F9.7	-	requiere auditar valores generales, predeterminados o bases de todos los parámetros incorporados por hitos posteriores
+TEST-REQ-CONF-117	REQ-CONF-117	pass	F1.2	tests/rule_dominance.rs::every_internal_hierarchy_resolves_in_an_applicable_context_without_cross_axis_priority	generación, subpoblación, locus, región, secuencia, individuo, evento, grupo y bloque se resuelven contra ausencia sin prioridad transversal
+TEST-REQ-CONF-118	REQ-CONF-118	pass	F1.2	tests/cli_config_diagnostics.rs::incomparable_declared_intersections_fail_before_simulation_independent_of_rule_order;tests/rule_dominance.rs::spatial_and_individual_rules_require_a_combined_rule_for_their_intersection	máximas incomparables fallan con ámbito y reglas; una combinación explícita única domina independientemente del orden
+TEST-REQ-CONF-119	REQ-CONF-119	pass	F1.2	tests/rule_validation.rs::exact_duplicates_fail_with_equal_or_different_values	selectores exactamente duplicados fallan aunque sus valores coincidan
+TEST-REQ-CONF-120	REQ-CONF-120	reassigned	F9.7	-	requiere comprobar selectores y vigencia junto con no herencia y ausencia de modificación retroactiva sobre descendientes reales
+TEST-REQ-CONF-121	REQ-CONF-121	reassigned	F9.7	-	requiere auditar la matriz completa cuando todos los parámetros de las familias de v1 estén incorporados
+TEST-REQ-CONF-122	REQ-CONF-122	reassigned	F9.7	-	requiere comprobar que sustituciones técnicas no alteran genotipo, genealogía, trayectoria ni verdad y que eventos biológicos no se reinterpretan como técnicos
+TEST-REQ-IND-13	REQ-IND-13	reassigned	F2.2	-	requiere distribuir eventos reales uniformemente o por regiones configuradas
+TEST-REQ-IND-15	REQ-IND-15	reassigned	F2.3	-	requiere comprobar el consumo aislado de la región individual durante creación directa
+TEST-REQ-IND-21	REQ-IND-21	reassigned	F2.2	-	requiere aplicar el valor espacial resuelto al generar eventos reales
+TEST-REQ-REP-02	REQ-REP-02	reassigned	F7.6	-	requiere representar intervalos de generaciones y consumir la tasa efectiva en reproducción
+TEST-REQ-VAL-40	REQ-VAL-40	reassigned	F6.2	-	requiere validar además la tolerancia específica 0,5/C del modo controlado y su separación de la tolerancia general
+TEST-REQ-VAL-51	REQ-VAL-51	pass	F1.2	tests/rule_matching.rs::base_rule_is_mandatory_for_a_resolvable_parameter;tests/rule_dominance.rs::every_internal_hierarchy_resolves_in_an_applicable_context_without_cross_axis_priority;tests/rule_dominance.rs::spatial_and_individual_rules_require_a_combined_rule_for_their_intersection;tests/rule_dominance.rs::declared_individual_region_and_region_subpopulation_intersections_are_preflighted;tests/rule_validation.rs::exact_duplicates_fail_with_equal_or_different_values;tests/rule_validation.rs::closed_regions_reject_partial_total_and_boundary_overlap;tests/parameter_catalog.rs::prohibited_selector_diagnostic_identifies_parameter_scope_and_domain_boundary	admisión cubre base, jerarquías, combinación, conflictos cruzados, duplicados, solapes, selectores prohibidos y separación biológica/técnica

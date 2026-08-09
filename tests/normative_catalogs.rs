@@ -6,13 +6,14 @@ const DIAGNOSTIC_CATALOG: &str = include_str!("../catalogs/diagnostics-v1.tsv");
 const DIAGNOSTIC_SCHEMA: &str = include_str!("../schemas/diagnostics-v1.schema.json");
 const SUBSEED_CATALOG: &str = include_str!("../catalogs/subseed-scopes-v1.tsv");
 const ID_CATALOG: &str = include_str!("../catalogs/id-classes-v1.tsv");
+const PARAMETER_CATALOG: &str = include_str!("../catalogs/parameter-families-v1.tsv");
 const SUBSEED_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
 
 // These fingerprints are the review lock for the published v1 contracts. A
 // deliberate content change must use a new versioned artifact and add a new
 // fingerprint instead of replacing a v1 value here.
-const V1_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 4] = [
+const V1_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 5] = [
     (
         "catalogs/diagnostics-v1.tsv",
         DIAGNOSTIC_CATALOG,
@@ -32,6 +33,11 @@ const V1_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 4] = [
         "catalogs/id-classes-v1.tsv",
         ID_CATALOG,
         "7eca3d96b64ed2c5944f06c95b5b547464ace88ca6f5b3d3479235b56d7f23cf",
+    ),
+    (
+        "catalogs/parameter-families-v1.tsv",
+        PARAMETER_CATALOG,
+        "5507a763b91520449a022bd6e371cb4f03cafa5547a68ea8c0e1cfc3221b9a7a",
     ),
 ];
 
@@ -72,6 +78,7 @@ fn published_v1_contracts_match_their_reviewed_content() {
         "# derivation_version=1\n# context={SUBSEED_CONTEXT}\n"
     )));
     assert!(ID_CATALOG.starts_with(&format!("# derivation_version=1\n# context={ID_CONTEXT}\n")));
+    assert!(PARAMETER_CATALOG.starts_with("# parameter_catalog_version=1\n"));
 
     for (path, content, expected) in V1_CONTRACT_FINGERPRINTS {
         assert_eq!(

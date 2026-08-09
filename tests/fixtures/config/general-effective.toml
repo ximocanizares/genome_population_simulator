@@ -1,0 +1,55 @@
+config_kind = "general"
+schema_version = "1"
+route = "direct"
+normalization_tolerance = 0.000000000000001
+
+[reference]
+kind = "simulated"
+id = "ref-main"
+default_ploidy = 2
+composition = [
+  { id = "A", category = "base", value = 0.5 },
+  { id = "C", category = "base", value = 0.5000000000000002 },
+]
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1000
+
+[[individuals]]
+id = "ind-1"
+
+[[rules]]
+id = "variant-base"
+parameter = "variant_rate"
+value = 0.01
+
+[[rules]]
+id = "variant-ind-1"
+parameter = "variant_rate"
+value = 0.02
+individual = "ind-1"
+
+[[rules]]
+id = "ploidy-chr1"
+parameter = "ploidy"
+value = 4
+reference = "ref-main"
+sequence = "chr1"
+
+[[frequency_sets]]
+id = "ancestry"
+mode = "probabilistic"
+values = [
+  { id = "north", category = "population", value = 0.4 },
+  { id = "south", category = "population", value = 0.6 },
+]
+
+[[frequency_sets]]
+id = "founders"
+mode = "controlled"
+counts = [
+  { id = "south", category = "population", count = 3 },
+  { id = "north", category = "population", count = 2 },
+]

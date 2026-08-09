@@ -1,0 +1,27 @@
+config_kind = "general"
+schema_version = "1"
+route = "direct"
+
+[reference]
+kind = "simulated"
+id = "ref"
+default_ploidy = 2
+composition = [
+  { id = "large", category = "base", value = 1.0 },
+  { id = "small-b", category = "base", value = 1e-16 },
+  { id = "small-a", category = "base", value = 1e-16 },
+]
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 10
+
+[[frequency_sets]]
+id = "edge"
+mode = "probabilistic"
+tolerance = 2.220446049250313e-16
+values = [
+  { id = "B", category = "allele", value = 0.5000000000000002 },
+  { id = "A", category = "allele", value = 0.5 },
+]

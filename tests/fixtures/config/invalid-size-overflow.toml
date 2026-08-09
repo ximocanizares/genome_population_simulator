@@ -1,0 +1,24 @@
+config_kind = "general"
+schema_version = "1"
+route = "direct"
+
+[reference]
+kind = "simulated"
+id = "ref"
+default_ploidy = 2
+composition = [{ id = "A", category = "base", value = 1.0 }]
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 9223372036854775807
+
+[[reference.sequences]]
+id = "chr2"
+class = "chromosome"
+length = 9223372036854775807
+
+[[reference.sequences]]
+id = "scaffold1"
+class = "scaffold"
+length = 2

@@ -1,0 +1,30 @@
+config_kind = "general"
+schema_version = "1"
+route = "evolution"
+
+[reference]
+kind = "simulated"
+id = "ref-main"
+default_ploidy = 2
+composition = [{ id = "A", category = "base", value = 1.0 }]
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1000
+
+[[scenarios]]
+id = "evolution-small"
+path = "scenario-evolution.toml"
+route = "evolution"
+
+[[rules]]
+id = "selfing-base"
+parameter = "selfing_rate"
+value = 0.0
+
+[[rules]]
+id = "selfing-phase-1"
+parameter = "selfing_rate"
+value = 0.25
+phase = "phase-1"

@@ -220,82 +220,87 @@ evaluaciones están en `evaluaciones-dependencias-f1.md` y
 validadores se conserva en `../evidence/f1.1/validators-corrupt-20260808.md`.
 La pausa queda alcanzada y no autoriza comenzar F1.2 sin revisión del usuario.
 
+**Aprobación de la pausa (9 de agosto de 2026):** F1.1 queda aprobada tras la
+revisión independiente, la corrección de los dos hallazgos y la repetición de
+las puertas Cargo y de los cinco validadores. El commit `a95e614` conserva su
+implementación y evidencias; queda autorizado comenzar F1.2.
+
 ## 6. F1.2 — Configuración validada
 
 **Resultado del hito:** admisión TOML y motor de resolución comprobados antes de
 simular, con configuración efectiva inmutable y procedencia de la regla
 ganadora. Los consumidores biológicos posteriores no se implementan aquí.
 
-- ☐ B1. Fijar ejemplos mínimos y esquemas de autoría para configuración general y envolturas de escenario.
+- ✅ B1. Fijar ejemplos mínimos y esquemas de autoría para configuración general y envolturas de escenario.
   - Depende de: A1, A4 y aprobación de los campos derivados de los REQ asignados a F1.
   - Procede de: DTC-034 y DTC-036; REQ-CONF-01/02/03/04/07/09/10/101.
   - Cambia: esquemas y fixtures TOML con `config_kind`, `schema_version = "1"`, vía, referencia simulada/suministrada, escenarios como listas identificadas y cero/uno/varios eventos explícitos.
   - Se comprueba con: revisión contra ejemplos válidos e inválidos que cubran clase o versión ausente, desconocida o intercambiada sin interpretación parcial.
 
-- ☐ B2. Evaluar y aprobar las dependencias exactas para TOML y configuración antes de añadirlas al lock.
+- ✅ B2. Evaluar y aprobar las dependencias exactas para TOML y configuración antes de añadirlas al lock.
   - Depende de: A2 y B1.
   - Procede de: DTC-034, DTC-043 y DTC-048.
   - Cambia: registro de evaluación, versiones y características mínimas; solo después, `Cargo.toml` y `Cargo.lock`.
   - Se comprueba con: `cargo tree --locked -e features` más fixtures que demuestren detección localizable de campos y claves duplicados y desconocidos; una biblioteca que no conserve la evidencia necesaria se rechaza.
 
-- ☐ B3. Implementar la frontera de versión y clase antes del parseo semántico.
+- ✅ B3. Implementar la frontera de versión y clase antes del parseo semántico.
   - Depende de: B1–B2 y catálogo A4.
   - Procede de: DTC-034, DTC-036 y DTC-044.
   - Cambia: adaptador TOML de admisión que conserva bytes exactos, identifica ruta y ubicación y rechaza clase/versión inválida antes de construir el dominio.
   - Se comprueba con: `cargo test --locked` sobre versión ausente, `"0"`, `"2"`, no textual, clase cruzada y TOML malformado; cada caso obtiene código, contexto y salida 2.
 
-- ☐ B4. Construir `DeclaredConfig` sin conceder autoridad a la jerarquía u orden físico del TOML.
+- ✅ B4. Construir `DeclaredConfig` sin conceder autoridad a la jerarquía u orden físico del TOML.
   - Depende de: B3.
   - Procede de: DTC-034; REQ-CONF-01/09/10/13/14.
   - Cambia: tipos declarados con valor, fuente, ruta y ubicación; fases, eventos y cruces conservan IDs explícitos y orden solo donde sea normativo.
   - Se comprueba con: `cargo test --locked` comparando TOML reordenados semánticamente equivalentes y casos con IDs ausentes o duplicados; la copia original debe coincidir byte a byte.
 
-- ☐ B5. Materializar el catálogo normativo de familias de parámetros y selectores permitidos.
+- ✅ B5. Materializar el catálogo normativo de familias de parámetros y selectores permitidos.
   - Depende de: B4 y A6; no depende de consumidores de F2–F8.
-  - Procede de: REQ-CONF-17/18/20/22/29/43/83/84/116/117/120/121/122, REQ-IND-13/15/21 y REQ-REP-02.
+  - Procede de: REQ-CONF-29/117. La auditoría de cierre conserva aquí la infraestructura parcial de REQ-CONF-17/18/20/22/43/83/84/116/120/121/122, REQ-IND-13/15/21 y REQ-REP-02, pero reasigna su cierre al hito que prueba todos sus consumidores.
   - Cambia: tipos de eje y metadatos de cada familia para individuo preexistente, población/subpoblación, fase/generación, secuencia/región/locus, grupo/bloque y evento técnico solo donde esté permitido.
   - Se comprueba con: tabla exhaustiva de aceptación/rechazo independiente del resolvedor; incluye evento técnico aplicado a parámetro biológico, individuo futuro, ámbito desconocido y extremos de la jerarquía espacial.
 
-- ☐ B6. Implementar reglas base y coincidencia por todos los selectores.
+- ✅ B6. Implementar reglas base y coincidencia por todos los selectores.
   - Depende de: B5.
-  - Procede de: REQ-CONF-16/17/20/22/24/29/116/117/121.
+  - Procede de: REQ-CONF-29/117. REQ-CONF-16/17/20/22/24/116/121 conserva aquí infraestructura reutilizable, pero se traza al hito donde puede demostrarse íntegramente.
   - Cambia: tipos de regla, regla base obligatoria donde proceda, predicado de coincidencia y valor aplicable sin prioridades entre ejes distintos.
   - Se comprueba con: `cargo test --locked` mediante una tabla manual de casos global, población, fase, secuencia, región y locus; cada resultado se compara con el ganador esperado literal.
 
-- ☐ B7. Implementar la dominancia parcial y exigir una única máxima.
+- ✅ B7. Implementar la dominancia parcial y exigir una única máxima.
   - Depende de: B6.
-  - Procede de: REQ-CONF-29/31/116/117/118 y REQ-VAL-51.
+  - Procede de: REQ-CONF-29/31/117/118 y REQ-VAL-51; la base parcial de REQ-CONF-116 no constituye su cierre completo.
   - Cambia: comparación parcial entre reglas y resolución que devuelve una máxima única o un conflicto de máximas incomparables, sin desempate por orden.
   - Se comprueba con: `cargo test --locked` sobre un retículo pequeño enumerado manualmente; permutar las reglas no cambia el ganador y dos máximas incomparables producen el diagnóstico previsto antes de simular.
 
-- ☐ B8. Rechazar duplicados exactos, solapes espaciales y selectores o referencias inválidos.
+- ✅ B8. Rechazar duplicados exactos, solapes espaciales y selectores o referencias inválidos.
   - Depende de: B5–B7.
-  - Procede de: REQ-CONF-18/30/38/65/119/120/122 y REQ-VAL-51.
+  - Procede de: REQ-CONF-30/38/65/119 y REQ-VAL-51. REQ-CONF-18/120/122 conserva validación parcial aquí y queda cerrado solo tras probar sus consumidores reales en F9.7.
   - Cambia: validadores previos de unicidad, pertenencia a catálogos, intervalos, referencias de selector y solape para el mismo parámetro y selectores no espaciales.
   - Se comprueba con: `cargo test --locked` sobre duplicado exacto con valores iguales/diferentes, bordes de regiones cerradas, solape parcial/total, adyacencia válida, ID inexistente y referencia de selector de categoría incorrecta.
 
-- ☐ B9. Validar coherencia mínima de referencia, vía, escenarios, eventos y parámetros declarados sin ejecutar biología futura.
+- ✅ B9. Validar coherencia mínima de referencia, vía, escenarios, eventos y parámetros declarados sin ejecutar biología futura.
   - Depende de: B4–B8.
-  - Procede de: REQ-CONF-04/05/07/09/10/32/43/65/101 y REQ-REF-22.
+  - Procede de: REQ-CONF-04/05/07/09/10/65/101 y REQ-REF-22. REQ-CONF-32 y REQ-CONF-43 se reasignan respectivamente a F6.2 y F7.6, donde existe el comportamiento consumidor.
   - Cambia: validación cruzada y cálculo comprobado del tamaño total; clasifica cada secuencia como cromosoma o `scaffold`, exige escenario para las vías que lo requieren y conserva cero eventos sin crear uno implícito.
   - Se comprueba con: `cargo test --locked` sobre suma conocida y desbordamiento, vía/escenario incompatibles, evento duplicado/implícito, ploidía efectiva ausente y formas de frecuencia incompatibles; no se crea directorio final.
 
-- ☐ B10. Implementar la validación y normalización numérica reproducible fijada por DTC-049.
+- ✅ B10. Implementar la validación y normalización numérica reproducible fijada por DTC-049.
   - Depende de: B6–B9 y DTC-049.
-  - Procede de: DTC-049; REQ-CONF-106/107, REQ-VAL-40 y ACE-105; afecta a REQ-MAN-81.
+  - Procede de: DTC-049; REQ-CONF-106/107 y ACE-105; afecta a REQ-MAN-81. La infraestructura general de REQ-VAL-40 queda aquí, pero su cierre se reasigna a F6.2 para incluir la tolerancia 0,5/C del modo controlado.
   - Cambia: valores y tolerancia como `f64` finitos; probabilidades y frecuencias en `[0,1]`; tolerancia absoluta configurable en `[0, 1e-6]` y `1e-9` predeterminada; suma Neumaier en orden canónico estable por identidad y categoría, sin reducción paralela; cálculo de suma y delta, borde inclusivo `abs(suma - 1) <= tolerancia`, normalización y recomputación de suma y delta o rechazo previo.
   - Se comprueba con: vectores literales justo dentro, en el borde y justo fuera; orden de entrada permutado; valores/tolerancias no finitos o fuera de rango; suma cero/no positiva/no normalizable; bits `f64` esperados tras parsear los decimales TOML; los esperados no se calculan con el normalizador probado.
 
-- ☐ B11. Producir una `EffectiveConfig` inmutable con valores, regla ganadora, selectores y procedencia.
+- ✅ B11. Producir una `EffectiveConfig` inmutable con valores, regla ganadora, selectores y procedencia.
   - Depende de: B7–B10.
   - Procede de: DTC-034 y DTC-035; REQ-CONF-123 y REQ-MAN-05/10/88.
   - Cambia: modelo de configuración efectiva separado del declarado; no contiene referencias mutables ni reinterpreta el TOML al consumirlo.
   - Se comprueba con: `cargo test --locked` sobre instantáneas semánticas de configuración efectiva y prueba que modificar o reordenar la entrada después de admisión no altera el objeto ya resuelto.
 
-- ☐ B12. Cerrar las 36 pruebas trazables de F1.2 y sus diagnósticos de admisión.
+- ✅ B12. Auditar las 36 pruebas trazables inicialmente asignadas a F1.2 y cerrar solo las demostrables en este hito.
   - Depende de: B1–B11.
-  - Procede de: los 36 REQ asignados a F1.2 en la matriz, DTC-044 y DTC-049.
-  - Cambia: casos `TEST-REQ-*`, pruebas de integración CLI y matriz de resultado, código, contexto y ausencia de publicación final.
+  - Procede de: los 36 REQ inicialmente asignados a F1.2 en la matriz, DTC-044 y DTC-049.
+  - Cambia: casos `TEST-REQ-*`, pruebas de integración CLI y matriz de auditoría con 16 casos superados y 20 reasignados al hito que permite demostrar el REQ completo; código, contexto y ausencia de publicación final.
   - Se comprueba con: `cargo test --workspace --all-targets --locked`, seguido de ejecución de cada fixture inválido en modo humano y JSON; JSON es un único documento y ambos renderizados conservan el mismo diagnóstico estructurado.
 
 ### Pausa obligatoria de revisión de F1.2
@@ -305,6 +310,16 @@ debe inspeccionar casos de máximas incomparables y reglas permutadas, no solo
 casos felices. Los vectores de DTC-049 deben demostrar el orden canónico, la
 suma Neumaier, el borde inclusivo y la recuperación exacta del `f64` antes de
 cerrar F1.2.
+
+**Aprobación de la pausa (9 de agosto de 2026):** F1.2 queda aprobada tras la
+revisión independiente de las correcciones H-F12-01 a H-F12-04. Las puertas de
+formato, Clippy, pruebas, documentación, construcción release, grafo bloqueado,
+JSON Schema y `cargo audit` terminaron sin fallos. La matriz audita los 36
+`TEST-REQ-*` iniciales, con 16 superados en F1.2 y 20 reasignados honestamente a
+su hito consumidor o de consolidación. Los diagnósticos JSON de 17 fixtures
+persistentes y 12 casos de dominio cumplen el esquema independiente. Evidencias
+en `../evidence/f1.2/`. Queda autorizado comenzar C1/F1.3, pero no se inicia en
+este commit.
 
 ## 7. F1.3 — Aleatoriedad reproducible
 
@@ -547,8 +562,9 @@ del original y sin dependencia de validadores externos en runtime.
 Antes de pasar a F2 se revisan conjuntamente reproducibilidad, diagnósticos,
 trazabilidad, FASTA, integridad y estados de publicación. Deben existir al menos
 un recorrido suministrado, uno simulado, uno inválido de admisión, un fallo
-controlado y una interrupción. F1 solo se cierra si las 92 filas asignadas a F1
-tienen evidencia ejecutada y no quedan defectos
+controlado y una interrupción. F1 solo se cierra si las 72 filas asignadas
+actualmente a F1 tienen evidencia ejecutada, los 20 casos reasignados desde
+F1.2 conservan un destino verificable y no quedan defectos
 bloqueantes o graves sin resolución o destino aprobado.
 
 ## 10. Riesgos de error silencioso y pruebas independientes
@@ -569,14 +585,16 @@ bloqueantes o graves sin resolución o destino aprobado.
 
 ## 11. Matriz final de cobertura y evidencias
 
-La matriz no sustituye las 92 filas `TEST-REQ-*` del artefacto de trazabilidad;
-reproduce su asignación vigente 36/10/25/21 y las agrupa sin duplicar su texto
-normativo.
+La matriz no sustituye las filas `TEST-REQ-*` del artefacto de trazabilidad. La
+auditoría de F1.2 detectó que 20 de sus 36 asignaciones iniciales exigían
+consumidores biológicos de F2–F9: se reasignaron allí y se conservaron en la
+matriz de auditoría de F1.2 sin marcarlas como superadas. La asignación vigente
+de F1 es por tanto 16/10/25/21, 72 requisitos en total.
 
 | Hito | Requisitos asignados por la matriz | ACE principales | Decisiones | Pasos/evidencia de cierre |
 | --- | --- | --- | --- | --- |
 | F1.1 | Infraestructura de la hoja de ruta; sin filas REQ exclusivas | soporte de ACE-01/03/22/23/64 | DTC-042 a DTC-048 | A1–A7; toolchain exacto, lock, cinco puertas Cargo, catálogos previos y herramientas independientes aprobadas |
-| F1.2 | REQ-CONF-01/04/05/07/09/10/13/14/16/17/18/20/22/24/29/30/31/32/43/65/83/84/106/116–122; REQ-IND-13/15/21; REQ-REP-02; REQ-VAL-40/51 | ACE-01/02/10/11/47/105/109/111 | DTC-034, DTC-036, DTC-043, DTC-044, DTC-048, DTC-049 | B1–B12; 36 `TEST-REQ-*`, dominancia, invalidación previa, normalización Neumaier y diagnósticos |
+| F1.2 | REQ-CONF-01/04/05/07/09/10/14/29/30/31/65/106/117–119; REQ-VAL-51 | ACE-01/02/10/11/105/111 | DTC-034, DTC-036, DTC-043, DTC-044, DTC-048, DTC-049 | B1–B12; 16 `TEST-REQ-*` superados y auditoría explícita de 20 reasignados; dominancia, invalidación previa, normalización Neumaier y diagnósticos |
 | F1.3 | REQ-CONF-26/27/111–115; REQ-REP-22/23; REQ-VAL-44 | ACE-01/23/64 | DTC-037, DTC-038, DTC-042/043/048 | A5, C1–C8; 10 `TEST-REQ-*`, vectores, independencia de ámbitos, comparadores y repetición |
 | F1.4 | REQ-CONF-38/101/123; REQ-IND-25/26; REQ-EVO-63; REQ-MAN-01–05/08/10/32/69/72/81/83/88; REQ-SAL-03/04/17/18/22/26 | ACE-01/10/14/22/25/34/64/93/94/105/111 | DTC-035/036/038–040/042–045/047–049 | A4/A6, D1–D13; 25 `TEST-REQ-*`, JSON/SHA, evidencia DTC-049, estados y carrera no-clobber |
 | F1.5 | REQ-CONF-02/03; REQ-REF-01–07/12/13/15–18/22/23; REQ-VAL-45; REQ-MAN-06/86; REQ-SAL-01 | ACE-01–05/64/110 | DTC-037, DTC-039–049 | E1–E13; 21 `TEST-REQ-*`, puerta `noodles-fasta`, `cmp`, `samtools faidx`, SHA/JSON independientes, E2E y escenarios A/B/C |
@@ -587,7 +605,8 @@ normativo.
   `--locked` portable.
 - Lock y evaluaciones de todas las dependencias y herramientas usadas.
 - Catálogos y vectores normativos de diagnósticos, subsemillas e IDs.
-- Resultado de los 92 `TEST-REQ-*` asignados a F1, enlazado a su paso y commit.
+- Resultado de los 72 `TEST-REQ-*` asignados actualmente a F1, enlazado a su
+  paso y commit, más el registro auditable de los 20 reasignados desde F1.2.
 - Validación independiente de JSON, SHA-256, FASTA, `.tar.gz` y OCI.
 - Evidencia de publicación completa, rechazo previo, fallo controlado,
   interrupción y carrera no-clobber.
@@ -605,8 +624,8 @@ Antes de aprobar este documento se ejecutan las comprobaciones disponibles de
 - cada paso A1–E13 tiene dependencia, origen, cambio y comprobación concreta;
 - todas las casillas permanecen abiertas hasta ejecutar el trabajo;
 - existen cinco pausas obligatorias, una por hito;
-- la distribución vigente 36 + 10 + 25 + 21 = 92 está reproducida en pasos y
-  matriz;
+- la distribución vigente 16 + 10 + 25 + 21 = 72 y la reasignación auditada de
+  20 casos desde F1.2 están reproducidas en pasos, trazabilidad y matriz;
 - DTC-034 a DTC-049 están cubiertas sin convertir candidatas o DTPD en hechos;
 - `noodles-fasta` 0.66.0 no se incorpora antes de E1;
 - los catálogos A4–A6 preceden a sus consumidores;

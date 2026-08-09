@@ -1,0 +1,13 @@
+# case|parameter|toml_value|selectors|expected_code
+selfing_above_one|selfing_rate|1.0000000000000002||GPS-CONF-015
+selfing_wrong_type|selfing_rate|"invalid"||GPS-CONF-008
+error_non_finite|error_rate|nan||GPS-CONF-015
+contamination_negative|contamination_rate|-0.1||GPS-CONF-015
+output_wrong_type|output_enabled|1||GPS-CONF-008
+ploidy_non_integer|ploidy|2.5|reference = "ref-main";sequence = "chr1"|GPS-CONF-014
+ploidy_below_one|ploidy|0|reference = "ref-main";sequence = "chr1"|GPS-CONF-014
+ploidy_above_ten|ploidy|11|reference = "ref-main";sequence = "chr1"|GPS-CONF-014
+coverage_negative|coverage|-0.1||GPS-CONF-008
+coverage_non_finite|coverage|inf||GPS-CONF-008
+variant_rate_negative|variant_rate|-0.1||GPS-CONF-008
+recombination_rate_negative|recombination_rate|-0.1||GPS-CONF-008

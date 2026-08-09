@@ -1,0 +1,7 @@
+config_kind = "scenario"
+schema_version = "1"
+id = "families-small"
+route = "families"
+
+[[crosses]]
+id = "cross-1"

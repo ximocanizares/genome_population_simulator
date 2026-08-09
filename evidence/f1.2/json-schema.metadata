@@ -1,0 +1,14 @@
+evidence_version=1
+validator_class=json_schema
+tool=CPython/jsonschema
+tool_version=CPython 3.12.3; jsonschema 4.10.3
+platform=Linux 6.18.33.2-microsoft-standard-WSL2 x86_64
+filesystem=ext2/ext3 reported by statfs
+command=python3 -m jsonschema -i evidence/f1.2/diagnostic-invalid-version.json schemas/diagnostics-v1.schema.json
+fixture=evidence/f1.2/diagnostic-invalid-version.json sha256:1254b523aec20f8d8585f1fc3268c4b82e89da94915ce65003d44361f7d325af; source tests/fixtures/config/invalid-version-two.toml sha256:8950c2b8ce26be9bfabd81371e8b3f0bc767ab3033096f4fde812ffc44d0dbcd
+expected=accepted by Draft 2020-12 schema, exit 0
+observed=accepted, exit 0
+stdout_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+stderr_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+artifact_sha256=1254b523aec20f8d8585f1fc3268c4b82e89da94915ce65003d44361f7d325af
+schema_sha256=ab2b9f2cd41aa1fb28e7de3b0e72b5e8132031bd83b1adc72b09ee8b49d1855a
