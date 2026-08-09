@@ -89,3 +89,68 @@ Se rechazan para este hito `toml_edit` (edición y preservación de formato no
 necesarias), `toml-span` (otra API y otro grafo para una capacidad ya cubierta)
 y un parser propio (riesgo innecesario de incumplir TOML y sus duplicados). La
 copia exacta se conserva como bytes originales y no requiere un árbol editable.
+
+## C1 — CSPRNG, BLAKE3 y ChaCha12
+
+**Decisión (9 de agosto de 2026): aprobada para F1.3.** Se aceptan
+`getrandom 0.4.3`, `blake3 1.8.6` y `rand_chacha 0.10.0`, fijados en Cargo como
+versiones exactas. `blake3` se compila sin características predeterminadas y
+solo con `pure`; `getrandom` y `rand_chacha`, sin características
+predeterminadas. La resolución final y sus características se comprueban tras
+actualizar `Cargo.lock`.
+
+- **Propósito y REQ:** `getrandom` obtiene exactamente los 32 bytes de la raíz
+  ausente desde el CSPRNG del sistema operativo (REQ-CONF-26); `blake3`
+  materializa exclusivamente la derivación con dominio de DTC-037; y
+  `rand_chacha` proporciona `ChaCha12Rng` local por ámbito para
+  REQ-CONF-111–115 y REQ-REP-22/23. Los tres quedan detrás de contratos propios
+  de raíz, entropía, derivación, flujo y comparación; ningún tipo de error de
+  crate forma parte del diagnóstico público.
+- **Corrección:** las APIs seleccionadas ofrecen llenado completo o error,
+  `derive_key` con contexto explícito y la variante concreta de 12 rondas. Los
+  materiales y digests se contrastan con los cuatro vectores literales A5,
+  calculados por un oráculo independiente. Se descartan `StdRng`, un RNG global,
+  `seed_from_u64` y el consumo compartido.
+- **Versiones, mantenimiento y estabilidad:** las tres versiones proceden de
+  los proyectos oficiales BLAKE3 y rust-random, con mantenimiento activo.
+  `getrandom 0.4.3` y `rand_chacha 0.10.0` declaran Rust 1.85; BLAKE3 no declara
+  MSRV en sus metadatos publicados, por lo que la compatibilidad se demuestra
+  construyendo con el toolchain fijado 1.97.1. Las APIs se encapsulan para que
+  una actualización no cambie contratos propios; cualquier cambio repite
+  vectores y comparadores.
+- **Licencias:** `getrandom` y `rand_chacha` usan MIT o Apache-2.0. `blake3` usa
+  CC0-1.0 o Apache-2.0, incluida la alternativa con excepción LLVM. Las
+  transitivas se inventariarían y revisarían desde el árbol bloqueado antes del
+  cierre; son compatibles con la distribución MIT del proyecto.
+- **Seguridad:** no se usa BLAKE3 como integridad publicada ni ChaCha12 como
+  fuente de la raíz. La raíz procede del CSPRNG del sistema y los flujos locales
+  son deterministas desde subsemillas de 256 bits. `cargo audit` se ejecuta
+  sobre el lock final; cualquier aviso bloqueante invalida esta aceptación.
+- **Características, código nativo y scripts:** `blake3/pure` selecciona las
+  implementaciones Rust y evita compilar ensamblador o C; su paquete sí contiene
+  un `build.rs` y la dependencia de construcción `cc`, cuyo coste se acepta
+  únicamente para la selección portable. `rand_chacha` y `rand_core` declaran
+  `build = false`; `ppv-lite86` usa SIMD portable de Rust. `getrandom` contiene
+  un `build.rs` de selección de backend y, en Linux GNU, usa `libc` para la
+  frontera del sistema operativo; no enlaza una biblioteca C externa ni ejecuta
+  una herramienta en runtime. No se activan `serde`, `rayon`, `mmap`, `digest`,
+  `wasm_js`, `sys_rng` ni características de RNG del sistema en `rand_chacha`.
+- **Rendimiento y distribución:** la entropía se consulta una sola vez por raíz
+  ausente. Las derivaciones y estados locales son pequeños; la opción BLAKE3
+  pura prioriza portabilidad y ausencia de código nativo sobre SIMD ensamblado,
+  apropiado para los materiales cortos de F1.3. El coste exacto del grafo queda
+  registrado por `cargo tree --locked -e features`.
+
+Se rechazan el crate agregado `rand` (API y características innecesarias),
+`StdRng` (algoritmo no contractual), sembrar ChaCha directamente desde el SO
+(perdería la raíz auditable) y una implementación propia de ChaCha12 o BLAKE3
+(riesgo criptográfico y de incompatibilidad con los vectores normativos).
+
+**Resultado del cierre C1.** `cargo tree --locked -e features` confirma solo
+`blake3/pure`, `getrandom` sin rasgos propios y `rand_chacha` sin rasgos
+predeterminados, además de las transitivas descritas. El paquete BLAKE3 conserva
+su `build.rs` y `cc` como dependencia de construcción, pero la compilación
+observada con `pure` no compiló C ni ensamblador. `cargo audit` 0.22.2 cargó
+1198 avisos RustSec, examinó las 34 dependencias del lock ampliado y terminó con
+código 0, sin vulnerabilidades. Los cuatro vectores A5 pasaron tanto por el
+oráculo BLAKE3 de prueba independiente como por la implementación productiva.

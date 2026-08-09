@@ -33,6 +33,26 @@ impl Diagnostic {
         }
     }
 
+    pub(crate) fn resource(code: &'static str, message: &'static str) -> Self {
+        Self {
+            code,
+            category: "RES",
+            message,
+            exit_code: 3,
+            context: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn internal(code: &'static str, message: &'static str) -> Self {
+        Self {
+            code,
+            category: "INTERNAL",
+            message,
+            exit_code: 70,
+            context: BTreeMap::new(),
+        }
+    }
+
     #[must_use]
     pub fn with(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.context.insert(key.into(), value.into());

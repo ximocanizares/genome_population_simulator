@@ -327,53 +327,53 @@ este commit.
 locales y comparadores de reproducibilidad demostrados mediante vectores
 normativos y casos resistentes al reordenamiento.
 
-- ☐ C1. Evaluar y aprobar las dependencias exactas de CSPRNG, BLAKE3 y ChaCha12 antes de añadirlas.
+- ✅ C1. Evaluar y aprobar las dependencias exactas de CSPRNG, BLAKE3 y ChaCha12 antes de añadirlas.
   - Depende de: A2, catálogo A5 y DTC-043.
   - Procede de: DTC-037, DTC-038 y DTC-048.
   - Cambia: evaluaciones, versiones y características mínimas; después de aprobación, `Cargo.toml` y `Cargo.lock`, manteniendo contratos propios.
   - Se comprueba con: `cargo tree --locked -e features`, revisión de código nativo/build scripts/licencias y ejecución de los vectores A5; no se admite `StdRng`.
 
-- ☐ C2. Implementar el tipo de semilla raíz y su representación canónica.
+- ✅ C2. Implementar el tipo de semilla raíz y su representación canónica.
   - Depende de: C1 y A4.
   - Procede de: DTC-037; REQ-CONF-26/27.
   - Cambia: tipo de 32 bytes, parseo y formato de exactamente 64 hexadecimales minúsculos, más origen declarado o generado.
   - Se comprueba con: `cargo test --locked` sobre longitud 63/64/65, mayúsculas, caracteres no hexadecimales, ida/vuelta de bytes y valor no truncado.
 
-- ☐ C3. Obtener una raíz ausente desde el CSPRNG del sistema antes de simular y registrar su origen.
+- ✅ C3. Obtener una raíz ausente desde el CSPRNG del sistema antes de simular y registrar su origen.
   - Depende de: C2.
   - Procede de: DTC-037 y DTC-044.
-  - Cambia: proveedor inyectable de entropía del sistema y fallo tipado; la raíz generada entra en `EffectiveConfig` y manifiesto.
-  - Se comprueba con: doble determinista de 32 bytes, doble que falla y prueba CLI; el fallo usa diagnóstico estable y no crea ejecución final.
+  - Cambia: proveedor inyectable de entropía del sistema y fallo tipado; la raíz generada entra en `EffectiveConfig`. Su serialización y publicación en manifiesto quedan en D7/E8/F1.5.
+  - Se comprueba con: doble determinista de 32 bytes y doble que falla en la frontera de aplicación con `GPS-RES-001` y salida 3; el CLI rechaza una semilla declarada inválida en modos humano/JSON y no crea el destino solicitado. No se afirma una prueba CLI del fallo CSPRNG.
 
-- ☐ C4. Implementar la codificación binaria canónica de materiales de derivación.
+- ✅ C4. Implementar la codificación binaria canónica de materiales de derivación.
   - Depende de: catálogo A5 y C2.
   - Procede de: DTC-037.
   - Cambia: codificador de raíz cruda, versión y número de componentes `u32` big-endian y pares nombre ASCII/valor UTF-8 con longitud `u32` big-endian.
   - Se comprueba con: comparación byte a byte contra todos los materiales literales de A5, incluidos vacío, Unicode, longitudes y cambios de orden.
 
-- ☐ C5. Derivar subsemillas BLAKE3 y crear generadores ChaCha12 locales por ámbito.
+- ✅ C5. Derivar subsemillas BLAKE3 y crear generadores ChaCha12 locales por ámbito.
   - Depende de: C1, C4 y A5.
   - Procede de: DTC-037; REQ-CONF-111/112/113 y REQ-REP-22.
   - Cambia: derivador con contexto exacto `genome_population_simulator/v1/subseed`, versión explícita y fábrica que entrega estado local, nunca global o compartido.
   - Se comprueba con: vectores A5 y pruebas que añaden, omiten y reordenan consumidores ajenos sin cambiar la secuencia del ámbito observado.
 
-- ☐ C6. Registrar metadatos suficientes para reconstruir cada flujo de F1.
+- ✅ C6. Preparar metadatos RNG para que los hitos consumidores puedan reconstruir sus flujos.
   - Depende de: C3 y C5.
-  - Procede de: DTC-037 y DTC-038; REQ-CONF-114/115 y REQ-REP-22/23.
-  - Cambia: hechos de raíz/origen, algoritmo, versión de derivación, catálogo y subsemillas de evento; los ámbitos internos se reconstruyen desde IDs y reglas versionadas.
-  - Se comprueba con: prueba que reconstruye un flujo solo desde configuración efectiva, manifiesto, entrada y versión, y detecta cualquier condición distinta.
+  - Procede de: DTC-037 y DTC-038; prepara parte de REQ-CONF-114/115 y REQ-REP-22/23 sin afirmar todavía manifiestos ni resultados reales.
+  - Cambia: contrato propio de raíz/origen, algoritmo, versión de derivación, catálogo y subsemillas de evento dentro de `EffectiveConfig`; los ámbitos internos se reconstruyen desde IDs versionados.
+  - Se comprueba con: prueba que reconstruye una subsemilla de evento desde la configuración efectiva y sus IDs; el manifiesto, las entradas publicadas y los consumidores reales quedan en F1.4–F9.
 
-- ☐ C7. Implementar cuatro comparadores separados de reproducibilidad.
+- ✅ C7. Implementar la infraestructura preparatoria de cuatro comparadores separados de reproducibilidad.
   - Depende de: C6 y contratos de resultado DTC-038.
   - Procede de: REQ-CONF-111 a REQ-CONF-115 y REQ-VAL-44.
-  - Cambia: comparadores para decisiones biológicas, contenido técnico, equivalencia semántica y bytes; cada nivel informa `garantizado`, `no garantizado` o `no aplicable` y sus condiciones.
-  - Se comprueba con: fixtures donde el contenido lógico coincide pero cambian bytes, donde cambia una subsemilla técnica y donde cambia la versión; ningún nivel implica automáticamente el siguiente.
+  - Cambia: comparadores preparatorios para decisiones biológicas, contenido técnico, equivalencia semántica y bytes; cada nivel informa `garantizado`, `no garantizado` o `no aplicable` y sus condiciones, pero ningún estado constituye aún una afirmación sobre artefactos no implementados.
+  - Se comprueba con: valores sintéticos donde el contenido lógico coincide pero cambian bytes, donde cambia una subsemilla técnica o una versión relevante; ningún nivel implica automáticamente el siguiente y dependencias, catálogo y derivación forman parte de la base RNG.
 
-- ☐ C8. Ejecutar la prueba mínima repetida y cerrar la batería F1.3.
+- ✅ C8. Auditar los diez REQ y cerrar únicamente la infraestructura demostrable de F1.3.
   - Depende de: C2–C7 y una configuración mínima validada de B.
-  - Procede de: los diez REQ asignados a F1.3 y ACE-23.
-  - Cambia: `TEST-REQ-CONF-26/27` y test de integración que cubre semilla suministrada y generada y ejecuta dos veces con misma semilla, configuración, entradas, versión, plataforma y lock, además de pruebas negativas variando una condición cada vez.
-  - Se comprueba con: `cargo test --workspace --all-targets --locked`; informe de los cuatro niveles, raíz generada antes de simular y registrada, y comparación independiente de las decisiones lógicas esperadas en las dos repeticiones.
+  - Procede de: auditoría literal de los diez REQ inicialmente asignados a F1.3 y ACE-23.
+  - Cambia: matriz con 1 requisito superado, 3 trasladados a F1.5 y 6 reasignados a F4.6/F9.7; conserva nueve pruebas parciales sin presentarlas como simulación, manifiesto, lecturas o artefactos reales.
+  - Se comprueba con: `cargo test --workspace --all-targets --locked`; vectores RNG repetidos, condiciones negativas y prueba completa de que una versión distinta no recibe garantía, distinguiendo esa infraestructura de los consumidores pendientes.
 
 ### Pausa obligatoria de revisión de F1.3
 
@@ -381,6 +381,13 @@ No integrar RNG en generación de referencia hasta que todos los vectores A5
 pasen. Revisar explícitamente que ningún ID, flujo o resultado dependa de hilo,
 orden de mapa, ruta, reloj o consumo de otro ámbito. Conservar el lock y los
 vectores como evidencia conjunta.
+
+**Estado de la pausa (9 de agosto de 2026): pendiente de aprobación.** C1–C8
+cierran solo la infraestructura descrita arriba. La auditoría conserva los diez
+casos: 1 está superado y 9 quedan reasignados con evidencia parcial explícita.
+Los cuatro vectores A5, el aislamiento por ámbito y las puertas completas
+constan en `../evidence/f1.3/`. No se inicia F1.4 hasta recibir aprobación
+independiente.
 
 ## 8. F1.4 — Identidad y resultados
 
@@ -553,7 +560,7 @@ del original y sin dependencia de validadores externos en runtime.
 
 - ☐ E13. Cerrar la batería trazable de F1.5 y el expediente de F1.
   - Depende de: E1–E12 y todas las pausas anteriores.
-  - Procede de: los 21 REQ asignados a F1.5, ACE-01 a ACE-05/23/64/110 y reglas de avance de la hoja de ruta.
+  - Procede de: los 24 REQ asignados a F1.5 tras la auditoría F1.3, ACE-01 a ACE-05/23/64/110 y reglas de avance de la hoja de ruta.
   - Cambia: casos `TEST-REQ-*`, matriz final con comandos/salidas/digests y acta de revisión; no modifica requisitos ni marca pruebas no ejecutadas como superadas.
   - Se comprueba con: batería Cargo bloqueada por warnings, validadores independientes de F1, escenarios A/B/C según frecuencia y revisión de cero hallazgos bloqueantes o graves sin destino aprobado.
 
@@ -562,9 +569,9 @@ del original y sin dependencia de validadores externos en runtime.
 Antes de pasar a F2 se revisan conjuntamente reproducibilidad, diagnósticos,
 trazabilidad, FASTA, integridad y estados de publicación. Deben existir al menos
 un recorrido suministrado, uno simulado, uno inválido de admisión, un fallo
-controlado y una interrupción. F1 solo se cierra si las 72 filas asignadas
-actualmente a F1 tienen evidencia ejecutada, los 20 casos reasignados desde
-F1.2 conservan un destino verificable y no quedan defectos
+controlado y una interrupción. F1 solo se cierra si las 66 filas asignadas
+actualmente a F1 tienen evidencia ejecutada, los 26 casos reasignados desde
+F1.2/F1.3 conservan un destino verificable y no quedan defectos
 bloqueantes o graves sin resolución o destino aprobado.
 
 ## 10. Riesgos de error silencioso y pruebas independientes
@@ -585,19 +592,20 @@ bloqueantes o graves sin resolución o destino aprobado.
 
 ## 11. Matriz final de cobertura y evidencias
 
-La matriz no sustituye las filas `TEST-REQ-*` del artefacto de trazabilidad. La
-auditoría de F1.2 detectó que 20 de sus 36 asignaciones iniciales exigían
-consumidores biológicos de F2–F9: se reasignaron allí y se conservaron en la
-matriz de auditoría de F1.2 sin marcarlas como superadas. La asignación vigente
-de F1 es por tanto 16/10/25/21, 72 requisitos en total.
+La matriz no sustituye las filas `TEST-REQ-*` del artefacto de trazabilidad. Las
+auditorías de F1.2 y F1.3 detectaron respectivamente 20 y 6 asignaciones que
+exigían consumidores de F2–F9; además, F1.3 trasladó 3 requisitos al cierre
+ejecutable de F1.5. Las matrices de auditoría los conservan sin marcarlos como
+superados. La asignación vigente de F1 es por tanto 16/1/25/24, 66 requisitos
+en total.
 
 | Hito | Requisitos asignados por la matriz | ACE principales | Decisiones | Pasos/evidencia de cierre |
 | --- | --- | --- | --- | --- |
 | F1.1 | Infraestructura de la hoja de ruta; sin filas REQ exclusivas | soporte de ACE-01/03/22/23/64 | DTC-042 a DTC-048 | A1–A7; toolchain exacto, lock, cinco puertas Cargo, catálogos previos y herramientas independientes aprobadas |
 | F1.2 | REQ-CONF-01/04/05/07/09/10/14/29/30/31/65/106/117–119; REQ-VAL-51 | ACE-01/02/10/11/105/111 | DTC-034, DTC-036, DTC-043, DTC-044, DTC-048, DTC-049 | B1–B12; 16 `TEST-REQ-*` superados y auditoría explícita de 20 reasignados; dominancia, invalidación previa, normalización Neumaier y diagnósticos |
-| F1.3 | REQ-CONF-26/27/111–115; REQ-REP-22/23; REQ-VAL-44 | ACE-01/23/64 | DTC-037, DTC-038, DTC-042/043/048 | A5, C1–C8; 10 `TEST-REQ-*`, vectores, independencia de ámbitos, comparadores y repetición |
+| F1.3 | REQ-REP-23 | ACE-01/23/64 | DTC-037, DTC-038, DTC-042/043/048 | A5, C1–C8; 1 `TEST-REQ-*` superado y auditoría de 9 reasignados con pruebas parciales; vectores, aislamiento y comparadores preparatorios |
 | F1.4 | REQ-CONF-38/101/123; REQ-IND-25/26; REQ-EVO-63; REQ-MAN-01–05/08/10/32/69/72/81/83/88; REQ-SAL-03/04/17/18/22/26 | ACE-01/10/14/22/25/34/64/93/94/105/111 | DTC-035/036/038–040/042–045/047–049 | A4/A6, D1–D13; 25 `TEST-REQ-*`, JSON/SHA, evidencia DTC-049, estados y carrera no-clobber |
-| F1.5 | REQ-CONF-02/03; REQ-REF-01–07/12/13/15–18/22/23; REQ-VAL-45; REQ-MAN-06/86; REQ-SAL-01 | ACE-01–05/64/110 | DTC-037, DTC-039–049 | E1–E13; 21 `TEST-REQ-*`, puerta `noodles-fasta`, `cmp`, `samtools faidx`, SHA/JSON independientes, E2E y escenarios A/B/C |
+| F1.5 | REQ-CONF-02/03/26/27; REQ-REF-01–07/12/13/15–18/22/23; REQ-REP-22; REQ-VAL-45; REQ-MAN-06/86; REQ-SAL-01 | ACE-01–05/23/64/110 | DTC-037, DTC-039–049 | E1–E13; 24 `TEST-REQ-*`, incluida repetición ejecutable con semilla/configuración/entrada/manifiesto; puerta `noodles-fasta`, `cmp`, `samtools faidx`, SHA/JSON independientes y escenarios A/B/C |
 
 ### 11.1. Expediente mínimo para aprobar F1
 
@@ -605,8 +613,8 @@ de F1 es por tanto 16/10/25/21, 72 requisitos en total.
   `--locked` portable.
 - Lock y evaluaciones de todas las dependencias y herramientas usadas.
 - Catálogos y vectores normativos de diagnósticos, subsemillas e IDs.
-- Resultado de los 72 `TEST-REQ-*` asignados actualmente a F1, enlazado a su
-  paso y commit, más el registro auditable de los 20 reasignados desde F1.2.
+- Resultado de los 66 `TEST-REQ-*` asignados actualmente a F1, enlazado a su
+  paso y commit, más el registro auditable de los 26 reasignados desde F1.2/F1.3.
 - Validación independiente de JSON, SHA-256, FASTA, `.tar.gz` y OCI.
 - Evidencia de publicación completa, rechazo previo, fallo controlado,
   interrupción y carrera no-clobber.
@@ -624,8 +632,8 @@ Antes de aprobar este documento se ejecutan las comprobaciones disponibles de
 - cada paso A1–E13 tiene dependencia, origen, cambio y comprobación concreta;
 - todas las casillas permanecen abiertas hasta ejecutar el trabajo;
 - existen cinco pausas obligatorias, una por hito;
-- la distribución vigente 16 + 10 + 25 + 21 = 72 y la reasignación auditada de
-  20 casos desde F1.2 están reproducidas en pasos, trazabilidad y matriz;
+- la distribución vigente 16 + 1 + 25 + 24 = 66 y la reasignación auditada de
+  26 casos desde F1.2/F1.3 están reproducidas en pasos, trazabilidad y matriz;
 - DTC-034 a DTC-049 están cubiertas sin convertir candidatas o DTPD en hechos;
 - `noodles-fasta` 0.66.0 no se incorpora antes de E1;
 - los catálogos A4–A6 preceden a sus consumidores;

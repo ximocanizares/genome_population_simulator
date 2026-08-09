@@ -10,4 +10,5 @@ pub mod configuration;
 pub mod diagnostics;
 pub mod domain;
 pub mod numeric;
+pub mod randomness;
 pub mod rules;

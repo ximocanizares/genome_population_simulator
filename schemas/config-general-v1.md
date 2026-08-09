@@ -7,12 +7,17 @@ config_kind = "general"
 schema_version = "1"
 ```
 
-Las claves raíz admitidas en F1.2 son `config_kind`, `schema_version`, `route`,
-`normalization_tolerance`, `reference`, `scenarios`, `events`, `individuals`,
+Las claves raíz admitidas desde F1.3 son `config_kind`, `schema_version`, `route`,
+`seed`, `normalization_tolerance`, `reference`, `scenarios`, `events`, `individuals`,
 `populations`, `subpopulations`, `phases`, `groups`, `blocks`, `rules` y
 `frequency_sets`. No se admiten claves desconocidas ni duplicadas.
 
 - `route` es exactamente `direct`, `evolution` o `families`.
+- `seed` es opcional y, cuando se declara, contiene exactamente una semilla
+  raíz de 256 bits representada mediante 64 caracteres hexadecimales
+  minúsculos. Cuando falta, se genera antes de construir la configuración
+  efectiva con el CSPRNG del sistema y se registran tanto su valor como su
+  origen.
 - `reference` es una tabla. `kind = "simulated"` exige `id`, `default_ploidy`,
   `sequences` y `composition`; `kind = "supplied"` exige `id`, `fasta` y
   `sequences`. Cada secuencia es una tabla con `id`, `class`, `length` y

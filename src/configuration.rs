@@ -299,6 +299,7 @@ pub struct ScenarioLink {
 pub struct DeclaredGeneralConfig {
     source: AdmittedToml,
     route: Located<Route>,
+    seed: Option<Located<String>>,
     normalization_tolerance: Option<DeclaredNumber>,
     reference: DeclaredReference,
     scenarios: Vec<ScenarioLink>,
@@ -316,6 +317,7 @@ pub struct DeclaredGeneralConfig {
 pub(crate) struct DeclaredGeneralParts {
     pub source: AdmittedToml,
     pub route: Located<Route>,
+    pub seed: Option<Located<String>>,
     pub normalization_tolerance: Option<DeclaredNumber>,
     pub reference: DeclaredReference,
     pub scenarios: Vec<ScenarioLink>,
@@ -335,6 +337,7 @@ impl DeclaredGeneralConfig {
         let DeclaredGeneralParts {
             source,
             route,
+            seed,
             normalization_tolerance,
             reference,
             scenarios,
@@ -351,6 +354,7 @@ impl DeclaredGeneralConfig {
         Self {
             source,
             route,
+            seed,
             normalization_tolerance,
             reference,
             scenarios,
@@ -374,6 +378,11 @@ impl DeclaredGeneralConfig {
     #[must_use]
     pub const fn route(&self) -> &Located<Route> {
         &self.route
+    }
+
+    #[must_use]
+    pub const fn seed(&self) -> Option<&Located<String>> {
+        self.seed.as_ref()
     }
 
     #[must_use]

@@ -127,13 +127,16 @@ cree una ejecución identificada y produzca resultados trazables y repetibles.
   base, resolver sustituciones mediante la matriz y la dominancia de
   REQ-CONF-116 a REQ-CONF-123 y rechazar antes de simular máximas
   incomparables, duplicados, regiones solapadas y selectores no permitidos.
-- **F1.3. Aleatoriedad reproducible.** Registrar la semilla y demostrar la
-  repetición de un caso mínimo con entradas y versión idénticas.
+- **F1.3. Infraestructura de aleatoriedad reproducible.** Registrar la semilla,
+  validar los vectores normativos, aislar flujos locales y preparar comparadores
+  sin presentar valores sintéticos como una ejecución o un artefacto real.
 - **F1.4. Identidad y resultados.** Crear identificadores, directorios,
   configuración efectiva y manifiesto mínimo con regla ganadora, selectores y
   procedencia, sin confundir referencias, muestras o eventos.
-- **F1.5. Referencia mínima.** Aceptar una referencia pequeña simulada o
-  suministrada y conservar su FASTA e identidad verificable.
+- **F1.5. Referencia y repetición mínimas.** Aceptar una referencia pequeña
+  simulada o suministrada, conservar su FASTA e identidad verificable y repetir
+  el recorrido ejecutable con semilla, configuración, entrada, versión y
+  manifiesto mínimos idénticos.
 
 **Resultado de salida:** ejecución mínima repetible con configuración, semilla,
 referencia y manifiesto.

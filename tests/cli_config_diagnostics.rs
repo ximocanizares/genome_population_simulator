@@ -86,6 +86,7 @@ fn every_invalid_fixture_has_equivalent_human_and_single_json_diagnostics() {
         ("invalid-size-overflow.toml", "GPS-CONF-008"),
         ("invalid-supplied-ploidy-missing.toml", "GPS-CONF-014"),
         ("invalid-unknown-field.toml", "GPS-CONF-006"),
+        ("invalid-seed-uppercase.toml", "GPS-CONF-017"),
     ];
     for (fixture, expected_code) in cases {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -119,6 +120,11 @@ fn every_invalid_fixture_has_equivalent_human_and_single_json_diagnostics() {
         assert!(document.contains("\"schema_version\":\"1\""), "{fixture}");
         assert!(document.contains("\"exit_code\":2"), "{fixture}");
         assert!(document.contains("\"context\":{"), "{fixture}");
+        if expected_code == "GPS-CONF-017" {
+            for required in ["field", "found", "expected"] {
+                assert!(document.contains(&format!("\"{required}\":")), "{fixture}");
+            }
+        }
         assert!(
             !destination.exists(),
             "{fixture} publicó un destino inválido"
@@ -134,6 +140,7 @@ fn valid_validation_is_read_only_even_with_an_output_argument() {
         "general-evolution.toml",
         "general-families.toml",
         "general-combined-population-phase.toml",
+        "general-seeded.toml",
     ] {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/config")

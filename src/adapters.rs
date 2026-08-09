@@ -181,6 +181,7 @@ fn parse_general(
             "config_kind",
             "schema_version",
             "route",
+            "seed",
             "normalization_tolerance",
             "reference",
             "scenarios",
@@ -196,6 +197,7 @@ fn parse_general(
         ],
     )?;
     let route = required_route(&admitted, table, "route")?;
+    let seed = optional_located_string(&admitted, table, "seed")?;
     let normalization_tolerance = optional_number(&admitted, table, "normalization_tolerance")?;
     let reference = parse_reference(&admitted, required_table(&admitted, table, "reference")?)?;
     let scenarios = parse_scenario_links(&admitted, table)?;
@@ -213,6 +215,7 @@ fn parse_general(
         DeclaredGeneralConfig::new(DeclaredGeneralParts {
             source: admitted,
             route,
+            seed,
             normalization_tolerance,
             reference,
             scenarios,
@@ -836,6 +839,17 @@ fn optional_string(
     table
         .contains_key(field)
         .then(|| required_string(admitted, table, field).map(|value| value.value().clone()))
+        .transpose()
+}
+
+fn optional_located_string(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+    field: &str,
+) -> Result<Option<Located<String>>, Diagnostic> {
+    table
+        .contains_key(field)
+        .then(|| required_string(admitted, table, field))
         .transpose()
 }
 

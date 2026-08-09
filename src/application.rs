@@ -10,6 +10,7 @@ use crate::configuration::{
 };
 use crate::diagnostics::Diagnostic;
 use crate::numeric::{NormalizedCollection, normalize_declared};
+use crate::randomness::{EntropySource, ReproducibilityMetadata, SystemEntropy, resolve_root_seed};
 use crate::rules::{
     ParameterKey, ResolutionContext, Rule, RuleProvenance, RuleSet, RuleValue,
     SelectorIdentityCatalog, SelectorSet, validate_rules,
@@ -155,6 +156,7 @@ pub struct EffectiveConfig {
     normalized: Vec<NormalizedCollection>,
     controlled: Vec<EffectiveControlledSet>,
     values: Vec<EffectiveValue>,
+    reproducibility: ReproducibilityMetadata,
 }
 
 impl EffectiveConfig {
@@ -212,11 +214,23 @@ impl EffectiveConfig {
     pub fn values(&self) -> &[EffectiveValue] {
         &self.values
     }
+
+    #[must_use]
+    pub const fn reproducibility(&self) -> &ReproducibilityMetadata {
+        &self.reproducibility
+    }
 }
 
 /// Frontera de solo lectura usada por el subcomando `validate`. No crea ni
 /// publica un destino, incluso cuando el llamador ha indicado uno.
 pub fn load_and_validate_config(path: &Path) -> Result<EffectiveConfig, Diagnostic> {
+    load_and_validate_config_with_entropy(path, &mut SystemEntropy)
+}
+
+pub fn load_and_validate_config_with_entropy(
+    path: &Path,
+    entropy: &mut impl EntropySource,
+) -> Result<EffectiveConfig, Diagnostic> {
     let bytes = std::fs::read(path).map_err(|error| input_error(path, error))?;
     let admitted = admit_toml_header(path, bytes, ExpectedConfigKind::General)?;
     let DeclaredConfig::General(general) = parse_declared_config(admitted)? else {
@@ -243,7 +257,7 @@ pub fn load_and_validate_config(path: &Path) -> Result<EffectiveConfig, Diagnost
         scenarios.push(scenario);
     }
     let scenario_refs = scenarios.iter().map(Box::as_ref).collect::<Vec<_>>();
-    build_effective_config(&general, &scenario_refs, &[])
+    build_effective_config_with_entropy(&general, &scenario_refs, &[], entropy)
 }
 
 fn resolve_link(general_path: &Path, declared: &str) -> PathBuf {
@@ -359,7 +373,27 @@ pub fn build_effective_config(
     scenarios: &[&DeclaredScenarioConfig],
     requests: &[ResolutionRequest],
 ) -> Result<EffectiveConfig, Diagnostic> {
+    build_effective_config_with_entropy(general, scenarios, requests, &mut SystemEntropy)
+}
+
+pub fn build_effective_config_with_entropy(
+    general: &DeclaredGeneralConfig,
+    scenarios: &[&DeclaredScenarioConfig],
+    requests: &[ResolutionRequest],
+    entropy: &mut impl EntropySource,
+) -> Result<EffectiveConfig, Diagnostic> {
     let summary = validate_general_config(general, scenarios)?;
+    let (root_seed, seed_origin) = resolve_root_seed(
+        general.seed().map(|declared| declared.value().as_str()),
+        entropy,
+    )
+    .map_err(|diagnostic| {
+        let mut diagnostic = diagnostic.with("path", general.source().path().display().to_string());
+        if let Some(seed) = general.seed() {
+            diagnostic = diagnostic.with("location", seed.location().to_string());
+        }
+        diagnostic
+    })?;
     let default_ploidy = match &general.reference().source {
         DeclaredReferenceSource::Simulated { default_ploidy, .. } => Some(*default_ploidy.value()),
         DeclaredReferenceSource::Supplied { .. } => None,
@@ -535,6 +569,12 @@ pub fn build_effective_config(
     values.sort_by(|first, second| {
         (&first.object_id, first.parameter).cmp(&(&second.object_id, second.parameter))
     });
+    let reproducibility = ReproducibilityMetadata::new(
+        root_seed,
+        seed_origin,
+        general.reference().id.value(),
+        &summary.explicit_event_ids,
+    )?;
 
     Ok(EffectiveConfig {
         schema_version: "1",
@@ -552,6 +592,7 @@ pub fn build_effective_config(
         normalized,
         controlled,
         values,
+        reproducibility,
     })
 }
 
