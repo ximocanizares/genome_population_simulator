@@ -1,0 +1,18 @@
+{
+  "diagnostic_kind": "gps_diagnostics",
+  "schema_version": "1",
+  "exit_code": 2,
+  "diagnostics": [
+    {
+      "code": "GPS-CONF-005",
+      "category": "CONF",
+      "severity": "error",
+      "message": "La versión de esquema '2' no está admitida; se admite '1'.",
+      "context": {
+        "path": "scenario.toml",
+        "found": "2",
+        "accepted": ["1"]
+      }
+    }
+  ]
+}

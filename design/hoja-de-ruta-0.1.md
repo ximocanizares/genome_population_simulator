@@ -1,7 +1,7 @@
 # Hoja de ruta del simulador de genomas y poblaciones
 
 - **Versión:** 0.1
-- **Estado:** borrador inicial para revisión
+- **Estado:** vigente; F0 aprobada y F1 autorizada para ejecución
 - **Fecha:** 7 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
@@ -79,6 +79,9 @@ fase no se considerará terminada hasta satisfacer todas sus dependencias.
 ## 5. Fases e hitos
 
 ### F0. Arquitectura y decisiones técnicas
+
+**Estado:** cerrada y aprobada el 8 de agosto de 2026. Queda autorizada la
+ejecución del plan detallado de F1.
 
 **Objetivo:** convertir la especificación funcional en una arquitectura Rust
 trazable y resolver las decisiones necesarias para planificar el primer código.
@@ -504,9 +507,9 @@ continúa, se corrige o se modifica la hoja de ruta.
 
 ## 8. Trabajo posterior a esta hoja de ruta
 
-El siguiente documento debe ser la arquitectura Rust 0.1 correspondiente a F0.
-Después se resolverán las decisiones técnicas estrictamente necesarias para F1
-y se escribirá su plan de implementación detallado.
+F0 queda cerrada con la arquitectura Rust 0.1, las decisiones técnicas
+necesarias y el plan detallado de F1 aprobados. El trabajo siguiente comienza en
+F1.1 y debe respetar los pasos, comprobaciones y pausas obligatorias del plan.
 
 Las fases F2–F9 no deben dividirse todavía en archivos, módulos, crates ni
 commits. Su desglose se hará progresivamente con la evidencia obtenida en las

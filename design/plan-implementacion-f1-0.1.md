@@ -5,7 +5,7 @@
 - **Título:** plan detallado de F1, núcleo reproducible.
 - **Versión del plan:** 0.1.
 - **Fecha:** 8 de agosto de 2026.
-- **Estado:** listo para revisión de cierre de F0; ninguna casilla acredita trabajo ejecutado.
+- **Estado:** aprobado para ejecución; F0 está cerrada y ninguna casilla acredita todavía trabajo ejecutado.
 - **Ámbito temporal:** únicamente F1.1–F1.5.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
@@ -18,9 +18,10 @@
   convierte una propuesta DTP, una DTPD posterior ni una candidata de
   dependencia en decisión aprobada.
 
-Este documento ordena trabajo ya acordado. No autoriza a ampliar el alcance, a
-marcar F0 o F1 como cerradas ni a hacer commits. Antes de ejecutar el plan debe
-aprobarse en la revisión de F0.
+Este documento ordena trabajo ya acordado. F0 quedó aprobada el 8 de agosto de
+2026 y su ejecución comienza en A1. El plan no autoriza a ampliar el alcance, a
+marcar F1 como cerrada ni a hacer commits; deben respetarse sus pausas de
+revisión obligatorias.
 
 ## 2. Resultado y alcance
 
@@ -160,43 +161,43 @@ persona usuaria.
 calidad, dependencias y validadores, además de los catálogos que deben preceder
 a la implementación funcional.
 
-- ☐ A1. Crear la raíz Cargo y las fronteras mínimas de dominio, aplicación y adaptadores.
+- ✅ A1. Crear la raíz Cargo y las fronteras mínimas de dominio, aplicación y adaptadores.
   - Depende de: aprobación de F0 y de este plan.
   - Procede de: F1.1; arquitectura §§5–7; DTC-043 y DTC-048.
   - Cambia: `Cargo.toml`, `rust-toolchain.toml` y estructura mínima bajo `src/`; fija Rust 1.97.1, perfil `minimal`, `rustfmt`, `clippy`, target `x86_64-unknown-linux-gnu` y edición 2024, sin dependencias no evaluadas.
   - Se comprueba con: `rustc --version`, `cargo --version` y revisión literal de `rust-toolchain.toml` y `Cargo.toml`; no debe aparecer `target-cpu=native`.
 
-- ☐ A2. Generar y versionar la resolución reproducible de dependencias de la aplicación.
+- ✅ A2. Generar y versionar la resolución reproducible de dependencias de la aplicación.
   - Depende de: A1 y aceptación individual de cualquier dependencia inicial.
   - Procede de: DTC-043 y DTC-048.
   - Cambia: `Cargo.lock` y el registro de evaluación de cada dependencia realmente incorporada; no añade capacidades anticipadas.
   - Se comprueba con: `cargo metadata --locked --format-version 1` y `cargo tree --locked -e features`; ambos deben corresponder al lock versionado.
 
-- ☐ A3. Establecer las puertas automáticas de formato, análisis estático, pruebas y construcción portable.
+- ✅ A3. Establecer las puertas automáticas de formato, análisis estático, pruebas y construcción portable.
   - Depende de: A1–A2.
   - Procede de: F1.1; DTC-042, DTC-043 y DTC-048.
   - Cambia: configuración de automatización y documentación de comandos, separando pruebas rápidas, integración, validadores independientes y observaciones manuales.
   - Se comprueba con: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --all-targets --locked`, `cargo test --workspace --doc --locked` y `cargo build --release --locked --target x86_64-unknown-linux-gnu`.
 
-- ☐ A4. Crear el catálogo y el esquema públicos versionados de diagnósticos necesarios en F1 antes de implementar sus emisores.
+- ✅ A4. Crear el catálogo y el esquema públicos versionados de diagnósticos necesarios en F1 antes de implementar sus emisores.
   - Depende de: A1.
   - Procede de: DTC-036 y DTC-044; REQ-CONF/REF/VAL/MAN/SAL asignados a F1.
   - Cambia: artefacto normativo de códigos `GPS-{CONF|INPUT|FMT|DOMAIN|RES|TOOL|IO|INTERNAL}-NNN`, significado inmutable, contexto exigido y salida 0/1/2/3/4/5/70; además define el esquema Draft 2020-12 del documento único con `diagnostic_kind: "gps_diagnostics"`, `schema_version: "1"` y la lista `diagnostics`.
   - Se comprueba con: prueba de catálogo que rechace códigos repetidos, categorías desconocidas y significados vacíos; fixtures humano/JSON que conserven el mismo diagnóstico y revisión que asigne al menos un código a cada rechazo previsto por B, C, D y E.
 
-- ☐ A5. Crear el catálogo normativo de ámbitos de subsemilla y sus vectores literales antes del generador.
+- ✅ A5. Crear el catálogo normativo de ámbitos de subsemilla y sus vectores literales antes del generador.
   - Depende de: A1.
   - Procede de: DTC-037 y DTC-038; REQ-CONF-111 a REQ-CONF-115 y REQ-REP-22/23.
   - Cambia: artefacto versionado con ámbitos, nombres ASCII de campos, orden, valores UTF-8, versión de derivación, material binario esperado y subsemilla esperada; cubre al menos población inicial, generación/proceso biológico, muestreo y evento técnico sin implementar esos consumidores posteriores.
   - Se comprueba con: revisión byte a byte de vectores publicados que incluya longitudes y enteros `u32` big-endian y demuestre que no usa ruta, reloj, hilo, posición accidental ni orden de iteración.
 
-- ☐ A6. Crear el catálogo normativo de IDs y sus vectores literales antes del registro de identidades.
+- ✅ A6. Crear el catálogo normativo de IDs y sus vectores literales antes del registro de identidades.
   - Depende de: A1 y A5 para reutilizar únicamente la codificación canónica confirmada.
   - Procede de: DTC-039; REQ-CONF-38/101, REQ-IND-25/26 y REQ-EVO-63.
   - Cambia: artefacto versionado de clases, prefijos ASCII, ámbitos, causas mínimas, orden de campos, material binario, primeros 128 bits y Base32 RFC 4648 mayúscula sin `=`; incluye identidad de ejecución causada por raíz y digest de configuración.
   - Se comprueba con: vectores literales revisados independientemente y casos de separación entre `ReferenceId`, `IndividualId`, `EventId` e ID de ejecución; un cambio sin nueva versión debe fallar la prueba.
 
-- ☐ A7. Aprobar las herramientas independientes y el formato de sus evidencias antes de introducirlas en CI.
+- ✅ A7. Aprobar las herramientas independientes y el formato de sus evidencias antes de introducirlas en CI.
   - Depende de: A3.
   - Procede de: DTC-042, DTC-043 y DTC-047.
   - Cambia: registro versionado con versión y comando literal de `samtools`, `sha256sum`, listado/extracción de `.tar.gz`, implementación JSON Schema ajena al productor y herramienta de inspección/arranque OCI; fija por digest la base y receta OCI cuando se creen.
@@ -208,6 +209,16 @@ No comenzar consumidores de configuración, RNG o IDs hasta verificar A4–A6.
 La revisión debe conservar la salida de las cinco órdenes Cargo de A3, el árbol
 de características, el contrato Ubuntu/WSL2 y las evaluaciones de dependencias.
 Si falla una puerta, se corrige F1.1 y se repite la pausa.
+
+**Evidencia ejecutada en la pausa de F1.1 (8 de agosto de 2026):** las cinco
+órdenes Cargo de A3, `cargo metadata --locked --format-version 1`,
+`cargo tree --locked -e features`, las siete pruebas de catálogos y
+`scripts/check-independent-validators.sh` terminaron correctamente en Ubuntu
+24.04 sobre WSL2/ext4. El grafo Cargo no contiene dependencias externas. Las
+evaluaciones están en `evaluaciones-dependencias-f1.md` y
+`evaluacion-validadores-independientes-f1.md`; la salida negativa de los cinco
+validadores se conserva en `../evidence/f1.1/validators-corrupt-20260808.md`.
+La pausa queda alcanzada y no autoriza comenzar F1.2 sin revisión del usuario.
 
 ## 6. F1.2 — Configuración validada
 

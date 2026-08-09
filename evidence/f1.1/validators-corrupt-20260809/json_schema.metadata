@@ -1,0 +1,13 @@
+evidence_version=1
+validator_class=json_schema
+tool=CPython/jsonschema
+tool_version=CPython=3.12.3;jsonschema=4.10.3
+platform=Ubuntu 24.04; x86_64; WSL2
+filesystem=ext4
+command=python3 -m jsonschema -i diagnostics-unknown-field.json diagnostics-v1.schema.json
+fixture=tests/fixtures/validators/diagnostics-unknown-field.json
+expected=rejection
+observed=exit_code=1;rejected_unknown_top_level_field
+stdout_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+stderr_sha256=e777e75e5082976321d2a3e8c4e5976ecb9975981fb04f3f7204f3a674ac97d8
+artifact_sha256=751dd6a80e5fba2a18df6ff84db84c09381a8348948ceed516385770beba31b2

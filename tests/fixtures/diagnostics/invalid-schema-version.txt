@@ -1,0 +1,1 @@
+GPS-CONF-005 [CONF] La versión de esquema '2' no está admitida; se admite '1'. path=scenario.toml found=2 accepted=1

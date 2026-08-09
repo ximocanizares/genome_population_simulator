@@ -1,7 +1,7 @@
 # Arquitectura del simulador de genomas y poblaciones
 
 - **Versión:** 0.1
-- **Estado:** borrador para revisión
+- **Estado:** aprobada como base para ejecutar F1
 - **Fecha:** 8 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
