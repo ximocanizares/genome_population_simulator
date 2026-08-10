@@ -1,8 +1,8 @@
 # Hoja de ruta del simulador de genomas y poblaciones
 
 - **Versión:** 0.1
-- **Estado:** vigente; F0 aprobada y F1 autorizada para ejecución
-- **Fecha:** 7 de agosto de 2026
+- **Estado:** vigente; F0 aprobada, F1 ampliada con F1.6 y F2.0 pendiente de sus puertas
+- **Fecha:** 10 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Lenguaje del núcleo:** Rust
@@ -47,6 +47,10 @@ una fase dividirá sus hitos en cambios pequeños, con pruebas y pausas de revis
 8. **Planificar solo la siguiente fase.** No se redactará de una vez el plan
    detallado de toda la aplicación, porque las decisiones posteriores dependen
    de lo aprendido en fases anteriores.
+9. **Mantener paridad Marimo.** Desde F2.0, ninguna capacidad configurable de
+   F2–F9 cierra hasta que la aplicación permita configurarla, validarla y
+   lanzarla mediante el mismo conjunto TOML y binario y supere equivalencia y
+   accesibilidad.
 
 ## 3. Niveles de planificación
 
@@ -137,13 +141,20 @@ cree una ejecución identificada y produzca resultados trazables y repetibles.
   simulada o suministrada, conservar su FASTA e identidad verificable y repetir
   el recorrido ejecutable con semilla, configuración, entrada, versión y
   manifiesto mínimos idénticos.
+- **F1.6. Referencia reducida reproducible.** Derivar de un FASTA real validado
+  una referencia de tamaño exacto mediante regiones aleatorias no solapadas,
+  conservar orden/orientación y `N`, y publicar FASTA, mapa, integridad,
+  subsemilla y manifiesto reconstruibles. Antes de implementarla deben cerrarse
+  las dos cuestiones funcionales pendientes, DTPD-101 como decisión común de
+  coordenadas y después DTPD-116.
 
 **Resultado de salida:** ejecución mínima repetible con configuración, semilla,
-referencia y manifiesto.
+referencia completa o reducida y manifiesto; una reducción incluye su mapa.
 
 **Evidencia de cierre:** dos ejecuciones equivalentes producen el mismo
 resultado lógico y una configuración inválida no deja una ejecución marcada
-como completa.
+como completa. Una reducción se reconstruye exactamente desde origen+mapa y
+conserva tamaño, orden, clase, orientación y `N`.
 
 > Revisión de F1: comprobar reproducibilidad, diagnósticos y trazabilidad antes
 > de representar individuos.
@@ -160,17 +171,27 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
 
 **Hitos:**
 
+- **F2.0. Aplicación Marimo base.** Evaluar y fijar Marimo mediante DTPD-117;
+  implementar las nueve pestañas mínimas con `General/Ejecución`, `Genoma` y
+  `Revisar y ejecutar` activas para las capacidades F1, incluida F1.6; importar,
+  previsualizar y exportar un conjunto autoconsistente de TOML general y cero o
+  varios escenarios, implementando ahora el caso sin escenarios y preparando el
+  modelo multidocumento; invocar `validate`/`run` sin shell y demostrar
+  equivalencia, invalidación, salida segura y accesibilidad local.
 - **F2.1. Estado haplotípico.** Representar copias cromosómicas, fase, dosis y
-  procedencia sin duplicar innecesariamente secuencias completas; conservar `N`
-  como base desconocida con coordenada y longitud.
+  procedencia mediante el servicio de coordenadas decidido en F1.6, sin duplicar
+  innecesariamente secuencias completas; conservar `N` como base desconocida con
+  coordenada y longitud.
 - **F2.2. Variantes pequeñas.** Aplicar SNP e *indels* exactos y aleatorios con
   coordenadas y orden definidos; los recuentos aleatorios usan exclusivamente
   Poisson. Rechazar SNP sobre `N`, excluirla de sus oportunidades y conservarla
   en intervalos que no necesitan interpretarla.
 - **F2.3. Individuos directos.** Construir individuos desde la configuración y
-  reconstruir la secuencia de cada haplotipo.
+  reconstruir la secuencia de cada haplotipo; activar sus controles en la
+  pestaña `Individuos`.
 - **F2.4. Verdad estructurada.** Guardar el genotipo real y la información
-  necesaria para reconstruirlo independientemente del VCF.
+  necesaria para reconstruirlo independientemente del VCF y exponer sus
+  opciones y resumen enlazado en `Salidas`/`Revisar y ejecutar`.
 - **F2.5. VCF de verdad mínimo.** Producir exactamente un VCF multimuesta
   estándar por conjunto, ordenado, derivado del estado real y sin campos
   inferidos de lecturas. No emitir SNP con `REF=N` ni inventar una base; aplicar
@@ -375,7 +396,8 @@ configurado de los procesos.
 - **F7.6. Fases evolutivas.** Variar parámetros y encadenar episodios como
   panmixia, cuellos de botella o migración sin alterar el orden generacional
   fijo. Registrar cada etapa aplicada u omitida y el orden interno de varios
-  eventos demográficos.
+  eventos demográficos. Completar en `Evolución` la autoría de uno o varios TOML
+  de escenario y su equivalencia con el conjunto manual.
 - **F7.7. Observaciones.** Muestrear generaciones sin alterar la trayectoria y
   materializar estado completo y linaje detallado para población inicial,
   final y generaciones o muestreos solicitados; conservar solo resúmenes de las
@@ -411,7 +433,8 @@ conservar todos los individuos y haplotipos intermedios.
 **Hitos:**
 
 - **F8.1. Grafo de cruces.** Validar parentales, ciclos, dependencias y reglas
-  declarativas antes de generar descendencia.
+  declarativas antes de generar descendencia, y completar en `Familias` la
+  autoría de sus escenarios enlazados sin alterar IDs, orden ni rutas relativas.
 - **F8.2. Cruces básicos.** Implementar autofecundación, cruzamiento sexual,
   F2 y retrocruce como composiciones verificables que rechazan parentales con
   ploidía impar o desigual o con diferencias estructurales.
@@ -476,13 +499,19 @@ bloqueantes abiertos.
 > Revisión de F9: decidir si la versión está lista para publicarse o necesita un
 > ciclo adicional de corrección.
 
+DTF-037 reserva para después de F9.7 una decisión funcional separada sobre
+lotes reproducibles de ejecuciones completas. No es un hito de v1: solo podrá
+planificarse cuando existan las vías F3–F8 y la consolidación F9, y entonces
+deberá incluir la misma paridad Marimo exigida a cualquier capacidad
+configurable.
+
 ## 6. Matriz resumida de comprobación
 
 | Fase | Resultado construido | Evidencia principal | Riesgo protegido |
 |---|---|---|---|
 | F0 | Arquitectura y plan de F1 | Trazabilidad completa y decisiones cerradas | Diseño improvisado durante la implementación |
-| F1 | Ejecución mínima reproducible | Repetición con semilla y rechazo limpio | Resultados sin identidad o configuración efectiva |
-| F2 | Verdad genómica mínima | Reconstrucción independiente de haplotipos y VCF | Genotipos, fase o coordenadas incorrectos |
+| F1 | Ejecución mínima reproducible y referencia reducida | Repetición con semilla, reconstrucción origen+mapa y rechazo limpio | Resultados sin identidad, configuración efectiva o procedencia de referencia |
+| F2 | Aplicación base y verdad genómica mínima | Equivalencia Marimo→TOML→configuración efectiva y reconstrucción independiente de haplotipos/VCF | Semántica duplicada en UI o genotipos, fase y coordenadas incorrectos |
 | F3 | Primer recorrido extremo a extremo | Validación FASTQ, BAM/CRAM y procedencia | Alineamientos incoherentes con la verdad |
 | F4 | Realismo técnico WGS | Comparación de parámetros solicitados y realizados | Alterar la verdad con artefactos técnicos |
 | F5 | Variación y referencias complejas | Casos estructurales, VCF más complemento y aislamiento por referencia | Mezcla de referencias o pérdida de linaje o detalle complejo |
@@ -503,17 +532,19 @@ Una fase no se cerrará si:
 - falta una prueba independiente para una invariante crítica;
 - los archivos producidos no superan sus validaciones de formato;
 - la documentación afirma un resultado que no se ha ejecutado;
-- una decisión pendiente cambiaría los contratos de la fase siguiente.
+- una decisión pendiente cambiaría los contratos de la fase siguiente;
+- una opción configurable implementada desde F2 carece de control Marimo,
+  equivalencia UI→TOML→`EffectiveConfig` o comprobación accesible.
 
 Todo cierre termina con una pausa para revisar evidencias y decidir si se
 continúa, se corrige o se modifica la hoja de ruta.
 
 ## 8. Trabajo posterior a esta hoja de ruta
 
-F0 queda cerrada con la arquitectura Rust 0.1, las decisiones técnicas
-necesarias y el plan detallado de F1 aprobados. El trabajo siguiente comienza en
-F1.1 y debe respetar los pasos, comprobaciones y pausas obligatorias del plan.
+F0 queda cerrada con la arquitectura Rust 0.1 y las decisiones base. F1.6 y
+F2.0 son ampliaciones posteriores: no se consideran implementadas ni aprobadas
+por aparecer en esta hoja y deben respetar los planes, puertas y pausas.
 
-Las fases F2–F9 no deben dividirse todavía en archivos, módulos, crates ni
+Las fases F3–F9 no deben dividirse todavía en archivos, módulos, crates ni
 commits. Su desglose se hará progresivamente con la evidencia obtenida en las
-fases anteriores.
+fases anteriores; F2 ya dispone de su plan 0.1, todavía pendiente de aprobación.

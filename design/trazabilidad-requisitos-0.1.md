@@ -13,10 +13,12 @@ Cada REQ ocupa una fila. El identificador `TEST-REQ-…` reserva un caso de prue
 trazable; la frase breve solo identifica el escenario y debe interpretarse
 siempre mediante el texto normativo del REQ, no como otra obligación.
 
-**Estado de revisión:** las 788 filas se auditaron semánticamente en dos lotes
+**Estado de revisión:** las 788 filas anteriores se auditaron semánticamente en dos lotes
 complementarios de 412 y 376 REQ, además de la cobertura mecánica completa. Se
 corrigieron ACE, hitos y evidencias no pertinentes; RAD-028 queda resuelto. Las
-pruebas continúan marcadas como planificadas, no como ejecutadas o superadas.
+36 filas añadidas el 10 de agosto de 2026 quedan planificadas para F1.6/F2.0;
+el total vigente es 824. Las pruebas nuevas no se presentan como ejecutadas o
+superadas.
 
 ## 2. Matriz exhaustiva
 
@@ -145,6 +147,10 @@ pruebas continúan marcadas como planificadas, no como ejecutadas o superadas.
 | REQ-CONF-121 | ACE-111 | F9.7 | Planificada — TEST-REQ-CONF-121: auditar la matriz normativa completa cuando todos los parámetros de las familias de v1 estén incorporados. |
 | REQ-CONF-122 | ACE-111, ACE-93 | F9.7 | Planificada — TEST-REQ-CONF-122: comprobar que sustituciones técnicas no cambian verdad biológica y que eventos demográficos o reproductivos no se reinterpretan como técnicos. |
 | REQ-CONF-123 | ACE-111, ACE-22 | F1.4 | Superada — TEST-REQ-CONF-123 serializa valor, objeto, regla ganadora, selectores y procedencia y conserva equivalencia semántica al reordenar TOML. |
+| REQ-CONF-124 | ACE-112 | F1.6 | Planificada — TEST-REQ-CONF-124: declarar ID derivado, FASTA de origen y `region_size_bases` en bases y comprobar dominio, unidad y conservación efectiva. |
+| REQ-CONF-125 | ACE-112 | F1.6 | Planificada — TEST-REQ-CONF-125: aceptar por separado `target_bases` y `reduction_percent` y rechazar ambos, ninguno y cada valor fuera de dominio antes de derivar. |
+| REQ-CONF-126 | ACE-112, ACE-23 | F1.6 | Planificada — TEST-REQ-CONF-126: repetir la selección con raíz/ID iguales y demostrar aislamiento al añadir individuos, eventos o salidas. |
+| REQ-CONF-127 | ACE-112, ACE-113, ACE-22 | F1.6 | Planificada — TEST-REQ-CONF-127: inspeccionar configuración efectiva y verificar origen, objetivo declarado/realizado, región, seed/subseed, versión y procedencia sin sustitución silenciosa. |
 | REQ-TEC-01 | ACE-57 | F4.1 | Planificada — TEST-REQ-TEC-01: ejecutar el escenario «Cada evento que genere FASTQ, BAM o CRAM constituye también su único experimento de secuenciación, sin» y comparar el resultado observable con el REQ. |
 | REQ-TEC-02 | ACE-57 | F4.1 | Planificada — TEST-REQ-TEC-02: ejecutar el escenario «Cada experimento debe contener exactamente una tanda y una o varias bibliotecas» y comparar el resultado observable con el REQ. |
 | REQ-TEC-03 | ACE-57 | F4.1 | Planificada — TEST-REQ-TEC-03: crear dos eventos tecnológicos sobre la misma verdad; comprobar archivos y lecturas independientes y exigir otro evento para otra biblioteca, tanda, perfil o control. |
@@ -185,6 +191,19 @@ pruebas continúan marcadas como planificadas, no como ejecutadas o superadas.
 | REQ-REF-21 | ACE-58, ACE-03 | F5.6 | Planificada — TEST-REQ-REF-21: ejecutar el escenario «Cada CRAM debe estar asociado inequívocamente al FASTA exacto de la referencia contra la que se» y comparar el resultado observable con el REQ. |
 | REQ-REF-22 | ACE-03, ACE-04, ACE-11 | F1.5 | Superada — TEST-REQ-REF-22: dominio, configuración efectiva y manifiesto conservan clase explícita por secuencia. |
 | REQ-REF-23 | ACE-110, ACE-03 | F1.5 | Superada — TEST-REQ-REF-23: entrada y generación admiten A/C/G/T/N, conservan N y localizan cualquier otro símbolo. |
+| REQ-REF-24 | ACE-112, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-24: derivar una referencia con ID propio desde un FASTA real y comprobar que origen, copia autoritativa y derivada siguen siendo entidades distintas. |
+| REQ-REF-25 | ACE-03, ACE-112 | F1.6 | Planificada — TEST-REQ-REF-25: ejecutar el mismo preflight/copia/SHA-256 de F1.5 y demostrar que la selección solo lee la copia validada. |
+| REQ-REF-26 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-26: verificar con oráculo que los intervalos son reproducibles, no solapan ni se repiten y conservan orientación. |
+| REQ-REF-27 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-27: comprobar tamaño exacto para bases y porcentajes de borde con la regla funcional aprobada. |
+| REQ-REF-28 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-28: cubrir objetivo múltiplo y no múltiplo y exigir cero o exactamente un residual más corto, sin relleno ni repetición. |
+| REQ-REF-29 | ACE-113 | F1.6 | Planificada — TEST-REQ-REF-29: sortear intervalos fuera de orden y comprobar materialización por orden de secuencia y coordenada creciente. |
+| REQ-REF-30 | ACE-113 | F1.6 | Planificada — TEST-REQ-REF-30: omitir secuencias sin selección y rechazar cualquier referencia o registro FASTA vacío. |
+| REQ-REF-31 | ACE-113, ACE-25 | F1.6 | Planificada — TEST-REQ-REF-31: comprobar ID de referencia distinto e identidad/clase inequívocas de cada secuencia fuente conforme a la decisión funcional aprobada. |
+| REQ-REF-32 | ACE-110, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-32: seleccionar intervalos con `N`, contarla en el objetivo y comparar literalmente origen, derivada y mapa. |
+| REQ-REF-33 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-33: rechazar objetivo mayor, cálculo menor que una base, espacio insuficiente y combinación incompatible sin publicar resultado parcial. |
+| REQ-REF-34 | ACE-04, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-34: validar IDs distintos y tamaño/SHA-256 propios y coherentes; aceptar la misma suma solo si los bytes completos coinciden. |
+| REQ-REF-35 | ACE-95, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-35: auditar todas las columnas del mapa y la cobertura bidireccional base 1 cerrada sin huecos derivados ni origen duplicado. |
+| REQ-REF-36 | ACE-113, ACE-23 | F1.6 | Planificada — TEST-REQ-REF-36: reconstruir el FASTA exacto con implementación independiente desde origen+mapa y comprobar seed/versión sin usar orden de sorteo. |
 | REQ-IND-01 | ACE-09, ACE-10 | F7.2 | Planificada — TEST-REQ-IND-01: ejecutar «crear individuos que contengan SNP, *indels*, variantes estructurales y repeticiones en tándem respecto a una referencia» y comprobar el estado o artefacto resultante y su identidad. |
 | REQ-IND-02 | ACE-09, ACE-10 | F2.2 | Planificada — TEST-REQ-IND-02: ejecutar el escenario «La estructura de cada individuo debe poder corresponder a cualquiera de las referencias disponibles» y comparar el resultado observable con el REQ. |
 | REQ-IND-03 | ACE-21, ACE-22 | F2.2 | Planificada — TEST-REQ-IND-03: ejecutar «conservar qué referencia disponible describe la estructura de cada muestra» y comprobar el registro y su procedencia en la salida exigida. |
@@ -583,6 +602,19 @@ pruebas continúan marcadas como planificadas, no como ejecutadas o superadas.
 | REQ-CONT-14 | ACE-74 | F4.5 | Planificada — TEST-REQ-CONT-14: ejecutar «Por muestra, fuente y mecanismo, el manifiesto y el informe deben registrar objetivos, lecturas propias retiradas» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-CONT-15 | ACE-42 | F4.4 | Planificada — TEST-REQ-CONT-15: ejecutar «Las contribuciones expresadas como proporción, cobertura equivalente o número deben convertirse conjuntamente después de conocer el» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-CONT-16 | ACE-42 | F4.4 | Planificada — TEST-REQ-CONT-16: ejecutar «La asignación entera conjunta debe elegir, entre las soluciones que respeten los límites y la disponibilidad» y comprobar el registro y su procedencia en la salida exigida. |
+| REQ-UI-01 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-01: comparar el inventario de opciones implementadas F1/F1.6 con controles Marimo y demostrar que ninguna queda solo en TOML/CLI. |
+| REQ-UI-02 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-02: comprobar las nueve pestañas, su orden y su visibilidad/estado justificados para las tres vías. |
+| REQ-UI-03 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-03: cubrir controles de escalar/enumeración/booleano, dominios, ausencias y conversión visual de unidades sin pérdida normativa. |
+| REQ-UI-04 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-04: añadir, eliminar y reordenar filas de cada lista/regla y verificar identidad y orden TOML estables. |
+| REQ-UI-05 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-05: editar todos los ámbitos admitidos, rechazar los no permitidos y delegar conflictos de dominancia al binario. |
+| REQ-UI-06 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-06: importar/previsualizar/exportar un general sin escenarios y conjuntos multiescenario; conservar IDs, orden y rutas relativas con espacios y rechazar faltante/duplicado. |
+| REQ-UI-07 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-07: invocar `validate`, asociar diagnóstico a campo y demostrar que cualquier edición invalida la validación. |
+| REQ-UI-08 | ACE-115 | F2.0 | Planificada — TEST-REQ-UI-08: abrir, importar y editar sin ejecución y exigir acción explícita tras validación vigente. |
+| REQ-UI-09 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-UI-09: usar proceso falso y binario real para comprobar argumentos separados, ausencia de shell y autoridad exclusiva del núcleo. |
+| REQ-UI-10 | ACE-115 | F2.0 | Planificada — TEST-REQ-UI-10: rechazar destino vacío/existente y confirmar que la UI no evita ni rebaja la política no-clobber. |
+| REQ-UI-11 | ACE-115 | F2.0 | Planificada — TEST-REQ-UI-11: mostrar estado/código/logs/diagnósticos/resumen y demostrar con artefacto grande que no se carga completo. |
+| REQ-UI-12 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-UI-12: aceptar contrato compatible y bloquear versiones ausente, anterior, posterior o desconocida sin migración parcial. |
+| REQ-UI-13 | ACE-115 | F2.0 | Planificada — TEST-REQ-UI-13: recorrer por teclado en Ubuntu/WSL2, comprobar etiquetas/foco/color y auditar la puerta UI de cada capacidad F2. |
 | REQ-RG-01 | ACE-56, ACE-100 | F3.3 | Planificada — TEST-REQ-RG-01: ejecutar el escenario «Los BAM o CRAM deben incluir grupos de lectura coherentes que identifiquen como mínimo el evento» y comparar el resultado observable con el REQ. |
 | REQ-RG-02 | ACE-56, ACE-100 | F4.6 | Planificada — TEST-REQ-RG-02: ejecutar el escenario «Cada individuo seleccionado por un evento técnico debe tener exactamente una biblioteca, un grupo de lectura» y comparar el resultado observable con el REQ. |
 | REQ-RG-03 | ACE-100 | F3.1 | Planificada — TEST-REQ-RG-03: presentar el caso límite «Antes de generar lecturas, el sistema debe rechazar las colisiones de identificadores de grupos de lectura» y comprobar rechazo previo y diagnóstico identificable. |
@@ -688,6 +720,9 @@ pruebas continúan marcadas como planificadas, no como ejecutadas o superadas.
 | REQ-VAL-49 | ACE-48, ACE-64 | F4.7 | Planificada — TEST-REQ-VAL-49: ejecutar «La admisión debe comprobar que ninguna configuración solicita calibración empírica, aporta FASTQ o referencia para calibrarla» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-VAL-50 | ACE-110, ACE-64 | F7.4 | Planificada — TEST-REQ-VAL-50: presentar el caso límite «comprobar que ninguna `N` se resolvió, sustituyó ni creó silenciosamente» y comprobar rechazo previo y diagnóstico identificable. |
 | REQ-VAL-51 | ACE-111, ACE-64 | F1.2 | Planificada — TEST-REQ-VAL-51: presentar el caso límite «La admisión debe comprobar la resolución de sustituciones de REQ-CONF-116 a REQ-CONF-123 antes de simular» y comprobar rechazo previo y diagnóstico identificable. |
+| REQ-VAL-52 | ACE-112, ACE-64 | F1.6 | Planificada — TEST-REQ-VAL-52: agotar exclusividad, dominios, espacio, objetivo, residual e IDs y comprobar rechazo previo sin FASTA/mapa derivados. |
+| REQ-VAL-53 | ACE-113, ACE-64 | F1.6 | Planificada — TEST-REQ-VAL-53: reconstruir desde origen+mapa y detectar intervalo, orientación, orden, `N`, tamaño o SHA-256 alterados. |
+| REQ-VAL-54 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-VAL-54: comparar conjunto UI/manual hasta `EffectiveConfig` o diagnóstico, incluidos enlaces/rutas relativas, y rechazar incompatibilidad de versión app↔binario. |
 | REQ-MAN-01 | ACE-22 | F1.4 | Superada — TEST-REQ-MAN-01 comprueba manifiesto general y uno por evento explícito. |
 | REQ-MAN-02 | ACE-64 | F1.4 | Superada — TEST-REQ-MAN-02 analiza JSON y lo contrasta con JSON Schema Draft 2020-12 independiente. |
 | REQ-MAN-03 | ACE-14 | F1.4 | Superada — TEST-REQ-MAN-03 conserva la vía efectiva en el manifiesto general. |
@@ -776,7 +811,9 @@ pruebas continúan marcadas como planificadas, no como ejecutadas o superadas.
 | REQ-MAN-86 | ACE-03 | F1.5 | Superada — TEST-REQ-MAN-86: salida estructurada conserva ID, cabecera/descripcion reversibles, clase, longitud, ploidía, regla de alfabeto y N. |
 | REQ-MAN-87 | ACE-110 | F7.4 | Planificada — TEST-REQ-MAN-87: ejecutar «registrar, por referencia, biblioteca y operación pertinente, el número o la proporción de `N`, sus exclusiones» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-MAN-88 | ACE-111, ACE-22 | F1.4 | Superada — TEST-REQ-MAN-88 conserva parámetro, objeto, regla ganadora, selectores y procedencia; el rechazo ambiguo mantiene todas las máximas desde F1.2. |
-| REQ-SAL-01 | ACE-04 | F1.5 | Superada — TEST-REQ-SAL-01: cada ejecución válida produce un FASTA único; el FAI de aceptación queda fuera de la salida normal. |
+| REQ-MAN-89 | ACE-112, ACE-113, ACE-22 | F1.6 | Planificada — TEST-REQ-MAN-89: inspeccionar IDs, rutas/hashes, tamaños, región, objetivo, seed/subseed y versión de una reducción reproducible. |
+| REQ-MAN-90 | ACE-113, ACE-22 | F1.6 | Planificada — TEST-REQ-MAN-90: resolver el enlace al mapa, validar clase/versión/tamaño/SHA y comprobar secuencias omitidas y residual. |
+| REQ-SAL-01 | ACE-04 | F1.5 | Superada — TEST-REQ-SAL-01: cada referencia de la ejecución produce un único FASTA; el FAI de aceptación queda fuera de la salida normal. |
 | REQ-SAL-02 | ACE-34, ACE-78, ACE-14 | F8.5 | Planificada — TEST-REQ-SAL-02: ejecutar «Toda ejecución válida debe producir un fichero de verdad con el estado genotípico completo, faseado y» y comprobar el estado o artefacto resultante y su identidad. |
 | REQ-SAL-03 | ACE-03 | F1.4 | Superada — TEST-REQ-SAL-03 copia byte a byte todos los TOML realmente usados y verifica tamaño/SHA-256. |
 | REQ-SAL-04 | ACE-94 | F1.4 | Superada — TEST-REQ-SAL-04 produce y valida manifiesto general y todos los manifiestos de eventos explícitos. |
@@ -802,6 +839,7 @@ pruebas continúan marcadas como planificadas, no como ejecutadas o superadas.
 | REQ-SAL-24 | ACE-94 | F7.7 | Planificada — TEST-REQ-SAL-24: ejecutar «Un evento solo debe marcarse como completo cuando sus salidas propias y todos sus conjuntos obligatorios» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-SAL-25 | ACE-34 | F9.1 | Planificada — TEST-REQ-SAL-25: ejecutar «La ejecución solo debe marcarse como completa y exitosa cuando todas las salidas mínimas y activadas» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-SAL-26 | ACE-34 | F1.4 | Superada — TEST-REQ-SAL-26 ejecuta rechazo CLI con salida 2 y ausencia de destino final. |
+| REQ-SAL-27 | ACE-94, ACE-113 | F1.6 | Planificada — TEST-REQ-SAL-27: inyectar fallos entre FASTA/mapa/metadatos y exigir publicación conjunta completa o estado fallido sin unidad parcial válida. |
 | REQ-NOF-01 | ACE-01, ACE-35 | F9.1 | Planificada — TEST-REQ-NOF-01: ejecutar el escenario «El sistema no debe imponer límites funcionales fijos al número o tamaño de cromosomas o *scaffolds*» y comparar el resultado observable con el REQ. |
 | REQ-NOF-02 | ACE-35 | F9.1 | Planificada — TEST-REQ-NOF-02: ejecutar el escenario «Los límites prácticos de una ejecución deben depender de la memoria, CPU, almacenamiento y tiempo disponibles» y comparar el resultado observable con el REQ. |
 | REQ-NOF-03 | ACE-35 | F9.1 | Planificada — TEST-REQ-NOF-03: ejecutar el escenario «La primera versión debe priorizar la creación y comprobación de ejemplos pequeños, controlados y reproducibles para» y comparar el resultado observable con el REQ. |

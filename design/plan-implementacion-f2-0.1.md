@@ -6,9 +6,9 @@
 - **Versión del plan:** 0.1.
 - **Fecha:** 10 de agosto de 2026.
 - **Estado:** borrador técnico condicionado; F1.4 está aprobada, pero no está
-  autorizado para ejecución hasta que F1.5 y la revisión de cierre de F1 estén
-  terminadas y este plan sea aprobado explícitamente.
-- **Ámbito temporal:** únicamente F2.1–F2.5.
+  autorizado para ejecución hasta que F1.5, F1.6 y la revisión de cierre de F1
+  estén terminadas y este plan sea aprobado explícitamente.
+- **Ámbito temporal:** únicamente F2.0–F2.5.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
   [arquitectura-0.1.md](./arquitectura-0.1.md),
@@ -19,13 +19,19 @@
   y [plan-implementacion-f1-0.1.md](./plan-implementacion-f1-0.1.md).
 - **Decisiones confirmadas aplicables:** DTC-001, DTC-003, DTC-004, DTC-006,
   DTC-010, DTC-011, DTC-013, DTC-020 a DTC-022, DTC-024, DTC-031 a
-  DTC-049.
-- **Decisiones pendientes bloqueantes:** DTPD-101 para F2.1/F2.2, DTPD-102
-  para F2.1/F2.4 y DTPD-103 para F2.5. También falta documentar y aprobar la
+  DTC-049 y DTC-051.
+- **Decisiones pendientes bloqueantes:** DTPD-101 bloquea F1.6 y, por
+  dependencia, F2.1/F2.2; debe llegar resuelta desde F1. DTPD-102 bloquea
+  F2.1/F2.4 y DTPD-103, F2.5. También falta documentar y aprobar la
   concreción técnica de Poisson indicada en §4.2. Para los *indels* aleatorios
   de F2 ya se acordó una longitud exacta configurable por separado para
   inserciones y deleciones, con valor predeterminado de 1 pb; falta trasladar
   este acuerdo al registro canónico de decisiones.
+  DTPD-117 bloquea F2.0 hasta evaluar y fijar Marimo, su entorno, empaquetado y
+  contrato versionado con el binario.
+- **Pendientes del informe adversarial que siguen abiertos:** RAF2-001,
+  RAF2-004 y RAF2-007. Esta ampliación no los resuelve ni reduce su efecto
+  bloqueante.
 
 Todas las casillas permanecen abiertas. El documento ordena trabajo futuro: no
 acredita que F1 haya cerrado, no resuelve decisiones pendientes, no selecciona
@@ -66,6 +72,9 @@ VCF como fuente de verdad.
 - Verdad estructurada obligatoria e independiente del VCF, y un VCF de verdad
   mínimo con GT faseado, dosis correcta, orden de referencia, alelos derivados
   de la verdad y validación externa independiente.
+- Aplicación Marimo base con nueve pestañas, cobertura completa de F1/F1.6,
+  importación/exportación del conjunto TOML e invocación segura del binario; durante F2 se
+  amplía para individuos, verdad estructurada y VCF.
 
 ### 2.2. Excluido
 
@@ -78,23 +87,28 @@ VCF como fuente de verdad.
   longitud de *indels*, gVCF con posiciones invariantes y cualquier resolución
   silenciosa de `N`. Las distribuciones configurables de longitud corresponden
   a REQ-MUT-08 en F7.2; F2 solo admite la longitud exacta acordada.
-- DTF-003, DTF-008, DTF-013, DTF-014, DTF-023, DTF-033, DTF-034 y DTF-036,
+- DTF-003, DTF-008, DTF-013, DTF-014, DTF-023, DTF-033, DTF-034, DTF-036 y
+  DTF-037,
   además de las demás ampliaciones post-v1 del registro vigente.
 - Afirmar el cierre total de requisitos asignados a fases posteriores. F2 puede
   dejar evidencia parcial reutilizable para, por ejemplo, REQ-IND-58,
   REQ-IND-59, REQ-VER-01, REQ-VER-24 a REQ-VER-26, REQ-FMT-07 y REQ-SAL-02,
   pero no los marcará satisfechos en su matriz de cierre.
+- Reimplementar en Marimo validación, dominancia, biología, generación aleatoria
+  o publicación; la aplicación solo configura e invoca al binario.
 
 ## 3. Orden, reutilización y fronteras
 
-1. Cerrar F1 y congelar su línea base antes de modificar contratos de dominio,
+1. Cerrar F1.6 y F1, incluida DTPD-101 y el servicio común de coordenadas, y
+   congelar su línea base antes de modificar contratos de dominio,
    configuración, referencia, aleatoriedad o publicación.
-2. Resolver DTPD-101 y DTPD-102 con prototipos y oráculos independientes antes
-   de implementar coordenadas o estado haplotípico; resolver DTPD-103 antes de
-   implementar VCF.
-3. Mantener un único servicio de coordenadas. Las fronteras traducen la base 1
-   cerrada configurada; ningún adaptador ni algoritmo realiza conversiones
-   implícitas.
+2. Resolver DTPD-117 y cerrar F2.0 antes de F2.1. Después resolver DTPD-102 con
+   prototipos y oráculos independientes antes de implementar estado haplotípico;
+   resolver DTPD-103 antes de implementar VCF.
+3. Reutilizar y extender el único servicio de coordenadas decidido e iniciado
+   en F1.6. Las fronteras traducen la base 1 cerrada configurada; ningún
+   adaptador ni algoritmo realiza conversiones implícitas ni abre otra
+   representación interna.
 4. Extender `DeclaredConfig` y `EffectiveConfig`, el catálogo `ParameterKey`,
    `ResolutionContext` y los IDs tipados existentes. No crear un segundo parser,
    resolvedor, catálogo de semillas, mecanismo de hash o publicador.
@@ -126,7 +140,7 @@ serialización de verdad ni VCF; este plan no presupone ninguna.
 
 ### 4.1. Puerta de entrada a F2
 
-Antes de A1 deben constar: F1.4 y F1.5 terminadas; revisión de cierre de F1
+Antes de M1 deben constar: F1.4, F1.5 y F1.6 terminadas; revisión de cierre de F1
 aprobada; pruebas y evidencias F1 verdes; hashes/esquemas/catálogos F1 congelados;
 árbol de trabajo atribuido; y aprobación explícita de este plan. Si F1 cambia
 un contrato que F2 pretendía reutilizar, se actualiza primero este plan y su
@@ -134,13 +148,18 @@ trazabilidad.
 
 ### 4.2. Decisiones que detienen solo a sus consumidores
 
-- DTPD-101 debe elegir la representación interna y demostrar bordes,
-  conversiones y composición de segmentos sin pérdidas.
+- DTPD-101 debe resolverse durante F1.6 con representación común, tipos de
+  frontera y vectores de intervalos origen↔derivada. F2.1/F2.2 deben auditar y
+  extender esa decisión para segmentos, anclas y composición sin reabrirla.
 - DTPD-102 debe elegir por separado el estado haplotípico interno y el fichero
   obligatorio de verdad, demostrando reconstrucción, memoria, fase, dosis y
   procedencia.
 - DTPD-103 debe fijar versión VCF, normalización, campos `INFO`, representación
   complementaria y validadores independientes, incluidos BGZF e índice.
+- DTPD-117 debe evaluar y fijar versión compatible de Marimo, entorno,
+  dependencias, licencia, seguridad, empaquetado Ubuntu/WSL2, contrato de
+  esquemas/catálogos y adaptador de proceso sin shell. Ninguna versión se
+  presupone en este plan.
 - La documentación no concreta todavía la implementación Poisson. B1 debe
   crear una entrada de decisión conforme a §9 de
   `decisiones-tecnicas-0.1.md`, evaluar opciones, fijar el algoritmo y aprobarla.
@@ -178,7 +197,92 @@ Los oráculos de aceptación no pueden llamar al productor para calcular el
 resultado esperado ni leer el VCF para reconstruir la verdad con la que se lo
 compara.
 
-## 5. F2.1 — Estado haplotípico mínimo
+## 5. F2.0 — Aplicación Marimo base
+
+**Resultado del hito:** una aplicación local versionada permite configurar,
+validar y lanzar todas las capacidades cerradas en F1/F1.6 mediante el mismo
+TOML y binario, sin duplicar semántica y con las nueve pestañas preparadas para
+las ampliaciones F2–F9.
+
+- ☐ M1. Resolver DTPD-117 y aprobar la dependencia y distribución de Marimo.
+  - Depende de: cierre explícito de F1.6/F1 y aprobación de este plan.
+  - Procede de: DTPD-117, DTC-043, DTC-048 y DTC-051; REQ-UI-01, REQ-UI-12 y REQ-UI-13.
+  - Cambia: evaluación con versión exacta, entorno, lock/pinning, licencia, mantenimiento, seguridad, empaquetado local Ubuntu/WSL2 y protocolo de proceso; solo después incorpora los archivos/dependencias aprobados de la app.
+  - Se comprueba con: revisión DTC-043 equivalente para el entorno, instalación reproducible aislada, inventario bloqueado, arranque local y aprobación fechada de DTPD-117 sin introducir Python en el núcleo Rust.
+
+- ☐ M2. Publicar el contrato versionado aplicación↔esquema↔catálogos↔binario.
+  - Depende de: M1 y esquemas/catálogos cerrados en F1.6.
+  - Procede de: REQ-UI-01, REQ-UI-09 y REQ-UI-12; DTC-036 y DTC-051.
+  - Cambia: metadatos o comando de capacidades aprobado que declara versiones compatibles de esquema TOML general/escenario, campos, diagnósticos y protocolo `validate`/`run`, sin exponer tipos internos.
+  - Se comprueba con: conjuntos compatible, anterior, posterior, ausente y corrupto; toda incompatibilidad de cualquier documento bloquea importación/validación/ejecución antes de interpretar parcialmente opciones.
+
+- ☐ M3. Crear el armazón accesible de las nueve pestañas y su visibilidad por vía/capacidad.
+  - Depende de: M1–M2.
+  - Procede de: REQ-UI-02 y REQ-UI-13; DTC-051.
+  - Cambia: aplicación con `General/Ejecución`, `Genoma`, `Individuos`, `Poblaciones`, `Evolución`, `Familias`, `Eventos técnicos`, `Salidas` y `Revisar y ejecutar`; las no implementadas quedan deshabilitadas/ocultas con causa explícita.
+  - Se comprueba con: prueba de presencia y orden estable, rutas direct/evolution/families, navegación por teclado y comprobación de que una pestaña no disponible no pierde su destino trazable.
+
+- ☐ M4. Mantener un único estado de formulario tipado e invalidar toda validación tras una edición.
+  - Depende de: M2–M3.
+  - Procede de: REQ-UI-03, REQ-UI-07 y REQ-UI-09; arquitectura §§6.1 y 7.1.
+  - Cambia: modelo de autoría multidocumento separado de `EffectiveConfig`, con un general y cero o varios escenarios identificados/ordenados/enlazados; digest/revisión del conjunto validado y transición explícita editado→no validado→validado→ejecutable.
+  - Se comprueba con: editar, añadir, quitar, reordenar o renombrar cualquier documento/enlace después de validar, verificar invalidación inmediata y demostrar que la app nunca calcula regla ganadora, valor efectivo o verdad biológica.
+
+- ☐ M5. Cubrir con controles tipados todas las opciones escalares F1/F1.6 de General y Genoma.
+  - Depende de: M2–M4.
+  - Procede de: REQ-UI-01, REQ-UI-03 y REQ-CONF-124 a REQ-CONF-127; DTC-050/DTC-051.
+  - Cambia: controles de clase/versión, vía, seed, referencia simulada/suministrada/reducida, IDs, clases, tamaños, `region_size_bases`, unión de objetivo y opciones de salida existentes, con unidad normativa en bases y ayuda en kb.
+  - Se comprueba con: matriz opción F1/F1.6→pestaña/control/campo TOML, límites y exclusividad de reducción, conversión visual kb↔bases sin pérdida y ausencia de opción implementada solo en TOML.
+
+- ☐ M6. Implementar tablas editables para secuencias, eventos, reglas y demás listas F1.
+  - Depende de: M3–M5.
+  - Procede de: REQ-UI-04, REQ-UI-05 y DTC-051.
+  - Cambia: tablas con añadir/eliminar/reordenar, IDs y orden visibles y editores de selectores/ámbitos permitidos según catálogo; no concede precedencia por orden accidental de celdas.
+  - Se comprueba con: alta/baja/reordenación, duplicados, región/locus, selector no admitido y comparación del TOML resultante con fixtures manuales equivalentes.
+
+- ☐ M7. Importar y exportar un conjunto TOML autoconsistente.
+  - Depende de: M2 y M4–M6.
+  - Procede de: REQ-UI-06 y REQ-UI-12; DTC-034, DTC-036 y DTC-051.
+  - Cambia: adaptador de importación al estado de formulario multidocumento, previsualización individual y exportación/guardado conjunto de exactamente un general y cero o varios escenarios, conservando IDs, orden y enlaces/rutas relativas. F2.0 activa el caso general F1/F1.6 y prepara escenarios sin implementar sus controles biológicos.
+  - Se comprueba con: general sin escenarios y fixtures estructurales con varios escenarios, rutas relativas y nombres con espacios; faltante, duplicado, ajeno y enlace roto se rechazan; el ciclo importar→previsualizar→exportar→`validate` produce la misma `EffectiveConfig` o diagnóstico que el conjunto manual.
+
+- ☐ M8. Invocar `validate` sin shell y asociar diagnósticos a campos sin reinterpretarlos.
+  - Depende de: M1–M2 y M7.
+  - Procede de: REQ-UI-07, REQ-UI-09 y REQ-VAL-54; DTC-044 y DTC-051.
+  - Cambia: adaptador de proceso con argumentos separados para el general y sus escenarios enlazados, captura acotada de stdout/stderr/código y presentación por documento/pestaña/tabla/fila/campo usando el diagnóstico JSON del binario.
+  - Se comprueba con: proceso falso que registra cada argumento, rutas relativas con espacios/metacaracteres, binario real válido/inválido, códigos 0–5/70 y prueba de que ningún texto se ejecuta como shell.
+
+- ☐ M9. Seleccionar el destino de forma segura y lanzar `run` solo por acción explícita.
+  - Depende de: M4, M8 y publicación F1.4.
+  - Procede de: REQ-UI-08 a REQ-UI-10; DTC-045 y DTC-051.
+  - Cambia: selector/revisión de destino, confirmación visible de no-clobber y botón de ejecución habilitado solo para el digest validado vigente; abrir/importar/editar nunca ejecuta.
+  - Se comprueba con: destino vacío/existente/válido, doble clic, edición posterior, recarga de app y proceso falso; solo una acción explícita válida lanza una lista de argumentos y el binario conserva el rechazo no-clobber.
+
+- ☐ M10. Presentar estado, logs, diagnósticos y resultados sin cargar artefactos grandes.
+  - Depende de: M8–M9 y manifiestos F1.4/F1.6.
+  - Procede de: REQ-UI-11 y DTC-051.
+  - Cambia: vista de proceso/estado/código, logs acotados o paginados y resumen desde manifiestos con enlaces a artefactos; nunca lee completos FASTA/FASTQ/BAM/CRAM/VCF para resumir.
+  - Se comprueba con: proceso largo/fallido, log grande, manifiesto válido/roto y artefacto señuelo grande instrumentado para demostrar que solo se leen metadatos o fragmentos solicitados.
+
+- ☐ M11. Cerrar accesibilidad y funcionamiento local Ubuntu/WSL2.
+  - Depende de: M3–M10.
+  - Procede de: REQ-UI-13; DTC-042, DTC-051 y DTPD-117 aprobada.
+  - Cambia: etiquetas, ayuda/unidades, foco, teclado, estados textuales además de color y guía de arranque local sobre sistema de ficheros Linux; no promete Windows nativo.
+  - Se comprueba con: recorrido completo solo teclado, inspección de etiquetas/foco/contraste acordada, Ubuntu 24.04 y WSL2/ext4, y rechazo/documentación de `/mnt/c` conforme al entorno admitido.
+
+- ☐ M12. Completar equivalencia y trazabilidad de F2.0.
+  - Depende de: M1–M11.
+  - Procede de: REQ-UI-01 a REQ-UI-13, REQ-VAL-54 y ACE-114/115.
+  - Cambia: 14 casos `TEST-REQ-*`, matriz opción→control, pruebas app→conjunto TOML→binario y expediente DTPD-117; no marca controles de escenarios evolutivos/familias ni otras capacidades futuras como implementados.
+  - Se comprueba con: par UI/manual para cada capacidad F1/F1.6 y para la estructura general+0..N escenarios que produce igual `EffectiveConfig` o diagnóstico, puertas propias de la app y recuento automático de 14 REQ sin huérfanos.
+
+> **Pausa obligatoria F2.0.** No iniciar F2.1 hasta aprobar DTPD-117, la
+> equivalencia de todas las opciones F1/F1.6, la invocación sin shell, la
+> autoría/exportación autoconsistente del conjunto TOML, la invalidación tras
+> cambiar cualquier documento/enlace, el destino no-clobber y la revisión de
+> accesibilidad. RAF2-001, RAF2-004 y RAF2-007 continúan abiertos.
+
+## 6. F2.1 — Estado haplotípico mínimo
 
 **Resultado del hito:** coordenadas y estado propios representan cada copia
 haplotípica, fase, dosis, procedencia y `N`, y permiten materializar secuencias
@@ -190,11 +294,11 @@ exactas desde la referencia cerrada en F1.
   - Cambia: evidencia de preflight de F2 con commit base, toolchain, lock, esquemas, catálogos, comandos verdes y contratos F1 reutilizados; no cambia producción.
   - Se comprueba con: revisión del acta de cierre F1, `git status --short`, `rustc --version`, `cargo metadata --locked --format-version 1` y las puertas de §4.3 sobre el commit base.
 
-- ☐ A2. Resolver y aprobar DTPD-101 sin filtrar tipos de dependencias a dominio.
+- ☐ A2. Auditar y congelar para F2 la DTPD-101 resuelta en F1.6.
   - Depende de: A1.
   - Procede de: DTPD-101; DTC-010; REQ-CONF-28, REQ-IND-38 y REQ-IND-39.
-  - Cambia: registro de decisiones y prototipo desechable que compara las representaciones candidatas en límites, inserciones ancladas, deleciones internas y composición de ediciones.
-  - Se comprueba con: tabla de opciones y costes, vectores literales de primera/última base y rangos vacíos, demostración de ida/vuelta en fronteras, revisión independiente y aprobación fechada.
+  - Cambia: expediente de consumo F2 que enlaza la decisión y los tipos/servicio comunes de F1.6, completa vectores de inserciones ancladas, deleciones internas y composición y prohíbe otra representación; no reabre opciones ni cambia DTPD-101.
+  - Se comprueba con: huella/versión coincidentes con F1.6, vectores literales de primera/última base y rangos vacíos, ida/vuelta en fronteras y revisión independiente que detectaría cualquier conversión o tipo local nuevo.
 
 - ☐ A3. Resolver y aprobar DTPD-102 para estado interno y fichero de verdad como contratos distintos.
   - Depende de: A1 y A2 para interpretar coordenadas del prototipo.
@@ -208,11 +312,11 @@ exactas desde la referencia cerrada en F1.
   - Cambia: evaluación individual con propósito, REQ, versión exacta, licencia, mantenimiento, seguridad, características, árbol, código nativo, scripts y coste de distribución; después, solo las dependencias aprobadas y `Cargo.lock`.
   - Se comprueba con: revisión de la evaluación, `cargo metadata --locked --format-version 1`, `cargo tree --locked -e features` y repetición de §4.3.
 
-- ☐ A5. Implementar tipos propios de coordenada y el único servicio de conversión.
+- ☐ A5. Extender el servicio común de coordenadas de F1.6 a los casos de F2.
   - Depende de: A2 y A4 cuando corresponda.
   - Procede de: DTC-010, DTC-013 y DTC-039; REQ-CONF-28, REQ-IND-38 y REQ-IND-39.
-  - Cambia: dominio y servicio de coordenadas según DTPD-101, con constructores validados para posición, intervalo, ancla de inserción y deleción interna; no expone tipos de crates.
-  - Se comprueba con: pruebas de tabla escritas desde la semántica externa base 1 cerrada, propiedades de ida/vuelta y fallos explícitos en cero, fuera de rango, desbordamiento y límites terminales.
+  - Cambia: los tipos y el servicio ya usados por el mapa de reducción ganan constructores validados para posición, intervalo, ancla de inserción y deleción interna; no expone tipos de crates ni crea un segundo módulo/convenio.
+  - Se comprueba con: pruebas de tabla compartidas con F1.6 desde la semántica externa base 1 cerrada, propiedades de ida/vuelta y fallos explícitos en cero, fuera de rango, desbordamiento y límites terminales.
 
 - ☐ A6. Definir bases y vistas de referencia que preserven `N` literalmente.
   - Depende de: A1, A5 y contrato FASTA cerrado en F1.5.
@@ -244,12 +348,13 @@ exactas desde la referencia cerrada en F1.
   - Cambia: pruebas de integración, matriz de evidencia F2.1, casos de aceptación y documentación de límites frente a F5.3.
   - Se comprueba con: §4.3, recuento automático de cuatro REQ asignados sin huérfanos y revisión cruzada de materialización, fase, dosis, procedencia y conservación de `N`.
 
-> **Pausa obligatoria F2.1.** Revisar y aprobar DTPD-101/DTPD-102, tipos de
-> coordenada, representación haplotípica, consumo de memoria, oráculos y los
+> **Pausa obligatoria F2.1.** Revisar el consumo sin reapertura de DTPD-101 y
+> aprobar DTPD-102, la extensión de tipos de coordenada, representación
+> haplotípica, consumo de memoria, oráculos y los
 > cuatro REQ. No iniciar B6 ni F2.3/F2.4 si la representación no reconstruye
 > exactamente cada copia o si una conversión de coordenadas queda implícita.
 
-## 6. F2.2 — Variantes pequeñas explícitas y aleatorias
+## 7. F2.2 — Variantes pequeñas explícitas y aleatorias
 
 **Resultado del hito:** el motor aplica SNP e indels pequeños inequívocos con
 coordenadas, orden, regiones y conteos correctos, y rechaza cualquier caso que
@@ -335,7 +440,7 @@ pretenda convertir `N` en una base conocida sin declaración explícita válida.
 
 - ☐ B14. Completar evidencia y trazabilidad de F2.2 con oráculos ajenos al productor.
   - Depende de: B5–B13 y puertas de calidad verdes.
-  - Procede de: los 22 REQ asignados a F2.2 en la matriz de §13; ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109 y ACE-111.
+  - Procede de: los 22 REQ asignados a F2.2 en la matriz de §14; ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109 y ACE-111.
   - Cambia: pruebas unitarias, de propiedades, estadísticas y de integración; corpus sintético versionado; matriz de evidencia F2.2 con esperado calculado fuera del motor.
   - Se comprueba con: §4.3, recuento automático de 22 REQ sin huérfanos, caso negativo que rechaza una frecuencia alélica poblacional como valor literal de un individuo para REQ-IND-11, revisión independiente de los vectores y repetición exacta de verdad lógica con igual semilla. REQ-CONF-08, REQ-CONF-21, REQ-IND-02 y REQ-IND-03 no se marcan cerrados hasta resolver RAF2-004.
 
@@ -344,7 +449,7 @@ pretenda convertir `N` en una base conocida sin declaración explícita válida.
 > oráculo se deriva del motor, si una tasa cero consume RNG o si un rechazo deja
 > una edición parcial.
 
-## 7. F2.3 — Creación directa de individuos
+## 8. F2.3 — Creación directa de individuos
 
 **Resultado del hito:** la vía directa construye uno o varios individuos desde
 la referencia y su configuración efectiva, aplica cambios por copia y permite
@@ -398,12 +503,18 @@ reconstruir exactamente cada haplotipo sin crear población ni escenario.
   - Cambia: pruebas de integración de la vía directa, matriz de evidencia F2.3 y escenario sintético reproducible con verdad manual por haplotipo; registra por separado la evidencia parcial de los REQ compartidos.
   - Se comprueba con: §4.3, recuento automático de cinco REQ de cierre y dos REQ compartidos sin huérfanos, asignación real de ID estable cuando se omite y registro de valores globales/específicos/efectivos, además de revisar que el recorrido no crea escenarios, poblaciones, lecturas ni formatos técnicos.
 
+- ☐ C9. Activar la configuración completa de individuos directos en Marimo.
+  - Depende de: pausa F2.0, C1–C8.
+  - Procede de: REQ-UI-01 a REQ-UI-07, REQ-UI-13 y DTC-051; F2.3 de la hoja de ruta.
+  - Cambia: pestaña `Individuos` con tablas de individuos/copias/eventos, selectores y parámetros exactos/aleatorios F2, previsualización TOML e invalidación; no implementa creación ni resolución en la app.
+  - Se comprueba con: matriz campo F2.3→control, alta/baja/reordenación, configuración manual equivalente y comparación UI→TOML→`EffectiveConfig`→verdad para los casos C8.
+
 > **Pausa obligatoria F2.3.** Reconstruir manualmente todos los haplotipos del
 > escenario directo de aceptación y revisar aislamiento de subsemillas. No
 > iniciar F2.4 si la secuencia final no se deriva de la misma verdad canónica o
-> si añadir un individuo altera a otro.
+> si añadir un individuo altera a otro o C9 deja una opción F2.3 solo en TOML.
 
-## 8. F2.4 — Verdad estructurada independiente del VCF
+## 9. F2.4 — Verdad estructurada independiente del VCF
 
 **Resultado del hito:** una ejecución directa válida publica un fichero de
 verdad estructurada versionado que basta para reconstruir referencia, individuos,
@@ -457,12 +568,19 @@ copias, fase, dosis, eventos y procedencia aunque no se produzca ningún VCF.
   - Cambia: corpus dorado pequeño, pruebas de integración, informe del validador independiente y matriz de evidencia F2.4 que separa cierre y evidencia compartida.
   - Se comprueba con: §4.3, recuento automático de dos REQ de cierre y un REQ compartido sin huérfanos, validador de esquema independiente, coherencia del mismo ID entre estado y fichero, y reconstrucción exacta de todas las copias del corpus.
 
+- ☐ D9. Añadir controles y resumen enlazado de verdad estructurada a Marimo.
+  - Depende de: pausa F2.0 y D1–D8.
+  - Procede de: REQ-UI-01, REQ-UI-07 a REQ-UI-13 y DTC-051; F2.4 de la hoja de ruta.
+  - Cambia: controles de activación/formato ya aprobado en `Salidas`, revisión del TOML y resumen desde manifiesto en `Revisar y ejecutar`, sin cargar el fichero de verdad completo.
+  - Se comprueba con: configuración UI/manual equivalente con VCF activado/desactivado, validación invalidada tras cambio, manifiesto grande simulado y prueba de que la UI solo lee metadatos/enlaces.
+
 > **Pausa obligatoria F2.4.** Entregar el fichero y la referencia a una revisión
 > que no use el productor y exigir reconstrucción exacta. No iniciar F2.5 si el
 > VCF es necesario para interpretar la verdad, si falta fase/dosis/procedencia o
-> si una corrupción puede parecer una ejecución completa.
+> si una corrupción puede parecer una ejecución completa. D9 debe demostrar que
+> la app resume y enlaza la verdad sin cargarla ni interpretarla.
 
-## 9. F2.5 — VCF de verdad mínimo
+## 10. F2.5 — VCF de verdad mínimo
 
 **Resultado del hito:** cada conjunto publica exactamente un VCF de verdad
 multimuestra, ordenado por referencia, derivado de la verdad estructurada y
@@ -537,22 +655,29 @@ inventados.
 
 - ☐ E12. Completar evidencia y trazabilidad de F2.5 y preparar la revisión de cierre F2.
   - Depende de: E1–E11 y puertas de calidad verdes.
-  - Procede de: los 25 REQ de cierre asignados a F2.5 en la matriz de §13 y evidencia compartida de REQ-MAN-83; ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100 y ACE-103.
+  - Procede de: los 25 REQ de cierre asignados a F2.5 en la matriz de §14 y evidencia compartida de REQ-MAN-83; ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100 y ACE-103.
   - Cambia: matriz de evidencia F2.5, informe de validación independiente, inventario de limitaciones y dossier de cierre; separa la evidencia compartida y no marca requisitos de fases posteriores como completos.
-  - Se comprueba con: §4.3, recuento automático de 25 REQ de cierre y un REQ compartido sin huérfanos, comandos registrados de todos los validadores y revisión cruzada de los 58 REQ de cierre más los cuatro REQ compartidos de §13.
+  - Se comprueba con: §4.3, recuento automático de 25 REQ de cierre y un REQ compartido sin huérfanos, comandos registrados de todos los validadores y revisión cruzada de los 72 REQ de cierre más los cuatro REQ compartidos de §14.
+
+- ☐ E13. Incorporar todas las opciones VCF F2.5 a Marimo y cerrar la paridad F2.
+  - Depende de: pausa F2.0 y E1–E12.
+  - Procede de: REQ-UI-01, REQ-UI-03, REQ-UI-07 a REQ-UI-13 y DTC-051; F2.5 de la hoja de ruta.
+  - Cambia: controles `Salidas` para VCF BGZF/indexado predeterminado o texto, revisión de artefactos esperados, validación/lanzamiento explícitos y resumen de manifiesto/VCF sin cargar registros completos.
+  - Se comprueba con: pares UI/manual para ambos modos con igual `EffectiveConfig`, destino existente, edición tras validar, ejecución real mínima y matriz de todas las opciones configurables F2 sin huecos Marimo.
 
 > **Pausa obligatoria F2.5 y cierre de F2.** No autorizar F3 hasta que una
 > revisión independiente reconstruya todos los haplotipos, confirme
 > coordenadas/alelos/fase/dosis, valide VCF/BGZF/índice y demuestre los cuatro
 > casos de `N`: SNP rechazado, inserción aleatoria sin `N`, inserción explícita
 > con `N` conservada y VCF/complemento sin resolución inventada. Aprobar por
-> separado el cierre de F2; completar E12 no lo concede automáticamente.
+> separado el cierre de F2; completar E12/E13 no lo concede automáticamente y
+> ninguna opción configurable F2 puede quedar solo en TOML.
 
-## 10. Riesgos genómicos silenciosos y oráculos obligatorios
+## 11. Riesgos genómicos silenciosos y oráculos obligatorios
 
 | Riesgo silencioso | Prevención en producción | Oráculo independiente obligatorio | Evidencia de fallo que debe detectarse |
 |---|---|---|---|
-| Desfase base 0/base 1 o extremo abierto/cerrado | Tipos y único servicio de A5 | Vectores literales sobre cadenas etiquetadas por posición | SNP desplazado, indel con ancla incorrecta o acceso a posición 0 |
+| Desfase base 0/base 1 o extremo abierto/cerrado | Tipos/servicio DTPD-101 iniciados en F1.6 y extendidos en A5 | Vectores compartidos de mapa y cadenas etiquetadas por posición | Mapa, SNP o indel desplazado, ancla incorrecta o acceso a posición 0 |
 | Longitud de *indel* mal resuelta o convertida en distribución implícita | Parámetros exactos separados B1–B4 y constructores B10–B11 | Casos 1/2/`umbral - 1` y RNG instrumentado | Longitud distinta, consumo RNG para longitud o clasificación estructural incorrecta |
 | Inserción/deleción terminal inválida | Constructores validados B10–B11 | Enumeración manual de todos los indels de una cadena corta | Pérdida del ancla o secuencia sin base a uno de los lados |
 | Sustitución silenciosa de `N` | Dominio A6 y reglas B8–B10/E7 | Corpus con `N` en borde/interior y barrido de salidas | SNP `REF=N`, ALT `N` o inserción aleatoria con `N` |
@@ -565,15 +690,16 @@ inventados.
 | REF/ALT/normalización incorrectos | Proyección E3–E4 | Normalizador/validador independiente aprobado | Registro válido sintácticamente pero no representa la verdad |
 | Pérdida de detalle al agrupar multialélicos | Agrupación E5 y complemento E7 | Tabla manual sitio×copia y reconstructor combinado | ALT o copia portadora desaparece, o se inventa una base |
 | Artefactos mezclados entre ejecuciones | IDs/hashes/publicación F1 reutilizados | `sha256sum`, referencias cruzadas y fallos inyectados | Índice, VCF, verdad o referencia de ejecuciones distintas |
+| UI y conjunto TOML producen semánticas distintas, rompen enlaces o ejecutan una revisión obsoleta | Modelo/digest multidocumento M4/M7, binario único M8/M9 y pasos C9/D9/E13 | Conjunto manual gemelo, escenarios faltante/duplicado y proceso falso que registra argumentos | `EffectiveConfig` distinta, ruta/orden perdido, ejecución automática o validación antigua reutilizada |
 
 Una prueba que serializa y vuelve a leer con el mismo código solo demuestra
 consistencia interna. No satisface por sí sola ninguna fila de esta tabla.
 
-## 11. Cambios pequeños, revisión y política de bloqueo
+## 12. Cambios pequeños, revisión y política de bloqueo
 
 - Cada paso se implementa y revisa de forma aislada; una revisión puede dividirlo
   aún más, pero no fusionarlo con un paso dependiente para ocultar su evidencia.
-- Si A2, A3, B1 o E1 no obtienen aprobación, se detienen sus consumidores y se
+- Si M1, A2, A3, B1 o E1 no obtienen aprobación, se detienen sus consumidores y se
   actualiza este plan con el bloqueo. Se puede continuar únicamente con corpus,
   matrices o validadores que no presupongan la opción elegida.
 - Si una decisión aprobada contradice especificación, arquitectura o DTC
@@ -584,31 +710,30 @@ consistencia interna. No satisface por sí sola ninguna fila de esta tabla.
 - Ninguna pausa se supera solo porque compila. Requiere revisión de contratos,
   pruebas negativas, oráculo independiente y matriz REQ/ACE actualizada.
 
-## 12. Validación mecánica del documento
+## 13. Validación mecánica del documento
 
-Mientras el fichero sea nuevo, `git diff --no-index` termina con código 1 por
-existir contenido; es satisfactorio si `--check` no imprime diagnósticos. Antes
-de aprobar el plan se ejecutarán, como mínimo:
+Antes de aprobar el plan se ejecutarán, como mínimo:
 
 ```bash
-git diff --no-index --check /dev/null design/plan-implementacion-f2-0.1.md
-rg -n '^- ☐ [A-E][0-9]+\.' design/plan-implementacion-f2-0.1.md
-rg -n '^> \*\*Pausa obligatoria F2\.[1-5]' design/plan-implementacion-f2-0.1.md
-rg -n 'DTPD-101|DTPD-102|DTPD-103|F1\.4|F1\.5' design/plan-implementacion-f2-0.1.md
+git diff --check -- design/plan-implementacion-f2-0.1.md
+rg -n '^- ☐ [A-EM][0-9]+\.' design/plan-implementacion-f2-0.1.md
+rg -n '^> \*\*Pausa obligatoria F2\.[0-5]' design/plan-implementacion-f2-0.1.md
+rg -n 'DTPD-101|DTPD-102|DTPD-103|DTPD-117|F1\.5|F1\.6' design/plan-implementacion-f2-0.1.md
+rg -n 'RAF2-001|RAF2-004|RAF2-007' design/plan-implementacion-f2-0.1.md
 ```
 
 Además, un comprobador mecánico debe verificar que cada casilla contiene una y
 solo una línea `Depende de`, `Procede de`, `Cambia` y `Se comprueba con`; que la
-matriz siguiente contiene una sola vez los 58 REQ cuyo cierre está asignado
+matriz siguiente contiene una sola vez los 72 REQ cuyo cierre está asignado
 exclusivamente a F2; y que la lista separada de evidencia compartida contiene
 los otros cuatro REQ cuyo campo de hito incluye F2 junto con fases posteriores.
-La unión debe coincidir exactamente con las 62 filas de la trazabilidad cuyo
+La unión debe coincidir exactamente con las 76 filas de la trazabilidad cuyo
 hito contiene F2, sin confundir evidencia parcial con cierre total.
 
-## 13. Matriz de trazabilidad REQ/ACE/DTC
+## 14. Matriz de trazabilidad REQ/ACE/DTC
 
 La lista de REQ de cierre exclusivo es exhaustiva para la asignación F2 vigente:
-4 + 22 + 5 + 2 + 25 = **58**. Se añaden por separado **cuatro REQ compartidos**
+14 + 4 + 22 + 5 + 2 + 25 = **72**. Se añaden por separado **cuatro REQ compartidos**
 que exigen evidencia parcial en F2 y cierre posterior. Los ACE son la unión de
 los criterios enlazados por esas filas de trazabilidad. Una mención no acredita
 ejecución ni cierre. REQ-CONF-08, REQ-CONF-21, REQ-IND-02 y REQ-IND-03 siguen
@@ -618,13 +743,14 @@ alcance deliberado de F2.
 
 | Hito | REQ asignados | ACE cubiertos | Decisiones/puertas principales | Pasos de cierre |
 |---|---|---|---|---|
+| F2.0 | REQ-UI-01; REQ-UI-02; REQ-UI-03; REQ-UI-04; REQ-UI-05; REQ-UI-06; REQ-UI-07; REQ-UI-08; REQ-UI-09; REQ-UI-10; REQ-UI-11; REQ-UI-12; REQ-UI-13; REQ-VAL-54 | ACE-114, ACE-115 | DTC-034, DTC-036, DTC-042, DTC-043, DTC-044, DTC-045, DTC-048, DTC-051; DTPD-117 | M1–M12 |
 | F2.1 | REQ-REF-14; REQ-IND-28; REQ-IND-29; REQ-VER-27 | ACE-03, ACE-10, ACE-11, ACE-28, ACE-66 | DTC-003, DTC-010, DTC-013, DTC-031, DTC-032, DTC-039; DTPD-101 y DTPD-102 | A2–A10 |
 | F2.2 | REQ-CONF-08; REQ-CONF-21; REQ-CONF-24; REQ-CONF-25; REQ-CONF-28; REQ-IND-02; REQ-IND-03; REQ-IND-05; REQ-IND-06; REQ-IND-10; REQ-IND-11; REQ-IND-13; REQ-IND-14; REQ-IND-17; REQ-IND-18; REQ-IND-19; REQ-IND-21; REQ-IND-38; REQ-IND-40; REQ-IND-41; REQ-DIR-03; REQ-REC-24 | ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-111 | DTC-006, DTC-011, DTC-020, DTC-022, DTC-032, DTC-033, DTC-037, DTC-038, DTC-044, DTC-049; DTPD-101 y decisión B1 aún sin identificador | B1–B14 |
-| F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-IND-15; REQ-DIR-01; REQ-DIR-02 | ACE-01, ACE-10, ACE-12, ACE-111 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039 | C1–C8 |
-| F2.4 | REQ-VER-31; REQ-SAL-06 | ACE-34, ACE-62 | DTC-003, DTC-004, DTC-031, DTC-035, DTC-036, DTC-040, DTC-045, DTC-047; DTPD-102 | D1–D8 |
-| F2.5 | REQ-FMT-05; REQ-FMT-06; REQ-REC-26; REQ-VER-02; REQ-VER-06; REQ-VER-12; REQ-VER-15; REQ-VER-16; REQ-VER-17; REQ-VER-30; REQ-VER-32; REQ-VER-33; REQ-VER-34; REQ-VER-36; REQ-VER-37; REQ-VER-39; REQ-VER-40; REQ-VER-41; REQ-VER-43; REQ-VER-44; REQ-VER-47; REQ-VAL-28; REQ-MAN-27; REQ-MAN-57; REQ-SAL-21 | ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100, ACE-103 | DTC-003, DTC-004, DTC-013, DTC-021, DTC-032, DTC-040, DTC-043, DTC-045, DTC-047; DTPD-103 | E1–E12 |
+| F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-IND-15; REQ-DIR-01; REQ-DIR-02 | ACE-01, ACE-10, ACE-12, ACE-111 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039, DTC-051 | C1–C9 |
+| F2.4 | REQ-VER-31; REQ-SAL-06 | ACE-34, ACE-62 | DTC-003, DTC-004, DTC-031, DTC-035, DTC-036, DTC-040, DTC-045, DTC-047, DTC-051; DTPD-102 | D1–D9 |
+| F2.5 | REQ-FMT-05; REQ-FMT-06; REQ-REC-26; REQ-VER-02; REQ-VER-06; REQ-VER-12; REQ-VER-15; REQ-VER-16; REQ-VER-17; REQ-VER-30; REQ-VER-32; REQ-VER-33; REQ-VER-34; REQ-VER-36; REQ-VER-37; REQ-VER-39; REQ-VER-40; REQ-VER-41; REQ-VER-43; REQ-VER-44; REQ-VER-47; REQ-VAL-28; REQ-MAN-27; REQ-MAN-57; REQ-SAL-21 | ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100, ACE-103 | DTC-003, DTC-004, DTC-013, DTC-021, DTC-032, DTC-040, DTC-043, DTC-045, DTC-047, DTC-051; DTPD-103 | E1–E13 |
 
-### 13.1. Evidencia compartida obligatoria en F2
+### 14.1. Evidencia compartida obligatoria en F2
 
 Estas cuatro filas tienen un destino compuesto en la matriz maestra. F2 debe
 producir la evidencia concreta indicada, pero no declarará el REQ completamente
@@ -637,7 +763,7 @@ satisfecho hasta que cierren también sus fases posteriores:
 | REQ-MAN-10 (F2.3/F5.5/F9.7) | El manifiesto distingue valores globales, específicos y efectivos consumidos por individuos/regiones/clases de F2 | C2, C8 |
 | REQ-MAN-83 (F2.5/F3.5) | El primer conjunto real y sus artefactos VCF/índice manifiestan estados y diagnósticos coherentes con ejecución y evento | E9, E12 |
 
-### 13.2. Evidencia adyacente no asignada a F2
+### 14.2. Evidencia adyacente no asignada a F2
 
 Los casos de aceptación de F2 deben conservar evidencia útil sobre `N`,
 inserciones aleatorias, VCF y salida directa, pero la matriz no incorporará como
@@ -647,12 +773,12 @@ posteriores con alcance mayor. Cualquier discrepancia entre esa asignación y la
 evidencia de cierre pedida por la hoja de ruta se documentará como cobertura
 parcial, no se resolverá alterando silenciosamente la fase.
 
-## 14. Criterio de salida del plan
+## 15. Criterio de salida del plan
 
 El plan queda listo para aprobación cuando su validación mecánica no detecta
-errores, los 58 REQ de cierre aparecen exactamente una vez en §13, los cuatro
-REQ compartidos aparecen exactamente una vez en §13.1, cada hito tiene su pausa
+errores, los 72 REQ de cierre aparecen exactamente una vez en §14, los cuatro
+REQ compartidos aparecen exactamente una vez en §14.1, cada hito tiene su pausa
 y cada paso conserva las cuatro líneas obligatorias. La ejecución seguirá
-condicionada al cierre de F1 y a las decisiones A2, A3, B1 y E1. F2 solo podrá
-cerrarse cuando E12, la pausa final y la aprobación independiente de cierre
+condicionada al cierre de F1 y a las decisiones M1, A2, A3, B1 y E1. F2 solo podrá
+cerrarse cuando E12/E13, la pausa final y la aprobación independiente de cierre
 consten por separado.

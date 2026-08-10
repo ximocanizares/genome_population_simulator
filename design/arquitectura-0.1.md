@@ -1,8 +1,8 @@
 # Arquitectura del simulador de genomas y poblaciones
 
 - **Versión:** 0.1
-- **Estado:** aprobada como base para ejecutar F1
-- **Fecha:** 8 de agosto de 2026
+- **Estado:** ampliación F1.6/F2.0 pendiente de revisión; la base anterior de F1 permanece aprobada
+- **Fecha:** 10 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Hoja de ruta:** [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
@@ -27,6 +27,11 @@ de autoría, y JSON como formato de los manifiestos y de la configuración
 efectiva serializada. `noodles-fasta` 0.66.0 está confirmado y fijado para el
 adaptador FASTA tras superar la evaluación revisable de F1. Las versiones
 concretas de los crates aceptados quedan fijadas por `Cargo.lock`.
+
+La ampliación confirmada incorpora una derivación reducida de FASTA en F1.6 y
+una aplicación Marimo obligatoria desde F2.0. La arquitectura define sus
+fronteras, pero no da por resueltas DTPD-101/DTPD-116/DTPD-117 ni las dos cuestiones
+funcionales marcadas `PENDIENTE DE REVISIÓN` en la especificación.
 
 La arquitectura cubre toda la versión 1 para evitar contratos incompatibles
 entre fases. Sin embargo, su materialización seguirá la secuencia F1–F9 de la
@@ -68,6 +73,8 @@ técnicas de secuenciación.
 
 Son fronteras del sistema:
 
+- la aplicación Marimo local, que crea conjuntos TOML e invoca el binario como proceso
+  sin shell, pero no interpreta reglas biológicas;
 - los ficheros TOML de configuración general y poblacional;
 - `effective-config.json`, `manifest.json` general y los `manifest.json` de
   evento, todos generados por el sistema;
@@ -104,9 +111,10 @@ conversión génica, calibración empírica automática y todo modelado específ
 elementos transponibles. V1 no define una frontera de entrada para FASTQ y
 referencia de calibración ni para perfiles empíricos reutilizables.
 
-Python no forma parte del núcleo. Solo podrá incorporarse más adelante como
-herramienta auxiliar de análisis si se aprueba una decisión técnica que defina
-su frontera, distribución y reproducibilidad.
+Python no forma parte del núcleo. Se admite únicamente como entorno de la
+aplicación Marimo y de herramientas auxiliares expresamente aprobadas. Marimo
+queda fuera de las dependencias del dominio: su versión, empaquetado local y
+compatibilidad con el binario deben superar DTPD-117 y la puerta F2.0.
 
 macOS, Windows nativo y ARM64 no son plataformas oficialmente soportadas en v1.
 Su ampliación requiere comprobar compilación, dependencias, herramientas
@@ -157,14 +165,19 @@ consideran oficialmente validadas hasta incorporarlas a esa matriz.
 8. **Los recursos se observan antes de optimizar.** La arquitectura expone
    puntos de medida y admite representaciones compactas posteriores, sin fijar
    objetivos cuantitativos no acordados.
+9. **Marimo es un adaptador de autoría y ejecución.** Produce el mismo conjunto TOML,
+   consume versiones publicadas de esquemas y catálogos e invoca `validate` y
+   `run`. Nunca calcula valores efectivos, resuelve reglas ni modifica la
+   semántica biológica. Toda capacidad configurable F2–F9 añade su control antes
+   de cerrar el hito que la introduce.
 
 ## 4. Dirección de dependencias
 
 ```text
-Entradas y herramientas externas
+Persona usuaria / aplicación Marimo / entradas y herramientas externas
              │
              ▼
-Adaptadores de configuración, formatos y procesos
+Adaptadores de UI, configuración, formatos y procesos
              │
              ▼
 Orquestación de ejecución y de eventos
@@ -211,6 +224,7 @@ precedencia.
 |---|---|---|
 | Ejecución | Se crea tras validar y resolver la configuración. No se reutiliza | Versión, entradas, configuración efectiva, semilla raíz, estados y manifiesto general |
 | Referencia | Estable durante la ejecución | FASTA exacto, secuencias ordenadas, clasificación cromosoma/*scaffold*, origen y cambios si es derivada |
+| Derivación reducida | Identidad propia dentro de la ejecución; no sustituye a su origen | Referencia/FASTA de origen, parámetros efectivos, subsemilla, versión de selección, intervalos ordenados, mapa e integridad |
 | Secuencia de referencia | Su identificador procede del primer elemento no vacío de la cabecera FASTA y es único dentro de su referencia | Descripción restante de cabecera, longitud, clasificación, ploidía efectiva y convenio de coordenadas |
 | Segmento | Identifica una porción orientada y trazable | Estado actual, origen fundador o evento que lo creó, orientación y correspondencias disponibles |
 | Variante o evento genómico | Identidad estable en el historial biológico | Clase, orden, marco de coordenadas previo, haplotipo afectado y estado final |
@@ -259,6 +273,21 @@ identidad verificable del FASTA exacto. Una referencia derivada enlaza una únic
 referencia de origen y la secuencia ordenada de cambios estructurales que la
 creó. El catálogo de referencias es un grafo dirigido sin ciclos durante una
 ejecución.
+
+Una referencia reducida es una derivación de preparación distinta de los
+cambios estructurales biológicos. Enlaza una única copia autoritativa de FASTA
+suministrado y una lista ordenada de segmentos en orientación directa. Cada
+segmento lleva coordenadas de origen y derivadas basadas en 1 y cerradas,
+identidad y clase de secuencia, posición en la concatenación y procedencia. La
+lista y el FASTA canónico derivado son dos proyecciones del mismo resultado; el
+mapa no se reconstruye a posteriori desde nombres físicos.
+
+El espacio elegible y la interpretación porcentual permanecen bloqueados por
+las cuestiones funcionales de REQ-REF-27/31. DTPD-116 elegirá después un
+algoritmo uniforme y versionado sobre el espacio elegible, con RNG local y
+vectores normativos. La recomendación no aprobada es admitir cromosomas y
+*scaffolds* conservando su clase y entender el porcentaje como bases retiradas,
+con tamaño retenido redondeado hacia abajo.
 
 En un FASTA, el identificador de secuencia es el primer elemento no vacío que
 sigue a `>` y termina en el primer espacio o carácter de separación. Debe ser
@@ -387,10 +416,12 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 
 | Componente | Responsabilidad única | Entradas y salidas | Datos que posee o consulta |
 |---|---|---|---|
+| Aplicación Marimo | Editar y revisar configuración, invocar `validate`/`run` y presentar estado sin adquirir semántica | Esquemas/catálogos y acciones humanas → conjunto TOML enlazado, argumentos de proceso, diagnósticos, logs y enlaces | Posee estado multidocumento de formulario y validación; no posee `EffectiveConfig`, reglas biológicas, verdad ni artefactos grandes |
 | Admisión de configuración | Leer TOML, conservar su texto exacto, validar y normalizar colecciones numéricas y resolver `DeclaredConfig` en `EffectiveConfig` mediante la matriz de ejes y dominancia | Ficheros TOML y entradas declaradas → configuración efectiva con procedencia, auditoría numérica o diagnósticos localizables | Posee `DeclaredConfig`, ubicaciones, `EffectiveConfig` y registros de suma/normalización; consulta catálogos de capacidades |
 | Identidad de ejecución | Validar IDs aportados, derivar IDs automáticos tipados y comprobar sus ámbitos | Configuración validada, raíz, digest y causas estables → identidades, etiquetas y contexto o colisión | Posee registro, catálogo normativo de campos y prefijos y vectores BLAKE3; no posee datos biológicos |
 | Aleatoriedad reproducible | Obtener o validar la raíz de 256 bits, derivar subsemillas y proporcionar un ChaCha12 local por ámbito nombrado | Raíz, origen, versión y componentes estables → generador auditable | Posee el esquema binario, catálogo normativo de ámbitos y vectores BLAKE3; no posee un RNG global ni interpreta decisiones biológicas |
 | Catálogo de referencias | Validar, copiar, simular y derivar referencias mediante un contrato independiente del adaptador FASTA | FASTA de texto sin comprimir o configuración → referencias disponibles, copia exacta e índices necesarios | Posee identidades, cabeceras crudas, secuencias internas normalizadas, linaje y recursos exactos; usa `noodles-fasta` solo tras el contrato |
+| Reducción de referencias | Seleccionar segmentos elegibles con RNG local, proyectar el mapa y materializar una derivación exacta | Copia FASTA validada, objetivo, tamaño de región, subsemilla y versión → segmentos ordenados, mapa y FASTA canónico o rechazo previo | Posee el plan inmutable de segmentos y sus métricas; consulta catálogo, coordenadas, aleatoriedad y publicación, y no modifica el FASTA fuente |
 | Coordenadas y transformaciones | Validar intervalos y convertir convenios sin ambigüedad | Coordenadas etiquetadas → coordenadas validadas o correspondencias | Posee reglas de conversión; consulta referencias y segmentos |
 | Motor de verdad genómica | Crear y transformar haplotipos y eventos | Referencia, cambios y flujos aleatorios → estado faseado | Posee el estado genotípico, eventos, segmentos y correspondencias |
 | Creación directa | Traducir la vía directa a operaciones del motor genómico | Configuración efectiva → individuos | Posee solo el estado de progreso; el motor posee la verdad resultante |
@@ -443,6 +474,14 @@ etiqueta, ruta o nombre físico nunca se convierte implícitamente en identidad.
 
 ### 6.3. Dependencias permitidas y prohibidas
 
+- Marimo puede depender de esquemas y catálogos publicados y del adaptador de
+  proceso del binario. No puede depender del motor, del resolvedor interno ni de
+  escritores de resultados; su única configuración ejecutable es el conjunto
+  TOML que presenta y entrega a `validate`/`run`.
+- Reducción de referencias puede consultar catálogo, coordenadas, RNG local e
+  integridad. No puede escribir el origen, usar un RNG compartido ni decidir
+  reglas de elegibilidad/redondeo ni una representación local de coordenadas
+  mientras DTPD-101/DTPD-116 sigan pendientes.
 - Creación directa, inicialización, evolución y familias pueden depender del
   motor genómico, aleatoriedad, identidad y selección declarativa.
 - Todo consumidor de aleatoriedad recibe un generador local y solo avanza ese
@@ -522,6 +561,21 @@ indican cómo comprobarlos.
 
 ### 7.1. Admisión y preparación
 
+La aplicación Marimo carga únicamente versiones compatibles de esquema y
+catálogos y mantiene un modelo de formulario multidocumento: exactamente un
+TOML general y cero o varios TOML de escenario identificados, ordenados y
+enlazados mediante rutas relativas. Cada documento tiene previsualización
+visible; la exportación conserva un conjunto autoconsistente y es ese mismo
+conjunto el que se entrega al binario. F2.0 materializa el caso sin escenarios y
+el contrato multidocumento, sin anticipar controles biológicos de Evolución o
+Familias. `validate` y `run` se crean como procesos con lista de argumentos,
+nunca mediante shell. El estado validado se asocia al digest de todos los
+documentos, sus identidades/enlaces y el contrato; editar, añadir, eliminar,
+reordenar o renombrar cualquiera lo invalida. Un enlace ausente, duplicado o
+ajeno se diagnostica sin ejecutar. Los diagnósticos estructurados regresan a
+documento y campo cuando conservan ubicación, pero el binario decide su
+significado y código de salida.
+
 El adaptador TOML recibe tanto el fichero general como cada escenario y conserva
 una copia exacta de sus bytes. Primero exige `config_kind` y `schema_version` y
 solo admite la cadena de versión conocida `"1"`; una versión ausente, anterior,
@@ -581,11 +635,12 @@ literalmente los vectores del catálogo 1. Un cambio de codificación exige nuev
 versión de derivación; un cambio de ámbitos exige nueva versión de catálogo.
 Ruta, reloj, orden físico, hilo y planificación nunca participan.
 
-El contrato funcional de esta frontera está en REQ-CONF-01 a REQ-CONF-123,
+El contrato funcional de esta frontera está en REQ-CONF-01 a REQ-CONF-127,
 REQ-FMT-01 a REQ-FMT-07,
-REQ-NOF-01 a REQ-NOF-08 y REQ-VAL-01 a REQ-VAL-51; se comprueba
+REQ-NOF-01 a REQ-NOF-08, REQ-UI-01 a REQ-UI-13 y REQ-VAL-01 a
+REQ-VAL-54; se comprueba
 principalmente mediante ACE-01, ACE-23, ACE-35, ACE-36, ACE-64, ACE-65,
-ACE-105 y ACE-111.
+ACE-105, ACE-111, ACE-114 y ACE-115.
 
 ### 7.2. Referencias y estado biológico
 
@@ -607,13 +662,23 @@ canónico v1 de 80 bases por línea. La ejecución normal conserva el catálogo 
 demanda fuera del resultado publicado. Un FASTA comprimido se rechaza como
 formato no admitido, no se descomprime implícitamente.
 
+Para una reducción, el preflight termina antes de sortear. Tras resolver las
+cuestiones funcionales pendientes, DTPD-101 y DTPD-116, el planificador recibe el tamaño
+elegible, objetivo entero, tamaño de región, ID y RNG local; devuelve todos los
+segmentos o un error, nunca un prefijo parcial. Otra operación los ordena por
+secuencia fuente y coordenada, asigna coordenadas derivadas acumuladas y crea el
+mapa inmutable. El escritor FASTA consume ese plan una vez, copia `N` como
+cualquier otra base y aplica el formato canónico. Un comprobador independiente
+reconstruye el FASTA desde origen+mapa antes de publicar conjuntamente mapa,
+FASTA, hashes y manifiesto.
+
 El repositorio de verdad conserva estados faseados, genealogía, procedencia y
 capas de cambio. Creación directa, inicialización poblacional, reproducción,
 recombinación, dinámica evolutiva y mutación acceden a él mediante operaciones
 de dominio explícitas. El orquestador decide qué componente invocar; los
 componentes no se llaman entre sí para alterar el orden funcional.
 
-Las fuentes normativas son REQ-REF-01 a REQ-REF-23, REQ-IND-01 a
+Las fuentes normativas son REQ-REF-01 a REQ-REF-36, REQ-IND-01 a
 REQ-IND-59, REQ-DIR-01 a REQ-DIR-05, REQ-EVO-01 a REQ-EVO-73,
 REQ-POB-01 a REQ-POB-03, REQ-CRU-01 a REQ-CRU-45, REQ-REP-01 a
 REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17,
@@ -710,8 +775,8 @@ destino existente produce `EEXIST` y rechazo. Un sistema de ficheros que no
 ofrezca la garantía se rechaza de forma identificable antes o durante la
 publicación; nunca se usa check-then-`std::fs::rename` ni otro fallback con
 carrera. Esta garantía lógica no implica `fsync` ni durabilidad física. Los
-estados y efectos funcionales de cierre están en REQ-VAL-01 a REQ-VAL-51,
-REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a REQ-SAL-26, con ACE-22 a ACE-24,
+estados y efectos funcionales de cierre están en REQ-VAL-01 a REQ-VAL-54,
+REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a REQ-SAL-27, con ACE-22 a ACE-24,
 ACE-33, ACE-34, ACE-36, ACE-46 a ACE-67, ACE-78, ACE-86 y ACE-92 a ACE-108.
 
 ### 7.5. Construcción y publicación del programa
@@ -749,18 +814,20 @@ responsables y puntos de control.
 
 | Invariante arquitectónico | Responsable y frontera de control | Fuente funcional |
 |---|---|---|
-| Toda entidad cruza fronteras con identidad tipada, no inferida de una etiqueta, ruta o nombre físico | Identidad de ejecución, catálogos y ensamblador de resultados | REQ-CONF-01 a REQ-CONF-14, REQ-TEC-01 a REQ-TEC-10 y REQ-MAN-01 a REQ-MAN-88 |
-| Toda coordenada viaja asociada a su referencia y convenio | Catálogo de referencias y servicio de coordenadas | REQ-REF-01 a REQ-REF-23 y REQ-VER-01 a REQ-VER-47 |
+| Toda entidad cruza fronteras con identidad tipada, no inferida de una etiqueta, ruta o nombre físico | Identidad de ejecución, catálogos y ensamblador de resultados | REQ-CONF-01 a REQ-CONF-14, REQ-TEC-01 a REQ-TEC-10 y REQ-MAN-01 a REQ-MAN-90 |
+| Toda coordenada viaja asociada a su referencia y convenio | Catálogo de referencias y servicio de coordenadas | REQ-REF-01 a REQ-REF-36 y REQ-VER-01 a REQ-VER-47 |
+| Una referencia reducida conserva origen, orientación, clase y mapa completo; FASTA, mapa y manifiesto se publican o fallan como unidad | Reducción de referencias, catálogo, coordenadas y ensamblador | REQ-REF-24 a REQ-REF-36, REQ-VAL-52/53, REQ-MAN-89/90 y REQ-SAL-27 |
 | Solo los motores biológicos escriben en el repositorio de verdad | Interfaces de dominio y repositorio de verdad | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73 y REQ-CRU-01 a REQ-CRU-45 |
 | Los componentes técnicos observan instantáneas y no mutan genotipo, genealogía ni trayectoria | Orquestador de eventos y vistas de solo lectura | REQ-TEC-01 a REQ-TEC-10 y REQ-DAT-01 a REQ-DAT-73 |
-| `DeclaredConfig` conserva lo escrito y su ubicación; `EffectiveConfig` es inmutable durante cada ámbito de uso y mantiene la procedencia de la resolución | Adaptador TOML y resolvedor de configuración | REQ-CONF-01 a REQ-CONF-123 y REQ-MAN-01 a REQ-MAN-88 |
+| `DeclaredConfig` conserva lo escrito y su ubicación; `EffectiveConfig` es inmutable durante cada ámbito de uso y mantiene la procedencia de la resolución | Adaptador TOML y resolvedor de configuración | REQ-CONF-01 a REQ-CONF-127 y REQ-MAN-01 a REQ-MAN-90 |
+| Marimo solo entrega un conjunto TOML visible y autoconsistente y argumentos de proceso; cualquier cambio de documento o enlace invalida validación y ninguna opción implementada queda solo en TOML | Aplicación Marimo y adaptador de proceso | REQ-UI-01 a REQ-UI-13 y REQ-VAL-54 |
 | Toda probabilidad, frecuencia y tolerancia general es un `f64` finito válido; las colecciones se suman y normalizan una sola vez con Neumaier y orden canónico, y conservan auditoría decimal de ida/vuelta exacta | Admisión de configuración y frontera `DeclaredConfig` → `EffectiveConfig` | REQ-CONF-106/107, REQ-VAL-40, REQ-MAN-81 y ACE-105 |
-| Todo manifiesto declara versión y clase, cumple su esquema y conserva directamente el contenido REQ-MAN obligatorio | Escritor de manifiestos y validación de publicación | REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-04/17/18 |
+| Todo manifiesto declara versión y clase, cumple su esquema y conserva directamente el contenido REQ-MAN obligatorio | Escritor de manifiestos y validación de publicación | REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-04/17/18/27 |
 | Todo documento estructurado propio usa una clase inequívoca y la versión de esquema conocida `"1"`, incluidos los diagnósticos JSON; una versión distinta se rechaza antes de interpretar su contenido | Adaptadores de entrada y escritores de documentos | REQ-CONF-01/10/111 a REQ-CONF-115 y REQ-MAN-02/69/73 |
 | Las decisiones aleatorias consumen ChaCha12 locales derivados con los contextos, material binario y catálogo normativos; ningún consumidor afecta el estado de otro | Proveedor de aleatoriedad y motores consumidores | REQ-CONF-03 a REQ-CONF-08, REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
 | Toda entrega oficial v1 usa la referencia Ubuntu 24.04 LTS x86-64 GNU y CPU portable y supera validación en Ubuntu nativo y OCI antes de publicarse | Construcción y distribución | REQ-CONF-111 a REQ-CONF-115, REQ-REP-22/23, REQ-MAN-05 y REQ-SAL-19 |
-| Cada artefacto se finaliza desde su temporal; un destino completo o `fallido` solo aparece tras manifiestos coherentes y mediante no-clobber atómico, mientras una interrupción no controlable conserva `INCOMPLETE` | Productores, validadores, ensamblador y publicador | REQ-VAL-01 a REQ-VAL-51, REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a REQ-SAL-26 |
-| Verdad canónica, vistas interoperables y evidencia técnica permanecen como clases distintas | Repositorio de verdad, materializador VCF y productores técnicos | REQ-VER-01 a REQ-VER-47, REQ-DAT-01 a REQ-DAT-73 y REQ-SAL-01 a REQ-SAL-26 |
+| Cada artefacto se finaliza desde su temporal; un destino completo o `fallido` solo aparece tras manifiestos coherentes y mediante no-clobber atómico, mientras una interrupción no controlable conserva `INCOMPLETE` | Productores, validadores, ensamblador y publicador | REQ-VAL-01 a REQ-VAL-54, REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a REQ-SAL-27 |
+| Verdad canónica, vistas interoperables y evidencia técnica permanecen como clases distintas | Repositorio de verdad, materializador VCF y productores técnicos | REQ-VER-01 a REQ-VER-47, REQ-DAT-01 a REQ-DAT-73 y REQ-SAL-01 a REQ-SAL-27 |
 
 Ningún adaptador de formato, proceso externo, manifiesto o escritor de salida
 puede saltarse estas fronteras. Los casos observables son los ACE asignados a
@@ -781,9 +848,9 @@ representación derive autoridad de otra:
 | Estado interno y verdad | Repositorios de dominio | Evoluciona solo mediante operaciones biológicas y conserva lo necesario para reconstrucción |
 | Resultados publicados | Ensamblador, validadores y publicador | Se hacen visibles al exterior después del cierre del conjunto |
 
-Los contenidos exigidos a estas clases están en REQ-CONF-01 a REQ-CONF-123,
-REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a
-REQ-SAL-26. TOML fija la configuración de autoría; JSON fija
+Los contenidos exigidos a estas clases están en REQ-CONF-01 a REQ-CONF-127,
+REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a
+REQ-SAL-27. TOML fija la configuración de autoría; JSON fija
 `effective-config.json` y los manifiestos. Los esquemas de manifiesto usan JSON
 Schema Draft 2020-12. Todos estos documentos declaran su clase y el campo
 `schema_version` con el valor de cadena `"1"`, usando la sintaxis TOML o JSON
@@ -891,16 +958,16 @@ de significado.
 
 | Categoría pública mínima | Contexto que debe aportar la arquitectura | Fuente de la consecuencia funcional |
 |---|---|---|
-| Configuración o esquema | Fichero TOML, clase, versión, campo, valor, ruta y ubicación; en duplicados, todas las ubicaciones; en validación numérica, colección, identidad/categoría, tolerancia, orden, suma, delta, algoritmo/versión y condición incumplida | REQ-CONF-01 a REQ-CONF-123 y REQ-VAL-01 a REQ-VAL-51 |
-| Entrada o formato | Ruta, formato, posición, identificador, valor encontrado y contrato incumplido | REQ-FMT-01 a REQ-FMT-07, REQ-REF-01 a REQ-REF-23 y REQ-VAL-01 a REQ-VAL-51 |
+| Configuración o esquema | Fichero TOML, clase, versión, campo, valor, ruta y ubicación; en duplicados, todas las ubicaciones; en validación numérica, colección, identidad/categoría, tolerancia, orden, suma, delta, algoritmo/versión y condición incumplida | REQ-CONF-01 a REQ-CONF-127 y REQ-VAL-01 a REQ-VAL-54 |
+| Entrada o formato | Ruta, formato, posición, identificador, valor encontrado y contrato incumplido | REQ-FMT-01 a REQ-FMT-07, REQ-REF-01 a REQ-REF-36 y REQ-VAL-01 a REQ-VAL-54 |
 | Validación de dominio o biología | Entidad, generación o evento, estado previo identificable e invariante de dominio | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73, REQ-CRU-01 a REQ-CRU-45, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17, REQ-REC-01 a REQ-REC-29 y REQ-MUT-01 a REQ-MUT-15 |
-| Recursos | Estimación, medida o límite, unidad, ámbito y operación impedida | REQ-NOF-01 a REQ-NOF-08 y REQ-VAL-01 a REQ-VAL-51 |
-| Proceso o herramienta externa | Evento, herramienta, versión, comando, código de salida, entradas, salidas y ubicación de stdout o stderr | REQ-TEC-01 a REQ-TEC-10, REQ-DAT-01 a REQ-DAT-73 y REQ-VAL-01 a REQ-VAL-51 |
-| E/S o publicación | Conjunto, referencia, artefactos y enlaces; ante integridad fallida, algoritmo, digest esperado y observado, tamaño y etapa | REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-88, REQ-SAL-01 a REQ-SAL-26 y REQ-VAL-01 a REQ-VAL-51 |
-| Defecto interno | Componente, operación, invariante imposible y contexto reproducible | REQ-VAL-01 a REQ-VAL-51 |
+| Recursos | Estimación, medida o límite, unidad, ámbito y operación impedida | REQ-NOF-01 a REQ-NOF-08 y REQ-VAL-01 a REQ-VAL-54 |
+| Proceso o herramienta externa | Evento, herramienta, versión, comando, código de salida, entradas, salidas y ubicación de stdout o stderr | REQ-TEC-01 a REQ-TEC-10, REQ-DAT-01 a REQ-DAT-73, REQ-UI-01 a REQ-UI-13 y REQ-VAL-01 a REQ-VAL-54 |
+| E/S o publicación | Conjunto, referencia, artefactos y enlaces; ante integridad fallida, algoritmo, digest esperado y observado, tamaño y etapa | REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-90, REQ-SAL-01 a REQ-SAL-27 y REQ-VAL-01 a REQ-VAL-54 |
+| Defecto interno | Componente, operación, invariante imposible y contexto reproducible | REQ-VAL-01 a REQ-VAL-54 |
 
 La clasificación observable entre rechazo, fallo, aviso, resultado estadístico y
-estado no evaluable es exclusivamente la de REQ-VAL-01 a REQ-VAL-51 y sus
+estado no evaluable es exclusivamente la de REQ-VAL-01 a REQ-VAL-54 y sus
 ACE; esta tabla no introduce otra política.
 
 Los fallos esperables recorren retornos tipados y nunca provocan `panic`. Un
@@ -1071,8 +1138,9 @@ obligaciones vigentes.
 | REQ-MAN | Manifiestos y exportación | Identidad y ensamblado aportan el catálogo de hechos y artefactos |
 | REQ-SAL | Ensamblado de resultados | Validación y manifiestos deciden completitud y exportabilidad |
 | REQ-NOF | Estimación y observación de recursos | Todos los componentes exponen medidas sin imponer límites funcionales fijos |
+| REQ-UI | Aplicación Marimo | Admisión, diagnósticos, proceso y manifiestos prueban equivalencia, seguridad y ausencia de semántica duplicada |
 
-Los criterios ACE-01 a ACE-111 se distribuyen siguiendo esta matriz. Antes de
+Los criterios ACE-01 a ACE-115 se distribuyen siguiendo esta matriz. Antes de
 planificar cada fase, sus criterios se convertirán en casos concretos y se
 enlazarán con el componente y la frontera que aportan la evidencia.
 
@@ -1104,6 +1172,15 @@ seleccionan silenciosamente otros crates, conversores futuros, formatos aún
 abiertos, versiones de estándares genómicos, reglas de paralelismo ni objetivos
 cuantitativos de rendimiento. Tampoco amplía la garantía a versiones del
 simulador o plataformas no verificadas ni promete identidad binaria.
+
+DTC-050 confirma el contrato funcional de reducción y DTC-051 confirma Marimo
+como interfaz obligatoria sin autoridad biológica. DTPD-101 debe fijar en F1.6
+la representación común de coordenadas que reutilizan el mapa de reducción y
+los consumidores F2; DTPD-116 debe elegir el
+algoritmo uniforme/versionado de intervalos después de aprobar porcentaje y
+*scaffolds*. DTPD-117 debe evaluar y fijar versión, entorno, empaquetado y
+protocolo aplicación↔binario. Ninguna recomendación de esas entradas es una
+decisión aprobada.
 
 Las decisiones base DTPD-001 a DTPD-015 están resueltas. Para cerrar F0 debe
 aprobarse esta división; esa aprobación habilita planificar F1, pero no significa

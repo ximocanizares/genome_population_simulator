@@ -2,7 +2,7 @@
 
 - **Versión:** 0.1
 - **Estado:** borrador actualizado
-- **Fecha:** 7 de agosto de 2026
+- **Fecha:** 10 de agosto de 2026
 - **Fuentes disponibles:** `README.md`, información confirmada por el usuario y
   la decisión posterior de usar Rust recogida en
   [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
@@ -13,8 +13,11 @@ Este documento define el objetivo general y los requisitos funcionales
 confirmados para v1. Las elecciones técnicas pendientes se separan del contrato.
 
 La versión 0.1 sigue siendo un borrador documental. Sus requisitos son
-obligatorios y las 27 preguntas funcionales de la revisión están resueltas; aún
-deben planificarse representaciones técnicas y convertirse los ACE en pruebas.
+obligatorios y las 27 preguntas funcionales de la revisión anterior están
+resueltas. La ampliación del 10 de agosto de 2026 confirma la referencia
+reducida y la aplicación Marimo, pero conserva dos cuestiones nuevas marcadas
+`PENDIENTE DE REVISIÓN`; aún deben planificarse representaciones técnicas y
+convertirse los ACE en pruebas.
 
 La sección 4 es la fuente normativa de requisitos funcionales. Las secciones 2,
 5 y 6 los resumen y la sección 7 propone criterios de aceptación preliminares.
@@ -109,6 +112,19 @@ exacta no se conoce. La cantidad y el tamaño de estas secuencias, y por tanto e
 tamaño total del genoma, podrán variar mediante la configuración cuando la
 referencia inicial sea simulada. El único FASTA de cada referencia podrá
 contener uno o varios de estos cromosomas o *scaffolds*.
+
+Un FASTA real suministrado también podrá originar una referencia reducida para
+casos de prueba manejables. El sistema seleccionará regiones aleatorias
+reproducibles, conservará su cromosoma de origen y orden relativo y entregará
+un mapa completo entre coordenadas derivadas y originales. Esta reducción no es
+captura dirigida ni una simulación WGS de representación reducida: transforma
+la referencia de entrada antes de crear individuos u observaciones.
+
+Toda capacidad configurable de v1 deberá poder autorizarse y lanzarse desde una
+aplicación Marimo además de mediante TOML y el binario de línea de órdenes. La
+aplicación será otra forma de crear el mismo conjunto TOML y ejecutar las mismas órdenes;
+no definirá reglas biológicas distintas ni sustituirá la configuración efectiva
+o los manifiestos como autoridad.
 
 Una referencia estructural es una nueva referencia creada a partir de otra
 referencia disponible previamente. Solo se diferencia de su referencia de
@@ -329,6 +345,18 @@ de estadísticos objetivo y el cálculo interno de D, D' o r² (DTF-035).
 El VCF de verdad predeterminado no pretende describir posiciones invariantes ni
 emitir bloques gVCF (DTF-036). La representación completa de genotipos y haplotipos
 corresponde al fichero estructurado obligatorio de verdad.
+
+Los lotes de varias ejecuciones completas quedan fuera de v1 (DTF-037). Una
+futura ampliación podrá solicitar X réplicas de la misma configuración, pero
+cada réplica será una ejecución normal e independiente, con referencia
+aleatoria o derivada, individuos, poblaciones, eventos técnicos y salidas
+propios según la vía; también tendrá ID, semilla raíz, subsemillas, directorio y
+manifiesto propios. El lote necesitará identidad y resumen, reproducción completa
+desde la misma raíz/configuración, estabilidad de prefijo al aumentar X y estado
+por réplica, sin presentar un lote incompleto como completo. Esta capacidad solo
+podrá definirse después de que existan las vías F3–F8 y deberá incorporarse a
+Marimo cuando se implemente; no añade cardinalidad de referencias a F1.6 ni
+controles a F2.0.
 
 ## 4. Requisitos confirmados
 
@@ -907,6 +935,26 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   procedencia y selectores de esa regla. Ante un rechazo por ambigüedad, el
   diagnóstico debe conservar todas las reglas máximas en conflicto.
 
+- **REQ-CONF-124.** La configuración general debe permitir declarar una
+  referencia reducida con identificador propio a partir de un FASTA real
+  suministrado, identificando el FASTA de origen y un `region_size_bases`
+  entero positivo. La unidad normativa es la base; una interfaz puede mostrar
+  el valor convertido a kb sin cambiar ni redondear el valor almacenado.
+- **REQ-CONF-125.** Cada referencia reducida debe declarar exactamente uno de
+  estos dos objetivos mutuamente excluyentes: `target_bases`, entero positivo,
+  o `reduction_percent`, porcentaje finito en el intervalo `[0,100)`. Declarar
+  ambos, ninguno o un valor fuera de su dominio debe rechazarse antes de copiar
+  regiones.
+- **REQ-CONF-126.** La selección de regiones de cada referencia reducida debe
+  usar la semilla raíz de la ejecución y una subsemilla propia derivada del
+  identificador estable de la referencia. No debe consumir un generador global
+  mutable ni cambiar al añadir individuos, eventos técnicos o salidas.
+- **REQ-CONF-127.** La configuración efectiva debe registrar el FASTA e ID de
+  origen, el ID derivado, `region_size_bases`, la modalidad y valor del objetivo,
+  el número exacto de bases derivadas, la semilla y subsemilla aplicables y la
+  versión de la regla de selección. Debe conservar los valores declarados sin
+  sustituirlos silenciosamente por el resultado realizado.
+
 - **REQ-TEC-01.** Cada evento que genere FASTQ, BAM o CRAM constituye también su
   único experimento de secuenciación, sin una identidad de experimento separada,
   y debe seleccionar exactamente una tecnología. No debe mezclar lecturas
@@ -1052,6 +1100,78 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   diagnóstico. Las bases `N` de referencias, haplotipos, secuencias explícitas
   o copias deben conservarse con su posición; toda secuencia nueva generada
   aleatoriamente debe contener solo A, C, G y T.
+- **REQ-REF-24.** El sistema debe poder crear una referencia reducida con ID
+  propio a partir de las regiones de los cromosomas de un FASTA real
+  suministrado. La referencia reducida es una referencia derivada de
+  preparación y no debe modificar ni reemplazar la copia autoritativa del FASTA
+  de origen.
+- **REQ-REF-25.** El FASTA de origen de una reducción debe superar exactamente
+  el mismo preflight, copia byte a byte, validación de cabeceras y alfabeto y
+  cálculo de SHA-256 que cualquier FASTA suministrado en REQ-REF-12 a
+  REQ-REF-18. La selección solo puede leer esa copia validada.
+- **REQ-REF-26.** La selección debe ser aleatoria y reproducible, sin reemplazo
+  y sin solapamiento entre intervalos de origen. No debe duplicar regiones,
+  invertirlas, cambiar su orientación ni crear una correspondencia que no
+  exista en el FASTA de origen.
+- **REQ-REF-27.** La referencia reducida debe contener exactamente el número de
+  bases objetivo. Para `target_bases`, ese número es el entero declarado. Para
+  `reduction_percent`, debe calcularse desde el tamaño total elegible mediante
+  una regla decimal y de redondeo única, determinista y registrada antes de
+  seleccionar regiones.
+- **REQ-REF-28.** La selección debe usar intervalos de longitud
+  `region_size_bases`. Si el objetivo no es múltiplo de esa longitud, debe usar
+  exactamente un intervalo residual más corto para alcanzar el tamaño exacto;
+  no debe redondear el objetivo, completar con `N`, repetir bases ni producir
+  más de un residual.
+- **REQ-REF-29.** Antes de materializar, los intervalos elegidos deben ordenarse
+  por el orden de cromosomas del FASTA de origen y por coordenada creciente
+  dentro de cada cromosoma. La secuencia derivada de cada cromosoma debe
+  concatenar sus intervalos en ese orden y conservar siempre orientación
+  directa.
+- **REQ-REF-30.** Un cromosoma de origen sin intervalos elegidos debe omitirse de
+  la referencia reducida. El sistema no debe crear secuencias FASTA vacías y la
+  referencia reducida debe contener al menos un cromosoma y una base.
+- **REQ-REF-31.** Cada secuencia de la referencia reducida debe conservar de
+  forma inequívoca la identidad del cromosoma fuente. El ID de referencia
+  derivada es distinto del ID de la referencia de origen; la forma física de
+  codificar la identidad del cromosoma se fijará sin perder el vínculo tipado.
+- **REQ-REF-32.** Toda `N` incluida en un intervalo seleccionado debe copiarse
+  literalmente, conservar su posición relativa dentro del intervalo y contar
+  como una base para el tamaño objetivo. La reducción nunca debe resolver,
+  excluir o reemplazar `N` por su contenido.
+- **REQ-REF-33.** Un objetivo mayor que el total elegible, un objetivo calculado
+  menor que una base, la falta de espacio para completar intervalos no
+  solapados o cualquier combinación incompatible debe rechazarse antes de
+  materializar la referencia derivada. El rechazo no puede reducir el objetivo
+  ni aceptar una referencia parcial.
+- **REQ-REF-34.** El resultado válido debe ser una nueva referencia con ID
+  propio, un único FASTA canónico, tamaño exacto y SHA-256 sobre sus bytes. El
+  FASTA de origen, su copia autoritativa y la referencia reducida deben
+  conservar identidades propias y registrar por separado tamaño y suma. La
+  igualdad de una suma solo es válida cuando los bytes comparados son realmente
+  idénticos y nunca fusiona las identidades de origen y derivada.
+- **REQ-REF-35.** La reducción debe producir un mapa estructurado completo con,
+  al menos, referencia y cromosoma de origen, intervalo de origen, referencia y
+  cromosoma derivados, intervalo derivado, orientación directa y orden de cada
+  fragmento. Los intervalos usan coordenadas basadas en 1 y cerradas en el
+  contrato de configuración y salida.
+- **REQ-REF-36.** El FASTA reducido debe poder reconstruirse exactamente desde
+  la copia autoritativa del FASTA de origen, el mapa, los parámetros efectivos,
+  la semilla y la versión del algoritmo de selección. El mapa y el manifiesto
+  no pueden depender de recordar el orden en que el generador sorteó candidatos.
+
+**PENDIENTE DE REVISIÓN — porcentaje.** `reduction_percent` se interpreta de
+forma recomendada como porcentaje eliminado y no como porcentaje conservado.
+Falta aprobar la regla exacta que convierte el decimal declarado en bases
+enteras. La recomendación es calcular el tamaño conservado con aritmética
+decimal determinista, redondear hacia abajo y rechazar un resultado de cero;
+ningún plan debe implementar esa recomendación como si ya estuviera aprobada.
+
+**PENDIENTE DE REVISIÓN — *scaffolds*.** El contrato confirmado habla de
+cromosomas. La recomendación es admitir tanto cromosomas como *scaffolds* y
+preservar la clase de cada secuencia derivada, sin mezclarlos ni reclasificarlos.
+Incluir *scaffolds* cambia el espacio de selección y necesita aprobación
+funcional explícita.
 
 La copia permite reunir en el directorio de resultados todos los archivos
 necesarios para utilizar la simulación. Así se podrán exportar juntos a otros
@@ -3742,6 +3862,23 @@ comparten una política de aceptación.
   regiones solapadas aunque compartan valor, selectores no permitidos y la
   separación entre parámetros biológicos y técnicos. Cada rechazo debe incluir
   el parámetro, el objeto y las reglas o selectores causantes.
+- **REQ-VAL-52.** Antes de derivar una referencia reducida, la validación debe
+  comprobar la exclusión entre objetivos, dominios y unidades, tamaño elegible,
+  posibilidad de completar los intervalos sin solapamiento, cardinalidad del
+  residual y compatibilidad de IDs. Todo fallo debe ocurrir antes de publicar el
+  FASTA derivado o su mapa.
+- **REQ-VAL-53.** La validación de una referencia reducida debe comprobar con el
+  FASTA de origen y el mapa que cada intervalo existe, no se solapa, conserva
+  orientación y orden, que la concatenación reconstruye exactamente cada
+  cromosoma derivado y que tamaño y SHA-256 coinciden. Debe comprobar por
+  separado que toda `N` seleccionada se conservó.
+- **REQ-VAL-54.** La aceptación de la aplicación Marimo debe comparar el conjunto
+  TOML exportado por la interfaz con un conjunto equivalente escrito a mano y
+  demostrar que ambos producen la misma `EffectiveConfig` o los mismos
+  diagnósticos, incluidos IDs, orden, enlaces y resolución de rutas relativas
+  entre el documento general y sus escenarios. También debe rechazar antes de
+  validar o ejecutar cualquier incompatibilidad entre la versión de la
+  aplicación y las versiones de esquema o catálogos del binario.
 
 ### 4.7. Manifiestos de la ejecución y de sus eventos
 
@@ -4200,6 +4337,14 @@ VCF y no constituya un experimento de secuenciación.
   selectores y su procedencia. Una ejecución rechazada por máximas incomparables
   debe conservar esa misma información para todas las reglas máximas en el
   diagnóstico de admisión.
+- **REQ-MAN-89.** Para cada referencia reducida, el manifiesto debe registrar
+  los IDs de origen y derivado, rutas y SHA-256 de ambos FASTA, tamaño elegible,
+  `region_size_bases`, modalidad y valor del objetivo, número exacto de bases
+  derivadas, semilla raíz, subsemilla y versión de la selección.
+- **REQ-MAN-90.** El manifiesto debe enlazar el mapa completo de coordenadas de
+  cada referencia reducida, registrar su clase, versión, ruta, tamaño y SHA-256
+  y permitir comprobar qué cromosomas de origen se incluyeron u omitieron y si
+  se utilizó el único fragmento residual permitido.
 
 El formato y el esquema del manifiesto se elegirán durante la planificación de
 la implementación teniendo en cuenta que el núcleo se desarrollará en Rust.
@@ -4312,6 +4457,11 @@ Esta decisión no forma parte de la especificación funcional.
   de trabajo creadas durante la validación deben permanecer en el área temporal
   o eliminarse de forma segura. El sistema debe emitir un diagnóstico que no se
   presente como manifiesto de una ejecución completa.
+- **REQ-SAL-27.** Toda referencia reducida solicitada debe publicar como unidad
+  coherente su FASTA canónico, su mapa estructurado derivada↔origen y sus
+  metadatos de integridad y reconstrucción. Si falla cualquiera de ellos, la
+  referencia derivada debe quedar fallida y ninguno puede presentarse como
+  resultado completo.
 
 ### 4.9. Escala y prioridades de uso
 
@@ -4346,6 +4496,77 @@ Esta decisión no forma parte de la especificación funcional.
   el fichero de procedencia. Las estimaciones de espacio deben reflejar esta
   política.
 
+### 4.10. Aplicación Marimo de configuración y ejecución
+
+- **REQ-UI-01.** Toda capacidad y opción configurable implementada en v1 debe
+  poder configurarse y lanzarse desde una aplicación Marimo, además de poder
+  expresarse mediante TOML y ejecutarse con el binario. Ninguna opción
+  implementada puede quedar disponible únicamente en TOML o línea de órdenes.
+- **REQ-UI-02.** La aplicación debe organizar como mínimo las pestañas
+  `General/Ejecución`, `Genoma`, `Individuos`, `Poblaciones`, `Evolución`,
+  `Familias`, `Eventos técnicos`, `Salidas` y `Revisar y ejecutar`. Puede ocultar
+  o deshabilitar pestañas y controles que no correspondan a la vía elegida o a
+  una capacidad aún no implementada, indicando la causa sin eliminar su destino
+  previsto.
+- **REQ-UI-03.** Los escalares, enumeraciones y booleanos deben modificarse con
+  controles tipados que conserven su unidad, dominio y ausencia o valor por
+  defecto. La aplicación no debe convertir silenciosamente unidades, truncar
+  enteros ni redondear el valor normativo mostrado en otra unidad.
+- **REQ-UI-04.** Toda lista ordenada, entidad repetible y regla debe usar tablas
+  editables que permitan añadir, eliminar y reordenar filas. La identidad y el
+  orden normativo deben ser visibles y no pueden depender del orden accidental
+  en que Marimo vuelva a ejecutar una celda.
+- **REQ-UI-05.** Los selectores y ámbitos de cada regla deben mostrarse de forma
+  explícita, incluidos individuo, población o subpoblación, fase o generación,
+  referencia, secuencia, región o locus, grupo, bloque y evento técnico cuando
+  la familia los admita. La interfaz debe impedir o diagnosticar un selector no
+  permitido, pero no resolver conflictos con precedencia propia.
+- **REQ-UI-06.** La aplicación debe importar, editar, previsualizar y exportar
+  como unidad autoconsistente un conjunto de configuración de la versión
+  vigente: exactamente un TOML general y cero o varios TOML de escenario
+  enlazados. Debe conservar la identidad de cada documento, los IDs y el orden
+  normativo de los escenarios y sus enlaces o rutas relativas, incluidos
+  nombres con espacios. Debe rechazar un escenario enlazado ausente, duplicado
+  o ajeno al conjunto antes de ejecutar. Un ciclo
+  importar→previsualizar→exportar debe conservar el significado y producir un
+  conjunto que el binario pueda validar, aunque no se prometa identidad de
+  espacios o comentarios. F2.0 implementa el caso general sin escenarios y el
+  modelo multidocumento; los controles semánticos de escenarios evolutivos y de
+  familias se completan en las fases que incorporan esas vías.
+- **REQ-UI-07.** La validación debe invocar explícitamente `validate` del binario
+  Rust y asociar cada diagnóstico disponible con su pestaña, tabla, fila y campo.
+  Cualquier modificación posterior invalida el resultado de validación previo y
+  obliga a validar otra vez antes de habilitar la ejecución.
+- **REQ-UI-08.** La aplicación nunca debe ejecutar automáticamente al abrirse,
+  importar o modificar un valor. `run` solo se lanza mediante una acción humana
+  explícita después de una validación vigente y una revisión visible de la
+  configuración y el destino.
+- **REQ-UI-09.** La aplicación debe invocar `validate` y `run` como procesos con
+  argumentos separados, sin construir ni ejecutar una orden de *shell*. El
+  binario, sus esquemas, catálogos, diagnósticos, configuración efectiva y
+  manifiestos conservan toda autoridad semántica; Marimo no reimplementa reglas
+  biológicas ni decide valores efectivos.
+- **REQ-UI-10.** La elección del destino debe impedir selecciones vacías o
+  accidentales y mostrar la política no-clobber antes de lanzar. La aplicación
+  no puede autorizar sobrescritura, reparación o reutilización de un resultado
+  existente que el binario rechazaría.
+- **REQ-UI-11.** Durante validación y ejecución, la aplicación debe mostrar
+  estado, código de salida, logs y diagnósticos. Al terminar, debe mostrar un
+  resumen y enlaces a manifiestos y artefactos; no debe cargar completos en
+  memoria FASTA, FASTQ, BAM, CRAM, VCF u otros artefactos genómicos grandes para
+  presentar ese resumen.
+- **REQ-UI-12.** El contrato aplicación↔binario debe declarar y comprobar las
+  versiones admitidas del esquema TOML, catálogos de campos/diagnósticos y
+  protocolo de invocación. Una incompatibilidad debe bloquear importación,
+  validación o ejecución con un diagnóstico explícito, nunca intentar una
+  migración o interpretación parcial silenciosa.
+- **REQ-UI-13.** La aplicación debe ser utilizable localmente en Ubuntu 24.04 y
+  en el entorno de desarrollo WSL2 sobre el sistema de ficheros Linux. Debe
+  ofrecer etiquetas, ayuda, navegación por teclado, foco y estados que no
+  dependan solo del color. Desde F2, ningún hito F2–F9 puede cerrar una capacidad
+  configurable sin pruebas de equivalencia UI→TOML→`EffectiveConfig` y controles
+  accesibles para esa capacidad.
+
 ## 5. Mapa conceptual del flujo
 
 Esta sección es un resumen **derivado e informativo** para recorrer el sistema
@@ -4356,15 +4577,16 @@ observará el resultado, sin crear obligaciones adicionales.
 
 | Etapa conceptual | Pregunta que permite seguir el flujo | Fuente normativa | Comprobación principal |
 |---|---|---|---|
-| Admisión | ¿La petición y sus ficheros forman una ejecución inequívoca? | REQ-CONF-01 a REQ-CONF-123, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 | ACE-01, ACE-23, ACE-35, ACE-36, ACE-105 y ACE-111 |
-| Referencias | ¿Qué secuencias y sistemas de coordenadas sostienen la verdad? | REQ-REF-01 a REQ-REF-23 | ACE-02 a ACE-08, ACE-95 y ACE-110 |
+| Admisión | ¿La petición y sus ficheros forman una ejecución inequívoca? | REQ-CONF-01 a REQ-CONF-127, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 | ACE-01, ACE-23, ACE-35, ACE-36, ACE-105, ACE-111 y ACE-112 |
+| Referencias | ¿Qué secuencias y sistemas de coordenadas sostienen la verdad? | REQ-REF-01 a REQ-REF-36 | ACE-02 a ACE-08, ACE-95, ACE-110, ACE-112 y ACE-113 |
 | Construcción de individuos | ¿Qué genomas faseados existen antes de observarlos? | REQ-IND-01 a REQ-IND-59, REQ-DIR-01 a REQ-DIR-05 y REQ-MUT-01 a REQ-MUT-15 | ACE-09 a ACE-12, ACE-28 a ACE-32, ACE-79 a ACE-81, ACE-95, ACE-96, ACE-103, ACE-107 y ACE-109 a ACE-111 |
 | Inicialización poblacional | ¿Qué población inicial se deriva de las frecuencias y restricciones declaradas? | REQ-EVO-01 a REQ-EVO-52 y REQ-POB-01 a REQ-POB-03 | ACE-11, ACE-13, ACE-26, ACE-88 a ACE-90, ACE-104 y ACE-105 |
 | Evolución | ¿Cómo cambia el estado poblacional entre generaciones? | REQ-EVO-53 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 | ACE-13, ACE-24 a ACE-28 y ACE-76 a ACE-87 |
 | Familias y cruces | ¿Qué individuos intermedios y descendientes forman cada familia? | REQ-CRU-01 a REQ-CRU-45, junto con las reglas aplicables de REQ-REP-01 a REQ-REP-26 y REQ-REC-01 a REQ-REC-29 | ACE-14, ACE-27, ACE-75, ACE-85, ACE-87, ACE-97, ACE-98 y ACE-106 |
 | Observación técnica | ¿Qué evidencia se genera a partir de una verdad ya fijada? | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 | ACE-15 a ACE-17, ACE-37 a ACE-59, ACE-68 a ACE-74, ACE-93, ACE-94 y ACE-100 |
 | Verdad interoperable | ¿Cómo se proyecta la verdad canónica a cada referencia y formato solicitado? | REQ-VER-01 a REQ-VER-47 | ACE-18 a ACE-21, ACE-24, ACE-25, ACE-30, ACE-31, ACE-60 a ACE-63, ACE-66, ACE-100, ACE-101 y ACE-108 |
-| Cierre | ¿Cómo se decide que los resultados están completos y trazables? | REQ-VAL-01 a REQ-VAL-51, REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a REQ-SAL-26 | ACE-22 a ACE-24, ACE-33, ACE-34, ACE-36, ACE-46 a ACE-49, ACE-60 a ACE-67, ACE-78, ACE-86, ACE-92 a ACE-108 |
+| Interfaz de autoría | ¿Puede configurarse y lanzarse la misma semántica sin editar TOML? | REQ-UI-01 a REQ-UI-13 y REQ-VAL-54 | ACE-114 y ACE-115 |
+| Cierre | ¿Cómo se decide que los resultados están completos y trazables? | REQ-VAL-01 a REQ-VAL-54, REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a REQ-SAL-27 | ACE-22 a ACE-24, ACE-33, ACE-34, ACE-36, ACE-46 a ACE-49, ACE-60 a ACE-67, ACE-78, ACE-86, ACE-92 a ACE-115 |
 
 La relación conceptual entre etapas es: primero se admite una petición, luego se
 construye o recupera la verdad biológica, después se materializa la evidencia
@@ -4386,11 +4608,12 @@ valores, obligatoriedad ni relaciones entre objetos.
 
 | Grupo de entrada | Finalidad conceptual | Contrato aplicable |
 |---|---|---|
-| Petición y configuración | Identificar la ejecución y resolver los parámetros efectivos | REQ-CONF-01 a REQ-CONF-123, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 |
-| Secuencias y referencias | Establecer las bases y coordenadas sobre las que se construye y compara la verdad | REQ-REF-01 a REQ-REF-23 y las entradas de REQ-DAT-01 a REQ-DAT-73 |
+| Petición y configuración | Identificar la ejecución y resolver los parámetros efectivos | REQ-CONF-01 a REQ-CONF-127, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 |
+| Secuencias y referencias | Establecer las bases y coordenadas sobre las que se construye y compara la verdad | REQ-REF-01 a REQ-REF-36 y las entradas de REQ-DAT-01 a REQ-DAT-73 |
 | Individuos, poblaciones y familias | Declarar el material biológico inicial y las relaciones que deben simularse | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73, REQ-POB-01 a REQ-POB-03 y REQ-CRU-01 a REQ-CRU-45 |
 | Procesos biológicos | Especificar creación, mutación, migración, reproducción, selección y recombinación | REQ-DIR-01 a REQ-DIR-05, REQ-MUT-01 a REQ-MUT-15, REQ-MIG-01 a REQ-MIG-09, REQ-REP-01 a REQ-REP-26, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 |
 | Eventos y condiciones técnicas | Solicitar observaciones, perfiles, artefactos y tratamientos técnicos admitidos | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 |
+| Aplicación Marimo | Importar, editar, revisar, validar y lanzar la misma configuración mediante una interfaz local | REQ-UI-01 a REQ-UI-13 |
 
 La asignación exacta de cada entrada a sus ACE se consulta en la matriz de
 trazabilidad; esta agrupación no sustituye esa correspondencia individual.
@@ -4401,8 +4624,8 @@ trazabilidad; esta agrupación no sustituye esa correspondencia individual.
 |---|---|---|
 | Verdad biológica y genealogía | Conservar el estado canónico y la procedencia necesarios para interpretar la simulación | REQ-VER-01 a REQ-VER-47 y los requisitos de procedencia de REQ-IND-01 a REQ-IND-59, REQ-CRU-01 a REQ-CRU-45 y REQ-REC-01 a REQ-REC-29 |
 | Evidencia técnica | Entregar los artefactos solicitados sin convertirlos en fuente de verdad | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 |
-| Validación e informes | Hacer observables las comprobaciones deterministas y los resultados estadísticos | REQ-VAL-01 a REQ-VAL-51 |
-| Manifiestos y paquete publicado | Relacionar configuración efectiva, verdad, evidencia, procedencia y estado de cada artefacto | REQ-MAN-01 a REQ-MAN-88 y REQ-SAL-01 a REQ-SAL-26 |
+| Validación e informes | Hacer observables las comprobaciones deterministas y los resultados estadísticos | REQ-VAL-01 a REQ-VAL-54 |
+| Manifiestos y paquete publicado | Relacionar configuración efectiva, verdad, evidencia, procedencia y estado de cada artefacto | REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a REQ-SAL-27 |
 
 La matriz de trazabilidad asigna a cada salida sus ACE concretos. Los requisitos
 citados determinan qué salida existe en cada caso y qué contenido debe
@@ -4528,6 +4751,10 @@ pendientes.
 | **ACE-109. Poisson y modelo escalonado simple** | Todo recuento de variantes aleatorias usa exclusivamente Poisson y se reproduce con la misma semilla, configuración, entradas y versión. Los cambios concretos se expresan mediante eventos explícitos o el modo controlado aplicable, no como otra distribución. Cada mutación de repetición en tándem añade una unidad completa o elimina una, conforme al sesgo configurado. Seleccionar otra distribución de recuentos, otro modelo de repetición o un salto de varias unidades se rechaza antes de simular e identifica parámetro y valor | Casos Poisson reproducibles, eventos explícitos, expansión y contracción unitarias, valores de sesgo y rechazos de alternativas |
 | **ACE-110. Conservación de la base desconocida N** | `N` se conserva y nunca se resuelve. No puede ser SNP, locus seleccionado ni motivo de repetición; sí puede permanecer dentro de una SV o secuencia explícita/copiada. Las inserciones aleatorias y errores solo generan A/C/G/T. Se hereda y recombina sin cambios. WGS puede muestrearla, FASTQ la representa con Phred 0, BAM/CRAM la propaga, GC la excluye de su denominador y cobertura la cuenta. VCF nunca emite SNP con `REF=N` y usa complemento cuando el estándar no conserve otro caso sin pérdida. Validación y manifiesto prueban exclusiones, resúmenes y ausencia de resolución | SNP sobre `N`; SV con `N`; inserciones aleatoria y expresa; herencia; lectura Q0; ventana toda `N`; cobertura; VCF/complemento; ausencia de resolución |
 | **ACE-111. Sustituciones y precedencia entre ejes** | Cada parámetro parte de su regla base y solo admite los selectores de su familia. Una regla aplica cuando coinciden todos sus selectores; se eliminan las dominadas y una única máxima fija el valor. Una regla combinada domina las reglas parciales. Sin esa regla combinada, región frente a subpoblación e individuo frente a región son máximas incomparables y se rechazan aunque compartan valor; también se rechazan reglas duplicadas, regiones solapadas con iguales selectores no espaciales y selectores no admitidos. Generación domina fase, subpoblación domina población, locus domina región y secuencia, y una coincidencia concreta domina la ausencia dentro de los demás ejes. Un evento técnico nunca sustituye biología. Configuración efectiva y manifiesto conservan valor, regla ganadora, selectores y procedencia | Herencia base; todas las jerarquías internas; regla combinada; los dos conflictos cruzados; duplicado igual; regiones solapadas; selector no permitido; separación biológica/técnica; procedencia |
+| **ACE-112. Objetivo y selección de referencia reducida** | Un FASTA real validado origina otra referencia con ID propio. Exactamente uno de `target_bases` o `reduction_percent` fija un objetivo entero positivo; `region_size_bases` es positivo. La selección usa subsemilla propia, no reemplaza ni solapa, no duplica ni invierte y produce bloques completos más como máximo un residual para alcanzar exactamente el objetivo. Objetivo imposible, espacio insuficiente o parámetros incompatibles fallan antes de materializar | Casos con objetivo exacto/múltiplo/residual, 0 y 100 %, objetivo igual/mayor que origen, semilla repetida y espacio insuficiente; cerrar antes las dos cuestiones funcionales pendientes |
+| **ACE-113. Procedencia y reconstrucción de referencia reducida** | Los intervalos se ordenan por cromosoma y coordenada, se concatenan en orientación directa, omiten cromosomas sin selección y no crean secuencias vacías. `N` se copia y cuenta. FASTA canónico, mapa derivada↔origen, SHA-256, configuración efectiva y manifiesto permiten reconstruir exactamente cada base y explican cromosomas omitidos y residual | Reconstrucción con lector independiente, mapa con bordes base 1 cerrados, `sha256sum`, FASTA con `N` y corrupción deliberada de cada enlace |
+| **ACE-114. Equivalencia de autoría Marimo** | Todas las opciones implementadas están en una de las nueve pestañas mínimas. Escalares usan controles tipados; listas y reglas, tablas con alta/baja/reordenación y selectores visibles. Importar, editar, previsualizar y exportar como unidad el TOML general y cero o varios escenarios conserva significado, IDs, orden y enlaces/rutas relativas. El binario Rust valida y resuelve; cualquier cambio de cualquier documento invalida la validación previa y una incompatibilidad, escenario ausente o duplicado se rechaza | Matriz opción→pestaña/control; conjunto sin escenarios y conjuntos multiescenario con rutas relativas/espacios/faltantes/duplicados; comparación UI→conjunto TOML→`EffectiveConfig` o diagnóstico con conjunto manual equivalente |
+| **ACE-115. Ejecución segura y accesible desde Marimo** | La aplicación nunca ejecuta automáticamente ni usa shell. Una acción explícita tras validación vigente lanza `run` con argumentos separados y destino no-clobber revisado. Muestra estado, código, logs, diagnósticos y enlaces/resúmenes sin cargar artefactos genómicos grandes. Funciona localmente en Ubuntu/WSL2 Linux y ofrece teclado, foco, etiquetas, ayuda y estados no basados solo en color. Cada capacidad F2–F9 añade controles antes de cerrar | Proceso falso y binario real; cambio posterior a validar; destino existente; logs grandes y artefacto grande; revisión de teclado/foco/color; puerta transversal por hito |
 
 Estos criterios son cualitativos y deberán convertirse en pruebas durante la
 planificación de la implementación.
@@ -4536,9 +4763,12 @@ planificación de la implementación.
 
 Las 27 preguntas funcionales de la revisión
 [revision-adversarial-especificaciones-0.1.md](./revision-adversarial-especificaciones-0.1.md)
-están resueltas para v1. Añadir otro comportamiento, selector o clase de regla
-requerirá revisar expresamente esta especificación; las elecciones restantes de
-la sección 9 son técnicas y no pueden reabrir la semántica funcional confirmada.
+están resueltas para v1. La ampliación posterior confirma la referencia reducida
+y la aplicación Marimo, pero deja `PENDIENTE DE REVISIÓN` el redondeo de
+`reduction_percent` y la elegibilidad de *scaffolds*. Añadir otro comportamiento,
+selector o clase de regla requerirá revisar expresamente esta especificación;
+las elecciones restantes de la sección 9 son técnicas y no pueden reabrir la
+semántica funcional confirmada.
 
 ## 9. Decisiones técnicas aplazadas a la planificación de la implementación
 
@@ -4581,6 +4811,23 @@ decidirá la estrategia técnica de subsemillas o
   plataformas. Estas elecciones conservarán las medias esperadas configurables,
   los resultados realizados y los niveles de reproducibilidad ya exigidos.
 
+**PENDIENTE DE REVISIÓN TÉCNICA — selección de intervalos para referencias
+reducidas.** Después de cerrar las
+dos cuestiones funcionales de REQ-REF-27 y REQ-REF-31 y resolver DTPD-101 como
+contrato común de coordenadas, se elegirá y versionará
+el algoritmo exacto que reparte oportunidades entre cromosomas, selecciona
+intervalos no solapados y sitúa el único residual. La elección debe respetar el
+objetivo exacto, el orden relativo, la subsemilla propia y la reconstrucción, y
+debe aportar vectores independientes; no puede convertir el orden de recorrido
+o el paralelismo en azar implícito.
+
+**PENDIENTE DE REVISIÓN TÉCNICA — aplicación Marimo.** Se elegirán una versión
+compatible, el empaquetado local
+y el contrato técnico mediante el que la aplicación descubre versiones de
+esquema y catálogos e invoca el binario sin shell. Esta elección no puede mover
+validación o semántica biológica fuera del núcleo Rust ni conceder a Marimo
+autoridad sobre la configuración efectiva o los manifiestos.
+
 **Tolerancias numéricas.** Durante la implementación se fijarán el valor
 predeterminado y la precisión de la tolerancia general usada cuando frecuencias
 o probabilidades deban sumar 1. La configuración podrá sustituir ese valor. Las
@@ -4592,7 +4839,10 @@ fijarán las tolerancias técnicas específicas aún pendientes. Ninguna sustitu
 **Representación técnica de coordenadas.** La configuración usa coordenadas
 basadas en 1 e intervalos cerrados. Durante la planificación se elegirá su
 representación concreta en los ficheros estructurados y se documentarán las
-conversiones a las convenciones oficiales de cada formato externo. Los VCF de
+conversiones a las convenciones oficiales de cada formato externo. DTPD-101
+debe resolverse en F1.6 antes de materializar el mapa origen↔derivada y fijar un
+único servicio que reutilicen F2 y las fases posteriores; no se admite una
+representación local de reducción. Los VCF de
 referencias distintas se construirán de forma independiente y no se definirá un
 algoritmo de correspondencia entre sus registros.
 
@@ -4743,6 +4993,12 @@ familias de decisiones funcionales que siguen abiertas para el alcance de v1.
 9. Definir los campos de cabecera y las versiones de SAM/BAM, CRAM y VCF que
    identificarán referencia, muestra, evento, biblioteca, tanda y grupo
    de lectura.
-10. Completar los casos de prueba restantes y tomar las decisiones de
+10. Aprobar la interpretación y redondeo de `reduction_percent` y la
+    elegibilidad de *scaffolds*; después, elegir y versionar el algoritmo
+    uniforme de selección y sus vectores reproducibles.
+11. Evaluar, fijar y empaquetar Marimo mediante la puerta F2.0 y versionar su
+    contrato con esquemas, catálogos y binario sin trasladar reglas biológicas a
+    la interfaz.
+12. Completar los casos de prueba restantes y tomar las decisiones de
     implementación cuando el comportamiento esperado esté suficientemente
     definido.
