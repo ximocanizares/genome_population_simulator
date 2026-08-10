@@ -464,13 +464,13 @@ rechazo previo, fallo controlado e interrupción.
   - Cambia: registro de tolerancia efectiva, orden canónico, algoritmo y versión, suma, delta y valores antes y después o causa de rechazo, sin reutilizar tolerancias con otra finalidad.
   - Se comprueba con: los mismos vectores independientes de B10 a través de JSON Schema y comparación semántica del manifiesto; la serialización recupera el mismo `f64` y ningún predeterminado queda implícito.
 
-- ☐ D12. Probar rechazo, fallo controlado e interrupción no controlable como resultados distintos.
+- ✅ D12. Probar rechazo, fallo controlado e interrupción no controlable como resultados distintos.
   - Depende de: D7–D10.
   - Procede de: DTC-045 y DTC-044; REQ-MAN-83 y REQ-SAL-26.
   - Cambia: pruebas de proceso para salida 2 sin destino, salida de fallo controlado con manifiesto final `fallido` y señal no controlable con provisional `INCOMPLETE`.
   - Se comprueba con: ejecución en WSL2/ext4 y CI Ubuntu 24.04; se inyectan fallos antes/después de catalogar un artefacto y se verifica que un SIGKILL no publique completo.
 
-- ☐ D13. Auditar las 25 pruebas trazables de F1.4 con validadores independientes y cerrar solo las demostrables.
+- ✅ D13. Auditar las 25 pruebas trazables de F1.4 con validadores independientes y cerrar solo las demostrables.
   - Depende de: D1–D12.
   - Procede de: los 25 REQ asignados a F1.4, ACE-22/25/34/93/94/105, DTC-047 y DTC-049.
   - Cambia: casos `TEST-REQ-*`, verificador de enlaces, pruebas de hash/no-clobber y matriz de evidencias.
@@ -492,8 +492,19 @@ detectó H-F14-R2-R1: la regresión demostró que el contrato cerrado todavía
 aceptaba contradicciones de estado, niveles y dependencias. El contrato Draft
 2020-12 exige ahora los cuatro niveles y las siete dependencias exactamente una
 vez, además de la coherencia entre estado general, configuración efectiva,
-diagnósticos y unidades y la unidad completa de evento. D12–D13 continúan
-abiertos hasta la misma repetición nativa.
+diagnósticos y unidades y la unidad completa de evento. En ese punto D12–D13
+continuaban abiertos hasta la repetición nativa registrada a continuación.
+
+**Aprobación de la pausa (10 de agosto de 2026):** F1.4 queda aprobada tras
+la revisión independiente, la corrección de los diez hallazgos y la repetición
+nativa en GitHub Actions sobre `ubuntu-24.04`. La ejecución
+[`31372725778`](https://github.com/ximocanizares/genome_population_simulator/actions/runs/31372725778),
+para el commit `5d12e58965561cd63eec76020c56ce7cc9d6cf8c`, terminó con éxito:
+formato, Clippy, 109 pruebas, doctest y construcción release. El job
+[`93405082155`](https://github.com/ximocanizares/genome_population_simulator/actions/runs/31372725778/job/93405082155)
+demuestra expresamente rechazo previo, fallo controlado, carrera no-clobber y
+SIGKILL con `INCOMPLETE`. D12–D13 quedan cerrados y se autoriza comenzar
+E1/F1.5, sin declarar todavía F1 completa.
 
 ### Pausa obligatoria de revisión de F1.4
 

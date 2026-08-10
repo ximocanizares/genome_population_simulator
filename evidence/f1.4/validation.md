@@ -11,8 +11,9 @@ Fecha: 10 de agosto de 2026.
   `x86_64-unknown-linux-gnu`.
 - Validador independiente `python-jsonschema` 4.10.3 y GNU `sha256sum` 9.4.
 
-La repetición exigida por D12 y por la pausa en Ubuntu 24.04 nativo no se ha
-ejecutado en este entorno y permanece como condición explícita de aprobación.
+La repetición exigida por D12 y por la pausa se ejecutó después en GitHub
+Actions sobre la imagen nativa `ubuntu-24.04`; su evidencia se registra al
+final de este documento.
 
 ## Puertas ejecutadas
 
@@ -88,7 +89,7 @@ REQ-SAL-17/18; cada fila conserva evidencia parcial y destino consumidor.
 
 La pasada H-F14-R3 confirma también la coherencia documental: F1.5 conserva 27
 REQ, F1 conserva 61 filas vigentes y 31 casos están reasignados a F2–F9. D12 y
-D13 continúan sin aprobación a falta de la evidencia Ubuntu 24.04 nativa.
+D13 quedaron aprobados tras incorporar la evidencia Ubuntu 24.04 nativa.
 
 ## Regresión H-F14-R2-R1
 
@@ -105,3 +106,21 @@ corruptos independientes. La revisión de colecciones equivalentes confirmó que
 `uniqueItems`, nombres limitados a esas tres opciones y estado único `passed`
 impiden omitir una mediante duplicación. Las colecciones variables no se
 convirtieron artificialmente en catálogos cerrados.
+
+## Validación nativa y cierre de D12–D13
+
+La ejecución de GitHub Actions
+[`31372725778`](https://github.com/ximocanizares/genome_population_simulator/actions/runs/31372725778)
+usó la imagen `ubuntu-24.04` y el commit exacto
+`5d12e58965561cd63eec76020c56ce7cc9d6cf8c`. El job
+[`93405082155`](https://github.com/ximocanizares/genome_population_simulator/actions/runs/31372725778/job/93405082155)
+terminó con éxito el 10 de agosto de 2026. Sus registros confirman:
+
+- formato, Clippy con advertencias como error, 109 pruebas, doctest y release;
+- rechazo previo sin destino final;
+- fallo controlado con manifiesto final `failed`;
+- dos procesos en carrera con un único publicador;
+- SIGKILL sin resultado completo y con `INCOMPLETE` conservado.
+
+Con esta repetición, D12 y D13 y la pausa obligatoria de F1.4 quedan aprobados.
+F1.5 queda autorizado; F1 aún no se declara completa.

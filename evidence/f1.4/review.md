@@ -14,11 +14,10 @@ plan F2 ajeno al alcance.
 
 ## Veredicto
 
-Sin hallazgos pendientes en el alcance local de F1.4. Los diez hallazgos de la
-implementación y las revisiones fueron corregidos, recibieron prueba de regresión y superaron de nuevo
-las puertas completas. El código queda listo para la pausa obligatoria, pero la
-fase no debe declararse aprobada hasta repetir D12 y la carrera no-clobber en
-Ubuntu 24.04 nativo.
+Sin hallazgos pendientes en F1.4. Los diez hallazgos de la implementación y las
+revisiones fueron corregidos, recibieron prueba de regresión y superaron de
+nuevo las puertas completas. La repetición posterior en GitHub Actions sobre
+`ubuntu-24.04` cerró D12, D13 y la pausa obligatoria; F1.5 queda autorizado.
 
 ## Preguntas de revisión
 
@@ -53,18 +52,19 @@ se contrastó con el contrato y se verificó sobre el código real.
 
 ## Riesgos y límites restantes
 
-- La prueba nativa Ubuntu 24.04 es una condición de aceptación ambiental, no
-  un defecto reproducido en WSL2/ext4.
+- La validación nativa Ubuntu 24.04 quedó registrada en la ejecución
+  `31372725778`, job `93405082155`, para el commit exacto `5d12e58`.
 - Ocho requisitos permanecen correctamente reasignados porque sus consumidores
   reales pertenecen a F1.5 o F2–F9.
 - No se implementó referencia, FASTA, verdad, VCF, FASTQ, BAM/CRAM ni biología
   de F1.5 o posteriores.
 
-## Tres aspectos prioritarios para la pausa
+## Cierre de la pausa
 
-1. Repetir carrera, destino existente, fallo controlado y SIGKILL en Ubuntu
-   24.04 nativo sobre su sistema de ficheros.
-2. Inspeccionar allí un resultado completo, uno `failed` y un provisional
-   `INCOMPLETE` con los mismos esquemas y `sha256sum`.
-3. Mantener sin aprobar F1.4 hasta registrar esa evidencia y confirmar las ocho
-   reasignaciones de la matriz.
+La ejecución
+[`31372725778`](https://github.com/ximocanizares/genome_population_simulator/actions/runs/31372725778)
+y su job
+[`93405082155`](https://github.com/ximocanizares/genome_population_simulator/actions/runs/31372725778/job/93405082155)
+repitieron satisfactoriamente la matriz de publicación en `ubuntu-24.04`.
+D12–D13 y F1.4 quedan aprobados; se conservan las ocho reasignaciones con sus
+destinos y se autoriza E1/F1.5.
