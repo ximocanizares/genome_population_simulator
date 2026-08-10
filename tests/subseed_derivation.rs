@@ -18,7 +18,7 @@ fn decode_hex(value: &str) -> Vec<u8> {
 
 #[test]
 fn every_a5_vector_matches_literal_material_and_blake3_subseed() {
-    for row in include_str!("../catalogs/subseed-scopes-v1.tsv")
+    for row in include_str!("../catalogs/subseed-scopes-v2.tsv")
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
     {
@@ -42,6 +42,44 @@ fn every_a5_vector_matches_literal_material_and_blake3_subseed() {
             *subseed_hex
         );
     }
+}
+
+#[test]
+fn reference_generation_has_a_stable_stream_isolated_from_technical_events() {
+    let root = RootSeed::from_bytes([11; 32]);
+    let reference = SubseedRequest::from_scope(
+        "reference_generation",
+        &[("reference_id", "reference-main")],
+    )
+    .unwrap();
+    let event = SubseedRequest::from_scope(
+        "technical_event",
+        &[
+            ("event_id", "event-main"),
+            ("reference_id", "reference-main"),
+        ],
+    )
+    .unwrap();
+    let mut first = derive_subseed(root, &reference).unwrap().local_rng();
+    let mut repeated = derive_subseed(root, &reference).unwrap().local_rng();
+    let mut unrelated = derive_subseed(root, &event).unwrap().local_rng();
+    let expected = [first.next_u64(), first.next_u64(), first.next_u64()];
+    assert_eq!(
+        expected,
+        [
+            repeated.next_u64(),
+            repeated.next_u64(),
+            repeated.next_u64()
+        ]
+    );
+    assert_ne!(
+        expected,
+        [
+            unrelated.next_u64(),
+            unrelated.next_u64(),
+            unrelated.next_u64()
+        ]
+    );
 }
 
 #[test]

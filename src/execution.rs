@@ -2,17 +2,23 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::application::{EffectiveConfig, EffectiveConfigurationInput};
+use crate::application::{EffectiveConfig, EffectiveConfigurationInput, EffectiveReferenceSource};
 use crate::diagnostics::Diagnostic;
 use crate::identity::{AutomaticIdRequest, IdClass, IdentityRegistry};
 use crate::integrity::Sha256Writer;
 use crate::publication::{
     ArtifactStage, AtomicPublisher, ExecutionWorkspace, LinuxAtomicPublisher, PublishableUnit,
 };
+use crate::reference::Reference;
+use crate::reference_fasta::{
+    SequenceExpectation, ValidatedSuppliedReference, validate_supplied_fasta,
+    validate_supplied_fasta_with_origin, write_generated_fasta,
+};
+use crate::reference_generation::{BaseFrequency, GeneratedSequenceSpec, generate_reference};
 use crate::results::{
     ArtifactRecord, ConfigurationInputRecord, EventManifest, EventManifestLink, GeneralManifest,
-    UnitRecord, UnitState, effective_config_document, event_manifest_document,
-    general_manifest_document, json_document_bytes,
+    ReferenceOutput, UnitRecord, UnitState, effective_config_document_with_reference,
+    event_manifest_document, general_manifest_document, json_document_bytes,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,8 +58,7 @@ pub fn execute_validated_config_with(
     fault: ExecutionFault,
     publisher: &impl AtomicPublisher,
 ) -> Result<ExecutionOutcome, Diagnostic> {
-    let effective_document = effective_config_document(effective);
-    let effective_bytes = json_document_bytes(&effective_document)?;
+    let mut prepared_reference = prepare_reference(effective)?;
     let configuration_digest = configuration_digest(effective.configuration_inputs())?;
     let execution_request = AutomaticIdRequest::new(
         IdClass::Execution,
@@ -83,10 +88,25 @@ pub fn execute_validated_config_with(
             execution_id.as_str(),
             &configuration_inputs,
             None,
+            None,
             &[],
             injected_failure("after_configuration_copy"),
         );
     }
+
+    let reference_artifact = write_reference(effective, &prepared_reference, &mut workspace)?;
+    prepared_reference = load_authoritative_reference(
+        effective,
+        &workspace,
+        &reference_artifact,
+        prepared_reference,
+    )?;
+    let reference_output = ReferenceOutput {
+        reference: prepared_reference.reference(),
+        fasta: &reference_artifact,
+    };
+    let effective_document = effective_config_document_with_reference(effective, reference_output)?;
+    let effective_bytes = json_document_bytes(&effective_document)?;
 
     let effective_record = workspace.write_artifact(
         "effective-config",
@@ -102,12 +122,13 @@ pub fn execute_validated_config_with(
             execution_id.as_str(),
             &configuration_inputs,
             Some(&effective_record),
+            Some(reference_output),
             &[],
             injected_failure("after_effective_config"),
         );
     }
 
-    let event_links = write_event_manifests(effective, &mut workspace)?;
+    let event_links = write_event_manifests(effective, reference_output, &mut workspace)?;
     let mut execution_unit = PublishableUnit::new(
         execution_id.as_str(),
         "execution",
@@ -117,7 +138,8 @@ pub fn execute_validated_config_with(
                     .iter()
                     .map(|input| input.copy.id.clone()),
             )
-            .chain(event_links.iter().map(|event| event.manifest.id.clone())),
+            .chain(event_links.iter().map(|event| event.manifest.id.clone()))
+            .chain(std::iter::once(reference_artifact.id.clone())),
     );
     execution_unit.record_artifact("effective-config", ArtifactStage::Cataloged)?;
     for input in &configuration_inputs {
@@ -126,6 +148,7 @@ pub fn execute_validated_config_with(
     for event in &event_links {
         execution_unit.record_artifact(&event.manifest.id, ArtifactStage::Cataloged)?;
     }
+    execution_unit.record_artifact(&reference_artifact.id, ArtifactStage::Cataloged)?;
     execution_unit.complete()?;
     let units = std::iter::once(execution_unit.record())
         .chain(event_links.iter().map(|event| UnitRecord {
@@ -143,6 +166,7 @@ pub fn execute_validated_config_with(
         effective,
         configuration_inputs: &configuration_inputs,
         effective_config: Some(&effective_record),
+        reference: Some(reference_output),
         events: &event_links,
         artifacts: &artifacts,
         units: &units,
@@ -160,6 +184,205 @@ pub fn execute_validated_config_with(
         destination,
         state: UnitState::Complete,
     })
+}
+
+enum PreparedReference {
+    Supplied(ValidatedSuppliedReference),
+    Generated(Reference),
+}
+
+impl PreparedReference {
+    fn reference(&self) -> &Reference {
+        match self {
+            Self::Supplied(supplied) => supplied.reference(),
+            Self::Generated(reference) => reference,
+        }
+    }
+
+    fn reference_mut(&mut self) -> &mut Reference {
+        match self {
+            Self::Supplied(supplied) => supplied.reference_mut(),
+            Self::Generated(reference) => reference,
+        }
+    }
+}
+
+fn prepare_reference(effective: &EffectiveConfig) -> Result<PreparedReference, Diagnostic> {
+    match effective.reference_source() {
+        EffectiveReferenceSource::Supplied { original_path } => {
+            let expected = sequence_expectations(effective);
+            validate_supplied_fasta(original_path, effective.reference_id(), &expected)
+                .map(PreparedReference::Supplied)
+        }
+        EffectiveReferenceSource::Simulated => {
+            let specs = effective
+                .sequences()
+                .iter()
+                .map(|sequence| GeneratedSequenceSpec {
+                    id: sequence.id(),
+                    class: sequence.class(),
+                    length: sequence.length(),
+                })
+                .collect::<Vec<_>>();
+            let normalization = effective
+                .normalized_collections()
+                .iter()
+                .find(|collection| collection.parameter == "reference.composition")
+                .ok_or_else(|| {
+                    Diagnostic::internal(
+                        "GPS-INTERNAL-001",
+                        "Una invariante interna considerada imposible se ha roto.",
+                    )
+                    .with("component", "execution")
+                    .with("operation", "prepare_reference")
+                    .with("detail", "simulated reference has no effective composition")
+                })?;
+            let composition = normalization
+                .values
+                .iter()
+                .map(|value| {
+                    let base = match value.id.as_str() {
+                        "A" => b'A',
+                        "C" => b'C',
+                        "G" => b'G',
+                        "T" => b'T',
+                        other => {
+                            return Err(Diagnostic::internal(
+                                "GPS-INTERNAL-001",
+                                "Una invariante interna considerada imposible se ha roto.",
+                            )
+                            .with("component", "execution")
+                            .with("operation", "prepare_reference")
+                            .with("detail", format!("unexpected admitted base ID {other}")));
+                        }
+                    };
+                    Ok(BaseFrequency {
+                        base,
+                        probability: value.after,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?;
+            generate_reference(
+                effective.reference_id(),
+                effective.reproducibility().root_seed(),
+                &specs,
+                &composition,
+            )
+            .map(PreparedReference::Generated)
+        }
+    }
+}
+
+fn sequence_expectations(effective: &EffectiveConfig) -> Vec<SequenceExpectation<'_>> {
+    effective
+        .sequences()
+        .iter()
+        .map(|sequence| SequenceExpectation {
+            id: sequence.id(),
+            class: sequence.class(),
+            length: sequence.length(),
+        })
+        .collect()
+}
+
+fn load_authoritative_reference(
+    effective: &EffectiveConfig,
+    workspace: &ExecutionWorkspace,
+    artifact: &ArtifactRecord,
+    prepared: PreparedReference,
+) -> Result<PreparedReference, Diagnostic> {
+    let mut authoritative = match (effective.reference_source(), prepared) {
+        (EffectiveReferenceSource::Supplied { original_path }, PreparedReference::Supplied(_)) => {
+            let read_path = workspace.root().join(&artifact.path);
+            let expected = sequence_expectations(effective);
+            let supplied = validate_supplied_fasta_with_origin(
+                &read_path,
+                original_path,
+                effective.reference_id(),
+                &expected,
+            )?;
+            if supplied.source_identity().size_bytes() != artifact.size_bytes
+                || supplied.source_identity().digest() != artifact.digest
+            {
+                return Err(Diagnostic::internal(
+                    "GPS-INTERNAL-001",
+                    "Una invariante interna considerada imposible se ha roto.",
+                )
+                .with("component", "execution")
+                .with("operation", "load_authoritative_reference")
+                .with(
+                    "detail",
+                    "the cataloged reference changed before authoritative loading",
+                ));
+            }
+            PreparedReference::Supplied(supplied)
+        }
+        (EffectiveReferenceSource::Simulated, PreparedReference::Generated(reference)) => {
+            PreparedReference::Generated(reference)
+        }
+        _ => {
+            return Err(Diagnostic::internal(
+                "GPS-INTERNAL-001",
+                "Una invariante interna considerada imposible se ha roto.",
+            )
+            .with("component", "execution")
+            .with("operation", "load_authoritative_reference")
+            .with(
+                "detail",
+                "prepared reference origin changed before authoritative loading",
+            ));
+        }
+    };
+    authoritative
+        .reference_mut()
+        .bind_authoritative_resource(PathBuf::from(&artifact.path))
+        .map_err(|error| {
+            Diagnostic::internal(
+                "GPS-INTERNAL-001",
+                "Una invariante interna considerada imposible se ha roto.",
+            )
+            .with("component", "execution")
+            .with("operation", "bind_authoritative_reference")
+            .with("detail", format!("{error:?}"))
+        })?;
+    Ok(authoritative)
+}
+
+fn write_reference(
+    effective: &EffectiveConfig,
+    prepared: &PreparedReference,
+    workspace: &mut ExecutionWorkspace,
+) -> Result<ArtifactRecord, Diagnostic> {
+    let relative = PathBuf::from(format!(
+        "resources/references/{}.fa",
+        effective.reference_id()
+    ));
+    match (effective.reference_source(), prepared) {
+        (
+            EffectiveReferenceSource::Supplied { original_path },
+            PreparedReference::Supplied(supplied),
+        ) => workspace.copy_verified_artifact(
+            "reference-fasta",
+            "reference_fasta",
+            original_path,
+            &relative,
+            supplied.source_identity(),
+        ),
+        (EffectiveReferenceSource::Simulated, PreparedReference::Generated(reference)) => workspace
+            .write_streamed_artifact("reference-fasta", "reference_fasta", &relative, |file| {
+                write_generated_fasta(reference, file)
+            }),
+        _ => Err(Diagnostic::internal(
+            "GPS-INTERNAL-001",
+            "Una invariante interna considerada imposible se ha roto.",
+        )
+        .with("component", "execution")
+        .with("operation", "write_reference")
+        .with(
+            "detail",
+            "prepared reference origin changed before publication",
+        )),
+    }
 }
 
 fn copy_configuration_inputs(
@@ -230,6 +453,7 @@ fn digest_material_error(field: &str) -> Diagnostic {
 
 fn write_event_manifests(
     effective: &EffectiveConfig,
+    reference: ReferenceOutput<'_>,
     workspace: &mut ExecutionWorkspace,
 ) -> Result<Vec<EventManifestLink>, Diagnostic> {
     let mut links = Vec::with_capacity(effective.reproducibility().event_subseeds().len());
@@ -246,6 +470,7 @@ fn write_event_manifests(
             event_id: event.event_id(),
             state: UnitState::Complete,
             subseed: &subseed,
+            reference,
             artifacts: &[],
             units: &[event_unit],
             diagnostics: &[],
@@ -277,6 +502,7 @@ fn close_failed_execution(
     execution_id: &str,
     configuration_inputs: &[ConfigurationInputRecord],
     effective_config: Option<&ArtifactRecord>,
+    reference: Option<ReferenceOutput<'_>>,
     events: &[EventManifestLink],
     diagnostic: Diagnostic,
 ) -> Result<ExecutionOutcome, Diagnostic> {
@@ -295,6 +521,7 @@ fn close_failed_execution(
         effective,
         configuration_inputs,
         effective_config,
+        reference,
         events,
         artifacts: &artifacts,
         units: &units,

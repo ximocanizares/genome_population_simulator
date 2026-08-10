@@ -24,10 +24,9 @@ sus partes para satisfacer la especificación 0.1. No define archivos de código
 paquetes, algoritmos concretos ni un plan de implementación salvo las elecciones
 técnicas ya confirmadas. TOML está confirmado como formato de configuración
 de autoría, y JSON como formato de los manifiestos y de la configuración
-efectiva serializada. `noodles-fasta` está confirmado para el adaptador FASTA;
-la versión 0.66.0 es una candidata evaluada, no una versión fijada. Las versiones
-concretas de los crates se aceptarán al implementar F1 tras la evaluación
-revisable y quedarán fijadas por `Cargo.lock`.
+efectiva serializada. `noodles-fasta` 0.66.0 está confirmado y fijado para el
+adaptador FASTA tras superar la evaluación revisable de F1. Las versiones
+concretas de los crates aceptados quedan fijadas por `Cargo.lock`.
 
 La arquitectura cubre toda la versión 1 para evitar contratos incompatibles
 entre fases. Sin embargo, su materialización seguirá la secuencia F1–F9 de la
@@ -277,9 +276,11 @@ representación interna.
 
 Los FASTA simulados o derivados se escriben de forma canónica: texto sin
 comprimir, A/C/G/T/N mayúsculas, saltos LF, ancho fijo de línea y orden estable.
-El ancho exacto puede fijarse durante la implementación sin cambiar la
-semántica, pero se versiona si forma parte de una comparación de bytes. FAI y
-los demás índices solo se crean cuando los exige una operación o formato.
+La escritura canónica FASTA v1 usa exactamente 80 bases por línea. Ese ancho es
+parte de la versión porque afecta a los bytes. Una ejecución F1 normal produce
+cero índices. FAI solo se crea bajo demanda en el espacio de trabajo de la
+consulta indexada de aceptación que lo consume; ese índice no se publica como
+salida normal de la ejecución.
 
 Toda secuencia suministrada o generada usa exclusivamente `A`, `C`, `G`, `T` y
 `N`, sin distinguir mayúsculas de minúsculas durante la validación. `N` expresa
@@ -573,9 +574,12 @@ El registro de identidades valida los IDs aportados y deriva los automáticos
 con el contexto distinto `genome_population_simulator/v1/id`, el mismo contrato
 binario versionado y las causas definidas en 5.1. Conserva tipo, ámbito, causa y
 etiqueta y rechaza cualquier colisión. El catálogo normativo de F1 fija ámbitos,
-nombres, orden de campos y prefijos; sus vectores prueban ambos contextos. Ni el
-catálogo ni la codificación pueden cambiar sin nueva versión de derivación. Ruta,
-reloj, orden físico, hilo y planificación nunca participan.
+nombres, orden de campos y prefijos; sus vectores prueban ambos contextos. Su
+versión 2 añade `reference_generation`, compuesto únicamente por `reference_id`,
+sin modificar la codificación ni la versión de derivación 1 y conservando
+literalmente los vectores del catálogo 1. Un cambio de codificación exige nueva
+versión de derivación; un cambio de ámbitos exige nueva versión de catálogo.
+Ruta, reloj, orden físico, hilo y planificación nunca participan.
 
 El contrato funcional de esta frontera está en REQ-CONF-01 a REQ-CONF-123,
 REQ-FMT-01 a REQ-FMT-07,
@@ -596,10 +600,12 @@ Para una referencia suministrada, el adaptador `noodles-fasta` lee por flujo
 detrás del contrato del catálogo. El mismo recorrido crea la copia exacta,
 calcula SHA-256 y entrega al validador de dominio cabecera y secuencia; un fallo
 impide publicar la copia. El catálogo conserva los bytes crudos de cabecera y
-expone bases internas en mayúsculas. Para referencias generadas, el adaptador
-aplica la escritura canónica y crea FAI o acceso indexado únicamente cuando el
-plan lo necesita. Un FASTA comprimido se rechaza como formato no admitido, no se
-descomprime implícitamente.
+expone bases internas en mayúsculas. Para referencias generadas, el flujo
+`reference_generation` usa solo el ID estable y el escritor aplica el FASTA
+canónico v1 de 80 bases por línea. La ejecución normal conserva el catálogo de
+índices vacío. La consulta indexada de aceptación crea y consume un FAI bajo
+demanda fuera del resultado publicado. Un FASTA comprimido se rechaza como
+formato no admitido, no se descomprime implícitamente.
 
 El repositorio de verdad conserva estados faseados, genealogía, procedencia y
 capas de cambio. Creación directa, inicialización poblacional, reproducción,
@@ -965,20 +971,23 @@ comprobación independiente cuando el hito exige interoperabilidad.
 Toda incorporación o ampliación de características de una dependencia adjunta
 una evaluación revisable: propósito y requisito cubierto, corrección del
 estándar, mantenimiento, seguridad, licencia, rendimiento, estabilidad de API,
-*features* activadas, código nativo o scripts de construcción y coste de
-distribución. Se comprueba además que el contrato propio impide filtrar tipos y
-errores externos. No se incorpora una dependencia para una necesidad futura aún
-no implementada.
+*features* activadas, código nativo, scripts de construcción y coste de
+distribución. La presencia de `build.rs` no basta para rechazarla: se auditan su
+función, entradas, salidas y efectos. Sin aprobación expresa, el script no puede
+ejecutar procesos externos ni usar la red, modificar fuentes, generar o compilar
+código nativo ni realizar acciones no necesarias o no acotadas. Se comprueba
+además que el contrato propio impide filtrar tipos y errores externos. No se
+incorpora una dependencia para una necesidad futura aún no implementada.
 
-La evaluación revisable de `noodles-fasta` comprobada el 8 de agosto de 2026
-considera 0.66.0 como candidata, no como versión fijada: licencia MIT, MSRV
-1.89.0 compatible con Rust 1.97.1, edición 2024 y `build = false`. Es Rust puro,
-cubre lectura, escritura, FAI e indexación y sus dependencias directas son
-`bstr`, `memchr`, `noodles-bgzf`, `noodles-core` y `tokio` solo para async. F1
-activa únicamente características mínimas síncronas. La API upstream todavía se
-considera experimental y cambia con frecuencia; adaptador propio, lock y pruebas
-mitigan el riesgo. Antes de aceptarla se revalidan seguridad y licencias del
-grafo final y ausencia de código nativo o scripts de construcción.
+La evaluación final de `noodles-fasta` comprobada el 10 de agosto de 2026 acepta
+la versión exacta 0.66.0: licencia MIT, MSRV 1.89.0 compatible con Rust 1.97.1,
+edición 2024 y características mínimas síncronas sin `async`. Es Rust puro y
+cubre lectura, escritura, FAI e indexación. El grafo transitivo incorpora BGZF,
+Rayon y cuatro `build.rs` de Crossbeam/Rayon; estos scripts fueron auditados y
+solo emiten configuración para Cargo, sin procesos externos, red, escritura de
+fuentes ni generación o compilación de código. El coste transitivo se acepta y se
+vigila. La API upstream cambia con frecuencia; adaptador propio, versión exacta,
+lock y pruebas mitigan el riesgo.
 
 Una actualización de Rust o del grafo de dependencias se propone como cambio
 aislado. Antes de aceptarla ejecuta pruebas, validadores independientes, vectores
@@ -1080,8 +1089,8 @@ por sí solo crates. DTC-043 fija su política de admisión y DTC-048 fija Rust
 `rust-toolchain.toml`; la edición 2024 se declara en Cargo, y `Cargo.lock` se
 versiona y usa bloqueado. SHA-256 es la única suma publicada por v1 y permanece
 separada de BLAKE3. El FASTA de v1 es texto sin comprimir y su adaptador usa
-`noodles-fasta` tras un contrato propio; 0.66.0 es candidata evaluada y solo se
-fijará si supera la revisión final de F1. La plataforma nativa oficial es Ubuntu
+`noodles-fasta` 0.66.0 tras un contrato propio y una evaluación final favorable
+de su grafo y scripts de construcción. La plataforma nativa oficial es Ubuntu
 24.04 LTS con triple `x86_64-unknown-linux-gnu`; WSL2 es un entorno de desarrollo
 y las entregas se verifican en Ubuntu nativo y OCI. El `.tar.gz` publica SHA-256
 de sus bytes; la imagen OCI se identifica por sus descriptores y un archivo OCI

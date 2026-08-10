@@ -85,6 +85,13 @@ pub struct EffectiveControlledSet {
     counts: Vec<EffectiveCount>,
 }
 
+/// Origen de referencia ya resuelto respecto al fichero general admitido.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EffectiveReferenceSource {
+    Simulated,
+    Supplied { original_path: PathBuf },
+}
+
 /// Entrada de configuración ya admitida, conservada byte a byte para que la
 /// ejecución no vuelva a leer una fuente mutable después de validarla.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -187,6 +194,7 @@ pub struct EffectiveConfig {
     source_path: String,
     route: Route,
     reference_id: String,
+    reference_source: EffectiveReferenceSource,
     total_genome_size: u64,
     sequences: Vec<EffectiveSequence>,
     scenario_ids: Vec<String>,
@@ -218,6 +226,11 @@ impl EffectiveConfig {
     #[must_use]
     pub fn reference_id(&self) -> &str {
         &self.reference_id
+    }
+
+    #[must_use]
+    pub const fn reference_source(&self) -> &EffectiveReferenceSource {
+        &self.reference_source
     }
 
     #[must_use]
@@ -523,11 +536,7 @@ pub fn build_effective_config_with_entropy(
 
     let mut normalized = Vec::new();
     if let DeclaredReferenceSource::Simulated { composition, .. } = &general.reference().source {
-        normalized.push(normalize_declared(
-            "reference.composition",
-            composition,
-            general.normalization_tolerance(),
-        )?);
+        normalized.push(normalize_reference_composition(general, composition)?);
     }
     let mut controlled = Vec::new();
     for set in general.frequency_sets() {
@@ -672,6 +681,12 @@ pub fn build_effective_config_with_entropy(
         general.reference().id.value(),
         &summary.explicit_event_ids,
     )?;
+    let reference_source = match &general.reference().source {
+        DeclaredReferenceSource::Simulated { .. } => EffectiveReferenceSource::Simulated,
+        DeclaredReferenceSource::Supplied { fasta } => EffectiveReferenceSource::Supplied {
+            original_path: resolve_link(general.source().path(), fasta.value()),
+        },
+    };
 
     let mut configuration_inputs = vec![EffectiveConfigurationInput {
         kind: "general",
@@ -703,6 +718,7 @@ pub fn build_effective_config_with_entropy(
         source_path: general.source().path().display().to_string(),
         route: *general.route().value(),
         reference_id: general.reference().id.value().clone(),
+        reference_source,
         total_genome_size: summary.total_genome_size,
         sequences,
         scenario_ids,
@@ -714,6 +730,47 @@ pub fn build_effective_config_with_entropy(
         values,
         reproducibility,
     })
+}
+
+fn normalize_reference_composition(
+    general: &DeclaredGeneralConfig,
+    composition: &[crate::configuration::DeclaredFrequencyValue],
+) -> Result<NormalizedCollection, Diagnostic> {
+    let mut normalized = normalize_declared(
+        "reference.composition",
+        composition,
+        general.normalization_tolerance(),
+    )?;
+    let mut present = BTreeSet::new();
+    for value in &normalized.values {
+        if !matches!(value.id.as_str(), "A" | "C" | "G" | "T")
+            || value.category != "base"
+            || !present.insert(value.id.clone())
+        {
+            return Err(config_error(
+                general,
+                "reference.composition",
+                format!(
+                    "cada elemento debe usar una vez un ID exacto A/C/G/T y category=base; encontrado {}/{}",
+                    value.id, value.category
+                ),
+            ));
+        }
+    }
+    for id in ["A", "C", "G", "T"] {
+        if !present.contains(id) {
+            normalized.values.push(crate::numeric::NormalizedValue {
+                id: id.to_owned(),
+                category: "base".to_owned(),
+                before: 0.0,
+                after: 0.0,
+            });
+        }
+    }
+    normalized
+        .values
+        .sort_by(|first, second| (&first.id, &first.category).cmp(&(&second.id, &second.category)));
+    Ok(normalized)
 }
 
 fn validate_declared_rules(

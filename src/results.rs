@@ -12,6 +12,10 @@ use crate::diagnostics::Diagnostic;
 use crate::integrity::{ArtifactIdentity, identify_file};
 use crate::numeric::NormalizedCollection;
 use crate::randomness::EventSubseed;
+use crate::reference::{
+    AlphabetValidation, Reference, ReferenceOrigin, SequenceClass as ReferenceSequenceClass,
+};
+use crate::reference_fasta::{CANONICAL_FASTA_VERSION, CANONICAL_LINE_BASE_COUNT};
 use crate::rules::{PopulationSelector, RuleValue, SelectorSet, SpatialSelector, TemporalSelector};
 
 pub const RESULT_SCHEMA_VERSION: &str = "1";
@@ -105,12 +109,19 @@ pub struct UnitRecord {
     pub diagnostic_code: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+pub struct ReferenceOutput<'a> {
+    pub reference: &'a Reference,
+    pub fasta: &'a ArtifactRecord,
+}
+
 pub struct GeneralManifest<'a> {
     pub execution_id: &'a str,
     pub state: UnitState,
     pub effective: &'a EffectiveConfig,
     pub configuration_inputs: &'a [ConfigurationInputRecord],
     pub effective_config: Option<&'a ArtifactRecord>,
+    pub reference: Option<ReferenceOutput<'a>>,
     pub events: &'a [EventManifestLink],
     pub artifacts: &'a [ArtifactRecord],
     pub units: &'a [UnitRecord],
@@ -121,13 +132,13 @@ pub struct EventManifest<'a> {
     pub event_id: &'a str,
     pub state: UnitState,
     pub subseed: &'a str,
+    pub reference: ReferenceOutput<'a>,
     pub artifacts: &'a [ArtifactRecord],
     pub units: &'a [UnitRecord],
     pub diagnostics: &'a [Diagnostic],
 }
 
-#[must_use]
-pub fn effective_config_document(config: &EffectiveConfig) -> Value {
+fn effective_config_base(config: &EffectiveConfig) -> Value {
     let sequences = config
         .sequences()
         .iter()
@@ -190,11 +201,22 @@ pub fn effective_config_document(config: &EffectiveConfig) -> Value {
     })
 }
 
+pub fn effective_config_document_with_reference(
+    config: &EffectiveConfig,
+    output: ReferenceOutput<'_>,
+) -> Result<Value, Diagnostic> {
+    validate_reference_output(output)?;
+    let mut document = effective_config_base(config);
+    document["reference"] = reference_json(config, output);
+    Ok(document)
+}
+
 #[must_use]
 pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
     let dependencies = [
         ("blake3", "1.8.6"),
         ("getrandom", "0.4.3"),
+        ("noodles-fasta", "0.66.0"),
         ("rand_chacha", "0.10.0"),
         ("rustix", "1.1.4"),
         ("serde_json", "1.0.149"),
@@ -247,13 +269,14 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
         ],
         "configuration_inputs": configuration_inputs,
         "effective_config": manifest.effective_config.map(ArtifactRecord::to_json),
+        "references": manifest.reference.map(|reference| reference_json(manifest.effective, reference)).into_iter().collect::<Vec<_>>(),
         "events": events,
         "artifacts": manifest.artifacts.iter().map(ArtifactRecord::to_json).collect::<Vec<_>>(),
         "outputs": {
-            "minimum": ["configuration_copies", "effective_config", "manifest_general"],
+            "minimum": ["configuration_copies", "effective_config", "reference_fasta", "manifest_general"],
             "default_enabled": [],
             "explicitly_requested": [],
-            "disabled": ["reference", "truth", "vcf", "fastq", "bam", "cram"]
+            "disabled": ["truth", "vcf", "fastq", "bam", "cram"]
         },
         "normalizations": manifest.effective.normalized_collections().iter().map(normalization_json).collect::<Vec<_>>(),
         "reproducibility": reproducibility_levels(),
@@ -270,6 +293,7 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Value {
         "event_id": manifest.event_id,
         "state": manifest.state.as_str(),
         "subseed": manifest.subseed,
+        "references": [reference_link_json(manifest.reference)],
         "artifacts": manifest.artifacts.iter().map(ArtifactRecord::to_json).collect::<Vec<_>>(),
         "outputs": {
             "minimum": ["manifest_event"],
@@ -372,11 +396,124 @@ fn normalization_json(normalization: &NormalizedCollection) -> Value {
 
 fn reproducibility_levels() -> Vec<Value> {
     vec![
-        json!({"level": "biological", "status": "not_applicable", "conditions": []}),
+        json!({"level": "biological", "status": "guaranteed", "conditions": ["simulator_version", "platform", "root_seed", "effective_configuration", "input_contents", "profiles", "random_algorithm", "subseed_catalog_v2", "reference_fasta_sha256"]}),
         json!({"level": "technical", "status": "not_applicable", "conditions": []}),
         json!({"level": "semantic", "status": "not_guaranteed", "conditions": ["comparison_required"]}),
         json!({"level": "binary", "status": "not_guaranteed", "conditions": ["format_specific_evidence_required"]}),
     ]
+}
+
+fn reference_json(config: &EffectiveConfig, output: ReferenceOutput<'_>) -> Value {
+    let origin = match output.reference.origin() {
+        ReferenceOrigin::Generated => json!({"kind": "generated"}),
+        ReferenceOrigin::Supplied { original_path } => json!({
+            "kind": "supplied",
+            "original_path": original_path.to_string_lossy(),
+        }),
+    };
+    let canonical_format =
+        matches!(output.reference.origin(), ReferenceOrigin::Generated).then(|| {
+            json!({
+                "version": CANONICAL_FASTA_VERSION,
+                "line_base_count": CANONICAL_LINE_BASE_COUNT,
+                "line_ending": "LF",
+                "base_case": "uppercase",
+            })
+        });
+    let sequences = output
+        .reference
+        .sequences()
+        .iter()
+        .map(|sequence| {
+            let ploidy = config
+                .sequences()
+                .iter()
+                .find(|declared| declared.id() == sequence.id().as_str())
+                .map_or(1, |declared| declared.ploidy());
+            let header = reversible_bytes_json(sequence.header().raw_bytes());
+            let description = sequence.header().description().map(|text| {
+                json!({
+                    "encoding": text.encoding(),
+                    "value": text.encoded(),
+                })
+            });
+            json!({
+                "id": sequence.id().as_str(),
+                "class": match sequence.class() {
+                    ReferenceSequenceClass::Chromosome => "chromosome",
+                    ReferenceSequenceClass::Scaffold => "scaffold",
+                },
+                "length": sequence.length(),
+                "ploidy": ploidy,
+                "header": header,
+                "description": description,
+                "alphabet_validation": match sequence.alphabet_validation() {
+                    AlphabetValidation::AcgtnCaseInsensitive => "ACGTN-case-insensitive",
+                },
+                "unknown_base_count": sequence.unknown_base_count(),
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "id": output.reference.id().as_str(),
+        "total_genome_size": output.reference.total_length(),
+        "origin": origin,
+        "authoritative_resource": output.reference.authoritative_resource().map(|path| path.to_string_lossy()),
+        "fasta": output.fasta.to_json(),
+        "canonical_format": canonical_format,
+        "indexes": [],
+        "sequences": sequences,
+    })
+}
+
+fn validate_reference_output(output: ReferenceOutput<'_>) -> Result<(), Diagnostic> {
+    let authoritative = output.reference.authoritative_resource().ok_or_else(|| {
+        Diagnostic::internal(
+            "GPS-INTERNAL-001",
+            "Una invariante interna considerada imposible se ha roto.",
+        )
+        .with("component", "results_json")
+        .with("operation", "effective_config_document_with_reference")
+        .with("detail", "reference has no authoritative resource")
+    })?;
+    if authoritative != Path::new(&output.fasta.path) {
+        return Err(Diagnostic::internal(
+            "GPS-INTERNAL-001",
+            "Una invariante interna considerada imposible se ha roto.",
+        )
+        .with("component", "results_json")
+        .with("operation", "effective_config_document_with_reference")
+        .with(
+            "detail",
+            "reference authoritative resource differs from FASTA artifact",
+        ));
+    }
+    Ok(())
+}
+
+fn reference_link_json(output: ReferenceOutput<'_>) -> Value {
+    json!({
+        "id": output.reference.id().as_str(),
+        "fasta": output.fasta.to_json(),
+        "indexes": [],
+    })
+}
+
+fn reversible_bytes_json(bytes: &[u8]) -> Value {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => json!({"encoding": "utf-8", "value": text}),
+        Err(_) => json!({"encoding": "bytes-hex", "value": encode_hex(bytes)}),
+    }
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    output
 }
 
 fn unit_json(unit: &UnitRecord) -> Value {

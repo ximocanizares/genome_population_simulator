@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::diagnostics::Diagnostic;
+pub use crate::reference::SequenceClass;
 use crate::rules::Rule;
 
 /// Clase de un documento TOML propio.
@@ -187,12 +188,6 @@ impl Route {
             Self::Families => "families",
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SequenceClass {
-    Chromosome,
-    Scaffold,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -4,7 +4,8 @@ use std::process::{Command, Stdio};
 
 const DIAGNOSTIC_CATALOG: &str = include_str!("../catalogs/diagnostics-v1.tsv");
 const DIAGNOSTIC_SCHEMA: &str = include_str!("../schemas/diagnostics-v1.schema.json");
-const SUBSEED_CATALOG: &str = include_str!("../catalogs/subseed-scopes-v1.tsv");
+const SUBSEED_CATALOG_V1: &str = include_str!("../catalogs/subseed-scopes-v1.tsv");
+const SUBSEED_CATALOG: &str = include_str!("../catalogs/subseed-scopes-v2.tsv");
 const ID_CATALOG: &str = include_str!("../catalogs/id-classes-v1.tsv");
 const PARAMETER_CATALOG: &str = include_str!("../catalogs/parameter-families-v1.tsv");
 const SUBSEED_CONTEXT: &str = "genome_population_simulator/v1/subseed";
@@ -13,7 +14,7 @@ const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
 // These fingerprints are the review lock for the published v1 contracts. A
 // deliberate content change must use a new versioned artifact and add a new
 // fingerprint instead of replacing a v1 value here.
-const V1_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 5] = [
+const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 6] = [
     (
         "catalogs/diagnostics-v1.tsv",
         DIAGNOSTIC_CATALOG,
@@ -26,8 +27,13 @@ const V1_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 5] = [
     ),
     (
         "catalogs/subseed-scopes-v1.tsv",
-        SUBSEED_CATALOG,
+        SUBSEED_CATALOG_V1,
         "b6c56848b1ae48d5646dcdc515709259ea65fc5c8b6a407bf403e4da8477675d",
+    ),
+    (
+        "catalogs/subseed-scopes-v2.tsv",
+        SUBSEED_CATALOG,
+        "c40f812d1645bb11a2e2641cc76a5b6db583f0505e246cb41a24bc0aa554ceff",
     ),
     (
         "catalogs/id-classes-v1.tsv",
@@ -74,13 +80,16 @@ fn sha256sum(input: &str) -> String {
 #[test]
 fn published_v1_contracts_match_their_reviewed_content() {
     assert!(DIAGNOSTIC_CATALOG.starts_with("# diagnostic_catalog_version=1\n"));
-    assert!(SUBSEED_CATALOG.starts_with(&format!(
+    assert!(SUBSEED_CATALOG_V1.starts_with(&format!(
         "# derivation_version=1\n# context={SUBSEED_CONTEXT}\n"
+    )));
+    assert!(SUBSEED_CATALOG.starts_with(&format!(
+        "# derivation_version=1\n# catalog_version=2\n# context={SUBSEED_CONTEXT}\n"
     )));
     assert!(ID_CATALOG.starts_with(&format!("# derivation_version=1\n# context={ID_CONTEXT}\n")));
     assert!(PARAMETER_CATALOG.starts_with("# parameter_catalog_version=1\n"));
 
-    for (path, content, expected) in V1_CONTRACT_FINGERPRINTS {
+    for (path, content, expected) in REVIEWED_CONTRACT_FINGERPRINTS {
         assert_eq!(
             sha256sum(content),
             expected,
@@ -444,7 +453,7 @@ fn subseed_vectors_publish_exact_canonical_material() {
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .collect();
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 5);
     let mut scopes = BTreeSet::new();
     for row in rows {
         let fields: Vec<_> = row.split('|').collect();
@@ -462,6 +471,7 @@ fn subseed_vectors_publish_exact_canonical_material() {
         BTreeSet::from([
             "biological_process",
             "initial_population",
+            "reference_generation",
             "sampling",
             "technical_event"
         ])

@@ -25,7 +25,12 @@ struct ParsedArgs {
 }
 
 fn main() -> ExitCode {
-    let parsed = match parse_args(std::env::args().skip(1)) {
+    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    if arguments.as_slice() == ["--version"] {
+        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
+    let parsed = match parse_args(arguments.into_iter()) {
         Ok(parsed) => parsed,
         Err(message) => {
             eprintln!("{message}");

@@ -76,9 +76,8 @@ marcado como completo.
   reproducibilidad entre versiones, reanudación, ejecución distribuida,
   auditoría externa en runtime, calibración empírica y niveles configurables de
   trazabilidad.
-- Elección de crates por conveniencia. Solo se incorporará cada dependencia tras
-  su puerta de evaluación; `noodles-fasta` 0.66.0 sigue siendo candidata hasta
-  superar la puerta E1.
+- Elección de crates por conveniencia. Solo se incorpora cada dependencia tras
+  su puerta de evaluación; `noodles-fasta` 0.66.0 superó la puerta E1.
 
 ## 3. Criterios de orden
 
@@ -519,55 +518,86 @@ efectivo o la evidencia completa de REQ-MAN-81 conforme a DTC-049.
 simulada o suministrada con identidad verificable, sin reescritura silenciosa
 del original y sin dependencia de validadores externos en runtime.
 
-- ☐ E1. Revalidar y decidir la aceptación final de la candidata `noodles-fasta` 0.66.0 antes de incorporarla.
+- ✅ E1. Revalidar y decidir la aceptación final de la candidata `noodles-fasta` 0.66.0 antes de incorporarla.
   - Depende de: A2, A7 y DTC-041/DTC-043/DTC-048.
-  - Procede de: DTC-041, que la mantiene como candidata no fijada.
-  - Cambia: informe actualizado de seguridad, licencias y mantenimiento del grafo final, ausencia de código nativo y scripts de construcción, características mínimas síncronas y coste; solo si se acepta cambia `Cargo.toml`/`Cargo.lock`.
-  - Se comprueba con: `cargo tree --locked -e features` y revisión que confirme que no se activa async ni características innecesarias; si falla la puerta, se detienen E3–E8 y se eleva una nueva decisión, sin sustituirla silenciosamente; el contrato de dominio E2 puede prepararse de forma independiente.
+  - Procede de: DTC-041, que exigía evaluarla antes de fijarla.
+  - Cambia: informe actualizado de seguridad, licencias y mantenimiento del grafo final, ausencia de código nativo no aprobado, auditoría de scripts de construcción, características mínimas síncronas y coste; solo si se acepta cambia `Cargo.toml`/`Cargo.lock`.
+  - Se comprueba con: `cargo tree --locked -e features` y revisión que confirme que no se activa `async`, que cada `build.rs` tiene efectos acotados y que no ejecuta procesos, usa la red, modifica fuentes ni genera o compila código nativo no aprobado; si falla la puerta, se detienen E3–E8 y se eleva una nueva decisión, sin sustituirla silenciosamente.
 
-- ☐ E2. Implementar el contrato de dominio de referencia y secuencia independiente del adaptador FASTA.
+  **Evidencia ejecutada (10 de agosto de 2026):** la política se corrigió para
+  evaluar efectos en vez de prohibir cualquier `build.rs`. La candidata compila
+  sin `async` ni código nativo. Los cuatro scripts transitivos de Crossbeam y
+  Rayon solo emiten configuración para Cargo: no ejecutan procesos, usan red,
+  escriben fuentes ni generan o compilan código. Se acepta y fija la versión
+  exacta; el coste transitivo de BGZF, compresión y paralelismo queda registrado
+  y vigilado en `evaluaciones-dependencias-f1.md`. E3–E8 quedan desbloqueados.
+
+- ✅ E2. Implementar el contrato de dominio de referencia y secuencia independiente del adaptador FASTA.
   - Depende de: D2–D4; no depende de la candidata FASTA ni de otro adaptador externo.
   - Procede de: DTC-039 a DTC-041; REQ-REF-02/03/04/05/07/22/23 y REQ-MAN-86.
   - Cambia: tipo de secuencia DNA validada y reutilizable por futuros adaptadores, `ReferenceId`, secuencias ordenadas, ID de primer token, cabecera cruda, descripción reversible, clase cromosoma/`scaffold`, longitud, origen y catálogo de índices.
   - Se comprueba con: `cargo test --locked` sobre A/C/G/T/N en ambas cajas, símbolo inválido con posición, conservación exacta de `N`, una/dos secuencias, IDs repetidos, orden, descripción UTF-8/no UTF-8 y clasificación obligatoria, sin usar el lector FASTA como único oráculo.
 
-- ☐ E3. Implementar validación por flujo del FASTA suministrado sin modificarlo.
+  **Evidencia ejecutada (10 de agosto de 2026):** ocho pruebas de dominio y
+  Clippy sin avisos cubren alfabeto, `N`, posición base 1, cabecera cruda,
+  descripción reversible incluido su espacio de frontera, conservación de las
+  bases normalizadas, orden, clase, origen, duplicados e índice FAI bajo demanda.
+  El contrato no importa ni expone tipos de `noodles-fasta`.
+
+- ✅ E3. Implementar validación por flujo del FASTA suministrado sin modificarlo.
   - Depende de: E1–E2, D4 y A4.
   - Procede de: DTC-041; REQ-REF-12/13/15/16/23 y REQ-VAL-45.
   - Cambia: adaptador que exige texto sin comprimir, al menos una secuencia no vacía, ID no vacío/único y alfabeto A/C/G/T/N en cualquier caja; conserva `N`, caja en la copia y cabecera cruda.
   - Se comprueba con: fixtures válido, vacío, secuencia vacía, ID vacío/repetido, descripción, CRLF, descripción no UTF-8, gzip, gap, otros IUPAC y símbolo inválido con fuente/posición; cada inválido se rechaza antes de publicación.
 
-- ☐ E4. Copiar el FASTA suministrado byte a byte al provisional mientras calcula y verifica SHA-256.
+- ✅ E4. Copiar el FASTA suministrado byte a byte al provisional mientras calcula y verifica SHA-256.
   - Depende de: D4, D8–D10 y E3.
   - Procede de: DTC-040, DTC-041 y DTC-045; REQ-REF-17/18 y REQ-SAL-03.
   - Cambia: flujo de copia que deja intacto el origen, verifica tamaño/digest, cataloga la copia cerrada y hace que la ejecución use esa copia.
   - Se comprueba con: `cmp` entre origen y copia y `sha256sum` sobre ambos; truncado o cambio de un byte impide catalogar y publicar completo.
 
-- ☐ E5. Implementar generación de referencia mínima según composición, longitudes y semilla efectivas.
+  **Corrección verificada H-F15-R02:** tras catalogar la copia, la ejecución
+  vuelve a leerla para construir la representación consumida por configuración
+  efectiva y manifiestos. La ruta original permanece únicamente como
+  procedencia; una regresión muta el original antes de esa carga y demuestra
+  que cabecera y bases proceden de la copia.
+
+- ✅ E5. Implementar generación de referencia mínima según composición, longitudes y semilla efectivas.
   - Depende de: B9, B10, C5, E2 y catálogo A5; la composición general consume los valores ya validados y normalizados por B10.
   - Procede de: REQ-CONF-04/05, REQ-REF-01/02/03/04/22/23 y DTC-037/DTC-041/DTC-049.
   - Cambia: generador que crea únicamente A/C/G/T en secuencias nuevas, usa un flujo nombrado, respeta número/orden/clase/longitudes/composición efectiva y no introduce `N` al azar.
   - Se comprueba con: casos literales de longitud total y composición degenerada, más repetición con misma semilla y cambio controlado de semilla; la secuencia esperada pequeña se deriva con un oráculo de prueba independiente del generador.
 
-- ☐ E6. Escribir FASTA generado de forma canónica y versionar toda elección que afecte a sus bytes.
+  **Adaptación aprobada:** el catálogo de ámbitos v2 añade
+  `reference_generation(reference_id)` sin alterar la derivación v1 ni los
+  vectores del catálogo v1. Los vectores v2 prueban aislamiento y repetición.
+
+- ✅ E6. Escribir FASTA generado de forma canónica y versionar toda elección que afecte a sus bytes.
   - Depende de: E1–E2 y E5.
   - Procede de: DTC-041; REQ-REF-03/04 y REQ-SAL-01.
   - Cambia: primero registra y aprueba el ancho exacto como parte de la versión canónica y después implementa el escritor por flujo con A/C/G/T/N mayúsculas, LF, ese ancho fijo y orden estable.
   - Se comprueba con: fixture literal de FASTA pequeño, validación interna, conteo de líneas/bases y repetición; la equivalencia semántica se comprueba separada de los bytes.
 
-- ☐ E7. Crear índices únicamente cuando una operación F1 los necesite.
+  **Elección aprobada:** FASTA canónico v1 usa 80 bases por línea, LF,
+  mayúsculas y orden de catálogo; la prueba literal cubre la frontera 80/81.
+
+- ✅ E7. Crear índices únicamente cuando una operación F1 los necesite.
   - Depende de: E1, E3 o E6.
   - Procede de: DTC-041; REQ-REF-05/06.
   - Cambia: contrato de índice bajo demanda y catálogo cero/uno/varios; F1 no genera índices anticipados sin consumidor.
   - Se comprueba con: caso sin operación indexada que conserva cero índices y caso que exige FAI; `samtools faidx` valida el FASTA y consulta secuencias conocidas en pruebas/CI, nunca durante una ejecución normal.
 
-- ☐ E8. Integrar origen, cabeceras, secuencias, índice, tamaño y digest en configuración efectiva y manifiesto.
+  **Frontera aprobada:** toda ejecución normal F1 conserva cero índices. La
+  consulta indexada de aceptación crea el FAI bajo demanda fuera del resultado
+  publicado y demuestra el consumidor con un oráculo `samtools` independiente.
+
+- ✅ E8. Integrar origen, cabeceras, secuencias, índice, tamaño y digest en configuración efectiva y manifiesto.
   - Depende de: D5–D8 y E2–E7.
   - Procede de: REQ-REF-07/22, REQ-MAN-06/86 y REQ-SAL-01.
   - Cambia: representación estructurada que distingue simulada/suministrada, enlaza el FASTA único y sus índices y conserva ID, descripción, cabecera reversible, longitud y clase por secuencia.
   - Se comprueba con: JSON Schema independiente, `sha256sum`, enlaces resolubles y comparación contra el FASTA leído por un oráculo distinto.
 
-- ☐ E9. Ejecutar los recorridos extremo a extremo suministrado y simulado, válidos e inválidos.
+- ✅ E9. Ejecutar los recorridos extremo a extremo suministrado y simulado, válidos e inválidos.
   - Depende de: B12, C8, D13 y E2–E8.
   - Procede de: resultado y evidencia de cierre de F1; REQ-REF-23 y ACE-01/02/03/04/05/23/64/110.
   - Cambia: `TEST-REQ-REF-23`, fixtures y pruebas CLI que producen configuración original, efectiva, semilla, referencia, manifiestos, estados y diagnósticos.
@@ -579,13 +609,22 @@ del original y sin dependencia de validadores externos en runtime.
   - Cambia: escenario A con configuración y semilla fijas y captura de tiempo total/etapas, CPU fiable, RSS máximo, bytes de entrada/temporales/salida, MB/s, ficheros y contexto.
   - Se comprueba con: ejecución repetida de la orden versionada del banco en WSL2/ext4; corrección, integridad y trazabilidad son obligatorias, pero una variación temporal pequeña no provoca fallo.
 
+  **Medición ejecutada, paso reabierto:** la corrección H-F15-R04 distingue el
+  preflight del recorrido completo y el residuo temporal medido, pero el pico de
+  bytes temporales sigue sin instrumentación directa y se declara
+  `not_measured`. E10 no se aprueba hasta medir ese pico sin inferirlo.
+
 - ☐ E11. Ejecutar la serie B y programar la observación C sin inventar umbrales.
   - Depende de: E10.
   - Procede de: DTC-046.
   - Cambia: referencias deterministas de 1, 10 y 100 Mb para B y caso de 1 Gb manual/programado para C, con mismas métricas y contexto; conserva resultados como línea base observada.
   - Se comprueba con: informe que muestre crecimiento y número de repeticiones en construcción optimizada portable; C no forma parte de cada cambio y ningún tamaño se presenta como promesa de producto.
 
-- ☐ E12. Contrastar la base de distribución F1 mediante `.tar.gz` e imagen OCI sin adelantar la publicación F9.
+  **Serie ejecutada, cierre dependiente:** B se repitió tres veces por tamaño y
+  C quedó programado, pero E11 conserva abierto su cierre mientras E10 no mida
+  el pico temporal exigido.
+
+- ✅ E12. Contrastar la base de distribución F1 mediante `.tar.gz` e imagen OCI sin adelantar la publicación F9.
   - Depende de: A7, E9 y DTC-042.
   - Procede de: DTC-042 y DTC-047.
   - Cambia: prueba de empaquetado mínimo versionado y receta OCI fijada por digest que incluyen ejecutable, esquemas, licencias y ejemplos; no declara una entrega v1.
@@ -596,6 +635,12 @@ del original y sin dependencia de validadores externos en runtime.
   - Procede de: los 27 REQ asignados a F1.5 tras las auditorías F1.3/F1.4, ACE-01 a ACE-05/23/64/110 y reglas de avance de la hoja de ruta.
   - Cambia: casos `TEST-REQ-*`, matriz final con comandos/salidas/digests y acta de revisión; no modifica requisitos ni marca pruebas no ejecutadas como superadas.
   - Se comprueba con: batería Cargo bloqueada por warnings, validadores independientes de F1, escenarios A/B/C según frecuencia y revisión de cero hallazgos bloqueantes o graves sin destino aprobado.
+
+  **Auditoría ejecutada, cierre no aprobado (10 de agosto de 2026):** las 27
+  filas se reauditaron y las puertas completas pasan, pero solo 25 tienen
+  consumidor completo. REQ-REF-05 demuestra cero y un FAI, no «varios» con un
+  segundo consumidor real; REQ-EVO-63 conserva resultados reales pendientes en
+  F5.6. E13 permanece abierto y F1 no se declara cerrado.
 
 ### Pausa obligatoria de revisión de F1.5 y cierre de F1
 
@@ -670,6 +715,6 @@ Antes de aprobar este documento se ejecutan las comprobaciones disponibles de
   31 casos a F2–F9 desde F1.2/F1.3/F1.4 están reproducidas en pasos,
   trazabilidad y matriz;
 - DTC-034 a DTC-049 están cubiertas sin convertir candidatas o DTPD en hechos;
-- `noodles-fasta` 0.66.0 no se incorpora antes de E1;
+- `noodles-fasta` 0.66.0 solo se incorpora tras superar E1;
 - los catálogos A4–A6 preceden a sus consumidores;
 - los comandos Cargo se declaran futuros y no ejecutados.

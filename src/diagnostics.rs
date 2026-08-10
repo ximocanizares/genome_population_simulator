@@ -45,6 +45,16 @@ impl Diagnostic {
         }
     }
 
+    pub(crate) fn format(code: &'static str, message: &'static str) -> Self {
+        Self {
+            code,
+            category: "FMT",
+            message,
+            exit_code: 2,
+            context: BTreeMap::new(),
+        }
+    }
+
     pub(crate) fn resource(code: &'static str, message: &'static str) -> Self {
         Self {
             code,

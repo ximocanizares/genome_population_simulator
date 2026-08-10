@@ -7,9 +7,10 @@ kind = "simulated"
 id = "ref"
 default_ploidy = 2
 composition = [
-  { id = "large", category = "base", value = 1.0 },
-  { id = "small-b", category = "base", value = 1e-16 },
-  { id = "small-a", category = "base", value = 1e-16 },
+  { id = "A", category = "base", value = 1.0 },
+  { id = "C", category = "base", value = 1e-16 },
+  { id = "G", category = "base", value = 1e-16 },
+  { id = "T", category = "base", value = 0.0 },
 ]
 
 [[reference.sequences]]

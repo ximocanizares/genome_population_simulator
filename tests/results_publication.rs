@@ -9,13 +9,19 @@ use std::time::{Duration, Instant};
 
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::{
-    ExecutionFault, ExecutionOutcome, execute_validated_config_with,
+    ExecutionFault, ExecutionOutcome, execute_validated_config, execute_validated_config_with,
 };
 use genome_population_simulator::publication::{
     ArtifactLifecycle, ArtifactStage, AtomicPublisher, ExecutionWorkspace, LinuxAtomicPublisher,
     PublishableUnit, UnsupportedAtomicPublisher,
 };
-use genome_population_simulator::results::{UnitState, effective_config_document};
+use genome_population_simulator::reference::SequenceClass as ReferenceSequenceClass;
+use genome_population_simulator::reference_generation::{
+    BaseFrequency, GeneratedSequenceSpec, generate_reference,
+};
+use genome_population_simulator::results::{
+    ArtifactRecord, ReferenceOutput, UnitState, effective_config_document_with_reference,
+};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_genome-population-simulator");
 static NONCE: AtomicU64 = AtomicU64::new(0);
@@ -331,16 +337,30 @@ fn effective_json_is_semantically_stable_under_toml_reordering() {
         1,
     );
     fs::write(&path, first).expect("first config");
-    let first = effective_config_document(&load_and_validate_config(&path).expect("first"));
+    let first_config = load_and_validate_config(&path).expect("first");
+    let first_destination = temporary("first-effective");
+    execute_validated_config(&first_config, &first_destination).expect("first execution");
+    let first: serde_json::Value = serde_json::from_slice(
+        &fs::read(first_destination.join("effective-config.json")).expect("first effective"),
+    )
+    .expect("first JSON");
     let second = include_str!("fixtures/config/general-minimal-reordered.toml").replacen(
         "route = \"direct\"",
         &seed_line,
         1,
     );
     fs::write(&path, second).expect("second config");
-    let second = effective_config_document(&load_and_validate_config(&path).expect("second"));
+    let second_config = load_and_validate_config(&path).expect("second");
+    let second_destination = temporary("second-effective");
+    execute_validated_config(&second_config, &second_destination).expect("second execution");
+    let second: serde_json::Value = serde_json::from_slice(
+        &fs::read(second_destination.join("effective-config.json")).expect("second effective"),
+    )
+    .expect("second JSON");
     assert_eq!(first, second);
     fs::remove_file(path).expect("cleanup");
+    fs::remove_dir_all(first_destination).expect("first cleanup");
+    fs::remove_dir_all(second_destination).expect("second cleanup");
 }
 
 #[test]
@@ -408,11 +428,18 @@ fn manifest_preserves_every_dtc049_value_and_exact_f64_roundtrip() {
 
 #[test]
 fn schemas_reject_truncation_unknown_fields_and_wrong_class_or_version() {
-    let effective = effective_config_document(
-        &load_and_validate_config(&fixture("general-seeded.toml")).expect("effective"),
-    );
     let root = temporary("schema-negative");
     fs::create_dir_all(&root).expect("root");
+    let execution = root.join("execution");
+    execute_validated_config(
+        &load_and_validate_config(&fixture("general-seeded.toml")).expect("effective"),
+        &execution,
+    )
+    .expect("execution");
+    let effective: serde_json::Value = serde_json::from_slice(
+        &fs::read(execution.join("effective-config.json")).expect("effective output"),
+    )
+    .expect("effective JSON");
     let valid = root.join("valid.json");
     fs::write(
         &valid,
@@ -444,6 +471,88 @@ fn schemas_reject_truncation_unknown_fields_and_wrong_class_or_version() {
         .expect("corrupt");
         validate_json(&path, "effective-config-v1.schema.json", false);
     }
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn public_effective_document_builder_is_schema_valid_before_one_nested_mutation() {
+    let config = load_and_validate_config(&fixture("general-seeded.toml")).expect("effective");
+    let specs = config
+        .sequences()
+        .iter()
+        .map(|sequence| GeneratedSequenceSpec {
+            id: sequence.id(),
+            class: match sequence.class() {
+                genome_population_simulator::configuration::SequenceClass::Chromosome => {
+                    ReferenceSequenceClass::Chromosome
+                }
+                genome_population_simulator::configuration::SequenceClass::Scaffold => {
+                    ReferenceSequenceClass::Scaffold
+                }
+            },
+            length: sequence.length(),
+        })
+        .collect::<Vec<_>>();
+    let composition = config.normalized_collections()[0]
+        .values
+        .iter()
+        .map(|value| BaseFrequency {
+            base: match value.id.as_str() {
+                "A" => b'A',
+                "C" => b'C',
+                "G" => b'G',
+                "T" => b'T',
+                other => panic!("unexpected admitted base ID {other}"),
+            },
+            probability: value.after,
+        })
+        .collect::<Vec<_>>();
+    let mut reference = generate_reference(
+        config.reference_id(),
+        config.reproducibility().root_seed(),
+        &specs,
+        &composition,
+    )
+    .expect("reference");
+    reference
+        .bind_authoritative_resource(PathBuf::from("resources/references/ref-main.fa"))
+        .expect("resource");
+    let artifact = ArtifactRecord {
+        id: "reference-fasta".to_owned(),
+        kind: "reference_fasta".to_owned(),
+        path: "resources/references/ref-main.fa".to_owned(),
+        size_bytes: 1019,
+        digest: "0".repeat(64),
+        state: UnitState::Complete,
+        validated: true,
+    };
+    let valid = effective_config_document_with_reference(
+        &config,
+        ReferenceOutput {
+            reference: &reference,
+            fasta: &artifact,
+        },
+    )
+    .expect("public builder contract");
+    let root = temporary("public-effective-builder");
+    fs::create_dir(&root).expect("root");
+    let valid_path = root.join("valid.json");
+    fs::write(
+        &valid_path,
+        serde_json::to_vec_pretty(&valid).expect("serialize"),
+    )
+    .expect("valid document");
+    validate_json(&valid_path, "effective-config-v1.schema.json", true);
+
+    let mut invalid = valid;
+    invalid["reference"]["sequences"][0]["unexpected"] = serde_json::json!(true);
+    let invalid_path = root.join("invalid.json");
+    fs::write(
+        &invalid_path,
+        serde_json::to_vec_pretty(&invalid).expect("serialize invalid"),
+    )
+    .expect("invalid document");
+    validate_json(&invalid_path, "effective-config-v1.schema.json", false);
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -538,9 +647,16 @@ fn schemas_reject_unknown_fields_in_every_nested_f1_4_contract() {
         "manifest-event-v1.schema.json",
     );
 
-    let rich_effective = effective_config_document(
+    let rich_destination = root.join("rich-effective-result");
+    execute_validated_config(
         &load_and_validate_config(&fixture("general-effective.toml")).expect("rich effective"),
-    );
+        &rich_destination,
+    )
+    .expect("rich execution");
+    let rich_effective: serde_json::Value = serde_json::from_slice(
+        &fs::read(rich_destination.join("effective-config.json")).expect("rich output"),
+    )
+    .expect("rich JSON");
     for (name, pointer) in [
         ("effective-reference", "/reference"),
         ("effective-randomness", "/randomness"),
@@ -1172,6 +1288,7 @@ fn reject_nested_unknown(
     pointer: &str,
     schema: &str,
 ) {
+    write_base_and_accept(root, name, &document, schema);
     document
         .pointer_mut(pointer)
         .unwrap_or_else(|| panic!("missing JSON pointer {pointer}"))
@@ -1198,6 +1315,7 @@ fn reject_missing_nested_required(
     field: &str,
     schema: &str,
 ) {
+    write_base_and_accept(root, name, &document, schema);
     document
         .pointer_mut(pointer)
         .unwrap_or_else(|| panic!("missing JSON pointer {pointer}"))
@@ -1216,10 +1334,21 @@ fn reject_nested_value(
     value: serde_json::Value,
     schema: &str,
 ) {
+    write_base_and_accept(root, name, &document, schema);
     *document
         .pointer_mut(pointer)
         .unwrap_or_else(|| panic!("missing JSON pointer {pointer}")) = value;
     write_corrupt_and_reject(root, name, &document, schema);
+}
+
+fn write_base_and_accept(root: &Path, name: &str, document: &serde_json::Value, schema: &str) {
+    let path = root.join(format!("{name}-base-valid.json"));
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(document).expect("serialize valid base"),
+    )
+    .expect("write valid base");
+    validate_json(&path, schema, true);
 }
 
 fn write_corrupt_and_reject(root: &Path, name: &str, document: &serde_json::Value, schema: &str) {

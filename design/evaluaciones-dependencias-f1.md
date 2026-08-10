@@ -212,3 +212,57 @@ del valor original. Se añadió `float_roundtrip`, se conservó el mismo contrat
 público y la repetición exige igualdad de `to_bits()` para tolerancia, sumas,
 deltas y todos los valores antes/después. La selección sin esta característica
 queda rechazada por evidencia ejecutada.
+
+## E1 — reevaluación de `noodles-fasta` 0.66.0
+
+**Decisión (10 de agosto de 2026): aceptada por la puerta de F1.5 tras corregir
+la política de construcción.** La versión exacta se incorpora sin características
+predeterminadas en la dependencia directa y sin `async`. La compilación con
+Rust 1.97.1 termina correctamente. La nueva regla no prohíbe todo `build.rs`,
+sino que exige auditar sus efectos y rechaza los que introduzcan acciones no
+necesarias, no acotadas o no aprobadas.
+
+- **Propósito y contrato:** la candidata cubriría el adaptador síncrono de
+  lectura/escritura FASTA y FAI de DTC-041 tras tipos propios. No tendría
+  autoridad sobre alfabeto, cabeceras, identidad, diagnósticos ni conservación
+  byte a byte.
+- **Versión, mantenimiento y API:** `noodles-fasta 0.66.0`, publicada el 3 de
+  agosto de 2026, declara edición 2024, Rust 1.89.0, licencia MIT y
+  `build = false`. La serie publicó 0.63–0.66 entre julio y agosto de 2026 y su
+  historial confirma cambios frecuentes de API, mitigables mediante adaptador
+  propio, pero no relevantes para el bloqueo observado.
+- **Características:** la raíz se declaró como
+  `default-features = false`; `cargo tree --locked -e features` confirmó que
+  `tokio` y la característica `async` no se activaron. La dependencia directa
+  de `noodles-fasta` sobre `noodles-bgzf 0.51.0`, sin desactivar sus
+  características predeterminadas, incorporó sin embargo `bytes`,
+  `crossbeam-channel`, `rayon` y `zlib-rs`.
+- **Licencias y seguridad:** las licencias observadas fueron MIT,
+  MIT/Apache-2.0, Unlicense/MIT y Zlib, compatibles con la distribución MIT.
+  `cargo audit --no-fetch` cargó 1199 avisos y examinó el lock temporal de 65
+  paquetes con código 0; avisó de que no podía bloquear el índice de crates.io
+  de solo lectura.
+- **Código nativo y scripts:** no se encontraron fuentes C/C++, enlace nativo
+  ni ejecución de procesos en `noodles-fasta`, `noodles-bgzf` o
+  `noodles-core`; `zlib-rs` es Rust. El árbol sí contiene y ejecuta cuatro
+  scripts: `crossbeam-utils 0.8.22/build.rs`,
+  `crossbeam-epoch 0.9.20/build.rs`, `crossbeam-deque 0.8.7/build.rs` y
+  `rayon-core 1.13.0/build.rs`. Los tres scripts de Crossbeam consultan el
+  objetivo y la configuración de sanitizadores y emiten directivas `cfg`/
+  `check-cfg`; el de Rayon solo emite `rerun-if-changed`. Ninguno ejecuta
+  procesos, accede a la red, modifica fuentes, escribe artefactos generados ni
+  genera o compila código nativo. Superan la regla revisada de DTC-043.
+- **Rendimiento y distribución:** incluso para FASTA sin comprimir y síncrono,
+  el grafo añade BGZF, compresión y paralelismo no requeridos por el recorrido
+  mínimo. La API publicada por `noodles-fasta` no permite al consumidor
+  desactivar las características predeterminadas de su dependencia directa
+  `noodles-bgzf`, por lo que no existe una selección de características de la
+  aplicación que elimine esos scripts.
+
+El coste de BGZF, compresión, Rayon y `zlib-rs` se acepta de forma explícita
+porque la API publicada no permite retirarlo desde la aplicación. `zlib-rs` es
+Rust puro, contiene `unsafe` interno y selecciona optimizaciones mediante
+detección de CPU en tiempo de ejecución; no enlaza una biblioteca nativa. Este
+coste y superficie se vigilan en futuras actualizaciones. La aceptación no
+autoriza parchear o sustituir silenciosamente la dependencia ni relajar los
+contratos propios de DTC-041/DTC-043. E3–E8 quedan desbloqueados.

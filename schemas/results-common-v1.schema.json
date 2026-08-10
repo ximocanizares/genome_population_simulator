@@ -34,6 +34,98 @@
         "validated": { "const": true }
       }
     },
+    "reversible_text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "value"],
+      "properties": {
+        "encoding": { "enum": ["utf-8", "bytes-hex"] },
+        "value": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "encoding": { "const": "bytes-hex" } } },
+          "then": { "properties": { "value": { "pattern": "^(?:[0-9a-f]{2})*$" } } }
+        }
+      ]
+    },
+    "reference_origin": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "generated" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "original_path"],
+          "properties": {
+            "kind": { "const": "supplied" },
+            "original_path": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "canonical_fasta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "line_base_count", "line_ending", "base_case"],
+      "properties": {
+        "version": { "const": "1" },
+        "line_base_count": { "const": 80 },
+        "line_ending": { "const": "LF" },
+        "base_case": { "const": "uppercase" }
+      }
+    },
+    "reference_sequence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "class", "length", "ploidy", "header", "description", "alphabet_validation", "unknown_base_count"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stable_id" },
+        "class": { "enum": ["chromosome", "scaffold"] },
+        "length": { "type": "integer", "minimum": 1 },
+        "ploidy": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "header": { "$ref": "#/$defs/reversible_text" },
+        "description": { "oneOf": [{ "$ref": "#/$defs/reversible_text" }, { "type": "null" }] },
+        "alphabet_validation": { "const": "ACGTN-case-insensitive" },
+        "unknown_base_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "reference_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "total_genome_size", "origin", "authoritative_resource", "fasta", "canonical_format", "indexes", "sequences"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stable_id" },
+        "total_genome_size": { "type": "integer", "minimum": 1 },
+        "origin": { "$ref": "#/$defs/reference_origin" },
+        "authoritative_resource": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+        "fasta": { "$ref": "#/$defs/artifact" },
+        "canonical_format": { "oneOf": [{ "$ref": "#/$defs/canonical_fasta" }, { "type": "null" }] },
+        "indexes": { "type": "array", "maxItems": 0 },
+        "sequences": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/reference_sequence" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "origin": { "properties": { "kind": { "const": "generated" } }, "required": ["kind"] } } },
+          "then": { "properties": { "canonical_format": { "$ref": "#/$defs/canonical_fasta" } } },
+          "else": { "properties": { "canonical_format": { "type": "null" } } }
+        }
+      ]
+    },
+    "reference_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "fasta", "indexes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stable_id" },
+        "fasta": { "$ref": "#/$defs/artifact" },
+        "indexes": { "type": "array", "maxItems": 0 }
+      }
+    },
     "normalization_value": {
       "type": "object",
       "additionalProperties": false,
@@ -202,8 +294,14 @@
       "required": ["level", "status", "conditions"],
       "properties": {
         "level": { "const": "biological" },
-        "status": { "const": "not_applicable" },
-        "conditions": { "type": "array", "maxItems": 0 }
+        "status": { "const": "guaranteed" },
+        "conditions": {
+          "type": "array",
+          "prefixItems": [{ "const": "simulator_version" }, { "const": "platform" }, { "const": "root_seed" }, { "const": "effective_configuration" }, { "const": "input_contents" }, { "const": "profiles" }, { "const": "random_algorithm" }, { "const": "subseed_catalog_v2" }, { "const": "reference_fasta_sha256" }],
+          "items": false,
+          "minItems": 9,
+          "maxItems": 9
+        }
       }
     },
     "technical_reproducibility": {
@@ -283,7 +381,7 @@
       "additionalProperties": false,
       "required": ["name", "version"],
       "properties": {
-        "name": { "enum": ["blake3", "getrandom", "rand_chacha", "rustix", "serde_json", "sha2", "toml"] },
+        "name": { "enum": ["blake3", "getrandom", "noodles-fasta", "rand_chacha", "rustix", "serde_json", "sha2", "toml"] },
         "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
       }
     },
@@ -303,6 +401,12 @@
       "allOf": [
         { "$ref": "#/$defs/dependency" },
         { "properties": { "name": { "const": "rand_chacha" }, "version": { "const": "0.10.0" } } }
+      ]
+    },
+    "dependency_noodles_fasta": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "properties": { "name": { "const": "noodles-fasta" }, "version": { "const": "0.66.0" } } }
       ]
     },
     "dependency_rustix": {
@@ -416,19 +520,19 @@
       "properties": {
         "minimum": {
           "type": "array",
-          "prefixItems": [{ "const": "configuration_copies" }, { "const": "effective_config" }, { "const": "manifest_general" }],
+          "prefixItems": [{ "const": "configuration_copies" }, { "const": "effective_config" }, { "const": "reference_fasta" }, { "const": "manifest_general" }],
           "items": false,
-          "minItems": 3,
-          "maxItems": 3
+          "minItems": 4,
+          "maxItems": 4
         },
         "default_enabled": { "type": "array", "maxItems": 0 },
         "explicitly_requested": { "type": "array", "maxItems": 0 },
         "disabled": {
           "type": "array",
-          "prefixItems": [{ "const": "reference" }, { "const": "truth" }, { "const": "vcf" }, { "const": "fastq" }, { "const": "bam" }, { "const": "cram" }],
+          "prefixItems": [{ "const": "truth" }, { "const": "vcf" }, { "const": "fastq" }, { "const": "bam" }, { "const": "cram" }],
           "items": false,
-          "minItems": 6,
-          "maxItems": 6
+          "minItems": 5,
+          "maxItems": 5
         }
       }
     },
@@ -458,30 +562,7 @@
         "schema_version": { "const": "1" },
         "source_path": { "type": "string", "minLength": 1 },
         "route": { "enum": ["direct", "evolution", "families"] },
-        "reference": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["id", "total_genome_size", "sequences"],
-          "properties": {
-            "id": { "$ref": "#/$defs/stable_id" },
-            "total_genome_size": { "type": "integer", "minimum": 1 },
-            "sequences": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["id", "class", "length", "ploidy"],
-                "properties": {
-                  "id": { "$ref": "#/$defs/stable_id" },
-                  "class": { "enum": ["chromosome", "scaffold"] },
-                  "length": { "type": "integer", "minimum": 1 },
-                  "ploidy": { "type": "integer", "minimum": 1, "maximum": 10 }
-                }
-              }
-            }
-          }
-        },
+        "reference": { "$ref": "#/$defs/reference_record" },
         "scenario_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" }, "uniqueItems": true },
         "event_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" }, "uniqueItems": true },
         "individual_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" }, "uniqueItems": true },
@@ -494,7 +575,7 @@
             "seed_origin": { "enum": ["declared", "system_csprng"] },
             "algorithm": { "const": "ChaCha12" },
             "derivation_version": { "const": 1 },
-            "catalog_version": { "const": "1" },
+            "catalog_version": { "const": "2" },
             "event_subseeds": { "type": "array", "items": { "$ref": "#/$defs/event_subseed" } }
           }
         },
@@ -506,7 +587,7 @@
     "general_manifest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["manifest_kind", "schema_version", "execution_id", "state", "route", "program", "platform", "toolchain", "dependencies", "tools", "profiles", "checks", "configuration_inputs", "effective_config", "events", "artifacts", "outputs", "normalizations", "reproducibility", "units", "diagnostics"],
+      "required": ["manifest_kind", "schema_version", "execution_id", "state", "route", "program", "platform", "toolchain", "dependencies", "tools", "profiles", "checks", "configuration_inputs", "effective_config", "references", "events", "artifacts", "outputs", "normalizations", "reproducibility", "units", "diagnostics"],
       "properties": {
         "manifest_kind": { "const": "gps_execution_manifest" },
         "schema_version": { "const": "1" },
@@ -518,12 +599,13 @@
         "toolchain": { "$ref": "#/$defs/toolchain" },
         "dependencies": {
           "type": "array",
-          "minItems": 7,
-          "maxItems": 7,
+          "minItems": 8,
+          "maxItems": 8,
           "items": {
             "oneOf": [
               { "$ref": "#/$defs/dependency_blake3" },
               { "$ref": "#/$defs/dependency_getrandom" },
+              { "$ref": "#/$defs/dependency_noodles_fasta" },
               { "$ref": "#/$defs/dependency_rand_chacha" },
               { "$ref": "#/$defs/dependency_rustix" },
               { "$ref": "#/$defs/dependency_serde_json" },
@@ -534,6 +616,7 @@
           "allOf": [
             { "contains": { "$ref": "#/$defs/dependency_blake3" }, "minContains": 1, "maxContains": 1 },
             { "contains": { "$ref": "#/$defs/dependency_getrandom" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/dependency_noodles_fasta" }, "minContains": 1, "maxContains": 1 },
             { "contains": { "$ref": "#/$defs/dependency_rand_chacha" }, "minContains": 1, "maxContains": 1 },
             { "contains": { "$ref": "#/$defs/dependency_rustix" }, "minContains": 1, "maxContains": 1 },
             { "contains": { "$ref": "#/$defs/dependency_serde_json" }, "minContains": 1, "maxContains": 1 },
@@ -546,6 +629,7 @@
         "checks": { "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": { "$ref": "#/$defs/check" } },
         "configuration_inputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/configuration_input" } },
         "effective_config": { "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+        "references": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/reference_record" } },
         "events": { "type": "array", "items": { "$ref": "#/$defs/event_link" } },
         "artifacts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/artifact" } },
         "outputs": { "$ref": "#/$defs/general_outputs" },
@@ -578,6 +662,7 @@
           "then": {
             "properties": {
               "effective_config": { "$ref": "#/$defs/artifact" },
+              "references": { "minItems": 1, "maxItems": 1 },
               "diagnostics": { "maxItems": 0 },
               "units": {
                 "items": {
@@ -612,13 +697,14 @@
     "event_manifest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["manifest_kind", "schema_version", "event_id", "state", "subseed", "artifacts", "outputs", "units", "diagnostics"],
+      "required": ["manifest_kind", "schema_version", "event_id", "state", "subseed", "references", "artifacts", "outputs", "units", "diagnostics"],
       "properties": {
         "manifest_kind": { "const": "gps_event_manifest" },
         "schema_version": { "const": "1" },
         "event_id": { "$ref": "#/$defs/stable_id" },
         "state": { "const": "complete" },
         "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "references": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/reference_link" } },
         "artifacts": { "type": "array", "maxItems": 0 },
         "outputs": { "$ref": "#/$defs/event_outputs" },
         "units": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/complete_event_unit" } },

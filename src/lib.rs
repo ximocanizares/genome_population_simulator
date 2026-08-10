@@ -15,5 +15,8 @@ pub mod integrity;
 pub mod numeric;
 pub mod publication;
 pub mod randomness;
+pub mod reference;
+pub mod reference_fasta;
+pub mod reference_generation;
 pub mod results;
 pub mod rules;

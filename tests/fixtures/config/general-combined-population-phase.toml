@@ -6,7 +6,12 @@ route = "direct"
 kind = "simulated"
 id = "ref-main"
 default_ploidy = 2
-composition = [{ id = "A", category = "base", value = 1.0 }]
+composition = [
+  { id = "A", category = "base", value = 1.0 },
+  { id = "C", category = "base", value = 0.0 },
+  { id = "G", category = "base", value = 0.0 },
+  { id = "T", category = "base", value = 0.0 },
+]
 
 [[reference.sequences]]
 id = "chr1"

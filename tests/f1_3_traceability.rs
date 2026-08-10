@@ -445,7 +445,7 @@ fn partial_test_req_rep_22_rng_metadata_reconstructs_an_event_subseed() {
     );
     assert_eq!(metadata.random_algorithm(), "ChaCha12");
     assert_eq!(metadata.derivation_version(), 1);
-    assert_eq!(metadata.catalog_version(), "1");
+    assert_eq!(metadata.catalog_version(), "2");
 
     let first = observation(root());
     let mut changed_input = first.clone();

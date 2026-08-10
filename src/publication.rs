@@ -2,14 +2,14 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustix::fs::{CWD, RenameFlags, renameat_with};
 
 use crate::diagnostics::Diagnostic;
-use crate::integrity::{identify_file, verify_identity};
+use crate::integrity::{ArtifactIdentity, Sha256Writer, identify_file, verify_identity};
 use crate::results::{ArtifactRecord, UnitRecord, UnitState};
 
 const INCOMPLETE_MARKER: &str = "INCOMPLETE";
@@ -335,6 +335,112 @@ impl ExecutionWorkspace {
         Ok(record)
     }
 
+    pub fn write_streamed_artifact(
+        &mut self,
+        id: &str,
+        kind: &str,
+        relative_path: &Path,
+        write: impl FnOnce(&mut File) -> Result<(), Diagnostic>,
+    ) -> Result<ArtifactRecord, Diagnostic> {
+        validate_relative_path(relative_path)?;
+        let final_path = self.provisional.join(relative_path);
+        let parent = final_path
+            .parent()
+            .ok_or_else(|| invalid_unit_state(id, "artifact path has no provisional parent"))?;
+        fs::create_dir_all(parent).map_err(|error| io_error(parent, "create_dir_all", error))?;
+        let file_name = final_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| invalid_unit_state(id, "artifact file name is not UTF-8"))?;
+        let temporary = parent.join(format!(".{file_name}.gps-tmp"));
+        let mut lifecycle = ArtifactLifecycle::new(id);
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| io_error(&temporary, "create_artifact_temporary", error))?;
+        write(&mut file)?;
+        file.flush()
+            .map_err(|error| io_error(&temporary, "flush", error))?;
+        drop(file);
+        lifecycle.close()?;
+        let identity = identify_file(&temporary, relative_path)?;
+        verify_identity(&temporary, &identity)?;
+        lifecycle.validate()?;
+        fs::rename(&temporary, &final_path)
+            .map_err(|error| io_error(&final_path, "finalize_artifact", error))?;
+        lifecycle.catalog()?;
+        let record = ArtifactRecord::from_identity(id, kind, &identity)?;
+        self.artifacts.push(record.clone());
+        Ok(record)
+    }
+
+    /// Copia una entrada exacta al temporal del artefacto, calculando de nuevo
+    /// tamaño y SHA-256 antes de catalogarla. Una mutación entre admisión y
+    /// copia se rechaza y nunca alcanza la ruta final del artefacto.
+    pub fn copy_verified_artifact(
+        &mut self,
+        id: &str,
+        kind: &str,
+        source: &Path,
+        relative_path: &Path,
+        expected: &ArtifactIdentity,
+    ) -> Result<ArtifactRecord, Diagnostic> {
+        validate_relative_path(relative_path)?;
+        let final_path = self.provisional.join(relative_path);
+        let parent = final_path
+            .parent()
+            .ok_or_else(|| invalid_unit_state(id, "artifact path has no provisional parent"))?;
+        fs::create_dir_all(parent).map_err(|error| io_error(parent, "create_dir_all", error))?;
+        let file_name = final_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| invalid_unit_state(id, "artifact file name is not UTF-8"))?;
+        let temporary = parent.join(format!(".{file_name}.gps-tmp"));
+        let mut input = File::open(source).map_err(|error| input_error(source, error))?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| io_error(&temporary, "create_artifact_temporary", error))?;
+        let mut digest = Sha256Writer::default();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = input
+                .read(&mut buffer)
+                .map_err(|error| input_error(source, error))?;
+            if read == 0 {
+                break;
+            }
+            output
+                .write_all(&buffer[..read])
+                .map_err(|error| io_error(&temporary, "write", error))?;
+            digest.update(&buffer[..read])?;
+        }
+        output
+            .flush()
+            .map_err(|error| io_error(&temporary, "flush", error))?;
+        drop(output);
+
+        let observed = digest.finish(relative_path);
+        if observed.size_bytes() != expected.size_bytes() || observed.digest() != expected.digest()
+        {
+            return Err(Diagnostic::input(
+                "GPS-INPUT-002",
+                "Una entrada cambió durante su copia o no coincide con su identidad declarada.",
+            )
+            .with("path", source.display().to_string())
+            .with("expected_digest", expected.digest())
+            .with("observed_digest", observed.digest()));
+        }
+        verify_identity(&temporary, &observed)?;
+        fs::rename(&temporary, &final_path)
+            .map_err(|error| io_error(&final_path, "finalize_artifact", error))?;
+        let record = ArtifactRecord::from_identity(id, kind, &observed)?;
+        self.artifacts.push(record.clone());
+        Ok(record)
+    }
+
     pub fn create_truncated_temporary(
         &self,
         relative_path: &Path,
@@ -539,4 +645,13 @@ fn io_error(path: &Path, operation: &str, error: std::io::Error) -> Diagnostic {
         .with("path", path.display().to_string())
         .with("operation", operation)
         .with("detail", error.to_string())
+}
+
+fn input_error(path: &Path, error: std::io::Error) -> Diagnostic {
+    Diagnostic::input(
+        "GPS-INPUT-001",
+        "No se puede abrir o leer una entrada declarada.",
+    )
+    .with("path", path.display().to_string())
+    .with("detail", error.to_string())
 }

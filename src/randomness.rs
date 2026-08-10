@@ -8,7 +8,7 @@ use rand_chacha::rand_core::{Rng, SeedableRng};
 use crate::diagnostics::Diagnostic;
 
 pub const DERIVATION_VERSION: u32 = 1;
-pub const SUBSEED_CATALOG_VERSION: &str = "1";
+pub const SUBSEED_CATALOG_VERSION: &str = "2";
 pub const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 pub const RANDOM_ALGORITHM: &str = "ChaCha12";
 
@@ -135,6 +135,7 @@ pub struct SubseedRequest {
 impl SubseedRequest {
     pub fn from_scope(scope: &str, components: &[(&str, &str)]) -> Result<Self, Diagnostic> {
         let (canonical_scope, names): (&'static str, &[&'static str]) = match scope {
+            "reference_generation" => ("reference_generation", &["reference_id"]),
             "initial_population" => ("initial_population", &["scenario_id", "population_id"]),
             "biological_process" => (
                 "biological_process",
