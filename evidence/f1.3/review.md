@@ -60,5 +60,6 @@ corregidos o aplicados con adaptación, 0 pendientes**.
 La inspección adversarial final no encontró dependencia de ruta, reloj, hilo,
 mapa, posición accidental o planificador; tampoco `StdRng`, flujo global o
 compartido, truncado de raíces, prioridad de consumo ni inferencia entre
-niveles. La pausa de F1.3 queda alcanzada y pendiente de una nueva aprobación
-independiente.
+niveles. La pausa de F1.3 fue aprobada por la persona responsable del proyecto
+el 9 de agosto de 2026; D1/F1.4 queda autorizado, pero no se inicia en este
+cambio.

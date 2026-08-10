@@ -382,12 +382,15 @@ pasen. Revisar explícitamente que ningún ID, flujo o resultado dependa de hilo
 orden de mapa, ruta, reloj o consumo de otro ámbito. Conservar el lock y los
 vectores como evidencia conjunta.
 
-**Estado de la pausa (9 de agosto de 2026): pendiente de aprobación.** C1–C8
-cierran solo la infraestructura descrita arriba. La auditoría conserva los diez
-casos: 1 está superado y 9 quedan reasignados con evidencia parcial explícita.
-Los cuatro vectores A5, el aislamiento por ámbito y las puertas completas
-constan en `../evidence/f1.3/`. No se inicia F1.4 hasta recibir aprobación
-independiente.
+**Aprobación de la pausa (9 de agosto de 2026):** F1.3 queda aprobada tras la
+revisión independiente y la corrección de H-F13-01 a H-F13-03 y
+H-F13-02-R1. Las puertas de formato, Clippy, 83 pruebas, doctests,
+documentación, construcción release, grafo bloqueado, JSON Schema y
+`cargo audit` terminaron sin fallos. La auditoría conserva los diez casos: 1
+está superado y 9 quedan reasignados con evidencia parcial y destino explícitos.
+Los cuatro vectores A5, el aislamiento por ámbito y el resto de evidencias
+constan en `../evidence/f1.3/`. Queda autorizado comenzar D1/F1.4, pero no se
+inicia en este cambio.
 
 ## 8. F1.4 — Identidad y resultados
 
@@ -395,67 +398,67 @@ independiente.
 manifiestos JSON íntegros dentro de una publicación atómica que distingue
 rechazo previo, fallo controlado e interrupción.
 
-- ☐ D1. Evaluar y aprobar dependencias exactas para JSON, JSON Schema, SHA-256 y publicación no-clobber.
+- ✅ D1. Evaluar y aprobar dependencias exactas para JSON, JSON Schema, SHA-256 y publicación no-clobber.
   - Depende de: A2, A7 y los contratos DTC-035/040/045.
   - Procede de: DTC-035, DTC-040, DTC-043, DTC-045, DTC-047 y DTC-048.
   - Cambia: evaluaciones y, solo tras aprobación, `Cargo.toml` y `Cargo.lock`; separa productor JSON de validador independiente y oculta la llamada Linux tras adaptador propio.
   - Se comprueba con: `cargo tree --locked -e features`, auditoría del grafo y pruebas de capacidad para RFC 8259, Draft 2020-12, hash incremental y no-clobber real sin patrón check-then-rename.
 
-- ☐ D2. Implementar tipos de ID aportado y etiqueta humana sin mezclar categorías.
+- ✅ D2. Implementar tipos de ID aportado y etiqueta humana sin mezclar categorías.
   - Depende de: A6 y A4.
   - Procede de: DTC-039; REQ-CONF-38, REQ-IND-25/26.
   - Cambia: nuevos tipos por entidad, validación conceptual `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, etiqueta Unicode opcional y registro central por ámbito.
   - Se comprueba con: `cargo test --locked` sobre longitudes 1/64/65, mayúsculas, espacios, rutas, Unicode en ID/etiqueta, duplicado y colisión; un bloque documental `compile_fail` demuestra el cruce de tipos y se ejecuta con `cargo test --workspace --doc --locked`, sin añadir una dependencia de pruebas solo para esta garantía.
 
-- ☐ D3. Implementar IDs automáticos exactamente desde el catálogo y vectores A6.
+- ✅ D3. Implementar IDs automáticos exactamente desde el catálogo y vectores A6.
   - Depende de: C4, D1–D2 y A6.
   - Procede de: DTC-039.
   - Cambia: derivación BLAKE3 con contexto `genome_population_simulator/v1/id`, primeros 128 bits, Base32 RFC 4648 mayúscula sin relleno y prefijo por clase.
   - Se comprueba con: todos los vectores A6, longitud/alfabeto/prefijo exactos, causas de ejecución raíz+digest de configuración y rechazo de colisión inyectada.
 
-- ☐ D4. Implementar SHA-256 incremental sobre bytes exactos y catálogo de artefactos.
+- ✅ D4. Implementar SHA-256 incremental sobre bytes exactos y catálogo de artefactos.
   - Depende de: D1.
   - Procede de: DTC-040; REQ-MAN-08 y REQ-SAL-03.
   - Cambia: adaptador que entrega algoritmo literal `sha256`, 64 hex minúsculos, tamaño y ruta relativa por fichero; nunca sustituye contenido por metadatos o muestreo.
   - Se comprueba con: fixtures vacíos/binarios/textuales comparados con `sha256sum`; modificar un byte debe cambiar el digest y truncar debe fallar tamaño/integridad.
 
-- ☐ D5. Definir los esquemas JSON de resultados de F1 antes de sus escritores y reutilizar el esquema diagnóstico de A4.
+- ✅ D5. Definir los esquemas JSON de resultados de F1 antes de sus escritores y reutilizar el esquema diagnóstico de A4.
   - Depende de: B11, C6, D1–D4 y catálogo A4.
   - Procede de: DTC-035, DTC-036, DTC-038 y DTC-044; REQ-MAN-01 a REQ-MAN-05, REQ-MAN-08/10/32/69/72/81/83/88.
   - Cambia: esquemas Draft 2020-12 separados para `effective-config.json`, manifiesto general y manifiesto de evento, con definiciones comunes, discriminadores y `schema_version: "1"`; integra sin redefinir el contrato diagnóstico ya fijado en A4.
   - Se comprueba con: revisión campo por campo contra los REQ y fixtures válidos, truncados, corruptos, con campo desconocido y clase/versión errónea validados por la implementación independiente aprobada en A7.
 
-- ☐ D6. Serializar `effective-config.json` con orden estable donde la semántica sea de conjunto.
+- ✅ D6. Serializar `effective-config.json` con orden estable donde la semántica sea de conjunto.
   - Depende de: B11 y D5; la sección de normalización depende de B10.
   - Procede de: DTC-035 y DTC-036; REQ-CONF-123 y REQ-MAN-05/10/88.
   - Cambia: escritor legible que registra valor efectivo, regla ganadora, selectores y procedencia y enlaza la copia TOML exacta sin duplicarla.
   - Se comprueba con: validación JSON Schema independiente, permutación de entradas equivalentes y comparación semántica; no se afirma identidad binaria general.
 
-- ☐ D7. Implementar manifiesto general y manifiestos solo para eventos explícitos.
+- ✅ D7. Implementar manifiesto general y manifiestos solo para eventos explícitos.
   - Depende de: D3–D6.
   - Procede de: DTC-035 y DTC-036; REQ-CONF-101, REQ-EVO-63, REQ-MAN-01/02/03/04/08/32/69/72/83 y REQ-SAL-04/17/18.
   - Cambia: escritores con clase, versión, vía, configuración/escenarios, eventos, estados, plataforma, toolchain, dependencias y enlaces de artefacto; cero eventos no crea directorio o manifiesto de evento implícito.
   - Se comprueba con: casos cero/uno/dos eventos, IDs permutados y enlaces relativos; cada JSON supera el validador independiente y todos los enlaces resuelven dentro de la raíz.
 
-- ☐ D8. Implementar el modelo de estado y el catálogo de unidades publicables.
+- ✅ D8. Implementar el modelo de estado y el catálogo de unidades publicables.
   - Depende de: D4–D7.
   - Procede de: DTC-045; REQ-MAN-83 y REQ-SAL-22/26.
   - Cambia: estados funcionales `incompleto`, `completo` y `fallido`, más el marcador físico `INCOMPLETE` del provisional; artefactos y conjuntos independientes se incorporan solo tras cierre, validación, tamaño y digest.
   - Se comprueba con: máquina de estados probada exhaustivamente; ninguna transición desde artefacto abierto/inválido llega a completo y un fallo controlado enumera unidades válidas y diagnóstico.
 
-- ☐ D9. Implementar directorio provisional hermano y temporales por artefacto.
+- ✅ D9. Implementar directorio provisional hermano y temporales por artefacto.
   - Depende de: D8.
   - Procede de: DTC-045; REQ-SAL-22/26.
   - Cambia: ensamblador que trabaja en el mismo sistema de ficheros, marca `INCOMPLETE`, valida antes de catalogar y no crea destino final durante rechazo de admisión.
   - Se comprueba con: pruebas de integración para rechazo previo, fallo durante escritura y temporal truncado; se inspeccionan raíz provisional, catálogo y ausencia de destino final indebido.
 
-- ☐ D10. Implementar publicación Linux atómica no-clobber detrás de un adaptador propio.
+- ✅ D10. Implementar publicación Linux atómica no-clobber detrás de un adaptador propio.
   - Depende de: D1 y D9.
   - Procede de: DTC-045 y DTC-042; REQ-SAL-22/26.
   - Cambia: operación equivalente a `renameat2(..., RENAME_NOREPLACE)` que rechaza `EEXIST` o sistema de ficheros sin garantía, sin fallback con comprobación previa.
   - Se comprueba con: carrera de dos procesos por el mismo destino, destino preexistente y doble que simula operación no soportada; exactamente uno publica y nunca se mezclan o sobrescriben bytes.
 
-- ☐ D11. Completar la evidencia de manifiesto de las normalizaciones fijadas por DTC-049.
+- ✅ D11. Completar la evidencia de manifiesto de las normalizaciones fijadas por DTC-049.
   - Depende de: B10 y D5–D7.
   - Procede de: DTC-049; REQ-MAN-81, REQ-CONF-106/107 y REQ-VAL-40.
   - Cambia: registro de tolerancia efectiva, orden canónico, algoritmo y versión, suma, delta y valores antes y después o causa de rechazo, sin reutilizar tolerancias con otra finalidad.
@@ -467,11 +470,30 @@ rechazo previo, fallo controlado e interrupción.
   - Cambia: pruebas de proceso para salida 2 sin destino, salida de fallo controlado con manifiesto final `fallido` y señal no controlable con provisional `INCOMPLETE`.
   - Se comprueba con: ejecución en WSL2/ext4 y CI Ubuntu 24.04; se inyectan fallos antes/después de catalogar un artefacto y se verifica que un SIGKILL no publique completo.
 
-- ☐ D13. Cerrar las 25 pruebas trazables de F1.4 con validadores independientes.
+- ☐ D13. Auditar las 25 pruebas trazables de F1.4 con validadores independientes y cerrar solo las demostrables.
   - Depende de: D1–D12.
   - Procede de: los 25 REQ asignados a F1.4, ACE-22/25/34/93/94/105, DTC-047 y DTC-049.
   - Cambia: casos `TEST-REQ-*`, verificador de enlaces, pruebas de hash/no-clobber y matriz de evidencias.
   - Se comprueba con: `cargo test --workspace --all-targets --locked`, implementación JSON Schema independiente y `sha256sum`; corruptos, truncados y campos desconocidos deben fallar por un oráculo distinto del productor.
+
+**Estado local de D12–D13 (10 de agosto de 2026):** la implementación y las
+pruebas de proceso están completas en Ubuntu sobre WSL2/ext4: rechazo con
+salida 2 y sin destino, fallo controlado con salida 1 y manifiesto `failed`,
+SIGKILL con provisional `INCOMPLETE`, carrera de dos procesos, JSON Schema
+independiente y `sha256sum`. La auditoría literal conserva los 25 casos con 17
+superados y 8 reasignados; no se cierran D12–D13 ni la fase hasta repetir la
+matriz de publicación en Ubuntu 24.04 nativo. Evidencia en `../evidence/f1.4/`.
+La revisión independiente posterior detectó H-F14-R1/R2: ambos quedaron
+corregidos con regresiones del marcador durante publicación y contratos JSON
+anidados cerrados, sin alterar que D12–D13 siguen pendientes de la repetición
+nativa. La pasada de coherencia H-F14-R3 corrigió los únicos residuos de
+recuento de E13 y la pausa F1.5 a 27/61/31. La segunda revisión de esquemas
+detectó H-F14-R2-R1: la regresión demostró que el contrato cerrado todavía
+aceptaba contradicciones de estado, niveles y dependencias. El contrato Draft
+2020-12 exige ahora los cuatro niveles y las siete dependencias exactamente una
+vez, además de la coherencia entre estado general, configuración efectiva,
+diagnósticos y unidades y la unidad completa de evento. D12–D13 continúan
+abiertos hasta la misma repetición nativa.
 
 ### Pausa obligatoria de revisión de F1.4
 
@@ -560,7 +582,7 @@ del original y sin dependencia de validadores externos en runtime.
 
 - ☐ E13. Cerrar la batería trazable de F1.5 y el expediente de F1.
   - Depende de: E1–E12 y todas las pausas anteriores.
-  - Procede de: los 24 REQ asignados a F1.5 tras la auditoría F1.3, ACE-01 a ACE-05/23/64/110 y reglas de avance de la hoja de ruta.
+  - Procede de: los 27 REQ asignados a F1.5 tras las auditorías F1.3/F1.4, ACE-01 a ACE-05/23/64/110 y reglas de avance de la hoja de ruta.
   - Cambia: casos `TEST-REQ-*`, matriz final con comandos/salidas/digests y acta de revisión; no modifica requisitos ni marca pruebas no ejecutadas como superadas.
   - Se comprueba con: batería Cargo bloqueada por warnings, validadores independientes de F1, escenarios A/B/C según frecuencia y revisión de cero hallazgos bloqueantes o graves sin destino aprobado.
 
@@ -569,9 +591,9 @@ del original y sin dependencia de validadores externos en runtime.
 Antes de pasar a F2 se revisan conjuntamente reproducibilidad, diagnósticos,
 trazabilidad, FASTA, integridad y estados de publicación. Deben existir al menos
 un recorrido suministrado, uno simulado, uno inválido de admisión, un fallo
-controlado y una interrupción. F1 solo se cierra si las 66 filas asignadas
-actualmente a F1 tienen evidencia ejecutada, los 26 casos reasignados desde
-F1.2/F1.3 conservan un destino verificable y no quedan defectos
+controlado y una interrupción. F1 solo se cierra si las 61 filas asignadas
+actualmente a F1 tienen evidencia ejecutada, los 31 casos reasignados a F2–F9
+desde F1.2/F1.3/F1.4 conservan un destino verificable y no quedan defectos
 bloqueantes o graves sin resolución o destino aprobado.
 
 ## 10. Riesgos de error silencioso y pruebas independientes
@@ -593,19 +615,19 @@ bloqueantes o graves sin resolución o destino aprobado.
 ## 11. Matriz final de cobertura y evidencias
 
 La matriz no sustituye las filas `TEST-REQ-*` del artefacto de trazabilidad. Las
-auditorías de F1.2 y F1.3 detectaron respectivamente 20 y 6 asignaciones que
-exigían consumidores de F2–F9; además, F1.3 trasladó 3 requisitos al cierre
-ejecutable de F1.5. Las matrices de auditoría los conservan sin marcarlos como
-superados. La asignación vigente de F1 es por tanto 16/1/25/24, 66 requisitos
-en total.
+auditorías de F1.2, F1.3 y F1.4 detectaron respectivamente 20, 6 y 5
+asignaciones que exigían consumidores de F2–F9; además, F1.3 trasladó 3
+requisitos y F1.4 trasladó otros 3 al cierre ejecutable de F1.5. Las matrices
+de auditoría los conservan sin marcarlos como superados. La asignación vigente
+de F1 es por tanto 16/1/17/27, 61 requisitos en total.
 
 | Hito | Requisitos asignados por la matriz | ACE principales | Decisiones | Pasos/evidencia de cierre |
 | --- | --- | --- | --- | --- |
 | F1.1 | Infraestructura de la hoja de ruta; sin filas REQ exclusivas | soporte de ACE-01/03/22/23/64 | DTC-042 a DTC-048 | A1–A7; toolchain exacto, lock, cinco puertas Cargo, catálogos previos y herramientas independientes aprobadas |
 | F1.2 | REQ-CONF-01/04/05/07/09/10/14/29/30/31/65/106/117–119; REQ-VAL-51 | ACE-01/02/10/11/105/111 | DTC-034, DTC-036, DTC-043, DTC-044, DTC-048, DTC-049 | B1–B12; 16 `TEST-REQ-*` superados y auditoría explícita de 20 reasignados; dominancia, invalidación previa, normalización Neumaier y diagnósticos |
 | F1.3 | REQ-REP-23 | ACE-01/23/64 | DTC-037, DTC-038, DTC-042/043/048 | A5, C1–C8; 1 `TEST-REQ-*` superado y auditoría de 9 reasignados con pruebas parciales; vectores, aislamiento y comparadores preparatorios |
-| F1.4 | REQ-CONF-38/101/123; REQ-IND-25/26; REQ-EVO-63; REQ-MAN-01–05/08/10/32/69/72/81/83/88; REQ-SAL-03/04/17/18/22/26 | ACE-01/10/14/22/25/34/64/93/94/105/111 | DTC-035/036/038–040/042–045/047–049 | A4/A6, D1–D13; 25 `TEST-REQ-*`, JSON/SHA, evidencia DTC-049, estados y carrera no-clobber |
-| F1.5 | REQ-CONF-02/03/26/27; REQ-REF-01–07/12/13/15–18/22/23; REQ-REP-22; REQ-VAL-45; REQ-MAN-06/86; REQ-SAL-01 | ACE-01–05/23/64/110 | DTC-037, DTC-039–049 | E1–E13; 24 `TEST-REQ-*`, incluida repetición ejecutable con semilla/configuración/entrada/manifiesto; puerta `noodles-fasta`, `cmp`, `samtools faidx`, SHA/JSON independientes y escenarios A/B/C |
+| F1.4 | REQ-CONF-38/101/123; REQ-MAN-01–05/08/32/69/81/88; REQ-SAL-03/04/22/26 | ACE-01/10/14/22/25/34/64/93/94/105/111 | DTC-035/036/038–040/042–045/047–049 | A4/A6, D1–D13; 17 `TEST-REQ-*` superados y auditoría explícita de 8 reasignados; JSON/SHA, evidencia DTC-049, estados y carrera no-clobber |
+| F1.5 | REQ-CONF-02/03/26/27; REQ-REF-01–07/12/13/15–18/22/23; REQ-REP-22; REQ-EVO-63; REQ-VAL-45; REQ-MAN-06/72/86; REQ-SAL-01/18 | ACE-01–05/23/64/110 | DTC-037, DTC-039–049 | E1–E13; 27 `TEST-REQ-*`, incluida repetición ejecutable con semilla/configuración/entrada/manifiesto; puerta `noodles-fasta`, `cmp`, `samtools faidx`, SHA/JSON independientes y escenarios A/B/C |
 
 ### 11.1. Expediente mínimo para aprobar F1
 
@@ -613,8 +635,9 @@ en total.
   `--locked` portable.
 - Lock y evaluaciones de todas las dependencias y herramientas usadas.
 - Catálogos y vectores normativos de diagnósticos, subsemillas e IDs.
-- Resultado de los 66 `TEST-REQ-*` asignados actualmente a F1, enlazado a su
-  paso y commit, más el registro auditable de los 26 reasignados desde F1.2/F1.3.
+- Resultado de los 61 `TEST-REQ-*` asignados actualmente a F1, enlazado a su
+  paso y commit, más el registro auditable de los 31 reasignados a F2–F9 desde
+  F1.2/F1.3/F1.4.
 - Validación independiente de JSON, SHA-256, FASTA, `.tar.gz` y OCI.
 - Evidencia de publicación completa, rechazo previo, fallo controlado,
   interrupción y carrera no-clobber.
@@ -632,8 +655,9 @@ Antes de aprobar este documento se ejecutan las comprobaciones disponibles de
 - cada paso A1–E13 tiene dependencia, origen, cambio y comprobación concreta;
 - todas las casillas permanecen abiertas hasta ejecutar el trabajo;
 - existen cinco pausas obligatorias, una por hito;
-- la distribución vigente 16 + 1 + 25 + 24 = 66 y la reasignación auditada de
-  26 casos desde F1.2/F1.3 están reproducidas en pasos, trazabilidad y matriz;
+- la distribución vigente 16 + 1 + 17 + 27 = 61 y la reasignación auditada de
+  31 casos a F2–F9 desde F1.2/F1.3/F1.4 están reproducidas en pasos,
+  trazabilidad y matriz;
 - DTC-034 a DTC-049 están cubiertas sin convertir candidatas o DTPD en hechos;
 - `noodles-fasta` 0.66.0 no se incorpora antes de E1;
 - los catálogos A4–A6 preceden a sus consumidores;

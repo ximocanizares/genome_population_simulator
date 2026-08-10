@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::configuration::{
@@ -9,6 +10,10 @@ use crate::configuration::{
     ExpectedConfigKind, FrequencyMode, Route, SequenceClass,
 };
 use crate::diagnostics::Diagnostic;
+use crate::identity::{
+    BlockId, CrossId, EventId, GroupId, IdentityRegistry, IndividualId, PhaseId, PopulationId,
+    ReferenceId, ScenarioId, SequenceId, SubpopulationId,
+};
 use crate::numeric::{NormalizedCollection, normalize_declared};
 use crate::randomness::{EntropySource, ReproducibilityMetadata, SystemEntropy, resolve_root_seed};
 use crate::rules::{
@@ -20,6 +25,7 @@ use crate::rules::{
 pub struct ValidatedGeneralSummary {
     pub total_genome_size: u64,
     pub explicit_event_ids: Vec<String>,
+    pub individual_ids: Vec<String>,
     pub sequence_classes: BTreeMap<String, SequenceClass>,
 }
 
@@ -77,6 +83,38 @@ impl EffectiveCount {
 pub struct EffectiveControlledSet {
     id: String,
     counts: Vec<EffectiveCount>,
+}
+
+/// Entrada de configuración ya admitida, conservada byte a byte para que la
+/// ejecución no vuelva a leer una fuente mutable después de validarla.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectiveConfigurationInput {
+    kind: &'static str,
+    id: String,
+    original_path: String,
+    bytes: Arc<[u8]>,
+}
+
+impl EffectiveConfigurationInput {
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn original_path(&self) -> &str {
+        &self.original_path
+    }
+
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 impl EffectiveControlledSet {
@@ -152,7 +190,9 @@ pub struct EffectiveConfig {
     total_genome_size: u64,
     sequences: Vec<EffectiveSequence>,
     scenario_ids: Vec<String>,
+    configuration_inputs: Vec<EffectiveConfigurationInput>,
     explicit_event_ids: Vec<String>,
+    individual_ids: Vec<String>,
     normalized: Vec<NormalizedCollection>,
     controlled: Vec<EffectiveControlledSet>,
     values: Vec<EffectiveValue>,
@@ -196,8 +236,18 @@ impl EffectiveConfig {
     }
 
     #[must_use]
+    pub fn configuration_inputs(&self) -> &[EffectiveConfigurationInput] {
+        &self.configuration_inputs
+    }
+
+    #[must_use]
     pub fn explicit_event_ids(&self) -> &[String] {
         &self.explicit_event_ids
+    }
+
+    #[must_use]
+    pub fn individual_ids(&self) -> &[String] {
+        &self.individual_ids
     }
 
     #[must_use]
@@ -288,6 +338,56 @@ pub fn validate_general_config(
 ) -> Result<ValidatedGeneralSummary, Diagnostic> {
     validate_route_and_scenarios(general, scenarios)?;
 
+    let _reference_id = ReferenceId::parse(general.reference().id.value(), "execution")?;
+    for sequence in &general.reference().sequences {
+        let _ = SequenceId::parse(sequence.id.value(), general.reference().id.value())?;
+    }
+    for scenario in general.scenarios() {
+        let _ = ScenarioId::parse(scenario.id.value(), "execution")?;
+    }
+    for scenario in scenarios {
+        let scenario_id = ScenarioId::parse(scenario.id().value(), "execution")?;
+        for phase in scenario.phases() {
+            let _ = PhaseId::parse(phase.id().value(), scenario_id.as_str())?;
+        }
+        for cross in scenario.crosses() {
+            let _ = CrossId::parse(cross.id().value(), scenario_id.as_str())?;
+        }
+    }
+    for population in general.populations() {
+        let _ = PopulationId::parse(population.id().value(), "execution")?;
+    }
+    for subpopulation in general.subpopulations() {
+        let _ = SubpopulationId::parse(subpopulation.id().value(), "execution")?;
+    }
+    for phase in general.phases() {
+        let _ = PhaseId::parse(phase.id().value(), "execution")?;
+    }
+    for group in general.groups() {
+        let _ = GroupId::parse(group.id().value(), "execution")?;
+    }
+    for block in general.blocks() {
+        let _ = BlockId::parse(block.id().value(), "execution")?;
+    }
+    let mut identities = IdentityRegistry::default();
+    let mut individual_ids = Vec::with_capacity(general.individuals().len());
+    for individual in general.individuals() {
+        let id = IndividualId::parse(individual.id().value(), "execution")?;
+        individual_ids.push(identities.register_individual("execution", id)?.to_string());
+    }
+    individual_ids.sort();
+
+    let declared_events = general
+        .events()
+        .iter()
+        .chain(scenarios.iter().flat_map(|scenario| scenario.events()));
+    let mut explicit_event_ids = Vec::new();
+    for event in declared_events {
+        let id = EventId::parse(event.id().value(), "execution")?;
+        explicit_event_ids.push(identities.register_event("execution", id)?.to_string());
+    }
+    explicit_event_ids.sort();
+
     let mut total_genome_size = 0_u64;
     let mut sequence_classes = BTreeMap::new();
     let default_ploidy = match &general.reference().source {
@@ -355,11 +455,8 @@ pub fn validate_general_config(
 
     Ok(ValidatedGeneralSummary {
         total_genome_size,
-        explicit_event_ids: general
-            .events()
-            .iter()
-            .map(|event| event.id().value().clone())
-            .collect(),
+        explicit_event_ids,
+        individual_ids,
         sequence_classes,
     })
 }
@@ -576,6 +673,31 @@ pub fn build_effective_config_with_entropy(
         &summary.explicit_event_ids,
     )?;
 
+    let mut configuration_inputs = vec![EffectiveConfigurationInput {
+        kind: "general",
+        id: "general".to_owned(),
+        original_path: general.source().path().display().to_string(),
+        bytes: Arc::from(general.source().bytes()),
+    }];
+    configuration_inputs.extend(
+        scenarios
+            .iter()
+            .map(|scenario| EffectiveConfigurationInput {
+                kind: "scenario",
+                id: scenario.id().value().clone(),
+                original_path: scenario.source().path().display().to_string(),
+                bytes: Arc::from(scenario.source().bytes()),
+            }),
+    );
+    configuration_inputs
+        .sort_by(|first, second| (first.kind, &first.id).cmp(&(second.kind, &second.id)));
+    let mut scenario_ids = general
+        .scenarios()
+        .iter()
+        .map(|scenario| scenario.id.value().clone())
+        .collect::<Vec<_>>();
+    scenario_ids.sort();
+
     Ok(EffectiveConfig {
         schema_version: "1",
         source_path: general.source().path().display().to_string(),
@@ -583,12 +705,10 @@ pub fn build_effective_config_with_entropy(
         reference_id: general.reference().id.value().clone(),
         total_genome_size: summary.total_genome_size,
         sequences,
-        scenario_ids: general
-            .scenarios()
-            .iter()
-            .map(|scenario| scenario.id.value().clone())
-            .collect(),
+        scenario_ids,
+        configuration_inputs,
         explicit_event_ids: summary.explicit_event_ids,
+        individual_ids: summary.individual_ids,
         normalized,
         controlled,
         values,

@@ -1,0 +1,629 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "results-common-v1.schema.json",
+  "title": "Definiciones comunes de resultados GPS v1",
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "diagnostic_code": {
+      "type": "string",
+      "pattern": "^GPS-(CONF|INPUT|FMT|DOMAIN|RES|TOOL|IO|INTERNAL)-[0-9]{3}$"
+    },
+    "checksum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "digest"],
+      "properties": {
+        "algorithm": { "const": "sha256" },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "path", "size_bytes", "checksum", "state", "validated"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "checksum": { "$ref": "#/$defs/checksum" },
+        "state": { "const": "complete" },
+        "validated": { "const": true }
+      }
+    },
+    "normalization_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "before", "after"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "before": { "type": "number" },
+        "after": { "type": "number" }
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parameter", "tolerance", "canonical_order", "algorithm", "algorithm_version", "sum_before", "delta_before", "decision", "values", "sum_after", "delta_after", "specific_tolerances"],
+      "properties": {
+        "parameter": { "type": "string", "minLength": 1 },
+        "tolerance": { "type": "number", "minimum": 0, "maximum": 0.000001 },
+        "canonical_order": { "const": "id,category" },
+        "algorithm": { "const": "neumaier" },
+        "algorithm_version": { "const": "1" },
+        "sum_before": { "type": "number" },
+        "delta_before": { "type": "number", "minimum": 0 },
+        "decision": { "enum": ["accepted_without_change", "normalized"] },
+        "values": { "type": "array", "items": { "$ref": "#/$defs/normalization_value" } },
+        "sum_after": { "type": "number" },
+        "delta_after": { "type": "number", "minimum": 0 },
+        "specific_tolerances": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "controlled_count": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "count"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "controlled_frequency_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "counts"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "counts": { "type": "array", "items": { "$ref": "#/$defs/controlled_count" } }
+      }
+    },
+    "population_selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["population", "subpopulation"] },
+        "id": { "$ref": "#/$defs/stable_id" }
+      }
+    },
+    "temporal_selector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": { "const": "phase" },
+            "id": { "$ref": "#/$defs/stable_id" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "generation"],
+          "properties": {
+            "kind": { "const": "generation" },
+            "generation": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+          }
+        }
+      ]
+    },
+    "spatial_selector": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reference", "sequence"],
+          "properties": {
+            "kind": { "const": "sequence" },
+            "reference": { "$ref": "#/$defs/stable_id" },
+            "sequence": { "$ref": "#/$defs/stable_id" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reference", "sequence", "start", "end"],
+          "properties": {
+            "kind": { "const": "region" },
+            "reference": { "$ref": "#/$defs/stable_id" },
+            "sequence": { "$ref": "#/$defs/stable_id" },
+            "start": { "type": "integer", "minimum": 0 },
+            "end": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reference", "sequence", "locus"],
+          "properties": {
+            "kind": { "const": "locus" },
+            "reference": { "$ref": "#/$defs/stable_id" },
+            "sequence": { "$ref": "#/$defs/stable_id" },
+            "locus": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "selectors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["individual", "population", "temporal", "spatial", "group", "block", "technical_event"],
+      "properties": {
+        "individual": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "population": { "oneOf": [{ "$ref": "#/$defs/population_selector" }, { "type": "null" }] },
+        "temporal": { "oneOf": [{ "$ref": "#/$defs/temporal_selector" }, { "type": "null" }] },
+        "spatial": { "oneOf": [{ "$ref": "#/$defs/spatial_selector" }, { "type": "null" }] },
+        "group": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "block": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "technical_event": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "location"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "location": { "type": "string", "minLength": 1 }
+      }
+    },
+    "effective_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "parameter", "value", "winning_rule_id", "selectors", "provenance"],
+      "properties": {
+        "object_id": { "type": "string", "minLength": 1 },
+        "parameter": { "enum": ["ploidy", "variant_rate", "selfing_rate", "recombination_rate", "coverage", "error_rate", "contamination_rate", "output_enabled"] },
+        "value": { "type": ["number", "string", "boolean"] },
+        "winning_rule_id": { "type": "string", "minLength": 1 },
+        "selectors": { "$ref": "#/$defs/selectors" },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "event_subseed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "subseed"],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/stable_id" },
+        "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "biological_reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "status", "conditions"],
+      "properties": {
+        "level": { "const": "biological" },
+        "status": { "const": "not_applicable" },
+        "conditions": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "technical_reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "status", "conditions"],
+      "properties": {
+        "level": { "const": "technical" },
+        "status": { "const": "not_applicable" },
+        "conditions": { "type": "array", "maxItems": 0 }
+      }
+    },
+    "semantic_reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "status", "conditions"],
+      "properties": {
+        "level": { "const": "semantic" },
+        "status": { "const": "not_guaranteed" },
+        "conditions": {
+          "type": "array",
+          "prefixItems": [{ "const": "comparison_required" }],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        }
+      }
+    },
+    "binary_reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "status", "conditions"],
+      "properties": {
+        "level": { "const": "binary" },
+        "status": { "const": "not_guaranteed" },
+        "conditions": {
+          "type": "array",
+          "prefixItems": [{ "const": "format_specific_evidence_required" }],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        }
+      }
+    },
+    "program": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "genome-population-simulator" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture", "official_target"],
+      "properties": {
+        "os": { "const": "linux" },
+        "architecture": { "const": "x86_64" },
+        "official_target": { "const": "x86_64-unknown-linux-gnu" }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rustc", "cargo", "edition", "lock"],
+      "properties": {
+        "rustc": { "const": "1.97.1" },
+        "cargo": { "const": "1.97.1" },
+        "edition": { "const": "2024" },
+        "lock": { "const": "Cargo.lock" }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "enum": ["blake3", "getrandom", "rand_chacha", "rustix", "serde_json", "sha2", "toml"] },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "dependency_blake3": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "properties": { "name": { "const": "blake3" }, "version": { "const": "1.8.6" } } }
+      ]
+    },
+    "dependency_getrandom": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "properties": { "name": { "const": "getrandom" }, "version": { "const": "0.4.3" } } }
+      ]
+    },
+    "dependency_rand_chacha": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "properties": { "name": { "const": "rand_chacha" }, "version": { "const": "0.10.0" } } }
+      ]
+    },
+    "dependency_rustix": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "properties": { "name": { "const": "rustix" }, "version": { "const": "1.1.4" } } }
+      ]
+    },
+    "dependency_serde_json": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "properties": { "name": { "const": "serde_json" }, "version": { "const": "1.0.149" } } }
+      ]
+    },
+    "dependency_sha2": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "properties": { "name": { "const": "sha2" }, "version": { "const": "0.10.9" } } }
+      ]
+    },
+    "dependency_toml": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "properties": { "name": { "const": "toml" }, "version": { "const": "1.1.4" } } }
+      ]
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status"],
+      "properties": {
+        "name": { "enum": ["configuration_validation", "artifact_size_and_sha256", "result_json_internal_contract"] },
+        "status": { "const": "passed" }
+      }
+    },
+    "configuration_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "original_path", "copy"],
+      "properties": {
+        "kind": { "enum": ["general", "scenario"] },
+        "original_path": { "type": "string", "minLength": 1 },
+        "copy": { "$ref": "#/$defs/artifact" }
+      }
+    },
+    "event_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "subseed", "state", "manifest"],
+      "properties": {
+        "event_id": { "$ref": "#/$defs/stable_id" },
+        "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "state": { "const": "complete" },
+        "manifest": { "$ref": "#/$defs/artifact" }
+      }
+    },
+    "complete_execution_unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "state", "exportable", "diagnostic_code"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^RUN_[A-Z2-7]{26}$" },
+        "kind": { "const": "execution" },
+        "state": { "const": "complete" },
+        "exportable": { "const": true },
+        "diagnostic_code": { "type": "null" }
+      }
+    },
+    "failed_execution_unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "state", "exportable", "diagnostic_code"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^RUN_[A-Z2-7]{26}$" },
+        "kind": { "const": "execution" },
+        "state": { "const": "failed" },
+        "exportable": { "const": false },
+        "diagnostic_code": { "$ref": "#/$defs/diagnostic_code" }
+      }
+    },
+    "complete_event_unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "state", "exportable", "diagnostic_code"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stable_id" },
+        "kind": { "const": "event" },
+        "state": { "const": "complete" },
+        "exportable": { "const": true },
+        "diagnostic_code": { "type": "null" }
+      }
+    },
+    "embedded_diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "category", "message", "context"],
+      "properties": {
+        "code": { "$ref": "#/$defs/diagnostic_code" },
+        "category": { "enum": ["CONF", "INPUT", "FMT", "DOMAIN", "RES", "TOOL", "IO", "INTERNAL"] },
+        "message": { "type": "string", "minLength": 1 },
+        "context": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "general_outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "default_enabled", "explicitly_requested", "disabled"],
+      "properties": {
+        "minimum": {
+          "type": "array",
+          "prefixItems": [{ "const": "configuration_copies" }, { "const": "effective_config" }, { "const": "manifest_general" }],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "default_enabled": { "type": "array", "maxItems": 0 },
+        "explicitly_requested": { "type": "array", "maxItems": 0 },
+        "disabled": {
+          "type": "array",
+          "prefixItems": [{ "const": "reference" }, { "const": "truth" }, { "const": "vcf" }, { "const": "fastq" }, { "const": "bam" }, { "const": "cram" }],
+          "items": false,
+          "minItems": 6,
+          "maxItems": 6
+        }
+      }
+    },
+    "event_outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "default_enabled", "explicitly_requested", "disabled"],
+      "properties": {
+        "minimum": { "type": "array", "prefixItems": [{ "const": "manifest_event" }], "items": false, "minItems": 1, "maxItems": 1 },
+        "default_enabled": { "type": "array", "maxItems": 0 },
+        "explicitly_requested": { "type": "array", "maxItems": 0 },
+        "disabled": {
+          "type": "array",
+          "prefixItems": [{ "const": "truth" }, { "const": "vcf" }, { "const": "fastq" }, { "const": "bam" }, { "const": "cram" }],
+          "items": false,
+          "minItems": 5,
+          "maxItems": 5
+        }
+      }
+    },
+    "effective_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effective_config_kind", "schema_version", "source_path", "route", "reference", "scenario_ids", "event_ids", "individual_ids", "randomness", "normalizations", "controlled_frequency_sets", "effective_values"],
+      "properties": {
+        "effective_config_kind": { "const": "gps_effective_config" },
+        "schema_version": { "const": "1" },
+        "source_path": { "type": "string", "minLength": 1 },
+        "route": { "enum": ["direct", "evolution", "families"] },
+        "reference": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "total_genome_size", "sequences"],
+          "properties": {
+            "id": { "$ref": "#/$defs/stable_id" },
+            "total_genome_size": { "type": "integer", "minimum": 1 },
+            "sequences": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "class", "length", "ploidy"],
+                "properties": {
+                  "id": { "$ref": "#/$defs/stable_id" },
+                  "class": { "enum": ["chromosome", "scaffold"] },
+                  "length": { "type": "integer", "minimum": 1 },
+                  "ploidy": { "type": "integer", "minimum": 1, "maximum": 10 }
+                }
+              }
+            }
+          }
+        },
+        "scenario_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" }, "uniqueItems": true },
+        "event_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" }, "uniqueItems": true },
+        "individual_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" }, "uniqueItems": true },
+        "randomness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["root_seed", "seed_origin", "algorithm", "derivation_version", "catalog_version", "event_subseeds"],
+          "properties": {
+            "root_seed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "seed_origin": { "enum": ["declared", "system_csprng"] },
+            "algorithm": { "const": "ChaCha12" },
+            "derivation_version": { "const": 1 },
+            "catalog_version": { "const": "1" },
+            "event_subseeds": { "type": "array", "items": { "$ref": "#/$defs/event_subseed" } }
+          }
+        },
+        "normalizations": { "type": "array", "items": { "$ref": "#/$defs/normalization" } },
+        "controlled_frequency_sets": { "type": "array", "items": { "$ref": "#/$defs/controlled_frequency_set" } },
+        "effective_values": { "type": "array", "items": { "$ref": "#/$defs/effective_value" } }
+      }
+    },
+    "general_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_kind", "schema_version", "execution_id", "state", "route", "program", "platform", "toolchain", "dependencies", "tools", "profiles", "checks", "configuration_inputs", "effective_config", "events", "artifacts", "outputs", "normalizations", "reproducibility", "units", "diagnostics"],
+      "properties": {
+        "manifest_kind": { "const": "gps_execution_manifest" },
+        "schema_version": { "const": "1" },
+        "execution_id": { "type": "string", "pattern": "^RUN_[A-Z2-7]{26}$" },
+        "state": { "enum": ["complete", "failed"] },
+        "route": { "enum": ["direct", "evolution", "families"] },
+        "program": { "$ref": "#/$defs/program" },
+        "platform": { "$ref": "#/$defs/platform" },
+        "toolchain": { "$ref": "#/$defs/toolchain" },
+        "dependencies": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/dependency_blake3" },
+              { "$ref": "#/$defs/dependency_getrandom" },
+              { "$ref": "#/$defs/dependency_rand_chacha" },
+              { "$ref": "#/$defs/dependency_rustix" },
+              { "$ref": "#/$defs/dependency_serde_json" },
+              { "$ref": "#/$defs/dependency_sha2" },
+              { "$ref": "#/$defs/dependency_toml" }
+            ]
+          },
+          "allOf": [
+            { "contains": { "$ref": "#/$defs/dependency_blake3" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/dependency_getrandom" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/dependency_rand_chacha" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/dependency_rustix" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/dependency_serde_json" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/dependency_sha2" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/dependency_toml" }, "minContains": 1, "maxContains": 1 }
+          ]
+        },
+        "tools": { "type": "array", "maxItems": 0 },
+        "profiles": { "type": "array", "maxItems": 0 },
+        "checks": { "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": { "$ref": "#/$defs/check" } },
+        "configuration_inputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/configuration_input" } },
+        "effective_config": { "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/event_link" } },
+        "artifacts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/artifact" } },
+        "outputs": { "$ref": "#/$defs/general_outputs" },
+        "normalizations": { "type": "array", "items": { "$ref": "#/$defs/normalization" } },
+        "reproducibility": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/biological_reproducibility" },
+              { "$ref": "#/$defs/technical_reproducibility" },
+              { "$ref": "#/$defs/semantic_reproducibility" },
+              { "$ref": "#/$defs/binary_reproducibility" }
+            ]
+          },
+          "allOf": [
+            { "contains": { "$ref": "#/$defs/biological_reproducibility" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/technical_reproducibility" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/semantic_reproducibility" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/binary_reproducibility" }, "minContains": 1, "maxContains": 1 }
+          ]
+        },
+        "units": { "type": "array", "minItems": 1 },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/embedded_diagnostic" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "const": "complete" } } },
+          "then": {
+            "properties": {
+              "effective_config": { "$ref": "#/$defs/artifact" },
+              "diagnostics": { "maxItems": 0 },
+              "units": {
+                "items": {
+                  "oneOf": [
+                    { "$ref": "#/$defs/complete_execution_unit" },
+                    { "$ref": "#/$defs/complete_event_unit" }
+                  ]
+                },
+                "contains": { "$ref": "#/$defs/complete_execution_unit" },
+                "minContains": 1,
+                "maxContains": 1
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "state": { "const": "failed" } } },
+          "then": {
+            "properties": {
+              "events": { "maxItems": 0 },
+              "diagnostics": { "minItems": 1 },
+              "units": {
+                "minItems": 1,
+                "maxItems": 1,
+                "items": { "$ref": "#/$defs/failed_execution_unit" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "event_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_kind", "schema_version", "event_id", "state", "subseed", "artifacts", "outputs", "units", "diagnostics"],
+      "properties": {
+        "manifest_kind": { "const": "gps_event_manifest" },
+        "schema_version": { "const": "1" },
+        "event_id": { "$ref": "#/$defs/stable_id" },
+        "state": { "const": "complete" },
+        "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "artifacts": { "type": "array", "maxItems": 0 },
+        "outputs": { "$ref": "#/$defs/event_outputs" },
+        "units": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/complete_event_unit" } },
+        "diagnostics": { "type": "array", "maxItems": 0 }
+      }
+    }
+  }
+}

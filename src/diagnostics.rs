@@ -13,6 +13,18 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// Construye el diagnóstico estable para una invariante interna rota en
+    /// una frontera pública, sin exponer el constructor general del catálogo.
+    #[must_use]
+    pub fn internal_invariant(component: impl Into<String>, operation: impl Into<String>) -> Self {
+        Self::internal(
+            "GPS-INTERNAL-001",
+            "Una invariante interna considerada imposible se ha roto.",
+        )
+        .with("component", component.into())
+        .with("operation", operation.into())
+    }
+
     pub(crate) fn configuration(code: &'static str, message: &'static str) -> Self {
         Self {
             code,
@@ -39,6 +51,26 @@ impl Diagnostic {
             category: "RES",
             message,
             exit_code: 3,
+            context: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn domain(code: &'static str, message: &'static str) -> Self {
+        Self {
+            code,
+            category: "DOMAIN",
+            message,
+            exit_code: 1,
+            context: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn io(code: &'static str, message: &'static str) -> Self {
+        Self {
+            code,
+            category: "IO",
+            message,
+            exit_code: 5,
             context: BTreeMap::new(),
         }
     }

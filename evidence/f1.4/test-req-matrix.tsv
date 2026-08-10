@@ -1,0 +1,26 @@
+test_id	requirement	status	evidence	destination
+TEST-REQ-CONF-38	REQ-CONF-38	passed	tests/f1_4_traceability.rs::test_req_conf_38_validates_and_deduplicates_provided_individual_ids	F1.4
+TEST-REQ-CONF-101	REQ-CONF-101	passed	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.4
+TEST-REQ-CONF-123	REQ-CONF-123	passed	tests/results_publication.rs::effective_json_is_semantically_stable_under_toml_reordering	F1.4
+TEST-REQ-IND-25	REQ-IND-25	reassigned	tests/identity.rs::all_a6_vectors_match_material_and_identifier	F2.3/F6.1: falta un creador real que asigne el ID automático al individuo
+TEST-REQ-IND-26	REQ-IND-26	reassigned	tests/identity.rs::registry_separates_categories_but_rejects_reuse_in_the_same_scope	F2.4/F3.5/F7.7/F8.5: faltan estado genotípico, observaciones, linaje y archivos del individuo
+TEST-REQ-EVO-63	REQ-EVO-63	reassigned	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.5/F5.6: existen directorios/manifiestos/subsemillas, pero faltan referencias y resultados reales enlazados
+TEST-REQ-MAN-01	REQ-MAN-01	passed	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.4
+TEST-REQ-MAN-02	REQ-MAN-02	passed	tests/results_publication.rs::schemas_reject_truncation_unknown_fields_and_wrong_class_or_version	F1.4
+TEST-REQ-MAN-03	REQ-MAN-03	passed	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.4
+TEST-REQ-MAN-04	REQ-MAN-04	passed	tests/results_publication.rs::scenario_inputs_are_copied_exactly_and_invalid_scenario_ids_create_no_workspace	F1.4
+TEST-REQ-MAN-05	REQ-MAN-05	passed	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.4
+TEST-REQ-MAN-08	REQ-MAN-08	passed	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.4
+TEST-REQ-MAN-10	REQ-MAN-10	reassigned	tests/results_publication.rs::effective_json_is_semantically_stable_under_toml_reordering	F2.3/F5.5/F9.7: la procedencia de reglas existe, pero faltan consumidores de variantes y valores por individuo/región
+TEST-REQ-MAN-32	REQ-MAN-32	passed	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.4
+TEST-REQ-MAN-69	REQ-MAN-69	passed	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.4
+TEST-REQ-MAN-72	REQ-MAN-72	reassigned	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.5: faltan referencia y recursos comunes reales
+TEST-REQ-MAN-81	REQ-MAN-81	passed	tests/results_publication.rs::manifest_preserves_every_dtc049_value_and_exact_f64_roundtrip	F1.4
+TEST-REQ-MAN-83	REQ-MAN-83	reassigned	tests/results_publication.rs::artifact_and_unit_state_machines_reject_every_premature_completion	F2.5/F3.5: ejecución, evento y artefacto tienen consumidor; falta un conjunto real
+TEST-REQ-MAN-88	REQ-MAN-88	passed	tests/results_publication.rs::effective_json_is_semantically_stable_under_toml_reordering	F1.4
+TEST-REQ-SAL-03	REQ-SAL-03	passed	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.4
+TEST-REQ-SAL-04	REQ-SAL-04	passed	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.4
+TEST-REQ-SAL-17	REQ-SAL-17	reassigned	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F5.6: separación por evento demostrada; falta el caso real con varias referencias de mapeo
+TEST-REQ-SAL-18	REQ-SAL-18	reassigned	tests/results_publication.rs::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json	F1.5: falta el área común real de referencias e índices
+TEST-REQ-SAL-22	REQ-SAL-22	passed	tests/results_publication.rs::artifact_and_unit_state_machines_reject_every_premature_completion	F1.4
+TEST-REQ-SAL-26	REQ-SAL-26	passed	tests/results_publication.rs::run_rejection_creates_no_destination_and_existing_destination_is_not_clobbered	F1.4

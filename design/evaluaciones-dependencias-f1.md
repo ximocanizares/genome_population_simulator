@@ -154,3 +154,61 @@ observada con `pure` no compiló C ni ensamblador. `cargo audit` 0.22.2 cargó
 1198 avisos RustSec, examinó las 34 dependencias del lock ampliado y terminó con
 código 0, sin vulnerabilidades. Los cuatro vectores A5 pasaron tanto por el
 oráculo BLAKE3 de prueba independiente como por la implementación productiva.
+
+## D1 — JSON, JSON Schema, SHA-256 y publicación no-clobber
+
+**Decisión (10 de agosto de 2026): aprobada para F1.4.** Se aceptan
+`serde_json 1.0.149`, `sha2 0.10.9` y `rustix 1.1.4`, fijados como versiones
+exactas. `serde_json` se compila sin características predeterminadas y solo con
+`std` y `float_roundtrip`; `sha2`, sin características predeterminadas; y `rustix`, sin
+características predeterminadas y solo con `fs` y `std` (esta última aporta la
+frontera segura de rutas `Path`). JSON Schema Draft 2020-12 se
+publica como esquemas estáticos propios y se contrasta con el validador externo
+ya aprobado en A7; no necesita una dependencia Cargo de validación.
+
+- **Propósito y REQ:** `serde_json` produce los documentos RFC 8259 de
+  DTC-035/DTC-036; `sha2` calcula SHA-256 incremental sobre bytes exactos para
+  DTC-040; `rustix` encapsula la operación Linux
+  `renameat2(..., RENAME_NOREPLACE)` de DTC-045. Ningún tipo de estos crates
+  cruza los contratos propios de configuración, identidad, artefacto o
+  publicación.
+- **Corrección y evidencia:** `serde_json` rechaza números no finitos y escribe
+  `f64` con recuperación exacta; `float_roundtrip` es necesario para que su
+  lector recupere también los bits exactos de los vectores DTC-049. Sin
+  `preserve_order`, los mapas mantienen orden
+  determinista por clave. `sha2` implementa SHA-256 incremental y se contrasta
+  con GNU `sha256sum` 9.4. `rustix::fs::renameat_with` expone
+  `RenameFlags::NOREPLACE` sin patrón *check-then-rename*; se prueban destino
+  existente, carrera de procesos y operación no soportada mediante doble.
+- **Versiones y estabilidad:** las APIs usadas son pequeñas y quedan aisladas
+  en adaptadores propios. Las versiones declaran respectivamente Rust 1.68,
+  1.85 y 1.63 como mínimo, compatibles con el toolchain fijado 1.97.1. Toda
+  actualización será aislada y repetirá esquemas, SHA, carrera y puertas Cargo.
+- **Licencias y mantenimiento:** `serde_json` y sus dependencias usan MIT o
+  Apache-2.0; `sha2` y el ecosistema RustCrypto, MIT o Apache-2.0; `rustix`,
+  Apache-2.0 con LLVM-exception, Apache-2.0 o MIT. Los tres proyectos tienen
+  mantenimiento activo y licencias compatibles con la distribución MIT.
+- **Seguridad:** el cierre ejecuta `cargo audit` sobre el lock final. El JSON se
+  valida además mediante CPython/jsonschema ajeno al productor; SHA-256 no se
+  sustituye por BLAKE3; y la publicación no ofrece un *fallback* con carrera.
+- **Características, código nativo y scripts:** las características elegidas no
+  activan `preserve_order`, `arbitrary_precision`, `raw_value`, async ni E/S de
+  red. Los crates son Rust puro. `rustix` usa la ABI Linux mediante
+  `linux-raw-sys`/`libc` según plataforma, sin biblioteca C externa ni proceso
+  de ejecución. Los paquetes seleccionados no requieren compilar código C/C++.
+- **Rendimiento y coste:** los documentos F1 son acotados y se materializan una
+  vez; los artefactos se hashean por flujo sin una segunda copia en memoria; la
+  publicación realiza una única llamada atómica. El árbol y las características
+  finales se conservan con `cargo tree --locked -e features`.
+
+Se rechazan un serializador JSON propio, una implementación propia de SHA-256,
+usar BLAKE3 como integridad publicada, `std::fs::rename` con comprobación previa
+y llamar a `mv` como proceso externo. También se rechaza integrar un validador
+JSON Schema en el runtime: DTC-047 lo reserva a pruebas y aceptación.
+
+**Corrección durante D11.** La primera prueba de ida y vuelta del manifiesto
+detectó que compilar `serde_json` solo con `std` recuperaba un vector a dos ULP
+del valor original. Se añadió `float_roundtrip`, se conservó el mismo contrato
+público y la repetición exige igualdad de `to_bits()` para tolerancia, sumas,
+deltas y todos los valores antes/después. La selección sin esta característica
+queda rechazada por evidencia ejecutada.
