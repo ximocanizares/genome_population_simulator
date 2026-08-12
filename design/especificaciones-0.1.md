@@ -2,7 +2,7 @@
 
 - **Versión:** 0.1
 - **Estado:** borrador actualizado
-- **Fecha:** 10 de agosto de 2026
+- **Fecha:** 12 de agosto de 2026
 - **Fuentes disponibles:** `README.md`, información confirmada por el usuario y
   la decisión posterior de usar Rust recogida en
   [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
@@ -15,8 +15,9 @@ confirmados para v1. Las elecciones técnicas pendientes se separan del contrato
 La versión 0.1 sigue siendo un borrador documental. Sus requisitos son
 obligatorios y las 27 preguntas funcionales de la revisión anterior están
 resueltas. La ampliación del 10 de agosto de 2026 confirma la referencia
-reducida y la aplicación Marimo, pero conserva dos cuestiones nuevas marcadas
-`PENDIENTE DE REVISIÓN`; aún deben planificarse representaciones técnicas y
+reducida y la aplicación Marimo; la revisión del 12 de agosto resuelve matrices
+y espectros SNV. El panel de haplotipos conserva su cuestión técnica marcada
+`PENDIENTE DE REVISIÓN`; aún deben planificarse representaciones restantes y
 convertirse los ACE en pruebas.
 
 La sección 4 es la fuente normativa de requisitos funcionales. Las secciones 2,
@@ -357,6 +358,12 @@ por réplica, sin presentar un lote incompleto como completo. Esta capacidad sol
 podrá definirse después de que existan las vías F3–F8 y deberá incorporarse a
 Marimo cuando se implemente; no añade cardinalidad de referencias a F1.6 ni
 controles a F2.0.
+
+La conversión de VCF poblacionales a la matriz canónica `alt_af` queda como
+utilidad auxiliar futura (DTF-038); F2 no acepta VCF como fuente de frecuencias
+ni infiere estas desde genotipos, `AC/AN`, MAF o frecuencia derivada. También se
+aplaza la generación aleatoria de loci SNV multialélicos (DTF-039). F2 sí admite
+varios `ALT` en una matriz suministrada que supere sus comprobaciones.
 
 ## 4. Requisitos confirmados
 
@@ -966,17 +973,24 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   versión de la regla de selección. Debe conservar los valores declarados sin
   sustituirlos silenciosamente por el resultado realizado.
 - **REQ-CONF-128.** La creación aleatoria de individuos desde una población de
-  origen debe aceptar exactamente una matriz de frecuencias SNV suministrada o
-  solicitar que el simulador la genere. La matriz debe identificar su referencia
-  estructural, sus poblaciones de origen y, para cada alelo alternativo, secuencia,
-  coordenada, `REF`, `ALT` y frecuencia por población.
+  origen debe aceptar exactamente una matriz de frecuencias SNV canónica ya
+  preparada o solicitar que el simulador la genere. La matriz debe pertenecer a
+  una única referencia estructural y contener una o varias poblaciones. Cada
+  individuo debe seleccionar exactamente una de ellas; sus IDs deben coincidir
+  literalmente y no se admite mezcla de ancestrías en F2. Varias referencias
+  exigen matrices independientes y una población no seleccionada puede
+  conservarse como disponible sin intervenir en los cálculos realizados.
 - **REQ-CONF-129.** La generación de una matriz de frecuencias SNV debe poder
-  configurar un número exacto de loci o una cantidad media o densidad, la
-  distribución espacial, el espectro de sustituciones y un espectro de
-  frecuencias alélicas. V1 debe incluir al menos un perfil de ejemplo derivado de
-  datos empíricos públicos, identificado por nombre, versión y fuente, y debe
-  permitir suministrar otro mediante un fichero. La persona usuaria debe elegir
-  el perfil o fichero; nunca debe aplicarse implícitamente un espectro empírico.
+  configurar exactamente uno de: número exacto de loci candidatos, media
+  Poisson o densidad por Mb convertida a media sobre las bases elegibles; además
+  debe configurar la distribución espacial, el espectro de sustituciones y un
+  espectro de frecuencias `alt_af`. El número exacto se conserva como candidatos
+  y la media/densidad registra media y sorteo; un candidato descartado después
+  no se reemplaza. V1 debe incluir el ejemplo explícito y versionado
+  `1000g_phase3_v5_sfs_v1`, global y para AFR, AMR, EAS, EUR y SAS, derivado de
+  SNV autosómicos bialélicos `PASS`, con fuente, filtros, receta y SHA-256. Es
+  solo un ejemplo seleccionable: nunca se carga por defecto. La persona usuaria
+  debe elegir expresamente ese perfil u otro fichero válido.
 - **REQ-CONF-130.** Al convertir una matriz de frecuencias en genotipos, cada
   población de origen debe elegir entre Hardy-Weinberg, que es el modo
   predeterminado, y un coeficiente de endogamia `F`. El coeficiente `F` solo se
@@ -1498,28 +1512,48 @@ expansión frente a contracción, pero no el tamaño del salto.
   Una inserción configurada explícitamente o copiada desde una secuencia
   existente puede contener `N` y debe conservarla exactamente.
 - **REQ-IND-60.** Cada fila de una matriz de frecuencias SNV debe identificar un
-  alelo `ALT` A, C, G o T distinto del `REF` A, C, G o T de la referencia exacta.
-  Un locus multialélico puede ocupar varias filas, pero no puede repetir un
-  alelo ni discrepar en `REF`; para cada población, las frecuencias alternativas
-  deben ser finitas, estar entre 0 y 1 y sumar como máximo 1. La frecuencia de
-  referencia es el resto hasta 1.
+  alelo `ALT` A, C, G o T distinto del `REF` A, C, G o T de la referencia exacta,
+  con `contig`, `position`, `ref`, `alt`, `population_id` y `alt_af`. La única
+  semántica aceptada es la frecuencia ALT; no se aceptan ni convierten MAF, DAF,
+  `AC/AN` o valores ausentes. `position` usa base 1 cerrada y el nombre de
+  secuencia debe coincidir literalmente con el FASTA. Un locus multialélico
+  suministrado puede ocupar varias filas, pero no puede repetir un alelo ni
+  discrepar en `REF`; se exige una fila por combinación `ALT`×población. Cada
+  `alt_af` debe ser un `f64` finito en `[0,1]` y puede usar notación decimal o
+  científica. Para cada población, la suma ALT no debe superar 1 fuera de la
+  tolerancia general; el resto es la frecuencia de referencia. Un exceso dentro
+  de la tolerancia se normaliza y registra; uno mayor se rechaza.
 - **REQ-IND-61.** Al generar la matriz, el sistema debe seleccionar loci válidos
-  sin reemplazo conforme al número o recuento sorteado y a la distribución
-  espacial, obtener `REF` de la referencia, elegir `ALT` mediante el espectro de
-  sustituciones y asignar una frecuencia mediante el espectro alélico efectivo.
-  No debe situar SNV sobre `N`, producir un locus monomórfico ni redondear una
-  frecuencia a cero o uno sin que el perfil lo permita expresamente.
+  sin reemplazo conforme al número de candidatos y a la distribución espacial,
+  obtener `REF` de la referencia, elegir un único `ALT` mediante el espectro de
+  sustituciones y asignar frecuencias por población mediante el espectro
+  alélico efectivo. F2 genera solo loci bialélicos. `uniform` es el único perfil
+  espacial incorporado; `weighted_regions` usa intervalos base 1 cerrados no
+  solapados, pesos finitos no negativos y un `outside_weight` explícito. La
+  probabilidad por base es proporcional a su peso, peso cero la excluye y debe
+  quedar espacio positivo. No debe situar SNV sobre `N`.
 - **REQ-IND-62.** Para crear individuos desde una matriz de frecuencias, el
   sistema debe muestrear en cada locus los alelos de sus copias conforme a la
   población de origen y al modelo genotípico efectivo. Con Hardy-Weinberg, las
   copias se muestrean de forma independiente; en diploides con `F`, deben usarse
   las fórmulas bialélicas o multialélicas ya fijadas en REQ-EVO-47/48. La
-  asignación a copias concretas debe conservar fase aunque la matriz no defina
-  asociación entre loci.
+  composición obtenida debe permutarse reproduciblemente entre copias y
+  conservar fase aunque la matriz no defina asociación entre loci. Los loci se
+  fasean independientemente y esta fase conocida no representa LD. Un genotipo
+  explícito incompatible bloquea por defecto; la opción específica
+  `--allow-incompatible-genotypes` puede conservarlo como restricción forzada y
+  trazada sin modificar la matriz, pero nunca relaja referencia, coordenadas,
+  alelos, ploidía, dosis, formato, sumas o publicación segura.
 - **REQ-IND-63.** La misma matriz o sus mismos parámetros generadores, la misma
   semilla, los mismos IDs de población e individuo y la misma versión deben
   reproducir matriz, genotipos y fase. Añadir individuos no debe cambiar la
-  matriz ni los individuos ya identificados; solo añade nuevos sorteos aislados.
+  matriz ni los individuos ya identificados; añadir una población no debe
+  cambiar posiciones, alelos ni frecuencias preexistentes y reordenar filas no
+  debe cambiar ningún resultado. Deben existir subsemillas separadas para
+  selección de loci, `ALT` por variante, frecuencia por población/variante,
+  genotipo por población/individuo/variante y fase por individuo/variante. Sus
+  nombres y versión deben registrarse. No se promete estabilidad de prefijo al
+  cambiar el número o la distribución espacial de loci.
 - **REQ-IND-64.** En una misma población inicial, el modo de matriz de frecuencias
   SNV y la generación inicial de SNP por cantidad o densidad individual son
   mutuamente excluyentes. Los SNV explícitos pueden actuar como restricciones
@@ -1531,6 +1565,50 @@ expansión frente a contracción, pero no el tamaño del salto.
   copias observadas, los recuentos y frecuencias realizados y, cuando proceda,
   los genotipos esperados y realizados. La variación por tamaño finito debe
   informarse y no corregirse modificando genotipos ya sorteados.
+
+El espectro de frecuencias alélicas es una tabla versionada de componentes no
+solapados. Cada componente es un valor `fixed` de `[0,1]` o un intervalo
+`[min_af,max_af)` con peso y muestreo `linear_uniform` o `log_uniform`; el
+último puede alcanzar 1 y `log_uniform` exige un mínimo positivo. Los pesos son
+finitos y no negativos, al menos uno es positivo y se normalizan en orden
+canónico. El modo predeterminado `stochastic` sortea el componente de cada
+candidato; el modo `exact` reparte candidatos por población mediante mayores
+restos y resuelve empates por el orden estable de las filas. Las poblaciones se
+generan independientemente y pueden asignar a un mismo locus frecuencias
+distintas, cero o uno. Los intervalos incorporados de 1000 Genomes separan 0,
+`[min_positive,0.001)`, `[0.001,0.005)`, `[0.005,0.01)`, `[0.01,0.05)`,
+`[0.05,0.10)`, `[0.10,0.50)`, `[0.50,0.90)`, `[0.90,0.99)`, `[0.99,1)` y 1;
+usan muestreo logarítmico por debajo de 0,05 y lineal desde ese valor.
+
+El espectro de sustituciones canónico contiene los 12 cambios dirigidos. El
+perfil predeterminado `uniform_snv12_v1` da el mismo peso a los tres `ALT` de
+cada `REF`. El ejemplo seleccionable `1000g_phase3_v5_snv12_v1` conserva los
+recuentos dirigidos del mismo corpus y no se presenta como tasa universal de
+mutación. Una tabla propia prevalece. El atajo `ti_tv_ratio=R`, finito y no
+negativo, asigna peso `2R` a la transición y peso 1 a cada transversión; excluir
+todas las transversiones exige una tabla explícita. La configuración efectiva
+siempre conserva los 12 pesos resultantes.
+
+Un `ALT` con `alt_af=0` en todas las poblaciones se elimina de la vista canónica
+activa y se registra; en un locus multialélico se conservan los demás `ALT` y el
+locus solo desaparece si ninguno queda. Un `ALT` fijado, incluso en todas las
+poblaciones, se conserva. Los eliminados siguen contando entre los candidatos
+generados y no se reemplazan. Una matriz activa vacía es válida, pero `run` debe
+exigir la confirmación reproducible `--allow-empty-snv-matrix`; Marimo ofrece la
+misma confirmación explícita.
+
+Una matriz suministrada se prepara sin modificar el original. La entrada mínima
+contiene las seis columnas de REQ-IND-60 y puede conservar `source_id`; la orden
+auxiliar calcula IDs canónicos, valida contra el FASTA, ordena, filtra y publica
+atómicamente `population_snvs.tsv` y `population_snvs.metadata.json`. El JSON
+declara versión, referencia y SHA-256 observado, coordenadas, poblaciones,
+procedencia y el SHA-256 del TSV; por población puede conservar descripción,
+tamaño muestral o número de alelos, fuente, filtros y fecha o versión. En una
+matriz empírica esos campos se proporcionan o se declaran explícitamente como
+`unknown`, nunca se inventan. Configuración y manifiesto conservan a su vez el
+SHA-256 del JSON. `run` solo consume este par canónico y vuelve a comprobar el
+FASTA. Una orden independiente y la ruta integrada pueden generar el mismo par
+con los mismos bytes; este es reutilizable sin volver a sortear la matriz.
 
 El identificador de individuo distingue a una entidad biológica simulada. Es
 distinto del identificador de un evento de muestreo, que distingue una
@@ -1591,8 +1669,9 @@ cada frecuencia o intervalo de frecuencias. No determina las posiciones ni los
 cambios `REF`→`ALT`, y tampoco contiene asociación entre loci. Un espectro
 suministrado debe expresar valores o intervalos ordenados, no solapados y con
 pesos finitos no negativos que, tras aplicar la política numérica general, sumen
-1. Debe declarar si usa frecuencia del alelo alternativo, frecuencia derivada o
-frecuencia del alelo menor; v1 no convertirá silenciosamente entre ellas.
+1. V1 solo admite `alt_af`, la frecuencia del alelo alternativo; rechaza
+frecuencia derivada, MAF y cualquier entrada que exija inferir o convertir su
+semántica.
 
 Los perfiles empíricos dependen de la población, el tamaño de muestra, la región
 del genoma y los filtros. Como ejemplo documentado, 1000 Genomes fase 3 observó
@@ -1605,7 +1684,10 @@ perfil humano universal ni autorizan a mezclar estudios. Todo ejemplo incorporad
 debe conservar fuente, versión, población, muestra, región, filtros, definición
 de frecuencia y transformación aplicada. Fuentes primarias: [1000 Genomes fase
 3](https://www.nature.com/articles/nature15393) y
-[ExAC](https://www.nature.com/articles/nature19057).
+[ExAC](https://www.nature.com/articles/nature19057). La documentación oficial
+de IGSR confirma los campos `AF` globales y por superpoblación usados para
+preparar el ejemplo: [frecuencias de alelos de 1000
+Genomes](https://www.internationalgenome.org/faq/how-can-i-get-allele-frequency-my-variant/).
 
 Todavía deben definirse el formato técnico de las regiones, el catálogo y los
 parámetros de las distribuciones probabilísticas adicionales, y cómo se
@@ -3995,9 +4077,13 @@ comparten una política de aceptación.
   validar o ejecutar cualquier incompatibilidad entre la versión de la
   aplicación y las versiones de esquema o catálogos del binario.
 - **REQ-VAL-55.** La validación de la matriz de frecuencias SNV debe comprobar
-  referencia y coordenadas, `REF`/`ALT`, duplicados, sumas multialélicas,
-  poblaciones, definición y normalización del espectro, modelo Hardy-Weinberg o
-  `F` y aislamiento de subsemillas. Sobre un corpus conocido debe comparar
+  el par TSV+JSON y sus SHA-256, referencia y coordenadas, coincidencia literal
+  de `REF`, columnas y semántica `alt_af`, combinaciones población×ALT,
+  duplicados, sumas multialélicas, filtrado global de ceros, IDs y orden,
+  poblaciones, espectros no solapados, regiones no solapadas, reparto exacto o
+  estocástico, perfiles, modelo Hardy-Weinberg o `F`, confirmaciones limitadas y
+  aislamiento de subsemillas. Debe rechazar VCF y semánticas de frecuencia
+  alternativas. Sobre corpus y generador independientes debe comparar matriz,
   frecuencias y genotipos esperados y realizados sin exigir que una muestra
   finita reproduzca exactamente las frecuencias objetivo.
 - **REQ-VAL-56.** La validación del panel de haplotipos debe reconstruir cada
@@ -4472,10 +4558,14 @@ VCF y no constituya un experimento de secuenciación.
   y permitir comprobar qué cromosomas de origen se incluyeron u omitieron y si
   se utilizó el único fragmento residual permitido.
 - **REQ-MAN-91.** La creación desde frecuencias SNV debe registrar si la matriz
-  fue suministrada o generada, su ruta y SHA-256, referencia, poblaciones,
-  parámetros de número/densidad/espacio/sustitución, perfil de frecuencias con
-  fuente y versión, semilla y subsemillas, modelo Hardy-Weinberg o `F` y
-  frecuencias y genotipos esperados y realizados.
+  fue suministrada, generada o reutilizada; rutas, clases, versiones, tamaños y
+  SHA-256 del TSV, JSON y referencia; poblaciones disponibles y seleccionadas;
+  parámetros declarados y efectivos de candidatos, Poisson/densidad, espacio,
+  sustituciones y frecuencias; fuente, filtros y versión de perfiles; semilla,
+  ámbitos y subsemillas; modelo Hardy-Weinberg o `F`; loci sorteados, descartes
+  globales, loci activos y repartos antes/después; frecuencias y genotipos
+  esperados y realizados; y toda autorización de genotipo incompatible o matriz
+  vacía.
 - **REQ-MAN-92.** La creación desde un panel de haplotipos debe registrar su ruta
   y SHA-256, referencia y población, frecuencias objetivo y realizadas, modo con
   o sin recombinación, subsemillas y, cuando corresponda, mapas, puntos de cruce
@@ -4702,10 +4792,14 @@ Esta decisión no forma parte de la especificación funcional.
   configurable sin pruebas de equivalencia UI→TOML→`EffectiveConfig` y controles
   accesibles para esa capacidad.
 - **REQ-UI-14.** En F2, Marimo debe permitir elegir una matriz de frecuencias SNV
-  suministrada o generada, seleccionar o cargar el espectro alélico, configurar
-  población, número o densidad, espacio, sustituciones, Hardy-Weinberg o `F`, y
-  previsualizar matriz, sumas y distribuciones sin crear individuos hasta una
-  ejecución explícita validada.
+  suministrada, generada o reutilizada; preparar una entrada mediante la misma
+  orden auxiliar del binario y la acción «Vincular y verificar referencia»;
+  seleccionar o cargar el espectro alélico; configurar población, candidatos,
+  espacio, sustituciones, Hardy-Weinberg o `F`; y previsualizar matriz, sumas,
+  descartes y distribuciones sin crear individuos. Las confirmaciones de
+  genotipos incompatibles y matriz vacía deben mostrar individuos/loci o el
+  resumen afectado y traducirse a los argumentos específicos, nunca a un
+  `--force` general.
 - **REQ-UI-15.** En la fase posterior correspondiente, Marimo debe permitir
   cargar y previsualizar el panel de haplotipos, sus poblaciones y frecuencias y
   elegir de forma excluyente creación intacta o con recombinación. La interfaz
@@ -4900,7 +4994,7 @@ pendientes.
 | **ACE-113. Procedencia y reconstrucción de referencia reducida** | Los intervalos se ordenan por cromosoma y coordenada, se concatenan en orientación directa, omiten cromosomas sin selección y no crean secuencias vacías. `N` se copia y cuenta. FASTA canónico, mapa derivada↔origen, SHA-256, configuración efectiva y manifiesto permiten reconstruir exactamente cada base y explican cromosomas omitidos y residual | Reconstrucción con lector independiente, mapa con bordes base 1 cerrados, `sha256sum`, FASTA con `N` y corrupción deliberada de cada enlace |
 | **ACE-114. Equivalencia de autoría Marimo** | Todas las opciones implementadas están en una de las nueve pestañas mínimas. Escalares usan controles tipados; listas y reglas, tablas con alta/baja/reordenación y selectores visibles. Importar, editar, previsualizar y exportar como unidad el TOML general y cero o varios escenarios conserva significado, IDs, orden y enlaces/rutas relativas. El binario Rust valida y resuelve; cualquier cambio de cualquier documento invalida la validación previa y una incompatibilidad, escenario ausente o duplicado se rechaza | Matriz opción→pestaña/control; conjunto sin escenarios y conjuntos multiescenario con rutas relativas/espacios/faltantes/duplicados; comparación UI→conjunto TOML→`EffectiveConfig` o diagnóstico con conjunto manual equivalente |
 | **ACE-115. Ejecución segura y accesible desde Marimo** | La aplicación nunca ejecuta automáticamente ni usa shell. Una acción explícita tras validación vigente lanza `run` con argumentos separados y destino no-clobber revisado. Muestra estado, código, logs, diagnósticos y enlaces/resúmenes sin cargar artefactos genómicos grandes. Funciona localmente en Ubuntu/WSL2 Linux y ofrece teclado, foco, etiquetas, ayuda y estados no basados solo en color. Cada capacidad F2–F9 añade controles antes de cerrar | Proceso falso y binario real; cambio posterior a validar; destino existente; logs grandes y artefacto grande; revisión de teclado/foco/color; puerta transversal por hito |
-| **ACE-116. Población inicial desde frecuencias SNV** | La ejecución acepta o genera una matriz versionada compatible con la referencia. Un espectro explícito, normalmente sesgado hacia frecuencias bajas, asigna frecuencias por población; Hardy-Weinberg es predeterminado y `F` solo se admite en diploides. Cada individuo recibe genotipos y fase reproducibles, los loci permanecen independientes y frecuencias/genotipos esperados y realizados se registran sin corregir el muestreo finito | Matriz manual pequeña; perfil empírico versionado; HWE y F=0/intermedio/1; multialélico; semilla e individuo añadido; errores de suma, duplicado, referencia y `N` |
+| **ACE-116. Población inicial desde frecuencias SNV** | La ejecución prepara, genera o reutiliza el par canónico TSV+JSON enlazado a una referencia exacta. Solo admite `alt_af`; genera loci bialélicos candidatos sin reemplazo mediante espacio, sustituciones y espectro explícitos y acepta multialelia suministrada. Las poblaciones asignan frecuencias independientemente, permiten 0/1, eliminan `ALT` globalmente ausentes sin reemplazo y conservan fijados. HWE es predeterminado y `F` solo diploide; cada individuo pertenece a una población y recibe genotipo/fase reproducibles sin LD ni corrección por muestra finita. Perfiles empíricos son ejemplos explícitos, nunca predeterminados. Las dos excepciones de ejecución son específicas, visibles y trazadas | Preparación y hashes; tabla y VCF rechazado; modos exacto/mayores restos y estocástico; regiones/pesos; 12 sustituciones y Ti/Tv; perfiles uniformes/1000G; ceros/fijados; matriz vacía; multialélico; HWE/F; subsemillas y reordenación; flags limitados; errores de suma, duplicado, referencia y `N` |
 | **ACE-117. Individuos desde panel de haplotipos** | Un panel versionado proporciona haplotipos faseados y frecuencias por población. El modo intacto muestrea copias completas sin mosaicos; el modo recombinante usa el motor y los mapas comunes, conserva fuentes, puntos y segmentos y no promete conservar LD. Ambos registran objetivo, realizado, semilla y procedencia y tienen controles Marimo en su fase | Panel manual reconstruible; frecuencias derivadas; modos excluyentes; intacto sin cortes; mosaico con puntos conocidos; reconstructor independiente y equivalencia UI→TOML→resultado |
 
 Estos criterios son cualitativos y deberán convertirse en pruebas durante la
@@ -4975,13 +5069,13 @@ esquema y catálogos e invoca el binario sin shell. Esta elección no puede move
 validación o semántica biológica fuera del núcleo Rust ni conceder a Marimo
 autoridad sobre la configuración efectiva o los manifiestos.
 
-**PENDIENTE DE REVISIÓN TÉCNICA — matrices y espectros SNV.** Se elegirán el
-formato versionado de la matriz de frecuencias y del espectro suministrado, la
-representación exacta de valores o intervalos y el algoritmo que muestrea una
-frecuencia dentro de un intervalo. También se decidirá cómo se prepara y
-distribuye el ejemplo derivado de 1000 Genomes sin confundir sus tres intervalos
-resumidos con una distribución continua ni perder población, muestra y filtros.
-La decisión debe aportar vectores y un generador de referencia independiente.
+**DECISIÓN TÉCNICA RESUELTA — matrices y espectros SNV.** DTPD-118 fija el par
+canónico TSV+JSON, la preparación y generación reutilizables, `alt_af` como única
+frecuencia, intervalos no solapados con muestreo fijo/lineal/logarítmico, modos
+estocástico y exacto por mayores restos, poblaciones independientes, espacio
+uniforme o ponderado y 12 sustituciones dirigidas. Los perfiles de 1000 Genomes
+son ejemplos versionados de selección expresa, no valores predeterminados. La
+validación debe aportar vectores y productores/oráculos independientes.
 
 **PENDIENTE DE REVISIÓN TÉCNICA — panel de haplotipos.** Antes de F6.4 se elegirá
 el formato versionado que representa haplotipos y frecuencias sin perder fase,

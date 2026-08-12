@@ -2,7 +2,7 @@
 
 - **Versión:** 0.1
 - **Estado:** ampliación F1.6/F2.0 pendiente de revisión; la base anterior de F1 permanece aprobada
-- **Fecha:** 10 de agosto de 2026
+- **Fecha:** 12 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Hoja de ruta:** [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
@@ -428,7 +428,7 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 | Coordenadas y transformaciones | Validar intervalos y convertir convenios sin ambigüedad | Coordenadas etiquetadas → coordenadas validadas o correspondencias | Posee reglas de conversión; consulta referencias y segmentos |
 | Motor de verdad genómica | Crear y transformar haplotipos y eventos | Referencia, cambios y flujos aleatorios → estado faseado | Posee el estado genotípico, eventos, segmentos y correspondencias |
 | Creación directa | Traducir la vía directa a operaciones del motor genómico | Configuración efectiva → individuos | Posee solo el estado de progreso; el motor posee la verdad resultante |
-| Fuentes de variación poblacional | Admitir o generar espectros, matrices SNV y paneles de haplotipos sin crear todavía individuos | Recursos/configuración/semilla → fuente poblacional inmutable, auditoría o error | Posee recursos normalizados, versiones, perfiles y estadísticas de generación; consulta referencia, coordenadas y aleatoriedad |
+| Fuentes de variación poblacional | Preparar, admitir, generar o reutilizar espectros y matrices SNV canónicas sin crear todavía individuos; posteriormente admitir paneles de haplotipos | Tabla mínima o par TSV+JSON/configuración/semilla → fuente poblacional inmutable, par publicado, auditoría o error | Posee recursos normalizados, IDs, versiones, perfiles, descartes y estadísticas de generación; consulta referencia, coordenadas, SHA-256, aleatoriedad y publicación |
 | Inicialización poblacional | Crear fundadores, frecuencias, genotipos, LD, HWE y F diploide inicial | Fuente poblacional y configuración → población inicial o error previo | Posee estadísticas solicitadas/realizadas y el estado «no aplicable» de F fuera de diploides; entrega verdad al repositorio biológico |
 | Reproducción y recombinación | Validar ploidía y estructura canónica, formar bivalentes, gametos y descendencia trazable | Progenitores, mapas/tasas y flujo → descendientes o incompatibilidad reproductiva | Posee eventos de transmisión y comparaciones estructurales; consulta verdad parental |
 | Dinámica evolutiva | Ejecutar las ocho etapas generacionales en su orden fijo | Población y fases → población final e historial de etapas aplicadas u omitidas | Posee estado generacional y resúmenes; delega cambios genómicos |
@@ -536,7 +536,7 @@ exige que la persona usuaria los instale.
 | Coordenadas y transformaciones | Convenio ausente, intervalo fuera de límites o correspondencia inexistente | Probar extremos, inserciones, inversiones y conversiones de ida y vuelta donde sean definidas |
 | Motor de verdad genómica | Evento solapado prohibido, objetivo eliminado, destinos válidos insuficientes, punto de ruptura o ploidía inválidos | Materializar haplotipos conocidos; rechazar SNP o motivo sobre `N`, conservarla dentro de SV e inserciones explícitas y agotar de forma controlada el espacio válido |
 | Creación directa | Individuo incompleto o cambio incompatible | Crear individuos pequeños con cambios concretos y aleatorios controlados |
-| Fuentes e inicialización poblacional | Espectro, matriz, referencia, frecuencias, recuentos, F fuera de [0,1], F en ploidía distinta de 2, LD, panel o restricciones incompatibles | Generar/admitir una matriz SNV pequeña; enumerar HWE haploide, diploide y poliploide bialélico/multialélico; comprobar F diploide 0, intermedio y 1; rechazar F en P=1 y P>2; probar panel intacto y mosaico reconstruible con procedencia |
+| Fuentes e inicialización poblacional | Par TSV+JSON/versiones/hash incorrectos; semántica distinta de `alt_af`; espectros o regiones solapados; matriz/referencia/frecuencias/recuentos incompatibles; autorización específica ausente; F fuera de [0,1] o en ploidía distinta de 2; LD o panel incompatibles | Preparar y generar la misma matriz pequeña y comparar bytes; oráculo separado para mayores restos, muestreo fijo/lineal/logarítmico, pesos espaciales, 12 sustituciones, ceros/fijados y subsemillas; enumerar HWE haploide, diploide y poliploide bialélico/multialélico; comprobar F diploide 0, intermedio y 1; probar después panel intacto y mosaico reconstruible |
 | Reproducción y recombinación | Referencias distintas, ploidía impar o desigual, estado estructural no idéntico, mapa incompleto o bivalente imposible | Probar diploides y tetraploides idénticos; SNP, *indels* pequeños y repeticiones distintos; cada clase SV heterocigota; SV fijada con historias distintas; *scaffold* intacto; SV de novo seguida de otro intento |
 | Dinámica evolutiva | Orden alternativo solicitado, población activa vacía no autorizada, mezcla de referencias estructurales tras migración o evento demográfico imposible | Ejecutar las ocho etapas, omitir una opcional en su posición, rechazar otro orden, ordenar varios eventos demográficos y comprobar el historial efectivo |
 | Selección de viabilidad | Locus ausente, múltiple, ambiguo o situado sobre `N`; dosis sin valor; aptitud negativa, no finita o máximo cero | Probar varias ploidías, rechazo de `N`, fallos antes de supervivencia y recombinación que conserva la identidad única |
@@ -676,14 +676,36 @@ cualquier otra base y aplica el formato canónico. Un comprobador independiente
 reconstruye el FASTA desde origen+mapa antes de publicar conjuntamente mapa,
 FASTA, hashes y manifiesto.
 
-La fuente de variación poblacional admite una matriz SNV suministrada o construye
-otra desde referencia, número o densidad, espacio, espectro de sustituciones y
-un espectro alélico explícito. El generador termina y fija la matriz antes de
-crear individuos. El inicializador consume después esa misma matriz para todos
-los individuos, deriva un RNG local por población/individuo y muestrea genotipos
-con Hardy-Weinberg o `F` diploide; nunca vuelve a elegir loci por individuo. La
-matriz conserva solo frecuencias marginales, por lo que los loci se tratan como
-independientes y cualquier LD requiere el panel de haplotipos posterior.
+La fuente de variación poblacional de DTC-054 materializa un recurso inmutable
+formado por `population_snvs.tsv` y `population_snvs.metadata.json`. El JSON
+enlaza por SHA-256 el TSV y la referencia exacta; configuración y manifiesto
+enlazan el JSON. La preparación recibe una tabla mínima, calcula SHA-256 e IDs,
+comprueba coordenadas base 1 cerradas y `REF`, filtra `ALT` globalmente ausentes,
+ordena y publica el par sin modificar el original. La generación independiente
+y la integrada llaman al mismo servicio y producen los mismos bytes, por lo que
+el par puede reutilizarse sin volver a sortear posiciones o frecuencias.
+
+El planificador de candidatos recibe exactamente un recuento o una realización
+Poisson obtenida de media/densidad y selecciona bases A/C/G/T sin reemplazo. Un
+selector espacial uniforme o por intervalos no solapados asigna pesos por base y
+`outside_weight`; otro servicio elige uno de los tres `ALT` mediante los 12
+cambios dirigidos. Cada población consume su espectro no solapado de frecuencias
+en modo estocástico o exacto por mayores restos. Posición, `ALT`, frecuencia,
+genotipo y fase usan ámbitos RNG separados y estables. El filtrado posterior de
+un `ALT` cero en todas las poblaciones no repone el candidato; un valor fijado se
+conserva. V1 solo genera loci bialélicos, aunque el lector canónico admite
+multialelia suministrada con suma ALT validada por DTC-049.
+
+El inicializador consume esa misma matriz para todos los individuos, asigna a
+cada uno una única población y muestrea genotipos con Hardy-Weinberg o `F`
+diploide; nunca vuelve a elegir loci por individuo. Después permuta los alelos
+entre copias con un ámbito de fase independiente. Un genotipo explícito de
+probabilidad cero solo atraviesa la admisión con la autorización específica
+`--allow-incompatible-genotypes`; una matriz activa vacía exige
+`--allow-empty-snv-matrix`. Ambas decisiones se incorporan a configuración
+efectiva/manifiesto y no relajan otras invariantes. La matriz conserva solo
+frecuencias marginales, por lo que los loci son independientes y cualquier LD
+requiere el panel de haplotipos posterior.
 
 El panel de haplotipos cruza la misma frontera como otro recurso inmutable. F6.4
 lo admite, valida y puede muestrear copias completas; F7.1 añade el modo de
@@ -836,7 +858,7 @@ responsables y puntos de control.
 | Toda entidad cruza fronteras con identidad tipada, no inferida de una etiqueta, ruta o nombre físico | Identidad de ejecución, catálogos y ensamblador de resultados | REQ-CONF-01 a REQ-CONF-14, REQ-TEC-01 a REQ-TEC-10 y REQ-MAN-01 a REQ-MAN-92 |
 | Toda coordenada viaja asociada a su referencia y convenio | Catálogo de referencias y servicio de coordenadas | REQ-REF-01 a REQ-REF-36 y REQ-VER-01 a REQ-VER-47 |
 | Una referencia reducida conserva origen, orientación, clase y mapa completo; FASTA, mapa y manifiesto se publican o fallan como unidad | Reducción de referencias, catálogo, coordenadas y ensamblador | REQ-REF-24 a REQ-REF-36, REQ-VAL-52/53, REQ-MAN-89/90 y REQ-SAL-27 |
-| Una matriz SNV se fija antes de crear individuos; todos comparten sus loci/frecuencias y solo los genotipos se muestrean por identidad. Un panel se conserva intacto y cualquier mosaico exige el motor común de recombinación | Fuentes de variación, inicialización poblacional y recombinación | REQ-CONF-128 a REQ-CONF-130, REQ-IND-60 a REQ-IND-65 y REQ-EVO-74 a REQ-EVO-77 |
+| Una matriz SNV canónica e íntegra se fija antes de crear individuos; todos comparten sus loci/frecuencias y solo genotipos/fase se muestrean por identidad. Preparación y generación integrada/independiente comparten productor; los descartes no se reponen. Un panel se conserva intacto y cualquier mosaico exige el motor común de recombinación | Fuentes de variación, inicialización poblacional y recombinación | REQ-CONF-128 a REQ-CONF-130, REQ-IND-60 a REQ-IND-65 y REQ-EVO-74 a REQ-EVO-77 |
 | Solo los motores biológicos escriben en el repositorio de verdad | Interfaces de dominio y repositorio de verdad | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-77 y REQ-CRU-01 a REQ-CRU-45 |
 | Los componentes técnicos observan instantáneas y no mutan genotipo, genealogía ni trayectoria | Orquestador de eventos y vistas de solo lectura | REQ-TEC-01 a REQ-TEC-10 y REQ-DAT-01 a REQ-DAT-73 |
 | `DeclaredConfig` conserva lo escrito y su ubicación; `EffectiveConfig` es inmutable durante cada ámbito de uso y mantiene la procedencia de la resolución | Adaptador TOML y resolvedor de configuración | REQ-CONF-01 a REQ-CONF-130 y REQ-MAN-01 a REQ-MAN-92 |
@@ -1202,9 +1224,9 @@ algoritmo uniforme/versionado de intervalos después de aprobar porcentaje y
 protocolo aplicación↔binario. Ninguna recomendación de esas entradas es una
 decisión aprobada.
 
-DTC-052 asigna a una matriz común las frecuencias SNV iniciales y DTC-053 separa
-el panel haplotípico posterior. DTPD-118 debe fijar formatos, perfiles y
-generación reproducible antes de F2.2/F2.3. DTPD-119 debe fijar el panel y su
+DTC-052 asigna a una matriz común las frecuencias SNV iniciales, DTC-054 resuelve
+DTPD-118 con el par TSV+JSON, perfiles, preparación y generación reproducible, y
+DTC-053 separa el panel haplotípico posterior. DTPD-119 debe fijar el panel y su
 muestreo intacto antes de F6.4 y conectarse con DTPD-111 para el modo recombinante
 de F7.1. Ninguna de estas fuentes puede poseer o reescribir la verdad resultante.
 

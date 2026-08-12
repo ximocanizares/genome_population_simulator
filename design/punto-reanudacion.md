@@ -1,11 +1,10 @@
 # Punto de reanudación del proyecto
 
-- **Fecha:** 10 de agosto de 2026
-- **Último commit publicado:** `9df8b7c docs: plan reduced references and Marimo UI`
-- **Estado posterior al commit:** existen cambios documentales sin confirmar en
-  especificaciones, arquitectura, decisiones técnicas, hoja de ruta, plan F2 y
-  trazabilidad. El directorio `tmp-genome-TDvk2K/` es intencionado y no debe
-  añadirse ni eliminarse sin una petición expresa.
+- **Fecha:** 12 de agosto de 2026
+- **Último commit publicado al iniciar la sesión:** `2eac575 docs: plan population SNV matrices`
+- **Estado de esta revisión:** DTPD-118 se ha discutido y resuelto; sus cambios
+  documentales deben validarse, confirmarse y publicarse antes de continuar con
+  DTPD-119. Los directorios `tmp*/` están ignorados por Git.
 
 ## Decisión que se estaba desarrollando
 
@@ -25,15 +24,18 @@ reutilizando el motor común y conservando la procedencia por segmentos.
 ## Estado comprobado
 
 - 843 requisitos y 843 filas de trazabilidad, sin ausencias ni duplicados.
-- ACE-01 a ACE-117, DTC-001 a DTC-053 y DTPD-101 a DTPD-119.
-- Plan F2: 77 pasos abiertos, 6 pausas, 84 requisitos exclusivos y 4 compartidos.
+- ACE-01 a ACE-117, DTC-001 a DTC-054, DTF-001 a DTF-039 y DTPD-101 a
+  DTPD-119; DTPD-118 ya está resuelta.
+- El plan F2 conserva seis pausas; su recuento de pasos se actualiza para
+  materializar DTC-054 antes de este commit.
 - Los 12 requisitos nuevos de F2 se reparten en 4 para F2.2 y 8 para F2.3.
 - `git diff --check` estaba limpio.
 - No se hizo commit de esta ampliación de matrices y espectros.
 
 ## Siguiente conversación
 
-Revisar DTPD-118: decidir el formato exacto del espectro suministrado —valores
-discretos, intervalos o ambos— y la regla para seleccionar una frecuencia dentro
-de un intervalo. Después se revisará DTPD-119, el formato y muestreo del panel de
-haplotipos. RAF2-001, RAF2-004 y RAF2-007 siguen pendientes de revisión.
+Revisar DTPD-119: formato canónico y muestreo del panel de haplotipos. La primera
+propuesta aún no aprobada es un paquete con catálogo de sitios, alelos por
+haplotipo, frecuencias por población y metadatos JSON. Después deberán cerrarse
+el muestreo intacto y el modo recombinante. RAF2-001, RAF2-004 y RAF2-007 siguen
+pendientes de revisión.

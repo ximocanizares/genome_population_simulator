@@ -2,7 +2,7 @@
 
 - **Versión:** 0.1
 - **Estado:** aprobado como registro técnico para ejecutar F1
-- **Fecha:** 10 de agosto de 2026
+- **Fecha:** 12 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Arquitectura relacionada:**
@@ -103,8 +103,9 @@ planificación; ya no existe una discrepancia entre fuentes.
 
 | <a id="dtc-050"></a>DTC-050 | V1 incorpora en F1.6 una referencia reducida derivada de un FASTA real ya admitido por F1.5. Usa exactamente un objetivo por bases o porcentaje, selección reproducible sin reemplazo ni solapamiento, orden relativo/orientación conservados, como máximo un residual, `N` literal y publicación conjunta de FASTA canónico, mapa completo, SHA-256 y manifiesto. REQ-CONF-124 a REQ-CONF-127, REQ-REF-24 a REQ-REF-36, REQ-VAL-52/53, REQ-MAN-89/90 y REQ-SAL-27 | Decisión funcional explícita del 10 de agosto de 2026 | No decide la semántica/redondeo porcentual ni *scaffolds*, marcados `PENDIENTE DE REVISIÓN`; DTPD-101 debe fijar primero coordenadas comunes y DTPD-116 elegirá después el algoritmo uniforme/versionado y los vectores. No convierte la reducción en captura dirigida ni en variante estructural biológica |
 | <a id="dtc-051"></a>DTC-051 | Toda capacidad configurable de v1 debe estar disponible en una aplicación Marimo además de TOML/CLI. La aplicación genera el conjunto TOML visible —general y cero o varios escenarios enlazados— e invoca `validate`/`run` sin shell; el binario, esquemas, catálogos, `EffectiveConfig` y manifiestos conservan autoridad. F2.0 establece el modelo multidocumento y la base sin escenarios; cada hito F2–F9 añade sus controles antes de cerrar. REQ-UI-01 a REQ-UI-15 y REQ-VAL-54 a REQ-VAL-56 | Decisión funcional explícita del 10 de agosto de 2026 | DTPD-117 debe evaluar y fijar Marimo, entorno, empaquetado y protocolo compatible. No autoriza Python dentro del núcleo, ejecución automática, reglas duplicadas, un paquete de resultados ni carga completa de artefactos grandes |
-| <a id="dtc-052"></a>DTC-052 | Los SNV heredables iniciales de F2 proceden de una matriz de frecuencias común a la población, suministrada o generada desde número/densidad, espacio, sustituciones y un espectro alélico explícito. Los loci son marginalmente independientes; Hardy-Weinberg es el modelo predeterminado y `F` solo se admite en diploides. REQ-CONF-128 a REQ-CONF-130, REQ-IND-60 a REQ-IND-65, REQ-VAL-55, REQ-MAN-91 y REQ-UI-14 | Decisión funcional explícita del 10 de agosto de 2026, ampliada tras revisar espectros empíricos | Separa creación de la matriz y muestreo de genotipos; no usa densidades SNP independientes por individuo, no inventa LD y no convierte 1000 Genomes o ExAC en un perfil universal. DTPD-118 debe fijar formatos, algoritmo y perfiles incorporados |
+| <a id="dtc-052"></a>DTC-052 | Los SNV heredables iniciales de F2 proceden de una matriz de frecuencias común a la población, suministrada o generada desde número/densidad, espacio, sustituciones y un espectro alélico explícito. Los loci son marginalmente independientes; Hardy-Weinberg es el modelo predeterminado y `F` solo se admite en diploides. REQ-CONF-128 a REQ-CONF-130, REQ-IND-60 a REQ-IND-65, REQ-VAL-55, REQ-MAN-91 y REQ-UI-14 | Decisión funcional explícita del 10 de agosto de 2026, ampliada tras revisar espectros empíricos | Separa creación de la matriz y muestreo de genotipos; no usa densidades SNP independientes por individuo, no inventa LD y no convierte 1000 Genomes o ExAC en un perfil universal. DTC-054 resuelve los formatos, algoritmos y perfiles de DTPD-118 |
 | <a id="dtc-053"></a>DTC-053 | Una fase posterior admite un panel de haplotipos y frecuencias para crear individuos. El modo intacto muestrea copias completas; el modo recombinante reutiliza el motor común y conserva procedencia por segmentos. REQ-EVO-74 a REQ-EVO-77, REQ-VAL-56, REQ-MAN-92 y REQ-UI-15 | Decisión funcional explícita del 10 de agosto de 2026 | F6.4 incorpora panel/formato y modo intacto; F7.1 incorpora recombinación tras resolver DTPD-111/DTPD-119. No infiere haplotipos desde frecuencias marginales ni promete conservar LD después de recombinar |
+| <a id="dtc-054"></a>DTC-054 | DTPD-118 se resuelve con una matriz canónica `population_snvs.tsv` + `population_snvs.metadata.json`, ligada por SHA-256 a una referencia y con `alt_af` como única frecuencia. Una orden prepara entradas tabulares y otra genera el mismo recurso reutilizable. La generación produce candidatos bialélicos sin reemplazo; usa espacio uniforme o regiones no solapadas ponderadas, 12 sustituciones dirigidas y un espectro no solapado fijo/lineal/logarítmico en modo estocástico o exacto por mayores restos. REQ-CONF-128/129, REQ-IND-60 a REQ-IND-65, REQ-VAL-55, REQ-MAN-91, REQ-UI-14 y ACE-116 | Decisiones explícitas aprobadas el 12 de agosto de 2026 | Poblaciones y subsemillas son independientes; 0 y 1 son válidos, se eliminan sin reemplazo los `ALT` globalmente ausentes y se conservan los fijados; una suma ALT menor o igual que 1 conserva `REF=1-suma`, un exceso dentro de tolerancia se normaliza a 1 y otro mayor se rechaza. La multialelia aleatoria y conversión VCF se aplazan a DTF-039/038. `uniform_snv12_v1` es el valor de sustitución predeterminado; los perfiles 1000 Genomes son ejemplos explícitos, nunca implícitos. Genotipos incompatibles y matriz vacía solo pueden continuar mediante autorizaciones específicas trazadas, no `--force` general. DTC-049 rige `f64`, Neumaier y tolerancia |
 
 **Concreción aprobada de F1.5 para DTC-037.** El catálogo normativo de ámbitos
 se versiona separadamente de la codificación. El catálogo 2 añade el ámbito
@@ -312,6 +313,28 @@ validadores, vectores reproducibles y escenarios de rendimiento antes de
 reformular garantías. Esto sustituye la propuesta accidental basada en Rust
 1.94.0 local y no exige Rust a quien usa el binario o imagen.
 
+### DTPD-118. Formatos y generación de espectros/matrices SNV (resuelta)
+
+Resuelta el 12 de agosto de 2026 mediante [DTC-054](#dtc-054). El contrato
+runtime es un par TSV+JSON versionado, íntegro y ligado a una referencia exacta;
+solo admite `alt_af`. Una preparación explícita convierte la tabla mínima a ese
+par sin modificar el original y la generación integrada o independiente produce
+los mismos bytes y permite reutilización. Los espectros de frecuencia usan
+componentes no solapados `fixed`, `linear_uniform` o `log_uniform`; el modo
+exacto aplica mayores restos y el estocástico es predeterminado. Posiciones,
+alelos, frecuencias, genotipos y fase poseen ámbitos RNG separados.
+
+La generación espacial es uniforme o usa regiones no solapadas con peso y
+`outside_weight`; genera solo loci bialélicos. Las sustituciones usan 12 cambios
+dirigidos, con perfil uniforme predeterminado, tabla propia, atajo Ti/Tv o
+ejemplo 1000 Genomes seleccionado expresamente. El ejemplo alélico global y por
+AFR/AMR/EAS/EUR/SAS conserva fuente, filtros, receta y SHA-256 y nunca se carga
+implícitamente. Las poblaciones automáticas se generan independientemente; una
+relación entre ellas debe venir en una matriz suministrada. Los valores 0 y 1
+son válidos: un `ALT` globalmente ausente se elimina y cuenta como candidato sin
+reemplazo, mientras uno fijado se conserva. VCF→TSV y generación multialélica
+quedan en DTF-038/039.
+
 ## 7. Decisiones pendientes para fases posteriores
 
 | ID | Decisión | Opciones | Recomendación razonada | Consecuencias | Bloquea |
@@ -333,7 +356,6 @@ reformular garantías. Esto sustituye la propuesta accidental basada en Rust
 | DTPD-115 | Objetivos y presupuestos cuantitativos | Umbrales por escenario; presupuesto configurable; perfiles de recursos | Fijarlos después de medir escenarios representativos; todo presupuesto debe incluir el mínimo, la trazabilidad única y las salidas activadas, y su exceso rechaza sin degradación automática | Define expectativas de escala y criterios de publicación | F9.1/F9.4 |
 | DTPD-116 | Selección reproducible de intervalos para referencia reducida | Muestreo sobre bases o sobre intervalos candidatos; asignación conjunta o por secuencia; tratamiento técnico del residual | Resolver primero porcentaje, *scaffolds* y DTPD-101. Después evaluar un algoritmo uniforme y versionado sobre todo el espacio elegible que use RNG local, garantice no solapamiento/objetivo exacto y ofrezca vectores y oráculo independientes. Esta es la recomendación, no una elección aprobada | Afecta distribución entre secuencias, reproducibilidad, consumo y mapa; no puede cambiar el orden materializado, la orientación ni la convención común de coordenadas | F1.6 |
 | DTPD-117 | Aplicación Marimo y contrato con el binario | Versión/entorno de Marimo; instalación local o paquete separado; descubrimiento versionado de esquema/catálogos; adaptador de proceso y pruebas de accesibilidad | Evaluar y fijar versión compatible, dependencias, licencia, seguridad, mantenimiento, empaquetado Ubuntu/WSL2, argumentos sin shell y protocolo de compatibilidad. Probar contra un proceso falso y el binario real antes de incorporar; pinning y empaquetado son recomendación obligada a evaluación, no versiones ya elegidas | Afecta distribución y experiencia local, pero nunca la semántica, `EffectiveConfig`, manifiestos ni dependencias del núcleo Rust | F2.0 y puerta F2–F9 |
-| DTPD-118 | Formatos y generación de espectros/matrices SNV | Tabla larga por alelo y población; VCF de sitios con AF; espectro discreto o por intervalos; perfil incorporado o fichero suministrado | Elegir formatos versionados y un algoritmo reproducible que diferencie frecuencia ALT, derivada y MAF, resuelva valores dentro de intervalos, conserve población/muestra/filtros y genere loci sin reemplazo. Preparar un ejemplo empírico trazable sin tratar el resumen de 1000 Genomes como distribución continua | Afecta admisión, perfiles, subsemillas y reproducibilidad F2; no puede introducir LD ni cambiar HWE/F | F2.2/F2.3 |
 | DTPD-119 | Formato y muestreo del panel de haplotipos | VCF faseado, tabla de alelos por haplotipo o formato estructurado propio; muestreo directo o fuentes recombinantes | Elegir un formato reconstruible y un muestreo versionado. El modo intacto debe ser oracularmente idéntico al panel; el recombinante debe reutilizar DTPD-101/DTPD-111 y registrar todos los segmentos | Afecta memoria, interoperabilidad, fase, LD y procedencia; no puede crear una segunda implementación de recombinación | F6.4/F7.1 |
 
 ## 8. Decisiones futuras que no bloquean v1
@@ -342,7 +364,7 @@ Esta tabla es un resumen derivado. El registro canónico con fuentes, estado,
 destino y dependencias es
 [registro-ampliaciones-futuras-0.1.md](./registro-ampliaciones-futuras-0.1.md).
 
-Las entradas DTF-001 a DTF-037 se definen una sola vez en ese registro. Este
+Las entradas DTF-001 a DTF-039 se definen una sola vez en ese registro. Este
 documento conserva únicamente las decisiones técnicas DTC, DTP y DTPD.
 
 ## 9. Reglas para resolver una decisión
@@ -376,8 +398,9 @@ DTC-049 resuelve la representación, suma, tolerancia general y normalización d
 REQ-CONF-106/107. DTPD-110 queda restringida a distribuciones y tolerancias
 poblacionales específicas posteriores y no reabre ese contrato general.
 
-Las decisiones DTPD-101 a DTPD-119 deben resolverse antes de ejecutar el hito
-que señalan. No bloquean la redacción del plan de F1 salvo que su evaluación
+Las decisiones pendientes de DTPD-101 a DTPD-119 deben resolverse antes de
+ejecutar el hito que señalan; DTPD-118 ya está resuelta mediante DTC-054. No
+bloquean la redacción del plan de F1 salvo que su evaluación
 revele una incompatibilidad con un contrato base de configuración, identidad,
 referencia o reproducibilidad.
 
@@ -385,9 +408,10 @@ DTPD-101 se resuelve una sola vez en F1.6 antes de DTPD-116 y bloquea también a
 F2.1/F2.2: el mapa de reducción y los tipos posteriores de segmentos, posiciones
 y anclas deben compartir el mismo servicio, no decisiones locales sucesivas.
 
-DTC-050 a DTC-053 confirman la capacidad de reducción, la obligación Marimo y
-las dos fuentes poblacionales, pero no resuelven sus detalles pendientes. F1.6 queda
+DTC-050 a DTC-054 confirman la capacidad de reducción, la obligación Marimo y
+las dos fuentes poblacionales; DTC-054 cierra los formatos y algoritmos de la
+matriz SNV. F1.6 queda
 bloqueada por las dos cuestiones funcionales de la especificación y DTPD-116;
-F2.0, por DTPD-117; F2.2/F2.3, por DTPD-118; y F6.4/F7.1, por DTPD-119 y las
+F2.0, por DTPD-117; F2.2/F2.3 ya no están bloqueadas por DTPD-118; y F6.4/F7.1, por DTPD-119 y las
 decisiones de recombinación relacionadas. Sus recomendaciones no se consideran aprobadas hasta que
 consten revisión y fecha.

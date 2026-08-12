@@ -4,7 +4,7 @@
 
 - **Título:** plan detallado de F2, verdad genómica mínima.
 - **Versión del plan:** 0.1.
-- **Fecha:** 10 de agosto de 2026.
+- **Fecha:** 12 de agosto de 2026.
 - **Estado:** borrador técnico condicionado; F1.4 está aprobada, pero no está
   autorizado para ejecución hasta que F1.5, F1.6 y la revisión de cierre de F1
   estén terminadas y este plan sea aprobado explícitamente.
@@ -19,7 +19,7 @@
   y [plan-implementacion-f1-0.1.md](./plan-implementacion-f1-0.1.md).
 - **Decisiones confirmadas aplicables:** DTC-001, DTC-003, DTC-004, DTC-006,
   DTC-010, DTC-011, DTC-013, DTC-020 a DTC-022, DTC-024, DTC-031 a
-  DTC-049 y DTC-051 a DTC-053.
+  DTC-049 y DTC-051 a DTC-054.
 - **Decisiones pendientes bloqueantes:** DTPD-101 bloquea F1.6 y, por
   dependencia, F2.1/F2.2; debe llegar resuelta desde F1. DTPD-102 bloquea
   F2.1/F2.4 y DTPD-103, F2.5. También falta documentar y aprobar la
@@ -28,10 +28,11 @@
   inserciones y deleciones, con valor predeterminado de 1 pb; falta trasladar
   este acuerdo al registro canónico de decisiones.
   DTPD-117 bloquea F2.0 hasta evaluar y fijar Marimo, su entorno, empaquetado y
-  contrato versionado con el binario. DTPD-118 bloquea F2.2/F2.3 hasta fijar
-  formatos de matriz/espectro, algoritmo reproducible y perfiles versionados.
-  DTPD-119 bloquea las capacidades posteriores de paneles de F6.4/F7.1 y no se
-  resuelve ni consume dentro de F2.
+  contrato versionado con el binario. DTC-054 resuelve DTPD-118 y fija para
+  F2.2/F2.3 los formatos de matriz/espectro, el algoritmo reproducible, los
+  perfiles versionados y las excepciones limitadas. DTPD-119 continúa abierta:
+  bloquea las capacidades posteriores de paneles de F6.4/F7.1 y no se resuelve
+  ni consume dentro de F2.
 - **Pendientes del informe adversarial que siguen abiertos:** RAF2-001,
   RAF2-004 y RAF2-007. Esta ampliación no los da por resueltos; DTC-052 aporta
   la semántica que faltaba para reevaluar RAF2-004, pero su cierre requiere
@@ -171,10 +172,12 @@ trazabilidad.
   dependencias, licencia, seguridad, empaquetado Ubuntu/WSL2, contrato de
   esquemas/catálogos y adaptador de proceso sin shell. Ninguna versión se
   presupone en este plan.
-- DTPD-118 debe fijar, antes de B3, los formatos versionados de matriz y
-  espectro, el algoritmo reproducible de generación, la semántica inequívoca de
-  frecuencia ALT/derivada/MAF y los perfiles incorporados con fuente y versión.
-  Hasta aprobarla solo pueden prepararse corpus y validadores independientes.
+- DTC-054 resuelve DTPD-118 y debe consumirse sin reinterpretación: solo admite
+  `alt_af`; separa el espectro, la matriz larga canónica y sus metadatos; fija
+  generación bialélica, poblaciones independientes, selección sin reemplazo,
+  perfiles explícitos, ámbitos RNG, preparación/reutilización y excepciones
+  limitadas. B1 debe congelar su versión documental antes de implementar sus
+  consumidores. DTPD-119 permanece fuera de este alcance.
 - DTC-052 fija la separación funcional posterior a esa puerta: F2.2 produce o
   admite la matriz poblacional y F2.3 muestrea genotipos HWE o `F` diploide.
   Poisson solo puede obtener un recuento de loci/eventos desde una media o
@@ -370,7 +373,7 @@ exactas desde la referencia cerrada en F1.
 > **Pausa obligatoria F2.1.** Revisar el consumo sin reapertura de DTPD-101 y
 > aprobar DTPD-102, la extensión de tipos de coordenada, representación
 > haplotípica, consumo de memoria, oráculos y los
-> cuatro REQ. No iniciar B6 ni F2.3/F2.4 si la representación no reconstruye
+> cuatro REQ. No iniciar B27 ni F2.3/F2.4 si la representación no reconstruye
 > exactamente cada copia o si una conversión de coordenadas queda implícita.
 
 ## 7. F2.2 — Variantes pequeñas y matriz de frecuencias SNV
@@ -380,11 +383,11 @@ frecuencias SNV reproducible y validada, aplica SNP explícitos e *indels*
 pequeños inequívocos y nunca usa Poisson para muestrear frecuencias, alelos o
 genotipos.
 
-- ☐ B1. Resolver y aprobar DTPD-118 antes de fijar cualquier formato o algoritmo de matriz.
+- ☐ B1. Congelar como entrada de implementación DTC-054, que resuelve DTPD-118.
   - Depende de: pausa F2.1 aprobada, A2 y A3.
-  - Procede de: DTC-052 y DTPD-118; REQ-CONF-128, REQ-CONF-129, REQ-IND-60 y REQ-IND-61.
-  - Cambia: decisión fechada sobre formatos versionados de matriz/espectro, algoritmo reproducible, distinción ALT/derivada/MAF, resolución de intervalos, población/muestra/filtros, perfil empírico trazable y consumo aleatorio; no introduce LD.
-  - Se comprueba con: opciones y dependencias evaluadas conforme a DTC-043, ejemplos reconstruibles, fuente/licencia/versión del perfil, vectores de generación y aprobación formal conforme al registro técnico.
+  - Procede de: DTC-052, DTC-054 y DTPD-118 resuelta; REQ-CONF-128, REQ-CONF-129, REQ-IND-60 y REQ-IND-61.
+  - Cambia: expediente de consumo que enlaza la versión aprobada y enumera formato, algoritmos, perfiles, límites, ámbitos aleatorios y excepciones; declara fuera de F2 VCF→TSV, generación multialélica, estructura/evolución poblacional y DTPD-119.
+  - Se comprueba con: revisión requisito→cláusula DTC-054→paso que no deja comportamiento aprobado sin consumidor ni reabre DTPD-118 al implementar.
 
 - ☐ B2. Registrar y aprobar la concreción Poisson y las longitudes exactas de *indels* de F2.
   - Depende de: pausa F2.1 aprobada y A2–A3; es independiente de la elección de formato B1.
@@ -392,106 +395,210 @@ genotipos.
   - Cambia: decisión técnica que fija implementación Poisson, límites, espacio vacío y consumo RNG, selección espacial y longitudes exactas por clase con predeterminado 1 pb; declara expresamente que Poisson solo produce recuentos desde medias/densidades.
   - Se comprueba con: oráculo Poisson independiente, prueba estadística con umbral previo, casos cero/vacío y longitudes 1/2/`umbral - 1`, rechazo de 0 o `>= umbral` y aprobación formal.
 
-- ☐ B3. Especificar la autoría TOML excluyente de matriz suministrada o generada y de los demás eventos F2.
-  - Depende de: B1–B2.
+- ☐ B3. Publicar los esquemas versionados de espectro y matriz SNV.
+  - Depende de: B1.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-CONF-129 y REQ-IND-60.
+  - Cambia: esquema del espectro TSV por intervalos y filas `fixed`; entrada suministrada mínima `contig/position/ref/alt/population_id/alt_af` con `source_id` opcional; pareja canónica `population_snvs.tsv` + `population_snvs.metadata.json`, sin entrada VCF.
+  - Se comprueba con: fixtures manuales válidos e inválidos validados por una implementación de esquema separada, rechazo de columnas de frecuencia distintas de `alt_af` y prueba negativa de que `run` no acepta VCF ni TSV sin metadatos canónicos.
+
+- ☐ B4. Fijar el contrato de metadatos, integridad y referencia de la pareja canónica.
+  - Depende de: B3 y contratos SHA-256 de F1.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-IND-60, REQ-VAL-55 y REQ-MAN-91.
+  - Cambia: JSON con versión, referencia esperada, SHA-256 del FASTA, coordenadas `1-based-closed`, poblaciones, procedencia sintética/empírica y SHA-256 del TSV; muestra/fuente/filtros desconocidos se declaran `unknown`, y configuración/manifiesto enlazan el SHA-256 del JSON sin digest circular.
+  - Se comprueba con: pareja escrita a mano, `sha256sum`, intercambio independiente de TSV/JSON/FASTA, contig literal `1` frente a `chr1` y rechazo previo a individuos ante cualquier discordancia.
+
+- ☐ B5. Especificar la autoría TOML excluyente de matriz preparada, reutilizada o generada y de los demás eventos F2.
+  - Depende de: B2–B4.
   - Procede de: REQ-CONF-08, REQ-CONF-21, REQ-CONF-24, REQ-CONF-25, REQ-CONF-28, REQ-CONF-128 y REQ-CONF-129; DTC-034 y DTC-052.
-  - Cambia: esquema documental para fuente de matriz, referencia/poblaciones, número exacto o media/densidad, espacio, sustituciones y espectro explícito, más SNP explícitos e inserciones/deleciones explícitas o aleatorias; elimina la densidad SNP inicial por individuo.
-  - Se comprueba con: ejemplos TOML suministrado/generado válidos y rechazo de ambos/ninguno, perfil implícito, número y densidad simultáneos, densidad SNP individual y campos futuros.
+  - Cambia: esquema documental para fuente canónica o generación, referencia/poblaciones, `exact_loci`/`mean_loci`/`density_per_mb`, espacio, sustituciones y espectro explícito, más SNP e *indels*; elimina densidad SNP inicial por individuo.
+  - Se comprueba con: ejemplos de las tres rutas y rechazo de fuentes simultáneas, perfil alélico ausente, más de un modo de recuento, densidad SNP individual, VCF y campos futuros.
 
-- ☐ B4. Extender configuración declarada y parser conservando literales y ubicaciones.
-  - Depende de: B3.
+- ☐ B6. Extender configuración declarada y parser conservando literales y ubicaciones.
+  - Depende de: B3–B5.
   - Procede de: DTC-034, DTC-036, DTC-044 y DTC-052; REQ-CONF-128, REQ-CONF-129 y REQ-DIR-03.
-  - Cambia: `DeclaredConfig`, adaptador TOML y diagnósticos para la unión de matriz, espectros y eventos pequeños aprobada, sin construir verdad ni normalizar silenciosamente.
-  - Se comprueba con: parsing de cada forma, claves desconocidas/duplicadas, clase/versión/ruta errónea y snapshots de documento, campo y ubicación.
+  - Cambia: `DeclaredConfig`, adaptador TOML y diagnósticos para matriz, metadatos, espectros, regiones y eventos pequeños, sin construir verdad, calcular digests ni normalizar silenciosamente.
+  - Se comprueba con: parsing de cada forma, claves desconocidas/duplicadas, clase/versión/ruta errónea y snapshots de documento, campo, literal y ubicación.
 
-- ☐ B5. Extender el catálogo y la resolución efectiva con los parámetros de matriz e *indels*.
-  - Depende de: B3–B4.
+- ☐ B7. Extender catálogo y resolución efectiva con parámetros de matriz e *indels*.
+  - Depende de: B5–B6.
   - Procede de: DTC-006, DTC-033, DTC-049 y DTC-052; REQ-IND-10, REQ-IND-13, REQ-IND-14 y REQ-CONF-129.
-  - Cambia: `ParameterKey`, metadatos, dominios y solicitudes para número/media/densidad, espacio, sustituciones, perfil y longitudes exactas de inserción/deleción, sin duplicar el resolvedor.
-  - Se comprueba con: catálogo completo, dominios y unidades, cero explícito, precedencia por espacio, ausencia de fallback ambiguo y rechazo de ejes no admitidos.
+  - Cambia: `ParameterKey`, metadatos, dominios y solicitudes para recuentos excluyentes, espacio, sustituciones, perfil, modo `exact/stochastic` y longitudes exactas de inserción/deleción, sin duplicar el resolvedor.
+  - Se comprueba con: catálogo completo, dominios/unidades, cero explícito, precedencia espacial, valor efectivo y rechazo de ejes no admitidos o fallback empírico implícito.
 
-- ☐ B6. Versionar subsemillas independientes para generar la matriz y los demás eventos.
-  - Depende de: B1–B2 y catálogo RNG cerrado en F1.3.
+- ☐ B8. Versionar los ámbitos aleatorios independientes aprobados para la matriz.
+  - Depende de: B1, B7 y catálogo RNG cerrado en F1.3.
   - Procede de: DTC-011, DTC-037, DTC-038 y DTC-052; REQ-IND-61 y REQ-VAL-55.
-  - Cambia: ámbitos/versiones y vectores BLAKE3 separados para matriz, loci, sustituciones, frecuencias e *indels*, sin flujo global ni reutilización entre etapas.
-  - Se comprueba con: vectores literales independientes, unicidad de claves, repetición idéntica y cambio localizado al variar referencia, población o una sola identidad lógica.
+  - Cambia: ámbitos `matrix/locus_selection`, `matrix/alternate_allele/<variant_id>` y `matrix/frequency/<population_id>/<variant_id>`, separados de *indels*, genotipo y fase, con versión y vectores BLAKE3.
+  - Se comprueba con: vectores literales, claves únicas y pruebas de que añadir/reordenar una población no cambia loci, ALT ni frecuencias existentes y cambiar un perfil solo afecta a esa población.
 
-- ☐ B7. Enumerar oportunidades válidas por secuencia y región antes de sortear o seleccionar.
-  - Depende de: A5–A6 y B5–B6.
-  - Procede de: REQ-CONF-21, REQ-CONF-28, REQ-IND-13, REQ-IND-14, REQ-IND-19, REQ-IND-38, REQ-IND-40, REQ-IND-41 y REQ-DIR-03.
-  - Cambia: servicio que cuenta candidatos válidos por clase y ámbito, excluye `N`, bordes y destinos imposibles y no selecciona aún posiciones.
-  - Se comprueba con: enumeración independiente en secuencias cortas, primera/última base, región de una base, solapamientos normativos y espacio vacío tras filtros.
+- ☐ B9. Enumerar bases elegibles antes de determinar o seleccionar loci.
+  - Depende de: A5–A6 y B7–B8.
+  - Procede de: REQ-CONF-21, REQ-CONF-28, REQ-IND-13, REQ-IND-14, REQ-IND-19 y REQ-DIR-03.
+  - Cambia: servicio que cuenta posiciones `A/C/G/T` elegibles tras inclusiones, exclusiones, posiciones protegidas/ocupadas y pesos cero; excluye `N` y no sortea todavía.
+  - Se comprueba con: enumeración ajena al productor en secuencias cortas, contigs/regiones literales, espacio vacío y denominador de bases elegibles por cromosoma.
 
-- ☐ B8. Admitir y validar una matriz suministrada contra la referencia exacta.
-  - Depende de: B1, B4 y B7.
-  - Procede de: REQ-CONF-128, REQ-IND-60 y REQ-VAL-55; DTC-052.
-  - Cambia: adaptador del formato aprobado que conserva referencia, población, locus y filas ALT; valida `REF/ALT`, `N`, duplicados, multialelos, frecuencias finitas y suma ALT con DTC-049.
-  - Se comprueba con: corpus manual bialélico/multialélico y mutaciones de referencia, coordenada, REF, ALT, duplicado, `N`, población, suma y digest mediante un lector/oráculo distinto.
+- ☐ B10. Implementar `uniform` y `weighted_regions` sin solapamientos.
+  - Depende de: B3, B7 y B9.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-19 y REQ-VAL-55.
+  - Cambia: perfil incorporado único `uniform` con peso 1; tabla propia `1-based-closed` con pesos finitos no negativos, `outside_weight` explícito, regiones no solapadas y probabilidad por base proporcional al peso.
+  - Se comprueba con: tabla manual por longitud×peso, casos `outside_weight` 0/1, peso 0/0.5/1/2, frontera contigua, solapamiento rechazado y requisito de al menos una base con peso positivo.
 
-- ☐ B9. Obtener el número de loci generado sin confundir recuento con frecuencia alélica.
-  - Depende de: B2, B5–B7.
+- ☐ B11. Determinar el número de loci candidatos sin confundirlo con loci activos.
+  - Depende de: B2 y B7–B10.
   - Procede de: REQ-CONF-129, REQ-IND-17, REQ-IND-18 y REQ-IND-61; DTC-022 y DTC-052.
-  - Cambia: servicio que acepta número exacto o calcula media desde densidad y espacio y, solo en este último caso, sortea Poisson; cero/vacío no consume RNG y falta de candidatos suficientes falla.
-  - Se comprueba con: números exactos, vectores Poisson, igualdad de media, tasa cero, espacio vacío/insuficiente y prueba de que cambiar el espectro alélico no cambia el recuento.
+  - Cambia: `exact_loci` fija candidatos; `mean_loci` y `density_per_mb × bases_elegibles/1_000_000` fijan una media y sortean Poisson; los tres modos son excluyentes y el recuento se conserva aunque después se eliminen ALT globalmente ausentes.
+  - Se comprueba con: exactos, vectores Poisson para media/densidad, denominador manual, tasa cero, espacio vacío/insuficiente y prueba de que cambiar frecuencias no vuelve a calcular candidatos.
 
-- ☐ B10. Generar loci, alelos y frecuencias de la matriz sin reemplazo.
-  - Depende de: B1 y B6–B9.
-  - Procede de: REQ-CONF-129, REQ-IND-03, REQ-IND-19 y REQ-IND-61; DTC-052.
-  - Cambia: generador versionado que selecciona loci válidos sin reemplazo, toma REF del FASTA, elige ALT por espectro de sustitución y frecuencia por espectro efectivo, sin monomorfos ni redondeo no autorizado.
-  - Se comprueba con: referencia corta exhaustiva `A/C/G/T/N`, semilla fija, oráculo de candidatos y espectros discretos/de intervalos del contrato B1, unicidad y ausencia de `N`.
+- ☐ B12. Validar espectros alélicos por intervalos no solapados.
+  - Depende de: B3, B6–B7 y DTC-049.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-61 y REQ-VAL-55.
+  - Cambia: lector `f64` de decimal/científica para `[min_af,max_af)`, último límite 1 y filas `fixed`; admite huecos, rechaza solapamiento, porcentajes, NaN/infinito y pesos inválidos; `log_uniform` exige mínimo positivo y solo `fixed` genera exactamente 0/1.
+  - Se comprueba con: corpus de fronteras 0/1, intervalos contiguos/solapados/con huecos, pesos no normalizados, todo cero, `1e-3`, porcentaje, NaN/infinito y conservación del literal y valor efectivo sin redondeo.
 
-- ☐ B11. Validar y aplicar SNP explícitos como restricciones trazables, no como otra fuente aleatoria inicial.
-  - Depende de: A8–A9 y B4–B5.
+- ☐ B13. Implementar los repartos `stochastic` y `exact` por población.
+  - Depende de: B8, B11–B12.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-61 y REQ-VAL-55.
+  - Cambia: sorteo ponderado de fila en modo estocástico predeterminado y mayores restos en modo exacto, con parte entera primero y desempate por orden estable del espectro; cada población aplica su reparto independientemente.
+  - Se comprueba con: ejemplos manuales, incluido 11 loci con pesos 60/25/10/5→7/3/1/0, suma exacta por población, empate literal y prueba estadística prefijada del modo estocástico.
+
+- ☐ B14. Incorporar solo los perfiles alélicos empíricos 1000 Genomes seleccionables de forma explícita.
+  - Depende de: B1, B3, B12–B13 y evaluación DTC-043 de datos/licencia/herramienta.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-61 y ACE-116.
+  - Cambia: recurso `1000g_phase3_v5_sfs_v1` global/AFR/AMR/EAS/EUR/SAS derivado de autosomas, PASS y SNV bialélicos; separa `fixed 0`, `min_positive–0.001`, 0.001–0.005, 0.005–0.01, 0.01–0.05, 0.05–0.10, 0.10–0.50, 0.50–0.90, 0.90–0.99, 0.99–1 y `fixed 1`, con recuentos, fuente, filtros, receta y SHA-256; nunca es predeterminado.
+  - Se comprueba con: regeneración independiente desde la fuente versionada, comparación de recuentos/digests, selección nominal obligatoria y configuraciones sin perfil, con perfil propio y con perfil empírico explícito.
+
+- ☐ B15. Resolver el espectro dirigido de las 12 sustituciones.
+  - Depende de: B3 y B7.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129 y REQ-IND-61.
+  - Cambia: `uniform_snv12_v1` predeterminado, tabla propia, atajo `ti_tv_ratio=R` convertido a peso `2R` para la transición y 1 para cada transversión, y perfil explícito `1000g_phase3_v5_snv12_v1`; la configuración efectiva conserva siempre los 12 pesos.
+  - Se comprueba con: las tres ALT por cada REF, R=0/1/2, rechazo de R negativo/infinito, razón esperada independiente, perfil empírico reproducible y prueba de que este último nunca se carga por defecto.
+
+- ☐ B16. Crear IDs canónicos y orden independiente del orden de entrada.
+  - Depende de: B3–B4 y servicios de identidad F1.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-60, REQ-IND-61 y REQ-VAL-55.
+  - Cambia: `site_id` por referencia/contig/posición/REF y `variant_id` por referencia/contig/posición/REF/ALT; conserva `source_id` como alias y ordena por catálogo FASTA, posición, REF, ALT y población.
+  - Se comprueba con: permutación de filas/poblaciones, mismo SNV en referencias distintas, sitio multialélico y comparación literal de IDs y bytes ordenados.
+
+- ☐ B17. Preparar una matriz suministrada sin modificar el original.
+  - Depende de: B3–B4, B9 y B16.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-IND-60, REQ-VAL-55 y REQ-MAN-91.
+  - Cambia: orden `prepare-snv-matrix --reference ... --input ... --output ...` que calcula SHA-256, IDs y orden, comprueba contigs/coordenadas/REF y publica de forma segura la pareja canónica nueva.
+  - Se comprueba con: fixture mínimo, original inalterado, salida reconstruible, referencia intercambiada, fallo sin pareja parcial y equivalencia con la acción Marimo «Vincular y verificar referencia».
+
+- ☐ B18. Validar filas completas y poblaciones de una matriz suministrada.
+  - Depende de: B3–B4 y B16–B17.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-IND-60 y REQ-VAL-55.
+  - Cambia: exige una fila por `ALT × población`, `alt_af` explícito en `[0,1]`, población declarada y claves únicas; rechaza vacío/NA, MAF/DAF, AC/AN, inferencias y alias de población, pero admite y valida poblaciones no seleccionadas.
+  - Se comprueba con: corpus que omite una combinación, usa cero explícito, añade población válida no usada, solicita una inexistente e intenta cada semántica de frecuencia prohibida.
+
+- ☐ B19. Validar loci multialélicos suministrados con suma estable y tolerancia aprobada.
+  - Depende de: B18 y DTC-049.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-60 y REQ-VAL-55.
+  - Cambia: agrupa por sitio/población, calcula suma ALT con Neumaier en orden canónico y `ref_af=1-suma`; acepta suma ≤1, normaliza solo un exceso ≤`1e-9` y lo registra, y rechaza exceso mayor sin recortar valores individuales.
+  - Se comprueba con: sumas manuales 0.5, 1, `1+5e-10` y 1.01, orden permutado y lector independiente que confirma frecuencias/normalización y diagnóstico.
+
+- ☐ B20. Normalizar alelos globalmente ausentes sin reponer candidatos.
+  - Depende de: B18–B19.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-60, REQ-IND-61, REQ-VAL-55 y REQ-MAN-91.
+  - Cambia: elimina cada ALT con `alt_af=0` en todas las poblaciones y el sitio si pierde todos sus ALT; conserva `alt_af=1`, cuenta candidatos/ALT descartados/loci activos por separado y nunca selecciona sustitutos.
+  - Se comprueba con: bialélico global 0/1, multialélico con un ALT global 0 y otro activo, matriz suministrada/generada y recuentos antes/después calculados fuera del normalizador.
+
+- ☐ B21. Implementar autorización explícita para una matriz activa vacía.
+  - Depende de: B20 y diagnósticos F1.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-VAL-55 y REQ-MAN-91.
+  - Cambia: `validate` avisa; `run` se detiene salvo `--allow-empty-snv-matrix`; la autorización no relaja otros errores y queda en configuración efectiva/manifiesto.
+  - Se comprueba con: matriz vacía inicial y tras normalización, ejecución con/sin flag, SNP explícitos que aún se aplican y prueba negativa de que el flag no acepta digest, REF o frecuencia inválidos.
+
+- ☐ B22. Seleccionar las posiciones candidatas sin reemplazo.
+  - Depende de: B8–B11.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-03, REQ-IND-19 y REQ-IND-61.
+  - Cambia: selector ponderado sobre las bases elegibles que obtiene exactamente el recuento candidato ya fijado, sin duplicados, y falla si no hay suficientes posiciones; no promete prefijo al cambiar N.
+  - Se comprueba con: referencia exhaustiva `A/C/G/T/N`, uniformidad/ponderación con umbral previo, N=0/1/máximo/exceso, semilla fija y comparación con un enumerador independiente.
+
+- ☐ B23. Asignar un único ALT generado por locus candidato.
+  - Depende de: B8, B15–B16 y B22.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129 y REQ-IND-61.
+  - Cambia: generador bialélico que lee REF del FASTA y sortea una de sus tres ALT mediante los 12 pesos; no genera multialelia ni contexto trinucleotídico.
+  - Se comprueba con: cada REF A/C/G/T, pesos degenerados, perfiles uniforme/propio/empírico y prueba de que jamás produce REF, `N`, segundo ALT o cambio fuera del perfil.
+
+- ☐ B24. Asignar frecuencias independientes a todas las poblaciones.
+  - Depende de: B8, B12–B13, B16 y B23.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-61 y REQ-VAL-55.
+  - Cambia: para cada `población × variant_id` elige fila y valor `alt_af` con su perfil, admite 0/1, conserva fila/subsemilla y no introduce población ancestral, FST, parentesco, migración, correlación o LD.
+  - Se comprueba con: dos poblaciones y perfiles distintos, cambio aislado de una, frecuencias 0/intermedias/1, orden permutado y prueba de independencia sin exigir distribuciones correlacionadas.
+
+- ☐ B25. Publicar la matriz generada mediante el mismo contrato canónico.
+  - Depende de: B4, B16 y B20–B24.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-61 y REQ-MAN-91.
+  - Cambia: escritor determinista de TSV+JSON con origen generado, parámetros/perfiles efectivos, candidatos/descartes/activos, subsemillas, fuente/versión y digests, usando publicación segura.
+  - Se comprueba con: dos generaciones de igual referencia/configuración/semilla con mismos bytes, hashes externos, fallo inyectado sin pareja parcial y lector independiente que reconstruye todos los metadatos.
+
+- ☐ B26. Ofrecer generación independiente y reutilización sin reescribir la matriz.
+  - Depende de: B17 y B25.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-CONF-129, REQ-IND-60 y REQ-IND-61.
+  - Cambia: orden `generate-snv-matrix config.toml --output ...` y consumo posterior de la pareja canónica; el recurso conserva bytes/digest/origen y el manifiesto consumidor registra su reutilización.
+  - Se comprueba con: generación autónoma e integrada equivalentes byte a byte, segunda ejecución con individuos distintos que no modifica `mtime`/hash del recurso y rechazo de pareja parcial o mezclada.
+
+- ☐ B27. Validar y aplicar SNP explícitos como restricciones trazables, no como otra fuente aleatoria inicial.
+  - Depende de: A8–A9 y B6–B7.
   - Procede de: REQ-IND-05, REQ-IND-11 y REQ-REC-24; DTC-020, DTC-032 y DTC-052.
   - Cambia: evento SNP explícito con referencia esperada, ALT `A/C/G/T`, copia y procedencia; prepara su contraste posterior con la matriz y rechaza origen/destino `N`.
   - Se comprueba con: transición/transversión, desacuerdo, copia ausente, borde y `N`, más caso negativo que no acepta una frecuencia poblacional como valor literal individual.
 
-- ☐ B12. Validar y aplicar inserciones pequeñas explícitas y aleatorias.
-  - Depende de: A5, A8–A9, B2, B4 y B6–B9.
+- ☐ B28. Validar y aplicar inserciones pequeñas explícitas y aleatorias.
+  - Depende de: A5, A8–A9, B2, B6–B11.
   - Procede de: REQ-IND-05, REQ-IND-40 y REQ-REC-24; DTC-032.
   - Cambia: inserción interna anclada en la base precedente; la explícita conserva `N` literal y la aleatoria genera solo `A/C/G/T` con longitud exacta efectiva.
   - Se comprueba con: oráculo manual, terminal imposible, `N` explícita, longitudes 1/2/`umbral - 1` y barrido aleatorio sin `N`.
 
-- ☐ B13. Validar y aplicar deleciones pequeñas solo con bases flanqueantes.
-  - Depende de: A5, A8–A9, B2 y B4–B9.
+- ☐ B29. Validar y aplicar deleciones pequeñas solo con bases flanqueantes.
+  - Depende de: A5, A8–A9, B2 y B6–B11.
   - Procede de: REQ-IND-05, REQ-IND-41 y REQ-REC-24.
   - Cambia: deleción con intervalo/REF explícitos o longitud exacta aleatoria; rechaza cero, desacuerdo, solapamiento inválido y cualquier deleción terminal.
   - Se comprueba con: cadenas cortas, longitudes 1/2/`umbral - 1`, intentos sobre primera/última/toda la secuencia y estado intacto tras error.
 
-- ☐ B14. Componer eventos pequeños sobre el estado vigente con conflictos explícitos.
-  - Depende de: B11–B13.
+- ☐ B30. Componer eventos pequeños sobre el estado vigente con conflictos explícitos.
+  - Depende de: B27–B29.
   - Procede de: DTC-020 y DTC-031; REQ-REC-24 y REQ-IND-21.
   - Cambia: aplicación secuencial de explícitos y demás clases aleatorias en orden normativo, con coordenada de referencia, alelo vigente y diagnóstico de objetivo inexistente; la matriz todavía no se muestrea.
   - Se comprueba con: SNP→deleción, deleción→SNP, inserciones vecinas y repetidas con resultado manual y prueba de ausencia de edición parcial.
 
-- ☐ B15. Cerrar diagnósticos y preflight de las entradas F2.2.
-  - Depende de: B4–B14.
+- ☐ B31. Cerrar diagnósticos y preflight de las entradas F2.2.
+  - Depende de: B6–B30.
   - Procede de: DTC-044; REQ-CONF-25, REQ-CONF-28, REQ-IND-40, REQ-IND-41 y REQ-VAL-55.
-  - Cambia: catálogo estable y agregado anticipado para matriz/espectro/perfil, referencia, población, coordenada, alelo, región, recuento, `N`, *indel* y conflicto.
-  - Se comprueba con: tabla diagnóstico→caso, texto/JSON equivalentes, orden determinista y configuración inválida que no crea artefactos finales.
+  - Cambia: catálogo estable y agregado para formato/digest, referencia, población, coordenada, alelo, espectro/intervalo, región/peso, recuentos, `N`, *indel*, matriz vacía y conflicto.
+  - Se comprueba con: tabla diagnóstico→caso, texto/JSON equivalentes, orden determinista, flags limitados y configuración inválida que no crea artefactos finales.
 
-- ☐ B16. Construir un validador y corpus independientes para matriz y espectros.
-  - Depende de: B1; no depende de B8–B10 para calcular el esperado.
-  - Procede de: REQ-VAL-55 y ACE-116; DTC-047 y DTPD-118 aprobada.
-  - Cambia: corpus conocido, lector/comprobador separado y cálculos literales de sumas, candidatos y distribuciones esperadas; registra herramienta/versión si es externa.
-  - Se comprueba con: matrices manuales válidas/corruptas, normalización DTC-049, loci conocidos y mutación deliberada de cada invariante sin llamar al productor.
+- ☐ B32. Construir un validador independiente de los formatos, digests y normalización.
+  - Depende de: B3–B4; no depende de B17–B26 para calcular el esperado.
+  - Procede de: REQ-VAL-55 y ACE-116; DTC-047 y DTC-054 (resuelve DTPD-118).
+  - Cambia: corpus escrito a mano y lector separado para TSV+JSON, referencia, filas completas, IDs, orden, multialelia, sumas Neumaier, tolerancia y eliminación de ALT cero.
+  - Se comprueba con: mutación deliberada de cada campo/digest/invariante y reconstrucción de resultados literales sin llamar al parser, normalizador ni escritor de producción.
 
-- ☐ B17. Integrar fuente, matriz efectiva, digest y procedencia sin crear individuos.
-  - Depende de: B8–B10 y B15–B16.
+- ☐ B33. Construir oráculos independientes para selección, espectros y perfiles.
+  - Depende de: B8–B15; no depende de B22–B25 para producir el esperado.
+  - Procede de: REQ-VAL-55 y ACE-116; DTC-047 y DTC-054 (resuelve DTPD-118).
+  - Cambia: casos sintéticos y cálculo separado de elegibilidad ponderada, Poisson, mayores restos, muestreo de intervalos, ti/tv y resúmenes 1000 Genomes.
+  - Se comprueba con: vectores literales, semillas fijas, pruebas estadísticas con umbrales previos y mutaciones del productor que el oráculo detecta sin reutilizar sus funciones.
+
+- ☐ B34. Integrar fuente, matriz efectiva, digest y procedencia sin crear individuos.
+  - Depende de: B17–B26 y B31–B33.
   - Procede de: REQ-CONF-128, REQ-CONF-129, REQ-IND-02, REQ-IND-06, REQ-IND-60 y REQ-IND-61; DTC-040 y DTC-052.
-  - Cambia: resultado F2.2 estable que enlaza referencia/poblaciones, matriz suministrada o generada, parámetros/perfil, subsemillas, versión y SHA-256 para consumo de F2.3.
-  - Se comprueba con: recorrido suministrado y generado, referencias cruzadas, `sha256sum`, igualdad lógica con semilla fija y ausencia demostrada de genotipos o SNP individuales sorteados.
+  - Cambia: resultado F2.2 inmutable con referencia, poblaciones disponibles/seleccionadas, matriz preparada/generada/reutilizada, perfiles, candidatos/descartes/activos, subsemillas, versiones y SHA-256 para F2.3.
+  - Se comprueba con: las tres rutas, referencias cruzadas, `sha256sum`, igualdad con semilla fija, poblaciones adicionales válidas y ausencia demostrada de genotipos o SNP individuales sorteados.
 
-- ☐ B18. Completar evidencia y trazabilidad de F2.2 con oráculos ajenos al productor.
-  - Depende de: B6–B17 y puertas de calidad verdes.
+- ☐ B35. Completar evidencia y trazabilidad de F2.2 con oráculos ajenos al productor.
+  - Depende de: B8–B34 y puertas de calidad verdes.
   - Procede de: los 26 REQ asignados a F2.2 en §15; ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111 y ACE-116.
   - Cambia: pruebas unitarias, de propiedades, estadísticas e integración y matriz de evidencia de los 22 REQ previos más CONF-128/129 e IND-60/61.
-  - Se comprueba con: §4.3, recuento automático de 26 REQ sin huérfanos, revisión independiente de vectores y repetición exacta; DTC-052 aporta la semántica faltante a RAF2-004, pero sus cuatro filas discutidas no se marcan cerradas hasta revisar formalmente el hallazgo y la matriz maestra.
+  - Se comprueba con: §4.3, recuento automático de 26 REQ sin huérfanos, revisión de B32/B33 y repetición exacta; DTC-052 aporta semántica a RAF2-004, pero no lo cierra sin revisar formalmente la matriz maestra.
 
-> **Pausa obligatoria F2.2.** Aprobar DTPD-118, la matriz común, sus perfiles y
-> validadores, Poisson limitado a recuentos, espacios elegibles, bordes de
-> *indels* y todos los casos con `N`. No iniciar F2.3 si un oráculo se deriva del
-> productor, una densidad SNP individual sigue activa o un rechazo deja cambios.
+> **Pausa obligatoria F2.2.** Confirmar el consumo sin reinterpretación de
+> DTC-054 y el cierre de DTPD-118, la pareja TSV+JSON y sus digests, perfiles solo explícitos,
+> candidatos/descartes/activos, poblaciones independientes, validadores,
+> Poisson limitado a recuentos, espacios elegibles y casos con `N`. No iniciar
+> F2.3 si un oráculo se deriva del productor, una densidad SNP individual sigue
+> activa, un flag relaja otra validación o un rechazo deja cambios.
 
 ## 8. F2.3 — Individuos directos desde una población de origen
 
@@ -500,10 +607,10 @@ genotipos.
 cambios y reconstruye cada haplotipo sin simular dinámica poblacional.
 
 - ☐ C1. Extender la autoría de individuos, población de origen y modelo genotípico.
-  - Depende de: pausa F2.2 aprobada y B1–B4.
+  - Depende de: pausa F2.2 aprobada y B1–B6.
   - Procede de: REQ-CONF-20, REQ-CONF-22, REQ-CONF-130, REQ-DIR-01 y REQ-DIR-02; DTC-034 y DTC-052.
-  - Cambia: esquema `individuals` para ruta `direct`, referencia, población de origen, ploidía uniforme, HWE predeterminado o `F` diploide y cambios explícitos restantes; no añade evolución ni ploidía por secuencia.
-  - Se comprueba con: ejemplos HWE y `F`, cero/uno/varios individuos, población desconocida, F fuera de `[0,1]`, F en ploidía distinta de 2 y campos futuros.
+  - Cambia: esquema `individuals` para ruta `direct`, exactamente una población de origen disponible en la matriz por individuo, asignada explícitamente o mediante el reparto configurado de individuos entre poblaciones, ploidía uniforme, HWE predeterminado o `F` diploide; no admite mezcla/admixture ni evolución.
+  - Se comprueba con: ejemplos explícitos y por reparto, HWE y `F`, cero/uno/varios individuos, población desconocida o múltiple, suma/cantidad de reparto inválida, F fuera de `[0,1]` y F en ploidía distinta de 2.
 
 - ☐ C2. Parsear, validar y resolver individuos con IDs tipados y procedencia completa.
   - Depende de: C1 y contratos F1 de identidad/configuración.
@@ -512,9 +619,9 @@ cambios y reconstruye cada haplotipo sin simular dinámica poblacional.
   - Se comprueba con: IDs repetidos/desconocidos, orden, sustitución individual, HWE omitido/predeterminado y aislamiento de valores efectivos.
 
 - ☐ C3. Versionar subsemillas de genotipo y fase separadas de la generación de matriz.
-  - Depende de: B6, C1–C2.
+  - Depende de: B8, C1–C2.
   - Procede de: REQ-IND-63 y REQ-VAL-55; DTC-011, DTC-037, DTC-038 y DTC-052.
-  - Cambia: catálogo/vectores por población, individuo, locus y copia que consumen la matriz inmutable sin compartir RNG mutable.
+  - Cambia: ámbitos `individual/genotype/<population_id>/<individual_id>/<variant_id>` e `individual/phase/<individual_id>/<variant_id>` que consumen la matriz inmutable sin compartir RNG mutable.
   - Se comprueba con: vectores literales, mismo resultado con distinto orden físico y prueba de estabilidad de matriz e individuos existentes al añadir otro ID.
 
 - ☐ C4. Construir el estado inicial faseado de cada individuo desde la referencia.
@@ -524,75 +631,88 @@ cambios y reconstruye cada haplotipo sin simular dinámica poblacional.
   - Se comprueba con: copias 1–10 iguales byte a byte a la referencia, cardinalidad/IDs exactos y ausencia de escenarios o poblaciones simuladas.
 
 - ☐ C5. Muestrear alelos HWE por locus y copia conservando fase.
-  - Depende de: B17 y C3–C4.
+  - Depende de: B34 y C3–C4.
   - Procede de: REQ-CONF-130 y REQ-IND-62; DTC-052.
-  - Cambia: muestreo independiente de copias desde frecuencias REF/ALT por población y locus, asignado a copias concretas; no introduce asociación entre loci ni usa Poisson.
-  - Se comprueba con: corpus bialélico/multialélico, frecuencias 0/intermedias/1 permitidas, oráculo de sorteos/vectores y fase reconstruible por copia.
+  - Cambia: muestreo independiente de la composición genotípica desde frecuencias REF/ALT por población y locus; `alt_af=0/1` es determinista y ningún recuento se corrige para acercar frecuencias realizadas al objetivo.
+  - Se comprueba con: corpus bialélico/multialélico y ploidías 1/2/10, frecuencias 0/intermedias/1, oráculo de probabilidades/vectores y prueba de ausencia de Poisson o autocorrección.
 
 - ☐ C6. Muestrear genotipos diploides con `F` usando las fórmulas normativas.
-  - Depende de: B17 y C3–C4.
+  - Depende de: B34 y C3–C4.
   - Procede de: REQ-CONF-130, REQ-IND-62 y REQ-EVO-47/48; DTC-052.
   - Cambia: distribución bialélica/multialélica diploide para `F` efectivo 0–1, con asignación faseada a dos copias; no generaliza `F` a otras ploidías.
   - Se comprueba con: probabilidades calculadas fuera del motor para F=0/intermedio/1, suma/normalización, casos multialélicos y rechazo haploide/poliploide.
 
-- ☐ C7. Contrastar SNP explícitos con matriz y modelo antes de modificar copias.
-  - Depende de: B11, C2 y C5–C6.
-  - Procede de: REQ-IND-64 y REQ-DIR-02; DTC-020 y DTC-052.
-  - Cambia: preflight transaccional de restricciones individuales que acepta compatibilidad y rechaza densidad SNP individual, alelo imposible, dosis/genotipo contradictorio o población ausente; deja aparte mutaciones *de novo* posteriores.
-  - Se comprueba con: tabla matriz/modelo/restricción válida e inválida, contradicción tardía sin individuo parcial y prueba de exclusividad frente al modo antiguo.
+- ☐ C7. Asignar fase independiente después de sortear la composición genotípica.
+  - Depende de: C3 y C5–C6.
+  - Procede de: REQ-IND-62, REQ-IND-63 y REQ-VAL-55; DTC-052 y DTC-054 (resuelve DTPD-118).
+  - Cambia: permutación reproducible de alelos entre las copias para heterocigotos diploides, multialélicos y poliploides; la fase es conocida pero no representa LD ni haplotipos poblacionales.
+  - Se comprueba con: genotipos 0/1, 1/1, 1/2 y poliploides, vectores de fase separados y prueba de que cambiar solo fase no vuelve a sortear genotipo ni correlaciona loci.
 
-- ☐ C8. Integrar *indels* y los demás cambios directos después de fijar genotipos SNV.
-  - Depende de: B12–B15, C4 y C7.
+- ☐ C8. Contrastar SNP explícitos con matriz y modelo antes de modificar copias.
+  - Depende de: B27, C2 y C5–C7.
+  - Procede de: REQ-IND-64 y REQ-DIR-02; DTC-020 y DTC-052.
+  - Cambia: preflight transaccional que acepta restricciones compatibles y diagnostica probabilidad cero, ALT ajeno al sitio, dosis/genotipo contradictorio, población ausente y densidad SNP individual; no modifica la matriz ni sus frecuencias.
+  - Se comprueba con: tabla matriz/modelo/restricción para `alt_af=0/1`, F=1, ALT nuevo, dosis imposible y contradicción tardía sin individuo parcial.
+
+- ☐ C9. Aplicar solo la excepción `--allow-incompatible-genotypes` aprobada.
+  - Depende de: C8 y catálogo de diagnósticos F1.
+  - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-64, REQ-VAL-55 y REQ-MAN-91.
+  - Cambia: sin flag, toda incompatibilidad de C8 bloquea; con flag, conserva el genotipo explícito y registra individuo/locus/alelos/motivo, sin relajar referencia, coordenadas, ploidía/dosis imposible, formato, sumas ni no-clobber.
+  - Se comprueba con: cada incompatibilidad permitida con/sin flag y matriz de errores no anulables que siguen fallando; el manifiesto y las frecuencias realizadas incluyen el genotipo forzado.
+
+- ☐ C10. Integrar *indels* y los demás cambios directos después de fijar genotipos SNV.
+  - Depende de: B28–B31, C4 y C8–C9.
   - Procede de: REQ-IND-15, REQ-DIR-01, REQ-DIR-02 y REQ-REC-24; DTC-020 y DTC-031.
   - Cambia: orquestación ordenada por individuo/copia sobre el estado faseado, con transacción lógica y RNG locales para clases no SNV iniciales.
   - Se comprueba con: caso manual matriz+SNP restringido+inserción+deleción, permutación controlada y fallo tardío sin publicación parcial.
 
-- ☐ C9. Materializar y validar cada secuencia haplotípica final contra su historial.
-  - Depende de: C5–C8 y A9.
+- ☐ C11. Materializar y validar cada secuencia haplotípica final contra su historial.
+  - Depende de: C5–C10 y A9.
   - Procede de: DTC-003 y DTC-031; REQ-IND-15 y REQ-DIR-01.
   - Cambia: resultado con secuencia final, eventos, fase, dosis y procedencia sin convertir bytes materializados en una segunda verdad.
   - Se comprueba con: aplicación de eventos y ensamblado independiente que producen los mismos bytes/longitudes y conservan `N` por copia.
 
-- ☐ C10. Integrar múltiples individuos sin acoplar matriz, genotipos ni cambios locales.
-  - Depende de: C2–C9.
+- ☐ C12. Integrar múltiples individuos sin acoplar matriz, genotipos ni cambios locales.
+  - Depende de: C2–C11.
   - Procede de: REQ-IND-63, REQ-CONF-22 y REQ-DIR-01; DTC-006 y DTC-038.
   - Cambia: recorrido ordenado de varios individuos con matriz común inmutable y valores/verdad separados por identidad.
   - Se comprueba con: al menos tres individuos, adición/eliminación/reordenación, ejecución física distinta y comparación exacta de matriz e IDs previos.
 
-- ☐ C11. Calcular objetivos y realizados sin autocorregir el muestreo finito.
-  - Depende de: C5–C10.
+- ☐ C13. Calcular objetivos y realizados sin autocorregir el muestreo finito.
+  - Depende de: C5–C12.
   - Procede de: REQ-IND-65 y REQ-VAL-55; DTC-049 y DTC-052.
-  - Cambia: agregados canónicos por población/locus de frecuencias objetivo, modelo, copias observadas, recuentos/frecuencias y genotipos esperados/realizados.
-  - Se comprueba con: cálculo manual sobre corpus pequeño, orden/suma canónicos, desviación finita informada y prueba de que ningún genotipo sorteado se modifica para acercarla al objetivo.
+  - Cambia: agregados canónicos por población/locus de `alt_af` objetivo, copias totales/ALT, `alt_af` realizada y genotipos esperados/realizados, incluyendo individuos forzados.
+  - Se comprueba con: cálculo manual sobre corpus pequeño, orden/suma canónicos, desviación finita informada, extremos deterministas y prueba de que ningún genotipo se modifica para acercarla al objetivo.
 
-- ☐ C12. Integrar procedencia de matriz y muestreo en configuración efectiva y manifiesto.
-  - Depende de: B17 y C2–C11.
+- ☐ C14. Integrar procedencia de matriz y muestreo en configuración efectiva y manifiesto.
+  - Depende de: B34 y C2–C13.
   - Procede de: REQ-MAN-91, REQ-IND-65 y evidencia compartida de REQ-MAN-10; DTC-040 y DTC-052.
-  - Cambia: manifiesto con modo/ruta/SHA-256 de matriz, referencia/poblaciones, parámetros/perfil/fuente/versión, semillas/subsemillas, HWE/F y valores esperados/realizados.
-  - Se comprueba con: inspección campo a campo, `sha256sum`, enlaces resolubles y ejecuciones suministrada/generada que no omiten procedencia declarada o efectiva.
+  - Cambia: manifiesto con modo/ruta/SHA-256 de matriz y JSON, referencia, poblaciones disponibles/seleccionadas, parámetros/perfiles/fuente/versión, semillas, HWE/F, autorizaciones y valores objetivo/realizados.
+  - Se comprueba con: inspección campo a campo, `sha256sum`, enlaces resolubles y ejecuciones preparada/generada/reutilizada/forzada que no omiten procedencia declarada o efectiva.
 
-- ☐ C13. Validar estadísticamente HWE/`F` con un corpus y cálculos independientes.
-  - Depende de: C5–C6 y C11; no usa C9 para calcular el esperado.
+- ☐ C15. Validar estadísticamente HWE/`F` con un corpus y cálculos independientes.
+  - Depende de: C5–C7 y C13; no usa C11 para calcular el esperado.
   - Procede de: REQ-VAL-55 y ACE-116; DTC-047 y DTC-052.
-  - Cambia: pruebas de aceptación con probabilidades y umbrales predeclarados para HWE/`F`, fase y aislamiento de subsemillas, separadas de la validez formal B16.
+  - Cambia: pruebas de aceptación con probabilidades y umbrales predeclarados para HWE/`F`, fase y aislamiento de subsemillas, separadas de la validez formal B32.
   - Se comprueba con: muestras reproducibles de tamaños pequeño/grande, comparación de esperado/realizado sin exigir igualdad exacta, límites F=0/1 y fallo deliberado detectado por el oráculo.
 
-- ☐ C14. Completar evidencia y trazabilidad de F2.3.
-  - Depende de: C2–C13 y puertas de calidad verdes.
+- ☐ C16. Completar evidencia y trazabilidad de F2.3.
+  - Depende de: C2–C15 y puertas de calidad verdes.
   - Procede de: los 13 REQ exclusivos y dos compartidos asignados a F2.3 en §15/§15.1; ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114 y ACE-116.
   - Cambia: matriz de evidencia y escenario sintético reproducible con matriz, genotipos, fase, haplotipos, métricas y manifiesto calculados independientemente.
   - Se comprueba con: §4.3, recuento automático de 13 exclusivos y dos compartidos sin huérfanos, ID estable omitido y ausencia de dinámica poblacional, lecturas o formatos técnicos.
 
-- ☐ C15. Activar matriz, población y creación directa completa en Marimo.
-  - Depende de: pausa F2.0 y C1–C14.
+- ☐ C17. Activar matriz, población y creación directa completa en Marimo.
+  - Depende de: pausa F2.0 y C1–C16.
   - Procede de: REQ-UI-01 a REQ-UI-07, REQ-UI-13, REQ-UI-14 y DTC-051/DTC-052.
-  - Cambia: pestaña `Individuos` con matriz suministrada/generada, perfil/fichero de espectro, población, número/densidad, espacio, sustituciones, HWE/F, restricciones y demás eventos F2; previsualiza matriz/sumas/distribuciones sin crear individuos ni reinterpretar reglas.
-  - Se comprueba con: matriz campo→control, accesibilidad, alta/baja/reordenación, invalidación y comparación UI→TOML→`EffectiveConfig`→verdad/manifiesto con un conjunto manual equivalente; solo una ejecución explícita validada crea individuos.
+  - Cambia: pestaña `Individuos` para preparar/vincular/verificar referencia, generar/previsualizar/reutilizar matriz, elegir población/perfiles/modos/regiones/HWE/F y confirmar matriz vacía o genotipos incompatibles; invoca al binario sin reimplementar reglas.
+  - Se comprueba con: matriz campo→control, SHA/REF y resúmenes por cromosoma/sustitución/población/intervalo, accesibilidad e igualdad UI→TOML→`EffectiveConfig`→artefactos; confirmaciones producen solo los flags específicos y una edición invalida la ejecución.
 
 > **Pausa obligatoria F2.3.** Reconstruir manualmente todos los haplotipos,
 > aprobar HWE/`F`, fase, métricas, manifiesto y aislamiento de subsemillas. No
 > iniciar F2.4 si Poisson aparece en muestreo de alelos, añadir un individuo
-> altera a otro o C15 deja una opción F2.3 solo en TOML.
+> altera a otro, una excepción limitada oculta otra validación o C17 deja una
+> opción F2.3 solo en TOML.
 
 ## 9. F2.4 — Verdad estructurada independiente del VCF
 
@@ -607,7 +727,7 @@ copias, fase, dosis, eventos y procedencia aunque no se produzca ningún VCF.
   - Se comprueba con: ejemplos válidos e inválidos, recorrido campo→REQ y validación mediante una implementación de esquema independiente elegida y registrada.
 
 - ☐ D2. Implementar una proyección pura desde la verdad canónica al modelo externo.
-  - Depende de: C6–C7 y D1.
+  - Depende de: C7–C11 y D1.
   - Procede de: DTC-003, DTC-004 y DTC-031; REQ-VER-31 y evidencia compartida de REQ-IND-26.
   - Cambia: transformación que incluye referencia/huella, IDs, secuencias, copias, ploidía, fase, dosis, eventos, alelos, coordenadas, `N`, origen y subsemilla o procedencia necesaria, sin consultar VCF.
   - Se comprueba con: prueba exhaustiva campo a campo sobre el escenario sintético y propiedad de que desactivar la salida VCF deja idéntica la proyección de verdad.
@@ -772,21 +892,25 @@ solo expondrá REQ-UI-15 cuando cierren las capacidades correspondientes.
 | Riesgo silencioso | Prevención en producción | Oráculo independiente obligatorio | Evidencia de fallo que debe detectarse |
 |---|---|---|---|
 | Desfase base 0/base 1 o extremo abierto/cerrado | Tipos/servicio DTPD-101 iniciados en F1.6 y extendidos en A5 | Vectores compartidos de mapa y cadenas etiquetadas por posición | Mapa, SNP o indel desplazado, ancla incorrecta o acceso a posición 0 |
-| Longitud de *indel* mal resuelta o convertida en distribución implícita | Parámetros exactos B2/B5 y constructores B12–B13 | Casos 1/2/`umbral - 1` y RNG instrumentado | Longitud distinta, consumo RNG para longitud o clasificación estructural incorrecta |
-| Inserción/deleción terminal inválida | Constructores validados B12–B13 | Enumeración manual de todos los indels de una cadena corta | Pérdida del ancla o secuencia sin base a uno de los lados |
-| Sustitución silenciosa de `N` | Dominio A6 y reglas B8–B13/E7 | Corpus con `N` en borde/interior y barrido de salidas | SNP `REF=N`, ALT `N` o inserción aleatoria con `N` |
+| Longitud de *indel* mal resuelta o convertida en distribución implícita | Parámetros exactos B2/B7 y constructores B28–B29 | Casos 1/2/`umbral - 1` y RNG instrumentado | Longitud distinta, consumo RNG para longitud o clasificación estructural incorrecta |
+| Inserción/deleción terminal inválida | Constructores validados B28–B29 | Enumeración manual de todos los indels de una cadena corta | Pérdida del ancla o secuencia sin base a uno de los lados |
+| Sustitución silenciosa de `N` | Dominio A6 y reglas B9/B17/B22–B29/E7 | Corpus con `N` en borde/interior y barrido de salidas | SNP `REF=N`, ALT `N` o inserción aleatoria con `N` |
 | Fase o dosis alterada | Copias ordenadas A7/A9 y GT E5 | Conteo manual por copia, no parsing circular del VCF | GT sin P alelos, separador no faseado o dosis distinta |
-| Evento perdido por solapamiento | Composición B14 e historial D2 | Aplicador de cadenas corto escrito desde fixtures | SNP superviviente tras ser borrado o conflicto aceptado |
-| Tasa cero que consume RNG | Ruta explícita B9 | RNG instrumentado y comparación de ámbitos vecinos | Cambios en otras clases o individuos al activar cero |
-| Poisson incorrecto o aplicado a alelos/genotipos | Decisión B2 y servicios B9/C5–C6 | Vectores o implementación ajena y test estadístico prefijado | Media/varianza fuera del umbral, Poisson fuera del recuento o resultado no reproducible |
-| Matriz o espectro incompatibles con referencia/población | Validación B8/B15 y formato DTPD-118 | Corpus/lector B16 calculado fuera del productor | REF/ALT, suma, duplicado, población, perfil o digest incorrectos aceptados |
-| HWE/`F`, fase o frecuencia realizada incorrectos | Muestreo C5–C7 y agregados C11 | Probabilidades/corpus independiente C13 | Genotipo fuera del modelo, fase cambiada o muestra finita autocorregida |
-| Verdad y secuencia materializada divergen | Una verdad canónica A8–A9/C9 | Segundo reconstructor de D4 | Bytes o longitud distintos para la misma copia |
+| Evento perdido por solapamiento | Composición B30 e historial D2 | Aplicador de cadenas corto escrito desde fixtures | SNP superviviente tras ser borrado o conflicto aceptado |
+| Tasa cero que consume RNG | Rutas explícitas B11/B20/B24 | RNG instrumentado y comparación de ámbitos vecinos | Cambios en otras clases o individuos al activar cero |
+| Poisson incorrecto o aplicado a alelos/genotipos | Decisión B2 y servicio B11/C5–C6 | Vectores o implementación ajena y test estadístico prefijado | Media/varianza fuera del umbral, Poisson fuera del recuento o resultado no reproducible |
+| Matriz o espectro incompatibles con referencia/población | Esquemas/validación DTC-054 y B3–B4/B12/B17–B21 | Corpus/lector B32 calculado fuera del productor | REF/ALT, suma, duplicado, población, perfil o digest incorrectos aceptados |
+| Recuento candidato confundido con loci activos | Separación B11/B20/B25 | Tabla manual candidatos→ALT cero→activos | Reposición de un locus globalmente ausente o `exact_loci` interpretado como activos |
+| Distribución o perfil implícito/incorrecto | Perfiles B10/B12–B15 y selección B22–B24 | Oráculos B33 y regeneración 1000 Genomes | Solapamiento aceptado, mayor resto incorrecto o perfil empírico cargado por defecto |
+| Identidad o azar cambia por orden/adición | IDs B16 y ámbitos B8/C3 | Permutaciones y vectores literales | Reordenar filas/poblaciones o añadir individuo altera resultados existentes |
+| Excepción limitada relaja otra validación | Flags B21/C9 y preflight B31 | Matriz independiente error×flag | Digest, REF, frecuencia, ploidía/dosis o no-clobber inválidos aceptados |
+| HWE/`F`, fase o frecuencia realizada incorrectos | Muestreo C5–C9 y agregados C13 | Probabilidades/corpus independiente C15 | Genotipo fuera del modelo, fase cambiada o muestra finita autocorregida |
+| Verdad y secuencia materializada divergen | Una verdad canónica A8–A9/C11 | Segundo reconstructor de D4 | Bytes o longitud distintos para la misma copia |
 | VCF convertido en fuente de verdad | Dirección de dependencias D2/E3 | Prueba sin VCF y auditoría de módulos | No se puede reconstruir o cambia la verdad al desactivar VCF |
 | REF/ALT/normalización incorrectos | Proyección E3–E4 | Normalizador/validador independiente aprobado | Registro válido sintácticamente pero no representa la verdad |
 | Pérdida de detalle al agrupar multialélicos | Agrupación E5 y complemento E7 | Tabla manual sitio×copia y reconstructor combinado | ALT o copia portadora desaparece, o se inventa una base |
 | Artefactos mezclados entre ejecuciones | IDs/hashes/publicación F1 reutilizados | `sha256sum`, referencias cruzadas y fallos inyectados | Índice, VCF, verdad o referencia de ejecuciones distintas |
-| UI y conjunto TOML producen semánticas distintas, rompen enlaces o ejecutan una revisión obsoleta | Modelo/digest multidocumento M4/M7, binario único M8/M9 y pasos C15/D9/E13 | Conjunto manual gemelo, escenarios faltante/duplicado y proceso falso que registra argumentos | `EffectiveConfig` distinta, ruta/orden perdido, ejecución automática o validación antigua reutilizada |
+| UI y conjunto TOML producen semánticas distintas, rompen enlaces o ejecutan una revisión obsoleta | Modelo/digest multidocumento M4/M7, binario único M8/M9 y pasos C17/D9/E13 | Conjunto manual gemelo, escenarios faltante/duplicado y proceso falso que registra argumentos | `EffectiveConfig` distinta, ruta/orden perdido, ejecución automática o validación antigua reutilizada |
 
 Una prueba que serializa y vuelve a leer con el mismo código solo demuestra
 consistencia interna. No satisface por sí sola ninguna fila de esta tabla.
@@ -795,7 +919,8 @@ consistencia interna. No satisface por sí sola ninguna fila de esta tabla.
 
 - Cada paso se implementa y revisa de forma aislada; una revisión puede dividirlo
   aún más, pero no fusionarlo con un paso dependiente para ocultar su evidencia.
-- Si M1, A2, A3, B1, B2 o E1 no obtienen aprobación, se detienen sus consumidores y se
+- Si M1, A2, A3, B2 o E1 no obtienen aprobación, o B1 no confirma sin
+  contradicción DTC-054 y el cierre de DTPD-118, se detienen sus consumidores y se
   actualiza este plan con el bloqueo. Se puede continuar únicamente con corpus,
   matrices o validadores que no presupongan la opción elegida.
 - Si una decisión aprobada contradice especificación, arquitectura o DTC
@@ -814,7 +939,7 @@ Antes de aprobar el plan se ejecutarán, como mínimo:
 git diff --check -- design/plan-implementacion-f2-0.1.md
 rg -n '^- ☐ [A-EM][0-9]+\.' design/plan-implementacion-f2-0.1.md
 rg -n '^> \*\*Pausa obligatoria F2\.[0-5]' design/plan-implementacion-f2-0.1.md
-rg -n 'DTC-052|DTC-053|DTPD-101|DTPD-102|DTPD-103|DTPD-117|DTPD-118|DTPD-119|F1\.5|F1\.6' design/plan-implementacion-f2-0.1.md
+rg -n 'DTC-052|DTC-053|DTC-054|DTPD-101|DTPD-102|DTPD-103|DTPD-117|DTPD-118|DTPD-119|F1\.5|F1\.6' design/plan-implementacion-f2-0.1.md
 rg -n 'RAF2-001|RAF2-004|RAF2-007' design/plan-implementacion-f2-0.1.md
 ```
 
@@ -843,8 +968,8 @@ contradiría esas filas sin una revisión explícita de trazabilidad.
 |---|---|---|---|---|
 | F2.0 | REQ-UI-01; REQ-UI-02; REQ-UI-03; REQ-UI-04; REQ-UI-05; REQ-UI-06; REQ-UI-07; REQ-UI-08; REQ-UI-09; REQ-UI-10; REQ-UI-11; REQ-UI-12; REQ-UI-13; REQ-VAL-54 | ACE-114, ACE-115 | DTC-034, DTC-036, DTC-042, DTC-043, DTC-044, DTC-045, DTC-048, DTC-051; DTPD-117 | M1–M12 |
 | F2.1 | REQ-REF-14; REQ-IND-28; REQ-IND-29; REQ-VER-27 | ACE-03, ACE-10, ACE-11, ACE-28, ACE-66 | DTC-003, DTC-010, DTC-013, DTC-031, DTC-032, DTC-039; DTPD-101 y DTPD-102 | A2–A10 |
-| F2.2 | REQ-CONF-08; REQ-CONF-21; REQ-CONF-24; REQ-CONF-25; REQ-CONF-28; REQ-CONF-128; REQ-CONF-129; REQ-IND-02; REQ-IND-03; REQ-IND-05; REQ-IND-06; REQ-IND-10; REQ-IND-11; REQ-IND-13; REQ-IND-14; REQ-IND-17; REQ-IND-18; REQ-IND-19; REQ-IND-21; REQ-IND-38; REQ-IND-40; REQ-IND-41; REQ-IND-60; REQ-IND-61; REQ-DIR-03; REQ-REC-24 | ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111, ACE-116 | DTC-006, DTC-011, DTC-020, DTC-022, DTC-032, DTC-033, DTC-037, DTC-038, DTC-044, DTC-049, DTC-052; DTPD-101, DTPD-118 y decisión B2 aún sin identificador | B1–B18 |
-| F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-CONF-130; REQ-IND-15; REQ-IND-62; REQ-IND-63; REQ-IND-64; REQ-IND-65; REQ-DIR-01; REQ-DIR-02; REQ-UI-14; REQ-VAL-55; REQ-MAN-91 | ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114, ACE-116 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039, DTC-049, DTC-051, DTC-052; DTPD-118 | C1–C15 |
+| F2.2 | REQ-CONF-08; REQ-CONF-21; REQ-CONF-24; REQ-CONF-25; REQ-CONF-28; REQ-CONF-128; REQ-CONF-129; REQ-IND-02; REQ-IND-03; REQ-IND-05; REQ-IND-06; REQ-IND-10; REQ-IND-11; REQ-IND-13; REQ-IND-14; REQ-IND-17; REQ-IND-18; REQ-IND-19; REQ-IND-21; REQ-IND-38; REQ-IND-40; REQ-IND-41; REQ-IND-60; REQ-IND-61; REQ-DIR-03; REQ-REC-24 | ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111, ACE-116 | DTC-006, DTC-011, DTC-020, DTC-022, DTC-032, DTC-033, DTC-037, DTC-038, DTC-044, DTC-049, DTC-052 y DTC-054; DTPD-101 y decisión B2 aún sin identificador; DTPD-118 resuelta | B1–B35 |
+| F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-CONF-130; REQ-IND-15; REQ-IND-62; REQ-IND-63; REQ-IND-64; REQ-IND-65; REQ-DIR-01; REQ-DIR-02; REQ-UI-14; REQ-VAL-55; REQ-MAN-91 | ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114, ACE-116 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039, DTC-049, DTC-051, DTC-052 y DTC-054; DTPD-118 resuelta | C1–C17 |
 | F2.4 | REQ-VER-31; REQ-SAL-06 | ACE-34, ACE-62 | DTC-003, DTC-004, DTC-031, DTC-035, DTC-036, DTC-040, DTC-045, DTC-047, DTC-051; DTPD-102 | D1–D9 |
 | F2.5 | REQ-FMT-05; REQ-FMT-06; REQ-REC-26; REQ-VER-02; REQ-VER-06; REQ-VER-12; REQ-VER-15; REQ-VER-16; REQ-VER-17; REQ-VER-30; REQ-VER-32; REQ-VER-33; REQ-VER-34; REQ-VER-36; REQ-VER-37; REQ-VER-39; REQ-VER-40; REQ-VER-41; REQ-VER-43; REQ-VER-44; REQ-VER-47; REQ-VAL-28; REQ-MAN-27; REQ-MAN-57; REQ-SAL-21 | ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100, ACE-103 | DTC-003, DTC-004, DTC-013, DTC-021, DTC-032, DTC-040, DTC-043, DTC-045, DTC-047, DTC-051; DTPD-103 | E1–E13 |
 
@@ -856,9 +981,9 @@ satisfecho hasta que cierren también sus fases posteriores:
 
 | REQ compartido | Evidencia parcial exigida en F2 | Pasos |
 |---|---|---|
-| REQ-IND-25 (F2.3/F6.1) | Un creador directo real asigna un ID estable cuando falta, comprueba unicidad y no reutilización dentro del recorrido disponible | C2, C14 |
+| REQ-IND-25 (F2.3/F6.1) | Un creador directo real asigna un ID estable cuando falta, comprueba unicidad y no reutilización dentro del recorrido disponible | C2, C16 |
 | REQ-IND-26 (F2.4/F3.5/F7.7/F8.5) | El mismo ID aparece sin traducción en estado genotípico, verdad estructurada y metadatos F2; observaciones y linaje quedan para sus fases | D2, D6, D8 |
-| REQ-MAN-10 (F2.3/F5.5/F9.7) | El manifiesto distingue valores globales, específicos y efectivos consumidos por individuos/regiones/clases de F2 | C2, C12, C14 |
+| REQ-MAN-10 (F2.3/F5.5/F9.7) | El manifiesto distingue valores globales, específicos y efectivos consumidos por individuos/regiones/clases de F2 | C2, C14, C16 |
 | REQ-MAN-83 (F2.5/F3.5) | El primer conjunto real y sus artefactos VCF/índice manifiestan estados y diagnósticos coherentes con ejecución y evento | E9, E12 |
 
 ### 15.2. Evidencia adyacente no asignada a F2
@@ -877,6 +1002,7 @@ El plan queda listo para aprobación cuando su validación mecánica no detecta
 errores, los 84 REQ de cierre aparecen exactamente una vez en §15, los cuatro
 REQ compartidos aparecen exactamente una vez en §15.1, cada hito tiene su pausa
 y cada paso conserva las cuatro líneas obligatorias. La ejecución seguirá
-condicionada al cierre de F1 y a las decisiones M1, A2, A3, B1 y E1. F2 solo podrá
+condicionada al cierre de F1 y a las decisiones M1, A2, A3, B2 y E1, además de
+la auditoría de consumo B1. F2 solo podrá
 cerrarse cuando E12/E13, la pausa final y la aprobación independiente de cierre
 consten por separado.

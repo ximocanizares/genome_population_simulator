@@ -152,8 +152,8 @@ presentan como ejecutadas o superadas.
 | REQ-CONF-125 | ACE-112 | F1.6 | Planificada — TEST-REQ-CONF-125: aceptar por separado `target_bases` y `reduction_percent` y rechazar ambos, ninguno y cada valor fuera de dominio antes de derivar. |
 | REQ-CONF-126 | ACE-112, ACE-23 | F1.6 | Planificada — TEST-REQ-CONF-126: repetir la selección con raíz/ID iguales y demostrar aislamiento al añadir individuos, eventos o salidas. |
 | REQ-CONF-127 | ACE-112, ACE-113, ACE-22 | F1.6 | Planificada — TEST-REQ-CONF-127: inspeccionar configuración efectiva y verificar origen, objetivo declarado/realizado, región, seed/subseed, versión y procedencia sin sustitución silenciosa. |
-| REQ-CONF-128 | ACE-116 | F2.2 | Planificada — TEST-REQ-CONF-128: admitir por separado una matriz suministrada y otra generada, enlazarlas a referencia/poblaciones y rechazar ambas o ninguna. |
-| REQ-CONF-129 | ACE-116 | F2.2 | Planificada — TEST-REQ-CONF-129: generar matrices desde número exacto y media/densidad con espacio, sustitución y espectro incorporado o suministrado, sin perfil implícito. |
+| REQ-CONF-128 | ACE-116 | F2.2 | Planificada — TEST-REQ-CONF-128: admitir exactamente una matriz canónica preparada, generada o reutilizada por referencia, seleccionar una población literal por individuo y rechazar mezcla o matriz/referencia incompatible. |
+| REQ-CONF-129 | ACE-116 | F2.2 | Planificada — TEST-REQ-CONF-129: generar candidatos desde número exacto o Poisson por media/densidad, con espacio, sustitución y espectro explícitos; comprobar seis ejemplos 1000G seleccionables y ausencia de perfil empírico implícito. |
 | REQ-CONF-130 | ACE-116 | F2.3 | Planificada — TEST-REQ-CONF-130: usar HWE predeterminado y F diploide 0/intermedio/1; rechazar F fuera de dominio y en P=1/P>2. |
 | REQ-TEC-01 | ACE-57 | F4.1 | Planificada — TEST-REQ-TEC-01: ejecutar el escenario «Cada evento que genere FASTQ, BAM o CRAM constituye también su único experimento de secuenciación, sin» y comparar el resultado observable con el REQ. |
 | REQ-TEC-02 | ACE-57 | F4.1 | Planificada — TEST-REQ-TEC-02: ejecutar el escenario «Cada experimento debe contener exactamente una tanda y una o varias bibliotecas» y comparar el resultado observable con el REQ. |
@@ -267,12 +267,12 @@ presentan como ejecutadas o superadas.
 | REQ-IND-57 | ACE-107, ACE-10 | F5.5 | Planificada — TEST-REQ-IND-57: ejecutar «Si el espacio válido actualizado no permite completar el número sorteado de una clase, la generación» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-IND-58 | ACE-79, ACE-10 | F5.2 | Planificada — TEST-REQ-IND-58: ejecutar «`N` no debe ser origen ni destino de un SNP» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-IND-59 | ACE-110, ACE-10 | F7.2 | Planificada — TEST-REQ-IND-59: ejecutar «Una inserción aleatoria nueva debe contener solo A, C, G y T» y comprobar el registro y su procedencia en la salida exigida. |
-| REQ-IND-60 | ACE-116, ACE-110 | F2.2 | Planificada — TEST-REQ-IND-60: validar matriz manual bialélica/multialélica y rechazar REF/ALT, N, frecuencia, suma, duplicado o referencia incompatibles. |
-| REQ-IND-61 | ACE-116 | F2.2 | Planificada — TEST-REQ-IND-61: generar loci sin reemplazo, REF desde FASTA, ALT según espectro y frecuencias según perfil con semilla fija y oráculo independiente. |
-| REQ-IND-62 | ACE-116, ACE-28 | F2.3 | Planificada — TEST-REQ-IND-62: muestrear copias por población con HWE o F, conservar fase y comprobar fórmulas bialélicas/multialélicas. |
-| REQ-IND-63 | ACE-116, ACE-23 | F2.3 | Planificada — TEST-REQ-IND-63: repetir matriz/genotipos/fase y demostrar estabilidad al añadir otro ID de individuo. |
-| REQ-IND-64 | ACE-116, ACE-10 | F2.3 | Planificada — TEST-REQ-IND-64: rechazar densidad SNP individual junto con matriz y restricciones explícitas incompatibles; mantener separadas mutaciones de novo. |
-| REQ-IND-65 | ACE-116, ACE-104 | F2.3 | Planificada — TEST-REQ-IND-65: comparar frecuencias/genotipos esperados y realizados por población y locus sin autocorregir variación finita. |
+| REQ-IND-60 | ACE-116, ACE-110 | F2.2 | Planificada — TEST-REQ-IND-60: preparar TSV+JSON base 1 cerrado con `alt_af` decimal/científico, combinaciones completas ALT×población y multialelia; rechazar VCF/MAF/DAF/AC-AN, ausencias, REF/ALT, N, suma, duplicado o hash incompatibles. |
+| REQ-IND-61 | ACE-116 | F2.2 | Planificada — TEST-REQ-IND-61: generar candidatos bialélicos sin reemplazo sobre uniforme/regiones ponderadas no solapadas, 12 sustituciones o Ti/Tv y espectro fixed/lineal/log no solapado en modos estocástico/exacto, con oráculos independientes. |
+| REQ-IND-62 | ACE-116, ACE-28 | F2.3 | Planificada — TEST-REQ-IND-62: muestrear copias por una población con HWE o F, fase independiente y fórmulas bialélicas/multialélicas; rechazar incompatibles salvo autorización específica que no relaje otras invariantes. |
+| REQ-IND-63 | ACE-116, ACE-23 | F2.3 | Planificada — TEST-REQ-IND-63: repetir bytes de matriz/genotipos/fase y demostrar aislamiento al añadir/reordenar individuos, poblaciones o filas mediante ámbitos separados. |
+| REQ-IND-64 | ACE-116, ACE-10 | F2.3 | Planificada — TEST-REQ-IND-64: rechazar densidad SNP individual junto con matriz; comprobar restricciones explícitas, `--allow-incompatible-genotypes` limitado y separación de mutaciones de novo. |
+| REQ-IND-65 | ACE-116, ACE-104 | F2.3 | Planificada — TEST-REQ-IND-65: comparar frecuencias/genotipos esperados y realizados, candidatos/descartes/activos por población y locus sin autocorregir variación finita ni reponer ceros globales. |
 | REQ-DIR-01 | ACE-12, ACE-10 | F2.3 | Planificada — TEST-REQ-DIR-01: declarar «permitir crear directamente individuos con los cambios indicados en el fichero general de configuración» y comprobar aceptación, valor efectivo y ámbito de aplicación. |
 | REQ-DIR-02 | ACE-10 | F2.3 | Planificada — TEST-REQ-DIR-02: ejecutar el escenario «La creación directa debe admitir tanto cambios concretos como cambios al azar configurados por clase de» y comparar el resultado observable con el REQ. |
 | REQ-DIR-03 | ACE-10 | F2.2 | Planificada — TEST-REQ-DIR-03: ejecutar el escenario «La creación directa debe admitir para cada clase de variante una distribución espacial uniforme o regiones» y comparar el resultado observable con el REQ. |
@@ -629,7 +629,7 @@ presentan como ejecutadas o superadas.
 | REQ-UI-11 | ACE-115 | F2.0 | Planificada — TEST-REQ-UI-11: mostrar estado/código/logs/diagnósticos/resumen y demostrar con artefacto grande que no se carga completo. |
 | REQ-UI-12 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-UI-12: aceptar contrato compatible y bloquear versiones ausente, anterior, posterior o desconocida sin migración parcial. |
 | REQ-UI-13 | ACE-115 | F2.0 | Planificada — TEST-REQ-UI-13: recorrer por teclado en Ubuntu/WSL2, comprobar etiquetas/foco/color y auditar la puerta UI de cada capacidad F2. |
-| REQ-UI-14 | ACE-114, ACE-116 | F2.3 | Planificada — TEST-REQ-UI-14: configurar matriz suministrada/generada, espectro, población y HWE/F en Marimo y demostrar equivalencia con TOML manual. |
+| REQ-UI-14 | ACE-114, ACE-116 | F2.3 | Planificada — TEST-REQ-UI-14: preparar/vincular, generar o reutilizar matriz, previsualizar perfiles/descartes y confirmar únicamente genotipos incompatibles o matriz vacía en Marimo, con equivalencia a argumentos/TOML manuales. |
 | REQ-UI-15 | ACE-114, ACE-117 | F6.4/F7.1 | Planificada — TEST-REQ-UI-15: cargar panel, previsualizar frecuencias y elegir intacto/recombinante con equivalencia UI→TOML→resultado. |
 | REQ-RG-01 | ACE-56, ACE-100 | F3.3 | Planificada — TEST-REQ-RG-01: ejecutar el escenario «Los BAM o CRAM deben incluir grupos de lectura coherentes que identifiquen como mínimo el evento» y comparar el resultado observable con el REQ. |
 | REQ-RG-02 | ACE-56, ACE-100 | F4.6 | Planificada — TEST-REQ-RG-02: ejecutar el escenario «Cada individuo seleccionado por un evento técnico debe tener exactamente una biblioteca, un grupo de lectura» y comparar el resultado observable con el REQ. |
@@ -739,7 +739,7 @@ presentan como ejecutadas o superadas.
 | REQ-VAL-52 | ACE-112, ACE-64 | F1.6 | Planificada — TEST-REQ-VAL-52: agotar exclusividad, dominios, espacio, objetivo, residual e IDs y comprobar rechazo previo sin FASTA/mapa derivados. |
 | REQ-VAL-53 | ACE-113, ACE-64 | F1.6 | Planificada — TEST-REQ-VAL-53: reconstruir desde origen+mapa y detectar intervalo, orientación, orden, `N`, tamaño o SHA-256 alterados. |
 | REQ-VAL-54 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-VAL-54: comparar conjunto UI/manual hasta `EffectiveConfig` o diagnóstico, incluidos enlaces/rutas relativas, y rechazar incompatibilidad de versión app↔binario. |
-| REQ-VAL-55 | ACE-116 | F2.3 | Planificada — TEST-REQ-VAL-55: validar matriz/espectro/modelo y comparar estadísticamente corpus HWE/F sin exigir igualdad exacta de frecuencias finitas. |
+| REQ-VAL-55 | ACE-116 | F2.3 | Planificada — TEST-REQ-VAL-55: validar par/hashes/referencia, esquema `alt_af`, espectros/regiones, perfiles, mayores restos, ceros/fijados, IDs/subsemillas y HWE/F con corpus/productor independientes, sin exigir igualdad exacta de frecuencias finitas. |
 | REQ-VAL-56 | ACE-117 | F6.4/F7.1 | Planificada — TEST-REQ-VAL-56: reconstruir panel y frecuencias; detectar mosaico en modo intacto y reconstruirlo desde procedencia en modo recombinante. |
 | REQ-MAN-01 | ACE-22 | F1.4 | Superada — TEST-REQ-MAN-01 comprueba manifiesto general y uno por evento explícito. |
 | REQ-MAN-02 | ACE-64 | F1.4 | Superada — TEST-REQ-MAN-02 analiza JSON y lo contrasta con JSON Schema Draft 2020-12 independiente. |
@@ -831,7 +831,7 @@ presentan como ejecutadas o superadas.
 | REQ-MAN-88 | ACE-111, ACE-22 | F1.4 | Superada — TEST-REQ-MAN-88 conserva parámetro, objeto, regla ganadora, selectores y procedencia; el rechazo ambiguo mantiene todas las máximas desde F1.2. |
 | REQ-MAN-89 | ACE-112, ACE-113, ACE-22 | F1.6 | Planificada — TEST-REQ-MAN-89: inspeccionar IDs, rutas/hashes, tamaños, región, objetivo, seed/subseed y versión de una reducción reproducible. |
 | REQ-MAN-90 | ACE-113, ACE-22 | F1.6 | Planificada — TEST-REQ-MAN-90: resolver el enlace al mapa, validar clase/versión/tamaño/SHA y comprobar secuencias omitidas y residual. |
-| REQ-MAN-91 | ACE-116, ACE-22 | F2.3 | Planificada — TEST-REQ-MAN-91: inspeccionar fuente/digest de matriz, perfil, parámetros, HWE/F, semillas y valores esperados/realizados. |
+| REQ-MAN-91 | ACE-116, ACE-22 | F2.3 | Planificada — TEST-REQ-MAN-91: inspeccionar clases/versiones/rutas/digests, referencia, poblaciones disponibles/seleccionadas, candidatos/descartes/activos, perfiles/parámetros, HWE/F, ámbitos/semillas, autorizaciones y valores esperados/realizados. |
 | REQ-MAN-92 | ACE-117, ACE-22 | F6.4/F7.1 | Planificada — TEST-REQ-MAN-92: inspeccionar panel/digest, frecuencias, modo, semillas y fuentes/puntos/segmentos recombinantes. |
 | REQ-SAL-01 | ACE-04 | F1.5 | Superada — TEST-REQ-SAL-01: cada referencia de la ejecución produce un único FASTA; el FAI de aceptación queda fuera de la salida normal. |
 | REQ-SAL-02 | ACE-34, ACE-78, ACE-14 | F8.5 | Planificada — TEST-REQ-SAL-02: ejecutar «Toda ejecución válida debe producir un fichero de verdad con el estado genotípico completo, faseado y» y comprobar el estado o artefacto resultante y su identidad. |

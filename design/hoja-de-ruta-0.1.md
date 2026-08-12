@@ -2,7 +2,7 @@
 
 - **Versión:** 0.1
 - **Estado:** vigente; F0 aprobada, F1 ampliada con F1.6 y F2.0 pendiente de sus puertas
-- **Fecha:** 10 de agosto de 2026
+- **Fecha:** 12 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Lenguaje del núcleo:** Rust
@@ -183,16 +183,21 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
   innecesariamente secuencias completas; conservar `N` como base desconocida con
   coordenada y longitud.
 - **F2.2. Variantes pequeñas y matriz SNV.** Aplicar SNP explícitos e *indels*
-  exactos o aleatorios; admitir o generar una matriz de frecuencias SNV común a
-  la población desde número/densidad, espacio, sustituciones y un espectro
-  alélico explícito. Poisson solo rige recuentos generados desde una media, no
-  el muestreo de alelos. Rechazar SNV sobre `N` y conservarla en intervalos que
-  no necesitan interpretarla. Resolver DTPD-118 antes de fijar formatos, perfiles
-  incorporados o el algoritmo de generación.
+  exactos o aleatorios; preparar, admitir, generar y reutilizar el par canónico
+  TSV+JSON de DTC-054 ligado por SHA-256 a la referencia. Generar candidatos
+  bialélicos sin reemplazo desde número exacto/media/densidad, espacio uniforme
+  o ponderado, 12 sustituciones y espectro `alt_af` no solapado en modo
+  estocástico o exacto por mayores restos. Poisson solo rige recuentos generados
+  desde una media, no el muestreo de alelos. Rechazar SNV sobre `N`, VCF o
+  semánticas de frecuencia alternativas; conservar `N` en intervalos que no
+  necesitan interpretarla. DTPD-118 está resuelta por DTC-054.
 - **F2.3. Individuos directos desde población de origen.** Construir individuos
-  muestreando la matriz mediante Hardy-Weinberg o `F` diploide, integrar los
-  demás cambios y reconstruir cada haplotipo; activar matriz, espectro,
-  población y modelo en la pestaña `Individuos`.
+  asignados a una única población y muestrear la matriz mediante Hardy-Weinberg
+  o `F` diploide, con fase y subsemillas independientes. Integrar restricciones
+  explícitas, incluidas las dos autorizaciones limitadas y trazadas para
+  genotipos incompatibles o matriz activa vacía; integrar los demás cambios y
+  reconstruir cada haplotipo. Activar preparación/generación/reutilización,
+  perfiles, población y modelo en la pestaña `Individuos`.
 - **F2.4. Verdad estructurada.** Guardar el genotipo real y la información
   necesaria para reconstruirlo independientemente del VCF y exponer sus
   opciones y resumen enlazado en `Salidas`/`Revisar y ejecutar`.

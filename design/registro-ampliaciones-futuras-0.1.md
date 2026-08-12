@@ -52,6 +52,8 @@ resultados ni errores pertenecen a DTP/DTPD en
 | DTF-035 | Inferencia o generación de LD desde D, D' o r² | Especificación §3; REQ-EVO-40..45 | v1 recibe haplotipos y frecuencias explícitos | Post-v1, decisión de estadísticos de LD | Modelo poblacional, estimadores, bloques y tolerancias |
 | DTF-036 | Posiciones invariantes y bloques gVCF | Especificación §3; REQ-VER-01..18 | VCF de verdad v1 solo representa diferencias | Post-v1, decisión de vista gVCF | Estándar seleccionado, bloques, genotipos y tamaño de salida |
 | DTF-037 | Lotes reproducibles de ejecuciones completas | Especificación §3, párrafo de lotes | Excluidos de F1.6/F2.0 y de v1; cada réplica futura será una ejecución completa e independiente, no otra referencia dentro de la misma ejecución | Post-v1, después de F9.7 y de una decisión funcional específica de lotes | Vías F3–F8 y consolidación F9; identidad/raíz/semillas, estabilidad de prefijo, directorios/manifiestos y estados por réplica, identidad/resumen del lote, preflight agregado y paridad Marimo |
+| DTF-038 | Utilidad para convertir VCF poblacionales a la matriz canónica de frecuencias SNV | REQ-CONF-128/129; resolución DTPD-118 del 12 de agosto de 2026 | Fuera de F2 y del núcleo de simulación; v1 solo recibe la tabla versionada con `alt_af`. La utilidad futura deberá producir esa tabla sin ampliar ni relajar el contrato de entrada del simulador | Post-v1, decisión de herramientas auxiliares de importación | Formato canónico DTPD-118 cerrado; versión VCF, referencia, multialelia, campos poblacionales, filtros, procedencia, validación y equivalencia de la conversión |
+| DTF-039 | Generación aleatoria de loci SNV multialélicos | REQ-CONF-128/129; resolución DTPD-118 del 12 de agosto de 2026 | Fuera de F2; la generación aleatoria de v1 solo crea loci bialélicos, aunque la matriz suministrada puede contener varios `ALT` por locus | Post-v1, decisión de generación multialélica | Espectro conjunto de número e identidad de alelos, frecuencias cuya suma no supere 1, colisiones, HWE/F, verdad y validación independiente |
 
 ## 3. Cobertura y mantenimiento
 
@@ -91,5 +93,6 @@ Las exclusiones funcionales normativas se enlazan mediante el DTF explícito de
 la sección 3 o mediante los REQ estables citados en la fila DTF. La auditoría
 detectó trece grupos que no estaban en DTF-001..023 y añadió DTF-024..036. Tras
 esa corrección quedaron **0 exclusiones funcionales futuras huérfanas** en el
-corte auditado. DTF-037 se añadió el 10 de agosto de 2026 por una petición
-posterior y queda fuera de los recuentos históricos de la tabla.
+corte auditado. DTF-037 se añadió el 10 de agosto de 2026 y DTF-038/039 el 12
+de agosto de 2026 por peticiones posteriores; las tres quedan fuera de los
+recuentos históricos de la tabla.
