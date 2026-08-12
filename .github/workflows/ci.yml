@@ -13,9 +13,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Install pinned independent FASTA validator
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends samtools=1.19.2-1build2
+          samtools --version
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Check formatting
