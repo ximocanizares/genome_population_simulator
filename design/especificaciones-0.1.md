@@ -389,9 +389,12 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
 - **REQ-CONF-07.** El fichero general debe seleccionar una de las tres vías de
   creación definidas en la sección 4.3.
 - **REQ-CONF-08.** El fichero general debe permitir definir cambios concretos o
-  solicitar cambios al azar. Para SNP, *indels* y variantes estructurales por
-  separado, debe permitir elegir entre una cantidad media esperada de eventos o
-  una densidad por base, kilobase o megabase.
+  solicitar cambios al azar. Los SNV heredables de una población inicial deben
+  proceder de una matriz de frecuencias suministrada o generada; no se crean por
+  separado para cada individuo mediante una densidad. Para *indels*, variantes
+  estructurales y mutaciones *de novo* de fases posteriores, debe permitir
+  elegir por clase entre una cantidad media esperada de eventos o una densidad
+  por base, kilobase o megabase.
 - **REQ-CONF-09.** Cuando se seleccione la vía evolutiva o la vía de familias y
   poblaciones segregantes, el fichero general debe referenciar el fichero de
   configuración poblacional correspondiente.
@@ -435,10 +438,13 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   valor y, cuando proceda, la unidad de densidad deben poder definirse como
   valores globales y como sustituciones específicas por individuo, con la
   precedencia establecida en REQ-CONF-18.
-- **REQ-CONF-21.** Para SNP, *indels* y variantes estructurales por separado, la
-  configuración debe permitir elegir una distribución espacial uniforme o
-  definir regiones con una cantidad media esperada o una densidad de cambios
-  mayor o menor que el valor general, incluidas regiones con densidad cero.
+- **REQ-CONF-21.** Para *indels*, variantes estructurales y mutaciones *de novo*
+  por separado, la configuración debe permitir elegir una distribución espacial
+  uniforme o definir regiones con una cantidad media esperada o una densidad de
+  cambios mayor o menor que el valor general, incluidas regiones con densidad
+  cero. En la inicialización desde una matriz de frecuencias SNV, sus filas fijan
+  los loci posibles y las regiones solo pueden intervenir al generar esa matriz,
+  no al volver a muestrear un individuo.
 - **REQ-CONF-22.** La distribución espacial y las regiones deben poder definirse
   como valores globales y como sustituciones específicas por individuo, con la
   precedencia establecida en REQ-CONF-18.
@@ -448,16 +454,21 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   multiplicando la densidad por la longitud válida del ámbito al que se aplica.
   Un conjunto exacto de cambios debe declararse mediante eventos explícitos; los
   recuentos alélicos exactos deben usar el modo controlado. Ninguno constituye
-  otra distribución probabilística de recuentos.
+  otra distribución probabilística de recuentos. El número exacto de loci de una
+  matriz SNV generada es la excepción explícita de REQ-CONF-129 y no fija los
+  recuentos alélicos realizados de los individuos.
 - **REQ-CONF-24.** El número realizado o sorteado de eventos debe obtenerse al
   azar a partir de la cantidad media esperada mediante una distribución
-  probabilística y puede variar entre ejecuciones.
+  probabilística y puede variar entre ejecuciones. El muestreo de alelos desde
+  una matriz usa probabilidades por locus y no es un recuento de eventos.
 - **REQ-CONF-25.** En v1, la distribución de Poisson debe ser la única
   distribución probabilística admitida para obtener el número realizado o
   sorteado de variantes aleatorias, por clase, región e individuo según las
   sustituciones aplicables. Una configuración que seleccione otra distribución
   debe rechazarse antes de simular e identificar el parámetro y el valor no
-  admitido.
+  admitido. Esta exclusividad no convierte en Poisson el espectro alélico ni el
+  muestreo de genotipos de REQ-IND-60 a REQ-IND-65.
+
 - **REQ-CONF-26.** Toda ejecución debe usar una semilla aleatoria, es decir, un
   valor que determina las decisiones tomadas al azar. El fichero general debe
   permitir proporcionar una semilla. Si no se proporciona, el sistema debe
@@ -954,6 +965,24 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   el número exacto de bases derivadas, la semilla y subsemilla aplicables y la
   versión de la regla de selección. Debe conservar los valores declarados sin
   sustituirlos silenciosamente por el resultado realizado.
+- **REQ-CONF-128.** La creación aleatoria de individuos desde una población de
+  origen debe aceptar exactamente una matriz de frecuencias SNV suministrada o
+  solicitar que el simulador la genere. La matriz debe identificar su referencia
+  estructural, sus poblaciones de origen y, para cada alelo alternativo, secuencia,
+  coordenada, `REF`, `ALT` y frecuencia por población.
+- **REQ-CONF-129.** La generación de una matriz de frecuencias SNV debe poder
+  configurar un número exacto de loci o una cantidad media o densidad, la
+  distribución espacial, el espectro de sustituciones y un espectro de
+  frecuencias alélicas. V1 debe incluir al menos un perfil de ejemplo derivado de
+  datos empíricos públicos, identificado por nombre, versión y fuente, y debe
+  permitir suministrar otro mediante un fichero. La persona usuaria debe elegir
+  el perfil o fichero; nunca debe aplicarse implícitamente un espectro empírico.
+- **REQ-CONF-130.** Al convertir una matriz de frecuencias en genotipos, cada
+  población de origen debe elegir entre Hardy-Weinberg, que es el modo
+  predeterminado, y un coeficiente de endogamia `F`. El coeficiente `F` solo se
+  admite en diploides y debe estar entre 0 y 1, inclusive; en haploides y
+  poliploides se mantiene Hardy-Weinberg o una distribución genotípica explícita
+  ya admitida, sin inferir una generalización de `F`.
 
 - **REQ-TEC-01.** Cada evento que genere FASTQ, BAM o CRAM constituye también su
   único experimento de secuenciación, sin una identidad de experimento separada,
@@ -1230,9 +1259,11 @@ expansión frente a contracción, pero no el tamaño del salto.
   cualquiera de las referencias disponibles.
 - **REQ-IND-03.** El sistema debe conservar qué referencia disponible describe
   la estructura de cada muestra.
-- **REQ-IND-04.** Los cambios deben poder crearse al azar configurando, para cada
-  clase de variante por separado, una cantidad media esperada de eventos o una
-  densidad por base, kilobase o megabase.
+- **REQ-IND-04.** Los cambios deben poder crearse al azar. Los SNV heredables de
+  la población inicial usan la matriz de frecuencias de REQ-IND-60 a REQ-IND-65.
+  Las demás clases y las mutaciones *de novo* posteriores pueden configurar, por
+  clase, una cantidad media esperada de eventos o una densidad por base,
+  kilobase o megabase.
 - **REQ-IND-05.** Los cambios también deben poder definirse de forma concreta en
   el fichero general de configuración.
 - **REQ-IND-06.** El sistema debe poder simular ploidías enteras de 1 a 10
@@ -1241,9 +1272,10 @@ expansión frente a contracción, pero no el tamaño del salto.
   misma ploidía efectiva para un cromosoma o *scaffold* dado.
 - **REQ-IND-08.** En esta primera aproximación, no se deben permitir cambios de
   ploidía entre individuos de una misma ejecución.
-- **REQ-IND-09.** La cantidad media esperada o densidad de SNP, *indels* y
-  variantes estructurales debe poder tener un valor global y valores específicos
-  para los individuos que se indiquen.
+- **REQ-IND-09.** La cantidad media esperada o densidad de *indels*, variantes
+  estructurales y mutaciones *de novo* debe poder tener un valor global y valores
+  específicos para los individuos que se indiquen. Los SNV iniciales usan una
+  frecuencia por población y solo admiten restricciones genotípicas por individuo.
 - **REQ-IND-10.** Un valor específico de cantidad media esperada o densidad debe
   sustituir al valor global únicamente para el individuo correspondiente.
 - **REQ-IND-11.** La frecuencia alélica debe representar la proporción de copias
@@ -1252,7 +1284,7 @@ expansión frente a contracción, pero no el tamaño del salto.
 - **REQ-IND-12.** Para un individuo concreto, el sistema debe expresar el estado
   de un alelo mediante su presencia o ausencia, su genotipo o su dosis alélica,
   según la ploidía del individuo.
-- **REQ-IND-13.** Para cada clase de variante por separado, el sistema debe poder
+- **REQ-IND-13.** Para cada clase generada por cantidad o densidad, el sistema debe poder
   distribuir espacialmente los eventos de manera uniforme o aplicar regiones
   configuradas con una cantidad media esperada o densidad mayor o menor que el
   valor general.
@@ -1262,16 +1294,18 @@ expansión frente a contracción, pero no el tamaño del salto.
 - **REQ-IND-15.** Una distribución o región específica de un individuo debe
   sustituir a la configuración global correspondiente solo para ese individuo.
   Los demás individuos deben conservar la configuración global.
-- **REQ-IND-16.** Para cada clase de variante, ámbito general o región e
+- **REQ-IND-16.** Para cada clase generada por cantidad o densidad, ámbito general o región e
   individuo al que se aplique la generación aleatoria, el sistema debe conservar
   la cantidad media esperada, el número realizado o sorteado, el número aceptado
   antes de un posible fallo y el número finalmente activo.
 - **REQ-IND-17.** El número realizado debe ser entero y puede diferir de la
   cantidad media esperada y entre ejecuciones que no estén obligadas a repetir
   las mismas decisiones aleatorias.
-- **REQ-IND-18.** El número realizado de variantes aleatorias debe obtenerse
-  exclusivamente con la distribución de Poisson. La misma semilla,
-  configuración, entradas y versión deben reproducir el mismo recuento.
+- **REQ-IND-18.** El número realizado de variantes aleatorias generadas desde una
+  cantidad media debe obtenerse exclusivamente con la distribución de Poisson.
+  Esta regla no se aplica al muestreo de alelos desde una matriz de frecuencias.
+  La misma semilla, configuración, entradas y versión deben reproducir el mismo
+  recuento.
 - **REQ-IND-19.** Las coordenadas de una región de generación deben interpretarse
   sobre la referencia estructural que corresponde al individuo o a la población
   a los que se aplica.
@@ -1463,6 +1497,40 @@ expansión frente a contracción, pero no el tamaño del salto.
 - **REQ-IND-59.** Una inserción aleatoria nueva debe contener solo A, C, G y T.
   Una inserción configurada explícitamente o copiada desde una secuencia
   existente puede contener `N` y debe conservarla exactamente.
+- **REQ-IND-60.** Cada fila de una matriz de frecuencias SNV debe identificar un
+  alelo `ALT` A, C, G o T distinto del `REF` A, C, G o T de la referencia exacta.
+  Un locus multialélico puede ocupar varias filas, pero no puede repetir un
+  alelo ni discrepar en `REF`; para cada población, las frecuencias alternativas
+  deben ser finitas, estar entre 0 y 1 y sumar como máximo 1. La frecuencia de
+  referencia es el resto hasta 1.
+- **REQ-IND-61.** Al generar la matriz, el sistema debe seleccionar loci válidos
+  sin reemplazo conforme al número o recuento sorteado y a la distribución
+  espacial, obtener `REF` de la referencia, elegir `ALT` mediante el espectro de
+  sustituciones y asignar una frecuencia mediante el espectro alélico efectivo.
+  No debe situar SNV sobre `N`, producir un locus monomórfico ni redondear una
+  frecuencia a cero o uno sin que el perfil lo permita expresamente.
+- **REQ-IND-62.** Para crear individuos desde una matriz de frecuencias, el
+  sistema debe muestrear en cada locus los alelos de sus copias conforme a la
+  población de origen y al modelo genotípico efectivo. Con Hardy-Weinberg, las
+  copias se muestrean de forma independiente; en diploides con `F`, deben usarse
+  las fórmulas bialélicas o multialélicas ya fijadas en REQ-EVO-47/48. La
+  asignación a copias concretas debe conservar fase aunque la matriz no defina
+  asociación entre loci.
+- **REQ-IND-63.** La misma matriz o sus mismos parámetros generadores, la misma
+  semilla, los mismos IDs de población e individuo y la misma versión deben
+  reproducir matriz, genotipos y fase. Añadir individuos no debe cambiar la
+  matriz ni los individuos ya identificados; solo añade nuevos sorteos aislados.
+- **REQ-IND-64.** En una misma población inicial, el modo de matriz de frecuencias
+  SNV y la generación inicial de SNP por cantidad o densidad individual son
+  mutuamente excluyentes. Los SNV explícitos pueden actuar como restricciones
+  individuales, pero una contradicción con la matriz o el modelo genotípico debe
+  rechazarse antes de crear individuos. Las mutaciones *de novo* posteriores
+  conservan sus propias tasas y no modifican retroactivamente la matriz inicial.
+- **REQ-IND-65.** Para cada población y locus, el sistema debe conservar las
+  frecuencias objetivo de la matriz, el modelo Hardy-Weinberg o `F`, el número de
+  copias observadas, los recuentos y frecuencias realizados y, cuando proceda,
+  los genotipos esperados y realizados. La variación por tamaño finito debe
+  informarse y no corregirse modificando genotipos ya sorteados.
 
 El identificador de individuo distingue a una entidad biológica simulada. Es
 distinto del identificador de un evento de muestreo, que distingue una
@@ -1512,6 +1580,33 @@ No debe confundirse con la cantidad media esperada ni con la densidad de
 eventos. La dosis alélica es el número de copias de un alelo que contiene un
 individuo y depende de su ploidía.
 
+Una población de origen de la matriz es un perfil estadístico identificado, no
+una población simulada con generaciones, miembros o demografía. En la vía
+directa sirve para elegir una columna de frecuencias al crear cada individuo;
+no crea por sí misma un escenario evolutivo ni hace que esos individuos formen
+una unidad reproductiva.
+
+El espectro de frecuencias alélicas describe qué proporción de los loci usa
+cada frecuencia o intervalo de frecuencias. No determina las posiciones ni los
+cambios `REF`→`ALT`, y tampoco contiene asociación entre loci. Un espectro
+suministrado debe expresar valores o intervalos ordenados, no solapados y con
+pesos finitos no negativos que, tras aplicar la política numérica general, sumen
+1. Debe declarar si usa frecuencia del alelo alternativo, frecuencia derivada o
+frecuencia del alelo menor; v1 no convertirá silenciosamente entre ellas.
+
+Los perfiles empíricos dependen de la población, el tamaño de muestra, la región
+del genoma y los filtros. Como ejemplo documentado, 1000 Genomes fase 3 observó
+aproximadamente 64 millones de variantes autosómicas con frecuencia menor de
+0,5 %, 12 millones entre 0,5 % y 5 % y 8 millones por encima de 5 %. ExAC, sobre
+exomas de 60.706 personas, informó que el 99 % de sus variantes de alta calidad
+tenía frecuencia menor de 1 % y que el 54 % eran *singletons*. Estos datos
+justifican perfiles con predominio de frecuencias bajas, pero no constituyen un
+perfil humano universal ni autorizan a mezclar estudios. Todo ejemplo incorporado
+debe conservar fuente, versión, población, muestra, región, filtros, definición
+de frecuencia y transformación aplicada. Fuentes primarias: [1000 Genomes fase
+3](https://www.nature.com/articles/nature15393) y
+[ExAC](https://www.nature.com/articles/nature19057).
+
 Todavía deben definirse el formato técnico de las regiones, el catálogo y los
 parámetros de las distribuciones probabilísticas adicionales, y cómo se
 comprobará estadísticamente que los números realizados concuerdan con las
@@ -1526,10 +1621,11 @@ la ejecución.
 - **REQ-DIR-01.** El sistema debe permitir crear directamente individuos con
   los cambios indicados en el fichero general de configuración.
 - **REQ-DIR-02.** La creación directa debe admitir tanto cambios concretos como
-  cambios al azar configurados por clase de variante mediante una cantidad
+  cambios al azar. Los SNV iniciales deben muestrearse desde la matriz y la
+  población de origen elegidas; las demás clases admitidas usan una cantidad
   media esperada o una densidad por base, kilobase o megabase, con valores
   globales y valores específicos por individuo.
-- **REQ-DIR-03.** La creación directa debe admitir para cada clase de variante
+- **REQ-DIR-03.** La creación directa debe admitir para cada clase generada por cantidad o densidad
   una distribución espacial uniforme o regiones con una cantidad media
   esperada o densidad mayor o menor que el valor general, incluidas regiones con
   densidad cero, tanto globales como específicas por individuo.
@@ -2022,6 +2118,25 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   estado completo producido por el anterior. Antes de simular, el sistema debe
   validar sus dependencias y rechazar un orden ausente, ambiguo o imposible,
   identificando los eventos y la dependencia incumplida.
+- **REQ-EVO-74.** Una fase posterior debe admitir un panel o matriz de haplotipos
+  suministrado: cada haplotipo debe identificar referencia, secuencia, alelos
+  ordenados y fase, y cada población debe asignarle una frecuencia finita entre
+  0 y 1. Las frecuencias de los haplotipos elegibles deben sumar 1 y sus
+  frecuencias alélicas marginales deben poder derivarse sin otra fuente de verdad.
+- **REQ-EVO-75.** En el modo sin recombinación, cada copia cromosómica fundadora
+  debe muestrearse como un haplotipo completo e intacto conforme a sus
+  frecuencias. No debe mezclar segmentos, romper bloques ni crear combinaciones
+  ausentes del panel, salvo mutaciones posteriores configuradas por separado.
+- **REQ-EVO-76.** En el modo con recombinación, la creación debe seleccionar los
+  haplotipos fuente conforme a sus frecuencias y aplicar el mismo motor, mapas,
+  convenciones e invariantes de recombinación que F7.1. Cada mosaico resultante
+  debe conservar los puntos de cruce y la procedencia de todos sus segmentos; el
+  panel de entrada no se modifica.
+- **REQ-EVO-77.** Los modos con y sin recombinación deben ser mutuamente
+  excluyentes para una misma unidad de creación. Deben registrar frecuencias
+  objetivo y realizadas de haplotipos, número de copias muestreadas, subsemillas
+  y, en el modo recombinante, haplotipos fuente, puntos y segmentos. No se debe
+  presentar como preservado un LD que la recombinación haya modificado.
 - **REQ-POB-01.** El sistema debe permitir crear poblaciones naturales mediante
   esta vía.
 
@@ -3879,6 +3994,17 @@ comparten una política de aceptación.
   entre el documento general y sus escenarios. También debe rechazar antes de
   validar o ejecutar cualquier incompatibilidad entre la versión de la
   aplicación y las versiones de esquema o catálogos del binario.
+- **REQ-VAL-55.** La validación de la matriz de frecuencias SNV debe comprobar
+  referencia y coordenadas, `REF`/`ALT`, duplicados, sumas multialélicas,
+  poblaciones, definición y normalización del espectro, modelo Hardy-Weinberg o
+  `F` y aislamiento de subsemillas. Sobre un corpus conocido debe comparar
+  frecuencias y genotipos esperados y realizados sin exigir que una muestra
+  finita reproduzca exactamente las frecuencias objetivo.
+- **REQ-VAL-56.** La validación del panel de haplotipos debe reconstruir cada
+  haplotipo de entrada, derivar sus frecuencias alélicas y comprobar sus sumas.
+  En modo intacto debe detectar cualquier mosaico; en modo recombinante debe
+  reconstruir cada haplotipo creado desde los segmentos y fuentes registrados y
+  comprobar los puntos mediante un oráculo independiente del productor.
 
 ### 4.7. Manifiestos de la ejecución y de sus eventos
 
@@ -4345,6 +4471,15 @@ VCF y no constituya un experimento de secuenciación.
   cada referencia reducida, registrar su clase, versión, ruta, tamaño y SHA-256
   y permitir comprobar qué cromosomas de origen se incluyeron u omitieron y si
   se utilizó el único fragmento residual permitido.
+- **REQ-MAN-91.** La creación desde frecuencias SNV debe registrar si la matriz
+  fue suministrada o generada, su ruta y SHA-256, referencia, poblaciones,
+  parámetros de número/densidad/espacio/sustitución, perfil de frecuencias con
+  fuente y versión, semilla y subsemillas, modelo Hardy-Weinberg o `F` y
+  frecuencias y genotipos esperados y realizados.
+- **REQ-MAN-92.** La creación desde un panel de haplotipos debe registrar su ruta
+  y SHA-256, referencia y población, frecuencias objetivo y realizadas, modo con
+  o sin recombinación, subsemillas y, cuando corresponda, mapas, puntos de cruce
+  y procedencia por segmentos.
 
 El formato y el esquema del manifiesto se elegirán durante la planificación de
 la implementación teniendo en cuenta que el núcleo se desarrollará en Rust.
@@ -4566,6 +4701,16 @@ Esta decisión no forma parte de la especificación funcional.
   dependan solo del color. Desde F2, ningún hito F2–F9 puede cerrar una capacidad
   configurable sin pruebas de equivalencia UI→TOML→`EffectiveConfig` y controles
   accesibles para esa capacidad.
+- **REQ-UI-14.** En F2, Marimo debe permitir elegir una matriz de frecuencias SNV
+  suministrada o generada, seleccionar o cargar el espectro alélico, configurar
+  población, número o densidad, espacio, sustituciones, Hardy-Weinberg o `F`, y
+  previsualizar matriz, sumas y distribuciones sin crear individuos hasta una
+  ejecución explícita validada.
+- **REQ-UI-15.** En la fase posterior correspondiente, Marimo debe permitir
+  cargar y previsualizar el panel de haplotipos, sus poblaciones y frecuencias y
+  elegir de forma excluyente creación intacta o con recombinación. La interfaz
+  debe mostrar que la recombinación puede alterar las asociaciones originales y
+  no debe interpretar el panel fuera del binario Rust.
 
 ## 5. Mapa conceptual del flujo
 
@@ -4577,16 +4722,16 @@ observará el resultado, sin crear obligaciones adicionales.
 
 | Etapa conceptual | Pregunta que permite seguir el flujo | Fuente normativa | Comprobación principal |
 |---|---|---|---|
-| Admisión | ¿La petición y sus ficheros forman una ejecución inequívoca? | REQ-CONF-01 a REQ-CONF-127, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 | ACE-01, ACE-23, ACE-35, ACE-36, ACE-105, ACE-111 y ACE-112 |
+| Admisión | ¿La petición y sus ficheros forman una ejecución inequívoca? | REQ-CONF-01 a REQ-CONF-130, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 | ACE-01, ACE-23, ACE-35, ACE-36, ACE-105, ACE-111, ACE-112 y ACE-116 |
 | Referencias | ¿Qué secuencias y sistemas de coordenadas sostienen la verdad? | REQ-REF-01 a REQ-REF-36 | ACE-02 a ACE-08, ACE-95, ACE-110, ACE-112 y ACE-113 |
-| Construcción de individuos | ¿Qué genomas faseados existen antes de observarlos? | REQ-IND-01 a REQ-IND-59, REQ-DIR-01 a REQ-DIR-05 y REQ-MUT-01 a REQ-MUT-15 | ACE-09 a ACE-12, ACE-28 a ACE-32, ACE-79 a ACE-81, ACE-95, ACE-96, ACE-103, ACE-107 y ACE-109 a ACE-111 |
+| Construcción de individuos | ¿Qué genomas faseados existen antes de observarlos? | REQ-IND-01 a REQ-IND-65, REQ-DIR-01 a REQ-DIR-05 y REQ-MUT-01 a REQ-MUT-15 | ACE-09 a ACE-12, ACE-28 a ACE-32, ACE-79 a ACE-81, ACE-95, ACE-96, ACE-103, ACE-107, ACE-109 a ACE-111 y ACE-116/117 |
 | Inicialización poblacional | ¿Qué población inicial se deriva de las frecuencias y restricciones declaradas? | REQ-EVO-01 a REQ-EVO-52 y REQ-POB-01 a REQ-POB-03 | ACE-11, ACE-13, ACE-26, ACE-88 a ACE-90, ACE-104 y ACE-105 |
-| Evolución | ¿Cómo cambia el estado poblacional entre generaciones? | REQ-EVO-53 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 | ACE-13, ACE-24 a ACE-28 y ACE-76 a ACE-87 |
+| Evolución | ¿Cómo cambia el estado poblacional entre generaciones? | REQ-EVO-53 a REQ-EVO-77, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 | ACE-13, ACE-24 a ACE-28, ACE-76 a ACE-87 y ACE-117 |
 | Familias y cruces | ¿Qué individuos intermedios y descendientes forman cada familia? | REQ-CRU-01 a REQ-CRU-45, junto con las reglas aplicables de REQ-REP-01 a REQ-REP-26 y REQ-REC-01 a REQ-REC-29 | ACE-14, ACE-27, ACE-75, ACE-85, ACE-87, ACE-97, ACE-98 y ACE-106 |
 | Observación técnica | ¿Qué evidencia se genera a partir de una verdad ya fijada? | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 | ACE-15 a ACE-17, ACE-37 a ACE-59, ACE-68 a ACE-74, ACE-93, ACE-94 y ACE-100 |
 | Verdad interoperable | ¿Cómo se proyecta la verdad canónica a cada referencia y formato solicitado? | REQ-VER-01 a REQ-VER-47 | ACE-18 a ACE-21, ACE-24, ACE-25, ACE-30, ACE-31, ACE-60 a ACE-63, ACE-66, ACE-100, ACE-101 y ACE-108 |
-| Interfaz de autoría | ¿Puede configurarse y lanzarse la misma semántica sin editar TOML? | REQ-UI-01 a REQ-UI-13 y REQ-VAL-54 | ACE-114 y ACE-115 |
-| Cierre | ¿Cómo se decide que los resultados están completos y trazables? | REQ-VAL-01 a REQ-VAL-54, REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a REQ-SAL-27 | ACE-22 a ACE-24, ACE-33, ACE-34, ACE-36, ACE-46 a ACE-49, ACE-60 a ACE-67, ACE-78, ACE-86, ACE-92 a ACE-115 |
+| Interfaz de autoría | ¿Puede configurarse y lanzarse la misma semántica sin editar TOML? | REQ-UI-01 a REQ-UI-15 y REQ-VAL-54 a REQ-VAL-56 | ACE-114 a ACE-117 |
+| Cierre | ¿Cómo se decide que los resultados están completos y trazables? | REQ-VAL-01 a REQ-VAL-56, REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a REQ-SAL-27 | ACE-22 a ACE-24, ACE-33, ACE-34, ACE-36, ACE-46 a ACE-49, ACE-60 a ACE-67, ACE-78, ACE-86, ACE-92 a ACE-117 |
 
 La relación conceptual entre etapas es: primero se admite una petición, luego se
 construye o recupera la verdad biológica, después se materializa la evidencia
@@ -4608,12 +4753,12 @@ valores, obligatoriedad ni relaciones entre objetos.
 
 | Grupo de entrada | Finalidad conceptual | Contrato aplicable |
 |---|---|---|
-| Petición y configuración | Identificar la ejecución y resolver los parámetros efectivos | REQ-CONF-01 a REQ-CONF-127, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 |
+| Petición y configuración | Identificar la ejecución y resolver los parámetros efectivos | REQ-CONF-01 a REQ-CONF-130, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 |
 | Secuencias y referencias | Establecer las bases y coordenadas sobre las que se construye y compara la verdad | REQ-REF-01 a REQ-REF-36 y las entradas de REQ-DAT-01 a REQ-DAT-73 |
-| Individuos, poblaciones y familias | Declarar el material biológico inicial y las relaciones que deben simularse | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73, REQ-POB-01 a REQ-POB-03 y REQ-CRU-01 a REQ-CRU-45 |
+| Individuos, poblaciones y familias | Declarar el material biológico inicial y las relaciones que deben simularse | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-77, REQ-POB-01 a REQ-POB-03 y REQ-CRU-01 a REQ-CRU-45 |
 | Procesos biológicos | Especificar creación, mutación, migración, reproducción, selección y recombinación | REQ-DIR-01 a REQ-DIR-05, REQ-MUT-01 a REQ-MUT-15, REQ-MIG-01 a REQ-MIG-09, REQ-REP-01 a REQ-REP-26, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 |
 | Eventos y condiciones técnicas | Solicitar observaciones, perfiles, artefactos y tratamientos técnicos admitidos | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 |
-| Aplicación Marimo | Importar, editar, revisar, validar y lanzar la misma configuración mediante una interfaz local | REQ-UI-01 a REQ-UI-13 |
+| Aplicación Marimo | Importar, editar, revisar, validar y lanzar la misma configuración mediante una interfaz local | REQ-UI-01 a REQ-UI-15 |
 
 La asignación exacta de cada entrada a sus ACE se consulta en la matriz de
 trazabilidad; esta agrupación no sustituye esa correspondencia individual.
@@ -4622,10 +4767,10 @@ trazabilidad; esta agrupación no sustituye esa correspondencia individual.
 
 | Grupo de salida | Finalidad conceptual | Contrato aplicable |
 |---|---|---|
-| Verdad biológica y genealogía | Conservar el estado canónico y la procedencia necesarios para interpretar la simulación | REQ-VER-01 a REQ-VER-47 y los requisitos de procedencia de REQ-IND-01 a REQ-IND-59, REQ-CRU-01 a REQ-CRU-45 y REQ-REC-01 a REQ-REC-29 |
+| Verdad biológica y genealogía | Conservar el estado canónico y la procedencia necesarios para interpretar la simulación | REQ-VER-01 a REQ-VER-47 y los requisitos de procedencia de REQ-IND-01 a REQ-IND-65, REQ-CRU-01 a REQ-CRU-45 y REQ-REC-01 a REQ-REC-29 |
 | Evidencia técnica | Entregar los artefactos solicitados sin convertirlos en fuente de verdad | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 |
-| Validación e informes | Hacer observables las comprobaciones deterministas y los resultados estadísticos | REQ-VAL-01 a REQ-VAL-54 |
-| Manifiestos y paquete publicado | Relacionar configuración efectiva, verdad, evidencia, procedencia y estado de cada artefacto | REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a REQ-SAL-27 |
+| Validación e informes | Hacer observables las comprobaciones deterministas y los resultados estadísticos | REQ-VAL-01 a REQ-VAL-56 |
+| Manifiestos y paquete publicado | Relacionar configuración efectiva, verdad, evidencia, procedencia y estado de cada artefacto | REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a REQ-SAL-27 |
 
 La matriz de trazabilidad asigna a cada salida sus ACE concretos. Los requisitos
 citados determinan qué salida existe en cada caso y qué contenido debe
@@ -4649,7 +4794,7 @@ pendientes.
 | **ACE-07. Diferencias entre referencias** | Cada nueva referencia estructural difiere de su referencia de origen solo por las duplicaciones, deleciones, inversiones y translocaciones solicitadas | Casos de prueba y comprobación de cada cambio |
 | **ACE-08. Origen de las referencias** | Para cada referencia estructural se pueden conocer su referencia de origen y los cambios que las distinguen | Forma de representar y consultar la relación |
 | **ACE-09. Clases de variante** | Se pueden crear individuos con SNP, *indels*, variantes estructurales y repeticiones en tándem respecto a cualquiera de las referencias disponibles | Casos de prueba por clase |
-| **ACE-10. Creación de cambios** | Para SNP, *indels* y variantes estructurales por separado, la configuración permite indicar una cantidad media esperada o una densidad por base, kilobase o megabase; la densidad se convierte en una media usando la longitud válida. El número realizado es entero, puede diferir de la media y se obtiene exclusivamente con Poisson. Los valores espaciales y por individuo se resuelven mediante la dominancia de ACE-111. Las sustituciones por identificador individual solo admiten individuos directos, fundadores o parentales expresos existentes durante la validación; un identificador inexistente se rechaza. No se heredan como sustituciones por los descendientes ni se aplican retroactivamente tras seleccionarlos. Los valores alélicos fijados son restricciones obligatorias. El modo probabilístico usa Poisson; los eventos explícitos y el modo controlado expresan resultados concretos y no son otras distribuciones | Formato técnico de coordenadas y pruebas estadísticas de las medias y reproducibilidad |
+| **ACE-10. Creación de cambios** | Los SNV heredables iniciales proceden de una matriz poblacional suministrada o generada; su aleatoriedad está en las frecuencias y genotipos, no en una densidad independiente por individuo. *Indels*, variantes estructurales y mutaciones *de novo* pueden indicar cantidad media o densidad; la densidad se convierte usando longitud válida y el recuento usa Poisson. Los valores espaciales e individuales se resuelven mediante ACE-111. Una sustitución individual solo admite entidades preexistentes, no se hereda ni se aplica retroactivamente, y un valor alélico fijado es una restricción obligatoria | Matriz SNV y corpus poblacional; coordenadas; pruebas estadísticas de Poisson y de frecuencias; reproducibilidad |
 | **ACE-11. Ploidía** | La configuración admite un valor global y sustituciones por cromosoma o *scaffold*, cada uno entero de 1 a 10. Toda secuencia tiene un valor efectivo idéntico en todos los individuos. Los valores no enteros, fuera de rango o ausentes se rechazan antes de simular. Estado genotípico y VCF representan exactamente sus haplotipos y dosis | Casos de prueba de límites y sustituciones |
 | **ACE-12. Creación directa** | Se pueden crear directamente individuos con cambios concretos o aleatorios indicados en la configuración | Casos de prueba |
 | **ACE-13. Vía evolutiva** | Cada escenario usa fases ordenadas y generaciones discretas no solapadas. N objetivo fija los intentos reproductivos y N realizado registra los descendientes creados; una desviación aleatoria advierte sin detener. Ne objetivo se rechaza y Ne realizado se calcula como Ne reproductivo cuando es evaluable. El orden único es demografía/N objetivo, migración, viabilidad, elección parental/reproducción, segregación/recombinación, mutación de novo, cálculo y registro de N/Ne/frecuencias, y muestreo/salidas. La deriva surge del muestreo finito | Casos de las ocho etapas, etapa opcional omitida y registro efectivo |
@@ -4755,6 +4900,8 @@ pendientes.
 | **ACE-113. Procedencia y reconstrucción de referencia reducida** | Los intervalos se ordenan por cromosoma y coordenada, se concatenan en orientación directa, omiten cromosomas sin selección y no crean secuencias vacías. `N` se copia y cuenta. FASTA canónico, mapa derivada↔origen, SHA-256, configuración efectiva y manifiesto permiten reconstruir exactamente cada base y explican cromosomas omitidos y residual | Reconstrucción con lector independiente, mapa con bordes base 1 cerrados, `sha256sum`, FASTA con `N` y corrupción deliberada de cada enlace |
 | **ACE-114. Equivalencia de autoría Marimo** | Todas las opciones implementadas están en una de las nueve pestañas mínimas. Escalares usan controles tipados; listas y reglas, tablas con alta/baja/reordenación y selectores visibles. Importar, editar, previsualizar y exportar como unidad el TOML general y cero o varios escenarios conserva significado, IDs, orden y enlaces/rutas relativas. El binario Rust valida y resuelve; cualquier cambio de cualquier documento invalida la validación previa y una incompatibilidad, escenario ausente o duplicado se rechaza | Matriz opción→pestaña/control; conjunto sin escenarios y conjuntos multiescenario con rutas relativas/espacios/faltantes/duplicados; comparación UI→conjunto TOML→`EffectiveConfig` o diagnóstico con conjunto manual equivalente |
 | **ACE-115. Ejecución segura y accesible desde Marimo** | La aplicación nunca ejecuta automáticamente ni usa shell. Una acción explícita tras validación vigente lanza `run` con argumentos separados y destino no-clobber revisado. Muestra estado, código, logs, diagnósticos y enlaces/resúmenes sin cargar artefactos genómicos grandes. Funciona localmente en Ubuntu/WSL2 Linux y ofrece teclado, foco, etiquetas, ayuda y estados no basados solo en color. Cada capacidad F2–F9 añade controles antes de cerrar | Proceso falso y binario real; cambio posterior a validar; destino existente; logs grandes y artefacto grande; revisión de teclado/foco/color; puerta transversal por hito |
+| **ACE-116. Población inicial desde frecuencias SNV** | La ejecución acepta o genera una matriz versionada compatible con la referencia. Un espectro explícito, normalmente sesgado hacia frecuencias bajas, asigna frecuencias por población; Hardy-Weinberg es predeterminado y `F` solo se admite en diploides. Cada individuo recibe genotipos y fase reproducibles, los loci permanecen independientes y frecuencias/genotipos esperados y realizados se registran sin corregir el muestreo finito | Matriz manual pequeña; perfil empírico versionado; HWE y F=0/intermedio/1; multialélico; semilla e individuo añadido; errores de suma, duplicado, referencia y `N` |
+| **ACE-117. Individuos desde panel de haplotipos** | Un panel versionado proporciona haplotipos faseados y frecuencias por población. El modo intacto muestrea copias completas sin mosaicos; el modo recombinante usa el motor y los mapas comunes, conserva fuentes, puntos y segmentos y no promete conservar LD. Ambos registran objetivo, realizado, semilla y procedencia y tienen controles Marimo en su fase | Panel manual reconstruible; frecuencias derivadas; modos excluyentes; intacto sin cortes; mosaico con puntos conocidos; reconstructor independiente y equivalencia UI→TOML→resultado |
 
 Estos criterios son cualitativos y deberán convertirse en pruebas durante la
 planificación de la implementación.
@@ -4827,6 +4974,20 @@ y el contrato técnico mediante el que la aplicación descubre versiones de
 esquema y catálogos e invoca el binario sin shell. Esta elección no puede mover
 validación o semántica biológica fuera del núcleo Rust ni conceder a Marimo
 autoridad sobre la configuración efectiva o los manifiestos.
+
+**PENDIENTE DE REVISIÓN TÉCNICA — matrices y espectros SNV.** Se elegirán el
+formato versionado de la matriz de frecuencias y del espectro suministrado, la
+representación exacta de valores o intervalos y el algoritmo que muestrea una
+frecuencia dentro de un intervalo. También se decidirá cómo se prepara y
+distribuye el ejemplo derivado de 1000 Genomes sin confundir sus tres intervalos
+resumidos con una distribución continua ni perder población, muestra y filtros.
+La decisión debe aportar vectores y un generador de referencia independiente.
+
+**PENDIENTE DE REVISIÓN TÉCNICA — panel de haplotipos.** Antes de F6.4 se elegirá
+el formato versionado que representa haplotipos y frecuencias sin perder fase,
+referencia ni población. Antes del modo recombinante, F7.1 fijará cómo se
+seleccionan las fuentes y se conecta el panel al motor común sin introducir una
+segunda semántica de mapas, coordenadas o puntos de cruce.
 
 **Tolerancias numéricas.** Durante la implementación se fijarán el valor
 predeterminado y la precisión de la tolerancia general usada cuando frecuencias

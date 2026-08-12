@@ -182,13 +182,17 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
   procedencia mediante el servicio de coordenadas decidido en F1.6, sin duplicar
   innecesariamente secuencias completas; conservar `N` como base desconocida con
   coordenada y longitud.
-- **F2.2. Variantes pequeñas.** Aplicar SNP e *indels* exactos y aleatorios con
-  coordenadas y orden definidos; los recuentos aleatorios usan exclusivamente
-  Poisson. Rechazar SNP sobre `N`, excluirla de sus oportunidades y conservarla
-  en intervalos que no necesitan interpretarla.
-- **F2.3. Individuos directos.** Construir individuos desde la configuración y
-  reconstruir la secuencia de cada haplotipo; activar sus controles en la
-  pestaña `Individuos`.
+- **F2.2. Variantes pequeñas y matriz SNV.** Aplicar SNP explícitos e *indels*
+  exactos o aleatorios; admitir o generar una matriz de frecuencias SNV común a
+  la población desde número/densidad, espacio, sustituciones y un espectro
+  alélico explícito. Poisson solo rige recuentos generados desde una media, no
+  el muestreo de alelos. Rechazar SNV sobre `N` y conservarla en intervalos que
+  no necesitan interpretarla. Resolver DTPD-118 antes de fijar formatos, perfiles
+  incorporados o el algoritmo de generación.
+- **F2.3. Individuos directos desde población de origen.** Construir individuos
+  muestreando la matriz mediante Hardy-Weinberg o `F` diploide, integrar los
+  demás cambios y reconstruir cada haplotipo; activar matriz, espectro,
+  población y modelo en la pestaña `Individuos`.
 - **F2.4. Verdad estructurada.** Guardar el genotipo real y la información
   necesaria para reconstruirlo independientemente del VCF y exponer sus
   opciones y resumen enlazado en `Salidas`/`Revisar y ejecutar`.
@@ -342,12 +346,16 @@ evolución a lo largo de generaciones.
   dosis y recuentos según el modo seleccionado.
 - **F6.2. Frecuencias y Hardy-Weinberg.** Aplicar y comprobar la distribución
   binomial bialélica y la multinomial multialélica en ploidías 1–10, tanto en
-  modo probabilístico como controlado.
+  modo probabilístico como controlado, reutilizando el muestreo matricial
+  probabilístico de F2.3 y extendiéndolo a subpoblaciones y recuentos controlados.
 - **F6.3. Endogamia inicial.** Aplicar las fórmulas confirmadas de F automático
   solo en diploides, probar F=0, valores intermedios y F=1, rechazar F en P=1 o
-  P>2 y registrar F realizado como «no aplicable» fuera de diploides.
-- **F6.4. Desequilibrio de ligamiento.** Crear bloques no solapados mediante
-  haplotipos y frecuencias conjuntas, conservando la fase.
+  P>2 y registrar F realizado como «no aplicable» fuera de diploides, sin crear
+  una segunda implementación distinta de la usada para matrices en F2.3.
+- **F6.4. Paneles haplotípicos y desequilibrio de ligamiento.** Admitir un panel
+  de haplotipos y frecuencias, crear copias intactas sin recombinación y crear
+  bloques no solapados mediante frecuencias conjuntas, conservando la fase.
+  Resolver DTPD-119 para el formato y el muestreo intacto.
 - **F6.5. Grupos y subpoblaciones.** Asignar identidades, pertenencias y
   parámetros iniciales sin ambigüedades.
 - **F6.6. Fundadores.** Identificar individuos y copias haplotípicas fundadoras
@@ -372,10 +380,13 @@ configurado de los procesos.
 
 **Hitos:**
 
-- **F7.1. Reproducción y recombinación.** Validar ploidía par e igual y estado
+- **F7.1. Reproducción, panel y recombinación.** Validar ploidía par e igual y estado
   estructural canónico idéntico, formar bivalentes al azar y transmitir la mitad
   de copias de cada parental con fase y procedencia reconstruibles. Incluir
   *scaffolds* sin recombinación y portadores de SV de novo incompatibles después.
+  Añadir la creación opcional de haplotipos mosaico desde el panel F6.4 usando
+  exactamente el mismo motor, mapas y procedencia por segmentos después de
+  resolver DTPD-111 y la parte recombinante de DTPD-119.
 - **F7.2. Mutación heredable.** Introducir SNP, *indels*, variantes estructurales
   y repeticiones según sus modelos y momentos confirmados. Contar por clase las
   oportunidades válidas en todas las copias descendientes actuales, registrar
@@ -511,12 +522,12 @@ configurable.
 |---|---|---|---|
 | F0 | Arquitectura y plan de F1 | Trazabilidad completa y decisiones cerradas | Diseño improvisado durante la implementación |
 | F1 | Ejecución mínima reproducible y referencia reducida | Repetición con semilla, reconstrucción origen+mapa y rechazo limpio | Resultados sin identidad, configuración efectiva o procedencia de referencia |
-| F2 | Aplicación base y verdad genómica mínima | Equivalencia Marimo→TOML→configuración efectiva y reconstrucción independiente de haplotipos/VCF | Semántica duplicada en UI o genotipos, fase y coordenadas incorrectos |
+| F2 | Aplicación base, matriz SNV e individuos faseados | Equivalencia Marimo→TOML, matriz suministrada/generada, HWE/F y reconstrucción independiente de haplotipos/VCF | Perfil implícito, loci distintos por individuo, genotipos/fase incorrectos o semántica duplicada en UI |
 | F3 | Primer recorrido extremo a extremo | Validación FASTQ, BAM/CRAM y procedencia | Alineamientos incoherentes con la verdad |
 | F4 | Realismo técnico WGS | Comparación de parámetros solicitados y realizados | Alterar la verdad con artefactos técnicos |
 | F5 | Variación y referencias complejas | Casos estructurales, VCF más complemento y aislamiento por referencia | Mezcla de referencias o pérdida de linaje o detalle complejo |
-| F6 | Población inicial | Recuentos y pruebas estadísticas reproducibles | Frecuencias, LD o F mal representados |
-| F7 | Evolución poblacional | Reconstrucción de transmisiones y medidas realizadas | Orden evolutivo o genealogía incorrectos |
+| F6 | Población inicial y panel haplotípico intacto | Recuentos, frecuencias, reconstrucción del panel y pruebas estadísticas reproducibles | Frecuencias, fase, LD o F mal representados |
+| F7 | Evolución y recombinación de paneles | Reconstrucción de transmisiones, mosaicos y medidas realizadas | Orden evolutivo, puntos de cruce, procedencia o genealogía incorrectos |
 | F8 | Familias y segregantes | Casos mendelianos y grafos validados | Cruces o selección de descendientes erróneos |
 | F9 | Versión consolidada | Pruebas completas y escenarios de rendimiento | Fallos de escala, distribución o interoperabilidad |
 

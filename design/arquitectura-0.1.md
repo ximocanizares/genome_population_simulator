@@ -30,7 +30,7 @@ concretas de los crates aceptados quedan fijadas por `Cargo.lock`.
 
 La ampliación confirmada incorpora una derivación reducida de FASTA en F1.6 y
 una aplicación Marimo obligatoria desde F2.0. La arquitectura define sus
-fronteras, pero no da por resueltas DTPD-101/DTPD-116/DTPD-117 ni las dos cuestiones
+fronteras, pero no da por resueltas DTPD-101/DTPD-116 a DTPD-119 ni las dos cuestiones
 funcionales marcadas `PENDIENTE DE REVISIÓN` en la especificación.
 
 La arquitectura cubre toda la versión 1 para evitar contratos incompatibles
@@ -228,6 +228,9 @@ precedencia.
 | Secuencia de referencia | Su identificador procede del primer elemento no vacío de la cabecera FASTA y es único dentro de su referencia | Descripción restante de cabecera, longitud, clasificación, ploidía efectiva y convenio de coordenadas |
 | Segmento | Identifica una porción orientada y trazable | Estado actual, origen fundador o evento que lo creó, orientación y correspondencias disponibles |
 | Variante o evento genómico | Identidad estable en el historial biológico | Clase, orden, marco de coordenadas previo, haplotipo afectado y estado final |
+| Espectro de frecuencias alélicas | Identidad y versión estables; puede ser incorporado o suministrado | Definición de frecuencia, valores o intervalos, pesos, población/fuente/filtros y transformación |
+| Matriz de frecuencias SNV | Inmutable una vez admitida o generada | Referencia exacta, poblaciones, loci/alelos, frecuencias, perfil y procedencia generadora |
+| Panel de haplotipos | Inmutable durante la ejecución | Referencia, poblaciones, haplotipos faseados, frecuencias y digest del recurso |
 | Individuo | Único y no reutilizable en la ejecución | Referencia estructural, generación, población, parentales, haplotipos y observaciones |
 | Copia haplotípica | Distinta aunque tenga la misma secuencia que otra | Individuo, secuencia, índice de copia, ploidía, segmentos y fundador |
 | Población y subpoblación | Identidades no reutilizables | Generación, miembros, estado activa/extinguida y relaciones demográficas |
@@ -425,7 +428,8 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 | Coordenadas y transformaciones | Validar intervalos y convertir convenios sin ambigüedad | Coordenadas etiquetadas → coordenadas validadas o correspondencias | Posee reglas de conversión; consulta referencias y segmentos |
 | Motor de verdad genómica | Crear y transformar haplotipos y eventos | Referencia, cambios y flujos aleatorios → estado faseado | Posee el estado genotípico, eventos, segmentos y correspondencias |
 | Creación directa | Traducir la vía directa a operaciones del motor genómico | Configuración efectiva → individuos | Posee solo el estado de progreso; el motor posee la verdad resultante |
-| Inicialización poblacional | Crear fundadores, frecuencias, genotipos, LD, HWE y F diploide inicial | Configuración poblacional → población inicial o error previo | Posee estadísticas solicitadas/realizadas y el estado «no aplicable» de F fuera de diploides; entrega verdad al repositorio biológico |
+| Fuentes de variación poblacional | Admitir o generar espectros, matrices SNV y paneles de haplotipos sin crear todavía individuos | Recursos/configuración/semilla → fuente poblacional inmutable, auditoría o error | Posee recursos normalizados, versiones, perfiles y estadísticas de generación; consulta referencia, coordenadas y aleatoriedad |
+| Inicialización poblacional | Crear fundadores, frecuencias, genotipos, LD, HWE y F diploide inicial | Fuente poblacional y configuración → población inicial o error previo | Posee estadísticas solicitadas/realizadas y el estado «no aplicable» de F fuera de diploides; entrega verdad al repositorio biológico |
 | Reproducción y recombinación | Validar ploidía y estructura canónica, formar bivalentes, gametos y descendencia trazable | Progenitores, mapas/tasas y flujo → descendientes o incompatibilidad reproductiva | Posee eventos de transmisión y comparaciones estructurales; consulta verdad parental |
 | Dinámica evolutiva | Ejecutar las ocho etapas generacionales en su orden fijo | Población y fases → población final e historial de etapas aplicadas u omitidas | Posee estado generacional y resúmenes; delega cambios genómicos |
 | Selección de viabilidad | Evaluar el SNP bialélico protegido y decidir supervivencia | Individuos elegibles, dosis y función → supervivientes o error | Posee evaluaciones y decisiones; consulta identidad única, dosis y valores genéticos |
@@ -532,7 +536,7 @@ exige que la persona usuaria los instale.
 | Coordenadas y transformaciones | Convenio ausente, intervalo fuera de límites o correspondencia inexistente | Probar extremos, inserciones, inversiones y conversiones de ida y vuelta donde sean definidas |
 | Motor de verdad genómica | Evento solapado prohibido, objetivo eliminado, destinos válidos insuficientes, punto de ruptura o ploidía inválidos | Materializar haplotipos conocidos; rechazar SNP o motivo sobre `N`, conservarla dentro de SV e inserciones explícitas y agotar de forma controlada el espacio válido |
 | Creación directa | Individuo incompleto o cambio incompatible | Crear individuos pequeños con cambios concretos y aleatorios controlados |
-| Inicialización poblacional | Frecuencias, recuentos, F fuera de [0,1], F en ploidía distinta de 2, LD o restricciones incompatibles | Enumerar HWE haploide, diploide y poliploide bialélico/multialélico; comprobar F diploide 0, intermedio y 1; rechazar F en P=1 y P>2; probar distribución explícita poliploide y F realizado «no aplicable» |
+| Fuentes e inicialización poblacional | Espectro, matriz, referencia, frecuencias, recuentos, F fuera de [0,1], F en ploidía distinta de 2, LD, panel o restricciones incompatibles | Generar/admitir una matriz SNV pequeña; enumerar HWE haploide, diploide y poliploide bialélico/multialélico; comprobar F diploide 0, intermedio y 1; rechazar F en P=1 y P>2; probar panel intacto y mosaico reconstruible con procedencia |
 | Reproducción y recombinación | Referencias distintas, ploidía impar o desigual, estado estructural no idéntico, mapa incompleto o bivalente imposible | Probar diploides y tetraploides idénticos; SNP, *indels* pequeños y repeticiones distintos; cada clase SV heterocigota; SV fijada con historias distintas; *scaffold* intacto; SV de novo seguida de otro intento |
 | Dinámica evolutiva | Orden alternativo solicitado, población activa vacía no autorizada, mezcla de referencias estructurales tras migración o evento demográfico imposible | Ejecutar las ocho etapas, omitir una opcional en su posición, rechazar otro orden, ordenar varios eventos demográficos y comprobar el historial efectivo |
 | Selección de viabilidad | Locus ausente, múltiple, ambiguo o situado sobre `N`; dosis sin valor; aptitud negativa, no finita o máximo cero | Probar varias ploidías, rechazo de `N`, fallos antes de supervivencia y recombinación que conserva la identidad única |
@@ -635,12 +639,12 @@ literalmente los vectores del catálogo 1. Un cambio de codificación exige nuev
 versión de derivación; un cambio de ámbitos exige nueva versión de catálogo.
 Ruta, reloj, orden físico, hilo y planificación nunca participan.
 
-El contrato funcional de esta frontera está en REQ-CONF-01 a REQ-CONF-127,
+El contrato funcional de esta frontera está en REQ-CONF-01 a REQ-CONF-130,
 REQ-FMT-01 a REQ-FMT-07,
-REQ-NOF-01 a REQ-NOF-08, REQ-UI-01 a REQ-UI-13 y REQ-VAL-01 a
-REQ-VAL-54; se comprueba
+REQ-NOF-01 a REQ-NOF-08, REQ-UI-01 a REQ-UI-15 y REQ-VAL-01 a
+REQ-VAL-56; se comprueba
 principalmente mediante ACE-01, ACE-23, ACE-35, ACE-36, ACE-64, ACE-65,
-ACE-105, ACE-111, ACE-114 y ACE-115.
+ACE-105, ACE-111 y ACE-114 a ACE-117.
 
 ### 7.2. Referencias y estado biológico
 
@@ -672,6 +676,21 @@ cualquier otra base y aplica el formato canónico. Un comprobador independiente
 reconstruye el FASTA desde origen+mapa antes de publicar conjuntamente mapa,
 FASTA, hashes y manifiesto.
 
+La fuente de variación poblacional admite una matriz SNV suministrada o construye
+otra desde referencia, número o densidad, espacio, espectro de sustituciones y
+un espectro alélico explícito. El generador termina y fija la matriz antes de
+crear individuos. El inicializador consume después esa misma matriz para todos
+los individuos, deriva un RNG local por población/individuo y muestrea genotipos
+con Hardy-Weinberg o `F` diploide; nunca vuelve a elegir loci por individuo. La
+matriz conserva solo frecuencias marginales, por lo que los loci se tratan como
+independientes y cualquier LD requiere el panel de haplotipos posterior.
+
+El panel de haplotipos cruza la misma frontera como otro recurso inmutable. F6.4
+lo admite, valida y puede muestrear copias completas; F7.1 añade el modo de
+creación recombinante reutilizando el único motor de recombinación y sus tipos de
+coordenadas. El panel no posee el resultado: el repositorio de verdad conserva
+los haplotipos intactos o mosaicos y su procedencia por segmentos.
+
 El repositorio de verdad conserva estados faseados, genealogía, procedencia y
 capas de cambio. Creación directa, inicialización poblacional, reproducción,
 recombinación, dinámica evolutiva y mutación acceden a él mediante operaciones
@@ -679,12 +698,12 @@ de dominio explícitas. El orquestador decide qué componente invocar; los
 componentes no se llaman entre sí para alterar el orden funcional.
 
 Las fuentes normativas son REQ-REF-01 a REQ-REF-36, REQ-IND-01 a
-REQ-IND-59, REQ-DIR-01 a REQ-DIR-05, REQ-EVO-01 a REQ-EVO-73,
+REQ-IND-65, REQ-DIR-01 a REQ-DIR-05, REQ-EVO-01 a REQ-EVO-77,
 REQ-POB-01 a REQ-POB-03, REQ-CRU-01 a REQ-CRU-45, REQ-REP-01 a
 REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17,
 REQ-REC-01 a REQ-REC-29 y REQ-MUT-01 a REQ-MUT-15. Sus recorridos se
 aceptan con ACE-02 a ACE-14, ACE-24 a ACE-32, ACE-75 a ACE-91, ACE-95 a
-ACE-98, ACE-103 a ACE-107 y ACE-109 a ACE-111 según la asignación individual
+ACE-98, ACE-103 a ACE-107 y ACE-109 a ACE-117 según la asignación individual
 de la matriz de trazabilidad.
 
 ### 7.3. Observación técnica
@@ -775,8 +794,8 @@ destino existente produce `EEXIST` y rechazo. Un sistema de ficheros que no
 ofrezca la garantía se rechaza de forma identificable antes o durante la
 publicación; nunca se usa check-then-`std::fs::rename` ni otro fallback con
 carrera. Esta garantía lógica no implica `fsync` ni durabilidad física. Los
-estados y efectos funcionales de cierre están en REQ-VAL-01 a REQ-VAL-54,
-REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a REQ-SAL-27, con ACE-22 a ACE-24,
+estados y efectos funcionales de cierre están en REQ-VAL-01 a REQ-VAL-56,
+REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a REQ-SAL-27, con ACE-22 a ACE-24,
 ACE-33, ACE-34, ACE-36, ACE-46 a ACE-67, ACE-78, ACE-86 y ACE-92 a ACE-108.
 
 ### 7.5. Construcción y publicación del programa
@@ -814,19 +833,20 @@ responsables y puntos de control.
 
 | Invariante arquitectónico | Responsable y frontera de control | Fuente funcional |
 |---|---|---|
-| Toda entidad cruza fronteras con identidad tipada, no inferida de una etiqueta, ruta o nombre físico | Identidad de ejecución, catálogos y ensamblador de resultados | REQ-CONF-01 a REQ-CONF-14, REQ-TEC-01 a REQ-TEC-10 y REQ-MAN-01 a REQ-MAN-90 |
+| Toda entidad cruza fronteras con identidad tipada, no inferida de una etiqueta, ruta o nombre físico | Identidad de ejecución, catálogos y ensamblador de resultados | REQ-CONF-01 a REQ-CONF-14, REQ-TEC-01 a REQ-TEC-10 y REQ-MAN-01 a REQ-MAN-92 |
 | Toda coordenada viaja asociada a su referencia y convenio | Catálogo de referencias y servicio de coordenadas | REQ-REF-01 a REQ-REF-36 y REQ-VER-01 a REQ-VER-47 |
 | Una referencia reducida conserva origen, orientación, clase y mapa completo; FASTA, mapa y manifiesto se publican o fallan como unidad | Reducción de referencias, catálogo, coordenadas y ensamblador | REQ-REF-24 a REQ-REF-36, REQ-VAL-52/53, REQ-MAN-89/90 y REQ-SAL-27 |
-| Solo los motores biológicos escriben en el repositorio de verdad | Interfaces de dominio y repositorio de verdad | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73 y REQ-CRU-01 a REQ-CRU-45 |
+| Una matriz SNV se fija antes de crear individuos; todos comparten sus loci/frecuencias y solo los genotipos se muestrean por identidad. Un panel se conserva intacto y cualquier mosaico exige el motor común de recombinación | Fuentes de variación, inicialización poblacional y recombinación | REQ-CONF-128 a REQ-CONF-130, REQ-IND-60 a REQ-IND-65 y REQ-EVO-74 a REQ-EVO-77 |
+| Solo los motores biológicos escriben en el repositorio de verdad | Interfaces de dominio y repositorio de verdad | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-77 y REQ-CRU-01 a REQ-CRU-45 |
 | Los componentes técnicos observan instantáneas y no mutan genotipo, genealogía ni trayectoria | Orquestador de eventos y vistas de solo lectura | REQ-TEC-01 a REQ-TEC-10 y REQ-DAT-01 a REQ-DAT-73 |
-| `DeclaredConfig` conserva lo escrito y su ubicación; `EffectiveConfig` es inmutable durante cada ámbito de uso y mantiene la procedencia de la resolución | Adaptador TOML y resolvedor de configuración | REQ-CONF-01 a REQ-CONF-127 y REQ-MAN-01 a REQ-MAN-90 |
-| Marimo solo entrega un conjunto TOML visible y autoconsistente y argumentos de proceso; cualquier cambio de documento o enlace invalida validación y ninguna opción implementada queda solo en TOML | Aplicación Marimo y adaptador de proceso | REQ-UI-01 a REQ-UI-13 y REQ-VAL-54 |
+| `DeclaredConfig` conserva lo escrito y su ubicación; `EffectiveConfig` es inmutable durante cada ámbito de uso y mantiene la procedencia de la resolución | Adaptador TOML y resolvedor de configuración | REQ-CONF-01 a REQ-CONF-130 y REQ-MAN-01 a REQ-MAN-92 |
+| Marimo solo entrega un conjunto TOML visible y autoconsistente y argumentos de proceso; cualquier cambio de documento o enlace invalida validación y ninguna opción implementada queda solo en TOML | Aplicación Marimo y adaptador de proceso | REQ-UI-01 a REQ-UI-15 y REQ-VAL-54 a REQ-VAL-56 |
 | Toda probabilidad, frecuencia y tolerancia general es un `f64` finito válido; las colecciones se suman y normalizan una sola vez con Neumaier y orden canónico, y conservan auditoría decimal de ida/vuelta exacta | Admisión de configuración y frontera `DeclaredConfig` → `EffectiveConfig` | REQ-CONF-106/107, REQ-VAL-40, REQ-MAN-81 y ACE-105 |
-| Todo manifiesto declara versión y clase, cumple su esquema y conserva directamente el contenido REQ-MAN obligatorio | Escritor de manifiestos y validación de publicación | REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-04/17/18/27 |
+| Todo manifiesto declara versión y clase, cumple su esquema y conserva directamente el contenido REQ-MAN obligatorio | Escritor de manifiestos y validación de publicación | REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-04/17/18/27 |
 | Todo documento estructurado propio usa una clase inequívoca y la versión de esquema conocida `"1"`, incluidos los diagnósticos JSON; una versión distinta se rechaza antes de interpretar su contenido | Adaptadores de entrada y escritores de documentos | REQ-CONF-01/10/111 a REQ-CONF-115 y REQ-MAN-02/69/73 |
-| Las decisiones aleatorias consumen ChaCha12 locales derivados con los contextos, material binario y catálogo normativos; ningún consumidor afecta el estado de otro | Proveedor de aleatoriedad y motores consumidores | REQ-CONF-03 a REQ-CONF-08, REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
+| Las decisiones aleatorias consumen ChaCha12 locales derivados con los contextos, material binario y catálogo normativos; ningún consumidor afecta el estado de otro | Proveedor de aleatoriedad y motores consumidores | REQ-CONF-03 a REQ-CONF-08, REQ-CONF-126/129, REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-77, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
 | Toda entrega oficial v1 usa la referencia Ubuntu 24.04 LTS x86-64 GNU y CPU portable y supera validación en Ubuntu nativo y OCI antes de publicarse | Construcción y distribución | REQ-CONF-111 a REQ-CONF-115, REQ-REP-22/23, REQ-MAN-05 y REQ-SAL-19 |
-| Cada artefacto se finaliza desde su temporal; un destino completo o `fallido` solo aparece tras manifiestos coherentes y mediante no-clobber atómico, mientras una interrupción no controlable conserva `INCOMPLETE` | Productores, validadores, ensamblador y publicador | REQ-VAL-01 a REQ-VAL-54, REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a REQ-SAL-27 |
+| Cada artefacto se finaliza desde su temporal; un destino completo o `fallido` solo aparece tras manifiestos coherentes y mediante no-clobber atómico, mientras una interrupción no controlable conserva `INCOMPLETE` | Productores, validadores, ensamblador y publicador | REQ-VAL-01 a REQ-VAL-56, REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a REQ-SAL-27 |
 | Verdad canónica, vistas interoperables y evidencia técnica permanecen como clases distintas | Repositorio de verdad, materializador VCF y productores técnicos | REQ-VER-01 a REQ-VER-47, REQ-DAT-01 a REQ-DAT-73 y REQ-SAL-01 a REQ-SAL-27 |
 
 Ningún adaptador de formato, proceso externo, manifiesto o escritor de salida
@@ -848,8 +868,8 @@ representación derive autoridad de otra:
 | Estado interno y verdad | Repositorios de dominio | Evoluciona solo mediante operaciones biológicas y conserva lo necesario para reconstrucción |
 | Resultados publicados | Ensamblador, validadores y publicador | Se hacen visibles al exterior después del cierre del conjunto |
 
-Los contenidos exigidos a estas clases están en REQ-CONF-01 a REQ-CONF-127,
-REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-90 y REQ-SAL-01 a
+Los contenidos exigidos a estas clases están en REQ-CONF-01 a REQ-CONF-130,
+REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a
 REQ-SAL-27. TOML fija la configuración de autoría; JSON fija
 `effective-config.json` y los manifiestos. Los esquemas de manifiesto usan JSON
 Schema Draft 2020-12. Todos estos documentos declaran su clase y el campo
@@ -958,16 +978,16 @@ de significado.
 
 | Categoría pública mínima | Contexto que debe aportar la arquitectura | Fuente de la consecuencia funcional |
 |---|---|---|
-| Configuración o esquema | Fichero TOML, clase, versión, campo, valor, ruta y ubicación; en duplicados, todas las ubicaciones; en validación numérica, colección, identidad/categoría, tolerancia, orden, suma, delta, algoritmo/versión y condición incumplida | REQ-CONF-01 a REQ-CONF-127 y REQ-VAL-01 a REQ-VAL-54 |
-| Entrada o formato | Ruta, formato, posición, identificador, valor encontrado y contrato incumplido | REQ-FMT-01 a REQ-FMT-07, REQ-REF-01 a REQ-REF-36 y REQ-VAL-01 a REQ-VAL-54 |
-| Validación de dominio o biología | Entidad, generación o evento, estado previo identificable e invariante de dominio | REQ-IND-01 a REQ-IND-59, REQ-EVO-01 a REQ-EVO-73, REQ-CRU-01 a REQ-CRU-45, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17, REQ-REC-01 a REQ-REC-29 y REQ-MUT-01 a REQ-MUT-15 |
-| Recursos | Estimación, medida o límite, unidad, ámbito y operación impedida | REQ-NOF-01 a REQ-NOF-08 y REQ-VAL-01 a REQ-VAL-54 |
-| Proceso o herramienta externa | Evento, herramienta, versión, comando, código de salida, entradas, salidas y ubicación de stdout o stderr | REQ-TEC-01 a REQ-TEC-10, REQ-DAT-01 a REQ-DAT-73, REQ-UI-01 a REQ-UI-13 y REQ-VAL-01 a REQ-VAL-54 |
-| E/S o publicación | Conjunto, referencia, artefactos y enlaces; ante integridad fallida, algoritmo, digest esperado y observado, tamaño y etapa | REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-90, REQ-SAL-01 a REQ-SAL-27 y REQ-VAL-01 a REQ-VAL-54 |
-| Defecto interno | Componente, operación, invariante imposible y contexto reproducible | REQ-VAL-01 a REQ-VAL-54 |
+| Configuración o esquema | Fichero TOML, clase, versión, campo, valor, ruta y ubicación; en duplicados, todas las ubicaciones; en validación numérica, colección, identidad/categoría, tolerancia, orden, suma, delta, algoritmo/versión y condición incumplida | REQ-CONF-01 a REQ-CONF-130 y REQ-VAL-01 a REQ-VAL-56 |
+| Entrada o formato | Ruta, formato, posición, identificador, valor encontrado y contrato incumplido | REQ-FMT-01 a REQ-FMT-07, REQ-REF-01 a REQ-REF-36 y REQ-VAL-01 a REQ-VAL-56 |
+| Validación de dominio o biología | Entidad, generación o evento, estado previo identificable e invariante de dominio | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-77, REQ-CRU-01 a REQ-CRU-45, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17, REQ-REC-01 a REQ-REC-29 y REQ-MUT-01 a REQ-MUT-15 |
+| Recursos | Estimación, medida o límite, unidad, ámbito y operación impedida | REQ-NOF-01 a REQ-NOF-08 y REQ-VAL-01 a REQ-VAL-56 |
+| Proceso o herramienta externa | Evento, herramienta, versión, comando, código de salida, entradas, salidas y ubicación de stdout o stderr | REQ-TEC-01 a REQ-TEC-10, REQ-DAT-01 a REQ-DAT-73, REQ-UI-01 a REQ-UI-15 y REQ-VAL-01 a REQ-VAL-56 |
+| E/S o publicación | Conjunto, referencia, artefactos y enlaces; ante integridad fallida, algoritmo, digest esperado y observado, tamaño y etapa | REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-92, REQ-SAL-01 a REQ-SAL-27 y REQ-VAL-01 a REQ-VAL-56 |
+| Defecto interno | Componente, operación, invariante imposible y contexto reproducible | REQ-VAL-01 a REQ-VAL-56 |
 
 La clasificación observable entre rechazo, fallo, aviso, resultado estadístico y
-estado no evaluable es exclusivamente la de REQ-VAL-01 a REQ-VAL-54 y sus
+estado no evaluable es exclusivamente la de REQ-VAL-01 a REQ-VAL-56 y sus
 ACE; esta tabla no introduce otra política.
 
 Los fallos esperables recorren retornos tipados y nunca provocan `panic`. Un
@@ -1028,7 +1048,7 @@ sección solo organiza las capas técnicas de comprobación.
 | Dominio unitario | Probar tipos, transformaciones e invariantes sin E/S ni procesos externos | Casos TEST de cada REQ biológico y sus ACE |
 | Frontera de componente | Probar traducción de identidades, coordenadas, configuración y errores con dobles de dependencias | Vectores normativos BLAKE3 e IDs; vectores Neumaier con orden canónico, bordes inclusivos, normalización y decimal round-trip; tipos no intercambiables; catálogo diagnóstico y JSON único; comparadores de verdad y contenido técnico; TEST de cada familia |
 | Adaptador | Comprobar lectura, escritura e invocación contra contratos externos | TOML desconocido o duplicado con ubicación; clase/versión inválida; FASTA con `samtools faidx`; SHA-256 con `sha256sum`; manifiestos, configuración efectiva y diagnósticos con otra implementación JSON Schema; `.tar.gz` por listado/extracción; descriptores OCI por inspección/arranque; VCF/BAM/CRAM en sus fases; casos válidos, truncados, corruptos y de borde |
-| Propiedad y estadística | Explorar espacios amplios sin confundir variación aleatoria con un invariante | Vectores de derivación por ámbito, independencia al añadir o reordenar observaciones y casos TEST asociados a REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-73, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
+| Propiedad y estadística | Explorar espacios amplios sin confundir variación aleatoria con un invariante | Vectores de derivación por ámbito, independencia al añadir o reordenar observaciones y casos TEST asociados a REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-77, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
 | Recorrido completo | Demostrar que las fronteras componen un paquete trazable | Rechazo previo sin destino, fallo controlado final y SIGKILL provisional; carreras no-clobber y FS sin soporte; comparadores semánticos y de bytes; pruebas WSL2/ext4 y publicación en Ubuntu 24.04 LTS nativo y OCI fijado por digest, incluido su FS, señales, permisos, recursos y procesos externos |
 
 Las versiones concretas y los restantes validadores independientes se eligen en
@@ -1140,7 +1160,7 @@ obligaciones vigentes.
 | REQ-NOF | Estimación y observación de recursos | Todos los componentes exponen medidas sin imponer límites funcionales fijos |
 | REQ-UI | Aplicación Marimo | Admisión, diagnósticos, proceso y manifiestos prueban equivalencia, seguridad y ausencia de semántica duplicada |
 
-Los criterios ACE-01 a ACE-115 se distribuyen siguiendo esta matriz. Antes de
+Los criterios ACE-01 a ACE-117 se distribuyen siguiendo esta matriz. Antes de
 planificar cada fase, sus criterios se convertirán en casos concretos y se
 enlazarán con el componente y la frontera que aportan la evidencia.
 
@@ -1181,6 +1201,12 @@ algoritmo uniforme/versionado de intervalos después de aprobar porcentaje y
 *scaffolds*. DTPD-117 debe evaluar y fijar versión, entorno, empaquetado y
 protocolo aplicación↔binario. Ninguna recomendación de esas entradas es una
 decisión aprobada.
+
+DTC-052 asigna a una matriz común las frecuencias SNV iniciales y DTC-053 separa
+el panel haplotípico posterior. DTPD-118 debe fijar formatos, perfiles y
+generación reproducible antes de F2.2/F2.3. DTPD-119 debe fijar el panel y su
+muestreo intacto antes de F6.4 y conectarse con DTPD-111 para el modo recombinante
+de F7.1. Ninguna de estas fuentes puede poseer o reescribir la verdad resultante.
 
 Las decisiones base DTPD-001 a DTPD-015 están resueltas. Para cerrar F0 debe
 aprobarse esta división; esa aprobación habilita planificar F1, pero no significa
