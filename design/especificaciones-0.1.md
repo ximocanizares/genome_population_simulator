@@ -2,7 +2,7 @@
 
 - **Versión:** 0.1
 - **Estado:** borrador actualizado
-- **Fecha:** 12 de agosto de 2026
+- **Fecha:** 13 de agosto de 2026
 - **Fuentes disponibles:** `README.md`, información confirmada por el usuario y
   la decisión posterior de usar Rust recogida en
   [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
@@ -16,9 +16,9 @@ La versión 0.1 sigue siendo un borrador documental. Sus requisitos son
 obligatorios y las 27 preguntas funcionales de la revisión anterior están
 resueltas. La ampliación del 10 de agosto de 2026 confirma la referencia
 reducida y la aplicación Marimo; la revisión del 12 de agosto resuelve matrices
-y espectros SNV. El panel de haplotipos conserva su cuestión técnica marcada
-`PENDIENTE DE REVISIÓN`; aún deben planificarse representaciones restantes y
-convertirse los ACE en pruebas.
+y espectros SNV; la revisión del 13 de agosto resuelve mediante DTC-055 el panel
+de bloques haplotípicos. Aún deben planificarse las representaciones que siguen
+abiertas y convertirse los ACE en pruebas.
 
 La sección 4 es la fuente normativa de requisitos funcionales. Las secciones 2,
 5 y 6 los resumen y la sección 7 propone criterios de aceptación preliminares.
@@ -2200,25 +2200,304 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   estado completo producido por el anterior. Antes de simular, el sistema debe
   validar sus dependencias y rechazar un orden ausente, ambiguo o imposible,
   identificando los eventos y la dependencia incumplida.
-- **REQ-EVO-74.** Una fase posterior debe admitir un panel o matriz de haplotipos
-  suministrado: cada haplotipo debe identificar referencia, secuencia, alelos
-  ordenados y fase, y cada población debe asignarle una frecuencia finita entre
-  0 y 1. Las frecuencias de los haplotipos elegibles deben sumar 1 y sus
-  frecuencias alélicas marginales deben poder derivarse sin otra fuente de verdad.
+- **REQ-EVO-74.** Una fase posterior debe admitir un panel suministrado formado
+  por bloques haplotípicos locales. El paquete canónico debe constar exactamente
+  de cinco ficheros enlazados: `panel_blocks.tsv`, `panel_sites.tsv`,
+  `panel_haplotype_alleles.tsv`, `panel_frequencies.tsv` y
+  `panel.metadata.json`. `panel_blocks.tsv` debe contener una fila por bloque con
+  `block_id`, `reference_id`, `sequence_id`, `start` y `end`. Las coordenadas
+  deben usar la convención común basada en 1 y cerrada. Los bloques no deben
+  solaparse y todos sus sitios deben quedar dentro de su intervalo. El paquete
+  debe estar ligado a una única referencia: todos los `reference_id` de
+  `panel_blocks.tsv` deben coincidir exactamente con
+  `panel.metadata.json.reference.reference_id`; el
+  `panel.metadata.json.reference.sha256` debe coincidir con el SHA-256
+  recalculado sobre los bytes del FASTA autoritativo; y todo `sequence_id` debe
+  existir en ese FASTA. Una mezcla de referencias, un ID o digest divergente o
+  una secuencia inexistente debe rechazarse antes de interpretar o crear
+  individuos.
+
+  Los cuatro TSV deben usar UTF-8 sin BOM, saltos LF y tabulador como único
+  separador. Deben terminar en LF, contener una única cabecera exacta y no
+  admitir comillas, líneas vacías, campos vacíos ni columnas adicionales. Sus
+  esquemas, en orden, deben ser los siguientes. En la tabla, `\t` representa un
+  único carácter de tabulación en la cabecera, no los dos caracteres barra y
+  letra t:
+
+  | Fichero | Cabecera exacta |
+  |---|---|
+  | `panel_blocks.tsv` | `block_id\treference_id\tsequence_id\tstart\tend` |
+  | `panel_sites.tsv` | `block_id\tsite_id\tposition\tref\talt` |
+  | `panel_haplotype_alleles.tsv` | `block_id\thaplotype_id\tsite_id\tallele_index` |
+  | `panel_frequencies.tsv` | `population_id\tblock_id\thaplotype_id\tfrequency` |
+
+  Los identificadores deben conservar la sintaxis ASCII de DTC-039. `start`,
+  `end` y `position` deben escribirse como enteros decimales positivos sin signo
+  ni ceros iniciales; `allele_index`, como entero decimal no negativo con las
+  mismas reglas. `frequency` debe usar la serialización decimal mínima que
+  recupera exactamente el mismo `f64`, conforme a DTC-049, sin notación no finita.
+
+  `panel_sites.tsv` debe contener el catálogo de sitios ordenado por bloque, con
+  una fila por sitio. `ref` debe contener una base A/C/G/T y `alt`, uno o varios
+  ALT A/C/G/T separados por comas, sin espacios, comillas ni alelos repetidos o
+  iguales a `ref`. El orden textual de `alt` debe definir `allele_index` 1..N;
+  `ref` debe corresponder siempre al índice 0. Cada haplotipo debe contener los alelos faseados de un único
+  bloque y su identidad debe ser local a ese bloque: la
+  identidad inequívoca es la pareja `block_id` + `haplotype_id`, y reutilizar un
+  mismo `haplotype_id` en otro bloque no debe relacionarlos. V1 solo debe admitir
+  SNP suministrados, bialélicos o multialélicos: `REF` y cada `ALT` deben ser
+  exactamente una base A, C, G o T. Debe rechazar `N`, *indels*, repeticiones,
+  variantes estructurales, alelos simbólicos, *breakends* y sitios repetidos o
+  solapados.
+
+  `panel_frequencies.tsv` debe contener exactamente una fila por
+  (`population_id`, `block_id`, `haplotype_id`), incluidos los valores 0 y 1.
+  Para cada población y bloque, las frecuencias deben ser finitas, pertenecer a
+  [0,1] y sumar 1 conforme a DTC-049. Una fila ausente o duplicada debe ser un
+  error, no debe interpretarse como frecuencia 0 y no debe existir una frecuencia
+  global ni herencia de frecuencias entre poblaciones. Las frecuencias alélicas
+  marginales deben poder derivarse sin otra fuente de verdad. La tabla
+  canónica `panel_haplotype_alleles.tsv` debe ser densa: para cada pareja
+  (`block_id`, `haplotype_id`) debe contener exactamente una asignación para cada
+  `site_id` del bloque. `allele_index=0` representa `REF` y los valores de 1 a N,
+  los `ALT` declarados para el sitio en ese mismo orden. Una asignación ausente,
+  duplicada o ajena al catálogo debe ser un error; una ausencia no equivale a
+  `REF` y v1 no admite alelos desconocidos ni ausentes en el panel. Dentro de un
+  mismo `block_id`, dos `haplotype_id` no deben tener el mismo vector completo y
+  ordenado de `allele_index`. Si varios haplotipos son equivalentes, la
+  validación debe rechazarlos e identificar el bloque y todos los IDs
+  implicados; no debe fusionarlos ni sumar sus frecuencias. La misma secuencia de
+  índices puede aparecer en bloques distintos porque representa sitios
+  diferentes. Un haplotipo de frecuencia 0 sigue siendo válido si su vector es
+  único. Cada bloque debe declarar al menos dos sitios SNP y al menos dos
+  vectores HAP distintos. Una población puede asignar frecuencia 1 a un único
+  HAP y 0 a todos los demás; el catálogo global sigue siendo válido incluso si
+  todas las poblaciones actuales lo hacen, y las filas con 0 deben conservarse.
+  Un sitio cuyo mismo ALT esté fijado en todos los HAP debe conservarse. En
+  cambio, un sitio con `allele_index=0` en todos los HAP no representa ninguna
+  variante respecto a la referencia y debe rechazarse como redundante. La matriz de
+  SNP independientes `alt_af` no puede contener ningún locus situado dentro del
+  intervalo completo de un bloque, aunque esa posición no sea un `site_id` del
+  panel. La validación debe detectar el conflicto antes de crear individuos, sin
+  prioridad ni sobrescritura, e identificar como mínimo la referencia,
+  secuencia, posición y fila o identidad de matriz conflictiva, además del
+  `block_id` y su intervalo. Fuera de los intervalos de bloque debe regir
+  DTC-054. `panel.metadata.json` debe declarar la clase y versión del recurso,
+  `panel_id`, la referencia y su SHA-256, y la convención de coordenadas basada
+  en 1 y cerrada. Para cada uno de los cuatro TSV debe registrar clase, ruta,
+  tamaño y SHA-256. También debe registrar la procedencia y la herramienta
+  creadora cuando existan. El JSON no debe duplicar las filas de las tablas.
+
+  El orden canónico debe ser único. `panel_blocks.tsv` debe ordenar por
+  `reference_id`, orden de `sequence_id` en el FASTA, `start`, `end` y
+  `block_id`; `panel_sites.tsv`, por el orden canónico del bloque, `position` y
+  `site_id`; `panel_haplotype_alleles.tsv`, por bloque, `haplotype_id` ASCII y
+  orden canónico del sitio; y `panel_frequencies.tsv`, por `population_id` ASCII,
+  bloque y `haplotype_id` ASCII. Deben ser únicas, respectivamente, las claves
+  `block_id`, (`block_id`,`site_id`),
+  (`block_id`,`haplotype_id`,`site_id`) y
+  (`population_id`,`block_id`,`haplotype_id`). La orden de preparación debe
+  rechazar cualquier entrada que no pueda llevarse sin ambigüedad a este orden.
+  Una única orden auxiliar del binario Rust, conceptualmente
+  `prepare-haplotype-panel`, debe recibir la referencia y las cuatro tablas,
+  validar su contrato y relaciones, crear una copia nueva en orden canónico,
+  calcular los SHA-256 de la referencia y de las tablas, generar
+  `panel.metadata.json` y publicar atómicamente el directorio. No debe modificar
+  los originales ni sobrescribir un destino existente. La simulación solo debe
+  aceptar el paquete completo: debe recalcular sus sumas y verificar referencia,
+  clases, versiones y rutas. Un fichero ausente o modificado o cualquier
+  incompatibilidad debe detener la ejecución antes de crear individuos.
 - **REQ-EVO-75.** En el modo sin recombinación, cada copia cromosómica fundadora
-  debe muestrearse como un haplotipo completo e intacto conforme a sus
-  frecuencias. No debe mezclar segmentos, romper bloques ni crear combinaciones
-  ausentes del panel, salvo mutaciones posteriores configuradas por separado.
-- **REQ-EVO-76.** En el modo con recombinación, la creación debe seleccionar los
-  haplotipos fuente conforme a sus frecuencias y aplicar el mismo motor, mapas,
-  convenciones e invariantes de recombinación que F7.1. Cada mosaico resultante
-  debe conservar los puntos de cruce y la procedencia de todos sus segmentos; el
-  panel de entrada no se modifica.
+  debe recibir en cada bloque un haplotipo local completo e intacto conforme a
+  sus frecuencias. A efectos del muestreo, cada bloque debe tratarse como un
+  locus multialélico cuyas categorías son sus haplotipos locales. Para cada
+  individuo de una población y ploidía P, deben asignarse P haplotipos locales a
+  sus copias haplotípicas biológicas identificadas. Hardy-Weinberg mediante el
+  modelo multinomial debe ser el modo predeterminado para P=1..10. El modelo F
+  debe reutilizar exactamente las fórmulas multialélicas aprobadas y solo debe
+  admitirse en diploides: F=0 coincide con Hardy-Weinberg y F=1 asigna a ambas
+  copias el mismo haplotipo local. F debe rechazarse en P=1 o P>2. Una
+  distribución explícita de combinaciones haplotípicas puede prevalecer
+  localmente conforme a REQ-EVO-49.
+
+  Cada población y bloque debe elegir uno de los dos modos normativos. El modo
+  probabilístico debe ser el predeterminado: sortea cada copia según las
+  frecuencias, permite reutilizar un haplotipo en sorteos distintos y produce
+  recuentos realizados estocásticos. El modo controlado debe solicitar o derivar
+  un vector entero de copias por haplotipo que sume C, construir ese multiconjunto
+  y asignarlo reproduciblemente sin alterar sus totales; no significa muestreo
+  sin reemplazo del catálogo. Cuando un modo controlado exija además recuentos
+  genotípicos finales exactos, la asignación debe ser compatible con HWE, F
+  diploide o la distribución explícita aplicable. Una incompatibilidad
+  matemática debe rechazarse antes de crear individuos, sin ajustar cantidades
+  ni relajar el modelo. Esta restricción no se aplica al modo probabilístico ni
+  convierte F en emparejamiento físico, autofecundación o pedigrí. Deben
+  registrarse los valores esperados, solicitados y realizados.
+
+  Los bloques deben muestrearse independientemente. Un mismo individuo puede
+  combinar haplotipos distintos en bloques diferentes y esa combinación no debe
+  expresar un donante común. Cada asignación debe quedar ligada de forma
+  reproducible a la copia haplotípica biológica que la recibió. Los SNP situados
+  fuera de los intervalos de bloque deben proceder del
+  mecanismo vigente de loci independientes de la matriz `alt_af`; esto no
+  implica que las bases situadas entre bloques permanezcan iguales a la
+  referencia. En modo intacto debe seleccionarse exactamente un HAP por cada
+  población×individuo×copia×bloque y copiar conjuntamente todos sus
+  `allele_index`, sin cortes ni mosaicos. Antes de aplicar mutaciones posteriores,
+  el vector debe ser idéntico a un HAP del panel y un HAP con frecuencia 0 nunca
+  debe seleccionarse. Deben registrarse población, bloque, copia biológica y HAP
+  fundador. Las mutaciones de novo posteriores pueden modificar ese estado según
+  el flujo general, pero deben trazarse en una capa separada y no reescribir la
+  identidad ni el origen del HAP fundador.
+- **REQ-EVO-76.** En el modo con recombinación, cada individuo y bloque debe
+  generarse directamente; no debe existir un depósito prototipo seguido de un
+  segundo muestreo ni debe presentarse la operación como una meiosis histórica.
+  El productor de una copia final debe seleccionar primero un HAP primario según
+  las frecuencias del panel. La configuración debe declarar
+  `recombination_probability_per_interbase = r`, finita en (0,1]. Para un bloque
+  de longitud L existen L−1 uniones elegibles y cada una debe sortearse
+  independientemente en cada ejecución del productor. Por ello, K sigue
+  `Binomial(L−1,r)` y la probabilidad de al menos un punto es
+  `1−(1−r)^(L−1)`.
+
+  Cuando K=0, el productor debe devolver intacto el HAP primario. Cuando K sea
+  mayor o igual que 1, debe sortear un HAP secundario según las frecuencias de la
+  población; ambas fuentes pueden coincidir. Los puntos deben ser únicos, estar
+  ordenados y caer estrictamente dentro del intervalo del bloque; se deben
+  admitir varios cruces. Un punto x debe representar la unión situada después
+  de la base x, entre x y x+1; no debe desplazarse hasta un SNP. La salida debe
+  comenzar con la fuente primaria en `start` y alternar secundaria y primaria en
+  cada punto, siempre en orientación directa y sin inversión. Por ejemplo, para
+  `start=100`, `end=300` y puntos 150 y 240, los segmentos deben ser primaria
+  100–150, secundaria 151–240 y primaria 241–300. El productor
+  debe devolver ese mosaico como una copia final. No se deben corregir ni
+  descartar mosaicos para imponer recuentos de fuentes o resultados. DTC-055
+  define y cierra para F6.4 un único constructor común de segmentos y su variante
+  uniforme: recibe las dos fuentes y los puntos ya ordenados, alterna los
+  segmentos con estas convenciones y produce la copia reconstruible. F7.1 debe
+  reutilizar ese constructor; DTPD-111 solo debe decidir cómo los mapas y la
+  semántica meiótica proporcionan sus puntos, sin bloquear F6.4 ni crear un
+  algoritmo paralelo. Los mapas posteriores deben sustituir la probabilidad
+  uniforme por probabilidades dependientes de la posición sin crear otro motor. Los
+  bloques se procesan independientemente y una fuente elegida en uno no expresa
+  continuidad de donante en otro. Los SNP exteriores siguen DTC-054 y el panel
+  de entrada no se modifica. Tanto la fuente primaria como la secundaria deben
+  seleccionarse exclusivamente del panel original mediante
+  `panel_frequencies.tsv`. Un recombinante generado antes en la misma ejecución
+  nunca debe convertirse en fuente, las probabilidades no deben actualizarse y
+  el resultado no debe depender del orden de procesamiento. La recombinación
+  acumulada, la reproducción, las poblaciones evolutivas y el uso de haplotipos
+  descendientes como fuentes pertenecen a F7/F8 y quedan fuera de esta
+  inicialización. Todos los cruces sorteados deben conservarse en la traza,
+  incluidos los que no cambien ningún alelo observado y los pares cuyo efecto
+  alélico neto se cancele.
+
+  En diploides, para cada individuo y bloque debe sortearse primero una variable
+  de Bernoulli con probabilidad F. Si indica autozigosis —dos copias que proceden
+  de la misma realización genética—, se debe ejecutar una sola vez el productor
+  y asignar exactamente su mismo vector a ambas copias. En caso contrario, deben
+  ejecutarse dos productores independientes. Esto implementa directamente
+  `P(ii)=p_i²+F p_i(1−p_i)` y `P(ij)=2(1−F)p_i p_j` para la distribución
+  implícita de vectores finales. F=0 equivale a HWE y F=1 produce todos los
+  individuos homocigotos, sin representar autofecundación, apareamiento ni
+  pedigrí. Cuando P sea distinta de 2, deben ejecutarse P productores
+  independientes y F debe rechazarse.
+
+  Para cada población y bloque deben existir C=N×P copias finales. Estas deben
+  agruparse por su vector completo y ordenado y su frecuencia realizada debe ser
+  `n_h/C`. Un mosaico coincidente con un HAP del panel suma a ese vector sin
+  perder su procedencia recombinante; mosaicos nuevos idénticos comparten
+  categoría. Las frecuencias del panel son el objetivo para seleccionar las
+  fuentes, no frecuencias creadas por un conjunto intermedio.
 - **REQ-EVO-77.** Los modos con y sin recombinación deben ser mutuamente
-  excluyentes para una misma unidad de creación. Deben registrar frecuencias
-  objetivo y realizadas de haplotipos, número de copias muestreadas, subsemillas
-  y, en el modo recombinante, haplotipos fuente, puntos y segmentos. No se debe
-  presentar como preservado un LD que la recombinación haya modificado.
+  excluyentes para una misma unidad de creación. La configuración debe separar
+  los dos ejes con nombres inequívocos:
+  `haplotype_construction = "intact" | "recombinant"` para construir los
+  haplotipos y `frequency_sampling = "probabilistic" | "controlled"` para
+  tratar sus frecuencias. `haplotype_construction` debe poder declararse como
+  valor general y mediante sustituciones por población y bloque compatibles con
+  DTC-033; la regla conjunta población+bloque debe prevalecer conforme a la
+  precedencia vigente. Poblaciones o bloques distintos pueden usar
+  construcciones distintas, pero una misma combinación población×bloque no
+  puede mezclar ambas. `intact` debe prohibir cualquier parámetro de
+  recombinación. `recombinant` debe exigir
+  `recombination_probability_per_interbase` finita y mayor que 0 y menor o igual
+  que 1 y solo debe admitir `frequency_sampling = "probabilistic"`. La
+  combinación `recombinant` + `controlled` debe rechazarse antes de crear
+  individuos e identificar ambos campos y el ámbito población×bloque efectivo.
+  `intact` debe admitir HWE, F diploide o una distribución genotípica explícita.
+  `recombinant` debe admitir únicamente HWE o F diploide; combinarlo con una
+  distribución genotípica explícita debe rechazarse antes de crear individuos e
+  identificar población, bloque y campos incompatibles. Condicionar una
+  distribución explícita sobre resultados recombinantes queda fuera de v1.
+  Que algunas copias obtengan K=0 por azar no cambia el modo efectivo. El
+  control exacto de fuentes o resultados recombinantes queda fuera de v1.
+  Deben registrar las frecuencias objetivo del panel para las fuentes y los
+  recuentos, frecuencias y genotipos realizados sobre las C copias finales por
+  población, bloque y vector completo, además de las subsemillas. En el modo
+  recombinante deben distinguir el número de ejecuciones del productor con K≥1
+  y el número de copias finales derivadas de ellas: una única salida duplicada
+  por F cuenta como un productor con cruce y dos copias finales derivadas. Por
+  cada productor con cruce deben registrar la fuente primaria, la secundaria,
+  los puntos y la procedencia ordenada de todos los segmentos. También deben
+  distinguir los vectores ausentes del catálogo de entrada. La
+  procedencia intacta y recombinante debe distinguirse aunque el vector final
+  coincida. También deben registrarse los genotipos esperados y realizados y el
+  F realizado, o «no aplicable» fuera de diploides. No se debe presentar como preservado un LD que la
+  recombinación haya modificado.
+
+  La aleatoriedad debe reutilizar exclusivamente el contrato nombrado y local de
+  DTC-037. Los ámbitos deben incluir `population_id`, `block_id`, `individual_id`
+  y, cuando corresponda, `copy_id`, y separar las decisiones de F/autozigosis,
+  fuente primaria, puntos interbase y fuente secundaria. La misma raíz, panel,
+  configuración y versión debe reproducir el resultado. Añadir o reordenar
+  individuos o bloques no debe alterar los IDs existentes, y cambiar `r` en un
+  bloque no debe afectar a otro. Cuando F duplique una salida, debe existir una
+  sola ejecución y procedencia del productor y dos copias biológicas enlazadas a
+  ella. Deben registrarse la versión de derivación, los ámbitos y las
+  subsemillas; no se debe introducir otro generador aleatorio.
+
+  Deben publicarse tres tablas obligatorias. `founder_block_assignments.tsv`
+  debe contener una fila por población, individuo, copia y bloque, con
+  `final_haplotype_id`, `origin_kind` y `process_id`; una salida duplicada por F
+  crea dos asignaciones enlazadas al mismo proceso. Todo productor debe tener un
+  `process_id` tipado conforme a DTC-039, incluso cuando K=0. `origin_kind` debe
+  admitir exactamente `intact` para K=0 y `recombined` para K≥1, aunque el vector
+  final coincida con un HAP del panel. Las dos copias duplicadas por F deben usar
+  el mismo `process_id` y `origin_kind`; no debe existir un origen
+  `autozygous_copy`.
+
+  `recombination_segments.tsv` debe contener una fila por
+  (`process_id`, `segment_index`) con bloque, `start`, `end` y HAP fuente,
+  suficiente para reconstruir la salida. Un proceso K=0 debe contener un único
+  segmento que cubra el bloque completo con su fuente primaria.
+  `realized_haplotype_frequencies.tsv` debe contener una fila por población,
+  bloque y HAP final con `copy_count`, `intact_copy_count`,
+  `recombined_copy_count` y frecuencia `n_h/C`, agrupando vectores idénticos.
+  Debe cumplirse `copy_count = intact_copy_count + recombined_copy_count`; una
+  copia duplicada por F debe contarse dos veces en la categoría de su proceso.
+  Las tres tablas deben compartir el contrato byte a byte de los TSV del panel:
+  UTF-8 sin BOM, LF incluido al final, tabulador, una cabecera exacta y ausencia
+  de comillas, líneas o campos vacíos y columnas extra. Sus cabeceras exactas,
+  donde `\t` representa un carácter de tabulación, deben ser:
+
+  | Fichero | Cabecera exacta |
+  |---|---|
+  | `founder_block_assignments.tsv` | `population_id\tindividual_id\tcopy_id\tblock_id\tfinal_haplotype_id\torigin_kind\tprocess_id` |
+  | `recombination_segments.tsv` | `process_id\tsegment_index\tblock_id\tstart\tend\tsource_haplotype_id` |
+  | `realized_haplotype_frequencies.tsv` | `population_id\tblock_id\thaplotype_id\tcopy_count\tintact_copy_count\trecombined_copy_count\tfrequency` |
+
+  Todos los campos terminados en `_id`, incluido `copy_id`, deben usar su forma
+  ASCII canónica conforme a DTC-039. `segment_index` y los tres recuentos deben
+  usar decimal no negativo sin signo ni ceros iniciales; `start` y `end`,
+  decimal positivo con las mismas reglas;
+  `frequency`, la forma decimal mínima *round-trip* de DTC-049. Las filas deben
+  ordenarse, respectivamente, por población, individuo, copia y orden canónico
+  de bloque; por proceso y `segment_index`; y por población, orden canónico de
+  bloque e ID de HAP. Esas mismas tuplas deben ser sus claves únicas. La clase y
+  versión de cada tabla pertenecen a su enlace de esquema/manifiesto y no deben
+  añadirse como columnas TSV. Cada tabla debe quedar enlazada desde el manifiesto
+  mediante clase, versión, ruta, tamaño y SHA-256.
 - **REQ-POB-01.** El sistema debe permitir crear poblaciones naturales mediante
   esta vía.
 
@@ -4087,10 +4366,49 @@ comparten una política de aceptación.
   frecuencias y genotipos esperados y realizados sin exigir que una muestra
   finita reproduzca exactamente las frecuencias objetivo.
 - **REQ-VAL-56.** La validación del panel de haplotipos debe reconstruir cada
-  haplotipo de entrada, derivar sus frecuencias alélicas y comprobar sus sumas.
-  En modo intacto debe detectar cualquier mosaico; en modo recombinante debe
-  reconstruir cada haplotipo creado desde los segmentos y fuentes registrados y
-  comprobar los puntos mediante un oráculo independiente del productor.
+  haplotipo local de entrada, derivar sus frecuencias alélicas y comprobar sus
+  sumas y cobertura completa por población y bloque en
+  `panel_frequencies.tsv`, incluidos ceros y fijados, sin valores globales ni
+  heredados. Debe verificar que los bloques no se solapen, que cada sitio esté
+  dentro de su intervalo, que solo existan SNP con alelos A/C/G/T y que no haya
+  sitios repetidos ni solapados. Debe comprobar la cobertura cartesiana exacta
+  bloque×haplotipo×sitio de `panel_haplotype_alleles.tsv`, la unicidad de cada
+  asignación y que todo `allele_index` pertenezca al catálogo del sitio; no debe
+  completar ausencias como `REF`. También debe comparar los vectores completos
+  de un mismo bloque y rechazar todos los haplotipos equivalentes, incluidos los
+  de frecuencia 0, informando bloque e IDs sin fusionarlos ni sumar
+  frecuencias. Antes de crear individuos debe demostrar que
+  cada `block.reference_id` coincide con
+  `metadata.reference.reference_id`, que `metadata.reference.sha256` coincide
+  con el SHA-256 recalculado del FASTA autoritativo y que cada `sequence_id`
+  existe en ese FASTA; debe rechazar mezclas, divergencias o secuencias
+  inexistentes antes de interpretar el panel. También debe demostrar que
+  ningún locus de la matriz `alt_af` cae dentro de un intervalo del panel; cada
+  conflicto debe informar referencia, secuencia, posición y fila o identidad de
+  matriz, además del `block_id` y su intervalo, sin elegir una fuente ganadora.
+  También debe exigir exactamente los cinco ficheros canónicos, comprobar la
+  clase y versión del JSON y verificar ruta, tamaño y SHA-256 de los cuatro TSV y
+  el enlace a la referencia. El contenido tabular solo debe proceder de los TSV,
+  no de una copia en los metadatos. En modo intacto debe detectar cualquier
+  combinación intrabloque ausente del panel. En la alternativa recombinante debe
+  usar un oráculo independiente que no llame a ninguna función de producción
+  examinada. Debe reconstruir los HAP del panel desde referencia, sitios y
+  alelos, y cada mosaico desde `recombination_segments.tsv`; recalcular el ID de
+  contenido; verificar todas las asignaciones; comprobar que la suma de
+  `copy_count` es C=N×P y que cada frecuencia es `copy_count/C`. Debe verificar
+  byte a byte las cabeceras, tipos, orden y claves de las tres tablas de salida,
+  rechazar columnas extra —incluidas clase o versión— y contrastar esas dos
+  propiedades con sus enlaces de esquema/manifiesto. El oráculo debe probar el
+  constructor uniforme cerrado por DTC-055 sin depender de mapas ni semántica
+  meiótica pendientes en DTPD-111.
+
+  El corpus debe incluir el rechazo de `r=0` en modo recombinante, un cruce
+  conocido, cruces múltiples, invisibles y cancelados, resultados repetidos y
+  F=0, intermedio y 1; F=1 debe producir homocigosis sin pedigrí ni
+  autofecundación. Debe comprobar repetición exacta, aislamiento al añadir o
+  reordenar individuos/bloques y paridad Marimo↔TOML. Debe corromper
+  deliberadamente cada tabla, hash, referencia, intervalo, alelo, frecuencia y
+  enlace y demostrar su detección.
 
 ### 4.7. Manifiestos de la ejecución y de sus eventos
 
@@ -4567,9 +4885,19 @@ VCF y no constituya un experimento de secuenciación.
   esperados y realizados; y toda autorización de genotipo incompatible o matriz
   vacía.
 - **REQ-MAN-92.** La creación desde un panel de haplotipos debe registrar su ruta
-  y SHA-256, referencia y población, frecuencias objetivo y realizadas, modo con
-  o sin recombinación, subsemillas y, cuando corresponda, mapas, puntos de cruce
-  y procedencia por segmentos.
+  y la ruta y SHA-256 de `panel.metadata.json`, `panel_id`, referencia y
+  población, bloques e intervalos, identidades locales, frecuencias objetivo y
+  realizadas por bloque, modo con o sin recombinación, subsemillas y, cuando
+  corresponda, mapas, puntos de cruce y procedencia por segmentos. Cuando se
+  combine con una matriz `alt_af`, debe registrar ambos recursos y que se
+  comprobó que ningún locus independiente cae dentro de los intervalos de
+  bloque. En la alternativa recombinante fundadora debe registrar además la
+  configuración efectiva, F, `recombination_probability_per_interbase`, versión
+  de derivación, semillas y ámbitos, número de productores con cruce, número
+  total de cruces, vectores nuevos y coincidencias con HAP del panel. Debe enlazar
+  `founder_block_assignments.tsv`, `recombination_segments.tsv` y
+  `realized_haplotype_frequencies.tsv` por clase, versión, ruta, tamaño y SHA-256,
+  sin duplicar sus filas en el JSON.
 
 El formato y el esquema del manifiesto se elegirán durante la planificación de
 la implementación teniendo en cuenta que el núcleo se desarrollará en Rust.
@@ -4801,10 +5129,30 @@ Esta decisión no forma parte de la especificación funcional.
   resumen afectado y traducirse a los argumentos específicos, nunca a un
   `--force` general.
 - **REQ-UI-15.** En la fase posterior correspondiente, Marimo debe permitir
-  cargar y previsualizar el panel de haplotipos, sus poblaciones y frecuencias y
-  elegir de forma excluyente creación intacta o con recombinación. La interfaz
-  debe mostrar que la recombinación puede alterar las asociaciones originales y
-  no debe interpretar el panel fuera del binario Rust.
+  elegir el directorio del panel en una sección «Bloques haplotípicos en
+  población» y ofrecer acciones explícitas para prepararlo mediante la orden
+  auxiliar Rust y para validarlo. Debe mostrar un resumen de referencia,
+  bloques, sitios, HAP y poblaciones, y permitir mapear cada población del panel
+  a una población simulada. Una tabla por población y bloque debe ofrecer una selección excluyente
+  de `haplotype_construction` entre `intact` y `recombinant`, separada de
+  `frequency_sampling`, y admitir el valor general y las sustituciones por
+  población y bloque. Solo debe mostrar y exportar
+  `recombination_probability_per_interbase` cuando la construcción efectiva sea
+  `recombinant`; el control debe ser tipado. En modo intacto debe mostrar
+  `probabilistic` y `controlled`; en recombinante debe desactivar `controlled` y
+  explicar la incompatibilidad. F solo debe mostrarse para diploides.
+
+  La previsualización debe incluir frecuencias, `P(K>0)`, homocigosis esperada y
+  conflictos con `alt_af`. Para preparar el recurso debe invocar la misma orden
+  auxiliar del binario Rust y no reimplementar su validación. Cuando
+  también se seleccione una matriz `alt_af`,
+  la validación del binario debe mostrar cualquier locus de la matriz situado
+  dentro de un intervalo de bloque antes de ejecutar. La
+  interfaz debe mostrar que la recombinación puede alterar las asociaciones
+  originales y no debe interpretar el panel fuera del binario Rust. Una
+  validación vigente debe ser obligatoria antes de ejecutar. Tras la ejecución,
+  Marimo debe mostrar enlaces y resúmenes de las tres tablas obligatorias sin
+  cargar artefactos grandes completos.
 
 ## 5. Mapa conceptual del flujo
 
@@ -4995,7 +5343,7 @@ pendientes.
 | **ACE-114. Equivalencia de autoría Marimo** | Todas las opciones implementadas están en una de las nueve pestañas mínimas. Escalares usan controles tipados; listas y reglas, tablas con alta/baja/reordenación y selectores visibles. Importar, editar, previsualizar y exportar como unidad el TOML general y cero o varios escenarios conserva significado, IDs, orden y enlaces/rutas relativas. El binario Rust valida y resuelve; cualquier cambio de cualquier documento invalida la validación previa y una incompatibilidad, escenario ausente o duplicado se rechaza | Matriz opción→pestaña/control; conjunto sin escenarios y conjuntos multiescenario con rutas relativas/espacios/faltantes/duplicados; comparación UI→conjunto TOML→`EffectiveConfig` o diagnóstico con conjunto manual equivalente |
 | **ACE-115. Ejecución segura y accesible desde Marimo** | La aplicación nunca ejecuta automáticamente ni usa shell. Una acción explícita tras validación vigente lanza `run` con argumentos separados y destino no-clobber revisado. Muestra estado, código, logs, diagnósticos y enlaces/resúmenes sin cargar artefactos genómicos grandes. Funciona localmente en Ubuntu/WSL2 Linux y ofrece teclado, foco, etiquetas, ayuda y estados no basados solo en color. Cada capacidad F2–F9 añade controles antes de cerrar | Proceso falso y binario real; cambio posterior a validar; destino existente; logs grandes y artefacto grande; revisión de teclado/foco/color; puerta transversal por hito |
 | **ACE-116. Población inicial desde frecuencias SNV** | La ejecución prepara, genera o reutiliza el par canónico TSV+JSON enlazado a una referencia exacta. Solo admite `alt_af`; genera loci bialélicos candidatos sin reemplazo mediante espacio, sustituciones y espectro explícitos y acepta multialelia suministrada. Las poblaciones asignan frecuencias independientemente, permiten 0/1, eliminan `ALT` globalmente ausentes sin reemplazo y conservan fijados. HWE es predeterminado y `F` solo diploide; cada individuo pertenece a una población y recibe genotipo/fase reproducibles sin LD ni corrección por muestra finita. Perfiles empíricos son ejemplos explícitos, nunca predeterminados. Las dos excepciones de ejecución son específicas, visibles y trazadas | Preparación y hashes; tabla y VCF rechazado; modos exacto/mayores restos y estocástico; regiones/pesos; 12 sustituciones y Ti/Tv; perfiles uniformes/1000G; ceros/fijados; matriz vacía; multialélico; HWE/F; subsemillas y reordenación; flags limitados; errores de suma, duplicado, referencia y `N` |
-| **ACE-117. Individuos desde panel de haplotipos** | Un panel versionado proporciona haplotipos faseados y frecuencias por población. El modo intacto muestrea copias completas sin mosaicos; el modo recombinante usa el motor y los mapas comunes, conserva fuentes, puntos y segmentos y no promete conservar LD. Ambos registran objetivo, realizado, semilla y procedencia y tienen controles Marimo en su fase | Panel manual reconstruible; frecuencias derivadas; modos excluyentes; intacto sin cortes; mosaico con puntos conocidos; reconstructor independiente y equivalencia UI→TOML→resultado |
+| **ACE-117. Individuos desde panel de haplotipos** | Un paquete canónico de cinco ficheros contiene una única referencia, bloques locales, SNP A/C/G/T, HAP únicos y frecuencias densas y lo prepara una única orden Rust. Cada bloque tiene al menos dos sitios y HAP; admite población monomórfica y ALT fijado, pero rechaza sitio siempre REF, referencia/secuencia incompatible y loci `alt_af` dentro del intervalo. `haplotype_construction` se resuelve por población×bloque y se separa de `frequency_sampling`; intacto admite probabilístico/controlado y HWE, F diploide o distribución explícita; recombinante exige solo probabilístico, r en (0,1] y HWE o F diploide, y rechaza una distribución explícita. El productor recombinante opera directamente por individuo×bloque con fuentes exclusivas del panel y el constructor común uniforme cerrado por DTC-055; DTPD-111 solo conecta mapas y meiosis en F7.1. En diploides Bernoulli(F) ejecuta uno duplicado o dos independientes; P≠2 ejecuta P sin F. Un punto x es x\|x+1, alterna segmentos *forward* desde la primaria y conserva cruces invisibles. Un vector conocido reutiliza HAP y uno nuevo deriva ID por DTC-039 desde panel+bloque+contenido. RNG DTC-037 separa F, primaria, puntos y secundaria. Todo productor tiene `process_id`; `origin_kind` distingue exactamente K=0 intacto y K≥1 recombinado. C=N×P copias finales se agregan como `n_h/C` y separan recuentos intactos y recombinados. Tres TSV con cabeceras, tipos, orden y claves exactos conservan asignaciones, segmentos y frecuencias; clase/versión están en sus enlaces del manifiesto. Marimo invoca Rust, presenta controles compatibles y exige validación vigente. | Oráculo independiente que reconstruye HAP/mosaicos/IDs/asignaciones y verifica referencia única, C, `n_h/C`, recuentos por origen y contratos TSV; r=0 rechazado, cruces conocidos/múltiples/invisibles, F=0/intermedio/1, combinaciones de modelo admitidas y rechazadas, fuentes solo del panel, repetición/aislamiento, corrupción de tablas y enlaces, tres salidas y paridad Marimo↔TOML |
 
 Estos criterios son cualitativos y deberán convertirse en pruebas durante la
 planificación de la implementación.
@@ -5077,11 +5425,35 @@ uniforme o ponderado y 12 sustituciones dirigidas. Los perfiles de 1000 Genomes
 son ejemplos versionados de selección expresa, no valores predeterminados. La
 validación debe aportar vectores y productores/oráculos independientes.
 
-**PENDIENTE DE REVISIÓN TÉCNICA — panel de haplotipos.** Antes de F6.4 se elegirá
-el formato versionado que representa haplotipos y frecuencias sin perder fase,
-referencia ni población. Antes del modo recombinante, F7.1 fijará cómo se
-seleccionan las fuentes y se conecta el panel al motor común sin introducir una
-segunda semántica de mapas, coordenadas o puntos de cruce.
+**BASE FUNCIONAL APROBADA — panel de haplotipos.** El panel representa
+bloques de LD locales, no cromosomas completos ni una identidad de haplotipo que
+se prolongue entre bloques. Cada bloque posee intervalo explícito y no solapado;
+los SNP exteriores a esos intervalos proceden de la matriz `alt_af` y ninguno de
+sus loci puede caer dentro de ellos. Ya se ha fijado que v1 solo admite SNP
+suministrados A/C/G/T, que
+`panel_haplotype_alleles.tsv` es densa y no admite asignaciones implícitas ni
+alelos desconocidos, y que `panel_frequencies.tsv` es densa por población,
+bloque y haplotipo. También queda fijado el paquete exacto de cuatro TSV y un
+`panel.metadata.json` que los enlaza por ruta, tamaño y SHA-256 sin duplicar sus
+tablas, y la orden Rust única que lo prepara sin modificar las entradas. El
+runtime solo acepta el paquete íntegro y compatible. La conversión desde VCF
+queda fuera de v1 en DTF-041: en esta versión se suministran las cuatro tablas o
+se generan externamente. La alternativa recombinante también pertenece a F6.4:
+genera directamente cada individuo y bloque mediante productores que usan solo
+el panel original; Bernoulli(F) decide uno duplicado o dos independientes en
+diploides. La probabilidad uniforme, los puntos x|x+1, la identidad por contenido,
+los ámbitos aleatorios, las tres salidas obligatorias y la interfaz Marimo están
+fijados.
+
+**DECISIÓN TÉCNICA RESUELTA — paneles de bloques haplotípicos.** DTPD-119 queda
+resuelta mediante DTC-055. Los TSV del panel, la semántica de origen/proceso, los
+modelos genotípicos y los contratos intacto/recombinante están fijados.
+`intact` admite HWE, F diploide o distribución explícita; `recombinant`, solo HWE
+o F diploide. Condicionar distribuciones explícitas sobre resultados
+recombinantes queda aplazado.
+Incorporar *indels*, repeticiones, variantes estructurales,
+alelos simbólicos o *breakends* al panel queda en DTF-040 y no presupone un
+formato futuro.
 
 **Tolerancias numéricas.** Durante la implementación se fijarán el valor
 predeterminado y la precisión de la tolerancia general usada cuando frecuencias

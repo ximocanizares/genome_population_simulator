@@ -2,7 +2,7 @@
 
 - **Versión:** 0.1
 - **Estado:** vigente; F0 aprobada, F1 ampliada con F1.6 y F2.0 pendiente de sus puertas
-- **Fecha:** 12 de agosto de 2026
+- **Fecha:** 13 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Lenguaje del núcleo:** Rust
@@ -358,9 +358,37 @@ evolución a lo largo de generaciones.
   P>2 y registrar F realizado como «no aplicable» fuera de diploides, sin crear
   una segunda implementación distinta de la usada para matrices en F2.3.
 - **F6.4. Paneles haplotípicos y desequilibrio de ligamiento.** Admitir un panel
-  de haplotipos y frecuencias, crear copias intactas sin recombinación y crear
-  bloques no solapados mediante frecuencias conjuntas, conservando la fase.
-  Resolver DTPD-119 para el formato y el muestreo intacto.
+  canónico de cinco ficheros, preparado por una única orden Rust, con bloques de
+  LD no solapados, SNP A/C/G/T, haplotipos locales únicos y frecuencias densas por
+  población y bloque. Exigir una única referencia: cada ID de bloque coincide
+  con el ID del metadato, el SHA-256 recalculado del FASTA coincide con su digest
+  declarado y cada secuencia existe en ese FASTA. En construcción intacta, tratar cada bloque como locus
+  multialélico y reutilizar HWE, F diploide o distribución explícita y los modos
+  probabilístico o controlado comunes. Crear combinaciones intrabloque intactas sin recombinación,
+  ligarlas a copias biológicas y conservar el HAP fundador aunque mutaciones
+  posteriores formen otra capa. Separar `haplotype_construction`
+  intacto/recombinante de `frequency_sampling`
+  probabilístico/controlado y resolver el primero por población×bloque conforme
+  a DTC-033. Admitir ambos muestreos y HWE/F/distribución explícita en intacto;
+  en recombinante, solo muestreo probabilístico y HWE o F diploide. En esta alternativa, ejecutar productores directamente por
+  individuo×bloque: en diploides Bernoulli(F) elige uno duplicado o dos
+  independientes; en otras ploidías, P productores independientes. Cada
+  productor usa solo fuentes del panel original, sortea las uniones y devuelve
+  primaria intacta o mosaico; interpretar x como unión x|x+1, comenzar en la
+  primaria y alternar segmentos *forward* sin ajustar a SNP, conservando cruces
+  invisibles. Implementar en F6.4 la variante uniforme y el constructor común de
+  segmentos cerrados por DTC-055; F7.1 conectará mapas y meiosis al mismo
+  constructor tras DTPD-111, que no bloquea F6.4. Agrupar las C copias finales
+  por ID de contenido y calcular `n_h/C`, distinguiendo productores con cruce de
+  copias derivadas.
+  Incorporar en Marimo la sección poblacional para preparar/validar el panel,
+  mapear poblaciones, editar la tabla por bloque, previsualizar métricas y enlazar
+  las tres salidas obligatorias sin cargar artefactos grandes. Publicar estas
+  salidas con las cabeceras, claves, orden y serialización TSV exactos de
+  DTC-055, dejando clase/versión en sus enlaces de manifiesto.
+  Permitir HAP distintos entre bloques y obtener los SNP exteriores desde
+  `alt_af`. Rechazar cualquier locus de matriz dentro de un bloque, sin prioridad
+  ni sobrescritura. Consumir DTC-055, que cierra DTPD-119.
 - **F6.5. Grupos y subpoblaciones.** Asignar identidades, pertenencias y
   parámetros iniciales sin ambigüedades.
 - **F6.6. Fundadores.** Identificar individuos y copias haplotípicas fundadoras
@@ -385,13 +413,13 @@ configurado de los procesos.
 
 **Hitos:**
 
-- **F7.1. Reproducción, panel y recombinación.** Validar ploidía par e igual y estado
+- **F7.1. Reproducción y recombinación.** Validar ploidía par e igual y estado
   estructural canónico idéntico, formar bivalentes al azar y transmitir la mitad
   de copias de cada parental con fase y procedencia reconstruibles. Incluir
   *scaffolds* sin recombinación y portadores de SV de novo incompatibles después.
-  Añadir la creación opcional de haplotipos mosaico desde el panel F6.4 usando
-  exactamente el mismo motor, mapas y procedencia por segmentos después de
-  resolver DTPD-111 y la parte recombinante de DTPD-119.
+  Reutilizar el mismo motor, mapas y procedencia por segmentos que la
+  inicialización fundadora con panel de F6.4, sin convertir aquella creación en
+  una meiosis histórica ni introducir un algoritmo alternativo.
 - **F7.2. Mutación heredable.** Introducir SNP, *indels*, variantes estructurales
   y repeticiones según sus modelos y momentos confirmados. Contar por clase las
   oportunidades válidas en todas las copias descendientes actuales, registrar
@@ -532,7 +560,7 @@ configurable.
 | F4 | Realismo técnico WGS | Comparación de parámetros solicitados y realizados | Alterar la verdad con artefactos técnicos |
 | F5 | Variación y referencias complejas | Casos estructurales, VCF más complemento y aislamiento por referencia | Mezcla de referencias o pérdida de linaje o detalle complejo |
 | F6 | Población inicial y panel haplotípico intacto | Recuentos, frecuencias, reconstrucción del panel y pruebas estadísticas reproducibles | Frecuencias, fase, LD o F mal representados |
-| F7 | Evolución y recombinación de paneles | Reconstrucción de transmisiones, mosaicos y medidas realizadas | Orden evolutivo, puntos de cruce, procedencia o genealogía incorrectos |
+| F7 | Evolución y recombinación meiótica | Reconstrucción de transmisiones, mosaicos y medidas realizadas | Orden evolutivo, puntos de cruce, procedencia o genealogía incorrectos |
 | F8 | Familias y segregantes | Casos mendelianos y grafos validados | Cruces o selección de descendientes erróneos |
 | F9 | Versión consolidada | Pruebas completas y escenarios de rendimiento | Fallos de escala, distribución o interoperabilidad |
 

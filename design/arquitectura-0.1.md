@@ -2,7 +2,7 @@
 
 - **Versión:** 0.1
 - **Estado:** ampliación F1.6/F2.0 pendiente de revisión; la base anterior de F1 permanece aprobada
-- **Fecha:** 12 de agosto de 2026
+- **Fecha:** 13 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Hoja de ruta:** [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
@@ -30,7 +30,7 @@ concretas de los crates aceptados quedan fijadas por `Cargo.lock`.
 
 La ampliación confirmada incorpora una derivación reducida de FASTA en F1.6 y
 una aplicación Marimo obligatoria desde F2.0. La arquitectura define sus
-fronteras, pero no da por resueltas DTPD-101/DTPD-116 a DTPD-119 ni las dos cuestiones
+fronteras, pero no da por resueltas DTPD-101, DTPD-116 ni DTPD-117, ni las dos cuestiones
 funcionales marcadas `PENDIENTE DE REVISIÓN` en la especificación.
 
 La arquitectura cubre toda la versión 1 para evitar contratos incompatibles
@@ -230,7 +230,7 @@ precedencia.
 | Variante o evento genómico | Identidad estable en el historial biológico | Clase, orden, marco de coordenadas previo, haplotipo afectado y estado final |
 | Espectro de frecuencias alélicas | Identidad y versión estables; puede ser incorporado o suministrado | Definición de frecuencia, valores o intervalos, pesos, población/fuente/filtros y transformación |
 | Matriz de frecuencias SNV | Inmutable una vez admitida o generada | Referencia exacta, poblaciones, loci/alelos, frecuencias, perfil y procedencia generadora |
-| Panel de haplotipos | Inmutable durante la ejecución | Referencia, poblaciones, haplotipos faseados, frecuencias y digest del recurso |
+| Panel de bloques haplotípicos | Paquete inmutable de cinco ficheros durante la ejecución | `panel.metadata.json`, referencia exacta, cuatro TSV enlazados, bloques e intervalos no solapados, sitios SNP A/C/G/T, haplotipos de identidad local `block_id` + `haplotype_id`, asignaciones y frecuencias densas por población y bloque |
 | Individuo | Único y no reutilizable en la ejecución | Referencia estructural, generación, población, parentales, haplotipos y observaciones |
 | Copia haplotípica | Distinta aunque tenga la misma secuencia que otra | Individuo, secuencia, índice de copia, ploidía, segmentos y fundador |
 | Población y subpoblación | Identidades no reutilizables | Generación, miembros, estado activa/extinguida y relaciones demográficas |
@@ -536,7 +536,7 @@ exige que la persona usuaria los instale.
 | Coordenadas y transformaciones | Convenio ausente, intervalo fuera de límites o correspondencia inexistente | Probar extremos, inserciones, inversiones y conversiones de ida y vuelta donde sean definidas |
 | Motor de verdad genómica | Evento solapado prohibido, objetivo eliminado, destinos válidos insuficientes, punto de ruptura o ploidía inválidos | Materializar haplotipos conocidos; rechazar SNP o motivo sobre `N`, conservarla dentro de SV e inserciones explícitas y agotar de forma controlada el espacio válido |
 | Creación directa | Individuo incompleto o cambio incompatible | Crear individuos pequeños con cambios concretos y aleatorios controlados |
-| Fuentes e inicialización poblacional | Par TSV+JSON/versiones/hash incorrectos; semántica distinta de `alt_af`; espectros o regiones solapados; matriz/referencia/frecuencias/recuentos incompatibles; autorización específica ausente; F fuera de [0,1] o en ploidía distinta de 2; LD o panel incompatibles | Preparar y generar la misma matriz pequeña y comparar bytes; oráculo separado para mayores restos, muestreo fijo/lineal/logarítmico, pesos espaciales, 12 sustituciones, ceros/fijados y subsemillas; enumerar HWE haploide, diploide y poliploide bialélico/multialélico; comprobar F diploide 0, intermedio y 1; probar después panel intacto y mosaico reconstruible |
+| Fuentes e inicialización poblacional | Paquete/hash/referencia inválido; bloque/sitio/alelo/frecuencia incompatible; locus `alt_af` dentro de bloque; ejes o ámbitos ambiguos; recombinante+controlado o distribución explícita; r fuera de (0,1]; F fuera de diploides; ID, asignación, segmento, recuento o enlace incoherente | Validar corpus y corrupción con oráculo ajeno al productor; reconstruir HAP y mosaicos; probar productor directo, F=0/intermedio/1, puntos conocidos/múltiples/invisibles, fuentes solo del panel, IDs por contenido, suma C y `n_h/C`; repetición, aislamiento por identidad/bloque y paridad Marimo↔TOML |
 | Reproducción y recombinación | Referencias distintas, ploidía impar o desigual, estado estructural no idéntico, mapa incompleto o bivalente imposible | Probar diploides y tetraploides idénticos; SNP, *indels* pequeños y repeticiones distintos; cada clase SV heterocigota; SV fijada con historias distintas; *scaffold* intacto; SV de novo seguida de otro intento |
 | Dinámica evolutiva | Orden alternativo solicitado, población activa vacía no autorizada, mezcla de referencias estructurales tras migración o evento demográfico imposible | Ejecutar las ocho etapas, omitir una opcional en su posición, rechazar otro orden, ordenar varios eventos demográficos y comprobar el historial efectivo |
 | Selección de viabilidad | Locus ausente, múltiple, ambiguo o situado sobre `N`; dosis sin valor; aptitud negativa, no finita o máximo cero | Probar varias ploidías, rechazo de `N`, fallos antes de supervivencia y recombinación que conserva la identidad única |
@@ -707,11 +707,210 @@ efectiva/manifiesto y no relajan otras invariantes. La matriz conserva solo
 frecuencias marginales, por lo que los loci son independientes y cualquier LD
 requiere el panel de haplotipos posterior.
 
-El panel de haplotipos cruza la misma frontera como otro recurso inmutable. F6.4
-lo admite, valida y puede muestrear copias completas; F7.1 añade el modo de
-creación recombinante reutilizando el único motor de recombinación y sus tipos de
-coordenadas. El panel no posee el resultado: el repositorio de verdad conserva
-los haplotipos intactos o mosaicos y su procedencia por segmentos.
+El panel de bloques haplotípicos cruza la misma frontera como otro recurso
+inmutable. El paquete contiene exactamente `panel_blocks.tsv`, `panel_sites.tsv`,
+`panel_haplotype_alleles.tsv`, `panel_frequencies.tsv` y `panel.metadata.json`.
+El JSON es la raíz del recurso: declara clase, versión, `panel_id`, referencia y
+SHA-256, coordenadas base 1 cerradas y, para cada TSV, clase, ruta, tamaño y
+SHA-256. Registra procedencia y herramienta cuando existan, pero no duplica las
+tablas. El adaptador verifica todos los enlaces antes de interpretar la fuente.
+
+El adaptador tabular comparte un contrato byte a byte para los cuatro TSV:
+UTF-8 sin BOM, LF incluido al final, campos separados por tabulador, una cabecera
+exacta, sin comillas, vacíos, líneas vacías ni columnas extra. Las cabeceras son
+`block_id reference_id sequence_id start end`,
+`block_id site_id position ref alt`,
+`block_id haplotype_id site_id allele_index` y
+`population_id block_id haplotype_id frequency`, donde los espacios de esta
+enumeración representan tabuladores en el fichero. Enteros positivos y no
+negativos usan decimal canónico sin signo ni ceros iniciales y `frequency` la
+representación decimal mínima *round-trip* de DTC-049.
+
+Cada fila de `panel_blocks.tsv` declara `block_id`, `reference_id`,
+`sequence_id`, `start` y `end`; sus intervalos no se solapan. Cada fila de
+`panel_sites.tsv` declara `block_id`, `site_id`, posición, `REF` y los `ALT`
+ordenados, y todos los sitios quedan dentro de su bloque.
+El adaptador solo admite una referencia por paquete: contrasta todos los
+`block.reference_id` con `metadata.reference.reference_id`, recalcula el
+SHA-256 del FASTA autoritativo y lo contrasta con
+`metadata.reference.sha256`, y comprueba que cada `sequence_id` existe en ese
+FASTA. Cualquier mezcla, ID o digest divergente o secuencia inexistente falla en
+la frontera antes de entregar el panel al inicializador.
+Cada haplotipo pertenece a un único bloque y su identidad normativa combina
+`block_id` y `haplotype_id`; no existe una columna o identidad de donante que
+persista entre bloques. V1 admite aquí únicamente SNP suministrados cuyos `REF` y
+`ALT` son una base A/C/G/T. La columna `alt` serializa uno o varios ALT distintos
+mediante comas sin espacios; el orden textual define 1..N y `ref` define 0. La frontera rechaza las demás clases de variante,
+`N`, alelos simbólicos, *breakends* y sitios repetidos o solapados.
+
+`panel_haplotype_alleles.tsv` es una relación densa: cada pareja bloque-haplotipo
+contiene exactamente una asignación por sitio, con 0 para `REF` y 1..N para los
+`ALT` declarados. El adaptador rechaza huecos, duplicados y valores ajenos al
+catálogo y nunca completa un hueco como `REF`. Tras ordenar por los sitios del
+bloque, compara el vector completo de `allele_index` de todos sus haplotipos. Si
+varios IDs tienen el mismo vector, rechaza el panel e informa el bloque y todos
+los IDs equivalentes; no los fusiona ni suma sus frecuencias. La unicidad solo se
+exige dentro del bloque y también se aplica a haplotipos con frecuencia 0.
+`panel_frequencies.tsv` también es densa: contiene una fila por población,
+bloque y haplotipo, incluidos 0 y 1.
+No existe frecuencia global ni herencia entre poblaciones; ausencia o duplicado
+son errores y cada suma población×bloque usa DTC-049.
+
+La escritura ordena bloques por referencia, orden FASTA de secuencia, límites e
+ID; sitios por bloque, posición e ID; alelos por bloque, HAP ASCII y sitio; y
+frecuencias por población ASCII, bloque y HAP ASCII. El adaptador exige las
+claves únicas de bloque, bloque+sitio, bloque+HAP+sitio y
+población+bloque+HAP, respectivamente, antes de calcular hashes.
+
+Cada bloque debe contener como mínimo dos sitios y dos vectores HAP distintos.
+El catálogo no se reduce por las frecuencias de las poblaciones: una o todas
+pueden concentrar frecuencia 1 en un único HAP y mantener a 0 los restantes. El
+validador conserva un sitio fijado en el mismo ALT en todos los HAP, pero rechaza
+como redundante un sitio cuyo `allele_index` sea 0 en todos ellos.
+
+F6.4 admite y valida el recurso y trata cada bloque como un locus multialélico
+cuyas categorías son sus haplotipos locales. Para cada individuo de ploidía P,
+el inicializador asigna P categorías a copias haplotípicas biológicas
+identificadas. Reutiliza HWE/multinomial para P=1..10 y exactamente el modelo F
+multialélico solo en diploides; F=0 coincide con HWE, F=1 asigna el mismo HAP a
+ambas copias y F se rechaza para P=1 o P>2. En construcción intacta, una
+distribución explícita de combinaciones puede prevalecer localmente conforme a
+REQ-EVO-49.
+
+La configuración mantiene dos ejes separados. `haplotype_construction` elige
+`intact` o `recombinant`, mientras `frequency_sampling` elige `probabilistic` o
+`controlled`. El primero admite un valor general y sustituciones por población y
+bloque mediante el resolvedor DTC-033; la regla conjunta población+bloque
+prevalece. Una unidad efectiva no mezcla construcciones, aunque otras unidades
+usen otra. `intact` rechaza parámetros de recombinación y `recombinant` exige
+`recombination_probability_per_interbase` y `frequency_sampling=probabilistic`.
+La combinación recombinante+controlado falla antes de individuos con ambos
+campos y el ámbito efectivo. Marimo proyecta esta misma unión discriminada y
+oculta el campo de probabilidad cuando no corresponde.
+
+El selector genotípico también forma una unión validada: `intact` admite HWE, F
+diploide o distribución explícita; `recombinant` solo HWE o F diploide. La
+combinación recombinante+distribución explícita falla antes de individuos e
+identifica población, bloque y campos. La arquitectura no reserva una ruta
+parcial para condicionar distribuciones explícitas sobre mosaicos.
+
+Cada población×bloque intacto usa el modo probabilístico predeterminado o el
+controlado explícito; el recombinante usa únicamente el probabilístico. El
+probabilístico sortea copias con reemplazo según las frecuencias.
+El controlado construye un multiconjunto desde recuentos enteros por HAP que
+suman C y lo asigna sin alterar los totales. Ambos se condicionan al modelo
+genotípico. Una incompatibilidad se rechaza antes de crear individuos; nunca se
+ajustan recuentos ni se relaja el modelo. Los ámbitos aleatorios separan bloques
+y ligan reproduciblemente cada asignación a la identidad de copia, sin expresar
+un donante común entre bloques. Se registran esperado, solicitado y realizado.
+
+Los SNP exteriores a los intervalos de bloque se obtienen de
+la matriz independiente `alt_af`, de modo que un individuo puede combinar
+haplotipos distintos entre bloques sin que las bases intermedias queden forzadas
+a la referencia. Antes de inicializar ningún individuo, Fuentes de variación
+poblacional comprueba cada posición de la matriz contra los intervalos del
+panel. Un locus situado dentro de un bloque produce un error con referencia,
+secuencia, posición y fila o identidad de matriz, además de `block_id` e
+intervalo. La frontera no expone prioridad, fusión ni sobrescritura y no entrega
+fuentes parcialmente admitidas al inicializador.
+
+El modo recombinante también pertenece a la inicialización fundadora, no al flujo
+de meiosis histórica. No construye un depósito prototipo ni vuelve a muestrear.
+Un productor de copia final selecciona un HAP primario con las frecuencias del
+panel. Con `recombination_probability_per_interbase=r` finita en (0,1], prueba
+independientemente las L−1 uniones interbase: K~Binomial(L−1,r). K=0 devuelve la
+fuente primaria intacta. K≥1 selecciona una secundaria con las mismas
+frecuencias y delega al constructor común los puntos únicos, ordenados e internos
+y la alternancia de segmentos. DTC-055 cierra para F6.4 tanto el sorteo uniforme
+de puntos como este constructor: recibe dos fuentes y puntos ordenados y devuelve
+segmentos reconstruibles. DTPD-111 no es una dependencia de F6.4; en F7.1
+conectará mapas y semántica meiótica al mismo constructor. El punto x representa
+la unión x|x+1. El constructor
+empieza con la primaria en `start`, alterna en cada punto y produce segmentos
+cerrados *forward* sin inversión; 100–300 con puntos 150/240 produce P 100–150,
+S 151–240 y P 241–300. No ajusta puntos a sitios SNP. Las fuentes pueden coincidir, se admiten varios
+cruces y no se corrigen ni descartan mosaicos. Los mapas posteriores cambian las
+probabilidades por posición, no el motor.
+
+Las dos selecciones consultan exclusivamente el panel original y las frecuencias
+de su población. El repositorio de verdad recibe las salidas, pero nunca vuelve
+a ofrecerlas al productor durante esta inicialización. No se actualizan pesos ni
+catálogos, de modo que el orden de procesamiento no cambia la distribución. La
+recombinación acumulada y el uso de descendientes como fuentes pertenecen a
+F7/F8.
+
+La traza conserva todos los puntos generados, aunque fuentes iguales, regiones
+sin SNP o un número par de alternancias produzcan el mismo vector alélico. La
+identidad por contenido y la procedencia histórica son capas distintas.
+
+El inicializador invoca ese productor directamente por individuo y bloque. En
+diploides sortea primero Bernoulli(F): en autozigosis ejecuta un productor y
+asigna el mismo vector a las dos copias; en caso contrario ejecuta dos productores
+independientes. Así implementa directamente las fórmulas multialélicas aprobadas;
+F=0 es HWE y F=1 produce homocigosis completa sin representar reproducción o
+pedigrí. Para P distinta de 2 ejecuta P productores independientes y rechaza F.
+Las C=N×P copias finales se agrupan por vector y la frecuencia realizada es
+`n_h/C`. Las frecuencias del panel siguen siendo las probabilidades objetivo de
+las fuentes; no se crea otra distribución intermedia.
+
+La identidad final depende del contenido. Un vector que coincide con un HAP del
+panel reutiliza su identidad local. Para un vector nuevo, el servicio común de
+IDs aplica DTC-039 y deriva un ID tipado y determinista desde `panel_id`,
+`block_id` y el vector canónico ordenado de `allele_index`. Individuo, orden,
+subsemilla y evento no participan en la identidad. Por tanto, vectores iguales
+comparten ID y recuento y vectores distintos tienen IDs distintos; las colisiones
+se tratan con el contrato común, no con otro algoritmo. La procedencia permanece
+separada por ejecución y copia: fuentes, puntos, segmentos, individuo, copia y
+subsemilla.
+
+El repositorio distingue el número de productores con K≥1 del número de copias
+finales derivadas de ellos; una salida autozigótica duplicada cuenta una ejecución
+y dos copias. Registra además recuentos/frecuencias por vector, genotipos y F
+realizados y la procedencia intacta o mosaico. El panel no posee el resultado.
+
+El productor solicita todos sus flujos al servicio DTC-037. La clave de ámbito
+combina población, bloque, individuo y, salvo en la decisión compartida de
+autozigosis, copia; usa decisiones nombradas distintas para F, primaria, uniones
+interbase y secundaria. La versión de derivación forma parte del contrato. La
+identidad lógica evita que añadir o reordenar individuos/bloques cambie los ya
+existentes, y el ámbito de bloque evita que cambiar `r` contamine otros. Una
+salida duplicada por F conserva un único registro de productor enlazado a dos
+copias biológicas.
+
+La persistencia materializa tres proyecciones obligatorias y versionadas:
+`founder_block_assignments.tsv` indexa población/individuo/copia/bloque y enlaza
+HAP final, tipo de origen y proceso. Cada productor recibe un ID DTC-039, incluso
+con K=0; el origen es exactamente `intact` para K=0 o `recombined` para K≥1. La
+duplicación por F enlaza dos asignaciones al mismo proceso y origen, sin una
+categoría especial. `recombination_segments.tsv` ordena por
+proceso cada segmento reconstruible con bloque, límites y HAP fuente; y
+un proceso K=0 conserva un segmento primario para todo el bloque.
+`realized_haplotype_frequencies.tsv` agrega población/bloque/HAP final con
+recuento total, intacto y recombinado y `n_h/C`; el total debe ser la suma de los
+dos orígenes. El manifiesto enlaza cada una por clase,
+versión, ruta, tamaño y SHA-256 y solo resume configuración, F, r, RNG,
+productores con cruce, cruces totales, vectores nuevos y coincidencias con panel.
+
+Las tres proyecciones usan UTF-8 sin BOM, LF final, tabuladores, una cabecera
+exacta y ningún campo vacío, comilla, línea vacía o columna extra. Sus esquemas
+son `population_id individual_id copy_id block_id final_haplotype_id origin_kind process_id`,
+`process_id segment_index block_id start end source_haplotype_id` y
+`population_id block_id haplotype_id copy_count intact_copy_count recombined_copy_count frequency`;
+los espacios de esta descripción son tabuladores. Identificadores, ordinales,
+coordenadas, recuentos y `frequency` reutilizan las formas canónicas DTC-039 y
+DTC-049. El orden y clave son, respectivamente, población+individuo+copia+bloque,
+proceso+índice y población+bloque+HAP. Clase y versión residen en el enlace del
+manifiesto/esquema, no en columnas añadidas a los TSV.
+
+La pestaña poblacional de Marimo contiene la sección «Bloques haplotípicos en
+población». Su adaptador solo selecciona directorio, invoca preparar/validar y
+proyecta el resumen devuelto por Rust; no analiza tablas. Mantiene el mapeo entre
+poblaciones del panel y simuladas y una tabla de sustituciones población×bloque.
+La unión discriminada muestra muestreo probabilístico/controlado en intacto y r
+tipado en recombinante, con controlado desactivado y explicado; F solo aparece en
+diploides. La previsualización consume frecuencias, `P(K>0)`, homocigosis esperada
+y conflictos `alt_af` calculados por el binario. `run` exige validación vigente y
+la vista posterior enlaza/resume las tres tablas sin cargarlas completas.
 
 El repositorio de verdad conserva estados faseados, genealogía, procedencia y
 capas de cambio. Creación directa, inicialización poblacional, reproducción,
@@ -1226,9 +1425,16 @@ decisión aprobada.
 
 DTC-052 asigna a una matriz común las frecuencias SNV iniciales, DTC-054 resuelve
 DTPD-118 con el par TSV+JSON, perfiles, preparación y generación reproducible, y
-DTC-053 separa el panel haplotípico posterior. DTPD-119 debe fijar el panel y su
-muestreo intacto antes de F6.4 y conectarse con DTPD-111 para el modo recombinante
-de F7.1. Ninguna de estas fuentes puede poseer o reescribir la verdad resultante.
+DTC-053 separa el panel posterior de bloques haplotípicos locales. La matriz
+aporta los SNP independientes exteriores y el panel, las combinaciones conjuntas
+intrabloque; ningún locus de matriz puede caer dentro del intervalo de un bloque
+y una colisión se rechaza antes de crear individuos, sin prioridad ni
+sobrescritura. Las asignaciones de alelos y frecuencias del panel son densas y no
+admiten completar valores ausentes. El paquete, la preparación y el modo intacto
+están definidos. La alternativa recombinante fundadora usa productores directos,
+F, puntos, IDs, RNG y salidas trazables ya fijados. DTC-055 resuelve DTPD-119 y
+rechaza distribuciones genotípicas explícitas con construcción recombinante.
+Ninguna de estas fuentes puede poseer o reescribir la verdad resultante.
 
 Las decisiones base DTPD-001 a DTPD-015 están resueltas. Para cerrar F0 debe
 aprobarse esta división; esa aprobación habilita planificar F1, pero no significa

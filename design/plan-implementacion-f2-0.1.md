@@ -4,7 +4,7 @@
 
 - **Título:** plan detallado de F2, verdad genómica mínima.
 - **Versión del plan:** 0.1.
-- **Fecha:** 12 de agosto de 2026.
+- **Fecha:** 13 de agosto de 2026.
 - **Estado:** borrador técnico condicionado; F1.4 está aprobada, pero no está
   autorizado para ejecución hasta que F1.5, F1.6 y la revisión de cierre de F1
   estén terminadas y este plan sea aprobado explícitamente.
@@ -19,7 +19,7 @@
   y [plan-implementacion-f1-0.1.md](./plan-implementacion-f1-0.1.md).
 - **Decisiones confirmadas aplicables:** DTC-001, DTC-003, DTC-004, DTC-006,
   DTC-010, DTC-011, DTC-013, DTC-020 a DTC-022, DTC-024, DTC-031 a
-  DTC-049 y DTC-051 a DTC-054.
+  DTC-049 y DTC-051 a DTC-055.
 - **Decisiones pendientes bloqueantes:** DTPD-101 bloquea F1.6 y, por
   dependencia, F2.1/F2.2; debe llegar resuelta desde F1. DTPD-102 bloquea
   F2.1/F2.4 y DTPD-103, F2.5. También falta documentar y aprobar la
@@ -30,9 +30,11 @@
   DTPD-117 bloquea F2.0 hasta evaluar y fijar Marimo, su entorno, empaquetado y
   contrato versionado con el binario. DTC-054 resuelve DTPD-118 y fija para
   F2.2/F2.3 los formatos de matriz/espectro, el algoritmo reproducible, los
-  perfiles versionados y las excepciones limitadas. DTPD-119 continúa abierta:
-  bloquea las capacidades posteriores de paneles de F6.4/F7.1 y no se resuelve
-  ni consume dentro de F2.
+  perfiles versionados y las excepciones limitadas. DTC-055 resuelve DTPD-119 y
+  deja preparada la inicialización fundadora desde paneles para F6.4; no se
+  consume dentro de F2. DTC-055 ya cierra para F6.4 el constructor común y su
+  variante uniforme; F7.1 lo reutilizará después para la recombinación meiótica
+  y DTPD-111 solo resolverá mapas y semántica meiótica.
 - **Pendientes del informe adversarial que siguen abiertos:** RAF2-001,
   RAF2-004 y RAF2-007. Esta ampliación no los da por resueltos; DTC-052 aporta
   la semántica que faltaba para reevaluar RAF2-004, pero su cierre requiere
@@ -93,8 +95,10 @@ VCF como fuente de verdad.
 - Dinámica de poblaciones, evolución, recombinación, selección, familias y
   cruces; F6–F8. F2 solo usa la población de origen necesaria para interpretar
   la matriz de frecuencias y crear individuos directos, sin simularla.
-- Paneles de haplotipos, desequilibrio de ligamiento y creación intacta o
-  recombinante desde ellos; DTC-053/DTPD-119 los destinan a F6.4/F7.1.
+- Paneles de haplotipos, desequilibrio de ligamiento y creación fundadora
+  intacta o recombinante desde ellos; DTC-055 destina ambas alternativas a
+  F6.4. F7.1 reutiliza el motor común en la reproducción, pero no inicializa el
+  conjunto fundador.
 - Distribuciones no Poisson para recuentos, distribuciones probabilísticas de
   longitud de *indels*, gVCF con posiciones invariantes y cualquier resolución
   silenciosa de `N`. Las distribuciones configurables de longitud corresponden
@@ -177,7 +181,8 @@ trazabilidad.
   generación bialélica, poblaciones independientes, selección sin reemplazo,
   perfiles explícitos, ámbitos RNG, preparación/reutilización y excepciones
   limitadas. B1 debe congelar su versión documental antes de implementar sus
-  consumidores. DTPD-119 permanece fuera de este alcance.
+  consumidores. La capacidad de panel resuelta por DTC-055 permanece fuera de
+  este alcance.
 - DTC-052 fija la separación funcional posterior a esa puerta: F2.2 produce o
   admite la matriz poblacional y F2.3 muestrea genotipos HWE o `F` diploide.
   Poisson solo puede obtener un recuento de loci/eventos desde una media o
@@ -386,7 +391,7 @@ genotipos.
 - ☐ B1. Congelar como entrada de implementación DTC-054, que resuelve DTPD-118.
   - Depende de: pausa F2.1 aprobada, A2 y A3.
   - Procede de: DTC-052, DTC-054 y DTPD-118 resuelta; REQ-CONF-128, REQ-CONF-129, REQ-IND-60 y REQ-IND-61.
-  - Cambia: expediente de consumo que enlaza la versión aprobada y enumera formato, algoritmos, perfiles, límites, ámbitos aleatorios y excepciones; declara fuera de F2 VCF→TSV, generación multialélica, estructura/evolución poblacional y DTPD-119.
+  - Cambia: expediente de consumo que enlaza la versión aprobada y enumera formato, algoritmos, perfiles, límites, ámbitos aleatorios y excepciones; declara fuera de F2 VCF→TSV, generación multialélica, estructura/evolución poblacional y la capacidad de panel de DTC-055.
   - Se comprueba con: revisión requisito→cláusula DTC-054→paso que no deja comportamiento aprobado sin consumidor ni reabre DTPD-118 al implementar.
 
 - ☐ B2. Registrar y aprobar la concreción Poisson y las longitudes exactas de *indels* de F2.
@@ -880,12 +885,21 @@ DTC-053 sin anticipar la planificación completa de F6 o F7:
 
 | Destino | Contrato que deberá consumir | Puertas previas | Evidencia mínima futura |
 |---|---|---|---|
-| F6.4, panel intacto | REQ-EVO-74, REQ-EVO-75 y parte intacta de REQ-EVO-77; REQ-VAL-56, REQ-MAN-92 y REQ-UI-15 | Resolver DTPD-119: formato reconstruible, poblaciones/frecuencias y muestreo versionado | Reconstruir panel y marginales; demostrar copias completas sin cortes/mosaicos; registrar digest, frecuencias, copias y subsemillas; equivalencia Marimo→TOML→binario |
-| F7.1, panel recombinante | REQ-EVO-76 y parte recombinante de REQ-EVO-77; REQ-VAL-56, REQ-MAN-92 y REQ-UI-15 | F6.4 cerrado; DTPD-101 y DTPD-111 resueltas; parte recombinante de DTPD-119 aprobada | Reutilizar exactamente el motor/mapas comunes, reconstruir mosaicos desde fuentes/puntos/segmentos con oráculo independiente y no declarar preservado el LD modificado |
+| F6.4, panel fundador intacto o recombinante | REQ-EVO-74 a REQ-EVO-77; REQ-VAL-56, REQ-MAN-92 y REQ-UI-15 | Consumir íntegramente DTC-055: paquete/TSV, referencia única, mínimos, ejes/modelos, productor directo, constructor común uniforme, puntos x\|x+1, F, IDs DTC-039, RNG DTC-037, origen/proceso y salidas canónicas | Probar catálogo/ejes y rechazos de combinaciones, incluida distribución explícita solo en intacto; ejecutar Bernoulli(F), productores y fuentes solo del panel; probar referencia/secuencias, K, puntos no SNP/invisibles; verificar C, ID, `n_h/C`, recuentos por origen y los tres esquemas/órdenes/claves TSV; reconstruir con oráculo independiente y corrupción deliberada; publicar/enlazar las tres tablas; probar Marimo, validación vigente y paridad TOML |
+| F7.1, recombinación meiótica | REQ-REC y requisitos reproductivos aplicables | F6.4 cerrado y DTPD-101/DTPD-111 resueltas | Conectar los mapas y la semántica meiótica decididos por DTPD-111 al constructor común ya implementado en F6.4 y demostrar que no reinterpreta la inicialización fundadora como evento histórico ni crea una segunda implementación |
 
-DTPD-119 permanece abierta. Ningún paso B/C puede aceptar un panel, inferir
-haplotipos desde la matriz marginal ni implementar recombinación local. Marimo
-solo expondrá REQ-UI-15 cuando cierren las capacidades correspondientes.
+DTPD-119 está resuelta mediante DTC-055. Quedan decididos el paquete y su preparación, el
+alcance SNP, bloques e identidades locales, tablas y vectores densos/únicos, los
+modelos y modos del muestreo intacto, la asignación a copias, el uso de la matriz
+para loci exteriores y el rechazo de cualquier locus `alt_af` dentro de un
+bloque. La alternativa recombinante se ha trasladado a la formación del conjunto
+fundador F6.4 y ya tiene productor directo, puntos, F, IDs, RNG, tres salidas y
+Marimo definidos, incluida la sintaxis TSV, la semántica de origen/proceso y el
+rechazo de distribuciones genotípicas explícitas en recombinante.
+Ningún paso B/C
+puede aceptar un panel,
+inferir haplotipos desde la matriz marginal ni implementar recombinación local.
+Marimo solo expondrá REQ-UI-15 cuando cierren las capacidades correspondientes.
 
 ## 12. Riesgos genómicos silenciosos y oráculos obligatorios
 
@@ -939,7 +953,7 @@ Antes de aprobar el plan se ejecutarán, como mínimo:
 git diff --check -- design/plan-implementacion-f2-0.1.md
 rg -n '^- ☐ [A-EM][0-9]+\.' design/plan-implementacion-f2-0.1.md
 rg -n '^> \*\*Pausa obligatoria F2\.[0-5]' design/plan-implementacion-f2-0.1.md
-rg -n 'DTC-052|DTC-053|DTC-054|DTPD-101|DTPD-102|DTPD-103|DTPD-117|DTPD-118|DTPD-119|F1\.5|F1\.6' design/plan-implementacion-f2-0.1.md
+rg -n 'DTC-052|DTC-053|DTC-054|DTC-055|DTPD-101|DTPD-102|DTPD-103|DTPD-117|DTPD-118|DTPD-119|F1\.5|F1\.6' design/plan-implementacion-f2-0.1.md
 rg -n 'RAF2-001|RAF2-004|RAF2-007' design/plan-implementacion-f2-0.1.md
 ```
 
