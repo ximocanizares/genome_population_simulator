@@ -814,6 +814,14 @@ secuencia, posición y fila o identidad de matriz, además de `block_id` e
 intervalo. La frontera no expone prioridad, fusión ni sobrescritura y no entrega
 fuentes parcialmente admitidas al inicializador.
 
+La inicialización no mantiene estado de transición, donante común ni objetivo de
+LD entre bloques. El LD interbloque que aparezca por tamaño muestral se informa
+como realizado cuando corresponda, pero no condiciona ni repite asignaciones.
+DTF-044 reserva para una versión posterior las dependencias haplotípicas entre
+bloques. Esta frontera no altera el productor recombinante local descrito a
+continuación: sus fuentes, puntos y segmentos siguen perteneciendo a un único
+bloque.
+
 El modo recombinante también pertenece a la inicialización fundadora, no al flujo
 de meiosis histórica. No construye un depósito prototipo ni vuelve a muestrear.
 Un productor de copia final selecciona un HAP primario con las frecuencias del

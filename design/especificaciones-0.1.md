@@ -2336,8 +2336,13 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
 
   Los bloques deben muestrearse independientemente. Un mismo individuo puede
   combinar haplotipos distintos en bloques diferentes y esa combinación no debe
-  expresar un donante común. Cada asignación debe quedar ligada de forma
-  reproducible a la copia haplotípica biológica que la recibió. Los SNP situados
+  expresar un donante común. V1 no debe imponer un LD objetivo entre bloques,
+  condicionar el haplotipo de un bloque al elegido en otro ni corregir el LD
+  interbloque realizado en una población finita. El modelado posterior de LD
+  entre bloques queda en DTF-044. Esta independencia entre bloques no modifica
+  la construcción recombinante fundadora dentro de cada bloque, que conserva
+  todas las reglas de REQ-EVO-76 y REQ-EVO-77. Cada asignación debe quedar ligada
+  de forma reproducible a la copia haplotípica biológica que la recibió. Los SNP situados
   fuera de los intervalos de bloque deben proceder del
   mecanismo vigente de loci independientes de la matriz `alt_af`; esto no
   implica que las bases situadas entre bloques permanezcan iguales a la

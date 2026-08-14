@@ -1,17 +1,21 @@
 # Punto de reanudación del proyecto
 
-- **Fecha:** 13 de agosto de 2026
+- **Fecha:** 14 de agosto de 2026
 - **Último cierre documental:** `docs: resolve haplotype panel design`.
 - **Estado:** DTPD-118 y DTPD-119 están resueltas y publicadas. DTPD-119 queda
   cerrada mediante DTC-055 después de una revisión independiente y dos rondas
   de correcciones.
 - **Copia de la conversación:**
-  [chat-dtpd-119-2026-08-12.md](../docs/chat-dtpd-119-2026-08-12.md).
+  [chat-dtpd-119-2026-08-12.md](../docs/chat-dtpd-119-2026-08-12.md) y
+  [chat-generacion-automatica-bloques-ld-2026-08-13.md](../docs/chat-generacion-automatica-bloques-ld-2026-08-13.md).
 
 ## DTPD-119: decisiones ya aprobadas
 
 - El panel contiene bloques de LD locales independientes, no haplotipos
   cromosómicos completos. La identidad es `(block_id, haplotype_id)`.
+- La población inicial no impone LD ni continuidad de donante entre bloques.
+  Esa dependencia cromosómica queda en DTF-044. La recombinación fundadora
+  dentro de cada bloque permanece disponible exactamente como define DTC-055.
 - Cada bloque declara referencia, secuencia y límites explícitos; los bloques no
   se solapan y todos sus sitios quedan dentro del intervalo.
 - Dentro del bloque se usan haplotipos locales. Fuera de los bloques, los SNP se
@@ -90,27 +94,81 @@
 
 ## Punto exacto de reanudación
 
-Iniciar una decisión separada sobre la generación automática, por el propio
-programa, de bloques, SNP, haplotipos y frecuencias. No queda ninguna cuestión
-funcional o técnica abierta dentro de DTPD-119.
+Continuar la decisión separada sobre la generación automática de bloques de LD.
+La geometría, los perfiles, las frecuencias marginales, el constructor
+haplotípico, la puntuación, el calendario de recocido y el presupuesto de
+movimientos ya están acordados. También quedan cerrados el preflight conservador
+de imposibilidad de LD, Hyndman–Fan Type 7, la representabilidad exacta de
+cobertura, el aislamiento poblacional y los seis ámbitos físicos RNG con su
+futuro catálogo v3. No queda ninguna cuestión abierta dentro de DTPD-119 ni una
+elección funcional o técnica sustantiva en el preplan de generación automática.
+El nombre físico `human_ld_ragsdale_approx_v1` queda ratificado como
+`profile_id` definitivo.
+
+El próximo trabajo no es otra decisión funcional: hay que trasladar el borrador
+a especificaciones y trazabilidad,
+redactar la arquitectura y la decisión técnica y, solo después, convertir el
+preplan F6.4 en plan ejecutable.
+
+Los acuerdos y propuestas de esta conversación se conservan en
+[borrador-generacion-automatica-bloques-0.1.md](borrador-generacion-automatica-bloques-0.1.md).
 
 ## Siguiente conversación
 
 Discutir, como idea separada y todavía sin requisitos, la generación automática
-de bloques, SNP, haplotipos y frecuencias a partir de un valor o rango de LD,
-produciendo el mismo paquete canónico de cinco ficheros. La propuesta inicial es
-usar `r²` entre SNP consecutivos dentro de cada bloque, pero no está aprobada.
-Antes de especificar o planificar hay que decidir:
+de bloques, SNP, haplotipos y frecuencias, produciendo el mismo paquete canónico
+de cinco ficheros. Ya se acordó usar `r²` haplotípico faseado, dependiente de la
+distancia física, mediante perfiles por población. El programa incluirá el
+perfil sintético aproximado `human_ld_ragsdale_approx_v1` como ejemplo
+seleccionable pero nunca predeterminado; un perfil empírico derivado de 1000
+Genomas podrá añadirse en el futuro. Cada población podrá cargar su propio
+perfil. En esta versión los bloques se mantendrán independientes entre sí
+y DTF-044 reserva su LD posterior; la recombinación fundadora intrabloque de
+DTC-055 no cambia. La colocación inicial será uniforme sobre inicios elegibles;
+DTF-045 reserva regiones pericentroméricas con baja recombinación y bloques
+mayores. El constructor haplotípico aprobado usa intercambios que conservan las
+marginales y recocido simulado para ajustar los cuantiles agregados de `r²`;
+DTF-046 reserva el signo del LD. Los resultados se resumen en cuatro TSV de
+geometría, frecuencias realizadas, perfil de LD e intentos, enlazados por el
+manifiesto; DTF-047 reserva una tabla futura con el `r²` de cada pareja.
+La representabilidad de cobertura ya queda separada de la colocación: un grafo
+exacto de residuos módulo la menor longitud admisible calcula la menor suma por
+residuo y reconstruye un testigo exacto. El testigo no sustituye el muestreo
+ponderado; pasar la prueba no garantiza que el layout fragmentado pueda colocar
+la lista. El agotamiento de layout y la falta de recursos del preflight se
+diagnostican por separado y nunca como suma imposible. Para `block_count`, solo
+superar `sum(floor(segment_length/min_allowed_length))` demuestra imposibilidad.
+El perfil
+`human_ld_ragsdale_approx_v1` ya queda definido como aproximación
+sintética: usa la tendencia `r²_÷` de Ragsdale y Gravel, una distribución beta
+por población e intervalo y el valor global/versionado `kappa = 8.0`; nunca es
+predeterminado ni se presenta como cuantiles empíricos. El preflight enumera el
+dominio discreto de `r²` y deriva cotas Type 7 conservadoras; fixtures exhaustivos
+pequeños protegen frente a falsos imposibles. Los ámbitos físicos aprobados son
+`ld_geometry`, `ld_site_alleles`, `ld_population_frequencies`,
+`ld_haplotype_initialization`, `ld_annealing_proposals` y
+`ld_annealing_acceptance`, todos con `derivation_version = 2`. La geometría es
+común e inmutable; frecuencias, cuantización, inicialización, cálculo de
+cuantiles Type 7, score y recocido son independientes por población y usan un
+`population_attempt_index`. Cambiar, añadir o reordenar una población no altera
+los resultados no relacionados. Los catálogos v1 y v2 no se modifican ni
+reinterpretan. El futuro `catalogs/subseed-scopes-v3.tsv` tendrá
+`catalog_version = 3`, `derivation_version = 2`, los ámbitos anteriores
+necesarios y los seis ámbitos LD con vectores normativos propios. Una ejecución
+automática seleccionará coherentemente catálogo 3 y derivación 2, sin mezcla
+silenciosa, y lo registrará conforme a DTC-037/DTC-038. El fichero real no se
+creará antes de cerrar las puertas normativas y autorizar la implementación.
 
-1. el estadístico de LD y las parejas de SNP a las que se aplica;
-2. si se declara un valor o un intervalo objetivo;
-3. el número/densidad de SNP y la distribución del tamaño de los bloques;
-4. el espectro de frecuencias alélicas y el modelo que construye haplotipos
-   compatibles;
-5. la tolerancia, los casos imposibles y la política de intentos/fallo;
-6. la semilla, los ámbitos y la versión del algoritmo;
-7. los valores de LD solicitados y realizados que deben registrarse y validar.
+La puntuación, el calendario y el presupuesto del recocido ya están cerrados.
+Cada población usa
+`population_haplotype_cells=sum(C*snp_count)` sobre sus bloques y
+`max_annealing_moves=min(10_000_000,max(100_000,100*population_haplotype_cells))`.
+El límite cuenta propuestas y no es configurable. Cada población dispone de
+`max_haplotype_attempts=1000`; al fallar reintenta solo ella. Si una agota el
+límite, falla el panel completo sin resortear las demás y sin publicación
+parcial. La unión densa de HAP se forma únicamente cuando todas han pasado.
 
 La orden futura deberá producir exactamente el paquete canónico de DTC-055 y
 pasar el mismo validador que un panel suministrado. Esta capacidad no forma parte
-de DTC-055 y todavía no tiene REQ, ACE, DTC, DTPD ni asignación de fase.
+de DTC-055 y, aunque su encaje preliminar es F6.4, todavía no tiene REQ, ACE,
+DTC/DTPD ni plan ejecutable.

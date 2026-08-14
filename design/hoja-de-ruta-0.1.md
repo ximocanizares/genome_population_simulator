@@ -389,6 +389,129 @@ evolución a lo largo de generaciones.
   Permitir HAP distintos entre bloques y obtener los SNP exteriores desde
   `alt_af`. Rechazar cualquier locus de matriz dentro de un bloque, sin prioridad
   ni sobrescritura. Consumir DTC-055, que cierra DTPD-119.
+
+  **Encaje de planificación pendiente para generación automática.** La
+  generación por el programa de bloques, SNP, haplotipos y frecuencias que
+  produzcan ese mismo paquete se ubica como preparación previa dentro de F6.4,
+  no en F2. Todavía no amplía el alcance ejecutable de este hito: la
+  especificación vigente solo obliga a admitir un panel suministrado y faltan
+  sus REQ/ACE, arquitectura y decisión técnica. Las decisiones cerradas, las
+  puertas y los bloqueos se mantienen en el
+  [preplan de generación automática de bloques de LD](./preplan-generacion-automatica-bloques-ld-0.1.md).
+  La preparación automática producirá el mismo paquete canónico de cinco
+  ficheros sin ampliarlo y enlazará desde su manifiesto cuatro informes TSV
+  externos de geometría, frecuencias, LD e intentos. La publicación opcional de
+  todas las parejas de `r²` queda reservada a DTF-047.
+  Cada perfil reutilizable de entrada será, tanto si está incorporado como si lo
+  suministra el usuario, un paquete validado de exactamente cuatro ficheros:
+  `block_lengths.tsv`, `snp_gaps.tsv`, `ld_profile.tsv` y
+  `profile.metadata.json`. La máscara de exclusión ligada a la referencia se
+  mantendrá fuera y se declarará y verificará por separado.
+  `block_lengths.tsv` tendrá la cabecera exacta
+  `length_min_bp<TAB>length_max_bp<TAB>weight`, serialización TSV canónica y
+  filas ordenadas, únicas y no solapadas; validará la suma según DTC-049 sin
+  normalizarla automáticamente.
+  `snp_gaps.tsv` aplicará el mismo contrato con cabecera exacta
+  `gap_min_bp<TAB>gap_max_bp<TAB>weight`; su tabla 1–5000 documentada es solo un
+  ejemplo ilustrativo y nunca un valor predeterminado.
+  `ld_profile.tsv` tendrá una fila canónica por población e intervalo, con
+  `population_profile_id`, límites, mínimo evaluable, tolerancia absoluta y los
+  cuantiles p10/p25/p50/p75/p90; todas las poblaciones compartirán exactamente
+  las mismas fronteras contiguas desde 1. Los valores CEU/YRI documentados serán
+  ilustrativos.
+  `profile.metadata.json` será un objeto cerrado que identificará el recurso,
+  su origen builtin o supplied, su derivación aproximada o empírica, el modelo
+  de cuantiles y la procedencia obligatoria, y enlazará exactamente los tres TSV
+  por nombre canónico, tamaño y SHA-256 recalculado, sin duplicar sus tablas.
+  La máscara opcional `excluded_regions.tsv` permanecerá fuera del paquete,
+  declarará intervalos cerrados base 1 no solapados sobre secuencias del FASTA y
+  quedará enlazada por SHA-256 junto con la identidad de la referencia. Su
+  ausencia no desactivará la exclusión automática de `N`, loci reservados o
+  bloques aceptados.
+  La configuración usará `[initial_population.ld_blocks]` con
+  `source = "generated"`, una única fuente `profile|profile_path`, una única
+  medida `block_count|covered_bases|coverage_fraction` y máscara opcional. Cada
+  población simulada se mapeará en su subsección a un
+  `population_profile_id` existente. Las sustituciones DTC-033 solo cambiarán
+  ese mapeo y nunca parchearán tablas o parámetros del builtin; la geometría
+  común se resolverá una sola vez.
+  La geometría será común e inmutable. Frecuencias, cuantización, inicialización,
+  cálculo de cuantiles Type 7, puntuación y recocido se resolverán
+  independientemente por población, con `population_attempt_index` propio. El score poblacional minimizará, en
+  orden canónico y con suma Neumaier, los excesos cuadrados de los cinco
+  cuantiles sobre sus tolerancias para sus intervalos activos. Solo aceptará
+  `score = 0.0` junto con la validación individual de cuantiles y mínimos;
+  temperatura, mejor score y mejores cuantiles serán también poblacionales.
+  El recocido usará `T0 = max(score_inicial, 1e-12)`, aceptará siempre mejoras y
+  empates y los empeoramientos con `U < exp(-delta_score/T)`. Enfriará
+  `T *= 0.95` tras cada 1000 propuestas, independientemente de cuántas se
+  acepten, y se detendrá inmediatamente al alcanzar un estado válido.
+  Para cada población se calculará
+  `population_haplotype_cells = sum(C * snp_count)` sobre sus bloques y su
+  intento quedará limitado a
+  `min(10_000_000, max(100_000, 100 * population_haplotype_cells))` movimientos
+  propuestos. `max_haplotype_attempts = 1000` se aplicará por población. Agotar
+  un intento reintentará solo esa población; agotar su límite hará fallar el
+  panel sin resortear las demás y sin convertir el agotamiento en imposibilidad.
+  Podrán conservarse resultados válidos internamente, pero la publicación será
+  atómica después de que todas las poblaciones superen el validador común. Solo
+  entonces se formará la unión densa final de HAP por bloque.
+  La derivación RNG 2 separará exactamente `ld_geometry`, `ld_site_alleles`,
+  `ld_population_frequencies`, `ld_haplotype_initialization`,
+  `ld_annealing_proposals` y `ld_annealing_acceptance`; este último consumirá
+  uniformes solo para empeoramientos y no desplazará propuestas posteriores.
+  Las derivaciones usarán exclusivamente IDs estables y
+  `population_attempt_index` donde corresponda, nunca ruta, reloj, hilo,
+  *scheduler* u orden accidental. Los ámbitos poblacionales incorporarán
+  `population_id`; cambiar, añadir o reordenar una población no alterará la
+  geometría ni frecuencias, haplotipos o recocido de las demás. Los catálogos v1
+  y v2 seguirán intactos y legibles. El futuro
+  `catalogs/subseed-scopes-v3.tsv` declarará `catalog_version = 3` y
+  `derivation_version = 2`, contendrá los ámbitos anteriores necesarios y los
+  seis ámbitos LD con vectores normativos propios. La generación automática
+  elegirá explícitamente catálogo 3 y derivación 2, sin mezclas silenciosas;
+  configuración efectiva y manifiesto registrarán catálogo, derivación,
+  contexto, ámbitos, componentes y subsemillas conforme a DTC-037/DTC-038. El
+  catálogo real solo se publicará tras cerrar las puertas normativas.
+  Los cuantiles empíricos usarán siempre Hyndman–Fan Type 7: sobre valores
+  ordenados, `t=(n-1)q`, interpolación entre `floor(t)` y `ceil(t)`, y `x[0]`
+  cuando `n=1`, para q 0.10/0.25/0.50/0.75/0.90. La misma regla regirá
+  generador, preflight, oráculo e informes.
+  El preflight enumerará, para cada pareja no fijada con recuentos `a`, `b` y
+  `C`, todos los recuentos conjuntos enteros entre `max(0,a+b-C)` y `min(a,b)`.
+  Derivará cotas relajadas de cada cuantil aplicando Type 7 a los mínimos y
+  máximos por pareja y solo declarará imposibilidad si la banda solicitada no
+  las interseca o faltan parejas evaluables. Ignorará compatibilidades
+  multilocus, no admitirá `--force` y se protegerá con enumeración exhaustiva en
+  fixtures pequeños para demostrar ausencia de falsos imposibles.
+  La representabilidad de `covered_bases` o `coverage_fraction` se comprobará
+  aparte de la colocación mediante un grafo exacto de residuos módulo la menor
+  longitud admisible que quepa en algún segmento elegible. Caminos mínimos
+  obtendrán la menor suma por residuo y predecesores: un objetivo será
+  representable si y solo si la menor suma de su residuo no lo supera, y se
+  reconstruirá una combinación testigo exacta con aritmética comprobada. Ese
+  testigo será evidencia del preflight y no sustituirá el muestreo ponderado.
+  Para `block_count`, solo exceder
+  `sum(floor(segment_length/min_allowed_length))` demostrará imposibilidad. Pasar
+  estas pruebas no demostrará colocabilidad conjunta; el layout agotado y la
+  imposibilidad de ejecutar el cálculo por recursos tendrán diagnósticos
+  separados y nunca se reclasificarán como suma imposible. Fixtures pequeños
+  usarán enumeración o programación dinámica independiente, incluidos intervalos
+  degenerados, huecos y recomposición del testigo.
+  Los oráculos de aislamiento cambiarán el perfil, reordenarán o añadirán una
+  población y exigirán que los artefactos poblacionales no relacionados, o sus
+  filas/proyecciones canónicas cuando compartan fichero, permanezcan idénticos.
+  También comprobarán que el fallo de una población no publica un panel parcial
+  ni resortea las demás.
+  Podrá ofrecer, siempre mediante selección explícita, el perfil
+  `human_ld_ragsdale_approx_v1`: una aproximación sintética y trazable a la
+  tendencia humana `r_div^2` de Ragsdale y Gravel (2020), nunca presentada como
+  cuantiles empíricos ni usada por defecto. Sus cinco cuantiles procederán de
+  una distribución Beta por población e intervalo, con media dada por la curva
+  y `kappa = 8.0` global, no configurable y versionado con el builtin, nunca
+  inferido ni ajustado durante la ejecución. Un perfil empírico exacto podrá
+  añadirse posteriormente sin bloquear esta primera capacidad. El `profile_id`
+  queda ratificado como identificador físico definitivo en todos los contratos.
 - **F6.5. Grupos y subpoblaciones.** Asignar identidades, pertenencias y
   parámetros iniciales sin ambigüedades.
 - **F6.6. Fundadores.** Identificar individuos y copias haplotípicas fundadoras
