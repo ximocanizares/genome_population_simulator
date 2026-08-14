@@ -508,7 +508,7 @@ Esta tabla es un resumen derivado. El registro canónico con fuentes, estado,
 destino y dependencias es
 [registro-ampliaciones-futuras-0.1.md](./registro-ampliaciones-futuras-0.1.md).
 
-Las entradas DTF-001 a DTF-047 se definen una sola vez en ese registro. Este
+Las entradas DTF-001 a DTF-048 se definen una sola vez en ese registro. Este
 documento conserva únicamente las decisiones técnicas DTC, DTP y DTPD.
 
 ## 9. Reglas para resolver una decisión

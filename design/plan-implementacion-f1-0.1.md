@@ -5,8 +5,8 @@
 - **Título:** plan detallado de F1, núcleo reproducible.
 - **Versión del plan:** 0.1.
 - **Fecha:** 10 de agosto de 2026.
-- **Estado:** ejecución en curso; F1.5 conserva E10, E11 y E13 abiertas, todos
-  los pasos nuevos de F1.6 están abiertos y F1 no está cerrada.
+- **Estado:** ejecución en curso; F1.5 ha llegado a su pausa obligatoria de
+  revisión, todos los pasos nuevos de F1.6 están abiertos y F1 no está cerrada.
 - **Ámbito temporal:** únicamente F1.1–F1.6.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
@@ -77,11 +77,12 @@ marcado como completo.
   autocontenida y publicación de una versión, que corresponden a F9. Los
   contrastes mínimos de `.tar.gz` y OCI exigidos por DTC-047 son pruebas de la
   base de distribución, no la implementación anticipada de F9.6/F9.7.
-- Todas las ampliaciones DTF-001 a DTF-037: entre otras, migración de esquemas,
+- Todas las ampliaciones DTF-001 a DTF-048: entre otras, migración de esquemas,
   reproducibilidad entre versiones, reanudación, ejecución distribuida,
   auditoría externa en runtime, calibración empírica, niveles configurables de
-  trazabilidad y lotes de ejecuciones completas. DTF-037 no multiplica
-  referencias dentro de F1.6.
+  trazabilidad, lotes de ejecuciones completas e índices múltiples de
+  referencia. DTF-037 no multiplica referencias dentro de F1.6 y DTF-048 no
+  añade índices ficticios a F1.5.
 - Elección de crates por conveniencia. Solo se incorpora cada dependencia tras
   su puerta de evaluación; `noodles-fasta` 0.66.0 superó la puerta E1.
 
@@ -137,30 +138,27 @@ marcado como completo.
 
 ### 4.2. Comandos disponibles y comandos posteriores
 
-Ahora, antes de crear Cargo, solo son comprobables la documentación y el árbol
-de trabajo, por ejemplo:
+El proyecto Cargo y su `Cargo.lock` ya existen. Las comprobaciones documentales
+y del árbol de trabajo siguen disponibles, por ejemplo:
 
 ```bash
-git diff --no-index --check /dev/null design/plan-implementacion-f1-0.1.md
-rg -n '^- ☐ [A-F][0-9]+\.' design/plan-implementacion-f1-0.1.md
+git diff --check
+rg -n '^- (☐|✅) [A-F][0-9]+\.' design/plan-implementacion-f1-0.1.md
 rg -n 'DTC-050|DTPD-101|DTPD-116|noodles-fasta|Rust 1\.97\.1|edition = "2024"' design/plan-implementacion-f1-0.1.md
 ```
 
-Mientras el plan sea un fichero nuevo, la primera orden termina con código 1
-porque compara dos contenidos distintos; la comprobación es satisfactoria si no
-imprime diagnósticos de espacios o líneas inválidas.
-
-Los siguientes comandos son criterios de pasos futuros. No se presentarán como
-ejecutados hasta que A1 haya creado el proyecto y A2 haya producido el lock:
+Los siguientes comandos son puertas actuales del proyecto. Cada hito debe
+repetir las que le correspondan y conservar su resultado; que hayan pasado en
+un hito anterior no demuestra un cambio posterior:
 
 ```bash
 rustc --version
 cargo --version
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --all-targets --locked
-cargo test --workspace --doc --locked
-cargo build --release --locked --target x86_64-unknown-linux-gnu
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-targets --all-features --locked
+cargo test --workspace --doc --all-features --locked
+cargo build --release --workspace --all-features --locked --target x86_64-unknown-linux-gnu
 cargo metadata --locked --format-version 1
 cargo tree --locked -e features
 ```
@@ -600,7 +598,7 @@ del original y sin dependencia de validadores externos en runtime.
 - ✅ E7. Crear índices únicamente cuando una operación F1 los necesite.
   - Depende de: E1, E3 o E6.
   - Procede de: DTC-041; REQ-REF-05/06.
-  - Cambia: contrato de índice bajo demanda y catálogo cero/uno/varios; F1 no genera índices anticipados sin consumidor.
+  - Cambia: contrato de índice bajo demanda y catálogo cero/uno; F1 no genera índices anticipados sin consumidor y DTF-048 reserva los índices múltiples.
   - Se comprueba con: caso sin operación indexada que conserva cero índices y caso que exige FAI; `samtools faidx` valida el FASTA y consulta secuencias conocidas en pruebas/CI, nunca durante una ejecución normal.
 
   **Frontera aprobada:** toda ejecución normal F1 conserva cero índices. La
@@ -619,26 +617,28 @@ del original y sin dependencia de validadores externos en runtime.
   - Cambia: `TEST-REQ-REF-23`, fixtures y pruebas CLI que producen configuración original, efectiva, semilla, referencia, manifiestos, estados y diagnósticos.
   - Se comprueba con: FASTA suministrado con `N` conservada y símbolo inválido localizado, referencia generada solo con A/C/G/T, dos ejecuciones equivalentes comparadas lógicamente, `samtools faidx`, `sha256sum`, JSON independiente y configuración inválida sin destino completo.
 
-- ☐ E10. Establecer y ejecutar la línea base A de 100 kbp en cada cambio relevante.
+- ✅ E10. Establecer y ejecutar la línea base A de 100 kbp en cada cambio relevante.
   - Depende de: E9 y construcción `--release` portable.
   - Procede de: DTC-046; REQ-NOF-01 a REQ-NOF-08.
   - Cambia: escenario A con configuración y semilla fijas y captura de tiempo total/etapas, CPU fiable, RSS máximo, bytes de entrada/temporales/salida, MB/s, ficheros y contexto.
   - Se comprueba con: ejecución repetida de la orden versionada del banco en WSL2/ext4; corrección, integridad y trazabilidad son obligatorias, pero una variación temporal pequeña no provoca fallo.
 
-  **Medición ejecutada, paso reabierto:** la corrección H-F15-R04 distingue el
-  preflight del recorrido completo y el residuo temporal medido, pero el pico de
-  bytes temporales sigue sin instrumentación directa y se declara
-  `not_measured`. E10 no se aprueba hasta medir ese pico sin inferirlo.
+  **Medición cerrada el 14 de agosto de 2026:** una ejecución gemela con la
+  misma entrada y semilla retrasa `renameat2` mediante `strace --seccomp-bpf`,
+  mide directamente el provisional con `du -sb` y exige un árbol publicado
+  idéntico. A×3 registra pico no nulo y residuo cero sin contaminar el tiempo de
+  la ejecución ordinaria.
 
-- ☐ E11. Ejecutar la serie B y programar la observación C sin inventar umbrales.
+- ✅ E11. Ejecutar la serie B y programar la observación C sin inventar umbrales.
   - Depende de: E10.
   - Procede de: DTC-046.
   - Cambia: referencias deterministas de 1, 10 y 100 Mb para B y caso de 1 Gb manual/programado para C, con mismas métricas y contexto; conserva resultados como línea base observada.
   - Se comprueba con: informe que muestre crecimiento y número de repeticiones en construcción optimizada portable; C no forma parte de cada cambio y ningún tamaño se presenta como promesa de producto.
 
-  **Serie ejecutada, cierre dependiente:** B se repitió tres veces por tamaño y
-  C quedó programado, pero E11 conserva abierto su cierre mientras E10 no mida
-  el pico temporal exigido.
+  **Serie cerrada el 14 de agosto de 2026:** B se repitió tres veces por tamaño
+  con pico temporal directo, salida gemela idéntica y residuo cero. C queda
+  programado mediante la misma orden y no se ejecuta en cada cambio conforme a
+  DTC-046.
 
 - ✅ E12. Contrastar la base de distribución F1 mediante `.tar.gz` e imagen OCI sin adelantar la publicación F9.
   - Depende de: A7, E9 y DTC-042.
@@ -646,17 +646,18 @@ del original y sin dependencia de validadores externos en runtime.
   - Cambia: prueba de empaquetado mínimo versionado y receta OCI fijada por digest que incluyen ejecutable, esquemas, licencias y ejemplos; no declara una entrega v1.
   - Se comprueba con: listado y extracción estándar de `.tar.gz`, SHA-256 de sus bytes, inspección de descriptores/configuración/capas y arranque de prueba OCI mediante los comandos exactos aprobados en A7, en Ubuntu 24.04 nativo/OCI.
 
-- ☐ E13. Cerrar la batería trazable y la revisión propia de F1.5.
+- ✅ E13. Cerrar la batería trazable y la revisión propia de F1.5.
   - Depende de: E1–E12 y todas las pausas anteriores.
   - Procede de: los 27 REQ asignados a F1.5 tras las auditorías F1.3/F1.4, ACE-01 a ACE-05/23/64/110 y reglas de avance de la hoja de ruta.
   - Cambia: casos `TEST-REQ-*`, matriz F1.5 con comandos/salidas/digests y acta de revisión; no cierra F1 ni modifica requisitos o pruebas no ejecutadas.
   - Se comprueba con: batería Cargo bloqueada por warnings, validadores independientes de F1, escenarios A/B/C según frecuencia y revisión de cero hallazgos bloqueantes o graves sin destino aprobado.
 
-  **Auditoría ejecutada, cierre no aprobado (10 de agosto de 2026):** las 27
-  filas se reauditaron y las puertas completas pasan, pero solo 25 tienen
-  consumidor completo. REQ-REF-05 demuestra cero y un FAI, no «varios» con un
-  segundo consumidor real; REQ-EVO-63 conserva resultados reales pendientes en
-  F5.6. E13 permanece abierto y F1 no se declara cerrado.
+  **Auditoría cerrada, pausa no aprobada (14 de agosto de 2026):** las 27
+  filas se reauditaron y todas tienen consumidor completo. REQ-REF-05 queda
+  superado tras limitar v1 a cero o un FAI; REQ-EVO-63 queda superado con la
+  infraestructura propia de evento. REQ-EVO-78 reserva para F5.6 los enlaces a
+  resultados reales. A/B, las pruebas y las puertas generales pasan. F1.5 llega
+  a la pausa obligatoria, que aún no aprueba F1 ni autoriza comenzar F1.6.
 
 ### Pausa obligatoria de revisión de F1.5
 

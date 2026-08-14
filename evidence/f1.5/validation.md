@@ -1,9 +1,9 @@
 # Validación de F1.5
 
-- Fecha: 10 de agosto de 2026.
+- Fecha de actualización: 14 de agosto de 2026.
 - Plataforma: Ubuntu 24.04 sobre WSL2, x86-64, ext4.
-- Estado: E1–E12 ejecutados; E13 reauditado con 25/27 casos superados y dos
-  parciales. F1.5 llega a la pausa sin cierre total.
+- Estado: E1–E13 ejecutados y 27/27 casos de requisitos superados; F1.5 ha
+  llegado a la pausa obligatoria, todavía no aprobada.
 
 ## Pasos y pruebas específicas
 
@@ -23,13 +23,17 @@
 - E9: `f1_5_acceptance` (4) superadas; CLI simulado repetido, CLI suministrado
   con N/cabecera/caja exactas y CLI inválido sin destino. Oráculos `cmp`,
   `sha256sum`, Python jsonschema y samtools terminaron correctamente.
-- E10/E11, reabiertos: release portable; A (100 kbp) y B (1/10/100 Mb), tres repeticiones
-  cada tamaño. Se miden preflight y recorrido completo, residuo temporal y se
-  declara `not_measured` para el pico temporal no instrumentado. C de 1 Gb
-  queda programado y no ejecutado.
+- E10/E11: release portable; A (100 kbp) y B (1/10/100 Mb), tres repeticiones
+  cada tamaño. Se miden preflight y recorrido completo, pico temporal directo y
+  residuo. La sonda gemela usa `strace` 6.8 con filtro seccomp y retraso de
+  `renameat2`, exige salida idéntica y no contamina los tiempos ordinarios. C de
+  1 Gb queda programado y no ejecutado conforme a DTC-046. La sonda se ejecutó
+  fuera del sandbox restringido porque necesita `ptrace`; dentro de él falla de
+  forma explícita y nunca registra cero como sustituto.
 - E12: tar listado/extraído y verificado; OCI por digest construido,
   inspeccionado y arrancado. Digests en `distribution.md`.
-- E13: 27 casos reaudidatos en `requirements.md`: 25 superados y 2 parciales.
+- E13: 27 casos reaudidatos en `requirements.md`: 27 superados; puertas
+  generales repetidas después de cerrar E10/E11.
 
 ## Regresiones alternativas solicitadas
 
@@ -75,11 +79,10 @@ Ejecutadas individualmente antes de las puertas generales:
 
 ## Pendientes de la pausa
 
-- TEST-REQ-REF-05 no demuestra «varios» índices porque F1 solo tiene FAI y no
-  existe un segundo tipo con consumidor real aprobado.
-- TEST-REQ-EVO-63 enlaza referencia, configuración, subsemilla y manifiesto por
-  evento, pero los resultados biológicos/técnicos reales siguen en F5.6.
-- E10/E11 permanecen abiertos: el residuo temporal sí se mide, pero el pico de
-  bytes temporales se declara `not_measured` y requiere instrumentación directa.
+- TEST-REQ-REF-05 queda superado: v1 exige cero índices normales o un único FAI
+  bajo demanda; DTF-048 reserva la coexistencia de índices múltiples.
+- TEST-REQ-EVO-63 queda superado con directorio, manifiesto y enlaces propios de
+  evento; REQ-EVO-78 planifica en F5.6 los enlaces a resultados reales.
+- E10/E11 quedan cerrados con instrumentación y resultados completos.
 - La evidencia nativa Ubuntu 24.04 de esta implementación F1.5 deberá provenir
   de CI; WSL2 y OCI no se presentan como ejecución nativa independiente.

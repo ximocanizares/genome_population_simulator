@@ -326,7 +326,9 @@ separación estricta entre referencias.
   en VCF, enlazar sus registros con una única entrada complementaria y demostrar
   la reconstrucción completa del par.
 - **F5.6. Varios conjuntos de referencia.** Mapear las mismas muestras contra
-  referencias diferentes y producir BAM/CRAM y VCF independientes.
+  referencias diferentes, producir BAM/CRAM y VCF independientes y demostrar
+  que el manifiesto del evento y el manifiesto raíz enlazan todos los resultados
+  reales con su evento, conjunto, referencia y artefacto conforme a REQ-EVO-78.
 
 **Resultado de salida:** individuos complejos reconstruibles y conjuntos
 independientes por referencia.

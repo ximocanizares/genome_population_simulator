@@ -1076,8 +1076,11 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   guardar toda su secuencia en un único fichero FASTA.
 - **REQ-REF-04.** El único FASTA de una referencia debe poder contener uno o
   varios cromosomas o *scaffolds*.
-- **REQ-REF-05.** El número de índices de una referencia puede ser cero, uno o
-  varios.
+- **REQ-REF-05.** En v1, una referencia debe tener cero índices durante una
+  ejecución normal y puede tener un único índice FAI cuando una operación lo
+  necesite. Ese FAI debe crearse bajo demanda y no debe publicarse como salida
+  normal. La coexistencia de varios índices de referencia queda aplazada a
+  DTF-048.
 - **REQ-REF-06.** El sistema debe generar para cada referencia todos los tipos de
   índice que necesiten las operaciones o los formatos utilizados.
 - **REQ-REF-07.** El sistema debe conservar si la referencia inicial fue
@@ -2109,7 +2112,7 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   y deben relacionar el identificador biológico, el evento y la subsemilla.
 - **REQ-EVO-63.** Cada evento debe tener un directorio y un manifiesto propios.
   El manifiesto raíz debe enlazar todos los eventos, sus configuraciones
-  resueltas, referencias, subsemillas y resultados.
+  resueltas, referencias y subsemillas.
 - **REQ-EVO-64.** Cada evento de muestreo debe guardar por separado un resumen
   poblacional y un resumen muestral de la generación observada. El primero debe
   describir la población completa y cada subpoblación relevante. El segundo debe
@@ -2503,6 +2506,11 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   versión de cada tabla pertenecen a su enlace de esquema/manifiesto y no deben
   añadirse como columnas TSV. Cada tabla debe quedar enlazada desde el manifiesto
   mediante clase, versión, ruta, tamaño y SHA-256.
+- **REQ-EVO-78.** Cuando un evento produzca resultados biológicos o técnicos,
+  su manifiesto propio y el manifiesto raíz deben enlazar todos esos resultados
+  y conservar su relación con el evento, el conjunto, la referencia y el
+  artefacto correspondientes. Un evento sin una salida activada no debe inventar
+  un resultado vacío para satisfacer este requisito.
 - **REQ-POB-01.** El sistema debe permitir crear poblaciones naturales mediante
   esta vía.
 
@@ -5173,7 +5181,7 @@ observará el resultado, sin crear obligaciones adicionales.
 | Referencias | ¿Qué secuencias y sistemas de coordenadas sostienen la verdad? | REQ-REF-01 a REQ-REF-36 | ACE-02 a ACE-08, ACE-95, ACE-110, ACE-112 y ACE-113 |
 | Construcción de individuos | ¿Qué genomas faseados existen antes de observarlos? | REQ-IND-01 a REQ-IND-65, REQ-DIR-01 a REQ-DIR-05 y REQ-MUT-01 a REQ-MUT-15 | ACE-09 a ACE-12, ACE-28 a ACE-32, ACE-79 a ACE-81, ACE-95, ACE-96, ACE-103, ACE-107, ACE-109 a ACE-111 y ACE-116/117 |
 | Inicialización poblacional | ¿Qué población inicial se deriva de las frecuencias y restricciones declaradas? | REQ-EVO-01 a REQ-EVO-52 y REQ-POB-01 a REQ-POB-03 | ACE-11, ACE-13, ACE-26, ACE-88 a ACE-90, ACE-104 y ACE-105 |
-| Evolución | ¿Cómo cambia el estado poblacional entre generaciones? | REQ-EVO-53 a REQ-EVO-77, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 | ACE-13, ACE-24 a ACE-28, ACE-76 a ACE-87 y ACE-117 |
+| Evolución | ¿Cómo cambia el estado poblacional entre generaciones? | REQ-EVO-53 a REQ-EVO-78, REQ-REP-01 a REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 | ACE-13, ACE-24 a ACE-28, ACE-76 a ACE-87 y ACE-117 |
 | Familias y cruces | ¿Qué individuos intermedios y descendientes forman cada familia? | REQ-CRU-01 a REQ-CRU-45, junto con las reglas aplicables de REQ-REP-01 a REQ-REP-26 y REQ-REC-01 a REQ-REC-29 | ACE-14, ACE-27, ACE-75, ACE-85, ACE-87, ACE-97, ACE-98 y ACE-106 |
 | Observación técnica | ¿Qué evidencia se genera a partir de una verdad ya fijada? | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 | ACE-15 a ACE-17, ACE-37 a ACE-59, ACE-68 a ACE-74, ACE-93, ACE-94 y ACE-100 |
 | Verdad interoperable | ¿Cómo se proyecta la verdad canónica a cada referencia y formato solicitado? | REQ-VER-01 a REQ-VER-47 | ACE-18 a ACE-21, ACE-24, ACE-25, ACE-30, ACE-31, ACE-60 a ACE-63, ACE-66, ACE-100, ACE-101 y ACE-108 |
@@ -5202,7 +5210,7 @@ valores, obligatoriedad ni relaciones entre objetos.
 |---|---|---|
 | Petición y configuración | Identificar la ejecución y resolver los parámetros efectivos | REQ-CONF-01 a REQ-CONF-130, REQ-FMT-01 a REQ-FMT-07 y REQ-NOF-01 a REQ-NOF-08 |
 | Secuencias y referencias | Establecer las bases y coordenadas sobre las que se construye y compara la verdad | REQ-REF-01 a REQ-REF-36 y las entradas de REQ-DAT-01 a REQ-DAT-73 |
-| Individuos, poblaciones y familias | Declarar el material biológico inicial y las relaciones que deben simularse | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-77, REQ-POB-01 a REQ-POB-03 y REQ-CRU-01 a REQ-CRU-45 |
+| Individuos, poblaciones y familias | Declarar el material biológico inicial y las relaciones que deben simularse | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-78, REQ-POB-01 a REQ-POB-03 y REQ-CRU-01 a REQ-CRU-45 |
 | Procesos biológicos | Especificar creación, mutación, migración, reproducción, selección y recombinación | REQ-DIR-01 a REQ-DIR-05, REQ-MUT-01 a REQ-MUT-15, REQ-MIG-01 a REQ-MIG-09, REQ-REP-01 a REQ-REP-26, REQ-SEL-01 a REQ-SEL-17 y REQ-REC-01 a REQ-REC-29 |
 | Eventos y condiciones técnicas | Solicitar observaciones, perfiles, artefactos y tratamientos técnicos admitidos | REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07, REQ-WGS-01 a REQ-WGS-14 y REQ-CONT-01 a REQ-CONT-16 |
 | Aplicación Marimo | Importar, editar, revisar, validar y lanzar la misma configuración mediante una interfaz local | REQ-UI-01 a REQ-UI-15 |
@@ -5236,7 +5244,7 @@ pendientes.
 | **ACE-02. Tamaños del genoma simulado** | Cada cromosoma o *scaffold* tiene el tamaño configurado y el tamaño total corresponde a los tamaños de todas sus secuencias | Casos de prueba y comprobación exacta |
 | **ACE-03. Modos de referencia inicial** | El sistema puede simular la referencia inicial desde la configuración o utilizar un FASTA real suministrado. Un FASTA legible, con al menos una secuencia no vacía y cuyo primer elemento no vacío de cada cabecera sea un identificador único supera la validación si sus secuencias contienen exclusivamente A, C, G, T y N en mayúsculas o minúsculas. `N` se conserva exactamente, ocupa coordenada y cuenta en la longitud; nunca se resuelve. La descripción restante de la cabecera se conserva por separado. El sistema copia el FASTA al directorio de resultados, usa esa copia y deja el original sin cambios. Un archivo ilegible, sin secuencias no vacías, con identificadores vacíos o repetidos, huecos, otros códigos IUPAC o cualquier otro símbolo hace que la ejecución se detenga antes de generar resultados y explique los errores | Casos de alfabeto, integridad y conservación de `N` |
 | **ACE-04. Un FASTA por referencia** | Cada referencia inicial o derivada conserva toda su secuencia en un único FASTA, que contiene uno o varios cromosomas o *scaffolds* | Casos de prueba |
-| **ACE-05. Índices de las referencias** | Cada referencia tiene cero, uno o varios índices y dispone de todos los tipos que necesitan las operaciones o los formatos que la usan | Tipos exigidos por cada operación y herramientas de indexación |
+| **ACE-05. Índices de las referencias** | Una ejecución normal v1 conserva cero índices de referencia. Una operación indexada puede crear bajo demanda un único FAI, consumirlo y validarlo sin publicarlo como salida normal. Los índices múltiples quedan en DTF-048 | Caso sin índice, caso con FAI y validación independiente |
 | **ACE-06. Creación de referencias estructurales** | Se pueden crear dos o más referencias estructurales a partir de referencias disponibles previamente, incluida una referencia inicial suministrada | Casos de prueba, tamaños y reglas exactas |
 | **ACE-07. Diferencias entre referencias** | Cada nueva referencia estructural difiere de su referencia de origen solo por las duplicaciones, deleciones, inversiones y translocaciones solicitadas | Casos de prueba y comprobación de cada cambio |
 | **ACE-08. Origen de las referencias** | Para cada referencia estructural se pueden conocer su referencia de origen y los cambios que las distinguen | Forma de representar y consultar la relación |
@@ -5325,7 +5333,7 @@ pendientes.
 | **ACE-91. Fundadores trazables** | Todos los individuos de la población inicial son fundadores con identificadores estables propios. Cada copia haplotípica también tiene identificador propio aunque su secuencia coincida con otra, y toda traza posterior alcanza una copia fundadora concreta | Formato de identificadores y casos de reconstrucción |
 | **ACE-92. Selección de muestreos** | Un evento admite identificadores explícitos, selección aleatoria sin reemplazo o ambas, además de estratos no solapados por subpoblación, grupos y filtros de genotipo. Los explícitos se incorporan primero y se excluyen del sorteo. Duplicados, individuos incompatibles, estratos ambiguos o tamaños mayores que los elegibles detienen el evento sin reemplazo ni reducción silenciosa | Sintaxis de filtros y estratos y casos de prueba |
 | **ACE-93. Eventos explícitos independientes** | Una ejecución biológica admite cero, uno o varios eventos explícitos con identificador, selección, referencias, salidas y subsemilla. Solo los eventos que generan FASTQ, BAM o CRAM necesitan una tecnología y perfil; los que generan alineamientos necesitan además un mapeador. Un evento que solo materializa verdad o VCF carece de esos requisitos técnicos. El mismo individuo conserva genotipo, fase y ascendencia entre eventos, pero las lecturas y alineamientos se materializan de nuevo e independientemente | Estrategia técnica de subsemillas y casos multievento |
-| **ACE-94. Organización, atomicidad y exportación** | La raíz conserva una sola copia verificable de cada referencia e índice y un manifiesto general. Cada evento tiene directorio y manifiesto propios y separa resultados por referencia. Ejecución, evento, conjunto y artefacto distinguen estados incompleto, completo y fallido. Cada artefacto se publica atómicamente tras validarse; el éxito exige todas las unidades y la trazabilidad obligatoria completas. No se publica ni exporta una versión degradada por recursos. Los conjuntos completos independientes se conservan y el paquete autocontenido valida sus sumas antes y después | Preflight insuficiente, ausencia de degradación, esquema, sumas y formato |
+| **ACE-94. Organización, atomicidad y exportación** | La raíz conserva una sola copia verificable de cada referencia e índice y un manifiesto general. Cada evento tiene directorio y manifiesto propios; la raíz enlaza su configuración resuelta, referencias y subsemilla incluso antes de que existan resultados. Cuando el evento produce resultados reales, ambos manifiestos los enlazan y los separan por referencia, sin crear resultados vacíos para salidas no activadas. Ejecución, evento, conjunto y artefacto distinguen estados incompleto, completo y fallido. Cada artefacto se publica atómicamente tras validarse; el éxito exige todas las unidades y la trazabilidad obligatoria completas. No se publica ni exporta una versión degradada por recursos. Los conjuntos completos independientes se conservan y el paquete autocontenido valida sus sumas antes y después | Preflight insuficiente, ausencia de degradación, esquema, sumas y formato |
 | **ACE-95. Coordenadas y límites estructurales** | La configuración usa coordenadas basadas en 1 e intervalos cerrados; cada formato externo usa su convención oficial mediante conversión documentada. Cada duplicación usa el estado inmediatamente anterior para interpretar origen y destino y conserva las correspondencias posteriores. Una fuente completa puede insertar la copia dentro de la misma secuencia; una fuente parcial solo puede usar un destino adyacente o externo a su intervalo. Inserciones, deleciones, inversiones y puntos de ruptura respetan las reglas terminales, y toda translocación conserva subeventos, segmentos y orientaciones sin vaciar una secuencia | Representación técnica y casos límite |
 | **ACE-96. Límite local de copias** | El máximo local predeterminado y provisional es 10 copias totales, incluida la original, por familia de copia e intervalo fundador dentro de cada copia haplotípica. Se contabiliza de forma acumulada y separada de ploidía y repeticiones en tándem. Un valor mayor requiere configuración explícita, genera una advertencia y activa una estimación previa de memoria, almacenamiento y volumen de datos. Si supera el presupuesto configurado se rechaza; si no, continúa. No existe otro máximo absoluto fijo y el valor predeterminado debe revisarse mediante pruebas de rendimiento | Pruebas de rendimiento y casos acumulativos y de presupuesto |
 | **ACE-97. Reproducción de familias** | Cada evento tiene un parental para autofecundación o dos para cruzamiento sexual; otras cardinalidades se rechazan. Todos los parentales usan la misma referencia estructural, ploidía par e igual y estado estructural canónico idéntico en cada secuencia reproductiva. El orden de dos parentales no cambia el modelo y los diseños con tres o más fundadores forman un grafo. Clonación, apomixis, dobles haploides, referencias distintas y parentales estructuralmente heterocigotos se rechazan | Casos por tipo, diploide/tetraploide, ploidía impar/desigual, estructura y referencia |
@@ -5391,9 +5399,9 @@ los archivos relevantes y permitir exportar un evento con sus referencias,
 
 **Índices exigidos por cada operación.** Durante esa planificación se
 identificarán los tipos concretos de índice que exige cada operación o formato
-utilizado y se elegirán las herramientas de indexación. Esta decisión no cambia
-que cada referencia pueda tener cero, uno o varios índices según sus
-necesidades.
+utilizado y se elegirán las herramientas de indexación. En v1, el único índice
+de referencia admitido es un FAI creado bajo demanda. La coexistencia de varios
+tipos de índice se decidirá posteriormente mediante DTF-048.
 
 **Generación aleatoria y reproducibilidad.** Durante la implementación y la
 validación se elegirán el algoritmo y las pruebas estadísticas que materialicen

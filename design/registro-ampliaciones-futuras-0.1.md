@@ -62,6 +62,7 @@ resultados ni errores pertenecen a DTP/DTPD en
 | DTF-045 | Regiones pericentroméricas con baja recombinación y bloques de LD mayores | Borrador de generación automática de bloques de LD 0.1 | Fuera de la primera versión del generador; la colocación actual es uniforme sobre inicios elegibles y no crea dominios cromosómicos especiales | Post-v1, junto con mapas de recombinación y heterogeneidad espacial del generador de bloques | Definición o anotación de regiones pericentroméricas, referencia y coordenadas, reducción de recombinación, distribución propia de longitudes y densidad, transición de fronteras, perfiles por población, trazabilidad y compatibilidad con DTF-044 y DTPD-111 |
 | DTF-046 | Signo y fase dirigida del LD en la generación automática de haplotipos | Borrador de generación automática de bloques de LD 0.1 | Fuera de la primera versión del generador; el objetivo usa `r²` y acepta indistintamente asociaciones en acoplamiento o repulsión con igual magnitud | Post-v1, después de validar el constructor por intercambios basado en `r²` | Perfil de `r` firmado o fase objetivo, orientación REF/ALT, coherencia multilocus, compatibilidad entre pares, tolerancias, datos empíricos, algoritmo de optimización y salidas solicitadas/realizadas |
 | DTF-047 | Informe detallado del `r²` de cada pareja de SNP | Borrador de generación automática de bloques de LD 0.1 | Fuera de la primera versión del generador; los informes obligatorios agregan parejas por población e intervalo y no publican la tabla cuadrática completa | Post-v1, si el diagnóstico resumido resulta insuficiente | Activación explícita, esquema y orden, identidad de ambas variantes y del bloque, población, distancia, exclusión por fijación, `r²`, compresión, límites de tamaño, publicación y enlace desde el manifiesto |
+| DTF-048 | Varios índices para una misma referencia | REQ-REF-05/06 y ACE-05; revisión de la pausa F1.5 | Fuera de v1; una ejecución normal conserva cero índices y una operación indexada solo puede crear un FAI bajo demanda, sin publicarlo como salida normal | Fase posterior que incorpore un segundo tipo de índice con consumidor real | Tipos y formatos de índice, consumidores, coexistencia, identidad y catálogo, invalidación al cambiar el FASTA, publicación, herramientas y validación independiente |
 
 ## 3. Cobertura y mantenimiento
 
@@ -111,5 +112,6 @@ continuidad haplotípica entre bloques sin retirar la recombinación fundadora
 intrabloque. DTF-045 se añadió el mismo día para reservar regiones
 pericentroméricas con baja recombinación y bloques mayores, DTF-046 para
 aplazar el signo o fase dirigida del LD y DTF-047 para reservar el informe
-completo de parejas. Las once quedan fuera de los recuentos históricos de la
-tabla.
+completo de parejas. DTF-048 se añadió el 14 de agosto de 2026 al aplazar la
+coexistencia de varios índices de referencia hasta disponer de un segundo
+consumidor real. Las doce quedan fuera de los recuentos históricos de la tabla.

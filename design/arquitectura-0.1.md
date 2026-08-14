@@ -235,7 +235,7 @@ precedencia.
 | Copia haplotípica | Distinta aunque tenga la misma secuencia que otra | Individuo, secuencia, índice de copia, ploidía, segmentos y fundador |
 | Población y subpoblación | Identidades no reutilizables | Generación, miembros, estado activa/extinguida y relaciones demográficas |
 | Evento biológico | Identifica muestreo, cruce, mutación o cambio demográfico según su categoría | Entradas, orden, resultado y causas de omisión o fallo |
-| Evento explícito | Unidad de observación independiente | Individuos, referencias, subsemilla y salidas; tecnología, perfil, tanda, bibliotecas y mapeador solo cuando procedan |
+| Evento explícito | Unidad de observación independiente, con directorio y manifiesto propios | Individuos, configuración resuelta, referencias y subsemilla enlazados desde la raíz; las salidas reales se enlazan cuando existen, sin artefactos vacíos; tecnología, perfil, tanda, bibliotecas y mapeador solo cuando procedan |
 | Experimento de secuenciación | Condición de un evento que genera FASTQ, BAM o CRAM; es el único experimento del evento y no posee otra identidad | Tecnología, perfil, una tanda, una biblioteca por individuo y, si genera alineamientos, mapeador |
 | Tanda | Única dentro de un evento de secuenciación | Evento, tecnología, perfil y todas las bibliotecas procesadas conjuntamente |
 | Biblioteca | Única para un individuo dentro del evento | Evento, tanda, individuo, tecnología, perfil, objetivo WGS e índices técnicos |

@@ -1,10 +1,15 @@
 # Punto de reanudación del proyecto
 
 - **Fecha:** 14 de agosto de 2026
-- **Último cierre documental:** `docs: resolve haplotype panel design`.
-- **Estado:** DTPD-118 y DTPD-119 están resueltas y publicadas. DTPD-119 queda
-  cerrada mediante DTC-055 después de una revisión independiente y dos rondas
-  de correcciones.
+- **Último commit publicado:** `81e6589 docs: preplan automatic LD block generation`.
+- **Estado actual de ejecución:** F1.5 completó E1–E13 localmente y alcanzó su
+  pausa obligatoria. Sus 27/27 requisitos están demostrados; E10/E11 conservan
+  líneas base A/B con pico temporal directo y E13 supera las puertas generales.
+  La pausa aún requiere revisión y la evidencia nativa Ubuntu 24.04 de CI; F1.6
+  no ha comenzado.
+- **Estado de diseño:** DTPD-118 y DTPD-119 están resueltas y publicadas.
+  DTPD-119 queda cerrada mediante DTC-055 después de una revisión independiente
+  y dos rondas de correcciones.
 - **Copia de la conversación:**
   [chat-dtpd-119-2026-08-12.md](../docs/chat-dtpd-119-2026-08-12.md) y
   [chat-generacion-automatica-bloques-ld-2026-08-13.md](../docs/chat-generacion-automatica-bloques-ld-2026-08-13.md).
@@ -94,30 +99,26 @@
 
 ## Punto exacto de reanudación
 
-Continuar la decisión separada sobre la generación automática de bloques de LD.
-La geometría, los perfiles, las frecuencias marginales, el constructor
-haplotípico, la puntuación, el calendario de recocido y el presupuesto de
-movimientos ya están acordados. También quedan cerrados el preflight conservador
-de imposibilidad de LD, Hyndman–Fan Type 7, la representabilidad exacta de
-cobertura, el aislamiento poblacional y los seis ámbitos físicos RNG con su
-futuro catálogo v3. No queda ninguna cuestión abierta dentro de DTPD-119 ni una
-elección funcional o técnica sustantiva en el preplan de generación automática.
-El nombre físico `human_ld_ragsdale_approx_v1` queda ratificado como
-`profile_id` definitivo.
+Revisar la evidencia nativa Ubuntu 24.04 de CI y decidir si se aprueba la pausa
+F1.5. No comenzar F1.6 antes de esa aprobación. Si la pausa se aprueba, el paso
+siguiente es cerrar sus dos cuestiones funcionales de reducción, DTPD-101 y
+DTPD-116 antes de implementar F1–F14.
 
-El próximo trabajo no es otra decisión funcional: hay que trasladar el borrador
-a especificaciones y trazabilidad,
-redactar la arquitectura y la decisión técnica y, solo después, convertir el
-preplan F6.4 en plan ejecutable.
+El preplan de generación automática de bloques de LD no tiene elecciones
+funcionales o técnicas materiales abiertas y conserva el `profile_id`
+definitivo `human_ld_ragsdale_approx_v1`. Su próximo trabajo, cuando vuelva a
+ser prioritario, será trasladar el borrador a especificaciones y trazabilidad,
+redactar arquitectura y decisión técnica y solo después crear el plan ejecutable
+de F6.4.
 
 Los acuerdos y propuestas de esta conversación se conservan en
 [borrador-generacion-automatica-bloques-0.1.md](borrador-generacion-automatica-bloques-0.1.md).
 
-## Siguiente conversación
+## Estado conservado del preplan LD
 
-Discutir, como idea separada y todavía sin requisitos, la generación automática
-de bloques, SNP, haplotipos y frecuencias, produciendo el mismo paquete canónico
-de cinco ficheros. Ya se acordó usar `r²` haplotípico faseado, dependiente de la
+La idea separada, todavía sin requisitos, generará automáticamente bloques, SNP,
+haplotipos y frecuencias y producirá el mismo paquete canónico de cinco ficheros.
+Ya se acordó usar `r²` haplotípico faseado, dependiente de la
 distancia física, mediante perfiles por población. El programa incluirá el
 perfil sintético aproximado `human_ld_ragsdale_approx_v1` como ejemplo
 seleccionable pero nunca predeterminado; un perfil empírico derivado de 1000

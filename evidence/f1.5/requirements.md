@@ -14,7 +14,7 @@ superado.
 | TEST-REQ-REF-02 | Superado | `reference_domain::reference_preserves_sequence_order_classes_lengths_and_origin` y `reference_generation::generated_reference_respects_order_lengths_classes_and_degenerate_composition`. |
 | TEST-REQ-REF-03 | Superado | `results_publication::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json` comprueba un único FASTA enlazado por referencia. |
 | TEST-REQ-REF-04 | Superado | `reference_generation::generated_fasta_v1_has_literal_headers_lf_order_and_eighty_base_lines` cubre dos secuencias en el FASTA único. |
-| TEST-REQ-REF-05 | Parcial | `reference_index_acceptance::normal_f1_run_has_zero_indexes_and_acceptance_query_creates_fai_on_demand` demuestra cero y uno; F1 no tiene un segundo tipo de índice ni consumidor real para demostrar «varios». |
+| TEST-REQ-REF-05 | Superado | `reference_index_acceptance::normal_f1_run_has_zero_indexes_and_acceptance_query_creates_fai_on_demand` demuestra el contrato v1 de cero índices normales o un único FAI bajo demanda, consumido por una consulta y validado independientemente; DTF-048 reserva los índices múltiples. |
 | TEST-REQ-REF-06 | Superado | La consulta indexada de aceptación crea exactamente el FAI que necesita y ejecuta la consulta conocida. |
 | TEST-REQ-REF-07 | Superado | `reference_copy::supplied_run_copies_the_validated_fasta_byte_for_byte` y los esquemas comprueban origen y ruta suministrada; el recorrido simulado declara `generated`. |
 | TEST-REQ-REF-12 | Superado | `fasta_validation::valid_fasta_preserves_headers_descriptions_n_and_order` y rechazo prepublicación. |
@@ -26,7 +26,7 @@ superado.
 | TEST-REQ-REF-22 | Superado | Las pruebas de dominio, generación y manifiesto conservan clase por secuencia. |
 | TEST-REQ-REF-23 | Superado | Pruebas de dominio/FASTA conservan solo `N` y diagnostican todo símbolo no admitido con posición base 1. |
 | TEST-REQ-REP-22 | Superado | Repetición CLI conserva versión del programa, plataforma, toolchain, dependencias, raíz, configuración efectiva, FASTA y manifiesto. |
-| TEST-REQ-EVO-63 | Parcial | F1.5 enlaza directorio/manifiesto de evento, configuración, referencia y subsemilla; los resultados biológicos/técnicos reales siguen asignados a F5.6 y no se presentan como consumidos. |
+| TEST-REQ-EVO-63 | Superado | `results_publication::complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_valid_json` demuestra directorio y manifiesto propios por evento y enlaces desde la raíz a configuración, referencia y subsemilla, sin inventar resultados. REQ-EVO-78 reserva los enlaces a resultados reales para F5.6. |
 | TEST-REQ-VAL-45 | Superado | `fasta_validation` prueba primer token, duplicados y alfabeto antes de publicación con diagnóstico identificable. |
 | TEST-REQ-MAN-06 | Superado | Configuración efectiva y manifiesto distinguen `generated`/`supplied` y conservan ruta de origen cuando corresponde. |
 | TEST-REQ-MAN-72 | Superado | `results_publication` valida enlaces resolubles a configuración efectiva, referencia común, subsemilla y manifiesto de cada evento. |
@@ -34,6 +34,6 @@ superado.
 | TEST-REQ-SAL-01 | Superado | Recorridos válidos publican exactamente un FASTA por referencia y un FAI solo en aceptación, fuera de la salida normal. |
 | TEST-REQ-SAL-18 | Superado | El resultado contiene manifiesto raíz, área `resources/references` e índices vacíos enlazados verificablemente desde eventos. |
 
-Resultado honesto: 25 de 27 casos superados y 2 parciales. No se declara cierre
-total de las 27 filas: REQ-REF-05 necesita un consumidor de un segundo tipo de
-índice para «varios» y REQ-EVO-63 conserva su cierre compartido en F5.6.
+Resultado: 27 de 27 casos de F1.5 superados. REQ-REF-05 y REQ-EVO-63 cumplen sus
+contratos v1; DTF-048 y REQ-EVO-78 conservan, respectivamente, los índices
+múltiples y los enlaces a resultados reales fuera de esta batería.
