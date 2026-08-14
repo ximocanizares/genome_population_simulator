@@ -5,8 +5,8 @@
 - **Título:** plan detallado de F1, núcleo reproducible.
 - **Versión del plan:** 0.1.
 - **Fecha:** 10 de agosto de 2026.
-- **Estado:** ejecución en curso; F1.5 ha llegado a su pausa obligatoria de
-  revisión, todos los pasos nuevos de F1.6 están abiertos y F1 no está cerrada.
+- **Estado:** ejecución en curso; la pausa F1.5 está aprobada, todos los pasos
+  nuevos de F1.6 están abiertos y F1 no está cerrada.
 - **Ámbito temporal:** únicamente F1.1–F1.6.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
@@ -652,12 +652,13 @@ del original y sin dependencia de validadores externos en runtime.
   - Cambia: casos `TEST-REQ-*`, matriz F1.5 con comandos/salidas/digests y acta de revisión; no cierra F1 ni modifica requisitos o pruebas no ejecutadas.
   - Se comprueba con: batería Cargo bloqueada por warnings, validadores independientes de F1, escenarios A/B/C según frecuencia y revisión de cero hallazgos bloqueantes o graves sin destino aprobado.
 
-  **Auditoría cerrada, pausa no aprobada (14 de agosto de 2026):** las 27
+  **Auditoría previa a la aprobación (14 de agosto de 2026):** las 27
   filas se reauditaron y todas tienen consumidor completo. REQ-REF-05 queda
   superado tras limitar v1 a cero o un FAI; REQ-EVO-63 queda superado con la
   infraestructura propia de evento. REQ-EVO-78 reserva para F5.6 los enlaces a
   resultados reales. A/B, las pruebas y las puertas generales pasan. F1.5 llega
-  a la pausa obligatoria, que aún no aprueba F1 ni autoriza comenzar F1.6.
+  a la pausa obligatoria, pendiente en ese momento de la aprobación registrada
+  a continuación.
 
 ### Pausa obligatoria de revisión de F1.5
 
@@ -666,6 +667,12 @@ trazabilidad, FASTA, integridad y estados de publicación. Deben existir al meno
 un recorrido suministrado, uno simulado, uno inválido de admisión, un fallo
 controlado y una interrupción. Esta pausa solo cierra F1.5; el cierre de F1 se
 traslada detrás de F1.6.
+
+**Aprobación de la pausa (14 de agosto de 2026):** F1.5 queda aprobada tras
+confirmar E1–E13, 27/27 casos trazados, las líneas base A/B, la distribución
+OCI y todas las puertas locales. El commit `b5dc220` superó además `Cargo gates`
+en GitHub Actions sobre Ubuntu 24.04 nativo (ejecución `31783456974`). Esta
+aprobación autoriza comenzar F1.6, pero no declara F1 completa.
 
 ## 10. F1.6 — Referencia reducida reproducible desde FASTA real
 

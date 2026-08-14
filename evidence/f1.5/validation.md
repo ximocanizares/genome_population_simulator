@@ -2,8 +2,8 @@
 
 - Fecha de actualización: 14 de agosto de 2026.
 - Plataforma: Ubuntu 24.04 sobre WSL2, x86-64, ext4.
-- Estado: E1–E13 ejecutados y 27/27 casos de requisitos superados; F1.5 ha
-  llegado a la pausa obligatoria, todavía no aprobada.
+- Estado: E1–E13 ejecutados y 27/27 casos de requisitos superados; pausa F1.5
+  aprobada el 14 de agosto de 2026.
 
 ## Pasos y pruebas específicas
 
@@ -77,12 +77,16 @@ Ejecutadas individualmente antes de las puertas generales:
   código 0; se conserva el aviso no bloqueante por lock del índice local.
 - `git diff --check`: código 0.
 
-## Pendientes de la pausa
+## Cierre de la pausa
 
 - TEST-REQ-REF-05 queda superado: v1 exige cero índices normales o un único FAI
   bajo demanda; DTF-048 reserva la coexistencia de índices múltiples.
 - TEST-REQ-EVO-63 queda superado con directorio, manifiesto y enlaces propios de
   evento; REQ-EVO-78 planifica en F5.6 los enlaces a resultados reales.
 - E10/E11 quedan cerrados con instrumentación y resultados completos.
-- La evidencia nativa Ubuntu 24.04 de esta implementación F1.5 deberá provenir
-  de CI; WSL2 y OCI no se presentan como ejecución nativa independiente.
+- El commit `b5dc2207a36561fa447e9015d7be72e33f7235ac` superó el trabajo
+  `Cargo gates` de GitHub Actions sobre Ubuntu 24.04 nativo en la ejecución
+  [31783456974](https://github.com/ximocanizares/genome_population_simulator/actions/runs/31783456974):
+  formato, Clippy, pruebas objetivo, doctests y compilación release portable.
+- Con la evidencia local WSL2/ext4, OCI y CI nativo no queda ningún pendiente
+  de la pausa F1.5. Su aprobación no cierra F1, que continúa con F1.6.

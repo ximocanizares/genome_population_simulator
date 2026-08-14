@@ -1,12 +1,12 @@
 # Punto de reanudación del proyecto
 
 - **Fecha:** 14 de agosto de 2026
-- **Último commit publicado:** `81e6589 docs: preplan automatic LD block generation`.
-- **Estado actual de ejecución:** F1.5 completó E1–E13 localmente y alcanzó su
-  pausa obligatoria. Sus 27/27 requisitos están demostrados; E10/E11 conservan
-  líneas base A/B con pico temporal directo y E13 supera las puertas generales.
-  La pausa aún requiere revisión y la evidencia nativa Ubuntu 24.04 de CI; F1.6
-  no ha comenzado.
+- **Implementación F1.5 publicada:** `b5dc220 feat: complete F1.5 reference evidence`.
+- **Estado actual de ejecución:** la pausa F1.5 está aprobada. Sus 27/27
+  requisitos están demostrados; E10/E11 conservan líneas base A/B con pico
+  temporal directo y E13 supera las puertas generales. El commit `b5dc220`
+  superó también `Cargo gates` en Ubuntu 24.04 nativo. F1.6 no ha comenzado y
+  F1 todavía no está cerrada.
 - **Estado de diseño:** DTPD-118 y DTPD-119 están resueltas y publicadas.
   DTPD-119 queda cerrada mediante DTC-055 después de una revisión independiente
   y dos rondas de correcciones.
@@ -99,10 +99,9 @@
 
 ## Punto exacto de reanudación
 
-Revisar la evidencia nativa Ubuntu 24.04 de CI y decidir si se aprueba la pausa
-F1.5. No comenzar F1.6 antes de esa aprobación. Si la pausa se aprueba, el paso
-siguiente es cerrar sus dos cuestiones funcionales de reducción, DTPD-101 y
-DTPD-116 antes de implementar F1–F14.
+La pausa F1.5 está aprobada. El siguiente paso es cerrar las dos cuestiones
+funcionales de reducción, DTPD-101 y DTPD-116, antes de implementar F1–F14 de
+F1.6.
 
 El preplan de generación automática de bloques de LD no tiene elecciones
 funcionales o técnicas materiales abiertas y conserva el `profile_id`

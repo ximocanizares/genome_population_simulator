@@ -75,5 +75,6 @@ No quedan hallazgos bloqueantes o graves de código abiertos en E3–E12.
   inventarlos en F1.
 
 La revisión marca 27/27 casos de requisitos superados y E10/E11 cerrados. E13
-queda completo y F1.5 alcanza su pausa obligatoria; esto no aprueba todavía la
-pausa ni declara F1 cerrada.
+queda completo. Tras superar el commit `b5dc220` las puertas de CI en Ubuntu
+24.04 nativo, la pausa F1.5 queda aprobada el 14 de agosto de 2026. Esto autoriza
+comenzar F1.6, pero no declara F1 cerrada.
