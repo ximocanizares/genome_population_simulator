@@ -149,7 +149,7 @@ presentan como ejecutadas o superadas.
 | REQ-CONF-122 | ACE-111, ACE-93 | F9.7 | Planificada — TEST-REQ-CONF-122: comprobar que sustituciones técnicas no cambian verdad biológica y que eventos demográficos o reproductivos no se reinterpretan como técnicos. |
 | REQ-CONF-123 | ACE-111, ACE-22 | F1.4 | Superada — TEST-REQ-CONF-123 serializa valor, objeto, regla ganadora, selectores y procedencia y conserva equivalencia semántica al reordenar TOML. |
 | REQ-CONF-124 | ACE-112 | F1.6 | Planificada — TEST-REQ-CONF-124: declarar ID derivado, FASTA de origen y `region_size_bases` en bases y comprobar dominio, unidad y conservación efectiva. |
-| REQ-CONF-125 | ACE-112 | F1.6 | Planificada — TEST-REQ-CONF-125: aceptar por separado `target_bases` y `reduction_percent` y rechazar ambos, ninguno y cada valor fuera de dominio antes de derivar. |
+| REQ-CONF-125 | ACE-112 | F1.6 | Planificada — TEST-REQ-CONF-125: aceptar por separado `target_bases` y `reduction_percent` en `(0,100)` y rechazar ambos, ninguno, 0/100 y todo objetivo igual o mayor que el origen antes de derivar. |
 | REQ-CONF-126 | ACE-112, ACE-23 | F1.6 | Planificada — TEST-REQ-CONF-126: repetir la selección con raíz/ID iguales y demostrar aislamiento al añadir individuos, eventos o salidas. |
 | REQ-CONF-127 | ACE-112, ACE-113, ACE-22 | F1.6 | Planificada — TEST-REQ-CONF-127: inspeccionar configuración efectiva y verificar origen, objetivo declarado/realizado, región, seed/subseed, versión y procedencia sin sustitución silenciosa. |
 | REQ-CONF-128 | ACE-116 | F2.2 | Planificada — TEST-REQ-CONF-128: admitir exactamente una matriz canónica preparada, generada o reutilizada por referencia, seleccionar una población literal por individuo y rechazar mezcla o matriz/referencia incompatible. |
@@ -195,18 +195,18 @@ presentan como ejecutadas o superadas.
 | REQ-REF-21 | ACE-58, ACE-03 | F5.6 | Planificada — TEST-REQ-REF-21: ejecutar el escenario «Cada CRAM debe estar asociado inequívocamente al FASTA exacto de la referencia contra la que se» y comparar el resultado observable con el REQ. |
 | REQ-REF-22 | ACE-03, ACE-04, ACE-11 | F1.5 | Superada — TEST-REQ-REF-22: dominio, configuración efectiva y manifiesto conservan clase explícita por secuencia. |
 | REQ-REF-23 | ACE-110, ACE-03 | F1.5 | Superada — TEST-REQ-REF-23: entrada y generación admiten A/C/G/T/N, conservan N y localizan cualquier otro símbolo. |
-| REQ-REF-24 | ACE-112, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-24: derivar una referencia con ID propio desde un FASTA real y comprobar que origen, copia autoritativa y derivada siguen siendo entidades distintas. |
+| REQ-REF-24 | ACE-112, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-24: derivar una referencia con ID propio desde un FASTA real mixto de cromosomas/*scaffolds* y comprobar que origen, copia autoritativa y derivada siguen siendo entidades distintas. |
 | REQ-REF-25 | ACE-03, ACE-112 | F1.6 | Planificada — TEST-REQ-REF-25: ejecutar el mismo preflight/copia/SHA-256 de F1.5 y demostrar que la selección solo lee la copia validada. |
-| REQ-REF-26 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-26: verificar con oráculo que los intervalos son reproducibles, no solapan ni se repiten y conservan orientación. |
-| REQ-REF-27 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-27: comprobar tamaño exacto para bases y porcentajes de borde con la regla funcional aprobada. |
+| REQ-REF-26 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-26: verificar con oráculo que los inicios seguros se ponderan uniformemente, son reproducibles, no solapan ni se repiten y conservan orientación. |
+| REQ-REF-27 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-27: comprobar tamaño exacto para bases y porcentajes de borde mediante `floor(S × (100 − p) / 100)` sobre el decimal exacto. |
 | REQ-REF-28 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-28: cubrir objetivo múltiplo y no múltiplo y exigir cero o exactamente un residual más corto, sin relleno ni repetición. |
 | REQ-REF-29 | ACE-113 | F1.6 | Planificada — TEST-REQ-REF-29: sortear intervalos fuera de orden y comprobar materialización por orden de secuencia y coordenada creciente. |
 | REQ-REF-30 | ACE-113 | F1.6 | Planificada — TEST-REQ-REF-30: omitir secuencias sin selección y rechazar cualquier referencia o registro FASTA vacío. |
-| REQ-REF-31 | ACE-113, ACE-25 | F1.6 | Planificada — TEST-REQ-REF-31: comprobar ID de referencia distinto e identidad/clase inequívocas de cada secuencia fuente conforme a la decisión funcional aprobada. |
+| REQ-REF-31 | ACE-113, ACE-25 | F1.6 | Planificada — TEST-REQ-REF-31: comprobar ID de referencia distinto y conservación literal de `sequence_id`/clase de cada cromosoma o *scaffold*, sin mezclar fuentes. |
 | REQ-REF-32 | ACE-110, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-32: seleccionar intervalos con `N`, contarla en el objetivo y comparar literalmente origen, derivada y mapa. |
-| REQ-REF-33 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-33: rechazar objetivo mayor, cálculo menor que una base, espacio insuficiente y combinación incompatible sin publicar resultado parcial. |
+| REQ-REF-33 | ACE-112 | F1.6 | Planificada — TEST-REQ-REF-33: rechazar objetivo igual o mayor, cálculo menor que una base, espacio insuficiente y combinación incompatible sin consumir selección ni publicar resultado parcial. |
 | REQ-REF-34 | ACE-04, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-34: validar IDs distintos y tamaño/SHA-256 propios y coherentes; aceptar la misma suma solo si los bytes completos coinciden. |
-| REQ-REF-35 | ACE-95, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-35: auditar todas las columnas del mapa y la cobertura bidireccional base 1 cerrada sin huecos derivados ni origen duplicado. |
+| REQ-REF-35 | ACE-95, ACE-113 | F1.6 | Planificada — TEST-REQ-REF-35: auditar el mapa JSON v1, conversiones `[1,1]↔[0,1)`/`[1,L]↔[0,L)` y cobertura bidireccional base 1 cerrada sin huecos derivados ni origen duplicado. |
 | REQ-REF-36 | ACE-113, ACE-23 | F1.6 | Planificada — TEST-REQ-REF-36: reconstruir el FASTA exacto con implementación independiente desde origen+mapa y comprobar seed/versión sin usar orden de sorteo. |
 | REQ-IND-01 | ACE-09, ACE-10 | F7.2 | Planificada — TEST-REQ-IND-01: ejecutar «crear individuos que contengan SNP, *indels*, variantes estructurales y repeticiones en tándem respecto a una referencia» y comprobar el estado o artefacto resultante y su identidad. |
 | REQ-IND-02 | ACE-09, ACE-10 | F2.2 | Planificada — TEST-REQ-IND-02: ejecutar el escenario «La estructura de cada individuo debe poder corresponder a cualquiera de las referencias disponibles» y comparar el resultado observable con el REQ. |

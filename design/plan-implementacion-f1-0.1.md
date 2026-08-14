@@ -5,8 +5,8 @@
 - **Título:** plan detallado de F1, núcleo reproducible.
 - **Versión del plan:** 0.1.
 - **Fecha:** 10 de agosto de 2026.
-- **Estado:** ejecución en curso; la pausa F1.5 está aprobada, todos los pasos
-  nuevos de F1.6 están abiertos y F1 no está cerrada.
+- **Estado:** ejecución en curso; la pausa F1.5 está aprobada, F1–F3 de F1.6
+  están cerrados documentalmente, F4–F14 están abiertos y F1 no está cerrada.
 - **Ámbito temporal:** únicamente F1.1–F1.6.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
@@ -125,16 +125,14 @@ marcado como completo.
 - Una actualización posterior de Rust, del lock, de un crate, de un catálogo o
   de un algoritmo aleatorio exige un cambio aislado y repetir vectores,
   validadores, reproducibilidad y escenarios de rendimiento.
-- F1.6 no puede implementar cálculo porcentual ni espacio elegible hasta aprobar
-  las dos cuestiones `PENDIENTE DE REVISIÓN` de la especificación. La
-  recomendación no aprobada es porcentaje retirado con tamaño retenido
-  redondeado hacia abajo y soporte de cromosomas/*scaffolds* conservando clase.
-- DTPD-101 debe aprobar en F1.6 la representación común y el servicio de
-  coordenadas antes de proyectar el primer mapa; F2.1/F2.2 reutilizarán esa
-  misma decisión y no podrán abrir una convención local.
-- DTPD-116 debe aprobar después algoritmo uniforme/versionado, mapa y vectores
-  antes de que exista un consumidor de selección. No se elige dentro de este
-  plan.
+- F1.6 aplica DTC-050: porcentaje eliminado en `(0,100)`, objetivo retenido
+  decimal exacto redondeado hacia abajo y cromosomas/*scaffolds* elegibles con
+  ID y clase conservados.
+- DTC-056 resuelve DTPD-101 con representación interna base 0 semiabierta y
+  servicio común; F2.1/F2.2 reutilizarán esa decisión sin abrir una convención
+  local.
+- DTC-057 resuelve DTPD-116 con `reduced_reference_selection_v1`, inicios
+  seguros uniformes, regiones completas seguidas del residual y mapa JSON v1.
 
 ### 4.2. Comandos disponibles y comandos posteriores
 
@@ -680,35 +678,35 @@ aprobación autoriza comenzar F1.6, pero no declara F1 completa.
 derivada de tamaño exacto, reconstruible desde su copia de origen y un mapa
 completo, sin alterar orden, orientación, clase o bases `N`.
 
-- ☐ F1. Cerrar las dos decisiones funcionales pendientes de reducción.
+- ✅ F1. Cerrar las dos decisiones funcionales pendientes de reducción.
   - Depende de: pausa F1.5 aprobada.
   - Procede de: REQ-REF-27/31; DTC-050; especificación §4.2.
   - Cambia: especificación, ACE-112/113, trazabilidad y acta fechada que aprueba o sustituye las recomendaciones sobre porcentaje/redondeo y elegibilidad de cromosomas/*scaffolds*; no cambia código.
-  - Se comprueba con: revisión funcional que fija resultados literales para porcentajes de borde y un FASTA mixto cromosoma/*scaffold*, sin conservar ninguna marca `PENDIENTE DE REVISIÓN` en el contrato consumidor.
+  - Se comprueba con: aprobación del 14 de agosto de 2026 que fija rechazo de 0/100, cálculo decimal exacto y un FASTA mixto cromosoma/*scaffold*, sin conservar ninguna marca `PENDIENTE DE REVISIÓN` en el contrato consumidor.
 
-- ☐ F2. Resolver DTPD-101 como decisión única de coordenadas para F1.6 y F2.
+- ✅ F2. Resolver DTPD-101 como decisión única de coordenadas para F1.6 y F2.
   - Depende de: F1.
   - Procede de: DTPD-101; REQ-REF-29/35/36, REQ-VAL-53 y ACE-113; arquitectura §§6.1 y 7.2.
   - Cambia: decisión aprobada con representación interna canónica, tipos de posición/intervalo etiquetados por referencia, conversiones exclusivas de frontera e invariantes comunes para mapa de reducción, segmentos, anclas y formatos; no implementa un servicio local de F1.6.
-  - Se comprueba con: tabla literal de intervalos origen↔derivada y bordes inicial/final, conversiones ida/vuelta, comparación de las necesidades F1.6/F2.1/F2.2 y aprobación fechada que asigna un único servicio responsable.
+  - Se comprueba con: DTC-056, tabla literal `[1,1]↔[0,1)` y `[1,L]↔[0,L)`, puntos interbase 0/L, conversiones ida/vuelta y aprobación fechada que asigna un único servicio responsable.
 
-- ☐ F3. Resolver DTPD-116 y evaluar cualquier dependencia o formato necesarios.
+- ✅ F3. Resolver DTPD-116 y evaluar cualquier dependencia o formato necesarios.
   - Depende de: F1–F2.
   - Procede de: DTPD-116; DTC-037, DTC-043, DTC-047, DTC-048 y DTC-050.
-  - Cambia: decisión aprobada con algoritmo uniforme/versionado sobre el espacio elegible, tratamiento del residual, formato/esquema del mapa compatible con DTPD-101, vectores y oráculo; solo después incorpora dependencias aprobadas y actualiza el lock.
-  - Se comprueba con: comparación reproducible de opciones, revisión DTC-043 por dependencia, vectores externos, `cargo metadata --locked --format-version 1`, `cargo tree --locked -e features` y aprobación fechada.
+  - Cambia: DTC-057 aprueba `reduced_reference_selection_v1`, tratamiento del residual y mapa JSON v1 compatible con DTC-056; no requiere una dependencia nueva ni modifica el lock.
+  - Se comprueba con: opciones y oráculos registrados en DTC-057, `cargo metadata --locked --format-version 1`, `cargo tree --locked -e features` y aprobación del 14 de agosto de 2026.
 
 - ☐ F4. Extender el esquema de autoría y la configuración declarada para referencias reducidas.
   - Depende de: F1–F3.
   - Procede de: REQ-CONF-124/125 y DTC-034, DTC-036 y DTC-050.
-  - Cambia: esquema TOML, tipos `DeclaredConfig`, parser y ubicaciones para ID derivado, FASTA origen, `region_size_bases` y la unión exclusiva `target_bases`/`reduction_percent` conforme a las decisiones aprobadas.
-  - Se comprueba con: fixtures por modalidad y pruebas negativas de ambos/ningún objetivo, enteros cero, porcentaje no finito/fuera de rango, clave desconocida y diagnóstico con ruta/campo/ubicación.
+  - Cambia: esquema TOML, tipos `DeclaredConfig`, parser y ubicaciones para ID derivado, FASTA origen, `region_size_bases` y la unión exclusiva `target_bases`/`reduction_percent`; conserva el literal decimal del porcentaje para el cálculo exacto y no lo reduce a `f64`.
+  - Se comprueba con: fixtures por modalidad y literales decimales/exponenciales equivalentes, más pruebas negativas de ambos/ningún objetivo, enteros cero, porcentaje no finito/fuera de rango, clave desconocida y diagnóstico con ruta/campo/ubicación.
 
 - ☐ F5. Resolver y validar la configuración efectiva completa antes de seleccionar una base.
   - Depende de: F4 y contratos F1.2/F1.5 cerrados.
   - Procede de: REQ-CONF-126/127, REQ-REF-25/27/33 y REQ-VAL-52.
-  - Cambia: `EffectiveConfig` y preflight que enlazan la copia FASTA autoritativa, calculan tamaño elegible/objetivo entero, validan IDs, espacio y residual y rechazan toda incompatibilidad antes del plan derivado.
-  - Se comprueba con: objetivos 1, múltiplo, residual, igual al origen, mayor al origen, redondeo aprobado, ausencia de secuencias elegibles y garantía de cero artefactos derivados ante rechazo.
+  - Cambia: `EffectiveConfig` y preflight que enlazan la copia FASTA autoritativa, calculan el tamaño elegible y el objetivo entero mediante aritmética racional comprobada sobre el literal declarado, validan IDs, espacio y residual y rechazan toda incompatibilidad antes del plan derivado.
+  - Se comprueba con: objetivos 1, múltiplo, residual, igual al origen, mayor al origen, vectores cuyo resultado diferiría tras redondear primero a `f64`, ausencia de secuencias elegibles y garantía de cero artefactos derivados ante rechazo.
 
 - ☐ F6. Versionar el ámbito aleatorio de reducción antes de su primer consumidor.
   - Depende de: F3 y catálogo de subsemillas F1.3.
@@ -766,8 +764,9 @@ completo, sin alterar orden, orientación, clase o bases `N`.
 
 ### Pausa obligatoria de revisión de F1.6 y cierre de F1
 
-No pasar a F2.0 hasta aprobar las decisiones funcionales, DTPD-101, DTPD-116, los 22
-casos F1.6 y la reconstrucción independiente. F1 solo cierra cuando sus 83 REQ
+No pasar a F2.0 hasta completar los 22 casos F1.6 y la reconstrucción
+independiente; las decisiones funcionales y DTPD-101/DTPD-116 ya están
+aprobadas. F1 solo cierra cuando sus 83 REQ
 tienen evidencia válida, E10/E11/E13 están cerradas y FASTA, mapa, manifiesto e
 integridad demuestran el mismo origen y resultado sin `N`, bases, orientación o
 clase inventadas.
@@ -808,7 +807,7 @@ asignación vigente es 16/1/17/27/22, **83 requisitos** en total.
 | F1.3 | REQ-REP-23 | ACE-01/23/64 | DTC-037, DTC-038, DTC-042/043/048 | A5, C1–C8; 1 `TEST-REQ-*` superado y auditoría de 9 reasignados con pruebas parciales; vectores, aislamiento y comparadores preparatorios |
 | F1.4 | REQ-CONF-38/101/123; REQ-MAN-01–05/08/32/69/81/88; REQ-SAL-03/04/22/26 | ACE-01/10/14/22/25/34/64/93/94/105/111 | DTC-035/036/038–040/042–045/047–049 | A4/A6, D1–D13; 17 `TEST-REQ-*` superados y auditoría explícita de 8 reasignados; JSON/SHA, evidencia DTC-049, estados y carrera no-clobber |
 | F1.5 | REQ-CONF-02/03/26/27; REQ-REF-01–07/12/13/15–18/22/23; REQ-REP-22; REQ-EVO-63; REQ-VAL-45; REQ-MAN-06/72/86; REQ-SAL-01/18 | ACE-01–05/23/64/110 | DTC-037, DTC-039–049 | E1–E13; 27 `TEST-REQ-*`, incluida repetición ejecutable con semilla/configuración/entrada/manifiesto; puerta `noodles-fasta`, `cmp`, `samtools faidx`, SHA/JSON independientes y escenarios A/B/C |
-| F1.6 | REQ-CONF-124–127; REQ-REF-24–36; REQ-VAL-52/53; REQ-MAN-89/90; REQ-SAL-27 | ACE-112/113 | DTC-037/038/040/041/043–045/047/048/050; DTPD-101/DTPD-116 y dos decisiones funcionales pendientes | F1–F14; 22 `TEST-REQ-*`, coordenadas comunes, objetivo exacto, vectores de selección, FASTA/mapa/manifiesto atómicos y reconstrucción independiente origen+mapa |
+| F1.6 | REQ-CONF-124–127; REQ-REF-24–36; REQ-VAL-52/53; REQ-MAN-89/90; REQ-SAL-27 | ACE-112/113 | DTC-037/038/040/041/043–045/047/048/050/056/057 | F1–F14; F1–F3 documentales cerrados y F4–F14 abiertos; 22 `TEST-REQ-*`, coordenadas comunes, objetivo exacto, vectores de selección, FASTA/mapa/manifiesto atómicos y reconstrucción independiente origen+mapa |
 
 ### 12.1. Expediente mínimo para aprobar F1
 

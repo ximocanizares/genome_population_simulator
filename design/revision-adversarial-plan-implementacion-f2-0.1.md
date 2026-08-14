@@ -11,6 +11,13 @@
 - **Alcance:** coherencia del plan con la especificación, la arquitectura, las
   decisiones técnicas, la hoja de ruta y la matriz de trazabilidad vigentes.
 
+> **Actualización del 14 de agosto de 2026.** Este informe conserva como
+> evidencia la fotografía revisada el 10 de agosto. Desde entonces DTPD-101 se
+> resolvió mediante DTC-056 y dejó de ser parte pendiente de RAF2-001. El
+> hallazgo continúa abierto por DTPD-102, DTPD-103 y las demás concreciones que
+> enumera; el estado operativo vigente se consulta en el plan F2 y en el
+> registro canónico de decisiones.
+
 Esta revisión distingue los defectos del plan de los heredados de la matriz de
 trazabilidad. Se han aplicado al plan y, cuando era inequívoco y no alteraba el
 alcance funcional, a la matriz maestra. No se han modificado especificación,

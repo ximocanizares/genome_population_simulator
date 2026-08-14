@@ -19,9 +19,8 @@
   y [plan-implementacion-f1-0.1.md](./plan-implementacion-f1-0.1.md).
 - **Decisiones confirmadas aplicables:** DTC-001, DTC-003, DTC-004, DTC-006,
   DTC-010, DTC-011, DTC-013, DTC-020 a DTC-022, DTC-024, DTC-031 a
-  DTC-049 y DTC-051 a DTC-055.
-- **Decisiones pendientes bloqueantes:** DTPD-101 bloquea F1.6 y, por
-  dependencia, F2.1/F2.2; debe llegar resuelta desde F1. DTPD-102 bloquea
+  DTC-049 y DTC-051 a DTC-057.
+- **Decisiones pendientes bloqueantes:** DTPD-102 bloquea
   F2.1/F2.4 y DTPD-103, F2.5. También falta documentar y aprobar la
   concreción técnica de Poisson indicada en §4.2. Para los *indels* aleatorios
   de F2 ya se acordó una longitud exacta configurable por separado para
@@ -115,7 +114,7 @@ VCF como fuente de verdad.
 
 ## 3. Orden, reutilización y fronteras
 
-1. Cerrar F1.6 y F1, incluida DTPD-101 y el servicio común de coordenadas, y
+1. Cerrar F1.6 y F1, implementando DTC-056 y el servicio común de coordenadas, y
    congelar su línea base antes de modificar contratos de dominio,
    configuración, referencia, aleatoriedad o publicación.
 2. Resolver DTPD-117 y cerrar F2.0 antes de F2.1. Después resolver DTPD-102 con
@@ -164,9 +163,10 @@ trazabilidad.
 
 ### 4.2. Decisiones que detienen solo a sus consumidores
 
-- DTPD-101 debe resolverse durante F1.6 con representación común, tipos de
-  frontera y vectores de intervalos origen↔derivada. F2.1/F2.2 deben auditar y
-  extender esa decisión para segmentos, anclas y composición sin reabrirla.
+- DTPD-101 está resuelta mediante DTC-056. F1.6 implementa representación común,
+  tipos de frontera y vectores de intervalos origen↔derivada; F2.1/F2.2 deben
+  auditarlos y extender el mismo servicio para segmentos, anclas y composición
+  sin reabrir la decisión.
 - DTPD-102 debe elegir por separado el estado haplotípico interno y el fichero
   obligatorio de verdad, demostrando reconstrucción, memoria, fase, dosis y
   procedencia.
@@ -981,8 +981,8 @@ contradiría esas filas sin una revisión explícita de trazabilidad.
 | Hito | REQ asignados | ACE cubiertos | Decisiones/puertas principales | Pasos de cierre |
 |---|---|---|---|---|
 | F2.0 | REQ-UI-01; REQ-UI-02; REQ-UI-03; REQ-UI-04; REQ-UI-05; REQ-UI-06; REQ-UI-07; REQ-UI-08; REQ-UI-09; REQ-UI-10; REQ-UI-11; REQ-UI-12; REQ-UI-13; REQ-VAL-54 | ACE-114, ACE-115 | DTC-034, DTC-036, DTC-042, DTC-043, DTC-044, DTC-045, DTC-048, DTC-051; DTPD-117 | M1–M12 |
-| F2.1 | REQ-REF-14; REQ-IND-28; REQ-IND-29; REQ-VER-27 | ACE-03, ACE-10, ACE-11, ACE-28, ACE-66 | DTC-003, DTC-010, DTC-013, DTC-031, DTC-032, DTC-039; DTPD-101 y DTPD-102 | A2–A10 |
-| F2.2 | REQ-CONF-08; REQ-CONF-21; REQ-CONF-24; REQ-CONF-25; REQ-CONF-28; REQ-CONF-128; REQ-CONF-129; REQ-IND-02; REQ-IND-03; REQ-IND-05; REQ-IND-06; REQ-IND-10; REQ-IND-11; REQ-IND-13; REQ-IND-14; REQ-IND-17; REQ-IND-18; REQ-IND-19; REQ-IND-21; REQ-IND-38; REQ-IND-40; REQ-IND-41; REQ-IND-60; REQ-IND-61; REQ-DIR-03; REQ-REC-24 | ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111, ACE-116 | DTC-006, DTC-011, DTC-020, DTC-022, DTC-032, DTC-033, DTC-037, DTC-038, DTC-044, DTC-049, DTC-052 y DTC-054; DTPD-101 y decisión B2 aún sin identificador; DTPD-118 resuelta | B1–B35 |
+| F2.1 | REQ-REF-14; REQ-IND-28; REQ-IND-29; REQ-VER-27 | ACE-03, ACE-10, ACE-11, ACE-28, ACE-66 | DTC-003, DTC-010, DTC-013, DTC-031, DTC-032, DTC-039 y DTC-056; DTPD-102 | A2–A10 |
+| F2.2 | REQ-CONF-08; REQ-CONF-21; REQ-CONF-24; REQ-CONF-25; REQ-CONF-28; REQ-CONF-128; REQ-CONF-129; REQ-IND-02; REQ-IND-03; REQ-IND-05; REQ-IND-06; REQ-IND-10; REQ-IND-11; REQ-IND-13; REQ-IND-14; REQ-IND-17; REQ-IND-18; REQ-IND-19; REQ-IND-21; REQ-IND-38; REQ-IND-40; REQ-IND-41; REQ-IND-60; REQ-IND-61; REQ-DIR-03; REQ-REC-24 | ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111, ACE-116 | DTC-006, DTC-011, DTC-020, DTC-022, DTC-032, DTC-033, DTC-037, DTC-038, DTC-044, DTC-049, DTC-052, DTC-054 y DTC-056; decisión B2 aún sin identificador; DTPD-118 resuelta | B1–B35 |
 | F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-CONF-130; REQ-IND-15; REQ-IND-62; REQ-IND-63; REQ-IND-64; REQ-IND-65; REQ-DIR-01; REQ-DIR-02; REQ-UI-14; REQ-VAL-55; REQ-MAN-91 | ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114, ACE-116 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039, DTC-049, DTC-051, DTC-052 y DTC-054; DTPD-118 resuelta | C1–C17 |
 | F2.4 | REQ-VER-31; REQ-SAL-06 | ACE-34, ACE-62 | DTC-003, DTC-004, DTC-031, DTC-035, DTC-036, DTC-040, DTC-045, DTC-047, DTC-051; DTPD-102 | D1–D9 |
 | F2.5 | REQ-FMT-05; REQ-FMT-06; REQ-REC-26; REQ-VER-02; REQ-VER-06; REQ-VER-12; REQ-VER-15; REQ-VER-16; REQ-VER-17; REQ-VER-30; REQ-VER-32; REQ-VER-33; REQ-VER-34; REQ-VER-36; REQ-VER-37; REQ-VER-39; REQ-VER-40; REQ-VER-41; REQ-VER-43; REQ-VER-44; REQ-VER-47; REQ-VAL-28; REQ-MAN-27; REQ-MAN-57; REQ-SAL-21 | ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100, ACE-103 | DTC-003, DTC-004, DTC-013, DTC-021, DTC-032, DTC-040, DTC-043, DTC-045, DTC-047, DTC-051; DTPD-103 | E1–E13 |

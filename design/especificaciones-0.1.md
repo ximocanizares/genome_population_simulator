@@ -960,9 +960,11 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   el valor convertido a kb sin cambiar ni redondear el valor almacenado.
 - **REQ-CONF-125.** Cada referencia reducida debe declarar exactamente uno de
   estos dos objetivos mutuamente excluyentes: `target_bases`, entero positivo,
-  o `reduction_percent`, porcentaje finito en el intervalo `[0,100)`. Declarar
+  o `reduction_percent`, porcentaje finito en el intervalo `(0,100)`. Declarar
   ambos, ninguno o un valor fuera de su dominio debe rechazarse antes de copiar
-  regiones.
+  regiones. El objetivo retenido debe ser menor que el tamaño elegible; para
+  conservar la referencia completa se usa directamente la referencia
+  suministrada, no una referencia reducida idéntica.
 - **REQ-CONF-126.** La selección de regiones de cada referencia reducida debe
   usar la semilla raíz de la ejecución y una subsemilla propia derivada del
   identificador estable de la referencia. No debe consumir un generador global
@@ -1147,7 +1149,7 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   o copias deben conservarse con su posición; toda secuencia nueva generada
   aleatoriamente debe contener solo A, C, G y T.
 - **REQ-REF-24.** El sistema debe poder crear una referencia reducida con ID
-  propio a partir de las regiones de los cromosomas de un FASTA real
+  propio a partir de las regiones de los cromosomas o *scaffolds* de un FASTA real
   suministrado. La referencia reducida es una referencia derivada de
   preparación y no debe modificar ni reemplazar la copia autoritativa del FASTA
   de origen.
@@ -1161,31 +1163,34 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   exista en el FASTA de origen.
 - **REQ-REF-27.** La referencia reducida debe contener exactamente el número de
   bases objetivo. Para `target_bases`, ese número es el entero declarado. Para
-  `reduction_percent`, debe calcularse desde el tamaño total elegible mediante
-  una regla decimal y de redondeo única, determinista y registrada antes de
-  seleccionar regiones.
+  `reduction_percent=p`, `p` expresa el porcentaje eliminado y el tamaño
+  retenido debe ser `floor(S × (100 − p) / 100)`, donde `S` es el tamaño total
+  elegible. El cálculo debe usar el valor decimal declarado de forma exacta,
+  redondear una sola vez hacia abajo y registrarse antes de seleccionar
+  regiones. Un resultado menor que una base debe rechazarse.
 - **REQ-REF-28.** La selección debe usar intervalos de longitud
   `region_size_bases`. Si el objetivo no es múltiplo de esa longitud, debe usar
   exactamente un intervalo residual más corto para alcanzar el tamaño exacto;
   no debe redondear el objetivo, completar con `N`, repetir bases ni producir
   más de un residual.
 - **REQ-REF-29.** Antes de materializar, los intervalos elegidos deben ordenarse
-  por el orden de cromosomas del FASTA de origen y por coordenada creciente
-  dentro de cada cromosoma. La secuencia derivada de cada cromosoma debe
+  por el orden de cromosomas o *scaffolds* del FASTA de origen y por coordenada
+  creciente dentro de cada secuencia. La secuencia derivada correspondiente debe
   concatenar sus intervalos en ese orden y conservar siempre orientación
   directa.
-- **REQ-REF-30.** Un cromosoma de origen sin intervalos elegidos debe omitirse de
+- **REQ-REF-30.** Un cromosoma o *scaffold* de origen sin intervalos elegidos debe omitirse de
   la referencia reducida. El sistema no debe crear secuencias FASTA vacías y la
-  referencia reducida debe contener al menos un cromosoma y una base.
+  referencia reducida debe contener al menos una secuencia y una base.
 - **REQ-REF-31.** Cada secuencia de la referencia reducida debe conservar de
-  forma inequívoca la identidad del cromosoma fuente. El ID de referencia
-  derivada es distinto del ID de la referencia de origen; la forma física de
-  codificar la identidad del cromosoma se fijará sin perder el vínculo tipado.
+  forma inequívoca la identidad y clase del cromosoma o *scaffold* fuente. La
+  secuencia derivada debe reutilizar exactamente su `sequence_id` y su clase;
+  el ID de referencia derivada, distinto del ID de origen, separa ambos espacios
+  de coordenadas. No se mezclan regiones de secuencias fuente diferentes.
 - **REQ-REF-32.** Toda `N` incluida en un intervalo seleccionado debe copiarse
   literalmente, conservar su posición relativa dentro del intervalo y contar
   como una base para el tamaño objetivo. La reducción nunca debe resolver,
   excluir o reemplazar `N` por su contenido.
-- **REQ-REF-33.** Un objetivo mayor que el total elegible, un objetivo calculado
+- **REQ-REF-33.** Un objetivo igual o mayor que el total elegible, un objetivo calculado
   menor que una base, la falta de espacio para completar intervalos no
   solapados o cualquier combinación incompatible debe rechazarse antes de
   materializar la referencia derivada. El rechazo no puede reducir el objetivo
@@ -1206,18 +1211,10 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   la semilla y la versión del algoritmo de selección. El mapa y el manifiesto
   no pueden depender de recordar el orden en que el generador sorteó candidatos.
 
-**PENDIENTE DE REVISIÓN — porcentaje.** `reduction_percent` se interpreta de
-forma recomendada como porcentaje eliminado y no como porcentaje conservado.
-Falta aprobar la regla exacta que convierte el decimal declarado en bases
-enteras. La recomendación es calcular el tamaño conservado con aritmética
-decimal determinista, redondear hacia abajo y rechazar un resultado de cero;
-ningún plan debe implementar esa recomendación como si ya estuviera aprobada.
-
-**PENDIENTE DE REVISIÓN — *scaffolds*.** El contrato confirmado habla de
-cromosomas. La recomendación es admitir tanto cromosomas como *scaffolds* y
-preservar la clase de cada secuencia derivada, sin mezclarlos ni reclasificarlos.
-Incluir *scaffolds* cambia el espacio de selección y necesita aprobación
-funcional explícita.
+**Decisión funcional cerrada el 14 de agosto de 2026.** `reduction_percent`
+expresa el porcentaje eliminado, usa el cálculo decimal exacto y el redondeo de
+REQ-REF-27 y no admite cero. Cromosomas y *scaffolds* forman el espacio elegible
+y cada secuencia derivada conserva su ID y clase sin mezclarse con otra.
 
 La copia permite reunir en el directorio de resultados todos los archivos
 necesarios para utilizar la simulación. Así se podrán exportar juntos a otros
@@ -5351,8 +5348,8 @@ pendientes.
 | **ACE-109. Poisson y modelo escalonado simple** | Todo recuento de variantes aleatorias usa exclusivamente Poisson y se reproduce con la misma semilla, configuración, entradas y versión. Los cambios concretos se expresan mediante eventos explícitos o el modo controlado aplicable, no como otra distribución. Cada mutación de repetición en tándem añade una unidad completa o elimina una, conforme al sesgo configurado. Seleccionar otra distribución de recuentos, otro modelo de repetición o un salto de varias unidades se rechaza antes de simular e identifica parámetro y valor | Casos Poisson reproducibles, eventos explícitos, expansión y contracción unitarias, valores de sesgo y rechazos de alternativas |
 | **ACE-110. Conservación de la base desconocida N** | `N` se conserva y nunca se resuelve. No puede ser SNP, locus seleccionado ni motivo de repetición; sí puede permanecer dentro de una SV o secuencia explícita/copiada. Las inserciones aleatorias y errores solo generan A/C/G/T. Se hereda y recombina sin cambios. WGS puede muestrearla, FASTQ la representa con Phred 0, BAM/CRAM la propaga, GC la excluye de su denominador y cobertura la cuenta. VCF nunca emite SNP con `REF=N` y usa complemento cuando el estándar no conserve otro caso sin pérdida. Validación y manifiesto prueban exclusiones, resúmenes y ausencia de resolución | SNP sobre `N`; SV con `N`; inserciones aleatoria y expresa; herencia; lectura Q0; ventana toda `N`; cobertura; VCF/complemento; ausencia de resolución |
 | **ACE-111. Sustituciones y precedencia entre ejes** | Cada parámetro parte de su regla base y solo admite los selectores de su familia. Una regla aplica cuando coinciden todos sus selectores; se eliminan las dominadas y una única máxima fija el valor. Una regla combinada domina las reglas parciales. Sin esa regla combinada, región frente a subpoblación e individuo frente a región son máximas incomparables y se rechazan aunque compartan valor; también se rechazan reglas duplicadas, regiones solapadas con iguales selectores no espaciales y selectores no admitidos. Generación domina fase, subpoblación domina población, locus domina región y secuencia, y una coincidencia concreta domina la ausencia dentro de los demás ejes. Un evento técnico nunca sustituye biología. Configuración efectiva y manifiesto conservan valor, regla ganadora, selectores y procedencia | Herencia base; todas las jerarquías internas; regla combinada; los dos conflictos cruzados; duplicado igual; regiones solapadas; selector no permitido; separación biológica/técnica; procedencia |
-| **ACE-112. Objetivo y selección de referencia reducida** | Un FASTA real validado origina otra referencia con ID propio. Exactamente uno de `target_bases` o `reduction_percent` fija un objetivo entero positivo; `region_size_bases` es positivo. La selección usa subsemilla propia, no reemplaza ni solapa, no duplica ni invierte y produce bloques completos más como máximo un residual para alcanzar exactamente el objetivo. Objetivo imposible, espacio insuficiente o parámetros incompatibles fallan antes de materializar | Casos con objetivo exacto/múltiplo/residual, 0 y 100 %, objetivo igual/mayor que origen, semilla repetida y espacio insuficiente; cerrar antes las dos cuestiones funcionales pendientes |
-| **ACE-113. Procedencia y reconstrucción de referencia reducida** | Los intervalos se ordenan por cromosoma y coordenada, se concatenan en orientación directa, omiten cromosomas sin selección y no crean secuencias vacías. `N` se copia y cuenta. FASTA canónico, mapa derivada↔origen, SHA-256, configuración efectiva y manifiesto permiten reconstruir exactamente cada base y explican cromosomas omitidos y residual | Reconstrucción con lector independiente, mapa con bordes base 1 cerrados, `sha256sum`, FASTA con `N` y corrupción deliberada de cada enlace |
+| **ACE-112. Objetivo y selección de referencia reducida** | Un FASTA real validado origina otra referencia con ID propio. Exactamente uno de `target_bases` o `reduction_percent` fija un objetivo entero positivo y menor que el origen; `region_size_bases` es positivo. El porcentaje expresa bases eliminadas y retiene `floor(S × (100 − p) / 100)` con decimal exacto. La selección usa subsemilla propia, pondera por inicios seguros del espacio conjunto, no reemplaza ni solapa, no duplica ni invierte y produce bloques completos más como máximo un residual para alcanzar exactamente el objetivo. Objetivo imposible, espacio insuficiente o parámetros incompatibles fallan antes de materializar | Casos con objetivo exacto/múltiplo/residual, porcentajes próximos a 0 y 100, rechazo de 0/100, objetivo igual/mayor que origen, semilla repetida, cromosomas/*scaffolds*, enumeración de inicios seguros y espacio insuficiente |
+| **ACE-113. Procedencia y reconstrucción de referencia reducida** | Los intervalos se ordenan por secuencia y coordenada, se concatenan en orientación directa, omiten secuencias sin selección y no crean secuencias vacías. Cada cromosoma o *scaffold* conserva `sequence_id` y clase. `N` se copia y cuenta. FASTA canónico, mapa derivada↔origen, SHA-256, configuración efectiva y manifiesto permiten reconstruir exactamente cada base y explican secuencias omitidas y residual | Reconstrucción con lector independiente, mapa con bordes base 1 cerrados y vectores base 0 semiabiertos, `sha256sum`, FASTA mixto con `N` y corrupción deliberada de cada enlace |
 | **ACE-114. Equivalencia de autoría Marimo** | Todas las opciones implementadas están en una de las nueve pestañas mínimas. Escalares usan controles tipados; listas y reglas, tablas con alta/baja/reordenación y selectores visibles. Importar, editar, previsualizar y exportar como unidad el TOML general y cero o varios escenarios conserva significado, IDs, orden y enlaces/rutas relativas. El binario Rust valida y resuelve; cualquier cambio de cualquier documento invalida la validación previa y una incompatibilidad, escenario ausente o duplicado se rechaza | Matriz opción→pestaña/control; conjunto sin escenarios y conjuntos multiescenario con rutas relativas/espacios/faltantes/duplicados; comparación UI→conjunto TOML→`EffectiveConfig` o diagnóstico con conjunto manual equivalente |
 | **ACE-115. Ejecución segura y accesible desde Marimo** | La aplicación nunca ejecuta automáticamente ni usa shell. Una acción explícita tras validación vigente lanza `run` con argumentos separados y destino no-clobber revisado. Muestra estado, código, logs, diagnósticos y enlaces/resúmenes sin cargar artefactos genómicos grandes. Funciona localmente en Ubuntu/WSL2 Linux y ofrece teclado, foco, etiquetas, ayuda y estados no basados solo en color. Cada capacidad F2–F9 añade controles antes de cerrar | Proceso falso y binario real; cambio posterior a validar; destino existente; logs grandes y artefacto grande; revisión de teclado/foco/color; puerta transversal por hito |
 | **ACE-116. Población inicial desde frecuencias SNV** | La ejecución prepara, genera o reutiliza el par canónico TSV+JSON enlazado a una referencia exacta. Solo admite `alt_af`; genera loci bialélicos candidatos sin reemplazo mediante espacio, sustituciones y espectro explícitos y acepta multialelia suministrada. Las poblaciones asignan frecuencias independientemente, permiten 0/1, eliminan `ALT` globalmente ausentes sin reemplazo y conservan fijados. HWE es predeterminado y `F` solo diploide; cada individuo pertenece a una población y recibe genotipo/fase reproducibles sin LD ni corrección por muestra finita. Perfiles empíricos son ejemplos explícitos, nunca predeterminados. Las dos excepciones de ejecución son específicas, visibles y trazadas | Preparación y hashes; tabla y VCF rechazado; modos exacto/mayores restos y estocástico; regiones/pesos; 12 sustituciones y Ti/Tv; perfiles uniformes/1000G; ceros/fijados; matriz vacía; multialélico; HWE/F; subsemillas y reordenación; flags limitados; errores de suma, duplicado, referencia y `N` |
@@ -5366,8 +5363,8 @@ planificación de la implementación.
 Las 27 preguntas funcionales de la revisión
 [revision-adversarial-especificaciones-0.1.md](./revision-adversarial-especificaciones-0.1.md)
 están resueltas para v1. La ampliación posterior confirma la referencia reducida
-y la aplicación Marimo, pero deja `PENDIENTE DE REVISIÓN` el redondeo de
-`reduction_percent` y la elegibilidad de *scaffolds*. Añadir otro comportamiento,
+y la aplicación Marimo; el 14 de agosto de 2026 quedaron también cerrados el
+redondeo de `reduction_percent` y la elegibilidad de *scaffolds*. Añadir otro comportamiento,
 selector o clase de regla requerirá revisar expresamente esta especificación;
 las elecciones restantes de la sección 9 son técnicas y no pueden reabrir la
 semántica funcional confirmada.
@@ -5413,15 +5410,13 @@ decidirá la estrategia técnica de subsemillas o
   plataformas. Estas elecciones conservarán las medias esperadas configurables,
   los resultados realizados y los niveles de reproducibilidad ya exigidos.
 
-**PENDIENTE DE REVISIÓN TÉCNICA — selección de intervalos para referencias
-reducidas.** Después de cerrar las
-dos cuestiones funcionales de REQ-REF-27 y REQ-REF-31 y resolver DTPD-101 como
-contrato común de coordenadas, se elegirá y versionará
-el algoritmo exacto que reparte oportunidades entre cromosomas, selecciona
-intervalos no solapados y sitúa el único residual. La elección debe respetar el
-objetivo exacto, el orden relativo, la subsemilla propia y la reconstrucción, y
-debe aportar vectores independientes; no puede convertir el orden de recorrido
-o el paralelismo en azar implícito.
+**DECISIÓN TÉCNICA RESUELTA — coordenadas y selección de intervalos para
+referencias reducidas.** DTPD-101 y DTPD-116 quedan resueltas mediante DTC-056 y
+DTC-057. El dominio usa coordenadas internas base 0 semiabiertas y tipos
+etiquetados, mientras configuración y mapa conservan base 1 cerrada. El
+algoritmo versionado pondera por inicios seguros del espacio conjunto,
+selecciona bloques completos y después el único residual y materializa en orden
+de secuencia y coordenada, con vectores y reconstrucción independientes.
 
 **PENDIENTE DE REVISIÓN TÉCNICA — aplicación Marimo.** Se elegirán una versión
 compatible, el empaquetado local
@@ -5476,13 +5471,11 @@ y sumas no normalizables, conservando los valores antes y después. También se
 fijarán las tolerancias técnicas específicas aún pendientes. Ninguna sustituirá
 `0,5/C` ni otra tolerancia ya acordada con una finalidad distinta.
 
-**Representación técnica de coordenadas.** La configuración usa coordenadas
-basadas en 1 e intervalos cerrados. Durante la planificación se elegirá su
-representación concreta en los ficheros estructurados y se documentarán las
-conversiones a las convenciones oficiales de cada formato externo. DTPD-101
-debe resolverse en F1.6 antes de materializar el mapa origen↔derivada y fijar un
-único servicio que reutilicen F2 y las fases posteriores; no se admite una
-representación local de reducción. Los VCF de
+**Representación técnica de coordenadas.** La configuración y el mapa de
+reducción usan coordenadas basadas en 1 e intervalos cerrados. DTC-056 fija la
+representación interna base 0 semiabierta, los puntos interbase separados y un
+único servicio con conversiones comprobadas que reutilizan F1.6, F2 y las fases
+posteriores. Cada formato externo conserva su convenio oficial. Los VCF de
 referencias distintas se construirán de forma independiente y no se definirá un
 algoritmo de correspondencia entre sus registros.
 
@@ -5633,9 +5626,8 @@ familias de decisiones funcionales que siguen abiertas para el alcance de v1.
 9. Definir los campos de cabecera y las versiones de SAM/BAM, CRAM y VCF que
    identificarán referencia, muestra, evento, biblioteca, tanda y grupo
    de lectura.
-10. Aprobar la interpretación y redondeo de `reduction_percent` y la
-    elegibilidad de *scaffolds*; después, elegir y versionar el algoritmo
-    uniforme de selección y sus vectores reproducibles.
+10. Implementar y validar DTC-056/DTC-057 para coordenadas y selección uniforme
+    reproducible de referencias reducidas, incluidos sus vectores y oráculos.
 11. Evaluar, fijar y empaquetar Marimo mediante la puerta F2.0 y versionar su
     contrato con esquemas, catálogos y binario sin trasladar reglas biológicas a
     la interfaz.

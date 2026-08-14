@@ -7,9 +7,10 @@
   temporal directo y E13 supera las puertas generales. El commit `b5dc220`
   superó también `Cargo gates` en Ubuntu 24.04 nativo. F1.6 no ha comenzado y
   F1 todavía no está cerrada.
-- **Estado de diseño:** DTPD-118 y DTPD-119 están resueltas y publicadas.
-  DTPD-119 queda cerrada mediante DTC-055 después de una revisión independiente
-  y dos rondas de correcciones.
+- **Estado de diseño:** DTPD-101, DTPD-116, DTPD-118 y DTPD-119 están resueltas.
+  DTC-056 fija las coordenadas comunes y DTC-057,
+  `reduced_reference_selection_v1`; DTPD-119 queda cerrada mediante DTC-055
+  después de una revisión independiente y dos rondas de correcciones.
 - **Copia de la conversación:**
   [chat-dtpd-119-2026-08-12.md](../docs/chat-dtpd-119-2026-08-12.md) y
   [chat-generacion-automatica-bloques-ld-2026-08-13.md](../docs/chat-generacion-automatica-bloques-ld-2026-08-13.md).
@@ -99,9 +100,10 @@
 
 ## Punto exacto de reanudación
 
-La pausa F1.5 está aprobada. El siguiente paso es cerrar las dos cuestiones
-funcionales de reducción, DTPD-101 y DTPD-116, antes de implementar F1–F14 de
-F1.6.
+La pausa F1.5 está aprobada. Las cuestiones funcionales de reducción y
+DTPD-101/DTPD-116 quedaron cerradas el 14 de agosto de 2026; F1–F3 de F1.6 son
+documentales y están completos. El siguiente paso es F4: extender esquema TOML,
+`DeclaredConfig` y admisión para referencias reducidas, y continuar F4–F14.
 
 El preplan de generación automática de bloques de LD no tiene elecciones
 funcionales o técnicas materiales abiertas y conserva el `profile_id`

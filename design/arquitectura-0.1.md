@@ -29,9 +29,9 @@ adaptador FASTA tras superar la evaluación revisable de F1. Las versiones
 concretas de los crates aceptados quedan fijadas por `Cargo.lock`.
 
 La ampliación confirmada incorpora una derivación reducida de FASTA en F1.6 y
-una aplicación Marimo obligatoria desde F2.0. La arquitectura define sus
-fronteras, pero no da por resueltas DTPD-101, DTPD-116 ni DTPD-117, ni las dos cuestiones
-funcionales marcadas `PENDIENTE DE REVISIÓN` en la especificación.
+una aplicación Marimo obligatoria desde F2.0. DTC-056/DTC-057 cierran las
+coordenadas comunes y la selección de intervalos; DTPD-117 continúa pendiente
+para la frontera técnica de Marimo.
 
 La arquitectura cubre toda la versión 1 para evitar contratos incompatibles
 entre fases. Sin embargo, su materialización seguirá la secuencia F1–F9 de la
@@ -285,12 +285,33 @@ identidad y clase de secuencia, posición en la concatenación y procedencia. La
 lista y el FASTA canónico derivado son dos proyecciones del mismo resultado; el
 mapa no se reconstruye a posteriori desde nombres físicos.
 
-El espacio elegible y la interpretación porcentual permanecen bloqueados por
-las cuestiones funcionales de REQ-REF-27/31. DTPD-116 elegirá después un
-algoritmo uniforme y versionado sobre el espacio elegible, con RNG local y
-vectores normativos. La recomendación no aprobada es admitir cromosomas y
-*scaffolds* conservando su clase y entender el porcentaje como bases retiradas,
-con tamaño retenido redondeado hacia abajo.
+El espacio elegible contiene cromosomas y *scaffolds*. Cada secuencia derivada
+conserva exactamente el `sequence_id` y la clase de su fuente; la identidad de
+referencia separa los dos espacios. `reduction_percent` expresa el porcentaje
+eliminado y el objetivo retenido es `floor(S × (100 − p) / 100)` calculado desde
+el literal decimal TOML exacto. La frontera conserva ese literal y obtiene el
+entero mediante aritmética racional comprobada, sin pasar por `f64`. Tanto el
+porcentaje como `target_bases` deben producir un objetivo positivo y
+estrictamente menor que `S`.
+
+El servicio común de coordenadas posee tipos distintos para posición de base,
+punto interbase e intervalo. Internamente usa magnitudes `u64`, intervalos base
+0 semiabiertos no vacíos `[start,end)` y valores ligados a `ReferenceId` y
+`SequenceId`. Un punto interbase admite `0..=sequence_length`. Los adaptadores
+convierten explícitamente `[s,e]` base 1 cerrado en `[s−1,e)` y viceversa, con
+aritmética comprobada. Ningún valor inválido se recorta, y un DTO externo nunca
+se usa como valor de dominio. F2 amplía este mismo servicio para anclas,
+variantes y segmentos.
+
+`reduced_reference_selection_v1` calcula `q=T/R` y `r=T%R`. El preflight
+comprueba que existe una disposición completa. Para cada región completa
+enumera de forma compacta rangos de inicios no solapantes cuya elección conserva
+al menos una terminación posible; todos los inicios seguros del conjunto reciben
+el mismo peso. Un índice entero uniforme sin sesgo elige el inicio mediante el
+RNG local. Tras las `q` regiones se aplica la misma regla al único residual si
+`r>0`. No existen reintentos de disposición ni resultados parciales. El orden
+de sorteo se conserva como traza, pero el plan materializado se ordena por orden
+FASTA y coordenada.
 
 En un FASTA, el identificador de secuencia es el primer elemento no vacío que
 sigue a `>` y termina en el primer espacio o carácter de separación. Debe ser
@@ -483,9 +504,8 @@ etiqueta, ruta o nombre físico nunca se convierte implícitamente en identidad.
   escritores de resultados; su única configuración ejecutable es el conjunto
   TOML que presenta y entrega a `validate`/`run`.
 - Reducción de referencias puede consultar catálogo, coordenadas, RNG local e
-  integridad. No puede escribir el origen, usar un RNG compartido ni decidir
-  reglas de elegibilidad/redondeo ni una representación local de coordenadas
-  mientras DTPD-101/DTPD-116 sigan pendientes.
+  integridad. No puede escribir el origen, usar un RNG compartido, reinterpretar
+  DTC-050/DTC-056/DTC-057 ni crear una representación local de coordenadas.
 - Creación directa, inicialización, evolución y familias pueden depender del
   motor genómico, aleatoriedad, identidad y selección declarativa.
 - Todo consumidor de aleatoriedad recibe un generador local y solo avanza ese
@@ -666,15 +686,22 @@ canónico v1 de 80 bases por línea. La ejecución normal conserva el catálogo 
 demanda fuera del resultado publicado. Un FASTA comprimido se rechaza como
 formato no admitido, no se descomprime implícitamente.
 
-Para una reducción, el preflight termina antes de sortear. Tras resolver las
-cuestiones funcionales pendientes, DTPD-101 y DTPD-116, el planificador recibe el tamaño
-elegible, objetivo entero, tamaño de región, ID y RNG local; devuelve todos los
-segmentos o un error, nunca un prefijo parcial. Otra operación los ordena por
-secuencia fuente y coordenada, asigna coordenadas derivadas acumuladas y crea el
-mapa inmutable. El escritor FASTA consume ese plan una vez, copia `N` como
-cualquier otra base y aplica el formato canónico. Un comprobador independiente
-reconstruye el FASTA desde origen+mapa antes de publicar conjuntamente mapa,
-FASTA, hashes y manifiesto.
+Para una reducción, el preflight termina antes de sortear. El planificador recibe
+el tamaño elegible, objetivo entero, tamaño de región, ID y RNG local; aplica
+DTC-057 y devuelve todos los segmentos o un error, nunca un prefijo parcial.
+Otra operación los ordena por secuencia fuente y coordenada, asigna coordenadas
+derivadas acumuladas y crea el mapa inmutable. El escritor FASTA consume ese
+plan una vez, copia `N` como cualquier otra base y aplica el formato canónico.
+Un comprobador independiente reconstruye el FASTA desde origen+mapa antes de
+publicar conjuntamente mapa, FASTA, hashes y manifiesto.
+
+El mapa es un documento JSON cerrado con `document_kind` igual a
+`reference_reduction_map` y `schema_version` igual a `1`. Identifica referencias
+origen/derivada, algoritmo y cada segmento mediante orden, clase
+completa/residual, `sequence_id`, clase de secuencia, intervalos origen y
+derivado base 1 cerrados y orientación directa. Sus filas siguen el orden
+materializado; el manifiesto conserva además el orden original del sorteo y la
+subsemilla. El mapa no usa posiciones base 0 como contrato externo.
 
 La fuente de variación poblacional de DTC-054 materializa un recurso inmutable
 formado por `population_snvs.tsv` y `population_snvs.metadata.json`. El JSON
@@ -1422,14 +1449,11 @@ abiertos, versiones de estándares genómicos, reglas de paralelismo ni objetivo
 cuantitativos de rendimiento. Tampoco amplía la garantía a versiones del
 simulador o plataformas no verificadas ni promete identidad binaria.
 
-DTC-050 confirma el contrato funcional de reducción y DTC-051 confirma Marimo
-como interfaz obligatoria sin autoridad biológica. DTPD-101 debe fijar en F1.6
-la representación común de coordenadas que reutilizan el mapa de reducción y
-los consumidores F2; DTPD-116 debe elegir el
-algoritmo uniforme/versionado de intervalos después de aprobar porcentaje y
-*scaffolds*. DTPD-117 debe evaluar y fijar versión, entorno, empaquetado y
-protocolo aplicación↔binario. Ninguna recomendación de esas entradas es una
-decisión aprobada.
+DTC-050 confirma el contrato funcional de reducción, DTC-056 fija las
+coordenadas comunes y DTC-057 el algoritmo uniforme/versionado y su mapa.
+DTC-051 confirma Marimo como interfaz obligatoria sin autoridad biológica;
+DTPD-117 debe evaluar y fijar versión, entorno, empaquetado y protocolo
+aplicación↔binario.
 
 DTC-052 asigna a una matriz común las frecuencias SNV iniciales, DTC-054 resuelve
 DTPD-118 con el par TSV+JSON, perfiles, preparación y generación reproducible, y

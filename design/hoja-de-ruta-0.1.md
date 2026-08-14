@@ -144,9 +144,9 @@ cree una ejecución identificada y produzca resultados trazables y repetibles.
 - **F1.6. Referencia reducida reproducible.** Derivar de un FASTA real validado
   una referencia de tamaño exacto mediante regiones aleatorias no solapadas,
   conservar orden/orientación y `N`, y publicar FASTA, mapa, integridad,
-  subsemilla y manifiesto reconstruibles. Antes de implementarla deben cerrarse
-  las dos cuestiones funcionales pendientes, DTPD-101 como decisión común de
-  coordenadas y después DTPD-116.
+  subsemilla y manifiesto reconstruibles. Las cuestiones funcionales y
+  DTPD-101/DTPD-116 están cerradas mediante DTC-050/DTC-056/DTC-057; el hito
+  puede comenzar por implementar esos contratos.
 
 **Resultado de salida:** ejecución mínima repetible con configuración, semilla,
 referencia completa o reducida y manifiesto; una reducción incluye su mapa.
