@@ -1,16 +1,35 @@
 # Punto de reanudación del proyecto
 
-- **Fecha:** 14 de agosto de 2026
+- **Fecha:** 15 de agosto de 2026
 - **Implementación F1.5 publicada:** `b5dc220 feat: complete F1.5 reference evidence`.
-- **Estado actual de ejecución:** la pausa F1.5 está aprobada. Sus 27/27
-  requisitos están demostrados; E10/E11 conservan líneas base A/B con pico
-  temporal directo y E13 supera las puertas generales. El commit `b5dc220`
-  superó también `Cargo gates` en Ubuntu 24.04 nativo. F1.6 no ha comenzado y
-  F1 todavía no está cerrada.
-- **Estado de diseño:** DTPD-101, DTPD-116, DTPD-118 y DTPD-119 están resueltas.
+- **Estado actual de ejecución:** H-F16-R25–R27 están 3/3 aplicados con
+  adaptación. F14, MAN-90, SAL-27, 22/22 requisitos F1.6 y 83/83 requisitos F1
+  están restaurados tras 196 pruebas y todas las puertas verdes. La pausa y F1
+  no están aprobadas hasta una nueva revisión independiente. F2 no ha comenzado.
+- **Estado de los agentes al pausar:** el implementador de la decimonovena ronda
+  terminó y dejó el árbol listo para revisión independiente, sin commit ni push.
+- **Estado de diseño:** DTPD-101, DTPD-116, DTPD-118, DTPD-119 y DTPD-121 están resueltas.
   DTC-056 fija las coordenadas comunes y DTC-057,
   `reduced_reference_selection_v1`; DTPD-119 queda cerrada mediante DTC-055
-  después de una revisión independiente y dos rondas de correcciones.
+  después de una revisión independiente y dos rondas de correcciones. DTC-068
+  sustituye la materialización pesada 1000 Genomes de F2 por los perfiles
+  aproximados compactos `human_1000g_global_sfs_approx_v1` y
+  `human_harris2017_snv12_approx_v1`; el VCF y perfiles exactos quedan en
+  DTF-016/post-v1 y no bloquean F2.2. DTC-070 resuelve RAF2-029: el modo
+  `exact` usa cuotas por mayores restos, permutación independiente por población
+  y flujo separado para el valor; DTC-071 publica el catálogo RNG v4 sin
+  circularidad y resuelve RAF2-028. DTC-072 fija los consumidores RNG no Poisson,
+  DTC-073 hace efectivas las capacidades solo con su semántica y DTC-074 exige
+  evidencia de plataforma detectada. DTC-075 resuelve RAF2-041 a RAF2-044:
+  intervalos semiabiertos sin extremos continuos, selector indel dinámico,
+  propietarios RNG únicos y `matrix_candidate_count` explícito. RAF2-030 queda resuelto mediante DTC-065/066: `GPS_CASE` es
+  multivaluado y canónico, `truth.jsonl` conserva ALT↔casos y F2 no genera
+  complemento; la primera cardinalidad positiva se define en F5.5. La revisión
+  adversarial F2 0.3 queda corregida: RAF2-028 a RAF2-044 están
+  resueltos documentalmente; el plan tiene 128 pasos con cinco campos, seis
+  pausas explícitas, 79 cierres, nueve compartidos y nueve parciales directos.
+  RAF2-027 permanece como único bloqueo: exige revisar/aprobar F1 y fijar su
+  commit base; después se repetirá la revisión adversarial antes de autorizar F2.
 - **Copia de la conversación:**
   [chat-dtpd-119-2026-08-12.md](../docs/chat-dtpd-119-2026-08-12.md) y
   [chat-generacion-automatica-bloques-ld-2026-08-13.md](../docs/chat-generacion-automatica-bloques-ld-2026-08-13.md).
@@ -100,10 +119,103 @@
 
 ## Punto exacto de reanudación
 
-La pausa F1.5 está aprobada. Las cuestiones funcionales de reducción y
-DTPD-101/DTPD-116 quedaron cerradas el 14 de agosto de 2026; F1–F3 de F1.6 son
-documentales y están completos. El siguiente paso es F4: extender esquema TOML,
-`DeclaredConfig` y admisión para referencias reducidas, y continuar F4–F14.
+F1.6 conserva H-F16-R09-R2/R3 y cierra H-F16-R11–R16 tras la decimocuarta ronda.
+La matriz ejecutable recorre una/dos reducciones, índices 0/1 y las tres fronteras;
+los corpus vuelven a ejecutar positivos completo/fallido, mezclas contextuales,
+contradicciones entre colecciones y Python frente a Rust. El catálogo trazable
+comprueba los 22 nombres contra sus fuentes y contra el listado ejecutado.
+
+H-F16-R13 añade un corpus real con cero, una y dos reducciones y cierres
+completo/fallido. Referencias, recurso autoritativo, configuración efectiva y
+manifiestos de evento se cruzan íntegramente contra el catálogo; 29 mutaciones
+individuales se contrastan con un oráculo semántico independiente ampliado.
+
+H-F16-R14 cierra el resto del grafo dinámico interno: configuraciones, unidad de
+ejecución, biyección eventos/unidades, categorías de salida, propietarios,
+clases y unicidad global de rutas. Su corpus catalogado recorre ocho positivos y
+24 contradicciones; el expediente incluye un inventario que separa qué igualdad
+pertenece al esquema, al grafo del manifiesto o a la relectura física de otros
+ficheros.
+
+H-F16-R15 añade el contrato autoritativo de diagnósticos y completa la semántica
+de catálogos de secuencias y reducciones: siete positivos y 27 mutaciones
+individuales se recorren desde un catálogo literal y una tabla declarativa de
+oráculos. Se permiten códigos compartidos por unidades fallidas, pero no códigos
+ausentes, duplicados ni huérfanos; particiones, intervalos, sumas, objetivo,
+región y residual deben reconstruir exactamente la referencia derivada.
+
+H-F16-R16 sustituye el `f64` del oráculo porcentual por aritmética decimal larga
+independiente y cierra la relectura semántica del paquete. Raíz y subsemillas se
+derivan con catálogo v3; orden y cabeceras/descripciones son reversibles;
+normalizaciones reconstruyen Neumaier; y cada evento coincide entre
+configuración efectiva, manifiesto general y manifiesto de evento. El corpus
+literal contiene seis positivos y 20 mutaciones correlacionadas.
+
+H-F16-R17 valida la gramática decimal TOML antes de retirar separadores, relee
+el FASTA autoritativo mediante `openat`/`O_NOFOLLOW` y cruza sus bytes con ambos
+documentos JSON. También reconstruye la configuración efectiva desde las copias
+TOML y cierra identidad, orden, dominio, regla ganadora, selectores, procedencia
+y colecciones exclusivas. Su corpus literal contiene seis positivos y 34
+negativos; sus validadores externos, incluida OCI con Docker 29.6.1, superaron
+la validación.
+
+H-F16-R18 conserva el contexto completo de cada `ResolutionRequest` en el valor
+efectivo, valida que `object_id` pertenezca a una entidad declarada compatible y
+vuelve a resolver la regla dominante. El oráculo independiente parsea reglas e
+identidades desde TOML y calcula aplicabilidad/dominancia sin llamar a
+producción. Dos mutaciones con tamaño/SHA recalculados cierran la copia de regla
+base y el objeto ajeno; las pruebas adicionales cubren regla combinada, orden y
+máximas incomparables.
+
+H-F16-R19–R21 contrastan cada dimensión presente con los ejes permitidos del
+parámetro, permiten jerarquías completas sin mezclar ejes no relacionados y
+exigen que posición/locus lleven referencia y secuencia declaradas y queden en
+rango. El oráculo independiente usa una tabla parámetro→ejes propia y reconstruye
+longitudes desde el TOML. Dos mutaciones correlacionadas recalculan tamaño y
+SHA-256; la suite suma 189 pruebas y los validadores externos, incluida OCI con
+Docker 29.6.1, están verdes.
+
+H-F16-R22–R24 añaden la matriz ejecutable de ocho parámetros por tres niveles
+espaciales, exigen el objeto principal correspondiente y sustituyen la
+inferencia desde listas planas por `ResolutionDomain`. F1 conserva el contrato
+tipado y un snapshot versionado, pero no introduce poblaciones, fases
+biológicas ni loci reales: los proveedores pertenecen a F2 y fases posteriores.
+El oráculo relee por separado todas las copias de escenarios y agrega sus fases.
+Ocho mutaciones correlacionadas y positivos completo/fallido con cero/una/dos
+reducciones pasan producción y oráculo independiente según corresponda. La
+suite suma 193 pruebas; puertas Cargo, validadores externos y OCI con Docker
+Engine 29.6.1, commit `8ec5ab3`, están verdes.
+
+H-F16-R25–R27 publican `resolution-evidence` v1 como fuente autoritativa
+independiente de dominio y solicitudes, enlazada por identidad física y releída
+sin seguir enlaces; la configuración efectiva queda como derivada. Los IDs de
+fase son globalmente únicos entre escenarios y el diagnóstico conserva ambas
+fuentes. El orden de parámetros usa una tabla literal
+`parameter_order_version=1`, con implementación separada en el oráculo. Tres
+pruebas nuevas y doce mutaciones del corpus cubren TOCTOU, enlaces, cambios
+correlacionados, completo/fallido, colisión de fases y permutaciones. La suite
+suma 196 pruebas; puertas Cargo, cuatro esquemas externos, cinco artefactos,
+`samtools faidx` y OCI con Docker Engine 29.6.1 están verdes.
+
+La puerta física añade una mutación que mueve un directorio intermedio real y
+lo sustituye por un *symlink*: falla antes del publicador, no crea destino y
+conserva `INCOMPLETE`. La canonicalización alcanza directamente `a//b`, `.`,
+`..`, separador final y barra inversa; ya no se atribuye al alias de manifiesto
+un rechazo que en realidad se producía primero por SHA-256.
+
+**Primera acción al reanudar:** repetir la revisión independiente de F1 antes de
+aprobar la pausa. No iniciar F2 ni hacer commit/push.
+
+El árbol está deliberadamente sin commit desde `8dd676a`; contiene la
+implementación completa de F1.6, la dependencia `jsonschema = 0.49.9`, sus
+catálogos/esquemas/pruebas/evidencias y la convención jerárquica futura de planes.
+Al retomar, no descartar ni restaurar en bloque estos cambios.
+
+Queda una incoherencia futura no bloqueante para esta pausa: el preplan LD aún
+reserva `subseed-scopes-v3.tsv`, pero F1.6 ya publica v3 con el ámbito
+`reference_reduction`. Antes de convertir el preplan LD en plan ejecutable se
+debe asignar la siguiente versión disponible o integrar formalmente los nuevos
+ámbitos sin reescribir v3.
 
 El preplan de generación automática de bloques de LD no tiene elecciones
 funcionales o técnicas materiales abiertas y conserva el `profile_id`

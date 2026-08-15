@@ -5,8 +5,10 @@
 - **Título:** plan detallado de F1, núcleo reproducible.
 - **Versión del plan:** 0.1.
 - **Fecha:** 10 de agosto de 2026.
-- **Estado:** ejecución en curso; la pausa F1.5 está aprobada, F1–F3 de F1.6
-  están cerrados documentalmente, F4–F14 están abiertos y F1 no está cerrada.
+- **Estado:** H-F16-R25–R27 están 3/3 aplicados con adaptación y las 196 pruebas,
+  puertas Cargo, validadores externos y OCI son verdes. F14 y los balances
+  22/22 y 83/83 se restauran para una nueva revisión independiente. F1 no está
+  aprobada ni cerrada y F2 no ha comenzado.
 - **Ámbito temporal:** únicamente F1.1–F1.6.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
@@ -15,12 +17,12 @@
   [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md),
   [trazabilidad-requisitos-0.1.md](./trazabilidad-requisitos-0.1.md) y
   [registro-ampliaciones-futuras-0.1.md](./registro-ampliaciones-futuras-0.1.md).
-- **Decisiones confirmadas aplicables:** DTC-034 a DTC-050. Este plan no
+- **Decisiones confirmadas aplicables:** DTC-034 a DTC-050 y DTC-076/DTC-077. Este plan no
   convierte una propuesta DTP, una DTPD posterior ni una candidata de
   dependencia en decisión aprobada.
 
-Este documento conserva la ejecución acreditada de F1.1–F1.5 y añade F1.6 sin
-marcar sus pasos como realizados. El plan no autoriza a marcar F1 como cerrada
+Este documento conserva la ejecución acreditada de F1.1–F1.6, incluida la
+decimoctava ronda de correcciones. El plan no autoriza a marcar F1 como cerrada
 ni a hacer commits; deben respetarse sus pausas de revisión obligatorias.
 
 ## 2. Resultado y alcance
@@ -263,14 +265,14 @@ ganadora. Los consumidores biológicos posteriores no se implementan aquí.
 - ✅ B4. Construir `DeclaredConfig` sin conceder autoridad a la jerarquía u orden físico del TOML.
   - Depende de: B3.
   - Procede de: DTC-034; REQ-CONF-01/09/10/13/14.
-  - Cambia: tipos declarados con valor, fuente, ruta y ubicación; fases, eventos y cruces conservan IDs explícitos y orden solo donde sea normativo.
-  - Se comprueba con: `cargo test --locked` comparando TOML reordenados semánticamente equivalentes y casos con IDs ausentes o duplicados; la copia original debe coincidir byte a byte.
+  - Cambia: tipos declarados con valor, fuente, ruta y ubicación; fases, eventos y cruces conservan IDs explícitos y orden solo donde sea normativo. Los IDs de fase son globalmente únicos entre todas las configuraciones v1.
+  - Se comprueba con: `cargo test --locked` comparando TOML reordenados semánticamente equivalentes y casos con IDs ausentes o duplicados, incluida una colisión de fase entre dos escenarios en ambos órdenes; la copia original debe coincidir byte a byte.
 
 - ✅ B5. Materializar el catálogo normativo de familias de parámetros y selectores permitidos.
   - Depende de: B4 y A6; no depende de consumidores de F2–F8.
   - Procede de: REQ-CONF-29/117. La auditoría de cierre conserva aquí la infraestructura parcial de REQ-CONF-17/18/20/22/43/83/84/116/120/121/122, REQ-IND-13/15/21 y REQ-REP-02, pero reasigna su cierre al hito que prueba todos sus consumidores.
   - Cambia: tipos de eje y metadatos de cada familia para individuo preexistente, población/subpoblación, fase/generación, secuencia/región/locus, grupo/bloque y evento técnico solo donde esté permitido.
-  - Se comprueba con: tabla exhaustiva de aceptación/rechazo independiente del resolvedor; incluye evento técnico aplicado a parámetro biológico, individuo futuro, ámbito desconocido y extremos de la jerarquía espacial.
+  - Se comprueba con: tabla exhaustiva de aceptación/rechazo independiente del resolvedor; incluye evento técnico aplicado a parámetro biológico, individuo futuro, ámbito desconocido y una matriz de los ocho parámetros por secuencia/región/locus. La frontera `ResolutionDomain` usa relaciones sintéticas explícitas para probar el motor y rechaza jerarquías sin prueba; no implementa población, evolución ni loci reales en F1.
 
 - ✅ B6. Implementar reglas base y coincidencia por todos los selectores.
   - Depende de: B5.
@@ -304,9 +306,9 @@ ganadora. Los consumidores biológicos posteriores no se implementan aquí.
 
 - ✅ B11. Producir una `EffectiveConfig` inmutable con valores, regla ganadora, selectores y procedencia.
   - Depende de: B7–B10.
-  - Procede de: DTC-034 y DTC-035; REQ-CONF-123 y REQ-MAN-05/10/88.
-  - Cambia: modelo de configuración efectiva separado del declarado; no contiene referencias mutables ni reinterpreta el TOML al consumirlo.
-  - Se comprueba con: `cargo test --locked` sobre instantáneas semánticas de configuración efectiva y prueba que modificar o reordenar la entrada después de admisión no altera el objeto ya resuelto.
+  - Procede de: DTC-034, DTC-035 y DTC-077; REQ-CONF-123 y REQ-MAN-05/10/88.
+  - Cambia: modelo de configuración efectiva separado del declarado; no contiene referencias mutables ni reinterpreta el TOML al consumirlo. Dominio y solicitudes admitidos se conservan antes como `resolution-evidence` v1 autoritativa e independiente; la configuración efectiva solo enlaza esa fuente, conserva el resultado derivado y registra `parameter_order_version=1` para una tabla literal.
+  - Se comprueba con: `cargo test --locked` sobre instantáneas semánticas, relectura no-follow de la evidencia desde el paquete, mutaciones correlacionadas de dominio/solicitudes, permutaciones de reglas y solicitudes y prueba que modificar o reordenar la entrada después de admisión no altera el objeto ya resuelto.
 
 - ✅ B12. Auditar las 36 pruebas trazables inicialmente asignadas a F1.2 y cerrar solo las demostrables en este hito.
   - Depende de: B1–B11.
@@ -696,73 +698,78 @@ completo, sin alterar orden, orientación, clase o bases `N`.
   - Cambia: DTC-057 aprueba `reduced_reference_selection_v1`, tratamiento del residual y mapa JSON v1 compatible con DTC-056; no requiere una dependencia nueva ni modifica el lock.
   - Se comprueba con: opciones y oráculos registrados en DTC-057, `cargo metadata --locked --format-version 1`, `cargo tree --locked -e features` y aprobación del 14 de agosto de 2026.
 
-- ☐ F4. Extender el esquema de autoría y la configuración declarada para referencias reducidas.
+- ✅ F4. Extender el esquema de autoría y la configuración declarada para referencias reducidas.
   - Depende de: F1–F3.
   - Procede de: REQ-CONF-124/125 y DTC-034, DTC-036 y DTC-050.
   - Cambia: esquema TOML, tipos `DeclaredConfig`, parser y ubicaciones para ID derivado, FASTA origen, `region_size_bases` y la unión exclusiva `target_bases`/`reduction_percent`; conserva el literal decimal del porcentaje para el cálculo exacto y no lo reduce a `f64`.
   - Se comprueba con: fixtures por modalidad y literales decimales/exponenciales equivalentes, más pruebas negativas de ambos/ningún objetivo, enteros cero, porcentaje no finito/fuera de rango, clave desconocida y diagnóstico con ruta/campo/ubicación.
 
-- ☐ F5. Resolver y validar la configuración efectiva completa antes de seleccionar una base.
+- ✅ F5. Resolver y validar la configuración efectiva completa antes de seleccionar una base.
   - Depende de: F4 y contratos F1.2/F1.5 cerrados.
   - Procede de: REQ-CONF-126/127, REQ-REF-25/27/33 y REQ-VAL-52.
   - Cambia: `EffectiveConfig` y preflight que enlazan la copia FASTA autoritativa, calculan el tamaño elegible y el objetivo entero mediante aritmética racional comprobada sobre el literal declarado, validan IDs, espacio y residual y rechazan toda incompatibilidad antes del plan derivado.
   - Se comprueba con: objetivos 1, múltiplo, residual, igual al origen, mayor al origen, vectores cuyo resultado diferiría tras redondear primero a `f64`, ausencia de secuencias elegibles y garantía de cero artefactos derivados ante rechazo.
 
-- ☐ F6. Versionar el ámbito aleatorio de reducción antes de su primer consumidor.
+- ✅ F6. Versionar el ámbito aleatorio de reducción antes de su primer consumidor.
   - Depende de: F3 y catálogo de subsemillas F1.3.
   - Procede de: REQ-CONF-126, REQ-REF-26/36 y DTC-037, DTC-038 y DTC-050.
   - Cambia: nueva versión del catálogo con ámbito tipado para reducción, componentes causales mínimos, huella y vectores BLAKE3; no altera vectores anteriores.
   - Se comprueba con: vectores literales calculados independientemente, misma subsemilla para igual raíz/ID/versión, cambio al variar una causa y aislamiento frente a individuos, eventos y salidas añadidos.
 
-- ☐ F7. Construir el plan inmutable de intervalos no solapados y tamaño exacto.
+- ✅ F7. Construir el plan inmutable de intervalos no solapados y tamaño exacto.
   - Depende de: F3, F5–F6.
   - Procede de: REQ-REF-26 a REQ-REF-30 y DTPD-116 aprobada.
   - Cambia: dominio/servicio de reducción que enumera el espacio aprobado, selecciona sin reemplazo con RNG local y devuelve todos los bloques completos y como máximo un residual o un error sin resultado parcial.
   - Se comprueba con: oráculo independiente sobre FASTA corto, propiedad de ausencia de solapamiento/duplicado, cardinalidad del residual, suma exacta y prueba estadística predeclarada de uniformidad conforme a DTPD-116.
 
-- ☐ F8. Ordenar intervalos y asignar coordenadas derivadas sin usar el orden del sorteo.
+- ✅ F8. Ordenar intervalos y asignar coordenadas derivadas sin usar el orden del sorteo.
   - Depende de: F2 y F7; DTPD-101 debe constar aprobada.
   - Procede de: DTPD-101; REQ-REF-29 a REQ-REF-31, REQ-REF-35 y ACE-113.
   - Cambia: tipos y servicio común mínimos para posición/intervalo etiquetados por referencia y la proyección que ordena por catálogo de origen/coordenada, conserva clase y orientación, omite secuencias sin intervalos y calcula intervalos derivados base 1 cerrados acumulativos sin una convención local; F2 solo podrá extenderlos.
   - Se comprueba con: fixture con selección sorteada fuera de orden, varias secuencias, omisión, límites inicial/final y tabla manual origen↔derivada cuya ida/vuelta cubre cada base exactamente una vez usando los tipos/vectores aprobados en DTPD-101.
 
-- ☐ F9. Materializar el FASTA reducido canónico desde el plan aprobado.
+- ✅ F9. Materializar el FASTA reducido canónico desde el plan aprobado.
   - Depende de: F8 y escritor FASTA F1.5.
   - Procede de: REQ-REF-30, REQ-REF-32, REQ-REF-34 y REQ-SAL-27; DTC-041 y DTC-050.
   - Cambia: caso de uso y adaptador que leen exclusivamente la copia autoritativa, concatenan intervalos en orientación directa, preservan `N` y escriben el único FASTA canónico de la nueva referencia.
   - Se comprueba con: `samtools faidx`, conteo independiente de bases, fixture con `N`, comparación literal de cada fragmento y pruebas de que el origen permanece byte a byte idéntico.
 
-- ☐ F10. Escribir y validar el mapa estructurado completo de coordenadas.
+- ✅ F10. Escribir y validar el mapa estructurado completo de coordenadas.
   - Depende de: F2–F3 y F8–F9; DTPD-101/DTPD-116 deben constar aprobadas.
   - Procede de: DTPD-101/DTPD-116; REQ-REF-35/36, REQ-VAL-53 y DTC-050.
   - Cambia: esquema y escritor del formato aprobado con clase/versión, IDs, intervalos origen/derivados tipados por el servicio común, orientación, orden y residual; no infiere el mapa desde el FASTA final ni introduce conversiones propias.
   - Se comprueba con: validador de esquema independiente, vectores de bordes DTPD-101, reconstrucción externa origen+mapa, casos corruptos/truncados/solapados/fuera de rango y comparación SHA-256 del FASTA reconstruido.
 
-- ☐ F11. Integrar reducción en configuración efectiva, manifiesto, integridad y publicación atómica.
+- ✅ F11. Integrar reducción en configuración efectiva, manifiesto, integridad y publicación atómica.
   - Depende de: F5, F9–F10 y contratos F1.4.
-  - Procede de: REQ-CONF-127, REQ-MAN-89/90, REQ-SAL-27; DTC-040, DTC-045 y DTC-050.
-  - Cambia: esquemas/escritores de configuración efectiva y manifiesto, catálogo de artefactos, hashes y unidad publicable que enlaza origen, derivada, mapa, parámetros, semilla/subsemilla, algoritmo y estados.
+  - Procede de: REQ-CONF-127, REQ-MAN-88/89/90, REQ-SAL-27; DTC-040, DTC-045, DTC-050 y DTC-077.
+  - Cambia: esquemas/escritores de configuración efectiva y manifiesto, catálogo de artefactos, hashes y unidad publicable que enlaza origen, derivada, mapa, evidencia autoritativa de resolución, parámetros, semilla/subsemilla, algoritmo y estados.
   - Se comprueba con: JSON Schema independiente, `sha256sum`, enlaces resolubles, fallo inyectado entre FASTA/mapa/manifiesto y verificación de que nunca se publica una unidad parcial como completa.
 
-- ☐ F12. Completar diagnósticos y fallos previos específicos de la reducción.
+- ✅ F12. Completar diagnósticos y fallos previos específicos de la reducción.
   - Depende de: F4–F11.
   - Procede de: REQ-REF-33, REQ-VAL-52 y DTC-044/DTC-045.
   - Cambia: catálogo público para exclusividad, dominios, objetivo imposible, espacio insuficiente, ID/clase incompatible, mapa incoherente y E/S, con texto/JSON y causalidad sin tipos de dependencias.
   - Se comprueba con: tabla error→código→salida, códigos 1/2 según frontera, orden determinista de diagnósticos y ausencia de destino final para todos los rechazos de preflight.
 
-- ☐ F13. Ejecutar recorridos reproducibles y reconstrucción independiente de extremo a extremo.
+- ✅ F13. Ejecutar recorridos reproducibles y reconstrucción independiente de extremo a extremo.
   - Depende de: F4–F12 y puertas Cargo verdes.
   - Procede de: REQ-REF-24 a REQ-REF-36, REQ-VAL-52/53 y ACE-112/113.
   - Cambia: fixtures realistas pequeños y pruebas CLI para objetivo exacto, porcentaje aprobado, múltiplo/residual, varias secuencias/clases según contrato, `N`, mismo/diferente seed y fallos de borde.
   - Se comprueba con: dos ejecuciones equivalentes, reconstructor ajeno al productor, `cmp`, `sha256sum`, `samtools faidx`, validador de esquema independiente y puertas §4.2.
 
-- ☐ F14. Cerrar trazabilidad de F1.6 y el expediente completo de F1.
+- ✅ F14. Cerrar trazabilidad de F1.6 y el expediente completo de F1.
   - Depende de: F1–F13, E10–E13 y todas las pausas anteriores.
   - Procede de: los 22 REQ asignados a F1.6, ACE-112/113 y reglas de avance de la hoja de ruta.
   - Cambia: 22 casos `TEST-REQ-*`, matriz F1.6, balance F1 actualizado y acta de cierre; no marca ninguna recomendación, prueba o fase posterior como aprobada.
   - Se comprueba con: recuento automático de 83 REQ F1, cero filas huérfanas/duplicadas, DTPD-101/DTPD-116 aprobadas y enlazadas, validadores independientes, puertas Cargo y revisión explícita de cero defectos bloqueantes o graves sin destino aprobado.
 
 ### Pausa obligatoria de revisión de F1.6 y cierre de F1
+
+**Estado (15 de agosto de 2026):** H-F16-R25–R27 están 3/3 aplicados con
+adaptación. Se restauran F14 y los balances 22/22 F1.6 y 83/83 F1 tras 196
+pruebas, puertas Cargo, validadores externos y OCI verdes. La pausa sigue
+abierta hasta una nueva revisión independiente y no se ha iniciado F2.
 
 No pasar a F2.0 hasta completar los 22 casos F1.6 y la reconstrucción
 independiente; las decisiones funcionales y DTPD-101/DTPD-116 ya están
@@ -807,7 +814,7 @@ asignación vigente es 16/1/17/27/22, **83 requisitos** en total.
 | F1.3 | REQ-REP-23 | ACE-01/23/64 | DTC-037, DTC-038, DTC-042/043/048 | A5, C1–C8; 1 `TEST-REQ-*` superado y auditoría de 9 reasignados con pruebas parciales; vectores, aislamiento y comparadores preparatorios |
 | F1.4 | REQ-CONF-38/101/123; REQ-MAN-01–05/08/32/69/81/88; REQ-SAL-03/04/22/26 | ACE-01/10/14/22/25/34/64/93/94/105/111 | DTC-035/036/038–040/042–045/047–049 | A4/A6, D1–D13; 17 `TEST-REQ-*` superados y auditoría explícita de 8 reasignados; JSON/SHA, evidencia DTC-049, estados y carrera no-clobber |
 | F1.5 | REQ-CONF-02/03/26/27; REQ-REF-01–07/12/13/15–18/22/23; REQ-REP-22; REQ-EVO-63; REQ-VAL-45; REQ-MAN-06/72/86; REQ-SAL-01/18 | ACE-01–05/23/64/110 | DTC-037, DTC-039–049 | E1–E13; 27 `TEST-REQ-*`, incluida repetición ejecutable con semilla/configuración/entrada/manifiesto; puerta `noodles-fasta`, `cmp`, `samtools faidx`, SHA/JSON independientes y escenarios A/B/C |
-| F1.6 | REQ-CONF-124–127; REQ-REF-24–36; REQ-VAL-52/53; REQ-MAN-89/90; REQ-SAL-27 | ACE-112/113 | DTC-037/038/040/041/043–045/047/048/050/056/057 | F1–F14; F1–F3 documentales cerrados y F4–F14 abiertos; 22 `TEST-REQ-*`, coordenadas comunes, objetivo exacto, vectores de selección, FASTA/mapa/manifiesto atómicos y reconstrucción independiente origen+mapa |
+| F1.6 | REQ-CONF-124–127; REQ-REF-24–36; REQ-VAL-52/53; REQ-MAN-89/90; REQ-SAL-27 | ACE-112/113 | DTC-037/038/040/041/043–045/047/048/050/056/057/076/077 | H-F16-R25–R27 3/3 aplicados; F14, 22/22 y balance F1 83/83 restaurados para revisión independiente; no iniciar F2. |
 
 ### 12.1. Expediente mínimo para aprobar F1
 

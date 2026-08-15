@@ -150,7 +150,11 @@ fn a_source_change_between_validation_and_copy_cannot_be_cataloged() {
         .expect_err("changed source must not be cataloged");
     assert_eq!(error.code(), "GPS-INPUT-002");
     assert!(workspace.artifacts().is_empty());
-    assert!(workspace.root().join("INCOMPLETE").is_file());
+    assert!(
+        provisional_workspace(&destination)
+            .join("INCOMPLETE")
+            .is_file()
+    );
     assert!(!destination.exists());
 }
 
@@ -181,7 +185,7 @@ fn authoritative_representation_is_loaded_from_the_copy_and_keeps_original_prove
 
     fs::write(&source, b">chr1 mutated header\nAAAAA\n")
         .expect("mutate original before authoritative loading");
-    let copy = workspace.root().join(&artifact.path);
+    let copy = provisional_workspace(&destination).join(&artifact.path);
     let authoritative =
         validate_supplied_fasta_with_origin(&copy, &source, "ref-main", &expectation)
             .expect("authoritative representation is loaded from copied bytes");
@@ -207,6 +211,24 @@ fn authoritative_representation_is_loaded_from_the_copy_and_keeps_original_prove
         "the original differs before the authoritative representation is consumed"
     );
     assert_eq!(fs::read(copy).expect("copied FASTA"), original);
+}
+
+fn provisional_workspace(destination: &Path) -> PathBuf {
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap();
+    let prefix = format!(".{name}.gps-incomplete-");
+    let mut matches = fs::read_dir(parent)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with(&prefix))
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    matches.sort();
+    assert_eq!(matches.len(), 1);
+    matches.remove(0)
 }
 
 fn write_supplied_config(path: &Path, fasta: &str, length: u64) {

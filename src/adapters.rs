@@ -8,9 +8,9 @@ use toml::de::{DeTable, DeValue};
 use crate::configuration::{
     AdmittedToml, ConfigKind, DeclaredConfig, DeclaredEntity, DeclaredFrequencyCount,
     DeclaredFrequencySet, DeclaredFrequencyValue, DeclaredGeneralConfig, DeclaredGeneralParts,
-    DeclaredNumber, DeclaredReference, DeclaredReferenceSource, DeclaredScenarioConfig,
-    DeclaredSequence, ExpectedConfigKind, FrequencyMode, Located, Route, ScenarioLink,
-    SequenceClass, SourceLocation, semantic_error,
+    DeclaredNumber, DeclaredReducedReference, DeclaredReductionTarget, DeclaredReference,
+    DeclaredReferenceSource, DeclaredScenarioConfig, DeclaredSequence, ExpectedConfigKind,
+    FrequencyMode, Located, Route, ScenarioLink, SequenceClass, SourceLocation, semantic_error,
 };
 use crate::diagnostics::Diagnostic;
 use crate::rules::{
@@ -184,6 +184,7 @@ fn parse_general(
             "seed",
             "normalization_tolerance",
             "reference",
+            "reduced_references",
             "scenarios",
             "events",
             "individuals",
@@ -200,6 +201,7 @@ fn parse_general(
     let seed = optional_located_string(&admitted, table, "seed")?;
     let normalization_tolerance = optional_number(&admitted, table, "normalization_tolerance")?;
     let reference = parse_reference(&admitted, required_table(&admitted, table, "reference")?)?;
+    let reduced_references = parse_reduced_references(&admitted, table)?;
     let scenarios = parse_scenario_links(&admitted, table)?;
     let events = parse_id_list(&admitted, table, "events")?;
     let individuals = parse_id_list(&admitted, table, "individuals")?;
@@ -218,6 +220,7 @@ fn parse_general(
             seed,
             normalization_tolerance,
             reference,
+            reduced_references,
             scenarios,
             events,
             individuals,
@@ -230,6 +233,72 @@ fn parse_general(
             frequency_sets,
         }),
     )))
+}
+
+fn parse_reduced_references(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<Vec<DeclaredReducedReference>, Diagnostic> {
+    let Some(values) = optional_array(admitted, table, "reduced_references")? else {
+        return Ok(Vec::new());
+    };
+    let mut reductions = Vec::with_capacity(values.len());
+    let mut ids = std::collections::BTreeSet::new();
+    for value in values {
+        let entry = value
+            .get_ref()
+            .as_table()
+            .ok_or_else(|| wrong_type(admitted, "reduced_references", value, "table"))?;
+        check_unknown(
+            admitted,
+            entry,
+            &[
+                "id",
+                "source_reference_id",
+                "region_size_bases",
+                "target_bases",
+                "reduction_percent",
+            ],
+        )?;
+        let id = required_string(admitted, entry, "id")?;
+        if !ids.insert(id.value().clone()) {
+            return Err(semantic_error(
+                admitted,
+                "reduced_references.id",
+                format!("identificador repetido: {}", id.value()),
+            ));
+        }
+        let target_bases = entry.get("target_bases");
+        let reduction_percent = entry.get("reduction_percent");
+        let target = match (target_bases, reduction_percent) {
+            (Some(_), None) => {
+                DeclaredReductionTarget::Bases(required_u64(admitted, entry, "target_bases")?)
+            }
+            (None, Some(_)) => DeclaredReductionTarget::ReductionPercent(
+                optional_number(admitted, entry, "reduction_percent")?.ok_or_else(|| {
+                    semantic_error(
+                        admitted,
+                        "reduced_references.reduction_percent",
+                        "falta el porcentaje declarado",
+                    )
+                })?,
+            ),
+            _ => {
+                return Err(semantic_error(
+                    admitted,
+                    "reduced_references.target_bases,reduced_references.reduction_percent",
+                    "cada referencia reducida exige exactamente un objetivo",
+                ));
+            }
+        };
+        reductions.push(DeclaredReducedReference {
+            id,
+            source_reference_id: required_string(admitted, entry, "source_reference_id")?,
+            region_size_bases: required_u64(admitted, entry, "region_size_bases")?,
+            target,
+        });
+    }
+    Ok(reductions)
 }
 
 fn parse_scenario(

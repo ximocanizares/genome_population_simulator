@@ -7,7 +7,9 @@
 - **Fecha:** 13 de agosto de 2026.
 - **Estado:** borrador técnico condicionado; F1.4 está aprobada, pero no está
   autorizado para ejecución hasta que F1.5, F1.6 y la revisión de cierre de F1
-  estén terminadas y este plan sea aprobado explícitamente.
+  estén terminadas, las decisiones previas estén resueltas, la validación
+  mecánica sea correcta, una nueva revisión adversarial no encuentre bloqueantes
+  y este plan sea aprobado explícitamente.
 - **Ámbito temporal:** únicamente F2.0–F2.5.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
@@ -19,36 +21,40 @@
   y [plan-implementacion-f1-0.1.md](./plan-implementacion-f1-0.1.md).
 - **Decisiones confirmadas aplicables:** DTC-001, DTC-003, DTC-004, DTC-006,
   DTC-010, DTC-011, DTC-013, DTC-020 a DTC-022, DTC-024, DTC-031 a
-  DTC-049 y DTC-051 a DTC-057.
-- **Decisiones pendientes bloqueantes:** DTPD-102 bloquea
-  F2.1/F2.4 y DTPD-103, F2.5. También falta documentar y aprobar la
-  concreción técnica de Poisson indicada en §4.2. Para los *indels* aleatorios
-  de F2 ya se acordó una longitud exacta configurable por separado para
-  inserciones y deleciones, con valor predeterminado de 1 pb; falta trasladar
-  este acuerdo al registro canónico de decisiones.
-  DTPD-117 bloquea F2.0 hasta evaluar y fijar Marimo, su entorno, empaquetado y
-  contrato versionado con el binario. DTC-054 resuelve DTPD-118 y fija para
+  DTC-049 y DTC-051 a DTC-075.
+- **Decisiones resueltas y puertas internas:** DTPD-102, DTPD-103, DTPD-120 y
+  DTPD-121 están resueltas por DTC-061 y DTC-062 a DTC-068. REQ-CONF-130 queda
+  limitado en F2 a HWE y F diploide; su distribución explícita cierra en F6.2.
+  DTC-069 resuelve la unidad visible de importación/exportación Marimo.
+  DTC-058 resuelve DTPD-117 sin alternativas técnicas abiertas, pero F2.0 queda
+  bloqueada hasta que F2.0.2 verifique y apruebe las versiones candidatas, el
+  entorno, la distribución y el contrato versionado con el binario. DTC-054
+  resuelve DTPD-118 y fija para
   F2.2/F2.3 los formatos de matriz/espectro, el algoritmo reproducible, los
   perfiles versionados y las excepciones limitadas. DTC-055 resuelve DTPD-119 y
   deja preparada la inicialización fundadora desde paneles para F6.4; no se
   consume dentro de F2. DTC-055 ya cierra para F6.4 el constructor común y su
   variante uniforme; F7.1 lo reutilizará después para la recombinación meiótica
   y DTPD-111 solo resolverá mapas y semántica meiótica.
-- **Pendientes del informe adversarial que siguen abiertos:** RAF2-001,
-  RAF2-004 y RAF2-007. Esta ampliación no los da por resueltos; DTC-052 aporta
-  la semántica que faltaba para reevaluar RAF2-004, pero su cierre requiere
-  evidencia y revisión formal de la asignación maestra.
+- **Pendiente del informe adversarial que sigue abierto:** RAF2-027, bloqueado
+  únicamente por el cierre y aprobación de F1. RAF2-028 a RAF2-044 quedan
+  resueltos mediante DTC-065/066 y DTC-070 a DTC-075. Los hallazgos anteriores ya
+  resueltos documentalmente no autorizan por sí solos la ejecución; una nueva
+  revisión adversarial debe confirmar que el plan corregido no conserva
+  bloqueantes.
 
 Todas las casillas permanecen abiertas. El documento ordena trabajo futuro: no
 acredita que F1 haya cerrado, no resuelve decisiones pendientes, no selecciona
-crates, versiones, formatos ni herramientas externas y no autoriza commits.
+crates, formatos ni herramientas externas no confirmados y no autoriza commits.
+Las versiones candidatas de DTC-058 son la única selección concreta añadida y
+siguen sujetas a F2.0.2. F2 continúa sin aprobarse.
 
 ## 2. Resultado y alcance
 
 F2 termina con un recorrido directo pequeño pero completo que, partiendo de una
 referencia de F1, construye individuos de ploidía uniforme, conserva copias
 haplotípicas separadas, aplica SNP e inserciones/deleciones pequeñas inequívocas
-y publica una verdad estructurada canónica junto con exactamente un VCF de verdad
+y publica `truth.jsonl` canónico junto con exactamente un VCF de verdad
 multimuestra por conjunto. La fase, la dosis, la procedencia, las coordenadas y
 los alelos deben reconstruirse sin consultar lecturas, alineamientos ni el propio
 VCF como fuente de verdad.
@@ -58,9 +64,10 @@ VCF como fuente de verdad.
 - Una referencia pequeña y una ploidía uniforme configurable entre 1 y 10 para
   todas sus secuencias en el recorrido de F2; la variación de ploidía por
   secuencia sigue reservada a F5.3.
-- Estado haplotípico por individuo, secuencia y copia, con fase, dosis,
-  procedencia y materialización exacta, sin duplicar secuencias completas por
-  defecto cuando la decisión DTPD-102 elija otra representación.
+- Estado haplotípico híbrido DTC-061 por individuo, secuencia y copia, con fase,
+  dosis y procedencia: cadena ordenada/persistente de segmentos que referencia
+  fuentes, modificaciones pequeñas tipadas y materialización exacta solo bajo
+  demanda, sin duplicar secuencias completas.
 - SNP e inserciones/deleciones pequeñas inequívocas, explícitas y aleatorias,
   sobre toda una secuencia o regiones declaradas. Los SNV heredables iniciales
   proceden de una matriz común a la población, suministrada o generada desde
@@ -84,7 +91,7 @@ VCF como fuente de verdad.
   de la verdad y validación externa independiente.
 - Aplicación Marimo base con nueve pestañas, cobertura completa de F1/F1.6,
   importación/exportación del conjunto TOML e invocación segura del binario; durante F2 se
-  amplía para individuos, verdad estructurada y VCF.
+  amplía para individuos, `truth.jsonl` y VCF.
 
 ### 2.2. Excluido
 
@@ -117,9 +124,10 @@ VCF como fuente de verdad.
 1. Cerrar F1.6 y F1, implementando DTC-056 y el servicio común de coordenadas, y
    congelar su línea base antes de modificar contratos de dominio,
    configuración, referencia, aleatoriedad o publicación.
-2. Resolver DTPD-117 y cerrar F2.0 antes de F2.1. Después resolver DTPD-102 con
-   prototipos y oráculos independientes antes de implementar estado haplotípico;
-   resolver DTPD-103 antes de implementar VCF.
+2. Validar DTC-058 en F2.0.2 y cerrar F2.0 antes de F2.1. Consumir sin reabrir
+   DTC-061 para implementar el estado haplotípico y `truth.jsonl`; consumir
+   DTC-062 a DTC-066 como resolución completa de DTPD-103 antes de implementar
+   el VCF.
 3. Reutilizar y extender el único servicio de coordenadas decidido e iniciado
    en F1.6. Las fronteras traducen la base 1 cerrada configurada; ningún
    adaptador ni algoritmo realiza conversiones implícitas ni abre otra
@@ -144,9 +152,11 @@ VCF como fuente de verdad.
 El árbol actual ya contiene el parser TOML, `DeclaredConfig`, `EffectiveConfig`,
 el resolvedor de reglas con `ParameterKey::VariantRate`, selectores espaciales,
 diagnósticos, RNG ChaCha12 local y configuración de Rust 1.97.1/edición 2024.
-F1.4 está aprobada y F1.5 continúa pendiente; por tanto, los IDs tipados,
-SHA-256, publicación y manifiestos de F1.4 pueden reutilizarse, mientras el
-adaptador FASTA solo puede consumirse después de la revisión y cierre de F1.5.
+F1.4 está aprobada; sus IDs tipados, SHA-256, publicación y manifiestos pueden
+reutilizarse después de congelar la línea base completa. F1.5 está
+implementada y publicada. F1.6 declara corregidos sus hallazgos, pero continúa
+en revisión independiente; ni su pausa ni el cierre global de F1 están
+aprobados. Por ello, ningún contrato F1 se congela todavía como línea base F2.
 `src/domain.rs` aún no constituye un modelo
 genómico. En el manifiesto actual no hay una dependencia aprobada para Poisson,
 serialización de verdad ni VCF; este plan no presupone ninguna.
@@ -155,7 +165,7 @@ serialización de verdad ni VCF; este plan no presupone ninguna.
 
 ### 4.1. Puerta de entrada a F2
 
-Antes de M1 deben constar: F1.4, F1.5 y F1.6 terminadas; revisión de cierre de F1
+Antes de F2.0.1 deben constar: F1.4, F1.5 y F1.6 terminadas; revisión de cierre de F1
 aprobada; pruebas y evidencias F1 verdes; hashes/esquemas/catálogos F1 congelados;
 árbol de trabajo atribuido; y aprobación explícita de este plan. Si F1 cambia
 un contrato que F2 pretendía reutilizar, se actualiza primero este plan y su
@@ -167,38 +177,94 @@ trazabilidad.
   tipos de frontera y vectores de intervalos origen↔derivada; F2.1/F2.2 deben
   auditarlos y extender el mismo servicio para segmentos, anclas y composición
   sin reabrir la decisión.
-- DTPD-102 debe elegir por separado el estado haplotípico interno y el fichero
-  obligatorio de verdad, demostrando reconstrucción, memoria, fase, dosis y
-  procedencia.
-- DTPD-103 debe fijar versión VCF, normalización, campos `INFO`, representación
-  complementaria y validadores independientes, incluidos BGZF e índice.
-- DTPD-117 debe evaluar y fijar versión compatible de Marimo, entorno,
-  dependencias, licencia, seguridad, empaquetado Ubuntu/WSL2, contrato de
-  esquemas/catálogos y adaptador de proceso sin shell. Ninguna versión se
-  presupone en este plan.
+- DTC-061 resuelve DTPD-102: modelo interno híbrido de segmentos/modificaciones
+  y `truth.jsonl` v1 obligatorio, UTF-8 sin comprimir, ordenado y validado por
+  esquema por registro más reconstructor semántico independiente. F2 consume
+  ese contrato sin reabrir formato, compresión ni dirección de derivación.
+- DTC-062 fija VCF 4.5 como única versión y la cabecera exacta
+  `##fileformat=VCFv4.5`, con validación externa basada en htslib. DTC-062 a
+  DTC-066 ya completan normalización, representación, campos `INFO`, complemento
+  y versiones/comandos de validadores; F2.5 los consume y verifica sin reabrir
+  DTPD-103 ni producir VCF 4.2/4.3/4.4.
+- DTC-063 fija `.vcf.gz` BGZF con exactamente un índice TBI o CSI como salida
+  predeterminada, seleccionado por el límite normativo de TBI, y `.vcf` de
+  texto sin índice como alternativa explícita. La configuración efectiva y el
+  manifiesto registran modo, tipo y rutas; VCF e índice se validan y publican
+  atómicamente.
+- DTC-064 fija la normalización interna determinista/versionada desde los
+  haplotipos finales, agrupación de todos los alelos compatibles en un único
+  registro multialélico por `CHROM+POS` y `bcftools norm` solo como oráculo.
+  Los cambios solapados se reconstruyen antes sobre un intervalo `REF` común;
+  la excepción de varios BND se reserva a SV/translocaciones futuras.
+- DTC-065 fija los `INFO` declarados `GPS_CASE`, `GPS_LOSS` y
+  `GPS_COMPLEMENT`, y un único `vcf-complement.jsonl` versionado por conjunto,
+  presente solo si existe pérdida. `GPS_CASE` es una lista canónica de casos
+  originales y `truth.jsonl` conserva por ALT sus casos fuente; F2 no crea casos
+  compuestos ni complementos. La primera cardinalidad positiva del complemento
+  se cierra en F5.5 sobre una pérdida real.
+- DTC-066 cierra DTPD-103 con `bcftools` 1.24 y HTSlib/tabix 1.24 solo en
+  aceptación/CI, comandos fijados y un oráculo semántico independiente. El
+  corpus positivo cubre texto, BGZF+TBI y BGZF+CSI; mutaciones aisladas prueban
+  cada invariante. EBI `vcf-validator` no es autoridad VCF 4.5.
+- DTC-058 resuelve DTPD-117 y concreta versión compatible de Marimo, entorno,
+  dependencias, licencia, seguridad, empaquetado Ubuntu/WSL2, contratos y
+  adaptador de proceso sin *shell*. La pareja candidata
+  exacta es CPython 3.14.7 + Marimo 0.23.16; todavía no está aprobada ni puede
+  incorporarse antes de superar la puerta de F2.0.2. `uv` será el único gestor:
+  dependencias en `pyproject.toml`, resolución exacta en `uv.lock`, entorno
+  local `.venv` excluido de Git y reproducción mediante `uv sync --frozen`,
+  sin paquetes globales ni instalación automática de paquetes desde Marimo.
+  La app, `pyproject.toml` y `uv.lock` se incluyen en el repositorio y en el
+  `.tar.gz` oficial junto al lanzador único
+  `genome-population-simulator-ui`. Su suborden `install` crea `.venv` y `run`
+  no descarga ni actualiza; el entorno no se distribuye y Marimo no se incrusta
+  en Rust. La imagen OCI de v1 permanece
+  exclusivamente CLI y no incluye Marimo, Python, `uv` ni un puerto UI. El
+  enlace es exclusivamente `127.0.0.1`, sin `0.0.0.0`, interfaces LAN, acceso
+  remoto ni configuración para ampliar la superficie; WSL2 accede mediante
+  `localhost` desde el navegador de Windows. El puerto predeterminado es 2718;
+  el lanzador admite `--port <n>` en `1024..=65535`, muestra el puerto efectivo
+  y falla ante una colisión con un ejemplo para elegir otro, sin selección
+  automática. El
+  lanzamiento interactivo imprime siempre la URL y después intenta abrir el
+  navegador predeterminado —el de Windows bajo WSL2—; un fallo de apertura solo
+  avisa y `--no-open` omite el intento. Abrir la aplicación nunca ejecuta una
+  simulación. Estos parámetros quedan fuera del TOML biológico y de
+  `EffectiveConfig`. La puerta de versiones debe demostrar resolución y *lock*
+  exactos, inventario de dependencias, *builds* y licencias, auditoría de
+  seguridad, arranque y controles en Ubuntu 24.04 nativo y WSL2, proceso falso,
+  binario Rust real y pruebas del lanzador. Si falla, se reabre DTPD-117 sin
+  degradar ni cambiar versiones silenciosamente.
+  La concreción incluye además descubrimiento del binario sin *fallback*,
+  contratos locales emparejados por SHA-256, protocolo de proceso v1,
+  cancelación escalonada, seguridad local, estado de formulario en memoria,
+  instantánea validada exacta, registros acotados, accesibilidad WCAG 2.2 AA y
+  pruebas automatizadas y manuales. F2.0.2–F2.0.18 materializan y verifican cada parte.
 - DTC-054 resuelve DTPD-118 y debe consumirse sin reinterpretación: solo admite
   `alt_af`; separa el espectro, la matriz larga canónica y sus metadatos; fija
   generación bialélica, poblaciones independientes, selección sin reemplazo,
   perfiles explícitos, ámbitos RNG, preparación/reutilización y excepciones
-  limitadas. B1 debe congelar su versión documental antes de implementar sus
+  limitadas. F2.2.1 debe congelar su versión documental antes de implementar sus
   consumidores. La capacidad de panel resuelta por DTC-055 permanece fuera de
   este alcance.
 - DTC-052 fija la separación funcional posterior a esa puerta: F2.2 produce o
   admite la matriz poblacional y F2.3 muestrea genotipos HWE o `F` diploide.
   Poisson solo puede obtener un recuento de loci/eventos desde una media o
   densidad; no gobierna frecuencias, alelos, genotipos ni fase.
-- La documentación no concreta todavía la implementación Poisson. B2 debe
-  crear una entrada de decisión conforme a §9 de
-  `decisiones-tecnicas-0.1.md`, evaluar opciones, fijar el algoritmo y aprobarla.
-  Esta puerta debe cerrarse antes de sus consumidores de recuentos.
-  Debe conservar Poisson como única distribución del número de variantes y
-  especificar espacios vacíos, límites y consumo aleatorio. La misma entrada
-  debe registrar la regla ya acordada para F2: inserciones y deleciones
-  aleatorias reciben longitudes exactas configurables e independientes, con
-  valor predeterminado de 1 pb y dominio inequívoco
-  `1 ≤ longitud < umbral estructural efectivo`; no se
-  sortea la longitud ni se introduce una distribución probabilística hasta
-  F7.2.
+- DTC-067 resuelve DTPD-120 con `poisson-count-v1`: cero sin consumo, Knuth para
+  `0<lambda<10`, PTRS para `10<=lambda<=2^52`, uniformes/consumo exactos y
+  `libm` 0.2.16 sujeto a DTC-043. Candidatos no exactos o fuera de `0..=2^53-1`
+  fallan; vectores y oráculo independiente cubren límites y Linux/WSL2.
+- DTC-059 formaliza las longitudes de *indels* F2: inserción y deleción usan
+  parámetros exactos, independientes, predeterminados a 1 pb y dentro de
+  `1 <= longitud < umbral estructural efectivo`. No consumen RNG de longitud ni
+  admiten una distribución probabilística.
+- DTC-068 resuelve DTPD-121 con dos perfiles humanos compactos aproximados. El
+  SFS usa los literales 64:12:8 y mínimo `1/5008`; el SNV12 transforma los 96
+  contextos Harris 2017 desde el fichero eLife fijado por tamaño/SHA-256. F2 no
+  procesa el VCF Phase 3 ni usa `bcftools` para estos builtins. F2.2.14 regenera
+  y revisa los recursos pequeños antes de incorporarlos; es una puerta de
+  evidencia interna, no una decisión abierta ni un bloqueo para iniciar F2.2.
 
 Que una puerta quede bloqueada no impide preparar matrices, casos literales o
 validadores que no dependan de su resultado. Sí impide escribir el contrato de
@@ -217,12 +283,28 @@ cargo test --workspace --doc --locked
 cargo build --release --locked --target x86_64-unknown-linux-gnu
 cargo metadata --locked --format-version 1
 cargo tree --locked -e features
+uv sync --frozen
+uv run --frozen pytest
 ```
 
 Cada validador externo elegido debe registrarse con versión y comando exactos.
 Los oráculos de aceptación no pueden llamar al productor para calcular el
 resultado esperado ni leer el VCF para reconstruir la verdad con la que se lo
 compara.
+
+### 4.4. Evidencia ejecutable por paso
+
+F2.0.1 crea `scripts/verify-f2-step` y el registro
+`tests/f2/step-evidence.toml`. Cada casilla del plan incluye después una línea
+`Evidencia ejecutable` con el comando exacto. El ejecutor corre los comandos y
+oráculos registrados para ese identificador, conserva stdout/stderr/versiones y
+escribe `evidence/f2/<paso>/result.json` conforme a esquema. El resultado
+esperado mínimo es código 0, `status = "passed"` y ninguna comprobación omitida.
+Un paso detenido por una decisión pendiente nombrada usa `status = "blocked"`;
+una orden ausente, no ejecutada o con esperado no declarado hace fallar el
+paso. Un expediente de cobertura parcial conserva el paso como `passed`, pero
+usa `status = "partial"` en el registro del REQ, identifica su destino final y
+nunca permite superar una pausa como si fuera cierre completo de ese REQ.
 
 ## 5. F2.0 — Aplicación Marimo base
 
@@ -231,83 +313,197 @@ validar y lanzar todas las capacidades cerradas en F1/F1.6 mediante el mismo
 TOML y binario, sin duplicar semántica y con las nueve pestañas preparadas para
 las ampliaciones F2–F9.
 
-- ☐ M1. Resolver DTPD-117 y aprobar la dependencia y distribución de Marimo.
-  - Depende de: cierre explícito de F1.6/F1 y aprobación de este plan.
-  - Procede de: DTPD-117, DTC-043, DTC-048 y DTC-051; REQ-UI-01, REQ-UI-12 y REQ-UI-13.
-  - Cambia: evaluación con versión exacta, entorno, lock/pinning, licencia, mantenimiento, seguridad, empaquetado local Ubuntu/WSL2 y protocolo de proceso; solo después incorpora los archivos/dependencias aprobados de la app.
-  - Se comprueba con: revisión DTC-043 equivalente para el entorno, instalación reproducible aislada, inventario bloqueado, arranque local y aprobación fechada de DTPD-117 sin introducir Python en el núcleo Rust.
+- ☐ F2.0.1. Crear el ejecutor y registro uniforme de evidencia de F2.
+  - Depende de: cierre y commit base de F1, árbol atribuido y aprobación de este plan; no inicia producto F2.
+  - Procede de: RAF2-023 y reglas de evidencia de §4.4.
+  - Cambia: `scripts/verify-f2-step`, el registro versionado `tests/f2/step-evidence.toml` y el esquema de `evidence/f2/<paso>/result.json`; cada entrada enumera comandos, fixtures, oráculos, versiones y resultados esperados y falla si alguno falta o no se ejecuta.
+  - Se comprueba con: `cargo test --test f2_plan_evidence_contract --locked` y `./scripts/verify-f2-step F2.0.1`; ambos terminan 0, el segundo crea `evidence/f2/F2.0.1/result.json` válido y una entrada sin comando, fixture o esperado falla.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.1`; debe terminar con código 0 y escribir `evidence/f2/F2.0.1/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ M2. Publicar el contrato versionado aplicación↔esquema↔catálogos↔binario.
-  - Depende de: M1 y esquemas/catálogos cerrados en F1.6.
-  - Procede de: REQ-UI-01, REQ-UI-09 y REQ-UI-12; DTC-036 y DTC-051.
-  - Cambia: metadatos o comando de capacidades aprobado que declara versiones compatibles de esquema TOML general/escenario, campos, diagnósticos y protocolo `validate`/`run`, sin exponer tipos internos.
-  - Se comprueba con: conjuntos compatible, anterior, posterior, ausente y corrupto; toda incompatibilidad de cualquier documento bloquea importación/validación/ejecución antes de interpretar parcialmente opciones.
+- ☐ F2.0.2. Evaluar y aprobar experimentalmente las candidatas de DTC-058.
+  - Depende de: F2.0.1.
+  - Procede de: DTC-043, DTC-048 y DTC-058 (resuelve DTPD-117).
+  - Cambia: expediente sin dependencia de producción que evalúa exactamente CPython 3.14.7, Marimo 0.23.16 y `uv` 0.12.0, resolución, *builds*, licencias, mantenimiento, CVE-2026-39987 y compatibilidad básica; termina en aprobación fechada o reapertura de DTPD-117, nunca en sustitución silenciosa.
+  - Se comprueba con: `./scripts/evaluate-marimo-toolchain --python 3.14.7 --marimo 0.23.16 --uv 0.12.0 --output evidence/f2/F2.0.2` y `./scripts/verify-f2-step F2.0.2`; inventario, auditoría y decisión fechada son válidos o el paso queda bloqueado sin modificar dependencias de producción.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.2`; debe terminar con código 0 y escribir `evidence/f2/F2.0.2/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ M3. Crear el armazón accesible de las nueve pestañas y su visibilidad por vía/capacidad.
-  - Depende de: M1–M2.
+- ☐ F2.0.3. Incorporar el proyecto Python y su entorno bloqueado.
+  - Depende de: F2.0.2 aprobada.
+  - Procede de: DTC-043, DTC-048 y DTC-058.
+  - Cambia: `pyproject.toml`, `uv.lock`, `.python-version`, exclusión de `.venv`, instalación `genome-population-simulator-ui install` con `uv sync --frozen` y prohibición de paquetes globales o instalación automática de Marimo.
+  - Se comprueba con: `uv sync --frozen --python 3.14.7`, `uv run --frozen python -VV`, `git check-ignore .venv` y `./scripts/verify-f2-step F2.0.3`; lock divergente falla sin actualizar y las versiones coinciden exactamente.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.3`; debe terminar con código 0 y escribir `evidence/f2/F2.0.3/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.0.4. Crear el esqueleto de entrega local de la aplicación.
+  - Depende de: F2.0.3.
+  - Procede de: DTC-042, DTC-045 y DTC-058; REQ-UI-01 y REQ-UI-12.
+  - Cambia: aplicación vacía, directorio de contratos y lanzador `genome-population-simulator-ui` en repositorio y receta `.tar.gz`; excluye `.venv`, CPython y `uv`, sin incorporar aún controles ni protocolo de F2.0.8/F2.0.14.
+  - Se comprueba con: `./scripts/build-distribution.sh --format tar.gz --output evidence/f2/F2.0.4/package` y `./scripts/verify-f2-step F2.0.4`; listado/extracción independiente confirma contenidos y exclusiones exactos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.4`; debe terminar con código 0 y escribir `evidence/f2/F2.0.4/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.0.5. Implementar el ciclo de arranque local y navegador.
+  - Depende de: F2.0.3–F2.0.4.
+  - Procede de: DTC-058; REQ-UI-08, REQ-UI-09 y REQ-UI-13.
+  - Cambia: `genome-population-simulator-ui run` usa `marimo run`, token obligatorio, solo `127.0.0.1`, puerto 2718 o `--port 1024..=65535`, colisión sin selección automática, URL visible, navegador predeterminado/Windows WSL2 y `--no-open`; abrir nunca simula.
+  - Se comprueba con: `./scripts/test-ui-launcher --bind 127.0.0.1 --port 2718 --evidence evidence/f2/F2.0.5` y `./scripts/verify-f2-step F2.0.5`; cubre bordes de puerto, colisión, `0.0.0.0` prohibido, apertura/fallo/`--no-open` y ausencia de `run` Rust.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.5`; debe terminar con código 0 y escribir `evidence/f2/F2.0.5/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.0.6. Demostrar arranque sin red y separación de la imagen OCI.
+  - Depende de: F2.0.4–F2.0.5.
+  - Procede de: DTC-042, DTC-043 y DTC-058.
+  - Cambia: prueba reproducible posterior a instalación que bloquea red durante el arranque; receta OCI continúa CLI y excluye aplicación, Python, `uv` y puerto UI.
+  - Se comprueba con: `./scripts/test-ui-offline --launcher ./genome-population-simulator-ui --evidence evidence/f2/F2.0.6`, `./scripts/inspect-distribution.sh --oci --expect-cli-only` y `./scripts/verify-f2-step F2.0.6`; toda descarga/actualización o contenido UI en OCI falla.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.6`; debe terminar con código 0 y escribir `evidence/f2/F2.0.6/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.0.7. Cerrar la evidencia de entorno en Ubuntu y WSL2.
+  - Depende de: F2.0.2–F2.0.6.
+  - Procede de: DTC-042, DTC-058 y DTC-074 (resuelve RAF2-035); REQ-UI-13.
+  - Cambia: verificador que detecta y registra `/etc/os-release`, kernel, arquitectura, triple, WSL2, montaje y metadatos CI antes de compararlos con `--expect-platform`; rechaza etiquetas discordantes. Produce dossiers separados para Ubuntu 24.04 nativo y WSL2/ext4 con instalación, arranque, navegador, permisos y binario falso/real; no declara Windows nativo ni WSL2 como plataforma de publicación.
+  - Se comprueba con: un job Ubuntu 24.04 nativo identificable ejecuta `./scripts/verify-ui-platform --expect-platform ubuntu-24.04-native --evidence evidence/f2/F2.0.7/ubuntu`; el host WSL2 ejecuta `./scripts/verify-ui-platform --expect-platform wsl2 --evidence evidence/f2/F2.0.7/wsl2`; intercambiar expectativas falla. `./scripts/verify-f2-step F2.0.7` exige hechos detectados, URL/job/commit nativos y separa evidencia automática de actas manuales.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.7`; debe terminar con código 0 y escribir `evidence/f2/F2.0.7/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.0.8. Publicar el contrato versionado aplicación↔esquema↔catálogos↔binario.
+  - Depende de: F2.0.2–F2.0.7 y esquemas/catálogos cerrados en F1.6.
+  - Procede de: REQ-UI-01, REQ-UI-09 y REQ-UI-12; DTC-036, DTC-051 y DTC-073 (resuelve RAF2-034).
+  - Cambia: directorio oficial con manifiesto, esquemas, catálogos, capacidades, versiones y SHA-256; `--simulator-bin` es una selección estricta, en su ausencia se usa el binario del paquete si existe y solo si no está incluido se resuelve una única ruta de `PATH` al inicio. Una fuente seleccionada nunca cambia tras ausencia no permitida, falta de ejecución, fallo o incompatibilidad. `capabilities --format json` usa protocolo `"1"` y separa `catalogued_authorizations` de `available_authorizations`; en F2.0 ambas opciones están catalogadas y ninguna disponible. Marimo solo muestra la intersección y registra ruta, versión y SHA-256 en sesión —nunca TOML/`EffectiveConfig`—.
+  - Se comprueba con: rutas/fallos sin *fallback*; `available` no subconjunto, duplicado, opción desconocida o disponibilidad sin parser/semántica fallan; una opción solo catalogada no aparece ni se transmite. También cubre protocolo frente a *semver*, contratos compatible/anterior/posterior/ausente/corrupto/intercambiado y modo diagnóstico sin búsqueda externa ni mezcla.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.8`; debe terminar con código 0 y escribir `evidence/f2/F2.0.8/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.0.9. Crear el armazón accesible de las nueve pestañas y su visibilidad por vía/capacidad.
+  - Depende de: F2.0.1–F2.0.8.
   - Procede de: REQ-UI-02 y REQ-UI-13; DTC-051.
-  - Cambia: aplicación con `General/Ejecución`, `Genoma`, `Individuos`, `Poblaciones`, `Evolución`, `Familias`, `Eventos técnicos`, `Salidas` y `Revisar y ejecutar`; las no implementadas quedan deshabilitadas/ocultas con causa explícita.
-  - Se comprueba con: prueba de presencia y orden estable, rutas direct/evolution/families, navegación por teclado y comprobación de que una pestaña no disponible no pierde su destino trazable.
+  - Cambia: aplicación servida solo con `marimo run`, token obligatorio y sin editor, terminal, IA, telemetría, compartición o instalador; contiene `General/Ejecución`, `Genoma`, `Individuos`, `Poblaciones`, `Evolución`, `Familias`, `Eventos técnicos`, `Salidas` y `Revisar y ejecutar`, con indisponibilidad explicada.
+  - Se comprueba con: presencia/orden estable, vías direct/evolution/families, token y rutas negativas `edit`/terminal/IA/red, navegación por teclado y comprobación de que una pestaña no disponible no pierde su destino trazable.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.9`; debe terminar con código 0 y escribir `evidence/f2/F2.0.9/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ M4. Mantener un único estado de formulario tipado e invalidar toda validación tras una edición.
-  - Depende de: M2–M3.
+- ☐ F2.0.10. Mantener un único estado de formulario tipado e invalidar toda validación tras una edición.
+  - Depende de: F2.0.8–F2.0.9.
   - Procede de: REQ-UI-03, REQ-UI-07 y REQ-UI-09; arquitectura §§6.1 y 7.1.
-  - Cambia: modelo de autoría multidocumento separado de `EffectiveConfig`, con un general y cero o varios escenarios identificados/ordenados/enlazados; digest/revisión del conjunto validado y transición explícita editado→no validado→validado→ejecutable.
-  - Se comprueba con: editar, añadir, quitar, reordenar o renombrar cualquier documento/enlace después de validar, verificar invalidación inmediata y demostrar que la app nunca calcula regla ganadora, valor efectivo o verdad biológica.
+  - Cambia: modelo de autoría multidocumento en memoria, sin autoguardado, recuperación ni estado biológico del navegador; `Validar` crea una instantánea TOML visible en temporal privado 0700 y ficheros 0600, la asocia a su digest y `Ejecutar` reutiliza esos bytes; solo exportar persiste configuración.
+  - Se comprueba con: editar/añadir/quitar/reordenar/renombrar invalida instantánea y ejecución; reiniciar pierde cambios no exportados; permisos, mismo UID y limpieza segura de temporales; la app nunca calcula regla ganadora, valor efectivo o verdad.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.10`; debe terminar con código 0 y escribir `evidence/f2/F2.0.10/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ M5. Cubrir con controles tipados todas las opciones escalares F1/F1.6 de General y Genoma.
-  - Depende de: M2–M4.
+- ☐ F2.0.11. Cubrir con controles tipados todas las opciones escalares F1/F1.6 de General y Genoma.
+  - Depende de: F2.0.8–F2.0.10.
   - Procede de: REQ-UI-01, REQ-UI-03 y REQ-CONF-124 a REQ-CONF-127; DTC-050/DTC-051.
   - Cambia: controles de clase/versión, vía, seed, referencia simulada/suministrada/reducida, IDs, clases, tamaños, `region_size_bases`, unión de objetivo y opciones de salida existentes, con unidad normativa en bases y ayuda en kb.
   - Se comprueba con: matriz opción F1/F1.6→pestaña/control/campo TOML, límites y exclusividad de reducción, conversión visual kb↔bases sin pérdida y ausencia de opción implementada solo en TOML.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.11`; debe terminar con código 0 y escribir `evidence/f2/F2.0.11/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ M6. Implementar tablas editables para secuencias, eventos, reglas y demás listas F1.
-  - Depende de: M3–M5.
+- ☐ F2.0.12. Implementar tablas editables para secuencias, eventos, reglas y demás listas F1.
+  - Depende de: F2.0.9–F2.0.11.
   - Procede de: REQ-UI-04, REQ-UI-05 y DTC-051.
   - Cambia: tablas con añadir/eliminar/reordenar, IDs y orden visibles y editores de selectores/ámbitos permitidos según catálogo; no concede precedencia por orden accidental de celdas.
   - Se comprueba con: alta/baja/reordenación, duplicados, región/locus, selector no admitido y comparación del TOML resultante con fixtures manuales equivalentes.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.12`; debe terminar con código 0 y escribir `evidence/f2/F2.0.12/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ M7. Importar y exportar un conjunto TOML autoconsistente.
-  - Depende de: M2 y M4–M6.
-  - Procede de: REQ-UI-06 y REQ-UI-12; DTC-034, DTC-036 y DTC-051.
-  - Cambia: adaptador de importación al estado de formulario multidocumento, previsualización individual y exportación/guardado conjunto de exactamente un general y cero o varios escenarios, conservando IDs, orden y enlaces/rutas relativas. F2.0 activa el caso general F1/F1.6 y prepara escenarios sin implementar sus controles biológicos.
-  - Se comprueba con: general sin escenarios y fixtures estructurales con varios escenarios, rutas relativas y nombres con espacios; faltante, duplicado, ajeno y enlace roto se rechazan; el ciclo importar→previsualizar→exportar→`validate` produce la misma `EffectiveConfig` o diagnóstico que el conjunto manual.
+- ☐ F2.0.13. Cerrar la importación/exportación atómica del directorio autocontenido DTC-069.
+  - Depende de: F2.0.13.1–F2.0.13.4.
+  - Procede de: REQ-UI-06 y REQ-UI-12; DTC-034, DTC-036, DTC-051 y DTC-069; RAF2-017/036 resueltos.
+  - Cambia: integra inventario, copia aislada, preservación opaca y exportación no-clobber como una única puerta de aceptación, sin volver a mezclar sus responsabilidades.
+  - Se comprueba con: ejecución conjunta de los cuatro expedientes hijos y prueba de que ningún fallo adopta una sesión ni publica un directorio parcial.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.13`; debe terminar con código 0 y escribir `evidence/f2/F2.0.13/result.json` con `status = "passed"` y los cuatro expedientes hijos enlazados.
 
-- ☐ M8. Invocar `validate` sin shell y asociar diagnósticos a campos sin reinterpretarlos.
-  - Depende de: M1–M2 y M7.
+- ☐ F2.0.13.1. Inventariar y validar el grafo autocontenido y sus límites.
+  - Depende de: F2.0.8 y F2.0.10–F2.0.12.
+  - Procede de: DTC-069; contrato de importación de REQ-UI-06/12.
+  - Cambia: selector de un directorio, inventario canónico de exactamente un TOML general y 0..N escenarios alcanzables, validación de enlaces relativos y límites antes de abrir contenido.
+  - Se comprueba con: general ausente/múltiple, enlace ausente/duplicado, ruta absoluta/`..`/no canónica, ciclo, escape, extra y cada borde de cantidad/tamaño/profundidad DTC-069.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.13.1`; debe terminar con código 0 y escribir `evidence/f2/F2.0.13.1/result.json` con inventario, límites ejercitados y `status = "passed"`.
+
+- ☐ F2.0.13.2. Copiar el conjunto validado al espacio privado sin TOCTOU ni escapes.
+  - Depende de: F2.0.13.1.
+  - Procede de: DTC-069; aislamiento local de DTC-051.
+  - Cambia: apertura segura, rechazo de symlink/hardlink que rompa aislamiento, copia privada atómica y comparación de identidad/hash entre inventario, copia y adopción.
+  - Se comprueba con: sustitución y carrera entre inventario/apertura/copia/hash, enlace inseguro, cambio de inode/contenido y permisos; todo fallo descarta el provisional y conserva intacta la sesión anterior.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.13.2`; debe terminar con código 0 y escribir `evidence/f2/F2.0.13.2/result.json` con carreras reproducibles y ausencia de adopción parcial.
+
+- ☐ F2.0.13.3. Preservar opacamente documentos y campos válidos sin controles.
+  - Depende de: F2.0.13.2.
+  - Procede de: DTC-069; autoría multidocumento F2.0.10.
+  - Cambia: modelo de round-trip que conserva bytes/documentos válidos aún no editables y solo invalida el digest cuando el usuario realiza un cambio explícito.
+  - Se comprueba con: 0/1/N escenarios, espacios, campos desconocidos válidos y documentos alcanzables sin control; importación-exportación sin edición es exacta y una edición invalida el digest sin perder el resto opaco.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.13.3`; debe terminar con código 0 y escribir `evidence/f2/F2.0.13.3/result.json` con hashes antes/después y `status = "passed"`.
+
+- ☐ F2.0.13.4. Exportar otro directorio completo de forma atómica y no-clobber.
+  - Depende de: F2.0.13.1–F2.0.13.3.
+  - Procede de: DTC-069; publicación segura DTC-045.
+  - Cambia: exportación mediante directorio provisional, rutas relativas canónicas, revalidación, hashes y publicación no-clobber; no admite ZIP/TAR ni selección manual múltiple.
+  - Se comprueba con: destino inexistente/existente, carrera de creación, fallo de escritura/revalidación/hash y grafo alterado; no queda salida parcial y el original importado nunca se modifica.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.13.4`; debe terminar con código 0 y escribir `evidence/f2/F2.0.13.4/result.json` con publicación atómica demostrada.
+
+- ☐ F2.0.14. Invocar `validate` sin shell y asociar diagnósticos a campos sin reinterpretarlos.
+  - Depende de: F2.0.1–F2.0.8 y F2.0.13.
   - Procede de: REQ-UI-07, REQ-UI-09 y REQ-VAL-54; DTC-044 y DTC-051.
-  - Cambia: adaptador de proceso con argumentos separados para el general y sus escenarios enlazados, captura acotada de stdout/stderr/código y presentación por documento/pestaña/tabla/fila/campo usando el diagnóstico JSON del binario.
-  - Se comprueba con: proceso falso que registra cada argumento, rutas relativas con espacios/metacaracteres, binario real válido/inválido, códigos 0–5/70 y prueba de que ningún texto se ejecuta como shell.
+  - Cambia: protocolo `"1"` sin *shell* para `validate <general> --diagnostics json [autorizaciones]`, cwd del general, un proceso activo, `stdin` cerrado y sin reintentos; el digest incluye documentos, contratos y autorizaciones ordenadas. Confirmar o retirar una autorización invalida y repite `validate`. `stdout`/`stderr` se drenan concurrentemente; el primero queda vacío o contiene un JSON y el segundo solo log.
+  - Se comprueba con: proceso falso registra argv/cwd y rechaza opción no catalogada/general; espacios/metacaracteres, códigos 0/1/2/3/4/5/70, JSON ausente solo en éxito limpio, JSON inválido/doble/incompatible, ambos flujos llenos/intercalados sin bloqueo y prueba de que stderr/texto nunca se ejecuta ni adquiere semántica.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.14`; debe terminar con código 0 y escribir `evidence/f2/F2.0.14/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ M9. Seleccionar el destino de forma segura y lanzar `run` solo por acción explícita.
-  - Depende de: M4, M8 y publicación F1.4.
+- ☐ F2.0.15. Seleccionar el destino de forma segura y lanzar `run` solo por acción explícita.
+  - Depende de: F2.0.10, F2.0.14 y publicación F1.4.
   - Procede de: REQ-UI-08 a REQ-UI-10; DTC-045 y DTC-051.
-  - Cambia: selector/revisión de destino, confirmación visible de no-clobber y botón de ejecución habilitado solo para el digest validado vigente; abrir/importar/editar nunca ejecuta.
-  - Se comprueba con: destino vacío/existente/válido, doble clic, edición posterior, recarga de app y proceso falso; solo una acción explícita válida lanza una lista de argumentos y el binario conserva el rechazo no-clobber.
+  - Cambia: destino/no-clobber y botón habilitado solo para el digest vigente; lanza una vez `run <general> --diagnostics json --output <destino> [autorizaciones]` con exactamente documentos, contrato y autorizaciones validados. Crea un grupo dedicado, no reutiliza hijo y cancelar envía solo a ese grupo SIGINT/10 s, SIGTERM/5 s y SIGKILL; registra etapas y nunca completa salida parcial.
+  - Se comprueba con: destino vacío/existente/válido, doble clic, edición/recarga y autorización añadida/retirada; proceso falso/real, descendientes que ignoran señales, drenaje hasta EOF, espera sin huérfanos y proceso ajeno intacto; manifiesto final ausente tras código 0 falla y Rust conserva no-clobber.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.15`; debe terminar con código 0 y escribir `evidence/f2/F2.0.15/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ M10. Presentar estado, logs, diagnósticos y resultados sin cargar artefactos grandes.
-  - Depende de: M8–M9 y manifiestos F1.4/F1.6.
+- ☐ F2.0.16. Presentar estado, logs, diagnósticos y resultados sin cargar artefactos grandes.
+  - Depende de: F2.0.14–F2.0.15 y manifiestos F1.4/F1.6.
   - Procede de: REQ-UI-11 y DTC-051.
-  - Cambia: vista de proceso/estado/código, logs acotados o paginados y resumen desde manifiestos con enlaces a artefactos; nunca lee completos FASTA/FASTQ/BAM/CRAM/VCF para resumir.
-  - Se comprueba con: proceso largo/fallido, log grande, manifiesto válido/roto y artefacto señuelo grande instrumentado para demostrar que solo se leen metadatos o fragmentos solicitados.
+  - Cambia: ficheros 0600 bajo estado XDG, cola UI de 1 MiB y paginación; límites 16 MiB stdout/64 MiB stderr por invocación y 256 MiB total, exceso termina sin truncar, token redactado y limpieza explícita/evicción de sesiones terminadas; resumen solo desde manifiestos/metadatos.
+  - Se comprueba con: bordes y exceso de los tres límites, proceso falso que llena ambos flujos intercalados sin bloquear, sesión activa nunca eliminada, token ausente, proceso largo/fallido, manifiesto válido/roto y artefacto señuelo grande que demuestra lectura parcial.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.16`; debe terminar con código 0 y escribir `evidence/f2/F2.0.16/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ M11. Cerrar accesibilidad y funcionamiento local Ubuntu/WSL2.
-  - Depende de: M3–M10.
-  - Procede de: REQ-UI-13; DTC-042, DTC-051 y DTPD-117 aprobada.
-  - Cambia: etiquetas, ayuda/unidades, foco, teclado, estados textuales además de color y guía de arranque local sobre sistema de ficheros Linux; no promete Windows nativo.
-  - Se comprueba con: recorrido completo solo teclado, inspección de etiquetas/foco/contraste acordada, Ubuntu 24.04 y WSL2/ext4, y rechazo/documentación de `/mnt/c` conforme al entorno admitido.
+- ☐ F2.0.17. Cerrar accesibilidad y funcionamiento local Ubuntu/WSL2.
+  - Depende de: F2.0.17.1–F2.0.17.4.
+  - Procede de: REQ-UI-13; DTC-042, DTC-051, DTC-058 y DTC-074; RAF2-035/036 resueltos.
+  - Cambia: reúne cuatro expedientes independientes —navegador, accesibilidad automática, teclado/foco y lector de pantalla/plataformas— bajo una puerta WCAG 2.2 AA de controles propios.
+  - Se comprueba con: los cuatro expedientes hijos aprobados, limitaciones de Marimo registradas y guía coherente con `127.0.0.1`, navegador Windows desde WSL2 y alternativa manual.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.17`; debe terminar con código 0 y escribir `evidence/f2/F2.0.17/result.json` con `status = "passed"` y enlaces a F2.0.17.1–F2.0.17.4.
 
-- ☐ M12. Completar equivalencia y trazabilidad de F2.0.
-  - Depende de: M1–M11.
+- ☐ F2.0.17.1. Fijar y verificar el navegador automatizado reproducible.
+  - Depende de: F2.0.2 y F2.0.9–F2.0.16.
+  - Procede de: DTC-058 y DTC-074; puerta de navegador de REQ-UI-13.
+  - Cambia: Playwright y axe fijados en `uv.lock`; un Chromium único con versión, URL, artefacto y SHA-256 inventariados, más receta Ubuntu exacta y ejecución posterior sin red.
+  - Se comprueba con: instalación reproducible de Chromium y dependencias desde receta aprobada, segunda ejecución offline, rechazo de hash/versión distintos y registro de la plataforma detectada.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.17.1`; debe terminar con código 0 y escribir `evidence/f2/F2.0.17.1/result.json` con inventario y repetición offline.
+
+- ☐ F2.0.17.2. Ejecutar la auditoría automática de accesibilidad.
+  - Depende de: F2.0.17.1.
+  - Procede de: REQ-UI-13; objetivo WCAG 2.2 AA de controles propios.
+  - Cambia: corpus automatizado de etiquetas/ayuda, errores asociados, contraste, zoom 200 %, estados no basados solo en color y rutas principales de la aplicación.
+  - Se comprueba con: Playwright+axe sobre estados vacío, válido, inválido, validando, ejecutando y fallido; toda infracción o ruta no visitada bloquea.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.17.2`; debe terminar con código 0 y escribir `evidence/f2/F2.0.17.2/result.json` con reglas, rutas, versión y resultados completos.
+
+- ☐ F2.0.17.3. Revisar manualmente teclado, orden de foco y recuperación tras errores.
+  - Depende de: F2.0.17.2.
+  - Procede de: REQ-UI-13; controles y estados implementados en F2.0.9–F2.0.16.
+  - Cambia: acta manual separada para navegación sin ratón, foco visible, orden lógico, modales, cancelación y retorno del foco tras diagnóstico.
+  - Se comprueba con: guion versionado ejecutado en Ubuntu 24.04 nativo y WSL2/navegador Windows, con fecha, revisor, versiones, pasos y resultado; una omisión o limitación no aceptada bloquea.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.17.3`; debe terminar con código 0 y escribir `evidence/f2/F2.0.17.3/result.json` que enlace ambas actas y su plataforma detectada.
+
+- ☐ F2.0.17.4. Revisar manualmente lector de pantalla y funcionamiento por plataforma.
+  - Depende de: F2.0.17.1–F2.0.17.3 y F2.0.7.
+  - Procede de: DTC-042 y DTC-074; REQ-UI-13.
+  - Cambia: actas independientes de lector de pantalla/navegador para Ubuntu nativo y WSL2 con navegador Windows, sin presentar Windows nativo ni acceso remoto como soportados.
+  - Se comprueba con: anuncio de etiquetas, ayuda, errores, cambios de estado y resultados; cada acta registra lector/navegador/versiones, evidencia de plataforma detectada, fecha, revisor y limitaciones.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.17.4`; debe terminar con código 0 y escribir `evidence/f2/F2.0.17.4/result.json` con las dos actas enlazadas y `status = "passed"`.
+
+- ☐ F2.0.18. Completar equivalencia y trazabilidad de F2.0.
+  - Depende de: F2.0.1–F2.0.17.
   - Procede de: REQ-UI-01 a REQ-UI-13, REQ-VAL-54 y ACE-114/115.
-  - Cambia: 14 casos `TEST-REQ-*`, matriz opción→control, pruebas app→conjunto TOML→binario y expediente DTPD-117; no marca controles de escenarios evolutivos/familias ni otras capacidades futuras como implementados.
-  - Se comprueba con: par UI/manual para cada capacidad F1/F1.6 y para la estructura general+0..N escenarios que produce igual `EffectiveConfig` o diagnóstico, puertas propias de la app y recuento automático de 14 REQ sin huérfanos.
+  - Cambia: 14 casos `TEST-REQ-*`, matriz opción→control, pruebas UI→TOML→binario y expediente DTPD-117; inventario de entrega confirma UI en repositorio/`.tar.gz` y su exclusión deliberada de OCI; no marca controles futuros como implementados.
+  - Se comprueba con: par UI/manual para cada capacidad F1/F1.6 y general+0..N escenarios con igual `EffectiveConfig`/diagnóstico; puertas Python/Rust/navegador, extracción del `.tar.gz`, arranque CLI OCI sin Python/Marimo/puerto UI y recuento de 14 REQ sin huérfanos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.18`; debe terminar con código 0 y escribir `evidence/f2/F2.0.18/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-> **Pausa obligatoria F2.0.** No iniciar F2.1 hasta aprobar DTPD-117, la
-> equivalencia de todas las opciones F1/F1.6, la invocación sin shell, la
+> **PAUSA-F2.0 — cierre obligatorio de F2.0.** No iniciar F2.1 hasta superar y aprobar la puerta
+> experimental F2.0.2 de DTC-058, la equivalencia de todas las opciones F1/F1.6, el
+> emparejamiento de contratos, la invocación sin *shell* y la cancelación, la
 > autoría/exportación autoconsistente del conjunto TOML, la invalidación tras
-> cambiar cualquier documento/enlace, el destino no-clobber y la revisión de
-> accesibilidad. RAF2-001, RAF2-004 y RAF2-007 continúan abiertos.
+> cambiar cualquier documento/enlace, el destino no-clobber, los límites de
+> registros, la seguridad local, la accesibilidad y las entregas diferenciadas
+> `.tar.gz`/OCI. RAF2-001 está resuelto; RAF2-027 mantiene bloqueado el inicio
+> por F1. RAF2-004 y RAF2-007 se resuelven
+> mediante las reasignaciones y pruebas negativas explícitas de este plan.
 
 ## 6. F2.1 — Estado haplotípico mínimo
 
@@ -315,70 +511,81 @@ las ampliaciones F2–F9.
 haplotípica, fase, dosis, procedencia y `N`, y permiten materializar secuencias
 exactas desde la referencia cerrada en F1.
 
-- ☐ A1. Congelar y auditar la línea base que F2 consumirá.
-  - Depende de: cierre explícito de F1.4, F1.5 y F1, y aprobación de este plan.
+- ☐ F2.1.1. Congelar y auditar la línea base que F2 consumirá.
+  - Depende de: PAUSA-F2.0 aprobada, cierre explícito de F1.4, F1.5 y F1 y commit base identificado.
   - Procede de: dependencia F1→F2 de la hoja de ruta; DTC-043, DTC-045 y DTC-048.
   - Cambia: evidencia de preflight de F2 con commit base, toolchain, lock, esquemas, catálogos, comandos verdes y contratos F1 reutilizados; no cambia producción.
   - Se comprueba con: revisión del acta de cierre F1, `git status --short`, `rustc --version`, `cargo metadata --locked --format-version 1` y las puertas de §4.3 sobre el commit base.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.1`; debe terminar con código 0 y escribir `evidence/f2/F2.1.1/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ A2. Auditar y congelar para F2 la DTPD-101 resuelta en F1.6.
-  - Depende de: A1.
+- ☐ F2.1.2. Auditar y congelar para F2 la DTPD-101 resuelta en F1.6.
+  - Depende de: F2.1.1.
   - Procede de: DTPD-101; DTC-010; REQ-CONF-28, REQ-IND-38 y REQ-IND-39.
   - Cambia: expediente de consumo F2 que enlaza la decisión y los tipos/servicio comunes de F1.6, completa vectores de inserciones ancladas, deleciones internas y composición y prohíbe otra representación; no reabre opciones ni cambia DTPD-101.
   - Se comprueba con: huella/versión coincidentes con F1.6, vectores literales de primera/última base y rangos vacíos, ida/vuelta en fronteras y revisión independiente que detectaría cualquier conversión o tipo local nuevo.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.2`; debe terminar con código 0 y escribir `evidence/f2/F2.1.2/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ A3. Resolver y aprobar DTPD-102 para estado interno y fichero de verdad como contratos distintos.
-  - Depende de: A1 y A2 para interpretar coordenadas del prototipo.
-  - Procede de: DTPD-102; arquitectura §§6.2, 9 y 10; REQ-IND-28, REQ-IND-29 y REQ-VER-31.
-  - Cambia: registro de decisiones y prototipos comparables con copias, SNP, indels, `N`, materialización, fase, dosis y procedencia; documenta formato y versionado elegidos sin confundirlos con la estructura interna.
-  - Se comprueba con: reconstrucción por un comprobador independiente, medida reproducible de memoria en el caso pequeño acordado, casos poliploides 1–10 y aprobación explícita conforme a §9 del registro técnico.
+- ☐ F2.1.3. Congelar y auditar DTC-061 como resolución completa de DTPD-102.
+  - Depende de: F2.1.1 y F2.1.2 para interpretar coordenadas del prototipo.
+  - Procede de: DTPD-102 y DTC-061; arquitectura §§5.3, 6.2, 9 y 10; REQ-IND-28, REQ-IND-29 y REQ-VER-31.
+  - Cambia: expediente de consumo que congela modelo híbrido y `truth.jsonl` v1 sin comparar alternativas: UTF-8 sin comprimir, cabecera, tipos de registro, orden, recuentos/digests, enlaces a fuentes, integridad, flujo y dirección única verdad→VCF.
+  - Se comprueba con: recorrido DTC-061→arquitectura→pasos, prototipo JSONL manual, esquemas por tipo y validador semántico ajeno que detectan copia/genotipo discordantes, relaciones ausentes/duplicadas/desordenadas y recuentos/digests falsos; ninguna prueba reelige formato.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.3`; debe terminar con código 0 y escribir `evidence/f2/F2.1.3/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ A4. Evaluar cada dependencia necesaria para las decisiones A2–A3 antes de incorporarla.
-  - Depende de: A2–A3; se omite si las opciones aprobadas no necesitan dependencia nueva.
+- ☐ F2.1.4. Evaluar cada dependencia necesaria para las decisiones F2.1.2–F2.1.3 antes de incorporarla.
+  - Depende de: F2.1.2–F2.1.3; se omite si los contratos aprobados no necesitan dependencia nueva.
   - Procede de: DTC-043, DTC-047 y DTC-048.
   - Cambia: evaluación individual con propósito, REQ, versión exacta, licencia, mantenimiento, seguridad, características, árbol, código nativo, scripts y coste de distribución; después, solo las dependencias aprobadas y `Cargo.lock`.
   - Se comprueba con: revisión de la evaluación, `cargo metadata --locked --format-version 1`, `cargo tree --locked -e features` y repetición de §4.3.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.4`; debe terminar con código 0 y escribir `evidence/f2/F2.1.4/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ A5. Extender el servicio común de coordenadas de F1.6 a los casos de F2.
-  - Depende de: A2 y A4 cuando corresponda.
+- ☐ F2.1.5. Extender el servicio común de coordenadas de F1.6 a los casos de F2.
+  - Depende de: F2.1.2 y F2.1.4 cuando corresponda.
   - Procede de: DTC-010, DTC-013 y DTC-039; REQ-CONF-28, REQ-IND-38 y REQ-IND-39.
   - Cambia: los tipos y el servicio ya usados por el mapa de reducción ganan constructores validados para posición, intervalo, ancla de inserción y deleción interna; no expone tipos de crates ni crea un segundo módulo/convenio.
   - Se comprueba con: pruebas de tabla compartidas con F1.6 desde la semántica externa base 1 cerrada, propiedades de ida/vuelta y fallos explícitos en cero, fuera de rango, desbordamiento y límites terminales.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.5`; debe terminar con código 0 y escribir `evidence/f2/F2.1.5/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ A6. Definir bases y vistas de referencia que preserven `N` literalmente.
-  - Depende de: A1, A5 y contrato FASTA cerrado en F1.5.
+- ☐ F2.1.6. Definir bases y vistas de referencia que preserven `N` literalmente.
+  - Depende de: F2.1.1, F2.1.5 y contrato FASTA cerrado en F1.5.
   - Procede de: DTC-032; REQ-REF-14 y REQ-IND-28.
   - Cambia: tipos de dominio para base y acceso inmutable por secuencia/coordenada, reutilizando la referencia F1 sin reinterpretar ni sustituir `N`.
   - Se comprueba con: referencia sintética que contiene `N` en principio, interior y final, comparación byte a byte con la referencia F1 y casos de error de secuencia o coordenada inexistente.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.6`; debe terminar con código 0 y escribir `evidence/f2/F2.1.6/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ A7. Modelar individuo, secuencia y copia haplotípica con ploidía uniforme explícita.
-  - Depende de: A3, A5–A6 y catálogo de IDs cerrado en F1.4.
-  - Procede de: DTC-003 y DTC-039; REQ-IND-28, REQ-IND-29 y REQ-VER-27; alcance deliberado de F2.
-  - Cambia: tipos de estado que contienen exactamente una copia por índice de fase entre 1 y la ploidía 1–10, sin habilitar ploidía distinta por secuencia.
-  - Se comprueba con: constructores y pruebas para ploidías 1, 2 y 10, rechazo de 0 y 11, unicidad de IDs/índices y cardinalidad exacta por secuencia.
+- ☐ F2.1.7. Modelar individuo, secuencia y copia haplotípica con ploidía uniforme explícita.
+  - Depende de: DTC-061, F2.1.5–F2.1.6 y catálogo de IDs cerrado en F1.4.
+  - Procede de: DTC-003, DTC-039 y DTC-061; REQ-IND-28, REQ-IND-29 y REQ-VER-27; alcance deliberado de F2.
+  - Cambia: tipos de estado con exactamente una copia por índice de fase entre 1 y la ploidía 1–10; cada copia posee una cadena ordenada, lógicamente inmutable y compartible de segmentos, sin habilitar ploidía distinta por secuencia ni fijar un crate/contenedor concreto.
+  - Se comprueba con: constructores y pruebas para ploidías 1, 2 y 10, rechazo de 0 y 11, unicidad de IDs/índices, cardinalidad exacta y compartición de segmentos intactos sin clonar sus bases.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.7`; debe terminar con código 0 y escribir `evidence/f2/F2.1.7/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ A8. Representar ediciones y procedencia sin duplicación innecesaria de la referencia.
-  - Depende de: A3 y A5–A7.
-  - Procede de: DTPD-102; DTC-003, DTC-031 y DTC-039; REQ-IND-28 y REQ-IND-29.
-  - Cambia: estado aprobado de segmentos/eventos por copia con alelo de referencia, alelo verdadero, origen explícito o aleatorio y vínculo a la referencia; no añade clases fuera de F2.
-  - Se comprueba con: casos literales de copia intacta, SNP, inserción y deleción, inspección de que cada evento conserva identidad/procedencia y medida que demuestra que una copia intacta no clona toda la secuencia.
+- ☐ F2.1.8. Representar ediciones y procedencia sin duplicación innecesaria de la referencia.
+  - Depende de: DTC-061 y F2.1.5–F2.1.7.
+  - Procede de: DTC-003, DTC-031, DTC-039 y DTC-061; REQ-IND-28 y REQ-IND-29.
+  - Cambia: segmentos ordinarios referencian intervalos de referencia/fundador; SNP e *indels* pequeños son modificaciones tipadas con alelo verdadero, origen explícito/aleatorio, copia/fase y coordenadas DTC-056. Solo una inserción sin fuente conserva sus propios bytes; no añade clases fuera de F2.
+  - Se comprueba con: copia intacta, SNP, inserción con/sin fuente y deleción; identidad/procedencia/coordenadas por modificación, ausencia de bytes duplicados y prototipo de composición futura que conserva modificaciones al cortar/concatenar segmentos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.8`; debe terminar con código 0 y escribir `evidence/f2/F2.1.8/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ A9. Materializar una copia y calcular fase y dosis desde el estado canónico.
-  - Depende de: A7–A8.
+- ☐ F2.1.9. Materializar una copia y calcular fase y dosis desde el estado canónico.
+  - Depende de: F2.1.7–F2.1.8.
   - Procede de: DTC-003 y DTC-031; REQ-IND-28, REQ-IND-29 y REQ-VER-27.
   - Cambia: operaciones de materialización determinista y consulta genotípica por locus; fase y dosis se derivan de copias ordenadas, no de una salida VCF.
   - Se comprueba con: oráculo manual que aplica ediciones a cadenas cortas, casos haploide/diploide/poliploide y propiedad de que dosis equivale al número exacto de copias portadoras.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.9`; debe terminar con código 0 y escribir `evidence/f2/F2.1.9/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ A10. Completar la evidencia y trazabilidad de F2.1.
-  - Depende de: A5–A9 y puertas de calidad verdes.
+- ☐ F2.1.10. Completar la evidencia y trazabilidad de F2.1.
+  - Depende de: F2.1.5–F2.1.9 y puertas de calidad verdes.
   - Procede de: F2.1; REQ-REF-14, REQ-IND-28, REQ-IND-29 y REQ-VER-27; ACE-03, ACE-10, ACE-11, ACE-28 y ACE-66.
   - Cambia: pruebas de integración, matriz de evidencia F2.1, casos de aceptación y documentación de límites frente a F5.3.
   - Se comprueba con: §4.3, recuento automático de cuatro REQ asignados sin huérfanos y revisión cruzada de materialización, fase, dosis, procedencia y conservación de `N`.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.10`; debe terminar con código 0 y escribir `evidence/f2/F2.1.10/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-> **Pausa obligatoria F2.1.** Revisar el consumo sin reapertura de DTPD-101 y
-> aprobar DTPD-102, la extensión de tipos de coordenada, representación
+> **PAUSA-F2.1 — cierre obligatorio de F2.1.** Revisar el consumo sin reapertura de DTPD-101 y
+> DTPD-102, auditar sin reabrir el modelo interno ni `truth.jsonl` de DTC-061,
+> la extensión de tipos de coordenada, representación
 > haplotípica, consumo de memoria, oráculos y los
-> cuatro REQ. No iniciar B27 ni F2.3/F2.4 si la representación no reconstruye
+> cuatro REQ. No iniciar ningún paso de F2.2, F2.3 o F2.4 si la representación no reconstruye
 > exactamente cada copia o si una conversión de coordenadas queda implícita.
 
 ## 7. F2.2 — Variantes pequeñas y matriz de frecuencias SNV
@@ -388,217 +595,357 @@ frecuencias SNV reproducible y validada, aplica SNP explícitos e *indels*
 pequeños inequívocos y nunca usa Poisson para muestrear frecuencias, alelos o
 genotipos.
 
-- ☐ B1. Congelar como entrada de implementación DTC-054, que resuelve DTPD-118.
-  - Depende de: pausa F2.1 aprobada, A2 y A3.
+- ☐ F2.2.1. Congelar como entrada de implementación DTC-054, que resuelve DTPD-118.
+  - Depende de: PAUSA-F2.1 aprobada, F2.1.2 y F2.1.3.
   - Procede de: DTC-052, DTC-054 y DTPD-118 resuelta; REQ-CONF-128, REQ-CONF-129, REQ-IND-60 y REQ-IND-61.
   - Cambia: expediente de consumo que enlaza la versión aprobada y enumera formato, algoritmos, perfiles, límites, ámbitos aleatorios y excepciones; declara fuera de F2 VCF→TSV, generación multialélica, estructura/evolución poblacional y la capacidad de panel de DTC-055.
   - Se comprueba con: revisión requisito→cláusula DTC-054→paso que no deja comportamiento aprobado sin consumidor ni reabre DTPD-118 al implementar.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.1`; debe terminar con código 0 y escribir `evidence/f2/F2.2.1/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B2. Registrar y aprobar la concreción Poisson y las longitudes exactas de *indels* de F2.
-  - Depende de: pausa F2.1 aprobada y A2–A3; es independiente de la elección de formato B1.
-  - Procede de: REQ-CONF-23 a REQ-CONF-25 y REQ-IND-16 a REQ-IND-18; DTC-022, DTC-037, DTC-043 y DTC-049; §4.2.
-  - Cambia: decisión técnica que fija implementación Poisson, límites, espacio vacío y consumo RNG, selección espacial y longitudes exactas por clase con predeterminado 1 pb; declara expresamente que Poisson solo produce recuentos desde medias/densidades.
-  - Se comprueba con: oráculo Poisson independiente, prueba estadística con umbral previo, casos cero/vacío y longitudes 1/2/`umbral - 1`, rechazo de 0 o `>= umbral` y aprobación formal.
+- ☐ F2.2.2. Congelar DTC-067 y DTC-059 antes de sus consumidores.
+  - Depende de: PAUSA-F2.1 aprobada y F2.1.2–F2.1.3; es independiente de la elección de formato F2.2.1.
+  - Procede de: DTPD-120 resuelta; DTC-022, DTC-037, DTC-043, DTC-059, DTC-067 y DTC-072; REQ-CONF-23 a REQ-CONF-25 y REQ-IND-16 a REQ-IND-18.
+  - Cambia: expediente de consumo y evaluación DTC-043 de `libm = =0.2.16`; implementa únicamente `poisson-count-v1`, con ramas/fronteras, límites, errores y metadatos exactos, y deja disponible la dependencia matemática aprobada para F2.2.8.4. Congela DTC-059 sin RNG de longitud.
+  - Se comprueba con: licencia/auditoría/`build.rs`/lock de libm; vectores Poisson, hook fuera de rango, PMF/media/varianza y bytes iguales Linux/WSL2; longitudes 1/2/`umbral-1` y rechazos 0/`>=umbral`. Los vectores de `log-uniform-v1` pertenecen exclusivamente a F2.2.8.4.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.2`; debe terminar con código 0 y escribir `evidence/f2/F2.2.2/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B3. Publicar los esquemas versionados de espectro y matriz SNV.
-  - Depende de: B1.
+- ☐ F2.2.3. Publicar los esquemas versionados de espectro y matriz SNV.
+  - Depende de: F2.2.1.
   - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-CONF-129 y REQ-IND-60.
   - Cambia: esquema del espectro TSV por intervalos y filas `fixed`; entrada suministrada mínima `contig/position/ref/alt/population_id/alt_af` con `source_id` opcional; pareja canónica `population_snvs.tsv` + `population_snvs.metadata.json`, sin entrada VCF.
   - Se comprueba con: fixtures manuales válidos e inválidos validados por una implementación de esquema separada, rechazo de columnas de frecuencia distintas de `alt_af` y prueba negativa de que `run` no acepta VCF ni TSV sin metadatos canónicos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.3`; debe terminar con código 0 y escribir `evidence/f2/F2.2.3/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B4. Fijar el contrato de metadatos, integridad y referencia de la pareja canónica.
-  - Depende de: B3 y contratos SHA-256 de F1.
+- ☐ F2.2.4. Fijar el contrato de metadatos, integridad y referencia de la pareja canónica.
+  - Depende de: F2.2.3 y contratos SHA-256 de F1.
   - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-IND-60, REQ-VAL-55 y REQ-MAN-91.
   - Cambia: JSON con versión, referencia esperada, SHA-256 del FASTA, coordenadas `1-based-closed`, poblaciones, procedencia sintética/empírica y SHA-256 del TSV; muestra/fuente/filtros desconocidos se declaran `unknown`, y configuración/manifiesto enlazan el SHA-256 del JSON sin digest circular.
   - Se comprueba con: pareja escrita a mano, `sha256sum`, intercambio independiente de TSV/JSON/FASTA, contig literal `1` frente a `chr1` y rechazo previo a individuos ante cualquier discordancia.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.4`; debe terminar con código 0 y escribir `evidence/f2/F2.2.4/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B5. Especificar la autoría TOML excluyente de matriz preparada, reutilizada o generada y de los demás eventos F2.
-  - Depende de: B2–B4.
+- ☐ F2.2.5. Especificar la autoría TOML excluyente de matriz preparada, reutilizada o generada y de los demás eventos F2.
+  - Depende de: F2.2.2–F2.2.4.
   - Procede de: REQ-CONF-08, REQ-CONF-21, REQ-CONF-24, REQ-CONF-25, REQ-CONF-28, REQ-CONF-128 y REQ-CONF-129; DTC-034 y DTC-052.
   - Cambia: esquema documental para fuente canónica o generación, referencia/poblaciones, `exact_loci`/`mean_loci`/`density_per_mb`, espacio, sustituciones y espectro explícito, más SNP e *indels*; elimina densidad SNP inicial por individuo.
   - Se comprueba con: ejemplos de las tres rutas y rechazo de fuentes simultáneas, perfil alélico ausente, más de un modo de recuento, densidad SNP individual, VCF y campos futuros.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.5`; debe terminar con código 0 y escribir `evidence/f2/F2.2.5/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B6. Extender configuración declarada y parser conservando literales y ubicaciones.
-  - Depende de: B3–B5.
+- ☐ F2.2.6. Extender configuración declarada y parser conservando literales y ubicaciones.
+  - Depende de: F2.2.3–F2.2.5.
   - Procede de: DTC-034, DTC-036, DTC-044 y DTC-052; REQ-CONF-128, REQ-CONF-129 y REQ-DIR-03.
   - Cambia: `DeclaredConfig`, adaptador TOML y diagnósticos para matriz, metadatos, espectros, regiones y eventos pequeños, sin construir verdad, calcular digests ni normalizar silenciosamente.
   - Se comprueba con: parsing de cada forma, claves desconocidas/duplicadas, clase/versión/ruta errónea y snapshots de documento, campo, literal y ubicación.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.6`; debe terminar con código 0 y escribir `evidence/f2/F2.2.6/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B7. Extender catálogo y resolución efectiva con parámetros de matriz e *indels*.
-  - Depende de: B5–B6.
+- ☐ F2.2.7. Extender catálogo y resolución efectiva con parámetros de matriz e *indels*.
+  - Depende de: F2.2.5–F2.2.6.
   - Procede de: DTC-006, DTC-033, DTC-049 y DTC-052; REQ-IND-10, REQ-IND-13, REQ-IND-14 y REQ-CONF-129.
   - Cambia: `ParameterKey`, metadatos, dominios y solicitudes para recuentos excluyentes, espacio, sustituciones, perfil, modo `exact/stochastic` y longitudes exactas de inserción/deleción, sin duplicar el resolvedor.
   - Se comprueba con: catálogo completo, dominios/unidades, cero explícito, precedencia espacial, valor efectivo y rechazo de ejes no admitidos o fallback empírico implícito.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.7`; debe terminar con código 0 y escribir `evidence/f2/F2.2.7/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B8. Versionar los ámbitos aleatorios independientes aprobados para la matriz.
-  - Depende de: B1, B7 y catálogo RNG cerrado en F1.3.
-  - Procede de: DTC-011, DTC-037, DTC-038 y DTC-052; REQ-IND-61 y REQ-VAL-55.
-  - Cambia: ámbitos `matrix/locus_selection`, `matrix/alternate_allele/<variant_id>` y `matrix/frequency/<population_id>/<variant_id>`, separados de *indels*, genotipo y fase, con versión y vectores BLAKE3.
-  - Se comprueba con: vectores literales, claves únicas y pruebas de que añadir/reordenar una población no cambia loci, ALT ni frecuencias existentes y cambiar un perfil solo afecta a esa población.
+- ☐ F2.2.8. Cerrar el catálogo RNG v4 y la familia de consumidores F2.
+  - Depende de: F2.2.8.1–F2.2.8.6.
+  - Procede de: DTC-011, DTC-037, DTC-038, DTC-052 y DTC-070 a DTC-075; REQ-IND-61, REQ-IND-63 y REQ-VAL-55; RAF2-028/033/041–043 resueltos.
+  - Cambia: integra catálogo, primitivas, selectores, distribuciones, genotipo/fase y oráculos como una puerta única, conservando un solo productor por algoritmo.
+  - Se comprueba con: aprobación de los seis expedientes hijos y prueba de que ningún consumidor se compila o habilita contra una versión parcial de catálogo/algoritmos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.8`; debe terminar con código 0 y escribir `evidence/f2/F2.2.8/result.json` con `status = "passed"` y enlaces a F2.2.8.1–F2.2.8.6.
 
-- ☐ B9. Enumerar bases elegibles antes de determinar o seleccionar loci.
-  - Depende de: A5–A6 y B7–B8.
+- ☐ F2.2.8.1. Publicar el catálogo `subseed-scopes-v4.tsv` y sus vectores de derivación.
+  - Depende de: F2.2.1, F2.2.7 y catálogo RNG cerrado en F1.3.
+  - Procede de: DTC-011, DTC-037, DTC-038, DTC-070, DTC-071 y DTC-075.
+  - Cambia: conserva literalmente las seis filas/vectores v3 y añade los once ámbitos F2 con componentes exactos, `catalog_version=4`, `derivation_version=1` y algoritmo consumidor; ALT usa escenario/referencia/secuencia/posición/REF y `variant_id` nace después.
+  - Se comprueba con: parser ajeno, igualdad byte a byte v3⊂v4, vectores BLAKE3 por ámbito/componente, mutación aislada y rechazo de componente/orden/entero no canónico; ningún ámbito depende de ALT antes de sortearlo.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.8.1`; debe terminar con código 0 y escribir `evidence/f2/F2.2.8.1/result.json` con catálogo, vectores y `status = "passed"`.
+
+- ☐ F2.2.8.2. Implementar el uniforme abierto y el entero acotado normativos.
+  - Depende de: F2.2.8.1.
+  - Procede de: DTC-037, DTC-071, DTC-072 y DTC-075.
+  - Cambia: productores únicos `open-unit-f64-v1` y `uniform-u64-below-v1`, con conversión de bits, rechazo, fronteras y consumo cero exactos.
+  - Se comprueba con: vectores literales de `next_u64`, 0/1/máximo, `n=0/1`, rechazo forzado, consumos exactos y oráculo independiente de aritmética.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.8.2`; debe terminar con código 0 y escribir `evidence/f2/F2.2.8.2/result.json` con vectores y `status = "passed"`.
+
+- ☐ F2.2.8.3. Implementar categórico, permutación y selectores estático/dinámico.
+  - Depende de: F2.2.8.1–F2.2.8.2.
+  - Procede de: DTC-020, DTC-049, DTC-071, DTC-072 y DTC-075; ACE-107.
+  - Cambia: productores únicos `categorical-f64-v1`, `fisher-yates-v1`, `weighted-without-replacement-v1` solo para SNV estáticos y `dynamic-indel-selection-v1` para reenumeración del estado vigente; este último consume solo `indel_position`, nunca `insertion_content`.
+  - Se comprueba con: enumeración exhaustiva pequeña, pesos degenerados, permutaciones y selección SNV; para indels, cadenas manuales que ganan/pierden oportunidades, agotamiento, orden canónico, mismo flujo continuo, consumo cero, aislamiento respecto a `insertion_content` y descarte transaccional sin prefijo publicado.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.8.3`; debe terminar con código 0 y escribir `evidence/f2/F2.2.8.3/result.json` con vectores de ambos selectores y `status = "passed"`.
+
+- ☐ F2.2.8.4. Implementar las distribuciones continuas semiabiertas.
+  - Depende de: F2.2.2 y F2.2.8.2.
+  - Procede de: DTC-043, DTC-049, DTC-068, DTC-072 y DTC-075; RAF2-041/043 resueltos.
+  - Cambia: productores únicos `linear-uniform-v1` y `log-uniform-v1`; ambos consumen `[min,max)`, permiten `max=1` sin devolverlo, impiden 0 continuo y la variante logarítmica usa exclusivamente `libm = =0.2.16` aprobado en F2.2.2.
+  - Se comprueba con: vectores de cero, subnormales, intervalo sin `f64` positivo interior, `next_down(1)`, `max=1`, redondeo inferior/superior y extremos inválidos; oráculo independiente confirma que solo `fixed` produce 0/1 y que F2.2.2 no implementa ni prueba otra copia logarítmica.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.8.4`; debe terminar con código 0 y escribir `evidence/f2/F2.2.8.4/result.json` con fronteras, versión de `libm` y `status = "passed"`.
+
+- ☐ F2.2.8.5. Implementar los consumidores de composición genotípica y fase.
+  - Depende de: F2.2.8.2–F2.2.8.3.
+  - Procede de: DTC-052, DTC-071, DTC-072 y DTC-075; REQ-IND-62/63.
+  - Cambia: productores únicos `hwe-composition-v1`, `f-diploid-genotype-v1` y `phase-permutation-v1`, sin adelantar su integración biológica F2.3.
+  - Se comprueba con: enumeración HWE/F ajena, ploidías 1/2/10, distribuciones degeneradas, orden de composición/fase y consumo exacto independiente entre genotipo y fase.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.8.5`; debe terminar con código 0 y escribir `evidence/f2/F2.2.8.5/result.json` con vectores y `status = "passed"`.
+
+- ☐ F2.2.8.6. Verificar conjuntamente versiones, consumos y aislamiento de la familia RNG.
+  - Depende de: F2.2.8.1–F2.2.8.5.
+  - Procede de: DTC-038, DTC-071, DTC-072 y DTC-075; REQ-IND-63 y REQ-VAL-55.
+  - Cambia: oráculo de integración ajeno a los productores y expediente de propiedad única que enlaza cada ámbito con exactamente un algoritmo, módulo, vector y consumidor.
+  - Se comprueba con: mutación aislada de componentes/algoritmos, reordenación, adición de población/individuo/clase y búsqueda de productores duplicados; Linux/WSL2 producen bytes y consumos idénticos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.8.6`; debe terminar con código 0 y escribir `evidence/f2/F2.2.8.6/result.json` con matriz ámbito→productor→consumidor y `status = "passed"`.
+
+- ☐ F2.2.9. Enumerar bases elegibles antes de determinar o seleccionar loci.
+  - Depende de: F2.1.5–F2.1.6 y F2.2.7.
   - Procede de: REQ-CONF-21, REQ-CONF-28, REQ-IND-13, REQ-IND-14, REQ-IND-19 y REQ-DIR-03.
   - Cambia: servicio que cuenta posiciones `A/C/G/T` elegibles tras inclusiones, exclusiones, posiciones protegidas/ocupadas y pesos cero; excluye `N` y no sortea todavía.
   - Se comprueba con: enumeración ajena al productor en secuencias cortas, contigs/regiones literales, espacio vacío y denominador de bases elegibles por cromosoma.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.9`; debe terminar con código 0 y escribir `evidence/f2/F2.2.9/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B10. Implementar `uniform` y `weighted_regions` sin solapamientos.
-  - Depende de: B3, B7 y B9.
+- ☐ F2.2.10. Implementar `uniform` y `weighted_regions` sin solapamientos.
+  - Depende de: F2.2.3, F2.2.7 y F2.2.9.
   - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-19 y REQ-VAL-55.
   - Cambia: perfil incorporado único `uniform` con peso 1; tabla propia `1-based-closed` con pesos finitos no negativos, `outside_weight` explícito, regiones no solapadas y probabilidad por base proporcional al peso.
   - Se comprueba con: tabla manual por longitud×peso, casos `outside_weight` 0/1, peso 0/0.5/1/2, frontera contigua, solapamiento rechazado y requisito de al menos una base con peso positivo.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.10`; debe terminar con código 0 y escribir `evidence/f2/F2.2.10/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B11. Determinar el número de loci candidatos sin confundirlo con loci activos.
-  - Depende de: B2 y B7–B10.
-  - Procede de: REQ-CONF-129, REQ-IND-17, REQ-IND-18 y REQ-IND-61; DTC-022 y DTC-052.
-  - Cambia: `exact_loci` fija candidatos; `mean_loci` y `density_per_mb × bases_elegibles/1_000_000` fijan una media y sortean Poisson; los tres modos son excluyentes y el recuento se conserva aunque después se eliminen ALT globalmente ausentes.
-  - Se comprueba con: exactos, vectores Poisson para media/densidad, denominador manual, tasa cero, espacio vacío/insuficiente y prueba de que cambiar frecuencias no vuelve a calcular candidatos.
+- ☐ F2.2.11. Determinar el número de loci candidatos sin confundirlo con loci activos.
+  - Depende de: F2.2.2, F2.2.7, F2.2.8.1 y F2.2.9–F2.2.10.
+  - Procede de: REQ-CONF-129, REQ-IND-17, REQ-IND-18 y REQ-IND-61; DTC-022, DTC-052, DTC-071 y DTC-075; RAF2-044 resuelto.
+  - Cambia: `exact_loci` fija candidatos sin consumir `matrix_candidate_count`; `mean_loci` y `density_per_mb × bases_elegibles/1_000_000` fijan una media y llaman una vez a `poisson-count-v1` con ese ámbito. Los tres modos son excluyentes; se registran algoritmo, media, ámbito/subsemilla, consumo y recuento aunque después se eliminen ALT globalmente ausentes.
+  - Se comprueba con: exactos con consumo cero/ausencia de subsemilla sorteada, vectores Poisson para media/densidad, denominador manual, tasa cero, espacio vacío/insuficiente, aislamiento frente a `matrix_locus_selection`/ALT/frecuencias y manifiesto que reconstruye el recuento sin ambigüedad.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.11`; debe terminar con código 0 y escribir `evidence/f2/F2.2.11/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B12. Validar espectros alélicos por intervalos no solapados.
-  - Depende de: B3, B6–B7 y DTC-049.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-61 y REQ-VAL-55.
-  - Cambia: lector `f64` de decimal/científica para `[min_af,max_af)`, último límite 1 y filas `fixed`; admite huecos, rechaza solapamiento, porcentajes, NaN/infinito y pesos inválidos; `log_uniform` exige mínimo positivo y solo `fixed` genera exactamente 0/1.
-  - Se comprueba con: corpus de fronteras 0/1, intervalos contiguos/solapados/con huecos, pesos no normalizados, todo cero, `1e-3`, porcentaje, NaN/infinito y conservación del literal y valor efectivo sin redondeo.
+- ☐ F2.2.12. Validar espectros alélicos por intervalos no solapados.
+  - Depende de: F2.2.3, F2.2.6–F2.2.7, F2.2.8.4 y DTC-049.
+  - Procede de: DTC-054, DTC-068, DTC-072 y DTC-075; REQ-CONF-129, REQ-IND-61 y REQ-VAL-55; RAF2-041 resuelto.
+  - Cambia: lector `f64` de decimal/científica para intervalos siempre `[min_af,max_af)`, incluido `max_af=1`, y filas `fixed`; admite huecos, rechaza solapamiento, porcentajes, NaN/infinito y pesos inválidos; solo `fixed` genera exactamente 0/1.
+  - Se comprueba con: corpus de fronteras 0/1, subnormales, `next_down(1)`, intervalos contiguos/solapados/con huecos, pesos no normalizados, todo cero, `1e-3`, porcentaje, NaN/infinito y oráculo que prueba que el máximo 1 cubre pero nunca se sortea.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.12`; debe terminar con código 0 y escribir `evidence/f2/F2.2.12/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B13. Implementar los repartos `stochastic` y `exact` por población.
-  - Depende de: B8, B11–B12.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-61 y REQ-VAL-55.
-  - Cambia: sorteo ponderado de fila en modo estocástico predeterminado y mayores restos en modo exacto, con parte entera primero y desempate por orden estable del espectro; cada población aplica su reparto independientemente.
-  - Se comprueba con: ejemplos manuales, incluido 11 loci con pesos 60/25/10/5→7/3/1/0, suma exacta por población, empate literal y prueba estadística prefijada del modo estocástico.
+- ☐ F2.2.13. Implementar los repartos `stochastic` y `exact` por población.
+  - Depende de: F2.2.8.1–F2.2.8.3 y F2.2.11–F2.2.12.
+  - Procede de: DTC-054, DTC-070, DTC-071 y DTC-072 (resuelven DTPD-118 y RAF2-028/029/033); REQ-CONF-129, REQ-IND-61, REQ-IND-63 y REQ-VAL-55.
+  - Cambia: sorteo `categorical-f64-v1` de fila en modo estocástico. En `exact`, calcula cuotas por mayores restos y cada población aplica `fisher-yates-v1` con `matrix_exact_assignment` a todos los `variant_id`; no usa coordenadas ni orden canónico para asociar filas.
+  - Se comprueba con: 11 loci y pesos 60/25/10/5→7/3/1/0, suma exacta por población, empate literal, estabilidad al reordenar entrada, ausencia de asociación con coordenada, aislamiento entre poblaciones, cuota cero sin consumo RNG, separación respecto al flujo de valor y prueba estadística prefijada del modo estocástico.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.13`; debe terminar con código 0 y escribir `evidence/f2/F2.2.13/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B14. Incorporar solo los perfiles alélicos empíricos 1000 Genomes seleccionables de forma explícita.
-  - Depende de: B1, B3, B12–B13 y evaluación DTC-043 de datos/licencia/herramienta.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-61 y ACE-116.
-  - Cambia: recurso `1000g_phase3_v5_sfs_v1` global/AFR/AMR/EAS/EUR/SAS derivado de autosomas, PASS y SNV bialélicos; separa `fixed 0`, `min_positive–0.001`, 0.001–0.005, 0.005–0.01, 0.01–0.05, 0.05–0.10, 0.10–0.50, 0.50–0.90, 0.90–0.99, 0.99–1 y `fixed 1`, con recuentos, fuente, filtros, receta y SHA-256; nunca es predeterminado.
-  - Se comprueba con: regeneración independiente desde la fuente versionada, comparación de recuentos/digests, selección nominal obligatoria y configuraciones sin perfil, con perfil propio y con perfil empírico explícito.
+- ☐ F2.2.14. Aprobar e incorporar los dos perfiles humanos compactos aproximados.
+  - Depende de: F2.2.14.1–F2.2.14.4.
+  - Procede de: DTC-054 y DTC-068 (resuelven DTPD-118/121); REQ-CONF-129, REQ-IND-61 y ACE-116; RAF2-018/036 resueltos.
+  - Cambia: publica conjuntamente fuente fijada, perfil SFS, perfil SNV12 y reproducción independiente, manteniendo cada responsabilidad en un expediente revisable.
+  - Se comprueba con: los cuatro expedientes hijos aprobados, digests canónicos de ambos recursos y prueba de selección nominal; ningún builtin se activa por defecto.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.14`; debe terminar con código 0 y escribir `evidence/f2/F2.2.14/result.json` con `status = "passed"` y enlaces a F2.2.14.1–F2.2.14.4.
 
-- ☐ B15. Resolver el espectro dirigido de las 12 sustituciones.
-  - Depende de: B3 y B7.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129 y REQ-IND-61.
-  - Cambia: `uniform_snv12_v1` predeterminado, tabla propia, atajo `ti_tv_ratio=R` convertido a peso `2R` para la transición y 1 para cada transversión, y perfil explícito `1000g_phase3_v5_snv12_v1`; la configuración efectiva conserva siempre los 12 pesos.
-  - Se comprueba con: las tres ALT por cada REF, R=0/1/2, rechazo de R negativo/infinito, razón esperada independiente, perfil empírico reproducible y prueba de que este último nunca se carga por defecto.
+- ☐ F2.2.14.1. Fijar e inventariar la fuente pequeña Harris 2017.
+  - Depende de: F2.2.1 y DTC-068.
+  - Procede de: DTC-068; atribución y licencia de ACE-116.
+  - Cambia: copia de prueba versionada de `elife-24284-fig1-data1-v2.txt`, URL/DOI, Nature/eLife, licencia CC BY, tamaño 3.644 bytes y SHA-256 `970cc71578fc008ef4e0d75c7c460ab874073da7c5b5226c526b387627c97a7f`.
+  - Se comprueba con: tamaño/hash antes de parsear, licencia/atribución presentes, cinco filas continentales y 96 contextos exactos; una diferencia bloquea sin descargar ni sustituir la fuente.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.14.1`; debe terminar con código 0 y escribir `evidence/f2/F2.2.14.1/result.json` con inventario y `status = "passed"`.
 
-- ☐ B16. Crear IDs canónicos y orden independiente del orden de entrada.
-  - Depende de: B3–B4 y servicios de identidad F1.
+- ☐ F2.2.14.2. Generar el perfil SFS global aproximado versionado.
+  - Depende de: F2.2.3, F2.2.8.4 y F2.2.12–F2.2.13.
+  - Procede de: DTC-054 y DTC-068; `human_1000g_global_sfs_approx_v1`.
+  - Cambia: generador offline pequeño para pesos 64:12:8, intervalos `[1/5008,0.005)`, `[0.005,0.05)` y `[0.05,1)`, muestreos log/log/lineal, literales, orden y digest del recurso.
+  - Se comprueba con: límites y pesos exactos, normalización DTC-049, máximo 1 nunca sorteado, ausencia de masa fija en cero y de frecuencias positivas inferiores a `1/5008`, metadatos que lo identifican como aproximación global no universal.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.14.2`; debe terminar con código 0 y escribir `evidence/f2/F2.2.14.2/result.json` con recurso candidato y SHA-256.
+
+- ☐ F2.2.14.3. Generar el perfil SNV12 Harris 2017 aproximado versionado.
+  - Depende de: F2.2.14.1 y F2.2.3.
+  - Procede de: DTC-068; `human_harris2017_snv12_approx_v1`.
+  - Cambia: parser y receta que normalizan AFR/AMR/EUR/EAS/SAS por fila, promedian con igual peso, agregan 96 contextos a seis clases por hebra, reflejan complementos inversos con igual peso y normalizan 12 cambios dirigidos.
+  - Se comprueba con: `cargo +1.97.1 run --locked --bin gps-build-human-snv-profiles -- --harris-source tests/fixtures/profiles/elife-24284-fig1-data1-v2.txt --output-dir target/f2-profile-candidate`; recuentos, sumas intermedias, complementos, orden, atribución y digest son exactos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.14.3`; debe terminar con código 0 y escribir `evidence/f2/F2.2.14.3/result.json` con todas las sumas intermedias y SHA-256 final.
+
+- ☐ F2.2.14.4. Reproducir independientemente y autorizar la incorporación de ambos perfiles.
+  - Depende de: F2.2.14.1–F2.2.14.3.
+  - Procede de: DTC-068; puerta reproducible de RAF2-018.
+  - Cambia: oráculo ajeno al productor que recalcula recursos/digests y puerta que los incorpora solo tras coincidencia exacta; prohíbe VCF Phase 3, `bcftools`, perfiles inventados por superpoblación y carga predeterminada.
+  - Se comprueba con: segundo cálculo de implementación independiente, mutaciones de fuente/literal/orden/licencia y selección nominal; perfiles suministrados por población siguen siendo válidos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.14.4`; debe terminar con código 0 y escribir `evidence/f2/F2.2.14.4/result.json` con comparación byte a byte, hashes y aprobación explícita.
+
+- ☐ F2.2.15. Resolver el espectro dirigido de las 12 sustituciones.
+  - Depende de: F2.2.3 y F2.2.7; solo el builtin Harris 2017 depende además de DTC-068/F2.2.14.
+  - Procede de: DTC-054 y DTC-068; REQ-CONF-129 y REQ-IND-61.
+  - Cambia: `uniform_snv12_v1` predeterminado, tabla propia, atajo `ti_tv_ratio=R` convertido a peso `2R` para la transición y 1 para cada transversión, y perfil explícito `human_harris2017_snv12_approx_v1`; la configuración efectiva conserva siempre los 12 pesos.
+  - Se comprueba con: las tres ALT por cada REF, R=0/1/2, rechazo de R negativo/infinito y razón esperada independiente; para Harris se normaliza cada fila AFR/AMR/EUR/EAS/SAS, se promedia a igual peso, se colapsan los 96 contextos a seis clases y cada una se refleja con mitad de peso a su complemento inverso. El oráculo no comparte productor y el builtin nunca se carga por defecto ni se presenta como tasa universal.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.15`; debe terminar con código 0 y escribir `evidence/f2/F2.2.15/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.2.16. Crear IDs canónicos y orden independiente del orden de entrada.
+  - Depende de: F2.2.3–F2.2.4 y servicios de identidad F1.
   - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-60, REQ-IND-61 y REQ-VAL-55.
   - Cambia: `site_id` por referencia/contig/posición/REF y `variant_id` por referencia/contig/posición/REF/ALT; conserva `source_id` como alias y ordena por catálogo FASTA, posición, REF, ALT y población.
   - Se comprueba con: permutación de filas/poblaciones, mismo SNV en referencias distintas, sitio multialélico y comparación literal de IDs y bytes ordenados.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.16`; debe terminar con código 0 y escribir `evidence/f2/F2.2.16/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B17. Preparar una matriz suministrada sin modificar el original.
-  - Depende de: B3–B4, B9 y B16.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-IND-60, REQ-VAL-55 y REQ-MAN-91.
-  - Cambia: orden `prepare-snv-matrix --reference ... --input ... --output ...` que calcula SHA-256, IDs y orden, comprueba contigs/coordenadas/REF y publica de forma segura la pareja canónica nueva.
-  - Se comprueba con: fixture mínimo, original inalterado, salida reconstruible, referencia intercambiada, fallo sin pareja parcial y equivalencia con la acción Marimo «Vincular y verificar referencia».
+- ☐ F2.2.17. Preparar una matriz suministrada sin modificar el original.
+  - Depende de: F2.2.3–F2.2.4, F2.2.9 y F2.2.16.
+  - Procede de: DTC-054 y DTC-060; REQ-CONF-128, REQ-IND-60, REQ-VAL-55 y REQ-MAN-91.
+  - Cambia: orden `prepare-snv-matrix --reference-manifest <manifest.json> --reference-id <id> --input <TSV> --output <destino>` que valida el manifiesto F1, resuelve exactamente su entrada de referencia, verifica ruta/tamaño/SHA-256 y después calcula IDs/orden, comprueba contigs/coordenadas/REF y publica la pareja nueva.
+  - Se comprueba con: ID correcto, ID distinto con mismos bytes, mismo ID con bytes distintos, referencia derivada válida/incoherente y manifiesto corrupto; fixture mínimo original inalterado, fallo sin pareja parcial y equivalencia Marimo «Vincular y verificar referencia».
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.17`; debe terminar con código 0 y escribir `evidence/f2/F2.2.17/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B18. Validar filas completas y poblaciones de una matriz suministrada.
-  - Depende de: B3–B4 y B16–B17.
+- ☐ F2.2.18. Validar filas completas y poblaciones de una matriz suministrada.
+  - Depende de: F2.2.3–F2.2.4 y F2.2.16–F2.2.17.
   - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-IND-60 y REQ-VAL-55.
   - Cambia: exige una fila por `ALT × población`, `alt_af` explícito en `[0,1]`, población declarada y claves únicas; rechaza vacío/NA, MAF/DAF, AC/AN, inferencias y alias de población, pero admite y valida poblaciones no seleccionadas.
   - Se comprueba con: corpus que omite una combinación, usa cero explícito, añade población válida no usada, solicita una inexistente e intenta cada semántica de frecuencia prohibida.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.18`; debe terminar con código 0 y escribir `evidence/f2/F2.2.18/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B19. Validar loci multialélicos suministrados con suma estable y tolerancia aprobada.
-  - Depende de: B18 y DTC-049.
+- ☐ F2.2.19. Validar loci multialélicos suministrados con suma estable y tolerancia aprobada.
+  - Depende de: F2.2.18 y DTC-049.
   - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-60 y REQ-VAL-55.
-  - Cambia: agrupa por sitio/población, calcula suma ALT con Neumaier en orden canónico y `ref_af=1-suma`; acepta suma ≤1, normaliza solo un exceso ≤`1e-9` y lo registra, y rechaza exceso mayor sin recortar valores individuales.
-  - Se comprueba con: sumas manuales 0.5, 1, `1+5e-10` y 1.01, orden permutado y lector independiente que confirma frecuencias/normalización y diagnóstico.
+  - Cambia: agrupa por sitio/población, calcula suma ALT con Neumaier en orden canónico y `ref_af=1-suma`; acepta suma ≤1, normaliza solo un exceso `delta <= tolerancia_efectiva` de DTC-049 y registra tolerancia, suma/delta y valores antes/después; rechaza exceso mayor sin recortar valores individuales.
+  - Se comprueba con: tolerancia efectiva 0, `1e-9` y un valor sustituido válido; para cada una prueba `delta == tolerancia` y el siguiente `f64` mayor, sumas 0.5/1/1.01, orden permutado y lector independiente de frecuencias/normalización/diagnóstico.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.19`; debe terminar con código 0 y escribir `evidence/f2/F2.2.19/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B20. Normalizar alelos globalmente ausentes sin reponer candidatos.
-  - Depende de: B18–B19.
+- ☐ F2.2.20. Normalizar alelos globalmente ausentes sin reponer candidatos.
+  - Depende de: F2.2.18–F2.2.19.
   - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-60, REQ-IND-61, REQ-VAL-55 y REQ-MAN-91.
   - Cambia: elimina cada ALT con `alt_af=0` en todas las poblaciones y el sitio si pierde todos sus ALT; conserva `alt_af=1`, cuenta candidatos/ALT descartados/loci activos por separado y nunca selecciona sustitutos.
   - Se comprueba con: bialélico global 0/1, multialélico con un ALT global 0 y otro activo, matriz suministrada/generada y recuentos antes/después calculados fuera del normalizador.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.20`; debe terminar con código 0 y escribir `evidence/f2/F2.2.20/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B21. Implementar autorización explícita para una matriz activa vacía.
-  - Depende de: B20 y diagnósticos F1.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-VAL-55 y REQ-MAN-91.
-  - Cambia: `validate` avisa; `run` se detiene salvo `--allow-empty-snv-matrix`; la autorización no relaja otros errores y queda en configuración efectiva/manifiesto.
-  - Se comprueba con: matriz vacía inicial y tras normalización, ejecución con/sin flag, SNP explícitos que aún se aplican y prueba negativa de que el flag no acepta digest, REF o frecuencia inválidos.
+- ☐ F2.2.21. Implementar autorización explícita para una matriz activa vacía.
+  - Depende de: F2.2.20 y diagnósticos F1.
+  - Procede de: DTC-054 y DTC-073 (resuelven DTPD-118 y RAF2-034); REQ-VAL-55 y REQ-MAN-91.
+  - Cambia: incorpora conjuntamente parser, validación y semántica de `--allow-empty-snv-matrix` y solo entonces la añade a `available_authorizations`. El primer `validate` avisa; confirmarla crea otro digest y obliga a validar de nuevo. Solo `run` con los mismos documentos, contrato y autorizaciones continúa; queda en configuración efectiva/manifiesto y no relaja errores.
+  - Se comprueba con: antes del paso está catalogada pero no disponible/visible; después, capabilities/parser/validate/run coinciden. Cubre matriz vacía inicial/tras normalización, confirmación→revalidación, edición/flag que bloquea, SNP explícitos y negativos de digest, REF, frecuencia, opción desconocida o disponibilidad sin semántica.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.21`; debe terminar con código 0 y escribir `evidence/f2/F2.2.21/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B22. Seleccionar las posiciones candidatas sin reemplazo.
-  - Depende de: B8–B11.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-03, REQ-IND-19 y REQ-IND-61.
-  - Cambia: selector ponderado sobre las bases elegibles que obtiene exactamente el recuento candidato ya fijado, sin duplicados, y falla si no hay suficientes posiciones; no promete prefijo al cambiar N.
-  - Se comprueba con: referencia exhaustiva `A/C/G/T/N`, uniformidad/ponderación con umbral previo, N=0/1/máximo/exceso, semilla fija y comparación con un enumerador independiente.
+- ☐ F2.2.22. Seleccionar las posiciones candidatas sin reemplazo.
+  - Depende de: F2.2.8.1–F2.2.8.3 y F2.2.9–F2.2.11.
+  - Procede de: DTC-054 y DTC-071/072 (resuelven DTPD-118 y RAF2-028/033); REQ-CONF-129, REQ-IND-03, REQ-IND-19 y REQ-IND-61.
+  - Cambia: `weighted-without-replacement-v1` sobre bases elegibles en orden canónico obtiene exactamente el recuento candidato, sin duplicados, y falla en preflight si faltan posiciones; cero candidatos no consume y no promete prefijo al cambiar N.
+  - Se comprueba con: referencia exhaustiva `A/C/G/T/N`, enumeración literal de pesos/acumulados/elecciones, N=0/1/máximo/exceso, forzado de rechazo entero, semilla fija, consumo exacto y comparación con un enumerador independiente.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.22`; debe terminar con código 0 y escribir `evidence/f2/F2.2.22/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B23. Asignar un único ALT generado por locus candidato.
-  - Depende de: B8, B15–B16 y B22.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129 y REQ-IND-61.
-  - Cambia: generador bialélico que lee REF del FASTA y sortea una de sus tres ALT mediante los 12 pesos; no genera multialelia ni contexto trinucleotídico.
-  - Se comprueba con: cada REF A/C/G/T, pesos degenerados, perfiles uniforme/propio/empírico y prueba de que jamás produce REF, `N`, segundo ALT o cambio fuera del perfil.
+- ☐ F2.2.23. Asignar un único ALT generado por locus candidato.
+  - Depende de: F2.2.8.1–F2.2.8.3, F2.2.15–F2.2.16 y F2.2.22.
+  - Procede de: DTC-054 y DTC-071/072 (resuelven DTPD-118 y RAF2-028/033); REQ-CONF-129 y REQ-IND-61.
+  - Cambia: generador bialélico que lee REF del FASTA y aplica `categorical-f64-v1` a sus tres ALT mediante `matrix_alternate_allele`, identificado antes de ALT; deriva `variant_id` solo después. No genera multialelia ni contexto trinucleotídico.
+  - Se comprueba con: cada REF A/C/G/T, pesos degenerados con consumo cero, perfiles uniforme/propio/builtin, vectores de scope sin ALT y prueba de que jamás produce REF, `N`, segundo ALT o cambio fuera del perfil.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.23`; debe terminar con código 0 y escribir `evidence/f2/F2.2.23/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B24. Asignar frecuencias independientes a todas las poblaciones.
-  - Depende de: B8, B12–B13, B16 y B23.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-61 y REQ-VAL-55.
-  - Cambia: para cada `población × variant_id` elige fila y valor `alt_af` con su perfil, admite 0/1, conserva fila/subsemilla y no introduce población ancestral, FST, parentesco, migración, correlación o LD.
-  - Se comprueba con: dos poblaciones y perfiles distintos, cambio aislado de una, frecuencias 0/intermedias/1, orden permutado y prueba de independencia sin exigir distribuciones correlacionadas.
+- ☐ F2.2.24. Asignar frecuencias independientes a todas las poblaciones.
+  - Depende de: F2.2.8.1, F2.2.8.3–F2.2.8.4, F2.2.12–F2.2.13, F2.2.16 y F2.2.23.
+  - Procede de: DTC-054, DTC-070, DTC-071 y DTC-072 (resuelven DTPD-118 y RAF2-028/029/033); REQ-CONF-129, REQ-IND-61, REQ-IND-63 y REQ-VAL-55.
+  - Cambia: en modo estocástico aplica `categorical-f64-v1`; en `exact` consume la fila asociada por F2.2.13. Después usa `linear-uniform-v1` o `log-uniform-v1` en el ámbito separado por población×`variant_id`. Admite 0/1 solo mediante `fixed`, conserva versiones/subsemillas y no consume RNG para `fixed` ni cuota cero.
+  - Se comprueba con: dos poblaciones/perfiles, frecuencias `fixed` 0/1 e intervalos `[min,max)` que nunca producen 0/1 aunque `max=1`, reordenación, consumo cero, vectores lineal/log de F2.2.8.4, separación asignación/valor e independencia sin exigir correlación.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.24`; debe terminar con código 0 y escribir `evidence/f2/F2.2.24/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B25. Publicar la matriz generada mediante el mismo contrato canónico.
-  - Depende de: B4, B16 y B20–B24.
+- ☐ F2.2.25. Publicar la matriz generada mediante el mismo contrato canónico.
+  - Depende de: F2.2.4, F2.2.16 y F2.2.20–F2.2.24.
   - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-129, REQ-IND-61 y REQ-MAN-91.
-  - Cambia: escritor determinista de TSV+JSON con origen generado, parámetros/perfiles efectivos, candidatos/descartes/activos, subsemillas, fuente/versión y digests, usando publicación segura.
-  - Se comprueba con: dos generaciones de igual referencia/configuración/semilla con mismos bytes, hashes externos, fallo inyectado sin pareja parcial y lector independiente que reconstruye todos los metadatos.
+  - Cambia: escritor determinista de TSV+JSON con origen generado, parámetros/perfiles efectivos, candidatos/descartes/activos, algoritmo de recuento, `matrix_candidate_count`/subsemilla/consumo cuando corresponda, fuente/versión y digests, usando publicación segura. En `exact_loci` registra modo y recuento sin fingir consumo ni subsemilla sorteada.
+  - Se comprueba con: dos generaciones de igual referencia/configuración/semilla con mismos bytes, rutas exacta/Poisson, hashes externos, fallo inyectado sin pareja parcial y lector independiente que reconstruye todos los metadatos y distingue ausencia normativa de ámbito en `exact_loci`.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.25`; debe terminar con código 0 y escribir `evidence/f2/F2.2.25/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B26. Ofrecer generación independiente y reutilización sin reescribir la matriz.
-  - Depende de: B17 y B25.
+- ☐ F2.2.26. Ofrecer generación independiente y reutilización sin reescribir la matriz.
+  - Depende de: F2.2.17 y F2.2.25.
   - Procede de: DTC-054 (resuelve DTPD-118); REQ-CONF-128, REQ-CONF-129, REQ-IND-60 y REQ-IND-61.
   - Cambia: orden `generate-snv-matrix config.toml --output ...` y consumo posterior de la pareja canónica; el recurso conserva bytes/digest/origen y el manifiesto consumidor registra su reutilización.
   - Se comprueba con: generación autónoma e integrada equivalentes byte a byte, segunda ejecución con individuos distintos que no modifica `mtime`/hash del recurso y rechazo de pareja parcial o mezclada.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.26`; debe terminar con código 0 y escribir `evidence/f2/F2.2.26/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B27. Validar y aplicar SNP explícitos como restricciones trazables, no como otra fuente aleatoria inicial.
-  - Depende de: A8–A9 y B6–B7.
+- ☐ F2.2.27. Validar y aplicar SNP explícitos como restricciones trazables, no como otra fuente aleatoria inicial.
+  - Depende de: F2.1.8–F2.1.9 y F2.2.6–F2.2.7.
   - Procede de: REQ-IND-05, REQ-IND-11 y REQ-REC-24; DTC-020, DTC-032 y DTC-052.
   - Cambia: evento SNP explícito con referencia esperada, ALT `A/C/G/T`, copia y procedencia; prepara su contraste posterior con la matriz y rechaza origen/destino `N`.
   - Se comprueba con: transición/transversión, desacuerdo, copia ausente, borde y `N`, más caso negativo que no acepta una frecuencia poblacional como valor literal individual.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.27`; debe terminar con código 0 y escribir `evidence/f2/F2.2.27/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B28. Validar y aplicar inserciones pequeñas explícitas y aleatorias.
-  - Depende de: A5, A8–A9, B2, B6–B11.
-  - Procede de: REQ-IND-05, REQ-IND-40 y REQ-REC-24; DTC-032.
+- ☐ F2.2.28. Publicar ámbitos RNG propios de inserciones y deleciones aleatorias.
+  - Depende de: F2.2.2, F2.2.7, F2.2.8.1 y F2.2.8.3.
+  - Procede de: DTC-037, DTC-038, DTC-059, DTC-071, DTC-072 y DTC-075; RAF2-016/028/033/042 resueltos.
+  - Cambia: consume `indel_count`, `indel_position` e `insertion_content` v4 con componentes exactos; enlaza `indel_position` exclusivamente a `dynamic-indel-selection-v1`. Deleción no tiene contenido; clases, matriz, recuento, posición y bases no comparten estado.
+  - Se comprueba con: vectores BLAKE3/componentes/orden, `event_index=0/1`, `global`, región tipada, tasa cero sin avance y cambios aislados de matriz/clase/región/individuo/secuencia.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.28`; debe terminar con código 0 y escribir `evidence/f2/F2.2.28/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.2.29. Resolver medias y regiones de indels sin reutilizar el selector de matriz.
+  - Depende de: F2.2.5–F2.2.7 y F2.2.28.
+  - Procede de: REQ-CONF-20 a REQ-CONF-22, REQ-IND-10, REQ-IND-13 a REQ-IND-15; DTC-033 y DTC-059.
+  - Cambia: parámetros independientes de inserción/deleción para media o densidad, distribución uniforme y regiones efectivas por individuo; crea ámbitos espaciales disjuntos según DTC-033 y calcula `media = densidad × oportunidades_validas`, sin `weighted_regions` de matriz.
+  - Se comprueba con: valores global/región/individuo, densidad cero, regiones solapadas/incomparables, denominador manual y prueba de que modificar `outside_weight` o un perfil de matriz no cambia ninguna media de indel.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.29`; debe terminar con código 0 y escribir `evidence/f2/F2.2.29/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.2.30. Enumerar oportunidades de indels sobre el estado vigente.
+  - Depende de: F2.1.5–F2.1.9 y F2.2.29.
+  - Procede de: REQ-IND-13/14/19/21/40/41 y DTC-020/DTC-032/DTC-075; RAF2-042 resuelto.
+  - Cambia: enumeradores separados de anclas de inserción y deleciones flanqueadas para la longitud exacta efectiva; excluyen destinos inválidos, respetan `N` según clase y recalculan después de cada evento aceptado sin reintentar candidatos descartados.
+  - Se comprueba con: enumeración exhaustiva ajena sobre cadenas cortas, bordes, `N`, posiciones ocupadas y estado tras inserción/deleción previa; espacio vacío no consume selección.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.30`; debe terminar con código 0 y escribir `evidence/f2/F2.2.30/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.2.31. Sortear una vez el recuento Poisson local y seleccionar secuencialmente.
+  - Depende de: DTC-067, F2.2.2, F2.2.8.3 y F2.2.28–F2.2.30.
+  - Procede de: DTC-020, DTC-022, DTC-037, DTC-067, DTC-071, DTC-072 y DTC-075; REQ-CONF-23 a REQ-CONF-25 y REQ-IND-16 a REQ-IND-18; RAF2-042 resuelto.
+  - Cambia: cada clase/individuo/secuencia/ámbito llama una vez a `poisson-count-v1` con `indel_count` y entrega `sampled_count` a `dynamic-indel-selection-v1` en `indel_position`. Por ordinal reenumera/pondera/aplica sobre el estado vigente; registra versión, lambda, subsemillas, oportunidades iniciales/vigentes, sorteado, aceptado y activo antes del rollback. Agotamiento descarta la transacción, registra `published_count=0` y no hace nuevo Poisson, recorte, reintento ni publicación parcial.
+  - Se comprueba con: vectores DTC-067/072, lambda cero sin consumo, límite/next-up, cadenas independientes donde un evento crea o elimina oportunidades, un único candidato degenerado, espacio vacío inicial/tardío, orden canónico, flujo continuo y fallo inyectado que deja cero eventos publicados y conserva diagnóstico completo.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.31`; debe terminar con código 0 y escribir `evidence/f2/F2.2.31/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.2.32. Generar contenido de inserción aislado y verificar independencia completa.
+  - Depende de: F2.2.8.3 y F2.2.28–F2.2.31.
+  - Procede de: DTC-032, DTC-037, DTC-059 y DTC-071/072; REQ-IND-40 y RAF2-016/028/033 resueltos.
+  - Cambia: cada inserción aplica un categórico uniforme A/C/G/T por base en `insertion_content` con su `event_index`; consume exactamente la longitud efectiva. Deleción y longitud no consumen ese ámbito.
+  - Se comprueba con: RNG instrumentado y vectores de bases/consumos para longitudes 1/2/`umbral - 1`, ordinales 0/1, ausencia de `N` y aislamiento frente a matriz/individuo/región/clase.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.32`; debe terminar con código 0 y escribir `evidence/f2/F2.2.32/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.2.33. Validar y aplicar inserciones pequeñas explícitas y aleatorias.
+  - Depende de: F2.1.5, F2.1.8–F2.1.9, F2.2.2, F2.2.6–F2.2.7 y F2.2.28–F2.2.32.
+  - Procede de: REQ-IND-05, REQ-IND-40 y REQ-REC-24; DTC-032 y DTC-059.
   - Cambia: inserción interna anclada en la base precedente; la explícita conserva `N` literal y la aleatoria genera solo `A/C/G/T` con longitud exacta efectiva.
   - Se comprueba con: oráculo manual, terminal imposible, `N` explícita, longitudes 1/2/`umbral - 1` y barrido aleatorio sin `N`.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.33`; debe terminar con código 0 y escribir `evidence/f2/F2.2.33/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B29. Validar y aplicar deleciones pequeñas solo con bases flanqueantes.
-  - Depende de: A5, A8–A9, B2 y B6–B11.
-  - Procede de: REQ-IND-05, REQ-IND-41 y REQ-REC-24.
+- ☐ F2.2.34. Validar y aplicar deleciones pequeñas solo con bases flanqueantes.
+  - Depende de: F2.1.5, F2.1.8–F2.1.9, F2.2.2, F2.2.6–F2.2.7 y F2.2.28–F2.2.31.
+  - Procede de: REQ-IND-05, REQ-IND-41 y REQ-REC-24; DTC-059.
   - Cambia: deleción con intervalo/REF explícitos o longitud exacta aleatoria; rechaza cero, desacuerdo, solapamiento inválido y cualquier deleción terminal.
   - Se comprueba con: cadenas cortas, longitudes 1/2/`umbral - 1`, intentos sobre primera/última/toda la secuencia y estado intacto tras error.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.34`; debe terminar con código 0 y escribir `evidence/f2/F2.2.34/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B30. Componer eventos pequeños sobre el estado vigente con conflictos explícitos.
-  - Depende de: B27–B29.
+- ☐ F2.2.35. Componer eventos pequeños sobre el estado vigente con conflictos explícitos.
+  - Depende de: F2.2.27–F2.2.34.
   - Procede de: DTC-020 y DTC-031; REQ-REC-24 y REQ-IND-21.
   - Cambia: aplicación secuencial de explícitos y demás clases aleatorias en orden normativo, con coordenada de referencia, alelo vigente y diagnóstico de objetivo inexistente; la matriz todavía no se muestrea.
   - Se comprueba con: SNP→deleción, deleción→SNP, inserciones vecinas y repetidas con resultado manual y prueba de ausencia de edición parcial.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.35`; debe terminar con código 0 y escribir `evidence/f2/F2.2.35/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B31. Cerrar diagnósticos y preflight de las entradas F2.2.
-  - Depende de: B6–B30.
+- ☐ F2.2.36. Cerrar diagnósticos y preflight de las entradas F2.2.
+  - Depende de: F2.2.6–F2.2.35.
   - Procede de: DTC-044; REQ-CONF-25, REQ-CONF-28, REQ-IND-40, REQ-IND-41 y REQ-VAL-55.
   - Cambia: catálogo estable y agregado para formato/digest, referencia, población, coordenada, alelo, espectro/intervalo, región/peso, recuentos, `N`, *indel*, matriz vacía y conflicto.
   - Se comprueba con: tabla diagnóstico→caso, texto/JSON equivalentes, orden determinista, flags limitados y configuración inválida que no crea artefactos finales.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.36`; debe terminar con código 0 y escribir `evidence/f2/F2.2.36/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B32. Construir un validador independiente de los formatos, digests y normalización.
-  - Depende de: B3–B4; no depende de B17–B26 para calcular el esperado.
+- ☐ F2.2.37. Construir un validador independiente de los formatos, digests y normalización.
+  - Depende de: F2.2.3–F2.2.4; no depende de F2.2.17–F2.2.26 para calcular el esperado.
   - Procede de: REQ-VAL-55 y ACE-116; DTC-047 y DTC-054 (resuelve DTPD-118).
   - Cambia: corpus escrito a mano y lector separado para TSV+JSON, referencia, filas completas, IDs, orden, multialelia, sumas Neumaier, tolerancia y eliminación de ALT cero.
   - Se comprueba con: mutación deliberada de cada campo/digest/invariante y reconstrucción de resultados literales sin llamar al parser, normalizador ni escritor de producción.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.37`; debe terminar con código 0 y escribir `evidence/f2/F2.2.37/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B33. Construir oráculos independientes para selección, espectros y perfiles.
-  - Depende de: B8–B15; no depende de B22–B25 para producir el esperado.
-  - Procede de: REQ-VAL-55 y ACE-116; DTC-047 y DTC-054 (resuelve DTPD-118).
-  - Cambia: casos sintéticos y cálculo separado de elegibilidad ponderada, Poisson, mayores restos, muestreo de intervalos, ti/tv y resúmenes 1000 Genomes.
-  - Se comprueba con: vectores literales, semillas fijas, pruebas estadísticas con umbrales previos y mutaciones del productor que el oráculo detecta sin reutilizar sus funciones.
+- ☐ F2.2.38. Construir oráculos independientes para selección, espectros y perfiles.
+  - Depende de: F2.2.8–F2.2.15; no depende de F2.2.22–F2.2.25 para producir el esperado.
+  - Procede de: REQ-VAL-55 y ACE-107/116; DTC-047, DTC-054, DTC-070 y DTC-075; DTPD-118 y RAF2-029/041/042 resueltos.
+  - Cambia: casos sintéticos y cálculos separados de elegibilidad/selección SNV estática, selección indel dinámica, Poisson, cuotas, permutación `exact`, intervalos semiabiertos, ti/tv, SFS 64:12:8 y Harris 96→6→12.
+  - Se comprueba con: vectores y semillas fijas que cubren cantidades, reordenación, aislamiento, consumo cero, extremos 0/1, creación/pérdida dinámica de oportunidades, agotamiento transaccional y separación de flujos; pruebas estadísticas y mutaciones del productor se detectan sin reutilizar sus funciones.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.38`; debe terminar con código 0 y escribir `evidence/f2/F2.2.38/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B34. Integrar fuente, matriz efectiva, digest y procedencia sin crear individuos.
-  - Depende de: B17–B26 y B31–B33.
-  - Procede de: REQ-CONF-128, REQ-CONF-129, REQ-IND-02, REQ-IND-06, REQ-IND-60 y REQ-IND-61; DTC-040 y DTC-052.
-  - Cambia: resultado F2.2 inmutable con referencia, poblaciones disponibles/seleccionadas, matriz preparada/generada/reutilizada, perfiles, candidatos/descartes/activos, subsemillas, versiones y SHA-256 para F2.3.
+- ☐ F2.2.39. Integrar fuente, matriz efectiva, digest y procedencia sin crear individuos.
+  - Depende de: F2.2.17–F2.2.26 y F2.2.36–F2.2.38.
+  - Procede de: REQ-CONF-128, REQ-CONF-129, REQ-IND-06, REQ-IND-60 y REQ-IND-61; DTC-040 y DTC-052.
+  - Cambia: resultado F2.2 inmutable con referencia, poblaciones disponibles/seleccionadas, matriz preparada/generada/reutilizada, perfiles, candidatos/descartes/activos, algoritmos, ámbitos/subsemillas y consumos aplicables —incluido `matrix_candidate_count` o su ausencia normativa—, versiones y SHA-256 para F2.3.
   - Se comprueba con: las tres rutas, referencias cruzadas, `sha256sum`, igualdad con semilla fija, poblaciones adicionales válidas y ausencia demostrada de genotipos o SNP individuales sorteados.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.39`; debe terminar con código 0 y escribir `evidence/f2/F2.2.39/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ B35. Completar evidencia y trazabilidad de F2.2 con oráculos ajenos al productor.
-  - Depende de: B8–B34 y puertas de calidad verdes.
-  - Procede de: los 26 REQ asignados a F2.2 en §15; ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111 y ACE-116.
-  - Cambia: pruebas unitarias, de propiedades, estadísticas e integración y matriz de evidencia de los 22 REQ previos más CONF-128/129 e IND-60/61.
-  - Se comprueba con: §4.3, recuento automático de 26 REQ sin huérfanos, revisión de B32/B33 y repetición exacta; DTC-052 aporta semántica a RAF2-004, pero no lo cierra sin revisar formalmente la matriz maestra.
+- ☐ F2.2.40. Completar evidencia y trazabilidad de F2.2 con oráculos ajenos al productor.
+  - Depende de: F2.2.8–F2.2.39 y puertas de calidad verdes.
+  - Procede de: los 22 REQ de cierre y dos de evidencia parcial asignados a F2.2 en §15/§15.1; ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111 y ACE-116.
+  - Cambia: pruebas unitarias, de propiedades, estadísticas e integración y matriz de evidencia para los 22 cierres exclusivos, más REQ-CONF-08/21 parciales sobre matriz e indels.
+  - Se comprueba con: §4.3, recuento automático de 22 cierres y dos expedientes parciales con destino F5.2/F7.2, revisión de F2.2.37/F2.2.38 y repetición exacta; ningún parcial aparece como cierre total ni atribuye creación de individuos a F2.2.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.40`; debe terminar con código 0 y escribir `evidence/f2/F2.2.40/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-> **Pausa obligatoria F2.2.** Confirmar el consumo sin reinterpretación de
+> **PAUSA-F2.2 — cierre obligatorio de F2.2.** Confirmar el consumo sin reinterpretación de
 > DTC-054 y el cierre de DTPD-118, la pareja TSV+JSON y sus digests, perfiles solo explícitos,
 > candidatos/descartes/activos, poblaciones independientes, validadores,
 > Poisson limitado a recuentos, espacios elegibles y casos con `N`. No iniciar
@@ -611,271 +958,334 @@ genotipos.
 `F` diploide, conserva fase y valores esperados/realizados, integra los demás
 cambios y reconstruye cada haplotipo sin simular dinámica poblacional.
 
-- ☐ C1. Extender la autoría de individuos, población de origen y modelo genotípico.
-  - Depende de: pausa F2.2 aprobada y B1–B6.
+- ☐ F2.3.1. Extender la autoría HWE/F y trasladar la distribución explícita a F6.2.
+  - Depende de: PAUSA-F2.2 aprobada y F2.2.1–F2.2.6.
   - Procede de: REQ-CONF-20, REQ-CONF-22, REQ-CONF-130, REQ-DIR-01 y REQ-DIR-02; DTC-034 y DTC-052.
-  - Cambia: esquema `individuals` para ruta `direct`, exactamente una población de origen disponible en la matriz por individuo, asignada explícitamente o mediante el reparto configurado de individuos entre poblaciones, ploidía uniforme, HWE predeterminado o `F` diploide; no admite mezcla/admixture ni evolución.
-  - Se comprueba con: ejemplos explícitos y por reparto, HWE y `F`, cero/uno/varios individuos, población desconocida o múltiple, suma/cantidad de reparto inválida, F fuera de `[0,1]` y F en ploidía distinta de 2.
+  - Cambia: F2 admite HWE para P=1..10 y F únicamente en diploides; P!=2 rechaza F y usa HWE. No añade esquema, fichero ni controles Marimo para distribución genotípica explícita, cuyo cierre completo queda en F6.2 con REQ-EVO-35/36/49.
+  - Se comprueba con: HWE en ploidías 1/2/10, F=0/intermedio/1 solo P=2, rechazo de F en P=1/3/10 y búsqueda negativa de distribución explícita en esquema/CLI/Marimo F2; expediente `REQ-CONF-130.status=partial` con destino F6.2.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.1`; debe terminar con código 0 y escribir `evidence/f2/F2.3.1/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C2. Parsear, validar y resolver individuos con IDs tipados y procedencia completa.
-  - Depende de: C1 y contratos F1 de identidad/configuración.
-  - Procede de: DTC-033, DTC-039 y DTC-044; REQ-CONF-20, REQ-CONF-22, REQ-CONF-130 y evidencia compartida de REQ-IND-25/REQ-MAN-10.
+- ☐ F2.3.2. Parsear, validar y resolver individuos con IDs tipados y procedencia completa.
+  - Depende de: F2.3.1 y contratos F1 de identidad/configuración.
+  - Procede de: DTC-033, DTC-039 y DTC-044; REQ-CONF-20, REQ-CONF-22, REQ-CONF-130 y evidencia compartida de REQ-IND-02/03/25 y REQ-MAN-10.
   - Cambia: configuración declarada/efectiva, identidades, población, modelo y solicitudes de resolución, conservando valor, regla, selectores y origen.
   - Se comprueba con: IDs repetidos/desconocidos, orden, sustitución individual, HWE omitido/predeterminado y aislamiento de valores efectivos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.2`; debe terminar con código 0 y escribir `evidence/f2/F2.3.2/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C3. Versionar subsemillas de genotipo y fase separadas de la generación de matriz.
-  - Depende de: B8, C1–C2.
-  - Procede de: REQ-IND-63 y REQ-VAL-55; DTC-011, DTC-037, DTC-038 y DTC-052.
-  - Cambia: ámbitos `individual/genotype/<population_id>/<individual_id>/<variant_id>` e `individual/phase/<individual_id>/<variant_id>` que consumen la matriz inmutable sin compartir RNG mutable.
-  - Se comprueba con: vectores literales, mismo resultado con distinto orden físico y prueba de estabilidad de matriz e individuos existentes al añadir otro ID.
+- ☐ F2.3.3. Versionar subsemillas de genotipo y fase separadas de la generación de matriz.
+  - Depende de: F2.2.8.1, F2.2.8.5–F2.2.8.6 y F2.3.1–F2.3.2.
+  - Procede de: REQ-IND-63 y REQ-VAL-55; DTC-011, DTC-037, DTC-038, DTC-052 y DTC-071/072.
+  - Cambia: consume `initial_genotype` e `initial_phase` del catálogo v4 con escenario, referencia, población, individuo y variante en orden normativo; enlaza `hwe-composition-v1`/`f-diploid-genotype-v1` y `phase-permutation-v1` sin RNG mutable compartido.
+  - Se comprueba con: vectores literales de ambos ámbitos/algoritmos, componentes omitidos/reordenados rechazados, mismo resultado con distinto orden físico y estabilidad al añadir otro ID.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.3`; debe terminar con código 0 y escribir `evidence/f2/F2.3.3/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C4. Construir el estado inicial faseado de cada individuo desde la referencia.
-  - Depende de: A6–A9 y C2.
-  - Procede de: DTC-003 y DTC-006; REQ-DIR-01, REQ-DIR-02, REQ-IND-28 y REQ-IND-29.
+- ☐ F2.3.4. Construir el estado inicial faseado de cada individuo desde la referencia.
+  - Depende de: F2.1.6–F2.1.9 y F2.3.2.
+  - Procede de: DTC-003 y DTC-006; REQ-DIR-01, REQ-DIR-02, REQ-IND-28 y REQ-IND-29; evidencia compartida de REQ-IND-02/03.
   - Cambia: copias intactas ordenadas por secuencia/ploidía y enlaces a referencia, población, individuo y procedencia antes de asignar alelos.
   - Se comprueba con: copias 1–10 iguales byte a byte a la referencia, cardinalidad/IDs exactos y ausencia de escenarios o poblaciones simuladas.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.4`; debe terminar con código 0 y escribir `evidence/f2/F2.3.4/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C5. Muestrear alelos HWE por locus y copia conservando fase.
-  - Depende de: B34 y C3–C4.
-  - Procede de: REQ-CONF-130 y REQ-IND-62; DTC-052.
-  - Cambia: muestreo independiente de la composición genotípica desde frecuencias REF/ALT por población y locus; `alt_af=0/1` es determinista y ningún recuento se corrige para acercar frecuencias realizadas al objetivo.
-  - Se comprueba con: corpus bialélico/multialélico y ploidías 1/2/10, frecuencias 0/intermedias/1, oráculo de probabilidades/vectores y prueba de ausencia de Poisson o autocorrección.
+- ☐ F2.3.5. Muestrear alelos HWE por locus y copia conservando fase.
+  - Depende de: F2.2.8.5, F2.2.39 y F2.3.3–F2.3.4.
+  - Procede de: REQ-CONF-130 y REQ-IND-62; DTC-052 y DTC-072.
+  - Cambia: `hwe-composition-v1` realiza P categóricos independientes, ordena la composición y deja la fase a F2.3.7; `alt_af=0/1` es determinista sin consumo y ningún recuento se corrige para acercar frecuencias realizadas.
+  - Se comprueba con: corpus bialélico/multialélico y P=1/2/10, 0/intermedias/1, vectores de `next_u64`, distribución degenerada sin consumo, oráculo de probabilidades independiente y ausencia de Poisson/autocorrección.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.5`; debe terminar con código 0 y escribir `evidence/f2/F2.3.5/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C6. Muestrear genotipos diploides con `F` usando las fórmulas normativas.
-  - Depende de: B34 y C3–C4.
-  - Procede de: REQ-CONF-130, REQ-IND-62 y REQ-EVO-47/48; DTC-052.
-  - Cambia: distribución bialélica/multialélica diploide para `F` efectivo 0–1, con asignación faseada a dos copias; no generaliza `F` a otras ploidías.
-  - Se comprueba con: probabilidades calculadas fuera del motor para F=0/intermedio/1, suma/normalización, casos multialélicos y rechazo haploide/poliploide.
+- ☐ F2.3.6. Muestrear genotipos diploides con `F` usando las fórmulas normativas.
+  - Depende de: F2.2.8.5, F2.2.39 y F2.3.3–F2.3.4.
+  - Procede de: REQ-CONF-130, REQ-IND-62 y REQ-EVO-47/48; DTC-052 y DTC-072.
+  - Cambia: `f-diploid-genotype-v1` enumera genotipos no ordenados por índices de alelo, aplica las fórmulas normativas y un categórico; entrega composición a F2.3.7 y no generaliza F.
+  - Se comprueba con: probabilidades ajenas para F=0/intermedio/1, orden literal de genotipos, suma/normalización, distribución degenerada sin consumo, multialelia y rechazo no diploide.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.6`; debe terminar con código 0 y escribir `evidence/f2/F2.3.6/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C7. Asignar fase independiente después de sortear la composición genotípica.
-  - Depende de: C3 y C5–C6.
-  - Procede de: REQ-IND-62, REQ-IND-63 y REQ-VAL-55; DTC-052 y DTC-054 (resuelve DTPD-118).
-  - Cambia: permutación reproducible de alelos entre las copias para heterocigotos diploides, multialélicos y poliploides; la fase es conocida pero no representa LD ni haplotipos poblacionales.
-  - Se comprueba con: genotipos 0/1, 1/1, 1/2 y poliploides, vectores de fase separados y prueba de que cambiar solo fase no vuelve a sortear genotipo ni correlaciona loci.
+- ☐ F2.3.7. Asignar fase independiente después de sortear la composición genotípica.
+  - Depende de: F2.2.8.3, F2.2.8.5, F2.3.3 y F2.3.5–F2.3.6.
+  - Procede de: REQ-IND-62, REQ-IND-63 y REQ-VAL-55; DTC-052, DTC-054 y DTC-072 (resuelve DTPD-118/RAF2-033).
+  - Cambia: `phase-permutation-v1` aplica Fisher-Yates a la composición ordenada para heterocigotos diploides, multialélicos y poliploides; P<2 o todos iguales no consume. La fase conocida no representa LD.
+  - Se comprueba con: genotipos 0/1, 1/1, 1/2 y poliploides, vectores incluido rechazo de entero acotado, consumos cero y prueba de que cambiar solo fase no vuelve a sortear genotipo ni correlaciona loci.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.7`; debe terminar con código 0 y escribir `evidence/f2/F2.3.7/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C8. Contrastar SNP explícitos con matriz y modelo antes de modificar copias.
-  - Depende de: B27, C2 y C5–C7.
+- ☐ F2.3.8. Contrastar SNP explícitos con matriz y modelo antes de modificar copias.
+  - Depende de: F2.2.27, F2.3.2 y F2.3.5–F2.3.7.
   - Procede de: REQ-IND-64 y REQ-DIR-02; DTC-020 y DTC-052.
   - Cambia: preflight transaccional que acepta restricciones compatibles y diagnostica probabilidad cero, ALT ajeno al sitio, dosis/genotipo contradictorio, población ausente y densidad SNP individual; no modifica la matriz ni sus frecuencias.
   - Se comprueba con: tabla matriz/modelo/restricción para `alt_af=0/1`, F=1, ALT nuevo, dosis imposible y contradicción tardía sin individuo parcial.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.8`; debe terminar con código 0 y escribir `evidence/f2/F2.3.8/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C9. Aplicar solo la excepción `--allow-incompatible-genotypes` aprobada.
-  - Depende de: C8 y catálogo de diagnósticos F1.
-  - Procede de: DTC-054 (resuelve DTPD-118); REQ-IND-64, REQ-VAL-55 y REQ-MAN-91.
-  - Cambia: sin flag, toda incompatibilidad de C8 bloquea; con flag, conserva el genotipo explícito y registra individuo/locus/alelos/motivo, sin relajar referencia, coordenadas, ploidía/dosis imposible, formato, sumas ni no-clobber.
-  - Se comprueba con: cada incompatibilidad permitida con/sin flag y matriz de errores no anulables que siguen fallando; el manifiesto y las frecuencias realizadas incluyen el genotipo forzado.
+- ☐ F2.3.9. Aplicar solo la excepción `--allow-incompatible-genotypes` aprobada.
+  - Depende de: F2.3.8 y catálogo de diagnósticos F1.
+  - Procede de: DTC-054 y DTC-073 (resuelven DTPD-118 y RAF2-034); REQ-IND-64, REQ-VAL-55 y REQ-MAN-91.
+  - Cambia: incorpora conjuntamente parser, validación y semántica de `--allow-incompatible-genotypes` y solo entonces la añade a `available_authorizations`. Confirmarla invalida el digest y obliga a validar; `run` idéntico conserva y registra el genotipo sin relajar otras invariantes.
+  - Se comprueba con: antes catalogada/no disponible y después capabilities/parser/validate/run coherentes; confirmación→revalidación, incompatibilidades con/sin flag, edición/conjunto distinto, opción desconocida/disponibilidad falsa y errores no anulables; manifiesto incluye el forzado.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.9`; debe terminar con código 0 y escribir `evidence/f2/F2.3.9/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C10. Integrar *indels* y los demás cambios directos después de fijar genotipos SNV.
-  - Depende de: B28–B31, C4 y C8–C9.
+- ☐ F2.3.10. Integrar *indels* y los demás cambios directos después de fijar genotipos SNV.
+  - Depende de: F2.2.33–F2.2.36, F2.3.4 y F2.3.8–F2.3.9.
   - Procede de: REQ-IND-15, REQ-DIR-01, REQ-DIR-02 y REQ-REC-24; DTC-020 y DTC-031.
   - Cambia: orquestación ordenada por individuo/copia sobre el estado faseado, con transacción lógica y RNG locales para clases no SNV iniciales.
   - Se comprueba con: caso manual matriz+SNP restringido+inserción+deleción, permutación controlada y fallo tardío sin publicación parcial.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.10`; debe terminar con código 0 y escribir `evidence/f2/F2.3.10/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C11. Materializar y validar cada secuencia haplotípica final contra su historial.
-  - Depende de: C5–C10 y A9.
+- ☐ F2.3.11. Materializar y validar cada secuencia haplotípica final contra su historial.
+  - Depende de: F2.3.5–F2.3.10 y F2.1.9.
   - Procede de: DTC-003 y DTC-031; REQ-IND-15 y REQ-DIR-01.
   - Cambia: resultado con secuencia final, eventos, fase, dosis y procedencia sin convertir bytes materializados en una segunda verdad.
   - Se comprueba con: aplicación de eventos y ensamblado independiente que producen los mismos bytes/longitudes y conservan `N` por copia.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.11`; debe terminar con código 0 y escribir `evidence/f2/F2.3.11/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C12. Integrar múltiples individuos sin acoplar matriz, genotipos ni cambios locales.
-  - Depende de: C2–C11.
+- ☐ F2.3.12. Integrar múltiples individuos sin acoplar matriz, genotipos ni cambios locales.
+  - Depende de: F2.3.2–F2.3.11.
   - Procede de: REQ-IND-63, REQ-CONF-22 y REQ-DIR-01; DTC-006 y DTC-038.
   - Cambia: recorrido ordenado de varios individuos con matriz común inmutable y valores/verdad separados por identidad.
   - Se comprueba con: al menos tres individuos, adición/eliminación/reordenación, ejecución física distinta y comparación exacta de matriz e IDs previos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.12`; debe terminar con código 0 y escribir `evidence/f2/F2.3.12/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C13. Calcular objetivos y realizados sin autocorregir el muestreo finito.
-  - Depende de: C5–C12.
+- ☐ F2.3.13. Calcular objetivos y realizados sin autocorregir el muestreo finito.
+  - Depende de: F2.3.5–F2.3.12.
   - Procede de: REQ-IND-65 y REQ-VAL-55; DTC-049 y DTC-052.
   - Cambia: agregados canónicos por población/locus de `alt_af` objetivo, copias totales/ALT, `alt_af` realizada y genotipos esperados/realizados, incluyendo individuos forzados.
   - Se comprueba con: cálculo manual sobre corpus pequeño, orden/suma canónicos, desviación finita informada, extremos deterministas y prueba de que ningún genotipo se modifica para acercarla al objetivo.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.13`; debe terminar con código 0 y escribir `evidence/f2/F2.3.13/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C14. Integrar procedencia de matriz y muestreo en configuración efectiva y manifiesto.
-  - Depende de: B34 y C2–C13.
-  - Procede de: REQ-MAN-91, REQ-IND-65 y evidencia compartida de REQ-MAN-10; DTC-040 y DTC-052.
-  - Cambia: manifiesto con modo/ruta/SHA-256 de matriz y JSON, referencia, poblaciones disponibles/seleccionadas, parámetros/perfiles/fuente/versión, semillas, HWE/F, autorizaciones y valores objetivo/realizados.
-  - Se comprueba con: inspección campo a campo, `sha256sum`, enlaces resolubles y ejecuciones preparada/generada/reutilizada/forzada que no omiten procedencia declarada o efectiva.
+- ☐ F2.3.14. Integrar procedencia de matriz y muestreo en configuración efectiva y manifiesto.
+  - Depende de: F2.2.39 y F2.3.2–F2.3.13.
+  - Procede de: REQ-MAN-91, REQ-IND-65 y evidencia compartida de REQ-MAN-10; DTC-040, DTC-052 y DTC-075.
+  - Cambia: manifiesto con modo/ruta/SHA-256 de matriz y JSON, referencia, poblaciones, parámetros/perfiles/fuente/versión, catálogo/algoritmos RNG, `matrix_candidate_count`/subsemilla/consumo solo cuando hubo Poisson, HWE/F, autorizaciones y valores objetivo/realizados.
+  - Se comprueba con: inspección campo a campo, `sha256sum`, enlaces resolubles y ejecuciones preparada/generada exacta/Poisson/reutilizada/forzada; `exact_loci` conserva modo/recuento pero no inventa consumo o subsemilla.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.14`; debe terminar con código 0 y escribir `evidence/f2/F2.3.14/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C15. Validar estadísticamente HWE/`F` con un corpus y cálculos independientes.
-  - Depende de: C5–C7 y C13; no usa C11 para calcular el esperado.
+- ☐ F2.3.15. Validar estadísticamente HWE/`F` con un corpus y cálculos independientes.
+  - Depende de: F2.3.5–F2.3.7 y F2.3.13; no usa F2.3.11 para calcular el esperado.
   - Procede de: REQ-VAL-55 y ACE-116; DTC-047 y DTC-052.
-  - Cambia: pruebas de aceptación con probabilidades y umbrales predeclarados para HWE/`F`, fase y aislamiento de subsemillas, separadas de la validez formal B32.
+  - Cambia: pruebas de aceptación con probabilidades y umbrales predeclarados para HWE/`F`, fase y aislamiento de subsemillas, separadas de la validez formal F2.2.37.
   - Se comprueba con: muestras reproducibles de tamaños pequeño/grande, comparación de esperado/realizado sin exigir igualdad exacta, límites F=0/1 y fallo deliberado detectado por el oráculo.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.15`; debe terminar con código 0 y escribir `evidence/f2/F2.3.15/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C16. Completar evidencia y trazabilidad de F2.3.
-  - Depende de: C2–C15 y puertas de calidad verdes.
-  - Procede de: los 13 REQ exclusivos y dos compartidos asignados a F2.3 en §15/§15.1; ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114 y ACE-116.
+- ☐ F2.3.16. Completar evidencia y trazabilidad de F2.3.
+  - Depende de: F2.3.2–F2.3.15 y puertas de calidad verdes.
+  - Procede de: los 12 REQ exclusivos y cinco compartidos asignados a F2.3 en §15/§15.1; ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114 y ACE-116.
   - Cambia: matriz de evidencia y escenario sintético reproducible con matriz, genotipos, fase, haplotipos, métricas y manifiesto calculados independientemente.
-  - Se comprueba con: §4.3, recuento automático de 13 exclusivos y dos compartidos sin huérfanos, ID estable omitido y ausencia de dinámica poblacional, lecturas o formatos técnicos.
+  - Se comprueba con: §4.3, recuento automático de 12 exclusivos y cinco compartidos sin huérfanos; REQ-IND-02/03 prueban una referencia estructural por individuo, `REQ-CONF-130` queda parcial hacia F6.2, el ID estable omitido se cubre y no se reclama dinámica poblacional, lecturas ni formatos técnicos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.16`; debe terminar con código 0 y escribir `evidence/f2/F2.3.16/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ C17. Activar matriz, población y creación directa completa en Marimo.
-  - Depende de: pausa F2.0 y C1–C16.
+- ☐ F2.3.17. Activar matriz, población y creación directa completa en Marimo.
+  - Depende de: PAUSA-F2.0 aprobada y F2.3.1–F2.3.16.
   - Procede de: REQ-UI-01 a REQ-UI-07, REQ-UI-13, REQ-UI-14 y DTC-051/DTC-052.
-  - Cambia: pestaña `Individuos` para preparar/vincular/verificar referencia, generar/previsualizar/reutilizar matriz, elegir población/perfiles/modos/regiones/HWE/F y confirmar matriz vacía o genotipos incompatibles; invoca al binario sin reimplementar reglas.
-  - Se comprueba con: matriz campo→control, SHA/REF y resúmenes por cromosoma/sustitución/población/intervalo, accesibilidad e igualdad UI→TOML→`EffectiveConfig`→artefactos; confirmaciones producen solo los flags específicos y una edición invalida la ejecución.
+  - Cambia: pestaña `Individuos` para preparar/vincular/verificar referencia, generar/previsualizar/reutilizar matriz, elegir población/perfiles/modos/regiones/HWE/F y confirmar matriz vacía o genotipos incompatibles; cada confirmación forma el conjunto cerrado de autorizaciones, invalida el digest y relanza `validate` antes de habilitar `run` con el mismo conjunto.
+  - Se comprueba con: matriz campo→control, SHA/REF y resúmenes por cromosoma/sustitución/población/intervalo, accesibilidad e igualdad UI→TOML→`EffectiveConfig`→artefactos; proceso falso verifica flags idénticos en revalidación/ejecución y edición, retirada o flag general bloquea.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.17`; debe terminar con código 0 y escribir `evidence/f2/F2.3.17/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-> **Pausa obligatoria F2.3.** Reconstruir manualmente todos los haplotipos,
+> **PAUSA-F2.3 — cierre obligatorio de F2.3.** Reconstruir manualmente todos los haplotipos,
 > aprobar HWE/`F`, fase, métricas, manifiesto y aislamiento de subsemillas. No
 > iniciar F2.4 si Poisson aparece en muestreo de alelos, añadir un individuo
-> altera a otro, una excepción limitada oculta otra validación o C17 deja una
-> opción F2.3 solo en TOML.
+> altera a otro, una excepción limitada oculta otra validación o F2.3.17 deja una
+> opción F2.3 solo en TOML. La pausa no puede aprobarse mientras el alcance de
+> REQ-CONF-130 se marque como cierre F2 en lugar de evidencia parcial hacia F6.2.
 
 ## 9. F2.4 — Verdad estructurada independiente del VCF
 
-**Resultado del hito:** una ejecución directa válida publica un fichero de
-verdad estructurada versionado que basta para reconstruir referencia, individuos,
-copias, fase, dosis, eventos y procedencia aunque no se produzca ningún VCF.
+**Resultado del hito:** una ejecución directa válida publica `truth.jsonl` v1,
+UTF-8 sin comprimir, que basta para reconstruir referencia, individuos, copias,
+fase, dosis, eventos y procedencia aunque no se produzca ningún VCF.
 
-- ☐ D1. Formalizar el esquema externo aprobado por DTPD-102 y su contrato de compatibilidad.
-  - Depende de: pausa F2.3 aprobada y A3.
-  - Procede de: DTPD-102; DTC-031, DTC-035 y DTC-036; REQ-VER-31 y REQ-SAL-06.
-  - Cambia: esquema versionado del fichero de verdad con campos obligatorios, tipos, orden normativo, coordenadas, unidades y política ante versión/claves desconocidas; no reutiliza el esquema del estado interno.
-  - Se comprueba con: ejemplos válidos e inválidos, recorrido campo→REQ y validación mediante una implementación de esquema independiente elegida y registrada.
+- ☐ F2.4.1. Publicar los esquemas por tipo de registro de `truth.jsonl` v1 aprobados por DTC-061.
+  - Depende de: PAUSA-F2.3 aprobada y F2.1.3.
+  - Procede de: DTPD-102; DTC-031, DTC-035, DTC-036, DTC-061 y DTC-065; REQ-VER-25, REQ-VER-31 y REQ-SAL-06; RAF2-030 resuelto.
+  - Cambia: esquemas independientes del modelo Rust para cabecera, copia haplotípica y genotipo; fijan clase/versión, ejecución, referencia, convenio, recuentos/digests, segmentos/modificaciones, fase/procedencia, caso/locus, alelos/dosis/copias y, para cada alelo final proyectable, ALT y lista canónica de casos fuente; fijan también la política ante claves/versiones desconocidas.
+  - Se comprueba con: una línea manual válida/inválida de cada tipo, recorrido campo→REQ y validación por implementación de esquema independiente; se rechazan cabecera no inicial, tipo desconocido, clave ausente/duplicada y JSON multilínea.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.1`; debe terminar con código 0 y escribir `evidence/f2/F2.4.1/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ D2. Implementar una proyección pura desde la verdad canónica al modelo externo.
-  - Depende de: C7–C11 y D1.
+- ☐ F2.4.2. Implementar una proyección pura desde la verdad canónica al modelo externo.
+  - Depende de: F2.3.7–F2.3.11 y F2.4.1.
   - Procede de: DTC-003, DTC-004 y DTC-031; REQ-VER-31 y evidencia compartida de REQ-IND-26.
-  - Cambia: transformación que incluye referencia/huella, IDs, secuencias, copias, ploidía, fase, dosis, eventos, alelos, coordenadas, `N`, origen y subsemilla o procedencia necesaria, sin consultar VCF.
+  - Cambia: transformación a registros lógicos `truth.jsonl` que incluye referencia/huella, IDs, copias, cadenas ordenadas de segmentos/modificaciones, ploidía, fase, genotipos, dosis, alelos, coordenadas, `N`, procedencia y relación ALT↔lista ordenada de casos fuente, sin consultar VCF, crear casos compuestos ni copiar el contenedor Rust.
   - Se comprueba con: prueba exhaustiva campo a campo sobre el escenario sintético y propiedad de que desactivar la salida VCF deja idéntica la proyección de verdad.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.2`; debe terminar con código 0 y escribir `evidence/f2/F2.4.2/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ D3. Escribir la verdad de forma determinista y acotada por el mecanismo de publicación F1.
-  - Depende de: D1–D2 y cierre de publicación/integridad F1.4.
+- ☐ F2.4.3. Escribir `truth.jsonl` por flujo, en orden canónico y mediante la publicación F1.
+  - Depende de: F2.4.1–F2.4.2 y cierre de publicación/integridad F1.4.
   - Procede de: DTC-035, DTC-040 y DTC-045; REQ-SAL-06.
-  - Cambia: adaptador del formato aprobado, artefacto temporal, hash SHA-256 y promoción atómica/no-clobber; el orden físico estable no concede semántica adicional.
-  - Se comprueba con: dos escrituras lógicas iguales con bytes/hash iguales cuando el contrato lo exija, fallo inyectado sin destino completo y `sha256sum` comparado con el manifiesto.
+  - Cambia: escritor UTF-8 sin compresión con cabecera inicial y registros ordenados por referencia/individuo/secuencia/copia y claves internas; calcula por flujo longitudes, recuentos/digests de grupos y SHA-256 del fichero, y publica desde temporal de forma atómica/no-clobber.
+  - Se comprueba con: dos escrituras lógicas iguales con bytes/hash iguales, corpus deliberadamente reordenado que se canonicaliza, cabecera/recuentos/digests contrastados, fallo inyectado sin destino completo y `sha256sum` comparado con manifiesto.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.3`; debe terminar con código 0 y escribir `evidence/f2/F2.4.3/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ D4. Construir un lector/comprobador independiente del productor para la aceptación.
-  - Depende de: D1; no depende de D2–D3 para calcular resultados esperados.
+- ☐ F2.4.4. Construir el validador semántico/reconstructor independiente de `truth.jsonl`.
+  - Depende de: F2.4.1; no depende de F2.4.2–F2.4.3 para calcular resultados esperados.
   - Procede de: DTC-047; REQ-VER-31 y REQ-SAL-06; ACE-34 y ACE-62.
-  - Cambia: herramienta o implementación de prueba separada que valida esquema, relaciones y reconstruye haplotipos desde el fichero y la referencia; registra versión/comando si es externa.
-  - Se comprueba con: corpus escrito manualmente, mutaciones deliberadas de cada invariante y comparación byte a byte contra secuencias esperadas precomputadas, no contra una nueva llamada al productor.
+  - Cambia: herramienta o implementación de prueba separada que lee por flujo, valida cada esquema, cabecera, orden, unicidad, relaciones, recuentos/digests, reconstruye cada haplotipo y vuelve a calcular genotipos/dosis por caso/locus; registra versión/comando si es externa.
+  - Se comprueba con: corpus manual y mutaciones de relación ausente/duplicada/desordenada, segmento, fase, alelo, dosis, copia, recuento y digest; compara secuencias/genotipos precomputados y detecta toda discordancia sin llamar al productor.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.4`; debe terminar con código 0 y escribir `evidence/f2/F2.4.4/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ D5. Demostrar que la verdad permanece disponible sin ninguna salida VCF.
-  - Depende de: D2–D4.
+- ☐ F2.4.5. Demostrar que la verdad permanece disponible sin ninguna salida VCF.
+  - Depende de: F2.4.2–F2.4.4.
   - Procede de: DTC-004 y DTC-031; REQ-VER-31 y REQ-SAL-06.
   - Cambia: opción efectiva de salida y recorrido que publica verdad/manifiesto aun con VCF desactivado, sin cambiar el genotipo ni eliminar detalles necesarios.
-  - Se comprueba con: ejecuciones gemelas VCF activado/desactivado que tienen la misma verdad lógica y reconstrucción, y ausencia verificada de dependencia desde D2 hacia cualquier módulo VCF.
+  - Se comprueba con: ejecuciones gemelas VCF activado/desactivado que tienen la misma verdad lógica y reconstrucción, y ausencia verificada de dependencia desde F2.4.2 hacia cualquier módulo VCF.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.5`; debe terminar con código 0 y escribir `evidence/f2/F2.4.5/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ D6. Integrar verdad, configuración efectiva, referencia y manifiestos mediante identidades e integridad.
-  - Depende de: D3 y contratos cerrados de F1.4/F1.5.
+- ☐ F2.4.6. Integrar verdad, configuración efectiva, referencia y manifiestos mediante identidades e integridad.
+  - Depende de: F2.4.3 y contratos cerrados de F1.4/F1.5.
   - Procede de: DTC-039, DTC-040 y DTC-045; REQ-VER-31, REQ-SAL-06 y evidencia compartida de REQ-IND-26.
-  - Cambia: manifiestos de ejecución/evento y catálogo de artefactos para enlazar fichero de verdad, esquema, referencia exacta, configuración efectiva, hashes y estado de publicación.
+  - Cambia: manifiestos de ejecución/evento y catálogo de artefactos para enlazar `truth.jsonl`, sus esquemas, longitud/SHA-256, referencia exacta, configuración efectiva y estado de publicación.
   - Se comprueba con: recorrido bidireccional de cada ID/ruta/hash, `sha256sum`, rechazo de referencia o artefacto intercambiado y revisión de que no existen rutas huérfanas.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.6`; debe terminar con código 0 y escribir `evidence/f2/F2.4.6/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ D7. Cubrir corrupción, truncado, versión y pérdida de campos sin degradación silenciosa.
-  - Depende de: D3–D6.
+- ☐ F2.4.7. Cubrir corrupción, truncado, versión y pérdida de campos sin degradación silenciosa.
+  - Depende de: F2.4.3–F2.4.6.
   - Procede de: DTC-031, DTC-036, DTC-044 y DTC-045; REQ-VER-31 y REQ-SAL-06.
   - Cambia: validación y diagnósticos de lectura/publicación para bytes corruptos, JSON incompleto o equivalente del formato elegido, versión desconocida, duplicados y relaciones rotas.
   - Se comprueba con: mutación sistemática del corpus, códigos/ubicaciones estables y prueba de que ningún fallo se acepta como verdad parcial ni deja una ejecución marcada completa.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.7`; debe terminar con código 0 y escribir `evidence/f2/F2.4.7/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ D8. Completar evidencia y trazabilidad de F2.4.
-  - Depende de: D1–D7 y puertas de calidad verdes.
-  - Procede de: REQ-VER-31 y REQ-SAL-06; evidencia compartida de REQ-IND-26; ACE-14, ACE-34 y ACE-62.
-  - Cambia: corpus dorado pequeño, pruebas de integración, informe del validador independiente y matriz de evidencia F2.4 que separa cierre y evidencia compartida.
-  - Se comprueba con: §4.3, recuento automático de dos REQ de cierre y un REQ compartido sin huérfanos, validador de esquema independiente, coherencia del mismo ID entre estado y fichero, y reconstrucción exacta de todas las copias del corpus.
+- ☐ F2.4.8. Completar evidencia y trazabilidad de F2.4.
+  - Depende de: F2.4.1–F2.4.7 y puertas de calidad verdes.
+  - Procede de: REQ-VER-31 y REQ-SAL-06; evidencia compartida de REQ-IND-26 y evidencia parcial directa de REQ-SAL-02; ACE-14, ACE-34 y ACE-62.
+  - Cambia: corpus dorado `truth.jsonl`, pruebas de integración, informe del reconstructor independiente y matriz de evidencia F2.4 que separa cierre, evidencia compartida y expediente parcial `REQ-SAL-02 → F8.5`.
+  - Se comprueba con: §4.3, recuento automático de dos REQ de cierre, un REQ compartido y REQ-SAL-02 parcial sin huérfanos; validador independiente, coherencia del mismo ID y reconstrucción exacta de todas las copias sin VCF. El expediente parcial no puede cerrar REQ-SAL-02 ni la pausa final asignada a F8.5.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.8`; debe terminar con código 0 y escribir `evidence/f2/F2.4.8/result.json` con el paso `status = "passed"`, `requirements.REQ-SAL-02.status = "partial"` y destino `F8.5`, sin comprobaciones omitidas.
 
-- ☐ D9. Añadir controles y resumen enlazado de verdad estructurada a Marimo.
-  - Depende de: pausa F2.0 y D1–D8.
+- ☐ F2.4.9. Añadir controles y resumen enlazado de verdad estructurada a Marimo.
+  - Depende de: PAUSA-F2.0 aprobada y F2.4.1–F2.4.8.
   - Procede de: REQ-UI-01, REQ-UI-07 a REQ-UI-13 y DTC-051; F2.4 de la hoja de ruta.
-  - Cambia: controles de activación/formato ya aprobado en `Salidas`, revisión del TOML y resumen desde manifiesto en `Revisar y ejecutar`, sin cargar el fichero de verdad completo.
+  - Cambia: `Salidas` muestra `truth.jsonl` obligatorio y no configurable en formato/compresión; `Revisar y ejecutar` resume clase/versión/recuentos/longitud/SHA desde manifiesto sin cargar el fichero completo.
   - Se comprueba con: configuración UI/manual equivalente con VCF activado/desactivado, validación invalidada tras cambio, manifiesto grande simulado y prueba de que la UI solo lee metadatos/enlaces.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.9`; debe terminar con código 0 y escribir `evidence/f2/F2.4.9/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-> **Pausa obligatoria F2.4.** Entregar el fichero y la referencia a una revisión
+> **PAUSA-F2.4 — cierre obligatorio de F2.4.** Entregar el fichero y la referencia a una revisión
 > que no use el productor y exigir reconstrucción exacta. No iniciar F2.5 si el
 > VCF es necesario para interpretar la verdad, si falta fase/dosis/procedencia o
-> si una corrupción puede parecer una ejecución completa. D9 debe demostrar que
+> si una corrupción puede parecer una ejecución completa. F2.4.9 debe demostrar que
 > la app resume y enlaza la verdad sin cargarla ni interpretarla.
 
 ## 10. F2.5 — VCF de verdad mínimo
 
-**Resultado del hito:** cada conjunto publica exactamente un VCF de verdad
-multimuestra, ordenado por referencia, derivado de la verdad estructurada y
+**Resultado del hito:** cada conjunto publica exactamente un VCF 4.5 de verdad
+multimuestra, ordenado por referencia, derivado de `truth.jsonl` y
 validado de forma independiente, con GT faseado y sin campos observacionales
 inventados.
 
-- ☐ E1. Resolver y aprobar DTPD-103 con los casos mínimos y futuros explícitamente separados.
-  - Depende de: pausa F2.4 aprobada.
-  - Procede de: DTPD-103; DTC-021; REQ-FMT-05, REQ-FMT-06, REQ-VER-06 y REQ-VER-34.
-  - Cambia: registro técnico con versión VCF, normalización, campos `INFO`, BGZF/índice, representación complementaria para pérdidas de F2, herramientas de validación y límites que quedan en F5.5.
-  - Se comprueba con: evaluación de capacidad haploide/poliploide, SNP/indels/multialélicos/`N`, prototipos interoperables, reconstrucción sin invención y aprobación conforme a §9 de decisiones técnicas.
+- ☐ F2.5.1. Congelar y auditar DTC-062 a DTC-066 como resolución completa de DTPD-103.
+  - Depende de: PAUSA-F2.4 aprobada.
+  - Procede de: DTPD-103; DTC-021 y DTC-061 a DTC-066; REQ-FMT-05 a REQ-FMT-07, REQ-VER-06 y REQ-VER-34.
+  - Cambia: expediente de consumo que congela VCF 4.5, compresión/índice, normalización/agrupación, `GPS_*`/complemento y validadores de DTC-066 sin comparar alternativas ni reabrir decisiones.
+  - Se comprueba con: recorrido DTC-062..066→arquitectura→pasos, prototipos de todos los modos y enlaces, plantillas exactas de la resolución DTPD-103 y matriz de corpus/mutaciones; ninguna herramienta externa produce o repara la salida.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.1`; debe terminar con código 0 y escribir `evidence/f2/F2.5.1/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ E2. Evaluar e incorporar solo dependencias y validadores aprobados para VCF.
-  - Depende de: E1.
-  - Procede de: DTC-043, DTC-047 y DTC-048.
-  - Cambia: evaluaciones con versión exacta y, tras aprobarlas, manifiesto/lock y registro de versión/comando de cada validador; no selecciona herramientas por costumbre.
-  - Se comprueba con: revisión DTC-043, `cargo metadata --locked --format-version 1`, `cargo tree --locked -e features`, §4.3 y ejecución del prototipo con el validador independiente registrado.
+- ☐ F2.5.2. Evaluar e incorporar solo dependencias y validadores aprobados para VCF.
+  - Depende de: F2.5.1.
+  - Procede de: DTC-043, DTC-047, DTC-048 y DTC-066.
+  - Cambia: evaluación de cualquier crate productor bajo DTC-043/048 y provisión CI de `bcftools`/HTSlib-tabix 1.24 como herramientas externas, no dependencias runtime; registra versión y cada argv de DTPD-103. EBI `vcf-validator` queda excluido como autoridad 4.5.
+  - Se comprueba con: revisión DTC-043, `cargo metadata --locked --format-version 1`, `cargo tree --locked -e features`, `bcftools --version`, `tabix --version`, §4.3 y ejecución íntegra de las plantillas aprobadas con versión 1.24.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.2`; debe terminar con código 0 y escribir `evidence/f2/F2.5.2/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ E3. Definir la proyección VCF desde verdad final y referencia exacta.
-  - Depende de: E1–E2 y D2.
-  - Procede de: DTC-003, DTC-004 y DTC-021; REQ-VER-06, REQ-VER-15, REQ-VER-16, REQ-VER-17 y REQ-VER-30.
-  - Cambia: modelo intermedio propio con contigs, muestras, posiciones, REF, ALT y genotipos derivados únicamente del estado canónico; no parsea secuencias de lecturas ni infiere observaciones.
+- ☐ F2.5.3. Definir la proyección VCF desde verdad final y referencia exacta.
+  - Depende de: F2.5.1–F2.5.2 y F2.4.2.
+  - Procede de: DTC-003, DTC-004, DTC-021, DTC-061 y DTC-062; REQ-VER-06, REQ-VER-15, REQ-VER-16, REQ-VER-17 y REQ-VER-30.
+  - Cambia: modelo intermedio VCF 4.5 con contigs, muestras, posiciones, REF, ALT, genotipos y relación ALT↔lista canónica de casos fuente derivados únicamente de `truth.jsonl` validado y la referencia; no existe proyección inversa VCF→verdad, caso compuesto ni observación inferida.
   - Se comprueba con: fixtures construidos a mano, prueba de dependencia de módulos y comparación de cada registro con referencia/verdad mediante un oráculo distinto.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.3`; debe terminar con código 0 y escribir `evidence/f2/F2.5.3/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ E4. Normalizar y ordenar SNP e indels según la decisión aprobada.
-  - Depende de: E1 y E3.
-  - Procede de: REQ-FMT-05, REQ-FMT-06, REQ-VER-15 y REQ-VER-16; DTC-013 y DTC-021.
-  - Cambia: representación REF/ALT mínima para SNP, inserción y deleción, conversión exclusiva en el servicio de coordenadas y orden por catálogo de referencia, posición y desempate aprobado.
-  - Se comprueba con: casos manuales en primera/interior/última zona admitida, repetición local, ancla de indel y comparación contra el normalizador independiente fijado por E1.
+- ☐ F2.5.4. Cerrar la normalización y orden de SNP e indels mediante DTC-064.
+  - Depende de: F2.5.4.1–F2.5.4.3.
+  - Procede de: REQ-FMT-05, REQ-FMT-06, REQ-VER-15 y REQ-VER-16; DTC-013, DTC-021 y DTC-064; RAF2-036 resuelto.
+  - Cambia: integra reconstrucción, recorte anclado y alineación/orden en una puerta del algoritmo interno versionado, sin usar `bcftools norm` para producir la salida.
+  - Se comprueba con: aprobación de los tres expedientes hijos y ejecución conjunta de los vectores congelados contra el oráculo externo.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.4`; debe terminar con código 0 y escribir `evidence/f2/F2.5.4/result.json` con `status = "passed"` y enlaces a F2.5.4.1–F2.5.4.3.
 
-- ☐ E5. Agrupar alelos por sitio y calcular GT faseado/dosis para todas las muestras.
-  - Depende de: E3–E4.
-  - Procede de: DTC-003 y DTC-021; REQ-VER-02, REQ-VER-12, REQ-VER-17, REQ-VER-30, REQ-VER-32, REQ-VER-33 y REQ-VER-34.
-  - Cambia: agrupación multialélica con ALT fijos incluidos, índices de alelo estables, una columna por individuo y GT con exactamente una entrada por copia en orden de fase.
-  - Se comprueba con: loci bialélicos/multialélicos, dosis 0..P y ploidías 1, 2 y 10, oráculo de conteo por copia y permutación de muestras que no cambia alelos ni coordenadas.
+- ☐ F2.5.4.1. Reconstruir alelos finales y su intervalo REF común.
+  - Depende de: F2.5.1 y F2.5.3.
+  - Procede de: DTC-061 y DTC-064; verdad haplotípica final.
+  - Cambia: reconstrucción por haplotipo y cálculo del intervalo de referencia común suficiente para cambios solapados y alelos de longitudes distintas.
+  - Se comprueba con: SNP, inserción, deleción, sustituciones solapadas y combinaciones con longitudes distintas; un reconstructor independiente obtiene las mismas cadenas e intervalo.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.4.1`; debe terminar con código 0 y escribir `evidence/f2/F2.5.4.1/result.json` con alelos/intervalos esperados y observados.
 
-- ☐ E6. Omitir invariantes y alelos eliminados sin perder la verdad canónica.
-  - Depende de: E3–E5.
+- ☐ F2.5.4.2. Recortar contexto común conservando el anclaje VCF.
+  - Depende de: F2.5.4.1.
+  - Procede de: DTC-064; representación VCF 4.5 DTC-062.
+  - Cambia: recorte común determinista que conserva al menos la base de anclaje necesaria y nunca crea REF/ALT vacío o coordenada fuera de referencia.
+  - Se comprueba con: primera/interior/última zona admitida, prefijos/sufijos comunes, alelos de distinta longitud y repeticiones; vectores de bordes demuestran anclaje y REF exactos.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.4.2`; debe terminar con código 0 y escribir `evidence/f2/F2.5.4.2/result.json` con vectores congelados de recorte.
+
+- ☐ F2.5.4.3. Alinear a la izquierda, ordenar y congelar la versión del algoritmo.
+  - Depende de: F2.5.4.2 y catálogo de secuencias F1.
+  - Procede de: DTC-013, DTC-021 y DTC-064.
+  - Cambia: alineación izquierda respecto al FASTA autoritativo y orden canónico por catálogo/posición, con versión de normalización registrada.
+  - Se comprueba con: repeticiones locales y permutaciones de entrada; comparación independiente con `bcftools norm` contra el mismo FASTA sin llamarlo desde el productor ni runtime.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.4.3`; debe terminar con código 0 y escribir `evidence/f2/F2.5.4.3/result.json` con versión, vectores y comparación externa.
+
+- ☐ F2.5.5. Agrupar alelos por sitio y calcular GT faseado/dosis para todas las muestras.
+  - Depende de: F2.5.3–F2.5.4.
+  - Procede de: DTC-003, DTC-021, DTC-064 y DTC-065; REQ-VER-02, REQ-VER-12, REQ-VER-17, REQ-VER-23, REQ-VER-25, REQ-VER-30, REQ-VER-32, REQ-VER-33 y REQ-VER-34; RAF2-030 resuelto.
+  - Cambia: agrupación de todos los alelos finales compatibles en exactamente un registro multialélico por `CHROM+POS`, sin descomposición automática ni caso compuesto, con ALT fijos incluidos, índices estables, relación por ALT con la lista ordenada de casos fuente, una columna por individuo y GT con una entrada por copia en orden de fase.
+  - Se comprueba con: dos ALT/dos casos, un ALT/dos casos, un caso/varios registros, entrada reordenada, caso duplicado e ID inexistente; además loci bialélicos/multialélicos, cambios solapados compatibles, rechazo de segundo registro, dosis 0..P y ploidías 1/2/10. El oráculo de copia y la permutación de muestras no cambian alelos, coordenadas ni relaciones. Los fixtures F2 no usan BND.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.5`; debe terminar con código 0 y escribir `evidence/f2/F2.5.5/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
+
+- ☐ F2.5.6. Omitir invariantes y alelos eliminados sin perder la verdad canónica.
+  - Depende de: F2.5.3–F2.5.5.
   - Procede de: REQ-REC-26, REQ-VER-30, REQ-VER-36, REQ-VER-37, REQ-VER-39, REQ-VER-40 y REQ-VER-41; DTC-021.
   - Cambia: filtros de proyección que excluyen posiciones invariantes, variantes ausentes del conjunto y SNP borrados por una deleción posterior, manteniendo el historial completo en el fichero estructurado.
-  - Se comprueba con: verdad manual que contiene alelo fijo, evento revertido o eliminado y sitio invariante; el VCF contiene solo estados finales representables y el fichero D conserva todo el historial exigido.
+  - Se comprueba con: verdad manual que contiene alelo fijo, evento revertido o eliminado y sitio invariante; el VCF contiene solo estados finales representables y los registros de modificaciones/procedencia de `truth.jsonl` conservan todo el historial exigido.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.6`; debe terminar con código 0 y escribir `evidence/f2/F2.5.6/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ E7. Aplicar la regla de `N` y emitir el complemento mínimo aprobado cuando el VCF pierda detalle.
-  - Depende de: E1, E3–E6.
-  - Procede de: DTC-021 y DTC-032; REQ-VER-24, REQ-VER-34, REQ-VER-47 y REQ-MAN-27; cierre F2 de la hoja de ruta.
-  - Cambia: rechazo de cualquier SNP con `REF=N` y conservación de inserciones explícitas con `N` en verdad; solo crea complemento si DTPD-103 identifica una pérdida real del alcance F2. Si ningún caso F2 pierde detalle, no se inventa una entrada: se conserva la prueba negativa y RAF2-007 impide aprobar el cierre hasta corregir la evidencia de la hoja de ruta.
-  - Se comprueba con: casos `N` de referencia, inserción explícita y aleatoria, ausencia de complemento para todo caso plenamente representable y prueba negativa de que ninguna base desconocida se sustituye por `A/C/G/T`; una reconstrucción conjunta VCF+complemento solo se exige si DTPD-103 documenta antes un caso F2 literal con pérdida real.
+- ☐ F2.5.7. Aplicar la regla de `N` y emitir el complemento mínimo aprobado cuando el VCF pierda detalle.
+  - Depende de: F2.5.1, F2.5.3–F2.5.6.
+  - Procede de: DTC-021, DTC-032 y DTC-065; REQ-VER-19, REQ-VER-24 a REQ-VER-26, REQ-VER-34, REQ-VER-47 y REQ-MAN-27; cierre F2 de la hoja de ruta.
+  - Cambia: implementa el mecanismo condicional de `vcf-complement.jsonl`, pero F2 no fabrica un caso con pérdida. Rechaza SNP con `REF=N`, conserva `N` representable y exige ausencia de `GPS_LOSS/GPS_COMPLEMENT`, entradas y fichero para todos los casos F2 plenamente representables. Una pérdida literal auténtica descubierta puede añadirse sin ser requisito previo.
+  - Se comprueba con: corpus F2 positivo representable, incluida inserción explícita con `N` cuando VCF 4.5 la conserva, inserción aleatoria sin `N`, ausencia exacta de complemento/links y prueba negativa de que `N` nunca se sustituye por A/C/G/T; unitarias del esquema/cardinalidad rechazan relaciones rotas o sobrantes sin inventar una simulación con pérdida. La primera reconstrucción positiva VCF+complemento queda en F5.5.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.7`; debe terminar con código 0 y escribir `evidence/f2/F2.5.7/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ E8. Escribir exactamente un VCF multimuestra por conjunto con cabecera y campos mínimos correctos.
-  - Depende de: E2–E7.
-  - Procede de: DTC-021; REQ-FMT-05, REQ-FMT-06, REQ-VER-06, REQ-VER-43, REQ-VER-44 y REQ-MAN-57.
-  - Cambia: adaptador VCF con versión/cabecera aprobadas, `QUAL=.`, `FILTER=PASS`, GT faseado y ausencia de `DP`, `AD`, `GQ`, `PL` u otros campos observacionales no justificados.
-  - Se comprueba con: parser independiente de cabecera/registros, búsqueda negativa de campos prohibidos, cardinalidad de un fichero por conjunto y comparación exacta del orden de muestras/contigs.
+- ☐ F2.5.8. Escribir exactamente un VCF multimuestra por conjunto con cabecera y campos mínimos correctos.
+  - Depende de: F2.5.2–F2.5.7.
+  - Procede de: DTC-021, DTC-062 y DTC-065; REQ-FMT-05, REQ-FMT-06, REQ-VER-06, REQ-VER-23 a REQ-VER-25, REQ-VER-43, REQ-VER-44 y REQ-MAN-57.
+  - Cambia: adaptador VCF 4.5 con `GPS_CASE` `Number=.`/`Type=String` en todo registro, IDs originales únicos en orden canónico y sin caso compuesto; `GPS_LOSS` de catálogo cerrado y `GPS_COMPLEMENT` solo ante pérdida futura; `QUAL=.`, `FILTER=PASS`, GT faseado y ausencia de campos observacionales no justificados. La cabecera declara número/tipo/descripción de cada `GPS_*`.
+  - Se comprueba con: parser independiente de cabecera/registros; dos ALT/dos casos, un ALT/dos casos, un caso/varios registros, orden de entrada, duplicados e ID inexistente; ausencia F2 exacta de `GPS_LOSS/GPS_COMPLEMENT` y complemento; campos prohibidos, cardinalidad por conjunto y orden de muestras/contigs.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.8`; debe terminar con código 0 y escribir `evidence/f2/F2.5.8/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ E9. Publicar BGZF e índice por defecto y texto solo cuando se solicite explícitamente.
-  - Depende de: E1–E2, E8 y publicación F1.4 cerrada.
-  - Procede de: REQ-SAL-12 y REQ-MAN-58 como fuentes directas de BGZF, índice y modo texto; REQ-SAL-21 a REQ-SAL-23 y evidencia compartida de REQ-MAN-83 para los estados y la publicación; DTC-040 y DTC-045.
-  - Cambia: artefactos temporales, compresión/índice aprobados, hashes y manifiestos con modo efectivo; todos se promueven como unidad coherente o la ejecución falla.
-  - Se comprueba con: validador externo que abre BGZF e índice, consultas por región, modo texto sin índice según contrato, `sha256sum` y fallos inyectados sin conjunto parcialmente completo.
+- ☐ F2.5.9. Publicar BGZF e índice por defecto y texto solo cuando se solicite explícitamente.
+  - Depende de: F2.5.1–F2.5.2, F2.5.8 y publicación F1.4 cerrada.
+  - Procede de: REQ-SAL-12 y REQ-MAN-58 como fuentes directas de BGZF, índice y modo texto; REQ-SAL-21 a REQ-SAL-23 y evidencia compartida de REQ-MAN-83 para los estados y la publicación; DTC-040, DTC-045 y DTC-063.
+  - Cambia: artefactos temporales `.vcf.gz` y exactamente un `.tbi` si todo cabe en el límite TBI o un `.csi` si alguna secuencia/posición lo supera; alternativa explícita `.vcf` sin compresión ni índice; hashes, `EffectiveConfig` y manifiestos con modo, tipo y rutas efectivos. VCF+índice se validan y promueven como una unidad coherente o no se publica ninguno.
+  - Se comprueba con: validador externo que abre BGZF y el único índice, referencias a ambos lados del límite TBI, consultas por región, ausencia del índice alternativo, modo texto sin índice, `sha256sum` y fallos inyectados en VCF/índice sin conjunto parcialmente publicado.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.9`; debe terminar con código 0 y escribir `evidence/f2/F2.5.9/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ E10. Ejecutar validación sintáctica independiente y validación semántica contra la verdad.
-  - Depende de: E7–E9.
-  - Procede de: DTC-047; REQ-VAL-28, REQ-VER-02, REQ-VER-12, REQ-VER-43, REQ-VER-44 y REQ-VER-47.
-  - Cambia: pruebas/CI con validador VCF externo registrado y comprobador semántico separado que lee referencia, verdad y VCF/complemento, pero no llama a la proyección productora.
-  - Se comprueba con: comando externo exacto sobre texto y BGZF/índice, mutaciones deliberadas de REF/ALT/GT/fase/dosis/orden y detección de cada discordancia por el comprobador independiente.
+- ☐ F2.5.10. Ejecutar validación sintáctica independiente y validación semántica contra la verdad.
+  - Depende de: F2.5.7–F2.5.9.
+  - Procede de: DTC-047 y DTC-066; REQ-VAL-28, REQ-VER-02, REQ-VER-12, REQ-VER-23 a REQ-VER-26, REQ-VER-43, REQ-VER-44 y REQ-VER-47.
+  - Cambia: aceptación/CI ejecuta lectura, `bcftools norm` contra FASTA y consultas regionales con bcftools/tabix 1.24; el comprobador semántico separado lee FASTA, `truth.jsonl`, VCF y complemento opcional sin llamar ni compartir código con la proyección productora.
+  - Se comprueba con: corpus positivo texto/BGZF+TBI/BGZF+CSI; dos ALT/dos casos, un ALT/dos casos, un caso/varios registros y orden de entrada; consultas esperadas; ausencia del índice alternativo; mutaciones individuales de REF/ALT/GT, dosis/fase/muestras, orden, unicidad `CHROM+POS`, `GPS_CASE` duplicado/no canónico/ID inexistente/relación ALT↔casos alterada, presencia indebida F2 de `GPS_LOSS/GPS_COMPLEMENT` o complemento y campos prohibidos, cada una detectada por el oráculo independiente.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.10`; debe terminar con código 0 y escribir `evidence/f2/F2.5.10/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ E11. Verificar el recorrido completo configuración→verdad→VCF y sus invariantes cruzadas.
-  - Depende de: E3–E10.
+- ☐ F2.5.11. Verificar el recorrido completo configuración→verdad→VCF y sus invariantes cruzadas.
+  - Depende de: F2.5.3–F2.5.10.
   - Procede de: F2.5 y cierre F2; DTC-003, DTC-004, DTC-021 y DTC-031.
   - Cambia: escenario de aceptación con varias muestras, ploidías del alcance, SNP, inserción/deleción, sitio multialélico, alelo fijo y `N`, más inventario de artefactos y métricas pequeñas de tiempo/memoria.
   - Se comprueba con: reconstrucción independiente de todos los haplotipos, validación VCF externa, contraste fase/dosis/alelos/coordenadas y repetición con igual semilla que conserva verdad lógica e integridad esperada.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.11`; debe terminar con código 0 y escribir `evidence/f2/F2.5.11/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ E12. Completar evidencia y trazabilidad de F2.5 y preparar la revisión de cierre F2.
-  - Depende de: E1–E11 y puertas de calidad verdes.
-  - Procede de: los 25 REQ de cierre asignados a F2.5 en la matriz de §15 y evidencia compartida de REQ-MAN-83; ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100 y ACE-103.
-  - Cambia: matriz de evidencia F2.5, informe de validación independiente, inventario de limitaciones y dossier de cierre; separa la evidencia compartida y no marca requisitos de fases posteriores como completos.
-  - Se comprueba con: §4.3, recuento automático de 25 REQ de cierre y un REQ compartido sin huérfanos, comandos registrados de todos los validadores y revisión cruzada de los 84 REQ de cierre más los cuatro REQ compartidos de §15.
+- ☐ F2.5.12. Completar evidencia y trazabilidad de F2.5 y preparar la revisión de cierre F2.
+  - Depende de: F2.5.1–F2.5.11 y puertas de calidad verdes.
+  - Procede de: los 25 REQ de cierre asignados a F2.5 en §15, evidencia compartida de REQ-MAN-83 y evidencia parcial directa de REQ-SAL-12, REQ-FMT-07, REQ-VER-23 a REQ-VER-26, REQ-MAN-31 y REQ-MAN-58; ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-65, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100, ACE-103 y ACE-108.
+  - Cambia: matriz de evidencia F2.5, informe de validación independiente, inventario de limitaciones y dossier de cierre; separa el REQ compartido y los ocho expedientes parciales directos de los cierres exclusivos.
+  - Se comprueba con: §4.3, recuento automático de 25 REQ de cierre, un REQ compartido y ocho parciales directos sin huérfanos; comandos de validadores y revisión cruzada de §15. Ningún expediente de formato/VCF/complemento/manifiesto cierra antes de F5.5 o F9.5.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.12`; debe terminar con código 0 y escribir `evidence/f2/F2.5.12/result.json` con el paso `status = "passed"`, los ocho `requirements.<REQ>.status = "partial"` y sus destinos F5.5/F9.5, sin comprobaciones omitidas.
 
-- ☐ E13. Incorporar todas las opciones VCF F2.5 a Marimo y cerrar la paridad F2.
-  - Depende de: pausa F2.0 y E1–E12.
+- ☐ F2.5.13. Incorporar todas las opciones VCF F2.5 a Marimo y cerrar la paridad F2.
+  - Depende de: PAUSA-F2.0 aprobada y F2.5.1–F2.5.12.
   - Procede de: REQ-UI-01, REQ-UI-03, REQ-UI-07 a REQ-UI-13 y DTC-051; F2.5 de la hoja de ruta.
   - Cambia: controles `Salidas` para VCF BGZF/indexado predeterminado o texto, revisión de artefactos esperados, validación/lanzamiento explícitos y resumen de manifiesto/VCF sin cargar registros completos.
   - Se comprueba con: pares UI/manual para ambos modos con igual `EffectiveConfig`, destino existente, edición tras validar, ejecución real mínima y matriz de todas las opciones configurables F2 sin huecos Marimo.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.5.13`; debe terminar con código 0 y escribir `evidence/f2/F2.5.13/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-> **Pausa obligatoria F2.5 y cierre de F2.** No autorizar F3 hasta que una
+> **PAUSA-F2.5 — cierre obligatorio de F2.5 y de F2.** No autorizar F3 hasta que una
 > revisión independiente reconstruya todos los haplotipos, confirme
 > coordenadas/alelos/fase/dosis, valide VCF/BGZF/índice y demuestre los cuatro
 > casos de `N`: SNP rechazado, inserción aleatoria sin `N`, inserción explícita
-> con `N` conservada y VCF/complemento sin resolución inventada. Aprobar por
-> separado el cierre de F2; completar E12/E13 no lo concede automáticamente y
+> con `N` conservada, ausencia del complemento no necesario y ninguna resolución
+> inventada. La primera prueba positiva VCF+complemento se exige en F5.5 sobre
+> un caso complejo/SV/BND real. Aprobar por
+> separado el cierre de F2; completar F2.5.12/F2.5.13 no lo concede automáticamente y
 > ninguna opción configurable F2 puede quedar solo en TOML.
 
 ## 11. Dependencias posteriores confirmadas, fuera de la ejecución de F2
@@ -885,6 +1295,7 @@ DTC-053 sin anticipar la planificación completa de F6 o F7:
 
 | Destino | Contrato que deberá consumir | Puertas previas | Evidencia mínima futura |
 |---|---|---|---|
+| F5.5, primer complemento positivo | DTC-065/066; REQ-VER-19 y REQ-VER-23 a REQ-VER-26 | Mecanismo condicional y negativas F2.5 cerrados; clase compleja/SV/BND real implementada | Producir un caso auténtico que pierda detalle, enlazar todos sus registros mediante `GPS_CASE/GPS_LOSS/GPS_COMPLEMENT` a exactamente una entrada, reconstruir fase/haplotipo/genotipo/coordenadas/cambio y probar ausencia de entradas sobrantes; no fabricar pérdida ni reinterpretar un caso F2 representable |
 | F6.4, panel fundador intacto o recombinante | REQ-EVO-74 a REQ-EVO-77; REQ-VAL-56, REQ-MAN-92 y REQ-UI-15 | Consumir íntegramente DTC-055: paquete/TSV, referencia única, mínimos, ejes/modelos, productor directo, constructor común uniforme, puntos x\|x+1, F, IDs DTC-039, RNG DTC-037, origen/proceso y salidas canónicas | Probar catálogo/ejes y rechazos de combinaciones, incluida distribución explícita solo en intacto; ejecutar Bernoulli(F), productores y fuentes solo del panel; probar referencia/secuencias, K, puntos no SNP/invisibles; verificar C, ID, `n_h/C`, recuentos por origen y los tres esquemas/órdenes/claves TSV; reconstruir con oráculo independiente y corrupción deliberada; publicar/enlazar las tres tablas; probar Marimo, validación vigente y paridad TOML |
 | F7.1, recombinación meiótica | REQ-REC y requisitos reproductivos aplicables | F6.4 cerrado y DTPD-101/DTPD-111 resueltas | Conectar los mapas y la semántica meiótica decididos por DTPD-111 al constructor común ya implementado en F6.4 y demostrar que no reinterpreta la inicialización fundadora como evento histórico ni crea una segunda implementación |
 
@@ -896,7 +1307,7 @@ bloque. La alternativa recombinante se ha trasladado a la formación del conjunt
 fundador F6.4 y ya tiene productor directo, puntos, F, IDs, RNG, tres salidas y
 Marimo definidos, incluida la sintaxis TSV, la semántica de origen/proceso y el
 rechazo de distribuciones genotípicas explícitas en recombinante.
-Ningún paso B/C
+Ningún paso F2.2/F2.3
 puede aceptar un panel,
 inferir haplotipos desde la matriz marginal ni implementar recombinación local.
 Marimo solo expondrá REQ-UI-15 cuando cierren las capacidades correspondientes.
@@ -905,26 +1316,28 @@ Marimo solo expondrá REQ-UI-15 cuando cierren las capacidades correspondientes.
 
 | Riesgo silencioso | Prevención en producción | Oráculo independiente obligatorio | Evidencia de fallo que debe detectarse |
 |---|---|---|---|
-| Desfase base 0/base 1 o extremo abierto/cerrado | Tipos/servicio DTPD-101 iniciados en F1.6 y extendidos en A5 | Vectores compartidos de mapa y cadenas etiquetadas por posición | Mapa, SNP o indel desplazado, ancla incorrecta o acceso a posición 0 |
-| Longitud de *indel* mal resuelta o convertida en distribución implícita | Parámetros exactos B2/B7 y constructores B28–B29 | Casos 1/2/`umbral - 1` y RNG instrumentado | Longitud distinta, consumo RNG para longitud o clasificación estructural incorrecta |
-| Inserción/deleción terminal inválida | Constructores validados B28–B29 | Enumeración manual de todos los indels de una cadena corta | Pérdida del ancla o secuencia sin base a uno de los lados |
-| Sustitución silenciosa de `N` | Dominio A6 y reglas B9/B17/B22–B29/E7 | Corpus con `N` en borde/interior y barrido de salidas | SNP `REF=N`, ALT `N` o inserción aleatoria con `N` |
-| Fase o dosis alterada | Copias ordenadas A7/A9 y GT E5 | Conteo manual por copia, no parsing circular del VCF | GT sin P alelos, separador no faseado o dosis distinta |
-| Evento perdido por solapamiento | Composición B30 e historial D2 | Aplicador de cadenas corto escrito desde fixtures | SNP superviviente tras ser borrado o conflicto aceptado |
-| Tasa cero que consume RNG | Rutas explícitas B11/B20/B24 | RNG instrumentado y comparación de ámbitos vecinos | Cambios en otras clases o individuos al activar cero |
-| Poisson incorrecto o aplicado a alelos/genotipos | Decisión B2 y servicio B11/C5–C6 | Vectores o implementación ajena y test estadístico prefijado | Media/varianza fuera del umbral, Poisson fuera del recuento o resultado no reproducible |
-| Matriz o espectro incompatibles con referencia/población | Esquemas/validación DTC-054 y B3–B4/B12/B17–B21 | Corpus/lector B32 calculado fuera del productor | REF/ALT, suma, duplicado, población, perfil o digest incorrectos aceptados |
-| Recuento candidato confundido con loci activos | Separación B11/B20/B25 | Tabla manual candidatos→ALT cero→activos | Reposición de un locus globalmente ausente o `exact_loci` interpretado como activos |
-| Distribución o perfil implícito/incorrecto | Perfiles B10/B12–B15 y selección B22–B24 | Oráculos B33 y regeneración 1000 Genomes | Solapamiento aceptado, mayor resto incorrecto o perfil empírico cargado por defecto |
-| Identidad o azar cambia por orden/adición | IDs B16 y ámbitos B8/C3 | Permutaciones y vectores literales | Reordenar filas/poblaciones o añadir individuo altera resultados existentes |
-| Excepción limitada relaja otra validación | Flags B21/C9 y preflight B31 | Matriz independiente error×flag | Digest, REF, frecuencia, ploidía/dosis o no-clobber inválidos aceptados |
-| HWE/`F`, fase o frecuencia realizada incorrectos | Muestreo C5–C9 y agregados C13 | Probabilidades/corpus independiente C15 | Genotipo fuera del modelo, fase cambiada o muestra finita autocorregida |
-| Verdad y secuencia materializada divergen | Una verdad canónica A8–A9/C11 | Segundo reconstructor de D4 | Bytes o longitud distintos para la misma copia |
-| VCF convertido en fuente de verdad | Dirección de dependencias D2/E3 | Prueba sin VCF y auditoría de módulos | No se puede reconstruir o cambia la verdad al desactivar VCF |
-| REF/ALT/normalización incorrectos | Proyección E3–E4 | Normalizador/validador independiente aprobado | Registro válido sintácticamente pero no representa la verdad |
-| Pérdida de detalle al agrupar multialélicos | Agrupación E5 y complemento E7 | Tabla manual sitio×copia y reconstructor combinado | ALT o copia portadora desaparece, o se inventa una base |
+| Desfase base 0/base 1 o extremo abierto/cerrado | Tipos/servicio DTPD-101 iniciados en F1.6 y extendidos en F2.1.5 | Vectores compartidos de mapa y cadenas etiquetadas por posición | Mapa, SNP o indel desplazado, ancla incorrecta o acceso a posición 0 |
+| Longitud de *indel* mal resuelta o convertida en distribución implícita | Parámetros exactos F2.2.2/F2.2.7 y constructores F2.2.33–F2.2.34 | Casos 1/2/`umbral - 1` y RNG instrumentado | Longitud distinta, consumo RNG para longitud o clasificación estructural incorrecta |
+| Inserción/deleción terminal inválida | Constructores validados F2.2.33–F2.2.34 | Enumeración manual de todos los indels de una cadena corta | Pérdida del ancla o secuencia sin base a uno de los lados |
+| Sustitución silenciosa de `N` | Dominio F2.1.6 y reglas F2.2.9/F2.2.17/F2.2.22–F2.2.34/F2.5.7 | Corpus con `N` en borde/interior y barrido de salidas | SNP `REF=N`, ALT `N` o inserción aleatoria con `N` |
+| Fase o dosis alterada | Copias ordenadas F2.1.7/F2.1.9 y GT F2.5.5 | Conteo manual por copia, no parsing circular del VCF | GT sin P alelos, separador no faseado o dosis distinta |
+| Evento perdido por solapamiento | Composición F2.2.35 e historial F2.4.2 | Aplicador de cadenas corto escrito desde fixtures | SNP superviviente tras ser borrado o conflicto aceptado |
+| Tasa cero que consume RNG | Rutas explícitas F2.2.11/F2.2.20/F2.2.24 | RNG instrumentado y comparación de ámbitos vecinos | Cambios en otras clases o individuos al activar cero |
+| Poisson incorrecto o aplicado a alelos/genotipos | Decisión F2.2.2 y servicio F2.2.11/F2.3.5–F2.3.6 | Vectores o implementación ajena y test estadístico prefijado | Media/varianza fuera del umbral, Poisson fuera del recuento o resultado no reproducible |
+| Intervalo continuo produce 0/1 o interpreta 1 como cerrado | DTC-072/075 y F2.2.8.4/F2.2.12/F2.2.24 | Vectores independientes de cero, subnormales, `next_down(1)` y redondeos | `alt_af` extremo sin componente `fixed` o perfil SFS incompatible |
+| Selector estático aplicado a indels sobre estado mutable | `dynamic-indel-selection-v1` en F2.2.8.3/F2.2.30–F2.2.31 | Modelo de cadenas que gana/pierde oportunidades y agota el espacio | Preflight falso, candidato obsoleto, prefijo publicado o nuevo Poisson |
+| Matriz o espectro incompatibles con referencia/población | Esquemas/validación DTC-054 y F2.2.3–F2.2.4/F2.2.12/F2.2.17–F2.2.21 | Corpus/lector F2.2.37 calculado fuera del productor | REF/ALT, suma, duplicado, población, perfil o digest incorrectos aceptados |
+| Recuento candidato confundido con loci activos | Separación F2.2.11/F2.2.20/F2.2.25 | Tabla manual candidatos→ALT cero→activos | Reposición de un locus globalmente ausente o `exact_loci` interpretado como activos |
+| Distribución o perfil implícito/incorrecto | Perfiles F2.2.10/F2.2.12–F2.2.15 y selección F2.2.22–F2.2.24 | Oráculos F2.2.38 y regeneración compacta DTC-068 | Solapamiento aceptado, mínimo `1/5008` alterado, promedio/complemento incorrecto o builtin aproximado cargado por defecto |
+| Identidad o azar cambia por orden/adición | IDs F2.2.16 y ámbitos F2.2.8/F2.3.3 | Permutaciones y vectores literales | Reordenar filas/poblaciones o añadir individuo altera resultados existentes |
+| Excepción limitada relaja otra validación | Flags F2.2.21/F2.3.9 y preflight F2.2.36 | Matriz independiente error×flag | Digest, REF, frecuencia, ploidía/dosis o no-clobber inválidos aceptados |
+| HWE/`F`, fase o frecuencia realizada incorrectos | Muestreo F2.3.5–F2.3.9 y agregados F2.3.13 | Probabilidades/corpus independiente F2.3.15 | Genotipo fuera del modelo, fase cambiada o muestra finita autocorregida |
+| Verdad y secuencia materializada divergen | Una verdad canónica F2.1.8–F2.1.9/F2.3.11 | Segundo reconstructor de F2.4.4 | Bytes o longitud distintos para la misma copia |
+| VCF convertido en fuente de verdad | Dirección de dependencias F2.4.2/F2.5.3 | Prueba sin VCF y auditoría de módulos | No se puede reconstruir o cambia la verdad al desactivar VCF |
+| REF/ALT/normalización incorrectos | Proyección F2.5.3–F2.5.4 | Normalizador/validador independiente aprobado | Registro válido sintácticamente pero no representa la verdad |
+| Pérdida de detalle al agrupar multialélicos | Agrupación F2.5.5 y complemento F2.5.7 | Tabla manual sitio×copia y reconstructor combinado | ALT o copia portadora desaparece, o se inventa una base |
 | Artefactos mezclados entre ejecuciones | IDs/hashes/publicación F1 reutilizados | `sha256sum`, referencias cruzadas y fallos inyectados | Índice, VCF, verdad o referencia de ejecuciones distintas |
-| UI y conjunto TOML producen semánticas distintas, rompen enlaces o ejecutan una revisión obsoleta | Modelo/digest multidocumento M4/M7, binario único M8/M9 y pasos C17/D9/E13 | Conjunto manual gemelo, escenarios faltante/duplicado y proceso falso que registra argumentos | `EffectiveConfig` distinta, ruta/orden perdido, ejecución automática o validación antigua reutilizada |
+| UI y conjunto TOML producen semánticas distintas, rompen enlaces o ejecutan una revisión obsoleta | Modelo/digest multidocumento F2.0.10/F2.0.13, binario único F2.0.14/F2.0.15 y pasos F2.3.17/F2.4.9/F2.5.13 | Conjunto manual gemelo, escenarios faltante/duplicado y proceso falso que registra argumentos | `EffectiveConfig` distinta, ruta/orden perdido, ejecución automática o validación antigua reutilizada |
 
 Una prueba que serializa y vuelve a leer con el mismo código solo demuestra
 consistencia interna. No satisface por sí sola ninguna fila de esta tabla.
@@ -933,10 +1346,16 @@ consistencia interna. No satisface por sí sola ninguna fila de esta tabla.
 
 - Cada paso se implementa y revisa de forma aislada; una revisión puede dividirlo
   aún más, pero no fusionarlo con un paso dependiente para ocultar su evidencia.
-- Si M1, A2, A3, B2 o E1 no obtienen aprobación, o B1 no confirma sin
+- Si F2.0.2, F2.0.13, F2.1.2, F2.1.3, F2.2.2, F2.2.14, F2.3.1 o F2.5.1 no obtienen aprobación, o F2.2.1 no confirma sin
   contradicción DTC-054 y el cierre de DTPD-118, se detienen sus consumidores y se
   actualiza este plan con el bloqueo. Se puede continuar únicamente con corpus,
   matrices o validadores que no presupongan la opción elegida.
+- F2.0.2, F2.2.1 y F2.2.14 son pasos internos ejecutables después de autorizar
+  el inicio de F2, no prerrequisitos de esa autorización: F2.0.2 bloquea
+  F2.0.3 y sus demás consumidores, F2.2.1 bloquea únicamente los consumidores
+  declarados y F2.2.14 no incorpora los perfiles hasta materializar y revisar
+  los literales SFS, tamaño/SHA-256 de la fuente eLife, cinco filas, 96
+  contextos, transformaciones y SHA-256 de salida.
 - Si una decisión aprobada contradice especificación, arquitectura o DTC
   confirmada, no se adapta el requisito al código: se pausa y se eleva la
   contradicción para decisión explícita.
@@ -951,72 +1370,94 @@ Antes de aprobar el plan se ejecutarán, como mínimo:
 
 ```bash
 git diff --check -- design/plan-implementacion-f2-0.1.md
-rg -n '^- ☐ [A-EM][0-9]+\.' design/plan-implementacion-f2-0.1.md
-rg -n '^> \*\*Pausa obligatoria F2\.[0-5]' design/plan-implementacion-f2-0.1.md
-rg -n 'DTC-052|DTC-053|DTC-054|DTC-055|DTPD-101|DTPD-102|DTPD-103|DTPD-117|DTPD-118|DTPD-119|F1\.5|F1\.6' design/plan-implementacion-f2-0.1.md
-rg -n 'RAF2-001|RAF2-004|RAF2-007' design/plan-implementacion-f2-0.1.md
+rg -n '^- ☐ F2\.[0-5]\.[0-9]+(\.[0-9]+)*\.' design/plan-implementacion-f2-0.1.md
+rg -n '^> \*\*PAUSA-F2\.[0-5]' design/plan-implementacion-f2-0.1.md
+rg -n 'DTC-052|DTC-053|DTC-054|DTC-055|DTC-058|DTC-059|DTC-060|DTC-061|DTC-062|DTC-063|DTC-064|DTC-065|DTC-066|DTC-067|DTC-068|DTC-069|DTC-070|DTC-071|DTC-072|DTC-073|DTC-074|DTC-075|DTPD-101|DTPD-102|DTPD-103|DTPD-117|DTPD-118|DTPD-119|DTPD-120|DTPD-121|F1\.5|F1\.6' design/plan-implementacion-f2-0.1.md
+rg -n 'RAF2-001|RAF2-004|RAF2-007|RAF2-012|RAF2-017' design/plan-implementacion-f2-0.1.md
 ```
 
 Además, un comprobador mecánico debe verificar que cada casilla contiene una y
-solo una línea `Depende de`, `Procede de`, `Cambia` y `Se comprueba con`; que la
-matriz siguiente contiene una sola vez los 84 REQ cuyo cierre está asignado
-exclusivamente a F2; y que la lista separada de evidencia compartida contiene
-los otros cuatro REQ cuyo campo de hito incluye F2 junto con fases posteriores.
-La unión debe coincidir exactamente con las 88 filas de la trazabilidad cuyo
-hito contiene F2, sin confundir evidencia parcial con cierre total.
+solo una línea `Depende de`, `Procede de`, `Cambia`, `Se comprueba con` y
+`Evidencia ejecutable`; que existen exactamente 128 casillas; que la
+matriz siguiente contiene una sola vez los 79 REQ cuyo cierre está asignado
+exclusivamente a F2; que la lista separada de evidencia compartida contiene
+los otros nueve REQ cuyo campo de hito incluye F2 junto con fases posteriores;
+y que la lista directa contiene nueve obligaciones parciales cuyo hito final
+no incluye F2. Los dos conjuntos parciales deben permanecer fuera de los 79
+cierres y declarar `status = "partial"` y destino final.
 
 ## 15. Matriz de trazabilidad REQ/ACE/DTC
 
 La lista de REQ de cierre exclusivo es exhaustiva para la asignación F2 vigente:
-14 + 4 + 26 + 13 + 2 + 25 = **84**. Se añaden por separado **cuatro REQ compartidos**
-que exigen evidencia parcial en F2 y cierre posterior. Los ACE son la unión de
+14 + 4 + 22 + 12 + 2 + 25 = **79**. Se añaden por separado **nueve REQ compartidos**
+y **nueve REQ parciales directos** que exigen evidencia en F2 y cierre posterior. Los ACE son la unión de
 los criterios enlazados por esas filas de trazabilidad. Una mención no acredita
-ejecución ni cierre. REQ-CONF-08, REQ-CONF-21, REQ-IND-02 y REQ-IND-03 siguen
-señalados como cierres exclusivos solo porque así consta en la matriz maestra;
-RAF2-004 impide marcarlos satisfechos hasta revisar esa asignación frente al
-alcance deliberado de F2. La auditoría de la matriz maestra asigna los doce REQ
+ejecución ni cierre. REQ-CONF-08, REQ-CONF-21, REQ-IND-02, REQ-IND-03 y
+REQ-CONF-130 figuran como evidencia parcial con destino posterior; RAF2-004 y
+RAF2-012 quedan resueltos sin ampliar F2. La auditoría de la matriz maestra asigna los doce REQ
 nuevos como cuatro a F2.2 y ocho a F2.3; no se adopta el reparto 5/7 porque
 contradiría esas filas sin una revisión explícita de trazabilidad.
 
 | Hito | REQ asignados | ACE cubiertos | Decisiones/puertas principales | Pasos de cierre |
 |---|---|---|---|---|
-| F2.0 | REQ-UI-01; REQ-UI-02; REQ-UI-03; REQ-UI-04; REQ-UI-05; REQ-UI-06; REQ-UI-07; REQ-UI-08; REQ-UI-09; REQ-UI-10; REQ-UI-11; REQ-UI-12; REQ-UI-13; REQ-VAL-54 | ACE-114, ACE-115 | DTC-034, DTC-036, DTC-042, DTC-043, DTC-044, DTC-045, DTC-048, DTC-051; DTPD-117 | M1–M12 |
-| F2.1 | REQ-REF-14; REQ-IND-28; REQ-IND-29; REQ-VER-27 | ACE-03, ACE-10, ACE-11, ACE-28, ACE-66 | DTC-003, DTC-010, DTC-013, DTC-031, DTC-032, DTC-039 y DTC-056; DTPD-102 | A2–A10 |
-| F2.2 | REQ-CONF-08; REQ-CONF-21; REQ-CONF-24; REQ-CONF-25; REQ-CONF-28; REQ-CONF-128; REQ-CONF-129; REQ-IND-02; REQ-IND-03; REQ-IND-05; REQ-IND-06; REQ-IND-10; REQ-IND-11; REQ-IND-13; REQ-IND-14; REQ-IND-17; REQ-IND-18; REQ-IND-19; REQ-IND-21; REQ-IND-38; REQ-IND-40; REQ-IND-41; REQ-IND-60; REQ-IND-61; REQ-DIR-03; REQ-REC-24 | ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111, ACE-116 | DTC-006, DTC-011, DTC-020, DTC-022, DTC-032, DTC-033, DTC-037, DTC-038, DTC-044, DTC-049, DTC-052, DTC-054 y DTC-056; decisión B2 aún sin identificador; DTPD-118 resuelta | B1–B35 |
-| F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-CONF-130; REQ-IND-15; REQ-IND-62; REQ-IND-63; REQ-IND-64; REQ-IND-65; REQ-DIR-01; REQ-DIR-02; REQ-UI-14; REQ-VAL-55; REQ-MAN-91 | ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114, ACE-116 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039, DTC-049, DTC-051, DTC-052 y DTC-054; DTPD-118 resuelta | C1–C17 |
-| F2.4 | REQ-VER-31; REQ-SAL-06 | ACE-34, ACE-62 | DTC-003, DTC-004, DTC-031, DTC-035, DTC-036, DTC-040, DTC-045, DTC-047, DTC-051; DTPD-102 | D1–D9 |
-| F2.5 | REQ-FMT-05; REQ-FMT-06; REQ-REC-26; REQ-VER-02; REQ-VER-06; REQ-VER-12; REQ-VER-15; REQ-VER-16; REQ-VER-17; REQ-VER-30; REQ-VER-32; REQ-VER-33; REQ-VER-34; REQ-VER-36; REQ-VER-37; REQ-VER-39; REQ-VER-40; REQ-VER-41; REQ-VER-43; REQ-VER-44; REQ-VER-47; REQ-VAL-28; REQ-MAN-27; REQ-MAN-57; REQ-SAL-21 | ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100, ACE-103 | DTC-003, DTC-004, DTC-013, DTC-021, DTC-032, DTC-040, DTC-043, DTC-045, DTC-047, DTC-051; DTPD-103 | E1–E13 |
+| F2.0 | REQ-UI-01; REQ-UI-02; REQ-UI-03; REQ-UI-04; REQ-UI-05; REQ-UI-06; REQ-UI-07; REQ-UI-08; REQ-UI-09; REQ-UI-10; REQ-UI-11; REQ-UI-12; REQ-UI-13; REQ-VAL-54 | ACE-114, ACE-115 | DTC-034, DTC-036, DTC-042, DTC-043, DTC-044, DTC-045, DTC-048, DTC-051, DTC-058, DTC-069, DTC-073 y DTC-074; RAF2-017/034/035 resueltos | F2.0.1–F2.0.18 |
+| F2.1 | REQ-REF-14; REQ-IND-28; REQ-IND-29; REQ-VER-27 | ACE-03, ACE-10, ACE-11, ACE-28, ACE-66 | DTC-003, DTC-010, DTC-013, DTC-031, DTC-032, DTC-039, DTC-056 y DTC-061; DTPD-102 resuelta | F2.1.2–F2.1.10 |
+| F2.2 | REQ-CONF-24; REQ-CONF-25; REQ-CONF-28; REQ-CONF-128; REQ-CONF-129; REQ-IND-05; REQ-IND-06; REQ-IND-10; REQ-IND-11; REQ-IND-13; REQ-IND-14; REQ-IND-17; REQ-IND-18; REQ-IND-19; REQ-IND-21; REQ-IND-38; REQ-IND-40; REQ-IND-41; REQ-IND-60; REQ-IND-61; REQ-DIR-03; REQ-REC-24 | ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111, ACE-116 | DTC-006, DTC-011, DTC-020, DTC-022, DTC-032, DTC-033, DTC-037, DTC-038, DTC-044, DTC-049, DTC-052, DTC-054, DTC-056, DTC-059/DTC-060, DTC-067/DTC-068 y DTC-070 a DTC-075; DTPD-118/120/121 y RAF2-028/029/033/041–044 resueltas; puerta compacta F2.2.14 sin VCF | F2.2.1–F2.2.40 |
+| F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-IND-15; REQ-IND-62; REQ-IND-63; REQ-IND-64; REQ-IND-65; REQ-DIR-01; REQ-DIR-02; REQ-UI-14; REQ-VAL-55; REQ-MAN-91 | ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114, ACE-116 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039, DTC-049, DTC-051, DTC-052, DTC-054 y DTC-071 a DTC-073; DTPD-118 y RAF2-028/033/034 resueltas; REQ-CONF-130 parcial hacia F6.2 | F2.3.1–F2.3.17 |
+| F2.4 | REQ-VER-31; REQ-SAL-06 | ACE-34, ACE-62 | DTC-003, DTC-004, DTC-031, DTC-035, DTC-036, DTC-040, DTC-045, DTC-047, DTC-051 y DTC-061; DTPD-102 resuelta | F2.4.1–F2.4.9 |
+| F2.5 | REQ-FMT-05; REQ-FMT-06; REQ-REC-26; REQ-VER-02; REQ-VER-06; REQ-VER-12; REQ-VER-15; REQ-VER-16; REQ-VER-17; REQ-VER-30; REQ-VER-32; REQ-VER-33; REQ-VER-34; REQ-VER-36; REQ-VER-37; REQ-VER-39; REQ-VER-40; REQ-VER-41; REQ-VER-43; REQ-VER-44; REQ-VER-47; REQ-VAL-28; REQ-MAN-27; REQ-MAN-57; REQ-SAL-21 | ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100, ACE-103 | DTC-003, DTC-004, DTC-013, DTC-021, DTC-032, DTC-040, DTC-043, DTC-045, DTC-047, DTC-051, DTC-061 a DTC-066; DTPD-103 y RAF2-030 resueltas | F2.5.1–F2.5.13 |
 
 ### 15.1. Evidencia compartida obligatoria en F2
 
-Estas cuatro filas tienen un destino compuesto en la matriz maestra. F2 debe
+Estas nueve filas tienen un destino compuesto en la matriz maestra. F2 debe
 producir la evidencia concreta indicada, pero no declarará el REQ completamente
 satisfecho hasta que cierren también sus fases posteriores:
 
 | REQ compartido | Evidencia parcial exigida en F2 | Pasos |
 |---|---|---|
-| REQ-IND-25 (F2.3/F6.1) | Un creador directo real asigna un ID estable cuando falta, comprueba unicidad y no reutilización dentro del recorrido disponible | C2, C16 |
-| REQ-IND-26 (F2.4/F3.5/F7.7/F8.5) | El mismo ID aparece sin traducción en estado genotípico, verdad estructurada y metadatos F2; observaciones y linaje quedan para sus fases | D2, D6, D8 |
-| REQ-MAN-10 (F2.3/F5.5/F9.7) | El manifiesto distingue valores globales, específicos y efectivos consumidos por individuos/regiones/clases de F2 | C2, C14, C16 |
-| REQ-MAN-83 (F2.5/F3.5) | El primer conjunto real y sus artefactos VCF/índice manifiestan estados y diagnósticos coherentes con ejecución y evento | E9, E12 |
+| REQ-CONF-08 (F2.2/F5.2/F7.2) | Configurar cambios concretos/aleatorios solo para matriz SNV e *indels* F2; SV y mutación heredable quedan para los destinos indicados | F2.2.5, F2.2.25, F2.2.33–F2.2.35, F2.2.40 |
+| REQ-CONF-21 (F2.2/F5.2/F7.2) | Probar distribución espacial de matriz e *indels* sin reclamar SV ni mutación heredable | F2.2.10, F2.2.29, F2.2.33–F2.2.34, F2.2.40 |
+| REQ-IND-02 (F2.3/F5.2) | Crear individuos sobre la única referencia estructural F2; múltiples referencias estructurales cierran en F5.2 | F2.3.2, F2.3.4, F2.3.10–F2.3.11, F2.3.16 |
+| REQ-IND-03 (F2.3/F5.2) | Conservar ID/huella de la referencia estructural F2 por muestra sin reclamar todas las referencias disponibles | F2.3.2, F2.3.4, F2.3.11, F2.3.14, F2.3.16 |
+| REQ-CONF-130 (F2.3/F6.2) | HWE P=1..10 y F solo diploide; rechazo fuera de P=2 y ausencia de distribución explícita en esquema/CLI/Marimo | F2.3.1, F2.3.4, F2.3.16 |
+| REQ-IND-25 (F2.3/F6.1) | Un creador directo real asigna un ID estable cuando falta, comprueba unicidad y no reutilización dentro del recorrido disponible | F2.3.2, F2.3.16 |
+| REQ-IND-26 (F2.4/F3.5/F7.7/F8.5) | El mismo ID aparece sin traducción en estado genotípico, verdad estructurada y metadatos F2; observaciones y linaje quedan para sus fases | F2.4.2, F2.4.6, F2.4.8 |
+| REQ-MAN-10 (F2.3/F5.5/F9.7) | El manifiesto distingue valores globales, específicos y efectivos consumidos por individuos/regiones/clases de F2 | F2.3.2, F2.3.14, F2.3.16 |
+| REQ-MAN-83 (F2.5/F3.5) | El primer conjunto real y sus artefactos VCF/índice manifiestan estados y diagnósticos coherentes con ejecución y evento | F2.5.9, F2.5.12 |
 
-### 15.2. Evidencia adyacente no asignada a F2
+### 15.2. Evidencia parcial directa con cierre posterior
 
-Los casos de aceptación de F2 deben conservar evidencia útil sobre `N`,
-inserciones aleatorias, VCF y salida directa, pero la matriz no incorporará como
-cerrados REQ-IND-58, REQ-IND-59, REQ-VER-01, REQ-VER-24 a REQ-VER-26,
-REQ-FMT-07 ni REQ-SAL-02 porque la trazabilidad vigente los asigna a hitos
-posteriores con alcance mayor. Cualquier discrepancia entre esa asignación y la
-evidencia de cierre pedida por la hoja de ruta se documentará como cobertura
-parcial, no se resolverá alterando silenciosamente la fase.
+F2 debe registrar además nueve expedientes `status = "partial"` directamente
+reutilizables. No cambian el hito de cierre de los REQ ni permiten aprobarlos:
+
+| REQ | Evidencia parcial ejecutable en F2 | Pasos | Cierre final |
+|---|---|---|---|
+| REQ-SAL-02 | Publicar para creación directa el fichero de verdad F2, reconstruir cada copia sin VCF y enlazar identidad/integridad. `./scripts/verify-f2-step F2.4.8` debe producir el expediente parcial. | F2.4.2, F2.4.5, F2.4.8 | F8.5, tras cubrir todos los modos y estados exigidos |
+| REQ-SAL-12 | Publicar el VCF F2 solicitado como BGZF con índice, abrirlo y consultarlo con el validador fijado; `./scripts/verify-f2-step F2.5.12` debe producir el expediente parcial. | F2.5.9, F2.5.10, F2.5.12 | F5.5, tras cubrir el contrato VCF completo |
+| REQ-FMT-07 | Leer completamente VCF texto/BGZF, normalizar contra FASTA y consultar regionalmente con las herramientas fijadas. | F2.5.2, F2.5.10, F2.5.12 | F9.5, tras cubrir todas las vías |
+| REQ-VER-23 | Emitir y verificar `GPS_CASE` multivaluado, único, ordenado y enlazado con `truth.jsonl`. | F2.5.5, F2.5.8, F2.5.10, F2.5.12 | F5.5, al incorporar campos de repeticiones/SV |
+| REQ-VER-24 | Demostrar que todos los casos representables F2 omiten complemento, sin fabricar pérdida. | F2.5.7, F2.5.10, F2.5.12 | F5.5, con el primer caso positivo real complejo/SV/BND |
+| REQ-VER-25 | Verificar ALT↔casos, ausencia condicional de pérdida y cardinalidades negativas. | F2.5.5, F2.5.7, F2.5.8, F2.5.10, F2.5.12 | F5.5, con cardinalidad positiva de complemento real |
+| REQ-VER-26 | Validar el mecanismo de reconstrucción y su ausencia en casos sin pérdida, sin reclamar caso positivo F2. | F2.5.7, F2.5.10, F2.5.12 | F5.5, al reconstruir un caso complejo real perdido |
+| REQ-MAN-31 | Validar que ruta/tamaño/SHA de `vcf-complement.jsonl` solo existen cuando el fichero existe. | F2.5.7, F2.5.9, F2.5.12 | F5.5, con todas las clases complejas |
+| REQ-MAN-58 | Registrar versión VCF, normalización, modo, índice, rutas, validación y publicación atómica. | F2.5.8–F2.5.10, F2.5.12 | F9.5 |
+
+Los casos de aceptación de F2 conservan también evidencia adyacente sobre `N`,
+inserciones aleatorias y salida directa, pero no incorporan como cerrados
+REQ-IND-58, REQ-IND-59 ni REQ-VER-01.
 
 ## 16. Criterio de salida del plan
 
-El plan queda listo para aprobación cuando su validación mecánica no detecta
-errores, los 84 REQ de cierre aparecen exactamente una vez en §15, los cuatro
-REQ compartidos aparecen exactamente una vez en §15.1, cada hito tiene su pausa
-y cada paso conserva las cuatro líneas obligatorias. La ejecución seguirá
-condicionada al cierre de F1 y a las decisiones M1, A2, A3, B2 y E1, además de
-la auditoría de consumo B1. F2 solo podrá
-cerrarse cuando E12/E13, la pausa final y la aprobación independiente de cierre
-consten por separado.
+El inicio de F2 puede aprobarse cuando F1 esté cerrada y aprobada, las decisiones
+previas estén resueltas, la validación mecánica no detecte errores —incluidos
+los 79 REQ de cierre únicos, los nueve compartidos, los nueve parciales directos,
+las seis pausas y las cinco líneas de cada uno de los 128 pasos— y una nueva revisión adversarial del plan
+corregido no encuentre bloqueantes. El plan todavía no está autorizado porque
+F1 y RAF2-027 siguen abiertos y falta esa nueva revisión.
+
+F2.0.2, F2.2.1 y la regeneración/revisión compacta DTC-068 dentro de F2.2.14 no
+son prerrequisitos de inicio: son puertas de ejecución internas con los
+consumidores delimitados en §13. DTPD-103/120/121 y
+RAF2-001/004/007/012/017 quedan resueltos por las decisiones y reasignaciones
+aprobadas. F2 solo podrá cerrarse cuando F2.5.12/F2.5.13, la pausa final y la
+aprobación independiente de cierre consten por separado.

@@ -146,7 +146,9 @@ cree una ejecución identificada y produzca resultados trazables y repetibles.
   conservar orden/orientación y `N`, y publicar FASTA, mapa, integridad,
   subsemilla y manifiesto reconstruibles. Las cuestiones funcionales y
   DTPD-101/DTPD-116 están cerradas mediante DTC-050/DTC-056/DTC-057; el hito
-  puede comenzar por implementar esos contratos.
+  está implementado y sus correcciones declaran la evidencia completa, pero
+  sigue pendiente la revisión independiente; ni la pausa F1.6 ni el cierre
+  global de F1 se consideran aprobados todavía.
 
 **Resultado de salida:** ejecución mínima repetible con configuración, semilla,
 referencia completa o reducida y manifiesto; una reducción incluye su mapa.
@@ -171,48 +173,77 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
 
 **Hitos:**
 
-- **F2.0. Aplicación Marimo base.** Evaluar y fijar Marimo mediante DTPD-117;
+- **F2.0. Aplicación Marimo base.** Ejecutar la puerta experimental F2.0.2 de
+  DTC-058 —que ya resuelve DTPD-117— antes de incorporar las candidatas;
   implementar las nueve pestañas mínimas con `General/Ejecución`, `Genoma` y
   `Revisar y ejecutar` activas para las capacidades F1, incluida F1.6; importar,
-  previsualizar y exportar un conjunto autoconsistente de TOML general y cero o
-  varios escenarios, implementando ahora el caso sin escenarios y preparando el
-  modelo multidocumento; invocar `validate`/`run` sin shell y demostrar
-  equivalencia, invalidación, salida segura y accesibilidad local.
+  previsualizar y exportar como directorio autocontenido un conjunto de un TOML
+  general y cero o varios escenarios alcanzables. Aplicar copia privada y
+  exportación atómicas, rutas relativas canónicas, aislamiento/TOCTOU,
+  preservación opaca y límites DTC-069; invocar `validate`/`run` sin shell y demostrar
+  equivalencia, invalidación, salida segura y accesibilidad local. DTC-073
+  separa capacidades catalogadas/disponibles y DTC-074 exige evidencia real,
+  diferenciada, de Ubuntu 24.04 nativo y WSL2.
 - **F2.1. Estado haplotípico.** Representar copias cromosómicas, fase, dosis y
-  procedencia mediante el servicio de coordenadas decidido en F1.6, sin duplicar
-  innecesariamente secuencias completas; conservar `N` como base desconocida con
-  coordenada y longitud.
+  procedencia mediante DTC-056 y el modelo híbrido DTC-061, sin duplicar
+  innecesariamente secuencias completas; conservar `N` y preparar la proyección
+  obligatoria `truth.jsonl` sin acoplarla a tipos Rust.
 - **F2.2. Variantes pequeñas y matriz SNV.** Aplicar SNP explícitos e *indels*
   exactos o aleatorios; preparar, admitir, generar y reutilizar el par canónico
   TSV+JSON de DTC-054 ligado por SHA-256 a la referencia. Generar candidatos
   bialélicos sin reemplazo desde número exacto/media/densidad, espacio uniforme
   o ponderado, 12 sustituciones y espectro `alt_af` no solapado en modo
-  estocástico o exacto por mayores restos. Poisson solo rige recuentos generados
-  desde una media, no el muestreo de alelos. Rechazar SNV sobre `N`, VCF o
+  estocástico o exacto por mayores restos. `poisson-count-v1` de DTC-067 solo
+  rige recuentos desde una media, no alelos. Regenerar y validar mediante
+  DTC-068 los ejemplos compactos `human_1000g_global_sfs_approx_v1` y
+  `human_harris2017_snv12_approx_v1`, incluida fuente eLife fijada por
+  tamaño/SHA-256, receta, CC BY y digests de salida. No procesar el VCF Phase 3
+  ni depender de `bcftools` para estos builtins; nunca seleccionarlos en runtime
+  de forma implícita. Rechazar SNV sobre `N`, VCF o
   semánticas de frecuencia alternativas; conservar `N` en intervalos que no
-  necesitan interpretarla. DTPD-118 está resuelta por DTC-054.
+  necesitan interpretarla. Todos los intervalos de frecuencia son `[min,max)`;
+  0/1 exactos solo proceden de `fixed`. DTC-071 fija los once ámbitos RNG F2 sin circularidad,
+  DTC-072 sus consumidores no Poisson y DTC-075 separa selección SNV estática
+  de selección indel dinámica con reenumeración tras cada evento. REQ-CONF-08/21 aportan aquí evidencia
+  parcial y cierran en F5.2/F7.2 según su alcance. DTPD-118 está resuelta por
+  DTC-054.
 - **F2.3. Individuos directos desde población de origen.** Construir individuos
   asignados a una única población y muestrear la matriz mediante Hardy-Weinberg
-  o `F` diploide, con fase y subsemillas independientes. Integrar restricciones
+  para P=1..10 o `F` solo diploide, con fase y subsemillas independientes. La
+  distribución genotípica explícita no tiene fichero, esquema ni control Marimo
+  en F2; REQ-CONF-130 aporta evidencia parcial y cierra en F6.2. Integrar restricciones
   explícitas, incluidas las dos autorizaciones limitadas y trazadas para
   genotipos incompatibles o matriz activa vacía; integrar los demás cambios y
-  reconstruir cada haplotipo. Activar preparación/generación/reutilización,
+  reconstruir cada haplotipo. REQ-IND-02/03 aportan aquí evidencia parcial sobre
+  una referencia estructural por individuo y cierran en F5.2. Activar preparación/generación/reutilización,
   perfiles, población y modelo en la pestaña `Individuos`.
-- **F2.4. Verdad estructurada.** Guardar el genotipo real y la información
-  necesaria para reconstruirlo independientemente del VCF y exponer sus
-  opciones y resumen enlazado en `Salidas`/`Revisar y ejecutar`.
-- **F2.5. VCF de verdad mínimo.** Producir exactamente un VCF multimuesta
-  estándar por conjunto, ordenado, derivado del estado real y sin campos
-  inferidos de lecturas. No emitir SNP con `REF=N` ni inventar una base; aplicar
-  complemento si otro cambio no conserva `N` sin pérdida en la versión elegida.
+- **F2.4. Verdad estructurada.** Publicar `truth.jsonl` v1 obligatorio, UTF-8
+  sin comprimir, con cabecera, copias/genotipos tipados, orden e integridad;
+  reconstruirlo y contrastar genotipos/haplotipos independientemente del VCF.
+- **F2.5. VCF de verdad mínimo.** Producir exactamente un VCF 4.5 multimuesta
+  estándar por conjunto, ordenado, derivado de `truth.jsonl` y sin campos
+  inferidos de lecturas. Publicar por defecto `.vcf.gz` BGZF con exactamente un
+  índice TBI o CSI según el límite de TBI, o `.vcf` de texto sin índice cuando
+  se solicite explícitamente; validar y publicar VCF+índice de forma atómica.
+  Normalizar de forma determinista/versionada desde los haplotipos finales y
+  agrupar en F2 todos los alelos compatibles en un único registro multialélico
+  por `CHROM+POS`, sin descomposición automática. Todo registro usa `GPS_CASE`;
+  solo una pérdida añade `GPS_LOSS`, `GPS_COMPLEMENT` y una entrada por caso en
+  el `vcf-complement.jsonl` condicional del conjunto. No emitir SNP con `REF=N`
+  ni inventar una base. Aceptar en CI con bcftools/HTSlib-tabix 1.24 y un
+  oráculo semántico independiente sobre texto, BGZF+TBI y BGZF+CSI.
 
-**Resultado de salida:** referencia, individuos faseados, verdad estructurada y
-VCF verdadero coherentes.
+**Resultado de salida:** referencia, individuos faseados, `truth.jsonl` y VCF
+4.5 verdadero coherentes.
 
 **Evidencia de cierre:** casos sintéticos independientes reconstruyen las
 secuencias esperadas y demuestran coordenadas, alelos, fase y dosis. Incluyen un
 SNP rechazado sobre `N`, una inserción aleatoria sin `N`, una explícita que la
-conserva y un caso VCF/complemento sin resolución implícita.
+conserva y la ausencia de `vcf-complement.jsonl` para todos los casos F2
+representables, sin resolver `N` como A/C/G/T. F2 no fabrica una pérdida. Deja evidencia
+parcial ejecutable de REQ-SAL-02 en F2.4.2/F2.4.5/F2.4.8 y de REQ-SAL-12 en
+F2.5.9/F2.5.10/F2.5.12; sus cierres completos siguen en F8.5 y F5.5,
+respectivamente.
 
 > Revisión de F2: validar la verdad biológica antes de generar una sola lectura.
 
@@ -299,7 +330,9 @@ bloquear F4. Antes de recuperarla deberán acordarse el contrato mínimo de
 entrada, la separación entre variantes y errores, el esquema reutilizable, las
 métricas y umbrales de fiabilidad y las reglas de reutilización. Los perfiles
 incorporados de Illumina y PacBio HiFi y sus sustituciones explícitas sí forman
-parte de F4.
+parte de F4. DTF-016 reserva también la materialización exacta de VCF
+poblacionales y perfiles empíricos exactos; no sustituye ni bloquea los dos
+ejemplos compactos aproximados de F2.2.
 
 ### F5. Referencias y variación complejas
 
@@ -324,7 +357,8 @@ separación estricta entre referencias.
 - **F5.5. Variantes solapadas y complemento.** Resolver cambios secuenciales,
   variantes eliminadas y alelos finales complejos. Cuando un caso pierda detalle
   en VCF, enlazar sus registros con una única entrada complementaria y demostrar
-  la reconstrucción completa del par.
+  la reconstrucción completa del par. Esta fase aporta la primera prueba
+  positiva obligatoria VCF+complemento mediante un caso complejo/SV/BND real.
 - **F5.6. Varios conjuntos de referencia.** Mapear las mismas muestras contra
   referencias diferentes, producir BAM/CRAM y VCF independientes y demostrar
   que el manifiesto del evento y el manifiesto raíz enlazan todos los resultados
@@ -354,7 +388,9 @@ evolución a lo largo de generaciones.
 - **F6.2. Frecuencias y Hardy-Weinberg.** Aplicar y comprobar la distribución
   binomial bialélica y la multinomial multialélica en ploidías 1–10, tanto en
   modo probabilístico como controlado, reutilizando el muestreo matricial
-  probabilístico de F2.3 y extendiéndolo a subpoblaciones y recuentos controlados.
+  probabilístico de F2.3 y extendiéndolo a subpoblaciones, recuentos controlados
+  y distribución genotípica explícita. Aquí cierran REQ-CONF-130 y
+  REQ-EVO-35/36/49.
 - **F6.3. Endogamia inicial.** Aplicar las fórmulas confirmadas de F automático
   solo en diploides, probar F=0, valores intermedios y F=1, rechazar F en P=1 o
   P>2 y registrar F realizado como «no aplicable» fuera de diploides, sin crear

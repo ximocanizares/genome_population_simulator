@@ -282,6 +282,7 @@ impl ReferenceSequence {
 pub enum ReferenceOrigin {
     Generated,
     Supplied { original_path: PathBuf },
+    Reduced { source_reference_id: ReferenceId },
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]

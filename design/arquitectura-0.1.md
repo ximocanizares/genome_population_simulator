@@ -30,8 +30,9 @@ concretas de los crates aceptados quedan fijadas por `Cargo.lock`.
 
 La ampliación confirmada incorpora una derivación reducida de FASTA en F1.6 y
 una aplicación Marimo obligatoria desde F2.0. DTC-056/DTC-057 cierran las
-coordenadas comunes y la selección de intervalos; DTPD-117 continúa pendiente
-para la frontera técnica de Marimo.
+coordenadas comunes y la selección de intervalos; DTC-058 resuelve DTPD-117 y
+concreta la frontera técnica de Marimo. Su incorporación queda condicionada
+solo a superar la puerta experimental F2.0.2.
 
 La arquitectura cubre toda la versión 1 para evitar contratos incompatibles
 entre fases. Sin embargo, su materialización seguirá la secuencia F1–F9 de la
@@ -113,8 +114,54 @@ referencia de calibración ni para perfiles empíricos reutilizables.
 
 Python no forma parte del núcleo. Se admite únicamente como entorno de la
 aplicación Marimo y de herramientas auxiliares expresamente aprobadas. Marimo
-queda fuera de las dependencias del dominio: su versión, empaquetado local y
-compatibilidad con el binario deben superar DTPD-117 y la puerta F2.0.
+queda fuera de las dependencias del dominio. CPython 3.14.7 y Marimo 0.23.16
+forman la pareja candidata exacta, pero no se incorporan hasta que la puerta F2.0.2
+de DTC-058 apruebe su resolución y *lock*, inventario de dependencias, *builds*
+y licencias, auditoría de seguridad, funcionamiento Ubuntu/WSL2, proceso falso,
+binario real y lanzador. Un fallo reabre DTPD-117 y nunca autoriza una
+degradación o sustitución silenciosa.
+
+`uv` 0.12.0 es la candidata exacta y el único gestor del entorno y de las
+dependencias Python. Estas se declaran en `pyproject.toml` y su resolución
+exacta se conserva en `uv.lock`.
+El entorno local aislado es `.venv`, queda excluido de Git y se reproduce en
+desarrollo, CI e instalación mediante `uv sync --frozen`, que debe fallar si el
+proyecto y el *lock* divergen sin actualizarlos. Marimo no instala paquetes
+automáticamente y la aplicación no consulta ni depende de paquetes Python
+globales del host o de WSL2. La candidata de `uv`, el empaquetado local y la
+compatibilidad de todo el entorno con el binario deben superar la puerta F2.0.2 de
+DTC-058 y la pausa F2.0 sin sustituciones silenciosas.
+
+Marimo es un componente auxiliar oficial separado del binario Rust. La
+aplicación, `pyproject.toml` y `uv.lock` se versionan en el repositorio y se
+incluyen en el `.tar.gz` oficial junto al lanzador único
+`genome-population-simulator-ui`. Su suborden `install` ejecuta
+`uv sync --frozen` y crea `.venv`; `run` utiliza ese entorno ya preparado y
+nunca descarga, resuelve o actualiza dependencias.
+`.venv`, CPython y `uv` no se distribuyen dentro del paquete y Marimo no se
+incrusta ni enlaza dentro del binario Rust. La imagen OCI de v1 permanece
+exclusivamente CLI: no contiene la aplicación, Python, `uv` ni un puerto UI.
+Así conserva el enlace local confirmado sin abrir una excepción de red dentro
+del contenedor.
+
+La aplicación Marimo de v1 expone su servidor únicamente mediante IPv4
+*loopback* `127.0.0.1`. No existe configuración para enlazarlo con `0.0.0.0`,
+una interfaz LAN u otra dirección, y el acceso remoto queda fuera de alcance.
+En WSL2, la persona usuaria accede mediante `localhost` desde el navegador de
+Windows. El lanzador usa el puerto 2718 por omisión y acepta `--port <n>` solo
+para puertos no privilegiados entre 1024 y 65535, ambos inclusive. Muestra el
+puerto efectivo y, si está ocupado, termina antes de abrir o ejecutar con un
+diagnóstico y un ejemplo para elegir otro; no busca ni selecciona uno
+automáticamente. El puerto no forma parte del TOML biológico ni de
+`EffectiveConfig`. En una sesión interactiva, el lanzador imprime siempre la
+URL completa después de iniciar el servidor y luego intenta abrir el navegador
+predeterminado; bajo WSL2 intenta el navegador predeterminado de Windows. Un
+fallo al abrirlo solo produce un aviso accionable y no detiene el servidor.
+`--no-open` suprime el intento para CI y automatización. Iniciar o abrir esta
+aplicación no ejecuta una simulación. Los demás límites de entorno,
+empaquetado, contratos, proceso, seguridad, persistencia, registros,
+accesibilidad, pruebas y distribución quedan concretados por DTC-058 y deben
+superar la puerta F2.0 antes de incorporarse.
 
 macOS, Windows nativo y ARM64 no son plataformas oficialmente soportadas en v1.
 Su ampliación requiere comprobar compilación, dependencias, herramientas
@@ -243,7 +290,7 @@ precedencia.
 | Instancia de lectura | Observación concreta con identidad técnica única dentro del evento; una pareja constituye una unidad y comparte el nombre exigido por el formato | Biblioteca actual, miembros cuando sea pareja, origen estable y mecanismo de copia o transferencia |
 | Conjunto | Local a un evento y una referencia de mapeo | Mismas muestras que los demás conjuntos del evento y resultados de esa referencia |
 | Caso de verdad | Local a un conjunto | Diferencia biológica simple o compuesta y uno o varios registros VCF |
-| Registro VCF | Local a un conjunto y a un caso de verdad | Referencia, representación estándar y, si pierde detalle, una única entrada complementaria |
+| Registro VCF | Local a un conjunto y enlazado a uno o varios casos de verdad originales | Referencia, representación estándar, lista canónica `GPS_CASE` y, si pierde detalle, el enlace complementario que se defina para ese caso real |
 | Entrada complementaria | Única para un caso que pierde detalle en VCF | Identificador local estable, registros enlazados y detalle completo no representable |
 
 Un identificador aportado usa ASCII, distingue mayúsculas de minúsculas y
@@ -343,22 +390,39 @@ azar, sustituirla ni atribuirle otro significado de forma implícita.
 
 Toda coordenada contiene, como mínimo, referencia, secuencia, posición o
 intervalo y convenio. La configuración utiliza base 1 e intervalos cerrados;
-los formatos externos conservan su convenio oficial. La representación interna
-se decidirá por separado. Ningún componente puede convertir coordenadas sin
-usar el servicio común de coordenadas y registrar la conversión.
+los formatos externos conservan su convenio oficial. DTC-056 fija la
+representación interna base 0 semiabierta y tipos distintos para base, punto
+interbase e intervalo. Ningún componente puede convertir coordenadas sin usar
+el servicio común de coordenadas y registrar la conversión.
 
-Un segmento conserva la secuencia actual o la forma de materializarla y su
-procedencia. Puede apuntar a una copia fundadora, a una copia duplicada o a una
-inserción sin origen fundador. Una deleción conserva el intervalo ausente. Las
+Según DTC-061, un segmento ordinario no conserva una copia de la secuencia:
+referencia un intervalo de la referencia o de una fuente fundadora exacta y
+conserva cómo materializarlo y su procedencia. Una secuencia insertada se
+almacena como dato propio únicamente cuando no existe en ninguna fuente. Una
+deleción conserva el intervalo ausente. Segmentos y modificaciones tipadas usan
+los tipos de DTC-056 y mantienen referencia/fuente, copia y fase; las
 correspondencias entre estados solo existen donde la transformación las hace
-significativas; nunca se inventan para cubrir regiones sin homología.
+significativas y nunca se inventan para regiones sin homología.
 
 ### 5.3. Estado genotípico y verdad
 
 El estado genotípico de un individuo agrupa, para cada secuencia, exactamente el
-número de copias que indica su ploidía efectiva. Cada copia contiene una cadena
-ordenada de segmentos y eventos suficiente para materializar su secuencia,
-conservar fase y dosis y alcanzar un origen fundador o un evento de inserción.
+número de copias que indica su ploidía efectiva. Cada copia contiene la cadena
+ordenada y persistente de segmentos de DTC-061. SNP e *indels* pequeños son
+modificaciones tipadas sobre esos segmentos, con procedencia y coordenadas
+explícitas. La estructura es lógicamente inmutable y admite compartir segmentos
+entre estados; DTC-061 no obliga a un crate o contenedor físico concreto. La
+cadena basta para materializar bajo demanda la secuencia, conservar fase y dosis
+y alcanzar la referencia, una fuente fundadora o un evento de inserción. Los
+bytes materializados son una vista y nunca otra fuente de verdad.
+
+La futura recombinación compone cadenas de segmentos y las variantes
+estructurales añaden transformaciones o clases de segmento trazables. Ninguna de
+las dos capacidades puede sustituir el modelo híbrido, aplanarlo de forma
+permanente en secuencias completas ni perder modificaciones pequeñas ya
+asociadas. DTPD-102 queda completamente resuelta por DTC-061: este mismo modelo
+lógico se proyecta al fichero externo obligatorio `truth.jsonl` sin copiar el
+contenedor físico Rust.
 
 El motor genómico aplica primero los eventos explícitos en su orden declarado.
 Después recibe un recuento sorteado por clase y procesa, en orden fijo,
@@ -373,9 +437,67 @@ concretos y no implementan otra distribución. Las mutaciones de repeticiones en
 tándem usan el modelo escalonado simple: cada evento añade o elimina una unidad
 completa según el sesgo efectivo entre ambas direcciones.
 
+El servicio de recuento implementa únicamente `poisson-count-v1` de DTC-067.
+Recibe `lambda` ya derivada y el RNG ChaCha12 del ámbito; cero retorna sin
+avanzarlo, la rama `0<lambda<10` usa Knuth y `10<=lambda<=2^52` usa PTRS de
+Hörmann. Cada uniforme abierto consume un `next_u64` mediante la conversión
+normativa de 52 bits. Toda matemática trascendente pasa por `libm` 0.2.16 y el
+resultado se valida antes de convertirlo a `u64`. El servicio no conoce ni
+recorta el espacio genómico: el consumidor aplica después el fallo por
+oportunidades insuficientes y registra versión, media, ámbito/subsemilla y
+recuento.
+
 La **verdad biológica** comprende referencias, haplotipos, genotipos,
 parentescos, poblaciones, transmisiones, mutaciones y observaciones. Es la única
 fuente autorizada para generar el fichero obligatorio de verdad y los VCF.
+
+El fichero obligatorio es `truth.jsonl` v1, UTF-8 sin comprimir. Se escribe y
+lee por flujo. La primera línea es siempre la cabecera versionada con clase,
+ejecución, referencia, convenio de coordenadas, recuentos y digests; las líneas
+siguientes son registros tipados de copia haplotípica o genotipo. Cada copia
+conserva su cadena ordenada de segmentos/modificaciones, fase y procedencia; cada
+genotipo identifica caso/locus, alelos, dosis y copias portadoras. Los esquemas
+por tipo validan cada línea. El orden canónico comienza por referencia,
+individuo, secuencia y copia y continúa por las claves internas del registro.
+El manifiesto enlaza longitud y SHA-256 del fichero completo.
+
+La validación de conjunto no se reduce a validar líneas: un reconstructor
+independiente comprueba por flujo cabecera, orden, unicidad, recuentos/digests y
+relaciones, materializa cada secuencia y vuelve a obtener los genotipos desde
+los haplotipos. Una ausencia, duplicado, desorden, relación rota o diferencia de
+alelos, dosis o copia invalida el artefacto. VCF es exclusivamente una vista
+derivada de `truth.jsonl`; ningún VCF puede reconstruir, corregir o sustituir la
+verdad. La compresión queda fuera de F2 y una ampliación no podrá cambiar el
+modelo lógico.
+
+La vista VCF aplica desde esos haplotipos finales el algoritmo de normalización
+versionado por DTC-064: reconstruye primero cada alelo final, amplía los cambios
+solapados al intervalo de referencia común necesario, recorta contexto común
+sin perder el anclaje, alinea a la izquierda contra la referencia y ordena por
+catálogo de secuencias y coordenada. En F2 agrupa todos los alelos compatibles
+en un único registro multialélico por `CHROM+POS`, sin descomponerlo. El
+materializador no invoca `bcftools`; las pruebas lo usan como oráculo externo.
+La excepción para varios BND relacionados, incluso en una misma posición, se
+reserva a SV/translocaciones futuras y no relaja la cardinalidad de SNP e
+*indels* pequeños de F2.
+
+Cada registro VCF conserva siempre `GPS_CASE`, declarado como `Number=.` y
+`Type=String`. Contiene los IDs locales estables, únicos y ordenados
+canónicamente de todos los casos originales en `truth.jsonl` que aportan uno o
+varios ALT al registro; no se crea un caso compuesto. `truth.jsonl`, como
+autoridad canónica, conserva para cada alelo final la relación explícita
+ALT↔lista ordenada de casos fuente. Un caso que aparece en varios registros
+repite su ID en cada uno. Solo una pérdida real añade `GPS_LOSS`, código
+de catálogo cerrado y no texto libre, y `GPS_COMPLEMENT`, ID de la única entrada
+correspondiente en `vcf-complement.jsonl`. Este JSON Lines versionado es único
+por conjunto y no existe si ningún caso pierde detalle; contiene una entrada por
+caso perdido con fase, haplotipo, genotipo, coordenadas, cambio completo y enlace
+a la verdad. Varios registros del mismo caso, incluidos BND futuros, comparten
+entrada. El manifiesto conserva ruta, tamaño y SHA-256, y el validador rechaza
+enlaces ausentes, múltiples, cruzados o entradas sobrantes. Todos los casos de
+F2 son representables y, por tanto, omiten `GPS_LOSS`, `GPS_COMPLEMENT` y el
+complemento. La cardinalidad positiva multicaso del complemento se definirá en
+F5.5 sobre un caso real con pérdida, no en F2.
 
 La **verdad técnica de lecturas** conserva el origen real de fragmentos,
 secuencias original y observada, errores, duplicados, contaminaciones,
@@ -462,7 +584,7 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 | Artefactos y demultiplexado | Convertir conjuntamente la contaminación y aplicar errores, duplicados, adaptadores y reasignaciones | Lecturas y configuración → FASTQ finales y procedencia | Posee transformaciones técnicas e identidades de instancia; consulta fuentes compatibles |
 | Alineamiento | Ejecutar el mapeador sobre el FASTQ final | FASTQ y referencia → alineamientos observados | Posee invocación, salida, diagnóstico y metadatos del proceso |
 | Alineamiento directo | Crear registros sintéticos coherentes sin FASTQ | Verdad y perfil directo → alineamientos sintéticos | Posee categorías y registros sintéticos; no llama a un mapeador |
-| Materialización de verdad | Aplicar el único contrato obligatorio de trazabilidad y escribir verdad, VCF y complemento | Estado faseado, historial y referencia de conjunto → artefactos de verdad y resúmenes | No altera el dominio; materializa el detalle exigido por vía sin ofrecer niveles ni degradarlo por escala |
+| Materialización de verdad | Aplicar el único contrato obligatorio de trazabilidad, proyectar/escribir/validar `truth.jsonl` y derivar después VCF/complemento | Estado faseado, historial y referencia de conjunto → `truth.jsonl`, vistas interoperables y resúmenes | No altera el dominio; posee esquemas por registro, escritor por flujo y validación semántica independiente; materializa el detalle exigido por vía sin niveles ni degradación |
 | Ensamblado de resultados | Organizar recursos comunes, eventos y conjuntos | Artefactos validados → estructura de resultados | Posee catálogo lógico de artefactos y estados de completitud |
 | Validación interna | Comparar configuración, verdad y evidencia | Objetivos y resultados → informe, aviso o error | Posee evidencias de comprobación; no corrige resultados |
 | Diagnósticos públicos | Traducir errores internos tipados a un contrato público estable y renderizarlo | Error causal y contexto → texto humano a stderr o documento JSON único y código de salida | Posee catálogo versionado de códigos, esquema y renderizadores; no expone tipos de dependencias ni decide la consecuencia funcional |
@@ -550,6 +672,7 @@ exige que la persona usuaria los instale.
 | Componente | Errores propios principales | Comprobación aislada mínima |
 |---|---|---|
 | Admisión de configuración | Sintaxis TOML; clave/campo desconocido o duplicado; versión ausente; precedencia conflictiva; `f64` no finito o fuera de intervalo; tolerancia inválida; suma no positiva/no finita o delta excesivo; referencia inexistente y solicitud fuera de v1 | Resolver casos mínimos y conservar TOML; probar tolerancias 0, `1e-9`, `1e-6` y fuera de rango, `delta == t` y valores inmediatamente dentro/fuera, NaN/infinito, cero total, reorden físico y rechazo; comprobar vectores Neumaier, recomputación, decimal round-trip y registro antes/después |
+| Aplicación Marimo | Entorno o contrato divergente; binario ausente/incompatible; intento de red o *shell*; estado validado obsoleto; salida excesiva; navegador o accesibilidad fallidos | Probar ruta explícita estricta, paquete preferido y `PATH` solo si el paquete no incluye binario; contratos y SHA-256, proceso falso/real, límites/cancelación, seguridad `marimo run`, WCAG 2.2 AA y recorridos Ubuntu/WSL2 |
 | Identidad de ejecución | Sintaxis inválida, categoría o ámbito incorrectos, colisión o reutilización | Probar sintaxis y sensibilidad, etiquetas repetidas, vectores normativos del contexto ID, material binario y Base32 sin relleno; causas mínimas del ID de ejecución; colisiones y cruces de tipos; y rechazo de cambios de catálogo sin nueva versión |
 | Aleatoriedad reproducible | Raíz mal codificada, CSPRNG fallido, ámbito desconocido, codificación ambigua, identificador inestable o estado no regenerable | Probar raíces y subsemillas de exactamente 64 hex minúsculos, generación por CSPRNG y registro de origen, vectores normativos del contexto subseed y enteros big-endian; reconstruir ámbitos y demostrar independencia al añadir o reordenar observaciones |
 | Catálogo de referencias | FASTA comprimido o inválido, secuencia vacía, identificador de primer elemento vacío o repetido, símbolo distinto de A/C/G/T/N, linaje cíclico o derivación imposible | Copiar sin cambiar bytes mientras se valida y calcula SHA-256; separar identificador, descripción y cabecera cruda; conservar una descripción no UTF-8 reversiblemente; comprobar escritura canónica e índices bajo demanda; conservar `N` con coordenada y longitud; y reconstruir una referencia pequeña desde su origen y cambios |
@@ -573,7 +696,7 @@ exige que la persona usuaria los instale.
 | Validación interna | Evidencia insuficiente, invariante rota o desviación fuera de política | Inyectar resultados conocidos y comprobar conforme, aviso y error sin corrección automática |
 | Diagnósticos públicos | Código o categoría desconocidos, contexto perdido, causa de crate filtrada, JSONL o renderizados divergentes | Probar catálogo inmutable y un caso por categoría; humano a stderr; un único documento JSON por invocación con clase, versión y esquema; salidas 0/1/2/3/4/5/70, avisos con 0; conservación causal solo en detalle; y ausencia de `panic` ante fallos esperables |
 | Manifiestos y exportación | JSON o esquema inválido, enlace roto, integridad fallida, destino existente, carrera o interrupción | Probar temporales por artefacto; rechazo pre-simulación sin destino; fallo controlado final `fallido` con diagnóstico, catálogo y unidades independientes exportables; SIGKILL con provisional `INCOMPLETE` y diagnóstico opcional; publicación completa; `EEXIST` concurrente; y rechazo sin fallback cuando no exista no-clobber, en WSL2/ext4, Ubuntu nativo y el FS OCI admitido |
-| Construcción y distribución | Baseline, triple o CPU no portables; receta OCI mutable; digest incorrecto; contenido incompleto o divergente | Comprobar Ubuntu 24.04 LTS y `x86_64-unknown-linux-gnu`, rechazar `target-cpu=native`, validar SHA-256 del `.tar.gz`, digests de índice o manifiesto, config y capas OCI y, si existe, SHA-256 independiente del archivo OCI; fijar base/receta por digest y arrancar en Ubuntu nativo y OCI |
+| Construcción y distribución | Baseline, triple o CPU no portables; receta OCI mutable; digest incorrecto; contenido incompleto o divergente | Comprobar Ubuntu 24.04 LTS y `x86_64-unknown-linux-gnu`, rechazar `target-cpu=native`, validar SHA-256 y contenido Marimo del `.tar.gz`; validar que OCI sigue siendo CLI y no contiene Python/Marimo/puerto UI, además de sus digests, config, capas y arranque |
 | Estimación y observación de recursos | Dato no medible, estimación inválida o presupuesto excedido | Comparar estimación y medida; ejecutar A en cada cambio, la serie B y la observación C según su frecuencia; y rechazar antes de simular un caso insuficiente sin degradar trazabilidad ni salidas |
 
 ## 7. Flujos de datos y ejecución
@@ -592,13 +715,104 @@ enlazados mediante rutas relativas. Cada documento tiene previsualización
 visible; la exportación conserva un conjunto autoconsistente y es ese mismo
 conjunto el que se entrega al binario. F2.0 materializa el caso sin escenarios y
 el contrato multidocumento, sin anticipar controles biológicos de Evolución o
-Familias. `validate` y `run` se crean como procesos con lista de argumentos,
+Familias. El servidor de la aplicación enlaza exclusivamente `127.0.0.1`; no
+admite una dirección configurable ni acceso remoto, y WSL2 lo presenta al
+navegador de Windows mediante `localhost`. El lanzador muestra el puerto
+efectivo: 2718 por omisión o el valor no privilegiado solicitado mediante
+`--port`. Una colisión detiene el arranque sin selección automática.
+La URL completa se imprime siempre; salvo con `--no-open`, el lanzador intenta
+abrirla después de que el servidor esté disponible y trata un fallo del
+navegador como aviso, no como caída del servicio. Ninguno de estos pasos invoca
+una simulación.
+
+DTC-069 concreta la frontera de ficheros. La persona selecciona un directorio;
+un importador inventaría el árbol, localiza el único general y recorre solo los
+escenarios alcanzables. Canonicaliza rutas relativas y, mediante operaciones
+resistentes a sustitución, valida tipo, identidad, enlaces, ausencia de
+ciclos/escapes/extras y estabilidad entre inventario, copia y hash. Copia el
+grafo completo a un provisional privado y solo lo adopta si termina; los
+originales permanecen intactos. Conserva opacamente documentos y campos válidos
+que todavía no tengan controles. La exportación revalida la instantánea y
+publica otro directorio mediante provisional+no-clobber. Los límites son 256
+documentos, 16 MiB por TOML, 64 MiB totales, profundidad 32, ruta UTF-8 de 4096
+bytes y componente de 255 bytes. No hay ZIP/TAR ni selección múltiple manual en
+F2.
+
+`validate` y `run` se crean como procesos con lista de argumentos,
 nunca mediante shell. El estado validado se asocia al digest de todos los
-documentos, sus identidades/enlaces y el contrato; editar, añadir, eliminar,
-reordenar o renombrar cualquiera lo invalida. Un enlace ausente, duplicado o
+documentos, sus identidades/enlaces, el contrato y el conjunto ordenado de
+autorizaciones limitadas; editar, añadir, eliminar, reordenar o renombrar un
+documento, o confirmar/retirar una autorización, lo invalida. Un enlace ausente, duplicado o
 ajeno se diagnostica sin ejecutar. Los diagnósticos estructurados regresan a
 documento y campo cuando conservan ubicación, pero el binario decide su
 significado y código de salida.
+
+Si se declara `--simulator-bin`, el lanzador selecciona definitivamente esa
+ruta: ausencia, falta de permiso de ejecución, fallo o incompatibilidad detienen
+sin *fallback*. Sin esa opción, selecciona el ejecutable
+`genome-population-simulator` del paquete cuando existe. Solo cuando el paquete
+o el árbol de desarrollo no lo incluye, resuelve al inicio una única ruta según
+el orden de `PATH`; no encontrarla detiene. Una vez seleccionada una fuente
+existente o resuelta, cualquier fallo detiene y nunca cambia silenciosamente a
+otra. Antes de habilitar las acciones semánticas invoca
+directamente `capabilities --format json`, muestra la ruta elegida y registra
+ruta canónica, versión y SHA-256 en el registro privado de la sesión UI, no en
+el TOML ni en `EffectiveConfig`. La respuesta declara
+`protocol_version: "1"`; la compatibilidad se decide por el protocolo y los
+contratos, no solo por la versión semántica del programa.
+
+La respuesta separa `catalogued_authorizations` de
+`available_authorizations`. La segunda es un subconjunto canónico de la primera
+y describe exclusivamente opciones cuyo parser, validación y efecto existen en
+ese binario. Marimo solo presenta y transmite la intersección; volver a consultar
+un binario con otra disponibilidad invalida el digest validado. F2.0 conoce el
+catálogo pero no anuncia soporte. F2.2.21 y F2.3.9 incorporan, respectivamente,
+las disponibilidades de matriz vacía y genotipo incompatible junto con toda su
+semántica.
+
+El `.tar.gz` y el repositorio contienen un directorio de contratos con un
+manifiesto versionado, esquemas, catálogos, capacidades, versiones y SHA-256.
+Marimo solo lee esos bytes locales, recalcula sus huellas y los contrasta con la
+orden informativa. Falta, corrupción o diferencia deja accesible una vista
+diagnóstica, pero deshabilita `Validar` y `Ejecutar`. No busca contratos en el
+sistema, en red ni en otra instalación y no mezcla versiones.
+
+El adaptador de proceso ejecuta sin *shell*
+`validate <general.toml> --diagnostics json [autorizaciones]` o
+`run <general.toml> --diagnostics json --output <destino> [autorizaciones]`.
+La unión cerrada catalogada admite solo `--allow-empty-snv-matrix` y
+`--allow-incompatible-genotypes`, pero cada una solo puede usarse cuando figure
+como disponible conforme a DTC-073. Confirmar cualquiera obliga a crear otro
+digest y repetir `validate`; `run` recibe exactamente los mismos bytes,
+contratos y autorizaciones validados. Una opción no catalogada se rechaza. Usa
+el directorio del TOML general como directorio de trabajo. Solo permite un proceso Rust por
+sesión, cierra su `stdin`, crea un grupo de procesos dedicado, no reutiliza el
+hijo y no reintenta automáticamente. Drena `stdout` y `stderr` concurrentemente
+desde el arranque para que ninguno bloquee al otro. `stdout` queda vacío ante éxito sin
+diagnósticos o contiene un único documento JSON compatible; `stderr` transporta
+registro humano/progreso y no se interpreta como semántica. Se conservan los
+códigos 0/1/2/3/4/5/70. JSON inválido, documentos adicionales, versión
+incompatible o manifiesto final ausente es fallo de protocolo. Una cancelación
+actúa exclusivamente sobre el grupo creado por la UI: SIGINT, 10 segundos,
+SIGTERM, 5 segundos y finalmente SIGKILL, registrando cada transición, drenando
+ambos flujos hasta cierre y esperando todos los descendientes sin dejar
+huérfanos ni publicar una salida parcial como completa.
+
+El servidor usa `marimo run`, nunca `marimo edit`, y exige el token aleatorio;
+`--no-token` no se admite. Terminal, editor, IA, telemetría, compartición e
+instalación automática de paquetes permanecen desactivados. La aplicación no
+expone un explorador general de ficheros: canonicaliza y muestra las rutas
+elegidas, mientras Rust conserva su validación. Ningún texto del formulario se
+convierte en orden, variable de entorno o fragmento de *shell*. El proceso usa
+los permisos de la cuenta local y no promete otro *sandbox*.
+
+El formulario solo persiste mediante exportación explícita; no hay autoguardado,
+recuperación de sesión ni estado biológico en el navegador. `Validar` escribe la
+instantánea TOML visible en un temporal privado 0700, con ficheros 0600, calcula
+el digest del conjunto y lo asocia al estado validado. `Ejecutar` entrega
+exactamente esos bytes; una edición invalida la instantánea. La limpieza solo
+elimina temporales con marcador propio y mismo UID. Configuración efectiva, copias de entrada y
+resultados continúan bajo la autoridad y publicación del binario Rust.
 
 El adaptador TOML recibe tanto el fichero general como cada escenario y conserva
 una copia exacta de sus bytes. Primero exige `config_kind` y `schema_version` y
@@ -613,6 +827,24 @@ validadores de identidad, referencias, combinaciones y reglas; el resolvedor
 produce `EffectiveConfig`, validada, heredada y resuelta e inmutable en su
 ámbito, conservando la regla ganadora y su procedencia. El catálogo de entradas
 copiadas y el plan de ejecución solo se crean tras esa frontera.
+
+La admisión expone una frontera `ResolutionDomain`: un proveedor propietario
+entrega relaciones población↔subpoblación, intervalos fase↔generación y loci con
+referencia, secuencia y coordenada ya validados. El resolvedor de F1 comprueba
+la identidad, el nivel espacial admitido y la prueba exacta antes de aplicar el
+retículo de REQ-CONF-117/118; nunca deduce relaciones desde listas planas. F1
+usa un proveedor sintético explícito solo en las pruebas del motor. F2 y las
+fases evolutivas implementarán proveedores reales sin trasladar su biología a
+F1. `EffectiveConfig` conserva el *snapshot* canónico, versión y proveedor del
+dominio. Antes de derivar esa configuración, admisión serializa dominio y
+solicitudes validados en `resolution-evidence` v1. El artefacto tiene ID, clase,
+ruta, tamaño y SHA-256 propios; el manifiesto lo enlaza y la revalidación relee
+sus bytes sin seguir enlaces. Así, `EffectiveConfig` queda como resultado
+derivado y no puede convertirse en la autoridad que se valida a sí misma. Los
+IDs de fase son globalmente únicos en las copias general y de escenarios v1.
+La ordenación de valores usa la tabla literal `parameter_order_version=1`; el
+oráculo mantiene una implementación separada y no depende del discriminante de
+`ParameterKey` ni del orden lexicográfico.
 
 Al construir `EffectiveConfig`, admisión representa como `f64` cada probabilidad,
 frecuencia y tolerancia general y exige que sea finita. Los valores pertenecen a
@@ -655,9 +887,26 @@ etiqueta y rechaza cualquier colisión. El catálogo normativo de F1 fija ámbit
 nombres, orden de campos y prefijos; sus vectores prueban ambos contextos. Su
 versión 2 añade `reference_generation`, compuesto únicamente por `reference_id`,
 sin modificar la codificación ni la versión de derivación 1 y conservando
-literalmente los vectores del catálogo 1. Un cambio de codificación exige nueva
+literalmente los vectores del catálogo 1. La versión 3 añade
+`reference_reduction`. DTC-071 define la versión 4 como superconjunto inmutable:
+conserva las seis filas y vectores v3 y añade los once ámbitos F2 de matriz,
+*indels*, genotipo y fase. `matrix_alternate_allele` usa escenario, referencia,
+secuencia, posición base 1 y `REF`, nunca el `variant_id` todavía inexistente.
+Los demás nombres, componentes y orden son los de §3.1 de decisiones técnicas.
+Un cambio de codificación exige nueva
 versión de derivación; un cambio de ámbitos exige nueva versión de catálogo.
 Ruta, reloj, orden físico, hilo y planificación nunca participan.
+
+El proveedor ofrece los consumidores versionados de DTC-072/075 detrás de una
+frontera pequeña: uniforme abierto, entero acotado por rechazo, categórico,
+Fisher-Yates, selección ponderada estática sin reemplazo, selección dinámica de
+*indels*, intervalos lineal/logarítmico, composición HWE, genotipo F diploide y
+fase. Cada consumidor recibe su ChaCha12
+local, valida antes de consumir, conserva el orden canónico y expone en pruebas
+el recuento de `next_u64`. `fixed`, distribuciones degeneradas, tamaño menor de
+dos y solicitudes de tamaño cero tienen el consumo cero definido. Matemática
+logarítmica usa el mismo `libm` fijado por DTC-067; ningún motor llama utilidades
+aleatorias de conveniencia no versionadas.
 
 El contrato funcional de esta frontera está en REQ-CONF-01 a REQ-CONF-130,
 REQ-FMT-01 a REQ-FMT-07,
@@ -707,21 +956,62 @@ La fuente de variación poblacional de DTC-054 materializa un recurso inmutable
 formado por `population_snvs.tsv` y `population_snvs.metadata.json`. El JSON
 enlaza por SHA-256 el TSV y la referencia exacta; configuración y manifiesto
 enlazan el JSON. La preparación recibe una tabla mínima, calcula SHA-256 e IDs,
-comprueba coordenadas base 1 cerradas y `REF`, filtra `ALT` globalmente ausentes,
-ordena y publica el par sin modificar el original. La generación independiente
+recibe `reference_id` y el FASTA autoritativo exclusivamente desde la entrada
+seleccionada de un manifiesto general F1 validado conforme a DTC-060, comprueba
+ruta, tamaño, SHA-256, coordenadas base 1 cerradas y `REF`, filtra `ALT`
+globalmente ausentes, ordena y publica el par sin modificar el original. La generación independiente
 y la integrada llaman al mismo servicio y producen los mismos bytes, por lo que
 el par puede reutilizarse sin volver a sortear posiciones o frecuencias.
 
 El planificador de candidatos recibe exactamente un recuento o una realización
-Poisson obtenida de media/densidad y selecciona bases A/C/G/T sin reemplazo. Un
+Poisson obtenida de media/densidad y selecciona bases A/C/G/T sin reemplazo. La
+semántica es DTC-022 y el algoritmo, límites, consumo RNG y vectores son los de
+DTC-067; ningún consumidor implementa una variante local. Un
 selector espacial uniforme o por intervalos no solapados asigna pesos por base y
 `outside_weight`; otro servicio elige uno de los tres `ALT` mediante los 12
 cambios dirigidos. Cada población consume su espectro no solapado de frecuencias
-en modo estocástico o exacto por mayores restos. Posición, `ALT`, frecuencia,
-genotipo y fase usan ámbitos RNG separados y estables. El filtrado posterior de
+en modo estocástico o exacto. En el segundo se calculan primero las cuotas por
+mayores restos; luego una permutación reproducible e independiente por población
+de todos los `variant_id` canónicos asocia las filas siguiendo su orden estable.
+Esta asignación usa una subsemilla exclusiva y nunca el orden de coordenadas o
+el orden canónico de variantes. Un flujo distinto por población×`variant_id`
+obtiene después el valor dentro del intervalo; `fixed` no consume RNG para el
+valor y una cuota cero no consume RNG. Todo intervalo es `[min,max)`, incluso si
+`max=1`; la corrección numérica DTC-072 impide que un intervalo continuo produzca
+0 o 1. Los nombres, componentes, orden y versión
+literales pertenecen al catálogo RNG v4 fijado por DTC-071, que cierra RAF2-028
+sin modificar DTC-070. Posición, `ALT`, frecuencia, genotipo y fase usan
+ámbitos RNG separados y estables. El filtrado posterior de
 un `ALT` cero en todas las poblaciones no repone el candidato; un valor fijado se
 conserva. V1 solo genera loci bialélicos, aunque el lector canónico admite
-multialelia suministrada con suma ALT validada por DTC-049.
+multialelia suministrada con suma ALT validada mediante la tolerancia efectiva
+de DTC-049, no mediante su valor predeterminado fijo.
+
+Las inserciones y deleciones aleatorias no reutilizan ámbitos ni selectores de
+la matriz. Cada clase separa por referencia, individuo y región el sorteo del
+recuento, la selección espacial y, solo para inserciones, el contenido de bases;
+una media cero no consume RNG. DTC-059 aporta longitudes exactas sin sorteo. El
+motor enumera oportunidades sobre el estado vigente, sortea una vez mediante
+`poisson-count-v1` y entrega el recuento a `dynamic-indel-selection-v1`. Este
+consumidor no preflighta una colección inicial: por ordinal reenumera y pondera
+canónicamente el estado actual y consume el mismo flujo `indel_position`. El
+orquestador completa una inserción con el flujo aislado `insertion_content`,
+aplica el evento y solo entonces pide el ordinal siguiente. El agotamiento antes del recuento falla y descarta el estado
+transaccional completo, aunque registra el número aceptado antes del fallo. La
+selección estática `weighted-without-replacement-v1` queda reservada a loci SNV.
+
+Los dos perfiles humanos aproximados se incorporan mediante la receta compacta
+DTC-068 y nunca requieren el VCF poblacional. El generador de recursos toma los
+literales SFS 64:12:8 y el mínimo versionado `1/5008`; para SNV12 consume el
+fichero eLife fijado de 3.644 bytes solo después de verificar su SHA-256, normaliza
+por fila continental, promedia las cinco filas, agrega los 96 contextos a seis
+clases de hebra y refleja cada clase a dos sustituciones dirigidas. Un oráculo
+independiente repite los cálculos y compara orden, pesos normalizados y SHA-256
+de las dos salidas pequeñas. El catálogo las etiqueta `approximate`, conserva
+fuentes, licencia CC BY y transformación y nunca las selecciona por omisión.
+No existen builtins exactos por superpoblación; perfiles suministrados por
+población siguen usando el contrato general. `bcftools` permanece como validador
+VCF de DTC-066, no como dependencia de estos perfiles.
 
 El inicializador consume esa misma matriz para todos los individuos, asigna a
 cada uno una única población y muestrea genotipos con Hardy-Weinberg o `F`
@@ -1096,7 +1386,7 @@ responsables y puntos de control.
 | Solo los motores biológicos escriben en el repositorio de verdad | Interfaces de dominio y repositorio de verdad | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-77 y REQ-CRU-01 a REQ-CRU-45 |
 | Los componentes técnicos observan instantáneas y no mutan genotipo, genealogía ni trayectoria | Orquestador de eventos y vistas de solo lectura | REQ-TEC-01 a REQ-TEC-10 y REQ-DAT-01 a REQ-DAT-73 |
 | `DeclaredConfig` conserva lo escrito y su ubicación; `EffectiveConfig` es inmutable durante cada ámbito de uso y mantiene la procedencia de la resolución | Adaptador TOML y resolvedor de configuración | REQ-CONF-01 a REQ-CONF-130 y REQ-MAN-01 a REQ-MAN-92 |
-| Marimo solo entrega un conjunto TOML visible y autoconsistente y argumentos de proceso; cualquier cambio de documento o enlace invalida validación y ninguna opción implementada queda solo en TOML | Aplicación Marimo y adaptador de proceso | REQ-UI-01 a REQ-UI-15 y REQ-VAL-54 a REQ-VAL-56 |
+| Marimo solo entrega un conjunto TOML visible y autoconsistente y argumentos de proceso; cualquier cambio invalida validación y ninguna opción implementada queda solo en TOML. Su servidor solo enlaza con `127.0.0.1`; binario y contratos deben emparejarse por versión y SHA-256 antes de habilitar acciones | Aplicación Marimo y adaptador de proceso | REQ-UI-01 a REQ-UI-15 y REQ-VAL-54 a REQ-VAL-56 |
 | Toda probabilidad, frecuencia y tolerancia general es un `f64` finito válido; las colecciones se suman y normalizan una sola vez con Neumaier y orden canónico, y conservan auditoría decimal de ida/vuelta exacta | Admisión de configuración y frontera `DeclaredConfig` → `EffectiveConfig` | REQ-CONF-106/107, REQ-VAL-40, REQ-MAN-81 y ACE-105 |
 | Todo manifiesto declara versión y clase, cumple su esquema y conserva directamente el contenido REQ-MAN obligatorio | Escritor de manifiestos y validación de publicación | REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-04/17/18/27 |
 | Todo documento estructurado propio usa una clase inequívoca y la versión de esquema conocida `"1"`, incluidos los diagnósticos JSON; una versión distinta se rechaza antes de interpretar su contenido | Adaptadores de entrada y escritores de documentos | REQ-CONF-01/10/111 a REQ-CONF-115 y REQ-MAN-02/69/73 |
@@ -1121,8 +1411,8 @@ representación derive autoridad de otra:
 |---|---|---|
 | `DeclaredConfig` | Adaptador TOML | Conserva lo escrito, su procedencia y ubicación; la copia TOML exacta se guarda para auditoría y los motores no la consultan |
 | `EffectiveConfig` | Resolvedor de configuración | Vista validada, heredada y resuelta e inmutable en su ámbito; la consumen orquestadores y motores y se serializa versionada en `effective-config.json` |
-| Estado interno y verdad | Repositorios de dominio | Evoluciona solo mediante operaciones biológicas y conserva lo necesario para reconstrucción |
-| Resultados publicados | Ensamblador, validadores y publicador | Se hacen visibles al exterior después del cierre del conjunto |
+| Estado interno y verdad | Repositorios de dominio | Evoluciona solo mediante operaciones biológicas; usa DTC-061 y conserva lo necesario para reconstrucción |
+| Resultados publicados | Ensamblador, validadores y publicador | Incluyen `truth.jsonl` como proyección canónica obligatoria; VCF y demás vistas se hacen visibles solo después de validarlo y cerrar el conjunto |
 
 Los contenidos exigidos a estas clases están en REQ-CONF-01 a REQ-CONF-130,
 REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a
@@ -1193,8 +1483,13 @@ produciría otra copia conservando el original.
 ### 9.4. Entregas del programa
 
 El paquete versionado `.tar.gz` contiene el ejecutable para
-`x86_64-unknown-linux-gnu`, los esquemas, las licencias y los ejemplos. La imagen
-OCI es la referencia encapsulada de ejecución y fija base y receta por digest.
+`x86_64-unknown-linux-gnu`, los esquemas, las licencias y los ejemplos, además
+de la aplicación Marimo, `pyproject.toml`, `uv.lock`, el directorio de contratos
+y el lanzador único. No incluye `.venv`, CPython ni `uv`; una instalación
+explícita mediante `genome-population-simulator-ui install` prepara el entorno y
+`genome-population-simulator-ui run` funciona sin red. La imagen
+OCI es la referencia encapsulada de ejecución CLI, fija base y receta por digest
+y no contiene Marimo, Python, `uv` ni un puerto UI.
 El `.tar.gz` publica SHA-256 de todos los bytes exactos del fichero. Una imagen
 OCI abstracta no es un único flujo de bytes: se identifica por el digest
 `sha256:` del descriptor de índice o manifiesto y conserva y verifica los
@@ -1267,6 +1562,18 @@ sitúa en las fronteras que producen o consumen esos recursos. La selección de
 métricas, política de datos sensibles y umbrales de rendimiento se mantiene en
 las decisiones de planificación, sin modificar los criterios funcionales.
 
+El adaptador Marimo escribe cada flujo de proceso en ficheros privados 0600
+bajo `$XDG_STATE_HOME/genome-population-simulator/ui` o su ubicación XDG
+predeterminada. La vista conserva en memoria solo una cola de 1 MiB y pagina
+desde disco. El documento estructurado de `stdout` tiene un límite de 16 MiB y
+`stderr`, 64 MiB por invocación; superar cualquiera termina el grupo y produce
+un error de recursos, sin truncado silencioso. El token de acceso se redacta
+antes de persistir. El almacén completo se limita a 256 MiB y elimina primero
+sesiones terminadas antiguas, nunca la activa, mostrando cada descarte; también
+ofrece una limpieza explícita. Estos logs son estado auxiliar de la interfaz,
+no manifiestos ni resultados de simulación, y nunca se obtienen cargando
+artefactos genómicos completos.
+
 El registro de reproducibilidad conserva la raíz de 256 bits como 64
 hexadecimales minúsculos, su origen declarado o CSPRNG del sistema operativo,
 el nombre ChaCha12, la versión y catálogo del esquema de derivación y las
@@ -1275,6 +1582,16 @@ desde IDs y reglas versionadas, sin persistir cada estado mutable. Un cambio de
 ChaCha12, BLAKE3, contextos, material binario, catálogo o algoritmo consumidor
 es un cambio de reproducibilidad y exige nueva versión cuando afecte a la
 derivación.
+
+La evidencia de plataforma de DTC-074 procede de detección, no de etiquetas.
+Un colector registra `/etc/os-release`, kernel, arquitectura, triple Rust,
+marcadores WSL2, montaje del árbol y metadatos de CI. La expectativa solicitada
+solo se compara con esos hechos y una discordancia falla. Ubuntu 24.04 nativo
+exige un job identificable sin marcadores WSL; WSL2 exige sus marcadores y un
+montaje Linux fuera de `/mnt`. Navegador y herramientas quedan inventariados.
+Teclado y lector de pantalla producen actas manuales separadas con revisor,
+fecha, versiones, comprobaciones y resultado; ninguna sustituye la evidencia
+automática.
 
 La biología solo se declara reproducible con la misma versión del simulador,
 plataforma inicialmente admitida, semilla raíz, `EffectiveConfig`, contenidos
@@ -1304,6 +1621,7 @@ sección solo organiza las capas técnicas de comprobación.
 | Dominio unitario | Probar tipos, transformaciones e invariantes sin E/S ni procesos externos | Casos TEST de cada REQ biológico y sus ACE |
 | Frontera de componente | Probar traducción de identidades, coordenadas, configuración y errores con dobles de dependencias | Vectores normativos BLAKE3 e IDs; vectores Neumaier con orden canónico, bordes inclusivos, normalización y decimal round-trip; tipos no intercambiables; catálogo diagnóstico y JSON único; comparadores de verdad y contenido técnico; TEST de cada familia |
 | Adaptador | Comprobar lectura, escritura e invocación contra contratos externos | TOML desconocido o duplicado con ubicación; clase/versión inválida; FASTA con `samtools faidx`; SHA-256 con `sha256sum`; manifiestos, configuración efectiva y diagnósticos con otra implementación JSON Schema; `.tar.gz` por listado/extracción; descriptores OCI por inspección/arranque; VCF/BAM/CRAM en sus fases; casos válidos, truncados, corruptos y de borde |
+| Aplicación Marimo | Demostrar paridad, seguridad local, proceso y accesibilidad sin duplicar semántica | Playwright y axe fijados en `uv.lock`; Chromium único con revisión, artefacto y SHA-256 inventariados e instalación explícita repetible sin red; WCAG 2.2 AA para controles propios; teclado, foco, etiquetas, contraste, zoom 200 %, estados no basados solo en color y lector de pantalla; binario falso/real, contratos corruptos y revisión manual separada en Ubuntu/WSL2 |
 | Propiedad y estadística | Explorar espacios amplios sin confundir variación aleatoria con un invariante | Vectores de derivación por ámbito, independencia al añadir o reordenar observaciones y casos TEST asociados a REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-77, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
 | Recorrido completo | Demostrar que las fronteras componen un paquete trazable | Rechazo previo sin destino, fallo controlado final y SIGKILL provisional; carreras no-clobber y FS sin soporte; comparadores semánticos y de bytes; pruebas WSL2/ext4 y publicación en Ubuntu 24.04 LTS nativo y OCI fijado por digest, incluido su FS, señales, permisos, recursos y procesos externos |
 
@@ -1452,8 +1770,11 @@ simulador o plataformas no verificadas ni promete identidad binaria.
 DTC-050 confirma el contrato funcional de reducción, DTC-056 fija las
 coordenadas comunes y DTC-057 el algoritmo uniforme/versionado y su mapa.
 DTC-051 confirma Marimo como interfaz obligatoria sin autoridad biológica;
-DTPD-117 debe evaluar y fijar versión, entorno, empaquetado y protocolo
-aplicación↔binario.
+DTC-058 resuelve DTPD-117 y concreta versión candidata, entorno, empaquetado,
+contratos, protocolo, seguridad, persistencia, registros, accesibilidad, pruebas
+y distribución. Su
+incorporación queda condicionada a superar la evidencia experimental de F2.0.2; un
+fallo reabre la decisión sin sustituciones silenciosas.
 
 DTC-052 asigna a una matriz común las frecuencias SNV iniciales, DTC-054 resuelve
 DTPD-118 con el par TSV+JSON, perfiles, preparación y generación reproducible, y
@@ -1467,6 +1788,45 @@ están definidos. La alternativa recombinante fundadora usa productores directos
 F, puntos, IDs, RNG y salidas trazables ya fijados. DTC-055 resuelve DTPD-119 y
 rechaza distribuciones genotípicas explícitas con construcción recombinante.
 Ninguna de estas fuentes puede poseer o reescribir la verdad resultante.
+
+DTC-061 resuelve DTPD-102 con la representación interna híbrida y su proyección
+obligatoria `truth.jsonl` v1, validada por esquemas de registro y reconstrucción
+semántica independiente. DTC-062 fija VCF 4.5 como única versión de salida, la
+cabecera `##fileformat=VCFv4.5` y validación externa basada en htslib. DTC-063
+fija `.vcf.gz` BGZF con exactamente un índice TBI o CSI como salida
+predeterminada: TBI solo si toda secuencia y posición cabe en su límite
+normativo, aproximadamente 2^29 bases por secuencia, y CSI en caso contrario;
+el modo explícito `.vcf` produce texto sin índice. Configuración efectiva y
+manifiesto conservan modo, índice y rutas; BGZF e índice se validan y publican
+atómicamente. DTC-064 fija la normalización y agrupación multialélica interna,
+con `bcftools norm` solo como oráculo externo. DTC-065 fija `GPS_CASE` como
+lista canónica de casos originales, su relación ALT↔casos en `truth.jsonl`,
+`GPS_LOSS`, `GPS_COMPLEMENT` y el complemento condicional
+`vcf-complement.jsonl`. DTC-066 cierra DTPD-103 con `bcftools` 1.24 y
+HTSlib/tabix 1.24 solo en aceptación/CI, más un oráculo semántico independiente
+que no comparte la proyección productora. El corpus cubre texto, BGZF+TBI,
+BGZF+CSI y una mutación aislada de cada invariante; EBI `vcf-validator` no actúa
+como autoridad VCF 4.5.
+
+DTC-067 resuelve DTPD-120 con `poisson-count-v1`, límite `lambda<=2^52`,
+conversión uniforme/consumo RNG exactos y `libm` 0.2.16 sujeto a DTC-043.
+DTC-068 resuelve fuente y receta de los dos ejemplos humanos compactos
+`human_1000g_global_sfs_approx_v1` y
+`human_harris2017_snv12_approx_v1`; F2.2.14 valida sus literales, fuente eLife
+fijada, licencia, transformaciones y digests sin procesar el VCF Phase 3. La
+materialización empírica exacta queda en DTF-016/post-v1 y no bloquea F2.2.
+DTC-069 resuelve RAF2-017 con el directorio autocontenido como única unidad
+visible de importación/exportación Marimo, copia/publicación atómicas,
+preservación opaca, límites y corpus de aislamiento/TOCTOU.
+DTC-070 resuelve RAF2-029: mayores restos fija las cuotas del modo `exact`, una
+permutación independiente por población las asocia a todos los `variant_id` y
+otro flujo obtiene el valor sin consumo para `fixed` o cuotas cero. DTC-071
+publica los literales del catálogo RNG F2 y resuelve RAF2-028. DTC-072 fija
+todos los consumidores aleatorios no Poisson de F2; DTC-073 separa capacidades
+catalogadas de disponibles; DTC-074 hace verificable la plataforma real.
+DTC-075 corrige los bordes continuos, separa selectores estático/dinámico y
+asigna un productor y una evidencia únicos a cada primitiva sin reabrir la
+biología.
 
 Las decisiones base DTPD-001 a DTPD-015 están resueltas. Para cerrar F0 debe
 aprobarse esta división; esa aprobación habilita planificar F1, pero no significa

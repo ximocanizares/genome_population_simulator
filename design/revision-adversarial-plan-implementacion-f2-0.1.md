@@ -1,415 +1,570 @@
 # Revisión adversarial del plan de implementación de F2 0.1
 
-## 1. Estado y alcance
+## 1. Cabecera, alcance y método
 
 - **Documento revisado:**
   [plan-implementacion-f2-0.1.md](./plan-implementacion-f2-0.1.md).
-- **Fecha de revisión:** 10 de agosto de 2026.
-- **Estado del informe:** correcciones aplicadas; conserva pendientes que
-  requieren decisión o consejo.
-- **Resultado:** **no aprobar todavía el plan para ejecución**.
-- **Alcance:** coherencia del plan con la especificación, la arquitectura, las
-  decisiones técnicas, la hoja de ruta y la matriz de trazabilidad vigentes.
+- **Fecha de revisión:** 15 de agosto de 2026.
+- **Estado del informe:** revisión independiente posterior a DTC-058 y a la
+  ampliación del plan a F2.0–F2.5, con seguimiento documental de las
+  correcciones aprobado el 15 de agosto de 2026.
+- **Veredicto:** **no aprobar todavía el plan para ejecución**.
+- **Cambios realizados durante la revisión inicial:** únicamente este informe;
+  el seguimiento posterior sí corrige plan, especificación, arquitectura,
+  decisiones, hoja de ruta y trazabilidad. No se modifica código ni se inicia
+  F2.
 
-> **Actualización del 14 de agosto de 2026.** Este informe conserva como
-> evidencia la fotografía revisada el 10 de agosto. Desde entonces DTPD-101 se
-> resolvió mediante DTC-056 y dejó de ser parte pendiente de RAF2-001. El
-> hallazgo continúa abierto por DTPD-102, DTPD-103 y las demás concreciones que
-> enumera; el estado operativo vigente se consulta en el plan F2 y en el
-> registro canónico de decisiones.
+Durante la revisión inicial se contrastaron completamente los 96 pasos y las
+seis pausas de aquella versión del plan con
+las secciones aplicables de:
 
-Esta revisión distingue los defectos del plan de los heredados de la matriz de
-trazabilidad. Se han aplicado al plan y, cuando era inequívoco y no alteraba el
-alcance funcional, a la matriz maestra. No se han modificado especificación,
-arquitectura, decisiones técnicas ni hoja de ruta: los hallazgos que las
-necesitan permanecen pendientes de revisión.
+- [especificaciones-0.1.md](./especificaciones-0.1.md), incluidos los contratos
+  de configuración, individuos, matriz SNV, HWE/`F`, verdad, VCF, resultados y
+  Marimo;
+- [arquitectura-0.1.md](./arquitectura-0.1.md), en particular dominio,
+  componentes, admisión, proceso UI, fuentes poblacionales, publicación,
+  observabilidad y comprobación;
+- [decisiones-tecnicas-0.1.md](./decisiones-tecnicas-0.1.md), incluidas
+  DTC-049, DTC-052, DTC-054, DTC-056, DTC-058 y DTPD-102/103;
+- [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md), la matriz completa de
+  [trazabilidad](./trazabilidad-requisitos-0.1.md), el
+  [registro de ampliaciones futuras](./registro-ampliaciones-futuras-0.1.md),
+  la revisión adversarial anterior y el punto de reanudación;
+- el estado real de `Cargo.toml`, `Cargo.lock`, `src/`, `tests/`, esquemas,
+  catálogos, CI y `distribution/f1/`.
+
+La inspección mecánica de la versión originalmente auditada confirmó 96 casillas, una línea `Depende de`, `Procede
+de`, `Cambia` y `Se comprueba con` en cada una, seis pausas, 84 REQ exclusivos
+y cuatro compartidos. Esa regularidad no hace ejecutable el plan: persisten
+decisiones abiertas, dependencias equivocadas y comprobaciones sin comando ni
+oráculo materializable.
 
 ## 2. Veredicto ejecutivo
 
-El plan tiene una estructura de ejecución sólida: 52 pasos pequeños, cinco
-pausas obligatorias, fronteras claras entre verdad y VCF, pruebas negativas y
-oráculos ajenos al productor. Sin embargo, no es todavía ejecutable ni puede
-servir como matriz de cierre de F2.
+La versión auditada había mejorado sustancialmente respecto a la revisión del
+10 de agosto: incorporaba F2.0, separaba matriz y genotipos, mantenía
+verdad→VCF, exigía pausas y proponía numerosos oráculos independientes. No
+obstante, todavía obligaba al implementador a tomar decisiones durante la
+ejecución.
+
+En la versión originalmente auditada, los bloqueos se agrupaban así:
+
+- **funcionales:** cierres de REQ mayores que el alcance de F2, distribución
+  genotípica explícita no resuelta y evidencia positiva de complemento VCF que
+  puede ser imposible sin inventar pérdida;
+- **técnicos:** F1 no está cerrada, DTPD-102/103 siguen abiertas, Poisson e
+  *indels* carecen de decisión canónica, el protocolo UI no puede expresar sus
+  propias confirmaciones y faltan contratos ejecutables de importación,
+  aleatoriedad, datos 1000 Genomes y navegador;
+- **documentales:** numeración contraria a la convención vigente, pasos
+  excesivos, casi ninguna comprobación con comando exacto y contadores
+  desactualizados.
+
+Tras el seguimiento, las decisiones y correcciones documentales están
+integradas en 107 pasos jerárquicos. Para autorizar el inicio de F2 todavía debe
+cerrarse y aprobarse F1 y una nueva revisión adversarial del plan corregido debe
+confirmar que no quedan bloqueantes. F2.0.2, F2.2.1 y la regeneración/revisión
+compacta DTC-068 de F2.2.14 son puertas internas de la ejecución posterior, no
+prerrequisitos para iniciarla.
+
+## 3. Hallazgos bloqueantes funcionales
+
+### RAF2-004 — Cuatro REQ se siguen declarando cerrables con un subconjunto de su alcance
+
+**Prioridad:** bloqueante funcional. **Estado:** resuelto el 15 de agosto de
+2026.
+
+**Resolución:** REQ-CONF-08/21 pasan a F2.2/F5.2/F7.2 y REQ-IND-02/03 a
+F2.2/F5.2. F2 conserva expedientes parciales explícitos; §15 cuenta 79 cierres
+exclusivos y nueve compartidos, sin ampliar su alcance.
+
+La matriz y §15 asignan a F2.2:
+
+- REQ-CONF-08, que incluye *indels*, variantes estructurales y mutaciones *de
+  novo* posteriores;
+- REQ-CONF-21, que exige el modelo espacial por separado para *indels*,
+  variantes estructurales y mutaciones *de novo*;
+- REQ-IND-02/03, que exigen escoger y conservar cualquiera de varias referencias
+  disponibles.
+
+F2 excluye variantes estructurales, mutación evolutiva y varias referencias.
+B35 reconoce la discrepancia, pero continúa contando los cuatro entre sus 26
+REQ exclusivos y §16 permite aprobar el plan con ellos en esa matriz. Una nota
+de cautela no impide un cierre falso.
+
+**Corrección exigida:** reasignar el cierre completo a la primera fase que cubra
+todo el REQ y registrar en F2 solo evidencia parcial. No ampliar F2 para hacer
+encajar la matriz.
 
-De los once hallazgos identificados:
+**Condición de cierre:** los cuatro dejan de formar parte de los 84 cierres
+exclusivos de F2 y aparecen, si procede, en una tabla explícita de evidencia
+parcial con destino final.
 
-- **ocho están resueltos**;
-- **tres permanecen pendientes de revisión**;
-- los pendientes son RAF2-001, RAF2-004 y RAF2-007 y bloquean la aprobación.
+### RAF2-007 — La hoja de ruta sigue exigiendo un complemento positivo no demostrado en F2
 
-Los principales bloqueos son las decisiones técnicas aún no incorporadas al
-registro canónico, una trazabilidad que intenta cerrar requisitos VCF antes de
-crear el VCF, cuatro requisitos F2 omitidos del inventario y varias
-afirmaciones de cierre que exceden el alcance deliberadamente reducido de F2.
+**Prioridad:** bloqueante funcional. **Estado:** resuelto el 15 de agosto de
+2026.
 
-## 3. Hallazgos bloqueantes
+**Resolución:** F2 prueba positivamente la ausencia de complemento para todos
+sus casos representables y nunca fabrica pérdida; F5.5 aporta el primer caso
+positivo complejo/SV/BND real conforme a DTC-065/066.
 
-### RAF2-001 — Las decisiones que definen F2 siguen pendientes en la fuente canónica
+E7 aplica correctamente REQ-VER-24 y prohíbe crear complemento para un caso
+plenamente representable. Sin embargo, la evidencia de cierre de F2 en la hoja
+de ruta continúa exigiendo «un caso VCF/complemento», mientras el alcance solo
+incluye SNP e *indels* inequívocos, GT faseado y ploidía 1–10. DTPD-103 aún no
+ha demostrado una pérdida real en ese conjunto.
 
-**Estado tras corrección: PENDIENTE DE REVISIÓN.**
+**Corrección exigida:** si DTPD-103 no encuentra un caso literal de F2 con
+pérdida, cambiar la evidencia F2 por una prueba negativa de ausencia de
+complemento y trasladar el primer caso positivo a F5.5. No crear una entrada
+redundante para cumplir la hoja de ruta.
 
-**Evidencia.** El plan declara pendientes DTPD-101, DTPD-102 y DTPD-103 y las
-convierte en A2, A3 y E1. También reconoce que la longitud exacta de los
-*indels* se acordó pero no se trasladó al registro de decisiones. El registro
-técnico todavía conserva DTPD-101 a DTPD-103 como pendientes y exige resolver
-cada DTPD antes de planificar el hito que bloquea.
+**Condición de cierre:** hoja de ruta, plan, trazabilidad y DTPD-103 piden el
+mismo caso observable.
 
-**Riesgo.** A1 autoriza una fase cuyo modelo de coordenadas, estado haplotípico,
-verdad externa y VCF todavía podría cambiar. Los pasos consumidores parecen
-detallados, pero su contrato no es estable. Una aprobación del plan podría
-interpretarse erróneamente como aprobación de esas decisiones.
+### RAF2-012 — REQ-CONF-130 admite una alternativa que C1 rechaza sin destino explícito
 
-**Corrección necesaria.** Antes de aprobar F2:
+**Prioridad:** bloqueante funcional. **Estado:** resuelto el 15 de agosto de
+2026.
 
-1. registrar como decisiones confirmadas las elecciones ya acordadas sobre
-   coordenadas, modelo haplotípico y `truth.json`;
-2. registrar la decisión VCF ya acordada, con versión, normalización, campos
-   `INFO`, compresión, índice, complemento y validadores;
-3. registrar por separado el contrato de longitudes exactas de *indels* y la
-   concreción de Poisson;
-4. actualizar arquitectura y plan con los identificadores confirmados;
-5. convertir A2, A3 y E1 en comprobaciones de prerrequisitos o prototipos de
-   validación, no en lugares donde la implementación elige el diseño.
+**Resolución:** F2 implementa HWE P=1..10 y F solo diploide y registra
+REQ-CONF-130 como parcial; la distribución genotípica explícita y el cierre
+completo pasan a F6.2 con REQ-EVO-35/36/49.
 
-**Condición de cierre.** Ninguna DTPD que bloquee F2 figura pendiente y el plan
-no contiene un consumidor anterior a su decisión canónica.
+REQ-CONF-130 dispone que en haploides y poliploides se use HWE **o una
+distribución genotípica explícita ya admitida**. C1 limita F2.3 a HWE o `F`
+diploide y §15 declara REQ-CONF-130 cerrado exclusivamente en F2.3. El plan no
+implementa la distribución explícita, no la identifica como evidencia parcial
+y tampoco traslada esa cláusula a otra fase.
 
-**Decisión o consejo necesario.** Deben confirmarse en las fuentes canónicas:
+**Corrección exigida:** decidir entre incorporarla en F2.3 o mantener el alcance
+pequeño y reasignar el cierre completo del REQ, dejando en F2 evidencia parcial
+de HWE/`F`.
 
-- DTPD-101: base 1 cerrada, base 0 semiabierta o valores etiquetados; el registro
-  recomienda evaluar composición y bordes y mantener tipos de frontera;
-- DTPD-102: secuencias completas, listas de variantes, segmentos persistentes o
-  modelo híbrido, separando el estado interno del fichero de intercambio;
-- DTPD-103: versión VCF, normalización, `INFO`, complemento, BGZF/índice y
-  validadores;
-- Poisson: dependencia Rust pura evaluada conforme a DTC-043 o implementación
-  propia versionada y contrastada; se recomienda preferir la opción más simple
-  que proporcione un oráculo independiente y consumo aleatorio estable;
-- el contrato de longitudes exactas de *indels*, ya descrito en el plan, debe
-  recibir un identificador canónico y aprobación explícita.
+**Condición de cierre:** la prueba asignada cubre todas las opciones normativas
+del REQ o deja de presentarlo como cerrado.
 
-El plan deja esas elecciones en puertas anteriores a sus consumidores, pero no
-puede convertirlas por sí mismo en decisiones confirmadas.
+## 4. Hallazgos bloqueantes técnicos
 
-### RAF2-002 — F2.4 intenta cerrar dos requisitos que solo pueden demostrarse con VCF
+### RAF2-001 — Tres decisiones centrales siguen dentro del plan en lugar de precederlo
 
-**Estado tras corrección: RESUELTO.**
+**Prioridad:** bloqueante técnico. **Estado:** resuelto documentalmente el 15 de
+agosto de 2026.
 
-**Evidencia.** La matriz asigna REQ-VER-02 y REQ-VER-12 a F2.4, y los pasos
-D1–D8 pretenden demostrarlos sobre el fichero estructurado de verdad. Sin
-embargo:
+**Resolución:** DTC-059 y DTC-061 a DTC-068 preceden a sus consumidores; los
+pasos F2.1.3, F2.2.2 y F2.5.1 congelan/auditan contratos y ya no los eligen.
 
-- REQ-VER-02 exige que cada genotipo **del VCF** corresponda al individuo del
-  archivo;
-- REQ-VER-12 exige que los identificadores de muestra **del VCF** correspondan
-  a los identificadores estables;
-- la pausa F2.4 prohíbe depender del VCF y F2.5 es el primer hito que lo crea.
+En la versión auditada, DTPD-102 continuaba pendiente y A3 pretendía elegir a la vez la representación
+interna y el formato obligatorio de verdad. DTPD-103 continuaba pendiente y E1
+elegía versión VCF, normalización, campos, complemento y validadores. B2 todavía
+debía crear la decisión de implementación Poisson y registrar el contrato ya
+acordado de longitudes exactas de *indels*.
 
-El problema procede de la matriz maestra y el plan lo reproduce.
+Esto contradice la puerta de entrada del proceso de planificación: un plan
+ejecutable no puede usar pasos de implementación para decidir sus contratos.
+Además, A3 prueba solo copias, SNP, *indels* y `N`, aunque la propia DTPD-102
+exige evaluar composición con variantes estructurales para no elegir una
+representación incapaz de sostener F5.
 
-**Riesgo.** F2.4 podría aprobar dos pruebas que no ejecutan el comportamiento
-normativo. Posteriormente F2.5 no estaría obligado a aportar esa evidencia.
+**Corrección exigida:** resolver y aprobar antes del plan ejecutable:
 
-**Corrección necesaria.** Reasignar REQ-VER-02 y REQ-VER-12 a F2.5, o declarar
-en F2.4 solo la evidencia parcial de identidad que alimentará las pruebas VCF.
-Recalcular los recuentos de F2.4/F2.5, sus ACE y sus pasos de cierre en la matriz
-maestra y en el plan.
+1. estructura interna haplotípica y formato externo como decisiones distintas,
+   incluyendo un prototipo estructural mínimo;
+2. contrato VCF/complemento completo;
+3. algoritmo Poisson, consumo RNG, límites y oráculo;
+4. parámetros exactos de longitud de inserción/deleción de F2.
 
-**Condición de cierre.** Ambos TEST ejecutan un VCF real y comparan sus columnas
-y genotipos con los individuos de la verdad canónica.
+A3, B2 y E1 deben convertirse después en comprobaciones de decisiones ya
+aprobadas, no en lugares donde se escogen.
 
-**Corrección aplicada.** REQ-VER-02 y REQ-VER-12 se han reasignado de F2.4 a
-F2.5 en la matriz maestra y en el plan. E5 y E10 aportan la comprobación sobre
-un VCF real; F2.4 queda con dos REQ de cierre y F2.5 con veinticinco.
+### RAF2-013 — F1 sigue abierta mientras su corrección espera revisión independiente
 
-### RAF2-003 — La lista de 58 REQ no es exhaustiva para las filas que involucran F2
+**Prioridad:** bloqueante técnico. **Estado:** nuevo.
 
-**Estado tras corrección: RESUELTO.**
+El árbol real no coincide con la fotografía de §3.1 del plan. F1.5 está
+implementada. Durante esta auditoría H-F16-R13 fue corregido mediante cruce
+global exacto y un corpus con cero, una y dos reducciones; el expediente vuelve
+a declarar 22/22 REQ de F1.6 y 83/83 de F1. Sin embargo, la revisión
+independiente final sigue en curso y ni la pausa F1.6 ni F1 están aprobadas.
 
-**Evidencia.** La validación del plan cuenta únicamente las filas cuyo destino
-es exactamente un solo hito F2. La trazabilidad vigente contiene **62** filas
-cuyo campo de hito incluye F2. Las cuatro omitidas son:
+F2 reutiliza precisamente integridad, manifiestos y publicación. Empezar M1 o A1
+sobre esa base convertiría un defecto conocido en contrato de la interfaz y de
+las nuevas salidas.
 
-- REQ-IND-25, reasignado a F2.3/F6.1;
-- REQ-IND-26, reasignado a F2.4/F3.5/F7.7/F8.5;
-- REQ-MAN-10, reasignado a F2.3/F5.5/F9.7;
-- REQ-MAN-83, reasignado a F2.5/F3.5.
-
-El apartado 13.1 tampoco las reconoce como evidencia adyacente.
-
-**Riesgo.** El creador real de individuos, la coherencia de su ID, la
-procedencia efectiva y el primer conjunto real pueden implementarse sin
-actualizar las pruebas que la trazabilidad dejó expresamente para F2.
+**Condición de cierre:** revisión independiente de H-F16-R13 verde, pausa F1.6
+y F1 aprobadas y commit base congelado.
 
-**Corrección necesaria.** Mantener separados:
+### RAF2-014 — El protocolo fijo de Marimo no puede validar sus dos autorizaciones limitadas
 
-- los REQ cuyo cierre total corresponde a F2;
-- los REQ compartidos para los que F2 debe aportar una evidencia parcial
-  identificada y ejecutable.
+**Prioridad:** bloqueante técnico/funcional. **Estado:** resuelto
+documentalmente el 15 de agosto de 2026.
 
-Añadir las cuatro filas a la sección 13.1, enlazarlas desde C2/C8, D2/D6/D8 y
-E8–E12 según corresponda, y hacer que la validación mecánica compruebe ambas
-listas.
+**Resolución:** las autorizaciones forman parte de la invocación y del digest;
+cada confirmación obliga a revalidar y `run` solo admite la instantánea y las
+autorizaciones exactamente validadas.
 
-**Condición de cierre.** La unión de requisitos cerrados y compartidos coincide
-exactamente con todas las filas de trazabilidad cuyo hito contiene F2.
+M8 fija exactamente:
 
-**Corrección aplicada.** §13 conserva los 58 cierres exclusivos y §13.1 añade
-una tabla separada para REQ-IND-25, REQ-IND-26, REQ-MAN-10 y REQ-MAN-83, con
-evidencia concreta y pasos. Las comprobaciones exigen ahora que la unión sea
-exactamente las 62 filas cuyo hito contiene F2.
+```text
+validate <general> --diagnostics json
+```
 
-### RAF2-004 — Algunos cierres de F2.2 exceden el alcance implementado
+y M9 fija:
 
-**Estado tras corrección: PENDIENTE DE REVISIÓN.**
+```text
+run <general> --diagnostics json --output <destino>
+```
 
-**Evidencia.** F2 se limita a una referencia pequeña y a SNP e *indels*. Sin
-embargo, F2.2 se propone cerrar requisitos cuyo texto completo incluye
-capacidades excluidas:
+Pero B21 y C9 requieren `--allow-empty-snv-matrix` y
+`--allow-incompatible-genotypes`. Sin autorización, una contradicción debe
+bloquear antes de crear individuos; con autorización debe volver a validarse,
+quedar en `EffectiveConfig`/manifiesto y solo entonces ejecutarse. C17 afirma
+que la confirmación produce flags, pero M8/M9 no permiten pasarlos ni asocian
+las autorizaciones al digest validado.
 
-- REQ-CONF-08 y REQ-CONF-21 incluyen variantes estructurales;
-- REQ-IND-02 exige que un individuo pueda corresponder a cualquiera de las
-  referencias disponibles;
-- REQ-IND-03 exige conservar cuál de esas referencias describe cada muestra;
-- F2 declara una sola referencia y aplaza variantes estructurales y referencias
-  adicionales.
+**Riesgo:** la UI no puede mostrar el conflicto para confirmarlo, ejecuta una
+configuración distinta de la validada o aplica una autorización antigua a un
+documento editado.
 
-Además, REQ-IND-11 se incluye entre los 22 REQ, pero no existe un caso explícito
-que demuestre que una frecuencia alélica poblacional se rechaza como valor
-literal de un individuo.
+**Corrección exigida:** versionar una unión cerrada de opciones de invocación
+admitidas en `validate` y `run`; incluir flags y valores en el digest de la
+instantánea; repetir `validate` tras confirmar; exigir que `run` use exactamente
+documentos, contrato y autorizaciones validados. El proceso falso debe rechazar
+cualquier flag general o no catalogado.
 
-**Riesgo.** El acta podría marcar requisitos completos después de demostrar
-solo el subconjunto de SNP/*indels* o una ejecución monorreferencia.
+### RAF2-015 — La tolerancia multialélica de B19 contradice DTC-049
 
-**Corrección necesaria.** Revisar la matriz maestra requisito por requisito.
-Cuando el REQ sea indivisible, asignar el cierre a la primera fase que cubra
-todo su texto y conservar F2 como evidencia parcial. Si se pretende cerrar en
-F2, ampliar explícitamente sus casos sin contradecir el alcance de la hoja de
-ruta. Añadir el caso negativo de REQ-IND-11.
+**Prioridad:** bloqueante técnico con resultado biológico silencioso.
+**Estado:** resuelto documentalmente el 15 de agosto de 2026.
 
-**Condición de cierre.** Ningún REQ se declara superado mediante una prueba que
-solo cubra una clase o cardinalidad menor que la exigida por su texto.
+**Resolución:** F2.2 consume y registra la tolerancia efectiva de DTC-049 y
+prueba el valor cero, el predeterminado, un valor sustituido y sus fronteras.
 
-**Corrección parcial aplicada.** B14 incluye ya el caso negativo literal de
-REQ-IND-11 y prohíbe marcar REQ-CONF-08, REQ-CONF-21, REQ-IND-02 y REQ-IND-03
-como cerrados mientras se resuelve este hallazgo.
+B19 acepta y normaliza solo un exceso `<=1e-9`. DTC-049 establece una tolerancia
+general **efectiva y configurable** en `[0,1e-6]`, con `1e-9` únicamente como
+predeterminado. REQ-IND-60 remite a esa tolerancia general.
 
-**Decisión o consejo necesario.** Hay tres opciones: (a) mantener F2 como
-evidencia parcial y trasladar el cierre total a la primera fase con variantes
-estructurales o varias referencias; (b) dividir los REQ, lo que exige cambiar la
-especificación; o (c) ampliar F2, contradiciendo su alcance deliberado actual.
-Se recomienda (a), porque conserva los REQ y el alcance pequeño de F2. Requiere
-aprobar y modificar la matriz maestra; no se ha hecho de forma unilateral.
+**Riesgo:** dos ejecuciones con tolerancias efectivas válidas distintas serían
+admitidas o rechazadas como si ambas usaran el valor predeterminado.
 
-### RAF2-005 — La procedencia normativa de varios pasos es semánticamente incorrecta
+**Corrección exigida:** B19 debe consumir la tolerancia efectiva ya resuelta,
+registrar antes/después y probar 0, el predeterminado, un valor sustituido y sus
+dos fronteras inclusiva/excesiva.
 
-**Estado tras corrección: RESUELTO.**
+### RAF2-016 — La generación de *indels* reutiliza dependencias de la matriz sin definir sus propios ámbitos
 
-**Evidencia.** Las cuatro líneas obligatorias existen mecánicamente, pero varios
-enlaces `Procede de` no justifican el cambio del paso. Ejemplos:
+**Prioridad:** bloqueante técnico/genómico. **Estado:** resuelto
+documentalmente el 15 de agosto de 2026.
 
-- A2/A5 enlazan Poisson, sustituciones individuales o dosis para decidir tipos
-  de coordenadas;
-- A6 enlaza la regla de deleciones terminales para definir bases y `N`;
-- B4/B6 enlazan identidad de referencia del individuo para definir Poisson;
-- B7, B10 y B11 enlazan la semántica de frecuencia alélica poblacional;
-- B8 enlaza las reglas de ancla de inserción y deleción terminal a un evento
-  SNP.
+**Resolución:** F2.2 define ámbitos RNG independientes de recuento, posición y
+contenido para inserciones y deleciones, y separa sus oportunidades y medias
+del generador de matrices.
 
-**Riesgo.** Una revisión automatizada da por buena la trazabilidad por presencia
-de IDs, aunque el requisito citado no pruebe el comportamiento. También quedan
-REQ reales sin un paso que los demuestre directamente.
+B8 solo versiona `matrix/locus_selection`, `matrix/alternate_allele` y
+`matrix/frequency` y dice que quedan separados de *indels*. No existe después
+un paso que publique ámbitos para recuento, posición y bases insertadas por
+clase, individuo y región. B28/B29 dependen de B9–B11, aunque B10/B11 definen el
+selector ponderado y el recuento de **loci candidatos de la matriz**, no el
+modelo espacial por cantidad/densidad individual de REQ-CONF-20/21/22 y
+REQ-IND-13/15/18.
 
-**Corrección necesaria.** Auditar semánticamente todos los `Procede de`. Cada
-REQ debe aparecer en el paso que implementa o prueba su conducta concreta; los
-requisitos meramente relacionados deben ir en contexto, no como fuente del
-cambio. Repetir después el recuento REQ/ACE.
+**Riesgo:** cambiar una matriz puede alterar *indels*, una tasa cero consumir
+azar, o `weighted_regions` sustituir por accidente el modelo regional de
+*indels*. También falta separar la secuencia aleatoria insertada de su posición.
 
-**Condición de cierre.** Para cada enlace puede explicarse una relación directa
-entre el verbo normativo del REQ, el cambio y la comprobación del paso.
+**Corrección exigida:** pasos propios y pequeños para cada clase:
 
-**Corrección aplicada.** Se auditaron los campos `Procede de` y se corrigieron
-las asociaciones erróneas de A2, A3, A5, A6, B1–B11, C2/C8, D1–D8 y E5–E10.
-Entre otros cambios, las reglas de inserciones y deleciones se citan solo en sus
-constructores y espacios válidos; Poisson cita sus requisitos de media,
-distribución y recuentos; y cada REQ compartido se etiqueta expresamente como
-evidencia parcial.
+- catálogo de ámbitos de recuento, selección espacial y contenido insertado;
+- enumeración de oportunidades válidas sobre el estado vigente;
+- media por ámbito y Poisson local;
+- selección secuencial sin reintentos y actualización del espacio;
+- aislamiento frente a matriz, individuo y demás clase.
 
-## 4. Hallazgos mayores
+### RAF2-017 — M7 no define una importación multidocumento segura ni conservadora
 
-### RAF2-006 — BGZF e índice se implementan con fuentes normativas equivocadas
+**Prioridad:** bloqueante técnico de F2.0. **Estado:** resuelto el 15 de agosto
+de 2026 mediante DTC-069.
 
-**Estado tras corrección: RESUELTO.**
+**Resolución:** la unidad es un directorio autocontenido; importación y
+exportación son atómicas, aisladas, resistentes a TOCTOU y limitadas, y
+preservan opacamente lo no editado sin ZIP/TAR ni selección múltiple.
 
-**Evidencia.** E9 atribuye compresión BGZF, índice y modo texto a REQ-REC-26,
-REQ-MAN-27, REQ-MAN-57 y REQ-SAL-21. Esos requisitos tratan, respectivamente,
-variantes eliminadas, fase/procedencia, relación VCF–muestras y estados. Los
-contratos directos son REQ-SAL-12 y REQ-MAN-58, que la matriz sitúa en fases
-posteriores.
+M7 promete importar exactamente un general y cero o varios escenarios, pero no
+define si la unidad de entrada es directorio, selección múltiple o archivo; cómo
+se preserva la jerarquía relativa; cómo se rechazan `..`, rutas absolutas,
+*symlinks* y cambios TOCTOU; ni cómo se copian los bytes a la instantánea
+privada. Tampoco exige conservar como contenido opaco los campos de escenarios
+Evolución/Familias que F2.0 todavía no sabe editar. «Canonicalizar rutas» puede
+convertir una ruta relativa portable en una absoluta de la máquina local.
 
-**Riesgo.** E9 puede pasar sin demostrar los requisitos que realmente definen
-sus artefactos, mientras estos se cerrarían otra vez en F5.5/F9.5.
+**Riesgo:** pérdida silenciosa de campos al importar/exportar, enlaces que salen
+del conjunto, semántica distinta entre previsualización y binario o acceso a
+ficheros no seleccionados.
 
-**Corrección necesaria.** Citar REQ-SAL-12 y REQ-MAN-58 como fuentes directas y
-registrar evidencia parcial si su cierre completo permanece en fases
-posteriores. Mantener REQ-SAL-21 solo para la parte de estados y REQ-MAN-57 para
-la relación con referencia e individuos.
+**Corrección exigida:** fijar la unidad de importación y su modelo de amenaza;
+separar literal TOML de ruta resuelta mostrada; copiar de forma segura todos los
+documentos enlazados; conservar opacos los no editables; y validar el conjunto
+copiado, no rutas mutables del origen.
 
-**Corrección aplicada.** E9 cita REQ-SAL-12 y REQ-MAN-58 como fuentes directas
-y conserva REQ-SAL-21 a REQ-SAL-23 para estados/publicación. REQ-MAN-57 se
-trasladó a E8, REQ-REC-26 a E6 y REQ-MAN-27 a E7. La evidencia de las fuentes
-asignadas a fases posteriores se declara parcial.
+### RAF2-018 — El perfil 1000 Genomes no tiene todavía una receta ejecutable ni una dependencia correcta
 
-### RAF2-007 — No se identifica un caso F2 que necesite realmente complemento
+**Prioridad:** bloqueante técnico de B14/B15. **Estado:** resuelto el 15 de
+agosto de 2026 mediante DTC-068 y simplificado después a dos perfiles compactos
+aproximados, con fuente/receta/hash pequeños y sin VCF ni `bcftools`.
 
-**Estado tras corrección: PENDIENTE DE REVISIÓN.**
+En la versión auditada, DTC-054 fijaba el nombre lógico y filtros generales, pero no el ensamblado exacto,
+URL/artefactos de origen, SHA-256 de entradas, campos por superpoblación,
+tratamiento de cromosomas/contigs, descomposición multialélica, herramientas ni
+comando reproducible. B14 exige regeneración independiente sin que esas entradas
+existan. B15 creaba el antiguo perfil SNV12 desde el mismo corpus pero no
+dependía de B14 ni de una evaluación de datos común.
 
-**Evidencia.** La hoja de ruta y E7 exigen demostrar un caso VCF+complemento,
-pero el plan limita F2 a SNP, *indels* inequívocos, GT faseado y ploidía 1–10.
-E7 no identifica qué información de uno de esos casos no puede representar la
-versión VCF elegida. REQ-VER-24 prohíbe crear una entrada complementaria cuando
-el caso es plenamente representable.
+**Resolución vigente:** F2.2.14 regenera
+`human_1000g_global_sfs_approx_v1` desde 64:12:8 y `1/5008` y
+`human_harris2017_snv12_approx_v1` desde el fichero eLife de 3.644 bytes y
+SHA-256 fijado. Un oráculo independiente comprueba normalizaciones,
+transformación 96→6→12, licencia CC BY y digests. La materialización exacta del
+VCF queda en DTF-016/post-v1 y no bloquea F2.
 
-**Riesgo.** Para satisfacer la prueba se podría inventar una pérdida o crear un
-complemento redundante, incumpliendo precisamente la regla funcional.
+### RAF2-019 — `prepare-snv-matrix` no puede construir los metadatos que B4 exige
 
-**Corrección necesaria.** DTPD-103 debe aportar un ejemplo literal de F2 cuya
-pérdida sea real y verificable. Si no existe, corregir la evidencia de cierre de
-F2 para demostrar la **ausencia** de complemento en los casos representables y
-trasladar el primer caso positivo a F5.5.
+**Prioridad:** bloqueante técnico. **Estado:** resuelto documentalmente el 15
+de agosto de 2026.
 
-**Corrección parcial aplicada.** E7 ya prohíbe inventar una entrada
-complementaria y exige la prueba negativa para casos representables. Solo exige
-un caso positivo si DTPD-103 demuestra antes una pérdida real.
+**Resolución:** `prepare-snv-matrix` obtiene `reference_id` y la huella desde el
+manifiesto F1 autoritativo asociado al FASTA y contrasta ambos antes de escribir.
 
-**Decisión o consejo necesario.** Debe elegirse entre (a) documentar en
-DTPD-103 un caso literal de SNP/*indel*/`N` de F2 que VCF no represente sin
-pérdida o (b) corregir la evidencia de cierre de la hoja de ruta para demostrar
-ausencia de complemento en F2 y trasladar el primer positivo a F5.5. Se
-recomienda (b) si la evaluación de VCF no encuentra una pérdida real; es la
-única opción compatible con REQ-VER-24 sin fabricar redundancia.
+B17 propone:
 
-### RAF2-008 — La decisión aleatoria se registra después de diseñar sus consumidores
+```text
+prepare-snv-matrix --reference <FASTA> --input <TSV> --output <destino>
+```
 
-**Estado tras corrección: RESUELTO.**
+B4 exige además el identificador estable de la referencia, no deducible de una
+ruta FASTA. Tampoco se indica si se consume un manifiesto F1, un descriptor de
+referencia o un `--reference-id` explícito ni cómo se contrasta ese ID con el
+FASTA autoritativo.
 
-**Evidencia.** B1 y B3 definen el TOML y `ParameterKey` para las longitudes
-exactas antes de B4, aunque B4 es el paso que registra y aprueba ese contrato.
-B4 solo exige estar resuelto antes de B6. Además, no existe una puerta
-equivalente a A4/E2 para evaluar una posible dependencia Poisson conforme a
-DTC-043.
+**Corrección exigida:** fijar una fuente inequívoca de `reference_id` y probar
+ID correcto, ID distinto con mismos bytes, mismos ID con bytes distintos y
+referencia derivada.
 
-**Riesgo.** El esquema público y el catálogo pueden fijar accidentalmente una
-decisión aún no confirmada, o incorporarse un crate sin la evaluación exigida.
+### RAF2-020 — El entorno bloqueado no incluye los binarios que ejecuta Playwright
 
-**Corrección necesaria.** Resolver el contrato funcional de longitud y la
-concreción técnica de Poisson antes de B1. Añadir una puerta DTC-043, aunque el
-resultado sea «implementación propia, sin dependencia nueva».
+**Prioridad:** bloqueante técnico de M1/M11. **Estado:** resuelto
+documentalmente el 15 de agosto de 2026.
 
-**Corrección aplicada.** La puerta de decisión es ahora B1; B2–B4, esquema,
-parser y catálogo, dependen de ella. B1 evalúa expresamente cualquier
-dependencia conforme a DTC-043, incluida la opción de no añadir ninguna.
-
-### RAF2-009 — El orden entre espacio elegible y recuento Poisson es ambiguo
-
-**Estado tras corrección: RESUELTO.**
-
-**Evidencia.** B6 recibe el tamaño elegible para calcular la media, pero B7 es
-quien construye el espacio elegible y depende de B6. El flujo normativo exige
-calcular oportunidades válidas del ámbito y después sortear el recuento
-correspondiente; la aplicación posterior debe trabajar sobre el estado válido
-actualizado.
-
-**Riesgo.** Puede usarse la longitud bruta en vez del número de oportunidades
-válidas, especialmente con `N`, bordes de *indels* y regiones filtradas.
-
-**Corrección necesaria.** Separar el enumerador de oportunidades de la selección
-de posiciones. Hacer que el cálculo del tamaño elegible preceda al sorteo, y
-dejar la actualización del espacio después de cada evento en el motor.
-
-**Corrección aplicada.** B6 enumera y cuenta oportunidades válidas sin sortear;
-B7 recibe esa cardinalidad y aplica Poisson. B12 mantiene la actualización del
-estado vigente entre eventos y las pruebas verifican `media = tasa ×
-oportunidades válidas`.
-
-## 5. Correcciones menores
-
-### RAF2-010 — La línea base de F1.4 está desactualizada
-
-**Estado tras corrección: RESUELTO.**
-
-El plan todavía afirma que F1.4 está en desarrollo. F1.4 ya fue aprobada; F1.5
-continúa sin cerrar. Debe actualizarse el estado sin eliminar la puerta de
-cierre total de F1.
-
-La cabecera y §3.1 reflejan ahora F1.4 aprobada, F1.5 pendiente y la revisión
-total de F1 todavía obligatoria.
-
-### RAF2-011 — El intervalo de longitud usa una notación ambigua
-
-**Estado tras corrección: RESUELTO.**
-
-El texto `1..umbral estructural efectivo` puede interpretarse como inclusivo,
-aunque el resto del plan rechaza longitudes `>= umbral`. Debe escribirse de
-forma inequívoca: `1 ≤ longitud < umbral estructural efectivo`.
-
-La notación se ha sustituido por esa desigualdad explícita.
-
-## 6. Aspectos validados y reutilizables
-
-No requieren rediseño los siguientes elementos:
-
-- 52 pasos abiertos, cada uno con una sola línea `Depende de`, `Procede de`,
-  `Cambia` y `Se comprueba con`;
-- cinco pausas obligatorias y aprobación separada del cierre de fase;
-- dirección correcta verdad canónica → verdad externa → VCF;
-- prohibición de usar VCF o el propio productor como oráculo circular;
-- conservación de `N`, rechazo de SNP sobre `N` y ausencia de `N` en
-  inserciones aleatorias;
-- separación de conteo Poisson y longitud exacta de *indel*, sin consumo de RNG
-  para la longitud;
-- aplicación ordenada de eventos y comprobación contra el estado vigente;
-- publicación provisional, SHA-256, no-clobber y validadores independientes
-  reutilizados desde F1;
-- validación mecánica de formato sin errores de espacios ni casillas cerradas.
-
-## 7. Trabajo restante antes de aprobar
-
-1. Cerrar F1.5 y la revisión final de F1.
-2. Resolver RAF2-001 en decisiones técnicas y arquitectura, y propagar los IDs
-   confirmados al plan.
-3. Resolver RAF2-004 en la matriz maestra sin ampliar silenciosamente F2.
-4. Resolver RAF2-007 en DTPD-103 y, si no existe un caso positivo real de F2,
-   corregir la evidencia de cierre de la hoja de ruta.
-5. Repetir la revisión adversarial de esos tres cambios y aprobar después el
-   plan antes de autorizar A1.
-
-## 8. Preguntas reservadas para la revisión posterior
-
-1. ¿Los REQ que incluyen variantes estructurales o varias referencias deben
-   quedar como evidencia parcial en F2 o se desea ampliar el alcance inicial?
-2. ¿Qué caso concreto de F2 pierde información en VCF 4.5 y exige complemento?
-   Si ninguno la pierde, ¿se corrige la evidencia de cierre de la hoja de ruta?
-3. ¿La decisión Poisson usará una dependencia evaluada o una implementación
-   propia versionada?
-Las cuatro filas compartidas ya no requieren pregunta: el plan registra
-evidencia parcial en F2 y conserva su cierre total condicionado a las demás
-fases de su asignación vigente.
-
-## 9. Comprobaciones mecánicas ejecutadas
-
-- `git diff --no-index --check` sobre plan e informe: sin diagnósticos.
-- `git diff --check` sobre el cambio de trazabilidad: sin diagnósticos.
-- Casillas de pasos: 52.
-- Pausas obligatorias: 5.
-- Campos obligatorios por paso: 4/4 en los 52 pasos.
-- Identificadores de paso: A1–A10, B1–B14, C1–C8, D1–D8 y E1–E12, sin
-  duplicados.
-- REQ únicos en la matriz de cierre exclusivo del plan: 58, sin duplicados.
-- REQ compartidos en §13.1: 4, sin duplicados.
-- Filas de la matriz maestra cuyo hito contiene F2: 62.
-- Diferencia entre la unión 58+4 del plan y las filas F2 de la matriz maestra:
-  ninguna.
-- REQ-VER-02 y REQ-VER-12: reasignados a F2.5 y comprobados sobre VCF real.
-- Enlaces relativos consultados: todos sus destinos existen.
-- Cercas Markdown: equilibradas en plan e informe.
+**Resolución:** la puerta F2.0 fija navegador y revisión, inventario y hashes de
+artefactos, dependencias de Ubuntu y una ejecución posterior sin red; separa la
+evidencia automatizada de la revisión manual WSL2.
+
+`uv.lock` puede fijar los paquetes Python `playwright` y la integración de axe,
+pero no fija por sí solo los binarios de Chromium/Firefox/WebKit ni las
+bibliotecas del sistema que descarga o instala Playwright. `uv sync --frozen`
+no demuestra una prueba de navegador repetible ni un arranque posterior sin red.
+
+**Corrección exigida:** elegir y registrar navegador, revisión, artefacto/hash,
+comando de instalación y dependencias Ubuntu; separar pruebas automatizadas de
+la revisión manual WSL2; ejecutar ambas sin descarga después de la instalación.
+
+### RAF2-021 — M1 mezcla evaluación, implementación y aceptación en una sola casilla
+
+**Prioridad:** bloqueante estructural del plan. **Estado:** resuelto
+documentalmente el 15 de agosto de 2026.
+
+**Resolución:** la antigua M1 se dividió en una puerta experimental previa y
+pasos independientes de entorno, empaquetado, lanzador, red, OCI y evidencias de
+plataforma.
+
+M1 evalúa tres herramientas, crea entorno y *lock*, incorpora aplicación,
+lanzador, contratos y paquete, modifica la entrega `.tar.gz`, comprueba OCI,
+prueba red, puertos, navegador, proceso falso, binario real, Ubuntu, WSL2,
+licencias y una vulnerabilidad concreta. No es un cambio independiente ni puede
+revisarse o revertirse como una unidad. Además, contratos y protocolo se
+implementan formalmente en M2/M8, por lo que parte de la aceptación de M1 carece
+todavía de productor.
+
+**Corrección exigida:** dividir la puerta experimental de versiones/licencias,
+el esqueleto de empaquetado, el lanzador/red, el entorno sin red, OCI y las
+evidencias de plataforma. M1 debe terminar en una decisión fechada antes de
+incorporar dependencias de producción; la implementación depende de esa puerta.
+
+## 5. Hallazgos mayores no bloqueantes por sí solos
+
+### RAF2-022 — La numeración no cumple la convención jerárquica vigente
+
+**Estado:** resuelto documentalmente el 15 de agosto de 2026.
+
+Los identificadores M1/A1/B1/C1/D1/E1 no heredan F2.0–F2.5. La habilidad vigente
+y la directriz incorporada al proyecto exigen `F2.0.1`, `F2.1.1`, etc. El plan
+no se ha ejecutado, por lo que aún puede renumerarse sin romper evidencia
+histórica. También deben cambiar dependencias, pausas, matrices y comandos de
+validación.
+
+### RAF2-023 — Las comprobaciones describen pruebas, pero casi nunca dan comandos ejecutables
+
+**Estado:** resuelto documentalmente el 15 de agosto de 2026.
+
+Las 96 casillas tienen texto `Se comprueba con`, pero solo una fracción mínima
+incluye un comando. No se fijan nombres de pruebas, rutas de fixtures, comandos
+de validadores, artefactos de evidencia ni resultado esperado material. §4.3
+solo aporta puertas globales; no permite demostrar cada paso ni reanudarlo con
+trazabilidad.
+
+Debe existir por paso al menos un comando real o un enlace a un script/fixture
+planificado, más el fichero de evidencia y el resultado esperado. Los
+validadores externos deben llevar versión y comando exactos después de sus
+decisiones.
+
+### RAF2-024 — El supervisor de procesos no exige drenaje concurrente ni prueba de bloqueo
+
+**Estado:** resuelto documentalmente el 15 de agosto de 2026.
+
+M8–M10 limitan `stdout`/`stderr`, pero no exigen leer ambos concurrentemente.
+Un proceso que llena una tubería mientras la UI espera la otra puede bloquearse
+antes de alcanzar el límite. Tampoco se exige cerrar `stdin`, reaprovechar el
+hijo ni comprobar que las señales solo alcanzan el grupo creado por la UI.
+
+Añadir pruebas falsas que llenen ambos flujos intercalados, mantengan
+descendientes, ignoren cada señal y comprueben cierre, reaprovechamiento y
+ausencia de proceso huérfano.
+
+### RAF2-025 — La trazabilidad omite evidencia parcial directa de REQ-SAL-02 y REQ-SAL-12
+
+**Estado:** resuelto documentalmente el 15 de agosto de 2026.
+
+F2.4 implementa para creación directa el fichero obligatorio de REQ-SAL-02 y
+F2.5 implementa BGZF/índice de REQ-SAL-12, pero §15.2 solo los menciona como
+«evidencia adyacente» sin enlazarlos a D2/D8 y E9/E12 como ocurre con los cuatro
+REQ compartidos. No deben cerrarse en F2, pero sí dejar una evidencia parcial
+ejecutable y un destino final explícito.
+
+### RAF2-026 — El estado de fuentes y contadores documentales está desactualizado
+
+**Estado:** resuelto documentalmente el 15 de agosto de 2026.
+
+- §3.1 del plan afirma F1.5 pendiente, aunque está implementada y publicada;
+  lo pendiente es la revisión y aprobación final de F1.6/F1.
+- La cabecera de trazabilidad declara 843 filas, mientras el fichero contiene
+  844 filas `REQ`.
+- La revisión adversarial anterior aún describe 52 pasos y cinco pausas; este
+  informe la sustituye para el estado actual de 96 y seis.
+- La arquitectura conserva una frase que dice que la representación interna de
+  coordenadas «se decidirá por separado» después de haber fijado DTC-056.
+
+Son correcciones documentales, pero deben resolverse antes de congelar la línea
+base para que las puertas mecánicas no acrediten una fotografía falsa.
+
+## 6. Preguntas y decisiones que sí requieren intervención del usuario
+
+Las seis decisiones quedaron resueltas el 15 de agosto de 2026:
+
+1. **DTPD-102:** modelo híbrido y `truth.jsonl` mediante DTC-061.
+2. **DTPD-103:** contrato VCF completo mediante DTC-062 a DTC-066.
+3. **RAF2-004:** cuatro REQ amplios pasan a evidencia parcial F2 y cierre
+   posterior, con 79 cierres exclusivos y nueve compartidos.
+4. **RAF2-007:** F2 prueba ausencia de complemento redundante y F5.5 aporta el
+   primer positivo real.
+5. **REQ-CONF-130/RAF2-012:** HWE/F en F2 y distribución explícita en F6.2.
+6. **Importación Marimo/RAF2-017:** directorio autocontenido seguro según
+   DTC-069.
+
+## 7. Aspectos correctos y reutilizables
+
+Se deben conservar al corregir el plan:
+
+- la separación matriz común → genotipo/fase por individuo → verdad externa →
+  VCF;
+- la prohibición de usar Poisson para frecuencias, alelos o genotipos;
+- candidatos, `ALT` globalmente descartados y loci activos como cantidades
+  distintas, sin reposición;
+- `alt_af` en `[0,1]`, alelos fijados conservados, poblaciones independientes y
+  perfiles humanos aproximados DTC-068 solo por selección explícita y perfiles
+  suministrados distintos por población;
+- IDs canónicos, subsemillas por identidad y pruebas de estabilidad al añadir o
+  reordenar entidades;
+- coordenadas mediante el servicio común DTC-056 y casos de borde de inserción
+  y deleción;
+- conservación literal de `N` y separación de inserción explícita/aleatoria;
+- oráculos que no llaman al productor y prueba de verdad aun sin VCF;
+- VCF derivado de la verdad, GT faseado, dosis real y ausencia de campos
+  observacionales inventados;
+- publicación no-clobber, hashes, fallos sin salida parcial y pausa al final de
+  cada hito;
+- Marimo sin autoridad biológica, sin *shell*, sin ejecución automática, con
+  digest invalidado tras editar y sin cargar artefactos grandes;
+- enlace exclusivo a `127.0.0.1`, colisión de puerto explícita y separación
+  `.tar.gz` con UI frente a OCI solo CLI.
+
+La inspección del repositorio confirma nombres reutilizables reales:
+`genome-population-simulator`, `validate`, `run`, `--diagnostics`, `--output`,
+`DeclaredConfig`, `EffectiveConfig`, el resolvedor, los tipos de coordenadas,
+SHA-256, publicación y manifiestos. No existe todavía `capabilities`, Marimo,
+`pyproject.toml`, `uv.lock`, los dos flags de autorización, matriz SNV, verdad
+genotípica ni VCF; el plan debe presentarlos como nuevas capacidades, no como
+componentes disponibles.
+
+## 8. Orden de corrección recomendado
+
+1. **Pendiente externo a este informe:** revisar F1.6/F1 y congelar el commit base.
+2. **Completado documentalmente:** decisiones RAF2-004/007/012/017 y
+   DTPD-102/103/120/121 integradas.
+3. **Completado documentalmente:** Poisson e *indels* canónicos.
+4. **Completado documentalmente:** autorizaciones UI, importación, receta
+   compacta DTC-068 y navegador bloqueado.
+5. **Completado documentalmente:** plan jerárquico de 107 pasos.
+6. **Completado documentalmente:** 79 cierres, nueve compartidos y dos
+   expedientes parciales directos.
+7. **Pendiente antes de autorizar el inicio:** cerrar/aprobar F1 y repetir la
+   revisión adversarial sobre el plan corregido; debe concluir sin bloqueantes.
+   F2.0.2, F2.2.1 y F2.2.14 producirán sus evidencias después, durante F2, y
+   bloquearán solo a sus consumidores.
+
+## 9. Comandos de revalidación
+
+Comprobaciones documentales mínimas tras las correcciones:
+
+```bash
+git diff --check -- design/plan-implementacion-f2-0.1.md \
+  design/especificaciones-0.1.md design/arquitectura-0.1.md \
+  design/decisiones-tecnicas-0.1.md design/hoja-de-ruta-0.1.md \
+  design/trazabilidad-requisitos-0.1.md
+
+rg -n '^- ☐ F2\.[0-5]\.[0-9]+\.' design/plan-implementacion-f2-0.1.md
+rg -n '^> \*\*Pausa obligatoria F2\.[0-5]' \
+  design/plan-implementacion-f2-0.1.md
+rg -n 'DTPD-102|DTPD-103|RAF2-004|RAF2-007|REQ-CONF-130' \
+  design/plan-implementacion-f2-0.1.md \
+  design/decisiones-tecnicas-0.1.md design/hoja-de-ruta-0.1.md
+rg '\| F2(\.[0-5])?(/| \||$)' design/trazabilidad-requisitos-0.1.md | wc -l
+rg '^\| REQ-' design/trazabilidad-requisitos-0.1.md | wc -l
+```
+
+Puertas de línea base antes de iniciar F2:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+cargo test --workspace --doc --locked
+cargo build --release --locked --target x86_64-unknown-linux-gnu
+cargo metadata --locked --format-version 1
+cargo tree --locked -e features
+git status --short
+```
+
+Puertas internas que el plan corregido ejecutará después de iniciar F2 y antes
+de habilitar sus respectivos consumidores:
+
+```text
+F2.0.2: uv sync --frozen con CPython exacto, arranque Marimo y navegador bloqueado
+F2.2.1: auditoría de consumo de DTC-054 sin reabrir la decisión
+F2.2.14: regeneración compacta DTC-068 y revisión de fuente, receta y SHA-256
+F2.4.1/F2.4.4: validadores formal y semántico de truth.jsonl
+F2.5.1/F2.5.2/F2.5.10: bcftools/HTSlib/tabix 1.24 y oráculo VCF independiente
+```
+
+No se han ejecutado las puertas Cargo durante esta auditoría porque otro agente
+está corrigiendo F1.6 en el mismo árbol compartido. Esta revisión no atribuye ni
+certifica esos cambios concurrentes.

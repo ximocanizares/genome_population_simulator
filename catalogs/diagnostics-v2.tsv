@@ -1,0 +1,48 @@
+# diagnostic_catalog_version=2
+# code|category|meaning|required_context|exit_code|planned_steps
+GPS-CONF-001|CONF|El documento de configuración no tiene sintaxis TOML válida.|path,location,detail|2|B3
+GPS-CONF-002|CONF|Falta el discriminador de clase del documento.|path,field|2|B3
+GPS-CONF-003|CONF|La clase declarada del documento no está admitida en esta frontera.|path,field,found,accepted|2|B3
+GPS-CONF-004|CONF|Falta la versión de esquema del documento.|path,field|2|B3
+GPS-CONF-005|CONF|La versión de esquema declarada no está admitida.|path,found,accepted|2|B3
+GPS-CONF-006|CONF|La configuración contiene un campo desconocido.|path,location,field|2|B3
+GPS-CONF-007|CONF|La configuración repite una clave o un campo.|path,field,locations|2|B3
+GPS-CONF-008|CONF|La configuración contiene una combinación de campos incompatible.|path,fields,detail|2|B9
+GPS-CONF-009|CONF|Varias reglas máximas incomparables impiden obtener un valor efectivo único.|parameter,scope,rules|2|B7
+GPS-CONF-010|CONF|Dos reglas del mismo parámetro tienen exactamente los mismos selectores.|parameter,selectors,locations|2|B8
+GPS-CONF-011|CONF|Dos regiones del mismo parámetro y selectores no espaciales se solapan.|parameter,reference,sequence,regions|2|B8
+GPS-CONF-012|CONF|La familia del parámetro no admite uno de los selectores declarados.|parameter,selector,scope|2|B5
+GPS-CONF-013|CONF|Una regla referencia una identidad inexistente o de otra categoría.|field,identifier,expected_category|2|B8
+GPS-CONF-014|CONF|Una secuencia carece de ploidía efectiva válida.|reference,sequence,found,accepted|2|B9
+GPS-CONF-015|CONF|Una probabilidad, frecuencia o tolerancia no es finita o está fuera de su intervalo.|parameter,identity,found,accepted|2|B10
+GPS-CONF-016|CONF|Una colección de probabilidades o frecuencias no puede normalizarse con la tolerancia efectiva.|parameter,tolerance,algorithm,sum,delta|2|B10
+GPS-CONF-017|CONF|La semilla raíz no contiene exactamente 256 bits en hexadecimal minúsculo.|field,found,expected|2|C2
+GPS-CONF-018|CONF|El ámbito solicitado no existe en el catálogo normativo de subsemillas.|scope,catalog_version|2|C5
+GPS-CONF-019|CONF|El porcentaje de reducción no es un decimal finito representable exactamente.|field,found,accepted|2|F4;F5
+GPS-CONF-020|CONF|El porcentaje de reducción está fuera del intervalo abierto admitido.|field,found,accepted|2|F4;F5
+GPS-CONF-021|CONF|El objetivo de la referencia reducida no es menor que el espacio elegible.|path,reference,target_bases,eligible_bases|2|F5;F12
+GPS-CONF-022|CONF|No existe una disposición completa de intervalos para la reducción solicitada.|reference,target_bases,region_size_bases,eligible_bases|2|F5;F7;F12
+GPS-INPUT-001|INPUT|No se puede abrir o leer una entrada declarada.|path,detail|2|B3;E3
+GPS-INPUT-002|INPUT|Una entrada cambió durante su copia o no coincide con su identidad declarada.|path,expected_digest,observed_digest|2|D4;E4
+GPS-FMT-001|FMT|El FASTA suministrado está comprimido y v1 solo admite texto sin comprimir.|path,detected_format|2|E3
+GPS-FMT-002|FMT|El FASTA no contiene ninguna secuencia no vacía.|path|2|E3
+GPS-FMT-003|FMT|Una cabecera FASTA no contiene un identificador de secuencia.|path,location|2|E3
+GPS-FMT-004|FMT|Un identificador de secuencia FASTA está repetido.|path,identifier,locations|2|E3
+GPS-FMT-005|FMT|Una secuencia contiene un símbolo de DNA no admitido.|path,sequence,position,found,accepted|2|E2;E3
+GPS-FMT-006|FMT|Un documento JSON producido no satisface su esquema publicado.|path,schema,detail|1|D5;D13
+GPS-FMT-007|FMT|El mapa de reducción no permite reconstruir exactamente la referencia derivada.|path,reference,invariant,detail|2|F10;F12
+GPS-DOMAIN-001|DOMAIN|Un identificador aportado incumple la sintaxis o el ámbito de su categoría.|identifier,category,scope|1|D2
+GPS-DOMAIN-002|DOMAIN|La derivación de una identidad produjo una colisión.|identifier,category,causes|1|D3
+GPS-DOMAIN-003|DOMAIN|Una invariante del estado biológico o técnico válido no se cumple.|entity,invariant,detail|1|D8
+GPS-DOMAIN-004|DOMAIN|Una coordenada o intervalo no pertenece al espacio de referencia declarado.|reference,sequence,found,accepted|1|F8;F10
+GPS-RES-001|RES|El CSPRNG del sistema operativo no pudo producir la semilla raíz.|operation,detail|3|C3
+GPS-RES-002|RES|Los recursos disponibles no permiten completar el plan sin degradar resultados obligatorios.|resource,required,available|3|E10
+GPS-TOOL-001|TOOL|Una herramienta externa necesaria no está disponible.|tool,command|4|E7
+GPS-TOOL-002|TOOL|La versión de una herramienta externa no es compatible.|tool,found,accepted|4|E7
+GPS-TOOL-003|TOOL|Una herramienta externa terminó con error o produjo una salida inválida.|tool,command,exit_status,stderr|4|E7
+GPS-IO-001|IO|Una operación de lectura o escritura falló.|path,operation,detail|5|D4;D9
+GPS-IO-002|IO|El tamaño o SHA-256 de un artefacto no coincide con el valor esperado.|path,expected_size,observed_size,expected_digest,observed_digest|5|D4;E4
+GPS-IO-003|IO|El destino final ya existe y no puede sobrescribirse.|path|5|D10
+GPS-IO-004|IO|El sistema de ficheros no ofrece publicación atómica no-clobber.|path,filesystem,operation|5|D10
+GPS-IO-005|IO|Una unidad incompleta o inválida no puede publicarse como completa.|unit,state,detail|5|D8;D12
+GPS-INTERNAL-001|INTERNAL|Una invariante interna considerada imposible se ha roto.|component,operation,detail|70|B12;C8;D13;E13

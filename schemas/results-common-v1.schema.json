@@ -2,14 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "results-common-v1.schema.json",
   "title": "Definiciones comunes de resultados GPS v1",
+  "$comment": "Para gps_execution_manifest, manifest-general-runtime-validation-v1 compila en runtime exactamente manifest-general-v1.schema.json y este recurso Draft 2020-12 embebido; después aplica las igualdades dinámicas y cruza catálogo, instancia privada de workspace y árbol físico canónico mediante operaciones no-follow. Solo la capacidad opaca ligada a esa instancia y snapshot puede escribirse o publicarse; la enumeración se repite inmediatamente antes de la publicación atómica.",
   "$defs": {
     "stable_id": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$(?!\\n)"
     },
     "diagnostic_code": {
       "type": "string",
-      "pattern": "^GPS-(CONF|INPUT|FMT|DOMAIN|RES|TOOL|IO|INTERNAL)-[0-9]{3}$"
+      "pattern": "^GPS-(CONF|INPUT|FMT|DOMAIN|RES|TOOL|IO|INTERNAL)-[0-9]{3}$(?!\\n)"
     },
     "checksum": {
       "type": "object",
@@ -17,7 +18,7 @@
       "required": ["algorithm", "digest"],
       "properties": {
         "algorithm": { "const": "sha256" },
-        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$(?!\\n)" }
       }
     },
     "artifact": {
@@ -27,12 +28,58 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "kind": { "type": "string", "minLength": 1 },
-        "path": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+        "path": { "type": "string", "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f])(?!.*\\/$).+$(?!\\n)" },
         "size_bytes": { "type": "integer", "minimum": 0 },
         "checksum": { "$ref": "#/$defs/checksum" },
-        "state": { "const": "complete" },
-        "validated": { "const": true }
-      }
+        "state": { "enum": ["complete", "failed"] },
+        "validated": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "state": { "const": "complete" } } },
+          "then": { "properties": { "validated": { "const": true } } }
+        },
+        {
+          "if": { "properties": { "state": { "const": "failed" } } },
+          "then": { "properties": { "validated": { "const": false } } }
+        }
+      ]
+    },
+    "complete_artifact": {
+      "allOf": [
+        { "$ref": "#/$defs/artifact" },
+        {
+          "properties": {
+            "state": { "const": "complete" },
+            "validated": { "const": true }
+          }
+        }
+      ]
+    },
+    "failed_reduction_artifact": {
+      "allOf": [
+        { "$ref": "#/$defs/artifact" },
+        {
+          "properties": {
+            "state": { "const": "failed" },
+            "validated": { "const": false }
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "id": { "pattern": "^reference-fasta-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$(?!\\n)" },
+                "kind": { "const": "reference_fasta" }
+              }
+            },
+            {
+              "properties": {
+                "id": { "pattern": "^reference-map-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$(?!\\n)" },
+                "kind": { "const": "reference_reduction_map" }
+              }
+            }
+          ]
+        }
+      ]
     },
     "reversible_text": {
       "type": "object",
@@ -45,7 +92,7 @@
       "allOf": [
         {
           "if": { "properties": { "encoding": { "const": "bytes-hex" } } },
-          "then": { "properties": { "value": { "pattern": "^(?:[0-9a-f]{2})*$" } } }
+          "then": { "properties": { "value": { "pattern": "^(?:[0-9a-f]{2})*$(?!\\n)" } } }
         }
       ]
     },
@@ -64,6 +111,15 @@
           "properties": {
             "kind": { "const": "supplied" },
             "original_path": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "source_reference_id"],
+          "properties": {
+            "kind": { "const": "reduced" },
+            "source_reference_id": { "$ref": "#/$defs/stable_id" }
           }
         }
       ]
@@ -102,7 +158,7 @@
         "id": { "$ref": "#/$defs/stable_id" },
         "total_genome_size": { "type": "integer", "minimum": 1 },
         "origin": { "$ref": "#/$defs/reference_origin" },
-        "authoritative_resource": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+        "authoritative_resource": { "type": "string", "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f])(?!.*\\/$).+$(?!\\n)" },
         "fasta": { "$ref": "#/$defs/artifact" },
         "canonical_format": { "oneOf": [{ "$ref": "#/$defs/canonical_fasta" }, { "type": "null" }] },
         "indexes": { "type": "array", "maxItems": 0 },
@@ -110,10 +166,16 @@
       },
       "allOf": [
         {
-          "if": { "properties": { "origin": { "properties": { "kind": { "const": "generated" } }, "required": ["kind"] } } },
-          "then": { "properties": { "canonical_format": { "$ref": "#/$defs/canonical_fasta" } } },
-          "else": { "properties": { "canonical_format": { "type": "null" } } }
+          "if": { "properties": { "origin": { "properties": { "kind": { "const": "supplied" } }, "required": ["kind"] } } },
+          "then": { "properties": { "canonical_format": { "type": "null" } } },
+          "else": { "properties": { "canonical_format": { "$ref": "#/$defs/canonical_fasta" } } }
         }
+      ]
+    },
+    "complete_reference_record": {
+      "allOf": [
+        { "$ref": "#/$defs/reference_record" },
+        { "properties": { "fasta": { "$ref": "#/$defs/complete_artifact" } } }
       ]
     },
     "reference_link": {
@@ -125,6 +187,12 @@
         "fasta": { "$ref": "#/$defs/artifact" },
         "indexes": { "type": "array", "maxItems": 0 }
       }
+    },
+    "complete_reference_link": {
+      "allOf": [
+        { "$ref": "#/$defs/reference_link" },
+        { "properties": { "fasta": { "$ref": "#/$defs/complete_artifact" } } }
+      ]
     },
     "normalization_value": {
       "type": "object",
@@ -266,17 +334,108 @@
         "location": { "type": "string", "minLength": 1 }
       }
     },
+    "resolution_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["individual", "population", "subpopulation", "phase", "generation", "reference", "sequence", "position", "locus", "group", "block", "technical_event"],
+      "properties": {
+        "individual": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "population": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "subpopulation": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "phase": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "generation": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "reference": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "sequence": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "position": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+        "locus": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "group": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "block": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] },
+        "technical_event": { "oneOf": [{ "$ref": "#/$defs/stable_id" }, { "type": "null" }] }
+      }
+    },
     "effective_value": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["object_id", "parameter", "value", "winning_rule_id", "selectors", "provenance"],
+      "required": ["object_id", "parameter", "resolution_context", "value", "winning_rule_id", "selectors", "provenance"],
       "properties": {
         "object_id": { "type": "string", "minLength": 1 },
         "parameter": { "enum": ["ploidy", "variant_rate", "selfing_rate", "recombination_rate", "coverage", "error_rate", "contamination_rate", "output_enabled"] },
+        "resolution_context": { "$ref": "#/$defs/resolution_context" },
         "value": { "type": ["number", "string", "boolean"] },
         "winning_rule_id": { "type": "string", "minLength": 1 },
         "selectors": { "$ref": "#/$defs/selectors" },
         "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "resolution_domain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "version", "provider", "population_memberships", "phase_generation_intervals", "loci"],
+      "properties": {
+        "class": { "const": "resolution_domain" },
+        "version": { "const": "1" },
+        "provider": { "type": "string", "minLength": 1 },
+        "population_memberships": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["population", "subpopulation"],
+            "properties": {
+              "population": { "$ref": "#/$defs/stable_id" },
+              "subpopulation": { "$ref": "#/$defs/stable_id" }
+            }
+          }
+        },
+        "phase_generation_intervals": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["phase", "start", "end"],
+            "properties": {
+              "phase": { "$ref": "#/$defs/stable_id" },
+              "start": { "type": "integer", "minimum": 0 },
+              "end": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "loci": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "reference", "sequence", "position"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "reference": { "$ref": "#/$defs/stable_id" },
+              "sequence": { "$ref": "#/$defs/stable_id" },
+              "position": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    },
+    "resolution_request_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["object_id", "parameter", "resolution_context"],
+      "properties": {
+        "object_id": { "$ref": "#/$defs/stable_id" },
+        "parameter": { "enum": ["ploidy", "variant_rate", "selfing_rate", "recombination_rate", "coverage", "error_rate", "contamination_rate", "output_enabled"] },
+        "resolution_context": { "$ref": "#/$defs/resolution_context" }
+      }
+    },
+    "resolution_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resolution_evidence_kind", "schema_version", "parameter_order_version", "resolution_domain", "resolution_requests"],
+      "properties": {
+        "resolution_evidence_kind": { "const": "gps_resolution_evidence" },
+        "schema_version": { "const": "1" },
+        "parameter_order_version": { "const": "1" },
+        "resolution_domain": { "$ref": "#/$defs/resolution_domain" },
+        "resolution_requests": { "type": "array", "items": { "$ref": "#/$defs/resolution_request_input" } }
       }
     },
     "event_subseed": {
@@ -285,8 +444,81 @@
       "required": ["event_id", "subseed"],
       "properties": {
         "event_id": { "$ref": "#/$defs/stable_id" },
-        "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$(?!\\n)" }
       }
+    },
+    "reduction_selection_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selection_order", "sequence_id", "start", "end"],
+      "properties": {
+        "selection_order": { "type": "integer", "minimum": 1 },
+        "sequence_id": { "$ref": "#/$defs/stable_id" },
+        "start": { "type": "integer", "minimum": 1 },
+        "end": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "reference_reduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_reference_id", "derived_reference_id", "source_fasta", "derived_fasta", "eligible_bases", "region_size_bases", "target", "randomness", "algorithm", "map", "included_sequence_ids", "omitted_sequence_ids", "has_residual", "selection_order"],
+      "properties": {
+        "source_reference_id": { "$ref": "#/$defs/stable_id" },
+        "derived_reference_id": { "$ref": "#/$defs/stable_id" },
+        "source_fasta": { "$ref": "#/$defs/artifact" },
+        "derived_fasta": { "$ref": "#/$defs/artifact" },
+        "eligible_bases": { "type": "integer", "minimum": 1 },
+        "region_size_bases": { "type": "integer", "minimum": 1 },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "declared_value", "derived_bases"],
+          "properties": {
+            "mode": { "enum": ["target_bases", "reduction_percent"] },
+            "declared_value": { "type": "string", "minLength": 1 },
+            "derived_bases": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "randomness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["root_seed", "subseed"],
+          "properties": {
+            "root_seed": { "type": "string", "pattern": "^[0-9a-f]{64}$(?!\\n)" },
+            "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$(?!\\n)" }
+          }
+        },
+        "algorithm": { "const": "reduced_reference_selection_v1" },
+        "map": { "$ref": "#/$defs/artifact" },
+        "included_sequence_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/stable_id" } },
+        "omitted_sequence_ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/stable_id" } },
+        "has_residual": { "type": "boolean" },
+        "selection_order": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/reduction_selection_entry" } }
+      }
+    },
+    "complete_reference_reduction": {
+      "allOf": [
+        { "$ref": "#/$defs/reference_reduction" },
+        {
+          "properties": {
+            "source_fasta": { "$ref": "#/$defs/complete_artifact" },
+            "derived_fasta": { "$ref": "#/$defs/complete_artifact" },
+            "map": { "$ref": "#/$defs/complete_artifact" }
+          }
+        }
+      ]
+    },
+    "failed_reference_reduction": {
+      "allOf": [
+        { "$ref": "#/$defs/reference_reduction" },
+        {
+          "properties": {
+            "source_fasta": { "$ref": "#/$defs/complete_artifact" },
+            "derived_fasta": { "$ref": "#/$defs/failed_reduction_artifact" },
+            "map": { "$ref": "#/$defs/failed_reduction_artifact" }
+          }
+        }
+      ]
     },
     "biological_reproducibility": {
       "type": "object",
@@ -297,7 +529,7 @@
         "status": { "const": "guaranteed" },
         "conditions": {
           "type": "array",
-          "prefixItems": [{ "const": "simulator_version" }, { "const": "platform" }, { "const": "root_seed" }, { "const": "effective_configuration" }, { "const": "input_contents" }, { "const": "profiles" }, { "const": "random_algorithm" }, { "const": "subseed_catalog_v2" }, { "const": "reference_fasta_sha256" }],
+          "prefixItems": [{ "const": "simulator_version" }, { "const": "platform" }, { "const": "root_seed" }, { "const": "effective_configuration" }, { "const": "input_contents" }, { "const": "profiles" }, { "const": "random_algorithm" }, { "const": "subseed_catalog_v3" }, { "const": "reference_fasta_sha256" }],
           "items": false,
           "minItems": 9,
           "maxItems": 9
@@ -352,7 +584,7 @@
       "required": ["name", "version"],
       "properties": {
         "name": { "const": "genome-population-simulator" },
-        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" }
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$(?!\\n)" }
       }
     },
     "platform": {
@@ -381,8 +613,8 @@
       "additionalProperties": false,
       "required": ["name", "version"],
       "properties": {
-        "name": { "enum": ["blake3", "getrandom", "noodles-fasta", "rand_chacha", "rustix", "serde_json", "sha2", "toml"] },
-        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+        "name": { "enum": ["blake3", "getrandom", "jsonschema", "noodles-fasta", "rand_chacha", "rustix", "serde_json", "sha2", "toml"] },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$(?!\\n)" }
       }
     },
     "dependency_blake3": {
@@ -395,6 +627,12 @@
       "allOf": [
         { "$ref": "#/$defs/dependency" },
         { "properties": { "name": { "const": "getrandom" }, "version": { "const": "0.4.3" } } }
+      ]
+    },
+    "dependency_jsonschema": {
+      "allOf": [
+        { "$ref": "#/$defs/dependency" },
+        { "properties": { "name": { "const": "jsonschema" }, "version": { "const": "0.49.9" } } }
       ]
     },
     "dependency_rand_chacha": {
@@ -452,23 +690,35 @@
         "copy": { "$ref": "#/$defs/artifact" }
       }
     },
+    "complete_configuration_input": {
+      "allOf": [
+        { "$ref": "#/$defs/configuration_input" },
+        { "properties": { "copy": { "$ref": "#/$defs/complete_artifact" } } }
+      ]
+    },
     "event_link": {
       "type": "object",
       "additionalProperties": false,
       "required": ["event_id", "subseed", "state", "manifest"],
       "properties": {
         "event_id": { "$ref": "#/$defs/stable_id" },
-        "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$(?!\\n)" },
         "state": { "const": "complete" },
         "manifest": { "$ref": "#/$defs/artifact" }
       }
+    },
+    "complete_event_link": {
+      "allOf": [
+        { "$ref": "#/$defs/event_link" },
+        { "properties": { "manifest": { "$ref": "#/$defs/complete_artifact" } } }
+      ]
     },
     "complete_execution_unit": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "kind", "state", "exportable", "diagnostic_code"],
       "properties": {
-        "id": { "type": "string", "pattern": "^RUN_[A-Z2-7]{26}$" },
+        "id": { "type": "string", "pattern": "^RUN_[A-Z2-7]{26}$(?!\\n)" },
         "kind": { "const": "execution" },
         "state": { "const": "complete" },
         "exportable": { "const": true },
@@ -480,7 +730,7 @@
       "additionalProperties": false,
       "required": ["id", "kind", "state", "exportable", "diagnostic_code"],
       "properties": {
-        "id": { "type": "string", "pattern": "^RUN_[A-Z2-7]{26}$" },
+        "id": { "type": "string", "pattern": "^RUN_[A-Z2-7]{26}$(?!\\n)" },
         "kind": { "const": "execution" },
         "state": { "const": "failed" },
         "exportable": { "const": false },
@@ -497,6 +747,30 @@
         "state": { "const": "complete" },
         "exportable": { "const": true },
         "diagnostic_code": { "type": "null" }
+      }
+    },
+    "complete_reference_reduction_unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "state", "exportable", "diagnostic_code"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stable_id" },
+        "kind": { "const": "reference_reduction" },
+        "state": { "const": "complete" },
+        "exportable": { "const": true },
+        "diagnostic_code": { "type": "null" }
+      }
+    },
+    "failed_reference_reduction_unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "state", "exportable", "diagnostic_code"],
+      "properties": {
+        "id": { "$ref": "#/$defs/stable_id" },
+        "kind": { "const": "reference_reduction" },
+        "state": { "const": "failed" },
+        "exportable": { "const": false },
+        "diagnostic_code": { "$ref": "#/$defs/diagnostic_code" }
       }
     },
     "embedded_diagnostic": {
@@ -520,13 +794,19 @@
       "properties": {
         "minimum": {
           "type": "array",
-          "prefixItems": [{ "const": "configuration_copies" }, { "const": "effective_config" }, { "const": "reference_fasta" }, { "const": "manifest_general" }],
-          "items": false,
-          "minItems": 4,
-          "maxItems": 4
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "contains": { "const": "manifest-general" },
+          "minContains": 1,
+          "maxContains": 1
         },
         "default_enabled": { "type": "array", "maxItems": 0 },
-        "explicitly_requested": { "type": "array", "maxItems": 0 },
+        "explicitly_requested": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
         "disabled": {
           "type": "array",
           "prefixItems": [{ "const": "truth" }, { "const": "vcf" }, { "const": "fastq" }, { "const": "bam" }, { "const": "cram" }],
@@ -556,26 +836,30 @@
     "effective_config": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["effective_config_kind", "schema_version", "source_path", "route", "reference", "scenario_ids", "event_ids", "individual_ids", "randomness", "normalizations", "controlled_frequency_sets", "effective_values"],
+      "required": ["effective_config_kind", "schema_version", "source_path", "route", "reference", "reduced_references", "scenario_ids", "event_ids", "individual_ids", "parameter_order_version", "resolution_evidence_id", "resolution_domain", "randomness", "normalizations", "controlled_frequency_sets", "effective_values"],
       "properties": {
         "effective_config_kind": { "const": "gps_effective_config" },
         "schema_version": { "const": "1" },
         "source_path": { "type": "string", "minLength": 1 },
         "route": { "enum": ["direct", "evolution", "families"] },
         "reference": { "$ref": "#/$defs/reference_record" },
+        "reduced_references": { "type": "array", "items": { "$ref": "#/$defs/reference_reduction" } },
         "scenario_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" }, "uniqueItems": true },
         "event_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" }, "uniqueItems": true },
         "individual_ids": { "type": "array", "items": { "$ref": "#/$defs/stable_id" }, "uniqueItems": true },
+        "parameter_order_version": { "const": "1" },
+        "resolution_evidence_id": { "const": "resolution-evidence" },
+        "resolution_domain": { "$ref": "#/$defs/resolution_domain" },
         "randomness": {
           "type": "object",
           "additionalProperties": false,
           "required": ["root_seed", "seed_origin", "algorithm", "derivation_version", "catalog_version", "event_subseeds"],
           "properties": {
-            "root_seed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "root_seed": { "type": "string", "pattern": "^[0-9a-f]{64}$(?!\\n)" },
             "seed_origin": { "enum": ["declared", "system_csprng"] },
             "algorithm": { "const": "ChaCha12" },
             "derivation_version": { "const": 1 },
-            "catalog_version": { "const": "2" },
+            "catalog_version": { "const": "3" },
             "event_subseeds": { "type": "array", "items": { "$ref": "#/$defs/event_subseed" } }
           }
         },
@@ -587,11 +871,11 @@
     "general_manifest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["manifest_kind", "schema_version", "execution_id", "state", "route", "program", "platform", "toolchain", "dependencies", "tools", "profiles", "checks", "configuration_inputs", "effective_config", "references", "events", "artifacts", "outputs", "normalizations", "reproducibility", "units", "diagnostics"],
+      "required": ["manifest_kind", "schema_version", "execution_id", "state", "route", "program", "platform", "toolchain", "dependencies", "tools", "profiles", "checks", "configuration_inputs", "resolution_evidence", "effective_config", "references", "reference_reductions", "events", "artifacts", "outputs", "normalizations", "reproducibility", "units", "diagnostics"],
       "properties": {
         "manifest_kind": { "const": "gps_execution_manifest" },
         "schema_version": { "const": "1" },
-        "execution_id": { "type": "string", "pattern": "^RUN_[A-Z2-7]{26}$" },
+        "execution_id": { "type": "string", "pattern": "^RUN_[A-Z2-7]{26}$(?!\\n)" },
         "state": { "enum": ["complete", "failed"] },
         "route": { "enum": ["direct", "evolution", "families"] },
         "program": { "$ref": "#/$defs/program" },
@@ -599,12 +883,13 @@
         "toolchain": { "$ref": "#/$defs/toolchain" },
         "dependencies": {
           "type": "array",
-          "minItems": 8,
-          "maxItems": 8,
+          "minItems": 9,
+          "maxItems": 9,
           "items": {
             "oneOf": [
               { "$ref": "#/$defs/dependency_blake3" },
               { "$ref": "#/$defs/dependency_getrandom" },
+              { "$ref": "#/$defs/dependency_jsonschema" },
               { "$ref": "#/$defs/dependency_noodles_fasta" },
               { "$ref": "#/$defs/dependency_rand_chacha" },
               { "$ref": "#/$defs/dependency_rustix" },
@@ -616,6 +901,7 @@
           "allOf": [
             { "contains": { "$ref": "#/$defs/dependency_blake3" }, "minContains": 1, "maxContains": 1 },
             { "contains": { "$ref": "#/$defs/dependency_getrandom" }, "minContains": 1, "maxContains": 1 },
+            { "contains": { "$ref": "#/$defs/dependency_jsonschema" }, "minContains": 1, "maxContains": 1 },
             { "contains": { "$ref": "#/$defs/dependency_noodles_fasta" }, "minContains": 1, "maxContains": 1 },
             { "contains": { "$ref": "#/$defs/dependency_rand_chacha" }, "minContains": 1, "maxContains": 1 },
             { "contains": { "$ref": "#/$defs/dependency_rustix" }, "minContains": 1, "maxContains": 1 },
@@ -628,8 +914,10 @@
         "profiles": { "type": "array", "maxItems": 0 },
         "checks": { "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true, "items": { "$ref": "#/$defs/check" } },
         "configuration_inputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/configuration_input" } },
+        "resolution_evidence": { "$ref": "#/$defs/artifact" },
         "effective_config": { "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
-        "references": { "type": "array", "maxItems": 1, "items": { "$ref": "#/$defs/reference_record" } },
+        "references": { "type": "array", "items": { "$ref": "#/$defs/reference_record" } },
+        "reference_reductions": { "type": "array", "items": { "$ref": "#/$defs/reference_reduction" } },
         "events": { "type": "array", "items": { "$ref": "#/$defs/event_link" } },
         "artifacts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/artifact" } },
         "outputs": { "$ref": "#/$defs/general_outputs" },
@@ -661,13 +949,18 @@
           "if": { "properties": { "state": { "const": "complete" } } },
           "then": {
             "properties": {
-              "effective_config": { "$ref": "#/$defs/artifact" },
-              "references": { "minItems": 1, "maxItems": 1 },
+              "configuration_inputs": { "items": { "$ref": "#/$defs/complete_configuration_input" } },
+              "effective_config": { "$ref": "#/$defs/complete_artifact" },
+              "references": { "minItems": 1, "items": { "$ref": "#/$defs/complete_reference_record" } },
+              "reference_reductions": { "items": { "$ref": "#/$defs/complete_reference_reduction" } },
+              "events": { "items": { "$ref": "#/$defs/complete_event_link" } },
+              "artifacts": { "items": { "$ref": "#/$defs/complete_artifact" } },
               "diagnostics": { "maxItems": 0 },
               "units": {
                 "items": {
                   "oneOf": [
                     { "$ref": "#/$defs/complete_execution_unit" },
+                    { "$ref": "#/$defs/complete_reference_reduction_unit" },
                     { "$ref": "#/$defs/complete_event_unit" }
                   ]
                 },
@@ -682,12 +975,39 @@
           "if": { "properties": { "state": { "const": "failed" } } },
           "then": {
             "properties": {
+              "configuration_inputs": { "items": { "$ref": "#/$defs/complete_configuration_input" } },
+              "effective_config": { "oneOf": [{ "$ref": "#/$defs/complete_artifact" }, { "type": "null" }] },
+              "references": { "items": { "$ref": "#/$defs/complete_reference_record" } },
+              "reference_reductions": {
+                "items": {
+                  "oneOf": [
+                    { "$ref": "#/$defs/complete_reference_reduction" },
+                    { "$ref": "#/$defs/failed_reference_reduction" }
+                  ]
+                }
+              },
               "events": { "maxItems": 0 },
+              "artifacts": {
+                "items": {
+                  "oneOf": [
+                    { "$ref": "#/$defs/complete_artifact" },
+                    { "$ref": "#/$defs/failed_reduction_artifact" }
+                  ]
+                }
+              },
               "diagnostics": { "minItems": 1 },
               "units": {
                 "minItems": 1,
-                "maxItems": 1,
-                "items": { "$ref": "#/$defs/failed_execution_unit" }
+                "items": {
+                  "oneOf": [
+                    { "$ref": "#/$defs/failed_execution_unit" },
+                    { "$ref": "#/$defs/complete_reference_reduction_unit" },
+                    { "$ref": "#/$defs/failed_reference_reduction_unit" }
+                  ]
+                },
+                "contains": { "$ref": "#/$defs/failed_execution_unit" },
+                "minContains": 1,
+                "maxContains": 1
               }
             }
           }
@@ -703,8 +1023,8 @@
         "schema_version": { "const": "1" },
         "event_id": { "$ref": "#/$defs/stable_id" },
         "state": { "const": "complete" },
-        "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "references": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/reference_link" } },
+        "subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$(?!\\n)" },
+        "references": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/complete_reference_link" } },
         "artifacts": { "type": "array", "maxItems": 0 },
         "outputs": { "$ref": "#/$defs/event_outputs" },
         "units": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/complete_event_unit" } },

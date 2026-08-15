@@ -1,0 +1,27 @@
+config_kind = "general"
+schema_version = "1"
+route = "direct"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+
+[reference]
+kind = "supplied"
+id = "reference-main"
+fasta = "source.fa"
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 12
+ploidy = 2
+
+[[reference.sequences]]
+id = "scaffold-1"
+class = "scaffold"
+length = 8
+ploidy = 2
+
+[[reduced_references]]
+id = "reference-small"
+source_reference_id = "reference-main"
+region_size_bases = 5
+target_bases = 13

@@ -8,7 +8,7 @@ use rand_chacha::rand_core::{Rng, SeedableRng};
 use crate::diagnostics::Diagnostic;
 
 pub const DERIVATION_VERSION: u32 = 1;
-pub const SUBSEED_CATALOG_VERSION: &str = "2";
+pub const SUBSEED_CATALOG_VERSION: &str = "3";
 pub const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 pub const RANDOM_ALGORITHM: &str = "ChaCha12";
 
@@ -143,6 +143,10 @@ impl SubseedRequest {
             ),
             "sampling" => ("sampling", &["generation", "sampling_id"]),
             "technical_event" => ("technical_event", &["event_id", "reference_id"]),
+            "reference_reduction" => (
+                "reference_reduction",
+                &["source_reference_id", "derived_reference_id", "algorithm"],
+            ),
             _ => return Err(unknown_scope(scope)),
         };
         if components.len() != names.len()

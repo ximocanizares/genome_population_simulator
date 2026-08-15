@@ -42,7 +42,30 @@ pub enum ParameterKey {
     OutputEnabled,
 }
 
+/// Versión del orden canónico usado en documentos efectivos y evidencia.
+pub const PARAMETER_ORDER_VERSION: &str = "1";
+
+/// Orden normativo explícito; no depende del discriminante Rust ni del texto.
+pub const PARAMETER_CANONICAL_ORDER: [ParameterKey; 8] = [
+    ParameterKey::Ploidy,
+    ParameterKey::VariantRate,
+    ParameterKey::SelfingRate,
+    ParameterKey::RecombinationRate,
+    ParameterKey::Coverage,
+    ParameterKey::ErrorRate,
+    ParameterKey::ContaminationRate,
+    ParameterKey::OutputEnabled,
+];
+
 impl ParameterKey {
+    #[must_use]
+    pub fn canonical_rank(self) -> usize {
+        PARAMETER_CANONICAL_ORDER
+            .iter()
+            .position(|parameter| *parameter == self)
+            .expect("todo ParameterKey debe figurar en PARAMETER_CANONICAL_ORDER")
+    }
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -89,6 +112,17 @@ pub enum SpatialLevel {
     Sequence,
     Region,
     Locus,
+}
+
+impl SpatialLevel {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sequence => "sequence",
+            Self::Region => "region",
+            Self::Locus => "locus",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

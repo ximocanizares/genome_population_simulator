@@ -61,8 +61,8 @@ Mantener, salvo que exista una plantilla acordada:
 Usar una casilla por cambio independiente:
 
 ```markdown
-- ☐ A1. Resultado concreto y observable.
-  - Depende de: A0 o «ninguno».
+- ☐ F6.1.1. Resultado concreto y observable.
+  - Depende de: F6.1.0 o «ninguno».
   - Procede de: especificación §X y arquitectura §Y.
   - Cambia: rutas, componentes o interfaces previstos.
   - Se comprueba con: comando, prueba y evidencia esperada.
@@ -70,6 +70,12 @@ Usar una casilla por cambio independiente:
 
 Aplicar estas reglas:
 
+- heredar siempre la coordenada completa del hito de la hoja de ruta: los
+  pasos de F6.1 son `F6.1.1`, `F6.1.2`, etc., y una subdivisión excepcional usa
+  `F6.1.1.1`; no reiniciar con `A1`, `B1`, `F1` u otra numeración local;
+- reutilizar el mismo identificador jerárquico en dependencias, pausas,
+  evidencias, revisiones y matrices; no renumerar retroactivamente planes ya
+  ejecutados si ello rompe trazabilidad, salvo decisión explícita;
 - describir un resultado, no una actividad imprecisa;
 - limitar el paso a una unidad que pueda implementarse, revisar y validar por
   separado;

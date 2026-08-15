@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 
 use genome_population_simulator::randomness::{
     BinaryIdentityEvidence, EntropySource, GuaranteeStatus, ReproducibilityContext,
-    ReproducibilityMetadata, ReproducibilityObservation, RootSeed, SeedOrigin, SubseedRequest,
-    compare_binary, compare_biological, compare_semantic, compare_technical, derive_subseed,
-    resolve_root_seed,
+    ReproducibilityMetadata, ReproducibilityObservation, RootSeed, SUBSEED_CATALOG_VERSION,
+    SeedOrigin, SubseedRequest, compare_binary, compare_biological, compare_semantic,
+    compare_technical, derive_subseed, resolve_root_seed,
 };
 
 #[derive(Debug)]
@@ -445,7 +445,7 @@ fn partial_test_req_rep_22_rng_metadata_reconstructs_an_event_subseed() {
     );
     assert_eq!(metadata.random_algorithm(), "ChaCha12");
     assert_eq!(metadata.derivation_version(), 1);
-    assert_eq!(metadata.catalog_version(), "2");
+    assert_eq!(metadata.catalog_version(), SUBSEED_CATALOG_VERSION);
 
     let first = observation(root());
     let mut changed_input = first.clone();

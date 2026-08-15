@@ -18,7 +18,7 @@ fn decode_hex(value: &str) -> Vec<u8> {
 
 #[test]
 fn every_a5_vector_matches_literal_material_and_blake3_subseed() {
-    for row in include_str!("../catalogs/subseed-scopes-v2.tsv")
+    for row in include_str!("../catalogs/subseed-scopes-v3.tsv")
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
     {

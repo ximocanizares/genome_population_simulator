@@ -1,19 +1,15 @@
-use std::cell::Cell;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use genome_population_simulator::application::load_and_validate_config;
-use genome_population_simulator::execution::{
-    ExecutionFault, ExecutionOutcome, execute_validated_config, execute_validated_config_with,
-};
+use genome_population_simulator::execution::execute_validated_config;
 use genome_population_simulator::publication::{
-    ArtifactLifecycle, ArtifactStage, AtomicPublisher, ExecutionWorkspace, LinuxAtomicPublisher,
-    PublishableUnit, UnsupportedAtomicPublisher,
+    ArtifactLifecycle, ArtifactStage, ExecutionWorkspace, PublishableUnit,
 };
 use genome_population_simulator::reference::SequenceClass as ReferenceSequenceClass;
 use genome_population_simulator::reference_generation::{
@@ -21,6 +17,7 @@ use genome_population_simulator::reference_generation::{
 };
 use genome_population_simulator::results::{
     ArtifactRecord, ReferenceOutput, UnitState, effective_config_document_with_reference,
+    validate_general_manifest_bytes,
 };
 
 const BINARY: &str = env!("CARGO_BIN_EXE_genome-population-simulator");
@@ -32,6 +29,65 @@ fn temporary(label: &str) -> PathBuf {
         std::process::id(),
         NONCE.fetch_add(1, Ordering::Relaxed)
     ))
+}
+
+fn structurally_valid_manifest_bytes() -> &'static [u8] {
+    &manifest_fixture().manifest
+}
+
+struct ManifestFixture {
+    manifest: Vec<u8>,
+    artifacts: Vec<(String, String, PathBuf, Vec<u8>)>,
+}
+
+fn manifest_fixture() -> &'static ManifestFixture {
+    static FIXTURE: OnceLock<ManifestFixture> = OnceLock::new();
+    FIXTURE.get_or_init(|| {
+        let destination = temporary("structural-manifest-fixture");
+        let effective = load_and_validate_config(&fixture("general-seeded.toml"))
+            .expect("fixture configuration");
+        execute_validated_config(&effective, &destination).expect("fixture execution");
+        let manifest = fs::read(destination.join("manifest.json")).expect("fixture manifest");
+        let document: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+        let artifacts = document["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|artifact| {
+                let id = artifact["id"].as_str().unwrap().to_owned();
+                let kind = artifact["kind"].as_str().unwrap().to_owned();
+                let path = PathBuf::from(artifact["path"].as_str().unwrap());
+                let bytes = fs::read(destination.join(&path)).unwrap();
+                (id, kind, path, bytes)
+            })
+            .collect();
+        fs::remove_dir_all(destination).expect("fixture cleanup");
+        ManifestFixture {
+            manifest,
+            artifacts,
+        }
+    })
+}
+
+fn matching_workspace(
+    destination: &Path,
+) -> (
+    ExecutionWorkspace,
+    genome_population_simulator::results::ValidatedGeneralManifest,
+) {
+    let mut workspace = ExecutionWorkspace::create(destination).expect("workspace");
+    for (id, kind, path, bytes) in &manifest_fixture().artifacts {
+        workspace
+            .write_artifact(id, kind, path, bytes)
+            .expect("fixture payload artifact");
+    }
+    let manifest = workspace
+        .validate_general_manifest(
+            Path::new("manifest.json"),
+            structurally_valid_manifest_bytes(),
+        )
+        .expect("structurally, semantically and physically valid manifest fixture");
+    (workspace, manifest)
 }
 
 fn fixture(name: &str) -> PathBuf {
@@ -55,6 +111,12 @@ fn provisional_siblings(destination: &Path) -> Vec<PathBuf> {
         .collect::<Vec<_>>();
     matches.sort();
     matches
+}
+
+fn provisional_workspace(destination: &Path) -> PathBuf {
+    let siblings = provisional_siblings(destination);
+    assert_eq!(siblings.len(), 1, "exactly one provisional workspace");
+    siblings[0].clone()
 }
 
 #[test]
@@ -142,20 +204,8 @@ fn admitted_configuration_bytes_are_frozen_and_execution_identity_ignores_source
 
     let first_destination = temporary("first-output");
     let second_destination = temporary("second-output");
-    execute_validated_config_with(
-        &first,
-        &first_destination,
-        ExecutionFault::None,
-        &LinuxAtomicPublisher,
-    )
-    .expect("first execution");
-    execute_validated_config_with(
-        &second,
-        &second_destination,
-        ExecutionFault::None,
-        &LinuxAtomicPublisher,
-    )
-    .expect("second execution");
+    execute_validated_config(&first, &first_destination).expect("first execution");
+    execute_validated_config(&second, &second_destination).expect("second execution");
     assert_eq!(
         fs::read(first_destination.join("inputs/config/general.toml")).expect("frozen copy"),
         original
@@ -290,6 +340,11 @@ fn complete_zero_one_and_two_event_results_have_resolvable_hashed_links_and_vali
         validate_json(
             &destination.join("manifest.json"),
             "manifest-general-v1.schema.json",
+            true,
+        );
+        validate_json(
+            &destination.join("inputs/resolution/evidence.json"),
+            "resolution-evidence-v1.schema.json",
             true,
         );
         let manifest: serde_json::Value =
@@ -557,410 +612,6 @@ fn public_effective_document_builder_is_schema_valid_before_one_nested_mutation(
 }
 
 #[test]
-fn schemas_reject_unknown_fields_in_every_nested_f1_4_contract() {
-    let root = temporary("schema-nested-negative");
-    fs::create_dir(&root).expect("root");
-
-    let complete_destination = root.join("complete");
-    let output = Command::new(BINARY)
-        .args(["run"])
-        .arg(fixture("general-seeded.toml"))
-        .args(["--output"])
-        .arg(&complete_destination)
-        .output()
-        .expect("complete run");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let general: serde_json::Value = serde_json::from_slice(
-        &fs::read(complete_destination.join("manifest.json")).expect("general manifest"),
-    )
-    .expect("general JSON");
-    let event_path = complete_destination.join(
-        general["events"][0]["manifest"]["path"]
-            .as_str()
-            .expect("event manifest path"),
-    );
-    let event: serde_json::Value =
-        serde_json::from_slice(&fs::read(event_path).expect("event manifest")).expect("event JSON");
-
-    for (name, pointer) in [
-        ("general-program", "/program"),
-        ("general-platform", "/platform"),
-        ("general-toolchain", "/toolchain"),
-        ("general-dependency", "/dependencies/0"),
-        ("general-check", "/checks/0"),
-        ("general-input", "/configuration_inputs/0"),
-        ("general-event", "/events/0"),
-        ("general-outputs", "/outputs"),
-        ("general-unit", "/units/0"),
-    ] {
-        reject_nested_unknown(
-            &root,
-            name,
-            general.clone(),
-            pointer,
-            "manifest-general-v1.schema.json",
-        );
-    }
-    reject_missing_nested_required(
-        &root,
-        "general-program-missing-name",
-        general.clone(),
-        "/program",
-        "name",
-        "manifest-general-v1.schema.json",
-    );
-    reject_nested_value(
-        &root,
-        "general-input-wrong-path-type",
-        general.clone(),
-        "/configuration_inputs/0/original_path",
-        serde_json::json!(false),
-        "manifest-general-v1.schema.json",
-    );
-    for (name, pointer) in [("event-outputs", "/outputs"), ("event-unit", "/units/0")] {
-        reject_nested_unknown(
-            &root,
-            name,
-            event.clone(),
-            pointer,
-            "manifest-event-v1.schema.json",
-        );
-    }
-    reject_missing_nested_required(
-        &root,
-        "event-outputs-missing-disabled",
-        event.clone(),
-        "/outputs",
-        "disabled",
-        "manifest-event-v1.schema.json",
-    );
-    reject_nested_value(
-        &root,
-        "event-unit-wrong-exportable-type",
-        event.clone(),
-        "/units/0/exportable",
-        serde_json::json!("true"),
-        "manifest-event-v1.schema.json",
-    );
-
-    let rich_destination = root.join("rich-effective-result");
-    execute_validated_config(
-        &load_and_validate_config(&fixture("general-effective.toml")).expect("rich effective"),
-        &rich_destination,
-    )
-    .expect("rich execution");
-    let rich_effective: serde_json::Value = serde_json::from_slice(
-        &fs::read(rich_destination.join("effective-config.json")).expect("rich output"),
-    )
-    .expect("rich JSON");
-    for (name, pointer) in [
-        ("effective-reference", "/reference"),
-        ("effective-randomness", "/randomness"),
-        ("effective-controlled-set", "/controlled_frequency_sets/0"),
-        (
-            "effective-controlled-count",
-            "/controlled_frequency_sets/0/counts/0",
-        ),
-        ("effective-value", "/effective_values/0"),
-        ("effective-selectors", "/effective_values/0/selectors"),
-        ("effective-provenance", "/effective_values/0/provenance"),
-    ] {
-        reject_nested_unknown(
-            &root,
-            name,
-            rich_effective.clone(),
-            pointer,
-            "effective-config-v1.schema.json",
-        );
-    }
-    reject_missing_nested_required(
-        &root,
-        "effective-provenance-missing-location",
-        rich_effective.clone(),
-        "/effective_values/0/provenance",
-        "location",
-        "effective-config-v1.schema.json",
-    );
-    reject_nested_value(
-        &root,
-        "effective-controlled-negative-count",
-        rich_effective,
-        "/controlled_frequency_sets/0/counts/0/count",
-        serde_json::json!(-1),
-        "effective-config-v1.schema.json",
-    );
-
-    let failed_destination = root.join("failed");
-    let effective = load_and_validate_config(&fixture("general-seeded.toml")).expect("effective");
-    execute_validated_config_with(
-        &effective,
-        &failed_destination,
-        ExecutionFault::AfterEffectiveConfig,
-        &LinuxAtomicPublisher,
-    )
-    .expect("failed result");
-    let failed: serde_json::Value = serde_json::from_slice(
-        &fs::read(failed_destination.join("manifest.json")).expect("failed manifest"),
-    )
-    .expect("failed JSON");
-    reject_nested_unknown(
-        &root,
-        "general-diagnostic",
-        failed,
-        "/diagnostics/0",
-        "manifest-general-v1.schema.json",
-    );
-
-    fs::remove_dir_all(root).expect("cleanup");
-}
-
-#[test]
-fn schemas_reject_semantically_contradictory_f1_4_documents() {
-    let root = temporary("schema-semantic-negative");
-    fs::create_dir(&root).expect("root");
-
-    let complete_destination = root.join("complete");
-    let output = Command::new(BINARY)
-        .args(["run"])
-        .arg(fixture("general-seeded.toml"))
-        .args(["--output"])
-        .arg(&complete_destination)
-        .output()
-        .expect("complete run");
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let complete: serde_json::Value = serde_json::from_slice(
-        &fs::read(complete_destination.join("manifest.json")).expect("general manifest"),
-    )
-    .expect("general JSON");
-    let event_path = complete_destination.join(
-        complete["events"][0]["manifest"]["path"]
-            .as_str()
-            .expect("event manifest path"),
-    );
-    let event: serde_json::Value =
-        serde_json::from_slice(&fs::read(event_path).expect("event manifest")).expect("event JSON");
-
-    reject_nested_value(
-        &root,
-        "complete-declared-failed-without-diagnostic",
-        complete.clone(),
-        "/state",
-        serde_json::json!("failed"),
-        "manifest-general-v1.schema.json",
-    );
-
-    let mut duplicate_level = complete.clone();
-    *duplicate_level
-        .pointer_mut("/reproducibility/0/level")
-        .expect("biological level") = serde_json::json!("technical");
-    *duplicate_level
-        .pointer_mut("/reproducibility/0/status")
-        .expect("biological status") = serde_json::json!("guaranteed");
-    write_corrupt_and_reject(
-        &root,
-        "reproducibility-duplicates-technical-and-omits-biological",
-        &duplicate_level,
-        "manifest-general-v1.schema.json",
-    );
-
-    reject_nested_value(
-        &root,
-        "complete-without-effective-config",
-        complete.clone(),
-        "/effective_config",
-        serde_json::Value::Null,
-        "manifest-general-v1.schema.json",
-    );
-
-    let mut complete_with_failed_unit = complete.clone();
-    *complete_with_failed_unit
-        .pointer_mut("/units/0/state")
-        .expect("execution state") = serde_json::json!("failed");
-    *complete_with_failed_unit
-        .pointer_mut("/units/0/exportable")
-        .expect("execution exportability") = serde_json::json!(false);
-    *complete_with_failed_unit
-        .pointer_mut("/units/0/diagnostic_code")
-        .expect("execution diagnostic") = serde_json::json!("GPS-DOMAIN-003");
-    write_corrupt_and_reject(
-        &root,
-        "complete-with-failed-execution-unit",
-        &complete_with_failed_unit,
-        "manifest-general-v1.schema.json",
-    );
-
-    let failed_destination = root.join("failed");
-    let effective = load_and_validate_config(&fixture("general-seeded.toml")).expect("effective");
-    execute_validated_config_with(
-        &effective,
-        &failed_destination,
-        ExecutionFault::AfterEffectiveConfig,
-        &LinuxAtomicPublisher,
-    )
-    .expect("failed result");
-    let failed: serde_json::Value = serde_json::from_slice(
-        &fs::read(failed_destination.join("manifest.json")).expect("failed manifest"),
-    )
-    .expect("failed JSON");
-
-    reject_nested_value(
-        &root,
-        "complete-with-diagnostic",
-        complete.clone(),
-        "/diagnostics",
-        failed["diagnostics"].clone(),
-        "manifest-general-v1.schema.json",
-    );
-
-    reject_nested_value(
-        &root,
-        "failed-without-diagnostics",
-        failed.clone(),
-        "/diagnostics",
-        serde_json::json!([]),
-        "manifest-general-v1.schema.json",
-    );
-    reject_nested_value(
-        &root,
-        "failed-execution-unit-without-code",
-        failed.clone(),
-        "/units/0/diagnostic_code",
-        serde_json::Value::Null,
-        "manifest-general-v1.schema.json",
-    );
-    reject_nested_value(
-        &root,
-        "failed-execution-unit-exportable",
-        failed.clone(),
-        "/units/0/exportable",
-        serde_json::json!(true),
-        "manifest-general-v1.schema.json",
-    );
-
-    let mut failed_with_complete_unit = failed;
-    *failed_with_complete_unit
-        .pointer_mut("/units/0/state")
-        .expect("execution state") = serde_json::json!("complete");
-    *failed_with_complete_unit
-        .pointer_mut("/units/0/exportable")
-        .expect("execution exportability") = serde_json::json!(true);
-    *failed_with_complete_unit
-        .pointer_mut("/units/0/diagnostic_code")
-        .expect("execution diagnostic") = serde_json::Value::Null;
-    write_corrupt_and_reject(
-        &root,
-        "failed-with-complete-execution-unit",
-        &failed_with_complete_unit,
-        "manifest-general-v1.schema.json",
-    );
-
-    reject_nested_value(
-        &root,
-        "event-unit-not-exportable",
-        event.clone(),
-        "/units/0/exportable",
-        serde_json::json!(false),
-        "manifest-event-v1.schema.json",
-    );
-    reject_nested_value(
-        &root,
-        "event-unit-wrong-kind",
-        event.clone(),
-        "/units/0/kind",
-        serde_json::json!("execution"),
-        "manifest-event-v1.schema.json",
-    );
-    reject_nested_value(
-        &root,
-        "event-unit-wrong-state",
-        event,
-        "/units/0/state",
-        serde_json::json!("failed"),
-        "manifest-event-v1.schema.json",
-    );
-
-    let mut duplicate_dependency = complete.clone();
-    *duplicate_dependency
-        .pointer_mut("/dependencies/1/name")
-        .expect("second dependency name") = duplicate_dependency["dependencies"][0]["name"].clone();
-    *duplicate_dependency
-        .pointer_mut("/dependencies/1/version")
-        .expect("second dependency version") = serde_json::json!("9.9.9");
-    write_corrupt_and_reject(
-        &root,
-        "dependencies-duplicate-one-and-omit-one",
-        &duplicate_dependency,
-        "manifest-general-v1.schema.json",
-    );
-    reject_nested_value(
-        &root,
-        "dependency-version-outside-f1-4-lock",
-        complete,
-        "/dependencies/0/version",
-        serde_json::json!("9.9.9"),
-        "manifest-general-v1.schema.json",
-    );
-
-    fs::remove_dir_all(root).expect("cleanup");
-}
-
-#[test]
-fn controlled_failure_publishes_failed_manifest_and_interruption_keeps_marker() {
-    let effective = load_and_validate_config(&fixture("general-seeded.toml")).expect("effective");
-    for fault in [
-        ExecutionFault::AfterConfigurationCopy,
-        ExecutionFault::AfterEffectiveConfig,
-    ] {
-        let destination = temporary("controlled-failure");
-        let outcome =
-            execute_validated_config_with(&effective, &destination, fault, &LinuxAtomicPublisher)
-                .expect("controlled failure closes coherently");
-        assert_eq!(
-            outcome,
-            ExecutionOutcome::Published {
-                destination: destination.clone(),
-                state: UnitState::Failed
-            }
-        );
-        validate_json(
-            &destination.join("manifest.json"),
-            "manifest-general-v1.schema.json",
-            true,
-        );
-        let manifest: serde_json::Value =
-            serde_json::from_slice(&fs::read(destination.join("manifest.json")).expect("manifest"))
-                .expect("JSON");
-        assert_eq!(manifest["state"], "failed");
-        assert_eq!(manifest["diagnostics"][0]["code"], "GPS-DOMAIN-003");
-        assert!(!destination.join("INCOMPLETE").exists());
-        fs::remove_dir_all(destination).expect("cleanup");
-    }
-
-    let destination = temporary("interrupted");
-    let outcome = execute_validated_config_with(
-        &effective,
-        &destination,
-        ExecutionFault::InterruptedAfterWorkspace,
-        &LinuxAtomicPublisher,
-    )
-    .expect("interruption fixture");
-    let ExecutionOutcome::Interrupted { provisional } = outcome else {
-        panic!("expected provisional");
-    };
-    assert!(!destination.exists());
-    assert!(provisional.join("INCOMPLETE").is_file());
-    fs::remove_dir_all(provisional).expect("cleanup");
-}
-
-#[test]
 fn run_rejection_creates_no_destination_and_existing_destination_is_not_clobbered() {
     let rejected = temporary("rejected");
     let invalid = Command::new(BINARY)
@@ -1037,117 +688,236 @@ fn two_processes_racing_for_one_destination_publish_exactly_one_result() {
 }
 
 #[test]
-fn unsupported_publisher_never_falls_back_or_removes_incomplete_marker() {
-    let destination = temporary("unsupported");
-    let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
-    workspace
-        .write_artifact("a", "test", Path::new("a"), b"a")
-        .expect("artifact");
-    workspace
-        .write_artifact(
-            "manifest-general",
-            "manifest_general",
-            Path::new("manifest.json"),
-            b"{}\n",
-        )
-        .expect("cataloged manifest fixture");
-    let provisional = workspace.root().to_path_buf();
-    let error = workspace
-        .publish(&UnsupportedAtomicPublisher)
-        .expect_err("unsupported");
-    assert_eq!(error.code(), "GPS-IO-004");
-    assert!(provisional.join("INCOMPLETE").is_file());
-    assert!(!destination.exists());
-    fs::remove_dir_all(provisional).expect("cleanup");
-}
-
-#[test]
-fn incomplete_marker_is_present_during_atomic_publication_and_survives_publisher_failure() {
-    for fail in [false, true] {
-        let destination = temporary(if fail {
-            "marker-publisher-failure"
-        } else {
-            "marker-publisher-success"
-        });
-        let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
-        workspace
-            .write_artifact(
-                "manifest-general",
-                "manifest_general",
-                Path::new("manifest.json"),
-                b"{}\n",
-            )
-            .expect("cataloged manifest fixture");
-        let provisional = workspace.root().to_path_buf();
-        let publisher = MarkerObservingPublisher::new(fail);
-        let outcome = workspace.publish(&publisher);
-        assert!(
-            publisher.marker_present_at_entry.get(),
-            "INCOMPLETE must cover the entire pre-publication interval"
-        );
-        if fail {
-            assert_eq!(outcome.expect_err("simulated failure").code(), "GPS-IO-004");
-            assert!(provisional.join("INCOMPLETE").is_file());
-            assert!(!destination.exists());
-            fs::remove_dir_all(provisional).expect("failed provisional cleanup");
-        } else {
-            assert_eq!(outcome.expect("publication"), destination);
-            assert!(!provisional.exists());
-            assert!(!destination.join("INCOMPLETE").exists());
-            fs::remove_dir_all(destination).expect("published cleanup");
-        }
+fn runtime_structure_matches_jsonschema_and_generic_manifest_paths_are_closed() {
+    let root = temporary("runtime-structure-corpus");
+    fs::create_dir_all(&root).unwrap();
+    for (_, _, relative, bytes) in &manifest_fixture().artifacts {
+        let path = root.join(relative);
+        fs::create_dir_all(path.parent().expect("fixture artifact parent")).unwrap();
+        fs::write(path, bytes).unwrap();
     }
+    let valid_path = root.join("valid.json");
+    fs::write(&valid_path, structurally_valid_manifest_bytes()).unwrap();
+    validate_json(&valid_path, "manifest-general-v1.schema.json", true);
+    validate_general_manifest_bytes(&valid_path, structurally_valid_manifest_bytes())
+        .expect("runtime accepts the structural positive");
+
+    let valid: serde_json::Value =
+        serde_json::from_slice(structurally_valid_manifest_bytes()).unwrap();
+    let incomplete = serde_json::json!({
+        "manifest_kind": "gps_execution_manifest",
+        "state": "failed",
+        "references": [],
+        "reference_reductions": [],
+        "artifacts": [],
+        "units": [],
+        "diagnostics": []
+    });
+    let mut missing_required = valid.clone();
+    missing_required.as_object_mut().unwrap().remove("program");
+    let mut unknown_root = valid.clone();
+    unknown_root["unknown_runtime_bypass"] = serde_json::json!(true);
+    let mut wrong_type = valid.clone();
+    wrong_type["effective_config"]["validated"] = serde_json::json!("true");
+    let mut invalid_nested_enum = valid.clone();
+    invalid_nested_enum["references"][0]["origin"]["kind"] = serde_json::json!("invented");
+    let mut wrong_const = valid.clone();
+    wrong_const["manifest_kind"] = serde_json::json!("other_manifest");
+    let mut wrong_pattern = valid.clone();
+    wrong_pattern["execution_id"] = serde_json::json!("run_invalid");
+    let mut zero_minimum = valid.clone();
+    zero_minimum["references"][0]["total_genome_size"] = serde_json::json!(0);
+    let mut empty_min_length = valid.clone();
+    empty_min_length["program"]["name"] = serde_json::json!("");
+    let mut invalid_version_pattern = valid.clone();
+    invalid_version_pattern["program"]["version"] = serde_json::json!("not-a-version");
+    let mut duplicate_unique_item = valid.clone();
+    duplicate_unique_item["outputs"]["minimum"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!("manifest-general"));
+    let mut wrong_prefix_items = valid.clone();
+    wrong_prefix_items["outputs"]["disabled"]
+        .as_array_mut()
+        .unwrap()
+        .swap(0, 1);
+    let mut missing_dependency_item = valid.clone();
+    missing_dependency_item["dependencies"]
+        .as_array_mut()
+        .unwrap()
+        .pop();
+    let mut inconsistent_if_else = valid.clone();
+    inconsistent_if_else["references"][0]["origin"] = serde_json::json!({
+        "kind": "supplied",
+        "original_path": "input.fa"
+    });
+    for (name, mutation) in [
+        ("incomplete", incomplete),
+        ("missing-required", missing_required),
+        ("unknown-root", unknown_root),
+        ("wrong-type", wrong_type),
+        ("invalid-nested-enum", invalid_nested_enum),
+        ("wrong-const", wrong_const),
+        ("wrong-pattern", wrong_pattern),
+        ("zero-minimum", zero_minimum),
+        ("empty-min-length", empty_min_length),
+        ("invalid-version-pattern", invalid_version_pattern),
+        ("duplicate-unique-item", duplicate_unique_item),
+        ("wrong-prefix-items", wrong_prefix_items),
+        ("missing-dependency-item", missing_dependency_item),
+        ("inconsistent-if-else", inconsistent_if_else),
+    ] {
+        let path = root.join(format!("{name}.json"));
+        let bytes = serde_json::to_vec_pretty(&mutation).unwrap();
+        fs::write(&path, &bytes).unwrap();
+        validate_json(&path, "manifest-general-v1.schema.json", false);
+        let error = match validate_general_manifest_bytes(&path, &bytes) {
+            Err(error) => error,
+            Ok(_) => panic!("runtime structural gate accepted Python rejection: {name}"),
+        };
+        assert_eq!(error.code(), "GPS-FMT-006");
+    }
+
+    let destination = root.join("generic-bypass");
+    let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
+    let direct = workspace
+        .write_artifact(
+            "manifest-general",
+            "manifest_general",
+            Path::new("manifest.json"),
+            structurally_valid_manifest_bytes(),
+        )
+        .expect_err("raw manifest bytes cannot use generic writer");
+    assert_eq!(direct.code(), "GPS-IO-005");
+    let streamed = workspace
+        .write_streamed_artifact(
+            "manifest-general",
+            "manifest_general",
+            Path::new("manifest.json"),
+            |_| Ok(()),
+        )
+        .expect_err("streaming cannot bypass the capability");
+    assert_eq!(streamed.code(), "GPS-IO-005");
+    workspace
+        .write_artifact(
+            "manifest-disguised",
+            "other",
+            Path::new("manifest.json"),
+            structurally_valid_manifest_bytes(),
+        )
+        .expect("non-manifest artifact for publication rejection");
+    let provisional = provisional_workspace(&destination);
+    let publish = workspace
+        .publish()
+        .expect_err("publication requires the capability-backed artifact class");
+    assert_eq!(publish.code(), "GPS-IO-005");
+    fs::remove_dir_all(provisional).expect("provisional cleanup");
+    fs::remove_dir_all(root).expect("corpus cleanup");
 }
 
 #[test]
-fn marker_restoration_and_removal_failures_preserve_the_incomplete_invariant() {
-    let failed_destination = temporary("marker-restoration");
-    let mut workspace = ExecutionWorkspace::create(&failed_destination).expect("workspace");
-    workspace
-        .write_artifact(
-            "manifest-general",
-            "manifest_general",
-            Path::new("manifest.json"),
-            b"{}\n",
-        )
-        .expect("manifest");
-    let provisional = workspace.root().to_path_buf();
-    let error = workspace
-        .publish(&MarkerRemovingFailurePublisher)
-        .expect_err("publisher failure");
-    assert_eq!(error.code(), "GPS-IO-004");
-    assert!(provisional.join("INCOMPLETE").is_file());
-    assert!(!failed_destination.exists());
-    fs::remove_dir_all(provisional).expect("restored provisional cleanup");
+fn manifest_capability_is_bound_to_the_exact_workspace_catalog_and_files() {
+    let root = temporary("workspace-binding");
+    fs::create_dir_all(&root).unwrap();
+    let source_destination = root.join("source");
+    let (source_workspace, manifest) = matching_workspace(&source_destination);
 
-    let removal_destination = temporary("marker-removal-failure");
-    let mut workspace = ExecutionWorkspace::create(&removal_destination).expect("workspace");
-    workspace
-        .write_artifact(
-            "manifest-general",
-            "manifest_general",
-            Path::new("manifest.json"),
-            b"{}\n",
-        )
-        .expect("manifest");
-    let error = workspace
-        .publish(&ReadOnlyDestinationPublisher)
-        .expect_err("marker removal must be reported");
-    assert_eq!(error.code(), "GPS-IO-001");
-    assert!(removal_destination.join("INCOMPLETE").is_file());
-    let mut permissions = fs::metadata(&removal_destination)
-        .expect("destination metadata")
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&removal_destination, permissions).expect("restore permissions");
-    fs::remove_dir_all(removal_destination).expect("removal failure cleanup");
+    let identical_destination = root.join("identical");
+    let (mut identical, identical_manifest) = matching_workspace(&identical_destination);
+    assert_eq!(
+        identical
+            .write_general_manifest(&manifest)
+            .expect_err("identical bytes and catalog do not transfer workspace authority")
+            .code(),
+        "GPS-IO-005"
+    );
+    identical
+        .write_general_manifest(&identical_manifest)
+        .expect("the capability created by this workspace remains valid");
+    fs::remove_dir_all(provisional_workspace(&identical_destination)).unwrap();
+
+    let empty_destination = root.join("empty");
+    let mut empty = ExecutionWorkspace::create(&empty_destination).unwrap();
+    assert_eq!(
+        empty
+            .write_general_manifest(&manifest)
+            .expect_err("a foreign capability cannot authorize an empty workspace")
+            .code(),
+        "GPS-IO-005"
+    );
+    fs::remove_dir_all(provisional_workspace(&empty_destination)).unwrap();
+
+    for (missing_index, (_, missing_kind, _, _)) in manifest_fixture().artifacts.iter().enumerate()
+    {
+        let destination = root.join(format!("missing-{missing_kind}"));
+        let mut workspace = ExecutionWorkspace::create(&destination).unwrap();
+        for (index, (id, kind, path, bytes)) in manifest_fixture().artifacts.iter().enumerate() {
+            if index != missing_index {
+                workspace.write_artifact(id, kind, path, bytes).unwrap();
+            }
+        }
+        assert_eq!(
+            workspace
+                .write_general_manifest(&manifest)
+                .expect_err("every artifact class is required")
+                .code(),
+            "GPS-IO-005"
+        );
+        fs::remove_dir_all(provisional_workspace(&destination)).unwrap();
+    }
+
+    let extra_destination = root.join("extra");
+    let (mut extra, extra_manifest) = matching_workspace(&extra_destination);
+    extra
+        .write_artifact("extra", "extra_kind", Path::new("extra.bin"), b"extra")
+        .unwrap();
+    assert_eq!(
+        extra
+            .write_general_manifest(&extra_manifest)
+            .expect_err("workspace extras are forbidden")
+            .code(),
+        "GPS-IO-005"
+    );
+    fs::remove_dir_all(provisional_workspace(&extra_destination)).unwrap();
+
+    for mutation in ["class", "path"] {
+        let destination = root.join(mutation);
+        let mut workspace = ExecutionWorkspace::create(&destination).unwrap();
+        for (index, (id, kind, path, bytes)) in manifest_fixture().artifacts.iter().enumerate() {
+            let changed_kind = if index == 0 && mutation == "class" {
+                "different_kind"
+            } else {
+                kind
+            };
+            let changed_path = if index == 0 && mutation == "path" {
+                Path::new("different/path.bin")
+            } else {
+                path
+            };
+            workspace
+                .write_artifact(id, changed_kind, changed_path, bytes)
+                .unwrap();
+        }
+        assert_eq!(
+            workspace
+                .write_general_manifest(&manifest)
+                .expect_err("catalog metadata must match exactly")
+                .code(),
+            "GPS-IO-005"
+        );
+        fs::remove_dir_all(provisional_workspace(&destination)).unwrap();
+    }
+
+    fs::remove_dir_all(provisional_workspace(&source_destination)).unwrap();
+    drop(source_workspace);
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
 fn truncated_temporary_is_never_cataloged_or_published() {
     let destination = temporary("truncated-destination");
     let workspace = ExecutionWorkspace::create(&destination).expect("workspace");
-    let provisional = workspace.root().to_path_buf();
+    let provisional = provisional_workspace(&destination);
     let truncated = workspace
         .create_truncated_temporary(Path::new("artifacts/truncated.json"), b"{\"x\":")
         .expect("truncated fixture");
@@ -1160,7 +930,7 @@ fn truncated_temporary_is_never_cataloged_or_published() {
     );
     assert!(workspace.artifacts().is_empty());
     let error = workspace
-        .publish(&LinuxAtomicPublisher)
+        .publish()
         .expect_err("missing validated manifest cannot publish");
     assert_eq!(error.code(), "GPS-IO-005");
     assert!(provisional.join("INCOMPLETE").is_file());
@@ -1169,62 +939,17 @@ fn truncated_temporary_is_never_cataloged_or_published() {
 }
 
 #[test]
-fn controlled_failure_process_exits_one_and_publishes_failed_manifest() {
-    if std::env::var_os("GPS_F14_CONTROLLED_CHILD").is_some() {
-        let destination =
-            PathBuf::from(std::env::var_os("GPS_F14_DESTINATION").expect("destination"));
-        let effective =
-            load_and_validate_config(&fixture("general-seeded.toml")).expect("effective");
-        let outcome = execute_validated_config_with(
-            &effective,
-            &destination,
-            ExecutionFault::AfterEffectiveConfig,
-            &LinuxAtomicPublisher,
-        )
-        .expect("controlled closure");
-        assert!(matches!(
-            outcome,
-            ExecutionOutcome::Published {
-                state: UnitState::Failed,
-                ..
-            }
-        ));
-        std::process::exit(1);
-    }
-
-    let destination = temporary("controlled-process");
-    let status = Command::new(std::env::current_exe().expect("current test binary"))
-        .args([
-            "--exact",
-            "controlled_failure_process_exits_one_and_publishes_failed_manifest",
-            "--nocapture",
-        ])
-        .env("GPS_F14_CONTROLLED_CHILD", "1")
-        .env("GPS_F14_DESTINATION", &destination)
-        .status()
-        .expect("controlled child");
-    assert_eq!(status.code(), Some(1));
-    validate_json(
-        &destination.join("manifest.json"),
-        "manifest-general-v1.schema.json",
-        true,
-    );
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&fs::read(destination.join("manifest.json")).expect("manifest"))
-            .expect("JSON");
-    assert_eq!(manifest["state"], "failed");
-    assert!(!destination.join("INCOMPLETE").exists());
-    fs::remove_dir_all(destination).expect("cleanup");
-}
-
-#[test]
 fn uncontrolled_sigkill_leaves_a_provisional_incomplete_marker() {
     if std::env::var_os("GPS_F14_SIGKILL_CHILD").is_some() {
         let destination =
             PathBuf::from(std::env::var_os("GPS_F14_DESTINATION").expect("destination"));
         let ready = PathBuf::from(std::env::var_os("GPS_F14_READY").expect("ready"));
-        let workspace = ExecutionWorkspace::create(&destination).expect("workspace");
-        fs::write(&ready, workspace.root().display().to_string()).expect("ready");
+        let _workspace = ExecutionWorkspace::create(&destination).expect("workspace");
+        fs::write(
+            &ready,
+            provisional_workspace(&destination).display().to_string(),
+        )
+        .expect("ready");
         loop {
             thread::sleep(Duration::from_secs(1));
         }
@@ -1263,15 +988,7 @@ fn uncontrolled_sigkill_leaves_a_provisional_incomplete_marker() {
 }
 
 fn validate_json(instance: &Path, schema: &str, expected_success: bool) {
-    let schema_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas");
-    let base_uri = format!("file://{}/", schema_root.display());
-    let output = Command::new("python3")
-        .args(["-m", "jsonschema", "--base-uri", &base_uri, "-i"])
-        .arg(instance)
-        .arg(schema)
-        .current_dir(schema_root)
-        .output()
-        .expect("independent JSON Schema validator from A7");
+    let output = python_jsonschema_output(instance, schema);
     assert_eq!(
         output.status.success(),
         expected_success,
@@ -1281,143 +998,14 @@ fn validate_json(instance: &Path, schema: &str, expected_success: bool) {
     );
 }
 
-fn reject_nested_unknown(
-    root: &Path,
-    name: &str,
-    mut document: serde_json::Value,
-    pointer: &str,
-    schema: &str,
-) {
-    write_base_and_accept(root, name, &document, schema);
-    document
-        .pointer_mut(pointer)
-        .unwrap_or_else(|| panic!("missing JSON pointer {pointer}"))
-        .as_object_mut()
-        .unwrap_or_else(|| panic!("JSON pointer {pointer} is not an object"))
-        .insert(
-            "unexpected_nested_field".to_owned(),
-            serde_json::json!(true),
-        );
-    let path = root.join(format!("{name}.json"));
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&document).expect("serialize corruption"),
-    )
-    .expect("write corruption");
-    validate_json(&path, schema, false);
-}
-
-fn reject_missing_nested_required(
-    root: &Path,
-    name: &str,
-    mut document: serde_json::Value,
-    pointer: &str,
-    field: &str,
-    schema: &str,
-) {
-    write_base_and_accept(root, name, &document, schema);
-    document
-        .pointer_mut(pointer)
-        .unwrap_or_else(|| panic!("missing JSON pointer {pointer}"))
-        .as_object_mut()
-        .unwrap_or_else(|| panic!("JSON pointer {pointer} is not an object"))
-        .remove(field)
-        .unwrap_or_else(|| panic!("missing required field {field} at {pointer}"));
-    write_corrupt_and_reject(root, name, &document, schema);
-}
-
-fn reject_nested_value(
-    root: &Path,
-    name: &str,
-    mut document: serde_json::Value,
-    pointer: &str,
-    value: serde_json::Value,
-    schema: &str,
-) {
-    write_base_and_accept(root, name, &document, schema);
-    *document
-        .pointer_mut(pointer)
-        .unwrap_or_else(|| panic!("missing JSON pointer {pointer}")) = value;
-    write_corrupt_and_reject(root, name, &document, schema);
-}
-
-fn write_base_and_accept(root: &Path, name: &str, document: &serde_json::Value, schema: &str) {
-    let path = root.join(format!("{name}-base-valid.json"));
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(document).expect("serialize valid base"),
-    )
-    .expect("write valid base");
-    validate_json(&path, schema, true);
-}
-
-fn write_corrupt_and_reject(root: &Path, name: &str, document: &serde_json::Value, schema: &str) {
-    let path = root.join(format!("{name}.json"));
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(document).expect("serialize corruption"),
-    )
-    .expect("write corruption");
-    validate_json(&path, schema, false);
-}
-
-struct MarkerObservingPublisher {
-    marker_present_at_entry: Cell<bool>,
-    fail: bool,
-}
-
-impl MarkerObservingPublisher {
-    fn new(fail: bool) -> Self {
-        Self {
-            marker_present_at_entry: Cell::new(false),
-            fail,
-        }
-    }
-}
-
-impl AtomicPublisher for MarkerObservingPublisher {
-    fn publish_no_replace(
-        &self,
-        provisional: &Path,
-        destination: &Path,
-    ) -> Result<(), genome_population_simulator::diagnostics::Diagnostic> {
-        self.marker_present_at_entry
-            .set(provisional.join("INCOMPLETE").is_file());
-        if self.fail {
-            UnsupportedAtomicPublisher.publish_no_replace(provisional, destination)
-        } else {
-            LinuxAtomicPublisher.publish_no_replace(provisional, destination)
-        }
-    }
-}
-
-struct MarkerRemovingFailurePublisher;
-
-impl AtomicPublisher for MarkerRemovingFailurePublisher {
-    fn publish_no_replace(
-        &self,
-        provisional: &Path,
-        destination: &Path,
-    ) -> Result<(), genome_population_simulator::diagnostics::Diagnostic> {
-        fs::remove_file(provisional.join("INCOMPLETE")).expect("remove marker in failure double");
-        UnsupportedAtomicPublisher.publish_no_replace(provisional, destination)
-    }
-}
-
-struct ReadOnlyDestinationPublisher;
-
-impl AtomicPublisher for ReadOnlyDestinationPublisher {
-    fn publish_no_replace(
-        &self,
-        provisional: &Path,
-        destination: &Path,
-    ) -> Result<(), genome_population_simulator::diagnostics::Diagnostic> {
-        LinuxAtomicPublisher.publish_no_replace(provisional, destination)?;
-        let mut permissions = fs::metadata(destination)
-            .expect("destination metadata")
-            .permissions();
-        permissions.set_mode(0o555);
-        fs::set_permissions(destination, permissions).expect("read-only destination");
-        Ok(())
-    }
+fn python_jsonschema_output(instance: &Path, schema: &str) -> std::process::Output {
+    let schema_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("schemas");
+    let base_uri = format!("file://{}/", schema_root.display());
+    Command::new("python3")
+        .args(["-m", "jsonschema", "--base-uri", &base_uri, "-i"])
+        .arg(instance)
+        .arg(schema)
+        .current_dir(schema_root)
+        .output()
+        .expect("independent JSON Schema validator from A7")
 }

@@ -2,10 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-const DIAGNOSTIC_CATALOG: &str = include_str!("../catalogs/diagnostics-v1.tsv");
+const DIAGNOSTIC_CATALOG_V1: &str = include_str!("../catalogs/diagnostics-v1.tsv");
+const DIAGNOSTIC_CATALOG: &str = include_str!("../catalogs/diagnostics-v2.tsv");
 const DIAGNOSTIC_SCHEMA: &str = include_str!("../schemas/diagnostics-v1.schema.json");
 const SUBSEED_CATALOG_V1: &str = include_str!("../catalogs/subseed-scopes-v1.tsv");
-const SUBSEED_CATALOG: &str = include_str!("../catalogs/subseed-scopes-v2.tsv");
+const SUBSEED_CATALOG_V2: &str = include_str!("../catalogs/subseed-scopes-v2.tsv");
+const SUBSEED_CATALOG: &str = include_str!("../catalogs/subseed-scopes-v3.tsv");
 const ID_CATALOG: &str = include_str!("../catalogs/id-classes-v1.tsv");
 const PARAMETER_CATALOG: &str = include_str!("../catalogs/parameter-families-v1.tsv");
 const SUBSEED_CONTEXT: &str = "genome_population_simulator/v1/subseed";
@@ -14,11 +16,16 @@ const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
 // These fingerprints are the review lock for the published v1 contracts. A
 // deliberate content change must use a new versioned artifact and add a new
 // fingerprint instead of replacing a v1 value here.
-const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 6] = [
+const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 8] = [
     (
         "catalogs/diagnostics-v1.tsv",
-        DIAGNOSTIC_CATALOG,
+        DIAGNOSTIC_CATALOG_V1,
         "4fb2be15e392c8fa9fb8791a5d8821fe14da901f88286711c2fb29d3d0a6997f",
+    ),
+    (
+        "catalogs/diagnostics-v2.tsv",
+        DIAGNOSTIC_CATALOG,
+        "24e6153b152e78236dfc2a3ae84e17f4c7ab733045b934d0fbf715ebcbdab432",
     ),
     (
         "schemas/diagnostics-v1.schema.json",
@@ -32,8 +39,13 @@ const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 6] = [
     ),
     (
         "catalogs/subseed-scopes-v2.tsv",
-        SUBSEED_CATALOG,
+        SUBSEED_CATALOG_V2,
         "c40f812d1645bb11a2e2641cc76a5b6db583f0505e246cb41a24bc0aa554ceff",
+    ),
+    (
+        "catalogs/subseed-scopes-v3.tsv",
+        SUBSEED_CATALOG,
+        "415ead5f7083220953f3795f51da1cc464c41783174d11359d3e0e5759460066",
     ),
     (
         "catalogs/id-classes-v1.tsv",
@@ -79,12 +91,12 @@ fn sha256sum(input: &str) -> String {
 
 #[test]
 fn published_v1_contracts_match_their_reviewed_content() {
-    assert!(DIAGNOSTIC_CATALOG.starts_with("# diagnostic_catalog_version=1\n"));
+    assert!(DIAGNOSTIC_CATALOG.starts_with("# diagnostic_catalog_version=2\n"));
     assert!(SUBSEED_CATALOG_V1.starts_with(&format!(
         "# derivation_version=1\n# context={SUBSEED_CONTEXT}\n"
     )));
     assert!(SUBSEED_CATALOG.starts_with(&format!(
-        "# derivation_version=1\n# catalog_version=2\n# context={SUBSEED_CONTEXT}\n"
+        "# derivation_version=1\n# catalog_version=3\n# context={SUBSEED_CONTEXT}\n"
     )));
     assert!(ID_CATALOG.starts_with(&format!("# derivation_version=1\n# context={ID_CONTEXT}\n")));
     assert!(PARAMETER_CATALOG.starts_with("# parameter_catalog_version=1\n"));
@@ -179,7 +191,7 @@ fn validate_diagnostic_catalog(catalog: &str) -> Result<usize, CatalogError> {
 
 #[test]
 fn published_diagnostic_catalog_is_well_formed_and_covers_every_category() {
-    assert_eq!(validate_diagnostic_catalog(DIAGNOSTIC_CATALOG), Ok(40));
+    assert_eq!(validate_diagnostic_catalog(DIAGNOSTIC_CATALOG), Ok(46));
     for category in [
         "CONF", "INPUT", "FMT", "DOMAIN", "RES", "TOOL", "IO", "INTERNAL",
     ] {
@@ -453,7 +465,7 @@ fn subseed_vectors_publish_exact_canonical_material() {
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .collect();
-    assert_eq!(rows.len(), 5);
+    assert_eq!(rows.len(), 6);
     let mut scopes = BTreeSet::new();
     for row in rows {
         let fields: Vec<_> = row.split('|').collect();
@@ -472,6 +484,7 @@ fn subseed_vectors_publish_exact_canonical_material() {
             "biological_process",
             "initial_population",
             "reference_generation",
+            "reference_reduction",
             "sampling",
             "technical_event"
         ])

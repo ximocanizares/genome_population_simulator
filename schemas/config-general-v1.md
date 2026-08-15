@@ -10,7 +10,8 @@ schema_version = "1"
 Las claves raíz admitidas desde F1.3 son `config_kind`, `schema_version`, `route`,
 `seed`, `normalization_tolerance`, `reference`, `scenarios`, `events`, `individuals`,
 `populations`, `subpopulations`, `phases`, `groups`, `blocks`, `rules` y
-`frequency_sets`. No se admiten claves desconocidas ni duplicadas.
+`frequency_sets`, además de `reduced_references`. No se admiten campos desconocidos
+ni claves duplicadas.
 
 - `route` es exactamente `direct`, `evolution` o `families`.
 - `seed` es opcional y, cuando se declara, contiene exactamente una semilla
@@ -22,6 +23,13 @@ Las claves raíz admitidas desde F1.3 son `config_kind`, `schema_version`, `rout
   `sequences` y `composition`; `kind = "supplied"` exige `id`, `fasta` y
   `sequences`. Cada secuencia es una tabla con `id`, `class`, `length` y
   `ploidy` opcional. `class` es `chromosome` o `scaffold`.
+- `reduced_references` es una lista opcional de tablas. Cada tabla exige `id`,
+  `source_reference_id`, `region_size_bases` entero positivo y exactamente uno
+  entre `target_bases` entero positivo o `reduction_percent` decimal finito en
+  `(0,100)`. La referencia fuente debe ser la única referencia suministrada del
+  documento y el ID derivado debe ser distinto. El porcentaje expresa bases
+  eliminadas; su literal TOML se conserva y el objetivo retenido se calcula sin
+  convertirlo a `f64`.
 - `scenarios` es una lista de tablas con `id`, `path` y `route`. La vía directa
   exige cero escenarios; las vías evolutiva y de familias exigen al menos uno
   de su misma vía.

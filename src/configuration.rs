@@ -283,6 +283,22 @@ pub struct DeclaredReference {
     pub sequences: Vec<DeclaredSequence>,
 }
 
+/// Objetivo declarado de una referencia reducida. Las variantes son
+/// excluyentes por construcción después de atravesar el adaptador TOML.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeclaredReductionTarget {
+    Bases(Located<u64>),
+    ReductionPercent(DeclaredNumber),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredReducedReference {
+    pub id: Located<String>,
+    pub source_reference_id: Located<String>,
+    pub region_size_bases: Located<u64>,
+    pub target: DeclaredReductionTarget,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScenarioLink {
     pub id: Located<String>,
@@ -297,6 +313,7 @@ pub struct DeclaredGeneralConfig {
     seed: Option<Located<String>>,
     normalization_tolerance: Option<DeclaredNumber>,
     reference: DeclaredReference,
+    reduced_references: Vec<DeclaredReducedReference>,
     scenarios: Vec<ScenarioLink>,
     events: Vec<DeclaredEntity>,
     individuals: Vec<DeclaredEntity>,
@@ -315,6 +332,7 @@ pub(crate) struct DeclaredGeneralParts {
     pub seed: Option<Located<String>>,
     pub normalization_tolerance: Option<DeclaredNumber>,
     pub reference: DeclaredReference,
+    pub reduced_references: Vec<DeclaredReducedReference>,
     pub scenarios: Vec<ScenarioLink>,
     pub events: Vec<DeclaredEntity>,
     pub individuals: Vec<DeclaredEntity>,
@@ -335,6 +353,7 @@ impl DeclaredGeneralConfig {
             seed,
             normalization_tolerance,
             reference,
+            reduced_references,
             scenarios,
             events,
             individuals,
@@ -352,6 +371,7 @@ impl DeclaredGeneralConfig {
             seed,
             normalization_tolerance,
             reference,
+            reduced_references,
             scenarios,
             events,
             individuals,
@@ -388,6 +408,11 @@ impl DeclaredGeneralConfig {
     #[must_use]
     pub const fn reference(&self) -> &DeclaredReference {
         &self.reference
+    }
+
+    #[must_use]
+    pub fn reduced_references(&self) -> &[DeclaredReducedReference] {
+        &self.reduced_references
     }
 
     #[must_use]

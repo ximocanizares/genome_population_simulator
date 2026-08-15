@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reference-reduction-map-v1.schema.json",
+  "title": "Mapa de coordenadas de referencia reducida v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["document_kind", "schema_version", "source_reference_id", "derived_reference_id", "algorithm", "segments"],
+  "properties": {
+    "document_kind": { "const": "reference_reduction_map" },
+    "schema_version": { "const": "1" },
+    "source_reference_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "derived_reference_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "algorithm": { "const": "reduced_reference_selection_v1" },
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["materialization_order", "selection_order", "segment_class", "sequence_id", "sequence_class", "source_interval", "derived_interval", "orientation"],
+        "properties": {
+          "materialization_order": { "type": "integer", "minimum": 1 },
+          "selection_order": { "type": "integer", "minimum": 1 },
+          "segment_class": { "enum": ["full", "residual"] },
+          "sequence_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+          "sequence_class": { "enum": ["chromosome", "scaffold"] },
+          "source_interval": { "$ref": "#/$defs/closed_interval_1" },
+          "derived_interval": { "$ref": "#/$defs/closed_interval_1" },
+          "orientation": { "const": "forward" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "closed_interval_1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "type": "integer", "minimum": 1 },
+        "end": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
