@@ -1,7 +1,7 @@
 # Hoja de ruta del simulador de genomas y poblaciones
 
 - **Versión:** 0.1
-- **Estado:** vigente; F0 aprobada, F1 ampliada con F1.6 y F2.0 pendiente de sus puertas
+- **Estado:** vigente; F0 aprobada, F1 cerrada en `e14705a`/`efca265`; F2 corregida y pendiente de nueva revisión adversarial
 - **Fecha:** 13 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
@@ -179,7 +179,10 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
 
 **Hitos:**
 
-- **F2.0. Aplicación Marimo base.** Ejecutar la puerta experimental F2.0.2 de
+- **F2.0. Aplicación Marimo base.** Antes de `validate`, ampliar Rust con
+  `ConfigKind::Scenario`, enlaces general→0..N, identidad/ruta/digest y
+  preservación opaca; la vía directa usa el literal interno reservado
+  `scenario_id = "direct"`. Ejecutar la puerta experimental F2.0.2 de
   DTC-058 —que ya resuelve DTPD-117— antes de incorporar las candidatas;
   implementar las nueve pestañas mínimas con `General/Ejecución`, `Genoma` y
   `Revisar y ejecutar` activas para las capacidades F1, incluida F1.6; importar,
@@ -188,8 +191,9 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
   exportación atómicas, rutas relativas canónicas, aislamiento/TOCTOU,
   preservación opaca y límites DTC-069; invocar `validate`/`run` sin shell y demostrar
   equivalencia, invalidación, salida segura y accesibilidad local. DTC-073
-  separa capacidades catalogadas/disponibles y DTC-074 exige evidencia real,
-  diferenciada, de Ubuntu 24.04 nativo y WSL2.
+  separa capacidades catalogadas/disponibles. F2 prueba instalación desde
+  repositorio y arranque local/offline; DTC-074, `.tar.gz`, OCI y evidencia
+  oficial de plataforma/distribución se cierran en F9.
 - **F2.1. Estado haplotípico.** Representar copias cromosómicas, fase, dosis y
   procedencia mediante DTC-056 y el modelo híbrido DTC-061, sin duplicar
   innecesariamente secuencias completas; conservar `N` y preparar la proyección
@@ -699,7 +703,9 @@ publicarse.
 - **F9.6. Exportación autocontenida.** Empaquetar eventos con referencias,
   índices, configuraciones, manifiestos y sumas de comprobación.
 - **F9.7. Preparación de publicación.** Completar documentación, ejemplos,
-  pruebas de regresión y proceso reproducible de construcción.
+  pruebas de regresión y proceso reproducible de construcción; construir y
+  validar oficialmente `.tar.gz` y OCI, y ejecutar la evidencia de plataforma
+  y distribución detectada de DTC-074.
 
 **Resultado de salida:** primera versión candidata a publicación.
 

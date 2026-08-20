@@ -4,10 +4,11 @@
 
 - **Título:** plan detallado de F2, verdad genómica mínima.
 - **Versión del plan:** 0.1.
-- **Fecha:** 13 de agosto de 2026.
-- **Estado:** plan técnico aprobado condicionalmente por la revisión adversarial
-  F2 0.4; la condición externa se cumplió al cerrar F1 en `e14705a`. F2 no se ha
-  iniciado y requiere aprobación explícita del usuario para ejecutarse.
+- **Fecha:** 20 de agosto de 2026.
+- **Estado:** corregido después del cierre simplificado de F1; pendiente de una
+  nueva revisión adversarial y de aprobación explícita. La revisión F2 0.4 es
+  histórica y no aprueba esta versión, porque precede a DTC-078 y a esta
+  corrección. F2 no se ha iniciado.
 - **Ámbito temporal:** únicamente F2.0–F2.5.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
@@ -16,17 +17,19 @@
   [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md),
   [trazabilidad-requisitos-0.1.md](./trazabilidad-requisitos-0.1.md),
   [registro-ampliaciones-futuras-0.1.md](./registro-ampliaciones-futuras-0.1.md)
-  y [plan-implementacion-f1-0.1.md](./plan-implementacion-f1-0.1.md).
+  y [plan-reimplementacion-f1-0.2.md](./plan-reimplementacion-f1-0.2.md).
 - **Decisiones confirmadas aplicables:** DTC-001, DTC-003, DTC-004, DTC-006,
   DTC-010, DTC-011, DTC-013, DTC-020 a DTC-022, DTC-024, DTC-031 a
-  DTC-049 y DTC-051 a DTC-075.
+  DTC-049 y DTC-051 a DTC-075, DTC-078.
 - **Decisiones resueltas y puertas internas:** DTPD-102, DTPD-103, DTPD-120 y
   DTPD-121 están resueltas por DTC-061 y DTC-062 a DTC-068. REQ-CONF-130 queda
   limitado en F2 a HWE y F diploide; su distribución explícita cierra en F6.2.
   DTC-069 resuelve la unidad visible de importación/exportación Marimo.
   DTC-058 resuelve DTPD-117 sin alternativas técnicas abiertas, pero F2.0 queda
   bloqueada hasta que F2.0.2 verifique y apruebe las versiones candidatas, el
-  entorno, la distribución y el contrato versionado con el binario. DTC-054
+  entorno local/offline y el contrato versionado con el binario. La construcción
+  y validación oficial de `.tar.gz`, OCI y plataforma/distribución se trasladan
+  a F9. DTC-054
   resuelve DTPD-118 y fija para
   F2.2/F2.3 los formatos de matriz/espectro, el algoritmo reproducible, los
   perfiles versionados y las excepciones limitadas. DTC-055 resuelve DTPD-119 y
@@ -34,17 +37,16 @@
   consume dentro de F2. DTC-055 ya cierra para F6.4 el constructor común y su
   variante uniforme; F7.1 lo reutilizará después para la recombinación meiótica
   y DTPD-111 solo resolverá mapas y semántica meiótica.
-- **Puerta externa resuelta:** RAF2-027 queda cerrado mediante la aprobación y
-  publicación de F1 en `e14705a`. RAF2-028 a RAF2-044 quedan
-  resueltos mediante DTC-065/066 y DTC-070 a DTC-075. Los hallazgos anteriores ya
-  resueltos documentalmente. La revisión adversarial F2 0.4 confirmó que el plan
-  corregido no conserva bloqueantes propios.
+- **Base cerrada y corrección pendiente:** F1 está cerrada en `e14705a` y su
+  cierre documental en `efca265`. RAF2-027 queda satisfecho por esa base;
+  RAF2-028 a RAF2-044 conservan sus decisiones. Esta corrección sustituye las
+  premisas F1 retiradas; no cierra una nueva revisión adversarial de F2.
 
 Todas las casillas permanecen abiertas. El documento ordena trabajo futuro: no
   inicia F2, no resuelve decisiones pendientes, no selecciona
 crates, formatos ni herramientas externas no confirmados y no autoriza commits.
-Las versiones candidatas de DTC-058 son la única selección concreta añadida y
-siguen sujetas a F2.0.2. F2 continúa sin aprobarse.
+Las versiones candidatas de DTC-058 siguen sujetas a F2.0.2. F2 continúa sin
+aprobarse ni autorizada para iniciar.
 
 ## 2. Resultado y alcance
 
@@ -80,9 +82,10 @@ VCF como fuente de verdad.
 - Conservación literal de `N`: un SNP nunca tiene origen ni destino `N`, una
   inserción aleatoria usa solo `A/C/G/T`, y una inserción explícita o copiada
   puede conservar `N`.
-- Configuración declarada, validada y efectiva del recorrido directo, reutilizando
-  el resolvedor de reglas, IDs tipados, subsemillas locales, integridad,
-  manifiestos y publicación que cierre F1.
+- Configuración declarada, validada y efectiva del recorrido directo, ampliando
+  la frontera mínima F1 solo con los tipos, relaciones e IDs que tengan su
+  primer consumidor F2; reutiliza sintaxis TOML, derivación RNG, integridad,
+  manifiesto general y publicación F1, sin suponer reglas ni resolvedores F1.
 - Verdad estructurada obligatoria e independiente del VCF, y un VCF de verdad
   mínimo con GT faseado, dosis correcta, orden de referencia, alelos derivados
   de la verdad y validación externa independiente.
@@ -118,9 +121,8 @@ VCF como fuente de verdad.
 
 ## 3. Orden, reutilización y fronteras
 
-1. Cerrar F1.6 y F1, implementando DTC-056 y el servicio común de coordenadas, y
-   congelar su línea base antes de modificar contratos de dominio,
-   configuración, referencia, aleatoriedad o publicación.
+1. Partir exclusivamente de F1 cerrado en `e14705a` y de su cierre documental
+   `efca265`; la autoridad de planificación F1 es `plan-reimplementacion-f1-0.2`.
 2. Validar DTC-058 en F2.0.2 y cerrar F2.0 antes de F2.1. Consumir sin reabrir
    DTC-061 para implementar el estado haplotípico y `truth.jsonl`; consumir
    DTC-062 a DTC-066 como resolución completa de DTPD-103 antes de implementar
@@ -129,9 +131,12 @@ VCF como fuente de verdad.
    en F1.6. Las fronteras traducen la base 1 cerrada configurada; ningún
    adaptador ni algoritmo realiza conversiones implícitas ni abre otra
    representación interna.
-4. Extender `DeclaredConfig` y `EffectiveConfig`, el catálogo `ParameterKey`,
-   `ResolutionContext` y los IDs tipados existentes. No crear un segundo parser,
-   resolvedor, catálogo de semillas, mecanismo de hash o publicador.
+4. Extender `DeclaredConfig` y `EffectiveConfig` desde su superficie mínima F1.
+   F2 crea el primer catálogo/formas de reglas y el normalizador solo cuando
+   haya consumidores reales; no presupone `ParameterKey`, `ResolutionContext`,
+   `ResolutionDomain` ni `resolution-evidence` existentes. Reutiliza solo la
+   sintaxis TOML, derivación RNG, detección de colisiones de IDs, hashes y
+   publicación realmente cerrados en F1.
 5. Crear primero verdad de dominio y materialización; derivar después el fichero
    estructurado y, por último, el VCF. Ninguna salida técnica se convierte en
    estado canónico.
@@ -144,19 +149,15 @@ VCF como fuente de verdad.
 8. Terminar cada hito con una pausa obligatoria. Un hito consumidor no comienza
    mientras la revisión o las evidencias del productor estén pendientes.
 
-### 3.1. Línea base observada, no garantía de cierre
+### 3.1. Línea base cerrada y frontera de extensión
 
-El árbol actual ya contiene el parser TOML, `DeclaredConfig`, `EffectiveConfig`,
-el resolvedor de reglas con `ParameterKey::VariantRate`, selectores espaciales,
-diagnósticos, RNG ChaCha12 local y configuración de Rust 1.97.1/edición 2024.
-F1.4 está aprobada; sus IDs tipados, SHA-256, publicación y manifiestos pueden
-reutilizarse después de congelar la línea base completa. F1.5 está
-implementada y publicada. F1.6 declara corregidos sus hallazgos, pero continúa
-en revisión independiente; ni su pausa ni el cierre global de F1 están
-aprobados. Por ello, ningún contrato F1 se congela todavía como línea base F2.
-`src/domain.rs` aún no constituye un modelo
-genómico. En el manifiesto actual no hay una dependencia aprobada para Poisson,
-serialización de verdad ni VCF; este plan no presupone ninguna.
+F1 está cerrada en `e14705a` y documentada en `efca265`. Su base reutilizable
+es deliberadamente mínima: TOML general para semilla, referencia y reducciones;
+RNG v1–v3 para `reference_generation` y `reference_reduction`; IDs, SHA-256,
+manifiesto general y publicación local. No existen aún vía, `scenario`,
+ploidía, reglas, `ParameterKey`, `ResolutionContext`, dominio de resolución,
+evidencia de resolución, eventos ni catálogos de locus/posición. F2 no supone
+dependencias para Poisson, JSONL o VCF antes de evaluarlas.
 
 ## 4. Prerrequisitos, decisiones y comprobaciones comunes
 
@@ -211,12 +212,11 @@ trazabilidad.
   dependencias en `pyproject.toml`, resolución exacta en `uv.lock`, entorno
   local `.venv` excluido de Git y reproducción mediante `uv sync --frozen`,
   sin paquetes globales ni instalación automática de paquetes desde Marimo.
-  La app, `pyproject.toml` y `uv.lock` se incluyen en el repositorio y en el
-  `.tar.gz` oficial junto al lanzador único
+  La app, `pyproject.toml` y `uv.lock` se incluyen en el repositorio junto al lanzador único
   `genome-population-simulator-ui`. Su suborden `install` crea `.venv` y `run`
   no descarga ni actualiza; el entorno no se distribuye y Marimo no se incrusta
-  en Rust. La imagen OCI de v1 permanece
-  exclusivamente CLI y no incluye Marimo, Python, `uv` ni un puerto UI. El
+  en Rust. La construcción/validación oficial de `.tar.gz` e imagen OCI se
+  traslada a F9. El
   enlace es exclusivamente `127.0.0.1`, sin `0.0.0.0`, interfaces LAN, acceso
   remoto ni configuración para ampliar la superficie; WSL2 accede mediante
   `localhost` desde el navegador de Windows. El puerto predeterminado es 2718;
@@ -310,6 +310,13 @@ validar y lanzar todas las capacidades cerradas en F1/F1.6 mediante el mismo
 TOML y binario, sin duplicar semántica y con las nueve pestañas preparadas para
 las ampliaciones F2–F9.
 
+- ☐ F2.0.0. Ampliar en Rust la frontera mínima F1 para el conjunto de configuración F2 antes de invocar `validate`.
+  - Depende de: F1 cerrado en `e14705a`, cierre documental `efca265` y aprobación futura de inicio F2.
+  - Procede de: DTC-034, DTC-036, DTC-037, DTC-071 y DTC-078; REQ-CONF-01, REQ-CONF-07, REQ-CONF-09/10 y REQ-UI-06/07.
+  - Cambia: crea `ConfigKind::Scenario`, enlaces general→0..N escenarios, identidad, ruta relativa y digest de cada documento, y preservación opaca; para la vía directa sin documento de escenario fija internamente `scenario_id = "direct"`, reservado, no biológico, no aportable por la persona usuaria ni utilizable por un escenario real, y lo registra en `EffectiveConfig`, manifiesto general y contexto RNG. No activa fases, cruces, eventos ni reglas sin consumidor.
+  - Se comprueba con: pruebas Rust para 0/1/N escenarios, enlaces, ruta/digest, campos opacos, rechazo de `scenario_id = "direct"` externo o escenario real con ese ID, y paridad de `EffectiveConfig`/manifiesto/contexto RNG; ninguna ruta alcanza semántica de fases, cruces, eventos o reglas.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.0`; debe terminar con código 0 y escribir `evidence/f2/F2.0.0/result.json` con `status = "passed"`.
+
 - ☐ F2.0.1. Crear el ejecutor y registro uniforme de evidencia de F2.
   - Depende de: cierre y commit base de F1, árbol atribuido y aprobación de este plan; no inicia producto F2.
   - Procede de: RAF2-023 y reglas de evidencia de §4.4.
@@ -331,11 +338,11 @@ las ampliaciones F2–F9.
   - Se comprueba con: `uv sync --frozen --python 3.14.7`, `uv run --frozen python -VV`, `git check-ignore .venv` y `./scripts/verify-f2-step F2.0.3`; lock divergente falla sin actualizar y las versiones coinciden exactamente.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.3`; debe terminar con código 0 y escribir `evidence/f2/F2.0.3/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.0.4. Crear el esqueleto de entrega local de la aplicación.
+- ☐ F2.0.4. Crear el esqueleto local de la aplicación en el repositorio.
   - Depende de: F2.0.3.
   - Procede de: DTC-042, DTC-045 y DTC-058; REQ-UI-01 y REQ-UI-12.
-  - Cambia: aplicación vacía, directorio de contratos y lanzador `genome-population-simulator-ui` en repositorio y receta `.tar.gz`; excluye `.venv`, CPython y `uv`, sin incorporar aún controles ni protocolo de F2.0.8/F2.0.14.
-  - Se comprueba con: `./scripts/build-distribution.sh --format tar.gz --output evidence/f2/F2.0.4/package` y `./scripts/verify-f2-step F2.0.4`; listado/extracción independiente confirma contenidos y exclusiones exactos.
+  - Cambia: aplicación vacía, directorio de contratos y lanzador `genome-population-simulator-ui` en el repositorio; excluye `.venv`, CPython y `uv`, sin incorporar aún controles ni protocolo de F2.0.8/F2.0.14. No construye una entrega oficial.
+  - Se comprueba con: instalación desde un clon local mediante `uv sync --frozen`, inspección del árbol versionado y `./scripts/verify-f2-step F2.0.4`; confirma contenidos y exclusiones sin producir `.tar.gz` u OCI.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.4`; debe terminar con código 0 y escribir `evidence/f2/F2.0.4/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
 - ☐ F2.0.5. Implementar el ciclo de arranque local y navegador.
@@ -345,24 +352,24 @@ las ampliaciones F2–F9.
   - Se comprueba con: `./scripts/test-ui-launcher --bind 127.0.0.1 --port 2718 --evidence evidence/f2/F2.0.5` y `./scripts/verify-f2-step F2.0.5`; cubre bordes de puerto, colisión, `0.0.0.0` prohibido, apertura/fallo/`--no-open` y ausencia de `run` Rust.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.5`; debe terminar con código 0 y escribir `evidence/f2/F2.0.5/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.0.6. Demostrar arranque sin red y separación de la imagen OCI.
+- ☐ F2.0.6. Demostrar arranque local sin red después de instalar desde el repositorio.
   - Depende de: F2.0.4–F2.0.5.
-  - Procede de: DTC-042, DTC-043 y DTC-058.
-  - Cambia: prueba reproducible posterior a instalación que bloquea red durante el arranque; receta OCI continúa CLI y excluye aplicación, Python, `uv` y puerto UI.
-  - Se comprueba con: `./scripts/test-ui-offline --launcher ./genome-population-simulator-ui --evidence evidence/f2/F2.0.6`, `./scripts/inspect-distribution.sh --oci --expect-cli-only` y `./scripts/verify-f2-step F2.0.6`; toda descarga/actualización o contenido UI en OCI falla.
+  - Procede de: DTC-043 y DTC-058.
+  - Cambia: prueba reproducible posterior a instalación desde el repositorio que bloquea red durante el arranque; no construye ni inspecciona OCI.
+  - Se comprueba con: `./scripts/test-ui-offline --launcher ./genome-population-simulator-ui --evidence evidence/f2/F2.0.6` y `./scripts/verify-f2-step F2.0.6`; toda descarga o actualización durante el arranque falla.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.6`; debe terminar con código 0 y escribir `evidence/f2/F2.0.6/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.0.7. Cerrar la evidencia de entorno en Ubuntu y WSL2.
+- ☐ F2.0.7. Comprobar de forma local el arranque en Ubuntu/WSL2.
   - Depende de: F2.0.2–F2.0.6.
-  - Procede de: DTC-042, DTC-058 y DTC-074 (resuelve RAF2-035); REQ-UI-13.
-  - Cambia: verificador que detecta y registra `/etc/os-release`, kernel, arquitectura, triple, WSL2, montaje y metadatos CI antes de compararlos con `--expect-platform`; rechaza etiquetas discordantes. Produce dossiers separados para Ubuntu 24.04 nativo y WSL2/ext4 con instalación, arranque, navegador, permisos y binario falso/real; no declara Windows nativo ni WSL2 como plataforma de publicación.
-  - Se comprueba con: un job Ubuntu 24.04 nativo identificable ejecuta `./scripts/verify-ui-platform --expect-platform ubuntu-24.04-native --evidence evidence/f2/F2.0.7/ubuntu`; el host WSL2 ejecuta `./scripts/verify-ui-platform --expect-platform wsl2 --evidence evidence/f2/F2.0.7/wsl2`; intercambiar expectativas falla. `./scripts/verify-f2-step F2.0.7` exige hechos detectados, URL/job/commit nativos y separa evidencia automática de actas manuales.
+  - Procede de: DTC-058; REQ-UI-13.
+  - Cambia: actas locales separadas de instalación desde repositorio, arranque, navegador, permisos y binario falso/real en Ubuntu Linux y WSL2/ext4. No constituye evidencia oficial de plataforma, distribución ni publicación; DTC-074 y ese gate quedan en F9.
+  - Se comprueba con: los recorridos locales identifican su entorno real y registran resultado/limitaciones; `./scripts/verify-f2-step F2.0.7` exige acta automática y manual sin etiquetarla como validación oficial.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.7`; debe terminar con código 0 y escribir `evidence/f2/F2.0.7/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.0.8. Publicar el contrato versionado aplicación↔esquema↔catálogos↔binario.
-  - Depende de: F2.0.2–F2.0.7 y esquemas/catálogos cerrados en F1.6.
+- ☐ F2.0.8. Crear el primer contrato versionado aplicación↔esquema↔catálogos↔binario.
+  - Depende de: F2.0.0–F2.0.7.
   - Procede de: REQ-UI-01, REQ-UI-09 y REQ-UI-12; DTC-036, DTC-051 y DTC-073 (resuelve RAF2-034).
-  - Cambia: directorio oficial con manifiesto, esquemas, catálogos, capacidades, versiones y SHA-256; `--simulator-bin` es una selección estricta, en su ausencia se usa el binario del paquete si existe y solo si no está incluido se resuelve una única ruta de `PATH` al inicio. Una fuente seleccionada nunca cambia tras ausencia no permitida, falta de ejecución, fallo o incompatibilidad. `capabilities --format json` usa protocolo `"1"` y separa `catalogued_authorizations` de `available_authorizations`; en F2.0 ambas opciones están catalogadas y ninguna disponible. Marimo solo muestra la intersección y registra ruta, versión y SHA-256 en sesión —nunca TOML/`EffectiveConfig`—.
+  - Cambia: primer directorio versionado con manifiesto, esquemas, catálogo y `capabilities --format json`, versiones y SHA-256; no extiende un catálogo F1 inexistente. `--simulator-bin` es una selección estricta. El protocolo `"1"` separa `catalogued_authorizations` de `available_authorizations`; en F2.0 ambas opciones están catalogadas y ninguna disponible. Marimo solo muestra la intersección y registra ruta, versión y SHA-256 en sesión —nunca TOML/`EffectiveConfig`—.
   - Se comprueba con: rutas/fallos sin *fallback*; `available` no subconjunto, duplicado, opción desconocida o disponibilidad sin parser/semántica fallan; una opción solo catalogada no aparece ni se transmite. También cubre protocolo frente a *semver*, contratos compatible/anterior/posterior/ausente/corrupto/intercambiado y modo diagnóstico sin búsqueda externa ni mezcla.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.8`; debe terminar con código 0 y escribir `evidence/f2/F2.0.8/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
@@ -380,18 +387,18 @@ las ampliaciones F2–F9.
   - Se comprueba con: editar/añadir/quitar/reordenar/renombrar invalida instantánea y ejecución; reiniciar pierde cambios no exportados; permisos, mismo UID y limpieza segura de temporales; la app nunca calcula regla ganadora, valor efectivo o verdad.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.10`; debe terminar con código 0 y escribir `evidence/f2/F2.0.10/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.0.11. Cubrir con controles tipados todas las opciones escalares F1/F1.6 de General y Genoma.
+- ☐ F2.0.11. Cubrir con controles tipados solo referencia, secuencias y reducciones cerradas en F1.
   - Depende de: F2.0.8–F2.0.10.
   - Procede de: REQ-UI-01, REQ-UI-03 y REQ-CONF-124 a REQ-CONF-127; DTC-050/DTC-051.
-  - Cambia: controles de clase/versión, vía, seed, referencia simulada/suministrada/reducida, IDs, clases, tamaños, `region_size_bases`, unión de objetivo y opciones de salida existentes, con unidad normativa en bases y ayuda en kb.
+  - Cambia: controles de clase/versión, seed, referencia simulada/suministrada/reducida, IDs, clases, tamaños, `region_size_bases`, unión de objetivo y opciones de salida F1, con unidad normativa en bases y ayuda en kb. Vía, reglas y eventos permanecen indisponibles.
   - Se comprueba con: matriz opción F1/F1.6→pestaña/control/campo TOML, límites y exclusividad de reducción, conversión visual kb↔bases sin pérdida y ausencia de opción implementada solo en TOML.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.11`; debe terminar con código 0 y escribir `evidence/f2/F2.0.11/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.0.12. Implementar tablas editables para secuencias, eventos, reglas y demás listas F1.
+- ☐ F2.0.12. Implementar tablas editables solo para secuencias y reducciones F1.
   - Depende de: F2.0.9–F2.0.11.
   - Procede de: REQ-UI-04, REQ-UI-05 y DTC-051.
-  - Cambia: tablas con añadir/eliminar/reordenar, IDs y orden visibles y editores de selectores/ámbitos permitidos según catálogo; no concede precedencia por orden accidental de celdas.
-  - Se comprueba con: alta/baja/reordenación, duplicados, región/locus, selector no admitido y comparación del TOML resultante con fixtures manuales equivalentes.
+  - Cambia: tablas con añadir/eliminar/reordenar, IDs y orden visibles de secuencias y reducciones. Vía, reglas, selectores, eventos y sus listas no existen aún y se muestran como indisponibles hasta su primer consumidor; no concede precedencia por orden accidental de celdas.
+  - Se comprueba con: alta/baja/reordenación, duplicados y comparación del TOML F1 resultante con fixtures manuales equivalentes; las rutas de regla, selector y evento permanecen ausentes.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.12`; debe terminar con código 0 y escribir `evidence/f2/F2.0.12/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
 - ☐ F2.0.13. Cerrar la importación/exportación atómica del directorio autocontenido DTC-069.
@@ -488,17 +495,17 @@ las ampliaciones F2–F9.
 - ☐ F2.0.18. Completar equivalencia y trazabilidad de F2.0.
   - Depende de: F2.0.1–F2.0.17.
   - Procede de: REQ-UI-01 a REQ-UI-13, REQ-VAL-54 y ACE-114/115.
-  - Cambia: 14 casos `TEST-REQ-*`, matriz opción→control, pruebas UI→TOML→binario y expediente DTPD-117; inventario de entrega confirma UI en repositorio/`.tar.gz` y su exclusión deliberada de OCI; no marca controles futuros como implementados.
-  - Se comprueba con: par UI/manual para cada capacidad F1/F1.6 y general+0..N escenarios con igual `EffectiveConfig`/diagnóstico; puertas Python/Rust/navegador, extracción del `.tar.gz`, arranque CLI OCI sin Python/Marimo/puerto UI y recuento de 14 REQ sin huérfanos.
+  - Cambia: 14 casos `TEST-REQ-*`, matriz opción→control, pruebas UI→TOML→binario y expediente DTPD-117; inventario del repositorio confirma la UI y no marca controles futuros como implementados. La entrega oficial queda en F9.
+  - Se comprueba con: par UI/manual para referencia, secuencias y reducciones F1, y general+0..N escenarios con igual `EffectiveConfig`/diagnóstico; puertas Python/Rust/navegador, arranque local/offline y recuento de 14 REQ sin huérfanos. `.tar.gz`/OCI y evidencia oficial quedan fuera de F2.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.0.18`; debe terminar con código 0 y escribir `evidence/f2/F2.0.18/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
 > **PAUSA-F2.0 — cierre obligatorio de F2.0.** No iniciar F2.1 hasta superar y aprobar la puerta
-> experimental F2.0.2 de DTC-058, la equivalencia de todas las opciones F1/F1.6, el
+> experimental F2.0.2 de DTC-058, la equivalencia de referencia, secuencias y reducciones F1, el
 > emparejamiento de contratos, la invocación sin *shell* y la cancelación, la
 > autoría/exportación autoconsistente del conjunto TOML, la invalidación tras
 > cambiar cualquier documento/enlace, el destino no-clobber, los límites de
-> registros, la seguridad local, la accesibilidad y las entregas diferenciadas
-> `.tar.gz`/OCI. RAF2-001 y RAF2-027 están resueltos; este último mediante el
+> registros, la seguridad local y la accesibilidad. Las entregas diferenciadas
+> `.tar.gz`/OCI y la evidencia oficial de DTC-074 pertenecen a F9. RAF2-001 y RAF2-027 están resueltos; este último mediante el
 > cierre de F1 en `e14705a`. RAF2-004 y RAF2-007 se resuelven
 > mediante las reasignaciones y pruebas negativas explícitas de este plan.
 
@@ -627,17 +634,24 @@ genotipos.
   - Se comprueba con: ejemplos de las tres rutas y rechazo de fuentes simultáneas, perfil alélico ausente, más de un modo de recuento, densidad SNP individual, VCF y campos futuros.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.5`; debe terminar con código 0 y escribir `evidence/f2/F2.2.5/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.2.6. Extender configuración declarada y parser conservando literales y ubicaciones.
+- ☐ F2.2.6. Introducir la autoría F2 de tolerancia general y las primeras reglas/formas necesarias.
   - Depende de: F2.2.3–F2.2.5.
   - Procede de: DTC-034, DTC-036, DTC-044 y DTC-052; REQ-CONF-128, REQ-CONF-129 y REQ-DIR-03.
-  - Cambia: `DeclaredConfig`, adaptador TOML y diagnósticos para matriz, metadatos, espectros, regiones y eventos pequeños, sin construir verdad, calcular digests ni normalizar silenciosamente.
+  - Cambia: `DeclaredConfig`, adaptador TOML y diagnósticos para tolerancia general, matriz, metadatos, espectros, regiones, indels y población de origen; conserva literales y ubicaciones sin construir verdad, calcular digests ni normalizar silenciosamente, y no presupone un resolvedor o `ParameterKey` F1.
   - Se comprueba con: parsing de cada forma, claves desconocidas/duplicadas, clase/versión/ruta errónea y snapshots de documento, campo, literal y ubicación.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.6`; debe terminar con código 0 y escribir `evidence/f2/F2.2.6/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.2.7. Extender catálogo y resolución efectiva con parámetros de matriz e *indels*.
+- ☐ F2.2.6.1. Crear el primer normalizador real de DTC-049 para colecciones F2.
+  - Depende de: F2.2.6.
+  - Procede de: DTC-049, DTC-078 y REQ-CONF-106/107.
+  - Cambia: crea el único normalizador F2 de probabilidades/frecuencias con orden canónico, Neumaier, tolerancia efectiva, antes/después y diagnósticos; no lo atribuye retrospectivamente a F1 ni adelanta una colección futura sin consumidor.
+  - Se comprueba con: sumas dentro/fuera de tolerancia, cero/no finita, borde inclusivo y registro antes/después con un oráculo numérico independiente.
+  - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.6.1`; debe terminar con código 0 y escribir `evidence/f2/F2.2.6.1/result.json` con `status = "passed"`.
+
+- ☐ F2.2.7. Crear el primer catálogo y dominio real de locus, posición y espacio.
   - Depende de: F2.2.5–F2.2.6.
   - Procede de: DTC-006, DTC-033, DTC-049 y DTC-052; REQ-IND-10, REQ-IND-13, REQ-IND-14 y REQ-CONF-129.
-  - Cambia: `ParameterKey`, metadatos, dominios y solicitudes para recuentos excluyentes, espacio, sustituciones, perfil, modo `exact/stochastic` y longitudes exactas de inserción/deleción, sin duplicar el resolvedor.
+  - Cambia: crea el catálogo/dominio/resolvedor real de locus, posición y espacio para recuentos excluyentes, sustituciones, perfil, modo `exact/stochastic` y longitudes exactas de inserción/deleción, con parámetros efectivos y procedencia; no introduce jerarquías futuras ni `resolution-evidence`.
   - Se comprueba con: catálogo completo, dominios/unidades, cero explícito, precedencia espacial, valor efectivo y rechazo de ejes no admitidos o fallback empírico implícito.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.2.7`; debe terminar con código 0 y escribir `evidence/f2/F2.2.7/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
@@ -962,10 +976,10 @@ cambios y reconstruye cada haplotipo sin simular dinámica poblacional.
   - Se comprueba con: HWE en ploidías 1/2/10, F=0/intermedio/1 solo P=2, rechazo de F en P=1/3/10 y búsqueda negativa de distribución explícita en esquema/CLI/Marimo F2; expediente `REQ-CONF-130.status=partial` con destino F6.2.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.1`; debe terminar con código 0 y escribir `evidence/f2/F2.3.1/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.3.2. Parsear, validar y resolver individuos con IDs tipados y procedencia completa.
+- ☐ F2.3.2. Ampliar el catálogo F2 con individuo y población de origen.
   - Depende de: F2.3.1 y contratos F1 de identidad/configuración.
   - Procede de: DTC-033, DTC-039 y DTC-044; REQ-CONF-20, REQ-CONF-22, REQ-CONF-38, REQ-CONF-130 y evidencia compartida de REQ-IND-02/03/25 y REQ-MAN-10.
-  - Cambia: configuración declarada/efectiva, identidades, población, modelo y solicitudes de resolución, conservando valor, regla, selectores y origen.
+  - Cambia: amplía el catálogo/dominio creado en F2.2.7 con individuo y población de origen, y configura/valida/resuelve sus IDs tipados y procedencia completa; no introduce subpoblaciones, generaciones ni jerarquías futuras.
   - Se comprueba con: IDs repetidos/desconocidos, orden, sustitución individual, HWE omitido/predeterminado y aislamiento de valores efectivos.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.2`; debe terminar con código 0 y escribir `evidence/f2/F2.3.2/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
@@ -1122,10 +1136,10 @@ fase, dosis, eventos y procedencia aunque no se produzca ningún VCF.
   - Se comprueba con: ejecuciones gemelas VCF activado/desactivado que tienen la misma verdad lógica y reconstrucción, y ausencia verificada de dependencia desde F2.4.2 hacia cualquier módulo VCF.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.5`; debe terminar con código 0 y escribir `evidence/f2/F2.4.5/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
-- ☐ F2.4.6. Integrar verdad, configuración efectiva, referencia y manifiestos mediante identidades e integridad.
+- ☐ F2.4.6. Integrar `truth.jsonl` en el manifiesto general y el primer conjunto real F2.
   - Depende de: F2.4.3 y contratos cerrados de F1.4/F1.5.
   - Procede de: DTC-039, DTC-040 y DTC-045; REQ-VER-31, REQ-SAL-06 y evidencia compartida de REQ-IND-26.
-  - Cambia: manifiestos de ejecución/evento y catálogo de artefactos para enlazar `truth.jsonl`, sus esquemas, longitud/SHA-256, referencia exacta, configuración efectiva y estado de publicación.
+  - Cambia: extiende el manifiesto general F1 y su catálogo de artefactos para enlazar `truth.jsonl`, sus esquemas, longitud/SHA-256, referencia exacta, configuración efectiva y la primera unidad real de conjunto. No crea manifiestos de evento: los eventos técnicos y sus manifiestos pertenecen a F3/F4.
   - Se comprueba con: recorrido bidireccional de cada ID/ruta/hash, `sha256sum`, rechazo de referencia o artefacto intercambiado y revisión de que no existen rutas huérfanas.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.4.6`; debe terminar con código 0 y escribir `evidence/f2/F2.4.6/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
@@ -1375,7 +1389,7 @@ rg -n 'RAF2-001|RAF2-004|RAF2-007|RAF2-012|RAF2-017' design/plan-implementacion-
 
 Además, un comprobador mecánico debe verificar que cada casilla contiene una y
 solo una línea `Depende de`, `Procede de`, `Cambia`, `Se comprueba con` y
-`Evidencia ejecutable`; que existen exactamente 128 casillas; que la
+`Evidencia ejecutable`; que existen exactamente 130 casillas; que la
 matriz siguiente contiene una sola vez los 79 REQ cuyo cierre está asignado
 exclusivamente a F2; que la lista separada de evidencia compartida contiene
 los otros nueve REQ cuyo campo de hito incluye F2 junto con fases posteriores;
@@ -1397,7 +1411,7 @@ contradiría esas filas sin una revisión explícita de trazabilidad.
 
 | Hito | REQ asignados | ACE cubiertos | Decisiones/puertas principales | Pasos de cierre |
 |---|---|---|---|---|
-| F2.0 | REQ-UI-01; REQ-UI-02; REQ-UI-03; REQ-UI-04; REQ-UI-05; REQ-UI-06; REQ-UI-07; REQ-UI-08; REQ-UI-09; REQ-UI-10; REQ-UI-11; REQ-UI-12; REQ-UI-13; REQ-VAL-54 | ACE-114, ACE-115 | DTC-034, DTC-036, DTC-042, DTC-043, DTC-044, DTC-045, DTC-048, DTC-051, DTC-058, DTC-069, DTC-073 y DTC-074; RAF2-017/034/035 resueltos | F2.0.1–F2.0.18 |
+| F2.0 | REQ-UI-01; REQ-UI-02; REQ-UI-03; REQ-UI-04; REQ-UI-05; REQ-UI-06; REQ-UI-07; REQ-UI-08; REQ-UI-09; REQ-UI-10; REQ-UI-11; REQ-UI-12; REQ-UI-13 (parcial local); REQ-VAL-54 | ACE-114, ACE-115 | DTC-034, DTC-036, DTC-043, DTC-044, DTC-045, DTC-048, DTC-051, DTC-058, DTC-069 y DTC-073; DTC-074/RAF2-035 cierran en F9 | F2.0.0–F2.0.18 |
 | F2.1 | REQ-IND-28; REQ-IND-29; REQ-VER-27 | ACE-03, ACE-10, ACE-11, ACE-28, ACE-66 | DTC-003, DTC-010, DTC-013, DTC-031, DTC-032, DTC-039, DTC-056 y DTC-061; DTPD-102 resuelta; REQ-REF-14 ya cerrado en F1.5 se conserva como invariante heredada | F2.1.2–F2.1.10 |
 | F2.2 | REQ-CONF-24; REQ-CONF-25; REQ-CONF-28; REQ-CONF-128; REQ-CONF-129; REQ-IND-05; REQ-IND-06; REQ-IND-10; REQ-IND-11; REQ-IND-13; REQ-IND-14; REQ-IND-17; REQ-IND-18; REQ-IND-19; REQ-IND-21; REQ-IND-38; REQ-IND-40; REQ-IND-41; REQ-IND-60; REQ-IND-61; REQ-DIR-03; REQ-REC-24 | ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111, ACE-116 | DTC-006, DTC-011, DTC-020, DTC-022, DTC-032, DTC-033, DTC-037, DTC-038, DTC-044, DTC-049, DTC-052, DTC-054, DTC-056, DTC-059/DTC-060, DTC-067/DTC-068 y DTC-070 a DTC-075; DTPD-118/120/121 y RAF2-028/029/033/041–044 resueltas; puerta compacta F2.2.14 sin VCF | F2.2.1–F2.2.40 |
 | F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-CONF-38; REQ-IND-15; REQ-IND-62; REQ-IND-63; REQ-IND-64; REQ-IND-65; REQ-DIR-01; REQ-DIR-02; REQ-UI-14; REQ-VAL-55; REQ-MAN-91 | ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114, ACE-116 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039, DTC-049, DTC-051, DTC-052, DTC-054 y DTC-071 a DTC-073; DTPD-118 y RAF2-028/033/034 resueltas; REQ-CONF-130 parcial hacia F6.2 | F2.3.1–F2.3.17 |
@@ -1445,12 +1459,11 @@ REQ-IND-58, REQ-IND-59 ni REQ-VER-01.
 
 ## 16. Criterio de salida del plan
 
-El inicio de F2 puede aprobarse porque F1 está cerrada, las decisiones previas
-están resueltas, la validación mecánica no detecta errores —incluidos
-los 79 REQ de cierre únicos, los nueve compartidos, los nueve parciales directos,
-las seis pausas y las cinco líneas de cada uno de los 128 pasos— y la revisión
-adversarial F2 0.4 no encontró bloqueantes propios. El plan todavía no está en
-ejecución porque requiere la aprobación explícita del usuario.
+F1 está cerrado y la validación mecánica de esta corrección debe detectar
+errores —incluidos los 79 REQ de cierre únicos, los nueve compartidos, los nueve
+parciales directos, las seis pausas y las cinco líneas de cada uno de los 130
+pasos—. El inicio de F2 no puede aprobarse todavía: requiere nueva revisión
+adversarial sobre este texto corregido y aprobación explícita del usuario.
 
 F2.0.2, F2.2.1 y la regeneración/revisión compacta DTC-068 dentro de F2.2.14 no
 son prerrequisitos de inicio: son puertas de ejecución internas con los

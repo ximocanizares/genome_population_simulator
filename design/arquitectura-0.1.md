@@ -1,7 +1,7 @@
 # Arquitectura del simulador de genomas y poblaciones
 
 - **Versión:** 0.1
-- **Estado:** ampliación F1.6/F2.0 pendiente de revisión; la base anterior de F1 permanece aprobada
+- **Estado:** F1 cerrado en `e14705a`/`efca265`; arquitectura F2 corregida y pendiente de nueva revisión adversarial y aprobación
 - **Fecha:** 13 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
@@ -19,6 +19,19 @@ las elecciones DTP/DTPD siguen siendo planificación técnica, no funciones.
 
 ## 1. Finalidad y estado
 
+**Corrección F2 posterior a F1.** La base cerrada es `e14705a` con cierre
+documental `efca265`, no los contratos anticipados de los checkpoints. F1 no
+proporciona vía, escenarios, ploidía, reglas, `ParameterKey`,
+`ResolutionContext`, `ResolutionDomain` ni `resolution-evidence`. Antes de que
+Marimo invoque `validate`, F2 crea en Rust `ConfigKind::Scenario`, enlaces
+general→0..N, identidad/ruta/digest y preservación opaca. La vía directa sin
+documento usa exclusivamente el ID interno reservado `scenario_id = "direct"`;
+no representa biología ni es admisible en TOML, y queda en `EffectiveConfig`,
+manifiesto general y contexto RNG. F2 crea los dominios reales de locus/posición
+y después individuo/población de origen, sin anticipar relaciones posteriores.
+Solo instala desde repositorio y prueba arranque local/offline; distribución
+oficial `.tar.gz`, OCI y evidencia oficial de plataforma quedan en F9.
+
 Este documento define cómo se divide el sistema y qué contratos deben mantener
 sus partes para satisfacer la especificación 0.1. No define archivos de código,
 paquetes, algoritmos concretos ni un plan de implementación salvo las elecciones
@@ -32,7 +45,8 @@ La ampliación confirmada incorpora una derivación reducida de FASTA en F1.6 y
 una aplicación Marimo obligatoria desde F2.0. DTC-056/DTC-057 cierran las
 coordenadas comunes y la selección de intervalos; DTC-058 resuelve DTPD-117 y
 concreta la frontera técnica de Marimo. Su incorporación queda condicionada
-solo a superar la puerta experimental F2.0.2.
+solo a superar la puerta experimental F2.0.2; la distribución oficial se
+pospone a F9.
 
 La arquitectura cubre toda la versión 1 para evitar contratos incompatibles
 entre fases. Sin embargo, su materialización seguirá la secuencia F1–F9 de la
@@ -90,8 +104,8 @@ Son fronteras del sistema:
   seleccione;
 - el sistema de ficheros y los recursos de CPU, memoria y almacenamiento.
 - las entregas oficiales para Ubuntu 24.04 LTS x86-64 GNU, con triple
-  `x86_64-unknown-linux-gnu`: paquete `.tar.gz` con SHA-256 de sus bytes e
-  imagen OCI identificada por los digests de sus descriptores.
+  `x86_64-unknown-linux-gnu`: la construcción y validación oficial del paquete
+  `.tar.gz` y de la imagen OCI se posponen a F9.
 
 Cada integración externa se realiza mediante un contrato sustituible. El
 dominio biológico no conoce comandos, rutas concretas, cabeceras físicas ni
@@ -144,7 +158,7 @@ exclusivamente CLI: no contiene la aplicación, Python, `uv` ni un puerto UI.
 Así conserva el enlace local confirmado sin abrir una excepción de red dentro
 del contenedor.
 
-La aplicación Marimo de v1 expone su servidor únicamente mediante IPv4
+La aplicación Marimo de F2 expone su servidor únicamente mediante IPv4
 *loopback* `127.0.0.1`. No existe configuración para enlazarlo con `0.0.0.0`,
 una interfaz LAN u otra dirección, y el acceso remoto queda fuera de alcance.
 En WSL2, la persona usuaria accede mediante `localhost` desde el navegador de
@@ -775,7 +789,7 @@ catálogo pero no anuncia soporte. F2.2.21 y F2.3.9 incorporan, respectivamente,
 las disponibilidades de matriz vacía y genotipo incompatible junto con toda su
 semántica.
 
-El `.tar.gz` y el repositorio contienen un directorio de contratos con un
+El repositorio contiene un directorio de contratos con un
 manifiesto versionado, esquemas, catálogos, capacidades, versiones y SHA-256.
 Marimo solo lee esos bytes locales, recalcula sus huellas y los contrasta con la
 orden informativa. Falta, corrupción o diferencia deja accesible una vista
@@ -1355,7 +1369,7 @@ hashes y renombrado no-clobber; no enumera exhaustivamente el árbol para
 rechazar hardlinks, inodos externos o cada carrera TOCTOU. Esas defensas se
 evalúan en F9/CI si el despliegue declara ese modelo de amenaza.
 
-### 7.5. Construcción y publicación del programa
+### 7.5. Construcción y publicación del programa (F9)
 
 El recorrido ordinario de desarrollo se ejecuta de forma nativa en Ubuntu
 24.04 sobre WSL2 y siempre dentro del sistema de ficheros Linux/ext4, nunca en

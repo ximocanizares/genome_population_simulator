@@ -20,6 +20,17 @@ y espectros SNV; la revisión del 13 de agosto resuelve mediante DTC-055 el pane
 de bloques haplotípicos. Aún deben planificarse las representaciones que siguen
 abiertas y convertirse los ACE en pruebas.
 
+**Corrección de alcance F2 posterior al cierre F1.** F1 quedó cerrado en
+`e14705a` con cierre documental `efca265` y no contiene vía, ploidía, reglas,
+escenarios, eventos ni relaciones de resolución futuras. F2 introduce el
+conjunto general con `0..N` escenarios antes de validar: la vía directa sin
+documento usa internamente `scenario_id = "direct"`, literal reservado que no
+representa biología, no puede escribir la persona usuaria ni puede usar un
+escenario real. Se observa en configuración efectiva, manifiesto general y
+contexto RNG. F2 prueba instalación desde repositorio y arranque local/offline
+de Marimo; la construcción/validación oficial de `.tar.gz`, OCI y plataforma se
+reserva a F9.
+
 La sección 4 es la fuente normativa de requisitos funcionales. Las secciones 2,
 5 y 6 los resumen y la sección 7 propone criterios de aceptación preliminares.
 Si una redacción resumida difiere de un requisito identificado, prevalece el

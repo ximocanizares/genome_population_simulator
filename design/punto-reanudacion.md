@@ -5,7 +5,9 @@
 > completadas y todas sus pausas están aprobadas. H-F16-R1/R2 quedaron aplicados
 > 2/2; las dos revisiones independientes posteriores fueron consecutivas y
 > limpias. F1 está cerrada sobre el commit publicado `e14705a`; F2 todavía no
-> se ha iniciado.
+> se ha iniciado. La documentación F2 fue corregida después de DTC-078 y queda
+> pendiente de nueva revisión adversarial y aprobación; la revisión 0.4 no la
+> aprueba.
 > Las indicaciones históricas
 > posteriores de este documento no sustituyen este punto.
 
@@ -59,8 +61,9 @@
   ignorado. Dos revisiones independientes consecutivas posteriores terminaron
   limpias. PAUSA-F1.6 está aprobada, F1 está cerrada y F2 no ha comenzado.
 - **Estado de los agentes al pausar:** implementador y revisor F1.3 terminaron;
-  la revisión adversarial F2 0.4 terminó con aprobación condicionada
-  exclusivamente al cierre y commit base de F1.
+  la revisión adversarial F2 0.4 es histórica, anterior a DTC-078 y no aprueba
+  el plan F2 corregido. F2 requiere una nueva revisión adversarial y aprobación
+  explícita antes de iniciarse.
 - **Estado de diseño:** DTPD-101, DTPD-116, DTPD-118, DTPD-119 y DTPD-121 están resueltas.
   DTC-056 fija las coordenadas comunes y DTC-057,
   `reduced_reference_selection_v1`; DTPD-119 queda cerrada mediante DTC-055
@@ -79,13 +82,15 @@
   multivaluado y canónico, `truth.jsonl` conserva ALT↔casos y F2 no genera
   complemento; la primera cardinalidad positiva se define en F5.5. La revisión
   adversarial F2 0.3 queda corregida: RAF2-028 a RAF2-044 están
-  resueltos documentalmente; el plan tiene 128 pasos con cinco campos, seis
-  pausas explícitas, 79 cierres, nueve compartidos y nueve parciales directos;
+  resueltos documentalmente; el plan corregido tiene 130 pasos con cinco
+  campos, seis pausas explícitas, 79 cierres, nueve compartidos y nueve
+  parciales directos; requiere nueva revisión adversarial;
   REQ-REF-14 pasó justificadamente a F1.5 y F2.1 conserva su invariante,
   mientras REQ-CONF-38 pasó a F2.3 con individuos reales.
   RAF2-027 queda resuelto por el cierre y publicación de F1 en `e14705a`. La
-  revisión adversarial F2 0.4 aprobó el plan condicionada exclusivamente a este
-  cierre; iniciar F2 requiere ahora la aprobación explícita del usuario.
+  revisión adversarial F2 0.4 fue anterior a DTC-078 y queda sustituida como
+  aprobación por la corrección vigente; iniciar F2 requiere una nueva revisión
+  adversarial y aprobación explícita del usuario.
 - **Copia de la conversación:**
   [chat-reimplementacion-f1-2026-08-15.md](../docs/chat-reimplementacion-f1-2026-08-15.md),
   [chat-dtpd-119-2026-08-12.md](../docs/chat-dtpd-119-2026-08-12.md) y
