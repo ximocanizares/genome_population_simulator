@@ -1,5 +1,9 @@
 # Validación de F1.5
 
+> **Evidencia histórica del checkpoint `66ad8b2`.** Incluye alcance retirado
+> por DTC-078 y no acredita F1.5 del plan 0.2. La validación vigente está en
+> `evidence/f1-reimplementation/f1.5-validation.md`.
+
 - Fecha de actualización: 14 de agosto de 2026.
 - Plataforma: Ubuntu 24.04 sobre WSL2, x86-64, ext4.
 - Estado: E1–E13 ejecutados y 27/27 casos de requisitos superados; pausa F1.5

@@ -214,7 +214,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
 
 ## 8. F1.5 — Referencia inicial
 
-- ☐ F1.5.1. Conservar generación simulada y admisión/copia exacta de FASTA.
+- ✅ F1.5.1. Conservar generación simulada y admisión/copia exacta de FASTA.
   - Depende de: F1.3.3 y F1.4.4.
   - Procede de: REQ-REF-01 a REQ-REF-07, REQ-REF-12 a
     REQ-REF-18, REQ-REF-22 y DTC-041. F1 aporta evidencia parcial al alfabeto
@@ -223,7 +223,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: fixtures de cabecera, duplicado, A/C/G/T/N, copia `cmp`,
     `samtools faidx` en pruebas y origen inalterado.
 
-- ☐ F1.5.2. Enlazar la referencia autoritativa al manifiesto mínimo.
+- ✅ F1.5.2. Enlazar la referencia autoritativa al manifiesto mínimo.
   - Depende de: F1.4.2 y F1.5.1.
   - Procede de: REQ-MAN-06/86 y REQ-SAL-01. REQ-MAN-72 y
     REQ-SAL-18 se cierran con eventos reales en F3.5.
@@ -232,7 +232,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: lectura independiente del FASTA y comparación con ambos
     documentos sin revalidar relaciones futuras.
 
-- ☐ F1.5.3. Repetir los escenarios pequeños de referencia y medir sin convertir
+- ✅ F1.5.3. Repetir los escenarios pequeños de referencia y medir sin convertir
   el benchmark en contrato.
   - Depende de: F1.5.2.
   - Procede de: DTC-046/DTC-047 y REQ-NOF-01 a REQ-NOF-04.
@@ -240,8 +240,10 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: suite, release portable, FASTA/SHA/JSON externos y medidas
     documentadas como observación.
 
-> Pausa F1.5: revisar una referencia simulada y otra suministrada completas,
-> reproducibles y sin manifiestos de evento.
+> ✅ PAUSA-F1.5 aprobada: una referencia simulada y otra suministrada completas
+> son reproducibles, superan FASTA/SHA/JSON externos y no contienen manifiestos
+> de evento. Los tres hallazgos de la revisión independiente están aplicados y
+> la revisión focal no encontró residuos. F1.6 todavía no se ha iniciado.
 
 ## 9. F1.6 — Referencia reducida
 

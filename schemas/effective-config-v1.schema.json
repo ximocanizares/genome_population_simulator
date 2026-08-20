@@ -38,9 +38,11 @@
     "reference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "source", "total_genome_size", "composition", "sequences", "fasta_artifact_id"],
+      "required": ["id", "source", "original_fasta_path", "canonical_format", "total_genome_size", "composition", "sequences", "fasta_artifact_id"],
       "properties": {
         "id": {"type": "string", "minLength": 1}, "source": {"enum": ["simulated", "supplied"]},
+        "original_fasta_path": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+        "canonical_format": {"oneOf": [{"$ref": "#/$defs/canonical_fasta"}, {"type": "null"}]},
         "total_genome_size": {"type": "integer", "minimum": 1},
         "composition": {
           "oneOf": [
@@ -50,14 +52,46 @@
           ]
         },
         "sequences": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false,
-          "required": ["id", "class", "length", "unknown_base_count"],
-          "properties": {"id": {"type": "string", "minLength": 1}, "class": {"enum": ["chromosome", "scaffold"]}, "length": {"type": "integer", "minimum": 1}, "unknown_base_count": {"type": "integer", "minimum": 0}}}},
+          "required": ["id", "class", "length", "header", "description", "alphabet_validation", "unknown_base_count"],
+          "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "class": {"enum": ["chromosome", "scaffold"]},
+            "length": {"type": "integer", "minimum": 1},
+            "header": {"$ref": "#/$defs/reversible_text"},
+            "description": {"oneOf": [{"$ref": "#/$defs/reversible_text"}, {"type": "null"}]},
+            "alphabet_validation": {"const": "ACGTN-case-insensitive"},
+            "unknown_base_count": {"type": "integer", "minimum": 0}
+          }}},
         "fasta_artifact_id": {"type": "string", "minLength": 1}
       },
       "allOf": [
-        {"if": {"properties": {"source": {"const": "simulated"}}}, "then": {"properties": {"composition": {"type": "object"}}}},
-        {"if": {"properties": {"source": {"const": "supplied"}}}, "then": {"properties": {"composition": {"type": "null"}}}}
+        {"if": {"properties": {"source": {"const": "simulated"}}}, "then": {"properties": {"composition": {"type": "object"}, "original_fasta_path": {"type": "null"}, "canonical_format": {"$ref": "#/$defs/canonical_fasta"}}}},
+        {"if": {"properties": {"source": {"const": "supplied"}}}, "then": {"properties": {"composition": {"type": "null"}, "original_fasta_path": {"type": "string", "minLength": 1}, "canonical_format": {"type": "null"}}}}
       ]
+    },
+    "canonical_fasta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "line_base_count", "line_ending", "base_case"],
+      "properties": {
+        "version": {"const": "1"},
+        "line_base_count": {"const": 80},
+        "line_ending": {"const": "LF"},
+        "base_case": {"const": "uppercase"}
+      }
+    },
+    "reversible_text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "value"],
+      "properties": {
+        "encoding": {"enum": ["utf-8", "bytes-hex"]},
+        "value": {"type": "string", "minLength": 1}
+      },
+      "allOf": [{
+        "if": {"properties": {"encoding": {"const": "bytes-hex"}}, "required": ["encoding"]},
+        "then": {"properties": {"value": {"pattern": "^(?:[0-9a-f]{2})+$"}}}
+      }]
     },
     "reduction": {
       "type": "object",

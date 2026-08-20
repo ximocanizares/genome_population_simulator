@@ -1,0 +1,7 @@
+scenario	bases	repetition	stage	elapsed_seconds	user_seconds	system_seconds	cpu_percent	max_rss_kib	input_bytes	temporary_peak_bytes	temporary_residual_bytes	output_bytes	throughput_mb_s	files	voluntary_context_switches	involuntary_context_switches
+A	100000	1	validation_preflight	0.002814	0.00	0.00	88%	3084	316	0	0	0	NA	0	1	1
+A	100000	1	complete_run	0.012306	0.00	0.00	90%	3512	316	104256	0	104245	8.126117	4	1	0
+A	100000	2	validation_preflight	0.003092	0.00	0.00	0%	2984	316	0	0	0	NA	0	1	0
+A	100000	2	complete_run	0.012536	0.00	0.00	90%	3552	316	104256	0	104245	7.977026	4	1	2
+A	100000	3	validation_preflight	0.002868	0.00	0.00	0%	2916	316	0	0	0	NA	0	0	0
+A	100000	3	complete_run	0.012362	0.00	0.00	80%	3492	316	104256	0	104245	8.089306	4	1	2

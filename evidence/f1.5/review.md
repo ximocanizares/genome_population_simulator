@@ -1,5 +1,9 @@
 # Revisión de F1.5
 
+> **Revisión histórica del checkpoint `66ad8b2`.** No acredita la
+> reimplementación simplificada. La revisión vigente está en
+> `evidence/f1-reimplementation/f1.5-review.md`.
+
 ## Aplicación de la revisión independiente H-F15-R01–R05
 
 | ID | Gravedad | Decisión inicial | Estado final | Prueba principal | Seguimiento |

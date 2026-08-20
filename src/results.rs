@@ -17,8 +17,14 @@ use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
 use crate::identity::{ReferenceId, derive_execution_id};
 use crate::integrity::{ArtifactIdentity, configuration_digest, identify_file};
 use crate::randomness::{EntropySource, RootSeed, RuntimeSubseedScope, derive_subseed};
-use crate::reference::{Reference, ReferenceSequence, SequenceClass};
-use crate::reference_fasta::{SequenceExpectation, validate_supplied_fasta};
+use crate::reference::{
+    AlphabetValidation, Reference, ReferenceOrigin, ReferenceSequence, ReversibleText,
+    SequenceClass,
+};
+use crate::reference_fasta::{
+    CANONICAL_FASTA_VERSION, CANONICAL_LINE_BASE_COUNT, SequenceExpectation,
+    validate_supplied_fasta,
+};
 use crate::reference_generation::COMPOSITION_TOLERANCE;
 use crate::reference_generation::{BaseFrequency, GeneratedSequenceSpec, generate_reference};
 use crate::reference_reduction::{
@@ -162,7 +168,7 @@ pub fn effective_config_document_with_reductions(
     output: ReferenceOutput<'_>,
     reductions: &[ReducedReferenceOutput<'_>],
 ) -> Result<Value, Diagnostic> {
-    validate_reference_output(output)?;
+    validate_reference_output(config, output)?;
     let composition = config.composition().map(|composition| {
         let values = composition.values();
         json!({"A": values[0], "C": values[1], "G": values[2], "T": values[3]})
@@ -608,8 +614,15 @@ fn validate_effective_targets_against_configuration(
         .map_err(|error| io_error(&configuration_path, "read_configuration", error))?;
     let digest = configuration_digest(&bytes)
         .map_err(|error| physical_error(effective_path, "configuration_digest", &error))?;
-    let admitted = admit_toml_header(&configuration_path, bytes, ExpectedConfigKind::General)
-        .map_err(|error| physical_error(effective_path, "admit_configuration", &error))?;
+    let original_configuration_path = manifest["configuration_input"]["original_path"]
+        .as_str()
+        .ok_or_else(|| effective_error(effective_path, "configuration_input sin procedencia"))?;
+    let admitted = admit_toml_header(
+        Path::new(original_configuration_path),
+        bytes,
+        ExpectedConfigKind::General,
+    )
+    .map_err(|error| physical_error(effective_path, "admit_configuration", &error))?;
     let declared = parse_declared_config(admitted)
         .map_err(|error| physical_error(effective_path, "parse_configuration", &error))?;
     let seed = effective_object(effective, "seed", effective_path)?;
@@ -654,6 +667,28 @@ fn validate_effective_targets_against_configuration(
         return Err(effective_error(
             effective_path,
             "la referencia efectiva no coincide con la declaración TOML",
+        ));
+    }
+    let expected_original_path = match expected.reference_source() {
+        EffectiveReferenceSource::Simulated => Value::Null,
+        EffectiveReferenceSource::Supplied { original_path } => {
+            Value::String(original_path.to_string_lossy().into_owned())
+        }
+    };
+    if reference.get("original_fasta_path") != Some(&expected_original_path) {
+        return Err(effective_error(
+            effective_path,
+            "la procedencia FASTA efectiva no coincide con la declaración TOML",
+        ));
+    }
+    let expected_canonical_format = match expected.reference_source() {
+        EffectiveReferenceSource::Simulated => canonical_fasta_json(),
+        EffectiveReferenceSource::Supplied { .. } => Value::Null,
+    };
+    if reference.get("canonical_format") != Some(&expected_canonical_format) {
+        return Err(effective_error(
+            effective_path,
+            "el formato FASTA efectivo no corresponde al origen declarado",
         ));
     }
 
@@ -791,6 +826,22 @@ fn read_physical_reference(
                 effective_path,
                 format!(
                     "unknown_base_count físico de {} no coincide",
+                    physical.id().as_str()
+                ),
+            ));
+        }
+        if declared.get("header") != Some(&reversible_bytes_json(physical.header().raw_bytes()))
+            || declared.get("description")
+                != Some(&reversible_description_json(
+                    physical.header().description(),
+                ))
+            || declared.get("alphabet_validation").and_then(Value::as_str)
+                != Some(alphabet_validation(physical.alphabet_validation()))
+        {
+            return Err(effective_error(
+                effective_path,
+                format!(
+                    "cabecera, descripción o validación de alfabeto física de {} no coincide",
                     physical.id().as_str()
                 ),
             ));
@@ -1491,9 +1542,11 @@ fn validate_effective_reference(
     catalog: &BTreeMap<&str, &str>,
     path: &Path,
 ) -> Result<(String, String), Diagnostic> {
-    const FIELDS: [&str; 6] = [
+    const FIELDS: [&str; 8] = [
         "id",
         "source",
+        "original_fasta_path",
+        "canonical_format",
         "total_genome_size",
         "composition",
         "sequences",
@@ -1545,6 +1598,28 @@ fn validate_effective_reference(
             "reference.composition no corresponde al origen declarado",
         ));
     }
+    match (source, object.get("original_fasta_path")) {
+        ("simulated", Some(Value::Null)) => {}
+        ("supplied", Some(Value::String(value))) if !value.is_empty() => {}
+        _ => {
+            return Err(effective_error(
+                path,
+                "reference.original_fasta_path no corresponde al origen declarado",
+            ));
+        }
+    }
+    match (source, object.get("canonical_format")) {
+        ("simulated", Some(Value::Object(format))) => {
+            validate_canonical_fasta(format, path)?;
+        }
+        ("supplied", Some(Value::Null)) => {}
+        _ => {
+            return Err(effective_error(
+                path,
+                "reference.canonical_format no corresponde al origen declarado",
+            ));
+        }
+    }
     let sequences = effective_array(object, "sequences", path)?;
     if sequences.is_empty() {
         return Err(effective_error(path, "reference.sequences está vacío"));
@@ -1555,7 +1630,15 @@ fn validate_effective_reference(
         let sequence = value
             .as_object()
             .ok_or_else(|| effective_error(path, "una secuencia no es objeto"))?;
-        const SEQUENCE_FIELDS: [&str; 4] = ["id", "class", "length", "unknown_base_count"];
+        const SEQUENCE_FIELDS: [&str; 7] = [
+            "id",
+            "class",
+            "length",
+            "header",
+            "description",
+            "alphabet_validation",
+            "unknown_base_count",
+        ];
         validate_effective_closed_object(
             sequence,
             &SEQUENCE_FIELDS,
@@ -1580,6 +1663,25 @@ fn validate_effective_reference(
             .ok_or_else(|| effective_error(path, "unknown_base_count inválido"))?;
         if unknown > length {
             return Err(effective_error(path, "unknown_base_count excede length"));
+        }
+        validate_reversible_text(
+            sequence
+                .get("header")
+                .ok_or_else(|| effective_error(path, "header ausente"))?,
+            "reference.sequences[].header",
+            path,
+        )?;
+        match sequence.get("description") {
+            Some(Value::Null) => {}
+            Some(value) => {
+                validate_reversible_text(value, "reference.sequences[].description", path)?
+            }
+            None => return Err(effective_error(path, "description ausente")),
+        }
+        if sequence.get("alphabet_validation").and_then(Value::as_str)
+            != Some("ACGTN-case-insensitive")
+        {
+            return Err(effective_error(path, "alphabet_validation inválida"));
         }
     }
     if summed_length != declared_total {
@@ -1735,16 +1837,112 @@ fn reference_json(
             crate::application::EffectiveReferenceSource::Simulated => "simulated",
             crate::application::EffectiveReferenceSource::Supplied { .. } => "supplied",
         },
+        "original_fasta_path": match config.reference_source() {
+            crate::application::EffectiveReferenceSource::Simulated => Value::Null,
+            crate::application::EffectiveReferenceSource::Supplied { original_path } => {
+                Value::String(original_path.to_string_lossy().into_owned())
+            },
+        },
+        "canonical_format": match config.reference_source() {
+            crate::application::EffectiveReferenceSource::Simulated => canonical_fasta_json(),
+            crate::application::EffectiveReferenceSource::Supplied { .. } => Value::Null,
+        },
         "total_genome_size": config.total_genome_size(),
         "composition": composition,
         "sequences": output.reference.sequences().iter().map(|sequence| json!({
             "id": sequence.id().as_str(),
             "class": sequence_class(sequence.class()),
             "length": sequence.length(),
+            "header": reversible_bytes_json(sequence.header().raw_bytes()),
+            "description": reversible_description_json(sequence.header().description()),
+            "alphabet_validation": alphabet_validation(sequence.alphabet_validation()),
             "unknown_base_count": sequence.unknown_base_count(),
         })).collect::<Vec<_>>(),
         "fasta_artifact_id": output.fasta.id,
     })
+}
+
+fn canonical_fasta_json() -> Value {
+    json!({
+        "version": CANONICAL_FASTA_VERSION,
+        "line_base_count": CANONICAL_LINE_BASE_COUNT,
+        "line_ending": "LF",
+        "base_case": "uppercase",
+    })
+}
+
+fn validate_canonical_fasta(
+    object: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    const FIELDS: [&str; 4] = ["version", "line_base_count", "line_ending", "base_case"];
+    validate_effective_closed_object(object, &FIELDS, "reference.canonical_format", path)?;
+    if object.get("version").and_then(Value::as_str) != Some(CANONICAL_FASTA_VERSION)
+        || object.get("line_base_count").and_then(Value::as_u64)
+            != Some(CANONICAL_LINE_BASE_COUNT as u64)
+        || object.get("line_ending").and_then(Value::as_str) != Some("LF")
+        || object.get("base_case").and_then(Value::as_str) != Some("uppercase")
+    {
+        return Err(effective_error(path, "reference.canonical_format inválido"));
+    }
+    Ok(())
+}
+
+fn reversible_bytes_json(bytes: &[u8]) -> Value {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => json!({"encoding": "utf-8", "value": text}),
+        Err(_) => json!({"encoding": "bytes-hex", "value": encode_hex(bytes)}),
+    }
+}
+
+fn reversible_description_json(description: Option<&ReversibleText>) -> Value {
+    description.map_or(
+        Value::Null,
+        |text| json!({"encoding": text.encoding(), "value": text.encoded()}),
+    )
+}
+
+fn validate_reversible_text(value: &Value, field: &str, path: &Path) -> Result<(), Diagnostic> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| effective_error(path, format!("{field} no es objeto")))?;
+    const FIELDS: [&str; 2] = ["encoding", "value"];
+    validate_effective_closed_object(object, &FIELDS, field, path)?;
+    let encoded = object
+        .get("value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| effective_error(path, format!("{field}.value inválido")))?;
+    if encoded.is_empty() {
+        return Err(effective_error(path, format!("{field}.value está vacío")));
+    }
+    match object.get("encoding").and_then(Value::as_str) {
+        Some("utf-8") => Ok(()),
+        Some("bytes-hex")
+            if encoded.len() % 2 == 0
+                && encoded
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) =>
+        {
+            Ok(())
+        }
+        _ => Err(effective_error(path, format!("{field}.encoding inválido"))),
+    }
+}
+
+fn alphabet_validation(validation: AlphabetValidation) -> &'static str {
+    match validation {
+        AlphabetValidation::AcgtnCaseInsensitive => "ACGTN-case-insensitive",
+    }
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    output
 }
 
 fn manifest_reference_json(output: &ManifestReferenceLink) -> Value {
@@ -1818,7 +2016,10 @@ fn output_categories(manifest: &GeneralManifest<'_>) -> Value {
     })
 }
 
-fn validate_reference_output(output: ReferenceOutput<'_>) -> Result<(), Diagnostic> {
+fn validate_reference_output(
+    config: &EffectiveConfig,
+    output: ReferenceOutput<'_>,
+) -> Result<(), Diagnostic> {
     if output.reference.authoritative_resource().is_none()
         || output
             .reference
@@ -1829,6 +2030,36 @@ fn validate_reference_output(output: ReferenceOutput<'_>) -> Result<(), Diagnost
         return Err(Diagnostic::internal_invariant(
             "results",
             "reference artifact is not the authoritative resource",
+        ));
+    }
+    let origin_matches = match (config.reference_source(), output.reference.origin()) {
+        (EffectiveReferenceSource::Simulated, ReferenceOrigin::Generated) => true,
+        (
+            EffectiveReferenceSource::Supplied { original_path },
+            ReferenceOrigin::Supplied {
+                original_path: observed,
+            },
+        ) => original_path == observed,
+        _ => false,
+    };
+    if !origin_matches
+        || output.reference.id().as_str() != config.reference_id()
+        || output.reference.total_length() != config.total_genome_size()
+        || output.reference.sequences().len() != config.sequences().len()
+        || output
+            .reference
+            .sequences()
+            .iter()
+            .zip(config.sequences())
+            .any(|(observed, expected)| {
+                observed.id().as_str() != expected.id()
+                    || observed.class() != expected.class()
+                    || observed.length() != expected.length()
+            })
+    {
+        return Err(Diagnostic::internal_invariant(
+            "results",
+            "reference domain does not match effective configuration",
         ));
     }
     Ok(())

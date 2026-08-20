@@ -6,9 +6,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::{ExecutionOutcome, execute_validated_config};
 use genome_population_simulator::publication::ExecutionWorkspace;
-use genome_population_simulator::reference::{ReferenceOrigin, SequenceClass};
+use genome_population_simulator::reference::{Reference, ReferenceOrigin, SequenceClass};
 use genome_population_simulator::reference_fasta::{
     SequenceExpectation, validate_supplied_fasta, validate_supplied_fasta_with_origin,
+};
+use genome_population_simulator::results::{
+    ArtifactRecord, ReferenceOutput, effective_config_document_with_reference,
 };
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -17,7 +20,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 fn supplied_run_copies_the_validated_fasta_byte_for_byte() {
     let directory = TestDirectory::new("exact-copy");
     let fasta = directory.path().join("source.fa");
-    let original = b">chr1 description\r\naCgTn\r\n";
+    let original = b">chr1 description \xff\r\naCgTn\r\n";
     fs::write(&fasta, original).expect("write FASTA");
     let config = directory.path().join("config.toml");
     write_supplied_config(&config, "source.fa", 5);
@@ -39,10 +42,33 @@ fn supplied_run_copies_the_validated_fasta_byte_for_byte() {
     .expect("effective JSON");
     let reference = &effective_json["reference"];
     assert_eq!(reference["source"], "supplied");
+    assert_eq!(
+        reference["original_fasta_path"],
+        fasta.to_string_lossy().as_ref()
+    );
+    assert_eq!(reference["canonical_format"], serde_json::Value::Null);
     assert_eq!(reference["composition"], serde_json::Value::Null);
     assert_eq!(reference["sequences"][0]["unknown_base_count"], 1);
     assert_eq!(reference["sequences"][0]["length"], 5);
     assert_eq!(reference["sequences"][0]["class"], "chromosome");
+    assert_eq!(
+        reference["sequences"][0]["header"],
+        serde_json::json!({
+            "encoding": "bytes-hex",
+            "value": "63687231206465736372697074696f6e20ff"
+        })
+    );
+    assert_eq!(
+        reference["sequences"][0]["description"],
+        serde_json::json!({
+            "encoding": "bytes-hex",
+            "value": "6465736372697074696f6e20ff"
+        })
+    );
+    assert_eq!(
+        reference["sequences"][0]["alphabet_validation"],
+        "ACGTN-case-insensitive"
+    );
 
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(destination.join("manifest.json")).expect("manifest"))
@@ -67,6 +93,20 @@ fn supplied_run_copies_the_validated_fasta_byte_for_byte() {
             .expect("relative FASTA link"),
     );
     assert_eq!(linked, copy);
+    assert_eq!(fasta_artifact["kind"], "reference_fasta");
+    assert_eq!(
+        fasta_artifact["size_bytes"],
+        u64::try_from(original.len()).expect("fixture size")
+    );
+    assert!(
+        Command::new("cmp")
+            .args(["-s"])
+            .arg(&fasta)
+            .arg(&copy)
+            .status()
+            .expect("independent cmp")
+            .success()
+    );
     fs::write(&fasta, b">chr1 changed\nAAAAA\n").expect("mutate original after publication");
     assert_eq!(
         fs::read(&copy).expect("authoritative copy after source mutation"),
@@ -204,6 +244,52 @@ fn authoritative_representation_is_loaded_from_the_copy_and_keeps_original_prove
         "the original differs before the authoritative representation is consumed"
     );
     assert_eq!(fs::read(copy).expect("copied FASTA"), original);
+}
+
+#[test]
+fn effective_document_rejects_a_reference_with_an_origin_different_from_the_config() {
+    let directory = TestDirectory::new("origin-mismatch");
+    let source = directory.path().join("source.fa");
+    fs::write(&source, b">chr1\nACGT\n").expect("write FASTA");
+    let config = directory.path().join("config.toml");
+    write_supplied_config(&config, "source.fa", 4);
+    let effective = load_and_validate_config(&config).expect("effective supplied config");
+    let validated = validate_supplied_fasta(
+        &source,
+        "ref-supplied",
+        &[SequenceExpectation {
+            id: "chr1",
+            class: SequenceClass::Chromosome,
+            length: 4,
+        }],
+    )
+    .expect("valid source");
+    let mut wrong_origin = Reference::new(
+        validated.reference().id().clone(),
+        ReferenceOrigin::Generated,
+        validated.reference().sequences().to_vec(),
+    )
+    .expect("reference with intentionally wrong origin");
+    wrong_origin
+        .bind_authoritative_resource(PathBuf::from("resources/references/ref-supplied.fa"))
+        .expect("bind resource");
+    let artifact = ArtifactRecord {
+        id: "reference-fasta".to_owned(),
+        kind: "reference_fasta".to_owned(),
+        path: "resources/references/ref-supplied.fa".to_owned(),
+        size_bytes: 11,
+        digest: "0".repeat(64),
+    };
+
+    let error = effective_config_document_with_reference(
+        &effective,
+        ReferenceOutput {
+            reference: &wrong_origin,
+            fasta: &artifact,
+        },
+    )
+    .expect_err("effective output must not copy origin from the wrong authority");
+    assert_eq!(error.code(), "GPS-INTERNAL-001");
 }
 
 fn provisional_workspace(destination: &Path) -> PathBuf {

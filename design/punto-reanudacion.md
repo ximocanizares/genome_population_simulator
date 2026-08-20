@@ -1,17 +1,17 @@
 # Punto de reanudación del proyecto
 
-> **Punto vigente (20 de agosto de 2026):** F1.1–F1.3 del
+> **Punto vigente (20 de agosto de 2026):** F1.1–F1.4 del
 > [plan de reimplementación F1](plan-reimplementacion-f1-0.2.md) están
-> completadas. F1.4.1–F1.4.5 y sus correcciones están aplicadas; la séptima
-> revisión no encontró defectos funcionales y su única deriva de trazabilidad
-> quedó corregida y regresionada. PAUSA-F1.4 está aprobada. No se ha iniciado
-> F1.5. Las indicaciones históricas
+> completadas y PAUSA-F1.4 está aprobada. F1.5.1–F1.5.3 están implementadas,
+> sus tres hallazgos de revisión independiente están corregidos y la revisión
+> focal quedó limpia. PAUSA-F1.5 está aprobada. F1.6 no se ha iniciado.
+> Las indicaciones históricas
 > posteriores de este documento no sustituyen este punto.
 
 - **Fecha:** 20 de agosto de 2026
 - **Implementación F1.5 histórica del checkpoint anterior:** `b5dc220 feat:
   complete F1.5 reference evidence`; no acredita el plan 0.2 vigente.
-- **Base publicada:** `3416db4 refactor: complete minimal F1.3 randomness`,
+- **Base publicada:** `a9d5c1a refactor: complete minimal F1.4 publication`,
   publicada en `origin/main`.
 - **Checkpoint de seguridad anterior:** `66ad8b2 checkpoint: preserve F1 and
   F2 work before simplification`.
@@ -46,7 +46,15 @@
   una prueba de la copia TOML y que REQ-MAN-32 conservaba un símbolo antiguo.
   Ambos enlaces están corregidos; la prueba nueva recorre el CLI real y cruza
   bytes, manifiesto, clase, ruta, tamaño y `sha256sum`. La suite actual ejecuta
-  143 pruebas y deja un helper ignorado. F2 no ha comenzado.
+  143 pruebas y deja un helper ignorado. F1.5 reutiliza el dominio, adaptador,
+  generador y FAI ya correctos; completa procedencia FASTA, formato canónico,
+  cabecera/descripción reversibles y alfabeto en la salida efectiva, ligados al
+  FASTA físico y al catálogo mínimo. A y B se midieron tres veces; C queda
+  programado. La revisión independiente de F1.5 quedó aplicada 3/3: ejecución
+  explícita con raíz declarada y CSPRNG, testigo compartido para las cláusulas
+  de referencia derivada y RSS corregido a 393832 KiB (aproximadamente 385
+  MiB). La suite final lista 147 pruebas: 146 superadas y un helper ignorado.
+  PAUSA-F1.5 está aprobada; F1.6 y F2 no han comenzado.
 - **Estado de los agentes al pausar:** implementador y revisor F1.3 terminaron;
   la revisión adversarial F2 0.4 terminó con aprobación condicionada
   exclusivamente al cierre y commit base de F1.
@@ -81,9 +89,9 @@
 
 ## Punto vigente de reanudación para F1
 
-PAUSA-F1.4 está aprobada tras la séptima revisión independiente y la corrección
-focal de trazabilidad. El siguiente paso permitido es iniciar F1.5 según el
-plan 0.2; todavía no se ha iniciado. Conservar la superficie
+PAUSA-F1.5 está aprobada tras implementar F1.5.1–F1.5.3, aplicar los tres
+hallazgos de revisión independiente y superar una revisión focal sin residuos.
+El siguiente paso permitido es F1.6. Conservar la superficie
 TOML mínima, los dos únicos ámbitos RNG activos, la configuración efectiva con
 consumidores reales y la ausencia de `ResolutionDomain`, `resolution-evidence`,
 eventos/manifiestos sintéticos, normalización poblacional y hardening frente a

@@ -1,5 +1,9 @@
 # Revisión de rendimiento F1.5
 
+> **Medición histórica del checkpoint `66ad8b2`.** La línea base vigente del
+> plan 0.2 está en
+> `evidence/f1-reimplementation/f1.5-performance-review.md`.
+
 - Fecha de actualización: 14 de agosto de 2026.
 - Contexto: Ubuntu 24.04 bajo WSL2, x86-64, ext4; construcción release portable
   `x86_64-unknown-linux-gnu`, sin `target-cpu=native`.

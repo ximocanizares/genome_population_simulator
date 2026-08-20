@@ -80,6 +80,42 @@ fn semantic_ids_source_path_and_selection_order_cannot_be_empty() {
     assert_invalid("empty-selection-order", &document);
 }
 
+#[test]
+fn reference_origin_and_reversible_metadata_are_closed_and_source_specific() {
+    let mut reversible_bytes = effective_config("supplied", false);
+    reversible_bytes["reference"]["sequences"][0]["header"] =
+        json!({"encoding": "bytes-hex", "value": "63687231ff"});
+    reversible_bytes["reference"]["sequences"][0]["description"] =
+        json!({"encoding": "bytes-hex", "value": "ff"});
+    assert_valid("reversible-non-utf8-header", &reversible_bytes);
+
+    let mut simulated_path = effective_config("simulated", false);
+    simulated_path["reference"]["original_fasta_path"] = json!("source.fa");
+    assert_invalid("simulated-original-path", &simulated_path);
+
+    let mut supplied_format = effective_config("supplied", false);
+    supplied_format["reference"]["canonical_format"] = json!({
+        "version": "1",
+        "line_base_count": 80,
+        "line_ending": "LF",
+        "base_case": "uppercase"
+    });
+    assert_invalid("supplied-canonical-format", &supplied_format);
+
+    let mut wrong_width = effective_config("simulated", false);
+    wrong_width["reference"]["canonical_format"]["line_base_count"] = json!(79);
+    assert_invalid("wrong-canonical-width", &wrong_width);
+
+    let mut invalid_hex = effective_config("supplied", false);
+    invalid_hex["reference"]["sequences"][0]["header"] =
+        json!({"encoding": "bytes-hex", "value": "0G"});
+    assert_invalid("invalid-header-hex", &invalid_hex);
+
+    let mut wrong_alphabet = effective_config("supplied", false);
+    wrong_alphabet["reference"]["sequences"][0]["alphabet_validation"] = json!("ACGT");
+    assert_invalid("wrong-alphabet-contract", &wrong_alphabet);
+}
+
 fn effective_config(source: &str, with_reduction: bool) -> Value {
     let composition = match source {
         "simulated" => json!({"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25}),
@@ -113,12 +149,30 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
         "reference": {
             "id": "main",
             "source": source,
+            "original_fasta_path": match source {
+                "simulated" => Value::Null,
+                "supplied" => json!("inputs/reference.fa"),
+                _ => unreachable!(),
+            },
+            "canonical_format": match source {
+                "simulated" => json!({
+                    "version": "1",
+                    "line_base_count": 80,
+                    "line_ending": "LF",
+                    "base_case": "uppercase"
+                }),
+                "supplied" => Value::Null,
+                _ => unreachable!(),
+            },
             "total_genome_size": 1000,
             "composition": composition,
             "sequences": [{
                 "id": "chr1",
                 "class": "chromosome",
                 "length": 1000,
+                "header": {"encoding": "utf-8", "value": "chr1"},
+                "description": null,
+                "alphabet_validation": "ACGTN-case-insensitive",
                 "unknown_base_count": 0
             }],
             "fasta_artifact_id": "reference-main"

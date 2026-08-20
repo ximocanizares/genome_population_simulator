@@ -61,6 +61,61 @@ fn simulated_cli_runs_repeat_logically_and_pass_independent_oracles() {
 }
 
 #[test]
+fn declared_and_system_csprng_roots_are_effective_before_reference_generation() {
+    let root = temporary("declared-and-csprng");
+    fs::create_dir(&root).expect("root");
+
+    let declared_destination = root.join("declared");
+    run_cli(
+        Path::new("tests/fixtures/config/general-seeded.toml"),
+        &declared_destination,
+        true,
+    );
+    let declared = read_json(&declared_destination.join("effective-config.json"));
+    assert_eq!(declared["seed"]["origin"], "declared");
+    assert_eq!(
+        declared["seed"]["root"],
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    );
+
+    let seedless_config = Path::new("tests/fixtures/config/general-minimal.toml");
+    let generated_destination = root.join("generated");
+    run_cli(seedless_config, &generated_destination, true);
+    let generated = read_json(&generated_destination.join("effective-config.json"));
+    assert_eq!(generated["seed"]["origin"], "system_csprng");
+    let generated_root = generated["seed"]["root"]
+        .as_str()
+        .expect("generated root seed");
+    assert_eq!(generated_root.len(), 64);
+    assert!(
+        generated_root
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+
+    let replay_config = root.join("replay.toml");
+    let seedless_source = fs::read_to_string(seedless_config).expect("seedless config");
+    fs::write(
+        &replay_config,
+        format!("seed = \"{generated_root}\"\n{seedless_source}"),
+    )
+    .expect("replay config");
+    let replay_destination = root.join("replay");
+    run_cli(&replay_config, &replay_destination, true);
+    let replay = read_json(&replay_destination.join("effective-config.json"));
+    assert_eq!(replay["seed"]["origin"], "declared");
+    assert_eq!(replay["seed"]["root"], generated_root);
+    assert_eq!(
+        fs::read(generated_destination.join("resources/references/ref-main.fa"))
+            .expect("generated FASTA"),
+        fs::read(replay_destination.join("resources/references/ref-main.fa"))
+            .expect("replayed FASTA")
+    );
+
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
 fn supplied_cli_preserves_n_and_exact_input_while_invalid_input_has_no_destination() {
     let root = temporary("supplied");
     fs::create_dir(&root).expect("root");
@@ -85,6 +140,23 @@ fn supplied_cli_preserves_n_and_exact_input_while_invalid_input_has_no_destinati
             .status()
             .expect("cmp")
             .success()
+    );
+    let acceptance_fasta = root.join("supplied-acceptance.fa");
+    fs::copy(&copy, &acceptance_fasta).expect("independent supplied FASTA copy");
+    let samtools = Command::new("samtools")
+        .args(["faidx"])
+        .arg(&acceptance_fasta)
+        .status()
+        .expect("samtools");
+    assert!(samtools.success());
+    assert!(acceptance_fasta.with_extension("fa.fai").is_file());
+    validate_json(
+        &destination.join("effective-config.json"),
+        "effective-config-v1.schema.json",
+    );
+    validate_json(
+        &destination.join("manifest.json"),
+        "manifest-general-v1.schema.json",
     );
 
     fs::write(&source, b">chrN\nACRTA\n").expect("invalid source");

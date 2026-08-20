@@ -1,5 +1,9 @@
 # Batería trazable F1.5
 
+> **Evidencia histórica del checkpoint `66ad8b2`.** No acredita F1.5 del plan
+> 0.2. La matriz ejecutable vigente está en
+> `evidence/f1-reimplementation/f1.5-test-req-matrix.tsv`.
+
 Fecha: 10 de agosto de 2026. Cada identificador `TEST-REQ-*` designa un caso
 observable y enlaza su prueba ejecutable. «Parcial» no se contabiliza como
 superado.

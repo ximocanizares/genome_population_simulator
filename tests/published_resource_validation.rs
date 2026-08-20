@@ -129,6 +129,47 @@ fn correlated_documents_cannot_replace_physical_authority() {
         },
     );
 
+    for (label, pointer, replacement) in [
+        (
+            "reference-original-path",
+            "/reference/original_fasta_path",
+            json!("other.fa"),
+        ),
+        (
+            "reference-header",
+            "/reference/sequences/0/header/value",
+            json!("changed-header"),
+        ),
+        (
+            "reference-description",
+            "/reference/sequences/0/description",
+            json!({"encoding": "utf-8", "value": "invented"}),
+        ),
+        (
+            "reference-alphabet",
+            "/reference/sequences/0/alphabet_validation",
+            json!("ACGTN-case-insensitive-correlated"),
+        ),
+    ] {
+        assert_physical_rejection(
+            label,
+            supplied_fixture(),
+            move |_root, effective, _manifest| {
+                *effective
+                    .pointer_mut(pointer)
+                    .expect("reference metadata pointer") = replacement;
+            },
+        );
+    }
+
+    assert_physical_rejection(
+        "canonical-format",
+        simulated_fixture(),
+        |_root, effective, _manifest| {
+            effective["reference"]["canonical_format"]["line_base_count"] = json!(79);
+        },
+    );
+
     assert_physical_rejection(
         "reduction-map",
         supplied_fixture(),
