@@ -1,5 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "resolution-evidence-v1.schema.json",
-  "$ref": "results-common-v1.schema.json#/$defs/resolution_evidence"
-}

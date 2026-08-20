@@ -1,5 +1,0 @@
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "manifest-event-v1.schema.json",
-  "$ref": "results-common-v1.schema.json#/$defs/event_manifest"
-}

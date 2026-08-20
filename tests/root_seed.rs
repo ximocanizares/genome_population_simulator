@@ -4,7 +4,7 @@ use genome_population_simulator::adapters::{admit_toml_header, parse_declared_co
 use genome_population_simulator::application::{
     build_effective_config_with_entropy, load_and_validate_config_with_entropy,
 };
-use genome_population_simulator::configuration::{DeclaredConfig, ExpectedConfigKind};
+use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::randomness::{
     EntropySource, RootSeed, SeedOrigin, resolve_root_seed,
 };
@@ -101,18 +101,10 @@ fn declared_seed_bypasses_entropy_and_enters_immutable_effective_config() {
         ExpectedConfigKind::General,
     )
     .expect("cabecera válida");
-    let DeclaredConfig::General(general) =
-        parse_declared_config(admitted).expect("configuración declarada válida")
-    else {
-        panic!("clase general esperada");
-    };
-    let effective = build_effective_config_with_entropy(
-        &general,
-        &[],
-        &[],
-        &mut FixedEntropy(Err("must not be called")),
-    )
-    .expect("la raíz declarada no consume entropía");
+    let general = parse_declared_config(admitted).expect("configuración declarada válida");
+    let effective =
+        build_effective_config_with_entropy(&general, &mut FixedEntropy(Err("must not be called")))
+            .expect("la raíz declarada no consume entropía");
     assert_eq!(
         effective.reproducibility().seed_origin(),
         SeedOrigin::Declared
@@ -121,11 +113,7 @@ fn declared_seed_bypasses_entropy_and_enters_immutable_effective_config() {
         effective.reproducibility().root_seed().to_hex(),
         "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     );
-    assert_eq!(effective.reproducibility().event_subseeds().len(), 1);
-    assert_eq!(
-        effective.reproducibility().event_subseeds()[0].event_id(),
-        "event-illumina"
-    );
+    assert!(effective.reproducibility().event_subseeds().is_empty());
 }
 
 #[test]

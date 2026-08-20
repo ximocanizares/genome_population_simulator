@@ -1,23 +1,18 @@
 config_kind = "general"
 schema_version = "1"
-route = "direct"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 [reference]
 kind = "simulated"
 id = "ref-main"
-default_ploidy = 2
-composition = [
-  { id = "A", category = "base", value = 0.25 },
-  { id = "C", category = "base", value = 0.25 },
-  { id = "G", category = "base", value = 0.25 },
-  { id = "T", category = "base", value = 0.25 },
-]
+
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
 
 [[reference.sequences]]
 id = "chr1"
 class = "chromosome"
 length = 1000
-
-[[events]]
-id = "event-illumina"

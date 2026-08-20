@@ -121,22 +121,28 @@ componente responsable y no quedan decisiones de diseño ocultas en su plan.
 **Objetivo:** obtener una aplicación Rust mínima que valide una configuración,
 cree una ejecución identificada y produzca resultados trazables y repetibles.
 
+**Estado:** replanificación aprobada tras la auditoría sistemática del commit
+`66ad8b2`. La implementación anterior queda como checkpoint recuperable, no
+como base que deba conservarse íntegramente.
+
 **Depende de:** F0.
 
 **Hitos:**
 
 - **F1.1. Base del proyecto.** Disponer del proyecto Cargo, comprobaciones de
   formato, análisis estático, pruebas y política inicial de dependencias.
-- **F1.2. Configuración validada.** Leer la configuración mínima, aplicar valores
-  base, resolver sustituciones mediante la matriz y la dominancia de
-  REQ-CONF-116 a REQ-CONF-123 y rechazar antes de simular máximas
-  incomparables, duplicados, regiones solapadas y selectores no permitidos.
+- **F1.2. Configuración validada.** Leer la configuración mínima y resolver solo
+  los valores y selectores consumidos por la referencia inicial o reducida.
+  Las matrices poblacionales, temporales y espaciales se incorporan con su
+  primer consumidor real en F2/F6/F7 y se auditan conjuntamente en F9.7.
 - **F1.3. Infraestructura de aleatoriedad reproducible.** Registrar la semilla,
   validar los vectores normativos, aislar flujos locales y preparar comparadores
   sin presentar valores sintéticos como una ejecución o un artefacto real.
-- **F1.4. Identidad y resultados.** Crear identificadores, directorios,
-  configuración efectiva y manifiesto mínimo con regla ganadora, selectores y
-  procedencia, sin confundir referencias, muestras o eventos.
+- **F1.4. Identidad y resultados.** Crear los identificadores realmente
+  producidos, el provisional privado, la configuración efectiva y un
+  manifiesto general mínimo con tamaños/SHA-256 y publicación atómica
+  no-clobber. Los manifiestos de evento y conjuntos aparecen con esas unidades
+  en F3/F4; el hardening contra atacante local activo se evalúa en F9.
 - **F1.5. Referencia y repetición mínimas.** Aceptar una referencia pequeña
   simulada o suministrada, conservar su FASTA e identidad verificable y repetir
   el recorrido ejecutable con semilla, configuración, entrada, versión y
@@ -145,10 +151,10 @@ cree una ejecución identificada y produzca resultados trazables y repetibles.
   una referencia de tamaño exacto mediante regiones aleatorias no solapadas,
   conservar orden/orientación y `N`, y publicar FASTA, mapa, integridad,
   subsemilla y manifiesto reconstruibles. Las cuestiones funcionales y
-  DTPD-101/DTPD-116 están cerradas mediante DTC-050/DTC-056/DTC-057; el hito
-  está implementado y sus correcciones declaran la evidencia completa, pero
-  sigue pendiente la revisión independiente; ni la pausa F1.6 ni el cierre
-  global de F1 se consideran aprobados todavía.
+  DTPD-101/DTPD-116 están cerradas mediante DTC-050/DTC-056/DTC-057. El código
+  útil del checkpoint puede reutilizarse, pero el hito se vuelve a validar tras
+  retirar `ResolutionDomain`, `resolution-evidence`, eventos sintéticos y el
+  hardening físico que DTC-078 saca de F1.
 
 **Resultado de salida:** ejecución mínima repetible con configuración, semilla,
 referencia completa o reducida y manifiesto; una reducción incluye su mapa.

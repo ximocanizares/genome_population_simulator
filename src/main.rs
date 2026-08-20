@@ -26,6 +26,10 @@ struct ParsedArgs {
 
 fn main() -> ExitCode {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    if matches!(arguments.as_slice(), [argument] if argument == "--help" || argument == "-h") {
+        println!("{}", usage());
+        return ExitCode::SUCCESS;
+    }
     if arguments.as_slice() == ["--version"] {
         println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
@@ -77,9 +81,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<ParsedArgs, &'st
         Some("validate") => CommandMode::Validate,
         Some("run") => CommandMode::Run,
         _ => {
-            return Err(
-                "uso: genome-population-simulator <validate|run> <config.toml> [--diagnostics human|json] [--output <ruta>]",
-            );
+            return Err(usage());
         }
     };
     let path = PathBuf::from(
@@ -112,4 +114,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<ParsedArgs, &'st
         diagnostics: mode,
         output,
     })
+}
+
+fn usage() -> &'static str {
+    "uso: genome-population-simulator <validate|run> <config.toml> [--diagnostics human|json] [--output <ruta>]"
 }

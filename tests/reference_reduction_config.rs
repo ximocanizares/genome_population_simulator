@@ -2,13 +2,10 @@ use std::path::Path;
 
 use genome_population_simulator::adapters::{admit_toml_header, parse_declared_config};
 use genome_population_simulator::application::build_effective_config;
-use genome_population_simulator::configuration::{
-    DeclaredConfig, DeclaredReductionTarget, ExpectedConfigKind,
-};
+use genome_population_simulator::configuration::{DeclaredReductionTarget, ExpectedConfigKind};
 
 const BASE: &str = r#"config_kind = "general"
 schema_version = "1"
-route = "direct"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 [reference]
@@ -20,18 +17,14 @@ fasta = "source.fa"
 id = "chr1"
 class = "chromosome"
 length = 10
-ploidy = 2
 
 [[reference.sequences]]
 id = "scaffold-1"
 class = "scaffold"
 length = 7
-ploidy = 2
 "#;
 
-fn declared(
-    reduction: &str,
-) -> Box<genome_population_simulator::configuration::DeclaredGeneralConfig> {
+fn declared(reduction: &str) -> genome_population_simulator::configuration::DeclaredGeneralConfig {
     let bytes = format!("{BASE}\n{reduction}\n").into_bytes();
     let admitted = admit_toml_header(
         Path::new("config/general.toml"),
@@ -39,10 +32,7 @@ fn declared(
         ExpectedConfigKind::General,
     )
     .unwrap();
-    let DeclaredConfig::General(config) = parse_declared_config(admitted).unwrap() else {
-        panic!("expected general config")
-    };
-    config
+    parse_declared_config(admitted).unwrap()
 }
 
 #[test]
@@ -96,7 +86,7 @@ source_reference_id = "reference-main"
 region_size_bases = 4
 reduction_percent = 33.333333333333333333"#,
     );
-    let effective = build_effective_config(&config, &[], &[]).unwrap();
+    let effective = build_effective_config(&config).unwrap();
     let reduction = &effective.reduced_references()[0];
     assert_eq!(reduction.target_bases(), 11);
     assert_eq!(reduction.target().declared_value(), "33.333333333333333333");
@@ -118,7 +108,7 @@ fn zero_endpoints_source_mismatch_and_non_reduction_are_rejected() {
         "[[reduced_references]]\nid = \"small\"\nsource_reference_id = \"reference-main\"\nregion_size_bases = 4\ntarget_bases = 17",
     ] {
         let config = declared(reduction);
-        let error = build_effective_config(&config, &[], &[]).expect_err("preflight must reject");
+        let error = build_effective_config(&config).expect_err("preflight must reject");
         assert_eq!(error.exit_code(), 2);
         if matches!(error.code(), "GPS-CONF-019" | "GPS-CONF-020") {
             assert_eq!(

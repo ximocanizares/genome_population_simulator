@@ -1,67 +1,56 @@
 use std::path::Path;
 
 use genome_population_simulator::adapters::{admit_toml_header, parse_declared_config};
-use genome_population_simulator::application::validate_general_config;
+use genome_population_simulator::application::{build_effective_config, validate_general_config};
 use genome_population_simulator::configuration::{
-    DeclaredConfig, DeclaredGeneralConfig, DeclaredReferenceSource, DeclaredScenarioConfig,
-    ExpectedConfigKind, SequenceClass,
+    DeclaredReferenceSource, ExpectedConfigKind, SequenceClass,
 };
 
-fn general(bytes: &[u8]) -> DeclaredGeneralConfig {
+fn general(bytes: &[u8]) -> genome_population_simulator::configuration::DeclaredGeneralConfig {
     let admitted = admit_toml_header(
         Path::new("general.toml"),
         bytes.to_vec(),
         ExpectedConfigKind::General,
     )
     .expect("valid header");
-    let DeclaredConfig::General(config) = parse_declared_config(admitted).expect("declared config")
-    else {
-        panic!("expected general")
-    };
-    *config
-}
-
-fn scenario(bytes: &[u8]) -> DeclaredScenarioConfig {
-    let admitted = admit_toml_header(
-        Path::new("scenario.toml"),
-        bytes.to_vec(),
-        ExpectedConfigKind::Scenario,
-    )
-    .expect("valid header");
-    let DeclaredConfig::Scenario(config) =
-        parse_declared_config(admitted).expect("declared config")
-    else {
-        panic!("expected scenario")
-    };
-    *config
-}
-
-#[test]
-fn known_sum_classes_and_zero_explicit_events_are_preserved() {
-    let config = general(include_bytes!("fixtures/config/general-minimal.toml"));
-    let summary = validate_general_config(&config, &[]).expect("valid direct config");
-
-    assert_eq!(summary.total_genome_size, 1000);
-    assert_eq!(
-        summary.sequence_classes.get("chr1"),
-        Some(&SequenceClass::Chromosome)
-    );
-    assert!(summary.explicit_event_ids.is_empty());
+    parse_declared_config(admitted).expect("declared config")
 }
 
 #[test]
 fn simulated_reference_preserves_sequence_count_lengths_classes_and_composition() {
+    let config = general(include_bytes!("fixtures/config/general-minimal.toml"));
+    let summary = validate_general_config(&config).expect("valid config");
+    assert_eq!(summary.total_genome_size, 1000);
+    assert_eq!(config.reference().sequences.len(), 1);
+    assert_eq!(
+        *config.reference().sequences[0].class.value(),
+        SequenceClass::Chromosome
+    );
+    assert_eq!(*config.reference().sequences[0].length.value(), 1000);
+    let DeclaredReferenceSource::Simulated { composition } = &config.reference().source else {
+        panic!("expected simulated reference")
+    };
+    assert_eq!(
+        composition
+            .iter()
+            .map(|value| value.base.value().as_str())
+            .collect::<Vec<_>>(),
+        ["A", "C", "G", "T"]
+    );
+}
+
+#[test]
+fn multiple_sequences_preserve_order_classes_lengths_and_total_size() {
     let source = br#"config_kind = "general"
 schema_version = "1"
-route = "direct"
 [reference]
 kind = "simulated"
-id = "ref-two"
-default_ploidy = 2
-composition = [
-  { id = "A", category = "base", value = 0.6 },
-  { id = "C", category = "base", value = 0.4 },
-]
+id = "ref-multiple"
+[reference.composition]
+A = 0.1
+C = 0.2
+G = 0.3
+T = 0.4
 [[reference.sequences]]
 id = "chr1"
 class = "chromosome"
@@ -72,75 +61,220 @@ class = "scaffold"
 length = 5
 "#;
     let config = general(source);
+    let summary = validate_general_config(&config).expect("valid multi-sequence config");
+
+    assert_eq!(summary.total_genome_size, 12);
     assert_eq!(config.reference().sequences.len(), 2);
-    assert_eq!(*config.reference().sequences[0].length.value(), 7);
-    assert_eq!(*config.reference().sequences[1].length.value(), 5);
+    assert_eq!(config.reference().sequences[0].id.value(), "chr1");
     assert_eq!(
         *config.reference().sequences[0].class.value(),
         SequenceClass::Chromosome
     );
+    assert_eq!(*config.reference().sequences[0].length.value(), 7);
+    assert_eq!(config.reference().sequences[1].id.value(), "scaffold-1");
     assert_eq!(
         *config.reference().sequences[1].class.value(),
         SequenceClass::Scaffold
     );
-    let DeclaredReferenceSource::Simulated { composition, .. } = &config.reference().source else {
-        panic!("la referencia debe ser simulada")
+    assert_eq!(*config.reference().sequences[1].length.value(), 5);
+    let DeclaredReferenceSource::Simulated { composition } = &config.reference().source else {
+        panic!("expected simulated reference")
     };
-    assert_eq!(composition.len(), 2);
-    assert_eq!(composition[0].id.value(), "A");
-    assert_eq!(composition[0].value.literal(), "0.6");
-    assert_eq!(composition[1].id.value(), "C");
-    assert_eq!(composition[1].value.literal(), "0.4");
+    assert_eq!(
+        composition
+            .iter()
+            .map(|value| value.value.literal())
+            .collect::<Vec<_>>(),
+        ["0.1", "0.2", "0.3", "0.4"]
+    );
+}
 
-    let summary = validate_general_config(&config, &[]).expect("referencia simulada válida");
-    assert_eq!(summary.total_genome_size, 12);
+#[test]
+fn reduced_reference_requires_a_supplied_source_reference() {
+    let source = br#"config_kind = "general"
+schema_version = "1"
+seed = "0000000000000000000000000000000000000000000000000000000000000000"
+[reference]
+kind = "simulated"
+id = "ref-simulated"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 100
+[[reduced_references]]
+id = "ref-reduced"
+source_reference_id = "ref-simulated"
+region_size_bases = 10
+target_bases = 50
+"#;
+
+    let error = validate_general_config(&general(source))
+        .expect_err("a simulated reference cannot be reduced in F1");
+    assert_eq!(error.code(), "GPS-CONF-008");
+    assert_eq!(error.context()["fields"], "reduced_references");
+    assert!(error.context()["detail"].contains("suministrada"));
+}
+
+#[test]
+fn composition_uses_fixed_tolerance_and_effective_values_are_normalized() {
+    let source = br#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "simulated"
+id = "ref"
+[reference.composition]
+A = 0.2500000001
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 10
+"#;
+    let config = general(source);
+    let effective = build_effective_config(&config).expect("within fixed tolerance");
+    let sum: f64 = effective
+        .composition()
+        .expect("composition")
+        .values()
+        .iter()
+        .sum();
+    assert!((sum - 1.0).abs() <= 1e-9);
 }
 
 #[test]
 fn total_size_overflow_is_rejected_without_wrapping() {
-    let config = general(include_bytes!("fixtures/config/invalid-size-overflow.toml"));
-    let error = validate_general_config(&config, &[]).expect_err("sum must overflow");
+    let source = br#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "supplied"
+id = "ref"
+fasta = "source.fa"
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 18446744073709551615
+[[reference.sequences]]
+id = "chr2"
+class = "chromosome"
+length = 1
+"#;
+    let error = validate_general_config(&general(source)).expect_err("sum must overflow");
     assert_eq!(error.code(), "GPS-CONF-008");
     assert!(error.context()["detail"].contains("desborda"));
 }
 
 #[test]
-fn supplied_sequence_without_effective_ploidy_is_rejected() {
-    let config = general(include_bytes!(
-        "fixtures/config/invalid-supplied-ploidy-missing.toml"
-    ));
-    let error = validate_general_config(&config, &[]).expect_err("ploidy is mandatory");
-    assert_eq!(error.code(), "GPS-CONF-014");
-}
+fn future_root_and_nested_fields_are_rejected() {
+    let base = r#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "supplied"
+id = "ref"
+fasta = "source.fa"
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1
+"#;
+    for future_field in [
+        "route = \"direct\"",
+        "default_ploidy = 2",
+        "scenarios = []",
+        "events = []",
+        "individuals = []",
+        "populations = []",
+        "phases = []",
+        "groups = []",
+        "blocks = []",
+        "rules = []",
+        "frequency_sets = []",
+        "normalization_tolerance = 1e-9",
+    ] {
+        let source = base.replacen("[reference]", &format!("{future_field}\n[reference]"), 1);
+        let admitted = admit_toml_header(
+            Path::new("future.toml"),
+            source.into_bytes(),
+            ExpectedConfigKind::General,
+        )
+        .unwrap();
+        let error = parse_declared_config(admitted).expect_err("future field must fail");
+        assert_eq!(error.code(), "GPS-CONF-006");
+    }
 
-#[test]
-fn incompatible_frequency_forms_fail_during_declared_admission() {
+    let nested = br#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "supplied"
+id = "ref"
+fasta = "source.fa"
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1
+ploidy = 2
+"#;
     let admitted = admit_toml_header(
-        Path::new("frequency.toml"),
-        include_bytes!("fixtures/config/invalid-frequency-forms.toml").to_vec(),
+        Path::new("future.toml"),
+        nested.to_vec(),
         ExpectedConfigKind::General,
     )
-    .expect("valid header");
-    let error = parse_declared_config(admitted).expect_err("mixed forms must fail");
-    assert_eq!(error.code(), "GPS-CONF-008");
+    .unwrap();
+    let error = parse_declared_config(admitted).expect_err("ploidy must fail in F1");
+    assert_eq!(error.code(), "GPS-CONF-006");
 }
 
 #[test]
-fn route_and_scenario_must_agree() {
-    let evolution_general = b"config_kind = \"general\"\nschema_version = \"1\"\nroute = \"evolution\"\n[[scenarios]]\nid = \"families-small\"\npath = \"scenario.toml\"\nroute = \"evolution\"\n[reference]\nkind = \"simulated\"\nid = \"ref\"\ndefault_ploidy = 2\ncomposition = [{ id = \"A\", category = \"base\", value = 1.0 }]\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 10\n";
-    let general = general(evolution_general);
-    let families = scenario(include_bytes!("fixtures/config/scenario-families.toml"));
-    let error = validate_general_config(&general, &[&families])
-        .expect_err("scenario route mismatch must fail");
-    assert_eq!(error.code(), "GPS-CONF-008");
-}
-
-#[test]
-fn validation_does_not_create_a_final_directory() {
-    let config = general(include_bytes!("fixtures/config/general-minimal.toml"));
-    let destination =
-        std::env::temp_dir().join(format!("gps-f1.2-no-publication-{}", std::process::id()));
-    assert!(!destination.exists());
-    validate_general_config(&config, &[]).expect("valid config");
-    assert!(!destination.exists());
+fn reference_source_fields_are_mutually_exclusive() {
+    let simulated_with_fasta = br#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "simulated"
+id = "ref"
+fasta = "source.fa"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1
+"#;
+    let supplied_with_composition = br#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "supplied"
+id = "ref"
+fasta = "source.fa"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1
+"#;
+    for source in [
+        simulated_with_fasta.as_slice(),
+        supplied_with_composition.as_slice(),
+    ] {
+        let admitted = admit_toml_header(
+            Path::new("exclusive.toml"),
+            source.to_vec(),
+            ExpectedConfigKind::General,
+        )
+        .unwrap();
+        let error = parse_declared_config(admitted).expect_err("exclusive fields must fail");
+        assert_eq!(error.code(), "GPS-CONF-008");
+    }
 }

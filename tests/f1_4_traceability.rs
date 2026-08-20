@@ -1,47 +1,4 @@
 use std::collections::BTreeSet;
-use std::fs;
-
-use genome_population_simulator::application::load_and_validate_config;
-
-#[test]
-fn test_req_conf_38_validates_and_deduplicates_provided_individual_ids() {
-    let root = std::env::temp_dir().join(format!("gps-f14-conf38-{}", std::process::id()));
-    fs::create_dir_all(&root).expect("root");
-    let base = include_str!("fixtures/config/general-minimal.toml");
-    let valid = base.replacen(
-        "[reference]",
-        "[[individuals]]\nid = \"Sample.UPPER_1-ok\"\n\n[reference]",
-        1,
-    );
-    let path = root.join("valid.toml");
-    fs::write(&path, valid).expect("valid");
-    let effective = load_and_validate_config(&path).expect("valid provided ID");
-    assert_eq!(effective.individual_ids(), ["Sample.UPPER_1-ok"]);
-
-    let invalid = base.replacen(
-        "[reference]",
-        "[[individuals]]\nid = \"../sample\"\n\n[reference]",
-        1,
-    );
-    fs::write(&path, invalid).expect("invalid syntax");
-    assert_eq!(
-        load_and_validate_config(&path)
-            .expect_err("path-like ID")
-            .code(),
-        "GPS-DOMAIN-001"
-    );
-
-    let duplicate = base.replacen(
-        "[reference]",
-        "[[individuals]]\nid = \"same\"\n[[individuals]]\nid = \"same\"\n\n[reference]",
-        1,
-    );
-    fs::write(&path, duplicate).expect("duplicate");
-    let error = load_and_validate_config(&path).expect_err("duplicate ID");
-    assert_eq!(error.code(), "GPS-CONF-008");
-    assert!(error.context()["detail"].contains("same"));
-    fs::remove_dir_all(root).expect("cleanup");
-}
 
 #[test]
 fn f1_4_reaudits_exactly_25_requirements_without_claiming_missing_consumers() {
@@ -76,6 +33,6 @@ fn f1_4_reaudits_exactly_25_requirements_without_claiming_missing_consumers() {
     }
     assert_eq!(requirements.len(), 25);
     assert_eq!(tests.len(), 25);
-    assert_eq!(passed, 17);
-    assert_eq!(reassigned, 8);
+    assert_eq!(passed, 6);
+    assert_eq!(reassigned, 19);
 }

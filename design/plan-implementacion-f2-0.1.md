@@ -578,14 +578,14 @@ exactas desde la referencia cerrada en F1.
   - Depende de: F2.1.5–F2.1.9 y puertas de calidad verdes.
   - Procede de: F2.1; REQ-REF-14, REQ-IND-28, REQ-IND-29 y REQ-VER-27; ACE-03, ACE-10, ACE-11, ACE-28 y ACE-66.
   - Cambia: pruebas de integración, matriz de evidencia F2.1, casos de aceptación y documentación de límites frente a F5.3.
-  - Se comprueba con: §4.3, recuento automático de cuatro REQ asignados sin huérfanos y revisión cruzada de materialización, fase, dosis, procedencia y conservación de `N`.
+  - Se comprueba con: §4.3, recuento automático de tres REQ exclusivos sin huérfanos, verificación de `REQ-REF-14` como invariante heredada de F1.5 y revisión cruzada de materialización, fase, dosis, procedencia y conservación de `N`.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.1.10`; debe terminar con código 0 y escribir `evidence/f2/F2.1.10/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
 > **PAUSA-F2.1 — cierre obligatorio de F2.1.** Revisar el consumo sin reapertura de DTPD-101 y
 > DTPD-102, auditar sin reabrir el modelo interno ni `truth.jsonl` de DTC-061,
 > la extensión de tipos de coordenada, representación
 > haplotípica, consumo de memoria, oráculos y los
-> cuatro REQ. No iniciar ningún paso de F2.2, F2.3 o F2.4 si la representación no reconstruye
+> tres REQ exclusivos y la invariante heredada `REQ-REF-14`. No iniciar ningún paso de F2.2, F2.3 o F2.4 si la representación no reconstruye
 > exactamente cada copia o si una conversión de coordenadas queda implícita.
 
 ## 7. F2.2 — Variantes pequeñas y matriz de frecuencias SNV
@@ -967,7 +967,7 @@ cambios y reconstruye cada haplotipo sin simular dinámica poblacional.
 
 - ☐ F2.3.2. Parsear, validar y resolver individuos con IDs tipados y procedencia completa.
   - Depende de: F2.3.1 y contratos F1 de identidad/configuración.
-  - Procede de: DTC-033, DTC-039 y DTC-044; REQ-CONF-20, REQ-CONF-22, REQ-CONF-130 y evidencia compartida de REQ-IND-02/03/25 y REQ-MAN-10.
+  - Procede de: DTC-033, DTC-039 y DTC-044; REQ-CONF-20, REQ-CONF-22, REQ-CONF-38, REQ-CONF-130 y evidencia compartida de REQ-IND-02/03/25 y REQ-MAN-10.
   - Cambia: configuración declarada/efectiva, identidades, población, modelo y solicitudes de resolución, conservando valor, regla, selectores y origen.
   - Se comprueba con: IDs repetidos/desconocidos, orden, sustitución individual, HWE omitido/predeterminado y aislamiento de valores efectivos.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.2`; debe terminar con código 0 y escribir `evidence/f2/F2.3.2/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
@@ -1065,9 +1065,9 @@ cambios y reconstruye cada haplotipo sin simular dinámica poblacional.
 
 - ☐ F2.3.16. Completar evidencia y trazabilidad de F2.3.
   - Depende de: F2.3.2–F2.3.15 y puertas de calidad verdes.
-  - Procede de: los 12 REQ exclusivos y cinco compartidos asignados a F2.3 en §15/§15.1; ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114 y ACE-116.
+  - Procede de: los 13 REQ exclusivos y cinco compartidos asignados a F2.3 en §15/§15.1; ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114 y ACE-116.
   - Cambia: matriz de evidencia y escenario sintético reproducible con matriz, genotipos, fase, haplotipos, métricas y manifiesto calculados independientemente.
-  - Se comprueba con: §4.3, recuento automático de 12 exclusivos y cinco compartidos sin huérfanos; REQ-IND-02/03 prueban una referencia estructural por individuo, `REQ-CONF-130` queda parcial hacia F6.2, el ID estable omitido se cubre y no se reclama dinámica poblacional, lecturas ni formatos técnicos.
+  - Se comprueba con: §4.3, recuento automático de 13 exclusivos y cinco compartidos sin huérfanos; REQ-IND-02/03 prueban una referencia estructural por individuo, `REQ-CONF-130` queda parcial hacia F6.2, el ID estable omitido se cubre y no se reclama dinámica poblacional, lecturas ni formatos técnicos.
   - Evidencia ejecutable: `./scripts/verify-f2-step F2.3.16`; debe terminar con código 0 y escribir `evidence/f2/F2.3.16/result.json` con `status = "passed"`, o `status = "blocked"` únicamente mientras subsista una decisión pendiente nombrada, sin comprobaciones omitidas.
 
 - ☐ F2.3.17. Activar matriz, población y creación directa completa en Marimo.
@@ -1389,7 +1389,7 @@ cierres y declarar `status = "partial"` y destino final.
 ## 15. Matriz de trazabilidad REQ/ACE/DTC
 
 La lista de REQ de cierre exclusivo es exhaustiva para la asignación F2 vigente:
-14 + 4 + 22 + 12 + 2 + 25 = **79**. Se añaden por separado **nueve REQ compartidos**
+14 + 3 + 22 + 13 + 2 + 25 = **79**. Se añaden por separado **nueve REQ compartidos**
 y **nueve REQ parciales directos** que exigen evidencia en F2 y cierre posterior. Los ACE son la unión de
 los criterios enlazados por esas filas de trazabilidad. Una mención no acredita
 ejecución ni cierre. REQ-CONF-08, REQ-CONF-21, REQ-IND-02, REQ-IND-03 y
@@ -1401,9 +1401,9 @@ contradiría esas filas sin una revisión explícita de trazabilidad.
 | Hito | REQ asignados | ACE cubiertos | Decisiones/puertas principales | Pasos de cierre |
 |---|---|---|---|---|
 | F2.0 | REQ-UI-01; REQ-UI-02; REQ-UI-03; REQ-UI-04; REQ-UI-05; REQ-UI-06; REQ-UI-07; REQ-UI-08; REQ-UI-09; REQ-UI-10; REQ-UI-11; REQ-UI-12; REQ-UI-13; REQ-VAL-54 | ACE-114, ACE-115 | DTC-034, DTC-036, DTC-042, DTC-043, DTC-044, DTC-045, DTC-048, DTC-051, DTC-058, DTC-069, DTC-073 y DTC-074; RAF2-017/034/035 resueltos | F2.0.1–F2.0.18 |
-| F2.1 | REQ-REF-14; REQ-IND-28; REQ-IND-29; REQ-VER-27 | ACE-03, ACE-10, ACE-11, ACE-28, ACE-66 | DTC-003, DTC-010, DTC-013, DTC-031, DTC-032, DTC-039, DTC-056 y DTC-061; DTPD-102 resuelta | F2.1.2–F2.1.10 |
+| F2.1 | REQ-IND-28; REQ-IND-29; REQ-VER-27 | ACE-03, ACE-10, ACE-11, ACE-28, ACE-66 | DTC-003, DTC-010, DTC-013, DTC-031, DTC-032, DTC-039, DTC-056 y DTC-061; DTPD-102 resuelta; REQ-REF-14 ya cerrado en F1.5 se conserva como invariante heredada | F2.1.2–F2.1.10 |
 | F2.2 | REQ-CONF-24; REQ-CONF-25; REQ-CONF-28; REQ-CONF-128; REQ-CONF-129; REQ-IND-05; REQ-IND-06; REQ-IND-10; REQ-IND-11; REQ-IND-13; REQ-IND-14; REQ-IND-17; REQ-IND-18; REQ-IND-19; REQ-IND-21; REQ-IND-38; REQ-IND-40; REQ-IND-41; REQ-IND-60; REQ-IND-61; REQ-DIR-03; REQ-REC-24 | ACE-01, ACE-09, ACE-10, ACE-21, ACE-22, ACE-28, ACE-85, ACE-95, ACE-103, ACE-104, ACE-109, ACE-110, ACE-111, ACE-116 | DTC-006, DTC-011, DTC-020, DTC-022, DTC-032, DTC-033, DTC-037, DTC-038, DTC-044, DTC-049, DTC-052, DTC-054, DTC-056, DTC-059/DTC-060, DTC-067/DTC-068 y DTC-070 a DTC-075; DTPD-118/120/121 y RAF2-028/029/033/041–044 resueltas; puerta compacta F2.2.14 sin VCF | F2.2.1–F2.2.40 |
-| F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-IND-15; REQ-IND-62; REQ-IND-63; REQ-IND-64; REQ-IND-65; REQ-DIR-01; REQ-DIR-02; REQ-UI-14; REQ-VAL-55; REQ-MAN-91 | ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114, ACE-116 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039, DTC-049, DTC-051, DTC-052, DTC-054 y DTC-071 a DTC-073; DTPD-118 y RAF2-028/033/034 resueltas; REQ-CONF-130 parcial hacia F6.2 | F2.3.1–F2.3.17 |
+| F2.3 | REQ-CONF-20; REQ-CONF-22; REQ-CONF-38; REQ-IND-15; REQ-IND-62; REQ-IND-63; REQ-IND-64; REQ-IND-65; REQ-DIR-01; REQ-DIR-02; REQ-UI-14; REQ-VAL-55; REQ-MAN-91 | ACE-01, ACE-10, ACE-12, ACE-22, ACE-23, ACE-28, ACE-104, ACE-111, ACE-114, ACE-116 | DTC-003, DTC-006, DTC-011, DTC-020, DTC-037, DTC-038, DTC-039, DTC-049, DTC-051, DTC-052, DTC-054 y DTC-071 a DTC-073; DTPD-118 y RAF2-028/033/034 resueltas; REQ-CONF-130 parcial hacia F6.2 | F2.3.1–F2.3.17 |
 | F2.4 | REQ-VER-31; REQ-SAL-06 | ACE-34, ACE-62 | DTC-003, DTC-004, DTC-031, DTC-035, DTC-036, DTC-040, DTC-045, DTC-047, DTC-051 y DTC-061; DTPD-102 resuelta | F2.4.1–F2.4.9 |
 | F2.5 | REQ-FMT-05; REQ-FMT-06; REQ-REC-26; REQ-VER-02; REQ-VER-06; REQ-VER-12; REQ-VER-15; REQ-VER-16; REQ-VER-17; REQ-VER-30; REQ-VER-32; REQ-VER-33; REQ-VER-34; REQ-VER-36; REQ-VER-37; REQ-VER-39; REQ-VER-40; REQ-VER-41; REQ-VER-43; REQ-VER-44; REQ-VER-47; REQ-VAL-28; REQ-MAN-27; REQ-MAN-57; REQ-SAL-21 | ACE-19, ACE-25, ACE-28, ACE-29, ACE-30, ACE-60, ACE-61, ACE-62, ACE-63, ACE-64, ACE-66, ACE-67, ACE-93, ACE-94, ACE-100, ACE-103 | DTC-003, DTC-004, DTC-013, DTC-021, DTC-032, DTC-040, DTC-043, DTC-045, DTC-047, DTC-051, DTC-061 a DTC-066; DTPD-103 y RAF2-030 resueltas | F2.5.1–F2.5.13 |
 

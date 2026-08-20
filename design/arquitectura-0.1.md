@@ -185,13 +185,11 @@ consideran oficialmente validadas hasta incorporarlas a esa matriz.
    referencias de mapeo.
 4. **La configuración se resuelve antes de simular.** El adaptador TOML conserva
    el documento original exacto, comprueba su clase y versión conocida y solo
-   entonces construye `DeclaredConfig` con procedencia y ubicación. Sobre ella
-   se aplican valores base y la dominancia parcial de
-   REQ-CONF-116 a REQ-CONF-123, se validan máximas incomparables, duplicados,
-   solapamientos y selectores no permitidos y se obtiene `EffectiveConfig`,
-   inmutable en su ámbito. Las sustituciones por identificador individual solo
-   pueden resolverse contra individuos directos, fundadores o parentales
-   expresos que ya existan en esta fase.
+   entonces construye `DeclaredConfig` con procedencia y ubicación. Cada fase
+   incorpora al resolvedor únicamente los parámetros, selectores y relaciones
+   que consume realmente y obtiene un `EffectiveConfig` inmutable para ese
+   recorrido. F1 no simula dominios poblacionales, temporales o espaciales para
+   anticipar la validación de fases posteriores.
 5. **Los estados inválidos no cruzan fronteras.** Los identificadores,
    coordenadas, ploidías, proporciones y relaciones se representan mediante
    valores validados o producen errores explícitos.
@@ -202,13 +200,11 @@ consideran oficialmente validadas hasta incorporarlas a esa matriz.
    comparten consumo. La reproducibilidad se declara por separado para biología,
    contenido técnico, equivalencia semántica e identidad binaria; alcanzar un
    nivel no presupone alcanzar el siguiente.
-7. **Los estados y la publicación son jerárquicos.** Ejecución, evento, conjunto
-   y artefacto distinguen como mínimo `incompleto`, `completo` y `fallido`. Cada
-   artefacto se finaliza primero en su temporal. Un destino final solo aparece
-   tras cerrar manifiestos coherentes: puede ser una ejecución completa o un
-   fallo controlado que identifica y conserva únicamente unidades independientes
-   ya validadas. Una unidad superior solo está completa cuando lo están todas
-   sus unidades obligatorias.
+7. **Los estados y la publicación crecen con sus consumidores.** F1 distingue
+   ejecución y artefactos como `incompleto`, `completo` o `fallido`, trabaja en
+   un provisional privado y publica mediante renombrado atómico no-clobber. Las
+   jerarquías de evento, conjunto y exportación se incorporan en las fases que
+   creen esas unidades, sin simularlas mediante manifiestos vacíos.
 8. **Los recursos se observan antes de optimizar.** La arquitectura expone
    puntos de medida y admite representaciones compactas posteriores, sin fijar
    objetivos cuantitativos no acordados.
@@ -217,6 +213,15 @@ consideran oficialmente validadas hasta incorporarlas a esa matriz.
    `run`. Nunca calcula valores efectivos, resuelve reglas ni modifica la
    semántica biológica. Toda capacidad configurable F2–F9 añade su control antes
    de cerrar el hito que la introduce.
+10. **El modelo de confianza es proporcional al despliegue.** Los TOML, FASTA y
+    demás entradas externas son no confiables y se validan antes de entrar. Los
+    ficheros creados por el proceso dentro de su provisional privado se confían
+    frente a un atacante local activo y se protegen frente a errores propios,
+    interrupciones y corrupción accidental mediante estados, tamaños, SHA-256
+    y publicación atómica. La defensa exhaustiva contra symlink, hardlink,
+    sustitución concurrente e inodos ajenos pertenece a F9/CI cuando el modelo
+    de despliegue la requiera; no condiciona la reproducibilidad científica de
+    F1.
 
 ## 4. Dirección de dependencias
 
@@ -814,39 +819,33 @@ exactamente esos bytes; una edición invalida la instantánea. La limpieza solo
 elimina temporales con marcador propio y mismo UID. Configuración efectiva, copias de entrada y
 resultados continúan bajo la autoridad y publicación del binario Rust.
 
-El adaptador TOML recibe tanto el fichero general como cada escenario y conserva
-una copia exacta de sus bytes. Primero exige `config_kind` y `schema_version` y
-solo admite la cadena de versión conocida `"1"`; una versión ausente, anterior,
-posterior o desconocida se rechaza sin interpretar parcialmente el resto. Solo
-entonces produce `DeclaredConfig` con procedencia y ubicaciones. Antes de
-resolver valores rechaza además sintaxis inválida, claves o campos duplicados o
-desconocidos y combinaciones inválidas. Fases, eventos y cruces entran como
-listas de tablas con identificadores explícitos: la jerarquía física del TOML
-no les concede identidad ni precedencia. El componente de admisión coordina después los
-validadores de identidad, referencias, combinaciones y reglas; el resolvedor
-produce `EffectiveConfig`, validada, heredada y resuelta e inmutable en su
-ámbito, conservando la regla ganadora y su procedencia. El catálogo de entradas
-copiadas y el plan de ejecución solo se crean tras esa frontera.
+El adaptador TOML crece por fases. En F1 recibe exclusivamente un fichero
+general y conserva una copia exacta de sus bytes. Primero exige
+`config_kind = "general"` y `schema_version = "1"`; una clase o versión distinta
+se rechaza sin interpretar parcialmente el resto. Solo entonces produce la
+configuración declarada con procedencia y ubicaciones y rechaza sintaxis
+inválida, claves duplicadas, campos desconocidos y combinaciones incompatibles.
+En F1 la raíz contiene únicamente semilla, referencia y referencias reducidas;
+vía, ploidía, reglas, entidades poblacionales, eventos y enlaces a escenarios
+son campos fuera de alcance y no se ignoran ni se siguen como rutas. F2 amplía
+esta misma frontera con el conjunto general más cero o varios escenarios; las
+fases propietarias incorporan después fases, eventos, cruces, relaciones y
+reglas cuando exista su primer consumidor real. El catálogo de entradas
+copiadas y el plan de ejecución solo se crean tras la frontera correspondiente.
 
-La admisión expone una frontera `ResolutionDomain`: un proveedor propietario
-entrega relaciones población↔subpoblación, intervalos fase↔generación y loci con
-referencia, secuencia y coordenada ya validados. El resolvedor de F1 comprueba
-la identidad, el nivel espacial admitido y la prueba exacta antes de aplicar el
-retículo de REQ-CONF-117/118; nunca deduce relaciones desde listas planas. F1
-usa un proveedor sintético explícito solo en las pruebas del motor. F2 y las
-fases evolutivas implementarán proveedores reales sin trasladar su biología a
-F1. `EffectiveConfig` conserva el *snapshot* canónico, versión y proveedor del
-dominio. Antes de derivar esa configuración, admisión serializa dominio y
-solicitudes validados en `resolution-evidence` v1. El artefacto tiene ID, clase,
-ruta, tamaño y SHA-256 propios; el manifiesto lo enlaza y la revalidación relee
-sus bytes sin seguir enlaces. Así, `EffectiveConfig` queda como resultado
-derivado y no puede convertirse en la autoridad que se valida a sí misma. Los
-IDs de fase son globalmente únicos en las copias general y de escenarios v1.
-La ordenación de valores usa la tabla literal `parameter_order_version=1`; el
-oráculo mantiene una implementación separada y no depende del discriminante de
-`ParameterKey` ni del orden lexicográfico.
+F1 no expone `ResolutionDomain` ni publica `resolution-evidence`. Resuelve solo
+los valores que consumen sus referencias, usando las identidades y coordenadas
+ya validadas en ese mismo recorrido. La composición A/C/G/T simulada conserva
+un validador numérico específico y una tolerancia efectiva fija de `1e-9`; no
+arrastra el resolvedor ni las colecciones poblacionales genéricas. Cuando
+aparezcan relaciones reales, F2
+aportará loci y posiciones, F6 población↔subpoblación y F7
+fase↔generaciones; cada fase será propietaria de su evidencia, su orden estable
+y sus pruebas. La composición final del retículo se audita en F9.7. Ningún
+proveedor sintético ni una salida derivada se convierte en autoridad runtime.
 
-Al construir `EffectiveConfig`, admisión representa como `f64` cada probabilidad,
+Cuando F6 incorpore probabilidades y frecuencias reales, admisión representará
+como `f64` cada probabilidad,
 frecuencia y tolerancia general y exige que sea finita. Los valores pertenecen a
 `[0,1]`; la tolerancia absoluta pertenece inclusivamente a `[0, 1e-6]` y, si no
 se declara, vale `1e-9`. Cada colección se ordena canónicamente por identidad
@@ -1280,6 +1279,11 @@ ACE-66 y ACE-68 a ACE-74.
 
 ### 7.4. Cierre y publicación
 
+F1 aplica esta frontera a la ejecución y a sus artefactos reales de
+configuración y referencia. No crea manifiestos de evento, conjuntos vacíos ni
+evidencias sintéticas para unidades que todavía no existen. Los productores de
+F2–F8 extenderán el mismo patrón al introducir cada unidad real.
+
 Cada productor escribe primero cada artefacto en su propio temporal. Solo tras
 cerrarlo, validarlo y comprobar tamaño y SHA-256 lo finaliza atómicamente dentro del
 directorio provisional de ejecución, acompañado de identidad, referencia,
@@ -1343,6 +1347,13 @@ carrera. Esta garantía lógica no implica `fsync` ni durabilidad física. Los
 estados y efectos funcionales de cierre están en REQ-VAL-01 a REQ-VAL-56,
 REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a REQ-SAL-27, con ACE-22 a ACE-24,
 ACE-33, ACE-34, ACE-36, ACE-46 a ACE-67, ACE-78, ACE-86 y ACE-92 a ACE-108.
+
+En el recorrido local ordinario, el provisional pertenece al proceso y no es
+una frontera frente a un atacante con acceso de escritura concurrente. F1 exige
+rutas relativas canónicas, permisos privados razonables, temporales propios,
+hashes y renombrado no-clobber; no enumera exhaustivamente el árbol para
+rechazar hardlinks, inodos externos o cada carrera TOCTOU. Esas defensas se
+evalúan en F9/CI si el despliegue declara ese modelo de amenaza.
 
 ### 7.5. Construcción y publicación del programa
 
@@ -1445,6 +1456,12 @@ manifiesto se construye desde esas transiciones. El tamaño completo de los
 manifiestos y de `effective-config.json` entra en el preflight; no permite omitir
 campos, enumeraciones ni enlaces. El provisional es hermano del destino, reside
 en el mismo sistema de ficheros y lleva el marcador `INCOMPLETE`.
+
+Dentro de F1, una salida que el propio proceso acaba de escribir en ese
+provisional privado no se vuelve a tratar como entrada hostil. Se comprueban su
+cierre, tamaño y SHA-256 y se conservan pruebas independientes pequeñas de los
+formatos; la revalidación semántica exhaustiva del paquete completo y las
+matrices de mutaciones físicas pertenecen a la consolidación F9.
 
 Hay tres cierres distintos. Un rechazo durante admisión o pre-simulación no
 publica destino y deja, como máximo, provisional o diagnóstico externo. Un

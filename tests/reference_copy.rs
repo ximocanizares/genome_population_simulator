@@ -38,21 +38,8 @@ fn supplied_run_copies_the_validated_fasta_byte_for_byte() {
     )
     .expect("effective JSON");
     let reference = &effective_json["reference"];
-    assert_eq!(reference["origin"]["kind"], "supplied");
-    assert_eq!(
-        reference["authoritative_resource"],
-        "resources/references/ref-supplied.fa"
-    );
-    assert_eq!(reference["canonical_format"], serde_json::Value::Null);
-    assert_eq!(reference["indexes"], serde_json::json!([]));
-    assert_eq!(
-        reference["sequences"][0]["header"]["value"],
-        "chr1 description"
-    );
-    assert_eq!(
-        reference["sequences"][0]["description"]["value"],
-        "description"
-    );
+    assert_eq!(reference["source"], "supplied");
+    assert_eq!(reference["composition"], serde_json::Value::Null);
     assert_eq!(reference["sequences"][0]["unknown_base_count"], 1);
     assert_eq!(reference["sequences"][0]["length"], 5);
     assert_eq!(reference["sequences"][0]["class"], "chromosome");
@@ -60,22 +47,14 @@ fn supplied_run_copies_the_validated_fasta_byte_for_byte() {
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(destination.join("manifest.json")).expect("manifest"))
             .expect("manifest JSON");
-    assert_eq!(manifest["references"][0], *reference);
+    assert_eq!(manifest["references"][0]["id"], reference["id"]);
+    assert_eq!(manifest["references"][0]["fasta"], reference["fasta"]);
     let linked = destination.join(
         reference["fasta"]["path"]
             .as_str()
             .expect("relative FASTA link"),
     );
     assert_eq!(linked, copy);
-    assert_eq!(
-        destination.join(
-            reference["authoritative_resource"]
-                .as_str()
-                .expect("authoritative resource")
-        ),
-        copy,
-        "every consumer must be bound to the verified copy, not the original"
-    );
     fs::write(&fasta, b">chr1 changed\nAAAAA\n").expect("mutate original after publication");
     assert_eq!(
         fs::read(&copy).expect("authoritative copy after source mutation"),
@@ -237,7 +216,6 @@ fn write_supplied_config(path: &Path, fasta: &str, length: u64) {
         format!(
             r#"config_kind = "general"
 schema_version = "1"
-route = "direct"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 [reference]
@@ -249,7 +227,6 @@ fasta = "{fasta}"
 id = "chr1"
 class = "chromosome"
 length = {length}
-ploidy = 2
 "#
         ),
     )

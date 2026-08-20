@@ -1,5 +1,197 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "manifest-general-v1.schema.json",
-  "$ref": "results-common-v1.schema.json#/$defs/general_manifest"
+  "title": "Manifiesto general mínimo GPS v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_kind",
+    "schema_version",
+    "execution_id",
+    "state",
+    "configuration_input",
+    "effective_config",
+    "references",
+    "reference_reductions",
+    "artifacts",
+    "units",
+    "diagnostics"
+  ],
+  "properties": {
+    "manifest_kind": { "const": "gps_execution_manifest" },
+    "schema_version": { "const": "1" },
+    "execution_id": { "type": "string", "minLength": 1 },
+    "state": { "enum": ["complete", "failed"] },
+    "configuration_input": { "$ref": "#/$defs/configuration_input" },
+    "effective_config": {
+      "oneOf": [
+        { "$ref": "#/$defs/artifact" },
+        { "type": "null" }
+      ]
+    },
+    "references": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/reference_link" }
+    },
+    "reference_reductions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/reference_reduction" }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "units": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/unit" }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    }
+  },
+  "$defs": {
+    "checksum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "digest"],
+      "properties": {
+        "algorithm": { "const": "sha256" },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "path",
+        "size_bytes",
+        "checksum",
+        "state",
+        "validated"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f])(?!.*\\/$).+$(?!\\n)"
+        },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "checksum": { "$ref": "#/$defs/checksum" },
+        "state": { "enum": ["complete", "failed"] },
+        "validated": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "state": { "const": "complete" } },
+            "required": ["state"]
+          },
+          "then": { "properties": { "validated": { "const": true } } }
+        },
+        {
+          "if": {
+            "properties": { "state": { "const": "failed" } },
+            "required": ["state"]
+          },
+          "then": { "properties": { "validated": { "const": false } } }
+        }
+      ]
+    },
+    "configuration_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "original_path", "copy"],
+      "properties": {
+        "kind": { "const": "general" },
+        "original_path": { "type": "string", "minLength": 1 },
+        "copy": { "$ref": "#/$defs/artifact" }
+      }
+    },
+    "reference_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "fasta"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "fasta": { "$ref": "#/$defs/artifact" }
+      }
+    },
+    "reduction_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "declared", "bases"],
+      "properties": {
+        "mode": { "enum": ["target_bases", "reduction_percent"] },
+        "declared": { "type": "string", "minLength": 1 },
+        "bases": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "reference_reduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_reference_id",
+        "region_size_bases",
+        "target",
+        "selection_subseed",
+        "selection_order",
+        "state",
+        "fasta",
+        "map",
+        "source_fasta_id"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "source_reference_id": { "type": "string", "minLength": 1 },
+        "region_size_bases": { "type": "integer", "minimum": 1 },
+        "target": { "$ref": "#/$defs/reduction_target" },
+        "selection_subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "selection_order": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "state": { "enum": ["incomplete", "complete", "failed"] },
+        "fasta": { "$ref": "#/$defs/artifact" },
+        "map": { "$ref": "#/$defs/artifact" },
+        "source_fasta_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "state", "exportable", "diagnostic_code"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["incomplete", "complete", "failed"] },
+        "exportable": { "type": "boolean" },
+        "diagnostic_code": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^GPS-(CONF|INPUT|FMT|DOMAIN|RES|TOOL|IO|INTERNAL)-[0-9]{3}$"
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^GPS-(CONF|INPUT|FMT|DOMAIN|RES|TOOL|IO|INTERNAL)-[0-9]{3}$"
+        },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
 }

@@ -1,5 +1,12 @@
 # Revisión de F1.2
 
+> **REVISIÓN HISTÓRICA SUPERADA.** La aprobación que figura al final pertenece a
+> la implementación anterior preservada en el checkpoint `66ad8b2`. DTC-078 y
+> `design/plan-reimplementacion-f1-0.2.md` la sustituyeron: F1.2 permanece
+> abierta y no autoriza iniciar F1.3. El estado vigente se conserva en
+> `evidence/f1-reimplementation/f1.2-corrections.md` y requiere una nueva
+> revisión independiente limpia.
+
 - Fecha: 9 de agosto de 2026.
 - Alcance: B1–B12, sin C1/F1.3.
 - Método: revisión completa del diff conforme a `revisar-codigo-rust`, separada

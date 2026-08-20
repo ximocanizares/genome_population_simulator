@@ -22,8 +22,12 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn temporary(label: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
     std::env::temp_dir().join(format!(
-        "gps-f1-6-{}-{}-{label}",
+        "gps-f1-6-{}-{}-{nanos}-{label}",
         std::process::id(),
         NONCE.fetch_add(1, Ordering::Relaxed)
     ))
@@ -256,29 +260,14 @@ fn validate_json(instance: &Path, schema: &str, expected_success: bool) {
 fn assert_artifacts_are_classified_once(
     manifest: &serde_json::Value,
     expected_reduction_units: usize,
-    expected_explicit_artifacts: usize,
+    _expected_explicit_artifacts: usize,
 ) {
-    let outputs = manifest["outputs"].as_object().expect("outputs object");
-    let mut classified = BTreeMap::<String, usize>::new();
-    for category in ["minimum", "default_enabled", "explicitly_requested"] {
-        for artifact_id in outputs[category].as_array().expect("output category") {
-            *classified
-                .entry(artifact_id.as_str().expect("artifact ID").to_owned())
-                .or_default() += 1;
-        }
-    }
-    assert_eq!(classified.get("manifest-general"), Some(&1));
-    for artifact in manifest["artifacts"].as_array().expect("artifacts") {
-        let id = artifact["id"].as_str().expect("artifact ID");
-        assert_eq!(classified.get(id), Some(&1), "classification for {id}");
-    }
     assert_eq!(
-        outputs["explicitly_requested"]
-            .as_array()
-            .expect("explicit outputs")
-            .len(),
-        expected_explicit_artifacts
+        manifest["artifacts"].as_array().expect("artifacts").len(),
+        3 + expected_reduction_units * 2
     );
+    assert!(manifest.get("events").is_none());
+    assert!(manifest.get("resolution_evidence").is_none());
     assert_eq!(
         manifest["units"]
             .as_array()
@@ -423,11 +412,10 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
     )
     .unwrap();
     let reduction = &effective_json["reduced_references"][0];
-    assert_eq!(reduction["target"]["declared_value"], "13");
-    assert_eq!(reduction["target"]["derived_bases"], 13);
-    assert_eq!(reduction["eligible_bases"], 20);
+    assert_eq!(reduction["target"]["declared"], "13");
+    assert_eq!(reduction["target"]["bases"], 13);
     assert_eq!(
-        reduction["randomness"]["subseed"],
+        reduction["selection_subseed"],
         effective.reduced_references()[0]
             .selection_subseed()
             .to_hex()
@@ -473,7 +461,7 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
         .to_owned();
     assert_eq!(
         observed_digest,
-        manifest["reference_reductions"][0]["derived_fasta"]["checksum"]["digest"]
+        manifest["reference_reductions"][0]["fasta"]["checksum"]["digest"]
             .as_str()
             .unwrap()
     );
@@ -826,7 +814,7 @@ target_bases = 7"#;
 }
 
 #[test]
-fn omitted_sequence_and_unrelated_consumers_do_not_change_the_reduction_stream() {
+fn future_consumers_are_rejected_instead_of_silently_changing_the_reduction_stream() {
     let reduction = r#"[[reduced_references]]
 id = "reference-one-block"
 source_reference_id = "reference-main"
@@ -846,50 +834,24 @@ target_bases = 5"#;
         "individuals = [{ id = \"individual-extra\" }]\nevents = [{ id = \"event-extra\" }]\n\n[[rules]]\nid = \"output-extra\"\nparameter = \"output_enabled\"\nvalue = true",
         reduction,
     );
-    let consumers = load_and_validate_config(&consumers_config).expect("consumer config");
-    assert!(
-        consumers
-            .values()
-            .iter()
-            .any(|value| value.parameter().as_str() == "output_enabled")
-    );
-    let consumers_output = consumers_root.join("output");
-    execute_validated_config(&consumers, &consumers_output).expect("consumer run");
-
-    assert_eq!(
-        baseline.reduced_references()[0].selection_subseed(),
-        consumers.reduced_references()[0].selection_subseed()
-    );
-    assert_eq!(
-        fs::read(baseline_output.join("resources/references/reference-one-block.map.json"))
+    let error =
+        load_and_validate_config(&consumers_config).expect_err("future consumers are outside F1");
+    assert_eq!(error.code(), "GPS-CONF-006");
+    assert!(!consumers_root.join("output").exists());
+    let map: serde_json::Value = serde_json::from_slice(
+        &fs::read(baseline_output.join("resources/references/reference-one-block.map.json"))
             .unwrap(),
-        fs::read(consumers_output.join("resources/references/reference-one-block.map.json"))
-            .unwrap()
-    );
+    )
+    .unwrap();
     assert_eq!(
-        fs::read(baseline_output.join("resources/references/reference-one-block.fa")).unwrap(),
-        fs::read(consumers_output.join("resources/references/reference-one-block.fa")).unwrap()
-    );
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&fs::read(baseline_output.join("manifest.json")).unwrap()).unwrap();
-    let reduction_record = &manifest["reference_reductions"][0];
-    assert_eq!(
-        reduction_record["included_sequence_ids"]
+        map["segments"]
             .as_array()
-            .unwrap()
+            .expect("segments")
+            .iter()
+            .map(|segment| segment["sequence_id"].as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>()
             .len(),
-        1
-    );
-    assert_eq!(
-        reduction_record["omitted_sequence_ids"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_ne!(
-        manifest["reference_reductions"][0]["included_sequence_ids"][0],
-        manifest["reference_reductions"][0]["omitted_sequence_ids"][0]
+        1,
     );
 
     fs::remove_dir_all(baseline_root).unwrap();

@@ -5,10 +5,10 @@
 - **Título:** plan detallado de F1, núcleo reproducible.
 - **Versión del plan:** 0.1.
 - **Fecha:** 10 de agosto de 2026.
-- **Estado:** H-F16-R25–R27 están 3/3 aplicados con adaptación y las 196 pruebas,
-  puertas Cargo, validadores externos y OCI son verdes. F14 y los balances
-  22/22 y 83/83 se restauran para una nueva revisión independiente. F1 no está
-  aprobada ni cerrada y F2 no ha comenzado.
+- **Estado:** histórico y superado para ejecución por
+  [plan-reimplementacion-f1-0.2.md](./plan-reimplementacion-f1-0.2.md). El
+  checkpoint `66ad8b2` conserva este resultado y sus evidencias, pero F1 no está
+  aprobada ni cerrada.
 - **Ámbito temporal:** únicamente F1.1–F1.6.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
@@ -17,7 +17,8 @@
   [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md),
   [trazabilidad-requisitos-0.1.md](./trazabilidad-requisitos-0.1.md) y
   [registro-ampliaciones-futuras-0.1.md](./registro-ampliaciones-futuras-0.1.md).
-- **Decisiones confirmadas aplicables:** DTC-034 a DTC-050 y DTC-076/DTC-077. Este plan no
+- **Decisiones históricas aplicadas:** DTC-034 a DTC-050 y DTC-076/DTC-077;
+  estas dos últimas quedan superadas por DTC-078. Este plan no
   convierte una propuesta DTP, una DTPD posterior ni una candidata de
   dependencia en decisión aprobada.
 

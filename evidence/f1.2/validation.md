@@ -1,5 +1,13 @@
 # Validación de F1.2
 
+> **EVIDENCIA HISTÓRICA SUPERADA.** Este documento describe la implementación
+> anterior conservada en el checkpoint `66ad8b2`; sus cifras de 63 pruebas y 16
+> requisitos superados no son el estado vigente y no aprueban PAUSA-F1.2. La
+> reimplementación mínima usa la matriz actual de cuatro `pass` y 32
+> reasignaciones. Su aplicación de correcciones y puertas actuales se registra
+> en `evidence/f1-reimplementation/f1.2-corrections.md` hasta completar una nueva
+> revisión independiente.
+
 Entorno observado: Rust/Cargo 1.97.1, objetivo
 `x86_64-unknown-linux-gnu`, Linux WSL2 x86_64; CPython 3.12.3 con `jsonschema`
 4.10.3.

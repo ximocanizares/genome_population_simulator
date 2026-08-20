@@ -7,6 +7,8 @@ use crate::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
 
+pub(crate) const COMPOSITION_TOLERANCE: f64 = 1e-9;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BaseFrequency {
     pub base: u8,
@@ -96,27 +98,68 @@ fn validate_composition(composition: &[BaseFrequency]) -> Result<[(u8, f64); 4],
             ));
         }
     }
-    let mut cumulative = 0.0;
-    let mut result = [(b'A', 0.0), (b'C', 0.0), (b'G', 0.0), (b'T', 1.0)];
-    for (index, ((base, probability), (_, threshold))) in
-        ordered.into_iter().zip(result.iter_mut()).enumerate()
-    {
+    let mut probabilities = [0.0_f64; 4];
+    for (index, (base, probability)) in ordered.into_iter().enumerate() {
         let probability = probability.ok_or_else(|| {
             configuration_error(
                 "reference.composition",
                 format!("missing generated base {}", char::from(base)),
             )
         })?;
-        if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
-            return Err(configuration_error(
-                "reference.composition",
-                format!("invalid probability for {}", char::from(base)),
-            ));
-        }
+        probabilities[index] = probability;
+    }
+    let probabilities = normalize_composition_probabilities(probabilities)
+        .map_err(|detail| configuration_error("reference.composition", detail))?;
+    let mut cumulative = 0.0;
+    let mut result = [(b'A', 0.0), (b'C', 0.0), (b'G', 0.0), (b'T', 1.0)];
+    for (index, (probability, (_, threshold))) in
+        probabilities.into_iter().zip(result.iter_mut()).enumerate()
+    {
         cumulative += probability;
         *threshold = if index == 3 { 1.0 } else { cumulative };
     }
     Ok(result)
+}
+
+pub(crate) fn normalize_composition_probabilities(
+    mut values: [f64; 4],
+) -> Result<[f64; 4], String> {
+    if values
+        .iter()
+        .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+    {
+        return Err("each A/C/G/T probability must be finite and in [0,1]".to_owned());
+    }
+    let sum = neumaier(values);
+    let delta = (sum - 1.0).abs();
+    if !sum.is_finite() || sum <= 0.0 || delta > COMPOSITION_TOLERANCE {
+        return Err(format!(
+            "A/C/G/T sum {sum} differs from 1 by more than {COMPOSITION_TOLERANCE}"
+        ));
+    }
+    for value in &mut values {
+        *value /= sum;
+    }
+    let normalized_sum = neumaier(values);
+    if !normalized_sum.is_finite() || (normalized_sum - 1.0).abs() > COMPOSITION_TOLERANCE {
+        return Err("A/C/G/T composition cannot be normalized finitely".to_owned());
+    }
+    Ok(values)
+}
+
+fn neumaier(values: impl IntoIterator<Item = f64>) -> f64 {
+    let mut sum = 0.0_f64;
+    let mut correction = 0.0_f64;
+    for value in values {
+        let next = sum + value;
+        correction += if sum.abs() >= value.abs() {
+            (sum - next) + value
+        } else {
+            (value - next) + sum
+        };
+        sum = next;
+    }
+    sum + correction
 }
 
 fn u64_to_unit_interval(value: u64) -> f64 {

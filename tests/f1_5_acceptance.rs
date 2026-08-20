@@ -97,7 +97,7 @@ fn supplied_cli_preserves_n_and_exact_input_while_invalid_input_has_no_destinati
 }
 
 #[test]
-fn partial_ac_composition_is_completed_with_zero_g_t_before_cli_execution() {
+fn partial_ac_composition_is_rejected_before_cli_execution() {
     let root = temporary("partial-composition");
     fs::create_dir(&root).expect("root");
     let config = root.join("general.toml");
@@ -105,16 +105,13 @@ fn partial_ac_composition_is_completed_with_zero_g_t_before_cli_execution() {
         &config,
         r#"config_kind = "general"
 schema_version = "1"
-route = "direct"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [reference]
 kind = "simulated"
 id = "ref-partial"
-default_ploidy = 2
-composition = [
-  { id = "A", category = "base", value = 0.75 },
-  { id = "C", category = "base", value = 0.25 },
-]
+[reference.composition]
+A = 0.75
+C = 0.25
 [[reference.sequences]]
 id = "chr1"
 class = "chromosome"
@@ -123,39 +120,34 @@ length = 64
     )
     .expect("config");
     let destination = root.join("result");
-    run_cli(&config, &destination, true);
-    let effective = read_json(&destination.join("effective-config.json"));
-    let values = effective["normalizations"][0]["values"]
-        .as_array()
-        .expect("composition");
-    assert_eq!(values.len(), 4);
-    assert_eq!(
-        values[2],
-        serde_json::json!({"id": "G", "category": "base", "before": 0.0, "after": 0.0})
-    );
-    assert_eq!(
-        values[3],
-        serde_json::json!({"id": "T", "category": "base", "before": 0.0, "after": 0.0})
-    );
-    let fasta = fs::read(destination.join("resources/references/ref-partial.fa")).expect("FASTA");
-    assert!(fasta.iter().all(|byte| !matches!(byte, b'G' | b'T')));
+    let output = run_cli(&config, &destination, false);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!destination.exists());
     fs::remove_dir_all(root).expect("cleanup");
 }
 
 #[test]
-fn generated_composition_rejects_nonexact_ids_categories_and_duplicates_at_admission() {
-    for (label, composition) in [
+fn generated_composition_rejects_non_acgt_and_duplicate_keys_at_admission() {
+    for (label, composition, expected_code) in [
         (
             "lowercase",
-            r#"[{ id = "a", category = "base", value = 1.0 }]"#,
+            "a = 0.25\nC = 0.25\nG = 0.25\nT = 0.25",
+            "GPS-CONF-006",
         ),
         (
-            "category",
-            r#"[{ id = "A", category = "nucleotide", value = 1.0 }]"#,
+            "non-acgt",
+            "A = 0.25\nC = 0.25\nG = 0.25\nN = 0.25\nT = 0.0",
+            "GPS-CONF-006",
         ),
         (
-            "duplicate",
-            r#"[{ id = "A", category = "base", value = 0.5 }, { id = "A", category = "base", value = 0.5 }]"#,
+            "legacy-category-field",
+            "A = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\ncategory = \"base\"",
+            "GPS-CONF-006",
+        ),
+        (
+            "duplicate-a",
+            "A = 0.5\nA = 0.5\nC = 0.0\nG = 0.0\nT = 0.0",
+            "GPS-CONF-007",
         ),
     ] {
         let root = temporary(label);
@@ -166,12 +158,11 @@ fn generated_composition_rejects_nonexact_ids_categories_and_duplicates_at_admis
             format!(
                 r#"config_kind = "general"
 schema_version = "1"
-route = "direct"
 [reference]
 kind = "simulated"
 id = "ref-invalid"
-default_ploidy = 2
-composition = {composition}
+[reference.composition]
+{composition}
 [[reference.sequences]]
 id = "chr1"
 class = "chromosome"
@@ -183,7 +174,11 @@ length = 8
         let destination = root.join("result");
         let output = run_cli(&config, &destination, false);
         assert_eq!(output.status.code(), Some(2), "{label}");
-        assert!(String::from_utf8_lossy(&output.stderr).contains("GPS-CONF-008"));
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected_code),
+            "{label}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert!(!destination.exists());
         fs::remove_dir_all(root).expect("cleanup");
     }
@@ -233,7 +228,6 @@ fn write_supplied_config(path: &Path, fasta: &str, length: u64) {
         format!(
             r#"config_kind = "general"
 schema_version = "1"
-route = "direct"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 [reference]
@@ -245,7 +239,6 @@ fasta = "{fasta}"
 id = "chrN"
 class = "chromosome"
 length = {length}
-ploidy = 2
 "#
         ),
     )

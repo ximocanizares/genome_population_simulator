@@ -1,13 +1,25 @@
 # Punto de reanudación del proyecto
 
-- **Fecha:** 15 de agosto de 2026
+> **Punto vigente (15 de agosto de 2026):** continuar desde
+> [punto-reactivacion-f1.2-2026-08-15.md](punto-reactivacion-f1.2-2026-08-15.md).
+> F1.2 ya fue reimplementada, corregida y aprobada por una tercera revisión
+> independiente. El proyecto está detenido en PAUSA-F1.2 y necesita aprobación
+> explícita antes de iniciar F1.3. Las indicaciones históricas posteriores de
+> este documento no sustituyen ese punto.
+
+- **Fecha:** 20 de agosto de 2026
 - **Implementación F1.5 publicada:** `b5dc220 feat: complete F1.5 reference evidence`.
-- **Estado actual de ejecución:** H-F16-R25–R27 están 3/3 aplicados con
-  adaptación. F14, MAN-90, SAL-27, 22/22 requisitos F1.6 y 83/83 requisitos F1
-  están restaurados tras 196 pruebas y todas las puertas verdes. La pausa y F1
-  no están aprobadas hasta una nueva revisión independiente. F2 no ha comenzado.
-- **Estado de los agentes al pausar:** el implementador de la decimonovena ronda
-  terminó y dejó el árbol listo para revisión independiente, sin commit ni push.
+- **Checkpoint de seguridad:** `66ad8b2 checkpoint: preserve F1 and F2 work
+  before simplification`, publicado en `origin/main`.
+- **Estado actual de ejecución:** la auditoría sistemática bloqueó el alcance
+  anterior y recomendó simplificar en vez de seguir parcheando. DTC-078 fija el
+  modelo de confianza local mínimo; DTC-076/DTC-077 quedan superadas. El plan
+  vigente es `plan-reimplementacion-f1-0.2.md`. F1.1 y F1.2 están completados.
+  Tras dos rondas de correcciones, una tercera revisión independiente aprobó
+  PAUSA-F1.2 sin hallazgos nuevos. F1.3 y F2 no han comenzado.
+- **Estado de los agentes al pausar:** implementadores y revisor F1.2
+  terminaron; la revisión adversarial F2 0.4 terminó con aprobación condicionada
+  exclusivamente al cierre y commit base de F1.
 - **Estado de diseño:** DTPD-101, DTPD-116, DTPD-118, DTPD-119 y DTPD-121 están resueltas.
   DTC-056 fija las coordenadas comunes y DTC-057,
   `reduced_reference_selection_v1`; DTPD-119 queda cerrada mediante DTC-055
@@ -27,12 +39,27 @@
   complemento; la primera cardinalidad positiva se define en F5.5. La revisión
   adversarial F2 0.3 queda corregida: RAF2-028 a RAF2-044 están
   resueltos documentalmente; el plan tiene 128 pasos con cinco campos, seis
-  pausas explícitas, 79 cierres, nueve compartidos y nueve parciales directos.
+  pausas explícitas, 79 cierres, nueve compartidos y nueve parciales directos;
+  REQ-REF-14 pasó justificadamente a F1.5 y F2.1 conserva su invariante,
+  mientras REQ-CONF-38 pasó a F2.3 con individuos reales.
   RAF2-027 permanece como único bloqueo: exige revisar/aprobar F1 y fijar su
   commit base; después se repetirá la revisión adversarial antes de autorizar F2.
 - **Copia de la conversación:**
+  [chat-reimplementacion-f1-2026-08-15.md](../docs/chat-reimplementacion-f1-2026-08-15.md),
   [chat-dtpd-119-2026-08-12.md](../docs/chat-dtpd-119-2026-08-12.md) y
   [chat-generacion-automatica-bloques-ld-2026-08-13.md](../docs/chat-generacion-automatica-bloques-ld-2026-08-13.md).
+
+## Punto vigente de reanudación para F1
+
+Reanudar en PAUSA-F1.2 de `plan-reimplementacion-f1-0.2.md`. La primera acción
+es obtener aprobación explícita para iniciar F1.3.1. Conservar la superficie TOML
+mínima, la configuración efectiva con consumidores reales y la ausencia de
+`ResolutionDomain`, `resolution-evidence`, eventos/manifiestos sintéticos,
+normalización poblacional y hardening frente a atacante local. No iniciar F2
+hasta cerrar y fijar F1.
+
+Las rondas H-F16 descritas más abajo son historia del checkpoint `66ad8b2`; no
+constituyen el plan vigente ni obligan a conservar código trasladado.
 
 ## DTPD-119: decisiones ya aprobadas
 

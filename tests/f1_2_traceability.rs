@@ -49,6 +49,9 @@ fn f1_2_audits_exactly_36_test_req_cases_without_claiming_future_biology() {
     .into_iter()
     .collect::<BTreeSet<_>>();
     let expected_reassignments = BTreeMap::from([
+        ("REQ-CONF-07", "F8.1"),
+        ("REQ-CONF-09", "F8.1"),
+        ("REQ-CONF-10", "F8.1"),
         ("REQ-CONF-13", "F9.7"),
         ("REQ-CONF-16", "F9.7"),
         ("REQ-CONF-17", "F9.7"),
@@ -56,11 +59,19 @@ fn f1_2_audits_exactly_36_test_req_cases_without_claiming_future_biology() {
         ("REQ-CONF-20", "F2.3"),
         ("REQ-CONF-22", "F2.3"),
         ("REQ-CONF-24", "F2.2"),
+        ("REQ-CONF-29", "F9.7"),
+        ("REQ-CONF-30", "F9.7"),
+        ("REQ-CONF-31", "F9.7"),
         ("REQ-CONF-32", "F6.2"),
         ("REQ-CONF-43", "F7.6"),
+        ("REQ-CONF-65", "F5.3"),
         ("REQ-CONF-83", "F4.2"),
         ("REQ-CONF-84", "F4.2"),
+        ("REQ-CONF-106", "F6.2"),
         ("REQ-CONF-116", "F9.7"),
+        ("REQ-CONF-117", "F9.7"),
+        ("REQ-CONF-118", "F9.7"),
+        ("REQ-CONF-119", "F9.7"),
         ("REQ-CONF-120", "F9.7"),
         ("REQ-CONF-121", "F9.7"),
         ("REQ-CONF-122", "F9.7"),
@@ -69,6 +80,7 @@ fn f1_2_audits_exactly_36_test_req_cases_without_claiming_future_biology() {
         ("REQ-IND-21", "F2.2"),
         ("REQ-REP-02", "F7.6"),
         ("REQ-VAL-40", "F6.2"),
+        ("REQ-VAL-51", "F9.7"),
     ]);
 
     let rows = MATRIX.lines().skip(1).collect::<Vec<_>>();
@@ -138,7 +150,7 @@ fn f1_2_audits_exactly_36_test_req_cases_without_claiming_future_biology() {
             other => panic!("estado no admitido {other}: {test_id}"),
         }
     }
-    assert_eq!(passed, 16);
+    assert_eq!(passed, 4);
     assert_eq!(observed_reassignments, expected_reassignments);
     assert_eq!(requirements, expected);
 }

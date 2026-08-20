@@ -89,7 +89,7 @@ fn malformed_and_duplicate_toml_are_localizable() {
         let error = admit_toml_header(
             Path::new("broken.toml"),
             fixture.as_bytes().to_vec(),
-            ExpectedConfigKind::Either,
+            ExpectedConfigKind::General,
         )
         .expect_err("fixture must fail");
         assert_eq!(error.code(), expected_code);

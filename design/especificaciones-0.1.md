@@ -185,6 +185,17 @@ ejecutar, nunca el contenido mínimo de una salida ya activada.
 
 ## 3. Fuera del alcance del proyecto
 
+La ejecución local de v1 no intenta defenderse de una persona con acceso de
+escritura simultáneo al directorio privado de trabajo o al mismo sistema de
+ficheros. Las entradas proporcionadas por la persona usuaria sí se consideran
+no confiables y deben validarse antes de usarse. Una vez copiadas o generadas
+dentro del provisional privado, el programa protege los datos frente a errores
+de entrada, fallos propios, interrupciones y corrupción accidental mediante
+estados, tamaños, SHA-256 y publicación atómica. La defensa adicional frente a
+manipulación local activa mediante enlaces físicos o simbólicos, sustitución de
+ficheros o carreras TOCTOU pertenece al endurecimiento de despliegue y
+publicación de F9; no forma parte de la reproducibilidad científica de F1.
+
 Este proyecto se limita a generar los datos simulados y su verdad conocida. No
 ejecutará programas externos de detección y genotipado de SNP, denominados *SNP
 callers*. Tampoco comparará sus resultados con la verdad conocida, calculará
@@ -390,6 +401,15 @@ la implementación teniendo en cuenta que el núcleo se desarrollará en Rust.
 El fichero general contiene las decisiones que afectan a la totalidad de la
 ejecución. Un fichero de configuración poblacional describe un escenario
 concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes.
+
+La incorporación es incremental. F1 solo interpreta del fichero general la
+semilla y la referencia inicial o reducida. No acepta todavía vía, ploidía,
+reglas, individuos, poblaciones, fases, eventos ni enlaces a escenarios; si se
+declaran antes de su fase propietaria, los rechaza como campos fuera de alcance
+y no abre ningún fichero enlazado. F2 incorpora la composición documental de
+escenarios y los hitos posteriores activan su semántica cuando exista el primer
+consumidor real. Los requisitos siguientes conservan el contrato final de v1;
+su asignación por fase está en la matriz de trazabilidad.
 
 - **REQ-CONF-01.** El sistema debe leer los parámetros de cada ejecución desde
   un fichero general de configuración estructurado y legible por el programa.
@@ -925,10 +945,12 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   nominal ya admitido, como grupo o bloque, una coincidencia concreta debe ser
   más específica que su ausencia. No debe existir prioridad implícita entre
   ejes distintos. Esta ordenación solo se aplica después de que la fase
-  propietaria haya validado autoritativamente el contexto: F1 no debe inferir
-  población↔subpoblación, fase↔intervalo de generaciones ni locus↔coordenada a
-  partir de listas planas de identificadores. Sin prueba tipada de esa relación,
-  la resolución jerárquica debe rechazarse antes de calcular la regla máxima.
+  propietaria haya validado el contexto con sus datos reales. F2 aportará loci
+  y posiciones; F6, población y subpoblación; y F7, fases e intervalos de
+  generaciones. F1 solo resolverá los valores y selectores que consuman
+  realmente sus recorridos de configuración y referencias; no construirá
+  dominios sintéticos ni inferirá relaciones de fases posteriores desde listas
+  planas de identificadores.
 - **REQ-CONF-118.** Una regla A debe dominar a otra B cuando sea igual o más
   específica en todos los ejes admitidos y aplicables y estrictamente más
   específica en al menos uno. Tras reunir las reglas aplicables se deben retirar
@@ -970,17 +992,11 @@ concreto de la vía evolutiva o de la vía de familias y poblaciones segregantes
   parámetro y objeto evaluado, el valor efectivo, la regla ganadora y la
   procedencia y selectores de esa regla. Ante un rechazo por ambigüedad, el
   diagnóstico debe conservar todas las reglas máximas en conflicto.
-  Cuando la resolución use una relación jerárquica, debe conservar además un
-  *snapshot* versionado y la procedencia del dominio autoritativo empleado, de
-  modo que la configuración efectiva y el paquete publicado puedan revalidar el
-  contexto. Ese dominio y las solicitudes admitidas deben publicarse como una
-  evidencia autoritativa independiente, anterior a la configuración efectiva
-  derivada y enlazada íntegramente por el manifiesto. La configuración efectiva
-  debe enlazarla y ordenar sus parámetros mediante una tabla literal cuya
-  versión quede registrada; no puede depender del orden interno del código ni
-  del orden lexicográfico. F1 solo define este contrato y lo demuestra con un dominio
-  sintético; F2 aportará relaciones población↔subpoblación y loci, y las fases
-  evolutivas aportarán fase↔intervalo de generaciones.
+  Cuando una fase resuelva una relación jerárquica real, debe conservar además
+  la versión y procedencia de los datos que acreditan esa relación. La fase
+  propietaria define y valida ese contrato junto con su primer consumidor; no
+  se exige a F1 publicar una evidencia sintética independiente ni anticipar el
+  orden de parámetros que aún no consume.
 
 - **REQ-CONF-124.** La configuración general debe permitir declarar una
   referencia reducida con identificador propio a partir de un FASTA real
@@ -4954,10 +4970,10 @@ VCF y no constituya un experimento de secuenciación.
   para cada valor sustituido, el parámetro y objeto, la regla ganadora, sus
   selectores y su procedencia. Una ejecución rechazada por máximas incomparables
   debe conservar esa misma información para todas las reglas máximas en el
-  diagnóstico de admisión. El manifiesto debe enlazar además la evidencia
-  autoritativa versionada de dominio y solicitudes por identificador, clase,
-  ruta, tamaño y SHA-256; la revalidación debe releerla independientemente de la
-  configuración efectiva derivada.
+  diagnóstico de admisión. Cuando una fase propietaria use relaciones
+  jerárquicas, el manifiesto debe enlazar la procedencia real que esa fase haya
+  definido; F1 no crea una evidencia de dominio sintética para relaciones que
+  todavía no existen.
 - **REQ-MAN-89.** Para cada referencia reducida, el manifiesto debe registrar
   los IDs de origen y derivado, rutas y SHA-256 de ambos FASTA, tamaño elegible,
   `region_size_bases`, modalidad y valor del objetivo, número exacto de bases

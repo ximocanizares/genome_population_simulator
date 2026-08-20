@@ -332,15 +332,6 @@ impl ExecutionWorkspace {
         Ok(manifest)
     }
 
-    pub(crate) fn mark_existing_artifacts_failed(&mut self, ids: &BTreeSet<String>) {
-        for artifact in &mut self.artifacts {
-            if ids.contains(&artifact.id) {
-                artifact.state = UnitState::Failed;
-                artifact.validated = false;
-            }
-        }
-    }
-
     pub fn write_artifact(
         &mut self,
         id: &str,

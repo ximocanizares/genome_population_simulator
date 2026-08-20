@@ -105,6 +105,23 @@ fn generated_reference_rejects_a_non_acgt_catalog() {
 }
 
 #[test]
+fn generated_reference_rejects_an_acgt_catalog_whose_sum_is_outside_tolerance() {
+    let specs = [GeneratedSequenceSpec {
+        id: "chr1",
+        class: SequenceClass::Chromosome,
+        length: 1,
+    }];
+    let error = generate_reference(
+        "reference-main",
+        ROOT,
+        &specs,
+        &composition(0.2, 0.2, 0.2, 0.2),
+    )
+    .expect_err("an incomplete probability mass must not be assigned silently to T");
+    assert_eq!(error.code(), "GPS-CONF-008");
+}
+
+#[test]
 fn generated_fasta_v1_has_literal_headers_lf_order_and_eighty_base_lines() {
     assert_eq!(CANONICAL_FASTA_VERSION, "1");
     assert_eq!(CANONICAL_LINE_BASE_COUNT, 80);
