@@ -1,17 +1,19 @@
 # Punto de reanudación del proyecto
 
-> **Punto vigente (20 de agosto de 2026):** F1.1–F1.4 del
+> **Punto vigente (20 de agosto de 2026):** F1.1–F1.5 del
 > [plan de reimplementación F1](plan-reimplementacion-f1-0.2.md) están
-> completadas y PAUSA-F1.4 está aprobada. F1.5.1–F1.5.3 están implementadas,
-> sus tres hallazgos de revisión independiente están corregidos y la revisión
-> focal quedó limpia. PAUSA-F1.5 está aprobada. F1.6 no se ha iniciado.
+> completadas y PAUSA-F1.5 está aprobada. F1.6.1–F1.6.4 están implementadas;
+> los gates y la autorrevisión del implementador para F1.6.5 están completos.
+> La primera revisión independiente abrió H-F16-R1/R2; ambos están aplicados
+> 2/2 y PAUSA-F1.6 vuelve a estar preparada para repetir esa primera revisión.
+> La revisión anterior no cuenta como limpia. F1 no está cerrado y F2 no se ha iniciado.
 > Las indicaciones históricas
 > posteriores de este documento no sustituyen este punto.
 
 - **Fecha:** 20 de agosto de 2026
 - **Implementación F1.5 histórica del checkpoint anterior:** `b5dc220 feat:
   complete F1.5 reference evidence`; no acredita el plan 0.2 vigente.
-- **Base publicada:** `a9d5c1a refactor: complete minimal F1.4 publication`,
+- **Base publicada:** `60447eb refactor: complete minimal F1.5 references`,
   publicada en `origin/main`.
 - **Checkpoint de seguridad anterior:** `66ad8b2 checkpoint: preserve F1 and
   F2 work before simplification`.
@@ -53,8 +55,10 @@
   programado. La revisión independiente de F1.5 quedó aplicada 3/3: ejecución
   explícita con raíz declarada y CSPRNG, testigo compartido para las cláusulas
   de referencia derivada y RSS corregido a 393832 KiB (aproximadamente 385
-  MiB). La suite final lista 147 pruebas: 146 superadas y un helper ignorado.
-  PAUSA-F1.5 está aprobada; F1.6 y F2 no han comenzado.
+  MiB). PAUSA-F1.5 está aprobada. Sobre esa base, F1.6.1–F1.6.4 ya están
+  implementadas y los gates posteriores a H-F16-R1/R2 listan 153 pruebas:
+  152 superadas y un helper ignorado. Quedan pendientes las dos revisiones
+  independientes; F1 no está cerrado y F2 no ha comenzado.
 - **Estado de los agentes al pausar:** implementador y revisor F1.3 terminaron;
   la revisión adversarial F2 0.4 terminó con aprobación condicionada
   exclusivamente al cierre y commit base de F1.
@@ -89,13 +93,22 @@
 
 ## Punto vigente de reanudación para F1
 
-PAUSA-F1.5 está aprobada tras implementar F1.5.1–F1.5.3, aplicar los tres
-hallazgos de revisión independiente y superar una revisión focal sin residuos.
-El siguiente paso permitido es F1.6. Conservar la superficie
-TOML mínima, los dos únicos ámbitos RNG activos, la configuración efectiva con
-consumidores reales y la ausencia de `ResolutionDomain`, `resolution-evidence`,
+F1.6.1–F1.6.4 están implementadas sobre `60447eb`. La selección publica sus
+parámetros reconstruibles; FASTA y mapa se contrastan mediante reconstructor,
+`cmp`, `sha256sum`, `samtools` y validación JSON independiente; y el expediente
+vigente contiene exactamente 54 REQ distribuidos 4/1/6/22/21. Los dos defectos
+encontrados durante la implementación tienen regresiones rojo-verde y están
+corregidos. Todos los gates propios de F1.6.5 pasan: 152 pruebas superadas, un
+helper ignorado, doctest, fmt, Clippy estricto, doc, release, metadata, audit y
+`git diff --check`.
+
+H-F16-R1/R2 están aplicados 2/2 y el siguiente paso es repetir la primera
+revisión independiente; la revisión que abrió los hallazgos no cuenta como
+limpia. No aprobar PAUSA-F1.6, no cerrar F1 y no iniciar F2 hasta obtener
+dos revisiones limpias y aprobación expresa de la raíz. Conservar la superficie TOML mínima, los dos únicos
+ámbitos RNG activos y la ausencia de `ResolutionDomain`, `resolution-evidence`,
 eventos/manifiestos sintéticos, normalización poblacional y hardening frente a
-atacante local. No iniciar F2 hasta cerrar y fijar F1.
+atacante local.
 
 Las rondas H-F16 descritas más abajo son historia del checkpoint `66ad8b2`; no
 constituyen el plan vigente ni obligan a conservar código trasladado.

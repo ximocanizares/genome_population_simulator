@@ -243,11 +243,11 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
 > ✅ PAUSA-F1.5 aprobada: una referencia simulada y otra suministrada completas
 > son reproducibles, superan FASTA/SHA/JSON externos y no contienen manifiestos
 > de evento. Los tres hallazgos de la revisión independiente están aplicados y
-> la revisión focal no encontró residuos. F1.6 todavía no se ha iniciado.
+> la revisión focal no encontró residuos. F1.6 parte de esta base publicada.
 
 ## 9. F1.6 — Referencia reducida
 
-- ☐ F1.6.1. Reutilizar el cálculo decimal, coordenadas y selector de reducción
+- ✅ F1.6.1. Reutilizar el cálculo decimal, coordenadas y selector de reducción
   tras aislarlos del grafo retirado.
   - Depende de: F1.5.3.
   - Procede de: DTC-050, DTC-056 y DTC-057.
@@ -256,7 +256,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: vectores exactos, bordes de coordenadas, preflight,
     uniformidad predeclarada y tamaño exacto.
 
-- ☐ F1.6.2. Materializar FASTA y mapa de reducción sin
+- ✅ F1.6.2. Materializar FASTA y mapa de reducción sin
   `resolution-evidence`.
   - Depende de: F1.6.1.
   - Procede de: REQ-REF-24 a REQ-REF-36 y REQ-VAL-52/53.
@@ -264,7 +264,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: reconstructor independiente origen+mapa, `cmp`,
     `sha256sum`, `samtools faidx`, N, múltiples secuencias y residual.
 
-- ☐ F1.6.3. Publicar la reducción como una unidad simple y coherente.
+- ✅ F1.6.3. Publicar la reducción como una unidad simple y coherente.
   - Depende de: F1.4.4 y F1.6.2.
   - Procede de: REQ-MAN-89/90, REQ-SAL-27 y DTC-078.
   - Cambia: `EffectiveConfig`, manifiesto general y catálogo simple para FASTA
@@ -272,7 +272,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: fallo individual antes de publicación, ningún resultado
     parcial presentado como completo y enlaces/tamaños/SHA exactos.
 
-- ☐ F1.6.4. Sustituir el expediente 83/83 por la asignación estricta vigente
+- ✅ F1.6.4. Sustituir el expediente 83/83 por la asignación estricta vigente
   de 54 REQ F1 —4/1/6/22/21— y pruebas
   ejecutables honestas.
   - Depende de: F1.1.1–F1.6.3.
@@ -291,8 +291,13 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
     release, metadata/tree, audit y validadores TOML/JSON/FASTA/SHA; después
     dos revisiones consecutivas sin hallazgos graves ni bloqueantes.
 
-> Pausa F1.6 y cierre de F1: no comenzar F2 hasta aprobar explícitamente el
-> alcance mínimo, las evidencias vigentes y las dos revisiones limpias.
+  Estado vigente: H-F16-R1/R2 están aplicados 2/2 con regresiones rojo-verde y
+  gates completos. La revisión que los abrió no cuenta como limpia; debe
+  repetirse la primera revisión independiente antes de iniciar la segunda.
+
+> PAUSA-F1.6 preparada de nuevo para revisión, no aprobada: no comenzar F2
+> ni cerrar F1 hasta aprobar explícitamente el alcance mínimo, las evidencias
+> vigentes y las dos revisiones independientes limpias.
 
 ## 10. Matriz de salida
 

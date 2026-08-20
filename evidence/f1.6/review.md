@@ -1,5 +1,9 @@
 # Revisión propia de F1.6
 
+> **Expediente histórico no vigente.** Esta revisión corresponde al checkpoint
+> anterior a DTC-078 y no cuenta como una de las dos revisiones independientes
+> exigidas para el cierre actual.
+
 Fecha: 14 de agosto de 2026. Alcance: F4–F14, sin iniciar F2.
 
 ## Hallazgos de la revisión propia previa

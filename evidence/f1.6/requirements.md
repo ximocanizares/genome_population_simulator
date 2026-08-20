@@ -1,5 +1,9 @@
 # Batería trazable F1.6
 
+> **Expediente histórico no vigente.** Pertenece al checkpoint `66ad8b2` y no
+> acredita el runtime simplificado. La evidencia vigente está en
+> `evidence/f1-reimplementation/f1-complete-test-req-matrix.tsv`.
+
 Fecha: 14 de agosto de 2026. Cada identificador `TEST-REQ-*` designa un caso
 observable ejecutado. Ninguna fila parcial se contabiliza como superada.
 

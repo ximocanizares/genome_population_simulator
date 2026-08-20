@@ -1,5 +1,8 @@
 # Revisión de rendimiento F1.6
 
+> **Expediente histórico no vigente.** Las observaciones pueden orientar la
+> reauditoría, pero no acreditan por sí solas el runtime simplificado actual.
+
 Fecha: 14 de agosto de 2026.
 
 - El selector representa huecos y clases de candidatos mediante rangos

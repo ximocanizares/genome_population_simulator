@@ -37,6 +37,72 @@ fn effective_selection_order_is_strictly_one_based() {
 }
 
 #[test]
+fn effective_reduction_selection_algorithm_is_literal_and_required() {
+    let mut wrong = effective_config("supplied", true);
+    wrong["reduced_references"][0]["selection_algorithm"] = json!("future_algorithm");
+    assert_invalid("wrong-reduction-selection-algorithm", &wrong);
+
+    let mut absent = effective_config("supplied", true);
+    absent["reduced_references"][0]
+        .as_object_mut()
+        .expect("reduction object")
+        .remove("selection_algorithm");
+    assert_invalid("absent-reduction-selection-algorithm", &absent);
+}
+
+#[test]
+fn derived_sequence_catalog_is_required_closed_and_reversible() {
+    let document = effective_config("supplied", true);
+    assert_valid("derived-sequence-catalog", &document);
+
+    for (name, pointer, replacement) in [
+        (
+            "derived-id",
+            "/reduced_references/0/sequences/0/id",
+            json!(""),
+        ),
+        (
+            "derived-class",
+            "/reduced_references/0/sequences/0/class",
+            json!("contig"),
+        ),
+        (
+            "derived-length",
+            "/reduced_references/0/sequences/0/length",
+            json!(0),
+        ),
+        (
+            "derived-header",
+            "/reduced_references/0/sequences/0/header/value",
+            json!(""),
+        ),
+        (
+            "derived-description",
+            "/reduced_references/0/sequences/0/description/encoding",
+            json!("latin-1"),
+        ),
+        (
+            "derived-alphabet",
+            "/reduced_references/0/sequences/0/alphabet_validation",
+            json!("ACGT"),
+        ),
+        (
+            "derived-n-count",
+            "/reduced_references/0/sequences/0/n_count",
+            json!(-1),
+        ),
+    ] {
+        let mut changed = document.clone();
+        *changed.pointer_mut(pointer).expect(name) = replacement;
+        assert_invalid(name, &changed);
+    }
+
+    let mut unknown = document.clone();
+    unknown["reduced_references"][0]["sequences"][0]["future"] = json!(true);
+    assert_invalid("derived-sequence-unknown-field", &unknown);
+}
+
+#[test]
 fn every_effective_artifact_link_is_a_non_empty_catalog_id() {
     for id in ["reference-main", "a", "referencia-ñ"] {
         let mut document = effective_config("supplied", true);
@@ -128,8 +194,18 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
             "source_reference_id": "main",
             "region_size_bases": 100,
             "target": {"mode": "target_bases", "declared": "200", "bases": 200},
+            "selection_algorithm": "reduced_reference_selection_v1",
             "selection_subseed": "1".repeat(64),
             "selection_order": [1, 2],
+            "sequences": [{
+                "id": "chr1",
+                "class": "chromosome",
+                "length": 200,
+                "header": {"encoding": "utf-8", "value": "chr1"},
+                "description": {"encoding": "bytes-hex", "value": "ff"},
+                "alphabet_validation": "ACGTN-case-insensitive",
+                "n_count": 1
+            }],
             "state": "complete",
             "fasta_artifact_id": "reference-reduced",
             "map_artifact_id": "reference-map",

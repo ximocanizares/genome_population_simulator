@@ -107,16 +107,21 @@ fn source_and_derived_fasta_cannot_alias_across_output_categories() {
     let reductions = vec![ManifestReductionLink {
         id: "small".to_owned(),
         source_reference_id: "main".to_owned(),
+        eligible_bases: 20,
         region_size_bases: 10,
         target_mode: "target_bases".to_owned(),
         target_declared: "10".to_owned(),
         target_bases: 10,
+        root_seed: "0".repeat(64),
+        selection_algorithm: "reduced_reference_selection_v1".to_owned(),
         selection_subseed: "1".repeat(64),
         selection_order: vec![1],
         state: UnitState::Complete,
         fasta_artifact_id: Some("shared".to_owned()),
         map_artifact_id: Some("map".to_owned()),
         source_fasta_artifact_id: Some("shared".to_owned()),
+        map_document_kind: "reference_reduction_map".to_owned(),
+        map_schema_version: "1".to_owned(),
     }];
     let diagnostic = validate_general_manifest_bytes(Path::new("truncated.json"), b"{")
         .expect_err("controlled format diagnostic");
@@ -178,16 +183,21 @@ fn failed_reduction_keeps_reached_links_and_requested_classification() {
     let reductions = vec![ManifestReductionLink {
         id: "small".to_owned(),
         source_reference_id: "main".to_owned(),
+        eligible_bases: 20,
         region_size_bases: 10,
         target_mode: "target_bases".to_owned(),
         target_declared: "10".to_owned(),
         target_bases: 10,
+        root_seed: "0".repeat(64),
+        selection_algorithm: "reduced_reference_selection_v1".to_owned(),
         selection_subseed: "1".repeat(64),
         selection_order: vec![1],
         state: UnitState::Failed,
         fasta_artifact_id: Some("derived".to_owned()),
         map_artifact_id: Some("map".to_owned()),
         source_fasta_artifact_id: Some("source".to_owned()),
+        map_document_kind: "reference_reduction_map".to_owned(),
+        map_schema_version: "1".to_owned(),
     }];
     let diagnostic = validate_general_manifest_bytes(Path::new("truncated.json"), b"{")
         .expect_err("controlled format diagnostic");

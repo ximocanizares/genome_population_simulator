@@ -259,12 +259,12 @@ fn validate_json(instance: &Path, schema: &str, expected_success: bool) {
 
 fn assert_artifacts_are_classified_once(
     manifest: &serde_json::Value,
-    expected_reduction_units: usize,
-    _expected_explicit_artifacts: usize,
+    expected_reductions: usize,
+    expected_requested_artifacts: usize,
 ) {
     assert_eq!(
         manifest["artifacts"].as_array().expect("artifacts").len(),
-        3 + expected_reduction_units * 2
+        3 + expected_reductions * 2
     );
     assert!(manifest.get("events").is_none());
     assert!(manifest.get("resolution_evidence").is_none());
@@ -274,15 +274,38 @@ fn assert_artifacts_are_classified_once(
             .as_array()
             .expect("reference reductions")
             .len(),
-        expected_reduction_units
+        expected_reductions
     );
     assert_eq!(
         manifest["output_categories"]["requested"]
             .as_array()
             .expect("requested outputs")
             .len(),
-        expected_reduction_units * 2
+        expected_requested_artifacts
     );
+    let requested = manifest["output_categories"]["requested"]
+        .as_array()
+        .expect("requested outputs")
+        .iter()
+        .map(|value| value.as_str().expect("requested artifact ID"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(requested.len(), expected_requested_artifacts);
+    let reduction_artifacts = manifest["reference_reductions"]
+        .as_array()
+        .expect("reference reductions")
+        .iter()
+        .flat_map(|reduction| {
+            [
+                reduction["fasta_artifact_id"]
+                    .as_str()
+                    .expect("reduction FASTA ID"),
+                reduction["map_artifact_id"]
+                    .as_str()
+                    .expect("reduction map ID"),
+            ]
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(requested, reduction_artifacts);
 }
 
 fn load_map_references(
@@ -421,11 +444,47 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
     assert_eq!(reduction["target"]["declared"], "13");
     assert_eq!(reduction["target"]["bases"], 13);
     assert_eq!(
+        reduction["selection_algorithm"],
+        "reduced_reference_selection_v1"
+    );
+    assert_eq!(
         reduction["selection_subseed"],
         effective.reduced_references()[0]
             .selection_subseed()
             .to_hex()
     );
+    let effective_catalog = reduction["sequences"]
+        .as_array()
+        .expect("derived sequence catalog");
+    assert_eq!(effective_catalog.len(), derived_catalog.len());
+    for (declared, (expected_id, expected_class)) in effective_catalog.iter().zip(&derived_catalog)
+    {
+        let bases = derived.get(expected_id).expect("physical derived sequence");
+        assert_eq!(declared["id"], expected_id.as_str());
+        assert_eq!(declared["class"], *expected_class);
+        assert_eq!(declared["length"], bases.len());
+        assert_eq!(
+            declared["header"],
+            serde_json::json!({"encoding": "utf-8", "value": expected_id})
+        );
+        assert_eq!(declared["description"], serde_json::Value::Null);
+        assert_eq!(declared["alphabet_validation"], "ACGTN-case-insensitive");
+        assert_eq!(
+            declared["n_count"],
+            bases.iter().filter(|base| **base == b'N').count()
+        );
+    }
+    let catalog_n_count = effective_catalog
+        .iter()
+        .map(|sequence| sequence["n_count"].as_u64().unwrap())
+        .sum::<u64>();
+    let physical_n_count = derived
+        .values()
+        .flatten()
+        .filter(|base| **base == b'N')
+        .count() as u64;
+    assert!(physical_n_count > 0);
+    assert_eq!(catalog_n_count, physical_n_count);
 
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(first.join("manifest.json")).expect("manifest")).unwrap();
@@ -434,6 +493,21 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
         manifest["reference_reductions"].as_array().unwrap().len(),
         1
     );
+    let manifest_reduction = &manifest["reference_reductions"][0];
+    assert_eq!(manifest_reduction["eligible_bases"], 20);
+    assert_eq!(
+        manifest_reduction["root_seed"],
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    );
+    assert_eq!(
+        manifest_reduction["selection_algorithm"],
+        "reduced_reference_selection_v1"
+    );
+    assert_eq!(
+        manifest_reduction["map_document_kind"],
+        "reference_reduction_map"
+    );
+    assert_eq!(manifest_reduction["map_schema_version"], "1");
     let map_id = manifest["reference_reductions"][0]["map_artifact_id"]
         .as_str()
         .expect("map artifact ID");
@@ -486,6 +560,15 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
     );
     let reconstructed_path = temporary("reconstructed.fa");
     fs::write(&reconstructed_path, &reconstructed_fasta).unwrap();
+    assert!(
+        Command::new("cmp")
+            .arg("-s")
+            .arg(&reconstructed_path)
+            .arg(&derived_path)
+            .status()
+            .expect("cmp reconstructed and published FASTA")
+            .success()
+    );
     let reconstructed_sha = Command::new("sha256sum")
         .arg(&reconstructed_path)
         .output()
@@ -787,6 +870,68 @@ fn percentage_mode_is_exact_and_infeasible_layout_never_creates_a_derived_artifa
             );
         }
     }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn one_block_reduction_omits_unselected_sequences_without_empty_records() {
+    let reduction = r#"[[reduced_references]]
+id = "reference-one-block"
+source_reference_id = "reference-main"
+region_size_bases = 5
+target_bases = 5"#;
+    let root = temporary("one-block-omission");
+    let config = write_config_with_reductions(&root, "general.toml", "", reduction);
+    let effective = load_and_validate_config(&config).expect("one-block config");
+    let destination = root.join("output");
+    execute_validated_config(&effective, &destination).expect("one-block run");
+
+    let source =
+        read_fasta_independently(&destination.join("resources/references/reference-main.fa"));
+    let derived =
+        read_fasta_independently(&destination.join("resources/references/reference-one-block.fa"));
+    assert_eq!(source.len(), 2);
+    assert_eq!(derived.len(), 1);
+    assert!(derived.values().all(|bases| !bases.is_empty()));
+    assert_eq!(derived.values().map(Vec::len).sum::<usize>(), 5);
+
+    let map: serde_json::Value = serde_json::from_slice(
+        &fs::read(destination.join("resources/references/reference-one-block.map.json"))
+            .expect("one-block map"),
+    )
+    .expect("map JSON");
+    assert_eq!(map["segments"].as_array().expect("segments").len(), 1);
+    assert!(derived.contains_key(map["segments"][0]["sequence_id"].as_str().unwrap()));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn one_invalid_reduction_prevents_any_partial_publication() {
+    let valid = r#"[[reduced_references]]
+id = "reference-valid"
+source_reference_id = "reference-main"
+region_size_bases = 5
+target_bases = 13"#;
+    let infeasible = r#"[[reduced_references]]
+id = "reference-infeasible"
+source_reference_id = "reference-main"
+region_size_bases = 10
+target_bases = 19"#;
+    let root = temporary("all-reductions-preflight");
+    let config = write_config_with_reductions(
+        &root,
+        "general.toml",
+        "",
+        &format!("{valid}\n\n{infeasible}"),
+    );
+    let effective = load_and_validate_config(&config).expect("valid declarations");
+    let destination = root.join("output");
+    let diagnostic = execute_validated_config(&effective, &destination)
+        .expect_err("infeasible reduction must stop the execution");
+    assert_eq!(diagnostic.code(), "GPS-CONF-022");
+    assert!(!destination.exists());
+
     fs::remove_dir_all(root).unwrap();
 }
 

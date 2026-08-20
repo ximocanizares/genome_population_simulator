@@ -109,6 +109,11 @@ fn every_reduction_field_and_exact_reference_set_are_cross_checked() {
             json!("2".repeat(64)),
         ),
         (
+            "selection-algorithm",
+            "/reduced_references/0/selection_algorithm",
+            json!("future_algorithm"),
+        ),
+        (
             "selection-order",
             "/reduced_references/0/selection_order",
             json!([99]),
@@ -117,6 +122,49 @@ fn every_reduction_field_and_exact_reference_set_are_cross_checked() {
         let mut changed = parse(&effective_bytes);
         *changed.pointer_mut(pointer).expect(name) = replacement;
         assert_rejected_json(&effective_path, &changed, &manifest_path, &manifest_bytes);
+    }
+
+    for (name, pointer, replacement, expected_schema) in [
+        (
+            "eligible-bases",
+            "/reference_reductions/0/eligible_bases",
+            json!(19),
+            "effective-config-v1.schema.json",
+        ),
+        (
+            "root-seed",
+            "/reference_reductions/0/root_seed",
+            json!("2".repeat(64)),
+            "effective-config-v1.schema.json",
+        ),
+        (
+            "manifest-selection-algorithm",
+            "/reference_reductions/0/selection_algorithm",
+            json!("future_algorithm"),
+            "manifest-general-v1.schema.json",
+        ),
+        (
+            "map-document-kind",
+            "/reference_reductions/0/map_document_kind",
+            json!("future_map"),
+            "manifest-general-v1.schema.json",
+        ),
+        (
+            "map-schema-version",
+            "/reference_reductions/0/map_schema_version",
+            json!("2"),
+            "manifest-general-v1.schema.json",
+        ),
+    ] {
+        let mut changed = parse(&manifest_bytes);
+        *changed.pointer_mut(pointer).expect(name) = replacement;
+        assert_rejected_manifest_json(
+            &effective_path,
+            &parse(&effective_bytes),
+            &manifest_path,
+            &changed,
+            expected_schema,
+        );
     }
 
     let effective = parse(&effective_bytes);
@@ -177,6 +225,29 @@ fn assert_rejected_json(
         &serde_json::to_vec(document).expect("JSON"),
         manifest_path,
         manifest_bytes,
+    );
+}
+
+fn assert_rejected_manifest_json(
+    effective_path: &Path,
+    effective: &Value,
+    manifest_path: &Path,
+    manifest: &Value,
+    expected_schema: &str,
+) {
+    let error = validate_effective_config_against_manifest_bytes(
+        effective_path,
+        &serde_json::to_vec(effective).expect("effective JSON"),
+        manifest_path,
+        &serde_json::to_vec(manifest).expect("manifest JSON"),
+    )
+    .expect_err("invalid effective/manifest pair");
+    assert_eq!(error.code(), "GPS-FMT-006");
+    assert_eq!(error.category(), "FMT");
+    assert_eq!(error.exit_code(), 1);
+    assert_eq!(
+        error.context().get("schema").map(String::as_str),
+        Some(expected_schema)
     );
 }
 

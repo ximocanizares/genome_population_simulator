@@ -141,20 +141,28 @@
       "required": [
         "id",
         "source_reference_id",
+        "eligible_bases",
         "region_size_bases",
         "target",
+        "root_seed",
+        "selection_algorithm",
         "selection_subseed",
         "selection_order",
         "state",
         "fasta_artifact_id",
         "map_artifact_id",
-        "source_fasta_artifact_id"
+        "source_fasta_artifact_id",
+        "map_document_kind",
+        "map_schema_version"
       ],
       "properties": {
         "id": { "$ref": "#/$defs/non_empty_id" },
         "source_reference_id": { "$ref": "#/$defs/non_empty_id" },
+        "eligible_bases": { "type": "integer", "minimum": 1 },
         "region_size_bases": { "type": "integer", "minimum": 1 },
         "target": { "$ref": "#/$defs/reduction_target" },
+        "root_seed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "selection_algorithm": { "const": "reduced_reference_selection_v1" },
         "selection_subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "selection_order": {
           "type": "array",
@@ -164,7 +172,9 @@
         "state": { "enum": ["incomplete", "complete", "failed"] },
         "fasta_artifact_id": { "oneOf": [{ "$ref": "#/$defs/non_empty_id" }, { "type": "null" }] },
         "map_artifact_id": { "oneOf": [{ "$ref": "#/$defs/non_empty_id" }, { "type": "null" }] },
-        "source_fasta_artifact_id": { "oneOf": [{ "$ref": "#/$defs/non_empty_id" }, { "type": "null" }] }
+        "source_fasta_artifact_id": { "oneOf": [{ "$ref": "#/$defs/non_empty_id" }, { "type": "null" }] },
+        "map_document_kind": { "const": "reference_reduction_map" },
+        "map_schema_version": { "const": "1" }
       },
       "allOf": [{
         "if": { "properties": { "state": { "const": "complete" } }, "required": ["state"] },

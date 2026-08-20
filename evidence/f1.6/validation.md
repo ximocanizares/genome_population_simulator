@@ -1,5 +1,9 @@
 # Validación de F1.6
 
+> **Expediente histórico no vigente.** Sus afirmaciones 22/22, 83/83, OCI y de
+> hardening no cierran el plan 0.2. La validación vigente se conserva bajo
+> `evidence/f1-reimplementation/`.
+
 - Fecha: 15 de agosto de 2026.
 - Plataforma: Ubuntu 24.04 sobre WSL2, x86-64, ext4.
 - Estado de la ronda: H-F16-R25–R27 están 3/3 aplicados con adaptación. Sus

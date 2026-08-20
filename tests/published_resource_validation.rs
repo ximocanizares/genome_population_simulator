@@ -184,6 +184,67 @@ fn correlated_documents_cannot_replace_physical_authority() {
 }
 
 #[test]
+fn every_derived_sequence_catalog_field_is_checked_independently() {
+    for (label, pointer, replacement) in [
+        (
+            "derived-sequence-id",
+            "/reduced_references/0/sequences/0/id",
+            json!("changed-sequence"),
+        ),
+        (
+            "derived-sequence-length",
+            "/reduced_references/0/sequences/0/length",
+            json!(1),
+        ),
+        (
+            "derived-sequence-header",
+            "/reduced_references/0/sequences/0/header/value",
+            json!("changed-header"),
+        ),
+        (
+            "derived-sequence-description",
+            "/reduced_references/0/sequences/0/description",
+            json!({"encoding": "utf-8", "value": "invented"}),
+        ),
+        (
+            "derived-sequence-alphabet",
+            "/reduced_references/0/sequences/0/alphabet_validation",
+            json!("ACGT"),
+        ),
+    ] {
+        assert_physical_rejection(
+            label,
+            supplied_fixture(),
+            move |_root, effective, _manifest| {
+                *effective.pointer_mut(pointer).expect(label) = replacement;
+            },
+        );
+    }
+
+    assert_physical_rejection(
+        "derived-sequence-class",
+        supplied_fixture(),
+        |_root, effective, _manifest| {
+            let class = &mut effective["reduced_references"][0]["sequences"][0]["class"];
+            *class = if class == "chromosome" {
+                json!("scaffold")
+            } else {
+                json!("chromosome")
+            };
+        },
+    );
+    assert_physical_rejection(
+        "derived-sequence-n-count",
+        supplied_fixture(),
+        |_root, effective, _manifest| {
+            let n_count = &mut effective["reduced_references"][0]["sequences"][0]["n_count"];
+            let observed = n_count.as_u64().expect("n_count");
+            *n_count = json!(if observed == 0 { 1 } else { observed - 1 });
+        },
+    );
+}
+
+#[test]
 fn execution_id_is_bound_to_csprng_seed_and_exact_toml_digest() {
     let parent = temporary("execution-id-csprng");
     fs::create_dir(&parent).expect("temporary root");

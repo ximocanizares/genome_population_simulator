@@ -157,11 +157,12 @@ fn complete_failed_and_incomplete_are_real_minimal_trees() {
     let failed_manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(failed.join("manifest.json")).unwrap()).unwrap();
     assert_eq!(failed_manifest["diagnostics"][0]["code"], "GPS-INPUT-001");
+    let failed_reductions = failed_manifest["reference_reductions"]
+        .as_array()
+        .expect("failed reductions");
     assert!(
-        failed_manifest["reference_reductions"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+        failed_reductions.is_empty(),
+        "the source copy failed before any reduction selection was reached"
     );
     assert!(failed_manifest["references"].as_array().unwrap().is_empty());
     assert_eq!(failed_manifest["artifacts"].as_array().unwrap().len(), 1);

@@ -17,12 +17,13 @@ use crate::reference_fasta::{
 };
 use crate::reference_generation::{BaseFrequency, GeneratedSequenceSpec, generate_reference};
 use crate::reference_reduction::{
-    EligibleSequence, MaterializedPlan, ReductionError, materialize_selection,
-    preflight_reduced_reference, select_reduced_reference,
+    EligibleSequence, MaterializedPlan, REDUCED_REFERENCE_SELECTION_ALGORITHM, ReductionError,
+    materialize_selection, preflight_reduced_reference, select_reduced_reference,
 };
 use crate::reference_reduction_io::{
-    ReductionMapParameters, build_reduced_reference, reduction_map_document,
-    validate_reduced_reference, validate_reduction_map_document,
+    REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
+    build_reduced_reference, reduction_map_document, validate_reduced_reference,
+    validate_reduction_map_document,
 };
 use crate::results::{
     ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestReductionLink,
@@ -45,6 +46,7 @@ pub fn execute_validated_config(
     execute_validated_config_with_effective_document(
         effective,
         destination,
+        |_| Ok(()),
         std::convert::identity,
         |_| Ok(()),
     )
@@ -53,12 +55,15 @@ pub fn execute_validated_config(
 fn execute_validated_config_with_effective_document(
     effective: &EffectiveConfig,
     destination: &Path,
+    after_prepare_reference: impl FnOnce(&mut PreparedReference) -> Result<(), Diagnostic>,
     transform_effective: impl FnOnce(serde_json::Value) -> serde_json::Value,
     before_manifest: impl FnOnce(&mut ExecutionWorkspace) -> Result<(), Diagnostic>,
 ) -> Result<ExecutionOutcome, Diagnostic> {
     let mut prepared_reference = prepare_reference(effective)?;
-    // Todo error de dominio o preflight ocurre antes de crear el provisional.
-    let prepared_reductions = prepare_reductions(effective, prepared_reference.reference())?;
+    after_prepare_reference(&mut prepared_reference)?;
+    // Todo error de dominio o preflight ocurre antes de crear el provisional y
+    // antes de que exista cualquier RNG local de selección.
+    preflight_reductions(effective, prepared_reference.reference())?;
     let configuration_digest = configuration_digest(effective.configuration_input().bytes())?;
     let execution_id = derive_execution_id(
         effective.reproducibility().root_seed(),
@@ -69,8 +74,8 @@ fn execute_validated_config_with_effective_document(
     let mut configuration_input = None;
     let mut reference_artifact = None;
     let mut manifest_references = Vec::new();
-    let mut manifest_reductions = manifest_reduction_links(effective, &prepared_reductions);
-    let mut published_reductions = Vec::with_capacity(prepared_reductions.len());
+    let mut manifest_reductions = Vec::new();
+    let mut published_reductions = Vec::with_capacity(effective.reduced_references().len());
     let started = (|| -> Result<(), Diagnostic> {
         configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
         reference_artifact = Some(write_reference(
@@ -85,20 +90,24 @@ fn execute_validated_config_with_effective_document(
             id: effective.reference_id().to_owned(),
             fasta_artifact_id: source_artifact.id.clone(),
         });
-        for reduction in &mut manifest_reductions {
-            reduction.source_fasta_artifact_id = Some(source_artifact.id.clone());
-        }
         prepared_reference = load_authoritative_reference(
             effective,
             &workspace,
             source_artifact,
             prepared_reference,
         )?;
+        // A partir de aquí la copia recargada es la única autoridad para
+        // seleccionar intervalos y materializar bases derivadas.
+        let prepared_reductions = prepare_reductions(effective, prepared_reference.reference())?;
+        manifest_reductions = manifest_reduction_links(effective, &prepared_reductions);
+        for reduction in &mut manifest_reductions {
+            reduction.source_fasta_artifact_id = Some(source_artifact.id.clone());
+        }
         let reference_output = ReferenceOutput {
             reference: prepared_reference.reference(),
             fasta: source_artifact,
         };
-        for (index, mut prepared) in prepared_reductions.into_iter().enumerate() {
+        for (index, prepared) in prepared_reductions.into_iter().enumerate() {
             let reduction = &effective.reduced_references()[index];
             let attempt = (|| -> Result<PublishedReduction, Diagnostic> {
                 let fasta_path =
@@ -114,10 +123,12 @@ fn execute_validated_config_with_effective_document(
                     id: reduction.id().to_owned(),
                     fasta_artifact_id: fasta.id.clone(),
                 });
-                prepared
-                    .reference
-                    .bind_authoritative_resource(PathBuf::from(&fasta.path))
-                    .map_err(|error| internal("bind_reduced_authoritative_resource", error))?;
+                let authoritative_derived = load_authoritative_reduced_reference(
+                    &workspace,
+                    &fasta,
+                    &prepared.reference,
+                    reference_output.reference.id(),
+                )?;
                 let map_document = reduction_map_document(&prepared.plan);
                 let map_bytes = json_document_bytes(&map_document)?;
                 let map_path =
@@ -148,7 +159,7 @@ fn execute_validated_config_with_effective_document(
                 })?;
                 validate_reduction_map_document(
                     reference_output.reference,
-                    &prepared.reference,
+                    &authoritative_derived,
                     &reparsed,
                     ReductionMapParameters {
                         region_size_bases: reduction.region_size_bases(),
@@ -157,7 +168,7 @@ fn execute_validated_config_with_effective_document(
                 )?;
                 Ok(PublishedReduction {
                     effective_index: index,
-                    reference: prepared.reference,
+                    reference: authoritative_derived,
                     plan: prepared.plan,
                     fasta,
                     map,
@@ -217,7 +228,19 @@ fn execute_validated_config_with_effective_document(
             })
         }
         Err(cause) => {
-            publish_controlled_failure(&mut workspace, execution_id.as_str(), effective, &cause)?;
+            for reduction in &mut manifest_reductions {
+                reduction.state = UnitState::Failed;
+                reduction.fasta_artifact_id = None;
+                reduction.map_artifact_id = None;
+                reduction.source_fasta_artifact_id = None;
+            }
+            publish_controlled_failure(
+                &mut workspace,
+                execution_id.as_str(),
+                effective,
+                &manifest_reductions,
+                &cause,
+            )?;
             workspace.publish()?;
             Err(cause)
         }
@@ -228,6 +251,7 @@ fn publish_controlled_failure(
     workspace: &mut ExecutionWorkspace,
     execution_id: &str,
     effective: &EffectiveConfig,
+    reductions: &[ManifestReductionLink],
     cause: &Diagnostic,
 ) -> Result<(), Diagnostic> {
     let configuration_artifact = workspace
@@ -253,7 +277,7 @@ fn publish_controlled_failure(
         configuration_input: configuration_input.as_ref(),
         effective_config: None,
         references: &[],
-        reduced_references: &[],
+        reduced_references: reductions,
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(cause),
     };
@@ -325,10 +349,13 @@ fn manifest_reduction_links(
         .map(|(reduction, prepared)| ManifestReductionLink {
             id: reduction.id().to_owned(),
             source_reference_id: reduction.source_reference_id().to_owned(),
+            eligible_bases: effective.total_genome_size(),
             region_size_bases: reduction.region_size_bases(),
             target_mode: reduction.target().mode().to_owned(),
             target_declared: reduction.target().declared_value().to_owned(),
             target_bases: reduction.target_bases(),
+            root_seed: effective.reproducibility().root_seed().to_hex(),
+            selection_algorithm: REDUCED_REFERENCE_SELECTION_ALGORITHM.to_owned(),
             selection_subseed: reduction.selection_subseed().to_hex(),
             selection_order: prepared
                 .plan
@@ -340,6 +367,8 @@ fn manifest_reduction_links(
             fasta_artifact_id: None,
             map_artifact_id: None,
             source_fasta_artifact_id: None,
+            map_document_kind: REDUCTION_MAP_DOCUMENT_KIND.to_owned(),
+            map_schema_version: REDUCTION_MAP_SCHEMA_VERSION.to_owned(),
         })
         .collect()
 }
@@ -389,14 +418,7 @@ fn prepare_reductions(
     effective: &EffectiveConfig,
     source: &Reference,
 ) -> Result<Vec<PreparedReduction>, Diagnostic> {
-    let eligible = source
-        .sequences()
-        .iter()
-        .map(|sequence| {
-            EligibleSequence::new(sequence.id().clone(), sequence.class(), sequence.length())
-                .map_err(|error| reduction_error("source", effective, error))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let eligible = eligible_sequences(source, effective)?;
     let mut prepared = Vec::with_capacity(effective.reduced_references().len());
     for reduction in effective.reduced_references() {
         preflight_reduced_reference(
@@ -422,6 +444,33 @@ fn prepare_reductions(
         prepared.push(PreparedReduction { reference, plan });
     }
     Ok(prepared)
+}
+
+fn preflight_reductions(effective: &EffectiveConfig, source: &Reference) -> Result<(), Diagnostic> {
+    let eligible = eligible_sequences(source, effective)?;
+    for reduction in effective.reduced_references() {
+        preflight_reduced_reference(
+            &eligible,
+            reduction.target_bases(),
+            reduction.region_size_bases(),
+        )
+        .map_err(|error| reduction_error(reduction.id(), effective, error))?;
+    }
+    Ok(())
+}
+
+fn eligible_sequences(
+    source: &Reference,
+    effective: &EffectiveConfig,
+) -> Result<Vec<EligibleSequence>, Diagnostic> {
+    source
+        .sequences()
+        .iter()
+        .map(|sequence| {
+            EligibleSequence::new(sequence.id().clone(), sequence.class(), sequence.length())
+                .map_err(|error| reduction_error("source", effective, error))
+        })
+        .collect()
 }
 
 fn sequence_expectations(effective: &EffectiveConfig) -> Vec<SequenceExpectation<'_>> {
@@ -460,7 +509,27 @@ fn load_authoritative_reference(
             }
             PreparedReference::Supplied(supplied)
         }
-        (EffectiveReferenceSource::Simulated, PreparedReference::Generated(reference)) => {
+        (EffectiveReferenceSource::Simulated, PreparedReference::Generated(_)) => {
+            let physical_path = workspace.root().join(&artifact.path);
+            let parsed = validate_supplied_fasta(
+                &physical_path,
+                effective.reference_id(),
+                &sequence_expectations(effective),
+            )?;
+            if parsed.source_identity().size_bytes() != artifact.size_bytes
+                || parsed.source_identity().digest() != artifact.digest
+            {
+                return Err(internal(
+                    "load_authoritative_reference",
+                    "cataloged generated reference changed",
+                ));
+            }
+            let reference = Reference::new(
+                ReferenceId::parse(effective.reference_id(), "execution")?,
+                crate::reference::ReferenceOrigin::Generated,
+                parsed.reference().sequences().to_vec(),
+            )
+            .map_err(|error| internal("reload_generated_reference", error))?;
             PreparedReference::Generated(reference)
         }
         _ => return Err(internal("load_authoritative_reference", "origin changed")),
@@ -498,6 +567,45 @@ fn write_reference(
             }),
         _ => Err(internal("write_reference", "origin changed")),
     }
+}
+
+fn load_authoritative_reduced_reference(
+    workspace: &ExecutionWorkspace,
+    artifact: &ArtifactRecord,
+    expected: &Reference,
+    source_reference_id: &ReferenceId,
+) -> Result<Reference, Diagnostic> {
+    let expectations = expected
+        .sequences()
+        .iter()
+        .map(|sequence| SequenceExpectation {
+            id: sequence.id().as_str(),
+            class: sequence.class(),
+            length: sequence.length(),
+        })
+        .collect::<Vec<_>>();
+    let physical_path = workspace.root().join(&artifact.path);
+    let parsed = validate_supplied_fasta(&physical_path, expected.id().as_str(), &expectations)?;
+    if parsed.source_identity().size_bytes() != artifact.size_bytes
+        || parsed.source_identity().digest() != artifact.digest
+    {
+        return Err(internal(
+            "load_authoritative_reduced_reference",
+            "cataloged derived reference changed",
+        ));
+    }
+    let mut authoritative = Reference::new(
+        expected.id().clone(),
+        crate::reference::ReferenceOrigin::Reduced {
+            source_reference_id: source_reference_id.clone(),
+        },
+        parsed.reference().sequences().to_vec(),
+    )
+    .map_err(|error| internal("reload_reduced_reference", error))?;
+    authoritative
+        .bind_authoritative_resource(PathBuf::from(&artifact.path))
+        .map_err(|error| internal("bind_reduced_authoritative_resource", error))?;
+    Ok(authoritative)
 }
 
 fn copy_configuration_input(
@@ -616,6 +724,7 @@ mod tests {
         let error = execute_validated_config_with_effective_document(
             &effective,
             &destination,
+            |_| Ok(()),
             |mut document| {
                 document["effective_config_kind"] = json!("unknown");
                 document
@@ -661,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn physical_resource_mutation_with_updated_catalog_publishes_failed_without_effective() {
+    fn physical_resource_failure_marks_reduction_failed_without_partial_artifacts() {
         let root = std::env::temp_dir().join(format!(
             "gps-f14-physical-authority-fallback-{}-{}",
             std::process::id(),
@@ -676,6 +785,7 @@ mod tests {
         let error = execute_validated_config_with_effective_document(
             &effective,
             &destination,
+            |_| Ok(()),
             std::convert::identity,
             |workspace| {
                 let artifact = workspace
@@ -720,7 +830,19 @@ mod tests {
             assert!(!destination.join(relative).exists(), "retained {relative}");
         }
         assert_eq!(manifest["references"], json!([]));
-        assert_eq!(manifest["reference_reductions"], json!([]));
+        assert_eq!(
+            manifest["reference_reductions"].as_array().unwrap().len(),
+            1
+        );
+        let reduction = &manifest["reference_reductions"][0];
+        assert_eq!(reduction["id"], "reference-small");
+        assert_eq!(reduction["state"], "failed");
+        assert_eq!(reduction["fasta_artifact_id"], serde_json::Value::Null);
+        assert_eq!(reduction["map_artifact_id"], serde_json::Value::Null);
+        assert_eq!(
+            reduction["source_fasta_artifact_id"],
+            serde_json::Value::Null
+        );
         assert_eq!(
             manifest["output_categories"],
             json!({
@@ -737,6 +859,87 @@ mod tests {
                 .iter()
                 .all(|artifact| artifact["id"] == "config-general")
         );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn reduction_selection_uses_reloaded_copy_not_the_stale_origin_object() {
+        use crate::reference::{DnaSequence, ReferenceSequence};
+
+        let root = std::env::temp_dir().join(format!(
+            "gps-f16-authoritative-copy-selection-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test root");
+        let destination = root.join("result");
+        let config = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/reference_reduction/general.toml");
+        let effective = load_and_validate_config(&config).expect("valid input config");
+
+        execute_validated_config_with_effective_document(
+            &effective,
+            &destination,
+            |prepared| {
+                let PreparedReference::Supplied(supplied) = prepared else {
+                    return Err(internal("test_stale_origin", "expected supplied reference"));
+                };
+                let reference = supplied.reference();
+                let mut sequences = reference.sequences().to_vec();
+                let first = &sequences[0];
+                let mut bases = first.sequence().as_bytes().to_vec();
+                for base in &mut bases {
+                    *base = if *base == b'N' { b'N' } else { b'A' };
+                }
+                let dna = DnaSequence::try_from_bytes(&bases)
+                    .map_err(|error| internal("test_stale_origin_dna", error))?;
+                sequences[0] = ReferenceSequence::new(
+                    first.id().clone(),
+                    first.header().clone(),
+                    first.class(),
+                    &dna,
+                )
+                .map_err(|error| internal("test_stale_origin_sequence", error))?;
+                let stale = Reference::new(
+                    reference.id().clone(),
+                    reference.origin().clone(),
+                    sequences,
+                )
+                .map_err(|error| internal("test_stale_origin_reference", error))?;
+                *supplied.reference_mut() = stale;
+                Ok(())
+            },
+            std::convert::identity,
+            |_| Ok(()),
+        )
+        .expect("selection must ignore stale origin object after the authoritative copy exists");
+
+        let copied = fs::read(destination.join("resources/references/reference-main.fa"))
+            .expect("authoritative source copy");
+        assert_eq!(
+            copied,
+            fs::read(config.parent().unwrap().join("source.fa")).unwrap()
+        );
+        let effective_document: serde_json::Value = serde_json::from_slice(
+            &fs::read(destination.join("effective-config.json")).expect("effective config"),
+        )
+        .expect("effective JSON");
+        assert_eq!(
+            effective_document["reduced_references"][0]["source_fasta_artifact_id"],
+            "reference-fasta"
+        );
+        let baseline = root.join("baseline");
+        execute_validated_config(&effective, &baseline).expect("unpoisoned baseline");
+        for relative in [
+            "resources/references/reference-small.fa",
+            "resources/references/reference-small.map.json",
+        ] {
+            assert_eq!(
+                fs::read(destination.join(relative)).expect("stale-origin run artifact"),
+                fs::read(baseline.join(relative)).expect("baseline artifact"),
+                "{relative} must depend only on the authoritative copy"
+            );
+        }
         fs::remove_dir_all(root).expect("cleanup");
     }
 }

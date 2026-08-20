@@ -28,11 +28,12 @@ use crate::reference_fasta::{
 use crate::reference_generation::COMPOSITION_TOLERANCE;
 use crate::reference_generation::{BaseFrequency, GeneratedSequenceSpec, generate_reference};
 use crate::reference_reduction::{
-    EligibleSequence, MaterializedPlan, materialize_selection, select_reduced_reference,
+    EligibleSequence, MaterializedPlan, REDUCED_REFERENCE_SELECTION_ALGORITHM,
+    materialize_selection, select_reduced_reference,
 };
 use crate::reference_reduction_io::{
-    ReductionMapParameters, build_reduced_reference, reduction_map_document,
-    validate_reduction_map_document,
+    REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
+    build_reduced_reference, reduction_map_document, validate_reduction_map_document,
 };
 
 pub const RESULT_SCHEMA_VERSION: &str = "1";
@@ -133,16 +134,21 @@ pub struct ManifestReferenceLink {
 pub struct ManifestReductionLink {
     pub id: String,
     pub source_reference_id: String,
+    pub eligible_bases: u64,
     pub region_size_bases: u64,
     pub target_mode: String,
     pub target_declared: String,
     pub target_bases: u64,
+    pub root_seed: String,
+    pub selection_algorithm: String,
     pub selection_subseed: String,
     pub selection_order: Vec<u64>,
     pub state: UnitState,
     pub fasta_artifact_id: Option<String>,
     pub map_artifact_id: Option<String>,
     pub source_fasta_artifact_id: Option<String>,
+    pub map_document_kind: String,
+    pub map_schema_version: String,
 }
 
 pub struct GeneralManifest<'a> {
@@ -299,15 +305,13 @@ pub fn validate_effective_config_against_manifest_bytes(
             "source_path no coincide con la procedencia de la copia TOML",
         ));
     }
-    validate_effective_seed(
-        effective_object(object, "seed", effective_path)?,
-        effective_path,
-    )?;
-    let reference = validate_effective_reference(
-        effective_object(object, "reference", effective_path)?,
-        &catalog,
-        effective_path,
-    )?;
+    let seed = effective_object(object, "seed", effective_path)?;
+    validate_effective_seed(seed, effective_path)?;
+    let effective_root_seed = effective_non_empty_text(seed, "root", effective_path)?;
+    let effective_reference = effective_object(object, "reference", effective_path)?;
+    let reference = validate_effective_reference(effective_reference, &catalog, effective_path)?;
+    let eligible_bases =
+        effective_positive_u64(effective_reference, "total_genome_size", effective_path)?;
     if manifest_references.get(&reference.0).map(String::as_str) != Some(reference.1.as_str()) {
         return Err(effective_error(
             effective_path,
@@ -353,6 +357,20 @@ pub fn validate_effective_config_against_manifest_bytes(
             .ok_or_else(|| effective_error(effective_path, "una reducción no es objeto"))?;
         if manifest_reduction.get("state").and_then(Value::as_str) != Some("complete")
             || manifest_reduction
+                .get("eligible_bases")
+                .and_then(Value::as_u64)
+                != Some(eligible_bases)
+            || manifest_reduction.get("root_seed").and_then(Value::as_str)
+                != Some(effective_root_seed)
+            || manifest_reduction
+                .get("map_document_kind")
+                .and_then(Value::as_str)
+                != Some(REDUCTION_MAP_DOCUMENT_KIND)
+            || manifest_reduction
+                .get("map_schema_version")
+                .and_then(Value::as_str)
+                != Some(REDUCTION_MAP_SCHEMA_VERSION)
+            || manifest_reduction
                 .get("source_reference_id")
                 .and_then(Value::as_str)
                 != Some(reduction.source_reference_id.as_str())
@@ -371,6 +389,7 @@ pub fn validate_effective_config_against_manifest_bytes(
             || [
                 "region_size_bases",
                 "target",
+                "selection_algorithm",
                 "selection_subseed",
                 "selection_order",
             ]
@@ -551,6 +570,7 @@ pub fn validate_published_resources(
             root,
             id,
             fasta_id,
+            effective_array(reduction, "sequences", effective_path)?,
             expected_derived.sequences(),
             &artifact_paths,
             effective_path,
@@ -791,6 +811,27 @@ fn read_physical_reference(
 ) -> Result<Reference, Diagnostic> {
     let id = effective_non_empty_text(reference, "id", effective_path)?;
     let sequences = effective_array(reference, "sequences", effective_path)?;
+    let artifact_id = effective_non_empty_text(reference, "fasta_artifact_id", effective_path)?;
+    read_physical_sequence_catalog(
+        root,
+        id,
+        artifact_id,
+        sequences,
+        "unknown_base_count",
+        artifact_paths,
+        effective_path,
+    )
+}
+
+fn read_physical_sequence_catalog(
+    root: &Path,
+    reference_id: &str,
+    artifact_id: &str,
+    sequences: &[Value],
+    n_count_field: &str,
+    artifact_paths: &BTreeMap<&str, &str>,
+    effective_path: &Path,
+) -> Result<Reference, Diagnostic> {
     let mut expectations = Vec::with_capacity(sequences.len());
     for sequence in sequences {
         let sequence = sequence
@@ -802,7 +843,6 @@ fn read_physical_reference(
             length: effective_positive_u64(sequence, "length", effective_path)?,
         });
     }
-    let artifact_id = effective_non_empty_text(reference, "fasta_artifact_id", effective_path)?;
     let relative = artifact_paths.get(artifact_id).ok_or_else(|| {
         effective_error(
             effective_path,
@@ -810,7 +850,7 @@ fn read_physical_reference(
         )
     })?;
     let path = root.join(relative);
-    let observed = validate_supplied_fasta(&path, id, &expectations)
+    let observed = validate_supplied_fasta(&path, reference_id, &expectations)
         .map_err(|error| physical_error(effective_path, "validate_reference_fasta", &error))?
         .into_reference();
     for (declared, physical) in sequences.iter().zip(observed.sequences()) {
@@ -818,14 +858,14 @@ fn read_physical_reference(
             .as_object()
             .ok_or_else(|| effective_error(effective_path, "una secuencia no es objeto"))?;
         let unknown = declared
-            .get("unknown_base_count")
+            .get(n_count_field)
             .and_then(Value::as_u64)
-            .ok_or_else(|| effective_error(effective_path, "unknown_base_count inválido"))?;
+            .ok_or_else(|| effective_error(effective_path, format!("{n_count_field} inválido")))?;
         if unknown != physical.unknown_base_count() {
             return Err(effective_error(
                 effective_path,
                 format!(
-                    "unknown_base_count físico de {} no coincide",
+                    "{n_count_field} físico de {} no coincide",
                     physical.id().as_str()
                 ),
             ));
@@ -854,28 +894,27 @@ fn read_reference_with_expected(
     root: &Path,
     reference_id: &str,
     artifact_id: &str,
+    declared_sequences: &[Value],
     expected: &[ReferenceSequence],
     artifact_paths: &BTreeMap<&str, &str>,
     effective_path: &Path,
 ) -> Result<Reference, Diagnostic> {
-    let expectations = expected
-        .iter()
-        .map(|sequence| SequenceExpectation {
-            id: sequence.id().as_str(),
-            class: sequence.class(),
-            length: sequence.length(),
-        })
-        .collect::<Vec<_>>();
-    let relative = artifact_paths.get(artifact_id).ok_or_else(|| {
-        effective_error(
+    let observed = read_physical_sequence_catalog(
+        root,
+        reference_id,
+        artifact_id,
+        declared_sequences,
+        "n_count",
+        artifact_paths,
+        effective_path,
+    )?;
+    if observed.sequences().len() != expected.len() {
+        return Err(effective_error(
             effective_path,
-            format!("FASTA físico ausente: {artifact_id}"),
-        )
-    })?;
-    let path = root.join(relative);
-    validate_supplied_fasta(&path, reference_id, &expectations)
-        .map_err(|error| physical_error(effective_path, "validate_reduced_fasta", &error))
-        .map(|validated| validated.into_reference())
+            "el catálogo físico derivado no coincide con el plan",
+        ));
+    }
+    Ok(observed)
 }
 
 fn validate_generated_reference(
@@ -1219,17 +1258,22 @@ fn validate_reference_reductions(
     references: &BTreeMap<String, String>,
     path: &Path,
 ) -> Result<ValidatedManifestReductions, Diagnostic> {
-    const FIELDS: [&str; 10] = [
+    const FIELDS: [&str; 15] = [
         "id",
         "source_reference_id",
+        "eligible_bases",
         "region_size_bases",
         "target",
+        "root_seed",
+        "selection_algorithm",
         "selection_subseed",
         "selection_order",
         "state",
         "fasta_artifact_id",
         "map_artifact_id",
         "source_fasta_artifact_id",
+        "map_document_kind",
+        "map_schema_version",
     ];
     const TARGET_FIELDS: [&str; 3] = ["mode", "declared", "bases"];
     let mut reduction_ids = BTreeSet::new();
@@ -1247,6 +1291,7 @@ fn validate_reference_reductions(
             return Err(manifest_error(path, "ID de reducción repetido"));
         }
         derived_reference_ids.insert(id.to_owned());
+        required_positive_u64(object, "eligible_bases", path)?;
         required_positive_u64(object, "region_size_bases", path)?;
         let target = required_object(object, "target", path)?;
         validate_closed_object(
@@ -1261,6 +1306,23 @@ fn validate_reference_reductions(
         }
         required_non_empty_text(target, "declared", path)?;
         required_positive_u64(target, "bases", path)?;
+        validate_lower_hex_64(
+            required_non_empty_text(object, "root_seed", path)?,
+            "root_seed",
+            path,
+        )?;
+        if required_non_empty_text(object, "selection_algorithm", path)?
+            != REDUCED_REFERENCE_SELECTION_ALGORITHM
+            || required_non_empty_text(object, "map_document_kind", path)?
+                != REDUCTION_MAP_DOCUMENT_KIND
+            || required_non_empty_text(object, "map_schema_version", path)?
+                != REDUCTION_MAP_SCHEMA_VERSION
+        {
+            return Err(manifest_error(
+                path,
+                "algoritmo o contrato de mapa de reducción incompatible",
+            ));
+        }
         validate_lower_hex_64(
             required_non_empty_text(object, "selection_subseed", path)?,
             "selection_subseed",
@@ -1703,13 +1765,15 @@ fn validate_effective_reduction(
     let object = value
         .as_object()
         .ok_or_else(|| effective_error(path, "una reducción no es objeto"))?;
-    const FIELDS: [&str; 10] = [
+    const FIELDS: [&str; 12] = [
         "id",
         "source_reference_id",
         "region_size_bases",
         "target",
+        "selection_algorithm",
         "selection_subseed",
         "selection_order",
+        "sequences",
         "state",
         "fasta_artifact_id",
         "map_artifact_id",
@@ -1728,7 +1792,12 @@ fn validate_effective_reduction(
         _ => return Err(effective_error(path, "target.mode inválido")),
     }
     effective_non_empty_text(target, "declared", path)?;
-    effective_positive_u64(target, "bases", path)?;
+    let target_bases = effective_positive_u64(target, "bases", path)?;
+    if effective_non_empty_text(object, "selection_algorithm", path)?
+        != REDUCED_REFERENCE_SELECTION_ALGORITHM
+    {
+        return Err(effective_error(path, "selection_algorithm inválido"));
+    }
     validate_lower_hex_64(
         effective_non_empty_text(object, "selection_subseed", path)?,
         "selection_subseed",
@@ -1742,6 +1811,7 @@ fn validate_effective_reduction(
     {
         return Err(effective_error(path, "selection_order inválido"));
     }
+    validate_effective_derived_sequences(object, target_bases, path)?;
     if object.get("state").and_then(Value::as_str) != Some("complete") {
         return Err(effective_error(
             path,
@@ -1762,6 +1832,94 @@ fn validate_effective_reduction(
         map_artifact_id,
         source_fasta_artifact_id,
     })
+}
+
+fn validate_effective_derived_sequences(
+    reduction: &serde_json::Map<String, Value>,
+    target_bases: u64,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    const FIELDS: [&str; 7] = [
+        "id",
+        "class",
+        "length",
+        "header",
+        "description",
+        "alphabet_validation",
+        "n_count",
+    ];
+    let sequences = effective_array(reduction, "sequences", path)?;
+    if sequences.is_empty() {
+        return Err(effective_error(path, "catálogo derivado vacío"));
+    }
+    let mut ids = BTreeSet::new();
+    let mut total = 0_u64;
+    for value in sequences {
+        let sequence = value
+            .as_object()
+            .ok_or_else(|| effective_error(path, "una secuencia derivada no es objeto"))?;
+        validate_effective_closed_object(
+            sequence,
+            &FIELDS,
+            "reduced_references[].sequences[]",
+            path,
+        )?;
+        let id = effective_non_empty_text(sequence, "id", path)?;
+        if !ids.insert(id) {
+            return Err(effective_error(path, "ID de secuencia derivada repetido"));
+        }
+        match sequence.get("class").and_then(Value::as_str) {
+            Some("chromosome" | "scaffold") => {}
+            _ => {
+                return Err(effective_error(
+                    path,
+                    "clase de secuencia derivada inválida",
+                ));
+            }
+        }
+        let length = effective_positive_u64(sequence, "length", path)?;
+        total = total
+            .checked_add(length)
+            .ok_or_else(|| effective_error(path, "la longitud derivada desborda u64"))?;
+        let n_count = sequence
+            .get("n_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| effective_error(path, "n_count derivado inválido"))?;
+        if n_count > length {
+            return Err(effective_error(path, "n_count derivado excede length"));
+        }
+        validate_reversible_text(
+            sequence
+                .get("header")
+                .ok_or_else(|| effective_error(path, "header derivado ausente"))?,
+            "reduced_references[].sequences[].header",
+            path,
+        )?;
+        match sequence.get("description") {
+            Some(Value::Null) => {}
+            Some(value) => validate_reversible_text(
+                value,
+                "reduced_references[].sequences[].description",
+                path,
+            )?,
+            None => return Err(effective_error(path, "description derivada ausente")),
+        }
+        if sequence.get("alphabet_validation").and_then(Value::as_str)
+            != Some("ACGTN-case-insensitive")
+        {
+            return Err(effective_error(
+                path,
+                "alphabet_validation derivada inválida",
+            ));
+        }
+    }
+    if total != target_bases {
+        return Err(effective_error(
+            path,
+            "la suma del catálogo derivado no coincide con target.bases",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_effective_closed_object(
@@ -1956,18 +2114,23 @@ fn manifest_reduction_json(output: &ManifestReductionLink) -> Value {
     json!({
         "id": output.id,
         "source_reference_id": output.source_reference_id,
+        "eligible_bases": output.eligible_bases,
         "region_size_bases": output.region_size_bases,
         "target": {
             "mode": output.target_mode,
             "declared": output.target_declared,
             "bases": output.target_bases,
         },
+        "root_seed": output.root_seed,
+        "selection_algorithm": output.selection_algorithm,
         "selection_subseed": output.selection_subseed,
         "selection_order": output.selection_order,
         "state": output.state.as_str(),
         "fasta_artifact_id": output.fasta_artifact_id,
         "map_artifact_id": output.map_artifact_id,
         "source_fasta_artifact_id": output.source_fasta_artifact_id,
+        "map_document_kind": output.map_document_kind,
+        "map_schema_version": output.map_schema_version,
     })
 }
 
@@ -1981,8 +2144,18 @@ fn reduction_json(output: &ReducedReferenceOutput<'_>) -> Value {
             "declared": output.effective.target().declared_value(),
             "bases": output.effective.target_bases(),
         },
+        "selection_algorithm": REDUCED_REFERENCE_SELECTION_ALGORITHM,
         "selection_subseed": output.effective.selection_subseed().to_hex(),
         "selection_order": output.plan.segments().iter().map(|segment| segment.selection_order()).collect::<Vec<_>>(),
+        "sequences": output.reference.sequences().iter().map(|sequence| json!({
+            "id": sequence.id().as_str(),
+            "class": sequence_class(sequence.class()),
+            "length": sequence.length(),
+            "header": reversible_bytes_json(sequence.header().raw_bytes()),
+            "description": reversible_description_json(sequence.header().description()),
+            "alphabet_validation": alphabet_validation(sequence.alphabet_validation()),
+            "n_count": sequence.unknown_base_count(),
+        })).collect::<Vec<_>>(),
         "state": output.state.as_str(),
         "fasta_artifact_id": output.fasta.id,
         "map_artifact_id": output.map.id,

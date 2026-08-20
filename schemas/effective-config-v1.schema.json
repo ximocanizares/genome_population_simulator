@@ -96,18 +96,34 @@
     "reduction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "source_reference_id", "region_size_bases", "target", "selection_subseed", "selection_order", "state", "fasta_artifact_id", "map_artifact_id", "source_fasta_artifact_id"],
+      "required": ["id", "source_reference_id", "region_size_bases", "target", "selection_algorithm", "selection_subseed", "selection_order", "sequences", "state", "fasta_artifact_id", "map_artifact_id", "source_fasta_artifact_id"],
       "properties": {
         "id": {"type": "string", "minLength": 1}, "source_reference_id": {"type": "string", "minLength": 1},
         "region_size_bases": {"type": "integer", "minimum": 1},
         "target": {"type": "object", "additionalProperties": false, "required": ["mode", "declared", "bases"],
           "properties": {"mode": {"enum": ["target_bases", "reduction_percent"]}, "declared": {"type": "string", "minLength": 1}, "bases": {"type": "integer", "minimum": 1}}},
+        "selection_algorithm": {"const": "reduced_reference_selection_v1"},
         "selection_subseed": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "selection_order": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "sequences": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/derived_sequence"}},
         "state": {"const": "complete"},
         "fasta_artifact_id": {"type": "string", "minLength": 1},
         "map_artifact_id": {"type": "string", "minLength": 1},
         "source_fasta_artifact_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "derived_sequence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "class", "length", "header", "description", "alphabet_validation", "n_count"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "class": {"enum": ["chromosome", "scaffold"]},
+        "length": {"type": "integer", "minimum": 1},
+        "header": {"$ref": "#/$defs/reversible_text"},
+        "description": {"oneOf": [{"$ref": "#/$defs/reversible_text"}, {"type": "null"}]},
+        "alphabet_validation": {"const": "ACGTN-case-insensitive"},
+        "n_count": {"type": "integer", "minimum": 0}
       }
     }
   }
