@@ -1,24 +1,29 @@
 # Punto de reanudación del proyecto
 
-> **Punto vigente (15 de agosto de 2026):** continuar desde
-> [punto-reactivacion-f1.2-2026-08-15.md](punto-reactivacion-f1.2-2026-08-15.md).
-> F1.2 ya fue reimplementada, corregida y aprobada por una tercera revisión
-> independiente. El proyecto está detenido en PAUSA-F1.2 y necesita aprobación
-> explícita antes de iniciar F1.3. Las indicaciones históricas posteriores de
-> este documento no sustituyen ese punto.
+> **Punto vigente (20 de agosto de 2026):** F1.1–F1.3 del
+> [plan de reimplementación F1](plan-reimplementacion-f1-0.2.md) están
+> completadas. PAUSA-F1.3 fue aprobada tras una revisión independiente y la
+> corrección H-F13-R01. El proyecto debe detenerse antes de F1.4 hasta recibir
+> aprobación explícita. Las indicaciones históricas posteriores de este
+> documento no sustituyen este punto.
 
 - **Fecha:** 20 de agosto de 2026
 - **Implementación F1.5 publicada:** `b5dc220 feat: complete F1.5 reference evidence`.
-- **Checkpoint de seguridad:** `66ad8b2 checkpoint: preserve F1 and F2 work
-  before simplification`, publicado en `origin/main`.
+- **Base publicada:** `7a69f72 refactor: reimplement minimal F1 through F1.2`,
+  publicada en `origin/main`.
+- **Checkpoint de seguridad anterior:** `66ad8b2 checkpoint: preserve F1 and
+  F2 work before simplification`.
 - **Estado actual de ejecución:** la auditoría sistemática bloqueó el alcance
   anterior y recomendó simplificar en vez de seguir parcheando. DTC-078 fija el
   modelo de confianza local mínimo; DTC-076/DTC-077 quedan superadas. El plan
-  vigente es `plan-reimplementacion-f1-0.2.md`. F1.1 y F1.2 están completados.
-  Tras dos rondas de correcciones, una tercera revisión independiente aprobó
-  PAUSA-F1.2 sin hallazgos nuevos. F1.3 y F2 no han comenzado.
-- **Estado de los agentes al pausar:** implementadores y revisor F1.2
-  terminaron; la revisión adversarial F2 0.4 terminó con aprobación condicionada
+  vigente es `plan-reimplementacion-f1-0.2.md`. F1.1, F1.2 y F1.3 están
+  completados. F1.3 conserva raíz de 256 bits y derivación BLAKE3/ChaCha12,
+  activa solo `reference_generation` y `reference_reduction`, y mantiene
+  intactos los catálogos v1–v3. La revisión independiente aprobó PAUSA-F1.3
+  después de corregir destinos y símbolos de trazabilidad. F1.4 y F2 no han
+  comenzado.
+- **Estado de los agentes al pausar:** implementador y revisor F1.3 terminaron;
+  la revisión adversarial F2 0.4 terminó con aprobación condicionada
   exclusivamente al cierre y commit base de F1.
 - **Estado de diseño:** DTPD-101, DTPD-116, DTPD-118, DTPD-119 y DTPD-121 están resueltas.
   DTC-056 fija las coordenadas comunes y DTC-057,
@@ -51,12 +56,12 @@
 
 ## Punto vigente de reanudación para F1
 
-Reanudar en PAUSA-F1.2 de `plan-reimplementacion-f1-0.2.md`. La primera acción
-es obtener aprobación explícita para iniciar F1.3.1. Conservar la superficie TOML
-mínima, la configuración efectiva con consumidores reales y la ausencia de
-`ResolutionDomain`, `resolution-evidence`, eventos/manifiestos sintéticos,
-normalización poblacional y hardening frente a atacante local. No iniciar F2
-hasta cerrar y fijar F1.
+Reanudar en PAUSA-F1.3 de `plan-reimplementacion-f1-0.2.md`. La primera acción
+es obtener aprobación explícita para iniciar F1.4.1. Conservar la superficie
+TOML mínima, los dos únicos ámbitos RNG activos, la configuración efectiva con
+consumidores reales y la ausencia de `ResolutionDomain`, `resolution-evidence`,
+eventos/manifiestos sintéticos, normalización poblacional y hardening frente a
+atacante local. No iniciar F2 hasta cerrar y fijar F1.
 
 Las rondas H-F16 descritas más abajo son historia del checkpoint `66ad8b2`; no
 constituyen el plan vigente ni obligan a conservar código trasladado.

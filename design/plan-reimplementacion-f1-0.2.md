@@ -128,7 +128,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
 
 ## 6. F1.3 — Aleatoriedad reproducible mínima
 
-- ☐ F1.3.1. Conservar la semilla raíz de 256 bits y la derivación BLAKE3 estable.
+- ✅ F1.3.1. Conservar la semilla raíz de 256 bits y la derivación BLAKE3 estable.
   - Depende de: F1.2.2.
   - Procede de: REQ-CONF-26, REQ-REP-23 y DTC-037/DTC-038; F1 aporta
     evidencia parcial para REQ-CONF-27 y REQ-REP-22, que cierran en F9.7.
@@ -136,7 +136,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: vectores congelados, semilla suministrada/generada y
     rechazo de representación inválida.
 
-- ☐ F1.3.2. Activar en runtime solo los ámbitos `reference_generation` y
+- ✅ F1.3.2. Activar en runtime solo los ámbitos `reference_generation` y
   `reference_reduction` sin reescribir catálogos publicados.
   - Depende de: F1.3.1.
   - Procede de: DTC-037, DTC-050, DTC-057 y DTC-078.
@@ -145,7 +145,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: vectores de ambos ámbitos y prueba de que ningún evento o
     población inexistente consume RNG en F1.
 
-- ☐ F1.3.3. Demostrar repetibilidad lógica y aislamiento entre generación y
+- ✅ F1.3.3. Demostrar repetibilidad lógica y aislamiento entre generación y
   reducción.
   - Depende de: F1.3.2.
   - Procede de: REQ-REP-23 y ACE-23; REQ-REP-22 recibe solo evidencia parcial.

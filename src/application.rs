@@ -13,8 +13,8 @@ use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
 use crate::identity::{ReferenceId, SequenceId};
 use crate::randomness::{
-    EntropySource, ReproducibilityMetadata, Subseed, SubseedRequest, SystemEntropy, derive_subseed,
-    resolve_root_seed,
+    EntropySource, ReproducibilityMetadata, RuntimeSubseedScope, Subseed, SystemEntropy,
+    derive_subseed, resolve_root_seed,
 };
 use crate::reference_generation::normalize_composition_probabilities;
 
@@ -384,21 +384,19 @@ pub fn build_effective_config_with_entropy(
             .with("target_bases", target_bases.to_string())
             .with("eligible_bases", summary.total_genome_size.to_string()));
         }
-        let request = SubseedRequest::from_scope(
-            "reference_reduction",
-            &[
-                ("source_reference_id", reduction.source_reference_id.value()),
-                ("derived_reference_id", reduction.id.value()),
-                ("algorithm", "reduced_reference_selection_v1"),
-            ],
-        )?;
         reduced_references.push(EffectiveReducedReference {
             id: reduction.id.value().clone(),
             source_reference_id: reduction.source_reference_id.value().clone(),
             region_size_bases: *reduction.region_size_bases.value(),
             target,
             target_bases,
-            selection_subseed: derive_subseed(root_seed, &request)?,
+            selection_subseed: derive_subseed(
+                root_seed,
+                RuntimeSubseedScope::ReferenceReduction {
+                    source_reference_id: reduction.source_reference_id.value(),
+                    derived_reference_id: reduction.id.value(),
+                },
+            )?,
         });
     }
     let reference_source = match &general.reference().source {
@@ -407,8 +405,7 @@ pub fn build_effective_config_with_entropy(
             original_path: resolve_link(general.source().path(), fasta.value()),
         },
     };
-    let reproducibility =
-        ReproducibilityMetadata::new(root_seed, seed_origin, general.reference().id.value(), &[])?;
+    let reproducibility = ReproducibilityMetadata::new(root_seed, seed_origin);
     Ok(EffectiveConfig {
         source_path: general.source().path().display().to_string(),
         reference_id: general.reference().id.value().clone(),

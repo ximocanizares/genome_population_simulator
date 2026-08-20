@@ -2,7 +2,7 @@
 
 use crate::diagnostics::Diagnostic;
 use crate::identity::{ReferenceId, SequenceId};
-use crate::randomness::{RootSeed, SubseedRequest, derive_subseed};
+use crate::randomness::{RootSeed, RuntimeSubseedScope, derive_subseed};
 use crate::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
@@ -29,9 +29,11 @@ pub fn generate_reference(
     composition: &[BaseFrequency],
 ) -> Result<Reference, Diagnostic> {
     let cumulative = validate_composition(composition)?;
-    let request =
-        SubseedRequest::from_scope("reference_generation", &[("reference_id", reference_id)])?;
-    let mut rng = derive_subseed(root_seed, &request)?.local_rng();
+    let mut rng = derive_subseed(
+        root_seed,
+        RuntimeSubseedScope::ReferenceGeneration { reference_id },
+    )?
+    .local_rng();
     let mut sequences = Vec::with_capacity(specs.len());
     for spec in specs {
         let length = usize::try_from(spec.length).map_err(|_| resource_error(spec.length))?;

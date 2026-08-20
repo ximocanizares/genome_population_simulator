@@ -11,6 +11,7 @@ pub const DERIVATION_VERSION: u32 = 1;
 pub const SUBSEED_CATALOG_VERSION: &str = "3";
 pub const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 pub const RANDOM_ALGORITHM: &str = "ChaCha12";
+pub const REFERENCE_REDUCTION_ALGORITHM: &str = "reduced_reference_selection_v1";
 
 /// Semilla raíz canónica de 256 bits.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -126,96 +127,32 @@ pub fn resolve_root_seed(
     Ok((RootSeed::from_bytes(bytes), SeedOrigin::SystemCsprng))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SubseedRequest {
-    scope: &'static str,
-    components: Vec<(&'static str, String)>,
+/// Ámbitos que tienen un consumidor real durante F1.
+///
+/// Los catálogos publicados v1–v3 contienen también filas reservadas para fases
+/// posteriores. Esas filas se verifican como datos históricos, pero no forman
+/// parte de esta frontera de ejecución.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeSubseedScope<'a> {
+    ReferenceGeneration {
+        reference_id: &'a str,
+    },
+    ReferenceReduction {
+        source_reference_id: &'a str,
+        derived_reference_id: &'a str,
+    },
 }
 
-impl SubseedRequest {
-    pub fn from_scope(scope: &str, components: &[(&str, &str)]) -> Result<Self, Diagnostic> {
-        let (canonical_scope, names): (&'static str, &[&'static str]) = match scope {
-            "reference_generation" => ("reference_generation", &["reference_id"]),
-            "initial_population" => ("initial_population", &["scenario_id", "population_id"]),
-            "biological_process" => (
-                "biological_process",
-                &["generation", "population_id", "process"],
-            ),
-            "sampling" => ("sampling", &["generation", "sampling_id"]),
-            "technical_event" => ("technical_event", &["event_id", "reference_id"]),
-            "reference_reduction" => (
-                "reference_reduction",
-                &["source_reference_id", "derived_reference_id", "algorithm"],
-            ),
-            _ => return Err(unknown_scope(scope)),
-        };
-        if components.len() != names.len()
-            || components
-                .iter()
-                .zip(names)
-                .any(|((found, _), expected)| found != expected)
-        {
-            return Err(invalid_scope_components(scope, components, names));
-        }
-        Ok(Self {
-            scope: canonical_scope,
-            components: names
-                .iter()
-                .zip(components)
-                .map(|(name, (_, value))| (*name, (*value).to_owned()))
-                .collect(),
-        })
-    }
+pub const F1_ACTIVE_SUBSEED_SCOPES: [&str; 2] = ["reference_generation", "reference_reduction"];
 
-    #[must_use]
-    pub const fn scope(&self) -> &'static str {
-        self.scope
-    }
-
-    pub fn components(&self) -> impl Iterator<Item = (&'static str, &str)> {
-        self.components
-            .iter()
-            .map(|(name, value)| (*name, value.as_str()))
-    }
-}
-
-fn unknown_scope(scope: &str) -> Diagnostic {
-    Diagnostic::configuration(
-        "GPS-CONF-018",
-        "El ámbito solicitado no existe en el catálogo normativo de subsemillas.",
-    )
-    .with("scope", scope)
-    .with("catalog_version", SUBSEED_CATALOG_VERSION)
-}
-
-fn invalid_scope_components(
-    scope: &str,
-    components: &[(&str, &str)],
-    expected: &[&str],
-) -> Diagnostic {
-    Diagnostic::internal(
-        "GPS-INTERNAL-001",
-        "Una invariante interna considerada imposible se ha roto.",
-    )
-    .with("component", "subseed_derivation")
-    .with("operation", "construct_scope_request")
-    .with(
-        "detail",
-        format!(
-            "scope {scope} expected components {expected:?}, found {:?}",
-            components.iter().map(|(name, _)| *name).collect::<Vec<_>>()
-        ),
-    )
-}
-
-pub fn canonical_material(root: RootSeed, request: &SubseedRequest) -> Result<Vec<u8>, Diagnostic> {
-    let component_count = u32::try_from(request.components.len())
-        .map_err(|_| material_length_error("component_count"))?;
+fn canonical_material(root: RootSeed, components: &[(&str, &str)]) -> Result<Vec<u8>, Diagnostic> {
+    let component_count =
+        u32::try_from(components.len()).map_err(|_| material_length_error("component_count"))?;
     let mut material = Vec::new();
     material.extend_from_slice(root.as_bytes());
     material.extend_from_slice(&DERIVATION_VERSION.to_be_bytes());
     material.extend_from_slice(&component_count.to_be_bytes());
-    for (name, value) in &request.components {
+    for (name, value) in components {
         append_length_prefixed(&mut material, name.as_bytes(), "component_name")?;
         append_length_prefixed(&mut material, value.as_bytes(), "component_value")?;
     }
@@ -263,8 +200,26 @@ impl Subseed {
     }
 }
 
-pub fn derive_subseed(root: RootSeed, request: &SubseedRequest) -> Result<Subseed, Diagnostic> {
-    let material = canonical_material(root, request)?;
+pub fn derive_subseed(
+    root: RootSeed,
+    scope: RuntimeSubseedScope<'_>,
+) -> Result<Subseed, Diagnostic> {
+    let material = match scope {
+        RuntimeSubseedScope::ReferenceGeneration { reference_id } => {
+            canonical_material(root, &[("reference_id", reference_id)])?
+        }
+        RuntimeSubseedScope::ReferenceReduction {
+            source_reference_id,
+            derived_reference_id,
+        } => canonical_material(
+            root,
+            &[
+                ("source_reference_id", source_reference_id),
+                ("derived_reference_id", derived_reference_id),
+                ("algorithm", REFERENCE_REDUCTION_ALGORITHM),
+            ],
+        )?,
+    };
     Ok(Subseed(blake3::derive_key(DERIVATION_CONTEXT, &material)))
 }
 
@@ -283,62 +238,24 @@ impl LocalRng {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EventSubseed {
-    event_id: String,
-    subseed: Subseed,
-}
-
-impl EventSubseed {
-    #[must_use]
-    pub fn event_id(&self) -> &str {
-        &self.event_id
-    }
-
-    #[must_use]
-    pub const fn subseed(&self) -> Subseed {
-        self.subseed
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReproducibilityMetadata {
     root_seed: RootSeed,
     seed_origin: SeedOrigin,
     random_algorithm: &'static str,
     derivation_version: u32,
     catalog_version: &'static str,
-    event_subseeds: Vec<EventSubseed>,
 }
 
 impl ReproducibilityMetadata {
-    pub fn new(
-        root_seed: RootSeed,
-        seed_origin: SeedOrigin,
-        reference_id: &str,
-        event_ids: &[String],
-    ) -> Result<Self, Diagnostic> {
-        let mut event_subseeds = event_ids
-            .iter()
-            .map(|event_id| {
-                let request = SubseedRequest::from_scope(
-                    "technical_event",
-                    &[("event_id", event_id), ("reference_id", reference_id)],
-                )?;
-                Ok(EventSubseed {
-                    event_id: event_id.clone(),
-                    subseed: derive_subseed(root_seed, &request)?,
-                })
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>()?;
-        event_subseeds.sort_by(|first, second| first.event_id.cmp(&second.event_id));
-        Ok(Self {
+    #[must_use]
+    pub const fn new(root_seed: RootSeed, seed_origin: SeedOrigin) -> Self {
+        Self {
             root_seed,
             seed_origin,
             random_algorithm: RANDOM_ALGORITHM,
             derivation_version: DERIVATION_VERSION,
             catalog_version: SUBSEED_CATALOG_VERSION,
-            event_subseeds,
-        })
+        }
     }
 
     #[must_use]
@@ -364,271 +281,5 @@ impl ReproducibilityMetadata {
     #[must_use]
     pub const fn catalog_version(&self) -> &'static str {
         self.catalog_version
-    }
-
-    #[must_use]
-    pub fn event_subseeds(&self) -> &[EventSubseed] {
-        &self.event_subseeds
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum GuaranteeStatus {
-    Guaranteed,
-    NotGuaranteed,
-    NotApplicable,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GuaranteeAssessment {
-    status: GuaranteeStatus,
-    conditions: &'static [&'static str],
-}
-
-impl GuaranteeAssessment {
-    #[must_use]
-    pub const fn status(&self) -> GuaranteeStatus {
-        self.status
-    }
-
-    #[must_use]
-    pub const fn conditions(&self) -> &'static [&'static str] {
-        self.conditions
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReproducibilityContext {
-    pub simulator_version: String,
-    pub platform: String,
-    pub root_seed: RootSeed,
-    pub effective_config: String,
-    pub input_identity: String,
-    pub profile: String,
-    pub random_algorithm: String,
-    pub derivation_version: u32,
-    pub catalog_version: String,
-    /// Dependencias que intervienen en la derivación o en los flujos RNG.
-    pub dependency_versions: Vec<String>,
-    /// Dependencias adicionales que intervienen únicamente en resultados técnicos.
-    pub technical_dependency_versions: Vec<String>,
-    pub external_tools: Vec<String>,
-}
-
-/// Evidencia previa y concreta que permite comparar bytes de una clase de
-/// artefacto. Su presencia no declara por sí sola que una salida real cumpla
-/// REQ-CONF-115; esa declaración corresponde al manifiesto y al validador del
-/// artefacto consumidor.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BinaryIdentityEvidence {
-    artifact_class: String,
-    verification_policy: String,
-    evidence_id: String,
-}
-
-impl BinaryIdentityEvidence {
-    #[must_use]
-    pub fn new(
-        artifact_class: impl Into<String>,
-        verification_policy: impl Into<String>,
-        evidence_id: impl Into<String>,
-    ) -> Option<Self> {
-        let evidence = Self {
-            artifact_class: artifact_class.into(),
-            verification_policy: verification_policy.into(),
-            evidence_id: evidence_id.into(),
-        };
-        (!evidence.artifact_class.trim().is_empty()
-            && !evidence.verification_policy.trim().is_empty()
-            && !evidence.evidence_id.trim().is_empty())
-        .then_some(evidence)
-    }
-
-    #[must_use]
-    pub fn artifact_class(&self) -> &str {
-        &self.artifact_class
-    }
-
-    #[must_use]
-    pub fn verification_policy(&self) -> &str {
-        &self.verification_policy
-    }
-
-    #[must_use]
-    pub fn evidence_id(&self) -> &str {
-        &self.evidence_id
-    }
-}
-
-/// Entrada preparatoria para comparar hechos ya validados por consumidores.
-/// No sustituye un resultado, un manifiesto ni evidencia sobre un artefacto real.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ReproducibilityObservation {
-    pub context: ReproducibilityContext,
-    pub biological_decisions: Option<String>,
-    pub technical_content: Option<String>,
-    pub semantic_content: Option<String>,
-    pub binary_content: Option<Vec<u8>>,
-    pub event_subseeds: Vec<EventSubseed>,
-    pub binary_identity_evidence: Option<BinaryIdentityEvidence>,
-}
-
-fn base_conditions_match(first: &ReproducibilityContext, second: &ReproducibilityContext) -> bool {
-    first.simulator_version == second.simulator_version
-        && first.platform == second.platform
-        && first.root_seed == second.root_seed
-        && first.effective_config == second.effective_config
-        && first.input_identity == second.input_identity
-        && first.profile == second.profile
-        && first.random_algorithm == second.random_algorithm
-        && first.derivation_version == second.derivation_version
-        && first.catalog_version == second.catalog_version
-        && same_unordered(&first.dependency_versions, &second.dependency_versions)
-}
-
-fn same_unordered<T: PartialEq>(first: &[T], second: &[T]) -> bool {
-    if first.len() != second.len() {
-        return false;
-    }
-    let mut matched = vec![false; second.len()];
-    first.iter().all(|value| {
-        second
-            .iter()
-            .enumerate()
-            .find(|(index, candidate)| !matched[*index] && value == *candidate)
-            .is_some_and(|(index, _)| {
-                matched[index] = true;
-                true
-            })
-    })
-}
-
-pub fn compare_biological(
-    first: &ReproducibilityObservation,
-    second: &ReproducibilityObservation,
-) -> GuaranteeAssessment {
-    let status = match (&first.biological_decisions, &second.biological_decisions) {
-        (Some(first_value), Some(second_value))
-            if base_conditions_match(&first.context, &second.context)
-                && first_value == second_value =>
-        {
-            GuaranteeStatus::Guaranteed
-        }
-        (Some(_), Some(_)) | (Some(_), None) | (None, Some(_)) => GuaranteeStatus::NotGuaranteed,
-        (None, None) => GuaranteeStatus::NotApplicable,
-    };
-    GuaranteeAssessment {
-        status,
-        conditions: &[
-            "simulator_version",
-            "platform",
-            "root_seed",
-            "effective_config",
-            "input_identity",
-            "profile",
-            "random_algorithm",
-            "derivation_version",
-            "catalog_version",
-            "dependency_versions",
-            "biological_decisions",
-        ],
-    }
-}
-
-pub fn compare_technical(
-    first: &ReproducibilityObservation,
-    second: &ReproducibilityObservation,
-) -> GuaranteeAssessment {
-    let status = match (&first.technical_content, &second.technical_content) {
-        (Some(first_value), Some(second_value))
-            if base_conditions_match(&first.context, &second.context)
-                && same_unordered(
-                    &first.context.technical_dependency_versions,
-                    &second.context.technical_dependency_versions,
-                )
-                && same_unordered(&first.event_subseeds, &second.event_subseeds)
-                && first_value == second_value =>
-        {
-            GuaranteeStatus::Guaranteed
-        }
-        (Some(_), Some(_)) | (Some(_), None) | (None, Some(_)) => GuaranteeStatus::NotGuaranteed,
-        (None, None) => GuaranteeStatus::NotApplicable,
-    };
-    GuaranteeAssessment {
-        status,
-        conditions: &[
-            "biological_base_conditions",
-            "event_subseeds",
-            "technical_dependency_versions",
-            "technical_content",
-        ],
-    }
-}
-
-pub fn compare_semantic(
-    first: &ReproducibilityObservation,
-    second: &ReproducibilityObservation,
-) -> GuaranteeAssessment {
-    let status = match (&first.semantic_content, &second.semantic_content) {
-        (Some(first_value), Some(second_value))
-            if base_conditions_match(&first.context, &second.context)
-                && same_unordered(
-                    &first.context.external_tools,
-                    &second.context.external_tools,
-                )
-                && first_value == second_value =>
-        {
-            GuaranteeStatus::Guaranteed
-        }
-        (Some(_), Some(_)) | (Some(_), None) | (None, Some(_)) => GuaranteeStatus::NotGuaranteed,
-        (None, None) => GuaranteeStatus::NotApplicable,
-    };
-    GuaranteeAssessment {
-        status,
-        conditions: &[
-            "biological_base_conditions",
-            "external_tools",
-            "semantic_content",
-        ],
-    }
-}
-
-pub fn compare_binary(
-    first: &ReproducibilityObservation,
-    second: &ReproducibilityObservation,
-) -> GuaranteeAssessment {
-    let status = match (&first.binary_content, &second.binary_content) {
-        (Some(first_value), Some(second_value))
-            if first.binary_identity_evidence.is_some()
-                && first.binary_identity_evidence == second.binary_identity_evidence
-                && base_conditions_match(&first.context, &second.context)
-                && same_unordered(
-                    &first.context.technical_dependency_versions,
-                    &second.context.technical_dependency_versions,
-                )
-                && same_unordered(
-                    &first.context.external_tools,
-                    &second.context.external_tools,
-                )
-                && same_unordered(&first.event_subseeds, &second.event_subseeds)
-                && first_value == second_value =>
-        {
-            GuaranteeStatus::Guaranteed
-        }
-        (Some(_), Some(_)) | (Some(_), None) | (None, Some(_)) => GuaranteeStatus::NotGuaranteed,
-        (None, None) => GuaranteeStatus::NotApplicable,
-    };
-    GuaranteeAssessment {
-        status,
-        conditions: &[
-            "binary_artifact_class",
-            "binary_verification_policy",
-            "binary_verification_evidence",
-            "biological_base_conditions",
-            "event_subseeds",
-            "technical_dependency_versions",
-            "external_tools",
-            "binary_content",
-        ],
     }
 }

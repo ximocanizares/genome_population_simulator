@@ -4,10 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::coordinates::{CoordinateError, GenomicInterval};
 use crate::identity::{ReferenceId, SequenceId};
-use crate::randomness::LocalRng;
+use crate::randomness::{LocalRng, REFERENCE_REDUCTION_ALGORITHM};
 use crate::reference::SequenceClass;
 
-pub const REDUCED_REFERENCE_SELECTION_ALGORITHM: &str = "reduced_reference_selection_v1";
+pub const REDUCED_REFERENCE_SELECTION_ALGORITHM: &str = REFERENCE_REDUCTION_ALGORITHM;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReductionError {
@@ -949,7 +949,7 @@ pub fn materialize_selection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::randomness::{RootSeed, SubseedRequest, derive_subseed};
+    use crate::randomness::{RootSeed, RuntimeSubseedScope, derive_subseed};
 
     fn reference_id(value: &str) -> ReferenceId {
         ReferenceId::parse(value, "reduction-test").expect("reference ID")
@@ -966,32 +966,30 @@ mod tests {
 
     fn rng(byte: u8) -> LocalRng {
         let root = RootSeed::from_bytes([byte; 32]);
-        let request = SubseedRequest::from_scope(
-            "reference_reduction",
-            &[
-                ("source_reference_id", "ref-source"),
-                ("derived_reference_id", "ref-derived"),
-                ("algorithm", REDUCED_REFERENCE_SELECTION_ALGORITHM),
-            ],
+        derive_subseed(
+            root,
+            RuntimeSubseedScope::ReferenceReduction {
+                source_reference_id: "ref-source",
+                derived_reference_id: "ref-derived",
+            },
         )
-        .expect("subseed request");
-        derive_subseed(root, &request).expect("subseed").local_rng()
+        .expect("subseed")
+        .local_rng()
     }
 
     fn rng_from_number(value: u64) -> LocalRng {
         let mut bytes = [0_u8; 32];
         bytes[..8].copy_from_slice(&value.to_be_bytes());
         let root = RootSeed::from_bytes(bytes);
-        let request = SubseedRequest::from_scope(
-            "reference_reduction",
-            &[
-                ("source_reference_id", "ref-source"),
-                ("derived_reference_id", "ref-derived"),
-                ("algorithm", REDUCED_REFERENCE_SELECTION_ALGORITHM),
-            ],
+        derive_subseed(
+            root,
+            RuntimeSubseedScope::ReferenceReduction {
+                source_reference_id: "ref-source",
+                derived_reference_id: "ref-derived",
+            },
         )
-        .expect("subseed request");
-        derive_subseed(root, &request).expect("subseed").local_rng()
+        .expect("subseed")
+        .local_rng()
     }
 
     #[test]
