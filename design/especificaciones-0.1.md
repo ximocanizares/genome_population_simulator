@@ -1422,7 +1422,11 @@ expansión frente a contracción, pero no el tamaño del salto.
 - **REQ-IND-25.** Todo individuo debe tener un identificador único y estable
   dentro de la ejecución. El sistema debe asignarlo cuando el individuo no haya
   sido definido con uno y no debe reutilizarlo aunque el individuo deje de
-  formar parte de la población.
+  formar parte de la población. En la creación directa de F2, la omisión de
+  `individual_id` exige un `founder_key` aportado, único y estable dentro de su
+  población de origen; el sistema deriva el identificador desde esa clave y las
+  causas DTC-039. Dos individuos sin ID ni claves fundadoras distintas se
+  rechazan: el orden físico del documento nunca crea una identidad.
 - **REQ-IND-26.** El mismo identificador de individuo debe usarse de forma
   coherente en su estado genotípico, sus observaciones, sus relaciones parentales
   o de linaje y todos los archivos y metadatos que le correspondan.

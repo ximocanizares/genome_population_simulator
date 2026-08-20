@@ -858,7 +858,8 @@ fase↔generaciones; cada fase será propietaria de su evidencia, su orden estab
 y sus pruebas. La composición final del retículo se audita en F9.7. Ningún
 proveedor sintético ni una salida derivada se convierte en autoridad runtime.
 
-Cuando F6 incorpore probabilidades y frecuencias reales, admisión representará
+F2.2 incorpora las primeras colecciones reales de probabilidades y frecuencias
+y F6.2 reutiliza y amplía ese contrato para las colecciones poblacionales. La admisión representará
 como `f64` cada probabilidad,
 frecuencia y tolerancia general y exige que sea finita. Los valores pertenecen a
 `[0,1]`; la tolerancia absoluta pertenece inclusivamente a `[0, 1e-6]` y, si no

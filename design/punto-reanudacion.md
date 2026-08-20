@@ -83,7 +83,7 @@
   complemento; la primera cardinalidad positiva se define en F5.5. La revisión
   adversarial F2 0.3 queda corregida: RAF2-028 a RAF2-044 están
   resueltos documentalmente; el plan corregido tiene 130 pasos con cinco
-  campos, seis pausas explícitas, 79 cierres, nueve compartidos y nueve
+  campos, seis pausas explícitas, 78 cierres, catorce compartidos y nueve
   parciales directos; requiere nueva revisión adversarial;
   REQ-REF-14 pasó justificadamente a F1.5 y F2.1 conserva su invariante,
   mientras REQ-CONF-38 pasó a F2.3 con individuos reales.
