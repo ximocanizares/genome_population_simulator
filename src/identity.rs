@@ -394,6 +394,19 @@ impl IdentityRegistry {
     }
 }
 
+/// Deriva la identidad de ejecución con el único material canónico de F1.
+pub fn derive_execution_id(
+    root: RootSeed,
+    configuration_sha256: &str,
+) -> Result<ExecutionId, Diagnostic> {
+    let request = AutomaticIdRequest::new(
+        IdClass::Execution,
+        "execution",
+        &[("config_sha256", configuration_sha256)],
+    )?;
+    IdentityRegistry::default().derive_execution(root, &request)
+}
+
 /// Las categorías no son intercambiables aunque el texto sea igual.
 ///
 /// ```compile_fail

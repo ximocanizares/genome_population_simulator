@@ -73,6 +73,19 @@ impl Sha256Writer {
     }
 }
 
+/// Digest canónico de los bytes TOML que participa en la identidad de ejecución.
+pub fn configuration_digest(bytes: &[u8]) -> Result<String, Diagnostic> {
+    let mut writer = Sha256Writer::default();
+    writer.update(b"genome_population_simulator/v1/configuration-digest\0")?;
+    writer.update(
+        &u64::try_from(bytes.len())
+            .map_err(|_| size_error())?
+            .to_be_bytes(),
+    )?;
+    writer.update(bytes)?;
+    Ok(writer.finish("configuration-input").digest().to_owned())
+}
+
 pub fn identify_file(
     path: &Path,
     relative_path: impl Into<PathBuf>,

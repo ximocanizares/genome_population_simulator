@@ -1,5 +1,11 @@
-use jsonschema::{Draft, Validator};
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde_json::{Value, json};
+
+static NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn real_effective_shapes_keep_their_two_valid_source_modes() {
@@ -31,40 +37,47 @@ fn effective_selection_order_is_strictly_one_based() {
 }
 
 #[test]
-fn every_effective_artifact_uses_the_canonical_relative_path_pattern() {
-    for path in [
-        "references/main/reference.fasta",
-        "a",
-        "a/.hidden",
-        "a/name..txt",
-        "referencias/ñ/reference.fasta",
-    ] {
+fn every_effective_artifact_link_is_a_non_empty_catalog_id() {
+    for id in ["reference-main", "a", "referencia-ñ"] {
         let mut document = effective_config("supplied", true);
         *document
-            .pointer_mut("/reference/fasta/path")
-            .expect("reference path") = json!(path);
-        assert_valid(&format!("canonical-path-{path:?}"), &document);
+            .pointer_mut("/reference/fasta_artifact_id")
+            .expect("reference artifact ID") = json!(id);
+        assert_valid(&format!("artifact-id-{id:?}"), &document);
     }
 
-    for path in [
-        "",
-        "/absolute",
-        "../outside",
-        "a/../outside",
-        "./relative",
-        "a/./relative",
-        "a//duplicate",
-        "a\\windows",
-        "a\nb",
-        "a\u{7f}b",
-        "trailing/",
-    ] {
+    for value in [json!(""), json!(null), json!(1)] {
         let mut document = effective_config("supplied", true);
         *document
-            .pointer_mut("/reference/fasta/path")
-            .expect("reference path") = json!(path);
-        assert_invalid(&format!("noncanonical-path-{path:?}"), &document);
+            .pointer_mut("/reference/fasta_artifact_id")
+            .expect("reference artifact ID") = value.clone();
+        assert_invalid(&format!("invalid-artifact-id-{value:?}"), &document);
     }
+}
+
+#[test]
+fn semantic_ids_source_path_and_selection_order_cannot_be_empty() {
+    for (name, pointer) in [
+        ("source-path", "/source_path"),
+        ("reference-id", "/reference/id"),
+        ("sequence-id", "/reference/sequences/0/id"),
+        ("reduction-id", "/reduced_references/0/id"),
+        (
+            "source-reference-id",
+            "/reduced_references/0/source_reference_id",
+        ),
+        ("target-declared", "/reduced_references/0/target/declared"),
+    ] {
+        let mut document = effective_config("supplied", true);
+        *document.pointer_mut(pointer).expect("fixture pointer") = json!("");
+        assert_invalid(name, &document);
+    }
+
+    let mut document = effective_config("supplied", true);
+    *document
+        .pointer_mut("/reduced_references/0/selection_order")
+        .expect("selection order") = json!([]);
+    assert_invalid("empty-selection-order", &document);
 }
 
 fn effective_config(source: &str, with_reduction: bool) -> Value {
@@ -82,9 +95,9 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
             "selection_subseed": "1".repeat(64),
             "selection_order": [1, 2],
             "state": "complete",
-            "fasta": artifact("reference-reduced", "references/reduced/reference.fasta"),
-            "map": artifact("reference-map", "references/reduced/map.tsv"),
-            "source_fasta_id": "reference-main"
+            "fasta_artifact_id": "reference-reduced",
+            "map_artifact_id": "reference-map",
+            "source_fasta_artifact_id": "reference-main"
         })]
     } else {
         Vec::new()
@@ -108,44 +121,39 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
                 "length": 1000,
                 "unknown_base_count": 0
             }],
-            "fasta": artifact("reference-main", "references/main/reference.fasta")
+            "fasta_artifact_id": "reference-main"
         },
         "reduced_references": reductions
     })
 }
 
-fn artifact(id: &str, path: &str) -> Value {
-    json!({
-        "id": id,
-        "kind": "reference_fasta",
-        "path": path,
-        "size_bytes": 100,
-        "checksum": {"algorithm": "sha256", "digest": "0".repeat(64)},
-        "state": "complete",
-        "validated": true
-    })
-}
-
-fn schema_validator() -> Validator {
-    let schema: Value =
-        serde_json::from_str(include_str!("../schemas/effective-config-v1.schema.json"))
-            .expect("effective-config schema JSON");
-    jsonschema::options()
-        .with_draft(Draft::Draft202012)
-        .build(&schema)
-        .expect("Draft 2020-12 schema")
-}
-
 fn assert_valid(name: &str, document: &Value) {
-    assert!(
-        schema_validator().is_valid(document),
-        "effective-config schema rejected positive {name}: {document}"
-    );
+    assert_external(name, document, true);
 }
 
 fn assert_invalid(name: &str, document: &Value) {
-    assert!(
-        !schema_validator().is_valid(document),
-        "effective-config schema accepted negative {name}: {document}"
+    assert_external(name, document, false);
+}
+
+fn assert_external(name: &str, document: &Value, expected_success: bool) {
+    let instance = std::env::temp_dir().join(format!(
+        "gps-effective-schema-{}-{}-{name}.json",
+        std::process::id(),
+        NONCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::write(&instance, serde_json::to_vec(document).expect("JSON")).expect("instance");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new("python3")
+        .arg(root.join("tests/external_jsonschema_validator.py"))
+        .arg(root.join("schemas/effective-config-v1.schema.json"))
+        .arg(&instance)
+        .output()
+        .expect("independent Python validator");
+    let _ = fs::remove_file(instance);
+    assert_eq!(
+        output.status.success(),
+        expected_success,
+        "effective-config schema mismatch for {name}: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }

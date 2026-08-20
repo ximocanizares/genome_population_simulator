@@ -1,0 +1,11 @@
+test_id	requirement	status	evidence	destination
+TEST-REQ-MAN-02	REQ-MAN-02	passed	tests/manifest_minimal.rs::complete_and_failed_minimal_manifests_pass_rust_and_external_validators	F1.4
+TEST-REQ-MAN-08	REQ-MAN-08	passed	tests/publication_process.rs::catalog_files_are_unique_resolvable_and_match_external_sha256	F1.4
+TEST-REQ-MAN-32	REQ-MAN-32	passed	tests/f1_6_acceptance.rs::output_categories_cover_zero_one_and_multiple_reductions	F1.4
+TEST-REQ-SAL-03	REQ-SAL-03	passed	tests/publication_process.rs::configuration_copy_is_byte_exact_linked_and_matches_external_sha256	F1.4
+TEST-REQ-SAL-22	REQ-SAL-22	passed	tests/publication_process.rs::complete_failed_and_incomplete_are_real_minimal_trees	F1.4
+TEST-REQ-SAL-26	REQ-SAL-26	passed	tests/publication_process.rs::invalid_configuration_exits_two_without_destination_or_provisional	F1.4
+PARTIAL-REQ-MAN-01	REQ-MAN-01	partial	tests/minimal_execution.rs::minimal_cli_never_publishes_resolution_evidence_or_event_units	F3.5: faltan manifiestos de eventos reales
+PARTIAL-REQ-MAN-05	REQ-MAN-05	partial	tests/manifest_minimal.rs::complete_and_failed_minimal_manifests_pass_rust_and_external_validators	F9.7: faltan perfiles, herramientas y consumidores posteriores
+PARTIAL-REQ-MAN-69	REQ-MAN-69	partial	tests/manifest_minimal.rs::complete_and_failed_minimal_manifests_pass_rust_and_external_validators	F9.7: faltan los cuatro niveles completos de reproducibilidad
+PARTIAL-REQ-MAN-72	REQ-MAN-72	partial	tests/minimal_execution.rs::minimal_cli_never_publishes_resolution_evidence_or_event_units	F3.5: faltan subsemillas y manifiestos de eventos reales

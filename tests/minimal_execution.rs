@@ -35,13 +35,7 @@ fn minimal_cli_never_publishes_resolution_evidence_or_event_units() {
             .expect("JSON");
     assert!(manifest.get("resolution_evidence").is_none());
     assert!(manifest.get("events").is_none());
-    assert!(
-        manifest["units"]
-            .as_array()
-            .expect("units")
-            .iter()
-            .all(|unit| unit["kind"] != "event")
-    );
+    assert!(manifest.get("units").is_none());
     fs::remove_dir_all(root).expect("cleanup");
 }
 

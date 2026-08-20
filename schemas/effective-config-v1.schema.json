@@ -7,7 +7,7 @@
   "properties": {
     "effective_config_kind": {"const": "gps_effective_config"},
     "schema_version": {"const": "1"},
-    "source_path": {"type": "string"},
+    "source_path": {"type": "string", "minLength": 1},
     "seed": {
       "type": "object",
       "additionalProperties": false,
@@ -35,25 +35,12 @@
     }
   ],
   "$defs": {
-    "artifact": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["id", "kind", "path", "size_bytes", "checksum", "state", "validated"],
-      "properties": {
-        "id": {"type": "string"}, "kind": {"type": "string"},
-        "path": {"type": "string", "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f])(?!.*\\/$).+$(?!\\n)"},
-        "size_bytes": {"type": "integer", "minimum": 0}, "state": {"const": "complete"},
-        "validated": {"const": true},
-        "checksum": {"type": "object", "required": ["algorithm", "digest"], "additionalProperties": false,
-          "properties": {"algorithm": {"const": "sha256"}, "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
-      }
-    },
     "reference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "source", "total_genome_size", "composition", "sequences", "fasta"],
+      "required": ["id", "source", "total_genome_size", "composition", "sequences", "fasta_artifact_id"],
       "properties": {
-        "id": {"type": "string"}, "source": {"enum": ["simulated", "supplied"]},
+        "id": {"type": "string", "minLength": 1}, "source": {"enum": ["simulated", "supplied"]},
         "total_genome_size": {"type": "integer", "minimum": 1},
         "composition": {
           "oneOf": [
@@ -64,8 +51,8 @@
         },
         "sequences": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false,
           "required": ["id", "class", "length", "unknown_base_count"],
-          "properties": {"id": {"type": "string"}, "class": {"enum": ["chromosome", "scaffold"]}, "length": {"type": "integer", "minimum": 1}, "unknown_base_count": {"type": "integer", "minimum": 0}}}},
-        "fasta": {"$ref": "#/$defs/artifact"}
+          "properties": {"id": {"type": "string", "minLength": 1}, "class": {"enum": ["chromosome", "scaffold"]}, "length": {"type": "integer", "minimum": 1}, "unknown_base_count": {"type": "integer", "minimum": 0}}}},
+        "fasta_artifact_id": {"type": "string", "minLength": 1}
       },
       "allOf": [
         {"if": {"properties": {"source": {"const": "simulated"}}}, "then": {"properties": {"composition": {"type": "object"}}}},
@@ -75,16 +62,18 @@
     "reduction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "source_reference_id", "region_size_bases", "target", "selection_subseed", "selection_order", "state", "fasta", "map", "source_fasta_id"],
+      "required": ["id", "source_reference_id", "region_size_bases", "target", "selection_subseed", "selection_order", "state", "fasta_artifact_id", "map_artifact_id", "source_fasta_artifact_id"],
       "properties": {
-        "id": {"type": "string"}, "source_reference_id": {"type": "string"},
+        "id": {"type": "string", "minLength": 1}, "source_reference_id": {"type": "string", "minLength": 1},
         "region_size_bases": {"type": "integer", "minimum": 1},
         "target": {"type": "object", "additionalProperties": false, "required": ["mode", "declared", "bases"],
-          "properties": {"mode": {"enum": ["target_bases", "reduction_percent"]}, "declared": {"type": "string"}, "bases": {"type": "integer", "minimum": 1}}},
+          "properties": {"mode": {"enum": ["target_bases", "reduction_percent"]}, "declared": {"type": "string", "minLength": 1}, "bases": {"type": "integer", "minimum": 1}}},
         "selection_subseed": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "selection_order": {"type": "array", "items": {"type": "integer", "minimum": 1}},
-        "state": {"const": "complete"}, "fasta": {"$ref": "#/$defs/artifact"},
-        "map": {"$ref": "#/$defs/artifact"}, "source_fasta_id": {"type": "string"}
+        "selection_order": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1}},
+        "state": {"const": "complete"},
+        "fasta_artifact_id": {"type": "string", "minLength": 1},
+        "map_artifact_id": {"type": "string", "minLength": 1},
+        "source_fasta_artifact_id": {"type": "string", "minLength": 1}
       }
     }
   }

@@ -1,6 +1,7 @@
 //! Diagnósticos públicos estables independientes de errores de crates.
 
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 /// Diagnóstico estructurado que alimenta todos los renderizados públicos.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -10,6 +11,14 @@ pub struct Diagnostic {
     message: &'static str,
     exit_code: u8,
     context: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CatalogContract {
+    code: &'static str,
+    category: &'static str,
+    meaning: &'static str,
+    exit_code: u8,
 }
 
 impl Diagnostic {
@@ -25,72 +34,42 @@ impl Diagnostic {
         .with("operation", operation.into())
     }
 
-    pub(crate) fn configuration(code: &'static str, message: &'static str) -> Self {
-        Self {
-            code,
-            category: "CONF",
-            message,
-            exit_code: 2,
-            context: BTreeMap::new(),
-        }
+    pub(crate) fn configuration(code: &'static str, _message: &'static str) -> Self {
+        Self::from_catalog(code)
     }
 
-    pub(crate) fn input(code: &'static str, message: &'static str) -> Self {
-        Self {
-            code,
-            category: "INPUT",
-            message,
-            exit_code: 2,
-            context: BTreeMap::new(),
-        }
+    pub(crate) fn input(code: &'static str, _message: &'static str) -> Self {
+        Self::from_catalog(code)
     }
 
-    pub(crate) fn format(code: &'static str, message: &'static str) -> Self {
-        Self {
-            code,
-            category: "FMT",
-            message,
-            exit_code: 2,
-            context: BTreeMap::new(),
-        }
+    pub(crate) fn format(code: &'static str, _message: &'static str) -> Self {
+        Self::from_catalog(code)
     }
 
-    pub(crate) fn resource(code: &'static str, message: &'static str) -> Self {
-        Self {
-            code,
-            category: "RES",
-            message,
-            exit_code: 3,
-            context: BTreeMap::new(),
-        }
+    pub(crate) fn resource(code: &'static str, _message: &'static str) -> Self {
+        Self::from_catalog(code)
     }
 
-    pub(crate) fn domain(code: &'static str, message: &'static str) -> Self {
-        Self {
-            code,
-            category: "DOMAIN",
-            message,
-            exit_code: 1,
-            context: BTreeMap::new(),
-        }
+    pub(crate) fn domain(code: &'static str, _message: &'static str) -> Self {
+        Self::from_catalog(code)
     }
 
-    pub(crate) fn io(code: &'static str, message: &'static str) -> Self {
-        Self {
-            code,
-            category: "IO",
-            message,
-            exit_code: 5,
-            context: BTreeMap::new(),
-        }
+    pub(crate) fn io(code: &'static str, _message: &'static str) -> Self {
+        Self::from_catalog(code)
     }
 
-    pub(crate) fn internal(code: &'static str, message: &'static str) -> Self {
+    pub(crate) fn internal(code: &'static str, _message: &'static str) -> Self {
+        Self::from_catalog(code)
+    }
+
+    fn from_catalog(code: &'static str) -> Self {
+        let contract = catalog_contract(code)
+            .unwrap_or_else(|| panic!("diagnostic code absent from runtime catalog: {code}"));
         Self {
-            code,
-            category: "INTERNAL",
-            message,
-            exit_code: 70,
+            code: contract.code,
+            category: contract.category,
+            message: contract.meaning,
+            exit_code: contract.exit_code,
             context: BTreeMap::new(),
         }
     }
@@ -170,6 +149,51 @@ impl Diagnostic {
     }
 }
 
+fn catalog_contract(code: &'static str) -> Option<CatalogContract> {
+    diagnostic_catalog().get(code).copied()
+}
+
+fn diagnostic_catalog() -> &'static BTreeMap<&'static str, CatalogContract> {
+    static CATALOG: OnceLock<BTreeMap<&'static str, CatalogContract>> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        let source = include_str!("../catalogs/diagnostics-v2.tsv");
+        assert!(
+            source
+                .lines()
+                .any(|line| line == "# diagnostic_catalog_version=2"),
+            "diagnostics-v2.tsv does not declare version 2"
+        );
+        let mut catalog = BTreeMap::new();
+        for line in source
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        {
+            let fields = line.split('|').collect::<Vec<_>>();
+            assert_eq!(fields.len(), 6, "invalid diagnostics-v2.tsv row: {line}");
+            let code = fields[0];
+            let contract = CatalogContract {
+                code,
+                category: fields[1],
+                meaning: fields[2],
+                exit_code: fields[4]
+                    .parse::<u8>()
+                    .expect("invalid diagnostics-v2.tsv exit code"),
+            };
+            assert!(
+                catalog.insert(code, contract).is_none(),
+                "duplicate diagnostics-v2.tsv code: {code}"
+            );
+        }
+        catalog
+    })
+}
+
+pub(crate) fn diagnostic_matches_catalog(code: &str, message: &str) -> bool {
+    diagnostic_catalog()
+        .get(code)
+        .is_some_and(|contract| message == contract.meaning)
+}
+
 fn escape_json(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
@@ -188,4 +212,94 @@ fn escape_json(value: &str) -> String {
         }
     }
     escaped
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::fs;
+    use std::path::Path;
+
+    use super::{Diagnostic, catalog_contract, diagnostic_matches_catalog};
+
+    #[test]
+    fn every_active_runtime_diagnostic_matches_catalog_v2() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let catalog = include_str!("../catalogs/diagnostics-v2.tsv")
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let fields = line.split('|').collect::<Vec<_>>();
+                assert_eq!(fields.len(), 6, "invalid catalog row: {line}");
+                (
+                    fields[0].to_owned(),
+                    (
+                        fields[1].to_owned(),
+                        fields[2].to_owned(),
+                        fields[4].parse::<u8>().expect("catalog exit code"),
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut active = BTreeSet::new();
+        collect_codes(&root.join("src"), &mut active);
+        assert!(!active.is_empty());
+        for code in active {
+            let static_code = catalog
+                .get_key_value(&code)
+                .map(|(code, _)| code.as_str())
+                .unwrap_or_else(|| panic!("active code absent from diagnostics-v2.tsv: {code}"));
+            // Los códigos del productor son literales estáticos; esta conversión
+            // solo presta esa vida al test sin ampliar la API de producción.
+            let static_code: &'static str = Box::leak(static_code.to_owned().into_boxed_str());
+            let contract = catalog_contract(static_code)
+                .unwrap_or_else(|| panic!("active code absent from runtime catalog: {code}"));
+            let declared = &catalog[&code];
+            assert_eq!(contract.category, declared.0, "category for {code}");
+            assert_eq!(contract.meaning, declared.1, "meaning for {code}");
+            assert_eq!(contract.exit_code, declared.2, "exit code for {code}");
+            let diagnostic = Diagnostic::from_catalog(static_code);
+            assert_eq!(diagnostic.code(), code);
+            assert_eq!(diagnostic.category(), declared.0);
+            assert_eq!(diagnostic.message(), declared.1);
+            assert_eq!(diagnostic.exit_code(), declared.2);
+            assert!(diagnostic_matches_catalog(&code, &declared.1));
+            assert!(!diagnostic_matches_catalog(&code, "significado alterado"));
+        }
+        let unknown_code = format!("{}FMT-999", "GPS-");
+        assert!(!diagnostic_matches_catalog(
+            &unknown_code,
+            "significado inventado"
+        ));
+    }
+
+    fn collect_codes(directory: &Path, output: &mut BTreeSet<String>) {
+        for entry in fs::read_dir(directory).expect("source directory") {
+            let path = entry.expect("source entry").path();
+            if path.is_dir() {
+                collect_codes(&path, output);
+            } else if path.extension().and_then(|value| value.to_str()) == Some("rs") {
+                let source = fs::read_to_string(path).expect("UTF-8 Rust source");
+                for token in source.split(|character: char| {
+                    !(character.is_ascii_uppercase()
+                        || character.is_ascii_digit()
+                        || character == '-')
+                }) {
+                    if is_diagnostic_code(token) {
+                        output.insert(token.to_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    fn is_diagnostic_code(value: &str) -> bool {
+        let parts = value.split('-').collect::<Vec<_>>();
+        parts.len() == 3
+            && parts[0] == "GPS"
+            && !parts[1].is_empty()
+            && parts[1].bytes().all(|byte| byte.is_ascii_uppercase())
+            && parts[2].len() == 3
+            && parts[2].bytes().all(|byte| byte.is_ascii_digit())
+    }
 }

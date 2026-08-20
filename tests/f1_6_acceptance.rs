@@ -268,14 +268,20 @@ fn assert_artifacts_are_classified_once(
     );
     assert!(manifest.get("events").is_none());
     assert!(manifest.get("resolution_evidence").is_none());
+    assert!(manifest.get("units").is_none());
     assert_eq!(
-        manifest["units"]
+        manifest["reference_reductions"]
             .as_array()
-            .expect("units")
-            .iter()
-            .filter(|unit| unit["kind"] == "reference_reduction")
-            .count(),
+            .expect("reference reductions")
+            .len(),
         expected_reduction_units
+    );
+    assert_eq!(
+        manifest["output_categories"]["requested"]
+            .as_array()
+            .expect("requested outputs")
+            .len(),
+        expected_reduction_units * 2
     );
 }
 
@@ -428,9 +434,15 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
         manifest["reference_reductions"].as_array().unwrap().len(),
         1
     );
-    assert_eq!(
-        manifest["reference_reductions"][0]["map"]["validated"],
-        true
+    let map_id = manifest["reference_reductions"][0]["map_artifact_id"]
+        .as_str()
+        .expect("map artifact ID");
+    assert!(
+        manifest["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|artifact| artifact["id"] == map_id)
     );
     validate_json(
         &first.join("effective-config.json"),
@@ -459,11 +471,18 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
         .next()
         .unwrap()
         .to_owned();
+    let fasta_id = manifest["reference_reductions"][0]["fasta_artifact_id"]
+        .as_str()
+        .expect("FASTA artifact ID");
+    let fasta_artifact = manifest["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|artifact| artifact["id"] == fasta_id)
+        .expect("cataloged reduction FASTA");
     assert_eq!(
         observed_digest,
-        manifest["reference_reductions"][0]["fasta"]["checksum"]["digest"]
-            .as_str()
-            .unwrap()
+        fasta_artifact["checksum"]["digest"].as_str().unwrap()
     );
     let reconstructed_path = temporary("reconstructed.fa");
     fs::write(&reconstructed_path, &reconstructed_fasta).unwrap();
@@ -772,7 +791,7 @@ fn percentage_mode_is_exact_and_infeasible_layout_never_creates_a_derived_artifa
 }
 
 #[test]
-fn output_categories_and_reduction_units_cover_zero_one_and_multiple_reductions() {
+fn output_categories_cover_zero_one_and_multiple_reductions() {
     let first = r#"[[reduced_references]]
 id = "reference-small"
 source_reference_id = "reference-main"
@@ -797,12 +816,11 @@ target_bases = 7"#;
             serde_json::from_slice(&fs::read(destination.join("manifest.json")).unwrap()).unwrap();
         assert_artifacts_are_classified_once(&manifest, count, count * 2);
         assert!(
-            manifest["units"]
+            manifest["reference_reductions"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .filter(|unit| unit["kind"] == "reference_reduction")
-                .all(|unit| unit["state"] == "complete" && unit["exportable"] == true)
+                .all(|reduction| reduction["state"] == "complete")
         );
         validate_json(
             &destination.join("manifest.json"),

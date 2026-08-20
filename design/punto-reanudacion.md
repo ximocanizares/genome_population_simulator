@@ -2,26 +2,51 @@
 
 > **Punto vigente (20 de agosto de 2026):** F1.1–F1.3 del
 > [plan de reimplementación F1](plan-reimplementacion-f1-0.2.md) están
-> completadas. PAUSA-F1.3 fue aprobada tras una revisión independiente y la
-> corrección H-F13-R01. El proyecto debe detenerse antes de F1.4 hasta recibir
-> aprobación explícita. Las indicaciones históricas posteriores de este
-> documento no sustituyen este punto.
+> completadas. F1.4.1–F1.4.5 y sus correcciones están aplicadas; la séptima
+> revisión no encontró defectos funcionales y su única deriva de trazabilidad
+> quedó corregida y regresionada. PAUSA-F1.4 está aprobada. No se ha iniciado
+> F1.5. Las indicaciones históricas
+> posteriores de este documento no sustituyen este punto.
 
 - **Fecha:** 20 de agosto de 2026
-- **Implementación F1.5 publicada:** `b5dc220 feat: complete F1.5 reference evidence`.
-- **Base publicada:** `7a69f72 refactor: reimplement minimal F1 through F1.2`,
+- **Implementación F1.5 histórica del checkpoint anterior:** `b5dc220 feat:
+  complete F1.5 reference evidence`; no acredita el plan 0.2 vigente.
+- **Base publicada:** `3416db4 refactor: complete minimal F1.3 randomness`,
   publicada en `origin/main`.
 - **Checkpoint de seguridad anterior:** `66ad8b2 checkpoint: preserve F1 and
   F2 work before simplification`.
 - **Estado actual de ejecución:** la auditoría sistemática bloqueó el alcance
   anterior y recomendó simplificar en vez de seguir parcheando. DTC-078 fija el
   modelo de confianza local mínimo; DTC-076/DTC-077 quedan superadas. El plan
-  vigente es `plan-reimplementacion-f1-0.2.md`. F1.1, F1.2 y F1.3 están
+  vigente es `plan-reimplementacion-f1-0.2.md`. F1.1–F1.3 están
   completados. F1.3 conserva raíz de 256 bits y derivación BLAKE3/ChaCha12,
   activa solo `reference_generation` y `reference_reduction`, y mantiene
   intactos los catálogos v1–v3. La revisión independiente aprobó PAUSA-F1.3
-  después de corregir destinos y símbolos de trazabilidad. F1.4 y F2 no han
-  comenzado.
+  después de corregir destinos y símbolos de trazabilidad. F1.4 conserva solo
+  manifiesto general `complete`/`failed`, catálogo único y enlaces por ID,
+  wrapper privado 0700 con `INCOMPLETE` exterior al payload publicable y rename no-clobber; retiró unidades
+  ficticias, capabilities, inventario de inodos/hardlinks/TOCTOU y el crate
+  `jsonschema`. La primera ronda de seis hallazgos quedó aplicada 6/6, y la
+  segunda revisión abrió R1–R3 y los tres están aplicados: cruce efectivo
+  completo, fallback `failed` sin artefacto efectivo inválido y alineación de
+  todos los diagnósticos activos con el catálogo v2. La tercera revisión abrió
+  A1 (autoridad física FASTA/mapa) y A2 (diagnósticos `failed` contra catálogo
+  v2); ambos están aplicados 2/2 con regresiones y gates completos. La cuarta
+  revisión abrió Q1–Q4: relación exacta entre objetivo declarado y bases,
+  fallback `failed` conservador, clasificación semántica exacta de salidas y
+  paridad Rust/Python sobre todo `diagnostics-v2`. Los cuatro están aplicados;
+  la suite completa ejecutó 138 pruebas correctamente y dejó un helper de
+  subproceso ignorado en el padre. La quinta revisión detectó dos defectos:
+  autoridad TOML incompleta y categorías solapables. Ambos se corrigieron con
+  reconstrucción exhaustiva desde TOML y disjunción global; la suite actual
+  ejecuta 140 pruebas y deja un helper ignorado. La sexta revisión detectó la
+  falta de ligadura de `execution_id`, una divergencia del oráculo Python y la
+  ruta reservada `INCOMPLETE`; las tres están corregidas. La séptima revisión
+  fue funcionalmente limpia y detectó solo que TEST-REQ-SAL-03 no apuntaba a
+  una prueba de la copia TOML y que REQ-MAN-32 conservaba un símbolo antiguo.
+  Ambos enlaces están corregidos; la prueba nueva recorre el CLI real y cruza
+  bytes, manifiesto, clase, ruta, tamaño y `sha256sum`. La suite actual ejecuta
+  143 pruebas y deja un helper ignorado. F2 no ha comenzado.
 - **Estado de los agentes al pausar:** implementador y revisor F1.3 terminaron;
   la revisión adversarial F2 0.4 terminó con aprobación condicionada
   exclusivamente al cierre y commit base de F1.
@@ -56,8 +81,9 @@
 
 ## Punto vigente de reanudación para F1
 
-Reanudar en PAUSA-F1.3 de `plan-reimplementacion-f1-0.2.md`. La primera acción
-es obtener aprobación explícita para iniciar F1.4.1. Conservar la superficie
+PAUSA-F1.4 está aprobada tras la séptima revisión independiente y la corrección
+focal de trazabilidad. El siguiente paso permitido es iniciar F1.5 según el
+plan 0.2; todavía no se ha iniciado. Conservar la superficie
 TOML mínima, los dos únicos ámbitos RNG activos, la configuración efectiva con
 consumidores reales y la ausencia de `ResolutionDomain`, `resolution-evidence`,
 eventos/manifiestos sintéticos, normalización poblacional y hardening frente a

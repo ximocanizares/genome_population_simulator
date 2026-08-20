@@ -3,7 +3,7 @@
 - **Base:** `66ad8b2`.
 - **Decisión:** DTC-078.
 - **Auditoría:** `design/auditoria-sistematica-cierre-f1-0.1.md`.
-- **Estado:** inventario previo a modificar código.
+- **Estado:** ejecutado hasta PAUSA-F1.4.
 
 ## Componentes
 
@@ -23,7 +23,7 @@
 | `execution.rs` | A/B/D | Conservar la orquestación de referencia y publicación; retirar eventos, jerarquías y validaciones duplicadas sin consumidor F1 |
 | `publication.rs` | A/C/D | Conservar provisional, INCOMPLETE y rename no-clobber; retirar hardlink/inodo/TOCTOU/capabilities de atacante activo |
 | `results.rs`, esquemas de resultados | A/D | Sustituir por manifiesto general y catálogo simple; retirar enlaces/unidades duplicados |
-| `manifest_schema.rs` y `jsonschema` runtime | C/D | Retirar tras migrar validación estructural a pruebas externas |
+| `manifest_schema.rs` y `jsonschema` runtime | C/D | Retirados en F1.4.5; los esquemas se validan mediante CPython/jsonschema externo en pruebas |
 | `ResolutionDomain`, `resolution-evidence-v1.schema.json` | D/B | Eliminar de F1; reintroducir solo con una fuente real en la fase propietaria |
 | matriz completa de reglas/ejes y normalización poblacional | B | Trasladar a F2/F6/F7; auditoría completa en F9.7 |
 | eventos técnicos y manifiestos de evento | B | Introducir en F3/F4 con sus primeros consumidores |
@@ -68,7 +68,7 @@
 | --- | --- | --- |
 | `blake3` | subsemillas e IDs | conservar |
 | `getrandom` | semilla raíz generada | conservar |
-| `jsonschema` | solo validador runtime del manifiesto sobrediseñado | retirar en F1.4.5; mantener JSON Schema externo en pruebas |
+| `jsonschema` | sin consumidor runtime | retirado de `Cargo.toml` y `Cargo.lock` en F1.4.5; CPython/jsonschema permanece como herramienta externa de pruebas |
 | `noodles-fasta` | FASTA e índice de aceptación | conservar |
 | `rand_chacha` | generación/reducción reproducibles | conservar |
 | `rustix` | rename no-clobber y operaciones Linux mínimas | conservar con features mínimas |

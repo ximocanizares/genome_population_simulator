@@ -3,13 +3,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::application::{EffectiveConfig, EffectiveReferenceSource};
+use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::Diagnostic;
-use crate::identity::{AutomaticIdRequest, IdClass, IdentityRegistry, ReferenceId};
-use crate::integrity::Sha256Writer;
-use crate::publication::{
-    ArtifactStage, ExecutionWorkspace, LinuxAtomicPublisher, PublishableUnit,
-};
+use crate::identity::{ReferenceId, derive_execution_id};
+use crate::integrity::configuration_digest;
+use crate::publication::ExecutionWorkspace;
 use crate::reference::Reference;
 use crate::reference_fasta::{
     SequenceExpectation, ValidatedSuppliedReference, validate_supplied_fasta,
@@ -25,9 +25,9 @@ use crate::reference_reduction_io::{
     validate_reduced_reference, validate_reduction_map_document,
 };
 use crate::results::{
-    ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ReducedReferenceOutput,
-    ReferenceOutput, UnitRecord, UnitState, effective_config_document_with_reductions,
-    general_manifest_document, json_document_bytes,
+    ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestReductionLink,
+    ManifestReferenceLink, ReducedReferenceOutput, ReferenceOutput, UnitState,
+    effective_config_document_with_reductions, general_manifest_document, json_document_bytes,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -42,150 +42,242 @@ pub fn execute_validated_config(
     effective: &EffectiveConfig,
     destination: &Path,
 ) -> Result<ExecutionOutcome, Diagnostic> {
+    execute_validated_config_with_effective_document(
+        effective,
+        destination,
+        std::convert::identity,
+        |_| Ok(()),
+    )
+}
+
+fn execute_validated_config_with_effective_document(
+    effective: &EffectiveConfig,
+    destination: &Path,
+    transform_effective: impl FnOnce(serde_json::Value) -> serde_json::Value,
+    before_manifest: impl FnOnce(&mut ExecutionWorkspace) -> Result<(), Diagnostic>,
+) -> Result<ExecutionOutcome, Diagnostic> {
     let mut prepared_reference = prepare_reference(effective)?;
+    // Todo error de dominio o preflight ocurre antes de crear el provisional.
+    let prepared_reductions = prepare_reductions(effective, prepared_reference.reference())?;
     let configuration_digest = configuration_digest(effective.configuration_input().bytes())?;
-    let request = AutomaticIdRequest::new(
-        IdClass::Execution,
-        "execution",
-        &[("config_sha256", configuration_digest.as_str())],
+    let execution_id = derive_execution_id(
+        effective.reproducibility().root_seed(),
+        &configuration_digest,
     )?;
-    let mut identities = IdentityRegistry::default();
-    let execution_id =
-        identities.derive_execution(effective.reproducibility().root_seed(), &request)?;
 
     let mut workspace = ExecutionWorkspace::create(destination)?;
-    let configuration_input = copy_configuration_input(effective, &mut workspace)?;
-    let reference_artifact = write_reference(effective, &prepared_reference, &mut workspace)?;
-    prepared_reference = load_authoritative_reference(
-        effective,
-        &workspace,
-        &reference_artifact,
-        prepared_reference,
-    )?;
-    let reference_output = ReferenceOutput {
-        reference: prepared_reference.reference(),
-        fasta: &reference_artifact,
-    };
-    let prepared_reductions = prepare_reductions(effective, reference_output.reference)?;
+    let mut configuration_input = None;
+    let mut reference_artifact = None;
+    let mut manifest_references = Vec::new();
+    let mut manifest_reductions = manifest_reduction_links(effective, &prepared_reductions);
     let mut published_reductions = Vec::with_capacity(prepared_reductions.len());
-    for (index, mut prepared) in prepared_reductions.into_iter().enumerate() {
-        let reduction = &effective.reduced_references()[index];
-        let fasta_path = PathBuf::from(format!("resources/references/{}.fa", reduction.id()));
-        let fasta = workspace.write_streamed_artifact(
-            &format!("reference-fasta-{}", reduction.id()),
-            "reference_fasta",
-            &fasta_path,
-            |file| write_generated_fasta(&prepared.reference, file),
-        )?;
-        prepared
-            .reference
-            .bind_authoritative_resource(PathBuf::from(&fasta.path))
-            .map_err(|error| internal("bind_reduced_authoritative_resource", error))?;
-        let map_document = reduction_map_document(&prepared.plan);
-        let map_bytes = json_document_bytes(&map_document)?;
-        let map_path = PathBuf::from(format!("resources/references/{}.map.json", reduction.id()));
-        let map = workspace.write_artifact(
-            &format!("reference-map-{}", reduction.id()),
-            "reference_reduction_map",
-            &map_path,
-            &map_bytes,
-        )?;
-        let reparsed: serde_json::Value = serde_json::from_slice(
-            &fs::read(workspace.root().join(&map.path)).map_err(|error| {
-                io_error(
-                    &workspace.root().join(&map.path),
-                    "read_reduction_map",
-                    error,
-                )
-            })?,
-        )
-        .map_err(|error| {
-            Diagnostic::format(
-                "GPS-FMT-007",
-                "El mapa de reducción no permite reconstruir exactamente la referencia derivada.",
-            )
-            .with("path", &map.path)
-            .with("detail", error.to_string())
-        })?;
-        validate_reduction_map_document(
-            reference_output.reference,
-            &prepared.reference,
-            &reparsed,
-            ReductionMapParameters {
-                region_size_bases: reduction.region_size_bases(),
-                target_bases: reduction.target_bases(),
-            },
-        )?;
-        published_reductions.push(PublishedReduction {
-            effective_index: index,
-            reference: prepared.reference,
-            plan: prepared.plan,
-            fasta,
-            map,
+    let started = (|| -> Result<(), Diagnostic> {
+        configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
+        reference_artifact = Some(write_reference(
+            effective,
+            &prepared_reference,
+            &mut workspace,
+        )?);
+        let source_artifact = reference_artifact
+            .as_ref()
+            .ok_or_else(|| internal("execute", "missing source artifact"))?;
+        manifest_references.push(ManifestReferenceLink {
+            id: effective.reference_id().to_owned(),
+            fasta_artifact_id: source_artifact.id.clone(),
         });
-    }
-    let reduction_outputs =
-        reduction_outputs(effective, &published_reductions, &reference_artifact);
-    let effective_document =
-        effective_config_document_with_reductions(effective, reference_output, &reduction_outputs)?;
-    let effective_record = workspace.write_artifact(
-        "effective-config",
-        "effective_config",
-        Path::new("effective-config.json"),
-        &json_document_bytes(&effective_document)?,
-    )?;
-
-    let artifact_ids = std::iter::once(configuration_input.copy.id.clone())
-        .chain(std::iter::once(reference_artifact.id.clone()))
-        .chain(std::iter::once(effective_record.id.clone()))
-        .chain(
-            published_reductions
-                .iter()
-                .flat_map(|reduction| [reduction.fasta.id.clone(), reduction.map.id.clone()]),
-        )
-        .collect::<Vec<_>>();
-    let mut execution_unit =
-        PublishableUnit::new(execution_id.as_str(), "execution", artifact_ids.clone());
-    for id in &artifact_ids {
-        execution_unit.record_artifact(id, ArtifactStage::Cataloged)?;
-    }
-    execution_unit.complete()?;
-    let units = std::iter::once(execution_unit.record())
-        .chain(
-            effective
-                .reduced_references()
-                .iter()
-                .map(|reduction| UnitRecord {
+        for reduction in &mut manifest_reductions {
+            reduction.source_fasta_artifact_id = Some(source_artifact.id.clone());
+        }
+        prepared_reference = load_authoritative_reference(
+            effective,
+            &workspace,
+            source_artifact,
+            prepared_reference,
+        )?;
+        let reference_output = ReferenceOutput {
+            reference: prepared_reference.reference(),
+            fasta: source_artifact,
+        };
+        for (index, mut prepared) in prepared_reductions.into_iter().enumerate() {
+            let reduction = &effective.reduced_references()[index];
+            let attempt = (|| -> Result<PublishedReduction, Diagnostic> {
+                let fasta_path =
+                    PathBuf::from(format!("resources/references/{}.fa", reduction.id()));
+                let fasta = workspace.write_streamed_artifact(
+                    &format!("reference-fasta-{}", reduction.id()),
+                    "reference_fasta",
+                    &fasta_path,
+                    |file| write_generated_fasta(&prepared.reference, file),
+                )?;
+                manifest_reductions[index].fasta_artifact_id = Some(fasta.id.clone());
+                manifest_references.push(ManifestReferenceLink {
                     id: reduction.id().to_owned(),
-                    kind: "reference_reduction".to_owned(),
-                    state: UnitState::Complete,
-                    exportable: true,
-                    diagnostic_code: None,
-                }),
-        )
-        .collect::<Vec<_>>();
+                    fasta_artifact_id: fasta.id.clone(),
+                });
+                prepared
+                    .reference
+                    .bind_authoritative_resource(PathBuf::from(&fasta.path))
+                    .map_err(|error| internal("bind_reduced_authoritative_resource", error))?;
+                let map_document = reduction_map_document(&prepared.plan);
+                let map_bytes = json_document_bytes(&map_document)?;
+                let map_path =
+                    PathBuf::from(format!("resources/references/{}.map.json", reduction.id()));
+                let map = workspace.write_artifact(
+                    &format!("reference-map-{}", reduction.id()),
+                    "reference_reduction_map",
+                    &map_path,
+                    &map_bytes,
+                )?;
+                manifest_reductions[index].map_artifact_id = Some(map.id.clone());
+                let reparsed: serde_json::Value = serde_json::from_slice(
+                    &fs::read(workspace.root().join(&map.path)).map_err(|error| {
+                        io_error(
+                            &workspace.root().join(&map.path),
+                            "read_reduction_map",
+                            error,
+                        )
+                    })?,
+                )
+                .map_err(|error| {
+                    Diagnostic::format(
+                        "GPS-FMT-007",
+                        "El mapa de reducción no permite reconstruir exactamente la referencia derivada.",
+                    )
+                    .with("path", &map.path)
+                    .with("detail", error.to_string())
+                })?;
+                validate_reduction_map_document(
+                    reference_output.reference,
+                    &prepared.reference,
+                    &reparsed,
+                    ReductionMapParameters {
+                        region_size_bases: reduction.region_size_bases(),
+                        target_bases: reduction.target_bases(),
+                    },
+                )?;
+                Ok(PublishedReduction {
+                    effective_index: index,
+                    reference: prepared.reference,
+                    plan: prepared.plan,
+                    fasta,
+                    map,
+                })
+            })();
+            match attempt {
+                Ok(published) => {
+                    manifest_reductions[index].state = UnitState::Complete;
+                    published_reductions.push(published);
+                }
+                Err(error) => {
+                    manifest_reductions[index].state = UnitState::Failed;
+                    return Err(error);
+                }
+            }
+        }
+        let reduction_outputs =
+            reduction_outputs(effective, &published_reductions, source_artifact);
+        let effective_document = transform_effective(effective_config_document_with_reductions(
+            effective,
+            reference_output,
+            &reduction_outputs,
+        )?);
+        let effective_record = workspace.write_artifact(
+            "effective-config",
+            "effective_config",
+            Path::new("effective-config.json"),
+            &json_document_bytes(&effective_document)?,
+        )?;
+        before_manifest(&mut workspace)?;
+
+        let artifacts = workspace.artifacts().to_vec();
+        let manifest = GeneralManifest {
+            execution_id: execution_id.as_str(),
+            state: UnitState::Complete,
+            configuration_input: configuration_input.as_ref(),
+            effective_config: Some(&effective_record),
+            references: &manifest_references,
+            reduced_references: &manifest_reductions,
+            artifacts: &artifacts,
+            diagnostics: &[],
+        };
+        let manifest_bytes = json_document_bytes(&general_manifest_document(&manifest))?;
+        if let Err(error) = workspace.write_general_manifest(&manifest_bytes) {
+            workspace.discard_last_artifact(&effective_record)?;
+            return Err(error);
+        }
+        Ok(())
+    })();
+
+    match started {
+        Ok(()) => {
+            let destination = workspace.publish()?;
+            Ok(ExecutionOutcome::Published {
+                destination,
+                state: UnitState::Complete,
+            })
+        }
+        Err(cause) => {
+            publish_controlled_failure(&mut workspace, execution_id.as_str(), effective, &cause)?;
+            workspace.publish()?;
+            Err(cause)
+        }
+    }
+}
+
+fn publish_controlled_failure(
+    workspace: &mut ExecutionWorkspace,
+    execution_id: &str,
+    effective: &EffectiveConfig,
+    cause: &Diagnostic,
+) -> Result<(), Diagnostic> {
+    let configuration_artifact = workspace
+        .artifacts()
+        .iter()
+        .find(|artifact| artifact.id == "config-general")
+        .cloned()
+        .filter(|artifact| valid_failure_configuration_copy(workspace, effective, artifact));
+    workspace.retain_only_artifact(
+        configuration_artifact
+            .as_ref()
+            .map(|artifact| artifact.id.as_str()),
+    )?;
     let artifacts = workspace.artifacts().to_vec();
+    let configuration_input = configuration_artifact.map(|copy| ConfigurationInputRecord {
+        kind: "general".to_owned(),
+        original_path: effective.configuration_input().original_path().to_owned(),
+        copy,
+    });
     let manifest = GeneralManifest {
-        execution_id: execution_id.as_str(),
-        state: UnitState::Complete,
-        effective,
-        configuration_input: &configuration_input,
-        effective_config: Some(&effective_record),
-        reference: Some(reference_output),
-        reduced_references: &reduction_outputs,
+        execution_id,
+        state: UnitState::Failed,
+        configuration_input: configuration_input.as_ref(),
+        effective_config: None,
+        references: &[],
+        reduced_references: &[],
         artifacts: &artifacts,
-        units: &units,
-        diagnostics: &[],
+        diagnostics: std::slice::from_ref(cause),
     };
-    let manifest_bytes = json_document_bytes(&general_manifest_document(&manifest))?;
-    let validated =
-        workspace.validate_general_manifest(Path::new("manifest.json"), &manifest_bytes)?;
-    workspace.write_general_manifest(&validated)?;
-    let destination = workspace.publish_with(&LinuxAtomicPublisher)?;
-    Ok(ExecutionOutcome::Published {
-        destination,
-        state: UnitState::Complete,
-    })
+    workspace.write_general_manifest(&json_document_bytes(&general_manifest_document(&manifest))?)
+}
+
+fn valid_failure_configuration_copy(
+    workspace: &ExecutionWorkspace,
+    effective: &EffectiveConfig,
+    artifact: &ArtifactRecord,
+) -> bool {
+    let Ok(bytes) = fs::read(workspace.root().join(&artifact.path)) else {
+        return false;
+    };
+    if bytes != effective.configuration_input().bytes() {
+        return false;
+    }
+    admit_toml_header(
+        Path::new(effective.configuration_input().original_path()),
+        bytes,
+        ExpectedConfigKind::General,
+    )
+    .and_then(parse_declared_config)
+    .is_ok()
 }
 
 enum PreparedReference {
@@ -220,6 +312,36 @@ struct PublishedReduction {
     plan: MaterializedPlan,
     fasta: ArtifactRecord,
     map: ArtifactRecord,
+}
+
+fn manifest_reduction_links(
+    effective: &EffectiveConfig,
+    prepared: &[PreparedReduction],
+) -> Vec<ManifestReductionLink> {
+    effective
+        .reduced_references()
+        .iter()
+        .zip(prepared)
+        .map(|(reduction, prepared)| ManifestReductionLink {
+            id: reduction.id().to_owned(),
+            source_reference_id: reduction.source_reference_id().to_owned(),
+            region_size_bases: reduction.region_size_bases(),
+            target_mode: reduction.target().mode().to_owned(),
+            target_declared: reduction.target().declared_value().to_owned(),
+            target_bases: reduction.target_bases(),
+            selection_subseed: reduction.selection_subseed().to_hex(),
+            selection_order: prepared
+                .plan
+                .segments()
+                .iter()
+                .map(|segment| segment.selection_order())
+                .collect(),
+            state: UnitState::Incomplete,
+            fasta_artifact_id: None,
+            map_artifact_id: None,
+            source_fasta_artifact_id: None,
+        })
+        .collect()
 }
 
 fn prepare_reference(effective: &EffectiveConfig) -> Result<PreparedReference, Diagnostic> {
@@ -415,18 +537,6 @@ fn reduction_outputs<'a>(
         .collect()
 }
 
-fn configuration_digest(bytes: &[u8]) -> Result<String, Diagnostic> {
-    let mut hasher = Sha256Writer::default();
-    hasher.update(b"genome_population_simulator/v1/configuration-digest\0")?;
-    hasher.update(
-        &u64::try_from(bytes.len())
-            .map_err(|_| internal("configuration_digest", "input exceeds u64"))?
-            .to_be_bytes(),
-    )?;
-    hasher.update(bytes)?;
-    Ok(hasher.finish("configuration-input").digest().to_owned())
-}
-
 fn reduction_error(
     reference: &str,
     effective: &EffectiveConfig,
@@ -477,4 +587,156 @@ fn io_error(path: &Path, operation: &str, error: std::io::Error) -> Diagnostic {
         .with("path", path.display().to_string())
         .with("operation", operation)
         .with("detail", error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::application::load_and_validate_config;
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn invalid_effective_document_is_removed_before_failed_fallback_publication() {
+        let root = std::env::temp_dir().join(format!(
+            "gps-f14-invalid-effective-fallback-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test root");
+        let destination = root.join("result");
+        let config =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config/general-seeded.toml");
+        let effective = load_and_validate_config(&config).expect("valid input config");
+
+        let error = execute_validated_config_with_effective_document(
+            &effective,
+            &destination,
+            |mut document| {
+                document["effective_config_kind"] = json!("unknown");
+                document
+            },
+            |_| Ok(()),
+        )
+        .expect_err("invalid produced effective config");
+
+        assert_eq!(error.code(), "GPS-FMT-006");
+        assert_eq!(error.category(), "FMT");
+        assert_eq!(error.exit_code(), 1);
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(destination.join("manifest.json")).expect("failed manifest"),
+        )
+        .expect("manifest JSON");
+        assert_eq!(manifest["state"], "failed");
+        assert_eq!(
+            manifest["effective_config_artifact_id"],
+            serde_json::Value::Null
+        );
+        assert_eq!(manifest["diagnostics"][0]["code"], "GPS-FMT-006");
+        assert!(!destination.join("effective-config.json").exists());
+        assert!(
+            !destination
+                .join("resources/references/ref-main.fa")
+                .exists()
+        );
+        assert_eq!(manifest["references"], json!([]));
+        assert_eq!(manifest["reference_reductions"], json!([]));
+        assert_eq!(
+            manifest["output_categories"]["minimum"],
+            json!(["config-general"])
+        );
+        assert_eq!(manifest["output_categories"]["requested"], json!([]));
+        assert!(
+            manifest["artifacts"]
+                .as_array()
+                .expect("artifact catalog")
+                .iter()
+                .all(|artifact| artifact["id"] == "config-general")
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn physical_resource_mutation_with_updated_catalog_publishes_failed_without_effective() {
+        let root = std::env::temp_dir().join(format!(
+            "gps-f14-physical-authority-fallback-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test root");
+        let destination = root.join("result");
+        let config = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/reference_reduction/general.toml");
+        let effective = load_and_validate_config(&config).expect("valid input config");
+
+        let error = execute_validated_config_with_effective_document(
+            &effective,
+            &destination,
+            std::convert::identity,
+            |workspace| {
+                let artifact = workspace
+                    .artifacts()
+                    .iter()
+                    .find(|artifact| artifact.id == "reference-fasta-reference-small")
+                    .expect("derived reference artifact");
+                let mut bytes =
+                    fs::read(workspace.root().join(&artifact.path)).expect("derived FASTA");
+                let sequence_start = bytes
+                    .iter()
+                    .position(|byte| *byte == b'\n')
+                    .expect("FASTA header")
+                    + 1;
+                let base = bytes[sequence_start];
+                bytes[sequence_start] = if base == b'A' { b'C' } else { b'A' };
+                workspace.replace_artifact_bytes_for_validation_test(
+                    "reference-fasta-reference-small",
+                    &bytes,
+                )
+            },
+        )
+        .expect_err("physical bytes disagree with generated authority");
+
+        assert_eq!(error.code(), "GPS-FMT-006");
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(destination.join("manifest.json")).expect("failed manifest"),
+        )
+        .expect("manifest JSON");
+        assert_eq!(manifest["state"], "failed");
+        assert_eq!(
+            manifest["effective_config_artifact_id"],
+            serde_json::Value::Null
+        );
+        assert_eq!(manifest["diagnostics"][0]["code"], "GPS-FMT-006");
+        assert!(!destination.join("effective-config.json").exists());
+        for relative in [
+            "resources/references/reference-main.fa",
+            "resources/references/reference-small.fa",
+            "resources/references/reference-small.map.json",
+        ] {
+            assert!(!destination.join(relative).exists(), "retained {relative}");
+        }
+        assert_eq!(manifest["references"], json!([]));
+        assert_eq!(manifest["reference_reductions"], json!([]));
+        assert_eq!(
+            manifest["output_categories"],
+            json!({
+                "minimum": ["config-general"],
+                "defaulted": [],
+                "requested": [],
+                "disabled": []
+            })
+        );
+        assert!(
+            manifest["artifacts"]
+                .as_array()
+                .expect("artifact catalog")
+                .iter()
+                .all(|artifact| artifact["id"] == "config-general")
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
 }

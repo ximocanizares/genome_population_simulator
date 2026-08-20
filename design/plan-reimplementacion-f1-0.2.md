@@ -159,7 +159,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
 
 ## 7. F1.4 — Manifiesto general y publicación proporcional
 
-- ☐ F1.4.1. Definir un manifiesto general mínimo y su configuración efectiva.
+- ✅ F1.4.1. Definir un manifiesto general mínimo y su configuración efectiva.
   - Depende de: F1.2.4 y F1.3.3.
   - Procede de: REQ-MAN-02/08/32, DTC-035/DTC-036 y DTC-078. El
     manifiesto general aporta evidencia parcial a REQ-MAN-01/05/69/72, que
@@ -169,7 +169,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: JSON Schema externo en pruebas para positivo completo,
     positivo fallido, truncado, campo desconocido y enlace ausente.
 
-- ☐ F1.4.2. Mantener catálogo simple de artefactos con ruta canónica, tamaño y
+- ✅ F1.4.2. Mantener catálogo simple de artefactos con ruta canónica, tamaño y
   SHA-256.
   - Depende de: F1.4.1.
   - Procede de: REQ-MAN-08, REQ-SAL-03/22 y DTC-040/DTC-078.
@@ -178,7 +178,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: `sha256sum`, cambio de un byte, truncado, ID/ruta duplicada
     y todos los enlaces resolubles.
 
-- ☐ F1.4.3. Simplificar el provisional y conservar publicación atómica
+- ✅ F1.4.3. Simplificar el provisional y conservar publicación atómica
   no-clobber.
   - Depende de: F1.4.2.
   - Procede de: REQ-SAL-22/26, DTC-045 y DTC-078.
@@ -188,7 +188,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: destino ausente/preexistente, carrera de dos procesos,
     fallo antes de publicar y SIGKILL que deja `INCOMPLETE`.
 
-- ☐ F1.4.4. Cerrar rechazo, fallo controlado y éxito sin unidades ficticias.
+- ✅ F1.4.4. Cerrar rechazo, fallo controlado y éxito sin unidades ficticias.
   - Depende de: F1.4.1–F1.4.3.
   - Procede de: REQ-SAL-22/26 y DTC-044/DTC-045/DTC-078. Los estados
     subordinados de eventos y conjuntos se introducen con sus consumidores.
@@ -196,7 +196,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Se comprueba con: códigos de salida, ausencia de destino en rechazo,
     manifiesto general `failed` tras fallo controlado y `complete` solo al éxito.
 
-- ☐ F1.4.5. Retirar dependencias que hayan quedado sin consumidor runtime.
+- ✅ F1.4.5. Retirar dependencias que hayan quedado sin consumidor runtime.
   - Depende de: F1.4.1–F1.4.4 y F1.1.2.
   - Procede de: DTC-043, DTC-048 y DTC-078.
   - Cambia: `Cargo.toml`, `Cargo.lock` y evaluación de dependencias; retira el
@@ -205,8 +205,12 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
     `cargo tree --locked -e features`, `cargo audit --no-fetch` y búsqueda de
     imports/usos del crate retirado.
 
-> Pausa F1.4: inspeccionar tres árboles reales —complete, failed e INCOMPLETE— y
-> confirmar que no contienen eventos, conjuntos ni defensas trasladadas.
+> ✅ Pausa F1.4 aprobada: se inspeccionaron tres árboles reales —complete,
+> failed e INCOMPLETE— y se confirmó que no contienen eventos, conjuntos ni
+> defensas trasladadas. La séptima revisión no encontró defectos funcionales;
+> su única deriva de trazabilidad se corrigió con una prueba CLI que demuestra
+> copia TOML byte a byte, enlace, clase, ruta, tamaño y SHA-256 externo. F1.5 no
+> se ha iniciado.
 
 ## 8. F1.5 — Referencia inicial
 

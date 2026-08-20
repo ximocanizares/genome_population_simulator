@@ -206,6 +206,16 @@ usar BLAKE3 como integridad publicada, `std::fs::rename` con comprobación previ
 y llamar a `mv` como proceso externo. También se rechaza integrar un validador
 JSON Schema en el runtime: DTC-047 lo reserva a pruebas y aceptación.
 
+**Reevaluación F1.4.5 (20 de agosto de 2026).** Se retiró `jsonschema` del
+grafo Cargo después de eliminar su último consumidor. Los contratos Draft
+2020-12 continúan publicados como ficheros estáticos y las pruebas los ejecutan
+con CPython/jsonschema 4.10.3, ajeno al productor Rust. `Cargo.lock` quedó en 65
+paquetes y las búsquedas en `Cargo.toml`, `Cargo.lock` y `cargo tree -e
+features` no contienen el crate retirado. `cargo metadata --locked`, `cargo
+tree --locked -e features` y `cargo audit --no-fetch` terminaron con código 0;
+la auditoría examinó los 65 paquetes y solo advirtió que no pudo tomar el lock
+del índice local, sin vulnerabilidades informadas.
+
 **Corrección durante D11.** La primera prueba de ida y vuelta del manifiesto
 detectó que compilar `serde_json` solo con `std` recuperaba un vector a dos ULP
 del valor original. Se añadió `float_roundtrip`, se conservó el mismo contrato

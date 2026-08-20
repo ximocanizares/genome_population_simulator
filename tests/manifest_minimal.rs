@@ -1,340 +1,226 @@
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use genome_population_simulator::results::validate_general_manifest_bytes;
-use jsonschema::{Draft, Validator};
+use genome_population_simulator::results::{
+    ArtifactRecord, GeneralManifest, ManifestReductionLink, ManifestReferenceLink, UnitState,
+    general_manifest_document, validate_general_manifest_bytes,
+};
 use serde_json::{Value, json};
 
+static NONCE: AtomicU64 = AtomicU64::new(0);
+
 #[test]
-fn complete_and_failed_minimal_manifests_pass_both_validators() {
-    for (name, document) in [
-        ("complete", complete_manifest()),
-        ("failed", failed_manifest()),
-    ] {
-        assert_accepted(name, &document);
-    }
+fn complete_and_failed_minimal_manifests_pass_rust_and_external_validators() {
+    assert_accepted("complete", &complete_manifest());
+    assert_accepted("failed", &failed_manifest());
 }
 
 #[test]
-fn exact_reviewer_bypass_is_rejected_by_both_validators() {
-    let bypass = json!({
-        "manifest_kind": "gps_execution_manifest",
-        "schema_version": "1",
-        "execution_id": "",
-        "state": "complete",
-        "configuration_input": {},
-        "effective_config": {},
-        "references": [42],
-        "reference_reductions": [false],
-        "artifacts": [],
-        "units": ["not-unit"],
-        "diagnostics": [17]
+fn truncation_unknown_field_and_absent_link_fail_both_validators() {
+    let complete = complete_manifest();
+    let mut bytes = serde_json::to_vec(&complete).expect("manifest JSON");
+    bytes.truncate(bytes.len() / 2);
+    assert!(validate_general_manifest_bytes(Path::new("manifest.json"), &bytes).is_err());
+    assert_external_bytes("truncated", &bytes, false);
+
+    let mut unknown = complete.clone();
+    unknown
+        .as_object_mut()
+        .expect("root object")
+        .insert("events".to_owned(), json!([]));
+    assert_rejected("unknown-root-field", &unknown);
+
+    let mut absent = complete;
+    absent["references"][0]["fasta_artifact_id"] = json!("artifact-absent");
+    assert_rejected("absent-artifact-link", &absent);
+}
+
+#[test]
+fn duplicate_ids_paths_and_output_categories_are_rejected() {
+    let mut duplicate_id = complete_manifest();
+    duplicate_id["artifacts"][1]["id"] = duplicate_id["artifacts"][0]["id"].clone();
+    assert_rejected("duplicate-artifact-id", &duplicate_id);
+
+    let mut duplicate_path = complete_manifest();
+    duplicate_path["artifacts"][1]["path"] = duplicate_path["artifacts"][0]["path"].clone();
+    assert_rejected("duplicate-artifact-path", &duplicate_path);
+
+    let mut repeated_category = complete_manifest();
+    repeated_category["output_categories"]["requested"] = json!(["reference-fasta"]);
+    assert_rejected("artifact-in-two-categories", &repeated_category);
+
+    let mut unclassified = complete_manifest();
+    unclassified["output_categories"]["minimum"] = json!(["config-general"]);
+    assert_rejected("unclassified-artifact", &unclassified);
+}
+
+#[test]
+fn failed_diagnostics_must_exist_in_catalog_v2_with_canonical_meaning() {
+    let mut unknown = failed_manifest();
+    unknown["diagnostics"][0]["code"] = json!("GPS-FMT-999");
+    assert_rejected("unknown-diagnostic-code", &unknown);
+
+    let mut altered = failed_manifest();
+    altered["diagnostics"][0]["message"] = json!("mensaje autofirmado");
+    assert_rejected("altered-diagnostic-meaning", &altered);
+
+    let mut full_catalog_positive = failed_manifest();
+    full_catalog_positive["diagnostics"][0] = json!({
+        "code": "GPS-DOMAIN-003",
+        "message": "Una invariante del estado biológico o técnico válido no se cumple."
     });
-    assert_rejected("exact-reviewer-bypass", &bypass);
+    assert_accepted("full-catalog-domain-003", &full_catalog_positive);
+
+    assert_accepted("cataloged-failed-diagnostic", &failed_manifest());
 }
 
 #[test]
-fn every_root_field_and_collection_has_a_negative_witness() {
-    let base = complete_manifest();
-    for field in [
-        "manifest_kind",
-        "schema_version",
-        "execution_id",
-        "state",
-        "configuration_input",
-        "effective_config",
-        "references",
-        "reference_reductions",
-        "artifacts",
-        "units",
-        "diagnostics",
-    ] {
-        let mut document = base.clone();
-        document.as_object_mut().expect("root").remove(field);
-        assert_rejected(&format!("missing-root-{field}"), &document);
-    }
-
-    for (name, pointer, replacement) in [
-        ("manifest-kind", "/manifest_kind", json!("other")),
-        ("schema-version", "/schema_version", json!(2)),
-        ("execution-id", "/execution_id", json!("")),
-        ("state", "/state", json!("incomplete")),
-        ("configuration-input", "/configuration_input", json!([])),
-        ("effective-config", "/effective_config", json!({})),
-        ("references", "/references", json!({})),
-        ("reference-reductions", "/reference_reductions", json!({})),
-        ("artifacts", "/artifacts", json!({})),
-        ("units", "/units", json!({})),
-        ("diagnostics", "/diagnostics", json!({})),
-    ] {
-        let mut document = base.clone();
-        *document.pointer_mut(pointer).expect("root pointer") = replacement;
-        assert_rejected(name, &document);
-    }
-
-    for (name, pointer, replacement) in [
-        ("reference-item", "/references/0", json!(42)),
-        ("reduction-item", "/reference_reductions/0", json!(false)),
-        ("artifact-item", "/artifacts/0", json!("not-artifact")),
-        ("unit-item", "/units/0", json!("not-unit")),
-        ("diagnostic-item", "/diagnostics/0", json!(17)),
-        (
-            "selection-order-item",
-            "/reference_reductions/0/selection_order/0",
-            json!(0),
-        ),
-    ] {
-        let mut document = base.clone();
-        *document.pointer_mut(pointer).expect("collection pointer") = replacement;
-        assert_rejected(name, &document);
-    }
+fn output_categories_cannot_be_swapped_while_preserving_a_partition() {
+    let mut document = complete_manifest();
+    document["output_categories"]["minimum"] = json!(["config-general", "effective-config"]);
+    document["output_categories"]["requested"] = json!(["reference-fasta"]);
+    assert_rejected("source-reference-swapped-to-requested", &document);
 }
 
 #[test]
-fn every_nested_required_field_has_a_negative_witness() {
-    let base = complete_manifest();
-    for (object_pointer, fields) in [
-        (
-            "/configuration_input",
-            &["kind", "original_path", "copy"][..],
+fn source_and_derived_fasta_cannot_alias_across_output_categories() {
+    let artifacts = vec![
+        record("shared", "reference_fasta", "resources/shared.fa"),
+        record(
+            "map",
+            "reference_reduction_map",
+            "resources/derived.map.json",
         ),
-        (
-            "/configuration_input/copy",
-            &[
-                "id",
-                "kind",
-                "path",
-                "size_bytes",
-                "checksum",
-                "state",
-                "validated",
-            ][..],
-        ),
-        (
-            "/configuration_input/copy/checksum",
-            &["algorithm", "digest"][..],
-        ),
-        ("/references/0", &["id", "fasta"][..]),
-        (
-            "/reference_reductions/0",
-            &[
-                "id",
-                "source_reference_id",
-                "region_size_bases",
-                "target",
-                "selection_subseed",
-                "selection_order",
-                "state",
-                "fasta",
-                "map",
-                "source_fasta_id",
-            ][..],
-        ),
-        (
-            "/reference_reductions/0/target",
-            &["mode", "declared", "bases"][..],
-        ),
-        (
-            "/units/0",
-            &["id", "kind", "state", "exportable", "diagnostic_code"][..],
-        ),
-        ("/diagnostics/0", &["code", "message"][..]),
-    ] {
-        for field in fields {
-            let mut document = base.clone();
-            document
-                .pointer_mut(object_pointer)
-                .and_then(Value::as_object_mut)
-                .expect("object pointer")
-                .remove(*field);
-            assert_rejected(
-                &format!("missing-{}-{field}", object_pointer.replace('/', "-")),
-                &document,
-            );
-        }
-    }
+    ];
+    let references = vec![
+        ManifestReferenceLink {
+            id: "main".to_owned(),
+            fasta_artifact_id: "shared".to_owned(),
+        },
+        ManifestReferenceLink {
+            id: "small".to_owned(),
+            fasta_artifact_id: "shared".to_owned(),
+        },
+    ];
+    let reductions = vec![ManifestReductionLink {
+        id: "small".to_owned(),
+        source_reference_id: "main".to_owned(),
+        region_size_bases: 10,
+        target_mode: "target_bases".to_owned(),
+        target_declared: "10".to_owned(),
+        target_bases: 10,
+        selection_subseed: "1".repeat(64),
+        selection_order: vec![1],
+        state: UnitState::Complete,
+        fasta_artifact_id: Some("shared".to_owned()),
+        map_artifact_id: Some("map".to_owned()),
+        source_fasta_artifact_id: Some("shared".to_owned()),
+    }];
+    let diagnostic = validate_general_manifest_bytes(Path::new("truncated.json"), b"{")
+        .expect_err("controlled format diagnostic");
+    let manifest = GeneralManifest {
+        execution_id: "execution-alias",
+        state: UnitState::Failed,
+        configuration_input: None,
+        effective_config: None,
+        references: &references,
+        reduced_references: &reductions,
+        artifacts: &artifacts,
+        diagnostics: std::slice::from_ref(&diagnostic),
+    };
+    assert_rejected(
+        "source-derived-fasta-alias",
+        &general_manifest_document(&manifest),
+    );
 }
 
 #[test]
-fn every_object_kind_is_closed_and_field_types_are_concrete() {
-    let base = complete_manifest();
-    for pointer in [
-        "",
-        "/configuration_input",
-        "/configuration_input/copy",
-        "/configuration_input/copy/checksum",
-        "/references/0",
-        "/reference_reductions/0",
-        "/reference_reductions/0/target",
-        "/units/0",
-        "/diagnostics/0",
-    ] {
-        let mut document = base.clone();
-        let object = if pointer.is_empty() {
-            document.as_object_mut().expect("root")
-        } else {
-            document
-                .pointer_mut(pointer)
-                .and_then(Value::as_object_mut)
-                .expect("object pointer")
-        };
-        object.insert("unexpected".to_owned(), json!(true));
-        assert_rejected(
-            &format!("unknown-field-{}", pointer.replace('/', "-")),
-            &document,
-        );
-    }
-
-    for (name, pointer, replacement) in [
-        (
-            "configuration-kind",
-            "/configuration_input/kind",
-            json!("scenario"),
-        ),
-        (
-            "configuration-path",
-            "/configuration_input/original_path",
-            json!(7),
-        ),
-        ("artifact-id", "/artifacts/0/id", json!("")),
-        ("artifact-kind", "/artifacts/0/kind", json!(false)),
-        ("artifact-path", "/artifacts/0/path", json!("")),
-        ("artifact-size", "/artifacts/0/size_bytes", json!(-1)),
-        (
-            "checksum-algorithm",
-            "/artifacts/0/checksum/algorithm",
-            json!("md5"),
-        ),
-        (
-            "checksum-digest",
-            "/artifacts/0/checksum/digest",
-            json!("A".repeat(64)),
-        ),
-        ("artifact-state", "/artifacts/0/state", json!("incomplete")),
-        ("artifact-validated", "/artifacts/0/validated", json!("yes")),
-        ("reference-id", "/references/0/id", json!(0)),
-        (
-            "reduction-source",
-            "/reference_reductions/0/source_reference_id",
-            json!(null),
-        ),
-        (
-            "reduction-region",
-            "/reference_reductions/0/region_size_bases",
-            json!(0),
-        ),
-        (
-            "target-mode",
-            "/reference_reductions/0/target/mode",
-            json!("other"),
-        ),
-        (
-            "target-declared",
-            "/reference_reductions/0/target/declared",
-            json!(1),
-        ),
-        (
-            "target-bases",
-            "/reference_reductions/0/target/bases",
-            json!(0),
-        ),
-        (
-            "subseed",
-            "/reference_reductions/0/selection_subseed",
-            json!("A".repeat(64)),
-        ),
-        (
-            "reduction-state",
-            "/reference_reductions/0/state",
-            json!(true),
-        ),
-        (
-            "source-fasta-id",
-            "/reference_reductions/0/source_fasta_id",
-            json!(""),
-        ),
-        ("unit-id", "/units/0/id", json!(null)),
-        ("unit-kind", "/units/0/kind", json!("")),
-        ("unit-state", "/units/0/state", json!("other")),
-        ("unit-exportable", "/units/0/exportable", json!(1)),
-        ("unit-diagnostic", "/units/0/diagnostic_code", json!("BAD")),
-        ("diagnostic-code", "/diagnostics/0/code", json!("BAD")),
-        ("diagnostic-message", "/diagnostics/0/message", json!("")),
-    ] {
-        let mut document = base.clone();
-        *document.pointer_mut(pointer).expect("field pointer") = replacement;
-        assert_rejected(name, &document);
-    }
-
-    let mut incompatible_artifact = base;
-    *incompatible_artifact
-        .pointer_mut("/artifacts/0/validated")
-        .expect("validated") = json!(false);
-    assert_rejected("artifact-state-validation-mismatch", &incompatible_artifact);
-}
-
-#[test]
-fn artifact_paths_have_the_same_canonical_contract_in_schema_and_rust() {
-    for path in [
-        "inputs/config/general.toml",
-        "a",
-        "a/.hidden",
-        "a/name..txt",
-        "referencias/ñ/reference.fasta",
+fn artifact_paths_are_canonical_and_digests_are_lowercase_sha256() {
+    for value in [
+        json!("../outside"),
+        json!("a//b"),
+        json!("a\\b"),
+        json!("trailing/"),
+        json!("INCOMPLETE"),
     ] {
         let mut document = complete_manifest();
-        *document
-            .pointer_mut("/artifacts/0/path")
-            .expect("artifact path") = json!(path);
-        assert_accepted(&format!("canonical-path-{path:?}"), &document);
+        document["artifacts"][0]["path"] = value.clone();
+        assert_rejected(&format!("invalid-path-{value}"), &document);
     }
+    let mut digest = complete_manifest();
+    digest["artifacts"][0]["checksum"]["digest"] = json!("A".repeat(64));
+    assert_rejected("uppercase-digest", &digest);
+}
 
-    for path in [
-        "",
-        "/absolute",
-        "../outside",
-        "a/../outside",
-        "./relative",
-        "a/./relative",
-        "a//duplicate",
-        "a\\windows",
-        "a\nb",
-        "a\u{7f}b",
-        "trailing/",
-    ] {
-        let mut document = complete_manifest();
-        *document
-            .pointer_mut("/artifacts/0/path")
-            .expect("artifact path") = json!(path);
-        assert_rejected(&format!("noncanonical-path-{path:?}"), &document);
+#[test]
+fn failed_reduction_keeps_reached_links_and_requested_classification() {
+    let artifacts = vec![
+        record("source", "reference_fasta", "resources/source.fa"),
+        record("derived", "reference_fasta", "resources/derived.fa"),
+        record(
+            "map",
+            "reference_reduction_map",
+            "resources/derived.map.json",
+        ),
+    ];
+    let references = vec![
+        ManifestReferenceLink {
+            id: "main".to_owned(),
+            fasta_artifact_id: "source".to_owned(),
+        },
+        ManifestReferenceLink {
+            id: "small".to_owned(),
+            fasta_artifact_id: "derived".to_owned(),
+        },
+    ];
+    let reductions = vec![ManifestReductionLink {
+        id: "small".to_owned(),
+        source_reference_id: "main".to_owned(),
+        region_size_bases: 10,
+        target_mode: "target_bases".to_owned(),
+        target_declared: "10".to_owned(),
+        target_bases: 10,
+        selection_subseed: "1".repeat(64),
+        selection_order: vec![1],
+        state: UnitState::Failed,
+        fasta_artifact_id: Some("derived".to_owned()),
+        map_artifact_id: Some("map".to_owned()),
+        source_fasta_artifact_id: Some("source".to_owned()),
+    }];
+    let diagnostic = validate_general_manifest_bytes(Path::new("truncated.json"), b"{")
+        .expect_err("controlled format diagnostic");
+    let manifest = GeneralManifest {
+        execution_id: "execution-partial",
+        state: UnitState::Failed,
+        configuration_input: None,
+        effective_config: None,
+        references: &references,
+        reduced_references: &reductions,
+        artifacts: &artifacts,
+        diagnostics: std::slice::from_ref(&diagnostic),
+    };
+    let document = general_manifest_document(&manifest);
+    assert_eq!(
+        document["output_categories"]["requested"],
+        json!(["derived", "map"])
+    );
+    assert_eq!(document["output_categories"]["minimum"], json!(["source"]));
+    assert_accepted("failed-partial", &document);
+}
+
+fn record(id: &str, kind: &str, path: &str) -> ArtifactRecord {
+    ArtifactRecord {
+        id: id.to_owned(),
+        kind: kind.to_owned(),
+        path: path.to_owned(),
+        size_bytes: 1,
+        digest: "0".repeat(64),
     }
 }
 
 fn complete_manifest() -> Value {
-    let config = artifact(
-        "config-general",
-        "config_general_toml",
-        "inputs/config/general.toml",
-    );
-    let reference = artifact(
-        "reference-fasta-ref",
-        "reference_fasta",
-        "references/ref/reference.fasta",
-    );
-    let reduced = artifact(
-        "reference-fasta-reduced",
-        "reference_fasta",
-        "references/reduced/reference.fasta",
-    );
-    let map = artifact(
-        "reference-map-reduced",
-        "reference_reduction_map",
-        "references/reduced/map.tsv",
-    );
-    let effective = artifact(
-        "effective-config",
-        "effective_config",
-        "effective-config.json",
-    );
     json!({
         "manifest_kind": "gps_execution_manifest",
         "schema_version": "1",
@@ -343,46 +229,27 @@ fn complete_manifest() -> Value {
         "configuration_input": {
             "kind": "general",
             "original_path": "config/general.toml",
-            "copy": config
+            "artifact_id": "config-general"
         },
-        "effective_config": effective,
-        "references": [
-            {"id": "ref", "fasta": reference},
-            {"id": "reduced", "fasta": reduced}
+        "effective_config_artifact_id": "effective-config",
+        "references": [{"id": "ref", "fasta_artifact_id": "reference-fasta"}],
+        "reference_reductions": [],
+        "output_categories": {
+            "minimum": ["config-general", "effective-config", "reference-fasta"],
+            "defaulted": [],
+            "requested": [],
+            "disabled": []
+        },
+        "artifacts": [
+            artifact("config-general", "config_general_toml", "inputs/config/general.toml"),
+            artifact("reference-fasta", "reference_fasta", "resources/references/ref.fa"),
+            artifact("effective-config", "effective_config", "effective-config.json")
         ],
-        "reference_reductions": [{
-            "id": "reduced",
-            "source_reference_id": "ref",
-            "region_size_bases": 100,
-            "target": {"mode": "target_bases", "declared": "200", "bases": 200},
-            "selection_subseed": "1".repeat(64),
-            "selection_order": [1, 2],
-            "state": "complete",
-            "fasta": reduced,
-            "map": map,
-            "source_fasta_id": "reference-fasta-ref"
-        }],
-        "artifacts": [config, reference, reduced, map, effective],
-        "units": [{
-            "id": "execution-001",
-            "kind": "execution",
-            "state": "complete",
-            "exportable": true,
-            "diagnostic_code": null
-        }],
-        "diagnostics": [{
-            "code": "GPS-FMT-006",
-            "message": "Testigo estructurado de diagnóstico."
-        }]
+        "diagnostics": []
     })
 }
 
 fn failed_manifest() -> Value {
-    let config = artifact(
-        "config-general",
-        "config_general_toml",
-        "inputs/config/general.toml",
-    );
     json!({
         "manifest_kind": "gps_execution_manifest",
         "schema_version": "1",
@@ -391,19 +258,20 @@ fn failed_manifest() -> Value {
         "configuration_input": {
             "kind": "general",
             "original_path": "config/general.toml",
-            "copy": config
+            "artifact_id": "config-general"
         },
-        "effective_config": null,
+        "effective_config_artifact_id": null,
         "references": [],
         "reference_reductions": [],
-        "artifacts": [config],
-        "units": [{
-            "id": "execution-failed-001",
-            "kind": "execution",
-            "state": "failed",
-            "exportable": false,
-            "diagnostic_code": "GPS-IO-001"
-        }],
+        "output_categories": {
+            "minimum": ["config-general"],
+            "defaulted": [],
+            "requested": [],
+            "disabled": []
+        },
+        "artifacts": [
+            artifact("config-general", "config_general_toml", "inputs/config/general.toml")
+        ],
         "diagnostics": [{
             "code": "GPS-IO-001",
             "message": "Una operación de lectura o escritura falló."
@@ -417,40 +285,50 @@ fn artifact(id: &str, kind: &str, path: &str) -> Value {
         "kind": kind,
         "path": path,
         "size_bytes": 1,
-        "checksum": {"algorithm": "sha256", "digest": "0".repeat(64)},
-        "state": "complete",
-        "validated": true
+        "checksum": {"algorithm": "sha256", "digest": "0".repeat(64)}
     })
 }
 
-fn schema_validator() -> Validator {
-    let schema: Value =
-        serde_json::from_str(include_str!("../schemas/manifest-general-v1.schema.json"))
-            .expect("manifest schema JSON");
-    jsonschema::options()
-        .with_draft(Draft::Draft202012)
-        .build(&schema)
-        .expect("Draft 2020-12 schema")
-}
-
 fn assert_accepted(name: &str, document: &Value) {
-    assert!(
-        schema_validator().is_valid(document),
-        "JSON Schema rejected positive {name}"
-    );
     let bytes = serde_json::to_vec(document).expect("manifest JSON");
     validate_general_manifest_bytes(Path::new("manifest.json"), &bytes)
-        .unwrap_or_else(|error| panic!("Rust validator rejected positive {name}: {error:?}"));
+        .unwrap_or_else(|error| panic!("Rust rejected positive {name}: {error:?}"));
+    assert_external_bytes(name, &bytes, true);
 }
 
 fn assert_rejected(name: &str, document: &Value) {
-    assert!(
-        !schema_validator().is_valid(document),
-        "JSON Schema accepted negative {name}: {document}"
-    );
     let bytes = serde_json::to_vec(document).expect("manifest JSON");
     assert!(
         validate_general_manifest_bytes(Path::new("manifest.json"), &bytes).is_err(),
-        "Rust validator accepted negative {name}: {document}"
+        "Rust accepted negative {name}"
     );
+    assert_external_bytes(name, &bytes, false);
+}
+
+fn assert_external_bytes(name: &str, bytes: &[u8], expected_success: bool) {
+    let instance = temporary(name);
+    fs::write(&instance, bytes).expect("write external instance");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new("python3")
+        .arg(root.join("tests/external_manifest_validator.py"))
+        .arg(root.join("schemas/manifest-general-v1.schema.json"))
+        .arg(&instance)
+        .arg(root.join("catalogs/diagnostics-v2.tsv"))
+        .output()
+        .expect("independent Python validator");
+    let _ = fs::remove_file(&instance);
+    assert_eq!(
+        output.status.success(),
+        expected_success,
+        "external validator mismatch for {name}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn temporary(_label: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "gps-f14-manifest-{}-{}.json",
+        std::process::id(),
+        NONCE.fetch_add(1, Ordering::Relaxed)
+    ))
 }

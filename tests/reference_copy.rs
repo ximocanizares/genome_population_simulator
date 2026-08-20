@@ -48,9 +48,21 @@ fn supplied_run_copies_the_validated_fasta_byte_for_byte() {
         serde_json::from_slice(&fs::read(destination.join("manifest.json")).expect("manifest"))
             .expect("manifest JSON");
     assert_eq!(manifest["references"][0]["id"], reference["id"]);
-    assert_eq!(manifest["references"][0]["fasta"], reference["fasta"]);
+    assert_eq!(
+        manifest["references"][0]["fasta_artifact_id"],
+        reference["fasta_artifact_id"]
+    );
+    let fasta_id = reference["fasta_artifact_id"]
+        .as_str()
+        .expect("FASTA artifact ID");
+    let fasta_artifact = manifest["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|artifact| artifact["id"] == fasta_id)
+        .expect("cataloged FASTA");
     let linked = destination.join(
-        reference["fasta"]["path"]
+        fasta_artifact["path"]
             .as_str()
             .expect("relative FASTA link"),
     );
@@ -72,7 +84,7 @@ fn supplied_run_copies_the_validated_fasta_byte_for_byte() {
         .next()
         .expect("digest")
         .to_owned();
-    assert_eq!(reference["fasta"]["checksum"]["digest"], digest);
+    assert_eq!(fasta_artifact["checksum"]["digest"], digest);
 }
 
 #[test]
@@ -164,7 +176,9 @@ fn authoritative_representation_is_loaded_from_the_copy_and_keeps_original_prove
 
     fs::write(&source, b">chr1 mutated header\nAAAAA\n")
         .expect("mutate original before authoritative loading");
-    let copy = provisional_workspace(&destination).join(&artifact.path);
+    let copy = provisional_workspace(&destination)
+        .join("payload")
+        .join(&artifact.path);
     let authoritative =
         validate_supplied_fasta_with_origin(&copy, &source, "ref-main", &expectation)
             .expect("authoritative representation is loaded from copied bytes");
