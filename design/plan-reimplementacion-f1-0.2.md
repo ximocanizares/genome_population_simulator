@@ -283,7 +283,7 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
     TEST apunta a una función existente y ningún REQ trasladado figura como
     superado por F1.
 
-- ☐ F1.6.5. Ejecutar cierre completo y dos revisiones independientes limpias.
+- ✅ F1.6.5. Ejecutar cierre completo y dos revisiones independientes limpias.
   - Depende de: F1.6.4.
   - Procede de: estrategia acordada tras la auditoría sistemática.
   - Cambia: informe de revisión y acta de pausa; no cambia comportamiento.
@@ -291,13 +291,14 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
     release, metadata/tree, audit y validadores TOML/JSON/FASTA/SHA; después
     dos revisiones consecutivas sin hallazgos graves ni bloqueantes.
 
-  Estado vigente: H-F16-R1/R2 están aplicados 2/2 con regresiones rojo-verde y
-  gates completos. La revisión que los abrió no cuenta como limpia; debe
-  repetirse la primera revisión independiente antes de iniciar la segunda.
+  Estado final: H-F16-R1/R2 están aplicados 2/2 con regresiones rojo-verde y
+  gates completos. Después de corregirlos se ejecutaron desde cero dos revisiones
+  independientes consecutivas; ambas terminaron limpias, sin hallazgos
+  bloqueantes, graves, menores ni notas accionables.
 
-> PAUSA-F1.6 preparada de nuevo para revisión, no aprobada: no comenzar F2
-> ni cerrar F1 hasta aprobar explícitamente el alcance mínimo, las evidencias
-> vigentes y las dos revisiones independientes limpias.
+> ✅ PAUSA-F1.6 aprobada el 20 de agosto de 2026. F1 queda cerrada sobre el
+> commit publicado `e14705a`: alcance mínimo aprobado, 54 REQ exactos,
+> gates completos y dos revisiones independientes consecutivas limpias.
 
 ## 10. Matriz de salida
 

@@ -1,20 +1,19 @@
 # Punto de reanudación del proyecto
 
-> **Punto vigente (20 de agosto de 2026):** F1.1–F1.5 del
+> **Punto vigente (20 de agosto de 2026):** F1.1–F1.6 del
 > [plan de reimplementación F1](plan-reimplementacion-f1-0.2.md) están
-> completadas y PAUSA-F1.5 está aprobada. F1.6.1–F1.6.4 están implementadas;
-> los gates y la autorrevisión del implementador para F1.6.5 están completos.
-> La primera revisión independiente abrió H-F16-R1/R2; ambos están aplicados
-> 2/2 y PAUSA-F1.6 vuelve a estar preparada para repetir esa primera revisión.
-> La revisión anterior no cuenta como limpia. F1 no está cerrado y F2 no se ha iniciado.
+> completadas y todas sus pausas están aprobadas. H-F16-R1/R2 quedaron aplicados
+> 2/2; las dos revisiones independientes posteriores fueron consecutivas y
+> limpias. F1 está cerrada sobre el commit publicado `e14705a`; F2 todavía no
+> se ha iniciado.
 > Las indicaciones históricas
 > posteriores de este documento no sustituyen este punto.
 
 - **Fecha:** 20 de agosto de 2026
 - **Implementación F1.5 histórica del checkpoint anterior:** `b5dc220 feat:
   complete F1.5 reference evidence`; no acredita el plan 0.2 vigente.
-- **Base publicada:** `60447eb refactor: complete minimal F1.5 references`,
-  publicada en `origin/main`.
+- **Base publicada de cierre F1:** `e14705a feat: complete minimal F1.6
+  reference reductions`, publicada en `origin/main`.
 - **Checkpoint de seguridad anterior:** `66ad8b2 checkpoint: preserve F1 and
   F2 work before simplification`.
 - **Estado actual de ejecución:** la auditoría sistemática bloqueó el alcance
@@ -55,10 +54,10 @@
   programado. La revisión independiente de F1.5 quedó aplicada 3/3: ejecución
   explícita con raíz declarada y CSPRNG, testigo compartido para las cláusulas
   de referencia derivada y RSS corregido a 393832 KiB (aproximadamente 385
-  MiB). PAUSA-F1.5 está aprobada. Sobre esa base, F1.6.1–F1.6.4 ya están
-  implementadas y los gates posteriores a H-F16-R1/R2 listan 153 pruebas:
-  152 superadas y un helper ignorado. Quedan pendientes las dos revisiones
-  independientes; F1 no está cerrado y F2 no ha comenzado.
+  MiB). PAUSA-F1.5 está aprobada. Sobre esa base se completó F1.6; los gates
+  posteriores a H-F16-R1/R2 listan 153 pruebas: 152 superadas y un helper
+  ignorado. Dos revisiones independientes consecutivas posteriores terminaron
+  limpias. PAUSA-F1.6 está aprobada, F1 está cerrada y F2 no ha comenzado.
 - **Estado de los agentes al pausar:** implementador y revisor F1.3 terminaron;
   la revisión adversarial F2 0.4 terminó con aprobación condicionada
   exclusivamente al cierre y commit base de F1.
@@ -84,16 +83,17 @@
   pausas explícitas, 79 cierres, nueve compartidos y nueve parciales directos;
   REQ-REF-14 pasó justificadamente a F1.5 y F2.1 conserva su invariante,
   mientras REQ-CONF-38 pasó a F2.3 con individuos reales.
-  RAF2-027 permanece como único bloqueo: exige revisar/aprobar F1 y fijar su
-  commit base; después se repetirá la revisión adversarial antes de autorizar F2.
+  RAF2-027 queda resuelto por el cierre y publicación de F1 en `e14705a`. La
+  revisión adversarial F2 0.4 aprobó el plan condicionada exclusivamente a este
+  cierre; iniciar F2 requiere ahora la aprobación explícita del usuario.
 - **Copia de la conversación:**
   [chat-reimplementacion-f1-2026-08-15.md](../docs/chat-reimplementacion-f1-2026-08-15.md),
   [chat-dtpd-119-2026-08-12.md](../docs/chat-dtpd-119-2026-08-12.md) y
   [chat-generacion-automatica-bloques-ld-2026-08-13.md](../docs/chat-generacion-automatica-bloques-ld-2026-08-13.md).
 
-## Punto vigente de reanudación para F1
+## Cierre vigente de F1
 
-F1.6.1–F1.6.4 están implementadas sobre `60447eb`. La selección publica sus
+F1.6.1–F1.6.5 están completadas y publicadas en `e14705a`. La selección publica sus
 parámetros reconstruibles; FASTA y mapa se contrastan mediante reconstructor,
 `cmp`, `sha256sum`, `samtools` y validación JSON independiente; y el expediente
 vigente contiene exactamente 54 REQ distribuidos 4/1/6/22/21. Los dos defectos
@@ -102,10 +102,9 @@ corregidos. Todos los gates propios de F1.6.5 pasan: 152 pruebas superadas, un
 helper ignorado, doctest, fmt, Clippy estricto, doc, release, metadata, audit y
 `git diff --check`.
 
-H-F16-R1/R2 están aplicados 2/2 y el siguiente paso es repetir la primera
-revisión independiente; la revisión que abrió los hallazgos no cuenta como
-limpia. No aprobar PAUSA-F1.6, no cerrar F1 y no iniciar F2 hasta obtener
-dos revisiones limpias y aprobación expresa de la raíz. Conservar la superficie TOML mínima, los dos únicos
+H-F16-R1/R2 están aplicados 2/2. Las dos revisiones independientes ejecutadas
+después de esas correcciones terminaron limpias. PAUSA-F1.6 y F1 están
+aprobadas; no iniciar F2 sin la autorización expresa del usuario. Conservar la superficie TOML mínima, los dos únicos
 ámbitos RNG activos y la ausencia de `ResolutionDomain`, `resolution-evidence`,
 eventos/manifiestos sintéticos, normalización poblacional y hardening frente a
 atacante local.
@@ -282,13 +281,12 @@ conserva `INCOMPLETE`. La canonicalización alcanza directamente `a//b`, `.`,
 `..`, separador final y barra inversa; ya no se atribuye al alias de manifiesto
 un rechazo que en realidad se producía primero por SHA-256.
 
-**Primera acción al reanudar:** repetir la revisión independiente de F1 antes de
-aprobar la pausa. No iniciar F2 ni hacer commit/push.
+**Primera acción al reanudar:** solicitar o confirmar la autorización para
+iniciar F2 sobre la base inmutable `e14705a`. F1 no requiere nuevas correcciones.
 
-El árbol está deliberadamente sin commit desde `8dd676a`; contiene la
-implementación completa de F1.6, la dependencia `jsonschema = 0.49.9`, sus
-catálogos/esquemas/pruebas/evidencias y la convención jerárquica futura de planes.
-Al retomar, no descartar ni restaurar en bloque estos cambios.
+El cierre de F1 está publicado en `origin/main` mediante `e14705a`. La
+validación JSON externa no es una dependencia runtime de Rust. Al retomar,
+partir de ese commit y preservar su expediente de 54 requisitos.
 
 Queda una incoherencia futura no bloqueante para esta pausa: el preplan LD aún
 reserva `subseed-scopes-v3.tsv`, pero F1.6 ya publica v3 con el ámbito

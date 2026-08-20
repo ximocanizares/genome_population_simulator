@@ -5,11 +5,9 @@
 - **Título:** plan detallado de F2, verdad genómica mínima.
 - **Versión del plan:** 0.1.
 - **Fecha:** 13 de agosto de 2026.
-- **Estado:** borrador técnico condicionado; F1.4 está aprobada, pero no está
-  autorizado para ejecución hasta que F1.5, F1.6 y la revisión de cierre de F1
-  estén terminadas, las decisiones previas estén resueltas, la validación
-  mecánica sea correcta, una nueva revisión adversarial no encuentre bloqueantes
-  y este plan sea aprobado explícitamente.
+- **Estado:** plan técnico aprobado condicionalmente por la revisión adversarial
+  F2 0.4; la condición externa se cumplió al cerrar F1 en `e14705a`. F2 no se ha
+  iniciado y requiere aprobación explícita del usuario para ejecutarse.
 - **Ámbito temporal:** únicamente F2.0–F2.5.
 - **Fuentes normativas y de diseño:**
   [especificaciones-0.1.md](./especificaciones-0.1.md),
@@ -36,15 +34,14 @@
   consume dentro de F2. DTC-055 ya cierra para F6.4 el constructor común y su
   variante uniforme; F7.1 lo reutilizará después para la recombinación meiótica
   y DTPD-111 solo resolverá mapas y semántica meiótica.
-- **Pendiente del informe adversarial que sigue abierto:** RAF2-027, bloqueado
-  únicamente por el cierre y aprobación de F1. RAF2-028 a RAF2-044 quedan
+- **Puerta externa resuelta:** RAF2-027 queda cerrado mediante la aprobación y
+  publicación de F1 en `e14705a`. RAF2-028 a RAF2-044 quedan
   resueltos mediante DTC-065/066 y DTC-070 a DTC-075. Los hallazgos anteriores ya
-  resueltos documentalmente no autorizan por sí solos la ejecución; una nueva
-  revisión adversarial debe confirmar que el plan corregido no conserva
-  bloqueantes.
+  resueltos documentalmente. La revisión adversarial F2 0.4 confirmó que el plan
+  corregido no conserva bloqueantes propios.
 
 Todas las casillas permanecen abiertas. El documento ordena trabajo futuro: no
-acredita que F1 haya cerrado, no resuelve decisiones pendientes, no selecciona
+  inicia F2, no resuelve decisiones pendientes, no selecciona
 crates, formatos ni herramientas externas no confirmados y no autoriza commits.
 Las versiones candidatas de DTC-058 son la única selección concreta añadida y
 siguen sujetas a F2.0.2. F2 continúa sin aprobarse.
@@ -501,8 +498,8 @@ las ampliaciones F2–F9.
 > autoría/exportación autoconsistente del conjunto TOML, la invalidación tras
 > cambiar cualquier documento/enlace, el destino no-clobber, los límites de
 > registros, la seguridad local, la accesibilidad y las entregas diferenciadas
-> `.tar.gz`/OCI. RAF2-001 está resuelto; RAF2-027 mantiene bloqueado el inicio
-> por F1. RAF2-004 y RAF2-007 se resuelven
+> `.tar.gz`/OCI. RAF2-001 y RAF2-027 están resueltos; este último mediante el
+> cierre de F1 en `e14705a`. RAF2-004 y RAF2-007 se resuelven
 > mediante las reasignaciones y pruebas negativas explícitas de este plan.
 
 ## 6. F2.1 — Estado haplotípico mínimo
@@ -1448,12 +1445,12 @@ REQ-IND-58, REQ-IND-59 ni REQ-VER-01.
 
 ## 16. Criterio de salida del plan
 
-El inicio de F2 puede aprobarse cuando F1 esté cerrada y aprobada, las decisiones
-previas estén resueltas, la validación mecánica no detecte errores —incluidos
+El inicio de F2 puede aprobarse porque F1 está cerrada, las decisiones previas
+están resueltas, la validación mecánica no detecta errores —incluidos
 los 79 REQ de cierre únicos, los nueve compartidos, los nueve parciales directos,
-las seis pausas y las cinco líneas de cada uno de los 128 pasos— y una nueva revisión adversarial del plan
-corregido no encuentre bloqueantes. El plan todavía no está autorizado porque
-F1 y RAF2-027 siguen abiertos y falta esa nueva revisión.
+las seis pausas y las cinco líneas de cada uno de los 128 pasos— y la revisión
+adversarial F2 0.4 no encontró bloqueantes propios. El plan todavía no está en
+ejecución porque requiere la aprobación explícita del usuario.
 
 F2.0.2, F2.2.1 y la regeneración/revisión compacta DTC-068 dentro de F2.2.14 no
 son prerrequisitos de inicio: son puertas de ejecución internas con los
