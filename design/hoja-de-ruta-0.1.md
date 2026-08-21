@@ -272,23 +272,23 @@ mapeador.
 - **F3.1. Lecturas desde haplotipos.** Generar FASTQ con cobertura o número de
   lecturas y contribución proporcional a dosis y ploidía. Las regiones con `N`
   son muestreables y la lectura la conserva con Phred 0.
-- **F3.2. Mapeo.** Ejecutar minimap2 contra la referencia elegida, registrar
-  versión y parámetros y detectar cualquier fallo del proceso.
-- **F3.3. Alineamiento final.** Producir BAM o CRAM ordenado e indexado con
-  cabeceras, muestra y grupos de lectura coherentes.
-- **F3.4. Validación interna.** Comparar lecturas y alineamientos con su origen
-  sin inferir genotipos ni ejecutar programas detectores de SNP.
 - **F3.5. Conjunto exportable mínimo.** Reunir referencia, verdad, FASTQ,
-  alineamientos, índices, configuración y manifiesto.
+  configuración y manifiesto, y comprobar el origen de las lecturas sin inferir
+  genotipos ni ejecutar programas detectores de SNP.
+
+El mapeo con minimap2 u otra herramienta y la creación de BAM o CRAM se realizan
+fuera del simulador a partir de los FASTQ exportados; F3 no los invoca ni los
+valida.
 
 **Resultado de salida:** recorrido completo:
 
 ```text
-configuración → referencia → individuo → verdad → FASTQ → minimap2 → BAM/CRAM
+configuración → referencia → individuo → verdad → FASTQ
 ```
 
-**Evidencia de cierre:** el conjunto supera validaciones de formatos y su BAM o
-CRAM refleja de forma coherente la verdad biológica conocida.
+**Evidencia de cierre:** el FASTQ y sus metadatos se corresponden con una verdad
+biológica conocida; pueden entregarse a un mapeador externo sin que este forme
+parte del simulador.
 
 > Revisión de F3: usar el primer conjunto extremo a extremo antes de ampliar el
 > modelo biológico o técnico.
