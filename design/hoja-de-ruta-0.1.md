@@ -1,8 +1,9 @@
 # Hoja de ruta del simulador de genomas y poblaciones
 
-- **Versión:** 0.1
-- **Estado:** vigente; F0 aprobada, F1 cerrada en `e14705a`/`efca265`; F2 corregida y pendiente de nueva revisión adversarial
-- **Fecha:** 13 de agosto de 2026
+- **Versión:** 0.2
+- **Estado:** vigente; F0 aprobada, F1 cerrada en `e14705a`/`efca265`; F2
+  simplificada por DTC-079 y pendiente de revisión
+- **Fecha:** 21 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Lenguaje del núcleo:** Rust
@@ -179,21 +180,19 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
 
 **Hitos:**
 
-- **F2.0. Aplicación Marimo base.** Antes de `validate`, ampliar Rust con
-  `ConfigKind::Scenario`, enlaces general→0..N, identidad/ruta/digest y
-  preservación opaca; la vía directa usa el literal interno reservado
-  `scenario_id = "direct"`. Ejecutar la puerta experimental F2.0.2 de
-  DTC-058 —que ya resuelve DTPD-117— antes de incorporar las candidatas;
-  implementar las nueve pestañas mínimas con `General/Ejecución`, `Genoma` y
-  `Revisar y ejecutar` activas para las capacidades F1, incluida F1.6; importar,
-  previsualizar y exportar como directorio autocontenido un conjunto de un TOML
-  general y cero o varios escenarios alcanzables. Aplicar copia privada y
-  exportación atómicas, rutas relativas canónicas, aislamiento/TOCTOU,
-  preservación opaca y límites DTC-069; invocar `validate`/`run` sin shell y demostrar
-  equivalencia, invalidación, salida segura y accesibilidad local. DTC-073
-  separa capacidades catalogadas/disponibles. F2 prueba instalación desde
-  repositorio y arranque local/offline; DTC-074, `.tar.gz`, OCI y evidencia
-  oficial de plataforma/distribución se cierran en F9.
+- **F2.0. Aplicación Marimo base.** Exponer a Marimo únicamente la configuración
+  F1 ya implementada; ploidía, población, variantes y `scenario_id = "direct"`
+  aparecen después con su primer consumidor F2. F2 no crea documentos de
+  escenario. Incorporar un entorno `uv` bloqueado, un
+  lanzador en `127.0.0.1` y controles para editar, importar y exportar un único
+  TOML general. Invocar `validate`/`run` mediante argumentos separados y mostrar
+  diagnósticos, progreso y resúmenes. Probar instalación desde el repositorio,
+  arranque local sin red y paridad UI→TOML→Rust. El aprovisionamiento inicial
+  explícito con `uv sync --frozen` puede descargar lo resuelto por `uv.lock`;
+  el uso normal no accede a la red. DTC-079 excluye protocolos paralelos,
+  almacenes de sesión, defensas contra atacante local y expedientes por paso;
+  la instalación distribuible sin descarga previa, `.tar.gz`, OCI, plataforma
+  oficial y endurecimiento se cierran en F9.
 - **F2.1. Estado haplotípico.** Representar copias cromosómicas, fase, dosis y
   procedencia mediante DTC-056 y el modelo híbrido DTC-061, sin duplicar
   innecesariamente secuencias completas; conservar `N` y preparar la proyección
@@ -251,8 +250,8 @@ secuencias esperadas y demuestran coordenadas, alelos, fase y dosis. Incluyen un
 SNP rechazado sobre `N`, una inserción aleatoria sin `N`, una explícita que la
 conserva y la ausencia de `vcf-complement.jsonl` para todos los casos F2
 representables, sin resolver `N` como A/C/G/T. F2 no fabrica una pérdida. Deja evidencia
-parcial ejecutable de REQ-SAL-02 en F2.4.2/F2.4.5/F2.4.8 y de REQ-SAL-12 en
-F2.5.9/F2.5.10/F2.5.12; sus cierres completos siguen en F8.5 y F5.5,
+parcial de REQ-SAL-02 en F2.4.1/F2.4.3/F2.4.4 y de REQ-SAL-12 en
+F2.5.4/F2.5.5/F2.5.6; sus cierres completos siguen en F8.5 y F5.5,
 respectivamente.
 
 > Revisión de F2: validar la verdad biológica antes de generar una sola lectura.

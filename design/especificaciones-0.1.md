@@ -1,13 +1,29 @@
 # Especificación del simulador de genomas y poblaciones
 
-- **Versión:** 0.1
-- **Estado:** borrador actualizado
-- **Fecha:** 14 de agosto de 2026
+- **Versión:** 0.2
+- **Estado:** borrador F2 simplificado, pendiente de revisión
+- **Fecha:** 21 de agosto de 2026
 - **Fuentes disponibles:** `README.md`, información confirmada por el usuario y
   la decisión posterior de usar Rust recogida en
   [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
 
 ## 1. Estado y finalidad del documento
+
+**Simplificación transversal de F2 (21 de agosto de 2026).** F2 adopta el
+mismo modelo de confianza local mínimo que cerró F1. La persona usuaria, el
+repositorio y el directorio privado de trabajo no se consideran adversarios.
+Las entradas externas se validan y los fallos accidentales se diagnostican,
+pero F2 no añade defensas frente a manipulación local activa, carreras hostiles,
+funciones de entorno inyectadas ni sustituciones deliberadas de ficheros. Ese
+endurecimiento solo se evaluará en F9 si el modo de distribución lo necesita.
+
+La aplicación Marimo de F2 es una interfaz local para editar la configuración
+que F2 realmente consume, invocar el binario Rust y mostrar diagnósticos y
+resúmenes. No crea un protocolo de seguridad, un sistema de expedientes por
+paso ni modelos de escenarios futuros. La vía directa usa un único TOML general;
+los documentos de escenario se incorporarán en la primera fase que tenga un
+consumidor biológico real. Esta decisión prevalece sobre cualquier detalle
+técnico anterior que anticipase esas capacidades en F2.
 
 Este documento define el objetivo general y los requisitos funcionales
 confirmados para v1. Las elecciones técnicas pendientes se separan del contrato.
@@ -23,13 +39,17 @@ abiertas y convertirse los ACE en pruebas.
 **Corrección de alcance F2 posterior al cierre F1.** F1 quedó cerrado en
 `e14705a` con cierre documental `efca265` y no contiene vía, ploidía, reglas,
 escenarios, eventos ni relaciones de resolución futuras. F2 introduce el
-conjunto general con `0..N` escenarios antes de validar: la vía directa sin
-documento usa internamente `scenario_id = "direct"`, literal reservado que no
-representa biología, no puede escribir la persona usuaria ni puede usar un
-escenario real. Se observa en configuración efectiva, manifiesto general y
-contexto RNG. F2 prueba instalación desde repositorio y arranque local/offline
-de Marimo; la construcción/validación oficial de `.tar.gz`, OCI y plataforma se
-reserva a F9.
+TOML general del recorrido directo y solo los campos que consume. Usa
+internamente `scenario_id = "direct"`, literal reservado que no representa
+biología ni puede escribir la persona usuaria. Se observa en configuración
+efectiva, manifiesto general y contexto RNG. Los escenarios se aplazan a su
+primer consumidor real. F2 prueba instalación desde repositorio y arranque
+local de Marimo; `.tar.gz`, OCI y plataforma oficial se reservan a F9.
+El aprovisionamiento inicial explícito mediante `uv sync --frozen` puede usar
+Internet únicamente para descargar las dependencias exactas resueltas por
+`uv.lock`. Una vez creado el entorno, el arranque y el uso normal de Marimo y
+del simulador no consultan la red ni dependen de servicios remotos. La
+instalación distribuible sin descarga previa sigue reservada a F9.
 
 La sección 4 es la fuente normativa de requisitos funcionales. Las secciones 2,
 5 y 6 los resumen y la sección 7 propone criterios de aceptación preliminares.
@@ -5198,17 +5218,13 @@ Esta decisión no forma parte de la especificación funcional.
   la familia los admita. La interfaz debe impedir o diagnosticar un selector no
   permitido, pero no resolver conflictos con precedencia propia.
 - **REQ-UI-06.** La aplicación debe importar, editar, previsualizar y exportar
-  como unidad autoconsistente un conjunto de configuración de la versión
-  vigente: exactamente un TOML general y cero o varios TOML de escenario
-  enlazados. Debe conservar la identidad de cada documento, los IDs y el orden
-  normativo de los escenarios y sus enlaces o rutas relativas, incluidos
-  nombres con espacios. Debe rechazar un escenario enlazado ausente, duplicado
-  o ajeno al conjunto antes de ejecutar. Un ciclo
-  importar→previsualizar→exportar debe conservar el significado y producir un
-  conjunto que el binario pueda validar, aunque no se prometa identidad de
-  espacios o comentarios. F2.0 implementa el caso general sin escenarios y el
-  modelo multidocumento; los controles semánticos de escenarios evolutivos y de
-  familias se completan en las fases que incorporan esas vías.
+  la configuración de la capacidad vigente sin cambiar su significado. En F2
+  la unidad visible es un único TOML general de la vía directa. Debe conservar
+  IDs, orden y rutas relativas que ya formen parte de ese documento y producir
+  una configuración que el binario pueda validar; no se promete conservar
+  espacios ni comentarios. El conjunto multidocumento y los TOML de escenario
+  se incorporarán en la primera fase que implemente una vía que los consuma, no
+  como infraestructura anticipada de F2.
 - **REQ-UI-07.** La validación debe invocar explícitamente `validate` del binario
   Rust y asociar cada diagnóstico disponible con su pestaña, tabla, fila y campo.
   El estado validado debe identificar los documentos, el contrato y el conjunto
@@ -5240,19 +5256,19 @@ Esta decisión no forma parte de la especificación funcional.
   memoria FASTA, FASTQ, BAM, CRAM, VCF u otros artefactos genómicos grandes para
   presentar ese resumen.
 - **REQ-UI-12.** El contrato aplicación↔binario debe declarar y comprobar las
-  versiones admitidas del esquema TOML, catálogos de campos/diagnósticos y
-  protocolo de invocación. Debe distinguir capacidades y autorizaciones
-  conocidas por el contrato de las disponibles en el binario concreto. Una incompatibilidad debe bloquear importación,
-  validación o ejecución con un diagnóstico explícito, nunca intentar una
-  migración o interpretación parcial silenciosa.
+  versiones admitidas del esquema TOML y la interfaz de línea de órdenes que
+  utiliza. La aplicación solo mostrará controles y autorizaciones realmente
+  implementados por el binario de la misma versión. Una incompatibilidad debe
+  bloquear validación o ejecución con un diagnóstico explícito; F2 no crea un
+  protocolo paralelo de capacidades, digests o migraciones.
 - **REQ-UI-13.** La aplicación debe ser utilizable localmente en Ubuntu 24.04 y
-  en el entorno de desarrollo WSL2 sobre el sistema de ficheros Linux. Debe
-  ofrecer etiquetas, ayuda, navegación por teclado, foco y estados que no
-  dependan solo del color. Desde F2, ningún hito F2–F9 puede cerrar una capacidad
-  configurable sin pruebas de equivalencia UI→TOML→`EffectiveConfig` y controles
-  accesibles para esa capacidad. La evidencia debe identificar el entorno real:
-  una ejecución WSL2 no puede presentarse como Ubuntu nativo mediante una
-  etiqueta suministrada, y la validación nativa debe enlazar su ejecución de CI.
+  en el entorno local de desarrollo sobre un sistema de ficheros Linux. Debe
+  ofrecer etiquetas, ayuda, navegación por teclado y estados que no dependan
+  solo del color. Cada fase que añada una opción configurable debe comprobar un
+  recorrido representativo UI→TOML→binario, sin exigir una auditoría completa
+  de navegador o plataforma en cada hito. F2 prueba instalación desde el
+  repositorio y arranque local; la acreditación oficial de Ubuntu 24.04,
+  accesibilidad de distribución y OCI pertenece a F9.
 - **REQ-UI-14.** En F2, Marimo debe permitir elegir una matriz de frecuencias SNV
   suministrada, generada o reutilizada; preparar una entrada mediante la misma
   orden auxiliar del binario y la acción «Vincular y verificar referencia»;
@@ -5599,45 +5615,29 @@ la receta publicada y no es universal. El segundo transforma las cinco filas
 continentales y 96 contextos de Harris y Pritchard a 12 sustituciones mediante
 promedio equitativo, colapso por hebra y complemento inverso. Fuente, licencia
 CC BY, fichero de 3.644 bytes, SHA-256, transformación y digests de salida se
-validan en F2.2.14 con un oráculo independiente. F2 no procesa el VCF Phase 3 ni
+validan en F2.2.6 con un oráculo independiente. F2 no procesa el VCF Phase 3 ni
 usa `bcftools` para estos perfiles; el perfil empírico exacto queda en DTF-016.
 
 **DECISIÓN TÉCNICA RESUELTA — fronteras y selección aleatoria F2.** DTC-075
-resuelve RAF2-041 a RAF2-044 sin cambiar el significado biológico. Todos los
-intervalos de frecuencia son semiabiertos y reservan 0/1 exactos para `fixed`.
-La selección de loci SNV usa un conjunto estático; la de *indels* reenumera las
-oportunidades del estado vigente después de cada aceptación, conserva el mismo
-flujo local y descarta toda la transacción si se agota antes del recuento
-sorteado. Catálogo, primitivas, selectores, distribuciones, genotipo/fase y
-oráculos tienen productores separados y evidencias propias.
+conserva los intervalos semiabiertos, los extremos `fixed`, la selección SNV
+estática y la selección dinámica de indels. DTC-079 permite agrupar las
+utilidades y sus pruebas: no se exige un productor, expediente o paso separado
+para cada primitiva interna. Los contratos observables y la reproducibilidad
+siguen siendo obligatorios.
 
-**DECISIÓN TÉCNICA RESUELTA — aplicación Marimo.** DTPD-117 queda resuelta
-mediante DTC-058, que fija las versiones candidatas, el entorno reproducible, el
-empaquetado local y el contrato técnico mediante el que la aplicación descubre
-esquemas, catálogos y binario y lo invoca sin *shell*. F2.0.2 debe aportar la
-evidencia experimental antes de incorporar las candidatas; no es una elección
-técnica pendiente y un fallo reabre DTPD-117 sin sustituciones silenciosas. La
-aplicación no mueve validación o semántica biológica fuera del núcleo Rust ni
-adquiere autoridad sobre la configuración efectiva o los manifiestos.
+**DECISIÓN TÉCNICA RESUELTA — aplicación Marimo simplificada.** DTC-079
+sustituye para F2 la concreción sobrediseñada de DTC-058. Marimo usa el entorno
+fijado por `pyproject.toml`/`uv.lock`, escucha en `127.0.0.1`, edita un
+único TOML general, invoca directamente `validate`/`run` y muestra
+diagnósticos y resúmenes. Rust conserva la semántica. F2 prueba instalación y
+arranque local; F9 conserva distribución, plataforma oficial, accesibilidad de
+entrega y endurecimiento.
 
-**DECISIÓN TÉCNICA RESUELTA — importación/exportación Marimo.** DTC-069 fija
-como unidad visible un directorio autocontenido con un general y `0..N`
-escenarios alcanzables. Importar inventaría/valida/copia atómicamente a sesión
-privada sin editar originales; exportar publica otro directorio mediante
-provisional+no-clobber, revalidación y hashes. Solo se admiten rutas relativas
-canónicas: general/enlace ausente o múltiple, `..`, absolutos, escapes, ciclos,
-extras, TOCTOU y enlaces físicos/simbólicos inseguros fallan. Documentos/campos
-válidos sin controles se conservan opacamente y sin pérdida salvo edición
-explícita. Los límites v1 son 256 documentos, 16 MiB por TOML, 64 MiB totales,
-profundidad 32, ruta UTF-8 de 4096 bytes y componente de 255 bytes. F2 no usa
-ZIP/TAR ni selección múltiple manual.
-Una ruta `--simulator-bin` es estricta y falla sin *fallback*. Si no se declara,
-la aplicación usa el binario empaquetado cuando existe y solo recurre a una
-única resolución inicial de `PATH` cuando el paquete o el árbol de desarrollo no
-lo incluye. Tras seleccionar una fuente, cualquier fallo o incompatibilidad
-detiene sin cambiarla silenciosamente; la ruta, versión y SHA-256 elegidos quedan
-visibles y registrados.
-
+**DECISIÓN TÉCNICA APLAZADA — importación/exportación multidocumento.** DTC-069
+se recuperará con la primera fase que implemente escenarios reales. F2 importa y
+exporta únicamente el TOML general de la vía directa, conserva su significado y
+no sobrescribe accidentalmente un destino. No crea un grafo de documentos,
+copias privadas, preservación opaca ni defensas TOCTOU sin consumidor.
 **DECISIÓN TÉCNICA RESUELTA — matrices y espectros SNV.** DTPD-118 fija el par
 canónico TSV+JSON, la preparación y generación reutilizables, `alt_af` como única
 frecuencia, intervalos no solapados con muestreo fijo/lineal/logarítmico, modos
@@ -5650,7 +5650,7 @@ liga la preparación a una entrada identificada y verificada del manifiesto F1;
 una ruta FASTA por sí sola no puede aportar `reference_id`.
 
 **DECISIÓN TÉCNICA RESUELTA — receta compacta.** DTPD-121 queda cerrada por
-DTC-068: F2.2.14 regenera recursos pequeños desde los literales publicados y el
+DTC-068: F2.2.6 regenera recursos pequeños desde los literales publicados y el
 fichero eLife fijado, verifica atribución, tamaño, SHA-256, transformaciones y
 digests y no descarga ni procesa el VCF 1000 Genomes. La materialización exacta
 del VCF y perfiles empíricos exactos quedan en DTF-016/post-v1 y no bloquean F2.
@@ -5855,7 +5855,8 @@ familias de decisiones funcionales que siguen abiertas para el alcance de v1.
    de lectura.
 10. Implementar y validar DTC-056/DTC-057 para coordenadas y selección uniforme
     reproducible de referencias reducidas, incluidos sus vectores y oráculos.
-11. Validar mediante F2.0.2 las candidatas y el empaquetado fijados por DTC-058,
+11. Validar mediante F2.0 la instalación bloqueada y el arranque local fijados
+   por DTC-079, dejando empaquetado y plataforma oficial para F9,
     versionar su contrato con esquemas, catálogos y binario y no trasladar reglas
     biológicas a la interfaz.
 12. Completar los casos de prueba restantes y tomar las decisiones de

@@ -1,5 +1,8 @@
 # Revisión adversarial final del plan de implementación F2 0.4
 
+> **Informe histórico.** Su aprobación se refería al plan anterior. El plan F2
+> 0.2 simplificado necesita una nueva revisión limitada por DTC-079.
+
 ## 1. Alcance y método
 
 - **Documento revisado:**

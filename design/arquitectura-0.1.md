@@ -1,8 +1,9 @@
 # Arquitectura del simulador de genomas y poblaciones
 
-- **Versión:** 0.1
-- **Estado:** F1 cerrado en `e14705a`/`efca265`; arquitectura F2 corregida y pendiente de nueva revisión adversarial y aprobación
-- **Fecha:** 13 de agosto de 2026
+- **Versión:** 0.2
+- **Estado:** F1 cerrado en `e14705a`/`efca265`; arquitectura F2 simplificada
+  para ejecución local confiable y pendiente de aprobación
+- **Fecha:** 21 de agosto de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Hoja de ruta:** [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
@@ -20,17 +21,23 @@ las elecciones DTP/DTPD siguen siendo planificación técnica, no funciones.
 ## 1. Finalidad y estado
 
 **Corrección F2 posterior a F1.** La base cerrada es `e14705a` con cierre
-documental `efca265`, no los contratos anticipados de los checkpoints. F1 no
-proporciona vía, escenarios, ploidía, reglas, `ParameterKey`,
-`ResolutionContext`, `ResolutionDomain` ni `resolution-evidence`. Antes de que
-Marimo invoque `validate`, F2 crea en Rust `ConfigKind::Scenario`, enlaces
-general→0..N, identidad/ruta/digest y preservación opaca. La vía directa sin
-documento usa exclusivamente el ID interno reservado `scenario_id = "direct"`;
-no representa biología ni es admisible en TOML, y queda en `EffectiveConfig`,
-manifiesto general y contexto RNG. F2 crea los dominios reales de locus/posición
-y después individuo/población de origen, sin anticipar relaciones posteriores.
-Solo instala desde repositorio y prueba arranque local/offline; distribución
-oficial `.tar.gz`, OCI y evidencia oficial de plataforma quedan en F9.
+documental `efca265`. F1 no proporciona vía, escenarios, ploidía, reglas ni
+dominios poblacionales. F2 añade únicamente los conceptos que usa su recorrido
+directo: ploidía, locus, población de origen, individuo, haplotipo y variantes
+pequeñas. La vía directa usa el ID interno reservado
+`scenario_id = "direct"` solo para identidad y RNG; F2 no crea documentos ni
+infraestructura de escenarios. Marimo edita un TOML general, llama a
+`validate`/`run` y presenta sus resultados. La instalación y el arranque se
+prueban desde el repositorio; `.tar.gz`, OCI y acreditación oficial de
+plataforma quedan en F9.
+
+F2 hereda el modelo de confianza local mínimo de F1: valida entradas externas
+y protege frente a fallos propios y corrupción accidental, pero confía en la
+persona usuaria, el repositorio y el provisional privado frente a manipulación
+activa. No construye defensas contra symlinks hostiles, inyección deliberada del
+entorno, carreras adversarias ni sustitución concurrente de ficheros. Tampoco
+crea un ejecutor de evidencia general: las pruebas normales de cada componente
+y las evidencias de cierre del hito son suficientes.
 
 Este documento define cómo se divide el sistema y qué contratos deben mantener
 sus partes para satisfacer la especificación 0.1. No define archivos de código,
@@ -42,10 +49,8 @@ adaptador FASTA tras superar la evaluación revisable de F1. Las versiones
 concretas de los crates aceptados quedan fijadas por `Cargo.lock`.
 
 La ampliación confirmada incorpora una derivación reducida de FASTA en F1.6 y
-una aplicación Marimo obligatoria desde F2.0. DTC-056/DTC-057 cierran las
-coordenadas comunes y la selección de intervalos; DTC-058 resuelve DTPD-117 y
-concreta la frontera técnica de Marimo. Su incorporación queda condicionada
-solo a superar la puerta experimental F2.0.2; la distribución oficial se
+una aplicación Marimo local desde F2.0. DTC-056/DTC-057 cierran las coordenadas
+comunes y DTC-079 simplifica la frontera Marimo; la distribución oficial se
 pospone a F9.
 
 La arquitectura cubre toda la versión 1 para evitar contratos incompatibles
@@ -126,56 +131,27 @@ conversión génica, calibración empírica automática y todo modelado específ
 elementos transponibles. V1 no define una frontera de entrada para FASTQ y
 referencia de calibración ni para perfiles empíricos reutilizables.
 
-Python no forma parte del núcleo. Se admite únicamente como entorno de la
-aplicación Marimo y de herramientas auxiliares expresamente aprobadas. Marimo
-queda fuera de las dependencias del dominio. CPython 3.14.7 y Marimo 0.23.16
-forman la pareja candidata exacta, pero no se incorporan hasta que la puerta F2.0.2
-de DTC-058 apruebe su resolución y *lock*, inventario de dependencias, *builds*
-y licencias, auditoría de seguridad, funcionamiento Ubuntu/WSL2, proceso falso,
-binario real y lanzador. Un fallo reabre DTPD-117 y nunca autoriza una
-degradación o sustitución silenciosa.
+Python no forma parte del núcleo. Se usa solo para Marimo y queda fuera del
+dominio biológico. Sus dependencias se declaran en `pyproject.toml`, se fijan en
+`uv.lock` y se instalan en un entorno local excluido de Git. Marimo no instala
+paquetes ni consulta la red durante el uso normal. El aprovisionamiento inicial
+explícito mediante `uv sync --frozen` puede acceder a Internet para descargar
+exclusivamente las dependencias resueltas por `uv.lock`; después se prueba el
+arranque local sin red. Las versiones se aceptan cuando el entorno bloqueado
+instala, arranca y ejecuta sus pruebas; F2 no añade una evaluación de
+distribución o seguridad separada para cada dependencia. La instalación
+distribuible sin descarga previa pertenece a F9.
 
-`uv` 0.12.0 es la candidata exacta y el único gestor del entorno y de las
-dependencias Python. Estas se declaran en `pyproject.toml` y su resolución
-exacta se conserva en `uv.lock`.
-El entorno local aislado es `.venv`, queda excluido de Git y se reproduce en
-desarrollo, CI e instalación mediante `uv sync --frozen`, que debe fallar si el
-proyecto y el *lock* divergen sin actualizarlos. Marimo no instala paquetes
-automáticamente y la aplicación no consulta ni depende de paquetes Python
-globales del host o de WSL2. La candidata de `uv`, el empaquetado local y la
-compatibilidad de todo el entorno con el binario deben superar la puerta F2.0.2 de
-DTC-058 y la pausa F2.0 sin sustituciones silenciosas.
+Marimo es un componente auxiliar separado del binario Rust. La aplicación,
+`pyproject.toml` y `uv.lock` se versionan en el repositorio. El entorno local no
+se versiona ni se incrusta en Rust. El contenido de las entregas oficiales y de
+la imagen OCI se decide y verifica en F9.
 
-Marimo es un componente auxiliar oficial separado del binario Rust. La
-aplicación, `pyproject.toml` y `uv.lock` se versionan en el repositorio y se
-incluyen en el `.tar.gz` oficial junto al lanzador único
-`genome-population-simulator-ui`. Su suborden `install` ejecuta
-`uv sync --frozen` y crea `.venv`; `run` utiliza ese entorno ya preparado y
-nunca descarga, resuelve o actualiza dependencias.
-`.venv`, CPython y `uv` no se distribuyen dentro del paquete y Marimo no se
-incrusta ni enlaza dentro del binario Rust. La imagen OCI de v1 permanece
-exclusivamente CLI: no contiene la aplicación, Python, `uv` ni un puerto UI.
-Así conserva el enlace local confirmado sin abrir una excepción de red dentro
-del contenedor.
-
-La aplicación Marimo de F2 expone su servidor únicamente mediante IPv4
-*loopback* `127.0.0.1`. No existe configuración para enlazarlo con `0.0.0.0`,
-una interfaz LAN u otra dirección, y el acceso remoto queda fuera de alcance.
-En WSL2, la persona usuaria accede mediante `localhost` desde el navegador de
-Windows. El lanzador usa el puerto 2718 por omisión y acepta `--port <n>` solo
-para puertos no privilegiados entre 1024 y 65535, ambos inclusive. Muestra el
-puerto efectivo y, si está ocupado, termina antes de abrir o ejecutar con un
-diagnóstico y un ejemplo para elegir otro; no busca ni selecciona uno
-automáticamente. El puerto no forma parte del TOML biológico ni de
-`EffectiveConfig`. En una sesión interactiva, el lanzador imprime siempre la
-URL completa después de iniciar el servidor y luego intenta abrir el navegador
-predeterminado; bajo WSL2 intenta el navegador predeterminado de Windows. Un
-fallo al abrirlo solo produce un aviso accionable y no detiene el servidor.
-`--no-open` suprime el intento para CI y automatización. Iniciar o abrir esta
-aplicación no ejecuta una simulación. Los demás límites de entorno,
-empaquetado, contratos, proceso, seguridad, persistencia, registros,
-accesibilidad, pruebas y distribución quedan concretados por DTC-058 y deben
-superar la puerta F2.0 antes de incorporarse.
+La aplicación Marimo escucha exclusivamente en `127.0.0.1`. El lanzador usa un
+puerto local predeterminado, permite elegir otro puerto no privilegiado, muestra
+la URL y puede omitir la apertura del navegador. Un puerto ocupado produce un
+diagnóstico. El puerto no pertenece al TOML biológico. Abrir la aplicación no
+ejecuta una simulación.
 
 macOS, Windows nativo y ARM64 no son plataformas oficialmente soportadas en v1.
 Su ampliación requiere comprobar compilación, dependencias, herramientas
@@ -230,12 +206,12 @@ consideran oficialmente validadas hasta incorporarlas a esa matriz.
 10. **El modelo de confianza es proporcional al despliegue.** Los TOML, FASTA y
     demás entradas externas son no confiables y se validan antes de entrar. Los
     ficheros creados por el proceso dentro de su provisional privado se confían
-    frente a un atacante local activo y se protegen frente a errores propios,
+    frente a manipulación local activa y se protegen frente a errores propios,
     interrupciones y corrupción accidental mediante estados, tamaños, SHA-256
     y publicación atómica. La defensa exhaustiva contra symlink, hardlink,
     sustitución concurrente e inodos ajenos pertenece a F9/CI cuando el modelo
     de despliegue la requiera; no condiciona la reproducibilidad científica de
-    F1.
+    F1 ni F2.
 
 ## 4. Dirección de dependencias
 
@@ -581,7 +557,7 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 
 | Componente | Responsabilidad única | Entradas y salidas | Datos que posee o consulta |
 |---|---|---|---|
-| Aplicación Marimo | Editar y revisar configuración, invocar `validate`/`run` y presentar estado sin adquirir semántica | Esquemas/catálogos y acciones humanas → conjunto TOML enlazado, argumentos de proceso, diagnósticos, logs y enlaces | Posee estado multidocumento de formulario y validación; no posee `EffectiveConfig`, reglas biológicas, verdad ni artefactos grandes |
+| Aplicación Marimo | Editar y revisar configuración, invocar `validate`/`run` y presentar estado sin adquirir semántica | Esquema vigente y acciones humanas → TOML general, argumentos de proceso, diagnósticos, resúmenes y enlaces | Posee el estado del formulario y la última validación; no posee `EffectiveConfig`, reglas biológicas, verdad ni artefactos grandes |
 | Admisión de configuración | Leer TOML, conservar su texto exacto, validar y normalizar colecciones numéricas y resolver `DeclaredConfig` en `EffectiveConfig` mediante la matriz de ejes y dominancia | Ficheros TOML y entradas declaradas → configuración efectiva con procedencia, auditoría numérica o diagnósticos localizables | Posee `DeclaredConfig`, ubicaciones, `EffectiveConfig` y registros de suma/normalización; consulta catálogos de capacidades |
 | Identidad de ejecución | Validar IDs aportados, derivar IDs automáticos tipados y comprobar sus ámbitos | Configuración validada, raíz, digest y causas estables → identidades, etiquetas y contexto o colisión | Posee registro, catálogo normativo de campos y prefijos y vectores BLAKE3; no posee datos biológicos |
 | Aleatoriedad reproducible | Obtener o validar la raíz de 256 bits, derivar subsemillas y proporcionar un ChaCha12 local por ámbito nombrado | Raíz, origen, versión y componentes estables → generador auditable | Posee el esquema binario, catálogo normativo de ámbitos y vectores BLAKE3; no posee un RNG global ni interpreta decisiones biológicas |
@@ -727,208 +703,37 @@ indican cómo comprobarlos.
 
 ### 7.1. Admisión y preparación
 
-La aplicación Marimo carga únicamente versiones compatibles de esquema y
-catálogos y mantiene un modelo de formulario multidocumento: exactamente un
-TOML general y cero o varios TOML de escenario identificados, ordenados y
-enlazados mediante rutas relativas. Cada documento tiene previsualización
-visible; la exportación conserva un conjunto autoconsistente y es ese mismo
-conjunto el que se entrega al binario. F2.0 materializa el caso sin escenarios y
-el contrato multidocumento, sin anticipar controles biológicos de Evolución o
-Familias. El servidor de la aplicación enlaza exclusivamente `127.0.0.1`; no
-admite una dirección configurable ni acceso remoto, y WSL2 lo presenta al
-navegador de Windows mediante `localhost`. El lanzador muestra el puerto
-efectivo: 2718 por omisión o el valor no privilegiado solicitado mediante
-`--port`. Una colisión detiene el arranque sin selección automática.
-La URL completa se imprime siempre; salvo con `--no-open`, el lanzador intenta
-abrirla después de que el servidor esté disponible y trata un fallo del
-navegador como aviso, no como caída del servicio. Ninguno de estos pasos invoca
-una simulación.
+En F2, Marimo mantiene un formulario para un único TOML general de la vía
+directa. Puede abrirlo, editar los campos implementados, previsualizar el texto
+resultante y guardarlo en una ruta elegida por la persona usuaria. Los escenarios
+y el conjunto multidocumento se incorporarán cuando una fase posterior tenga su
+primer consumidor real.
 
-DTC-069 concreta la frontera de ficheros. La persona selecciona un directorio;
-un importador inventaría el árbol, localiza el único general y recorre solo los
-escenarios alcanzables. Canonicaliza rutas relativas y, mediante operaciones
-resistentes a sustitución, valida tipo, identidad, enlaces, ausencia de
-ciclos/escapes/extras y estabilidad entre inventario, copia y hash. Copia el
-grafo completo a un provisional privado y solo lo adopta si termina; los
-originales permanecen intactos. Conserva opacamente documentos y campos válidos
-que todavía no tengan controles. La exportación revalida la instantánea y
-publica otro directorio mediante provisional+no-clobber. Los límites son 256
-documentos, 16 MiB por TOML, 64 MiB totales, profundidad 32, ruta UTF-8 de 4096
-bytes y componente de 255 bytes. No hay ZIP/TAR ni selección múltiple manual en
-F2.
+El servidor escucha en `127.0.0.1`. El lanzador muestra la URL, admite un
+puerto local no privilegiado y puede omitir la apertura del navegador. Abrir,
+importar o editar nunca ejecuta una simulación.
 
-`validate` y `run` se crean como procesos con lista de argumentos,
-nunca mediante shell. El estado validado se asocia al digest de todos los
-documentos, sus identidades/enlaces, el contrato y el conjunto ordenado de
-autorizaciones limitadas; editar, añadir, eliminar, reordenar o renombrar un
-documento, o confirmar/retirar una autorización, lo invalida. Un enlace ausente, duplicado o
-ajeno se diagnostica sin ejecutar. Los diagnósticos estructurados regresan a
-documento y campo cuando conservan ubicación, pero el binario decide su
-significado y código de salida.
+Marimo invoca directamente el binario Rust con argumentos separados:
+`validate <general.toml>` y
+`run <general.toml> --output <destino>`. El binario conserva toda la
+validación y semántica. La UI muestra sus diagnósticos, código de salida, progreso
+y enlaces o resúmenes finales. Una edición posterior invalida la última
+validación; `run` solo se habilita mediante una acción explícita.
 
-Si se declara `--simulator-bin`, el lanzador selecciona definitivamente esa
-ruta: ausencia, falta de permiso de ejecución, fallo o incompatibilidad detienen
-sin *fallback*. Sin esa opción, selecciona el ejecutable
-`genome-population-simulator` del paquete cuando existe. Solo cuando el paquete
-o el árbol de desarrollo no lo incluye, resuelve al inicio una única ruta según
-el orden de `PATH`; no encontrarla detiene. Una vez seleccionada una fuente
-existente o resuelta, cualquier fallo detiene y nunca cambia silenciosamente a
-otra. Antes de habilitar las acciones semánticas invoca
-directamente `capabilities --format json`, muestra la ruta elegida y registra
-ruta canónica, versión y SHA-256 en el registro privado de la sesión UI, no en
-el TOML ni en `EffectiveConfig`. La respuesta declara
-`protocol_version: "1"`; la compatibilidad se decide por el protocolo y los
-contratos, no solo por la versión semántica del programa.
+F2 no define un protocolo paralelo de capacidades ni copia contratos a un
+almacén privado. La aplicación y el binario del mismo árbol comparten los
+esquemas versionados del repositorio. Una versión incompatible o una opción no
+implementada produce un diagnóstico y bloquea la acción.
 
-La respuesta separa `catalogued_authorizations` de
-`available_authorizations`. La segunda es un subconjunto canónico de la primera
-y describe exclusivamente opciones cuyo parser, validación y efecto existen en
-ese binario. Marimo solo presenta y transmite la intersección; volver a consultar
-un binario con otra disponibilidad invalida el digest validado. F2.0 conoce el
-catálogo pero no anuncia soporte. F2.2.21 y F2.3.9 incorporan, respectivamente,
-las disponibilidades de matriz vacía y genotipo incompatible junto con toda su
-semántica.
+La persona usuaria puede confirmar únicamente las excepciones específicas que
+el binario F2 implemente. Estas confirmaciones se transmiten como argumentos
+separados y obligan a validar de nuevo. No existe un `--force` general.
 
-El repositorio contiene un directorio de contratos con un
-manifiesto versionado, esquemas, catálogos, capacidades, versiones y SHA-256.
-Marimo solo lee esos bytes locales, recalcula sus huellas y los contrasta con la
-orden informativa. Falta, corrupción o diferencia deja accesible una vista
-diagnóstica, pero deshabilita `Validar` y `Ejecutar`. No busca contratos en el
-sistema, en red ni en otra instalación y no mezcla versiones.
-
-El adaptador de proceso ejecuta sin *shell*
-`validate <general.toml> --diagnostics json [autorizaciones]` o
-`run <general.toml> --diagnostics json --output <destino> [autorizaciones]`.
-La unión cerrada catalogada admite solo `--allow-empty-snv-matrix` y
-`--allow-incompatible-genotypes`, pero cada una solo puede usarse cuando figure
-como disponible conforme a DTC-073. Confirmar cualquiera obliga a crear otro
-digest y repetir `validate`; `run` recibe exactamente los mismos bytes,
-contratos y autorizaciones validados. Una opción no catalogada se rechaza. Usa
-el directorio del TOML general como directorio de trabajo. Solo permite un proceso Rust por
-sesión, cierra su `stdin`, crea un grupo de procesos dedicado, no reutiliza el
-hijo y no reintenta automáticamente. Drena `stdout` y `stderr` concurrentemente
-desde el arranque para que ninguno bloquee al otro. `stdout` queda vacío ante éxito sin
-diagnósticos o contiene un único documento JSON compatible; `stderr` transporta
-registro humano/progreso y no se interpreta como semántica. Se conservan los
-códigos 0/1/2/3/4/5/70. JSON inválido, documentos adicionales, versión
-incompatible o manifiesto final ausente es fallo de protocolo. Una cancelación
-actúa exclusivamente sobre el grupo creado por la UI: SIGINT, 10 segundos,
-SIGTERM, 5 segundos y finalmente SIGKILL, registrando cada transición, drenando
-ambos flujos hasta cierre y esperando todos los descendientes sin dejar
-huérfanos ni publicar una salida parcial como completa.
-
-El servidor usa `marimo run`, nunca `marimo edit`, y exige el token aleatorio;
-`--no-token` no se admite. Terminal, editor, IA, telemetría, compartición e
-instalación automática de paquetes permanecen desactivados. La aplicación no
-expone un explorador general de ficheros: canonicaliza y muestra las rutas
-elegidas, mientras Rust conserva su validación. Ningún texto del formulario se
-convierte en orden, variable de entorno o fragmento de *shell*. El proceso usa
-los permisos de la cuenta local y no promete otro *sandbox*.
-
-El formulario solo persiste mediante exportación explícita; no hay autoguardado,
-recuperación de sesión ni estado biológico en el navegador. `Validar` escribe la
-instantánea TOML visible en un temporal privado 0700, con ficheros 0600, calcula
-el digest del conjunto y lo asocia al estado validado. `Ejecutar` entrega
-exactamente esos bytes; una edición invalida la instantánea. La limpieza solo
-elimina temporales con marcador propio y mismo UID. Configuración efectiva, copias de entrada y
-resultados continúan bajo la autoridad y publicación del binario Rust.
-
-El adaptador TOML crece por fases. En F1 recibe exclusivamente un fichero
-general y conserva una copia exacta de sus bytes. Primero exige
-`config_kind = "general"` y `schema_version = "1"`; una clase o versión distinta
-se rechaza sin interpretar parcialmente el resto. Solo entonces produce la
-configuración declarada con procedencia y ubicaciones y rechaza sintaxis
-inválida, claves duplicadas, campos desconocidos y combinaciones incompatibles.
-En F1 la raíz contiene únicamente semilla, referencia y referencias reducidas;
-vía, ploidía, reglas, entidades poblacionales, eventos y enlaces a escenarios
-son campos fuera de alcance y no se ignoran ni se siguen como rutas. F2 amplía
-esta misma frontera con el conjunto general más cero o varios escenarios; las
-fases propietarias incorporan después fases, eventos, cruces, relaciones y
-reglas cuando exista su primer consumidor real. El catálogo de entradas
-copiadas y el plan de ejecución solo se crean tras la frontera correspondiente.
-
-F1 no expone `ResolutionDomain` ni publica `resolution-evidence`. Resuelve solo
-los valores que consumen sus referencias, usando las identidades y coordenadas
-ya validadas en ese mismo recorrido. La composición A/C/G/T simulada conserva
-un validador numérico específico y una tolerancia efectiva fija de `1e-9`; no
-arrastra el resolvedor ni las colecciones poblacionales genéricas. Cuando
-aparezcan relaciones reales, F2
-aportará loci y posiciones, F6 población↔subpoblación y F7
-fase↔generaciones; cada fase será propietaria de su evidencia, su orden estable
-y sus pruebas. La composición final del retículo se audita en F9.7. Ningún
-proveedor sintético ni una salida derivada se convierte en autoridad runtime.
-
-F2.2 incorpora las primeras colecciones reales de probabilidades y frecuencias
-y F6.2 reutiliza y amplía ese contrato para las colecciones poblacionales. La admisión representará
-como `f64` cada probabilidad,
-frecuencia y tolerancia general y exige que sea finita. Los valores pertenecen a
-`[0,1]`; la tolerancia absoluta pertenece inclusivamente a `[0, 1e-6]` y, si no
-se declara, vale `1e-9`. Cada colección se ordena canónicamente por identidad
-estable y categoría y se suma con Neumaier, sin reducción paralela ni orden
-físico accidental. Se calcula `delta = abs(suma - 1)` y se acepta el borde
-`delta <= tolerancia`. Si la suma aceptada es positiva, finita y normalizable,
-se divide cada valor por ella y se recomputan suma y delta con igual algoritmo y
-orden. Entrada inválida, delta excesivo, suma no positiva/no finita o resultado
-no normalizable detienen la admisión antes de simular.
-
-El registro numérico conserva tolerancia efectiva, definición del orden,
-algoritmo Neumaier y versión del contrato, suma y delta y valores antes y después;
-se incorpora a configuración efectiva y manifiesto. Todo `f64` se serializa en
-decimal de modo que su lectura recupere exactamente el mismo valor. Estas
-condiciones forman parte de la reproducibilidad. La tolerancia general no
-sustituye `0,5/C` ni otra tolerancia específica.
-
-El estimador de recursos consulta el plan y las salidas activadas sin modificar
-la configuración. La raíz v1 contiene exactamente 256 bits y se representa en
-el TOML, `EffectiveConfig` y manifiesto mediante 64 hexadecimales minúsculos. Si
-no fue declarada, el proveedor obtiene 32 bytes del CSPRNG del sistema operativo
-antes de simular, incorpora el valor a la configuración efectiva y registra su
-origen. Un valor mal formado o un fallo del CSPRNG detienen la preparación.
-
-La derivación BLAKE3 de subsemillas usa el contexto ASCII exacto
-`genome_population_simulator/v1/subseed`. Su material binario canónico contiene,
-en orden, los 32 bytes crudos de la raíz, la versión de derivación como `u32`
-big-endian, el número de componentes como `u32` big-endian y cada componente en
-el orden del catálogo normativo. Cada componente contiene el nombre de campo
-ASCII y su valor UTF-8, ambos precedidos por la longitud `u32` big-endian. La
-subsemilla resultante también se presenta como 64 hexadecimales minúsculos y
-cada consumidor recibe con ella un ChaCha12 propio.
-
-El registro de identidades valida los IDs aportados y deriva los automáticos
-con el contexto distinto `genome_population_simulator/v1/id`, el mismo contrato
-binario versionado y las causas definidas en 5.1. Conserva tipo, ámbito, causa y
-etiqueta y rechaza cualquier colisión. El catálogo normativo de F1 fija ámbitos,
-nombres, orden de campos y prefijos; sus vectores prueban ambos contextos. Su
-versión 2 añade `reference_generation`, compuesto únicamente por `reference_id`,
-sin modificar la codificación ni la versión de derivación 1 y conservando
-literalmente los vectores del catálogo 1. La versión 3 añade
-`reference_reduction`. DTC-071 define la versión 4 como superconjunto inmutable:
-conserva las seis filas y vectores v3 y añade los once ámbitos F2 de matriz,
-*indels*, genotipo y fase. `matrix_alternate_allele` usa escenario, referencia,
-secuencia, posición base 1 y `REF`, nunca el `variant_id` todavía inexistente.
-Los demás nombres, componentes y orden son los de §3.1 de decisiones técnicas.
-Un cambio de codificación exige nueva
-versión de derivación; un cambio de ámbitos exige nueva versión de catálogo.
-Ruta, reloj, orden físico, hilo y planificación nunca participan.
-
-El proveedor ofrece los consumidores versionados de DTC-072/075 detrás de una
-frontera pequeña: uniforme abierto, entero acotado por rechazo, categórico,
-Fisher-Yates, selección ponderada estática sin reemplazo, selección dinámica de
-*indels*, intervalos lineal/logarítmico, composición HWE, genotipo F diploide y
-fase. Cada consumidor recibe su ChaCha12
-local, valida antes de consumir, conserva el orden canónico y expone en pruebas
-el recuento de `next_u64`. `fixed`, distribuciones degeneradas, tamaño menor de
-dos y solicitudes de tamaño cero tienen el consumo cero definido. Matemática
-logarítmica usa el mismo `libm` fijado por DTC-067; ningún motor llama utilidades
-aleatorias de conveniencia no versionadas.
-
-El contrato funcional de esta frontera está en REQ-CONF-01 a REQ-CONF-130,
-REQ-FMT-01 a REQ-FMT-07,
-REQ-NOF-01 a REQ-NOF-08, REQ-UI-01 a REQ-UI-15 y REQ-VAL-01 a
-REQ-VAL-56; se comprueba
-principalmente mediante ACE-01, ACE-23, ACE-35, ACE-36, ACE-64, ACE-65,
-ACE-105, ACE-111 y ACE-114 a ACE-117.
-
+Los logs se muestran de forma incremental y los artefactos grandes se presentan
+mediante sus metadatos y enlaces. F2 no necesita un daemon, una base de datos de
+sesiones, un protocolo de cancelación de grupos de procesos ni un sistema de
+expedientes de seguridad. El cierre y la publicación de resultados siguen
+reutilizando los mecanismos locales de F1 frente a fallos accidentales.
 ### 7.2. Referencias y estado biológico
 
 El catálogo de referencias es responsable de identidad, metadatos y acceso a
@@ -1594,17 +1399,11 @@ sitúa en las fronteras que producen o consumen esos recursos. La selección de
 métricas, política de datos sensibles y umbrales de rendimiento se mantiene en
 las decisiones de planificación, sin modificar los criterios funcionales.
 
-El adaptador Marimo escribe cada flujo de proceso en ficheros privados 0600
-bajo `$XDG_STATE_HOME/genome-population-simulator/ui` o su ubicación XDG
-predeterminada. La vista conserva en memoria solo una cola de 1 MiB y pagina
-desde disco. El documento estructurado de `stdout` tiene un límite de 16 MiB y
-`stderr`, 64 MiB por invocación; superar cualquiera termina el grupo y produce
-un error de recursos, sin truncado silencioso. El token de acceso se redacta
-antes de persistir. El almacén completo se limita a 256 MiB y elimina primero
-sesiones terminadas antiguas, nunca la activa, mostrando cada descarte; también
-ofrece una limpieza explícita. Estos logs son estado auxiliar de la interfaz,
-no manifiestos ni resultados de simulación, y nunca se obtienen cargando
-artefactos genómicos completos.
+Marimo presenta `stdout` y `stderr` de forma incremental durante la sesión. No
+los interpreta como verdad biológica ni necesita persistirlos en un almacén
+propio. Los resultados duraderos son los manifiestos y artefactos producidos
+por Rust; la UI los resume a partir de sus metadatos y enlaces, sin cargar
+ficheros genómicos grandes completos.
 
 El registro de reproducibilidad conserva la raíz de 256 bits como 64
 hexadecimales minúsculos, su origen declarado o CSPRNG del sistema operativo,
@@ -1653,7 +1452,7 @@ sección solo organiza las capas técnicas de comprobación.
 | Dominio unitario | Probar tipos, transformaciones e invariantes sin E/S ni procesos externos | Casos TEST de cada REQ biológico y sus ACE |
 | Frontera de componente | Probar traducción de identidades, coordenadas, configuración y errores con dobles de dependencias | Vectores normativos BLAKE3 e IDs; vectores Neumaier con orden canónico, bordes inclusivos, normalización y decimal round-trip; tipos no intercambiables; catálogo diagnóstico y JSON único; comparadores de verdad y contenido técnico; TEST de cada familia |
 | Adaptador | Comprobar lectura, escritura e invocación contra contratos externos | TOML desconocido o duplicado con ubicación; clase/versión inválida; FASTA con `samtools faidx`; SHA-256 con `sha256sum`; manifiestos, configuración efectiva y diagnósticos con otra implementación JSON Schema; `.tar.gz` por listado/extracción; descriptores OCI por inspección/arranque; VCF/BAM/CRAM en sus fases; casos válidos, truncados, corruptos y de borde |
-| Aplicación Marimo | Demostrar paridad, seguridad local, proceso y accesibilidad sin duplicar semántica | Playwright y axe fijados en `uv.lock`; Chromium único con revisión, artefacto y SHA-256 inventariados e instalación explícita repetible sin red; WCAG 2.2 AA para controles propios; teclado, foco, etiquetas, contraste, zoom 200 %, estados no basados solo en color y lector de pantalla; binario falso/real, contratos corruptos y revisión manual separada en Ubuntu/WSL2 |
+| Aplicación Marimo | Demostrar paridad local sin duplicar semántica | Pruebas de controles y recorrido UI→TOML→binario, arranque en `127.0.0.1`, acción explícita, invalidación tras editar, teclado/etiquetas y presentación de un resultado pequeño; la acreditación completa de plataforma y distribución queda en F9 |
 | Propiedad y estadística | Explorar espacios amplios sin confundir variación aleatoria con un invariante | Vectores de derivación por ámbito, independencia al añadir o reordenar observaciones y casos TEST asociados a REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-77, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
 | Recorrido completo | Demostrar que las fronteras componen un paquete trazable | Rechazo previo sin destino, fallo controlado final y SIGKILL provisional; carreras no-clobber y FS sin soporte; comparadores semánticos y de bytes; pruebas WSL2/ext4 y publicación en Ubuntu 24.04 LTS nativo y OCI fijado por digest, incluido su FS, señales, permisos, recursos y procesos externos |
 
@@ -1801,12 +1600,10 @@ simulador o plataformas no verificadas ni promete identidad binaria.
 
 DTC-050 confirma el contrato funcional de reducción, DTC-056 fija las
 coordenadas comunes y DTC-057 el algoritmo uniforme/versionado y su mapa.
-DTC-051 confirma Marimo como interfaz obligatoria sin autoridad biológica;
-DTC-058 resuelve DTPD-117 y concreta versión candidata, entorno, empaquetado,
-contratos, protocolo, seguridad, persistencia, registros, accesibilidad, pruebas
-y distribución. Su
-incorporación queda condicionada a superar la evidencia experimental de F2.0.2; un
-fallo reabre la decisión sin sustituciones silenciosas.
+DTC-051 confirma Marimo como interfaz sin autoridad biológica. DTC-079
+sustituye la concreción sobrediseñada de DTC-058 para F2: entorno bloqueado,
+servidor local, TOML general, invocación directa y pruebas de recorrido. La
+distribución y el endurecimiento permanecen en F9.
 
 DTC-052 asigna a una matriz común las frecuencias SNV iniciales, DTC-054 resuelve
 DTPD-118 con el par TSV+JSON, perfiles, preparación y generación reproducible, y
@@ -1844,21 +1641,20 @@ DTC-067 resuelve DTPD-120 con `poisson-count-v1`, límite `lambda<=2^52`,
 conversión uniforme/consumo RNG exactos y `libm` 0.2.16 sujeto a DTC-043.
 DTC-068 resuelve fuente y receta de los dos ejemplos humanos compactos
 `human_1000g_global_sfs_approx_v1` y
-`human_harris2017_snv12_approx_v1`; F2.2.14 valida sus literales, fuente eLife
+`human_harris2017_snv12_approx_v1`; F2.2.6 valida sus literales, fuente eLife
 fijada, licencia, transformaciones y digests sin procesar el VCF Phase 3. La
 materialización empírica exacta queda en DTF-016/post-v1 y no bloquea F2.2.
-DTC-069 resuelve RAF2-017 con el directorio autocontenido como única unidad
-visible de importación/exportación Marimo, copia/publicación atómicas,
-preservación opaca, límites y corpus de aislamiento/TOCTOU.
+DTC-069 queda aplazada por DTC-079 hasta la primera fase que implemente
+escenarios reales; F2 importa y exporta un único TOML general.
 DTC-070 resuelve RAF2-029: mayores restos fija las cuotas del modo `exact`, una
 permutación independiente por población las asocia a todos los `variant_id` y
 otro flujo obtiene el valor sin consumo para `fixed` o cuotas cero. DTC-071
 publica los literales del catálogo RNG F2 y resuelve RAF2-028. DTC-072 fija
-todos los consumidores aleatorios no Poisson de F2; DTC-073 separa capacidades
-catalogadas de disponibles; DTC-074 hace verificable la plataforma real.
-DTC-075 corrige los bordes continuos, separa selectores estático/dinámico y
-asigna un productor y una evidencia únicos a cada primitiva sin reabrir la
-biología.
+los consumidores aleatorios no Poisson de F2; DTC-073 queda simplificada por
+DTC-079 a mostrar únicamente opciones implementadas por el binario; DTC-074
+mantiene en F9 la evidencia oficial de plataforma. DTC-075 conserva los bordes
+y la separación de selectores, pero no obliga a crear un expediente ni un paso
+independiente para cada primitiva.
 
 Las decisiones base DTPD-001 a DTPD-015 están resueltas. Para cerrar F0 debe
 aprobarse esta división; esa aprobación habilita planificar F1, pero no significa

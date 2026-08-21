@@ -8,7 +8,8 @@ use std::sync::Arc;
 use crate::diagnostics::Diagnostic;
 pub use crate::reference::SequenceClass;
 
-/// F1 solo admite el documento general. Los escenarios se incorporan en F2.
+/// El recorrido vigente solo admite el documento general.
+/// Los escenarios se incorporarán con su primer consumidor biológico real.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfigKind {
     General,

@@ -52,5 +52,6 @@ es `kind = "supplied"`; una referencia simulada no puede ser fuente de una
 reducción en F1. La referencia fuente es la referencia inicial del mismo
 documento y el ID derivado debe ser distinto.
 
-El esquema de escenarios publicado permanece en `config-scenario-v1.md` como
-artefacto documental para F2; el binario F1 no lo carga ni lo interpreta.
+El borrador de escenarios permanece en `config-scenario-v1.md` como artefacto
+documental futuro; el binario F1 no lo carga ni lo interpreta y F2 tampoco lo
+incorpora antes de que exista un consumidor biológico real.

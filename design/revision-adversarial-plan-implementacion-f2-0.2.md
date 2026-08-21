@@ -1,5 +1,9 @@
 # Revisión adversarial del plan de implementación F2 0.2
 
+> **Informe histórico.** La numeración del informe no corresponde al plan F2
+> 0.2 vigente del 21 de agosto. Sus conclusiones sobre el plan anterior quedan
+> sustituidas por DTC-079 y requieren reevaluación proporcional.
+
 ## 1. Cabecera, alcance y método
 
 - **Documento revisado:**

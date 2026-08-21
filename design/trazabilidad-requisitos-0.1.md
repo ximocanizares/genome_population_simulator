@@ -1,5 +1,9 @@
 # Matriz de trazabilidad de requisitos 0.1
 
+> **Actualización F2 — 21 de agosto de 2026.** DTC-079 simplifica la ejecución
+> local y aplaza escenarios hasta su primer consumidor. La asignación de REQ a
+> hitos no cambia; sí se retiran pruebas de infraestructura anticipada.
+
 ## 1. Finalidad y autoridad
 
 Este artefacto enlaza cada requisito funcional con criterios de aceptación, un
@@ -34,7 +38,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-CONF-07 | ACE-01 | F8.1 | Planificada — las tres vías solo pueden cerrarse cuando exista la vía de familias y poblaciones segregantes. |
 | REQ-CONF-08 | ACE-10, ACE-01 | F2.2/F5.2/F7.2 | Planificada — F2 aporta evidencia parcial para matriz SNV e *indels* directos; F5.2 añade SV individuales y TEST-REQ-CONF-08 cierra en F7.2 al cubrir también mutación heredable/de novo de todas las clases. |
 | REQ-CONF-09 | ACE-01 | F8.1 | Planificada — F7 aporta la parte evolutiva y F8 cierra ambas configuraciones poblacionales. |
-| REQ-CONF-10 | ACE-01 | F8.1 | Planificada — F2.0 prepara composición documental; la semántica completa requiere escenarios poblacionales reales. |
+| REQ-CONF-10 | ACE-01 | F8.1 | Planificada — F2 no anticipa escenarios; la composición documental se implementará junto con la primera vía que la consuma. |
 | REQ-CONF-11 | ACE-13 | F7.6 | Planificada — TEST-REQ-CONF-11: ejecutar el escenario «El fichero de un escenario evolutivo debe definir cómo se obtiene la población final desde la» y comparar el resultado observable con el REQ. |
 | REQ-CONF-12 | ACE-14 | F8.1 | Planificada — TEST-REQ-CONF-12: ejecutar el escenario «El fichero de un escenario de familias o poblaciones segregantes debe indicar los parentales, los cruces» y comparar el resultado observable con el REQ. |
 | REQ-CONF-13 | ACE-01 | F9.7 | Planificada — TEST-REQ-CONF-13: comprobar al consolidar la versión que todos los parámetros incorporados por hitos posteriores se proporcionan mediante el fichero general o poblacional correspondiente. |
@@ -622,14 +626,14 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-UI-03 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-03: cubrir controles de escalar/enumeración/booleano, dominios, ausencias y conversión visual de unidades sin pérdida normativa. |
 | REQ-UI-04 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-04: añadir, eliminar y reordenar filas de cada lista/regla y verificar identidad y orden TOML estables. |
 | REQ-UI-05 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-05: editar todos los ámbitos admitidos, rechazar los no permitidos y delegar conflictos de dominancia al binario. |
-| REQ-UI-06 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-06: seleccionar un directorio, copiar atómicamente general+0/N escenarios alcanzables, preservar opacos/espacios y exportar otro directorio no-clobber; corpus DTC-069 cubre rutas, enlaces, ciclos, escapes, extras, TOCTOU y límites. |
-| REQ-UI-07 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-07: invocar `validate`, asociar diagnóstico a campo y demostrar que cualquier edición o cambio de capacidades/autorizaciones disponibles invalida la validación conforme a DTC-073. |
+| REQ-UI-06 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-06: importar, editar y exportar el único TOML general F2 conservando significado, IDs, orden y rutas relativas; escenarios y conjunto multidocumento quedan para su primer consumidor. |
+| REQ-UI-07 | ACE-114 | F2.0 | Planificada — TEST-REQ-UI-07: invocar `validate`, asociar diagnósticos a controles y demostrar que cualquier edición o cambio de autorización implementada invalida la validación. |
 | REQ-UI-08 | ACE-115 | F2.0 | Planificada — TEST-REQ-UI-08: abrir, importar y editar sin ejecución y exigir acción explícita tras validación vigente. |
-| REQ-UI-09 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-UI-09: usar proceso falso y binario real para comprobar argumentos separados, ausencia de shell, autoridad exclusiva del núcleo y que Marimo solo transmite autorizaciones catalogadas y disponibles según DTC-073. |
+| REQ-UI-09 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-UI-09: usar proceso falso y binario real para comprobar argumentos separados, ausencia de shell, autoridad exclusiva del núcleo y transmisión solo de autorizaciones realmente implementadas. |
 | REQ-UI-10 | ACE-115 | F2.0 | Planificada — TEST-REQ-UI-10: rechazar destino vacío/existente y confirmar que la UI no evita ni rebaja la política no-clobber. |
 | REQ-UI-11 | ACE-115 | F2.0 | Planificada — TEST-REQ-UI-11: mostrar estado/código/logs/diagnósticos/resumen y demostrar con artefacto grande que no se carga completo. |
-| REQ-UI-12 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-UI-12: aceptar contrato compatible en todo el grafo copiado, bloquear versiones ausente/anterior/posterior/desconocida sin adopción parcial, distinguir capacidades catalogadas/disponibles DTC-073 y conservar opacamente campos válidos aún sin control. |
-| REQ-UI-13 | ACE-115 | F2.0/F9.7 | Reasignada — F2 prueba localmente instalación desde repositorio, arranque offline, teclado/foco/color/lector y paridad UI; F9.7 cierra la evidencia oficial de plataforma/distribución detectada de DTC-074 y las entregas `.tar.gz`/OCI. |
+| REQ-UI-12 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-UI-12: aceptar el esquema y la interfaz CLI vigentes del binario, bloquear versiones incompatibles y no mostrar opciones futuras. |
+| REQ-UI-13 | ACE-115 | F2.0/F9.7 | Reasignada — F2 prueba instalación desde repositorio, arranque local, teclado/etiquetas/color y paridad UI; F9.7 cierra plataforma, distribución, accesibilidad de entrega y `.tar.gz`/OCI. |
 | REQ-UI-14 | ACE-114, ACE-116 | F2.3 | Planificada — TEST-REQ-UI-14: preparar/vincular, generar o reutilizar matriz, previsualizar perfiles/descartes y confirmar únicamente flags declarados disponibles —genotipos incompatibles o matriz vacía— en Marimo, con equivalencia a argumentos/TOML manuales. |
 | REQ-UI-15 | ACE-114, ACE-117 | F6.4 | Planificada — TEST-REQ-UI-15: preparar/validar mediante Rust, resumir panel, mapear poblaciones, editar tabla por bloque, mostrar controles compatibles y previsualizaciones, exigir validación vigente y enlazar tres tablas sin carga completa, con paridad Marimo↔TOML. |
 | REQ-RG-01 | ACE-56, ACE-100 | F3.3 | Planificada — TEST-REQ-RG-01: ejecutar el escenario «Los BAM o CRAM deben incluir grupos de lectura coherentes que identifiquen como mínimo el evento» y comparar el resultado observable con el REQ. |
@@ -739,7 +743,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-VAL-51 | ACE-111, ACE-64 | F9.7 | Reasignada por DTC-078 — las fases validan sus propios consumidores y F9.7 comprueba la resolución completa de REQ-CONF-116 a REQ-CONF-123. |
 | REQ-VAL-52 | ACE-112, ACE-64 | F1.6 | Superada — TEST-REQ-VAL-52: exclusividad, dominios, origen, objetivo y espacio se rechazan sin FASTA/mapa derivados ni destino parcial. Evidencia vigente: `evidence/f1-reimplementation/f1-complete-test-req-matrix.tsv`. |
 | REQ-VAL-53 | ACE-113, ACE-64 | F1.6 | Superada — TEST-REQ-VAL-53: el validador de bytes JSON releídos detecta campos desconocidos, truncado, clases, hueco/solape, rango, orden, orientación, catálogo derivado reordenado o reclasificado y reconstrucción alterados. Evidencia vigente: `evidence/f1-reimplementation/f1-complete-test-req-matrix.tsv`. |
-| REQ-VAL-54 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-VAL-54: comparar conjunto UI/manual hasta `EffectiveConfig` o diagnóstico, incluidos enlaces/rutas relativas, y rechazar incompatibilidad de versión app↔binario. |
+| REQ-VAL-54 | ACE-114, ACE-115 | F2.0 | Planificada — TEST-REQ-VAL-54: comparar el TOML general producido por UI y manual hasta `EffectiveConfig` o diagnóstico y rechazar incompatibilidad app↔binario. |
 | REQ-VAL-55 | ACE-116 | F2.3 | Planificada — TEST-REQ-VAL-55: validar par/hashes/referencia, `alt_af`, intervalos semiabiertos/perfiles, cuotas, permutación, reordenación, consumo cero, separación asignación/valor, catálogo DTC-071 y algoritmos DTC-072/075 mediante corpus/productor independientes, incluidos bordes 0/1 y selector indel dinámico. |
 | REQ-VAL-56 | ACE-117 | F6.4 | Planificada — TEST-REQ-VAL-56: con oráculo independiente verificar referencia única, paquete/TSV, productor, F, K, fuentes, x\|x+1, C, IDs, cabeceras/orden/claves exactos de assignments/segments/frequencies, segments K=0, totales intactos/recombinados y `n_h/C`; probar rechazos de modos/modelos, corrupción, repetición y aislamiento. |
 | REQ-MAN-01 | ACE-22 | F3.5 | Planificada — F1 crea el manifiesto general; el REQ se cierra con manifiestos de eventos reales. |
@@ -835,7 +839,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-MAN-91 | ACE-116, ACE-22 | F2.3 | Planificada — TEST-REQ-MAN-91: inspeccionar clases/versiones/rutas/digests, referencia, poblaciones, candidatos/descartes/activos, perfiles/parámetros, HWE/F, catálogo/derivación/algoritmos RNG DTC-071/072/075, `matrix_candidate_count` o ausencia normativa, autorizaciones DTC-073 y valores esperados/realizados. |
 | REQ-MAN-92 | ACE-117, ACE-22 | F6.4 | Planificada — TEST-REQ-MAN-92: inspeccionar panel/digests, ejes/modelos, C/r, productores/cruces, IDs, recuentos totales/intactos/recombinados, frecuencias, genotipos, F, RNG y enlaces clase/versión/ruta/tamaño/SHA de las tres tablas sin filas duplicadas ni columnas de clase/versión. |
 | REQ-SAL-01 | ACE-04 | F1.5 | Superada — TEST-REQ-SAL-01: cada referencia inicial produce un único FASTA y el FAI de aceptación queda fuera de la salida normal; el testigo compartido de reducción demuestra el FASTA derivado único y catalogado, sin atribuir cierre a F1.6. |
-| REQ-SAL-02 | ACE-34, ACE-78, ACE-14 | F8.5 | Planificada — F2 aporta evidencia parcial en F2.4.2/F2.4.5/F2.4.8 para `truth.jsonl` de creación directa, reconstrucción sin VCF, esquemas/semántica y longitud/SHA-256; TEST-REQ-SAL-02 cierra en F8.5 al cubrir todos los modos y estados. |
+| REQ-SAL-02 | ACE-34, ACE-78, ACE-14 | F8.5 | Planificada — F2 aporta evidencia parcial en F2.4.1/F2.4.3/F2.4.4 para `truth.jsonl` de creación directa, reconstrucción sin VCF, esquemas/semántica y longitud/SHA-256; TEST-REQ-SAL-02 cierra en F8.5 al cubrir todos los modos y estados. |
 | REQ-SAL-03 | ACE-03 | F1.4 | Superada — TEST-REQ-SAL-03 ejecuta `publication_process::configuration_copy_is_byte_exact_linked_and_matches_external_sha256`: copia byte a byte el TOML general realmente usado y verifica enlace, clase, ruta, tamaño y SHA-256 externo. |
 | REQ-SAL-04 | ACE-94 | F3.5 | Planificada — F1 aporta el manifiesto general; el cierre exige todos los manifiestos de evento aplicables. |
 | REQ-SAL-05 | ACE-34 | F9.1 | Planificada — TEST-REQ-SAL-05: ejecutar el escenario «Una ejecución solo debe terminar con éxito cuando haya producido todas las salidas mínimas y todas» y comparar el resultado observable con el REQ. |
@@ -845,7 +849,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-SAL-09 | ACE-46 | F3.4 | Planificada — TEST-REQ-SAL-09: ejecutar «Cuando se simulen lecturas, la verdad conocida debe conservar las diferencias entre la secuencia original y» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-SAL-10 | ACE-48 | F4.7 | Planificada — TEST-REQ-SAL-10: solicitar «Fichero estructurado reutilizable de perfil empírico como salida activada» y comprobar su rechazo o ausencia por estar retirada. |
 | REQ-SAL-11 | ACE-59 | F3.3 | Planificada — TEST-REQ-SAL-11: ejecutar el escenario «Todo BAM o CRAM final debe incluir su índice compatible entre las salidas activadas» y comparar el resultado observable con el REQ. |
-| REQ-SAL-12 | ACE-33, ACE-65, ACE-108, ACE-61 | F5.5 | Planificada — F2 aporta evidencia parcial en F2.5.9/F2.5.10/F2.5.12 para texto o BGZF+único índice, publicación atómica, consulta 1.24 y complemento condicional; TEST-REQ-SAL-12 cierra en F5.5 con todas las clases. |
+| REQ-SAL-12 | ACE-33, ACE-65, ACE-108, ACE-61 | F5.5 | Planificada — F2 aporta evidencia parcial en F2.5.4/F2.5.5/F2.5.6 para texto o BGZF+único índice, publicación atómica, consulta 1.24 y complemento condicional; TEST-REQ-SAL-12 cierra en F5.5 con todas las clases. |
 | REQ-SAL-13 | ACE-64 | F3.4 | Planificada — TEST-REQ-SAL-13: ejecutar «Siempre que la ejecución genere FASTQ o BAM o CRAM, los resultados estructurados de su validación» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-SAL-14 | ACE-80 | F5.4 | Planificada — TEST-REQ-SAL-14: solicitar «La primera versión no admite un catálogo FASTA de TE como entrada ni como salida activada» y comprobar su rechazo o ausencia por estar retirada. |
 | REQ-SAL-15 | ACE-78 | F7.7 | Planificada — TEST-REQ-SAL-15: ejecutar «Toda ejecución evolutiva debe producir el historial estructurado resumido de todas sus generaciones y los estados» y comprobar el estado o artefacto resultante y su identidad. |

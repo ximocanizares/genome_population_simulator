@@ -4,7 +4,7 @@ TEST-REQ-CONF-04	REQ-CONF-04	pass	F1.2	tests/config_validation.rs::multiple_sequ
 TEST-REQ-CONF-05	REQ-CONF-05	pass	F1.2	tests/config_validation.rs::multiple_sequences_preserve_order_classes_lengths_and_total_size	tamaño total es la suma exacta comprobada de varias secuencias con orden, longitudes y clases distintas
 TEST-REQ-CONF-07	REQ-CONF-07	reassigned	F8.1	-	las tres vías solo pueden cerrarse cuando exista la vía familiar
 TEST-REQ-CONF-09	REQ-CONF-09	reassigned	F8.1	-	F7 aporta evolución y F8 cierra ambas configuraciones poblacionales
-TEST-REQ-CONF-10	REQ-CONF-10	reassigned	F8.1	-	F2.0 prepara composición, pero F8 cierra escenarios poblacionales reales
+TEST-REQ-CONF-10	REQ-CONF-10	reassigned	F8.1	-	La primera vía consumidora implementará la composición; F2 no anticipa escenarios y F8 cierra los poblacionales reales
 TEST-REQ-CONF-13	REQ-CONF-13	reassigned	F9.7	-	no puede cerrarse hasta comprobar todos los parámetros añadidos en hitos posteriores
 TEST-REQ-CONF-14	REQ-CONF-14	pass	F1.2	tests/effective_config.rs::changing_a_toml_parameter_changes_the_effective_value_without_code_changes	editar solo TOML cambia el valor efectivo sin modificar código
 TEST-REQ-CONF-16	REQ-CONF-16	reassigned	F9.7	-	no puede cerrarse hasta comprobar todos los parámetros aleatorios de la versión
@@ -21,7 +21,7 @@ TEST-REQ-CONF-43	REQ-CONF-43	reassigned	F7.6	-	requiere modelar y consumir activ
 TEST-REQ-CONF-65	REQ-CONF-65	reassigned	F5.3	-	la ploidía efectiva por secuencia se cierra con la ploidía general real
 TEST-REQ-CONF-83	REQ-CONF-83	reassigned	F4.2	-	requiere aplicar homogéneamente un perfil versionado durante generación de lecturas
 TEST-REQ-CONF-84	REQ-CONF-84	reassigned	F4.2	-	requiere modelar y aplicar sustituciones completas del perfil de errores
-TEST-REQ-CONF-106	REQ-CONF-106	reassigned	F6.2	-	DTC-078 traslada la normalización a las primeras frecuencias poblacionales reales
+TEST-REQ-CONF-106	REQ-CONF-106	reassigned	F2.2/F6.2	-	F2.2 inicia la normalización con matriz/espectros y F6.2 la amplía a frecuencias poblacionales
 TEST-REQ-CONF-116	REQ-CONF-116	reassigned	F9.7	-	requiere auditar valores generales, predeterminados o bases de todos los parámetros incorporados por hitos posteriores
 TEST-REQ-CONF-117	REQ-CONF-117	reassigned	F9.7	-	las fases prueban sus jerarquías reales y F9.7 audita la composición completa
 TEST-REQ-CONF-118	REQ-CONF-118	reassigned	F9.7	-	las fases prueban dominancia con consumidores reales y F9.7 cierra la composición
@@ -33,5 +33,5 @@ TEST-REQ-IND-13	REQ-IND-13	reassigned	F2.2	-	requiere distribuir eventos reales 
 TEST-REQ-IND-15	REQ-IND-15	reassigned	F2.3	-	requiere comprobar el consumo aislado de la región individual durante creación directa
 TEST-REQ-IND-21	REQ-IND-21	reassigned	F2.2	-	requiere aplicar el valor espacial resuelto al generar eventos reales
 TEST-REQ-REP-02	REQ-REP-02	reassigned	F7.6	-	requiere representar intervalos de generaciones y consumir la tasa efectiva en reproducción
-TEST-REQ-VAL-40	REQ-VAL-40	reassigned	F6.2	-	requiere validar además la tolerancia específica 0,5/C del modo controlado y su separación de la tolerancia general
+TEST-REQ-VAL-40	REQ-VAL-40	reassigned	F2.2/F6.2	-	F2.2 valida la tolerancia general; F6.2 añade 0,5/C del modo controlado y su separación normativa
 TEST-REQ-VAL-51	REQ-VAL-51	reassigned	F9.7	-	las fases validan sus consumidores y F9.7 audita REQ-CONF-116 a REQ-CONF-123 completos

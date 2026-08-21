@@ -67,7 +67,7 @@ fn f1_2_audits_exactly_36_test_req_cases_without_claiming_future_biology() {
         ("REQ-CONF-65", "F5.3"),
         ("REQ-CONF-83", "F4.2"),
         ("REQ-CONF-84", "F4.2"),
-        ("REQ-CONF-106", "F6.2"),
+        ("REQ-CONF-106", "F2.2/F6.2"),
         ("REQ-CONF-116", "F9.7"),
         ("REQ-CONF-117", "F9.7"),
         ("REQ-CONF-118", "F9.7"),
@@ -79,7 +79,7 @@ fn f1_2_audits_exactly_36_test_req_cases_without_claiming_future_biology() {
         ("REQ-IND-15", "F2.3"),
         ("REQ-IND-21", "F2.2"),
         ("REQ-REP-02", "F7.6"),
-        ("REQ-VAL-40", "F6.2"),
+        ("REQ-VAL-40", "F2.2/F6.2"),
         ("REQ-VAL-51", "F9.7"),
     ]);
 
@@ -142,10 +142,12 @@ fn f1_2_audits_exactly_36_test_req_cases_without_claiming_future_biology() {
                         .is_none(),
                     "reasignación repetida: {requirement}"
                 );
-                assert!(
-                    ROADMAP.contains(&format!("**{milestone}. ")),
-                    "el destino {milestone} de {requirement} no existe en la hoja de ruta"
-                );
+                for destination in milestone.split('/') {
+                    assert!(
+                        ROADMAP.contains(&format!("**{destination}. ")),
+                        "el destino {destination} de {requirement} no existe en la hoja de ruta"
+                    );
+                }
             }
             other => panic!("estado no admitido {other}: {test_id}"),
         }

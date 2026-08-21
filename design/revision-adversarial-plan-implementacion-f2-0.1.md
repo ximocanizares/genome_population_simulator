@@ -1,5 +1,9 @@
 # Revisión adversarial del plan de implementación de F2 0.1
 
+> **Informe histórico.** Revisa una versión sustituida el 21 de agosto de 2026
+> por el plan F2 0.2 y DTC-079; no impone sus ampliaciones de amenaza o
+> infraestructura al plan vigente.
+
 ## 1. Cabecera, alcance y método
 
 - **Documento revisado:**

@@ -1,5 +1,8 @@
 # Revisión adversarial del plan de implementación F2 0.3
 
+> **Informe histórico.** Revisa el plan de 130 pasos sustituido por F2 0.2 y no
+> es autoridad para reintroducir expedientes, protocolos o hardening local.
+
 ## 1. Alcance y método
 
 - **Documento revisado:**

@@ -37,7 +37,7 @@
 | `catalogs/diagnostics-v*.tsv`, `id-classes-v1.tsv` | A | Conservar los contratos publicados usados por CLI, IDs y manifiesto mínimo |
 | `catalogs/parameter-families-v1.tsv` | A/B | Conservar la compatibilidad publicada; F1 solo consume las familias que permanezcan tras F1.2 |
 | `catalogs/subseed-scopes-v1.tsv` a `v3.tsv` | A/B | Conservar bytes y vectores; activar solo generación y reducción en F1.3 |
-| `schemas/config-general-v1.md`, `config-scenario-v1.md` | A/B | Mantener el esquema general F1 y conservar el esquema de escenario publicado para F2; el runtime F1 no carga ni compone escenarios |
+| `schemas/config-general-v1.md`, `config-scenario-v1.md` | A/B | Mantener el esquema general F1 y conservar el borrador histórico de escenario para su futura fase propietaria; F1 y F2 no cargan ni componen escenarios sin consumidor |
 | `schemas/diagnostics-v1.schema.json` | A | Conservar y probar externamente |
 | `schemas/effective-config-v1.schema.json` | A/D | Simplificar a consumidores F1 en F1.2 |
 | `schemas/manifest-general-v1.schema.json`, `results-common-v1.schema.json` | A/D | Simplificar al manifiesto general y catálogo únicos en F1.4 |
