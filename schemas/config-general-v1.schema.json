@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://genome-population-simulator.local/schemas/config-general-v1.schema.json",
+  "title": "Configuración general v1",
+  "description": "Vista estructural para autoría del TOML general. El binario Rust conserva la validación semántica.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["config_kind", "schema_version", "reference"],
+  "properties": {
+    "config_kind": {
+      "const": "general",
+      "x-gps-tab": "General/Ejecución",
+      "x-gps-control": "constant"
+    },
+    "schema_version": {
+      "const": "1",
+      "x-gps-tab": "General/Ejecución",
+      "x-gps-control": "constant"
+    },
+    "seed": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Semilla raíz opcional de 256 bits.",
+      "x-gps-tab": "General/Ejecución",
+      "x-gps-control": "text"
+    },
+    "reference": {
+      "oneOf": [
+        { "$ref": "#/$defs/simulated_reference" },
+        { "$ref": "#/$defs/supplied_reference" }
+      ],
+      "x-gps-tab": "Genoma"
+    },
+    "reduced_references": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/reduced_reference" },
+      "default": [],
+      "x-gps-tab": "Genoma",
+      "x-gps-control": "table"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "x-gps-control": "text"
+    },
+    "sequence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "class", "length"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "class": {
+          "type": "string",
+          "enum": ["chromosome", "scaffold"],
+          "x-gps-control": "select"
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615,
+          "x-gps-control": "integer",
+          "x-gps-unit": "bases"
+        }
+      }
+    },
+    "composition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["A", "C", "G", "T"],
+      "properties": {
+        "A": { "$ref": "#/$defs/base_fraction" },
+        "C": { "$ref": "#/$defs/base_fraction" },
+        "G": { "$ref": "#/$defs/base_fraction" },
+        "T": { "$ref": "#/$defs/base_fraction" }
+      }
+    },
+    "base_fraction": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "x-gps-control": "decimal-text",
+      "x-gps-unit": "fraction"
+    },
+    "simulated_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "composition", "sequences"],
+      "properties": {
+        "kind": {
+          "const": "simulated",
+          "x-gps-control": "select"
+        },
+        "id": { "$ref": "#/$defs/identifier" },
+        "composition": { "$ref": "#/$defs/composition" },
+        "sequences": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sequence" },
+          "x-gps-control": "table"
+        }
+      }
+    },
+    "supplied_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "fasta", "sequences"],
+      "properties": {
+        "kind": {
+          "const": "supplied",
+          "x-gps-control": "select"
+        },
+        "id": { "$ref": "#/$defs/identifier" },
+        "fasta": {
+          "type": "string",
+          "minLength": 1,
+          "x-gps-control": "path"
+        },
+        "sequences": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sequence" },
+          "x-gps-control": "table"
+        }
+      }
+    },
+    "reduced_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source_reference_id", "region_size_bases"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "source_reference_id": { "$ref": "#/$defs/identifier" },
+        "region_size_bases": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615,
+          "x-gps-control": "integer",
+          "x-gps-unit": "bases"
+        },
+        "target_bases": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615,
+          "x-gps-control": "integer",
+          "x-gps-unit": "bases"
+        },
+        "reduction_percent": {
+          "type": "number",
+          "exclusiveMinimum": 0.0,
+          "exclusiveMaximum": 100.0,
+          "x-gps-control": "decimal-text",
+          "x-gps-unit": "percent"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["target_bases"],
+          "not": { "required": ["reduction_percent"] }
+        },
+        {
+          "required": ["reduction_percent"],
+          "not": { "required": ["target_bases"] }
+        }
+      ]
+    }
+  }
+}

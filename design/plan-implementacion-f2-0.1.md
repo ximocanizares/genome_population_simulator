@@ -5,8 +5,7 @@
 - **Título:** implementación simplificada de F2, verdad genómica mínima.
 - **Versión:** 0.2.
 - **Fecha:** 21 de agosto de 2026.
-- **Estado:** simplificado tras detectar que la versión 0.1 repetía el
-  sobrediseño retirado de F1; pendiente de revisión y aprobación.
+- **Estado:** simplificado, revisado y aprobado para ejecución.
 - **Base:** F1 cerrada en `e14705a` y documentada en `efca265`.
 - **Alcance:** F2.0–F2.5.
 - **Autoridad:** especificación 0.2, arquitectura 0.2, DTC-079, hoja de ruta y
@@ -97,7 +96,7 @@ artefacto de evidencia independiente.
 **Resultado:** la interfaz local arranca, edita el TOML general vigente, invoca
 el binario y presenta sus diagnósticos y resultados.
 
-- ☐ F2.0.1. Exponer a Marimo la configuración F1 ya implementada.
+- ✅ F2.0.1. Exponer a Marimo la configuración F1 ya implementada.
   - Depende de: F1 cerrada.
   - Procede de: REQ-UI-01 a REQ-UI-03, DTC-051 y DTC-079.
   - Cambia: una frontera de lectura del esquema y los diagnósticos F1 existentes
@@ -107,7 +106,7 @@ el binario y presenta sus diagnósticos y resultados.
     el mismo documento o diagnóstico que por CLI, y los campos F2 siguen
     rechazados hasta su hito propietario.
 
-- ☐ F2.0.2. Incorporar el entorno Marimo bloqueado y un lanzador local pequeño.
+- ✅ F2.0.2. Incorporar el entorno Marimo bloqueado y un lanzador local pequeño.
   - Depende de: F2.0.1.
   - Procede de: REQ-UI-01, REQ-UI-13, DTC-051 y DTC-079.
   - Cambia: `pyproject.toml`, `uv.lock`, aplicación y lanzador que enlaza
@@ -117,7 +116,7 @@ el binario y presenta sus diagnósticos y resultados.
     arranque posterior sin red, puerto ocupado y confirmación de que abrir no
     ejecuta. La instalación distribuible sin descarga previa se valida en F9.
 
-- ☐ F2.0.3. Implementar edición e importación/exportación del TOML general.
+- ✅ F2.0.3. Implementar edición e importación/exportación del TOML general.
   - Depende de: F2.0.1–F2.0.2.
   - Procede de: REQ-UI-02 a REQ-UI-06, DTC-051 y DTC-079.
   - Cambia: pestañas previstas, controles solo para capacidades implementadas,
@@ -125,7 +124,7 @@ el binario y presenta sus diagnósticos y resultados.
   - Se comprueba con: ciclo TOML→UI→TOML→Rust equivalente, orden estable,
     nombres con espacios y errores del esquema visibles.
 
-- ☐ F2.0.4. Conectar `validate` y `run` con argumentos separados.
+- ✅ F2.0.4. Conectar `validate` y `run` con argumentos separados.
   - Depende de: F2.0.3.
   - Procede de: REQ-UI-07 a REQ-UI-12 y DTC-079.
   - Cambia: comprobación simple de versión mediante `--version`, acción
@@ -136,7 +135,7 @@ el binario y presenta sus diagnósticos y resultados.
     versión incompatible, destino existente, fallo y artefacto grande no
     cargado.
 
-- ☐ F2.0.5. Cerrar la paridad y usabilidad local de F2.0.
+- ✅ F2.0.5. Cerrar la paridad y usabilidad local de F2.0.
   - Depende de: F2.0.2–F2.0.4.
   - Procede de: REQ-UI-01 a REQ-UI-13, REQ-VAL-54 y ACE-114/115.
   - Cambia: pruebas de recorrido, etiquetas, teclado, foco y estados no basados

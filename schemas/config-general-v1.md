@@ -1,5 +1,10 @@
 # Esquema de autoría TOML: configuración general v1 en F1
 
+La vista estructural versionada que puede consumir la interfaz local se publica
+en `config-general-v1.schema.json`. Describe forma, tipos, dominios básicos y
+anotaciones de autoría, pero no sustituye la admisión ni la validación semántica
+del binario Rust.
+
 F1 admite un único documento general, con cabecera obligatoria:
 
 ```toml

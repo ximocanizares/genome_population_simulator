@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "ui"))
+
+from config_editor import (  # noqa: E402
+    EditorError,
+    editor_integer,
+    ordered_editor_rows,
+    parse_general_toml,
+    render_general_toml,
+)
+
+
+class ConfigEditorTests(unittest.TestCase):
+    def test_minimal_and_reordered_fixtures_round_trip_semantically(self) -> None:
+        fixtures = ROOT / "tests" / "fixtures" / "config"
+        first = parse_general_toml((fixtures / "general-minimal.toml").read_text())
+        reordered = parse_general_toml(
+            (fixtures / "general-minimal-reordered.toml").read_text()
+        )
+
+        self.assertEqual(first, reordered)
+        self.assertEqual(parse_general_toml(render_general_toml(first)), first)
+
+    def test_supplied_paths_with_spaces_and_exact_percent_survive_round_trip(self) -> None:
+        source = """config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "supplied"
+id = "reference-main"
+fasta = "inputs/reference with spaces.fa"
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 10
+[[reduced_references]]
+id = "reference-small"
+source_reference_id = "reference-main"
+region_size_bases = 4
+reduction_percent = 33.333333333333333333
+"""
+
+        parsed = parse_general_toml(source)
+        rendered = render_general_toml(parsed)
+        reparsed = parse_general_toml(rendered)
+
+        self.assertEqual(reparsed, parsed)
+        self.assertIn('fasta = "inputs/reference with spaces.fa"', rendered)
+        self.assertIn("33.333333333333333333", rendered)
+
+    def test_sequence_and_reduction_order_are_normative(self) -> None:
+        source = """config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "supplied"
+id = "reference-main"
+fasta = "source.fa"
+[[reference.sequences]]
+id = "chr2"
+class = "chromosome"
+length = 20
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 10
+[[reduced_references]]
+id = "second"
+source_reference_id = "reference-main"
+region_size_bases = 4
+target_bases = 8
+[[reduced_references]]
+id = "first"
+source_reference_id = "reference-main"
+region_size_bases = 2
+target_bases = 5
+"""
+
+        parsed = parse_general_toml(source)
+        rendered = render_general_toml(parsed)
+
+        self.assertLess(rendered.index('id = "chr2"'), rendered.index('id = "chr1"'))
+        self.assertLess(rendered.index('id = "second"'), rendered.index('id = "first"'))
+
+    def test_future_and_branch_incompatible_fields_are_visible_errors(self) -> None:
+        minimal = (ROOT / "tests" / "fixtures" / "config" / "general-minimal.toml").read_text()
+        cases = [
+            minimal.replace("[reference]", "ploidy = 2\n[reference]", 1),
+            minimal.replace(
+                'kind = "simulated"', 'kind = "simulated"\nfasta = "source.fa"', 1
+            ),
+            minimal.replace("length = 1000", 'length = "1000"', 1),
+            minimal.replace(
+                "[reference]", 'seed = ""\n[reference]', 1
+            ),
+            minimal.replace(
+                "[reference]",
+                f'seed = "{"A" * 64}"\n[reference]',
+                1,
+            ),
+        ]
+        for source in cases:
+            with self.subTest(source=source):
+                with self.assertRaises(EditorError):
+                    parse_general_toml(source)
+
+    def test_editor_integers_never_truncate_and_row_order_is_explicit(self) -> None:
+        self.assertEqual(editor_integer(2.0, "length"), 2)
+        self.assertEqual(editor_integer("3", "length"), 3)
+        for value in [1.5, float("nan"), "2.0", True, None]:
+            with self.subTest(value=value):
+                with self.assertRaises(EditorError):
+                    editor_integer(value, "length")
+
+        rows = [{"order": 2, "id": "second"}, {"order": 1, "id": "first"}]
+        self.assertEqual(
+            [row["id"] for row in ordered_editor_rows(rows, "rows")],
+            ["first", "second"],
+        )
+        for invalid in [
+            [{"order": 1}, {"order": 1}],
+            [{"order": 0}],
+            [{"order": 1.5}],
+        ]:
+            with self.subTest(rows=invalid):
+                with self.assertRaises(EditorError):
+                    ordered_editor_rows(invalid, "rows")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,203 @@
+"""Invocación local del binario Rust mediante argumentos separados."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+from typing import Any, Sequence
+
+SUPPORTED_BINARY_NAME = "genome-population-simulator"
+SUPPORTED_BINARY_VERSION = "0.1.0"
+DEFAULT_BINARY = Path(__file__).resolve().parents[1] / "target" / "debug" / SUPPORTED_BINARY_NAME
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class ProcessAdapterError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class ProcessResult:
+    command: tuple[str, ...]
+    returncode: int
+    stdout: str
+    stderr: str
+    diagnostics: dict[str, Any] | None
+    output_directory: Path | None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.returncode == 0
+
+
+@dataclass(frozen=True)
+class ValidatedSession:
+    toml: str
+    binary: Path
+    binary_version: str
+    base_directory: Path
+
+    def matches(self, toml: str, binary: Path, base_directory: Path) -> bool:
+        return (
+            self.toml == toml
+            and self.binary == binary.resolve()
+            and self.base_directory == base_directory.resolve()
+        )
+
+
+def check_binary_version(binary: Path) -> tuple[Path, str]:
+    resolved = binary.expanduser().resolve()
+    try:
+        completed = subprocess.run(
+            [str(resolved), "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ProcessAdapterError(f"no se puede consultar el binario: {error}") from error
+    expected = f"{SUPPORTED_BINARY_NAME} {SUPPORTED_BINARY_VERSION}"
+    observed = completed.stdout.strip()
+    if completed.returncode != 0 or observed != expected:
+        raise ProcessAdapterError(
+            f"binario incompatible: se esperaba {expected!r} y se obtuvo {observed!r}"
+        )
+    return resolved, SUPPORTED_BINARY_VERSION
+
+
+def validate_toml(binary: Path, toml: str, base_directory: Path) -> tuple[ProcessResult, ValidatedSession | None]:
+    resolved_binary, version = check_binary_version(binary)
+    resolved_base = _base_directory(base_directory)
+    result = _invoke(
+        resolved_binary,
+        ["validate"],
+        toml,
+        resolved_base,
+        output_directory=None,
+    )
+    session = (
+        ValidatedSession(toml, resolved_binary, version, resolved_base)
+        if result.succeeded
+        else None
+    )
+    return result, session
+
+
+def run_toml(
+    session: ValidatedSession,
+    toml: str,
+    binary: Path,
+    base_directory: Path,
+    output_directory: Path,
+) -> ProcessResult:
+    if not session.matches(toml, binary, base_directory):
+        raise ProcessAdapterError("la configuración cambió después de validar")
+    declared_destination = output_directory.expanduser()
+    destination = (
+        declared_destination
+        if declared_destination.is_absolute()
+        else session.base_directory / declared_destination
+    ).resolve()
+    if destination.exists():
+        raise ProcessAdapterError(f"el destino ya existe: {destination}")
+    return _invoke(
+        session.binary,
+        ["run"],
+        toml,
+        session.base_directory,
+        output_directory=destination,
+    )
+
+
+def _invoke(
+    binary: Path,
+    action: Sequence[str],
+    toml: str,
+    base_directory: Path,
+    output_directory: Path | None,
+) -> ProcessResult:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=".gps-marimo-",
+            suffix=".toml",
+            dir=base_directory,
+            delete=False,
+        ) as temporary:
+            temporary.write(toml)
+            temporary_path = Path(temporary.name)
+        command = [str(binary), *action, str(temporary_path), "--diagnostics", "json"]
+        if output_directory is not None:
+            command.extend(["--output", str(output_directory)])
+        completed = subprocess.run(
+            command,
+            cwd=base_directory,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return ProcessResult(
+            command=tuple(command),
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            diagnostics=_diagnostics(completed.stdout),
+            output_directory=output_directory if completed.returncode == 0 else None,
+        )
+    except OSError as error:
+        raise ProcessAdapterError(f"falló la invocación local: {error}") from error
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _base_directory(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if not resolved.is_dir():
+        raise ProcessAdapterError(f"el directorio base no existe: {resolved}")
+    return resolved
+
+
+def _diagnostics(stdout: str) -> dict[str, Any] | None:
+    if not stdout.strip():
+        return None
+    try:
+        document = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def diagnostic_summary(document: dict[str, Any] | None) -> str:
+    """Locate Rust diagnostics for display without interpreting their semantics."""
+    if document is None:
+        return ""
+    diagnostics = document.get("diagnostics")
+    if not isinstance(diagnostics, list):
+        return ""
+    lines = []
+    for item in diagnostics:
+        if not isinstance(item, dict):
+            continue
+        context = item.get("context")
+        context = context if isinstance(context, dict) else {}
+        field = context.get("field", context.get("fields", "documento"))
+        field_text = str(field)
+        tab = (
+            "General/Ejecución"
+            if field_text in {"config_kind", "schema_version", "seed"}
+            else "Genoma"
+        )
+        location = context.get("location")
+        suffix = f" · {location}" if location is not None else ""
+        lines.append(
+            f"{tab} · {field_text}{suffix} · "
+            f"{item.get('code', 'diagnóstico')}: {item.get('message', '')}"
+        )
+    return "\n".join(lines)

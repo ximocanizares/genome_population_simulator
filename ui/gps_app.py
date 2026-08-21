@@ -1,0 +1,523 @@
+import marimo
+
+__generated_with = "0.23.16"
+app = marimo.App(width="medium")
+
+
+@app.cell
+def _():
+    import marimo as mo
+
+    from config_editor import (
+        BASES,
+        EditorError,
+        GeneralForm,
+        ReductionRow,
+        ReferenceForm,
+        SequenceRow,
+        default_form,
+        editor_integer,
+        ordered_editor_rows,
+        parse_general_toml,
+        render_general_toml,
+    )
+    from process_adapter import (
+        DEFAULT_BINARY,
+        PROJECT_ROOT,
+        ProcessAdapterError,
+        diagnostic_summary,
+        run_toml,
+        validate_toml,
+    )
+
+    return (
+        BASES,
+        DEFAULT_BINARY,
+        EditorError,
+        GeneralForm,
+        PROJECT_ROOT,
+        ProcessAdapterError,
+        ReductionRow,
+        ReferenceForm,
+        SequenceRow,
+        default_form,
+        diagnostic_summary,
+        editor_integer,
+        mo,
+        ordered_editor_rows,
+        parse_general_toml,
+        render_general_toml,
+        run_toml,
+        validate_toml,
+    )
+
+
+@app.cell
+def _(mo):
+    config_upload = mo.ui.file(
+        filetypes=[".toml"],
+        max_size=2_000_000,
+        label="Importar configuración TOML general",
+    )
+    return (config_upload,)
+
+
+@app.cell
+def _(EditorError, config_upload, default_form, parse_general_toml):
+    import_error = None
+    imported_name = "config.toml"
+    imported_form = default_form()
+    if config_upload.value:
+        imported_name = config_upload.value[0].name
+        try:
+            imported_text = config_upload.value[0].contents.decode("utf-8")
+            imported_form = parse_general_toml(imported_text)
+        except (UnicodeDecodeError, EditorError) as error:
+            import_error = str(error)
+    return import_error, imported_form, imported_name
+
+
+@app.cell
+def _(BASES, imported_form, mo):
+    seed_control = mo.ui.text(
+        value=imported_form.seed or "",
+        label="Semilla raíz opcional (64 hexadecimales minúsculos)",
+        full_width=True,
+    )
+    reference_kind_control = mo.ui.dropdown(
+        options=["simulated", "supplied"],
+        value=imported_form.reference.kind,
+        label="Origen de la referencia",
+    )
+    reference_id_control = mo.ui.text(
+        value=imported_form.reference.id,
+        label="ID de referencia",
+        full_width=True,
+    )
+    fasta_control = mo.ui.text(
+        value=imported_form.reference.fasta or "",
+        label="Ruta FASTA relativa o absoluta",
+        full_width=True,
+    )
+    composition_controls = {
+        base: mo.ui.text(
+            value=(imported_form.reference.composition or {}).get(base, "0.25"),
+            label=f"Fracción {base} (literal decimal)",
+        )
+        for base in BASES
+    }
+    sequence_editor = mo.ui.data_editor(
+        [
+            {
+                "order": order,
+                "id": row.id,
+                "class": row.sequence_class,
+                "length": row.length,
+            }
+            for order, row in enumerate(imported_form.reference.sequences, start=1)
+        ],
+        label="Secuencias (edite order para reordenar)",
+        pagination=False,
+    )
+    initial_reduction_rows = [
+        {
+            "order": order,
+            "id": row.id,
+            "source_reference_id": row.source_reference_id,
+            "region_size_bases": row.region_size_bases,
+            "target_kind": row.target_kind,
+            "target_literal": row.target_literal,
+        }
+        for order, row in enumerate(imported_form.reduced_references, start=1)
+    ] or [
+        {
+            "order": 1,
+            "id": "",
+            "source_reference_id": imported_form.reference.id,
+            "region_size_bases": 1,
+            "target_kind": "target_bases",
+            "target_literal": "",
+        }
+    ]
+    reduction_editor = mo.ui.data_editor(
+        initial_reduction_rows,
+        label="Referencias reducidas (la fila vacía no se exporta)",
+        pagination=False,
+    )
+    return (
+        composition_controls,
+        fasta_control,
+        reduction_editor,
+        reference_id_control,
+        reference_kind_control,
+        seed_control,
+        sequence_editor,
+    )
+
+
+@app.cell
+def _(
+    BASES,
+    EditorError,
+    GeneralForm,
+    ReductionRow,
+    ReferenceForm,
+    SequenceRow,
+    composition_controls,
+    editor_integer,
+    fasta_control,
+    reduction_editor,
+    reference_id_control,
+    reference_kind_control,
+    render_general_toml,
+    seed_control,
+    sequence_editor,
+    ordered_editor_rows,
+):
+    preview_error = None
+    preview_toml = ""
+    try:
+        ordered_sequences = ordered_editor_rows(
+            sequence_editor.value, "reference.sequences"
+        )
+        sequence_rows = [
+            SequenceRow(
+                id=str(row["id"]),
+                sequence_class=str(row["class"]),
+                length=editor_integer(row["length"], "reference.sequences.length"),
+            )
+            for row in ordered_sequences
+        ]
+        active_reductions = [row for row in reduction_editor.value if str(row["id"]).strip()]
+        ordered_reductions = ordered_editor_rows(
+            active_reductions, "reduced_references"
+        )
+        authored_reductions = [
+            ReductionRow(
+                id=str(row["id"]),
+                source_reference_id=str(row["source_reference_id"]),
+                region_size_bases=editor_integer(
+                    row["region_size_bases"], "reduced_references.region_size_bases"
+                ),
+                target_kind=str(row["target_kind"]),
+                target_literal=str(row["target_literal"]),
+            )
+            for row in ordered_reductions
+        ]
+        selected_kind = str(reference_kind_control.value)
+        edited_form = GeneralForm(
+            seed=seed_control.value or None,
+            reference=ReferenceForm(
+                kind=selected_kind,
+                id=reference_id_control.value,
+                fasta=fasta_control.value if selected_kind == "supplied" else None,
+                composition=(
+                    {base: composition_controls[base].value for base in BASES}
+                    if selected_kind == "simulated"
+                    else None
+                ),
+                sequences=sequence_rows,
+            ),
+            reduced_references=authored_reductions,
+        )
+        preview_toml = render_general_toml(edited_form)
+    except (EditorError, KeyError, TypeError, ValueError) as error:
+        preview_error = str(error)
+    return preview_error, preview_toml
+
+
+@app.cell
+def _(import_error, preview_error, preview_toml):
+    authoring_error = import_error or preview_error
+    authoring_toml = "" if import_error else preview_toml
+    return authoring_error, authoring_toml
+
+
+@app.cell
+def _(DEFAULT_BINARY, PROJECT_ROOT, authoring_error, mo):
+    binary_path_control = mo.ui.text(
+        value=str(DEFAULT_BINARY),
+        label="Binario Rust",
+        full_width=True,
+    )
+    base_directory_control = mo.ui.text(
+        value=str(PROJECT_ROOT),
+        label="Directorio base de las rutas relativas del TOML",
+        full_width=True,
+    )
+    output_directory_control = mo.ui.text(
+        value=str(PROJECT_ROOT / "results" / "marimo-run"),
+        label="Directorio de resultados (debe no existir)",
+        full_width=True,
+    )
+    validate_button = mo.ui.run_button(
+        label="Validar con Rust",
+        kind="success",
+        disabled=bool(authoring_error),
+        keyboard_shortcut="Ctrl-Shift-V",
+    )
+    return (
+        base_directory_control,
+        binary_path_control,
+        output_directory_control,
+        validate_button,
+    )
+
+
+@app.cell
+def _(
+    ProcessAdapterError,
+    authoring_toml,
+    base_directory_control,
+    binary_path_control,
+    mo,
+    validate_button,
+    validate_toml,
+):
+    from pathlib import Path as _Path
+
+    validation_error = None
+    validation_result = None
+    validated_session = None
+    if validate_button.value:
+        try:
+            with mo.status.spinner(title="Validando con el binario Rust…"):
+                validation_result, validated_session = validate_toml(
+                    _Path(binary_path_control.value),
+                    authoring_toml,
+                    _Path(base_directory_control.value),
+                )
+        except ProcessAdapterError as error:
+            validation_error = str(error)
+    return validation_error, validation_result, validated_session
+
+
+@app.cell
+def _(authoring_error, mo, validated_session):
+    run_button = mo.ui.run_button(
+        label="Ejecutar simulación",
+        kind="warn",
+        disabled=bool(authoring_error) or validated_session is None,
+        keyboard_shortcut="Ctrl-Shift-R",
+    )
+    return (run_button,)
+
+
+@app.cell
+def _(
+    ProcessAdapterError,
+    authoring_toml,
+    base_directory_control,
+    binary_path_control,
+    mo,
+    output_directory_control,
+    run_button,
+    run_toml,
+    validated_session,
+):
+    from pathlib import Path as _Path
+
+    run_error = None
+    run_result = None
+    if run_button.value and validated_session is not None:
+        try:
+            with mo.status.spinner(title="Ejecutando el simulador local…"):
+                run_result = run_toml(
+                    validated_session,
+                    authoring_toml,
+                    _Path(binary_path_control.value),
+                    _Path(base_directory_control.value),
+                    _Path(output_directory_control.value),
+                )
+        except ProcessAdapterError as error:
+            run_error = str(error)
+    return run_error, run_result
+
+
+@app.cell
+def _(
+    authoring_error,
+    authoring_toml,
+    base_directory_control,
+    binary_path_control,
+    composition_controls,
+    config_upload,
+    fasta_control,
+    import_error,
+    imported_name,
+    mo,
+    output_directory_control,
+    reduction_editor,
+    reference_id_control,
+    reference_kind_control,
+    run_button,
+    run_error,
+    run_result,
+    seed_control,
+    sequence_editor,
+    validate_button,
+    validation_error,
+    validation_result,
+    diagnostic_summary,
+):
+    visible_error = authoring_error
+    visible_preview = authoring_toml
+    general_panel = mo.vstack(
+        [
+            mo.md("## General/Ejecución"),
+            config_upload,
+            seed_control,
+            (
+                mo.callout(import_error, kind="danger", title="Error de importación")
+                if import_error
+                else mo.callout(
+                    "Importar o editar no valida ni ejecuta la simulación.", kind="info"
+                )
+            ),
+        ]
+    )
+    selected_source_controls = (
+        fasta_control
+        if reference_kind_control.value == "supplied"
+        else mo.hstack([composition_controls[base] for base in ("A", "C", "G", "T")])
+    )
+    genome_panel = mo.vstack(
+        [
+            mo.md("## Genoma"),
+            mo.hstack([reference_kind_control, reference_id_control]),
+            selected_source_controls,
+            sequence_editor,
+            reduction_editor,
+        ]
+    )
+    unavailable = lambda phase: mo.callout(
+        f"Sin controles todavía: esta capacidad se incorpora en {phase}.", kind="neutral"
+    )
+    if validation_error:
+        validation_status = mo.callout(
+            validation_error, kind="danger", title="No se pudo validar"
+        )
+    elif validation_result is None:
+        validation_status = mo.callout(
+            "Pendiente de validación con Rust.", kind="neutral"
+        )
+    elif validation_result.succeeded:
+        validation_status = mo.callout(
+            "Configuración validada por el binario Rust.", kind="success"
+        )
+    else:
+        validation_status = mo.callout(
+            validation_result.stdout or validation_result.stderr,
+            kind="danger",
+            title=f"Validación rechazada (código {validation_result.returncode})",
+        )
+    if run_error:
+        run_status = mo.callout(run_error, kind="danger", title="No se pudo ejecutar")
+    elif run_result is None:
+        run_status = mo.callout("Ejecución no iniciada.", kind="neutral")
+    elif run_result.succeeded:
+        run_status = mo.callout(
+            "Ejecución completada. "
+            f"Resultados: {run_result.output_directory}. "
+            f"Manifiesto: {run_result.output_directory / 'manifest.json'}.",
+            kind="success",
+        )
+    else:
+        run_status = mo.callout(
+            run_result.stdout or run_result.stderr,
+            kind="danger",
+            title=f"Ejecución fallida (código {run_result.returncode})",
+        )
+    process_logs = ""
+    for process_result in (validation_result, run_result):
+        if process_result is not None:
+            process_logs += process_result.stdout + process_result.stderr
+    if len(process_logs) > 20_000:
+        process_logs = "[logs truncados a los últimos 20000 caracteres]\n" + process_logs[-20_000:]
+    localized_diagnostics = "\n".join(
+        summary
+        for summary in (
+            diagnostic_summary(
+                validation_result.diagnostics if validation_result is not None else None
+            ),
+            diagnostic_summary(run_result.diagnostics if run_result is not None else None),
+        )
+        if summary
+    )
+    review_panel = mo.vstack(
+        [
+            mo.md("## Revisar y ejecutar"),
+            (
+                mo.callout(visible_error, kind="danger", title="Error de autoría")
+                if visible_error
+                else mo.callout(
+                    "Previsualización estructural correcta. Use «Validar con Rust» "
+                    "antes de ejecutar.",
+                    kind="success",
+                )
+            ),
+            mo.ui.text_area(
+                value=visible_preview,
+                label="TOML general previsualizado",
+                rows=20,
+                disabled=True,
+                full_width=True,
+            ),
+            mo.download(
+                visible_preview,
+                filename=imported_name or "config.toml",
+                mimetype="application/toml",
+                disabled=bool(visible_error),
+                label="Exportar TOML general",
+            ),
+            mo.md("### Validar y ejecutar"),
+            binary_path_control,
+            base_directory_control,
+            output_directory_control,
+            mo.hstack([validate_button, run_button]),
+            validation_status,
+            run_status,
+            mo.ui.text_area(
+                value=localized_diagnostics,
+                label="Diagnósticos localizados por pestaña y campo",
+                rows=5,
+                disabled=True,
+                full_width=True,
+            ),
+            mo.ui.text_area(
+                value=process_logs,
+                label="Diagnósticos y logs del proceso",
+                rows=10,
+                disabled=True,
+                full_width=True,
+            ),
+        ]
+    )
+    application_tabs = mo.ui.tabs(
+        {
+            "General/Ejecución": general_panel,
+            "Genoma": genome_panel,
+            "Individuos": unavailable("F2.3"),
+            "Poblaciones": unavailable("F6"),
+            "Evolución": unavailable("F7"),
+            "Familias": unavailable("F8"),
+            "Eventos técnicos": unavailable("F3–F5"),
+            "Salidas": unavailable("F2.4–F2.5"),
+            "Revisar y ejecutar": review_panel,
+        }
+    )
+    mo.vstack(
+        [
+            mo.md("# Genome Population Simulator"),
+            mo.callout(
+                "Interfaz local en desarrollo. Rust conserva toda autoridad semántica.",
+                kind="info",
+            ),
+            application_tabs,
+        ]
+    )
+    return
+
+
+if __name__ == "__main__":
+    app.run()
