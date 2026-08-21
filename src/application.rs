@@ -11,6 +11,7 @@ use crate::configuration::{
 };
 use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
+use crate::haplotype::Ploidy;
 use crate::identity::{ReferenceId, SequenceId};
 use crate::randomness::{
     EntropySource, ReproducibilityMetadata, RuntimeSubseedScope, Subseed, SystemEntropy,
@@ -50,6 +51,19 @@ impl EffectiveSequence {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectiveComposition {
     values: [f64; 4],
+}
+
+/// Parámetro efectivo compartido por las normalizaciones DTC-049 consumidas en F2.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectiveNormalization {
+    tolerance: f64,
+}
+
+impl EffectiveNormalization {
+    #[must_use]
+    pub const fn tolerance(&self) -> f64 {
+        self.tolerance
+    }
 }
 
 impl EffectiveComposition {
@@ -153,6 +167,8 @@ impl EffectiveConfigurationInput {
 pub struct EffectiveConfig {
     source_path: String,
     reference_id: String,
+    ploidy: Ploidy,
+    normalization: EffectiveNormalization,
     reference_source: EffectiveReferenceSource,
     composition: Option<EffectiveComposition>,
     reduced_references: Vec<EffectiveReducedReference>,
@@ -171,6 +187,16 @@ impl EffectiveConfig {
     #[must_use]
     pub fn reference_id(&self) -> &str {
         &self.reference_id
+    }
+
+    #[must_use]
+    pub const fn ploidy(&self) -> Ploidy {
+        self.ploidy
+    }
+
+    #[must_use]
+    pub const fn normalization(&self) -> EffectiveNormalization {
+        self.normalization
     }
 
     #[must_use]
@@ -226,6 +252,7 @@ pub fn load_and_validate_config_with_entropy(
 pub fn validate_general_config(
     general: &DeclaredGeneralConfig,
 ) -> Result<ValidatedGeneralSummary, Diagnostic> {
+    effective_ploidy(general)?;
     ReferenceId::parse(general.reference().id.value(), "configuration")?;
     if general.reference().sequences.is_empty() {
         return Err(config_error(
@@ -316,6 +343,10 @@ pub fn build_effective_config_with_entropy(
     entropy: &mut impl EntropySource,
 ) -> Result<EffectiveConfig, Diagnostic> {
     let summary = validate_general_config(general)?;
+    let ploidy = effective_ploidy(general)?;
+    let normalization = EffectiveNormalization {
+        tolerance: effective_normalization_tolerance(general)?,
+    };
     let (root_seed, seed_origin) = resolve_root_seed(
         general.seed().map(|declared| declared.value().as_str()),
         entropy,
@@ -409,6 +440,8 @@ pub fn build_effective_config_with_entropy(
     Ok(EffectiveConfig {
         source_path: general.source().path().display().to_string(),
         reference_id: general.reference().id.value().clone(),
+        ploidy,
+        normalization,
         reference_source,
         composition,
         reduced_references,
@@ -419,6 +452,47 @@ pub fn build_effective_config_with_entropy(
             bytes: Arc::from(general.source().bytes()),
         },
         reproducibility,
+    })
+}
+
+fn effective_normalization_tolerance(general: &DeclaredGeneralConfig) -> Result<f64, Diagnostic> {
+    const DEFAULT: f64 = 1e-9;
+    const MAXIMUM: f64 = 1e-6;
+    let Some(declared) = general.normalization_tolerance() else {
+        return Ok(DEFAULT);
+    };
+    let value = declared
+        .literal()
+        .parse::<f64>()
+        .map_err(|_| config_error(general, "normalization_tolerance", "debe ser un f64 válido"))?;
+    if !value.is_finite() || !(0.0..=MAXIMUM).contains(&value) {
+        return Err(config_error(
+            general,
+            "normalization_tolerance",
+            "debe ser finita y pertenecer a [0,1e-6]",
+        ));
+    }
+    Ok(value)
+}
+
+fn effective_ploidy(general: &DeclaredGeneralConfig) -> Result<Ploidy, Diagnostic> {
+    let Some(declared) = general.ploidy() else {
+        return Ok(Ploidy::DIPLOID);
+    };
+    let value = *declared.value();
+    let value = u8::try_from(value).map_err(|_| {
+        config_error(
+            general,
+            "ploidy",
+            format!("debe pertenecer a {}..={}", Ploidy::MIN, Ploidy::MAX),
+        )
+    })?;
+    Ploidy::new(value).map_err(|_| {
+        config_error(
+            general,
+            "ploidy",
+            format!("debe pertenecer a {}..={}", Ploidy::MIN, Ploidy::MAX),
+        )
     })
 }
 

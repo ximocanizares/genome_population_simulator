@@ -86,10 +86,48 @@ target_bases = 5
         self.assertLess(rendered.index('id = "chr2"'), rendered.index('id = "chr1"'))
         self.assertLess(rendered.index('id = "second"'), rendered.index('id = "first"'))
 
+    def test_population_snv_modes_round_trip_without_future_parameters(self) -> None:
+        base = """config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "simulated"
+id = "reference-main"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 10
+"""
+        cases = {
+            "supplied": 'input_path = "input matrix.tsv"',
+            "reuse": 'metadata_path = "population_snvs.metadata.json"',
+            "generate": "",
+        }
+        for mode, path in cases.items():
+            with self.subTest(mode=mode):
+                source = f'{base}\n[population_snvs]\nmode = "{mode}"\n{path}\n'
+                parsed = parse_general_toml(source)
+                rendered = render_general_toml(parsed)
+                self.assertEqual(parse_general_toml(rendered), parsed)
+                self.assertIn(f'mode = "{mode}"', rendered)
+
+    def test_population_snv_paths_must_be_non_empty(self) -> None:
+        base = (ROOT / "tests" / "fixtures" / "config" / "general-minimal.toml").read_text()
+        for mode, field in (("supplied", "input_path"), ("reuse", "metadata_path")):
+            source = f'{base}\n[population_snvs]\nmode = "{mode}"\n{field} = ""\n'
+            with self.subTest(mode=mode):
+                with self.assertRaises(EditorError) as raised:
+                    parse_general_toml(source)
+                self.assertEqual(raised.exception.path, f"population_snvs.{field}")
+
     def test_future_and_branch_incompatible_fields_are_visible_errors(self) -> None:
         minimal = (ROOT / "tests" / "fixtures" / "config" / "general-minimal.toml").read_text()
         cases = [
-            minimal.replace("[reference]", "ploidy = 2\n[reference]", 1),
+            minimal.replace("[reference]", "unexpected = true\n[reference]", 1),
             minimal.replace(
                 'kind = "simulated"', 'kind = "simulated"\nfasta = "source.fa"', 1
             ),

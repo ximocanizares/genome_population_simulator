@@ -206,26 +206,46 @@ pub struct DeclaredReducedReference {
     pub target: DeclaredReductionTarget,
 }
 
+/// Selección declarada del recurso común de frecuencias SNV.
+///
+/// Solo describe la frontera de autoría. La preparación, la reutilización
+/// verificable y los parámetros de generación tienen sus propios pasos F2.2.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeclaredPopulationSnvs {
+    Supplied { input_path: Located<String> },
+    Reuse { metadata_path: Located<String> },
+    Generate,
+}
+
 #[derive(Clone, Debug)]
 pub struct DeclaredGeneralConfig {
     source: AdmittedToml,
     seed: Option<Located<String>>,
+    ploidy: Option<Located<u64>>,
+    normalization_tolerance: Option<DeclaredNumber>,
     reference: DeclaredReference,
     reduced_references: Vec<DeclaredReducedReference>,
+    population_snvs: Option<DeclaredPopulationSnvs>,
 }
 
 impl DeclaredGeneralConfig {
     pub(crate) fn new(
         source: AdmittedToml,
         seed: Option<Located<String>>,
+        ploidy: Option<Located<u64>>,
+        normalization_tolerance: Option<DeclaredNumber>,
         reference: DeclaredReference,
         reduced_references: Vec<DeclaredReducedReference>,
+        population_snvs: Option<DeclaredPopulationSnvs>,
     ) -> Self {
         Self {
             source,
             seed,
+            ploidy,
+            normalization_tolerance,
             reference,
             reduced_references,
+            population_snvs,
         }
     }
 
@@ -239,6 +259,18 @@ impl DeclaredGeneralConfig {
         self.seed.as_ref()
     }
 
+    /// Ploidía global solicitada; ausente conserva el valor diploide compatible con F1.
+    #[must_use]
+    pub const fn ploidy(&self) -> Option<&Located<u64>> {
+        self.ploidy.as_ref()
+    }
+
+    /// Tolerancia general DTC-049 solicitada para las frecuencias de F2.
+    #[must_use]
+    pub const fn normalization_tolerance(&self) -> Option<&DeclaredNumber> {
+        self.normalization_tolerance.as_ref()
+    }
+
     #[must_use]
     pub const fn reference(&self) -> &DeclaredReference {
         &self.reference
@@ -247,6 +279,12 @@ impl DeclaredGeneralConfig {
     #[must_use]
     pub fn reduced_references(&self) -> &[DeclaredReducedReference] {
         &self.reduced_references
+    }
+
+    /// Fuente de matriz SNV solicitada, si la configuración la declara.
+    #[must_use]
+    pub const fn population_snvs(&self) -> Option<&DeclaredPopulationSnvs> {
+        self.population_snvs.as_ref()
     }
 }
 

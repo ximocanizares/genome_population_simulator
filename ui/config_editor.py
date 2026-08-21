@@ -50,15 +50,27 @@ class ReductionRow:
 
 
 @dataclass(eq=True)
+class PopulationSnvsForm:
+    mode: str
+    input_path: str | None
+    metadata_path: str | None
+
+
+@dataclass(eq=True)
 class GeneralForm:
     seed: str | None
+    ploidy: int
+    normalization_tolerance: str
     reference: ReferenceForm
     reduced_references: list[ReductionRow]
+    population_snvs: PopulationSnvsForm | None
 
 
 def default_form() -> GeneralForm:
     return GeneralForm(
         seed=None,
+        ploidy=2,
+        normalization_tolerance="1e-9",
         reference=ReferenceForm(
             kind="simulated",
             id="reference-main",
@@ -67,6 +79,7 @@ def default_form() -> GeneralForm:
             sequences=[SequenceRow("chr1", "chromosome", 1_000)],
         ),
         reduced_references=[],
+        population_snvs=None,
     )
 
 
@@ -113,8 +126,11 @@ def parse_general_toml(text: str) -> GeneralForm:
             "config_kind",
             "schema_version",
             "seed",
+            "ploidy",
+            "normalization_tolerance",
             "reference",
             "reduced_references",
+            "population_snvs",
         },
         required={"config_kind", "schema_version", "reference"},
         path="document",
@@ -124,11 +140,55 @@ def parse_general_toml(text: str) -> GeneralForm:
     if _string(document["schema_version"], "schema_version") != "1":
         raise EditorError("schema_version", 'debe ser "1"')
     seed = _seed(document["seed"]) if "seed" in document else None
+    ploidy = _ploidy(document["ploidy"]) if "ploidy" in document else 2
+    normalization_tolerance = (
+        _number_literal(document["normalization_tolerance"], "normalization_tolerance")
+        if "normalization_tolerance" in document
+        else "1e-9"
+    )
     reference = _parse_reference(
         _mapping(document["reference"], "reference"), "reference"
     )
     reductions = _parse_reductions(document.get("reduced_references", []))
-    return GeneralForm(seed, reference, reductions)
+    population_snvs = (
+        _parse_population_snvs(
+            _mapping(document["population_snvs"], "population_snvs")
+        )
+        if "population_snvs" in document
+        else None
+    )
+    return GeneralForm(
+        seed, ploidy, normalization_tolerance, reference, reductions, population_snvs
+    )
+
+
+def _parse_population_snvs(table: Mapping[str, Any]) -> PopulationSnvsForm:
+    _keys(
+        table,
+        allowed={"mode", "input_path", "metadata_path"},
+        required={"mode"},
+        path="population_snvs",
+    )
+    mode = _string(table["mode"], "population_snvs.mode")
+    input_path = table.get("input_path")
+    metadata_path = table.get("metadata_path")
+    if mode == "supplied":
+        if metadata_path is not None:
+            raise EditorError("population_snvs.metadata_path", "no admite supplied")
+        return PopulationSnvsForm(
+            mode, _non_empty_string(input_path, "population_snvs.input_path"), None
+        )
+    if mode == "reuse":
+        if input_path is not None:
+            raise EditorError("population_snvs.input_path", "no admite reuse")
+        return PopulationSnvsForm(
+            mode, None, _non_empty_string(metadata_path, "population_snvs.metadata_path")
+        )
+    if mode == "generate":
+        if input_path is not None or metadata_path is not None:
+            raise EditorError("population_snvs", "generate no admite rutas")
+        return PopulationSnvsForm(mode, None, None)
+    raise EditorError("population_snvs.mode", "debe ser supplied, reuse o generate")
 
 
 def _parse_reference(table: Mapping[str, Any], path: str) -> ReferenceForm:
@@ -249,6 +309,11 @@ def render_general_toml(form: GeneralForm) -> str:
     document.add("schema_version", "1")
     if form.seed is not None:
         document.add("seed", _seed(form.seed))
+    document.add("ploidy", _ploidy(form.ploidy))
+    document.add(
+        "normalization_tolerance",
+        _literal_item(form.normalization_tolerance, "normalization_tolerance"),
+    )
 
     reference = tomlkit.table()
     reference.add("kind", form.reference.kind)
@@ -329,6 +394,34 @@ def render_general_toml(form: GeneralForm) -> str:
                 )
             reductions.append(row)
         document.add("reduced_references", reductions)
+    if form.population_snvs is not None:
+        population_snvs = form.population_snvs
+        table = tomlkit.table()
+        if population_snvs.mode == "supplied":
+            table.add("mode", "supplied")
+            table.add(
+                "input_path",
+                _non_empty_string(
+                    population_snvs.input_path, "population_snvs.input_path"
+                ),
+            )
+        elif population_snvs.mode == "reuse":
+            table.add("mode", "reuse")
+            table.add(
+                "metadata_path",
+                _non_empty_string(
+                    population_snvs.metadata_path, "population_snvs.metadata_path"
+                ),
+            )
+        elif population_snvs.mode == "generate":
+            if population_snvs.input_path is not None or population_snvs.metadata_path is not None:
+                raise EditorError("population_snvs", "generate no admite rutas")
+            table.add("mode", "generate")
+        else:
+            raise EditorError(
+                "population_snvs.mode", "debe ser supplied, reuse o generate"
+            )
+        document.add("population_snvs", table)
     return tomlkit.dumps(document)
 
 
@@ -365,6 +458,13 @@ def _string(value: Any, path: str) -> str:
     return value
 
 
+def _non_empty_string(value: Any, path: str) -> str:
+    text = _string(value, path)
+    if not text:
+        raise EditorError(path, "no puede estar vacío")
+    return text
+
+
 def _seed(value: Any) -> str:
     seed = _string(value, "seed")
     if re.fullmatch(r"[0-9a-f]{64}", seed) is None:
@@ -376,6 +476,12 @@ def _positive_u64(value: Any, path: str) -> int:
     if not isinstance(value, Integer):
         raise EditorError(path, "se esperaba un entero")
     return _checked_positive_u64(int(value), path)
+
+
+def _ploidy(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, (Integer, int)):
+        raise EditorError("ploidy", "se esperaba un entero")
+    return int(value)
 
 
 def _checked_positive_u64(value: int, path: str) -> int:

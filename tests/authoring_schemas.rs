@@ -2,15 +2,16 @@ const GENERAL_SCHEMA: &str = include_str!("../schemas/config-general-v1.md");
 const SCENARIO_SCHEMA: &str = include_str!("../schemas/config-scenario-v1.md");
 
 #[test]
-fn f1_schema_is_closed_and_scenario_schema_is_documental_only() {
+fn f2_2_schema_is_closed_and_scenario_schema_is_documental_only() {
     for literal in [
         "config_kind = \"general\"",
         "schema_version = \"1\"",
-        "`seed` opcional",
+        "`seed`, `ploidy` y\n`normalization_tolerance` opcionales",
         "`reference` obligatorio",
         "`reduced_references` opcional",
         "A, C, G y T exactamente una vez",
         "1e-9",
+        "F2.2.2 valida sus sumas ALT multialélicas",
     ] {
         assert!(GENERAL_SCHEMA.contains(literal), "missing {literal}");
     }

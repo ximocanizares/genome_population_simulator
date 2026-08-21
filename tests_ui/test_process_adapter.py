@@ -39,6 +39,14 @@ class ProcessAdapterTests(unittest.TestCase):
                     "message": "campo desconocido",
                     "context": {"field": "ploidy", "location": "4:1"},
                 },
+                {
+                    "code": "GPS-CONF-008",
+                    "message": "ruta vacía",
+                    "context": {
+                        "fields": "population_snvs.input_path",
+                        "location": "8:14",
+                    },
+                },
             ]
         }
 
@@ -46,6 +54,7 @@ class ProcessAdapterTests(unittest.TestCase):
 
         self.assertIn("General/Ejecución · schema_version · 2:1", summary)
         self.assertIn("Genoma · ploidy · 4:1", summary)
+        self.assertIn("Poblaciones · population_snvs.input_path · 8:14", summary)
         self.assertIn("GPS-CONF-006: campo desconocido", summary)
 
     def test_version_check_accepts_only_the_supported_literal(self) -> None:
@@ -142,7 +151,22 @@ class ProcessAdapterTests(unittest.TestCase):
             self.assertEqual(second_execution.output_directory, base / relative_destination)
 
     @unittest.skipUnless(BINARY.exists(), "compile the Rust binary before this integration test")
-    def test_real_binary_returns_the_structured_rust_diagnostic(self) -> None:
+    def test_real_binary_reports_an_unknown_top_level_field(self) -> None:
+        invalid = render_general_toml(default_form()).replace(
+            "[reference]", "unknown_top_level = true\n[reference]", 1
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result, session = validate_toml(self.BINARY, invalid, Path(directory))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIsNone(session)
+        self.assertIsNotNone(result.diagnostics)
+        self.assertEqual(
+            result.diagnostics["diagnostics"][0]["code"], "GPS-CONF-006"
+        )
+
+    @unittest.skipUnless(BINARY.exists(), "compile the Rust binary before this integration test")
+    def test_real_binary_reports_a_duplicate_top_level_field(self) -> None:
         invalid = render_general_toml(default_form()).replace(
             "[reference]", "ploidy = 2\n[reference]", 1
         )
@@ -153,7 +177,27 @@ class ProcessAdapterTests(unittest.TestCase):
         self.assertIsNone(session)
         self.assertIsNotNone(result.diagnostics)
         self.assertEqual(
-            result.diagnostics["diagnostics"][0]["code"], "GPS-CONF-006"
+            result.diagnostics["diagnostics"][0]["code"], "GPS-CONF-007"
+        )
+
+    @unittest.skipUnless(BINARY.exists(), "compile the Rust binary before this integration test")
+    def test_empty_population_matrix_path_keeps_its_qualified_json_field_and_location(self) -> None:
+        invalid = render_general_toml(default_form()).replace(
+            "[reference]",
+            '[population_snvs]\nmode = "supplied"\ninput_path = ""\n[reference]',
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result, session = validate_toml(self.BINARY, invalid, Path(directory))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIsNone(session)
+        self.assertIsNotNone(result.diagnostics)
+        context = result.diagnostics["diagnostics"][0]["context"]
+        self.assertEqual(context["fields"], "population_snvs.input_path")
+        self.assertIn("location", context)
+        self.assertIn(
+            "Poblaciones · population_snvs.input_path", diagnostic_summary(result.diagnostics)
         )
 
 

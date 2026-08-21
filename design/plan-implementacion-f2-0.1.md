@@ -152,7 +152,7 @@ el binario y presenta sus diagnósticos y resultados.
 **Resultado:** cada copia haplotípica conserva fase, procedencia y ediciones y
 puede materializarse exactamente desde la referencia.
 
-- ☐ F2.1.1. Extender el servicio común de coordenadas a variantes pequeñas.
+- ✅ F2.1.1. Extender el servicio común de coordenadas a variantes pequeñas.
   - Depende de: PAUSA-F2.0 y coordenadas F1.6.
   - Procede de: DTC-010, DTC-013, DTC-056; REQ-IND-38/39.
   - Cambia: posición, intervalo, ancla de inserción y deleción interna, todos
@@ -160,7 +160,7 @@ puede materializarse exactamente desde la referencia.
   - Se comprueba con: vectores base 1 cerrada↔base 0 semiabierta, extremos,
     cero, desbordamiento y secuencia incorrecta.
 
-- ☐ F2.1.2. Modelar referencia, individuo y copias con ploidía uniforme.
+- ✅ F2.1.2. Modelar referencia, individuo y copias con ploidía uniforme.
   - Depende de: F2.1.1.
   - Procede de: DTC-003, DTC-032, DTC-039, DTC-061;
     REQ-IND-28/29 y REQ-VER-27.
@@ -169,7 +169,7 @@ puede materializarse exactamente desde la referencia.
   - Se comprueba con: ploidías 1/2/10, cardinalidad, IDs únicos, rechazo 0/11 y
     referencia con `N` en bordes e interior.
 
-- ☐ F2.1.3. Representar segmentos, modificaciones y procedencia sin copiar la referencia.
+- ✅ F2.1.3. Representar segmentos, modificaciones y procedencia sin copiar la referencia.
   - Depende de: F2.1.1–F2.1.2.
   - Procede de: DTC-031 y DTC-061; REQ-IND-28/29.
   - Cambia: segmentos que referencian fuentes y modificaciones tipadas SNP,
@@ -177,7 +177,7 @@ puede materializarse exactamente desde la referencia.
   - Se comprueba con: copia intacta y cada tipo de edición, origen, coordenadas,
     compartición de segmentos y composición corta conocida.
 
-- ☐ F2.1.4. Materializar copias y derivar fase y dosis.
+- ✅ F2.1.4. Materializar copias y derivar fase y dosis.
   - Depende de: F2.1.3.
   - Procede de: DTC-003, DTC-031 y DTC-061; REQ-VER-27.
   - Cambia: materializador determinista y consultas genotípicas desde el estado
@@ -185,12 +185,16 @@ puede materializarse exactamente desde la referencia.
   - Se comprueba con: cadenas manuales haploides, diploides y poliploides; dosis
     igual al número de copias portadoras.
 
-- ☐ F2.1.5. Integrar y cerrar el estado haplotípico.
+- ✅ F2.1.5. Integrar y cerrar el estado haplotípico.
   - Depende de: F2.1.1–F2.1.4.
   - Procede de: REQ-REF-14, REQ-IND-28/29, REQ-VER-27 y ACE-03/10/11/28/66.
   - Cambia: pruebas de integración y documentación del límite frente a F5.3.
   - Se comprueba con: reconstrucción exacta, conservación de `N`, consumo de
     memoria razonable y puertas comunes.
+  - Límite: F2.1 conserva una ploidía uniforme provisional y solo segmentos
+    ordinarios con SNP e *indels* pequeños. F5.3 incorporará la ploidía efectiva
+    por cromosoma o *scaffold*; no se anticipan aquí sustituciones de
+    configuración ni estado adicional por secuencia.
 
 > **PAUSA-F2.1.** No continuar si una copia no puede reconstruirse exactamente,
 > si fase/dosis proceden de una salida o si existen dos convenios internos de
@@ -201,7 +205,7 @@ puede materializarse exactamente desde la referencia.
 **Resultado:** F2 admite o genera una matriz común reproducible y aplica SNP e
 indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
 
-- ☐ F2.2.1. Definir la configuración y los formatos mínimos de la matriz.
+- ✅ F2.2.1. Definir la configuración y los formatos mínimos de la matriz.
   - Depende de: PAUSA-F2.1.
   - Procede de: DTC-052, DTC-054, DTC-060; REQ-CONF-128/129 y REQ-IND-60.
   - Cambia: `population_snvs.tsv`, metadatos JSON y TOML excluyente para
@@ -209,7 +213,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: fixtures válidos/inválidos, SHA-256, referencia,
     poblaciones, `alt_af` única y rechazo de VCF como entrada.
 
-- ☐ F2.2.2. Incorporar normalización y parámetros efectivos usados por F2.
+- ✅ F2.2.2. Incorporar normalización y parámetros efectivos usados por F2.
   - Depende de: F2.2.1.
   - Procede de: DTC-049 y DTC-079; REQ-CONF-106/107, REQ-VAL-40 y REQ-MAN-81.
   - Cambia: normalización canónica de sumas alélicas, tolerancia, procedencia y
@@ -217,7 +221,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: sumas dentro/fuera del borde, no finitos, cero y oráculo
     numérico independiente.
 
-- ☐ F2.2.3. Añadir los ámbitos y utilidades RNG realmente consumidos por F2.
+- ✅ F2.2.3. Añadir los ámbitos y utilidades RNG realmente consumidos por F2.
   - Depende de: F2.2.1–F2.2.2 y RNG F1.
   - Procede de: DTC-037/038, DTC-067, DTC-070 a DTC-072, DTC-075/079.
   - Cambia: catálogo v4 y módulos agrupados para Poisson, selección de loci,

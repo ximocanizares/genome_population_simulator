@@ -1712,7 +1712,13 @@ misma confirmación explícita.
 Una matriz suministrada se prepara sin modificar el original. La entrada mínima
 contiene las seis columnas de REQ-IND-60 y puede conservar `source_id`; la orden
 auxiliar calcula IDs canónicos, valida contra el FASTA, ordena, filtra y publica
-atómicamente `population_snvs.tsv` y `population_snvs.metadata.json`. El JSON
+atómicamente `population_snvs.tsv` y `population_snvs.metadata.json`. El TSV
+canónico tiene exactamente la cabecera `variant_id`, `contig`, `position`, `ref`,
+`alt`, `population_id`, `alt_af`, `source_id`. `variant_id` se deriva de
+`contig`, `position`, `ref` y `alt`, por lo que es común a todas las poblaciones;
+`source_id` es opcional en la entrada y se publica vacío cuando no existe. Las
+filas se ordenan por el orden de secuencias del FASTA, posición ascendente,
+`ref`, `alt` y `population_id` léxico. El JSON
 declara versión, referencia y SHA-256 observado, coordenadas, poblaciones,
 procedencia y el SHA-256 del TSV; por población puede conservar descripción,
 tamaño muestral o número de alelos, fuente, filtros y fecha o versión. En una
@@ -1721,6 +1727,26 @@ matriz empírica esos campos se proporcionan o se declaran explícitamente como
 SHA-256 del JSON. `run` solo consume este par canónico y vuelve a comprobar el
 FASTA. Una orden independiente y la ruta integrada pueden generar el mismo par
 con los mismos bytes; este es reutilizable sin volver a sortear la matriz.
+
+Para F2.2.1, `population_snvs.metadata.json` usa la clase
+`population_snvs_metadata` y `schema_version = "1"`. Contiene como campos
+obligatorios
+`coordinate_system = "base1_closed"`, `reference` (`reference_id`, `sha256`),
+`matrix` (`path = "population_snvs.tsv"`, `sha256`) y una lista ordenada de
+`populations`. Cada población declara `population_id` y puede declarar
+`description`, `sample_size`, `allele_count`, `source`, `filters` y
+`data_version`; cuando un dato empírico no se conoce se escribe `"unknown"`.
+`provenance` declara si el recurso fue `supplied` o `generated`, sin duplicar
+las filas TSV. Los campos adicionales se rechazan hasta que una fase posterior
+los necesite.
+
+La configuración general usa una única tabla `[population_snvs]` con
+`mode = "supplied"`, `"reuse"` o `"generate"`. El modo `supplied` exige
+`input_path`; `reuse` exige `metadata_path`; `generate` no admite rutas y sus
+parámetros se incorporan con su primer consumidor en F2.2.5. Cualquier ruta no
+pertinente al modo, ambos tipos de ruta o un modo desconocido se rechaza. La
+validación de valores `alt_af`, sus sumas, tolerancias y normalización se
+incorpora exclusivamente en F2.2.2, para que F2.2.1 no duplique esa autoridad.
 
 El identificador de individuo distingue a una entidad biológica simulada. Es
 distinto del identificador de un evento de muestreo, que distingue una

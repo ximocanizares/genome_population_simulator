@@ -24,6 +24,24 @@
       "x-gps-tab": "General/Ejecución",
       "x-gps-control": "text"
     },
+    "ploidy": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10,
+      "default": 2,
+      "description": "Ploidía uniforme global. Si se omite, el valor efectivo es 2.",
+      "x-gps-tab": "Individuos",
+      "x-gps-control": "integer"
+    },
+    "normalization_tolerance": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 0.000001,
+      "default": 0.000000001,
+      "description": "Tolerancia absoluta general DTC-049 para sumas de frecuencias F2.",
+      "x-gps-tab": "Población",
+      "x-gps-control": "decimal-text"
+    },
     "reference": {
       "oneOf": [
         { "$ref": "#/$defs/simulated_reference" },
@@ -37,6 +55,10 @@
       "default": [],
       "x-gps-tab": "Genoma",
       "x-gps-control": "table"
+    },
+    "population_snvs": {
+      "$ref": "#/$defs/population_snvs",
+      "x-gps-tab": "Población"
     }
   },
   "$defs": {
@@ -162,6 +184,36 @@
         {
           "required": ["reduction_percent"],
           "not": { "required": ["target_bases"] }
+        }
+      ]
+    },
+    "population_snvs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["supplied", "reuse", "generate"],
+          "x-gps-control": "select"
+        },
+        "input_path": { "type": "string", "minLength": 1, "x-gps-control": "path" },
+        "metadata_path": { "type": "string", "minLength": 1, "x-gps-control": "path" }
+      },
+      "oneOf": [
+        {
+          "properties": { "mode": { "const": "supplied" } },
+          "required": ["input_path"],
+          "not": { "required": ["metadata_path"] }
+        },
+        {
+          "properties": { "mode": { "const": "reuse" } },
+          "required": ["metadata_path"],
+          "not": { "required": ["input_path"] }
+        },
+        {
+          "properties": { "mode": { "const": "generate" } },
+          "not": { "anyOf": [{ "required": ["input_path"] }, { "required": ["metadata_path"] }] }
         }
       ]
     }

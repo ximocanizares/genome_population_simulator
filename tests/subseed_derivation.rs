@@ -1,5 +1,5 @@
 use genome_population_simulator::randomness::{
-    DERIVATION_CONTEXT, DERIVATION_VERSION, F1_ACTIVE_SUBSEED_SCOPES,
+    DERIVATION_CONTEXT, DERIVATION_VERSION, F1_ACTIVE_SUBSEED_SCOPES, F2_DERIVATION_VERSION,
     REFERENCE_REDUCTION_ALGORITHM, RootSeed, RuntimeSubseedScope, SUBSEED_CATALOG_VERSION,
     derive_subseed,
 };
@@ -23,9 +23,22 @@ fn encode_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn independent_material(root: &[u8], components: &[(&str, &str)]) -> Vec<u8> {
+fn independent_material(
+    root: &[u8],
+    derivation_version: u32,
+    scope_name: Option<&str>,
+    components: &[(&str, &str)],
+) -> Vec<u8> {
     let mut result = root.to_vec();
-    result.extend_from_slice(&1_u32.to_be_bytes());
+    result.extend_from_slice(&derivation_version.to_be_bytes());
+    if let Some(scope_name) = scope_name {
+        result.extend_from_slice(
+            &u32::try_from(scope_name.len())
+                .expect("small literal scope name")
+                .to_be_bytes(),
+        );
+        result.extend_from_slice(scope_name.as_bytes());
+    }
     result.extend_from_slice(
         &u32::try_from(components.len())
             .expect("small literal component count")
@@ -44,13 +57,34 @@ fn independent_material(root: &[u8], components: &[(&str, &str)]) -> Vec<u8> {
     result
 }
 
-fn verify_catalog_with_independent_oracle(catalog: &str) {
+fn catalog_scope_derivation_version(catalog: &str, scope_name: &str) -> u32 {
+    let mapping = catalog
+        .lines()
+        .find_map(|line| line.strip_prefix("# scope_derivation_versions="))
+        .expect("v4 declares each row derivation version");
+    mapping
+        .split(';')
+        .find_map(|entry| {
+            let (scope, version) = entry.split_once(':').expect("scope:version");
+            (scope == scope_name).then(|| version.parse::<u32>().expect("u32 version"))
+        })
+        .expect("every catalog row has a declared derivation version")
+}
+
+fn verify_catalog_with_independent_oracle(catalog: &str, derivation_version: u32) {
     for row in catalog
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
     {
         let columns = row.split('|').collect::<Vec<_>>();
-        let [_, component_text, root_hex, material_hex, subseed_hex] = columns.as_slice() else {
+        let [
+            scope_name,
+            component_text,
+            root_hex,
+            material_hex,
+            subseed_hex,
+        ] = columns.as_slice()
+        else {
             panic!("malformed frozen catalog row: {row}");
         };
         let components = component_text
@@ -58,17 +92,48 @@ fn verify_catalog_with_independent_oracle(catalog: &str) {
             .map(|component| component.split_once('=').expect("name=value"))
             .collect::<Vec<_>>();
         let root = decode_hex(root_hex);
-        let material = independent_material(&root, &components);
+        let row_derivation_version = if derivation_version == F2_DERIVATION_VERSION {
+            catalog_scope_derivation_version(catalog, scope_name)
+        } else {
+            derivation_version
+        };
+        assert!(
+            [DERIVATION_VERSION, F2_DERIVATION_VERSION].contains(&row_derivation_version),
+            "unsupported row derivation version"
+        );
+        let is_v2 = row_derivation_version == F2_DERIVATION_VERSION;
+        let material = independent_material(
+            &root,
+            row_derivation_version,
+            is_v2.then_some(*scope_name),
+            &components,
+        );
         assert_eq!(encode_hex(&material), *material_hex);
         assert_eq!(
             encode_hex(&blake3::derive_key(DERIVATION_CONTEXT, &material)),
             *subseed_hex
         );
+        for (mutated_index, (name, value)) in components.iter().enumerate() {
+            let mut mutated = components.clone();
+            let mutated_value = format!("{value}-mutated");
+            mutated[mutated_index] = (name, &mutated_value);
+            let mutated_material = independent_material(
+                &root,
+                row_derivation_version,
+                is_v2.then_some(*scope_name),
+                &mutated,
+            );
+            assert_ne!(
+                encode_hex(&blake3::derive_key(DERIVATION_CONTEXT, &mutated_material)),
+                *subseed_hex,
+                "mutating {scope_name}.{name} must isolate its subseed"
+            );
+        }
     }
 }
 
 #[test]
-fn published_v1_v3_catalogs_remain_byte_exact_and_all_vectors_have_an_independent_oracle() {
+fn published_v1_v3_catalogs_remain_byte_exact_and_v4_has_an_independent_oracle() {
     let catalogs = [
         (
             include_bytes!("../catalogs/subseed-scopes-v1.tsv").as_slice(),
@@ -87,15 +152,21 @@ fn published_v1_v3_catalogs_remain_byte_exact_and_all_vectors_have_an_independen
         assert_eq!(encode_hex(&Sha256::digest(bytes)), expected_sha256);
         verify_catalog_with_independent_oracle(
             std::str::from_utf8(bytes).expect("published catalogs are UTF-8"),
+            DERIVATION_VERSION,
         );
     }
+    let v4 = include_str!("../catalogs/subseed-scopes-v4.tsv");
+    assert!(v4.starts_with(
+        "# derivation_versions=1,2\n# catalog_version=4\n# context=genome_population_simulator/v1/subseed\n"
+    ));
+    verify_catalog_with_independent_oracle(v4, F2_DERIVATION_VERSION);
 }
 
 #[test]
-fn both_active_runtime_scopes_match_their_frozen_v3_vectors() {
+fn f1_runtime_scopes_remain_on_derivation_v1_while_f2_uses_catalog_v4() {
     let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
     assert_eq!(DERIVATION_VERSION, 1);
-    assert_eq!(SUBSEED_CATALOG_VERSION, "3");
+    assert_eq!(SUBSEED_CATALOG_VERSION, "4");
     assert_eq!(
         REFERENCE_REDUCTION_ALGORITHM,
         "reduced_reference_selection_v1"
@@ -123,6 +194,137 @@ fn both_active_runtime_scopes_match_their_frozen_v3_vectors() {
         .to_hex(),
         "7fa724d52b2db97a043920dbc3062a34c6377eab76f1d9d6e4ff1d513747decd"
     );
+}
+
+fn v4_catalog_subseed(scope_name: &str) -> &str {
+    include_str!("../catalogs/subseed-scopes-v4.tsv")
+        .lines()
+        .find_map(|row| {
+            let fields = row.split('|').collect::<Vec<_>>();
+            if fields.len() == 5 && fields[0] == scope_name {
+                Some(fields[4])
+            } else {
+                None
+            }
+        })
+        .expect("frozen v4 vector")
+}
+
+#[test]
+fn every_f2_runtime_scope_matches_its_frozen_v4_vector() {
+    let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
+    let vectors = [
+        (
+            "matrix_candidate_count",
+            RuntimeSubseedScope::MatrixCandidateCount {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+            },
+        ),
+        (
+            "matrix_locus_selection",
+            RuntimeSubseedScope::MatrixLocusSelection {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+            },
+        ),
+        (
+            "matrix_alternate_allele",
+            RuntimeSubseedScope::MatrixAlternateAllele {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                sequence_id: "sequence-main",
+                position_1based: 42,
+                reference_base: "A",
+            },
+        ),
+        (
+            "matrix_exact_assignment",
+            RuntimeSubseedScope::MatrixExactAssignment {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                population_id: "population-main",
+            },
+        ),
+        (
+            "matrix_frequency_component",
+            RuntimeSubseedScope::MatrixFrequencyComponent {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                population_id: "population-main",
+                variant_id: "variant-main",
+            },
+        ),
+        (
+            "matrix_frequency_value",
+            RuntimeSubseedScope::MatrixFrequencyValue {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                population_id: "population-main",
+                variant_id: "variant-main",
+            },
+        ),
+        (
+            "indel_count",
+            RuntimeSubseedScope::IndelCount {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                individual_id: "individual-main",
+                sequence_id: "sequence-main",
+                variant_class: "insertion",
+                spatial_scope_id: "global",
+            },
+        ),
+        (
+            "indel_position",
+            RuntimeSubseedScope::IndelPosition {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                individual_id: "individual-main",
+                sequence_id: "sequence-main",
+                variant_class: "insertion",
+                spatial_scope_id: "global",
+            },
+        ),
+        (
+            "insertion_content",
+            RuntimeSubseedScope::InsertionContent {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                individual_id: "individual-main",
+                sequence_id: "sequence-main",
+                spatial_scope_id: "global",
+                event_index: 0,
+            },
+        ),
+        (
+            "initial_genotype",
+            RuntimeSubseedScope::InitialGenotype {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                population_id: "population-main",
+                individual_id: "individual-main",
+                variant_id: "variant-main",
+            },
+        ),
+        (
+            "initial_phase",
+            RuntimeSubseedScope::InitialPhase {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                population_id: "population-main",
+                individual_id: "individual-main",
+                variant_id: "variant-main",
+            },
+        ),
+    ];
+    for (scope_name, scope) in vectors {
+        assert_eq!(
+            derive_subseed(root, scope).expect("F2 subseed").to_hex(),
+            v4_catalog_subseed(scope_name),
+            "{scope_name}"
+        );
+    }
 }
 
 #[test]

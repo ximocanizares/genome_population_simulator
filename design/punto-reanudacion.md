@@ -1,6 +1,24 @@
 # Punto de reanudación
 
-## Estado actual — 21 de agosto de 2026
+## Estado actual — 21 de agosto de 2026 (cierre F2.2.3)
+
+- F1 sigue cerrada en `e14705a`.
+- F2.0, F2.1 y F2.2.1–F2.2.3 están implementadas, validadas y revisadas de forma
+  independiente; este commit las publica por primera vez.
+- F2.1 aporta coordenadas de variantes pequeñas, ploidía 1..10, estado
+  haplotípico por segmentos compartibles, materialización bajo demanda y dosis
+  o fase derivadas del estado canónico.
+- F2.2.1–F2.2.2 fijan la matriz SNV TSV+JSON, modos Marimo/TOML, normalización
+  Neumaier y tolerancia efectiva. F2.2.3 incorpora RNG v4: v1 se conserva para
+  F1 y v2 añade el nombre de ámbito para F2, con `scenario_id = "direct"`.
+- `libm = =0.2.16` fue evaluada conforme DTC-043 y queda fijada sin *features*
+  predeterminadas. Los vectores, consumos, PTRS/Poisson y sus oráculos quedan
+  cubiertos por pruebas de regresión.
+- La re-revisión final de F2.2.3 no encontró hallazgos. El siguiente paso es
+  F2.2.4: validar y preparar matrices suministradas; no iniciar F2.2.5 ni
+  generación hasta cerrar ese paso.
+
+## Contexto histórico de simplificación
 
 - F1 está cerrada en `e14705a` y su cierre documental en `efca265`.
 - El plan F2 0.1 aprobado en `b64767b` resultó sobrediseñado al comenzar
@@ -54,8 +72,9 @@ El plan pasa de 130 a 41 pasos y conserva F2.0–F2.5 y sus seis pausas.
 
 ## Siguiente acción
 
-1. Tras aprobación y commit/push, comenzar el nuevo F2.0.1: exponer a Marimo la
-   configuración F1 existente sin introducir conceptos biológicos F2.
+1. Tras este commit/push, comenzar F2.2.4: validar y preparar matrices
+   suministradas sin modificar el original, aplicando el mismo ciclo de
+   implementación, revisión independiente y corrección.
 
 La revisión directa de simplificación comprobó 41 pasos bien formados, seis
 pausas, 78 REQ exclusivos, 14 compartidos y 9 parciales. Corrigió restos en

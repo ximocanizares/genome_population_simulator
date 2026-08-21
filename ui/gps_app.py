@@ -3,7 +3,6 @@ import marimo
 __generated_with = "0.23.16"
 app = marimo.App(width="medium")
 
-
 @app.cell
 def _():
     import marimo as mo
@@ -12,6 +11,7 @@ def _():
         BASES,
         EditorError,
         GeneralForm,
+        PopulationSnvsForm,
         ReductionRow,
         ReferenceForm,
         SequenceRow,
@@ -29,12 +29,14 @@ def _():
         run_toml,
         validate_toml,
     )
+    from ui_panels import individuals_panel
 
     return (
         BASES,
         DEFAULT_BINARY,
         EditorError,
         GeneralForm,
+        PopulationSnvsForm,
         PROJECT_ROOT,
         ProcessAdapterError,
         ReductionRow,
@@ -43,6 +45,7 @@ def _():
         default_form,
         diagnostic_summary,
         editor_integer,
+        individuals_panel,
         mo,
         ordered_editor_rows,
         parse_general_toml,
@@ -82,6 +85,36 @@ def _(BASES, imported_form, mo):
     seed_control = mo.ui.text(
         value=imported_form.seed or "",
         label="Semilla raíz opcional (64 hexadecimales minúsculos)",
+        full_width=True,
+    )
+    ploidy_control = mo.ui.number(
+        value=imported_form.ploidy,
+        start=1,
+        stop=10,
+        step=1,
+        label="Ploidía global uniforme (1–10)",
+    )
+    normalization_tolerance_control = mo.ui.text(
+        value=imported_form.normalization_tolerance,
+        label="Tolerancia general de normalización (literal decimal, 0–1e-6)",
+        full_width=True,
+    )
+    selected_population_snvs = imported_form.population_snvs
+    population_snvs_mode_control = mo.ui.dropdown(
+        options=["none", "supplied", "reuse", "generate"],
+        value=(selected_population_snvs.mode if selected_population_snvs else "none"),
+        label="Fuente de matriz SNV",
+    )
+    population_snvs_input_path_control = mo.ui.text(
+        value=(selected_population_snvs.input_path if selected_population_snvs else "")
+        or "",
+        label="Ruta de tabla SNV suministrada",
+        full_width=True,
+    )
+    population_snvs_metadata_path_control = mo.ui.text(
+        value=(selected_population_snvs.metadata_path if selected_population_snvs else "")
+        or "",
+        label="Ruta de metadatos JSON de matriz SNV",
         full_width=True,
     )
     reference_kind_control = mo.ui.dropdown(
@@ -151,6 +184,11 @@ def _(BASES, imported_form, mo):
         reference_id_control,
         reference_kind_control,
         seed_control,
+        ploidy_control,
+        normalization_tolerance_control,
+        population_snvs_input_path_control,
+        population_snvs_metadata_path_control,
+        population_snvs_mode_control,
         sequence_editor,
     )
 
@@ -160,6 +198,7 @@ def _(
     BASES,
     EditorError,
     GeneralForm,
+    PopulationSnvsForm,
     ReductionRow,
     ReferenceForm,
     SequenceRow,
@@ -170,6 +209,11 @@ def _(
     reference_id_control,
     reference_kind_control,
     render_general_toml,
+    ploidy_control,
+    normalization_tolerance_control,
+    population_snvs_input_path_control,
+    population_snvs_metadata_path_control,
+    population_snvs_mode_control,
     seed_control,
     sequence_editor,
     ordered_editor_rows,
@@ -205,8 +249,28 @@ def _(
             for row in ordered_reductions
         ]
         selected_kind = str(reference_kind_control.value)
+        selected_population_mode = str(population_snvs_mode_control.value)
+        population_snvs = (
+            None
+            if selected_population_mode == "none"
+            else PopulationSnvsForm(
+                mode=selected_population_mode,
+                input_path=(
+                    population_snvs_input_path_control.value
+                    if selected_population_mode == "supplied"
+                    else None
+                ),
+                metadata_path=(
+                    population_snvs_metadata_path_control.value
+                    if selected_population_mode == "reuse"
+                    else None
+                ),
+            )
+        )
         edited_form = GeneralForm(
             seed=seed_control.value or None,
+            ploidy=editor_integer(ploidy_control.value, "ploidy"),
+            normalization_tolerance=normalization_tolerance_control.value,
             reference=ReferenceForm(
                 kind=selected_kind,
                 id=reference_id_control.value,
@@ -219,6 +283,7 @@ def _(
                 sequences=sequence_rows,
             ),
             reduced_references=authored_reductions,
+            population_snvs=population_snvs,
         )
         preview_toml = render_general_toml(edited_form)
     except (EditorError, KeyError, TypeError, ValueError) as error:
@@ -345,6 +410,7 @@ def _(
     fasta_control,
     import_error,
     imported_name,
+    individuals_panel,
     mo,
     output_directory_control,
     reduction_editor,
@@ -354,6 +420,11 @@ def _(
     run_error,
     run_result,
     seed_control,
+    ploidy_control,
+    normalization_tolerance_control,
+    population_snvs_input_path_control,
+    population_snvs_metadata_path_control,
+    population_snvs_mode_control,
     sequence_editor,
     validate_button,
     validation_error,
@@ -388,6 +459,33 @@ def _(
             selected_source_controls,
             sequence_editor,
             reduction_editor,
+        ]
+    )
+    population_panel_mode = str(population_snvs_mode_control.value)
+    population_path_control = (
+        population_snvs_input_path_control
+        if population_panel_mode == "supplied"
+        else (
+            population_snvs_metadata_path_control
+            if population_panel_mode == "reuse"
+            else mo.callout(
+                "La generación de parámetros se incorporará con su consumidor F2.2.5.",
+                kind="info",
+            )
+            if population_panel_mode == "generate"
+            else mo.callout("No se ha seleccionado una matriz SNV.", kind="neutral")
+        )
+    )
+    populations_panel = mo.vstack(
+        [
+            mo.md("## Poblaciones"),
+            population_snvs_mode_control,
+            normalization_tolerance_control,
+            population_path_control,
+            mo.callout(
+                "La interfaz solo conserva la forma estructural; Rust valida la semántica.",
+                kind="info",
+            ),
         ]
     )
     unavailable = lambda phase: mo.callout(
@@ -497,8 +595,8 @@ def _(
         {
             "General/Ejecución": general_panel,
             "Genoma": genome_panel,
-            "Individuos": unavailable("F2.3"),
-            "Poblaciones": unavailable("F6"),
+            "Individuos": individuals_panel(mo, ploidy_control),
+            "Poblaciones": populations_panel,
             "Evolución": unavailable("F7"),
             "Familias": unavailable("F8"),
             "Eventos técnicos": unavailable("F3–F5"),

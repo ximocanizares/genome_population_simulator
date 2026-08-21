@@ -4,8 +4,8 @@ use std::path::Path;
 
 use genome_population_simulator::application::load_and_validate_config_with_entropy;
 use genome_population_simulator::randomness::{
-    DERIVATION_VERSION, EntropySource, ReproducibilityMetadata, RootSeed, RuntimeSubseedScope,
-    SUBSEED_CATALOG_VERSION, SeedOrigin, derive_subseed,
+    EntropySource, ReproducibilityMetadata, RootSeed, RuntimeSubseedScope, SUBSEED_CATALOG_VERSION,
+    SUBSEED_DERIVATION_VERSIONS, SeedOrigin, derive_subseed,
 };
 
 #[derive(Debug)]
@@ -127,7 +127,7 @@ fn partial_test_req_rep_22_effective_metadata_identifies_the_rng_contract() {
     assert_eq!(metadata.root_seed(), root());
     assert_eq!(metadata.seed_origin(), SeedOrigin::Declared);
     assert_eq!(metadata.random_algorithm(), "ChaCha12");
-    assert_eq!(metadata.derivation_version(), DERIVATION_VERSION);
+    assert_eq!(metadata.derivation_versions(), SUBSEED_DERIVATION_VERSIONS);
     assert_eq!(metadata.catalog_version(), SUBSEED_CATALOG_VERSION);
 }
 
@@ -135,14 +135,14 @@ fn partial_test_req_rep_22_effective_metadata_identifies_the_rng_contract() {
 struct RngContract<'a> {
     simulator_version: &'a str,
     random_algorithm: &'a str,
-    derivation_version: u32,
+    derivation_versions: &'a [u32],
     catalog_version: &'a str,
 }
 
 fn same_reproduction_contract(first: RngContract<'_>, second: RngContract<'_>) -> bool {
     first.simulator_version == second.simulator_version
         && first.random_algorithm == second.random_algorithm
-        && first.derivation_version == second.derivation_version
+        && first.derivation_versions == second.derivation_versions
         && first.catalog_version == second.catalog_version
 }
 
@@ -151,7 +151,7 @@ fn test_req_rep_23_requires_exact_simulator_and_rng_contract_versions() {
     let current = RngContract {
         simulator_version: env!("CARGO_PKG_VERSION"),
         random_algorithm: "ChaCha12",
-        derivation_version: DERIVATION_VERSION,
+        derivation_versions: SUBSEED_DERIVATION_VERSIONS,
         catalog_version: SUBSEED_CATALOG_VERSION,
     };
     assert!(same_reproduction_contract(current, current));
@@ -166,7 +166,7 @@ fn test_req_rep_23_requires_exact_simulator_and_rng_contract_versions() {
             ..current
         },
         RngContract {
-            derivation_version: DERIVATION_VERSION + 1,
+            derivation_versions: &[1],
             ..current
         },
         RngContract {

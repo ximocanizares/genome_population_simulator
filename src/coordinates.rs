@@ -27,6 +27,15 @@ pub enum CoordinateError {
         end_length: u64,
     },
     ArithmeticOverflow,
+    InsertionAnchorMustBeInternal {
+        position: u64,
+        sequence_length: u64,
+    },
+    DeletionMustBeInternal {
+        start: u64,
+        end: u64,
+        sequence_length: u64,
+    },
 }
 
 /// Posición de una base en convenio interno base 0.
@@ -39,6 +48,22 @@ pub struct BasePosition {
 }
 
 impl BasePosition {
+    /// Convierte una posición de configuración base 1 al dominio interno.
+    pub fn from_base_1(
+        reference_id: ReferenceId,
+        sequence_id: SequenceId,
+        position: u64,
+        sequence_length: u64,
+    ) -> Result<Self, CoordinateError> {
+        if position == 0 {
+            return Err(CoordinateError::ZeroBasedOneCoordinate);
+        }
+        let offset = position
+            .checked_sub(1)
+            .ok_or(CoordinateError::ArithmeticOverflow)?;
+        Self::new(reference_id, sequence_id, offset, sequence_length)
+    }
+
     pub fn new(
         reference_id: ReferenceId,
         sequence_id: SequenceId,
@@ -72,6 +97,11 @@ impl BasePosition {
     #[must_use]
     pub const fn offset(&self) -> u64 {
         self.offset
+    }
+
+    #[must_use]
+    pub const fn sequence_length(&self) -> u64 {
+        self.sequence_length
     }
 
     pub fn to_base_1(&self) -> Result<u64, CoordinateError> {
@@ -125,6 +155,11 @@ impl InterbasePosition {
     pub const fn offset(&self) -> u64 {
         self.offset
     }
+
+    #[must_use]
+    pub const fn sequence_length(&self) -> u64 {
+        self.sequence_length
+    }
 }
 
 /// DTO de frontera para un intervalo base 1 cerrado `[start, end]`.
@@ -163,6 +198,7 @@ pub struct GenomicInterval {
     sequence_id: SequenceId,
     start: u64,
     end: u64,
+    sequence_length: u64,
 }
 
 impl GenomicInterval {
@@ -188,6 +224,7 @@ impl GenomicInterval {
             sequence_id,
             start,
             end,
+            sequence_length,
         })
     }
 
@@ -215,6 +252,7 @@ impl GenomicInterval {
             sequence_id: start.sequence_id,
             start: start.offset,
             end: end.offset,
+            sequence_length: start.sequence_length,
         })
     }
 
@@ -266,6 +304,11 @@ impl GenomicInterval {
     }
 
     #[must_use]
+    pub const fn sequence_length(&self) -> u64 {
+        self.sequence_length
+    }
+
+    #[must_use]
     pub const fn len(&self) -> u64 {
         self.end - self.start
     }
@@ -274,6 +317,79 @@ impl GenomicInterval {
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         false
+    }
+}
+
+/// Punto interno de inserción, anclado a la base inmediatamente anterior.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InsertionAnchor {
+    point: InterbasePosition,
+}
+
+impl InsertionAnchor {
+    /// Construye el ancla a partir de la base base 1 que precede a la inserción.
+    pub fn from_base_1(
+        reference_id: ReferenceId,
+        sequence_id: SequenceId,
+        anchor_base_1: u64,
+        sequence_length: u64,
+    ) -> Result<Self, CoordinateError> {
+        let anchor =
+            BasePosition::from_base_1(reference_id, sequence_id, anchor_base_1, sequence_length)?;
+        let point = InterbasePosition::new(
+            anchor.reference_id.clone(),
+            anchor.sequence_id.clone(),
+            anchor
+                .offset
+                .checked_add(1)
+                .ok_or(CoordinateError::ArithmeticOverflow)?,
+            anchor.sequence_length,
+        )?;
+        Self::new(point)
+    }
+
+    pub fn new(point: InterbasePosition) -> Result<Self, CoordinateError> {
+        if point.offset == 0 || point.offset == point.sequence_length {
+            return Err(CoordinateError::InsertionAnchorMustBeInternal {
+                position: point.offset,
+                sequence_length: point.sequence_length,
+            });
+        }
+        Ok(Self { point })
+    }
+
+    #[must_use]
+    pub const fn point(&self) -> &InterbasePosition {
+        &self.point
+    }
+
+    #[must_use]
+    pub const fn anchor_offset(&self) -> u64 {
+        self.point.offset - 1
+    }
+}
+
+/// Deleción interna que deja al menos una base a ambos lados de la secuencia.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InternalDeletion {
+    interval: GenomicInterval,
+}
+
+impl InternalDeletion {
+    pub fn new(interval: GenomicInterval) -> Result<Self, CoordinateError> {
+        if interval.start == 0 || interval.end == interval.sequence_length {
+            return Err(CoordinateError::DeletionMustBeInternal {
+                start: interval.start,
+                end: interval.end,
+                sequence_length: interval.sequence_length,
+            });
+        }
+        Ok(Self { interval })
+    }
+
+    #[must_use]
+    pub const fn interval(&self) -> &GenomicInterval {
+        &self.interval
     }
 }
 
@@ -388,5 +504,77 @@ mod tests {
                 end_length: 11
             })
         );
+    }
+
+    #[test]
+    fn base_one_positions_convert_at_both_sequence_extremes() {
+        let first = BasePosition::from_base_1(reference_id("ref"), sequence_id("chr1"), 1, 10)
+            .expect("first base");
+        let last = BasePosition::from_base_1(reference_id("ref"), sequence_id("chr1"), 10, 10)
+            .expect("last base");
+        assert_eq!((first.offset(), last.offset()), (0, 9));
+        assert_eq!(
+            BasePosition::from_base_1(reference_id("ref"), sequence_id("chr1"), 0, 10),
+            Err(CoordinateError::ZeroBasedOneCoordinate)
+        );
+        assert!(matches!(
+            BasePosition::from_base_1(reference_id("ref"), sequence_id("chr1"), 11, 10),
+            Err(CoordinateError::BaseOutOfBounds { .. })
+        ));
+    }
+
+    #[test]
+    fn insertion_anchor_requires_a_real_preceding_and_following_base() {
+        let anchor = InsertionAnchor::from_base_1(reference_id("ref"), sequence_id("chr1"), 4, 10)
+            .expect("internal anchor");
+        assert_eq!((anchor.anchor_offset(), anchor.point().offset()), (3, 4));
+
+        for position in [0, 10] {
+            assert!(matches!(
+                InsertionAnchor::from_base_1(
+                    reference_id("ref"),
+                    sequence_id("chr1"),
+                    position,
+                    10
+                ),
+                Err(CoordinateError::ZeroBasedOneCoordinate)
+                    | Err(CoordinateError::InsertionAnchorMustBeInternal { .. })
+            ));
+        }
+        assert!(matches!(
+            InsertionAnchor::from_base_1(reference_id("ref"), sequence_id("chr1"), 1, 1),
+            Err(CoordinateError::InsertionAnchorMustBeInternal { .. })
+        ));
+    }
+
+    #[test]
+    fn internal_deletion_leaves_bases_at_both_sequence_extremes() {
+        let internal = GenomicInterval::from_closed_1(
+            reference_id("ref"),
+            sequence_id("chr1"),
+            ClosedInterval1::new(2, 9).expect("closed interval"),
+            10,
+        )
+        .expect("internal interval");
+        assert_eq!(
+            InternalDeletion::new(internal.clone())
+                .expect("deletion")
+                .interval(),
+            &internal
+        );
+
+        for interval in [(1, 8), (2, 10), (1, 10)] {
+            let interval = GenomicInterval::from_closed_1(
+                reference_id("ref"),
+                sequence_id("chr1"),
+                ClosedInterval1::new(interval.0, interval.1).expect("closed interval"),
+                10,
+            )
+            .expect("in-bounds interval");
+            assert!(matches!(
+                InternalDeletion::new(interval),
+                Err(CoordinateError::DeletionMustBeInternal { .. })
+            ));
+        }
     }
 }

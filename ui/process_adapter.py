@@ -192,6 +192,9 @@ def diagnostic_summary(document: dict[str, Any] | None) -> str:
         tab = (
             "General/Ejecución"
             if field_text in {"config_kind", "schema_version", "seed"}
+            else "Poblaciones"
+            if field_text == "normalization_tolerance"
+            or field_text.startswith("population_snvs.")
             else "Genoma"
         )
         location = context.get("location")

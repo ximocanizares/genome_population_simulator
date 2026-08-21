@@ -1,24 +1,36 @@
-# Esquema de autoría TOML: configuración general v1 en F1
+# Esquema de autoría TOML: configuración general v1 en F2.2.1
 
 La vista estructural versionada que puede consumir la interfaz local se publica
 en `config-general-v1.schema.json`. Describe forma, tipos, dominios básicos y
 anotaciones de autoría, pero no sustituye la admisión ni la validación semántica
 del binario Rust.
 
-F1 admite un único documento general, con cabecera obligatoria:
+F2.2.1 conserva un único documento general, con cabecera obligatoria:
 
 ```toml
 config_kind = "general"
 schema_version = "1"
 ```
 
-La raíz es cerrada y contiene exactamente esas claves, `seed` opcional,
-`reference` obligatorio y `reduced_references` opcional. Los campos
+La raíz es cerrada y contiene esas claves, `seed`, `ploidy` y
+`normalization_tolerance` opcionales, `reference` obligatorio,
+`reduced_references` opcional y `population_snvs`
+opcional. `ploidy` es una
+ploidía global uniforme entera entre 1 y 10; al omitirse conserva el valor
+efectivo diploide (`2`) para mantener compatibles los TOML F1. Rust valida el
+rango y ninguna secuencia ni individuo puede sustituirla localmente. Los campos
 desconocidos y las claves duplicadas se rechazan con su ubicación. En
-particular, F1 no admite rutas biológicas, ploidía, escenarios, eventos,
-individuos, poblaciones, fases, reglas ni conjuntos de frecuencias.
+particular, F2.2.2 no admite escenarios, eventos, individuos configurables,
+poblaciones simuladas, fases configurables, reglas ni parámetros de generación
+o frecuencias. La única excepción estructural es `[population_snvs]`: declara
+el origen de una matriz común y F2.2.2 valida sus sumas ALT multialélicas.
 
 `seed`, cuando aparece, contiene 256 bits como 64 hexadecimales minúsculos.
+
+`normalization_tolerance`, cuando aparece, conserva su literal decimal TOML;
+Rust lo interpreta como `f64` finito en `[0,1e-6]`. Si se omite, su valor
+efectivo es `1e-9`. La interfaz solo conserva el literal y no replica esa
+validación semántica.
 
 Una referencia simulada tiene esta forma:
 
@@ -56,6 +68,21 @@ Cada elemento de `reduced_references` exige `id`, `source_reference_id`,
 es `kind = "supplied"`; una referencia simulada no puede ser fuente de una
 reducción en F1. La referencia fuente es la referencia inicial del mismo
 documento y el ID derivado debe ser distinto.
+
+La tabla opcional `[population_snvs]` fija una fuente excluyente de matriz SNV:
+`mode = "supplied"` exige solo `input_path`; `mode = "reuse"` exige solo
+`metadata_path`; `mode = "generate"` no admite rutas. Los parámetros de
+generación no se admiten aún: se incorporan en F2.2.5. La tabla canónica
+`population_snvs.tsv` usa exactamente las ocho columnas ordenadas
+`variant_id`, `contig`, `position`, `ref`, `alt`, `population_id`, `alt_af` y
+`source_id`; VCF no es una entrada admitida. Su JSON asociado declara la clase
+`population_snvs_metadata`, versión `1`, coordenadas `base1_closed`, referencia,
+enlace del TSV, poblaciones y procedencia `supplied` o `generated`. F2.2.2
+interpreta cada `alt_af` como `f64` finito en `[0,1]`, suma por
+población×locus en orden canónico con Neumaier y aplica la tolerancia efectiva:
+si la suma ALT no supera 1 conserva el resto REF; un exceso dentro del borde
+inclusivo se normaliza y registra; otro exceso se rechaza. La validación de
+FASTA, hashes e IDs canónicos sigue perteneciendo a los pasos posteriores.
 
 El borrador de escenarios permanece en `config-scenario-v1.md` como artefacto
 documental futuro; el binario F1 no lo carga ni lo interpreta y F2 tampoco lo

@@ -183,6 +183,12 @@ pub fn effective_config_document_with_reductions(
         "effective_config_kind": "gps_effective_config",
         "schema_version": RESULT_SCHEMA_VERSION,
         "source_path": config.source_path(),
+        "ploidy": config.ploidy().copy_count(),
+        "normalization": {
+            "tolerance": config.normalization().tolerance(),
+            "canonical_order": "population_id,contig,position,ref,alt,variant_id,source_id",
+            "sum_algorithm": "neumaier_sum_v1",
+        },
         "seed": {
             "root": config.reproducibility().root_seed().to_hex(),
             "origin": config.reproducibility().seed_origin().as_str(),
@@ -279,10 +285,12 @@ pub fn validate_effective_config_against_manifest_bytes(
     let object = document
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "la raíz no es un objeto"))?;
-    const FIELDS: [&str; 6] = [
+    const FIELDS: [&str; 8] = [
         "effective_config_kind",
         "schema_version",
         "source_path",
+        "ploidy",
+        "normalization",
         "seed",
         "reference",
         "reduced_references",
@@ -297,6 +305,14 @@ pub fn validate_effective_config_against_manifest_bytes(
         ));
     }
     let source_path = effective_non_empty_text(object, "source_path", effective_path)?;
+    let effective_ploidy = effective_positive_u64(object, "ploidy", effective_path)?;
+    if effective_ploidy > 10 {
+        return Err(effective_error(effective_path, "ploidy fuera de rango"));
+    }
+    validate_effective_normalization(
+        effective_object(object, "normalization", effective_path)?,
+        effective_path,
+    )?;
     let configuration_input = required_object(manifest, "configuration_input", manifest_path)?;
     if required_non_empty_text(configuration_input, "original_path", manifest_path)? != source_path
     {
@@ -671,6 +687,27 @@ fn validate_effective_targets_against_configuration(
         return Err(effective_error(
             effective_path,
             "la semilla efectiva no coincide con la declaración TOML",
+        ));
+    }
+
+    if effective.get("ploidy").and_then(Value::as_u64)
+        != Some(u64::from(expected.ploidy().copy_count()))
+    {
+        return Err(effective_error(
+            effective_path,
+            "la ploidía efectiva no coincide con la declaración TOML",
+        ));
+    }
+    let normalization = effective_object(effective, "normalization", effective_path)?;
+    if normalization
+        .get("tolerance")
+        .and_then(Value::as_f64)
+        .map(f64::to_bits)
+        != Some(expected.normalization().tolerance().to_bits())
+    {
+        return Err(effective_error(
+            effective_path,
+            "la tolerancia efectiva no coincide con la declaración TOML",
         ));
     }
 
@@ -1597,6 +1634,30 @@ fn validate_effective_seed(
         Some("declared" | "system_csprng") => Ok(()),
         _ => Err(effective_error(path, "seed.origin inválido")),
     }
+}
+
+fn validate_effective_normalization(
+    object: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    const FIELDS: [&str; 3] = ["tolerance", "canonical_order", "sum_algorithm"];
+    validate_effective_closed_object(object, &FIELDS, "normalization", path)?;
+    let tolerance = object
+        .get("tolerance")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && (0.0..=1e-6).contains(value))
+        .ok_or_else(|| effective_error(path, "normalization.tolerance inválida"))?;
+    let _ = tolerance;
+    if object.get("canonical_order").and_then(Value::as_str)
+        != Some("population_id,contig,position,ref,alt,variant_id,source_id")
+        || object.get("sum_algorithm").and_then(Value::as_str) != Some("neumaier_sum_v1")
+    {
+        return Err(effective_error(
+            path,
+            "metadatos de normalización incompatibles",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_effective_reference(

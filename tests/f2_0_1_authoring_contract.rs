@@ -32,13 +32,16 @@ fn strings_at(document: &Value, pointer: &str) -> BTreeSet<String> {
 }
 
 #[test]
-fn f1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
+fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
     let schema: Value = serde_json::from_str(AUTHORING_SCHEMA).expect("valid JSON schema");
 
     assert_eq!(
         keys_at(&schema, "/properties"),
         BTreeSet::from([
             "config_kind".to_owned(),
+            "normalization_tolerance".to_owned(),
+            "ploidy".to_owned(),
+            "population_snvs".to_owned(),
             "reduced_references".to_owned(),
             "reference".to_owned(),
             "schema_version".to_owned(),
@@ -150,7 +153,6 @@ fn f1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
         "scenario_id",
         "scenarios",
         "route",
-        "ploidy",
         "individuals",
         "populations",
     ] {

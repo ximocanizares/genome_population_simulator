@@ -114,8 +114,8 @@ fn declared_seed_bypasses_entropy_and_enters_immutable_effective_config() {
         "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     );
     assert_eq!(effective.reproducibility().random_algorithm(), "ChaCha12");
-    assert_eq!(effective.reproducibility().derivation_version(), 1);
-    assert_eq!(effective.reproducibility().catalog_version(), "3");
+    assert_eq!(effective.reproducibility().derivation_versions(), &[1, 2]);
+    assert_eq!(effective.reproducibility().catalog_version(), "4");
 }
 
 #[test]

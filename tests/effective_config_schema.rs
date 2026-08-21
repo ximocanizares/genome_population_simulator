@@ -147,6 +147,22 @@ fn semantic_ids_source_path_and_selection_order_cannot_be_empty() {
 }
 
 #[test]
+fn effective_ploidy_is_required_and_limited_to_the_f2_domain() {
+    let mut missing = effective_config("simulated", false);
+    missing
+        .as_object_mut()
+        .expect("effective config object")
+        .remove("ploidy");
+    assert_invalid("missing-ploidy", &missing);
+
+    for value in [json!(0), json!(11), json!(1.5), json!("2")] {
+        let mut document = effective_config("simulated", false);
+        document["ploidy"] = value.clone();
+        assert_invalid(&format!("invalid-ploidy-{value}"), &document);
+    }
+}
+
+#[test]
 fn reference_origin_and_reversible_metadata_are_closed_and_source_specific() {
     let mut reversible_bytes = effective_config("supplied", false);
     reversible_bytes["reference"]["sequences"][0]["header"] =
@@ -218,6 +234,8 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
         "effective_config_kind": "gps_effective_config",
         "schema_version": "1",
         "source_path": "config/general.toml",
+        "ploidy": 2,
+        "normalization": {"tolerance": 1e-9, "canonical_order": "population_id,contig,position,ref,alt,variant_id,source_id", "sum_algorithm": "neumaier_sum_v1"},
         "seed": {
             "root": "0".repeat(64),
             "origin": "declared"

@@ -3,11 +3,21 @@
   "$id": "effective-config-v1.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["effective_config_kind", "schema_version", "source_path", "seed", "reference", "reduced_references"],
+  "required": ["effective_config_kind", "schema_version", "source_path", "ploidy", "normalization", "seed", "reference", "reduced_references"],
   "properties": {
     "effective_config_kind": {"const": "gps_effective_config"},
     "schema_version": {"const": "1"},
     "source_path": {"type": "string", "minLength": 1},
+    "ploidy": {"type": "integer", "minimum": 1, "maximum": 10},
+    "normalization": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tolerance", "canonical_order", "sum_algorithm"],
+      "properties": {
+        "tolerance": {"type": "number", "minimum": 0, "maximum": 0.000001},
+        "canonical_order": {"const": "population_id,contig,position,ref,alt,variant_id,source_id"},
+        "sum_algorithm": {"const": "neumaier_sum_v1"}
+      }
+    },
     "seed": {
       "type": "object",
       "additionalProperties": false,

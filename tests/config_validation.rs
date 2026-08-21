@@ -185,7 +185,6 @@ length = 1
 "#;
     for future_field in [
         "route = \"direct\"",
-        "default_ploidy = 2",
         "scenarios = []",
         "events = []",
         "individuals = []",
@@ -195,7 +194,6 @@ length = 1
         "blocks = []",
         "rules = []",
         "frequency_sets = []",
-        "normalization_tolerance = 1e-9",
     ] {
         let source = base.replacen("[reference]", &format!("{future_field}\n[reference]"), 1);
         let admitted = admit_toml_header(
@@ -226,8 +224,46 @@ ploidy = 2
         ExpectedConfigKind::General,
     )
     .unwrap();
-    let error = parse_declared_config(admitted).expect_err("ploidy must fail in F1");
+    let error = parse_declared_config(admitted).expect_err("nested ploidy must fail");
     assert_eq!(error.code(), "GPS-CONF-006");
+}
+
+#[test]
+fn global_ploidy_is_effective_and_limited_to_one_through_ten() {
+    let base = r#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "simulated"
+id = "ref"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1
+"#;
+    for ploidy in [1, 2, 10] {
+        let source = base.replacen("[reference]", &format!("ploidy = {ploidy}\n[reference]"), 1);
+        let effective = build_effective_config(&general(source.as_bytes())).expect("valid ploidy");
+        assert_eq!(effective.ploidy().copy_count(), ploidy);
+    }
+    for ploidy in [0, 11] {
+        let source = base.replacen("[reference]", &format!("ploidy = {ploidy}\n[reference]"), 1);
+        let error =
+            build_effective_config(&general(source.as_bytes())).expect_err("invalid ploidy");
+        assert_eq!(error.code(), "GPS-CONF-008");
+        assert_eq!(error.context()["fields"], "ploidy");
+    }
+    assert_eq!(
+        build_effective_config(&general(base.as_bytes()))
+            .expect("implicit diploid")
+            .ploidy()
+            .copy_count(),
+        2
+    );
 }
 
 #[test]

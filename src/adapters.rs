@@ -7,8 +7,9 @@ use toml::de::{DeTable, DeValue};
 
 use crate::configuration::{
     AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredGeneralConfig, DeclaredNumber,
-    DeclaredReducedReference, DeclaredReductionTarget, DeclaredReference, DeclaredReferenceSource,
-    DeclaredSequence, ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
+    DeclaredPopulationSnvs, DeclaredReducedReference, DeclaredReductionTarget, DeclaredReference,
+    DeclaredReferenceSource, DeclaredSequence, ExpectedConfigKind, Located, SequenceClass,
+    SourceLocation, semantic_error,
 };
 use crate::diagnostics::Diagnostic;
 
@@ -157,16 +158,110 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
             "config_kind",
             "schema_version",
             "seed",
+            "ploidy",
+            "normalization_tolerance",
             "reference",
             "reduced_references",
+            "population_snvs",
         ],
     )?;
     let seed = optional_located_string(&admitted, table, "seed")?;
+    let ploidy = optional_located_u64(&admitted, table, "ploidy")?;
+    let normalization_tolerance = optional_number(&admitted, table, "normalization_tolerance")?;
     let reference = parse_reference(&admitted, required_table(&admitted, table, "reference")?)?;
     let reduced = parse_reduced_references(&admitted, table)?;
+    let population_snvs = parse_population_snvs(&admitted, table)?;
     Ok(DeclaredGeneralConfig::new(
-        admitted, seed, reference, reduced,
+        admitted,
+        seed,
+        ploidy,
+        normalization_tolerance,
+        reference,
+        reduced,
+        population_snvs,
     ))
+}
+
+fn parse_population_snvs(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<Option<DeclaredPopulationSnvs>, Diagnostic> {
+    let Some(value) = table.get("population_snvs") else {
+        return Ok(None);
+    };
+    let entry = value
+        .get_ref()
+        .as_table()
+        .ok_or_else(|| wrong_type(admitted, "population_snvs", value, "table"))?;
+    check_unknown(admitted, entry, &["mode", "input_path", "metadata_path"])?;
+    let mode = required_string(admitted, entry, "mode")?;
+    match mode.value().as_str() {
+        "supplied" => {
+            if entry.contains_key("metadata_path") {
+                return Err(semantic_error(
+                    admitted,
+                    "population_snvs.mode,population_snvs.metadata_path",
+                    "el modo supplied no admite metadata_path",
+                ));
+            }
+            Ok(Some(DeclaredPopulationSnvs::Supplied {
+                input_path: required_non_empty_string(
+                    admitted,
+                    entry,
+                    "input_path",
+                    "population_snvs.input_path",
+                )?,
+            }))
+        }
+        "reuse" => {
+            if entry.contains_key("input_path") {
+                return Err(semantic_error(
+                    admitted,
+                    "population_snvs.mode,population_snvs.input_path",
+                    "el modo reuse no admite input_path",
+                ));
+            }
+            Ok(Some(DeclaredPopulationSnvs::Reuse {
+                metadata_path: required_non_empty_string(
+                    admitted,
+                    entry,
+                    "metadata_path",
+                    "population_snvs.metadata_path",
+                )?,
+            }))
+        }
+        "generate" => {
+            if entry.contains_key("input_path") || entry.contains_key("metadata_path") {
+                return Err(semantic_error(
+                    admitted,
+                    "population_snvs",
+                    "el modo generate no admite rutas en F2.2.1",
+                ));
+            }
+            Ok(Some(DeclaredPopulationSnvs::Generate))
+        }
+        other => Err(semantic_error(
+            admitted,
+            "population_snvs.mode",
+            format!("modo de matriz SNV desconocido: {other}"),
+        )),
+    }
+}
+
+fn required_non_empty_string(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+    field: &str,
+    diagnostic_field: &str,
+) -> Result<Located<String>, Diagnostic> {
+    let value = required_string(admitted, table, field)?;
+    if value.value().is_empty() {
+        return Err(
+            semantic_error(admitted, diagnostic_field, "la ruta no puede estar vacía")
+                .with("location", value.location().to_string()),
+        );
+    }
+    Ok(value)
 }
 
 fn parse_reference(
@@ -427,6 +522,28 @@ fn optional_located_string(
     table
         .contains_key(field)
         .then(|| required_string(admitted, table, field))
+        .transpose()
+}
+
+fn optional_located_u64(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+    field: &str,
+) -> Result<Option<Located<u64>>, Diagnostic> {
+    table
+        .contains_key(field)
+        .then(|| required_u64(admitted, table, field))
+        .transpose()
+}
+
+fn optional_number(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+    field: &str,
+) -> Result<Option<DeclaredNumber>, Diagnostic> {
+    table
+        .contains_key(field)
+        .then(|| required_number(admitted, table, field))
         .transpose()
 }
 
