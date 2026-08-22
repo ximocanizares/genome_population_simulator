@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use crate::coordinates::{BasePosition, GenomicInterval, InsertionAnchor, InternalDeletion};
-use crate::identity::EventId;
+use crate::identity::{EventId, PopulationId, VariantId};
 
 /// Base concreta admitida como alelo de un SNP.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,6 +65,9 @@ pub struct SnpModification {
     reference: CanonicalBase,
     alternate: CanonicalBase,
     provenance: ModificationProvenance,
+    matrix_variant_id: Option<VariantId>,
+    matrix_population_id: Option<PopulationId>,
+    matrix_source_id: Option<String>,
 }
 
 impl SnpModification {
@@ -82,7 +85,27 @@ impl SnpModification {
             reference,
             alternate,
             provenance,
+            matrix_variant_id: None,
+            matrix_population_id: None,
+            matrix_source_id: None,
         })
+    }
+
+    /// Construye una sustitución procedente de una fila de matriz canónica.
+    pub(crate) fn from_population_matrix(
+        position: BasePosition,
+        reference: CanonicalBase,
+        alternate: CanonicalBase,
+        provenance: ModificationProvenance,
+        matrix_variant_id: VariantId,
+        matrix_population_id: PopulationId,
+        matrix_source_id: String,
+    ) -> Result<Self, SegmentError> {
+        let mut modification = Self::new(position, reference, alternate, provenance)?;
+        modification.matrix_variant_id = Some(matrix_variant_id);
+        modification.matrix_population_id = Some(matrix_population_id);
+        modification.matrix_source_id = Some(matrix_source_id);
+        Ok(modification)
     }
 
     #[must_use]
@@ -103,6 +126,24 @@ impl SnpModification {
     #[must_use]
     pub const fn provenance(&self) -> &ModificationProvenance {
         &self.provenance
+    }
+
+    /// Identidad de la fila de matriz que originó el SNP, si corresponde.
+    #[must_use]
+    pub const fn matrix_variant_id(&self) -> Option<&VariantId> {
+        self.matrix_variant_id.as_ref()
+    }
+
+    /// Población de origen de la frecuencia de matriz, si corresponde.
+    #[must_use]
+    pub const fn matrix_population_id(&self) -> Option<&PopulationId> {
+        self.matrix_population_id.as_ref()
+    }
+
+    /// Identificador de procedencia de la fila canónica, incluso si es vacío.
+    #[must_use]
+    pub fn matrix_source_id(&self) -> Option<&str> {
+        self.matrix_source_id.as_deref()
     }
 }
 
@@ -270,6 +311,59 @@ impl SegmentChain {
         })
     }
 
+    /// Devuelve una nueva cadena con un SNP insertado en el único segmento de
+    /// fuente que contiene su posición. La cadena original permanece intacta.
+    pub fn with_snp(&self, snp: SnpModification) -> Result<Self, SegmentError> {
+        let position = snp.position().offset();
+        let matching = self
+            .segments
+            .iter()
+            .enumerate()
+            .filter(|(_, segment)| {
+                let source = segment.source();
+                snp.position().reference_id() == source.reference_id()
+                    && snp.position().sequence_id() == source.sequence_id()
+                    && snp.position().sequence_length() == source.sequence_length()
+                    && (source.start()..source.end()).contains(&position)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let index = match matching.as_slice() {
+            [] => return Err(SegmentError::SnpPositionNotCovered),
+            [index] => *index,
+            _ => return Err(SegmentError::AmbiguousSnpPosition),
+        };
+
+        let mut segments = self.segments.to_vec();
+        let segment = &segments[index];
+        if segment.modifications().iter().any(|modification| {
+            matches!(modification, SmallModification::Snp(existing) if existing.position() == snp.position())
+        }) {
+            return Err(SegmentError::SnpPositionAlreadyModified);
+        }
+        if segment.modifications().iter().any(|modification| {
+            matches!(modification, SmallModification::Deletion(deletion)
+                if (deletion.deletion().interval().start()..deletion.deletion().interval().end())
+                    .contains(&position))
+        }) {
+            return Err(SegmentError::SnpPositionCoveredByDeletion);
+        }
+        let new_extent =
+            ModificationExtent::from_modification(&SmallModification::Snp(snp.clone()));
+        let insert_at = segment
+            .modifications()
+            .iter()
+            .position(|modification| {
+                new_extent.sort_key()
+                    < ModificationExtent::from_modification(modification).sort_key()
+            })
+            .unwrap_or(segment.modifications().len());
+        let mut modifications = segment.modifications().to_vec();
+        modifications.insert(insert_at, SmallModification::Snp(snp));
+        segments[index] = Segment::new(segment.source().clone(), modifications)?;
+        Self::new(segments)
+    }
+
     #[must_use]
     pub fn segments(&self) -> &[Segment] {
         &self.segments
@@ -379,6 +473,10 @@ pub enum SegmentError {
     ModificationOutsideSource,
     ModificationsNotStrictlyOrdered,
     OverlappingModifications,
+    SnpPositionNotCovered,
+    AmbiguousSnpPosition,
+    SnpPositionAlreadyModified,
+    SnpPositionCoveredByDeletion,
 }
 
 #[cfg(test)]

@@ -26,3 +26,4 @@ pub mod reference_reduction;
 pub mod reference_reduction_io;
 pub mod results;
 pub mod segments;
+pub mod snp_application;

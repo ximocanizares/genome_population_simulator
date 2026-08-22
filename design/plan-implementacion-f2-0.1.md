@@ -264,11 +264,16 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: round-trip semántico, SHA-256, orden canónico y ejecución
     repetida con iguales bytes/resultados.
 
-- ☐ F2.2.8. Aplicar SNP explícitos y derivados de la matriz.
+- ✅ F2.2.8. Aplicar SNP explícitos y derivados de la matriz.
   - Depende de: F2.1.3–F2.1.4 y F2.2.4–F2.2.7.
   - Procede de: REQ-CONF-08/21/28, REQ-IND-05/06/10/11/13/14.
   - Cambia: constructores y aplicación trazable de SNP sobre posiciones
     elegibles, sin `REF=N` ni otra fuente aleatoria por individuo.
+  - Límite confirmado: entrega un núcleo interno transaccional que recibe la
+    copia/fase ya seleccionada, hace *preflight* del lote y conserva la
+    procedencia explícita o canónica de matriz. No añade todavía campos
+    TOML/esquema/Marimo para seleccionar individuo, copia o fase; esa frontera
+    observable pertenece a F2.3, que crea dichas identidades.
   - Se comprueba con: REF/ALT, regiones, conflictos, procedencia y matriz común.
 
 - ☐ F2.2.9. Aplicar inserciones y deleciones pequeñas.

@@ -25,6 +25,14 @@ poblaciones simuladas, fases configurables, reglas ni parámetros de generación
 o frecuencias. La única excepción estructural es `[population_snvs]`: declara
 el origen de una matriz común y F2.2.2 valida sus sumas ALT multialélicas.
 
+F2.2.8 no añade todavía un campo de autoría para SNP explícitos: su aplicación
+requiere una copia haplotípica destino y las identidades de individuos se
+incorporan en F2.3. El núcleo ya acepta un SNP explícito o una fila preparada de
+la matriz canónica, realiza el preflight contra la referencia y conserva
+`variant_id`, población, `source_id` y evento como procedencia; no sortea loci
+ni alelos por individuo. Por ello Marimo tampoco muestra controles de destino
+SNP antes del primer consumidor que pueda representarlos sin ambigüedad.
+
 `seed`, cuando aparece, contiene 256 bits como 64 hexadecimales minúsculos.
 
 `normalization_tolerance`, cuando aparece, conserva su literal decimal TOML;

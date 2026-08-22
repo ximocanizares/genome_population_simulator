@@ -54,6 +54,16 @@ impl SnpLocus {
     pub const fn position(&self) -> &BasePosition {
         &self.position
     }
+
+    #[must_use]
+    pub const fn reference(&self) -> CanonicalBase {
+        self.reference
+    }
+
+    #[must_use]
+    pub const fn alternate(&self) -> CanonicalBase {
+        self.alternate
+    }
 }
 
 /// Rechazo de un locus que no representa una sustitución SNP real.
