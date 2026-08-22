@@ -4,7 +4,7 @@ use crate::coordinates::BasePosition;
 use crate::haplotype::{HaplotypeCopy, HaplotypePhase, Individual};
 use crate::identity::SequenceId;
 use crate::reference::{Reference, ReferenceSequence};
-use crate::segments::{CanonicalBase, CurrentIndelPiece, SmallModification};
+use crate::segments::{CanonicalBase, CurrentIndelPiece, CurrentSourcePiece};
 
 /// Error al reconstruir una copia desde sus segmentos y una referencia concreta.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -134,29 +134,7 @@ pub fn materialize_copy(
         return Err(MaterializationError::CopyReferenceMismatch);
     }
 
-    if let Some(pieces) = copy.segments().current_indel_pieces() {
-        return materialize_current_indel_pieces(copy, reference, pieces);
-    }
-
-    let mut materialized = Vec::new();
-    for segment in copy.segments().segments() {
-        let source = segment.source();
-        if source.reference_id() != reference.id() {
-            return Err(MaterializationError::SourceReferenceMismatch);
-        }
-        if source.sequence_id() != copy.id().sequence_id() {
-            return Err(MaterializationError::SourceSequenceMismatch);
-        }
-        let sequence = reference_sequence(reference, source.sequence_id())?;
-        if source.sequence_length() != sequence.length() {
-            return Err(MaterializationError::SourceLengthMismatch {
-                expected: source.sequence_length(),
-                found: sequence.length(),
-            });
-        }
-        materialize_segment(&mut materialized, segment, sequence)?;
-    }
-    Ok(materialized)
+    materialize_current_indel_pieces(copy, reference, copy.segments().current_modifications())
 }
 
 fn materialize_current_indel_pieces(
@@ -168,25 +146,20 @@ fn materialize_current_indel_pieces(
     for piece in pieces {
         match piece {
             CurrentIndelPiece::Source(source) => {
-                if source.reference_id() != reference.id() {
+                if source.source().reference_id() != reference.id() {
                     return Err(MaterializationError::SourceReferenceMismatch);
                 }
-                if source.sequence_id() != copy.id().sequence_id() {
+                if source.source().sequence_id() != copy.id().sequence_id() {
                     return Err(MaterializationError::SourceSequenceMismatch);
                 }
-                let sequence = reference_sequence(reference, source.sequence_id())?;
-                if source.sequence_length() != sequence.length() {
+                let sequence = reference_sequence(reference, source.source().sequence_id())?;
+                if source.source().sequence_length() != sequence.length() {
                     return Err(MaterializationError::SourceLengthMismatch {
-                        expected: source.sequence_length(),
+                        expected: source.source().sequence_length(),
                         found: sequence.length(),
                     });
                 }
-                append_source(
-                    &mut materialized,
-                    sequence.sequence().as_bytes(),
-                    source.start(),
-                    source.end(),
-                )?;
+                materialize_current_source(&mut materialized, sequence, source)?;
             }
             CurrentIndelPiece::Inserted(inserted) => {
                 materialized.extend_from_slice(inserted.bases());
@@ -194,6 +167,42 @@ fn materialize_current_indel_pieces(
         }
     }
     Ok(materialized)
+}
+
+fn materialize_current_source(
+    destination: &mut Vec<u8>,
+    sequence: &ReferenceSequence,
+    source: &CurrentSourcePiece,
+) -> Result<(), MaterializationError> {
+    let mut cursor = source.source().start();
+    for snp in source.snps() {
+        append_source(
+            destination,
+            sequence.sequence().as_bytes(),
+            cursor,
+            snp.position().offset(),
+        )?;
+        let found = byte_at(sequence.sequence().as_bytes(), snp.position().offset())?;
+        if found != snp.reference().as_byte() {
+            return Err(MaterializationError::SnpReferenceMismatch {
+                position: snp.position().offset(),
+                expected: snp.reference(),
+                found,
+            });
+        }
+        destination.push(snp.alternate().as_byte());
+        cursor = snp
+            .position()
+            .offset()
+            .checked_add(1)
+            .ok_or(MaterializationError::IndexOverflow)?;
+    }
+    append_source(
+        destination,
+        sequence.sequence().as_bytes(),
+        cursor,
+        source.source().end(),
+    )
 }
 
 /// Deriva los alelos faseados y la dosis ALT de un SNP desde las copias del individuo.
@@ -249,126 +258,50 @@ pub fn derive_snp_genotype(
     })
 }
 
-fn materialize_segment(
-    destination: &mut Vec<u8>,
-    segment: &crate::segments::Segment,
-    sequence: &ReferenceSequence,
-) -> Result<(), MaterializationError> {
-    let source = segment.source();
-    let bases = sequence.sequence().as_bytes();
-    let mut cursor = source.start();
-    for modification in segment.modifications() {
-        match modification {
-            SmallModification::Snp(snp) => {
-                append_source(destination, bases, cursor, snp.position().offset())?;
-                let found = byte_at(bases, snp.position().offset())?;
-                if found != snp.reference().as_byte() {
-                    return Err(MaterializationError::SnpReferenceMismatch {
-                        position: snp.position().offset(),
-                        expected: snp.reference(),
-                        found,
-                    });
-                }
-                destination.push(snp.alternate().as_byte());
-                cursor = snp
-                    .position()
-                    .offset()
-                    .checked_add(1)
-                    .ok_or(MaterializationError::IndexOverflow)?;
-            }
-            SmallModification::Insertion(insertion) => {
-                let point = insertion.anchor().point().offset();
-                append_source(destination, bases, cursor, point)?;
-                destination.extend_from_slice(insertion.bases());
-                cursor = point;
-            }
-            SmallModification::Deletion(deletion) => {
-                let interval = deletion.deletion().interval();
-                append_source(destination, bases, cursor, interval.start())?;
-                cursor = interval.end();
-            }
-        }
-    }
-    append_source(destination, bases, cursor, source.end())
-}
-
 fn allele_in_copy(
     copy: &HaplotypeCopy,
     locus: &SnpLocus,
 ) -> Result<CanonicalBase, GenotypeQueryError> {
-    if let Some(pieces) = copy.segments().current_indel_pieces() {
-        let matching = pieces
-            .iter()
-            .filter(|piece| {
-                matches!(piece, CurrentIndelPiece::Source(source)
-                    if source.reference_id() == locus.position.reference_id()
-                        && source.sequence_id() == locus.position.sequence_id()
-                        && source.sequence_length() == locus.position.sequence_length()
-                        && (source.start()..source.end()).contains(&locus.position.offset()))
-            })
-            .count();
-        return match matching {
-            0 => Err(GenotypeQueryError::LocusDeletedFromCopy {
-                phase: copy.phase(),
-            }),
-            1 => Ok(locus.reference),
-            _ => Err(GenotypeQueryError::AmbiguousLocusInCopy {
-                phase: copy.phase(),
-            }),
-        };
-    }
-    let mut matching_segment = None;
-    for segment in copy.segments().segments() {
-        let source = segment.source();
-        if source.reference_id() != locus.position.reference_id()
-            || source.sequence_id() != locus.position.sequence_id()
-        {
-            return Err(GenotypeQueryError::Materialization(
-                MaterializationError::SourceSequenceMismatch,
-            ));
-        }
-        if source.sequence_length() != locus.position.sequence_length() {
-            return Err(GenotypeQueryError::Materialization(
-                MaterializationError::SourceLengthMismatch {
-                    expected: locus.position.sequence_length(),
-                    found: source.sequence_length(),
-                },
-            ));
-        }
-        if locus.position.offset() >= source.start()
-            && locus.position.offset() < source.end()
-            && matching_segment.replace(segment).is_some()
-        {
-            return Err(GenotypeQueryError::AmbiguousLocusInCopy {
-                phase: copy.phase(),
-            });
-        }
-    }
-    let segment = matching_segment.ok_or(GenotypeQueryError::LocusAbsentFromCopy {
-        phase: copy.phase(),
-    })?;
-    for modification in segment.modifications() {
-        match modification {
-            SmallModification::Deletion(deletion)
-                if locus.position.offset() >= deletion.deletion().interval().start()
-                    && locus.position.offset() < deletion.deletion().interval().end() =>
+    let matching = copy
+        .segments()
+        .current_modifications()
+        .iter()
+        .filter_map(|piece| match piece {
+            CurrentIndelPiece::Source(source)
+                if source.source().reference_id() == locus.position.reference_id()
+                    && source.source().sequence_id() == locus.position.sequence_id()
+                    && source.source().sequence_length() == locus.position.sequence_length()
+                    && (source.source().start()..source.source().end())
+                        .contains(&locus.position.offset()) =>
             {
-                return Err(GenotypeQueryError::LocusDeletedFromCopy {
-                    phase: copy.phase(),
-                });
+                Some(source)
             }
-            SmallModification::Snp(snp) if snp.position() == locus.position() => {
-                if snp.reference() != locus.reference || snp.alternate() != locus.alternate {
-                    return Err(GenotypeQueryError::IncompatibleSnpInCopy {
-                        phase: copy.phase(),
-                    });
-                }
-                return Ok(locus.alternate);
+            CurrentIndelPiece::Source(_) | CurrentIndelPiece::Inserted(_) => None,
+        })
+        .collect::<Vec<_>>();
+    match matching.as_slice() {
+        [] => Err(GenotypeQueryError::LocusDeletedFromCopy {
+            phase: copy.phase(),
+        }),
+        [source] => match source
+            .snps()
+            .iter()
+            .find(|snp| snp.position() == locus.position())
+        {
+            None => Ok(locus.reference),
+            Some(snp)
+                if snp.reference() == locus.reference && snp.alternate() == locus.alternate =>
+            {
+                Ok(locus.alternate)
             }
-            _ => {}
-        }
+            Some(_) => Err(GenotypeQueryError::IncompatibleSnpInCopy {
+                phase: copy.phase(),
+            }),
+        },
+        _ => Err(GenotypeQueryError::AmbiguousLocusInCopy {
+            phase: copy.phase(),
+        }),
     }
-    Ok(locus.reference)
 }
 
 fn reference_sequence<'a>(

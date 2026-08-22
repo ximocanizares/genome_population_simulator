@@ -291,7 +291,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
     no se expone aún TOML/esquema/Marimo porque F2.2.11 es su primer consumidor
     observable.
 
-- ☐ F2.2.10. Componer eventos pequeños y cerrar diagnósticos.
+- ✅ F2.2.10. Componer eventos pequeños y cerrar diagnósticos.
   - Depende de: F2.2.8–F2.2.9.
   - Procede de: DTC-031/032/044; REQ-DIR-03 y ACE-01/09/21/22/28.
   - Cambia: orden declarado, conflictos explícitos, preflight y ausencia de

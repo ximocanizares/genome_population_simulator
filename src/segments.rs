@@ -279,7 +279,10 @@ impl Segment {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SegmentChain {
     segments: Arc<[Segment]>,
-    indel_state: Option<Arc<CurrentIndelState>>,
+    /// Vista canónica de la secuencia vigente. `segments` conserva la
+    /// procedencia estructural de compatibilidad, pero no es autoridad una vez
+    /// que existen modificaciones pequeñas compuestas.
+    indel_state: Arc<CurrentIndelState>,
 }
 
 /// Edición pequeña aceptada en las coordenadas de la secuencia vigente.
@@ -290,6 +293,10 @@ pub struct SegmentChain {
 /// la reconstrucción perezosa desde la fuente o desde los bytes insertados.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CurrentIndelEvent {
+    Snp {
+        event_id: EventId,
+        position: BasePosition,
+    },
     Insertion {
         event_id: EventId,
         point: u64,
@@ -306,34 +313,75 @@ impl CurrentIndelEvent {
     #[must_use]
     pub const fn event_id(&self) -> &EventId {
         match self {
-            Self::Insertion { event_id, .. } | Self::Deletion { event_id, .. } => event_id,
+            Self::Snp { event_id, .. }
+            | Self::Insertion { event_id, .. }
+            | Self::Deletion { event_id, .. } => event_id,
         }
     }
 }
 
+/// Fragmento canónico de una copia después de todas sus modificaciones
+/// pequeñas vigentes. Las ausencias entre fragmentos de fuente representan
+/// deleciones; el historial de eventos se consulta por separado.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum CurrentIndelPiece {
-    Source(GenomicInterval),
+pub enum CurrentIndelPiece {
+    Source(CurrentSourcePiece),
     Inserted(CurrentInsertedPiece),
 }
 
+/// Fragmento de referencia en el espacio de coordenadas vigente.
+///
+/// Los SNP conservan coordenadas de fuente incluso cuando una inserción o una
+/// deleción posterior divide el fragmento. Esto permite que la eliminación de
+/// un SNP sea una consecuencia del evento posterior, sin reconstruir ni
+/// aplanar la copia.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct CurrentInsertedPiece {
+pub struct CurrentSourcePiece {
+    source: GenomicInterval,
+    snps: Arc<[SnpModification]>,
+}
+
+impl CurrentSourcePiece {
+    fn new(source: GenomicInterval, snps: impl Into<Arc<[SnpModification]>>) -> Self {
+        Self {
+            source,
+            snps: snps.into(),
+        }
+    }
+
+    #[must_use]
+    pub const fn source(&self) -> &GenomicInterval {
+        &self.source
+    }
+
+    #[must_use]
+    pub fn snps(&self) -> &[SnpModification] {
+        &self.snps
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentInsertedPiece {
     bases: Arc<[u8]>,
     provenance: ModificationProvenance,
 }
 
 impl CurrentInsertedPiece {
     #[must_use]
-    pub(crate) const fn bases(&self) -> &Arc<[u8]> {
+    pub const fn bases(&self) -> &Arc<[u8]> {
         &self.bases
+    }
+
+    #[must_use]
+    pub const fn provenance(&self) -> &ModificationProvenance {
+        &self.provenance
     }
 }
 
 impl CurrentIndelPiece {
     fn len(&self) -> u64 {
         match self {
-            Self::Source(source) => source.len(),
+            Self::Source(source) => source.source.len(),
             Self::Inserted(inserted) => u64::try_from(inserted.bases.len()).unwrap_or(u64::MAX),
         }
     }
@@ -351,10 +399,16 @@ impl SegmentChain {
     pub fn intact(source: GenomicInterval) -> Self {
         Self {
             segments: Arc::from(vec![Segment {
-                source,
+                source: source.clone(),
                 modifications: Vec::new(),
             }]),
-            indel_state: None,
+            indel_state: Arc::new(CurrentIndelState {
+                pieces: Arc::from(vec![CurrentIndelPiece::Source(CurrentSourcePiece::new(
+                    source,
+                    Arc::from(Vec::<SnpModification>::new()),
+                ))]),
+                events: Arc::from(Vec::<CurrentIndelEvent>::new()),
+            }),
         }
     }
 
@@ -371,18 +425,17 @@ impl SegmentChain {
         }) {
             return Err(SegmentError::MixedSourceSpace);
         }
+        let indel_state = current_state_from_segments(&segments)?;
         Ok(Self {
             segments: Arc::from(segments),
-            indel_state: None,
+            indel_state: Arc::new(indel_state),
         })
     }
 
     /// Devuelve una nueva cadena con un SNP insertado en el único segmento de
     /// fuente que contiene su posición. La cadena original permanece intacta.
     pub fn with_snp(&self, snp: SnpModification) -> Result<Self, SegmentError> {
-        if self.indel_state.is_some() {
-            return Err(SegmentError::SmallIndelCompositionDeferred);
-        }
+        let current = self.with_current_snp(snp.clone())?;
         let position = snp.position().offset();
         let matching = self
             .segments
@@ -430,15 +483,105 @@ impl SegmentChain {
         let mut modifications = segment.modifications().to_vec();
         modifications.insert(insert_at, SmallModification::Snp(snp));
         segments[index] = Segment::new(segment.source().clone(), modifications)?;
-        Self::new(segments)
+        Ok(Self {
+            segments: Arc::from(segments),
+            indel_state: current.indel_state,
+        })
+    }
+
+    /// Añade un SNP a un fragmento de fuente que sigue presente tras indels.
+    fn with_current_snp(&self, snp: SnpModification) -> Result<Self, SegmentError> {
+        let state = self.current_indel_state()?;
+        let position = snp.position().offset();
+        let matching = state
+            .pieces
+            .iter()
+            .enumerate()
+            .filter(|(_, piece)| {
+                matches!(piece, CurrentIndelPiece::Source(source)
+                    if snp.position().reference_id() == source.source.reference_id()
+                        && snp.position().sequence_id() == source.source.sequence_id()
+                        && snp.position().sequence_length() == source.source.sequence_length()
+                        && (source.source.start()..source.source.end()).contains(&position))
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let index = match matching.as_slice() {
+            [] => {
+                let deleted_by_legacy_segment = self.segments.iter().any(|segment| {
+                    segment.modifications().iter().any(|modification| {
+                        matches!(modification, SmallModification::Deletion(deletion)
+                            if deletion.deletion().interval().reference_id()
+                                == snp.position().reference_id()
+                                && deletion.deletion().interval().sequence_id()
+                                    == snp.position().sequence_id()
+                                && (deletion.deletion().interval().start()
+                                    ..deletion.deletion().interval().end())
+                                    .contains(&position))
+                    })
+                });
+                return Err(
+                    if deleted_by_legacy_segment
+                        || state
+                            .events
+                            .iter()
+                            .any(|event| matches!(event, CurrentIndelEvent::Deletion { .. }))
+                    {
+                        SegmentError::SnpPositionCoveredByDeletion
+                    } else {
+                        SegmentError::SnpPositionNotCovered
+                    },
+                );
+            }
+            [index] => *index,
+            _ => return Err(SegmentError::AmbiguousSnpPosition),
+        };
+
+        let mut pieces = state.pieces.to_vec();
+        let CurrentIndelPiece::Source(source) = &pieces[index] else {
+            return Err(SegmentError::CurrentCoordinateMismatch);
+        };
+        if source
+            .snps
+            .iter()
+            .any(|existing| existing.position() == snp.position())
+        {
+            return Err(SegmentError::SnpPositionAlreadyModified);
+        }
+        let mut snps = source.snps.to_vec();
+        let insert_at = snps
+            .iter()
+            .position(|existing| existing.position().offset() > position)
+            .unwrap_or(snps.len());
+        let event_id = snp.provenance().event_id().clone();
+        let event_position = snp.position().clone();
+        snps.insert(insert_at, snp);
+        pieces[index] = CurrentIndelPiece::Source(CurrentSourcePiece::new(
+            source.source.clone(),
+            Arc::from(snps),
+        ));
+        Ok(Self {
+            segments: self.segments.clone(),
+            indel_state: Arc::new(CurrentIndelState {
+                pieces: Arc::from(pieces),
+                events: Arc::from({
+                    let mut events = state.events.to_vec();
+                    events.push(CurrentIndelEvent::Snp {
+                        event_id,
+                        position: event_position,
+                    });
+                    events
+                }),
+            }),
+        })
     }
 
     /// Inserta bases canónicas en un punto interno de la secuencia vigente.
     ///
     /// La cadena mantiene fragmentos de fuente y de inserción, por lo que una
     /// inserción posterior puede anclarse dentro de bases que no pertenecen a
-    /// la referencia. La composición con SNP se resuelve deliberadamente en
-    /// F2.2.10 y se rechaza aquí.
+    /// la referencia. F2.2.10 conserva además los SNP de los fragmentos de
+    /// fuente para que eventos posteriores puedan eliminarlos o coexistir.
     pub(crate) fn with_current_insertion(
         &self,
         point: u64,
@@ -491,10 +634,10 @@ impl SegmentChain {
         });
         Ok(Self {
             segments: self.segments.clone(),
-            indel_state: Some(Arc::new(CurrentIndelState {
+            indel_state: Arc::new(CurrentIndelState {
                 pieces: Arc::from(pieces),
                 events: Arc::from(events),
-            })),
+            }),
         })
     }
 
@@ -531,47 +674,43 @@ impl SegmentChain {
         });
         Ok(Self {
             segments: self.segments.clone(),
-            indel_state: Some(Arc::new(CurrentIndelState {
+            indel_state: Arc::new(CurrentIndelState {
                 pieces: Arc::from(pieces),
                 events: Arc::from(events),
-            })),
+            }),
         })
     }
 
     fn current_indel_state(&self) -> Result<CurrentIndelState, SegmentError> {
-        if let Some(state) = &self.indel_state {
-            return Ok((**state).clone());
-        }
-        if self
-            .segments
-            .iter()
-            .any(|segment| !segment.modifications().is_empty())
-        {
-            return Err(SegmentError::SmallIndelCompositionDeferred);
-        }
-        Ok(CurrentIndelState {
-            pieces: Arc::from(
-                self.segments
-                    .iter()
-                    .map(|segment| CurrentIndelPiece::Source(segment.source().clone()))
-                    .collect::<Vec<_>>(),
-            ),
-            events: Arc::from(Vec::<CurrentIndelEvent>::new()),
-        })
+        Ok((*self.indel_state).clone())
     }
 
     #[must_use]
     pub fn current_indel_events(&self) -> &[CurrentIndelEvent] {
-        self.indel_state
-            .as_ref()
-            .map_or(&[], |state| state.events.as_ref())
+        &self.indel_state.events
     }
 
-    pub(crate) fn current_indel_pieces(&self) -> Option<&[CurrentIndelPiece]> {
-        self.indel_state.as_ref().map(|state| state.pieces.as_ref())
+    /// Historial declarado de eventos pequeños, separado de la vista vigente.
+    #[must_use]
+    pub fn small_event_history(&self) -> &[CurrentIndelEvent] {
+        &self.indel_state.events
+    }
+
+    /// Devuelve la única vista pública canónica de las modificaciones vigentes.
+    ///
+    /// La lista está en orden de secuencia final y es la autoridad para
+    /// materialización y consultas genotípicas. Los segmentos heredados solo
+    /// describen fuentes y no deben usarse para inferir una variante vigente.
+    #[must_use]
+    pub fn current_modifications(&self) -> &[CurrentIndelPiece] {
+        &self.indel_state.pieces
     }
 
     #[must_use]
+    /// Descriptores de fuente conservados por compatibilidad estructural.
+    ///
+    /// No representan necesariamente el estado pequeño vigente después de una
+    /// composición; para ello debe usarse [`Self::current_modifications`].
     pub fn segments(&self) -> &[Segment] {
         &self.segments
     }
@@ -699,6 +838,78 @@ fn piece_length(pieces: &[CurrentIndelPiece]) -> Result<u64, SegmentError> {
     })
 }
 
+fn current_state_from_segments(segments: &[Segment]) -> Result<CurrentIndelState, SegmentError> {
+    let mut pieces = Vec::new();
+    for segment in segments {
+        let source = segment.source();
+        let mut cursor = source.start();
+        for modification in segment.modifications() {
+            match modification {
+                SmallModification::Snp(snp) => {
+                    push_source_piece(&mut pieces, source, cursor, snp.position().offset(), &[])?;
+                    let end = snp
+                        .position()
+                        .offset()
+                        .checked_add(1)
+                        .ok_or(SegmentError::ArithmeticOverflow)?;
+                    push_source_piece(
+                        &mut pieces,
+                        source,
+                        snp.position().offset(),
+                        end,
+                        std::slice::from_ref(snp),
+                    )?;
+                    cursor = end;
+                }
+                SmallModification::Insertion(insertion) => {
+                    let point = insertion.anchor().point().offset();
+                    push_source_piece(&mut pieces, source, cursor, point, &[])?;
+                    pieces.push(CurrentIndelPiece::Inserted(CurrentInsertedPiece {
+                        bases: Arc::from(insertion.bases()),
+                        provenance: insertion.provenance().clone(),
+                    }));
+                    cursor = point;
+                }
+                SmallModification::Deletion(deletion) => {
+                    let interval = deletion.deletion().interval();
+                    push_source_piece(&mut pieces, source, cursor, interval.start(), &[])?;
+                    cursor = interval.end();
+                }
+            }
+        }
+        push_source_piece(&mut pieces, source, cursor, source.end(), &[])?;
+    }
+    Ok(CurrentIndelState {
+        pieces: Arc::from(pieces),
+        events: Arc::from(Vec::<CurrentIndelEvent>::new()),
+    })
+}
+
+fn push_source_piece(
+    pieces: &mut Vec<CurrentIndelPiece>,
+    source: &GenomicInterval,
+    start: u64,
+    end: u64,
+    snps: &[SnpModification],
+) -> Result<(), SegmentError> {
+    if start == end {
+        return Ok(());
+    }
+    let interval = GenomicInterval::new(
+        source.reference_id().clone(),
+        source.sequence_id().clone(),
+        start,
+        end,
+        source.sequence_length(),
+    )
+    .map_err(|_| SegmentError::CurrentCoordinateMismatch)?;
+    pieces.push(CurrentIndelPiece::Source(CurrentSourcePiece::new(
+        interval,
+        Arc::from(snps),
+    )));
+    Ok(())
+}
+
 fn split_pieces_at(
     pieces: &[CurrentIndelPiece],
     point: u64,
@@ -718,32 +929,54 @@ fn split_pieces_at(
             let right_len = next - point;
             match piece {
                 CurrentIndelPiece::Source(source) => {
-                    result.push(CurrentIndelPiece::Source(
+                    result.push(CurrentIndelPiece::Source(CurrentSourcePiece::new(
                         GenomicInterval::new(
-                            source.reference_id().clone(),
-                            source.sequence_id().clone(),
-                            source.start(),
+                            source.source.reference_id().clone(),
+                            source.source.sequence_id().clone(),
+                            source.source.start(),
                             source
+                                .source
                                 .start()
                                 .checked_add(left_len)
                                 .ok_or(SegmentError::ArithmeticOverflow)?,
-                            source.sequence_length(),
+                            source.source.sequence_length(),
                         )
                         .map_err(|_| SegmentError::CurrentCoordinateMismatch)?,
-                    ));
-                    result.push(CurrentIndelPiece::Source(
-                        GenomicInterval::new(
-                            source.reference_id().clone(),
-                            source.sequence_id().clone(),
+                        Arc::from(
                             source
+                                .snps
+                                .iter()
+                                .filter(|snp| {
+                                    snp.position().offset() < source.source.start() + left_len
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                        ),
+                    )));
+                    result.push(CurrentIndelPiece::Source(CurrentSourcePiece::new(
+                        GenomicInterval::new(
+                            source.source.reference_id().clone(),
+                            source.source.sequence_id().clone(),
+                            source
+                                .source
                                 .end()
                                 .checked_sub(right_len)
                                 .ok_or(SegmentError::ArithmeticOverflow)?,
-                            source.end(),
-                            source.sequence_length(),
+                            source.source.end(),
+                            source.source.sequence_length(),
                         )
                         .map_err(|_| SegmentError::CurrentCoordinateMismatch)?,
-                    ));
+                        Arc::from(
+                            source
+                                .snps
+                                .iter()
+                                .filter(|snp| {
+                                    snp.position().offset() >= source.source.end() - right_len
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>(),
+                        ),
+                    )));
                 }
                 CurrentIndelPiece::Inserted(inserted) => {
                     let left =
