@@ -256,7 +256,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: intervalos semiabiertos/fijos, 12 sustituciones, recursos
     pequeños versionados y reproducción independiente de sus literales.
 
-- ☐ F2.2.7. Publicar y reutilizar la matriz canónica.
+- ✅ F2.2.7. Publicar y reutilizar la matriz canónica.
   - Depende de: F2.2.4–F2.2.6.
   - Procede de: DTC-054; REQ-MAN-91 y REQ-VAL-55.
   - Cambia: generación y preparación producen el mismo par TSV+JSON y la

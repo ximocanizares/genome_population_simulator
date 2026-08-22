@@ -9,7 +9,11 @@ use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::Diagnostic;
 use crate::identity::{ReferenceId, derive_execution_id};
 use crate::integrity::configuration_digest;
-use crate::population_snvs::generate_population_snvs_from_reference;
+use crate::population_snvs::{
+    PopulationSnvsProvenance, canonical_metadata_document, canonical_tsv_bytes,
+    generate_population_snvs_from_reference, parse_supplied_tsv,
+    prepare_population_snvs_from_reference, validate_reusable_population_snvs,
+};
 use crate::publication::ExecutionWorkspace;
 use crate::reference::Reference;
 use crate::reference_fasta::{
@@ -28,8 +32,9 @@ use crate::reference_reduction_io::{
 };
 use crate::results::{
     ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestReductionLink,
-    ManifestReferenceLink, ReducedReferenceOutput, ReferenceOutput, UnitState,
-    effective_config_document_with_reductions, general_manifest_document, json_document_bytes,
+    ManifestReferenceLink, PopulationSnvsManifestLink, ReducedReferenceOutput, ReferenceOutput,
+    UnitState, effective_config_document_with_population_snvs, general_manifest_document,
+    json_document_bytes,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,23 +67,6 @@ fn execute_validated_config_with_effective_document(
 ) -> Result<ExecutionOutcome, Diagnostic> {
     let mut prepared_reference = prepare_reference(effective)?;
     after_prepare_reference(&mut prepared_reference)?;
-    // F2.2.5 materializa únicamente la vista en memoria; F2.2.7 será la dueña
-    // de escribir/publicar el par canónico.
-    if let Some(generation) = effective.population_snvs_generation() {
-        let _matrix = generate_population_snvs_from_reference(
-            generation,
-            prepared_reference.reference(),
-            effective.reproducibility().root_seed(),
-        )
-        .map_err(|error| {
-            Diagnostic::configuration(
-                "GPS-CONF-008",
-                "La generación de la matriz SNV no cumple su configuración efectiva.",
-            )
-            .with("component", "population_snvs.generate")
-            .with("detail", error.to_string())
-        })?;
-    }
     // Todo error de dominio o preflight ocurre antes de crear el provisional y
     // antes de que exista cualquier RNG local de selección.
     preflight_reductions(effective, prepared_reference.reference())?;
@@ -94,6 +82,7 @@ fn execute_validated_config_with_effective_document(
     let mut manifest_references = Vec::new();
     let mut manifest_reductions = Vec::new();
     let mut published_reductions = Vec::with_capacity(effective.reduced_references().len());
+    let mut population_snvs = None;
     let started = (|| -> Result<(), Diagnostic> {
         configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
         reference_artifact = Some(write_reference(
@@ -113,6 +102,12 @@ fn execute_validated_config_with_effective_document(
             &workspace,
             source_artifact,
             prepared_reference,
+        )?;
+        population_snvs = materialize_population_snvs(
+            effective,
+            prepared_reference.reference(),
+            source_artifact,
+            &mut workspace,
         )?;
         // A partir de aquí la copia recargada es la única autoridad para
         // seleccionar intervalos y materializar bases derivadas.
@@ -205,11 +200,13 @@ fn execute_validated_config_with_effective_document(
         }
         let reduction_outputs =
             reduction_outputs(effective, &published_reductions, source_artifact);
-        let effective_document = transform_effective(effective_config_document_with_reductions(
-            effective,
-            reference_output,
-            &reduction_outputs,
-        )?);
+        let effective_document =
+            transform_effective(effective_config_document_with_population_snvs(
+                effective,
+                reference_output,
+                &reduction_outputs,
+                population_snvs.as_ref(),
+            )?);
         let effective_record = workspace.write_artifact(
             "effective-config",
             "effective_config",
@@ -226,6 +223,7 @@ fn execute_validated_config_with_effective_document(
             effective_config: Some(&effective_record),
             references: &manifest_references,
             reduced_references: &manifest_reductions,
+            population_snvs: population_snvs.as_ref(),
             artifacts: &artifacts,
             diagnostics: &[],
         };
@@ -296,10 +294,125 @@ fn publish_controlled_failure(
         effective_config: None,
         references: &[],
         reduced_references: reductions,
+        population_snvs: None,
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(cause),
     };
     workspace.write_general_manifest(&json_document_bytes(&general_manifest_document(&manifest))?)
+}
+
+fn materialize_population_snvs(
+    effective: &EffectiveConfig,
+    reference: &Reference,
+    reference_fasta: &ArtifactRecord,
+    workspace: &mut ExecutionWorkspace,
+) -> Result<Option<PopulationSnvsManifestLink>, Diagnostic> {
+    let Some(source) = effective.population_snvs() else {
+        return Ok(None);
+    };
+    let prepared = match source {
+        crate::application::EffectivePopulationSnvs::Generate { parameters } => {
+            let prepared = generate_population_snvs_from_reference(
+                parameters,
+                reference,
+                effective.reproducibility().root_seed(),
+            )
+            .map_err(|error| {
+                population_snvs_error("population_snvs.generate", error.to_string())
+            })?;
+            return publish_population_snvs(
+                workspace,
+                &prepared,
+                reference,
+                reference_fasta,
+                PopulationSnvsProvenance::Generated,
+            )
+            .map(Some);
+        }
+        crate::application::EffectivePopulationSnvs::Supplied { input_path } => {
+            let bytes = fs::read(input_path)
+                .map_err(|error| io_error(input_path, "read_population_snvs_input", error))?;
+            let table = parse_supplied_tsv(&bytes).map_err(|error| {
+                population_snvs_error("population_snvs.input_path", error.to_string())
+            })?;
+            prepare_population_snvs_from_reference(
+                &table,
+                reference,
+                effective.normalization().tolerance(),
+                false,
+            )
+            .map_err(|error| {
+                population_snvs_error("population_snvs.input_path", error.to_string())
+            })?
+        }
+        crate::application::EffectivePopulationSnvs::Reuse { metadata_path } => {
+            let (_, _, metadata_sha256) = validate_reusable_population_snvs(
+                metadata_path,
+                reference,
+                reference_fasta.digest.as_str(),
+                effective.normalization().tolerance(),
+                false,
+            )
+            .map_err(|error| {
+                population_snvs_error("population_snvs.metadata_path", error.to_string())
+            })?;
+            return Ok(Some(PopulationSnvsManifestLink {
+                mode: "reuse".to_owned(),
+                metadata_sha256,
+                metadata_artifact_id: None,
+            }));
+        }
+    };
+    publish_population_snvs(
+        workspace,
+        &prepared,
+        reference,
+        reference_fasta,
+        PopulationSnvsProvenance::Supplied,
+    )
+    .map(Some)
+}
+
+fn publish_population_snvs(
+    workspace: &mut ExecutionWorkspace,
+    prepared: &crate::population_snvs::PreparedPopulationSnvs,
+    reference: &Reference,
+    reference_fasta: &ArtifactRecord,
+    provenance: PopulationSnvsProvenance,
+) -> Result<PopulationSnvsManifestLink, Diagnostic> {
+    let matrix = workspace.write_artifact(
+        "population-snvs-tsv",
+        "population_snvs_tsv",
+        Path::new("population_snvs.tsv"),
+        &canonical_tsv_bytes(prepared),
+    )?;
+    let metadata = canonical_metadata_document(
+        prepared,
+        reference.id().as_str(),
+        &reference_fasta.digest,
+        &matrix.digest,
+        provenance,
+    );
+    let metadata = workspace.write_artifact(
+        "population-snvs-metadata",
+        "population_snvs_metadata",
+        Path::new("population_snvs.metadata.json"),
+        &json_document_bytes(&metadata)?,
+    )?;
+    Ok(PopulationSnvsManifestLink {
+        mode: provenance.as_str().to_owned(),
+        metadata_sha256: metadata.digest.clone(),
+        metadata_artifact_id: Some(metadata.id),
+    })
+}
+
+fn population_snvs_error(component: &str, detail: impl Into<String>) -> Diagnostic {
+    Diagnostic::configuration(
+        "GPS-CONF-008",
+        "La matriz SNV poblacional no cumple el contrato canónico.",
+    )
+    .with("component", component)
+    .with("detail", detail.into())
 }
 
 fn valid_failure_configuration_copy(

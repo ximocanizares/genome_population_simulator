@@ -182,7 +182,21 @@ pub struct EffectiveConfig {
     sequences: Vec<EffectiveSequence>,
     configuration_input: EffectiveConfigurationInput,
     reproducibility: ReproducibilityMetadata,
-    population_snvs_generation: Option<PopulationSnvsGenerationConfig>,
+    population_snvs: Option<EffectivePopulationSnvs>,
+}
+
+/// Origen efectivo del recurso canónico F2.2.7.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EffectivePopulationSnvs {
+    Supplied {
+        input_path: PathBuf,
+    },
+    Reuse {
+        metadata_path: PathBuf,
+    },
+    Generate {
+        parameters: PopulationSnvsGenerationConfig,
+    },
 }
 
 impl EffectiveConfig {
@@ -242,7 +256,15 @@ impl EffectiveConfig {
     }
     #[must_use]
     pub fn population_snvs_generation(&self) -> Option<&PopulationSnvsGenerationConfig> {
-        self.population_snvs_generation.as_ref()
+        match self.population_snvs.as_ref() {
+            Some(EffectivePopulationSnvs::Generate { parameters }) => Some(parameters),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn population_snvs(&self) -> Option<&EffectivePopulationSnvs> {
+        self.population_snvs.as_ref()
     }
 }
 
@@ -448,8 +470,11 @@ pub fn build_effective_config_with_entropy(
         },
     };
     let reproducibility = ReproducibilityMetadata::new(root_seed, seed_origin);
-    let population_snvs_generation = effective_population_snvs_generation(general)?;
-    if let Some(generation) = &population_snvs_generation {
+    let population_snvs = effective_population_snvs(general)?;
+    if let Some(EffectivePopulationSnvs::Generate {
+        parameters: generation,
+    }) = &population_snvs
+    {
         validate_generation_config(generation).map_err(|error| {
             config_error(general, "population_snvs.generate", error.to_string())
         })?;
@@ -457,7 +482,7 @@ pub fn build_effective_config_with_entropy(
     if let Some(PopulationSnvsGenerationConfig {
         spatial: GeneratedSpatialMode::WeightedRegions { regions, .. },
         ..
-    }) = &population_snvs_generation
+    }) = population_snvs_generation_from_effective(population_snvs.as_ref())
     {
         for region in regions {
             let valid = sequences
@@ -493,15 +518,40 @@ pub fn build_effective_config_with_entropy(
             bytes: Arc::from(general.source().bytes()),
         },
         reproducibility,
-        population_snvs_generation,
+        population_snvs,
     })
 }
 
-fn effective_population_snvs_generation(
+fn population_snvs_generation_from_effective(
+    value: Option<&EffectivePopulationSnvs>,
+) -> Option<&PopulationSnvsGenerationConfig> {
+    match value {
+        Some(EffectivePopulationSnvs::Generate { parameters }) => Some(parameters),
+        _ => None,
+    }
+}
+
+fn effective_population_snvs(
     general: &DeclaredGeneralConfig,
-) -> Result<Option<PopulationSnvsGenerationConfig>, Diagnostic> {
-    let Some(DeclaredPopulationSnvs::Generate { parameters }) = general.population_snvs() else {
+) -> Result<Option<EffectivePopulationSnvs>, Diagnostic> {
+    let Some(declared) = general.population_snvs() else {
         return Ok(None);
+    };
+    match declared {
+        DeclaredPopulationSnvs::Supplied { input_path } => {
+            return Ok(Some(EffectivePopulationSnvs::Supplied {
+                input_path: resolve_link(general.source().path(), input_path.value()),
+            }));
+        }
+        DeclaredPopulationSnvs::Reuse { metadata_path } => {
+            return Ok(Some(EffectivePopulationSnvs::Reuse {
+                metadata_path: resolve_link(general.source().path(), metadata_path.value()),
+            }));
+        }
+        DeclaredPopulationSnvs::Generate { parameters: _ } => {}
+    }
+    let DeclaredPopulationSnvs::Generate { parameters } = declared else {
+        unreachable!("handled non-generation population_snvs modes")
     };
     let decimal = |field: &str, value: &crate::configuration::DeclaredNumber| {
         value
@@ -549,7 +599,7 @@ fn effective_population_snvs_generation(
                 .collect::<Result<Vec<_>, Diagnostic>>()?,
         }
     };
-    Ok(Some(PopulationSnvsGenerationConfig {
+    Ok(Some(EffectivePopulationSnvs::Generate { parameters: PopulationSnvsGenerationConfig {
         count,
         spatial,
         substitution_profile: match parameters.substitution_profile.value().as_str() {
@@ -609,7 +659,7 @@ fn effective_population_snvs_generation(
                 })
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?,
-    }))
+    }}))
 }
 
 fn frequency_assignment_mode(value: &str) -> Result<FrequencyAssignmentMode, Diagnostic> {

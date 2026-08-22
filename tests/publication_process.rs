@@ -365,6 +365,7 @@ fn write_failed_manifest(
         effective_config: None,
         references: &[],
         reduced_references: &[],
+        population_snvs: None,
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(diagnostic),
     };

@@ -16,6 +16,7 @@ use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
 use crate::identity::{ReferenceId, derive_execution_id};
 use crate::integrity::{ArtifactIdentity, configuration_digest, identify_file};
+use crate::population_snvs::validate_reusable_population_snvs_bytes;
 use crate::randomness::{EntropySource, RootSeed, RuntimeSubseedScope, derive_subseed};
 use crate::reference::{
     AlphabetValidation, Reference, ReferenceOrigin, ReferenceSequence, ReversibleText,
@@ -180,6 +181,16 @@ pub struct ManifestReductionLink {
     pub map_schema_version: String,
 }
 
+/// Enlace verificable al metadato de la matriz SNV canónica. En `reuse` el
+/// recurso permanece externo e inmutable, por eso no hay identificador de
+/// artefacto publicado.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PopulationSnvsManifestLink {
+    pub mode: String,
+    pub metadata_sha256: String,
+    pub metadata_artifact_id: Option<String>,
+}
+
 pub struct GeneralManifest<'a> {
     pub execution_id: &'a str,
     pub state: UnitState,
@@ -187,6 +198,7 @@ pub struct GeneralManifest<'a> {
     pub effective_config: Option<&'a ArtifactRecord>,
     pub references: &'a [ManifestReferenceLink],
     pub reduced_references: &'a [ManifestReductionLink],
+    pub population_snvs: Option<&'a PopulationSnvsManifestLink>,
     pub artifacts: &'a [ArtifactRecord],
     pub diagnostics: &'a [Diagnostic],
 }
@@ -227,6 +239,32 @@ pub fn effective_config_document_with_reductions(
     }))
 }
 
+pub fn effective_config_document_with_population_snvs(
+    config: &EffectiveConfig,
+    output: ReferenceOutput<'_>,
+    reductions: &[ReducedReferenceOutput<'_>],
+    population_snvs: Option<&PopulationSnvsManifestLink>,
+) -> Result<Value, Diagnostic> {
+    let mut document = effective_config_document_with_reductions(config, output, reductions)?;
+    let object = document.as_object_mut().ok_or_else(|| {
+        Diagnostic::internal_invariant(
+            "effective-config",
+            "effective_config_document_is_not_object",
+        )
+    })?;
+    object.insert(
+        "population_snvs".to_owned(),
+        population_snvs.map_or(Value::Null, |link| {
+            json!({
+                "mode": link.mode,
+                "metadata_sha256": link.metadata_sha256,
+                "metadata_artifact_id": link.metadata_artifact_id,
+            })
+        }),
+    );
+    Ok(document)
+}
+
 #[must_use]
 pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
     json!({
@@ -242,6 +280,11 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
         "effective_config_artifact_id": manifest.effective_config.map(|artifact| artifact.id.as_str()),
         "references": manifest.references.iter().map(manifest_reference_json).collect::<Vec<_>>(),
         "reference_reductions": manifest.reduced_references.iter().map(manifest_reduction_json).collect::<Vec<_>>(),
+        "population_snvs": manifest.population_snvs.map(|link| json!({
+            "mode": link.mode,
+            "metadata_sha256": link.metadata_sha256,
+            "metadata_artifact_id": link.metadata_artifact_id,
+        })),
         "output_categories": output_categories(manifest),
         "artifacts": manifest.artifacts.iter().map(ArtifactRecord::to_json).collect::<Vec<_>>(),
         "diagnostics": manifest.diagnostics.iter().map(|diagnostic| json!({
@@ -422,7 +465,7 @@ pub fn validate_effective_config_against_manifest_bytes(
     let object = document
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "la raíz no es un objeto"))?;
-    const FIELDS: [&str; 8] = [
+    const FIELDS: [&str; 9] = [
         "effective_config_kind",
         "schema_version",
         "source_path",
@@ -430,6 +473,7 @@ pub fn validate_effective_config_against_manifest_bytes(
         "normalization",
         "seed",
         "reference",
+        "population_snvs",
         "reduced_references",
     ];
     validate_effective_closed_object(object, &FIELDS, "effective-config.json", effective_path)?;
@@ -472,6 +516,7 @@ pub fn validate_effective_config_against_manifest_bytes(
         ));
     }
     let mut effective_references = BTreeMap::from([(reference.0.clone(), reference.1.clone())]);
+    validate_effective_population_snvs(object, manifest, &catalog, effective_path, manifest_path)?;
 
     let manifest_reductions = required_array(manifest, "reference_reductions", manifest_path)?
         .iter()
@@ -619,6 +664,13 @@ pub fn validate_published_resources(
     let reference_value = effective_object(effective, "reference", effective_path)?;
     let source_reference =
         read_physical_reference(root, reference_value, &artifact_paths, effective_path)?;
+    validate_physical_population_snvs(
+        root,
+        effective,
+        &artifacts,
+        &source_reference,
+        effective_path,
+    )?;
     if reference_value.get("source").and_then(Value::as_str) == Some("simulated") {
         validate_generated_reference(
             reference_value,
@@ -761,6 +813,88 @@ pub fn validate_published_resources(
         references.insert(id.to_owned(), derived);
     }
     Ok(())
+}
+
+fn validate_physical_population_snvs(
+    root: &Path,
+    effective: &serde_json::Map<String, Value>,
+    artifacts: &[ArtifactRecord],
+    reference: &Reference,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    let Some(link) = effective.get("population_snvs").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    if link.get("mode").and_then(Value::as_str) == Some("reuse") {
+        return Ok(());
+    }
+    let metadata_id = link
+        .get("metadata_artifact_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| effective_error(effective_path, "population_snvs publicado sin metadata"))?;
+    let metadata = artifacts
+        .iter()
+        .find(|artifact| artifact.id == metadata_id)
+        .ok_or_else(|| effective_error(effective_path, "metadata SNV ausente del catálogo"))?;
+    let matrix = artifacts
+        .iter()
+        .find(|artifact| artifact.id == "population-snvs-tsv")
+        .ok_or_else(|| effective_error(effective_path, "TSV SNV ausente del catálogo"))?;
+    let reference_id = effective_object(effective, "reference", effective_path)?
+        .get("fasta_artifact_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| effective_error(effective_path, "referencia sin artefacto FASTA"))?;
+    let reference_artifact = artifacts
+        .iter()
+        .find(|artifact| artifact.id == reference_id)
+        .ok_or_else(|| effective_error(effective_path, "FASTA SNV ausente del catálogo"))?;
+    let metadata_path = root.join(&metadata.path);
+    let matrix_path = root.join(&matrix.path);
+    let metadata_bytes = read_verified_artifact_bytes(&metadata_path, metadata, effective_path)?;
+    let matrix_bytes = read_verified_artifact_bytes(&matrix_path, matrix, effective_path)?;
+    let (_, provenance, metadata_sha256) = validate_reusable_population_snvs_bytes(
+        &metadata_bytes,
+        &matrix_bytes,
+        reference,
+        &reference_artifact.digest,
+        effective
+            .get("normalization")
+            .and_then(|value| value.get("tolerance"))
+            .and_then(Value::as_f64)
+            .ok_or_else(|| effective_error(effective_path, "normalization.tolerance inválida"))?,
+        false,
+    )
+    .map_err(|error| {
+        effective_error(effective_path, format!("par SNV físico inválido: {error}"))
+    })?;
+    if link.get("metadata_sha256").and_then(Value::as_str) != Some(metadata_sha256.as_str())
+        || link.get("mode").and_then(Value::as_str) != Some(provenance.as_str())
+    {
+        return Err(effective_error(
+            effective_path,
+            "enlace population_snvs no coincide con el par físico",
+        ));
+    }
+    Ok(())
+}
+
+fn read_verified_artifact_bytes(
+    path: &Path,
+    artifact: &ArtifactRecord,
+    effective_path: &Path,
+) -> Result<Vec<u8>, Diagnostic> {
+    let bytes = fs::read(path).map_err(|error| io_error(path, "read_population_snvs", error))?;
+    let observed = identify_file(path, Path::new(&artifact.path))?;
+    if observed.size_bytes() != artifact.size_bytes || observed.digest() != artifact.digest {
+        return Err(effective_error(
+            effective_path,
+            format!(
+                "artefacto SNV físico {} no coincide con su SHA-256",
+                artifact.id
+            ),
+        ));
+    }
+    Ok(bytes)
 }
 
 fn validate_effective_targets_against_configuration(
@@ -1190,7 +1324,7 @@ pub(crate) fn parse_general_manifest_bytes(
     let object = document
         .as_object()
         .ok_or_else(|| manifest_error(path, "la raíz no es un objeto"))?;
-    const FIELDS: [&str; 11] = [
+    const FIELDS: [&str; 12] = [
         "manifest_kind",
         "schema_version",
         "execution_id",
@@ -1199,6 +1333,7 @@ pub(crate) fn parse_general_manifest_bytes(
         "effective_config_artifact_id",
         "references",
         "reference_reductions",
+        "population_snvs",
         "output_categories",
         "artifacts",
         "diagnostics",
@@ -1252,12 +1387,36 @@ pub(crate) fn parse_general_manifest_bytes(
         &references,
         path,
     )?;
+    let population_snvs =
+        validate_manifest_population_snvs(object.get("population_snvs"), &catalog, path)?;
+    if let Some(id) = population_snvs.as_deref() {
+        let declared = object
+            .get("population_snvs")
+            .and_then(Value::as_object)
+            .and_then(|link| link.get("metadata_sha256"))
+            .and_then(Value::as_str);
+        let observed = records
+            .iter()
+            .find(|artifact| artifact.id == id)
+            .map(|artifact| artifact.digest.as_str());
+        if declared != observed {
+            return Err(manifest_error(
+                path,
+                "population_snvs.metadata_sha256 no coincide con el artefacto",
+            ));
+        }
+    }
     let mut expected_minimum = BTreeSet::new();
     if let Some(id) = configuration_artifact_id.as_deref() {
         expected_minimum.insert(id);
     }
     if let Some(id) = effective_id {
         expected_minimum.insert(id);
+    }
+    if let Some(id) = population_snvs.as_deref() {
+        expected_minimum.insert(id);
+        require_artifact_kind(&catalog, "population-snvs-tsv", "population_snvs_tsv", path)?;
+        expected_minimum.insert("population-snvs-tsv");
     }
     for (reference_id, artifact_id) in &references {
         if !reductions.derived_reference_ids.contains(reference_id) {
@@ -1374,6 +1533,79 @@ fn validate_output_categories(
         return Err(manifest_error(
             path,
             "el catálogo contiene un artefacto sin rol de salida permitido en F1",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_manifest_population_snvs(
+    value: Option<&Value>,
+    catalog: &BTreeMap<&str, &str>,
+    path: &Path,
+) -> Result<Option<String>, Diagnostic> {
+    let Some(value) = value else { return Ok(None) };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let object = value
+        .as_object()
+        .ok_or_else(|| manifest_error(path, "population_snvs inválido"))?;
+    const FIELDS: [&str; 3] = ["mode", "metadata_sha256", "metadata_artifact_id"];
+    validate_closed_object(object, &FIELDS, "population_snvs", path)?;
+    let mode = match object.get("mode").and_then(Value::as_str) {
+        Some(mode @ ("supplied" | "generated" | "reuse")) => mode,
+        _ => return Err(manifest_error(path, "population_snvs.mode inválido")),
+    };
+    let digest = required_non_empty_text(object, "metadata_sha256", path)?;
+    if digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(manifest_error(
+            path,
+            "population_snvs.metadata_sha256 inválido",
+        ));
+    }
+    match (mode, object.get("metadata_artifact_id")) {
+        ("reuse", None | Some(Value::Null)) => Ok(None),
+        ("supplied" | "generated", Some(Value::String(id))) if !id.is_empty() => {
+            require_artifact_kind(catalog, id, "population_snvs_metadata", path)?;
+            Ok(Some(id.clone()))
+        }
+        _ => Err(manifest_error(
+            path,
+            "population_snvs.metadata_artifact_id inválido",
+        )),
+    }
+}
+
+fn validate_effective_population_snvs(
+    effective: &serde_json::Map<String, Value>,
+    manifest: &serde_json::Map<String, Value>,
+    catalog: &BTreeMap<&str, &str>,
+    effective_path: &Path,
+    manifest_path: &Path,
+) -> Result<(), Diagnostic> {
+    let effective_value = effective.get("population_snvs").unwrap_or(&Value::Null);
+    let manifest_value = manifest.get("population_snvs").unwrap_or(&Value::Null);
+    if effective_value != manifest_value {
+        return Err(effective_error(
+            effective_path,
+            "population_snvs no coincide con el manifiesto",
+        ));
+    }
+    if effective_value.is_null() {
+        return Ok(());
+    }
+    let object = effective_value
+        .as_object()
+        .ok_or_else(|| effective_error(effective_path, "population_snvs inválido"))?;
+    let id = validate_manifest_population_snvs(Some(effective_value), catalog, manifest_path)?;
+    if object.get("mode").and_then(Value::as_str) != Some("reuse") && id.is_none() {
+        return Err(effective_error(
+            effective_path,
+            "population_snvs publicado requiere metadata_artifact_id",
         ));
     }
     Ok(())

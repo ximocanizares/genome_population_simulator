@@ -587,6 +587,7 @@ mod tests {
             effective_config: None,
             references: &[],
             reduced_references: &[],
+            population_snvs: None,
             artifacts: &[],
             diagnostics: std::slice::from_ref(&diagnostic),
         };
@@ -688,6 +689,7 @@ mod tests {
             effective_config: Some(&effective),
             references: &references,
             reduced_references: &[],
+            population_snvs: None,
             artifacts: &artifacts,
             diagnostics: &[],
         };

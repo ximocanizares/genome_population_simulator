@@ -28,6 +28,21 @@ fn simulated_reference_cannot_claim_a_reduced_reference() {
 }
 
 #[test]
+fn population_snvs_effective_link_is_discriminated_by_mode() {
+    let mut reuse = effective_config("simulated", false);
+    reuse["population_snvs"] = json!({"mode":"reuse", "metadata_sha256":"a".repeat(64)});
+    assert_valid("reuse-population-snvs-may-omit-artifact-id", &reuse);
+
+    let mut reuse_with_id = reuse.clone();
+    reuse_with_id["population_snvs"]["metadata_artifact_id"] = json!("metadata");
+    assert_invalid("reuse-population-snvs-rejects-artifact-id", &reuse_with_id);
+
+    let mut generated = effective_config("simulated", false);
+    generated["population_snvs"] = json!({"mode":"generated", "metadata_sha256":"a".repeat(64)});
+    assert_invalid("generated-population-snvs-requires-artifact-id", &generated);
+}
+
+#[test]
 fn effective_selection_order_is_strictly_one_based() {
     let mut document = effective_config("supplied", true);
     *document

@@ -38,6 +38,45 @@ fn truncation_unknown_field_and_absent_link_fail_both_validators() {
 }
 
 #[test]
+fn population_snvs_link_is_discriminated_by_mode_in_rust_and_schema() {
+    let mut generated_without_id = complete_manifest();
+    generated_without_id["population_snvs"] = json!({
+        "mode": "generated", "metadata_sha256": "a".repeat(64)
+    });
+    assert_rejected(
+        "generated-population-snvs-requires-an-artifact",
+        &generated_without_id,
+    );
+
+    let mut generated_with_catalog = complete_manifest();
+    generated_with_catalog["artifacts"].as_array_mut().expect("catalog").extend([
+        json!({"id":"population-snvs-tsv", "kind":"population_snvs_tsv", "path":"population_snvs.tsv", "size_bytes":1, "checksum":{"algorithm":"sha256", "digest":"b".repeat(64)}}),
+        json!({"id":"population-snvs-metadata", "kind":"population_snvs_metadata", "path":"population_snvs.metadata.json", "size_bytes":1, "checksum":{"algorithm":"sha256", "digest":"a".repeat(64)}}),
+    ]);
+    generated_with_catalog["output_categories"]["minimum"] = json!([
+        "config-general",
+        "effective-config",
+        "reference-fasta",
+        "population-snvs-tsv",
+        "population-snvs-metadata"
+    ]);
+    generated_with_catalog["population_snvs"] = json!({
+        "mode": "generated", "metadata_sha256": "a".repeat(64), "metadata_artifact_id": "population-snvs-metadata"
+    });
+    assert_accepted(
+        "generated-population-snvs-accepts-a-nonempty-metadata-artifact",
+        &generated_with_catalog,
+    );
+
+    let mut reuse_with_id = generated_with_catalog.clone();
+    reuse_with_id["population_snvs"]["mode"] = json!("reuse");
+    assert_rejected(
+        "reuse-population-snvs-must-not-name-an-artifact",
+        &reuse_with_id,
+    );
+}
+
+#[test]
 fn duplicate_ids_paths_and_output_categories_are_rejected() {
     let mut duplicate_id = complete_manifest();
     duplicate_id["artifacts"][1]["id"] = duplicate_id["artifacts"][0]["id"].clone();
@@ -132,6 +171,7 @@ fn source_and_derived_fasta_cannot_alias_across_output_categories() {
         effective_config: None,
         references: &references,
         reduced_references: &reductions,
+        population_snvs: None,
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(&diagnostic),
     };
@@ -208,6 +248,7 @@ fn failed_reduction_keeps_reached_links_and_requested_classification() {
         effective_config: None,
         references: &references,
         reduced_references: &reductions,
+        population_snvs: None,
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(&diagnostic),
     };

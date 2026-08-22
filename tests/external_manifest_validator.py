@@ -46,6 +46,19 @@ references = {reference["id"]: reference["fasta_artifact_id"] for reference in i
 assert len(references) == len(instance["references"])
 for reference in instance["references"]:
     require_kind(catalog, reference["fasta_artifact_id"], "reference_fasta")
+population_snvs = instance.get("population_snvs")
+population_minimum_ids: set[str] = set()
+if population_snvs is not None:
+    assert population_snvs["mode"] in {"supplied", "generated", "reuse"}
+    artifact_id = population_snvs.get("metadata_artifact_id")
+    if population_snvs["mode"] == "reuse":
+        assert artifact_id is None
+    else:
+        assert isinstance(artifact_id, str) and artifact_id
+        require_kind(catalog, artifact_id, "population_snvs_metadata")
+        assert population_snvs["metadata_sha256"] == catalog[artifact_id]["checksum"]["digest"]
+        require_kind(catalog, "population-snvs-tsv", "population_snvs_tsv")
+        population_minimum_ids.update({artifact_id, "population-snvs-tsv"})
 reduction_ids: set[str] = set()
 requested_ids: set[str] = set()
 for reduction in instance["reference_reductions"]:
@@ -87,6 +100,7 @@ if effective_id is not None:
 for reference_id, artifact_id in references.items():
     if reference_id not in reduction_ids:
         minimum_ids.add(artifact_id)
+minimum_ids |= population_minimum_ids
 assert set(instance["output_categories"]["minimum"]) == minimum_ids
 assert set(instance["output_categories"]["requested"]) == requested_ids
 assert not instance["output_categories"]["defaulted"]

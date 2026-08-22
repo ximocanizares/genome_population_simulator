@@ -28,6 +28,22 @@
       }
     },
     "reference": {"$ref": "#/$defs/reference"},
+    "population_snvs": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "object", "additionalProperties": false,
+          "required": ["mode", "metadata_sha256"],
+          "properties": {
+            "mode": {"enum": ["supplied", "generated", "reuse"]},
+            "metadata_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "metadata_artifact_id": {"oneOf": [{"type": "string", "minLength": 1}, {"type": "null"}]}
+          },
+          "allOf": [
+            {"if": {"properties": {"mode": {"const": "reuse"}}, "required": ["mode"]}, "then": {"properties": {"metadata_artifact_id": {"type": "null"}}}},
+            {"if": {"properties": {"mode": {"enum": ["supplied", "generated"]}}, "required": ["mode"]}, "then": {"required": ["metadata_artifact_id"], "properties": {"metadata_artifact_id": {"type": "string", "minLength": 1}}}}
+          ]}
+      ]
+    },
     "reduced_references": {"type": "array", "items": {"$ref": "#/$defs/reduction"}}
   },
   "allOf": [

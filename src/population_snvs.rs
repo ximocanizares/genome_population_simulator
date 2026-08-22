@@ -7,7 +7,9 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fmt::Write as _;
 use std::fs;
+use std::path::Path;
 
 use crate::identity::{PopulationId, SequenceId, VariantId, derive_matrix_variant_id};
 use crate::randomness::{
@@ -17,7 +19,8 @@ use crate::randomness::{
 use crate::reference::Reference;
 use crate::results::ResolvedManifestReference;
 
-use serde_json::Value;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 /// Cabecera literal y ordenada del TSV canónico de matriz SNV.
 pub const TSV_HEADER: [&str; 8] = [
@@ -334,6 +337,31 @@ pub struct PreparedPopulationSnvs {
     empty_authorized: bool,
 }
 
+/// Procedencia declarada del par canónico publicado.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PopulationSnvsProvenance {
+    Supplied,
+    Generated,
+}
+
+impl PopulationSnvsProvenance {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Supplied => "supplied",
+            Self::Generated => "generated",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "supplied" => Some(Self::Supplied),
+            "generated" => Some(Self::Generated),
+            _ => None,
+        }
+    }
+}
+
 impl PreparedPopulationSnvs {
     #[must_use]
     pub fn rows(&self) -> &[PreparedPopulationSnv] {
@@ -414,6 +442,51 @@ pub fn prepare_supplied_population_snvs(
     allow_empty_matrix: bool,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
     let fasta = load_authoritative_fasta(reference)?;
+    prepare_population_snvs(
+        table,
+        reference.reference_id(),
+        &fasta,
+        tolerance,
+        allow_empty_matrix,
+    )
+}
+
+/// Variante integrada sobre la referencia ya verificada y materializada por la
+/// ejecución. No acepta rutas libres ni altera la tabla de entrada.
+pub fn prepare_population_snvs_from_reference(
+    table: &PopulationSnvsTsv,
+    reference: &Reference,
+    tolerance: f64,
+    allow_empty_matrix: bool,
+) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
+    let fasta = AuthoritativeFasta {
+        sequences: reference
+            .sequences()
+            .iter()
+            .map(|sequence| {
+                (
+                    sequence.id().as_str().to_owned(),
+                    sequence.sequence().as_bytes().to_vec(),
+                )
+            })
+            .collect(),
+        order: reference
+            .sequences()
+            .iter()
+            .enumerate()
+            .map(|(index, sequence)| (sequence.id().as_str().to_owned(), index))
+            .collect(),
+    };
+    prepare_population_snvs(table, reference.id(), &fasta, tolerance, allow_empty_matrix)
+}
+
+fn prepare_population_snvs(
+    table: &PopulationSnvsTsv,
+    reference_id: &crate::identity::ReferenceId,
+    fasta: &AuthoritativeFasta,
+    tolerance: f64,
+    allow_empty_matrix: bool,
+) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
     let normalized = normalize_alt_frequencies(table, tolerance)
         .map_err(PopulationSnvsPreparationError::Frequencies)?;
     let mut effective = BTreeMap::new();
@@ -566,16 +639,11 @@ pub fn prepare_supplied_population_snvs(
         .collect::<BTreeSet<_>>();
     let mut rows = Vec::new();
     for (index, contig, position, reference_base, alternate, population, source_id) in parsed {
-        let variant_id = derive_matrix_variant_id(
-            reference.reference_id(),
-            &contig,
-            position,
-            reference_base,
-            alternate,
-        )
-        .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: error.render_human(),
-        })?;
+        let variant_id =
+            derive_matrix_variant_id(reference_id, &contig, position, reference_base, alternate)
+                .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
+                    detail: error.render_human(),
+                })?;
         if inactive.contains(&(
             contig.as_str().to_owned(),
             position,
@@ -620,6 +688,229 @@ pub fn prepare_supplied_population_snvs(
         discarded_globally_absent: discarded,
         empty_authorized,
     })
+}
+
+/// Serialización canónica, estable y sin formato numérico dependiente de la
+/// plataforma del recurso TSV F2.2.7.
+#[must_use]
+pub fn canonical_tsv_bytes(prepared: &PreparedPopulationSnvs) -> Vec<u8> {
+    let mut text = TSV_HEADER.join("\t");
+    text.push('\n');
+    for row in prepared.rows() {
+        let _ = writeln!(
+            text,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            row.variant_id().as_str(),
+            row.contig().as_str(),
+            row.position_1based(),
+            char::from(row.reference()),
+            char::from(row.alternate()),
+            row.population_id().as_str(),
+            row.alt_af(),
+            row.source_id(),
+        );
+    }
+    text.into_bytes()
+}
+
+/// Construye el JSON cerrado del par canónico después de calcular el SHA-256
+/// del TSV. Las poblaciones se derivan de las filas activas y quedan ordenadas.
+#[must_use]
+pub fn canonical_metadata_document(
+    prepared: &PreparedPopulationSnvs,
+    reference_id: &str,
+    reference_sha256: &str,
+    matrix_sha256: &str,
+    provenance: PopulationSnvsProvenance,
+) -> Value {
+    let populations = prepared
+        .rows()
+        .iter()
+        .map(|row| row.population_id().as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|population_id| json!({"population_id": population_id}))
+        .collect::<Vec<_>>();
+    json!({
+        "document_kind": "population_snvs_metadata",
+        "schema_version": "1",
+        "coordinate_system": "base1_closed",
+        "reference": {"reference_id": reference_id, "sha256": reference_sha256},
+        "matrix": {"path": "population_snvs.tsv", "sha256": matrix_sha256},
+        "populations": populations,
+        "provenance": provenance.as_str(),
+    })
+}
+
+/// Valida un par reutilizado y devuelve su vista semántica. El TSV se exige en
+/// bytes canónicos para evitar que una entrada equivalente reintroduzca IDs,
+/// orden o representación numérica no canónicos.
+pub fn validate_reusable_population_snvs(
+    metadata_path: &Path,
+    reference: &Reference,
+    reference_sha256: &str,
+    tolerance: f64,
+    allow_empty_matrix: bool,
+) -> Result<
+    (PreparedPopulationSnvs, PopulationSnvsProvenance, String),
+    PopulationSnvsPreparationError,
+> {
+    validate_reusable_population_snvs_with_hooks(
+        metadata_path,
+        reference,
+        reference_sha256,
+        tolerance,
+        allow_empty_matrix,
+        || {},
+        || {},
+    )
+}
+
+/// Igual que [`validate_reusable_population_snvs`], con puntos de prueba entre
+/// las dos lecturas. Ninguna comprobación posterior vuelve a abrir ninguno de
+/// los dos recursos: hashes y semántica proceden de estas instantáneas.
+pub fn validate_reusable_population_snvs_with_hooks(
+    metadata_path: &Path,
+    reference: &Reference,
+    reference_sha256: &str,
+    tolerance: f64,
+    allow_empty_matrix: bool,
+    after_metadata_snapshot: impl FnOnce(),
+    after_matrix_snapshot: impl FnOnce(),
+) -> Result<
+    (PreparedPopulationSnvs, PopulationSnvsProvenance, String),
+    PopulationSnvsPreparationError,
+> {
+    let metadata_bytes = fs::read(metadata_path).map_err(|error| {
+        PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: format!("no se puede leer metadata_path: {error}"),
+        }
+    })?;
+    after_metadata_snapshot();
+    let matrix_path = metadata_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("population_snvs.tsv");
+    let matrix_bytes = fs::read(&matrix_path).map_err(|error| {
+        PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: error.to_string(),
+        }
+    })?;
+    after_matrix_snapshot();
+    validate_reusable_population_snvs_bytes(
+        &metadata_bytes,
+        &matrix_bytes,
+        reference,
+        reference_sha256,
+        tolerance,
+        allow_empty_matrix,
+    )
+}
+
+/// Valida las instantáneas exactas que forman un par reutilizable. Esta
+/// frontera también la reutiliza la validación física previa a publicar.
+pub fn validate_reusable_population_snvs_bytes(
+    metadata_bytes: &[u8],
+    matrix_bytes: &[u8],
+    reference: &Reference,
+    reference_sha256: &str,
+    tolerance: f64,
+    allow_empty_matrix: bool,
+) -> Result<
+    (PreparedPopulationSnvs, PopulationSnvsProvenance, String),
+    PopulationSnvsPreparationError,
+> {
+    let metadata = parse_metadata_json(metadata_bytes).map_err(|error| {
+        PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: error.to_string(),
+        }
+    })?;
+    let document = metadata.document();
+    let object =
+        document
+            .as_object()
+            .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "metadata no es un objeto".to_owned(),
+            })?;
+    let reference_object = object
+        .get("reference")
+        .and_then(Value::as_object)
+        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.reference inválida".to_owned(),
+        })?;
+    let declared_reference = reference_object.get("reference_id").and_then(Value::as_str);
+    let declared_sha = reference_object.get("sha256").and_then(Value::as_str);
+    if declared_reference != Some(reference.id().as_str()) || declared_sha != Some(reference_sha256)
+    {
+        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "la matriz reutilizada no está ligada a la referencia autoritativa".to_owned(),
+        });
+    }
+    let matrix = object
+        .get("matrix")
+        .and_then(Value::as_object)
+        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.matrix inválida".to_owned(),
+        })?;
+    let declared_digest = matrix
+        .get("sha256")
+        .and_then(Value::as_str)
+        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.matrix.sha256 inválido".to_owned(),
+        })?;
+    if sha256_bytes(matrix_bytes) != declared_digest {
+        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "SHA-256 del TSV reutilizado no coincide con metadata".to_owned(),
+        });
+    }
+    let table = parse_canonical_tsv(matrix_bytes).map_err(|error| {
+        PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: error.to_string(),
+        }
+    })?;
+    let prepared =
+        prepare_population_snvs_from_reference(&table, reference, tolerance, allow_empty_matrix)?;
+    if canonical_tsv_bytes(&prepared) != matrix_bytes {
+        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "el TSV reutilizado no está en orden y representación canónicos".to_owned(),
+        });
+    }
+    let populations = object
+        .get("populations")
+        .and_then(Value::as_array)
+        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.populations inválida".to_owned(),
+        })?;
+    let expected = prepared
+        .rows()
+        .iter()
+        .map(|row| row.population_id().as_str())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let observed = populations
+        .iter()
+        .filter_map(|value| value.get("population_id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    if observed != expected {
+        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.populations no coincide con el TSV canónico".to_owned(),
+        });
+    }
+    let provenance = object
+        .get("provenance")
+        .and_then(Value::as_str)
+        .and_then(PopulationSnvsProvenance::parse)
+        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.provenance inválida".to_owned(),
+        })?;
+    Ok((prepared, provenance, sha256_bytes(metadata_bytes)))
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    let mut digest = Sha256::new();
+    digest.update(bytes);
+    format!("{:x}", digest.finalize())
 }
 
 fn parse_snv_base(
