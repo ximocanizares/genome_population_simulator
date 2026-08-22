@@ -9,6 +9,7 @@ const SUBSEED_CATALOG_V1: &str = include_str!("../catalogs/subseed-scopes-v1.tsv
 const SUBSEED_CATALOG_V2: &str = include_str!("../catalogs/subseed-scopes-v2.tsv");
 const SUBSEED_CATALOG: &str = include_str!("../catalogs/subseed-scopes-v3.tsv");
 const ID_CATALOG: &str = include_str!("../catalogs/id-classes-v1.tsv");
+const VARIANT_ID_CATALOG: &str = include_str!("../catalogs/variant-id-v1.tsv");
 const PARAMETER_CATALOG: &str = include_str!("../catalogs/parameter-families-v1.tsv");
 const SUBSEED_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
@@ -108,6 +109,27 @@ fn published_v1_contracts_match_their_reviewed_content() {
             "{path} changed without introducing a new versioned contract"
         );
     }
+}
+
+#[test]
+fn variant_id_catalog_has_an_independent_review_fingerprint() {
+    assert_eq!(
+        sha256sum(VARIANT_ID_CATALOG),
+        "c1cc71ff9b19e5f00f62e260f49f57107098c3afc4e431c01938395263d5aff1"
+    );
+    let fields = VARIANT_ID_CATALOG
+        .lines()
+        .last()
+        .expect("vector")
+        .split('|')
+        .collect::<Vec<_>>();
+    assert_eq!(fields.len(), 5);
+    assert_eq!(fields[1], "VAR_");
+    assert!(
+        fields[2].contains("reference_id=")
+            && fields[2].contains("sequence_id=")
+            && fields[2].contains("position_1based=")
+    );
 }
 
 fn validate_diagnostic_catalog(catalog: &str) -> Result<usize, CatalogError> {

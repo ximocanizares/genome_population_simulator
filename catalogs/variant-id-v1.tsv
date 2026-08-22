@@ -1,0 +1,5 @@
+# algorithm=blake3_derive_key
+# context=genome_population_simulator/v1/variant-id
+# encoding=component_count:u32be || repeated(name_length:u32be || name:ASCII || value_length:u32be || value:UTF-8)
+# class|prefix|ordered_components|material_hex|identifier
+variant|VAR_|class=variant;reference_id=ref-main;sequence_id=chr1;position_1based=7;ref=A;alt=C|0000000600000005636c6173730000000776617269616e740000000c7265666572656e63655f6964000000087265662d6d61696e0000000b73657175656e63655f696400000004636872310000000f706f736974696f6e5f316261736564000000013700000003726566000000014100000003616c740000000143|VAR_ETWKMO4NA6HZ4YXCBOLCN34GTY

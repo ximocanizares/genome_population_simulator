@@ -872,3 +872,10 @@ DTPD-118; F6.4 ya no
 está bloqueada por DTPD-119; y F7.1 continúa bloqueada por DTPD-111. Las
 recomendaciones pendientes no se consideran aprobadas hasta que consten
 revisión y fecha.
+
+### Ampliación DTC-039 para F2.2.4
+
+`VariantId` usa el prefijo `VAR_`, es común entre poblaciones y se deriva de
+`reference_id`, `sequence_id`/contig, `position_1based`, `ref` y `alt`. No
+incorpora fila, población, ruta, orden físico ni semilla. El vector y la
+codificación BLAKE3 quedan fijados en `catalogs/variant-id-v1.tsv`.

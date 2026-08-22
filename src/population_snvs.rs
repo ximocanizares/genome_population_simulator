@@ -5,8 +5,12 @@
 //! incorpora en los pasos consumidores posteriores.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fs;
+
+use crate::identity::{PopulationId, SequenceId, VariantId, derive_matrix_variant_id};
+use crate::results::ResolvedManifestReference;
 
 use serde_json::Value;
 
@@ -269,6 +273,434 @@ pub struct NormalizedPopulationSnvs {
     groups: Vec<AltFrequencyNormalization>,
 }
 
+/// Fila activa, canónica y separada de la tabla suministrada original.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedPopulationSnv {
+    variant_id: VariantId,
+    contig: SequenceId,
+    position_1based: u64,
+    reference: u8,
+    alternate: u8,
+    population_id: PopulationId,
+    alt_af: f64,
+    source_id: String,
+}
+
+impl PreparedPopulationSnv {
+    #[must_use]
+    pub const fn variant_id(&self) -> &VariantId {
+        &self.variant_id
+    }
+    #[must_use]
+    pub const fn contig(&self) -> &SequenceId {
+        &self.contig
+    }
+    #[must_use]
+    pub const fn position_1based(&self) -> u64 {
+        self.position_1based
+    }
+    #[must_use]
+    pub const fn reference(&self) -> u8 {
+        self.reference
+    }
+    #[must_use]
+    pub const fn alternate(&self) -> u8 {
+        self.alternate
+    }
+    #[must_use]
+    pub const fn population_id(&self) -> &PopulationId {
+        &self.population_id
+    }
+    #[must_use]
+    pub const fn alt_af(&self) -> f64 {
+        self.alt_af
+    }
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+}
+
+/// Recurso preparado en memoria; no publica ni altera la tabla suministrada.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedPopulationSnvs {
+    rows: Vec<PreparedPopulationSnv>,
+    discarded_globally_absent: Vec<VariantId>,
+    empty_authorized: bool,
+}
+
+impl PreparedPopulationSnvs {
+    #[must_use]
+    pub fn rows(&self) -> &[PreparedPopulationSnv] {
+        &self.rows
+    }
+    #[must_use]
+    pub fn discarded_globally_absent(&self) -> &[VariantId] {
+        &self.discarded_globally_absent
+    }
+    #[must_use]
+    pub const fn empty_authorized(&self) -> bool {
+        self.empty_authorized
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PopulationSnvsPreparationError {
+    AuthoritativeFasta {
+        detail: String,
+    },
+    InvalidPopulation {
+        row_index: usize,
+        value: String,
+    },
+    InvalidContig {
+        row_index: usize,
+        value: String,
+    },
+    InvalidPosition {
+        row_index: usize,
+        value: String,
+    },
+    InvalidAllele {
+        row_index: usize,
+        field: &'static str,
+        value: String,
+    },
+    ReferenceMismatch {
+        row_index: usize,
+        contig: String,
+        position: u64,
+        expected: u8,
+        found: u8,
+    },
+    DuplicateAltPopulation {
+        contig: String,
+        position: u64,
+        reference: u8,
+        alternate: u8,
+        population: String,
+    },
+    IncompletePopulationCoverage {
+        contig: String,
+        position: u64,
+        reference: u8,
+        alternate: u8,
+    },
+    EmptyActiveMatrixRequiresAuthorization,
+    Frequencies(AltFrequencyNormalizationError),
+}
+
+impl fmt::Display for PopulationSnvsPreparationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for PopulationSnvsPreparationError {}
+
+/// Valida y prepara una matriz sin modificar sus bytes de entrada.
+///
+/// La referencia solo puede proceder de `resolve_manifest_reference` (DTC-060).
+/// La publicación y los hashes del nuevo par siguen siendo responsabilidad de
+/// F2.2.7; este paso devuelve exclusivamente la vista canónica en memoria.
+pub fn prepare_supplied_population_snvs(
+    table: &PopulationSnvsTsv,
+    reference: &ResolvedManifestReference,
+    tolerance: f64,
+    allow_empty_matrix: bool,
+) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
+    let fasta = load_authoritative_fasta(reference)?;
+    let normalized = normalize_alt_frequencies(table, tolerance)
+        .map_err(PopulationSnvsPreparationError::Frequencies)?;
+    let mut effective = BTreeMap::new();
+    for group in normalized.groups() {
+        for value in group.values() {
+            effective.insert(value.row_index(), value.effective());
+        }
+    }
+    let populations = table
+        .rows()
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            PopulationId::parse(row.field(5), "population_snvs").map_err(|_| {
+                PopulationSnvsPreparationError::InvalidPopulation {
+                    row_index: i,
+                    value: row.field(5).to_owned(),
+                }
+            })
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    let mut seen = BTreeSet::new();
+    let mut alt_populations: BTreeMap<(String, u64, u8, u8), BTreeSet<PopulationId>> =
+        BTreeMap::new();
+    let mut parsed = Vec::with_capacity(table.rows().len());
+    for (row_index, row) in table.rows().iter().enumerate() {
+        let contig = SequenceId::parse(row.field(1), "population_snvs").map_err(|_| {
+            PopulationSnvsPreparationError::InvalidContig {
+                row_index,
+                value: row.field(1).to_owned(),
+            }
+        })?;
+        let position = row
+            .field(2)
+            .parse::<u64>()
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| PopulationSnvsPreparationError::InvalidPosition {
+                row_index,
+                value: row.field(2).to_owned(),
+            })?;
+        let reference_base = parse_snv_base(row.field(3), row_index, "ref")?;
+        let alternate = parse_snv_base(row.field(4), row_index, "alt")?;
+        if reference_base == alternate {
+            return Err(PopulationSnvsPreparationError::InvalidAllele {
+                row_index,
+                field: "alt",
+                value: row.field(4).to_owned(),
+            });
+        }
+        let population = PopulationId::parse(row.field(5), "population_snvs").map_err(|_| {
+            PopulationSnvsPreparationError::InvalidPopulation {
+                row_index,
+                value: row.field(5).to_owned(),
+            }
+        })?;
+        let sequence = fasta.sequences.get(contig.as_str()).ok_or_else(|| {
+            PopulationSnvsPreparationError::InvalidContig {
+                row_index,
+                value: contig.as_str().to_owned(),
+            }
+        })?;
+        let offset = usize::try_from(position - 1).ok();
+        let expected = offset
+            .and_then(|index| sequence.get(index).copied())
+            .ok_or_else(|| PopulationSnvsPreparationError::ReferenceMismatch {
+                row_index,
+                contig: contig.as_str().to_owned(),
+                position,
+                expected: b'?',
+                found: reference_base,
+            })?;
+        if expected != reference_base {
+            return Err(PopulationSnvsPreparationError::ReferenceMismatch {
+                row_index,
+                contig: contig.as_str().to_owned(),
+                position,
+                expected,
+                found: reference_base,
+            });
+        }
+        let key = (
+            contig.as_str().to_owned(),
+            position,
+            reference_base,
+            alternate,
+            population.as_str().to_owned(),
+        );
+        if !seen.insert(key) {
+            return Err(PopulationSnvsPreparationError::DuplicateAltPopulation {
+                contig: contig.as_str().to_owned(),
+                position,
+                reference: reference_base,
+                alternate,
+                population: population.as_str().to_owned(),
+            });
+        }
+        alt_populations
+            .entry((
+                contig.as_str().to_owned(),
+                position,
+                reference_base,
+                alternate,
+            ))
+            .or_default()
+            .insert(population.clone());
+        parsed.push((
+            row_index,
+            contig,
+            position,
+            reference_base,
+            alternate,
+            population,
+            row.field(7).to_owned(),
+        ));
+    }
+    if alt_populations
+        .values()
+        .any(|covered| covered != &populations)
+    {
+        let Some(((contig, position, reference_base, alternate), _)) = alt_populations
+            .iter()
+            .find(|(_, covered)| *covered != &populations)
+        else {
+            return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: "invariante de cobertura de población".to_owned(),
+            });
+        };
+        return Err(
+            PopulationSnvsPreparationError::IncompletePopulationCoverage {
+                contig: contig.clone(),
+                position: *position,
+                reference: *reference_base,
+                alternate: *alternate,
+            },
+        );
+    }
+    let mut discarded = Vec::new();
+    let inactive: BTreeSet<(String, u64, u8, u8)> = alt_populations
+        .iter()
+        .filter_map(|((contig, position, reference_base, alternate), _)| {
+            let all_zero = parsed
+                .iter()
+                .filter(|(_, c, p, r, a, _, _)| {
+                    c.as_str() == contig && p == position && r == reference_base && a == alternate
+                })
+                .all(|(index, ..)| effective[index] == 0.0);
+            all_zero.then_some((contig.clone(), *position, *reference_base, *alternate))
+        })
+        .collect::<BTreeSet<_>>();
+    let mut rows = Vec::new();
+    for (index, contig, position, reference_base, alternate, population, source_id) in parsed {
+        let variant_id = derive_matrix_variant_id(
+            reference.reference_id(),
+            &contig,
+            position,
+            reference_base,
+            alternate,
+        )
+        .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: error.render_human(),
+        })?;
+        if inactive.contains(&(
+            contig.as_str().to_owned(),
+            position,
+            reference_base,
+            alternate,
+        )) {
+            if !discarded.contains(&variant_id) {
+                discarded.push(variant_id);
+            }
+            continue;
+        }
+        rows.push(PreparedPopulationSnv {
+            variant_id,
+            contig,
+            position_1based: position,
+            reference: reference_base,
+            alternate,
+            population_id: population,
+            alt_af: effective[&index],
+            source_id,
+        });
+    }
+    rows.sort_by(|left, right| {
+        fasta
+            .ordinal(left.contig().as_str())
+            .cmp(&fasta.ordinal(right.contig().as_str()))
+            .then(left.position_1based().cmp(&right.position_1based()))
+            .then(left.reference().cmp(&right.reference()))
+            .then(left.alternate().cmp(&right.alternate()))
+            .then(
+                left.population_id()
+                    .as_str()
+                    .cmp(right.population_id().as_str()),
+            )
+    });
+    if rows.is_empty() && !allow_empty_matrix {
+        return Err(PopulationSnvsPreparationError::EmptyActiveMatrixRequiresAuthorization);
+    }
+    let empty_authorized = rows.is_empty();
+    Ok(PreparedPopulationSnvs {
+        rows,
+        discarded_globally_absent: discarded,
+        empty_authorized,
+    })
+}
+
+fn parse_snv_base(
+    value: &str,
+    row_index: usize,
+    field: &'static str,
+) -> Result<u8, PopulationSnvsPreparationError> {
+    let bytes = value.as_bytes();
+    if bytes.len() == 1 && matches!(bytes[0], b'A' | b'C' | b'G' | b'T') {
+        Ok(bytes[0])
+    } else {
+        Err(PopulationSnvsPreparationError::InvalidAllele {
+            row_index,
+            field,
+            value: value.to_owned(),
+        })
+    }
+}
+
+struct AuthoritativeFasta {
+    sequences: BTreeMap<String, Vec<u8>>,
+    order: BTreeMap<String, usize>,
+}
+impl AuthoritativeFasta {
+    fn ordinal(&self, id: &str) -> usize {
+        self.order.get(id).copied().unwrap_or(usize::MAX)
+    }
+}
+
+fn load_authoritative_fasta(
+    reference: &ResolvedManifestReference,
+) -> Result<AuthoritativeFasta, PopulationSnvsPreparationError> {
+    let bytes = fs::read(reference.fasta_path()).map_err(|error| {
+        PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: error.to_string(),
+        }
+    })?;
+    let mut records = BTreeMap::new();
+    let mut order = BTreeMap::new();
+    let mut name = None::<String>;
+    let mut bases = Vec::new();
+    for raw in bytes.split(|byte| *byte == b'\n') {
+        let line = raw.strip_suffix(b"\r").unwrap_or(raw);
+        if let Some(header) = line.strip_prefix(b">") {
+            if let Some(previous) = name.replace(
+                header
+                    .split(u8::is_ascii_whitespace)
+                    .next()
+                    .unwrap_or_default()
+                    .iter()
+                    .copied()
+                    .map(char::from)
+                    .collect(),
+            ) {
+                if previous.is_empty()
+                    || records
+                        .insert(previous.clone(), std::mem::take(&mut bases))
+                        .is_some()
+                {
+                    return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
+                        detail: "cabecera FASTA duplicada o vacía".to_owned(),
+                    });
+                }
+                order.insert(previous, order.len());
+            }
+        } else {
+            bases.extend(line.iter().map(|base| base.to_ascii_uppercase()));
+        }
+    }
+    let Some(last) = name else {
+        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "FASTA vacío".to_owned(),
+        });
+    };
+    if last.is_empty() || records.insert(last.clone(), bases).is_some() {
+        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "cabecera FASTA duplicada o vacía".to_owned(),
+        });
+    }
+    order.insert(last, order.len());
+    Ok(AuthoritativeFasta {
+        sequences: records,
+        order,
+    })
+}
+
 impl NormalizedPopulationSnvs {
     #[must_use]
     pub fn groups(&self) -> &[AltFrequencyNormalization] {
@@ -515,6 +947,56 @@ pub fn parse_canonical_tsv(bytes: &[u8]) -> Result<PopulationSnvsTsv, Population
                     found,
                 })?;
         rows.push(PopulationSnvRow { fields });
+    }
+    Ok(PopulationSnvsTsv { rows })
+}
+
+/// Analiza la tabla mínima suministrada (seis columnas y `source_id` opcional)
+/// sin confundirla con el recurso canónico publicado de ocho columnas.
+pub fn parse_supplied_tsv(bytes: &[u8]) -> Result<PopulationSnvsTsv, PopulationSnvsFormatError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| PopulationSnvsFormatError::InvalidUtf8)?;
+    if text.starts_with("##fileformat=VCF") || text.starts_with("#CHROM\t") {
+        return Err(PopulationSnvsFormatError::VcfInput);
+    }
+    let mut lines = text.lines();
+    let header = lines
+        .next()
+        .ok_or(PopulationSnvsFormatError::MissingHeader)?;
+    let accepted = [
+        "contig\tposition\tref\talt\tpopulation_id\talt_af",
+        "contig\tposition\tref\talt\tpopulation_id\talt_af\tsource_id",
+    ];
+    if !accepted.contains(&header) {
+        return Err(PopulationSnvsFormatError::IncorrectHeader {
+            found: header.to_owned(),
+        });
+    }
+    let has_source = header.ends_with("\tsource_id");
+    let mut rows = Vec::new();
+    for (index, line) in lines.enumerate() {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() != if has_source { 7 } else { 6 } {
+            return Err(PopulationSnvsFormatError::IncorrectColumnCount {
+                line: index + 2,
+                found: fields.len(),
+            });
+        }
+        rows.push(PopulationSnvRow {
+            fields: [
+                String::new(),
+                fields[0].to_owned(),
+                fields[1].to_owned(),
+                fields[2].to_owned(),
+                fields[3].to_owned(),
+                fields[4].to_owned(),
+                fields[5].to_owned(),
+                if has_source {
+                    fields[6].to_owned()
+                } else {
+                    String::new()
+                },
+            ],
+        });
     }
     Ok(PopulationSnvsTsv { rows })
 }

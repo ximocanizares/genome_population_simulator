@@ -1,5 +1,6 @@
 use genome_population_simulator::identity::{
     AutomaticIdRequest, EventId, HumanLabel, IdClass, IdentityRegistry, IndividualId, ReferenceId,
+    SequenceId, derive_matrix_variant_id,
 };
 use genome_population_simulator::randomness::RootSeed;
 
@@ -117,6 +118,21 @@ fn class_prefix_len(class: IdClass) -> usize {
         IdClass::Execution | IdClass::Reference => 4,
         IdClass::Individual | IdClass::Event => 4,
     }
+}
+
+#[test]
+fn matrix_variant_id_is_stable_and_excludes_population_and_row_order() {
+    let reference = ReferenceId::parse("ref-main", "test").expect("reference");
+    let sequence = SequenceId::parse("chr1", "test").expect("sequence");
+    let first = derive_matrix_variant_id(&reference, &sequence, 7, b'A', b'C').expect("variant");
+    let repeated = derive_matrix_variant_id(&reference, &sequence, 7, b'A', b'C').expect("variant");
+    let changed_alt =
+        derive_matrix_variant_id(&reference, &sequence, 7, b'A', b'G').expect("variant");
+    assert_eq!(first.as_str(), "VAR_ETWKMO4NA6HZ4YXCBOLCN34GTY");
+    assert!(include_str!("../catalogs/variant-id-v1.tsv").contains(first.as_str()));
+    assert_eq!(first, repeated);
+    assert_ne!(first, changed_alt);
+    assert!(first.as_str().starts_with("VAR_"));
 }
 
 #[test]

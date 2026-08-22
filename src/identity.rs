@@ -43,6 +43,7 @@ typed_id!(ExecutionId, "execution");
 typed_id!(ReferenceId, "reference");
 typed_id!(IndividualId, "individual");
 typed_id!(EventId, "event");
+typed_id!(VariantId, "variant");
 
 macro_rules! provided_typed_id {
     ($name:ident, $category:literal) => {
@@ -405,6 +406,46 @@ pub fn derive_execution_id(
         &[("config_sha256", configuration_sha256)],
     )?;
     IdentityRegistry::default().derive_execution(root, &request)
+}
+
+/// Deriva el ID de una variante de matriz a partir de su locus canónico.
+///
+/// A diferencia de las entidades sorteadas, este ID no incorpora semilla: debe
+/// ser idéntico al reutilizar una misma matriz bajo otra ejecución. Las causas
+/// están completas y ordenadas para que no dependa de población, fila, ruta ni
+/// orden físico.
+pub fn derive_matrix_variant_id(
+    reference_id: &ReferenceId,
+    sequence_id: &SequenceId,
+    position_1based: u64,
+    reference: u8,
+    alternate: u8,
+) -> Result<VariantId, Diagnostic> {
+    let position = position_1based.to_string();
+    let reference = char::from(reference).to_string();
+    let alternate = char::from(alternate).to_string();
+    let components = [
+        ("class", "variant"),
+        ("reference_id", reference_id.as_str()),
+        ("sequence_id", sequence_id.as_str()),
+        ("position_1based", position.as_str()),
+        ("ref", reference.as_str()),
+        ("alt", alternate.as_str()),
+    ];
+    let mut material = Vec::new();
+    material.extend_from_slice(
+        &u32::try_from(components.len())
+            .map_err(|_| identity_material_error("component_count"))?
+            .to_be_bytes(),
+    );
+    for (name, value) in components {
+        append_component(&mut material, name, value)?;
+    }
+    let digest = blake3::derive_key("genome_population_simulator/v1/variant-id", &material);
+    Ok(VariantId::from_automatic(format!(
+        "VAR_{}",
+        encode_base32(&digest[..16])
+    )))
 }
 
 /// Las categorías no son intercambiables aunque el texto sea igual.

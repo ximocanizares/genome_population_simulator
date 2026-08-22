@@ -230,7 +230,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: vectores de subsemilla, semillas fijas, bordes, consumo
     cero, aislamiento entre población/individuo/clase y propiedades estadísticas.
 
-- ☐ F2.2.4. Validar y preparar matrices suministradas.
+- ✅ F2.2.4. Validar y preparar matrices suministradas.
   - Depende de: F2.2.1–F2.2.3.
   - Procede de: DTC-054 y DTC-060; REQ-IND-60/61 y REQ-VAL-55.
   - Cambia: orden, IDs, filas multialélicas, REF/ALT, poblaciones y eliminación

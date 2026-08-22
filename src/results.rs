@@ -1,9 +1,9 @@
 //! Documentos JSON mínimos producidos por F1.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::Write;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 use serde_json::{Value, json};
 
@@ -129,6 +129,35 @@ pub struct ManifestReferenceLink {
     pub fasta_artifact_id: String,
 }
 
+/// Referencia F1 resuelta desde un manifiesto general ya validado.
+///
+/// Esta frontera conserva juntos el ID solicitado, el enlace semántico del
+/// manifiesto y la identidad física comprobada del FASTA. Los consumidores F2
+/// no deben aceptar un ID ni un FASTA alternativos fuera de esta resolución.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedManifestReference {
+    reference_id: ReferenceId,
+    fasta_path: PathBuf,
+    fasta: ArtifactRecord,
+}
+
+impl ResolvedManifestReference {
+    #[must_use]
+    pub const fn reference_id(&self) -> &ReferenceId {
+        &self.reference_id
+    }
+
+    #[must_use]
+    pub fn fasta_path(&self) -> &Path {
+        &self.fasta_path
+    }
+
+    #[must_use]
+    pub const fn fasta(&self) -> &ArtifactRecord {
+        &self.fasta
+    }
+}
+
 /// Estado alcanzado por una reducción solicitada, incluso si la ejecución falla.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ManifestReductionLink {
@@ -246,6 +275,114 @@ pub fn json_document_bytes(document: &Value) -> Result<Vec<u8>, Diagnostic> {
 /// Analiza y valida el contrato propio y la resolución de todos los enlaces.
 pub fn validate_general_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Diagnostic> {
     parse_general_manifest_bytes(path, bytes).map(|_| ())
+}
+
+/// Resuelve una referencia exclusivamente desde su manifiesto general F1 y
+/// comprueba que el FASTA enlazado sigue teniendo los bytes declarados.
+///
+/// Es la frontera reutilizable de DTC-060: el llamador aporta conjuntamente el
+/// manifiesto y el `reference_id`; ni una ruta FASTA libre ni un ID aislado
+/// pueden llegar al consumidor posterior.
+pub fn resolve_manifest_reference(
+    manifest_path: &Path,
+    reference_id: &ReferenceId,
+) -> Result<ResolvedManifestReference, Diagnostic> {
+    let bytes = fs::read(manifest_path).map_err(|error| {
+        Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")
+            .with("path", manifest_path.display().to_string())
+            .with("operation", "read_reference_manifest")
+            .with("detail", error.to_string())
+    })?;
+    let artifacts = parse_general_manifest_bytes(manifest_path, &bytes)?;
+    let parent = manifest_path.parent().ok_or_else(|| {
+        manifest_error(
+            manifest_path,
+            "el manifiesto no tiene un directorio padre para resolver recursos",
+        )
+    })?;
+    let document: Value = serde_json::from_slice(&bytes).map_err(|error| {
+        manifest_error(
+            manifest_path,
+            format!("JSON no legible tras validación: {error}"),
+        )
+    })?;
+    let references = document
+        .get("references")
+        .and_then(Value::as_array)
+        .ok_or_else(|| manifest_error(manifest_path, "falta references tras validación"))?;
+    let fasta_artifact_id = references
+        .iter()
+        .filter_map(Value::as_object)
+        .find(|reference| {
+            reference.get("id").and_then(Value::as_str) == Some(reference_id.as_str())
+        })
+        .and_then(|reference| reference.get("fasta_artifact_id").and_then(Value::as_str))
+        .ok_or_else(|| {
+            manifest_error(
+                manifest_path,
+                format!(
+                    "la referencia solicitada no existe: {}",
+                    reference_id.as_str()
+                ),
+            )
+        })?;
+    let fasta = artifacts
+        .iter()
+        .find(|artifact| artifact.id == fasta_artifact_id && artifact.kind == "reference_fasta")
+        .cloned()
+        .ok_or_else(|| {
+            manifest_error(
+                manifest_path,
+                format!("el FASTA de referencia no existe: {fasta_artifact_id}"),
+            )
+        })?;
+    let fasta_path = parent.join(&fasta.path);
+    let observed = identify_file(&fasta_path, &fasta.path)?;
+    if observed.size_bytes() != fasta.size_bytes || observed.digest() != fasta.digest {
+        return Err(Diagnostic::io(
+            "GPS-IO-002",
+            "El tamaño o SHA-256 de un artefacto no coincide con el valor esperado.",
+        )
+        .with("path", fasta_path.display().to_string())
+        .with("expected_size", fasta.size_bytes.to_string())
+        .with("observed_size", observed.size_bytes().to_string())
+        .with("expected_digest", &fasta.digest)
+        .with("observed_digest", observed.digest()));
+    }
+
+    // El digest del FASTA seleccionado no autentica por sí solo una referencia
+    // reducida: su mapa puede haber sido sustituido conservando intactos el
+    // FASTA y sus metadatos. Reutilizamos la puerta física F1 para reconstruir
+    // todas las relaciones de la publicación antes de entregar cualquier
+    // enlace al consumidor F2.
+    let effective_id = document
+        .get("effective_config_artifact_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| manifest_error(manifest_path, "falta effective_config_artifact_id"))?;
+    let effective = artifacts
+        .iter()
+        .find(|artifact| artifact.id == effective_id && artifact.kind == "effective_config")
+        .ok_or_else(|| {
+            manifest_error(
+                manifest_path,
+                format!("la configuración efectiva no existe: {effective_id}"),
+            )
+        })?;
+    let effective_path = parent.join(&effective.path);
+    let effective_bytes = fs::read(&effective_path)
+        .map_err(|error| io_error(&effective_path, "read_effective_config", error))?;
+    validate_published_resources(
+        parent,
+        &effective_path,
+        &effective_bytes,
+        manifest_path,
+        &bytes,
+    )?;
+    Ok(ResolvedManifestReference {
+        reference_id: reference_id.clone(),
+        fasta_path,
+        fasta,
+    })
 }
 
 /// Valida la configuración efectiva releyéndola y cruza todos sus enlaces con
