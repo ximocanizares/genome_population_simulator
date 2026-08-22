@@ -309,12 +309,17 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
     individuo/copia/fase; Marimo expone la matriz común y su autorización
     ejecutable, no controles de SNP/indels sin destino.
 
-- ☐ F2.2.12. Cerrar integración, oráculos y trazabilidad F2.2.
+- ✅ F2.2.12. Cerrar integración, oráculos y trazabilidad F2.2.
   - Depende de: F2.2.1–F2.2.11.
   - Procede de: requisitos y ACE asignados a F2.2.
   - Cambia: pruebas integradas y nota de cierre; no añade otro ejecutor.
-  - Se comprueba con: matriz suministrada/generada, cambios explícitos/aleatorios,
-    semillas, oráculos independientes pertinentes y puertas comunes.
+  - Se comprueba con: `tests/f2_2_integration.rs`, matriz suministrada,
+    generada y reutilizada, auditoría de normalización conservada y validada
+    en metadata/configuración efectiva/manifiesto, cambios
+    explícitos/aleatorios, semillas, oráculos FASTA/materialización
+    independientes (incluidos bytes finales congelados), validación física
+    publicada y puertas comunes. La nota y los límites están en
+    `evidence/f2.2/cierre.md`.
 
 > **PAUSA-F2.2.** Revisar especialmente coordenadas, `N`, sumas, aislamiento
 > RNG, matriz común y composición de indels. No iniciar individuos si la matriz

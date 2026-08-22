@@ -120,7 +120,18 @@ fijos. Las regiones ponderadas incluyen `outside_weight`, `contig`, `start`,
 `variant_id`, `contig`, `position`, `ref`, `alt`, `population_id`, `alt_af` y
 `source_id`; VCF no es una entrada admitida. Su JSON asociado declara la clase
 `population_snvs_metadata`, versión `1`, coordenadas `base1_closed`, referencia,
-enlace del TSV, poblaciones y procedencia `supplied` o `generated`. F2.2.2
+enlace del TSV, poblaciones, procedencia `supplied` o `generated` y una
+auditoría por `población×locus`. La auditoría conserva los ALT originales y su
+suma, la decisión (`reference_remainder` o `normalized`), los valores
+efectivos, su suma y la frecuencia REF resultante. La misma auditoría se enlaza
+sin cambios en la configuración efectiva y el manifiesto. La metadata además
+enumera de forma canónica `discarded_variant_pairs`: un ALT efectivo cero que
+ya no está en el TSV sólo es admisible si su par `population_id`×`variant_id`
+pertenece exactamente a esa lista. Cada variante descartada debe aparecer una
+vez para cada población declarada, y su `variant_id` se deriva de la
+referencia, contig, posición, REF y ALT. Al
+reutilizar, Rust contrasta identidad, orden, alelos, TSV, tolerancia y metadata.
+F2.2.2
 interpreta cada `alt_af` como `f64` finito en `[0,1]`, suma por
 población×locus en orden canónico con Neumaier y aplica la tolerancia efectiva:
 si la suma ALT no supera 1 conserva el resto REF; un exceso dentro del borde

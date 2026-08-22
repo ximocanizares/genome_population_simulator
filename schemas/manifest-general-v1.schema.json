@@ -89,6 +89,33 @@
     }
   ],
   "$defs": {
+    "normalization_audit": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/normalization_audit_group"}
+    },
+    "normalization_audit_group": {
+      "type": "object", "additionalProperties": false,
+      "required": ["population_id", "contig", "position", "ref", "tolerance", "canonical_order", "sum_algorithm", "original_sum", "original_delta", "effective_sum", "effective_delta", "reference_frequency", "decision", "values"],
+      "properties": {
+        "population_id": {"type": "string", "minLength": 1}, "contig": {"type": "string", "minLength": 1},
+        "position": {"type": "string", "pattern": "^[1-9][0-9]*$"}, "ref": {"enum": ["A", "C", "G", "T"]},
+        "tolerance": {"type": "number", "minimum": 0, "maximum": 0.000001},
+        "canonical_order": {"const": "population_id,contig,position,ref,alt,variant_id,source_id"}, "sum_algorithm": {"const": "neumaier_sum_v1"},
+        "original_sum": {"type": "number", "minimum": 0}, "original_delta": {"type": "number", "minimum": 0},
+        "effective_sum": {"type": "number", "minimum": 0}, "effective_delta": {"type": "number", "minimum": 0},
+        "reference_frequency": {"type": "number", "minimum": 0, "maximum": 1}, "decision": {"enum": ["reference_remainder", "normalized"]},
+        "values": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/normalization_audit_value"}}
+      }
+    },
+    "normalization_audit_value": {
+      "type": "object", "additionalProperties": false,
+      "required": ["alt", "variant_id", "source_id", "original", "effective"],
+      "properties": {
+        "alt": {"enum": ["A", "C", "G", "T"]}, "variant_id": {"type": "string", "minLength": 1},
+        "source_id": {"type": "string"}, "original": {"type": "number", "minimum": 0, "maximum": 1},
+        "effective": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
     "authorizations": { "type": "object", "additionalProperties": false, "required": ["allow_empty_snv_matrix"], "properties": {"allow_empty_snv_matrix": {"type": "boolean"}}},
     "non_empty_id": { "type": "string", "minLength": 1 },
     "checksum": {
@@ -197,11 +224,12 @@
     "population_snvs_link": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode", "metadata_sha256"],
+      "required": ["mode", "metadata_sha256", "normalization_audit"],
       "properties": {
         "mode": {"enum": ["supplied", "generated", "reuse"]},
         "metadata_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "metadata_artifact_id": {"oneOf": [{"$ref": "#/$defs/non_empty_id"}, {"type": "null"}]}
+        "metadata_artifact_id": {"oneOf": [{"$ref": "#/$defs/non_empty_id"}, {"type": "null"}]},
+        "normalization_audit": {"$ref": "#/$defs/normalization_audit"}
       },
       "allOf": [
         {"if": {"properties": {"mode": {"const": "reuse"}}, "required": ["mode"]}, "then": {"properties": {"metadata_artifact_id": {"type": "null"}}}},

@@ -333,8 +333,10 @@ impl PreparedPopulationSnv {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedPopulationSnvs {
     rows: Vec<PreparedPopulationSnv>,
+    population_ids: Vec<PopulationId>,
     discarded_globally_absent: Vec<VariantId>,
     empty_authorized: bool,
+    normalization_audit: Vec<AltFrequencyNormalization>,
 }
 
 /// Procedencia declarada del par canónico publicado.
@@ -368,12 +370,20 @@ impl PreparedPopulationSnvs {
         &self.rows
     }
     #[must_use]
+    pub fn population_ids(&self) -> &[PopulationId] {
+        &self.population_ids
+    }
+    #[must_use]
     pub fn discarded_globally_absent(&self) -> &[VariantId] {
         &self.discarded_globally_absent
     }
     #[must_use]
     pub const fn empty_authorized(&self) -> bool {
         self.empty_authorized
+    }
+    #[must_use]
+    pub fn normalization_audit(&self) -> &[AltFrequencyNormalization] {
+        &self.normalization_audit
     }
 
     /// Exige la misma confirmación explícita para una matriz vacía generada
@@ -502,7 +512,7 @@ fn prepare_population_snvs(
     tolerance: f64,
     allow_empty_matrix: bool,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
-    let normalized = normalize_alt_frequencies(table, tolerance)
+    let mut normalized = normalize_alt_frequencies(table, tolerance)
         .map_err(PopulationSnvsPreparationError::Frequencies)?;
     let mut effective = BTreeMap::new();
     for group in normalized.groups() {
@@ -618,6 +628,48 @@ fn prepare_population_snvs(
             row.field(7).to_owned(),
         ));
     }
+    let variant_ids = parsed
+        .iter()
+        .map(|(_, contig, position, reference_base, alternate, ..)| {
+            derive_matrix_variant_id(reference_id, contig, *position, *reference_base, *alternate)
+                .map(|variant_id| {
+                    (
+                        (
+                            contig.as_str().to_owned(),
+                            *position,
+                            *reference_base,
+                            *alternate,
+                        ),
+                        variant_id,
+                    )
+                })
+                .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
+                    detail: error.render_human(),
+                })
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    for group in &mut normalized.groups {
+        let contig = group.contig().to_owned();
+        let position_text = group.position().to_owned();
+        let reference = group.reference().to_owned();
+        for value in &mut group.values {
+            let reference_base = parse_snv_base(&reference, value.row_index(), "ref")?;
+            let alternate = parse_snv_base(value.alt(), value.row_index(), "alt")?;
+            let position = position_text.parse::<u64>().map_err(|_| {
+                PopulationSnvsPreparationError::InvalidPosition {
+                    row_index: value.row_index(),
+                    value: position_text.clone(),
+                }
+            })?;
+            value.variant_id = variant_ids
+                .get(&(contig.clone(), position, reference_base, alternate))
+                .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+                    detail: "invariante de identidad de auditoría".to_owned(),
+                })?
+                .as_str()
+                .to_owned();
+        }
+    }
     if alt_populations
         .values()
         .any(|covered| covered != &populations)
@@ -700,8 +752,10 @@ fn prepare_population_snvs(
     let empty_authorized = rows.is_empty();
     Ok(PreparedPopulationSnvs {
         rows,
+        population_ids: populations.into_iter().collect(),
         discarded_globally_absent: discarded,
         empty_authorized,
+        normalization_audit: normalized.groups,
     })
 }
 
@@ -739,13 +793,32 @@ pub fn canonical_metadata_document(
     provenance: PopulationSnvsProvenance,
 ) -> Value {
     let populations = prepared
-        .rows()
+        .population_ids()
         .iter()
-        .map(|row| row.population_id().as_str())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
+        .map(PopulationId::as_str)
         .map(|population_id| json!({"population_id": population_id}))
         .collect::<Vec<_>>();
+    let mut discarded_variant_pairs = prepared
+        .population_ids()
+        .iter()
+        .flat_map(|population_id| {
+            prepared
+                .discarded_globally_absent()
+                .iter()
+                .map(move |variant_id| {
+                    json!({
+                        "population_id": population_id.as_str(),
+                        "variant_id": variant_id.as_str(),
+                    })
+                })
+        })
+        .collect::<Vec<_>>();
+    discarded_variant_pairs.sort_by(|left, right| {
+        (left["population_id"].as_str(), left["variant_id"].as_str()).cmp(&(
+            right["population_id"].as_str(),
+            right["variant_id"].as_str(),
+        ))
+    });
     json!({
         "document_kind": "population_snvs_metadata",
         "schema_version": "1",
@@ -754,7 +827,58 @@ pub fn canonical_metadata_document(
         "matrix": {"path": "population_snvs.tsv", "sha256": matrix_sha256},
         "populations": populations,
         "provenance": provenance.as_str(),
+        "discarded_variant_pairs": discarded_variant_pairs,
+        "normalization_audit": normalization_audit_document(prepared),
     })
+}
+
+/// Auditoría completa de normalización que acompaña al par canónico hasta el
+/// resultado. Sus valores `effective` son comprobables contra el TSV; los
+/// `original` conservan la decisión previa a cualquier normalización.
+#[must_use]
+pub fn normalization_audit_document(prepared: &PreparedPopulationSnvs) -> Value {
+    let mut groups = prepared.normalization_audit().iter().collect::<Vec<_>>();
+    groups.sort_by(|left, right| {
+        left.population_id()
+            .cmp(right.population_id())
+            .then(left.contig().cmp(right.contig()))
+            .then_with(|| {
+                left.position()
+                    .parse::<u64>()
+                    .unwrap_or(u64::MAX)
+                    .cmp(&right.position().parse::<u64>().unwrap_or(u64::MAX))
+            })
+            .then(left.reference().cmp(right.reference()))
+    });
+    Value::Array(
+        groups
+            .into_iter()
+            .map(|group| {
+                json!({
+                    "population_id": group.population_id(),
+                    "contig": group.contig(),
+                    "position": group.position(),
+                    "ref": group.reference(),
+                    "tolerance": group.tolerance(),
+                    "canonical_order": group.canonical_order(),
+                    "sum_algorithm": group.sum_algorithm(),
+                    "original_sum": group.original_sum(),
+                    "original_delta": group.original_delta(),
+                    "effective_sum": group.effective_sum(),
+                    "effective_delta": group.effective_delta(),
+                    "reference_frequency": group.reference_frequency(),
+                    "decision": group.decision().as_str(),
+                    "values": group.values().iter().map(|value| json!({
+                        "alt": value.alt(),
+                        "variant_id": value.variant_id(),
+                        "source_id": value.source_id(),
+                        "original": value.original(),
+                        "effective": value.effective(),
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Valida un par reutilizado y devuelve su vista semántica. El TSV se exige en
@@ -767,7 +891,12 @@ pub fn validate_reusable_population_snvs(
     tolerance: f64,
     allow_empty_matrix: bool,
 ) -> Result<
-    (PreparedPopulationSnvs, PopulationSnvsProvenance, String),
+    (
+        PreparedPopulationSnvs,
+        PopulationSnvsProvenance,
+        String,
+        Value,
+    ),
     PopulationSnvsPreparationError,
 > {
     validate_reusable_population_snvs_with_hooks(
@@ -793,7 +922,12 @@ pub fn validate_reusable_population_snvs_with_hooks(
     after_metadata_snapshot: impl FnOnce(),
     after_matrix_snapshot: impl FnOnce(),
 ) -> Result<
-    (PreparedPopulationSnvs, PopulationSnvsProvenance, String),
+    (
+        PreparedPopulationSnvs,
+        PopulationSnvsProvenance,
+        String,
+        Value,
+    ),
     PopulationSnvsPreparationError,
 > {
     let metadata_bytes = fs::read(metadata_path).map_err(|error| {
@@ -832,7 +966,12 @@ pub fn validate_reusable_population_snvs_bytes(
     tolerance: f64,
     allow_empty_matrix: bool,
 ) -> Result<
-    (PreparedPopulationSnvs, PopulationSnvsProvenance, String),
+    (
+        PreparedPopulationSnvs,
+        PopulationSnvsProvenance,
+        String,
+        Value,
+    ),
     PopulationSnvsPreparationError,
 > {
     let metadata = parse_metadata_json(metadata_bytes).map_err(|error| {
@@ -883,7 +1022,7 @@ pub fn validate_reusable_population_snvs_bytes(
             detail: error.to_string(),
         }
     })?;
-    let prepared =
+    let mut prepared =
         prepare_population_snvs_from_reference(&table, reference, tolerance, allow_empty_matrix)?;
     if canonical_tsv_bytes(&prepared) != matrix_bytes {
         return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
@@ -896,18 +1035,32 @@ pub fn validate_reusable_population_snvs_bytes(
         .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "metadata.populations inválida".to_owned(),
         })?;
-    let expected = prepared
-        .rows()
-        .iter()
-        .map(|row| row.population_id().as_str())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
     let observed = populations
         .iter()
-        .filter_map(|value| value.get("population_id").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-    if observed != expected {
+        .map(|value| {
+            value
+                .get("population_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+                    detail: "metadata.populations inválida".to_owned(),
+                })
+                .and_then(|value| {
+                    PopulationId::parse(value, "population_snvs_metadata").map_err(|_| {
+                        PopulationSnvsPreparationError::AuthoritativeFasta {
+                            detail: "metadata.populations inválida".to_owned(),
+                        }
+                    })
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if observed.windows(2).any(|window| window[0] >= window[1]) {
+        return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.populations no está ordenada canónicamente".to_owned(),
+        });
+    }
+    if prepared.population_ids().is_empty() {
+        prepared.population_ids = observed;
+    } else if observed != prepared.population_ids() {
         return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "metadata.populations no coincide con el TSV canónico".to_owned(),
         });
@@ -919,7 +1072,333 @@ pub fn validate_reusable_population_snvs_bytes(
         .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "metadata.provenance inválida".to_owned(),
         })?;
-    Ok((prepared, provenance, sha256_bytes(metadata_bytes)))
+    let audit = object.get("normalization_audit").ok_or_else(|| {
+        PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.normalization_audit ausente".to_owned(),
+        }
+    })?;
+    let discarded_variant_pairs = object
+        .get("discarded_variant_pairs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+        })?
+        .iter()
+        .map(|value| {
+            let pair = value.as_object().ok_or_else(|| {
+                PopulationSnvsPreparationError::AuthoritativeFasta {
+                    detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+                }
+            })?;
+            Ok((
+                pair.get("population_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+                        detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+                    })?,
+                pair.get("variant_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+                        detail: "metadata.discarded_variant_pairs inválido".to_owned(),
+                    })?,
+            ))
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    validate_normalization_audit_document(
+        audit,
+        &prepared,
+        reference,
+        tolerance,
+        &discarded_variant_pairs,
+    )?;
+    Ok((
+        prepared,
+        provenance,
+        sha256_bytes(metadata_bytes),
+        audit.clone(),
+    ))
+}
+
+/// Comprueba que la auditoría publicada conserva la decisión original y que
+/// sus valores efectivos siguen correspondiendo exactamente al TSV canónico.
+pub fn validate_normalization_audit_document(
+    audit: &Value,
+    prepared: &PreparedPopulationSnvs,
+    reference: &Reference,
+    tolerance: f64,
+    declared_discarded_variant_pairs: &BTreeSet<(String, String)>,
+) -> Result<(), PopulationSnvsPreparationError> {
+    let groups = audit
+        .as_array()
+        .ok_or_else(|| audit_error("debe ser una lista"))?;
+    let mut active = prepared
+        .rows()
+        .iter()
+        .map(|row| {
+            (
+                (
+                    row.population_id().as_str().to_owned(),
+                    row.contig().as_str().to_owned(),
+                    row.position_1based().to_string(),
+                    char::from(row.reference()).to_string(),
+                    char::from(row.alternate()).to_string(),
+                    row.variant_id().as_str().to_owned(),
+                    row.source_id().to_owned(),
+                ),
+                row.alt_af(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut seen = BTreeSet::new();
+    let mut previous_group = None;
+    let mut absent_variant_pairs = BTreeSet::new();
+    for group in groups {
+        let object = group
+            .as_object()
+            .ok_or_else(|| audit_error("grupo inválido"))?;
+        const FIELDS: [&str; 14] = [
+            "population_id",
+            "contig",
+            "position",
+            "ref",
+            "tolerance",
+            "canonical_order",
+            "sum_algorithm",
+            "original_sum",
+            "original_delta",
+            "effective_sum",
+            "effective_delta",
+            "reference_frequency",
+            "decision",
+            "values",
+        ];
+        if object.len() != FIELDS.len()
+            || object.keys().any(|field| !FIELDS.contains(&field.as_str()))
+        {
+            return Err(audit_error("campos de grupo inválidos"));
+        }
+        let text = |field| {
+            object
+                .get(field)
+                .and_then(Value::as_str)
+                .ok_or_else(|| audit_error(field))
+        };
+        let number = |field| {
+            object
+                .get(field)
+                .and_then(Value::as_f64)
+                .filter(|value| value.is_finite())
+                .ok_or_else(|| audit_error(field))
+        };
+        let population = text("population_id")?;
+        let contig = text("contig")?;
+        let position_text = text("position")?;
+        let reference_text = text("ref")?;
+        PopulationId::parse(population, "normalization_audit")
+            .map_err(|_| audit_error("population_id"))?;
+        if !prepared
+            .population_ids()
+            .iter()
+            .any(|known| known.as_str() == population)
+        {
+            return Err(audit_error("population_id no pertenece a la matriz"));
+        }
+        let position = position_text
+            .parse::<u64>()
+            .ok()
+            .filter(|position| *position > 0)
+            .ok_or_else(|| audit_error("position"))?;
+        let reference_base =
+            parse_snv_base(reference_text, 0, "ref").map_err(|_| audit_error("ref"))?;
+        let sequence_id =
+            SequenceId::parse(contig, "normalization_audit").map_err(|_| audit_error("contig"))?;
+        let sequence = reference
+            .sequences()
+            .iter()
+            .find(|sequence| sequence.id() == &sequence_id)
+            .ok_or_else(|| audit_error("contig ausente de referencia"))?;
+        if sequence
+            .sequence()
+            .as_bytes()
+            .get(usize::try_from(position - 1).map_err(|_| audit_error("position"))?)
+            .copied()
+            != Some(reference_base)
+        {
+            return Err(audit_error("ref no coincide con referencia"));
+        }
+        let group_key = (population, contig, position, reference_text);
+        if number("tolerance")?.to_bits() != tolerance.to_bits()
+            || text("canonical_order")? != ALT_FREQUENCY_CANONICAL_ORDER
+            || text("sum_algorithm")? != ALT_FREQUENCY_SUM_ALGORITHM
+            || previous_group
+                .as_ref()
+                .is_some_and(|last| last >= &group_key)
+            || !seen.insert(group_key)
+        {
+            return Err(audit_error("identidad o algoritmo de grupo inválido"));
+        }
+        previous_group = Some(group_key);
+        let values = object
+            .get("values")
+            .and_then(Value::as_array)
+            .ok_or_else(|| audit_error("values"))?;
+        if values.is_empty() {
+            return Err(audit_error("values vacíos"));
+        }
+        let mut originals = Vec::with_capacity(values.len());
+        let mut effectives = Vec::with_capacity(values.len());
+        let mut previous_value = None;
+        for value in values {
+            let value = value
+                .as_object()
+                .ok_or_else(|| audit_error("valor inválido"))?;
+            const VALUE_FIELDS: [&str; 5] =
+                ["alt", "variant_id", "source_id", "original", "effective"];
+            if value.len() != VALUE_FIELDS.len()
+                || value
+                    .keys()
+                    .any(|field| !VALUE_FIELDS.contains(&field.as_str()))
+            {
+                return Err(audit_error("campos de valor inválidos"));
+            }
+            let alt = value
+                .get("alt")
+                .and_then(Value::as_str)
+                .ok_or_else(|| audit_error("alt"))?;
+            let source = value
+                .get("source_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| audit_error("source_id"))?;
+            let variant_id = value
+                .get("variant_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| audit_error("variant_id"))?;
+            VariantId::parse(variant_id, "normalization_audit")
+                .map_err(|_| audit_error("variant_id"))?;
+            let alternate = parse_snv_base(alt, 0, "alt").map_err(|_| audit_error("alt"))?;
+            if alternate == reference_base {
+                return Err(audit_error("alt igual a ref"));
+            }
+            let expected_variant_id = derive_matrix_variant_id(
+                reference.id(),
+                &sequence_id,
+                position,
+                reference_base,
+                alternate,
+            )
+            .map_err(|_| audit_error("variant_id"))?;
+            if variant_id != expected_variant_id.as_str() {
+                return Err(audit_error("variant_id no canónico"));
+            }
+            let value_key = (alt, variant_id, source);
+            if previous_value
+                .as_ref()
+                .is_some_and(|last| last >= &value_key)
+            {
+                return Err(audit_error("orden canónico de values inválido"));
+            }
+            previous_value = Some(value_key);
+            let original = value
+                .get("original")
+                .and_then(Value::as_f64)
+                .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                .ok_or_else(|| audit_error("original"))?;
+            let effective = value
+                .get("effective")
+                .and_then(Value::as_f64)
+                .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                .ok_or_else(|| audit_error("effective"))?;
+            let key = (
+                population.to_owned(),
+                contig.to_owned(),
+                position.to_string(),
+                reference_text.to_owned(),
+                alt.to_owned(),
+                variant_id.to_owned(),
+                source.to_owned(),
+            );
+            if let Some(expected) = active.remove(&key) {
+                if expected.to_bits() != effective.to_bits() {
+                    return Err(audit_error("effective no coincide con TSV"));
+                }
+            } else if effective != 0.0 {
+                return Err(audit_error("valor efectivo activo ausente del TSV"));
+            } else {
+                absent_variant_pairs.insert((population.to_owned(), variant_id.to_owned()));
+            }
+            originals.push(original);
+            effectives.push(effective);
+        }
+        let original_sum = neumaier(originals.iter().copied());
+        let effective_sum = neumaier(effectives.iter().copied());
+        let original_delta = (original_sum - 1.0).abs();
+        let effective_delta = (effective_sum - 1.0).abs();
+        if number("original_sum")?.to_bits() != original_sum.to_bits()
+            || number("original_delta")?.to_bits() != original_delta.to_bits()
+            || number("effective_sum")?.to_bits() != effective_sum.to_bits()
+            || number("effective_delta")?.to_bits() != effective_delta.to_bits()
+        {
+            return Err(audit_error("sumas no coinciden"));
+        }
+        match text("decision")? {
+            "reference_remainder" if original_sum <= 1.0 => {
+                if originals != effectives
+                    || number("reference_frequency")?.to_bits() != (1.0 - effective_sum).to_bits()
+                {
+                    return Err(audit_error("resto de referencia inválido"));
+                }
+            }
+            "normalized" if original_sum > 1.0 && original_delta <= tolerance => {
+                if effectives
+                    .iter()
+                    .zip(&originals)
+                    .any(|(effective, original)| {
+                        effective.to_bits() != (original / original_sum).to_bits()
+                    })
+                    || effective_delta > tolerance
+                    || number("reference_frequency")?.to_bits() != 0.0_f64.to_bits()
+                {
+                    return Err(audit_error("normalización inválida"));
+                }
+            }
+            _ => return Err(audit_error("decisión inválida")),
+        }
+    }
+    if active.is_empty() {
+        let discarded_variant_ids = declared_discarded_variant_pairs
+            .iter()
+            .map(|(_, variant_id)| variant_id)
+            .collect::<BTreeSet<_>>();
+        let expected_discarded_pairs = prepared
+            .population_ids()
+            .iter()
+            .flat_map(|population_id| {
+                discarded_variant_ids.iter().map(move |variant_id| {
+                    (population_id.as_str().to_owned(), (*variant_id).to_owned())
+                })
+            })
+            .collect::<BTreeSet<_>>();
+        if absent_variant_pairs == *declared_discarded_variant_pairs
+            && expected_discarded_pairs == *declared_discarded_variant_pairs
+        {
+            Ok(())
+        } else {
+            Err(audit_error(
+                "ceros ausentes no coinciden con pares población×variante descartados",
+            ))
+        }
+    } else {
+        Err(audit_error("faltan valores efectivos del TSV"))
+    }
+}
+
+fn audit_error(detail: impl Into<String>) -> PopulationSnvsPreparationError {
+    PopulationSnvsPreparationError::AuthoritativeFasta {
+        detail: format!("auditoría de normalización inválida: {}", detail.into()),
+    }
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
@@ -1344,6 +1823,8 @@ pub fn parse_metadata_json(
             "matrix",
             "populations",
             "provenance",
+            "discarded_variant_pairs",
+            "normalization_audit",
         ],
         "",
     )?;
@@ -1383,6 +1864,45 @@ pub fn parse_metadata_json(
         required_string(population, "populations[].population_id")?;
     }
     required_provenance(object)?;
+    let discarded = object
+        .get("discarded_variant_pairs")
+        .ok_or_else(|| missing("discarded_variant_pairs"))?
+        .as_array()
+        .ok_or_else(|| invalid("discarded_variant_pairs", "una lista"))?;
+    let mut previous = None;
+    for value in discarded {
+        let pair = value
+            .as_object()
+            .ok_or_else(|| invalid("discarded_variant_pairs[]", "un objeto"))?;
+        closed_object(
+            pair,
+            &["population_id", "variant_id"],
+            "discarded_variant_pairs[]",
+        )?;
+        let population_id = pair
+            .get("population_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("discarded_variant_pairs[].population_id", "un PopulationId"))?;
+        PopulationId::parse(population_id, "population_snvs_metadata")
+            .map_err(|_| invalid("discarded_variant_pairs[].population_id", "un PopulationId"))?;
+        let variant_id = pair
+            .get("variant_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid("discarded_variant_pairs[].variant_id", "un VariantId"))?;
+        VariantId::parse(variant_id, "population_snvs_metadata")
+            .map_err(|_| invalid("discarded_variant_pairs[].variant_id", "un VariantId"))?;
+        let key = (population_id, variant_id);
+        if previous.is_some_and(|last| last >= key) {
+            return Err(invalid(
+                "discarded_variant_pairs",
+                "pares población×VariantId ordenados y sin duplicados",
+            ));
+        }
+        previous = Some(key);
+    }
+    if !matches!(object.get("normalization_audit"), Some(Value::Array(_))) {
+        return Err(invalid("normalization_audit", "una lista"));
+    }
     Ok(PopulationSnvsMetadata { document: value })
 }
 
@@ -1630,6 +2150,7 @@ pub fn generate_population_snvs(
                 .collect::<Result<_, _>>()?,
         },
         root_seed,
+        1e-9,
     )
 }
 
@@ -1639,6 +2160,18 @@ pub fn generate_population_snvs_from_reference(
     config: &PopulationSnvsGenerationConfig,
     reference: &Reference,
     root_seed: RootSeed,
+) -> Result<PreparedPopulationSnvs, PopulationSnvsGenerationError> {
+    generate_population_snvs_from_reference_with_tolerance(config, reference, root_seed, 1e-9)
+}
+
+/// Variante del recorrido directo que registra la misma tolerancia efectiva
+/// que se publicará con el resultado. Mantiene la API histórica para los
+/// consumidores que usan la tolerancia por defecto de F2.2.
+pub fn generate_population_snvs_from_reference_with_tolerance(
+    config: &PopulationSnvsGenerationConfig,
+    reference: &Reference,
+    root_seed: RootSeed,
+    normalization_tolerance: f64,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsGenerationError> {
     generate_population_snvs_view(
         config,
@@ -1656,6 +2189,7 @@ pub fn generate_population_snvs_from_reference(
                 .collect(),
         },
         root_seed,
+        normalization_tolerance,
     )
 }
 
@@ -1663,9 +2197,25 @@ fn generate_population_snvs_view(
     config: &PopulationSnvsGenerationConfig,
     reference: GenerationReference,
     root_seed: RootSeed,
+    normalization_tolerance: f64,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsGenerationError> {
     validate_generation_config(config)?;
     validate_generation_regions(config, &reference.sequences)?;
+    let population_ids = config
+        .populations
+        .iter()
+        .map(|population| {
+            PopulationId::parse(&population.population_id, "generated_population_snvs").map_err(
+                |_| {
+                    PopulationSnvsGenerationError::InvalidPopulation(
+                        population.population_id.clone(),
+                    )
+                },
+            )
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?
+        .into_iter()
+        .collect();
     let mut candidates = Vec::<(SequenceId, u64, u8)>::new();
     let mut weights = Vec::new();
     let order = reference
@@ -1813,11 +2363,20 @@ fn generate_population_snvs_view(
                     .cmp(right.population_id().as_str()),
             )
     });
-    Ok(PreparedPopulationSnvs {
+    let mut prepared = PreparedPopulationSnvs {
         rows,
+        population_ids,
         discarded_globally_absent: Vec::new(),
         empty_authorized: false,
-    })
+        normalization_audit: Vec::new(),
+    };
+    let generated_table = parse_canonical_tsv(&canonical_tsv_bytes(&prepared))
+        .map_err(|error| PopulationSnvsGenerationError::Reference(error.to_string()))?;
+    prepared.normalization_audit =
+        normalize_alt_frequencies(&generated_table, normalization_tolerance)
+            .map_err(|error| PopulationSnvsGenerationError::Reference(error.to_string()))?
+            .groups;
+    Ok(prepared)
 }
 
 fn substitution_weights(

@@ -30,7 +30,8 @@ fn simulated_reference_cannot_claim_a_reduced_reference() {
 #[test]
 fn population_snvs_effective_link_is_discriminated_by_mode() {
     let mut reuse = effective_config("simulated", false);
-    reuse["population_snvs"] = json!({"mode":"reuse", "metadata_sha256":"a".repeat(64)});
+    reuse["population_snvs"] =
+        json!({"mode":"reuse", "metadata_sha256":"a".repeat(64), "normalization_audit": []});
     assert_valid("reuse-population-snvs-may-omit-artifact-id", &reuse);
 
     let mut reuse_with_id = reuse.clone();
@@ -38,8 +39,24 @@ fn population_snvs_effective_link_is_discriminated_by_mode() {
     assert_invalid("reuse-population-snvs-rejects-artifact-id", &reuse_with_id);
 
     let mut generated = effective_config("simulated", false);
-    generated["population_snvs"] = json!({"mode":"generated", "metadata_sha256":"a".repeat(64)});
+    generated["population_snvs"] =
+        json!({"mode":"generated", "metadata_sha256":"a".repeat(64), "normalization_audit": []});
     assert_invalid("generated-population-snvs-requires-artifact-id", &generated);
+
+    let mut malformed_audit = reuse.clone();
+    malformed_audit["population_snvs"]["normalization_audit"] = json!([{
+        "population_id": "P1", "contig": "chr1", "position": "0", "ref": "N",
+        "tolerance": 1e-9, "canonical_order": "population_id,contig,position,ref,alt,variant_id,source_id",
+        "sum_algorithm": "neumaier_sum_v1", "original_sum": 0.0, "original_delta": 1.0,
+        "effective_sum": 0.0, "effective_delta": 1.0, "reference_frequency": 1.0,
+        "decision": "reference_remainder", "values": [{
+            "alt": "N", "variant_id": "VAR_BOGUS", "source_id": "", "original": 0.0, "effective": 0.0
+        }]
+    }]);
+    assert_invalid(
+        "population-snvs-audit-rejects-invalid-position-and-alleles",
+        &malformed_audit,
+    );
 }
 
 #[test]

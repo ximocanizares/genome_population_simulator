@@ -41,7 +41,7 @@ fn truncation_unknown_field_and_absent_link_fail_both_validators() {
 fn population_snvs_link_is_discriminated_by_mode_in_rust_and_schema() {
     let mut generated_without_id = complete_manifest();
     generated_without_id["population_snvs"] = json!({
-        "mode": "generated", "metadata_sha256": "a".repeat(64)
+        "mode": "generated", "metadata_sha256": "a".repeat(64), "normalization_audit": []
     });
     assert_rejected(
         "generated-population-snvs-requires-an-artifact",
@@ -61,11 +61,26 @@ fn population_snvs_link_is_discriminated_by_mode_in_rust_and_schema() {
         "population-snvs-metadata"
     ]);
     generated_with_catalog["population_snvs"] = json!({
-        "mode": "generated", "metadata_sha256": "a".repeat(64), "metadata_artifact_id": "population-snvs-metadata"
+        "mode": "generated", "metadata_sha256": "a".repeat(64), "metadata_artifact_id": "population-snvs-metadata", "normalization_audit": []
     });
     assert_accepted(
         "generated-population-snvs-accepts-a-nonempty-metadata-artifact",
         &generated_with_catalog,
+    );
+
+    let mut malformed_audit = generated_with_catalog.clone();
+    malformed_audit["population_snvs"]["normalization_audit"] = json!([{
+        "population_id": "P1", "contig": "chr1", "position": "0", "ref": "N",
+        "tolerance": 1e-9, "canonical_order": "population_id,contig,position,ref,alt,variant_id,source_id",
+        "sum_algorithm": "neumaier_sum_v1", "original_sum": 0.0, "original_delta": 1.0,
+        "effective_sum": 0.0, "effective_delta": 1.0, "reference_frequency": 1.0,
+        "decision": "reference_remainder", "values": [{
+            "alt": "N", "variant_id": "VAR_BOGUS", "source_id": "", "original": 0.0, "effective": 0.0
+        }]
+    }]);
+    assert_rejected(
+        "population-snvs-audit-rejects-invalid-position-and-alleles",
+        &malformed_audit,
     );
 
     let mut reuse_with_id = generated_with_catalog.clone();

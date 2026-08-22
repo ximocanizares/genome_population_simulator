@@ -11,8 +11,8 @@ use crate::identity::{ReferenceId, derive_execution_id};
 use crate::integrity::configuration_digest;
 use crate::population_snvs::{
     PopulationSnvsProvenance, canonical_metadata_document, canonical_tsv_bytes,
-    generate_population_snvs_from_reference, parse_supplied_tsv,
-    prepare_population_snvs_from_reference, validate_reusable_population_snvs,
+    generate_population_snvs_from_reference_with_tolerance, normalization_audit_document,
+    parse_supplied_tsv, prepare_population_snvs_from_reference, validate_reusable_population_snvs,
 };
 use crate::publication::ExecutionWorkspace;
 use crate::reference::Reference;
@@ -339,10 +339,11 @@ fn materialize_population_snvs(
     };
     let prepared = match source {
         crate::application::EffectivePopulationSnvs::Generate { parameters } => {
-            let prepared = generate_population_snvs_from_reference(
+            let prepared = generate_population_snvs_from_reference_with_tolerance(
                 parameters,
                 reference,
                 effective.reproducibility().root_seed(),
+                effective.normalization().tolerance(),
             )
             .map_err(|error| population_snvs_error("population_snvs.generate", error.to_string()))?
             .authorize_empty_matrix(authorizations.allow_empty_snv_matrix)
@@ -375,7 +376,7 @@ fn materialize_population_snvs(
             })?
         }
         crate::application::EffectivePopulationSnvs::Reuse { metadata_path } => {
-            let (_, _, metadata_sha256) = validate_reusable_population_snvs(
+            let (_, _, metadata_sha256, normalization_audit) = validate_reusable_population_snvs(
                 metadata_path,
                 reference,
                 reference_fasta.digest.as_str(),
@@ -389,6 +390,7 @@ fn materialize_population_snvs(
                 mode: "reuse".to_owned(),
                 metadata_sha256,
                 metadata_artifact_id: None,
+                normalization_audit,
             }));
         }
     };
@@ -432,6 +434,7 @@ fn publish_population_snvs(
         mode: provenance.as_str().to_owned(),
         metadata_sha256: metadata.digest.clone(),
         metadata_artifact_id: Some(metadata.id),
+        normalization_audit: normalization_audit_document(prepared),
     })
 }
 

@@ -47,7 +47,7 @@ fn metadata_requires_the_closed_v1_envelope() {
         "reference":{"reference_id":"ref-main","sha256":"abc"},
         "matrix":{"path":"population_snvs.tsv","sha256":"def"},
         "populations":[{"population_id":"POP","sample_size":"unknown"}],
-        "provenance":"supplied"
+        "provenance":"supplied", "discarded_variant_pairs":[], "normalization_audit":[]
     }"#;
     parse_metadata_json(metadata).expect("valid metadata envelope");
 

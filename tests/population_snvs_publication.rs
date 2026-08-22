@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::load_and_validate_config;
-use genome_population_simulator::execution::execute_validated_config;
+use genome_population_simulator::execution::{
+    ExecutionAuthorizations, execute_validated_config, execute_validated_config_with_authorizations,
+};
+use genome_population_simulator::identity::{SequenceId, derive_matrix_variant_id};
 use genome_population_simulator::integrity::identify_file;
 use genome_population_simulator::population_snvs::{
     TSV_HEADER, parse_canonical_tsv, parse_metadata_json, validate_reusable_population_snvs_bytes,
@@ -162,7 +165,7 @@ max_alt_af = 0.9"#,
         .as_str()
         .expect("sha")
         .to_owned();
-    let (_, _, snapshot_metadata_sha) = validate_reusable_population_snvs_with_hooks(
+    let (_, _, snapshot_metadata_sha, _) = validate_reusable_population_snvs_with_hooks(
         &metadata_path,
         &reference,
         &reference_sha,
@@ -201,6 +204,89 @@ max_alt_af = 0.9"#,
     changed_provenance["provenance"] = serde_json::json!("unknown");
     assert!(reject(
         &serde_json::to_vec(&changed_provenance).expect("JSON"),
+        &matrix_original
+    ));
+    let mut changed_audit = original_document.clone();
+    changed_audit["normalization_audit"][0]["original_sum"] = serde_json::json!(0.0);
+    assert!(reject(
+        &serde_json::to_vec(&changed_audit).expect("JSON"),
+        &matrix_original
+    ));
+    let mut bogus_group = original_document.clone();
+    let mut group = bogus_group["normalization_audit"][0].clone();
+    group["population_id"] = serde_json::json!("P999");
+    group["original_sum"] = serde_json::json!(0.0);
+    group["original_delta"] = serde_json::json!(1.0);
+    group["effective_sum"] = serde_json::json!(0.0);
+    group["effective_delta"] = serde_json::json!(1.0);
+    group["reference_frequency"] = serde_json::json!(1.0);
+    for value in group["values"].as_array_mut().expect("values") {
+        value["original"] = serde_json::json!(0.0);
+        value["effective"] = serde_json::json!(0.0);
+    }
+    bogus_group["normalization_audit"]
+        .as_array_mut()
+        .expect("audit")
+        .push(group);
+    assert!(reject(
+        &serde_json::to_vec(&bogus_group).expect("JSON"),
+        &matrix_original
+    ));
+    let mut bogus_zero = original_document.clone();
+    let group = &mut bogus_zero["normalization_audit"][0];
+    let reference_base = group["ref"].as_str().expect("ref").as_bytes()[0];
+    let used_alternates = group["values"]
+        .as_array()
+        .expect("values")
+        .iter()
+        .filter_map(|value| value["alt"].as_str())
+        .collect::<Vec<_>>();
+    let alternate = *b"ACGT"
+        .iter()
+        .find(|base| {
+            **base != reference_base
+                && !used_alternates.contains(&std::str::from_utf8(&[**base]).expect("base"))
+        })
+        .expect("unused alternate");
+    let variant_id = derive_matrix_variant_id(
+        reference.id(),
+        &SequenceId::parse(group["contig"].as_str().expect("contig"), "test").expect("contig"),
+        group["position"]
+            .as_str()
+            .expect("position")
+            .parse()
+            .expect("position"),
+        reference_base,
+        alternate,
+    )
+    .expect("canonical VariantId");
+    group["values"]
+        .as_array_mut()
+        .expect("values")
+        .push(serde_json::json!({
+            "alt": char::from(alternate).to_string(),
+            "variant_id": variant_id.as_str(),
+            "source_id": "bogus-zero",
+            "original": 0.0,
+            "effective": 0.0,
+        }));
+    group["values"]
+        .as_array_mut()
+        .expect("values")
+        .sort_by(|left, right| {
+            (
+                left["alt"].as_str(),
+                left["variant_id"].as_str(),
+                left["source_id"].as_str(),
+            )
+                .cmp(&(
+                    right["alt"].as_str(),
+                    right["variant_id"].as_str(),
+                    right["source_id"].as_str(),
+                ))
+        });
+    assert!(reject(
+        &serde_json::to_vec(&bogus_zero).expect("JSON"),
         &matrix_original
     ));
     let mut changed_populations = original_document.clone();
@@ -265,6 +351,148 @@ max_alt_af = 0.9"#,
             .expect("JSON");
     assert_eq!(manifest["population_snvs"]["mode"], "reuse");
     assert!(manifest["population_snvs"]["metadata_artifact_id"].is_null());
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn discarded_variant_requires_every_declared_population_in_reuse_and_physical_validation() {
+    let root = temporary();
+    fs::create_dir_all(&root).expect("root");
+    let fasta = root.join("reference.fa");
+    fs::write(&fasta, b">chr1\nAC\n").expect("FASTA");
+    let input = root.join("all-zero.tsv");
+    fs::write(
+        &input,
+        "contig\tposition\tref\talt\tpopulation_id\talt_af\tsource_id\nchr1\t1\tA\tC\tP1\t0\tzero-p1\nchr1\t1\tA\tC\tP2\t0\tzero-p2\n",
+    )
+    .expect("all-zero matrix");
+    let config = root.join("supplied.toml");
+    fs::write(
+        &config,
+        format!(
+            r#"config_kind = "general"
+schema_version = "1"
+[population_snvs]
+mode = "supplied"
+input_path = "{}"
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "{}"
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 2
+"#,
+            input.display(),
+            fasta.display()
+        ),
+    )
+    .expect("config");
+    let authorizations = ExecutionAuthorizations {
+        allow_empty_snv_matrix: true,
+    };
+    let published = root.join("published");
+    execute_validated_config_with_authorizations(
+        &load_and_validate_config(&config).expect("effective"),
+        &published,
+        authorizations,
+    )
+    .expect("authorized all-zero publication");
+    let metadata_path = published.join("population_snvs.metadata.json");
+    let mut metadata: serde_json::Value =
+        serde_json::from_slice(&fs::read(&metadata_path).expect("metadata")).expect("JSON");
+    assert_eq!(
+        metadata["populations"]
+            .as_array()
+            .expect("populations")
+            .len(),
+        2
+    );
+    assert_eq!(
+        metadata["discarded_variant_pairs"]
+            .as_array()
+            .expect("pairs")
+            .len(),
+        2
+    );
+    metadata["normalization_audit"]
+        .as_array_mut()
+        .expect("audit")
+        .retain(|group| group["population_id"] != "P2");
+    fs::write(
+        &metadata_path,
+        serde_json::to_vec_pretty(&metadata).expect("bad metadata"),
+    )
+    .expect("write bad metadata");
+    let reuse = root.join("reuse.toml");
+    fs::write(
+        &reuse,
+        format!(
+            r#"config_kind = "general"
+schema_version = "1"
+[population_snvs]
+mode = "reuse"
+metadata_path = "{}"
+[reference]
+kind = "supplied"
+id = "ref-main"
+fasta = "{}"
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 2
+"#,
+            metadata_path.display(),
+            fasta.display()
+        ),
+    )
+    .expect("reuse config");
+    assert!(
+        execute_validated_config_with_authorizations(
+            &load_and_validate_config(&reuse).expect("reuse effective"),
+            &root.join("reused"),
+            authorizations,
+        )
+        .is_err(),
+        "falta el par P2×VariantId descartado"
+    );
+    let effective_path = published.join("effective-config.json");
+    let manifest_path = published.join("manifest.json");
+    let metadata_identity = identify_file(
+        &metadata_path,
+        PathBuf::from("population_snvs.metadata.json"),
+    )
+    .expect("mutated metadata identity");
+    let mut effective: serde_json::Value =
+        serde_json::from_slice(&fs::read(&effective_path).expect("effective")).expect("JSON");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("manifest")).expect("JSON");
+    let audit = metadata["normalization_audit"].clone();
+    for document in [&mut effective, &mut manifest] {
+        document["population_snvs"]["metadata_sha256"] =
+            serde_json::json!(metadata_identity.digest());
+        document["population_snvs"]["normalization_audit"] = audit.clone();
+    }
+    for artifact in manifest["artifacts"].as_array_mut().expect("catalog") {
+        if artifact["id"] == "population-snvs-metadata" {
+            artifact["size_bytes"] = serde_json::json!(metadata_identity.size_bytes());
+            artifact["checksum"]["digest"] = serde_json::json!(metadata_identity.digest());
+        }
+    }
+    let physical_error = validate_published_resources(
+        &published,
+        &effective_path,
+        &serde_json::to_vec(&effective).expect("forged effective"),
+        &manifest_path,
+        &serde_json::to_vec(&manifest).expect("forged manifest"),
+    )
+    .expect_err("el validador físico debe rechazar metadata sin el grupo P2");
+    assert!(
+        physical_error.context()["detail"].contains("pares población"),
+        "el rechazo físico debe proceder de la auditoría de descartes: {}",
+        physical_error.render_human()
+    );
     fs::remove_dir_all(root).expect("cleanup");
 }
 

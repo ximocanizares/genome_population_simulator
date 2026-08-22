@@ -189,6 +189,7 @@ pub struct PopulationSnvsManifestLink {
     pub mode: String,
     pub metadata_sha256: String,
     pub metadata_artifact_id: Option<String>,
+    pub normalization_audit: Value,
 }
 
 pub struct GeneralManifest<'a> {
@@ -265,6 +266,7 @@ pub fn effective_config_document_with_population_snvs(
                 "mode": link.mode,
                 "metadata_sha256": link.metadata_sha256,
                 "metadata_artifact_id": link.metadata_artifact_id,
+                "normalization_audit": link.normalization_audit.clone(),
             })
         }),
     );
@@ -290,6 +292,7 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
             "mode": link.mode,
             "metadata_sha256": link.metadata_sha256,
             "metadata_artifact_id": link.metadata_artifact_id,
+            "normalization_audit": link.normalization_audit.clone(),
         })),
         "authorizations": {"allow_empty_snv_matrix": manifest.authorizations.allow_empty_snv_matrix},
         "output_categories": output_categories(manifest),
@@ -868,23 +871,27 @@ fn validate_physical_population_snvs(
     let matrix_path = root.join(&matrix.path);
     let metadata_bytes = read_verified_artifact_bytes(&metadata_path, metadata, effective_path)?;
     let matrix_bytes = read_verified_artifact_bytes(&matrix_path, matrix, effective_path)?;
-    let (_, provenance, metadata_sha256) = validate_reusable_population_snvs_bytes(
-        &metadata_bytes,
-        &matrix_bytes,
-        reference,
-        &reference_artifact.digest,
-        effective
-            .get("normalization")
-            .and_then(|value| value.get("tolerance"))
-            .and_then(Value::as_f64)
-            .ok_or_else(|| effective_error(effective_path, "normalization.tolerance inválida"))?,
-        allow_empty_snv_matrix,
-    )
-    .map_err(|error| {
-        effective_error(effective_path, format!("par SNV físico inválido: {error}"))
-    })?;
+    let (_, provenance, metadata_sha256, normalization_audit) =
+        validate_reusable_population_snvs_bytes(
+            &metadata_bytes,
+            &matrix_bytes,
+            reference,
+            &reference_artifact.digest,
+            effective
+                .get("normalization")
+                .and_then(|value| value.get("tolerance"))
+                .and_then(Value::as_f64)
+                .ok_or_else(|| {
+                    effective_error(effective_path, "normalization.tolerance inválida")
+                })?,
+            allow_empty_snv_matrix,
+        )
+        .map_err(|error| {
+            effective_error(effective_path, format!("par SNV físico inválido: {error}"))
+        })?;
     if link.get("metadata_sha256").and_then(Value::as_str) != Some(metadata_sha256.as_str())
         || link.get("mode").and_then(Value::as_str) != Some(provenance.as_str())
+        || link.get("normalization_audit") != Some(&normalization_audit)
     {
         return Err(effective_error(
             effective_path,
@@ -1568,7 +1575,12 @@ fn validate_manifest_population_snvs(
     let object = value
         .as_object()
         .ok_or_else(|| manifest_error(path, "population_snvs inválido"))?;
-    const FIELDS: [&str; 3] = ["mode", "metadata_sha256", "metadata_artifact_id"];
+    const FIELDS: [&str; 4] = [
+        "mode",
+        "metadata_sha256",
+        "metadata_artifact_id",
+        "normalization_audit",
+    ];
     validate_closed_object(object, &FIELDS, "population_snvs", path)?;
     let mode = match object.get("mode").and_then(Value::as_str) {
         Some(mode @ ("supplied" | "generated" | "reuse")) => mode,
@@ -1585,6 +1597,11 @@ fn validate_manifest_population_snvs(
             "population_snvs.metadata_sha256 inválido",
         ));
     }
+    validate_serialized_normalization_audit(
+        object.get("normalization_audit"),
+        "population_snvs.normalization_audit inválida",
+    )
+    .map_err(|detail| manifest_error(path, detail))?;
     match (mode, object.get("metadata_artifact_id")) {
         ("reuse", None | Some(Value::Null)) => Ok(None),
         ("supplied" | "generated", Some(Value::String(id))) if !id.is_empty() => {
@@ -1596,6 +1613,160 @@ fn validate_manifest_population_snvs(
             "population_snvs.metadata_artifact_id inválido",
         )),
     }
+}
+
+fn validate_serialized_normalization_audit(
+    value: Option<&Value>,
+    detail: &'static str,
+) -> Result<(), &'static str> {
+    let groups = value.and_then(Value::as_array).ok_or(detail)?;
+    let mut previous_group = None;
+    for group in groups {
+        let group = group.as_object().ok_or(detail)?;
+        const GROUP_FIELDS: [&str; 14] = [
+            "population_id",
+            "contig",
+            "position",
+            "ref",
+            "tolerance",
+            "canonical_order",
+            "sum_algorithm",
+            "original_sum",
+            "original_delta",
+            "effective_sum",
+            "effective_delta",
+            "reference_frequency",
+            "decision",
+            "values",
+        ];
+        if group.len() != GROUP_FIELDS.len()
+            || group
+                .keys()
+                .any(|field| !GROUP_FIELDS.contains(&field.as_str()))
+        {
+            return Err(detail);
+        }
+        let population = group
+            .get("population_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or(detail)?;
+        let contig = group
+            .get("contig")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or(detail)?;
+        let position = group
+            .get("position")
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .ok_or(detail)?;
+        let reference = group
+            .get("ref")
+            .and_then(Value::as_str)
+            .and_then(single_canonical_base)
+            .ok_or(detail)?;
+        if group
+            .get("tolerance")
+            .and_then(Value::as_f64)
+            .filter(|value| value.is_finite() && (0.0..=1e-6).contains(value))
+            .is_none()
+            || group.get("canonical_order").and_then(Value::as_str)
+                != Some("population_id,contig,position,ref,alt,variant_id,source_id")
+            || group.get("sum_algorithm").and_then(Value::as_str) != Some("neumaier_sum_v1")
+            || [
+                "original_sum",
+                "original_delta",
+                "effective_sum",
+                "effective_delta",
+            ]
+            .iter()
+            .any(|field| {
+                group
+                    .get(*field)
+                    .and_then(Value::as_f64)
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                    .is_none()
+            })
+            || group
+                .get("reference_frequency")
+                .and_then(Value::as_f64)
+                .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                .is_none()
+            || !matches!(
+                group.get("decision").and_then(Value::as_str),
+                Some("reference_remainder" | "normalized")
+            )
+        {
+            return Err(detail);
+        }
+        let group_key = (population, contig, position, reference);
+        if previous_group
+            .as_ref()
+            .is_some_and(|last| last >= &group_key)
+        {
+            return Err(detail);
+        }
+        previous_group = Some(group_key);
+        let values = group
+            .get("values")
+            .and_then(Value::as_array)
+            .filter(|values| !values.is_empty())
+            .ok_or(detail)?;
+        let mut previous_value = None;
+        for value in values {
+            let value = value.as_object().ok_or(detail)?;
+            const VALUE_FIELDS: [&str; 5] =
+                ["alt", "variant_id", "source_id", "original", "effective"];
+            if value.len() != VALUE_FIELDS.len()
+                || value
+                    .keys()
+                    .any(|field| !VALUE_FIELDS.contains(&field.as_str()))
+            {
+                return Err(detail);
+            }
+            let alternate = value
+                .get("alt")
+                .and_then(Value::as_str)
+                .and_then(single_canonical_base)
+                .filter(|alternate| *alternate != reference)
+                .ok_or(detail)?;
+            let variant_id = value
+                .get("variant_id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or(detail)?;
+            let source_id = value
+                .get("source_id")
+                .and_then(Value::as_str)
+                .ok_or(detail)?;
+            if ["original", "effective"].iter().any(|field| {
+                value
+                    .get(*field)
+                    .and_then(Value::as_f64)
+                    .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                    .is_none()
+            }) {
+                return Err(detail);
+            }
+            let value_key = (alternate, variant_id, source_id);
+            if previous_value
+                .as_ref()
+                .is_some_and(|last| last >= &value_key)
+            {
+                return Err(detail);
+            }
+            previous_value = Some(value_key);
+        }
+    }
+    Ok(())
+}
+
+fn single_canonical_base(value: &str) -> Option<u8> {
+    (value.len() == 1)
+        .then(|| value.as_bytes()[0])
+        .filter(|base| matches!(base, b'A' | b'C' | b'G' | b'T'))
 }
 
 fn validate_effective_population_snvs(
