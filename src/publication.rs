@@ -588,6 +588,7 @@ mod tests {
             references: &[],
             reduced_references: &[],
             population_snvs: None,
+            authorizations: crate::execution::ExecutionAuthorizations::default(),
             artifacts: &[],
             diagnostics: std::slice::from_ref(&diagnostic),
         };
@@ -690,6 +691,7 @@ mod tests {
             references: &references,
             reduced_references: &[],
             population_snvs: None,
+            authorizations: crate::execution::ExecutionAuthorizations::default(),
             artifacts: &artifacts,
             diagnostics: &[],
         };

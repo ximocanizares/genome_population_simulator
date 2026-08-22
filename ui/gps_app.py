@@ -384,6 +384,10 @@ def _(import_error, preview_error, preview_toml):
 
 @app.cell
 def _(DEFAULT_BINARY, PROJECT_ROOT, authoring_error, mo):
+    allow_empty_snv_matrix_control = mo.ui.checkbox(
+        value=False,
+        label="Autorizar una matriz SNV activa vacía",
+    )
     binary_path_control = mo.ui.text(
         value=str(DEFAULT_BINARY),
         label="Binario Rust",
@@ -406,6 +410,7 @@ def _(DEFAULT_BINARY, PROJECT_ROOT, authoring_error, mo):
         keyboard_shortcut="Ctrl-Shift-V",
     )
     return (
+        allow_empty_snv_matrix_control,
         base_directory_control,
         binary_path_control,
         output_directory_control,
@@ -416,6 +421,7 @@ def _(DEFAULT_BINARY, PROJECT_ROOT, authoring_error, mo):
 @app.cell
 def _(
     ProcessAdapterError,
+    allow_empty_snv_matrix_control,
     authoring_toml,
     base_directory_control,
     binary_path_control,
@@ -435,6 +441,7 @@ def _(
                     _Path(binary_path_control.value),
                     authoring_toml,
                     _Path(base_directory_control.value),
+                    allow_empty_snv_matrix=allow_empty_snv_matrix_control.value,
                 )
         except ProcessAdapterError as error:
             validation_error = str(error)
@@ -455,6 +462,7 @@ def _(authoring_error, mo, validated_session):
 @app.cell
 def _(
     ProcessAdapterError,
+    allow_empty_snv_matrix_control,
     authoring_toml,
     base_directory_control,
     binary_path_control,
@@ -477,6 +485,7 @@ def _(
                     _Path(binary_path_control.value),
                     _Path(base_directory_control.value),
                     _Path(output_directory_control.value),
+                    allow_empty_snv_matrix=allow_empty_snv_matrix_control.value,
                 )
         except ProcessAdapterError as error:
             run_error = str(error)
@@ -485,6 +494,7 @@ def _(
 
 @app.cell
 def _(
+    allow_empty_snv_matrix_control,
     authoring_error,
     authoring_toml,
     base_directory_control,
@@ -584,6 +594,7 @@ def _(
         [
             mo.md("## Poblaciones"),
             population_snvs_mode_control,
+            allow_empty_snv_matrix_control,
             normalization_tolerance_control,
             population_path_control,
             mo.callout(

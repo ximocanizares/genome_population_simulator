@@ -33,6 +33,14 @@ la matriz canónica, realiza el preflight contra la referencia y conserva
 ni alelos por individuo. Por ello Marimo tampoco muestra controles de destino
 SNP antes del primer consumidor que pueda representarlos sin ambigüedad.
 
+F2.2.9 y F2.2.10 conservan el mismo límite observable para indels y la
+composición de eventos pequeños: el núcleo recibe un destino ya identificado,
+pero el TOML general aún no declara individuos, copias ni fases. Marimo no
+anuncia controles para SNP o indels explícitos o aleatorios hasta que F2.3
+publique ese consumidor. La única autorización ejecutable en esta frontera es
+`--allow-empty-snv-matrix`: no altera el TOML, acompaña a `validate` y a `run`,
+y queda registrada en la configuración efectiva y el manifiesto.
+
 `seed`, cuando aparece, contiene 256 bits como 64 hexadecimales minúsculos.
 
 `normalization_tolerance`, cuando aparece, conserva su literal decimal TOML;

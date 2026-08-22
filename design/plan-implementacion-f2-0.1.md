@@ -299,12 +299,15 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: SNP eliminado por deleción, inserciones vecinas,
     solapamientos, entrada incompatible y cadenas cortas con verdad manual.
 
-- ☐ F2.2.11. Exponer matriz y variantes pequeñas en Marimo.
+- ✅ F2.2.11. Exponer matriz y variantes pequeñas en Marimo.
   - Depende de: F2.2.7–F2.2.10.
   - Procede de: REQ-UI-14, DTC-051/079 y ACE-114/116.
   - Cambia: controles de fuente, generación, perfiles, regiones, SNP/indels,
     previsualización y autorización de matriz vacía.
   - Se comprueba con: UI→TOML→Rust equivalente y previsualización coherente.
+  - Frontera: F2.2.8–F2.2.10 aún no publican en TOML identidades de
+    individuo/copia/fase; Marimo expone la matriz común y su autorización
+    ejecutable, no controles de SNP/indels sin destino.
 
 - ☐ F2.2.12. Cerrar integración, oráculos y trazabilidad F2.2.
   - Depende de: F2.2.1–F2.2.11.

@@ -39,12 +39,16 @@ class ValidatedSession:
     binary: Path
     binary_version: str
     base_directory: Path
+    allow_empty_snv_matrix: bool = False
 
-    def matches(self, toml: str, binary: Path, base_directory: Path) -> bool:
+    def matches(
+        self, toml: str, binary: Path, base_directory: Path, allow_empty_snv_matrix: bool = False
+    ) -> bool:
         return (
             self.toml == toml
             and self.binary == binary.resolve()
             and self.base_directory == base_directory.resolve()
+            and self.allow_empty_snv_matrix == allow_empty_snv_matrix
         )
 
 
@@ -69,18 +73,20 @@ def check_binary_version(binary: Path) -> tuple[Path, str]:
     return resolved, SUPPORTED_BINARY_VERSION
 
 
-def validate_toml(binary: Path, toml: str, base_directory: Path) -> tuple[ProcessResult, ValidatedSession | None]:
+def validate_toml(
+    binary: Path, toml: str, base_directory: Path, *, allow_empty_snv_matrix: bool = False
+) -> tuple[ProcessResult, ValidatedSession | None]:
     resolved_binary, version = check_binary_version(binary)
     resolved_base = _base_directory(base_directory)
     result = _invoke(
         resolved_binary,
-        ["validate"],
+        ["validate", *(["--allow-empty-snv-matrix"] if allow_empty_snv_matrix else [])],
         toml,
         resolved_base,
         output_directory=None,
     )
     session = (
-        ValidatedSession(toml, resolved_binary, version, resolved_base)
+        ValidatedSession(toml, resolved_binary, version, resolved_base, allow_empty_snv_matrix)
         if result.succeeded
         else None
     )
@@ -93,8 +99,10 @@ def run_toml(
     binary: Path,
     base_directory: Path,
     output_directory: Path,
+    *,
+    allow_empty_snv_matrix: bool = False,
 ) -> ProcessResult:
-    if not session.matches(toml, binary, base_directory):
+    if not session.matches(toml, binary, base_directory, allow_empty_snv_matrix):
         raise ProcessAdapterError("la configuración cambió después de validar")
     declared_destination = output_directory.expanduser()
     destination = (
@@ -106,7 +114,7 @@ def run_toml(
         raise ProcessAdapterError(f"el destino ya existe: {destination}")
     return _invoke(
         session.binary,
-        ["run"],
+        ["run", *(["--allow-empty-snv-matrix"] if allow_empty_snv_matrix else [])],
         toml,
         session.base_directory,
         output_directory=destination,
@@ -132,7 +140,14 @@ def _invoke(
         ) as temporary:
             temporary.write(toml)
             temporary_path = Path(temporary.name)
-        command = [str(binary), *action, str(temporary_path), "--diagnostics", "json"]
+        command = [
+            str(binary),
+            action[0],
+            str(temporary_path),
+            *action[1:],
+            "--diagnostics",
+            "json",
+        ]
         if output_directory is not None:
             command.extend(["--output", str(output_directory)])
         completed = subprocess.run(

@@ -13,6 +13,7 @@
     "effective_config_artifact_id",
     "references",
     "reference_reductions",
+    "authorizations",
     "output_categories",
     "artifacts",
     "diagnostics"
@@ -48,6 +49,7 @@
         { "$ref": "#/$defs/population_snvs_link" }
       ]
     },
+    "authorizations": { "$ref": "#/$defs/authorizations" },
     "output_categories": { "$ref": "#/$defs/output_categories" },
     "artifacts": {
       "type": "array",
@@ -87,6 +89,7 @@
     }
   ],
   "$defs": {
+    "authorizations": { "type": "object", "additionalProperties": false, "required": ["allow_empty_snv_matrix"], "properties": {"allow_empty_snv_matrix": {"type": "boolean"}}},
     "non_empty_id": { "type": "string", "minLength": 1 },
     "checksum": {
       "type": "object",

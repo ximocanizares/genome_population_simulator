@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use genome_population_simulator::application::load_and_validate_config;
-use genome_population_simulator::execution::execute_validated_config;
+use genome_population_simulator::execution::{
+    ExecutionAuthorizations, execute_validated_config_with_authorizations,
+};
 
 #[derive(Clone, Copy)]
 enum DiagnosticMode {
@@ -22,6 +24,7 @@ struct ParsedArgs {
     path: PathBuf,
     diagnostics: DiagnosticMode,
     output: Option<PathBuf>,
+    authorizations: ExecutionAuthorizations,
 }
 
 fn main() -> ExitCode {
@@ -52,7 +55,14 @@ fn main() -> ExitCode {
                     ),
                 )
             },
-            |destination| execute_validated_config(&effective, destination).map(|_| ()),
+            |destination| {
+                execute_validated_config_with_authorizations(
+                    &effective,
+                    destination,
+                    parsed.authorizations,
+                )
+                .map(|_| ())
+            },
         ),
     }) {
         Ok(()) => ExitCode::SUCCESS,
@@ -90,6 +100,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<ParsedArgs, &'st
     );
     let mut mode = DiagnosticMode::Human;
     let mut output = None;
+    let mut authorizations = ExecutionAuthorizations::default();
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--diagnostics" => {
@@ -102,6 +113,9 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<ParsedArgs, &'st
             "--output" => {
                 output = Some(PathBuf::from(args.next().ok_or("--output exige una ruta")?));
             }
+            "--allow-empty-snv-matrix" => {
+                authorizations.allow_empty_snv_matrix = true;
+            }
             _ => return Err("argumento desconocido"),
         }
     }
@@ -113,9 +127,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<ParsedArgs, &'st
         path,
         diagnostics: mode,
         output,
+        authorizations,
     })
 }
 
 fn usage() -> &'static str {
-    "uso: genome-population-simulator <validate|run> <config.toml> [--diagnostics human|json] [--output <ruta>]"
+    "uso: genome-population-simulator <validate|run> <config.toml> [--diagnostics human|json] [--output <ruta>] [--allow-empty-snv-matrix]"
 }

@@ -3,7 +3,7 @@
   "$id": "effective-config-v1.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["effective_config_kind", "schema_version", "source_path", "ploidy", "normalization", "seed", "reference", "reduced_references"],
+  "required": ["effective_config_kind", "schema_version", "source_path", "ploidy", "normalization", "seed", "reference", "reduced_references", "authorizations"],
   "properties": {
     "effective_config_kind": {"const": "gps_effective_config"},
     "schema_version": {"const": "1"},
@@ -28,6 +28,7 @@
       }
     },
     "reference": {"$ref": "#/$defs/reference"},
+    "authorizations": {"$ref": "#/$defs/authorizations"},
     "population_snvs": {
       "oneOf": [
         {"type": "null"},
@@ -61,6 +62,7 @@
     }
   ],
   "$defs": {
+    "authorizations": {"type": "object", "additionalProperties": false, "required": ["allow_empty_snv_matrix"], "properties": {"allow_empty_snv_matrix": {"type": "boolean"}}},
     "reference": {
       "type": "object",
       "additionalProperties": false,

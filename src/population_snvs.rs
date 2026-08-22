@@ -375,6 +375,21 @@ impl PreparedPopulationSnvs {
     pub const fn empty_authorized(&self) -> bool {
         self.empty_authorized
     }
+
+    /// Exige la misma confirmación explícita para una matriz vacía generada
+    /// que para una matriz suministrada o reutilizada.
+    pub fn authorize_empty_matrix(
+        mut self,
+        allow_empty_matrix: bool,
+    ) -> Result<Self, PopulationSnvsPreparationError> {
+        if self.rows.is_empty() {
+            if !allow_empty_matrix {
+                return Err(PopulationSnvsPreparationError::EmptyActiveMatrixRequiresAuthorization);
+            }
+            self.empty_authorized = true;
+        }
+        Ok(self)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

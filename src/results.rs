@@ -199,6 +199,7 @@ pub struct GeneralManifest<'a> {
     pub references: &'a [ManifestReferenceLink],
     pub reduced_references: &'a [ManifestReductionLink],
     pub population_snvs: Option<&'a PopulationSnvsManifestLink>,
+    pub authorizations: crate::execution::ExecutionAuthorizations,
     pub artifacts: &'a [ArtifactRecord],
     pub diagnostics: &'a [Diagnostic],
 }
@@ -241,6 +242,7 @@ pub fn effective_config_document_with_reductions(
 
 pub fn effective_config_document_with_population_snvs(
     config: &EffectiveConfig,
+    authorizations: crate::execution::ExecutionAuthorizations,
     output: ReferenceOutput<'_>,
     reductions: &[ReducedReferenceOutput<'_>],
     population_snvs: Option<&PopulationSnvsManifestLink>,
@@ -252,6 +254,10 @@ pub fn effective_config_document_with_population_snvs(
             "effective_config_document_is_not_object",
         )
     })?;
+    object.insert(
+        "authorizations".to_owned(),
+        json!({"allow_empty_snv_matrix": authorizations.allow_empty_snv_matrix}),
+    );
     object.insert(
         "population_snvs".to_owned(),
         population_snvs.map_or(Value::Null, |link| {
@@ -285,6 +291,7 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
             "metadata_sha256": link.metadata_sha256,
             "metadata_artifact_id": link.metadata_artifact_id,
         })),
+        "authorizations": {"allow_empty_snv_matrix": manifest.authorizations.allow_empty_snv_matrix},
         "output_categories": output_categories(manifest),
         "artifacts": manifest.artifacts.iter().map(ArtifactRecord::to_json).collect::<Vec<_>>(),
         "diagnostics": manifest.diagnostics.iter().map(|diagnostic| json!({
@@ -465,7 +472,7 @@ pub fn validate_effective_config_against_manifest_bytes(
     let object = document
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "la raíz no es un objeto"))?;
-    const FIELDS: [&str; 9] = [
+    const FIELDS: [&str; 10] = [
         "effective_config_kind",
         "schema_version",
         "source_path",
@@ -474,6 +481,7 @@ pub fn validate_effective_config_against_manifest_bytes(
         "seed",
         "reference",
         "population_snvs",
+        "authorizations",
         "reduced_references",
     ];
     validate_effective_closed_object(object, &FIELDS, "effective-config.json", effective_path)?;
@@ -517,6 +525,7 @@ pub fn validate_effective_config_against_manifest_bytes(
     }
     let mut effective_references = BTreeMap::from([(reference.0.clone(), reference.1.clone())]);
     validate_effective_population_snvs(object, manifest, &catalog, effective_path, manifest_path)?;
+    validate_effective_authorizations(object, manifest, effective_path, manifest_path)?;
 
     let manifest_reductions = required_array(manifest, "reference_reductions", manifest_path)?
         .iter()
@@ -664,12 +673,18 @@ pub fn validate_published_resources(
     let reference_value = effective_object(effective, "reference", effective_path)?;
     let source_reference =
         read_physical_reference(root, reference_value, &artifact_paths, effective_path)?;
+    let allow_empty_snv_matrix = effective
+        .get("authorizations")
+        .and_then(|value| value.get("allow_empty_snv_matrix"))
+        .and_then(Value::as_bool)
+        .ok_or_else(|| effective_error(effective_path, "authorizations inválido"))?;
     validate_physical_population_snvs(
         root,
         effective,
         &artifacts,
         &source_reference,
         effective_path,
+        allow_empty_snv_matrix,
     )?;
     if reference_value.get("source").and_then(Value::as_str) == Some("simulated") {
         validate_generated_reference(
@@ -821,6 +836,7 @@ fn validate_physical_population_snvs(
     artifacts: &[ArtifactRecord],
     reference: &Reference,
     effective_path: &Path,
+    allow_empty_snv_matrix: bool,
 ) -> Result<(), Diagnostic> {
     let Some(link) = effective.get("population_snvs").and_then(Value::as_object) else {
         return Ok(());
@@ -862,7 +878,7 @@ fn validate_physical_population_snvs(
             .and_then(|value| value.get("tolerance"))
             .and_then(Value::as_f64)
             .ok_or_else(|| effective_error(effective_path, "normalization.tolerance inválida"))?,
-        false,
+        allow_empty_snv_matrix,
     )
     .map_err(|error| {
         effective_error(effective_path, format!("par SNV físico inválido: {error}"))
@@ -1324,7 +1340,7 @@ pub(crate) fn parse_general_manifest_bytes(
     let object = document
         .as_object()
         .ok_or_else(|| manifest_error(path, "la raíz no es un objeto"))?;
-    const FIELDS: [&str; 12] = [
+    const FIELDS: [&str; 13] = [
         "manifest_kind",
         "schema_version",
         "execution_id",
@@ -1334,6 +1350,7 @@ pub(crate) fn parse_general_manifest_bytes(
         "references",
         "reference_reductions",
         "population_snvs",
+        "authorizations",
         "output_categories",
         "artifacts",
         "diagnostics",
@@ -1389,6 +1406,7 @@ pub(crate) fn parse_general_manifest_bytes(
     )?;
     let population_snvs =
         validate_manifest_population_snvs(object.get("population_snvs"), &catalog, path)?;
+    validate_manifest_authorizations(object.get("authorizations"), path)?;
     if let Some(id) = population_snvs.as_deref() {
         let declared = object
             .get("population_snvs")
@@ -1607,6 +1625,41 @@ fn validate_effective_population_snvs(
             effective_path,
             "population_snvs publicado requiere metadata_artifact_id",
         ));
+    }
+    Ok(())
+}
+
+fn validate_effective_authorizations(
+    effective: &serde_json::Map<String, Value>,
+    manifest: &serde_json::Map<String, Value>,
+    effective_path: &Path,
+    manifest_path: &Path,
+) -> Result<(), Diagnostic> {
+    let effective_value = effective
+        .get("authorizations")
+        .ok_or_else(|| effective_error(effective_path, "falta authorizations"))?;
+    let manifest_value = manifest
+        .get("authorizations")
+        .ok_or_else(|| manifest_error(manifest_path, "falta authorizations"))?;
+    if effective_value != manifest_value {
+        return Err(effective_error(
+            effective_path,
+            "authorizations no coincide con el manifiesto",
+        ));
+    }
+    validate_authorizations_value(effective_value)
+        .map_err(|detail| effective_error(effective_path, detail))
+}
+
+fn validate_manifest_authorizations(value: Option<&Value>, path: &Path) -> Result<(), Diagnostic> {
+    let value = value.ok_or_else(|| manifest_error(path, "falta authorizations"))?;
+    validate_authorizations_value(value).map_err(|detail| manifest_error(path, detail))
+}
+
+fn validate_authorizations_value(value: &Value) -> Result<(), &'static str> {
+    let object = value.as_object().ok_or("authorizations inválido")?;
+    if object.len() != 1 || !matches!(object.get("allow_empty_snv_matrix"), Some(Value::Bool(_))) {
+        return Err("authorizations inválido");
     }
     Ok(())
 }

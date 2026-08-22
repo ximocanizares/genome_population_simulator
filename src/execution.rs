@@ -45,13 +45,32 @@ pub enum ExecutionOutcome {
     },
 }
 
+/// Confirmaciones explícitas de la invocación, separadas del TOML autorado.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ExecutionAuthorizations {
+    pub allow_empty_snv_matrix: bool,
+}
+
 pub fn execute_validated_config(
     effective: &EffectiveConfig,
     destination: &Path,
 ) -> Result<ExecutionOutcome, Diagnostic> {
+    execute_validated_config_with_authorizations(
+        effective,
+        destination,
+        ExecutionAuthorizations::default(),
+    )
+}
+
+pub fn execute_validated_config_with_authorizations(
+    effective: &EffectiveConfig,
+    destination: &Path,
+    authorizations: ExecutionAuthorizations,
+) -> Result<ExecutionOutcome, Diagnostic> {
     execute_validated_config_with_effective_document(
         effective,
         destination,
+        authorizations,
         |_| Ok(()),
         std::convert::identity,
         |_| Ok(()),
@@ -61,6 +80,7 @@ pub fn execute_validated_config(
 fn execute_validated_config_with_effective_document(
     effective: &EffectiveConfig,
     destination: &Path,
+    authorizations: ExecutionAuthorizations,
     after_prepare_reference: impl FnOnce(&mut PreparedReference) -> Result<(), Diagnostic>,
     transform_effective: impl FnOnce(serde_json::Value) -> serde_json::Value,
     before_manifest: impl FnOnce(&mut ExecutionWorkspace) -> Result<(), Diagnostic>,
@@ -105,6 +125,7 @@ fn execute_validated_config_with_effective_document(
         )?;
         population_snvs = materialize_population_snvs(
             effective,
+            authorizations,
             prepared_reference.reference(),
             source_artifact,
             &mut workspace,
@@ -203,6 +224,7 @@ fn execute_validated_config_with_effective_document(
         let effective_document =
             transform_effective(effective_config_document_with_population_snvs(
                 effective,
+                authorizations,
                 reference_output,
                 &reduction_outputs,
                 population_snvs.as_ref(),
@@ -224,6 +246,7 @@ fn execute_validated_config_with_effective_document(
             references: &manifest_references,
             reduced_references: &manifest_reductions,
             population_snvs: population_snvs.as_ref(),
+            authorizations,
             artifacts: &artifacts,
             diagnostics: &[],
         };
@@ -254,6 +277,7 @@ fn execute_validated_config_with_effective_document(
                 &mut workspace,
                 execution_id.as_str(),
                 effective,
+                authorizations,
                 &manifest_reductions,
                 &cause,
             )?;
@@ -267,6 +291,7 @@ fn publish_controlled_failure(
     workspace: &mut ExecutionWorkspace,
     execution_id: &str,
     effective: &EffectiveConfig,
+    authorizations: ExecutionAuthorizations,
     reductions: &[ManifestReductionLink],
     cause: &Diagnostic,
 ) -> Result<(), Diagnostic> {
@@ -295,6 +320,7 @@ fn publish_controlled_failure(
         references: &[],
         reduced_references: reductions,
         population_snvs: None,
+        authorizations,
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(cause),
     };
@@ -303,6 +329,7 @@ fn publish_controlled_failure(
 
 fn materialize_population_snvs(
     effective: &EffectiveConfig,
+    authorizations: ExecutionAuthorizations,
     reference: &Reference,
     reference_fasta: &ArtifactRecord,
     workspace: &mut ExecutionWorkspace,
@@ -317,6 +344,8 @@ fn materialize_population_snvs(
                 reference,
                 effective.reproducibility().root_seed(),
             )
+            .map_err(|error| population_snvs_error("population_snvs.generate", error.to_string()))?
+            .authorize_empty_matrix(authorizations.allow_empty_snv_matrix)
             .map_err(|error| {
                 population_snvs_error("population_snvs.generate", error.to_string())
             })?;
@@ -339,7 +368,7 @@ fn materialize_population_snvs(
                 &table,
                 reference,
                 effective.normalization().tolerance(),
-                false,
+                authorizations.allow_empty_snv_matrix,
             )
             .map_err(|error| {
                 population_snvs_error("population_snvs.input_path", error.to_string())
@@ -351,7 +380,7 @@ fn materialize_population_snvs(
                 reference,
                 reference_fasta.digest.as_str(),
                 effective.normalization().tolerance(),
-                false,
+                authorizations.allow_empty_snv_matrix,
             )
             .map_err(|error| {
                 population_snvs_error("population_snvs.metadata_path", error.to_string())
@@ -855,6 +884,7 @@ mod tests {
         let error = execute_validated_config_with_effective_document(
             &effective,
             &destination,
+            ExecutionAuthorizations::default(),
             |_| Ok(()),
             |mut document| {
                 document["effective_config_kind"] = json!("unknown");
@@ -916,6 +946,7 @@ mod tests {
         let error = execute_validated_config_with_effective_document(
             &effective,
             &destination,
+            ExecutionAuthorizations::default(),
             |_| Ok(()),
             std::convert::identity,
             |workspace| {
@@ -1011,6 +1042,7 @@ mod tests {
         execute_validated_config_with_effective_document(
             &effective,
             &destination,
+            ExecutionAuthorizations::default(),
             |prepared| {
                 let PreparedReference::Supplied(supplied) = prepared else {
                     return Err(internal("test_stale_origin", "expected supplied reference"));
