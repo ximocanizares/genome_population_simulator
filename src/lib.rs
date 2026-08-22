@@ -14,6 +14,7 @@ pub mod exact_decimal;
 pub mod execution;
 pub mod haplotype;
 pub mod identity;
+pub mod indel_application;
 pub mod integrity;
 pub mod materialization;
 pub mod population_snvs;

@@ -279,6 +279,70 @@ impl Segment {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SegmentChain {
     segments: Arc<[Segment]>,
+    indel_state: Option<Arc<CurrentIndelState>>,
+}
+
+/// Edición pequeña aceptada en las coordenadas de la secuencia vigente.
+///
+/// Estas coordenadas no se convierten en coordenadas de referencia: después de
+/// una inserción o deleción esa correspondencia puede no existir. El historial
+/// conserva por separado el evento que la estableció y los fragmentos mantienen
+/// la reconstrucción perezosa desde la fuente o desde los bytes insertados.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CurrentIndelEvent {
+    Insertion {
+        event_id: EventId,
+        point: u64,
+        bases: Arc<[u8]>,
+    },
+    Deletion {
+        event_id: EventId,
+        start: u64,
+        end: u64,
+    },
+}
+
+impl CurrentIndelEvent {
+    #[must_use]
+    pub const fn event_id(&self) -> &EventId {
+        match self {
+            Self::Insertion { event_id, .. } | Self::Deletion { event_id, .. } => event_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum CurrentIndelPiece {
+    Source(GenomicInterval),
+    Inserted(CurrentInsertedPiece),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CurrentInsertedPiece {
+    bases: Arc<[u8]>,
+    provenance: ModificationProvenance,
+}
+
+impl CurrentInsertedPiece {
+    #[must_use]
+    pub(crate) const fn bases(&self) -> &Arc<[u8]> {
+        &self.bases
+    }
+}
+
+impl CurrentIndelPiece {
+    fn len(&self) -> u64 {
+        match self {
+            Self::Source(source) => source.len(),
+            Self::Inserted(inserted) => u64::try_from(inserted.bases.len()).unwrap_or(u64::MAX),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CurrentIndelState {
+    pieces: Arc<[CurrentIndelPiece]>,
+    events: Arc<[CurrentIndelEvent]>,
 }
 
 impl SegmentChain {
@@ -290,6 +354,7 @@ impl SegmentChain {
                 source,
                 modifications: Vec::new(),
             }]),
+            indel_state: None,
         }
     }
 
@@ -308,12 +373,16 @@ impl SegmentChain {
         }
         Ok(Self {
             segments: Arc::from(segments),
+            indel_state: None,
         })
     }
 
     /// Devuelve una nueva cadena con un SNP insertado en el único segmento de
     /// fuente que contiene su posición. La cadena original permanece intacta.
     pub fn with_snp(&self, snp: SnpModification) -> Result<Self, SegmentError> {
+        if self.indel_state.is_some() {
+            return Err(SegmentError::SmallIndelCompositionDeferred);
+        }
         let position = snp.position().offset();
         let matching = self
             .segments
@@ -362,6 +431,144 @@ impl SegmentChain {
         modifications.insert(insert_at, SmallModification::Snp(snp));
         segments[index] = Segment::new(segment.source().clone(), modifications)?;
         Self::new(segments)
+    }
+
+    /// Inserta bases canónicas en un punto interno de la secuencia vigente.
+    ///
+    /// La cadena mantiene fragmentos de fuente y de inserción, por lo que una
+    /// inserción posterior puede anclarse dentro de bases que no pertenecen a
+    /// la referencia. La composición con SNP se resuelve deliberadamente en
+    /// F2.2.10 y se rechaza aquí.
+    pub(crate) fn with_current_insertion(
+        &self,
+        point: u64,
+        bases: Arc<[u8]>,
+        provenance: ModificationProvenance,
+    ) -> Result<Self, SegmentError> {
+        if bases.is_empty() {
+            return Err(SegmentError::EmptyInsertion);
+        }
+        if bases
+            .iter()
+            .any(|base| !matches!(*base, b'A' | b'C' | b'G' | b'T'))
+        {
+            return Err(SegmentError::InvalidInsertedBase {
+                base: *bases
+                    .iter()
+                    .find(|base| !matches!(**base, b'A' | b'C' | b'G' | b'T'))
+                    .expect("a non-canonical base was found"),
+            });
+        }
+        let state = self.current_indel_state()?;
+        let length = piece_length(&state.pieces)?;
+        if point == 0 || point >= length {
+            return Err(SegmentError::CurrentInsertionMustBeInternal { point, length });
+        }
+        let mut pieces = split_pieces_at(&state.pieces, point)?;
+        let insertion_index = pieces
+            .iter()
+            .scan(0_u64, |cursor, piece| {
+                let here = *cursor;
+                *cursor = cursor.checked_add(piece.len())?;
+                Some((here, *cursor))
+            })
+            .position(|(_, end)| end == point)
+            .ok_or(SegmentError::CurrentCoordinateMismatch)?
+            .checked_add(1)
+            .ok_or(SegmentError::ArithmeticOverflow)?;
+        pieces.insert(
+            insertion_index,
+            CurrentIndelPiece::Inserted(CurrentInsertedPiece {
+                bases: bases.clone(),
+                provenance: provenance.clone(),
+            }),
+        );
+        let mut events = state.events.to_vec();
+        events.push(CurrentIndelEvent::Insertion {
+            event_id: provenance.event_id().clone(),
+            point,
+            bases,
+        });
+        Ok(Self {
+            segments: self.segments.clone(),
+            indel_state: Some(Arc::new(CurrentIndelState {
+                pieces: Arc::from(pieces),
+                events: Arc::from(events),
+            })),
+        })
+    }
+
+    /// Elimina un intervalo interno de la secuencia vigente sin aplanarla.
+    pub(crate) fn with_current_deletion(
+        &self,
+        start: u64,
+        end: u64,
+        provenance: ModificationProvenance,
+    ) -> Result<Self, SegmentError> {
+        let state = self.current_indel_state()?;
+        let length = piece_length(&state.pieces)?;
+        if start == 0 || start >= end || end >= length {
+            return Err(SegmentError::CurrentDeletionMustBeInternal { start, end, length });
+        }
+        let split = split_pieces_at(&state.pieces, start)?;
+        let split = split_pieces_at(&split, end)?;
+        let mut cursor = 0_u64;
+        let mut pieces = Vec::with_capacity(split.len());
+        for piece in split {
+            let next = cursor
+                .checked_add(piece.len())
+                .ok_or(SegmentError::ArithmeticOverflow)?;
+            if next <= start || cursor >= end {
+                pieces.push(piece);
+            }
+            cursor = next;
+        }
+        let mut events = state.events.to_vec();
+        events.push(CurrentIndelEvent::Deletion {
+            event_id: provenance.event_id().clone(),
+            start,
+            end,
+        });
+        Ok(Self {
+            segments: self.segments.clone(),
+            indel_state: Some(Arc::new(CurrentIndelState {
+                pieces: Arc::from(pieces),
+                events: Arc::from(events),
+            })),
+        })
+    }
+
+    fn current_indel_state(&self) -> Result<CurrentIndelState, SegmentError> {
+        if let Some(state) = &self.indel_state {
+            return Ok((**state).clone());
+        }
+        if self
+            .segments
+            .iter()
+            .any(|segment| !segment.modifications().is_empty())
+        {
+            return Err(SegmentError::SmallIndelCompositionDeferred);
+        }
+        Ok(CurrentIndelState {
+            pieces: Arc::from(
+                self.segments
+                    .iter()
+                    .map(|segment| CurrentIndelPiece::Source(segment.source().clone()))
+                    .collect::<Vec<_>>(),
+            ),
+            events: Arc::from(Vec::<CurrentIndelEvent>::new()),
+        })
+    }
+
+    #[must_use]
+    pub fn current_indel_events(&self) -> &[CurrentIndelEvent] {
+        self.indel_state
+            .as_ref()
+            .map_or(&[], |state| state.events.as_ref())
+    }
+
+    pub(crate) fn current_indel_pieces(&self) -> Option<&[CurrentIndelPiece]> {
+        self.indel_state.as_ref().map(|state| state.pieces.as_ref())
     }
 
     #[must_use]
@@ -477,6 +684,86 @@ pub enum SegmentError {
     AmbiguousSnpPosition,
     SnpPositionAlreadyModified,
     SnpPositionCoveredByDeletion,
+    SmallIndelCompositionDeferred,
+    CurrentInsertionMustBeInternal { point: u64, length: u64 },
+    CurrentDeletionMustBeInternal { start: u64, end: u64, length: u64 },
+    CurrentCoordinateMismatch,
+    ArithmeticOverflow,
+}
+
+fn piece_length(pieces: &[CurrentIndelPiece]) -> Result<u64, SegmentError> {
+    pieces.iter().try_fold(0_u64, |total, piece| {
+        total
+            .checked_add(piece.len())
+            .ok_or(SegmentError::ArithmeticOverflow)
+    })
+}
+
+fn split_pieces_at(
+    pieces: &[CurrentIndelPiece],
+    point: u64,
+) -> Result<Vec<CurrentIndelPiece>, SegmentError> {
+    let length = piece_length(pieces)?;
+    if point > length {
+        return Err(SegmentError::CurrentCoordinateMismatch);
+    }
+    let mut result = Vec::with_capacity(pieces.len() + 1);
+    let mut cursor = 0_u64;
+    for piece in pieces {
+        let next = cursor
+            .checked_add(piece.len())
+            .ok_or(SegmentError::ArithmeticOverflow)?;
+        if cursor < point && point < next {
+            let left_len = point - cursor;
+            let right_len = next - point;
+            match piece {
+                CurrentIndelPiece::Source(source) => {
+                    result.push(CurrentIndelPiece::Source(
+                        GenomicInterval::new(
+                            source.reference_id().clone(),
+                            source.sequence_id().clone(),
+                            source.start(),
+                            source
+                                .start()
+                                .checked_add(left_len)
+                                .ok_or(SegmentError::ArithmeticOverflow)?,
+                            source.sequence_length(),
+                        )
+                        .map_err(|_| SegmentError::CurrentCoordinateMismatch)?,
+                    ));
+                    result.push(CurrentIndelPiece::Source(
+                        GenomicInterval::new(
+                            source.reference_id().clone(),
+                            source.sequence_id().clone(),
+                            source
+                                .end()
+                                .checked_sub(right_len)
+                                .ok_or(SegmentError::ArithmeticOverflow)?,
+                            source.end(),
+                            source.sequence_length(),
+                        )
+                        .map_err(|_| SegmentError::CurrentCoordinateMismatch)?,
+                    ));
+                }
+                CurrentIndelPiece::Inserted(inserted) => {
+                    let left =
+                        usize::try_from(left_len).map_err(|_| SegmentError::ArithmeticOverflow)?;
+                    result.push(CurrentIndelPiece::Inserted(CurrentInsertedPiece {
+                        bases: Arc::from(&inserted.bases[..left]),
+                        provenance: inserted.provenance.clone(),
+                    }));
+                    result.push(CurrentIndelPiece::Inserted(CurrentInsertedPiece {
+                        bases: Arc::from(&inserted.bases[left..]),
+                        provenance: inserted.provenance.clone(),
+                    }));
+                }
+            }
+        } else {
+            result.push(piece.clone());
+        }
+        cursor = next;
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

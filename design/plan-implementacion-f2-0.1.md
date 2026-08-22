@@ -276,13 +276,20 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
     observable pertenece a F2.3, que crea dichas identidades.
   - Se comprueba con: REF/ALT, regiones, conflictos, procedencia y matriz común.
 
-- ☐ F2.2.9. Aplicar inserciones y deleciones pequeñas.
+- ✅ F2.2.9. Aplicar inserciones y deleciones pequeñas.
   - Depende de: F2.1.3–F2.1.4 y F2.2.3.
   - Procede de: DTC-059 y DTC-075; REQ-IND-38/40/41 y REQ-REC-24.
   - Cambia: longitudes exactas, oportunidades sobre estado vigente, contenido
     A/C/G/T y aplicación con anclas/bases flanqueantes.
   - Se comprueba con: longitudes 1, 2 y umbral−1; terminales rechazados,
     reenumeración dinámica, `N`, agotamiento y tasa cero.
+  - Decisión local aprobada: el núcleo aplica primero inserciones y después
+    deleciones, ambas en orden canónico dinámico sobre el estado vigente. Amplía
+    la cadena persistente con fragmentos de fuente e inserción para conservar
+    anclas dentro de contenido insertado, deleciones posteriores y procedencia.
+    La composición con SNP y los conflictos globales siguen siendo F2.2.10;
+    no se expone aún TOML/esquema/Marimo porque F2.2.11 es su primer consumidor
+    observable.
 
 - ☐ F2.2.10. Componer eventos pequeños y cerrar diagnósticos.
   - Depende de: F2.2.8–F2.2.9.
