@@ -117,6 +117,18 @@ def _(BASES, imported_form, mo):
         label="Ruta de metadatos JSON de matriz SNV",
         full_width=True,
     )
+    population_snvs_locus_count_control = mo.ui.number(
+        value=((selected_population_snvs.generate or {}).get("locus_count", 10) if selected_population_snvs else 10), start=0, step=1, label="Loci candidatos exactos"
+    )
+    generate = (selected_population_snvs.generate or {}) if selected_population_snvs else {}
+    population_snvs_count_mode_control = mo.ui.dropdown(options=["exact", "poisson"], value=generate.get("count_mode", "exact"), label="Modo de recuento")
+    population_snvs_poisson_parameter_control = mo.ui.dropdown(options=["mean_loci", "mean_density_per_base"], value=("mean_density_per_base" if "mean_density_per_base" in generate else "mean_loci"), label="Parámetro Poisson")
+    population_snvs_mean_loci_control = mo.ui.text(value=str(generate.get("mean_loci", "10")), label="Media Poisson de loci")
+    population_snvs_density_control = mo.ui.text(value=str(generate.get("mean_density_per_base", "0.01")), label="Densidad media por base")
+    population_snvs_spatial_mode_control = mo.ui.dropdown(options=["uniform", "weighted_regions"], value=generate.get("spatial_mode", "uniform"), label="Espacio de loci")
+    population_snvs_outside_weight_control = mo.ui.text(value=str(generate.get("outside_weight", "1")), label="Peso fuera de regiones")
+    population_snvs_regions_editor = mo.ui.data_editor([{"order": index, **row} for index, row in enumerate(generate.get("regions", [{"contig": "", "start": 1, "end": 1, "weight": 1.0}]), start=1)], label="Regiones ponderadas (fila vacía se omite)", pagination=False)
+    population_snvs_populations_editor = mo.ui.data_editor([{"order": index, **row} for index, row in enumerate(generate.get("populations", [{"population_id": "population-1", "frequency_model": "uniform", "min_alt_af": 0.01, "max_alt_af": 0.99}]), start=1)], label="Poblaciones y frecuencias", pagination=False)
     reference_kind_control = mo.ui.dropdown(
         options=["simulated", "supplied"],
         value=imported_form.reference.kind,
@@ -189,6 +201,15 @@ def _(BASES, imported_form, mo):
         population_snvs_input_path_control,
         population_snvs_metadata_path_control,
         population_snvs_mode_control,
+        population_snvs_locus_count_control,
+        population_snvs_count_mode_control,
+        population_snvs_poisson_parameter_control,
+        population_snvs_mean_loci_control,
+        population_snvs_density_control,
+        population_snvs_spatial_mode_control,
+        population_snvs_outside_weight_control,
+        population_snvs_regions_editor,
+        population_snvs_populations_editor,
         sequence_editor,
     )
 
@@ -214,12 +235,53 @@ def _(
     population_snvs_input_path_control,
     population_snvs_metadata_path_control,
     population_snvs_mode_control,
+    population_snvs_locus_count_control,
+    population_snvs_count_mode_control,
+    population_snvs_poisson_parameter_control,
+    population_snvs_mean_loci_control,
+    population_snvs_density_control,
+    population_snvs_spatial_mode_control,
+    population_snvs_outside_weight_control,
+    population_snvs_regions_editor,
+    population_snvs_populations_editor,
     seed_control,
     sequence_editor,
     ordered_editor_rows,
 ):
     preview_error = None
     preview_toml = ""
+    def build_population_snvs_generate():
+        count_mode = str(population_snvs_count_mode_control.value)
+        generated = {
+            "count_mode": count_mode,
+            "spatial_mode": str(population_snvs_spatial_mode_control.value),
+            "substitution_profile": "uniform_snv12_v1",
+            "populations": [
+                {
+                    "population_id": str(row["population_id"]),
+                    "frequency_model": str(row["frequency_model"]),
+                    "min_alt_af": float(row["min_alt_af"]),
+                    "max_alt_af": float(row["max_alt_af"]),
+                }
+                for row in ordered_editor_rows(population_snvs_populations_editor.value, "population_snvs.generate.populations")
+                if str(row["population_id"]).strip()
+            ],
+        }
+        if count_mode == "exact":
+            generated["locus_count"] = editor_integer(population_snvs_locus_count_control.value, "population_snvs.generate.locus_count")
+        else:
+            if str(population_snvs_poisson_parameter_control.value) == "mean_loci":
+                generated["mean_loci"] = float(population_snvs_mean_loci_control.value)
+            else:
+                generated["mean_density_per_base"] = float(population_snvs_density_control.value)
+        if generated["spatial_mode"] == "weighted_regions":
+            generated["outside_weight"] = float(population_snvs_outside_weight_control.value)
+            generated["regions"] = [
+                {"contig": str(row["contig"]), "start": editor_integer(row["start"], "population_snvs.generate.regions.start"), "end": editor_integer(row["end"], "population_snvs.generate.regions.end"), "weight": float(row["weight"])}
+                for row in ordered_editor_rows(population_snvs_regions_editor.value, "population_snvs.generate.regions")
+                if str(row["contig"]).strip()
+            ]
+        return generated
     try:
         ordered_sequences = ordered_editor_rows(
             sequence_editor.value, "reference.sequences"
@@ -265,6 +327,7 @@ def _(
                     if selected_population_mode == "reuse"
                     else None
                 ),
+                generate=(build_population_snvs_generate() if selected_population_mode == "generate" else None),
             )
         )
         edited_form = GeneralForm(
@@ -425,6 +488,15 @@ def _(
     population_snvs_input_path_control,
     population_snvs_metadata_path_control,
     population_snvs_mode_control,
+    population_snvs_locus_count_control,
+    population_snvs_count_mode_control,
+    population_snvs_poisson_parameter_control,
+    population_snvs_mean_loci_control,
+    population_snvs_density_control,
+    population_snvs_spatial_mode_control,
+    population_snvs_outside_weight_control,
+    population_snvs_regions_editor,
+    population_snvs_populations_editor,
     sequence_editor,
     validate_button,
     validation_error,
@@ -468,10 +540,17 @@ def _(
         else (
             population_snvs_metadata_path_control
             if population_panel_mode == "reuse"
-            else mo.callout(
-                "La generación de parámetros se incorporará con su consumidor F2.2.5.",
-                kind="info",
-            )
+            else mo.vstack([
+                population_snvs_count_mode_control,
+                population_snvs_poisson_parameter_control,
+                population_snvs_locus_count_control,
+                population_snvs_mean_loci_control,
+                population_snvs_density_control,
+                population_snvs_spatial_mode_control,
+                population_snvs_outside_weight_control,
+                population_snvs_regions_editor,
+                population_snvs_populations_editor,
+            ])
             if population_panel_mode == "generate"
             else mo.callout("No se ha seleccionado una matriz SNV.", kind="neutral")
         )

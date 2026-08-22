@@ -210,11 +210,44 @@ pub struct DeclaredReducedReference {
 ///
 /// Solo describe la frontera de autoría. La preparación, la reutilización
 /// verificable y los parámetros de generación tienen sus propios pasos F2.2.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum DeclaredPopulationSnvs {
-    Supplied { input_path: Located<String> },
-    Reuse { metadata_path: Located<String> },
-    Generate,
+    Supplied {
+        input_path: Located<String>,
+    },
+    Reuse {
+        metadata_path: Located<String>,
+    },
+    Generate {
+        parameters: Box<DeclaredPopulationSnvsGeneration>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredPopulationSnvsGeneration {
+    pub count_mode: Located<String>,
+    pub locus_count: Option<Located<u64>>,
+    pub mean_loci: Option<DeclaredNumber>,
+    pub mean_density_per_base: Option<DeclaredNumber>,
+    pub spatial_mode: Located<String>,
+    pub substitution_profile: Located<String>,
+    pub outside_weight: Option<DeclaredNumber>,
+    pub regions: Vec<DeclaredPopulationSnvsRegion>,
+    pub populations: Vec<DeclaredPopulationSnvsPopulation>,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredPopulationSnvsRegion {
+    pub contig: Located<String>,
+    pub start: Located<u64>,
+    pub end: Located<u64>,
+    pub weight: DeclaredNumber,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredPopulationSnvsPopulation {
+    pub population_id: Located<String>,
+    pub frequency_model: Located<String>,
+    pub min_alt_af: DeclaredNumber,
+    pub max_alt_af: DeclaredNumber,
 }
 
 #[derive(Clone, Debug)]

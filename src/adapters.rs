@@ -7,9 +7,10 @@ use toml::de::{DeTable, DeValue};
 
 use crate::configuration::{
     AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredGeneralConfig, DeclaredNumber,
-    DeclaredPopulationSnvs, DeclaredReducedReference, DeclaredReductionTarget, DeclaredReference,
-    DeclaredReferenceSource, DeclaredSequence, ExpectedConfigKind, Located, SequenceClass,
-    SourceLocation, semantic_error,
+    DeclaredPopulationSnvs, DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
+    DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
+    DeclaredReference, DeclaredReferenceSource, DeclaredSequence, ExpectedConfigKind, Located,
+    SequenceClass, SourceLocation, semantic_error,
 };
 use crate::diagnostics::Diagnostic;
 
@@ -193,15 +194,19 @@ fn parse_population_snvs(
         .get_ref()
         .as_table()
         .ok_or_else(|| wrong_type(admitted, "population_snvs", value, "table"))?;
-    check_unknown(admitted, entry, &["mode", "input_path", "metadata_path"])?;
+    check_unknown(
+        admitted,
+        entry,
+        &["mode", "input_path", "metadata_path", "generate"],
+    )?;
     let mode = required_string(admitted, entry, "mode")?;
     match mode.value().as_str() {
         "supplied" => {
-            if entry.contains_key("metadata_path") {
+            if entry.contains_key("metadata_path") || entry.contains_key("generate") {
                 return Err(semantic_error(
                     admitted,
                     "population_snvs.mode,population_snvs.metadata_path",
-                    "el modo supplied no admite metadata_path",
+                    "el modo supplied no admite metadata_path ni generate",
                 ));
             }
             Ok(Some(DeclaredPopulationSnvs::Supplied {
@@ -214,11 +219,11 @@ fn parse_population_snvs(
             }))
         }
         "reuse" => {
-            if entry.contains_key("input_path") {
+            if entry.contains_key("input_path") || entry.contains_key("generate") {
                 return Err(semantic_error(
                     admitted,
                     "population_snvs.mode,population_snvs.input_path",
-                    "el modo reuse no admite input_path",
+                    "el modo reuse no admite input_path ni generate",
                 ));
             }
             Ok(Some(DeclaredPopulationSnvs::Reuse {
@@ -238,7 +243,12 @@ fn parse_population_snvs(
                     "el modo generate no admite rutas en F2.2.1",
                 ));
             }
-            Ok(Some(DeclaredPopulationSnvs::Generate))
+            Ok(Some(DeclaredPopulationSnvs::Generate {
+                parameters: Box::new(parse_population_snvs_generation(
+                    admitted,
+                    required_table(admitted, entry, "generate")?,
+                )?),
+            }))
         }
         other => Err(semantic_error(
             admitted,
@@ -246,6 +256,154 @@ fn parse_population_snvs(
             format!("modo de matriz SNV desconocido: {other}"),
         )),
     }
+}
+
+fn parse_population_snvs_generation(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<DeclaredPopulationSnvsGeneration, Diagnostic> {
+    check_unknown(
+        admitted,
+        table,
+        &[
+            "count_mode",
+            "locus_count",
+            "mean_loci",
+            "mean_density_per_base",
+            "spatial_mode",
+            "substitution_profile",
+            "outside_weight",
+            "regions",
+            "populations",
+        ],
+    )?;
+    let count_mode = required_string(admitted, table, "count_mode")?;
+    let locus_count = optional_located_u64(admitted, table, "locus_count")?;
+    let mean_loci = optional_number(admitted, table, "mean_loci")?;
+    let mean_density_per_base = optional_number(admitted, table, "mean_density_per_base")?;
+    let count_fields = usize::from(locus_count.is_some())
+        + usize::from(mean_loci.is_some())
+        + usize::from(mean_density_per_base.is_some());
+    if count_fields != 1
+        || !matches!(
+            (
+                count_mode.value().as_str(),
+                locus_count.is_some(),
+                mean_loci.is_some(),
+                mean_density_per_base.is_some()
+            ),
+            ("exact", true, false, false)
+                | ("poisson", false, true, false)
+                | ("poisson", false, false, true)
+        )
+    {
+        return Err(semantic_error(
+            admitted,
+            "population_snvs.generate",
+            "count_mode exige exactamente el parámetro de recuento compatible",
+        ));
+    }
+    let spatial_mode = required_string(admitted, table, "spatial_mode")?;
+    let substitution_profile = required_string(admitted, table, "substitution_profile")?;
+    if substitution_profile.value() != "uniform_snv12_v1" {
+        return Err(semantic_error(
+            admitted,
+            "population_snvs.generate.substitution_profile",
+            "F2.2.5 solo admite uniform_snv12_v1",
+        ));
+    }
+    let outside_weight = optional_number(admitted, table, "outside_weight")?;
+    let regions = optional_array(admitted, table, "regions")?
+        .unwrap_or_default()
+        .iter()
+        .map(|value| {
+            let region = value.get_ref().as_table().ok_or_else(|| {
+                wrong_type(admitted, "population_snvs.generate.regions", value, "table")
+            })?;
+            check_unknown(admitted, region, &["contig", "start", "end", "weight"])?;
+            Ok(DeclaredPopulationSnvsRegion {
+                contig: required_string(admitted, region, "contig")?,
+                start: required_u64(admitted, region, "start")?,
+                end: required_u64(admitted, region, "end")?,
+                weight: required_number(admitted, region, "weight")?,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    if (spatial_mode.value() == "weighted_regions") != outside_weight.is_some()
+        || !matches!(
+            spatial_mode.value().as_str(),
+            "uniform" | "weighted_regions"
+        )
+    {
+        return Err(semantic_error(
+            admitted,
+            "population_snvs.generate.spatial_mode",
+            "weighted_regions exige outside_weight; uniform no lo admite",
+        ));
+    }
+    if spatial_mode.value() == "uniform" && !regions.is_empty() {
+        return Err(semantic_error(
+            admitted,
+            "population_snvs.generate.regions",
+            "uniform no admite regiones",
+        ));
+    }
+    let populations = required_array(admitted, table, "populations")?
+        .iter()
+        .map(|value| {
+            let population = value.get_ref().as_table().ok_or_else(|| {
+                wrong_type(
+                    admitted,
+                    "population_snvs.generate.populations",
+                    value,
+                    "table",
+                )
+            })?;
+            check_unknown(
+                admitted,
+                population,
+                &[
+                    "population_id",
+                    "frequency_model",
+                    "min_alt_af",
+                    "max_alt_af",
+                ],
+            )?;
+            Ok(DeclaredPopulationSnvsPopulation {
+                population_id: required_string(admitted, population, "population_id")?,
+                frequency_model: required_string(admitted, population, "frequency_model")?,
+                min_alt_af: required_number(admitted, population, "min_alt_af")?,
+                max_alt_af: required_number(admitted, population, "max_alt_af")?,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    if populations.is_empty() {
+        return Err(semantic_error(
+            admitted,
+            "population_snvs.generate.populations",
+            "se exige al menos una población",
+        ));
+    }
+    for population in &populations {
+        if population.frequency_model.value() != "uniform" {
+            return Err(semantic_error(
+                admitted,
+                "population_snvs.generate.populations",
+                "F2.2.5 exige frequency_model uniform",
+            ));
+        }
+    }
+    Ok(DeclaredPopulationSnvsGeneration {
+        count_mode,
+        locus_count,
+        mean_loci,
+        mean_density_per_base,
+        spatial_mode,
+        substitution_profile,
+        outside_weight,
+        regions,
+        populations,
+    })
 }
 
 fn required_non_empty_string(

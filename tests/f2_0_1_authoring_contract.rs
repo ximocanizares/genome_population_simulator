@@ -149,13 +149,7 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
         BTreeSet::from(["reduction_percent".to_owned()])
     );
 
-    for future_field in [
-        "scenario_id",
-        "scenarios",
-        "route",
-        "individuals",
-        "populations",
-    ] {
+    for future_field in ["scenario_id", "scenarios", "route", "individuals"] {
         assert!(
             !AUTHORING_SCHEMA.contains(&format!("\"{future_field}\"")),
             "future F2 field leaked into F2.0.1: {future_field}"

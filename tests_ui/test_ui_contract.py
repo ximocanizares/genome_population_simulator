@@ -151,7 +151,16 @@ length = 10
         cases = {
             "supplied": 'input_path = "input.tsv"',
             "reuse": 'metadata_path = "population_snvs.metadata.json"',
-            "generate": "",
+            "generate": '''[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.1
+max_alt_af = 0.9''',
         }
         with tempfile.TemporaryDirectory() as directory:
             base_path = Path(directory)

@@ -71,8 +71,14 @@ documento y el ID derivado debe ser distinto.
 
 La tabla opcional `[population_snvs]` fija una fuente excluyente de matriz SNV:
 `mode = "supplied"` exige solo `input_path`; `mode = "reuse"` exige solo
-`metadata_path`; `mode = "generate"` no admite rutas. Los parámetros de
-generación no se admiten aún: se incorporan en F2.2.5. La tabla canónica
+`metadata_path`; `mode = "generate"` no admite rutas y exige
+`[population_snvs.generate]`. Este bloque usa `count_mode = "exact"` con
+`locus_count`, o `count_mode = "poisson"` con exactamente uno de `mean_loci` y
+`mean_density_per_base`; fija `spatial_mode = "uniform"` o
+`"weighted_regions"`, y `substitution_profile = "uniform_snv12_v1"`. Cada
+población declara `population_id`, `frequency_model = "uniform"`,
+`min_alt_af` y `max_alt_af`; las regiones ponderadas incluyen
+`outside_weight`, `contig`, `start`, `end` y `weight` en base 1 cerrada. La tabla canónica
 `population_snvs.tsv` usa exactamente las ocho columnas ordenadas
 `variant_id`, `contig`, `position`, `ref`, `alt`, `population_id`, `alt_af` y
 `source_id`; VCF no es una entrada admitida. Su JSON asociado declara la clase

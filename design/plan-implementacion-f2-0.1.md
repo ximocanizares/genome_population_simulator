@@ -238,7 +238,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: duplicados, reordenación, referencia errónea, sumas,
     matriz activa vacía y autorización específica.
 
-- ☐ F2.2.5. Generar loci y frecuencias de una matriz nueva.
+- ✅ F2.2.5. Generar loci y frecuencias de una matriz nueva.
   - Depende de: F2.2.1–F2.2.3.
   - Procede de: DTC-052, DTC-054, DTC-067/070/072;
     REQ-CONF-24/25/129 y REQ-IND-17 a REQ-IND-19/61.

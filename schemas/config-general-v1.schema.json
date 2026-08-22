@@ -198,24 +198,58 @@
           "x-gps-control": "select"
         },
         "input_path": { "type": "string", "minLength": 1, "x-gps-control": "path" },
-        "metadata_path": { "type": "string", "minLength": 1, "x-gps-control": "path" }
+        "metadata_path": { "type": "string", "minLength": 1, "x-gps-control": "path" },
+        "generate": { "$ref": "#/$defs/population_snvs_generate" }
       },
       "oneOf": [
         {
           "properties": { "mode": { "const": "supplied" } },
           "required": ["input_path"],
-          "not": { "required": ["metadata_path"] }
+          "not": { "anyOf": [{ "required": ["metadata_path"] }, { "required": ["generate"] }] }
         },
         {
           "properties": { "mode": { "const": "reuse" } },
           "required": ["metadata_path"],
-          "not": { "required": ["input_path"] }
+          "not": { "anyOf": [{ "required": ["input_path"] }, { "required": ["generate"] }] }
         },
         {
           "properties": { "mode": { "const": "generate" } },
+          "required": ["generate"],
           "not": { "anyOf": [{ "required": ["input_path"] }, { "required": ["metadata_path"] }] }
         }
       ]
-    }
+    },
+    "population_snvs_generate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["count_mode", "spatial_mode", "substitution_profile", "populations"],
+      "properties": {
+        "count_mode": { "enum": ["exact", "poisson"] },
+        "locus_count": { "type": "integer", "minimum": 0 },
+        "mean_loci": { "type": "number", "minimum": 0 },
+        "mean_density_per_base": { "type": "number", "minimum": 0 },
+        "spatial_mode": { "enum": ["uniform", "weighted_regions"] },
+        "substitution_profile": { "const": "uniform_snv12_v1" },
+        "outside_weight": { "type": "number", "minimum": 0 },
+        "regions": { "type": "array", "items": { "$ref": "#/$defs/population_snvs_region" } },
+        "populations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/population_snvs_population" } }
+      },
+      "allOf": [
+        { "oneOf": [
+          { "properties": { "count_mode": { "const": "exact" } }, "required": ["locus_count"], "not": { "anyOf": [{ "required": ["mean_loci"] }, { "required": ["mean_density_per_base"] }] } },
+          { "properties": { "count_mode": { "const": "poisson" } }, "not": { "required": ["locus_count"] } }
+        ] },
+        { "oneOf": [
+          { "required": ["mean_loci"], "not": { "required": ["mean_density_per_base"] } },
+          { "required": ["mean_density_per_base"], "not": { "required": ["mean_loci"] } },
+          { "properties": { "count_mode": { "const": "exact" } }, "not": { "anyOf": [{ "required": ["mean_loci"] }, { "required": ["mean_density_per_base"] }] } }
+        ] },
+        { "oneOf": [
+          { "properties": { "spatial_mode": { "const": "uniform" } }, "not": { "anyOf": [{ "required": ["outside_weight"] }, { "required": ["regions"] }] } },
+          { "properties": { "spatial_mode": { "const": "weighted_regions" } }, "required": ["outside_weight"] }
+        ] }
+      ]
+    },
+    "population_snvs_region": { "type": "object", "additionalProperties": false, "required": ["contig", "start", "end", "weight"], "properties": { "contig": { "$ref": "#/$defs/identifier" }, "start": { "type": "integer", "minimum": 1 }, "end": { "type": "integer", "minimum": 1 }, "weight": { "type": "number", "minimum": 0 } } },
+    "population_snvs_population": { "type": "object", "additionalProperties": false, "required": ["population_id", "frequency_model", "min_alt_af", "max_alt_af"], "properties": { "population_id": { "$ref": "#/$defs/identifier" }, "frequency_model": { "const": "uniform" }, "min_alt_af": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 }, "max_alt_af": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } } }
   }
 }

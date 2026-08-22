@@ -1748,6 +1748,19 @@ pertinente al modo, ambos tipos de ruta o un modo desconocido se rechaza. La
 validación de valores `alt_af`, sus sumas, tolerancias y normalización se
 incorpora exclusivamente en F2.2.2, para que F2.2.1 no duplique esa autoridad.
 
+En el modo `generate`, `[population_snvs.generate]` declara `count_mode` como
+`exact` o `poisson`, `spatial_mode` como `uniform` o `weighted_regions`, y
+`substitution_profile = "uniform_snv12_v1"`. Exige exactamente uno de
+`locus_count` (solo `exact`), `mean_loci` (solo `poisson`) o
+`mean_density_per_base` (solo `poisson`). Cada entrada de
+`[[population_snvs.generate.populations]]` declara `population_id`,
+`frequency_model = "uniform"`, `min_alt_af` y `max_alt_af`; genera valores en
+el intervalo semiabierto `[min_alt_af,max_alt_af)`, sin producir 0 ni 1.
+`weighted_regions` añade `outside_weight` y entradas con `contig`, `start`,
+`end` y `weight`, en coordenadas base 1 cerradas. F2.2.5 no admite otros
+perfiles de frecuencia o sustitución: los espectros fijo, lineal, logarítmico y
+los perfiles humanos pertenecen a F2.2.6.
+
 El identificador de individuo distingue a una entidad biológica simulada. Es
 distinto del identificador de un evento de muestreo, que distingue una
 observación, y del identificador de un conjunto, que agrupa archivos referidos a

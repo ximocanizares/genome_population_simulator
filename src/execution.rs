@@ -9,6 +9,7 @@ use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::Diagnostic;
 use crate::identity::{ReferenceId, derive_execution_id};
 use crate::integrity::configuration_digest;
+use crate::population_snvs::generate_population_snvs_from_reference;
 use crate::publication::ExecutionWorkspace;
 use crate::reference::Reference;
 use crate::reference_fasta::{
@@ -61,6 +62,23 @@ fn execute_validated_config_with_effective_document(
 ) -> Result<ExecutionOutcome, Diagnostic> {
     let mut prepared_reference = prepare_reference(effective)?;
     after_prepare_reference(&mut prepared_reference)?;
+    // F2.2.5 materializa únicamente la vista en memoria; F2.2.7 será la dueña
+    // de escribir/publicar el par canónico.
+    if let Some(generation) = effective.population_snvs_generation() {
+        let _matrix = generate_population_snvs_from_reference(
+            generation,
+            prepared_reference.reference(),
+            effective.reproducibility().root_seed(),
+        )
+        .map_err(|error| {
+            Diagnostic::configuration(
+                "GPS-CONF-008",
+                "La generación de la matriz SNV no cumple su configuración efectiva.",
+            )
+            .with("component", "population_snvs.generate")
+            .with("detail", error.to_string())
+        })?;
+    }
     // Todo error de dominio o preflight ocurre antes de crear el provisional y
     // antes de que exista cualquier RNG local de selección.
     preflight_reductions(effective, prepared_reference.reference())?;

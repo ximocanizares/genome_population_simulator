@@ -54,6 +54,7 @@ class PopulationSnvsForm:
     mode: str
     input_path: str | None
     metadata_path: str | None
+    generate: dict[str, Any] | None = None
 
 
 @dataclass(eq=True)
@@ -165,7 +166,7 @@ def parse_general_toml(text: str) -> GeneralForm:
 def _parse_population_snvs(table: Mapping[str, Any]) -> PopulationSnvsForm:
     _keys(
         table,
-        allowed={"mode", "input_path", "metadata_path"},
+        allowed={"mode", "input_path", "metadata_path", "generate"},
         required={"mode"},
         path="population_snvs",
     )
@@ -173,21 +174,22 @@ def _parse_population_snvs(table: Mapping[str, Any]) -> PopulationSnvsForm:
     input_path = table.get("input_path")
     metadata_path = table.get("metadata_path")
     if mode == "supplied":
-        if metadata_path is not None:
-            raise EditorError("population_snvs.metadata_path", "no admite supplied")
+        if metadata_path is not None or "generate" in table:
+            raise EditorError("population_snvs", "supplied no admite metadata_path ni generate")
         return PopulationSnvsForm(
             mode, _non_empty_string(input_path, "population_snvs.input_path"), None
         )
     if mode == "reuse":
-        if input_path is not None:
-            raise EditorError("population_snvs.input_path", "no admite reuse")
+        if input_path is not None or "generate" in table:
+            raise EditorError("population_snvs", "reuse no admite input_path ni generate")
         return PopulationSnvsForm(
             mode, None, _non_empty_string(metadata_path, "population_snvs.metadata_path")
         )
     if mode == "generate":
         if input_path is not None or metadata_path is not None:
             raise EditorError("population_snvs", "generate no admite rutas")
-        return PopulationSnvsForm(mode, None, None)
+        generate = _mapping(table.get("generate"), "population_snvs.generate")
+        return PopulationSnvsForm(mode, None, None, dict(generate))
     raise EditorError("population_snvs.mode", "debe ser supplied, reuse o generate")
 
 
@@ -417,6 +419,13 @@ def render_general_toml(form: GeneralForm) -> str:
             if population_snvs.input_path is not None or population_snvs.metadata_path is not None:
                 raise EditorError("population_snvs", "generate no admite rutas")
             table.add("mode", "generate")
+            generate = population_snvs.generate
+            if generate is None:
+                raise EditorError("population_snvs.generate", "falta la configuración de generación")
+            generated = tomlkit.table()
+            for key, value in generate.items():
+                generated.add(key, value)
+            table.add("generate", generated)
         else:
             raise EditorError(
                 "population_snvs.mode", "debe ser supplied, reuse o generate"

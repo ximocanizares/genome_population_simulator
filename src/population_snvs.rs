@@ -10,6 +10,11 @@ use std::fmt;
 use std::fs;
 
 use crate::identity::{PopulationId, SequenceId, VariantId, derive_matrix_variant_id};
+use crate::randomness::{
+    RandomSamplingError, RootSeed, RuntimeSubseedScope, categorical_f64, derive_subseed,
+    linear_uniform, poisson_count, weighted_without_replacement,
+};
+use crate::reference::Reference;
 use crate::results::ResolvedManifestReference;
 
 use serde_json::Value;
@@ -1163,4 +1168,424 @@ fn invalid(field: &str, expected: &'static str) -> PopulationSnvsFormatError {
         field: field.to_owned(),
         expected,
     }
+}
+
+/// Recuento de candidatos de una matriz generada. `Poisson` conserva la media,
+/// mientras que `Exact` no abre el ámbito RNG de recuento (DTC-067).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GeneratedLocusCount {
+    Exact(u64),
+    PoissonMean(f64),
+    PoissonDensityPerBase(f64),
+}
+
+/// Región base 1 cerrada para el espacio ponderado de la matriz.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeneratedWeightedRegion {
+    pub contig: String,
+    pub start_1based: u64,
+    pub end_1based: u64,
+    pub weight: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum GeneratedSpatialMode {
+    Uniform,
+    WeightedRegions {
+        outside_weight: f64,
+        regions: Vec<GeneratedWeightedRegion>,
+    },
+}
+
+/// Único espectro de frecuencias incorporado por F2.2.5. Los extremos no se
+/// producen: para masas fijas y perfiles adicionales corresponde F2.2.6.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeneratedPopulationFrequency {
+    pub population_id: String,
+    pub min_alt_af: f64,
+    pub max_alt_af: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopulationSnvsGenerationConfig {
+    pub count: GeneratedLocusCount,
+    pub spatial: GeneratedSpatialMode,
+    pub populations: Vec<GeneratedPopulationFrequency>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PopulationSnvsGenerationError {
+    InvalidCount,
+    InvalidPopulation(String),
+    DuplicatePopulation(String),
+    InvalidFrequencyInterval { population_id: String },
+    InvalidRegion { contig: String },
+    OverlappingRegions { contig: String },
+    InvalidWeight,
+    EmptyEligibleSpace,
+    InsufficientEligibleSpace { requested: u64, available: u64 },
+    Random(RandomSamplingError),
+    Reference(String),
+}
+
+impl fmt::Display for PopulationSnvsGenerationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+impl std::error::Error for PopulationSnvsGenerationError {}
+
+/// Vista mínima de una referencia ya validada: identidad, orden FASTA y bases.
+/// No reinterpreta rutas ni crea una identidad alternativa.
+struct GenerationReference {
+    id: crate::identity::ReferenceId,
+    sequences: Vec<(SequenceId, Vec<u8>)>,
+}
+
+/// Genera la vista activa de una matriz nueva desde una referencia F1 resuelta.
+pub fn generate_population_snvs(
+    config: &PopulationSnvsGenerationConfig,
+    reference: &ResolvedManifestReference,
+    root_seed: RootSeed,
+) -> Result<PreparedPopulationSnvs, PopulationSnvsGenerationError> {
+    let fasta = load_authoritative_fasta(reference)
+        .map_err(|error| PopulationSnvsGenerationError::Reference(error.to_string()))?;
+    let sequence_order = fasta.order.clone();
+    let mut ordered = fasta.sequences.into_iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|(id, _)| sequence_order.get(id).copied());
+    generate_population_snvs_view(
+        config,
+        GenerationReference {
+            id: reference.reference_id().clone(),
+            sequences: ordered
+                .into_iter()
+                .map(|(id, bases)| {
+                    Ok((
+                        SequenceId::parse(id, "generated_population_snvs").map_err(|_| {
+                            PopulationSnvsGenerationError::Reference("invalid sequence".into())
+                        })?,
+                        bases,
+                    ))
+                })
+                .collect::<Result<_, _>>()?,
+        },
+        root_seed,
+    )
+}
+
+/// Misma operación en el recorrido directo, sobre la referencia ya validada en
+/// memoria. No publica la matriz ni sustituye el par canónico de F2.2.7.
+pub fn generate_population_snvs_from_reference(
+    config: &PopulationSnvsGenerationConfig,
+    reference: &Reference,
+    root_seed: RootSeed,
+) -> Result<PreparedPopulationSnvs, PopulationSnvsGenerationError> {
+    generate_population_snvs_view(
+        config,
+        GenerationReference {
+            id: reference.id().clone(),
+            sequences: reference
+                .sequences()
+                .iter()
+                .map(|sequence| {
+                    (
+                        sequence.id().clone(),
+                        sequence.sequence().as_bytes().to_vec(),
+                    )
+                })
+                .collect(),
+        },
+        root_seed,
+    )
+}
+
+fn generate_population_snvs_view(
+    config: &PopulationSnvsGenerationConfig,
+    reference: GenerationReference,
+    root_seed: RootSeed,
+) -> Result<PreparedPopulationSnvs, PopulationSnvsGenerationError> {
+    validate_generation_config(config)?;
+    validate_generation_regions(config, &reference.sequences)?;
+    let mut candidates = Vec::<(SequenceId, u64, u8)>::new();
+    let mut weights = Vec::new();
+    let order = reference
+        .sequences
+        .iter()
+        .enumerate()
+        .map(|(index, (id, _))| (id.as_str().to_owned(), index))
+        .collect::<BTreeMap<_, _>>();
+    for (id, bases) in &reference.sequences {
+        let contig = id.as_str();
+        for (offset, base) in bases.iter().copied().enumerate() {
+            if !matches!(base, b'A' | b'C' | b'G' | b'T') {
+                continue;
+            }
+            let position =
+                u64::try_from(offset).map_err(|_| PopulationSnvsGenerationError::InvalidCount)? + 1;
+            let weight = candidate_weight(&config.spatial, contig, position)?;
+            candidates.push((id.clone(), position, base));
+            weights.push(weight);
+        }
+    }
+    if weights.iter().all(|weight| *weight == 0.0) {
+        return Err(PopulationSnvsGenerationError::EmptyEligibleSpace);
+    }
+    let requested = match config.count {
+        GeneratedLocusCount::Exact(value) => value,
+        GeneratedLocusCount::PoissonMean(mean) => {
+            sample_candidate_count(root_seed, &reference.id, mean)?
+        }
+        GeneratedLocusCount::PoissonDensityPerBase(density) => {
+            let eligible = weights.iter().filter(|weight| **weight > 0.0).count() as f64;
+            sample_candidate_count(root_seed, &reference.id, density * eligible)?
+        }
+    };
+    let available = weights.iter().filter(|weight| **weight > 0.0).count() as u64;
+    if requested > available {
+        return Err(PopulationSnvsGenerationError::InsufficientEligibleSpace {
+            requested,
+            available,
+        });
+    }
+    let requested_usize =
+        usize::try_from(requested).map_err(|_| PopulationSnvsGenerationError::InvalidCount)?;
+    let mut selector = derive_subseed(
+        root_seed,
+        RuntimeSubseedScope::MatrixLocusSelection {
+            scenario_id: "direct",
+            reference_id: reference.id.as_str(),
+        },
+    )
+    .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
+    .local_rng();
+    let selected = weighted_without_replacement(&mut selector, &weights, requested_usize)
+        .map_err(PopulationSnvsGenerationError::Random)?;
+    let mut loci = Vec::with_capacity(selected.len());
+    for index in selected {
+        let (contig, position, reference_base) = &candidates[index];
+        let mut alt_rng = derive_subseed(
+            root_seed,
+            RuntimeSubseedScope::MatrixAlternateAllele {
+                scenario_id: "direct",
+                reference_id: reference.id.as_str(),
+                sequence_id: contig.as_str(),
+                position_1based: *position,
+                reference_base: std::str::from_utf8(&[*reference_base]).unwrap_or("A"),
+            },
+        )
+        .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
+        .local_rng();
+        let alternatives: Vec<u8> = (*b"ACGT")
+            .into_iter()
+            .filter(|base| base != reference_base)
+            .collect();
+        let alternate = alternatives[categorical_f64(&mut alt_rng, &[1.0, 1.0, 1.0])
+            .map_err(PopulationSnvsGenerationError::Random)?];
+        let variant_id =
+            derive_matrix_variant_id(&reference.id, contig, *position, *reference_base, alternate)
+                .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?;
+        loci.push((
+            contig.clone(),
+            *position,
+            *reference_base,
+            alternate,
+            variant_id,
+        ));
+    }
+    loci.sort_by(|left, right| {
+        order
+            .get(left.0.as_str())
+            .cmp(&order.get(right.0.as_str()))
+            .then(left.1.cmp(&right.1))
+    });
+    let mut rows = Vec::with_capacity(loci.len() * config.populations.len());
+    for population in &config.populations {
+        let population_id = PopulationId::parse(
+            &population.population_id,
+            "generated_population_snvs",
+        )
+        .map_err(|_| {
+            PopulationSnvsGenerationError::InvalidPopulation(population.population_id.clone())
+        })?;
+        for (contig, position, reference_base, alternate, variant_id) in &loci {
+            let mut value_rng = derive_subseed(
+                root_seed,
+                RuntimeSubseedScope::MatrixFrequencyValue {
+                    scenario_id: "direct",
+                    reference_id: reference.id.as_str(),
+                    population_id: population_id.as_str(),
+                    variant_id: variant_id.as_str(),
+                },
+            )
+            .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
+            .local_rng();
+            let alt_af =
+                linear_uniform(&mut value_rng, population.min_alt_af, population.max_alt_af)
+                    .map_err(PopulationSnvsGenerationError::Random)?;
+            rows.push(PreparedPopulationSnv {
+                variant_id: variant_id.clone(),
+                contig: contig.clone(),
+                position_1based: *position,
+                reference: *reference_base,
+                alternate: *alternate,
+                population_id: population_id.clone(),
+                alt_af,
+                source_id: "generated".to_owned(),
+            });
+        }
+    }
+    rows.sort_by(|left, right| {
+        order
+            .get(left.contig().as_str())
+            .cmp(&order.get(right.contig().as_str()))
+            .then(left.position_1based().cmp(&right.position_1based()))
+            .then(left.alternate().cmp(&right.alternate()))
+            .then(
+                left.population_id()
+                    .as_str()
+                    .cmp(right.population_id().as_str()),
+            )
+    });
+    Ok(PreparedPopulationSnvs {
+        rows,
+        discarded_globally_absent: Vec::new(),
+        empty_authorized: false,
+    })
+}
+
+fn sample_candidate_count(
+    root: RootSeed,
+    reference: &crate::identity::ReferenceId,
+    mean: f64,
+) -> Result<u64, PopulationSnvsGenerationError> {
+    let mut rng = derive_subseed(
+        root,
+        RuntimeSubseedScope::MatrixCandidateCount {
+            scenario_id: "direct",
+            reference_id: reference.as_str(),
+        },
+    )
+    .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
+    .local_rng();
+    poisson_count(&mut rng, mean).map_err(PopulationSnvsGenerationError::Random)
+}
+
+fn candidate_weight(
+    spatial: &GeneratedSpatialMode,
+    contig: &str,
+    position: u64,
+) -> Result<f64, PopulationSnvsGenerationError> {
+    match spatial {
+        GeneratedSpatialMode::Uniform => Ok(1.0),
+        GeneratedSpatialMode::WeightedRegions {
+            outside_weight,
+            regions,
+        } => {
+            let mut weight = *outside_weight;
+            for region in regions {
+                if region.contig == contig
+                    && (region.start_1based..=region.end_1based).contains(&position)
+                {
+                    weight = region.weight;
+                    break;
+                }
+            }
+            Ok(weight)
+        }
+    }
+}
+
+pub(crate) fn validate_generation_config(
+    config: &PopulationSnvsGenerationConfig,
+) -> Result<(), PopulationSnvsGenerationError> {
+    match config.count {
+        GeneratedLocusCount::Exact(_) => {}
+        GeneratedLocusCount::PoissonMean(v) | GeneratedLocusCount::PoissonDensityPerBase(v)
+            if v.is_finite() && v >= 0.0 => {}
+        _ => return Err(PopulationSnvsGenerationError::InvalidCount),
+    }
+    if config.populations.is_empty() {
+        return Err(PopulationSnvsGenerationError::InvalidPopulation(
+            "missing".to_owned(),
+        ));
+    }
+    let mut populations = BTreeSet::new();
+    for population in &config.populations {
+        PopulationId::parse(&population.population_id, "generated_population_snvs").map_err(
+            |_| PopulationSnvsGenerationError::InvalidPopulation(population.population_id.clone()),
+        )?;
+        if !populations.insert(&population.population_id) {
+            return Err(PopulationSnvsGenerationError::DuplicatePopulation(
+                population.population_id.clone(),
+            ));
+        }
+        if !population.min_alt_af.is_finite()
+            || !population.max_alt_af.is_finite()
+            || population.min_alt_af < 0.0
+            || population.min_alt_af >= population.max_alt_af
+            || population.max_alt_af > 1.0
+        {
+            return Err(PopulationSnvsGenerationError::InvalidFrequencyInterval {
+                population_id: population.population_id.clone(),
+            });
+        }
+    }
+    if let GeneratedSpatialMode::WeightedRegions {
+        outside_weight,
+        regions,
+    } = &config.spatial
+    {
+        if !outside_weight.is_finite() || *outside_weight < 0.0 {
+            return Err(PopulationSnvsGenerationError::InvalidWeight);
+        }
+        let mut sorted = regions.clone();
+        sorted.sort_by(|a, b| {
+            a.contig
+                .cmp(&b.contig)
+                .then(a.start_1based.cmp(&b.start_1based))
+        });
+        for region in &sorted {
+            if region.start_1based == 0 || region.start_1based > region.end_1based {
+                return Err(PopulationSnvsGenerationError::InvalidRegion {
+                    contig: region.contig.clone(),
+                });
+            }
+            if !region.weight.is_finite() || region.weight < 0.0 {
+                return Err(PopulationSnvsGenerationError::InvalidWeight);
+            }
+        }
+        for pair in sorted.windows(2) {
+            if pair[0].contig == pair[1].contig && pair[1].start_1based <= pair[0].end_1based {
+                return Err(PopulationSnvsGenerationError::OverlappingRegions {
+                    contig: pair[0].contig.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_generation_regions(
+    config: &PopulationSnvsGenerationConfig,
+    sequences: &[(SequenceId, Vec<u8>)],
+) -> Result<(), PopulationSnvsGenerationError> {
+    let lengths = sequences
+        .iter()
+        .map(|(id, bases)| (id.as_str(), u64::try_from(bases.len()).unwrap_or(u64::MAX)))
+        .collect::<BTreeMap<_, _>>();
+    if let GeneratedSpatialMode::WeightedRegions { regions, .. } = &config.spatial {
+        for region in regions {
+            let Some(length) = lengths.get(region.contig.as_str()) else {
+                return Err(PopulationSnvsGenerationError::InvalidRegion {
+                    contig: region.contig.clone(),
+                });
+            };
+            if region.start_1based == 0 || region.end_1based > *length {
+                return Err(PopulationSnvsGenerationError::InvalidRegion {
+                    contig: region.contig.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
 }

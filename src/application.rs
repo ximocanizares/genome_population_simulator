@@ -6,13 +6,17 @@ use std::sync::Arc;
 
 use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::configuration::{
-    DeclaredGeneralConfig, DeclaredReductionTarget, DeclaredReferenceSource, ExpectedConfigKind,
-    SequenceClass,
+    DeclaredGeneralConfig, DeclaredPopulationSnvs, DeclaredReductionTarget,
+    DeclaredReferenceSource, ExpectedConfigKind, SequenceClass,
 };
 use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
 use crate::haplotype::Ploidy;
 use crate::identity::{ReferenceId, SequenceId};
+use crate::population_snvs::{
+    GeneratedLocusCount, GeneratedPopulationFrequency, GeneratedSpatialMode,
+    GeneratedWeightedRegion, PopulationSnvsGenerationConfig, validate_generation_config,
+};
 use crate::randomness::{
     EntropySource, ReproducibilityMetadata, RuntimeSubseedScope, Subseed, SystemEntropy,
     derive_subseed, resolve_root_seed,
@@ -176,6 +180,7 @@ pub struct EffectiveConfig {
     sequences: Vec<EffectiveSequence>,
     configuration_input: EffectiveConfigurationInput,
     reproducibility: ReproducibilityMetadata,
+    population_snvs_generation: Option<PopulationSnvsGenerationConfig>,
 }
 
 impl EffectiveConfig {
@@ -232,6 +237,10 @@ impl EffectiveConfig {
     #[must_use]
     pub const fn reproducibility(&self) -> &ReproducibilityMetadata {
         &self.reproducibility
+    }
+    #[must_use]
+    pub fn population_snvs_generation(&self) -> Option<&PopulationSnvsGenerationConfig> {
+        self.population_snvs_generation.as_ref()
     }
 }
 
@@ -364,7 +373,7 @@ pub fn build_effective_config_with_entropy(
         }),
         DeclaredReferenceSource::Supplied { .. } => None,
     };
-    let sequences = general
+    let sequences: Vec<EffectiveSequence> = general
         .reference()
         .sequences
         .iter()
@@ -437,6 +446,36 @@ pub fn build_effective_config_with_entropy(
         },
     };
     let reproducibility = ReproducibilityMetadata::new(root_seed, seed_origin);
+    let population_snvs_generation = effective_population_snvs_generation(general)?;
+    if let Some(generation) = &population_snvs_generation {
+        validate_generation_config(generation).map_err(|error| {
+            config_error(general, "population_snvs.generate", error.to_string())
+        })?;
+    }
+    if let Some(PopulationSnvsGenerationConfig {
+        spatial: GeneratedSpatialMode::WeightedRegions { regions, .. },
+        ..
+    }) = &population_snvs_generation
+    {
+        for region in regions {
+            let valid = sequences
+                .iter()
+                .find(|sequence| sequence.id() == region.contig)
+                .is_some_and(|sequence| {
+                    region.start_1based > 0 && region.end_1based <= sequence.length()
+                });
+            if !valid {
+                return Err(config_error(
+                    general,
+                    "population_snvs.generate.regions",
+                    format!(
+                        "región fuera de la referencia efectiva: {}:{}..{}",
+                        region.contig, region.start_1based, region.end_1based
+                    ),
+                ));
+            }
+        }
+    }
     Ok(EffectiveConfig {
         source_path: general.source().path().display().to_string(),
         reference_id: general.reference().id.value().clone(),
@@ -452,7 +491,83 @@ pub fn build_effective_config_with_entropy(
             bytes: Arc::from(general.source().bytes()),
         },
         reproducibility,
+        population_snvs_generation,
     })
+}
+
+fn effective_population_snvs_generation(
+    general: &DeclaredGeneralConfig,
+) -> Result<Option<PopulationSnvsGenerationConfig>, Diagnostic> {
+    let Some(DeclaredPopulationSnvs::Generate { parameters }) = general.population_snvs() else {
+        return Ok(None);
+    };
+    let decimal = |field: &str, value: &crate::configuration::DeclaredNumber| {
+        value
+            .literal()
+            .parse::<f64>()
+            .map_err(|_| config_error(general, field, "debe ser un f64 válido"))
+    };
+    let count = if let Some(value) = &parameters.locus_count {
+        GeneratedLocusCount::Exact(*value.value())
+    } else if let Some(value) = &parameters.mean_loci {
+        GeneratedLocusCount::PoissonMean(decimal("population_snvs.generate.mean_loci", value)?)
+    } else {
+        GeneratedLocusCount::PoissonDensityPerBase(decimal(
+            "population_snvs.generate.mean_density_per_base",
+            parameters.mean_density_per_base.as_ref().ok_or_else(|| {
+                config_error(general, "population_snvs.generate", "recuento ausente")
+            })?,
+        )?)
+    };
+    let spatial = if parameters.spatial_mode.value() == "uniform" {
+        GeneratedSpatialMode::Uniform
+    } else {
+        GeneratedSpatialMode::WeightedRegions {
+            outside_weight: decimal(
+                "population_snvs.generate.outside_weight",
+                parameters.outside_weight.as_ref().ok_or_else(|| {
+                    config_error(
+                        general,
+                        "population_snvs.generate.outside_weight",
+                        "falta outside_weight",
+                    )
+                })?,
+            )?,
+            regions: parameters
+                .regions
+                .iter()
+                .map(|region| {
+                    Ok(GeneratedWeightedRegion {
+                        contig: region.contig.value().clone(),
+                        start_1based: *region.start.value(),
+                        end_1based: *region.end.value(),
+                        weight: decimal("population_snvs.generate.regions.weight", &region.weight)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?,
+        }
+    };
+    Ok(Some(PopulationSnvsGenerationConfig {
+        count,
+        spatial,
+        populations: parameters
+            .populations
+            .iter()
+            .map(|population| {
+                Ok(GeneratedPopulationFrequency {
+                    population_id: population.population_id.value().clone(),
+                    min_alt_af: decimal(
+                        "population_snvs.generate.populations.min_alt_af",
+                        &population.min_alt_af,
+                    )?,
+                    max_alt_af: decimal(
+                        "population_snvs.generate.populations.max_alt_af",
+                        &population.max_alt_af,
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?,
+    }))
 }
 
 fn effective_normalization_tolerance(general: &DeclaredGeneralConfig) -> Result<f64, Diagnostic> {
