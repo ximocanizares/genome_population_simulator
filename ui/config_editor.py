@@ -115,6 +115,26 @@ def ordered_editor_rows(rows: Sequence[Mapping[str, Any]], path: str) -> list[Ma
     return [row for _, row in positioned]
 
 
+def population_snvs_population_from_editor_row(
+    row: Mapping[str, Any], components_by_population: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> dict[str, Any]:
+    """Shape a population editor row without assigning scientific meaning in Python."""
+    population_id = str(row["population_id"]).strip()
+    frequency_model = str(row.get("frequency_model", "uniform"))
+    population: dict[str, Any] = {
+        "population_id": population_id,
+        "frequency_model": frequency_model,
+    }
+    if frequency_model == "uniform":
+        population["min_alt_af"] = float(row["min_alt_af"])
+        population["max_alt_af"] = float(row["max_alt_af"])
+    else:
+        population["frequency_mode"] = str(row.get("frequency_mode", "stochastic"))
+        if frequency_model == "spectrum":
+            population["spectrum"] = list(components_by_population.get(population_id, []))
+    return population
+
+
 def parse_general_toml(text: str) -> GeneralForm:
     try:
         document = tomlkit.parse(text)

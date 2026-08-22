@@ -6,7 +6,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ui"))
 
-from config_editor import EditorError, parse_general_toml, render_general_toml
+from config_editor import (
+    EditorError,
+    parse_general_toml,
+    population_snvs_population_from_editor_row,
+    render_general_toml,
+)
 
 
 class PopulationSnvsEditorTest(unittest.TestCase):
@@ -70,6 +75,77 @@ class PopulationSnvsEditorTest(unittest.TestCase):
             },
         }
         self.assertFalse(list(validator.iter_errors(inverted_region)))
+
+        uniform_with_mode = {
+            "config_kind": "general",
+            "schema_version": "1",
+            "reference": reference,
+            "population_snvs": {
+                "mode": "generate",
+                "generate": {
+                    **generation,
+                    "populations": [{**generation["populations"][0], "frequency_mode": "exact"}],
+                },
+            },
+        }
+        self.assertTrue(list(validator.iter_errors(uniform_with_mode)))
+
+    def test_population_editor_omits_uniform_mode_and_keeps_spectrum_modes(self):
+        uniform = population_snvs_population_from_editor_row(
+            {
+                "population_id": "P1",
+                "frequency_model": "uniform",
+                "frequency_mode": "exact",
+                "min_alt_af": 0.1,
+                "max_alt_af": 0.9,
+            },
+            {},
+        )
+        self.assertNotIn("frequency_mode", uniform)
+        self.assertEqual(
+            population_snvs_population_from_editor_row(
+                {"population_id": "P2", "frequency_model": "spectrum", "frequency_mode": "exact"},
+                {"P2": [{"kind": "fixed", "fixed_alt_af": 0.5, "weight": 1.0}]},
+            )["frequency_mode"],
+            "exact",
+        )
+        self.assertEqual(
+            population_snvs_population_from_editor_row(
+                {"population_id": "P3", "frequency_model": "human_1000g_global_sfs_approx_v1"},
+                {},
+            )["frequency_mode"],
+            "stochastic",
+        )
+        source = '''config_kind = "general"
+schema_version = "1"
+[population_snvs]
+mode = "generate"
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.1
+max_alt_af = 0.9
+[reference]
+kind = "simulated"
+id = "ref"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1
+'''
+        rendered = render_general_toml(parse_general_toml(source))
+        self.assertNotIn("frequency_mode =", rendered)
+        self.assertEqual(parse_general_toml(rendered), parse_general_toml(source))
     def test_generate_round_trip_preserves_poisson_regions_and_populations(self):
         source = '''config_kind = "general"
 schema_version = "1"
@@ -113,6 +189,49 @@ length = 2
         rendered = render_general_toml(form)
         reparsed = parse_general_toml(rendered)
         self.assertEqual(form.population_snvs, reparsed.population_snvs)
+
+    def test_generate_round_trip_preserves_spectrum_and_approved_profiles(self):
+        source = '''config_kind = "general"
+schema_version = "1"
+[population_snvs]
+mode = "generate"
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "human_harris2017_snv12_approx_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "spectrum"
+frequency_mode = "exact"
+[[population_snvs.generate.populations.spectrum]]
+kind = "fixed"
+fixed_alt_af = 0
+weight = 1
+[[population_snvs.generate.populations.spectrum]]
+kind = "interval"
+min_alt_af = 0.1
+max_alt_af = 0.9
+weight = 2
+sampling = "linear_uniform"
+[[population_snvs.generate.populations]]
+population_id = "P2"
+frequency_model = "human_1000g_global_sfs_approx_v1"
+[reference]
+kind = "simulated"
+id = "ref"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1
+'''
+        form = parse_general_toml(source)
+        self.assertEqual(parse_general_toml(render_general_toml(form)), form)
 
     def test_generate_requires_its_nested_table(self):
         with self.assertRaises(EditorError):

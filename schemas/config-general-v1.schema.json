@@ -228,7 +228,7 @@
         "mean_loci": { "type": "number", "minimum": 0 },
         "mean_density_per_base": { "type": "number", "minimum": 0 },
         "spatial_mode": { "enum": ["uniform", "weighted_regions"] },
-        "substitution_profile": { "const": "uniform_snv12_v1" },
+        "substitution_profile": { "enum": ["uniform_snv12_v1", "human_harris2017_snv12_approx_v1"] },
         "outside_weight": { "type": "number", "minimum": 0 },
         "regions": { "type": "array", "items": { "$ref": "#/$defs/population_snvs_region" } },
         "populations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/population_snvs_population" } }
@@ -250,6 +250,36 @@
       ]
     },
     "population_snvs_region": { "type": "object", "additionalProperties": false, "required": ["contig", "start", "end", "weight"], "properties": { "contig": { "$ref": "#/$defs/identifier" }, "start": { "type": "integer", "minimum": 1 }, "end": { "type": "integer", "minimum": 1 }, "weight": { "type": "number", "minimum": 0 } } },
-    "population_snvs_population": { "type": "object", "additionalProperties": false, "required": ["population_id", "frequency_model", "min_alt_af", "max_alt_af"], "properties": { "population_id": { "$ref": "#/$defs/identifier" }, "frequency_model": { "const": "uniform" }, "min_alt_af": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 }, "max_alt_af": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } } }
+    "population_snvs_population": {
+      "type": "object", "additionalProperties": false, "required": ["population_id", "frequency_model"],
+      "properties": {
+        "population_id": { "$ref": "#/$defs/identifier" },
+        "frequency_model": { "enum": ["uniform", "spectrum", "human_1000g_global_sfs_approx_v1"] },
+        "frequency_mode": { "enum": ["stochastic", "exact"], "default": "stochastic" },
+        "min_alt_af": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 },
+        "max_alt_af": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "spectrum": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/frequency_spectrum_component" }, "x-gps-control": "table" }
+      },
+      "oneOf": [
+        { "properties": { "frequency_model": { "const": "uniform" } }, "required": ["min_alt_af", "max_alt_af"], "not": { "anyOf": [{ "required": ["spectrum"] }, { "required": ["frequency_mode"] }] } },
+        { "properties": { "frequency_model": { "const": "spectrum" } }, "required": ["spectrum"], "not": { "anyOf": [{ "required": ["min_alt_af"] }, { "required": ["max_alt_af"] }] } },
+        { "properties": { "frequency_model": { "const": "human_1000g_global_sfs_approx_v1" } }, "not": { "anyOf": [{ "required": ["min_alt_af"] }, { "required": ["max_alt_af"] }, { "required": ["spectrum"] }] } }
+      ]
+    },
+    "frequency_spectrum_component": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "weight"],
+      "properties": {
+        "kind": { "enum": ["fixed", "interval"] },
+        "fixed_alt_af": { "type": "number", "minimum": 0, "maximum": 1 },
+        "min_alt_af": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 },
+        "max_alt_af": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "weight": { "type": "number", "minimum": 0 },
+        "sampling": { "enum": ["linear_uniform", "log_uniform"] }
+      },
+      "oneOf": [
+        { "properties": { "kind": { "const": "fixed" } }, "required": ["fixed_alt_af"], "not": { "anyOf": [{ "required": ["min_alt_af"] }, { "required": ["max_alt_af"] }, { "required": ["sampling"] }] } },
+        { "properties": { "kind": { "const": "interval" } }, "required": ["min_alt_af", "max_alt_af", "sampling"], "not": { "required": ["fixed_alt_af"] } }
+      ]
+    }
   }
 }

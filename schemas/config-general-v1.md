@@ -75,10 +75,31 @@ La tabla opcional `[population_snvs]` fija una fuente excluyente de matriz SNV:
 `[population_snvs.generate]`. Este bloque usa `count_mode = "exact"` con
 `locus_count`, o `count_mode = "poisson"` con exactamente uno de `mean_loci` y
 `mean_density_per_base`; fija `spatial_mode = "uniform"` o
-`"weighted_regions"`, y `substitution_profile = "uniform_snv12_v1"`. Cada
-población declara `population_id`, `frequency_model = "uniform"`,
-`min_alt_af` y `max_alt_af`; las regiones ponderadas incluyen
-`outside_weight`, `contig`, `start`, `end` y `weight` en base 1 cerrada. La tabla canónica
+`"weighted_regions"`, y selecciona explícitamente `substitution_profile`:
+`uniform_snv12_v1` (predeterminado) o
+`human_harris2017_snv12_approx_v1`. El segundo es una aproximación versionada
+de los doce cambios SNV dirigida por el recurso Harris 2017; no constituye una
+tasa universal.
+
+Cada población declara `population_id` y uno de estos modelos de frecuencia:
+`frequency_model = "uniform"` con `min_alt_af` y `max_alt_af` (el intervalo
+heredado semiabierto `[min_alt_af,max_alt_af)`); `frequency_model =
+"spectrum"` con una lista no vacía `spectrum`; o el perfil explícito
+`human_1000g_global_sfs_approx_v1`. Este último es una aproximación global SFS
+versionada, nunca una elección implícita. Los modelos `spectrum` y
+`human_1000g_global_sfs_approx_v1` admiten `frequency_mode = "stochastic"`
+(predeterminado) o `"exact"`: el primero sortea la componente por VariantId y
+el segundo fija sus cuotas mediante mayores restos, con una permutación
+determinista por VariantId. El modelo `uniform` debe omitir `frequency_mode`.
+
+Cada entrada de `spectrum` declara un `weight` finito no negativo (al menos
+uno debe ser positivo) y es `kind = "fixed"` con `fixed_alt_af` en `[0,1]`, o
+`kind = "interval"` con `min_alt_af`, `max_alt_af` y `sampling`. Los
+intervalos son semiabiertos, no se solapan y usan `sampling =
+"linear_uniform"` o `"log_uniform"`; el muestreo logarítmico exige mínimo
+estrictamente positivo. Los valores `0` y `1` solo se expresan con componentes
+fijos. Las regiones ponderadas incluyen `outside_weight`, `contig`, `start`,
+`end` y `weight` en base 1 cerrada. La tabla canónica
 `population_snvs.tsv` usa exactamente las ocho columnas ordenadas
 `variant_id`, `contig`, `position`, `ref`, `alt`, `population_id`, `alt_af` y
 `source_id`; VCF no es una entrada admitida. Su JSON asociado declara la clase

@@ -305,11 +305,14 @@ fn parse_population_snvs_generation(
     }
     let spatial_mode = required_string(admitted, table, "spatial_mode")?;
     let substitution_profile = required_string(admitted, table, "substitution_profile")?;
-    if substitution_profile.value() != "uniform_snv12_v1" {
+    if !matches!(
+        substitution_profile.value().as_str(),
+        "uniform_snv12_v1" | "human_harris2017_snv12_approx_v1"
+    ) {
         return Err(semantic_error(
             admitted,
             "population_snvs.generate.substitution_profile",
-            "F2.2.5 solo admite uniform_snv12_v1",
+            "substitution_profile debe ser uniform_snv12_v1 o human_harris2017_snv12_approx_v1",
         ));
     }
     let outside_weight = optional_number(admitted, table, "outside_weight")?;
@@ -365,15 +368,90 @@ fn parse_population_snvs_generation(
                 &[
                     "population_id",
                     "frequency_model",
+                    "frequency_mode",
                     "min_alt_af",
                     "max_alt_af",
+                    "spectrum",
                 ],
             )?;
+            let frequency_model = required_string(admitted, population, "frequency_model")?;
+            let frequency_mode = optional_located_string(admitted, population, "frequency_mode")?;
+            let min_alt_af = optional_number(admitted, population, "min_alt_af")?;
+            let max_alt_af = optional_number(admitted, population, "max_alt_af")?;
+            let spectrum = optional_array(admitted, population, "spectrum")?
+                .unwrap_or_default()
+                .iter()
+                .map(|value| {
+                    let component = value.get_ref().as_table().ok_or_else(|| {
+                        wrong_type(admitted, "population_snvs.generate.populations.spectrum", value, "table")
+                    })?;
+                    check_unknown(
+                        admitted,
+                        component,
+                        &["kind", "fixed_alt_af", "min_alt_af", "max_alt_af", "weight", "sampling"],
+                    )?;
+                    let kind = required_string(admitted, component, "kind")?;
+                    let fixed_alt_af = optional_number(admitted, component, "fixed_alt_af")?;
+                    let min_alt_af = optional_number(admitted, component, "min_alt_af")?;
+                    let max_alt_af = optional_number(admitted, component, "max_alt_af")?;
+                    let sampling = optional_located_string(admitted, component, "sampling")?;
+                    let valid = match kind.value().as_str() {
+                        "fixed" => fixed_alt_af.is_some()
+                            && min_alt_af.is_none()
+                            && max_alt_af.is_none()
+                            && sampling.is_none(),
+                        "interval" => fixed_alt_af.is_none()
+                            && min_alt_af.is_some()
+                            && max_alt_af.is_some()
+                            && sampling.is_some(),
+                        _ => false,
+                    };
+                    if !valid {
+                        return Err(semantic_error(
+                            admitted,
+                            "population_snvs.generate.populations.spectrum",
+                            "fixed exige solo fixed_alt_af; interval exige min_alt_af, max_alt_af y sampling",
+                        ));
+                    }
+                    Ok(crate::configuration::DeclaredFrequencySpectrumComponent {
+                        kind,
+                        fixed_alt_af,
+                        min_alt_af,
+                        max_alt_af,
+                        weight: required_number(admitted, component, "weight")?,
+                        sampling,
+                    })
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?;
+            let simple_uniform = frequency_model.value() == "uniform"
+                && frequency_mode.is_none()
+                && min_alt_af.is_some()
+                && max_alt_af.is_some()
+                && spectrum.is_empty();
+            let supplied_spectrum = frequency_model.value() == "spectrum"
+                && min_alt_af.is_none()
+                && max_alt_af.is_none()
+                && !spectrum.is_empty();
+            let builtin = matches!(
+                frequency_model.value().as_str(),
+                "human_1000g_global_sfs_approx_v1"
+            ) && min_alt_af.is_none()
+                && max_alt_af.is_none()
+                && spectrum.is_empty();
+            if !(simple_uniform || supplied_spectrum || builtin) {
+                return Err(semantic_error(
+                    admitted,
+                    "population_snvs.generate.populations",
+                    "uniform exige límites y omite frequency_mode; spectrum exige componentes y human_1000g_global_sfs_approx_v1 no admite límites",
+                ));
+            }
             Ok(DeclaredPopulationSnvsPopulation {
                 population_id: required_string(admitted, population, "population_id")?,
-                frequency_model: required_string(admitted, population, "frequency_model")?,
-                min_alt_af: required_number(admitted, population, "min_alt_af")?,
-                max_alt_af: required_number(admitted, population, "max_alt_af")?,
+                frequency_model,
+                frequency_mode,
+                min_alt_af,
+                max_alt_af,
+                spectrum,
             })
         })
         .collect::<Result<Vec<_>, Diagnostic>>()?;
@@ -385,11 +463,13 @@ fn parse_population_snvs_generation(
         ));
     }
     for population in &populations {
-        if population.frequency_model.value() != "uniform" {
+        if let Some(mode) = &population.frequency_mode
+            && !matches!(mode.value().as_str(), "stochastic" | "exact")
+        {
             return Err(semantic_error(
                 admitted,
                 "population_snvs.generate.populations",
-                "F2.2.5 exige frequency_model uniform",
+                "frequency_mode debe ser stochastic o exact",
             ));
         }
     }

@@ -125,6 +125,74 @@ length = 2
 }
 
 #[test]
+fn f2_2_6_accepts_explicit_spectra_and_approved_profiles() {
+    let text = generated_config(
+        r#"count_mode = "exact"
+locus_count = 2
+spatial_mode = "uniform"
+substitution_profile = "human_harris2017_snv12_approx_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "spectrum"
+frequency_mode = "exact"
+[[population_snvs.generate.populations.spectrum]]
+kind = "fixed"
+fixed_alt_af = 0
+weight = 1
+[[population_snvs.generate.populations.spectrum]]
+kind = "interval"
+min_alt_af = 0.1
+max_alt_af = 0.9
+weight = 3
+sampling = "log_uniform"
+[[population_snvs.generate.populations]]
+population_id = "P2"
+frequency_model = "human_1000g_global_sfs_approx_v1"
+frequency_mode = "stochastic""#,
+    );
+    let admitted = admit_toml_header(
+        Path::new("population-snvs.toml"),
+        text.into_bytes(),
+        ExpectedConfigKind::General,
+    )
+    .unwrap();
+    let effective = build_effective_config(&parse_declared_config(admitted).unwrap()).unwrap();
+    let generation = effective.population_snvs_generation().unwrap();
+    assert_eq!(generation.populations.len(), 2);
+    assert!(
+        generation
+            .populations
+            .iter()
+            .all(|population| population.spectrum.is_some())
+    );
+}
+
+#[test]
+fn uniform_frequency_model_rejects_an_ignored_frequency_mode() {
+    let text = generated_config(
+        r#"count_mode = "exact"
+locus_count = 2
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+frequency_mode = "exact"
+min_alt_af = 0.1
+max_alt_af = 0.9"#,
+    );
+    let admitted = admit_toml_header(
+        Path::new("population-snvs.toml"),
+        text.into_bytes(),
+        ExpectedConfigKind::General,
+    )
+    .unwrap();
+    let error =
+        parse_declared_config(admitted).expect_err("uniform must not ignore frequency_mode");
+    assert!(error.context()["detail"].contains("omite frequency_mode"));
+}
+
+#[test]
 fn generate_rejects_incompatible_count_and_frequency_contracts() {
     let invalid = config("generate", "generate");
     assert!(parse(&invalid).is_err());

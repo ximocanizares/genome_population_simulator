@@ -19,6 +19,7 @@ def _():
         editor_integer,
         ordered_editor_rows,
         parse_general_toml,
+        population_snvs_population_from_editor_row,
         render_general_toml,
     )
     from process_adapter import (
@@ -49,6 +50,7 @@ def _():
         mo,
         ordered_editor_rows,
         parse_general_toml,
+        population_snvs_population_from_editor_row,
         render_general_toml,
         run_toml,
         validate_toml,
@@ -126,9 +128,19 @@ def _(BASES, imported_form, mo):
     population_snvs_mean_loci_control = mo.ui.text(value=str(generate.get("mean_loci", "10")), label="Media Poisson de loci")
     population_snvs_density_control = mo.ui.text(value=str(generate.get("mean_density_per_base", "0.01")), label="Densidad media por base")
     population_snvs_spatial_mode_control = mo.ui.dropdown(options=["uniform", "weighted_regions"], value=generate.get("spatial_mode", "uniform"), label="Espacio de loci")
+    population_snvs_substitution_profile_control = mo.ui.dropdown(
+        options=["uniform_snv12_v1", "human_harris2017_snv12_approx_v1"],
+        value=generate.get("substitution_profile", "uniform_snv12_v1"),
+        label="Perfil de sustituciones SNV12",
+    )
     population_snvs_outside_weight_control = mo.ui.text(value=str(generate.get("outside_weight", "1")), label="Peso fuera de regiones")
     population_snvs_regions_editor = mo.ui.data_editor([{"order": index, **row} for index, row in enumerate(generate.get("regions", [{"contig": "", "start": 1, "end": 1, "weight": 1.0}]), start=1)], label="Regiones ponderadas (fila vacía se omite)", pagination=False)
-    population_snvs_populations_editor = mo.ui.data_editor([{"order": index, **row} for index, row in enumerate(generate.get("populations", [{"population_id": "population-1", "frequency_model": "uniform", "min_alt_af": 0.01, "max_alt_af": 0.99}]), start=1)], label="Poblaciones y frecuencias", pagination=False)
+    population_snvs_populations_editor = mo.ui.data_editor([{"order": index, **row} for index, row in enumerate(generate.get("populations", [{"population_id": "population-1", "frequency_model": "uniform", "min_alt_af": 0.01, "max_alt_af": 0.99}]), start=1)], label="Poblaciones y perfiles de frecuencia (modo solo para spectrum/1000G)", pagination=False)
+    population_snvs_spectra_editor = mo.ui.data_editor(
+        [{"order": index, "population_id": population.get("population_id", ""), **component} for population in generate.get("populations", []) for index, component in enumerate(population.get("spectrum", []), start=1)] or [{"order": 1, "population_id": "population-1", "kind": "interval", "min_alt_af": 0.01, "max_alt_af": 0.99, "weight": 1.0, "sampling": "linear_uniform"}],
+        label="Componentes de espectro por población (solo spectrum)",
+        pagination=False,
+    )
     reference_kind_control = mo.ui.dropdown(
         options=["simulated", "supplied"],
         value=imported_form.reference.kind,
@@ -207,9 +219,11 @@ def _(BASES, imported_form, mo):
         population_snvs_mean_loci_control,
         population_snvs_density_control,
         population_snvs_spatial_mode_control,
+        population_snvs_substitution_profile_control,
         population_snvs_outside_weight_control,
         population_snvs_regions_editor,
         population_snvs_populations_editor,
+        population_snvs_spectra_editor,
         sequence_editor,
     )
 
@@ -241,12 +255,15 @@ def _(
     population_snvs_mean_loci_control,
     population_snvs_density_control,
     population_snvs_spatial_mode_control,
+    population_snvs_substitution_profile_control,
     population_snvs_outside_weight_control,
     population_snvs_regions_editor,
     population_snvs_populations_editor,
+    population_snvs_spectra_editor,
     seed_control,
     sequence_editor,
     ordered_editor_rows,
+    population_snvs_population_from_editor_row,
 ):
     preview_error = None
     preview_toml = ""
@@ -255,18 +272,22 @@ def _(
         generated = {
             "count_mode": count_mode,
             "spatial_mode": str(population_snvs_spatial_mode_control.value),
-            "substitution_profile": "uniform_snv12_v1",
-            "populations": [
-                {
-                    "population_id": str(row["population_id"]),
-                    "frequency_model": str(row["frequency_model"]),
-                    "min_alt_af": float(row["min_alt_af"]),
-                    "max_alt_af": float(row["max_alt_af"]),
-                }
-                for row in ordered_editor_rows(population_snvs_populations_editor.value, "population_snvs.generate.populations")
-                if str(row["population_id"]).strip()
-            ],
+            "substitution_profile": str(population_snvs_substitution_profile_control.value),
+            "populations": [],
         }
+        components_by_population = {}
+        for row in ordered_editor_rows(population_snvs_spectra_editor.value, "population_snvs.generate.populations.spectrum"):
+            population_id = str(row.get("population_id", "")).strip()
+            if population_id:
+                component = {key: row[key] for key in ("kind", "fixed_alt_af", "min_alt_af", "max_alt_af", "weight", "sampling") if key in row and row[key] is not None}
+                components_by_population.setdefault(population_id, []).append(component)
+        for row in ordered_editor_rows(population_snvs_populations_editor.value, "population_snvs.generate.populations"):
+            population_id = str(row["population_id"]).strip()
+            if not population_id:
+                continue
+            generated["populations"].append(
+                population_snvs_population_from_editor_row(row, components_by_population)
+            )
         if count_mode == "exact":
             generated["locus_count"] = editor_integer(population_snvs_locus_count_control.value, "population_snvs.generate.locus_count")
         else:
@@ -494,9 +515,11 @@ def _(
     population_snvs_mean_loci_control,
     population_snvs_density_control,
     population_snvs_spatial_mode_control,
+    population_snvs_substitution_profile_control,
     population_snvs_outside_weight_control,
     population_snvs_regions_editor,
     population_snvs_populations_editor,
+    population_snvs_spectra_editor,
     sequence_editor,
     validate_button,
     validation_error,
@@ -547,9 +570,11 @@ def _(
                 population_snvs_mean_loci_control,
                 population_snvs_density_control,
                 population_snvs_spatial_mode_control,
+                population_snvs_substitution_profile_control,
                 population_snvs_outside_weight_control,
                 population_snvs_regions_editor,
                 population_snvs_populations_editor,
+                population_snvs_spectra_editor,
             ])
             if population_panel_mode == "generate"
             else mo.callout("No se ha seleccionado una matriz SNV.", kind="neutral")

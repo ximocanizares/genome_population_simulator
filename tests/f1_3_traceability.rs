@@ -204,7 +204,6 @@ fn f1_runtime_has_no_preparatory_rng_scope_or_event_comparator() {
     for forbidden in [
         "\"initial_population\"",
         "\"biological_process\"",
-        "\"sampling\"",
         "\"technical_event\"",
         "EventSubseed",
         "event_subseeds",

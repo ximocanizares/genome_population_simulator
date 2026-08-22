@@ -1,0 +1,27 @@
+{
+  "schema_version": "1",
+  "profiles": {
+    "human_1000g_global_sfs_approx_v1": {
+      "classification": "approximate_descriptive_not_universal_rate",
+      "article_url": "https://www.nature.com/articles/nature15393",
+      "literals": {
+        "minimum_alt_af": "1/5008",
+        "weights": [64, 12, 8]
+      },
+      "output_path": "human_1000g_global_sfs_approx_v1.tsv",
+      "output_sha256": "0ae67f89380293a136dd265099785790b32588a6234234e702c280f15276fc7e"
+    },
+    "human_harris2017_snv12_approx_v1": {
+      "classification": "approximate_descriptive_not_universal_rate",
+      "article_url": "https://elifesciences.org/articles/24284",
+      "data_doi": "https://doi.org/10.7554/eLife.24284.004",
+      "data_url": "https://cdn.elifesciences.org/articles/24284/elife-24284-fig1-data1-v2.txt",
+      "license": "CC-BY-4.0",
+      "input_path": "elife-24284-fig1-data1-v2.txt",
+      "input_size": 3644,
+      "input_sha256": "970cc71578fc008ef4e0d75c7c460ab874073da7c5b5226c526b387627c97a7f",
+      "output_path": "human_harris2017_snv12_approx_v1.tsv",
+      "output_sha256": "ea2f515124eafe7ed174930f7a71c4f524f4c7c9d22bfc4d3b0051dff55db0b2"
+    }
+  }
+}

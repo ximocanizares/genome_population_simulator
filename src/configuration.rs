@@ -246,8 +246,20 @@ pub struct DeclaredPopulationSnvsRegion {
 pub struct DeclaredPopulationSnvsPopulation {
     pub population_id: Located<String>,
     pub frequency_model: Located<String>,
-    pub min_alt_af: DeclaredNumber,
-    pub max_alt_af: DeclaredNumber,
+    pub frequency_mode: Option<Located<String>>,
+    pub min_alt_af: Option<DeclaredNumber>,
+    pub max_alt_af: Option<DeclaredNumber>,
+    pub spectrum: Vec<DeclaredFrequencySpectrumComponent>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredFrequencySpectrumComponent {
+    pub kind: Located<String>,
+    pub fixed_alt_af: Option<DeclaredNumber>,
+    pub min_alt_af: Option<DeclaredNumber>,
+    pub max_alt_af: Option<DeclaredNumber>,
+    pub weight: DeclaredNumber,
+    pub sampling: Option<Located<String>>,
 }
 
 #[derive(Clone, Debug)]

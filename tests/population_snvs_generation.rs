@@ -6,9 +6,10 @@ use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::execute_validated_config;
 use genome_population_simulator::identity::ReferenceId;
 use genome_population_simulator::population_snvs::{
-    GeneratedLocusCount, GeneratedPopulationFrequency, GeneratedSpatialMode,
-    GeneratedWeightedRegion, PopulationSnvsGenerationConfig, PopulationSnvsGenerationError,
-    generate_population_snvs,
+    FrequencyAssignmentMode, FrequencySampling, FrequencySpectrumComponent,
+    GeneratedFrequencySpectrum, GeneratedLocusCount, GeneratedPopulationFrequency,
+    GeneratedSpatialMode, GeneratedSubstitutionProfile, GeneratedWeightedRegion,
+    PopulationSnvsGenerationConfig, PopulationSnvsGenerationError, generate_population_snvs,
 };
 use genome_population_simulator::randomness::RootSeed;
 use genome_population_simulator::reference::SequenceClass;
@@ -57,16 +58,19 @@ fn config(count: GeneratedLocusCount) -> PopulationSnvsGenerationConfig {
     PopulationSnvsGenerationConfig {
         count,
         spatial: GeneratedSpatialMode::Uniform,
+        substitution_profile: GeneratedSubstitutionProfile::UniformSnv12V1,
         populations: vec![
             GeneratedPopulationFrequency {
                 population_id: "P1".into(),
                 min_alt_af: 0.1,
                 max_alt_af: 0.9,
+                spectrum: None,
             },
             GeneratedPopulationFrequency {
                 population_id: "P2".into(),
                 min_alt_af: 0.2,
                 max_alt_af: 0.8,
+                spectrum: None,
             },
         ],
     }
@@ -182,6 +186,7 @@ fn population_frequency_streams_are_invariant_to_population_order_and_addition()
         population_id: "P3".into(),
         min_alt_af: 0.4,
         max_alt_af: 0.5,
+        spectrum: None,
     });
     let result = generate_population_snvs(&altered, &reference, seed).unwrap();
     for row in baseline.rows() {
@@ -194,6 +199,420 @@ fn population_frequency_streams_are_invariant_to_population_order_and_addition()
             })
             .unwrap();
         assert_eq!(observed.alt_af().to_bits(), row.alt_af().to_bits());
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn spectrum_exact_uses_largest_remainders_and_fixed_extremes() {
+    let directory = root();
+    let reference = reference(&directory);
+    let mut parameters = config(GeneratedLocusCount::Exact(4));
+    parameters.populations.truncate(1);
+    parameters.populations[0].spectrum = Some(GeneratedFrequencySpectrum {
+        mode: FrequencyAssignmentMode::Exact,
+        components: vec![
+            FrequencySpectrumComponent::Fixed {
+                value: 0.0,
+                weight: 1.0,
+            },
+            FrequencySpectrumComponent::Fixed {
+                value: 1.0,
+                weight: 1.0,
+            },
+            FrequencySpectrumComponent::Interval {
+                min: 0.1,
+                max: 0.2,
+                weight: 2.0,
+                sampling: FrequencySampling::LogUniform,
+            },
+        ],
+    });
+    let matrix =
+        generate_population_snvs(&parameters, &reference, RootSeed::from_bytes([14; 32])).unwrap();
+    let values = matrix
+        .rows()
+        .iter()
+        .map(|row| row.alt_af())
+        .collect::<Vec<_>>();
+    assert_eq!(values.iter().filter(|value| **value == 0.0).count(), 1);
+    assert_eq!(values.iter().filter(|value| **value == 1.0).count(), 1);
+    assert_eq!(
+        values
+            .iter()
+            .filter(|value| **value >= 0.1 && **value < 0.2)
+            .count(),
+        2
+    );
+    let mut continuous = config(GeneratedLocusCount::Exact(4));
+    continuous.populations.truncate(1);
+    continuous.populations[0].spectrum = Some(GeneratedFrequencySpectrum {
+        mode: FrequencyAssignmentMode::Exact,
+        components: vec![FrequencySpectrumComponent::Interval {
+            min: 0.0,
+            max: 1.0,
+            weight: 1.0,
+            sampling: FrequencySampling::LinearUniform,
+        }],
+    });
+    let continuous =
+        generate_population_snvs(&continuous, &reference, RootSeed::from_bytes([16; 32])).unwrap();
+    assert!(
+        continuous
+            .rows()
+            .iter()
+            .all(|row| row.alt_af() > 0.0 && row.alt_af() < 1.0)
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn rejects_overlapping_or_zero_weight_spectra() {
+    let directory = root();
+    let reference = reference(&directory);
+    let mut parameters = config(GeneratedLocusCount::Exact(1));
+    parameters.populations[0].spectrum = Some(GeneratedFrequencySpectrum {
+        mode: FrequencyAssignmentMode::Stochastic,
+        components: vec![
+            FrequencySpectrumComponent::Interval {
+                min: 0.1,
+                max: 0.5,
+                weight: 0.0,
+                sampling: FrequencySampling::LinearUniform,
+            },
+            FrequencySpectrumComponent::Interval {
+                min: 0.4,
+                max: 0.6,
+                weight: 0.0,
+                sampling: FrequencySampling::LinearUniform,
+            },
+        ],
+    });
+    assert!(matches!(
+        generate_population_snvs(&parameters, &reference, RootSeed::from_bytes([15; 32])),
+        Err(PopulationSnvsGenerationError::InvalidFrequencySpectrum { .. })
+    ));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+fn spectrum_validation_error(components: Vec<FrequencySpectrumComponent>) {
+    let directory = root();
+    let reference = reference(&directory);
+    let mut parameters = config(GeneratedLocusCount::Exact(1));
+    parameters.populations[0].spectrum = Some(GeneratedFrequencySpectrum {
+        mode: FrequencyAssignmentMode::Stochastic,
+        components,
+    });
+    assert!(matches!(
+        generate_population_snvs(&parameters, &reference, RootSeed::from_bytes([18; 32])),
+        Err(PopulationSnvsGenerationError::InvalidFrequencySpectrum { .. })
+    ));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn spectrum_rejects_overlapping_intervals_in_isolation() {
+    spectrum_validation_error(vec![
+        FrequencySpectrumComponent::Interval {
+            min: 0.1,
+            max: 0.6,
+            weight: 1.0,
+            sampling: FrequencySampling::LinearUniform,
+        },
+        FrequencySpectrumComponent::Interval {
+            min: 0.5,
+            max: 0.9,
+            weight: 1.0,
+            sampling: FrequencySampling::LinearUniform,
+        },
+    ]);
+}
+
+#[test]
+fn spectrum_rejects_all_zero_negative_and_nonfinite_weights_in_isolation() {
+    spectrum_validation_error(vec![FrequencySpectrumComponent::Fixed {
+        value: 0.1,
+        weight: 0.0,
+    }]);
+    spectrum_validation_error(vec![FrequencySpectrumComponent::Fixed {
+        value: 0.1,
+        weight: -1.0,
+    }]);
+    spectrum_validation_error(vec![FrequencySpectrumComponent::Fixed {
+        value: 0.1,
+        weight: f64::NAN,
+    }]);
+    spectrum_validation_error(vec![FrequencySpectrumComponent::Fixed {
+        value: 0.1,
+        weight: f64::INFINITY,
+    }]);
+}
+
+#[test]
+fn spectrum_rejects_invalid_log_and_fixed_components_in_isolation() {
+    spectrum_validation_error(vec![FrequencySpectrumComponent::Interval {
+        min: 0.0,
+        max: 0.5,
+        weight: 1.0,
+        sampling: FrequencySampling::LogUniform,
+    }]);
+    spectrum_validation_error(vec![FrequencySpectrumComponent::Fixed {
+        value: 1.1,
+        weight: 1.0,
+    }]);
+    spectrum_validation_error(vec![
+        FrequencySpectrumComponent::Fixed {
+            value: 0.1,
+            weight: 1.0,
+        },
+        FrequencySpectrumComponent::Fixed {
+            value: 0.1,
+            weight: 1.0,
+        },
+    ]);
+    spectrum_validation_error(vec![
+        FrequencySpectrumComponent::Fixed {
+            value: 0.2,
+            weight: 1.0,
+        },
+        FrequencySpectrumComponent::Interval {
+            min: 0.1,
+            max: 0.3,
+            weight: 1.0,
+            sampling: FrequencySampling::LinearUniform,
+        },
+    ]);
+}
+
+#[test]
+fn spectrum_allows_adjacent_semiopen_intervals() {
+    let directory = root();
+    let reference = reference(&directory);
+    let mut parameters = config(GeneratedLocusCount::Exact(4));
+    parameters.populations.truncate(1);
+    parameters.populations[0].spectrum = Some(GeneratedFrequencySpectrum {
+        mode: FrequencyAssignmentMode::Exact,
+        components: vec![
+            FrequencySpectrumComponent::Interval {
+                min: 0.0,
+                max: 0.5,
+                weight: 1.0,
+                sampling: FrequencySampling::LinearUniform,
+            },
+            FrequencySpectrumComponent::Interval {
+                min: 0.5,
+                max: 1.0,
+                weight: 1.0,
+                sampling: FrequencySampling::LinearUniform,
+            },
+        ],
+    });
+    assert!(
+        generate_population_snvs(&parameters, &reference, RootSeed::from_bytes([19; 32])).is_ok()
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn exact_spectrum_uses_fractional_largest_remainders_and_stable_tie_order() {
+    let directory = root();
+    let reference = reference(&directory);
+    let mut parameters = config(GeneratedLocusCount::Exact(4));
+    parameters.populations.truncate(1);
+    parameters.populations[0].spectrum = Some(GeneratedFrequencySpectrum {
+        mode: FrequencyAssignmentMode::Exact,
+        components: vec![
+            FrequencySpectrumComponent::Fixed {
+                value: 0.11,
+                weight: 1.0,
+            },
+            FrequencySpectrumComponent::Fixed {
+                value: 0.22,
+                weight: 1.0,
+            },
+            FrequencySpectrumComponent::Fixed {
+                value: 0.33,
+                weight: 1.0,
+            },
+        ],
+    });
+    let matrix =
+        generate_population_snvs(&parameters, &reference, RootSeed::from_bytes([17; 32])).unwrap();
+    let values = matrix
+        .rows()
+        .iter()
+        .map(|row| row.alt_af())
+        .collect::<Vec<_>>();
+    assert_eq!(values.iter().filter(|value| **value == 0.11).count(), 2);
+    assert_eq!(values.iter().filter(|value| **value == 0.22).count(), 1);
+    assert_eq!(values.iter().filter(|value| **value == 0.33).count(), 1);
+    assert_eq!(values, vec![0.11, 0.33, 0.22, 0.11]);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+fn exact_population(
+    id: &str,
+    fixed: f64,
+    min: f64,
+    max: f64,
+    include_zero_quota_component: bool,
+) -> GeneratedPopulationFrequency {
+    let mut components = vec![
+        FrequencySpectrumComponent::Fixed {
+            value: fixed,
+            weight: 1.0,
+        },
+        FrequencySpectrumComponent::Interval {
+            min,
+            max,
+            weight: 2.0,
+            sampling: FrequencySampling::LinearUniform,
+        },
+    ];
+    if include_zero_quota_component {
+        // Para N=4 su cuota es cero: no debe alterar la asignación ni
+        // disparar un sorteo de valor para esta componente fija.
+        components.push(FrequencySpectrumComponent::Fixed {
+            value: 0.99,
+            weight: 0.0,
+        });
+    }
+    GeneratedPopulationFrequency {
+        population_id: id.to_owned(),
+        min_alt_af: 0.0,
+        max_alt_af: 1.0,
+        spectrum: Some(GeneratedFrequencySpectrum {
+            mode: FrequencyAssignmentMode::Exact,
+            components,
+        }),
+    }
+}
+
+#[test]
+fn exact_frequency_assignment_is_variant_id_stable_across_population_order_and_addition() {
+    let directory = root();
+    let reference = reference(&directory);
+    let mut baseline = config(GeneratedLocusCount::Exact(4));
+    baseline.populations = vec![
+        exact_population("P1", 0.11, 0.40, 0.50, true),
+        exact_population("P2", 0.22, 0.60, 0.70, true),
+    ];
+    let seed = RootSeed::from_bytes([21; 32]);
+    let first = generate_population_snvs(&baseline, &reference, seed).unwrap();
+    let mut reordered = baseline.clone();
+    reordered.populations.reverse();
+    reordered
+        .populations
+        .push(exact_population("P3", 0.33, 0.70, 0.80, true));
+    let second = generate_population_snvs(&reordered, &reference, seed).unwrap();
+    for row in first.rows() {
+        let other = second
+            .rows()
+            .iter()
+            .find(|candidate| {
+                candidate.population_id() == row.population_id()
+                    && candidate.variant_id() == row.variant_id()
+            })
+            .unwrap();
+        assert_eq!(other.alt_af().to_bits(), row.alt_af().to_bits());
+    }
+
+    // Una componente de cuota cero no participa ni desplaza las corrientes de
+    // asignación/valor de las componentes activas.
+    let mut without_zero_quota = config(GeneratedLocusCount::Exact(4));
+    without_zero_quota.populations = vec![
+        exact_population("P1", 0.11, 0.40, 0.50, false),
+        exact_population("P2", 0.22, 0.60, 0.70, false),
+    ];
+    let without_zero_quota =
+        generate_population_snvs(&without_zero_quota, &reference, seed).unwrap();
+    for row in first.rows() {
+        let other = without_zero_quota
+            .rows()
+            .iter()
+            .find(|candidate| {
+                candidate.population_id() == row.population_id()
+                    && candidate.variant_id() == row.variant_id()
+            })
+            .unwrap();
+        assert_eq!(other.alt_af().to_bits(), row.alt_af().to_bits());
+    }
+
+    // Cambiar exclusivamente el valor fijo conserva las tres extracciones de
+    // intervalo por VariantId: fixed no consume la corriente de valores.
+    let mut changed_fixed = baseline.clone();
+    changed_fixed.populations[0] = exact_population("P1", 0.12, 0.40, 0.50, true);
+    let changed_fixed = generate_population_snvs(&changed_fixed, &reference, seed).unwrap();
+    for row in first
+        .rows()
+        .iter()
+        .filter(|row| row.population_id().as_str() == "P1")
+    {
+        let other = changed_fixed
+            .rows()
+            .iter()
+            .find(|candidate| {
+                candidate.population_id() == row.population_id()
+                    && candidate.variant_id() == row.variant_id()
+            })
+            .unwrap();
+        let expected = if row.alt_af() == 0.11 {
+            0.12
+        } else {
+            row.alt_af()
+        };
+        assert_eq!(other.alt_af().to_bits(), expected.to_bits());
+    }
+
+    let p1 = first
+        .rows()
+        .iter()
+        .filter(|row| row.population_id().as_str() == "P1")
+        .map(|row| (row.variant_id().as_str(), row.alt_af()))
+        .collect::<Vec<_>>();
+    let p2 = first
+        .rows()
+        .iter()
+        .filter(|row| row.population_id().as_str() == "P2")
+        .map(|row| (row.variant_id().as_str(), row.alt_af()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        p1,
+        vec![
+            ("VAR_USYUVYBQYFQOIUM2Z6LW4K7HKA", 0.11),
+            ("VAR_SEF5VD7KSUS6KWUEZIK2ZXAIWI", 0.479_584_908_530_667_76),
+            ("VAR_QJXGBAVGTGRCFFBQIJ2H5M5HCQ", 0.496_784_172_816_939_54),
+            ("VAR_JE6MDR4M7NEHP6GJ4WCUEEDK7E", 0.472_674_930_901_828_16),
+        ]
+    );
+    assert_eq!(
+        p2,
+        vec![
+            ("VAR_USYUVYBQYFQOIUM2Z6LW4K7HKA", 0.682_954_222_217_499_1),
+            ("VAR_SEF5VD7KSUS6KWUEZIK2ZXAIWI", 0.22),
+            ("VAR_QJXGBAVGTGRCFFBQIJ2H5M5HCQ", 0.642_199_956_246_785_5),
+            ("VAR_JE6MDR4M7NEHP6GJ4WCUEEDK7E", 0.619_627_744_784_811_5),
+        ]
+    );
+    // Con las mismas coordenadas, las cuotas fijas recaen en VariantId
+    // distintos entre P1 y P2; por tanto no siguen el orden canónico.
+    assert_ne!(p1[0].0, p2[1].0);
+    for (population, fixed, min, max) in [("P1", 0.11, 0.40, 0.50), ("P2", 0.22, 0.60, 0.70)] {
+        let values = first
+            .rows()
+            .iter()
+            .filter(|row| row.population_id().as_str() == population)
+            .map(|row| row.alt_af())
+            .collect::<Vec<_>>();
+        assert_eq!(values.iter().filter(|value| **value == fixed).count(), 1);
+        assert_eq!(
+            values
+                .iter()
+                .filter(|value| **value >= min && **value < max)
+                .count(),
+            3
+        );
+        assert!(!values.contains(&0.99));
     }
     fs::remove_dir_all(directory).unwrap();
 }

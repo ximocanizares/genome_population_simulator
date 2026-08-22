@@ -12,7 +12,7 @@ use std::fs;
 use crate::identity::{PopulationId, SequenceId, VariantId, derive_matrix_variant_id};
 use crate::randomness::{
     RandomSamplingError, RootSeed, RuntimeSubseedScope, categorical_f64, derive_subseed,
-    linear_uniform, poisson_count, weighted_without_replacement,
+    fisher_yates, linear_uniform, log_uniform, poisson_count, weighted_without_replacement,
 };
 use crate::reference::Reference;
 use crate::results::ResolvedManifestReference;
@@ -1197,19 +1197,72 @@ pub enum GeneratedSpatialMode {
     },
 }
 
-/// Único espectro de frecuencias incorporado por F2.2.5. Los extremos no se
-/// producen: para masas fijas y perfiles adicionales corresponde F2.2.6.
+/// Método con que un componente de espectro produce una frecuencia ALT.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FrequencySampling {
+    LinearUniform,
+    LogUniform,
+}
+
+/// Componente ordenado de un espectro de frecuencias ALT.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FrequencySpectrumComponent {
+    Fixed {
+        value: f64,
+        weight: f64,
+    },
+    Interval {
+        min: f64,
+        max: f64,
+        weight: f64,
+        sampling: FrequencySampling,
+    },
+}
+
+impl FrequencySpectrumComponent {
+    fn weight(&self) -> f64 {
+        match self {
+            Self::Fixed { weight, .. } | Self::Interval { weight, .. } => *weight,
+        }
+    }
+}
+
+/// Política de asociación de componentes a los loci de una población.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FrequencyAssignmentMode {
+    Stochastic,
+    Exact,
+}
+
+/// Espectro explícito de frecuencias ALT, en orden estable de componentes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeneratedFrequencySpectrum {
+    pub mode: FrequencyAssignmentMode,
+    pub components: Vec<FrequencySpectrumComponent>,
+}
+
+/// Perfil de pesos para los doce cambios dirigidos de SNV.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GeneratedSubstitutionProfile {
+    UniformSnv12V1,
+    HumanHarris2017Snv12ApproxV1,
+}
+
+/// Compatibilidad F2.2.5: cuando `spectrum` es `None`, `min_alt_af` y
+/// `max_alt_af` representan el único intervalo lineal estocástico con peso 1.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GeneratedPopulationFrequency {
     pub population_id: String,
     pub min_alt_af: f64,
     pub max_alt_af: f64,
+    pub spectrum: Option<GeneratedFrequencySpectrum>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopulationSnvsGenerationConfig {
     pub count: GeneratedLocusCount,
     pub spatial: GeneratedSpatialMode,
+    pub substitution_profile: GeneratedSubstitutionProfile,
     pub populations: Vec<GeneratedPopulationFrequency>,
 }
 
@@ -1219,6 +1272,7 @@ pub enum PopulationSnvsGenerationError {
     InvalidPopulation(String),
     DuplicatePopulation(String),
     InvalidFrequencyInterval { population_id: String },
+    InvalidFrequencySpectrum { population_id: String },
     InvalidRegion { contig: String },
     OverlappingRegions { contig: String },
     InvalidWeight,
@@ -1379,8 +1433,11 @@ fn generate_population_snvs_view(
             .into_iter()
             .filter(|base| base != reference_base)
             .collect();
-        let alternate = alternatives[categorical_f64(&mut alt_rng, &[1.0, 1.0, 1.0])
-            .map_err(PopulationSnvsGenerationError::Random)?];
+        let alternate = alternatives[categorical_f64(
+            &mut alt_rng,
+            &substitution_weights(config.substitution_profile, *reference_base, &alternatives),
+        )
+        .map_err(PopulationSnvsGenerationError::Random)?];
         let variant_id =
             derive_matrix_variant_id(&reference.id, contig, *position, *reference_base, alternate)
                 .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?;
@@ -1407,21 +1464,25 @@ fn generate_population_snvs_view(
         .map_err(|_| {
             PopulationSnvsGenerationError::InvalidPopulation(population.population_id.clone())
         })?;
-        for (contig, position, reference_base, alternate, variant_id) in &loci {
-            let mut value_rng = derive_subseed(
+        let spectrum = population_spectrum(population);
+        let assignments = assign_frequency_components(
+            &spectrum,
+            &loci,
+            root_seed,
+            &reference.id,
+            population_id.as_str(),
+        )?;
+        for ((contig, position, reference_base, alternate, variant_id), component_index) in
+            loci.iter().zip(assignments)
+        {
+            let component = &spectrum.components[component_index];
+            let alt_af = sample_frequency_component(
+                component,
                 root_seed,
-                RuntimeSubseedScope::MatrixFrequencyValue {
-                    scenario_id: "direct",
-                    reference_id: reference.id.as_str(),
-                    population_id: population_id.as_str(),
-                    variant_id: variant_id.as_str(),
-                },
-            )
-            .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
-            .local_rng();
-            let alt_af =
-                linear_uniform(&mut value_rng, population.min_alt_af, population.max_alt_af)
-                    .map_err(PopulationSnvsGenerationError::Random)?;
+                &reference.id,
+                population_id.as_str(),
+                variant_id.as_str(),
+            )?;
             rows.push(PreparedPopulationSnv {
                 variant_id: variant_id.clone(),
                 contig: contig.clone(),
@@ -1451,6 +1512,180 @@ fn generate_population_snvs_view(
         discarded_globally_absent: Vec::new(),
         empty_authorized: false,
     })
+}
+
+fn substitution_weights(
+    profile: GeneratedSubstitutionProfile,
+    reference: u8,
+    alternatives: &[u8],
+) -> Vec<f64> {
+    let weights = match profile {
+        GeneratedSubstitutionProfile::UniformSnv12V1 => [1.0; 3],
+        GeneratedSubstitutionProfile::HumanHarris2017Snv12ApproxV1 => {
+            harris_substitution_weights(reference, alternatives)
+        }
+    };
+    weights.to_vec()
+}
+
+fn harris_substitution_weights(reference: u8, alternatives: &[u8]) -> [f64; 3] {
+    const PROFILE: &str = include_str!("../resources/f2_2_6/human_harris2017_snv12_approx_v1.tsv");
+    let mut weights = BTreeMap::new();
+    for line in PROFILE.lines().skip(1) {
+        let mut fields = line.split('\t');
+        let Some(change) = fields.next() else {
+            continue;
+        };
+        let Some(weight) = fields.next().and_then(|value| value.parse::<f64>().ok()) else {
+            continue;
+        };
+        weights.insert(change, weight);
+    }
+    let mut result = [0.0; 3];
+    for (index, alternate) in alternatives.iter().copied().enumerate() {
+        let change = format!("{}>{}", char::from(reference), char::from(alternate));
+        result[index] = weights.get(change.as_str()).copied().unwrap_or(0.0);
+    }
+    result
+}
+
+fn population_spectrum(population: &GeneratedPopulationFrequency) -> GeneratedFrequencySpectrum {
+    population
+        .spectrum
+        .clone()
+        .unwrap_or(GeneratedFrequencySpectrum {
+            mode: FrequencyAssignmentMode::Stochastic,
+            components: vec![FrequencySpectrumComponent::Interval {
+                min: population.min_alt_af,
+                max: population.max_alt_af,
+                weight: 1.0,
+                sampling: FrequencySampling::LinearUniform,
+            }],
+        })
+}
+
+fn assign_frequency_components(
+    spectrum: &GeneratedFrequencySpectrum,
+    loci: &[(SequenceId, u64, u8, u8, VariantId)],
+    root_seed: RootSeed,
+    reference_id: &crate::identity::ReferenceId,
+    population_id: &str,
+) -> Result<Vec<usize>, PopulationSnvsGenerationError> {
+    let weights = spectrum
+        .components
+        .iter()
+        .map(FrequencySpectrumComponent::weight)
+        .collect::<Vec<_>>();
+    match spectrum.mode {
+        FrequencyAssignmentMode::Stochastic => loci
+            .iter()
+            .map(|(_, _, _, _, variant_id)| {
+                let mut rng = derive_subseed(
+                    root_seed,
+                    RuntimeSubseedScope::MatrixFrequencyComponent {
+                        scenario_id: "direct",
+                        reference_id: reference_id.as_str(),
+                        population_id,
+                        variant_id: variant_id.as_str(),
+                    },
+                )
+                .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
+                .local_rng();
+                categorical_f64(&mut rng, &weights).map_err(PopulationSnvsGenerationError::Random)
+            })
+            .collect(),
+        FrequencyAssignmentMode::Exact => {
+            let counts = largest_remainder_counts(loci.len(), &weights)?;
+            let mut permuted = (0..loci.len()).collect::<Vec<_>>();
+            permuted.sort_by(|left, right| loci[*left].4.as_str().cmp(loci[*right].4.as_str()));
+            let mut rng = derive_subseed(
+                root_seed,
+                RuntimeSubseedScope::MatrixExactAssignment {
+                    scenario_id: "direct",
+                    reference_id: reference_id.as_str(),
+                    population_id,
+                },
+            )
+            .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
+            .local_rng();
+            fisher_yates(&mut rng, &mut permuted).map_err(PopulationSnvsGenerationError::Random)?;
+            let mut assigned = vec![0; loci.len()];
+            let mut offset = 0;
+            for (component, count) in counts.into_iter().enumerate() {
+                for locus in &permuted[offset..offset + count] {
+                    assigned[*locus] = component;
+                }
+                offset += count;
+            }
+            Ok(assigned)
+        }
+    }
+}
+
+fn largest_remainder_counts(
+    count: usize,
+    weights: &[f64],
+) -> Result<Vec<usize>, PopulationSnvsGenerationError> {
+    let total = neumaier(weights.iter().copied());
+    if !total.is_finite() || total <= 0.0 {
+        return Err(PopulationSnvsGenerationError::InvalidFrequencySpectrum {
+            population_id: "unknown".to_owned(),
+        });
+    }
+    let mut quotas = weights
+        .iter()
+        .enumerate()
+        .map(|(index, weight)| {
+            let quota = (count as f64) * *weight / total;
+            let floor = quota.floor() as usize;
+            (index, floor, quota - floor as f64)
+        })
+        .collect::<Vec<_>>();
+    let assigned = quotas.iter().map(|(_, floor, _)| *floor).sum::<usize>();
+    quotas.sort_by(|left, right| {
+        right
+            .2
+            .partial_cmp(&left.2)
+            .unwrap_or(Ordering::Equal)
+            .then(left.0.cmp(&right.0))
+    });
+    for (_, floor, _) in quotas.iter_mut().take(count - assigned) {
+        *floor += 1;
+    }
+    quotas.sort_by_key(|(index, _, _)| *index);
+    Ok(quotas.into_iter().map(|(_, floor, _)| floor).collect())
+}
+
+fn sample_frequency_component(
+    component: &FrequencySpectrumComponent,
+    root_seed: RootSeed,
+    reference_id: &crate::identity::ReferenceId,
+    population_id: &str,
+    variant_id: &str,
+) -> Result<f64, PopulationSnvsGenerationError> {
+    match component {
+        FrequencySpectrumComponent::Fixed { value, .. } => Ok(*value),
+        FrequencySpectrumComponent::Interval {
+            min, max, sampling, ..
+        } => {
+            let mut rng = derive_subseed(
+                root_seed,
+                RuntimeSubseedScope::MatrixFrequencyValue {
+                    scenario_id: "direct",
+                    reference_id: reference_id.as_str(),
+                    population_id,
+                    variant_id,
+                },
+            )
+            .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
+            .local_rng();
+            match sampling {
+                FrequencySampling::LinearUniform => linear_uniform(&mut rng, *min, *max),
+                FrequencySampling::LogUniform => log_uniform(&mut rng, *min, *max),
+            }
+            .map_err(PopulationSnvsGenerationError::Random)
+        }
+    }
 }
 
 fn sample_candidate_count(
@@ -1519,7 +1754,9 @@ pub(crate) fn validate_generation_config(
                 population.population_id.clone(),
             ));
         }
-        if !population.min_alt_af.is_finite()
+        if let Some(spectrum) = &population.spectrum {
+            validate_frequency_spectrum(spectrum, &population.population_id)?;
+        } else if !population.min_alt_af.is_finite()
             || !population.max_alt_af.is_finite()
             || population.min_alt_af < 0.0
             || population.min_alt_af >= population.max_alt_af
@@ -1565,6 +1802,75 @@ pub(crate) fn validate_generation_config(
     Ok(())
 }
 
+fn validate_frequency_spectrum(
+    spectrum: &GeneratedFrequencySpectrum,
+    population_id: &str,
+) -> Result<(), PopulationSnvsGenerationError> {
+    if spectrum.components.is_empty() {
+        return Err(PopulationSnvsGenerationError::InvalidFrequencySpectrum {
+            population_id: population_id.to_owned(),
+        });
+    }
+    let mut intervals = Vec::new();
+    let mut fixed = Vec::new();
+    let mut positive_weight = false;
+    for component in &spectrum.components {
+        match component {
+            FrequencySpectrumComponent::Fixed { value, weight } => {
+                if !value.is_finite()
+                    || !(0.0..=1.0).contains(value)
+                    || !weight.is_finite()
+                    || *weight < 0.0
+                {
+                    return Err(PopulationSnvsGenerationError::InvalidFrequencySpectrum {
+                        population_id: population_id.to_owned(),
+                    });
+                }
+                fixed.push(*value);
+                positive_weight |= *weight > 0.0;
+            }
+            FrequencySpectrumComponent::Interval {
+                min,
+                max,
+                weight,
+                sampling,
+            } => {
+                if !min.is_finite()
+                    || !max.is_finite()
+                    || *min < 0.0
+                    || *min >= *max
+                    || *max > 1.0
+                    || !weight.is_finite()
+                    || *weight < 0.0
+                    || (*sampling == FrequencySampling::LogUniform && *min <= 0.0)
+                {
+                    return Err(PopulationSnvsGenerationError::InvalidFrequencySpectrum {
+                        population_id: population_id.to_owned(),
+                    });
+                }
+                intervals.push((*min, *max));
+                positive_weight |= *weight > 0.0;
+            }
+        }
+    }
+    intervals.sort_by(|left, right| left.0.partial_cmp(&right.0).unwrap_or(Ordering::Equal));
+    fixed.sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
+    if !positive_weight
+        || intervals.windows(2).any(|pair| pair[1].0 < pair[0].1)
+        || fixed.windows(2).any(|pair| pair[0] == pair[1])
+        || fixed.iter().any(|value| {
+            intervals
+                .iter()
+                .any(|(min, max)| *min <= *value && *value < *max)
+        })
+    {
+        return Err(PopulationSnvsGenerationError::InvalidFrequencySpectrum {
+            population_id: population_id.to_owned(),
+        });
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_generation_regions(
     config: &PopulationSnvsGenerationConfig,
     sequences: &[(SequenceId, Vec<u8>)],
@@ -1588,4 +1894,45 @@ pub(crate) fn validate_generation_regions(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod profile_resource_tests {
+    use super::{GeneratedSubstitutionProfile, substitution_weights};
+
+    #[test]
+    fn harris_profile_weights_read_by_rust_match_the_independent_versioned_resource() {
+        let expected = include_str!("../resources/f2_2_6/human_harris2017_snv12_approx_v1.tsv")
+            .lines()
+            .skip(1)
+            .map(|line| {
+                let (change, weight) = line
+                    .split_once('\t')
+                    .expect("every versioned Harris row has its weight");
+                (
+                    change,
+                    weight.parse::<f64>().expect("Harris weight is finite"),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(expected.len(), 12);
+        for reference in *b"ACGT" {
+            let alternatives = (*b"ACGT")
+                .into_iter()
+                .filter(|alternate| *alternate != reference)
+                .collect::<Vec<_>>();
+            for (alternate, observed) in alternatives.iter().copied().zip(substitution_weights(
+                GeneratedSubstitutionProfile::HumanHarris2017Snv12ApproxV1,
+                reference,
+                &alternatives,
+            )) {
+                let change = format!("{}>{}", char::from(reference), char::from(alternate));
+                let (_, expected_weight) = expected
+                    .iter()
+                    .find(|(expected_change, _)| *expected_change == change)
+                    .expect("the twelve directed substitutions are exhaustive");
+                assert_eq!(observed.to_bits(), (*expected_weight).to_bits(), "{change}");
+            }
+        }
+    }
 }

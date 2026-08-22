@@ -14,8 +14,10 @@ use crate::exact_decimal::ExactDecimal;
 use crate::haplotype::Ploidy;
 use crate::identity::{ReferenceId, SequenceId};
 use crate::population_snvs::{
-    GeneratedLocusCount, GeneratedPopulationFrequency, GeneratedSpatialMode,
-    GeneratedWeightedRegion, PopulationSnvsGenerationConfig, validate_generation_config,
+    FrequencyAssignmentMode, FrequencySampling, FrequencySpectrumComponent,
+    GeneratedFrequencySpectrum, GeneratedLocusCount, GeneratedPopulationFrequency,
+    GeneratedSpatialMode, GeneratedSubstitutionProfile, GeneratedWeightedRegion,
+    PopulationSnvsGenerationConfig, validate_generation_config,
 };
 use crate::randomness::{
     EntropySource, ReproducibilityMetadata, RuntimeSubseedScope, Subseed, SystemEntropy,
@@ -550,24 +552,101 @@ fn effective_population_snvs_generation(
     Ok(Some(PopulationSnvsGenerationConfig {
         count,
         spatial,
+        substitution_profile: match parameters.substitution_profile.value().as_str() {
+            "uniform_snv12_v1" => GeneratedSubstitutionProfile::UniformSnv12V1,
+            "human_harris2017_snv12_approx_v1" => {
+                GeneratedSubstitutionProfile::HumanHarris2017Snv12ApproxV1
+            }
+            _ => return Err(config_error(general, "population_snvs.generate.substitution_profile", "perfil de sustitución desconocido")),
+        },
         populations: parameters
             .populations
             .iter()
             .map(|population| {
+                let spectrum = match population.frequency_model.value().as_str() {
+                    "uniform" => None,
+                    "human_1000g_global_sfs_approx_v1" => Some(human_1000g_spectrum(
+                        population.frequency_mode.as_ref().map_or("stochastic", |mode| mode.value()),
+                    )?),
+                    "spectrum" => Some(GeneratedFrequencySpectrum {
+                        mode: frequency_assignment_mode(
+                            population.frequency_mode.as_ref().map_or("stochastic", |mode| mode.value()),
+                        )?,
+                        components: population.spectrum.iter().map(|component| {
+                            let weight = decimal("population_snvs.generate.populations.spectrum.weight", &component.weight)?;
+                            match component.kind.value().as_str() {
+                                "fixed" => Ok(FrequencySpectrumComponent::Fixed {
+                                    value: decimal("population_snvs.generate.populations.spectrum.fixed_alt_af", component.fixed_alt_af.as_ref().ok_or_else(|| config_error(general, "population_snvs.generate.populations.spectrum.fixed_alt_af", "fixed exige fixed_alt_af"))?)?,
+                                    weight,
+                                }),
+                                "interval" => Ok(FrequencySpectrumComponent::Interval {
+                                    min: decimal("population_snvs.generate.populations.spectrum.min_alt_af", component.min_alt_af.as_ref().ok_or_else(|| config_error(general, "population_snvs.generate.populations.spectrum.min_alt_af", "interval exige min_alt_af"))?)?,
+                                    max: decimal("population_snvs.generate.populations.spectrum.max_alt_af", component.max_alt_af.as_ref().ok_or_else(|| config_error(general, "population_snvs.generate.populations.spectrum.max_alt_af", "interval exige max_alt_af"))?)?,
+                                    weight,
+                                    sampling: match component.sampling.as_ref().map_or("", |sampling| sampling.value().as_str()) {
+                                        "linear_uniform" => FrequencySampling::LinearUniform,
+                                        "log_uniform" => FrequencySampling::LogUniform,
+                                        _ => return Err(config_error(general, "population_snvs.generate.populations.spectrum.sampling", "interval exige linear_uniform o log_uniform")),
+                                    },
+                                }),
+                                _ => Err(config_error(general, "population_snvs.generate.populations.spectrum.kind", "debe ser fixed o interval")),
+                            }
+                        }).collect::<Result<Vec<_>, Diagnostic>>()?,
+                    }),
+                    _ => return Err(config_error(general, "population_snvs.generate.populations.frequency_model", "modelo de frecuencia desconocido")),
+                };
                 Ok(GeneratedPopulationFrequency {
                     population_id: population.population_id.value().clone(),
-                    min_alt_af: decimal(
+                    min_alt_af: population.min_alt_af.as_ref().map(|value| decimal(
                         "population_snvs.generate.populations.min_alt_af",
-                        &population.min_alt_af,
-                    )?,
-                    max_alt_af: decimal(
+                        value,
+                    )).transpose()?.unwrap_or(0.0),
+                    max_alt_af: population.max_alt_af.as_ref().map(|value| decimal(
                         "population_snvs.generate.populations.max_alt_af",
-                        &population.max_alt_af,
-                    )?,
+                        value,
+                    )).transpose()?.unwrap_or(1.0),
+                    spectrum,
                 })
             })
             .collect::<Result<Vec<_>, Diagnostic>>()?,
     }))
+}
+
+fn frequency_assignment_mode(value: &str) -> Result<FrequencyAssignmentMode, Diagnostic> {
+    match value {
+        "stochastic" => Ok(FrequencyAssignmentMode::Stochastic),
+        "exact" => Ok(FrequencyAssignmentMode::Exact),
+        _ => Err(Diagnostic::configuration(
+            "GPS-CONF-008",
+            "El modo de espectro de frecuencias no es válido.",
+        )),
+    }
+}
+
+fn human_1000g_spectrum(mode: &str) -> Result<GeneratedFrequencySpectrum, Diagnostic> {
+    Ok(GeneratedFrequencySpectrum {
+        mode: frequency_assignment_mode(mode)?,
+        components: vec![
+            FrequencySpectrumComponent::Interval {
+                min: 1.0 / 5008.0,
+                max: 0.005,
+                weight: 64.0,
+                sampling: FrequencySampling::LogUniform,
+            },
+            FrequencySpectrumComponent::Interval {
+                min: 0.005,
+                max: 0.05,
+                weight: 12.0,
+                sampling: FrequencySampling::LogUniform,
+            },
+            FrequencySpectrumComponent::Interval {
+                min: 0.05,
+                max: 1.0,
+                weight: 8.0,
+                sampling: FrequencySampling::LinearUniform,
+            },
+        ],
+    })
 }
 
 fn effective_normalization_tolerance(general: &DeclaredGeneralConfig) -> Result<f64, Diagnostic> {
@@ -698,4 +777,53 @@ fn config_error(
     .with("path", general.source().path().display().to_string())
     .with("fields", fields)
     .with("detail", detail.into())
+}
+
+#[cfg(test)]
+mod profile_resource_tests {
+    use super::{
+        FrequencyAssignmentMode, FrequencySampling, FrequencySpectrumComponent,
+        human_1000g_spectrum,
+    };
+
+    #[test]
+    fn human_1000g_spectrum_matches_its_versioned_resource_literals() {
+        let resource = include_str!("../resources/f2_2_6/human_1000g_global_sfs_approx_v1.tsv");
+        let rows = resource
+            .lines()
+            .skip(1)
+            .map(|line| line.split('\t').collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 3);
+        let spectrum = human_1000g_spectrum("exact").unwrap();
+        assert_eq!(spectrum.mode, FrequencyAssignmentMode::Exact);
+        for (component, fields) in spectrum.components.iter().zip(rows) {
+            assert_eq!(fields[0], "interval");
+            let (min, max, weight, sampling) = match component {
+                FrequencySpectrumComponent::Interval {
+                    min,
+                    max,
+                    weight,
+                    sampling,
+                } => (min, max, weight, sampling),
+                FrequencySpectrumComponent::Fixed { .. } => {
+                    panic!("the SFS resource has only intervals")
+                }
+            };
+            assert_eq!(min.to_bits(), fields[1].parse::<f64>().unwrap().to_bits());
+            assert_eq!(max.to_bits(), fields[2].parse::<f64>().unwrap().to_bits());
+            assert_eq!(
+                weight.to_bits(),
+                fields[3].parse::<f64>().unwrap().to_bits()
+            );
+            assert_eq!(
+                *sampling,
+                match fields[4] {
+                    "log_uniform" => FrequencySampling::LogUniform,
+                    "linear_uniform" => FrequencySampling::LinearUniform,
+                    _ => panic!("unexpected versioned SFS sampling literal"),
+                }
+            );
+        }
+    }
 }

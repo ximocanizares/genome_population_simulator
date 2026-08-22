@@ -247,7 +247,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: `N` excluida, espacio vacío/insuficiente, tasa cero,
     mayores restos, independencia poblacional y semilla repetible.
 
-- ☐ F2.2.6. Incorporar espectros y perfiles aproximados aprobados.
+- ✅ F2.2.6. Incorporar espectros y perfiles aproximados aprobados.
   - Depende de: F2.2.2–F2.2.5.
   - Procede de: DTC-068 y DTC-070/072; REQ-CONF-129 y ACE-116.
   - Cambia: espectros suministrados, `uniform_snv12_v1`,
