@@ -44,7 +44,8 @@ fn metadata_requires_the_closed_v1_envelope() {
         "document_kind":"population_snvs_metadata",
         "schema_version":"1",
         "coordinate_system":"base1_closed",
-        "reference":{"reference_id":"ref-main","sha256":"abc"},
+        "reference":{"reference_id":"ref-main","canonical_fingerprint":"abc"},
+        "reference_fasta":{"sha256":"fasta-abc"},
         "matrix":{"path":"population_snvs.tsv","sha256":"def"},
         "populations":[{"population_id":"POP","sample_size":"unknown"}],
         "provenance":"supplied", "discarded_variant_pairs":[], "normalization_audit":[]
@@ -54,7 +55,8 @@ fn metadata_requires_the_closed_v1_envelope() {
     let unexpected = br#"{
         "document_kind":"population_snvs_metadata", "schema_version":"1",
         "coordinate_system":"base1_closed",
-        "reference":{"reference_id":"ref-main","sha256":"abc"},
+        "reference":{"reference_id":"ref-main","canonical_fingerprint":"abc"},
+        "reference_fasta":{"sha256":"fasta-abc"},
         "matrix":{"path":"population_snvs.tsv","sha256":"def"},
         "populations":[], "provenance":"generated", "rows":[]
     }"#;

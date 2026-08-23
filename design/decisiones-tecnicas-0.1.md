@@ -149,7 +149,7 @@ orden de componentes mostrado es normativo:
 | `indel_count` | `scenario_id`, `reference_id`, `individual_id`, `sequence_id`, `variant_class`, `spatial_scope_id` | `poisson-count-v1` |
 | `indel_position` | `scenario_id`, `reference_id`, `individual_id`, `sequence_id`, `variant_class`, `spatial_scope_id` | `dynamic-indel-selection-v1`, que reenumera el estado vigente |
 | `insertion_content` | `scenario_id`, `reference_id`, `individual_id`, `sequence_id`, `spatial_scope_id`, `event_index` | `categorical-f64-v1` sobre A/C/G/T por base |
-| `initial_genotype` | `scenario_id`, `reference_id`, `population_id`, `individual_id`, `variant_id` | `hwe-composition-v1` o `f-diploid-genotype-v1` |
+| `initial_genotype` | `scenario_id`, `reference_id`, `population_id`, `individual_id`, `sequence_id`, `position_1based`, `ref`, `alternate_alleles` | `hwe-composition-v1` o `f-diploid-genotype-v1`; `alternate_alleles` es la lista ALT ASCII ordenada del locus, por lo que un sorteo multialélico no depende de un ALT representativo |
 | `initial_phase` | `scenario_id`, `reference_id`, `population_id`, `individual_id`, `variant_id` | `phase-permutation-v1` |
 
 `variant_class` solo admite `insertion` o `deletion`. `spatial_scope_id` es el

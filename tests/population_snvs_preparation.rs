@@ -189,6 +189,8 @@ fn preparation_uses_independent_fasta_truth_and_canonical_order() {
         false,
     )
     .expect("prepared");
+    assert_eq!(prepared.reference_id(), reference.reference_id());
+    assert_eq!(prepared.reference_fingerprint().len(), 64);
     assert_eq!(prepared.rows().len(), 4);
     // Oráculo independiente: la fila reordenada físicamente conserva su orden canónico.
     assert_eq!(prepared.rows()[0].contig().as_str(), "chr1");

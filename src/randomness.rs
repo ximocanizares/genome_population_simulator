@@ -204,7 +204,10 @@ pub enum RuntimeSubseedScope<'a> {
         reference_id: &'a str,
         population_id: &'a str,
         individual_id: &'a str,
-        variant_id: &'a str,
+        sequence_id: &'a str,
+        position_1based: u64,
+        reference_base: &'a str,
+        alternate_alleles: &'a str,
     },
     InitialPhase {
         scenario_id: &'a str,
@@ -448,7 +451,10 @@ pub fn derive_subseed(
             reference_id,
             population_id,
             individual_id,
-            variant_id,
+            sequence_id,
+            position_1based,
+            reference_base,
+            alternate_alleles,
         } => canonical_material_v2(
             root,
             "initial_genotype",
@@ -457,7 +463,10 @@ pub fn derive_subseed(
                 ("reference_id", reference_id),
                 ("population_id", population_id),
                 ("individual_id", individual_id),
-                ("variant_id", variant_id),
+                ("sequence_id", sequence_id),
+                ("position_1based", &position_1based.to_string()),
+                ("ref", reference_base),
+                ("alternate_alleles", alternate_alleles),
             ],
         )?,
         RuntimeSubseedScope::InitialPhase {
@@ -495,17 +504,24 @@ impl LocalRng {
     }
 }
 
-trait WordSource {
+/// Fuente instrumentable de palabras RNG para consumidores normativos.
+///
+/// Las implementaciones de producción usan [`LocalRng`]. Esta frontera permite
+/// verificar vectores de palabras y consumo sin acoplar la especificación a
+/// ChaCha ni a una semilla concreta.
+pub trait RandomWordSource {
     fn next_word(&mut self) -> u64;
 }
 
-impl WordSource for LocalRng {
+impl RandomWordSource for LocalRng {
     fn next_word(&mut self) -> u64 {
         self.next_u64()
     }
 }
 
 pub const POISSON_COUNT_ALGORITHM: &str = "poisson-count-v1";
+pub const HWE_COMPOSITION_ALGORITHM: &str = "hwe-composition-v1";
+pub const F_DIPLOID_GENOTYPE_ALGORITHM: &str = "f-diploid-genotype-v1";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RandomSamplingError {
@@ -513,6 +529,8 @@ pub enum RandomSamplingError {
     InvalidWeights,
     InvalidInterval,
     InvalidLambda,
+    InvalidPloidy,
+    InvalidInbreedingCoefficient,
     NumericFailure,
     InsufficientCandidates,
 }
@@ -523,7 +541,7 @@ pub fn open_unit_f64(rng: &mut LocalRng) -> f64 {
     open_unit_f64_with_source(rng)
 }
 
-fn open_unit_f64_with_source(rng: &mut impl WordSource) -> f64 {
+fn open_unit_f64_with_source(rng: &mut impl RandomWordSource) -> f64 {
     (((rng.next_word() >> 12) as f64) + 0.5) * (1.0 / 4_503_599_627_370_496.0)
 }
 
@@ -532,7 +550,7 @@ pub fn uniform_u64_below(rng: &mut LocalRng, n: u64) -> Result<u64, RandomSampli
 }
 
 fn uniform_u64_below_with_source(
-    rng: &mut impl WordSource,
+    rng: &mut impl RandomWordSource,
     n: u64,
 ) -> Result<u64, RandomSamplingError> {
     if n == 0 {
@@ -555,7 +573,7 @@ pub fn categorical_f64(rng: &mut LocalRng, weights: &[f64]) -> Result<usize, Ran
 }
 
 fn categorical_f64_with_source(
-    rng: &mut impl WordSource,
+    rng: &mut impl RandomWordSource,
     weights: &[f64],
 ) -> Result<usize, RandomSamplingError> {
     if weights
@@ -595,7 +613,7 @@ pub fn fisher_yates<T>(rng: &mut LocalRng, values: &mut [T]) -> Result<(), Rando
 }
 
 fn fisher_yates_with_source<T>(
-    rng: &mut impl WordSource,
+    rng: &mut impl RandomWordSource,
     values: &mut [T],
 ) -> Result<(), RandomSamplingError> {
     for index in (1..values.len()).rev() {
@@ -614,7 +632,7 @@ pub fn weighted_without_replacement(
 }
 
 fn weighted_without_replacement_with_source(
-    rng: &mut impl WordSource,
+    rng: &mut impl RandomWordSource,
     weights: &[f64],
     selected_count: usize,
 ) -> Result<Vec<usize>, RandomSamplingError> {
@@ -639,7 +657,7 @@ pub fn linear_uniform(rng: &mut LocalRng, min: f64, max: f64) -> Result<f64, Ran
 }
 
 fn linear_uniform_with_source(
-    rng: &mut impl WordSource,
+    rng: &mut impl RandomWordSource,
     min: f64,
     max: f64,
 ) -> Result<f64, RandomSamplingError> {
@@ -667,7 +685,7 @@ pub fn log_uniform(rng: &mut LocalRng, min: f64, max: f64) -> Result<f64, Random
 }
 
 fn log_uniform_with_source(
-    rng: &mut impl WordSource,
+    rng: &mut impl RandomWordSource,
     min: f64,
     max: f64,
 ) -> Result<f64, RandomSamplingError> {
@@ -716,12 +734,113 @@ fn neumaier_sum(values: impl IntoIterator<Item = f64>) -> f64 {
     sum + correction
 }
 
+/// Muestrea las dosis de cada alelo bajo HWE sin asignar fase a las copias.
+///
+/// Las frecuencias deben estar normalizadas y en el orden canónico del locus:
+/// primero REF y después ALT. Cada copia es una categoría independiente; un
+/// locus monomórfico no consume RNG.
+pub fn hwe_composition(
+    rng: &mut LocalRng,
+    allele_frequencies: &[f64],
+    copy_count: u8,
+) -> Result<Vec<u8>, RandomSamplingError> {
+    hwe_composition_with_source(rng, allele_frequencies, copy_count)
+}
+
+/// Variante instrumentable de [`hwe_composition`] para vectores normativos.
+///
+/// Consume una palabra por copia solo si el locus tiene más de una categoría
+/// con peso positivo; las comprobaciones de entrada no consumen palabras.
+pub fn hwe_composition_with_source(
+    rng: &mut impl RandomWordSource,
+    allele_frequencies: &[f64],
+    copy_count: u8,
+) -> Result<Vec<u8>, RandomSamplingError> {
+    if !(1..=10).contains(&copy_count) {
+        return Err(RandomSamplingError::InvalidPloidy);
+    }
+    validate_allele_frequencies(allele_frequencies)?;
+    let mut dosage = vec![0_u8; allele_frequencies.len()];
+    for _ in 0..copy_count {
+        let allele = categorical_f64_with_source(rng, allele_frequencies)?;
+        dosage[allele] = dosage[allele]
+            .checked_add(1)
+            .ok_or(RandomSamplingError::NumericFailure)?;
+    }
+    Ok(dosage)
+}
+
+/// Muestrea un genotipo diploide no ordenado con el coeficiente F normativo.
+///
+/// El resultado son dos índices de alelo sin fase. La enumeración es estable:
+/// homocigotos `i,i` y después heterocigotos `i,j` con `i < j`.
+pub fn f_diploid_genotype(
+    rng: &mut LocalRng,
+    allele_frequencies: &[f64],
+    inbreeding_coefficient: f64,
+) -> Result<[u8; 2], RandomSamplingError> {
+    f_diploid_genotype_with_source(rng, allele_frequencies, inbreeding_coefficient)
+}
+
+/// Variante instrumentable de [`f_diploid_genotype`] para vectores normativos.
+///
+/// La enumeración, fórmulas y consumo son idénticos a la API de producción.
+pub fn f_diploid_genotype_with_source(
+    rng: &mut impl RandomWordSource,
+    allele_frequencies: &[f64],
+    inbreeding_coefficient: f64,
+) -> Result<[u8; 2], RandomSamplingError> {
+    if !inbreeding_coefficient.is_finite() || !(0.0..=1.0).contains(&inbreeding_coefficient) {
+        return Err(RandomSamplingError::InvalidInbreedingCoefficient);
+    }
+    validate_allele_frequencies(allele_frequencies)?;
+    let mut genotypes =
+        Vec::with_capacity(allele_frequencies.len() * (allele_frequencies.len() + 1) / 2);
+    let mut weights = Vec::with_capacity(genotypes.capacity());
+    for (index, frequency) in allele_frequencies.iter().copied().enumerate() {
+        let allele = u8::try_from(index).map_err(|_| RandomSamplingError::NumericFailure)?;
+        genotypes.push([allele, allele]);
+        weights
+            .push(frequency * frequency + inbreeding_coefficient * frequency * (1.0 - frequency));
+    }
+    for (left, left_frequency) in allele_frequencies.iter().copied().enumerate() {
+        for (right, right_frequency) in allele_frequencies
+            .iter()
+            .copied()
+            .enumerate()
+            .skip(left + 1)
+        {
+            genotypes.push([
+                u8::try_from(left).map_err(|_| RandomSamplingError::NumericFailure)?,
+                u8::try_from(right).map_err(|_| RandomSamplingError::NumericFailure)?,
+            ]);
+            weights.push(2.0 * (1.0 - inbreeding_coefficient) * left_frequency * right_frequency);
+        }
+    }
+    Ok(genotypes[categorical_f64_with_source(rng, &weights)?])
+}
+
+fn validate_allele_frequencies(allele_frequencies: &[f64]) -> Result<(), RandomSamplingError> {
+    if allele_frequencies.is_empty()
+        || allele_frequencies
+            .iter()
+            .any(|frequency| !frequency.is_finite() || *frequency < 0.0)
+    {
+        return Err(RandomSamplingError::InvalidWeights);
+    }
+    let total = neumaier_sum(allele_frequencies.iter().copied());
+    if !total.is_finite() || (total - 1.0).abs() > 1e-12 {
+        return Err(RandomSamplingError::InvalidWeights);
+    }
+    Ok(())
+}
+
 pub fn poisson_count(rng: &mut LocalRng, lambda: f64) -> Result<u64, RandomSamplingError> {
     poisson_count_with_source(rng, lambda, None)
 }
 
 fn poisson_count_with_source(
-    rng: &mut impl WordSource,
+    rng: &mut impl RandomWordSource,
     lambda: f64,
     candidate_override: Option<f64>,
 ) -> Result<u64, RandomSamplingError> {
@@ -778,10 +897,10 @@ fn poisson_count_with_source(
 #[cfg(test)]
 mod tests {
     use super::{
-        RandomSamplingError, WordSource, categorical_f64_with_source, fisher_yates_with_source,
-        linear_uniform_with_source, log_uniform_with_source, neumaier_sum,
-        open_unit_f64_with_source, poisson_count_with_source, uniform_u64_below_with_source,
-        weighted_without_replacement_with_source,
+        RandomSamplingError, RandomWordSource, categorical_f64_with_source,
+        fisher_yates_with_source, linear_uniform_with_source, log_uniform_with_source,
+        neumaier_sum, open_unit_f64_with_source, poisson_count_with_source,
+        uniform_u64_below_with_source, weighted_without_replacement_with_source,
     };
 
     struct Scripted {
@@ -798,7 +917,7 @@ mod tests {
         }
     }
 
-    impl WordSource for Scripted {
+    impl RandomWordSource for Scripted {
         fn next_word(&mut self) -> u64 {
             let value = self.words[self.consumed];
             self.consumed += 1;

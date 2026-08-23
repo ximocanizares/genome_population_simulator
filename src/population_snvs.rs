@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
 
-use crate::identity::{PopulationId, SequenceId, VariantId, derive_matrix_variant_id};
+use crate::identity::{PopulationId, ReferenceId, SequenceId, VariantId, derive_matrix_variant_id};
 use crate::randomness::{
     RandomSamplingError, RootSeed, RuntimeSubseedScope, categorical_f64, derive_subseed,
     fisher_yates, linear_uniform, log_uniform, poisson_count, weighted_without_replacement,
@@ -329,9 +329,85 @@ impl PreparedPopulationSnv {
     }
 }
 
+/// Huella SHA-256 de la vista canónica `id`+secuencias+bases de una referencia.
+///
+/// No es el SHA-256 físico del FASTA: ese hash autentica un artefacto publicado
+/// y se conserva separado en sus metadatos.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonicalReferenceFingerprint(String);
+
+impl CanonicalReferenceFingerprint {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Identidad tipada que enlaza una matriz preparada con la referencia exacta.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedReferenceIdentity {
+    reference_id: ReferenceId,
+    canonical_fingerprint: CanonicalReferenceFingerprint,
+}
+
+impl PreparedReferenceIdentity {
+    #[must_use]
+    pub const fn reference_id(&self) -> &ReferenceId {
+        &self.reference_id
+    }
+
+    #[must_use]
+    pub const fn canonical_fingerprint(&self) -> &CanonicalReferenceFingerprint {
+        &self.canonical_fingerprint
+    }
+
+    #[must_use]
+    pub fn from_reference(reference: &Reference) -> Self {
+        Self::from_sequences(
+            reference.id().clone(),
+            reference
+                .sequences()
+                .iter()
+                .map(|sequence| (sequence.id().as_str(), sequence.sequence().as_bytes())),
+        )
+    }
+
+    fn from_authoritative_fasta(reference_id: ReferenceId, fasta: &AuthoritativeFasta) -> Self {
+        let mut sequences = fasta.sequences.iter().collect::<Vec<_>>();
+        sequences.sort_by_key(|(id, _)| fasta.ordinal(id));
+        Self::from_sequences(
+            reference_id,
+            sequences
+                .into_iter()
+                .map(|(id, bases)| (id.as_str(), bases.as_slice())),
+        )
+    }
+
+    fn from_sequences<'a>(
+        reference_id: ReferenceId,
+        sequences: impl IntoIterator<Item = (&'a str, &'a [u8])>,
+    ) -> Self {
+        let mut digest = Sha256::new();
+        digest.update(b"genome_population_simulator/v1/prepared-reference\0");
+        append_digest_component(&mut digest, reference_id.as_str().as_bytes());
+        for (sequence_id, bases) in sequences {
+            append_digest_component(&mut digest, sequence_id.as_bytes());
+            append_digest_component(&mut digest, bases);
+        }
+        Self {
+            reference_id,
+            canonical_fingerprint: CanonicalReferenceFingerprint(format!(
+                "{:x}",
+                digest.finalize()
+            )),
+        }
+    }
+}
+
 /// Recurso preparado en memoria; no publica ni altera la tabla suministrada.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedPopulationSnvs {
+    prepared_reference: PreparedReferenceIdentity,
     rows: Vec<PreparedPopulationSnv>,
     population_ids: Vec<PopulationId>,
     discarded_globally_absent: Vec<VariantId>,
@@ -365,6 +441,22 @@ impl PopulationSnvsProvenance {
 }
 
 impl PreparedPopulationSnvs {
+    /// Identidad canónica de la referencia validada al preparar esta matriz.
+    #[must_use]
+    pub const fn prepared_reference(&self) -> &PreparedReferenceIdentity {
+        &self.prepared_reference
+    }
+
+    #[must_use]
+    pub const fn reference_id(&self) -> &ReferenceId {
+        self.prepared_reference.reference_id()
+    }
+
+    #[must_use]
+    pub fn reference_fingerprint(&self) -> &str {
+        self.prepared_reference.canonical_fingerprint().as_str()
+    }
+
     #[must_use]
     pub fn rows(&self) -> &[PreparedPopulationSnv] {
         &self.rows
@@ -467,9 +559,13 @@ pub fn prepare_supplied_population_snvs(
     allow_empty_matrix: bool,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
     let fasta = load_authoritative_fasta(reference)?;
+    let prepared_reference = PreparedReferenceIdentity::from_authoritative_fasta(
+        reference.reference_id().clone(),
+        &fasta,
+    );
     prepare_population_snvs(
         table,
-        reference.reference_id(),
+        &prepared_reference,
         &fasta,
         tolerance,
         allow_empty_matrix,
@@ -484,6 +580,7 @@ pub fn prepare_population_snvs_from_reference(
     tolerance: f64,
     allow_empty_matrix: bool,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
+    let prepared_reference = PreparedReferenceIdentity::from_reference(reference);
     let fasta = AuthoritativeFasta {
         sequences: reference
             .sequences()
@@ -502,12 +599,18 @@ pub fn prepare_population_snvs_from_reference(
             .map(|(index, sequence)| (sequence.id().as_str().to_owned(), index))
             .collect(),
     };
-    prepare_population_snvs(table, reference.id(), &fasta, tolerance, allow_empty_matrix)
+    prepare_population_snvs(
+        table,
+        &prepared_reference,
+        &fasta,
+        tolerance,
+        allow_empty_matrix,
+    )
 }
 
 fn prepare_population_snvs(
     table: &PopulationSnvsTsv,
-    reference_id: &crate::identity::ReferenceId,
+    prepared_reference: &PreparedReferenceIdentity,
     fasta: &AuthoritativeFasta,
     tolerance: f64,
     allow_empty_matrix: bool,
@@ -631,21 +734,27 @@ fn prepare_population_snvs(
     let variant_ids = parsed
         .iter()
         .map(|(_, contig, position, reference_base, alternate, ..)| {
-            derive_matrix_variant_id(reference_id, contig, *position, *reference_base, *alternate)
-                .map(|variant_id| {
+            derive_matrix_variant_id(
+                prepared_reference.reference_id(),
+                contig,
+                *position,
+                *reference_base,
+                *alternate,
+            )
+            .map(|variant_id| {
+                (
                     (
-                        (
-                            contig.as_str().to_owned(),
-                            *position,
-                            *reference_base,
-                            *alternate,
-                        ),
-                        variant_id,
-                    )
-                })
-                .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
-                    detail: error.render_human(),
-                })
+                        contig.as_str().to_owned(),
+                        *position,
+                        *reference_base,
+                        *alternate,
+                    ),
+                    variant_id,
+                )
+            })
+            .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
+                detail: error.render_human(),
+            })
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
     for group in &mut normalized.groups {
@@ -706,11 +815,16 @@ fn prepare_population_snvs(
         .collect::<BTreeSet<_>>();
     let mut rows = Vec::new();
     for (index, contig, position, reference_base, alternate, population, source_id) in parsed {
-        let variant_id =
-            derive_matrix_variant_id(reference_id, &contig, position, reference_base, alternate)
-                .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
-                    detail: error.render_human(),
-                })?;
+        let variant_id = derive_matrix_variant_id(
+            prepared_reference.reference_id(),
+            &contig,
+            position,
+            reference_base,
+            alternate,
+        )
+        .map_err(|error| PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: error.render_human(),
+        })?;
         if inactive.contains(&(
             contig.as_str().to_owned(),
             position,
@@ -751,6 +865,7 @@ fn prepare_population_snvs(
     }
     let empty_authorized = rows.is_empty();
     Ok(PreparedPopulationSnvs {
+        prepared_reference: prepared_reference.clone(),
         rows,
         population_ids: populations.into_iter().collect(),
         discarded_globally_absent: discarded,
@@ -787,8 +902,7 @@ pub fn canonical_tsv_bytes(prepared: &PreparedPopulationSnvs) -> Vec<u8> {
 #[must_use]
 pub fn canonical_metadata_document(
     prepared: &PreparedPopulationSnvs,
-    reference_id: &str,
-    reference_sha256: &str,
+    reference_fasta_sha256: &str,
     matrix_sha256: &str,
     provenance: PopulationSnvsProvenance,
 ) -> Value {
@@ -823,7 +937,11 @@ pub fn canonical_metadata_document(
         "document_kind": "population_snvs_metadata",
         "schema_version": "1",
         "coordinate_system": "base1_closed",
-        "reference": {"reference_id": reference_id, "sha256": reference_sha256},
+        "reference": {
+            "reference_id": prepared.reference_id().as_str(),
+            "canonical_fingerprint": prepared.reference_fingerprint(),
+        },
+        "reference_fasta": {"sha256": reference_fasta_sha256},
         "matrix": {"path": "population_snvs.tsv", "sha256": matrix_sha256},
         "populations": populations,
         "provenance": provenance.as_str(),
@@ -992,9 +1110,21 @@ pub fn validate_reusable_population_snvs_bytes(
         .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "metadata.reference inválida".to_owned(),
         })?;
+    let expected_reference = PreparedReferenceIdentity::from_reference(reference);
     let declared_reference = reference_object.get("reference_id").and_then(Value::as_str);
-    let declared_sha = reference_object.get("sha256").and_then(Value::as_str);
-    if declared_reference != Some(reference.id().as_str()) || declared_sha != Some(reference_sha256)
+    let declared_fingerprint = reference_object
+        .get("canonical_fingerprint")
+        .and_then(Value::as_str);
+    let fasta_object = object
+        .get("reference_fasta")
+        .and_then(Value::as_object)
+        .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.reference_fasta inválida".to_owned(),
+        })?;
+    let declared_fasta_sha = fasta_object.get("sha256").and_then(Value::as_str);
+    if declared_reference != Some(expected_reference.reference_id().as_str())
+        || declared_fingerprint != Some(expected_reference.canonical_fingerprint().as_str())
+        || declared_fasta_sha != Some(reference_sha256)
     {
         return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "la matriz reutilizada no está ligada a la referencia autoritativa".to_owned(),
@@ -1434,6 +1564,11 @@ impl AuthoritativeFasta {
     }
 }
 
+fn append_digest_component(digest: &mut Sha256, bytes: &[u8]) {
+    digest.update(u64::try_from(bytes.len()).unwrap_or(u64::MAX).to_be_bytes());
+    digest.update(bytes);
+}
+
 fn load_authoritative_fasta(
     reference: &ResolvedManifestReference,
 ) -> Result<AuthoritativeFasta, PopulationSnvsPreparationError> {
@@ -1820,6 +1955,7 @@ pub fn parse_metadata_json(
             "schema_version",
             "coordinate_system",
             "reference",
+            "reference_fasta",
             "matrix",
             "populations",
             "provenance",
@@ -1832,9 +1968,16 @@ pub fn parse_metadata_json(
     required_literal(object, "schema_version", "1")?;
     required_literal(object, "coordinate_system", "base1_closed")?;
     let reference = required_object(object, "reference")?;
-    closed_object(reference, &["reference_id", "sha256"], "reference")?;
+    closed_object(
+        reference,
+        &["reference_id", "canonical_fingerprint"],
+        "reference",
+    )?;
     required_string(reference, "reference.reference_id")?;
-    required_string(reference, "reference.sha256")?;
+    required_string(reference, "reference.canonical_fingerprint")?;
+    let reference_fasta = required_object(object, "reference_fasta")?;
+    closed_object(reference_fasta, &["sha256"], "reference_fasta")?;
+    required_string(reference_fasta, "reference_fasta.sha256")?;
     let matrix = required_object(object, "matrix")?;
     closed_object(matrix, &["path", "sha256"], "matrix")?;
     required_literal(matrix, "path", "population_snvs.tsv")?;
@@ -2118,7 +2261,8 @@ impl std::error::Error for PopulationSnvsGenerationError {}
 /// Vista mínima de una referencia ya validada: identidad, orden FASTA y bases.
 /// No reinterpreta rutas ni crea una identidad alternativa.
 struct GenerationReference {
-    id: crate::identity::ReferenceId,
+    id: ReferenceId,
+    prepared_identity: PreparedReferenceIdentity,
     sequences: Vec<(SequenceId, Vec<u8>)>,
 }
 
@@ -2131,12 +2275,17 @@ pub fn generate_population_snvs(
     let fasta = load_authoritative_fasta(reference)
         .map_err(|error| PopulationSnvsGenerationError::Reference(error.to_string()))?;
     let sequence_order = fasta.order.clone();
+    let prepared_identity = PreparedReferenceIdentity::from_authoritative_fasta(
+        reference.reference_id().clone(),
+        &fasta,
+    );
     let mut ordered = fasta.sequences.into_iter().collect::<Vec<_>>();
     ordered.sort_by_key(|(id, _)| sequence_order.get(id).copied());
     generate_population_snvs_view(
         config,
         GenerationReference {
             id: reference.reference_id().clone(),
+            prepared_identity,
             sequences: ordered
                 .into_iter()
                 .map(|(id, bases)| {
@@ -2177,6 +2326,7 @@ pub fn generate_population_snvs_from_reference_with_tolerance(
         config,
         GenerationReference {
             id: reference.id().clone(),
+            prepared_identity: PreparedReferenceIdentity::from_reference(reference),
             sequences: reference
                 .sequences()
                 .iter()
@@ -2364,6 +2514,7 @@ fn generate_population_snvs_view(
             )
     });
     let mut prepared = PreparedPopulationSnvs {
+        prepared_reference: reference.prepared_identity,
         rows,
         population_ids,
         discarded_globally_absent: Vec::new(),

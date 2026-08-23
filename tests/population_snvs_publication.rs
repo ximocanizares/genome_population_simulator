@@ -161,7 +161,7 @@ max_alt_af = 0.9"#,
     .expect("original metadata SHA")
     .digest()
     .to_owned();
-    let reference_sha = metadata.document()["reference"]["sha256"]
+    let reference_sha = metadata.document()["reference_fasta"]["sha256"]
         .as_str()
         .expect("sha")
         .to_owned();
@@ -195,9 +195,15 @@ max_alt_af = 0.9"#,
     let original_document: serde_json::Value =
         serde_json::from_slice(&metadata_original).expect("JSON");
     let mut changed_reference = original_document.clone();
-    changed_reference["reference"]["sha256"] = serde_json::json!("0".repeat(64));
+    changed_reference["reference"]["canonical_fingerprint"] = serde_json::json!("0".repeat(64));
     assert!(reject(
         &serde_json::to_vec(&changed_reference).expect("JSON"),
+        &matrix_original
+    ));
+    let mut changed_reference_fasta = original_document.clone();
+    changed_reference_fasta["reference_fasta"]["sha256"] = serde_json::json!("0".repeat(64));
+    assert!(reject(
+        &serde_json::to_vec(&changed_reference_fasta).expect("JSON"),
         &matrix_original
     ));
     let mut changed_provenance = original_document.clone();

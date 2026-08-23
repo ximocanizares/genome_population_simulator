@@ -353,7 +353,6 @@ fn materialize_population_snvs(
             return publish_population_snvs(
                 workspace,
                 &prepared,
-                reference,
                 reference_fasta,
                 PopulationSnvsProvenance::Generated,
             )
@@ -397,7 +396,6 @@ fn materialize_population_snvs(
     publish_population_snvs(
         workspace,
         &prepared,
-        reference,
         reference_fasta,
         PopulationSnvsProvenance::Supplied,
     )
@@ -407,7 +405,6 @@ fn materialize_population_snvs(
 fn publish_population_snvs(
     workspace: &mut ExecutionWorkspace,
     prepared: &crate::population_snvs::PreparedPopulationSnvs,
-    reference: &Reference,
     reference_fasta: &ArtifactRecord,
     provenance: PopulationSnvsProvenance,
 ) -> Result<PopulationSnvsManifestLink, Diagnostic> {
@@ -419,7 +416,6 @@ fn publish_population_snvs(
     )?;
     let metadata = canonical_metadata_document(
         prepared,
-        reference.id().as_str(),
         &reference_fasta.digest,
         &matrix.digest,
         provenance,

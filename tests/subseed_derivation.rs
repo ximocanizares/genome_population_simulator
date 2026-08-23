@@ -304,7 +304,10 @@ fn every_f2_runtime_scope_matches_its_frozen_v4_vector() {
                 reference_id: "reference-main",
                 population_id: "population-main",
                 individual_id: "individual-main",
-                variant_id: "variant-main",
+                sequence_id: "sequence-main",
+                position_1based: 42,
+                reference_base: "A",
+                alternate_alleles: "C,G",
             },
         ),
         (

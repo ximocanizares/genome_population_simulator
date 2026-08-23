@@ -1718,8 +1718,10 @@ canónico tiene exactamente la cabecera `variant_id`, `contig`, `position`, `ref
 `contig`, `position`, `ref` y `alt`, por lo que es común a todas las poblaciones;
 `source_id` es opcional en la entrada y se publica vacío cuando no existe. Las
 filas se ordenan por el orden de secuencias del FASTA, posición ascendente,
-`ref`, `alt` y `population_id` léxico. El JSON
-declara versión, referencia y SHA-256 observado, coordenadas, poblaciones,
+`ref`, `alt` y `population_id` léxico. El JSON declara versión, la identidad
+preparada de referencia (`reference_id` y huella canónica de
+ID+secuencias+bases) y, por separado, el SHA-256 físico observado del FASTA,
+además de coordenadas y poblaciones,
 procedencia y el SHA-256 del TSV; por población puede conservar descripción,
 tamaño muestral o número de alelos, fuente, filtros y fecha o versión. En una
 matriz empírica esos campos se proporcionan o se declaran explícitamente como
@@ -1731,8 +1733,9 @@ con los mismos bytes; este es reutilizable sin volver a sortear la matriz.
 Para F2.2.1, `population_snvs.metadata.json` usa la clase
 `population_snvs_metadata` y `schema_version = "1"`. Contiene como campos
 obligatorios
-`coordinate_system = "base1_closed"`, `reference` (`reference_id`, `sha256`),
-`matrix` (`path = "population_snvs.tsv"`, `sha256`) y una lista ordenada de
+`coordinate_system = "base1_closed"`, `reference` (`reference_id`,
+`canonical_fingerprint`), `reference_fasta` (`sha256`) y `matrix` (`path =
+"population_snvs.tsv"`, `sha256`), además de una lista ordenada de
 `populations`. Cada población declara `population_id` y puede declarar
 `description`, `sample_size`, `allele_count`, `source`, `filters` y
 `data_version`; cuando un dato empírico no se conoce se escribe `"unknown"`.
