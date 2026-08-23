@@ -295,6 +295,45 @@ fn execution_id_is_bound_to_csprng_seed_and_exact_toml_digest() {
     fs::remove_dir_all(parent).expect("cleanup");
 }
 
+#[test]
+fn direct_events_must_match_the_typed_toml_resolution_exactly() {
+    let fixture_root = temporary("direct-events-fixture");
+    fs::create_dir(&fixture_root).expect("fixture root");
+    let config = write_direct_events_fixture(&fixture_root);
+    for (label, pointer, replacement) in [
+        (
+            "direct-individual",
+            "/direct_events/0/individual_id",
+            json!("I2"),
+        ),
+        ("direct-phase", "/direct_events/0/phase", json!(1)),
+        ("direct-contig", "/direct_events/0/contig", json!("chr2")),
+        (
+            "direct-position",
+            "/direct_events/0/position_1based",
+            json!(2),
+        ),
+        ("direct-reference", "/direct_events/0/ref", json!("C")),
+        ("direct-alternate", "/direct_events/0/alt", json!("T")),
+    ] {
+        assert_physical_rejection(label, config.clone(), move |_root, effective, _manifest| {
+            *effective.pointer_mut(pointer).expect(label) = replacement;
+        });
+    }
+    assert_physical_rejection("direct-class", config, |_root, effective, _manifest| {
+        effective["direct_events"][0] = json!({
+            "event_id": "event-1",
+            "individual_id": "I1",
+            "phase": 0,
+            "kind": "deletion",
+            "contig": "chr1",
+            "start": 1,
+            "end": 2,
+        });
+    });
+    fs::remove_dir_all(fixture_root).expect("fixture cleanup");
+}
+
 fn assert_physical_rejection(
     label: &str,
     config: PathBuf,
@@ -422,6 +461,34 @@ fn write_percentage_fixture(root: &Path) -> PathBuf {
         ),
     )
     .expect("percent fixture config");
+    config
+}
+
+fn write_direct_events_fixture(root: &Path) -> PathBuf {
+    let fasta = root.join("reference.fa");
+    let matrix = root.join("matrix.tsv");
+    fs::write(&fasta, b">chr1\nACGT\n").expect("reference");
+    fs::write(
+        &matrix,
+        "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t1\tA\tG\tP1\t0.5\n",
+    )
+    .expect("matrix");
+    let config = root.join("general.toml");
+    fs::write(
+        &config,
+        format!(
+            "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"{}\"\n\
+             [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\
+             [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"I1\"]\nploidy = 2\ngenotype_model = \"hwe\"\n\
+             [[direct_events]]\nevent_id = \"event-1\"\nindividual_id = \"I1\"\nphase = 0\nkind = \"snp\"\ncontig = \"chr1\"\nposition_1based = 1\nref = \"A\"\nalt = \"G\"\n\
+             [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"{}\"\n\
+             [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 4\n",
+            "0".repeat(64),
+            matrix.display(),
+            fasta.display(),
+        ),
+    )
+    .expect("direct events config");
     config
 }
 

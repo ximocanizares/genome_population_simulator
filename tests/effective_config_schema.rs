@@ -339,7 +339,7 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
             "root": "0".repeat(64),
             "origin": "declared"
         },
-        "authorizations": {"allow_empty_snv_matrix": false},
+        "authorizations": {"allow_empty_snv_matrix": false, "allow_incompatible_genotypes": false},
         "reference": {
             "id": "main",
             "source": source,

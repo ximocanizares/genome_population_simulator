@@ -844,6 +844,19 @@ efectiva/manifiesto y no relajan otras invariantes. La matriz conserva solo
 frecuencias marginales, por lo que los loci son independientes y cualquier LD
 requiere el panel de haplotipos posterior.
 
+F2.3.4 admite `direct_events` únicamente como una vista tipada por individuo y
+fase: su adaptador resuelve ID, contig, alelos y coordenadas, y el orquestador
+prepara una vez la matriz, muestrea y fasea antes de construir estados lógicos
+temporales. La fase conserva la identidad de referencia y SHA-256 canónico de
+la matriz; cualquier diferencia de locus o frecuencia rechaza el enlace. Para
+un SNP explícito que coincide con la matriz, la compatibilidad se decide por
+probabilidad positiva bajo HWE o `F` diploide, no contra el alelo sorteado; la
+autorización específica solo conserva un caso de probabilidad cero. El
+preflight transaccional finaliza antes de crear el workspace, conserva el orden
+de cambios por individuo y no materializa ni publica las copias.
+`validate` y `run` llaman al mismo preflight de solo lectura; únicamente el
+segundo abre el workspace de publicación.
+
 El panel de bloques haplotípicos cruza la misma frontera como otro recurso
 inmutable. El paquete contiene exactamente `panel_blocks.tsv`, `panel_sites.tsv`,
 `panel_haplotype_alleles.tsv`, `panel_frequencies.tsv` y `panel.metadata.json`.

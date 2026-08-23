@@ -351,13 +351,19 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Cambia: utilidad RNG y permutación de copias posterior a la composición.
   - Se comprueba con: dosis conservada, aislamiento genotipo/fase y semilla fija.
 
-- ☐ F2.3.4. Integrar SNP explícitos e indels en las copias individuales.
+- ✅ F2.3.4. Integrar SNP explícitos e indels en las copias individuales.
   - Depende de: F2.2.8–F2.2.10 y F2.3.2–F2.3.3.
   - Procede de: REQ-DIR-01/02 y REQ-IND-64/65.
-  - Cambia: validación de incompatibilidades y autorización específica, seguida
-    por cambios directos locales.
-  - Se comprueba con: incompatibilidad rechazada/confirmada, ninguna corrección
-    silenciosa y ausencia de `--force`.
+  - Cambia: sintaxis TOML `[[direct_events]]` dirigida por
+    `event_id`/`individual_id`/`phase`; `kind="snp"` exige
+    `position_1based`/`ref`/`alt`, `insertion` exige `point`/`bases` y
+    `deletion` exige `start`/`end`. La ejecución prepara la matriz, muestrea,
+    fasea, liga su huella y preflighta cada copia antes de abrir el workspace;
+    no publica ni materializa individuos.
+  - Se comprueba con: incompatibilidad de probabilidad cero rechazada o
+    confirmada y trazada, HWE multialélico y `F=1`, vistas por individuo y
+    huella matriz–fase, indels transaccionales, ninguna corrección silenciosa y
+    ausencia de `--force`.
 
 - ☐ F2.3.5. Materializar individuos y calcular estadísticas solicitadas/realizadas.
   - Depende de: F2.3.4.

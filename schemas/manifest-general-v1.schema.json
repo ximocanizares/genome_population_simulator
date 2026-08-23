@@ -116,7 +116,7 @@
         "effective": {"type": "number", "minimum": 0, "maximum": 1}
       }
     },
-    "authorizations": { "type": "object", "additionalProperties": false, "required": ["allow_empty_snv_matrix"], "properties": {"allow_empty_snv_matrix": {"type": "boolean"}}},
+    "authorizations": { "type": "object", "additionalProperties": false, "required": ["allow_empty_snv_matrix", "allow_incompatible_genotypes"], "properties": {"allow_empty_snv_matrix": {"type": "boolean"}, "allow_incompatible_genotypes": {"type": "boolean"}}},
     "non_empty_id": { "type": "string", "minLength": 1 },
     "checksum": {
       "type": "object",

@@ -276,6 +276,23 @@ pub struct DeclaredInitialPopulation {
     pub individual_ids: Option<Vec<Located<String>>>,
 }
 
+/// Cambio directo mínimo de F2.3.4 dirigido a una copia individual.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredDirectEvent {
+    pub event_id: Located<String>,
+    pub individual_id: Located<String>,
+    pub phase: Located<u64>,
+    pub kind: Located<String>,
+    pub contig: Located<String>,
+    pub position_1based: Option<Located<u64>>,
+    pub reference: Option<Located<String>>,
+    pub alternate: Option<Located<String>>,
+    pub point: Option<Located<u64>>,
+    pub bases: Option<Located<String>>,
+    pub start: Option<Located<u64>>,
+    pub end: Option<Located<u64>>,
+}
+
 #[derive(Clone, Debug)]
 pub struct DeclaredGeneralConfig {
     source: AdmittedToml,
@@ -286,6 +303,7 @@ pub struct DeclaredGeneralConfig {
     reduced_references: Vec<DeclaredReducedReference>,
     population_snvs: Option<DeclaredPopulationSnvs>,
     initial_populations: Vec<DeclaredInitialPopulation>,
+    direct_events: Vec<DeclaredDirectEvent>,
 }
 
 impl DeclaredGeneralConfig {
@@ -307,6 +325,7 @@ impl DeclaredGeneralConfig {
             reduced_references,
             population_snvs,
             initial_populations: Vec::new(),
+            direct_events: Vec::new(),
         }
     }
 
@@ -315,6 +334,11 @@ impl DeclaredGeneralConfig {
         initial_populations: Vec<DeclaredInitialPopulation>,
     ) -> Self {
         self.initial_populations = initial_populations;
+        self
+    }
+
+    pub(crate) fn with_direct_events(mut self, direct_events: Vec<DeclaredDirectEvent>) -> Self {
+        self.direct_events = direct_events;
         self
     }
 
@@ -360,6 +384,11 @@ impl DeclaredGeneralConfig {
     #[must_use]
     pub fn initial_populations(&self) -> &[DeclaredInitialPopulation] {
         &self.initial_populations
+    }
+
+    #[must_use]
+    pub fn direct_events(&self) -> &[DeclaredDirectEvent] {
+        &self.direct_events
     }
 }
 

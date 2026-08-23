@@ -53,11 +53,7 @@ fn invalid_header_and_future_fields_have_equivalent_diagnostics_without_publicat
 
 #[test]
 fn validation_is_read_only() {
-    for fixture in [
-        "general-minimal.toml",
-        "general-supplied.toml",
-        "general-seeded.toml",
-    ] {
+    for fixture in ["general-minimal.toml", "general-seeded.toml"] {
         let input = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/config")
             .join(fixture);
@@ -70,6 +66,28 @@ fn validation_is_read_only() {
         );
         assert!(!output.exists());
     }
+    let supplied_root = destination("supplied-read-only");
+    fs::create_dir(&supplied_root).expect("supplied fixture root");
+    let input = supplied_root.join("general.toml");
+    fs::write(
+        supplied_root.join("reference.fa"),
+        format!(">chr1\n{}\n", "A".repeat(1000)),
+    )
+    .expect("supplied FASTA");
+    fs::write(
+        &input,
+        include_str!("fixtures/config/general-supplied.toml"),
+    )
+    .expect("supplied config");
+    let output = supplied_root.join("result");
+    let result = run("validate", &input, "human", &output);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(!output.exists());
+    fs::remove_dir_all(supplied_root).expect("supplied fixture cleanup");
 }
 
 #[test]

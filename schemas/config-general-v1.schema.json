@@ -64,6 +64,12 @@
       "type": "array",
       "items": {"$ref": "#/$defs/initial_population"},
       "default": []
+    },
+    "direct_events": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/direct_event"},
+      "default": [],
+      "description": "Cambios explícitos por individuo ya faseado; requieren population_snvs e initial_populations."
     }
   },
   "$defs": {
@@ -300,6 +306,29 @@
       "allOf": [
         {"if": {"properties": {"genotype_model": {"const": "hwe"}}, "required": ["genotype_model"]}, "then": {"not": {"required": ["inbreeding_coefficient"]}}},
         {"if": {"properties": {"genotype_model": {"const": "f_diploid"}}, "required": ["genotype_model"]}, "then": {"required": ["inbreeding_coefficient"], "properties": {"ploidy": {"const": 2}}}}
+      ]
+    },
+    "direct_event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["event_id", "individual_id", "phase", "kind", "contig"],
+      "properties": {
+        "event_id": {"$ref": "#/$defs/identifier"},
+        "individual_id": {"$ref": "#/$defs/identifier"},
+        "phase": {"type": "integer", "minimum": 0, "maximum": 9},
+        "kind": {"enum": ["snp", "insertion", "deletion"]},
+        "contig": {"$ref": "#/$defs/identifier"},
+        "position_1based": {"type": "integer", "minimum": 1},
+        "ref": {"enum": ["A", "C", "G", "T", "a", "c", "g", "t"]},
+        "alt": {"enum": ["A", "C", "G", "T", "a", "c", "g", "t"]},
+        "point": {"type": "integer", "minimum": 0},
+        "bases": {"type": "string", "pattern": "^[ACGTacgt]+$"},
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 0}
+      },
+      "oneOf": [
+        {"properties": {"kind": {"const": "snp"}}, "required": ["position_1based", "ref", "alt"], "not": {"anyOf": [{"required": ["point"]}, {"required": ["bases"]}, {"required": ["start"]}, {"required": ["end"]}]}},
+        {"properties": {"kind": {"const": "insertion"}}, "required": ["point", "bases"], "not": {"anyOf": [{"required": ["position_1based"]}, {"required": ["ref"]}, {"required": ["alt"]}, {"required": ["start"]}, {"required": ["end"]}]}},
+        {"properties": {"kind": {"const": "deletion"}}, "required": ["start", "end"], "not": {"anyOf": [{"required": ["position_1based"]}, {"required": ["ref"]}, {"required": ["alt"]}, {"required": ["point"]}, {"required": ["bases"]}]}}
       ]
     }
   }

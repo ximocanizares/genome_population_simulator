@@ -39,6 +39,7 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
         keys_at(&schema, "/properties"),
         BTreeSet::from([
             "config_kind".to_owned(),
+            "direct_events".to_owned(),
             "initial_populations".to_owned(),
             "normalization_tolerance".to_owned(),
             "ploidy".to_owned(),

@@ -11,10 +11,10 @@ use crate::configuration::{
 };
 use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
-use crate::haplotype::Ploidy;
+use crate::haplotype::{HaplotypePhase, Ploidy};
 use crate::identity::{
-    AutomaticIdRequest, IdClass, IdentityRegistry, IndividualId, PopulationId, ReferenceId,
-    SequenceId,
+    AutomaticIdRequest, EventId, IdClass, IdentityRegistry, IndividualId, PopulationId,
+    ReferenceId, SequenceId,
 };
 use crate::population_snvs::{
     FrequencyAssignmentMode, FrequencySampling, FrequencySpectrumComponent,
@@ -187,6 +187,7 @@ pub struct EffectiveConfig {
     reproducibility: ReproducibilityMetadata,
     population_snvs: Option<EffectivePopulationSnvs>,
     initial_populations: Vec<EffectiveInitialPopulation>,
+    direct_events: Vec<EffectiveDirectEvent>,
 }
 
 /// Origen efectivo del recurso canónico F2.2.7.
@@ -211,6 +212,76 @@ pub enum EffectivePopulationSnvs {
 pub enum EffectiveInitialGenotypeModel {
     HardyWeinberg,
     FDiploid { inbreeding_coefficient: f64 },
+}
+
+/// Cambio directo de F2.3.4 ya ligado a una identidad individual y a una
+/// fase existente. Las coordenadas de indels mantienen el convenio actual
+/// del compositor, pues se evalúan en orden declarado tras los SNP de matriz.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EffectiveDirectEvent {
+    Snp {
+        event_id: EventId,
+        individual_id: IndividualId,
+        phase: HaplotypePhase,
+        sequence_id: SequenceId,
+        position_1based: u64,
+        reference: u8,
+        alternate: u8,
+    },
+    Insertion {
+        event_id: EventId,
+        individual_id: IndividualId,
+        phase: HaplotypePhase,
+        sequence_id: SequenceId,
+        point: u64,
+        bases: Arc<[u8]>,
+    },
+    Deletion {
+        event_id: EventId,
+        individual_id: IndividualId,
+        phase: HaplotypePhase,
+        sequence_id: SequenceId,
+        start: u64,
+        end: u64,
+    },
+}
+
+impl EffectiveDirectEvent {
+    #[must_use]
+    pub const fn event_id(&self) -> &EventId {
+        match self {
+            Self::Snp { event_id, .. }
+            | Self::Insertion { event_id, .. }
+            | Self::Deletion { event_id, .. } => event_id,
+        }
+    }
+
+    #[must_use]
+    pub const fn individual_id(&self) -> &IndividualId {
+        match self {
+            Self::Snp { individual_id, .. }
+            | Self::Insertion { individual_id, .. }
+            | Self::Deletion { individual_id, .. } => individual_id,
+        }
+    }
+
+    #[must_use]
+    pub const fn phase(&self) -> HaplotypePhase {
+        match self {
+            Self::Snp { phase, .. }
+            | Self::Insertion { phase, .. }
+            | Self::Deletion { phase, .. } => *phase,
+        }
+    }
+
+    #[must_use]
+    pub const fn sequence_id(&self) -> &SequenceId {
+        match self {
+            Self::Snp { sequence_id, .. }
+            | Self::Insertion { sequence_id, .. }
+            | Self::Deletion { sequence_id, .. } => sequence_id,
+        }
+    }
 }
 
 /// Identidades y parámetros ya resueltos de una cohorte directa.
@@ -324,6 +395,12 @@ impl EffectiveConfig {
     #[must_use]
     pub fn initial_populations(&self) -> &[EffectiveInitialPopulation] {
         &self.initial_populations
+    }
+
+    /// Eventos directos tipados y en su orden de declaración global.
+    #[must_use]
+    pub fn direct_events(&self) -> &[EffectiveDirectEvent] {
+        &self.direct_events
     }
 }
 
@@ -531,6 +608,14 @@ pub fn build_effective_config_with_entropy(
     let reproducibility = ReproducibilityMetadata::new(root_seed, seed_origin);
     let initial_populations = effective_initial_populations(general, root_seed)?;
     let population_snvs = effective_population_snvs(general)?;
+    let direct_events = effective_direct_events(general, &initial_populations, &sequences)?;
+    if !direct_events.is_empty() && population_snvs.is_none() {
+        return Err(config_error(
+            general,
+            "direct_events,population_snvs",
+            "direct_events exige una matriz SNV poblacional para ligar genotipo y fase",
+        ));
+    }
     if let Some(EffectivePopulationSnvs::Generate {
         parameters: generation,
     }) = &population_snvs
@@ -580,7 +665,159 @@ pub fn build_effective_config_with_entropy(
         reproducibility,
         population_snvs,
         initial_populations,
+        direct_events,
     })
+}
+
+fn effective_direct_events(
+    general: &DeclaredGeneralConfig,
+    populations: &[EffectiveInitialPopulation],
+    sequences: &[EffectiveSequence],
+) -> Result<Vec<EffectiveDirectEvent>, Diagnostic> {
+    let mut individuals = std::collections::BTreeMap::new();
+    for population in populations {
+        for individual in population.individual_ids() {
+            individuals.insert(individual.clone(), population.ploidy());
+        }
+    }
+    let mut registry = IdentityRegistry::default();
+    general
+        .direct_events()
+        .iter()
+        .map(|declared| {
+            let event_id = EventId::parse(declared.event_id.value().clone(), "direct_events")
+                .map_err(|error| with_initial_population_path(general, error))?;
+            let event_id = registry
+                .register_event("execution", event_id)
+                .map_err(|error| with_initial_population_path(general, error))?;
+            let individual_id =
+                IndividualId::parse(declared.individual_id.value().clone(), "direct_events")
+                    .map_err(|error| with_initial_population_path(general, error))?;
+            let ploidy = individuals.get(&individual_id).ok_or_else(|| {
+                config_error(
+                    general,
+                    "direct_events.individual_id",
+                    format!("individuo no declarado en initial_populations: {individual_id}"),
+                )
+            })?;
+            let phase_index = u8::try_from(*declared.phase.value()).map_err(|_| {
+                config_error(general, "direct_events.phase", "no se puede representar")
+            })?;
+            if phase_index >= ploidy.copy_count() {
+                return Err(config_error(
+                    general,
+                    "direct_events.phase",
+                    format!(
+                        "la fase {phase_index} no existe para ploidía {}",
+                        ploidy.copy_count()
+                    ),
+                ));
+            }
+            let phase = HaplotypePhase::from_copy_index(phase_index)
+                .map_err(|_| config_error(general, "direct_events.phase", "fase inválida"))?;
+            let sequence_id = SequenceId::parse(declared.contig.value().clone(), "direct_events")
+                .map_err(|error| with_initial_population_path(general, error))?;
+            if !sequences
+                .iter()
+                .any(|sequence| sequence.id() == sequence_id.as_str())
+            {
+                return Err(config_error(
+                    general,
+                    "direct_events.contig",
+                    format!("contig ausente de la referencia efectiva: {sequence_id}"),
+                ));
+            }
+            match declared.kind.value().as_str() {
+                "snp" => {
+                    let position_1based = *declared
+                        .position_1based
+                        .as_ref()
+                        .expect("parser checked")
+                        .value();
+                    let reference = single_canonical_base(
+                        general,
+                        "direct_events.ref",
+                        declared.reference.as_ref().expect("parser checked").value(),
+                    )?;
+                    let alternate = single_canonical_base(
+                        general,
+                        "direct_events.alt",
+                        declared.alternate.as_ref().expect("parser checked").value(),
+                    )?;
+                    if reference == alternate {
+                        return Err(config_error(
+                            general,
+                            "direct_events.ref,direct_events.alt",
+                            "deben ser bases canónicas distintas",
+                        ));
+                    }
+                    Ok(EffectiveDirectEvent::Snp {
+                        event_id,
+                        individual_id,
+                        phase,
+                        sequence_id,
+                        position_1based,
+                        reference,
+                        alternate,
+                    })
+                }
+                "insertion" => {
+                    let bases = declared
+                        .bases
+                        .as_ref()
+                        .expect("parser checked")
+                        .value()
+                        .as_bytes();
+                    if bases.is_empty()
+                        || bases.iter().any(|base| {
+                            !matches!(base.to_ascii_uppercase(), b'A' | b'C' | b'G' | b'T')
+                        })
+                    {
+                        return Err(config_error(
+                            general,
+                            "direct_events.bases",
+                            "debe contener una o más bases A/C/G/T",
+                        ));
+                    }
+                    Ok(EffectiveDirectEvent::Insertion {
+                        event_id,
+                        individual_id,
+                        phase,
+                        sequence_id,
+                        point: *declared.point.as_ref().expect("parser checked").value(),
+                        bases: Arc::from(
+                            bases.iter().map(u8::to_ascii_uppercase).collect::<Vec<_>>(),
+                        ),
+                    })
+                }
+                "deletion" => Ok(EffectiveDirectEvent::Deletion {
+                    event_id,
+                    individual_id,
+                    phase,
+                    sequence_id,
+                    start: *declared.start.as_ref().expect("parser checked").value(),
+                    end: *declared.end.as_ref().expect("parser checked").value(),
+                }),
+                _ => unreachable!("parser validates direct event kind"),
+            }
+        })
+        .collect()
+}
+
+fn single_canonical_base(
+    general: &DeclaredGeneralConfig,
+    field: &str,
+    value: &str,
+) -> Result<u8, Diagnostic> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 1 || !matches!(bytes[0].to_ascii_uppercase(), b'A' | b'C' | b'G' | b'T') {
+        return Err(config_error(
+            general,
+            field,
+            "debe ser exactamente una base A/C/G/T",
+        ));
+    }
+    Ok(bytes[0].to_ascii_uppercase())
 }
 
 fn effective_initial_populations(

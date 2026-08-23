@@ -4,11 +4,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::adapters::{admit_toml_header, parse_declared_config};
-use crate::application::{EffectiveConfig, EffectiveReferenceSource};
+use crate::application::{EffectiveConfig, EffectiveDirectEvent, EffectiveReferenceSource};
 use crate::configuration::ExpectedConfigKind;
+use crate::coordinates::BasePosition;
 use crate::diagnostics::Diagnostic;
+use crate::haplotype::Individual;
 use crate::identity::{ReferenceId, derive_execution_id};
-use crate::integrity::configuration_digest;
+use crate::initial_genotypes::{assign_initial_phases, sample_initial_genotypes};
+use crate::initial_individual_integration::{
+    IncompatibleGenotypeAuthorization, InitialIndividualIntegrationRequest,
+    integrate_initial_individual,
+};
+use crate::integrity::{Sha256Writer, configuration_digest};
+use crate::materialization::SnpLocus;
 use crate::population_snvs::{
     PopulationSnvsProvenance, canonical_metadata_document, canonical_tsv_bytes,
     generate_population_snvs_from_reference_with_tolerance, normalization_audit_document,
@@ -36,6 +44,11 @@ use crate::results::{
     UnitState, effective_config_document_with_population_snvs, general_manifest_document,
     json_document_bytes,
 };
+use crate::segments::{CanonicalBase, ModificationProvenance};
+use crate::small_event_composition::{
+    DeclaredSmallEvent, TargetedCurrentDeletion, TargetedCurrentInsertion,
+};
+use crate::snp_application::{ApplicableSnp, TargetedSnp};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutionOutcome {
@@ -49,6 +62,7 @@ pub enum ExecutionOutcome {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ExecutionAuthorizations {
     pub allow_empty_snv_matrix: bool,
+    pub allow_incompatible_genotypes: bool,
 }
 
 pub fn execute_validated_config(
@@ -77,6 +91,17 @@ pub fn execute_validated_config_with_authorizations(
     )
 }
 
+/// Ejecuta todo el preflight de recursos y creación directa sin crear un
+/// workspace ni publicar artefactos. `validate` y `run` comparten esta frontera
+/// para que las autorizaciones y los rechazos F2.3.4 no diverjan.
+pub fn preflight_validated_config_with_authorizations(
+    effective: &EffectiveConfig,
+    authorizations: ExecutionAuthorizations,
+) -> Result<(), Diagnostic> {
+    let prepared_reference = prepare_reference(effective)?;
+    preflight_prepared_config(effective, authorizations, &prepared_reference).map(|_| ())
+}
+
 fn execute_validated_config_with_effective_document(
     effective: &EffectiveConfig,
     destination: &Path,
@@ -89,7 +114,8 @@ fn execute_validated_config_with_effective_document(
     after_prepare_reference(&mut prepared_reference)?;
     // Todo error de dominio o preflight ocurre antes de crear el provisional y
     // antes de que exista cualquier RNG local de selección.
-    preflight_reductions(effective, prepared_reference.reference())?;
+    let prepared_population_snvs =
+        preflight_prepared_config(effective, authorizations, &prepared_reference)?;
     let configuration_digest = configuration_digest(effective.configuration_input().bytes())?;
     let execution_id = derive_execution_id(
         effective.reproducibility().root_seed(),
@@ -123,10 +149,8 @@ fn execute_validated_config_with_effective_document(
             source_artifact,
             prepared_reference,
         )?;
-        population_snvs = materialize_population_snvs(
-            effective,
-            authorizations,
-            prepared_reference.reference(),
+        population_snvs = publish_prepared_population_snvs(
+            prepared_population_snvs.as_ref(),
             source_artifact,
             &mut workspace,
         )?;
@@ -287,6 +311,25 @@ fn execute_validated_config_with_effective_document(
     }
 }
 
+fn preflight_prepared_config(
+    effective: &EffectiveConfig,
+    authorizations: ExecutionAuthorizations,
+    prepared_reference: &PreparedReference,
+) -> Result<Option<PreparedPopulationSnvsForExecution>, Diagnostic> {
+    preflight_reductions(effective, prepared_reference.reference())?;
+    let prepared_population_snvs =
+        prepare_population_snvs_for_execution(effective, authorizations, prepared_reference)?;
+    preflight_initial_individuals(
+        effective,
+        prepared_reference.reference(),
+        prepared_population_snvs
+            .as_ref()
+            .map(|prepared| &prepared.matrix),
+        authorizations,
+    )?;
+    Ok(prepared_population_snvs)
+}
+
 fn publish_controlled_failure(
     workspace: &mut ExecutionWorkspace,
     execution_id: &str,
@@ -327,19 +370,33 @@ fn publish_controlled_failure(
     workspace.write_general_manifest(&json_document_bytes(&general_manifest_document(&manifest))?)
 }
 
-fn materialize_population_snvs(
+struct PreparedPopulationSnvsForExecution {
+    matrix: crate::population_snvs::PreparedPopulationSnvs,
+    publication: PopulationSnvsPublication,
+}
+
+enum PopulationSnvsPublication {
+    Publish {
+        provenance: PopulationSnvsProvenance,
+    },
+    Reuse {
+        metadata_sha256: String,
+        normalization_audit: serde_json::Value,
+    },
+}
+
+fn prepare_population_snvs_for_execution(
     effective: &EffectiveConfig,
     authorizations: ExecutionAuthorizations,
-    reference: &Reference,
-    reference_fasta: &ArtifactRecord,
-    workspace: &mut ExecutionWorkspace,
-) -> Result<Option<PopulationSnvsManifestLink>, Diagnostic> {
+    prepared_reference: &PreparedReference,
+) -> Result<Option<PreparedPopulationSnvsForExecution>, Diagnostic> {
     let Some(source) = effective.population_snvs() else {
         return Ok(None);
     };
+    let reference = prepared_reference.reference();
     let prepared = match source {
         crate::application::EffectivePopulationSnvs::Generate { parameters } => {
-            let prepared = generate_population_snvs_from_reference_with_tolerance(
+            let matrix = generate_population_snvs_from_reference_with_tolerance(
                 parameters,
                 reference,
                 effective.reproducibility().root_seed(),
@@ -350,13 +407,12 @@ fn materialize_population_snvs(
             .map_err(|error| {
                 population_snvs_error("population_snvs.generate", error.to_string())
             })?;
-            return publish_population_snvs(
-                workspace,
-                &prepared,
-                reference_fasta,
-                PopulationSnvsProvenance::Generated,
-            )
-            .map(Some);
+            PreparedPopulationSnvsForExecution {
+                matrix,
+                publication: PopulationSnvsPublication::Publish {
+                    provenance: PopulationSnvsProvenance::Generated,
+                },
+            }
         }
         crate::application::EffectivePopulationSnvs::Supplied { input_path } => {
             let bytes = fs::read(input_path)
@@ -364,7 +420,7 @@ fn materialize_population_snvs(
             let table = parse_supplied_tsv(&bytes).map_err(|error| {
                 population_snvs_error("population_snvs.input_path", error.to_string())
             })?;
-            prepare_population_snvs_from_reference(
+            let matrix = prepare_population_snvs_from_reference(
                 &table,
                 reference,
                 effective.normalization().tolerance(),
@@ -372,34 +428,219 @@ fn materialize_population_snvs(
             )
             .map_err(|error| {
                 population_snvs_error("population_snvs.input_path", error.to_string())
-            })?
+            })?;
+            PreparedPopulationSnvsForExecution {
+                matrix,
+                publication: PopulationSnvsPublication::Publish {
+                    provenance: PopulationSnvsProvenance::Supplied,
+                },
+            }
         }
         crate::application::EffectivePopulationSnvs::Reuse { metadata_path } => {
-            let (_, _, metadata_sha256, normalization_audit) = validate_reusable_population_snvs(
-                metadata_path,
-                reference,
-                reference_fasta.digest.as_str(),
-                effective.normalization().tolerance(),
-                authorizations.allow_empty_snv_matrix,
-            )
-            .map_err(|error| {
-                population_snvs_error("population_snvs.metadata_path", error.to_string())
-            })?;
-            return Ok(Some(PopulationSnvsManifestLink {
-                mode: "reuse".to_owned(),
-                metadata_sha256,
-                metadata_artifact_id: None,
-                normalization_audit,
-            }));
+            let (matrix, _, metadata_sha256, normalization_audit) =
+                validate_reusable_population_snvs(
+                    metadata_path,
+                    reference,
+                    &prepared_reference_fasta_digest(prepared_reference)?,
+                    effective.normalization().tolerance(),
+                    authorizations.allow_empty_snv_matrix,
+                )
+                .map_err(|error| {
+                    population_snvs_error("population_snvs.metadata_path", error.to_string())
+                })?;
+            PreparedPopulationSnvsForExecution {
+                matrix,
+                publication: PopulationSnvsPublication::Reuse {
+                    metadata_sha256,
+                    normalization_audit,
+                },
+            }
         }
     };
-    publish_population_snvs(
-        workspace,
-        &prepared,
-        reference_fasta,
-        PopulationSnvsProvenance::Supplied,
+    Ok(Some(prepared))
+}
+
+fn publish_prepared_population_snvs(
+    prepared: Option<&PreparedPopulationSnvsForExecution>,
+    reference_fasta: &ArtifactRecord,
+    workspace: &mut ExecutionWorkspace,
+) -> Result<Option<PopulationSnvsManifestLink>, Diagnostic> {
+    let Some(prepared) = prepared else {
+        return Ok(None);
+    };
+    match &prepared.publication {
+        PopulationSnvsPublication::Publish { provenance } => {
+            publish_population_snvs(workspace, &prepared.matrix, reference_fasta, *provenance)
+                .map(Some)
+        }
+        PopulationSnvsPublication::Reuse {
+            metadata_sha256,
+            normalization_audit,
+        } => Ok(Some(PopulationSnvsManifestLink {
+            mode: "reuse".to_owned(),
+            metadata_sha256: metadata_sha256.clone(),
+            metadata_artifact_id: None,
+            normalization_audit: normalization_audit.clone(),
+        })),
+    }
+}
+
+fn prepared_reference_fasta_digest(
+    prepared_reference: &PreparedReference,
+) -> Result<String, Diagnostic> {
+    match prepared_reference {
+        PreparedReference::Supplied(value) => Ok(value.source_identity().digest().to_owned()),
+        PreparedReference::Generated(reference) => {
+            let mut bytes = Vec::new();
+            write_generated_fasta(reference, &mut bytes)?;
+            let mut digest = Sha256Writer::default();
+            digest.update(&bytes)?;
+            Ok(digest.finish("reference.fa").digest().to_owned())
+        }
+    }
+}
+
+/// Recorre la ruta F2.3.2 → F2.3.3 → F2.3.4 antes de abrir el workspace.
+/// El resultado lógico se descarta intencionadamente: F2.3.4 valida e integra
+/// copias, pero no publica individuos ni materializa sus secuencias.
+fn preflight_initial_individuals(
+    effective: &EffectiveConfig,
+    reference: &Reference,
+    matrix: Option<&crate::population_snvs::PreparedPopulationSnvs>,
+    authorizations: ExecutionAuthorizations,
+) -> Result<(), Diagnostic> {
+    if effective.direct_events().is_empty() {
+        return Ok(());
+    }
+    let matrix = matrix.ok_or_else(|| {
+        initial_individual_error(
+            "direct_events,population_snvs",
+            "la matriz SNV falta después de la validación efectiva",
+        )
+    })?;
+    let compositions = sample_initial_genotypes(effective, reference, matrix)
+        .map_err(|error| initial_individual_error("initial_genotypes", error.to_string()))?;
+    let phased = assign_initial_phases(effective.reproducibility().root_seed(), &compositions)
+        .map_err(|error| initial_individual_error("initial_phases", error.to_string()))?;
+    for population in effective.initial_populations() {
+        for individual_id in population.individual_ids() {
+            let explicit_events = effective
+                .direct_events()
+                .iter()
+                .filter(|event| event.individual_id() == individual_id)
+                .map(|event| declared_small_event(event, reference))
+                .collect::<Result<Vec<_>, _>>()?;
+            if explicit_events.is_empty() {
+                continue;
+            }
+            let individual =
+                Individual::from_reference(individual_id.clone(), reference, population.ploidy());
+            let phased_for_individual = phased.for_individual(individual_id);
+            let authorization = if authorizations.allow_incompatible_genotypes {
+                IncompatibleGenotypeAuthorization::allowed()
+            } else {
+                IncompatibleGenotypeAuthorization::denied()
+            };
+            integrate_initial_individual(
+                &individual,
+                reference,
+                InitialIndividualIntegrationRequest::new(
+                    matrix,
+                    &phased_for_individual,
+                    effective.reproducibility().root_seed(),
+                    &explicit_events,
+                    &[],
+                    authorization,
+                    population.genotype_model(),
+                ),
+            )
+            .map_err(|error| initial_individual_error("direct_events", error.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+fn declared_small_event(
+    event: &EffectiveDirectEvent,
+    reference: &Reference,
+) -> Result<DeclaredSmallEvent, Diagnostic> {
+    let sequence = reference
+        .sequences()
+        .iter()
+        .find(|sequence| sequence.id() == event.sequence_id())
+        .ok_or_else(|| initial_individual_error("direct_events.contig", "contig ausente"))?;
+    let provenance = ModificationProvenance::new(event.event_id().clone());
+    match event {
+        EffectiveDirectEvent::Snp {
+            phase,
+            sequence_id,
+            position_1based,
+            reference: expected,
+            alternate,
+            ..
+        } => {
+            let position = BasePosition::from_base_1(
+                reference.id().clone(),
+                sequence_id.clone(),
+                *position_1based,
+                sequence.length(),
+            )
+            .map_err(|error| {
+                initial_individual_error("direct_events.position_1based", format!("{error:?}"))
+            })?;
+            let locus = SnpLocus::new(
+                position,
+                CanonicalBase::from_byte(*expected).map_err(|error| {
+                    initial_individual_error("direct_events.ref", format!("{error:?}"))
+                })?,
+                CanonicalBase::from_byte(*alternate).map_err(|error| {
+                    initial_individual_error("direct_events.alt", format!("{error:?}"))
+                })?,
+            )
+            .map_err(|error| initial_individual_error("direct_events", format!("{error:?}")))?;
+            Ok(DeclaredSmallEvent::Snp(TargetedSnp::new(
+                *phase,
+                ApplicableSnp::explicit(locus, event.event_id().clone()),
+            )))
+        }
+        EffectiveDirectEvent::Insertion {
+            phase,
+            sequence_id,
+            point,
+            bases,
+            ..
+        } => Ok(DeclaredSmallEvent::Insertion(
+            TargetedCurrentInsertion::new(
+                sequence_id.clone(),
+                *phase,
+                *point,
+                bases.clone(),
+                provenance,
+            ),
+        )),
+        EffectiveDirectEvent::Deletion {
+            phase,
+            sequence_id,
+            start,
+            end,
+            ..
+        } => Ok(DeclaredSmallEvent::Deletion(TargetedCurrentDeletion::new(
+            sequence_id.clone(),
+            *phase,
+            *start,
+            *end,
+            provenance,
+        ))),
+    }
+}
+
+fn initial_individual_error(component: &str, detail: impl Into<String>) -> Diagnostic {
+    Diagnostic::configuration(
+        "GPS-CONF-008",
+        "Los cambios directos iniciales no cumplen el contrato F2.3.4.",
     )
-    .map(Some)
+    .with("component", component)
+    .with("detail", detail.into())
 }
 
 fn publish_population_snvs(

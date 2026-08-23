@@ -16,6 +16,7 @@ pub mod haplotype;
 pub mod identity;
 pub mod indel_application;
 pub mod initial_genotypes;
+pub mod initial_individual_integration;
 pub mod integrity;
 pub mod materialization;
 pub mod population_snvs;

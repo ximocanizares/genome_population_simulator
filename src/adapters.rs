@@ -6,7 +6,7 @@ use std::sync::Arc;
 use toml::de::{DeTable, DeValue};
 
 use crate::configuration::{
-    AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredGeneralConfig,
+    AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredDirectEvent, DeclaredGeneralConfig,
     DeclaredInitialPopulation, DeclaredNumber, DeclaredPopulationSnvs,
     DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
     DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
@@ -166,6 +166,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
             "reduced_references",
             "population_snvs",
             "initial_populations",
+            "direct_events",
         ],
     )?;
     let seed = optional_located_string(&admitted, table, "seed")?;
@@ -175,6 +176,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
     let reduced = parse_reduced_references(&admitted, table)?;
     let population_snvs = parse_population_snvs(&admitted, table)?;
     let initial_populations = parse_initial_populations(&admitted, table)?;
+    let direct_events = parse_direct_events(&admitted, table)?;
     Ok(DeclaredGeneralConfig::new(
         admitted,
         seed,
@@ -184,7 +186,110 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
         reduced,
         population_snvs,
     )
-    .with_initial_populations(initial_populations))
+    .with_initial_populations(initial_populations)
+    .with_direct_events(direct_events))
+}
+
+fn parse_direct_events(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<Vec<DeclaredDirectEvent>, Diagnostic> {
+    let Some(values) = optional_array(admitted, table, "direct_events")? else {
+        return Ok(Vec::new());
+    };
+    values
+        .iter()
+        .map(|value| {
+            let entry = value
+                .get_ref()
+                .as_table()
+                .ok_or_else(|| wrong_type(admitted, "direct_events", value, "table"))?;
+            check_unknown(
+                admitted,
+                entry,
+                &[
+                    "event_id",
+                    "individual_id",
+                    "phase",
+                    "kind",
+                    "contig",
+                    "position_1based",
+                    "ref",
+                    "alt",
+                    "point",
+                    "bases",
+                    "start",
+                    "end",
+                ],
+            )?;
+            let kind = required_string(admitted, entry, "kind")?;
+            if !matches!(kind.value().as_str(), "snp" | "insertion" | "deletion") {
+                return Err(semantic_error(
+                    admitted,
+                    "direct_events.kind",
+                    "debe ser snp, insertion o deletion",
+                ));
+            }
+            let position_1based = optional_located_u64(admitted, entry, "position_1based")?;
+            let reference = optional_located_string(admitted, entry, "ref")?;
+            let alternate = optional_located_string(admitted, entry, "alt")?;
+            let point = optional_located_u64(admitted, entry, "point")?;
+            let bases = optional_located_string(admitted, entry, "bases")?;
+            let start = optional_located_u64(admitted, entry, "start")?;
+            let end = optional_located_u64(admitted, entry, "end")?;
+            let valid = match kind.value().as_str() {
+                "snp" => {
+                    position_1based.is_some()
+                        && reference.is_some()
+                        && alternate.is_some()
+                        && point.is_none()
+                        && bases.is_none()
+                        && start.is_none()
+                        && end.is_none()
+                }
+                "insertion" => {
+                    point.is_some()
+                        && bases.is_some()
+                        && position_1based.is_none()
+                        && reference.is_none()
+                        && alternate.is_none()
+                        && start.is_none()
+                        && end.is_none()
+                }
+                "deletion" => {
+                    start.is_some()
+                        && end.is_some()
+                        && position_1based.is_none()
+                        && reference.is_none()
+                        && alternate.is_none()
+                        && point.is_none()
+                        && bases.is_none()
+                }
+                _ => false,
+            };
+            if !valid {
+                return Err(semantic_error(
+                    admitted,
+                    "direct_events",
+                    "los campos no corresponden a kind",
+                ));
+            }
+            Ok(DeclaredDirectEvent {
+                event_id: required_string(admitted, entry, "event_id")?,
+                individual_id: required_string(admitted, entry, "individual_id")?,
+                phase: required_u64(admitted, entry, "phase")?,
+                kind,
+                contig: required_string(admitted, entry, "contig")?,
+                position_1based,
+                reference,
+                alternate,
+                point,
+                bases,
+                start,
+                end,
+            })
+        })
+        .collect()
 }
 
 fn parse_initial_populations(

@@ -397,6 +397,7 @@ length = 2
     .expect("config");
     let authorizations = ExecutionAuthorizations {
         allow_empty_snv_matrix: true,
+        allow_incompatible_genotypes: false,
     };
     let published = root.join("published");
     execute_validated_config_with_authorizations(

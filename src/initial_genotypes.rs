@@ -122,12 +122,24 @@ impl InitialLocusComposition {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InitialGenotypeCompositions {
     loci: Vec<InitialLocusComposition>,
+    matrix_reference: PreparedReferenceIdentity,
+    matrix_fingerprint: String,
 }
 
 impl InitialGenotypeCompositions {
     #[must_use]
     pub fn loci(&self) -> &[InitialLocusComposition] {
         &self.loci
+    }
+
+    #[must_use]
+    pub const fn matrix_reference(&self) -> &PreparedReferenceIdentity {
+        &self.matrix_reference
+    }
+
+    #[must_use]
+    pub fn matrix_fingerprint(&self) -> &str {
+        &self.matrix_fingerprint
     }
 }
 
@@ -176,12 +188,39 @@ impl InitialPhasedLocus {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InitialPhasedGenotypes {
     loci: Vec<InitialPhasedLocus>,
+    matrix_reference: PreparedReferenceIdentity,
+    matrix_fingerprint: String,
 }
 
 impl InitialPhasedGenotypes {
     #[must_use]
     pub fn loci(&self) -> &[InitialPhasedLocus] {
         &self.loci
+    }
+
+    /// Vista aislada de una identidad; nunca mezcla loci de otro individuo.
+    #[must_use]
+    pub fn for_individual(&self, individual_id: &IndividualId) -> Self {
+        Self {
+            loci: self
+                .loci
+                .iter()
+                .filter(|locus| locus.composition().individual_id() == individual_id)
+                .cloned()
+                .collect(),
+            matrix_reference: self.matrix_reference.clone(),
+            matrix_fingerprint: self.matrix_fingerprint.clone(),
+        }
+    }
+
+    #[must_use]
+    pub const fn matrix_reference(&self) -> &PreparedReferenceIdentity {
+        &self.matrix_reference
+    }
+
+    #[must_use]
+    pub fn matrix_fingerprint(&self) -> &str {
+        &self.matrix_fingerprint
     }
 }
 
@@ -376,7 +415,11 @@ pub fn assign_initial_phases(
             alleles_by_phase,
         });
     }
-    Ok(InitialPhasedGenotypes { loci })
+    Ok(InitialPhasedGenotypes {
+        loci,
+        matrix_reference: compositions.matrix_reference.clone(),
+        matrix_fingerprint: compositions.matrix_fingerprint.clone(),
+    })
 }
 
 fn canonical_alternate_alleles(composition: &InitialLocusComposition) -> String {
@@ -476,7 +519,11 @@ pub fn sample_initial_genotype_compositions(
             }
         }
     }
-    Ok(InitialGenotypeCompositions { loci: sampled })
+    Ok(InitialGenotypeCompositions {
+        loci: sampled,
+        matrix_reference: matrix.prepared_reference().clone(),
+        matrix_fingerprint: matrix.canonical_fingerprint(),
+    })
 }
 
 fn preflight_reference(

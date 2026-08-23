@@ -30,6 +30,7 @@
     "reference": {"$ref": "#/$defs/reference"},
     "authorizations": {"$ref": "#/$defs/authorizations"},
     "initial_populations": {"type": "array", "items": {"$ref": "#/$defs/initial_population"}},
+    "direct_events": {"type": "array", "items": {"$ref": "#/$defs/direct_event"}},
     "population_snvs": {
       "oneOf": [
         {"type": "null"},
@@ -91,7 +92,7 @@
         "effective": {"type": "number", "minimum": 0, "maximum": 1}
       }
     },
-    "authorizations": {"type": "object", "additionalProperties": false, "required": ["allow_empty_snv_matrix"], "properties": {"allow_empty_snv_matrix": {"type": "boolean"}}},
+    "authorizations": {"type": "object", "additionalProperties": false, "required": ["allow_empty_snv_matrix", "allow_incompatible_genotypes"], "properties": {"allow_empty_snv_matrix": {"type": "boolean"}, "allow_incompatible_genotypes": {"type": "boolean"}}},
     "initial_population": {
       "type": "object", "additionalProperties": false,
       "required": ["population_id", "individual_count", "individual_ids", "ploidy", "genotype_model"],
@@ -163,6 +164,29 @@
         "line_ending": {"const": "LF"},
         "base_case": {"const": "uppercase"}
       }
+    },
+    "direct_event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["event_id", "individual_id", "phase", "kind", "contig"],
+      "properties": {
+        "event_id": {"type": "string", "minLength": 1},
+        "individual_id": {"type": "string", "minLength": 1},
+        "phase": {"type": "integer", "minimum": 0, "maximum": 9},
+        "kind": {"enum": ["snp", "insertion", "deletion"]},
+        "contig": {"type": "string", "minLength": 1},
+        "position_1based": {"type": "integer", "minimum": 1},
+        "ref": {"enum": ["A", "C", "G", "T"]},
+        "alt": {"enum": ["A", "C", "G", "T"]},
+        "point": {"type": "integer", "minimum": 0},
+        "bases": {"type": "string", "pattern": "^[ACGT]+$"},
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 0}
+      },
+      "oneOf": [
+        {"properties": {"kind": {"const": "snp"}}, "required": ["position_1based", "ref", "alt"]},
+        {"properties": {"kind": {"const": "insertion"}}, "required": ["point", "bases"]},
+        {"properties": {"kind": {"const": "deletion"}}, "required": ["start", "end"]}
+      ]
     },
     "reversible_text": {
       "type": "object",

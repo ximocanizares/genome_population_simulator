@@ -9,12 +9,14 @@ use serde_json::{Value, json};
 
 use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::application::{
-    EffectiveConfig, EffectiveInitialGenotypeModel, EffectiveReducedReference,
-    EffectiveReferenceSource, build_effective_config_with_entropy,
+    EffectiveConfig, EffectiveDirectEvent, EffectiveInitialGenotypeModel,
+    EffectiveReducedReference, EffectiveReferenceSource, build_effective_config_with_entropy,
 };
 use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
-use crate::identity::{IndividualId, PopulationId, ReferenceId, derive_execution_id};
+use crate::identity::{
+    EventId, IndividualId, PopulationId, ReferenceId, SequenceId, derive_execution_id,
+};
 use crate::integrity::{ArtifactIdentity, configuration_digest, identify_file};
 use crate::population_snvs::validate_reusable_population_snvs_bytes;
 use crate::randomness::{EntropySource, RootSeed, RuntimeSubseedScope, derive_subseed};
@@ -253,7 +255,52 @@ pub fn effective_config_document_with_reductions(
                 "genotype_model": genotype_model,
             })
         }).collect::<Vec<_>>(),
+        "direct_events": config.direct_events().iter().map(direct_event_json).collect::<Vec<_>>(),
     }))
+}
+
+fn direct_event_json(event: &EffectiveDirectEvent) -> Value {
+    let common = |kind: &str| {
+        json!({
+            "event_id": event.event_id().as_str(),
+            "individual_id": event.individual_id().as_str(),
+            "phase": event.phase().copy_index(),
+            "kind": kind,
+            "contig": event.sequence_id().as_str(),
+        })
+    };
+    match event {
+        EffectiveDirectEvent::Snp {
+            position_1based,
+            reference,
+            alternate,
+            ..
+        } => {
+            let mut value = common("snp");
+            let object = value.as_object_mut().expect("JSON object");
+            object.insert("position_1based".to_owned(), json!(position_1based));
+            object.insert("ref".to_owned(), json!(char::from(*reference)));
+            object.insert("alt".to_owned(), json!(char::from(*alternate)));
+            value
+        }
+        EffectiveDirectEvent::Insertion { point, bases, .. } => {
+            let mut value = common("insertion");
+            let object = value.as_object_mut().expect("JSON object");
+            object.insert("point".to_owned(), json!(point));
+            object.insert(
+                "bases".to_owned(),
+                json!(std::str::from_utf8(bases).expect("effective bases are canonical ASCII")),
+            );
+            value
+        }
+        EffectiveDirectEvent::Deletion { start, end, .. } => {
+            let mut value = common("deletion");
+            let object = value.as_object_mut().expect("JSON object");
+            object.insert("start".to_owned(), json!(start));
+            object.insert("end".to_owned(), json!(end));
+            value
+        }
+    }
 }
 
 pub fn effective_config_document_with_population_snvs(
@@ -272,7 +319,10 @@ pub fn effective_config_document_with_population_snvs(
     })?;
     object.insert(
         "authorizations".to_owned(),
-        json!({"allow_empty_snv_matrix": authorizations.allow_empty_snv_matrix}),
+        json!({
+            "allow_empty_snv_matrix": authorizations.allow_empty_snv_matrix,
+            "allow_incompatible_genotypes": authorizations.allow_incompatible_genotypes,
+        }),
     );
     object.insert(
         "population_snvs".to_owned(),
@@ -309,7 +359,10 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
             "metadata_artifact_id": link.metadata_artifact_id,
             "normalization_audit": link.normalization_audit.clone(),
         })),
-        "authorizations": {"allow_empty_snv_matrix": manifest.authorizations.allow_empty_snv_matrix},
+        "authorizations": {
+            "allow_empty_snv_matrix": manifest.authorizations.allow_empty_snv_matrix,
+            "allow_incompatible_genotypes": manifest.authorizations.allow_incompatible_genotypes,
+        },
         "output_categories": output_categories(manifest),
         "artifacts": manifest.artifacts.iter().map(ArtifactRecord::to_json).collect::<Vec<_>>(),
         "diagnostics": manifest.diagnostics.iter().map(|diagnostic| json!({
@@ -490,7 +543,7 @@ pub fn validate_effective_config_against_manifest_bytes(
     let object = document
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "la raíz no es un objeto"))?;
-    const FIELDS: [&str; 11] = [
+    const LEGACY_FIELDS: [&str; 11] = [
         "effective_config_kind",
         "schema_version",
         "source_path",
@@ -503,7 +556,26 @@ pub fn validate_effective_config_against_manifest_bytes(
         "reduced_references",
         "initial_populations",
     ];
-    validate_effective_closed_object(object, &FIELDS, "effective-config.json", effective_path)?;
+    const DIRECT_EVENT_FIELDS: [&str; 12] = [
+        "effective_config_kind",
+        "schema_version",
+        "source_path",
+        "ploidy",
+        "normalization",
+        "seed",
+        "reference",
+        "population_snvs",
+        "authorizations",
+        "reduced_references",
+        "initial_populations",
+        "direct_events",
+    ];
+    let fields = if object.contains_key("direct_events") {
+        &DIRECT_EVENT_FIELDS[..]
+    } else {
+        &LEGACY_FIELDS[..]
+    };
+    validate_effective_closed_object(object, fields, "effective-config.json", effective_path)?;
     if object.get("effective_config_kind").and_then(Value::as_str) != Some("gps_effective_config")
         || object.get("schema_version").and_then(Value::as_str) != Some("1")
     {
@@ -546,6 +618,9 @@ pub fn validate_effective_config_against_manifest_bytes(
     validate_effective_population_snvs(object, manifest, &catalog, effective_path, manifest_path)?;
     validate_effective_authorizations(object, manifest, effective_path, manifest_path)?;
     validate_effective_initial_populations(object, effective_path)?;
+    if object.contains_key("direct_events") {
+        validate_effective_direct_events(object, effective_path)?;
+    }
 
     let manifest_reductions = required_array(manifest, "reference_reductions", manifest_path)?
         .iter()
@@ -1130,6 +1205,19 @@ fn validate_effective_targets_against_configuration(
                 ),
             ));
         }
+    }
+    let expected_direct_events = Value::Array(
+        expected
+            .direct_events()
+            .iter()
+            .map(direct_event_json)
+            .collect(),
+    );
+    if effective.get("direct_events") != Some(&expected_direct_events) {
+        return Err(effective_error(
+            effective_path,
+            "direct_events efectivo no coincide exactamente con el TOML resuelto",
+        ));
     }
     Ok(())
 }
@@ -1906,6 +1994,97 @@ fn validate_effective_initial_populations(
     Ok(())
 }
 
+fn validate_effective_direct_events(
+    effective: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    let events = effective_array(effective, "direct_events", path)?;
+    let mut event_ids = BTreeSet::new();
+    for value in events {
+        let event = value
+            .as_object()
+            .ok_or_else(|| effective_error(path, "direct_events[] inválido"))?;
+        let kind = effective_non_empty_text(event, "kind", path)?;
+        let fields: &[&str] = match kind {
+            "snp" => &[
+                "event_id",
+                "individual_id",
+                "phase",
+                "kind",
+                "contig",
+                "position_1based",
+                "ref",
+                "alt",
+            ],
+            "insertion" => &[
+                "event_id",
+                "individual_id",
+                "phase",
+                "kind",
+                "contig",
+                "point",
+                "bases",
+            ],
+            "deletion" => &[
+                "event_id",
+                "individual_id",
+                "phase",
+                "kind",
+                "contig",
+                "start",
+                "end",
+            ],
+            _ => return Err(effective_error(path, "direct_events[].kind inválido")),
+        };
+        validate_effective_closed_object(event, fields, "direct_events[]", path)?;
+        let event_id = effective_non_empty_text(event, "event_id", path)?;
+        EventId::parse(event_id, "effective_config")
+            .map_err(|_| effective_error(path, "event_id directo inválido"))?;
+        if !event_ids.insert(event_id) {
+            return Err(effective_error(path, "event_id directo repetido"));
+        }
+        IndividualId::parse(
+            effective_non_empty_text(event, "individual_id", path)?,
+            "effective_config",
+        )
+        .map_err(|_| effective_error(path, "individual_id directo inválido"))?;
+        SequenceId::parse(
+            effective_non_empty_text(event, "contig", path)?,
+            "effective_config",
+        )
+        .map_err(|_| effective_error(path, "contig directo inválido"))?;
+        if effective_nonnegative_u64(event, "phase", path)? > 9 {
+            return Err(effective_error(path, "fase directa fuera de rango"));
+        }
+        match kind {
+            "snp" => {
+                let _ = effective_positive_u64(event, "position_1based", path)?;
+                for field in ["ref", "alt"] {
+                    let base = effective_non_empty_text(event, field, path)?;
+                    if base.len() != 1 || !matches!(base.as_bytes()[0], b'A' | b'C' | b'G' | b'T') {
+                        return Err(effective_error(path, "alelo directo inválido"));
+                    }
+                }
+            }
+            "insertion" => {
+                let _ = effective_nonnegative_u64(event, "point", path)?;
+                if effective_non_empty_text(event, "bases", path)?
+                    .bytes()
+                    .any(|base| !matches!(base, b'A' | b'C' | b'G' | b'T'))
+                {
+                    return Err(effective_error(path, "bases de inserción inválidas"));
+                }
+            }
+            "deletion" => {
+                let _ = effective_nonnegative_u64(event, "start", path)?;
+                let _ = effective_nonnegative_u64(event, "end", path)?;
+            }
+            _ => unreachable!("kind was checked"),
+        }
+    }
+    Ok(())
+}
+
 fn validate_manifest_authorizations(value: Option<&Value>, path: &Path) -> Result<(), Diagnostic> {
     let value = value.ok_or_else(|| manifest_error(path, "falta authorizations"))?;
     validate_authorizations_value(value).map_err(|detail| manifest_error(path, detail))
@@ -1913,7 +2092,13 @@ fn validate_manifest_authorizations(value: Option<&Value>, path: &Path) -> Resul
 
 fn validate_authorizations_value(value: &Value) -> Result<(), &'static str> {
     let object = value.as_object().ok_or("authorizations inválido")?;
-    if object.len() != 1 || !matches!(object.get("allow_empty_snv_matrix"), Some(Value::Bool(_))) {
+    if object.len() != 2
+        || !matches!(object.get("allow_empty_snv_matrix"), Some(Value::Bool(_)))
+        || !matches!(
+            object.get("allow_incompatible_genotypes"),
+            Some(Value::Bool(_))
+        )
+    {
         return Err("authorizations inválido");
     }
     Ok(())
@@ -2719,6 +2904,17 @@ fn effective_positive_u64(
         .get(field)
         .and_then(Value::as_u64)
         .filter(|value| *value > 0)
+        .ok_or_else(|| effective_error(path, format!("{field} inválido")))
+}
+
+fn effective_nonnegative_u64(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+    path: &Path,
+) -> Result<u64, Diagnostic> {
+    object
+        .get(field)
+        .and_then(Value::as_u64)
         .ok_or_else(|| effective_error(path, format!("{field} inválido")))
 }
 

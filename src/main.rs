@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::{
     ExecutionAuthorizations, execute_validated_config_with_authorizations,
+    preflight_validated_config_with_authorizations,
 };
 
 #[derive(Clone, Copy)]
@@ -45,7 +46,9 @@ fn main() -> ExitCode {
         }
     };
     match load_and_validate_config(&parsed.path).and_then(|effective| match parsed.command {
-        CommandMode::Validate => Ok(()),
+        CommandMode::Validate => {
+            preflight_validated_config_with_authorizations(&effective, parsed.authorizations)
+        }
         CommandMode::Run => parsed.output.as_deref().map_or_else(
             || {
                 Err(
@@ -116,6 +119,9 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<ParsedArgs, &'st
             "--allow-empty-snv-matrix" => {
                 authorizations.allow_empty_snv_matrix = true;
             }
+            "--allow-incompatible-genotypes" => {
+                authorizations.allow_incompatible_genotypes = true;
+            }
             _ => return Err("argumento desconocido"),
         }
     }
@@ -132,5 +138,5 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<ParsedArgs, &'st
 }
 
 fn usage() -> &'static str {
-    "uso: genome-population-simulator <validate|run> <config.toml> [--diagnostics human|json] [--output <ruta>] [--allow-empty-snv-matrix]"
+    "uso: genome-population-simulator <validate|run> <config.toml> [--diagnostics human|json] [--output <ruta>] [--allow-empty-snv-matrix] [--allow-incompatible-genotypes]"
 }

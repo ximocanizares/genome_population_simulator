@@ -302,7 +302,7 @@ fn complete_manifest() -> Value {
         "effective_config_artifact_id": "effective-config",
         "references": [{"id": "ref", "fasta_artifact_id": "reference-fasta"}],
         "reference_reductions": [],
-        "authorizations": {"allow_empty_snv_matrix": false},
+        "authorizations": {"allow_empty_snv_matrix": false, "allow_incompatible_genotypes": false},
         "output_categories": {
             "minimum": ["config-general", "effective-config", "reference-fasta"],
             "defaulted": [],
@@ -332,7 +332,7 @@ fn failed_manifest() -> Value {
         "effective_config_artifact_id": null,
         "references": [],
         "reference_reductions": [],
-        "authorizations": {"allow_empty_snv_matrix": false},
+        "authorizations": {"allow_empty_snv_matrix": false, "allow_incompatible_genotypes": false},
         "output_categories": {
             "minimum": ["config-general"],
             "defaulted": [],

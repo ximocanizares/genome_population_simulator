@@ -1867,6 +1867,15 @@ la ejecución.
   población de origen elegidas; las demás clases admitidas usan una cantidad
   media esperada o una densidad por base, kilobase o megabase, con valores
   globales y valores específicos por individuo.
+
+En F2.3.4, la forma mínima autorada para esos cambios concretos es
+`[[direct_events]]`: todos los registros declaran `event_id`, `individual_id`,
+`phase`, `kind` y `contig`; un SNP usa `position_1based`, `ref` y `alt`, una
+inserción usa `point` y `bases`, y una deleción `start` y `end`. El registro se
+resuelve contra una cohorte inicial y su ploidía, mantiene el orden declarado
+por individuo y se valida contra matriz, genotipo y fase antes de publicar
+artefactos. Esta fase no materializa ni publica individuos; los resultados y
+estadísticas realizados siguen siendo F2.3.5.
 - **REQ-DIR-03.** La creación directa debe admitir para cada clase generada por cantidad o densidad
   una distribución espacial uniforme o regiones con una cantidad media
   esperada o densidad mayor o menor que el valor general, incluidas regiones con

@@ -478,6 +478,14 @@ impl PreparedPopulationSnvs {
         &self.normalization_audit
     }
 
+    /// Huella SHA-256 de la proyección canónica exacta consumida por F2.3.
+    #[must_use]
+    pub fn canonical_fingerprint(&self) -> String {
+        use sha2::{Digest, Sha256};
+
+        format!("{:x}", Sha256::digest(canonical_tsv_bytes(self)))
+    }
+
     /// Exige la misma confirmación explícita para una matriz vacía generada
     /// que para una matriz suministrada o reutilizada.
     pub fn authorize_empty_matrix(

@@ -43,6 +43,7 @@ class UiContractTests(unittest.TestCase):
             set(schema["properties"]),
             {
                 "config_kind",
+                "direct_events",
                 "initial_populations",
                 "normalization_tolerance",
                 "ploidy",
@@ -75,6 +76,7 @@ class UiContractTests(unittest.TestCase):
             "scenario_id",
             "population_control",
             "initial_populations",
+            "direct_events",
         ):
             with self.subTest(future_option=future_option):
                 self.assertNotIn(future_option, source)
@@ -175,8 +177,12 @@ max_alt_af = 0.9''',
                     exported = render_general_toml(parse_general_toml(source))
                     self.assertEqual(parse_general_toml(exported), parse_general_toml(source))
                     result, session = validate_toml(self.BINARY, exported, base_path)
-                    self.assertTrue(result.succeeded, result.stdout or result.stderr)
-                    self.assertIsNotNone(session)
+                    if mode == "generate":
+                        self.assertTrue(result.succeeded, result.stdout or result.stderr)
+                        self.assertIsNotNone(session)
+                    else:
+                        self.assertFalse(result.succeeded)
+                        self.assertIsNone(session)
 
     @unittest.skipUnless(BINARY.exists(), "compile the Rust binary before this integration test")
     def test_ui_and_manual_toml_produce_the_same_effective_configuration(self) -> None:
