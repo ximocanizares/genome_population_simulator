@@ -1,4 +1,4 @@
-# Esquema de autoría TOML: configuración general v1 en F2.2.1
+# Esquema de autoría TOML: configuración general v1 en F2.3.1
 
 La vista estructural versionada que puede consumir la interfaz local se publica
 en `config-general-v1.schema.json`. Describe forma, tipos, dominios básicos y
@@ -14,20 +14,22 @@ schema_version = "1"
 
 La raíz es cerrada y contiene esas claves, `seed`, `ploidy` y
 `normalization_tolerance` opcionales, `reference` obligatorio,
-`reduced_references` opcional y `population_snvs`
-opcional. `ploidy` es una
+`reduced_references` opcional, `population_snvs`
+opcional e `initial_populations` opcional. `ploidy` es una
 ploidía global uniforme entera entre 1 y 10; al omitirse conserva el valor
 efectivo diploide (`2`) para mantener compatibles los TOML F1. Rust valida el
-rango y ninguna secuencia ni individuo puede sustituirla localmente. Los campos
+rango. Las cohortes directas de F2.3.1 declaran su propia ploidía efectiva; no
+existen sustituciones por secuencia ni por individuo. Los campos
 desconocidos y las claves duplicadas se rechazan con su ubicación. En
-particular, F2.2.2 no admite escenarios, eventos, individuos configurables,
-poblaciones simuladas, fases configurables, reglas ni parámetros de generación
-o frecuencias. La única excepción estructural es `[population_snvs]`: declara
+particular, F2.3.1 no admite escenarios, eventos, poblaciones evolutivas, fases
+configurables ni reglas. Además de las cohortes directas,
+`[population_snvs]` declara
 el origen de una matriz común y F2.2.2 valida sus sumas ALT multialélicas.
 
-F2.2.8 no añade todavía un campo de autoría para SNP explícitos: su aplicación
-requiere una copia haplotípica destino y las identidades de individuos se
-incorporan en F2.3. El núcleo ya acepta un SNP explícito o una fila preparada de
+F2.2.8 no añadió un campo de autoría para SNP explícitos: su aplicación requiere
+una copia haplotípica destino. F2.3.1 incorpora las identidades de individuos,
+pero todavía no publica destinos de SNP, copias o fases; F2.3.2–F2.3.5 son sus
+primeros consumidores. El núcleo ya acepta un SNP explícito o una fila preparada de
 la matriz canónica, realiza el preflight contra la referencia y conserva
 `variant_id`, población, `source_id` y evento como procedencia; no sortea loci
 ni alelos por individuo. Por ello Marimo tampoco muestra controles de destino
@@ -35,7 +37,7 @@ SNP antes del primer consumidor que pueda representarlos sin ambigüedad.
 
 F2.2.9 y F2.2.10 conservan el mismo límite observable para indels y la
 composición de eventos pequeños: el núcleo recibe un destino ya identificado,
-pero el TOML general aún no declara individuos, copias ni fases. Marimo no
+pero F2.3.1 todavía no declara destinos individuales de copia o fase. Marimo no
 anuncia controles para SNP o indels explícitos o aleatorios hasta que F2.3
 publique ese consumidor. La única autorización ejecutable en esta frontera es
 `--allow-empty-snv-matrix`: no altera el TOML, acompaña a `validate` y a `run`,
@@ -137,6 +139,48 @@ población×locus en orden canónico con Neumaier y aplica la tolerancia efectiv
 si la suma ALT no supera 1 conserva el resto REF; un exceso dentro del borde
 inclusivo se normaliza y registra; otro exceso se rechaza. La validación de
 FASTA, hashes e IDs canónicos sigue perteneciendo a los pasos posteriores.
+
+## Cohortes iniciales directas (F2.3.1)
+
+Cada `[[initial_populations]]` es una cohorte de creación directa, no una
+población evolutiva ni reproductiva. Selecciona una `population_id` de la matriz
+canónica cuando esta se consuma en F2.3.2, declara `individual_count` positivo,
+la `ploidy` efectiva uniforme de la cohorte entre 1 y 10 y `genotype_model`.
+`hwe` admite toda ploidía; `f_diploid` exige `ploidy = 2` e
+`inbreeding_coefficient` finito en `[0,1]`. HWE no admite ese coeficiente. Esta
+fase solo valida y conserva el modelo: no sortea genotipos ni fase.
+
+`individual_ids` es una lista opcional no vacía de IDs aportados. Si existe, debe
+contener exactamente `individual_count` IDs válidos y cada uno debe ser único en
+toda la ejecución. JSON Schema impone que la lista no esté vacía y que sus
+elementos no se repitan, pero la igualdad entre su longitud y
+`individual_count` es una semántica exclusiva de la validación Rust. Si se
+omite, Rust deriva un ID estable por individuo con DTC-039,
+usando como ámbito `population_id` y una clave fundadora canónica de ordinal
+uno-basado. Ese ordinal pertenece a la cohorte, no al orden físico del TOML, de
+modo que reordenar las cohortes no cambia los IDs derivados y aumentar N conserva
+los anteriores. Las IDs aportadas y derivadas nunca se mezclan en una misma
+cohorte.
+
+```toml
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+ploidy = 2
+genotype_model = "f_diploid"
+inbreeding_coefficient = 0.25
+
+[[initial_populations]]
+population_id = "P2"
+individual_count = 2
+ploidy = 4
+genotype_model = "hwe"
+individual_ids = ["sample-A", "sample-B"]
+```
+
+Marimo no muestra aún estos campos: sus controles se incorporan exclusivamente
+en F2.3.6. La configuración efectiva publica las cohortes, sus IDs ya resueltos,
+ploidía y modelo para que F2.3.2 sea el primer consumidor biológico.
 
 El borrador de escenarios permanece en `config-scenario-v1.md` como artefacto
 documental futuro; el binario F1 no lo carga ni lo interpreta y F2 tampoco lo

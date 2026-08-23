@@ -12,7 +12,10 @@ use crate::configuration::{
 use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
 use crate::haplotype::Ploidy;
-use crate::identity::{ReferenceId, SequenceId};
+use crate::identity::{
+    AutomaticIdRequest, IdClass, IdentityRegistry, IndividualId, PopulationId, ReferenceId,
+    SequenceId,
+};
 use crate::population_snvs::{
     FrequencyAssignmentMode, FrequencySampling, FrequencySpectrumComponent,
     GeneratedFrequencySpectrum, GeneratedLocusCount, GeneratedPopulationFrequency,
@@ -183,6 +186,7 @@ pub struct EffectiveConfig {
     configuration_input: EffectiveConfigurationInput,
     reproducibility: ReproducibilityMetadata,
     population_snvs: Option<EffectivePopulationSnvs>,
+    initial_populations: Vec<EffectiveInitialPopulation>,
 }
 
 /// Origen efectivo del recurso canónico F2.2.7.
@@ -197,6 +201,55 @@ pub enum EffectivePopulationSnvs {
     Generate {
         parameters: PopulationSnvsGenerationConfig,
     },
+}
+
+/// Modelo de genotipo solicitado para una cohorte directa.
+///
+/// F2.3.1 solo conserva esta elección validada. El sorteo de composición y la
+/// fase se incorporan en F2.3.2 y F2.3.3, respectivamente.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EffectiveInitialGenotypeModel {
+    HardyWeinberg,
+    FDiploid { inbreeding_coefficient: f64 },
+}
+
+/// Identidades y parámetros ya resueltos de una cohorte directa.
+///
+/// La población de origen es un perfil de frecuencias de la matriz, no una
+/// población evolutiva ni una estructura reproductiva.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectiveInitialPopulation {
+    population_id: PopulationId,
+    individual_ids: Vec<IndividualId>,
+    ploidy: Ploidy,
+    genotype_model: EffectiveInitialGenotypeModel,
+}
+
+impl EffectiveInitialPopulation {
+    #[must_use]
+    pub const fn population_id(&self) -> &PopulationId {
+        &self.population_id
+    }
+
+    #[must_use]
+    pub fn individual_ids(&self) -> &[IndividualId] {
+        &self.individual_ids
+    }
+
+    #[must_use]
+    pub const fn individual_count(&self) -> usize {
+        self.individual_ids.len()
+    }
+
+    #[must_use]
+    pub const fn ploidy(&self) -> Ploidy {
+        self.ploidy
+    }
+
+    #[must_use]
+    pub const fn genotype_model(&self) -> EffectiveInitialGenotypeModel {
+        self.genotype_model
+    }
 }
 
 impl EffectiveConfig {
@@ -265,6 +318,12 @@ impl EffectiveConfig {
     #[must_use]
     pub fn population_snvs(&self) -> Option<&EffectivePopulationSnvs> {
         self.population_snvs.as_ref()
+    }
+
+    /// Cohortes directas listas para que F2.3.2 consuma sus identidades.
+    #[must_use]
+    pub fn initial_populations(&self) -> &[EffectiveInitialPopulation] {
+        &self.initial_populations
     }
 }
 
@@ -470,6 +529,7 @@ pub fn build_effective_config_with_entropy(
         },
     };
     let reproducibility = ReproducibilityMetadata::new(root_seed, seed_origin);
+    let initial_populations = effective_initial_populations(general, root_seed)?;
     let population_snvs = effective_population_snvs(general)?;
     if let Some(EffectivePopulationSnvs::Generate {
         parameters: generation,
@@ -519,7 +579,156 @@ pub fn build_effective_config_with_entropy(
         },
         reproducibility,
         population_snvs,
+        initial_populations,
     })
+}
+
+fn effective_initial_populations(
+    general: &DeclaredGeneralConfig,
+    root_seed: crate::randomness::RootSeed,
+) -> Result<Vec<EffectiveInitialPopulation>, Diagnostic> {
+    let mut population_ids = BTreeSet::new();
+    let mut derivation_registry = IdentityRegistry::default();
+    let mut execution_registry = IdentityRegistry::default();
+    let mut effective = Vec::with_capacity(general.initial_populations().len());
+
+    for declared in general.initial_populations() {
+        let population_id = PopulationId::parse(
+            declared.population_id.value().clone(),
+            "initial_populations",
+        )
+        .map_err(|error| with_initial_population_path(general, error))?;
+        if !population_ids.insert(population_id.clone()) {
+            return Err(config_error(
+                general,
+                "initial_populations.population_id",
+                format!("identificador repetido: {population_id}"),
+            ));
+        }
+
+        let individual_count = *declared.individual_count.value();
+        if individual_count == 0 {
+            return Err(config_error(
+                general,
+                "initial_populations.individual_count",
+                "debe ser mayor que cero",
+            ));
+        }
+        let individual_count = usize::try_from(individual_count).map_err(|_| {
+            config_error(
+                general,
+                "initial_populations.individual_count",
+                "no se puede representar en esta plataforma",
+            )
+        })?;
+        let ploidy = u8::try_from(*declared.ploidy.value())
+            .ok()
+            .and_then(|value| Ploidy::new(value).ok())
+            .ok_or_else(|| {
+                config_error(
+                    general,
+                    "initial_populations.ploidy",
+                    format!("debe pertenecer a {}..={}", Ploidy::MIN, Ploidy::MAX),
+                )
+            })?;
+        let genotype_model = match declared.genotype_model.value().as_str() {
+            "hwe" => EffectiveInitialGenotypeModel::HardyWeinberg,
+            "f_diploid" => {
+                if ploidy != Ploidy::DIPLOID {
+                    return Err(config_error(
+                        general,
+                        "initial_populations.genotype_model,initial_populations.ploidy",
+                        "f_diploid solo se admite con ploidía 2",
+                    ));
+                }
+                let coefficient = declared
+                    .inbreeding_coefficient
+                    .as_ref()
+                    .ok_or_else(|| {
+                        config_error(
+                            general,
+                            "initial_populations.inbreeding_coefficient",
+                            "f_diploid exige inbreeding_coefficient",
+                        )
+                    })?
+                    .literal()
+                    .parse::<f64>()
+                    .map_err(|_| {
+                        config_error(
+                            general,
+                            "initial_populations.inbreeding_coefficient",
+                            "debe ser un f64 válido",
+                        )
+                    })?;
+                if !coefficient.is_finite() || !(0.0..=1.0).contains(&coefficient) {
+                    return Err(config_error(
+                        general,
+                        "initial_populations.inbreeding_coefficient",
+                        "debe ser finito y pertenecer a [0,1]",
+                    ));
+                }
+                EffectiveInitialGenotypeModel::FDiploid {
+                    inbreeding_coefficient: coefficient,
+                }
+            }
+            _ => unreachable!("parser validates initial genotype model"),
+        };
+
+        let individual_ids = match &declared.individual_ids {
+            Some(provided) => {
+                if provided.len() != individual_count {
+                    return Err(config_error(
+                        general,
+                        "initial_populations.individual_ids,initial_populations.individual_count",
+                        "individual_ids debe contener exactamente individual_count identificadores",
+                    ));
+                }
+                provided
+                    .iter()
+                    .map(|id| {
+                        let id = IndividualId::parse(id.value().clone(), "initial_populations")
+                            .map_err(|error| with_initial_population_path(general, error))?;
+                        execution_registry
+                            .register_individual("execution", id)
+                            .map_err(|error| with_initial_population_path(general, error))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+            None => (1..=individual_count)
+                .map(|index| {
+                    // La clave no depende del orden físico del TOML: el ordinal
+                    // canónico de la cohorte es estable al añadir individuos.
+                    let founder_key = format!("initial-population-index-v1:{index}");
+                    let request = AutomaticIdRequest::new(
+                        IdClass::Individual,
+                        population_id.as_str(),
+                        &[("founder_key", founder_key.as_str())],
+                    )
+                    .map_err(|error| with_initial_population_path(general, error))?;
+                    let id = derivation_registry
+                        .derive_individual(root_seed, &request)
+                        .map_err(|error| with_initial_population_path(general, error))?;
+                    execution_registry
+                        .register_individual("execution", id)
+                        .map_err(|error| with_initial_population_path(general, error))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+        effective.push(EffectiveInitialPopulation {
+            population_id,
+            individual_ids,
+            ploidy,
+            genotype_model,
+        });
+    }
+    Ok(effective)
+}
+
+fn with_initial_population_path(
+    general: &DeclaredGeneralConfig,
+    diagnostic: Diagnostic,
+) -> Diagnostic {
+    diagnostic.with("path", general.source().path().display().to_string())
 }
 
 fn population_snvs_generation_from_effective(

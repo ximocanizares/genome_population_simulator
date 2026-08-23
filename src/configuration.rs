@@ -262,6 +262,20 @@ pub struct DeclaredFrequencySpectrumComponent {
     pub sampling: Option<Located<String>>,
 }
 
+/// Una cohorte de creación directa procedente de una población de la matriz.
+///
+/// No representa una población evolutiva: únicamente agrupa la procedencia y
+/// el modelo genotípico que consumirán los pasos posteriores de F2.3.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredInitialPopulation {
+    pub population_id: Located<String>,
+    pub individual_count: Located<u64>,
+    pub ploidy: Located<u64>,
+    pub genotype_model: Located<String>,
+    pub inbreeding_coefficient: Option<DeclaredNumber>,
+    pub individual_ids: Option<Vec<Located<String>>>,
+}
+
 #[derive(Clone, Debug)]
 pub struct DeclaredGeneralConfig {
     source: AdmittedToml,
@@ -271,6 +285,7 @@ pub struct DeclaredGeneralConfig {
     reference: DeclaredReference,
     reduced_references: Vec<DeclaredReducedReference>,
     population_snvs: Option<DeclaredPopulationSnvs>,
+    initial_populations: Vec<DeclaredInitialPopulation>,
 }
 
 impl DeclaredGeneralConfig {
@@ -291,7 +306,16 @@ impl DeclaredGeneralConfig {
             reference,
             reduced_references,
             population_snvs,
+            initial_populations: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_initial_populations(
+        mut self,
+        initial_populations: Vec<DeclaredInitialPopulation>,
+    ) -> Self {
+        self.initial_populations = initial_populations;
+        self
     }
 
     #[must_use]
@@ -330,6 +354,12 @@ impl DeclaredGeneralConfig {
     #[must_use]
     pub const fn population_snvs(&self) -> Option<&DeclaredPopulationSnvs> {
         self.population_snvs.as_ref()
+    }
+
+    /// Cohortes directas declaradas; no son estructura poblacional evolutiva.
+    #[must_use]
+    pub fn initial_populations(&self) -> &[DeclaredInitialPopulation] {
+        &self.initial_populations
     }
 }
 

@@ -60,6 +60,47 @@ fn population_snvs_effective_link_is_discriminated_by_mode() {
 }
 
 #[test]
+fn effective_initial_population_schema_enforces_local_bounds_and_f_diploidy() {
+    let schema: Value =
+        serde_json::from_str(include_str!("../schemas/effective-config-v1.schema.json"))
+            .expect("effective schema JSON");
+    let cohort_schema = &schema["$defs"]["initial_population"];
+    assert_eq!(
+        cohort_schema["properties"]["individual_count"]["maximum"],
+        json!(u64::MAX)
+    );
+    assert_eq!(cohort_schema["properties"]["individual_ids"]["minItems"], 1);
+
+    let mut valid = effective_config("simulated", false);
+    valid["initial_populations"] = json!([{
+        "population_id": "P1",
+        "individual_count": 2,
+        "individual_ids": ["IND_1", "IND_2"],
+        "ploidy": 2,
+        "genotype_model": {"kind": "f_diploid", "inbreeding_coefficient": 0.25}
+    }]);
+    assert_valid("effective-initial-population-valid", &valid);
+
+    let mut empty_ids = valid.clone();
+    empty_ids["initial_populations"][0]["individual_ids"] = json!([]);
+    assert_invalid("effective-initial-population-empty-ids", &empty_ids);
+
+    let mut duplicated_ids = valid.clone();
+    duplicated_ids["initial_populations"][0]["individual_ids"] = json!(["IND_1", "IND_1"]);
+    assert_invalid(
+        "effective-initial-population-duplicate-ids",
+        &duplicated_ids,
+    );
+
+    let mut f_outside_diploidy = valid;
+    f_outside_diploidy["initial_populations"][0]["ploidy"] = json!(3);
+    assert_invalid(
+        "effective-initial-population-f-outside-diploidy",
+        &f_outside_diploidy,
+    );
+}
+
+#[test]
 fn effective_selection_order_is_strictly_one_based() {
     let mut document = effective_config("supplied", true);
     *document
@@ -195,6 +236,32 @@ fn effective_ploidy_is_required_and_limited_to_the_f2_domain() {
 }
 
 #[test]
+fn initial_populations_publish_only_resolved_ids_and_validated_hwe_or_f_models() {
+    let mut document = effective_config("simulated", false);
+    document["initial_populations"] = json!([
+        {
+            "population_id": "P1",
+            "individual_count": 2,
+            "individual_ids": ["IND_A", "IND_B"],
+            "ploidy": 1,
+            "genotype_model": {"kind": "hwe"}
+        },
+        {
+            "population_id": "P2",
+            "individual_count": 2,
+            "individual_ids": ["IND_C", "IND_D"],
+            "ploidy": 2,
+            "genotype_model": {"kind": "f_diploid", "inbreeding_coefficient": 0.5}
+        }
+    ]);
+    assert_valid("initial-populations", &document);
+
+    let mut wrong_f_ploidy = document.clone();
+    wrong_f_ploidy["initial_populations"][1]["ploidy"] = json!(3);
+    assert_invalid("initial-populations-f-outside-diploidy", &wrong_f_ploidy);
+}
+
+#[test]
 fn reference_origin_and_reversible_metadata_are_closed_and_source_specific() {
     let mut reversible_bytes = effective_config("supplied", false);
     reversible_bytes["reference"]["sequences"][0]["header"] =
@@ -304,7 +371,8 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
             }],
             "fasta_artifact_id": "reference-main"
         },
-        "reduced_references": reductions
+        "reduced_references": reductions,
+        "initial_populations": []
     })
 }
 

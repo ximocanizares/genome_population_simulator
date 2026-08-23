@@ -59,6 +59,11 @@
     "population_snvs": {
       "$ref": "#/$defs/population_snvs",
       "x-gps-tab": "Población"
+    },
+    "initial_populations": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/initial_population"},
+      "default": []
     }
   },
   "$defs": {
@@ -279,6 +284,22 @@
       "oneOf": [
         { "properties": { "kind": { "const": "fixed" } }, "required": ["fixed_alt_af"], "not": { "anyOf": [{ "required": ["min_alt_af"] }, { "required": ["max_alt_af"] }, { "required": ["sampling"] }] } },
         { "properties": { "kind": { "const": "interval" } }, "required": ["min_alt_af", "max_alt_af", "sampling"], "not": { "required": ["fixed_alt_af"] } }
+      ]
+    },
+    "initial_population": {
+      "type": "object", "additionalProperties": false,
+      "required": ["population_id", "individual_count", "ploidy", "genotype_model"],
+      "properties": {
+        "population_id": {"$ref": "#/$defs/identifier"},
+        "individual_count": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+        "ploidy": {"type": "integer", "minimum": 1, "maximum": 10},
+        "genotype_model": {"enum": ["hwe", "f_diploid"]},
+        "inbreeding_coefficient": {"type": "number", "minimum": 0, "maximum": 1},
+        "individual_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}}
+      },
+      "allOf": [
+        {"if": {"properties": {"genotype_model": {"const": "hwe"}}, "required": ["genotype_model"]}, "then": {"not": {"required": ["inbreeding_coefficient"]}}},
+        {"if": {"properties": {"genotype_model": {"const": "f_diploid"}}, "required": ["genotype_model"]}, "then": {"required": ["inbreeding_coefficient"], "properties": {"ploidy": {"const": 2}}}}
       ]
     }
   }

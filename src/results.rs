@@ -9,12 +9,12 @@ use serde_json::{Value, json};
 
 use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::application::{
-    EffectiveConfig, EffectiveReducedReference, EffectiveReferenceSource,
-    build_effective_config_with_entropy,
+    EffectiveConfig, EffectiveInitialGenotypeModel, EffectiveReducedReference,
+    EffectiveReferenceSource, build_effective_config_with_entropy,
 };
 use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
-use crate::identity::{ReferenceId, derive_execution_id};
+use crate::identity::{IndividualId, PopulationId, ReferenceId, derive_execution_id};
 use crate::integrity::{ArtifactIdentity, configuration_digest, identify_file};
 use crate::population_snvs::validate_reusable_population_snvs_bytes;
 use crate::randomness::{EntropySource, RootSeed, RuntimeSubseedScope, derive_subseed};
@@ -238,6 +238,21 @@ pub fn effective_config_document_with_reductions(
         },
         "reference": reference_json(config, output, composition),
         "reduced_references": reductions.iter().map(reduction_json).collect::<Vec<_>>(),
+        "initial_populations": config.initial_populations().iter().map(|population| {
+            let genotype_model = match population.genotype_model() {
+                EffectiveInitialGenotypeModel::HardyWeinberg => json!({"kind": "hwe"}),
+                EffectiveInitialGenotypeModel::FDiploid { inbreeding_coefficient } => {
+                    json!({"kind": "f_diploid", "inbreeding_coefficient": inbreeding_coefficient})
+                }
+            };
+            json!({
+                "population_id": population.population_id().as_str(),
+                "individual_count": population.individual_count(),
+                "individual_ids": population.individual_ids().iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+                "ploidy": population.ploidy().copy_count(),
+                "genotype_model": genotype_model,
+            })
+        }).collect::<Vec<_>>(),
     }))
 }
 
@@ -475,7 +490,7 @@ pub fn validate_effective_config_against_manifest_bytes(
     let object = document
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "la raíz no es un objeto"))?;
-    const FIELDS: [&str; 10] = [
+    const FIELDS: [&str; 11] = [
         "effective_config_kind",
         "schema_version",
         "source_path",
@@ -486,6 +501,7 @@ pub fn validate_effective_config_against_manifest_bytes(
         "population_snvs",
         "authorizations",
         "reduced_references",
+        "initial_populations",
     ];
     validate_effective_closed_object(object, &FIELDS, "effective-config.json", effective_path)?;
     if object.get("effective_config_kind").and_then(Value::as_str) != Some("gps_effective_config")
@@ -529,6 +545,7 @@ pub fn validate_effective_config_against_manifest_bytes(
     let mut effective_references = BTreeMap::from([(reference.0.clone(), reference.1.clone())]);
     validate_effective_population_snvs(object, manifest, &catalog, effective_path, manifest_path)?;
     validate_effective_authorizations(object, manifest, effective_path, manifest_path)?;
+    validate_effective_initial_populations(object, effective_path)?;
 
     let manifest_reductions = required_array(manifest, "reference_reductions", manifest_path)?
         .iter()
@@ -1820,6 +1837,73 @@ fn validate_effective_authorizations(
     }
     validate_authorizations_value(effective_value)
         .map_err(|detail| effective_error(effective_path, detail))
+}
+
+fn validate_effective_initial_populations(
+    effective: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    let populations = effective_array(effective, "initial_populations", path)?;
+    let mut population_ids = BTreeSet::new();
+    let mut individual_ids = BTreeSet::new();
+    for value in populations {
+        let population = value
+            .as_object()
+            .ok_or_else(|| effective_error(path, "initial_populations[] inválida"))?;
+        const FIELDS: [&str; 5] = [
+            "population_id",
+            "individual_count",
+            "individual_ids",
+            "ploidy",
+            "genotype_model",
+        ];
+        validate_effective_closed_object(population, &FIELDS, "initial_populations[]", path)?;
+        let population_id = effective_non_empty_text(population, "population_id", path)?;
+        PopulationId::parse(population_id, "effective_config")
+            .map_err(|_| effective_error(path, "population_id inicial inválido"))?;
+        if !population_ids.insert(population_id) {
+            return Err(effective_error(path, "population_id inicial repetido"));
+        }
+        let count = effective_positive_u64(population, "individual_count", path)?;
+        let ploidy = effective_positive_u64(population, "ploidy", path)?;
+        if ploidy > 10 {
+            return Err(effective_error(path, "ploidy inicial fuera de rango"));
+        }
+        let ids = effective_array(population, "individual_ids", path)?;
+        if usize::try_from(count).ok() != Some(ids.len()) {
+            return Err(effective_error(
+                path,
+                "individual_count inicial no coincide con individual_ids",
+            ));
+        }
+        for id in ids {
+            let id = id
+                .as_str()
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| effective_error(path, "individual_id inicial inválido"))?;
+            IndividualId::parse(id, "effective_config")
+                .map_err(|_| effective_error(path, "individual_id inicial inválido"))?;
+            if !individual_ids.insert(id) {
+                return Err(effective_error(path, "individual_id inicial repetido"));
+            }
+        }
+        let model = effective_object(population, "genotype_model", path)?;
+        match model.get("kind").and_then(Value::as_str) {
+            Some("hwe") if model.len() == 1 => {}
+            Some("f_diploid") if model.len() == 2 && ploidy == 2 => {
+                let coefficient = model
+                    .get("inbreeding_coefficient")
+                    .and_then(Value::as_f64)
+                    .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+                    .ok_or_else(|| {
+                        effective_error(path, "inbreeding_coefficient inicial inválido")
+                    })?;
+                let _ = coefficient;
+            }
+            _ => return Err(effective_error(path, "genotype_model inicial inválido")),
+        }
+    }
+    Ok(())
 }
 
 fn validate_manifest_authorizations(value: Option<&Value>, path: &Path) -> Result<(), Diagnostic> {

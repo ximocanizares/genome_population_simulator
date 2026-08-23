@@ -214,6 +214,75 @@ fn reference_composition_and_total_size_are_recomputed() {
     fs::remove_dir_all(destination).expect("cleanup");
 }
 
+#[test]
+fn runtime_rejects_effective_initial_population_ids_that_violate_the_typed_contract() {
+    let destination = run_fixture(
+        "effective-initial-population-ids",
+        "tests/fixtures/config/general-seeded.toml",
+    );
+    let effective_path = destination.join("effective-config.json");
+    let manifest_path = destination.join("manifest.json");
+    let effective = parse(&fs::read(&effective_path).expect("effective config"));
+    let manifest = fs::read(&manifest_path).expect("manifest");
+
+    for (population_id, individual_id) in [
+        ("invalid population", "IND_valid"),
+        ("P1", "invalid individual"),
+    ] {
+        let mut changed = effective.clone();
+        changed["initial_populations"] = json!([{
+            "population_id": population_id,
+            "individual_count": 1,
+            "individual_ids": [individual_id],
+            "ploidy": 2,
+            "genotype_model": {"kind": "hwe"}
+        }]);
+        assert_rejected_json(&effective_path, &changed, &manifest_path, &manifest);
+    }
+    fs::remove_dir_all(destination).expect("cleanup");
+}
+
+#[test]
+fn runtime_rejects_corrupt_effective_initial_population_cardinality_duplicates_and_f_model() {
+    let destination = run_fixture(
+        "effective-initial-population-invariants",
+        "tests/fixtures/config/general-seeded.toml",
+    );
+    let effective_path = destination.join("effective-config.json");
+    let manifest_path = destination.join("manifest.json");
+    let effective = parse(&fs::read(&effective_path).expect("effective config"));
+    let manifest = fs::read(&manifest_path).expect("manifest");
+
+    for population in [
+        json!({
+            "population_id": "P1",
+            "individual_count": 2,
+            "individual_ids": ["IND_1"],
+            "ploidy": 2,
+            "genotype_model": {"kind": "hwe"}
+        }),
+        json!({
+            "population_id": "P1",
+            "individual_count": 2,
+            "individual_ids": ["IND_1", "IND_1"],
+            "ploidy": 2,
+            "genotype_model": {"kind": "hwe"}
+        }),
+        json!({
+            "population_id": "P1",
+            "individual_count": 2,
+            "individual_ids": ["IND_1", "IND_2"],
+            "ploidy": 3,
+            "genotype_model": {"kind": "f_diploid", "inbreeding_coefficient": 0.25}
+        }),
+    ] {
+        let mut changed = effective.clone();
+        changed["initial_populations"] = json!([population]);
+        assert_rejected_json(&effective_path, &changed, &manifest_path, &manifest);
+    }
+    fs::remove_dir_all(destination).expect("cleanup");
+}
+
 fn assert_rejected_json(
     effective_path: &Path,
     document: &Value,

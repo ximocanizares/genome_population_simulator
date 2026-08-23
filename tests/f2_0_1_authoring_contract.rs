@@ -39,6 +39,7 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
         keys_at(&schema, "/properties"),
         BTreeSet::from([
             "config_kind".to_owned(),
+            "initial_populations".to_owned(),
             "normalization_tolerance".to_owned(),
             "ploidy".to_owned(),
             "population_snvs".to_owned(),
@@ -155,6 +156,10 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
             "future F2 field leaked into F2.0.1: {future_field}"
         );
     }
+    assert!(
+        AUTHORING_SCHEMA.contains("\"initial_populations\""),
+        "F2.3.1 initial cohorts must be exposed by the authoring schema"
+    );
 }
 
 #[test]

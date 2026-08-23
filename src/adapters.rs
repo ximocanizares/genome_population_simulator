@@ -6,8 +6,9 @@ use std::sync::Arc;
 use toml::de::{DeTable, DeValue};
 
 use crate::configuration::{
-    AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredGeneralConfig, DeclaredNumber,
-    DeclaredPopulationSnvs, DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
+    AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredGeneralConfig,
+    DeclaredInitialPopulation, DeclaredNumber, DeclaredPopulationSnvs,
+    DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
     DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
     DeclaredReference, DeclaredReferenceSource, DeclaredSequence, ExpectedConfigKind, Located,
     SequenceClass, SourceLocation, semantic_error,
@@ -164,6 +165,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
             "reference",
             "reduced_references",
             "population_snvs",
+            "initial_populations",
         ],
     )?;
     let seed = optional_located_string(&admitted, table, "seed")?;
@@ -172,6 +174,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
     let reference = parse_reference(&admitted, required_table(&admitted, table, "reference")?)?;
     let reduced = parse_reduced_references(&admitted, table)?;
     let population_snvs = parse_population_snvs(&admitted, table)?;
+    let initial_populations = parse_initial_populations(&admitted, table)?;
     Ok(DeclaredGeneralConfig::new(
         admitted,
         seed,
@@ -180,7 +183,97 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
         reference,
         reduced,
         population_snvs,
-    ))
+    )
+    .with_initial_populations(initial_populations))
+}
+
+fn parse_initial_populations(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<Vec<DeclaredInitialPopulation>, Diagnostic> {
+    let Some(values) = optional_array(admitted, table, "initial_populations")? else {
+        return Ok(Vec::new());
+    };
+    let mut populations = Vec::with_capacity(values.len());
+    for value in values {
+        let entry = value
+            .get_ref()
+            .as_table()
+            .ok_or_else(|| wrong_type(admitted, "initial_populations", value, "table"))?;
+        check_unknown(
+            admitted,
+            entry,
+            &[
+                "population_id",
+                "individual_count",
+                "ploidy",
+                "genotype_model",
+                "inbreeding_coefficient",
+                "individual_ids",
+            ],
+        )?;
+        let genotype_model = required_string(admitted, entry, "genotype_model")?;
+        if !matches!(genotype_model.value().as_str(), "hwe" | "f_diploid") {
+            return Err(semantic_error(
+                admitted,
+                "initial_populations.genotype_model",
+                "debe ser hwe o f_diploid",
+            ));
+        }
+        let inbreeding_coefficient = optional_number(admitted, entry, "inbreeding_coefficient")?;
+        match (
+            genotype_model.value().as_str(),
+            inbreeding_coefficient.is_some(),
+        ) {
+            ("hwe", true) => {
+                return Err(semantic_error(
+                    admitted,
+                    "initial_populations.inbreeding_coefficient",
+                    "hwe no admite inbreeding_coefficient",
+                ));
+            }
+            ("f_diploid", false) => {
+                return Err(semantic_error(
+                    admitted,
+                    "initial_populations.inbreeding_coefficient",
+                    "f_diploid exige inbreeding_coefficient",
+                ));
+            }
+            _ => {}
+        }
+        let individual_ids = optional_array(admitted, entry, "individual_ids")?
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|value| {
+                        value
+                            .get_ref()
+                            .as_str()
+                            .map(|text| {
+                                Located::new(text.to_owned(), location(admitted, value.span()))
+                            })
+                            .ok_or_else(|| {
+                                wrong_type(
+                                    admitted,
+                                    "initial_populations.individual_ids",
+                                    value,
+                                    "string",
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
+        populations.push(DeclaredInitialPopulation {
+            population_id: required_string(admitted, entry, "population_id")?,
+            individual_count: required_u64(admitted, entry, "individual_count")?,
+            ploidy: required_u64(admitted, entry, "ploidy")?,
+            genotype_model,
+            inbreeding_coefficient,
+            individual_ids,
+        });
+    }
+    Ok(populations)
 }
 
 fn parse_population_snvs(

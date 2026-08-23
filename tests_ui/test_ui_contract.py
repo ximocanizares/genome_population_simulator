@@ -43,6 +43,7 @@ class UiContractTests(unittest.TestCase):
             set(schema["properties"]),
             {
                 "config_kind",
+                "initial_populations",
                 "normalization_tolerance",
                 "ploidy",
                 "population_snvs",
@@ -70,7 +71,11 @@ class UiContractTests(unittest.TestCase):
         ):
             with self.subTest(control=control):
                 self.assertIn(control, source)
-        for future_option in ("scenario_id", "population_control"):
+        for future_option in (
+            "scenario_id",
+            "population_control",
+            "initial_populations",
+        ):
             with self.subTest(future_option=future_option):
                 self.assertNotIn(future_option, source)
 

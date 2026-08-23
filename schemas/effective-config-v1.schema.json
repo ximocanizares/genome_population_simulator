@@ -3,7 +3,7 @@
   "$id": "effective-config-v1.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["effective_config_kind", "schema_version", "source_path", "ploidy", "normalization", "seed", "reference", "reduced_references", "authorizations"],
+  "required": ["effective_config_kind", "schema_version", "source_path", "ploidy", "normalization", "seed", "reference", "reduced_references", "authorizations", "initial_populations"],
   "properties": {
     "effective_config_kind": {"const": "gps_effective_config"},
     "schema_version": {"const": "1"},
@@ -29,6 +29,7 @@
     },
     "reference": {"$ref": "#/$defs/reference"},
     "authorizations": {"$ref": "#/$defs/authorizations"},
+    "initial_populations": {"type": "array", "items": {"$ref": "#/$defs/initial_population"}},
     "population_snvs": {
       "oneOf": [
         {"type": "null"},
@@ -91,6 +92,33 @@
       }
     },
     "authorizations": {"type": "object", "additionalProperties": false, "required": ["allow_empty_snv_matrix"], "properties": {"allow_empty_snv_matrix": {"type": "boolean"}}},
+    "initial_population": {
+      "type": "object", "additionalProperties": false,
+      "required": ["population_id", "individual_count", "individual_ids", "ploidy", "genotype_model"],
+      "properties": {
+        "population_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+        "individual_count": {"type": "integer", "minimum": 1, "maximum": 18446744073709551615},
+        "individual_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
+        "ploidy": {"type": "integer", "minimum": 1, "maximum": 10},
+        "genotype_model": {"$ref": "#/$defs/initial_genotype_model"}
+      },
+      "allOf": [{
+        "if": {"properties": {"genotype_model": {"properties": {"kind": {"const": "f_diploid"}}, "required": ["kind"]}}, "required": ["genotype_model"]},
+        "then": {"properties": {"ploidy": {"const": 2}}}
+      }]
+    },
+    "initial_genotype_model": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["hwe", "f_diploid"]},
+        "inbreeding_coefficient": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "oneOf": [
+        {"properties": {"kind": {"const": "hwe"}}, "not": {"required": ["inbreeding_coefficient"]}},
+        {"properties": {"kind": {"const": "f_diploid"}}, "required": ["inbreeding_coefficient"]}
+      ]
+    },
     "reference": {
       "type": "object",
       "additionalProperties": false,
