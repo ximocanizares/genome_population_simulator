@@ -139,8 +139,8 @@ max_alt_af = 0.9''',
     def test_initial_populations_and_all_direct_event_branches_round_trip(self) -> None:
         form = default_form()
         form.initial_populations = [
-            InitialPopulationRow("P1", 2, 2, "f_diploid", "0.25", ["sample-A", "sample-B"]),
-            InitialPopulationRow("P2", 1, 4, "hwe", None, None),
+            InitialPopulationRow("P1", 2, 2, "f_diploid", "0.25", ["sample-A", "sample-B"], None),
+            InitialPopulationRow("P2", 1, 4, "hwe", None, None, ["founder-P2"]),
         ]
         form.direct_events = [
             DirectEventRow("event-snp", "sample-A", 0, "snp", "chr1", 1, "A", "G"),
@@ -152,6 +152,7 @@ max_alt_af = 0.9''',
 
         self.assertEqual(parse_general_toml(rendered), form)
         self.assertIn('individual_ids = ["sample-A", "sample-B"]', rendered)
+        self.assertIn('founder_keys = ["founder-P2"]', rendered)
         self.assertIn('kind = "insertion"', rendered)
         self.assertIn('kind = "deletion"', rendered)
 
@@ -175,6 +176,7 @@ population_id = "P1"
 individual_count = 1
 ploidy = "2"
 genotype_model = "hwe"
+founder_keys = ["founder-P1"]
 """
 
         with self.assertRaises(EditorError) as raised:

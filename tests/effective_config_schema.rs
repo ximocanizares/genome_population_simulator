@@ -158,6 +158,35 @@ fn effective_initial_population_schema_enforces_local_bounds_and_f_diploidy() {
     add_initial_population_statistics(&mut valid);
     assert_valid("effective-initial-population-valid", &valid);
 
+    let mut derived = valid.clone();
+    derived["initial_populations"][0]["founder_keys"] = json!(["founder-A", "founder-B"]);
+    assert_valid("effective-initial-population-derived-ids", &derived);
+
+    let mut same_key_in_another_population = derived.clone();
+    same_key_in_another_population["initial_populations"] = json!([
+        derived["initial_populations"][0].clone(),
+        {
+            "population_id": "P2",
+            "individual_count": 2,
+            "individual_ids": ["P2_IND_1", "P2_IND_2"],
+            "founder_keys": ["founder-A", "founder-B"],
+            "ploidy": 2,
+            "genotype_model": {"kind": "hwe"}
+        }
+    ]);
+    assert_valid(
+        "effective-initial-population-founder-keys-are-local-to-population",
+        &same_key_in_another_population,
+    );
+
+    let mut duplicate_founder_keys = derived;
+    duplicate_founder_keys["initial_populations"][0]["founder_keys"] =
+        json!(["founder-A", "founder-A"]);
+    assert_invalid(
+        "effective-initial-population-duplicate-founder-keys",
+        &duplicate_founder_keys,
+    );
+
     let mut empty_ids = valid.clone();
     empty_ids["initial_populations"][0]["individual_ids"] = json!([]);
     assert_invalid("effective-initial-population-empty-ids", &empty_ids);

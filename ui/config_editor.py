@@ -65,6 +65,7 @@ class InitialPopulationRow:
     genotype_model: str
     inbreeding_coefficient: str | None
     individual_ids: list[str] | None
+    founder_keys: list[str] | None
 
 
 @dataclass(eq=True)
@@ -171,8 +172,16 @@ def initial_population_from_editor_row(row: Mapping[str, Any], path: str) -> Ini
     coefficient = str(row.get("inbreeding_coefficient", "")).strip()
     ids_text = str(row.get("individual_ids", "")).strip()
     individual_ids = [item.strip() for item in ids_text.split(",")] if ids_text else None
+    founder_keys_text = str(row.get("founder_keys", "")).strip()
+    founder_keys = [item.strip() for item in founder_keys_text.split(",")] if founder_keys_text else None
     if individual_ids is not None and any(not item for item in individual_ids):
         raise EditorError(f"{path}.individual_ids", "contiene un ID vacío")
+    if founder_keys is not None and any(not item for item in founder_keys):
+        raise EditorError(f"{path}.founder_keys", "contiene una clave vacía")
+    if individual_ids is not None and founder_keys is not None:
+        raise EditorError(path, "individual_ids y founder_keys son mutuamente excluyentes")
+    if individual_ids is None and founder_keys is None:
+        raise EditorError(f"{path}.founder_keys", "es obligatorio si se omite individual_ids")
     return InitialPopulationRow(
         population_id=str(row.get("population_id", "")).strip(),
         individual_count=editor_integer(row.get("individual_count"), f"{path}.individual_count"),
@@ -180,6 +189,7 @@ def initial_population_from_editor_row(row: Mapping[str, Any], path: str) -> Ini
         genotype_model=genotype_model,
         inbreeding_coefficient=coefficient or None,
         individual_ids=individual_ids,
+        founder_keys=founder_keys,
     )
 
 
@@ -318,6 +328,7 @@ def _parse_initial_populations(value: Any) -> list[InitialPopulationRow]:
                 "genotype_model",
                 "inbreeding_coefficient",
                 "individual_ids",
+                "founder_keys",
             },
             required={"population_id", "individual_count", "ploidy", "genotype_model"},
             path=path,
@@ -341,14 +352,29 @@ def _parse_initial_populations(value: Any) -> list[InitialPopulationRow]:
         )
         if ids is not None and not ids:
             raise EditorError(f"{path}.individual_ids", "no puede estar vacío")
+        founder_keys = (
+            [_string(item, f"{path}.founder_keys") for item in _sequence(row["founder_keys"], f"{path}.founder_keys")]
+            if "founder_keys" in row
+            else None
+        )
+        if founder_keys is not None and not founder_keys:
+            raise EditorError(f"{path}.founder_keys", "no puede estar vacío")
+        if ids is not None and founder_keys is not None:
+            raise EditorError(path, "individual_ids y founder_keys son mutuamente excluyentes")
+        if ids is None and founder_keys is None:
+            raise EditorError(f"{path}.founder_keys", "es obligatorio si se omite individual_ids")
+        count = _positive_u64(row["individual_count"], f"{path}.individual_count")
+        if founder_keys is not None and len(founder_keys) != count:
+            raise EditorError(f"{path}.founder_keys", "debe contener individual_count claves")
         populations.append(
             InitialPopulationRow(
                 _string(row["population_id"], f"{path}.population_id"),
-                _positive_u64(row["individual_count"], f"{path}.individual_count"),
+                count,
                 _ploidy(row["ploidy"], f"{path}.ploidy"),
                 model,
                 coefficient,
                 ids,
+                founder_keys,
             )
         )
     return populations
@@ -662,6 +688,14 @@ def render_general_toml(form: GeneralForm) -> str:
                 if not population.individual_ids:
                     raise EditorError(f"{path}.individual_ids", "no puede estar vacío")
                 row.add("individual_ids", population.individual_ids)
+            elif population.founder_keys is not None:
+                if not population.founder_keys:
+                    raise EditorError(f"{path}.founder_keys", "no puede estar vacío")
+                if len(population.founder_keys) != population.individual_count:
+                    raise EditorError(f"{path}.founder_keys", "debe contener individual_count claves")
+                row.add("founder_keys", population.founder_keys)
+            else:
+                raise EditorError(f"{path}.founder_keys", "es obligatorio si se omite individual_ids")
             populations.append(row)
         document.add("initial_populations", populations)
     if form.direct_events:

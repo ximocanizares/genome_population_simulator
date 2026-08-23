@@ -330,14 +330,17 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
 **Resultado:** la población de origen produce individuos faseados con HWE o
 `F` diploide, manteniendo objetivos y realizaciones separados.
 
-- ☐ F2.3.1. Extender configuración e identidades de población e individuo.
+- ✅ F2.3.1. Extender configuración e identidades de población e individuo.
   - Depende de: PAUSA-F2.2.
-  - Procede de: DTC-003/039/052; REQ-CONF-20/22/38 y REQ-IND-15/25.
-  - Cambia: población de origen, número de individuos, ploidía, HWE/`F` e IDs
-    estables; no crea estructura poblacional evolutiva.
-  - Se comprueba con: IDs aportados/derivados, unicidad, P=1..10 y `F` solo P=2.
+  - Procede de: DTC-003/039/052; REQ-CONF-38 y REQ-IND-25.
+  - Cambia: población de origen, número de individuos, ploidía, HWE/`F`, IDs
+    aportados o derivados desde `founder_keys` explícitas; no crea estructura
+    poblacional evolutiva.
+  - Se comprueba con: exclusividad IDs/claves, cardinalidad, unicidad de claves
+    dentro de cada población,
+    reordenación por clave, P=1..10 y `F` solo P=2.
 
-- ☐ F2.3.2. Muestrear composición genotípica HWE o `F`.
+- ✅ F2.3.2. Muestrear composición genotípica HWE o `F`.
   - Depende de: F2.2.3–F2.2.7 y F2.3.1.
   - Procede de: DTC-052/071/072; REQ-IND-62/63.
   - Cambia: utilidad RNG y composición por locus e individuo desde `alt_af`,
@@ -353,37 +356,50 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
 
 - ✅ F2.3.4. Integrar SNP explícitos e indels en las copias individuales.
   - Depende de: F2.2.8–F2.2.10 y F2.3.2–F2.3.3.
-  - Procede de: REQ-DIR-01/02 y REQ-IND-64/65.
+  - Procede de: REQ-DIR-01, REQ-IND-65 y evidencia parcial de REQ-DIR-02/REQ-IND-64.
   - Cambia: sintaxis TOML `[[direct_events]]` dirigida por
     `event_id`/`individual_id`/`phase`; `kind="snp"` exige
     `position_1based`/`ref`/`alt`, `insertion` exige `point`/`bases` y
     `deletion` exige `start`/`end`. La ejecución prepara la matriz, muestrea,
-    fasea, liga su huella y preflighta cada copia antes de abrir el workspace;
-    no publica ni materializa individuos.
+    fasea, liga su huella y preflighta cada copia mediante materialización
+    temporal antes de abrir el workspace; `validate` la descarta y `run`
+    publica solo estadísticas, no individuos ni secuencias.
   - Se comprueba con: incompatibilidad de probabilidad cero rechazada o
     confirmada y trazada, HWE multialélico y `F=1`, vistas por individuo y
     huella matriz–fase, indels transaccionales, ninguna corrección silenciosa y
     ausencia de `--force`.
 
-- ✅ F2.3.5. Materializar individuos y calcular estadísticas solicitadas/realizadas.
+- ✅ F2.3.5. Materializar temporalmente individuos y calcular estadísticas solicitadas/realizadas.
   - Depende de: F2.3.4.
   - Procede de: REQ-IND-62 a REQ-IND-65 y REQ-MAN-91.
-  - Cambia: secuencias finales, procedencia, frecuencias realizadas y resumen.
+  - Cambia: materialización temporal, procedencia, frecuencias realizadas y
+    resumen estadístico publicado; no crea artefactos de copias o secuencias.
   - Se comprueba con: reconstructor manual, varios individuos, adición/reordenación
     aislada y frecuencias finitas sin autocorrección.
 
 - ✅ F2.3.6. Añadir los controles de individuos a Marimo.
   - Depende de: F2.3.1–F2.3.5.
   - Procede de: REQ-UI-14 y DTC-051/079.
-  - Cambia: población, N, ploidía, HWE/`F`, autorización y resúmenes.
+  - Cambia: población, N, ploidía, HWE/`F`, IDs aportados o `founder_keys`,
+    autorización y resúmenes.
   - Se comprueba con: paridad UI→TOML→Rust y diagnósticos localizados.
 
-- ☐ F2.3.7. Cerrar integración y trazabilidad F2.3.
+- ✅ F2.3.7. Cerrar integración y trazabilidad F2.3.
   - Depende de: F2.3.1–F2.3.6.
-  - Procede de: requisitos y ACE asignados a F2.3.
-  - Cambia: pruebas y nota de cierre.
+  - Procede de: requisitos y ACE implementados en F2.3; no cierra los
+    subpasos diferidos F5.5.a (variación aleatoria directa), F5.6.a (matrices
+    por referencia) ni F7.2.a (mutación *de novo*).
+  - Cambia: pruebas y nota de cierre; no añade otro ejecutor ni formato de
+    verdad.
   - Se comprueba con: HWE/`F`, fase, dosis, múltiples individuos, estadísticas
-    y puertas comunes.
+    y puertas comunes. `tests/initial_populations_config.rs`,
+    `tests/initial_genotypes.rs`, `tests/initial_individual_materialization.rs`,
+    `tests/cli_smoke.rs`, `tests/{effective_config_schema,manifest_minimal,
+    published_resource_validation}.rs` y
+    `tests_ui/test_f2_3_individuals_ui.py` cubren respectivamente contrato,
+    oráculos biológicos, materialización, recorrido CLI, esquema/revalidación
+    y paridad UI→TOML→Rust. La nota y límites vigentes están en
+    `evidence/f2.3/cierre.md`.
 
 > **PAUSA-F2.3.** No continuar si la fase o dosis no se reconstruyen desde las
 > copias, si `F` se aplica fuera de diploides o si Marimo obtiene resultados

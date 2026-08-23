@@ -336,11 +336,15 @@ fn project_matrix_snps(
                 .iter()
                 .map(|row| (row.alternate(), row.variant_id().clone()))
                 .collect();
+            let frequencies = matrix
+                .allele_frequencies_for_rows(&rows)
+                .ok_or_else(|| invalid_locus(locus))?;
             let frequencies_by_alternate = rows
                 .iter()
-                .map(|row| (row.alternate(), row.alt_af()))
+                .zip(frequencies.iter().copied().skip(1))
+                .map(|(row, frequency)| (row.alternate(), frequency))
                 .collect::<BTreeMap<_, _>>();
-            let reference_frequency = 1.0 - frequencies_by_alternate.values().sum::<f64>();
+            let reference_frequency = frequencies[0];
             if expected_by_target
                 .insert(
                     target.clone(),

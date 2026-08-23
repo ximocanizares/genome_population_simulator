@@ -274,6 +274,7 @@ pub struct DeclaredInitialPopulation {
     pub genotype_model: Located<String>,
     pub inbreeding_coefficient: Option<DeclaredNumber>,
     pub individual_ids: Option<Vec<Located<String>>>,
+    pub founder_keys: Option<Vec<Located<String>>>,
 }
 
 /// Cambio directo mínimo de F2.3.4 dirigido a una copia individual.

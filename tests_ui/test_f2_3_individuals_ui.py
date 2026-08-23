@@ -104,6 +104,7 @@ population_id = ""
 individual_count = 1
 ploidy = 2
 genotype_model = "hwe"
+founder_keys = ["founder-empty"]
 [[direct_events]]
 event_id = ""
 individual_id = "sample-A"
@@ -121,6 +122,7 @@ bases = "A"
             "genotype_model": "hwe",
             "inbreeding_coefficient": "",
             "individual_ids": "",
+            "founder_keys": "founder-empty",
             "individual_ids_specified": False,
             "omit_if_blank": False,
         }
@@ -166,6 +168,7 @@ bases = "A"
                 "genotype_model": "hwe",
                 "inbreeding_coefficient": "",
                 "individual_ids": "sample-A",
+                "founder_keys": "",
             },
             "initial_populations[0]",
         )
@@ -177,6 +180,7 @@ bases = "A"
                 "genotype_model": "f_diploid",
                 "inbreeding_coefficient": "0.25",
                 "individual_ids": "sample-B",
+                "founder_keys": "",
             },
             "initial_populations[1]",
         )
@@ -195,7 +199,7 @@ bases = "A"
         for kind in ("snp", "insertion", "deletion"):
             self.assertIn(f'kind = "{kind}"', rendered)
 
-    def test_blank_individual_ids_cell_means_derived_ids_not_an_empty_toml_array(self) -> None:
+    def test_blank_individual_ids_requires_founder_keys_for_derived_ids(self) -> None:
         imported = parse_general_toml(
             """config_kind = "general"
 schema_version = "1"
@@ -227,6 +231,7 @@ individual_ids = ["sample-A"]
             "genotype_model": imported_population.genotype_model,
             "inbreeding_coefficient": "",
             "individual_ids": "",  # La persona usuaria borra la lista importada.
+            "founder_keys": "founder-P1",
             "individual_ids_specified": True,
         }
         form = default_form()
@@ -240,7 +245,11 @@ individual_ids = ["sample-A"]
         rendered = render_general_toml(form)
 
         self.assertNotIn("individual_ids", rendered)
-        self.assertIsNone(parse_general_toml(rendered).initial_populations[0].individual_ids)
+        self.assertIn('founder_keys = ["founder-P1"]', rendered)
+        self.assertEqual(
+            parse_general_toml(rendered).initial_populations[0].founder_keys,
+            ["founder-P1"],
+        )
 
     def test_individual_diagnostics_are_localized_to_the_individuals_tab(self) -> None:
         rendered = diagnostic_summary(
@@ -330,6 +339,7 @@ individual_ids = ["sample-A"]
                 "genotype_model": "hwe",
                 "inbreeding_coefficient": "",
                 "individual_ids": "sample-A",
+                "founder_keys": "",
                 "individual_ids_specified": True,
                 "omit_if_blank": True,
             },
@@ -340,6 +350,7 @@ individual_ids = ["sample-A"]
                 "genotype_model": "f_diploid",
                 "inbreeding_coefficient": "0.25",
                 "individual_ids": "sample-B",
+                "founder_keys": "",
                 "individual_ids_specified": True,
                 "omit_if_blank": True,
             },

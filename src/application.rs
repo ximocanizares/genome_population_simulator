@@ -13,7 +13,7 @@ use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
 use crate::haplotype::{HaplotypePhase, Ploidy};
 use crate::identity::{
-    AutomaticIdRequest, EventId, IdClass, IdentityRegistry, IndividualId, PopulationId,
+    AutomaticIdRequest, EventId, FounderKey, IdClass, IdentityRegistry, IndividualId, PopulationId,
     ReferenceId, SequenceId,
 };
 use crate::population_snvs::{
@@ -292,6 +292,7 @@ impl EffectiveDirectEvent {
 pub struct EffectiveInitialPopulation {
     population_id: PopulationId,
     individual_ids: Vec<IndividualId>,
+    founder_keys: Option<Vec<FounderKey>>,
     ploidy: Ploidy,
     genotype_model: EffectiveInitialGenotypeModel,
 }
@@ -305,6 +306,11 @@ impl EffectiveInitialPopulation {
     #[must_use]
     pub fn individual_ids(&self) -> &[IndividualId] {
         &self.individual_ids
+    }
+
+    #[must_use]
+    pub fn founder_keys(&self) -> Option<&[FounderKey]> {
+        self.founder_keys.as_deref()
     }
 
     #[must_use]
@@ -911,8 +917,11 @@ fn effective_initial_populations(
             _ => unreachable!("parser validates initial genotype model"),
         };
 
-        let individual_ids = match &declared.individual_ids {
-            Some(provided) => {
+        let (individual_ids, founder_keys) = match (
+            &declared.individual_ids,
+            &declared.founder_keys,
+        ) {
+            (Some(provided), None) => {
                 if provided.len() != individual_count {
                     return Err(config_error(
                         general,
@@ -920,7 +929,7 @@ fn effective_initial_populations(
                         "individual_ids debe contener exactamente individual_count identificadores",
                     ));
                 }
-                provided
+                let individual_ids = provided
                     .iter()
                     .map(|id| {
                         let id = IndividualId::parse(id.value().clone(), "initial_populations")
@@ -929,31 +938,71 @@ fn effective_initial_populations(
                             .register_individual("execution", id)
                             .map_err(|error| with_initial_population_path(general, error))
                     })
-                    .collect::<Result<Vec<_>, _>>()?
+                    .collect::<Result<Vec<_>, _>>()?;
+                (individual_ids, None)
             }
-            None => (1..=individual_count)
-                .map(|index| {
-                    // La clave no depende del orden físico del TOML: el ordinal
-                    // canónico de la cohorte es estable al añadir individuos.
-                    let founder_key = format!("initial-population-index-v1:{index}");
-                    let request = AutomaticIdRequest::new(
-                        IdClass::Individual,
-                        population_id.as_str(),
-                        &[("founder_key", founder_key.as_str())],
-                    )
-                    .map_err(|error| with_initial_population_path(general, error))?;
-                    let id = derivation_registry
-                        .derive_individual(root_seed, &request)
+            (None, Some(provided)) => {
+                if provided.len() != individual_count {
+                    return Err(config_error(
+                        general,
+                        "initial_populations.founder_keys,initial_populations.individual_count",
+                        "founder_keys debe contener exactamente individual_count claves",
+                    ));
+                }
+                let mut founder_key_registry = BTreeSet::new();
+                let founder_keys = provided
+                    .iter()
+                    .map(|key| {
+                        let key = FounderKey::parse(key.value().clone(), "initial_populations")
+                            .map_err(|error| with_initial_population_path(general, error))?;
+                        if !founder_key_registry.insert(key.clone()) {
+                            return Err(config_error(
+                                general,
+                                "initial_populations.founder_keys",
+                                format!("founder_key repetida: {key}"),
+                            ));
+                        }
+                        Ok(key)
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?;
+                let individual_ids = founder_keys
+                    .iter()
+                    .map(|founder_key| {
+                        let request = AutomaticIdRequest::new(
+                            IdClass::Individual,
+                            population_id.as_str(),
+                            &[("founder_key", founder_key.as_str())],
+                        )
                         .map_err(|error| with_initial_population_path(general, error))?;
-                    execution_registry
-                        .register_individual("execution", id)
-                        .map_err(|error| with_initial_population_path(general, error))
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+                        let id = derivation_registry
+                            .derive_individual(root_seed, &request)
+                            .map_err(|error| with_initial_population_path(general, error))?;
+                        execution_registry
+                            .register_individual("execution", id)
+                            .map_err(|error| with_initial_population_path(general, error))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                (individual_ids, Some(founder_keys))
+            }
+            (Some(_), Some(_)) => {
+                return Err(config_error(
+                    general,
+                    "initial_populations.individual_ids,initial_populations.founder_keys",
+                    "individual_ids y founder_keys son mutuamente excluyentes",
+                ));
+            }
+            (None, None) => {
+                return Err(config_error(
+                    general,
+                    "initial_populations.founder_keys",
+                    "founder_keys es obligatorio cuando se omite individual_ids",
+                ));
+            }
         };
         effective.push(EffectiveInitialPopulation {
             population_id,
             individual_ids,
+            founder_keys,
             ploidy,
             genotype_model,
         });

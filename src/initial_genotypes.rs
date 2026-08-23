@@ -464,7 +464,12 @@ pub fn sample_initial_genotype_compositions(
                     .ok_or_else(|| InitialGenotypeSamplingError::MissingMatrixPopulation {
                         population_id: cohort.population_id().as_str().to_owned(),
                     })?;
-                let frequencies = allele_frequencies(rows, locus)?;
+                let frequencies = matrix.allele_frequencies_for_rows(rows).ok_or_else(|| {
+                    InitialGenotypeSamplingError::InvalidLocusFrequencies {
+                        contig: locus.contig.as_str().to_owned(),
+                        position_1based: locus.position_1based,
+                    }
+                })?;
                 let mut rng = derive_subseed(
                     root_seed,
                     RuntimeSubseedScope::InitialGenotype {
@@ -653,43 +658,4 @@ fn canonical_loci(
             })
         })
         .collect()
-}
-
-fn allele_frequencies(
-    rows: &[&PreparedPopulationSnv],
-    locus: &CanonicalLocus<'_>,
-) -> Result<Vec<f64>, InitialGenotypeSamplingError> {
-    let alternate_sum = neumaier_sum(rows.iter().map(|row| row.alt_af()));
-    let reference = 1.0 - alternate_sum;
-    if !alternate_sum.is_finite()
-        || alternate_sum < 0.0
-        || reference < -1e-12
-        || rows
-            .iter()
-            .any(|row| !row.alt_af().is_finite() || row.alt_af() < 0.0)
-    {
-        return Err(InitialGenotypeSamplingError::InvalidLocusFrequencies {
-            contig: locus.contig.as_str().to_owned(),
-            position_1based: locus.position_1based,
-        });
-    }
-    let mut frequencies = Vec::with_capacity(rows.len() + 1);
-    frequencies.push(reference.max(0.0));
-    frequencies.extend(rows.iter().map(|row| row.alt_af()));
-    Ok(frequencies)
-}
-
-fn neumaier_sum(values: impl IntoIterator<Item = f64>) -> f64 {
-    let mut sum = 0.0;
-    let mut correction = 0.0;
-    for value in values {
-        let next = sum + value;
-        if sum.abs() >= value.abs() {
-            correction += (sum - next) + value;
-        } else {
-            correction += (value - next) + sum;
-        }
-        sum = next;
-    }
-    sum + correction
 }

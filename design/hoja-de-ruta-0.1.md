@@ -368,10 +368,22 @@ separación estricta entre referencias.
   en VCF, enlazar sus registros con una única entrada complementaria y demostrar
   la reconstrucción completa del par. Esta fase aporta la primera prueba
   positiva obligatoria VCF+complemento mediante un caso complejo/SV/BND real.
+  **Subpaso diferido F5.5.a — variación aleatoria directa por individuo:**
+  incorporar en la creación inicial directa las cantidades medias o densidades
+  globales y sus sustituciones por individuo, distribuciones y regiones, y la
+  exclusión explícita respecto de la matriz SNV canónica; demostrar que cada
+  sustitución afecta solo a su individuo. Este subpaso conserva separados los
+  cambios *de novo* posteriores a la inicialización (F7.2.a) y cubre
+  REQ-CONF-20, REQ-CONF-22, REQ-IND-15, REQ-DIR-02 y la parte inicial de
+  REQ-IND-64.
 - **F5.6. Varios conjuntos de referencia.** Mapear las mismas muestras contra
   referencias diferentes, producir BAM/CRAM y VCF independientes y demostrar
   que el manifiesto del evento y el manifiesto raíz enlazan todos los resultados
   reales con su evento, conjunto, referencia y artefacto conforme a REQ-EVO-78.
+  **Subpaso diferido F5.6.a — matrices SNV por referencia:** permitir y validar
+  enlaces de matriz canónica separados para cada referencia estructural, su
+  selección trazable y su publicación sin mezclar matrices entre referencias;
+  cierra la parte multirreferencia de REQ-CONF-128.
 
 **Resultado de salida:** individuos complejos reconstruibles y conjuntos
 independientes por referencia.
@@ -595,7 +607,10 @@ configurado de los procesos.
   oportunidades válidas en todas las copias descendientes actuales, registrar
   tasa, espacio, media Poisson y recuentos sorteado, aceptado y activo. Excluir
   `N` de SNP, motivos repetidos y anclas que exigen base concreta sin excluirla
-  del interior de intervalos puramente estructurales.
+  del interior de intervalos puramente estructurales. **Subpaso diferido F7.2.a
+  — mutaciones *de novo*:** aplicar y trazar exclusivamente los cambios
+  posteriores a la inicialización, sin reinterpretar la matriz o la variación
+  aleatoria inicial directa; cierra esa parte de REQ-IND-64.
 - **F7.3. Tamaño poblacional.** Procesar N intentos reproductivos, registrar
   éxitos, fallos y N realizado, y calcular Ne reproductivo realizado cuando sea
   evaluable. Ne objetivo y el control de contribuciones parentales quedan fuera

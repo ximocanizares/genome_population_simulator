@@ -228,6 +228,7 @@ def _(BASES, imported_form, mo):
             "genotype_model": row.genotype_model,
             "inbreeding_coefficient": row.inbreeding_coefficient or "",
             "individual_ids": ", ".join(row.individual_ids or []),
+            "founder_keys": ", ".join(row.founder_keys or []),
             "individual_ids_specified": row.individual_ids is not None,
             "omit_if_blank": False,
         }
@@ -240,6 +241,7 @@ def _(BASES, imported_form, mo):
         "genotype_model": "hwe",
         "inbreeding_coefficient": "",
         "individual_ids": "",
+        "founder_keys": "",
         "individual_ids_specified": False,
         "omit_if_blank": True,
     }]

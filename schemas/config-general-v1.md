@@ -26,9 +26,11 @@ particular, no admite escenarios, poblaciones evolutivas ni reglas. Además de l
 el origen de una matriz común y F2.2.2 valida sus sumas ALT multialélicas.
 
 F2.3.4 declara destinos explícitos de copia con `[[direct_events]]`, resuelve
-individuo y fase contra las cohortes y preflighta SNP e indels antes de abrir la
-publicación. No materializa ni publica individuos y Marimo no recibe controles
-nuevos. `--allow-incompatible-genotypes` solo conserva y registra una
+individuo y fase contra las cohortes y preflighta SNP e indels con copias
+temporales antes de abrir la publicación. Tanto `validate` como `run` las
+descartan al terminar; `run` publica solo estadísticas, no individuos ni sus
+secuencias. Marimo expone desde F2.3.6 los controles de cohortes y eventos
+directos que exportan este mismo TOML. `--allow-incompatible-genotypes` solo conserva y registra una
 restricción SNP de probabilidad cero; no es `--force` ni relaja referencia,
 alelos, coordenadas o ploidía. `--allow-empty-snv-matrix` conserva su alcance
 independiente.
@@ -142,15 +144,15 @@ fase solo valida y conserva el modelo: no sortea genotipos ni fase.
 
 `individual_ids` es una lista opcional no vacía de IDs aportados. Si existe, debe
 contener exactamente `individual_count` IDs válidos y cada uno debe ser único en
-toda la ejecución. JSON Schema impone que la lista no esté vacía y que sus
-elementos no se repitan, pero la igualdad entre su longitud y
-`individual_count` es una semántica exclusiva de la validación Rust. Si se
-omite, Rust deriva un ID estable por individuo con DTC-039,
-usando como ámbito `population_id` y una clave fundadora canónica de ordinal
-uno-basado. Ese ordinal pertenece a la cohorte, no al orden físico del TOML, de
-modo que reordenar las cohortes no cambia los IDs derivados y aumentar N conserva
-los anteriores. Las IDs aportadas y derivadas nunca se mezclan en una misma
-cohorte.
+toda la ejecución; en esa rama `founder_keys` está prohibido. Si se omite,
+`founder_keys` es obligatorio: contiene exactamente una clave válida, única
+dentro de su población y estable por individuo, en el mismo orden que la
+cohorte. Rust deriva cada ID
+desde `population_id` y su `founder_key`, nunca desde un ordinal implícito. JSON
+Schema impone presencia exclusiva, no vacío y unicidad local; la igualdad con
+`individual_count`, la unicidad global de los IDs y la unicidad por población
+de las claves son semántica de Rust. Las IDs aportadas y derivadas nunca se
+mezclan en una misma cohorte.
 
 ```toml
 [[initial_populations]]
@@ -159,6 +161,7 @@ individual_count = 2
 ploidy = 2
 genotype_model = "f_diploid"
 inbreeding_coefficient = 0.25
+founder_keys = ["P1-founder-A", "P1-founder-B"]
 
 [[initial_populations]]
 population_id = "P2"
@@ -168,9 +171,10 @@ genotype_model = "hwe"
 individual_ids = ["sample-A", "sample-B"]
 ```
 
-Marimo no muestra aún estos campos: sus controles se incorporan exclusivamente
-en F2.3.6. La configuración efectiva publica las cohortes, sus IDs ya resueltos,
-ploidía y modelo para que F2.3.2 sea el primer consumidor biológico.
+Marimo muestra estos campos desde F2.3.6 y exporta el mismo TOML visible que
+admite Rust; una edición invalida la sesión de validación. La configuración
+efectiva publica las cohortes, sus IDs ya resueltos, ploidía y modelo para que
+el muestreo y la materialización sean consumidores biológicos trazables.
 
 ## Cambios explícitos por individuo (F2.3.4)
 
@@ -183,7 +187,9 @@ para ese individuo tras la proyección de SNP de matriz. `individual_id` debe
 pertenecer a una cohorte y `phase` debe existir para su ploidía. Se exige una
 matriz SNV para recorrer genotipo y fase, cuya identidad y huella canónica se
 comprueban antes de los cambios. Tanto `validate` como `run` ejecutan este
-preflight de solo lectura; solo `run` abre la publicación.
+preflight de solo lectura y materializan copias temporales; `validate` las
+descarta y solo `run` abre la publicación, donde registra estadísticas sin
+copias ni secuencias.
 
 ```toml
 [[direct_events]]

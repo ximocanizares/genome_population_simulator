@@ -258,6 +258,7 @@ fn statistics_document(
                 .map(|(key, rows)| {
                     locus_statistics(
                         reference,
+                        matrix,
                         population.genotype_model(),
                         population.ploidy().copy_count(),
                         key,
@@ -313,6 +314,7 @@ fn statistics_document(
 
 fn locus_statistics(
     reference: &Reference,
+    matrix: &PreparedPopulationSnvs,
     model: EffectiveInitialGenotypeModel,
     ploidy: u8,
     key: &LocusKey,
@@ -344,14 +346,10 @@ fn locus_statistics(
         contig: key.contig.clone(),
         position_1based: key.position_1based,
     })?;
-    let mut frequencies = Vec::with_capacity(rows.len() + 1);
-    let alt_sum = neumaier_sum(rows.iter().map(|row| row.alt_af()));
-    let reference_frequency = 1.0 - alt_sum;
-    if !reference_frequency.is_finite() || reference_frequency < 0.0 {
-        return Err(InitialIndividualsMaterializationError::InvalidStatistics);
-    }
-    frequencies.push(reference_frequency);
-    frequencies.extend(rows.iter().map(|row| row.alt_af()));
+    let frequencies = matrix
+        .allele_frequencies_for_rows(rows)
+        .ok_or(InitialIndividualsMaterializationError::InvalidStatistics)?;
+    let reference_frequency = frequencies[0];
     if frequencies
         .iter()
         .any(|frequency| !frequency.is_finite() || *frequency < 0.0)
@@ -561,21 +559,6 @@ fn enumerate_hwe(
 
 fn factorial(value: u8) -> f64 {
     (1..=u64::from(value)).fold(1.0, |result, item| result * item as f64)
-}
-
-fn neumaier_sum(values: impl IntoIterator<Item = f64>) -> f64 {
-    let mut sum = 0.0;
-    let mut correction = 0.0;
-    for value in values {
-        let next = sum + value;
-        if sum.abs() >= value.abs() {
-            correction += (sum - next) + value;
-        } else {
-            correction += (value - next) + sum;
-        }
-        sum = next;
-    }
-    sum + correction
 }
 
 fn expanded_genotype(dosages: &[u8]) -> Result<Vec<u8>, InitialIndividualsMaterializationError> {

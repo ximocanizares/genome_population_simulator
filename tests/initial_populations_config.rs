@@ -49,13 +49,20 @@ length = 10
 }
 
 fn cohort(population_id: &str, ploidy: u8, model: &str, extra: &str) -> String {
+    let identities = if extra.contains("individual_ids") || extra.contains("founder_keys") {
+        extra.to_owned()
+    } else {
+        format!(
+            "founder_keys = [\"{population_id}-founder-1\", \"{population_id}-founder-2\"]\n{extra}"
+        )
+    };
     format!(
         r#"[[initial_populations]]
 population_id = "{population_id}"
 individual_count = 2
 ploidy = {ploidy}
 genotype_model = "{model}"
-{extra}
+{identities}
 "#
     )
 }
@@ -151,6 +158,74 @@ fn provided_ids_replace_derivation_only_with_exact_cardinality_and_global_unique
 }
 
 #[test]
+fn omitted_ids_require_unique_founder_keys_and_derive_from_them() {
+    let source = cohort(
+        "P1",
+        2,
+        "hwe",
+        "founder_keys = [\"founder-alpha\", \"founder-beta\"]",
+    );
+    let first = build(&config(&source)).expect("founder keys derive IDs");
+    let reordered = build(&config(&cohort(
+        "P1",
+        2,
+        "hwe",
+        "founder_keys = [\"founder-beta\", \"founder-alpha\"]",
+    )))
+    .expect("reordered founder keys");
+    let first_by_key = first.initial_populations()[0]
+        .founder_keys()
+        .expect("derived keys")
+        .iter()
+        .zip(first.initial_populations()[0].individual_ids())
+        .map(|(key, id)| (key.as_str(), id.as_str()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let reordered_by_key = reordered.initial_populations()[0]
+        .founder_keys()
+        .expect("derived keys")
+        .iter()
+        .zip(reordered.initial_populations()[0].individual_ids())
+        .map(|(key, id)| (key.as_str(), id.as_str()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(first_by_key, reordered_by_key);
+
+    let missing_founder_keys =
+        cohort("P1", 2, "hwe", "founder_keys = []").replace("founder_keys = []\n", "");
+    let missing = build(&config(&missing_founder_keys))
+        .expect_err("founder keys are required when IDs are omitted");
+    assert_eq!(missing.code(), "GPS-CONF-008");
+    assert!(missing.context()["fields"].contains("founder_keys"));
+
+    for (extra, field) in [
+        ("founder_keys = []", "founder_keys"),
+        ("founder_keys = [\"only-one\"]", "founder_keys"),
+        ("founder_keys = [\"same\", \"same\"]", "founder_keys"),
+        (
+            "individual_ids = [\"I1\", \"I2\"]\nfounder_keys = [\"a\", \"b\"]",
+            "individual_ids,initial_populations.founder_keys",
+        ),
+    ] {
+        let error = build(&config(&cohort("P1", 2, "hwe", extra)))
+            .expect_err("invalid founder-key contract");
+        assert_eq!(error.code(), "GPS-CONF-008");
+        assert!(error.context()["fields"].contains(field));
+    }
+
+    let repeated_across_cohorts = format!(
+        "{}{}",
+        cohort("P1", 2, "hwe", "founder_keys = [\"shared\", \"P1-only\"]"),
+        cohort("P2", 2, "hwe", "founder_keys = [\"shared\", \"P2-only\"]"),
+    );
+    let repeated = build(&config(&repeated_across_cohorts))
+        .expect("the same founder key is valid in distinct populations");
+    assert_ne!(
+        repeated.initial_populations()[0].individual_ids()[0],
+        repeated.initial_populations()[1].individual_ids()[0],
+        "the population remains part of the deterministic derivation scope"
+    );
+}
+
+#[test]
 fn f_diploid_is_exclusive_to_diploids_and_validates_its_coefficient() {
     for coefficient in ["0", "1", "0.25"] {
         let population = cohort(
@@ -219,6 +294,47 @@ fn authoring_schema_and_rust_accept_the_same_initial_cohort_shape() {
         ),
         true,
         true,
+    );
+    assert_authoring_and_rust(
+        "valid-derived-ids-from-founder-keys",
+        json!({
+            "population_id": "P", "individual_count": 2, "ploidy": 2,
+            "genotype_model": "hwe", "founder_keys": ["founder-A", "founder-B"]
+        }),
+        &cohort(
+            "P",
+            2,
+            "hwe",
+            "founder_keys = [\"founder-A\", \"founder-B\"]",
+        ),
+        true,
+        true,
+    );
+    assert_authoring_and_rust(
+        "missing-ids-and-founder-keys",
+        json!({
+            "population_id": "P", "individual_count": 2, "ploidy": 2,
+            "genotype_model": "hwe"
+        }),
+        &cohort("P", 2, "hwe", "founder_keys = []").replace("founder_keys = []\n", ""),
+        false,
+        false,
+    );
+    assert_authoring_and_rust(
+        "provided-ids-and-founder-keys-are-exclusive",
+        json!({
+            "population_id": "P", "individual_count": 2, "ploidy": 2,
+            "genotype_model": "hwe", "individual_ids": ["I1", "I2"],
+            "founder_keys": ["founder-A", "founder-B"]
+        }),
+        &cohort(
+            "P",
+            2,
+            "hwe",
+            "individual_ids = [\"I1\", \"I2\"]\nfounder_keys = [\"founder-A\", \"founder-B\"]",
+        ),
+        false,
+        false,
     );
     assert_authoring_and_rust(
         "empty-provided-ids",

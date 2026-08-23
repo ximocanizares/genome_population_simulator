@@ -16,7 +16,7 @@ use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
 use crate::execution::declared_small_event;
 use crate::identity::{
-    EventId, IndividualId, PopulationId, ReferenceId, SequenceId, derive_execution_id,
+    EventId, FounderKey, IndividualId, PopulationId, ReferenceId, SequenceId, derive_execution_id,
 };
 use crate::initial_individual_integration::IncompatibleGenotypeAuthorization;
 use crate::initial_individual_materialization::{
@@ -266,13 +266,18 @@ fn effective_initial_populations_json(config: &EffectiveConfig) -> Value {
                         inbreeding_coefficient,
                     } => json!({"kind": "f_diploid", "inbreeding_coefficient": inbreeding_coefficient}),
                 };
-                json!({
+                let mut result = json!({
                     "population_id": population.population_id().as_str(),
                     "individual_count": population.individual_count(),
                     "individual_ids": population.individual_ids().iter().map(|id| id.as_str()).collect::<Vec<_>>(),
                     "ploidy": population.ploidy().copy_count(),
                     "genotype_model": genotype_model,
-                })
+                });
+                if let Some(founder_keys) = population.founder_keys() {
+                    result["founder_keys"] =
+                        json!(founder_keys.iter().map(|key| key.as_str()).collect::<Vec<_>>());
+                }
+                result
             })
             .collect(),
     )
@@ -2588,7 +2593,20 @@ fn validate_effective_initial_populations(
             "ploidy",
             "genotype_model",
         ];
-        validate_effective_closed_object(population, &FIELDS, "initial_populations[]", path)?;
+        const DERIVED_FIELDS: [&str; 6] = [
+            "population_id",
+            "individual_count",
+            "individual_ids",
+            "ploidy",
+            "genotype_model",
+            "founder_keys",
+        ];
+        let fields = if population.contains_key("founder_keys") {
+            &DERIVED_FIELDS[..]
+        } else {
+            &FIELDS[..]
+        };
+        validate_effective_closed_object(population, fields, "initial_populations[]", path)?;
         let population_id = effective_non_empty_text(population, "population_id", path)?;
         PopulationId::parse(population_id, "effective_config")
             .map_err(|_| effective_error(path, "population_id inicial inválido"))?;
@@ -2616,6 +2634,28 @@ fn validate_effective_initial_populations(
                 .map_err(|_| effective_error(path, "individual_id inicial inválido"))?;
             if !individual_ids.insert(id) {
                 return Err(effective_error(path, "individual_id inicial repetido"));
+            }
+        }
+        if let Some(founder_keys_value) = population.get("founder_keys") {
+            let mut founder_keys = BTreeSet::new();
+            let founder_key_values = founder_keys_value
+                .as_array()
+                .ok_or_else(|| effective_error(path, "founder_keys inicial inválida"))?;
+            if founder_key_values.len() != ids.len() {
+                return Err(effective_error(
+                    path,
+                    "founder_keys inicial no coincide con individual_ids",
+                ));
+            }
+            for key in founder_key_values {
+                let key = key
+                    .as_str()
+                    .ok_or_else(|| effective_error(path, "founder_key inicial inválida"))?;
+                FounderKey::parse(key, "effective_config")
+                    .map_err(|_| effective_error(path, "founder_key inicial inválida"))?;
+                if !founder_keys.insert(key) {
+                    return Err(effective_error(path, "founder_key inicial repetida"));
+                }
             }
         }
         let model = effective_object(population, "genotype_model", path)?;

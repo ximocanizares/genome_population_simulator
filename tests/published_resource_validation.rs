@@ -370,6 +370,42 @@ fn direct_events_must_match_the_typed_toml_resolution_exactly() {
 }
 
 #[test]
+fn published_founder_keys_are_revalidated_against_the_toml_contract() {
+    let fixture_root = temporary("founder-keys-fixture");
+    fs::create_dir(&fixture_root).expect("fixture root");
+    let config = write_founder_keys_fixture(&fixture_root);
+    let destination = temporary("founder-keys-result");
+    let effective_config = load_and_validate_config(&config).expect("valid fixture");
+    execute_validated_config(&effective_config, &destination).expect("complete baseline");
+
+    let effective_path = destination.join("effective-config.json");
+    let manifest_path = destination.join("manifest.json");
+    let mut effective = read_json(&effective_path);
+    let mut manifest = read_json(&manifest_path);
+    assert_eq!(
+        effective["initial_populations"][0]["founder_keys"],
+        json!(["founder-I1"])
+    );
+    effective["initial_populations"][0]["founder_keys"][0] = json!("other-founder");
+    write_json(&effective_path, &effective);
+    refresh_artifact(&destination, &mut manifest, "effective-config");
+    write_json(&manifest_path, &manifest);
+
+    let error = validate_published_resources(
+        &destination,
+        &effective_path,
+        &fs::read(&effective_path).expect("effective bytes"),
+        &manifest_path,
+        &fs::read(&manifest_path).expect("manifest bytes"),
+    )
+    .expect_err("revalidation must bind founder keys to the typed TOML resolution");
+    assert_eq!(error.code(), "GPS-FMT-006");
+
+    fs::remove_dir_all(destination).expect("result cleanup");
+    fs::remove_dir_all(fixture_root).expect("fixture cleanup");
+}
+
+#[test]
 fn hostile_genotype_dosage_overflow_is_a_controlled_revalidation_error() {
     let fixture_root = temporary("hostile-dosage-fixture");
     fs::create_dir(&fixture_root).expect("fixture root");
@@ -563,6 +599,33 @@ fn write_direct_events_fixture(root: &Path) -> PathBuf {
         ),
     )
     .expect("direct events config");
+    config
+}
+
+fn write_founder_keys_fixture(root: &Path) -> PathBuf {
+    let fasta = root.join("reference.fa");
+    let matrix = root.join("matrix.tsv");
+    fs::write(&fasta, b">chr1\nACGT\n").expect("reference");
+    fs::write(
+        &matrix,
+        "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t1\tA\tG\tP1\t0.5\n",
+    )
+    .expect("matrix");
+    let config = root.join("founder-keys.toml");
+    fs::write(
+        &config,
+        format!(
+            "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"{}\"\n\
+             [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\
+             [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nfounder_keys = [\"founder-I1\"]\nploidy = 2\ngenotype_model = \"hwe\"\n\
+             [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"{}\"\n\
+             [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 4\n",
+            "0".repeat(64),
+            matrix.display(),
+            fasta.display(),
+        ),
+    )
+    .expect("founder keys config");
     config
 }
 

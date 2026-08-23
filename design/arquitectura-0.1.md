@@ -844,13 +844,22 @@ efectiva/manifiesto y no relajan otras invariantes. La matriz conserva solo
 frecuencias marginales, por lo que los loci son independientes y cualquier LD
 requiere el panel de haplotipos posterior.
 
-F2.3.5 materializa bajo demanda cada copia ya integrada y conserva el estado
-segmentado como autoridad. El resumen por población×locus enlaza la huella de
-la matriz, el modelo y los algoritmos, separa objetivo y realización y no
-retroalimenta los genotipos. Una copia cuya deleción directa cubre el locus se
-cuenta como `missing_by_deletion`; REF/ALT usan `observed_copies` como
-denominador efectivo y los genotipos realizados solo incluyen observaciones
-completas.
+Una cohorte inicial declara IDs aportados o, exclusivamente cuando estos se
+omiten, una `founder_key` estable por individuo. La derivación automática usa
+`population_id`×`founder_key`, no el ordinal ni el orden físico TOML; las claves
+deben ser únicas dentro de su población y se conservan junto a los IDs efectivos
+para revalidar su emparejamiento. Esta frontera no introduce sustituciones
+individuales de cantidad, densidad o región.
+
+F2.3.5 materializa bajo demanda y de forma temporal cada copia ya integrada,
+conservando el estado segmentado como autoridad. Tanto `validate` como `run`
+usan ese materializador temporal durante el preflight: `validate` descarta el
+resultado al terminar, y `run` publica solo el resumen por población×locus, no
+las copias ni sus secuencias. El resumen enlaza la huella de la matriz, el
+modelo y los algoritmos, separa objetivo y realización y no retroalimenta los
+genotipos. Una copia cuya deleción directa cubre el locus se cuenta como
+`missing_by_deletion`; REF/ALT usan `observed_copies` como denominador efectivo
+y los genotipos realizados solo incluyen observaciones completas.
 
 F2.3.4 admite `direct_events` únicamente como una vista tipada por individuo y
 fase: su adaptador resuelve ID, contig, alelos y coordenadas, y el orquestador
@@ -860,10 +869,14 @@ la matriz; cualquier diferencia de locus o frecuencia rechaza el enlace. Para
 un SNP explícito que coincide con la matriz, la compatibilidad se decide por
 probabilidad positiva bajo HWE o `F` diploide, no contra el alelo sorteado; la
 autorización específica solo conserva un caso de probabilidad cero. El
-preflight transaccional finaliza antes de crear el workspace, conserva el orden
-de cambios por individuo y no materializa ni publica las copias.
-`validate` y `run` llaman al mismo preflight de solo lectura; únicamente el
-segundo abre el workspace de publicación.
+preflight transaccional conserva el orden de cambios por individuo y usa el
+materializador temporal antes de crear el workspace. `validate` y `run` llaman
+al mismo preflight de solo lectura y ambos descartan sus copias temporales;
+únicamente `run` abre el workspace de publicación. Su configuración efectiva y
+manifiesto conservan el resumen estadístico, nunca copias ni secuencias. La
+revalidación publicada vuelve a resolver el TOML tipado, exige que configuración
+efectiva, manifiesto y sus esquemas coincidan y reconstruye las estadísticas
+antes de aceptar los enlaces.
 
 El panel de bloques haplotípicos cruza la misma frontera como otro recurso
 inmutable. El paquete contiene exactamente `panel_blocks.tsv`, `panel_sites.tsv`,

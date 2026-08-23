@@ -478,6 +478,68 @@ impl PreparedPopulationSnvs {
         &self.normalization_audit
     }
 
+    /// Frecuencias alélicas preparadas para una única población×locus.
+    ///
+    /// La frecuencia REF procede de la decisión de normalización ya retenida:
+    /// en particular, una decisión `normalized` conserva REF exactamente a
+    /// cero y ningún consumidor vuelve a calcular `1 - sum(ALT)`.
+    #[must_use]
+    pub fn allele_frequencies_for_rows(&self, rows: &[&PreparedPopulationSnv]) -> Option<Vec<f64>> {
+        let first = *rows.first()?;
+        if rows.iter().any(|row| {
+            row.population_id() != first.population_id()
+                || row.contig() != first.contig()
+                || row.position_1based() != first.position_1based()
+                || row.reference() != first.reference()
+        }) {
+            return None;
+        }
+        let position = first.position_1based().to_string();
+        let reference = char::from(first.reference()).to_string();
+        let group = self.normalization_audit.iter().find(|group| {
+            group.population_id() == first.population_id().as_str()
+                && group.contig() == first.contig().as_str()
+                && group.position() == position
+                && group.reference() == reference
+        })?;
+        let mut expected = rows.to_vec();
+        expected.sort_by(|left, right| {
+            left.alternate()
+                .cmp(&right.alternate())
+                .then(left.variant_id().cmp(right.variant_id()))
+        });
+        let active_variants = expected
+            .iter()
+            .map(|row| (row.variant_id().as_str(), (row.alternate(), row.alt_af())))
+            .collect::<BTreeMap<_, _>>();
+        let discarded = self
+            .discarded_globally_absent
+            .iter()
+            .map(VariantId::as_str)
+            .collect::<BTreeSet<_>>();
+        let mut seen_active = BTreeSet::new();
+        for value in group.values() {
+            let variant_id = value.variant_id();
+            if let Some((alternate, frequency)) = active_variants.get(variant_id) {
+                if value.alt().as_bytes() != [*alternate]
+                    || value.effective().to_bits() != frequency.to_bits()
+                    || !seen_active.insert(variant_id)
+                {
+                    return None;
+                }
+            } else if value.effective() != 0.0 || !discarded.contains(variant_id) {
+                return None;
+            }
+        }
+        if seen_active.len() != expected.len() {
+            return None;
+        }
+        let mut frequencies = Vec::with_capacity(expected.len() + 1);
+        frequencies.push(group.reference_frequency());
+        frequencies.extend(expected.iter().map(|row| row.alt_af()));
+        Some(frequencies)
+    }
+
     /// Huella SHA-256 de la proyección canónica exacta consumida por F2.3.
     #[must_use]
     pub fn canonical_fingerprint(&self) -> String {
@@ -1155,6 +1217,11 @@ pub fn validate_reusable_population_snvs_bytes(
             detail: "SHA-256 del TSV reutilizado no coincide con metadata".to_owned(),
         });
     }
+    let audit = object.get("normalization_audit").ok_or_else(|| {
+        PopulationSnvsPreparationError::AuthoritativeFasta {
+            detail: "metadata.normalization_audit ausente".to_owned(),
+        }
+    })?;
     let table = parse_canonical_tsv(matrix_bytes).map_err(|error| {
         PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: error.to_string(),
@@ -1162,6 +1229,7 @@ pub fn validate_reusable_population_snvs_bytes(
     })?;
     let mut prepared =
         prepare_population_snvs_from_reference(&table, reference, tolerance, allow_empty_matrix)?;
+    restore_published_allele_frequencies(&mut prepared, audit)?;
     if canonical_tsv_bytes(&prepared) != matrix_bytes {
         return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "el TSV reutilizado no está en orden y representación canónicos".to_owned(),
@@ -1210,11 +1278,6 @@ pub fn validate_reusable_population_snvs_bytes(
         .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "metadata.provenance inválida".to_owned(),
         })?;
-    let audit = object.get("normalization_audit").ok_or_else(|| {
-        PopulationSnvsPreparationError::AuthoritativeFasta {
-            detail: "metadata.normalization_audit ausente".to_owned(),
-        }
-    })?;
     let discarded_variant_pairs = object
         .get("discarded_variant_pairs")
         .and_then(Value::as_array)
@@ -1257,6 +1320,148 @@ pub fn validate_reusable_population_snvs_bytes(
         sha256_bytes(metadata_bytes),
         audit.clone(),
     ))
+}
+
+/// Restaura la semántica de frecuencias que acompaña al TSV canónico.
+///
+/// El TSV conserva los ALT efectivos, pero una normalización que declaró REF
+/// exactamente cero no puede reconstruirse con seguridad como `1 - sum(ALT)`
+/// tras una segunda lectura de `f64`. La auditoría autenticada es por tanto la
+/// representación preparada autoritativa para REF y para cada ALT.
+fn restore_published_allele_frequencies(
+    prepared: &mut PreparedPopulationSnvs,
+    audit: &Value,
+) -> Result<(), PopulationSnvsPreparationError> {
+    type AlleleKey = (String, String, String, String, String, String, String);
+    type GroupKey = (String, String, String, String);
+    let groups = audit
+        .as_array()
+        .ok_or_else(|| audit_error("debe ser una lista"))?;
+    let mut values = BTreeMap::<AlleleKey, f64>::new();
+    let mut references = BTreeMap::<GroupKey, f64>::new();
+    for group in groups {
+        let group = group
+            .as_object()
+            .ok_or_else(|| audit_error("grupo inválido"))?;
+        let population = group
+            .get("population_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| audit_error("population_id"))?;
+        let contig = group
+            .get("contig")
+            .and_then(Value::as_str)
+            .ok_or_else(|| audit_error("contig"))?;
+        let position = group
+            .get("position")
+            .and_then(Value::as_str)
+            .ok_or_else(|| audit_error("position"))?;
+        let reference = group
+            .get("ref")
+            .and_then(Value::as_str)
+            .ok_or_else(|| audit_error("ref"))?;
+        let reference_frequency = group
+            .get("reference_frequency")
+            .and_then(Value::as_f64)
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .ok_or_else(|| audit_error("reference_frequency"))?;
+        if references
+            .insert(
+                (
+                    population.to_owned(),
+                    contig.to_owned(),
+                    position.to_owned(),
+                    reference.to_owned(),
+                ),
+                reference_frequency,
+            )
+            .is_some()
+        {
+            return Err(audit_error("grupo duplicado"));
+        }
+        for value in group
+            .get("values")
+            .and_then(Value::as_array)
+            .ok_or_else(|| audit_error("values"))?
+        {
+            let value = value
+                .as_object()
+                .ok_or_else(|| audit_error("valor inválido"))?;
+            let alt = value
+                .get("alt")
+                .and_then(Value::as_str)
+                .ok_or_else(|| audit_error("alt"))?;
+            let variant_id = value
+                .get("variant_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| audit_error("variant_id"))?;
+            let source_id = value
+                .get("source_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| audit_error("source_id"))?;
+            let effective = value
+                .get("effective")
+                .and_then(Value::as_f64)
+                .filter(|value| value.is_finite() && *value >= 0.0)
+                .ok_or_else(|| audit_error("effective"))?;
+            if values
+                .insert(
+                    (
+                        population.to_owned(),
+                        contig.to_owned(),
+                        position.to_owned(),
+                        reference.to_owned(),
+                        alt.to_owned(),
+                        variant_id.to_owned(),
+                        source_id.to_owned(),
+                    ),
+                    effective,
+                )
+                .is_some()
+            {
+                return Err(audit_error("valor duplicado"));
+            }
+        }
+    }
+    for row in &mut prepared.rows {
+        let key = (
+            row.population_id().as_str().to_owned(),
+            row.contig().as_str().to_owned(),
+            row.position_1based().to_string(),
+            char::from(row.reference()).to_string(),
+            char::from(row.alternate()).to_string(),
+            row.variant_id().as_str().to_owned(),
+            row.source_id().to_owned(),
+        );
+        row.alt_af = *values
+            .get(&key)
+            .ok_or_else(|| audit_error("efectivo activo ausente"))?;
+    }
+    for group in &mut prepared.normalization_audit {
+        let key = (
+            group.population_id.clone(),
+            group.contig.clone(),
+            group.position.clone(),
+            group.reference.clone(),
+        );
+        group.reference_frequency = *references
+            .get(&key)
+            .ok_or_else(|| audit_error("referencia ausente"))?;
+        for value in &mut group.values {
+            let key = (
+                group.population_id.clone(),
+                group.contig.clone(),
+                group.position.clone(),
+                group.reference.clone(),
+                value.alt.clone(),
+                value.variant_id.clone(),
+                value.source_id.clone(),
+            );
+            value.effective = *values
+                .get(&key)
+                .ok_or_else(|| audit_error("efectivo ausente"))?;
+        }
+    }
+    Ok(())
 }
 
 /// Comprueba que la auditoría publicada conserva la decisión original y que

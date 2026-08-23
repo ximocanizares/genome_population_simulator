@@ -1,6 +1,28 @@
 # Punto de reanudación
 
-## Estado actual — 21 de agosto de 2026 (cierre F2.2.3)
+## Estado actual — 23 de agosto de 2026 (cierre F2.3, pendiente de publicar)
+
+- F2.3.1–F2.3.7 está cerrada: configuración de fundadores, genotipos HWE/`F`,
+  fase multialélica, eventos explícitos, materialización temporal, estadísticas
+  y controles Marimo locales. Falta únicamente confirmar y publicar este
+  estado en un commit posterior a `0f604fc`.
+- `founder_keys` se exige cuando faltan IDs explícitos; es única dentro de cada
+  población y deriva IDs estables desde población×clave.
+- La matriz multialélica conserva una representación preparada única de REF y
+  ALT. Cubre normalización con REF=0 y ALT globalmente ausentes, tanto en
+  matriz suministrada como reutilizada.
+- `validate` y `run` comparten un preflight que materializa temporalmente;
+  ambos descartan copias y `run` publica solamente el resumen estadístico.
+- F2.3 superó revisión independiente y revisión adversarial final. Marimo
+  permanece exclusivamente local; el gate reproducible es
+  `MARIMO_SKIP_UPDATE_CHECK=1 uv run --frozen marimo check --strict ui/gps_app.py`.
+- El siguiente hito es F2.4.1: definir el esquema externo mínimo e
+  independiente de `truth.jsonl`.
+- Existe un cambio local ajeno y sin publicar en
+  `tests_ui/test_process_adapter.py`; no incluirlo, revertirlo ni atribuirlo a
+  F2.3 sin revisarlo explícitamente.
+
+## Estado histórico — 21 de agosto de 2026 (cierre F2.2.3)
 
 - F1 sigue cerrada en `e14705a`.
 - F2.0, F2.1 y F2.2.1–F2.2.3 están implementadas, validadas y revisadas de forma

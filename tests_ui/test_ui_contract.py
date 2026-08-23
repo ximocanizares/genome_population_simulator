@@ -124,6 +124,7 @@ class UiContractTests(unittest.TestCase):
             "genotype_model",
             "inbreeding_coefficient",
             "individual_ids",
+            "founder_keys",
             "position_1based",
             "--allow-incompatible-genotypes",
         ):

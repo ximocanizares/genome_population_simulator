@@ -74,6 +74,7 @@ macro_rules! provided_typed_id {
 provided_typed_id!(SequenceId, "sequence");
 provided_typed_id!(ScenarioId, "scenario");
 provided_typed_id!(PopulationId, "population");
+provided_typed_id!(FounderKey, "founder_key");
 provided_typed_id!(SubpopulationId, "subpopulation");
 provided_typed_id!(PhaseId, "phase");
 provided_typed_id!(GroupId, "group");

@@ -315,6 +315,7 @@ fn parse_initial_populations(
                 "genotype_model",
                 "inbreeding_coefficient",
                 "individual_ids",
+                "founder_keys",
             ],
         )?;
         let genotype_model = required_string(admitted, entry, "genotype_model")?;
@@ -369,6 +370,29 @@ fn parse_initial_populations(
                     .collect::<Result<Vec<_>, _>>()
             })
             .transpose()?;
+        let founder_keys = optional_array(admitted, entry, "founder_keys")?
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|value| {
+                        value
+                            .get_ref()
+                            .as_str()
+                            .map(|text| {
+                                Located::new(text.to_owned(), location(admitted, value.span()))
+                            })
+                            .ok_or_else(|| {
+                                wrong_type(
+                                    admitted,
+                                    "initial_populations.founder_keys",
+                                    value,
+                                    "string",
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
         populations.push(DeclaredInitialPopulation {
             population_id: required_string(admitted, entry, "population_id")?,
             individual_count: required_u64(admitted, entry, "individual_count")?,
@@ -376,6 +400,7 @@ fn parse_initial_populations(
             genotype_model,
             inbreeding_coefficient,
             individual_ids,
+            founder_keys,
         });
     }
     Ok(populations)

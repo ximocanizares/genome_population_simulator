@@ -7,6 +7,7 @@ _INITIAL_PLACEHOLDER_DEFAULTS = {
     "genotype_model": "hwe",
     "inbreeding_coefficient": "",
     "individual_ids": "",
+    "founder_keys": "",
     "individual_ids_specified": False,
 }
 _DIRECT_EVENT_PLACEHOLDER_DEFAULTS = {
@@ -91,8 +92,8 @@ def individuals_panel(
                 mo.md("### Cohortes iniciales"),
                 initial_populations_editor,
                 mo.callout(
-                    "Deje `individual_ids` vacío para que Rust los derive; "
-                    "use una lista separada por comas para proporcionarlos.",
+                    "Use `individual_ids` o, para IDs derivados, una lista de "
+                    "`founder_keys` separada por comas; ambas columnas son excluyentes.",
                     kind="info",
                 ),
             ]
