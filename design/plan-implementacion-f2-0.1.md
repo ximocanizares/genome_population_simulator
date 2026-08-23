@@ -365,14 +365,14 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
     huella matriz–fase, indels transaccionales, ninguna corrección silenciosa y
     ausencia de `--force`.
 
-- ☐ F2.3.5. Materializar individuos y calcular estadísticas solicitadas/realizadas.
+- ✅ F2.3.5. Materializar individuos y calcular estadísticas solicitadas/realizadas.
   - Depende de: F2.3.4.
   - Procede de: REQ-IND-62 a REQ-IND-65 y REQ-MAN-91.
   - Cambia: secuencias finales, procedencia, frecuencias realizadas y resumen.
   - Se comprueba con: reconstructor manual, varios individuos, adición/reordenación
     aislada y frecuencias finitas sin autocorrección.
 
-- ☐ F2.3.6. Añadir los controles de individuos a Marimo.
+- ✅ F2.3.6. Añadir los controles de individuos a Marimo.
   - Depende de: F2.3.1–F2.3.5.
   - Procede de: REQ-UI-14 y DTC-051/079.
   - Cambia: población, N, ploidía, HWE/`F`, autorización y resúmenes.

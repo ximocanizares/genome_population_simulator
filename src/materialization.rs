@@ -262,17 +262,34 @@ fn allele_in_copy(
     copy: &HaplotypeCopy,
     locus: &SnpLocus,
 ) -> Result<CanonicalBase, GenotypeQueryError> {
+    let allele = observed_snp_allele(copy, locus.position(), locus.reference())?;
+    if allele != locus.reference && allele != locus.alternate {
+        return Err(GenotypeQueryError::IncompatibleSnpInCopy {
+            phase: copy.phase(),
+        });
+    }
+    Ok(allele)
+}
+
+/// Consulta el alelo presente en una coordenada de referencia sin imponer cuál
+/// de los ALT multialélicos se espera. Una copia que perdió la coordenada se
+/// informa explícitamente como `LocusDeletedFromCopy`.
+pub fn observed_snp_allele(
+    copy: &HaplotypeCopy,
+    position: &BasePosition,
+    reference: CanonicalBase,
+) -> Result<CanonicalBase, GenotypeQueryError> {
     let matching = copy
         .segments()
         .current_modifications()
         .iter()
         .filter_map(|piece| match piece {
             CurrentIndelPiece::Source(source)
-                if source.source().reference_id() == locus.position.reference_id()
-                    && source.source().sequence_id() == locus.position.sequence_id()
-                    && source.source().sequence_length() == locus.position.sequence_length()
+                if source.source().reference_id() == position.reference_id()
+                    && source.source().sequence_id() == position.sequence_id()
+                    && source.source().sequence_length() == position.sequence_length()
                     && (source.source().start()..source.source().end())
-                        .contains(&locus.position.offset()) =>
+                        .contains(&position.offset()) =>
             {
                 Some(source)
             }
@@ -283,17 +300,9 @@ fn allele_in_copy(
         [] => Err(GenotypeQueryError::LocusDeletedFromCopy {
             phase: copy.phase(),
         }),
-        [source] => match source
-            .snps()
-            .iter()
-            .find(|snp| snp.position() == locus.position())
-        {
-            None => Ok(locus.reference),
-            Some(snp)
-                if snp.reference() == locus.reference && snp.alternate() == locus.alternate =>
-            {
-                Ok(locus.alternate)
-            }
+        [source] => match source.snps().iter().find(|snp| snp.position() == position) {
+            None => Ok(reference),
+            Some(snp) if snp.reference() == reference => Ok(snp.alternate()),
             Some(_) => Err(GenotypeQueryError::IncompatibleSnpInCopy {
                 phase: copy.phase(),
             }),

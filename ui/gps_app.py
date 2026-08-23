@@ -9,14 +9,18 @@ def _():
 
     from config_editor import (
         BASES,
+        DirectEventRow,
         EditorError,
         GeneralForm,
+        InitialPopulationRow,
         PopulationSnvsForm,
         ReductionRow,
         ReferenceForm,
         SequenceRow,
         default_form,
+        direct_event_from_editor_row,
         editor_integer,
+        initial_population_from_editor_row,
         ordered_editor_rows,
         parse_general_toml,
         population_snvs_population_from_editor_row,
@@ -27,16 +31,25 @@ def _():
         PROJECT_ROOT,
         ProcessAdapterError,
         diagnostic_summary,
+        initial_population_statistics_summary,
         run_toml,
         validate_toml,
     )
-    from ui_panels import individuals_panel
+    from ui_panels import (
+        authored_editor_rows,
+        effective_incompatible_genotype_authorization,
+        explicit_snp_authorization_summary,
+        individuals_panel,
+    )
 
     return (
         BASES,
+        authored_editor_rows,
+        DirectEventRow,
         DEFAULT_BINARY,
         EditorError,
         GeneralForm,
+        InitialPopulationRow,
         PopulationSnvsForm,
         PROJECT_ROOT,
         ProcessAdapterError,
@@ -44,8 +57,13 @@ def _():
         ReferenceForm,
         SequenceRow,
         default_form,
+        direct_event_from_editor_row,
         diagnostic_summary,
+        initial_population_statistics_summary,
         editor_integer,
+        effective_incompatible_genotype_authorization,
+        explicit_snp_authorization_summary,
+        initial_population_from_editor_row,
         individuals_panel,
         mo,
         ordered_editor_rows,
@@ -201,6 +219,74 @@ def _(BASES, imported_form, mo):
         label="Referencias reducidas (la fila vacía no se exporta)",
         pagination=False,
     )
+    initial_population_rows = [
+        {
+            "order": order,
+            "population_id": row.population_id,
+            "individual_count": row.individual_count,
+            "ploidy": row.ploidy,
+            "genotype_model": row.genotype_model,
+            "inbreeding_coefficient": row.inbreeding_coefficient or "",
+            "individual_ids": ", ".join(row.individual_ids or []),
+            "individual_ids_specified": row.individual_ids is not None,
+            "omit_if_blank": False,
+        }
+        for order, row in enumerate(imported_form.initial_populations, start=1)
+    ] or [{
+        "order": 1,
+        "population_id": "",
+        "individual_count": 1,
+        "ploidy": 2,
+        "genotype_model": "hwe",
+        "inbreeding_coefficient": "",
+        "individual_ids": "",
+        "individual_ids_specified": False,
+        "omit_if_blank": True,
+    }]
+    initial_populations_editor = mo.ui.data_editor(
+        initial_population_rows,
+        label="Cohortes iniciales (`omit_if_blank` permite omitir solo el borrador vacío)",
+        pagination=False,
+    )
+    direct_event_rows = [
+        {
+            "order": order,
+            "event_id": row.event_id,
+            "individual_id": row.individual_id,
+            "phase": row.phase,
+            "kind": row.kind,
+            "contig": row.contig,
+            "position_1based": row.position_1based or "",
+            "ref": row.reference or "",
+            "alt": row.alternate or "",
+            "point": row.point if row.point is not None else "",
+            "bases": row.bases or "",
+            "start": row.start if row.start is not None else "",
+            "end": row.end if row.end is not None else "",
+            "omit_if_blank": False,
+        }
+        for order, row in enumerate(imported_form.direct_events, start=1)
+    ] or [{
+        "order": 1,
+        "event_id": "",
+        "individual_id": "",
+        "phase": 0,
+        "kind": "snp",
+        "contig": "",
+        "position_1based": 1,
+        "ref": "A",
+        "alt": "G",
+        "point": "",
+        "bases": "",
+        "start": "",
+        "end": "",
+        "omit_if_blank": True,
+    }]
+    direct_events_editor = mo.ui.data_editor(
+        direct_event_rows,
+        label="Cambios directos (`omit_if_blank` permite omitir solo el borrador vacío; complete las columnas de kind)",
+        pagination=False,
+    )
     return (
         composition_controls,
         fasta_control,
@@ -224,6 +310,8 @@ def _(BASES, imported_form, mo):
         population_snvs_regions_editor,
         population_snvs_populations_editor,
         population_snvs_spectra_editor,
+        initial_populations_editor,
+        direct_events_editor,
         sequence_editor,
     )
 
@@ -231,6 +319,7 @@ def _(BASES, imported_form, mo):
 @app.cell
 def _(
     BASES,
+    authored_editor_rows,
     EditorError,
     GeneralForm,
     PopulationSnvsForm,
@@ -238,6 +327,8 @@ def _(
     ReferenceForm,
     SequenceRow,
     composition_controls,
+    direct_event_from_editor_row,
+    direct_events_editor,
     editor_integer,
     fasta_control,
     reduction_editor,
@@ -260,6 +351,8 @@ def _(
     population_snvs_regions_editor,
     population_snvs_populations_editor,
     population_snvs_spectra_editor,
+    initial_population_from_editor_row,
+    initial_populations_editor,
     seed_control,
     sequence_editor,
     ordered_editor_rows,
@@ -331,6 +424,24 @@ def _(
             )
             for row in ordered_reductions
         ]
+        active_initial_populations = authored_editor_rows(
+            initial_populations_editor.value, "population_id"
+        )
+        authored_initial_populations = [
+            initial_population_from_editor_row(row, f"initial_populations[{index}]")
+            for index, row in enumerate(
+                ordered_editor_rows(active_initial_populations, "initial_populations"), start=0
+            )
+        ]
+        active_direct_events = authored_editor_rows(
+            direct_events_editor.value, "event_id"
+        )
+        authored_direct_events = [
+            direct_event_from_editor_row(row, f"direct_events[{index}]")
+            for index, row in enumerate(
+                ordered_editor_rows(active_direct_events, "direct_events"), start=0
+            )
+        ]
         selected_kind = str(reference_kind_control.value)
         selected_population_mode = str(population_snvs_mode_control.value)
         population_snvs = (
@@ -368,6 +479,8 @@ def _(
             ),
             reduced_references=authored_reductions,
             population_snvs=population_snvs,
+            initial_populations=authored_initial_populations,
+            direct_events=authored_direct_events,
         )
         preview_toml = render_general_toml(edited_form)
     except (EditorError, KeyError, TypeError, ValueError) as error:
@@ -387,6 +500,10 @@ def _(DEFAULT_BINARY, PROJECT_ROOT, authoring_error, mo):
     allow_empty_snv_matrix_control = mo.ui.checkbox(
         value=False,
         label="Autorizar una matriz SNV activa vacía",
+    )
+    allow_incompatible_genotypes_control = mo.ui.checkbox(
+        value=False,
+        label="Autorizar genotipos explícitos incompatibles con el modelo",
     )
     binary_path_control = mo.ui.text(
         value=str(DEFAULT_BINARY),
@@ -411,6 +528,7 @@ def _(DEFAULT_BINARY, PROJECT_ROOT, authoring_error, mo):
     )
     return (
         allow_empty_snv_matrix_control,
+        allow_incompatible_genotypes_control,
         base_directory_control,
         binary_path_control,
         output_directory_control,
@@ -422,9 +540,12 @@ def _(DEFAULT_BINARY, PROJECT_ROOT, authoring_error, mo):
 def _(
     ProcessAdapterError,
     allow_empty_snv_matrix_control,
+    allow_incompatible_genotypes_control,
     authoring_toml,
     base_directory_control,
     binary_path_control,
+    direct_events_editor,
+    effective_incompatible_genotype_authorization,
     mo,
     validate_button,
     validate_toml,
@@ -436,12 +557,17 @@ def _(
     validated_session = None
     if validate_button.value:
         try:
+            _allow_incompatible_genotypes = effective_incompatible_genotype_authorization(
+                direct_events_editor.value,
+                allow_incompatible_genotypes_control.value,
+            )
             with mo.status.spinner(title="Validando con el binario Rust…"):
                 validation_result, validated_session = validate_toml(
                     _Path(binary_path_control.value),
                     authoring_toml,
                     _Path(base_directory_control.value),
                     allow_empty_snv_matrix=allow_empty_snv_matrix_control.value,
+                    allow_incompatible_genotypes=_allow_incompatible_genotypes,
                 )
         except ProcessAdapterError as error:
             validation_error = str(error)
@@ -463,9 +589,12 @@ def _(authoring_error, mo, validated_session):
 def _(
     ProcessAdapterError,
     allow_empty_snv_matrix_control,
+    allow_incompatible_genotypes_control,
     authoring_toml,
     base_directory_control,
     binary_path_control,
+    direct_events_editor,
+    effective_incompatible_genotype_authorization,
     mo,
     output_directory_control,
     run_button,
@@ -478,6 +607,10 @@ def _(
     run_result = None
     if run_button.value and validated_session is not None:
         try:
+            _allow_incompatible_genotypes = effective_incompatible_genotype_authorization(
+                direct_events_editor.value,
+                allow_incompatible_genotypes_control.value,
+            )
             with mo.status.spinner(title="Ejecutando el simulador local…"):
                 run_result = run_toml(
                     validated_session,
@@ -486,6 +619,7 @@ def _(
                     _Path(base_directory_control.value),
                     _Path(output_directory_control.value),
                     allow_empty_snv_matrix=allow_empty_snv_matrix_control.value,
+                    allow_incompatible_genotypes=_allow_incompatible_genotypes,
                 )
         except ProcessAdapterError as error:
             run_error = str(error)
@@ -495,15 +629,20 @@ def _(
 @app.cell
 def _(
     allow_empty_snv_matrix_control,
+    allow_incompatible_genotypes_control,
     authoring_error,
     authoring_toml,
     base_directory_control,
     binary_path_control,
     composition_controls,
     config_upload,
+    effective_incompatible_genotype_authorization,
     fasta_control,
     import_error,
     imported_name,
+    explicit_snp_authorization_summary,
+    initial_population_statistics_summary,
+    initial_populations_editor,
     individuals_panel,
     mo,
     output_directory_control,
@@ -531,6 +670,7 @@ def _(
     population_snvs_populations_editor,
     population_snvs_spectra_editor,
     sequence_editor,
+    direct_events_editor,
     validate_button,
     validation_error,
     validation_result,
@@ -657,6 +797,22 @@ def _(
         )
         if summary
     )
+    founders_summary = (
+        initial_population_statistics_summary(run_result.output_directory)
+        if run_result is not None and run_result.succeeded and run_result.output_directory is not None
+        else "El resumen F2.3.5 aparecerá tras una ejecución correcta."
+    )
+    incompatible_authorization = (
+        allow_incompatible_genotypes_control
+        if effective_incompatible_genotype_authorization(
+            direct_events_editor.value,
+            True,
+        )
+        else None
+    )
+    incompatible_authorization_summary = explicit_snp_authorization_summary(
+        direct_events_editor.value
+    )
     review_panel = mo.vstack(
         [
             mo.md("## Revisar y ejecutar"),
@@ -691,6 +847,13 @@ def _(
             validation_status,
             run_status,
             mo.ui.text_area(
+                value=founders_summary,
+                label="Resumen de fundadores F2.3.5 (sin cargar secuencias)",
+                rows=5,
+                disabled=True,
+                full_width=True,
+            ),
+            mo.ui.text_area(
                 value=localized_diagnostics,
                 label="Diagnósticos localizados por pestaña y campo",
                 rows=5,
@@ -710,7 +873,14 @@ def _(
         {
             "General/Ejecución": general_panel,
             "Genoma": genome_panel,
-            "Individuos": individuals_panel(mo, ploidy_control),
+            "Individuos": individuals_panel(
+                mo,
+                ploidy_control,
+                initial_populations_editor,
+                direct_events_editor,
+                incompatible_authorization,
+                incompatible_authorization_summary,
+            ),
             "Poblaciones": populations_panel,
             "Evolución": unavailable("F7"),
             "Familias": unavailable("F8"),

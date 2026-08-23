@@ -69,14 +69,17 @@ class UiContractTests(unittest.TestCase):
             "population_snvs_mode_control",
             "population_snvs_input_path_control",
             "population_snvs_metadata_path_control",
+            "initial_populations_editor",
+            "direct_events_editor",
+            "allow_incompatible_genotypes_control",
         ):
             with self.subTest(control=control):
                 self.assertIn(control, source)
         for future_option in (
             "scenario_id",
             "population_control",
-            "initial_populations",
-            "direct_events",
+            "haplotype_construction",
+            "recombination_probability_per_interbase",
         ):
             with self.subTest(future_option=future_option):
                 self.assertNotIn(future_option, source)
@@ -103,6 +106,7 @@ class UiContractTests(unittest.TestCase):
             "TOML general previsualizado",
             "Diagnósticos y logs del proceso",
             "Diagnósticos localizados por pestaña y campo",
+            "Resumen de fundadores F2.3.5 (sin cargar secuencias)",
         ):
             self.assertIn(f'label="{label}"', source)
         for textual_state in (
@@ -112,6 +116,19 @@ class UiContractTests(unittest.TestCase):
             "Ejecución completada.",
         ):
             self.assertIn(textual_state, source)
+
+    def test_individual_controls_are_limited_to_f2_3_binary_fields(self) -> None:
+        source = (ROOT / "ui" / "gps_app.py").read_text()
+        for field in (
+            "individual_count",
+            "genotype_model",
+            "inbreeding_coefficient",
+            "individual_ids",
+            "position_1based",
+            "--allow-incompatible-genotypes",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, source if field != "--allow-incompatible-genotypes" else (ROOT / "ui" / "process_adapter.py").read_text())
 
     def test_individuals_panel_contains_the_real_ploidy_control(self) -> None:
         mo = RecordingMo()

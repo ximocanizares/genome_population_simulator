@@ -92,6 +92,57 @@ fn population_snvs_link_is_discriminated_by_mode_in_rust_and_schema() {
 }
 
 #[test]
+fn initial_population_statistics_are_closed_in_rust_and_schema() {
+    let mut valid = complete_manifest();
+    valid["artifacts"].as_array_mut().expect("catalog").extend([
+        json!({"id":"population-snvs-tsv", "kind":"population_snvs_tsv", "path":"population_snvs.tsv", "size_bytes":1, "checksum":{"algorithm":"sha256", "digest":"b".repeat(64)}}),
+        json!({"id":"population-snvs-metadata", "kind":"population_snvs_metadata", "path":"population_snvs.metadata.json", "size_bytes":1, "checksum":{"algorithm":"sha256", "digest":"a".repeat(64)}}),
+    ]);
+    valid["output_categories"]["minimum"] = json!([
+        "config-general",
+        "effective-config",
+        "reference-fasta",
+        "population-snvs-tsv",
+        "population-snvs-metadata"
+    ]);
+    valid["population_snvs"] = json!({
+        "mode": "generated", "metadata_sha256": "a".repeat(64), "metadata_artifact_id": "population-snvs-metadata", "normalization_audit": [],
+        "initial_population_statistics": initial_population_statistics_fixture(),
+    });
+    assert_accepted("initial-population-statistics", &valid);
+
+    let mut too_few_algorithms = valid.clone();
+    too_few_algorithms["population_snvs"]["initial_population_statistics"]["provenance"]["genotype_algorithms"] =
+        json!(["hwe-composition-v1", "f-diploid-genotype-v1"]);
+    assert_rejected("statistics-require-three-algorithms", &too_few_algorithms);
+
+    let mut duplicate_population = valid.clone();
+    let population =
+        duplicate_population["population_snvs"]["initial_population_statistics"]["populations"][0]
+            .clone();
+    duplicate_population["population_snvs"]["initial_population_statistics"]["populations"]
+        .as_array_mut()
+        .expect("populations")
+        .push(population);
+    assert_rejected("statistics-duplicate-population", &duplicate_population);
+
+    let mut frequency_mismatch = valid.clone();
+    frequency_mismatch["population_snvs"]["initial_population_statistics"]["populations"][0]["loci"]
+        [0]["alleles"][0]["realized_frequency"] = json!(0.25);
+    let bytes = serde_json::to_vec(&frequency_mismatch).expect("manifest JSON");
+    assert!(
+        validate_general_manifest_bytes(Path::new("manifest.json"), &bytes).is_err(),
+        "Rust accepted an inconsistent frequency/count pair"
+    );
+    assert_external_bytes("statistics-frequency-count-mismatch", &bytes, true);
+
+    let mut invalid_f_model = valid;
+    invalid_f_model["population_snvs"]["initial_population_statistics"]["populations"][0]["genotype_model"] =
+        json!({"kind": "f_diploid", "inbreeding_coefficient": 1.1});
+    assert_rejected("statistics-f-model-out-of-range", &invalid_f_model);
+}
+
+#[test]
 fn duplicate_ids_paths_and_output_categories_are_rejected() {
     let mut duplicate_id = complete_manifest();
     duplicate_id["artifacts"][1]["id"] = duplicate_id["artifacts"][0]["id"].clone();
@@ -356,6 +407,37 @@ fn artifact(id: &str, kind: &str, path: &str) -> Value {
         "path": path,
         "size_bytes": 1,
         "checksum": {"algorithm": "sha256", "digest": "0".repeat(64)}
+    })
+}
+
+fn initial_population_statistics_fixture() -> Value {
+    json!({
+        "kind": "initial_population_statistics",
+        "version": "1",
+        "provenance": {
+            "matrix_reference_id": "ref",
+            "matrix_reference_fingerprint": "b".repeat(64),
+            "matrix_canonical_tsv_sha256": "c".repeat(64),
+            "genotype_algorithms": ["hwe-composition-v1", "f-diploid-genotype-v1", "phase-permutation-v1"],
+            "missing_locus_policy": "missing_by_deletion_excluded_from_allele_frequency_denominator_v1",
+            "explicit_snp_constraints": []
+        },
+        "populations": [{
+            "population_id": "P1", "genotype_model": {"kind": "hwe"}, "individual_count": 1, "ploidy": 2,
+            "loci": [{
+                "contig": "chr1", "position_1based": 1, "ref": "A", "total_copies": 2, "observed_copies": 2, "missing_by_deletion": 0,
+                "alleles": [
+                    {"allele": "A", "kind": "ref", "requested_frequency": 0.5, "realized_count": 1, "realized_frequency": 0.5},
+                    {"allele": "C", "kind": "alt", "variant_id": "v1", "source_id": "test", "requested_frequency": 0.5, "realized_count": 1, "realized_frequency": 0.5}
+                ],
+                "complete_genotype_observations": 1,
+                "genotypes": [
+                    {"allele_dosages": [2, 0], "expected_probability": 0.25, "expected_count": 0.25, "realized_count": 0},
+                    {"allele_dosages": [1, 1], "expected_probability": 0.5, "expected_count": 0.5, "realized_count": 1},
+                    {"allele_dosages": [0, 2], "expected_probability": 0.25, "expected_count": 0.25, "realized_count": 0}
+                ]
+            }]
+        }]
     })
 }
 

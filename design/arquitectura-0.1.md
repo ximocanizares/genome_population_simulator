@@ -844,6 +844,14 @@ efectiva/manifiesto y no relajan otras invariantes. La matriz conserva solo
 frecuencias marginales, por lo que los loci son independientes y cualquier LD
 requiere el panel de haplotipos posterior.
 
+F2.3.5 materializa bajo demanda cada copia ya integrada y conserva el estado
+segmentado como autoridad. El resumen por población×locus enlaza la huella de
+la matriz, el modelo y los algoritmos, separa objetivo y realización y no
+retroalimenta los genotipos. Una copia cuya deleción directa cubre el locus se
+cuenta como `missing_by_deletion`; REF/ALT usan `observed_copies` como
+denominador efectivo y los genotipos realizados solo incluyen observaciones
+completas.
+
 F2.3.4 admite `direct_events` únicamente como una vista tipada por individuo y
 fase: su adaptador resuelve ID, contig, alelos y coordenadas, y el orquestador
 prepara una vez la matriz, muestrea y fasea antes de construir estados lógicos

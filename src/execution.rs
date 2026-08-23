@@ -8,12 +8,11 @@ use crate::application::{EffectiveConfig, EffectiveDirectEvent, EffectiveReferen
 use crate::configuration::ExpectedConfigKind;
 use crate::coordinates::BasePosition;
 use crate::diagnostics::Diagnostic;
-use crate::haplotype::Individual;
 use crate::identity::{ReferenceId, derive_execution_id};
-use crate::initial_genotypes::{assign_initial_phases, sample_initial_genotypes};
-use crate::initial_individual_integration::{
-    IncompatibleGenotypeAuthorization, InitialIndividualIntegrationRequest,
-    integrate_initial_individual,
+use crate::initial_individual_integration::IncompatibleGenotypeAuthorization;
+use crate::initial_individual_materialization::{
+    InitialIndividualsMaterialization, InitialIndividualsMaterializationError,
+    materialize_initial_individuals,
 };
 use crate::integrity::{Sha256Writer, configuration_digest};
 use crate::materialization::SnpLocus;
@@ -114,7 +113,7 @@ fn execute_validated_config_with_effective_document(
     after_prepare_reference(&mut prepared_reference)?;
     // Todo error de dominio o preflight ocurre antes de crear el provisional y
     // antes de que exista cualquier RNG local de selección.
-    let prepared_population_snvs =
+    let prepared_execution =
         preflight_prepared_config(effective, authorizations, &prepared_reference)?;
     let configuration_digest = configuration_digest(effective.configuration_input().bytes())?;
     let execution_id = derive_execution_id(
@@ -150,10 +149,16 @@ fn execute_validated_config_with_effective_document(
             prepared_reference,
         )?;
         population_snvs = publish_prepared_population_snvs(
-            prepared_population_snvs.as_ref(),
+            prepared_execution.population_snvs.as_ref(),
             source_artifact,
             &mut workspace,
         )?;
+        if let (Some(link), Some(initial_individuals)) = (
+            &mut population_snvs,
+            &prepared_execution.initial_individuals,
+        ) {
+            link.initial_population_statistics = Some(initial_individuals.statistics().clone());
+        }
         // A partir de aquí la copia recargada es la única autoridad para
         // seleccionar intervalos y materializar bases derivadas.
         let prepared_reductions = prepare_reductions(effective, prepared_reference.reference())?;
@@ -315,11 +320,11 @@ fn preflight_prepared_config(
     effective: &EffectiveConfig,
     authorizations: ExecutionAuthorizations,
     prepared_reference: &PreparedReference,
-) -> Result<Option<PreparedPopulationSnvsForExecution>, Diagnostic> {
+) -> Result<PreparedExecution, Diagnostic> {
     preflight_reductions(effective, prepared_reference.reference())?;
     let prepared_population_snvs =
         prepare_population_snvs_for_execution(effective, authorizations, prepared_reference)?;
-    preflight_initial_individuals(
+    let initial_individuals = preflight_initial_individuals(
         effective,
         prepared_reference.reference(),
         prepared_population_snvs
@@ -327,7 +332,10 @@ fn preflight_prepared_config(
             .map(|prepared| &prepared.matrix),
         authorizations,
     )?;
-    Ok(prepared_population_snvs)
+    Ok(PreparedExecution {
+        population_snvs: prepared_population_snvs,
+        initial_individuals,
+    })
 }
 
 fn publish_controlled_failure(
@@ -373,6 +381,11 @@ fn publish_controlled_failure(
 struct PreparedPopulationSnvsForExecution {
     matrix: crate::population_snvs::PreparedPopulationSnvs,
     publication: PopulationSnvsPublication,
+}
+
+struct PreparedExecution {
+    population_snvs: Option<PreparedPopulationSnvsForExecution>,
+    initial_individuals: Option<InitialIndividualsMaterialization>,
 }
 
 enum PopulationSnvsPublication {
@@ -481,6 +494,7 @@ fn publish_prepared_population_snvs(
             metadata_sha256: metadata_sha256.clone(),
             metadata_artifact_id: None,
             normalization_audit: normalization_audit.clone(),
+            initial_population_statistics: None,
         })),
     }
 }
@@ -500,17 +514,17 @@ fn prepared_reference_fasta_digest(
     }
 }
 
-/// Recorre la ruta F2.3.2 → F2.3.3 → F2.3.4 antes de abrir el workspace.
-/// El resultado lógico se descarta intencionadamente: F2.3.4 valida e integra
-/// copias, pero no publica individuos ni materializa sus secuencias.
+/// Recorre F2.3.2–F2.3.5 antes de abrir el workspace: integra cada fundador,
+/// materializa sus copias bajo demanda y deriva el resumen sin alterar matriz ni
+/// genotipos. `validate` descarta el resultado; `run` solo publica su resumen.
 fn preflight_initial_individuals(
     effective: &EffectiveConfig,
     reference: &Reference,
     matrix: Option<&crate::population_snvs::PreparedPopulationSnvs>,
     authorizations: ExecutionAuthorizations,
-) -> Result<(), Diagnostic> {
-    if effective.direct_events().is_empty() {
-        return Ok(());
+) -> Result<Option<InitialIndividualsMaterialization>, Diagnostic> {
+    if effective.initial_populations().is_empty() {
+        return Ok(None);
     }
     let matrix = matrix.ok_or_else(|| {
         initial_individual_error(
@@ -518,49 +532,34 @@ fn preflight_initial_individuals(
             "la matriz SNV falta después de la validación efectiva",
         )
     })?;
-    let compositions = sample_initial_genotypes(effective, reference, matrix)
-        .map_err(|error| initial_individual_error("initial_genotypes", error.to_string()))?;
-    let phased = assign_initial_phases(effective.reproducibility().root_seed(), &compositions)
-        .map_err(|error| initial_individual_error("initial_phases", error.to_string()))?;
-    for population in effective.initial_populations() {
-        for individual_id in population.individual_ids() {
-            let explicit_events = effective
+    let authorization = if authorizations.allow_incompatible_genotypes {
+        IncompatibleGenotypeAuthorization::allowed()
+    } else {
+        IncompatibleGenotypeAuthorization::denied()
+    };
+    materialize_initial_individuals(
+        effective,
+        reference,
+        matrix,
+        authorization,
+        |individual_id| {
+            effective
                 .direct_events()
                 .iter()
                 .filter(|event| event.individual_id() == individual_id)
-                .map(|event| declared_small_event(event, reference))
-                .collect::<Result<Vec<_>, _>>()?;
-            if explicit_events.is_empty() {
-                continue;
-            }
-            let individual =
-                Individual::from_reference(individual_id.clone(), reference, population.ploidy());
-            let phased_for_individual = phased.for_individual(individual_id);
-            let authorization = if authorizations.allow_incompatible_genotypes {
-                IncompatibleGenotypeAuthorization::allowed()
-            } else {
-                IncompatibleGenotypeAuthorization::denied()
-            };
-            integrate_initial_individual(
-                &individual,
-                reference,
-                InitialIndividualIntegrationRequest::new(
-                    matrix,
-                    &phased_for_individual,
-                    effective.reproducibility().root_seed(),
-                    &explicit_events,
-                    &[],
-                    authorization,
-                    population.genotype_model(),
-                ),
-            )
-            .map_err(|error| initial_individual_error("direct_events", error.to_string()))?;
-        }
-    }
-    Ok(())
+                .map(|event| {
+                    declared_small_event(event, reference).map_err(|error| {
+                        InitialIndividualsMaterializationError::Sampling(error.render_human())
+                    })
+                })
+                .collect()
+        },
+    )
+    .map(Some)
+    .map_err(|error| initial_individual_error("initial_individuals", error.to_string()))
 }
 
-fn declared_small_event(
+pub(crate) fn declared_small_event(
     event: &EffectiveDirectEvent,
     reference: &Reference,
 ) -> Result<DeclaredSmallEvent, Diagnostic> {
@@ -672,6 +671,7 @@ fn publish_population_snvs(
         metadata_sha256: metadata.digest.clone(),
         metadata_artifact_id: Some(metadata.id),
         normalization_audit: normalization_audit_document(prepared),
+        initial_population_statistics: None,
     })
 }
 

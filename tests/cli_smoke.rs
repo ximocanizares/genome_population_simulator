@@ -257,5 +257,12 @@ length = 4
     )
     .expect("JSON");
     assert_eq!(effective["direct_events"][0]["event_id"], "force-g");
+    let statistics = &effective["population_snvs"]["initial_population_statistics"];
+    assert_eq!(statistics["kind"], "initial_population_statistics");
+    assert!(
+        statistics["populations"][0]["loci"][0]["observed_copies"]
+            .as_u64()
+            .is_some()
+    );
     fs::remove_dir_all(root).expect("cleanup");
 }

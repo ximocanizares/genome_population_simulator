@@ -60,6 +60,82 @@ fn population_snvs_effective_link_is_discriminated_by_mode() {
 }
 
 #[test]
+fn initial_population_statistics_schema_is_closed_and_typed() {
+    let mut valid = effective_config("simulated", false);
+    valid["initial_populations"] = json!([{
+        "population_id": "P1", "individual_count": 1, "individual_ids": ["I1"], "ploidy": 2,
+        "genotype_model": {"kind": "hwe"}
+    }]);
+    valid["population_snvs"] = json!({
+        "mode": "reuse",
+        "metadata_sha256": "a".repeat(64),
+        "normalization_audit": [],
+        "initial_population_statistics": initial_population_statistics_fixture(),
+    });
+    assert_valid("initial-population-statistics", &valid);
+
+    let mut missing_statistics = valid.clone();
+    missing_statistics["population_snvs"]
+        .as_object_mut()
+        .expect("population SNVs")
+        .remove("initial_population_statistics");
+    assert_invalid(
+        "initial-populations-require-initial-statistics",
+        &missing_statistics,
+    );
+
+    let cases = [
+        (
+            "statistics-unknown-provenance",
+            "/population_snvs/initial_population_statistics/provenance/future",
+            json!(true),
+        ),
+        (
+            "statistics-invalid-fingerprint",
+            "/population_snvs/initial_population_statistics/provenance/matrix_reference_fingerprint",
+            json!("A".repeat(64)),
+        ),
+        (
+            "statistics-invalid-missing-policy",
+            "/population_snvs/initial_population_statistics/provenance/missing_locus_policy",
+            json!("future"),
+        ),
+        (
+            "statistics-alt-without-source",
+            "/population_snvs/initial_population_statistics/populations/0/loci/0/alleles/1/source_id",
+            Value::Null,
+        ),
+        (
+            "statistics-invalid-dosage",
+            "/population_snvs/initial_population_statistics/populations/0/loci/0/genotypes/0/allele_dosages/0",
+            json!(-1),
+        ),
+        (
+            "statistics-too-few-algorithms",
+            "/population_snvs/initial_population_statistics/provenance/genotype_algorithms",
+            json!(["hwe-composition-v1", "f-diploid-genotype-v1"]),
+        ),
+    ];
+    for (name, pointer, replacement) in cases {
+        let mut invalid = valid.clone();
+        if name == "statistics-unknown-provenance" {
+            invalid["population_snvs"]["initial_population_statistics"]["provenance"]["future"] =
+                replacement;
+        } else if replacement.is_null() {
+            let (parent, field) = pointer.rsplit_once('/').expect("field pointer");
+            invalid
+                .pointer_mut(parent)
+                .and_then(Value::as_object_mut)
+                .expect("parent object")
+                .remove(field);
+        } else {
+            *invalid.pointer_mut(pointer).expect("fixture pointer") = replacement;
+        }
+        assert_invalid(name, &invalid);
+    }
+}
+
+#[test]
 fn effective_initial_population_schema_enforces_local_bounds_and_f_diploidy() {
     let schema: Value =
         serde_json::from_str(include_str!("../schemas/effective-config-v1.schema.json"))
@@ -79,6 +155,7 @@ fn effective_initial_population_schema_enforces_local_bounds_and_f_diploidy() {
         "ploidy": 2,
         "genotype_model": {"kind": "f_diploid", "inbreeding_coefficient": 0.25}
     }]);
+    add_initial_population_statistics(&mut valid);
     assert_valid("effective-initial-population-valid", &valid);
 
     let mut empty_ids = valid.clone();
@@ -254,6 +331,7 @@ fn initial_populations_publish_only_resolved_ids_and_validated_hwe_or_f_models()
             "genotype_model": {"kind": "f_diploid", "inbreeding_coefficient": 0.5}
         }
     ]);
+    add_initial_population_statistics(&mut document);
     assert_valid("initial-populations", &document);
 
     let mut wrong_f_ploidy = document.clone();
@@ -374,6 +452,46 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
         "reduced_references": reductions,
         "initial_populations": []
     })
+}
+
+fn initial_population_statistics_fixture() -> Value {
+    json!({
+        "kind": "initial_population_statistics",
+        "version": "1",
+        "provenance": {
+            "matrix_reference_id": "main",
+            "matrix_reference_fingerprint": "b".repeat(64),
+            "matrix_canonical_tsv_sha256": "c".repeat(64),
+            "genotype_algorithms": ["hwe-composition-v1", "f-diploid-genotype-v1", "phase-permutation-v1"],
+            "missing_locus_policy": "missing_by_deletion_excluded_from_allele_frequency_denominator_v1",
+            "explicit_snp_constraints": []
+        },
+        "populations": [{
+            "population_id": "P1", "genotype_model": {"kind": "hwe"}, "individual_count": 1, "ploidy": 2,
+            "loci": [{
+                "contig": "chr1", "position_1based": 1, "ref": "A", "total_copies": 2, "observed_copies": 2, "missing_by_deletion": 0,
+                "alleles": [
+                    {"allele": "A", "kind": "ref", "requested_frequency": 0.5, "realized_count": 1, "realized_frequency": 0.5},
+                    {"allele": "C", "kind": "alt", "variant_id": "v1", "source_id": "test", "requested_frequency": 0.5, "realized_count": 1, "realized_frequency": 0.5}
+                ],
+                "complete_genotype_observations": 1,
+                "genotypes": [
+                    {"allele_dosages": [2, 0], "expected_probability": 0.25, "expected_count": 0.25, "realized_count": 0},
+                    {"allele_dosages": [1, 1], "expected_probability": 0.5, "expected_count": 0.5, "realized_count": 1},
+                    {"allele_dosages": [0, 2], "expected_probability": 0.25, "expected_count": 0.25, "realized_count": 0}
+                ]
+            }]
+        }]
+    })
+}
+
+fn add_initial_population_statistics(document: &mut Value) {
+    document["population_snvs"] = json!({
+        "mode": "reuse",
+        "metadata_sha256": "a".repeat(64),
+        "normalization_audit": [],
+        "initial_population_statistics": initial_population_statistics_fixture(),
+    });
 }
 
 fn assert_valid(name: &str, document: &Value) {

@@ -8,7 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ui"))
 
 from config_editor import (  # noqa: E402
+    DirectEventRow,
     EditorError,
+    InitialPopulationRow,
+    default_form,
     editor_integer,
     ordered_editor_rows,
     parse_general_toml,
@@ -132,6 +135,52 @@ max_alt_af = 0.9''',
                 with self.assertRaises(EditorError) as raised:
                     parse_general_toml(source)
                 self.assertEqual(raised.exception.path, f"population_snvs.{field}")
+
+    def test_initial_populations_and_all_direct_event_branches_round_trip(self) -> None:
+        form = default_form()
+        form.initial_populations = [
+            InitialPopulationRow("P1", 2, 2, "f_diploid", "0.25", ["sample-A", "sample-B"]),
+            InitialPopulationRow("P2", 1, 4, "hwe", None, None),
+        ]
+        form.direct_events = [
+            DirectEventRow("event-snp", "sample-A", 0, "snp", "chr1", 1, "A", "G"),
+            DirectEventRow("event-insertion", "sample-A", 1, "insertion", "chr1", point=1, bases="AC"),
+            DirectEventRow("event-deletion", "sample-B", 0, "deletion", "chr1", start=0, end=1),
+        ]
+
+        rendered = render_general_toml(form)
+
+        self.assertEqual(parse_general_toml(rendered), form)
+        self.assertIn('individual_ids = ["sample-A", "sample-B"]', rendered)
+        self.assertIn('kind = "insertion"', rendered)
+        self.assertIn('kind = "deletion"', rendered)
+
+    def test_initial_population_ploidy_type_error_keeps_its_indexed_path(self) -> None:
+        source = """config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "simulated"
+id = "reference-main"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 10
+[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+ploidy = "2"
+genotype_model = "hwe"
+"""
+
+        with self.assertRaises(EditorError) as raised:
+            parse_general_toml(source)
+
+        self.assertEqual(raised.exception.path, "initial_populations[0].ploidy")
 
     def test_future_and_branch_incompatible_fields_are_visible_errors(self) -> None:
         minimal = (ROOT / "tests" / "fixtures" / "config" / "general-minimal.toml").read_text()

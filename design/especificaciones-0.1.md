@@ -1661,6 +1661,11 @@ expansión frente a contracción, pero no el tamaño del salto.
   los genotipos esperados y realizados. La variación por tamaño finito debe
   informarse y no corregirse modificando genotipos ya sorteados.
 
+  Si una deleción directa elimina el locus en una copia, esa copia debe figurar
+  separadamente como ausente por deleción. Los recuentos y frecuencias REF/ALT
+  realizadas usan solo las copias que conservan la coordenada; el resumen debe
+  declarar tanto el denominador efectivo como el número total de copias.
+
 El espectro de frecuencias alélicas es una tabla versionada de componentes no
 solapados. Cada componente es un valor `fixed` de `[0,1]` o un intervalo
 `[min_af,max_af)` con peso y muestreo `linear_uniform` o `log_uniform`; se

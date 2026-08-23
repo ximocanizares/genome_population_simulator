@@ -1,4 +1,4 @@
-"""Modelo de autoría F1 para Marimo, sin semántica biológica propia."""
+"""Modelo de autoría F2 para Marimo, sin semántica biológica propia."""
 
 from __future__ import annotations
 
@@ -58,6 +58,32 @@ class PopulationSnvsForm:
 
 
 @dataclass(eq=True)
+class InitialPopulationRow:
+    population_id: str
+    individual_count: int
+    ploidy: int
+    genotype_model: str
+    inbreeding_coefficient: str | None
+    individual_ids: list[str] | None
+
+
+@dataclass(eq=True)
+class DirectEventRow:
+    event_id: str
+    individual_id: str
+    phase: int
+    kind: str
+    contig: str
+    position_1based: int | None = None
+    reference: str | None = None
+    alternate: str | None = None
+    point: int | None = None
+    bases: str | None = None
+    start: int | None = None
+    end: int | None = None
+
+
+@dataclass(eq=True)
 class GeneralForm:
     seed: str | None
     ploidy: int
@@ -65,6 +91,8 @@ class GeneralForm:
     reference: ReferenceForm
     reduced_references: list[ReductionRow]
     population_snvs: PopulationSnvsForm | None
+    initial_populations: list[InitialPopulationRow]
+    direct_events: list[DirectEventRow]
 
 
 def default_form() -> GeneralForm:
@@ -81,6 +109,8 @@ def default_form() -> GeneralForm:
         ),
         reduced_references=[],
         population_snvs=None,
+        initial_populations=[],
+        direct_events=[],
     )
 
 
@@ -135,6 +165,56 @@ def population_snvs_population_from_editor_row(
     return population
 
 
+def initial_population_from_editor_row(row: Mapping[str, Any], path: str) -> InitialPopulationRow:
+    """Turn one editor row into TOML-shaped data without biological validation."""
+    genotype_model = str(row.get("genotype_model", "hwe"))
+    coefficient = str(row.get("inbreeding_coefficient", "")).strip()
+    ids_text = str(row.get("individual_ids", "")).strip()
+    individual_ids = [item.strip() for item in ids_text.split(",")] if ids_text else None
+    if individual_ids is not None and any(not item for item in individual_ids):
+        raise EditorError(f"{path}.individual_ids", "contiene un ID vacío")
+    return InitialPopulationRow(
+        population_id=str(row.get("population_id", "")).strip(),
+        individual_count=editor_integer(row.get("individual_count"), f"{path}.individual_count"),
+        ploidy=editor_integer(row.get("ploidy"), f"{path}.ploidy"),
+        genotype_model=genotype_model,
+        inbreeding_coefficient=coefficient or None,
+        individual_ids=individual_ids,
+    )
+
+
+def direct_event_from_editor_row(row: Mapping[str, Any], path: str) -> DirectEventRow:
+    """Turn one explicit-event editor row into its selected TOML branch."""
+    kind = str(row.get("kind", ""))
+    common = {
+        "event_id": str(row.get("event_id", "")).strip(),
+        "individual_id": str(row.get("individual_id", "")).strip(),
+        "phase": editor_integer(row.get("phase"), f"{path}.phase"),
+        "kind": kind,
+        "contig": str(row.get("contig", "")).strip(),
+    }
+    if kind == "snp":
+        return DirectEventRow(
+            **common,
+            position_1based=editor_integer(row.get("position_1based"), f"{path}.position_1based"),
+            reference=str(row.get("ref", "")).strip(),
+            alternate=str(row.get("alt", "")).strip(),
+        )
+    if kind == "insertion":
+        return DirectEventRow(
+            **common,
+            point=editor_integer(row.get("point"), f"{path}.point"),
+            bases=str(row.get("bases", "")).strip(),
+        )
+    if kind == "deletion":
+        return DirectEventRow(
+            **common,
+            start=editor_integer(row.get("start"), f"{path}.start"),
+            end=editor_integer(row.get("end"), f"{path}.end"),
+        )
+    raise EditorError(f"{path}.kind", "debe ser snp, insertion o deletion")
+
+
 def parse_general_toml(text: str) -> GeneralForm:
     try:
         document = tomlkit.parse(text)
@@ -152,6 +232,8 @@ def parse_general_toml(text: str) -> GeneralForm:
             "reference",
             "reduced_references",
             "population_snvs",
+            "initial_populations",
+            "direct_events",
         },
         required={"config_kind", "schema_version", "reference"},
         path="document",
@@ -178,8 +260,17 @@ def parse_general_toml(text: str) -> GeneralForm:
         if "population_snvs" in document
         else None
     )
+    initial_populations = _parse_initial_populations(document.get("initial_populations", []))
+    direct_events = _parse_direct_events(document.get("direct_events", []))
     return GeneralForm(
-        seed, ploidy, normalization_tolerance, reference, reductions, population_snvs
+        seed,
+        ploidy,
+        normalization_tolerance,
+        reference,
+        reductions,
+        population_snvs,
+        initial_populations,
+        direct_events,
     )
 
 
@@ -211,6 +302,101 @@ def _parse_population_snvs(table: Mapping[str, Any]) -> PopulationSnvsForm:
         generate = _mapping(table.get("generate"), "population_snvs.generate")
         return PopulationSnvsForm(mode, None, None, dict(generate))
     raise EditorError("population_snvs.mode", "debe ser supplied, reuse o generate")
+
+
+def _parse_initial_populations(value: Any) -> list[InitialPopulationRow]:
+    populations: list[InitialPopulationRow] = []
+    for index, value_row in enumerate(_sequence(value, "initial_populations")):
+        path = f"initial_populations[{index}]"
+        row = _mapping(value_row, path)
+        _keys(
+            row,
+            allowed={
+                "population_id",
+                "individual_count",
+                "ploidy",
+                "genotype_model",
+                "inbreeding_coefficient",
+                "individual_ids",
+            },
+            required={"population_id", "individual_count", "ploidy", "genotype_model"},
+            path=path,
+        )
+        model = _string(row["genotype_model"], f"{path}.genotype_model")
+        coefficient = (
+            _number_literal(row["inbreeding_coefficient"], f"{path}.inbreeding_coefficient")
+            if "inbreeding_coefficient" in row
+            else None
+        )
+        if model == "hwe" and coefficient is not None:
+            raise EditorError(f"{path}.inbreeding_coefficient", "hwe no admite inbreeding_coefficient")
+        if model == "f_diploid" and coefficient is None:
+            raise EditorError(f"{path}.inbreeding_coefficient", "f_diploid exige inbreeding_coefficient")
+        if model not in {"hwe", "f_diploid"}:
+            raise EditorError(f"{path}.genotype_model", "debe ser hwe o f_diploid")
+        ids = (
+            [_string(item, f"{path}.individual_ids") for item in _sequence(row["individual_ids"], f"{path}.individual_ids")]
+            if "individual_ids" in row
+            else None
+        )
+        if ids is not None and not ids:
+            raise EditorError(f"{path}.individual_ids", "no puede estar vacío")
+        populations.append(
+            InitialPopulationRow(
+                _string(row["population_id"], f"{path}.population_id"),
+                _positive_u64(row["individual_count"], f"{path}.individual_count"),
+                _ploidy(row["ploidy"], f"{path}.ploidy"),
+                model,
+                coefficient,
+                ids,
+            )
+        )
+    return populations
+
+
+def _parse_direct_events(value: Any) -> list[DirectEventRow]:
+    events: list[DirectEventRow] = []
+    common = {"event_id", "individual_id", "phase", "kind", "contig"}
+    fields_by_kind = {
+        "snp": {"position_1based", "ref", "alt"},
+        "insertion": {"point", "bases"},
+        "deletion": {"start", "end"},
+    }
+    for index, value_row in enumerate(_sequence(value, "direct_events")):
+        path = f"direct_events[{index}]"
+        row = _mapping(value_row, path)
+        kind = _string(row.get("kind"), f"{path}.kind")
+        branch = fields_by_kind.get(kind)
+        if branch is None:
+            raise EditorError(f"{path}.kind", "debe ser snp, insertion o deletion")
+        _keys(row, allowed=common | branch, required=common | branch, path=path)
+        common_values = {
+            "event_id": _string(row["event_id"], f"{path}.event_id"),
+            "individual_id": _string(row["individual_id"], f"{path}.individual_id"),
+            "phase": _non_negative_u64(row["phase"], f"{path}.phase"),
+            "kind": kind,
+            "contig": _string(row["contig"], f"{path}.contig"),
+        }
+        if kind == "snp":
+            events.append(DirectEventRow(
+                **common_values,
+                position_1based=_positive_u64(row["position_1based"], f"{path}.position_1based"),
+                reference=_string(row["ref"], f"{path}.ref"),
+                alternate=_string(row["alt"], f"{path}.alt"),
+            ))
+        elif kind == "insertion":
+            events.append(DirectEventRow(
+                **common_values,
+                point=_non_negative_u64(row["point"], f"{path}.point"),
+                bases=_string(row["bases"], f"{path}.bases"),
+            ))
+        else:
+            events.append(DirectEventRow(
+                **common_values,
+                start=_non_negative_u64(row["start"], f"{path}.start"),
+                end=_non_negative_u64(row["end"], f"{path}.end"),
+            ))
+    return events
 
 
 def _parse_reference(table: Mapping[str, Any], path: str) -> ReferenceForm:
@@ -451,6 +637,57 @@ def render_general_toml(form: GeneralForm) -> str:
                 "population_snvs.mode", "debe ser supplied, reuse o generate"
             )
         document.add("population_snvs", table)
+    if form.initial_populations:
+        populations = tomlkit.aot()
+        for index, population in enumerate(form.initial_populations):
+            path = f"initial_populations[{index}]"
+            row = tomlkit.table()
+            row.add("population_id", population.population_id)
+            row.add(
+                "individual_count",
+                _checked_positive_u64(population.individual_count, f"{path}.individual_count"),
+            )
+            row.add("ploidy", _checked_ploidy(population.ploidy, f"{path}.ploidy"))
+            if population.genotype_model not in {"hwe", "f_diploid"}:
+                raise EditorError(f"{path}.genotype_model", "debe ser hwe o f_diploid")
+            row.add("genotype_model", population.genotype_model)
+            if population.genotype_model == "f_diploid":
+                row.add(
+                    "inbreeding_coefficient",
+                    _literal_item(population.inbreeding_coefficient, f"{path}.inbreeding_coefficient"),
+                )
+            elif population.inbreeding_coefficient is not None:
+                raise EditorError(f"{path}.inbreeding_coefficient", "hwe no admite inbreeding_coefficient")
+            if population.individual_ids is not None:
+                if not population.individual_ids:
+                    raise EditorError(f"{path}.individual_ids", "no puede estar vacío")
+                row.add("individual_ids", population.individual_ids)
+            populations.append(row)
+        document.add("initial_populations", populations)
+    if form.direct_events:
+        events = tomlkit.aot()
+        for index, event in enumerate(form.direct_events):
+            path = f"direct_events[{index}]"
+            row = tomlkit.table()
+            row.add("event_id", event.event_id)
+            row.add("individual_id", event.individual_id)
+            row.add("phase", _checked_non_negative_u64(event.phase, f"{path}.phase"))
+            row.add("kind", event.kind)
+            row.add("contig", event.contig)
+            if event.kind == "snp":
+                row.add("position_1based", _checked_positive_u64(event.position_1based, f"{path}.position_1based"))
+                row.add("ref", _required_text(event.reference, f"{path}.ref"))
+                row.add("alt", _required_text(event.alternate, f"{path}.alt"))
+            elif event.kind == "insertion":
+                row.add("point", _checked_non_negative_u64(event.point, f"{path}.point"))
+                row.add("bases", _required_text(event.bases, f"{path}.bases"))
+            elif event.kind == "deletion":
+                row.add("start", _checked_non_negative_u64(event.start, f"{path}.start"))
+                row.add("end", _checked_non_negative_u64(event.end, f"{path}.end"))
+            else:
+                raise EditorError(f"{path}.kind", "debe ser snp, insertion o deletion")
+            events.append(row)
+        document.add("direct_events", events)
     return tomlkit.dumps(document)
 
 
@@ -507,15 +744,39 @@ def _positive_u64(value: Any, path: str) -> int:
     return _checked_positive_u64(int(value), path)
 
 
-def _ploidy(value: Any) -> int:
+def _ploidy(value: Any, path: str = "ploidy") -> int:
     if isinstance(value, bool) or not isinstance(value, (Integer, int)):
-        raise EditorError("ploidy", "se esperaba un entero")
+        raise EditorError(path, "se esperaba un entero")
     return int(value)
 
 
 def _checked_positive_u64(value: int, path: str) -> int:
     if isinstance(value, bool) or not 1 <= value <= U64_MAX:
         raise EditorError(path, "debe pertenecer a 1..=u64::MAX")
+    return value
+
+
+def _non_negative_u64(value: Any, path: str) -> int:
+    if not isinstance(value, Integer):
+        raise EditorError(path, "se esperaba un entero")
+    return _checked_non_negative_u64(int(value), path)
+
+
+def _checked_non_negative_u64(value: int | None, path: str) -> int:
+    if isinstance(value, bool) or value is None or not 0 <= value <= U64_MAX:
+        raise EditorError(path, "debe pertenecer a 0..=u64::MAX")
+    return value
+
+
+def _checked_ploidy(value: int, path: str) -> int:
+    if isinstance(value, bool) or not 1 <= value <= 10:
+        raise EditorError(path, "debe pertenecer a 1..=10")
+    return value
+
+
+def _required_text(value: str | None, path: str) -> str:
+    if value is None:
+        raise EditorError(path, "falta el texto")
     return value
 
 

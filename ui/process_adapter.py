@@ -40,15 +40,22 @@ class ValidatedSession:
     binary_version: str
     base_directory: Path
     allow_empty_snv_matrix: bool = False
+    allow_incompatible_genotypes: bool = False
 
     def matches(
-        self, toml: str, binary: Path, base_directory: Path, allow_empty_snv_matrix: bool = False
+        self,
+        toml: str,
+        binary: Path,
+        base_directory: Path,
+        allow_empty_snv_matrix: bool = False,
+        allow_incompatible_genotypes: bool = False,
     ) -> bool:
         return (
             self.toml == toml
             and self.binary == binary.resolve()
             and self.base_directory == base_directory.resolve()
             and self.allow_empty_snv_matrix == allow_empty_snv_matrix
+            and self.allow_incompatible_genotypes == allow_incompatible_genotypes
         )
 
 
@@ -74,19 +81,35 @@ def check_binary_version(binary: Path) -> tuple[Path, str]:
 
 
 def validate_toml(
-    binary: Path, toml: str, base_directory: Path, *, allow_empty_snv_matrix: bool = False
+    binary: Path,
+    toml: str,
+    base_directory: Path,
+    *,
+    allow_empty_snv_matrix: bool = False,
+    allow_incompatible_genotypes: bool = False,
 ) -> tuple[ProcessResult, ValidatedSession | None]:
     resolved_binary, version = check_binary_version(binary)
     resolved_base = _base_directory(base_directory)
     result = _invoke(
         resolved_binary,
-        ["validate", *(["--allow-empty-snv-matrix"] if allow_empty_snv_matrix else [])],
+        [
+            "validate",
+            *(["--allow-empty-snv-matrix"] if allow_empty_snv_matrix else []),
+            *(["--allow-incompatible-genotypes"] if allow_incompatible_genotypes else []),
+        ],
         toml,
         resolved_base,
         output_directory=None,
     )
     session = (
-        ValidatedSession(toml, resolved_binary, version, resolved_base, allow_empty_snv_matrix)
+        ValidatedSession(
+            toml,
+            resolved_binary,
+            version,
+            resolved_base,
+            allow_empty_snv_matrix,
+            allow_incompatible_genotypes,
+        )
         if result.succeeded
         else None
     )
@@ -101,8 +124,15 @@ def run_toml(
     output_directory: Path,
     *,
     allow_empty_snv_matrix: bool = False,
+    allow_incompatible_genotypes: bool = False,
 ) -> ProcessResult:
-    if not session.matches(toml, binary, base_directory, allow_empty_snv_matrix):
+    if not session.matches(
+        toml,
+        binary,
+        base_directory,
+        allow_empty_snv_matrix,
+        allow_incompatible_genotypes,
+    ):
         raise ProcessAdapterError("la configuración cambió después de validar")
     declared_destination = output_directory.expanduser()
     destination = (
@@ -114,7 +144,11 @@ def run_toml(
         raise ProcessAdapterError(f"el destino ya existe: {destination}")
     return _invoke(
         session.binary,
-        ["run", *(["--allow-empty-snv-matrix"] if allow_empty_snv_matrix else [])],
+        [
+            "run",
+            *(["--allow-empty-snv-matrix"] if allow_empty_snv_matrix else []),
+            *(["--allow-incompatible-genotypes"] if allow_incompatible_genotypes else []),
+        ],
         toml,
         session.base_directory,
         output_directory=destination,
@@ -210,6 +244,10 @@ def diagnostic_summary(document: dict[str, Any] | None) -> str:
             else "Poblaciones"
             if field_text == "normalization_tolerance"
             or field_text.startswith("population_snvs.")
+            else "Individuos"
+            if field_text.startswith("initial_populations")
+            or field_text.startswith("direct_events")
+            or field_text.startswith("initial_individuals")
             else "Genoma"
         )
         location = context.get("location")
@@ -219,3 +257,52 @@ def diagnostic_summary(document: dict[str, Any] | None) -> str:
             f"{item.get('code', 'diagnóstico')}: {item.get('message', '')}"
         )
     return "\n".join(lines)
+
+
+def initial_population_statistics_summary(output_directory: Path) -> str:
+    """Read only a bounded effective-config JSON summary, never genome artifacts."""
+    effective_config = output_directory / "effective-config.json"
+    maximum_bytes = 2_000_000
+    try:
+        if effective_config.stat().st_size > maximum_bytes:
+            return (
+                "El resumen de fundadores no se cargó porque effective-config.json "
+                "supera 2 MB; los artefactos genómicos no se abren desde Marimo."
+            )
+        with effective_config.open("rb") as source:
+            document = json.loads(source.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return f"No se pudo leer el resumen de fundadores publicado: {error}"
+    if not isinstance(document, dict):
+        return "La configuración efectiva publicada no es un objeto JSON."
+    population_snvs = document.get("population_snvs")
+    if not isinstance(population_snvs, dict):
+        return "La ejecución no publicó estadísticas de fundadores F2.3.5."
+    statistics = population_snvs.get("initial_population_statistics")
+    if not isinstance(statistics, dict):
+        return "La ejecución no publicó estadísticas de fundadores F2.3.5."
+    populations = statistics.get("populations")
+    if not isinstance(populations, list):
+        return "El resumen de fundadores publicado no tiene poblaciones legibles."
+    lines = []
+    for population in populations[:20]:
+        if not isinstance(population, dict):
+            continue
+        genotype_model = population.get("genotype_model", "?")
+        if isinstance(genotype_model, dict):
+            genotype_model = genotype_model.get("kind", "?")
+        lines.append(
+            "{population_id}: N={individual_count}, ploidía={ploidy}, "
+            "modelo={genotype_model}, loci={loci}".format(
+                population_id=population.get("population_id", "?"),
+                individual_count=population.get("individual_count", "?"),
+                ploidy=population.get("ploidy", "?"),
+                genotype_model=genotype_model,
+                loci=len(population.get("loci", []))
+                if isinstance(population.get("loci"), list)
+                else "?",
+            )
+        )
+    if len(populations) > 20:
+        lines.append(f"… y {len(populations) - 20} poblaciones más.")
+    return "\n".join(lines) or "No hay poblaciones iniciales en el resumen F2.3.5."

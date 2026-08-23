@@ -320,6 +320,41 @@ fn direct_events_must_match_the_typed_toml_resolution_exactly() {
             *effective.pointer_mut(pointer).expect(label) = replacement;
         });
     }
+    assert_physical_rejection(
+        "initial-statistics-realized-count",
+        config.clone(),
+        |_root, effective, manifest| {
+            let count = effective["population_snvs"]["initial_population_statistics"]
+                ["populations"][0]["loci"][0]["genotypes"][0]["expected_count"]
+                .as_f64()
+                .expect("expected count");
+            effective["population_snvs"]["initial_population_statistics"]["populations"][0]["loci"]
+                [0]["genotypes"][0]["expected_count"] = json!(count + 1.0);
+            manifest["population_snvs"]["initial_population_statistics"] =
+                effective["population_snvs"]["initial_population_statistics"].clone();
+        },
+    );
+    assert_physical_rejection(
+        "initial-populations-must-match-toml-exactly",
+        config.clone(),
+        |_root, effective, _manifest| {
+            effective["initial_populations"][0]["individual_ids"][0] = json!("I2");
+        },
+    );
+    assert_physical_rejection(
+        "initial-populations-require-statistics",
+        config.clone(),
+        |_root, effective, manifest| {
+            effective["population_snvs"]
+                .as_object_mut()
+                .expect("effective population SNVs")
+                .remove("initial_population_statistics");
+            manifest["population_snvs"]
+                .as_object_mut()
+                .expect("manifest population SNVs")
+                .remove("initial_population_statistics");
+        },
+    );
     assert_physical_rejection("direct-class", config, |_root, effective, _manifest| {
         effective["direct_events"][0] = json!({
             "event_id": "event-1",
@@ -331,6 +366,45 @@ fn direct_events_must_match_the_typed_toml_resolution_exactly() {
             "end": 2,
         });
     });
+    fs::remove_dir_all(fixture_root).expect("fixture cleanup");
+}
+
+#[test]
+fn hostile_genotype_dosage_overflow_is_a_controlled_revalidation_error() {
+    let fixture_root = temporary("hostile-dosage-fixture");
+    fs::create_dir(&fixture_root).expect("fixture root");
+    let config = write_direct_events_fixture(&fixture_root);
+    let destination = temporary("hostile-dosage-result");
+    let effective_config = load_and_validate_config(&config).expect("valid fixture");
+    execute_validated_config(&effective_config, &destination).expect("complete baseline");
+
+    let effective_path = destination.join("effective-config.json");
+    let manifest_path = destination.join("manifest.json");
+    let mut effective = read_json(&effective_path);
+    let mut manifest = read_json(&manifest_path);
+    effective["population_snvs"]["initial_population_statistics"]["populations"][0]["loci"][0]["genotypes"]
+        [0]["allele_dosages"] = json!([u64::MAX, 3]);
+    manifest["population_snvs"]["initial_population_statistics"] =
+        effective["population_snvs"]["initial_population_statistics"].clone();
+    write_json(&effective_path, &effective);
+    refresh_artifact(&destination, &mut manifest, "effective-config");
+    write_json(&manifest_path, &manifest);
+
+    let effective_bytes = fs::read(&effective_path).expect("effective bytes");
+    let manifest_bytes = fs::read(&manifest_path).expect("manifest bytes");
+    assert!(
+        validate_published_resources(
+            &destination,
+            &effective_path,
+            &effective_bytes,
+            &manifest_path,
+            &manifest_bytes,
+        )
+        .is_err(),
+        "la revalidación no debe aceptar ni desbordar con dosis hostiles"
+    );
+
+    fs::remove_dir_all(destination).expect("result cleanup");
     fs::remove_dir_all(fixture_root).expect("fixture cleanup");
 }
 

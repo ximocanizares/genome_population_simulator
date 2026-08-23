@@ -14,11 +14,19 @@ use crate::application::{
 };
 use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
+use crate::execution::declared_small_event;
 use crate::identity::{
     EventId, IndividualId, PopulationId, ReferenceId, SequenceId, derive_execution_id,
 };
+use crate::initial_individual_integration::IncompatibleGenotypeAuthorization;
+use crate::initial_individual_materialization::{
+    InitialIndividualsMaterializationError, materialize_initial_individuals,
+};
 use crate::integrity::{ArtifactIdentity, configuration_digest, identify_file};
-use crate::population_snvs::validate_reusable_population_snvs_bytes;
+use crate::population_snvs::{
+    PreparedPopulationSnvs, validate_reusable_population_snvs,
+    validate_reusable_population_snvs_bytes,
+};
 use crate::randomness::{EntropySource, RootSeed, RuntimeSubseedScope, derive_subseed};
 use crate::reference::{
     AlphabetValidation, Reference, ReferenceOrigin, ReferenceSequence, ReversibleText,
@@ -192,6 +200,7 @@ pub struct PopulationSnvsManifestLink {
     pub metadata_sha256: String,
     pub metadata_artifact_id: Option<String>,
     pub normalization_audit: Value,
+    pub initial_population_statistics: Option<Value>,
 }
 
 pub struct GeneralManifest<'a> {
@@ -240,23 +249,33 @@ pub fn effective_config_document_with_reductions(
         },
         "reference": reference_json(config, output, composition),
         "reduced_references": reductions.iter().map(reduction_json).collect::<Vec<_>>(),
-        "initial_populations": config.initial_populations().iter().map(|population| {
-            let genotype_model = match population.genotype_model() {
-                EffectiveInitialGenotypeModel::HardyWeinberg => json!({"kind": "hwe"}),
-                EffectiveInitialGenotypeModel::FDiploid { inbreeding_coefficient } => {
-                    json!({"kind": "f_diploid", "inbreeding_coefficient": inbreeding_coefficient})
-                }
-            };
-            json!({
-                "population_id": population.population_id().as_str(),
-                "individual_count": population.individual_count(),
-                "individual_ids": population.individual_ids().iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-                "ploidy": population.ploidy().copy_count(),
-                "genotype_model": genotype_model,
-            })
-        }).collect::<Vec<_>>(),
+        "initial_populations": effective_initial_populations_json(config),
         "direct_events": config.direct_events().iter().map(direct_event_json).collect::<Vec<_>>(),
     }))
+}
+
+fn effective_initial_populations_json(config: &EffectiveConfig) -> Value {
+    Value::Array(
+        config
+            .initial_populations()
+            .iter()
+            .map(|population| {
+                let genotype_model = match population.genotype_model() {
+                    EffectiveInitialGenotypeModel::HardyWeinberg => json!({"kind": "hwe"}),
+                    EffectiveInitialGenotypeModel::FDiploid {
+                        inbreeding_coefficient,
+                    } => json!({"kind": "f_diploid", "inbreeding_coefficient": inbreeding_coefficient}),
+                };
+                json!({
+                    "population_id": population.population_id().as_str(),
+                    "individual_count": population.individual_count(),
+                    "individual_ids": population.individual_ids().iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+                    "ploidy": population.ploidy().copy_count(),
+                    "genotype_model": genotype_model,
+                })
+            })
+            .collect(),
+    )
 }
 
 fn direct_event_json(event: &EffectiveDirectEvent) -> Value {
@@ -326,14 +345,7 @@ pub fn effective_config_document_with_population_snvs(
     );
     object.insert(
         "population_snvs".to_owned(),
-        population_snvs.map_or(Value::Null, |link| {
-            json!({
-                "mode": link.mode,
-                "metadata_sha256": link.metadata_sha256,
-                "metadata_artifact_id": link.metadata_artifact_id,
-                "normalization_audit": link.normalization_audit.clone(),
-            })
-        }),
+        population_snvs.map_or(Value::Null, population_snvs_link_json),
     );
     Ok(document)
 }
@@ -353,12 +365,7 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
         "effective_config_artifact_id": manifest.effective_config.map(|artifact| artifact.id.as_str()),
         "references": manifest.references.iter().map(manifest_reference_json).collect::<Vec<_>>(),
         "reference_reductions": manifest.reduced_references.iter().map(manifest_reduction_json).collect::<Vec<_>>(),
-        "population_snvs": manifest.population_snvs.map(|link| json!({
-            "mode": link.mode,
-            "metadata_sha256": link.metadata_sha256,
-            "metadata_artifact_id": link.metadata_artifact_id,
-            "normalization_audit": link.normalization_audit.clone(),
-        })),
+        "population_snvs": manifest.population_snvs.map(population_snvs_link_json),
         "authorizations": {
             "allow_empty_snv_matrix": manifest.authorizations.allow_empty_snv_matrix,
             "allow_incompatible_genotypes": manifest.authorizations.allow_incompatible_genotypes,
@@ -370,6 +377,28 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
             "message": diagnostic.message(),
         })).collect::<Vec<_>>(),
     })
+}
+
+fn population_snvs_link_json(link: &PopulationSnvsManifestLink) -> Value {
+    let mut object = serde_json::Map::from_iter([
+        ("mode".to_owned(), json!(link.mode)),
+        ("metadata_sha256".to_owned(), json!(link.metadata_sha256)),
+        (
+            "metadata_artifact_id".to_owned(),
+            json!(link.metadata_artifact_id),
+        ),
+        (
+            "normalization_audit".to_owned(),
+            link.normalization_audit.clone(),
+        ),
+    ]);
+    if let Some(statistics) = &link.initial_population_statistics {
+        object.insert(
+            "initial_population_statistics".to_owned(),
+            statistics.clone(),
+        );
+    }
+    Value::Object(object)
 }
 
 pub fn write_json_document(
@@ -750,7 +779,7 @@ pub fn validate_published_resources(
     let effective = effective
         .as_object()
         .ok_or_else(|| effective_error(effective_path, "la raíz no es objeto"))?;
-    validate_effective_targets_against_configuration(
+    let physical_config = validate_effective_targets_against_configuration(
         root,
         effective,
         &artifact_paths,
@@ -773,13 +802,21 @@ pub fn validate_published_resources(
         .and_then(|value| value.get("allow_empty_snv_matrix"))
         .and_then(Value::as_bool)
         .ok_or_else(|| effective_error(effective_path, "authorizations inválido"))?;
-    validate_physical_population_snvs(
+    let matrix = validate_physical_population_snvs(
         root,
         effective,
+        &physical_config,
         &artifacts,
         &source_reference,
         effective_path,
         allow_empty_snv_matrix,
+    )?;
+    validate_physical_initial_population_statistics(
+        effective,
+        &physical_config,
+        &source_reference,
+        matrix.as_ref(),
+        effective_path,
     )?;
     if reference_value.get("source").and_then(Value::as_str) == Some("simulated") {
         validate_generated_reference(
@@ -928,16 +965,57 @@ pub fn validate_published_resources(
 fn validate_physical_population_snvs(
     root: &Path,
     effective: &serde_json::Map<String, Value>,
+    physical_config: &EffectiveConfig,
     artifacts: &[ArtifactRecord],
     reference: &Reference,
     effective_path: &Path,
     allow_empty_snv_matrix: bool,
-) -> Result<(), Diagnostic> {
+) -> Result<Option<PreparedPopulationSnvs>, Diagnostic> {
     let Some(link) = effective.get("population_snvs").and_then(Value::as_object) else {
-        return Ok(());
+        return Ok(None);
     };
     if link.get("mode").and_then(Value::as_str) == Some("reuse") {
-        return Ok(());
+        let crate::application::EffectivePopulationSnvs::Reuse { metadata_path } =
+            physical_config.population_snvs().ok_or_else(|| {
+                effective_error(effective_path, "reutilización SNV sin fuente física")
+            })?
+        else {
+            return Err(effective_error(
+                effective_path,
+                "modo SNV efectivo no coincide con reutilización",
+            ));
+        };
+        let reference_id = effective_object(effective, "reference", effective_path)?
+            .get("fasta_artifact_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| effective_error(effective_path, "referencia sin artefacto FASTA"))?;
+        let reference_artifact = artifacts
+            .iter()
+            .find(|artifact| artifact.id == reference_id)
+            .ok_or_else(|| effective_error(effective_path, "FASTA SNV ausente del catálogo"))?;
+        let (prepared, _, metadata_sha256, normalization_audit) =
+            validate_reusable_population_snvs(
+                metadata_path,
+                reference,
+                &reference_artifact.digest,
+                physical_config.normalization().tolerance(),
+                allow_empty_snv_matrix,
+            )
+            .map_err(|error| {
+                effective_error(
+                    effective_path,
+                    format!("reuso SNV físico inválido: {error}"),
+                )
+            })?;
+        if link.get("metadata_sha256").and_then(Value::as_str) != Some(metadata_sha256.as_str())
+            || link.get("normalization_audit") != Some(&normalization_audit)
+        {
+            return Err(effective_error(
+                effective_path,
+                "enlace SNV reutilizado no coincide con el recurso físico",
+            ));
+        }
+        return Ok(Some(prepared));
     }
     let metadata_id = link
         .get("metadata_artifact_id")
@@ -963,7 +1041,7 @@ fn validate_physical_population_snvs(
     let matrix_path = root.join(&matrix.path);
     let metadata_bytes = read_verified_artifact_bytes(&metadata_path, metadata, effective_path)?;
     let matrix_bytes = read_verified_artifact_bytes(&matrix_path, matrix, effective_path)?;
-    let (_, provenance, metadata_sha256, normalization_audit) =
+    let (prepared, provenance, metadata_sha256, normalization_audit) =
         validate_reusable_population_snvs_bytes(
             &metadata_bytes,
             &matrix_bytes,
@@ -988,6 +1066,78 @@ fn validate_physical_population_snvs(
         return Err(effective_error(
             effective_path,
             "enlace population_snvs no coincide con el par físico",
+        ));
+    }
+    Ok(Some(prepared))
+}
+
+fn validate_physical_initial_population_statistics(
+    effective: &serde_json::Map<String, Value>,
+    physical_config: &EffectiveConfig,
+    reference: &Reference,
+    matrix: Option<&PreparedPopulationSnvs>,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    let declared = effective
+        .get("population_snvs")
+        .and_then(Value::as_object)
+        .and_then(|link| link.get("initial_population_statistics"));
+    if physical_config.initial_populations().is_empty() {
+        if declared.is_some() {
+            return Err(effective_error(
+                effective_path,
+                "hay estadísticas iniciales sin poblaciones iniciales",
+            ));
+        }
+        return Ok(());
+    }
+    let matrix = matrix.ok_or_else(|| {
+        effective_error(
+            effective_path,
+            "faltan matriz y estadísticas para poblaciones iniciales",
+        )
+    })?;
+    let authorizations = effective
+        .get("authorizations")
+        .and_then(Value::as_object)
+        .ok_or_else(|| effective_error(effective_path, "authorizations inválido"))?;
+    let authorization = if authorizations
+        .get("allow_incompatible_genotypes")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| effective_error(effective_path, "allow_incompatible_genotypes inválido"))?
+    {
+        IncompatibleGenotypeAuthorization::allowed()
+    } else {
+        IncompatibleGenotypeAuthorization::denied()
+    };
+    let rebuilt = materialize_initial_individuals(
+        physical_config,
+        reference,
+        matrix,
+        authorization,
+        |individual_id| {
+            physical_config
+                .direct_events()
+                .iter()
+                .filter(|event| event.individual_id() == individual_id)
+                .map(|event| {
+                    declared_small_event(event, reference).map_err(|error| {
+                        InitialIndividualsMaterializationError::Sampling(error.render_human())
+                    })
+                })
+                .collect()
+        },
+    )
+    .map_err(|error| {
+        effective_error(
+            effective_path,
+            format!("estadísticas iniciales no reconstruibles: {error}"),
+        )
+    })?;
+    if declared != Some(rebuilt.statistics()) {
+        return Err(effective_error(
+            effective_path,
+            "estadísticas iniciales no coinciden con matriz, semilla y eventos físicos",
         ));
     }
     Ok(())
@@ -1019,7 +1169,7 @@ fn validate_effective_targets_against_configuration(
     manifest_path: &Path,
     manifest_bytes: &[u8],
     effective_path: &Path,
-) -> Result<(), Diagnostic> {
+) -> Result<EffectiveConfig, Diagnostic> {
     let manifest: Value = serde_json::from_slice(manifest_bytes)
         .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
     let configuration_id = manifest["configuration_input"]["artifact_id"]
@@ -1082,6 +1232,13 @@ fn validate_effective_targets_against_configuration(
         return Err(effective_error(
             effective_path,
             "la ploidía efectiva no coincide con la declaración TOML",
+        ));
+    }
+    if effective.get("initial_populations") != Some(&effective_initial_populations_json(&expected))
+    {
+        return Err(effective_error(
+            effective_path,
+            "las cohortes iniciales efectivas no coinciden exactamente con el TOML",
         ));
     }
     let normalization = effective_object(effective, "normalization", effective_path)?;
@@ -1219,7 +1376,7 @@ fn validate_effective_targets_against_configuration(
             "direct_events efectivo no coincide exactamente con el TOML resuelto",
         ));
     }
-    Ok(())
+    Ok(expected)
 }
 
 struct ReplayEntropy(RootSeed);
@@ -1680,13 +1837,19 @@ fn validate_manifest_population_snvs(
     let object = value
         .as_object()
         .ok_or_else(|| manifest_error(path, "population_snvs inválido"))?;
-    const FIELDS: [&str; 4] = [
+    const FIELDS: [&str; 5] = [
         "mode",
         "metadata_sha256",
         "metadata_artifact_id",
         "normalization_audit",
+        "initial_population_statistics",
     ];
-    validate_closed_object(object, &FIELDS, "population_snvs", path)?;
+    let fields = if object.contains_key("initial_population_statistics") {
+        &FIELDS[..]
+    } else {
+        &FIELDS[..4]
+    };
+    validate_closed_object(object, fields, "population_snvs", path)?;
     let mode = match object.get("mode").and_then(Value::as_str) {
         Some(mode @ ("supplied" | "generated" | "reuse")) => mode,
         _ => return Err(manifest_error(path, "population_snvs.mode inválido")),
@@ -1707,6 +1870,10 @@ fn validate_manifest_population_snvs(
         "population_snvs.normalization_audit inválida",
     )
     .map_err(|detail| manifest_error(path, detail))?;
+    if let Some(statistics) = object.get("initial_population_statistics") {
+        validate_initial_population_statistics(statistics)
+            .map_err(|detail| manifest_error(path, detail))?;
+    }
     match (mode, object.get("metadata_artifact_id")) {
         ("reuse", None | Some(Value::Null)) => Ok(None),
         ("supplied" | "generated", Some(Value::String(id))) if !id.is_empty() => {
@@ -1718,6 +1885,482 @@ fn validate_manifest_population_snvs(
             "population_snvs.metadata_artifact_id inválido",
         )),
     }
+}
+
+fn validate_initial_population_statistics(value: &Value) -> Result<(), &'static str> {
+    let object = value
+        .as_object()
+        .ok_or("estadísticas iniciales inválidas")?;
+    const FIELDS: [&str; 4] = ["kind", "version", "provenance", "populations"];
+    if object.len() != FIELDS.len() || object.keys().any(|field| !FIELDS.contains(&field.as_str()))
+    {
+        return Err("estadísticas iniciales inválidas");
+    }
+    if object.get("kind").and_then(Value::as_str) != Some("initial_population_statistics")
+        || object.get("version").and_then(Value::as_str) != Some("1")
+    {
+        return Err("estadísticas iniciales inválidas");
+    }
+    let provenance = object
+        .get("provenance")
+        .and_then(Value::as_object)
+        .ok_or("procedencia de estadísticas iniciales inválida")?;
+    validate_initial_population_statistics_provenance(provenance)?;
+    let populations = object
+        .get("populations")
+        .and_then(Value::as_array)
+        .ok_or("estadísticas iniciales inválidas")?;
+    if populations.is_empty() {
+        return Err("estadísticas iniciales sin poblaciones");
+    }
+    let mut population_ids = BTreeSet::new();
+    for population in populations {
+        validate_initial_population_statistics_population(population)?;
+        let population_id = population
+            .get("population_id")
+            .and_then(Value::as_str)
+            .ok_or("población estadística inválida")?;
+        if !population_ids.insert(population_id) {
+            return Err("población estadística repetida");
+        }
+    }
+    Ok(())
+}
+
+fn validate_initial_population_statistics_provenance(
+    provenance: &serde_json::Map<String, Value>,
+) -> Result<(), &'static str> {
+    const FIELDS: [&str; 6] = [
+        "matrix_reference_id",
+        "matrix_reference_fingerprint",
+        "matrix_canonical_tsv_sha256",
+        "genotype_algorithms",
+        "missing_locus_policy",
+        "explicit_snp_constraints",
+    ];
+    if provenance.len() != FIELDS.len()
+        || provenance
+            .keys()
+            .any(|field| !FIELDS.contains(&field.as_str()))
+    {
+        return Err("procedencia de estadísticas iniciales inválida");
+    }
+    let reference_id = provenance
+        .get("matrix_reference_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty());
+    if reference_id.is_none()
+        || !valid_lower_sha256(provenance.get("matrix_reference_fingerprint"))
+        || !valid_lower_sha256(provenance.get("matrix_canonical_tsv_sha256"))
+        || provenance
+            .get("missing_locus_policy")
+            .and_then(Value::as_str)
+            != Some("missing_by_deletion_excluded_from_allele_frequency_denominator_v1")
+    {
+        return Err("procedencia de estadísticas iniciales inválida");
+    }
+    let algorithms = provenance
+        .get("genotype_algorithms")
+        .and_then(Value::as_array)
+        .ok_or("algoritmos de genotipo inválidos")?;
+    if algorithms.len() != 3
+        || algorithms[0].as_str() != Some("hwe-composition-v1")
+        || algorithms[1].as_str() != Some("f-diploid-genotype-v1")
+        || algorithms[2].as_str() != Some("phase-permutation-v1")
+    {
+        return Err("algoritmos de genotipo inválidos");
+    }
+    let constraints = provenance
+        .get("explicit_snp_constraints")
+        .and_then(Value::as_array)
+        .ok_or("restricciones SNV explícitas inválidas")?;
+    let mut constraint_ids = BTreeSet::new();
+    for constraint in constraints {
+        let constraint = constraint
+            .as_object()
+            .ok_or("restricción SNV explícita inválida")?;
+        const CONSTRAINT_FIELDS: [&str; 8] = [
+            "population_id",
+            "individual_id",
+            "event_id",
+            "phase",
+            "matrix_variant_id",
+            "sampled_alternate",
+            "explicit_alternate",
+            "incompatible",
+        ];
+        if constraint.len() != CONSTRAINT_FIELDS.len()
+            || constraint
+                .keys()
+                .any(|field| !CONSTRAINT_FIELDS.contains(&field.as_str()))
+            || ![
+                "population_id",
+                "individual_id",
+                "event_id",
+                "matrix_variant_id",
+            ]
+            .iter()
+            .all(|field| {
+                constraint
+                    .get(*field)
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.is_empty())
+            })
+            || !matches!(constraint.get("phase").and_then(Value::as_u64), Some(0..=9))
+            || !constraint.get("sampled_alternate").is_some_and(|value| {
+                value.is_null() || value.as_str().is_some_and(is_canonical_base_text)
+            })
+            || !constraint
+                .get("explicit_alternate")
+                .and_then(Value::as_str)
+                .is_some_and(is_canonical_base_text)
+            || !constraint
+                .get("incompatible")
+                .is_some_and(Value::is_boolean)
+        {
+            return Err("restricción SNV explícita inválida");
+        }
+        let key = (
+            constraint["population_id"].as_str().unwrap_or_default(),
+            constraint["individual_id"].as_str().unwrap_or_default(),
+            constraint["event_id"].as_str().unwrap_or_default(),
+        );
+        if !constraint_ids.insert(key) {
+            return Err("restricción SNV explícita repetida");
+        }
+    }
+    Ok(())
+}
+
+fn validate_initial_population_statistics_population(value: &Value) -> Result<(), &'static str> {
+    let population = value.as_object().ok_or("población estadística inválida")?;
+    const FIELDS: [&str; 5] = [
+        "population_id",
+        "genotype_model",
+        "individual_count",
+        "ploidy",
+        "loci",
+    ];
+    if population.len() != FIELDS.len()
+        || population.keys().any(|key| !FIELDS.contains(&key.as_str()))
+    {
+        return Err("población estadística inválida");
+    }
+    let population_id = population
+        .get("population_id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty());
+    let individual_count = population.get("individual_count").and_then(Value::as_u64);
+    let ploidy = population.get("ploidy").and_then(Value::as_u64);
+    if population_id.is_none()
+        || individual_count == Some(0)
+        || individual_count.is_none()
+        || !matches!(ploidy, Some(1..=10))
+    {
+        return Err("población estadística inválida");
+    }
+    validate_initial_population_statistics_model(
+        population
+            .get("genotype_model")
+            .and_then(Value::as_object)
+            .ok_or("modelo genotípico estadístico inválido")?,
+        ploidy.unwrap_or_default(),
+    )?;
+    let loci = population
+        .get("loci")
+        .and_then(Value::as_array)
+        .ok_or("loci estadísticos inválidos")?;
+    let mut locus_keys = BTreeSet::new();
+    for locus in loci {
+        validate_initial_population_statistics_locus(
+            locus,
+            individual_count.unwrap_or_default(),
+            ploidy.unwrap_or_default(),
+        )?;
+        let key = (
+            locus
+                .get("contig")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            locus
+                .get("position_1based")
+                .and_then(Value::as_u64)
+                .unwrap_or_default(),
+            locus.get("ref").and_then(Value::as_str).unwrap_or_default(),
+        );
+        if !locus_keys.insert(key) {
+            return Err("locus estadístico repetido");
+        }
+    }
+    Ok(())
+}
+
+fn validate_initial_population_statistics_model(
+    model: &serde_json::Map<String, Value>,
+    ploidy: u64,
+) -> Result<(), &'static str> {
+    let kind = model.get("kind").and_then(Value::as_str);
+    match kind {
+        Some("hwe") if model.len() == 1 => Ok(()),
+        Some("f_diploid")
+            if ploidy == 2
+                && model.len() == 2
+                && model
+                    .get("inbreeding_coefficient")
+                    .and_then(Value::as_f64)
+                    .is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value)) =>
+        {
+            Ok(())
+        }
+        _ => Err("modelo genotípico estadístico inválido"),
+    }
+}
+
+fn validate_initial_population_statistics_locus(
+    value: &Value,
+    individual_count: u64,
+    ploidy: u64,
+) -> Result<(), &'static str> {
+    let locus = value.as_object().ok_or("locus estadístico inválido")?;
+    const FIELDS: [&str; 9] = [
+        "contig",
+        "position_1based",
+        "ref",
+        "total_copies",
+        "observed_copies",
+        "missing_by_deletion",
+        "alleles",
+        "complete_genotype_observations",
+        "genotypes",
+    ];
+    if locus.len() != FIELDS.len() || locus.keys().any(|key| !FIELDS.contains(&key.as_str())) {
+        return Err("locus estadístico inválido");
+    }
+    if !locus
+        .get("contig")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.is_empty())
+        || !matches!(
+            locus.get("position_1based").and_then(Value::as_u64),
+            Some(1..)
+        )
+        || !locus
+            .get("ref")
+            .and_then(Value::as_str)
+            .is_some_and(is_canonical_base_text)
+    {
+        return Err("locus estadístico inválido");
+    }
+    let total = locus
+        .get("total_copies")
+        .and_then(Value::as_u64)
+        .ok_or("total de copias inválido")?;
+    let observed = locus
+        .get("observed_copies")
+        .and_then(Value::as_u64)
+        .ok_or("copias observadas inválidas")?;
+    let missing = locus
+        .get("missing_by_deletion")
+        .and_then(Value::as_u64)
+        .ok_or("copias ausentes inválidas")?;
+    if total
+        != individual_count
+            .checked_mul(ploidy)
+            .ok_or("total de copias inválido")?
+        || observed.checked_add(missing) != Some(total)
+    {
+        return Err("las copias observadas y ausentes no suman el total");
+    }
+    let alleles = locus
+        .get("alleles")
+        .and_then(Value::as_array)
+        .ok_or("alelos estadísticos inválidos")?;
+    if alleles.len() < 2 {
+        return Err("alelos estadísticos inválidos");
+    }
+    let reference = locus.get("ref").and_then(Value::as_str).unwrap_or_default();
+    let mut allele_texts = BTreeSet::new();
+    let mut count_sum = 0_u64;
+    let mut requested_sum = 0.0;
+    for (index, allele) in alleles.iter().enumerate() {
+        let allele = allele.as_object().ok_or("alelo estadístico inválido")?;
+        const REF_FIELDS: [&str; 5] = [
+            "allele",
+            "kind",
+            "requested_frequency",
+            "realized_count",
+            "realized_frequency",
+        ];
+        const ALT_FIELDS: [&str; 7] = [
+            "allele",
+            "kind",
+            "variant_id",
+            "source_id",
+            "requested_frequency",
+            "realized_count",
+            "realized_frequency",
+        ];
+        let kind = allele.get("kind").and_then(Value::as_str);
+        let fields = match kind {
+            Some("ref") if index == 0 => &REF_FIELDS[..],
+            Some("alt") if index > 0 => &ALT_FIELDS[..],
+            _ => return Err("clase u orden de alelo estadístico inválido"),
+        };
+        if allele.len() != fields.len()
+            || allele.keys().any(|field| !fields.contains(&field.as_str()))
+        {
+            return Err("alelo estadístico inválido");
+        }
+        let allele_text = allele
+            .get("allele")
+            .and_then(Value::as_str)
+            .filter(|value| is_canonical_base_text(value))
+            .ok_or("alelo estadístico inválido")?;
+        if !allele_texts.insert(allele_text) || (index == 0 && allele_text != reference) {
+            return Err("alelo estadístico duplicado o referencia incoherente");
+        }
+        if index > 0
+            && (!allele
+                .get("variant_id")
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+                || allele.get("source_id").and_then(Value::as_str).is_none())
+        {
+            return Err("procedencia de alelo alternativo inválida");
+        }
+        let count = allele
+            .get("realized_count")
+            .and_then(Value::as_u64)
+            .ok_or("recuento alélico inválido")?;
+        let requested = allele
+            .get("requested_frequency")
+            .and_then(Value::as_f64)
+            .ok_or("frecuencia objetivo inválida")?;
+        let realized = allele
+            .get("realized_frequency")
+            .and_then(Value::as_f64)
+            .ok_or("frecuencia realizada inválida")?;
+        if !requested.is_finite()
+            || !realized.is_finite()
+            || !(0.0..=1.0).contains(&requested)
+            || !(0.0..=1.0).contains(&realized)
+        {
+            return Err("frecuencia estadística no finita o fuera de rango");
+        }
+        let expected_realized = if observed == 0 {
+            0.0
+        } else {
+            count as f64 / observed as f64
+        };
+        if realized.to_bits() != expected_realized.to_bits() {
+            return Err("frecuencia realizada no coincide con recuento y denominador");
+        }
+        requested_sum += requested;
+        count_sum = count_sum
+            .checked_add(count)
+            .ok_or("recuento alélico desbordado")?;
+    }
+    if count_sum != observed {
+        return Err("los recuentos alélicos no suman las copias observadas");
+    }
+    if !requested_sum.is_finite() || (requested_sum - 1.0).abs() > 1e-12 {
+        return Err("las frecuencias objetivo no suman uno");
+    }
+    let complete = locus
+        .get("complete_genotype_observations")
+        .and_then(Value::as_u64)
+        .ok_or("observaciones genotípicas inválidas")?;
+    if complete > individual_count {
+        return Err("observaciones genotípicas fuera de rango");
+    }
+    let genotypes = locus
+        .get("genotypes")
+        .and_then(Value::as_array)
+        .ok_or("genotipos estadísticos inválidos")?;
+    if genotypes.is_empty() {
+        return Err("genotipos estadísticos inválidos");
+    }
+    let mut genotype_keys = BTreeSet::new();
+    let mut expected_probability_sum = 0.0;
+    let mut realized_genotype_sum = 0_u64;
+    for genotype in genotypes {
+        let genotype = genotype
+            .as_object()
+            .ok_or("genotipo estadístico inválido")?;
+        const GENOTYPE_FIELDS: [&str; 4] = [
+            "allele_dosages",
+            "expected_probability",
+            "expected_count",
+            "realized_count",
+        ];
+        if genotype.len() != GENOTYPE_FIELDS.len()
+            || genotype
+                .keys()
+                .any(|field| !GENOTYPE_FIELDS.contains(&field.as_str()))
+        {
+            return Err("genotipo estadístico inválido");
+        }
+        let dosages = genotype
+            .get("allele_dosages")
+            .and_then(Value::as_array)
+            .ok_or("dosis genotípicas inválidas")?;
+        let dosages = dosages
+            .iter()
+            .map(Value::as_u64)
+            .collect::<Option<Vec<_>>>()
+            .ok_or("dosis genotípicas inválidas")?;
+        let dosage_sum = dosages.iter().try_fold(0_u64, |sum, dosage| {
+            sum.checked_add(*dosage)
+                .ok_or("dosis genotípicas desbordadas")
+        })?;
+        if dosages.len() != alleles.len() || dosage_sum != ploidy || !genotype_keys.insert(dosages)
+        {
+            return Err("dosis genotípicas inválidas o repetidas");
+        }
+        let probability = genotype
+            .get("expected_probability")
+            .and_then(Value::as_f64)
+            .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+            .ok_or("probabilidad genotípica inválida")?;
+        genotype
+            .get("expected_count")
+            .and_then(Value::as_f64)
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .ok_or("recuento genotípico esperado inválido")?;
+        // El recuento esperado se conserva como una magnitud de salida. Su
+        // correspondencia exacta con la probabilidad y la población se vuelve
+        // a calcular desde TOML, semilla y matriz en la puerta física; aquí se
+        // valida sólo su representación cerrada y finita para no confundir el
+        // contrato de esquema con ese oráculo independiente.
+        let realized = genotype
+            .get("realized_count")
+            .and_then(Value::as_u64)
+            .ok_or("recuento genotípico realizado inválido")?;
+        expected_probability_sum += probability;
+        realized_genotype_sum = realized_genotype_sum
+            .checked_add(realized)
+            .ok_or("recuento genotípico realizado desbordado")?;
+    }
+    if !expected_probability_sum.is_finite() || (expected_probability_sum - 1.0).abs() > 1e-12 {
+        return Err("probabilidades genotípicas no suman uno");
+    }
+    if realized_genotype_sum != complete {
+        return Err("recuentos genotípicos realizados incoherentes");
+    }
+    Ok(())
+}
+
+fn valid_lower_sha256(value: Option<&Value>) -> bool {
+    value.and_then(Value::as_str).is_some_and(|digest| {
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    })
+}
+
+fn is_canonical_base_text(value: &str) -> bool {
+    matches!(value, "A" | "C" | "G" | "T")
 }
 
 fn validate_serialized_normalization_audit(
@@ -1990,6 +2633,17 @@ fn validate_effective_initial_populations(
             }
             _ => return Err(effective_error(path, "genotype_model inicial inválido")),
         }
+    }
+    if !populations.is_empty()
+        && !effective
+            .get("population_snvs")
+            .and_then(Value::as_object)
+            .is_some_and(|link| link.contains_key("initial_population_statistics"))
+    {
+        return Err(effective_error(
+            path,
+            "faltan estadísticas iniciales para cohortes iniciales",
+        ));
     }
     Ok(())
 }
