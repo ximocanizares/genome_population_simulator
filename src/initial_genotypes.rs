@@ -1,10 +1,10 @@
-//! Composición genotípica inicial por locus, antes de la fase y materialización.
+//! Composición y fase genotípicas iniciales, antes de materializar copias.
 //!
 //! F2.3.2 consume una matriz ya preparada, por lo que no reinterpreta `alt_af`,
 //! no elige loci y no modifica la matriz. Antes de derivar RNG exige que la
 //! referencia declarada coincida con la identidad y huella canónica retenidas
-//! durante la preparación. La fase queda deliberadamente fuera de este módulo: F2.3.3
-//! consumirá estas dosis con su propio ámbito RNG.
+//! durante la preparación. F2.3.3 asigna después las dosis ALT a copias con un
+//! ámbito independiente por locus, sin aplicar todavía cambios a las copias.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -12,13 +12,15 @@ use std::fmt;
 use crate::application::{
     EffectiveConfig, EffectiveInitialGenotypeModel, EffectiveInitialPopulation,
 };
+use crate::haplotype::HaplotypePhase;
 use crate::identity::{IndividualId, PopulationId, SequenceId, VariantId};
 use crate::population_snvs::{
     PreparedPopulationSnv, PreparedPopulationSnvs, PreparedReferenceIdentity,
 };
 use crate::randomness::{
-    F_DIPLOID_GENOTYPE_ALGORITHM, HWE_COMPOSITION_ALGORITHM, RandomSamplingError, RootSeed,
-    RuntimeSubseedScope, derive_subseed, f_diploid_genotype, hwe_composition,
+    F_DIPLOID_GENOTYPE_ALGORITHM, HWE_COMPOSITION_ALGORITHM, PHASE_PERMUTATION_ALGORITHM,
+    RandomSamplingError, RootSeed, RuntimeSubseedScope, derive_subseed, f_diploid_genotype,
+    hwe_composition, phase_permutation,
 };
 use crate::reference::Reference;
 
@@ -28,6 +30,10 @@ pub const INITIAL_GENOTYPE_HWE_ALGORITHM: &str = HWE_COMPOSITION_ALGORITHM;
 pub const INITIAL_GENOTYPE_F_DIPLOID_ALGORITHM: &str = F_DIPLOID_GENOTYPE_ALGORITHM;
 /// Ámbito de subsemilla para la composición genotípica inicial.
 pub const INITIAL_GENOTYPE_SCOPE: &str = "initial_genotype";
+/// Ámbito de subsemilla para asignar fases de un locus tras fijar su composición.
+pub const INITIAL_PHASE_SCOPE: &str = "initial_phase_locus";
+/// Algoritmo que permuta copias sin alterar la dosis ya muestreada.
+pub const INITIAL_PHASE_ALGORITHM: &str = PHASE_PERMUTATION_ALGORITHM;
 
 /// Alelo ALT y su dosis no faseada en una composición inicial.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -125,6 +131,60 @@ impl InitialGenotypeCompositions {
     }
 }
 
+/// Alelo canónico asignado a una copia faseada de un locus.
+///
+/// `allele_index=0` representa REF; `1..` indexan `alternate_dosages()` de la
+/// composición retenida. Cada fase aparece exactamente una vez.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InitialPhasedAllele {
+    phase: HaplotypePhase,
+    allele_index: u8,
+}
+
+impl InitialPhasedAllele {
+    #[must_use]
+    pub const fn phase(&self) -> HaplotypePhase {
+        self.phase
+    }
+
+    #[must_use]
+    pub const fn allele_index(&self) -> u8 {
+        self.allele_index
+    }
+}
+
+/// Composición de un locus junto con todos sus alelos asignados a fases.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InitialPhasedLocus {
+    composition: InitialLocusComposition,
+    alleles_by_phase: Vec<InitialPhasedAllele>,
+}
+
+impl InitialPhasedLocus {
+    #[must_use]
+    pub const fn composition(&self) -> &InitialLocusComposition {
+        &self.composition
+    }
+
+    #[must_use]
+    pub fn alleles_by_phase(&self) -> &[InitialPhasedAllele] {
+        &self.alleles_by_phase
+    }
+}
+
+/// Resultado F2.3.3, aún separado del estado de copias haplotípicas.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InitialPhasedGenotypes {
+    loci: Vec<InitialPhasedLocus>,
+}
+
+impl InitialPhasedGenotypes {
+    #[must_use]
+    pub fn loci(&self) -> &[InitialPhasedLocus] {
+        &self.loci
+    }
+}
+
 /// Error anterior al sorteo o procedente de la utilidad RNG normativa.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InitialGenotypeSamplingError {
@@ -197,6 +257,39 @@ impl fmt::Display for InitialGenotypeSamplingError {
 
 impl std::error::Error for InitialGenotypeSamplingError {}
 
+/// Error de F2.3.3 al derivar o aplicar la fase a una composición ya válida.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InitialPhaseAssignmentError {
+    InvalidComposition {
+        contig: String,
+        position_1based: u64,
+    },
+    Random(RandomSamplingError),
+    Derivation(crate::diagnostics::Diagnostic),
+}
+
+impl fmt::Display for InitialPhaseAssignmentError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidComposition {
+                contig,
+                position_1based,
+            } => write!(
+                formatter,
+                "la composición no tiene una ploidía válida en {contig}:{position_1based}"
+            ),
+            Self::Random(error) => write!(formatter, "error RNG al asignar fase: {error:?}"),
+            Self::Derivation(error) => write!(
+                formatter,
+                "no se pudo derivar la subsemilla de fase: {}",
+                error.render_human()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for InitialPhaseAssignmentError {}
+
 /// Muestrea las composiciones declaradas en una configuración efectiva.
 ///
 /// Esta frontera no publica estadísticas ni asigna fase; ambos pertenecen a
@@ -213,6 +306,93 @@ pub fn sample_initial_genotypes(
         config.initial_populations(),
         matrix,
     )
+}
+
+/// Asigna la composición completa de cada locus a copias faseadas independientes.
+///
+/// Esta frontera no materializa ni modifica copias y, por tanto, no adelanta
+/// las incompatibilidades ni la autorización exclusiva de F2.3.4.
+pub fn assign_initial_phases(
+    root_seed: RootSeed,
+    compositions: &InitialGenotypeCompositions,
+) -> Result<InitialPhasedGenotypes, InitialPhaseAssignmentError> {
+    let mut loci = Vec::with_capacity(compositions.loci.len());
+    for composition in &compositions.loci {
+        let copy_count = composition
+            .alternate_dosages
+            .iter()
+            .map(InitialAlternateDosage::dosage)
+            .try_fold(composition.reference_dosage, |total, dosage| {
+                total.checked_add(dosage)
+            })
+            .ok_or_else(|| invalid_composition(composition))?;
+        if !(1..=10).contains(&copy_count) {
+            return Err(invalid_composition(composition));
+        }
+
+        let mut allele_dosages = Vec::with_capacity(composition.alternate_dosages.len() + 1);
+        allele_dosages.push(composition.reference_dosage);
+        allele_dosages.extend(
+            composition
+                .alternate_dosages
+                .iter()
+                .map(InitialAlternateDosage::dosage),
+        );
+        let alternate_alleles = canonical_alternate_alleles(composition);
+        let reference_bytes = [composition.reference];
+        let reference_base =
+            std::str::from_utf8(&reference_bytes).map_err(|_| invalid_composition(composition))?;
+        let mut rng = derive_subseed(
+            root_seed,
+            RuntimeSubseedScope::InitialPhaseLocus {
+                scenario_id: "direct",
+                reference_id: composition.reference_id(),
+                population_id: composition.population_id().as_str(),
+                individual_id: composition.individual_id().as_str(),
+                sequence_id: composition.contig().as_str(),
+                position_1based: composition.position_1based(),
+                reference_base,
+                alternate_alleles: &alternate_alleles,
+            },
+        )
+        .map_err(InitialPhaseAssignmentError::Derivation)?
+        .local_rng();
+        let alleles_by_phase = phase_permutation(&mut rng, &allele_dosages)
+            .map_err(InitialPhaseAssignmentError::Random)?
+            .into_iter()
+            .enumerate()
+            .map(|(copy_index, allele_index)| {
+                let copy_index =
+                    u8::try_from(copy_index).map_err(|_| invalid_composition(composition))?;
+                Ok(InitialPhasedAllele {
+                    phase: HaplotypePhase::from_copy_index(copy_index)
+                        .map_err(|_| invalid_composition(composition))?,
+                    allele_index,
+                })
+            })
+            .collect::<Result<Vec<_>, InitialPhaseAssignmentError>>()?;
+        loci.push(InitialPhasedLocus {
+            composition: composition.clone(),
+            alleles_by_phase,
+        });
+    }
+    Ok(InitialPhasedGenotypes { loci })
+}
+
+fn canonical_alternate_alleles(composition: &InitialLocusComposition) -> String {
+    composition
+        .alternate_dosages
+        .iter()
+        .map(|alternate| char::from(alternate.alternate()).to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn invalid_composition(composition: &InitialLocusComposition) -> InitialPhaseAssignmentError {
+    InitialPhaseAssignmentError::InvalidComposition {
+        contig: composition.contig().as_str().to_owned(),
+        position_1based: composition.position_1based(),
+    }
 }
 
 /// Muestrea composición por locus e individuo con subsemillas aisladas.

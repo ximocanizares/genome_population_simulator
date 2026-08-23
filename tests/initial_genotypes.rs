@@ -5,7 +5,7 @@ use genome_population_simulator::application::{EffectiveConfig, build_effective_
 use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::identity::{ReferenceId, SequenceId};
 use genome_population_simulator::initial_genotypes::{
-    InitialGenotypeSamplingError, sample_initial_genotypes,
+    InitialGenotypeSamplingError, assign_initial_phases, sample_initial_genotypes,
 };
 use genome_population_simulator::population_snvs::{
     PreparedPopulationSnvs, PreparedReferenceIdentity, TSV_HEADER, parse_canonical_tsv,
@@ -14,7 +14,7 @@ use genome_population_simulator::population_snvs::{
 use genome_population_simulator::randomness::{
     RandomSamplingError, RandomWordSource, RootSeed, RuntimeSubseedScope, derive_subseed,
     f_diploid_genotype, f_diploid_genotype_with_source, hwe_composition,
-    hwe_composition_with_source,
+    hwe_composition_with_source, phase_permutation_with_source,
 };
 use genome_population_simulator::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
@@ -555,6 +555,12 @@ fn composition_is_reproducible_and_isolated_from_population_and_row_changes() {
     )
     .expect("reordered");
     assert_eq!(base, reordered, "canonical preparation removes row order");
+    let root = base_config.reproducibility().root_seed();
+    assert_eq!(
+        assign_initial_phases(root, &base).expect("base phases"),
+        assign_initial_phases(root, &reordered).expect("reordered phases"),
+        "phase derives from canonical locus identity rather than matrix row order"
+    );
 
     let expanded_config = config(&format!(
         "{}{}{}",
@@ -589,6 +595,22 @@ fn composition_is_reproducible_and_isolated_from_population_and_row_changes() {
         base_p1, expanded_p1,
         "P1 has a dedicated population/individual/locus stream"
     );
+    let base_phases = assign_initial_phases(root, &base).expect("base phases");
+    let expanded_phases =
+        assign_initial_phases(root, &expanded).expect("expanded population phases");
+    assert_eq!(
+        base_phases
+            .loci()
+            .iter()
+            .filter(|locus| locus.composition().population_id().as_str() == "P1")
+            .collect::<Vec<_>>(),
+        expanded_phases
+            .loci()
+            .iter()
+            .filter(|locus| locus.composition().population_id().as_str() == "P1")
+            .collect::<Vec<_>>(),
+        "P1 phase has its own population/individual/locus stream"
+    );
 }
 
 #[test]
@@ -610,6 +632,253 @@ fn composition_keeps_the_prepared_reference_contig_order() {
         .map(|locus| locus.contig().as_str())
         .collect::<Vec<_>>();
     assert_eq!(contigs, ["chr2", "chr1"]);
+}
+
+#[test]
+fn phase_permutation_word_vectors_preserve_complete_compositions_for_every_ploidy() {
+    const SENTINEL: u64 = 0xdeaf_beef_cafe_babe;
+    const WORDS: [u64; 9] = [
+        u64::MAX,
+        u64::MAX - 1,
+        u64::MAX - 2,
+        u64::MAX - 3,
+        u64::MAX - 4,
+        u64::MAX - 5,
+        u64::MAX - 6,
+        u64::MAX - 7,
+        u64::MAX - 8,
+    ];
+
+    let vectors = [
+        vec![1],
+        vec![1, 1],
+        vec![1, 1, 1],
+        vec![1, 1, 2],
+        vec![1, 1, 3],
+        vec![1, 2, 3],
+        vec![1, 2, 4],
+        vec![1, 3, 4],
+        vec![2, 3, 4],
+        vec![2, 3, 1, 4],
+    ];
+
+    for dosages in vectors {
+        let copy_count = dosages.iter().sum::<u8>();
+        let expected_consumed = if dosages.iter().filter(|dosage| **dosage > 0).count() == 1 {
+            0
+        } else {
+            usize::from(copy_count - 1)
+        };
+        let mut words = WORDS[..expected_consumed].to_vec();
+        words.push(SENTINEL);
+        let mut source = ScriptedWords::new(&words);
+        let observed = phase_permutation_with_source(&mut source, &dosages)
+            .expect("literal phase permutation");
+        assert_eq!(
+            observed,
+            independent_phase_permutation(&dosages, &WORDS),
+            "independent phase oracle for P={copy_count}"
+        );
+        assert_eq!(observed.len(), usize::from(copy_count));
+        assert_eq!(allele_counts(&observed, dosages.len()), dosages);
+        assert_eq!(
+            source.consumed, expected_consumed,
+            "P={copy_count} consumption"
+        );
+        assert_eq!(source.next_word(), SENTINEL, "P={copy_count} sentinel");
+    }
+}
+
+#[test]
+fn phase_permutation_degenerate_and_invalid_cases_consume_no_words() {
+    const SENTINEL: u64 = 0xdeaf_beef_cafe_babe;
+    for (dosages, expected) in [
+        (vec![1], vec![0]),
+        (vec![0, 1], vec![1]),
+        (vec![10], vec![0; 10]),
+        (vec![0, 10], vec![1; 10]),
+    ] {
+        let mut source = ScriptedWords::new(&[SENTINEL]);
+        assert_eq!(
+            phase_permutation_with_source(&mut source, &dosages),
+            Ok(expected)
+        );
+        assert_eq!(source.next_word(), SENTINEL);
+    }
+    for (dosages, error) in [
+        (vec![], RandomSamplingError::InvalidDosage),
+        (vec![0], RandomSamplingError::InvalidPloidy),
+        (vec![11], RandomSamplingError::InvalidPloidy),
+        (vec![u8::MAX, 1], RandomSamplingError::InvalidDosage),
+    ] {
+        let mut source = ScriptedWords::new(&[SENTINEL]);
+        assert_eq!(
+            phase_permutation_with_source(&mut source, &dosages),
+            Err(error)
+        );
+        assert_eq!(source.next_word(), SENTINEL);
+    }
+}
+
+#[test]
+fn phase_permutation_assigns_multiallelic_c_a_g_once_per_copy_and_preserves_polyploid_doses() {
+    const SENTINEL: u64 = 0xdeaf_beef_cafe_babe;
+    const WORDS: [u64; 9] = [
+        u64::MAX,
+        u64::MAX - 1,
+        u64::MAX - 2,
+        u64::MAX - 3,
+        u64::MAX - 4,
+        u64::MAX - 5,
+        u64::MAX - 6,
+        u64::MAX - 7,
+        u64::MAX - 8,
+    ];
+    for dosages in [vec![0, 1, 1], vec![2, 3, 1, 4]] {
+        let copy_count = usize::from(dosages.iter().sum::<u8>());
+        let mut input = WORDS[..copy_count - 1].to_vec();
+        input.push(SENTINEL);
+        let mut source = ScriptedWords::new(&input);
+        let observed = phase_permutation_with_source(&mut source, &dosages)
+            .expect("complete multiallelic phase");
+        assert_eq!(observed, independent_phase_permutation(&dosages, &WORDS));
+        assert_eq!(allele_counts(&observed, dosages.len()), dosages);
+        assert_eq!(source.consumed, copy_count - 1);
+        assert_eq!(source.next_word(), SENTINEL);
+    }
+}
+
+#[test]
+fn phase_permutation_has_a_frozen_initial_phase_locus_subseed_vector() {
+    let root = RootSeed::parse(
+        "root",
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    )
+    .expect("frozen root");
+    let seed = derive_subseed(
+        root,
+        RuntimeSubseedScope::InitialPhaseLocus {
+            scenario_id: "direct",
+            reference_id: "reference-main",
+            population_id: "population-main",
+            individual_id: "individual-main",
+            sequence_id: "sequence-main",
+            position_1based: 42,
+            reference_base: "C",
+            alternate_alleles: "A,G",
+        },
+    )
+    .expect("frozen phase subseed");
+    assert_eq!(
+        seed.to_hex(),
+        "5a8be1c6128ac413f3af7e699c284785d6827b9e51fa77bc5063eb47dbc40021"
+    );
+    let mut rng = seed.local_rng();
+    assert_eq!(
+        phase_permutation_with_source(&mut rng, &[0, 1, 1]),
+        Ok(vec![1, 2]),
+        "fixed DTC-071 scope and ChaCha12 stream"
+    );
+}
+
+#[test]
+fn phase_assignment_retains_complete_composition_and_is_reproducible_and_rng_isolated() {
+    let reference = reference();
+    let effective = config(&(cohort("P1", 2, "hwe", "") + &cohort("P10", 10, "hwe", "")));
+    let prepared = matrix(
+        &reference,
+        &[
+            "VAR_IGNORED\tchr1\t1\tA\tC\tP1\t0.25\ttest",
+            "VAR_IGNORED\tchr1\t1\tA\tC\tP10\t0.25\ttest",
+        ],
+    );
+    let compositions =
+        sample_initial_genotypes(&effective, &reference, &prepared).expect("compositions");
+    let root = effective.reproducibility().root_seed();
+    let first = assign_initial_phases(root, &compositions).expect("phases");
+    let repeated = assign_initial_phases(root, &compositions).expect("repeated phases");
+    assert_eq!(first, repeated, "fixed root is reproducible");
+    assert_eq!(first.loci().len(), compositions.loci().len());
+
+    for (phased, composition) in first.loci().iter().zip(compositions.loci()) {
+        assert_eq!(phased.composition(), composition, "composition is retained");
+        assert_eq!(
+            phased
+                .alleles_by_phase()
+                .iter()
+                .map(|allele| allele.phase().copy_index())
+                .collect::<Vec<_>>(),
+            (0..effective
+                .initial_populations()
+                .iter()
+                .find(|population| population.population_id() == composition.population_id())
+                .expect("cohort")
+                .ploidy()
+                .copy_count())
+                .collect::<Vec<_>>(),
+            "every copy receives exactly one phase assignment"
+        );
+        let mut expected_dosages = vec![composition.reference_dosage()];
+        expected_dosages.extend(
+            composition
+                .alternate_dosages()
+                .iter()
+                .map(|dose| dose.dosage()),
+        );
+        assert_eq!(
+            allele_counts(
+                &phased
+                    .alleles_by_phase()
+                    .iter()
+                    .map(|allele| allele.allele_index())
+                    .collect::<Vec<_>>(),
+                expected_dosages.len(),
+            ),
+            expected_dosages,
+            "phase is a permutation of the complete composition"
+        );
+    }
+
+    let locus = compositions.loci().first().expect("one P1 locus");
+    let genotype_seed = derive_subseed(
+        root,
+        RuntimeSubseedScope::InitialGenotype {
+            scenario_id: "direct",
+            reference_id: locus.reference_id(),
+            population_id: locus.population_id().as_str(),
+            individual_id: locus.individual_id().as_str(),
+            sequence_id: locus.contig().as_str(),
+            position_1based: locus.position_1based(),
+            reference_base: std::str::from_utf8(&[locus.reference()]).expect("ASCII REF"),
+            alternate_alleles: "C",
+        },
+    )
+    .expect("genotype scope");
+    let phase_seed = derive_subseed(
+        root,
+        RuntimeSubseedScope::InitialPhaseLocus {
+            scenario_id: "direct",
+            reference_id: locus.reference_id(),
+            population_id: locus.population_id().as_str(),
+            individual_id: locus.individual_id().as_str(),
+            sequence_id: locus.contig().as_str(),
+            position_1based: locus.position_1based(),
+            reference_base: std::str::from_utf8(&[locus.reference()]).expect("ASCII REF"),
+            alternate_alleles: "C",
+        },
+    )
+    .expect("phase scope");
+    assert_ne!(
+        genotype_seed, phase_seed,
+        "genotype and phase scopes are distinct"
+    );
+    let mut unrelated_genotype_rng = genotype_seed.local_rng();
+    let _ = unrelated_genotype_rng.next_u64();
+    assert_eq!(
+        assign_initial_phases(root, &compositions).expect("phases after genotype consumption"),
+        first,
+        "phase derives a fresh stream and cannot consume the genotype stream"
+    );
 }
 
 #[test]
@@ -689,6 +958,29 @@ fn independent_multinomial(frequencies: &[f64], words: &[u64]) -> Vec<u8> {
         }
     }
     dosage
+}
+
+fn independent_phase_permutation(dosages: &[u8], words: &[u64]) -> Vec<u8> {
+    let mut alleles = dosages
+        .iter()
+        .enumerate()
+        .flat_map(|(allele, dosage)| std::iter::repeat_n(allele as u8, usize::from(*dosage)))
+        .collect::<Vec<_>>();
+    if alleles.iter().all(|allele| *allele == alleles[0]) {
+        return alleles;
+    }
+    for (word, index) in words.iter().zip((1..alleles.len()).rev()) {
+        alleles.swap(index, (*word % (index + 1) as u64) as usize);
+    }
+    alleles
+}
+
+fn allele_counts(alleles: &[u8], category_count: usize) -> Vec<u8> {
+    let mut counts = vec![0_u8; category_count];
+    for allele in alleles {
+        counts[usize::from(*allele)] += 1;
+    }
+    counts
 }
 
 fn open_from_word(word: u64) -> f64 {

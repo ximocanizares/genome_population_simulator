@@ -224,7 +224,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
 - ✅ F2.2.3. Añadir los ámbitos y utilidades RNG realmente consumidos por F2.
   - Depende de: F2.2.1–F2.2.2 y RNG F1.
   - Procede de: DTC-037/038, DTC-067, DTC-070 a DTC-072, DTC-075/079.
-  - Cambia: catálogo v4 y módulos agrupados para Poisson, selección de loci,
+  - Cambia: catálogo v4 y su extensión v5, y módulos agrupados para Poisson, selección de loci,
     espectros e indels; introduce aquí el `scenario_id = "direct"` interno. Las
     utilidades de genotipo y fase esperan a F2.3.
   - Se comprueba con: vectores de subsemilla, semillas fijas, bordes, consumo
@@ -345,7 +345,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: casos degenerados, fórmulas independientes, ploidías
     1/2/10 y estadísticas prefijadas.
 
-- ☐ F2.3.3. Asignar fase con un ámbito independiente.
+- ✅ F2.3.3. Asignar fase con un ámbito independiente.
   - Depende de: F2.3.2.
   - Procede de: DTC-037/071/072; REQ-IND-63.
   - Cambia: utilidad RNG y permutación de copias posterior a la composición.

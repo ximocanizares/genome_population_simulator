@@ -10,7 +10,7 @@ use crate::diagnostics::Diagnostic;
 pub const DERIVATION_VERSION: u32 = 1;
 pub const F2_DERIVATION_VERSION: u32 = 2;
 pub const SUBSEED_DERIVATION_VERSIONS: &[u32] = &[DERIVATION_VERSION, F2_DERIVATION_VERSION];
-pub const SUBSEED_CATALOG_VERSION: &str = "4";
+pub const SUBSEED_CATALOG_VERSION: &str = "5";
 pub const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 pub const RANDOM_ALGORITHM: &str = "ChaCha12";
 pub const REFERENCE_REDUCTION_ALGORITHM: &str = "reduced_reference_selection_v1";
@@ -209,12 +209,23 @@ pub enum RuntimeSubseedScope<'a> {
         reference_base: &'a str,
         alternate_alleles: &'a str,
     },
+    /// Fila histórica v4, reservada antes de cerrar la fase multialélica.
     InitialPhase {
         scenario_id: &'a str,
         reference_id: &'a str,
         population_id: &'a str,
         individual_id: &'a str,
         variant_id: &'a str,
+    },
+    InitialPhaseLocus {
+        scenario_id: &'a str,
+        reference_id: &'a str,
+        population_id: &'a str,
+        individual_id: &'a str,
+        sequence_id: &'a str,
+        position_1based: u64,
+        reference_base: &'a str,
+        alternate_alleles: &'a str,
     },
 }
 
@@ -486,6 +497,29 @@ pub fn derive_subseed(
                 ("variant_id", variant_id),
             ],
         )?,
+        RuntimeSubseedScope::InitialPhaseLocus {
+            scenario_id,
+            reference_id,
+            population_id,
+            individual_id,
+            sequence_id,
+            position_1based,
+            reference_base,
+            alternate_alleles,
+        } => canonical_material_v2(
+            root,
+            "initial_phase_locus",
+            &[
+                ("scenario_id", scenario_id),
+                ("reference_id", reference_id),
+                ("population_id", population_id),
+                ("individual_id", individual_id),
+                ("sequence_id", sequence_id),
+                ("position_1based", &position_1based.to_string()),
+                ("ref", reference_base),
+                ("alternate_alleles", alternate_alleles),
+            ],
+        )?,
     };
     Ok(Subseed(blake3::derive_key(DERIVATION_CONTEXT, &material)))
 }
@@ -522,6 +556,7 @@ impl RandomWordSource for LocalRng {
 pub const POISSON_COUNT_ALGORITHM: &str = "poisson-count-v1";
 pub const HWE_COMPOSITION_ALGORITHM: &str = "hwe-composition-v1";
 pub const F_DIPLOID_GENOTYPE_ALGORITHM: &str = "f-diploid-genotype-v1";
+pub const PHASE_PERMUTATION_ALGORITHM: &str = "phase-permutation-v1";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RandomSamplingError {
@@ -530,6 +565,7 @@ pub enum RandomSamplingError {
     InvalidInterval,
     InvalidLambda,
     InvalidPloidy,
+    InvalidDosage,
     InvalidInbreedingCoefficient,
     NumericFailure,
     InsufficientCandidates,
@@ -621,6 +657,54 @@ fn fisher_yates_with_source<T>(
         values.swap(index, other);
     }
     Ok(())
+}
+
+/// Asigna una composición alélica completa a fases de copia mediante una
+/// permutación normativa.
+///
+/// `allele_dosages` está en el orden canónico del locus: REF primero y ALT
+/// ASCII ascendente después. La composición ya decide esas dosis; esta operación
+/// crea la lista repetida de índices de alelo, la permuta una sola vez y asigna
+/// su resultado secuencialmente a las fases `0..P`. Un locus monomórfico no
+/// tiene elección de fase y no consume palabras RNG.
+pub fn phase_permutation(
+    rng: &mut LocalRng,
+    allele_dosages: &[u8],
+) -> Result<Vec<u8>, RandomSamplingError> {
+    phase_permutation_with_source(rng, allele_dosages)
+}
+
+/// Variante instrumentable de [`phase_permutation`] para vectores normativos.
+///
+/// El preflight y los casos degenerados no consumen RNG. Un locus polimórfico
+/// consume exactamente lo que consume `fisher-yates-v1` para `P` alelos,
+/// incluidas sus repeticiones de rechazo si las hubiera.
+pub fn phase_permutation_with_source(
+    rng: &mut impl RandomWordSource,
+    allele_dosages: &[u8],
+) -> Result<Vec<u8>, RandomSamplingError> {
+    if allele_dosages.is_empty() {
+        return Err(RandomSamplingError::InvalidDosage);
+    }
+    let copy_count = allele_dosages.iter().try_fold(0_u8, |total, dosage| {
+        total
+            .checked_add(*dosage)
+            .ok_or(RandomSamplingError::InvalidDosage)
+    })?;
+    if !(1..=10).contains(&copy_count) {
+        return Err(RandomSamplingError::InvalidPloidy);
+    }
+    let mut alleles = Vec::with_capacity(usize::from(copy_count));
+    for (allele_index, dosage) in allele_dosages.iter().copied().enumerate() {
+        let allele_index =
+            u8::try_from(allele_index).map_err(|_| RandomSamplingError::InvalidDosage)?;
+        alleles.extend(std::iter::repeat_n(allele_index, usize::from(dosage)));
+    }
+    if alleles.iter().all(|allele| *allele == alleles[0]) {
+        return Ok(alleles);
+    }
+    fisher_yates_with_source(rng, &mut alleles)?;
+    Ok(alleles)
 }
 
 pub fn weighted_without_replacement(

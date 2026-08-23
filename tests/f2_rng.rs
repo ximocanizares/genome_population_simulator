@@ -72,6 +72,28 @@ fn v4_scope_name_separates_each_previously_colliding_pair() {
                 variant_id: "v",
             },
         ),
+        (
+            RuntimeSubseedScope::InitialGenotype {
+                scenario_id: "direct",
+                reference_id: "r",
+                population_id: "p",
+                individual_id: "i",
+                sequence_id: "s",
+                position_1based: 1,
+                reference_base: "A",
+                alternate_alleles: "C,G",
+            },
+            RuntimeSubseedScope::InitialPhaseLocus {
+                scenario_id: "direct",
+                reference_id: "r",
+                population_id: "p",
+                individual_id: "i",
+                sequence_id: "s",
+                position_1based: 1,
+                reference_base: "A",
+                alternate_alleles: "C,G",
+            },
+        ),
     ];
     for (left, right) in cases {
         assert_ne!(
@@ -252,6 +274,28 @@ fn every_f2_runtime_scope_changes_when_its_production_components_change() {
                 variant_id: "changed",
             },
         ),
+        (
+            RuntimeSubseedScope::InitialPhaseLocus {
+                scenario_id: "direct",
+                reference_id: "r",
+                population_id: "p",
+                individual_id: "i",
+                sequence_id: "s",
+                position_1based: 1,
+                reference_base: "A",
+                alternate_alleles: "C,G",
+            },
+            RuntimeSubseedScope::InitialPhaseLocus {
+                scenario_id: "direct",
+                reference_id: "r",
+                population_id: "p",
+                individual_id: "i",
+                sequence_id: "s",
+                position_1based: 1,
+                reference_base: "A",
+                alternate_alleles: "C,T",
+            },
+        ),
     ];
     for (base, mutated) in cases {
         assert_ne!(
@@ -336,6 +380,16 @@ fn mutated_scope(scope: &str, field: &str) -> RuntimeSubseedScope<'static> {
             population_id: changed("population_id"),
             individual_id: changed("individual_id"),
             variant_id: changed("variant_id"),
+        },
+        "initial_phase_locus" => RuntimeSubseedScope::InitialPhaseLocus {
+            scenario_id: changed("scenario_id"),
+            reference_id: changed("reference_id"),
+            population_id: changed("population_id"),
+            individual_id: changed("individual_id"),
+            sequence_id: changed("sequence_id"),
+            position_1based: if field == "position_1based" { 2 } else { 1 },
+            reference_base: changed("ref"),
+            alternate_alleles: changed("alternate_alleles"),
         },
         _ => unreachable!("closed F2 scope fixture"),
     }
@@ -422,6 +476,19 @@ fn every_runtime_scope_component_mutation_reaches_production_derivation() {
                 "population_id",
                 "individual_id",
                 "variant_id",
+            ],
+        ),
+        (
+            "initial_phase_locus",
+            &[
+                "scenario_id",
+                "reference_id",
+                "population_id",
+                "individual_id",
+                "sequence_id",
+                "position_1based",
+                "ref",
+                "alternate_alleles",
             ],
         ),
     ];

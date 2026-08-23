@@ -133,7 +133,7 @@ fn verify_catalog_with_independent_oracle(catalog: &str, derivation_version: u32
 }
 
 #[test]
-fn published_v1_v3_catalogs_remain_byte_exact_and_v4_has_an_independent_oracle() {
+fn published_v1_v4_catalogs_remain_byte_exact_and_v5_has_an_independent_oracle() {
     let catalogs = [
         (
             include_bytes!("../catalogs/subseed-scopes-v1.tsv").as_slice(),
@@ -156,17 +156,36 @@ fn published_v1_v3_catalogs_remain_byte_exact_and_v4_has_an_independent_oracle()
         );
     }
     let v4 = include_str!("../catalogs/subseed-scopes-v4.tsv");
+    assert_eq!(
+        encode_hex(&Sha256::digest(v4.as_bytes())),
+        "c14c582af00d309580846264184baeafc0194891c3795e3af05bc62a925fb74e"
+    );
     assert!(v4.starts_with(
         "# derivation_versions=1,2\n# catalog_version=4\n# context=genome_population_simulator/v1/subseed\n"
     ));
     verify_catalog_with_independent_oracle(v4, F2_DERIVATION_VERSION);
+    let v5 = include_str!("../catalogs/subseed-scopes-v5.tsv");
+    assert!(v5.starts_with(
+        "# derivation_versions=1,2\n# catalog_version=5\n# context=genome_population_simulator/v1/subseed\n"
+    ));
+    let v4_rows = v4
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    let v5_rows = v5
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(&v5_rows[..v4_rows.len()], v4_rows);
+    assert_eq!(v5_rows.len(), v4_rows.len() + 1);
+    verify_catalog_with_independent_oracle(v5, F2_DERIVATION_VERSION);
 }
 
 #[test]
-fn f1_runtime_scopes_remain_on_derivation_v1_while_f2_uses_catalog_v4() {
+fn f1_runtime_scopes_remain_on_derivation_v1_while_f2_uses_catalog_v5() {
     let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
     assert_eq!(DERIVATION_VERSION, 1);
-    assert_eq!(SUBSEED_CATALOG_VERSION, "4");
+    assert_eq!(SUBSEED_CATALOG_VERSION, "5");
     assert_eq!(
         REFERENCE_REDUCTION_ALGORITHM,
         "reduced_reference_selection_v1"
@@ -210,8 +229,22 @@ fn v4_catalog_subseed(scope_name: &str) -> &str {
         .expect("frozen v4 vector")
 }
 
+fn v5_catalog_subseed(scope_name: &str) -> &str {
+    include_str!("../catalogs/subseed-scopes-v5.tsv")
+        .lines()
+        .find_map(|row| {
+            let fields = row.split('|').collect::<Vec<_>>();
+            if fields.len() == 5 && fields[0] == scope_name {
+                Some(fields[4])
+            } else {
+                None
+            }
+        })
+        .expect("frozen v5 vector")
+}
+
 #[test]
-fn every_f2_runtime_scope_matches_its_frozen_v4_vector() {
+fn every_f2_runtime_scope_matches_its_frozen_v4_or_v5_vector() {
     let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
     let vectors = [
         (
@@ -328,6 +361,24 @@ fn every_f2_runtime_scope_matches_its_frozen_v4_vector() {
             "{scope_name}"
         );
     }
+    assert_eq!(
+        derive_subseed(
+            root,
+            RuntimeSubseedScope::InitialPhaseLocus {
+                scenario_id: "direct",
+                reference_id: "reference-main",
+                population_id: "population-main",
+                individual_id: "individual-main",
+                sequence_id: "sequence-main",
+                position_1based: 42,
+                reference_base: "C",
+                alternate_alleles: "A,G",
+            },
+        )
+        .expect("F2.3 phase subseed")
+        .to_hex(),
+        v5_catalog_subseed("initial_phase_locus")
+    );
 }
 
 #[test]

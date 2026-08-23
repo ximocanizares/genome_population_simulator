@@ -132,7 +132,7 @@ planificación; ya no existe una discrepancia entre fuentes.
 | <a id="dtc-078"></a>DTC-078 | F1 adopta un modelo de confianza local mínimo. Valida como no confiables los TOML y FASTA aportados; después confía en los ficheros creados dentro de su provisional privado frente a manipulación activa y los protege frente a fallos propios, interrupciones y corrupción accidental con estados, tamaño, SHA-256, `INCOMPLETE` y publicación atómica no-clobber. La raíz TOML activa de F1 contiene solo clase, versión, semilla opcional, referencia y referencias reducidas. No admite todavía vía, ploidía, reglas, entidades poblacionales, eventos ni escenarios. La composición simulada A/C/G/T usa un validador específico con tolerancia efectiva fija `1e-9`, sin conservar el sistema genérico de normalización poblacional. El cierre estricto de F1 comprende 54 REQ completos (4/1/6/22/21 en F1.2–F1.6); cualquier comprobación F1 de un REQ reasignado es evidencia parcial, no cierre. | Separar reproducibilidad científica e integridad accidental de un modelo de atacante local activo, y evitar construir biología futura sin consumidor | Población↔subpoblación, fase↔generación, locus↔posición, vía, ploidía, reglas, eventos técnicos, normalización poblacional y sus manifiestos se implementan en sus fases propietarias. `ResolutionDomain` sintético, `resolution-evidence`, validación exhaustiva del árbol contra symlink/hardlink/inodos, ventanas TOCTOU y revalidación combinatoria del paquete salen de F1; el endurecimiento frente a atacante local activo se evalúa en F9/CI según el despliegue. Se conservan rutas relativas canónicas, permisos privados razonables, ausencia de sobrescritura y validadores externos pequeños de TOML, FASTA, SHA y repetibilidad. Los IDs exactos y sus destinos pertenecen a la matriz de trazabilidad vigente. |
 | <a id="dtc-079"></a>DTC-079 | F2 adopta una implementación proporcional al uso local: repositorio, persona usuaria y provisional privado se consideran confiables frente a manipulación activa. Marimo configura el TOML general vigente, invoca directamente `validate`/`run` y muestra diagnósticos y resúmenes. F2 no crea escenarios sin consumidor, un ejecutor general de evidencias, protocolos paralelos de capacidades, almacenamiento persistente de sesiones ni defensas contra symlinks, inyección deliberada del entorno o carreras hostiles. El aprovisionamiento inicial explícito con `uv sync --frozen` puede usar Internet para descargar las dependencias resueltas por `uv.lock`; el arranque posterior y todo uso normal son locales, sin red ni servicios remotos. | Aplicar a toda F2 la simplificación que permitió cerrar F1 y evitar que la revisión técnica expanda el modelo de amenaza | Las entradas externas siguen validándose; Rust conserva autoridad semántica, reproducibilidad, publicación no-clobber y pruebas de invariantes biológicas. Cada hito usa pruebas Cargo y validadores de formato pertinentes, con una evidencia de cierre sencilla. La instalación distribuible sin descarga previa, `.tar.gz`, OCI, plataforma oficial, auditoría completa de accesibilidad y endurecimiento del despliegue quedan en F9. DTC-058/069/073 se interpretan según esta decisión; DTC-075 mantiene semántica pero no su partición documental. |
 
-### 3.1. Catálogo normativo de subsemillas F2 v4
+### 3.1. Catálogo normativo de subsemillas F2 v4 y extensión v5
 
 El fichero que publicará F2.2.8 conserva primero, sin cambio y en el mismo
 orden, las seis filas de `subseed-scopes-v3.tsv`. Añade después estas filas; el
@@ -150,7 +150,8 @@ orden de componentes mostrado es normativo:
 | `indel_position` | `scenario_id`, `reference_id`, `individual_id`, `sequence_id`, `variant_class`, `spatial_scope_id` | `dynamic-indel-selection-v1`, que reenumera el estado vigente |
 | `insertion_content` | `scenario_id`, `reference_id`, `individual_id`, `sequence_id`, `spatial_scope_id`, `event_index` | `categorical-f64-v1` sobre A/C/G/T por base |
 | `initial_genotype` | `scenario_id`, `reference_id`, `population_id`, `individual_id`, `sequence_id`, `position_1based`, `ref`, `alternate_alleles` | `hwe-composition-v1` o `f-diploid-genotype-v1`; `alternate_alleles` es la lista ALT ASCII ordenada del locus, por lo que un sorteo multialélico no depende de un ALT representativo |
-| `initial_phase` | `scenario_id`, `reference_id`, `population_id`, `individual_id`, `variant_id` | `phase-permutation-v1` |
+| `initial_phase` | `scenario_id`, `reference_id`, `population_id`, `individual_id`, `variant_id` | Fila histórica v4, no consumida por F2.3.3 |
+| `initial_phase_locus` | `scenario_id`, `reference_id`, `population_id`, `individual_id`, `sequence_id`, `position_1based`, `ref`, `alternate_alleles` | `phase-permutation-v1` sobre REF+ALT repetidos por dosis |
 
 `variant_class` solo admite `insertion` o `deletion`. `spatial_scope_id` es el
 ID estable DTC-039 de la regla espacial efectiva, con `global` como literal
@@ -173,6 +174,18 @@ componentes. Esta separación es necesaria porque cuatro pares v4 tienen los
 mismos componentes; no altera ninguna subsemilla F1.
 El literal reservado `scenario_id="direct"` sigue siendo interno a identidad y
 RNG, no un escenario ni un campo TOML/UI.
+
+**Corrección aprobada de F2.3.3 (23 de agosto de 2026).** La fila
+`initial_phase` de v4 queda inmutable y sin consumidor: una clave por ALT no
+puede describir una asignación multialélica disjunta. V5 es superconjunto
+estricto de v4: conserva literalmente sus filas y añade
+`initial_phase_locus` con la misma codificación v2. El productor construye en
+orden canónico la lista REF seguida de ALT ASCII, repite cada índice por su
+dosis, aplica una sola `phase-permutation-v1` y asigna el resultado a las copias
+en el orden de fase 0..P-1. Así cada copia recibe exactamente un alelo y las
+dosis se conservan sin depender del orden de filas ni de un ALT representativo.
+Desde esta corrección, la metadata de reproducibilidad registra catálogo 5;
+v4 sigue disponible y verificable para toda fila histórica.
 
 **Evaluación DTC-043 de `libm 0.2.16`.** Se admite con pin exacto para
 `poisson-count-v1` y `log-uniform-v1`: licencia MIT, MSRV 1.63 compatible con

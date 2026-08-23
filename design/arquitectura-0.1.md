@@ -799,7 +799,7 @@ obtiene después el valor dentro del intervalo; `fixed` no consume RNG para el
 valor y una cuota cero no consume RNG. Todo intervalo es `[min,max)`, incluso si
 `max=1`; la corrección numérica DTC-072 impide que un intervalo continuo produzca
 0 o 1. Los nombres, componentes, orden y versión
-literales pertenecen al catálogo RNG v4 fijado por DTC-071, que cierra RAF2-028
+literales pertenecen al catálogo RNG v4 con extensión v5 fijado por DTC-071, que cierra RAF2-028
 sin modificar DTC-070. Posición, `ALT`, frecuencia, genotipo y fase usan
 ámbitos RNG separados y estables. El filtrado posterior de
 un `ALT` cero en todas las poblaciones no repone el candidato; un valor fijado se
