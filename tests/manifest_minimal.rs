@@ -38,6 +38,28 @@ fn truncation_unknown_field_and_absent_link_fail_both_validators() {
 }
 
 #[test]
+fn complete_manifest_requires_the_canonical_truth_artifact_and_minimum_category() {
+    let complete = complete_manifest();
+    let mut missing = complete.clone();
+    missing["artifacts"]
+        .as_array_mut()
+        .expect("catalog")
+        .retain(|artifact| artifact["id"] != "truth-jsonl");
+    missing["output_categories"]["minimum"] =
+        json!(["config-general", "effective-config", "reference-fasta"]);
+    assert_rejected("complete-manifest-missing-truth", &missing);
+
+    let mut wrong_path = complete;
+    wrong_path["artifacts"]
+        .as_array_mut()
+        .expect("catalog")
+        .iter_mut()
+        .find(|artifact| artifact["id"] == "truth-jsonl")
+        .expect("truth artifact")["path"] = json!("truth.jsonl");
+    assert_rejected("complete-manifest-mutated-truth-path", &wrong_path);
+}
+
+#[test]
 fn population_snvs_link_is_discriminated_by_mode_in_rust_and_schema() {
     let mut generated_without_id = complete_manifest();
     generated_without_id["population_snvs"] = json!({
@@ -57,6 +79,7 @@ fn population_snvs_link_is_discriminated_by_mode_in_rust_and_schema() {
         "config-general",
         "effective-config",
         "reference-fasta",
+        "truth-jsonl",
         "population-snvs-tsv",
         "population-snvs-metadata"
     ]);
@@ -102,6 +125,7 @@ fn initial_population_statistics_are_closed_in_rust_and_schema() {
         "config-general",
         "effective-config",
         "reference-fasta",
+        "truth-jsonl",
         "population-snvs-tsv",
         "population-snvs-metadata"
     ]);
@@ -355,7 +379,7 @@ fn complete_manifest() -> Value {
         "reference_reductions": [],
         "authorizations": {"allow_empty_snv_matrix": false, "allow_incompatible_genotypes": false},
         "output_categories": {
-            "minimum": ["config-general", "effective-config", "reference-fasta"],
+            "minimum": ["config-general", "effective-config", "reference-fasta", "truth-jsonl"],
             "defaulted": [],
             "requested": [],
             "disabled": []
@@ -363,7 +387,8 @@ fn complete_manifest() -> Value {
         "artifacts": [
             artifact("config-general", "config_general_toml", "inputs/config/general.toml"),
             artifact("reference-fasta", "reference_fasta", "resources/references/ref.fa"),
-            artifact("effective-config", "effective_config", "effective-config.json")
+            artifact("effective-config", "effective_config", "effective-config.json"),
+            artifact("truth-jsonl", "truth_jsonl", "outputs/truth.jsonl")
         ],
         "diagnostics": []
     })

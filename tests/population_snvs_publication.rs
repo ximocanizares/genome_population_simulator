@@ -357,6 +357,34 @@ max_alt_af = 0.9"#,
             .expect("JSON");
     assert_eq!(manifest["population_snvs"]["mode"], "reuse");
     assert!(manifest["population_snvs"]["metadata_artifact_id"].is_null());
+    let source_matrix_sha256 = identify_file(
+        &generated.join("population_snvs.tsv"),
+        PathBuf::from("population_snvs.tsv"),
+    )
+    .expect("source matrix identity")
+    .digest()
+    .to_owned();
+    let truth_header: serde_json::Value = serde_json::from_slice(
+        fs::read(reused.join("outputs/truth.jsonl"))
+            .expect("truth")
+            .split(|byte| *byte == b'\n')
+            .next()
+            .expect("truth header"),
+    )
+    .expect("truth header JSON");
+    for digest in truth_header["source_digests"]
+        .as_array()
+        .expect("source digests")
+        .iter()
+        .chain(
+            truth_header["group_digests"]
+                .as_array()
+                .expect("group digests"),
+        )
+        .filter(|digest| digest["source"]["kind"] == "matrix")
+    {
+        assert_eq!(digest["sha256"], source_matrix_sha256);
+    }
     fs::remove_dir_all(root).expect("cleanup");
 }
 

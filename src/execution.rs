@@ -19,7 +19,8 @@ use crate::materialization::SnpLocus;
 use crate::population_snvs::{
     PopulationSnvsProvenance, canonical_metadata_document, canonical_tsv_bytes,
     generate_population_snvs_from_reference_with_tolerance, normalization_audit_document,
-    parse_supplied_tsv, prepare_population_snvs_from_reference, validate_reusable_population_snvs,
+    parse_supplied_tsv, prepare_population_snvs_from_reference,
+    validate_reusable_population_snvs_with_matrix_sha256,
 };
 use crate::publication::ExecutionWorkspace;
 use crate::reference::Reference;
@@ -48,6 +49,12 @@ use crate::small_event_composition::{
     DeclaredSmallEvent, TargetedCurrentDeletion, TargetedCurrentInsertion,
 };
 use crate::snp_application::{ApplicableSnp, TargetedSnp};
+use crate::truth_projection::{TruthProjectionInput, project_truth, write_truth_artifact};
+use crate::truth_schema::{
+    NamedDigest, TRUTH_COORDINATE_CONVENTION, TRUTH_DOCUMENT_KIND, TRUTH_SCHEMA_VERSION,
+    TruthDocument, TruthHeader, TruthSourceKind, TruthSourceRef,
+};
+use crate::truth_validation::reference_content_sha256;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutionOutcome {
@@ -250,6 +257,18 @@ fn execute_validated_config_with_effective_document(
         }
         let reduction_outputs =
             reduction_outputs(effective, &published_reductions, source_artifact);
+        write_execution_truth(
+            &mut workspace,
+            execution_id.as_str(),
+            prepared_reference.reference(),
+            prepared_execution.population_snvs.as_ref(),
+            prepared_execution.initial_individuals.as_ref(),
+            source_artifact,
+            configuration_input
+                .as_ref()
+                .ok_or_else(|| internal("execute", "missing configuration artifact"))?,
+            effective,
+        )?;
         let effective_document =
             transform_effective(effective_config_document_with_population_snvs(
                 effective,
@@ -313,6 +332,184 @@ fn execute_validated_config_with_effective_document(
             workspace.publish()?;
             Err(cause)
         }
+    }
+}
+
+/// Publica siempre la proyección obligatoria de verdad. Las ejecuciones F1 que
+/// aún no materializan población conservan un documento vacío y reconstruible;
+/// cuando F2.3 preparó matriz e individuos, reutiliza exclusivamente esa
+/// verdad faseada para escribir todos los registros.
+#[allow(clippy::too_many_arguments)]
+fn write_execution_truth(
+    workspace: &mut ExecutionWorkspace,
+    execution_id: &str,
+    reference: &Reference,
+    population_snvs: Option<&PreparedPopulationSnvsForExecution>,
+    initial_individuals: Option<&InitialIndividualsMaterialization>,
+    reference_artifact: &ArtifactRecord,
+    configuration_input: &ConfigurationInputRecord,
+    effective: &EffectiveConfig,
+) -> Result<(), Diagnostic> {
+    let document = match (population_snvs, initial_individuals) {
+        (Some(prepared), Some(individuals)) => {
+            let matrix_digest = prepared_matrix_digest(prepared, workspace)
+                .ok_or_else(|| internal("truth", "missing matrix identity"))?;
+            let mut source_digests = vec![named_digest(
+                TruthSourceKind::Reference,
+                reference.id().as_str(),
+                &reference_artifact.digest,
+            )];
+            source_digests.push(named_digest(
+                TruthSourceKind::Matrix,
+                &prepared.matrix.canonical_fingerprint(),
+                &matrix_digest,
+            ));
+            source_digests.extend(prepared.matrix.rows().iter().map(|row| {
+                named_digest(
+                    TruthSourceKind::Matrix,
+                    matrix_source_id(row.source_id()),
+                    &matrix_digest,
+                )
+            }));
+            source_digests.extend(effective.direct_events().iter().map(|event| {
+                named_digest(
+                    TruthSourceKind::Explicit,
+                    event.event_id().as_str(),
+                    &configuration_input.copy.digest,
+                )
+            }));
+            deduplicate_digests(&mut source_digests);
+            let group_digests = prepared
+                .matrix
+                .population_ids()
+                .iter()
+                .map(|population_id| {
+                    named_digest(
+                        TruthSourceKind::Matrix,
+                        population_id.as_str(),
+                        &matrix_digest,
+                    )
+                })
+                .collect::<Vec<_>>();
+            project_truth(TruthProjectionInput {
+                execution_id,
+                reference,
+                individuals,
+                matrix: &prepared.matrix,
+                source_digests: &source_digests,
+                group_digests: &group_digests,
+            })
+            .map_err(|error| {
+                Diagnostic::format("GPS-FMT-006", "No se pudo proyectar la verdad genómica.")
+                    .with("detail", error.to_string())
+            })?
+        }
+        (Some(prepared), None) => empty_truth_document(
+            execution_id,
+            reference,
+            reference_artifact,
+            Some((prepared, workspace)),
+        )?,
+        (None, None) => empty_truth_document(execution_id, reference, reference_artifact, None)?,
+        _ => return Err(internal("truth", "matrix and initial individuals diverged")),
+    };
+    write_truth_artifact(workspace, &document).map(|_| ())
+}
+
+fn empty_truth_document(
+    execution_id: &str,
+    reference: &Reference,
+    reference_artifact: &ArtifactRecord,
+    matrix: Option<(&PreparedPopulationSnvsForExecution, &ExecutionWorkspace)>,
+) -> Result<TruthDocument, Diagnostic> {
+    let mut source_digests = vec![named_digest(
+        TruthSourceKind::Reference,
+        reference.id().as_str(),
+        &reference_artifact.digest,
+    )];
+    let mut group_digests = Vec::new();
+    if let Some((prepared, workspace)) = matrix {
+        let matrix_digest = prepared_matrix_digest(prepared, workspace)
+            .ok_or_else(|| internal("truth", "missing matrix identity"))?;
+        source_digests.push(named_digest(
+            TruthSourceKind::Matrix,
+            &prepared.matrix.canonical_fingerprint(),
+            &matrix_digest,
+        ));
+        source_digests.extend(prepared.matrix.rows().iter().map(|row| {
+            named_digest(
+                TruthSourceKind::Matrix,
+                matrix_source_id(row.source_id()),
+                &matrix_digest,
+            )
+        }));
+        group_digests.extend(
+            prepared
+                .matrix
+                .population_ids()
+                .iter()
+                .map(|population_id| {
+                    named_digest(
+                        TruthSourceKind::Matrix,
+                        population_id.as_str(),
+                        &matrix_digest,
+                    )
+                }),
+        );
+        deduplicate_digests(&mut source_digests);
+    }
+    Ok(TruthDocument {
+        header: TruthHeader {
+            document_kind: TRUTH_DOCUMENT_KIND.to_owned(),
+            schema_version: TRUTH_SCHEMA_VERSION.to_owned(),
+            execution_id: execution_id.to_owned(),
+            reference_id: reference.id().as_str().to_owned(),
+            reference_content_sha256: reference_content_sha256(reference),
+            coordinate_convention: TRUTH_COORDINATE_CONVENTION.to_owned(),
+            copy_count: 0,
+            genotype_count: 0,
+            source_digests,
+            group_digests,
+        },
+        records: vec![],
+    })
+}
+
+fn prepared_matrix_digest(
+    prepared: &PreparedPopulationSnvsForExecution,
+    workspace: &ExecutionWorkspace,
+) -> Option<String> {
+    workspace
+        .artifacts()
+        .iter()
+        .find(|artifact| artifact.id == "population-snvs-tsv")
+        .map(|artifact| artifact.digest.clone())
+        .or_else(|| match &prepared.publication {
+            PopulationSnvsPublication::Reuse { matrix_sha256, .. } => Some(matrix_sha256.clone()),
+            PopulationSnvsPublication::Publish { .. } => None,
+        })
+}
+
+fn matrix_source_id(source_id: &str) -> &str {
+    if source_id.is_empty() {
+        "MATRIX_DEFAULT"
+    } else {
+        source_id
+    }
+}
+
+fn deduplicate_digests(digests: &mut Vec<NamedDigest>) {
+    digests.sort_by(|left, right| left.source.cmp(&right.source));
+    digests.dedup_by(|left, right| left.source == right.source);
+}
+
+fn named_digest(kind: TruthSourceKind, source_id: &str, sha256: &str) -> NamedDigest {
+    NamedDigest {
+        source: TruthSourceRef {
+            kind,
+            source_id: source_id.to_owned(),
+        },
+        sha256: sha256.to_owned(),
     }
 }
 
@@ -394,6 +591,7 @@ enum PopulationSnvsPublication {
     },
     Reuse {
         metadata_sha256: String,
+        matrix_sha256: String,
         normalization_audit: serde_json::Value,
     },
 }
@@ -450,8 +648,8 @@ fn prepare_population_snvs_for_execution(
             }
         }
         crate::application::EffectivePopulationSnvs::Reuse { metadata_path } => {
-            let (matrix, _, metadata_sha256, normalization_audit) =
-                validate_reusable_population_snvs(
+            let (matrix, _, metadata_sha256, normalization_audit, matrix_sha256) =
+                validate_reusable_population_snvs_with_matrix_sha256(
                     metadata_path,
                     reference,
                     &prepared_reference_fasta_digest(prepared_reference)?,
@@ -465,6 +663,7 @@ fn prepare_population_snvs_for_execution(
                 matrix,
                 publication: PopulationSnvsPublication::Reuse {
                     metadata_sha256,
+                    matrix_sha256,
                     normalization_audit,
                 },
             }
@@ -488,6 +687,7 @@ fn publish_prepared_population_snvs(
         }
         PopulationSnvsPublication::Reuse {
             metadata_sha256,
+            matrix_sha256: _,
             normalization_audit,
         } => Ok(Some(PopulationSnvsManifestLink {
             mode: "reuse".to_owned(),

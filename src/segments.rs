@@ -44,17 +44,40 @@ impl CanonicalBase {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ModificationProvenance {
     event_id: EventId,
+    origin: ModificationOrigin,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ModificationOrigin {
+    Explicit,
+    Random,
 }
 
 impl ModificationProvenance {
     #[must_use]
     pub const fn new(event_id: EventId) -> Self {
-        Self { event_id }
+        Self {
+            event_id,
+            origin: ModificationOrigin::Explicit,
+        }
+    }
+
+    #[must_use]
+    pub const fn random(event_id: EventId) -> Self {
+        Self {
+            event_id,
+            origin: ModificationOrigin::Random,
+        }
     }
 
     #[must_use]
     pub const fn event_id(&self) -> &EventId {
         &self.event_id
+    }
+
+    #[must_use]
+    pub const fn origin(&self) -> ModificationOrigin {
+        self.origin
     }
 }
 
@@ -294,18 +317,19 @@ pub struct SegmentChain {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CurrentIndelEvent {
     Snp {
-        event_id: EventId,
-        position: BasePosition,
+        snp: SnpModification,
     },
     Insertion {
         event_id: EventId,
         point: u64,
         bases: Arc<[u8]>,
+        provenance: ModificationProvenance,
     },
     Deletion {
         event_id: EventId,
         start: u64,
         end: u64,
+        provenance: ModificationProvenance,
     },
 }
 
@@ -313,9 +337,8 @@ impl CurrentIndelEvent {
     #[must_use]
     pub const fn event_id(&self) -> &EventId {
         match self {
-            Self::Snp { event_id, .. }
-            | Self::Insertion { event_id, .. }
-            | Self::Deletion { event_id, .. } => event_id,
+            Self::Snp { snp } => snp.provenance().event_id(),
+            Self::Insertion { event_id, .. } | Self::Deletion { event_id, .. } => event_id,
         }
     }
 }
@@ -553,8 +576,7 @@ impl SegmentChain {
             .iter()
             .position(|existing| existing.position().offset() > position)
             .unwrap_or(snps.len());
-        let event_id = snp.provenance().event_id().clone();
-        let event_position = snp.position().clone();
+        let event = snp.clone();
         snps.insert(insert_at, snp);
         pieces[index] = CurrentIndelPiece::Source(CurrentSourcePiece::new(
             source.source.clone(),
@@ -566,10 +588,7 @@ impl SegmentChain {
                 pieces: Arc::from(pieces),
                 events: Arc::from({
                     let mut events = state.events.to_vec();
-                    events.push(CurrentIndelEvent::Snp {
-                        event_id,
-                        position: event_position,
-                    });
+                    events.push(CurrentIndelEvent::Snp { snp: event });
                     events
                 }),
             }),
@@ -631,6 +650,7 @@ impl SegmentChain {
             event_id: provenance.event_id().clone(),
             point,
             bases,
+            provenance,
         });
         Ok(Self {
             segments: self.segments.clone(),
@@ -671,6 +691,7 @@ impl SegmentChain {
             event_id: provenance.event_id().clone(),
             start,
             end,
+            provenance,
         });
         Ok(Self {
             segments: self.segments.clone(),

@@ -1657,6 +1657,9 @@ pub(crate) fn parse_general_manifest_bytes(
         .iter()
         .map(|record| (record.id.as_str(), record.kind.as_str()))
         .collect::<BTreeMap<_, _>>();
+    if state == UnitState::Complete {
+        require_truth_artifact(&records, path)?;
+    }
 
     let configuration_input = object
         .get("configuration_input")
@@ -1710,6 +1713,9 @@ pub(crate) fn parse_general_manifest_bytes(
         require_artifact_kind(&catalog, "population-snvs-tsv", "population_snvs_tsv", path)?;
         expected_minimum.insert("population-snvs-tsv");
     }
+    if state == UnitState::Complete {
+        expected_minimum.insert("truth-jsonl");
+    }
     for (reference_id, artifact_id) in &references {
         if !reductions.derived_reference_ids.contains(reference_id) {
             expected_minimum.insert(artifact_id.as_str());
@@ -1753,6 +1759,22 @@ pub(crate) fn parse_general_manifest_bytes(
         UnitState::Incomplete => unreachable!("manifest parser never constructs incomplete"),
     }
     Ok(records)
+}
+
+fn require_truth_artifact(records: &[ArtifactRecord], path: &Path) -> Result<(), Diagnostic> {
+    let Some(truth) = records.iter().find(|artifact| artifact.id == "truth-jsonl") else {
+        return Err(manifest_error(
+            path,
+            "falta el artefacto obligatorio truth-jsonl",
+        ));
+    };
+    if truth.kind != "truth_jsonl" || truth.path != "outputs/truth.jsonl" {
+        return Err(manifest_error(
+            path,
+            "truth-jsonl debe tener clase truth_jsonl y ruta outputs/truth.jsonl",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_output_categories(

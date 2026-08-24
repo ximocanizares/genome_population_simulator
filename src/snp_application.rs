@@ -109,7 +109,7 @@ impl ApplicableSnp {
             origin: SnpOrigin::PopulationMatrix {
                 variant_id: row.variant_id().clone(),
                 population_id: row.population_id().clone(),
-                source_id: row.source_id().to_owned(),
+                source_id: matrix_source_id(row.source_id()).to_owned(),
             },
         })
     }
@@ -154,6 +154,17 @@ impl ApplicableSnp {
             )
             .map_err(SnpApplicationError::Segment),
         }
+    }
+}
+
+/// La columna TSV `source_id` puede quedar vacía. El estado de dominio no
+/// propaga ese valor no identificable a `truth.jsonl`: la matriz canónica es
+/// entonces la fuente publicada común de esas filas.
+fn matrix_source_id(source_id: &str) -> &str {
+    if source_id.is_empty() {
+        "MATRIX_DEFAULT"
+    } else {
+        source_id
     }
 }
 

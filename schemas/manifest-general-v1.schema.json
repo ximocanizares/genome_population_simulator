@@ -71,6 +71,19 @@
           "configuration_input": { "$ref": "#/$defs/configuration_input" },
           "effective_config_artifact_id": { "$ref": "#/$defs/non_empty_id" },
           "references": { "minItems": 1 },
+          "artifacts": {
+            "contains": {
+              "type": "object",
+              "required": ["id", "kind", "path"],
+              "properties": {
+                "id": { "const": "truth-jsonl" },
+                "kind": { "const": "truth_jsonl" },
+                "path": { "const": "outputs/truth.jsonl" }
+              }
+            },
+            "minContains": 1,
+            "maxContains": 1
+          },
           "reference_reductions": {
             "items": { "properties": { "state": { "const": "complete" } } }
           },

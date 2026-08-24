@@ -13,6 +13,7 @@ fn header() -> TruthHeader {
         schema_version: TRUTH_SCHEMA_VERSION.into(),
         execution_id: "RUN_01".into(),
         reference_id: "REF_main".into(),
+        reference_content_sha256: "c".repeat(64),
         coordinate_convention: TRUTH_COORDINATE_CONVENTION.into(),
         copy_count: 2,
         genotype_count: 1,
@@ -63,6 +64,21 @@ fn copy(index: u8) -> HaplotypeCopyRecord {
             },
             modifications: vec![],
         }],
+        current_pieces: vec![TruthCurrentPiece::Source {
+            source: SegmentSource {
+                source: TruthSourceRef {
+                    kind: TruthSourceKind::Reference,
+                    source_id: "REF_main".into(),
+                },
+                reference_id: "REF_main".into(),
+                sequence_id: "chr1".into(),
+                start: 0,
+                end: 8,
+                sequence_length: 8,
+            },
+            snps: vec![],
+        }],
+        history: vec![],
     }
 }
 
@@ -71,12 +87,16 @@ fn genotype() -> GenotypeRecord {
         case_id: "CASE_01".into(),
         reference_id: "REF_main".into(),
         individual_id: "IND_01".into(),
+        case_kind: GenotypeCaseKind::Snp,
         locus: TruthLocus {
             sequence_id: "chr1".into(),
             start: 2,
             end: 3,
         },
-        alleles: vec!["A".into(), "G".into()],
+        alleles: vec![
+            TruthAllele::Reference,
+            TruthAllele::Snp { base: "G".into() },
+        ],
         allele_dosages: vec![1, 1],
         carriers: vec![
             AlleleCarrier {
@@ -100,6 +120,102 @@ fn valid_document() -> TruthDocument {
             TruthRecord::Genotype(genotype()),
         ],
     }
+}
+
+#[test]
+fn structural_alleles_allow_partial_insertion_survival_but_reject_domain_boundaries() {
+    let mut document = valid_document();
+    let TruthRecord::Genotype(genotype) = document.records.last_mut().expect("genotype") else {
+        panic!("genotype record");
+    };
+    genotype.case_kind = GenotypeCaseKind::Indel;
+    genotype.locus = TruthLocus {
+        sequence_id: "chr1".into(),
+        start: 2,
+        end: 2,
+    };
+    genotype.alleles = vec![
+        TruthAllele::Reference,
+        TruthAllele::Insertion {
+            event_id: "INS_01".into(),
+            // El evento original es largo, pero el enlace muestra que solo
+            // una parte sigue viva después de una deleción posterior.
+            bases: "ACGT".into(),
+            final_haplotype_bases: "AC".into(),
+            source_event: TruthStructuralEvent::Insertion {
+                event_id: "INS_01".into(),
+                point: 2,
+                bases: "ACGT".into(),
+            },
+            piece_links: vec![TruthPieceLink {
+                piece_index: 3,
+                start: 1,
+                end: 2,
+            }],
+        },
+    ];
+    document
+        .validate_structure()
+        .expect("partial surviving insertion");
+
+    let mut invalid_point = document.clone();
+    if let TruthRecord::Genotype(genotype) = invalid_point.records.last_mut().expect("genotype")
+        && let TruthAllele::Insertion { source_event, .. } = &mut genotype.alleles[1]
+    {
+        *source_event = TruthStructuralEvent::Insertion {
+            event_id: "INS_01".into(),
+            point: 0,
+            bases: "ACGT".into(),
+        };
+    }
+    assert!(invalid_point.validate_structure().is_err());
+
+    let mut duplicate_link = document.clone();
+    if let TruthRecord::Genotype(genotype) = duplicate_link.records.last_mut().expect("genotype")
+        && let TruthAllele::Insertion { piece_links, .. } = &mut genotype.alleles[1]
+    {
+        piece_links.push(TruthPieceLink {
+            piece_index: 3,
+            start: 1,
+            end: 2,
+        });
+    }
+    assert!(duplicate_link.validate_structure().is_err());
+
+    let mut out_of_range = document.clone();
+    if let TruthRecord::Genotype(genotype) = out_of_range.records.last_mut().expect("genotype")
+        && let TruthAllele::Insertion { piece_links, .. } = &mut genotype.alleles[1]
+    {
+        piece_links[0].end = 3;
+    }
+    assert!(out_of_range.validate_structure().is_err());
+
+    let mut invalid_deletion = document;
+    let TruthRecord::Genotype(genotype) = invalid_deletion.records.last_mut().expect("genotype")
+    else {
+        unreachable!()
+    };
+    genotype.locus = TruthLocus {
+        sequence_id: "chr1".into(),
+        start: 0,
+        end: 1,
+    };
+    genotype.alleles = vec![
+        TruthAllele::Reference,
+        TruthAllele::Deletion {
+            event_id: "DEL_01".into(),
+            start: 0,
+            end: 1,
+            final_haplotype_bases: "AC".into(),
+            source_event: TruthStructuralEvent::Deletion {
+                event_id: "DEL_01".into(),
+                start: 0,
+                end: 1,
+            },
+            piece_links: vec![],
+        },
+    ];
+    assert!(invalid_deletion.validate_structure().is_err());
 }
 
 #[test]
@@ -139,6 +255,33 @@ fn manual_fixture_lines_are_valid_against_the_external_schema() {
 }
 
 #[test]
+fn external_schema_and_wire_reader_share_u64_integer_boundaries() {
+    let header = include_str!("fixtures/truth-v1/valid.jsonl")
+        .lines()
+        .next()
+        .expect("fixture header");
+    for (name, replacement, expected_valid) in [
+        ("exact-decimal", "2.0", true),
+        ("exact-exponent", "2e0", true),
+        ("negative-zero", "-0.0", true),
+        (
+            "zero-huge-exponent",
+            "0e999999999999999999999999999999999999999999",
+            true,
+        ),
+        ("fraction", "2.5", false),
+        ("u64-maximum", "18446744073709551615", true),
+        ("above-u64", "18446744073709551616", false),
+    ] {
+        assert_raw_schema_result(
+            name,
+            &header.replacen("\"copies\":2", &format!("\"copies\":{replacement}"), 1),
+            expected_valid,
+        );
+    }
+}
+
+#[test]
 fn external_schema_rejects_missing_fields_and_unknown_record_keys() {
     let mut header: Value = serde_json::from_str(
         include_str!("fixtures/truth-v1/valid.jsonl")
@@ -163,6 +306,42 @@ fn external_schema_rejects_missing_fields_and_unknown_record_keys() {
     .expect("copy JSON");
     copy["unexpected"] = json!(true);
     assert_schema_result("copy-unknown-field", &copy, false);
+
+    let structural = |allele: Value| {
+        json!({
+            "record_type":"genotype","case_id":"CASE_02","reference_id":"REF_main","individual_id":"IND_01",
+            "case_kind":"indel","locus":{"sequence_id":"chr1","start":1,"end":2},
+            "alleles":[{"kind":"reference"},allele],"allele_dosages":[1,1],
+            "carriers":[
+                {"allele_index":0,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":0}},
+                {"allele_index":1,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":1}}
+            ]
+        })
+    };
+    assert_schema_result(
+        "deletion-boundary",
+        &structural(json!({
+            "kind":"deletion","event_id":"DEL_01","start":0,"end":1,"final_haplotype_bases":"AC",
+            "source_event":{"kind":"deletion","event_id":"DEL_01","start":1,"end":2},"piece_links":[]
+        })),
+        false,
+    );
+    assert_schema_result(
+        "insertion-empty-links",
+        &structural(json!({
+            "kind":"insertion","event_id":"INS_01","bases":"A","final_haplotype_bases":"AC",
+            "source_event":{"kind":"insertion","event_id":"INS_01","point":1,"bases":"A"},"piece_links":[]
+        })),
+        false,
+    );
+    assert_schema_result(
+        "outer-source-kind-mismatch",
+        &structural(json!({
+            "kind":"insertion","event_id":"INS_01","bases":"A","final_haplotype_bases":"AC",
+            "source_event":{"kind":"deletion","event_id":"INS_01","start":1,"end":2},"piece_links":[{"piece_index":0,"start":0,"end":1}]
+        })),
+        false,
+    );
 }
 
 #[test]

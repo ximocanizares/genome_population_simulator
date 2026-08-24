@@ -432,7 +432,7 @@ pub fn apply_sampled_indels(
             u64::try_from(copy.segments().current_indel_events().len())
                 .map_err(|_| IndelApplicationError::ArithmeticOverflow)?,
         )?;
-        let provenance = ModificationProvenance::new(event_id);
+        let provenance = ModificationProvenance::random(event_id);
         let segments = match candidates[selected] {
             Opportunity::Insertion { point } => {
                 let mut content_rng = derive_subseed(

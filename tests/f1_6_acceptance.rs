@@ -264,7 +264,7 @@ fn assert_artifacts_are_classified_once(
 ) {
     assert_eq!(
         manifest["artifacts"].as_array().expect("artifacts").len(),
-        3 + expected_reductions * 2
+        4 + expected_reductions * 2
     );
     assert!(manifest.get("events").is_none());
     assert!(manifest.get("resolution_evidence").is_none());

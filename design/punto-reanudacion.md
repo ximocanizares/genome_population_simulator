@@ -1,6 +1,6 @@
 # Punto de reanudación
 
-## Estado actual — 24 de agosto de 2026 (cierre F2.3 publicado)
+## Estado actual — 24 de agosto de 2026 (F2.4 cerrada localmente, pendiente de commit)
 
 - F2.3.1–F2.3.7 está cerrada: configuración de fundadores, genotipos HWE/`F`,
   fase multialélica, eventos explícitos, materialización temporal, estadísticas
@@ -15,8 +15,31 @@
 - F2.3 superó revisión independiente y revisión adversarial final. Marimo
   permanece exclusivamente local; el gate reproducible es
   `MARIMO_SKIP_UPDATE_CHECK=1 uv run --frozen marimo check --strict ui/gps_app.py`.
-- El siguiente hito es F2.4.1: definir el esquema externo mínimo e
-  independiente de `truth.jsonl`.
+- F2.4 fija el esquema externo v1 e independiente de `truth.jsonl` en
+  `src/truth_schema.rs` y `schemas/truth-v1.schema.json`, incluyendo
+  fragmentos vigentes, historial y alelos estructurales tipados REF/inserción/
+  deleción. `src/truth_projection.rs` proyecta el estado F2.3 a registros
+  ordenados y publica JSONL UTF-8 por flujo mediante el provisional F1.
+- `src/truth_validation.rs` valida esquema, orden, unicidad, recuentos,
+  digests y relaciones, y reconstruye copias y genotipos usando únicamente
+  `truth.jsonl` y la referencia. La integración registra el artefacto con
+  ruta, tamaño y SHA-256 en el manifiesto; Marimo presenta ese resumen sin
+  cargar el JSONL completo. La evidencia de cierre está en `evidence/f2.4/cierre.md`.
+- La matriz canónica es una entrada obligatoria de F2.4: se valida contra la
+  referencia y exige digests tanto de matriz suministrada/reutilizada como de
+  grupo, incluso cuando un locus queda todo-REF o la matriz vacía fue
+  autorizada. Su identidad se deriva de la huella canónica preparada, separada
+  de los `source_id` heterogéneos de sus filas. Una copia cuyo SNP está
+  cubierto por deleción no recibe `<deleted>`: el caso indel tipado conserva
+  sus portadores y dosis 0..P, el evento fuente, enlaces a fragmentos vigentes
+  y los bytes materializados finales de la copia. La revisión independiente de
+  F2.4.4 y las puertas de cierre F2.4 se han completado localmente; no se ha
+  creado commit.
+- Adaptación aprobada de F2.4.1: `truth.jsonl` v1 conserva además fragmentos
+  vigentes de fuente o inserción, el historial cronológico con procedencia
+  explícita o aleatoria y casos indel activos.
+  Por ello representa inserciones anidadas, deleciones sobre bases insertadas
+  y SNP eliminados sin restringir el estado válido de F2.3.
 - Existe un cambio local ajeno y sin publicar en
   `tests_ui/test_process_adapter.py`; no incluirlo, revertirlo ni atribuirlo a
   F2.3 sin revisarlo explícitamente.
@@ -93,9 +116,8 @@ El plan pasa de 130 a 41 pasos y conserva F2.0–F2.5 y sus seis pausas.
 
 ## Siguiente acción
 
-1. Tras este commit/push, comenzar F2.2.4: validar y preparar matrices
-   suministradas sin modificar el original, aplicando el mismo ciclo de
-   implementación, revisión independiente y corrección.
+1. Revisar la pausa F2.4 y confirmar el cierre local antes de iniciar F2.5.
+   No comenzar VCF hasta esa aprobación.
 
 La revisión directa de simplificación comprobó 41 pasos bien formados, seis
 pausas, 78 REQ exclusivos, 14 compartidos y 9 parciales. Corrigió restos en

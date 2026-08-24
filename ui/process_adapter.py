@@ -306,3 +306,53 @@ def initial_population_statistics_summary(output_directory: Path) -> str:
     if len(populations) > 20:
         lines.append(f"… y {len(populations) - 20} poblaciones más.")
     return "\n".join(lines) or "No hay poblaciones iniciales en el resumen F2.3.5."
+
+
+def truth_artifact_summary(output_directory: Path) -> str:
+    """Read a bounded manifest entry; `truth.jsonl` is never opened by Marimo."""
+    manifest = output_directory / "manifest.json"
+    maximum_bytes = 2_000_000
+    try:
+        if manifest.stat().st_size > maximum_bytes:
+            return "El resumen de verdad no se cargó porque manifest.json supera 2 MB."
+        with manifest.open("rb") as source:
+            document = json.loads(source.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return f"No se pudo leer el manifiesto de resultados: {error}"
+    if not isinstance(document, dict):
+        return "El manifiesto publicado no es un objeto JSON."
+    artifacts = document.get("artifacts")
+    if not isinstance(artifacts, list):
+        return "El manifiesto publicado no contiene un catálogo de artefactos."
+    matches = [
+        artifact
+        for artifact in artifacts
+        if isinstance(artifact, dict)
+        and artifact.get("id") == "truth-jsonl"
+        and artifact.get("kind") == "truth_jsonl"
+    ]
+    if len(matches) != 1:
+        return "El manifiesto no enlaza exactamente un artefacto truth.jsonl válido."
+    artifact = matches[0]
+    path = artifact.get("path")
+    size = artifact.get("size_bytes")
+    checksum = artifact.get("checksum")
+    algorithm = checksum.get("algorithm") if isinstance(checksum, dict) else None
+    digest = checksum.get("digest") if isinstance(checksum, dict) else None
+    if (
+        path != "outputs/truth.jsonl"
+        or not isinstance(size, int)
+        or size < 0
+        or algorithm != "sha256"
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        return "El enlace de truth.jsonl en el manifiesto está incompleto o es inválido."
+    try:
+        truth_path = output_directory / path
+        if not truth_path.is_file() or truth_path.stat().st_size != size:
+            return "El enlace de truth.jsonl en el manifiesto está incompleto o es inválido."
+    except OSError:
+        return "El enlace de truth.jsonl en el manifiesto está incompleto o es inválido."
+    return f"truth.jsonl · ruta={path} · tamaño={size} bytes · SHA-256={digest}"

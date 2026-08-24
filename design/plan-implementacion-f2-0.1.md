@@ -409,21 +409,27 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
 
 **Resultado:** `truth.jsonl` permite reconstruir cada copia sin consultar VCF.
 
-- ✅ F2.4.1. Definir el esquema externo mínimo de `truth.jsonl`.
+- ✅ F2.4.1. Definir y adaptar el esquema externo de `truth.jsonl`.
   - Depende de: PAUSA-F2.3.
   - Procede de: DTC-061; REQ-VER-31 y REQ-SAL-06.
   - Cambia: cabecera y registros de copias/genotipos con versión, orden,
-    identidad, fase, dosis y procedencia.
+    identidad, fase, dosis, procedencia, fragmentos vigentes e historial de
+    modificaciones en coordenadas vigentes; los casos estructurales tipan REF,
+    inserción y deleción, enlazan evento fuente y fragmentos vigentes y llevan
+    los bytes finales materializados de la copia, sin codificar una deleción
+    como alelo SNP.
   - Se comprueba con: fixtures manuales válidos, campos ausentes/duplicados,
     orden, versiones y relaciones rotas.
 
-- ☐ F2.4.2. Proyectar y escribir la verdad por flujo.
+- ✅ F2.4.2. Proyectar y escribir la verdad por flujo.
   - Depende de: F2.4.1 y estado F2.3.
   - Procede de: DTC-004/031/061.
-  - Cambia: proyección pura y escritor JSONL mediante publicación F1.
-  - Se comprueba con: fichero determinista, recuentos, SHA-256, truncado y fallo.
+  - Cambia: proyección pura desde el catálogo de matriz obligatorio (incluido
+    REF) y el estado vigente F2.3; escritor JSONL mediante publicación F1.
+  - Se comprueba con: fichero determinista, recuentos, dosis por copia,
+    SHA-256, truncado, fallo atómico y composiciones de indels.
 
-- ☐ F2.4.3. Reconstruir y validar la verdad independientemente.
+- ✅ F2.4.3. Reconstruir y validar la verdad independientemente.
   - Depende de: F2.4.2.
   - Procede de: DTC-047/061 y ACE-34/62.
   - Cambia: validador de esquema y reconstructor semántico separado de la
@@ -431,13 +437,13 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
   - Se comprueba con: secuencias y genotipos conocidos, mutaciones aisladas y
     funcionamiento con VCF desactivado.
 
-- ☐ F2.4.4. Integrar verdad, manifiesto y presentación Marimo.
+- ✅ F2.4.4. Integrar verdad, manifiesto y presentación Marimo.
   - Depende de: F2.4.2–F2.4.3.
   - Procede de: REQ-SAL-02, REQ-IND-26 y DTC-051/079.
   - Cambia: enlace de artefacto, resumen y acceso desde la UI sin carga completa.
   - Se comprueba con: identidad/ruta/tamaño/SHA, enlace roto y resumen pequeño.
 
-- ☐ F2.4.5. Cerrar integración y trazabilidad F2.4.
+- ✅ F2.4.5. Cerrar integración y trazabilidad F2.4.
   - Depende de: F2.4.1–F2.4.4.
   - Procede de: requisitos y ACE asignados a F2.4.
   - Cambia: pruebas y nota de cierre.

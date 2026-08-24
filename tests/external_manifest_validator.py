@@ -97,6 +97,12 @@ if configuration is not None:
     minimum_ids.add(configuration["artifact_id"])
 if effective_id is not None:
     minimum_ids.add(effective_id)
+if instance["state"] == "complete":
+    truth = catalog.get("truth-jsonl")
+    assert truth is not None
+    assert truth["kind"] == "truth_jsonl"
+    assert truth["path"] == "outputs/truth.jsonl"
+    minimum_ids.add("truth-jsonl")
 for reference_id, artifact_id in references.items():
     if reference_id not in reduction_ids:
         minimum_ids.add(artifact_id)

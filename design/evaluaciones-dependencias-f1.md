@@ -276,3 +276,72 @@ detección de CPU en tiempo de ejecución; no enlaza una biblioteca nativa. Este
 coste y superficie se vigilan en futuras actualizaciones. La aceptación no
 autoriza parchear o sustituir silenciosamente la dependencia ni relajar los
 contratos propios de DTC-041/DTC-043. E3–E8 quedan desbloqueados.
+
+## F2.5.1 — evaluación DTC-043 de VCF/BGZF/índices
+
+**Decisión (24 de agosto de 2026): aceptada para el contrato físico F2.5.1.**
+Se incorporan `noodles-vcf = 0.88.0`, `noodles-csi = 0.56.0`,
+`noodles-tabix = 0.62.0` y `noodles-bgzf = 0.47.0`, todos con pin exacto y
+`default-features = false` en la dependencia directa. `Cargo.lock` fija la
+resolución. Su único propósito es escribir VCF 4.5, BGZF y exactamente un
+índice TBI o CSI desde el adaptador `vcf_contract`; no proyectan alelos, GT,
+verdad ni validadores externos. La cabecera y la selección TBI/CSI se
+comprueban con pruebas propias; `bcftools` y HTSlib siguen fuera del runtime.
+
+- **Estándar, API y mantenimiento:** `noodles-vcf` implementa el escritor VCF
+  y declara `FileFormat::new(4, 5)`; `noodles-tabix` y `noodles-csi` escriben
+  los índices TBI y CSI, y `noodles-bgzf` finaliza el flujo BGZF. La fuente
+  declarada de los cuatro es el repositorio `zaeleus/noodles`; el estado
+  evaluado es exactamente el de los paquetes de crates.io fijados en el lock:
+  VCF 0.88.0, CSI 0.56.0, Tabix 0.62.0 y BGZF 0.47.0. Sus cuatro
+  `.cargo_vcs_info.json` identifican el mismo snapshot
+  `f6a9dd58400a30084226c9c1d0fc300a9468c15a`, con los directorios respectivos
+  `noodles-vcf`, `noodles-csi`, `noodles-tabix` y `noodles-bgzf`. No se pudo
+  verificar actividad o fecha posterior en línea desde este entorno; la
+  aceptación queda condicionada a esos paquetes exactos, al lock y a repetir
+  esta evaluación antes de cualquier actualización. Todos declaran licencia
+  MIT, `build = false` y MSRV 1.89.0, por debajo del toolchain Rust 1.97.1.
+  Sus series `0.x` no prometen estabilidad semver de API: los tipos Noodles no
+  salen del contrato público y las regresiones cubren cabecera, índice y
+  cierre. No se activa `async`; `cargo tree --locked --offline -e features`
+  confirma el grafo efectivo.
+- **Grafo, licencias y seguridad:** las seis entradas nuevas de `Cargo.lock`
+  son los cuatro crates Noodles anteriores, `bit-vec 0.9.1` (Apache-2.0 OR
+  MIT) y `percent-encoding 2.3.2` (MIT OR Apache-2.0). `indexmap 2.14.0`
+  (Apache-2.0 OR MIT) ya estaba resuelto, pero pertenece al subgrafo nuevo de
+  CSI/VCF/Tabix, no a `noodles-fasta`. `bstr 1.13.0` (MIT OR Apache-2.0),
+  `bytes 1.12.1` (MIT), `crossbeam-*` (MIT OR Apache-2.0), `rayon*`
+  (Apache-2.0 OR MIT) y `zlib-rs 0.6.7` (Zlib) sí estaban resueltos por
+  `noodles-fasta 0.66.0`; este cambio los reutiliza, no los añade. Todas son compatibles con la
+  licencia MIT del proyecto. `cargo audit --no-fetch` cargó 1.216 avisos,
+  examinó las 72 dependencias del lock y terminó con código 0. `cargo-license`
+  no está instalado en este entorno; las licencias anteriores se comprobaron
+  en los `Cargo.toml` exactos de la caché y deben repetirse con esa herramienta
+  cuando esté disponible, sin reinterpretar su ausencia como una aprobación.
+- **Construcción y código nativo:** los cuatro crates Noodles nuevos y
+  `bit-vec` declaran `build = false`; no introducen fuente C/C++, enlace
+  nativo ni procesos externos. Sus transitivas reutilizan los cuatro
+  `build.rs` ya auditados de Crossbeam/Rayon en E1: solo emiten configuración
+  Cargo y no ejecutan procesos, red, generación de fuentes ni compilación
+  nativa. `zlib-rs` permanece Rust puro con `unsafe` interno y detección de
+  CPU; no enlaza zlib del sistema.
+- **Rendimiento, distribución y duplicación:** la escritura es por flujo y no
+  materializa VCF completo. El coste nuevo es real: por incompatibilidad entre
+  `noodles-fasta 0.66.0` y la familia VCF, el lock conserva las dos versiones
+  `noodles-bgzf 0.51.0` y `0.47.0`; ambas comparten las transitivas de
+  compresión, pero duplican código compilado y superficie de actualización.
+  No existe una actualización compatible dentro de F2.5.1 que lo elimine, por
+  lo que se acepta acotadamente y se reevaluará al actualizar Noodles. No se
+  añadieron dependencias nativas ni validadores como dependencia de ejecución.
+- **Evidencia reproducible y límite pendiente:** se ejecutaron `cargo metadata
+  --locked --offline --format-version 1 --no-deps`, `cargo tree --locked
+  --offline -e features`, `cargo audit --no-fetch`, las pruebas focales y las
+  puertas Cargo. La puerta externa DTC-066 es
+  `scripts/validate_vcf_external.sh`: exige exactamente `bcftools 1.24` y
+  `tabix (htslib) 1.24`, exige el sidecar exclusivo correcto, conserva en un
+  temporal la salida de `view` y `norm --check-ref e`, las compara sin reparar,
+  consulta por región y reconstruye el mismo tipo de índice solo sobre copias
+  temporales. Sus mutaciones REF, índice opuesto y doble índice deben fallar.
+  El entorno actual aporta 1.21 y 1.19, por tanto esa puerta queda **pendiente
+  y no superada**; la sonda de prueba solo informa versiones y nunca convierte
+  ese estado en éxito.

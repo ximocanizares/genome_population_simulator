@@ -13,7 +13,7 @@ use genome_population_simulator::randomness::{RootSeed, RuntimeSubseedScope, der
 use genome_population_simulator::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
-use genome_population_simulator::segments::{CanonicalBase, CurrentIndelEvent};
+use genome_population_simulator::segments::{CanonicalBase, CurrentIndelEvent, ModificationOrigin};
 use std::sync::OnceLock;
 
 fn reference(bases: &[u8]) -> Reference {
@@ -111,7 +111,9 @@ fn threshold_minus_one_is_applied_as_an_exact_insertion_length() {
     )
     .expect("one exact insertion");
     assert_eq!(first_copy_bases(result.individual(), &reference).len(), 7);
-    let CurrentIndelEvent::Insertion { bases, .. } = &result
+    let CurrentIndelEvent::Insertion {
+        bases, provenance, ..
+    } = &result
         .individual()
         .copies_for(reference.sequences()[0].id())
         .expect("copies")[0]
@@ -121,6 +123,7 @@ fn threshold_minus_one_is_applied_as_an_exact_insertion_length() {
         panic!("expected insertion");
     };
     assert_eq!(bases.len(), 4);
+    assert_eq!(provenance.origin(), ModificationOrigin::Random);
 }
 
 #[test]

@@ -1087,7 +1087,39 @@ pub fn validate_reusable_population_snvs(
     ),
     PopulationSnvsPreparationError,
 > {
-    validate_reusable_population_snvs_with_hooks(
+    validate_reusable_population_snvs_with_matrix_sha256(
+        metadata_path,
+        reference,
+        reference_sha256,
+        tolerance,
+        allow_empty_matrix,
+    )
+    .map(|(prepared, provenance, metadata_sha256, audit, _)| {
+        (prepared, provenance, metadata_sha256, audit)
+    })
+}
+
+/// Igual que [`validate_reusable_population_snvs`], pero conserva además el
+/// SHA-256 de los bytes TSV que se validaron. Los consumidores que publican
+/// procedencia de verdad deben usar esta identidad del recurso, nunca el hash
+/// del documento metadata que lo describe.
+pub fn validate_reusable_population_snvs_with_matrix_sha256(
+    metadata_path: &Path,
+    reference: &Reference,
+    reference_sha256: &str,
+    tolerance: f64,
+    allow_empty_matrix: bool,
+) -> Result<
+    (
+        PreparedPopulationSnvs,
+        PopulationSnvsProvenance,
+        String,
+        Value,
+        String,
+    ),
+    PopulationSnvsPreparationError,
+> {
+    validate_reusable_population_snvs_snapshots(
         metadata_path,
         reference,
         reference_sha256,
@@ -1118,6 +1150,38 @@ pub fn validate_reusable_population_snvs_with_hooks(
     ),
     PopulationSnvsPreparationError,
 > {
+    validate_reusable_population_snvs_snapshots(
+        metadata_path,
+        reference,
+        reference_sha256,
+        tolerance,
+        allow_empty_matrix,
+        after_metadata_snapshot,
+        after_matrix_snapshot,
+    )
+    .map(|(prepared, provenance, metadata_sha256, audit, _)| {
+        (prepared, provenance, metadata_sha256, audit)
+    })
+}
+
+fn validate_reusable_population_snvs_snapshots(
+    metadata_path: &Path,
+    reference: &Reference,
+    reference_sha256: &str,
+    tolerance: f64,
+    allow_empty_matrix: bool,
+    after_metadata_snapshot: impl FnOnce(),
+    after_matrix_snapshot: impl FnOnce(),
+) -> Result<
+    (
+        PreparedPopulationSnvs,
+        PopulationSnvsProvenance,
+        String,
+        Value,
+        String,
+    ),
+    PopulationSnvsPreparationError,
+> {
     let metadata_bytes = fs::read(metadata_path).map_err(|error| {
         PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: format!("no se puede leer metadata_path: {error}"),
@@ -1134,14 +1198,21 @@ pub fn validate_reusable_population_snvs_with_hooks(
         }
     })?;
     after_matrix_snapshot();
-    validate_reusable_population_snvs_bytes(
+    let (prepared, provenance, metadata_sha256, audit) = validate_reusable_population_snvs_bytes(
         &metadata_bytes,
         &matrix_bytes,
         reference,
         reference_sha256,
         tolerance,
         allow_empty_matrix,
-    )
+    )?;
+    Ok((
+        prepared,
+        provenance,
+        metadata_sha256,
+        audit,
+        sha256_bytes(&matrix_bytes),
+    ))
 }
 
 /// Valida las instantáneas exactas que forman un par reutilizable. Esta

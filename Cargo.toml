@@ -10,10 +10,15 @@ publish = false
 blake3 = { version = "=1.8.6", default-features = false, features = ["pure"] }
 getrandom = { version = "=0.4.3", default-features = false }
 libm = { version = "=0.2.16", default-features = false }
+noodles-bgzf = { version = "=0.47.0", default-features = false }
+noodles-csi = { version = "=0.56.0", default-features = false }
 noodles-fasta = { version = "=0.66.0", default-features = false }
+noodles-tabix = { version = "=0.62.0", default-features = false }
+noodles-vcf = { version = "=0.88.0", default-features = false }
 rand_chacha = { version = "=0.10.0", default-features = false }
 rustix = { version = "=1.1.4", default-features = false, features = ["fs", "std"] }
-serde_json = { version = "=1.0.149", default-features = false, features = ["float_roundtrip", "std"] }
+serde_json = { version = "=1.0.149", default-features = false, features = ["arbitrary_precision", "float_roundtrip", "std"] }
+serde = { version = "=1.0.228", default-features = false, features = ["derive", "std"] }
 sha2 = { version = "=0.10.9", default-features = false }
 toml = { version = "=1.1.4", default-features = false, features = ["parse", "std"] }
 

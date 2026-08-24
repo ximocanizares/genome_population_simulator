@@ -32,6 +32,7 @@ def _():
         ProcessAdapterError,
         diagnostic_summary,
         initial_population_statistics_summary,
+        truth_artifact_summary,
         run_toml,
         validate_toml,
     )
@@ -60,6 +61,7 @@ def _():
         direct_event_from_editor_row,
         diagnostic_summary,
         initial_population_statistics_summary,
+        truth_artifact_summary,
         editor_integer,
         effective_incompatible_genotype_authorization,
         explicit_snp_authorization_summary,
@@ -804,6 +806,11 @@ def _(
         if run_result is not None and run_result.succeeded and run_result.output_directory is not None
         else "El resumen F2.3.5 aparecerá tras una ejecución correcta."
     )
+    truth_summary = (
+        truth_artifact_summary(run_result.output_directory)
+        if run_result is not None and run_result.succeeded and run_result.output_directory is not None
+        else "El resumen de truth.jsonl aparecerá tras una ejecución correcta."
+    )
     incompatible_authorization = (
         allow_incompatible_genotypes_control
         if effective_incompatible_genotype_authorization(
@@ -852,6 +859,13 @@ def _(
                 value=founders_summary,
                 label="Resumen de fundadores F2.3.5 (sin cargar secuencias)",
                 rows=5,
+                disabled=True,
+                full_width=True,
+            ),
+            mo.ui.text_area(
+                value=truth_summary,
+                label="Resumen de truth.jsonl (sin cargar el JSONL)",
+                rows=3,
                 disabled=True,
                 full_width=True,
             ),
