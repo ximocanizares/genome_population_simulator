@@ -409,7 +409,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
 
 **Resultado:** `truth.jsonl` permite reconstruir cada copia sin consultar VCF.
 
-- ☐ F2.4.1. Definir el esquema externo mínimo de `truth.jsonl`.
+- ✅ F2.4.1. Definir el esquema externo mínimo de `truth.jsonl`.
   - Depende de: PAUSA-F2.3.
   - Procede de: DTC-061; REQ-VER-31 y REQ-SAL-06.
   - Cambia: cabecera y registros de copias/genotipos con versión, orden,

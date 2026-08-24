@@ -1,11 +1,10 @@
 # Punto de reanudación
 
-## Estado actual — 23 de agosto de 2026 (cierre F2.3, pendiente de publicar)
+## Estado actual — 24 de agosto de 2026 (cierre F2.3 publicado)
 
 - F2.3.1–F2.3.7 está cerrada: configuración de fundadores, genotipos HWE/`F`,
   fase multialélica, eventos explícitos, materialización temporal, estadísticas
-  y controles Marimo locales. Falta únicamente confirmar y publicar este
-  estado en un commit posterior a `0f604fc`.
+  y controles Marimo locales. El cierre está publicado en `2348f37`.
 - `founder_keys` se exige cuando faltan IDs explícitos; es única dentro de cada
   población y deriva IDs estables desde población×clave.
 - La matriz multialélica conserva una representación preparada única de REF y
