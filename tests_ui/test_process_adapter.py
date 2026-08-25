@@ -90,6 +90,30 @@ class ProcessAdapterTests(unittest.TestCase):
         self.assertFalse(session.matches("a = 2\n", binary, base))
         self.assertFalse(session.matches("a = 1\n", binary.with_name("other"), base))
         self.assertFalse(session.matches("a = 1\n", binary, base.parent))
+        self.assertFalse(session.matches("a = 1\n", binary, base, True))
+
+    def test_empty_matrix_authorization_is_an_argument_and_invalidates_the_session(self) -> None:
+        binary = (ROOT / "target/debug/genome-population-simulator").resolve()
+        session = ValidatedSession(
+            "a = 1\n", binary, SUPPORTED_BINARY_VERSION, ROOT, True
+        )
+        self.assertTrue(session.matches("a = 1\n", binary, ROOT, True))
+        with mock.patch.object(
+            subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")
+        ) as run:
+            with tempfile.TemporaryDirectory() as directory:
+                result = run_toml(
+                    session,
+                    "a = 1\n",
+                    binary,
+                    ROOT,
+                    Path(directory) / "new-output",
+                    allow_empty_snv_matrix=True,
+                )
+        self.assertIn("--allow-empty-snv-matrix", result.command)
+        self.assertEqual(result.command[1], "run")
+        self.assertLess(result.command.index("--allow-empty-snv-matrix"), result.command.index("--diagnostics"))
+        run.assert_called_once()
 
     def test_run_rejects_existing_destination_before_invoking_a_process(self) -> None:
         binary = (ROOT / "target/debug/genome-population-simulator").resolve()
