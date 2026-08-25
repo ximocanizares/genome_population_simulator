@@ -1,13 +1,15 @@
 //! F2.5.1: contrato físico, sin proyección de variantes ni lectura de verdad.
 
 use std::fs;
-use std::io::BufRead;
+use std::io::Read;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use genome_population_simulator::identity::{ExecutionId, ReferenceId};
 use genome_population_simulator::vcf_contract::{
-    TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfContig, VcfContractError, VcfHeaderContract, VcfIndexKind,
-    VcfOutputMode, write_vcf_contract,
+    TBI_MAXIMUM_POSITION_EXCLUSIVE, VCF_EXECUTION_META_KEY, VCF_PASS_FILTER_DESCRIPTION,
+    VCF_QUAL_META_KEY, VCF_QUAL_SEMANTICS, VCF_REFERENCE_META_KEY, VcfContig, VcfContractError,
+    VcfHeaderContract, VcfHeaderIdentity, VcfIndexKind, VcfOutputMode, write_vcf_contract,
 };
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
@@ -22,10 +24,28 @@ fn temporary(label: &str) -> std::path::PathBuf {
 
 fn contract(length: u64) -> VcfHeaderContract {
     VcfHeaderContract::new(
+        identity(),
         vec![VcfContig::new("chr1", length).expect("contig")],
         vec!["sample-a".to_owned(), "sample-b".to_owned()],
     )
     .expect("contract")
+}
+
+fn identity() -> VcfHeaderIdentity {
+    VcfHeaderIdentity::new(
+        ReferenceId::parse("ref-main", "VCF test").expect("reference ID"),
+        ExecutionId::parse("run-main", "VCF test").expect("execution ID"),
+    )
+}
+
+fn assert_canonical_declarations(text: &str) {
+    assert!(text.contains(&format!("##{VCF_REFERENCE_META_KEY}=ref-main\n")));
+    assert!(text.contains(&format!("##{VCF_EXECUTION_META_KEY}=run-main\n")));
+    assert!(text.contains(&format!("##{VCF_QUAL_META_KEY}={VCF_QUAL_SEMANTICS}\n")));
+    assert!(text.contains(&format!(
+        "##FILTER=<ID=PASS,Description=\"{VCF_PASS_FILTER_DESCRIPTION}\">\n"
+    )));
+    assert!(text.contains("##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"));
 }
 
 #[test]
@@ -37,6 +57,7 @@ fn text_mode_has_exact_vcf_45_header_and_no_index() {
     let text = fs::read_to_string(&output.vcf).expect("VCF text");
     assert!(text.starts_with("##fileformat=VCFv4.5\n"));
     assert!(text.contains("##contig=<ID=chr1,length=12>\n"));
+    assert_canonical_declarations(&text);
     assert!(
         text.ends_with(
             "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tsample-a\tsample-b\n"
@@ -62,9 +83,10 @@ fn bgzf_tbi_is_selected_below_normative_limit_and_is_readable() {
     let mut index_reader = noodles_tabix::io::Reader::new(fs::File::open(&index).expect("TBI"));
     index_reader.read_index().expect("readable TBI");
     let mut reader = noodles_bgzf::io::Reader::new(fs::File::open(&output.vcf).expect("BGZF"));
-    let mut first_line = String::new();
-    reader.read_line(&mut first_line).expect("header line");
-    assert_eq!(first_line, "##fileformat=VCFv4.5\n");
+    let mut text = String::new();
+    reader.read_to_string(&mut text).expect("read header");
+    assert!(text.starts_with("##fileformat=VCFv4.5\n"));
+    assert_canonical_declarations(&text);
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -92,7 +114,7 @@ fn bgzf_csi_is_selected_at_normative_limit_and_is_compressed() {
 #[test]
 fn contract_rejects_ambiguous_or_invalid_headers() {
     assert_eq!(
-        VcfHeaderContract::new(vec![], vec![]).expect_err("contigs required"),
+        VcfHeaderContract::new(identity(), vec![], vec![]).expect_err("contigs required"),
         VcfContractError::NoContigs
     );
     for invalid in [
@@ -108,11 +130,12 @@ fn contract_rejects_ambiguous_or_invalid_headers() {
     }
     let contig = VcfContig::new("chr1", 1).expect("contig");
     assert!(matches!(
-        VcfHeaderContract::new(vec![contig.clone(), contig], vec![]),
+        VcfHeaderContract::new(identity(), vec![contig.clone(), contig], vec![]),
         Err(VcfContractError::DuplicateContig(_))
     ));
     assert!(matches!(
         VcfHeaderContract::new(
+            identity(),
             vec![VcfContig::new("chr1", 1).expect("contig")],
             vec!["s".into(), "s".into()]
         ),
@@ -123,6 +146,7 @@ fn contract_rejects_ambiguous_or_invalid_headers() {
 #[test]
 fn sequence_id_backed_contigs_admit_the_project_identifier_domain() {
     let contract = VcfHeaderContract::new(
+        identity(),
         vec![
             VcfContig::new("chr1", 12).expect("contig"),
             VcfContig::new("scaffold_02", 13).expect("contig"),
@@ -137,6 +161,7 @@ fn sequence_id_backed_contigs_admit_the_project_identifier_domain() {
 #[test]
 fn index_selection_considers_every_contig_not_only_the_first() {
     let under_limit = VcfHeaderContract::new(
+        identity(),
         vec![
             VcfContig::new("chr1", 12).expect("contig"),
             VcfContig::new("chr2", TBI_MAXIMUM_POSITION_EXCLUSIVE - 1).expect("contig"),
@@ -147,6 +172,7 @@ fn index_selection_considers_every_contig_not_only_the_first() {
     assert_eq!(under_limit.selected_index(), VcfIndexKind::Tbi);
 
     let at_limit = VcfHeaderContract::new(
+        identity(),
         vec![
             VcfContig::new("chr1", 12).expect("contig"),
             VcfContig::new("chr2", TBI_MAXIMUM_POSITION_EXCLUSIVE).expect("contig"),

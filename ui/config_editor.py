@@ -94,6 +94,8 @@ class GeneralForm:
     population_snvs: PopulationSnvsForm | None
     initial_populations: list[InitialPopulationRow]
     direct_events: list[DirectEventRow]
+    # `None` conserva la omisión normativa: no se publica una vista VCF.
+    vcf_output_mode: str | None = None
 
 
 def default_form() -> GeneralForm:
@@ -112,6 +114,7 @@ def default_form() -> GeneralForm:
         population_snvs=None,
         initial_populations=[],
         direct_events=[],
+        vcf_output_mode=None,
     )
 
 
@@ -244,6 +247,7 @@ def parse_general_toml(text: str) -> GeneralForm:
             "population_snvs",
             "initial_populations",
             "direct_events",
+            "vcf_output",
         },
         required={"config_kind", "schema_version", "reference"},
         path="document",
@@ -272,6 +276,11 @@ def parse_general_toml(text: str) -> GeneralForm:
     )
     initial_populations = _parse_initial_populations(document.get("initial_populations", []))
     direct_events = _parse_direct_events(document.get("direct_events", []))
+    vcf_output_mode = (
+        _parse_vcf_output(_mapping(document["vcf_output"], "vcf_output"))
+        if "vcf_output" in document
+        else None
+    )
     return GeneralForm(
         seed,
         ploidy,
@@ -281,7 +290,16 @@ def parse_general_toml(text: str) -> GeneralForm:
         population_snvs,
         initial_populations,
         direct_events,
+        vcf_output_mode,
     )
+
+
+def _parse_vcf_output(table: Mapping[str, Any]) -> str:
+    _keys(table, allowed={"mode"}, required={"mode"}, path="vcf_output")
+    mode = _string(table["mode"], "vcf_output.mode")
+    if mode not in {"text", "bgzf"}:
+        raise EditorError("vcf_output.mode", "debe ser text o bgzf")
+    return mode
 
 
 def _parse_population_snvs(table: Mapping[str, Any]) -> PopulationSnvsForm:
@@ -722,6 +740,12 @@ def render_general_toml(form: GeneralForm) -> str:
                 raise EditorError(f"{path}.kind", "debe ser snp, insertion o deletion")
             events.append(row)
         document.add("direct_events", events)
+    if form.vcf_output_mode is not None:
+        if form.vcf_output_mode not in {"text", "bgzf"}:
+            raise EditorError("vcf_output.mode", "debe ser text o bgzf")
+        vcf_output = tomlkit.table()
+        vcf_output.add("mode", form.vcf_output_mode)
+        document.add("vcf_output", vcf_output)
     return tomlkit.dumps(document)
 
 

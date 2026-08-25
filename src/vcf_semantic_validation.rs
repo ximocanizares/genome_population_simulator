@@ -96,6 +96,11 @@ pub fn validate_vcf_against_truth(
     let mut seen = BTreeSet::new();
     let mut previous = None;
     let mut vcf_45 = false;
+    let mut reference_declarations = 0_u8;
+    let mut execution_declarations = 0_u8;
+    let mut qual_declarations = 0_u8;
+    let mut pass_filter_declarations = 0_u8;
+    let mut gt_declarations = 0_u8;
     let mut gps_case_declarations = 0_u8;
     let mut records_started = false;
     loop {
@@ -121,6 +126,45 @@ pub fn validate_vcf_against_truth(
             }
             if line_number == 1 && content == "##fileformat=VCFv4.5" {
                 vcf_45 = true;
+            }
+            if content.starts_with("##reference=") {
+                reference_declarations = reference_declarations.saturating_add(1);
+                if content != format!("##reference={}", truth.header.reference_id) {
+                    return vcf_error(
+                        line_number,
+                        "declaración reference distinta de la identidad truth F2",
+                    );
+                }
+            }
+            if content.starts_with("##gps_execution_id=") {
+                execution_declarations = execution_declarations.saturating_add(1);
+                if content != format!("##gps_execution_id={}", truth.header.execution_id) {
+                    return vcf_error(
+                        line_number,
+                        "declaración gps_execution_id distinta de la identidad truth F2",
+                    );
+                }
+            }
+            if content.starts_with("##gps_qual=") {
+                qual_declarations = qual_declarations.saturating_add(1);
+                if content != "##gps_qual=." {
+                    return vcf_error(line_number, "declaración gps_qual distinta de QUAL=. en F2");
+                }
+            }
+            if content.starts_with("##FILTER=<") {
+                pass_filter_declarations = pass_filter_declarations.saturating_add(1);
+                if content != "##FILTER=<ID=PASS,Description=\"All filters passed\">" {
+                    return vcf_error(
+                        line_number,
+                        "declaración FILTER distinta de PASS fijo en F2",
+                    );
+                }
+            }
+            if content.starts_with("##FORMAT=<") {
+                gt_declarations = gt_declarations.saturating_add(1);
+                if content != "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">" {
+                    return vcf_error(line_number, "declaración FORMAT distinta de GT fijo en F2");
+                }
             }
             if is_gps_case_declaration(content) {
                 gps_case_declarations = gps_case_declarations.saturating_add(1);
@@ -268,6 +312,18 @@ pub fn validate_vcf_against_truth(
         return vcf_error(
             1,
             "la primera línea debe ser exactamente ##fileformat=VCFv4.5",
+        );
+    }
+    if reference_declarations != 1 || execution_declarations != 1 {
+        return vcf_error(
+            0,
+            "debe existir exactamente una declaración canónica de referencia y ejecución",
+        );
+    }
+    if qual_declarations != 1 || pass_filter_declarations != 1 || gt_declarations != 1 {
+        return vcf_error(
+            0,
+            "deben existir exactamente las declaraciones QUAL=., FILTER=PASS y FORMAT/GT de F2",
         );
     }
     if gps_case_declarations != 1 {

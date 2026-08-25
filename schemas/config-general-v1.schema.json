@@ -78,7 +78,8 @@
       "properties": {
         "mode": {"enum": ["text", "bgzf"], "x-gps-control": "select"}
       },
-      "description": "Vista VCF opcional de la verdad; ausente significa que no se genera VCF."
+      "description": "Vista VCF opcional de la verdad; ausente significa que no se genera VCF.",
+      "x-gps-tab": "Salidas"
     }
   },
   "$defs": {

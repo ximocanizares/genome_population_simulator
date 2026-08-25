@@ -457,22 +457,26 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
 **Resultado:** exactamente un VCF 4.5 multimuestra representa la verdad F2 con
 GT faseado, dosis y procedencia correctos.
 
-- ☐ F2.5.1. Incorporar el contrato VCF y sus validadores.
+- ✅ F2.5.1. Incorporar el contrato VCF y sus validadores locales.
   - Depende de: PAUSA-F2.4.
   - Procede de: DTC-062/063/066; REQ-FMT-05/06/07.
-  - Cambia: dependencia/escritor aprobados y validación externa
-    `bcftools`/HTSlib solo en pruebas.
-  - Se comprueba con: evaluación de dependencia, texto, BGZF+TBI y BGZF+CSI.
+  - Cambia: dependencia/escritor aprobados, cabecera tipada con
+    `reference_id` efectivo y `execution_id` derivado (el conjunto directo F2),
+    y declaraciones fijas `QUAL=.`/`FILTER=PASS`/`FORMAT=GT`; validación
+    externa `bcftools`/HTSlib solo en pruebas.
+  - Se comprueba localmente con: evaluación de dependencia, texto, BGZF+TBI y
+    BGZF+CSI. DTC-066 externo con `bcftools`/`tabix` 1.24 queda pendiente.
 
-- ☐ F2.5.2. Proyectar y normalizar alelos desde la verdad.
+- ✅ F2.5.2. Proyectar y normalizar alelos desde la verdad.
   - Depende de: F2.4 y F2.5.1.
   - Procede de: DTC-064; REQ-VER-15/16/17/30/44.
   - Cambia: intervalo REF común, recorte, alineamiento izquierdo y orden
     determinista.
-  - Se comprueba con: SNP, inserción, deleción, solapamiento y comparación con
-    normalizador externo sin repararlo.
+  - Se comprueba localmente con: SNP, inserción, deleción y solapamiento. La
+    comparación DTC-066 con normalizador externo 1.24 queda pendiente y no
+    repara ni sustituye la normalización local.
 
-- ☐ F2.5.3. Agrupar alelos y calcular GT faseado.
+- ✅ F2.5.3. Agrupar alelos y calcular GT faseado.
   - Depende de: F2.5.2.
   - Procede de: DTC-064/065; REQ-VER-02/06/12/32 a REQ-VER-41/47.
   - Cambia: un registro multialélico por posición F2, ALT y GT de todas las
@@ -480,7 +484,7 @@ GT faseado, dosis y procedencia correctos.
   - Se comprueba con: varios ALT/casos/copias, ploidías 1/2/10, orden, duplicados
     y dosis manual.
 
-- ☐ F2.5.4. Aplicar `N` y el complemento condicional.
+- ✅ F2.5.4. Aplicar `N` y el complemento condicional.
   - Depende de: F2.5.2–F2.5.3.
   - Procede de: DTC-032/065; REQ-VER-23 a REQ-VER-26.
   - Cambia: omisión o representación válida y ausencia del complemento cuando
@@ -497,20 +501,23 @@ GT faseado, dosis y procedencia correctos.
     único, destino existente, fallo de índice y SHA-256. La aceptación externa
     DTC-066 con `bcftools`/`tabix` 1.24 permanece pendiente y no se acredita aquí.
 
-- ☐ F2.5.6. Validar semánticamente VCF contra verdad y referencia.
+- ✅ F2.5.6. Validar semánticamente VCF contra verdad y referencia.
   - Depende de: F2.5.5.
   - Procede de: DTC-066; REQ-VAL-28.
   - Cambia: comparador independiente de FASTA+`truth.jsonl`+VCF.
   - Se comprueba con: REF/ALT/GT/fase/dosis/muestras/`GPS_CASE`, mutaciones
     aisladas y prueba de que VCF nunca alimenta la verdad.
+    DTC-066 externo con `bcftools`/`tabix` 1.24 sigue pendiente y no sustituye
+    este comparador independiente local.
 
-- ☐ F2.5.7. Integrar VCF en Marimo y cerrar F2.
+- ✅ F2.5.7. Integrar VCF en Marimo y cerrar F2 localmente.
   - Depende de: F2.5.1–F2.5.6.
   - Procede de: DTC-051/079, requisitos y ACE asignados a F2.5.
   - Cambia: controles de salida, resumen/enlace, recorrido completo y nota de
     cierre.
-  - Se comprueba con: UI/TOML equivalentes, configuración→verdad→VCF,
-    validadores externos y puertas comunes.
+  - Se comprueba con: UI/TOML equivalentes, configuración→verdad→VCF y puertas
+    comunes. DTC-066 externo con `bcftools`/`tabix` 1.24 sigue pendiente hasta
+    disponer de esas versiones; no se acredita por los validadores locales.
 
 > **PAUSA-F2.5 / CIERRE F2.** Revisar de forma independiente las invariantes
 > genómicas, la trazabilidad y el recorrido local completo. No convertir la

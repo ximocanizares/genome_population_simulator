@@ -33,6 +33,7 @@ def _():
         diagnostic_summary,
         initial_population_statistics_summary,
         truth_artifact_summary,
+        vcf_artifact_summary,
         run_toml,
         validate_toml,
     )
@@ -62,6 +63,7 @@ def _():
         diagnostic_summary,
         initial_population_statistics_summary,
         truth_artifact_summary,
+        vcf_artifact_summary,
         editor_integer,
         effective_incompatible_genotype_authorization,
         explicit_snp_authorization_summary,
@@ -122,6 +124,11 @@ def _(BASES, imported_form, mo):
         full_width=True,
     )
     selected_population_snvs = imported_form.population_snvs
+    vcf_output_mode_control = mo.ui.dropdown(
+        options=["none", "text", "bgzf"],
+        value=imported_form.vcf_output_mode or "none",
+        label="Vista VCF de verdad opcional",
+    )
     population_snvs_mode_control = mo.ui.dropdown(
         options=["none", "supplied", "reuse", "generate"],
         value=(selected_population_snvs.mode if selected_population_snvs else "none"),
@@ -316,6 +323,7 @@ def _(BASES, imported_form, mo):
         population_snvs_spectra_editor,
         initial_populations_editor,
         direct_events_editor,
+        vcf_output_mode_control,
         sequence_editor,
     )
 
@@ -359,6 +367,7 @@ def _(
     initial_populations_editor,
     seed_control,
     sequence_editor,
+    vcf_output_mode_control,
     ordered_editor_rows,
     population_snvs_population_from_editor_row,
 ):
@@ -485,6 +494,11 @@ def _(
             population_snvs=population_snvs,
             initial_populations=authored_initial_populations,
             direct_events=authored_direct_events,
+            vcf_output_mode=(
+                None
+                if str(vcf_output_mode_control.value) == "none"
+                else str(vcf_output_mode_control.value)
+            ),
         )
         preview_toml = render_general_toml(edited_form)
     except (EditorError, KeyError, TypeError, ValueError) as error:
@@ -679,6 +693,8 @@ def _(
     validation_error,
     validation_result,
     diagnostic_summary,
+    vcf_artifact_summary,
+    vcf_output_mode_control,
 ):
     visible_error = authoring_error
     visible_preview = authoring_toml
@@ -747,6 +763,23 @@ def _(
             ),
         ]
     )
+    vcf_mode = str(vcf_output_mode_control.value)
+    outputs_panel = mo.vstack(
+        [
+            mo.md("## Salidas"),
+            vcf_output_mode_control,
+            mo.callout(
+                "No se solicitará VCF; truth.jsonl sigue siendo la verdad obligatoria."
+                if vcf_mode == "none"
+                else (
+                    "Se solicitará un único truth.vcf sin índice."
+                    if vcf_mode == "text"
+                    else "Se solicitará un único truth.vcf.gz con exactamente un índice TBI o CSI."
+                ),
+                kind="info",
+            ),
+        ]
+    )
     unavailable = lambda phase: mo.callout(
         f"Sin controles todavía: esta capacidad se incorpora en {phase}.", kind="neutral"
     )
@@ -811,6 +844,11 @@ def _(
         if run_result is not None and run_result.succeeded and run_result.output_directory is not None
         else "El resumen de truth.jsonl aparecerá tras una ejecución correcta."
     )
+    vcf_summary = (
+        vcf_artifact_summary(run_result.output_directory)
+        if run_result is not None and run_result.succeeded and run_result.output_directory is not None
+        else "El resumen del VCF aparecerá tras una ejecución correcta."
+    )
     incompatible_authorization = (
         allow_incompatible_genotypes_control
         if effective_incompatible_genotype_authorization(
@@ -870,6 +908,13 @@ def _(
                 full_width=True,
             ),
             mo.ui.text_area(
+                value=vcf_summary,
+                label="Resumen del VCF del manifiesto (sin cargar el VCF)",
+                rows=3,
+                disabled=True,
+                full_width=True,
+            ),
+            mo.ui.text_area(
                 value=localized_diagnostics,
                 label="Diagnósticos localizados por pestaña y campo",
                 rows=5,
@@ -901,7 +946,7 @@ def _(
             "Evolución": unavailable("F7"),
             "Familias": unavailable("F8"),
             "Eventos técnicos": unavailable("F3–F5"),
-            "Salidas": unavailable("F2.4–F2.5"),
+            "Salidas": outputs_panel,
             "Revisar y ejecutar": review_panel,
         }
     )

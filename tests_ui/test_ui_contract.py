@@ -52,6 +52,7 @@ class UiContractTests(unittest.TestCase):
                 "seed",
                 "reference",
                 "reduced_references",
+                "vcf_output",
             },
         )
 
@@ -72,6 +73,7 @@ class UiContractTests(unittest.TestCase):
             "initial_populations_editor",
             "direct_events_editor",
             "allow_incompatible_genotypes_control",
+            "vcf_output_mode_control",
         ):
             with self.subTest(control=control):
                 self.assertIn(control, source)
@@ -107,6 +109,7 @@ class UiContractTests(unittest.TestCase):
             "Diagnósticos y logs del proceso",
             "Diagnósticos localizados por pestaña y campo",
             "Resumen de fundadores F2.3.5 (sin cargar secuencias)",
+            "Resumen del VCF del manifiesto (sin cargar el VCF)",
         ):
             self.assertIn(f'label="{label}"', source)
         for textual_state in (
@@ -223,6 +226,9 @@ A = 0.25
 length = 1000
 class = "chromosome"
 id = "chr1"
+
+[vcf_output]
+mode = "text"
 """
         ui_toml = render_general_toml(parse_general_toml(manual))
 
@@ -241,6 +247,10 @@ id = "chr1"
                     base / name,
                 )
                 self.assertTrue(execution.succeeded, execution.stdout)
+                self.assertTrue((base / name / "outputs" / "truth.jsonl").is_file())
+                self.assertTrue((base / name / "outputs" / "truth.vcf").is_file())
+                manifest = json.loads((base / name / "manifest.json").read_text())
+                self.assertEqual(manifest["vcf_outputs"][0]["mode"], "text")
                 effective = json.loads(
                     (base / name / "effective-config.json").read_text()
                 )

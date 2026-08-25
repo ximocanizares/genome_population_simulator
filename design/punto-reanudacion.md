@@ -1,6 +1,6 @@
 # Punto de reanudación
 
-## Estado actual — 24 de agosto de 2026 (F2.4 cerrada localmente, pendiente de commit)
+## Estado actual — 25 de agosto de 2026 (F2 cerrada localmente, pendiente de revisión y commit)
 
 - F2.3.1–F2.3.7 está cerrada: configuración de fundadores, genotipos HWE/`F`,
   fase multialélica, eventos explícitos, materialización temporal, estadísticas
@@ -33,8 +33,8 @@
   cubierto por deleción no recibe `<deleted>`: el caso indel tipado conserva
   sus portadores y dosis 0..P, el evento fuente, enlaces a fragmentos vigentes
   y los bytes materializados finales de la copia. La revisión independiente de
-  F2.4.4 y las puertas de cierre F2.4 se han completado localmente; no se ha
-  creado commit.
+  F2.4.4 y las puertas de cierre F2.4 se completaron localmente y quedaron
+  registradas en `f1f3205`.
 - Adaptación aprobada de F2.4.1: `truth.jsonl` v1 conserva además fragmentos
   vigentes de fuente o inserción, el historial cronológico con procedencia
   explícita o aleatoria y casos indel activos.
@@ -43,6 +43,19 @@
 - Existe un cambio local ajeno y sin publicar en
   `tests_ui/test_process_adapter.py`; no incluirlo, revertirlo ni atribuirlo a
   F2.3 sin revisarlo explícitamente.
+- F2.5.1 quedó incorporada junto con la verdad independiente en `f1f3205`;
+  F2.5.2–F2.5.4 (proyección, agrupación y tratamiento de `N`) en `bb99a5d`; y
+  F2.5.5–F2.5.6 (publicación y validador semántico independiente) en
+  `839f56e`. F2.5.1–F2.5.7 están cerradas localmente: F2.5.7 aporta paridad
+  Marimo↔TOML y resumen acotado del manifiesto, y las revisiones finales de
+  contrato, oráculo, recorridos y trazabilidad de F2.5.1–F2.5.7 siguen sin
+  commit. La ruta local configuración→verdad→VCF, los gates Cargo, las pruebas
+  UI y el chequeo estricto Marimo están verdes; la evidencia es
+  `evidence/f2/cierre.md`.
+- DTC-066 sigue pendiente: el entorno observa `bcftools 1.21` y
+  `tabix (htslib) 1.19`, mientras que la puerta externa exige ambos en 1.24.
+  La pausa F2.5 mantiene la revisión independiente de invariantes y
+  trazabilidad antes de continuar F3.
 
 ## Estado histórico — 21 de agosto de 2026 (cierre F2.2.3)
 
@@ -114,10 +127,12 @@ El plan pasa de 130 a 41 pasos y conserva F2.0–F2.5 y sus seis pausas.
 - Se conservan las decisiones biológicas: matriz SNV común, perfiles
   aproximados, HWE/`F`, estado haplotípico, `truth.jsonl` y VCF 4.5.
 
-## Siguiente acción
+## Siguiente acción vigente
 
-1. Revisar la pausa F2.4 y confirmar el cierre local antes de iniciar F2.5.
-   No comenzar VCF hasta esa aprobación.
+1. Provisionar `bcftools 1.24` y `tabix (htslib) 1.24`, ejecutar
+   `scripts/validate_vcf_external.sh` con las tres salidas VCF exigidas y registrar el
+   resultado DTC-066. Hasta entonces la aceptación externa sigue pendiente.
+2. Realizar la revisión independiente de la pausa F2.5 antes de iniciar F3.
 
 La revisión directa de simplificación comprobó 41 pasos bien formados, seis
 pausas, 78 REQ exclusivos, 14 compartidos y 9 parciales. Corrigió restos en

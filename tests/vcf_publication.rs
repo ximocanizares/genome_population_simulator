@@ -1,24 +1,32 @@
 //! F2.5.5: publicación local VCF, catálogo y modos físicos.
 
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::load_and_validate_config;
 use genome_population_simulator::execution::execute_validated_config;
+use genome_population_simulator::identity::{ExecutionId, ReferenceId};
 use genome_population_simulator::integrity::identify_file;
 use genome_population_simulator::results::{
     validate_effective_config_against_manifest_bytes, validate_published_resources,
 };
 use genome_population_simulator::vcf_contract::{
-    TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfContig, VcfHeaderContract, write_vcf_index,
-    write_vcf_records,
+    TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfContig, VcfHeaderContract, VcfHeaderIdentity,
+    write_vcf_index, write_vcf_records,
 };
 use genome_population_simulator::vcf_grouping::{GroupedVcfRecord, PhasedGenotype};
 use serde_json::Value;
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
+
+fn header_identity() -> VcfHeaderIdentity {
+    VcfHeaderIdentity::new(
+        ReferenceId::parse("ref-main", "VCF publication test").expect("reference ID"),
+        ExecutionId::parse("run-main", "VCF publication test").expect("execution ID"),
+    )
+}
 
 struct FailingWriter;
 
@@ -117,6 +125,16 @@ fn explicit_text_vcf_is_complete_and_has_no_index() {
     assert!(!destination.join("outputs/truth.vcf.gz.csi").exists());
     let output = &manifest["vcf_outputs"][0];
     assert_eq!(output["mode"], "text");
+    assert!(text.contains(&format!(
+        "##reference={}\n",
+        output["reference_id"].as_str().expect("reference ID")
+    )));
+    assert!(text.contains(&format!(
+        "##gps_execution_id={}\n",
+        manifest["execution_id"].as_str().expect("execution ID")
+    )));
+    assert!(text.contains("##gps_qual=.\n"));
+    assert!(text.contains("##FILTER=<ID=PASS,Description=\"All filters passed\">\n"));
     assert!(output["index_kind"].is_null());
     assert!(output["index_artifact_id"].is_null());
     let artifact = manifest["artifacts"]
@@ -237,14 +255,24 @@ fn explicit_bgzf_vcf_has_one_readable_tbi_and_cataloged_sha() {
     assert!(vcf.is_file());
     assert!(index.is_file());
     assert!(!destination.join("outputs/truth.vcf.gz.csi").exists());
+    let output = &manifest["vcf_outputs"][0];
     let mut reader = noodles_bgzf::io::Reader::new(fs::File::open(&vcf).expect("BGZF"));
-    let mut first = String::new();
-    reader.read_line(&mut first).expect("read header");
-    assert_eq!(first, "##fileformat=VCFv4.5\n");
+    let mut text = String::new();
+    reader.read_to_string(&mut text).expect("read header");
+    assert!(text.starts_with("##fileformat=VCFv4.5\n"));
+    assert!(text.contains(&format!(
+        "##reference={}\n",
+        output["reference_id"].as_str().expect("reference ID")
+    )));
+    assert!(text.contains(&format!(
+        "##gps_execution_id={}\n",
+        manifest["execution_id"].as_str().expect("execution ID")
+    )));
+    assert!(text.contains("##gps_qual=.\n"));
+    assert!(text.contains("##FILTER=<ID=PASS,Description=\"All filters passed\">\n"));
     noodles_tabix::io::Reader::new(fs::File::open(&index).expect("TBI"))
         .read_index()
         .expect("readable TBI");
-    let output = &manifest["vcf_outputs"][0];
     assert_eq!(output["mode"], "bgzf");
     assert_eq!(output["index_kind"], "tbi");
     let vcf_identity = identify_file(&vcf, PathBuf::from("outputs/truth.vcf.gz")).expect("VCF SHA");
@@ -271,6 +299,7 @@ fn csi_indexes_real_records_and_is_queryable_by_region() {
     let root = temporary("csi");
     fs::create_dir_all(&root).expect("root");
     let header = VcfHeaderContract::new(
+        header_identity(),
         vec![VcfContig::new("chr1", TBI_MAXIMUM_POSITION_EXCLUSIVE).expect("contig")],
         vec!["sample-1".to_owned()],
     )
@@ -319,8 +348,12 @@ fn csi_indexes_real_records_and_is_queryable_by_region() {
 fn index_write_failure_is_reported_before_any_publication_step() {
     let root = temporary("index-failure");
     fs::create_dir_all(&root).expect("root");
-    let header = VcfHeaderContract::new(vec![VcfContig::new("chr1", 12).expect("contig")], vec![])
-        .expect("header");
+    let header = VcfHeaderContract::new(
+        header_identity(),
+        vec![VcfContig::new("chr1", 12).expect("contig")],
+        vec![],
+    )
+    .expect("header");
     let vcf = root.join("truth.vcf.gz");
     let writer = noodles_bgzf::io::Writer::new(fs::File::create(&vcf).expect("VCF"));
     write_vcf_records(writer, &header, &[])

@@ -136,6 +136,23 @@ max_alt_af = 0.9''',
                     parse_general_toml(source)
                 self.assertEqual(raised.exception.path, f"population_snvs.{field}")
 
+    def test_optional_vcf_mode_round_trips_and_omission_stays_default(self) -> None:
+        form = default_form()
+        self.assertIsNone(form.vcf_output_mode)
+        self.assertNotIn("vcf_output", render_general_toml(form))
+
+        for mode in ("text", "bgzf"):
+            with self.subTest(mode=mode):
+                form.vcf_output_mode = mode
+                rendered = render_general_toml(form)
+                self.assertIn("[vcf_output]", rendered)
+                self.assertIn(f'mode = "{mode}"', rendered)
+                self.assertEqual(parse_general_toml(rendered), form)
+
+        with self.assertRaises(EditorError) as raised:
+            parse_general_toml(render_general_toml(default_form()) + "\n[vcf_output]\nmode = \"csi\"\n")
+        self.assertEqual(raised.exception.path, "vcf_output.mode")
+
     def test_initial_populations_and_all_direct_event_branches_round_trip(self) -> None:
         form = default_form()
         form.initial_populations = [

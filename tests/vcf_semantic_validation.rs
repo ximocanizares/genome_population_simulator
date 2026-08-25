@@ -5,7 +5,7 @@ use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use genome_population_simulator::identity::{ReferenceId, SequenceId};
+use genome_population_simulator::identity::{ExecutionId, ReferenceId, SequenceId};
 use genome_population_simulator::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
@@ -15,6 +15,12 @@ use genome_population_simulator::truth_schema::{
 use genome_population_simulator::truth_validation::{
     read_truth_jsonl, reference_content_sha256, validate_and_reconstruct_truth,
 };
+use genome_population_simulator::vcf_contract::{
+    VcfContig, VcfHeaderContract, VcfHeaderIdentity, write_vcf_records,
+};
+use genome_population_simulator::vcf_grouping::group_normalized_alleles;
+use genome_population_simulator::vcf_projection::project_normalized_alleles;
+use genome_population_simulator::vcf_representation::prepare_conditional_vcf_records;
 use genome_population_simulator::vcf_semantic_validation::{
     VcfSemanticValidationError, validate_published_vcf_semantics, validate_vcf_against_truth,
 };
@@ -46,17 +52,78 @@ fn truth() -> String {
 }
 
 fn valid_vcf() -> String {
-    concat!(
-        "##fileformat=VCFv4.5\n",
-        "##INFO=<ID=GPS_CASE,Number=.,Type=String,Description=\"Canonical truth case identifiers contributing an ALT allele\">\n",
-        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tIND_01\n",
+    canonical_vcf(
+        "IND_01",
         "chr1\t3\t.\tA\tG\t.\tPASS\tGPS_CASE=CASE_01\tGT\t1|0\n",
     )
-    .to_owned()
+}
+
+fn canonical_vcf(samples: &str, records: &str) -> String {
+    format!(
+        concat!(
+            "##fileformat=VCFv4.5\n",
+            "##reference=REF_main\n",
+            "##gps_execution_id=RUN_01\n",
+            "##gps_qual=.\n",
+            "##FILTER=<ID=PASS,Description=\"All filters passed\">\n",
+            "##INFO=<ID=GPS_CASE,Number=.,Type=String,Description=\"Canonical truth case identifiers contributing an ALT allele\">\n",
+            "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n",
+            "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t{samples}\n{records}"
+        ),
+        samples = samples,
+        records = records,
+    )
 }
 
 fn parsed_truth() -> genome_population_simulator::truth_schema::TruthDocument {
     read_truth_jsonl(&mut Cursor::new(truth())).expect("valid independent truth fixture")
+}
+
+fn truth_with_fully_deleted_snp() -> genome_population_simulator::truth_schema::TruthDocument {
+    let mut lines = truth()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("truth JSON"))
+        .collect::<Vec<_>>();
+    let source = lines[1]["current_pieces"][0]["source"].clone();
+    let provenance = lines[1]["history"][0]["provenance"].clone();
+    lines[1]["current_pieces"] = serde_json::json!([
+        {"kind":"source", "source": {
+            "source": source["source"].clone(), "reference_id":"REF_main", "sequence_id":"chr1",
+            "start":0, "end":2, "sequence_length":8
+        }, "snps": []},
+        {"kind":"source", "source": {
+            "source": source["source"].clone(), "reference_id":"REF_main", "sequence_id":"chr1",
+            "start":3, "end":8, "sequence_length":8
+        }, "snps": []}
+    ]);
+    lines[1]["history"] = serde_json::json!([
+        {"kind":"snp", "event_id":"EVT_01", "position":2, "provenance":provenance.clone()},
+        {"kind":"deletion", "event_id":"DEL_01", "start":2, "end":3, "provenance":provenance}
+    ]);
+    lines[3] = serde_json::json!({
+        "record_type":"genotype", "case_id":"CASE_DEL", "reference_id":"REF_main",
+        "individual_id":"IND_01", "case_kind":"indel",
+        "locus":{"sequence_id":"chr1", "start":2, "end":3},
+        "alleles":[
+            {"kind":"reference"},
+            {"kind":"deletion", "event_id":"DEL_01", "start":2, "end":3,
+             "final_haplotype_bases":"AAAAAAA",
+             "source_event":{"kind":"deletion", "event_id":"DEL_01", "start":2, "end":3},
+             "piece_links":[]}
+        ],
+        "allele_dosages":[1,1],
+        "carriers":[
+            {"allele_index":1, "copy":{"reference_id":"REF_main", "individual_id":"IND_01", "sequence_id":"chr1", "copy_index":0}},
+            {"allele_index":0, "copy":{"reference_id":"REF_main", "individual_id":"IND_01", "sequence_id":"chr1", "copy_index":1}}
+        ]
+    });
+    let jsonl = lines
+        .into_iter()
+        .map(|line| serde_json::to_string(&line).expect("serialize truth"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    read_truth_jsonl(&mut Cursor::new(jsonl)).expect("truth with a fully deleted SNP")
 }
 
 fn two_alt_two_case_truth() -> genome_population_simulator::truth_schema::TruthDocument {
@@ -379,11 +446,46 @@ fn independent_oracle_accepts_ref_alt_gt_phase_dosage_samples_and_gps_case() {
 }
 
 #[test]
+fn fully_deleted_snp_is_absent_from_truth_and_vcf() {
+    let truth = truth_with_fully_deleted_snp();
+    assert!(
+        truth
+            .records
+            .iter()
+            .filter_map(|record| match record {
+                TruthRecord::Genotype(genotype) => Some(genotype),
+                TruthRecord::HaplotypeCopy(_) => None,
+            })
+            .all(|genotype| genotype.case_id == "CASE_DEL")
+    );
+    let normalized = project_normalized_alleles(&truth, &reference()).expect("project deletion");
+    let grouped =
+        group_normalized_alleles(&truth, &reference(), &normalized).expect("group deletion");
+    let records = prepare_conditional_vcf_records(grouped)
+        .expect("represent deletion")
+        .records;
+    let header = VcfHeaderContract::new(
+        VcfHeaderIdentity::new(
+            reference().id().clone(),
+            ExecutionId::parse("RUN_01", "deleted SNP test").expect("execution ID"),
+        ),
+        vec![VcfContig::new("chr1", 8).expect("contig")],
+        vec!["IND_01".to_owned()],
+    )
+    .expect("header");
+    let vcf = String::from_utf8(
+        write_vcf_records(Vec::new(), &header, &records).expect("write deletion VCF"),
+    )
+    .expect("UTF-8 VCF");
+    assert!(!vcf.contains("\t3\t"));
+    validate_vcf_against_truth(&reference(), &truth, &mut Cursor::new(vcf))
+        .expect("a SNP fully deleted from current truth has no VCF record");
+}
+
+#[test]
 fn independent_oracle_checks_two_alt_two_case_mapping_and_sample_dosages() {
-    let vcf = concat!(
-        "##fileformat=VCFv4.5\n",
-        "##INFO=<ID=GPS_CASE,Number=.,Type=String,Description=\"Canonical truth case identifiers contributing an ALT allele\">\n",
-        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tIND_01\tIND_02\n",
+    let vcf = canonical_vcf(
+        "IND_01\tIND_02",
         "chr1\t3\t.\tA\tG,T\t.\tPASS\tGPS_CASE=CASE_01,CASE_02\tGT\t1|0\t2|0\n",
     );
     validate_vcf_against_truth(
@@ -397,10 +499,8 @@ fn independent_oracle_checks_two_alt_two_case_mapping_and_sample_dosages() {
 #[test]
 fn independent_oracle_composes_final_haplotype_components_before_case_mapping() {
     let (reference, truth) = composed_truth();
-    let vcf = concat!(
-        "##fileformat=VCFv4.5\n",
-        "##INFO=<ID=GPS_CASE,Number=.,Type=String,Description=\"Canonical truth case identifiers contributing an ALT allele\">\n",
-        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tIND_01\n",
+    let vcf = canonical_vcf(
+        "IND_01",
         "chr1\t4\t.\tAA\tT\t.\tPASS\tGPS_CASE=CASE_DEL,CASE_SNP\tGT\t1|0\n",
     );
     validate_vcf_against_truth(&reference, &truth, &mut Cursor::new(vcf))
@@ -410,10 +510,8 @@ fn independent_oracle_composes_final_haplotype_components_before_case_mapping() 
 #[test]
 fn independent_oracle_keeps_an_insertion_bridge_until_all_three_changes_compose() {
     let (reference, truth) = insertion_bridge_truth();
-    let vcf = concat!(
-        "##fileformat=VCFv4.5\n",
-        "##INFO=<ID=GPS_CASE,Number=.,Type=String,Description=\"Canonical truth case identifiers contributing an ALT allele\">\n",
-        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tIND_01\n",
+    let vcf = canonical_vcf(
+        "IND_01",
         "chr1\t2\t.\tCG\tTAA\t.\tPASS\tGPS_CASE=CASE_INS,CASE_SNP1,CASE_SNP2\tGT\t1\n",
     );
     validate_vcf_against_truth(&reference, &truth, &mut Cursor::new(vcf))
@@ -426,8 +524,9 @@ fn independent_oracle_accepts_fixed_alt_for_haploid_diploid_and_decaploid_truth(
         let gt = std::iter::repeat_n("1", usize::from(ploidy))
             .collect::<Vec<_>>()
             .join("|");
-        let vcf = format!(
-            "##fileformat=VCFv4.5\n##INFO=<ID=GPS_CASE,Number=.,Type=String,Description=\"Canonical truth case identifiers contributing an ALT allele\">\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tIND_01\nchr1\t3\t.\tA\tG\t.\tPASS\tGPS_CASE=CASE_01\tGT\t{gt}\n"
+        let vcf = canonical_vcf(
+            "IND_01",
+            &format!("chr1\t3\t.\tA\tG\t.\tPASS\tGPS_CASE=CASE_01\tGT\t{gt}\n"),
         );
         validate_vcf_against_truth(
             &reference(),
@@ -440,12 +539,12 @@ fn independent_oracle_accepts_fixed_alt_for_haploid_diploid_and_decaploid_truth(
 
 #[test]
 fn independent_oracle_allows_one_case_to_repeat_on_several_records() {
-    let vcf = concat!(
-        "##fileformat=VCFv4.5\n",
-        "##INFO=<ID=GPS_CASE,Number=.,Type=String,Description=\"Canonical truth case identifiers contributing an ALT allele\">\n",
-        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tIND_01\n",
-        "chr1\t3\t.\tA\tG\t.\tPASS\tGPS_CASE=CASE_01\tGT\t1|0\n",
-        "chr1\t6\t.\tA\tT\t.\tPASS\tGPS_CASE=CASE_01\tGT\t1|0\n",
+    let vcf = canonical_vcf(
+        "IND_01",
+        concat!(
+            "chr1\t3\t.\tA\tG\t.\tPASS\tGPS_CASE=CASE_01\tGT\t1|0\n",
+            "chr1\t6\t.\tA\tT\t.\tPASS\tGPS_CASE=CASE_01\tGT\t1|0\n",
+        ),
     );
     validate_vcf_against_truth(
         &reference(),
@@ -463,6 +562,10 @@ fn isolated_mutations_reject_each_f2_semantic_invariant() {
         ("GT", valid_vcf().replacen("\t1|0\n", "\t0|1\n", 1)),
         ("dosage", valid_vcf().replacen("\t1|0\n", "\t1|1\n", 1)),
         ("phase", valid_vcf().replacen("\t1|0\n", "\t1/0\n", 1)),
+        (
+            "FORMAT GT:DP",
+            valid_vcf().replacen("\tGT\t1|0\n", "\tGT:DP\t1|0:10\n", 1),
+        ),
         (
             "GPS_CASE",
             valid_vcf().replacen("CASE_01", "CASE_UNKNOWN", 1),
@@ -505,6 +608,50 @@ fn isolated_mutations_reject_each_f2_semantic_invariant() {
             valid_vcf().replacen("GPS_CASE=CASE_01", "GPS_CASE=CASE_01,CASE_01", 1),
         ),
         ("VCF version", valid_vcf().replacen("VCFv4.5", "VCFv4.4", 1)),
+        (
+            "missing reference identity",
+            valid_vcf().replacen("##reference=REF_main\n", "", 1),
+        ),
+        (
+            "swapped reference identity",
+            valid_vcf().replacen("##reference=REF_main", "##reference=REF_other", 1),
+        ),
+        (
+            "missing execution identity",
+            valid_vcf().replacen("##gps_execution_id=RUN_01\n", "", 1),
+        ),
+        (
+            "swapped execution identity",
+            valid_vcf().replacen("##gps_execution_id=RUN_01", "##gps_execution_id=RUN_02", 1),
+        ),
+        (
+            "missing QUAL declaration",
+            valid_vcf().replacen("##gps_qual=.\n", "", 1),
+        ),
+        (
+            "swapped QUAL declaration",
+            valid_vcf().replacen("##gps_qual=.", "##gps_qual=1", 1),
+        ),
+        (
+            "swapped FILTER declaration",
+            valid_vcf().replacen("All filters passed", "Quality below 10", 1),
+        ),
+        (
+            "missing FILTER declaration",
+            valid_vcf().replacen(
+                "##FILTER=<ID=PASS,Description=\"All filters passed\">\n",
+                "",
+                1,
+            ),
+        ),
+        (
+            "missing GT declaration",
+            valid_vcf().replacen(
+                "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n",
+                "",
+                1,
+            ),
+        ),
         (
             "GPS_CASE header Number/Type",
             valid_vcf().replacen("Number=.", "Number=1", 1).replacen(

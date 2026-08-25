@@ -24,11 +24,16 @@ use noodles_vcf::{
     },
 };
 
-use crate::identity::SequenceId;
+use crate::identity::{ExecutionId, ReferenceId, SequenceId};
 use crate::vcf_grouping::GroupedVcfRecord;
 
 pub const VCF_FILE_FORMAT: &str = "VCFv4.5";
 pub const TBI_MAXIMUM_POSITION_EXCLUSIVE: u64 = 1 << 29;
+pub const VCF_REFERENCE_META_KEY: &str = "reference";
+pub const VCF_EXECUTION_META_KEY: &str = "gps_execution_id";
+pub const VCF_QUAL_META_KEY: &str = "gps_qual";
+pub const VCF_QUAL_SEMANTICS: &str = ".";
+pub const VCF_PASS_FILTER_DESCRIPTION: &str = "All filters passed";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VcfOutputMode {
@@ -74,12 +79,49 @@ impl VcfContig {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VcfHeaderContract {
+    identity: VcfHeaderIdentity,
     contigs: Vec<VcfContig>,
     samples: Vec<String>,
 }
 
+/// Identidad de la única vista VCF directa de F2.
+///
+/// F2 aún no tiene conjuntos de escenario: el conjunto es exactamente la
+/// ejecución que lo publica. Por ello el ID de ejecución ya existente, junto
+/// al ID tipado de la referencia efectiva, identifica sin ambigüedad esta
+/// vista sin introducir otra identidad de configuración.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VcfHeaderIdentity {
+    reference_id: ReferenceId,
+    execution_id: ExecutionId,
+}
+
+impl VcfHeaderIdentity {
+    #[must_use]
+    pub const fn new(reference_id: ReferenceId, execution_id: ExecutionId) -> Self {
+        Self {
+            reference_id,
+            execution_id,
+        }
+    }
+
+    #[must_use]
+    pub const fn reference_id(&self) -> &ReferenceId {
+        &self.reference_id
+    }
+
+    #[must_use]
+    pub const fn execution_id(&self) -> &ExecutionId {
+        &self.execution_id
+    }
+}
+
 impl VcfHeaderContract {
-    pub fn new(contigs: Vec<VcfContig>, samples: Vec<String>) -> Result<Self, VcfContractError> {
+    pub fn new(
+        identity: VcfHeaderIdentity,
+        contigs: Vec<VcfContig>,
+        samples: Vec<String>,
+    ) -> Result<Self, VcfContractError> {
         if contigs.is_empty() {
             return Err(VcfContractError::NoContigs);
         }
@@ -95,7 +137,16 @@ impl VcfHeaderContract {
                 return Err(VcfContractError::DuplicateSample(sample.clone()));
             }
         }
-        Ok(Self { contigs, samples })
+        Ok(Self {
+            identity,
+            contigs,
+            samples,
+        })
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> &VcfHeaderIdentity {
+        &self.identity
     }
 
     #[must_use]
@@ -267,6 +318,49 @@ fn build_header(contract: &VcfHeaderContract) -> Result<vcf::Header, VcfContract
         builder = builder.add_sample_name(sample);
     }
     builder = builder
+        .insert(
+            VCF_REFERENCE_META_KEY.parse().map_err(
+                |error: noodles_vcf::header::record::key::other::ParseError| {
+                    VcfContractError::Writer(error.to_string())
+                },
+            )?,
+            contract
+                .identity()
+                .reference_id()
+                .as_str()
+                .to_owned()
+                .into(),
+        )
+        .map_err(|error| VcfContractError::Writer(error.to_string()))?
+        .insert(
+            VCF_EXECUTION_META_KEY.parse().map_err(
+                |error: noodles_vcf::header::record::key::other::ParseError| {
+                    VcfContractError::Writer(error.to_string())
+                },
+            )?,
+            contract
+                .identity()
+                .execution_id()
+                .as_str()
+                .to_owned()
+                .into(),
+        )
+        .map_err(|error| VcfContractError::Writer(error.to_string()))?
+        .insert(
+            VCF_QUAL_META_KEY.parse().map_err(
+                |error: noodles_vcf::header::record::key::other::ParseError| {
+                    VcfContractError::Writer(error.to_string())
+                },
+            )?,
+            VCF_QUAL_SEMANTICS.into(),
+        )
+        .map_err(|error| VcfContractError::Writer(error.to_string()))?
+        .add_filter(
+            "PASS",
+            Map::<noodles_vcf::header::record::value::map::Filter>::new(
+                VCF_PASS_FILTER_DESCRIPTION,
+            ),
+        )
         .add_info(
             "GPS_CASE",
             Map::<noodles_vcf::header::record::value::map::Info>::new(

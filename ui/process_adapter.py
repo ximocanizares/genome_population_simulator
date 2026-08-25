@@ -356,3 +356,96 @@ def truth_artifact_summary(output_directory: Path) -> str:
     except OSError:
         return "El enlace de truth.jsonl en el manifiesto está incompleto o es inválido."
     return f"truth.jsonl · ruta={path} · tamaño={size} bytes · SHA-256={digest}"
+
+
+def vcf_artifact_summary(output_directory: Path) -> str:
+    """Read bounded manifest links for the optional VCF without opening it."""
+    manifest = output_directory / "manifest.json"
+    maximum_bytes = 2_000_000
+    try:
+        if manifest.stat().st_size > maximum_bytes:
+            return "El resumen VCF no se cargó porque manifest.json supera 2 MB."
+        with manifest.open("rb") as source:
+            document = json.loads(source.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        return f"No se pudo leer el manifiesto de resultados: {error}"
+    if not isinstance(document, dict):
+        return "El manifiesto publicado no es un objeto JSON."
+    outputs = document.get("vcf_outputs")
+    artifacts = document.get("artifacts")
+    if not isinstance(outputs, list) or not isinstance(artifacts, list):
+        return "El manifiesto publicado no contiene el catálogo VCF esperado."
+    if not outputs:
+        return "VCF no solicitado: el manifiesto no publica una vista VCF."
+    if len(outputs) != 1 or not isinstance(outputs[0], dict):
+        return "El manifiesto no enlaza exactamente una salida VCF válida."
+
+    output = outputs[0]
+    mode = output.get("mode")
+    vcf_id = output.get("vcf_artifact_id")
+    index_kind = output.get("index_kind")
+    index_id = output.get("index_artifact_id")
+    if output.get("state") != "complete" or mode not in {"text", "bgzf"} or vcf_id != "truth-vcf":
+        return "El enlace VCF en el manifiesto está incompleto o es inválido."
+    if mode == "text" and (index_kind is not None or index_id is not None):
+        return "El enlace VCF en el manifiesto está incompleto o es inválido."
+    if mode == "bgzf" and (index_kind not in {"tbi", "csi"} or index_id != "truth-vcf-index"):
+        return "El enlace VCF en el manifiesto está incompleto o es inválido."
+
+    expected_vcf_path = "outputs/truth.vcf" if mode == "text" else "outputs/truth.vcf.gz"
+    vcf = _cataloged_artifact(artifacts, "truth-vcf", "truth_vcf", expected_vcf_path)
+    if vcf is None or not _physical_artifact_matches(output_directory, vcf):
+        return "El enlace VCF en el manifiesto está incompleto o es inválido."
+    summary = _artifact_summary("truth.vcf" if mode == "text" else "truth.vcf.gz", vcf)
+
+    if mode == "text":
+        return summary
+    expected_index_path = f"outputs/truth.vcf.gz.{index_kind}"
+    expected_index_kind = f"vcf_{index_kind}_index"
+    index = _cataloged_artifact(artifacts, "truth-vcf-index", expected_index_kind, expected_index_path)
+    if index is None or not _physical_artifact_matches(output_directory, index):
+        return "El enlace VCF en el manifiesto está incompleto o es inválido."
+    return f"{summary}\níndice {index_kind.upper()} · {_artifact_summary(Path(expected_index_path).name, index)}"
+
+
+def _cataloged_artifact(
+    artifacts: list[Any], artifact_id: str, kind: str, expected_path: str
+) -> dict[str, Any] | None:
+    matches = [
+        artifact
+        for artifact in artifacts
+        if isinstance(artifact, dict)
+        and artifact.get("id") == artifact_id
+        and artifact.get("kind") == kind
+        and artifact.get("path") == expected_path
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _physical_artifact_matches(output_directory: Path, artifact: dict[str, Any]) -> bool:
+    size = artifact.get("size_bytes")
+    checksum = artifact.get("checksum")
+    algorithm = checksum.get("algorithm") if isinstance(checksum, dict) else None
+    digest = checksum.get("digest") if isinstance(checksum, dict) else None
+    if (
+        not isinstance(size, int)
+        or size < 0
+        or algorithm != "sha256"
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        return False
+    try:
+        path = output_directory / artifact["path"]
+        return path.is_file() and path.stat().st_size == size
+    except OSError:
+        return False
+
+
+def _artifact_summary(label: str, artifact: dict[str, Any]) -> str:
+    checksum = artifact["checksum"]
+    return (
+        f"{label} · ruta={artifact['path']} · tamaño={artifact['size_bytes']} bytes "
+        f"· SHA-256={checksum['digest']}"
+    )

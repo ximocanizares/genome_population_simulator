@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 use std::{fs::File, io::BufRead, path::Path};
 
 use crate::diagnostics::Diagnostic;
+use crate::identity::ExecutionId;
 use crate::publication::ExecutionWorkspace;
 use crate::reference::Reference;
 use crate::results::ArtifactRecord;
@@ -50,7 +51,7 @@ pub fn publish_truth_vcf(
     mode: VcfOutputMode,
 ) -> Result<VcfPublication, Diagnostic> {
     let samples = samples_from_truth(truth);
-    let header = header_contract(reference, samples.clone())?;
+    let header = header_contract(reference, truth, samples.clone())?;
     let normalized = project_normalized_alleles(truth, reference)
         .map_err(|error| vcf_invariant("project", error.to_string()))?;
     let grouped = group_normalized_alleles(truth, reference, &normalized)
@@ -301,16 +302,29 @@ where
 
 fn header_contract(
     reference: &Reference,
+    truth: &TruthDocument,
     samples: Vec<String>,
 ) -> Result<VcfHeaderContract, Diagnostic> {
+    if truth.header.reference_id != reference.id().as_str() {
+        return Err(vcf_invariant(
+            "header",
+            "truth.jsonl y la referencia efectiva no comparten reference_id",
+        ));
+    }
+    let execution_id = ExecutionId::parse(truth.header.execution_id.clone(), "VCF header")
+        .map_err(|error| vcf_invariant("header", format!("{error:?}")))?;
     let contigs = reference
         .sequences()
         .iter()
         .map(|sequence| VcfContig::new(sequence.id().as_str(), sequence.length()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| vcf_invariant("header", error.to_string()))?;
-    VcfHeaderContract::new(contigs, samples)
-        .map_err(|error| vcf_invariant("header", error.to_string()))
+    VcfHeaderContract::new(
+        crate::vcf_contract::VcfHeaderIdentity::new(reference.id().clone(), execution_id),
+        contigs,
+        samples,
+    )
+    .map_err(|error| vcf_invariant("header", error.to_string()))
 }
 
 fn samples_from_truth(truth: &TruthDocument) -> Vec<String> {
@@ -529,6 +543,12 @@ mod tests {
             16
         };
         VcfHeaderContract::new(
+            crate::vcf_contract::VcfHeaderIdentity::new(
+                crate::identity::ReferenceId::parse("ref-main", "VCF publication test")
+                    .expect("reference ID"),
+                crate::identity::ExecutionId::parse("run-main", "VCF publication test")
+                    .expect("execution ID"),
+            ),
             vec![
                 VcfContig::new("chr1", first_length).expect("chr1"),
                 VcfContig::new("chr2", 16).expect("chr2"),

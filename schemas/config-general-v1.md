@@ -41,6 +41,8 @@ independiente.
 campo `mode` es `"text"` para un único `truth.vcf`, o `"bgzf"` para
 `truth.vcf.gz` y exactamente un índice canónico TBI o CSI. Si se omite, no se
 escribe ni publica ningún VCF.
+Marimo conserva esa misma omisión como opción predeterminada y permite elegir
+solo `text` o `bgzf`; Rust sigue validando y resolviendo el índice efectivo.
 
 `normalization_tolerance`, cuando aparece, conserva su literal decimal TOML;
 Rust lo interpreta como `f64` finito en `[0,1e-6]`. Si se omite, su valor
