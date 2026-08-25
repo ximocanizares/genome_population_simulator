@@ -36,3 +36,6 @@ pub mod truth_projection;
 pub mod truth_schema;
 pub mod truth_validation;
 pub mod vcf_contract;
+pub mod vcf_grouping;
+pub mod vcf_projection;
+pub mod vcf_representation;
