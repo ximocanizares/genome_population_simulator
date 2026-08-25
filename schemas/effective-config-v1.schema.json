@@ -31,6 +31,12 @@
     "authorizations": {"$ref": "#/$defs/authorizations"},
     "initial_populations": {"type": "array", "items": {"$ref": "#/$defs/initial_population"}},
     "direct_events": {"type": "array", "items": {"$ref": "#/$defs/direct_event"}},
+    "vcf_output": {
+      "oneOf": [
+        {"type": "null"},
+        {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"enum": ["text", "bgzf"]}}}
+      ]
+    },
     "population_snvs": {
       "oneOf": [
         {"type": "null"},

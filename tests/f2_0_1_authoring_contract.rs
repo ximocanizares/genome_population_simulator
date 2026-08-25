@@ -48,6 +48,7 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
             "reference".to_owned(),
             "schema_version".to_owned(),
             "seed".to_owned(),
+            "vcf_output".to_owned(),
         ])
     );
     assert_eq!(

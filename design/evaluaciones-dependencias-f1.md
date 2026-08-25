@@ -288,6 +288,13 @@ resolución. Su único propósito es escribir VCF 4.5, BGZF y exactamente un
 verdad ni validadores externos. La cabecera y la selección TBI/CSI se
 comprueban con pruebas propias; `bcftools` y HTSlib siguen fuera del runtime.
 
+**Ampliación F2.5.5 (25 de agosto de 2026).** `noodles-core = 0.20.0`, ya
+resuelto transitivamente por la misma familia Noodles, se declara también de
+forma directa con pin exacto y `default-features = false`. Solo aporta el tipo
+de posición para la relectura y consulta regional local del índice ya escrito;
+no cambia el grafo de `Cargo.lock`, no abre una frontera pública ni añade una
+biblioteca nativa o un validador externo.
+
 - **Estándar, API y mantenimiento:** `noodles-vcf` implementa el escritor VCF
   y declara `FileFormat::new(4, 5)`; `noodles-tabix` y `noodles-csi` escriben
   los índices TBI y CSI, y `noodles-bgzf` finaliza el flujo BGZF. La fuente

@@ -206,6 +206,13 @@ pub struct DeclaredReducedReference {
     pub target: DeclaredReductionTarget,
 }
 
+/// Solicitud explícita de la vista VCF de verdad. Ausente significa que la
+/// ejecución conserva únicamente `truth.jsonl`, conforme a REQ-SAL-06.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredVcfOutput {
+    pub mode: Located<String>,
+}
+
 /// Selección declarada del recurso común de frecuencias SNV.
 ///
 /// Solo describe la frontera de autoría. La preparación, la reutilización
@@ -303,6 +310,7 @@ pub struct DeclaredGeneralConfig {
     reference: DeclaredReference,
     reduced_references: Vec<DeclaredReducedReference>,
     population_snvs: Option<DeclaredPopulationSnvs>,
+    vcf_output: Option<DeclaredVcfOutput>,
     initial_populations: Vec<DeclaredInitialPopulation>,
     direct_events: Vec<DeclaredDirectEvent>,
 }
@@ -325,6 +333,7 @@ impl DeclaredGeneralConfig {
             reference,
             reduced_references,
             population_snvs,
+            vcf_output: None,
             initial_populations: Vec::new(),
             direct_events: Vec::new(),
         }
@@ -340,6 +349,11 @@ impl DeclaredGeneralConfig {
 
     pub(crate) fn with_direct_events(mut self, direct_events: Vec<DeclaredDirectEvent>) -> Self {
         self.direct_events = direct_events;
+        self
+    }
+
+    pub(crate) fn with_vcf_output(mut self, vcf_output: Option<DeclaredVcfOutput>) -> Self {
+        self.vcf_output = vcf_output;
         self
     }
 
@@ -379,6 +393,11 @@ impl DeclaredGeneralConfig {
     #[must_use]
     pub const fn population_snvs(&self) -> Option<&DeclaredPopulationSnvs> {
         self.population_snvs.as_ref()
+    }
+
+    #[must_use]
+    pub const fn vcf_output(&self) -> Option<&DeclaredVcfOutput> {
+        self.vcf_output.as_ref()
     }
 
     /// Cohortes directas declaradas; no son estructura poblacional evolutiva.

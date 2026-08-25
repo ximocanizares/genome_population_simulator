@@ -41,8 +41,8 @@ use crate::reference_reduction_io::{
 use crate::results::{
     ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestReductionLink,
     ManifestReferenceLink, PopulationSnvsManifestLink, ReducedReferenceOutput, ReferenceOutput,
-    UnitState, effective_config_document_with_population_snvs, general_manifest_document,
-    json_document_bytes,
+    UnitState, VcfManifestLink, effective_config_document_with_population_snvs,
+    general_manifest_document, json_document_bytes,
 };
 use crate::segments::{CanonicalBase, ModificationProvenance};
 use crate::small_event_composition::{
@@ -55,6 +55,7 @@ use crate::truth_schema::{
     TruthDocument, TruthHeader, TruthSourceKind, TruthSourceRef,
 };
 use crate::truth_validation::reference_content_sha256;
+use crate::vcf_publication::publish_truth_vcf;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutionOutcome {
@@ -135,6 +136,7 @@ fn execute_validated_config_with_effective_document(
     let mut manifest_reductions = Vec::new();
     let mut published_reductions = Vec::with_capacity(effective.reduced_references().len());
     let mut population_snvs = None;
+    let mut vcf_outputs = Vec::new();
     let started = (|| -> Result<(), Diagnostic> {
         configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
         reference_artifact = Some(write_reference(
@@ -257,7 +259,7 @@ fn execute_validated_config_with_effective_document(
         }
         let reduction_outputs =
             reduction_outputs(effective, &published_reductions, source_artifact);
-        write_execution_truth(
+        let truth = write_execution_truth(
             &mut workspace,
             execution_id.as_str(),
             prepared_reference.reference(),
@@ -269,6 +271,19 @@ fn execute_validated_config_with_effective_document(
                 .ok_or_else(|| internal("execute", "missing configuration artifact"))?,
             effective,
         )?;
+        if let Some(mode) = effective.vcf_output() {
+            let published =
+                publish_truth_vcf(&mut workspace, prepared_reference.reference(), &truth, mode)?;
+            vcf_outputs.push(VcfManifestLink {
+                state: UnitState::Complete,
+                reference_id: published.reference_id,
+                samples: published.samples,
+                mode: published.mode,
+                vcf_artifact_id: published.vcf.id,
+                index_kind: published.index_kind,
+                index_artifact_id: published.index.map(|artifact| artifact.id),
+            });
+        }
         let effective_document =
             transform_effective(effective_config_document_with_population_snvs(
                 effective,
@@ -294,6 +309,7 @@ fn execute_validated_config_with_effective_document(
             references: &manifest_references,
             reduced_references: &manifest_reductions,
             population_snvs: population_snvs.as_ref(),
+            vcf_outputs: &vcf_outputs,
             authorizations,
             artifacts: &artifacts,
             diagnostics: &[],
@@ -349,7 +365,7 @@ fn write_execution_truth(
     reference_artifact: &ArtifactRecord,
     configuration_input: &ConfigurationInputRecord,
     effective: &EffectiveConfig,
-) -> Result<(), Diagnostic> {
+) -> Result<TruthDocument, Diagnostic> {
     let document = match (population_snvs, initial_individuals) {
         (Some(prepared), Some(individuals)) => {
             let matrix_digest = prepared_matrix_digest(prepared, workspace)
@@ -413,7 +429,8 @@ fn write_execution_truth(
         (None, None) => empty_truth_document(execution_id, reference, reference_artifact, None)?,
         _ => return Err(internal("truth", "matrix and initial individuals diverged")),
     };
-    write_truth_artifact(workspace, &document).map(|_| ())
+    write_truth_artifact(workspace, &document)?;
+    Ok(document)
 }
 
 fn empty_truth_document(
@@ -568,6 +585,7 @@ fn publish_controlled_failure(
         references: &[],
         reduced_references: reductions,
         population_snvs: None,
+        vcf_outputs: &[],
         authorizations,
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(cause),
@@ -1543,6 +1561,57 @@ mod tests {
                 "{relative} must depend only on the authoritative copy"
             );
         }
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn vcf_index_io_failure_publishes_only_the_controlled_failed_result() {
+        let root = std::env::temp_dir().join(format!(
+            "gps-f2-5-5-index-failure-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test root");
+        let destination = root.join("result");
+        let config = root.join("config.toml");
+        let mut bytes = fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config/general-seeded.toml"),
+        )
+        .expect("fixture");
+        bytes.extend_from_slice(b"\n[vcf_output]\nmode = \"bgzf\"\n");
+        fs::write(&config, bytes).expect("VCF config");
+        let effective = load_and_validate_config(&config).expect("valid VCF config");
+        let injected = Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")
+            .with("path", "outputs/truth.vcf.gz.tbi")
+            .with("operation", "write_index")
+            .with("detail", "injected index writer failure");
+
+        let error = execute_validated_config_with_effective_document(
+            &effective,
+            &destination,
+            ExecutionAuthorizations::default(),
+            |_| Ok(()),
+            std::convert::identity,
+            |_| Err(injected.clone()),
+        )
+        .expect_err("the VCF index I/O failure must fail the publication");
+
+        assert_eq!(error.code(), "GPS-IO-001");
+        assert_eq!(error.exit_code(), 5);
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(destination.join("manifest.json")).expect("failed manifest"),
+        )
+        .expect("manifest JSON");
+        assert_eq!(manifest["state"], "failed");
+        assert_eq!(manifest["diagnostics"][0]["code"], "GPS-IO-001");
+        assert!(
+            manifest["vcf_outputs"]
+                .as_array()
+                .expect("VCF outputs")
+                .is_empty()
+        );
+        assert!(!destination.join("outputs/truth.vcf.gz").exists());
+        assert!(!destination.join("outputs/truth.vcf.gz.tbi").exists());
         fs::remove_dir_all(root).expect("cleanup");
     }
 }

@@ -13,6 +13,7 @@
     "effective_config_artifact_id",
     "references",
     "reference_reductions",
+    "vcf_outputs",
     "authorizations",
     "output_categories",
     "artifacts",
@@ -48,6 +49,11 @@
         { "type": "null" },
         { "$ref": "#/$defs/population_snvs_link" }
       ]
+    },
+    "vcf_outputs": {
+      "type": "array",
+      "maxItems": 1,
+      "items": { "$ref": "#/$defs/vcf_output" }
     },
     "authorizations": { "$ref": "#/$defs/authorizations" },
     "output_categories": { "$ref": "#/$defs/output_categories" },
@@ -248,6 +254,24 @@
       "allOf": [
         {"if": {"properties": {"mode": {"const": "reuse"}}, "required": ["mode"]}, "then": {"properties": {"metadata_artifact_id": {"type": "null"}}}},
         {"if": {"properties": {"mode": {"enum": ["supplied", "generated"]}}, "required": ["mode"]}, "then": {"required": ["metadata_artifact_id"], "properties": {"metadata_artifact_id": {"$ref": "#/$defs/non_empty_id"}}}}
+      ]
+    },
+    "vcf_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reference_id", "samples", "mode", "vcf_artifact_id", "index_kind", "index_artifact_id"],
+      "properties": {
+        "state": {"const": "complete"},
+        "reference_id": {"$ref": "#/$defs/non_empty_id"},
+        "samples": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/non_empty_id"}},
+        "mode": {"enum": ["text", "bgzf"]},
+        "vcf_artifact_id": {"$ref": "#/$defs/non_empty_id"},
+        "index_kind": {"oneOf": [{"enum": ["tbi", "csi"]}, {"type": "null"}]},
+        "index_artifact_id": {"oneOf": [{"$ref": "#/$defs/non_empty_id"}, {"type": "null"}]}
+      },
+      "allOf": [
+        {"if": {"properties": {"mode": {"const": "text"}}, "required": ["mode"]}, "then": {"properties": {"index_kind": {"type": "null"}, "index_artifact_id": {"type": "null"}}}},
+        {"if": {"properties": {"mode": {"const": "bgzf"}}, "required": ["mode"]}, "then": {"properties": {"index_kind": {"enum": ["tbi", "csi"]}, "index_artifact_id": {"$ref": "#/$defs/non_empty_id"}}}}
       ]
     },
     "initial_population_statistics": {

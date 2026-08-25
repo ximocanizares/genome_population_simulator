@@ -208,6 +208,7 @@ dependencies = [
  "getrandom",
  "libm",
  "noodles-bgzf 0.47.0",
+ "noodles-core",
  "noodles-csi",
  "noodles-fasta",
  "noodles-tabix",

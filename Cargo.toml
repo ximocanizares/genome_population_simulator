@@ -12,6 +12,7 @@ getrandom = { version = "=0.4.3", default-features = false }
 libm = { version = "=0.2.16", default-features = false }
 noodles-bgzf = { version = "=0.47.0", default-features = false }
 noodles-csi = { version = "=0.56.0", default-features = false }
+noodles-core = { version = "=0.20.0", default-features = false }
 noodles-fasta = { version = "=0.66.0", default-features = false }
 noodles-tabix = { version = "=0.62.0", default-features = false }
 noodles-vcf = { version = "=0.88.0", default-features = false }

@@ -27,6 +27,7 @@ use crate::randomness::{
     derive_subseed, resolve_root_seed,
 };
 use crate::reference_generation::normalize_composition_probabilities;
+use crate::vcf_contract::VcfOutputMode;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ValidatedGeneralSummary {
@@ -188,6 +189,7 @@ pub struct EffectiveConfig {
     population_snvs: Option<EffectivePopulationSnvs>,
     initial_populations: Vec<EffectiveInitialPopulation>,
     direct_events: Vec<EffectiveDirectEvent>,
+    vcf_output: Option<VcfOutputMode>,
 }
 
 /// Origen efectivo del recurso canónico F2.2.7.
@@ -408,6 +410,11 @@ impl EffectiveConfig {
     pub fn direct_events(&self) -> &[EffectiveDirectEvent] {
         &self.direct_events
     }
+
+    #[must_use]
+    pub const fn vcf_output(&self) -> Option<VcfOutputMode> {
+        self.vcf_output
+    }
 }
 
 pub fn load_and_validate_config(path: &Path) -> Result<EffectiveConfig, Diagnostic> {
@@ -615,6 +622,13 @@ pub fn build_effective_config_with_entropy(
     let initial_populations = effective_initial_populations(general, root_seed)?;
     let population_snvs = effective_population_snvs(general)?;
     let direct_events = effective_direct_events(general, &initial_populations, &sequences)?;
+    let vcf_output = general
+        .vcf_output()
+        .map(|output| match output.mode.value().as_str() {
+            "text" => VcfOutputMode::Text,
+            "bgzf" => VcfOutputMode::Bgzf,
+            _ => unreachable!("the TOML adapter validates vcf_output.mode"),
+        });
     if !direct_events.is_empty() && population_snvs.is_none() {
         return Err(config_error(
             general,
@@ -672,6 +686,7 @@ pub fn build_effective_config_with_entropy(
         population_snvs,
         initial_populations,
         direct_events,
+        vcf_output,
     })
 }
 

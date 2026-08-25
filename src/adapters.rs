@@ -10,8 +10,8 @@ use crate::configuration::{
     DeclaredInitialPopulation, DeclaredNumber, DeclaredPopulationSnvs,
     DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
     DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
-    DeclaredReference, DeclaredReferenceSource, DeclaredSequence, ExpectedConfigKind, Located,
-    SequenceClass, SourceLocation, semantic_error,
+    DeclaredReference, DeclaredReferenceSource, DeclaredSequence, DeclaredVcfOutput,
+    ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
 };
 use crate::diagnostics::Diagnostic;
 
@@ -167,6 +167,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
             "population_snvs",
             "initial_populations",
             "direct_events",
+            "vcf_output",
         ],
     )?;
     let seed = optional_located_string(&admitted, table, "seed")?;
@@ -177,6 +178,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
     let population_snvs = parse_population_snvs(&admitted, table)?;
     let initial_populations = parse_initial_populations(&admitted, table)?;
     let direct_events = parse_direct_events(&admitted, table)?;
+    let vcf_output = parse_vcf_output(&admitted, table)?;
     Ok(DeclaredGeneralConfig::new(
         admitted,
         seed,
@@ -187,7 +189,26 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
         population_snvs,
     )
     .with_initial_populations(initial_populations)
-    .with_direct_events(direct_events))
+    .with_direct_events(direct_events)
+    .with_vcf_output(vcf_output))
+}
+
+fn parse_vcf_output(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<Option<DeclaredVcfOutput>, Diagnostic> {
+    let Some(output) = optional_table(admitted, table, "vcf_output")? else {
+        return Ok(None);
+    };
+    check_unknown(admitted, output, &["mode"])?;
+    let mode = required_string(admitted, output, "mode")?;
+    if !matches!(mode.value().as_str(), "text" | "bgzf") {
+        return Err(
+            semantic_error(admitted, "vcf_output.mode", "debe ser text o bgzf")
+                .with("location", mode.location().to_string()),
+        );
+    }
+    Ok(Some(DeclaredVcfOutput { mode }))
 }
 
 fn parse_direct_events(
@@ -930,6 +951,21 @@ fn required_table<'a>(
     value
         .get_ref()
         .as_table()
+        .ok_or_else(|| wrong_type(admitted, field, value, "table"))
+}
+
+fn optional_table<'a>(
+    admitted: &AdmittedToml,
+    table: &'a DeTable<'a>,
+    field: &str,
+) -> Result<Option<&'a DeTable<'a>>, Diagnostic> {
+    let Some(value) = table.get(field) else {
+        return Ok(None);
+    };
+    value
+        .get_ref()
+        .as_table()
+        .map(Some)
         .ok_or_else(|| wrong_type(admitted, field, value, "table"))
 }
 

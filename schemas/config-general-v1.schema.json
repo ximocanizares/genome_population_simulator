@@ -70,6 +70,15 @@
       "items": {"$ref": "#/$defs/direct_event"},
       "default": [],
       "description": "Cambios explícitos por individuo ya faseado; requieren population_snvs e initial_populations."
+    },
+    "vcf_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["text", "bgzf"], "x-gps-control": "select"}
+      },
+      "description": "Vista VCF opcional de la verdad; ausente significa que no se genera VCF."
     }
   },
   "$defs": {

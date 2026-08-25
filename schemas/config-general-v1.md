@@ -13,7 +13,7 @@ schema_version = "1"
 ```
 
 La raíz es cerrada y contiene esas claves, `seed`, `ploidy` y
-`normalization_tolerance` opcionales, `reference` obligatorio,
+`normalization_tolerance` opcionales, `vcf_output` opcional, `reference` obligatorio,
 `reduced_references` opcional, `population_snvs`
 opcional, `initial_populations` opcional y `direct_events` opcional. `ploidy` es una
 ploidía global uniforme entera entre 1 y 10; al omitirse conserva el valor
@@ -36,6 +36,11 @@ alelos, coordenadas o ploidía. `--allow-empty-snv-matrix` conserva su alcance
 independiente.
 
 `seed`, cuando aparece, contiene 256 bits como 64 hexadecimales minúsculos.
+
+`[vcf_output]`, cuando aparece, habilita el VCF final opcional de F2.5.5. Su
+campo `mode` es `"text"` para un único `truth.vcf`, o `"bgzf"` para
+`truth.vcf.gz` y exactamente un índice canónico TBI o CSI. Si se omite, no se
+escribe ni publica ningún VCF.
 
 `normalization_tolerance`, cuando aparece, conserva su literal decimal TOML;
 Rust lo interpreta como `f64` finito en `[0,1e-6]`. Si se omite, su valor

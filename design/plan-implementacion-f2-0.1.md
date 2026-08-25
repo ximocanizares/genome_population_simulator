@@ -488,13 +488,14 @@ GT faseado, dosis y procedencia correctos.
   - Se comprueba con: `N` en REF/ALT, casos representables y campos/fichero
     complementario ausentes.
 
-- ☐ F2.5.5. Escribir, indexar y publicar el VCF.
+- ✅ F2.5.5. Escribir, indexar y publicar el VCF.
   - Depende de: F2.5.3–F2.5.4.
   - Procede de: DTC-063/066; REQ-MAN-27/57/58 y REQ-SAL-12/21.
-  - Cambia: exactamente un VCF, BGZF+TBI/CSI por defecto o texto explícito,
-    manifiesto y unidad de publicación.
-  - Se comprueba con: lectura completa, consulta regional, índice único,
-    destino existente, fallo de índice y SHA-256.
+  - Cambia: VCF opcional y desactivado por defecto; cuando se activa, exactamente
+    un VCF BGZF+TBI/CSI o texto explícito, manifiesto y unidad de publicación.
+  - Se comprueba localmente con: lectura completa, consulta regional, índice
+    único, destino existente, fallo de índice y SHA-256. La aceptación externa
+    DTC-066 con `bcftools`/`tabix` 1.24 permanece pendiente y no se acredita aquí.
 
 - ☐ F2.5.6. Validar semánticamente VCF contra verdad y referencia.
   - Depende de: F2.5.5.

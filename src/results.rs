@@ -46,6 +46,11 @@ use crate::reference_reduction_io::{
     REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
     build_reduced_reference, reduction_map_document, validate_reduction_map_document,
 };
+use crate::vcf_contract::{TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfIndexKind, VcfOutputMode};
+use crate::vcf_publication::{
+    VCF_ARTIFACT_ID, VCF_ARTIFACT_KIND, VCF_BGZF_ARTIFACT_PATH, VCF_CSI_ARTIFACT_PATH,
+    VCF_INDEX_ARTIFACT_ID, VCF_TBI_ARTIFACT_PATH, VCF_TEXT_ARTIFACT_PATH,
+};
 
 pub const RESULT_SCHEMA_VERSION: &str = "1";
 
@@ -203,6 +208,19 @@ pub struct PopulationSnvsManifestLink {
     pub initial_population_statistics: Option<Value>,
 }
 
+/// Enlace de un VCF opcional a su única referencia, muestras e inventario
+/// físico. Las identidades SHA-256 y tamaños viven en el catálogo compartido.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VcfManifestLink {
+    pub state: UnitState,
+    pub reference_id: String,
+    pub samples: Vec<String>,
+    pub mode: VcfOutputMode,
+    pub vcf_artifact_id: String,
+    pub index_kind: Option<VcfIndexKind>,
+    pub index_artifact_id: Option<String>,
+}
+
 pub struct GeneralManifest<'a> {
     pub execution_id: &'a str,
     pub state: UnitState,
@@ -211,6 +229,7 @@ pub struct GeneralManifest<'a> {
     pub references: &'a [ManifestReferenceLink],
     pub reduced_references: &'a [ManifestReductionLink],
     pub population_snvs: Option<&'a PopulationSnvsManifestLink>,
+    pub vcf_outputs: &'a [VcfManifestLink],
     pub authorizations: crate::execution::ExecutionAuthorizations,
     pub artifacts: &'a [ArtifactRecord],
     pub diagnostics: &'a [Diagnostic],
@@ -251,6 +270,10 @@ pub fn effective_config_document_with_reductions(
         "reduced_references": reductions.iter().map(reduction_json).collect::<Vec<_>>(),
         "initial_populations": effective_initial_populations_json(config),
         "direct_events": config.direct_events().iter().map(direct_event_json).collect::<Vec<_>>(),
+        "vcf_output": config.vcf_output().map(|mode| match mode {
+            VcfOutputMode::Text => json!({"mode": "text"}),
+            VcfOutputMode::Bgzf => json!({"mode": "bgzf"}),
+        }),
     }))
 }
 
@@ -371,6 +394,7 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
         "references": manifest.references.iter().map(manifest_reference_json).collect::<Vec<_>>(),
         "reference_reductions": manifest.reduced_references.iter().map(manifest_reduction_json).collect::<Vec<_>>(),
         "population_snvs": manifest.population_snvs.map(population_snvs_link_json),
+        "vcf_outputs": manifest.vcf_outputs.iter().map(vcf_output_json).collect::<Vec<_>>(),
         "authorizations": {
             "allow_empty_snv_matrix": manifest.authorizations.allow_empty_snv_matrix,
             "allow_incompatible_genotypes": manifest.authorizations.allow_incompatible_genotypes,
@@ -381,6 +405,18 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
             "code": diagnostic.code(),
             "message": diagnostic.message(),
         })).collect::<Vec<_>>(),
+    })
+}
+
+fn vcf_output_json(link: &VcfManifestLink) -> Value {
+    json!({
+        "state": link.state.as_str(),
+        "reference_id": link.reference_id,
+        "samples": link.samples,
+        "mode": match link.mode { VcfOutputMode::Text => "text", VcfOutputMode::Bgzf => "bgzf" },
+        "vcf_artifact_id": link.vcf_artifact_id,
+        "index_kind": link.index_kind.map(|kind| match kind { VcfIndexKind::Tbi => "tbi", VcfIndexKind::Csi => "csi" }),
+        "index_artifact_id": link.index_artifact_id,
     })
 }
 
@@ -604,10 +640,43 @@ pub fn validate_effective_config_against_manifest_bytes(
         "initial_populations",
         "direct_events",
     ];
-    let fields = if object.contains_key("direct_events") {
-        &DIRECT_EVENT_FIELDS[..]
-    } else {
-        &LEGACY_FIELDS[..]
+    const VCF_FIELDS: [&str; 12] = [
+        "effective_config_kind",
+        "schema_version",
+        "source_path",
+        "ploidy",
+        "normalization",
+        "seed",
+        "reference",
+        "population_snvs",
+        "authorizations",
+        "reduced_references",
+        "initial_populations",
+        "vcf_output",
+    ];
+    const DIRECT_EVENT_VCF_FIELDS: [&str; 13] = [
+        "effective_config_kind",
+        "schema_version",
+        "source_path",
+        "ploidy",
+        "normalization",
+        "seed",
+        "reference",
+        "population_snvs",
+        "authorizations",
+        "reduced_references",
+        "initial_populations",
+        "direct_events",
+        "vcf_output",
+    ];
+    let fields = match (
+        object.contains_key("direct_events"),
+        object.contains_key("vcf_output"),
+    ) {
+        (false, false) => &LEGACY_FIELDS[..],
+        (true, false) => &DIRECT_EVENT_FIELDS[..],
+        (false, true) => &VCF_FIELDS[..],
+        (true, true) => &DIRECT_EVENT_VCF_FIELDS[..],
     };
     validate_effective_closed_object(object, fields, "effective-config.json", effective_path)?;
     if object.get("effective_config_kind").and_then(Value::as_str) != Some("gps_effective_config")
@@ -652,6 +721,14 @@ pub fn validate_effective_config_against_manifest_bytes(
     validate_effective_population_snvs(object, manifest, &catalog, effective_path, manifest_path)?;
     validate_effective_authorizations(object, manifest, effective_path, manifest_path)?;
     validate_effective_initial_populations(object, effective_path)?;
+    validate_effective_vcf_against_manifest(
+        object,
+        manifest,
+        &catalog,
+        effective_reference,
+        effective_path,
+        manifest_path,
+    )?;
     if object.contains_key("direct_events") {
         validate_effective_direct_events(object, effective_path)?;
     }
@@ -802,6 +879,15 @@ pub fn validate_published_resources(
     let reference_value = effective_object(effective, "reference", effective_path)?;
     let source_reference =
         read_physical_reference(root, reference_value, &artifact_paths, effective_path)?;
+    validate_physical_vcf_output(
+        root,
+        &physical_config,
+        manifest_bytes,
+        &artifacts,
+        &source_reference,
+        effective_path,
+        manifest_path,
+    )?;
     let allow_empty_snv_matrix = effective
         .get("authorizations")
         .and_then(|value| value.get("allow_empty_snv_matrix"))
@@ -1167,6 +1253,95 @@ fn read_verified_artifact_bytes(
     Ok(bytes)
 }
 
+fn validate_physical_vcf_output(
+    root: &Path,
+    effective: &EffectiveConfig,
+    manifest_bytes: &[u8],
+    artifacts: &[ArtifactRecord],
+    reference: &Reference,
+    effective_path: &Path,
+    manifest_path: &Path,
+) -> Result<(), Diagnostic> {
+    let manifest: Value = serde_json::from_slice(manifest_bytes)
+        .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
+    let manifest = manifest
+        .as_object()
+        .ok_or_else(|| manifest_error(manifest_path, "la raíz no es un objeto"))?;
+    let outputs = required_array(manifest, "vcf_outputs", manifest_path)?;
+    let expected = match effective.vcf_output() {
+        None => Vec::new(),
+        Some(VcfOutputMode::Text) => {
+            vec![(VCF_ARTIFACT_ID, VCF_ARTIFACT_KIND, VCF_TEXT_ARTIFACT_PATH)]
+        }
+        Some(VcfOutputMode::Bgzf) => {
+            let index = if reference
+                .sequences()
+                .iter()
+                .all(|sequence| sequence.length() < TBI_MAXIMUM_POSITION_EXCLUSIVE)
+            {
+                ("vcf_tbi_index", VCF_TBI_ARTIFACT_PATH)
+            } else {
+                ("vcf_csi_index", VCF_CSI_ARTIFACT_PATH)
+            };
+            vec![
+                (VCF_ARTIFACT_ID, VCF_ARTIFACT_KIND, VCF_BGZF_ARTIFACT_PATH),
+                (VCF_INDEX_ARTIFACT_ID, index.0, index.1),
+            ]
+        }
+    };
+    if (effective.vcf_output().is_none() && !outputs.is_empty())
+        || (effective.vcf_output().is_some() && outputs.len() != 1)
+    {
+        return Err(effective_error(
+            effective_path,
+            "vcf_outputs no coincide con la activación efectiva",
+        ));
+    }
+    let actual = artifacts
+        .iter()
+        .filter(|artifact| {
+            matches!(
+                artifact.kind.as_str(),
+                "truth_vcf" | "vcf_tbi_index" | "vcf_csi_index"
+            )
+        })
+        .collect::<Vec<_>>();
+    if actual.len() != expected.len() {
+        return Err(effective_error(
+            effective_path,
+            "el catálogo físico VCF no contiene exactamente los artefactos esperados",
+        ));
+    }
+    for (id, kind, relative_path) in expected {
+        let artifact = artifacts
+            .iter()
+            .find(|artifact| artifact.id == id)
+            .ok_or_else(|| {
+                effective_error(
+                    effective_path,
+                    format!("falta el artefacto VCF esperado {id}"),
+                )
+            })?;
+        if artifact.kind != kind || artifact.path != relative_path {
+            return Err(effective_error(
+                effective_path,
+                format!("el artefacto {id} no tiene clase o ruta VCF canónica"),
+            ));
+        }
+        let physical_path = root.join(relative_path);
+        let identity = identify_file(&physical_path, Path::new(relative_path))?;
+        if identity.size_bytes() != artifact.size_bytes || identity.digest() != artifact.digest {
+            return Err(Diagnostic::io(
+                "GPS-IO-002",
+                "El tamaño o SHA-256 de un artefacto no coincide con el valor esperado.",
+            )
+            .with("path", physical_path.display().to_string())
+            .with("artifact_id", id));
+        }
+    }
+    Ok(())
+}
+
 fn validate_effective_targets_against_configuration(
     root: &Path,
     effective: &serde_json::Map<String, Value>,
@@ -1379,6 +1554,16 @@ fn validate_effective_targets_against_configuration(
         return Err(effective_error(
             effective_path,
             "direct_events efectivo no coincide exactamente con el TOML resuelto",
+        ));
+    }
+    let expected_vcf = expected.vcf_output().map(|mode| match mode {
+        VcfOutputMode::Text => json!({"mode": "text"}),
+        VcfOutputMode::Bgzf => json!({"mode": "bgzf"}),
+    });
+    if effective.get("vcf_output") != Some(&expected_vcf.unwrap_or(Value::Null)) {
+        return Err(effective_error(
+            effective_path,
+            "vcf_output efectivo no coincide exactamente con el TOML resuelto",
         ));
     }
     Ok(expected)
@@ -1614,7 +1799,7 @@ pub(crate) fn parse_general_manifest_bytes(
     let object = document
         .as_object()
         .ok_or_else(|| manifest_error(path, "la raíz no es un objeto"))?;
-    const FIELDS: [&str; 13] = [
+    const FIELDS: [&str; 14] = [
         "manifest_kind",
         "schema_version",
         "execution_id",
@@ -1624,6 +1809,7 @@ pub(crate) fn parse_general_manifest_bytes(
         "references",
         "reference_reductions",
         "population_snvs",
+        "vcf_outputs",
         "authorizations",
         "output_categories",
         "artifacts",
@@ -1675,6 +1861,12 @@ pub(crate) fn parse_general_manifest_bytes(
     }
     let references =
         validate_references(required_array(object, "references", path)?, &catalog, path)?;
+    let vcf_requested = validate_vcf_outputs(
+        required_array(object, "vcf_outputs", path)?,
+        &catalog,
+        &references,
+        path,
+    )?;
     let reductions = validate_reference_reductions(
         required_array(object, "reference_reductions", path)?,
         &catalog,
@@ -1725,7 +1917,11 @@ pub(crate) fn parse_general_manifest_bytes(
         required_object(object, "output_categories", path)?,
         &catalog,
         &expected_minimum,
-        &reductions.requested_artifact_ids,
+        &reductions
+            .requested_artifact_ids
+            .union(&vcf_requested)
+            .cloned()
+            .collect(),
         path,
     )?;
     let diagnostics = required_array(object, "diagnostics", path)?;
@@ -2597,6 +2793,129 @@ fn validate_effective_authorizations(
         .map_err(|detail| effective_error(effective_path, detail))
 }
 
+fn validate_effective_vcf_output(
+    effective: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<Option<VcfOutputMode>, Diagnostic> {
+    let Some(value) = effective.get("vcf_output") else {
+        // Los documentos F1/F2 previos a F2.5.5 no incluyen la clave. La
+        // reconstrucción física contra el TOML actual sí exige `null` explícito.
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let output = value
+        .as_object()
+        .ok_or_else(|| effective_error(path, "vcf_output inválido"))?;
+    const FIELDS: [&str; 1] = ["mode"];
+    validate_effective_closed_object(output, &FIELDS, "vcf_output", path)?;
+    match output.get("mode").and_then(Value::as_str) {
+        Some("text") => Ok(Some(VcfOutputMode::Text)),
+        Some("bgzf") => Ok(Some(VcfOutputMode::Bgzf)),
+        _ => Err(effective_error(path, "vcf_output.mode inválido")),
+    }
+}
+
+fn validate_effective_vcf_against_manifest(
+    effective: &serde_json::Map<String, Value>,
+    manifest: &serde_json::Map<String, Value>,
+    catalog: &BTreeMap<&str, &str>,
+    reference: &serde_json::Map<String, Value>,
+    effective_path: &Path,
+    manifest_path: &Path,
+) -> Result<(), Diagnostic> {
+    let mode = validate_effective_vcf_output(effective, effective_path)?;
+    let outputs = required_array(manifest, "vcf_outputs", manifest_path)?;
+    let Some(mode) = mode else {
+        if !outputs.is_empty() {
+            return Err(effective_error(
+                effective_path,
+                "el manifiesto declara VCF aunque la configuración efectiva lo desactiva",
+            ));
+        }
+        return Ok(());
+    };
+    if outputs.len() != 1 {
+        return Err(effective_error(
+            effective_path,
+            "la configuración efectiva VCF exige exactamente un enlace en el manifiesto",
+        ));
+    }
+    let output = outputs[0]
+        .as_object()
+        .ok_or_else(|| effective_error(effective_path, "enlace VCF no es objeto"))?;
+    let effective_reference_id = effective_non_empty_text(reference, "id", effective_path)?;
+    let expected_mode = match mode {
+        VcfOutputMode::Text => "text",
+        VcfOutputMode::Bgzf => "bgzf",
+    };
+    if output.get("reference_id").and_then(Value::as_str) != Some(effective_reference_id)
+        || output.get("mode").and_then(Value::as_str) != Some(expected_mode)
+        || output.get("vcf_artifact_id").and_then(Value::as_str) != Some(VCF_ARTIFACT_ID)
+        || catalog.get(VCF_ARTIFACT_ID) != Some(&VCF_ARTIFACT_KIND)
+    {
+        return Err(effective_error(
+            effective_path,
+            "referencia, modo o artefacto VCF del manifiesto no coincide con la configuración efectiva",
+        ));
+    }
+    match mode {
+        VcfOutputMode::Text => {
+            if !output.get("index_kind").is_some_and(Value::is_null)
+                || !output.get("index_artifact_id").is_some_and(Value::is_null)
+            {
+                return Err(effective_error(
+                    effective_path,
+                    "VCF de texto efectivo no admite índice en el manifiesto",
+                ));
+            }
+        }
+        VcfOutputMode::Bgzf => {
+            let expected_index = expected_vcf_index_kind(reference, effective_path)?;
+            let (index_kind, artifact_kind) = match expected_index {
+                VcfIndexKind::Tbi => ("tbi", "vcf_tbi_index"),
+                VcfIndexKind::Csi => ("csi", "vcf_csi_index"),
+            };
+            if output.get("index_kind").and_then(Value::as_str) != Some(index_kind)
+                || output.get("index_artifact_id").and_then(Value::as_str)
+                    != Some(VCF_INDEX_ARTIFACT_ID)
+                || catalog.get(VCF_INDEX_ARTIFACT_ID) != Some(&artifact_kind)
+            {
+                return Err(effective_error(
+                    effective_path,
+                    "índice VCF del manifiesto no coincide con referencia y configuración efectiva",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn expected_vcf_index_kind(
+    reference: &serde_json::Map<String, Value>,
+    effective_path: &Path,
+) -> Result<VcfIndexKind, Diagnostic> {
+    let sequences = effective_array(reference, "sequences", effective_path)?;
+    if sequences.is_empty() {
+        return Err(effective_error(
+            effective_path,
+            "la referencia efectiva no tiene secuencias para seleccionar índice VCF",
+        ));
+    }
+    if sequences.iter().any(|sequence| {
+        sequence
+            .as_object()
+            .and_then(|sequence| sequence.get("length"))
+            .and_then(Value::as_u64)
+            .is_none_or(|length| length >= TBI_MAXIMUM_POSITION_EXCLUSIVE)
+    }) {
+        Ok(VcfIndexKind::Csi)
+    } else {
+        Ok(VcfIndexKind::Tbi)
+    }
+}
+
 fn validate_effective_initial_populations(
     effective: &serde_json::Map<String, Value>,
     path: &Path,
@@ -3010,6 +3329,84 @@ fn validate_reference_reductions(
         derived_reference_ids,
         requested_artifact_ids,
     })
+}
+
+fn validate_vcf_outputs(
+    values: &[Value],
+    catalog: &BTreeMap<&str, &str>,
+    references: &BTreeMap<String, String>,
+    path: &Path,
+) -> Result<BTreeSet<String>, Diagnostic> {
+    if values.len() > 1 {
+        return Err(manifest_error(
+            path,
+            "solo se admite un VCF final por ejecución",
+        ));
+    }
+    let mut requested = BTreeSet::new();
+    let mut reference_ids = BTreeSet::new();
+    for value in values {
+        let object = value
+            .as_object()
+            .ok_or_else(|| manifest_error(path, "vcf_outputs contiene un valor no objeto"))?;
+        const FIELDS: [&str; 7] = [
+            "state",
+            "reference_id",
+            "samples",
+            "mode",
+            "vcf_artifact_id",
+            "index_kind",
+            "index_artifact_id",
+        ];
+        validate_closed_object(object, &FIELDS, "vcf_outputs[]", path)?;
+        if object.get("state").and_then(Value::as_str) != Some("complete") {
+            return Err(manifest_error(path, "un VCF publicado debe estar complete"));
+        }
+        let reference_id = required_non_empty_text(object, "reference_id", path)?;
+        if !references.contains_key(reference_id) || !reference_ids.insert(reference_id.to_owned())
+        {
+            return Err(manifest_error(
+                path,
+                "VCF con referencia ausente o duplicada",
+            ));
+        }
+        let samples = required_array(object, "samples", path)?;
+        let mut sample_ids = BTreeSet::new();
+        for sample in samples {
+            let sample = sample
+                .as_str()
+                .filter(|sample| !sample.is_empty())
+                .ok_or_else(|| manifest_error(path, "muestra VCF inválida"))?;
+            if !sample_ids.insert(sample) {
+                return Err(manifest_error(path, "muestra VCF duplicada"));
+            }
+        }
+        let vcf_id = required_non_empty_text(object, "vcf_artifact_id", path)?;
+        require_artifact_kind(catalog, vcf_id, "truth_vcf", path)?;
+        match object.get("mode").and_then(Value::as_str) {
+            Some("text") => {
+                if !object.get("index_kind").is_some_and(Value::is_null)
+                    || !object.get("index_artifact_id").is_some_and(Value::is_null)
+                {
+                    return Err(manifest_error(path, "VCF de texto no admite índice"));
+                }
+            }
+            Some("bgzf") => {
+                let expected_kind = match object.get("index_kind").and_then(Value::as_str) {
+                    Some("tbi") => "vcf_tbi_index",
+                    Some("csi") => "vcf_csi_index",
+                    _ => return Err(manifest_error(path, "VCF BGZF exige índice TBI o CSI")),
+                };
+                let index_id = optional_text(object, "index_artifact_id", path)?
+                    .ok_or_else(|| manifest_error(path, "VCF BGZF exige artefacto de índice"))?;
+                require_artifact_kind(catalog, index_id, expected_kind, path)?;
+                requested.insert(index_id.to_owned());
+            }
+            _ => return Err(manifest_error(path, "modo VCF inválido")),
+        }
+        requested.insert(vcf_id.to_owned());
+    }
+    Ok(requested)
 }
 
 fn validate_artifact(value: &Value, path: &Path) -> Result<ArtifactRecord, Diagnostic> {
@@ -3824,6 +4221,10 @@ fn output_categories(manifest: &GeneralManifest<'_>) -> Value {
             ]
         })
         .flatten()
+        .chain(manifest.vcf_outputs.iter().flat_map(|output| {
+            std::iter::once(output.vcf_artifact_id.as_str())
+                .chain(output.index_artifact_id.as_deref())
+        }))
         .collect::<BTreeSet<_>>();
     let minimum = manifest
         .artifacts

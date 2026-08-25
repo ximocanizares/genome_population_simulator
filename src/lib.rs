@@ -38,4 +38,6 @@ pub mod truth_validation;
 pub mod vcf_contract;
 pub mod vcf_grouping;
 pub mod vcf_projection;
+pub mod vcf_publication;
 pub mod vcf_representation;
+pub mod vcf_semantic_validation;

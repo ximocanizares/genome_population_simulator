@@ -262,6 +262,7 @@ fn source_and_derived_fasta_cannot_alias_across_output_categories() {
         references: &references,
         reduced_references: &reductions,
         population_snvs: None,
+        vcf_outputs: &[],
         authorizations: genome_population_simulator::execution::ExecutionAuthorizations::default(),
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(&diagnostic),
@@ -340,6 +341,7 @@ fn failed_reduction_keeps_reached_links_and_requested_classification() {
         references: &references,
         reduced_references: &reductions,
         population_snvs: None,
+        vcf_outputs: &[],
         authorizations: genome_population_simulator::execution::ExecutionAuthorizations::default(),
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(&diagnostic),
@@ -377,6 +379,7 @@ fn complete_manifest() -> Value {
         "effective_config_artifact_id": "effective-config",
         "references": [{"id": "ref", "fasta_artifact_id": "reference-fasta"}],
         "reference_reductions": [],
+        "vcf_outputs": [],
         "authorizations": {"allow_empty_snv_matrix": false, "allow_incompatible_genotypes": false},
         "output_categories": {
             "minimum": ["config-general", "effective-config", "reference-fasta", "truth-jsonl"],
@@ -408,6 +411,7 @@ fn failed_manifest() -> Value {
         "effective_config_artifact_id": null,
         "references": [],
         "reference_reductions": [],
+        "vcf_outputs": [],
         "authorizations": {"allow_empty_snv_matrix": false, "allow_incompatible_genotypes": false},
         "output_categories": {
             "minimum": ["config-general"],
