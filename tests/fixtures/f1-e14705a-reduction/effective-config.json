@@ -1,0 +1,99 @@
+{
+  "effective_config_kind": "gps_effective_config",
+  "reduced_references": [
+    {
+      "fasta_artifact_id": "reference-fasta-reference-small",
+      "id": "reference-small",
+      "map_artifact_id": "reference-map-reference-small",
+      "region_size_bases": 5,
+      "selection_algorithm": "reduced_reference_selection_v1",
+      "selection_order": [
+        2,
+        1,
+        3
+      ],
+      "selection_subseed": "7fa724d52b2db97a043920dbc3062a34c6377eab76f1d9d6e4ff1d513747decd",
+      "sequences": [
+        {
+          "alphabet_validation": "ACGTN-case-insensitive",
+          "class": "chromosome",
+          "description": null,
+          "header": {
+            "encoding": "utf-8",
+            "value": "chr1"
+          },
+          "id": "chr1",
+          "length": 10,
+          "n_count": 2
+        },
+        {
+          "alphabet_validation": "ACGTN-case-insensitive",
+          "class": "scaffold",
+          "description": null,
+          "header": {
+            "encoding": "utf-8",
+            "value": "scaffold-1"
+          },
+          "id": "scaffold-1",
+          "length": 3,
+          "n_count": 0
+        }
+      ],
+      "source_fasta_artifact_id": "reference-fasta",
+      "source_reference_id": "reference-main",
+      "state": "complete",
+      "target": {
+        "bases": 13,
+        "declared": "13",
+        "mode": "target_bases"
+      }
+    }
+  ],
+  "reference": {
+    "canonical_format": null,
+    "composition": null,
+    "fasta_artifact_id": "reference-fasta",
+    "id": "reference-main",
+    "original_fasta_path": "/tmp/gps-f1-e147/tests/fixtures/reference_reduction/source.fa",
+    "sequences": [
+      {
+        "alphabet_validation": "ACGTN-case-insensitive",
+        "class": "chromosome",
+        "description": {
+          "encoding": "utf-8",
+          "value": "chromosome"
+        },
+        "header": {
+          "encoding": "utf-8",
+          "value": "chr1 chromosome"
+        },
+        "id": "chr1",
+        "length": 12,
+        "unknown_base_count": 2
+      },
+      {
+        "alphabet_validation": "ACGTN-case-insensitive",
+        "class": "scaffold",
+        "description": {
+          "encoding": "utf-8",
+          "value": "scaffold"
+        },
+        "header": {
+          "encoding": "utf-8",
+          "value": "scaffold-1 scaffold"
+        },
+        "id": "scaffold-1",
+        "length": 8,
+        "unknown_base_count": 2
+      }
+    ],
+    "source": "supplied",
+    "total_genome_size": 20
+  },
+  "schema_version": "1",
+  "seed": {
+    "origin": "declared",
+    "root": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  "source_path": "/tmp/gps-f1-e147/tests/fixtures/reference_reduction/general.toml"
+}

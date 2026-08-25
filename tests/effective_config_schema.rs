@@ -138,7 +138,7 @@ fn initial_population_statistics_schema_is_closed_and_typed() {
 #[test]
 fn effective_initial_population_schema_enforces_local_bounds_and_f_diploidy() {
     let schema: Value =
-        serde_json::from_str(include_str!("../schemas/effective-config-v1.schema.json"))
+        serde_json::from_str(include_str!("../schemas/effective-config-v2.schema.json"))
             .expect("effective schema JSON");
     let cohort_schema = &schema["$defs"]["initial_population"];
     assert_eq!(
@@ -438,7 +438,7 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
     };
     json!({
         "effective_config_kind": "gps_effective_config",
-        "schema_version": "1",
+        "schema_version": "2",
         "source_path": "config/general.toml",
         "ploidy": 2,
         "normalization": {"tolerance": 1e-9, "canonical_order": "population_id,contig,position,ref,alt,variant_id,source_id", "sum_algorithm": "neumaier_sum_v1"},
@@ -541,7 +541,7 @@ fn assert_external(name: &str, document: &Value, expected_success: bool) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("python3")
         .arg(root.join("tests/external_jsonschema_validator.py"))
-        .arg(root.join("schemas/effective-config-v1.schema.json"))
+        .arg(root.join("schemas/effective-config-v2.schema.json"))
         .arg(&instance)
         .output()
         .expect("independent Python validator");

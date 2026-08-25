@@ -1,0 +1,43 @@
+{
+  "effective_config_kind": "gps_effective_config",
+  "reduced_references": [],
+  "reference": {
+    "canonical_format": {
+      "base_case": "uppercase",
+      "line_base_count": 80,
+      "line_ending": "LF",
+      "version": "1"
+    },
+    "composition": {
+      "A": 0.25,
+      "C": 0.25,
+      "G": 0.25,
+      "T": 0.25
+    },
+    "fasta_artifact_id": "reference-fasta",
+    "id": "ref-main",
+    "original_fasta_path": null,
+    "sequences": [
+      {
+        "alphabet_validation": "ACGTN-case-insensitive",
+        "class": "chromosome",
+        "description": null,
+        "header": {
+          "encoding": "utf-8",
+          "value": "chr1"
+        },
+        "id": "chr1",
+        "length": 1000,
+        "unknown_base_count": 0
+      }
+    ],
+    "source": "simulated",
+    "total_genome_size": 1000
+  },
+  "schema_version": "1",
+  "seed": {
+    "origin": "declared",
+    "root": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+  },
+  "source_path": "/tmp/gps-f1-e147/tests/fixtures/config/general-seeded.toml"
+}

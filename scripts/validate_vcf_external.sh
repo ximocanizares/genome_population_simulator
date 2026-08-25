@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 # Puerta DTC-066: aceptación externa, nunca parte del runtime del simulador.
+#
+# Cada fixture es una tupla independiente:
+#   <reference.fa> <input.vcf[.gz]> <none|tbi|csi> <region|-> <expected-records>
+#
+# `expected-records` contiene exactamente las líneas de registros (sin cabecera)
+# que deben devolver bcftools/tabix. Se pasan, como mínimo, los tres positivos:
+# texto/none, FASTA corto/TBI y FASTA largo/CSI. El tipo esperado no se toma de
+# la cabecera VCF: se vuelve a derivar de las longitudes del FASTA autoritativo.
 set -euo pipefail
 
-if [[ $# -ne 5 ]]; then
-  echo "uso: $0 <reference.fa> <text.vcf> <bgzf-tbi.vcf.gz> <bgzf-csi.vcf.gz> <region>" >&2
+readonly TBI_MAXIMUM_POSITION_EXCLUSIVE=536870912
+
+if (( $# == 0 || $# % 5 != 0 )); then
+  echo "uso: $0 (<reference.fa> <input.vcf[.gz]> <none|tbi|csi> <region|-> <expected-records>)+" >&2
   exit 64
 fi
 
-reference=$1
-text_vcf=$2
-tbi_vcf=$3
-csi_vcf=$4
-region=$5
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/gps-dtc066.XXXXXX")
 
 fail() {
@@ -30,6 +35,33 @@ require_version() {
   [[ $observed == "$expected" ]] || fail "se requiere $expected; se observó ${observed:-ausente}."
 }
 
+# La selección DTC-063 depende solamente de la longitud real de cada secuencia
+# FASTA. No se acepta que un ##contig VCF ni su índice decidan este resultado.
+index_kind_from_reference() {
+  local reference=$1
+  awk -v threshold="$TBI_MAXIMUM_POSITION_EXCLUSIVE" '
+    function finish_sequence() {
+      if (seen && length_bases >= threshold) exceeds = 1
+    }
+    /^>/ {
+      finish_sequence()
+      seen = 1
+      length_bases = 0
+      next
+    }
+    {
+      sequence = $0
+      gsub(/[[:space:]]/, "", sequence)
+      length_bases += length(sequence)
+    }
+    END {
+      finish_sequence()
+      if (!seen) exit 2
+      print exceeds ? "csi" : "tbi"
+    }
+  ' "$reference" || fail "no se pudieron derivar longitudes de $reference."
+}
+
 require_sidecars() {
   local vcf=$1 expected=$2 opposite
   if [[ $expected == tbi ]]; then opposite=csi; else opposite=tbi; fi
@@ -42,34 +74,73 @@ require_no_sidecars() {
   [[ ! -e "${vcf}.tbi" && ! -e "${vcf}.csi" ]] || fail "el VCF de texto no puede llevar índice."
 }
 
-validate_text() {
-  local vcf=$1 label=$2
-  bcftools view --no-version "$vcf" >"$temporary/${label}.view.vcf"
-  bcftools norm --no-version --check-ref e --fasta-ref "$reference" "$vcf" >"$temporary/${label}.norm.vcf"
-  cmp -- "$temporary/${label}.view.vcf" "$temporary/${label}.norm.vcf" || fail "la validación normalizó o alteró $vcf; no se permite reparar ni descartar salida."
+compare_exact_records() {
+  local observed=$1 expected=$2 description=$3
+  cmp -- "$expected" "$observed" || fail "$description no coincide exactamente con $expected."
 }
 
-validate_indexed() {
-  local vcf=$1 kind=$2 label=$3 copied
-  require_sidecars "$vcf" "$kind"
-  validate_text "$vcf" "$label"
-  bcftools index --stats "$vcf" >"$temporary/${label}.original.stats"
-  bcftools view --no-version --regions "$region" "$vcf" >"$temporary/${label}.original.region.vcf"
-  tabix -l "$vcf" >"$temporary/${label}.original.contigs"
-  tabix "$vcf" "$region" >"$temporary/${label}.original.region.tabix"
+validate_complete_view_and_normalization() {
+  local reference=$1 vcf=$2 label=$3
+  local parsed="$temporary/${label}.parsed.vcf" normalized="$temporary/${label}.normalized.vcf"
+  bcftools view --no-version --output-type v --output "$parsed" "$vcf"
+  bcftools norm --no-version --check-ref e --fasta-ref "$reference" \
+    --output-type v --output "$normalized" "$vcf"
+  cmp -- "$parsed" "$normalized" || fail "la normalización externa alteró $vcf; no se permite reparar ni descartar salida."
+}
 
+validate_fixture() {
+  local reference=$1 vcf=$2 expected_kind=$3 region=$4 expected_records=$5 label=$6
+  local derived_kind copied
+  derived_kind=$(index_kind_from_reference "$reference")
+  [[ $expected_kind == none || $expected_kind == tbi || $expected_kind == csi ]] \
+    || fail "$label declara un tipo de índice desconocido: $expected_kind."
+  [[ -f $reference && -f $vcf && -f $expected_records ]] \
+    || fail "$label no contiene todos sus artefactos de fixture."
+
+  if [[ $expected_kind == none ]]; then
+    [[ $region == - ]] || fail "$label de texto debe declarar región '-'."
+    [[ $vcf != *.gz ]] || fail "$label de texto debe ser un .vcf sin compresión BGZF."
+    require_no_sidecars "$vcf"
+  else
+    [[ $derived_kind == "$expected_kind" ]] || fail "$label declara $expected_kind, pero las longitudes de $reference requieren $derived_kind."
+    [[ $region != - ]] || fail "$label indexado exige una región de consulta."
+    [[ $vcf == *.vcf.gz ]] || fail "$label indexado debe ser un .vcf.gz BGZF."
+    require_sidecars "$vcf" "$expected_kind"
+  fi
+
+  validate_complete_view_and_normalization "$reference" "$vcf" "$label"
+  if [[ $expected_kind == none ]]; then
+    bcftools view --no-version --no-header --output-type v \
+      --output "$temporary/${label}.full.records" "$vcf"
+    compare_exact_records "$temporary/${label}.full.records" "$expected_records" \
+      "la lectura completa de bcftools para $label"
+    return
+  fi
+
+  bcftools index --stats "$vcf" >"$temporary/${label}.original.stats"
+  bcftools view --no-version --no-header --regions "$region" --output-type v \
+    --output "$temporary/${label}.bcftools.records" "$vcf"
+  tabix -l "$vcf" >"$temporary/${label}.contigs"
+  tabix "$vcf" "$region" >"$temporary/${label}.tabix.records"
+  compare_exact_records "$temporary/${label}.bcftools.records" "$expected_records" \
+    "la consulta regional de bcftools para $label"
+  compare_exact_records "$temporary/${label}.tabix.records" "$expected_records" \
+    "la consulta regional de tabix para $label"
+
+  # Se conserva una comprobación secundaria de reconstrucción, pero jamás es
+  # la única evidencia: todas las salidas anteriores se compararon con la
+  # verdad independiente del fixture.
   copied="$temporary/${label}.vcf.gz"
   cp -- "$vcf" "$copied"
-  if [[ $kind == tbi ]]; then bcftools index --force --tbi "$copied"; else bcftools index --force --csi "$copied"; fi
-  require_sidecars "$copied" "$kind"
+  if [[ $expected_kind == tbi ]]; then
+    bcftools index --tbi --output "${copied}.tbi" "$copied"
+  else
+    bcftools index --csi --output "${copied}.csi" "$copied"
+  fi
+  require_sidecars "$copied" "$expected_kind"
   bcftools index --stats "$copied" >"$temporary/${label}.reconstructed.stats"
-  bcftools view --no-version --regions "$region" "$copied" >"$temporary/${label}.reconstructed.region.vcf"
-  tabix -l "$copied" >"$temporary/${label}.reconstructed.contigs"
-  tabix "$copied" "$region" >"$temporary/${label}.reconstructed.region.tabix"
-  cmp -- "$temporary/${label}.original.stats" "$temporary/${label}.reconstructed.stats" || fail "la reconstrucción temporal del índice $kind no reproduce sus estadísticas."
-  cmp -- "$temporary/${label}.original.region.vcf" "$temporary/${label}.reconstructed.region.vcf" || fail "la consulta regional tras reconstruir el índice $kind difiere."
-  cmp -- "$temporary/${label}.original.contigs" "$temporary/${label}.reconstructed.contigs" || fail "la lista HTSlib tras reconstruir el índice $kind difiere."
-  cmp -- "$temporary/${label}.original.region.tabix" "$temporary/${label}.reconstructed.region.tabix" || fail "la consulta regional HTSlib tras reconstruir el índice $kind difiere."
+  cmp -- "$temporary/${label}.original.stats" "$temporary/${label}.reconstructed.stats" \
+    || fail "la reconstrucción temporal del índice $expected_kind no reproduce sus estadísticas para $label."
 }
 
 expect_rejection() {
@@ -81,35 +152,49 @@ expect_rejection() {
   echo "DTC-066: rechazo esperado verificado para $label." >&2
 }
 
-exercise_mutation_helpers() {
-  local fixture_ref="$temporary/mutation.fa" fixture_text="$temporary/mutation.vcf"
-  local fixture_tbi="$temporary/mutation-tbi.vcf.gz" fixture_csi="$temporary/mutation-csi.vcf.gz"
-  local mutated_ref="$temporary/mutated-ref.vcf" opposite="$temporary/opposite.vcf.gz" both="$temporary/both.vcf.gz"
-  printf '>mutation\nA\n' >"$fixture_ref"
-  printf '##fileformat=VCFv4.5\n##contig=<ID=mutation,length=1>\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\nmutation\t1\t.\tA\tC\t.\t.\t.\n' >"$fixture_text"
-  bcftools view --no-version --output-type z --output-file "$fixture_tbi" "$fixture_text"
-  bcftools index --tbi "$fixture_tbi"
-  bcftools view --no-version --output-type z --output-file "$fixture_csi" "$fixture_text"
-  bcftools index --csi "$fixture_csi"
-
-  sed 's/\tA\tC\t/\tG\tC\t/' "$fixture_text" >"$mutated_ref"
-  if bcftools norm --no-version --check-ref e --fasta-ref "$fixture_ref" "$mutated_ref" >/dev/null 2>&1; then fail "la mutación de REF fue aceptada."; fi
-
-  cp -- "$fixture_tbi" "$opposite"
-  cp -- "${fixture_tbi}.tbi" "${opposite}.csi"
-  expect_rejection índice_opuesto require_sidecars "$opposite" tbi
-
-  cp -- "$fixture_tbi" "$both"
-  cp -- "${fixture_tbi}.tbi" "${both}.tbi"
-  cp -- "${fixture_csi}.csi" "${both}.csi"
-  expect_rejection ambos_índices require_sidecars "$both" tbi
-}
-
 require_version bcftools 'bcftools 1.24'
 require_version tabix 'tabix (htslib) 1.24'
-require_no_sidecars "$text_vcf"
-validate_text "$text_vcf" text
-validate_indexed "$tbi_vcf" tbi tbi
-validate_indexed "$csi_vcf" csi csi
-exercise_mutation_helpers
+
+saw_text=0
+saw_tbi=0
+saw_csi=0
+short_reference=
+short_vcf=
+short_region=
+short_expected_records=
+fixture_count=0
+
+while (( $# > 0 )); do
+  reference=$1
+  vcf=$2
+  expected_kind=$3
+  region=$4
+  expected_records=$5
+  shift 5
+  label="fixture-${fixture_count}-${expected_kind}"
+  validate_fixture "$reference" "$vcf" "$expected_kind" "$region" "$expected_records" "$label"
+  case $expected_kind in
+    none) saw_text=1 ;;
+    tbi)
+      saw_tbi=1
+      short_reference=$reference
+      short_vcf=$vcf
+      short_region=$region
+      short_expected_records=$expected_records
+      ;;
+    csi) saw_csi=1 ;;
+  esac
+  fixture_count=$((fixture_count + 1))
+done
+
+(( saw_text == 1 && saw_tbi == 1 && saw_csi == 1 )) \
+  || fail "el corpus debe incluir positivos independientes texto/none, FASTA corto/TBI y FASTA largo/CSI."
+
+# Mutación negativa: el mismo FASTA corto no puede cambiar a CSI solo porque
+# el fixture lo declare. Esto prueba que la elección procede de longitudes, no
+# del nombre del fichero, la cabecera VCF ni el sidecar existente.
+expect_rejection referencia_corta_declara_csi \
+  validate_fixture "$short_reference" "$short_vcf" csi "$short_region" "$short_expected_records" \
+    mutation-short-csi
+
 cleanup

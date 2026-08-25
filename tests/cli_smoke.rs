@@ -20,6 +20,17 @@ fn help_and_version_are_successful_cli_queries() {
         );
         assert!(!output.stdout.is_empty(), "{argument} no produjo salida");
     }
+
+    let version = Command::new(env!("CARGO_BIN_EXE_genome-population-simulator"))
+        .arg("--version")
+        .output()
+        .expect("el binario de integración debe informar su versión");
+    assert_eq!(
+        String::from_utf8(version.stdout)
+            .expect("versión UTF-8")
+            .trim(),
+        "genome-population-simulator 0.2.0"
+    );
 }
 
 #[test]

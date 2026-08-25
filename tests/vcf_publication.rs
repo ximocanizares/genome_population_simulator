@@ -17,6 +17,7 @@ use genome_population_simulator::vcf_contract::{
     write_vcf_index, write_vcf_records,
 };
 use genome_population_simulator::vcf_grouping::{GroupedVcfRecord, PhasedGenotype};
+use genome_population_simulator::vcf_semantic_validation::validate_published_vcf_semantics;
 use serde_json::Value;
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
@@ -53,7 +54,13 @@ fn configuration(mode: Option<&str>) -> String {
         format!("\n[vcf_output]\nmode = \"{mode}\"\n")
     });
     format!(
-        "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\"\n[reference]\nkind = \"simulated\"\nid = \"ref-main\"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 16\n{vcf}"
+        "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\"\n[reference]\nkind = \"simulated\"\nid = \"ref-main\"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 16\n[population_snvs]\nmode = \"generate\"\n[population_snvs.generate]\ncount_mode = \"exact\"\nlocus_count = 1\nspatial_mode = \"uniform\"\nsubstitution_profile = \"uniform_snv12_v1\"\n[[population_snvs.generate.populations]]\npopulation_id = \"P1\"\nfrequency_model = \"uniform\"\nmin_alt_af = 0.2\nmax_alt_af = 0.8\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"IND_01\"]\nploidy = 2\ngenotype_model = \"hwe\"\n{vcf}"
+    )
+}
+
+fn configuration_without_populations(mode: &str) -> String {
+    format!(
+        "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\"\n[reference]\nkind = \"simulated\"\nid = \"ref-main\"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 16\n[vcf_output]\nmode = \"{mode}\"\n"
     )
 }
 
@@ -114,6 +121,40 @@ fn existing_destination_prevents_requested_vcf_publication() {
 }
 
 #[test]
+fn requested_text_vcf_without_populations_rejects_before_destination_or_manifest() {
+    let root = temporary("vcf-without-samples");
+    fs::create_dir_all(&root).expect("root");
+    let config = root.join("config.toml");
+    fs::write(&config, configuration_without_populations("text")).expect("config");
+    let destination = root.join("published");
+
+    let error = execute_validated_config(
+        &load_and_validate_config(&config).expect("valid declaration"),
+        &destination,
+    )
+    .expect_err("a VCF without truth samples must fail during preflight");
+
+    assert_eq!(error.code(), "GPS-CONF-008");
+    assert_eq!(
+        error.context().get("component").map(String::as_str),
+        Some("vcf_output,initial_populations")
+    );
+    assert!(!destination.exists());
+    assert_eq!(
+        fs::read_dir(&root)
+            .expect("read root")
+            .filter_map(Result::ok)
+            .filter(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .contains("gps-incomplete"))
+            .count(),
+        0
+    );
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
 fn explicit_text_vcf_is_complete_and_has_no_index() {
     let (root, manifest) = publish(Some("text"));
     let destination = root.join("published");
@@ -146,6 +187,12 @@ fn explicit_text_vcf_is_complete_and_has_no_index() {
     let identity = identify_file(&vcf, PathBuf::from("outputs/truth.vcf")).expect("SHA");
     assert_eq!(artifact["size_bytes"], identity.size_bytes());
     assert_eq!(artifact["checksum"]["digest"], identity.digest());
+    validate_published_vcf_semantics(
+        &destination.join("resources/references/ref-main.fa"),
+        &destination.join("outputs/truth.jsonl"),
+        &vcf,
+    )
+    .expect("the published text VCF is semantically compatible with truth");
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -291,6 +338,12 @@ fn explicit_bgzf_vcf_has_one_readable_tbi_and_cataloged_sha() {
         assert_eq!(artifact["size_bytes"], identity.size_bytes());
         assert_eq!(artifact["checksum"]["digest"], identity.digest());
     }
+    validate_published_vcf_semantics(
+        &destination.join("resources/references/ref-main.fa"),
+        &destination.join("outputs/truth.jsonl"),
+        &vcf,
+    )
+    .expect("the published BGZF VCF is semantically compatible with truth");
     fs::remove_dir_all(root).expect("cleanup");
 }
 

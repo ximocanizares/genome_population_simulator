@@ -1,0 +1,62 @@
+{
+  "artifacts": [
+    {
+      "checksum": {
+        "algorithm": "sha256",
+        "digest": "f24976828da4a5e57da100e494352da1f5a11952e9d069412c14985e59ddb045"
+      },
+      "id": "config-general",
+      "kind": "config_general_toml",
+      "path": "inputs/config/general.toml",
+      "size_bytes": 300
+    },
+    {
+      "checksum": {
+        "algorithm": "sha256",
+        "digest": "9041505318e4b189419adc6df4f864d043caefe87967750456f9f44bea970f8c"
+      },
+      "id": "reference-fasta",
+      "kind": "reference_fasta",
+      "path": "resources/references/ref-main.fa",
+      "size_bytes": 1019
+    },
+    {
+      "checksum": {
+        "algorithm": "sha256",
+        "digest": "6274c2cdd44a46602f949c5ef5afc7ee48a36209df2c3a471412a932b364c0a2"
+      },
+      "id": "effective-config",
+      "kind": "effective_config",
+      "path": "effective-config.json",
+      "size_bytes": 1048
+    }
+  ],
+  "configuration_input": {
+    "artifact_id": "config-general",
+    "kind": "general",
+    "original_path": "/tmp/gps-f1-e147/tests/fixtures/config/general-seeded.toml"
+  },
+  "diagnostics": [],
+  "effective_config_artifact_id": "effective-config",
+  "execution_id": "RUN_QU42CAELG5UFMF2W2FA2BFTP5U",
+  "manifest_kind": "gps_execution_manifest",
+  "output_categories": {
+    "defaulted": [],
+    "disabled": [],
+    "minimum": [
+      "config-general",
+      "reference-fasta",
+      "effective-config"
+    ],
+    "requested": []
+  },
+  "reference_reductions": [],
+  "references": [
+    {
+      "fasta_artifact_id": "reference-fasta",
+      "id": "ref-main"
+    }
+  ],
+  "schema_version": "1",
+  "state": "complete"
+}

@@ -129,31 +129,31 @@ fn every_reduction_field_and_exact_reference_set_are_cross_checked() {
             "eligible-bases",
             "/reference_reductions/0/eligible_bases",
             json!(19),
-            "effective-config-v1.schema.json",
+            "effective-config-v2.schema.json",
         ),
         (
             "root-seed",
             "/reference_reductions/0/root_seed",
             json!("2".repeat(64)),
-            "effective-config-v1.schema.json",
+            "effective-config-v2.schema.json",
         ),
         (
             "manifest-selection-algorithm",
             "/reference_reductions/0/selection_algorithm",
             json!("future_algorithm"),
-            "manifest-general-v1.schema.json",
+            "manifest-general-v2.schema.json",
         ),
         (
             "map-document-kind",
             "/reference_reductions/0/map_document_kind",
             json!("future_map"),
-            "manifest-general-v1.schema.json",
+            "manifest-general-v2.schema.json",
         ),
         (
             "map-schema-version",
             "/reference_reductions/0/map_schema_version",
             json!("2"),
-            "manifest-general-v1.schema.json",
+            "manifest-general-v2.schema.json",
         ),
     ] {
         let mut changed = parse(&manifest_bytes);
@@ -338,7 +338,7 @@ fn assert_rejected(
     assert_eq!(error.exit_code(), 1);
     assert_eq!(
         error.context().get("schema").map(String::as_str),
-        Some("effective-config-v1.schema.json")
+        Some("effective-config-v2.schema.json")
     );
 }
 

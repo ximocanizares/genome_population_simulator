@@ -1,0 +1,115 @@
+{
+  "artifacts": [
+    {
+      "checksum": {
+        "algorithm": "sha256",
+        "digest": "5f8cc33038f940d9213df1e4bbc9597c577da668427e4f49721e3280cb157c84"
+      },
+      "id": "config-general",
+      "kind": "config_general_toml",
+      "path": "inputs/config/general.toml",
+      "size_bytes": 461
+    },
+    {
+      "checksum": {
+        "algorithm": "sha256",
+        "digest": "b451505c363758ed61246c58422b25f4e8101582c1aa9a6687eb37fdc1a096ad"
+      },
+      "id": "reference-fasta",
+      "kind": "reference_fasta",
+      "path": "resources/references/reference-main.fa",
+      "size_bytes": 60
+    },
+    {
+      "checksum": {
+        "algorithm": "sha256",
+        "digest": "17fbdee9b4e7f33c567eabda2aa7846efc306d7a5849a04c2ee9922114b239a0"
+      },
+      "id": "reference-fasta-reference-small",
+      "kind": "reference_fasta",
+      "path": "resources/references/reference-small.fa",
+      "size_bytes": 33
+    },
+    {
+      "checksum": {
+        "algorithm": "sha256",
+        "digest": "172ad30fce1eb82a8e14824c1d61d3533e14679763cb86a7fda512665067bbe5"
+      },
+      "id": "reference-map-reference-small",
+      "kind": "reference_reduction_map",
+      "path": "resources/references/reference-small.map.json",
+      "size_bytes": 1294
+    },
+    {
+      "checksum": {
+        "algorithm": "sha256",
+        "digest": "4f9cb132bf804140fd3849cbe54801e515a9dce0b121ec50abde12988aaa33a7"
+      },
+      "id": "effective-config",
+      "kind": "effective_config",
+      "path": "effective-config.json",
+      "size_bytes": 2710
+    }
+  ],
+  "configuration_input": {
+    "artifact_id": "config-general",
+    "kind": "general",
+    "original_path": "/tmp/gps-f1-e147/tests/fixtures/reference_reduction/general.toml"
+  },
+  "diagnostics": [],
+  "effective_config_artifact_id": "effective-config",
+  "execution_id": "RUN_YG7JSPV26W4TAXYO7EBWXVXLKA",
+  "manifest_kind": "gps_execution_manifest",
+  "output_categories": {
+    "defaulted": [],
+    "disabled": [],
+    "minimum": [
+      "config-general",
+      "reference-fasta",
+      "effective-config"
+    ],
+    "requested": [
+      "reference-fasta-reference-small",
+      "reference-map-reference-small"
+    ]
+  },
+  "reference_reductions": [
+    {
+      "eligible_bases": 20,
+      "fasta_artifact_id": "reference-fasta-reference-small",
+      "id": "reference-small",
+      "map_artifact_id": "reference-map-reference-small",
+      "map_document_kind": "reference_reduction_map",
+      "map_schema_version": "1",
+      "region_size_bases": 5,
+      "root_seed": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "selection_algorithm": "reduced_reference_selection_v1",
+      "selection_order": [
+        2,
+        1,
+        3
+      ],
+      "selection_subseed": "7fa724d52b2db97a043920dbc3062a34c6377eab76f1d9d6e4ff1d513747decd",
+      "source_fasta_artifact_id": "reference-fasta",
+      "source_reference_id": "reference-main",
+      "state": "complete",
+      "target": {
+        "bases": 13,
+        "declared": "13",
+        "mode": "target_bases"
+      }
+    }
+  ],
+  "references": [
+    {
+      "fasta_artifact_id": "reference-fasta",
+      "id": "reference-main"
+    },
+    {
+      "fasta_artifact_id": "reference-fasta-reference-small",
+      "id": "reference-small"
+    }
+  ],
+  "schema_version": "1",
+  "state": "complete"
+}

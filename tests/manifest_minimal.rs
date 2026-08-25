@@ -368,7 +368,7 @@ fn record(id: &str, kind: &str, path: &str) -> ArtifactRecord {
 fn complete_manifest() -> Value {
     json!({
         "manifest_kind": "gps_execution_manifest",
-        "schema_version": "1",
+        "schema_version": "2",
         "execution_id": "execution-001",
         "state": "complete",
         "configuration_input": {
@@ -400,7 +400,7 @@ fn complete_manifest() -> Value {
 fn failed_manifest() -> Value {
     json!({
         "manifest_kind": "gps_execution_manifest",
-        "schema_version": "1",
+        "schema_version": "2",
         "execution_id": "execution-failed-001",
         "state": "failed",
         "configuration_input": {
@@ -492,7 +492,7 @@ fn assert_external_bytes(name: &str, bytes: &[u8], expected_success: bool) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("python3")
         .arg(root.join("tests/external_manifest_validator.py"))
-        .arg(root.join("schemas/manifest-general-v1.schema.json"))
+        .arg(root.join("schemas/manifest-general-v2.schema.json"))
         .arg(&instance)
         .arg(root.join("catalogs/diagnostics-v2.tsv"))
         .output()

@@ -10,7 +10,7 @@ import tempfile
 from typing import Any, Sequence
 
 SUPPORTED_BINARY_NAME = "genome-population-simulator"
-SUPPORTED_BINARY_VERSION = "0.1.0"
+SUPPORTED_BINARY_VERSION = "0.2.0"
 DEFAULT_BINARY = Path(__file__).resolve().parents[1] / "target" / "debug" / SUPPORTED_BINARY_NAME
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

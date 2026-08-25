@@ -1,0 +1,57 @@
+{
+  "algorithm": "reduced_reference_selection_v1",
+  "derived_reference_id": "reference-small",
+  "document_kind": "reference_reduction_map",
+  "schema_version": "1",
+  "segments": [
+    {
+      "derived_interval": {
+        "end": 5,
+        "start": 1
+      },
+      "materialization_order": 1,
+      "orientation": "forward",
+      "segment_class": "full",
+      "selection_order": 2,
+      "sequence_class": "chromosome",
+      "sequence_id": "chr1",
+      "source_interval": {
+        "end": 6,
+        "start": 2
+      }
+    },
+    {
+      "derived_interval": {
+        "end": 10,
+        "start": 6
+      },
+      "materialization_order": 2,
+      "orientation": "forward",
+      "segment_class": "full",
+      "selection_order": 1,
+      "sequence_class": "chromosome",
+      "sequence_id": "chr1",
+      "source_interval": {
+        "end": 11,
+        "start": 7
+      }
+    },
+    {
+      "derived_interval": {
+        "end": 3,
+        "start": 1
+      },
+      "materialization_order": 3,
+      "orientation": "forward",
+      "segment_class": "residual",
+      "selection_order": 3,
+      "sequence_class": "scaffold",
+      "sequence_id": "scaffold-1",
+      "source_interval": {
+        "end": 7,
+        "start": 5
+      }
+    }
+  ],
+  "source_reference_id": "reference-main"
+}

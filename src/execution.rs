@@ -535,6 +535,7 @@ fn preflight_prepared_config(
     authorizations: ExecutionAuthorizations,
     prepared_reference: &PreparedReference,
 ) -> Result<PreparedExecution, Diagnostic> {
+    preflight_vcf_samples(effective)?;
     preflight_reductions(effective, prepared_reference.reference())?;
     let prepared_population_snvs =
         prepare_population_snvs_for_execution(effective, authorizations, prepared_reference)?;
@@ -550,6 +551,30 @@ fn preflight_prepared_config(
         population_snvs: prepared_population_snvs,
         initial_individuals,
     })
+}
+
+/// La proyección F2 solo representa genotipos de individuos iniciales. Un VCF
+/// solicitado sin ninguno produciría una cabecera sin muestras, que no es una
+/// vista semántica del conjunto de verdad. Se rechaza antes de crear el
+/// provisional de publicación, tanto para `validate` como para `run`.
+fn preflight_vcf_samples(effective: &EffectiveConfig) -> Result<(), Diagnostic> {
+    if effective.vcf_output().is_some()
+        && !effective
+            .initial_populations()
+            .iter()
+            .any(|population| !population.individual_ids().is_empty())
+    {
+        return Err(Diagnostic::configuration(
+            "GPS-CONF-008",
+            "La salida VCF exige al menos una muestra de una población inicial.",
+        )
+        .with("component", "vcf_output,initial_populations")
+        .with(
+            "detail",
+            "truth.jsonl no contiene copias ni genotipos cuando initial_populations está vacío",
+        ));
+    }
+    Ok(())
 }
 
 fn publish_controlled_failure(
@@ -1578,7 +1603,9 @@ mod tests {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/config/general-seeded.toml"),
         )
         .expect("fixture");
-        bytes.extend_from_slice(b"\n[vcf_output]\nmode = \"bgzf\"\n");
+        bytes.extend_from_slice(
+            b"\n[population_snvs]\nmode = \"generate\"\n[population_snvs.generate]\ncount_mode = \"exact\"\nlocus_count = 1\nspatial_mode = \"uniform\"\nsubstitution_profile = \"uniform_snv12_v1\"\n[[population_snvs.generate.populations]]\npopulation_id = \"P1\"\nfrequency_model = \"uniform\"\nmin_alt_af = 0.2\nmax_alt_af = 0.8\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"IND_01\"]\nploidy = 2\ngenotype_model = \"hwe\"\n[vcf_output]\nmode = \"bgzf\"\n",
+        );
         fs::write(&config, bytes).expect("VCF config");
         let effective = load_and_validate_config(&config).expect("valid VCF config");
         let injected = Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")

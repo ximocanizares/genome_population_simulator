@@ -1346,11 +1346,11 @@ durabilidad ante fallo físico: `fsync` y cualquier garantía de persistencia
 deben implementarse y verificarse expresamente antes de prometerlas. La
 reanudación por artefacto queda como ampliación futura tras medir costes.
 
-`effective-config.json` declara `schema_version` con `"1"` y el discriminador de
-clase equivalente definido por su esquema. Todo escritor emite siempre la
-versión actual. V1 no migra documentos ni modifica silenciosamente los leídos;
-una eventual conversión entre versiones exigiría una decisión posterior y
-produciría otra copia conservando el original.
+F1 publicó `effective-config.json` y el manifiesto general con
+`schema_version = "1"`. F2 publica sus extensiones incompatibles como versión
+`"2"`, con esquemas y lectores separados; los documentos v1 permanecen
+congelados y legibles. Todo escritor emite siempre la versión actual y no hay
+migración ni modificación silenciosa de documentos v1.
 
 ### 9.4. Entregas del programa
 

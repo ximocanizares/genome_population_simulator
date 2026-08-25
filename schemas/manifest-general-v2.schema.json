@@ -1,0 +1,323 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manifest-general-v2.schema.json",
+  "title": "Manifiesto general mínimo GPS v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_kind",
+    "schema_version",
+    "execution_id",
+    "state",
+    "configuration_input",
+    "effective_config_artifact_id",
+    "references",
+    "reference_reductions",
+    "vcf_outputs",
+    "authorizations",
+    "output_categories",
+    "artifacts",
+    "diagnostics"
+  ],
+  "properties": {
+    "manifest_kind": { "const": "gps_execution_manifest" },
+    "schema_version": { "const": "2" },
+    "execution_id": { "type": "string", "minLength": 1 },
+    "state": { "enum": ["complete", "failed"] },
+    "configuration_input": {
+      "oneOf": [
+        { "$ref": "#/$defs/configuration_input" },
+        { "type": "null" }
+      ]
+    },
+    "effective_config_artifact_id": {
+      "oneOf": [
+        { "$ref": "#/$defs/non_empty_id" },
+        { "type": "null" }
+      ]
+    },
+    "references": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/reference_link" }
+    },
+    "reference_reductions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/reference_reduction" }
+    },
+    "population_snvs": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/population_snvs_link" }
+      ]
+    },
+    "vcf_outputs": {
+      "type": "array",
+      "maxItems": 1,
+      "items": { "$ref": "#/$defs/vcf_output" }
+    },
+    "authorizations": { "$ref": "#/$defs/authorizations" },
+    "output_categories": { "$ref": "#/$defs/output_categories" },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "state": { "const": "complete" } },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": {
+          "configuration_input": { "$ref": "#/$defs/configuration_input" },
+          "effective_config_artifact_id": { "$ref": "#/$defs/non_empty_id" },
+          "references": { "minItems": 1 },
+          "artifacts": {
+            "contains": {
+              "type": "object",
+              "required": ["id", "kind", "path"],
+              "properties": {
+                "id": { "const": "truth-jsonl" },
+                "kind": { "const": "truth_jsonl" },
+                "path": { "const": "outputs/truth.jsonl" }
+              }
+            },
+            "minContains": 1,
+            "maxContains": 1
+          },
+          "reference_reductions": {
+            "items": { "properties": { "state": { "const": "complete" } } }
+          },
+          "diagnostics": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "state": { "const": "failed" } },
+        "required": ["state"]
+      },
+      "then": {
+        "properties": { "diagnostics": { "minItems": 1 } }
+      }
+    }
+  ],
+  "$defs": {
+    "normalization_audit": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/normalization_audit_group"}
+    },
+    "normalization_audit_group": {
+      "type": "object", "additionalProperties": false,
+      "required": ["population_id", "contig", "position", "ref", "tolerance", "canonical_order", "sum_algorithm", "original_sum", "original_delta", "effective_sum", "effective_delta", "reference_frequency", "decision", "values"],
+      "properties": {
+        "population_id": {"type": "string", "minLength": 1}, "contig": {"type": "string", "minLength": 1},
+        "position": {"type": "string", "pattern": "^[1-9][0-9]*$"}, "ref": {"enum": ["A", "C", "G", "T"]},
+        "tolerance": {"type": "number", "minimum": 0, "maximum": 0.000001},
+        "canonical_order": {"const": "population_id,contig,position,ref,alt,variant_id,source_id"}, "sum_algorithm": {"const": "neumaier_sum_v1"},
+        "original_sum": {"type": "number", "minimum": 0}, "original_delta": {"type": "number", "minimum": 0},
+        "effective_sum": {"type": "number", "minimum": 0}, "effective_delta": {"type": "number", "minimum": 0},
+        "reference_frequency": {"type": "number", "minimum": 0, "maximum": 1}, "decision": {"enum": ["reference_remainder", "normalized"]},
+        "values": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/normalization_audit_value"}}
+      }
+    },
+    "normalization_audit_value": {
+      "type": "object", "additionalProperties": false,
+      "required": ["alt", "variant_id", "source_id", "original", "effective"],
+      "properties": {
+        "alt": {"enum": ["A", "C", "G", "T"]}, "variant_id": {"type": "string", "minLength": 1},
+        "source_id": {"type": "string"}, "original": {"type": "number", "minimum": 0, "maximum": 1},
+        "effective": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "authorizations": { "type": "object", "additionalProperties": false, "required": ["allow_empty_snv_matrix", "allow_incompatible_genotypes"], "properties": {"allow_empty_snv_matrix": {"type": "boolean"}, "allow_incompatible_genotypes": {"type": "boolean"}}},
+    "non_empty_id": { "type": "string", "minLength": 1 },
+    "checksum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "digest"],
+      "properties": {
+        "algorithm": { "const": "sha256" },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "path", "size_bytes", "checksum"],
+      "properties": {
+        "id": { "$ref": "#/$defs/non_empty_id" },
+        "kind": { "$ref": "#/$defs/non_empty_id" },
+        "path": {
+          "type": "string",
+          "pattern": "^(?!INCOMPLETE$)(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f])(?!.*\\/$).+$(?!\\n)"
+        },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "checksum": { "$ref": "#/$defs/checksum" }
+      }
+    },
+    "configuration_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "original_path", "artifact_id"],
+      "properties": {
+        "kind": { "const": "general" },
+        "original_path": { "type": "string", "minLength": 1 },
+        "artifact_id": { "$ref": "#/$defs/non_empty_id" }
+      }
+    },
+    "reference_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "fasta_artifact_id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/non_empty_id" },
+        "fasta_artifact_id": { "$ref": "#/$defs/non_empty_id" }
+      }
+    },
+    "reduction_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "declared", "bases"],
+      "properties": {
+        "mode": { "enum": ["target_bases", "reduction_percent"] },
+        "declared": { "type": "string", "minLength": 1 },
+        "bases": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "reference_reduction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_reference_id",
+        "eligible_bases",
+        "region_size_bases",
+        "target",
+        "root_seed",
+        "selection_algorithm",
+        "selection_subseed",
+        "selection_order",
+        "state",
+        "fasta_artifact_id",
+        "map_artifact_id",
+        "source_fasta_artifact_id",
+        "map_document_kind",
+        "map_schema_version"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/non_empty_id" },
+        "source_reference_id": { "$ref": "#/$defs/non_empty_id" },
+        "eligible_bases": { "type": "integer", "minimum": 1 },
+        "region_size_bases": { "type": "integer", "minimum": 1 },
+        "target": { "$ref": "#/$defs/reduction_target" },
+        "root_seed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "selection_algorithm": { "const": "reduced_reference_selection_v1" },
+        "selection_subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "selection_order": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "state": { "enum": ["incomplete", "complete", "failed"] },
+        "fasta_artifact_id": { "oneOf": [{ "$ref": "#/$defs/non_empty_id" }, { "type": "null" }] },
+        "map_artifact_id": { "oneOf": [{ "$ref": "#/$defs/non_empty_id" }, { "type": "null" }] },
+        "source_fasta_artifact_id": { "oneOf": [{ "$ref": "#/$defs/non_empty_id" }, { "type": "null" }] },
+        "map_document_kind": { "const": "reference_reduction_map" },
+        "map_schema_version": { "const": "1" }
+      },
+      "allOf": [{
+        "if": { "properties": { "state": { "const": "complete" } }, "required": ["state"] },
+        "then": { "properties": {
+          "fasta_artifact_id": { "$ref": "#/$defs/non_empty_id" },
+          "map_artifact_id": { "$ref": "#/$defs/non_empty_id" },
+          "source_fasta_artifact_id": { "$ref": "#/$defs/non_empty_id" }
+        }}
+      }]
+    },
+    "population_snvs_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "metadata_sha256", "normalization_audit"],
+      "properties": {
+        "mode": {"enum": ["supplied", "generated", "reuse"]},
+        "metadata_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "metadata_artifact_id": {"oneOf": [{"$ref": "#/$defs/non_empty_id"}, {"type": "null"}]},
+        "normalization_audit": {"$ref": "#/$defs/normalization_audit"},
+        "initial_population_statistics": {"$ref": "#/$defs/initial_population_statistics"}
+      },
+      "allOf": [
+        {"if": {"properties": {"mode": {"const": "reuse"}}, "required": ["mode"]}, "then": {"properties": {"metadata_artifact_id": {"type": "null"}}}},
+        {"if": {"properties": {"mode": {"enum": ["supplied", "generated"]}}, "required": ["mode"]}, "then": {"required": ["metadata_artifact_id"], "properties": {"metadata_artifact_id": {"$ref": "#/$defs/non_empty_id"}}}}
+      ]
+    },
+    "vcf_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reference_id", "samples", "mode", "vcf_artifact_id", "index_kind", "index_artifact_id"],
+      "properties": {
+        "state": {"const": "complete"},
+        "reference_id": {"$ref": "#/$defs/non_empty_id"},
+        "samples": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/non_empty_id"}},
+        "mode": {"enum": ["text", "bgzf"]},
+        "vcf_artifact_id": {"$ref": "#/$defs/non_empty_id"},
+        "index_kind": {"oneOf": [{"enum": ["tbi", "csi"]}, {"type": "null"}]},
+        "index_artifact_id": {"oneOf": [{"$ref": "#/$defs/non_empty_id"}, {"type": "null"}]}
+      },
+      "allOf": [
+        {"if": {"properties": {"mode": {"const": "text"}}, "required": ["mode"]}, "then": {"properties": {"index_kind": {"type": "null"}, "index_artifact_id": {"type": "null"}}}},
+        {"if": {"properties": {"mode": {"const": "bgzf"}}, "required": ["mode"]}, "then": {"properties": {"index_kind": {"enum": ["tbi", "csi"]}, "index_artifact_id": {"$ref": "#/$defs/non_empty_id"}}}}
+      ]
+    },
+    "initial_population_statistics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "version", "provenance", "populations"],
+      "properties": {
+        "kind": {"const": "initial_population_statistics"},
+        "version": {"const": "1"},
+        "provenance": {"$ref": "#/$defs/initial_population_statistics_provenance"},
+        "populations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/initial_population_statistics_population"}}
+      }
+    },
+    "initial_population_statistics_provenance": {"type": "object", "additionalProperties": false, "required": ["matrix_reference_id", "matrix_reference_fingerprint", "matrix_canonical_tsv_sha256", "genotype_algorithms", "missing_locus_policy", "explicit_snp_constraints"], "properties": {"matrix_reference_id": {"type": "string", "minLength": 1}, "matrix_reference_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "matrix_canonical_tsv_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "genotype_algorithms": {"type": "array", "minItems": 3, "maxItems": 3, "prefixItems": [{"const": "hwe-composition-v1"}, {"const": "f-diploid-genotype-v1"}, {"const": "phase-permutation-v1"}], "items": false}, "missing_locus_policy": {"const": "missing_by_deletion_excluded_from_allele_frequency_denominator_v1"}, "explicit_snp_constraints": {"type": "array", "items": {"$ref": "#/$defs/explicit_snp_constraint"}}}},
+    "explicit_snp_constraint": {"type": "object", "additionalProperties": false, "required": ["population_id", "individual_id", "event_id", "phase", "matrix_variant_id", "sampled_alternate", "explicit_alternate", "incompatible"], "properties": {"population_id": {"type": "string", "minLength": 1}, "individual_id": {"type": "string", "minLength": 1}, "event_id": {"type": "string", "minLength": 1}, "phase": {"type": "integer", "minimum": 0, "maximum": 9}, "matrix_variant_id": {"type": "string", "minLength": 1}, "sampled_alternate": {"oneOf": [{"enum": ["A", "C", "G", "T"]}, {"type": "null"}]}, "explicit_alternate": {"enum": ["A", "C", "G", "T"]}, "incompatible": {"type": "boolean"}}},
+    "initial_population_statistics_population": {"type": "object", "additionalProperties": false, "required": ["population_id", "genotype_model", "individual_count", "ploidy", "loci"], "properties": {"population_id": {"type": "string", "minLength": 1}, "genotype_model": {"$ref": "#/$defs/initial_genotype_model"}, "individual_count": {"type": "integer", "minimum": 1}, "ploidy": {"type": "integer", "minimum": 1, "maximum": 10}, "loci": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/initial_population_statistics_locus"}}}},
+    "initial_population_statistics_locus": {"type": "object", "additionalProperties": false, "required": ["contig", "position_1based", "ref", "total_copies", "observed_copies", "missing_by_deletion", "alleles", "complete_genotype_observations", "genotypes"], "properties": {"contig": {"type": "string", "minLength": 1}, "position_1based": {"type": "integer", "minimum": 1}, "ref": {"enum": ["A", "C", "G", "T"]}, "total_copies": {"type": "integer", "minimum": 1}, "observed_copies": {"type": "integer", "minimum": 0}, "missing_by_deletion": {"type": "integer", "minimum": 0}, "alleles": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/initial_population_statistics_allele"}}, "complete_genotype_observations": {"type": "integer", "minimum": 0}, "genotypes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/initial_population_statistics_genotype"}}}},
+    "initial_population_statistics_allele": {"type": "object", "additionalProperties": false, "required": ["allele", "kind", "requested_frequency", "realized_count", "realized_frequency"], "properties": {"allele": {"enum": ["A", "C", "G", "T"]}, "kind": {"enum": ["ref", "alt"]}, "variant_id": {"type": "string", "minLength": 1}, "source_id": {"type": "string"}, "requested_frequency": {"type": "number", "minimum": 0, "maximum": 1}, "realized_count": {"type": "integer", "minimum": 0}, "realized_frequency": {"type": "number", "minimum": 0, "maximum": 1}}, "allOf": [{"if": {"properties": {"kind": {"const": "ref"}}, "required": ["kind"]}, "then": {"not": {"anyOf": [{"required": ["variant_id"]}, {"required": ["source_id"]}]}}}, {"if": {"properties": {"kind": {"const": "alt"}}, "required": ["kind"]}, "then": {"required": ["variant_id", "source_id"]}}]},
+    "initial_population_statistics_genotype": {"type": "object", "additionalProperties": false, "required": ["allele_dosages", "expected_probability", "expected_count", "realized_count"], "properties": {"allele_dosages": {"type": "array", "minItems": 2, "items": {"type": "integer", "minimum": 0, "maximum": 10}}, "expected_probability": {"type": "number", "minimum": 0, "maximum": 1}, "expected_count": {"type": "number", "minimum": 0}, "realized_count": {"type": "integer", "minimum": 0}}},
+    "initial_genotype_model": {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"enum": ["hwe", "f_diploid"]}, "inbreeding_coefficient": {"type": "number", "minimum": 0, "maximum": 1}}, "oneOf": [{"properties": {"kind": {"const": "hwe"}}, "not": {"required": ["inbreeding_coefficient"]}}, {"properties": {"kind": {"const": "f_diploid"}}, "required": ["inbreeding_coefficient"]}]},
+    "output_categories": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "defaulted", "requested", "disabled"],
+      "properties": {
+        "minimum": { "$ref": "#/$defs/id_set" },
+        "defaulted": { "$ref": "#/$defs/id_set" },
+        "requested": { "$ref": "#/$defs/id_set" },
+        "disabled": { "$ref": "#/$defs/id_set" }
+      }
+    },
+    "id_set": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/non_empty_id" }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^GPS-(CONF|INPUT|FMT|DOMAIN|RES|TOOL|IO|INTERNAL)-[0-9]{3}$"
+        },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
