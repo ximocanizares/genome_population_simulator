@@ -6,6 +6,7 @@
 //! secuencia sobre estados persistentes, de modo que ningún prefijo se publica
 //! si un conflicto o una entrada incompatible aparece después.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use crate::haplotype::Individual;
@@ -17,7 +18,10 @@ use crate::indel_application::{
 use crate::randomness::RootSeed;
 use crate::reference::Reference;
 use crate::segments::{ModificationProvenance, SegmentError};
-use crate::snp_application::{SnpApplicationError, TargetedSnp, apply_snps};
+use crate::snp_application::{
+    SnpApplicationError, SnpOrigin, TargetedSnp, apply_preflighted_snps_to_owned, apply_snps,
+    preflight_snps,
+};
 
 /// Petición de indels pequeños que posee sus identificadores y conserva el
 /// contexto de RNG de F2.2.9 sin depender de la vida de la configuración.
@@ -365,7 +369,40 @@ fn compose_declared_small_events(
     }
     let mut updated = individual.clone();
     let mut applied_events = Vec::with_capacity(explicit_events.len() + random_blocks.len());
-    for (declared_index, event) in explicit_events.iter().enumerate() {
+    let mut declared_index = 0;
+    while declared_index < explicit_events.len() {
+        if let Some(batch_end) = consecutive_matrix_snp_batch_end(explicit_events, declared_index) {
+            let batch = &explicit_events[declared_index..batch_end];
+            for (offset, event) in batch.iter().enumerate() {
+                let DeclaredSmallEvent::Snp(snp) = event else {
+                    unreachable!("a matrix SNP batch contains only SNP events");
+                };
+                preflight_snps(&updated, reference, std::slice::from_ref(snp)).map_err(
+                    |source| SmallEventCompositionError::Event {
+                        declared_index: declared_index + offset,
+                        kind: event.kind(),
+                        source: SmallEventSourceError::Snp(source),
+                    },
+                )?;
+            }
+            updated = apply_preflighted_snps_to_owned(
+                updated,
+                batch.iter().filter_map(|event| match event {
+                    DeclaredSmallEvent::Snp(snp) => Some(snp),
+                    DeclaredSmallEvent::Insertion(_) | DeclaredSmallEvent::Deletion(_) => None,
+                }),
+            )
+            .map_err(|source| SmallEventCompositionError::Event {
+                declared_index,
+                kind: DeclaredSmallEventKind::Snp,
+                source: SmallEventSourceError::Snp(source),
+            })?;
+            applied_events.extend(std::iter::repeat_n(AppliedSmallEvent::Snp, batch.len()));
+            declared_index = batch_end;
+            continue;
+        }
+
+        let event = &explicit_events[declared_index];
         let result = match event {
             DeclaredSmallEvent::Snp(snp) => {
                 apply_snps(&updated, reference, std::slice::from_ref(snp))
@@ -386,6 +423,7 @@ fn compose_declared_small_events(
         })?;
         updated = next;
         applied_events.push(applied);
+        declared_index += 1;
     }
     for (block_index, block) in random_blocks.iter().enumerate() {
         let declared_index = explicit_events.len() + block_index;
@@ -427,6 +465,43 @@ fn compose_declared_small_events(
         individual: updated,
         applied_events,
     })
+}
+
+/// Devuelve el final exclusivo de un lote de SNP de matriz contiguos. Los
+/// eventos explícitos y los indels nunca se atraviesan: conservan el orden
+/// declarado y ven exactamente el estado dejado por el lote anterior.
+fn consecutive_matrix_snp_batch_end(events: &[DeclaredSmallEvent], start: usize) -> Option<usize> {
+    let DeclaredSmallEvent::Snp(first) = events.get(start)? else {
+        return None;
+    };
+    if !matches!(first.snp().origin(), SnpOrigin::PopulationMatrix { .. }) {
+        return None;
+    }
+    let end = events[start..]
+        .iter()
+        .take_while(|event| {
+            matches!(
+                event,
+                DeclaredSmallEvent::Snp(snp)
+                    if matches!(snp.snp().origin(), SnpOrigin::PopulationMatrix { .. })
+            )
+        })
+        .count()
+        + start;
+    if end <= start + 1 {
+        return None;
+    }
+    let mut targets = BTreeSet::new();
+    events[start..end]
+        .iter()
+        .all(|event| {
+            let DeclaredSmallEvent::Snp(snp) = event else {
+                return false;
+            };
+            let position = snp.snp().locus().position();
+            targets.insert((position.sequence_id(), snp.phase(), position.offset()))
+        })
+        .then_some(end)
 }
 
 fn apply_current_insertion(

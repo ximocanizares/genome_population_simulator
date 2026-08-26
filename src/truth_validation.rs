@@ -4,6 +4,7 @@
 //! tipos externos, valida su estructura y materializa la vista vigente desde
 //! las piezas y la referencia autoritativa. Tampoco acepta ni consulta VCF.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::BufRead;
 
@@ -25,6 +26,45 @@ use crate::truth_schema::{
 pub struct ReconstructedTruth {
     pub document: TruthDocument,
     pub copies: BTreeMap<CopyIdentity, Vec<u8>>,
+}
+
+/// Vista compacta de una verdad que ya ha superado la validación semántica
+/// completa necesaria para derivar VCF.
+///
+/// La verdad mantiene piezas fuente, SNPs dispersos, inserciones y genotipos;
+/// las bases completas reconstruidas viven únicamente durante la validación de
+/// cada copia. El campo es privado para que los consumidores VCF no puedan
+/// omitir la frontera de validación.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ValidatedTruthForVcf<'truth> {
+    document: &'truth TruthDocument,
+    reference_id: &'truth str,
+    reference_content_sha256: &'truth str,
+}
+
+impl<'truth> ValidatedTruthForVcf<'truth> {
+    #[must_use]
+    pub(crate) fn document(self) -> &'truth TruthDocument {
+        self.document
+    }
+
+    /// Rechaza que una vista aprobada para una referencia se reutilice contra
+    /// otra en los consumidores internos de VCF.
+    pub(crate) fn validate_reference(
+        self,
+        reference: &Reference,
+    ) -> Result<(), TruthValidationError> {
+        if self.reference_id != reference.id().as_str() {
+            return Err(TruthValidationError::ReferenceIdMismatch {
+                declared: self.reference_id.to_owned(),
+                actual: reference.id().as_str().to_owned(),
+            });
+        }
+        if self.reference_content_sha256 != reference_content_sha256(reference) {
+            return Err(TruthValidationError::ReferenceDigestMismatch);
+        }
+        Ok(())
+    }
 }
 
 /// Recuento obtenido al validar por flujo. No conserva el documento ni las
@@ -263,6 +303,46 @@ pub fn validate_and_reconstruct_truth_jsonl(
     validate_and_reconstruct_truth(document, reference)
 }
 
+/// Valida una verdad ya deserializada sin retener secuencias reconstruidas.
+///
+/// La publicación VCF comprueba el contrato estructural antes de invocar esta
+/// fase, que valida referencia y semántica completa —incluido cada genotipo—
+/// y solo entonces entrega una vista que permite materializar ventanas
+/// puntuales.
+pub(crate) fn validate_truth_for_vcf<'truth>(
+    document: &'truth TruthDocument,
+    reference: &Reference,
+) -> Result<ValidatedTruthForVcf<'truth>, TruthValidationError> {
+    if document.header.reference_id != reference.id().as_str() {
+        return Err(TruthValidationError::ReferenceIdMismatch {
+            declared: document.header.reference_id.clone(),
+            actual: reference.id().as_str().to_owned(),
+        });
+    }
+    validate_reference_digest(&document.header, reference)?;
+
+    let mut details = BTreeMap::new();
+    for record in &document.records {
+        if let TruthRecord::HaplotypeCopy(copy) = record {
+            let result = reconstruct_copy(copy, reference)?;
+            details.insert(
+                copy.identity.clone(),
+                CopySummary::from_reconstructed(result, Cow::Borrowed(&copy.history)),
+            );
+        }
+    }
+    for record in &document.records {
+        if let TruthRecord::Genotype(genotype) = record {
+            validate_genotype_semantics(genotype, reference, &details)?;
+        }
+    }
+    Ok(ValidatedTruthForVcf {
+        document,
+        reference_id: &document.header.reference_id,
+        reference_content_sha256: &document.header.reference_content_sha256,
+    })
+}
+
 /// Valida y reconstruye por flujo, reteniendo únicamente metadatos compactos
 /// por copia para contrastar los genotipos que aparecen después en el orden
 /// canónico. Cada secuencia materializada se entrega al callback y se libera.
@@ -336,9 +416,13 @@ pub fn validate_truth_jsonl_streaming(
                 .map_err(TruthValidationError::Contract)?;
                 let result = reconstruct_copy(&copy, reference)?;
                 on_copy(&copy.identity, &result.bases);
-                summaries.insert(copy.identity.clone(), CopySummary::from(&result));
-                copy_identities.insert(copy.identity.clone());
-                previous_copy = Some(copy.identity);
+                let copy_identity = copy.identity.clone();
+                summaries.insert(
+                    copy_identity.clone(),
+                    CopySummary::from_reconstructed(result, Cow::Owned(copy.history)),
+                );
+                copy_identities.insert(copy_identity.clone());
+                previous_copy = Some(copy_identity);
                 copy_count = copy_count
                     .checked_add(1)
                     .ok_or(TruthValidationError::Contract(
@@ -427,8 +511,22 @@ pub fn validate_and_reconstruct_truth(
     for record in &document.records {
         if let TruthRecord::HaplotypeCopy(copy) = record {
             let result = reconstruct_copy(copy, reference)?;
-            reconstructed.insert(copy.identity.clone(), result.bases.clone());
-            details.insert(copy.identity.clone(), CopySummary::from(&result));
+            let ReconstructedCopy {
+                bases,
+                final_sha256,
+                source_slices,
+                pieces,
+            } = result;
+            reconstructed.insert(copy.identity.clone(), bases);
+            details.insert(
+                copy.identity.clone(),
+                CopySummary {
+                    final_sha256,
+                    source_slices,
+                    pieces,
+                    history: Cow::Borrowed(&copy.history),
+                },
+            );
         }
     }
     for record in &document.records {
@@ -450,24 +548,26 @@ struct ReconstructedCopy {
     /// base para el contraste posterior de genotipos en modo streaming.
     source_slices: Vec<SourceSlice>,
     pieces: Vec<PieceLayout>,
-    history: Vec<TruthHistoryEvent>,
 }
 
 #[derive(Clone, Debug)]
-struct CopySummary {
+struct CopySummary<'truth> {
     final_sha256: [u8; 32],
     source_slices: Vec<SourceSlice>,
     pieces: Vec<PieceLayout>,
-    history: Vec<TruthHistoryEvent>,
+    history: Cow<'truth, [TruthHistoryEvent]>,
 }
 
-impl From<&ReconstructedCopy> for CopySummary {
-    fn from(value: &ReconstructedCopy) -> Self {
+impl<'truth> CopySummary<'truth> {
+    fn from_reconstructed(
+        value: ReconstructedCopy,
+        history: Cow<'truth, [TruthHistoryEvent]>,
+    ) -> Self {
         Self {
             final_sha256: value.final_sha256,
-            source_slices: value.source_slices.clone(),
-            pieces: value.pieces.clone(),
-            history: value.history.clone(),
+            source_slices: value.source_slices,
+            pieces: value.pieces,
+            history,
         }
     }
 }
@@ -1112,7 +1212,6 @@ fn materialize_replayed_copy(
         bases,
         source_slices,
         pieces: layouts,
-        history: copy.history.clone(),
     })
 }
 
@@ -1154,7 +1253,7 @@ fn validated_source<'a>(
 fn validate_genotype_semantics(
     genotype: &GenotypeRecord,
     reference: &Reference,
-    copies: &BTreeMap<CopyIdentity, CopySummary>,
+    copies: &BTreeMap<CopyIdentity, CopySummary<'_>>,
 ) -> Result<(), TruthValidationError> {
     match genotype.case_kind {
         GenotypeCaseKind::Snp => validate_snp_genotype(genotype, reference, copies),
@@ -1165,7 +1264,7 @@ fn validate_genotype_semantics(
 fn validate_snp_genotype(
     genotype: &GenotypeRecord,
     reference: &Reference,
-    copies: &BTreeMap<CopyIdentity, CopySummary>,
+    copies: &BTreeMap<CopyIdentity, CopySummary<'_>>,
 ) -> Result<(), TruthValidationError> {
     let sequence = reference
         .sequences()
@@ -1218,7 +1317,7 @@ fn validate_snp_genotype(
 
 fn validate_indel_genotype(
     genotype: &GenotypeRecord,
-    copies: &BTreeMap<CopyIdentity, CopySummary>,
+    copies: &BTreeMap<CopyIdentity, CopySummary<'_>>,
 ) -> Result<(), TruthValidationError> {
     let alternates = genotype
         .alleles
@@ -1268,7 +1367,7 @@ fn validate_indel_genotype(
 }
 
 fn active_insertion_matches(
-    copy: &CopySummary,
+    copy: &CopySummary<'_>,
     allele: &TruthAllele,
     history: &TruthHistoryEvent,
 ) -> bool {
@@ -1313,7 +1412,7 @@ fn active_insertion_matches(
 }
 
 fn deletion_matches(
-    copy: &CopySummary,
+    copy: &CopySummary<'_>,
     final_haplotype_bases: &str,
     source_event: &TruthStructuralEvent,
     piece_links: &[TruthPieceLink],

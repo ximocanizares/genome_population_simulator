@@ -12,6 +12,10 @@ use genome_population_simulator::segments::{
     CanonicalBase, DeletionModification, ModificationProvenance, Segment, SegmentChain,
     SegmentError, SmallModification,
 };
+use genome_population_simulator::small_event_composition::{
+    DeclaredSmallEvent, DeclaredSmallEventKind, SmallEventCompositionError, SmallEventSourceError,
+    TargetedCurrentInsertion, apply_declared_small_events,
+};
 use genome_population_simulator::snp_application::{
     ApplicableSnp, SnpApplicationError, SnpOrigin, TargetedSnp, apply_snps, preflight_snps,
 };
@@ -38,6 +42,63 @@ fn reference_with_id(id: &str, bases: &[u8]) -> Reference {
         ],
     )
     .expect("reference")
+}
+
+fn two_sequence_reference() -> Reference {
+    Reference::new(
+        ReferenceId::parse("ref-main", "test").expect("reference"),
+        ReferenceOrigin::Generated,
+        vec![
+            ReferenceSequence::new(
+                SequenceId::parse("chr1", "test").expect("first sequence ID"),
+                FastaHeader::parse(b"chr1").expect("first header"),
+                SequenceClass::Chromosome,
+                &DnaSequence::try_from_bytes(b"ACGT").expect("first DNA"),
+            )
+            .expect("first sequence"),
+            ReferenceSequence::new(
+                SequenceId::parse("chr2", "test").expect("second sequence ID"),
+                FastaHeader::parse(b"chr2").expect("second header"),
+                SequenceClass::Chromosome,
+                &DnaSequence::try_from_bytes(b"TGCA").expect("second DNA"),
+            )
+            .expect("second sequence"),
+        ],
+    )
+    .expect("reference")
+}
+
+fn explicit_on_sequence(
+    reference: &Reference,
+    sequence_id: &SequenceId,
+    offset: u64,
+    alternate: CanonicalBase,
+    event: &str,
+) -> ApplicableSnp {
+    let sequence = reference
+        .sequences()
+        .iter()
+        .find(|sequence| sequence.id() == sequence_id)
+        .expect("known sequence");
+    let reference_base = CanonicalBase::from_byte(
+        sequence.sequence().as_bytes()[usize::try_from(offset).expect("offset")],
+    )
+    .expect("canonical reference");
+    ApplicableSnp::explicit(
+        SnpLocus::new(
+            BasePosition::new(
+                reference.id().clone(),
+                sequence_id.clone(),
+                offset,
+                sequence.sequence().len(),
+            )
+            .expect("position"),
+            reference_base,
+            alternate,
+        )
+        .expect("locus"),
+        EventId::parse(event, "test").expect("event"),
+    )
 }
 
 fn individual(reference: &Reference, id: &str) -> Individual {
@@ -653,5 +714,149 @@ fn one_canonical_matrix_row_can_target_fixed_individuals_and_phases_without_rng(
         assert_eq!(snp.matrix_variant_id(), Some(row.variant_id()));
         assert_eq!(snp.matrix_population_id(), Some(row.population_id()));
         assert_eq!(snp.matrix_source_id(), Some(row.source_id()));
+    }
+}
+
+#[test]
+fn matrix_snp_batch_matches_sequential_application_across_sequences_and_phases() {
+    let reference = two_sequence_reference();
+    let original = individual(&reference, "individual-1");
+    let header = TSV_HEADER.join("\t");
+    let table = parse_canonical_tsv(
+        format!(
+            "{header}\nignored\tchr1\t1\tA\tC\tP1\t0.5\tmatrix-1\nignored\tchr1\t4\tT\tA\tP1\t0.5\tmatrix-2\nignored\tchr2\t2\tG\tA\tP1\t0.5\tmatrix-3\n"
+        )
+        .as_bytes(),
+    )
+    .expect("matrix TSV");
+    let prepared = prepare_population_snvs_from_reference(&table, &reference, 1e-9, false)
+        .expect("prepared matrix");
+    let phase_zero = HaplotypePhase::from_copy_index(0).expect("phase zero");
+    let phase_one = HaplotypePhase::from_copy_index(1).expect("phase one");
+    let applications = prepared
+        .rows()
+        .iter()
+        .zip([phase_zero, phase_one, phase_zero])
+        .enumerate()
+        .map(|(index, (row, phase))| {
+            TargetedSnp::new(
+                phase,
+                ApplicableSnp::from_population_matrix(
+                    &reference,
+                    row,
+                    EventId::parse(format!("matrix-event-{}", index + 1), "test")
+                        .expect("matrix event"),
+                )
+                .expect("matrix SNP"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let batched = apply_snps(&original, &reference, &applications).expect("matrix batch");
+    let repeated = apply_snps(&original, &reference, &applications).expect("repeated matrix batch");
+    let sequential = applications
+        .iter()
+        .try_fold(original.clone(), |current, application| {
+            apply_snps(&current, &reference, std::slice::from_ref(application))
+        })
+        .expect("sequential matrix SNPs");
+    assert_eq!(batched, sequential);
+    assert_eq!(batched, repeated);
+    assert_eq!(original, individual(&reference, "individual-1"));
+
+    let duplicate_matrix_target = [
+        DeclaredSmallEvent::Snp(applications[0].clone()),
+        DeclaredSmallEvent::Snp(applications[0].clone()),
+    ];
+    assert_eq!(
+        apply_declared_small_events(
+            &original,
+            &reference,
+            genome_population_simulator::randomness::RootSeed::from_bytes([7; 32]),
+            &duplicate_matrix_target,
+            &[],
+        ),
+        Err(SmallEventCompositionError::Event {
+            declared_index: 1,
+            kind: DeclaredSmallEventKind::Snp,
+            source: SmallEventSourceError::Snp(SnpApplicationError::Segment(
+                SegmentError::SnpPositionAlreadyModified,
+            )),
+        })
+    );
+    assert_eq!(original, individual(&reference, "individual-1"));
+
+    let chr1 = SequenceId::parse("chr1", "test").expect("chr1 ID");
+    let later_events = [
+        DeclaredSmallEvent::Snp(TargetedSnp::new(
+            phase_zero,
+            explicit_on_sequence(
+                &reference,
+                &chr1,
+                2,
+                CanonicalBase::T,
+                "explicit-after-matrix",
+            ),
+        )),
+        DeclaredSmallEvent::Insertion(TargetedCurrentInsertion::new(
+            chr1.clone(),
+            phase_zero,
+            2,
+            b"GG".as_slice(),
+            ModificationProvenance::new(
+                EventId::parse("indel-after-matrix", "test").expect("indel event"),
+            ),
+        )),
+    ];
+    let root_seed = genome_population_simulator::randomness::RootSeed::from_bytes([7; 32]);
+    let after_batched =
+        apply_declared_small_events(&batched, &reference, root_seed, &later_events, &[])
+            .expect("later explicit events after batch");
+    let after_sequential =
+        apply_declared_small_events(&sequential, &reference, root_seed, &later_events, &[])
+            .expect("later explicit events after sequential SNPs");
+    let after_repeated =
+        apply_declared_small_events(&batched, &reference, root_seed, &later_events, &[])
+            .expect("repeated later explicit events");
+
+    assert_eq!(after_batched, after_sequential);
+    assert_eq!(after_batched, after_repeated);
+    for sequence in reference.sequences() {
+        for phase in [phase_zero, phase_one] {
+            let batched_copy = after_batched
+                .individual()
+                .copies_for(sequence.id())
+                .expect("batched copies")
+                .iter()
+                .find(|copy| copy.phase() == phase)
+                .expect("batched phase");
+            let sequential_copy = after_sequential
+                .individual()
+                .copies_for(sequence.id())
+                .expect("sequential copies")
+                .iter()
+                .find(|copy| copy.phase() == phase)
+                .expect("sequential phase");
+            assert_eq!(
+                genome_population_simulator::materialization::materialize_copy(
+                    batched_copy,
+                    &reference
+                )
+                .expect("batched genome"),
+                genome_population_simulator::materialization::materialize_copy(
+                    sequential_copy,
+                    &reference
+                )
+                .expect("sequential genome")
+            );
+            assert_eq!(
+                batched_copy.segments().current_modifications(),
+                sequential_copy.segments().current_modifications()
+            );
+            assert_eq!(
+                batched_copy.segments().small_event_history(),
+                sequential_copy.segments().small_event_history()
+            );
+        }
     }
 }

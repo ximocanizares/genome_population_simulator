@@ -7,6 +7,9 @@ use genome_population_simulator::indel_application::SmallIndelLengths;
 use genome_population_simulator::materialization::{
     GenotypeQueryError, SnpLocus, derive_snp_genotype, materialize_copy,
 };
+use genome_population_simulator::population_snvs::{
+    TSV_HEADER, parse_canonical_tsv, prepare_population_snvs_from_reference,
+};
 use genome_population_simulator::randomness::RootSeed;
 use genome_population_simulator::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
@@ -18,7 +21,9 @@ use genome_population_simulator::small_event_composition::{
     SmallEventSourceError, TargetedCurrentDeletion, TargetedCurrentInsertion,
     apply_declared_small_events, preflight_declared_small_events,
 };
-use genome_population_simulator::snp_application::{ApplicableSnp, TargetedSnp};
+use genome_population_simulator::snp_application::{
+    ApplicableSnp, SnpApplicationError, TargetedSnp, apply_snps,
+};
 
 fn reference(bases: &[u8]) -> Reference {
     Reference::new(
@@ -74,6 +79,31 @@ fn snp(
             EventId::parse(event_id, "test").expect("event"),
         ),
     )
+}
+
+fn matrix_snps(reference: &Reference, phases: [HaplotypePhase; 3]) -> [TargetedSnp; 3] {
+    let table = parse_canonical_tsv(
+        format!(
+            "{}\nignored\tchr1\t1\tA\tT\tP1\t0.5\tmatrix-1\nignored\tchr1\t2\tC\tG\tP1\t0.5\tmatrix-2\nignored\tchr1\t3\tG\tA\tP1\t0.5\tmatrix-3\n",
+            TSV_HEADER.join("\t")
+        )
+        .as_bytes(),
+    )
+    .expect("matrix TSV");
+    let prepared = prepare_population_snvs_from_reference(&table, reference, 1e-9, false)
+        .expect("prepared matrix");
+    std::array::from_fn(|index| {
+        TargetedSnp::new(
+            phases[index],
+            ApplicableSnp::from_population_matrix(
+                reference,
+                &prepared.rows()[index],
+                EventId::parse(format!("matrix-event-{}", index + 1), "test")
+                    .expect("matrix event"),
+            )
+            .expect("matrix SNP"),
+        )
+    })
 }
 
 fn random_indels(
@@ -254,6 +284,128 @@ fn declared_insertions_are_composed_before_a_later_snp_on_the_same_copy() {
     assert!(current.iter().any(
         |piece| matches!(piece, genome_population_simulator::segments::CurrentIndelPiece::Source(source) if source.snps().len() == 1)
     ));
+}
+
+#[test]
+fn matrix_snp_batches_preserve_explicit_event_boundaries_and_scalar_result() {
+    let reference = reference(b"ACGTACGT");
+    let original = individual(&reference);
+    let phase_zero = HaplotypePhase::from_copy_index(0).expect("phase zero");
+    let matrix = matrix_snps(&reference, [phase_zero; 3]);
+    let explicit = snp(&reference, 3, CanonicalBase::C, "explicit-after-matrix");
+    let events = [
+        DeclaredSmallEvent::Snp(matrix[0].clone()),
+        DeclaredSmallEvent::Snp(matrix[1].clone()),
+        DeclaredSmallEvent::Snp(matrix[2].clone()),
+        DeclaredSmallEvent::Snp(explicit.clone()),
+        insertion(&reference, 4, b"GG", "indel-after-explicit"),
+    ];
+
+    let result = apply_declared_small_events(
+        &original,
+        &reference,
+        RootSeed::from_bytes([9; 32]),
+        &events,
+        &[],
+    )
+    .expect("composition with a matrix batch");
+
+    // Esta referencia no atraviesa el agrupador: aplica cada SNP de matriz por
+    // separado y sólo después compone las fronteras explícitas.
+    let scalar_matrix = matrix
+        .iter()
+        .try_fold(original.clone(), |current, snp| {
+            apply_snps(&current, &reference, std::slice::from_ref(snp))
+        })
+        .expect("scalar matrix SNPs");
+    let scalar_boundaries = [
+        DeclaredSmallEvent::Snp(explicit),
+        insertion(&reference, 4, b"GG", "indel-after-explicit"),
+    ];
+    let scalar = apply_declared_small_events(
+        &scalar_matrix,
+        &reference,
+        RootSeed::from_bytes([9; 32]),
+        &scalar_boundaries,
+        &[],
+    )
+    .expect("scalar boundaries");
+
+    assert_eq!(result.individual(), scalar.individual());
+    assert_eq!(
+        result.applied_events(),
+        [
+            AppliedSmallEvent::Snp,
+            AppliedSmallEvent::Snp,
+            AppliedSmallEvent::Snp,
+            AppliedSmallEvent::Snp,
+            AppliedSmallEvent::Insertion,
+        ]
+    );
+    assert_eq!(
+        first_copy_bases(result.individual(), &reference),
+        b"TGACGGACGT"
+    );
+    for phase in [
+        phase_zero,
+        HaplotypePhase::from_copy_index(1).expect("phase one"),
+    ] {
+        let actual = result
+            .individual()
+            .copies_for(reference.sequences()[0].id())
+            .expect("actual copies")
+            .iter()
+            .find(|copy| copy.phase() == phase)
+            .expect("actual phase");
+        let expected = scalar
+            .individual()
+            .copies_for(reference.sequences()[0].id())
+            .expect("scalar copies")
+            .iter()
+            .find(|copy| copy.phase() == phase)
+            .expect("scalar phase");
+        assert_eq!(
+            materialize_copy(actual, &reference),
+            materialize_copy(expected, &reference)
+        );
+        assert_eq!(actual.segments(), expected.segments());
+        assert_eq!(
+            actual.segments().current_modifications(),
+            expected.segments().current_modifications()
+        );
+        assert_eq!(
+            actual.segments().small_event_history(),
+            expected.segments().small_event_history()
+        );
+    }
+}
+
+#[test]
+fn third_matrix_snp_in_a_batch_reports_its_declared_index_without_publishing_prefix() {
+    let reference = reference(b"ACGTACGT");
+    let original = individual(&reference);
+    let phase_zero = HaplotypePhase::from_copy_index(0).expect("phase zero");
+    let missing_phase = HaplotypePhase::from_copy_index(2).expect("unallocated phase");
+    let matrix = matrix_snps(&reference, [phase_zero, phase_zero, missing_phase]);
+    let events = matrix.map(DeclaredSmallEvent::Snp);
+
+    assert_eq!(
+        apply_declared_small_events(
+            &original,
+            &reference,
+            RootSeed::from_bytes([10; 32]),
+            &events,
+            &[],
+        ),
+        Err(SmallEventCompositionError::Event {
+            declared_index: 2,
+            kind: DeclaredSmallEventKind::Snp,
+            source: SmallEventSourceError::Snp(SnpApplicationError::MissingTargetCopy {
+                phase: missing_phase,
+            }),
+        })
+    );
+    assert_eq!(original, individual(&reference));
 }
 
 #[test]

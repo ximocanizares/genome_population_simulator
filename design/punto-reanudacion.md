@@ -1,5 +1,46 @@
 # Punto de reanudación
 
+## Estado actual — 26 de agosto de 2026 (PERF-VCF y lote de SNP, listo para commit)
+
+- `PERF-VCF.1` sustituye la reconstrucción de copias completas durante la
+  publicación VCF por una vista compacta validada. Mantiene la normalización,
+  agrupación multialélica, fase, dosis, `GPS_CASE`, atomicidad y diagnósticos.
+  Incluye regresiones diferenciales de inserciones; la revisión independiente
+  final no encontró hallazgos.
+- Se optimizó la aplicación de SNP de matriz consecutivos: la API pública
+  persistente de `apply_snps` permanece igual, pero el compositor usa una ruta
+  interna por lote y no clona el `Individual` completo por cada SNP. El lote
+  conserva preflight transaccional, fase, referencia, procedencia, historial,
+  orden frente a SNP explícitos/indels, índices de diagnóstico y determinismo.
+- La revisión detectó una cobertura incompleta del agrupador real; se corrigió
+  con regresiones de integración de tres SNP de matriz, SNP explícito e indel,
+  y un error tardío en el tercer SNP (`declared_index = 2`) sin publicación
+  parcial. La revisión de cierre no encontró hallazgos.
+- Gates correctos: `cargo fmt --check`, Clippy con `-D warnings`, pruebas
+  completas y `cargo doc --no-deps`. La puerta externa DTC-066 sigue pendiente:
+  el entorno tiene `bcftools` 1.21 en lugar de la versión normativa 1.24.
+- Benchmark reproducible: tomate reducido (~79 MiB), HWE diploide, semilla
+  fija, 100 individuos y 1.000 SNP. Heaptrack reduce las asignaciones de
+  1.236.218.388 a 633.609.556 (-48,7 %) y `String::clone` de
+  1.086.564.794 a 510.127.082. El RSS queda en ~889 MiB. Dos ejecuciones
+  normales posteriores dieron 2:51,6 y 2:07,4 frente a la referencia previa
+  de 2:14,5: hay variabilidad, por lo que aún no fijar una aceleración de
+  pared. Los artefactos publicados comparados (configuración, manifiesto,
+  `truth.jsonl`, VCF y estadísticas) son idénticos byte a byte.
+- Se han excluido expresamente del commit los resultados bajo `/tmp` y
+  `benchmarks/f1/tomato-reduction-90pct.toml`, que es una configuración local
+  sin seguimiento.
+
+## Siguiente acción vigente
+
+1. Tras este commit, repetir el benchmark normal varias veces en condiciones
+   controladas si se necesita cuantificar tiempo de pared; no iniciar aún una
+   segunda optimización de `truth_projection` sin un perfil posterior que la
+   justifique.
+2. Mantener pendiente DTC-066 hasta disponer de `bcftools` y `tabix`/HTSlib
+   1.24; entonces ejecutar `scripts/validate_vcf_external.sh` sobre las tres
+   salidas VCF exigidas.
+
 ## Estado actual — 25 de agosto de 2026 (F2 cerrada localmente, pendiente de revisión y commit)
 
 - F2.3.1–F2.3.7 está cerrada: configuración de fundadores, genotipos HWE/`F`,

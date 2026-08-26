@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::reference::Reference;
 use crate::truth_schema::{CopyIdentity, TruthDocument, TruthRecord};
-use crate::truth_validation::{TruthValidationError, validate_and_reconstruct_truth};
-use crate::vcf_projection::NormalizedAllele;
+use crate::truth_validation::{TruthValidationError, ValidatedTruthForVcf, validate_truth_for_vcf};
+use crate::vcf_projection::{NormalizedAllele, ProjectedAllele, ProjectedAlternateValue};
 
 /// Genotipo real de una muestra en el orden de fase de sus copias.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -115,22 +115,22 @@ pub fn group_normalized_alleles(
     reference: &Reference,
     normalized: &[NormalizedAllele],
 ) -> Result<Vec<GroupedVcfRecord>, VcfGroupingError> {
-    validate_and_reconstruct_truth(truth.clone(), reference).map_err(VcfGroupingError::Truth)?;
+    let validated = validate_truth_for_vcf(truth, reference).map_err(VcfGroupingError::Truth)?;
+    group_normalized_alleles_from_document(validated.document(), reference, normalized)
+}
 
+fn group_normalized_alleles_from_document(
+    truth: &TruthDocument,
+    reference: &Reference,
+    normalized: &[NormalizedAllele],
+) -> Result<Vec<GroupedVcfRecord>, VcfGroupingError> {
     let sequence_order = reference
         .sequences()
         .iter()
         .enumerate()
         .map(|(index, sequence)| (sequence.id().as_str().to_owned(), index))
         .collect::<BTreeMap<_, _>>();
-    let copies = truth
-        .records
-        .iter()
-        .filter_map(|record| match record {
-            TruthRecord::HaplotypeCopy(copy) => Some((copy.identity.clone(), copy.phase)),
-            TruthRecord::Genotype(_) => None,
-        })
-        .collect::<BTreeMap<_, _>>();
+    let copies = copy_phases(truth);
     validate_contiguous_copy_phases(&copies)?;
 
     let mut grouped = BTreeMap::<(usize, String, u64), Vec<&NormalizedAllele>>::new();
@@ -141,11 +141,11 @@ pub fn group_normalized_alleles(
                 position: allele.position,
             }
         })?;
-        let Some(_) = copies.get(&allele.copy) else {
+        if !copies.contains_key(&allele.copy) {
             return Err(VcfGroupingError::UnknownCopy {
                 copy: allele.copy.clone(),
             });
-        };
+        }
         if allele.copy.sequence_id != allele.sequence_id {
             return Err(VcfGroupingError::CopySequenceMismatch {
                 copy: allele.copy.clone(),
@@ -162,11 +162,77 @@ pub fn group_normalized_alleles(
     let mut records = Vec::with_capacity(grouped.len());
     let mut carriers_by_record = Vec::<BTreeMap<CopyIdentity, ProjectedCarrier>>::new();
     for ((_sequence_index, sequence_id, position), alleles) in grouped {
-        let (record, carriers) = build_record(sequence_id.clone(), position, alleles, &copies)?;
+        let (record, carriers) = build_record(sequence_id, position, alleles, &copies)?;
+        carriers_by_record.push(carriers);
+        records.push(record);
+    }
+    finish_records(truth, records, carriers_by_record)
+}
+
+/// Agrupa una vista de verdad que ya cruzó la frontera semántica completa sin
+/// materializar un ALT grande por copia. Los ALT se comparan por descriptor y
+/// se construyen una vez por valor de registro.
+pub(crate) fn group_projected_alleles_from_validated_truth(
+    truth: ValidatedTruthForVcf<'_>,
+    reference: &Reference,
+    projected: &[ProjectedAllele<'_>],
+) -> Result<Vec<GroupedVcfRecord>, VcfGroupingError> {
+    truth
+        .validate_reference(reference)
+        .map_err(VcfGroupingError::Truth)?;
+    let truth = truth.document();
+
+    let sequence_order = reference
+        .sequences()
+        .iter()
+        .enumerate()
+        .map(|(index, sequence)| (sequence.id().as_str().to_owned(), index))
+        .collect::<BTreeMap<_, _>>();
+    let copies = copy_phases(truth);
+    validate_contiguous_copy_phases(&copies)?;
+
+    let mut grouped = BTreeMap::<(usize, &str, u64), Vec<&ProjectedAllele<'_>>>::new();
+    for allele in projected {
+        let sequence_index = *sequence_order.get(allele.sequence_id).ok_or_else(|| {
+            VcfGroupingError::ReferenceOutOfBounds {
+                sequence_id: allele.sequence_id.to_owned(),
+                position: allele.position,
+            }
+        })?;
+        let Some(_) = copies.get(allele.copy) else {
+            return Err(VcfGroupingError::UnknownCopy {
+                copy: allele.copy.to_owned(),
+            });
+        };
+        if allele.copy.sequence_id != allele.sequence_id {
+            return Err(VcfGroupingError::CopySequenceMismatch {
+                copy: allele.copy.to_owned(),
+                sequence_id: allele.sequence_id.to_owned(),
+            });
+        }
+        validate_projected_allele(allele, reference)?;
+        grouped
+            .entry((sequence_index, allele.sequence_id, allele.position))
+            .or_default()
+            .push(allele);
+    }
+
+    let mut records = Vec::with_capacity(grouped.len());
+    let mut carriers_by_record = Vec::<BTreeMap<CopyIdentity, ProjectedCarrier>>::new();
+    for ((_sequence_index, sequence_id, position), alleles) in grouped {
+        let (record, carriers) = build_projected_record(sequence_id, position, alleles, &copies)?;
         carriers_by_record.push(carriers);
         records.push(record);
     }
 
+    finish_records(truth, records, carriers_by_record)
+}
+
+fn finish_records(
+    truth: &TruthDocument,
+    mut records: Vec<GroupedVcfRecord>,
+    carriers_by_record: Vec<BTreeMap<CopyIdentity, ProjectedCarrier>>,
+) -> Result<Vec<GroupedVcfRecord>, VcfGroupingError> {
     // La asociación se deduce de los intervalos fuente finales de la copia,
     // emitidos por F2.5.2 después de componer sus cambios. Nunca se infiere
     // renormalizando un `TruthAllele` aislado: eso perdería los casos de los
@@ -232,6 +298,17 @@ pub fn group_normalized_alleles(
     Ok(records)
 }
 
+fn copy_phases(truth: &TruthDocument) -> BTreeMap<CopyIdentity, u8> {
+    truth
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            TruthRecord::HaplotypeCopy(copy) => Some((copy.identity.clone(), copy.phase)),
+            TruthRecord::Genotype(_) => None,
+        })
+        .collect()
+}
+
 fn validate_normalized_allele(
     allele: &NormalizedAllele,
     reference: &Reference,
@@ -285,6 +362,70 @@ fn validate_normalized_allele(
     if sequence.sequence().as_bytes()[start..end] != *allele.reference.as_bytes() {
         return Err(VcfGroupingError::ReferenceMismatch {
             sequence_id: allele.sequence_id.clone(),
+            position: allele.position,
+        });
+    }
+    Ok(())
+}
+
+fn validate_projected_allele(
+    allele: &ProjectedAllele<'_>,
+    reference: &Reference,
+) -> Result<(), VcfGroupingError> {
+    if allele.reference.is_empty() || allele.alternate_with_suffix("").len() == 0 {
+        return Err(VcfGroupingError::EmptyAllele {
+            sequence_id: allele.sequence_id.to_owned(),
+            position: allele.position,
+        });
+    }
+    if allele.source_start > allele.source_end {
+        return Err(VcfGroupingError::InvalidSourceSpan {
+            sequence_id: allele.sequence_id.to_owned(),
+            position: allele.position,
+            start: allele.source_start,
+            end: allele.source_end,
+        });
+    }
+    let alternate = allele.alternate_with_suffix("");
+    if alternate.len() == allele.reference.len()
+        && alternate
+            .materialize()
+            .as_bytes()
+            .eq(allele.reference.as_bytes())
+    {
+        return Err(VcfGroupingError::ReferenceEqualsAlternate {
+            sequence_id: allele.sequence_id.to_owned(),
+            position: allele.position,
+        });
+    }
+    let sequence = reference
+        .sequences()
+        .iter()
+        .find(|sequence| sequence.id().as_str() == allele.sequence_id)
+        .ok_or_else(|| VcfGroupingError::ReferenceOutOfBounds {
+            sequence_id: allele.sequence_id.to_owned(),
+            position: allele.position,
+        })?;
+    let end = allele
+        .position
+        .checked_add(
+            u64::try_from(allele.reference.len())
+                .map_err(|_| VcfGroupingError::ArithmeticOverflow)?,
+        )
+        .ok_or(VcfGroupingError::ArithmeticOverflow)?;
+    let Some((start, end)) = usize::try_from(allele.position)
+        .ok()
+        .zip(usize::try_from(end).ok())
+        .filter(|(_, end)| *end <= sequence.sequence().as_bytes().len())
+    else {
+        return Err(VcfGroupingError::ReferenceOutOfBounds {
+            sequence_id: allele.sequence_id.to_owned(),
+            position: allele.position,
+        });
+    };
+    if sequence.sequence().as_bytes()[start..end] != *allele.reference.as_bytes() {
+        return Err(VcfGroupingError::ReferenceMismatch {
+            sequence_id: allele.sequence_id.to_owned(),
             position: allele.position,
         });
     }
@@ -450,6 +591,135 @@ fn build_record(
         },
         copy_to_alt,
     ))
+}
+
+fn build_projected_record<'truth>(
+    sequence_id: &'truth str,
+    position: u64,
+    alleles: Vec<&'truth ProjectedAllele<'truth>>,
+    copies: &BTreeMap<CopyIdentity, u8>,
+) -> Result<(GroupedVcfRecord, BTreeMap<CopyIdentity, ProjectedCarrier>), VcfGroupingError> {
+    let common_reference = alleles
+        .iter()
+        .map(|allele| allele.reference.as_str())
+        .max_by_key(|reference| reference.len())
+        .expect("a grouping key always has an allele");
+    if alleles
+        .iter()
+        .any(|allele| !common_reference.starts_with(&allele.reference))
+    {
+        return Err(VcfGroupingError::IncompatibleReferences {
+            sequence_id: sequence_id.to_owned(),
+            position,
+        });
+    }
+    let alternate_by_copy = alleles
+        .iter()
+        .map(|allele| {
+            let suffix = &common_reference[allele.reference.len()..];
+            (allele.copy.to_owned(), allele.alternate_with_suffix(suffix))
+        })
+        .collect::<BTreeMap<_, ProjectedAlternateValue<'_>>>();
+    if alternate_by_copy.len() != alleles.len() {
+        let mut seen = BTreeSet::new();
+        let duplicate = alleles
+            .iter()
+            .map(|allele| allele.copy.to_owned())
+            .find(|copy| !seen.insert(copy.clone()))
+            .expect("a duplicate exists");
+        return Err(VcfGroupingError::DuplicateCopyAtLocus {
+            copy: duplicate,
+            sequence_id: sequence_id.to_owned(),
+            position,
+        });
+    }
+    let alt_index = alternate_by_copy
+        .values()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .enumerate()
+        .map(|(index, alternate)| (alternate, index))
+        .collect::<BTreeMap<_, _>>();
+    let alternates = alt_index
+        .keys()
+        .copied()
+        .map(ProjectedAlternateValue::materialize)
+        .collect::<Vec<_>>();
+    let copy_to_alt = alternate_by_copy
+        .iter()
+        .map(|(copy, alternate)| {
+            let source = alleles
+                .iter()
+                .find(|allele| allele.copy == copy)
+                .expect("each copy is present in the projected input");
+            (
+                copy.clone(),
+                ProjectedCarrier {
+                    alt_index: alt_index[alternate],
+                    source_start: source.source_start,
+                    source_end: source.source_end,
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let samples = samples_for_record(sequence_id, &copy_to_alt, copies, alternates.len())?;
+    let alternate_cases = vec![Vec::new(); alternates.len()];
+    Ok((
+        GroupedVcfRecord {
+            sequence_id: sequence_id.to_owned(),
+            position,
+            reference: common_reference.to_owned(),
+            alternates,
+            samples,
+            gps_cases: Vec::new(),
+            alternate_cases,
+        },
+        copy_to_alt,
+    ))
+}
+
+fn samples_for_record(
+    sequence_id: &str,
+    copy_to_alt: &BTreeMap<CopyIdentity, ProjectedCarrier>,
+    copies: &BTreeMap<CopyIdentity, u8>,
+    alternate_count: usize,
+) -> Result<Vec<(String, PhasedGenotype)>, VcfGroupingError> {
+    let mut sample_copies = BTreeMap::<String, Vec<(u8, CopyIdentity)>>::new();
+    for (copy, phase) in copies {
+        if copy.sequence_id == sequence_id {
+            sample_copies
+                .entry(copy.individual_id.clone())
+                .or_default()
+                .push((*phase, copy.clone()));
+        }
+    }
+    sample_copies
+        .into_iter()
+        .map(|(sample, mut sample_copies)| {
+            sample_copies.sort_by_key(|(phase, copy)| (*phase, copy.clone()));
+            let mut alleles = Vec::with_capacity(sample_copies.len());
+            let mut dosage = vec![0_u8; alternate_count + 1];
+            for (_, copy) in sample_copies {
+                let allele = copy_to_alt
+                    .get(&copy)
+                    .map_or(0_usize, |projected| projected.alt_index + 1);
+                dosage[allele] = dosage[allele]
+                    .checked_add(1)
+                    .ok_or(VcfGroupingError::ArithmeticOverflow)?;
+                alleles
+                    .push(u32::try_from(allele).map_err(|_| VcfGroupingError::ArithmeticOverflow)?);
+            }
+            Ok((
+                sample,
+                PhasedGenotype {
+                    alleles,
+                    allele_dosages: dosage,
+                },
+            ))
+        })
+        .collect()
 }
 
 #[cfg(test)]

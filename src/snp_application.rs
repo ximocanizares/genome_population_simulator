@@ -292,10 +292,23 @@ pub fn apply_snps(
     applications: &[TargetedSnp],
 ) -> Result<Individual, SnpApplicationError> {
     preflight_snps(individual, reference, applications)?;
-    let mut updated = individual.clone();
+    apply_preflighted_snps_to_owned(individual.clone(), applications.iter())
+}
+
+/// Aplica SNP que ya han superado un preflight sobre la única versión poseída
+/// del individuo. Es una ruta interna para lotes consecutivos: sustituye de
+/// forma mutable solo la copia objetivo y no vuelve a clonar el individuo ni
+/// sus copias no afectadas por cada SNP.
+///
+/// El llamador debe haber validado el lote completo y no puede publicar el
+/// individuo mientras esta función no devuelva `Ok`.
+pub(crate) fn apply_preflighted_snps_to_owned<'a>(
+    mut individual: Individual,
+    applications: impl IntoIterator<Item = &'a TargetedSnp>,
+) -> Result<Individual, SnpApplicationError> {
     for application in applications {
         let locus = application.snp().locus();
-        let copy = updated
+        let copy = individual
             .copies_for(locus.position().sequence_id())
             .and_then(|copies| {
                 copies
@@ -309,8 +322,8 @@ pub fn apply_snps(
             .segments()
             .with_snp(application.snp().modification()?)
             .map_err(SnpApplicationError::Segment)?;
-        updated = updated
-            .with_copy_segments(
+        individual
+            .replace_copy_segments(
                 locus.position().sequence_id(),
                 application.phase(),
                 segments,
@@ -319,7 +332,7 @@ pub fn apply_snps(
                 phase: application.phase(),
             })?;
     }
-    Ok(updated)
+    Ok(individual)
 }
 
 fn validate_reference_base(

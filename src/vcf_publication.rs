@@ -13,12 +13,13 @@ use crate::publication::ExecutionWorkspace;
 use crate::reference::Reference;
 use crate::results::ArtifactRecord;
 use crate::truth_schema::{TruthDocument, TruthRecord};
+use crate::truth_validation::validate_truth_for_vcf;
 use crate::vcf_contract::{
     VcfContig, VcfContractError, VcfHeaderContract, VcfIndexKind, VcfOutputMode, write_vcf_index,
     write_vcf_records,
 };
-use crate::vcf_grouping::group_normalized_alleles;
-use crate::vcf_projection::project_normalized_alleles;
+use crate::vcf_grouping::group_projected_alleles_from_validated_truth;
+use crate::vcf_projection::project_projected_alleles_from_validated_truth;
 use crate::vcf_representation::prepare_conditional_vcf_records;
 
 pub const VCF_ARTIFACT_ID: &str = "truth-vcf";
@@ -51,10 +52,22 @@ pub fn publish_truth_vcf(
     mode: VcfOutputMode,
 ) -> Result<VcfPublication, Diagnostic> {
     let samples = samples_from_truth(truth);
+    // Históricamente los fallos del contrato de cabecera tenían precedencia
+    // sobre la comprobación semántica de verdad; se conserva ese diagnóstico.
     let header = header_contract(reference, truth, samples.clone())?;
-    let normalized = project_normalized_alleles(truth, reference)
+    // Esta validación es anterior a cualquier escritor VCF. Reconstruye una
+    // copia cada vez, contrasta todos los genotipos y solo retiene metadatos
+    // compactos para que la ruta posterior no pueda observar verdad inválida.
+    truth
+        .validate_structure()
+        .map_err(|error| vcf_invariant("validate_truth_structure", format!("{error:?}")))?;
+    let validated = validate_truth_for_vcf(truth, reference)
+        // Antes de la vista compacta, estos errores emergían de proyección.
+        // Mantener el contexto público no retrasa la validación al escritor.
         .map_err(|error| vcf_invariant("project", error.to_string()))?;
-    let grouped = group_normalized_alleles(truth, reference, &normalized)
+    let normalized = project_projected_alleles_from_validated_truth(validated, reference)
+        .map_err(|error| vcf_invariant("project", error.to_string()))?;
+    let grouped = group_projected_alleles_from_validated_truth(validated, reference, &normalized)
         .map_err(|error| vcf_invariant("group", error.to_string()))?;
     let conditional = prepare_conditional_vcf_records(grouped)
         .map_err(|error| vcf_invariant("representation", error.to_string()))?;
@@ -372,14 +385,29 @@ fn vcf_invariant(operation: &str, detail: impl Into<String>) -> Diagnostic {
 mod tests {
     use std::{
         fs::{self, File},
-        io::{self, Write},
+        io::{self, BufReader, Write},
         path::PathBuf,
+        process::Command,
         sync::atomic::{AtomicU64, Ordering},
     };
 
     use super::*;
+    use crate::identity::{ReferenceId, SequenceId};
+    use crate::reference::{
+        DnaSequence, FastaHeader, ReferenceOrigin, ReferenceSequence, SequenceClass,
+    };
+    use crate::truth_schema::{
+        AlleleCarrier, CopyIdentity, CopyProvenance, GenotypeCaseKind, GenotypeRecord,
+        HaplotypeCopyRecord, ModificationProvenance, ModificationProvenanceKind, NamedDigest,
+        SegmentSource, TRUTH_COORDINATE_CONVENTION, TRUTH_DOCUMENT_KIND, TRUTH_SCHEMA_VERSION,
+        TruthAllele, TruthCurrentPiece, TruthCurrentSnp, TruthHeader, TruthHistoryEvent,
+        TruthLocus, TruthModification, TruthPieceLink, TruthRecord, TruthSegment, TruthSourceKind,
+        TruthSourceRef, TruthStructuralEvent,
+    };
+    use crate::truth_validation::reference_content_sha256;
     use crate::vcf_contract::{TBI_MAXIMUM_POSITION_EXCLUSIVE, write_vcf_index, write_vcf_records};
     use crate::vcf_grouping::{GroupedVcfRecord, PhasedGenotype};
+    use crate::vcf_semantic_validation::validate_vcf_against_truth;
 
     static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -536,6 +564,446 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 
+    #[test]
+    fn corrupt_truth_is_rejected_before_creating_a_vcf_artifact() {
+        let root = temporary("corrupt-truth");
+        fs::create_dir_all(&root).expect("root");
+        let mut workspace = ExecutionWorkspace::create(&root.join("published")).expect("workspace");
+        let truth = TruthDocument {
+            header: TruthHeader {
+                document_kind: "not_truth".to_owned(),
+                schema_version: "1".to_owned(),
+                execution_id: "RUN_01".to_owned(),
+                reference_id: "REF_main".to_owned(),
+                reference_content_sha256: "a".repeat(64),
+                coordinate_convention: "zero_based_half_open_v1".to_owned(),
+                copy_count: 0,
+                genotype_count: 0,
+                source_digests: Vec::new(),
+                group_digests: Vec::new(),
+            },
+            records: Vec::new(),
+        };
+        let error = publish_truth_vcf(&mut workspace, &reference(), &truth, VcfOutputMode::Text)
+            .expect_err("invalid truth must stop before VCF writing");
+
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert_eq!(
+            error.context().get("operation").map(String::as_str),
+            Some("validate_truth_structure")
+        );
+        assert!(workspace.artifacts().is_empty());
+        assert!(!workspace.root().join(VCF_TEXT_ARTIFACT_PATH).exists());
+        drop(workspace);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn semantic_truth_failures_keep_project_diagnostic_and_write_nothing() {
+        let mut digest = valid_truth();
+        digest.header.reference_content_sha256 = "0".repeat(64);
+
+        let mut history = valid_truth();
+        let TruthRecord::HaplotypeCopy(copy) = &mut history.records[0] else {
+            panic!("copy");
+        };
+        copy.segments[0].modifications = vec![TruthModification::Snp {
+            event_id: "SNP_01".to_owned(),
+            position: 1,
+            reference: "C".to_owned(),
+            alternate: "T".to_owned(),
+            provenance: explicit_provenance(),
+        }];
+        copy.history = vec![TruthHistoryEvent::Snp {
+            event_id: "SNP_01".to_owned(),
+            position: 1,
+            provenance: explicit_provenance(),
+        }];
+
+        let mut genotype = valid_truth();
+        let TruthRecord::HaplotypeCopy(copy) = &mut genotype.records[0] else {
+            panic!("copy");
+        };
+        copy.segments[0].modifications = vec![TruthModification::Snp {
+            event_id: "SNP_01".to_owned(),
+            position: 1,
+            reference: "C".to_owned(),
+            alternate: "T".to_owned(),
+            provenance: explicit_provenance(),
+        }];
+        copy.current_pieces = vec![TruthCurrentPiece::Source {
+            source: source(),
+            snps: vec![TruthCurrentSnp {
+                event_id: "SNP_01".to_owned(),
+                position: 1,
+                reference: "C".to_owned(),
+                alternate: "T".to_owned(),
+                provenance: explicit_provenance(),
+            }],
+        }];
+        copy.history = vec![TruthHistoryEvent::Snp {
+            event_id: "SNP_01".to_owned(),
+            position: 1,
+            provenance: explicit_provenance(),
+        }];
+        genotype.header.genotype_count = 1;
+        genotype.records.push(TruthRecord::Genotype(GenotypeRecord {
+            case_id: "CASE_01".to_owned(),
+            reference_id: "REF_main".to_owned(),
+            individual_id: "IND_01".to_owned(),
+            case_kind: GenotypeCaseKind::Snp,
+            locus: TruthLocus {
+                sequence_id: "chr1".to_owned(),
+                start: 1,
+                end: 2,
+            },
+            alleles: vec![
+                TruthAllele::Reference,
+                TruthAllele::Snp {
+                    base: "G".to_owned(),
+                },
+            ],
+            allele_dosages: vec![0, 1],
+            carriers: vec![AlleleCarrier {
+                allele_index: 1,
+                copy: copy_identity(),
+            }],
+        }));
+
+        for (label, truth) in [
+            ("digest", digest),
+            ("history", history),
+            ("genotype", genotype),
+        ] {
+            let root = temporary(label);
+            fs::create_dir_all(&root).expect("root");
+            let mut workspace =
+                ExecutionWorkspace::create(&root.join("published")).expect("workspace");
+            let error =
+                publish_truth_vcf(&mut workspace, &reference(), &truth, VcfOutputMode::Text)
+                    .expect_err("structurally valid semantic corruption must stop publication");
+
+            assert_eq!(error.code(), "GPS-INTERNAL-001", "{label}");
+            assert_eq!(
+                error.context().get("operation").map(String::as_str),
+                Some("project"),
+                "{label}"
+            );
+            assert_eq!(
+                error.context().get("component").map(String::as_str),
+                Some("vcf_publication"),
+                "{label}"
+            );
+            assert!(workspace.artifacts().is_empty(), "{label}");
+            assert!(
+                !workspace.root().join(VCF_TEXT_ARTIFACT_PATH).exists(),
+                "{label}"
+            );
+            drop(workspace);
+            fs::remove_dir_all(root).expect("cleanup");
+        }
+    }
+
+    #[test]
+    fn large_identical_direct_insertions_materialize_once_per_vcf_alt() {
+        if let Ok(value) = std::env::var("GPS_VCF_HWM_COPY_COUNT") {
+            let copies = value.parse::<u8>().expect("copy count");
+            let (reference, truth) = direct_insertion_truth(copies, false);
+            let peak_before = peak_resident_set_bytes().expect("Linux peak RSS");
+            let root = temporary("large-direct-insertion");
+            fs::create_dir_all(&root).expect("root");
+            let mut workspace =
+                ExecutionWorkspace::create(&root.join("published")).expect("workspace");
+            publish_truth_vcf(&mut workspace, &reference, &truth, VcfOutputMode::Text)
+                .expect("publish valid insertion truth");
+            let delta = peak_resident_set_bytes()
+                .expect("Linux peak RSS")
+                .saturating_sub(peak_before);
+            let vcf = workspace.root().join(VCF_TEXT_ARTIFACT_PATH);
+            let text = fs::read_to_string(&vcf).expect("VCF");
+            let record = text
+                .lines()
+                .find(|line| !line.starts_with('#'))
+                .expect("one VCF record")
+                .split('\t')
+                .collect::<Vec<_>>();
+            assert_eq!(record[0], "chr1");
+            assert_eq!(record[1], "2");
+            assert_eq!(record[3], "A");
+            assert_eq!(record[4].len(), 1_000_001);
+            assert!(record[4].as_bytes()[1..].iter().all(|base| *base == b'G'));
+            assert_eq!(
+                text.lines().filter(|line| !line.starts_with('#')).count(),
+                1
+            );
+            validate_vcf_against_truth(
+                &reference,
+                &truth,
+                &mut BufReader::new(File::open(&vcf).expect("VCF")),
+            )
+            .expect("independent semantic VCF oracle");
+            drop(workspace);
+            fs::remove_dir_all(root).expect("cleanup");
+            println!("GPS_VCF_HWM_DELTA_BYTES={delta}");
+            return;
+        }
+
+        let ten = measured_large_insertion_hwm(10);
+        let twenty = measured_large_insertion_hwm(20);
+        // La entrada ya contiene una cadena por copia. Se mide únicamente el
+        // incremento de RSS máximo desde que está construida; la proyección y
+        // agrupación no pueden añadir otra inserción de 1 MiB por portador.
+        assert!(
+            twenty <= ten.saturating_add(4 * 1024 * 1024),
+            "20 copias añadió {twenty} bytes frente a {ten} para 10; el ALT se materializó por copia"
+        );
+
+        let (reference, truth) = direct_insertion_truth(2, true);
+        let root = temporary("different-large-direct-insertions");
+        fs::create_dir_all(&root).expect("root");
+        let mut workspace = ExecutionWorkspace::create(&root.join("published")).expect("workspace");
+        publish_truth_vcf(&mut workspace, &reference, &truth, VcfOutputMode::Text)
+            .expect("publish distinct valid insertion truth");
+        let vcf = workspace.root().join(VCF_TEXT_ARTIFACT_PATH);
+        let text = fs::read_to_string(&vcf).expect("VCF");
+        let alternates = text
+            .lines()
+            .find(|line| !line.starts_with('#'))
+            .expect("one VCF record")
+            .split('\t')
+            .nth(4)
+            .expect("ALT")
+            .split(',')
+            .collect::<Vec<_>>();
+        assert_eq!(alternates.len(), 2, "distinct insertions stay distinct ALT");
+        validate_vcf_against_truth(
+            &reference,
+            &truth,
+            &mut BufReader::new(File::open(&vcf).expect("VCF")),
+        )
+        .expect("independent semantic VCF oracle for distinct insertions");
+        drop(workspace);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    fn measured_large_insertion_hwm(copies: u8) -> u64 {
+        let output = Command::new(std::env::current_exe().expect("test executable"))
+            .args([
+                "--exact",
+                "vcf_publication::tests::large_identical_direct_insertions_materialize_once_per_vcf_alt",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("GPS_VCF_HWM_COPY_COUNT", copies.to_string())
+            .output()
+            .expect("isolated RSS measurement process");
+        assert!(
+            output.status.success(),
+            "isolated measurement failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("measurement output")
+            .lines()
+            .find_map(|line| {
+                line.split_once("GPS_VCF_HWM_DELTA_BYTES=")
+                    .map(|(_, value)| value)
+            })
+            .expect("RSS measurement")
+            .trim()
+            .parse::<u64>()
+            .expect("RSS bytes")
+    }
+
+    fn peak_resident_set_bytes() -> Option<u64> {
+        fs::read_to_string("/proc/self/status")
+            .ok()?
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("VmHWM:")?
+                    .split_whitespace()
+                    .next()?
+                    .parse::<u64>()
+                    .ok()
+            })
+            .and_then(|kibibytes| kibibytes.checked_mul(1024))
+    }
+
+    fn direct_insertion_truth(copy_count: u8, distinct: bool) -> (Reference, TruthDocument) {
+        let sequence = ReferenceSequence::new(
+            SequenceId::parse("chr1", "large insertion VCF test").expect("sequence ID"),
+            FastaHeader::parse(b"chr1").expect("FASTA header"),
+            SequenceClass::Chromosome,
+            &DnaSequence::try_from_bytes(b"CAAAA").expect("DNA"),
+        )
+        .expect("reference sequence");
+        let reference = Reference::new(
+            ReferenceId::parse("REF_main", "large insertion VCF test").expect("reference ID"),
+            ReferenceOrigin::Generated,
+            vec![sequence],
+        )
+        .expect("reference");
+        let shared_inserted = "G".repeat(1_000_000);
+        let mut copy_records = Vec::with_capacity(usize::from(copy_count));
+        let mut genotype_records = Vec::with_capacity(usize::from(copy_count));
+        for index in 0..copy_count {
+            let individual = format!("IND_{index:02}");
+            let identity = CopyIdentity {
+                reference_id: "REF_main".to_owned(),
+                individual_id: individual.clone(),
+                sequence_id: "chr1".to_owned(),
+                copy_index: 0,
+            };
+            let source = |start, end| SegmentSource {
+                source: TruthSourceRef {
+                    kind: TruthSourceKind::Reference,
+                    source_id: "REF_main".to_owned(),
+                },
+                reference_id: "REF_main".to_owned(),
+                sequence_id: "chr1".to_owned(),
+                start,
+                end,
+                sequence_length: 5,
+            };
+            let event_id = format!("INS_{index:02}");
+            let provenance = explicit_provenance();
+            let inserted = if distinct && index % 2 == 1 {
+                "T".repeat(1_000_000)
+            } else {
+                shared_inserted.clone()
+            };
+            let mut final_bases = String::with_capacity(inserted.len() + 5);
+            final_bases.push_str("CA");
+            final_bases.push_str(&inserted);
+            final_bases.push_str("AAA");
+            copy_records.push(TruthRecord::HaplotypeCopy(HaplotypeCopyRecord {
+                identity: identity.clone(),
+                phase: 0,
+                provenance: CopyProvenance {
+                    origin: "test".to_owned(),
+                    sources: vec![TruthSourceRef {
+                        kind: TruthSourceKind::Reference,
+                        source_id: "REF_main".to_owned(),
+                    }],
+                },
+                segments: vec![TruthSegment {
+                    source: source(0, 5),
+                    modifications: Vec::new(),
+                }],
+                current_pieces: vec![
+                    TruthCurrentPiece::Source {
+                        source: source(0, 2),
+                        snps: Vec::new(),
+                    },
+                    TruthCurrentPiece::Inserted {
+                        bases: inserted.clone(),
+                        provenance: provenance.clone(),
+                    },
+                    TruthCurrentPiece::Source {
+                        source: source(2, 5),
+                        snps: Vec::new(),
+                    },
+                ],
+                history: vec![TruthHistoryEvent::Insertion {
+                    event_id: event_id.clone(),
+                    point: 2,
+                    bases: inserted.clone(),
+                    provenance: provenance.clone(),
+                }],
+            }));
+            genotype_records.push(TruthRecord::Genotype(GenotypeRecord {
+                case_id: format!("CASE_{index:02}"),
+                reference_id: "REF_main".to_owned(),
+                individual_id: individual,
+                case_kind: GenotypeCaseKind::Indel,
+                locus: TruthLocus {
+                    sequence_id: "chr1".to_owned(),
+                    start: 2,
+                    end: 2,
+                },
+                alleles: vec![
+                    TruthAllele::Reference,
+                    TruthAllele::Insertion {
+                        event_id: event_id.clone(),
+                        bases: inserted.clone(),
+                        final_haplotype_bases: final_bases.clone(),
+                        source_event: TruthStructuralEvent::Insertion {
+                            event_id,
+                            point: 2,
+                            bases: inserted.clone(),
+                        },
+                        piece_links: vec![TruthPieceLink {
+                            piece_index: 1,
+                            start: 2,
+                            end: 1_000_002,
+                        }],
+                    },
+                ],
+                allele_dosages: vec![0, 1],
+                carriers: vec![AlleleCarrier {
+                    allele_index: 1,
+                    copy: identity,
+                }],
+            }));
+        }
+        copy_records.extend(genotype_records);
+        let reference_digest = reference_content_sha256(&reference);
+        (
+            reference,
+            TruthDocument {
+                header: TruthHeader {
+                    document_kind: TRUTH_DOCUMENT_KIND.to_owned(),
+                    schema_version: TRUTH_SCHEMA_VERSION.to_owned(),
+                    execution_id: "RUN_01".to_owned(),
+                    reference_id: "REF_main".to_owned(),
+                    reference_content_sha256: reference_digest,
+                    coordinate_convention: TRUTH_COORDINATE_CONVENTION.to_owned(),
+                    copy_count: u64::from(copy_count),
+                    genotype_count: u64::from(copy_count),
+                    source_digests: vec![
+                        NamedDigest {
+                            source: TruthSourceRef {
+                                kind: TruthSourceKind::Reference,
+                                source_id: "REF_main".to_owned(),
+                            },
+                            sha256: "a".repeat(64),
+                        },
+                        NamedDigest {
+                            source: TruthSourceRef {
+                                kind: TruthSourceKind::Explicit,
+                                source_id: "EXPLICIT_01".to_owned(),
+                            },
+                            sha256: "b".repeat(64),
+                        },
+                    ],
+                    group_digests: Vec::new(),
+                },
+                records: copy_records,
+            },
+        )
+    }
+
+    #[test]
+    fn header_contract_keeps_precedence_over_a_reference_id_mismatch() {
+        let mut truth = valid_truth();
+        truth.header.reference_id = "REF_other".to_owned();
+        let root = temporary("reference-id-precedence");
+        fs::create_dir_all(&root).expect("root");
+        let mut workspace = ExecutionWorkspace::create(&root.join("published")).expect("workspace");
+
+        let error = publish_truth_vcf(&mut workspace, &reference(), &truth, VcfOutputMode::Text)
+            .expect_err("header reference mismatch");
+
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert_eq!(
+            error.context().get("operation").map(String::as_str),
+            Some("header")
+        );
+        assert!(workspace.artifacts().is_empty());
+        drop(workspace);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
     fn header(use_csi: bool) -> VcfHeaderContract {
         let first_length = if use_csi {
             TBI_MAXIMUM_POSITION_EXCLUSIVE
@@ -577,6 +1045,110 @@ mod tests {
                 alternate_cases: vec![vec![case.to_owned()]],
             })
             .collect()
+    }
+
+    fn reference() -> Reference {
+        let sequence = ReferenceSequence::new(
+            SequenceId::parse("chr1", "VCF publication test").expect("sequence ID"),
+            FastaHeader::parse(b"chr1").expect("FASTA header"),
+            SequenceClass::Chromosome,
+            &DnaSequence::try_from_bytes(b"ACGT").expect("DNA"),
+        )
+        .expect("reference sequence");
+        Reference::new(
+            ReferenceId::parse("REF_main", "VCF publication test").expect("reference ID"),
+            ReferenceOrigin::Generated,
+            vec![sequence],
+        )
+        .expect("reference")
+    }
+
+    fn valid_truth() -> TruthDocument {
+        let reference = reference();
+        TruthDocument {
+            header: TruthHeader {
+                document_kind: TRUTH_DOCUMENT_KIND.to_owned(),
+                schema_version: TRUTH_SCHEMA_VERSION.to_owned(),
+                execution_id: "RUN_01".to_owned(),
+                reference_id: "REF_main".to_owned(),
+                reference_content_sha256: reference_content_sha256(&reference),
+                coordinate_convention: TRUTH_COORDINATE_CONVENTION.to_owned(),
+                copy_count: 1,
+                genotype_count: 0,
+                source_digests: vec![
+                    NamedDigest {
+                        source: TruthSourceRef {
+                            kind: TruthSourceKind::Reference,
+                            source_id: "REF_main".to_owned(),
+                        },
+                        sha256: "a".repeat(64),
+                    },
+                    NamedDigest {
+                        source: TruthSourceRef {
+                            kind: TruthSourceKind::Explicit,
+                            source_id: "EXPLICIT_01".to_owned(),
+                        },
+                        sha256: "b".repeat(64),
+                    },
+                ],
+                group_digests: Vec::new(),
+            },
+            records: vec![TruthRecord::HaplotypeCopy(HaplotypeCopyRecord {
+                identity: copy_identity(),
+                phase: 0,
+                provenance: CopyProvenance {
+                    origin: "test".to_owned(),
+                    sources: vec![TruthSourceRef {
+                        kind: TruthSourceKind::Reference,
+                        source_id: "REF_main".to_owned(),
+                    }],
+                },
+                segments: vec![TruthSegment {
+                    source: source(),
+                    modifications: Vec::new(),
+                }],
+                current_pieces: vec![TruthCurrentPiece::Source {
+                    source: source(),
+                    snps: Vec::new(),
+                }],
+                history: Vec::new(),
+            })],
+        }
+    }
+
+    fn copy_identity() -> CopyIdentity {
+        CopyIdentity {
+            reference_id: "REF_main".to_owned(),
+            individual_id: "IND_01".to_owned(),
+            sequence_id: "chr1".to_owned(),
+            copy_index: 0,
+        }
+    }
+
+    fn source() -> SegmentSource {
+        SegmentSource {
+            source: TruthSourceRef {
+                kind: TruthSourceKind::Reference,
+                source_id: "REF_main".to_owned(),
+            },
+            reference_id: "REF_main".to_owned(),
+            sequence_id: "chr1".to_owned(),
+            start: 0,
+            end: 4,
+            sequence_length: 4,
+        }
+    }
+
+    fn explicit_provenance() -> ModificationProvenance {
+        ModificationProvenance {
+            kind: ModificationProvenanceKind::Explicit,
+            version: "1".to_owned(),
+            source: TruthSourceRef {
+                kind: TruthSourceKind::Explicit,
+                source_id: "EXPLICIT_01".to_owned(),
+            },
+            matrix: None,
+        }
     }
 
     fn temporary(label: &str) -> PathBuf {

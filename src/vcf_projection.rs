@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::reference::{Reference, ReferenceSequence};
 use crate::truth_schema::{CopyIdentity, TruthCurrentPiece, TruthDocument, TruthRecord};
-use crate::truth_validation::{TruthValidationError, validate_and_reconstruct_truth};
+use crate::truth_validation::{TruthValidationError, ValidatedTruthForVcf, validate_truth_for_vcf};
 
 /// Versión estable del algoritmo interno de DTC-064.
 pub const VCF_NORMALIZATION_VERSION: &str = "vcf-small-allele-normalization-v1";
@@ -31,6 +31,182 @@ pub struct NormalizedAllele {
     pub source_start: u64,
     pub source_end: u64,
     pub copy: CopyIdentity,
+}
+
+/// Alelo normalizado de uso interno en la ruta de publicación.
+///
+/// La API pública conserva `NormalizedAllele` propietario. La publicación VCF
+/// usa esta forma hasta que el agrupador conoce cuántos ALT distintos habrá:
+/// una inserción directa grande puede entonces prestarse de `truth` para cada
+/// copia portadora y materializarse una sola vez por valor de ALT final.
+#[derive(Clone, Debug)]
+pub(crate) struct ProjectedAllele<'truth> {
+    pub(crate) sequence_id: &'truth str,
+    pub(crate) position: u64,
+    pub(crate) reference: String,
+    alternate: ProjectedAlternate<'truth>,
+    pub(crate) source_start: u64,
+    pub(crate) source_end: u64,
+    pub(crate) copy: &'truth CopyIdentity,
+}
+
+#[derive(Clone, Debug)]
+enum ProjectedAlternate<'truth> {
+    Owned(String),
+    /// La secuencia inicial era `anchor + bases`; `rotations` describe los
+    /// desplazamientos a la izquierda como rotaciones a la derecha de esa
+    /// secuencia. No se crea un buffer proporcional a `bases` por copia.
+    DirectInsertion {
+        /// Ancla alcanzada por la alineación izquierda; sustituye el primer
+        /// byte de la ALT compacta exactamente como `left_align`.
+        anchor: u8,
+        /// Ancla original, necesaria para reconstruir el núcleo de la ALT sin
+        /// materializar una cadena por copia.
+        initial_anchor: u8,
+        bases: &'truth str,
+        /// Desplazamientos de ese núcleo, reducidos módulo `bases.len()`.
+        rotations: usize,
+        left_shifted: bool,
+    },
+}
+
+/// Descriptor comparable por bytes sin concatenar los ALT de cada portador.
+/// El sufijo corresponde a la expansión al REF común del registro.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ProjectedAlternateValue<'truth> {
+    Owned {
+        alternate: &'truth str,
+        suffix: &'truth str,
+    },
+    DirectInsertion {
+        anchor: u8,
+        initial_anchor: u8,
+        bases: &'truth str,
+        rotations: usize,
+        left_shifted: bool,
+        suffix: &'truth str,
+    },
+}
+
+impl<'truth> ProjectedAllele<'truth> {
+    pub(crate) fn alternate_with_suffix<'value>(
+        &'value self,
+        suffix: &'value str,
+    ) -> ProjectedAlternateValue<'value> {
+        match &self.alternate {
+            ProjectedAlternate::Owned(alternate) => {
+                ProjectedAlternateValue::Owned { alternate, suffix }
+            }
+            ProjectedAlternate::DirectInsertion {
+                anchor,
+                initial_anchor,
+                bases,
+                rotations,
+                left_shifted,
+            } => ProjectedAlternateValue::DirectInsertion {
+                anchor: *anchor,
+                initial_anchor: *initial_anchor,
+                bases,
+                rotations: *rotations,
+                left_shifted: *left_shifted,
+                suffix,
+            },
+        }
+    }
+
+    fn into_public(self) -> NormalizedAllele {
+        let alternate = self.alternate_with_suffix("").materialize();
+        NormalizedAllele {
+            sequence_id: self.sequence_id.to_owned(),
+            position: self.position,
+            reference: self.reference,
+            alternate,
+            source_start: self.source_start,
+            source_end: self.source_end,
+            copy: self.copy.to_owned(),
+        }
+    }
+}
+
+impl ProjectedAlternateValue<'_> {
+    pub(crate) fn materialize(self) -> String {
+        let mut result = String::with_capacity(self.len());
+        for index in 0..self.len() {
+            result.push(char::from(self.byte_at(index)));
+        }
+        result
+    }
+
+    pub(crate) fn len(self) -> usize {
+        match self {
+            Self::Owned { alternate, suffix } => alternate.len() + suffix.len(),
+            Self::DirectInsertion { bases, suffix, .. } => bases.len() + 1 + suffix.len(),
+        }
+    }
+
+    fn byte_at(self, index: usize) -> u8 {
+        match self {
+            Self::Owned { alternate, suffix } => alternate
+                .as_bytes()
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| suffix.as_bytes()[index - alternate.len()]),
+            Self::DirectInsertion {
+                anchor,
+                initial_anchor,
+                bases,
+                rotations,
+                left_shifted,
+                suffix,
+            } => {
+                let inserted_length = bases.len() + 1;
+                if index >= inserted_length {
+                    return suffix.as_bytes()[index - inserted_length];
+                }
+                if index == 0 {
+                    return anchor;
+                }
+                if !left_shifted {
+                    return bases.as_bytes()[index - 1];
+                }
+                let core_length = bases.len();
+                let core_index = (core_length - rotations + index) % core_length;
+                if core_index == 0 {
+                    initial_anchor
+                } else {
+                    bases.as_bytes()[core_index - 1]
+                }
+            }
+        }
+    }
+}
+
+impl PartialEq for ProjectedAlternateValue<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.len() == other.len()
+            && (0..self.len()).all(|index| self.byte_at(index) == other.byte_at(index))
+    }
+}
+
+impl Eq for ProjectedAlternateValue<'_> {}
+
+impl PartialOrd for ProjectedAlternateValue<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ProjectedAlternateValue<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let common = self.len().min(other.len());
+        for index in 0..common {
+            match self.byte_at(index).cmp(&other.byte_at(index)) {
+                std::cmp::Ordering::Equal => {}
+                order => return order,
+            }
+        }
+        self.len().cmp(&other.len())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,7 +238,26 @@ pub fn project_normalized_alleles(
     truth: &TruthDocument,
     reference: &Reference,
 ) -> Result<Vec<NormalizedAllele>, VcfProjectionError> {
-    validate_and_reconstruct_truth(truth.clone(), reference).map_err(VcfProjectionError::Truth)?;
+    let validated = validate_truth_for_vcf(truth, reference).map_err(VcfProjectionError::Truth)?;
+    project_projected_alleles_from_validated_truth(validated, reference).map(|alleles| {
+        alleles
+            .into_iter()
+            .map(ProjectedAllele::into_public)
+            .collect()
+    })
+}
+
+/// Proyecta una verdad cuya estructura y semántica ya se validaron completa y
+/// secuencialmente. Solo la publicación VCF puede encadenar esta variante con
+/// el agrupador para no reconstruir todas las copias varias veces.
+pub(crate) fn project_projected_alleles_from_validated_truth<'truth>(
+    truth: ValidatedTruthForVcf<'truth>,
+    reference: &Reference,
+) -> Result<Vec<ProjectedAllele<'truth>>, VcfProjectionError> {
+    truth
+        .validate_reference(reference)
+        .map_err(VcfProjectionError::Truth)?;
+    let truth = truth.document();
 
     let catalog = reference
         .sequences()
@@ -81,7 +276,7 @@ pub fn project_normalized_alleles(
                 sequence_id: copy.identity.sequence_id.clone(),
             })?;
         paths.push(CopyPath::from_truth(
-            copy.identity.clone(),
+            &copy.identity,
             &copy.current_pieces,
             sequence,
         )?);
@@ -90,7 +285,7 @@ pub fn project_normalized_alleles(
     let mut changes = BTreeMap::<String, Vec<ReferenceSpan>>::new();
     for path in &paths {
         changes
-            .entry(path.sequence_id.clone())
+            .entry(path.sequence_id.to_owned())
             .or_default()
             .extend(path.changes());
     }
@@ -110,27 +305,20 @@ pub fn project_normalized_alleles(
 
     projected.sort_by(|left, right| {
         let left_catalog = catalog
-            .get(left.sequence_id.as_str())
+            .get(left.sequence_id)
             .expect("projected sequence belongs to the reference")
             .0;
         let right_catalog = catalog
-            .get(right.sequence_id.as_str())
+            .get(right.sequence_id)
             .expect("projected sequence belongs to the reference")
             .0;
-        (
-            left_catalog,
-            left.position,
-            &left.reference,
-            &left.alternate,
-            &left.copy,
-        )
-            .cmp(&(
-                right_catalog,
-                right.position,
-                &right.reference,
-                &right.alternate,
-                &right.copy,
-            ))
+        (left_catalog, left.position, &left.reference)
+            .cmp(&(right_catalog, right.position, &right.reference))
+            .then_with(|| {
+                left.alternate_with_suffix("")
+                    .cmp(&right.alternate_with_suffix(""))
+            })
+            .then_with(|| left.copy.cmp(right.copy))
     });
     Ok(projected)
 }
@@ -142,30 +330,29 @@ struct ReferenceSpan {
 }
 
 #[derive(Clone, Debug)]
-struct CopyPath {
-    identity: CopyIdentity,
-    sequence_id: String,
-    pieces: Vec<PathPiece>,
+struct CopyPath<'truth> {
+    identity: &'truth CopyIdentity,
+    sequence_id: &'truth str,
+    pieces: Vec<PathPiece<'truth>>,
 }
 
 #[derive(Clone, Debug)]
-enum PathPiece {
+enum PathPiece<'truth> {
     Source {
         start: u64,
         end: u64,
-        bases: Vec<u8>,
-        changed_positions: Vec<u64>,
+        snps: &'truth [crate::truth_schema::TruthCurrentSnp],
     },
     Inserted {
         anchor: u64,
-        bases: Vec<u8>,
+        bases: &'truth str,
     },
 }
 
-impl CopyPath {
+impl<'truth> CopyPath<'truth> {
     fn from_truth(
-        identity: CopyIdentity,
-        current_pieces: &[TruthCurrentPiece],
+        identity: &'truth CopyIdentity,
+        current_pieces: &'truth [TruthCurrentPiece],
         sequence: &ReferenceSequence,
     ) -> Result<Self, VcfProjectionError> {
         let mut pieces = Vec::with_capacity(current_pieces.len());
@@ -182,29 +369,17 @@ impl CopyPath {
                             copy: identity.clone(),
                         });
                     }
-                    let start = usize::try_from(source.start)
-                        .map_err(|_| VcfProjectionError::CoordinateOverflow)?;
-                    let end = usize::try_from(source.end)
-                        .map_err(|_| VcfProjectionError::CoordinateOverflow)?;
-                    let mut bases = sequence.sequence().as_bytes()[start..end].to_vec();
-                    let mut changed_positions = Vec::with_capacity(snps.len());
                     for snp in snps {
-                        let offset = snp
-                            .position
-                            .checked_sub(source.start)
-                            .and_then(|value| usize::try_from(value).ok())
-                            .filter(|offset| *offset < bases.len())
-                            .ok_or_else(|| VcfProjectionError::SourceOutsideReference {
+                        if snp.position < source.start || snp.position >= source.end {
+                            return Err(VcfProjectionError::SourceOutsideReference {
                                 copy: identity.clone(),
-                            })?;
-                        bases[offset] = snp.alternate.as_bytes()[0];
-                        changed_positions.push(snp.position);
+                            });
+                        }
                     }
                     pieces.push(PathPiece::Source {
                         start: source.start,
                         end: source.end,
-                        bases,
-                        changed_positions,
+                        snps,
                     });
                     prior_source_end = Some(source.end);
                 }
@@ -214,15 +389,12 @@ impl CopyPath {
                             copy: identity.clone(),
                         }
                     })?;
-                    pieces.push(PathPiece::Inserted {
-                        anchor,
-                        bases: bases.as_bytes().to_vec(),
-                    });
+                    pieces.push(PathPiece::Inserted { anchor, bases });
                 }
             }
         }
         Ok(Self {
-            sequence_id: identity.sequence_id.clone(),
+            sequence_id: &identity.sequence_id,
             identity,
             pieces,
         })
@@ -234,10 +406,7 @@ impl CopyPath {
         for piece in &self.pieces {
             match piece {
                 PathPiece::Source {
-                    start,
-                    end,
-                    changed_positions,
-                    ..
+                    start, end, snps, ..
                 } => {
                     if let Some(previous) = prior_source_end
                         && previous < *start
@@ -247,9 +416,9 @@ impl CopyPath {
                             end: *start,
                         });
                     }
-                    for position in changed_positions {
+                    for position in snps.iter().map(|snp| snp.position) {
                         changes.push(ReferenceSpan {
-                            start: *position,
+                            start: position,
                             end: position.saturating_add(1),
                         });
                     }
@@ -264,29 +433,57 @@ impl CopyPath {
         changes
     }
 
-    fn materialize_window(&self, start: u64, end: u64) -> Result<Vec<u8>, VcfProjectionError> {
+    fn materialize_window(
+        &self,
+        sequence: &ReferenceSequence,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<u8>, VcfProjectionError> {
         let mut output = Vec::new();
         for piece in &self.pieces {
             match piece {
                 PathPiece::Source {
                     start: piece_start,
                     end: piece_end,
-                    bases,
+                    snps,
                     ..
                 } if *piece_start < end && start < *piece_end => {
-                    let local_start = usize::try_from((*piece_start).max(start) - piece_start)
+                    let window_start = (*piece_start).max(start);
+                    let window_end = (*piece_end).min(end);
+                    let local_start = usize::try_from(window_start)
                         .map_err(|_| VcfProjectionError::CoordinateOverflow)?;
-                    let local_end = usize::try_from((*piece_end).min(end) - piece_start)
+                    let local_end = usize::try_from(window_end)
                         .map_err(|_| VcfProjectionError::CoordinateOverflow)?;
-                    output.extend_from_slice(&bases[local_start..local_end]);
+                    let offset = output.len();
+                    output
+                        .extend_from_slice(&sequence.sequence().as_bytes()[local_start..local_end]);
+                    for snp in *snps {
+                        if window_start <= snp.position && snp.position < window_end {
+                            let relative = usize::try_from(snp.position - window_start)
+                                .map_err(|_| VcfProjectionError::CoordinateOverflow)?;
+                            output[offset + relative] = snp.alternate.as_bytes()[0];
+                        }
+                    }
                 }
                 PathPiece::Inserted { anchor, bases } if start <= *anchor && *anchor <= end => {
-                    output.extend_from_slice(bases);
+                    output.extend_from_slice(bases.as_bytes());
                 }
                 _ => {}
             }
         }
         Ok(output)
+    }
+
+    fn direct_insertion_at(&self, anchor: u64) -> Option<&'truth str> {
+        let mut inserted = self.pieces.iter().filter_map(|piece| match piece {
+            PathPiece::Inserted {
+                anchor: piece_anchor,
+                bases,
+            } if *piece_anchor == anchor => Some(*bases),
+            _ => None,
+        });
+        let bases = inserted.next()?;
+        inserted.next().is_none().then_some(bases)
     }
 }
 
@@ -336,11 +533,11 @@ fn spans_overlap(left: ReferenceSpan, right: ReferenceSpan) -> bool {
 /// alineación izquierda, ocupan el mismo `CHROM+POS`. La unión vuelve a leer la
 /// secuencia haplotípica final, por lo que conserva inserciones intermedias y
 /// nunca representa dos veces una misma copia en ese locus.
-fn normalize_path_components(
-    path: &CopyPath,
+fn normalize_path_components<'truth>(
+    path: &CopyPath<'truth>,
     sequence: &ReferenceSequence,
     initial: &[ReferenceSpan],
-) -> Result<Vec<NormalizedAllele>, VcfProjectionError> {
+) -> Result<Vec<ProjectedAllele<'truth>>, VcfProjectionError> {
     let mut components = initial.to_vec();
     loop {
         let normalized = components
@@ -371,7 +568,7 @@ fn normalize_path_components(
 /// como el REF normalizado, de modo que un SNP intermedio no puede sobrevivir
 /// como un segundo registro incompatible con el alelo recompuesto.
 fn normalization_traversal_closures(
-    normalized: &[(ReferenceSpan, Option<NormalizedAllele>)],
+    normalized: &[(ReferenceSpan, Option<ProjectedAllele<'_>>)],
     components: &[ReferenceSpan],
 ) -> Result<Vec<Vec<ReferenceSpan>>, VcfProjectionError> {
     let mut closures = Vec::new();
@@ -404,7 +601,7 @@ fn normalization_traversal_closures(
 /// Detecta componentes cuyos intervalos REF VCF ya normalizados se solapan de
 /// verdad. La condición es semiabierta: el mero contacto de extremos no basta.
 fn normalized_ref_collisions(
-    normalized: &[(ReferenceSpan, Option<NormalizedAllele>)],
+    normalized: &[(ReferenceSpan, Option<ProjectedAllele<'_>>)],
 ) -> Result<Vec<Vec<ReferenceSpan>>, VcfProjectionError> {
     let mut intervals = normalized
         .iter()
@@ -561,11 +758,16 @@ impl DisjointComponents {
     }
 }
 
-fn normalize_path_window(
-    path: &CopyPath,
+fn normalize_path_window<'truth>(
+    path: &CopyPath<'truth>,
     sequence: &ReferenceSequence,
     span: ReferenceSpan,
-) -> Result<Option<NormalizedAllele>, VcfProjectionError> {
+) -> Result<Option<ProjectedAllele<'truth>>, VcfProjectionError> {
+    if span.start == span.end
+        && let Some(bases) = path.direct_insertion_at(span.start)
+    {
+        return normalize_direct_insertion(path, sequence, span, bases).map(Some);
+    }
     let reference_bases = sequence.sequence().as_bytes();
     let mut start = span.start;
     let end = span.end;
@@ -573,7 +775,7 @@ fn normalize_path_window(
         .map_err(|_| VcfProjectionError::CoordinateOverflow)?
         ..usize::try_from(end).map_err(|_| VcfProjectionError::CoordinateOverflow)?]
         .to_vec();
-    let mut alternate = path.materialize_window(start, end)?;
+    let mut alternate = path.materialize_window(sequence, start, end)?;
     if reference == alternate {
         return Ok(None);
     }
@@ -581,31 +783,88 @@ fn normalize_path_window(
         start = start
             .checked_sub(1)
             .ok_or_else(|| VcfProjectionError::CannotAnchor {
-                sequence_id: path.sequence_id.clone(),
+                sequence_id: path.sequence_id.to_owned(),
                 position: span.start,
             })?;
         reference = reference_bases[usize::try_from(start)
             .map_err(|_| VcfProjectionError::CoordinateOverflow)?
             ..usize::try_from(end).map_err(|_| VcfProjectionError::CoordinateOverflow)?]
             .to_vec();
-        alternate = path.materialize_window(start, end)?;
+        alternate = path.materialize_window(sequence, start, end)?;
     }
 
     trim_common(&mut start, &mut reference, &mut alternate);
     if reference.len() != alternate.len() {
         left_align(reference_bases, &mut start, &mut reference, &mut alternate);
     }
-    Ok(Some(NormalizedAllele {
-        sequence_id: path.sequence_id.clone(),
+    Ok(Some(ProjectedAllele {
+        sequence_id: path.sequence_id,
         position: start,
         reference: String::from_utf8(reference).expect("reference alphabet is UTF-8 DNA"),
-        alternate: String::from_utf8(alternate).expect("truth alphabet is UTF-8 DNA"),
+        alternate: ProjectedAlternate::Owned(
+            String::from_utf8(alternate).expect("truth alphabet is UTF-8 DNA"),
+        ),
         // Se reemplazan en `normalize_path_components` por el componente final
         // después de cerrar colisiones de la normalización.
         source_start: span.start,
         source_end: span.end,
-        copy: path.identity.clone(),
+        copy: path.identity,
     }))
+}
+
+fn normalize_direct_insertion<'truth>(
+    path: &CopyPath<'truth>,
+    sequence: &ReferenceSequence,
+    span: ReferenceSpan,
+    bases: &'truth str,
+) -> Result<ProjectedAllele<'truth>, VcfProjectionError> {
+    let mut position =
+        span.start
+            .checked_sub(1)
+            .ok_or_else(|| VcfProjectionError::CannotAnchor {
+                sequence_id: path.sequence_id.to_owned(),
+                position: span.start,
+            })?;
+    let reference_bases = sequence.sequence().as_bytes();
+    let mut anchor = reference_bases
+        [usize::try_from(position).map_err(|_| VcfProjectionError::CoordinateOverflow)?];
+    let initial_anchor = anchor;
+    let core_length = bases.len();
+    debug_assert!(core_length > 0, "validated direct insertion has bases");
+    let mut rotations = 0_usize;
+    let mut left_shifted = false;
+    let mut last = *bases
+        .as_bytes()
+        .last()
+        .expect("validated direct insertion has bases");
+    while position > 0 && anchor == last {
+        position -= 1;
+        anchor = reference_bases
+            [usize::try_from(position).map_err(|_| VcfProjectionError::CoordinateOverflow)?];
+        rotations = (rotations + 1) % core_length;
+        let core_last_index = (core_length - rotations) % core_length;
+        last = if core_last_index == 0 {
+            initial_anchor
+        } else {
+            bases.as_bytes()[core_last_index - 1]
+        };
+        left_shifted = true;
+    }
+    Ok(ProjectedAllele {
+        sequence_id: path.sequence_id,
+        position,
+        reference: char::from(anchor).to_string(),
+        alternate: ProjectedAlternate::DirectInsertion {
+            anchor,
+            initial_anchor,
+            bases,
+            rotations,
+            left_shifted,
+        },
+        source_start: span.start,
+        source_end: span.end,
+        copy: path.identity,
+    })
 }
 
 fn trim_common(position: &mut u64, reference: &mut Vec<u8>, alternate: &mut Vec<u8>) {
@@ -746,6 +1005,36 @@ mod tests {
         }
     }
 
+    fn direct_insertion_document(reference: &Reference, point: u64, bases: &str) -> TruthDocument {
+        let length = reference.sequences()[0].sequence().len();
+        let insertion = TruthModification::Insertion {
+            event_id: "INS_01".into(),
+            point,
+            bases: bases.into(),
+            provenance: explicit(),
+        };
+        let insertion_copy = copy_with_length(
+            0,
+            length,
+            vec![
+                TruthCurrentPiece::Source {
+                    source: source(0, point, length),
+                    snps: vec![],
+                },
+                TruthCurrentPiece::Inserted {
+                    bases: bases.into(),
+                    provenance: explicit(),
+                },
+                TruthCurrentPiece::Source {
+                    source: source(point, length, length),
+                    snps: vec![],
+                },
+            ],
+            vec![insertion],
+        );
+        document(reference, vec![insertion_copy])
+    }
+
     fn explicit() -> crate::truth_schema::ModificationProvenance {
         crate::truth_schema::ModificationProvenance {
             kind: crate::truth_schema::ModificationProvenanceKind::Explicit,
@@ -811,6 +1100,126 @@ mod tests {
     }
 
     #[test]
+    fn source_paths_retain_sparse_metadata_and_materialize_only_the_requested_window() {
+        let reference = reference(&vec![b'A'; 1_000_000]);
+        let sequence = &reference.sequences()[0];
+        let mut copy = copy_with_length(0, 1_000_000, Vec::new(), Vec::new());
+        copy.current_pieces = vec![TruthCurrentPiece::Source {
+            source: source(0, 1_000_000, 1_000_000),
+            snps: vec![TruthCurrentSnp {
+                event_id: "SNP_WINDOW".to_owned(),
+                position: 500_000,
+                reference: "A".to_owned(),
+                alternate: "G".to_owned(),
+                provenance: explicit(),
+            }],
+        }];
+        let path = CopyPath::from_truth(&copy.identity, &copy.current_pieces, sequence)
+            .expect("compact source path");
+
+        assert!(matches!(
+            path.pieces.as_slice(),
+            [PathPiece::Source { start: 0, end: 1_000_000, snps }] if snps.len() == 1
+        ));
+        assert_eq!(
+            path.materialize_window(sequence, 499_999, 500_002)
+                .expect("window"),
+            b"AGA"
+        );
+    }
+
+    #[test]
+    fn validated_compact_view_rejects_a_mixed_reference_at_its_effective_boundary() {
+        let validated_reference = reference(b"AAAAA");
+        let truth = document(
+            &validated_reference,
+            vec![copy_with_length(
+                0,
+                5,
+                vec![TruthCurrentPiece::Source {
+                    source: source(0, 5, 5),
+                    snps: Vec::new(),
+                }],
+                Vec::new(),
+            )],
+        );
+        let validated = validate_truth_for_vcf(&truth, &validated_reference)
+            .expect("truth validated for its original reference");
+        let mixed_reference = reference(b"AAAAT");
+
+        assert!(matches!(
+            project_projected_alleles_from_validated_truth(validated, &mixed_reference),
+            Err(VcfProjectionError::Truth(
+                TruthValidationError::ReferenceDigestMismatch
+            ))
+        ));
+    }
+
+    #[test]
+    fn large_direct_insertions_are_borrowed_for_ten_and_twenty_copies() {
+        let reference = reference(b"AAAAA");
+        let sequence = &reference.sequences()[0];
+        let requested_copies = std::env::var("GPS_VCF_INSERTION_COPIES")
+            .ok()
+            .and_then(|value| value.parse::<u8>().ok());
+        let copy_counts: &[u8] = requested_copies
+            .as_ref()
+            .map_or(&[10, 20], std::slice::from_ref);
+        for &copies in copy_counts {
+            let identities = (0..copies)
+                .map(|copy_index| CopyIdentity {
+                    reference_id: "REF_main".to_owned(),
+                    individual_id: format!("IND_{copy_index:02}"),
+                    sequence_id: "chr1".to_owned(),
+                    copy_index,
+                })
+                .collect::<Vec<_>>();
+            let pieces = (0..copies)
+                .map(|_| {
+                    vec![
+                        TruthCurrentPiece::Source {
+                            source: source(0, 5, 5),
+                            snps: Vec::new(),
+                        },
+                        TruthCurrentPiece::Inserted {
+                            // Es un caso grande de regresión, no una cota del
+                            // dominio biológico: la ruta acepta cualquier
+                            // longitud validable de inserción directa.
+                            bases: "G".repeat(1_000_000),
+                            provenance: explicit(),
+                        },
+                    ]
+                })
+                .collect::<Vec<_>>();
+            let paths = identities
+                .iter()
+                .zip(&pieces)
+                .map(|(identity, pieces)| CopyPath::from_truth(identity, pieces, sequence))
+                .collect::<Result<Vec<_>, _>>()
+                .expect("compact paths");
+
+            for (path, source_pieces) in paths.iter().zip(&pieces) {
+                let TruthCurrentPiece::Inserted {
+                    bases: expected, ..
+                } = &source_pieces[1]
+                else {
+                    panic!("inserted source piece");
+                };
+                let PathPiece::Inserted {
+                    bases: observed, ..
+                } = &path.pieces[1]
+                else {
+                    panic!("inserted path piece");
+                };
+                assert_eq!(observed.len(), expected.len());
+                assert_eq!(observed.as_ptr(), expected.as_ptr(), "{copies} copies");
+            }
+            std::hint::black_box(&paths);
+            std::hint::black_box(&pieces);
+        }
+    }
+
+    #[test]
     fn left_aligns_insertions_and_deletions() {
         let reference = reference(b"CAAAA");
         let insertion = TruthModification::Insertion {
@@ -870,6 +1279,179 @@ mod tests {
             allele.reference.as_str(),
             allele.alternate.as_str()
         ) == (0, "CA", "C")));
+    }
+
+    #[test]
+    fn direct_insertion_left_alignment_replaces_the_rotated_anchor() {
+        let reference = reference(b"CAAAA");
+        let truth = direct_insertion_document(&reference, 4, "A");
+        let validated = validate_truth_for_vcf(&truth, &reference).expect("validated truth");
+        let projected = project_projected_alleles_from_validated_truth(validated, &reference)
+            .expect("projection");
+
+        assert_eq!(projected.len(), 1);
+        assert!(matches!(
+            projected[0].alternate,
+            ProjectedAlternate::DirectInsertion { .. }
+        ));
+        assert_eq!(projected[0].position, 0);
+        assert_eq!(projected[0].reference, "C");
+        assert_eq!(projected[0].alternate_with_suffix("").materialize(), "CA");
+
+        let alleles = project_normalized_alleles(&truth, &reference).expect("public projection");
+        assert_eq!(alleles.len(), 1);
+        assert_eq!(alleles[0].position, 0);
+        assert_eq!(alleles[0].reference, "C");
+        assert_eq!(alleles[0].alternate, "CA");
+    }
+
+    #[test]
+    fn direct_insertions_match_historical_left_alignment_in_homopolymers() {
+        struct Case {
+            reference_bases: &'static [u8],
+            point: u64,
+            bases: &'static str,
+            position: u64,
+            reference: &'static str,
+            alternate: &'static str,
+        }
+
+        let cases = [
+            Case {
+                reference_bases: b"GAAAAAA",
+                point: 6,
+                bases: "AA",
+                position: 0,
+                reference: "G",
+                alternate: "GAA",
+            },
+            Case {
+                reference_bases: b"CTTTT",
+                point: 4,
+                bases: "TT",
+                position: 0,
+                reference: "C",
+                alternate: "CTT",
+            },
+            Case {
+                reference_bases: b"CATT",
+                point: 3,
+                bases: "AT",
+                position: 0,
+                reference: "C",
+                alternate: "CAT",
+            },
+        ];
+
+        for case in cases {
+            let reference = reference(case.reference_bases);
+            let truth = direct_insertion_document(&reference, case.point, case.bases);
+            let validated =
+                validate_truth_for_vcf(&truth, &reference).expect("validated direct insertion");
+            let projected = project_projected_alleles_from_validated_truth(validated, &reference)
+                .expect("projection");
+
+            assert_eq!(projected.len(), 1, "{:?}", case.reference_bases);
+            assert!(matches!(
+                projected[0].alternate,
+                ProjectedAlternate::DirectInsertion { .. }
+            ));
+            assert_eq!(
+                projected[0].position, case.position,
+                "{:?}",
+                case.reference_bases
+            );
+            assert_eq!(
+                projected[0].reference, case.reference,
+                "{:?}",
+                case.reference_bases
+            );
+            assert_eq!(
+                projected[0].alternate_with_suffix("").materialize(),
+                case.alternate,
+                "{:?}",
+                case.reference_bases
+            );
+        }
+    }
+
+    #[test]
+    fn direct_insertions_match_historical_normalization_for_short_repeats() {
+        for encoded_reference in 0_u8..32 {
+            let reference_bases = (0..5)
+                .map(|index| {
+                    if encoded_reference & (1 << index) == 0 {
+                        b'A'
+                    } else {
+                        b'C'
+                    }
+                })
+                .collect::<Vec<_>>();
+            let reference = reference(&reference_bases);
+            let sequence = &reference.sequences()[0];
+
+            for point in 1..5 {
+                for bases in ["A", "C", "AA", "AC", "CA", "CC"] {
+                    let copy = copy_with_length(
+                        0,
+                        5,
+                        vec![
+                            TruthCurrentPiece::Source {
+                                source: source(0, point, 5),
+                                snps: vec![],
+                            },
+                            TruthCurrentPiece::Inserted {
+                                bases: bases.into(),
+                                provenance: explicit(),
+                            },
+                            TruthCurrentPiece::Source {
+                                source: source(point, 5, 5),
+                                snps: vec![],
+                            },
+                        ],
+                        Vec::new(),
+                    );
+                    let path = CopyPath::from_truth(&copy.identity, &copy.current_pieces, sequence)
+                        .expect("direct path");
+                    let actual = normalize_direct_insertion(
+                        &path,
+                        sequence,
+                        ReferenceSpan {
+                            start: point,
+                            end: point,
+                        },
+                        bases,
+                    )
+                    .expect("compact normalization");
+
+                    let mut expected_position = point - 1;
+                    let mut expected_reference = vec![reference_bases[expected_position as usize]];
+                    let mut expected_alternate = expected_reference.clone();
+                    expected_alternate.extend_from_slice(bases.as_bytes());
+                    left_align(
+                        &reference_bases,
+                        &mut expected_position,
+                        &mut expected_reference,
+                        &mut expected_alternate,
+                    );
+
+                    assert_eq!(
+                        actual.position, expected_position,
+                        "{reference_bases:?}, {point}, {bases}"
+                    );
+                    assert_eq!(
+                        actual.reference.as_bytes(),
+                        expected_reference,
+                        "{reference_bases:?}, {point}, {bases}"
+                    );
+                    assert_eq!(
+                        actual.alternate_with_suffix("").materialize().as_bytes(),
+                        expected_alternate,
+                        "{reference_bases:?}, {point}, {bases}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

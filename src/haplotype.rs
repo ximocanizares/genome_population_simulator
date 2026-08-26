@@ -257,7 +257,20 @@ impl Individual {
         segments: SegmentChain,
     ) -> Result<Self, HaplotypeStateError> {
         let mut updated = self.clone();
-        let sequence = updated
+        updated.replace_copy_segments(sequence_id, phase, segments)?;
+        Ok(updated)
+    }
+
+    /// Sustituye internamente una sola copia ya localizada. Esta operación no
+    /// reconstruye el individuo: conserva todas las secuencias y copias no
+    /// objetivo tal como están compartidas en la versión poseída.
+    pub(crate) fn replace_copy_segments(
+        &mut self,
+        sequence_id: &SequenceId,
+        phase: HaplotypePhase,
+        segments: SegmentChain,
+    ) -> Result<(), HaplotypeStateError> {
+        let sequence = self
             .sequences
             .iter_mut()
             .find(|sequence| sequence.sequence_id() == sequence_id)
@@ -268,6 +281,6 @@ impl Individual {
             .find(|copy| copy.phase() == phase)
             .ok_or(HaplotypeStateError::MissingCopyPhase)?;
         *copy = copy.with_segments(segments)?;
-        Ok(updated)
+        Ok(())
     }
 }
