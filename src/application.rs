@@ -61,6 +61,7 @@ impl EffectiveSequence {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectiveComposition {
     values: [f64; 4],
+    unknown_base_fraction: f64,
 }
 
 /// Parámetro efectivo compartido por las normalizaciones DTC-049 consumidas en F2.
@@ -80,6 +81,12 @@ impl EffectiveComposition {
     #[must_use]
     pub const fn values(&self) -> &[f64; 4] {
         &self.values
+    }
+
+    /// Fracción independiente de posiciones ambiguas (`N`) de la referencia generada.
+    #[must_use]
+    pub const fn unknown_base_fraction(&self) -> f64 {
+        self.unknown_base_fraction
     }
 }
 
@@ -469,8 +476,13 @@ pub fn validate_general_config(
             )
         })?;
     }
-    if let DeclaredReferenceSource::Simulated { composition } = &general.reference().source {
+    if let DeclaredReferenceSource::Simulated {
+        composition,
+        unknown_base_fraction,
+    } = &general.reference().source
+    {
         normalize_composition(general, composition)?;
+        parse_unknown_base_fraction(general, unknown_base_fraction)?;
     }
     if !general.reduced_references().is_empty()
         && !matches!(
@@ -541,8 +553,12 @@ pub fn build_effective_config_with_entropy(
         diagnostic
     })?;
     let composition = match &general.reference().source {
-        DeclaredReferenceSource::Simulated { composition } => Some(EffectiveComposition {
+        DeclaredReferenceSource::Simulated {
+            composition,
+            unknown_base_fraction,
+        } => Some(EffectiveComposition {
             values: normalize_composition(general, composition)?,
+            unknown_base_fraction: parse_unknown_base_fraction(general, unknown_base_fraction)?,
         }),
         DeclaredReferenceSource::Supplied { .. } => None,
     };
@@ -1304,8 +1320,35 @@ fn normalize_composition(
         .map_err(|detail| config_error(general, "reference.composition", detail))
 }
 
+fn parse_unknown_base_fraction(
+    general: &DeclaredGeneralConfig,
+    declared: &Option<crate::configuration::DeclaredNumber>,
+) -> Result<f64, Diagnostic> {
+    let Some(declared) = declared else {
+        return Ok(0.0);
+    };
+    let value = declared.literal().parse::<f64>().map_err(|_| {
+        config_error(
+            general,
+            "reference.composition.N",
+            "valor decimal inválido para N",
+        )
+    })?;
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(config_error(
+            general,
+            "reference.composition.N",
+            "N debe ser finito y pertenecer a [0,1]",
+        ));
+    }
+    Ok(value)
+}
+
 fn resolve_link(general_path: &Path, declared: &str) -> PathBuf {
-    let declared = Path::new(declared);
+    // Los campos de ruta que introduce Marimo son texto. Recortamos únicamente
+    // espacio accidental en los extremos antes de decidir si es absoluta; los
+    // espacios internos se conservan como parte legítima del nombre.
+    let declared = Path::new(declared.trim());
     if declared.is_absolute() {
         declared.to_path_buf()
     } else {

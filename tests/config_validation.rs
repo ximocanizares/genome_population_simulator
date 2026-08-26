@@ -1,19 +1,73 @@
 use std::path::Path;
 
 use genome_population_simulator::adapters::{admit_toml_header, parse_declared_config};
-use genome_population_simulator::application::{build_effective_config, validate_general_config};
+use genome_population_simulator::application::{
+    EffectiveReferenceSource, build_effective_config, validate_general_config,
+};
 use genome_population_simulator::configuration::{
     DeclaredReferenceSource, ExpectedConfigKind, SequenceClass,
 };
 
 fn general(bytes: &[u8]) -> genome_population_simulator::configuration::DeclaredGeneralConfig {
-    let admitted = admit_toml_header(
-        Path::new("general.toml"),
-        bytes.to_vec(),
-        ExpectedConfigKind::General,
-    )
-    .expect("valid header");
+    general_at(Path::new("general.toml"), bytes)
+}
+
+fn general_at(
+    path: &Path,
+    bytes: &[u8],
+) -> genome_population_simulator::configuration::DeclaredGeneralConfig {
+    let admitted =
+        admit_toml_header(path, bytes.to_vec(), ExpectedConfigKind::General).expect("valid header");
     parse_declared_config(admitted).expect("declared config")
+}
+
+#[test]
+fn supplied_reference_paths_trim_accidental_edges_preserve_internal_spaces_and_resolve_relatives() {
+    let base = br#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "supplied"
+id = "ref"
+fasta = "  /external genomes/reference with spaces.fa  "
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1
+"#;
+    let absolute =
+        build_effective_config(&general_at(Path::new("/project/config/general.toml"), base))
+            .expect("absolute supplied path");
+    let EffectiveReferenceSource::Supplied { original_path } = absolute.reference_source() else {
+        panic!("expected supplied reference")
+    };
+    assert_eq!(
+        original_path,
+        Path::new("/external genomes/reference with spaces.fa")
+    );
+
+    let relative_source = br#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "supplied"
+id = "ref"
+fasta = "inputs/reference with spaces.fa"
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1
+"#;
+    let relative = build_effective_config(&general_at(
+        Path::new("/project/config/general.toml"),
+        relative_source,
+    ))
+    .expect("relative supplied path");
+    let EffectiveReferenceSource::Supplied { original_path } = relative.reference_source() else {
+        panic!("expected supplied reference")
+    };
+    assert_eq!(
+        original_path,
+        Path::new("/project/config/inputs/reference with spaces.fa")
+    );
 }
 
 #[test]
@@ -27,7 +81,7 @@ fn simulated_reference_preserves_sequence_count_lengths_classes_and_composition(
         SequenceClass::Chromosome
     );
     assert_eq!(*config.reference().sequences[0].length.value(), 1000);
-    let DeclaredReferenceSource::Simulated { composition } = &config.reference().source else {
+    let DeclaredReferenceSource::Simulated { composition, .. } = &config.reference().source else {
         panic!("expected simulated reference")
     };
     assert_eq!(
@@ -77,7 +131,7 @@ length = 5
         SequenceClass::Scaffold
     );
     assert_eq!(*config.reference().sequences[1].length.value(), 5);
-    let DeclaredReferenceSource::Simulated { composition } = &config.reference().source else {
+    let DeclaredReferenceSource::Simulated { composition, .. } = &config.reference().source else {
         panic!("expected simulated reference")
     };
     assert_eq!(
@@ -146,6 +200,34 @@ length = 10
         .iter()
         .sum();
     assert!((sum - 1.0).abs() <= 1e-9);
+}
+
+#[test]
+fn simulated_reference_accepts_an_independent_unknown_base_fraction() {
+    let source = br#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "simulated"
+id = "ref"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+N = 0.1
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 10
+"#;
+    let effective = build_effective_config(&general(source)).expect("valid composition with N");
+    assert_eq!(
+        effective
+            .composition()
+            .expect("composition")
+            .unknown_base_fraction(),
+        0.1
+    );
 }
 
 #[test]

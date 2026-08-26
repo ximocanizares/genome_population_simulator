@@ -116,7 +116,8 @@
         "A": { "$ref": "#/$defs/base_fraction" },
         "C": { "$ref": "#/$defs/base_fraction" },
         "G": { "$ref": "#/$defs/base_fraction" },
-        "T": { "$ref": "#/$defs/base_fraction" }
+        "T": { "$ref": "#/$defs/base_fraction" },
+        "N": { "$ref": "#/$defs/base_fraction", "description": "Fracción independiente de posiciones ambiguas; A/C/G/T siguen sumando 1." }
       }
     },
     "base_fraction": {

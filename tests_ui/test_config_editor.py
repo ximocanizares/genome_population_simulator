@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,15 +12,81 @@ from config_editor import (  # noqa: E402
     DirectEventRow,
     EditorError,
     InitialPopulationRow,
+    REDUCTION_OBJECTIVE_KEEP_BASES,
+    REDUCTION_OBJECTIVE_REMOVE_PERCENT,
+    ReductionRow,
+    SequenceRow,
     default_form,
     editor_integer,
     ordered_editor_rows,
     parse_general_toml,
+    read_fasta_sequence_rows,
+    reduction_editor_row,
+    reduction_from_editor_row,
     render_general_toml,
+    validate_simulated_composition,
 )
 
 
 class ConfigEditorTests(unittest.TestCase):
+    def test_fasta_header_reader_preserves_order_and_uses_scaffold_as_safe_default(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fasta = Path(directory) / "reference.fa"
+            fasta.write_bytes(b">chr1 primary\nACGT\n>SL4.0ch00\nNN\n")
+            rows = read_fasta_sequence_rows(fasta)
+
+        self.assertEqual(
+            rows,
+            [SequenceRow("chr1", "scaffold", 4), SequenceRow("SL4.0ch00", "scaffold", 2)],
+        )
+    def test_readable_reduction_objectives_export_the_normative_toml_branches(self) -> None:
+        cases = (
+            (REDUCTION_OBJECTIVE_KEEP_BASES, "13", "target_bases = 13"),
+            (REDUCTION_OBJECTIVE_REMOVE_PERCENT, "10", "reduction_percent = 10"),
+        )
+        for objective, value, expected_toml in cases:
+            with self.subTest(objective=objective):
+                reduction = reduction_from_editor_row(
+                    {
+                        "id": "reference-small",
+                        "source_reference_id": "reference-main",
+                        "region_size_bases": 4,
+                        "Objetivo": objective,
+                        "Valor": value,
+                    },
+                    "reduced_references[0]",
+                )
+                form = default_form()
+                form.reference.kind = "supplied"
+                form.reference.fasta = "source.fa"
+                form.reduced_references = [reduction]
+
+                rendered = render_general_toml(form)
+
+                self.assertIn(expected_toml, rendered)
+                self.assertNotIn("target_kind", rendered)
+                self.assertNotIn("target_literal", rendered)
+
+    def test_reduction_import_is_presented_with_readable_columns(self) -> None:
+        row = reduction_editor_row(
+            ReductionRow("small", "reference-main", 4, "reduction_percent", "10"),
+            1,
+        )
+
+        self.assertEqual(row["Objetivo"], REDUCTION_OBJECTIVE_REMOVE_PERCENT)
+        self.assertEqual(row["Valor"], "10")
+        self.assertNotIn("target_kind", row)
+        self.assertNotIn("target_literal", row)
+
+    def test_local_composition_validation_rejects_mass_above_one_before_rust(self) -> None:
+        composition = {"A": "0.4", "C": "0.3", "G": "0.2", "T": "0.2", "N": "0"}
+
+        with self.assertRaises(EditorError) as raised:
+            validate_simulated_composition(composition)
+
+        self.assertEqual(raised.exception.path, "reference.composition")
+        self.assertIn("no pueden superar 1", raised.exception.detail)
+
     def test_minimal_and_reordered_fixtures_round_trip_semantically(self) -> None:
         fixtures = ROOT / "tests" / "fixtures" / "config"
         first = parse_general_toml((fixtures / "general-minimal.toml").read_text())
@@ -29,6 +96,15 @@ class ConfigEditorTests(unittest.TestCase):
 
         self.assertEqual(first, reordered)
         self.assertEqual(parse_general_toml(render_general_toml(first)), first)
+
+    def test_imported_toml_strings_are_plain_python_values_for_marimo_controls(self) -> None:
+        form = parse_general_toml(
+            (ROOT / "tests" / "fixtures" / "config" / "general-minimal.toml").read_text()
+        )
+
+        self.assertIs(type(form.reference.kind), str)
+        self.assertIs(type(form.reference.id), str)
+        self.assertIs(type(form.reference.sequences[0].id), str)
 
     def test_supplied_paths_with_spaces_and_exact_percent_survive_round_trip(self) -> None:
         source = """config_kind = "general"

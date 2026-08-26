@@ -68,10 +68,13 @@ class = "chromosome"
 length = 1000
 ```
 
-`composition` es una tabla cerrada que exige A, C, G y T exactamente una vez.
-Cada valor es un `f64` finito en `[0,1]`. La suma determinista de Neumaier debe
-diferir de 1 como máximo `1e-9`; los cuatro valores efectivos se dividen por
-esa suma antes de generar. Esta normalización es específica de la referencia y
+`composition` es una tabla cerrada que exige A, C, G y T exactamente una vez y
+puede incluir `N`. Cada valor es un `f64` finito en `[0,1]`. La suma determinista
+de Neumaier de A/C/G/T debe diferir de 1 como máximo `1e-9`; los cuatro valores
+efectivos se dividen por esa suma antes de generar. `N`, ausente por defecto y
+por tanto igual a cero, es una fracción independiente de posiciones ambiguas:
+en cada posición se sortea primero `N` y, si no se obtiene, A/C/G/T según su
+composición normalizada. Esta normalización es específica de la referencia y
 no introduce un modelo de frecuencias poblacionales.
 
 Una referencia suministrada cambia `kind` por `supplied` y exige `fasta`; no

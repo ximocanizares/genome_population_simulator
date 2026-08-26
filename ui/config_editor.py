@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
 
@@ -12,7 +13,11 @@ from tomlkit.items import Float, Integer
 
 U64_MAX = 18_446_744_073_709_551_615
 BASES = ("A", "C", "G", "T")
+COMPOSITION_BASES = (*BASES, "N")
 SEQUENCE_CLASSES = ("chromosome", "scaffold")
+COMPOSITION_TOLERANCE = 1e-9
+REDUCTION_OBJECTIVE_REMOVE_PERCENT = "Eliminar porcentaje"
+REDUCTION_OBJECTIVE_KEEP_BASES = "Conservar bases"
 
 
 class EditorError(ValueError):
@@ -31,6 +36,70 @@ class SequenceRow:
     length: int
 
 
+def read_fasta_sequence_rows(path: Path) -> list[SequenceRow]:
+    """Read FASTA identifiers and lengths for authoring, without modifying the input.
+
+    Classes are intentionally initialized as ``scaffold``: a FASTA header does
+    not reliably distinguish chromosomes from unplaced or auxiliary sequences.
+    The Rust preflight remains the authority for the complete FASTA contract.
+    """
+    rows: list[SequenceRow] = []
+    current_id: str | None = None
+    current_length = 0
+
+    def finish_current() -> None:
+        nonlocal current_id, current_length
+        if current_id is None:
+            return
+        if current_length == 0:
+            raise EditorError(
+                "reference.fasta", f"la secuencia {current_id} está vacía"
+            )
+        rows.append(SequenceRow(current_id, "scaffold", current_length))
+
+    try:
+        with path.open("rb") as source:
+            for line_number, raw_line in enumerate(source, start=1):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if line.startswith(b">"):
+                    finish_current()
+                    identifier = line[1:].split(maxsplit=1)[0]
+                    if not identifier:
+                        raise EditorError(
+                            "reference.fasta", f"cabecera vacía en línea {line_number}"
+                        )
+                    try:
+                        current_id = identifier.decode("ascii")
+                    except UnicodeDecodeError as error:
+                        raise EditorError(
+                            "reference.fasta",
+                            f"ID FASTA no ASCII en línea {line_number}",
+                        ) from error
+                    if any(row.id == current_id for row in rows):
+                        raise EditorError(
+                            "reference.fasta", f"ID FASTA repetido: {current_id}"
+                        )
+                    current_length = 0
+                else:
+                    if current_id is None:
+                        raise EditorError(
+                            "reference.fasta",
+                            f"secuencia sin cabecera en línea {line_number}",
+                        )
+                    current_length += len(line)
+    except OSError as error:
+        raise EditorError("reference.fasta", f"no se puede leer: {error}") from error
+
+    finish_current()
+    if not rows:
+        raise EditorError("reference.fasta", "no contiene secuencias FASTA")
+    if len({row.id for row in rows}) != len(rows):
+        raise EditorError("reference.fasta", "contiene IDs FASTA repetidos")
+    return rows
+
+
 @dataclass(eq=True)
 class ReferenceForm:
     kind: str
@@ -47,6 +116,54 @@ class ReductionRow:
     region_size_bases: int
     target_kind: str
     target_literal: str
+
+
+def reduction_editor_row(row: ReductionRow, order: int) -> dict[str, Any]:
+    """Present one normative reduction row with author-facing column names."""
+    objectives = {
+        "target_bases": REDUCTION_OBJECTIVE_KEEP_BASES,
+        "reduction_percent": REDUCTION_OBJECTIVE_REMOVE_PERCENT,
+    }
+    try:
+        objective = objectives[row.target_kind]
+    except KeyError as error:
+        raise EditorError(
+            f"reduced_references[{order - 1}].target_kind",
+            "debe ser target_bases o reduction_percent",
+        ) from error
+    return {
+        "order": order,
+        "id": row.id,
+        "source_reference_id": row.source_reference_id,
+        "region_size_bases": row.region_size_bases,
+        "Objetivo": objective,
+        "Valor": row.target_literal,
+    }
+
+
+def reduction_from_editor_row(row: Mapping[str, Any], path: str) -> ReductionRow:
+    """Translate the readable reduction choice back to the normative TOML branch."""
+    targets = {
+        REDUCTION_OBJECTIVE_KEEP_BASES: "target_bases",
+        REDUCTION_OBJECTIVE_REMOVE_PERCENT: "reduction_percent",
+    }
+    objective = str(row.get("Objetivo", ""))
+    try:
+        target_kind = targets[objective]
+    except KeyError as error:
+        raise EditorError(
+            f"{path}.Objetivo",
+            "debe ser Eliminar porcentaje o Conservar bases",
+        ) from error
+    return ReductionRow(
+        id=str(row["id"]),
+        source_reference_id=str(row["source_reference_id"]),
+        region_size_bases=editor_integer(
+            row["region_size_bases"], f"{path}.region_size_bases"
+        ),
+        target_kind=target_kind,
+        target_literal=str(row.get("Valor", "")),
+    )
 
 
 @dataclass(eq=True)
@@ -107,7 +224,7 @@ def default_form() -> GeneralForm:
             kind="simulated",
             id="reference-main",
             fasta=None,
-            composition={base: "0.25" for base in BASES},
+            composition={**{base: "0.25" for base in BASES}, "N": "0"},
             sequences=[SequenceRow("chr1", "chromosome", 1_000)],
         ),
         reduced_references=[],
@@ -456,7 +573,7 @@ def _parse_reference(table: Mapping[str, Any], path: str) -> ReferenceForm:
         composition_table = _mapping(table["composition"], f"{path}.composition")
         _keys(
             composition_table,
-            allowed=set(BASES),
+            allowed=set(COMPOSITION_BASES),
             required=set(BASES),
             path=f"{path}.composition",
         )
@@ -466,6 +583,10 @@ def _parse_reference(table: Mapping[str, Any], path: str) -> ReferenceForm:
             )
             for base in BASES
         }
+        if "N" in composition_table:
+            composition["N"] = _number_literal(
+                composition_table["N"], f"{path}.composition.N"
+            )
         fasta = None
     elif kind == "supplied":
         _keys(
@@ -573,6 +694,7 @@ def render_general_toml(form: GeneralForm) -> str:
     if form.reference.kind == "simulated":
         if form.reference.composition is None:
             raise EditorError("reference.composition", "falta para simulated")
+        validate_simulated_composition(form.reference.composition)
         composition = tomlkit.table()
         for base in BASES:
             composition.add(
@@ -580,6 +702,13 @@ def render_general_toml(form: GeneralForm) -> str:
                 _literal_item(
                     form.reference.composition.get(base),
                     f"reference.composition.{base}",
+                ),
+            )
+        if "N" in form.reference.composition:
+            composition.add(
+                "N",
+                _literal_item(
+                    form.reference.composition["N"], "reference.composition.N"
                 ),
             )
         reference.add("composition", composition)
@@ -749,6 +878,45 @@ def render_general_toml(form: GeneralForm) -> str:
     return tomlkit.dumps(document)
 
 
+def validate_simulated_composition(composition: Mapping[str, Any]) -> None:
+    """Validate the local composition contract before calling the Rust binary.
+
+    `N` is intentionally outside the A/C/G/T mass: it represents an independent
+    fraction of ambiguous positions in the final simulated sequence.
+    """
+    values: list[float] = []
+    for base in BASES:
+        path = f"reference.composition.{base}"
+        try:
+            value = float(str(composition.get(base, "")).strip())
+        except (TypeError, ValueError) as error:
+            raise EditorError(path, "debe ser un decimal finito entre 0 y 1") from error
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise EditorError(path, "debe ser un decimal finito entre 0 y 1")
+        values.append(value)
+
+    total = math.fsum(values)
+    if total > 1.0 + COMPOSITION_TOLERANCE:
+        raise EditorError(
+            "reference.composition",
+            f"A/C/G/T suman {total:g}; no pueden superar 1",
+        )
+    if abs(total - 1.0) > COMPOSITION_TOLERANCE:
+        raise EditorError(
+            "reference.composition",
+            f"A/C/G/T deben sumar 1 (suman {total:g})",
+        )
+
+    if "N" not in composition:
+        return
+    try:
+        unknown_fraction = float(str(composition["N"]).strip())
+    except (TypeError, ValueError) as error:
+        raise EditorError("reference.composition.N", "debe ser un decimal finito entre 0 y 1") from error
+    if not math.isfinite(unknown_fraction) or not 0.0 <= unknown_fraction <= 1.0:
+        raise EditorError("reference.composition.N", "debe ser un decimal finito entre 0 y 1")
+
+
 def _keys(
     table: Mapping[str, Any],
     *,
@@ -779,7 +947,9 @@ def _sequence(value: Any, path: str) -> Sequence[Any]:
 def _string(value: Any, path: str) -> str:
     if not isinstance(value, str):
         raise EditorError(path, "se esperaba texto")
-    return value
+    # tomlkit usa una subclase de `str` que Marimo no puede serializar como
+    # valor inicial de sus controles. El formulario solo conserva texto plano.
+    return str(value)
 
 
 def _non_empty_string(value: Any, path: str) -> str:

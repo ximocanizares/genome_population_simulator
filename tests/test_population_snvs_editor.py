@@ -15,6 +15,27 @@ from config_editor import (
 
 
 class PopulationSnvsEditorTest(unittest.TestCase):
+    def test_simulated_reference_round_trips_optional_n_fraction(self):
+        source = '''config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "simulated"
+id = "ref"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+N = 0.05
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 5
+'''
+        form = parse_general_toml(source)
+        self.assertEqual(form.reference.composition["N"], "0.05")
+        self.assertEqual(parse_general_toml(render_general_toml(form)), form)
+
     def test_draft_schema_rejects_generate_with_supplied_or_reuse(self):
         if importlib.util.find_spec("jsonschema") is None:
             self.skipTest("jsonschema no está instalado en el entorno UI")

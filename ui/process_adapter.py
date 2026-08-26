@@ -52,15 +52,16 @@ class ValidatedSession:
     ) -> bool:
         return (
             self.toml == toml
-            and self.binary == binary.resolve()
-            and self.base_directory == base_directory.resolve()
+            and self.binary == _clean_local_path(binary).expanduser().resolve()
+            and self.base_directory
+                == _clean_local_path(base_directory).expanduser().resolve()
             and self.allow_empty_snv_matrix == allow_empty_snv_matrix
             and self.allow_incompatible_genotypes == allow_incompatible_genotypes
         )
 
 
 def check_binary_version(binary: Path) -> tuple[Path, str]:
-    resolved = binary.expanduser().resolve()
+    resolved = _clean_local_path(binary).expanduser().resolve()
     try:
         completed = subprocess.run(
             [str(resolved), "--version"],
@@ -134,7 +135,7 @@ def run_toml(
         allow_incompatible_genotypes,
     ):
         raise ProcessAdapterError("la configuración cambió después de validar")
-    declared_destination = output_directory.expanduser()
+    declared_destination = _clean_local_path(output_directory).expanduser()
     destination = (
         declared_destination
         if declared_destination.is_absolute()
@@ -207,10 +208,15 @@ def _invoke(
 
 
 def _base_directory(path: Path) -> Path:
-    resolved = path.expanduser().resolve()
+    resolved = _clean_local_path(path).expanduser().resolve()
     if not resolved.is_dir():
         raise ProcessAdapterError(f"el directorio base no existe: {resolved}")
     return resolved
+
+
+def _clean_local_path(path: Path) -> Path:
+    """Discard accidental edge whitespace while preserving spaces in path names."""
+    return Path(str(path).strip())
 
 
 def _diagnostics(stdout: str) -> dict[str, Any] | None:

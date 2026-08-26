@@ -28,7 +28,20 @@ pub fn generate_reference(
     specs: &[GeneratedSequenceSpec<'_>],
     composition: &[BaseFrequency],
 ) -> Result<Reference, Diagnostic> {
+    generate_reference_with_unknown_fraction(reference_id, root_seed, specs, composition, 0.0)
+}
+
+/// Genera una referencia con una fracción independiente de bases ambiguas `N`.
+/// Las frecuencias A/C/G/T se aplican solo a las posiciones que no son `N`.
+pub fn generate_reference_with_unknown_fraction(
+    reference_id: &str,
+    root_seed: RootSeed,
+    specs: &[GeneratedSequenceSpec<'_>],
+    composition: &[BaseFrequency],
+    unknown_base_fraction: f64,
+) -> Result<Reference, Diagnostic> {
     let cumulative = validate_composition(composition)?;
+    let unknown_base_fraction = validate_unknown_base_fraction(unknown_base_fraction)?;
     let mut rng = derive_subseed(
         root_seed,
         RuntimeSubseedScope::ReferenceGeneration { reference_id },
@@ -46,7 +59,14 @@ pub fn generate_reference(
         let mut bases = Vec::with_capacity(length);
         for _ in 0..length {
             let unit = u64_to_unit_interval(rng.next_u64());
-            bases.push(select_base(unit, &cumulative));
+            bases.push(if unit < unknown_base_fraction {
+                b'N'
+            } else {
+                select_base(
+                    (unit - unknown_base_fraction) / (1.0 - unknown_base_fraction),
+                    &cumulative,
+                )
+            });
         }
         let sequence = DnaSequence::try_from_bytes(&bases).map_err(|error| {
             internal_error(format!(
@@ -75,6 +95,16 @@ pub fn generate_reference(
             "generated reference construction failed: {error:?}"
         ))
     })
+}
+
+fn validate_unknown_base_fraction(value: f64) -> Result<f64, Diagnostic> {
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(configuration_error(
+            "reference.composition.N",
+            "N probability must be finite and in [0,1]",
+        ));
+    }
+    Ok(value)
 }
 
 fn validate_composition(composition: &[BaseFrequency]) -> Result<[(u8, f64); 4], Diagnostic> {

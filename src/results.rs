@@ -37,7 +37,7 @@ use crate::reference_fasta::{
     validate_supplied_fasta,
 };
 use crate::reference_generation::COMPOSITION_TOLERANCE;
-use crate::reference_generation::{BaseFrequency, GeneratedSequenceSpec, generate_reference};
+use crate::reference_generation::{BaseFrequency, GeneratedSequenceSpec};
 use crate::reference_reduction::{
     EligibleSequence, MaterializedPlan, REDUCED_REFERENCE_SELECTION_ALGORITHM,
     materialize_selection, select_reduced_reference,
@@ -254,7 +254,7 @@ pub fn effective_config_document_with_reductions(
     validate_reference_output(config, output)?;
     let composition = config.composition().map(|composition| {
         let values = composition.values();
-        json!({"A": values[0], "C": values[1], "G": values[2], "T": values[3]})
+        json!({"A": values[0], "C": values[1], "G": values[2], "T": values[3], "N": composition.unknown_base_fraction()})
     });
     Ok(json!({
         "effective_config_kind": "gps_effective_config",
@@ -1902,7 +1902,7 @@ fn validate_effective_targets_against_configuration(
 
     let expected_composition = expected.composition().map(|composition| {
         let values = composition.values();
-        json!({"A": values[0], "C": values[1], "G": values[2], "T": values[3]})
+        json!({"A": values[0], "C": values[1], "G": values[2], "T": values[3], "N": composition.unknown_base_fraction()})
     });
     if reference.get("composition") != Some(&expected_composition.unwrap_or(Value::Null)) {
         return Err(effective_error(
@@ -2158,11 +2158,18 @@ fn validate_generated_reference(
                 .ok_or_else(|| effective_error(effective_path, "composición efectiva inválida"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let expected = generate_reference(
+    let unknown_base_fraction = composition.get("N").map_or(Ok(0.0), |value| {
+        value
+            .as_f64()
+            .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+            .ok_or_else(|| effective_error(effective_path, "fracción N efectiva inválida"))
+    })?;
+    let expected = crate::reference_generation::generate_reference_with_unknown_fraction(
         effective_non_empty_text(reference, "id", effective_path)?,
         root_seed,
         &specs,
         &frequencies,
+        unknown_base_fraction,
     )
     .map_err(|error| physical_error(effective_path, "regenerate_reference", &error))?;
     compare_reference_bases(&expected, physical, effective_path, expected.id().as_str())
@@ -4388,7 +4395,16 @@ fn validate_effective_reference(
         Some(Value::Null) => false,
         Some(Value::Object(composition)) => {
             const BASES: [&str; 4] = ["A", "C", "G", "T"];
-            validate_effective_closed_object(composition, &BASES, "reference.composition", path)?;
+            const BASES_WITH_N: [&str; 5] = ["A", "C", "G", "T", "N"];
+            if composition
+                .keys()
+                .any(|key| !BASES_WITH_N.contains(&key.as_str()))
+            {
+                return Err(effective_error(
+                    path,
+                    "campos desconocidos en reference.composition",
+                ));
+            }
             for base in BASES {
                 let frequency = composition
                     .get(base)
@@ -4412,6 +4428,17 @@ fn validate_effective_reference(
                     path,
                     "reference.composition no suma 1 dentro de la tolerancia",
                 ));
+            }
+            if let Some(value) = composition.get("N") {
+                let value = value
+                    .as_f64()
+                    .ok_or_else(|| effective_error(path, "reference.composition.N inválida"))?;
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err(effective_error(
+                        path,
+                        "reference.composition.N fuera de rango",
+                    ));
+                }
             }
             true
         }

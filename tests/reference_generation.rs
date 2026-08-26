@@ -5,6 +5,7 @@ use genome_population_simulator::reference_fasta::{
 };
 use genome_population_simulator::reference_generation::{
     BaseFrequency, GeneratedSequenceSpec, generate_reference,
+    generate_reference_with_unknown_fraction,
 };
 
 const ROOT: RootSeed = RootSeed::from_bytes([
@@ -119,6 +120,29 @@ fn generated_reference_rejects_an_acgt_catalog_whose_sum_is_outside_tolerance() 
     )
     .expect_err("an incomplete probability mass must not be assigned silently to T");
     assert_eq!(error.code(), "GPS-CONF-008");
+}
+
+#[test]
+fn generated_reference_can_mark_an_independent_fraction_as_unknown() {
+    let specs = [GeneratedSequenceSpec {
+        id: "chr1",
+        class: SequenceClass::Chromosome,
+        length: 16,
+    }];
+    let reference = generate_reference_with_unknown_fraction(
+        "reference-main",
+        ROOT,
+        &specs,
+        &composition(1.0, 0.0, 0.0, 0.0),
+        1.0,
+    )
+    .expect("generated reference with unknown bases");
+
+    assert_eq!(
+        reference.sequences()[0].sequence().as_bytes(),
+        b"NNNNNNNNNNNNNNNN"
+    );
+    assert_eq!(reference.sequences()[0].unknown_base_count(), 16);
 }
 
 #[test]

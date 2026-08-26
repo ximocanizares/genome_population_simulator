@@ -28,7 +28,9 @@ use crate::reference_fasta::{
     SequenceExpectation, ValidatedSuppliedReference, validate_supplied_fasta,
     validate_supplied_fasta_with_origin, write_generated_fasta,
 };
-use crate::reference_generation::{BaseFrequency, GeneratedSequenceSpec, generate_reference};
+use crate::reference_generation::{
+    BaseFrequency, GeneratedSequenceSpec, generate_reference_with_unknown_fraction,
+};
 use crate::reference_reduction::{
     EligibleSequence, MaterializedPlan, REDUCED_REFERENCE_SELECTION_ALGORITHM, ReductionError,
     materialize_selection, preflight_reduced_reference, select_reduced_reference,
@@ -1034,23 +1036,23 @@ fn prepare_reference(effective: &EffectiveConfig) -> Result<PreparedReference, D
                     length: sequence.length(),
                 })
                 .collect::<Vec<_>>();
-            let values = effective
+            let composition = effective
                 .composition()
-                .ok_or_else(|| internal("prepare_reference", "missing composition"))?
-                .values();
-            let composition = (*b"ACGT")
+                .ok_or_else(|| internal("prepare_reference", "missing composition"))?;
+            let frequencies = (*b"ACGT")
                 .into_iter()
-                .zip(values)
+                .zip(composition.values())
                 .map(|(base, probability)| BaseFrequency {
                     base,
                     probability: *probability,
                 })
                 .collect::<Vec<_>>();
-            generate_reference(
+            generate_reference_with_unknown_fraction(
                 effective.reference_id(),
                 effective.reproducibility().root_seed(),
                 &specs,
-                &composition,
+                &frequencies,
+                composition.unknown_base_fraction(),
             )
             .map(PreparedReference::Generated)
         }

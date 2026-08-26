@@ -1231,8 +1231,9 @@ su asignación por fase está en la matriz de trazabilidad.
   sin distinguir mayúsculas de minúsculas durante la validación. Cualquier otro
   símbolo debe rechazarse antes de usar la secuencia e identificarse en el
   diagnóstico. Las bases `N` de referencias, haplotipos, secuencias explícitas
-  o copias deben conservarse con su posición; toda secuencia nueva generada
-  aleatoriamente debe contener solo A, C, G y T.
+  o copias deben conservarse con su posición. Una referencia nueva generada
+  aleatoriamente puede declarar una fracción independiente de posiciones `N`;
+  entre las posiciones restantes, las frecuencias A, C, G y T deben sumar 1.
 - **REQ-REF-24.** El sistema debe poder crear una referencia reducida con ID
   propio a partir de las regiones de los cromosomas o *scaffolds* de un FASTA real
   suministrado. La referencia reducida es una referencia derivada de

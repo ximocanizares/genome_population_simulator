@@ -199,16 +199,11 @@ length = 64
 }
 
 #[test]
-fn generated_composition_rejects_non_acgt_and_duplicate_keys_at_admission() {
+fn generated_composition_rejects_unknown_and_duplicate_keys_at_admission() {
     for (label, composition, expected_code) in [
         (
             "lowercase",
             "a = 0.25\nC = 0.25\nG = 0.25\nT = 0.25",
-            "GPS-CONF-006",
-        ),
-        (
-            "non-acgt",
-            "A = 0.25\nC = 0.25\nG = 0.25\nN = 0.25\nT = 0.0",
             "GPS-CONF-006",
         ),
         (
@@ -254,6 +249,40 @@ length = 8
         assert!(!destination.exists());
         fs::remove_dir_all(root).expect("cleanup");
     }
+}
+
+#[test]
+fn generated_composition_accepts_an_independent_n_fraction() {
+    let root = temporary("generated-n");
+    fs::create_dir(&root).expect("root");
+    let config = root.join("general.toml");
+    fs::write(
+        &config,
+        r#"config_kind = "general"
+schema_version = "1"
+[reference]
+kind = "simulated"
+id = "ref-n"
+[reference.composition]
+A = 1.0
+C = 0.0
+G = 0.0
+T = 0.0
+N = 1.0
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 8
+"#,
+    )
+    .expect("config");
+    let destination = root.join("result");
+    run_cli(&config, &destination, true);
+    assert_eq!(
+        fs::read(destination.join("resources/references/ref-n.fa")).expect("generated FASTA"),
+        b">chr1\nNNNNNNNN\n"
+    );
+    fs::remove_dir_all(root).expect("cleanup");
 }
 
 fn run_cli(config: &Path, destination: &Path, success: bool) -> std::process::Output {

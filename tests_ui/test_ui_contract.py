@@ -59,11 +59,13 @@ class UiContractTests(unittest.TestCase):
         source = (ROOT / "ui" / "gps_app.py").read_text()
         for control in (
             "seed_control",
+            "load_default_config_button",
             "ploidy_control",
             "normalization_tolerance_control",
             "reference_kind_control",
             "reference_id_control",
             "fasta_control",
+            "fasta_browser",
             "composition_controls",
             "sequence_editor",
             "reduction_editor",
@@ -73,6 +75,9 @@ class UiContractTests(unittest.TestCase):
             "initial_populations_editor",
             "direct_events_editor",
             "allow_incompatible_genotypes_control",
+            "base_directory_browser",
+            "output_parent_directory_browser",
+            "output_name_control",
             "vcf_output_mode_control",
         ):
             with self.subTest(control=control):
@@ -85,6 +90,42 @@ class UiContractTests(unittest.TestCase):
         ):
             with self.subTest(future_option=future_option):
                 self.assertNotIn(future_option, source)
+
+    def test_reference_composition_notice_is_shown_once_and_path_browsers_stay_local(self) -> None:
+        source = (ROOT / "ui" / "gps_app.py").read_text()
+
+        self.assertEqual(source.count("A/C/G/T deben sumar 1"), 1)
+        self.assertIn('selection_mode="file"', source)
+        self.assertIn('selection_mode="directory"', source)
+        self.assertIn("puede navegar fuera del proyecto", source)
+
+    def test_default_project_toml_requires_an_explicit_load_action(self) -> None:
+        source = (ROOT / "ui" / "gps_app.py").read_text()
+
+        self.assertIn("Cargar configuración predeterminada del proyecto", source)
+        self.assertIn("tests/fixtures/config/general-minimal.toml", source)
+        self.assertIn("elif load_default_config_button.value", source)
+
+    def test_supplied_reference_reduction_uses_readable_objectives_and_explains_scope(self) -> None:
+        source = (ROOT / "ui" / "gps_app.py").read_text()
+        editor_source = (ROOT / "ui" / "config_editor.py").read_text()
+
+        for label in (
+            "Cómo crear una referencia reducida",
+            "Objetivo",
+            "Valor",
+            "Eliminar porcentaje",
+            "Conservar bases",
+            "global entre cromosomas y scaffolds elegibles",
+            "bloques no solapados de `region_size_bases`",
+            "valor 10 elimina el 10 % y retiene el 90 %",
+            "Para conservar el 10 %, indique «Eliminar porcentaje» y valor 90",
+            "solo está disponible para una referencia FASTA suministrada",
+        ):
+            with self.subTest(label=label):
+                self.assertIn(label, source + editor_source)
+        self.assertNotIn('row["target_kind"]', source)
+        self.assertNotIn('row["target_literal"]', source)
 
     def test_nine_tabs_labels_keyboard_and_textual_states_are_present(self) -> None:
         source = (ROOT / "ui" / "gps_app.py").read_text()

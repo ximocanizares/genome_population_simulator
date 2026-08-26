@@ -95,8 +95,9 @@ F2/F3/F4/F6/F7/F9 conforme a DTC-078.
   - Depende de: F1.2.1.
   - Procede de: DTC-034, DTC-036 y DTC-078.
   - Cambia: `src/configuration.rs`, `src/rules.rs`, `src/application.rs` y tipos
-    asociados; conserva únicamente la composición efectiva A/C/G/T, clases y
-    longitudes de secuencia y objetivos de reducción. Para un FASTA suministrado,
+  asociados; conserva la composición condicional efectiva A/C/G/T y la fracción
+  independiente opcional de `N`, además de clases, longitudes de secuencia y
+  objetivos de reducción. Para un FASTA suministrado,
     la longitud TOML es una aserción que F1.5 contrasta con los bytes, no una
     autoridad independiente.
   - Se comprueba con: referencia simulada/suministrada/reducida, permutación de

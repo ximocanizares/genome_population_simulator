@@ -179,6 +179,7 @@ pub struct DeclaredSequence {
 pub enum DeclaredReferenceSource {
     Simulated {
         composition: Vec<DeclaredCompositionValue>,
+        unknown_base_fraction: Option<DeclaredNumber>,
     },
     Supplied {
         fasta: Located<String>,

@@ -14,6 +14,7 @@ def _():
         GeneralForm,
         InitialPopulationRow,
         PopulationSnvsForm,
+        REDUCTION_OBJECTIVE_KEEP_BASES,
         ReductionRow,
         ReferenceForm,
         SequenceRow,
@@ -24,6 +25,9 @@ def _():
         ordered_editor_rows,
         parse_general_toml,
         population_snvs_population_from_editor_row,
+        read_fasta_sequence_rows,
+        reduction_editor_row,
+        reduction_from_editor_row,
         render_general_toml,
     )
     from process_adapter import (
@@ -53,6 +57,7 @@ def _():
         GeneralForm,
         InitialPopulationRow,
         PopulationSnvsForm,
+        REDUCTION_OBJECTIVE_KEEP_BASES,
         PROJECT_ROOT,
         ProcessAdapterError,
         ReductionRow,
@@ -73,6 +78,9 @@ def _():
         ordered_editor_rows,
         parse_general_toml,
         population_snvs_population_from_editor_row,
+        read_fasta_sequence_rows,
+        reduction_editor_row,
+        reduction_from_editor_row,
         render_general_toml,
         run_toml,
         validate_toml,
@@ -86,11 +94,37 @@ def _(mo):
         max_size=2_000_000,
         label="Importar configuración TOML general",
     )
-    return (config_upload,)
+    load_default_config_button = mo.ui.run_button(
+        label="Cargar configuración predeterminada del proyecto",
+    )
+    return config_upload, load_default_config_button
 
 
 @app.cell
-def _(EditorError, config_upload, default_form, parse_general_toml):
+def _(PROJECT_ROOT, mo):
+    base_directory_control = mo.ui.text(
+        value=str(PROJECT_ROOT),
+        label="Directorio base de las rutas relativas del TOML",
+        full_width=True,
+    )
+    base_directory_browser = mo.ui.file_browser(
+        initial_path=PROJECT_ROOT,
+        selection_mode="directory",
+        multiple=False,
+        label="O seleccione el directorio base local",
+    )
+    return base_directory_browser, base_directory_control
+
+
+@app.cell
+def _(
+    EditorError,
+    PROJECT_ROOT,
+    config_upload,
+    default_form,
+    load_default_config_button,
+    parse_general_toml,
+):
     import_error = None
     imported_name = "config.toml"
     imported_form = default_form()
@@ -100,6 +134,13 @@ def _(EditorError, config_upload, default_form, parse_general_toml):
             imported_text = config_upload.value[0].contents.decode("utf-8")
             imported_form = parse_general_toml(imported_text)
         except (UnicodeDecodeError, EditorError) as error:
+            import_error = str(error)
+    elif load_default_config_button.value:
+        default_config_path = PROJECT_ROOT / "tests/fixtures/config/general-minimal.toml"
+        imported_name = str(default_config_path.relative_to(PROJECT_ROOT))
+        try:
+            imported_form = parse_general_toml(default_config_path.read_text())
+        except (OSError, EditorError) as error:
             import_error = str(error)
     return import_error, imported_form, imported_name
 
@@ -183,35 +224,31 @@ def _(BASES, imported_form, mo):
         label="Ruta FASTA relativa o absoluta",
         full_width=True,
     )
+    fasta_browser = mo.ui.file_browser(
+        initial_path=PROJECT_ROOT,
+        filetypes=[".fa", ".fasta", ".fna", ".fas"],
+        selection_mode="file",
+        multiple=False,
+        label="O seleccione un FASTA local (puede navegar fuera del proyecto)",
+    )
     composition_controls = {
         base: mo.ui.text(
-            value=(imported_form.reference.composition or {}).get(base, "0.25"),
-            label=f"Fracción {base} (literal decimal)",
+            value=(imported_form.reference.composition or {}).get(
+                base, "0" if base == "N" else "0.25"
+            ),
+            label=(
+                "Fracción N (posiciones ambiguas, independiente)"
+                if base == "N"
+                else f"Fracción {base}"
+            ),
         )
-        for base in BASES
+        for base in (*BASES, "N")
     }
-    sequence_editor = mo.ui.data_editor(
-        [
-            {
-                "order": order,
-                "id": row.id,
-                "class": row.sequence_class,
-                "length": row.length,
-            }
-            for order, row in enumerate(imported_form.reference.sequences, start=1)
-        ],
-        label="Secuencias (edite order para reordenar)",
-        pagination=False,
+    read_fasta_headers_button = mo.ui.run_button(
+        label="Leer cabeceras y longitudes del FASTA",
     )
     initial_reduction_rows = [
-        {
-            "order": order,
-            "id": row.id,
-            "source_reference_id": row.source_reference_id,
-            "region_size_bases": row.region_size_bases,
-            "target_kind": row.target_kind,
-            "target_literal": row.target_literal,
-        }
+        reduction_editor_row(row, order)
         for order, row in enumerate(imported_form.reduced_references, start=1)
     ] or [
         {
@@ -219,13 +256,13 @@ def _(BASES, imported_form, mo):
             "id": "",
             "source_reference_id": imported_form.reference.id,
             "region_size_bases": 1,
-            "target_kind": "target_bases",
-            "target_literal": "",
+            "Objetivo": REDUCTION_OBJECTIVE_KEEP_BASES,
+            "Valor": "",
         }
     ]
     reduction_editor = mo.ui.data_editor(
         initial_reduction_rows,
-        label="Referencias reducidas (la fila vacía no se exporta)",
+        label="Reducción de referencia (la fila sin ID no se exporta)",
         pagination=False,
     )
     initial_population_rows = [
@@ -301,6 +338,7 @@ def _(BASES, imported_form, mo):
     return (
         composition_controls,
         fasta_control,
+        fasta_browser,
         reduction_editor,
         reference_id_control,
         reference_kind_control,
@@ -324,8 +362,54 @@ def _(BASES, imported_form, mo):
         initial_populations_editor,
         direct_events_editor,
         vcf_output_mode_control,
-        sequence_editor,
+        read_fasta_headers_button,
     )
+
+
+@app.cell
+def _(
+    PROJECT_ROOT,
+    EditorError,
+    base_directory_control,
+    fasta_browser,
+    fasta_control,
+    imported_form,
+    mo,
+    read_fasta_headers_button,
+    read_fasta_sequence_rows,
+):
+    fasta_headers_error = None
+    _fasta_sequence_rows = imported_form.reference.sequences
+    if read_fasta_headers_button.value:
+        declared_path = (
+            fasta_browser.path(0)
+            if fasta_browser.value
+            else fasta_control.value.strip()
+        )
+        from pathlib import Path
+
+        fasta_path = Path(declared_path).expanduser()
+        if not fasta_path.is_absolute():
+            base_directory = Path(base_directory_control.value.strip() or PROJECT_ROOT)
+            fasta_path = base_directory / fasta_path
+        try:
+            _fasta_sequence_rows = read_fasta_sequence_rows(fasta_path)
+        except EditorError as error:
+            fasta_headers_error = str(error)
+    sequence_editor = mo.ui.data_editor(
+        [
+            {
+                "order": order,
+                "id": row.id,
+                "class": row.sequence_class,
+                "length": row.length,
+            }
+            for order, row in enumerate(_fasta_sequence_rows, start=1)
+        ],
+        label="Secuencias (edite order para reordenar)",
+        pagination=False,
+    )
+    return fasta_headers_error, sequence_editor
 
 
 @app.cell
@@ -343,6 +427,7 @@ def _(
     direct_events_editor,
     editor_integer,
     fasta_control,
+    fasta_browser,
     reduction_editor,
     reference_id_control,
     reference_kind_control,
@@ -370,6 +455,7 @@ def _(
     vcf_output_mode_control,
     ordered_editor_rows,
     population_snvs_population_from_editor_row,
+    reduction_from_editor_row,
 ):
     preview_error = None
     preview_toml = ""
@@ -413,7 +499,7 @@ def _(
         ordered_sequences = ordered_editor_rows(
             sequence_editor.value, "reference.sequences"
         )
-        sequence_rows = [
+        authored_sequence_rows = [
             SequenceRow(
                 id=str(row["id"]),
                 sequence_class=str(row["class"]),
@@ -426,16 +512,8 @@ def _(
             active_reductions, "reduced_references"
         )
         authored_reductions = [
-            ReductionRow(
-                id=str(row["id"]),
-                source_reference_id=str(row["source_reference_id"]),
-                region_size_bases=editor_integer(
-                    row["region_size_bases"], "reduced_references.region_size_bases"
-                ),
-                target_kind=str(row["target_kind"]),
-                target_literal=str(row["target_literal"]),
-            )
-            for row in ordered_reductions
+            reduction_from_editor_row(row, f"reduced_references[{index}]")
+            for index, row in enumerate(ordered_reductions)
         ]
         active_initial_populations = authored_editor_rows(
             initial_populations_editor.value, "population_id"
@@ -482,13 +560,19 @@ def _(
             reference=ReferenceForm(
                 kind=selected_kind,
                 id=reference_id_control.value,
-                fasta=fasta_control.value if selected_kind == "supplied" else None,
+                fasta=(
+                    str(fasta_browser.path(0))
+                    if fasta_browser.value
+                    else fasta_control.value.strip()
+                )
+                if selected_kind == "supplied"
+                else None,
                 composition=(
-                    {base: composition_controls[base].value for base in BASES}
+                    {base: composition_controls[base].value for base in (*BASES, "N")}
                     if selected_kind == "simulated"
                     else None
                 ),
-                sequences=sequence_rows,
+                sequences=authored_sequence_rows,
             ),
             reduced_references=authored_reductions,
             population_snvs=population_snvs,
@@ -528,15 +612,20 @@ def _(DEFAULT_BINARY, PROJECT_ROOT, authoring_error, mo):
         label="Binario Rust",
         full_width=True,
     )
-    base_directory_control = mo.ui.text(
-        value=str(PROJECT_ROOT),
-        label="Directorio base de las rutas relativas del TOML",
-        full_width=True,
-    )
     output_directory_control = mo.ui.text(
         value=str(PROJECT_ROOT / "results" / "marimo-run"),
         label="Directorio de resultados (debe no existir)",
         full_width=True,
+    )
+    output_parent_directory_browser = mo.ui.file_browser(
+        initial_path=PROJECT_ROOT,
+        selection_mode="directory",
+        multiple=False,
+        label="O seleccione la carpeta padre local de resultados",
+    )
+    output_name_control = mo.ui.text(
+        value="marimo-run",
+        label="Nombre nuevo del resultado al usar la carpeta padre",
     )
     validate_button = mo.ui.run_button(
         label="Validar con Rust",
@@ -547,9 +636,10 @@ def _(DEFAULT_BINARY, PROJECT_ROOT, authoring_error, mo):
     return (
         allow_empty_snv_matrix_control,
         allow_incompatible_genotypes_control,
-        base_directory_control,
         binary_path_control,
+        output_name_control,
         output_directory_control,
+        output_parent_directory_browser,
         validate_button,
     )
 
@@ -561,6 +651,7 @@ def _(
     allow_incompatible_genotypes_control,
     authoring_toml,
     base_directory_control,
+    base_directory_browser,
     binary_path_control,
     direct_events_editor,
     effective_incompatible_genotype_authorization,
@@ -583,7 +674,11 @@ def _(
                 validation_result, validated_session = validate_toml(
                     _Path(binary_path_control.value),
                     authoring_toml,
-                    _Path(base_directory_control.value),
+                    (
+                        _Path(base_directory_browser.path(0))
+                        if base_directory_browser.value
+                        else _Path(base_directory_control.value.strip())
+                    ),
                     allow_empty_snv_matrix=allow_empty_snv_matrix_control.value,
                     allow_incompatible_genotypes=_allow_incompatible_genotypes,
                 )
@@ -610,11 +705,14 @@ def _(
     allow_incompatible_genotypes_control,
     authoring_toml,
     base_directory_control,
+    base_directory_browser,
     binary_path_control,
     direct_events_editor,
     effective_incompatible_genotype_authorization,
     mo,
     output_directory_control,
+    output_name_control,
+    output_parent_directory_browser,
     run_button,
     run_toml,
     validated_session,
@@ -634,8 +732,17 @@ def _(
                     validated_session,
                     authoring_toml,
                     _Path(binary_path_control.value),
-                    _Path(base_directory_control.value),
-                    _Path(output_directory_control.value),
+                    (
+                        _Path(base_directory_browser.path(0))
+                        if base_directory_browser.value
+                        else _Path(base_directory_control.value.strip())
+                    ),
+                    (
+                        _Path(output_parent_directory_browser.path(0))
+                        / output_name_control.value.strip()
+                        if output_parent_directory_browser.value
+                        else _Path(output_directory_control.value.strip())
+                    ),
                     allow_empty_snv_matrix=allow_empty_snv_matrix_control.value,
                     allow_incompatible_genotypes=_allow_incompatible_genotypes,
                 )
@@ -651,11 +758,15 @@ def _(
     authoring_error,
     authoring_toml,
     base_directory_control,
+    base_directory_browser,
     binary_path_control,
     composition_controls,
     config_upload,
+    load_default_config_button,
     effective_incompatible_genotype_authorization,
     fasta_control,
+    fasta_browser,
+    fasta_headers_error,
     import_error,
     imported_name,
     explicit_snp_authorization_summary,
@@ -664,7 +775,10 @@ def _(
     individuals_panel,
     mo,
     output_directory_control,
+    output_name_control,
+    output_parent_directory_browser,
     reduction_editor,
+    read_fasta_headers_button,
     reference_id_control,
     reference_kind_control,
     run_button,
@@ -702,6 +816,7 @@ def _(
         [
             mo.md("## General/Ejecución"),
             config_upload,
+            load_default_config_button,
             seed_control,
             (
                 mo.callout(import_error, kind="danger", title="Error de importación")
@@ -713,9 +828,43 @@ def _(
         ]
     )
     selected_source_controls = (
-        fasta_control
+        mo.vstack(
+            [
+                fasta_control,
+                fasta_browser,
+                read_fasta_headers_button,
+                mo.callout(fasta_headers_error, kind="danger", title="No se pudo leer el FASTA")
+                if fasta_headers_error
+                else mo.md(
+                    "Al leerlo se rellenan ID y longitud en orden de FASTA; "
+                    "todas las filas empiezan como `scaffold`."
+                ),
+            ]
+        )
         if reference_kind_control.value == "supplied"
-        else mo.hstack([composition_controls[base] for base in ("A", "C", "G", "T")])
+        else mo.vstack([
+            mo.md("A/C/G/T deben sumar 1. `N` es una fracción adicional de posiciones ambiguas."),
+            mo.hstack([composition_controls[base] for base in ("A", "C", "G", "T", "N")]),
+        ])
+    )
+    reduction_controls = (
+        mo.vstack(
+            [
+                mo.callout(
+                    "La selección es global entre cromosomas y scaffolds elegibles y forma bloques no solapados de `region_size_bases`. "
+                    "«Eliminar porcentaje» usa `reduction_percent`: valor 10 elimina el 10 % y retiene el 90 %. "
+                    "Para conservar el 10 %, indique «Eliminar porcentaje» y valor 90.",
+                    kind="info",
+                    title="Cómo crear una referencia reducida",
+                ),
+                reduction_editor,
+            ]
+        )
+        if reference_kind_control.value == "supplied"
+        else mo.callout(
+            "La reducción de referencia solo está disponible para una referencia FASTA suministrada.",
+            kind="neutral",
+        )
     )
     genome_panel = mo.vstack(
         [
@@ -723,7 +872,7 @@ def _(
             mo.hstack([reference_kind_control, reference_id_control]),
             selected_source_controls,
             sequence_editor,
-            reduction_editor,
+            reduction_controls,
         ]
     )
     population_panel_mode = str(population_snvs_mode_control.value)
@@ -889,7 +1038,10 @@ def _(
             mo.md("### Validar y ejecutar"),
             binary_path_control,
             base_directory_control,
+            base_directory_browser,
             output_directory_control,
+            output_parent_directory_browser,
+            output_name_control,
             mo.hstack([validate_button, run_button]),
             validation_status,
             run_status,

@@ -87,6 +87,7 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
             "A".to_owned(),
             "C".to_owned(),
             "G".to_owned(),
+            "N".to_owned(),
             "T".to_owned(),
         ])
     );

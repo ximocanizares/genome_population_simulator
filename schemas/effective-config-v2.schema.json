@@ -226,7 +226,7 @@
           "oneOf": [
             {"type": "null"},
             {"type": "object", "additionalProperties": false, "required": ["A", "C", "G", "T"],
-              "properties": {"A": {"type": "number", "minimum": 0, "maximum": 1}, "C": {"type": "number", "minimum": 0, "maximum": 1}, "G": {"type": "number", "minimum": 0, "maximum": 1}, "T": {"type": "number", "minimum": 0, "maximum": 1}}}
+              "properties": {"A": {"type": "number", "minimum": 0, "maximum": 1}, "C": {"type": "number", "minimum": 0, "maximum": 1}, "G": {"type": "number", "minimum": 0, "maximum": 1}, "T": {"type": "number", "minimum": 0, "maximum": 1}, "N": {"type": "number", "minimum": 0, "maximum": 1}}}
           ]
         },
         "sequences": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": false,

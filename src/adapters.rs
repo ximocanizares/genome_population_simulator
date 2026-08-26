@@ -767,7 +767,7 @@ fn parse_reference(
                 ));
             }
             let composition_table = required_table(admitted, table, "composition")?;
-            check_unknown(admitted, composition_table, &["A", "C", "G", "T"])?;
+            check_unknown(admitted, composition_table, &["A", "C", "G", "T", "N"])?;
             let composition = ["A", "C", "G", "T"]
                 .into_iter()
                 .map(|base| {
@@ -778,7 +778,10 @@ fn parse_reference(
                     })
                 })
                 .collect::<Result<Vec<_>, Diagnostic>>()?;
-            DeclaredReferenceSource::Simulated { composition }
+            DeclaredReferenceSource::Simulated {
+                composition,
+                unknown_base_fraction: optional_number(admitted, composition_table, "N")?,
+            }
         }
         "supplied" => {
             if table.contains_key("composition") {

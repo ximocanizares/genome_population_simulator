@@ -92,6 +92,34 @@ class ProcessAdapterTests(unittest.TestCase):
         self.assertFalse(session.matches("a = 1\n", binary, base.parent))
         self.assertFalse(session.matches("a = 1\n", binary, base, True))
 
+    def test_validated_session_accepts_equivalent_paths_with_edge_whitespace(self) -> None:
+        binary = (ROOT / "target/debug/genome-population-simulator").resolve()
+        base = ROOT.resolve()
+        session = ValidatedSession("a = 1\n", binary, SUPPORTED_BINARY_VERSION, base)
+
+        self.assertTrue(
+            session.matches("a = 1\n", Path(f"  {binary}  "), Path(f"  {base}  "))
+        )
+
+    def test_edge_whitespace_does_not_turn_an_absolute_output_path_into_a_relative_one(self) -> None:
+        binary = (ROOT / "target/debug/genome-population-simulator").resolve()
+        session = ValidatedSession("a = 1\n", binary, SUPPORTED_BINARY_VERSION, ROOT)
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "output with spaces"
+            with mock.patch.object(
+                subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ):
+                result = run_toml(
+                    session,
+                    "a = 1\n",
+                    binary,
+                    ROOT,
+                    Path(f"  {destination}  "),
+                )
+        self.assertEqual(result.output_directory, destination)
+
     def test_empty_matrix_authorization_is_an_argument_and_invalidates_the_session(self) -> None:
         binary = (ROOT / "target/debug/genome-population-simulator").resolve()
         session = ValidatedSession(
