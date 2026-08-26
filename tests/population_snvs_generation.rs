@@ -12,7 +12,9 @@ use genome_population_simulator::population_snvs::{
     PopulationSnvsGenerationConfig, PopulationSnvsGenerationError, generate_population_snvs,
 };
 use genome_population_simulator::randomness::RootSeed;
-use genome_population_simulator::reference::SequenceClass;
+use genome_population_simulator::reference::{
+    DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
+};
 use genome_population_simulator::reference_fasta::{SequenceExpectation, validate_supplied_fasta};
 use genome_population_simulator::results::resolve_manifest_reference;
 
@@ -74,6 +76,30 @@ fn config(count: GeneratedLocusCount) -> PopulationSnvsGenerationConfig {
             },
         ],
     }
+}
+
+fn direct_reference(sequences: &[(&str, &[u8])]) -> Reference {
+    let sequences = sequences
+        .iter()
+        .map(|(id, bases)| {
+            let sequence_id = genome_population_simulator::identity::SequenceId::parse(*id, "test")
+                .expect("sequence id");
+            let sequence = DnaSequence::try_from_bytes(bases).expect("DNA sequence");
+            ReferenceSequence::new(
+                sequence_id,
+                FastaHeader::parse(id.as_bytes()).expect("FASTA header"),
+                SequenceClass::Chromosome,
+                &sequence,
+            )
+            .expect("reference sequence")
+        })
+        .collect();
+    Reference::new(
+        ReferenceId::parse("direct-multicontig", "test").expect("reference id"),
+        ReferenceOrigin::Generated,
+        sequences,
+    )
+    .expect("reference")
 }
 
 #[test]
@@ -635,6 +661,227 @@ fn weighted_regions_select_only_positive_bases() {
         generate_population_snvs(&weighted, &reference, RootSeed::from_bytes([9; 32])).unwrap();
     assert!(matrix.rows().iter().all(|row| row.position_1based() == 3));
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn streaming_selector_matches_known_weighted_distribution_and_is_seed_repeatable() {
+    let reference = direct_reference(&[("chr1", b"A"), ("chr2", b"A")]);
+    let mut parameters = config(GeneratedLocusCount::Exact(1));
+    parameters.populations.truncate(1);
+    parameters.spatial = GeneratedSpatialMode::WeightedRegions {
+        outside_weight: 0.0,
+        regions: vec![
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 1,
+                end_1based: 1,
+                weight: 1.0,
+            },
+            GeneratedWeightedRegion {
+                contig: "chr2".into(),
+                start_1based: 1,
+                end_1based: 1,
+                weight: 3.0,
+            },
+        ],
+    };
+
+    let fixed_seed = RootSeed::from_bytes([33; 32]);
+    let first =
+        genome_population_simulator::population_snvs::generate_population_snvs_from_reference(
+            &parameters,
+            &reference,
+            fixed_seed,
+        )
+        .unwrap();
+    let second =
+        genome_population_simulator::population_snvs::generate_population_snvs_from_reference(
+            &parameters,
+            &reference,
+            fixed_seed,
+        )
+        .unwrap();
+    assert_eq!(first, second);
+
+    let chr2_selected = (0_u64..4096)
+        .filter(|seed| {
+            let mut bytes = [0_u8; 32];
+            bytes[..8].copy_from_slice(&seed.to_le_bytes());
+            let matrix = genome_population_simulator::population_snvs::generate_population_snvs_from_reference(
+                &parameters,
+                &reference,
+                RootSeed::from_bytes(bytes),
+            )
+            .unwrap();
+            matrix.rows()[0].contig().as_str() == "chr2"
+        })
+        .count();
+    assert!(
+        (2786..=3424).contains(&chr2_selected),
+        "the weight-3 locus should be selected near 75% of the time, observed {chr2_selected}/4096"
+    );
+}
+
+#[test]
+fn streaming_selector_gumbel_top_k_keeps_the_two_highest_frozen_scores() {
+    let reference_with_leading_zero = direct_reference(&[("chr1", b"AAAAA")]);
+    let mut with_leading_zero = config(GeneratedLocusCount::Exact(2));
+    with_leading_zero.populations.truncate(1);
+    with_leading_zero.spatial = GeneratedSpatialMode::WeightedRegions {
+        outside_weight: 0.0,
+        regions: vec![
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 2,
+                end_1based: 2,
+                weight: 0.25,
+            },
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 3,
+                end_1based: 3,
+                weight: 1.0,
+            },
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 4,
+                end_1based: 4,
+                weight: 4.0,
+            },
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 5,
+                end_1based: 5,
+                weight: 16.0,
+            },
+        ],
+    };
+
+    let seed = RootSeed::from_bytes([118; 32]);
+    let selected =
+        genome_population_simulator::population_snvs::generate_population_snvs_from_reference(
+            &with_leading_zero,
+            &reference_with_leading_zero,
+            seed,
+        )
+        .unwrap();
+    let mut positions = selected
+        .rows()
+        .iter()
+        .map(|row| row.position_1based())
+        .collect::<Vec<_>>();
+    positions.sort_unstable();
+
+    // Oráculo congelado, calculado fuera del selector con log(peso) + Gumbel:
+    // las puntuaciones de las posiciones 2..=5 son -0.7923015366047965,
+    // 3.6893559120962367, 1.954769494708049 y 1.3411832084072275.
+    // La posición 4 llega después de los extremos 2 y 3, queda entre ellos y
+    // debe reemplazar a 2; al final, los ganadores son 3 y 4.
+    assert_eq!(positions, vec![3, 4]);
+
+    // El candidato de peso cero aparece antes de todos los positivos. Al
+    // retirarlo y desplazar las coordenadas, las mismas cuatro palabras deben
+    // asignarse a los mismos pesos; por tanto, los loci ganadores se desplazan
+    // exactamente una posición. Esto verifica que el cero no consume azar.
+    let reference_without_zero = direct_reference(&[("chr1", b"AAAA")]);
+    let mut without_zero = config(GeneratedLocusCount::Exact(2));
+    without_zero.populations.truncate(1);
+    without_zero.spatial = GeneratedSpatialMode::WeightedRegions {
+        outside_weight: 0.0,
+        regions: vec![
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 1,
+                end_1based: 1,
+                weight: 0.25,
+            },
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 2,
+                end_1based: 2,
+                weight: 1.0,
+            },
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 3,
+                end_1based: 3,
+                weight: 4.0,
+            },
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 4,
+                end_1based: 4,
+                weight: 16.0,
+            },
+        ],
+    };
+    let without_zero =
+        genome_population_simulator::population_snvs::generate_population_snvs_from_reference(
+            &without_zero,
+            &reference_without_zero,
+            seed,
+        )
+        .unwrap();
+    let mut positions_without_zero = without_zero
+        .rows()
+        .iter()
+        .map(|row| row.position_1based() + 1)
+        .collect::<Vec<_>>();
+    positions_without_zero.sort_unstable();
+    assert_eq!(positions_without_zero, positions);
+}
+
+#[test]
+fn streaming_selector_keeps_canonical_order_across_contigs_and_reports_empty_space() {
+    let reference = direct_reference(&[("chr2", b"AN"), ("chr1", b"CA")]);
+    let mut parameters = config(GeneratedLocusCount::Exact(2));
+    parameters.populations.truncate(1);
+    parameters.spatial = GeneratedSpatialMode::WeightedRegions {
+        outside_weight: 0.0,
+        regions: vec![
+            GeneratedWeightedRegion {
+                contig: "chr2".into(),
+                start_1based: 1,
+                end_1based: 1,
+                weight: 1.0,
+            },
+            GeneratedWeightedRegion {
+                contig: "chr1".into(),
+                start_1based: 2,
+                end_1based: 2,
+                weight: 1.0,
+            },
+        ],
+    };
+    let selected =
+        genome_population_simulator::population_snvs::generate_population_snvs_from_reference(
+            &parameters,
+            &reference,
+            RootSeed::from_bytes([34; 32]),
+        )
+        .unwrap();
+    assert_eq!(
+        selected
+            .rows()
+            .iter()
+            .map(|row| (row.contig().as_str(), row.position_1based()))
+            .collect::<Vec<_>>(),
+        vec![("chr2", 1), ("chr1", 2)]
+    );
+
+    parameters.count = GeneratedLocusCount::Exact(1);
+    parameters.spatial = GeneratedSpatialMode::WeightedRegions {
+        outside_weight: 0.0,
+        regions: Vec::new(),
+    };
+    assert_eq!(
+        genome_population_simulator::population_snvs::generate_population_snvs_from_reference(
+            &parameters,
+            &reference,
+            RootSeed::from_bytes([35; 32]),
+        ),
+        Err(PopulationSnvsGenerationError::EmptyEligibleSpace)
+    );
 }
 
 #[test]

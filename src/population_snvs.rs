@@ -4,8 +4,8 @@
 //! FASTA, la semántica de `alt_af`, sumas, IDs canónicos y hashes operativos se
 //! incorpora en los pasos consumidores posteriores.
 
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::{Ordering, Reverse};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::fmt;
 use std::fmt::Write as _;
 use std::fs;
@@ -14,7 +14,7 @@ use std::path::Path;
 use crate::identity::{PopulationId, ReferenceId, SequenceId, VariantId, derive_matrix_variant_id};
 use crate::randomness::{
     RandomSamplingError, RootSeed, RuntimeSubseedScope, categorical_f64, derive_subseed,
-    fisher_yates, linear_uniform, log_uniform, poisson_count, weighted_without_replacement,
+    fisher_yates, linear_uniform, log_uniform, open_unit_f64, poisson_count,
 };
 use crate::reference::Reference;
 use crate::results::ResolvedManifestReference;
@@ -2650,28 +2650,14 @@ fn generate_population_snvs_view(
         .collect::<Result<BTreeSet<_>, _>>()?
         .into_iter()
         .collect();
-    let mut candidates = Vec::<(SequenceId, u64, u8)>::new();
-    let mut weights = Vec::new();
     let order = reference
         .sequences
         .iter()
         .enumerate()
         .map(|(index, (id, _))| (id.as_str().to_owned(), index))
         .collect::<BTreeMap<_, _>>();
-    for (id, bases) in &reference.sequences {
-        let contig = id.as_str();
-        for (offset, base) in bases.iter().copied().enumerate() {
-            if !matches!(base, b'A' | b'C' | b'G' | b'T') {
-                continue;
-            }
-            let position =
-                u64::try_from(offset).map_err(|_| PopulationSnvsGenerationError::InvalidCount)? + 1;
-            let weight = candidate_weight(&config.spatial, contig, position)?;
-            candidates.push((id.clone(), position, base));
-            weights.push(weight);
-        }
-    }
-    if weights.iter().all(|weight| *weight == 0.0) {
+    let available = generated_locus_available_count(config, &reference.sequences)?;
+    if available == 0 {
         return Err(PopulationSnvsGenerationError::EmptyEligibleSpace);
     }
     let requested = match config.count {
@@ -2680,11 +2666,9 @@ fn generate_population_snvs_view(
             sample_candidate_count(root_seed, &reference.id, mean)?
         }
         GeneratedLocusCount::PoissonDensityPerBase(density) => {
-            let eligible = weights.iter().filter(|weight| **weight > 0.0).count() as f64;
-            sample_candidate_count(root_seed, &reference.id, density * eligible)?
+            sample_candidate_count(root_seed, &reference.id, density * available as f64)?
         }
     };
-    let available = weights.iter().filter(|weight| **weight > 0.0).count() as u64;
     if requested > available {
         return Err(PopulationSnvsGenerationError::InsufficientEligibleSpace {
             requested,
@@ -2693,48 +2677,46 @@ fn generate_population_snvs_view(
     }
     let requested_usize =
         usize::try_from(requested).map_err(|_| PopulationSnvsGenerationError::InvalidCount)?;
-    let mut selector = derive_subseed(
+    let selected = select_generated_loci(
+        config,
+        &reference.sequences,
         root_seed,
-        RuntimeSubseedScope::MatrixLocusSelection {
-            scenario_id: "direct",
-            reference_id: reference.id.as_str(),
-        },
-    )
-    .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
-    .local_rng();
-    let selected = weighted_without_replacement(&mut selector, &weights, requested_usize)
-        .map_err(PopulationSnvsGenerationError::Random)?;
+        reference.id.as_str(),
+        requested_usize,
+    )?;
     let mut loci = Vec::with_capacity(selected.len());
-    for index in selected {
-        let (contig, position, reference_base) = &candidates[index];
+    for selected in selected {
+        let (contig, _) = &reference.sequences[selected.sequence_index];
+        let position = selected.position_1based;
+        let reference_base = selected.reference_base;
         let mut alt_rng = derive_subseed(
             root_seed,
             RuntimeSubseedScope::MatrixAlternateAllele {
                 scenario_id: "direct",
                 reference_id: reference.id.as_str(),
                 sequence_id: contig.as_str(),
-                position_1based: *position,
-                reference_base: std::str::from_utf8(&[*reference_base]).unwrap_or("A"),
+                position_1based: position,
+                reference_base: std::str::from_utf8(&[reference_base]).unwrap_or("A"),
             },
         )
         .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
         .local_rng();
         let alternatives: Vec<u8> = (*b"ACGT")
             .into_iter()
-            .filter(|base| base != reference_base)
+            .filter(|base| base != &reference_base)
             .collect();
         let alternate = alternatives[categorical_f64(
             &mut alt_rng,
-            &substitution_weights(config.substitution_profile, *reference_base, &alternatives),
+            &substitution_weights(config.substitution_profile, reference_base, &alternatives),
         )
         .map_err(PopulationSnvsGenerationError::Random)?];
         let variant_id =
-            derive_matrix_variant_id(&reference.id, contig, *position, *reference_base, alternate)
+            derive_matrix_variant_id(&reference.id, contig, position, reference_base, alternate)
                 .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?;
         loci.push((
             contig.clone(),
-            *position,
-            *reference_base,
+            position,
+            reference_base,
             alternate,
             variant_id,
         ));
@@ -3003,6 +2985,128 @@ fn sample_candidate_count(
     .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
     .local_rng();
     poisson_count(&mut rng, mean).map_err(PopulationSnvsGenerationError::Random)
+}
+
+/// Candidato retenido por el selector de loci generado.
+///
+/// El orden invierte el índice canónico en los empates para que, al usar
+/// `Reverse` como montón mínimo, se descarte primero el candidato posterior.
+/// Los empates de puntuación son extraordinarios, pero esta regla mantiene el
+/// resultado definido incluso entonces.
+#[derive(Debug, PartialEq)]
+struct SelectedGeneratedLocus {
+    selection_score: f64,
+    canonical_index: u64,
+    sequence_index: usize,
+    position_1based: u64,
+    reference_base: u8,
+}
+
+impl Eq for SelectedGeneratedLocus {}
+
+impl Ord for SelectedGeneratedLocus {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.selection_score
+            .total_cmp(&other.selection_score)
+            .then_with(|| other.canonical_index.cmp(&self.canonical_index))
+    }
+}
+
+impl PartialOrd for SelectedGeneratedLocus {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn generated_locus_available_count(
+    config: &PopulationSnvsGenerationConfig,
+    sequences: &[(SequenceId, Vec<u8>)],
+) -> Result<u64, PopulationSnvsGenerationError> {
+    let mut available = 0_u64;
+    for (id, bases) in sequences {
+        for (offset, base) in bases.iter().copied().enumerate() {
+            if !matches!(base, b'A' | b'C' | b'G' | b'T') {
+                continue;
+            }
+            let position =
+                u64::try_from(offset).map_err(|_| PopulationSnvsGenerationError::InvalidCount)? + 1;
+            if candidate_weight(&config.spatial, id.as_str(), position)? > 0.0 {
+                available = available
+                    .checked_add(1)
+                    .ok_or(PopulationSnvsGenerationError::InvalidCount)?;
+            }
+        }
+    }
+    Ok(available)
+}
+
+/// Selecciona una muestra ponderada sin reemplazo sin conservar el espacio
+/// completo de candidatos. Gumbel-top-k induce la misma distribución de
+/// muestreo secuencial proporcional a los pesos que el selector histórico.
+///
+/// A diferencia del selector histórico, esta implementación consume una
+/// palabra aleatoria por candidato de peso positivo (en vez de una por locus
+/// seleccionado). Se conserva el mismo ámbito de subsemilla; por ello la
+/// semilla sigue determinando el resultado, pero las salidas pueden diferir de
+/// versiones anteriores para una misma semilla.
+fn select_generated_loci(
+    config: &PopulationSnvsGenerationConfig,
+    sequences: &[(SequenceId, Vec<u8>)],
+    root_seed: RootSeed,
+    reference_id: &str,
+    requested: usize,
+) -> Result<Vec<SelectedGeneratedLocus>, PopulationSnvsGenerationError> {
+    if requested == 0 {
+        return Ok(Vec::new());
+    }
+    let mut rng = derive_subseed(
+        root_seed,
+        RuntimeSubseedScope::MatrixLocusSelection {
+            scenario_id: "direct",
+            reference_id,
+        },
+    )
+    .map_err(|error| PopulationSnvsGenerationError::Reference(error.render_human()))?
+    .local_rng();
+    let mut selected = BinaryHeap::with_capacity(requested);
+    let mut canonical_index = 0_u64;
+
+    for (sequence_index, (id, bases)) in sequences.iter().enumerate() {
+        for (offset, reference_base) in bases.iter().copied().enumerate() {
+            if !matches!(reference_base, b'A' | b'C' | b'G' | b'T') {
+                continue;
+            }
+            let position_1based =
+                u64::try_from(offset).map_err(|_| PopulationSnvsGenerationError::InvalidCount)? + 1;
+            let weight = candidate_weight(&config.spatial, id.as_str(), position_1based)?;
+            let candidate_index = canonical_index;
+            canonical_index = canonical_index
+                .checked_add(1)
+                .ok_or(PopulationSnvsGenerationError::InvalidCount)?;
+            if weight == 0.0 {
+                continue;
+            }
+            let candidate = SelectedGeneratedLocus {
+                selection_score: libm::log(weight) - libm::log(-libm::log(open_unit_f64(&mut rng))),
+                canonical_index: candidate_index,
+                sequence_index,
+                position_1based,
+                reference_base,
+            };
+            if selected.len() < requested {
+                selected.push(Reverse(candidate));
+            } else if let Some(lowest) = selected.peek()
+                && candidate > lowest.0
+            {
+                selected.pop();
+                selected.push(Reverse(candidate));
+            }
+        }
+    }
+    Ok(selected
+        .into_iter()
+        .map(|Reverse(candidate)| candidate)
+        .collect())
 }
 
 fn candidate_weight(

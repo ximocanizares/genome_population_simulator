@@ -8,7 +8,10 @@ use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::haplotype::HaplotypePhase;
 use genome_population_simulator::identity::{EventId, ReferenceId, SequenceId};
 use genome_population_simulator::initial_individual_integration::IncompatibleGenotypeAuthorization;
-use genome_population_simulator::initial_individual_materialization::materialize_initial_individuals;
+use genome_population_simulator::initial_individual_materialization::{
+    MaterializedInitialIndividual, materialize_initial_individuals,
+};
+use genome_population_simulator::materialization::materialize_copy;
 use genome_population_simulator::population_snvs::{
     PreparedPopulationSnvs, TSV_HEADER, parse_canonical_tsv, prepare_population_snvs_from_reference,
 };
@@ -17,7 +20,7 @@ use genome_population_simulator::reference::{
 };
 use genome_population_simulator::segments::ModificationProvenance;
 use genome_population_simulator::small_event_composition::{
-    DeclaredSmallEvent, TargetedCurrentDeletion,
+    DeclaredSmallEvent, TargetedCurrentDeletion, TargetedCurrentInsertion,
 };
 
 fn reference() -> Reference {
@@ -77,6 +80,29 @@ fn matrix(reference: &Reference, rows: &[&str]) -> PreparedPopulationSnvs {
     .expect("prepared matrix")
 }
 
+/// Reconstruye el oráculo de bytes desde el estado compacto publicado. Esta
+/// prueba no depende de una caché de bases en el resultado de F2.3.5.
+fn materialized_bases(
+    individual: &MaterializedInitialIndividual,
+    reference: &Reference,
+) -> Vec<Vec<u8>> {
+    let mut copies = individual
+        .individual()
+        .sequences()
+        .iter()
+        .flat_map(|sequence| sequence.copies())
+        .map(|copy| {
+            (
+                copy.id().sequence_id().clone(),
+                copy.phase(),
+                materialize_copy(copy, reference).expect("materialized copy"),
+            )
+        })
+        .collect::<Vec<_>>();
+    copies.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
+    copies.into_iter().map(|(_, _, bases)| bases).collect()
+}
+
 #[test]
 fn deletion_is_explicitly_missing_and_uses_only_observed_copies_for_frequencies() {
     let reference = reference();
@@ -121,8 +147,10 @@ genotype_model = "hwe""#,
         .expect("I1");
     // Oráculo manual: todas las copias parten de ACGT y C→T; la fase 0 de I1
     // pierde exactamente la segunda base, sin reajustar la otra copia.
-    assert_eq!(i1.copies()[0].bases(), b"AGT");
-    assert_eq!(i1.copies()[1].bases(), b"ATGT");
+    assert_eq!(
+        materialized_bases(i1, &reference),
+        vec![b"AGT".to_vec(), b"ATGT".to_vec()]
+    );
 
     let locus = &output.statistics()["populations"][0]["loci"][0];
     assert_eq!(locus["total_copies"], 4);
@@ -175,25 +203,71 @@ genotype_model = "hwe""#,
         )
         .expect("founders")
     };
-    let base_i1 = founders(&base)
+    let base_output = founders(&base);
+    let base_i1 = base_output
         .individuals()
         .iter()
         .find(|individual| individual.individual().id().as_str() == "I1")
-        .expect("base I1")
-        .copies()
-        .iter()
-        .map(|copy| copy.bases().to_vec())
-        .collect::<Vec<_>>();
-    let extended_i1 = founders(&extended)
+        .expect("base I1");
+    let extended_output = founders(&extended);
+    let extended_i1 = extended_output
         .individuals()
         .iter()
         .find(|individual| individual.individual().id().as_str() == "I1")
-        .expect("extended I1")
-        .copies()
+        .expect("extended I1");
+    assert_eq!(
+        materialized_bases(base_i1, &reference),
+        materialized_bases(extended_i1, &reference)
+    );
+}
+
+#[test]
+fn preflight_materialization_accepts_indels_without_retaining_their_bases() {
+    let reference = reference();
+    let config = config(
+        r#"[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+individual_ids = ["I1"]
+ploidy = 2
+genotype_model = "hwe""#,
+    );
+    let matrix = matrix(&reference, &["VAR_IGNORED\tchr1\t2\tC\tT\tP1\t1\tfixed"]);
+    let output = materialize_initial_individuals(
+        &config,
+        &reference,
+        &matrix,
+        IncompatibleGenotypeAuthorization::denied(),
+        |_| {
+            Ok(vec![DeclaredSmallEvent::Insertion(
+                TargetedCurrentInsertion::new(
+                    SequenceId::parse("chr1", "test").expect("sequence ID"),
+                    HaplotypePhase::from_copy_index(0).expect("phase"),
+                    1,
+                    b"GG".as_slice(),
+                    ModificationProvenance::new(
+                        EventId::parse("insert-gg", "test").expect("event ID"),
+                    ),
+                ),
+            )])
+        },
+    )
+    .expect("founders with indel");
+
+    let i1 = output
+        .individuals()
         .iter()
-        .map(|copy| copy.bases().to_vec())
-        .collect::<Vec<_>>();
-    assert_eq!(base_i1, extended_i1);
+        .find(|individual| individual.individual().id().as_str() == "I1")
+        .expect("I1");
+    // Oráculo manual: C→T en ambas fases; la inserción en el punto 1 de la
+    // fase 0 deja A + GG + TGT. La materialización se consulta bajo demanda.
+    assert_eq!(
+        materialized_bases(i1, &reference),
+        vec![b"AGGTGT".to_vec(), b"ATGT".to_vec()]
+    );
+    let locus = &output.statistics()["populations"][0]["loci"][0];
+    assert_eq!(locus["observed_copies"], 2);
+    assert_eq!(locus["alleles"][1]["realized_count"], 2);
 }
 
 #[test]

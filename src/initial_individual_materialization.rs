@@ -1,10 +1,11 @@
 //! Materialización final y resumen de frecuencias de fundadores F2.3.5.
 //!
 //! El estado canónico continúa siendo la cadena de segmentos de cada copia. La
-//! materialización de bases se conserva aquí únicamente como la salida exacta
-//! solicitada por F2.3.5; nunca sustituye a segmentos, matriz o fase como fuente
-//! de verdad. Las frecuencias realizadas se calculan después de integrar los
-//! cambios directos, sin modificar las copias sorteadas.
+//! materialización de bases se usa aquí únicamente como comprobación temporal
+//! solicitada por F2.3.5 y se libera inmediatamente; nunca sustituye a
+//! segmentos, matriz o fase como fuente de verdad. Las frecuencias realizadas
+//! se calculan después de integrar los cambios directos, sin modificar las
+//! copias sorteadas.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -13,7 +14,7 @@ use serde_json::{Value, json};
 
 use crate::application::{EffectiveConfig, EffectiveInitialGenotypeModel};
 use crate::coordinates::BasePosition;
-use crate::haplotype::{HaplotypePhase, Individual};
+use crate::haplotype::Individual;
 use crate::identity::{IndividualId, PopulationId, SequenceId};
 use crate::initial_genotypes::{assign_initial_phases, sample_initial_genotypes};
 use crate::initial_individual_integration::{
@@ -28,38 +29,13 @@ use crate::reference::Reference;
 use crate::segments::CanonicalBase;
 use crate::small_event_composition::DeclaredSmallEvent;
 
-/// Secuencia final de una copia. Es una vista materializada de salida; el
-/// individuo retiene de forma canónica únicamente sus segmentos compartidos.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct MaterializedInitialCopy {
-    sequence_id: SequenceId,
-    phase: HaplotypePhase,
-    bases: Vec<u8>,
-}
-
-impl MaterializedInitialCopy {
-    #[must_use]
-    pub const fn sequence_id(&self) -> &SequenceId {
-        &self.sequence_id
-    }
-
-    #[must_use]
-    pub const fn phase(&self) -> HaplotypePhase {
-        self.phase
-    }
-
-    #[must_use]
-    pub fn bases(&self) -> &[u8] {
-        &self.bases
-    }
-}
-
-/// Fundador final, con sus copias compactas y sus bytes materializados.
+/// Fundador final. Sus copias se conservan únicamente como segmentos compactos
+/// en el individuo; F2.3.5 comprueba la materialización antes de publicar este
+/// estado, sin retener los bytes reconstruidos.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MaterializedInitialIndividual {
     population_id: PopulationId,
     individual: Individual,
-    copies: Vec<MaterializedInitialCopy>,
     explicit_snp_constraints: Vec<ExplicitSnpConstraint>,
 }
 
@@ -72,11 +48,6 @@ impl MaterializedInitialIndividual {
     #[must_use]
     pub const fn individual(&self) -> &Individual {
         &self.individual
-    }
-
-    #[must_use]
-    pub fn copies(&self) -> &[MaterializedInitialCopy] {
-        &self.copies
     }
 
     #[must_use]
@@ -134,9 +105,10 @@ impl fmt::Display for InitialIndividualsMaterializationError {
 
 impl std::error::Error for InitialIndividualsMaterializationError {}
 
-/// Integra todos los fundadores, materializa cada copia y calcula sus
-/// estadísticas desde el estado final. El orden es población e individuo por
-/// identidad, por lo que añadir o reordenar entidades no cambia las existentes.
+/// Integra todos los fundadores, comprueba temporalmente la materialización de
+/// cada copia y calcula sus estadísticas desde el estado final. El orden es
+/// población e individuo por identidad, por lo que añadir o reordenar entidades
+/// no cambia las existentes.
 pub fn materialize_initial_individuals(
     config: &EffectiveConfig,
     reference: &Reference,
@@ -176,11 +148,10 @@ pub fn materialize_initial_individuals(
                 ),
             )
             .map_err(InitialIndividualsMaterializationError::Integration)?;
-            let copies = materialize_individual(integrated.individual(), reference)?;
+            validate_individual_materialization(integrated.individual(), reference)?;
             individuals.push(MaterializedInitialIndividual {
                 population_id: population.population_id().clone(),
                 individual: integrated.individual().clone(),
-                copies,
                 explicit_snp_constraints: integrated.explicit_snp_constraints().to_vec(),
             });
         }
@@ -192,27 +163,22 @@ pub fn materialize_initial_individuals(
     })
 }
 
-fn materialize_individual(
+fn validate_individual_materialization(
     individual: &Individual,
     reference: &Reference,
-) -> Result<Vec<MaterializedInitialCopy>, InitialIndividualsMaterializationError> {
-    let mut copies = Vec::new();
+) -> Result<(), InitialIndividualsMaterializationError> {
     for sequence in individual.sequences() {
         for copy in sequence.copies() {
-            copies.push(MaterializedInitialCopy {
-                sequence_id: sequence.sequence_id().clone(),
-                phase: copy.phase(),
-                bases: materialize_copy(copy, reference)
+            // F2.3.5 exige validar las bases finales. La copia reconstruida no
+            // forma parte del estado canónico ni de ninguna salida: se libera
+            // antes de continuar con la siguiente copia.
+            drop(
+                materialize_copy(copy, reference)
                     .map_err(InitialIndividualsMaterializationError::Materialization)?,
-            });
+            );
         }
     }
-    copies.sort_by(|left, right| {
-        left.sequence_id
-            .cmp(&right.sequence_id)
-            .then(left.phase.cmp(&right.phase))
-    });
-    Ok(copies)
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
