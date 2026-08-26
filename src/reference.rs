@@ -43,14 +43,21 @@ pub struct DnaSequence {
 
 impl DnaSequence {
     pub fn try_from_bytes(input: &[u8]) -> Result<Self, ReferenceError> {
-        if input.is_empty() {
+        Self::try_from_owned_bytes(input.to_vec())
+    }
+
+    /// Construye una secuencia a partir de un búfer que ya pertenece al
+    /// llamador. Mantiene la misma normalización y validación que
+    /// [`Self::try_from_bytes`] sin una copia adicional de las bases.
+    pub(crate) fn try_from_owned_bytes(mut bases: Vec<u8>) -> Result<Self, ReferenceError> {
+        if bases.is_empty() {
             return Err(ReferenceError::EmptyDnaSequence);
         }
 
-        let mut bases = Vec::with_capacity(input.len());
         let mut unknown_base_count = 0_u64;
-        for (offset, raw) in input.iter().copied().enumerate() {
-            let base = raw.to_ascii_uppercase();
+        for (offset, raw) in bases.iter_mut().enumerate() {
+            let original = *raw;
+            let base = original.to_ascii_uppercase();
             if !matches!(base, b'A' | b'C' | b'G' | b'T' | b'N') {
                 let position = offset
                     .checked_add(1)
@@ -58,11 +65,11 @@ impl DnaSequence {
                     .ok_or(ReferenceError::LengthOverflow)?;
                 return Err(ReferenceError::InvalidDnaSymbol {
                     position,
-                    symbol: raw,
+                    symbol: original,
                 });
             }
             unknown_base_count += u64::from(base == b'N');
-            bases.push(base);
+            *raw = base;
         }
 
         Ok(Self {
@@ -421,4 +428,27 @@ fn encode_hex(bytes: &[u8]) -> String {
         output.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DnaSequence, ReferenceError};
+
+    #[test]
+    fn owned_dna_constructor_normalizes_in_place_and_counts_unknown_bases() {
+        let sequence = DnaSequence::try_from_owned_bytes(b"aCnTn".to_vec()).expect("valid DNA");
+        assert_eq!(sequence.as_bytes(), b"ACNTN");
+        assert_eq!(sequence.unknown_base_count(), 2);
+    }
+
+    #[test]
+    fn owned_dna_constructor_preserves_the_public_validation_error() {
+        assert_eq!(
+            DnaSequence::try_from_owned_bytes(b"AC-R".to_vec()),
+            Err(ReferenceError::InvalidDnaSymbol {
+                position: 3,
+                symbol: b'-',
+            })
+        );
+    }
 }

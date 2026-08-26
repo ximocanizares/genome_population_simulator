@@ -37,10 +37,10 @@ TEST-REQ-CONF-125	REQ-CONF-125	passed	F1.6	tests/reference_reduction_config.rs::
 TEST-REQ-CONF-127	REQ-CONF-127	passed	F1.6	tests/f1_6_acceptance.rs::target_reduction_publishes_reconstructible_fasta_map_and_manifest;tests/effective_config_runtime_validation.rs::every_reduction_field_and_exact_reference_set_are_cross_checked
 TEST-REQ-REF-24	REQ-REF-24	passed	F1.6	tests/f1_6_acceptance.rs::target_reduction_publishes_reconstructible_fasta_map_and_manifest
 TEST-REQ-REF-25	REQ-REF-25	passed	F1.6	src/execution.rs::reduction_selection_uses_reloaded_copy_not_the_stale_origin_object;tests/f1_6_acceptance.rs::target_reduction_publishes_reconstructible_fasta_map_and_manifest
-TEST-REQ-REF-26	REQ-REF-26	passed	F1.6	src/reference_reduction.rs::safe_candidate_groups_match_exhaustive_oracle_for_small_gaps;src/reference_reduction.rs::safe_candidate_groups_match_exhaustive_oracle_with_other_gaps;src/reference_reduction.rs::starts_are_uniform_over_bases_not_over_sequences
+TEST-REQ-REF-26	REQ-REF-26	passed	F1.6	src/reference_reduction.rs::direct_selector_is_deterministic_non_overlapping_and_has_one_residual;src/reference_reduction.rs::canonical_selector_reproduces_the_frozen_direct_vector
 TEST-REQ-REF-27	REQ-REF-27	passed	F1.6	src/exact_decimal.rs::exact_boundary_does_not_round_through_f64;src/exact_decimal.rs::supports_precision_beyond_fixed_width_integers;tests/f1_6_acceptance.rs::percentage_mode_is_exact_and_infeasible_layout_never_creates_a_derived_artifact
-TEST-REQ-REF-28	REQ-REF-28	passed	F1.6	src/reference_reduction.rs::creates_exact_non_overlapping_plan_with_one_residual;src/reference_reduction.rs::exact_multiple_has_no_residual_segment
-TEST-REQ-REF-29	REQ-REF-29	passed	F1.6	src/reference_reduction.rs::materialization_uses_fasta_order_and_accumulates_per_sequence
+TEST-REQ-REF-28	REQ-REF-28	passed	F1.6	src/reference_reduction.rs::direct_selector_is_deterministic_non_overlapping_and_has_one_residual;src/reference_reduction.rs::exact_multiple_has_no_residual
+TEST-REQ-REF-29	REQ-REF-29	passed	F1.6	tests/f1_6_acceptance.rs::target_reduction_publishes_reconstructible_fasta_map_and_manifest
 TEST-REQ-REF-30	REQ-REF-30	passed	F1.6	tests/f1_6_acceptance.rs::one_block_reduction_omits_unselected_sequences_without_empty_records
 TEST-REQ-REF-31	REQ-REF-31	passed	F1.6	tests/f1_6_acceptance.rs::target_reduction_publishes_reconstructible_fasta_map_and_manifest;tests/published_resource_validation.rs::every_derived_sequence_catalog_field_is_checked_independently
 TEST-REQ-REF-32	REQ-REF-32	passed	F1.6	tests/f1_6_acceptance.rs::target_reduction_publishes_reconstructible_fasta_map_and_manifest;tests/published_resource_validation.rs::every_derived_sequence_catalog_field_is_checked_independently

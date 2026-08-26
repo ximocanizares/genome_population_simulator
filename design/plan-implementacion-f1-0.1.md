@@ -134,8 +134,8 @@ marcado como completo.
 - DTC-056 resuelve DTPD-101 con representación interna base 0 semiabierta y
   servicio común; F2.1/F2.2 reutilizarán esa decisión sin abrir una convención
   local.
-- DTC-057 resuelve DTPD-116 con `reduced_reference_selection_v1`, inicios
-  seguros uniformes, regiones completas seguidas del residual y mapa JSON v1.
+- DTC-057 resuelve DTPD-116 con el selector directo proporcional, composición
+  directa de huecos, regiones completas seguidas del residual y mapa JSON v1.
 
 ### 4.2. Comandos disponibles y comandos posteriores
 
@@ -696,7 +696,7 @@ completo, sin alterar orden, orientación, clase o bases `N`.
 - ✅ F3. Resolver DTPD-116 y evaluar cualquier dependencia o formato necesarios.
   - Depende de: F1–F2.
   - Procede de: DTPD-116; DTC-037, DTC-043, DTC-047, DTC-048 y DTC-050.
-  - Cambia: DTC-057 aprueba `reduced_reference_selection_v1`, tratamiento del residual y mapa JSON v1 compatible con DTC-056; no requiere una dependencia nueva ni modifica el lock.
+  - Cambia: DTC-057 aprueba el selector directo proporcional, tratamiento del residual y mapa JSON v1 compatible con DTC-056; no requiere una dependencia nueva ni modifica el lock.
   - Se comprueba con: opciones y oráculos registrados en DTC-057, `cargo metadata --locked --format-version 1`, `cargo tree --locked -e features` y aprobación del 14 de agosto de 2026.
 
 - ✅ F4. Extender el esquema de autoría y la configuración declarada para referencias reducidas.
@@ -720,8 +720,8 @@ completo, sin alterar orden, orientación, clase o bases `N`.
 - ✅ F7. Construir el plan inmutable de intervalos no solapados y tamaño exacto.
   - Depende de: F3, F5–F6.
   - Procede de: REQ-REF-26 a REQ-REF-30 y DTPD-116 aprobada.
-  - Cambia: dominio/servicio de reducción que enumera el espacio aprobado, selecciona sin reemplazo con RNG local y devuelve todos los bloques completos y como máximo un residual o un error sin resultado parcial.
-  - Se comprueba con: oráculo independiente sobre FASTA corto, propiedad de ausencia de solapamiento/duplicado, cardinalidad del residual, suma exacta y prueba estadística predeclarada de uniformidad conforme a DTPD-116.
+  - Cambia: dominio/servicio de reducción directo proporcional que reparte bloques completos por longitud, compone huecos con separadores sorteados y devuelve todos los bloques completos y como máximo un residual o un error sin resultado parcial.
+  - Se comprueba con: vector canónico independiente, propiedad de ausencia de solapamiento/duplicado, cardinalidad del residual, suma exacta y prueba de 100 MB que no recorre la holgura por bases.
 
 - ✅ F8. Ordenar intervalos y asignar coordenadas derivadas sin usar el orden del sorteo.
   - Depende de: F2 y F7; DTPD-101 debe constar aprobada.
@@ -791,7 +791,7 @@ clase inventadas.
 | Calcular el digest tras normalizar o copiar solo parte del fichero | D4, E4 | `cmp` y `sha256sum` sobre bytes completos |
 | Publicar completo antes de cerrar/validar, sobrescribir o mezclar carreras | D8–D12 | Dos procesos, fallos inyectados y SIGKILL en ext4/Ubuntu/OCI |
 | Reescribir un FASTA suministrado o perder cabecera/no UTF-8/`N` | E2–E4 | `cmp`, fixtures crudos y `samtools faidx` |
-| Sesgar o hacer no reproducible la reducción por orden/consumo accidental | F3/F6/F7 | Vectores normativos, oráculo uniforme independiente y reordenamientos adversariales |
+| Sesgar o hacer no reproducible la reducción por orden/consumo accidental | F3/F6/F7 | Vector canónico directo proporcional, no solape/residual y reordenamientos adversariales |
 | Desplazar coordenadas, reordenar fragmentos o perder clase/orientación | F2/F8/F10 | Tabla manual origen↔derivada, vectores DTPD-101 y reconstrucción base a base |
 | Publicar FASTA, mapa o manifiesto de reducciones distintas | F9–F11 | SHA-256, fallo inyectado y reconstructor independiente origen+mapa |
 | Usar el propio lector/escritor como único validador | A7, D5/D13, E3/E7/E9 | JSON Schema distinto, `sha256sum`, `samtools`, tar/OCI |

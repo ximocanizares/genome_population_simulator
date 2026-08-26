@@ -1,13 +1,12 @@
 //! Planificación reproducible de referencias reducidas.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use crate::coordinates::{CoordinateError, GenomicInterval};
 use crate::identity::{ReferenceId, SequenceId};
-use crate::randomness::{LocalRng, REFERENCE_REDUCTION_ALGORITHM};
+use crate::randomness::LocalRng;
 use crate::reference::SequenceClass;
-
-pub const REDUCED_REFERENCE_SELECTION_ALGORITHM: &str = REFERENCE_REDUCTION_ALGORITHM;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReductionError {
@@ -31,14 +30,12 @@ impl From<CoordinateError> for ReductionError {
     }
 }
 
-/// Secuencia elegible en el orden del FASTA autoritativo.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EligibleSequence {
     id: SequenceId,
     class: SequenceClass,
     length: u64,
 }
-
 impl EligibleSequence {
     pub fn new(id: SequenceId, class: SequenceClass, length: u64) -> Result<Self, ReductionError> {
         if length == 0 {
@@ -46,17 +43,14 @@ impl EligibleSequence {
         }
         Ok(Self { id, class, length })
     }
-
     #[must_use]
     pub const fn id(&self) -> &SequenceId {
         &self.id
     }
-
     #[must_use]
     pub const fn class(&self) -> SequenceClass {
         self.class
     }
-
     #[must_use]
     pub const fn length(&self) -> u64 {
         self.length
@@ -69,7 +63,6 @@ pub enum ReductionSegmentClass {
     Residual,
 }
 
-/// Segmento en el orden en que fue sorteado.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SelectedSegment {
     selection_order: u64,
@@ -77,30 +70,25 @@ pub struct SelectedSegment {
     sequence_class: SequenceClass,
     source_interval: GenomicInterval,
 }
-
 impl SelectedSegment {
     #[must_use]
     pub const fn selection_order(&self) -> u64 {
         self.selection_order
     }
-
     #[must_use]
     pub const fn class(&self) -> ReductionSegmentClass {
         self.class
     }
-
     #[must_use]
     pub const fn sequence_class(&self) -> SequenceClass {
         self.sequence_class
     }
-
     #[must_use]
     pub const fn source_interval(&self) -> &GenomicInterval {
         &self.source_interval
     }
 }
 
-/// Resultado completo e inmutable del sorteo.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SelectionPlan {
     source_reference_id: ReferenceId,
@@ -108,30 +96,25 @@ pub struct SelectionPlan {
     region_size_bases: u64,
     segments: Vec<SelectedSegment>,
 }
-
 impl SelectionPlan {
     #[must_use]
     pub const fn source_reference_id(&self) -> &ReferenceId {
         &self.source_reference_id
     }
-
     #[must_use]
     pub const fn target_bases(&self) -> u64 {
         self.target_bases
     }
-
     #[must_use]
     pub const fn region_size_bases(&self) -> u64 {
         self.region_size_bases
     }
-
     #[must_use]
     pub fn segments_in_selection_order(&self) -> &[SelectedSegment] {
         &self.segments
     }
 }
 
-/// Segmento ordenado por origen y proyectado sobre la referencia derivada.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MaterializedSegment {
     materialization_order: u64,
@@ -141,33 +124,27 @@ pub struct MaterializedSegment {
     source_interval: GenomicInterval,
     derived_interval: GenomicInterval,
 }
-
 impl MaterializedSegment {
     #[must_use]
     pub const fn materialization_order(&self) -> u64 {
         self.materialization_order
     }
-
     #[must_use]
     pub const fn selection_order(&self) -> u64 {
         self.selection_order
     }
-
     #[must_use]
     pub const fn class(&self) -> ReductionSegmentClass {
         self.class
     }
-
     #[must_use]
     pub const fn sequence_class(&self) -> SequenceClass {
         self.sequence_class
     }
-
     #[must_use]
     pub const fn source_interval(&self) -> &GenomicInterval {
         &self.source_interval
     }
-
     #[must_use]
     pub const fn derived_interval(&self) -> &GenomicInterval {
         &self.derived_interval
@@ -180,108 +157,21 @@ pub struct MaterializedPlan {
     derived_reference_id: ReferenceId,
     segments: Vec<MaterializedSegment>,
 }
-
 impl MaterializedPlan {
     #[must_use]
     pub const fn source_reference_id(&self) -> &ReferenceId {
         &self.source_reference_id
     }
-
     #[must_use]
     pub const fn derived_reference_id(&self) -> &ReferenceId {
         &self.derived_reference_id
     }
-
     #[must_use]
     pub fn segments(&self) -> &[MaterializedSegment] {
         &self.segments
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct FreeGap {
-    sequence_index: usize,
-    start: u64,
-    end: u64,
-}
-
-impl FreeGap {
-    const fn len(self) -> u64 {
-        self.end - self.start
-    }
-}
-
-/// Ejecuta el preflight completo y, solo si es viable, consume el RNG local.
-pub fn select_reduced_reference(
-    source_reference_id: &ReferenceId,
-    sequences: &[EligibleSequence],
-    target_bases: u64,
-    region_size_bases: u64,
-    rng: &mut LocalRng,
-) -> Result<SelectionPlan, ReductionError> {
-    preflight_reduced_reference(sequences, target_bases, region_size_bases)?;
-    let full_count = target_bases / region_size_bases;
-    let residual = target_bases % region_size_bases;
-    let mut gaps = sequences
-        .iter()
-        .enumerate()
-        .map(|(sequence_index, sequence)| FreeGap {
-            sequence_index,
-            start: 0,
-            end: sequence.length,
-        })
-        .collect::<Vec<_>>();
-
-    let segment_count = full_count
-        .checked_add(u64::from(residual > 0))
-        .ok_or(ReductionError::ArithmeticOverflow)?;
-    let capacity = usize::try_from(segment_count).map_err(|_| ReductionError::TooManySegments)?;
-    let mut segments = Vec::new();
-    segments
-        .try_reserve_exact(capacity)
-        .map_err(|_| ReductionError::AllocationFailed)?;
-    gaps.try_reserve_exact(capacity)
-        .map_err(|_| ReductionError::AllocationFailed)?;
-
-    for selected_full in 0..full_count {
-        let remaining_full = full_count - selected_full - 1;
-        let (gap_index, start) =
-            choose_safe_full_start(&gaps, remaining_full, residual, region_size_bases, rng)?;
-        append_selected_segment(
-            source_reference_id,
-            sequences,
-            &mut gaps,
-            &mut segments,
-            gap_index,
-            start,
-            region_size_bases,
-            ReductionSegmentClass::Full,
-        )?;
-    }
-
-    if residual > 0 {
-        let (gap_index, start) = choose_any_start(&gaps, residual, rng)?;
-        append_selected_segment(
-            source_reference_id,
-            sequences,
-            &mut gaps,
-            &mut segments,
-            gap_index,
-            start,
-            residual,
-            ReductionSegmentClass::Residual,
-        )?;
-    }
-
-    Ok(SelectionPlan {
-        source_reference_id: source_reference_id.clone(),
-        target_bases,
-        region_size_bases,
-        segments,
-    })
-}
-
-/// Demuestra la viabilidad completa sin recibir ni consumir una fuente aleatoria.
 pub fn preflight_reduced_reference(
     sequences: &[EligibleSequence],
     target_bases: u64,
@@ -294,42 +184,113 @@ pub fn preflight_reduced_reference(
             eligible,
         });
     }
-
-    let full_count = target_bases / region_size_bases;
+    let full = target_bases / region_size_bases;
     let residual = target_bases % region_size_bases;
-    let gaps = sequences
+    let capacity = total_capacity(sequences, region_size_bases)?;
+    if residual == 0 {
+        return (capacity >= full)
+            .then_some(())
+            .ok_or(ReductionError::InfeasibleLayout);
+    }
+    sequences
+        .iter()
+        .any(|sequence| {
+            sequence.length >= residual
+                && capacity - sequence.length / region_size_bases
+                    + (sequence.length - residual) / region_size_bases
+                    >= full
+        })
+        .then_some(())
+        .ok_or(ReductionError::InfeasibleLayout)
+}
+
+/// Selector directo proporcional: asigna bloques completos por longitud con
+/// límites de capacidad y después materializa posiciones sin solapes.
+pub fn select_reduced_reference(
+    source_reference_id: &ReferenceId,
+    sequences: &[EligibleSequence],
+    target_bases: u64,
+    region_size_bases: u64,
+    rng: &mut LocalRng,
+) -> Result<SelectionPlan, ReductionError> {
+    preflight_reduced_reference(sequences, target_bases, region_size_bases)?;
+    let full = target_bases / region_size_bases;
+    let residual = target_bases % region_size_bases;
+    let host = if residual == 0 {
+        None
+    } else {
+        Some(choose_residual_host(
+            sequences,
+            full,
+            residual,
+            region_size_bases,
+            rng,
+        )?)
+    };
+    let capacities = sequences
         .iter()
         .enumerate()
-        .map(|(sequence_index, sequence)| FreeGap {
-            sequence_index,
-            start: 0,
-            end: sequence.length,
+        .map(|(index, sequence)| {
+            let reserved = if Some(index) == host { residual } else { 0 };
+            (sequence.length - reserved) / region_size_bases
         })
         .collect::<Vec<_>>();
-
-    if !layout_feasible(&gaps, full_count, residual, region_size_bases)? {
-        return Err(ReductionError::InfeasibleLayout);
+    let allocation = allocate_proportional(sequences, &capacities, full)?;
+    let mut segments = Vec::new();
+    segments
+        .try_reserve_exact(
+            usize::try_from(full + u64::from(residual > 0))
+                .map_err(|_| ReductionError::TooManySegments)?,
+        )
+        .map_err(|_| ReductionError::AllocationFailed)?;
+    for (index, sequence) in sequences.iter().enumerate() {
+        append_layout(
+            source_reference_id,
+            sequence,
+            allocation[index],
+            (Some(index) == host).then_some(residual),
+            region_size_bases,
+            &mut segments,
+            rng,
+        )?;
     }
-    Ok(())
+    let mut order = 1_u64;
+    for segment in &mut segments {
+        if segment.class == ReductionSegmentClass::Full {
+            segment.selection_order = order;
+            order += 1;
+        }
+    }
+    for segment in &mut segments {
+        if segment.class == ReductionSegmentClass::Residual {
+            segment.selection_order = order;
+        }
+    }
+    segments.sort_by_key(SelectedSegment::selection_order);
+    Ok(SelectionPlan {
+        source_reference_id: source_reference_id.clone(),
+        target_bases,
+        region_size_bases,
+        segments,
+    })
 }
 
 fn validate_request(
     sequences: &[EligibleSequence],
-    target_bases: u64,
-    region_size_bases: u64,
+    target: u64,
+    region: u64,
 ) -> Result<u64, ReductionError> {
     if sequences.is_empty() {
         return Err(ReductionError::EmptyEligibleSpace);
     }
-    if target_bases == 0 {
+    if target == 0 {
         return Err(ReductionError::ZeroTarget);
     }
-    if region_size_bases == 0 {
+    if region == 0 {
         return Err(ReductionError::ZeroRegionSize);
     }
     let mut ids = BTreeSet::new();
-    let mut eligible = 0_u64;
-    for sequence in sequences {
+    sequences.iter().try_fold(0_u64, |sum, sequence| {
         if sequence.length == 0 {
             return Err(ReductionError::ZeroLengthSequence(
                 sequence.id.as_str().to_owned(),
@@ -340,530 +301,228 @@ fn validate_request(
                 sequence.id.as_str().to_owned(),
             ));
         }
-        eligible = eligible
-            .checked_add(sequence.length)
-            .ok_or(ReductionError::ArithmeticOverflow)?;
-    }
-    Ok(eligible)
+        sum.checked_add(sequence.length)
+            .ok_or(ReductionError::ArithmeticOverflow)
+    })
 }
 
-fn layout_feasible(
-    gaps: &[FreeGap],
-    full_count: u64,
+fn total_capacity(sequences: &[EligibleSequence], region: u64) -> Result<u64, ReductionError> {
+    sequences.iter().try_fold(0_u64, |sum, sequence| {
+        sum.checked_add(sequence.length / region)
+            .ok_or(ReductionError::ArithmeticOverflow)
+    })
+}
+
+fn choose_residual_host(
+    sequences: &[EligibleSequence],
+    full: u64,
     residual: u64,
-    region_size: u64,
-) -> Result<bool, ReductionError> {
-    let mut capacity = 0_u64;
-    let mut minimum_residual_loss = None;
-    for gap in gaps {
-        let length = gap.len();
-        let full_capacity = length / region_size;
-        capacity = capacity
-            .checked_add(full_capacity)
-            .ok_or(ReductionError::ArithmeticOverflow)?;
-        if residual > 0 && length >= residual {
-            let capacity_with_residual = (length - residual) / region_size;
-            let loss = full_capacity - capacity_with_residual;
-            minimum_residual_loss =
-                Some(minimum_residual_loss.map_or(loss, |old: u64| old.min(loss)));
-        }
-    }
-    if residual == 0 {
-        return Ok(capacity >= full_count);
-    }
-    Ok(minimum_residual_loss
-        .and_then(|loss| capacity.checked_sub(loss))
-        .is_some_and(|available| available >= full_count))
-}
-
-#[derive(Clone, Copy)]
-enum SplitRequirement {
-    Any,
-    HostResidual,
-    ZeroLossResidual,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct ResidueRange {
-    start: u64,
-    end: u64,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct CandidatePiece {
-    low: u64,
-    high: u64,
-    residue: ResidueRange,
-}
-
-#[derive(Debug)]
-struct CandidateGroup {
-    gap_index: usize,
-    maximum_offset: u64,
-    modulus: u64,
-    pieces: Vec<CandidatePiece>,
-    count: u64,
-}
-
-impl CandidateGroup {
-    fn new(
-        gap_index: usize,
-        maximum_offset: u64,
-        modulus: u64,
-        pieces: Vec<CandidatePiece>,
-    ) -> Result<Option<Self>, ReductionError> {
-        let mut count = 0_u64;
-        for piece in &pieces {
-            count = count
-                .checked_add(count_piece(*piece, modulus)?)
-                .ok_or(ReductionError::ArithmeticOverflow)?;
-        }
-        Ok((count > 0).then_some(Self {
-            gap_index,
-            maximum_offset,
-            modulus,
-            pieces,
-            count,
-        }))
-    }
-
-    fn nth(&self, index: u64) -> Result<u64, ReductionError> {
-        if index >= self.count {
-            return Err(ReductionError::InfeasibleLayout);
-        }
-        let mut low = 0_u64;
-        let mut high = self.maximum_offset;
-        while low < high {
-            let middle = low + (high - low) / 2;
-            if self.count_through(middle)? > index {
-                high = middle;
-            } else {
-                low = middle
-                    .checked_add(1)
-                    .ok_or(ReductionError::ArithmeticOverflow)?;
-            }
-        }
-        Ok(low)
-    }
-
-    fn count_through(&self, maximum: u64) -> Result<u64, ReductionError> {
-        let mut count = 0_u64;
-        for piece in &self.pieces {
-            if piece.low > maximum {
-                continue;
-            }
-            let clipped = CandidatePiece {
-                low: piece.low,
-                high: piece.high.min(maximum),
-                residue: piece.residue,
-            };
-            if clipped.low <= clipped.high {
-                count = count
-                    .checked_add(count_piece(clipped, self.modulus)?)
-                    .ok_or(ReductionError::ArithmeticOverflow)?;
-            }
-        }
-        Ok(count)
-    }
-}
-
-fn choose_safe_full_start(
-    gaps: &[FreeGap],
-    remaining_full: u64,
-    residual: u64,
-    region_size: u64,
+    region: u64,
     rng: &mut LocalRng,
-) -> Result<(usize, u64), ReductionError> {
-    let total_capacity = gaps.iter().try_fold(0_u64, |total, gap| {
-        total
-            .checked_add(gap.len() / region_size)
+) -> Result<usize, ReductionError> {
+    let total = total_capacity(sequences, region)?;
+    let candidates = sequences
+        .iter()
+        .enumerate()
+        .filter_map(|(index, sequence)| {
+            (sequence.length >= residual
+                && total - sequence.length / region + (sequence.length - residual) / region >= full)
+                .then_some((index, sequence.length - residual + 1))
+        })
+        .collect::<Vec<_>>();
+    let weight = candidates.iter().try_fold(0_u64, |sum, (_, value)| {
+        sum.checked_add(*value)
             .ok_or(ReductionError::ArithmeticOverflow)
     })?;
-    let mut groups = Vec::new();
-    let mut total_candidates = 0_u64;
-    for (gap_index, gap) in gaps.iter().copied().enumerate() {
-        if gap.len() < region_size {
-            continue;
+    let mut selected = uniform_index(rng, weight);
+    for (index, count) in candidates {
+        if selected < count {
+            return Ok(index);
         }
-        if let Some(group) = safe_candidates_for_gap(
-            gaps,
-            gap_index,
-            total_capacity,
-            remaining_full,
-            residual,
-            region_size,
-        )? {
-            total_candidates = total_candidates
-                .checked_add(group.count)
-                .ok_or(ReductionError::ArithmeticOverflow)?;
-            groups.push(group);
-        }
-    }
-    choose_from_groups(&groups, total_candidates, gaps, rng)
-}
-
-fn choose_any_start(
-    gaps: &[FreeGap],
-    segment_length: u64,
-    rng: &mut LocalRng,
-) -> Result<(usize, u64), ReductionError> {
-    let mut groups = Vec::new();
-    let mut total_candidates = 0_u64;
-    for (gap_index, gap) in gaps.iter().copied().enumerate() {
-        if gap.len() < segment_length {
-            continue;
-        }
-        let maximum_offset = gap.len() - segment_length;
-        let piece = CandidatePiece {
-            low: 0,
-            high: maximum_offset,
-            residue: ResidueRange { start: 0, end: 0 },
-        };
-        if let Some(group) = CandidateGroup::new(gap_index, maximum_offset, 1, vec![piece])? {
-            total_candidates = total_candidates
-                .checked_add(group.count)
-                .ok_or(ReductionError::ArithmeticOverflow)?;
-            groups.push(group);
-        }
-    }
-    choose_from_groups(&groups, total_candidates, gaps, rng)
-}
-
-fn choose_from_groups(
-    groups: &[CandidateGroup],
-    total_candidates: u64,
-    gaps: &[FreeGap],
-    rng: &mut LocalRng,
-) -> Result<(usize, u64), ReductionError> {
-    if total_candidates == 0 {
-        return Err(ReductionError::InfeasibleLayout);
-    }
-    let mut selected = uniform_index(rng, total_candidates);
-    for group in groups {
-        if selected < group.count {
-            let local_offset = group.nth(selected)?;
-            let start = gaps[group.gap_index]
-                .start
-                .checked_add(local_offset)
-                .ok_or(ReductionError::ArithmeticOverflow)?;
-            return Ok((group.gap_index, start));
-        }
-        selected -= group.count;
+        selected -= count;
     }
     Err(ReductionError::InfeasibleLayout)
 }
 
-fn safe_candidates_for_gap(
-    gaps: &[FreeGap],
-    gap_index: usize,
-    total_capacity: u64,
-    remaining_full: u64,
-    residual: u64,
-    region_size: u64,
-) -> Result<Option<CandidateGroup>, ReductionError> {
-    let gap = gaps[gap_index];
-    let length = gap.len();
-    let maximum_offset = length - region_size;
-    let other_capacity = total_capacity - length / region_size;
-    let other_residual_loss = minimum_residual_loss(gaps, gap_index, residual, region_size);
-    let high_split_capacity = maximum_offset / region_size;
-    let boundary = maximum_offset % region_size;
-    let mut pieces = Vec::new();
-
-    add_capacity_class(
-        &mut pieces,
-        ResidueRange {
-            start: 0,
-            end: boundary,
-        },
-        other_capacity
-            .checked_add(high_split_capacity)
-            .ok_or(ReductionError::ArithmeticOverflow)?,
-        maximum_offset,
-        region_size,
-        remaining_full,
-        residual,
-        other_residual_loss,
-    );
-
-    if boundary + 1 < region_size && high_split_capacity > 0 {
-        add_capacity_class(
-            &mut pieces,
-            ResidueRange {
-                start: boundary + 1,
-                end: region_size - 1,
-            },
-            other_capacity
-                .checked_add(high_split_capacity - 1)
-                .ok_or(ReductionError::ArithmeticOverflow)?,
-            maximum_offset,
-            region_size,
-            remaining_full,
-            residual,
-            other_residual_loss,
-        );
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Priority {
+    deficit: i128,
+    index: usize,
+}
+impl Ord for Priority {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.deficit
+            .cmp(&other.deficit)
+            .then_with(|| other.index.cmp(&self.index))
     }
-
-    CandidateGroup::new(gap_index, maximum_offset, region_size, pieces)
+}
+impl PartialOrd for Priority {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
-fn minimum_residual_loss(
-    gaps: &[FreeGap],
-    excluded: usize,
-    residual: u64,
-    region_size: u64,
-) -> Option<u64> {
-    if residual == 0 {
-        return Some(0);
+fn allocate_proportional(
+    sequences: &[EligibleSequence],
+    capacities: &[u64],
+    full: u64,
+) -> Result<Vec<u64>, ReductionError> {
+    if sequences.len() != capacities.len() {
+        return Err(ReductionError::SelectionDoesNotMatchCatalog);
     }
-    gaps.iter()
-        .enumerate()
-        .filter(|(index, _)| *index != excluded)
-        .filter_map(|(_, gap)| {
-            let length = gap.len();
-            (length >= residual).then(|| length / region_size - (length - residual) / region_size)
-        })
-        .min()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn add_capacity_class(
-    pieces: &mut Vec<CandidatePiece>,
-    capacity_residues: ResidueRange,
-    capacity: u64,
-    maximum_offset: u64,
-    modulus: u64,
-    remaining_full: u64,
-    residual: u64,
-    other_residual_loss: Option<u64>,
-) {
-    if capacity < remaining_full {
-        return;
-    }
-    let requirement = if residual == 0 || other_residual_loss == Some(0) {
-        SplitRequirement::Any
-    } else if capacity > remaining_full {
-        if other_residual_loss.is_some() {
-            SplitRequirement::Any
-        } else {
-            SplitRequirement::HostResidual
-        }
-    } else {
-        SplitRequirement::ZeroLossResidual
-    };
-
-    let absolute_ranges = match requirement {
-        SplitRequirement::HostResidual if maximum_offset < residual.saturating_mul(2) => {
-            let mut ranges = Vec::new();
-            if maximum_offset >= residual {
-                ranges.push((0, maximum_offset - residual));
-                ranges.push((residual, maximum_offset));
-            }
-            ranges
-        }
-        _ => vec![(0, maximum_offset)],
-    };
-    let residue_ranges = match requirement {
-        SplitRequirement::ZeroLossResidual => intersect_ranges(
-            &[capacity_residues],
-            &zero_loss_residues(maximum_offset % modulus, residual, modulus),
-        ),
-        _ => vec![capacity_residues],
-    };
-    for (low, high) in absolute_ranges {
-        for residue in &residue_ranges {
-            pieces.push(CandidatePiece {
-                low,
-                high,
-                residue: *residue,
+    let total = sequences.iter().try_fold(0_u64, |sum, sequence| {
+        sum.checked_add(sequence.length)
+            .ok_or(ReductionError::ArithmeticOverflow)
+    })?;
+    let mut allocated = Vec::with_capacity(sequences.len());
+    let mut heap = BinaryHeap::new();
+    let mut assigned = 0_u64;
+    for (index, (sequence, capacity)) in sequences.iter().zip(capacities).enumerate() {
+        let requested = u128::from(full) * u128::from(sequence.length);
+        let base = u64::try_from(requested / u128::from(total))
+            .map_err(|_| ReductionError::ArithmeticOverflow)?
+            .min(*capacity);
+        assigned += base;
+        allocated.push(base);
+        if base < *capacity {
+            heap.push(Priority {
+                deficit: i128::try_from(requested - u128::from(base) * u128::from(total))
+                    .map_err(|_| ReductionError::ArithmeticOverflow)?,
+                index,
             });
         }
     }
-}
-
-fn zero_loss_residues(offset_remainder: u64, residual: u64, modulus: u64) -> Vec<ResidueRange> {
-    if residual == 0 {
-        return vec![ResidueRange {
-            start: 0,
-            end: modulus - 1,
-        }];
-    }
-    let first_forbidden = ResidueRange {
-        start: 0,
-        end: residual - 1,
-    };
-    let backwards = (residual - 1) % modulus;
-    let circular_start = if offset_remainder >= backwards {
-        offset_remainder - backwards
-    } else {
-        modulus - (backwards - offset_remainder)
-    };
-    let circular_forbidden = if circular_start <= offset_remainder {
-        vec![ResidueRange {
-            start: circular_start,
-            end: offset_remainder,
-        }]
-    } else {
-        vec![
-            ResidueRange {
-                start: 0,
-                end: offset_remainder,
-            },
-            ResidueRange {
-                start: circular_start,
-                end: modulus - 1,
-            },
-        ]
-    };
-    let forbidden = intersect_ranges(&[first_forbidden], &circular_forbidden);
-    subtract_ranges(
-        &[ResidueRange {
-            start: 0,
-            end: modulus - 1,
-        }],
-        &forbidden,
-    )
-}
-
-fn intersect_ranges(left: &[ResidueRange], right: &[ResidueRange]) -> Vec<ResidueRange> {
-    let mut intersections = Vec::new();
-    for a in left {
-        for b in right {
-            let start = a.start.max(b.start);
-            let end = a.end.min(b.end);
-            if start <= end {
-                intersections.push(ResidueRange { start, end });
-            }
+    while assigned < full {
+        let priority = heap.pop().ok_or(ReductionError::InfeasibleLayout)?;
+        allocated[priority.index] += 1;
+        assigned += 1;
+        if allocated[priority.index] < capacities[priority.index] {
+            heap.push(Priority {
+                deficit: priority.deficit - i128::from(total),
+                index: priority.index,
+            });
         }
     }
-    intersections
+    Ok(allocated)
 }
 
-fn subtract_ranges(source: &[ResidueRange], removed: &[ResidueRange]) -> Vec<ResidueRange> {
-    let mut result = source.to_vec();
-    for cut in removed {
-        let mut next = Vec::new();
-        for range in result {
-            if cut.end < range.start || cut.start > range.end {
-                next.push(range);
-                continue;
-            }
-            if cut.start > range.start {
-                next.push(ResidueRange {
-                    start: range.start,
-                    end: cut.start - 1,
-                });
-            }
-            if cut.end < range.end {
-                next.push(ResidueRange {
-                    start: cut.end + 1,
-                    end: range.end,
-                });
-            }
-        }
-        result = next;
-    }
-    result
-}
-
-fn count_piece(piece: CandidatePiece, modulus: u64) -> Result<u64, ReductionError> {
-    let through_high = count_residues_through(piece.high, piece.residue, modulus)?;
-    let before_low = if piece.low == 0 {
-        0
-    } else {
-        count_residues_through(piece.low - 1, piece.residue, modulus)?
-    };
-    through_high
-        .checked_sub(before_low)
-        .ok_or(ReductionError::ArithmeticOverflow)
-}
-
-fn count_residues_through(
-    maximum: u64,
-    residues: ResidueRange,
-    modulus: u64,
-) -> Result<u64, ReductionError> {
-    let width = residues.end - residues.start + 1;
-    let complete_cycles = maximum / modulus;
-    let remainder = maximum % modulus;
-    let tail = if remainder < residues.start {
-        0
-    } else {
-        remainder.min(residues.end) - residues.start + 1
-    };
-    complete_cycles
-        .checked_mul(width)
-        .and_then(|count| count.checked_add(tail))
-        .ok_or(ReductionError::ArithmeticOverflow)
-}
-
-fn uniform_index(rng: &mut LocalRng, upper_exclusive: u64) -> u64 {
-    debug_assert!(upper_exclusive > 0);
-    let rejection_threshold = upper_exclusive.wrapping_neg() % upper_exclusive;
-    loop {
-        let value = rng.next_u64();
-        if value >= rejection_threshold {
-            return value % upper_exclusive;
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn append_selected_segment(
-    source_reference_id: &ReferenceId,
-    sequences: &[EligibleSequence],
-    gaps: &mut Vec<FreeGap>,
+fn append_layout(
+    source: &ReferenceId,
+    sequence: &EligibleSequence,
+    full: u64,
+    residual: Option<u64>,
+    region: u64,
     segments: &mut Vec<SelectedSegment>,
-    gap_index: usize,
-    start: u64,
-    length: u64,
-    class: ReductionSegmentClass,
+    rng: &mut LocalRng,
 ) -> Result<(), ReductionError> {
-    let gap = gaps[gap_index];
-    let end = start
-        .checked_add(length)
+    let residual_length = residual.unwrap_or(0);
+    let count = full + u64::from(residual.is_some());
+    if count == 0 {
+        return Ok(());
+    }
+    let occupied = full
+        .checked_mul(region)
+        .and_then(|value| value.checked_add(residual_length))
         .ok_or(ReductionError::ArithmeticOverflow)?;
-    if start < gap.start || end > gap.end {
-        return Err(ReductionError::InfeasibleLayout);
-    }
-    let sequence = &sequences[gap.sequence_index];
-    let selection_order = u64::try_from(segments.len())
-        .map_err(|_| ReductionError::TooManySegments)?
-        .checked_add(1)
-        .ok_or(ReductionError::ArithmeticOverflow)?;
-    segments.push(SelectedSegment {
-        selection_order,
-        class,
-        sequence_class: sequence.class,
-        source_interval: GenomicInterval::new(
-            source_reference_id.clone(),
-            sequence.id.clone(),
-            start,
-            end,
-            sequence.length,
-        )?,
-    });
-
-    gaps.remove(gap_index);
-    if gap.start < start {
-        gaps.push(FreeGap {
-            sequence_index: gap.sequence_index,
-            start: gap.start,
-            end: start,
+    let slack = sequence
+        .length
+        .checked_sub(occupied)
+        .ok_or(ReductionError::InfeasibleLayout)?;
+    let separators = sample_sorted_distinct(
+        rng,
+        slack
+            .checked_add(count)
+            .ok_or(ReductionError::ArithmeticOverflow)?,
+        count,
+    )?;
+    let gaps = gaps_from_separators(slack, count, &separators)?;
+    let residual_rank = residual
+        .map(|_| uniform_index(rng, full + 1))
+        .unwrap_or(u64::MAX);
+    let mut start = gaps[0];
+    for rank in 0..count {
+        let (length, class) = if rank == residual_rank {
+            (residual_length, ReductionSegmentClass::Residual)
+        } else {
+            (region, ReductionSegmentClass::Full)
+        };
+        let end = start
+            .checked_add(length)
+            .ok_or(ReductionError::ArithmeticOverflow)?;
+        segments.push(SelectedSegment {
+            selection_order: 0,
+            class,
+            sequence_class: sequence.class,
+            source_interval: GenomicInterval::new(
+                source.clone(),
+                sequence.id.clone(),
+                start,
+                end,
+                sequence.length,
+            )?,
         });
+        start = end
+            .checked_add(
+                gaps[usize::try_from(rank + 1).map_err(|_| ReductionError::TooManySegments)?],
+            )
+            .ok_or(ReductionError::ArithmeticOverflow)?;
     }
-    if end < gap.end {
-        gaps.push(FreeGap {
-            sequence_index: gap.sequence_index,
-            start: end,
-            end: gap.end,
-        });
-    }
-    gaps.sort_by_key(|free| (free.sequence_index, free.start));
     Ok(())
 }
 
-/// Ordena por FASTA/coordenada y asigna coordenadas acumuladas por secuencia.
+fn uniform_index(rng: &mut LocalRng, upper: u64) -> u64 {
+    let threshold = upper.wrapping_neg() % upper;
+    loop {
+        let value = rng.next_u64();
+        if value >= threshold {
+            return value % upper;
+        }
+    }
+}
+
+/// Floyd sampling draws `count` separators without iterating through slack.
+fn sample_sorted_distinct(
+    rng: &mut LocalRng,
+    universe: u64,
+    count: u64,
+) -> Result<Vec<u64>, ReductionError> {
+    if count > universe {
+        return Err(ReductionError::InfeasibleLayout);
+    }
+    let mut selected = BTreeSet::new();
+    for value in (universe - count)..universe {
+        let candidate = uniform_index(rng, value + 1);
+        if !selected.insert(candidate) {
+            selected.insert(value);
+        }
+    }
+    Ok(selected.into_iter().collect())
+}
+
+fn gaps_from_separators(
+    slack: u64,
+    count: u64,
+    separators: &[u64],
+) -> Result<Vec<u64>, ReductionError> {
+    if separators.len() != usize::try_from(count).map_err(|_| ReductionError::TooManySegments)? {
+        return Err(ReductionError::InfeasibleLayout);
+    }
+    if separators.is_empty() {
+        return Ok(vec![slack]);
+    }
+    let mut gaps = Vec::with_capacity(separators.len() + 1);
+    gaps.push(separators[0]);
+    for pair in separators.windows(2) {
+        gaps.push(pair[1] - pair[0] - 1);
+    }
+    let last = slack
+        .checked_add(count)
+        .and_then(|value| value.checked_sub(1))
+        .ok_or(ReductionError::ArithmeticOverflow)?;
+    gaps.push(last - separators[separators.len() - 1]);
+    Ok(gaps)
+}
+
 pub fn materialize_selection(
     selection: &SelectionPlan,
     derived_reference_id: &ReferenceId,
@@ -882,39 +541,30 @@ pub fn materialize_selection(
     }
     let mut ordered = selection.segments.iter().collect::<Vec<_>>();
     ordered.sort_by_key(|segment| {
-        let sequence_order = catalog
-            .get(segment.source_interval.sequence_id().as_str())
-            .map_or(usize::MAX, |(index, _)| *index);
-        (sequence_order, segment.source_interval.start())
+        (
+            catalog
+                .get(segment.source_interval.sequence_id().as_str())
+                .map_or(usize::MAX, |(index, _)| *index),
+            segment.source_interval.start(),
+        )
     });
-    if ordered.iter().any(|segment| {
-        catalog
-            .get(segment.source_interval.sequence_id().as_str())
-            .is_none_or(|(_, class)| *class != segment.sequence_class)
-    }) {
-        return Err(ReductionError::SelectionDoesNotMatchCatalog);
-    }
-
-    let mut derived_lengths = vec![0_u64; sequences.len()];
+    let mut lengths = vec![0_u64; sequences.len()];
     for segment in &ordered {
         let index = catalog
             .get(segment.source_interval.sequence_id().as_str())
-            .map(|(index, _)| *index)
-            .ok_or(ReductionError::SelectionDoesNotMatchCatalog)?;
-        derived_lengths[index] = derived_lengths[index]
+            .ok_or(ReductionError::SelectionDoesNotMatchCatalog)?
+            .0;
+        lengths[index] = lengths[index]
             .checked_add(segment.source_interval.len())
             .ok_or(ReductionError::ArithmeticOverflow)?;
     }
     let mut offsets = vec![0_u64; sequences.len()];
-    let mut materialized = Vec::new();
-    materialized
-        .try_reserve_exact(ordered.len())
-        .map_err(|_| ReductionError::AllocationFailed)?;
+    let mut materialized = Vec::with_capacity(ordered.len());
     for (index, segment) in ordered.into_iter().enumerate() {
         let sequence_index = catalog
             .get(segment.source_interval.sequence_id().as_str())
-            .map(|(index, _)| *index)
-            .ok_or(ReductionError::SelectionDoesNotMatchCatalog)?;
+            .ok_or(ReductionError::SelectionDoesNotMatchCatalog)?
+            .0;
         let start = offsets[sequence_index];
         let end = start
             .checked_add(segment.source_interval.len())
@@ -923,8 +573,7 @@ pub fn materialize_selection(
         materialized.push(MaterializedSegment {
             materialization_order: u64::try_from(index)
                 .map_err(|_| ReductionError::TooManySegments)?
-                .checked_add(1)
-                .ok_or(ReductionError::ArithmeticOverflow)?,
+                + 1,
             selection_order: segment.selection_order,
             class: segment.class,
             sequence_class: segment.sequence_class,
@@ -934,11 +583,10 @@ pub fn materialize_selection(
                 segment.source_interval.sequence_id().clone(),
                 start,
                 end,
-                derived_lengths[sequence_index],
+                lengths[sequence_index],
             )?,
         });
     }
-
     Ok(MaterializedPlan {
         source_reference_id: selection.source_reference_id.clone(),
         derived_reference_id: derived_reference_id.clone(),
@@ -950,406 +598,163 @@ pub fn materialize_selection(
 mod tests {
     use super::*;
     use crate::randomness::{RootSeed, RuntimeSubseedScope, derive_subseed};
-
     fn reference_id(value: &str) -> ReferenceId {
-        ReferenceId::parse(value, "reduction-test").expect("reference ID")
+        ReferenceId::parse(value, "test").unwrap()
     }
-
     fn sequence(id: &str, class: SequenceClass, length: u64) -> EligibleSequence {
-        EligibleSequence::new(
-            SequenceId::parse(id, "ref-source").expect("sequence ID"),
-            class,
-            length,
-        )
-        .expect("eligible sequence")
+        EligibleSequence::new(SequenceId::parse(id, "test").unwrap(), class, length).unwrap()
     }
-
-    fn rng(byte: u8) -> LocalRng {
-        let root = RootSeed::from_bytes([byte; 32]);
+    fn rng(seed: u8) -> LocalRng {
         derive_subseed(
-            root,
+            RootSeed::from_bytes([seed; 32]),
             RuntimeSubseedScope::ReferenceReduction {
-                source_reference_id: "ref-source",
-                derived_reference_id: "ref-derived",
+                source_reference_id: "source",
+                derived_reference_id: "derived",
             },
         )
-        .expect("subseed")
+        .unwrap()
         .local_rng()
     }
-
     fn rng_from_number(value: u64) -> LocalRng {
         let mut bytes = [0_u8; 32];
         bytes[..8].copy_from_slice(&value.to_be_bytes());
-        let root = RootSeed::from_bytes(bytes);
         derive_subseed(
-            root,
+            RootSeed::from_bytes(bytes),
             RuntimeSubseedScope::ReferenceReduction {
                 source_reference_id: "ref-source",
                 derived_reference_id: "ref-derived",
             },
         )
-        .expect("subseed")
+        .unwrap()
         .local_rng()
     }
-
     #[test]
-    fn creates_exact_non_overlapping_plan_with_one_residual() {
+    fn canonical_selector_reproduces_the_frozen_direct_vector() {
         let sequences = vec![
-            sequence("chr1", SequenceClass::Chromosome, 11),
-            sequence("scaf1", SequenceClass::Scaffold, 8),
+            sequence("chr-a", SequenceClass::Chromosome, 13),
+            sequence("chr-b", SequenceClass::Chromosome, 13),
+            sequence("scaf-c", SequenceClass::Scaffold, 6),
         ];
-        let mut local_rng = rng(7);
+        let mut local_rng = rng_from_number(42);
         let plan = select_reduced_reference(
             &reference_id("ref-source"),
             &sequences,
-            13,
+            14,
             5,
             &mut local_rng,
         )
-        .expect("selection plan");
-        assert_eq!(plan.segments.len(), 3);
-        assert_eq!(
-            plan.segments
-                .iter()
-                .map(|segment| segment.source_interval.len())
-                .sum::<u64>(),
-            13
-        );
-        assert_eq!(
-            plan.segments
-                .iter()
-                .filter(|segment| segment.class == ReductionSegmentClass::Residual)
-                .count(),
-            1
-        );
-        for (index, first) in plan.segments.iter().enumerate() {
-            for second in &plan.segments[index + 1..] {
-                if first.source_interval.sequence_id() == second.source_interval.sequence_id() {
-                    assert!(
-                        first.source_interval.end() <= second.source_interval.start()
-                            || second.source_interval.end() <= first.source_interval.start()
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn exact_multiple_has_no_residual_segment() {
-        let sequences = vec![sequence("chr1", SequenceClass::Chromosome, 20)];
-        let mut rng = rng(19);
-        let plan = select_reduced_reference(&reference_id("ref"), &sequences, 10, 5, &mut rng)
-            .expect("exact multiple plan");
-        assert_eq!(plan.segments_in_selection_order().len(), 2);
-        assert!(
-            plan.segments_in_selection_order()
-                .iter()
-                .all(|segment| segment.class() == ReductionSegmentClass::Full)
-        );
-    }
-
-    #[test]
-    fn preflight_failure_does_not_consume_rng() {
-        let sequences = vec![
-            sequence("chr1", SequenceClass::Chromosome, 3),
-            sequence("chr2", SequenceClass::Chromosome, 3),
-        ];
-        let mut after_failure = rng(9);
-        assert_eq!(
-            select_reduced_reference(
-                &reference_id("ref-source"),
-                &sequences,
-                5,
-                4,
-                &mut after_failure,
-            ),
-            Err(ReductionError::InfeasibleLayout)
-        );
-        let mut untouched = rng(9);
-        let first = select_reduced_reference(
-            &reference_id("ref-source"),
-            &sequences,
-            2,
-            2,
-            &mut after_failure,
-        )
-        .expect("valid plan");
-        let second = select_reduced_reference(
-            &reference_id("ref-source"),
-            &sequences,
-            2,
-            2,
-            &mut untouched,
-        )
-        .expect("same valid plan");
-        assert_eq!(first, second);
-    }
-
-    #[test]
-    fn materialization_uses_fasta_order_and_accumulates_per_sequence() {
-        let sequences = vec![
-            sequence("chr1", SequenceClass::Chromosome, 12),
-            sequence("scaf1", SequenceClass::Scaffold, 8),
-        ];
-        let mut local_rng = rng(17);
-        let selection = select_reduced_reference(
-            &reference_id("ref-source"),
-            &sequences,
-            13,
-            5,
-            &mut local_rng,
-        )
-        .expect("selection");
-        let materialized =
-            materialize_selection(&selection, &reference_id("ref-derived"), &sequences)
-                .expect("materialized plan");
-        assert!(materialized.segments.windows(2).all(|pair| {
-            let first_sequence = sequences
-                .iter()
-                .position(|sequence| sequence.id() == pair[0].source_interval().sequence_id())
-                .expect("first sequence");
-            let second_sequence = sequences
-                .iter()
-                .position(|sequence| sequence.id() == pair[1].source_interval().sequence_id())
-                .expect("second sequence");
-            first_sequence < second_sequence
-                || (first_sequence == second_sequence
-                    && pair[0].source_interval().start() < pair[1].source_interval().start())
-        }));
-        for window in materialized.segments.windows(2) {
-            if window[0].derived_interval().sequence_id()
-                == window[1].derived_interval().sequence_id()
-            {
-                assert_eq!(
-                    window[0].derived_interval().end(),
-                    window[1].derived_interval().start()
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn safe_candidate_groups_match_exhaustive_oracle_for_small_gaps() {
-        for length in 1_u64..=14 {
-            for region_size in 1_u64..=length {
-                let gap = FreeGap {
-                    sequence_index: 0,
-                    start: 0,
-                    end: length,
-                };
-                for remaining_full in 0..=3 {
-                    for residual in 0..region_size {
-                        let total_capacity = length / region_size;
-                        let group = safe_candidates_for_gap(
-                            &[gap],
-                            0,
-                            total_capacity,
-                            remaining_full,
-                            residual,
-                            region_size,
-                        )
-                        .expect("candidate group");
-                        let expected = (0..=length - region_size)
-                            .filter(|start| {
-                                let after = [
-                                    FreeGap {
-                                        sequence_index: 0,
-                                        start: 0,
-                                        end: *start,
-                                    },
-                                    FreeGap {
-                                        sequence_index: 0,
-                                        start: start + region_size,
-                                        end: length,
-                                    },
-                                ];
-                                layout_feasible(&after, remaining_full, residual, region_size)
-                                    .expect("oracle")
-                            })
-                            .collect::<Vec<_>>();
-                        let actual = group
-                            .as_ref()
-                            .map(|candidates| {
-                                (0..candidates.count)
-                                    .map(|index| candidates.nth(index).expect("candidate"))
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_default();
-                        assert_eq!(
-                            actual, expected,
-                            "L={length}, R={region_size}, k={remaining_full}, r={residual}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn safe_candidate_groups_match_exhaustive_oracle_with_other_gaps() {
-        for first_length in 1_u64..=8 {
-            for second_length in 1_u64..=8 {
-                for region_size in 1_u64..=first_length.max(second_length) {
-                    let gaps = [
-                        FreeGap {
-                            sequence_index: 0,
-                            start: 0,
-                            end: first_length,
-                        },
-                        FreeGap {
-                            sequence_index: 1,
-                            start: 0,
-                            end: second_length,
-                        },
-                    ];
-                    let total_capacity =
-                        gaps.iter().map(|gap| gap.len() / region_size).sum::<u64>();
-                    for gap_index in 0..2 {
-                        if gaps[gap_index].len() < region_size {
-                            continue;
-                        }
-                        for remaining_full in 0..=3 {
-                            for residual in 0..region_size {
-                                let group = safe_candidates_for_gap(
-                                    &gaps,
-                                    gap_index,
-                                    total_capacity,
-                                    remaining_full,
-                                    residual,
-                                    region_size,
-                                )
-                                .expect("candidate group");
-                                let selected_gap = gaps[gap_index];
-                                let expected = (0..=selected_gap.len() - region_size)
-                                    .filter(|offset| {
-                                        let start = selected_gap.start + offset;
-                                        let mut after = gaps.to_vec();
-                                        after.remove(gap_index);
-                                        if selected_gap.start < start {
-                                            after.push(FreeGap {
-                                                sequence_index: selected_gap.sequence_index,
-                                                start: selected_gap.start,
-                                                end: start,
-                                            });
-                                        }
-                                        let end = start + region_size;
-                                        if end < selected_gap.end {
-                                            after.push(FreeGap {
-                                                sequence_index: selected_gap.sequence_index,
-                                                start: end,
-                                                end: selected_gap.end,
-                                            });
-                                        }
-                                        layout_feasible(
-                                            &after,
-                                            remaining_full,
-                                            residual,
-                                            region_size,
-                                        )
-                                        .expect("oracle")
-                                    })
-                                    .collect::<Vec<_>>();
-                                let actual = group
-                                    .as_ref()
-                                    .map(|candidates| {
-                                        (0..candidates.count)
-                                            .map(|index| candidates.nth(index).expect("candidate"))
-                                            .collect::<Vec<_>>()
-                                    })
-                                    .unwrap_or_default();
-                                assert_eq!(
-                                    actual, expected,
-                                    "L1={first_length}, L2={second_length}, gap={gap_index}, R={region_size}, k={remaining_full}, r={residual}"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn starts_are_uniform_over_bases_not_over_sequences() {
-        const REPETITIONS: u64 = 7_000;
-        const EXPECTED_PER_START: u64 = 1_000;
-        const MAXIMUM_ABSOLUTE_DEVIATION: u64 = 150;
-        let sequences = vec![
-            sequence("chr1", SequenceClass::Chromosome, 3),
-            sequence("scaf1", SequenceClass::Scaffold, 4),
-        ];
-        let mut counts = [0_u64; 7];
-        for seed in 0..REPETITIONS {
-            let plan = select_reduced_reference(
-                &reference_id("ref-source"),
-                &sequences,
-                1,
-                1,
-                &mut rng_from_number(seed),
-            )
-            .expect("one-base plan");
-            let segment = &plan.segments[0];
-            let offset = usize::try_from(segment.source_interval.start()).expect("small offset");
-            let index = if segment.source_interval.sequence_id().as_str() == "chr1" {
-                offset
-            } else {
-                3 + offset
-            };
-            counts[index] += 1;
-        }
-        for count in counts {
-            assert!(count.abs_diff(EXPECTED_PER_START) <= MAXIMUM_ABSOLUTE_DEVIATION);
-        }
-    }
-
-    #[test]
-    fn request_boundaries_are_rejected() {
-        let sequences = vec![sequence("chr1", SequenceClass::Chromosome, 10)];
-        assert_eq!(
-            select_reduced_reference(&reference_id("ref-source"), &sequences, 10, 3, &mut rng(1),),
-            Err(ReductionError::TargetNotSmallerThanEligible {
-                target: 10,
-                eligible: 10
-            })
-        );
-        assert_eq!(
-            select_reduced_reference(&reference_id("ref-source"), &sequences, 1, 0, &mut rng(1),),
-            Err(ReductionError::ZeroRegionSize)
-        );
-    }
-
-    #[test]
-    fn uniform_integer_mapping_has_a_frozen_vector() {
-        let mut local_rng = rng(23);
-        let observed = (0..8)
-            .map(|_| uniform_index(&mut local_rng, 7))
-            .collect::<Vec<_>>();
-        assert_eq!(observed, vec![5, 1, 3, 3, 3, 4, 1, 3]);
-    }
-
-    #[test]
-    fn complete_selection_has_a_frozen_vector() {
-        let sequences = vec![sequence("chr1", SequenceClass::Chromosome, 6)];
-        let plan =
-            select_reduced_reference(&reference_id("ref-source"), &sequences, 5, 3, &mut rng(9))
-                .expect("selection");
+        .unwrap();
         let observed = plan
-            .segments
+            .segments_in_selection_order()
             .iter()
             .map(|segment| {
                 (
-                    segment.class,
-                    segment.source_interval.start(),
-                    segment.source_interval.end(),
+                    segment.selection_order(),
+                    segment.class(),
+                    segment.source_interval().sequence_id().as_str().to_owned(),
+                    segment.source_interval().start(),
+                    segment.source_interval().end(),
                 )
             })
             .collect::<Vec<_>>();
         assert_eq!(
             observed,
             vec![
-                (ReductionSegmentClass::Full, 0, 3),
-                (ReductionSegmentClass::Residual, 3, 5),
+                (1, ReductionSegmentClass::Full, "chr-a".to_owned(), 0, 5),
+                (2, ReductionSegmentClass::Full, "chr-b".to_owned(), 7, 12),
+                (3, ReductionSegmentClass::Residual, "chr-b".to_owned(), 3, 7),
             ]
+        );
+    }
+    #[test]
+    fn direct_selector_is_deterministic_non_overlapping_and_has_one_residual() {
+        let sequences = vec![
+            sequence("chr1", SequenceClass::Chromosome, 31),
+            sequence("chr2", SequenceClass::Chromosome, 17),
+            sequence("scaf", SequenceClass::Scaffold, 4),
+        ];
+        let mut first_rng = rng(41);
+        let first =
+            select_reduced_reference(&reference_id("source"), &sequences, 29, 5, &mut first_rng)
+                .unwrap();
+        let mut second_rng = rng(41);
+        assert_eq!(
+            first,
+            select_reduced_reference(&reference_id("source"), &sequences, 29, 5, &mut second_rng)
+                .unwrap()
+        );
+        assert_eq!(
+            first
+                .segments
+                .iter()
+                .map(|segment| segment.source_interval.len())
+                .sum::<u64>(),
+            29
+        );
+        assert_eq!(
+            first
+                .segments
+                .iter()
+                .filter(|segment| segment.class == ReductionSegmentClass::Residual)
+                .count(),
+            1
+        );
+        for (index, segment) in first.segments.iter().enumerate() {
+            for other in &first.segments[index + 1..] {
+                if segment.source_interval.sequence_id() == other.source_interval.sequence_id() {
+                    assert!(
+                        segment.source_interval.end() <= other.source_interval.start()
+                            || other.source_interval.end() <= segment.source_interval.start()
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn exact_multiple_has_no_residual() {
+        let sequences = vec![sequence("chr1", SequenceClass::Chromosome, 20)];
+        let mut local_rng = rng(19);
+        let plan =
+            select_reduced_reference(&reference_id("source"), &sequences, 10, 5, &mut local_rng)
+                .unwrap();
+        assert!(
+            plan.segments
+                .iter()
+                .all(|segment| segment.class == ReductionSegmentClass::Full)
+        );
+    }
+
+    #[test]
+    fn direct_layout_handles_hundred_megabases_with_ten_blocks_without_per_base_work() {
+        let sequences = vec![sequence("chr1", SequenceClass::Chromosome, 100_000_000)];
+        let mut local_rng = rng(3);
+        let plan = select_reduced_reference(
+            &reference_id("source"),
+            &sequences,
+            10_000_000,
+            1_000_000,
+            &mut local_rng,
+        )
+        .unwrap();
+        assert_eq!(plan.segments_in_selection_order().len(), 10);
+    }
+    #[test]
+    fn boundaries_are_rejected_without_consuming_rng() {
+        let sequences = vec![
+            sequence("chr1", SequenceClass::Chromosome, 3),
+            sequence("chr2", SequenceClass::Chromosome, 3),
+        ];
+        let mut after = rng(9);
+        assert_eq!(
+            select_reduced_reference(&reference_id("source"), &sequences, 5, 4, &mut after),
+            Err(ReductionError::InfeasibleLayout)
+        );
+        let mut untouched = rng(9);
+        assert_eq!(
+            select_reduced_reference(&reference_id("source"), &sequences, 2, 2, &mut after)
+                .unwrap(),
+            select_reduced_reference(&reference_id("source"), &sequences, 2, 2, &mut untouched)
+                .unwrap()
         );
     }
 }

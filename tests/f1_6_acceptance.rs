@@ -374,7 +374,6 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
     .expect("map JSON");
     assert_eq!(map["document_kind"], "reference_reduction_map");
     assert_eq!(map["schema_version"], "1");
-    assert_eq!(map["algorithm"], "reduced_reference_selection_v1");
     let sequence_classes = effective
         .sequences()
         .iter()
@@ -444,10 +443,6 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
     assert_eq!(reduction["target"]["declared"], "13");
     assert_eq!(reduction["target"]["bases"], 13);
     assert_eq!(
-        reduction["selection_algorithm"],
-        "reduced_reference_selection_v1"
-    );
-    assert_eq!(
         reduction["selection_subseed"],
         effective.reduced_references()[0]
             .selection_subseed()
@@ -498,10 +493,6 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
     assert_eq!(
         manifest_reduction["root_seed"],
         "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
-    );
-    assert_eq!(
-        manifest_reduction["selection_algorithm"],
-        "reduced_reference_selection_v1"
     );
     assert_eq!(
         manifest_reduction["map_document_kind"],
@@ -629,6 +620,60 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
     fs::remove_file(format!("{}.fai", faidx_copy.display())).unwrap();
     fs::remove_file(reconstructed_path).unwrap();
     fs::remove_file(altered_path).unwrap();
+}
+
+#[test]
+fn reduction_publishes_a_reproducible_map_without_algorithm_metadata() {
+    let root = temporary("v2-reduction");
+    let config = write_config_with_reductions(
+        &root,
+        "general.toml",
+        "",
+        r#"[[reduced_references]]
+id = "reference-small"
+source_reference_id = "reference-main"
+region_size_bases = 5
+target_bases = 13
+"#,
+    );
+    let effective = load_and_validate_config(&config).expect("config");
+    let destination = root.join("run");
+    execute_validated_config(&effective, &destination).expect("complete run");
+
+    let effective_json: serde_json::Value = serde_json::from_slice(
+        &fs::read(destination.join("effective-config.json")).expect("effective config"),
+    )
+    .expect("effective JSON");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(destination.join("manifest.json")).expect("manifest"))
+            .expect("manifest JSON");
+    let map: serde_json::Value = serde_json::from_slice(
+        &fs::read(destination.join("resources/references/reference-small.map.json")).expect("map"),
+    )
+    .expect("map JSON");
+    assert!(
+        effective_json["reduced_references"][0]
+            .get("selection_algorithm")
+            .is_none()
+    );
+    assert!(
+        manifest["reference_reductions"][0]
+            .get("selection_algorithm")
+            .is_none()
+    );
+    assert!(map.get("algorithm").is_none());
+    let (source, derived) = load_map_references(&destination);
+    validate_reduction_map_document(
+        &source,
+        &derived,
+        &map,
+        ReductionMapParameters {
+            region_size_bases: 5,
+            target_bases: 13,
+        },
+    )
+    .expect("map validates independently");
+    fs::remove_dir_all(root).expect("remove temporary directory");
 }
 
 #[test]

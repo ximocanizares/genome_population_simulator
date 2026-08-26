@@ -92,8 +92,23 @@ reduction_percent = 33.333333333333333333"#,
     assert_eq!(reduction.target().declared_value(), "33.333333333333333333");
     assert_eq!(
         reduction.selection_subseed().to_hex(),
-        "7fa724d52b2db97a043920dbc3062a34c6377eab76f1d9d6e4ff1d513747decd"
+        "20c4a19ada8e8cdfce862db5b3423fd8250be2a61cf83321b4a6fb9210963169"
     );
+}
+
+#[test]
+fn selection_algorithm_is_rejected_at_the_toml_boundary() {
+    let admitted = admit_toml_header(
+        Path::new("config/general.toml"),
+        format!(
+            "{BASE}\n[[reduced_references]]\nid = \"reference-small\"\nsource_reference_id = \"reference-main\"\nregion_size_bases = 4\ntarget_bases = 8\nselection_algorithm = \"removed\"\n"
+        )
+        .into_bytes(),
+        ExpectedConfigKind::General,
+    )
+    .expect("admitted TOML");
+    let error = parse_declared_config(admitted).expect_err("removed field must fail");
+    assert_eq!(error.code(), "GPS-CONF-006");
 }
 
 #[test]

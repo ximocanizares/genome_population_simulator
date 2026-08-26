@@ -345,15 +345,14 @@ aritmética comprobada. Ningún valor inválido se recorta, y un DTO externo nun
 se usa como valor de dominio. F2 amplía este mismo servicio para anclas,
 variantes y segmentos.
 
-`reduced_reference_selection_v1` calcula `q=T/R` y `r=T%R`. El preflight
-comprueba que existe una disposición completa. Para cada región completa
-enumera de forma compacta rangos de inicios no solapantes cuya elección conserva
-al menos una terminación posible; todos los inicios seguros del conjunto reciben
-el mismo peso. Un índice entero uniforme sin sesgo elige el inicio mediante el
-RNG local. Tras las `q` regiones se aplica la misma regla al único residual si
-`r>0`. No existen reintentos de disposición ni resultados parciales. El orden
-de sorteo se conserva como traza, pero el plan materializado se ordena por orden
-FASTA y coordenada.
+El selector directo proporcional calcula `q=T/R` y `r=T%R`. El preflight
+comprueba que existe una disposición completa, reparte las regiones completas
+por longitud con capacidad comprobada y reserva un anfitrión factible si hay
+residual. En cada secuencia compone directamente los huecos mediante
+separadores sorteados, sin enumerar bases candidatas ni reintentar la
+disposición. El RNG local produce una disposición reproducible, sin solapes y
+con como máximo un residual. El plan conserva el orden de selección; la
+materialización se ordena después por FASTA y coordenada.
 
 En un FASTA, el identificador de secuencia es el primer elemento no vacío que
 sigue a `>` y termina en el primer espacio o carácter de separación. Debe ser
@@ -1634,7 +1633,7 @@ cuantitativos de rendimiento. Tampoco amplía la garantía a versiones del
 simulador o plataformas no verificadas ni promete identidad binaria.
 
 DTC-050 confirma el contrato funcional de reducción, DTC-056 fija las
-coordenadas comunes y DTC-057 el algoritmo uniforme/versionado y su mapa.
+coordenadas comunes y DTC-057 el selector directo proporcional y su mapa.
 DTC-051 confirma Marimo como interfaz sin autoridad biológica. DTC-079
 sustituye la concreción sobrediseñada de DTC-058 para F2: entorno bloqueado,
 servidor local, TOML general, invocación directa y pruebas de recorrido. La

@@ -216,17 +216,10 @@ fn effective_selection_order_is_strictly_one_based() {
 }
 
 #[test]
-fn effective_reduction_selection_algorithm_is_literal_and_required() {
-    let mut wrong = effective_config("supplied", true);
-    wrong["reduced_references"][0]["selection_algorithm"] = json!("future_algorithm");
-    assert_invalid("wrong-reduction-selection-algorithm", &wrong);
-
-    let mut absent = effective_config("supplied", true);
-    absent["reduced_references"][0]
-        .as_object_mut()
-        .expect("reduction object")
-        .remove("selection_algorithm");
-    assert_invalid("absent-reduction-selection-algorithm", &absent);
+fn effective_reduction_rejects_removed_selection_algorithm() {
+    let mut document = effective_config("supplied", true);
+    document["reduced_references"][0]["selection_algorithm"] = json!("removed");
+    assert_invalid("removed-reduction-selection-algorithm", &document);
 }
 
 #[test]
@@ -416,7 +409,6 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
             "source_reference_id": "main",
             "region_size_bases": 100,
             "target": {"mode": "target_bases", "declared": "200", "bases": 200},
-            "selection_algorithm": "reduced_reference_selection_v1",
             "selection_subseed": "1".repeat(64),
             "selection_order": [1, 2],
             "sequences": [{

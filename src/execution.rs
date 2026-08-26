@@ -32,13 +32,12 @@ use crate::reference_generation::{
     BaseFrequency, GeneratedSequenceSpec, generate_reference_with_unknown_fraction,
 };
 use crate::reference_reduction::{
-    EligibleSequence, MaterializedPlan, REDUCED_REFERENCE_SELECTION_ALGORITHM, ReductionError,
-    materialize_selection, preflight_reduced_reference, select_reduced_reference,
+    EligibleSequence, MaterializedPlan, ReductionError, materialize_selection,
+    preflight_reduced_reference, select_reduced_reference,
 };
 use crate::reference_reduction_io::{
     REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
-    build_reduced_reference, reduction_map_document, validate_reduced_reference,
-    validate_reduction_map_document,
+    build_reduced_reference, reduction_map_document, validate_reduction_map_document,
 };
 use crate::results::{
     ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestReductionLink,
@@ -1000,7 +999,6 @@ fn manifest_reduction_links(
             target_declared: reduction.target().declared_value().to_owned(),
             target_bases: reduction.target_bases(),
             root_seed: effective.reproducibility().root_seed().to_hex(),
-            selection_algorithm: REDUCED_REFERENCE_SELECTION_ALGORITHM.to_owned(),
             selection_subseed: reduction.selection_subseed().to_hex(),
             selection_order: prepared
                 .plan
@@ -1066,12 +1064,6 @@ fn prepare_reductions(
     let eligible = eligible_sequences(source, effective)?;
     let mut prepared = Vec::with_capacity(effective.reduced_references().len());
     for reduction in effective.reduced_references() {
-        preflight_reduced_reference(
-            &eligible,
-            reduction.target_bases(),
-            reduction.region_size_bases(),
-        )
-        .map_err(|error| reduction_error(reduction.id(), effective, error))?;
         let mut rng = reduction.selection_subseed().local_rng();
         let selection = select_reduced_reference(
             source.id(),
@@ -1085,7 +1077,6 @@ fn prepare_reductions(
         let plan = materialize_selection(&selection, &derived_id, &eligible)
             .map_err(|error| reduction_error(reduction.id(), effective, error))?;
         let reference = build_reduced_reference(source, &plan)?;
-        validate_reduced_reference(source, &reference, &plan)?;
         prepared.push(PreparedReduction { reference, plan });
     }
     Ok(prepared)

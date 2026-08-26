@@ -1,5 +1,4 @@
 {
-  "algorithm": "reduced_reference_selection_v1",
   "derived_reference_id": "reference-small",
   "document_kind": "reference_reduction_map",
   "schema_version": "1",

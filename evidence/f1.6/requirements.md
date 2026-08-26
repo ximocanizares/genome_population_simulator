@@ -1,42 +1,33 @@
-# Batería trazable F1.6
+# Evidencia vigente de F1.6
 
-> **Expediente histórico no vigente.** Pertenece al checkpoint `66ad8b2` y no
-> acredita el runtime simplificado. La evidencia vigente está en
-> `evidence/f1-reimplementation/f1-complete-test-req-matrix.tsv`.
+La matriz autoritativa es
+`evidence/f1-reimplementation/f1-complete-test-req-matrix.tsv`. Esta síntesis
+solo nombra símbolos ejecutables actuales; `REQ-CONF-126` permanece fuera del
+cierre F1.6 simplificado.
 
-Fecha: 14 de agosto de 2026. Cada identificador `TEST-REQ-*` designa un caso
-observable ejecutado. Ninguna fila parcial se contabiliza como superada.
+| Caso | Evidencia ejecutable actual |
+|---|---|
+| TEST-REQ-CONF-124 | `reference_reduction_config::declared_reduction_preserves_target_variant_literal_and_location`. |
+| TEST-REQ-CONF-125 | `reference_reduction_config::{exactly_one_target_and_known_fields_are_required,zero_endpoints_source_mismatch_and_non_reduction_are_rejected}`. |
+| TEST-REQ-CONF-127 | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` y `effective_config_runtime_validation::every_reduction_field_and_exact_reference_set_are_cross_checked`. |
+| TEST-REQ-REF-24 | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest`. |
+| TEST-REQ-REF-25 | `execution::tests::reduction_selection_uses_reloaded_copy_not_the_stale_origin_object`. |
+| TEST-REQ-REF-26 | `reference_reduction::tests::{direct_selector_is_deterministic_non_overlapping_and_has_one_residual,canonical_selector_reproduces_the_frozen_direct_vector}`. |
+| TEST-REQ-REF-27 | `exact_decimal::tests::{exact_boundary_does_not_round_through_f64,supports_precision_beyond_fixed_width_integers}`. |
+| TEST-REQ-REF-28 | `reference_reduction::tests::{direct_selector_is_deterministic_non_overlapping_and_has_one_residual,exact_multiple_has_no_residual}`. |
+| TEST-REQ-REF-29 | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest`. |
+| TEST-REQ-REF-30 | `f1_6_acceptance::one_block_reduction_omits_unselected_sequences_without_empty_records`. |
+| TEST-REQ-REF-31 | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` y `published_resource_validation::every_derived_sequence_catalog_field_is_checked_independently`. |
+| TEST-REQ-REF-32 | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` y `published_resource_validation::every_derived_sequence_catalog_field_is_checked_independently`. |
+| TEST-REQ-REF-33 | `f1_6_acceptance::{percentage_mode_is_exact_and_infeasible_layout_never_creates_a_derived_artifact,one_invalid_reduction_prevents_any_partial_publication}`. |
+| TEST-REQ-REF-34 | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest`. |
+| TEST-REQ-REF-35 | `coordinates::tests::converts_first_base_and_complete_sequence_exactly` y `f1_6_acceptance::serialized_map_validator_rejects_truncation_overlap_and_out_of_range`. |
+| TEST-REQ-REF-36 | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest`. |
+| TEST-REQ-VAL-52 | `reference_reduction_config::zero_endpoints_source_mismatch_and_non_reduction_are_rejected` y `f1_6_acceptance::one_invalid_reduction_prevents_any_partial_publication`. |
+| TEST-REQ-VAL-53 | `f1_6_acceptance::serialized_map_validator_rejects_truncation_overlap_and_out_of_range`. |
+| TEST-REQ-MAN-89 | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` y `effective_config_runtime_validation::every_reduction_field_and_exact_reference_set_are_cross_checked`. |
+| TEST-REQ-MAN-90 | `f1_6_acceptance::serialized_map_validator_rejects_truncation_overlap_and_out_of_range` y `published_resource_validation::correlated_documents_cannot_replace_physical_authority`. |
+| TEST-REQ-SAL-27 | `f1_6_acceptance::{one_invalid_reduction_prevents_any_partial_publication,target_reduction_publishes_reconstructible_fasta_map_and_manifest}` y `execution::tests::physical_resource_failure_marks_reduction_failed_without_partial_artifacts`. |
 
-La batería conserva testigos del checkpoint `66ad8b2`. DTC-078 traslada el
-cierre completo de REQ-CONF-126 y obliga a revalidar los otros 21 REQ contra el
-runtime simplificado; el hardening activo previo no se usa para cerrar
-REQ-SAL-27.
-
-| Caso | Estado | Evidencia ejecutable |
-|---|---|---|
-| TEST-REQ-CONF-124 | Superado | `reference_reduction_config::declared_reduction_preserves_target_variant_literal_and_location` y el esquema de autoría cubren ID derivado, origen y región en bases. |
-| TEST-REQ-CONF-125 | Superado | `reference_reduction_config::exactly_one_target_and_known_fields_are_required` y `reference_reduction_config::zero_endpoints_source_mismatch_and_non_reduction_are_rejected` cubren la unión exclusiva y sus dominios. |
-| TEST-REQ-CONF-126 | Parcial | `reference_reduction_config::effective_reduction_uses_exact_decimal_and_own_subseed` y `f1_6_acceptance::omitted_sequence_and_unrelated_consumers_do_not_change_the_reduction_stream` conservan catálogo, subsemilla y vector de reducción; el aislamiento frente a individuos, eventos y salidas reales cierra en F3.5. |
-| TEST-REQ-CONF-127 | Superado | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` inspecciona objetivo declarado/realizado, región, origen, seed/subseed y algoritmo efectivos. |
-| TEST-REQ-REF-24 | Superado | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` parte del FASTA mixto suministrado, conserva su copia y publica una entidad derivada con ID propio y unidad `reference_reduction`. |
-| TEST-REQ-REF-25 | Superado | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` compara la copia fuente byte a byte y la selección se ejecuta sobre la representación recargada desde esa copia autoritativa. |
-| TEST-REQ-REF-26 | Superado | `reference_reduction::tests::safe_candidate_groups_match_exhaustive_oracle_for_small_gaps`, junto con el segundo oráculo exhaustivo y la prueba estadística del mismo módulo, cubre uniformidad predeclarada, seguridad, no solapamiento y ausencia de reemplazo. |
-| TEST-REQ-REF-27 | Superado | `exact_decimal::tests::exact_boundary_does_not_round_through_f64` demuestra `S=10,p=10.0000000000000000001`: objetivo exacto 8 frente a 9 por la ruta `f64`; `exact_decimal::tests::enforces_toml_decimal_grammar_before_removing_separators` y el corpus R17 exigen además la gramática TOML exacta antes de retirar separadores. |
-| TEST-REQ-REF-28 | Superado | `reference_reduction::tests::creates_exact_non_overlapping_plan_with_one_residual` y el caso de múltiplo exacto exigen suma exacta, cero residual para múltiplos y como máximo uno en los demás casos. |
-| TEST-REQ-REF-29 | Superado | `reference_reduction::tests::materialization_uses_fasta_order_and_accumulates_per_sequence` demuestra que el orden materializado no depende del sorteo. |
-| TEST-REQ-REF-30 | Superado | `f1_6_acceptance::omitted_sequence_and_unrelated_consumers_do_not_change_the_reduction_stream` observa exactamente una secuencia incluida y otra omitida; los contratos FASTA rechazan registros vacíos. |
-| TEST-REQ-REF-31 | Superado | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` demuestra que el mapa y los dos manifiestos conservan ID de referencia, `sequence_id` y clase cromosoma/*scaffold* sin mezclar fuentes. |
-| TEST-REQ-REF-32 | Superado | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` reconstruye literalmente los fragmentos, compara el FASTA canónico completo y exige que la `N` seleccionada permanezca en las 13 bases derivadas. |
-| TEST-REQ-REF-33 | Superado | `f1_6_acceptance::percentage_mode_is_exact_and_infeasible_layout_never_creates_a_derived_artifact`, la configuración negativa y los bordes unitarios rechazan antes de producir FASTA/mapa derivados. |
-| TEST-REQ-REF-34 | Superado | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` contrasta `sha256sum`, tamaños e IDs propios con manifiesto; la copia fuente se compara byte a byte. |
-| TEST-REQ-REF-35 | Superado | `coordinates::tests::converts_first_base_and_complete_sequence_exactly` fija `[1,1]↔[0,1)` y `[1,L]↔[0,L)`; `f1_6_acceptance::serialized_map_validator_rejects_truncation_overlap_and_out_of_range` detecta huecos, solapes, rangos, clases, orden de segmentos y orden/clase del catálogo derivado incoherentes. |
-| TEST-REQ-REF-36 | Superado | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` contiene un reconstructor ajeno que exige orden y clase directos del catálogo derivado, usa intervalos origen y derivados, ambos órdenes, orientación y parámetros efectivos y compara FASTA canónico y SHA-256. |
-| TEST-REQ-VAL-52 | Superado | `reference_reduction_config::zero_endpoints_source_mismatch_and_non_reduction_are_rejected`, las pruebas de preflight y la disposición inviable agotan exclusividad, dominio, fuente, objetivo y espacio sin destino completo ni artefacto derivado. |
-| TEST-REQ-VAL-53 | Superado | `f1_6_acceptance::serialized_map_validator_rejects_truncation_overlap_and_out_of_range` altera JSON, orden y clase del catálogo derivado, campos desconocidos, etiquetas, huecos, solapes y rangos y exige rechazo. |
-| TEST-REQ-MAN-89 | Superado | `execution::tests::reduction_fault_matrix_preserves_prior_complete_and_fails_target_and_later_units`, JSON Schema independiente y `sha256sum` verifican IDs, rutas, hashes, tamaños, región, objetivo, seed/subseed, versión, unidad propia y los estados de una/dos reducciones. |
-| TEST-REQ-MAN-90 | Superado | `execution::tests::semantic_manifest_gate_rejects_cross_collection_contradictions_from_reloaded_bytes`, `execution::tests::global_manifest_links_must_match_catalog_exactly_without_reductions`, `execution::tests::global_manifest_links_match_catalog_for_complete_failed_zero_one_and_two_reductions`, `execution::tests::manifest_graph_rejects_every_dynamic_edge_contradiction` y `execution::tests::manifest_dynamic_graph_rejects_diagnostic_and_reference_inconsistencies` conservan R11–R15. `execution::tests::manifest_bundle_closes_exact_percent_seed_header_normalization_and_event_edges` conserva H-F16-R16, R23/R24 y añade R25/R26 en cierres completo/fallido. `execution::tests::manifest_bundle_closes_toml_fasta_and_effective_value_edges` conserva R17–R22 y añade R25/R27 con identidades físicas recalculadas. `execution::tests::resolution_evidence_toctou_is_rejected_before_publication` cierra la relectura física de la nueva fuente autoritativa. `effective_config::request_context_drives_combined_dominance_independently_of_rule_order`, `effective_config::foreign_object_and_incomparable_maxima_are_rejected_before_snapshot`, `effective_config::parameter_axes_reject_biological_rule_in_a_technical_event_context`, `effective_config::complete_population_and_temporal_hierarchies_reach_ruleset_dominance`, `effective_config::complete_locus_position_hierarchy_reaches_ruleset_dominance`, `effective_config::orphan_and_incoherent_spatial_coordinates_are_rejected`, `effective_config::spatial_level_and_primary_object_follow_parameter_metadata`, `effective_config::every_parameter_is_checked_at_sequence_region_and_locus_resolution_levels`, `effective_config::hierarchical_contexts_are_not_inferred_from_flat_identifier_lists`, `effective_config::hierarchical_contexts_must_match_parent_interval_and_coordinate_evidence`, `effective_config::phase_ids_are_globally_unique_across_scenarios_independently_of_order` y `effective_config::parameter_order_v1_is_literal_and_independent_of_rule_and_request_permutations` cubren contexto, dominancia, 8×3 niveles, objetos principales, pruebas jerárquicas, fase global y orden literal versionado. El catálogo literal y `f1_6_traceability::f1_6_expedient_claims_match_the_executed_independent_semantic_corpus` verifican fuente, listado y expediente. |
-| TEST-REQ-SAL-27 | Superado | `f1_6_acceptance::target_reduction_publishes_reconstructible_fasta_map_and_manifest` demuestra FASTA, mapa y metadatos coherentes; `execution::tests::reduction_fault_matrix_preserves_prior_complete_and_fails_target_and_later_units` impide presentar la unidad como completa si falla uno de ellos. Symlink, hardlink y TOCTOU activo pertenecen a F9/CI. |
-
-Estado vigente: 21 REQ completos asignados a F1.6 y una evidencia parcial
-reasignada. Todos deben repetirse contra el runtime simplificado antes de
-aprobar la pausa; las afirmaciones históricas 22/22 y 83/83 no cierran F1 0.2.
+`tests/f1_6_traceability.rs` exige que la lista ejecutada contenga exactamente
+estos testigos vivos, más la propia prueba de trazabilidad.

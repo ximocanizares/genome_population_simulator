@@ -6,7 +6,6 @@
       "id": "reference-small",
       "map_artifact_id": "reference-map-reference-small",
       "region_size_bases": 5,
-      "selection_algorithm": "reduced_reference_selection_v1",
       "selection_order": [
         2,
         1,

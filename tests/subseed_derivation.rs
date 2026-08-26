@@ -1,7 +1,6 @@
 use genome_population_simulator::randomness::{
     DERIVATION_CONTEXT, DERIVATION_VERSION, F1_ACTIVE_SUBSEED_SCOPES, F2_DERIVATION_VERSION,
-    REFERENCE_REDUCTION_ALGORITHM, RootSeed, RuntimeSubseedScope, SUBSEED_CATALOG_VERSION,
-    derive_subseed,
+    RootSeed, RuntimeSubseedScope, SUBSEED_CATALOG_VERSION, derive_subseed,
 };
 use sha2::{Digest, Sha256};
 
@@ -133,7 +132,7 @@ fn verify_catalog_with_independent_oracle(catalog: &str, derivation_version: u32
 }
 
 #[test]
-fn published_v1_v4_catalogs_remain_byte_exact_and_v5_has_an_independent_oracle() {
+fn published_catalogs_are_immutable_and_v6_has_an_independent_oracle() {
     let catalogs = [
         (
             include_bytes!("../catalogs/subseed-scopes-v1.tsv").as_slice(),
@@ -179,17 +178,33 @@ fn published_v1_v4_catalogs_remain_byte_exact_and_v5_has_an_independent_oracle()
     assert_eq!(&v5_rows[..v4_rows.len()], v4_rows);
     assert_eq!(v5_rows.len(), v4_rows.len() + 1);
     verify_catalog_with_independent_oracle(v5, F2_DERIVATION_VERSION);
+
+    let v6 = include_str!("../catalogs/subseed-scopes-v6.tsv");
+    assert!(v6.starts_with(
+        "# derivation_versions=1,2\n# catalog_version=6\n# context=genome_population_simulator/v1/subseed\n"
+    ));
+    let v6_rows = v6
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(v6_rows.len(), v5_rows.len());
+    for (v5_row, v6_row) in v5_rows.iter().zip(&v6_rows) {
+        if v5_row.starts_with("reference_reduction|") {
+            assert!(v6_row.starts_with(
+                "reference_reduction|source_reference_id=reference-main;derived_reference_id=reference-small;selector=direct_proportional_selection|"
+            ));
+        } else {
+            assert_eq!(v6_row, v5_row);
+        }
+    }
+    verify_catalog_with_independent_oracle(v6, F2_DERIVATION_VERSION);
 }
 
 #[test]
-fn f1_runtime_scopes_remain_on_derivation_v1_while_f2_uses_catalog_v5() {
+fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v6() {
     let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
     assert_eq!(DERIVATION_VERSION, 1);
-    assert_eq!(SUBSEED_CATALOG_VERSION, "5");
-    assert_eq!(
-        REFERENCE_REDUCTION_ALGORITHM,
-        "reduced_reference_selection_v1"
-    );
+    assert_eq!(SUBSEED_CATALOG_VERSION, "6");
     assert_eq!(
         derive_subseed(
             root,
@@ -211,7 +226,15 @@ fn f1_runtime_scopes_remain_on_derivation_v1_while_f2_uses_catalog_v5() {
         )
         .expect("reduction subseed")
         .to_hex(),
-        "7fa724d52b2db97a043920dbc3062a34c6377eab76f1d9d6e4ff1d513747decd"
+        "20c4a19ada8e8cdfce862db5b3423fd8250be2a61cf83321b4a6fb9210963169"
+    );
+    let active_row = include_str!("../catalogs/subseed-scopes-v6.tsv")
+        .lines()
+        .find(|row| row.starts_with("reference_reduction|"))
+        .expect("active reduction catalog row");
+    assert!(active_row.contains("selector=direct_proportional_selection"));
+    assert!(
+        active_row.ends_with("20c4a19ada8e8cdfce862db5b3423fd8250be2a61cf83321b4a6fb9210963169")
     );
 }
 

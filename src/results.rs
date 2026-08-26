@@ -39,8 +39,7 @@ use crate::reference_fasta::{
 use crate::reference_generation::COMPOSITION_TOLERANCE;
 use crate::reference_generation::{BaseFrequency, GeneratedSequenceSpec};
 use crate::reference_reduction::{
-    EligibleSequence, MaterializedPlan, REDUCED_REFERENCE_SELECTION_ALGORITHM,
-    materialize_selection, select_reduced_reference,
+    EligibleSequence, MaterializedPlan, materialize_selection, select_reduced_reference,
 };
 use crate::reference_reduction_io::{
     REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
@@ -189,7 +188,6 @@ pub struct ManifestReductionLink {
     pub target_declared: String,
     pub target_bases: u64,
     pub root_seed: String,
-    pub selection_algorithm: String,
     pub selection_subseed: String,
     pub selection_order: Vec<u64>,
     pub state: UnitState,
@@ -836,7 +834,6 @@ fn validate_effective_config_v2_against_manifest_bytes(
             || [
                 "region_size_bases",
                 "target",
-                "selection_algorithm",
                 "selection_subseed",
                 "selection_order",
             ]
@@ -2657,7 +2654,6 @@ fn validate_effective_config_v1_against_manifest_bytes(
             || [
                 "region_size_bases",
                 "target",
-                "selection_algorithm",
                 "selection_subseed",
                 "selection_order",
             ]
@@ -3926,14 +3922,13 @@ fn validate_reference_reductions(
     references: &BTreeMap<String, String>,
     path: &Path,
 ) -> Result<ValidatedManifestReductions, Diagnostic> {
-    const FIELDS: [&str; 15] = [
+    const FIELDS: [&str; 14] = [
         "id",
         "source_reference_id",
         "eligible_bases",
         "region_size_bases",
         "target",
         "root_seed",
-        "selection_algorithm",
         "selection_subseed",
         "selection_order",
         "state",
@@ -3979,10 +3974,8 @@ fn validate_reference_reductions(
             "root_seed",
             path,
         )?;
-        if required_non_empty_text(object, "selection_algorithm", path)?
-            != REDUCED_REFERENCE_SELECTION_ALGORITHM
-            || required_non_empty_text(object, "map_document_kind", path)?
-                != REDUCTION_MAP_DOCUMENT_KIND
+        if required_non_empty_text(object, "map_document_kind", path)?
+            != REDUCTION_MAP_DOCUMENT_KIND
             || required_non_empty_text(object, "map_schema_version", path)?
                 != REDUCTION_MAP_SCHEMA_VERSION
         {
@@ -4555,12 +4548,11 @@ fn validate_effective_reduction(
     let object = value
         .as_object()
         .ok_or_else(|| effective_error(path, "una reducción no es objeto"))?;
-    const FIELDS: [&str; 12] = [
+    const FIELDS: [&str; 11] = [
         "id",
         "source_reference_id",
         "region_size_bases",
         "target",
-        "selection_algorithm",
         "selection_subseed",
         "selection_order",
         "sequences",
@@ -4583,11 +4575,6 @@ fn validate_effective_reduction(
     }
     effective_non_empty_text(target, "declared", path)?;
     let target_bases = effective_positive_u64(target, "bases", path)?;
-    if effective_non_empty_text(object, "selection_algorithm", path)?
-        != REDUCED_REFERENCE_SELECTION_ALGORITHM
-    {
-        return Err(effective_error(path, "selection_algorithm inválido"));
-    }
     validate_lower_hex_64(
         effective_non_empty_text(object, "selection_subseed", path)?,
         "selection_subseed",
@@ -4923,7 +4910,6 @@ fn manifest_reduction_json(output: &ManifestReductionLink) -> Value {
             "bases": output.target_bases,
         },
         "root_seed": output.root_seed,
-        "selection_algorithm": output.selection_algorithm,
         "selection_subseed": output.selection_subseed,
         "selection_order": output.selection_order,
         "state": output.state.as_str(),
@@ -4945,7 +4931,6 @@ fn reduction_json(output: &ReducedReferenceOutput<'_>) -> Value {
             "declared": output.effective.target().declared_value(),
             "bases": output.effective.target_bases(),
         },
-        "selection_algorithm": REDUCED_REFERENCE_SELECTION_ALGORITHM,
         "selection_subseed": output.effective.selection_subseed().to_hex(),
         "selection_order": output.plan.segments().iter().map(|segment| segment.selection_order()).collect::<Vec<_>>(),
         "sequences": output.reference.sequences().iter().map(|sequence| json!({

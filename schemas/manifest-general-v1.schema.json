@@ -145,7 +145,6 @@
         "region_size_bases",
         "target",
         "root_seed",
-        "selection_algorithm",
         "selection_subseed",
         "selection_order",
         "state",
@@ -162,7 +161,6 @@
         "region_size_bases": { "type": "integer", "minimum": 1 },
         "target": { "$ref": "#/$defs/reduction_target" },
         "root_seed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "selection_algorithm": { "const": "reduced_reference_selection_v1" },
         "selection_subseed": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "selection_order": {
           "type": "array",

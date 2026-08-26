@@ -10,10 +10,10 @@ use crate::diagnostics::Diagnostic;
 pub const DERIVATION_VERSION: u32 = 1;
 pub const F2_DERIVATION_VERSION: u32 = 2;
 pub const SUBSEED_DERIVATION_VERSIONS: &[u32] = &[DERIVATION_VERSION, F2_DERIVATION_VERSION];
-pub const SUBSEED_CATALOG_VERSION: &str = "5";
+pub const SUBSEED_CATALOG_VERSION: &str = "6";
 pub const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 pub const RANDOM_ALGORITHM: &str = "ChaCha12";
-pub const REFERENCE_REDUCTION_ALGORITHM: &str = "reduced_reference_selection_v1";
+pub const REFERENCE_REDUCTION_SELECTOR: &str = "direct_proportional_selection";
 
 /// Semilla raíz canónica de 256 bits.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -321,7 +321,7 @@ pub fn derive_subseed(
             &[
                 ("source_reference_id", source_reference_id),
                 ("derived_reference_id", derived_reference_id),
-                ("algorithm", REFERENCE_REDUCTION_ALGORITHM),
+                ("selector", REFERENCE_REDUCTION_SELECTOR),
             ],
         )?,
         RuntimeSubseedScope::MatrixCandidateCount {

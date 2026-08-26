@@ -30,3 +30,6 @@ docs/
 
 # Temporary working directories
 tmp*/
+
+# Resultados locales de ejecuciones; no forman parte del código ni de los fixtures.
+results/

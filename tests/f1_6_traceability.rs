@@ -5,6 +5,7 @@ use std::path::Path;
 const MATRIX: &str =
     include_str!("../evidence/f1-reimplementation/f1-complete-test-req-matrix.tsv");
 const TRACEABILITY: &str = include_str!("../design/trazabilidad-requisitos-0.1.md");
+const EXECUTED_TESTS: &str = include_str!("../evidence/f1.6/executed-test-list.txt");
 
 #[test]
 fn simplified_f1_expedient_closes_exactly_54_requirements_with_real_symbols() {
@@ -63,6 +64,36 @@ fn simplified_f1_expedient_closes_exactly_54_requirements_with_real_symbols() {
     assert_eq!(requirements.len(), 54);
     assert_eq!(observed_counts, expected_counts);
     assert!(!requirements.contains("REQ-CONF-126"));
+
+    assert!(EXECUTED_TESTS.starts_with(
+        "evidence_version=2\nexecuted_at=2026-08-26\ncommand=cargo test --all-targets --all-features\nscope=all executable witnesses cited by the current F1.6 requirement matrix\n"
+    ));
+    let listed_entries = EXECUTED_TESTS
+        .lines()
+        .filter(|line| line.contains("::"))
+        .collect::<Vec<_>>();
+    let listed_symbols = listed_entries
+        .iter()
+        .map(|line| line.rsplit_once("::").expect("qualified test name").1)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        listed_entries.len(),
+        listed_symbols.len(),
+        "the executed list must not repeat a witness"
+    );
+    let mut expected_listed_symbols = MATRIX
+        .lines()
+        .skip(1)
+        .filter(|line| line.split('\t').nth(3) == Some("F1.6"))
+        .flat_map(|line| line.split('\t').nth(4).expect("matrix evidence").split(';'))
+        .map(|witness| witness.rsplit_once("::").expect("matrix witness").1)
+        .collect::<BTreeSet<_>>();
+    expected_listed_symbols
+        .insert("simplified_f1_expedient_closes_exactly_54_requirements_with_real_symbols");
+    assert_eq!(
+        listed_symbols, expected_listed_symbols,
+        "the executed list must contain exactly the live F1.6 witnesses"
+    );
 
     let central_f1 = TRACEABILITY
         .lines()

@@ -9,9 +9,7 @@ use crate::identity::SequenceId;
 use crate::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
-use crate::reference_reduction::{
-    MaterializedPlan, REDUCED_REFERENCE_SELECTION_ALGORITHM, ReductionSegmentClass,
-};
+use crate::reference_reduction::{MaterializedPlan, ReductionSegmentClass};
 
 pub const REDUCTION_MAP_DOCUMENT_KIND: &str = "reference_reduction_map";
 pub const REDUCTION_MAP_SCHEMA_VERSION: &str = "1";
@@ -33,76 +31,72 @@ pub fn build_reduced_reference(
             "el plan no pertenece al FASTA autoritativo",
         ));
     }
-    let mut bases_by_sequence: BTreeMap<&str, Vec<u8>> = BTreeMap::new();
-    let mut classes = BTreeMap::new();
-    for segment in plan.segments() {
-        let sequence = source
-            .sequences()
-            .iter()
-            .find(|sequence| sequence.id() == segment.source_interval().sequence_id())
-            .ok_or_else(|| {
-                map_error(
-                    plan.derived_reference_id().as_str(),
-                    "source_sequence",
-                    "el mapa referencia una secuencia inexistente",
-                )
-            })?;
-        if sequence.class() != segment.sequence_class() {
-            return Err(map_error(
-                plan.derived_reference_id().as_str(),
-                "sequence_class",
-                "la clase del segmento no coincide con la fuente",
-            ));
+    let mut derived_sequences = Vec::new();
+    let mut segments = plan.segments().iter().peekable();
+    for source_sequence in source.sequences() {
+        let Some(first_segment) = segments.peek() else {
+            break;
+        };
+        if first_segment.source_interval().sequence_id() != source_sequence.id() {
+            continue;
         }
-        let start = usize::try_from(segment.source_interval().start()).map_err(|_| {
-            map_error(
-                plan.derived_reference_id().as_str(),
-                "source_interval",
-                "la coordenada inicial no cabe en memoria direccionable",
-            )
-        })?;
-        let end = usize::try_from(segment.source_interval().end()).map_err(|_| {
-            map_error(
-                plan.derived_reference_id().as_str(),
-                "source_interval",
-                "la coordenada final no cabe en memoria direccionable",
-            )
-        })?;
-        let fragment = sequence
-            .sequence()
-            .as_bytes()
-            .get(start..end)
-            .ok_or_else(|| {
+        let mut bases = Vec::new();
+        while let Some(segment) = segments
+            .next_if(|segment| segment.source_interval().sequence_id() == source_sequence.id())
+        {
+            if source_sequence.class() != segment.sequence_class() {
+                return Err(map_error(
+                    plan.derived_reference_id().as_str(),
+                    "sequence_class",
+                    "la clase del segmento no coincide con la fuente",
+                ));
+            }
+            let start = usize::try_from(segment.source_interval().start()).map_err(|_| {
                 map_error(
                     plan.derived_reference_id().as_str(),
                     "source_interval",
-                    "el intervalo fuente queda fuera de la secuencia",
+                    "la coordenada inicial no cabe en memoria direccionable",
                 )
             })?;
-        bases_by_sequence
-            .entry(sequence.id().as_str())
-            .or_default()
-            .extend_from_slice(fragment);
-        classes.insert(sequence.id().as_str(), sequence.class());
-    }
-
-    let mut derived_sequences = Vec::new();
-    for source_sequence in source.sequences() {
-        let Some(bases) = bases_by_sequence.remove(source_sequence.id().as_str()) else {
-            continue;
-        };
+            let end = usize::try_from(segment.source_interval().end()).map_err(|_| {
+                map_error(
+                    plan.derived_reference_id().as_str(),
+                    "source_interval",
+                    "la coordenada final no cabe en memoria direccionable",
+                )
+            })?;
+            let fragment = source_sequence
+                .sequence()
+                .as_bytes()
+                .get(start..end)
+                .ok_or_else(|| {
+                    map_error(
+                        plan.derived_reference_id().as_str(),
+                        "source_interval",
+                        "el intervalo fuente queda fuera de la secuencia",
+                    )
+                })?;
+            bases.extend_from_slice(fragment);
+        }
         let id = SequenceId::parse(
             source_sequence.id().as_str(),
             plan.derived_reference_id().as_str(),
         )?;
         let header = FastaHeader::parse(id.as_str().as_bytes())
             .map_err(|error| internal_error("build_reduced_header", error))?;
-        let dna = DnaSequence::try_from_bytes(&bases)
+        let dna = DnaSequence::try_from_owned_bytes(bases)
             .map_err(|error| internal_error("build_reduced_sequence", error))?;
         derived_sequences.push(
-            ReferenceSequence::new(id, header, classes[source_sequence.id().as_str()], &dna)
+            ReferenceSequence::from_owned(id, header, source_sequence.class(), dna)
                 .map_err(|error| internal_error("build_reduced_reference_sequence", error))?,
         );
+    }
+    if segments.next().is_some() {
+        return Err(map_error(
+            plan.derived_reference_id().as_str(),
+            "source_sequence",
+            "el mapa referencia una secuencia inexistente o fuera de orden",
+        ));
     }
     let source_reference_id = source.id().clone();
     Reference::new(
@@ -122,7 +116,6 @@ pub fn reduction_map_document(plan: &MaterializedPlan) -> Value {
         "schema_version": REDUCTION_MAP_SCHEMA_VERSION,
         "source_reference_id": plan.source_reference_id().as_str(),
         "derived_reference_id": plan.derived_reference_id().as_str(),
-        "algorithm": REDUCED_REFERENCE_SELECTION_ALGORITHM,
         "segments": plan.segments().iter().map(|segment| {
             json!({
                 "materialization_order": segment.materialization_order(),
@@ -193,7 +186,6 @@ pub fn validate_reduction_map_document(
             "schema_version",
             "source_reference_id",
             "derived_reference_id",
-            "algorithm",
             "segments",
         ],
         derived_id,
@@ -205,9 +197,6 @@ pub fn validate_reduction_map_document(
     require_text(object, "schema_version", derived_id, "document")
         .filter(|value| *value == REDUCTION_MAP_SCHEMA_VERSION)
         .ok_or_else(|| map_error(derived_id, "schema_version", "versión de mapa inesperada"))?;
-    require_text(object, "algorithm", derived_id, "document")
-        .filter(|value| *value == REDUCED_REFERENCE_SELECTION_ALGORITHM)
-        .ok_or_else(|| map_error(derived_id, "algorithm", "algoritmo de mapa inesperado"))?;
     if require_text(object, "source_reference_id", derived_id, "document")
         != Some(source.id().as_str())
         || require_text(object, "derived_reference_id", derived_id, "document") != Some(derived_id)

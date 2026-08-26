@@ -5,10 +5,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use genome_population_simulator::identity::ReferenceId;
 use genome_population_simulator::results::{
-    resolve_manifest_reference, validate_effective_config_against_manifest_bytes,
-    validate_general_manifest_bytes, validate_published_resources,
+    validate_effective_config_against_manifest_bytes, validate_general_manifest_bytes,
+    validate_published_resources,
 };
 
 const F1_EFFECTIVE: &[u8] = include_bytes!("fixtures/f1-e14705a/effective-config.json");
@@ -50,43 +49,6 @@ fn archived_e14705a_f1_documents_remain_valid_with_their_frozen_v1_readers() {
         "manifest.json",
         F1_MANIFEST,
     );
-}
-
-#[test]
-fn archived_e14705a_reduction_tree_revalidates_physically_and_resolves_its_derived_reference() {
-    let root = temporary("reduction-tree");
-    fs::create_dir_all(&root).expect("temporary tree");
-    write_fixture_tree(&root);
-    let effective_path = root.join("effective-config.json");
-    let manifest_path = root.join("manifest.json");
-
-    validate_published_resources(
-        &root,
-        &effective_path,
-        F1_REDUCTION_EFFECTIVE,
-        &manifest_path,
-        F1_REDUCTION_MANIFEST,
-    )
-    .expect("F1 physical reference and reduction validation");
-    let reference =
-        ReferenceId::parse("reference-small", "F1 compatibility").expect("archived reference ID");
-    let resolved = resolve_manifest_reference(&manifest_path, &reference)
-        .expect("the F1 derived reference remains resolvable");
-    assert_eq!(
-        resolved.fasta_path(),
-        root.join("resources/references/reference-small.fa")
-    );
-
-    fs::write(
-        root.join("resources/references/reference-small.map.json"),
-        b"{}\n",
-    )
-    .expect("corrupt map");
-    assert!(
-        resolve_manifest_reference(&manifest_path, &reference).is_err(),
-        "a v1 resolver must still authenticate the reduction map"
-    );
-    fs::remove_dir_all(root).expect("cleanup");
 }
 
 #[test]

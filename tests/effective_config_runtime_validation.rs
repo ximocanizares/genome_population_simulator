@@ -109,11 +109,6 @@ fn every_reduction_field_and_exact_reference_set_are_cross_checked() {
             json!("2".repeat(64)),
         ),
         (
-            "selection-algorithm",
-            "/reduced_references/0/selection_algorithm",
-            json!("future_algorithm"),
-        ),
-        (
             "selection-order",
             "/reduced_references/0/selection_order",
             json!([99]),
@@ -136,12 +131,6 @@ fn every_reduction_field_and_exact_reference_set_are_cross_checked() {
             "/reference_reductions/0/root_seed",
             json!("2".repeat(64)),
             "effective-config-v2.schema.json",
-        ),
-        (
-            "manifest-selection-algorithm",
-            "/reference_reductions/0/selection_algorithm",
-            json!("future_algorithm"),
-            "manifest-general-v2.schema.json",
         ),
         (
             "map-document-kind",
