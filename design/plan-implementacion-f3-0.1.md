@@ -5,8 +5,7 @@
 - **Título:** generación mínima de lecturas desde haplotipos.
 - **Versión:** 0.1.
 - **Fecha:** 27 de agosto de 2026.
-- **Estado:** F3.1.1–F3.1.3 completados y revisados; F3.1.4 es el siguiente
-  paso.
+- **Estado:** F3.1.1–F3.1.4 completados y revisados; queda la pausa F3.1.
 - **Ámbito:** F3.1 y F3.5 simplificados de la hoja de ruta vigente.
 - **Fuentes:** especificación §4.4 y §4.6–§4.8; arquitectura §5.5 y §6; DTC-005, DTC-013, DTC-016, DTC-018, DTC-024, DTC-031–032, DTC-035, DTC-037–045 y DTC-079; hoja de ruta F3 y trazabilidad vigente.
 
@@ -108,7 +107,7 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
     cobertura estocástica e invariancia ante referencias de mapeo; puertas
     comunes.
 
-- ☐ F3.1.4. Materializar y comprobar FASTQ final por flujo, conservando N y
+- ✅ F3.1.4. Materializar y comprobar FASTQ final por flujo, conservando N y
   Phred 0, sin degradaciones ni acumulación de lecturas.
   - Depende de: F3.1.3.
   - Procede de: REQ-DAT-17–18/72–73, REQ-RG-06, REQ-SAL-08–09, DTC-007/031–032 y arquitectura §6.3.

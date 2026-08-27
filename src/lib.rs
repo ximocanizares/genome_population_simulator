@@ -12,6 +12,7 @@ pub mod diagnostics;
 pub mod domain;
 pub mod exact_decimal;
 pub mod execution;
+pub mod fastq_output;
 pub mod haplotype;
 pub mod identity;
 pub mod indel_application;

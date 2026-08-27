@@ -7,7 +7,7 @@
 use crate::application::{EffectiveTechnicalEventTarget, ILLUMINA_SE_MINIMAL_READ_LENGTH};
 use crate::diagnostics::Diagnostic;
 use crate::haplotype::{HaplotypeCopy, HaplotypeCopyId, Individual};
-use crate::identity::{IndividualId, SequenceId};
+use crate::identity::{EventId, IndividualId, LibraryId, SequenceId};
 use crate::materialization::{MaterializationError, materialize_copy_interval};
 use crate::randomness::{RandomSamplingError, poisson_count, uniform_u64_below};
 use crate::reference::{Reference, ReferenceSequence};
@@ -202,6 +202,30 @@ impl<'a> WgsLibrarySampler<'a> {
     #[must_use]
     pub const fn plan(&self) -> WgsReadPlan {
         self.plan
+    }
+
+    /// Identidad del individuo cuya única biblioteca recorre este flujo.
+    #[must_use]
+    pub const fn individual_id(&self) -> &IndividualId {
+        self.individual.id()
+    }
+
+    /// Evento técnico que causó las identidades emitidas por este flujo.
+    #[must_use]
+    pub const fn event_id(&self) -> &EventId {
+        self.identities.event_id()
+    }
+
+    /// Biblioteca técnica de este flujo.
+    ///
+    /// La construcción ya comprobó que existe una biblioteca para el
+    /// individuo; `None` solo protege esta frontera frente a una regresión de
+    /// esa invariante compartida.
+    #[must_use]
+    pub fn library_id(&self) -> Option<&LibraryId> {
+        self.identities
+            .library(self.individual.id())
+            .map(|library| library.library_id())
     }
 
     #[must_use]

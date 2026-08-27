@@ -124,6 +124,23 @@ impl ExecutionWorkspace {
         relative_path: &Path,
         write: impl FnOnce(&mut File) -> Result<(), Diagnostic>,
     ) -> Result<ArtifactRecord, Diagnostic> {
+        self.write_streamed_artifact_with_validation(id, kind, relative_path, write, |_| Ok(()))
+    }
+
+    /// Escribe un artefacto por flujo y valida el temporal ya cerrado antes de
+    /// calcular su identidad y hacerlo visible dentro del provisional.
+    ///
+    /// El validador recibe el temporal, nunca la ruta final. Por tanto, un
+    /// fallo de formato o de contadores no deja un artefacto parcial en el
+    /// catálogo ni en el árbol de carga útil.
+    pub fn write_streamed_artifact_with_validation(
+        &mut self,
+        id: &str,
+        kind: &str,
+        relative_path: &Path,
+        write: impl FnOnce(&mut File) -> Result<(), Diagnostic>,
+        validate: impl FnOnce(&Path) -> Result<(), Diagnostic>,
+    ) -> Result<ArtifactRecord, Diagnostic> {
         self.check_new_artifact(id, relative_path)?;
         let final_path = self.payload.join(relative_path);
         let parent = final_path
@@ -141,6 +158,7 @@ impl ExecutionWorkspace {
             file.flush()
                 .map_err(|error| io_error(&temporary, "flush", error))?;
             drop(file);
+            validate(&temporary)?;
             let identity = identify_file(&temporary, relative_path)?;
             verify_identity(&temporary, &identity)?;
             fs::rename(&temporary, &final_path)
