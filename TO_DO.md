@@ -18,3 +18,13 @@
     nombres no consecutivos o asignados externamente.
   - La sintaxis exacta, los conflictos entre modalidades y la interfaz Marimo
     requieren especificación antes de implementarse.
+
+## Salidas FASTQ
+
+- [ ] Permitir publicar los FASTQ finales comprimidos con gzip (`.fastq.gz`).
+  - Mantener la escritura, validación, tamaño y SHA-256 sobre los bytes finales
+    publicados; no sustituir la validación de registros FASTQ por la del flujo
+    comprimido.
+  - Definir el nivel y versión de compresión, la reproducibilidad de los bytes,
+    la compatibilidad con el validador por flujo y las pruebas de
+    interoperabilidad antes de implementarlo.
