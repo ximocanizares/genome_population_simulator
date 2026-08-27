@@ -13,7 +13,7 @@ use crate::diagnostics::Diagnostic;
 use crate::integrity::{ArtifactIdentity, Sha256Writer, identify_file, verify_identity};
 use crate::results::{
     ArtifactRecord, parse_general_manifest_bytes, validate_general_manifest_bytes,
-    validate_published_resources, validate_relative_link,
+    validate_published_event_manifests, validate_published_resources, validate_relative_link,
 };
 
 const INCOMPLETE_MARKER: &str = "INCOMPLETE";
@@ -275,6 +275,7 @@ impl ExecutionWorkspace {
             validate_general_manifest_bytes(&manifest_path, &reloaded)?;
             let reparsed = parse_general_manifest_bytes(&manifest_path, &reloaded)?;
             compare_catalogs(&reparsed, &self.artifacts)?;
+            validate_published_event_manifests(&self.payload, &manifest_path, &reloaded)?;
             self.validate_effective_config(&manifest_path, &reloaded)
         })();
         if result.is_err() {
@@ -309,11 +310,11 @@ impl ExecutionWorkspace {
             .map_err(|error| io_error(&manifest_path, "read_manifest", error))?;
         let declared = parse_general_manifest_bytes(&manifest_path, &manifest)?;
         compare_catalogs(&declared, &self.artifacts)?;
-        // `write_general_manifest` ya realizó la validación física completa
-        // sobre los bytes releídos. En este modelo local confiable, este último
-        // límite verifica los hashes de los artefactos y que el manifiesto
-        // sigue siendo válido y coherente con el catálogo antes del renombrado
-        // atómico.
+        // Revalida todos los enlaces físicos sobre los bytes que realmente se
+        // van a publicar. Entre el cierre del manifiesto y este punto todavía
+        // puede haberse alterado el árbol provisional.
+        validate_published_event_manifests(&self.payload, &manifest_path, &manifest)?;
+        self.validate_effective_config(&manifest_path, &manifest)?;
         self.rename_payload()?;
         // Desde este punto el destino ya es un árbol final limpio. El wrapper
         // exterior solo registra un residuo de limpieza si el proceso cae.
@@ -373,9 +374,12 @@ impl ExecutionWorkspace {
         Ok(())
     }
 
-    pub(crate) fn retain_only_artifact(
+    /// Conserva únicamente artefactos independientes ya validados al cerrar
+    /// un fallo controlado. No reabre ni completa temporales: los demás se
+    /// eliminan antes de formar el manifiesto final fallido.
+    pub(crate) fn retain_only_artifacts(
         &mut self,
-        retained_id: Option<&str>,
+        retained_ids: &BTreeSet<String>,
     ) -> Result<(), Diagnostic> {
         if self.manifest_written {
             return Err(invalid_state(
@@ -386,14 +390,14 @@ impl ExecutionWorkspace {
         for artifact in self
             .artifacts
             .iter()
-            .filter(|artifact| Some(artifact.id.as_str()) != retained_id)
+            .filter(|artifact| !retained_ids.contains(&artifact.id))
         {
             let path = self.payload.join(&artifact.path);
             fs::remove_file(&path)
                 .map_err(|error| io_error(&path, "discard_failed_artifact", error))?;
         }
         self.artifacts
-            .retain(|artifact| Some(artifact.id.as_str()) == retained_id);
+            .retain(|artifact| retained_ids.contains(&artifact.id));
         Ok(())
     }
 
@@ -585,10 +589,19 @@ fn io_error(path: &Path, operation: &str, error: std::io::Error) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::results::{
-        ConfigurationInputRecord, GeneralManifest, ManifestReferenceLink, UnitState,
-        general_manifest_document, json_document_bytes,
+    use crate::application::build_effective_config;
+    use crate::configuration::ExpectedConfigKind;
+    use crate::event_manifest::{
+        EventManifest, EventManifestArtifact, EventManifestReference, event_manifest_bytes,
+        event_manifest_relative_path, validate_event_manifest_bytes,
     };
+    use crate::identity::ReferenceId;
+    use crate::randomness::RootSeed;
+    use crate::results::{
+        ConfigurationInputRecord, GeneralManifest, ManifestEventLink, ManifestReferenceLink,
+        UnitState, general_manifest_document, json_document_bytes,
+    };
+    use crate::technical_identity::derive_technical_identity_plan;
 
     fn temporary(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -610,6 +623,7 @@ mod tests {
             reduced_references: &[],
             population_snvs: None,
             vcf_outputs: &[],
+            events: None,
             authorizations: crate::execution::ExecutionAuthorizations::default(),
             artifacts: &[],
             diagnostics: std::slice::from_ref(&diagnostic),
@@ -714,6 +728,7 @@ mod tests {
             reduced_references: &[],
             population_snvs: None,
             vcf_outputs: &[],
+            events: None,
             authorizations: crate::execution::ExecutionAuthorizations::default(),
             artifacts: &artifacts,
             diagnostics: &[],
@@ -760,6 +775,7 @@ mod tests {
             reduced_references: &[],
             population_snvs: None,
             vcf_outputs: &[],
+            events: None,
             authorizations: crate::execution::ExecutionAuthorizations::default(),
             artifacts: &artifacts,
             diagnostics: std::slice::from_ref(&diagnostic),
@@ -782,5 +798,245 @@ mod tests {
         assert_eq!(error.code(), "GPS-IO-002");
         assert!(!destination.exists());
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn publication_revalidates_event_manifests_immediately_before_rename() {
+        let root = temporary("event-tampered-before-publish");
+        fs::create_dir(&root).expect("root");
+        let destination = root.join("result");
+        let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
+        let reference = workspace
+            .write_artifact(
+                "reference-main-fasta",
+                "reference_fasta",
+                Path::new("resources/references/reference-main.fa"),
+                b">chr1\nACGT\n",
+            )
+            .expect("reference");
+        let effective = effective_technical_event();
+        let event = effective.technical_event().expect("technical event");
+        let reference_id = ReferenceId::parse("reference-main", "test").expect("reference ID");
+        let identities = derive_technical_identity_plan(
+            RootSeed::parse(
+                "root",
+                "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            )
+            .expect("seed"),
+            &reference_id,
+            event.event_id().clone(),
+            event.individual_ids(),
+        )
+        .expect("identities");
+        let libraries = identities.libraries().collect::<Vec<_>>();
+        let fastqs = libraries
+            .iter()
+            .map(|library| {
+                workspace.write_artifact(
+                    &format!("fastq-{}", library.library_id().as_str()),
+                    "fastq",
+                    &PathBuf::from("outputs/fastq")
+                        .join(event.event_id().as_str())
+                        .join(format!("{}.fastq", library.individual_id().as_str())),
+                    b"@read\nA\n+\nI\n",
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .expect("complete FASTQ artifacts");
+        let complete_artifacts = libraries
+            .iter()
+            .zip(&fastqs)
+            .map(|(library, artifact)| EventManifestArtifact {
+                id: &artifact.id,
+                kind: "fastq",
+                state: UnitState::Complete,
+                individual_id: library.individual_id(),
+                library_id: library.library_id(),
+                artifact: Some(artifact),
+                diagnostic: None,
+            })
+            .collect::<Vec<_>>();
+        let complete_event = EventManifest {
+            event,
+            state: UnitState::Complete,
+            identities: &identities,
+            reference: EventManifestReference {
+                reference_id: &reference_id,
+                fasta: &reference,
+            },
+            artifacts: &complete_artifacts,
+            diagnostics: &[],
+        };
+        let event_path = event_manifest_relative_path(event.event_id());
+        let initial_event_bytes = event_manifest_bytes(&complete_event).expect("event bytes");
+        let event_record = workspace
+            .write_streamed_artifact_with_validation(
+                "event-manifest-reads-main",
+                "event_manifest",
+                &event_path,
+                |file| {
+                    file.write_all(&initial_event_bytes)
+                        .map_err(|error| io_error(&event_path, "write_test_event_manifest", error))
+                },
+                |path| {
+                    let bytes = fs::read(path)
+                        .map_err(|error| io_error(path, "read_test_event_manifest", error))?;
+                    validate_event_manifest_bytes(&event_path, &bytes)
+                },
+            )
+            .expect("event manifest");
+        let root_failure = Diagnostic::format("GPS-FMT-001", "fallo controlado");
+        let events = [ManifestEventLink {
+            event_id: event.event_id().as_str().to_owned(),
+            state: UnitState::Complete,
+            manifest_artifact_id: event_record.id.clone(),
+        }];
+        let references = [ManifestReferenceLink {
+            id: reference_id.as_str().to_owned(),
+            fasta_artifact_id: reference.id.clone(),
+        }];
+        let catalog = workspace.artifacts().to_vec();
+        let general = GeneralManifest {
+            execution_id: "event-tamper-regression",
+            state: UnitState::Failed,
+            configuration_input: None,
+            effective_config: None,
+            references: &references,
+            reduced_references: &[],
+            population_snvs: None,
+            vcf_outputs: &[],
+            events: Some(&events),
+            authorizations: crate::execution::ExecutionAuthorizations::default(),
+            artifacts: &catalog,
+            diagnostics: std::slice::from_ref(&root_failure),
+        };
+        workspace
+            .write_general_manifest(
+                &json_document_bytes(&general_manifest_document(&general)).expect("general bytes"),
+            )
+            .expect("finalized general manifest");
+
+        // Simula una manipulación con acceso al provisional: reescribe ambos
+        // catálogos de hash, pero deja el enlace raíz declarado como complete.
+        let event_failure = Diagnostic::internal_invariant("test", "event-tampered");
+        let failed_artifacts = [
+            EventManifestArtifact {
+                id: &fastqs[0].id,
+                kind: "fastq",
+                state: UnitState::Complete,
+                individual_id: libraries[0].individual_id(),
+                library_id: libraries[0].library_id(),
+                artifact: Some(&fastqs[0]),
+                diagnostic: None,
+            },
+            EventManifestArtifact {
+                id: "fastq-unclosed-library",
+                kind: "fastq",
+                state: UnitState::Failed,
+                individual_id: libraries[1].individual_id(),
+                library_id: libraries[1].library_id(),
+                artifact: None,
+                diagnostic: Some(&event_failure),
+            },
+        ];
+        let failed_event = EventManifest {
+            event,
+            state: UnitState::Failed,
+            identities: &identities,
+            reference: EventManifestReference {
+                reference_id: &reference_id,
+                fasta: &reference,
+            },
+            artifacts: &failed_artifacts,
+            diagnostics: std::slice::from_ref(&event_failure),
+        };
+        let replacement = event_manifest_bytes(&failed_event).expect("tampered event bytes");
+        let physical_event_path = workspace.root().join(&event_path);
+        fs::write(&physical_event_path, replacement).expect("tamper event manifest");
+        let replacement_identity =
+            identify_file(&physical_event_path, &event_path).expect("identity");
+        let replacement_record = ArtifactRecord::from_identity(
+            event_record.id.clone(),
+            event_record.kind.clone(),
+            &replacement_identity,
+        )
+        .expect("replacement record");
+        let index = workspace
+            .artifacts
+            .iter()
+            .position(|artifact| artifact.id == event_record.id)
+            .expect("event catalog record");
+        workspace.artifacts[index] = replacement_record.clone();
+        let manifest_path = workspace.root().join("manifest.json");
+        let mut root_document: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).expect("general bytes"))
+                .expect("general JSON");
+        *root_document["artifacts"]
+            .as_array_mut()
+            .expect("catalog")
+            .iter_mut()
+            .find(|artifact| artifact["id"] == event_record.id)
+            .expect("event catalog JSON") = replacement_record.to_json();
+        fs::write(
+            &manifest_path,
+            json_document_bytes(&root_document).expect("rewritten general bytes"),
+        )
+        .expect("tamper general manifest");
+
+        let error = workspace
+            .publish()
+            .expect_err("event link altered after finalization must prevent rename");
+        assert_eq!(error.code(), "GPS-FMT-006");
+        assert!(!destination.exists());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    fn effective_technical_event() -> crate::application::EffectiveConfig {
+        const CONFIG: &str = r#"config_kind = "general"
+schema_version = "1"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+[population_snvs]
+mode = "generate"
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+[reference]
+kind = "simulated"
+id = "reference-main"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 200
+[[initial_populations]]
+population_id = "P1"
+individual_count = 2
+individual_ids = ["sample-A", "sample-B"]
+ploidy = 2
+genotype_model = "hwe"
+[technical_event]
+event_id = "reads-main"
+individual_ids = ["sample-A", "sample-B"]
+read_count = 1
+"#;
+        let admitted = crate::adapters::admit_toml_header(
+            Path::new("publication-event-regression.toml"),
+            CONFIG.as_bytes().to_vec(),
+            ExpectedConfigKind::General,
+        )
+        .expect("header");
+        build_effective_config(&crate::adapters::parse_declared_config(admitted).expect("declared"))
+            .expect("effective")
     }
 }

@@ -29,7 +29,7 @@ fn truncation_unknown_field_and_absent_link_fail_both_validators() {
     unknown
         .as_object_mut()
         .expect("root object")
-        .insert("events".to_owned(), json!([]));
+        .insert("sets".to_owned(), json!([]));
     assert_rejected("unknown-root-field", &unknown);
 
     let mut absent = complete;
@@ -57,6 +57,47 @@ fn complete_manifest_requires_the_canonical_truth_artifact_and_minimum_category(
         .find(|artifact| artifact["id"] == "truth-jsonl")
         .expect("truth artifact")["path"] = json!("truth.jsonl");
     assert_rejected("complete-manifest-mutated-truth-path", &wrong_path);
+}
+
+#[test]
+fn v3_complete_manifest_requires_complete_event_links_in_rust_and_external_schema() {
+    let mut document = complete_manifest();
+    document["schema_version"] = json!("3");
+    document["artifacts"]
+        .as_array_mut()
+        .expect("catalog")
+        .push(artifact(
+            "event-manifest-reads-main",
+            "event_manifest",
+            "events/reads-main/manifest.json",
+        ));
+    document["output_categories"]["minimum"]
+        .as_array_mut()
+        .expect("minimum")
+        .push(json!("event-manifest-reads-main"));
+    document["events"] = json!([{
+        "event_id": "reads-main",
+        "state": "failed",
+        "manifest_artifact_id": "event-manifest-reads-main"
+    }]);
+
+    assert_rejected("v3-complete-manifest-failed-event", &document);
+}
+
+#[test]
+fn v3_manifest_validation_reports_the_v3_schema_label() {
+    let mut document = complete_manifest();
+    document["schema_version"] = json!("3");
+    document["state"] = json!("unexpected");
+    let error = validate_general_manifest_bytes(
+        Path::new("manifest-v3.json"),
+        &serde_json::to_vec(&document).expect("manifest JSON"),
+    )
+    .expect_err("invalid v3 manifest");
+    assert_eq!(
+        error.context().get("schema").map(String::as_str),
+        Some("manifest-general-v3.schema.json")
+    );
 }
 
 #[test]
@@ -262,6 +303,7 @@ fn source_and_derived_fasta_cannot_alias_across_output_categories() {
         reduced_references: &reductions,
         population_snvs: None,
         vcf_outputs: &[],
+        events: None,
         authorizations: genome_population_simulator::execution::ExecutionAuthorizations::default(),
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(&diagnostic),
@@ -340,6 +382,7 @@ fn failed_reduction_keeps_reached_links_and_requested_classification() {
         reduced_references: &reductions,
         population_snvs: None,
         vcf_outputs: &[],
+        events: None,
         authorizations: genome_population_simulator::execution::ExecutionAuthorizations::default(),
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(&diagnostic),
@@ -488,9 +531,22 @@ fn assert_external_bytes(name: &str, bytes: &[u8], expected_success: bool) {
     let instance = temporary(name);
     fs::write(&instance, bytes).expect("write external instance");
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let schema = match serde_json::from_slice::<Value>(bytes)
+        .ok()
+        .and_then(|document| {
+            document
+                .get("schema_version")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .as_deref()
+    {
+        Some("3") => "manifest-general-v3.schema.json",
+        _ => "manifest-general-v2.schema.json",
+    };
     let output = Command::new("python3")
         .arg(root.join("tests/external_manifest_validator.py"))
-        .arg(root.join("schemas/manifest-general-v2.schema.json"))
+        .arg(root.join("schemas").join(schema))
         .arg(&instance)
         .arg(root.join("catalogs/diagnostics-v2.tsv"))
         .output()

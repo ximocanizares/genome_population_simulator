@@ -136,13 +136,13 @@ fn every_reduction_field_and_exact_reference_set_are_cross_checked() {
             "map-document-kind",
             "/reference_reductions/0/map_document_kind",
             json!("future_map"),
-            "manifest-general-v2.schema.json",
+            "manifest-general-v3.schema.json",
         ),
         (
             "map-schema-version",
             "/reference_reductions/0/map_schema_version",
             json!("2"),
-            "manifest-general-v2.schema.json",
+            "manifest-general-v3.schema.json",
         ),
     ] {
         let mut changed = parse(&manifest_bytes);

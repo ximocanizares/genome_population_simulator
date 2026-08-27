@@ -15,6 +15,7 @@ use crate::application::{
 };
 use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
+use crate::event_manifest::{event_manifest_relative_path, validate_event_manifest_bytes};
 use crate::execution::declared_small_event;
 use crate::identity::{
     EventId, FounderKey, IndividualId, PopulationId, ReferenceId, SequenceId, derive_execution_id,
@@ -46,15 +47,16 @@ use crate::reference_reduction_io::{
     REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
     build_reduced_reference, reduction_map_document, validate_reduction_map_document,
 };
+use crate::technical_identity::derive_technical_identity_plan;
 use crate::vcf_contract::{TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfIndexKind, VcfOutputMode};
 use crate::vcf_publication::{
     VCF_ARTIFACT_ID, VCF_ARTIFACT_KIND, VCF_BGZF_ARTIFACT_PATH, VCF_CSI_ARTIFACT_PATH,
     VCF_INDEX_ARTIFACT_ID, VCF_TBI_ARTIFACT_PATH, VCF_TEXT_ARTIFACT_PATH,
 };
 
-/// Versión vigente del manifiesto general. F3 no modifica su contrato: el
-/// manifiesto enlaza la configuración efectiva pero no interpreta el evento.
-pub const GENERAL_MANIFEST_SCHEMA_VERSION: &str = "2";
+/// Versión vigente del manifiesto general. F3 añade enlaces tipados a los
+/// manifiestos de eventos ya cerrados, sin introducir conjuntos genéricos.
+pub const GENERAL_MANIFEST_SCHEMA_VERSION: &str = "3";
 
 /// Versión vigente de la configuración efectiva. F3 usa una versión distinta
 /// para que un lector v2 estricto no interprete silenciosamente `technical_event`.
@@ -226,6 +228,16 @@ pub struct VcfManifestLink {
     pub index_artifact_id: Option<String>,
 }
 
+/// Enlace del manifiesto general al único manifiesto de un evento real. El
+/// detalle técnico continúa en el documento de evento; la raíz solo enlaza su
+/// identidad, estado y artefacto físico validado.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManifestEventLink {
+    pub event_id: String,
+    pub state: UnitState,
+    pub manifest_artifact_id: String,
+}
+
 pub struct GeneralManifest<'a> {
     pub execution_id: &'a str,
     pub state: UnitState,
@@ -235,6 +247,7 @@ pub struct GeneralManifest<'a> {
     pub reduced_references: &'a [ManifestReductionLink],
     pub population_snvs: Option<&'a PopulationSnvsManifestLink>,
     pub vcf_outputs: &'a [VcfManifestLink],
+    pub events: Option<&'a [ManifestEventLink]>,
     pub authorizations: crate::execution::ExecutionAuthorizations,
     pub artifacts: &'a [ArtifactRecord],
     pub diagnostics: &'a [Diagnostic],
@@ -404,7 +417,7 @@ pub fn effective_config_document_with_population_snvs(
 
 #[must_use]
 pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
-    json!({
+    let mut document = json!({
         "manifest_kind": "gps_execution_manifest",
         "schema_version": GENERAL_MANIFEST_SCHEMA_VERSION,
         "execution_id": manifest.execution_id,
@@ -429,6 +442,18 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
             "code": diagnostic.code(),
             "message": diagnostic.message(),
         })).collect::<Vec<_>>(),
+    });
+    if let Some(events) = manifest.events {
+        document["events"] = Value::Array(events.iter().map(manifest_event_json).collect());
+    }
+    document
+}
+
+fn manifest_event_json(link: &ManifestEventLink) -> Value {
+    json!({
+        "event_id": link.event_id,
+        "state": link.state.as_str(),
+        "manifest_artifact_id": link.manifest_artifact_id,
     })
 }
 
@@ -490,6 +515,137 @@ pub fn json_document_bytes(document: &Value) -> Result<Vec<u8>, Diagnostic> {
 /// Analiza y valida el contrato propio y la resolución de todos los enlaces.
 pub fn validate_general_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Diagnostic> {
     parse_general_manifest_bytes(path, bytes).map(|_| ())
+}
+
+/// Relee cada manifiesto de evento enlazado por la raíz y comprueba que sus
+/// hechos físicos siguen siendo exactamente los del catálogo general. Esta
+/// puerta es deliberadamente independiente de la configuración efectiva para
+/// que también proteja un fallo controlado que ya no la publica.
+pub fn validate_published_event_manifests(
+    root: &Path,
+    manifest_path: &Path,
+    manifest_bytes: &[u8],
+) -> Result<(), Diagnostic> {
+    let records = parse_general_manifest_bytes(manifest_path, manifest_bytes)?;
+    let document: Value = serde_json::from_slice(manifest_bytes)
+        .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
+    let object = document
+        .as_object()
+        .ok_or_else(|| manifest_error(manifest_path, "la raíz no es un objeto"))?;
+    let catalog = records
+        .iter()
+        .map(|record| (record.id.as_str(), record))
+        .collect::<BTreeMap<_, _>>();
+    let Some(events) = object.get("events") else {
+        return Ok(());
+    };
+    let mut linked_event_artifacts = BTreeSet::new();
+    let mut linked_fastq_artifacts = BTreeSet::new();
+    for event in events
+        .as_array()
+        .ok_or_else(|| manifest_error(manifest_path, "events no es una lista"))?
+    {
+        let link = event
+            .as_object()
+            .ok_or_else(|| manifest_error(manifest_path, "un enlace de evento no es objeto"))?;
+        let event_id = required_non_empty_text(link, "event_id", manifest_path)?;
+        let state = required_non_empty_text(link, "state", manifest_path)?;
+        let manifest_id = required_non_empty_text(link, "manifest_artifact_id", manifest_path)?;
+        linked_event_artifacts.insert(manifest_id.to_owned());
+        let artifact = catalog.get(manifest_id).ok_or_else(|| {
+            manifest_error(manifest_path, "el artefacto del manifiesto de evento falta")
+        })?;
+        let event_path = root.join(&artifact.path);
+        let observed = identify_file(&event_path, Path::new(&artifact.path))?;
+        if observed.size_bytes() != artifact.size_bytes || observed.digest() != artifact.digest {
+            return Err(manifest_error(
+                manifest_path,
+                "el manifiesto de evento no coincide con su identidad publicada",
+            ));
+        }
+        let bytes = fs::read(&event_path)
+            .map_err(|error| io_error(&event_path, "read_event_manifest", error))?;
+        validate_event_manifest_bytes(Path::new(&artifact.path), &bytes)?;
+        let event_document: Value = serde_json::from_slice(&bytes).map_err(|error| {
+            manifest_error(
+                manifest_path,
+                format!("el manifiesto de evento no es JSON legible: {error}"),
+            )
+        })?;
+        if event_document.get("event_id").and_then(Value::as_str) != Some(event_id)
+            || event_document.get("state").and_then(Value::as_str) != Some(state)
+        {
+            return Err(manifest_error(
+                manifest_path,
+                "el enlace general no coincide con el manifiesto de evento",
+            ));
+        }
+        let reference = event_document
+            .get("reference")
+            .and_then(Value::as_object)
+            .and_then(|reference| reference.get("fasta"))
+            .ok_or_else(|| manifest_error(manifest_path, "falta FASTA de evento"))?;
+        validate_event_artifact_against_catalog(reference, &catalog, manifest_path)?;
+        for artifact in event_document
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .ok_or_else(|| manifest_error(manifest_path, "faltan artefactos de evento"))?
+        {
+            if artifact.get("state").and_then(Value::as_str) == Some("complete") {
+                let physical = artifact.get("artifact").ok_or_else(|| {
+                    manifest_error(manifest_path, "artefacto completo de evento ausente")
+                })?;
+                validate_event_artifact_against_catalog(physical, &catalog, manifest_path)?;
+                let id = physical.get("id").and_then(Value::as_str).ok_or_else(|| {
+                    manifest_error(manifest_path, "artefacto completo de evento sin ID")
+                })?;
+                linked_fastq_artifacts.insert(id.to_owned());
+            }
+        }
+    }
+    let cataloged_event_artifacts = records
+        .iter()
+        .filter(|artifact| artifact.kind == "event_manifest")
+        .map(|artifact| artifact.id.clone())
+        .collect::<BTreeSet<_>>();
+    let cataloged_fastq_artifacts = records
+        .iter()
+        .filter(|artifact| artifact.kind == "fastq")
+        .map(|artifact| artifact.id.clone())
+        .collect::<BTreeSet<_>>();
+    if cataloged_event_artifacts != linked_event_artifacts
+        || cataloged_fastq_artifacts != linked_fastq_artifacts
+    {
+        return Err(manifest_error(
+            manifest_path,
+            "el catálogo contiene o omite artefactos de evento respecto de sus manifiestos enlazados",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_event_artifact_against_catalog(
+    value: &Value,
+    catalog: &BTreeMap<&str, &ArtifactRecord>,
+    manifest_path: &Path,
+) -> Result<(), Diagnostic> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| manifest_error(manifest_path, "artefacto de evento inválido"))?;
+    let id = object
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| manifest_error(manifest_path, "artefacto de evento sin ID"))?;
+    let record = catalog
+        .get(id)
+        .ok_or_else(|| manifest_error(manifest_path, "artefacto de evento no catalogado"))?;
+    if value != &record.to_json() {
+        return Err(manifest_error(
+            manifest_path,
+            "artefacto de evento no coincide con el catálogo físico general",
+        ));
+    }
+    Ok(())
 }
 
 /// Resuelve una referencia exclusivamente desde su manifiesto general F1 y
@@ -753,6 +909,7 @@ fn validate_effective_config_v3_against_manifest_bytes(
             effective_path,
         )?;
     }
+    validate_effective_technical_event_link(object, manifest, effective_path, manifest_path)?;
 
     let manifest_reductions = required_array(manifest, "reference_reductions", manifest_path)?
         .iter()
@@ -856,6 +1013,67 @@ fn validate_effective_config_v3_against_manifest_bytes(
     Ok(())
 }
 
+fn validate_effective_technical_event_link(
+    effective: &serde_json::Map<String, Value>,
+    manifest: &serde_json::Map<String, Value>,
+    effective_path: &Path,
+    manifest_path: &Path,
+) -> Result<(), Diagnostic> {
+    if !effective.contains_key("technical_event") {
+        return match manifest.get("events") {
+            None => Ok(()),
+            Some(Value::Array(events)) if events.is_empty() => Ok(()),
+            _ => Err(effective_error(
+                effective_path,
+                "un manifiesto con eventos exige technical_event en la configuración efectiva",
+            )),
+        };
+    }
+    let event = effective_object(effective, "technical_event", effective_path)?;
+    let event_id = effective_non_empty_text(event, "event_id", effective_path)?;
+    let events = manifest
+        .get("events")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            effective_error(
+                effective_path,
+                "technical_event no tiene enlace en el manifiesto general",
+            )
+        })?;
+    if events.len() != 1 {
+        return Err(effective_error(
+            effective_path,
+            "F3 exige exactamente un enlace de evento técnico",
+        ));
+    }
+    let link = events[0]
+        .as_object()
+        .ok_or_else(|| effective_error(effective_path, "enlace de evento inválido"))?;
+    if link.get("event_id").and_then(Value::as_str) != Some(event_id)
+        || link.get("state").and_then(Value::as_str) != Some("complete")
+    {
+        return Err(effective_error(
+            effective_path,
+            "el enlace del evento no coincide con technical_event efectivo",
+        ));
+    }
+    let manifest_id = link
+        .get("manifest_artifact_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| effective_error(effective_path, "enlace de evento sin manifiesto"))?;
+    let artifacts = required_array(manifest, "artifacts", manifest_path)?;
+    if !artifacts.iter().any(|artifact| {
+        artifact.get("id").and_then(Value::as_str) == Some(manifest_id)
+            && artifact.get("kind").and_then(Value::as_str) == Some("event_manifest")
+    }) {
+        return Err(effective_error(
+            effective_path,
+            "el manifiesto de evento enlazado no está catalogado",
+        ));
+    }
+    Ok(())
+}
+
 /// Relee los artefactos físicos enlazados y reconstruye sus relaciones sin
 /// aceptar effective/manifest como prueba de sus propias declaraciones.
 pub fn validate_published_resources(
@@ -892,6 +1110,7 @@ fn validate_published_resources_v3(
     manifest_path: &Path,
     manifest_bytes: &[u8],
 ) -> Result<(), Diagnostic> {
+    validate_published_event_manifests(root, manifest_path, manifest_bytes)?;
     validate_effective_config_against_manifest_bytes(
         effective_path,
         effective_bytes,
@@ -926,6 +1145,16 @@ fn validate_published_resources_v3(
     let reference_value = effective_object(effective, "reference", effective_path)?;
     let source_reference =
         read_physical_reference(root, reference_value, &artifact_paths, effective_path)?;
+    validate_physical_technical_event(
+        root,
+        effective,
+        manifest_path,
+        manifest_bytes,
+        &artifacts,
+        &root_seed,
+        &source_reference,
+        effective_path,
+    )?;
     validate_physical_vcf_output(
         root,
         &physical_config,
@@ -1096,6 +1325,108 @@ fn validate_published_resources_v3(
         )
         .map_err(|error| physical_error(effective_path, "validate_reduction_map", &error))?;
         references.insert(id.to_owned(), derived);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_physical_technical_event(
+    root: &Path,
+    effective: &serde_json::Map<String, Value>,
+    manifest_path: &Path,
+    manifest_bytes: &[u8],
+    artifacts: &[ArtifactRecord],
+    root_seed: &RootSeed,
+    reference: &Reference,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    let Some(technical_event) = effective.get("technical_event") else {
+        return Ok(());
+    };
+    let technical_event = technical_event
+        .as_object()
+        .ok_or_else(|| effective_error(effective_path, "technical_event inválido"))?;
+    let event_id = EventId::parse(
+        effective_non_empty_text(technical_event, "event_id", effective_path)?,
+        "effective_config",
+    )
+    .map_err(|_| effective_error(effective_path, "event_id técnico inválido"))?;
+    let individuals = effective_array(technical_event, "individual_ids", effective_path)?
+        .iter()
+        .map(|value| {
+            let value = value
+                .as_str()
+                .ok_or_else(|| effective_error(effective_path, "individual_id técnico inválido"))?;
+            IndividualId::parse(value, "effective_config")
+                .map_err(|_| effective_error(effective_path, "individual_id técnico inválido"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let identities =
+        derive_technical_identity_plan(*root_seed, reference.id(), event_id.clone(), &individuals)
+            .map_err(|error| {
+                physical_error(effective_path, "technical_event_identities", &error)
+            })?;
+    let general: Value = serde_json::from_slice(manifest_bytes)
+        .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
+    let event_link = general
+        .get("events")
+        .and_then(Value::as_array)
+        .and_then(|events| events.first())
+        .and_then(Value::as_object)
+        .ok_or_else(|| effective_error(effective_path, "falta enlace físico de technical_event"))?;
+    let manifest_id = required_non_empty_text(event_link, "manifest_artifact_id", manifest_path)?;
+    let artifact = artifacts
+        .iter()
+        .find(|artifact| artifact.id == manifest_id)
+        .ok_or_else(|| effective_error(effective_path, "manifiesto técnico no catalogado"))?;
+    let event_path = root.join(&artifact.path);
+    let event: Value = serde_json::from_slice(
+        &fs::read(&event_path)
+            .map_err(|error| io_error(&event_path, "read_event_manifest", error))?,
+    )
+    .map_err(|error| {
+        effective_error(
+            effective_path,
+            format!("manifiesto técnico ilegible: {error}"),
+        )
+    })?;
+    let selected = identities
+        .libraries()
+        .map(|library| {
+            json!({
+                "individual_id": library.individual_id().as_str(),
+                "library_id": library.library_id().as_str(),
+                "read_group_id": library.read_group_id().as_str(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let expected_event_subseed = identities.event_subseed().to_hex();
+    let profile_matches = event
+        .get("profile")
+        .and_then(Value::as_object)
+        .is_some_and(|profile| {
+            profile.get("id") == technical_event.get("profile")
+                && profile.get("read_length") == technical_event.get("read_length")
+                && profile.get("quality") == technical_event.get("quality")
+        });
+    if event.get("event_id").and_then(Value::as_str) != Some(event_id.as_str())
+        || event.get("event_subseed").and_then(Value::as_str)
+            != Some(expected_event_subseed.as_str())
+        || event.get("technical_batch_id").and_then(Value::as_str)
+            != Some(identities.batch_id().as_str())
+        || event
+            .get("reference")
+            .and_then(Value::as_object)
+            .and_then(|reference| reference.get("reference_id"))
+            .and_then(Value::as_str)
+            != Some(reference.id().as_str())
+        || event.get("selected_individuals").and_then(Value::as_array) != Some(&selected)
+        || !profile_matches
+    {
+        return Err(effective_error(
+            effective_path,
+            "el manifiesto técnico físico no coincide con la configuración efectiva, semilla o referencia",
+        ));
     }
     Ok(())
 }
@@ -2224,29 +2555,51 @@ pub(crate) fn parse_general_manifest_bytes(
     path: &Path,
     bytes: &[u8],
 ) -> Result<Vec<ArtifactRecord>, Diagnostic> {
+    let schema_version = serde_json::from_slice::<Value>(bytes)
+        .ok()
+        .and_then(|document| {
+            document
+                .get("schema_version")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+    parse_general_manifest_bytes_unretagged(path, bytes).map_err(|error| {
+        if schema_version.as_deref() == Some(GENERAL_MANIFEST_SCHEMA_VERSION) {
+            retag_format_schema(error, "manifest-general-v3.schema.json")
+        } else {
+            error
+        }
+    })
+}
+
+fn parse_general_manifest_bytes_unretagged(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<Vec<ArtifactRecord>, Diagnostic> {
     let document: Value = serde_json::from_slice(bytes)
         .map_err(|error| manifest_error(path, format!("JSON no legible: {error}")))?;
     let object = document
         .as_object()
         .ok_or_else(|| manifest_error(path, "la raíz no es un objeto"))?;
-    match object.get("schema_version").and_then(Value::as_str) {
+    let schema_version = object.get("schema_version").and_then(Value::as_str);
+    match schema_version {
         Some("1") => {
             return parse_general_manifest_v1_object(path, object)
                 .map_err(|error| retag_format_schema(error, "manifest-general-v1.schema.json"));
         }
-        Some(GENERAL_MANIFEST_SCHEMA_VERSION) => {}
+        Some("2" | GENERAL_MANIFEST_SCHEMA_VERSION) => {}
         observed => {
             return Err(manifest_error_for_schema(
                 path,
-                "manifest-general-v2.schema.json",
+                "manifest-general-v3.schema.json",
                 format!(
-                    "versión de manifiesto no admitida: {:?}; se admiten \"1\" y \"{}\"",
+                    "versión de manifiesto no admitida: {:?}; se admiten \"1\", \"2\" y \"{}\"",
                     observed, GENERAL_MANIFEST_SCHEMA_VERSION
                 ),
             ));
         }
     }
-    const FIELDS: [&str; 14] = [
+    const FIELDS: [&str; 15] = [
         "manifest_kind",
         "schema_version",
         "execution_id",
@@ -2261,11 +2614,16 @@ pub(crate) fn parse_general_manifest_bytes(
         "output_categories",
         "artifacts",
         "diagnostics",
+        "events",
     ];
-    validate_closed_object(object, &FIELDS, "manifest.json", path)?;
+    let fields = if schema_version == Some("2") {
+        &FIELDS[..14]
+    } else {
+        &FIELDS[..]
+    };
+    validate_closed_object(object, fields, "manifest.json", path)?;
     if object.get("manifest_kind").and_then(Value::as_str) != Some("gps_execution_manifest")
-        || object.get("schema_version").and_then(Value::as_str)
-            != Some(GENERAL_MANIFEST_SCHEMA_VERSION)
+        || !matches!(schema_version, Some("2" | GENERAL_MANIFEST_SCHEMA_VERSION))
     {
         return Err(manifest_error(path, "clase o versión incompatible"));
     }
@@ -2323,6 +2681,7 @@ pub(crate) fn parse_general_manifest_bytes(
     )?;
     let population_snvs =
         validate_manifest_population_snvs(object.get("population_snvs"), &catalog, path)?;
+    let events = validate_manifest_events(object.get("events"), &records, &catalog, path)?;
     validate_manifest_authorizations(object.get("authorizations"), path)?;
     if let Some(id) = population_snvs.as_deref() {
         let declared = object
@@ -2356,6 +2715,14 @@ pub(crate) fn parse_general_manifest_bytes(
     if state == UnitState::Complete {
         expected_minimum.insert("truth-jsonl");
     }
+    if !events.is_empty() {
+        expected_minimum.extend(
+            records
+                .iter()
+                .filter(|artifact| artifact.kind == "fastq" || artifact.kind == "event_manifest")
+                .map(|artifact| artifact.id.as_str()),
+        );
+    }
     for (reference_id, artifact_id) in &references {
         if !reductions.derived_reference_ids.contains(reference_id) {
             expected_minimum.insert(artifact_id.as_str());
@@ -2385,6 +2752,9 @@ pub(crate) fn parse_general_manifest_bytes(
                     .iter()
                     .any(|state| *state != UnitState::Complete)
                 || !diagnostics.is_empty()
+                || events
+                    .iter()
+                    .any(|(_, state, _)| *state != UnitState::Complete)
             {
                 return Err(manifest_error(
                     path,
@@ -2775,6 +3145,59 @@ fn validate_output_categories(
         ));
     }
     Ok(())
+}
+
+fn validate_manifest_events(
+    value: Option<&Value>,
+    records: &[ArtifactRecord],
+    catalog: &BTreeMap<&str, &str>,
+    path: &Path,
+) -> Result<Vec<(String, UnitState, String)>, Diagnostic> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| manifest_error(path, "events no es una lista"))?;
+    let mut previous = None;
+    let mut links = Vec::with_capacity(values.len());
+    for value in values {
+        let object = value
+            .as_object()
+            .ok_or_else(|| manifest_error(path, "un enlace de evento no es objeto"))?;
+        const FIELDS: [&str; 3] = ["event_id", "state", "manifest_artifact_id"];
+        validate_closed_object(object, &FIELDS, "events[]", path)?;
+        let event_id = required_non_empty_text(object, "event_id", path)?;
+        EventId::parse(event_id.to_owned(), "manifest.events")
+            .map_err(|error| manifest_error(path, error.render_human()))?;
+        if previous.is_some_and(|previous: &str| previous >= event_id) {
+            return Err(manifest_error(path, "events no está ordenado por event_id"));
+        }
+        previous = Some(event_id);
+        let state = match required_non_empty_text(object, "state", path)? {
+            "complete" => UnitState::Complete,
+            "failed" => UnitState::Failed,
+            _ => return Err(manifest_error(path, "estado de evento inválido")),
+        };
+        let artifact_id = required_non_empty_text(object, "manifest_artifact_id", path)?;
+        require_artifact_kind(catalog, artifact_id, "event_manifest", path)?;
+        let artifact = records
+            .iter()
+            .find(|artifact| artifact.id == artifact_id)
+            .ok_or_else(|| manifest_error(path, "manifiesto de evento ausente"))?;
+        let expected_path = event_manifest_relative_path(
+            &EventId::parse(event_id.to_owned(), "manifest.events")
+                .map_err(|error| manifest_error(path, error.render_human()))?,
+        );
+        if artifact.path != expected_path.to_string_lossy() {
+            return Err(manifest_error(
+                path,
+                "la ruta del manifiesto de evento no es canónica",
+            ));
+        }
+        links.push((event_id.to_owned(), state, artifact_id.to_owned()));
+    }
+    Ok(links)
 }
 
 fn validate_manifest_population_snvs(

@@ -11,7 +11,10 @@ use genome_population_simulator::application::{
     ILLUMINA_SE_MINIMAL_READ_LENGTH, ILLUMINA_SE_MINIMAL_V1, build_effective_config,
 };
 use genome_population_simulator::configuration::ExpectedConfigKind;
-use genome_population_simulator::results::validate_effective_config_against_manifest_bytes;
+use genome_population_simulator::integrity::identify_file;
+use genome_population_simulator::results::{
+    validate_effective_config_against_manifest_bytes, validate_published_resources,
+};
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -205,6 +208,22 @@ fn f3_technical_event_is_written_to_and_revalidated_from_effective_v3() {
         })
     );
 
+    let mut without_technical_event = effective.clone();
+    without_technical_event
+        .as_object_mut()
+        .expect("effective object")
+        .remove("technical_event");
+    assert!(
+        validate_effective_config_against_manifest_bytes(
+            &effective_path,
+            &serde_json::to_vec(&without_technical_event).expect("effective JSON"),
+            &manifest_path,
+            &manifest_bytes,
+        )
+        .is_err(),
+        "an event link must not outlive its effective technical event"
+    );
+
     let mut unknown_individual = effective.clone();
     unknown_individual["technical_event"]["individual_ids"][0] = json!("absent");
     assert!(
@@ -236,6 +255,46 @@ fn f3_technical_event_is_written_to_and_revalidated_from_effective_v3() {
             &manifest_bytes,
         )
         .is_err()
+    );
+
+    // Un manifiesto de evento puede seguir siendo válido por sí solo y tener
+    // hashes coherentes con la raíz, pero no pertenecer a esta semilla.
+    let event_path = output.join("events/reads-main/manifest.json");
+    let mut event_document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&event_path).expect("event manifest"))
+            .expect("event JSON");
+    event_document["event_subseed"] = json!("f".repeat(64));
+    fs::write(
+        &event_path,
+        serde_json::to_vec_pretty(&event_document).expect("event JSON"),
+    )
+    .expect("mutate event manifest");
+    let event_identity = identify_file(&event_path, Path::new("events/reads-main/manifest.json"))
+        .expect("event identity");
+    let mut forged_manifest: serde_json::Value =
+        serde_json::from_slice(&manifest_bytes).expect("general JSON");
+    let event_manifest_id = forged_manifest["events"][0]["manifest_artifact_id"]
+        .as_str()
+        .expect("event manifest ID")
+        .to_owned();
+    let artifact = forged_manifest["artifacts"]
+        .as_array_mut()
+        .expect("catalog")
+        .iter_mut()
+        .find(|artifact| artifact["id"] == event_manifest_id)
+        .expect("event manifest catalog row");
+    artifact["size_bytes"] = json!(event_identity.size_bytes());
+    artifact["checksum"]["digest"] = json!(event_identity.digest());
+    assert!(
+        validate_published_resources(
+            &output,
+            &effective_path,
+            &effective_bytes,
+            &manifest_path,
+            &serde_json::to_vec(&forged_manifest).expect("forged general JSON"),
+        )
+        .is_err(),
+        "physical event facts must be rederived from effective seed and reference"
     );
     fs::remove_dir_all(root).expect("cleanup");
 }

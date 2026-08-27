@@ -1,5 +1,6 @@
 //! Recorrido de ejecución F1 sin escenarios ni unidades poblacionales sintéticas.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -8,6 +9,12 @@ use crate::application::{EffectiveConfig, EffectiveDirectEvent, EffectiveReferen
 use crate::configuration::ExpectedConfigKind;
 use crate::coordinates::BasePosition;
 use crate::diagnostics::Diagnostic;
+use crate::event_manifest::{
+    EventManifest, EventManifestArtifact, EventManifestReference, event_manifest_bytes,
+    event_manifest_relative_path, validate_event_manifest_bytes,
+};
+use crate::fastq_output::write_wgs_fastq;
+use crate::fastq_validation::validate_wgs_fastq;
 use crate::identity::{ReferenceId, derive_execution_id};
 use crate::initial_individual_integration::IncompatibleGenotypeAuthorization;
 use crate::initial_individual_materialization::{
@@ -40,16 +47,17 @@ use crate::reference_reduction_io::{
     build_reduced_reference, reduction_map_document, validate_reduction_map_document,
 };
 use crate::results::{
-    ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestReductionLink,
-    ManifestReferenceLink, PopulationSnvsManifestLink, ReducedReferenceOutput, ReferenceOutput,
-    UnitState, VcfManifestLink, effective_config_document_with_population_snvs,
-    general_manifest_document, json_document_bytes,
+    ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestEventLink,
+    ManifestReductionLink, ManifestReferenceLink, PopulationSnvsManifestLink,
+    ReducedReferenceOutput, ReferenceOutput, UnitState, VcfManifestLink,
+    effective_config_document_with_population_snvs, general_manifest_document, json_document_bytes,
 };
 use crate::segments::{CanonicalBase, ModificationProvenance};
 use crate::small_event_composition::{
     DeclaredSmallEvent, TargetedCurrentDeletion, TargetedCurrentInsertion,
 };
 use crate::snp_application::{ApplicableSnp, TargetedSnp};
+use crate::technical_identity::derive_technical_identity_plan;
 use crate::truth_projection::{TruthProjectionInput, project_truth, write_truth_artifact};
 use crate::truth_schema::{
     NamedDigest, TRUTH_COORDINATE_CONVENTION, TRUTH_DOCUMENT_KIND, TRUTH_SCHEMA_VERSION,
@@ -57,6 +65,7 @@ use crate::truth_schema::{
 };
 use crate::truth_validation::reference_content_sha256;
 use crate::vcf_publication::publish_truth_vcf;
+use crate::wgs_sampling::WgsLibrarySampler;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutionOutcome {
@@ -138,6 +147,7 @@ fn execute_validated_config_with_effective_document(
     let mut published_reductions = Vec::with_capacity(effective.reduced_references().len());
     let mut population_snvs = None;
     let mut vcf_outputs = Vec::new();
+    let mut event_links: Option<Vec<ManifestEventLink>> = None;
     let started = (|| -> Result<(), Diagnostic> {
         configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
         reference_artifact = Some(write_reference(
@@ -285,6 +295,22 @@ fn execute_validated_config_with_effective_document(
                 index_artifact_id: published.index.map(|artifact| artifact.id),
             });
         }
+        if let Some(event) = effective.technical_event() {
+            match publish_technical_event(
+                &mut workspace,
+                effective,
+                event,
+                prepared_reference.reference(),
+                source_artifact,
+                prepared_execution.initial_individuals.as_ref(),
+            ) {
+                Ok(link) => event_links = Some(vec![link]),
+                Err(failure) => {
+                    event_links = failure.link.map(|link| vec![link]);
+                    return Err(failure.cause);
+                }
+            }
+        }
         let effective_document =
             transform_effective(effective_config_document_with_population_snvs(
                 effective,
@@ -311,6 +337,7 @@ fn execute_validated_config_with_effective_document(
             reduced_references: &manifest_reductions,
             population_snvs: population_snvs.as_ref(),
             vcf_outputs: &vcf_outputs,
+            events: event_links.as_deref(),
             authorizations,
             artifacts: &artifacts,
             diagnostics: &[],
@@ -338,12 +365,27 @@ fn execute_validated_config_with_effective_document(
                 reduction.map_artifact_id = None;
                 reduction.source_fasta_artifact_id = None;
             }
+            let failure_references = if event_links.is_some() {
+                manifest_references
+                    .iter()
+                    .filter(|reference| {
+                        !manifest_reductions
+                            .iter()
+                            .any(|reduction| reduction.id == reference.id)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
             publish_controlled_failure(
                 &mut workspace,
                 execution_id.as_str(),
                 effective,
                 authorizations,
                 &manifest_reductions,
+                event_links.as_deref(),
+                &failure_references,
                 &cause,
             )?;
             workspace.publish()?;
@@ -508,6 +550,222 @@ fn prepared_matrix_digest(
         })
 }
 
+struct TechnicalEventAssemblyFailure {
+    cause: Diagnostic,
+    link: Option<ManifestEventLink>,
+}
+
+struct TechnicalEventArtifact {
+    individual_id: crate::identity::IndividualId,
+    library_id: crate::identity::LibraryId,
+    id: String,
+    state: UnitState,
+    artifact: Option<ArtifactRecord>,
+    diagnostic: Option<Diagnostic>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static FORCE_FASTQ_REVALIDATION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Ensambla el único evento técnico real de F3 exclusivamente desde FASTQ ya
+/// cerrados y validados por el `ExecutionWorkspace`. El manifiesto de evento
+/// se vuelve un artefacto más del catálogo antes de que la raíz lo enlace.
+fn publish_technical_event(
+    workspace: &mut ExecutionWorkspace,
+    effective: &EffectiveConfig,
+    event: &crate::application::EffectiveTechnicalEvent,
+    reference: &Reference,
+    reference_fasta: &ArtifactRecord,
+    initial_individuals: Option<&InitialIndividualsMaterialization>,
+) -> Result<ManifestEventLink, Box<TechnicalEventAssemblyFailure>> {
+    let identities = derive_technical_identity_plan(
+        effective.reproducibility().root_seed(),
+        reference.id(),
+        event.event_id().clone(),
+        event.individual_ids(),
+    )
+    .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+    let individuals = initial_individuals
+        .ok_or_else(|| {
+            technical_event_error("initial_individuals", "faltan individuos materializados")
+        })
+        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?
+        .individuals()
+        .iter()
+        .map(|value| (value.individual().id().clone(), value.individual()))
+        .collect::<BTreeMap<_, _>>();
+    let libraries = identities.libraries().collect::<Vec<_>>();
+    let mut outputs = Vec::with_capacity(libraries.len());
+    for (index, library) in libraries.iter().enumerate() {
+        let individual = individuals.get(library.individual_id()).ok_or_else(|| {
+            technical_event_error(
+                "technical_event.individual_ids",
+                "un individuo seleccionado no tiene verdad materializada",
+            )
+        });
+        let result = individual.and_then(|individual| {
+            let mut sampler =
+                WgsLibrarySampler::new(reference, individual, &identities, event.target())
+                    .map_err(|error| technical_event_error("wgs_sampler", format!("{error:?}")))?;
+            let publication = write_wgs_fastq(workspace, &mut sampler)?;
+            if let Err(cause) = validate_closed_wgs_fastq(
+                &workspace.root().join(&publication.artifact().path),
+                publication.artifact(),
+                reference,
+                individual,
+                &identities,
+                &event.target(),
+            ) {
+                workspace.discard_last_artifact(publication.artifact())?;
+                return Err(cause);
+            }
+            Ok(publication)
+        });
+        match result {
+            Ok(publication) => outputs.push(TechnicalEventArtifact {
+                individual_id: library.individual_id().clone(),
+                library_id: library.library_id().clone(),
+                id: publication.artifact().id.clone(),
+                state: UnitState::Complete,
+                artifact: Some(publication.artifact().clone()),
+                diagnostic: None,
+            }),
+            Err(cause) => {
+                outputs.push(TechnicalEventArtifact {
+                    individual_id: library.individual_id().clone(),
+                    library_id: library.library_id().clone(),
+                    id: format!("fastq-{}", library.library_id().as_str()),
+                    state: UnitState::Failed,
+                    artifact: None,
+                    diagnostic: Some(cause.clone()),
+                });
+                for library in libraries.iter().skip(index + 1) {
+                    outputs.push(TechnicalEventArtifact {
+                        individual_id: library.individual_id().clone(),
+                        library_id: library.library_id().clone(),
+                        id: format!("fastq-{}", library.library_id().as_str()),
+                        state: UnitState::Incomplete,
+                        artifact: None,
+                        diagnostic: Some(cause.clone()),
+                    });
+                }
+                let link = write_event_manifest(
+                    workspace,
+                    event,
+                    &identities,
+                    reference_fasta,
+                    &outputs,
+                    UnitState::Failed,
+                    std::slice::from_ref(&cause),
+                )
+                .map_err(|manifest_error| {
+                    Box::new(TechnicalEventAssemblyFailure {
+                        cause: manifest_error,
+                        link: None,
+                    })
+                })?;
+                return Err(Box::new(TechnicalEventAssemblyFailure {
+                    cause,
+                    link: Some(link),
+                }));
+            }
+        }
+    }
+    write_event_manifest(
+        workspace,
+        event,
+        &identities,
+        reference_fasta,
+        &outputs,
+        UnitState::Complete,
+        &[],
+    )
+    .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))
+}
+
+fn validate_closed_wgs_fastq(
+    path: &Path,
+    artifact: &ArtifactRecord,
+    reference: &Reference,
+    individual: &crate::haplotype::Individual,
+    identities: &crate::technical_identity::TechnicalIdentityPlan,
+    target: &crate::application::EffectiveTechnicalEventTarget,
+) -> Result<(), Diagnostic> {
+    validate_wgs_fastq(path, artifact, reference, individual, identities, *target)
+        .map(|_| ())
+        .map_err(|error| technical_event_error("validate_wgs_fastq", error.to_string()))?;
+    #[cfg(test)]
+    if FORCE_FASTQ_REVALIDATION_FAILURE.replace(false) {
+        return Err(technical_event_error(
+            "validate_wgs_fastq",
+            "injected independent validation failure",
+        ));
+    }
+    Ok(())
+}
+
+fn write_event_manifest(
+    workspace: &mut ExecutionWorkspace,
+    event: &crate::application::EffectiveTechnicalEvent,
+    identities: &crate::technical_identity::TechnicalIdentityPlan,
+    reference_fasta: &ArtifactRecord,
+    outputs: &[TechnicalEventArtifact],
+    state: UnitState,
+    diagnostics: &[Diagnostic],
+) -> Result<ManifestEventLink, Diagnostic> {
+    let artifacts = outputs
+        .iter()
+        .map(|output| EventManifestArtifact {
+            id: &output.id,
+            kind: "fastq",
+            state: output.state,
+            individual_id: &output.individual_id,
+            library_id: &output.library_id,
+            artifact: output.artifact.as_ref(),
+            diagnostic: output.diagnostic.as_ref(),
+        })
+        .collect::<Vec<_>>();
+    let document = EventManifest {
+        event,
+        state,
+        identities,
+        reference: EventManifestReference {
+            reference_id: identities.reference_id(),
+            fasta: reference_fasta,
+        },
+        artifacts: &artifacts,
+        diagnostics,
+    };
+    let bytes = event_manifest_bytes(&document)?;
+    let relative_path = event_manifest_relative_path(event.event_id());
+    let artifact = workspace.write_streamed_artifact_with_validation(
+        &format!("event-manifest-{}", event.event_id().as_str()),
+        "event_manifest",
+        &relative_path,
+        |file| {
+            use std::io::Write;
+            file.write_all(&bytes)
+                .map_err(|error| io_error(&relative_path, "write_event_manifest", error))
+        },
+        |temporary| {
+            let bytes = fs::read(temporary)
+                .map_err(|error| io_error(temporary, "read_event_manifest", error))?;
+            validate_event_manifest_bytes(&relative_path, &bytes)
+        },
+    )?;
+    Ok(ManifestEventLink {
+        event_id: event.event_id().as_str().to_owned(),
+        state,
+        manifest_artifact_id: artifact.id,
+    })
+}
+
+fn technical_event_error(component: &str, detail: impl Into<String>) -> Diagnostic {
+    Diagnostic::internal_invariant("technical_event", component).with("detail", detail.into())
+}
+
 fn matrix_source_id(source_id: &str) -> &str {
     if source_id.is_empty() {
         "MATRIX_DEFAULT"
@@ -578,12 +836,15 @@ fn preflight_vcf_samples(effective: &EffectiveConfig) -> Result<(), Diagnostic> 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)] // El cierre DTC-045 necesita todas las relaciones ya validadas.
 fn publish_controlled_failure(
     workspace: &mut ExecutionWorkspace,
     execution_id: &str,
     effective: &EffectiveConfig,
     authorizations: ExecutionAuthorizations,
     reductions: &[ManifestReductionLink],
+    events: Option<&[ManifestEventLink]>,
+    references: &[ManifestReferenceLink],
     cause: &Diagnostic,
 ) -> Result<(), Diagnostic> {
     let configuration_artifact = workspace
@@ -592,11 +853,31 @@ fn publish_controlled_failure(
         .find(|artifact| artifact.id == "config-general")
         .cloned()
         .filter(|artifact| valid_failure_configuration_copy(workspace, effective, artifact));
-    workspace.retain_only_artifact(
-        configuration_artifact
-            .as_ref()
-            .map(|artifact| artifact.id.as_str()),
-    )?;
+    let mut retained = BTreeSet::new();
+    if let Some(artifact) = &configuration_artifact {
+        retained.insert(artifact.id.clone());
+    }
+    if events.is_some() {
+        retained.extend(
+            references
+                .iter()
+                .map(|reference| reference.fasta_artifact_id.clone()),
+        );
+        retained.extend(
+            workspace
+                .artifacts()
+                .iter()
+                .filter(|artifact| artifact.kind == "fastq")
+                .map(|artifact| artifact.id.clone()),
+        );
+        retained.extend(
+            events
+                .into_iter()
+                .flatten()
+                .map(|event| event.manifest_artifact_id.clone()),
+        );
+    }
+    workspace.retain_only_artifacts(&retained)?;
     let artifacts = workspace.artifacts().to_vec();
     let configuration_input = configuration_artifact.map(|copy| ConfigurationInputRecord {
         kind: "general".to_owned(),
@@ -608,10 +889,11 @@ fn publish_controlled_failure(
         state: UnitState::Failed,
         configuration_input: configuration_input.as_ref(),
         effective_config: None,
-        references: &[],
+        references,
         reduced_references: reductions,
         population_snvs: None,
         vcf_outputs: &[],
+        events,
         authorizations,
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(cause),
@@ -1496,6 +1778,207 @@ mod tests {
                 .expect("artifact catalog")
                 .iter()
                 .all(|artifact| artifact["id"] == "config-general")
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn controlled_failure_after_event_discards_derived_references_with_failed_reductions() {
+        let root = std::env::temp_dir().join(format!(
+            "gps-f3-event-reduction-failure-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).expect("test root");
+        fs::write(
+            root.join("reference.fa"),
+            format!(">chr1\n{}\n", "A".repeat(200)),
+        )
+        .expect("reference");
+        let config = root.join("general.toml");
+        fs::write(
+            &config,
+            r#"config_kind = "general"
+schema_version = "1"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+[reference]
+kind = "supplied"
+id = "reference-main"
+fasta = "reference.fa"
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 200
+[[reduced_references]]
+id = "reference-small"
+source_reference_id = "reference-main"
+region_size_bases = 10
+target_bases = 100
+[population_snvs]
+mode = "generate"
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+individual_ids = ["sample-A"]
+ploidy = 2
+genotype_model = "hwe"
+[technical_event]
+event_id = "reads-main"
+individual_ids = ["sample-A"]
+read_count = 1
+"#,
+        )
+        .expect("config");
+        let effective = load_and_validate_config(&config).expect("effective config");
+        let destination = root.join("result");
+
+        let error = execute_validated_config_with_effective_document(
+            &effective,
+            &destination,
+            ExecutionAuthorizations::default(),
+            |_| Ok(()),
+            std::convert::identity,
+            |_| {
+                Err(Diagnostic::internal_invariant(
+                    "test",
+                    "before-manifest-failure",
+                ))
+            },
+        )
+        .expect_err("injected failure");
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+
+        let manifest_path = destination.join("manifest.json");
+        let manifest_bytes = fs::read(&manifest_path).expect("failed manifest");
+        crate::results::validate_general_manifest_bytes(&manifest_path, &manifest_bytes)
+            .expect("controlled failure remains publishable");
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).expect("JSON");
+        assert_eq!(manifest["state"], "failed");
+        assert_eq!(
+            manifest["references"],
+            json!([{
+                "id": "reference-main",
+                "fasta_artifact_id": "reference-fasta"
+            }])
+        );
+        assert_eq!(manifest["reference_reductions"][0]["state"], "failed");
+        assert_eq!(
+            manifest["reference_reductions"][0]["fasta_artifact_id"],
+            serde_json::Value::Null
+        );
+        assert!(
+            manifest["artifacts"]
+                .as_array()
+                .expect("catalog")
+                .iter()
+                .all(
+                    |artifact| artifact["id"] != "reference-fasta-reference-small"
+                        && artifact["id"] != "reference-map-reference-small"
+                )
+        );
+        assert!(
+            destination
+                .join("events/reads-main/manifest.json")
+                .is_file()
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn failed_independent_fastq_validation_discards_fastq_before_failed_event_manifest() {
+        let root = std::env::temp_dir().join(format!(
+            "gps-f3-fastq-revalidation-failure-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        if root.exists() {
+            fs::remove_dir_all(&root).expect("remove stale test root");
+        }
+        fs::create_dir(&root).expect("test root");
+        let config = root.join("general.toml");
+        fs::write(
+            &config,
+            r#"config_kind = "general"
+schema_version = "1"
+seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+[reference]
+kind = "simulated"
+id = "reference-main"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 200
+[population_snvs]
+mode = "generate"
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+[[population_snvs.generate.populations]]
+population_id = "P1"
+frequency_model = "uniform"
+min_alt_af = 0.2
+max_alt_af = 0.8
+[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+individual_ids = ["sample-A"]
+ploidy = 2
+genotype_model = "hwe"
+[technical_event]
+event_id = "reads-main"
+individual_ids = ["sample-A"]
+read_count = 1
+"#,
+        )
+        .expect("config");
+        let effective = load_and_validate_config(&config).expect("effective config");
+        let destination = root.join("result");
+        FORCE_FASTQ_REVALIDATION_FAILURE.set(true);
+        let error = execute_validated_config(&effective, &destination)
+            .expect_err("injected FASTQ validation failure");
+        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert!(!FORCE_FASTQ_REVALIDATION_FAILURE.get());
+
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(destination.join("manifest.json")).expect("failed manifest"),
+        )
+        .expect("manifest JSON");
+        assert_eq!(manifest["state"], "failed");
+        assert_eq!(manifest["events"][0]["state"], "failed");
+        assert!(
+            destination
+                .join("events/reads-main/manifest.json")
+                .is_file()
+        );
+        assert!(
+            !destination
+                .join("outputs/fastq/reads-main/sample-A.fastq")
+                .exists(),
+            "a FASTQ rejected by independent replay must not be retained"
+        );
+        assert!(
+            manifest["artifacts"]
+                .as_array()
+                .expect("catalog")
+                .iter()
+                .all(|artifact| artifact["kind"] != "fastq")
         );
         fs::remove_dir_all(root).expect("cleanup");
     }

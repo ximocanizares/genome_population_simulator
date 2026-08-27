@@ -45,7 +45,7 @@ fn simulated_cli_runs_repeat_logically_and_pass_independent_oracles() {
     );
     validate_json(
         &first.join("manifest.json"),
-        "manifest-general-v2.schema.json",
+        "manifest-general-v3.schema.json",
     );
     assert!(!first_fasta.with_extension("fa.fai").exists());
     let acceptance_fasta = root.join("acceptance.fa");
@@ -156,7 +156,7 @@ fn supplied_cli_preserves_n_and_exact_input_while_invalid_input_has_no_destinati
     );
     validate_json(
         &destination.join("manifest.json"),
-        "manifest-general-v2.schema.json",
+        "manifest-general-v3.schema.json",
     );
 
     fs::write(&source, b">chrN\nACRTA\n").expect("invalid source");

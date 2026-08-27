@@ -367,6 +367,7 @@ fn write_failed_manifest(
         reduced_references: &[],
         population_snvs: None,
         vcf_outputs: &[],
+        events: None,
         authorizations: genome_population_simulator::execution::ExecutionAuthorizations::default(),
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(diagnostic),
