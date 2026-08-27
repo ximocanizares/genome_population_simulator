@@ -221,8 +221,8 @@ impl ExecutionWorkspace {
         Ok(record)
     }
 
-    /// Valida, escribe y relee el manifiesto general. `manifest.json` no entra
-    /// en el catálogo porque su auto-hash no tendría solución finita.
+    /// Escribe, relee y valida físicamente el manifiesto general. `manifest.json`
+    /// no entra en el catálogo porque su auto-hash no tendría solución finita.
     pub fn write_general_manifest(&mut self, bytes: &[u8]) -> Result<(), Diagnostic> {
         if self.manifest_written {
             return Err(invalid_state(
@@ -234,7 +234,6 @@ impl ExecutionWorkspace {
         let declared = parse_general_manifest_bytes(&manifest_path, bytes)?;
         compare_catalogs(&declared, &self.artifacts)?;
         self.verify_catalog()?;
-        self.validate_effective_config(&manifest_path, bytes)?;
         let temporary = self.payload.join(format!(
             ".manifest.json.gps-tmp-{}-{}",
             std::process::id(),
@@ -292,7 +291,11 @@ impl ExecutionWorkspace {
             .map_err(|error| io_error(&manifest_path, "read_manifest", error))?;
         let declared = parse_general_manifest_bytes(&manifest_path, &manifest)?;
         compare_catalogs(&declared, &self.artifacts)?;
-        self.validate_effective_config(&manifest_path, &manifest)?;
+        // `write_general_manifest` ya realizó la validación física completa
+        // sobre los bytes releídos. En este modelo local confiable, este último
+        // límite verifica los hashes de los artefactos y que el manifiesto
+        // sigue siendo válido y coherente con el catálogo antes del renombrado
+        // atómico.
         self.rename_payload()?;
         // Desde este punto el destino ya es un árbol final limpio. El wrapper
         // exterior solo registra un residuo de limpieza si el proceso cae.
@@ -705,6 +708,60 @@ mod tests {
         assert_eq!(error.code(), "GPS-FMT-006");
         assert_eq!(error.category(), "FMT");
         assert_eq!(error.exit_code(), 1);
+        assert!(!destination.exists());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn publication_rejects_an_artifact_mutated_after_manifest_finalization() {
+        let root = temporary("artifact-mutated-before-publish");
+        fs::create_dir(&root).expect("root");
+        let destination = root.join("result");
+        let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
+        let artifact = workspace
+            .write_artifact(
+                "config-general",
+                "config_general_toml",
+                Path::new("inputs/config/general.toml"),
+                b"config_kind = \"general\"\n",
+            )
+            .expect("artifact");
+        let configuration = ConfigurationInputRecord {
+            kind: "general".to_owned(),
+            original_path: "config/general.toml".to_owned(),
+            copy: artifact,
+        };
+        let diagnostic = Diagnostic::format("GPS-FMT-001", "fallo controlado");
+        let artifacts = workspace.artifacts().to_vec();
+        let manifest = GeneralManifest {
+            execution_id: "execution-mutated-artifact",
+            state: UnitState::Failed,
+            configuration_input: Some(&configuration),
+            effective_config: None,
+            references: &[],
+            reduced_references: &[],
+            population_snvs: None,
+            vcf_outputs: &[],
+            authorizations: crate::execution::ExecutionAuthorizations::default(),
+            artifacts: &artifacts,
+            diagnostics: std::slice::from_ref(&diagnostic),
+        };
+        workspace
+            .write_general_manifest(
+                &json_document_bytes(&general_manifest_document(&manifest)).expect("JSON"),
+            )
+            .expect("manifest");
+
+        fs::write(
+            workspace.root().join("inputs/config/general.toml"),
+            b"config_kind = \"mutated\"\n",
+        )
+        .expect("mutate provisional artifact");
+
+        let error = workspace
+            .publish()
+            .expect_err("a modified artifact must fail the lightweight catalog check");
+        assert_eq!(error.code(), "GPS-IO-002");
         assert!(!destination.exists());
         fs::remove_dir_all(root).expect("cleanup");
     }
