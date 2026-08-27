@@ -5,7 +5,8 @@
 - **Título:** generación mínima de lecturas desde haplotipos.
 - **Versión:** 0.1.
 - **Fecha:** 27 de agosto de 2026.
-- **Estado:** F3.1.1–F3.1.4 completados y revisados; queda la pausa F3.1.
+- **Estado:** F3.1 y F3.5.1–F3.5.2 completados y revisados; F3.5.3 es el
+  siguiente paso.
 - **Ámbito:** F3.1 y F3.5 simplificados de la hoja de ruta vigente.
 - **Fuentes:** especificación §4.4 y §4.6–§4.8; arquitectura §5.5 y §6; DTC-005, DTC-013, DTC-016, DTC-018, DTC-024, DTC-031–032, DTC-035, DTC-037–045 y DTC-079; hoja de ruta F3 y trazabilidad vigente.
 
@@ -125,7 +126,7 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
 
 **Resultado:** un directorio de evento real reúne referencia, verdad, FASTQ, configuración efectiva, comprobaciones internas y manifiesto.
 
-- ☐ F3.5.1. Validar FASTQ por flujo desde vistas de solo lectura de verdad y
+- ✅ F3.5.1. Validar FASTQ por flujo desde vistas de solo lectura de verdad y
   reproducción determinista de los orígenes, sin procedencia durable por lectura.
   - Depende de: PAUSA-F3.1.
   - Procede de: REQ-VAL-01–05/10–12, REQ-DAT-72–73, REQ-SAL-09/13, DTC-004/024/031–032 y arquitectura §6.3.
@@ -137,7 +138,7 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
     sintética distinta del productor detecta origen alterado y conserva como
     informe, no fallo, desviación aleatoria de cobertura; puertas comunes.
 
-- ☐ F3.5.2. Definir, validar y escribir el primer manifiesto JSON Schema de un
+- ✅ F3.5.2. Definir, validar y escribir el primer manifiesto JSON Schema de un
   evento técnico real.
   - Depende de: F3.5.1.
   - Procede de: REQ-MAN-01/72–73/83, REQ-SAL-04–05/17–18/21–25, DTC-005–006/013/035/045 y arquitectura §5.5/§7.4.

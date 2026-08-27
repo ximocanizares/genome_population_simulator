@@ -1,0 +1,304 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use genome_population_simulator::adapters::{admit_toml_header, parse_declared_config};
+use genome_population_simulator::application::build_effective_config;
+use genome_population_simulator::configuration::ExpectedConfigKind;
+use genome_population_simulator::event_manifest::{
+    EventManifest, EventManifestArtifact, EventManifestReference, event_manifest_bytes,
+    event_manifest_document, event_manifest_relative_path, validate_event_manifest_bytes,
+};
+use genome_population_simulator::identity::ReferenceId;
+use genome_population_simulator::randomness::RootSeed;
+use genome_population_simulator::results::{ArtifactRecord, UnitState};
+use genome_population_simulator::technical_identity::derive_technical_identity_plan;
+use serde_json::json;
+
+static NONCE: AtomicU64 = AtomicU64::new(0);
+
+const ROOT_SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+const DIGEST_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DIGEST_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+#[test]
+fn complete_technical_event_manifest_is_written_and_accepted_by_both_validators() {
+    let root = temporary("complete");
+    let (manifest, event_id) = complete_manifest();
+    let bytes = event_manifest_bytes(&manifest).expect("event JSON");
+    let document: serde_json::Value = serde_json::from_slice(&bytes).expect("event document");
+    assert_eq!(document["technology"], "illumina-short-read-v1");
+    validate_event_manifest_bytes(Path::new("events/reads-main/manifest.json"), &bytes)
+        .expect("Rust validator");
+
+    let manifest_path = root.join("events").join(event_id).join("manifest.json");
+    fs::create_dir_all(manifest_path.parent().expect("manifest parent")).expect("manifest parent");
+    fs::write(&manifest_path, &bytes).expect("test manifest");
+    assert_eq!(
+        event_manifest_relative_path(manifest.event.event_id()).to_string_lossy(),
+        "events/reads-main/manifest.json"
+    );
+    assert_external(&manifest_path, true);
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn invalid_schema_and_invalid_library_link_are_rejected() {
+    let root = temporary("invalid");
+    fs::create_dir_all(&root).expect("test directory");
+    let (manifest, _) = complete_manifest();
+    let mut malformed = event_manifest_document(&manifest).expect("event document");
+    malformed["artifacts"][0]["artifact"]["checksum"]["digest"] = json!("A".repeat(64));
+    let malformed_bytes = serde_json::to_vec(&malformed).expect("malformed JSON");
+    assert!(validate_event_manifest_bytes(Path::new("manifest.json"), &malformed_bytes).is_err());
+    let malformed_path = root.join("malformed.json");
+    fs::write(&malformed_path, malformed_bytes).expect("write malformed");
+    assert_external(&malformed_path, false);
+
+    let mut wrong_library = event_manifest_document(&manifest).expect("event document");
+    wrong_library["artifacts"][0]["library_id"] = json!("LIB_not_selected");
+    let wrong_library_bytes = serde_json::to_vec(&wrong_library).expect("wrong library JSON");
+    assert!(
+        validate_event_manifest_bytes(Path::new("manifest.json"), &wrong_library_bytes).is_err()
+    );
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn each_selected_library_has_one_canonical_fastq_result() {
+    let (manifest, _) = complete_manifest();
+    let document = event_manifest_document(&manifest).expect("event document");
+
+    let mut missing = document.clone();
+    missing["artifacts"] = json!([]);
+    assert!(validate_document(&missing).is_err());
+
+    let mut duplicate = document.clone();
+    let mut repeated = duplicate["artifacts"][0].clone();
+    repeated["id"] = json!("fastq-duplicate");
+    repeated["artifact"]["id"] = json!("fastq-duplicate");
+    repeated["artifact"]["path"] = json!("outputs/fastq/reads-main/duplicate.fastq");
+    duplicate["artifacts"]
+        .as_array_mut()
+        .expect("artifacts")
+        .push(repeated);
+    assert!(validate_document(&duplicate).is_err());
+
+    let mut two_libraries = document.clone();
+    two_libraries["selected_individuals"]
+        .as_array_mut()
+        .expect("individuals")
+        .push(json!({
+            "individual_id": "sample-B", "library_id": "LIB_sample-B", "read_group_id": "RG_sample-B",
+        }));
+    let mut second = two_libraries["artifacts"][0].clone();
+    second["id"] = json!("fastq-sample-B");
+    second["individual_id"] = json!("sample-B");
+    second["library_id"] = json!("LIB_sample-B");
+    second["artifact"]["id"] = json!("fastq-sample-B");
+    second["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-B.fastq");
+    two_libraries["artifacts"]
+        .as_array_mut()
+        .expect("artifacts")
+        .push(second);
+    assert!(validate_document(&two_libraries).is_ok());
+    two_libraries["artifacts"]
+        .as_array_mut()
+        .expect("artifacts")
+        .reverse();
+    assert!(validate_document(&two_libraries).is_err());
+}
+
+#[test]
+fn state_diagnostics_and_artifact_coherence_is_checked_externally() {
+    let root = temporary("states");
+    fs::create_dir_all(&root).expect("test directory");
+    let (manifest, _) = complete_manifest();
+    let complete = event_manifest_document(&manifest).expect("event document");
+
+    let mut complete_with_diagnostic = complete.clone();
+    complete_with_diagnostic["diagnostics"] = json!([format_diagnostic()]);
+    assert_rejected_by_both(&root, "complete-with-diagnostic", &complete_with_diagnostic);
+
+    let mut failed_without_diagnostic = complete.clone();
+    failed_without_diagnostic["state"] = json!("failed");
+    assert_rejected_by_both(
+        &root,
+        "failed-without-diagnostic",
+        &failed_without_diagnostic,
+    );
+
+    let failed = failed_document(&complete);
+    assert_accepted_by_both(&root, "failed", &failed);
+
+    let mut ordered_diagnostics = failed.clone();
+    ordered_diagnostics["diagnostics"]
+        .as_array_mut()
+        .expect("diagnostics")
+        .push(json!({
+            "code": "GPS-IO-001",
+            "message": "Una operación de lectura o escritura falló.",
+        }));
+    assert!(validate_document(&ordered_diagnostics).is_ok());
+    ordered_diagnostics["diagnostics"]
+        .as_array_mut()
+        .expect("diagnostics")
+        .reverse();
+    assert!(validate_document(&ordered_diagnostics).is_err());
+
+    let mut invalid_code = failed;
+    invalid_code["diagnostics"][0]["code"] = json!("GPS-BOGUS-001");
+    invalid_code["artifacts"][0]["diagnostic_code"] = json!("GPS-BOGUS-001");
+    assert_rejected_by_both(&root, "invalid-diagnostic-code", &invalid_code);
+
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+fn complete_manifest() -> (EventManifest<'static>, &'static str) {
+    let effective = Box::leak(Box::new(
+        build_effective_config(&declared()).expect("effective"),
+    ));
+    let event = effective.technical_event().expect("technical event");
+    let reference = Box::leak(Box::new(
+        ReferenceId::parse("reference-main", "test").expect("reference ID"),
+    ));
+    let identities = Box::leak(Box::new(
+        derive_technical_identity_plan(
+            RootSeed::parse("root", ROOT_SEED).expect("seed"),
+            reference,
+            event.event_id().clone(),
+            event.individual_ids(),
+        )
+        .expect("technical identities"),
+    ));
+    let fasta = Box::leak(Box::new(record(
+        "reference-main-fasta",
+        "reference_fasta",
+        "resources/references/reference-main.fa",
+        DIGEST_A,
+    )));
+    let individual = event.individual_ids().first().expect("individual");
+    let library = identities.library(individual).expect("library");
+    let artifact_id =
+        Box::leak(format!("fastq-{}", library.library_id().as_str()).into_boxed_str());
+    let fastq = Box::leak(Box::new(record(
+        artifact_id,
+        "fastq",
+        "outputs/fastq/reads-main/sample-A.fastq",
+        DIGEST_B,
+    )));
+    let artifacts = Box::leak(Box::new([EventManifestArtifact {
+        id: artifact_id,
+        kind: "fastq",
+        state: UnitState::Complete,
+        individual_id: individual,
+        library_id: library.library_id(),
+        artifact: Some(fastq),
+        diagnostic: None,
+    }]));
+    (
+        EventManifest {
+            event,
+            state: UnitState::Complete,
+            identities,
+            reference: EventManifestReference {
+                reference_id: reference,
+                fasta,
+            },
+            artifacts,
+            diagnostics: &[],
+        },
+        "reads-main",
+    )
+}
+
+fn declared() -> genome_population_simulator::configuration::DeclaredGeneralConfig {
+    let text = b"config_kind = \"general\"\nschema_version = \"1\"\n\n[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nploidy = 2\ngenotype_model = \"hwe\"\nindividual_ids = [\"sample-A\"]\n\n[technical_event]\nevent_id = \"reads-main\"\nindividual_ids = [\"sample-A\"]\nread_count = 1\n";
+    let admitted = admit_toml_header(
+        Path::new("f3-event-manifest.toml"),
+        text.to_vec(),
+        ExpectedConfigKind::General,
+    )
+    .expect("header");
+    parse_declared_config(admitted).expect("declared configuration")
+}
+
+fn record(id: &str, kind: &str, path: &str, digest: &str) -> ArtifactRecord {
+    ArtifactRecord {
+        id: id.to_owned(),
+        kind: kind.to_owned(),
+        path: path.to_owned(),
+        size_bytes: 1,
+        digest: digest.to_owned(),
+    }
+}
+
+fn assert_external(path: &Path, accepted: bool) {
+    let output = Command::new("python3")
+        .arg("tests/external_jsonschema_validator.py")
+        .arg("schemas/manifest-event-v1.schema.json")
+        .arg(path)
+        .output()
+        .expect("external JSON Schema validator");
+    assert_eq!(
+        output.status.success(),
+        accepted,
+        "external validator for {path:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn validate_document(
+    document: &serde_json::Value,
+) -> Result<(), genome_population_simulator::diagnostics::Diagnostic> {
+    validate_event_manifest_bytes(
+        Path::new("manifest.json"),
+        &serde_json::to_vec(document).expect("JSON"),
+    )
+}
+
+fn failed_document(complete: &serde_json::Value) -> serde_json::Value {
+    let mut failed = complete.clone();
+    failed["state"] = json!("failed");
+    failed["artifacts"][0]["state"] = json!("failed");
+    failed["artifacts"][0]["artifact"] = serde_json::Value::Null;
+    failed["artifacts"][0]["diagnostic_code"] = json!("GPS-FMT-006");
+    failed["diagnostics"] = json!([format_diagnostic()]);
+    failed
+}
+
+fn format_diagnostic() -> serde_json::Value {
+    json!({
+        "code": "GPS-FMT-006",
+        "message": "Un documento JSON producido no satisface su esquema publicado.",
+    })
+}
+
+fn assert_accepted_by_both(root: &Path, label: &str, document: &serde_json::Value) {
+    assert!(
+        validate_document(document).is_ok(),
+        "Rust validator: {label}"
+    );
+    let path = root.join(format!("{label}.json"));
+    fs::write(&path, serde_json::to_vec(document).expect("JSON")).expect("test document");
+    assert_external(&path, true);
+}
+
+fn assert_rejected_by_both(root: &Path, label: &str, document: &serde_json::Value) {
+    assert!(
+        validate_document(document).is_err(),
+        "Rust validator: {label}"
+    );
+    let path = root.join(format!("{label}.json"));
+    fs::write(&path, serde_json::to_vec(document).expect("JSON")).expect("test document");
+    assert_external(&path, false);
+}
+
+fn temporary(label: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "gps-f3-event-manifest-{}-{}-{label}",
+        std::process::id(),
+        NONCE.fetch_add(1, Ordering::Relaxed)
+    ))
+}
