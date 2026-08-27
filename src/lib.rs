@@ -42,3 +42,4 @@ pub mod vcf_projection;
 pub mod vcf_publication;
 pub mod vcf_representation;
 pub mod vcf_semantic_validation;
+pub mod wgs_sampling;

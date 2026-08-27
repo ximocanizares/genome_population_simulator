@@ -727,6 +727,12 @@ impl SegmentChain {
         &self.indel_state.pieces
     }
 
+    /// Longitud de la secuencia vigente después de todas las modificaciones
+    /// pequeñas, sin reconstruir sus bases.
+    pub fn current_length(&self) -> Result<u64, SegmentError> {
+        piece_length(&self.indel_state.pieces)
+    }
+
     #[must_use]
     /// Descriptores de fuente conservados por compatibilidad estructural.
     ///

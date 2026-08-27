@@ -39,6 +39,7 @@ fn technical_identities_and_template_subseed_are_repeatable() {
     let first = plan(&["sample-A"]);
     let repeated = plan(&["sample-A"]);
 
+    assert_eq!(first.reference_id(), &reference());
     assert_eq!(first.event_id().as_str(), repeated.event_id().as_str());
     assert_eq!(first.batch_id().as_str(), repeated.batch_id().as_str());
     assert_eq!(first.event_subseed(), repeated.event_subseed());
@@ -218,6 +219,33 @@ fn technical_event_subseed_matches_historical_vector_and_isolates_causes() {
     .expect("changed reference plan");
     assert_ne!(plan.event_subseed(), changed_event.event_subseed());
     assert_ne!(plan.event_subseed(), changed_reference.event_subseed());
+}
+
+#[test]
+fn technical_library_count_subseed_is_separate_and_invariant_to_other_libraries() {
+    let sample_a = individual("sample-A");
+    let only_a = plan(&["sample-A"]);
+    let reordered = plan(&["sample-B", "sample-A"]);
+    let count = only_a
+        .derive_library_count_subseed(&sample_a)
+        .expect("library count subseed");
+    assert_eq!(
+        count.to_hex(),
+        "a15ed6701dc96c809d699c3a17a524a7b6738752be9762cb8f63e11e46aa6e1b"
+    );
+    assert_eq!(
+        count,
+        reordered
+            .derive_library_count_subseed(&sample_a)
+            .expect("unchanged library count subseed")
+    );
+    assert_ne!(
+        count,
+        only_a
+            .derive_template(&sample_a, TemplateOrdinal::new(0))
+            .expect("template")
+            .subseed()
+    );
 }
 
 #[test]

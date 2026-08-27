@@ -2,7 +2,8 @@
 
 Los ficheros `subseed-scopes-v1.tsv`, `subseed-scopes-v2.tsv`,
 `subseed-scopes-v3.tsv`, `subseed-scopes-v4.tsv`, `subseed-scopes-v5.tsv`,
-`subseed-scopes-v6.tsv`, `subseed-scopes-v7.tsv`, `id-classes-v1.tsv` e
+`subseed-scopes-v6.tsv`, `subseed-scopes-v7.tsv`, `subseed-scopes-v8.tsv`,
+`id-classes-v1.tsv` e
 `id-classes-v2.tsv` fijan los contratos versionados
 de la codificación definida por DTC-037 y DTC-039. La versión 3 añade el ámbito
 `reference_reduction` sin modificar los vectores anteriores. Sus filas son vectores
@@ -27,6 +28,12 @@ automáticas. `TemplateId` es la excepción acotada de DTC-039: se compone como
 el evento y el ordinal lo es dentro de la biblioteca, no hay colisión posible
 ni se conserva un registro creciente de plantillas. Ninguna causa incorpora
 ruta, orden de iteración, hilo o planificación.
+
+La v8 conserva literalmente la v7 y añade `technical_library_count`, derivado
+de `event_id` y `library_id`. Es el único flujo que resuelve el número Poisson
+de plantillas de una biblioteca WGS; queda separado de los sorteos de origen y
+orientación de cada plantilla, y por ello añadir o reordenar bibliotecas no
+altera el conteo ya existente.
 
 Cada entero es `u32` big-endian. Los nombres de campo son ASCII y sus valores
 son UTF-8; ambos llevan delante su longitud en bytes. Las rutas, el reloj, los

@@ -10,7 +10,7 @@ use crate::diagnostics::Diagnostic;
 pub const DERIVATION_VERSION: u32 = 1;
 pub const F2_DERIVATION_VERSION: u32 = 2;
 pub const SUBSEED_DERIVATION_VERSIONS: &[u32] = &[DERIVATION_VERSION, F2_DERIVATION_VERSION];
-pub const SUBSEED_CATALOG_VERSION: &str = "7";
+pub const SUBSEED_CATALOG_VERSION: &str = "8";
 pub const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 pub const RANDOM_ALGORITHM: &str = "ChaCha12";
 pub const REFERENCE_REDUCTION_SELECTOR: &str = "direct_proportional_selection";
@@ -239,6 +239,12 @@ pub enum RuntimeSubseedScope<'a> {
         event_id: &'a str,
         library_id: &'a str,
         template_ordinal: u64,
+    },
+    /// Recuento estocástico WGS por biblioteca. Es distinto del sorteo de
+    /// cada plantilla para conservar independencia e invariancia por muestra.
+    TechnicalLibraryCount {
+        event_id: &'a str,
+        library_id: &'a str,
     },
 }
 
@@ -552,6 +558,14 @@ pub fn derive_subseed(
                 ("library_id", library_id),
                 ("template_ordinal", &template_ordinal.to_string()),
             ],
+        )?,
+        RuntimeSubseedScope::TechnicalLibraryCount {
+            event_id,
+            library_id,
+        } => canonical_material_v2(
+            root,
+            "technical_library_count",
+            &[("event_id", event_id), ("library_id", library_id)],
         )?,
     };
     Ok(Subseed(blake3::derive_key(DERIVATION_CONTEXT, &material)))

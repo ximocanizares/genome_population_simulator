@@ -5,7 +5,7 @@
 - **Título:** generación mínima de lecturas desde haplotipos.
 - **Versión:** 0.1.
 - **Fecha:** 27 de agosto de 2026.
-- **Estado:** F3.1.1–F3.1.2 completados y revisados; F3.1.3 es el siguiente
+- **Estado:** F3.1.1–F3.1.3 completados y revisados; F3.1.4 es el siguiente
   paso.
 - **Ámbito:** F3.1 y F3.5 simplificados de la hoja de ruta vigente.
 - **Fuentes:** especificación §4.4 y §4.6–§4.8; arquitectura §5.5 y §6; DTC-005, DTC-013, DTC-016, DTC-018, DTC-024, DTC-031–032, DTC-035, DTC-037–045 y DTC-079; hoja de ruta F3 y trazabilidad vigente.
@@ -91,13 +91,15 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
   - Cambia: catálogo versionado y derivación solo para evento, biblioteca, tanda, grupo de lectura y plantillas que F3 genera. La frontera del evento recibe `ReferenceId` tipado. Batch, biblioteca y grupo de lectura conservan BLAKE3 y registro de colisiones; por excepción explícita de DTC-039, `TemplateId` se compone como `TPL_<library_id>_<template_ordinal_decimal>`, único por construcción sin retener un registro por plantilla.
   - Se comprueba con: cargo test --test f3_technical_identity --locked; semilla fija reproduce ID/subsemilla y el vector histórico `technical_event`; cambiar cada causa altera su ámbito, texto/ruta inválido no cruza la frontera tipada, añadir o reordenar individuo no cambia plantilla existente y derivar muchos ordinales no incrementa estado residente; puertas comunes.
 
-- ☐ F3.1.3. Resolver el número estocástico de lecturas y muestrear sus orígenes
+- ✅ F3.1.3. Resolver el número estocástico de lecturas y muestrear sus orígenes
   desde la vista haplotípica faseada, sin reconstruir `truth.jsonl`.
   - Depende de: F3.1.1–F3.1.2 y estado haplotípico F2.
   - Procede de: REQ-DAT-15/24/68, REQ-WGS-01/04/07/09, DTC-018/031–032 y arquitectura §7.3.
   - Cambia: simulación WGS mínima de solo lectura del estado haplotípico; usa
     longitud haploide elegible como denominador y reparte por copias en
-    proporción a esa longitud. Por lectura produce transitoriamente plantilla,
+    proporción a esa longitud. `technical_library_count` deriva por evento y
+    biblioteca el único flujo Poisson del recuento, separado de cada plantilla.
+    Por lectura produce transitoriamente plantilla,
     individuo, copia/haplotipo, intervalo, orientación y secuencia verdadera;
     no serializa procedencia F4.
   - Se comprueba con: cargo test --test f3_wgs_sampling --locked; verdad

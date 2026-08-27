@@ -7,7 +7,7 @@ use genome_population_simulator::haplotype::{HaplotypePhase, Individual, Ploidy}
 use genome_population_simulator::identity::{EventId, IndividualId, ReferenceId, SequenceId};
 use genome_population_simulator::materialization::{
     GenotypeQueryError, MaterializationError, SnpLocus, SnpLocusError, derive_snp_genotype,
-    materialize_copy,
+    materialize_copy, materialize_copy_interval,
 };
 use genome_population_simulator::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
@@ -126,6 +126,45 @@ fn materializes_a_haploid_copy_from_manual_snp_indel_truth_and_preserves_n() {
     let sequence = materialize_copy(&individual.sequences()[0].copies()[0], &reference)
         .expect("materialized copy");
     assert_eq!(sequence, b"NANNTTN");
+}
+
+#[test]
+fn interval_materialization_matches_the_manual_full_truth_across_edits_and_edges() {
+    let reference = reference();
+    let individual = individual(&reference, 1)
+        .with_copy_segments(
+            &SequenceId::parse("chr1", "test").expect("sequence ID"),
+            HaplotypePhase::from_copy_index(0).expect("phase"),
+            edited_chain(&reference),
+        )
+        .expect("updated individual");
+    let copy = &individual.sequences()[0].copies()[0];
+    // Verdad construida manualmente: NACGTN, inserción NN tras A, C→T y
+    // deleción de G = NANNTTN. No deriva las ventanas del materializador.
+    let truth = b"NANNTTN";
+    let full = materialize_copy(copy, &reference).expect("full copy");
+    assert_eq!(full, truth);
+
+    for (start, end, label) in [
+        (0, 2, "extremo inicial"),
+        (1, 5, "inserción y SNP"),
+        (3, 6, "límite de deleción"),
+        (5, 7, "extremo final"),
+    ] {
+        assert_eq!(
+            materialize_copy_interval(copy, &reference, start, end).expect(label),
+            full[usize::try_from(start).expect("start")..usize::try_from(end).expect("end")],
+            "{label}",
+        );
+    }
+    for start in 0..u64::try_from(truth.len()).expect("length") {
+        for end in start + 1..=u64::try_from(truth.len()).expect("length") {
+            assert_eq!(
+                materialize_copy_interval(copy, &reference, start, end).expect("window"),
+                full[usize::try_from(start).expect("start")..usize::try_from(end).expect("end")],
+            );
+        }
+    }
 }
 
 #[test]

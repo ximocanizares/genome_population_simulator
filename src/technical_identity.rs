@@ -87,6 +87,7 @@ impl TechnicalTemplateIdentity {
 #[derive(Debug)]
 pub struct TechnicalIdentityPlan {
     root_seed: RootSeed,
+    reference_id: ReferenceId,
     event_id: EventId,
     batch_id: BatchId,
     event_subseed: Subseed,
@@ -94,6 +95,15 @@ pub struct TechnicalIdentityPlan {
 }
 
 impl TechnicalIdentityPlan {
+    /// Referencia tipada que causó la identidad y la subsemilla del evento.
+    ///
+    /// Los consumidores deben compararla con la referencia del estado antes de
+    /// derivar cualquier decisión aleatoria.
+    #[must_use]
+    pub const fn reference_id(&self) -> &ReferenceId {
+        &self.reference_id
+    }
+
     #[must_use]
     pub const fn event_id(&self) -> &EventId {
         &self.event_id
@@ -150,6 +160,31 @@ impl TechnicalIdentityPlan {
             template_ordinal,
             subseed,
         })
+    }
+
+    /// Deriva el flujo exclusivo que resuelve el número estocástico de
+    /// plantillas de una biblioteca. No comparte estado ni subsemilla con las
+    /// decisiones de origen y orientación de sus plantillas.
+    pub fn derive_library_count_subseed(
+        &self,
+        individual_id: &IndividualId,
+    ) -> Result<Subseed, Diagnostic> {
+        let library = self.libraries.get(individual_id).ok_or_else(|| {
+            Diagnostic::domain(
+                "GPS-DOMAIN-001",
+                "Un identificador aportado incumple la sintaxis o el ámbito de su categoría.",
+            )
+            .with("identifier", individual_id.as_str())
+            .with("category", "individual")
+            .with("scope", self.event_id.as_str())
+        })?;
+        derive_subseed(
+            self.root_seed,
+            RuntimeSubseedScope::TechnicalLibraryCount {
+                event_id: self.event_id.as_str(),
+                library_id: library.library_id().as_str(),
+            },
+        )
     }
 }
 
@@ -230,6 +265,7 @@ pub fn derive_technical_identity_plan(
     }
     Ok(TechnicalIdentityPlan {
         root_seed,
+        reference_id: reference_id.clone(),
         event_id,
         batch_id,
         event_subseed,

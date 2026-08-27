@@ -137,6 +137,139 @@ pub fn materialize_copy(
     materialize_current_indel_pieces(copy, reference, copy.segments().current_modifications())
 }
 
+/// Reconstruye únicamente un intervalo de coordenadas vigentes de una copia.
+///
+/// El intervalo pertenece al espacio de la secuencia haplotípica posterior a
+/// indels, no a las coordenadas de la referencia. Así el consumidor técnico
+/// puede obtener una lectura sin materializar la copia completa.
+pub fn materialize_copy_interval(
+    copy: &HaplotypeCopy,
+    reference: &Reference,
+    start: u64,
+    end: u64,
+) -> Result<Vec<u8>, MaterializationError> {
+    if copy.id().reference_id() != reference.id() {
+        return Err(MaterializationError::CopyReferenceMismatch);
+    }
+    if start >= end {
+        return Err(MaterializationError::IndexOverflow);
+    }
+    let mut result = Vec::new();
+    let mut current_start = 0_u64;
+    for piece in copy.segments().current_modifications() {
+        let piece_length = current_piece_length(piece)?;
+        let current_end = current_start
+            .checked_add(piece_length)
+            .ok_or(MaterializationError::IndexOverflow)?;
+        let overlap_start = start.max(current_start);
+        let overlap_end = end.min(current_end);
+        if overlap_start < overlap_end {
+            match piece {
+                CurrentIndelPiece::Source(source) => append_source_interval(
+                    &mut result,
+                    copy,
+                    reference,
+                    source,
+                    overlap_start - current_start,
+                    overlap_end - current_start,
+                )?,
+                CurrentIndelPiece::Inserted(inserted) => {
+                    let slice_start = usize::try_from(overlap_start - current_start)
+                        .map_err(|_| MaterializationError::IndexOverflow)?;
+                    let slice_end = usize::try_from(overlap_end - current_start)
+                        .map_err(|_| MaterializationError::IndexOverflow)?;
+                    result.extend_from_slice(
+                        inserted
+                            .bases()
+                            .get(slice_start..slice_end)
+                            .ok_or(MaterializationError::IndexOverflow)?,
+                    );
+                }
+            }
+        }
+        current_start = current_end;
+    }
+    if current_start < end || result.len() != usize::try_from(end - start).unwrap_or(usize::MAX) {
+        return Err(MaterializationError::IndexOverflow);
+    }
+    Ok(result)
+}
+
+fn current_piece_length(piece: &CurrentIndelPiece) -> Result<u64, MaterializationError> {
+    match piece {
+        CurrentIndelPiece::Source(source) => Ok(source.source().len()),
+        CurrentIndelPiece::Inserted(inserted) => {
+            u64::try_from(inserted.bases().len()).map_err(|_| MaterializationError::IndexOverflow)
+        }
+    }
+}
+
+fn append_source_interval(
+    destination: &mut Vec<u8>,
+    copy: &HaplotypeCopy,
+    reference: &Reference,
+    source: &CurrentSourcePiece,
+    local_start: u64,
+    local_end: u64,
+) -> Result<(), MaterializationError> {
+    if source.source().reference_id() != reference.id() {
+        return Err(MaterializationError::SourceReferenceMismatch);
+    }
+    if source.source().sequence_id() != copy.id().sequence_id() {
+        return Err(MaterializationError::SourceSequenceMismatch);
+    }
+    let sequence = reference_sequence(reference, source.source().sequence_id())?;
+    if source.source().sequence_length() != sequence.length() {
+        return Err(MaterializationError::SourceLengthMismatch {
+            expected: source.source().sequence_length(),
+            found: sequence.length(),
+        });
+    }
+    let source_start = source
+        .source()
+        .start()
+        .checked_add(local_start)
+        .ok_or(MaterializationError::IndexOverflow)?;
+    let source_end = source
+        .source()
+        .start()
+        .checked_add(local_end)
+        .ok_or(MaterializationError::IndexOverflow)?;
+    let start_index =
+        usize::try_from(source_start).map_err(|_| MaterializationError::IndexOverflow)?;
+    let end_index = usize::try_from(source_end).map_err(|_| MaterializationError::IndexOverflow)?;
+    let output_start = destination.len();
+    destination.extend_from_slice(
+        sequence
+            .sequence()
+            .as_bytes()
+            .get(start_index..end_index)
+            .ok_or(MaterializationError::IndexOverflow)?,
+    );
+    for snp in source.snps() {
+        let position = snp.position().offset();
+        if (source_start..source_end).contains(&position) {
+            let offset = usize::try_from(position - source_start)
+                .map_err(|_| MaterializationError::IndexOverflow)?;
+            let index = output_start
+                .checked_add(offset)
+                .ok_or(MaterializationError::IndexOverflow)?;
+            let found = *destination
+                .get(index)
+                .ok_or(MaterializationError::IndexOverflow)?;
+            if found != snp.reference().as_byte() {
+                return Err(MaterializationError::SnpReferenceMismatch {
+                    position,
+                    expected: snp.reference(),
+                    found,
+                });
+            }
+            destination[index] = snp.alternate().as_byte();
+        }
+    }
+    Ok(())
+}
+
 fn materialize_current_indel_pieces(
     copy: &HaplotypeCopy,
     reference: &Reference,
