@@ -5,8 +5,8 @@
 - **Título:** generación mínima de lecturas desde haplotipos.
 - **Versión:** 0.1.
 - **Fecha:** 27 de agosto de 2026.
-- **Estado:** F3.1 y F3.5.1–F3.5.2 completados y revisados; F3.5.3 es el
-  siguiente paso.
+- **Estado:** F3.1 y F3.5.1–F3.5.4 completados; pendiente la pausa de revisión
+  de F3.
 - **Ámbito:** F3.1 y F3.5 simplificados de la hoja de ruta vigente.
 - **Fuentes:** especificación §4.4 y §4.6–§4.8; arquitectura §5.5 y §6; DTC-005, DTC-013, DTC-016, DTC-018, DTC-024, DTC-031–032, DTC-035, DTC-037–045 y DTC-079; hoja de ruta F3 y trazabilidad vigente.
 
@@ -150,7 +150,7 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
     completo e inválido pasan o fallan frente al esquema propio y al validador
     JSON Schema existente; puertas comunes.
 
-- ☐ F3.5.3. Ensamblar y publicar el primer evento real desde sus artefactos
+- ✅ F3.5.3. Ensamblar y publicar el primer evento real desde sus artefactos
   validados.
   - Depende de: F3.5.2.
   - Procede de: REQ-MAN-01/72–73/83, REQ-SAL-04–05/17–18/21–25,
@@ -162,11 +162,11 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
     completo y fallo controlado prueban que solo artefactos validados son
     completos e independientes conservan estado; puertas comunes.
 
-- ☐ F3.5.4. Cerrar recorrido extremo a extremo con verdad conocida pequeña y FASTQ verificable.
+- ✅ F3.5.4. Cerrar recorrido extremo a extremo con verdad conocida pequeña y FASTQ verificable.
   - Depende de: F3.5.3.
   - Procede de: REQ-VAL-01–03/11, REQ-MAN-01/37, REQ-SAL-05/08–09/13/18 y ACE-17/34/46/64/69.
   - Cambia: prueba integrada y nota breve de cierre; no amplía modelo técnico ni publica paquete/imagen.
-  - Se comprueba con: cargo test --test f3_end_to_end --locked y validadores JSON Schema existentes. Demuestra configuración → referencia → individuo → verdad → FASTQ y que verdad no procede de evidencia; puertas comunes.
+  - Se comprueba con: cargo test --test f3_end_to_end --locked y validadores JSON Schema existentes. Demuestra configuración → referencia → individuo → verdad → FASTQ y que verdad no procede de evidencia. La matriz fija una posición distinta, de modo que no puede enmascarar el SNP directo de fase 0; puertas comunes.
 
 > **PAUSA-F3.5 / Revisión de F3.** Usar el primer conjunto FASTQ extremo a extremo antes de ampliar biología o técnica. Confirmar utilidad como entrada externa de mapeo/detección, hechos reales en estados/manifiestos y ausencia de escenarios, protocolos, persistencia, empaquetado u hardening F9.
 
@@ -175,7 +175,7 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
 | Hito | Resultado construido | Evidencia | Riesgo protegido |
 |---|---|---|---|
 | F3.1 | FASTQ real por flujo desde haplotipos | pruebas focales de admisión, identidad, muestreo y FASTQ; puertas Cargo | dosis/ploidía, N, cobertura, procedencia o memoria incorrectas sin fallo visible |
-| F3.5 | Validación FASTQ y evento exportable mínimo | verdad sintética independiente, recorrido extremo a extremo y JSON Schema de evento | aceptar incoherencia, tratar azar como error o declarar completa una salida parcial |
+| F3.5 | Validación FASTQ y evento exportable mínimo | verdad sintética independiente, recorrido extremo a extremo y JSON Schema de evento | aceptar incoherencia, tratar azar como error, enmascarar una mutación directa con un genotipo inicial fijado o declarar completa una salida parcial |
 
 ## 11. Riesgos pendientes
 
