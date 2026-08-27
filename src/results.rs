@@ -10,7 +10,8 @@ use serde_json::{Value, json};
 use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::application::{
     EffectiveConfig, EffectiveDirectEvent, EffectiveInitialGenotypeModel,
-    EffectiveReducedReference, EffectiveReferenceSource, build_effective_config_with_entropy,
+    EffectiveReducedReference, EffectiveReferenceSource, EffectiveTechnicalEvent,
+    EffectiveTechnicalEventTarget, build_effective_config_with_entropy,
 };
 use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
@@ -51,11 +52,13 @@ use crate::vcf_publication::{
     VCF_INDEX_ARTIFACT_ID, VCF_TBI_ARTIFACT_PATH, VCF_TEXT_ARTIFACT_PATH,
 };
 
-/// Version currently written for effective configuration and general manifests.
-///
-/// Version 1 remains readable because F2 added mandatory fields that a v1
-/// consumer must not silently interpret.
-pub const RESULT_SCHEMA_VERSION: &str = "2";
+/// Versión vigente del manifiesto general. F3 no modifica su contrato: el
+/// manifiesto enlaza la configuración efectiva pero no interpreta el evento.
+pub const GENERAL_MANIFEST_SCHEMA_VERSION: &str = "2";
+
+/// Versión vigente de la configuración efectiva. F3 usa una versión distinta
+/// para que un lector v2 estricto no interprete silenciosamente `technical_event`.
+pub const EFFECTIVE_CONFIG_SCHEMA_VERSION: &str = "3";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnitState {
@@ -254,9 +257,9 @@ pub fn effective_config_document_with_reductions(
         let values = composition.values();
         json!({"A": values[0], "C": values[1], "G": values[2], "T": values[3], "N": composition.unknown_base_fraction()})
     });
-    Ok(json!({
+    let mut document = json!({
         "effective_config_kind": "gps_effective_config",
-        "schema_version": RESULT_SCHEMA_VERSION,
+        "schema_version": EFFECTIVE_CONFIG_SCHEMA_VERSION,
         "source_path": config.source_path(),
         "ploidy": config.ploidy().copy_count(),
         "normalization": {
@@ -276,7 +279,11 @@ pub fn effective_config_document_with_reductions(
             VcfOutputMode::Text => json!({"mode": "text"}),
             VcfOutputMode::Bgzf => json!({"mode": "bgzf"}),
         }),
-    }))
+    });
+    if let Some(event) = config.technical_event() {
+        document["technical_event"] = technical_event_json(event);
+    }
+    Ok(document)
 }
 
 fn effective_initial_populations_json(config: &EffectiveConfig) -> Value {
@@ -352,6 +359,21 @@ fn direct_event_json(event: &EffectiveDirectEvent) -> Value {
     }
 }
 
+fn technical_event_json(event: &EffectiveTechnicalEvent) -> Value {
+    let target = match event.target() {
+        EffectiveTechnicalEventTarget::CoverageWgs(value) => json!({"coverage_wgs": value}),
+        EffectiveTechnicalEventTarget::ReadCount(value) => json!({"read_count": value}),
+    };
+    json!({
+        "event_id": event.event_id().as_str(),
+        "individual_ids": event.individual_ids().iter().map(|id| id.as_str()).collect::<Vec<_>>(),
+        "profile": event.profile(),
+        "read_length": event.read_length(),
+        "quality": {"acgt_phred": event.acgt_phred(), "n_phred": event.n_phred()},
+        "target": target,
+    })
+}
+
 pub fn effective_config_document_with_population_snvs(
     config: &EffectiveConfig,
     authorizations: crate::execution::ExecutionAuthorizations,
@@ -384,7 +406,7 @@ pub fn effective_config_document_with_population_snvs(
 pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
     json!({
         "manifest_kind": "gps_execution_manifest",
-        "schema_version": RESULT_SCHEMA_VERSION,
+        "schema_version": GENERAL_MANIFEST_SCHEMA_VERSION,
         "execution_id": manifest.execution_id,
         "state": manifest.state.as_str(),
         "configuration_input": manifest.configuration_input.map(|input| json!({
@@ -594,7 +616,7 @@ pub fn validate_effective_config_against_manifest_bytes(
             manifest_bytes,
         )
         .map_err(|error| retag_v1_pair_error(error, effective_path, manifest_path)),
-        RESULT_SCHEMA_VERSION => validate_effective_config_v2_against_manifest_bytes(
+        EFFECTIVE_CONFIG_SCHEMA_VERSION => validate_effective_config_v3_against_manifest_bytes(
             effective_path,
             effective_bytes,
             manifest_path,
@@ -604,7 +626,7 @@ pub fn validate_effective_config_against_manifest_bytes(
     }
 }
 
-fn validate_effective_config_v2_against_manifest_bytes(
+fn validate_effective_config_v3_against_manifest_bytes(
     effective_path: &Path,
     effective_bytes: &[u8],
     manifest_path: &Path,
@@ -616,10 +638,12 @@ fn validate_effective_config_v2_against_manifest_bytes(
     let manifest = manifest
         .as_object()
         .ok_or_else(|| manifest_error(manifest_path, "la raíz no es un objeto"))?;
-    if manifest.get("schema_version").and_then(Value::as_str) != Some(RESULT_SCHEMA_VERSION) {
+    if manifest.get("schema_version").and_then(Value::as_str)
+        != Some(GENERAL_MANIFEST_SCHEMA_VERSION)
+    {
         return Err(effective_error(
             effective_path,
-            "el manifiesto no usa la misma versión de contrato que la configuración efectiva",
+            "el manifiesto no usa la versión general vigente",
         ));
     }
     let catalog = artifacts
@@ -658,61 +682,16 @@ fn validate_effective_config_v2_against_manifest_bytes(
         "reduced_references",
         "initial_populations",
     ];
-    const DIRECT_EVENT_FIELDS: [&str; 12] = [
-        "effective_config_kind",
-        "schema_version",
-        "source_path",
-        "ploidy",
-        "normalization",
-        "seed",
-        "reference",
-        "population_snvs",
-        "authorizations",
-        "reduced_references",
-        "initial_populations",
-        "direct_events",
-    ];
-    const VCF_FIELDS: [&str; 12] = [
-        "effective_config_kind",
-        "schema_version",
-        "source_path",
-        "ploidy",
-        "normalization",
-        "seed",
-        "reference",
-        "population_snvs",
-        "authorizations",
-        "reduced_references",
-        "initial_populations",
-        "vcf_output",
-    ];
-    const DIRECT_EVENT_VCF_FIELDS: [&str; 13] = [
-        "effective_config_kind",
-        "schema_version",
-        "source_path",
-        "ploidy",
-        "normalization",
-        "seed",
-        "reference",
-        "population_snvs",
-        "authorizations",
-        "reduced_references",
-        "initial_populations",
-        "direct_events",
-        "vcf_output",
-    ];
-    let fields = match (
-        object.contains_key("direct_events"),
-        object.contains_key("vcf_output"),
-    ) {
-        (false, false) => &LEGACY_FIELDS[..],
-        (true, false) => &DIRECT_EVENT_FIELDS[..],
-        (false, true) => &VCF_FIELDS[..],
-        (true, true) => &DIRECT_EVENT_VCF_FIELDS[..],
-    };
-    validate_effective_closed_object(object, fields, "effective-config.json", effective_path)?;
+    let mut fields = LEGACY_FIELDS.to_vec();
+    for field in ["direct_events", "vcf_output", "technical_event"] {
+        if object.contains_key(field) {
+            fields.push(field);
+        }
+    }
+    validate_effective_closed_object(object, &fields, "effective-config.json", effective_path)?;
     if object.get("effective_config_kind").and_then(Value::as_str) != Some("gps_effective_config")
-        || object.get("schema_version").and_then(Value::as_str) != Some(RESULT_SCHEMA_VERSION)
+        || object.get("schema_version").and_then(Value::as_str)
+            != Some(EFFECTIVE_CONFIG_SCHEMA_VERSION)
     {
         return Err(effective_error(
             effective_path,
@@ -752,7 +731,7 @@ fn validate_effective_config_v2_against_manifest_bytes(
     let mut effective_references = BTreeMap::from([(reference.0.clone(), reference.1.clone())]);
     validate_effective_population_snvs(object, manifest, &catalog, effective_path, manifest_path)?;
     validate_effective_authorizations(object, manifest, effective_path, manifest_path)?;
-    validate_effective_initial_populations(object, effective_path)?;
+    let initial_individual_ids = validate_effective_initial_populations(object, effective_path)?;
     validate_effective_vcf_against_manifest(
         object,
         manifest,
@@ -761,8 +740,18 @@ fn validate_effective_config_v2_against_manifest_bytes(
         effective_path,
         manifest_path,
     )?;
-    if object.contains_key("direct_events") {
-        validate_effective_direct_events(object, effective_path)?;
+    let direct_event_ids = if object.contains_key("direct_events") {
+        validate_effective_direct_events(object, effective_path)?
+    } else {
+        BTreeSet::new()
+    };
+    if object.contains_key("technical_event") {
+        validate_effective_technical_event(
+            object,
+            &initial_individual_ids,
+            &direct_event_ids,
+            effective_path,
+        )?;
     }
 
     let manifest_reductions = required_array(manifest, "reference_reductions", manifest_path)?
@@ -885,7 +874,7 @@ pub fn validate_published_resources(
             manifest_bytes,
         )
         .map_err(|error| retag_v1_pair_error(error, effective_path, manifest_path)),
-        RESULT_SCHEMA_VERSION => validate_published_resources_v2(
+        EFFECTIVE_CONFIG_SCHEMA_VERSION => validate_published_resources_v3(
             root,
             effective_path,
             effective_bytes,
@@ -896,7 +885,7 @@ pub fn validate_published_resources(
     }
 }
 
-fn validate_published_resources_v2(
+fn validate_published_resources_v3(
     root: &Path,
     effective_path: &Path,
     effective_bytes: &[u8],
@@ -1686,10 +1675,12 @@ fn validate_physical_vcf_output(
     let manifest = manifest
         .as_object()
         .ok_or_else(|| manifest_error(manifest_path, "la raíz no es un objeto"))?;
-    if manifest.get("schema_version").and_then(Value::as_str) != Some(RESULT_SCHEMA_VERSION) {
+    if manifest.get("schema_version").and_then(Value::as_str)
+        != Some(GENERAL_MANIFEST_SCHEMA_VERSION)
+    {
         return Err(effective_error(
             effective_path,
-            "el manifiesto no usa la misma versión de contrato que la configuración efectiva",
+            "el manifiesto no usa la versión general vigente",
         ));
     }
     let outputs = required_array(manifest, "vcf_outputs", manifest_path)?;
@@ -1981,6 +1972,13 @@ fn validate_effective_targets_against_configuration(
             "direct_events efectivo no coincide exactamente con el TOML resuelto",
         ));
     }
+    let expected_technical_event = expected.technical_event().map(technical_event_json);
+    if effective.get("technical_event") != expected_technical_event.as_ref() {
+        return Err(effective_error(
+            effective_path,
+            "technical_event efectivo no coincide exactamente con el TOML resuelto",
+        ));
+    }
     let expected_vcf = expected.vcf_output().map(|mode| match mode {
         VcfOutputMode::Text => json!({"mode": "text"}),
         VcfOutputMode::Bgzf => json!({"mode": "bgzf"}),
@@ -2236,14 +2234,14 @@ pub(crate) fn parse_general_manifest_bytes(
             return parse_general_manifest_v1_object(path, object)
                 .map_err(|error| retag_format_schema(error, "manifest-general-v1.schema.json"));
         }
-        Some(RESULT_SCHEMA_VERSION) => {}
+        Some(GENERAL_MANIFEST_SCHEMA_VERSION) => {}
         observed => {
             return Err(manifest_error_for_schema(
                 path,
                 "manifest-general-v2.schema.json",
                 format!(
                     "versión de manifiesto no admitida: {:?}; se admiten \"1\" y \"{}\"",
-                    observed, RESULT_SCHEMA_VERSION
+                    observed, GENERAL_MANIFEST_SCHEMA_VERSION
                 ),
             ));
         }
@@ -2266,7 +2264,8 @@ pub(crate) fn parse_general_manifest_bytes(
     ];
     validate_closed_object(object, &FIELDS, "manifest.json", path)?;
     if object.get("manifest_kind").and_then(Value::as_str) != Some("gps_execution_manifest")
-        || object.get("schema_version").and_then(Value::as_str) != Some(RESULT_SCHEMA_VERSION)
+        || object.get("schema_version").and_then(Value::as_str)
+            != Some(GENERAL_MANIFEST_SCHEMA_VERSION)
     {
         return Err(manifest_error(path, "clase o versión incompatible"));
     }
@@ -3649,7 +3648,7 @@ fn expected_vcf_index_kind(
 fn validate_effective_initial_populations(
     effective: &serde_json::Map<String, Value>,
     path: &Path,
-) -> Result<(), Diagnostic> {
+) -> Result<BTreeSet<IndividualId>, Diagnostic> {
     let populations = effective_array(effective, "initial_populations", path)?;
     let mut population_ids = BTreeSet::new();
     let mut individual_ids = BTreeSet::new();
@@ -3701,9 +3700,9 @@ fn validate_effective_initial_populations(
                 .as_str()
                 .filter(|id| !id.is_empty())
                 .ok_or_else(|| effective_error(path, "individual_id inicial inválido"))?;
-            IndividualId::parse(id, "effective_config")
+            let individual_id = IndividualId::parse(id, "effective_config")
                 .map_err(|_| effective_error(path, "individual_id inicial inválido"))?;
-            if !individual_ids.insert(id) {
+            if !individual_ids.insert(individual_id) {
                 return Err(effective_error(path, "individual_id inicial repetido"));
             }
         }
@@ -3756,13 +3755,13 @@ fn validate_effective_initial_populations(
             "faltan estadísticas iniciales para cohortes iniciales",
         ));
     }
-    Ok(())
+    Ok(individual_ids)
 }
 
 fn validate_effective_direct_events(
     effective: &serde_json::Map<String, Value>,
     path: &Path,
-) -> Result<(), Diagnostic> {
+) -> Result<BTreeSet<EventId>, Diagnostic> {
     let events = effective_array(effective, "direct_events", path)?;
     let mut event_ids = BTreeSet::new();
     for value in events {
@@ -3803,7 +3802,7 @@ fn validate_effective_direct_events(
         };
         validate_effective_closed_object(event, fields, "direct_events[]", path)?;
         let event_id = effective_non_empty_text(event, "event_id", path)?;
-        EventId::parse(event_id, "effective_config")
+        let event_id = EventId::parse(event_id, "effective_config")
             .map_err(|_| effective_error(path, "event_id directo inválido"))?;
         if !event_ids.insert(event_id) {
             return Err(effective_error(path, "event_id directo repetido"));
@@ -3846,6 +3845,102 @@ fn validate_effective_direct_events(
             }
             _ => unreachable!("kind was checked"),
         }
+    }
+    Ok(event_ids)
+}
+
+fn validate_effective_technical_event(
+    effective: &serde_json::Map<String, Value>,
+    initial_individual_ids: &BTreeSet<IndividualId>,
+    direct_event_ids: &BTreeSet<EventId>,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    let event = effective_object(effective, "technical_event", path)?;
+    const FIELDS: [&str; 6] = [
+        "event_id",
+        "individual_ids",
+        "profile",
+        "read_length",
+        "quality",
+        "target",
+    ];
+    validate_effective_closed_object(event, &FIELDS, "technical_event", path)?;
+    let event_id = EventId::parse(
+        effective_non_empty_text(event, "event_id", path)?,
+        "effective_config",
+    )
+    .map_err(|_| effective_error(path, "event_id técnico inválido"))?;
+    if direct_event_ids.contains(&event_id) {
+        return Err(effective_error(
+            path,
+            "event_id técnico colisiona con un evento directo",
+        ));
+    }
+    if effective_non_empty_text(event, "profile", path)? != "illumina-se-minimal-v1"
+        || effective_nonnegative_u64(event, "read_length", path)? != 150
+    {
+        return Err(effective_error(path, "perfil técnico mínimo inválido"));
+    }
+    let quality = effective_object(event, "quality", path)?;
+    validate_effective_closed_object(
+        quality,
+        &["acgt_phred", "n_phred"],
+        "technical_event.quality",
+        path,
+    )?;
+    if effective_nonnegative_u64(quality, "acgt_phred", path)? != 40
+        || effective_nonnegative_u64(quality, "n_phred", path)? != 0
+    {
+        return Err(effective_error(path, "calidad técnica mínima inválida"));
+    }
+    let mut individuals = BTreeSet::new();
+    let individual_ids = effective_array(event, "individual_ids", path)?;
+    if individual_ids.is_empty() {
+        return Err(effective_error(path, "technical_event sin individuos"));
+    }
+    for individual_id in individual_ids {
+        let individual_id = individual_id
+            .as_str()
+            .ok_or_else(|| effective_error(path, "individual_id técnico inválido"))?;
+        let individual_id = IndividualId::parse(individual_id, "effective_config")
+            .map_err(|_| effective_error(path, "individual_id técnico inválido"))?;
+        if !individuals.insert(individual_id.clone()) {
+            return Err(effective_error(path, "individual_id técnico repetido"));
+        }
+        if !initial_individual_ids.contains(&individual_id) {
+            return Err(effective_error(
+                path,
+                "individual_id técnico fuera de las poblaciones iniciales",
+            ));
+        }
+    }
+    let target = effective_object(event, "target", path)?;
+    let is_coverage = target.get("coverage_wgs");
+    let is_count = target.get("read_count");
+    match (is_coverage, is_count) {
+        (Some(coverage), None) => {
+            if !matches!(coverage.as_f64(), Some(value) if value.is_finite() && value >= 0.0) {
+                return Err(effective_error(path, "cobertura WGS técnica inválida"));
+            }
+        }
+        (None, Some(_)) => {
+            validate_effective_closed_object(
+                target,
+                &["read_count"],
+                "technical_event.target",
+                path,
+            )?;
+            let _ = effective_nonnegative_u64(target, "read_count", path)?;
+        }
+        _ => return Err(effective_error(path, "objetivo técnico inválido")),
+    }
+    if is_coverage.is_some() {
+        validate_effective_closed_object(
+            target,
+            &["coverage_wgs"],
+            "technical_event.target",
+            path,
+        )?;
     }
     Ok(())
 }
@@ -5067,13 +5162,13 @@ fn effective_schema_version(path: &Path, bytes: &[u8]) -> Result<&'static str, D
         .ok_or_else(|| effective_error(path, "la raíz no es un objeto"))?;
     match object.get("schema_version").and_then(Value::as_str) {
         Some("1") => Ok("1"),
-        Some(RESULT_SCHEMA_VERSION) => Ok(RESULT_SCHEMA_VERSION),
+        Some(EFFECTIVE_CONFIG_SCHEMA_VERSION) => Ok(EFFECTIVE_CONFIG_SCHEMA_VERSION),
         observed => Err(effective_error_for_schema(
             path,
-            "effective-config-v2.schema.json",
+            "effective-config-v3.schema.json",
             format!(
                 "versión de configuración efectiva no admitida: {:?}; se admiten \"1\" y \"{}\"",
-                observed, RESULT_SCHEMA_VERSION
+                observed, EFFECTIVE_CONFIG_SCHEMA_VERSION
             ),
         )),
     }
@@ -5148,7 +5243,7 @@ fn manifest_error_for_schema(
 }
 
 fn effective_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
-    effective_error_for_schema(path, "effective-config-v2.schema.json", detail)
+    effective_error_for_schema(path, "effective-config-v3.schema.json", detail)
 }
 
 fn effective_error_for_schema(

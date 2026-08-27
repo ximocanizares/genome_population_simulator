@@ -71,6 +71,10 @@
       "default": [],
       "description": "Cambios explícitos por individuo ya faseado; requieren population_snvs e initial_populations."
     },
+    "technical_event": {
+      "$ref": "#/$defs/technical_event",
+      "description": "Único evento F3 de FASTQ Illumina single-end mínimo."
+    },
     "vcf_output": {
       "type": "object",
       "additionalProperties": false,
@@ -322,6 +326,20 @@
           {"required": ["individual_ids"], "not": {"required": ["founder_keys"]}},
           {"required": ["founder_keys"], "not": {"required": ["individual_ids"]}}
         ]}
+      ]
+    },
+    "technical_event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["event_id", "individual_ids"],
+      "properties": {
+        "event_id": {"$ref": "#/$defs/identifier"},
+        "individual_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}},
+        "target_coverage_wgs": {"type": "number", "minimum": 0},
+        "read_count": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615}
+      },
+      "oneOf": [
+        {"required": ["target_coverage_wgs"], "not": {"required": ["read_count"]}},
+        {"required": ["read_count"], "not": {"required": ["target_coverage_wgs"]}}
       ]
     },
     "direct_event": {

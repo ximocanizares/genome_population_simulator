@@ -214,6 +214,22 @@ pub struct DeclaredVcfOutput {
     pub mode: Located<String>,
 }
 
+/// Único evento técnico que F3 puede consumir. La tabla conserva únicamente
+/// los parámetros de autoría: el perfil mínimo se resuelve después, sin abrir
+/// aún el catálogo de perfiles, pares o referencias de mapeo de F4.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredTechnicalEvent {
+    pub event_id: Located<String>,
+    pub individual_ids: Vec<Located<String>>,
+    pub target: DeclaredTechnicalEventTarget,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeclaredTechnicalEventTarget {
+    CoverageWgs(DeclaredNumber),
+    ReadCount(Located<u64>),
+}
+
 /// Selección declarada del recurso común de frecuencias SNV.
 ///
 /// Solo describe la frontera de autoría. La preparación, la reutilización
@@ -314,6 +330,7 @@ pub struct DeclaredGeneralConfig {
     vcf_output: Option<DeclaredVcfOutput>,
     initial_populations: Vec<DeclaredInitialPopulation>,
     direct_events: Vec<DeclaredDirectEvent>,
+    technical_event: Option<DeclaredTechnicalEvent>,
 }
 
 impl DeclaredGeneralConfig {
@@ -337,6 +354,7 @@ impl DeclaredGeneralConfig {
             vcf_output: None,
             initial_populations: Vec::new(),
             direct_events: Vec::new(),
+            technical_event: None,
         }
     }
 
@@ -355,6 +373,14 @@ impl DeclaredGeneralConfig {
 
     pub(crate) fn with_vcf_output(mut self, vcf_output: Option<DeclaredVcfOutput>) -> Self {
         self.vcf_output = vcf_output;
+        self
+    }
+
+    pub(crate) fn with_technical_event(
+        mut self,
+        technical_event: Option<DeclaredTechnicalEvent>,
+    ) -> Self {
+        self.technical_event = technical_event;
         self
     }
 
@@ -410,6 +436,11 @@ impl DeclaredGeneralConfig {
     #[must_use]
     pub fn direct_events(&self) -> &[DeclaredDirectEvent] {
         &self.direct_events
+    }
+
+    #[must_use]
+    pub const fn technical_event(&self) -> Option<&DeclaredTechnicalEvent> {
+        self.technical_event.as_ref()
     }
 }
 

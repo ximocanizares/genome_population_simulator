@@ -1346,10 +1346,12 @@ deben implementarse y verificarse expresamente antes de prometerlas. La
 reanudación por artefacto queda como ampliación futura tras medir costes.
 
 F1 publicó `effective-config.json` y el manifiesto general con
-`schema_version = "1"`. F2 publica sus extensiones incompatibles como versión
-`"2"`, con esquemas y lectores separados; los documentos v1 permanecen
-congelados y legibles. Todo escritor emite siempre la versión actual y no hay
-migración ni modificación silenciosa de documentos v1.
+`schema_version = "1"`. F2 publicó extensiones incompatibles de la
+configuración efectiva como versión `"2"`; esa versión queda como registro
+histórico y no tiene lector activo. F3 publica la configuración efectiva vigente
+como versión `"3"`; el lector vigente conserva la lectura de documentos v1,
+pero no migra ni reescribe documentos históricos. El manifiesto general vigente
+permanece en versión `"2"` porque F3 no modifica su contrato.
 
 ### 9.4. Entregas del programa
 

@@ -511,7 +511,7 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
     );
     validate_json(
         &first.join("effective-config.json"),
-        "effective-config-v2.schema.json",
+        "effective-config-v3.schema.json",
         true,
     );
     validate_json(

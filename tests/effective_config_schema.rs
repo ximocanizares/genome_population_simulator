@@ -138,7 +138,7 @@ fn initial_population_statistics_schema_is_closed_and_typed() {
 #[test]
 fn effective_initial_population_schema_enforces_local_bounds_and_f_diploidy() {
     let schema: Value =
-        serde_json::from_str(include_str!("../schemas/effective-config-v2.schema.json"))
+        serde_json::from_str(include_str!("../schemas/effective-config-v3.schema.json"))
             .expect("effective schema JSON");
     let cohort_schema = &schema["$defs"]["initial_population"];
     assert_eq!(
@@ -204,6 +204,37 @@ fn effective_initial_population_schema_enforces_local_bounds_and_f_diploidy() {
         "effective-initial-population-f-outside-diploidy",
         &f_outside_diploidy,
     );
+}
+
+#[test]
+fn v3_effective_technical_event_is_closed_and_keeps_the_minimal_profile_fixed() {
+    let mut valid = effective_config("simulated", false);
+    valid["technical_event"] = json!({
+        "event_id": "reads-main",
+        "individual_ids": ["sample-A"],
+        "profile": "illumina-se-minimal-v1",
+        "read_length": 150,
+        "quality": {"acgt_phred": 40, "n_phred": 0},
+        "target": {"coverage_wgs": 0.0},
+    });
+    assert_valid("v3-technical-event", &valid);
+
+    for (name, pointer, replacement) in [
+        (
+            "profile",
+            "/technical_event/profile",
+            json!("future-profile"),
+        ),
+        ("length", "/technical_event/read_length", json!(151)),
+        ("quality", "/technical_event/quality/n_phred", json!(1)),
+    ] {
+        let mut invalid = valid.clone();
+        *invalid.pointer_mut(pointer).expect(name) = replacement;
+        assert_invalid(&format!("v3-technical-event-{name}"), &invalid);
+    }
+    let mut double_target = valid;
+    double_target["technical_event"]["target"]["read_count"] = json!(0);
+    assert_invalid("v3-technical-event-double-target", &double_target);
 }
 
 #[test]
@@ -430,7 +461,7 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
     };
     json!({
         "effective_config_kind": "gps_effective_config",
-        "schema_version": "2",
+        "schema_version": "3",
         "source_path": "config/general.toml",
         "ploidy": 2,
         "normalization": {"tolerance": 1e-9, "canonical_order": "population_id,contig,position,ref,alt,variant_id,source_id", "sum_algorithm": "neumaier_sum_v1"},
@@ -533,7 +564,7 @@ fn assert_external(name: &str, document: &Value, expected_success: bool) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("python3")
         .arg(root.join("tests/external_jsonschema_validator.py"))
-        .arg(root.join("schemas/effective-config-v2.schema.json"))
+        .arg(root.join("schemas/effective-config-v3.schema.json"))
         .arg(&instance)
         .output()
         .expect("independent Python validator");

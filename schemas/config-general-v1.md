@@ -15,7 +15,8 @@ schema_version = "1"
 La raíz es cerrada y contiene esas claves, `seed`, `ploidy` y
 `normalization_tolerance` opcionales, `vcf_output` opcional, `reference` obligatorio,
 `reduced_references` opcional, `population_snvs`
-opcional, `initial_populations` opcional y `direct_events` opcional. `ploidy` es una
+opcional, `initial_populations` opcional, `direct_events` opcional y
+`technical_event` opcional. `ploidy` es una
 ploidía global uniforme entera entre 1 y 10; al omitirse conserva el valor
 efectivo diploide (`2`) para mantener compatibles los TOML F1. Rust valida el
 rango. Las cohortes directas de F2.3.1 declaran su propia ploidía efectiva; no
@@ -48,6 +49,27 @@ solo `text` o `bgzf`; Rust sigue validando y resolviendo el índice efectivo.
 Rust lo interpreta como `f64` finito en `[0,1e-6]`. Si se omite, su valor
 efectivo es `1e-9`. La interfaz solo conserva el literal y no replica esa
 validación semántica.
+
+## Evento técnico mínimo F3
+
+La tabla opcional única `[technical_event]` solicita el primer consumidor de
+lecturas. Exige `event_id`, una lista no vacía `individual_ids` y exactamente
+uno de `target_coverage_wgs` (decimal finito mayor o igual que cero) o
+`read_count` (entero no negativo). Los individuos deben ser IDs de cohortes
+iniciales ya resueltas y no pueden repetirse. El ID comparte el ámbito de
+eventos de la ejecución y no puede colisionar con `direct_events`.
+
+F3 no admite una lista de eventos, referencias de mapeo, tecnología, perfiles
+alternativos, paired-end, contaminación, errores o parámetros de alineamiento.
+Al resolver, el binario fija `illumina-se-minimal-v1`: Illumina single-end de
+150 bases, sin degradaciones, con Phred 40 para A/C/G/T y 0 para `N`.
+
+```toml
+[technical_event]
+event_id = "reads-main"
+individual_ids = ["sample-A", "sample-B"]
+target_coverage_wgs = 30
+```
 
 Una referencia simulada tiene esta forma:
 

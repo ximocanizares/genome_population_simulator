@@ -41,7 +41,7 @@ fn simulated_cli_runs_repeat_logically_and_pass_independent_oracles() {
 
     validate_json(
         &first.join("effective-config.json"),
-        "effective-config-v2.schema.json",
+        "effective-config-v3.schema.json",
     );
     validate_json(
         &first.join("manifest.json"),
@@ -152,7 +152,7 @@ fn supplied_cli_preserves_n_and_exact_input_while_invalid_input_has_no_destinati
     assert!(acceptance_fasta.with_extension("fa.fai").is_file());
     validate_json(
         &destination.join("effective-config.json"),
-        "effective-config-v2.schema.json",
+        "effective-config-v3.schema.json",
     );
     validate_json(
         &destination.join("manifest.json"),

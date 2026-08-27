@@ -10,8 +10,9 @@ use crate::configuration::{
     DeclaredInitialPopulation, DeclaredNumber, DeclaredPopulationSnvs,
     DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
     DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
-    DeclaredReference, DeclaredReferenceSource, DeclaredSequence, DeclaredVcfOutput,
-    ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
+    DeclaredReference, DeclaredReferenceSource, DeclaredSequence, DeclaredTechnicalEvent,
+    DeclaredTechnicalEventTarget, DeclaredVcfOutput, ExpectedConfigKind, Located, SequenceClass,
+    SourceLocation, semantic_error,
 };
 use crate::diagnostics::Diagnostic;
 
@@ -168,6 +169,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
             "initial_populations",
             "direct_events",
             "vcf_output",
+            "technical_event",
         ],
     )?;
     let seed = optional_located_string(&admitted, table, "seed")?;
@@ -179,6 +181,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
     let initial_populations = parse_initial_populations(&admitted, table)?;
     let direct_events = parse_direct_events(&admitted, table)?;
     let vcf_output = parse_vcf_output(&admitted, table)?;
+    let technical_event = parse_technical_event(&admitted, table)?;
     Ok(DeclaredGeneralConfig::new(
         admitted,
         seed,
@@ -190,7 +193,66 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
     )
     .with_initial_populations(initial_populations)
     .with_direct_events(direct_events)
-    .with_vcf_output(vcf_output))
+    .with_vcf_output(vcf_output)
+    .with_technical_event(technical_event))
+}
+
+fn parse_technical_event(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<Option<DeclaredTechnicalEvent>, Diagnostic> {
+    let Some(event) = optional_table(admitted, table, "technical_event")? else {
+        return Ok(None);
+    };
+    check_unknown(
+        admitted,
+        event,
+        &[
+            "event_id",
+            "individual_ids",
+            "target_coverage_wgs",
+            "read_count",
+        ],
+    )?;
+    let target = match (
+        optional_number(admitted, event, "target_coverage_wgs")?,
+        optional_located_u64(admitted, event, "read_count")?,
+    ) {
+        (Some(coverage), None) => DeclaredTechnicalEventTarget::CoverageWgs(coverage),
+        (None, Some(read_count)) => DeclaredTechnicalEventTarget::ReadCount(read_count),
+        (Some(_), Some(_)) | (None, None) => {
+            return Err(semantic_error(
+                admitted,
+                "technical_event.target_coverage_wgs,technical_event.read_count",
+                "debe declarar exactamente uno de target_coverage_wgs o read_count",
+            ));
+        }
+    };
+    let individuals = required_array(admitted, event, "individual_ids")?;
+    if individuals.is_empty() {
+        return Err(semantic_error(
+            admitted,
+            "technical_event.individual_ids",
+            "debe contener al menos un individuo",
+        ));
+    }
+    let individual_ids = individuals
+        .iter()
+        .map(|value| {
+            value
+                .get_ref()
+                .as_str()
+                .map(|text| Located::new(text.to_owned(), location(admitted, value.span())))
+                .ok_or_else(|| {
+                    wrong_type(admitted, "technical_event.individual_ids", value, "string")
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(DeclaredTechnicalEvent {
+        event_id: required_string(admitted, event, "event_id")?,
+        individual_ids,
+        target,
+    }))
 }
 
 fn parse_vcf_output(

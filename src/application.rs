@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::configuration::{
     DeclaredGeneralConfig, DeclaredPopulationSnvs, DeclaredReductionTarget,
-    DeclaredReferenceSource, ExpectedConfigKind, SequenceClass,
+    DeclaredReferenceSource, DeclaredTechnicalEventTarget, ExpectedConfigKind, SequenceClass,
 };
 use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
@@ -196,7 +196,65 @@ pub struct EffectiveConfig {
     population_snvs: Option<EffectivePopulationSnvs>,
     initial_populations: Vec<EffectiveInitialPopulation>,
     direct_events: Vec<EffectiveDirectEvent>,
+    technical_event: Option<EffectiveTechnicalEvent>,
     vcf_output: Option<VcfOutputMode>,
+}
+
+/// Perfil sintético único que F3 genera antes de que F4 incorpore perfiles
+/// cuantitativos o tecnologías alternativas.
+pub const ILLUMINA_SE_MINIMAL_V1: &str = "illumina-se-minimal-v1";
+pub const ILLUMINA_SE_MINIMAL_READ_LENGTH: u16 = 150;
+pub const ILLUMINA_SE_MINIMAL_ACGT_PHRED: u8 = 40;
+pub const ILLUMINA_SE_MINIMAL_N_PHRED: u8 = 0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EffectiveTechnicalEventTarget {
+    CoverageWgs(f64),
+    ReadCount(u64),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectiveTechnicalEvent {
+    event_id: EventId,
+    individual_ids: Vec<IndividualId>,
+    target: EffectiveTechnicalEventTarget,
+}
+
+impl EffectiveTechnicalEvent {
+    #[must_use]
+    pub const fn event_id(&self) -> &EventId {
+        &self.event_id
+    }
+
+    #[must_use]
+    pub fn individual_ids(&self) -> &[IndividualId] {
+        &self.individual_ids
+    }
+
+    #[must_use]
+    pub const fn target(&self) -> EffectiveTechnicalEventTarget {
+        self.target
+    }
+
+    #[must_use]
+    pub const fn profile(&self) -> &'static str {
+        ILLUMINA_SE_MINIMAL_V1
+    }
+
+    #[must_use]
+    pub const fn read_length(&self) -> u16 {
+        ILLUMINA_SE_MINIMAL_READ_LENGTH
+    }
+
+    #[must_use]
+    pub const fn acgt_phred(&self) -> u8 {
+        ILLUMINA_SE_MINIMAL_ACGT_PHRED
+    }
+
+    #[must_use]
+    pub const fn n_phred(&self) -> u8 {
+        ILLUMINA_SE_MINIMAL_N_PHRED
+    }
 }
 
 /// Origen efectivo del recurso canónico F2.2.7.
@@ -419,6 +477,11 @@ impl EffectiveConfig {
     }
 
     #[must_use]
+    pub const fn technical_event(&self) -> Option<&EffectiveTechnicalEvent> {
+        self.technical_event.as_ref()
+    }
+
+    #[must_use]
     pub const fn vcf_output(&self) -> Option<VcfOutputMode> {
         self.vcf_output
     }
@@ -638,6 +701,7 @@ pub fn build_effective_config_with_entropy(
     let initial_populations = effective_initial_populations(general, root_seed)?;
     let population_snvs = effective_population_snvs(general)?;
     let direct_events = effective_direct_events(general, &initial_populations, &sequences)?;
+    let technical_event = effective_technical_event(general, &initial_populations, &direct_events)?;
     let vcf_output = general
         .vcf_output()
         .map(|output| match output.mode.value().as_str() {
@@ -702,8 +766,84 @@ pub fn build_effective_config_with_entropy(
         population_snvs,
         initial_populations,
         direct_events,
+        technical_event,
         vcf_output,
     })
+}
+
+fn effective_technical_event(
+    general: &DeclaredGeneralConfig,
+    populations: &[EffectiveInitialPopulation],
+    direct_events: &[EffectiveDirectEvent],
+) -> Result<Option<EffectiveTechnicalEvent>, Diagnostic> {
+    let Some(declared) = general.technical_event() else {
+        return Ok(None);
+    };
+    let event_id = EventId::parse(declared.event_id.value().clone(), "technical_event")
+        .map_err(|error| with_initial_population_path(general, error))?;
+    if direct_events
+        .iter()
+        .any(|event| event.event_id() == &event_id)
+    {
+        return Err(config_error(
+            general,
+            "technical_event.event_id",
+            format!("identificador de evento repetido en el ámbito de ejecución: {event_id}"),
+        ));
+    }
+    let declared_individuals = declared.individual_ids.as_slice();
+    let mut known_individuals = BTreeSet::new();
+    for population in populations {
+        known_individuals.extend(population.individual_ids().iter().cloned());
+    }
+    let mut individual_ids = Vec::with_capacity(declared_individuals.len());
+    let mut selected = BTreeSet::new();
+    for declared_id in declared_individuals {
+        let individual_id = IndividualId::parse(declared_id.value().clone(), "technical_event")
+            .map_err(|error| with_initial_population_path(general, error))?;
+        if !known_individuals.contains(&individual_id) {
+            return Err(config_error(
+                general,
+                "technical_event.individual_ids",
+                format!("individuo no declarado en initial_populations: {individual_id}"),
+            ));
+        }
+        if !selected.insert(individual_id.clone()) {
+            return Err(config_error(
+                general,
+                "technical_event.individual_ids",
+                format!("individuo repetido: {individual_id}"),
+            ));
+        }
+        individual_ids.push(individual_id);
+    }
+    let target = match &declared.target {
+        DeclaredTechnicalEventTarget::CoverageWgs(value) => {
+            let coverage = value.literal().parse::<f64>().map_err(|_| {
+                config_error(
+                    general,
+                    "technical_event.target_coverage_wgs",
+                    "debe ser un f64 válido",
+                )
+            })?;
+            if !coverage.is_finite() || coverage < 0.0 {
+                return Err(config_error(
+                    general,
+                    "technical_event.target_coverage_wgs",
+                    "debe ser finita y mayor o igual que cero",
+                ));
+            }
+            EffectiveTechnicalEventTarget::CoverageWgs(coverage)
+        }
+        DeclaredTechnicalEventTarget::ReadCount(value) => {
+            EffectiveTechnicalEventTarget::ReadCount(*value.value())
+        }
+    };
+    Ok(Some(EffectiveTechnicalEvent {
+        event_id,
+        individual_ids,
+        target,
+    }))
 }
 
 fn effective_direct_events(

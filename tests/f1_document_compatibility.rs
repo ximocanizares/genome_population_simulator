@@ -68,7 +68,7 @@ fn version_dispatch_is_closed_and_reports_the_schema_selected_by_the_document() 
 
     let mut unsupported_effective: serde_json::Value =
         serde_json::from_slice(F1_EFFECTIVE).expect("golden effective configuration");
-    unsupported_effective["schema_version"] = serde_json::json!("3");
+    unsupported_effective["schema_version"] = serde_json::json!("2");
     let error = validate_effective_config_against_manifest_bytes(
         Path::new("effective-config.json"),
         &serde_json::to_vec(&unsupported_effective).expect("JSON"),
@@ -78,13 +78,13 @@ fn version_dispatch_is_closed_and_reports_the_schema_selected_by_the_document() 
     .expect_err("unsupported version");
     assert_eq!(
         error.context().get("schema").map(String::as_str),
-        Some("effective-config-v2.schema.json")
+        Some("effective-config-v3.schema.json")
     );
     assert!(
         error
             .context()
             .get("detail")
-            .is_some_and(|detail| detail.contains("se admiten \"1\" y \"2\""))
+            .is_some_and(|detail| detail.contains("se admiten \"1\" y \"3\""))
     );
 }
 

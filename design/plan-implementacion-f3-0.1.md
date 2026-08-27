@@ -5,8 +5,7 @@
 - **Título:** generación mínima de lecturas desde haplotipos.
 - **Versión:** 0.1.
 - **Fecha:** 27 de agosto de 2026.
-- **Estado:** plan revisado; F3.1 puede comenzar con el contrato mínimo fijado
-  en este documento.
+- **Estado:** F3.1.1 completado y revisado; F3.1.2 es el siguiente paso.
 - **Ámbito:** F3.1 y F3.5 simplificados de la hoja de ruta vigente.
 - **Fuentes:** especificación §4.4 y §4.6–§4.8; arquitectura §5.5 y §6; DTC-005, DTC-013, DTC-016, DTC-018, DTC-024, DTC-031–032, DTC-035, DTC-037–045 y DTC-079; hoja de ruta F3 y trazabilidad vigente.
 
@@ -71,7 +70,7 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
 
 **Resultado:** un evento mínimo genera FASTQ final single-end desde copias faseadas, con identidad y origen suficientes para comprobarlo y exportarlo.
 
-- ☐ F3.1.1. Admitir el único evento técnico mínimo y resolver valores efectivos sin escenarios ni capacidades anticipadas.
+- ✅ F3.1.1. Admitir el único evento técnico mínimo y resolver valores efectivos sin escenarios ni capacidades anticipadas.
   - Depende de: F2 cerrada y contrato `illumina-se-minimal-v1` fijado en §3.
   - Procede de: REQ-CONF-64/69/101–103, REQ-DAT-15–18 y DTC-005/016/034/079.
   - Cambia: admisión TOML, configuración efectiva e identidad para un evento
@@ -79,9 +78,11 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
     longitud y calidad efectivas del contrato mínimo. Rechaza contaminación,
     pares, referencias múltiples y campos F4.
   - Se comprueba con: cargo test --test f3_event_admission --locked; fixture
-    válido produce valores/subsemilla estables y fixtures rechazan ID duplicado,
-    doble o nulo objetivo WGS, incompatibilidad tecnología/perfil y campos F4;
-    puertas comunes.
+    válido produce valores efectivos estables y fixtures rechazan un ID que
+    colisione con un evento directo, doble o nulo objetivo WGS y campos F4.
+    F3 usa una tabla única `[technical_event]`, por lo que no existe una lista
+    técnica donde pueda aparecer un ID duplicado; tecnología y perfil se fijan
+    por contrato y no son campos de autoría. puertas comunes.
 
 - ☐ F3.1.2. Derivar ámbito aleatorio e identidades técnicas mínimas desde causas estables, no desde orden de iteración.
   - Depende de: F3.1.1 y catálogo de subsemillas F2 vigente.

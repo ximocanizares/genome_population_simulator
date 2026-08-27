@@ -48,6 +48,7 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
             "reference".to_owned(),
             "schema_version".to_owned(),
             "seed".to_owned(),
+            "technical_event".to_owned(),
             "vcf_output".to_owned(),
         ])
     );
@@ -151,6 +152,26 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
     assert_eq!(
         strings_at(&schema, "/$defs/reduced_reference/oneOf/1/required"),
         BTreeSet::from(["reduction_percent".to_owned()])
+    );
+    assert_eq!(
+        keys_at(&schema, "/$defs/technical_event/properties"),
+        BTreeSet::from([
+            "event_id".to_owned(),
+            "individual_ids".to_owned(),
+            "read_count".to_owned(),
+            "target_coverage_wgs".to_owned(),
+        ])
+    );
+    assert_eq!(
+        strings_at(&schema, "/$defs/technical_event/required"),
+        BTreeSet::from(["event_id".to_owned(), "individual_ids".to_owned()])
+    );
+    assert_eq!(
+        schema["$defs"]["technical_event"]["oneOf"]
+            .as_array()
+            .expect("technical target union")
+            .len(),
+        2
     );
 
     for future_field in ["scenario_id", "scenarios", "route", "individuals"] {
