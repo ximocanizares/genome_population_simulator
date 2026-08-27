@@ -7,7 +7,7 @@ use crate::diagnostics::Diagnostic;
 use crate::randomness::{DERIVATION_VERSION, RootSeed};
 
 pub const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
-pub const ID_CATALOG_VERSION: &str = "1";
+pub const ID_CATALOG_VERSION: &str = "2";
 
 macro_rules! typed_id {
     ($name:ident, $category:literal) => {
@@ -44,6 +44,22 @@ typed_id!(ReferenceId, "reference");
 typed_id!(IndividualId, "individual");
 typed_id!(EventId, "event");
 typed_id!(VariantId, "variant");
+typed_id!(BatchId, "batch");
+typed_id!(LibraryId, "library");
+typed_id!(ReadGroupId, "read_group");
+typed_id!(TemplateId, "template");
+
+/// Construye el ID de plantilla de F3 a partir de una biblioteca ya única en
+/// el evento y de su ordinal lógico canónico en decimal.
+///
+/// Esta es la excepción acotada de DTC-039: no usa BLAKE3 ni requiere registrar
+/// IDs previos, porque la pareja `(library_id, template_ordinal)` es única por
+/// construcción. Los componentes ya cumplen la sintaxis de identificador y la
+/// longitud máxima queda acotada a 55 caracteres (`TPL_` + 30 + `_` + 20).
+#[must_use]
+pub(crate) fn compose_template_id(library_id: &LibraryId, template_ordinal: u64) -> TemplateId {
+    TemplateId::from_automatic(format!("TPL_{}_{template_ordinal}", library_id.as_str()))
+}
 
 macro_rules! provided_typed_id {
     ($name:ident, $category:literal) => {
@@ -125,6 +141,9 @@ pub enum IdClass {
     Reference,
     Individual,
     Event,
+    Batch,
+    Library,
+    ReadGroup,
 }
 
 impl IdClass {
@@ -134,6 +153,9 @@ impl IdClass {
             Self::Reference => "reference",
             Self::Individual => "individual",
             Self::Event => "event",
+            Self::Batch => "batch",
+            Self::Library => "library",
+            Self::ReadGroup => "read_group",
         }
     }
 
@@ -143,6 +165,9 @@ impl IdClass {
             Self::Reference => "REF_",
             Self::Individual => "IND_",
             Self::Event => "EVT_",
+            Self::Batch => "BAT_",
+            Self::Library => "LIB_",
+            Self::ReadGroup => "RG_",
         }
     }
 
@@ -152,6 +177,9 @@ impl IdClass {
             Self::Reference => &["source_kind", "source_digest"],
             Self::Individual => &["founder_key"],
             Self::Event => &["event_key"],
+            Self::Batch => &[],
+            Self::Library => &["individual_id"],
+            Self::ReadGroup => &["batch_id", "library_id"],
         }
     }
 }
@@ -280,6 +308,9 @@ enum IdClassKey {
     Reference,
     Individual,
     Event,
+    Batch,
+    Library,
+    ReadGroup,
 }
 
 impl From<IdClass> for IdClassKey {
@@ -289,6 +320,9 @@ impl From<IdClass> for IdClassKey {
             IdClass::Reference => Self::Reference,
             IdClass::Individual => Self::Individual,
             IdClass::Event => Self::Event,
+            IdClass::Batch => Self::Batch,
+            IdClass::Library => Self::Library,
+            IdClass::ReadGroup => Self::ReadGroup,
         }
     }
 }
@@ -373,6 +407,39 @@ impl IdentityRegistry {
         let text = request.derive_text(root)?;
         self.register_text(request.class, &request.scope, &text, "automatic")?;
         Ok(EventId::from_automatic(text))
+    }
+
+    pub fn derive_batch(
+        &mut self,
+        root: RootSeed,
+        request: &AutomaticIdRequest,
+    ) -> Result<BatchId, Diagnostic> {
+        self.require_class(request, IdClass::Batch)?;
+        let text = request.derive_text(root)?;
+        self.register_text(request.class, &request.scope, &text, "automatic")?;
+        Ok(BatchId::from_automatic(text))
+    }
+
+    pub fn derive_library(
+        &mut self,
+        root: RootSeed,
+        request: &AutomaticIdRequest,
+    ) -> Result<LibraryId, Diagnostic> {
+        self.require_class(request, IdClass::Library)?;
+        let text = request.derive_text(root)?;
+        self.register_text(request.class, &request.scope, &text, "automatic")?;
+        Ok(LibraryId::from_automatic(text))
+    }
+
+    pub fn derive_read_group(
+        &mut self,
+        root: RootSeed,
+        request: &AutomaticIdRequest,
+    ) -> Result<ReadGroupId, Diagnostic> {
+        self.require_class(request, IdClass::ReadGroup)?;
+        let text = request.derive_text(root)?;
+        self.register_text(request.class, &request.scope, &text, "automatic")?;
+        Ok(ReadGroupId::from_automatic(text))
     }
 
     fn require_class(

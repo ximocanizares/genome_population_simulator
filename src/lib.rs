@@ -32,6 +32,7 @@ pub mod results;
 pub mod segments;
 pub mod small_event_composition;
 pub mod snp_application;
+pub mod technical_identity;
 pub mod truth_projection;
 pub mod truth_schema;
 pub mod truth_validation;

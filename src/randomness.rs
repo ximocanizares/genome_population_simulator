@@ -10,7 +10,7 @@ use crate::diagnostics::Diagnostic;
 pub const DERIVATION_VERSION: u32 = 1;
 pub const F2_DERIVATION_VERSION: u32 = 2;
 pub const SUBSEED_DERIVATION_VERSIONS: &[u32] = &[DERIVATION_VERSION, F2_DERIVATION_VERSION];
-pub const SUBSEED_CATALOG_VERSION: &str = "6";
+pub const SUBSEED_CATALOG_VERSION: &str = "7";
 pub const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 pub const RANDOM_ALGORITHM: &str = "ChaCha12";
 pub const REFERENCE_REDUCTION_SELECTOR: &str = "direct_proportional_selection";
@@ -143,6 +143,12 @@ pub enum RuntimeSubseedScope<'a> {
         source_reference_id: &'a str,
         derived_reference_id: &'a str,
     },
+    /// Ámbito del único evento técnico F3, ya publicado como fila histórica
+    /// del catálogo v1 y activado ahora por su primer consumidor real.
+    TechnicalEvent {
+        event_id: &'a str,
+        reference_id: &'a str,
+    },
     MatrixCandidateCount {
         scenario_id: &'a str,
         reference_id: &'a str,
@@ -226,6 +232,13 @@ pub enum RuntimeSubseedScope<'a> {
         position_1based: u64,
         reference_base: &'a str,
         alternate_alleles: &'a str,
+    },
+    /// Ámbito propio de una plantilla F3. El ordinal es lógico dentro de una
+    /// biblioteca, no una posición accidental de iteración o planificación.
+    TechnicalTemplate {
+        event_id: &'a str,
+        library_id: &'a str,
+        template_ordinal: u64,
     },
 }
 
@@ -323,6 +336,13 @@ pub fn derive_subseed(
                 ("derived_reference_id", derived_reference_id),
                 ("selector", REFERENCE_REDUCTION_SELECTOR),
             ],
+        )?,
+        RuntimeSubseedScope::TechnicalEvent {
+            event_id,
+            reference_id,
+        } => canonical_material(
+            root,
+            &[("event_id", event_id), ("reference_id", reference_id)],
         )?,
         RuntimeSubseedScope::MatrixCandidateCount {
             scenario_id,
@@ -518,6 +538,19 @@ pub fn derive_subseed(
                 ("position_1based", &position_1based.to_string()),
                 ("ref", reference_base),
                 ("alternate_alleles", alternate_alleles),
+            ],
+        )?,
+        RuntimeSubseedScope::TechnicalTemplate {
+            event_id,
+            library_id,
+            template_ordinal,
+        } => canonical_material_v2(
+            root,
+            "technical_template",
+            &[
+                ("event_id", event_id),
+                ("library_id", library_id),
+                ("template_ordinal", &template_ordinal.to_string()),
             ],
         )?,
     };

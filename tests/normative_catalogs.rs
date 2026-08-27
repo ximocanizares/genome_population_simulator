@@ -9,6 +9,7 @@ const SUBSEED_CATALOG_V1: &str = include_str!("../catalogs/subseed-scopes-v1.tsv
 const SUBSEED_CATALOG_V2: &str = include_str!("../catalogs/subseed-scopes-v2.tsv");
 const SUBSEED_CATALOG: &str = include_str!("../catalogs/subseed-scopes-v3.tsv");
 const ID_CATALOG: &str = include_str!("../catalogs/id-classes-v1.tsv");
+const ID_CATALOG_V2: &str = include_str!("../catalogs/id-classes-v2.tsv");
 const VARIANT_ID_CATALOG: &str = include_str!("../catalogs/variant-id-v1.tsv");
 const PARAMETER_CATALOG: &str = include_str!("../catalogs/parameter-families-v1.tsv");
 const SUBSEED_CONTEXT: &str = "genome_population_simulator/v1/subseed";
@@ -17,7 +18,7 @@ const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
 // These fingerprints are the review lock for the published v1 contracts. A
 // deliberate content change must use a new versioned artifact and add a new
 // fingerprint instead of replacing a v1 value here.
-const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 8] = [
+const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 9] = [
     (
         "catalogs/diagnostics-v1.tsv",
         DIAGNOSTIC_CATALOG_V1,
@@ -52,6 +53,11 @@ const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 8] = [
         "catalogs/id-classes-v1.tsv",
         ID_CATALOG,
         "7eca3d96b64ed2c5944f06c95b5b547464ace88ca6f5b3d3479235b56d7f23cf",
+    ),
+    (
+        "catalogs/id-classes-v2.tsv",
+        ID_CATALOG_V2,
+        "386267beeecd7e25638e0b5b677c8c10cca871847fe0d4566f964e042f074b57",
     ),
     (
         "catalogs/parameter-families-v1.tsv",
@@ -100,6 +106,9 @@ fn published_v1_contracts_match_their_reviewed_content() {
         "# derivation_version=1\n# catalog_version=3\n# context={SUBSEED_CONTEXT}\n"
     )));
     assert!(ID_CATALOG.starts_with(&format!("# derivation_version=1\n# context={ID_CONTEXT}\n")));
+    assert!(ID_CATALOG_V2.starts_with(&format!(
+        "# derivation_version=1\n# catalog_version=2\n# context={ID_CONTEXT}\n"
+    )));
     assert!(PARAMETER_CATALOG.starts_with("# parameter_catalog_version=1\n"));
 
     for (path, content, expected) in REVIEWED_CONTRACT_FINGERPRINTS {
@@ -518,11 +527,16 @@ fn subseed_vectors_publish_exact_canonical_material() {
 
 #[test]
 fn id_vectors_separate_classes_and_encode_the_first_128_digest_bits() {
-    let rows: Vec<_> = ID_CATALOG
+    let v1_rows: Vec<_> = ID_CATALOG
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .collect();
-    assert_eq!(rows.len(), 4);
+    let rows: Vec<_> = ID_CATALOG_V2
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    assert_eq!(&rows[..v1_rows.len()], v1_rows);
+    assert_eq!(rows.len(), 8);
     let mut identifiers = BTreeSet::new();
     for row in rows {
         let fields: Vec<_> = row.split('|').collect();
@@ -541,18 +555,30 @@ fn id_vectors_separate_classes_and_encode_the_first_128_digest_bits() {
         else {
             panic!("ID catalog row must have nine fields");
         };
-        assert!(components.starts_with(&format!("class={class};")));
-        assert!(causes.contains("root"));
-        assert_eq!(encode_material(root, components), decode_hex(material));
-        let material = decode_hex(material);
-        assert_eq!(
-            blake3_derive_key(ID_CONTEXT, &material).as_slice(),
-            decode_hex(digest)
-        );
         assert!(identifier.starts_with(prefix));
-        let encoded = &identifier[prefix.len()..];
-        assert!(!encoded.contains('='));
-        assert_eq!(decode_base32_no_padding(encoded), decode_hex(&digest[..32]));
+        if *class == "template" {
+            assert_eq!(*causes, "library_id,template_ordinal");
+            assert_eq!(
+                *components,
+                "library_id=LIB_EB6VHCIWUACHDO7B5IVJ5RXTCQ;template_ordinal=7"
+            );
+            assert_eq!(*root, "-");
+            assert_eq!(*material, "-");
+            assert_eq!(*digest, "-");
+            assert_eq!(*identifier, "TPL_LIB_EB6VHCIWUACHDO7B5IVJ5RXTCQ_7");
+        } else {
+            assert!(components.starts_with(&format!("class={class};")));
+            assert!(causes.contains("root"));
+            assert_eq!(encode_material(root, components), decode_hex(material));
+            let material = decode_hex(material);
+            assert_eq!(
+                blake3_derive_key(ID_CONTEXT, &material).as_slice(),
+                decode_hex(digest)
+            );
+            let encoded = &identifier[prefix.len()..];
+            assert!(!encoded.contains('='));
+            assert_eq!(decode_base32_no_padding(encoded), decode_hex(&digest[..32]));
+        }
         assert!(identifiers.insert(*identifier));
     }
 }

@@ -1,6 +1,6 @@
 use genome_population_simulator::identity::{
-    AutomaticIdRequest, EventId, HumanLabel, IdClass, IdentityRegistry, IndividualId, ReferenceId,
-    SequenceId, derive_matrix_variant_id,
+    AutomaticIdRequest, EventId, HumanLabel, ID_CATALOG_VERSION, IdClass, IdentityRegistry,
+    IndividualId, ReferenceId, SequenceId, derive_matrix_variant_id,
 };
 use genome_population_simulator::randomness::RootSeed;
 
@@ -8,6 +8,11 @@ const ROOT: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d
 
 fn root() -> RootSeed {
     RootSeed::parse("root", ROOT).expect("literal root")
+}
+
+#[test]
+fn identity_uses_the_active_v2_catalog() {
+    assert_eq!(ID_CATALOG_VERSION, "2");
 }
 
 #[test]
@@ -83,6 +88,27 @@ fn all_a6_vectors_match_material_and_identifier() {
             vec![("event_key", "event-illumina")],
             "EVT_2V4A26ZPZMCRUEKKJQIZJ7EEVU",
         ),
+        (
+            IdClass::Batch,
+            "event-illumina",
+            vec![],
+            "BAT_LVFBOBZHZAZORHNNGRATZ55AFE",
+        ),
+        (
+            IdClass::Library,
+            "event-illumina",
+            vec![("individual_id", "sample-A")],
+            "LIB_EB6VHCIWUACHDO7B5IVJ5RXTCQ",
+        ),
+        (
+            IdClass::ReadGroup,
+            "event-illumina",
+            vec![
+                ("batch_id", "BAT_LVFBOBZHZAZORHNNGRATZ55AFE"),
+                ("library_id", "LIB_EB6VHCIWUACHDO7B5IVJ5RXTCQ"),
+            ],
+            "RG_FGR44MPG223B52YE6ROSTNX3B4",
+        ),
     ];
 
     for (class, scope, causes, expected) in cases {
@@ -101,6 +127,15 @@ fn all_a6_vectors_match_material_and_identifier() {
             IdClass::Event => registry
                 .derive_event(root(), &request)
                 .map(|id| id.to_string()),
+            IdClass::Batch => registry
+                .derive_batch(root(), &request)
+                .map(|id| id.to_string()),
+            IdClass::Library => registry
+                .derive_library(root(), &request)
+                .map(|id| id.to_string()),
+            IdClass::ReadGroup => registry
+                .derive_read_group(root(), &request)
+                .map(|id| id.to_string()),
         }
         .expect("derive vector");
         assert_eq!(observed, expected);
@@ -115,8 +150,13 @@ fn all_a6_vectors_match_material_and_identifier() {
 
 fn class_prefix_len(class: IdClass) -> usize {
     match class {
-        IdClass::Execution | IdClass::Reference => 4,
-        IdClass::Individual | IdClass::Event => 4,
+        IdClass::Execution
+        | IdClass::Reference
+        | IdClass::Individual
+        | IdClass::Event
+        | IdClass::Batch
+        | IdClass::Library => 4,
+        IdClass::ReadGroup => 3,
     }
 }
 

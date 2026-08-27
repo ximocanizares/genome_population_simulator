@@ -2,8 +2,8 @@
 
 Los ficheros `subseed-scopes-v1.tsv`, `subseed-scopes-v2.tsv`,
 `subseed-scopes-v3.tsv`, `subseed-scopes-v4.tsv`, `subseed-scopes-v5.tsv`,
-`subseed-scopes-v6.tsv` e
-`id-classes-v1.tsv` fijan los contratos versionados
+`subseed-scopes-v6.tsv`, `subseed-scopes-v7.tsv`, `id-classes-v1.tsv` e
+`id-classes-v2.tsv` fijan los contratos versionados
 de la codificación definida por DTC-037 y DTC-039. La versión 3 añade el ámbito
 `reference_reduction` sin modificar los vectores anteriores. Sus filas son vectores
 literales, no ejemplos orientativos. Cambiar un ámbito, nombre, orden, prefijo,
@@ -17,6 +17,16 @@ La v6 conserva v5 sin modificar y sustituye únicamente su fila
 `reference_reduction` por el selector canónico
 `direct_proportional_selection`. Es el catálogo activo del runtime; no promete
 compatibilidad con el selector transitorio anterior.
+
+La v7 conserva literalmente las filas de v6 y añade `technical_template`, con
+`event_id`, `library_id` y el ordinal lógico de plantilla. `id-classes-v2.tsv`
+conserva las filas v1 y añade `batch`, `library`, `read_group` y `template`.
+Batch, biblioteca y grupo de lectura usan BLAKE3 como las demás identidades
+automáticas. `TemplateId` es la excepción acotada de DTC-039: se compone como
+`TPL_<library_id>_<template_ordinal_decimal>`; como la biblioteca es única en
+el evento y el ordinal lo es dentro de la biblioteca, no hay colisión posible
+ni se conserva un registro creciente de plantillas. Ninguna causa incorpora
+ruta, orden de iteración, hilo o planificación.
 
 Cada entero es `u32` big-endian. Los nombres de campo son ASCII y sus valores
 son UTF-8; ambos llevan delante su longitud en bytes. Las rutas, el reloj, los

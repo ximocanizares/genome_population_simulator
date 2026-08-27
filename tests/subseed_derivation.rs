@@ -132,7 +132,7 @@ fn verify_catalog_with_independent_oracle(catalog: &str, derivation_version: u32
 }
 
 #[test]
-fn published_catalogs_are_immutable_and_v6_has_an_independent_oracle() {
+fn published_catalogs_are_immutable_and_v7_has_an_independent_oracle() {
     let catalogs = [
         (
             include_bytes!("../catalogs/subseed-scopes-v1.tsv").as_slice(),
@@ -198,13 +198,34 @@ fn published_catalogs_are_immutable_and_v6_has_an_independent_oracle() {
         }
     }
     verify_catalog_with_independent_oracle(v6, F2_DERIVATION_VERSION);
+
+    let v7 = include_str!("../catalogs/subseed-scopes-v7.tsv");
+    assert_eq!(
+        encode_hex(&Sha256::digest(v7.as_bytes())),
+        "bddd45fdb968e312676028585333b39a05c331cdcddae6d8bffda6edad05dbf8"
+    );
+    assert!(v7.starts_with(
+        "# derivation_versions=1,2\n# catalog_version=7\n# context=genome_population_simulator/v1/subseed\n"
+    ));
+    let v7_rows = v7
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(&v7_rows[..v6_rows.len()], v6_rows);
+    assert_eq!(v7_rows.len(), v6_rows.len() + 1);
+    assert!(
+        v7_rows
+            .last()
+            .is_some_and(|row| row.starts_with("technical_template|"))
+    );
+    verify_catalog_with_independent_oracle(v7, F2_DERIVATION_VERSION);
 }
 
 #[test]
-fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v6() {
+fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v7() {
     let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
     assert_eq!(DERIVATION_VERSION, 1);
-    assert_eq!(SUBSEED_CATALOG_VERSION, "6");
+    assert_eq!(SUBSEED_CATALOG_VERSION, "7");
     assert_eq!(
         derive_subseed(
             root,
@@ -228,7 +249,7 @@ fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v6() {
         .to_hex(),
         "20c4a19ada8e8cdfce862db5b3423fd8250be2a61cf83321b4a6fb9210963169"
     );
-    let active_row = include_str!("../catalogs/subseed-scopes-v6.tsv")
+    let active_row = include_str!("../catalogs/subseed-scopes-v7.tsv")
         .lines()
         .find(|row| row.starts_with("reference_reduction|"))
         .expect("active reduction catalog row");

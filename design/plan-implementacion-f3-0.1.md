@@ -5,7 +5,8 @@
 - **Título:** generación mínima de lecturas desde haplotipos.
 - **Versión:** 0.1.
 - **Fecha:** 27 de agosto de 2026.
-- **Estado:** F3.1.1 completado y revisado; F3.1.2 es el siguiente paso.
+- **Estado:** F3.1.1–F3.1.2 completados y revisados; F3.1.3 es el siguiente
+  paso.
 - **Ámbito:** F3.1 y F3.5 simplificados de la hoja de ruta vigente.
 - **Fuentes:** especificación §4.4 y §4.6–§4.8; arquitectura §5.5 y §6; DTC-005, DTC-013, DTC-016, DTC-018, DTC-024, DTC-031–032, DTC-035, DTC-037–045 y DTC-079; hoja de ruta F3 y trazabilidad vigente.
 
@@ -84,11 +85,11 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
     técnica donde pueda aparecer un ID duplicado; tecnología y perfil se fijan
     por contrato y no son campos de autoría. puertas comunes.
 
-- ☐ F3.1.2. Derivar ámbito aleatorio e identidades técnicas mínimas desde causas estables, no desde orden de iteración.
+- ✅ F3.1.2. Derivar ámbito aleatorio e identidades técnicas mínimas desde causas estables, no desde orden de iteración.
   - Depende de: F3.1.1 y catálogo de subsemillas F2 vigente.
   - Procede de: REQ-CONF-26–27, REQ-DAT-18/68, REQ-RG-03, REQ-MAN-72 y DTC-016/037–039.
-  - Cambia: catálogo versionado y derivación solo para evento, biblioteca, tanda, grupo de lectura y plantillas que F3 genera.
-  - Se comprueba con: cargo test --test f3_technical_identity --locked; semilla fija reproduce ID/subsemilla y añadir o reordenar individuo no cambia plantilla existente; puertas comunes.
+  - Cambia: catálogo versionado y derivación solo para evento, biblioteca, tanda, grupo de lectura y plantillas que F3 genera. La frontera del evento recibe `ReferenceId` tipado. Batch, biblioteca y grupo de lectura conservan BLAKE3 y registro de colisiones; por excepción explícita de DTC-039, `TemplateId` se compone como `TPL_<library_id>_<template_ordinal_decimal>`, único por construcción sin retener un registro por plantilla.
+  - Se comprueba con: cargo test --test f3_technical_identity --locked; semilla fija reproduce ID/subsemilla y el vector histórico `technical_event`; cambiar cada causa altera su ámbito, texto/ruta inválido no cruza la frontera tipada, añadir o reordenar individuo no cambia plantilla existente y derivar muchos ordinales no incrementa estado residente; puertas comunes.
 
 - ☐ F3.1.3. Resolver el número estocástico de lecturas y muestrear sus orígenes
   desde la vista haplotípica faseada, sin reconstruir `truth.jsonl`.
