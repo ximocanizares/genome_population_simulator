@@ -306,6 +306,8 @@ poblaciones pueden alimentar este mismo recorrido sin crear otra implementación
 
 **Hitos:**
 
+- **F4.0. Catálogo RNG técnico.** Fijar y probar las claves, consumidores y
+  vectores reproducibles del recorrido F4 antes de producir pares o artefactos.
 - **F4.1. Perfiles tecnológicos.** Completar Illumina *paired-end* para una
   población y un evento técnico únicos. PacBio HiFi se aplaza a DTF-049 y los
   recorridos con varias poblaciones o eventos a DTF-050.
@@ -313,8 +315,8 @@ poblaciones pueden alimentar este mismo recorrido sin crear otra implementación
   sustituciones configurables por los ámbitos permitidos.
 - **F4.3. Artefactos WGS.** Simular quimeras y rechazar configuraciones de
   duplicados, adaptadores, sesgo GC no neutro y anomalías *paired-end*, que se
-  aplazan en DTF-054–056. El contenido GC
-  excluye `N`; una ventana sin bases conocidas no recibe corrección y se registra.
+  aplazan en DTF-054–056. Las ventanas y correcciones GC no neutras pertenecen
+  a DTF-056.
 - **F4.4. Contaminación biológica.** Sustituir lecturas completas mediante un
   porcentaje sorteado por receptora y donantes aleatorios de su misma población;
   matrices dirigidas y fuentes externas quedan en DTF-052.

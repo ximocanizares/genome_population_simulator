@@ -504,16 +504,18 @@ mapeo, alineada observada por referencia.
 
 El flujo técnico de F4 es único: cobertura → fragmento → quimera opcional →
 calidad/error por mate → contaminación biológica → *index hopping* y
-demultiplexado → FASTQ y resumen. DTC-081 fija el catálogo `f4-technical-v1`:
+demultiplexado → FASTQ y resumen. DTC-086 fija el catálogo publicable
+`f4-technical-v3` y DTC-088 sus primitivas; DTC-081 y DTC-085 son antecedentes
+reemplazados:
 cada decisión inicia su propio ChaCha12 desde una clave canónica, no avanza un
-estado compartido. La clave comienza siempre por `event_id`, `library_id` y
-`stage`; añade la plantilla o instancia pre-salto y solo después los campos
-propios de fragmento, mate/ciclo, candidata o receptora. Por tanto el orden de
+estado compartido. La clave usa los componentes y el discriminador `decision`
+normativos de DTC-086; solo añade un resultado previo cuando esa decisión lo
+declara expresamente. Por tanto el orden de
 iteración, el número de hilos, escribir antes otra biblioteca, o que una
 instancia cambie de biblioteca no modifica un sorteo ajeno.
 
 Las decisiones discretas reutilizan únicamente `bernoulli-v1` y
-`uniform-index-v1` de DTC-081; las selecciones sin reemplazo usan una lista
+`uniform-index-v1` definidos por DTC-088; las selecciones sin reemplazo usan una lista
 canónica y Fisher–Yates parcial. Probabilidades 0 y 1 no consumen sorteos; la
 ausencia de candidatos o capacidad suficiente es un rechazo previo, no una rama
 que altere otros resultados. El *index hopping* se calcula sobre la instantánea
@@ -522,11 +524,18 @@ biblioteca de origen congelada; las transferencias se aplican simultáneamente.
 La distribución cuantitativa del perfil, incluida su normal truncada, pertenece
 al recurso versionado de DTPD-106, no a este catálogo.
 
+La identidad transitoria antes del salto no se deduce de la plantilla ni del
+orden de emisión. DTC-087 deriva un `PreHopInstanceId` propio desde plantilla y
+biblioteca y uno contaminante desde la biblioteca receptora y la instancia fuente.
+Tras el demultiplexado, la biblioteca final y esa instancia producen el
+`TechnicalPairId` BLAKE3. Ambos se conservan solo durante generación y validación;
+FASTQ y manifiesto no publican el vínculo de procedencia individual.
+
 Una quimera F4 no busca una segunda plantilla ni cambia de biblioteca. Para un
 inserto `L`, conserva el prefijo `1..b` de la plantilla fuente, donde `b` se
 elige uniformemente en `1..L-1`, y forma una lista canónica de intervalos de
 longitud `L-b` en todas las copias del mismo individuo/biblioteca. La clave de
-quimera añade `b` y el selector de intervalo a `f4-technical-v1`. En la copia
+quimera añade `b` y el selector de intervalo a `f4-technical-v3`. En la copia
 fuente excluye los intervalos que solapan o tocan el prefijo; escoge uno de los
 restantes con `uniform-index-v1`. Ambos segmentos se leen en orientación
 directa y la construcción PE aplica después la orientación normal al inserto
@@ -535,7 +544,7 @@ a publicación, nunca un reintento ni una quimera degradada.
 
 El lector de perfiles F4 consume el único recurso inicial
 `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json` y verifica su SHA-256
-`ae8d598a95f7a9826b3a8c563a023d745f85031651c1e8c03ee9f54310162d3b` antes de
+`3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea` antes de
 resolver la configuración. Sus tramos Q por ciclo y el algoritmo
 `normal_truncated_box_muller_v1` son datos de dominio versionados, no valores
 que pueda elegir la implementación. El generador local de la plantilla consume
@@ -1673,8 +1682,9 @@ enlazarán con el componente y la frontera que aportan la evidencia.
 Las decisiones confirmadas, propuestas, pendientes y futuras se registran en
 [decisiones-tecnicas-0.1.md](./decisiones-tecnicas-0.1.md). TOML para la
 configuración de autoría, JSON para manifiestos y configuración efectiva, RFC
-8259 y JSON Schema Draft 2020-12 ya están confirmados. V1 usa únicamente la
-versión de esquema `"1"`, rechaza otras versiones y no realiza migraciones. La
+8259 y JSON Schema Draft 2020-12 ya están confirmados. Los documentos iniciales
+empezaron en la versión de esquema `"1"`; las versiones vigentes y sus rechazos
+se rigen por DTC-036 y las extensiones de F4 por DTC-082. La
 aleatoriedad usa ChaCha12 y deriva subsemillas con BLAKE3; esto no selecciona
 por sí solo crates. DTC-043 fija su política de admisión y DTC-048 fija Rust
 1.97.1 stable con perfil minimal, rustfmt, clippy y target GNU en

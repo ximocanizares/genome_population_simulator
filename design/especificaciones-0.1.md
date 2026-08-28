@@ -3641,7 +3641,7 @@ a una probabilidad mayor de error.
   resolver una `N` de la plantilla ni generar nuevas `N` como error o llamada
   ausente. Para longitudes inferiores a 150 pb usa el prefijo del recurso propio
   `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json`, SHA-256
-  `ae8d598a95f7a9826b3a8c563a023d745f85031651c1e8c03ee9f54310162d3b`; no
+  `3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea`; no
   extrapola ciclos por encima de 150 pb. Es una aproximación sintética explícita
   y ART `HSXn` solo una referencia comparativa externa, sin incorporar ni
   redistribuir sus tablas. Si se configura un
@@ -3652,8 +3652,9 @@ a una probabilidad mayor de error.
 - **REQ-DAT-38.** Las puntuaciones de calidad por base del FASTQ deben generarse
   de forma coherente con el modelo de errores efectivo: una base de menor
   calidad debe tener mayor probabilidad de ser errónea conforme a la
-  interpretación probabilística de la puntuación. R1 y R2 sortean calidad y
-  error de forma independiente con sus curvas respectivas, incluso en posiciones
+  interpretación probabilística de la puntuación. R1 y R2 derivan la calidad
+  de forma determinista de sus curvas respectivas y sortean el error de forma
+  independiente, incluso en posiciones
   del inserto que ambas cubren. Tras cualquier ajuste configurado, la
   probabilidad final determina tanto el sorteo de error como la calidad FASTQ
   final; no se emite una calidad del perfil original incompatible con el error
@@ -3757,8 +3758,8 @@ a una probabilidad mayor de error.
   la original en la donante. Una misma unidad de
   origen no debe copiarse dos veces dentro de una misma biblioteca receptora;
   la copia conserva secuencia y calidades realizadas y no consume sorteos de
-  error o calidad adicionales.
-  puede originar una instancia en otra receptora compatible. Una duplicación
+  error o calidad adicionales. La misma unidad de origen puede originar una
+  instancia en otra receptora compatible. Una duplicación
   adicional dentro de la receptora solo debe aparecer mediante un mecanismo de
   duplicación configurado. El manifiesto informa los recuentos agregados, no los
   identificadores ni vínculos individuales.

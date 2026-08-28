@@ -43,7 +43,7 @@
     "substitution_matrix": "deferred_dtf_053"
   },
   "reproducibility": {
-    "rng_catalog": "f4-technical-v1",
+    "rng_catalog": "f4-technical-v3",
     "profile_algorithm_version": "1"
   }
 }

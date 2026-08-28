@@ -102,7 +102,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-CONF-71 | ACE-93, ACE-01 | F5.6 | Planificada — TEST-REQ-CONF-71: ejecutar «Si se seleccionan varias referencias de mapeo dentro de un evento, el único mapeador seleccionado debe» y comprobar el estado o artefacto resultante y su identidad. |
 | REQ-CONF-72 | ACE-41, ACE-01 | F4.2 | Planificada — TEST-REQ-CONF-72: ejecutar el escenario «La cobertura debe configurarse como una cobertura media objetivo en «x» para cada biblioteca, de forma» y comparar el resultado observable con el REQ. |
 | REQ-CONF-73 | ACE-111, ACE-41 | F4.2 | Planificada — TEST-REQ-CONF-73: rechazar sustituciones de cobertura por individuo, secuencia o región; F4 solo admite el objetivo común del evento. |
-| REQ-CONF-74 | ACE-41, ACE-01 | DTF-056 | Aplazada — regiones de cobertura requieren sesgo o perfil posterior; F4 las rechaza. |
+| REQ-CONF-74 | ACE-41, ACE-01 | F4.2/DTF-056 | F4 rechaza selectores regionales; DTF-056 implementa un perfil posterior. |
 | REQ-CONF-75 | ACE-42, ACE-01 | F4.4 | Planificada — TEST-REQ-CONF-75: declarar un rango de contaminación total y comprobar el sorteo reproducible por receptora y su ámbito. |
 | REQ-CONF-76 | ACE-43, ACE-42, ACE-01 | F4.4 | Planificada — TEST-REQ-CONF-76: cuantificar contaminación paired-end por número; comprobar pares completos y rechazo de pares huérfanos. |
 | REQ-CONF-77 | ACE-73, ACE-01 | F4.4 | Planificada — TEST-REQ-CONF-77: comprobar aceptación de donantes de la misma población y rechazo de externos, otra población o selección manual. |
@@ -120,13 +120,13 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-CONF-89 | ACE-49, ACE-68, ACE-01 | F4.3 | Planificada — TEST-REQ-CONF-89: declarar «Cada perfil predeterminado debe aportar valores habituales para los mecanismos de duplicación que le correspondan, y» y comprobar aceptación, valor efectivo y ámbito de aplicación. |
 | REQ-CONF-90 | ACE-49, ACE-01 | F4.3/DTF-055/DTF-056 | F4 rechaza marcado y configuración de duplicados; BAM/CRAM y modelos de duplicación se recuperan en sus DTF. |
 | REQ-CONF-91 | ACE-50, ACE-01 | F4.3/DTF-054 | F4 rechaza activar adaptadores; la opción activa se implementa en DTF-054. |
-| REQ-CONF-92 | ACE-50, ACE-01 | F4.3 | Planificada — TEST-REQ-CONF-92: declarar «Cuando se active, la configuración debe permitir definir como mínimo el perfil o la secuencia del» y comprobar aceptación, valor efectivo y ámbito de aplicación. |
+| REQ-CONF-92 | ACE-50, ACE-01 | F4.3/DTF-054 | F4 rechaza perfil, secuencia, frecuencia, proporción o longitud de adaptador; DTF-054 implementa la vía positiva. |
 | REQ-CONF-93 | ACE-50, ACE-01 | DTF-054 | Aplazada — parámetros de adaptadores pertenecen a perfiles de fragmentos cortos. |
-| REQ-CONF-94 | ACE-51, ACE-01 | F4.3 | Planificada — TEST-REQ-CONF-94: declarar «Cada perfil tecnológico debe poder definir una curva o relación predeterminada entre el contenido GC de» y comprobar aceptación, valor efectivo y ámbito de aplicación. |
-| REQ-CONF-95 | ACE-51, ACE-01 | F4.3 | Planificada — TEST-REQ-CONF-95: ejecutar el escenario «La configuración efectiva debe determinar de forma definida y documentada cómo se combina el sesgo de» y comparar el resultado observable con el REQ. |
+| REQ-CONF-94 | ACE-51, ACE-01 | F4.3/DTF-056 | F4 fija GC neutro y rechaza curva/intensidad no nula; DTF-056 implementa perfil no neutro. |
+| REQ-CONF-95 | ACE-51, ACE-01 | F4.3/DTF-056 | F4 rechaza combinaciones o excepciones regionales de GC; DTF-056 implementa su modelo. |
 | REQ-CONF-96 | ACE-52, ACE-01 | F5.1 | Planificada — TEST-REQ-CONF-96: declarar «permitir definir o generar por regiones secuencias repetitivas, duplicadas o altamente homólogas destinadas a producir baja» y comprobar aceptación, valor efectivo y ámbito de aplicación. |
-| REQ-CONF-97 | ACE-53, ACE-01 | DTF-051 | Aplazada — parámetros de categorías sintéticas directas. |
-| REQ-CONF-98 | ACE-53, ACE-01 | DTF-051 | Aplazada — validación de parámetros de alineamiento directo. |
+| REQ-CONF-97 | ACE-53, ACE-01 | F4.3/DTF-051 | F4 rechaza parámetros de categorías sintéticas directas; DTF-051 incorpora la vía positiva. |
+| REQ-CONF-98 | ACE-53, ACE-01 | F4.3/DTF-051 | F4 rechaza solicitudes de alineamiento directo e identifica el campo; DTF-051 incorpora la vía positiva. |
 | REQ-CONF-99 | ACE-54, ACE-01 | F4.3 | Planificada — TEST-REQ-CONF-99: vector literal prueba punto `1..L-1`, lista canónica de segundas fuentes, exclusión de solape/contacto, orientación directa, unión de longitud `L` y fallo previo si falta candidata. |
 | REQ-CONF-100 | ACE-85, ACE-01 | F7.1 | Planificada — TEST-REQ-CONF-100: declarar «definir un umbral general para decidir qué *scaffolds* reciben un mínimo de un entrecruzamiento por bivalente» y comprobar aceptación, valor efectivo y ámbito de aplicación. |
 | REQ-CONF-101 | ACE-93, ACE-01 | F4.1 | Planificada — F4 admite exactamente un evento técnico explícito para una población; las cardinalidades mayores quedan en DTF-050. |
@@ -541,11 +541,11 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-DAT-21 | ACE-39 | F5.6 | Planificada — TEST-REQ-DAT-21: ejecutar el escenario «Cada evento con alineamientos debe usar exactamente un mapeador» y comparar el resultado observable con el REQ. |
 | REQ-DAT-22 | ACE-93 | F5.6 | Planificada — TEST-REQ-DAT-22: ejecutar «Si un evento selecciona varias referencias de mapeo, debe aplicar el mismo mapeador y los mismos» y comprobar el estado o artefacto resultante y su identidad. |
 | REQ-DAT-23 | ACE-37 | F5.6 | Planificada — TEST-REQ-DAT-23: ejecutar el escenario «Cuando se use minimap2, el perfil de lecturas debe seleccionar automáticamente el *preset* y los parámetros» y comparar el resultado observable con el REQ. |
-| REQ-DAT-24 | ACE-17 | F3.1 | Planificada — TEST-REQ-DAT-24: ejecutar el escenario «La cobertura realizada debe ser estocástica y aproximarse a la cobertura media objetivo efectiva de cada» y comparar el resultado observable con el REQ. |
+| REQ-DAT-24 | ACE-17 | F4.2 | Planificada — TEST-REQ-DAT-24: ejecutar el escenario «La cobertura realizada debe ser estocástica y aproximarse a la cobertura media objetivo efectiva de cada» y comparar el resultado observable con el REQ. |
 | REQ-DAT-25 | ACE-42 | F4.4 | Planificada — comprobar sustitución sin reemplazo de parejas propias e ID técnico nuevo de receptora antes del demultiplexado. |
 | REQ-DAT-26 | ACE-100 | F4.4 | Planificada — TEST-REQ-DAT-26: comprobar que la sustitución usa identidad transitoria de pareja cuando es necesaria y que FASTQ y manifiesto no publican identificadores individuales de procedencia. |
 | REQ-DAT-27 | ACE-43 | F4.4 | Planificada — TEST-REQ-DAT-27: ejecutar «Cuando se contabilice la contaminación realizada en datos *paired-end*, cada unidad debe incorporar juntos los dos» y comprobar el estado o artefacto resultante y su identidad. |
-| REQ-DAT-28 | ACE-44 | DTF-052 | Aplazada — TEST-REQ-DAT-28: comprobar rechazo previo de FASTQ externos y ausencia de artefactos en F4. |
+| REQ-DAT-28 | ACE-44 | F4.4/DTF-052 | F4 rechaza FASTQ externo antes de generar y prueba ausencia de artefactos; DTF-052 implementa la capacidad positiva. |
 | REQ-DAT-29 | ACE-42, ACE-45 | F4.4 | Planificada — TEST-REQ-DAT-29: ejecutar el escenario «aplicar y registrar por separado la contaminación biológica y la técnica» y comparar el resultado observable con el REQ. |
 | REQ-DAT-30 | ACE-45 | F4.5 | Planificada — TEST-REQ-DAT-30: ejecutar el escenario «La contaminación técnica debe poder producir dos resultados» y comparar el resultado observable con el REQ. |
 | REQ-DAT-31 | ACE-45 | F4.5 | Planificada — TEST-REQ-DAT-31: introducir una combinación UDI inesperada en la frontera de demultiplexado y comprobar descarte defensivo y recuento agregado, sin inferir que UDI elimina el *index hopping*. |
@@ -582,9 +582,9 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-DAT-62 | ACE-53, ACE-12 | DTF-051 | Aplazada — quimeras en alineamientos directos. |
 | REQ-DAT-63 | ACE-54, ACE-12 | F4.3 | Planificada — TEST-REQ-DAT-63: vector de orígenes transitorios comprueba que ambas fuentes pertenecen al mismo individuo y biblioteca. |
 | REQ-DAT-64 | ACE-54, ACE-12 | F4.3 | Planificada — TEST-REQ-DAT-64: vector literal comprueba prefijo fuente, segunda fuente no solapada/contigua, suma de longitudes, cromosoma/copia alternativos y orientación directa antes de PE. |
-| REQ-DAT-65 | ACE-55 | DTF-055 | Aplazada — anomalías PE observables requieren mapeo. |
-| REQ-DAT-66 | ACE-55 | DTF-055 | Aplazada — estados PE determinados por mapeador. |
-| REQ-DAT-67 | ACE-55 | DTF-051/DTF-055 | Aplazada — parejas sintéticas directas y anomalías PE. |
+| REQ-DAT-65 | ACE-55 | F4.3/DTF-055 | F4 rechaza anomalías PE observables; DTF-055 implementa su modelo con mapeo. |
+| REQ-DAT-66 | ACE-55 | F4.3/DTF-055 | F4 rechaza estados PE observables; DTF-055 los determina desde mapeo. |
+| REQ-DAT-67 | ACE-55 | F4.3/DTF-051/DTF-055 | F4 rechaza categorías directas y anomalías PE; los DTF implementan las vías positivas. |
 | REQ-DAT-68 | ACE-100, ACE-12 | F4.1 | Planificada — TEST-REQ-DAT-68: vector literal comprueba cabeceras R1/R2 `GPS`, UDI `i7+i5` literal de 8+8 `ACGT`, rechazo de marcador `0`, unicidad y ausencia de metadatos físicos fingidos. |
 | REQ-DAT-69 | ACE-46, ACE-12 | F4.4 | Planificada — TEST-REQ-DAT-69: ejecutar «La contaminación biológica debe crear en la receptora una instancia nueva con identificador técnico nuevo y» y comprobar el estado o artefacto resultante y su identidad. |
 | REQ-DAT-70 | ACE-46, ACE-12 | F4.5 | Planificada — TEST-REQ-DAT-70: comprobar transferencia sin duplicación, identificador técnico local nuevo en salida y ausencia del previo en FASTQ/manifiesto. |
@@ -601,7 +601,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-WGS-08 | ACE-17 | F4.3/DTF-056 | F4 conserva GC neutro y rechaza cobertura especial; sesgo no nulo aplazado. |
 | REQ-WGS-09 | ACE-70, ACE-17 | F3.1 | Planificada — TEST-REQ-WGS-09: ejecutar «Antes de esos efectos, los haplotipos y alelos deben contribuir en proporción a su dosis y» y comprobar el estado o artefacto resultante y su identidad. |
 | REQ-WGS-10 | ACE-70, ACE-17 | F4.3 | Planificada — TEST-REQ-WGS-10: ejecutar el escenario «La primera versión no debe ofrecer parámetros para forzar un sesgo de biblioteca por alelo ni» y comparar el resultado observable con el REQ. |
-| REQ-WGS-11 | ACE-41, ACE-17 | F4.3 | Planificada — TEST-REQ-WGS-11: ejecutar «El manifiesto y el informe de validación deben registrar la referencia estructural y la longitud haploide» y comprobar el registro y su procedencia en la salida exigida. |
+| REQ-WGS-11 | ACE-41, ACE-17 | F4.2/DTF-055 | F4.2 registra denominador, coberturas básica/final y N; DTF-055 añade cobertura alineada. |
 | REQ-WGS-12 | ACE-71, ACE-17 | F5.6 | Planificada — TEST-REQ-WGS-12: ejecutar «Solo debe conservarse el BAM o CRAM final que contiene las degradaciones configuradas» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-WGS-13 | ACE-71, ACE-17 | DTF-050 | Aplazada — un control técnico separado requiere un segundo evento. |
 | REQ-WGS-14 | ACE-69, ACE-17 | F4.1 | Planificada — TEST-REQ-WGS-14: ejecutar el escenario «Las posiciones `N` deben ser elegibles para el muestreo y contar tanto como posiciones cubiertas como» y comparar el resultado observable con el REQ. |
@@ -610,7 +610,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-CONT-03 | ACE-42 | F4.4 | Planificada — TEST-REQ-CONT-03: comprobar conversión a unidades y suma exacta de aportes al objetivo realizado. |
 | REQ-CONT-04 | ACE-37 | F4.4 | Planificada — TEST-REQ-CONT-04: ejecutar el escenario «Toda fuente debe ser compatible con la tecnología, el perfil y la disposición de lecturas de» y comparar el resultado observable con el REQ. |
 | REQ-CONT-05 | ACE-73 | F4.4 | Planificada — TEST-REQ-CONT-05: comprobar que solo se eligen otros individuos de la misma población. |
-| REQ-CONT-06 | ACE-73 | DTF-052 | Aplazada — TEST-REQ-CONT-06: comprobar rechazo previo de matriz dirigida. |
+| REQ-CONT-06 | ACE-73 | F4.4/DTF-052 | F4 rechaza matriz dirigida y pesos; DTF-052 implementa la capacidad positiva. |
 | REQ-CONT-07 | ACE-72 | F4.4 | Planificada — comprobar rechazo de rango inválido, receptor sin donantes o capacidad de parejas insuficiente antes de escribir FASTQ. |
 | REQ-CONT-08 | ACE-73 | F4.4 | Planificada — comprobar sorteo reproducible sin reemplazo sobre todas las parejas elegibles y sin pesos por donante. |
 | REQ-CONT-09 | ACE-73 | F4.4 | Planificada — TEST-REQ-CONT-09: comprobar registro de rango, objetivo sorteado, donantes y aportes realizados. |
@@ -620,7 +620,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-CONT-13 | ACE-42, ACE-74 | DTF-051 | Aplazada — comparación de ambos modos. |
 | REQ-CONT-14 | ACE-74 | F4.5 | Planificada — TEST-REQ-CONT-14: ejecutar «Por muestra, fuente y mecanismo, el manifiesto y el informe deben registrar objetivos, lecturas propias retiradas» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-CONT-15 | ACE-42 | F4.4 | Planificada — TEST-REQ-CONT-15: comprobar porcentaje sorteado por receptora, conversión al entero más próximo con empate hacia arriba y rechazo de cobertura equivalente, número o porcentaje por donante. |
-| REQ-CONT-16 | ACE-42 | DTF-052 | Aplazada — optimización o reparto dirigido conjunto; F4 sortea donantes aleatorios sin matriz ni pesos. |
+| REQ-CONT-16 | ACE-42 | F4.4/DTF-052 | F4 prueba reparto aleatorio sin reemplazo y rechazo de optimización/matriz; DTF-052 recupera el reparto dirigido. |
 | REQ-UI-01 | ACE-114 | F2.0 | Implementada para el alcance vigente — `test_current_schema_options_have_controls_and_future_options_do_not`; cada fase amplía el inventario con su primer consumidor. |
 | REQ-UI-02 | ACE-114 | F2.0 | Implementada para la vía directa vigente — `test_nine_tabs_labels_keyboard_and_textual_states_are_present`; las capacidades futuras permanecen visibles con su fase y sin controles anticipados. |
 | REQ-UI-03 | ACE-114 | F2.0 | Implementada para campos F1 — controles estructurales, enteros sin truncamiento y decimales como literales exactos en `test_config_editor`. |
@@ -784,7 +784,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-MAN-36 | ACE-39 | F5.6 | Planificada — TEST-REQ-MAN-36: ejecutar «Para cada evento con alineamientos, el manifiesto debe registrar el nombre y la versión del único» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-MAN-37 | ACE-41 | F4.2/DTF-055 | F4 registra objetivo, denominador y coberturas WGS básica/final sin selectores; DTF-055 añade cobertura alineada. |
 | REQ-MAN-38 | ACE-42 | F4.4 | Planificada — TEST-REQ-MAN-38: ejecutar «Para cada fuente contaminante, el manifiesto debe registrar su identificador y origen, la fracción objetivo, la» y comprobar el registro y su procedencia en la salida exigida. |
-| REQ-MAN-39 | ACE-44 | DTF-052 | Aplazada — fuente contaminante externa excluida de F4. |
+| REQ-MAN-39 | ACE-44 | F4.4/DTF-052 | F4 rechaza la fuente externa antes de crear copia o entrada de manifiesto; DTF-052 incorpora la vía positiva. |
 | REQ-MAN-40 | ACE-45 | F4.5 | Planificada — TEST-REQ-MAN-40: ejecutar «Para la contaminación técnica, el manifiesto debe registrar la tanda, las bibliotecas, las muestras y sus» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-MAN-41 | ACE-46 | F4.5 | Planificada — TEST-REQ-MAN-41: comprobar hashes/tamaños FASTQ y resumen agregado, sin fichero de procedencia individual. |
 | REQ-MAN-42 | ACE-47 | F4.2 | Planificada — TEST-REQ-MAN-42: ejecutar «Para los errores de secuenciación, el manifiesto debe registrar la tecnología, el nombre y la versión» y comprobar el registro y su procedencia en la salida exigida. |
@@ -844,7 +844,7 @@ haplotipos fundadores en F6.4. El recuento mecánico vigente de filas `REQ` es
 | REQ-SAL-04 | ACE-94 | F3.5 | Planificada — F1 aporta el manifiesto general; el cierre exige todos los manifiestos de evento aplicables. |
 | REQ-SAL-05 | ACE-34 | F9.1 | Planificada — TEST-REQ-SAL-05: ejecutar el escenario «Una ejecución solo debe terminar con éxito cuando haya producido todas las salidas mínimas y todas» y comparar el resultado observable con el REQ. |
 | REQ-SAL-06 | ACE-34 | F2.4 | Superada F2.4 — `tests/truth_validation.rs` omite VCF y reconstruye copias y genotipos desde `truth.jsonl` v1 y la referencia mediante el validador semántico independiente; también rechaza corrupción de esquema, dosis, portadores, historial y enlaces de fragmentos. Evidencia vigente: `evidence/f2.4/cierre.md`. |
-| REQ-SAL-07 | ACE-44 | DTF-052 | Aplazada — FASTQ externo como contaminación excluido de F4. |
+| REQ-SAL-07 | ACE-44 | F4.4/DTF-052 | F4 rechaza FASTQ externo antes de copiarlo o publicarlo; DTF-052 incorpora la vía positiva. |
 | REQ-SAL-08 | ACE-46 | F4.5 | Planificada — TEST-REQ-SAL-08: comprobar un FASTQ o pareja final por grupo, su enlace y resumen agregado en manifiesto, y la ausencia de fichero de procedencia individual. |
 | REQ-SAL-09 | ACE-46 | F4.5 | Planificada — TEST-REQ-SAL-09: comprobar que la simulación no publica verdad técnica individual y que conserva únicamente parámetros y recuentos agregados. |
 | REQ-SAL-10 | ACE-48 | F4.7 | Planificada — TEST-REQ-SAL-10: solicitar «Fichero estructurado reutilizable de perfil empírico como salida activada» y comprobar su rechazo o ausencia por estar retirada. |
