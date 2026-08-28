@@ -504,12 +504,46 @@ mapeo, alineada observada por referencia.
 
 El flujo técnico de F4 es único: cobertura → fragmento → quimera opcional →
 calidad/error por mate → contaminación biológica → *index hopping* y
-demultiplexado → FASTQ y resumen. Cada sorteo deriva una subsemilla DTC-037 de
-identidades estables: fragmento y quimera por evento, biblioteca y ordinal de
-plantilla; calidad/error además por mate y ciclo; contaminación por receptora y
-pareja candidata; y *index hopping* por biblioteca actual y pareja técnica. No
-existe un RNG compartido entre etapas ni una identidad derivada del orden de
-iteración, hilo o escritura.
+demultiplexado → FASTQ y resumen. DTC-081 fija el catálogo `f4-technical-v1`:
+cada decisión inicia su propio ChaCha12 desde una clave canónica, no avanza un
+estado compartido. La clave comienza siempre por `event_id`, `library_id` y
+`stage`; añade la plantilla o instancia pre-salto y solo después los campos
+propios de fragmento, mate/ciclo, candidata o receptora. Por tanto el orden de
+iteración, el número de hilos, escribir antes otra biblioteca, o que una
+instancia cambie de biblioteca no modifica un sorteo ajeno.
+
+Las decisiones discretas reutilizan únicamente `bernoulli-v1` y
+`uniform-index-v1` de DTC-081; las selecciones sin reemplazo usan una lista
+canónica y Fisher–Yates parcial. Probabilidades 0 y 1 no consumen sorteos; la
+ausencia de candidatos o capacidad suficiente es un rechazo previo, no una rama
+que altere otros resultados. El *index hopping* se calcula sobre la instantánea
+completa posterior a contaminación, una vez por instancia pre-salto y con la
+biblioteca de origen congelada; las transferencias se aplican simultáneamente.
+La distribución cuantitativa del perfil, incluida su normal truncada, pertenece
+al recurso versionado de DTPD-106, no a este catálogo.
+
+Una quimera F4 no busca una segunda plantilla ni cambia de biblioteca. Para un
+inserto `L`, conserva el prefijo `1..b` de la plantilla fuente, donde `b` se
+elige uniformemente en `1..L-1`, y forma una lista canónica de intervalos de
+longitud `L-b` en todas las copias del mismo individuo/biblioteca. La clave de
+quimera añade `b` y el selector de intervalo a `f4-technical-v1`. En la copia
+fuente excluye los intervalos que solapan o tocan el prefijo; escoge uno de los
+restantes con `uniform-index-v1`. Ambos segmentos se leen en orientación
+directa y la construcción PE aplica después la orientación normal al inserto
+compuesto. La falta de candidata para una quimera seleccionada es un fallo previo
+a publicación, nunca un reintento ni una quimera degradada.
+
+El lector de perfiles F4 consume el único recurso inicial
+`resources/f4/gps-hiseqx-pcrfree-pe150-v1.json` y verifica su SHA-256
+`ae8d598a95f7a9826b3a8c563a023d745f85031651c1e8c03ee9f54310162d3b` antes de
+resolver la configuración. Sus tramos Q por ciclo y el algoritmo
+`normal_truncated_box_muller_v1` son datos de dominio versionados, no valores
+que pueda elegir la implementación. El generador local de la plantilla consume
+pares de uniformes abiertos de 53 bits, calcula una variate normal, redondea el
+inserto como declara el recurso y repite solo para esa plantilla hasta obtener
+un entero dentro de 250–450. No conserva una variate en caché. El manifiesto
+registra ID, versión, ruta, SHA-256 y ajustes efectivos; otro perfil o una curva
+medida en el futuro requiere un recurso nuevo y un ID nuevo.
 
 Antes de emitir FASTQ, el planificador crea un **plan técnico temporal** de
 asignación: para cada plaza de salida conserva solo biblioteca final,
@@ -521,6 +555,16 @@ escribe; después libera esa pareja. Una transferencia por *index hopping* mueve
 el contenido, no lo duplica, y recibe el identificador técnico local de su
 biblioteca final. Este recorrido evita conservar FASTQ limpios o una colección
 de lecturas en memoria.
+
+Antes de publicar, el **validador técnico de reproducción** recorre el mismo
+plan temporal, pero no consume la pareja producida ni usa el escritor FASTQ
+como oráculo. Regenera por flujo la expectativa desde la verdad biológica, la
+clave fuente y las transformaciones autorizadas, y la compara literalmente con
+R1, R2, calidades, cabeceras y biblioteca final observadas. Así detecta una
+copia de bases/calidades equivocada, un segundo sorteo de error, una retirada
+propia incorrecta o un salto que duplique o encadene una instancia. Solo emite
+éxito o diagnóstico y contadores agregados; termina antes de destruir el plan y
+no crea una verdad técnica persistente.
 
 El alcance mínimo de los estados genotípicos completos depende de la vía:
 
@@ -1169,9 +1213,9 @@ coherentes; los validadores consumen vistas de solo lectura y emiten resultados
 estructurados. El escritor recibe hechos ya producidos y genera JSON conforme a
 RFC 8259: un `manifest.json` general y uno por evento, validados respectivamente
 contra esquemas JSON Schema Draft 2020-12 distintos con definiciones comunes.
-Cada documento incluye `manifest_kind` y `schema_version` con la cadena exacta
-`"1"`, y no reconstruye decisiones desde nombres o mensajes. El escritor siempre
-emite la versión actual conocida.
+Cada documento incluye `manifest_kind` y `schema_version`; en F4 son `"4"` para
+el manifiesto general y `"2"` para el manifiesto de evento. No reconstruye
+decisiones desde nombres o mensajes y el escritor emite solo la versión activa.
 
 Los manifiestos contienen directamente todo dato que REQ-MAN exige registrar o
 enumerar. Verdad, procedencia de lecturas, informes de validación, complemento
@@ -1276,7 +1320,7 @@ responsables y puntos de control.
 | Marimo solo entrega un TOML visible y autoconsistente y argumentos de proceso; cualquier cambio invalida validación y ninguna opción implementada queda solo en TOML. Su servidor solo enlaza con `127.0.0.1`; la versión incompatible del binario bloquea las acciones, sin hashes entre componentes del mismo árbol | Aplicación Marimo y adaptador de proceso | REQ-UI-01 a REQ-UI-15 y REQ-VAL-54 a REQ-VAL-56 |
 | Toda probabilidad, frecuencia y tolerancia general es un `f64` finito válido; las colecciones se suman y normalizan una sola vez con Neumaier y orden canónico, y conservan auditoría decimal de ida/vuelta exacta | Admisión de configuración y frontera `DeclaredConfig` → `EffectiveConfig` | REQ-CONF-106/107, REQ-VAL-40, REQ-MAN-81 y ACE-105 |
 | Todo manifiesto declara versión y clase, cumple su esquema y conserva directamente el contenido REQ-MAN obligatorio | Escritor de manifiestos y validación de publicación | REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-04/17/18/27 |
-| Todo documento estructurado propio usa una clase inequívoca y la versión de esquema conocida `"1"`, incluidos los diagnósticos JSON; una versión distinta se rechaza antes de interpretar su contenido | Adaptadores de entrada y escritores de documentos | REQ-CONF-01/10/111 a REQ-CONF-115 y REQ-MAN-02/69/73 |
+| Cada clase propia usa una versión activa inequívoca; F4 admite solo TOML general `"2"`, configuración efectiva `"4"`, manifiesto general `"4"` y manifiesto de evento `"2"`, y rechaza otra versión antes de interpretarla | Adaptadores de entrada y escritores de documentos | REQ-CONF-01/10/111 a REQ-CONF-115 y REQ-MAN-02/69/73 |
 | Las decisiones aleatorias consumen ChaCha12 locales derivados con los contextos, material binario y catálogo normativos; ningún consumidor afecta el estado de otro | Proveedor de aleatoriedad y motores consumidores | REQ-CONF-03 a REQ-CONF-08, REQ-CONF-126/129, REQ-MUT-01 a REQ-MUT-15, REQ-EVO-01 a REQ-EVO-77, REQ-REP-01 a REQ-REP-26, REQ-REC-01 a REQ-REC-29 y REQ-DAT-01 a REQ-DAT-73 |
 | Toda entrega oficial v1 usa la referencia Ubuntu 24.04 LTS x86-64 GNU y CPU portable y supera validación en Ubuntu nativo y OCI antes de publicarse | Construcción y distribución | REQ-CONF-111 a REQ-CONF-115, REQ-REP-22/23, REQ-MAN-05 y REQ-SAL-19 |
 | Cada artefacto se finaliza desde su temporal; un destino completo o `fallido` solo aparece tras manifiestos coherentes y mediante no-clobber atómico, mientras una interrupción no controlable conserva `INCOMPLETE` | Productores, validadores, ensamblador y publicador | REQ-VAL-01 a REQ-VAL-56, REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a REQ-SAL-27 |
@@ -1305,10 +1349,9 @@ Los contenidos exigidos a estas clases están en REQ-CONF-01 a REQ-CONF-130,
 REQ-VER-01 a REQ-VER-47, REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a
 REQ-SAL-27. TOML fija la configuración de autoría; JSON fija
 `effective-config.json` y los manifiestos. Los esquemas de manifiesto usan JSON
-Schema Draft 2020-12. Todos estos documentos declaran su clase y el campo
-`schema_version` con el valor de cadena `"1"`, usando la sintaxis TOML o JSON
-que corresponda, sin confundirlo con la versión del programa ni con el dialecto
-de JSON Schema. La salida JSON de diagnósticos es otra clase estructurada propia
+Schema Draft 2020-12. F4 exige TOML general `"2"`, configuración efectiva `"4"`,
+manifiesto general `"4"` y manifiesto de evento `"2"`, sin confundirlos con la
+versión del programa ni con el dialecto de JSON Schema. La salida JSON de diagnósticos es otra clase estructurada propia
 y declara `diagnostic_kind: "gps_diagnostics"` y la misma versión de esquema.
 
 ### 9.2. Espacios lógicos
@@ -1367,13 +1410,11 @@ durabilidad ante fallo físico: `fsync` y cualquier garantía de persistencia
 deben implementarse y verificarse expresamente antes de prometerlas. La
 reanudación por artefacto queda como ampliación futura tras medir costes.
 
-F1 publicó `effective-config.json` y el manifiesto general con
-`schema_version = "1"`. F2 publicó extensiones incompatibles de la
-configuración efectiva como versión `"2"`; esa versión queda como registro
-histórico y no tiene lector activo. F3 publica la configuración efectiva vigente
-como versión `"3"`; el lector vigente conserva la lectura de documentos v1,
-pero no migra ni reescribe documentos históricos. El manifiesto general vigente
-permanece en versión `"2"` porque F3 no modifica su contrato.
+F1–F3 publicaron las versiones históricas 1–3. F4 consolida TOML general `"2"`,
+configuración efectiva `"4"`, manifiesto general `"4"` y manifiesto de evento
+`"2"`. No mantiene lectores ni migración para los contratos anteriores: los
+TOML y fixtures de prueba se actualizan o eliminan una vez, y el runtime rechaza
+otra versión.
 
 ### 9.4. Entregas del programa
 

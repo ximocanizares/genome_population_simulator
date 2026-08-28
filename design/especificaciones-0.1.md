@@ -123,12 +123,12 @@ misma ejecución biológica puede contener varios eventos con tecnologías,
 perfiles o mapeadores distintos, pero no reutiliza FASTQ entre ellos ni tiene
 como objetivo comparar mapeadores.
 
-La primera versión simulará exclusivamente secuenciación del genoma completo
-(WGS, *whole-genome sequencing*) de DNA genómico con lecturas cortas tipo
-Illumina, *single-end* o *paired-end*. La preparación de biblioteca
-predeterminada será sin PCR; también podrá seleccionarse una preparación WGS
-con amplificación, que puede producir duplicados de PCR y otros sesgos propios
-de esa preparación. PacBio HiFi, Oxford Nanopore y PacBio CLR quedan para
+La primera entrega técnica F4 simulará exclusivamente secuenciación del genoma
+completo (WGS, *whole-genome sequencing*) de DNA genómico con el perfil corto
+Illumina *paired-end* incorporado. El modo Illumina *single-end* queda aplazado
+en DTF-057. La preparación de biblioteca será exclusivamente sin PCR; la
+preparación WGS amplificada y sus duplicados o sesgos quedan aplazados en
+DTF-056. PacBio HiFi, Oxford Nanopore y PacBio CLR quedan para
 futuras ampliaciones con el fin de reducir el alcance inicial y aplazar perfiles
 de error más complejos. Esta
 decisión de alcance no presupone que una tecnología moderna sea incapaz de
@@ -728,11 +728,10 @@ su asignación por fase está en la matriz de trazabilidad.
   tiene una ploidía efectiva. Debe rechazar valores no enteros, menores que 1 o
   mayores que 10, o secuencias sin valor efectivo, e identificar la secuencia y
   el problema.
-- **REQ-CONF-66.** Cuando la salida BAM o CRAM esté activa, la configuración
-  debe permitir elegir una tecnología o perfil de lecturas predefinido y
-  sustituir sus parámetros. La primera versión debe incluir perfiles
-  predeterminados validados para lecturas tipo Illumina *single-end* y
-  *paired-end*. PacBio HiFi queda aplazado en DTF-049.
+- **REQ-CONF-66.** F4 admite exclusivamente el perfil predefinido Illumina
+  *paired-end* y sus sustituciones explícitamente permitidas. Una solicitud
+  Illumina *single-end* se rechaza e indica DTF-057; PacBio HiFi queda aplazado
+  en DTF-049.
 - **REQ-CONF-67.** Cuando la salida BAM o CRAM esté activa, la configuración debe
   usar el modo realista: simula y conserva los FASTQ finales antes de mapearlos.
   El modo directo de alineamientos sintéticos queda aplazado en DTF-051.
@@ -783,24 +782,32 @@ su asignación por fase está en la matriz de trazabilidad.
   configurarse dentro de esa tanda, identificando todas sus muestras,
   bibliotecas e índices. Debe distinguirse expresamente de la contaminación
   biológica definida por fuentes de lecturas.
-- **REQ-CONF-79.** La configuración debe admitir índices simples, índices duales
-  combinatorios e índices duales únicos (UDI, *Unique Dual Indexes*), en los que
-  cada biblioteca usa una combinación exclusiva de dos índices. F4 permite
-  declarar UDI por biblioteca; si se omiten, usa el marcador neutro literal `0`
-  en cabecera y no simula error de índice.
+- **REQ-CONF-79.** F4 exige para cada biblioteca un índice dual único (UDI,
+  *Unique Dual Index*) explícito: `i7` e `i5` son cada uno cadenas de exactamente
+  ocho bases del alfabeto `ACGT`, en orientación de secuenciación. Cada valor
+  `i7` y cada valor `i5` es único dentro de la tanda. La cabecera los escribe
+  literalmente como `i7+i5`, sin complementar ni invertir `i5`. F4 rechaza
+  índices simples, duales combinatorios, longitudes o alfabetos distintos,
+  duplicados y la ausencia de UDI; el marcador `0` queda reservado para perfiles
+  futuros que no usan índice y no es válido en F4.
 - **REQ-CONF-80.** En F4, la tasa de *index hopping* es la fracción configurable
   de parejas de la tanda que se reasigna reproduciblemente a otra biblioteca,
   elegida uniformemente entre las restantes. Una tasa positiva exige al menos
   dos bibliotecas; de otro modo se rechaza antes de generar. No hay una
   procedencia ni pesos de destino configurables. Cada pareja se selecciona de
   forma independiente mediante un sorteo Bernoulli de esa tasa y el recuento
-  realizado se informa, sin imponer el valor esperado.
+  realizado se informa, sin imponer el valor esperado. El sorteo se aplica una
+  vez a la instantánea completa posterior a la contaminación biológica, con la
+  biblioteca pre-salto congelada; todas las transferencias se materializan
+  simultáneamente. Una pareja recibida no vuelve a ser candidata y el resultado
+  no depende del orden de las bibliotecas.
 - **REQ-CONF-81.** F4 no genera combinaciones UDI inesperadas: el *index
-  hopping* solo transfiere a un UDI de otra biblioteca declarada. Si una
-  combinación inesperada alcanzara la frontera de demultiplexado, se descarta
-  defensivamente. La generación de índices i5/i7 y de combinaciones inesperadas
-  queda aplazada en DTF-025. El perfil inicial usa UDI y fija la tasa de
-  reasignación a cero.
+  hopping* solo transfiere una pareja al UDI completo ya declarado para otra
+  biblioteca de la tanda. Si una combinación inesperada alcanzara la frontera de
+  demultiplexado, se descarta defensivamente y se registra solo su recuento
+  agregado. La generación de índices i5/i7 y de combinaciones inesperadas queda
+  aplazada en DTF-025. El perfil inicial usa UDI y fija la tasa de reasignación a
+  cero.
 - **REQ-CONF-82.** Cada tecnología de secuenciación debe tener un perfil
   predeterminado identificado y versionado que incluya, como mínimo, la tasa y
   los tipos de error habituales que pretende representar y su longitud máxima
@@ -869,11 +876,20 @@ su asignación por fase está en la matriz de trazabilidad.
   limpias que se transforman en quiméricas antes de contaminación y
   demultiplexado: no añade ni retira parejas. Cada quimera une exactamente dos
   segmentos, con punto de unión uniforme entre las bases internas del inserto;
-  las fuentes se eligen entre posiciones válidas no contiguas. Pueden proceder
+  las fuentes se eligen entre posiciones válidas no contiguas. La primera fuente
+  es el prefijo de la plantilla original; para un inserto de longitud `L`, el
+  punto `b` se sortea uniformemente en `1..L-1` y la segunda fuente aporta
+  exactamente `L-b` bases. Sus candidatas son todos los intervalos válidos de
+  esa longitud en las copias del mismo individuo y biblioteca, ordenados por
+  copia, secuencia y inicio; se excluye una candidata de la misma copia que
+  solape o toque el intervalo del prefijo. Se elige uniformemente una candidata
+  restante. Las dos fuentes se leen en orientación directa de su copia y la
+  disposición PE normal se aplica después al inserto compuesto. Pueden proceder
   de cromosomas, *scaffolds*, haplotipos o copias distintos, pero nunca de
-  individuos o bibliotecas diferentes. Cada pareja limpia se selecciona de forma
-  independiente con un sorteo Bernoulli de esa tasa; el recuento realizado se
-  informa y no se fuerza al valor esperado.
+  individuos o bibliotecas diferentes. Si una pareja seleccionada no tiene
+  candidata válida, la ejecución falla antes de publicar salidas. Cada pareja
+  limpia se selecciona de forma independiente con un sorteo Bernoulli de esa
+  tasa; el recuento realizado se informa y no se fuerza al valor esperado.
 - **REQ-CONF-100.** La configuración debe definir un umbral general para decidir
   qué *scaffolds* reciben un mínimo de un entrecruzamiento por bivalente y
   meiosis. Debe elegir una sola unidad para esa regla: longitud genética en cM o
@@ -1113,17 +1129,15 @@ su asignación por fase está en la matriz de trazabilidad.
 - **REQ-TEC-06.** Todo experimento de la primera versión debe representar WGS de
   DNA genómico. La configuración debe rechazar paneles dirigidos, amplicones,
   GBS y otros protocolos de captura o reducción de representación.
-- **REQ-TEC-07.** Los perfiles WGS deben distinguir preparación sin PCR y
-  preparación con amplificación de biblioteca. Si no se indica otra, debe usarse
-  la preparación sin PCR.
-- **REQ-TEC-08.** Un perfil WGS con amplificación puede introducir duplicados de
-  PCR y otros sesgos propios, con parámetros predeterminados del perfil y
-  sustituciones configurables. Esto no debe activar ni representar una
-  secuenciación dirigida por PCR.
-- **REQ-TEC-09.** La primera versión solo debe admitir lecturas cortas tipo
-  Illumina, *single-end* o *paired-end*. Debe rechazar PacBio HiFi, Oxford
-  Nanopore y PacBio CLR como tecnologías de simulación e indicar que quedan
-  aplazadas a futuras ampliaciones (DTF-049 y DTF-001).
+- **REQ-TEC-07.** F4 usa exclusivamente preparación WGS sin PCR y la registra
+  como tal. Debe rechazar una preparación con amplificación e indicar DTF-056.
+- **REQ-TEC-08.** El perfil WGS amplificado, sus duplicados PCR y sus sesgos
+  propios quedan aplazados en DTF-056; F4 no acepta sus parámetros ni los
+  representa como secuenciación dirigida por PCR.
+- **REQ-TEC-09.** F4 solo debe admitir lecturas cortas Illumina *paired-end*.
+  Debe rechazar Illumina *single-end* e indicar DTF-057, y rechazar PacBio HiFi,
+  Oxford Nanopore y PacBio CLR como tecnologías de simulación con destino
+  DTF-049 y DTF-001.
 - **REQ-TEC-10.** La configuración efectiva y el manifiesto deben registrar el
   tipo de preparación WGS, el perfil, sus valores predeterminados y todas las
   sustituciones aplicadas.
@@ -3501,11 +3515,9 @@ a una probabilidad mayor de error.
   independientes; F4 no los fusiona ni elimina su solapamiento.
 - **REQ-DAT-13.** El sistema debe rechazar en esta versión una solicitud de
   lecturas largas PacBio HiFi e indicar DTF-049 como destino de la ampliación.
-- **REQ-DAT-14.** Las lecturas tipo Illumina *single-end* y *paired-end* deben
-  ofrecer perfiles predeterminados validados y permitir ajustar sus
-  parámetros. Las distribuciones, tasas y valores cuantitativos exactos de
-  longitud, error y calidad se decidirán durante la planificación de la
-  implementación y deberán comprobarse con datos adecuados para cada perfil.
+- **REQ-DAT-14.** F4 ofrece exclusivamente el perfil predeterminado validado
+  Illumina *paired-end* y sus ajustes permitidos. Illumina *single-end* queda
+  aplazado en DTF-057; no se selecciona ni se infiere un perfil SE alternativo.
 - **REQ-DAT-15.** En el modo realista, las lecturas deben generarse desde los
   haplotipos faseados de cada individuo y usar las decisiones aleatorias
   reproducibles de la ejecución. Cada decisión se deriva de un ámbito RNG local
@@ -3594,9 +3606,10 @@ a una probabilidad mayor de error.
   parejas completas transferidas de una muestra a otra, que desaparecen de la
   donante sin duplicarse, y parejas que quedan sin asignar o son filtradas. Los
   recuentos realizados deben ser reproducibles.
-- **REQ-DAT-31.** El uso de UDI debe permitir reconocer combinaciones de índices
-  inesperadas y simular su filtrado durante el demultiplexado. No debe asumirse
-  que los UDI impiden físicamente el *index hopping*.
+- **REQ-DAT-31.** El uso obligatorio de UDI debe permitir reconocer
+  combinaciones de índices inesperadas y simular su filtrado defensivo durante
+  el demultiplexado. No debe asumirse que los UDI impiden físicamente el *index
+  hopping*.
 - **REQ-DAT-32.** El sistema debe simular directamente el efecto final del
   demultiplexado sobre cada muestra: debe mover una pareja afectada a otra
   muestra, o descartarla o dejarla sin asignar según el esquema de índices. Solo
@@ -3626,10 +3639,12 @@ a una probabilidad mayor de error.
   elige uniformemente entre las otras tres bases A/C/G/T. Una matriz empírica de
   sustituciones queda aplazada en DTF-053. En v1, el modelo de error no debe
   resolver una `N` de la plantilla ni generar nuevas `N` como error o llamada
-  ausente. Para longitudes inferiores a 150 pb usa el prefijo del perfil propio
-  `gps-hiseqx-pcrfree-pe150-v1`; no extrapola ciclos por encima de 150 pb. ART
-  `HSXn` se usa únicamente como referencia externa de calibración y no se
-  incorpora ni redistribuye. Si se configura un
+  ausente. Para longitudes inferiores a 150 pb usa el prefijo del recurso propio
+  `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json`, SHA-256
+  `ae8d598a95f7a9826b3a8c563a023d745f85031651c1e8c03ee9f54310162d3b`; no
+  extrapola ciclos por encima de 150 pb. Es una aproximación sintética explícita
+  y ART `HSXn` solo una referencia comparativa externa, sin incorporar ni
+  redistribuir sus tablas. Si se configura un
   desplazamiento de calidad o una escala de error, se aplica primero el
   desplazamiento a la calidad del perfil, se deriva su probabilidad de error y
   se aplica después la escala; una combinación que produzca una probabilidad
@@ -3712,9 +3727,13 @@ a una probabilidad mayor de error.
   no deben representarse como quimeras, sino mediante los modelos de
   contaminación o errores de demultiplexado.
 - **REQ-DAT-64.** Dentro del mismo individuo y biblioteca, una lectura quimérica
-  une exactamente dos segmentos no contiguos. Sus fuentes pueden pertenecer a
-  cromosomas, *scaffolds*, haplotipos o copias diferentes; sus datos de origen
-  son transitorios y no forman una salida de F4.
+  une exactamente dos segmentos no contiguos. El primero es un prefijo de la
+  plantilla y el segundo un intervalo elegido uniformemente entre los que no
+  solapan ni tocan ese prefijo cuando comparten copia; sus longitudes suman el
+  inserto y se unen en un único punto interno. Sus fuentes pueden pertenecer a
+  cromosomas, *scaffolds*, haplotipos o copias diferentes; se leen en
+  orientación directa antes de aplicar la disposición PE habitual. Sus datos de
+  origen son transitorios y no forman una salida de F4.
 - **REQ-DAT-65.** Las anomalías *paired-end* observables mediante alineamiento
   —orientación anómala, tamaño de inserto observado inesperado o mate no
   alineado— quedan aplazadas en DTF-055. F4 solo emite parejas normales según
@@ -3729,9 +3748,10 @@ a una probabilidad mayor de error.
   `@GPS:<event_id>:<library_id>:<technical_pair_id> <mate>:N:0:<index>`.
   Los dos miembros de una pareja comparten el prefijo hasta el espacio y usan
   `1` o `2` como `<mate>`. `GPS` declara datos simulados; no se simulan campos
-  de instrumento, carril, *tile*, coordenadas, BCL ni control de calidad. Con
-  UDI, `<index>` es `i7+i5`; sin UDI usa el marcador neutro literal `0`. Ese
-  nombre de pareja no debe identificar otra pareja del mismo evento.
+  de instrumento, carril, *tile*, coordenadas, BCL ni control de calidad. En F4,
+  `<index>` es siempre el UDI literal `i7+i5`, con ambos componentes de ocho
+  bases `ACGT` en orientación de secuenciación; el marcador `0` no es válido.
+  Ese nombre de pareja no debe identificar otra pareja del mismo evento.
 - **REQ-DAT-69.** La contaminación biológica debe crear en la receptora una
   instancia nueva con identificador técnico nuevo de esa biblioteca y conservar
   la original en la donante. Una misma unidad de
@@ -3764,9 +3784,11 @@ a una probabilidad mayor de error.
 - **REQ-WGS-01.** En F4, el evento debe declarar exactamente una cobertura media
   objetivo común. Un objetivo por número de lecturas o parejas, la ausencia de
   cobertura o más de un objetivo deben ser errores previos a la generación.
-- **REQ-WGS-02.** En datos *paired-end*, un objetivo por número debe expresarse
-  en parejas completas. En datos *single-end* o de lecturas largas debe
-  expresarse en lecturas individuales.
+- **REQ-WGS-02.** Fuera de F4, si una fase posterior admite un objetivo por
+  número, en datos *paired-end* debe expresarlo en parejas completas. En datos
+  *single-end* o de lecturas largas debe expresarlo en lecturas individuales.
+  F4 rechaza ese objetivo como entrada y solo registra el número de parejas
+  derivado de su cobertura.
 - **REQ-WGS-03.** El sistema debe derivar y registrar para cada biblioteca el
   número de parejas que corresponde a la cobertura objetivo común y la
   cobertura equivalente realizada.
@@ -3819,10 +3841,10 @@ a una probabilidad mayor de error.
 - **REQ-WGS-12.** Solo debe conservarse el BAM o CRAM final que contiene las
   degradaciones configuradas. No debe guardarse simultáneamente una versión
   limpia del mismo experimento.
-- **REQ-WGS-13.** Un control sin degradaciones debe ser otro evento que
-  reutilice la misma verdad genotípica, referencias y muestras, y la semilla o
-  flujo pertinente, con las degradaciones desactivadas. El manifiesto debe
-  enlazar los eventos relacionados sin mezclar sus resultados.
+- **REQ-WGS-13.** F4 rechaza un control sin degradaciones porque exige otro
+  evento. Cuando se admita cardinalidad multievento tras DTF-050, ese control
+  reutilizará la misma verdad genotípica, referencias y muestras, tendrá su
+  propia subsemilla y enlazará la relación experimental sin mezclar resultados.
 - **REQ-WGS-14.** Las posiciones `N` deben ser elegibles para el muestreo y
   contar tanto como posiciones cubiertas como bases de lectura al calcular la
   cobertura. No deben excluirse del numerador ni del denominador; los resúmenes
@@ -3870,7 +3892,9 @@ a una probabilidad mayor de error.
   duplicarse. El total de la tanda debe conservarse salvo los descartes o datos
   sin asignar. En F4, *index hopping* selecciona esa fracción de parejas de la
   tanda y asigna cada una uniformemente a otra biblioteca; la transferencia se
-  aplica después de la contaminación biológica.
+  aplica después de la contaminación biológica sobre una instantánea inmutable y
+  simultáneamente. Cada pareja pre-salto se evalúa una sola vez, por lo que no
+  existen cadenas de saltos ni una reasignación dependiente del orden.
 - **REQ-CONT-11.** Las lecturas o parejas descartadas o sin asignar durante el
   demultiplexado no deben reemplazarse. Deben reducir el número de lecturas y la
   cobertura final de la muestra; en *paired-end* debe descartarse la pareja
@@ -4176,6 +4200,11 @@ comparten una política de aceptación.
 - **REQ-VAL-03.** La validación debe comprobar que las lecturas proceden de los
   individuos y haplotipos correctos, salvo las procedencias diferentes que la
   configuración introduzca expresamente como contaminación u otro artefacto.
+  Antes de destruir las claves técnicas transitorias, un reconstructor
+  independiente por flujo debe comparar cada pareja final con la pareja esperada
+  desde su clave, verdad biológica y transformación autorizada. Debe comprobar
+  bases, calidades, mates, contaminación y transferencia técnica sin publicar ni
+  conservar un vínculo individual por lectura.
 - **REQ-VAL-04.** La validación debe comparar la cobertura objetivo común con la
   cobertura WGS básica realizada de cada biblioteca. Debe comprobar
   por separado la cobertura final del FASTQ y la cobertura alineada observada
@@ -4239,12 +4268,11 @@ comparten una política de aceptación.
 - **REQ-VAL-15.** La validación debe distinguir una variación aleatoria admisible
   del soporte alélico de un modelo intencionado de desequilibrio o pérdida
   alélica, que no existe en la primera versión.
-- **REQ-VAL-16.** La validación de contaminación debe comprobar límites,
-  compatibilidad, matriz o reparto automático, sustituciones biológicas,
-  transferencias técnicas, descartes, totales por tanda y cobertura final.
-  También debe comprobar la conversión conjunta de unidades, el carácter óptimo de
-  la asignación entera, sus desviaciones y la resolución reproducible de
-  empates conforme a REQ-CONT-15 y REQ-CONT-16.
+- **REQ-VAL-16.** En F4, la validación de contaminación debe comprobar límites,
+  compatibilidad, selección reproducible sin reemplazo entre donantes elegibles
+  de la misma población, sustituciones biológicas, transferencias técnicas,
+  descartes, totales por tanda y cobertura final. No valida matriz, pesos ni
+  optimización global, que quedan en DTF-052.
 - **REQ-VAL-17.** La validación poblacional debe comprobar N objetivo, intentos,
   éxitos y fallos por causa, N realizado, su desviación y su aviso, además de Ne
   realizado o su estado «no evaluable» con causa en cada subpoblación y
@@ -4804,34 +4832,34 @@ VCF y no constituya un experimento de secuenciación.
   parámetros, cada referencia y los FASTQ usados. Cuando se use minimap2, debe
   distinguir el *preset*, los valores predeterminados y las sustituciones de la
   configuración.
-- **REQ-MAN-37.** Para la cobertura, el manifiesto debe registrar el objetivo y
-  las coberturas WGS básica, final del FASTQ y alineada observada por referencia,
-  por ámbito y muestra cuando puedan medirse. Debe incluir los valores globales
-  y las sustituciones efectivas por individuo, cromosoma o *scaffold* y región.
+- **REQ-MAN-37.** En F4, el manifiesto debe registrar el objetivo de cobertura
+  común, las coberturas WGS básica y final del FASTQ, por biblioteca y muestra,
+  y el denominador utilizado. No admite sustituciones por individuo, cromosoma,
+  *scaffold* o región. La cobertura alineada observada se añade cuando exista
+  mapeo en DTF-055 y no se presenta como objetivo.
 - **REQ-MAN-38.** Para cada fuente contaminante, el manifiesto debe registrar su
   identificador y origen, la fracción objetivo, la fracción realizada y los
   recuentos de lecturas o parejas propias retiradas y contaminantes incorporadas,
   además de la semilla o flujo aleatorio de selección. En datos *paired-end*,
   debe registrar las parejas completas como unidad.
-- **REQ-MAN-39.** Para una fuente contaminante externa, el manifiesto debe
-  identificarla como tal, registrar la ubicación original de cada FASTQ, la
-  copia utilizada, el resultado de su validación y los datos necesarios para
-  relacionar la fuente con las lecturas seleccionadas y la semilla o el flujo
-  aleatorio aplicable. También debe incluir los datos de integridad que se
-  definan durante la implementación.
-- **REQ-MAN-40.** Para la contaminación técnica, el manifiesto debe registrar la
-  tanda, las bibliotecas, las muestras y sus índices, la estrategia de índices,
-  las tasas y procedencias configuradas, los errores simulados y las cantidades
-  configuradas y realizadas de parejas reasignadas y sin asignar o filtradas.
-  No conserva procedencia individual.
+- **REQ-MAN-39.** F4 rechaza una fuente contaminante externa y no crea su copia
+  ni entrada de manifiesto. Cuando esa capacidad se incorpore desde DTF-052, el
+  manifiesto identificará la fuente, ubicación original, copia utilizada,
+  resultado de validación, integridad y relación con la selección y su semilla o
+  flujo aleatorio.
+- **REQ-MAN-40.** Para la contaminación técnica de F4, el manifiesto debe
+  registrar la tanda, bibliotecas, muestras y sus UDI `i7+i5`, la tasa de
+  *index hopping*, los errores simulados y las cantidades realizadas de parejas
+  reasignadas, sin asignar o filtradas. No conserva procedencia individual ni
+  declara estrategias de índice distintas de UDI.
 - **REQ-MAN-41.** El manifiesto debe registrar para cada FASTQ final sus hashes,
   tamaños y ausencia de FASTQ limpio adicional o fichero de procedencia. Debe
   resumir las parejas contaminantes, reasignadas, descartadas o sin asignar por
   muestra, causa y origen/destino cuando corresponda.
-- **REQ-MAN-42.** Para los errores de secuenciación, el manifiesto debe registrar
-  la tecnología, el nombre y la versión del perfil predeterminado, la tasa y los
-  tipos de error representados, todas las sustituciones configuradas y los
-  valores efectivos por individuo, cromosoma o *scaffold* y región.
+- **REQ-MAN-42.** Para los errores de secuenciación de F4, el manifiesto debe
+  registrar la tecnología, perfil y versión, sus tipos de error, y los ajustes
+  globales efectivos por mate. No admite ni registra valores por individuo,
+  cromosoma, *scaffold* o región.
 - **REQ-MAN-43 (retirado).** Registro en el manifiesto de entradas y resultados
   de calibración empírica; capacidad aplazada fuera de v1.
 - **REQ-MAN-44 (retirado).** Enlace desde el manifiesto a un fichero de perfil
@@ -4840,16 +4868,15 @@ VCF y no constituya un experimento de secuenciación.
   ópticos a cero. Tasas, cantidades y relaciones de duplicados quedan aplazadas
   en DTF-056.
 - **REQ-MAN-46.** El marcado de duplicados queda aplazado en DTF-055 y DTF-056.
-- **REQ-MAN-47.** Para los restos de adaptadores, el manifiesto debe registrar si
-  la degradación estuvo activa, los parámetros recomendados y efectivos, y las
-  cantidades configuradas y realizadas de lecturas afectadas.
+- **REQ-MAN-47.** En F4, el manifiesto declara adaptadores desactivados y
+  recuento cero; toda solicitud de activarlos se rechaza. El perfil de
+  fragmentos cortos y sus parámetros o lecturas afectadas quedan en DTF-054.
 - **REQ-MAN-48.** En F4, el manifiesto declara relación GC neutra. Curvas,
   intensidad, combinación con cobertura y métricas de corrección GC quedan
   aplazadas en DTF-056.
-- **REQ-MAN-49.** El manifiesto debe identificar las regiones configuradas o
-  generadas para producir baja mapeabilidad, su relación con repeticiones o
-  variantes estructurales y el mapeador y la referencia que determinaron los
-  alineamientos y la MAPQ observados.
+- **REQ-MAN-49.** La identificación de regiones para baja mapeabilidad, su
+  relación con repeticiones o variantes estructurales y el mapeador, referencia
+  y MAPQ observados quedan aplazados en DTF-055.
 - **REQ-MAN-50.** El manifiesto de categorías y MAPQ de alineamientos directos
   queda aplazado en DTF-051.
 - **REQ-MAN-51.** Para las lecturas quiméricas, el manifiesto debe registrar el
@@ -4893,9 +4920,9 @@ VCF y no constituya un experimento de secuenciación.
   explicación o los parámetros pertinentes. Si no se pudo calcular, debe
   registrar «no evaluable» y la causa. También debe identificar los conjuntos
   que no se marcaron como completos por una incoherencia determinista.
-- **REQ-MAN-60.** Para cada biblioteca WGS, el manifiesto debe registrar la
-  preparación sin PCR o con amplificación, el objetivo original de cobertura o
-  número de lecturas, el indicador equivalente realizado y el perfil y las
+- **REQ-MAN-60.** Para cada biblioteca WGS de F4, el manifiesto debe registrar
+  la preparación sin PCR, el objetivo original de cobertura, el número de
+  parejas derivado y realizado y el perfil y las
   sustituciones aplicados.
 - **REQ-MAN-61.** El manifiesto debe registrar la definición de cobertura usada,
   la referencia estructural y la longitud haploide del denominador, la cobertura
@@ -4904,15 +4931,17 @@ VCF y no constituya un experimento de secuenciación.
   referencia de mapeo. Cuando pueda medirse, debe desglosar también la cobertura
   por cromosoma y copia o haplotipo. La cobertura alineada no debe etiquetarse
   como objetivo.
-- **REQ-MAN-62.** Para la contaminación debe registrar la matriz objetivo y
-  realizada o los pesos del reparto automático, los límites comprobados y, por
-  fuente y mecanismo, lecturas propias retiradas, contaminantes incorporadas,
-  transferidas, descartadas, totales finales y cobertura final.
-- **REQ-MAN-63.** Cuando un evento sin degradaciones actúe como control de
-  otro, el manifiesto debe enlazar ambos mediante la verdad, referencias,
-  muestras biológicas y relación experimental, manteniendo separados sus
-  archivos. Cada evento debe conservar su propia subsemilla y generar sus
-  propias lecturas.
+- **REQ-MAN-62.** En F4, para la contaminación el manifiesto debe registrar el
+  rango, el porcentaje sorteado, los donantes elegibles y los aportes realizados
+  por donante, los límites comprobados y, por fuente y mecanismo, parejas propias
+  retiradas, contaminantes incorporadas, transferidas, descartadas, totales
+  finales y cobertura final. Matriz dirigida, pesos y reparto optimizado quedan
+  aplazados en DTF-052.
+- **REQ-MAN-63.** F4 no genera ni enlaza eventos de control porque solo admite
+  un evento. Tras DTF-050, el manifiesto deberá enlazar un control sin
+  degradaciones con su evento relacionado mediante verdad, referencias, muestras
+  biológicas y relación experimental, manteniendo separados sus archivos y
+  subsemillas.
 - **REQ-MAN-64.** El manifiesto debe enlazar el historial resumido de cada
   generación y registrar N objetivo heredado o modificado, intentos, éxitos y
   fallos por causa, N realizado, desviación y aviso, y la transición en que el
@@ -5037,11 +5066,12 @@ VCF y no constituya un experimento de secuenciación.
   materializaciones adicionales. No debe describir un resumen como si fuera un
   estado genotípico completo ni declarar un nivel configurable o una degradación
   automática de trazabilidad.
-- **REQ-MAN-85.** Para cada conversión conjunta de contaminación, el manifiesto
-  debe registrar las unidades originales, los objetivos convertidos, la
-  asignación entera, las desviaciones y los empates resueltos con la subsemilla,
-  todo como recuentos agregados por receptora, donante y mecanismo. No conserva
-  identificadores ni vínculos de origen de parejas individuales.
+- **REQ-MAN-85.** Para cada receptora de F4, el manifiesto debe registrar el
+  número de parejas limpias, porcentaje sorteado, objetivo entero derivado,
+  donantes elegibles, aportes realizados y subsemillas aplicables, todo como
+  recuentos agregados por receptora, donante y mecanismo. No conserva
+  identificadores ni vínculos de origen de parejas individuales. La conversión
+  conjunta, matriz y optimización de objetivos quedan en DTF-052.
 - **REQ-MAN-86.** Para cada secuencia FASTA, el manifiesto o la salida
   estructurada de referencias debe conservar el identificador formado por el
   primer elemento de la cabecera y la descripción completa restante, además del
@@ -5463,7 +5493,7 @@ pendientes.
 | **ACE-34. Resultado mínimo y salidas dependientes** | Toda ejecución exitosa produce FASTA e índices necesarios, la verdad completa obligatoria para su vía, los historiales o resúmenes exigidos, copias de configuraciones y manifiesto. Toda salida de observación requiere un evento explícito y cero eventos no crea ninguno implícito. Un evento puede solicitar solo verdad o VCF sin parámetros técnicos. Cuando solicita alineamientos, CRAM es predeterminado y BAM la alternativa; son obligatorios sus FASTQ finales y sus resúmenes técnicos agregados. El modo directo queda aplazado en DTF-051. V1 no produce perfiles empíricos. La ejecución falla si falta una salida mínima o activada | Formato del fichero de verdad, organización de copias y casos de fallo |
 | **ACE-35. Escala y prioridad de la primera versión** | Se pueden configurar, sin límites funcionales codificados, distintos números y tamaños de secuencias, individuos y generaciones. La validación prioriza escenarios pequeños y reproducibles. Los escenarios mayores están limitados por los recursos disponibles y no se presupone rendimiento ilimitado | Casos pequeños prioritarios, mediciones de recursos y pruebas de escalabilidad sin umbrales fijados |
 | **ACE-36. Estimación de recursos** | Antes de ejecutar se estiman volumen, almacenamiento, memoria y tiempo incluyendo la trazabilidad obligatoria y todas las salidas. Un escenario grande solo advierte, pero una configuración inválida, un mínimo imposible o un presupuesto configurado superado impiden iniciar y explican la causa. Nunca se degrada el detalle ni se elige otro nivel; la persona usuaria debe reducir materializaciones, muestreos, individuos, lecturas u otras salidas. El manifiesto conserva estimaciones, advertencias y consumo medible | Caso suficiente, preflight insuficiente y comprobación de ausencia de degradación |
-| **ACE-37. Tecnologías de lectura** | Con BAM o CRAM activos se pueden representar lecturas cortas tipo Illumina, *single-end* y *paired-end*. Cada modalidad tiene un perfil tecnológico incorporado, identificado, versionado, validado y ajustable mediante las sustituciones explícitas permitidas. En modo realista las lecturas proceden de haplotipos faseados y resultados y manifiesto registran tecnología y perfil efectivos. PacBio HiFi, Oxford Nanopore y PacBio CLR se rechazan en v1 y quedan para futuras ampliaciones | Distribuciones, parámetros, tasas y valores cuantitativos exactos; datos de validación y casos de prueba |
+| **ACE-37. Tecnologías de lectura** | F4 representa exclusivamente lecturas cortas Illumina *paired-end* con un perfil incorporado, identificado, versionado, validado y ajustable solo mediante las sustituciones permitidas. En modo realista las lecturas proceden de haplotipos faseados y resultado y manifiesto registran tecnología y perfil efectivos. Illumina *single-end* se rechaza hasta DTF-057; PacBio HiFi, Oxford Nanopore y PacBio CLR se rechazan hasta las ampliaciones indicadas | Perfil PE, casos de rechazo y datos de validación |
 | **ACE-38. Alineamientos realistas** | Cuando se solicitan, los BAM o CRAM se obtienen exclusivamente al mapear los FASTQ finales después de aplicar errores, contaminación y demultiplexado. Conservan pares, identificadores y registros no mapeados producidos por el mapeador. El modo directo queda aplazado en DTF-051 | Organización y casos de prueba del recorrido realista |
 | **ACE-39. Un mapeador por evento técnico** | Un evento con alineamientos usa exactamente un mapeador, minimap2 salvo selección compatible distinta, contra todas sus referencias. Para minimap2, el perfil elige automáticamente el *preset* y los valores predeterminados, y las sustituciones se advierten y validan. El manifiesto conserva herramienta, versión, comando completo y parámetros efectivos | Versión de minimap2, *presets* y valores exactos, catálogo inicial de alternativas, comprobaciones técnicas de compatibilidad y casos de opciones incompatibles |
 | **ACE-40. Independencia de eventos técnicos** | Dos eventos pueden usar mapeadores o tecnologías distintos sobre las mismas muestras biológicas, pero cada uno genera sus propias lecturas y usa un solo mapeador. No se reutilizan FASTQ entre eventos ni se presentan como comparación de mapeadores | Organización, identificadores y casos con varios eventos |
@@ -5471,18 +5501,18 @@ pendientes.
 | **ACE-42. Contaminación trazable** | El rango predeterminado de contaminación es `0–0 %`; al sustituirlo, por defecto cada individuo de la población seleccionada es receptor, aunque la configuración puede restringirlo a un subconjunto. Cada receptora seleccionada sortea su fracción total dentro del rango configurable 0–100 % y la convierte a parejas como el entero más próximo de `fracción × parejas limpias`, con empate hacia arriba. Sus unidades contaminantes se sortean sin reemplazo sobre todas las parejas limpias elegibles de los otros individuos de su misma población; no existe matriz, porcentaje ni pesos por donante. Cada unidad contaminante sustituye una propia; la donante no pierde datos. El manifiesto conserva rango, receptoras, objetivo sorteado, conversión, donantes, realizado, retiradas y totales finales | Validaciones y casos de prueba |
 | **ACE-43. Contaminación *paired-end*** | En datos *paired-end* se seleccionan y sustituyen parejas completas de una misma fuente. Ambos *mates* se incorporan juntos con nombres, indicadores, orientación y relación coherentes, sin crear huérfanos; el manifiesto registra parejas propias retiradas y contaminantes incorporadas | Casos de prueba de emparejamiento |
 | **ACE-44. FASTQ contaminante externo** | F4 rechaza FASTQ externos como contaminación antes de generar y explica que la capacidad corresponde a DTF-052. No lee, valida, copia ni registra esas entradas | Rechazo previo y ausencia de artefactos |
-| **ACE-45. Contaminación técnica por índices** | Tras la contaminación biológica, una tanda multiplexada puede usar índices simples, duales combinatorios o UDI y simular de forma reproducible *index hopping*: una fracción de parejas se reasigna uniformemente a otra biblioteca. Una pareja reasignada desaparece de la donante y entra en la receptora sin duplicarse, incluso si ya era contaminante. F4 no genera UDI inesperados; si uno alcanza el demultiplexado se descarta defensivamente. No se generan señales, BCL ni lecturas i5/i7 detalladas | Casos de prueba por estrategia de índices y resultado |
+| **ACE-45. Contaminación técnica por índices** | Tras la contaminación biológica, una tanda multiplexada usa UDI obligatorios y simula de forma reproducible *index hopping*: cada pareja de la instantánea post-contaminación se evalúa exactamente una vez y una fracción se reasigna uniformemente a otra biblioteca. Las transferencias son simultáneas; una pareja reasignada desaparece de la donante y entra en la receptora sin duplicarse, incluso si ya era contaminante, sin cadenas ni dependencia del orden. F4 no genera UDI inesperados; si uno alcanza el demultiplexado se descarta defensivamente. No se generan señales, BCL ni lecturas i5/i7 detalladas | Casos de transferencia simultánea, permutación de bibliotecas y resultado |
 | **ACE-46. FASTQ final y resumen técnico** | Existe un FASTQ final, o pareja *paired-end*, por individuo y evento después de contaminación y demultiplexado. Corresponde a la única biblioteca del individuo y a la única tanda, sin concatenación ni copia limpia adicional. El manifiesto conserva semilla, perfil, cobertura, contaminación y aportes por donante, quimeras, duplicados, descartes, hashes y tamaños como recuentos agregados. No conserva origen, diferencias, secuencias, calidades ni identificadores por lectura o pareja | FASTQ final, resumen agregado y ausencia de fichero individual |
-| **ACE-47. Perfiles de error y calidades** | Cada tecnología usa un perfil de errores identificado y versionado, homogéneo salvo sustituciones globales o por individuo, secuencia o región. Las calidades del FASTQ son probabilísticamente coherentes con los errores y se propagan a BAM/CRAM cuando exista mapeo. La salida conserva el perfil efectivo y recuentos agregados, no diferencias por lectura | Perfiles exactos, modelos por posición o contexto y casos estadísticos |
+| **ACE-47. Perfiles de error y calidades** | F4 usa el perfil identificado y versionado `gps-hiseqx-pcrfree-pe150-v1`, homogéneo para el evento salvo desplazamiento de calidad y escala de error globales por mate. Las calidades FASTQ son probabilísticamente coherentes con los errores; selectores por individuo, secuencia o región se rechazan. La salida conserva perfil, ajustes efectivos y recuentos agregados, no diferencias por lectura | Perfil literal, coherencia calidad-error, rechazos de selectores y casos estadísticos |
 | **ACE-48. Calibración empírica fuera de v1** | Una configuración que aporte FASTQ o referencia para calibración, solicite estimar o inferir un perfil o seleccione un perfil empírico reutilizable se rechaza antes de simular. El error identifica el campo y explica que la capacidad queda fuera de v1. Una ejecución válida con un perfil incorporado de Illumina y ajustes explícitos permitidos no genera un fichero de perfil empírico ni lo enlaza desde el manifiesto; PacBio HiFi permanece aplazado en DTF-049 | Casos por clase de campo rechazado y comprobación de ausencia del artefacto |
 | **ACE-49. Duplicados de PCR y ópticos** | F4 declara PCR no aplicable y duplicados ópticos a cero; no genera duplicados ni admite sus tasas. Un perfil amplificado y el modelo de duplicados quedan en DTF-056 | Evidencia, modelo y marcado posterior |
 | **ACE-50. Restos de adaptadores** | El perfil HiSeq X inicial no produce adaptadores: todos sus insertos son mayores que sus lecturas. F4 rechaza activarlos y conserva recuento cero. Un perfil futuro de fragmentos cortos podrá generarlos únicamente por sobrepasar el inserto, conforme a DTF-054 | Rechazo y recuento cero en F4; perfil futuro |
 | **ACE-51. Sesgo de cobertura por GC** | F4 usa GC neutro y rechaza una curva o intensidad no nulas. El perfil con sesgo GC calibrado queda en DTF-056 | Curvas, regla de combinación e intervalos de resumen concretos |
 | **ACE-52. Baja mapeabilidad realista** | Las lecturas de regiones repetitivas, duplicadas u homólogas parten de posiciones y haplotipos verdaderos. En F4 se publican solo FASTQ y métricas agregadas; el mapeador, sus alineamientos y la evaluación de ambigüedad o posiciones incorrectas quedan para DTF-055, sin sobrescritura artificial de MAPQ | Casos de prueba por tipo de región y referencia cuando exista mapeo |
 | **ACE-53. Alineamientos sintéticos coherentes** | Queda aplazado en DTF-051 el modo directo, incluidas sus categorías, MAPQ, campos y validación propios | Decisión posterior de modo directo |
-| **ACE-54. Lecturas quiméricas** | Una tasa configurable transforma parejas limpias en quimeras sin cambiar su número. Cada una une dos segmentos no contiguos, con unión uniforme dentro del inserto; ambos pertenecen al mismo individuo y biblioteca, pero pueden proceder de cromosomas, *scaffolds*, haplotipos o copias diferentes. F4 publica FASTQ y recuentos agregados, no procedencia individual ni alineamientos | Distribuciones de fragmentos y casos de prueba |
+| **ACE-54. Lecturas quiméricas** | Una tasa configurable transforma parejas limpias en quimeras sin cambiar su número. Para inserto `L`, el primer segmento es el prefijo de longitud `b`, con `b` uniforme en `1..L-1`; el segundo es un intervalo uniforme de longitud `L-b` de la lista canónica del mismo individuo y biblioteca. En la misma copia se excluyen intervalos que solapen o toquen el prefijo; ambos segmentos se leen en orientación directa antes de aplicar PE. Una falta de candidata detiene antes de publicar. F4 publica FASTQ y recuentos agregados, no procedencia individual ni alineamientos | Vector literal de fuentes, uniones, exclusiones y fallo sin candidata |
 | **ACE-55. Anomalías *paired-end*** | Aplazadas en DTF-055: orientación anómala, inserto observado inesperado y mate no alineado requieren BAM/CRAM y mapeo. F4 solo publica pares FASTQ normales y las quimeras explícitas de ACE-54 | Modelo, métricas y casos de prueba cuando exista mapeo |
-| **ACE-56. Grupo de lectura y archivo por individuo** | Cada individuo tiene exactamente una biblioteca, un grupo de lectura y, en modo realista, un FASTQ o pareja dentro del evento. Los identificadores de muestra, biblioteca, tanda, plataforma y grupo son consistentes entre FASTQ, `@RG`/`RG` de BAM o CRAM, procedencia y manifiesto. Cada conjunto por referencia contiene un único BAM o CRAM final por individuo con ese grupo y nunca mezcla referencias | Campos exactos de `@RG`, validaciones y casos de cardinalidad inválida |
+| **ACE-56. Grupo de lectura y archivo por individuo** | Cada individuo tiene exactamente una biblioteca, un grupo de lectura y, en modo realista, un FASTQ o pareja dentro del evento. Los identificadores de muestra, biblioteca, tanda, plataforma y grupo son consistentes entre FASTQ, manifiesto y, desde F5.6, `@RG`/`RG` de BAM o CRAM. F4 no publica procedencia individual; los vínculos transitorios solo permiten validar esas salidas. Cada conjunto futuro por referencia contiene un único BAM o CRAM final por individuo con ese grupo y nunca mezcla referencias | Cabeceras FASTQ, futuros campos `@RG`, validación por reproducción y casos de cardinalidad inválida |
 | **ACE-57. Una tecnología y una tanda por experimento** | Cada evento que genere FASTQ, BAM o CRAM constituye su único experimento de secuenciación, sin identidad separada, y contiene una tecnología, un perfil, exactamente una tanda y una biblioteca por individuo. Todas las bibliotecas se procesan conjuntamente y, si existen alineamientos, comparten mapeador. Otra biblioteca del individuo, tanda, perfil, tecnología o control exige otro evento. Los carriles se rechazan en v1. Un evento que solo materializa verdad o VCF no es un experimento y no admite campos técnicos | Casos válidos y rechazos por cardinalidad, carril o campo técnico indebido |
 | **ACE-58. CRAM predeterminado y referencia exacta** | Dentro de un evento que solicite alineamientos, cada individuo recibe un CRAM final salvo que se seleccione BAM como alternativa. Cada CRAM está ligado por cabecera y manifiesto a la copia FASTA exacta almacenada entre los recursos comunes, protegida por identificadores y comprobaciones de integridad; no puede asociarse a otra referencia. Una exportación del evento sí copia ese FASTA al paquete autocontenido | Campos, comprobaciones de integridad y casos de referencia incorrecta |
 | **ACE-59. Orden, índice y validación** | Cada BAM o CRAM final se entrega ordenado por coordenadas de forma predeterminada y con un índice compatible elegido según formato, tamaño y necesidad. La configuración y el manifiesto registran formato, orden e índice, y el resultado no se considera completo si alineamiento, índice y referencia no superan la validación conjunta | Herramientas, tipos exactos de índice y casos límite de tamaño |
@@ -5494,13 +5524,13 @@ pendientes.
 | **ACE-65. Consecuencias de la validación** | Un archivo, formato, índice o cabecera inválidos, una referencia o identificadores incompatibles, un genotipo imposible, una procedencia o haplotipo imposible o un artefacto sin explicación trazada detienen la ejecución e impiden completar el ámbito afectado. Una cobertura u otra magnitud aleatoria desviada se informa y permite completar, sin tolerancia de aceptación ni opción de elevarla a error. N desviado conserva un aviso no invalidante. Ne realizado no tiene objetivo; N realizado=0 aplica su política específica | Cobertura desviada que completa, procedencia imposible que falla, medida no evaluable y aviso de N |
 | **ACE-66. Contenido genotípico del VCF verdadero** | En cada locus incluido, `GT` coincide con el genotipo real simulado y conserva fase y ploidía aunque la cobertura sea cero o las lecturas estén degradadas. El VCF no contiene `DP`, `AD`, `GQ`, `PL` ni ningún otro campo `FORMAT` derivado de observaciones o inferencias. La cobertura, el soporte alélico, las calidades y métricas equivalentes aparecen en los resultados de validación de FASTQ/BAM/CRAM, no en el VCF | Casos con distintas ploidías, cobertura cero y degradaciones; inspección de campos `FORMAT` |
 | **ACE-67. QUAL y FILTER del VCF verdadero** | Todos los registros válidos usan `QUAL=.` y `FILTER=PASS`. La cabecera explica que no se estima una calidad probabilística y que `PASS` identifica un registro verdadero validado estructuralmente. Si un registro no puede representarse mediante el VCF y su complemento cuando corresponda, o no puede validarse, se produce un error estructural, se detiene la creación del conjunto, este no se marca como completo y el registro no se emite como `PASS` | Casos de cabecera válida, complemento enlazado, registro no representable y fallo de validación |
-| **ACE-68. Alcance WGS y preparación** | La primera versión acepta exclusivamente WGS de DNA genómico con lecturas cortas tipo Illumina. Rechaza PacBio HiFi, Oxford Nanopore, PacBio CLR, paneles, amplicones, GBS y captura o reducción de representación. La preparación predeterminada es sin PCR; una preparación WGS amplificada puede generar duplicados de PCR y sesgos configurados y queda identificada en configuración y manifiesto | Casos de rechazo por tecnología y protocolo |
-| **ACE-69. Objetivo y muestreo de bibliotecas WGS** | Cada biblioteca declara cobertura o número de lecturas, pero no ambos ni ninguno; en *paired-end* se cuentan parejas. Se deriva el indicador equivalente. La cobertura usa bases de lectura divididas por la longitud haploide de la referencia estructural, sumando cada secuencia una vez; `N` cuenta tanto en longitud como en bases y posiciones muestreadas y se resume por separado. Las posiciones se muestrean uniformemente y de forma reproducible y la profundidad previa a sesgos es aproximadamente Poisson, sin profundidad exacta por base. El mismo FASTQ se mapea contra todas las referencias seleccionadas y sus coberturas alineadas no redefinen el objetivo | Prueba estadística, casos con `N` y modelos futuros alternativos |
+| **ACE-68. Alcance WGS y preparación** | F4 acepta exclusivamente WGS de DNA genómico con Illumina PE y preparación sin PCR. Rechaza preparación amplificada, PacBio HiFi, Oxford Nanopore, PacBio CLR, paneles, amplicones, GBS y captura o reducción de representación. La preparación amplificada, duplicados PCR y sesgos asociados quedan en DTF-056 | Casos de rechazo por tecnología y protocolo |
+| **ACE-69. Objetivo y muestreo de bibliotecas WGS** | En F4, cada biblioteca declara exclusivamente cobertura; rechaza un número de lecturas o parejas como objetivo y deriva el número entero de parejas PE. La cobertura usa bases de lectura divididas por la longitud haploide de la referencia estructural, sumando cada secuencia una vez; `N` cuenta tanto en longitud como en bases y posiciones muestreadas y se resume por separado. Las posiciones se muestrean uniformemente y de forma reproducible y la profundidad previa a artefactos es aproximadamente Poisson, sin profundidad exacta por base. Mapeo y cobertura alineada se incorporan desde DTF-055 y no redefinen el objetivo | Prueba de conversión desde cobertura, rechazo numérico, casos con `N` y distribución de muestreo |
 | **ACE-70. Ploidía, copias y soporte alélico WGS** | Sin excepciones, las lecturas se reparten por longitud y número de copias, cada copia recibe cobertura semejante y la profundidad cromosómica total es proporcional a su ploidía. Los alelos contribuyen según dosis; la validación admite variación aleatoria y no exige balance exacto. No existen parámetros de sesgo alélico o *allele dropout* forzados | Métricas y resúmenes por copia o haplotipo |
-| **ACE-71. Un único alineamiento final** | Cada evento conserva solo su BAM/CRAM final con las degradaciones configuradas. Un control sin degradaciones es otro evento que usa la misma verdad, referencias y muestras, pero tiene subsemilla, lecturas y archivos propios; los manifiestos enlazan su relación experimental | Identificadores técnicos de eventos relacionados |
+| **ACE-71. Un único alineamiento final** | F4 no genera BAM/CRAM ni un evento de control. Tras DTF-050 y DTF-055, cada evento conservará solo su BAM/CRAM final con las degradaciones configuradas; un control sin degradaciones será otro evento con misma verdad, referencias y muestras, pero subsemilla, lecturas y archivos propios, enlazado por manifiestos | Rechazo F4 y futuros identificadores técnicos de eventos relacionados |
 | **ACE-72. Contaminación biológica sustitutiva** | Cada lectura o pareja contaminante sustituye una propia de la receptora sin reducir los datos de la donante. Cada receptora sortea su fracción total dentro del rango 0–100 %; el 100 % representa sustitución completa. Un rango inválido o un receptor sin donante elegible con objetivo positivo detiene antes de generar | Unidades exactas y casos límite |
 | **ACE-73. Fuentes y reparto de contaminación** | Las fuentes son otros individuos de la misma población, compatibles por construcción. Para cada unidad, el donante se sortea reproduciblemente entre los elegibles; los aportes por donante son el resultado observado. F4 no admite matrices dirigidas, pesos manuales ni FASTQ externos | Casos de reparto, aislamiento poblacional y ausencia de donantes |
-| **ACE-74. Transferencia y descarte por índices** | Una lectura o pareja reasignada por índices sale de la donante y entra en la receptora sin duplicarse. Las descartadas o sin asignar no se reemplazan y reducen cobertura. Informe y manifiesto conservan objetivos, transferencias, descartes, totales y cobertura final | Casos por estrategia de índices |
+| **ACE-74. Transferencia y descarte por índices** | Una lectura o pareja reasignada por índices sale de la donante y entra en la receptora sin duplicarse. F4 la evalúa una sola vez con su origen pre-salto y materializa todas las transferencias simultáneamente. Las descartadas o sin asignar no se reemplazan y reducen cobertura. Informe y manifiesto conservan objetivos, transferencias, descartes, totales y cobertura final | Casos sin cadena, por permutación de bibliotecas y por descarte |
 | **ACE-75. Plantillas y sistemas de cruce** | Existen plantillas F1, F2, retrocruce, autofecundación y pedigrí simple. F2 permite autofecundar F1 o cruzar F1. RIL, introgresión y MAGIC se expresan con cruces personalizados. El sistema admite especies autógamas y alógamas y registra modo, parentales y descendientes | Sintaxis del sistema general y casos por plantilla |
 | **ACE-76. Apareamiento mixto y contribución parental** | La autofecundación es una probabilidad reproducible de 0–100 % por evento, sustituible por población, subpoblación y fase. Cada intento elige reproduciblemente el tipo y parentales solo entre opciones con ploidía y estructura reproductivas compatibles; fuera de la autofecundación usa dos supervivientes distintos, sin ponderación por parentesco, distancia o genotipo. La incompatibilidad se registra como causa reproductiva, no como selección de viabilidad. Un parental puede reutilizarse sin límite de descendientes en v1 | Tasas realizadas; opción estructural inválida; ausencia de pareja compatible |
 | **ACE-77. N, Ne y descendencia** | N objetivo es obligatorio al iniciar y fija el número de intentos reproductivos; cada éxito crea un descendiente. Se procesan N intentos o se registra inequívocamente la imposibilidad común de los restantes. Se conservan éxitos, fallos y causas, N realizado, desviación y aviso. Una imposibilidad previa se rechaza y N=0 aplica su política. Ne objetivo, absoluto o Ne/N, se rechaza antes de simular; Ne realizado usa progenitores con descendencia y desigualdad de contribuciones, nunca heterocigosidad, endogamia o LD, y si no es evaluable conserva la causa | N alcanzado/parcial, imposibilidad previa, N=0, rechazo de Ne objetivo y Ne realizado/no evaluable |
@@ -5526,7 +5556,7 @@ pendientes.
 | **ACE-97. Reproducción de familias** | Cada evento tiene un parental para autofecundación o dos para cruzamiento sexual; otras cardinalidades se rechazan. Todos los parentales usan la misma referencia estructural, ploidía par e igual y estado estructural canónico idéntico en cada secuencia reproductiva. El orden de dos parentales no cambia el modelo y los diseños con tres o más fundadores forman un grafo. Clonación, apomixis, dobles haploides, referencias distintas y parentales estructuralmente heterocigotos se rechazan | Casos por tipo, diploide/tetraploide, ploidía impar/desigual, estructura y referencia |
 | **ACE-98. Segregación y mutación familiar** | La transmisión elige con igual probabilidad una copia de cada bivalente estructuralmente idéntico, sin conversión génica, distorsión ni impulso meiótico. SNP, *indels* pequeños y repeticiones distintas se transmiten como alelos. Deleción, duplicación, inversión, inserción estructural o translocación heterocigotas impiden reproducir; el mismo estado estructural fijado en todas las copias y parentales sí se admite aunque tenga historias distintas. Una SV de novo puede existir en la descendencia, pero el portador queda fuera de intentos posteriores mientras sea incompatible; su exclusión y los fallos resultantes se registran conforme a N | Casos por clase SV, SV fijada, SV de novo con reproducción posterior y variantes pequeñas |
 | **ACE-99. Independencia VCF entre referencias** | Cada referencia produce un VCF construido directamente en su secuencia y coordenadas, con un espacio propio de identificadores. Muestras biológicas pueden compartir identificador, pero VCF, complemento y manifiestos no contienen identificadores globales ni correspondencias registro a registro entre variantes de referencias diferentes | Casos con dos referencias y revisión de metadatos |
-| **ACE-100. Identidad técnica y biológica** | `SM` de BAM/CRAM y las columnas del VCF usan el identificador biológico estable. Cada individuo tiene un grupo de lectura por evento, único en toda la ejecución, que distingue evento, biblioteca y tanda y coincide entre FASTQ, BAM/CRAM, procedencia y manifiesto. Cada instancia de lectura o pareja tiene identidad única dentro del evento y su procedencia distingue copia biológica, transferencia técnica y duplicación configurada sin colisiones | Campos de `@RG`, representación técnica de los vínculos y casos de colisión |
+| **ACE-100. Identidad técnica y biológica** | `SM` de BAM/CRAM y las columnas del VCF usan el identificador biológico estable. Cada individuo tiene un grupo de lectura por evento, único en toda la ejecución, que distingue evento, biblioteca y tanda y coincide entre FASTQ, BAM/CRAM cuando existan y manifiesto. Cada instancia de lectura o pareja tiene identidad única dentro del evento. En F4, los vínculos de copia biológica, transferencia técnica o duplicación se conservan solo transitoriamente para generación y validación; el manifiesto no publica identificadores individuales de procedencia | Cabeceras, grupos de lectura, validación por reproducción y casos de colisión |
 | **ACE-101. VCF estable entre eventos** | Dos eventos con los mismos individuos, referencia y verdad producen VCF con idénticos identificadores locales, coordenadas, REF, ALT y genotipos aunque cambien tecnología, subsemilla, FASTQ, BAM/CRAM o degradaciones | Casos con eventos técnicos diferentes |
 | **ACE-102. ALT fijados y multialélicos** | Un ALT fijado en todas las muestras se incluye porque difiere de la referencia. Varios ALT representables en el mismo locus se reúnen en un registro multialélico normalizado y `GT` conserva ploidía, dosis y fase. Los casos no representables usan el complemento sin pérdida | Casos fijados, multialélicos, poliploides y solapados |
 | **ACE-103. Variantes pequeñas solapadas** | SNP e *indels* pueden solaparse en una copia haplotípica. Los explícitos exigen un orden, se aplican secuencialmente y usan el estado inmediatamente anterior como marco de coordenadas. La verdad actual y el VCF derivan de la secuencia final; el historial marca cada evento como activo, modificado o eliminado. Un objetivo ya eliminado detiene la configuración; no se ignora ni recoloca. Un SNP eliminado por una deleción no se emite como variante actual. Haplotipos distintos se resuelven independientemente y sus alelos finales pueden coexistir como ALT con fase y dosis. Varios eventos de un haplotipo que formen un alelo final se emiten como una sola variante o ALT compleja normalizada y usan complemento si hace falta | Casos secuenciales, multialélicos, complejos, de eliminación y de error |

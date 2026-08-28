@@ -315,8 +315,9 @@ poblaciones pueden alimentar este mismo recorrido sin crear otra implementación
   duplicados, adaptadores, sesgo GC no neutro y anomalías *paired-end*, que se
   aplazan en DTF-054–056. El contenido GC
   excluye `N`; una ventana sin bases conocidas no recibe corrección y se registra.
-- **F4.4. Contaminación biológica.** Sustituir lecturas según fuentes, unidades y
-  matrices dirigidas compatibles.
+- **F4.4. Contaminación biológica.** Sustituir lecturas completas mediante un
+  porcentaje sorteado por receptora y donantes aleatorios de su misma población;
+  matrices dirigidas y fuentes externas quedan en DTF-052.
 - **F4.5. Demultiplexado técnico.** Representar reasignaciones y descartes por
   índices y conservar solo sus recuentos agregados, sin duplicar secuencias.
 - **F4.6. Alineamientos y BAM/CRAM.** Aplazados en DTF-055. F4 termina en FASTQ
