@@ -306,26 +306,27 @@ poblaciones pueden alimentar este mismo recorrido sin crear otra implementación
 
 **Hitos:**
 
-- **F4.1. Perfiles tecnológicos.** Completar Illumina *single-end* y
-  *paired-end* y añadir PacBio HiFi en eventos separados.
+- **F4.1. Perfiles tecnológicos.** Completar Illumina *paired-end* para una
+  población y un evento técnico únicos. PacBio HiFi se aplaza a DTF-049 y los
+  recorridos con varias poblaciones o eventos a DTF-050.
 - **F4.2. Cobertura, longitud, error y calidad.** Aplicar perfiles validados y
   sustituciones configurables por los ámbitos permitidos.
-- **F4.3. Artefactos WGS.** Simular duplicados, adaptadores, sesgo GC, quimeras y
-  anomalías *paired-end* incluidas en la primera versión. El contenido GC
+- **F4.3. Artefactos WGS.** Simular quimeras y rechazar configuraciones de
+  duplicados, adaptadores, sesgo GC no neutro y anomalías *paired-end*, que se
+  aplazan en DTF-054–056. El contenido GC
   excluye `N`; una ventana sin bases conocidas no recibe corrección y se registra.
 - **F4.4. Contaminación biológica.** Sustituir lecturas según fuentes, unidades y
   matrices dirigidas compatibles.
 - **F4.5. Demultiplexado técnico.** Representar reasignaciones y descartes por
-  índices y conservar la procedencia sin duplicar secuencias.
-- **F4.6. Modo directo.** Producir alineamientos sintéticos coherentes sin FASTQ
-  y demostrar concordancia funcional con el modo realista donde corresponda.
+  índices y conservar solo sus recuentos agregados, sin duplicar secuencias.
+- **F4.6. Alineamientos y BAM/CRAM.** Aplazados en DTF-055. F4 termina en FASTQ
+  final; el modo directo permanece además en DTF-051.
 - **F4.7 (retirado de v1). Calibración desde datos reales.** No se implementa en
   esta versión. La admisión rechaza antes de simular FASTQ o referencia de
   calibración, solicitudes de estimación y perfiles empíricos reutilizables.
 
-**Resultado de salida:** eventos WGS configurables, trazables y separados por
-tecnología, referencia y muestra, disponibles desde una etapa temprana del
-proyecto.
+**Resultado de salida:** un evento WGS Illumina configurable y trazable para
+una población, disponible desde una etapa temprana del proyecto.
 
 **Evidencia de cierre:** validaciones internas cuantifican lo solicitado y lo
 realizado, y demuestran que las degradaciones solo afectan a la evidencia
@@ -338,8 +339,8 @@ La calibración empírica automática queda en la hoja de trabajo futura, sin
 bloquear F4. Antes de recuperarla deberán acordarse el contrato mínimo de
 entrada, la separación entre variantes y errores, el esquema reutilizable, las
 métricas y umbrales de fiabilidad y las reglas de reutilización. Los perfiles
-incorporados de Illumina y PacBio HiFi y sus sustituciones explícitas sí forman
-parte de F4. DTF-016 reserva también la materialización exacta de VCF
+incorporados de Illumina y sus sustituciones explícitas sí forman parte de F4.
+DTF-049 reserva PacBio HiFi. DTF-016 reserva también la materialización exacta de VCF
 poblacionales y perfiles empíricos exactos; no sustituye ni bloquea los dos
 ejemplos compactos aproximados de F2.2.
 
@@ -743,7 +744,7 @@ configurable.
 | F0 | Arquitectura y plan de F1 | Trazabilidad completa y decisiones cerradas | Diseño improvisado durante la implementación |
 | F1 | Ejecución mínima reproducible y referencia reducida | Repetición con semilla, reconstrucción origen+mapa y rechazo limpio | Resultados sin identidad, configuración efectiva o procedencia de referencia |
 | F2 | Aplicación base, matriz SNV e individuos faseados | Equivalencia Marimo→TOML, matriz suministrada/generada, HWE/F y reconstrucción independiente de haplotipos/VCF | Perfil implícito, loci distintos por individuo, genotipos/fase incorrectos o semántica duplicada en UI |
-| F3 | Primer recorrido extremo a extremo | Validación FASTQ, BAM/CRAM y procedencia | Alineamientos incoherentes con la verdad |
+| F3 | Primer recorrido extremo a extremo | FASTQ, compresión, hashes y comprobación contra la verdad biológica | Lecturas o metadatos técnicos incoherentes |
 | F4 | Realismo técnico WGS | Comparación de parámetros solicitados y realizados | Alterar la verdad con artefactos técnicos |
 | F5 | Variación y referencias complejas | Casos estructurales, VCF más complemento y aislamiento por referencia | Mezcla de referencias o pérdida de linaje o detalle complejo |
 | F6 | Población inicial y panel haplotípico intacto | Recuentos, frecuencias, reconstrucción del panel y pruebas estadísticas reproducibles | Frecuencias, fase, LD o F mal representados |

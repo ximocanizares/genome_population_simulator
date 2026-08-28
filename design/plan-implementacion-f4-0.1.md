@@ -23,38 +23,75 @@ el VCF de verdad. La base reutilizable actual es `src/wgs_sampling.rs`,
 por flujo BGZF/gzip, se valida descomprimido y publica tamaño y SHA-256 del
 archivo comprimido; F4 conserva esas propiedades.
 
+En este primer alcance de F4, una ejecución técnica consume individuos de una
+sola población y declara un único `[technical_event]`. No se introduce
+`[[technical_events]]`, ni se materializan varias poblaciones o eventos
+técnicos en una misma ejecución. La extensión multievento y multipoblación se
+recuperará solo desde DTF-050.
+
 ## 2. Alcance, exclusiones y orden
 
-**Incluye:** perfiles versionados incorporados de Illumina SE/PE y PacBio HiFi;
-longitud, cobertura, error y calidad; pares completos; duplicados, adaptadores,
-sesgo GC, quimeras y anomalías PE; contaminación biológica; demultiplexado;
-procedencia durable mínima sin secuencias duplicadas; modo directo; y, cuando
-las decisiones de alineamiento estén cerradas, BAM/CRAM e integración con el
-mapeador.
+**Incluye:** perfil versionado incorporado de Illumina PE;
+longitud, cobertura, error y calidad; pares completos; quimeras, contaminación
+biológica y demultiplexado;
+resumen técnico agregado sin secuencias duplicadas y FASTQ finales comprimidos.
 
-**Excluye:** estimar, calibrar o reutilizar perfiles empíricos; Oxford Nanopore,
-PacBio CLR, protocolos dirigidos, carriles, varias bibliotecas/tandas dentro de
-un evento, un segundo FASTQ limpio, un segundo BAM/CRAM limpio, perfiles o
+El perfil predeterminado de F4 es
+`gps-hiseqx-pcrfree-pe150-v1`: aproximación propia a Illumina HiSeq X con
+biblioteca WGS sin PCR, pares de 150 pb e inserto medio de 350 pb. Sus curvas
+R1/R2 son un recurso propio versionado; ART `HSXn` se usa exclusivamente como
+referencia externa de calibración y no se incorpora ni redistribuye. El inserto sigue una normal
+truncada con desviación estándar de 20 pb y límites 250–450 pb. Longitud,
+inserto y perfil son configurables. Cuando ocurre un error, el perfil inicial
+elige uniformemente una de las otras tres bases; una matriz empírica queda en
+DTF-053. Sus curvas admiten una longitud común a R1/R2 de 1–150 pb: una menor
+usa su prefijo y una mayor se rechaza sin extrapolar; longitudes asimétricas
+entre mates quedan fuera de F4. El inserto mínimo debe ser al menos esa longitud
+común, pues F4 no modela adaptadores. Por defecto, los duplicados PCR no aplican,
+los ópticos, quimeras, sesgo GC e *index hopping* tienen tasa cero; la
+contaminación usa rango predeterminado `0–0 %`; los adaptadores no aparecen
+porque los insertos mínimos superan la
+longitud de lectura y la capacidad se aplaza en DTF-054. Los duplicados y el
+sesgo GC no neutro quedan aplazados en DTF-056. F4 no genera UDI
+inesperados; si alguno alcanza el demultiplexado se descarta defensivamente y
+su generación explícita queda en DTF-025. Permanecen configurables únicamente
+los mecanismos definidos en este plan: contaminación, quimeras e *index
+hopping*; DTPD-106 conserva el perfil inicial y sus ajustes aprobados.
+
+**Excluye:** estimar, calibrar o reutilizar perfiles empíricos; tecnologías de
+lectura larga, incluido PacBio HiFi, Oxford Nanopore y PacBio CLR; protocolos
+dirigidos, carriles, varias bibliotecas/tandas dentro de un evento, un segundo
+FASTQ limpio, BAM/CRAM, mapeo real y el modo directo de alineamientos sintéticos
+(DTF-051/055), perfiles o
 degradaciones no especificados, automatización de callers, escenarios/sesiones
 paralelos y endurecimiento contra atacante local activo. F5–F9 conservan sus
 destinos de referencias complejas, poblaciones, paralelismo, presupuestos y
 distribución.
 
-El orden protege primero contratos y verdades de origen, después el muestreo y
-los perfiles, luego degradaciones y procedencia, y finalmente las vistas de
-alineamiento. Ninguna etapa que use una pareja, una instancia transferida o una
-lectura quimérica se apoya en identificadores derivados del orden físico o de un
-RNG compartido. DTC-079 permite una solución local proporcionada: entradas
+El orden normativo de F4 es cobertura → fragmento → quimera opcional →
+calidad/error por mate → contaminación biológica → *index hopping* y
+demultiplexado → FASTQ/resumen. Ninguna etapa que use una pareja, una instancia
+transferida o una lectura quimérica se apoya en identificadores derivados del
+orden físico o de un RNG compartido. El catálogo RNG F4 extenderá, sin modificar
+las filas previas de DTC-037, ámbitos locales para: plantilla/fragmento y
+quimera (`event_id`, `library_id`, `template_ordinal`); calidad/error
+(`event_id`, `library_id`, `template_ordinal`, mate, ciclo); porcentaje,
+selección de donante y retirada propia de contaminación (receptora y pareja
+candidata); e *index hopping* (biblioteca actual y pareja técnica). DTC-079 permite una solución local proporcionada: entradas
 externas se validan, Rust conserva la autoridad semántica y no se crean
 protocolos, almacenes o defensas no necesarios.
 
 ## 3. Requisitos previos reutilizables
 
-- F3 debe cerrar su pausa de revisión y aportar evento explícito, biblioteca y
-  grupo de lectura únicos, FASTQ final por flujo, `event_manifest`, publicación
+- F3 está cerrado y aporta el único evento explícito, biblioteca y grupo de
+  lectura únicos, FASTQ final por flujo, `event_manifest`, publicación
   no-clobber, hashes y validación independiente de origen, cobertura y `N`.
 - F2 debe continuar aportando referencia tipada, estado haplotípico faseado,
   materialización temporal, identidades, semilla raíz y subsemillas aisladas.
+- Todo campo F4 admitido por la configuración general tendrá, dentro del mismo
+  hito que lo introduce, su recorrido local Marimo → TOML → validación Rust y
+  una prueba de paridad. Marimo solo autoriza y muestra la configuración: no
+  incorpora lógica biológica, sesión ni servicio.
 - Todos los cambios usan Rust 1.97.1, Cargo bloqueado y las puertas existentes:
 
       cargo fmt --all -- --check
@@ -65,8 +102,8 @@ protocolos, almacenes o defensas no necesarios.
       git diff --check
 
 - Las pruebas focales se añadirán en `tests/f4_*.rs`; un productor no se valida
-  solo reproduciendo su propia lógica. Los ficheros de procedencia se recorrerán
-  por flujo y las pruebas sintéticas pequeñas conservarán verdad manual u
+  solo reproduciendo su propia lógica. Las pruebas sintéticas pequeñas usarán
+  oráculos independientes y los resúmenes agregados no retendrán procedencia
   oráculo independiente.
 
 ## 4. Decisiones bloqueantes y pausa de diseño
@@ -76,26 +113,23 @@ primer paso ejecutable que dependa de ellas.
 
 | Bloqueo | Bloquea | Lo que debe decidir el documento propietario |
 |---|---|---|
-| DTPD-106 | F4.1–F4.3 | Catálogo de perfiles incorporados, fuentes/datos de validación, distribuciones y valores cuantitativos de longitud, inserto, errores, calidad, duplicados, adaptadores, GC, quimeras y anomalías PE; sustituciones permitidas y versiones. |
-| DTPD-108 | F4.4–F4.6 y artefactos finales de F4.3 | Esquema y formato de procedencia por lectura o pareja, enlaces de origen, diferencias verdad/observación, agregados de descartes y límites de volumen. |
-| DTPD-104 | BAM/CRAM de F4.6 | Adaptador SAM/BAM/CRAM, versión, cabeceras/grupos de lectura, orden e índices. |
-| DTPD-105 | mapeo real de F4.1/F4.6 | Descubrimiento e invocación reproducible de minimap2/alternativas, compatibilidad de versión, *presets*, parámetros, diagnósticos y tratamiento de fallos. |
+| DTPD-106 | — | Resuelta: perfil inicial propio `gps-hiseqx-pcrfree-pe150-v1`, calibrado externamente frente a ART HSXn sin incorporar ni redistribuir sus tablas, y ajustes de longitud, inserto, errores, calidad, quimeras e índices aprobados. Duplicados y GC no neutro quedan en DTF-056; adaptadores, en DTF-054; anomalías PE, en DTF-055. |
+| DTPD-108 | — | Resuelta: manifiesto/resumen agregado sin fichero ni origen individual de lectura; conserva semilla, perfil, coberturas, contaminación/aportes, artefactos, descartes y hashes/tamaños. |
+| DTPD-104 | DTF-055 | Adaptador SAM/BAM/CRAM, versión, cabeceras/grupos de lectura, orden e índices. |
+| DTPD-105 | DTF-055 | Descubrimiento e invocación reproducible de minimap2/alternativas, compatibilidad de versión, *presets*, parámetros, diagnósticos y tratamiento de fallos. |
 
-> **PAUSA-DISEÑO-F4.** No iniciar F4.1–F4.6 hasta aprobar DTPD-106 y DTPD-108;
-> no activar BAM/CRAM o mapeo hasta aprobar además DTPD-104 y DTPD-105. La
-> resolución debe actualizar especificación/arquitectura/decisiones y
-> trazabilidad antes de desmarcar los pasos afectados. Esta pausa no autoriza a
-> elegir biología, tasas, distribuciones, formatos ni dependencias desde el
-> código.
+> **PAUSA-DISEÑO-F4.** Cerrada: DTPD-106 y DTPD-108 están resueltas. BAM/CRAM y
+> mapeo no pertenecen a F4 y quedan en DTF-055. La implementación no podrá
+> reabrir tasas, distribuciones, formatos ni dependencias desde el código.
 
 F4.7 es independiente de esos bloqueos: su rechazo explícito puede ejecutarse
 cuando F3 esté cerrado, sin anticipar un formato de perfil empírico.
 
 ## 5. F4.1 — Perfiles tecnológicos y pares
 
-**Resultado:** un evento selecciona una sola tecnología y perfil efectivo; las
-bibliotecas de ese evento son compatibles y una unidad PE conserva dos *mates*
-con una identidad de pareja única.
+**Resultado:** el único evento selecciona un perfil Illumina efectivo; las
+bibliotecas de la única población seleccionada son compatibles y una unidad PE
+conserva dos *mates* con una identidad de pareja única.
 
 - ☐ F4.1.1. Convertir el contrato fijo `illumina-se-minimal-v1` de F3 en una
   frontera de perfiles versionados, sin asignar valores cuantitativos no
@@ -106,7 +140,8 @@ con una identidad de pareja única.
   - Cambia: `src/application.rs`, `src/configuration.rs`,
     `src/technical_identity.rs`, `src/event_manifest.rs` y contratos TOML/JSON
     vigentes; registra ID, versión, preparación y parámetros/sustituciones con
-    procedencia. Rechaza tecnología mezclada, ONT, CLR y perfiles desconocidos.
+    procedencia. Rechaza tecnologías de lectura larga, perfiles desconocidos y
+    cualquier intento de declarar más de un evento o población en F4.
   - Se comprueba con: `cargo test --test f4_profiles --locked`; oráculo de
     admisión comprueba perfiles, versiones, exclusividad y hechos del manifiesto;
     puertas comunes.
@@ -116,21 +151,30 @@ con una identidad de pareja única.
   - Depende de: F4.1.1.
   - Procede de: REQ-DAT-18/68/71, REQ-RG-03–04 y DTC-037–039.
   - Cambia: `src/identity.rs`, `src/technical_identity.rs` y pruebas; la pareja
-    tiene nombre único dentro del evento y cada miembro usa solo el indicador de
-    mate admitido por FASTQ/SAM. Ámbitos RNG de plantilla, fragmento, mate y
-    artefacto se documentan y no consumen el de cobertura.
+    tiene nombre único dentro del evento y la cabecera FASTQ es exactamente
+    `@GPS:<event_id>:<library_id>:<technical_pair_id> <mate>:N:0:<index>`;
+    `<mate>` vale `1`/`2` y, con UDI, `<index>` vale `i7+i5` (sin UDI, `0`). No
+    incluye campos de instrumento, carril, *tile*, coordenadas ni BCL. Ámbitos
+    RNG de plantilla, fragmento, mate y artefacto se documentan y no consumen el
+    de cobertura.
   - Se comprueba con: `cargo test --test f4_technical_identity --locked`; vector
     literal comprueba repetición, aislamiento al reordenar bibliotecas,
     unicidad y ausencia de pares huérfanos; puertas comunes.
 
 - ☐ F4.1.3. Implementar el muestreador de fragmentos y la emisión PE sólo con
-  orientación y distribución de inserto ya aprobadas.
+  orientación `FR` y distribución de inserto ya aprobadas.
   - Depende de: F4.1.2 y DTPD-106 aprobada.
   - Procede de: REQ-DAT-12/15/18/65–66, REQ-WGS-01–11 y REQ-VAL-07.
   - Cambia: `src/wgs_sampling.rs`, nuevo módulo de pares y
-    `src/fastq_output.rs`; ambos mates proceden del mismo fragmento, mantienen
-    orientación, extremos y `N` literal/Phred 0. El objetivo numérico PE se
-    expresa en parejas completas.
+    `src/fastq_output.rs`; R1 es directo desde el extremo izquierdo y R2 el
+    complemento inverso desde el derecho; ambos mates proceden del mismo
+    fragmento y mantienen extremos y `N` literal/Phred 0. El objetivo numérico PE se
+    expresa en parejas completas. Cada fragmento se sortea directamente entre
+    inicios válidos que permiten alojar el inserto completo, sin recortar ni
+    reintentar extremos inválidos. La longitud configurable es única y común a
+    R1/R2, entre 1 y 150 pb, y no puede superar el inserto mínimo. Un
+    solapamiento entre mates se conserva como
+    dos lecturas completas, sin fusión.
   - Se comprueba con: `cargo test --test f4_paired_end --locked`; verdad manual
     de fragmentos cortos verifica orientación, inserto, extremos, calidad e
     imposibilidad de un único mate; puertas comunes.
@@ -144,13 +188,19 @@ con una identidad de pareja única.
 **Resultado:** cada biblioteca aplica el perfil y sus sustituciones efectivas
 con muestreo WGS básico separado de la evidencia final.
 
-- ☐ F4.2.1. Extender el plan WGS para longitudes variables y objetivos SE, PE y
-  HiFi sin alterar el denominador haploide acordado.
+- ☐ F4.2.1. Extender el plan WGS para longitudes variables y objetivos Illumina
+  PE sin alterar el denominador haploide acordado.
   - Depende de: F4.1.3 y DTPD-106 aprobada.
-  - Procede de: REQ-DAT-13–15/24, REQ-WGS-01–11/14 y REQ-CONF-72–74/83–84.
+  - Procede de: REQ-DAT-14–15/24, REQ-WGS-01–11/14 y REQ-CONF-72–74/83–84.
   - Cambia: `src/wgs_sampling.rs`, configuración efectiva e informe de
     validación; conserva selección uniforme básica, reparto por copia/ploidía,
-    `N` elegible y cobertura básica previa a artefactos.
+    `N` elegible y cobertura básica previa a artefactos. Una pareja contribuye
+    con las bases emitidas por ambos mates, también cuando se solapan. Un objetivo
+    no entero se redondea a la pareja más próxima, con empate hacia arriba. Las
+    secuencias menores que el inserto mínimo se excluyen y se informan a cero.
+    F4 admite únicamente una cobertura objetivo haploide común por evento;
+    rechaza objetivos por número de parejas y sustituciones por individuo,
+    secuencia o región.
   - Se comprueba con: `cargo test --test f4_wgs_profiles --locked`; oráculo
     independiente comprueba denominador, objetivos alternativos, pares enteros,
     cobertura por copia y `N`; puertas comunes.
@@ -158,23 +208,33 @@ con muestreo WGS básico separado de la evidencia final.
 - ☐ F4.2.2. Aplicar el modelo de error y calidad aprobado como transformación
   transitoria de una lectura verdadera, sin resolver ni crear `N`.
   - Depende de: F4.2.1 y DTPD-106 aprobada.
-  - Procede de: REQ-DAT-37–40/72–73, REQ-MAN-42 y REQ-VAL-01/06/09–13.
-  - Cambia: nuevo módulo de perfil/error y `src/fastq_output.rs`; conserva por
-    instancia la diferencia verdad/observación para el productor de procedencia
-    que DTPD-108 defina, sin serializar aún un formato supuesto.
+  - Procede de: REQ-DAT-37–39/72–73, REQ-MAN-42 y REQ-VAL-01/06/09–13.
+  - Cambia: nuevo módulo de perfil/error y `src/fastq_output.rs`; acumula solo
+    los contadores necesarios para el resumen de DTPD-108, sin conservar por
+    instancia diferencias verdad/observación. Tras un error, sortea
+    uniformemente una de las otras tres bases. R1 y R2 consumen sorteos
+    independientes de calidad/error aun cuando se solapen. Cuando haya
+    desplazamiento de calidad y escala de error, aplica el primero, deriva la
+    probabilidad y aplica después la escala; la probabilidad final gobierna a
+    la vez el sorteo de error y la calidad emitida. Rechaza probabilidades
+    finales inválidas, sin saturarlas silenciosamente. Estos ajustes son
+    globales por evento y pueden diferir entre R1 y R2; no admite selectores
+    por individuo, secuencia o región. Si se omiten, materializa y publica sus
+    valores neutros: desplazamiento `0 Phred` y escala `1` para cada mate.
+    Codifica las calidades como FASTQ Sanger (`Phred+33`), redondea al entero
+    más próximo y rechaza un resultado fuera de `0..=93`, sin saturarlo.
   - Se comprueba con: `cargo test --test f4_error_quality --locked`; vector
     externo al productor comprueba sustituciones, posición/contexto si procede,
     relación calidad-error, `N` y flujos RNG aislados; puertas comunes.
 
-- ☐ F4.2.3. Publicar e informar las cuatro coberturas distintas, sin convertir
-  la cobertura FASTQ final ni la alineada en objetivos nuevos.
-  - Depende de: F4.2.1; la alineada requiere DTPD-104/105.
+- ☐ F4.2.3. Publicar e informar las tres coberturas de F4, sin convertir la
+  cobertura FASTQ final en un objetivo nuevo.
+  - Depende de: F4.2.1.
   - Procede de: REQ-DAT-24, REQ-WGS-11, REQ-MAN-37/61 y REQ-VAL-04.
   - Cambia: `src/fastq_validation.rs`, `src/event_manifest.rs` y resultados de
-    validación; separa objetivo, WGS básica, FASTQ final propia/contaminante y
-    alineada por referencia cuando exista.
+    validación; separa objetivo, WGS básica y FASTQ final propia/contaminante.
   - Se comprueba con: `cargo test --test f4_coverage_reporting --locked`; caso
-    controlado demuestra que las cuatro medidas no se sustituyen entre sí;
+    controlado demuestra que las tres medidas no se sustituyen entre sí;
     puertas comunes.
 
 > **PAUSA-F4.2.** Confirmar que los perfiles cuantitativos se validan contra sus
@@ -183,66 +243,86 @@ con muestreo WGS básico separado de la evidencia final.
 
 ## 7. F4.3 — Artefactos WGS
 
-- ☐ F4.3.1. Modelar preparación sin PCR por omisión y preparación amplificada
-  sólo según los mecanismos y valores ya aprobados.
+- ☐ F4.3.1. Fijar y validar la preparación PCR-free del perfil inicial, sin
+  generar duplicados ni admitir su configuración.
   - Depende de: F4.2.2 y DTPD-106 aprobada.
   - Procede de: REQ-TEC-06–08, REQ-CONF-88–90 y REQ-DAT-46–49.
-  - Cambia: configuración efectiva y módulos de duplicación; PCR y ópticos se
-    distinguen, una duplicación PE afecta a la pareja completa y el estado
-    marcado/sin marcar no se finge hasta que DTPD-104 cierre SAM/BAM/CRAM.
-  - Se comprueba con: `cargo test --test f4_duplicates --locked`; verdad manual
-    comprueba tipos, origen, recuentos y ausencia de huérfanos; puertas comunes.
+  - Cambia: configuración efectiva y validación; declara PCR no aplicable y
+    ópticos a cero, y rechaza sus parámetros. La preparación amplificada y sus
+    duplicados quedan en DTF-056.
+  - Se comprueba con: `cargo test --test f4_profile_rejections --locked`;
+    fixtures rechazan perfiles/tasas de duplicación y confirman los valores
+    efectivos neutros; puertas comunes.
 
-- ☐ F4.3.2. Añadir adaptadores sin recortar y sesgo GC después del muestreo WGS
-  básico, con la excepción explícita de ventana solo `N`.
+- ☐ F4.3.2. Declarar GC neutro y rechazar su configuración no nula, junto con
+  adaptadores para el perfil inicial.
   - Depende de: F4.2.2 y DTPD-106 aprobada.
   - Procede de: REQ-DAT-50–53, REQ-CONF-91–95, REQ-WGS-08/14 y REQ-MAN-47–48.
-  - Cambia: módulo de artefactos y validación; calcula GC como `(G+C)/(A+C+G+T)`
-    excluyendo `N`, registra la excepción y no reabre dominancia de configuración.
-  - Se comprueba con: `cargo test --test f4_adapters_gc --locked`; oráculo de
-    ventanas cubre GC 0/1, mezcla con `N`, todo `N`, extremos e informe por
-    intervalo; puertas comunes.
+  - Cambia: configuración efectiva y validación; el perfil inicial usa GC
+    neutro, tiene insertos mayores que las lecturas y rechaza adaptadores. El
+    perfil GC calibrado queda en DTF-056 y los fragmentos cortos, en DTF-054.
+  - Se comprueba con: `cargo test --test f4_profile_rejections --locked`;
+    fixtures rechazan curva/intensidad GC y adaptadores, y confirman valores
+    efectivos neutros; puertas comunes.
 
-- ☐ F4.3.3. Crear quimeras y anomalías PE desde fragmentos verdaderos, sin usar
-  la contaminación como sustituto semántico.
+- ☐ F4.3.3. Crear quimeras desde fragmentos verdaderos, sin usar la
+  contaminación como sustituto semántico.
   - Depende de: F4.1.3, F4.2.2 y DTPD-106 aprobada.
-  - Procede de: REQ-DAT-60–67, REQ-CONF-99, REQ-MAN-51–52 y REQ-VAL-07.
+  - Procede de: REQ-DAT-60–64, REQ-CONF-99, REQ-MAN-51 y REQ-VAL-07.
   - Cambia: módulo de fragmentos/artefactos y datos transitorios de origen; los
-    fragmentos quiméricos son del mismo individuo/biblioteca y la pareja anómala
-    sigue siendo una unidad completa.
+    fragmentos quiméricos son del mismo individuo/biblioteca y la pareja sigue
+    siendo una unidad completa. Cada quimera une exactamente dos segmentos no
+    contiguos con punto de unión uniforme dentro del inserto. El perfil inicial
+    fija frecuencia cero. Una tasa no nula se sortea Bernoulli e
+    independientemente por pareja limpia antes de contaminación y
+    demultiplexado, sin añadir ni retirar parejas ni publicar procedencia
+    individual; informa el recuento realizado sin forzarlo al esperado.
   - Se comprueba con: `cargo test --test f4_chimeras_pairs --locked`; verdad
-    manual comprueba uniones, orígenes, orientación, inserto y mates no
-    alineados; puertas comunes.
+    manual comprueba uniones, orígenes transitorios, orientación, inserto y
+    ausencia de procedencia individual; puertas comunes.
 
-> **PAUSA-F4.3.** Revisar que cada artefacto tiene parámetro/perfil/origen y que
-> no altera la verdad biológica. La procedencia durable queda pendiente de
-> DTPD-108 y no se sustituye por retener todas las lecturas en memoria.
+> **PAUSA-F4.3.** Revisar que cada artefacto tiene parámetro/perfil y que no
+> altera la verdad biológica. Solo puede aumentar los contadores agregados de
+> DTPD-108, sin retener todas las lecturas en memoria.
 
 ## 8. F4.4 — Contaminación biológica
 
-- ☐ F4.4.1. Admitir y resolver fuentes compatibles, matriz dirigida o reparto
-  automático sin crear otra biblioteca ni mezclar disposiciones de lectura.
-  - Depende de: PAUSA-DISEÑO-F4, F4.1.3 y DTPD-108 aprobada.
+- ☐ F4.4.1. Sortear uniformemente por receptora el porcentaje total dentro de un
+  rango y repartir sus unidades al azar entre los otros individuos de su misma
+  población. Por defecto recibe toda la población seleccionada, con subconjunto
+  explícito opcional, sin crear otra biblioteca ni mezclar disposiciones.
+  - Depende de: PAUSA-DISEÑO-F4 y F4.1.3.
   - Procede de: REQ-CONF-75–77, REQ-CONT-01–09/15–16 y REQ-DAT-25–28/69/71.
-  - Cambia: configuración, planificador de asignación conjunta y manifiesto;
-    convierte unidades tras conocer el número limpio, preflighta disponibilidad
-    y registra empate/subsemilla. FASTQ externo se limita al modo realista y se
-    valida/copia antes de generar.
+  - Cambia: configuración, planificador de asignación y manifiesto;
+    resuelve receptoras (toda la población por omisión), sortea el objetivo de
+    cada una, lo convierte desde su porcentaje y parejas limpias al entero más
+    próximo (empate hacia arriba), preflighta donantes y capacidad conjunta; si
+    falta, rechaza antes de escribir FASTQ. Registra subsemillas y aportes
+    realizados. Selecciona sin reemplazo para cada receptora sobre el conjunto
+    de parejas limpias de todos sus donantes elegibles, siempre desde sus
+    lecturas propias previas a contaminación; no admite matriz dirigida ni FASTQ
+    externo en F4. El resultado es un plan temporal de asignaciones por claves,
+    sin secuencias, calidades ni FASTQ limpio.
   - Se comprueba con: `cargo test --test f4_biological_contamination --locked`;
-    oráculo de asignación entero verifica mínimos globales, matriz asimétrica,
-    0/100 %, PE completo, externo incompatible y ausencia de reemplazo doble;
+    oráculo de asignación entero verifica rango por receptora, 0/100 %, reparto
+    aleatorio reproducible, aislamiento poblacional, PE completo y ausencia de
+    reemplazo de una unidad de origen dentro de la misma receptora, sin cadenas
+    ni dependencia del orden de receptoras;
     puertas comunes.
 
-- ☐ F4.4.2. Materializar sustitución biológica y sus vínculos de instancia sin
-  duplicar secuencias/calidades en la procedencia.
-  - Depende de: F4.4.1 y DTPD-108 aprobada.
+- ☐ F4.4.2. Materializar sustitución biológica y sus recuentos agregados sin
+  duplicar secuencias/calidades ni conservar vínculos por lectura.
+  - Depende de: F4.4.1.
   - Procede de: REQ-CONT-01–05/13–16, REQ-DAT-25–27/34–36/69 y REQ-NOF-08.
-  - Cambia: módulos de instancias y procedencia, FASTQ final y manifiesto; la
-    receptora recibe ID técnico nuevo enlazado al origen estable y la donante no
-    pierde la unidad.
+  - Cambia: módulos de instancias, FASTQ final y manifiesto; la receptora recibe
+    una copia técnica nueva y la donante no pierde la unidad. Retira al azar, sin
+    reemplazo, una pareja propia por cada incorporada. Solo se publican recuentos
+    agregados por donante y receptora. La copia conserva sus bases y calidades
+    realizadas; no vuelve a consumir el RNG de error/calidad. El emisor la
+    regenera bajo demanda desde su clave y la descarta tras escribirla.
   - Se comprueba con: `cargo test --test f4_contamination_provenance --locked`;
-    lector independiente reconstruye origen/mecanismo de FASTQ+procedencia y
-    detecta secuencias duplicadas o un par huérfano; puertas comunes.
+    lector independiente comprueba recuentos, ausencia de pares huérfanos y que
+    no se publica procedencia individual; puertas comunes.
 
 > **PAUSA-F4.4.** Confirmar que contaminación biológica copia a la receptora y
 > demultiplexado técnico transferirá, no copiará, la misma instancia.
@@ -250,84 +330,48 @@ con muestreo WGS básico separado de la evidencia final.
 ## 9. F4.5 — Demultiplexado técnico y FASTQ final
 
 - ☐ F4.5.1. Admitir índices simples, duales combinatorios y UDI, junto con
-  tasas, procedencia y política de combinaciones inesperadas.
-  - Depende de: PAUSA-DISEÑO-F4, F4.4.2 y DTPD-108 aprobada.
+  tasas, procedencia y descarte defensivo de combinaciones inesperadas.
+  - Depende de: PAUSA-DISEÑO-F4 y F4.4.2.
   - Procede de: REQ-CONF-78–81, REQ-DAT-29–32/70–71 y REQ-CONT-10–11.
   - Cambia: configuración de tanda, plan de demultiplexado y validación de
     colisiones; UDI permite reconocer y filtrar, sin asumir que elimina el
-    *index hopping*.
+    *index hopping*. El perfil inicial usa UDI y fija *index hopping* a cero.
+    Los UDI son configurables por biblioteca; sin ellos, la cabecera usa el
+    marcador neutro literal `0`. F4 no genera combinaciones UDI inesperadas;
+    si alguna alcanzara esta frontera se descarta defensivamente, y su modelo
+    explícito queda en DTF-025.
+    Una tasa no nula se sortea Bernoulli e independientemente por pareja de la
+    tanda; cada seleccionada se transfiere uniformemente a otra biblioteca y
+    exige al menos dos. Opera después de contaminación biológica, por lo que
+    puede transferir una pareja ya contaminante, e informa el recuento realizado
+    sin forzarlo al esperado. La transferencia no duplica contenido y la salida
+    recibe el identificador técnico local de la biblioteca final.
   - Se comprueba con: `cargo test --test f4_demultiplexing --locked`; tabla de
-    casos cubre traslado, no asignada, filtrada, UDI inesperado, conservación de
+    casos cubre traslado, descarte defensivo de UDI inesperado, conservación de
     tanda y colisión; puertas comunes.
 
-- ☐ F4.5.2. Publicar un único FASTQ final SE o una pareja final PE por
-  individuo/evento y el fichero de procedencia definido, con agregados para
-  descartadas/no asignadas.
-  - Depende de: F4.5.1 y DTPD-108 aprobada.
+- ☐ F4.5.2. Publicar una pareja final PE por individuo/evento y su resumen
+  agregado en manifiesto.
+  - Depende de: F4.5.1.
   - Procede de: REQ-DAT-17/33–36/40, REQ-RG-02/04/06, REQ-SAL-08/09,
     REQ-MAN-40–41 y REQ-NOF-08.
   - Cambia: `src/fastq_output.rs`, `src/fastq_validation.rs`,
-    `src/event_manifest.rs`, ensamblado y nuevo escritor de procedencia por
-    flujo. Mantiene gzip/BGZF, validación descomprimida, hash del comprimido y
-    no guarda versión limpia.
+    `src/event_manifest.rs` y ensamblado. Mantiene gzip/BGZF, validación
+    descomprimida, hash del comprimido y publica
+    `<individual_id>_R1.fastq.gz` y `<individual_id>_R2.fastq.gz`; no guarda
+    versión limpia ni procedencia individual.
   - Se comprueba con: `cargo test --test f4_final_fastq_provenance --locked`;
-    validador independiente comprueba FASTQ, pareja, hashes, IDs, vínculos y que
-    los descartes sólo tienen agregados; puertas comunes.
+    validador independiente comprueba FASTQ, pareja, hashes y resúmenes, y que
+    no se publica procedencia individual; puertas comunes.
 
-> **PAUSA-F4.5.** Revisar coherencia transversal FASTQ–procedencia–manifiesto y
+> **PAUSA-F4.5.** Revisar coherencia transversal FASTQ–resumen agregado–manifiesto y
 > que los descartes reducen cobertura final sin regeneración.
 
-## 10. F4.6 — Modo directo y alineamientos
+## 10. F4.6 — Aplazado
 
-- ☐ F4.6.1. Admitir modo realista/directo y categorías sintéticas, sin permitir
-  FASTQ externo o FASTQ obligatorio en directo.
-  - Depende de: PAUSA-DISEÑO-F4, DTPD-108 aprobada y contrato de salida de
-    DTPD-104 aprobado.
-  - Procede de: REQ-CONF-67–68/97–98/113, REQ-DAT-19–20/57–59/62/67,
-    REQ-CONT-12–13 y REQ-MAN-34/50.
-  - Cambia: admisión, configuración efectiva, categorías de alineamiento y
-    manifiesto; conserva origen/haplotipo y categoría aun cuando posición
-    observada difiera.
-  - Se comprueba con: `cargo test --test f4_direct_admission --locked`; rechaza
-    proporciones inválidas y FASTQ externo, y comprueba trazabilidad del modo;
-    puertas comunes.
-
-- ☐ F4.6.2. Generar registros directos internamente coherentes y validar sus
-  pares, quimeras, CIGAR, banderas, RNEXT/PNEXT, TLEN y MAPQ contra la categoría
-  acordada.
-  - Depende de: F4.6.1 y DTPD-104 aprobada.
-  - Procede de: REQ-DAT-57–59/62/67, REQ-VAL-07–08 y arquitectura §6.
-  - Cambia: nuevo adaptador de alineamiento directo, validador e informe;
-    no invoca mapeador ni crea FASTQ.
-  - Se comprueba con: `cargo test --test f4_direct_alignment --locked`; oráculo
-    SAM/BAM/CRAM independiente valida una muestra de cada categoría y pareja;
-    puertas comunes.
-
-- ☐ F4.6.3. Conectar el modo realista al adaptador de mapeador elegido y medir
-  cobertura/alineamiento observado sin sobrescribir MAPQ real.
-  - Depende de: F4.5.2, DTPD-104 y DTPD-105 aprobadas.
-  - Procede de: REQ-DAT-17/21–23/40/54–56/61/66, REQ-VAL-08 y REQ-MAN-34/36.
-  - Cambia: adaptador de proceso, conjuntos por referencia, validación y
-    manifiesto; usa exactamente FASTQ final, registra herramienta/versión/
-    parámetros y conserva no mapeadas.
-  - Se comprueba con: `cargo test --test f4_realistic_mapping --locked` y el
-    validador externo aprobado por DTPD-104/105; fixture de baja mapeabilidad
-    verifica que MAPQ procede del mapeador; puertas comunes.
-
-- ☐ F4.6.4. Comparar funcionalmente modos directo y realista sin exigir
-  identidad de decisiones o bytes.
-  - Depende de: F4.6.2–F4.6.3.
-  - Procede de: REQ-CONF-113, REQ-CONT-13, REQ-VAL-01–13 y REQ-MAN-34.
-  - Cambia: informe estructurado y prueba de concordancia; compara objetivos,
-    categorías/procedencia y medidas declaradas, preservando que el realista es
-    resultado del mapeador y el directo sintético.
-  - Se comprueba con: `cargo test --test f4_mode_concordance --locked`; caso
-    pequeño con misma semilla/configuración demuestra equivalencia funcional y
-    diferencias permitidas explícitas; puertas comunes.
-
-> **PAUSA-F4.6 / revisión de F4.** Aprobar perfiles y artefactos antes de F5.
-> Comprobar que toda degradación tiene causa trazada, afecta únicamente evidencia
-> técnica, y que el modo directo se etiqueta siempre como sintético.
+Los BAM/CRAM y el mapeo real quedan fuera de F4 en DTF-055. La revisión de F4
+termina tras F4.5: comprueba que toda degradación afecta únicamente al FASTQ y
+que el resumen agregado no contiene procedencia individual.
 
 ## 11. F4.7 — Calibración retirada de v1
 
@@ -351,10 +395,10 @@ con muestreo WGS básico separado de la evidencia final.
 |---|---|---|---|
 | F4.1 | Perfiles, identidades y pares | vectores de perfil/ID, verdad manual de fragmentos | pares huérfanos, perfil o tecnología implícitos |
 | F4.2 | Muestreo y errores cuantitativos | oráculo de cobertura, longitud, calidad y `N` | confundir cobertura básica/final o resolver `N` |
-| F4.3 | Artefactos WGS | casos independientes de duplicado, GC, adaptador, quimera y PE | degradación sin origen o alteración de verdad |
-| F4.4 | Contaminación biológica | oráculo de asignación conjunta y procedencia | copia/retirada equivocada, exceso o par roto |
-| F4.5 | Demultiplexado y FASTQ definitivo | lector independiente FASTQ+procedencia+manifiesto | pérdida de instancia, secuencias duplicadas o salida limpia extra |
-| F4.6 | Directo y mapeo real | validador de alineamiento y concordancia funcional | presentar sintético como mapeado o forzar MAPQ |
+| F4.3 | Rechazos de artefactos y quimeras | rechazos de perfil y oráculo de quimeras | aceptar modelo no calibrado o alterar verdad |
+| F4.4 | Contaminación biológica | oráculo de asignación conjunta y agregados | copia/retirada equivocada, exceso o par roto |
+| F4.5 | Demultiplexado y FASTQ definitivo | lector independiente FASTQ+agregados+manifiesto | pérdida de instancia, secuencias duplicadas o salida limpia extra |
+| F4.6 | Aplazado en DTF-055 | — | introducir BAM/CRAM o mapeo en F4 |
 | F4.7 | Rechazo de calibración retirada | fixtures de admisión negativa | introducir perfil empírico o salida no admitida |
 
 ## 13. Recursos y trabajo posterior

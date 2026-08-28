@@ -386,7 +386,7 @@ normativos y casos resistentes al reordenamiento.
 - ✅ C8. Auditar los diez REQ y cerrar únicamente la infraestructura demostrable de F1.3.
   - Depende de: C2–C7 y una configuración mínima validada de B.
   - Procede de: auditoría literal de los diez REQ inicialmente asignados a F1.3 y ACE-23.
-  - Cambia: matriz con 1 requisito superado, 3 trasladados a F1.5 y 6 reasignados a F4.6/F9.7; conserva nueve pruebas parciales sin presentarlas como simulación, manifiesto, lecturas o artefactos reales.
+  - Cambia: matriz con 1 requisito superado, 3 trasladados a F1.5 y 6 reasignados a F4.5/F5.6/F9.7; conserva nueve pruebas parciales sin presentarlas como simulación, manifiesto, lecturas o artefactos reales.
   - Se comprueba con: `cargo test --workspace --all-targets --locked`; vectores RNG repetidos, condiciones negativas y prueba completa de que una versión distinta no recibe garantía, distinguiendo esa infraestructura de los consumidores pendientes.
 
 ### Pausa obligatoria de revisión de F1.3

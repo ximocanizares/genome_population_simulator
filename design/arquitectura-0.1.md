@@ -493,12 +493,34 @@ F2 son representables y, por tanto, omiten `GPS_LOSS`, `GPS_COMPLEMENT` y el
 complemento. La cardinalidad positiva multicaso del complemento se definirá en
 F5.5 sobre un caso real con pérdida, no en F2.
 
-La **verdad técnica de lecturas** conserva el origen real de fragmentos,
-secuencias original y observada, errores, duplicados, contaminaciones,
-quimeras, descartes agregados y categoría sintética cuando corresponda. Esta
-verdad se deriva de la biológica y del evento técnico, pero no la sustituye.
-También distingue cobertura objetivo, WGS básica anterior a artefactos, final
-del FASTQ y alineada observada por referencia de mapeo.
+La **representación técnica transitoria de lecturas** usa durante la generación
+el origen de fragmentos, las secuencias original y observada y las
+transformaciones necesarias para construir cada pareja. Se descarta al terminar
+el flujo de esa pareja: no constituye una verdad técnica persistente ni una
+salida. El manifiesto conserva solo parámetros y recuentos agregados de
+errores, contaminaciones, quimeras y descartes. También distingue cobertura
+objetivo, WGS básica anterior a artefactos, final del FASTQ y, cuando exista
+mapeo, alineada observada por referencia.
+
+El flujo técnico de F4 es único: cobertura → fragmento → quimera opcional →
+calidad/error por mate → contaminación biológica → *index hopping* y
+demultiplexado → FASTQ y resumen. Cada sorteo deriva una subsemilla DTC-037 de
+identidades estables: fragmento y quimera por evento, biblioteca y ordinal de
+plantilla; calidad/error además por mate y ciclo; contaminación por receptora y
+pareja candidata; y *index hopping* por biblioteca actual y pareja técnica. No
+existe un RNG compartido entre etapas ni una identidad derivada del orden de
+iteración, hilo o escritura.
+
+Antes de emitir FASTQ, el planificador crea un **plan técnico temporal** de
+asignación: para cada plaza de salida conserva solo biblioteca final,
+identificador técnico final y clave de la pareja fuente. No contiene secuencias,
+calidades ni procedencia publicable y se descarta al cerrar el evento. El emisor
+recorre cada biblioteca final en orden canónico, regenera bajo demanda la pareja
+fuente a partir de su clave y subsemillas, aplica la asignación prevista y la
+escribe; después libera esa pareja. Una transferencia por *index hopping* mueve
+el contenido, no lo duplica, y recibe el identificador técnico local de su
+biblioteca final. Este recorrido evita conservar FASTQ limpios o una colección
+de lecturas en memoria.
 
 El alcance mínimo de los estados genotípicos completos depende de la vía:
 
@@ -574,8 +596,8 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 | Selección declarativa | Evaluar el catálogo común sobre verdad biológica | Reglas y elegibles → seleccionados y auditoría | No posee genotipos; posee evaluación y resultado de selección |
 | Muestreo y resúmenes | Crear observaciones no destructivas y ámbitos estadísticos | Generación y regla → muestra, resumen poblacional y muestral | Posee observaciones y resúmenes; consulta verdad e historial |
 | Orquestación de eventos | Validar salidas y parámetros condicionales y aislar cada observación | Observación/configuración → plan de evento y conjuntos | Posee estado del evento y relaciones entre artefactos; solo crea un plan técnico si procede |
-| Simulación WGS | Generar fragmentos e instancias de lectura desde haplotipos | Verdad, perfil y objetivo → lecturas con identidad y origen | Posee lecturas previas al demultiplexado y verdad técnica asociada |
-| Artefactos y demultiplexado | Convertir conjuntamente la contaminación y aplicar errores, duplicados, adaptadores y reasignaciones | Lecturas y configuración → FASTQ finales y procedencia | Posee transformaciones técnicas e identidades de instancia; consulta fuentes compatibles |
+| Simulación WGS | Generar fragmentos e instancias transitorias de lectura desde haplotipos | Verdad, perfil y objetivo → parejas transitorias | Posee solo las parejas necesarias durante el flujo y sus contadores agregados |
+| Artefactos y demultiplexado | Convertir conjuntamente la contaminación y aplicar las transformaciones técnicas admitidas | Parejas transitorias y configuración → FASTQ finales y resumen agregado | Posee transformaciones transitorias e identidades técnicas mientras son necesarias; consulta fuentes compatibles |
 | Alineamiento | Ejecutar el mapeador sobre el FASTQ final | FASTQ y referencia → alineamientos observados | Posee invocación, salida, diagnóstico y metadatos del proceso |
 | Alineamiento directo | Crear registros sintéticos coherentes sin FASTQ | Verdad y perfil directo → alineamientos sintéticos | Posee categorías y registros sintéticos; no llama a un mapeador |
 | Materialización de verdad | Aplicar el único contrato obligatorio de trazabilidad, proyectar/escribir/validar `truth.jsonl` y derivar después VCF/complemento | Estado faseado, historial y referencia de conjunto → `truth.jsonl`, vistas interoperables y resúmenes | No altera el dominio; posee esquemas por registro, escritor por flujo y validación semántica independiente; materializa el detalle exigido por vía sin niveles ni degradación |
@@ -682,7 +704,7 @@ exige que la persona usuaria los instale.
 | Muestreo y resúmenes | Duplicado, estratos solapados, tamaño excesivo o ámbito estadístico confundido | Comparar resumen poblacional y muestral y demostrar observación no destructiva |
 | Orquestación de eventos | Evento implícito, parámetro técnico indebido, tecnología múltiple, perfil o mapeador incompatible y referencia ajena | Construir eventos solo de verdad y eventos técnicos independientes, y comprobar requisitos condicionales y aislamiento |
 | Simulación WGS | Objetivo ausente/doble, perfil incompatible, identidad repetida o fragmento imposible | Comprobar recuentos, cobertura haploide, aporte por copia y muestreo de `N` con Phred 0 antes de sesgos |
-| Artefactos y demultiplexado | Conversión conjunta inviable, exceso de contaminación, colisión de identidad o par huérfano | Resolver una asignación entera conocida; reconstruir origen y diferencia verdadera/observada de cada lectura final, y comprobar agregados de descartes |
+| Artefactos y demultiplexado | Conversión conjunta inviable, exceso de contaminación, colisión de identidad o par huérfano | Resolver una asignación entera conocida; comprobar parejas, transformaciones transitorias y agregados de descartes, sin publicar ni reconstruir procedencia individual |
 | Alineamiento | Herramienta ausente, versión incompatible, código no cero o salida inválida | Sustituir el proceso externo y comprobar comando, contexto y propagación de cada fallo |
 | Alineamiento directo | Proporciones, MAPQ, banderas, CIGAR o pares incoherentes | Generar un caso por categoría y validarlo contra la referencia y verdad de origen |
 | Materialización de verdad | VCF no conforme, SNP con `REF=N`, alelo no reconstruible, cardinalidad ambigua, enlace roto o pérdida de fase | Validar casos sin/con complemento, BND, dos referencias y cambios con `N`; reconstruir cada caso enlazado sin inventar una base y compararlo con la verdad canónica |
