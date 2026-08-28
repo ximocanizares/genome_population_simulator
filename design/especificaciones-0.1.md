@@ -3514,6 +3514,14 @@ a una probabilidad mayor de error.
   FASTQ finales después de aplicar la contaminación biológica y los errores de
   demultiplexado, y usar exactamente sus lecturas para generar los BAM o CRAM.
   No debe reconstruir esos FASTQ a partir de los archivos de alineamiento.
+  En F3.1, cada FASTQ final *single-end* se publica como
+  `outputs/fastq/<event_id>/<individual_id>.fastq.gz`: gzip en el perfil BGZF
+  v1, con DEFLATE nivel 6, bloques fijos y `MTIME = 0`. Su tamaño y SHA-256 se
+  calculan sobre los bytes comprimidos finales; la comprobación de formato,
+  IDs, secuencias y calidades relee por flujo los registros descomprimidos antes
+  de la publicación atómica. Esta fijación solo hace repetibles los bytes bajo
+  el mismo simulador, lock y plataforma admitida; no amplía la garantía general
+  de identidad binaria de REQ-REP-23/DTC-038.
 - **REQ-DAT-18.** Los FASTQ del modo realista deben conservar la secuencia, la
   calidad, el identificador de cada lectura y su emparejamiento cuando exista.
   El sistema debe conservar los mismos identificadores y pares al mapearlos y no

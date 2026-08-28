@@ -78,7 +78,7 @@ fn each_selected_library_has_one_canonical_fastq_result() {
     let mut repeated = duplicate["artifacts"][0].clone();
     repeated["id"] = json!("fastq-duplicate");
     repeated["artifact"]["id"] = json!("fastq-duplicate");
-    repeated["artifact"]["path"] = json!("outputs/fastq/reads-main/duplicate.fastq");
+    repeated["artifact"]["path"] = json!("outputs/fastq/reads-main/duplicate.fastq.gz");
     duplicate["artifacts"]
         .as_array_mut()
         .expect("artifacts")
@@ -97,7 +97,7 @@ fn each_selected_library_has_one_canonical_fastq_result() {
     second["individual_id"] = json!("sample-B");
     second["library_id"] = json!("LIB_sample-B");
     second["artifact"]["id"] = json!("fastq-sample-B");
-    second["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-B.fastq");
+    second["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-B.fastq.gz");
     two_libraries["artifacts"]
         .as_array_mut()
         .expect("artifacts")
@@ -108,6 +108,33 @@ fn each_selected_library_has_one_canonical_fastq_result() {
         .expect("artifacts")
         .reverse();
     assert!(validate_document(&two_libraries).is_err());
+}
+
+#[test]
+fn complete_fastq_path_has_the_canonical_shape_and_correlates_to_its_event_and_individual() {
+    let root = temporary("fastq-path");
+    fs::create_dir_all(&root).expect("test directory");
+    let (manifest, _) = complete_manifest();
+    let document = event_manifest_document(&manifest).expect("event document");
+
+    let mut malformed_shape = document.clone();
+    malformed_shape["artifacts"][0]["artifact"]["path"] =
+        json!("outputs/fastq/reads-main/nested/sample-A.fastq.gz");
+    assert_rejected_by_both(&root, "malformed-fastq-path", &malformed_shape);
+
+    let mut wrong_event = document;
+    wrong_event["artifacts"][0]["artifact"]["path"] =
+        json!("outputs/fastq/other-event/sample-A.fastq.gz");
+    assert!(validate_document(&wrong_event).is_err());
+    let wrong_event_path = root.join("wrong-event-fastq-path.json");
+    fs::write(
+        &wrong_event_path,
+        serde_json::to_vec(&wrong_event).expect("JSON"),
+    )
+    .expect("test document");
+    assert_external(&wrong_event_path, true);
+
+    fs::remove_dir_all(root).expect("cleanup");
 }
 
 #[test]
@@ -185,7 +212,7 @@ fn complete_manifest() -> (EventManifest<'static>, &'static str) {
     let fastq = Box::leak(Box::new(record(
         artifact_id,
         "fastq",
-        "outputs/fastq/reads-main/sample-A.fastq",
+        "outputs/fastq/reads-main/sample-A.fastq.gz",
         DIGEST_B,
     )));
     let artifacts = Box::leak(Box::new([EventManifestArtifact {

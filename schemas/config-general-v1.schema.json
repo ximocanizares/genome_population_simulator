@@ -73,7 +73,7 @@
     },
     "technical_event": {
       "$ref": "#/$defs/technical_event",
-      "description": "Único evento F3 de FASTQ Illumina single-end mínimo."
+      "description": "Único evento F3 de FASTQ Illumina single-end mínimo; cada salida final se publica como gzip/BGZF .fastq.gz."
     },
     "vcf_output": {
       "type": "object",

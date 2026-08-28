@@ -5,9 +5,10 @@
 //! registro FASTQ contra esa vista de solo lectura del estado haplotípico.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use noodles_bgzf as bgzf;
 use sha2::{Digest, Sha256};
 
 use crate::application::{
@@ -23,8 +24,14 @@ use crate::results::ArtifactRecord;
 use crate::technical_identity::TechnicalIdentityPlan;
 use crate::technical_identity::TemplateOrdinal;
 
-const FASTQ_BUFFER_CAPACITY: usize = 64 * 1024;
 const WGS_READ_LENGTH: u64 = ILLUMINA_SE_MINIMAL_READ_LENGTH as u64;
+/// § 4.1.2 de la especificación BGZF (2020-12-03). El lector BGZF acepta un
+/// final truncado como EOF, por lo que la frontera de validación debe exigir
+/// físicamente este marcador canónico completo.
+const BGZF_EOF_MARKER: [u8; 28] = [
+    0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43, 0x02, 0x00,
+    0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
 
 /// Desviación observada de cobertura WGS. Es una observación estadística y no
 /// una política de aceptación: una desviación nunca convierte por sí sola el
@@ -172,13 +179,18 @@ pub fn validate_wgs_fastq(
     validate_declared_artifact(expected_artifact, identities, individual)?;
     let expected_count = replay.read_count;
     let haploid_eligible_length = replay.haploid_eligible_length;
-    let file = File::open(fastq_path).map_err(|error| io_error(fastq_path, "open", error))?;
-    let mut reader = BufReader::with_capacity(FASTQ_BUFFER_CAPACITY, file);
+    let mut file = File::open(fastq_path).map_err(|error| io_error(fastq_path, "open", error))?;
+    validate_canonical_bgzf_eof(&mut file, fastq_path, expected_count)?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| io_error(fastq_path, "rewind_after_eof_check", error))?;
+    // BGZF es un perfil gzip interoperable. Su lector verifica cada bloque
+    // comprimido y expone el FASTQ descomprimido sin acumularlo ni envolverlo
+    // en otro búfer, que su contrato prohíbe.
+    let mut reader = bgzf::io::Reader::new(HashingReader::new(file));
     let mut header = Vec::with_capacity(64);
     let mut sequence = Vec::with_capacity(usize::from(ILLUMINA_SE_MINIMAL_READ_LENGTH) + 1);
     let mut plus = Vec::with_capacity(2);
     let mut qualities = Vec::with_capacity(usize::from(ILLUMINA_SE_MINIMAL_READ_LENGTH) + 1);
-    let mut stream_digest = StreamDigest::default();
     let mut unknown_base_count = 0_u64;
 
     for ordinal in 0..expected_count {
@@ -198,7 +210,6 @@ pub fn validate_wgs_fastq(
             ordinal,
             "header",
             header_maximum,
-            &mut stream_digest,
         )?;
         read_line(
             &mut reader,
@@ -207,17 +218,8 @@ pub fn validate_wgs_fastq(
             ordinal,
             "sequence",
             usize::from(ILLUMINA_SE_MINIMAL_READ_LENGTH) + 1,
-            &mut stream_digest,
         )?;
-        read_line(
-            &mut reader,
-            &mut plus,
-            fastq_path,
-            ordinal,
-            "separator",
-            2,
-            &mut stream_digest,
-        )?;
+        read_line(&mut reader, &mut plus, fastq_path, ordinal, "separator", 2)?;
         read_line(
             &mut reader,
             &mut qualities,
@@ -225,7 +227,6 @@ pub fn validate_wgs_fastq(
             ordinal,
             "quality",
             usize::from(ILLUMINA_SE_MINIMAL_READ_LENGTH) + 1,
-            &mut stream_digest,
         )?;
         unknown_base_count = validate_record(
             fastq_path,
@@ -251,6 +252,11 @@ pub fn validate_wgs_fastq(
         });
     }
 
+    // La identidad se actualiza desde el mismo descriptor que alimentó al
+    // lector BGZF y se cierra solo después de alcanzar su EOF. Así no puede
+    // asociarse la semántica de una versión con el SHA-256 de otra apertura.
+    let (observed_size_bytes, observed_digest) = reader.into_inner().finish();
+
     let base_count = expected_count
         .checked_mul(WGS_READ_LENGTH)
         .ok_or(FastqValidationError::CounterOverflow)?;
@@ -262,14 +268,12 @@ pub fn validate_wgs_fastq(
     let absolute_deviation = target_coverage.map(|value| (realized_coverage - value).abs());
     let relative_deviation = target_coverage
         .and_then(|value| (value != 0.0).then(|| (realized_coverage - value).abs() / value.abs()));
-    let (observed_size_bytes, observed_digest) = stream_digest.finish();
     validate_observed_artifact(
         expected_artifact,
         fastq_path,
         observed_size_bytes,
         &observed_digest,
     )?;
-
     Ok(FastqValidationReport {
         fastq_sha256: observed_digest,
         read_count: expected_count,
@@ -292,7 +296,6 @@ fn read_line(
     ordinal: u64,
     field: &'static str,
     maximum_length: usize,
-    stream_digest: &mut StreamDigest,
 ) -> Result<(), FastqValidationError> {
     line.clear();
     loop {
@@ -337,7 +340,6 @@ fn read_line(
             },
         });
     }
-    stream_digest.update(line)?;
     Ok(())
 }
 
@@ -345,6 +347,69 @@ fn read_line(
 struct StreamDigest {
     hasher: Sha256,
     size_bytes: u64,
+}
+
+struct HashingReader<R> {
+    inner: R,
+    digest: StreamDigest,
+}
+
+impl<R> HashingReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            digest: StreamDigest::default(),
+        }
+    }
+
+    fn finish(self) -> (u64, String) {
+        self.digest.finish()
+    }
+}
+
+impl<R: Read> Read for HashingReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+        self.digest.update(&buffer[..read]).map_err(|error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
+        })?;
+        Ok(read)
+    }
+}
+
+fn validate_canonical_bgzf_eof(
+    file: &mut File,
+    path: &Path,
+    expected_count: u64,
+) -> Result<(), FastqValidationError> {
+    let size = file
+        .metadata()
+        .map_err(|error| io_error(path, "metadata_eof_marker", error))?
+        .len();
+    let marker_length =
+        u64::try_from(BGZF_EOF_MARKER.len()).map_err(|_| FastqValidationError::CounterOverflow)?;
+    if size < marker_length {
+        return Err(missing_canonical_eof(path, expected_count));
+    }
+    file.seek(SeekFrom::End(
+        -i64::try_from(marker_length).map_err(|_| FastqValidationError::CounterOverflow)?,
+    ))
+    .map_err(|error| io_error(path, "seek_eof_marker", error))?;
+    let mut observed = [0_u8; BGZF_EOF_MARKER.len()];
+    file.read_exact(&mut observed)
+        .map_err(|error| io_error(path, "read_eof_marker", error))?;
+    if observed != BGZF_EOF_MARKER {
+        return Err(missing_canonical_eof(path, expected_count));
+    }
+    Ok(())
+}
+
+fn missing_canonical_eof(path: &Path, record_ordinal: u64) -> FastqValidationError {
+    FastqValidationError::Structural {
+        path: path.display().to_string(),
+        record_ordinal,
+        detail: "FASTQ BGZF stream is missing its canonical EOF marker",
+    }
 }
 
 impl StreamDigest {

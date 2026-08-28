@@ -1,5 +1,7 @@
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::EffectiveTechnicalEventTarget;
@@ -13,8 +15,13 @@ use genome_population_simulator::reference::{
 };
 use genome_population_simulator::technical_identity::derive_technical_identity_plan;
 use genome_population_simulator::wgs_sampling::WgsLibrarySampler;
+use noodles_bgzf as bgzf;
 
 const ROOT: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+const BGZF_EOF_MARKER: [u8; 28] = [
+    0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43, 0x02, 0x00,
+    0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
 static TEMPORARY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn temporary(name: &str) -> PathBuf {
@@ -62,7 +69,7 @@ fn plan(
     .expect("technical identities")
 }
 
-fn artifact_bytes(root: &Path, destination: &Path, relative_path: &str) -> Vec<u8> {
+fn artifact_path(root: &Path, destination: &Path, relative_path: &str) -> PathBuf {
     let destination_name = destination
         .file_name()
         .expect("destination name")
@@ -77,7 +84,18 @@ fn artifact_bytes(root: &Path, destination: &Path, relative_path: &str) -> Vec<u
             })
         })
         .expect("workspace provisional");
-    fs::read(provisional.join("payload").join(relative_path)).expect("FASTQ artifact")
+    provisional.join("payload").join(relative_path)
+}
+
+fn artifact_bytes(root: &Path, destination: &Path, relative_path: &str) -> Vec<u8> {
+    fs::read(artifact_path(root, destination, relative_path)).expect("FASTQ artifact")
+}
+
+fn decompress_bgzf(bytes: &[u8]) -> Vec<u8> {
+    let mut reader = bgzf::io::Reader::new(bytes);
+    let mut uncompressed = Vec::new();
+    reader.read_to_end(&mut uncompressed).expect("decode BGZF");
+    uncompressed
 }
 
 fn reverse_complement(sequence: &[u8]) -> Vec<u8> {
@@ -118,7 +136,26 @@ fn fastq_stream_preserves_literal_unknown_bases_technical_ids_and_phred_values()
     let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
 
     let publication = write_wgs_fastq(&mut workspace, &mut sampler).expect("FASTQ");
-    let bytes = artifact_bytes(&root, &destination, &publication.artifact().path);
+    let compressed = artifact_bytes(&root, &destination, &publication.artifact().path);
+    assert!(publication.artifact().path.ends_with(".fastq.gz"));
+    assert_eq!(&compressed[..3], &[0x1f, 0x8b, 0x08]);
+    assert!(compressed.ends_with(&BGZF_EOF_MARKER));
+    assert!(
+        !compressed[..compressed.len() - BGZF_EOF_MARKER.len()].ends_with(&BGZF_EOF_MARKER),
+        "the BGZF writer must consume its finish result, not emit a second EOF on drop"
+    );
+    let bytes = decompress_bgzf(&compressed);
+    let external = Command::new("gzip")
+        .arg("-cd")
+        .arg(artifact_path(
+            &root,
+            &destination,
+            &publication.artifact().path,
+        ))
+        .output()
+        .expect("gzip decoder available on the supported platform");
+    assert!(external.status.success(), "gzip -cd: {:?}", external.stderr);
+    assert_eq!(external.stdout, bytes, "standard gzip decodes the FASTQ");
     let library = plan.library(individual.id()).expect("library");
     let expected_header = format!("@TPL_{}_0\n", library.library_id().as_str());
     let expected_forward = bases;
@@ -171,8 +208,9 @@ fn fastq_bytes_are_reproducible_and_the_stream_keeps_only_aggregate_output_state
         assert_eq!(publication.base_count(), 7 * 150);
         assert_eq!(sampler.resident_candidate_count(), candidates);
         let bytes = artifact_bytes(&root, &destination, &publication.artifact().path);
+        let decompressed = decompress_bgzf(&bytes);
         let library = plan.library(individual.id()).expect("library");
-        let headers = bytes
+        let headers = decompressed
             .split_inclusive(|byte| *byte == b'\n')
             .step_by(4)
             .collect::<Vec<_>>();

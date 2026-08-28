@@ -837,7 +837,7 @@ mod tests {
                     "fastq",
                     &PathBuf::from("outputs/fastq")
                         .join(event.event_id().as_str())
-                        .join(format!("{}.fastq", library.individual_id().as_str())),
+                        .join(format!("{}.fastq.gz", library.individual_id().as_str())),
                     b"@read\nA\n+\nI\n",
                 )
             })

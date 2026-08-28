@@ -7,6 +7,15 @@ mínimo, tanda, bibliotecas, referencia común y FASTQ. Las rutas de los fichero
 enlazados son relativas a la raíz de la ejecución; el ensamblado y el enlace
 desde `manifest.json` general pertenecen a F3.5.3.
 
+Cada resultado `complete` de FASTQ usa la ruta
+`outputs/fastq/<event_id>/<individual_id>.fastq.gz`. Es un flujo gzip en el
+perfil BGZF v1, con DEFLATE nivel 6 y bloques de tamaño fijo; sus bytes se
+identifican por el tamaño y SHA-256 del fichero comprimido. Antes de publicarlo
+atómicamente, el simulador relee y valida el FASTQ descomprimido por flujo. El
+perfil fija `MTIME = 0`; por tanto los bytes se repiten con el mismo simulador,
+lock y plataforma admitida, sin extender la garantía general de identidad
+binaria de DTC-038 a otras condiciones.
+
 La v1 no modela conjuntos de mapeo, mapeadores, sesiones, paquetes exportables
 ni procedencia durable por lectura. Un artefacto `complete` conserva su ruta,
 tamaño y SHA-256; uno `incomplete` o `failed` no inventa una identidad física y

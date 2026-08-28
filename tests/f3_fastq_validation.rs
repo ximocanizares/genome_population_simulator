@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -20,6 +21,7 @@ use genome_population_simulator::segments::CanonicalBase;
 use genome_population_simulator::snp_application::{ApplicableSnp, TargetedSnp, apply_snps};
 use genome_population_simulator::technical_identity::derive_technical_identity_plan;
 use genome_population_simulator::wgs_sampling::WgsLibrarySampler;
+use noodles_bgzf as bgzf;
 
 const ROOT: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 static TEMPORARY_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -207,7 +209,24 @@ fn write_independent_unknown_fastq(
         bytes.extend(std::iter::repeat_n(b'!', 150));
         bytes.extend_from_slice(b"\n");
     }
-    fs::write(path, bytes).expect("independent FASTQ fixture");
+    write_gzip_fastq(path, &bytes);
+}
+
+fn write_gzip_fastq(path: &Path, bytes: &[u8]) {
+    let file = fs::File::create(path).expect("FASTQ gzip fixture");
+    let mut writer = bgzf::io::Writer::new(file);
+    writer.write_all(bytes).expect("compress FASTQ fixture");
+    writer.finish().expect("finish FASTQ gzip fixture");
+}
+
+fn read_gzip_fastq(path: &Path) -> Vec<u8> {
+    let file = fs::File::open(path).expect("FASTQ gzip fixture");
+    let mut reader = bgzf::io::Reader::new(file);
+    let mut bytes = Vec::new();
+    reader
+        .read_to_end(&mut bytes)
+        .expect("decompress FASTQ fixture");
+    bytes
 }
 
 fn expected_artifact(
@@ -247,7 +266,7 @@ fn validation_replays_synthetic_truth_and_reports_coverage_without_a_tolerance()
         .expect("sampler")
         .plan()
         .read_count();
-    let fastq_path = root.join("independent.fastq");
+    let fastq_path = root.join("independent.fastq.gz");
     write_independent_unknown_fastq(&fastq_path, &individual, &identities, count);
     let artifact = expected_artifact(&fastq_path, &identities, &individual);
 
@@ -260,7 +279,7 @@ fn validation_replays_synthetic_truth_and_reports_coverage_without_a_tolerance()
         target,
     )
     .expect("valid FASTQ");
-    assert_eq!(report.fastq_sha256().len(), 64);
+    assert_eq!(report.fastq_sha256(), artifact.digest);
     assert_eq!(report.verified_origin_count(), report.read_count());
     assert_eq!(report.base_count(), report.read_count() * 150);
     assert_eq!(report.unknown_base_count(), report.read_count() * 150);
@@ -283,7 +302,7 @@ fn structural_mutations_of_id_origin_sequence_and_quality_fail_without_repairing
         &identities,
         EffectiveTechnicalEventTarget::ReadCount(1),
     );
-    let original = fs::read(&fastq_path).expect("FASTQ bytes");
+    let original = read_gzip_fastq(&fastq_path);
     let header_end = original
         .iter()
         .position(|base| *base == b'\n')
@@ -346,7 +365,7 @@ fn structural_mutations_of_id_origin_sequence_and_quality_fail_without_repairing
             "FASTQ line exceeds the minimal profile bound",
         ),
     ] {
-        fs::write(&fastq_path, &bytes).expect("mutate only test artifact");
+        write_gzip_fastq(&fastq_path, &bytes);
         let error = validate_wgs_fastq(
             &fastq_path,
             &artifact,
@@ -396,8 +415,8 @@ IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII!IIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
     .collect::<Vec<_>>();
     assert_eq!(origins, vec![98, 57, 101]);
     assert!(origins.iter().any(|start| *start != 0));
-    let fastq_path = root.join("frozen.fastq");
-    fs::write(&fastq_path, FROZEN_FASTQ).expect("frozen FASTQ");
+    let fastq_path = root.join("frozen.fastq.gz");
+    write_gzip_fastq(&fastq_path, FROZEN_FASTQ);
     let artifact = expected_artifact(&fastq_path, &identities, &individual);
 
     let report = validate_wgs_fastq(
@@ -427,7 +446,7 @@ fn validation_rejects_missing_extra_truncated_and_malformed_records() {
         &identities,
         EffectiveTechnicalEventTarget::ReadCount(1),
     );
-    let valid = fs::read(&fastq_path).expect("FASTQ bytes");
+    let valid = read_gzip_fastq(&fastq_path);
     let header_end = valid
         .iter()
         .position(|base| *base == b'\n')
@@ -478,7 +497,7 @@ fn validation_rejects_missing_extra_truncated_and_malformed_records() {
             "FASTQ quality length does not match the minimal profile",
         ),
     ] {
-        fs::write(&fastq_path, bytes).expect("mutate only test artifact");
+        write_gzip_fastq(&fastq_path, &bytes);
         let error = validate_wgs_fastq(
             &fastq_path,
             &artifact,
@@ -500,7 +519,7 @@ fn validation_rejects_missing_extra_truncated_and_malformed_records() {
             other => panic!("{name}: expected structural error, found {other:?}"),
         }
     }
-    fs::write(&fastq_path, &valid).expect("restore one-record FASTQ");
+    write_gzip_fastq(&fastq_path, &valid);
     let error = validate_wgs_fastq(
         &fastq_path,
         &artifact,
@@ -515,6 +534,42 @@ fn validation_rejects_missing_extra_truncated_and_malformed_records() {
         FastqValidationError::Structural {
             record_ordinal: 1,
             detail: "FASTQ header line is truncated",
+            ..
+        }
+    ));
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn validation_rejects_a_physically_truncated_bgzf_eof_marker() {
+    let root = temporary("truncated-bgzf-eof");
+    let reference = reference();
+    let individual = truth_state(&reference);
+    let identities = identities(&reference, &individual);
+    let (fastq_path, artifact) = write_fastq(
+        &root,
+        &reference,
+        &individual,
+        &identities,
+        EffectiveTechnicalEventTarget::ReadCount(1),
+    );
+    let mut bytes = fs::read(&fastq_path).expect("compressed FASTQ");
+    bytes.truncate(bytes.len() - 15);
+    fs::write(&fastq_path, bytes).expect("truncated compressed FASTQ");
+
+    let error = validate_wgs_fastq(
+        &fastq_path,
+        &artifact,
+        &reference,
+        &individual,
+        &identities,
+        EffectiveTechnicalEventTarget::ReadCount(1),
+    )
+    .expect_err("a partial BGZF EOF marker must not be accepted as end of input");
+    assert!(matches!(
+        error,
+        FastqValidationError::Structural {
+            detail: "FASTQ BGZF stream is missing its canonical EOF marker",
             ..
         }
     ));
@@ -595,7 +650,7 @@ fn validation_binds_exact_artifact_record_and_opening_errors() {
         }
     }
     let error = validate_wgs_fastq(
-        &root.join("missing.fastq"),
+        &root.join("missing.fastq.gz"),
         &artifact,
         &reference,
         &individual,

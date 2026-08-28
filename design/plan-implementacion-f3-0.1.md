@@ -113,12 +113,15 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
   - Depende de: F3.1.3.
   - Procede de: REQ-DAT-17–18/72–73, REQ-RG-06, REQ-SAL-08–09, DTC-007/031–032 y arquitectura §6.3.
   - Cambia: escritor temporal y comprobación interna de un grupo por
-    individuo/evento; emite, comprueba y descarta una lectura cada vez. Conserva
-    solo contadores agregados y hashes; nunca reconstruye FASTQ desde
-    alineamientos.
+    individuo/evento; emite, comprueba y descarta una lectura cada vez. El
+    resultado físico v1 es `.fastq.gz` gzip/BGZF, con DEFLATE nivel 6, bloques
+    BGZF y `MTIME = 0`; conserva solo contadores agregados y hashes de los bytes
+    comprimidos finales, y nunca reconstruye FASTQ desde alineamientos. La
+    validación relee por flujo el contenido descomprimido antes de publicarlo.
   - Se comprueba con: cargo test --test f3_fastq_output --locked; fixture con N
     interior/terminal confirma base literal, Phred 0, número/ID, uso constante
-    de memoria y correspondencia con verdad sintética; puertas comunes.
+    de memoria, hash de bytes finales y correspondencia con verdad sintética;
+    `gzip -cd` independiente confirma interoperabilidad; puertas comunes.
 
 > **PAUSA-F3.1.** Confirmar que FASTQ procede de haplotipos faseados, cobertura no incorpora ploidía y no hay mapeador, perfiles, degradaciones, escenarios o persistencia general.
 

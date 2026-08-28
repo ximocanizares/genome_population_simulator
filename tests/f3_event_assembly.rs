@@ -64,11 +64,11 @@ fn complete_execution_assembles_and_links_the_validated_event_manifest() {
     }
     validate_published_event_manifests(&destination, &manifest_path, &manifest_bytes)
         .expect("physical event link");
-    let stray_path = destination.join("outputs/fastq/reads-main/stray.fastq");
+    let stray_path = destination.join("outputs/fastq/reads-main/stray.fastq.gz");
     fs::write(&stray_path, b"@stray\nA\n+\nI\n").expect("stray FASTQ");
     let stray_identity = identify_file(
         &stray_path,
-        Path::new("outputs/fastq/reads-main/stray.fastq"),
+        Path::new("outputs/fastq/reads-main/stray.fastq.gz"),
     )
     .expect("stray identity");
     let mut with_stray = manifest.clone();
@@ -78,7 +78,7 @@ fn complete_execution_assembles_and_links_the_validated_event_manifest() {
         .push(serde_json::json!({
             "id": "fastq-stray",
             "kind": "fastq",
-            "path": "outputs/fastq/reads-main/stray.fastq",
+            "path": "outputs/fastq/reads-main/stray.fastq.gz",
             "size_bytes": stray_identity.size_bytes(),
             "checksum": {"algorithm": "sha256", "digest": stray_identity.digest()},
         }));
@@ -159,7 +159,7 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
         .write_artifact(
             &format!("fastq-{}", library.library_id().as_str()),
             "fastq",
-            Path::new("outputs/fastq/reads-main/sample-A.fastq"),
+            Path::new("outputs/fastq/reads-main/sample-A.fastq.gz"),
             b"@read\nA\n+\nI\n",
         )
         .expect("closed independent FASTQ");

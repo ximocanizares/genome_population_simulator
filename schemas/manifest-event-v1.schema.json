@@ -67,6 +67,22 @@
         "checksum": { "$ref": "#/$defs/checksum" }
       }
     },
+    "fastq_artifact": {
+      "allOf": [
+        { "$ref": "#/$defs/artifact" },
+        {
+          "properties": {
+            "path": {
+              "allOf": [
+                { "$ref": "#/$defs/relative_path" },
+                { "pattern": "^outputs/fastq/[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\.fastq\\.gz$" }
+              ]
+            }
+          },
+          "required": ["path"]
+        }
+      ]
+    },
     "profile": {
       "type": "object", "additionalProperties": false,
       "required": ["id", "read_length", "quality"],
@@ -118,7 +134,7 @@
         "diagnostic_code": { "oneOf": [{ "$ref": "#/$defs/diagnostic_code" }, { "type": "null" }] }
       },
       "allOf": [
-        { "if": { "properties": { "state": { "const": "complete" } }, "required": ["state"] }, "then": { "properties": { "artifact": { "$ref": "#/$defs/artifact" }, "diagnostic_code": { "type": "null" } } } },
+        { "if": { "properties": { "state": { "const": "complete" } }, "required": ["state"] }, "then": { "properties": { "artifact": { "$ref": "#/$defs/fastq_artifact" }, "diagnostic_code": { "type": "null" } } } },
         { "if": { "properties": { "state": { "enum": ["incomplete", "failed"] } }, "required": ["state"] }, "then": { "properties": { "artifact": { "type": "null" }, "diagnostic_code": { "$ref": "#/$defs/diagnostic_code" } } } }
       ]
     }

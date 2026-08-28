@@ -295,6 +295,19 @@ de posición para la relectura y consulta regional local del índice ya escrito;
 no cambia el grafo de `Cargo.lock`, no abre una frontera pública ni añade una
 biblioteca nativa o un validador externo.
 
+**Ampliación F3.1.4 (28 de agosto de 2026).** La salida FASTQ comprimida
+reutiliza `noodles-bgzf = 0.47.0`, ya dependencia directa aprobada, mediante un
+adaptador privado de escritura y lectura por flujo. No cambia `Cargo.toml`,
+`Cargo.lock`, sus *features*, el grafo, licencias, scripts ni superficie nativa
+ya evaluados. BGZF es un perfil de gzip interoperable: se fija DEFLATE nivel 6,
+el tamaño de bloque de la versión bloqueada y `MTIME = 0`; los SHA-256 y tamaños
+se calculan sobre los bytes `.fastq.gz` finales, mientras el contrato FASTQ se
+valida tras descompresión en una frontera distinta. La prueba usa `gzip -cd`
+como decodificador independiente de interoperabilidad. Este uso no incorpora
+índices BGZF, paralelismo ni una opción de compresión configurable; la
+repetibilidad binaria queda condicionada por el simulador, lock y plataforma
+admitida, como exige DTC-038.
+
 - **Estándar, API y mantenimiento:** `noodles-vcf` implementa el escritor VCF
   y declara `FileFormat::new(4, 5)`; `noodles-tabix` y `noodles-csi` escriben
   los índices TBI y CSI, y `noodles-bgzf` finaliza el flujo BGZF. La fuente

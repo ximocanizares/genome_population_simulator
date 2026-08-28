@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 
 use crate::application::EffectiveTechnicalEvent;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
+use crate::fastq_output::fastq_relative_path;
 use crate::identity::{EventId, IndividualId, LibraryId, ReadGroupId, ReferenceId};
 use crate::results::{ArtifactRecord, UnitState, json_document_bytes, validate_relative_link};
 use crate::technical_identity::TechnicalIdentityPlan;
@@ -169,13 +170,13 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
     let diagnostics = validate_diagnostics(required_value(root, "diagnostics", path)?, path)?;
     let artifact_states = validate_artifacts(
         required_value(root, "artifacts", path)?,
+        &event_id,
         &selected,
         &reference,
         &diagnostics,
         path,
     )?;
     validate_event_state(state, &artifact_states, &diagnostics, path)?;
-    let _ = event_id;
     Ok(())
 }
 
@@ -263,6 +264,11 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
                 if artifact.diagnostic.is_some()
                     || record.id != artifact.id
                     || record.kind != artifact.kind
+                    || record.path
+                        != fastq_relative_path(
+                            manifest.event.event_id().as_str(),
+                            artifact.individual_id.as_str(),
+                        )
                 {
                     return Err(event_error(&path, "artefacto completo incoherente"));
                 }
@@ -413,6 +419,7 @@ fn validate_diagnostics(value: &Value, path: &Path) -> Result<BTreeSet<String>, 
 
 fn validate_artifacts(
     value: &Value,
+    event_id: &EventId,
     selected: &BTreeMap<String, String>,
     reference: &ArtifactRecord,
     diagnostics: &BTreeSet<String>,
@@ -470,6 +477,7 @@ fn validate_artifacts(
                     validate_artifact(required_non_null(artifact, "artifact", path)?, path)?;
                 if record.id != id
                     || record.kind != kind
+                    || record.path != fastq_relative_path(event_id.as_str(), individual)
                     || !paths.insert(record.path.clone())
                     || record.id == reference.id
                     || record.path == reference.path

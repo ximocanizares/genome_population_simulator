@@ -5,7 +5,7 @@
 //! catálogo de artefactos de `ExecutionWorkspace` y dos contadores agregados.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{BufRead, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::application::{
@@ -16,9 +16,21 @@ use crate::identity::{LibraryId, compose_template_id};
 use crate::publication::ExecutionWorkspace;
 use crate::results::ArtifactRecord;
 use crate::wgs_sampling::{WGS_READ_LENGTH, WgsLibrarySampler, WgsSamplingError};
+use noodles_bgzf as bgzf;
 
 pub const FASTQ_ARTIFACT_KIND: &str = "fastq";
 const FASTQ_BUFFER_CAPACITY: usize = 64 * 1024;
+/// Perfil físico fijo de FASTQ comprimido v1: BGZF, que es un flujo gzip
+/// interoperable, con DEFLATE nivel 6. BGZF fija `MTIME = 0` y el tamaño de
+/// bloque, para que los bytes sean repetibles bajo el lock y la plataforma
+/// admitidos.
+const FASTQ_GZIP_COMPRESSION_LEVEL: u8 = 6;
+/// § 4.1.2 de la especificación BGZF (2020-12-03). `noodles-bgzf` lo emite
+/// al terminar el escritor, pero su constante no forma parte de la API pública.
+const BGZF_EOF_MARKER: [u8; 28] = [
+    0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43, 0x02, 0x00,
+    0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+];
 
 /// Artefacto FASTQ final de la única biblioteca de un individuo en F3.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -48,9 +60,10 @@ impl FastqPublication {
 /// Materializa un FASTQ single-end final para una biblioteca WGS.
 ///
 /// Cada lectura se materializa, se escribe y se descarta dentro del mismo
-/// ciclo. El temporal se relee antes de calcular SHA-256 y renombrarlo como
-/// artefacto del provisional, comprobando el formato, el contador y cada ID y
-/// calidad canónicos.
+/// ciclo. El temporal gzip/BGZF se cierra y se relee descomprimido antes de
+/// calcular SHA-256 sobre sus bytes comprimidos y renombrarlo como artefacto
+/// del provisional, comprobando el formato, el contador y cada ID y calidad
+/// canónicos.
 pub fn write_wgs_fastq(
     workspace: &mut ExecutionWorkspace,
     sampler: &mut WgsLibrarySampler<'_>,
@@ -73,7 +86,15 @@ pub fn write_wgs_fastq(
         FASTQ_ARTIFACT_KIND,
         &relative_path,
         |file| {
-            summary = write_records(file, sampler, expected_count, &path_for_write)?;
+            let level = bgzf::io::writer::CompressionLevel::new(FASTQ_GZIP_COMPRESSION_LEVEL)
+                .ok_or_else(|| invariant("write_wgs_fastq", "invalid fixed gzip level"))?;
+            let mut compressed = bgzf::io::writer::Builder::default()
+                .set_compression_level(level)
+                .build_from_writer(file);
+            summary = write_records(&mut compressed, sampler, expected_count, &path_for_write)?;
+            compressed
+                .finish()
+                .map_err(|error| io_error(&path_for_write, "finish_fastq_gzip", error))?;
             Ok(())
         },
         |temporary| {
@@ -93,7 +114,7 @@ pub fn fastq_relative_path(event_id: &str, individual_id: &str) -> PathBuf {
     PathBuf::from("outputs")
         .join("fastq")
         .join(event_id)
-        .join(format!("{individual_id}.fastq"))
+        .join(format!("{individual_id}.fastq.gz"))
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -103,7 +124,7 @@ struct FastqSummary {
 }
 
 fn write_records(
-    file: &mut File,
+    file: &mut impl Write,
     sampler: &mut WgsLibrarySampler<'_>,
     expected_count: u64,
     relative_path: &Path,
@@ -175,8 +196,12 @@ fn validate_temporary_fastq(
     library_id: &LibraryId,
     expected_count: u64,
 ) -> Result<(), Diagnostic> {
+    validate_canonical_bgzf_eof(temporary, relative_path)?;
     let file = File::open(temporary).map_err(|error| io_error(temporary, "open_fastq", error))?;
-    let mut reader = BufReader::with_capacity(FASTQ_BUFFER_CAPACITY, file);
+    // `bgzf::io::Reader` ya conserva un bloque descomprimido; envolverlo en
+    // `BufReader` está prohibido por su contrato, pero satisface `BufRead` por
+    // sí mismo y permite validar el FASTQ sin materializarlo.
+    let mut reader = bgzf::io::Reader::new(file);
     let mut header = Vec::with_capacity(64);
     let mut sequence = Vec::with_capacity(usize::from(ILLUMINA_SE_MINIMAL_READ_LENGTH) + 1);
     let mut plus = Vec::with_capacity(2);
@@ -245,6 +270,48 @@ fn validate_temporary_fastq(
             relative_path,
             expected_count,
             "FASTQ contains records beyond the planned count",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_canonical_bgzf_eof(temporary: &Path, relative_path: &Path) -> Result<(), Diagnostic> {
+    let mut file = File::open(temporary)
+        .map_err(|error| io_error(temporary, "open_fastq_eof_marker", error))?;
+    let size = file
+        .metadata()
+        .map_err(|error| io_error(temporary, "metadata_fastq_eof_marker", error))?
+        .len();
+    let marker_length = u64::try_from(BGZF_EOF_MARKER.len()).map_err(|_| {
+        invariant(
+            "validate_canonical_bgzf_eof",
+            "BGZF EOF marker length overflows",
+        )
+    })?;
+    if size < marker_length {
+        return Err(format_error(
+            relative_path,
+            0,
+            "FASTQ BGZF stream is missing its canonical EOF marker",
+        ));
+    }
+    file.seek(SeekFrom::End(-i64::try_from(marker_length).map_err(
+        |_| {
+            invariant(
+                "validate_canonical_bgzf_eof",
+                "BGZF EOF marker offset overflows",
+            )
+        },
+    )?))
+    .map_err(|error| io_error(temporary, "seek_fastq_eof_marker", error))?;
+    let mut observed = [0_u8; BGZF_EOF_MARKER.len()];
+    file.read_exact(&mut observed)
+        .map_err(|error| io_error(temporary, "read_fastq_eof_marker", error))?;
+    if observed != BGZF_EOF_MARKER {
+        return Err(format_error(
+            relative_path,
+            0,
+            "FASTQ BGZF stream is missing its canonical EOF marker",
         ));
     }
     Ok(())
@@ -359,6 +426,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use noodles_bgzf as bgzf;
+
     use super::validate_temporary_fastq;
     use super::{ILLUMINA_SE_MINIMAL_READ_LENGTH, LibraryId, compose_template_id};
     use crate::publication::ExecutionWorkspace;
@@ -398,8 +467,12 @@ mod tests {
     }
 
     fn write_case(root: &Path, name: &str, bytes: &[u8]) -> PathBuf {
-        let temporary = root.join(format!("{name}.fastq"));
-        fs::write(&temporary, bytes).expect("temporary FASTQ");
+        let temporary = root.join(format!("{name}.fastq.gz"));
+        let file = fs::File::create(&temporary).expect("temporary FASTQ");
+        let mut writer = bgzf::io::Writer::new(file);
+        use std::io::Write;
+        writer.write_all(bytes).expect("compress temporary FASTQ");
+        writer.finish().expect("finish temporary FASTQ gzip");
         temporary
     }
 
@@ -504,14 +577,14 @@ mod tests {
             let temporary = write_case(&root, case.name, &case.bytes);
             let error = validate_temporary_fastq(
                 &temporary,
-                Path::new("outputs/fastq/event/sample.fastq"),
+                Path::new("outputs/fastq/event/sample.fastq.gz"),
                 &library_id,
                 case.expected_count,
             )
             .expect_err(case.name);
             assert_eq!(
                 error.context().get("path"),
-                Some(&"outputs/fastq/event/sample.fastq".to_owned()),
+                Some(&"outputs/fastq/event/sample.fastq.gz".to_owned()),
                 "{}",
                 case.name
             );
@@ -538,7 +611,7 @@ mod tests {
         let destination = root.join("published");
         let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
         let library_id = LibraryId::parse("library-fastq-test", "test").expect("library ID");
-        let relative_path = Path::new("outputs/fastq/event/sample.fastq");
+        let relative_path = Path::new("outputs/fastq/event/sample.fastq.gz");
         let invalid = b"@not-the-canonical-template\n";
 
         let error = workspace
@@ -548,10 +621,14 @@ mod tests {
                 relative_path,
                 |file| {
                     use std::io::Write;
-
-                    file.write_all(invalid).map_err(|source| {
+                    let mut writer = bgzf::io::Writer::new(file);
+                    writer.write_all(invalid).map_err(|source| {
                         super::io_error(relative_path, "write_test_fastq", source)
-                    })
+                    })?;
+                    writer.finish().map_err(|source| {
+                        super::io_error(relative_path, "finish_test_fastq_gzip", source)
+                    })?;
+                    Ok(())
                 },
                 |temporary| validate_temporary_fastq(temporary, relative_path, &library_id, 1),
             )

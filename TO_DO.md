@@ -21,10 +21,11 @@
 
 ## Salidas FASTQ
 
-- [ ] Permitir publicar los FASTQ finales comprimidos con gzip (`.fastq.gz`).
-  - Mantener la escritura, validación, tamaño y SHA-256 sobre los bytes finales
-    publicados; no sustituir la validación de registros FASTQ por la del flujo
-    comprimido.
-  - Definir el nivel y versión de compresión, la reproducibilidad de los bytes,
-    la compatibilidad con el validador por flujo y las pruebas de
-    interoperabilidad antes de implementarlo.
+- [x] Publicar los FASTQ finales comprimidos como `.fastq.gz`.
+  - El perfil v1 usa gzip/BGZF de `noodles-bgzf 0.47.0`, DEFLATE nivel 6,
+    bloques BGZF y `MTIME = 0`; no añade dependencias ni una opción pública de
+    compresión. La repetibilidad binaria se limita al mismo simulador, lock y
+    plataforma admitida.
+  - La escritura es por flujo; se relee y valida el FASTQ descomprimido antes
+    de publicar atómicamente. Tamaño y SHA-256 se calculan y verifican sobre
+    los bytes gzip finales. Las pruebas incluyen decodificación con `gzip -cd`.

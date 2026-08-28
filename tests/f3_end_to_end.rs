@@ -3,7 +3,7 @@
 //! y FASTQ final publicado.
 
 use std::fs;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,6 +25,7 @@ use genome_population_simulator::segments::CanonicalBase;
 use genome_population_simulator::snp_application::{ApplicableSnp, TargetedSnp, apply_snps};
 use genome_population_simulator::technical_identity::derive_technical_identity_plan;
 use genome_population_simulator::truth_validation::validate_and_reconstruct_truth_jsonl;
+use noodles_bgzf as bgzf;
 
 const ROOT_SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 const READ_LENGTH: usize = 150;
@@ -134,7 +135,13 @@ fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
     assert_eq!(artifact["state"], "complete");
     let fastq_artifact = artifact_record(&artifact["artifact"]);
     let fastq_path = destination.join(fastq_artifact.path.as_str());
-    let fastq = fs::read(&fastq_path).expect("published FASTQ");
+    assert!(fastq_artifact.path.ends_with(".fastq.gz"));
+    let mut gzip_reader =
+        bgzf::io::Reader::new(fs::File::open(&fastq_path).expect("published FASTQ"));
+    let mut fastq = Vec::new();
+    gzip_reader
+        .read_to_end(&mut fastq)
+        .expect("decompress published FASTQ");
     let lines = fastq
         .split_inclusive(|byte| *byte == b'\n')
         .collect::<Vec<_>>();

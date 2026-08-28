@@ -1969,7 +1969,7 @@ read_count = 1
         );
         assert!(
             !destination
-                .join("outputs/fastq/reads-main/sample-A.fastq")
+                .join("outputs/fastq/reads-main/sample-A.fastq.gz")
                 .exists(),
             "a FASTQ rejected by independent replay must not be retained"
         );
