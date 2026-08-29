@@ -32,6 +32,27 @@ const BGZF_EOF_MARKER: [u8; 28] = [
     0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 
+/// Codifica calidades numéricas estrictas como FASTQ Sanger (Phred+33).
+///
+/// F4.2 usa esta frontera para las vistas observadas transitorias; F3 conserva
+/// su escritor propio, que ya produce el mismo alfabeto para su perfil fijo.
+pub fn encode_fastq_sanger_qualities(phred: &[u8]) -> Result<Vec<u8>, Diagnostic> {
+    phred
+        .iter()
+        .copied()
+        .map(|value| {
+            if value > 93 {
+                Err(invariant(
+                    "encode_fastq_sanger_qualities",
+                    "Phred value is outside 0..=93",
+                ))
+            } else {
+                Ok(value + 33)
+            }
+        })
+        .collect()
+}
+
 /// Artefacto FASTQ final de la única biblioteca de un individuo en F3.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FastqPublication {

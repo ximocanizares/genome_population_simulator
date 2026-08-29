@@ -84,6 +84,62 @@ pub struct InsertLengthDistribution {
     maximum_bases: u16,
 }
 
+/// Un tramo inclusivo de la curva de calidad por ciclo del perfil.
+///
+/// Los extremos son enteros del recurso DTPD-106. La interpolación y el
+/// redondeo pertenecen al consumidor de calidad: este tipo solo impide que el
+/// consumidor replique o invente una tabla distinta.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct QualitySegment {
+    first_cycle: u16,
+    last_cycle: u16,
+    first_phred: u8,
+    last_phred: u8,
+}
+
+impl QualitySegment {
+    #[must_use]
+    pub const fn first_cycle(self) -> u16 {
+        self.first_cycle
+    }
+
+    #[must_use]
+    pub const fn last_cycle(self) -> u16 {
+        self.last_cycle
+    }
+
+    #[must_use]
+    pub const fn first_phred(self) -> u8 {
+        self.first_phred
+    }
+
+    #[must_use]
+    pub const fn last_phred(self) -> u8 {
+        self.last_phred
+    }
+}
+
+/// Curva versionada de calidad de uno de los mates PE.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct QualityCurve {
+    segments: &'static [QualitySegment],
+}
+
+impl QualityCurve {
+    #[must_use]
+    pub const fn segments(self) -> &'static [QualitySegment] {
+        self.segments
+    }
+}
+
+/// Mate seleccionado por el perfil técnico. Se mantiene separado del rol de
+/// identidad para que el recurso no dependa de las identidades transitorias.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfileMate {
+    R1,
+    R2,
+}
+
 impl InsertLengthDistribution {
     #[must_use]
     pub const fn algorithm(self) -> &'static str {
@@ -123,6 +179,8 @@ pub struct F4TechnicalProfile {
     orientation: PairOrientation,
     common_read_length: CommonReadLengthBounds,
     insert_length: InsertLengthDistribution,
+    quality_r1: QualityCurve,
+    quality_r2: QualityCurve,
 }
 
 impl F4TechnicalProfile {
@@ -170,7 +228,57 @@ impl F4TechnicalProfile {
     pub const fn insert_length(self) -> InsertLengthDistribution {
         self.insert_length
     }
+
+    #[must_use]
+    pub const fn quality_curve(self, mate: ProfileMate) -> QualityCurve {
+        match mate {
+            ProfileMate::R1 => self.quality_r1,
+            ProfileMate::R2 => self.quality_r2,
+        }
+    }
 }
+
+const QUALITY_R1_SEGMENTS: [QualitySegment; 3] = [
+    QualitySegment {
+        first_cycle: 1,
+        last_cycle: 10,
+        first_phred: 36,
+        last_phred: 36,
+    },
+    QualitySegment {
+        first_cycle: 11,
+        last_cycle: 100,
+        first_phred: 36,
+        last_phred: 32,
+    },
+    QualitySegment {
+        first_cycle: 101,
+        last_cycle: 150,
+        first_phred: 32,
+        last_phred: 28,
+    },
+];
+
+const QUALITY_R2_SEGMENTS: [QualitySegment; 3] = [
+    QualitySegment {
+        first_cycle: 1,
+        last_cycle: 10,
+        first_phred: 35,
+        last_phred: 35,
+    },
+    QualitySegment {
+        first_cycle: 11,
+        last_cycle: 100,
+        first_phred: 35,
+        last_phred: 30,
+    },
+    QualitySegment {
+        first_cycle: 101,
+        last_cycle: 150,
+        first_phred: 30,
+        last_phred: 25,
+    },
+];
 
 const INITIAL_PROFILE: F4TechnicalProfile = F4TechnicalProfile {
     id: GPS_HISEQX_PCRFREE_PE150_V1,
@@ -190,6 +298,12 @@ const INITIAL_PROFILE: F4TechnicalProfile = F4TechnicalProfile {
         standard_deviation_bases: 20,
         minimum_bases: 250,
         maximum_bases: 450,
+    },
+    quality_r1: QualityCurve {
+        segments: &QUALITY_R1_SEGMENTS,
+    },
+    quality_r2: QualityCurve {
+        segments: &QUALITY_R2_SEGMENTS,
     },
 };
 

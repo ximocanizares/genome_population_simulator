@@ -10,6 +10,7 @@ pub mod configuration;
 pub mod coordinates;
 pub mod diagnostics;
 pub mod domain;
+pub mod error_quality;
 pub mod event_manifest;
 pub mod exact_decimal;
 pub mod execution;
