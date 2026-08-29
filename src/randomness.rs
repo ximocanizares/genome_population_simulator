@@ -1,11 +1,13 @@
 //! Semillas, flujos aleatorios locales y contratos de reproducibilidad.
 
 use std::fmt;
+use std::num::NonZeroU64;
 
 use rand_chacha::ChaCha12Rng;
 use rand_chacha::rand_core::{Rng, SeedableRng};
 
 use crate::diagnostics::Diagnostic;
+use crate::identity::{EventId, IndividualId, LibraryId};
 
 pub const DERIVATION_VERSION: u32 = 1;
 pub const F2_DERIVATION_VERSION: u32 = 2;
@@ -610,10 +612,591 @@ pub const F4_UNIFORM_CLOSED_53_ALGORITHM: &str = "uniform-closed-53-bit-v1";
 pub const F4_BERNOULLI_ALGORITHM: &str = "bernoulli-v1";
 pub const F4_PARTIAL_FISHER_YATES_ALGORITHM: &str = "partial-fisher-yates-v1";
 pub const F4_TRUNCATED_NORMAL_ALGORITHM: &str = "normal-truncated-box-muller-v1";
+/// Catálogo normativo de claves técnicas F4 de DTC-086.
+pub const F4_TECHNICAL_RNG_CATALOG: &str = "f4-technical-v3";
 
 const F4_FIFTY_THREE_BIT_BOUND: u64 = 1_u64 << 53;
 const F4_FIFTY_THREE_BIT_MAX: u64 = F4_FIFTY_THREE_BIT_BOUND - 1;
 const F4_PI: f64 = f64::from_bits(0x4009_21fb_5444_2d18);
+
+/// Mate de una pareja PE en las decisiones de error F4.
+///
+/// No se admite un literal arbitrario para impedir que una clave de error
+/// represente un mate ajeno al contrato PE de F4.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum F4Mate {
+    R1,
+    R2,
+}
+
+impl F4Mate {
+    const fn canonical_value(self) -> &'static str {
+        match self {
+            Self::R1 => "R1",
+            Self::R2 => "R2",
+        }
+    }
+}
+
+/// Identificador canónico de una instancia previa al index hopping de F4.
+///
+/// La validación permanece junto a la frontera del catálogo RNG: la identidad
+/// de dominio que lo produzca se introducirá en una fase posterior. Mientras
+/// tanto, solo se admite la categoría `PH_` y la sintaxis ASCII canónica de
+/// identificadores aportados.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct F4IndexHopInstance<'a>(&'a str);
+
+impl<'a> F4IndexHopInstance<'a> {
+    pub fn parse(value: &'a str) -> Result<Self, Diagnostic> {
+        let suffix = value.strip_prefix("PH_");
+        let is_valid = suffix.is_some_and(|suffix| {
+            !suffix.is_empty()
+                && value.len() <= 64
+                && suffix
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && suffix
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        });
+        if is_valid {
+            return Ok(Self(value));
+        }
+        Err(Diagnostic::domain(
+            "GPS-DOMAIN-001",
+            "Un identificador aportado incumple la sintaxis o el ámbito de su categoría.",
+        )
+        .with("identifier", value)
+        .with("category", "f4_index_hop_instance")
+        .with("scope", "f4_technical_rng"))
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'a str {
+        self.0
+    }
+}
+
+/// Decisión atómica del catálogo `f4-technical-v3`.
+///
+/// Cada variante fija el ámbito, el discriminador y los componentes que DTC-086
+/// exige. Los campos permanecen privados para que no pueda construirse una
+/// clave incompleta, ni combinar una decisión con componentes de otra etapa.
+#[derive(Clone, Copy, Debug)]
+pub struct F4TechnicalDecision<'a>(F4TechnicalDecisionKind<'a>);
+
+#[derive(Clone, Copy, Debug)]
+enum F4TechnicalDecisionKind<'a> {
+    FragmentInsertLength {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    },
+    FragmentCopy {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    },
+    FragmentStart {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    },
+    ChimeraBernoulli {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    },
+    ChimeraBreakpoint {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    },
+    ChimeraSecondSource {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        breakpoint: NonZeroU64,
+    },
+    ErrorBernoulli {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        mate: F4Mate,
+        cycle: u64,
+    },
+    ErrorSubstitution {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        mate: F4Mate,
+        cycle: u64,
+    },
+    ContaminationPercent {
+        event_id: &'a EventId,
+        recipient_library_id: &'a LibraryId,
+        recipient_id: &'a IndividualId,
+    },
+    ContaminationDonors {
+        event_id: &'a EventId,
+        recipient_library_id: &'a LibraryId,
+        recipient_id: &'a IndividualId,
+    },
+    ContaminationRecipients {
+        event_id: &'a EventId,
+        recipient_library_id: &'a LibraryId,
+        recipient_id: &'a IndividualId,
+    },
+    IndexHopBernoulli {
+        event_id: &'a EventId,
+        pre_hop_library_id: &'a LibraryId,
+        pre_hop_instance_id: F4IndexHopInstance<'a>,
+    },
+    IndexHopDestination {
+        event_id: &'a EventId,
+        pre_hop_library_id: &'a LibraryId,
+        pre_hop_instance_id: F4IndexHopInstance<'a>,
+    },
+}
+
+impl<'a> F4TechnicalDecision<'a> {
+    #[must_use]
+    pub const fn fragment_insert_length(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::FragmentInsertLength {
+            event_id,
+            library_id,
+            template_ordinal,
+        })
+    }
+
+    #[must_use]
+    pub const fn fragment_copy(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::FragmentCopy {
+            event_id,
+            library_id,
+            template_ordinal,
+        })
+    }
+
+    #[must_use]
+    pub const fn fragment_start(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::FragmentStart {
+            event_id,
+            library_id,
+            template_ordinal,
+        })
+    }
+
+    #[must_use]
+    pub const fn chimera_bernoulli(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::ChimeraBernoulli {
+            event_id,
+            library_id,
+            template_ordinal,
+        })
+    }
+
+    #[must_use]
+    pub const fn chimera_breakpoint(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::ChimeraBreakpoint {
+            event_id,
+            library_id,
+            template_ordinal,
+        })
+    }
+
+    #[must_use]
+    pub const fn chimera_second_source(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        breakpoint: NonZeroU64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::ChimeraSecondSource {
+            event_id,
+            library_id,
+            template_ordinal,
+            breakpoint,
+        })
+    }
+
+    #[must_use]
+    pub const fn error_bernoulli(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        mate: F4Mate,
+        cycle: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::ErrorBernoulli {
+            event_id,
+            library_id,
+            template_ordinal,
+            mate,
+            cycle,
+        })
+    }
+
+    #[must_use]
+    pub const fn error_substitution(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        mate: F4Mate,
+        cycle: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::ErrorSubstitution {
+            event_id,
+            library_id,
+            template_ordinal,
+            mate,
+            cycle,
+        })
+    }
+
+    #[must_use]
+    pub const fn contamination_percent(
+        event_id: &'a EventId,
+        recipient_library_id: &'a LibraryId,
+        recipient_id: &'a IndividualId,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::ContaminationPercent {
+            event_id,
+            recipient_library_id,
+            recipient_id,
+        })
+    }
+
+    #[must_use]
+    pub const fn contamination_donors(
+        event_id: &'a EventId,
+        recipient_library_id: &'a LibraryId,
+        recipient_id: &'a IndividualId,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::ContaminationDonors {
+            event_id,
+            recipient_library_id,
+            recipient_id,
+        })
+    }
+
+    #[must_use]
+    pub const fn contamination_recipients(
+        event_id: &'a EventId,
+        recipient_library_id: &'a LibraryId,
+        recipient_id: &'a IndividualId,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::ContaminationRecipients {
+            event_id,
+            recipient_library_id,
+            recipient_id,
+        })
+    }
+
+    #[must_use]
+    pub const fn index_hop_bernoulli(
+        event_id: &'a EventId,
+        pre_hop_library_id: &'a LibraryId,
+        pre_hop_instance_id: F4IndexHopInstance<'a>,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::IndexHopBernoulli {
+            event_id,
+            pre_hop_library_id,
+            pre_hop_instance_id,
+        })
+    }
+
+    #[must_use]
+    pub const fn index_hop_destination(
+        event_id: &'a EventId,
+        pre_hop_library_id: &'a LibraryId,
+        pre_hop_instance_id: F4IndexHopInstance<'a>,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::IndexHopDestination {
+            event_id,
+            pre_hop_library_id,
+            pre_hop_instance_id,
+        })
+    }
+
+    fn canonical_components(self) -> Vec<(&'static str, String)> {
+        match self.0 {
+            F4TechnicalDecisionKind::FragmentInsertLength {
+                event_id,
+                library_id,
+                template_ordinal,
+            } => f4_template_components(
+                event_id,
+                library_id,
+                "fragment",
+                template_ordinal,
+                "insert_length",
+                None,
+            ),
+            F4TechnicalDecisionKind::FragmentCopy {
+                event_id,
+                library_id,
+                template_ordinal,
+            } => f4_template_components(
+                event_id,
+                library_id,
+                "fragment",
+                template_ordinal,
+                "copy",
+                None,
+            ),
+            F4TechnicalDecisionKind::FragmentStart {
+                event_id,
+                library_id,
+                template_ordinal,
+            } => f4_template_components(
+                event_id,
+                library_id,
+                "fragment",
+                template_ordinal,
+                "start",
+                None,
+            ),
+            F4TechnicalDecisionKind::ChimeraBernoulli {
+                event_id,
+                library_id,
+                template_ordinal,
+            } => f4_template_components(
+                event_id,
+                library_id,
+                "chimera",
+                template_ordinal,
+                "bernoulli",
+                None,
+            ),
+            F4TechnicalDecisionKind::ChimeraBreakpoint {
+                event_id,
+                library_id,
+                template_ordinal,
+            } => f4_template_components(
+                event_id,
+                library_id,
+                "chimera",
+                template_ordinal,
+                "breakpoint",
+                None,
+            ),
+            F4TechnicalDecisionKind::ChimeraSecondSource {
+                event_id,
+                library_id,
+                template_ordinal,
+                breakpoint,
+            } => f4_template_components(
+                event_id,
+                library_id,
+                "chimera",
+                template_ordinal,
+                "second_source",
+                Some(breakpoint.get()),
+            ),
+            F4TechnicalDecisionKind::ErrorBernoulli {
+                event_id,
+                library_id,
+                template_ordinal,
+                mate,
+                cycle,
+            } => f4_error_components(
+                event_id,
+                library_id,
+                template_ordinal,
+                mate,
+                cycle,
+                "bernoulli",
+            ),
+            F4TechnicalDecisionKind::ErrorSubstitution {
+                event_id,
+                library_id,
+                template_ordinal,
+                mate,
+                cycle,
+            } => f4_error_components(
+                event_id,
+                library_id,
+                template_ordinal,
+                mate,
+                cycle,
+                "substitution",
+            ),
+            F4TechnicalDecisionKind::ContaminationPercent {
+                event_id,
+                recipient_library_id,
+                recipient_id,
+            } => f4_contamination_components(
+                event_id,
+                recipient_library_id,
+                "contamination_percent",
+                recipient_id,
+                "percent",
+            ),
+            F4TechnicalDecisionKind::ContaminationDonors {
+                event_id,
+                recipient_library_id,
+                recipient_id,
+            } => f4_contamination_components(
+                event_id,
+                recipient_library_id,
+                "contamination_donors",
+                recipient_id,
+                "select_donors",
+            ),
+            F4TechnicalDecisionKind::ContaminationRecipients {
+                event_id,
+                recipient_library_id,
+                recipient_id,
+            } => f4_contamination_components(
+                event_id,
+                recipient_library_id,
+                "contamination_remove",
+                recipient_id,
+                "select_recipients",
+            ),
+            F4TechnicalDecisionKind::IndexHopBernoulli {
+                event_id,
+                pre_hop_library_id,
+                pre_hop_instance_id,
+            } => f4_index_hop_components(
+                event_id,
+                pre_hop_library_id,
+                pre_hop_instance_id,
+                "bernoulli",
+            ),
+            F4TechnicalDecisionKind::IndexHopDestination {
+                event_id,
+                pre_hop_library_id,
+                pre_hop_instance_id,
+            } => f4_index_hop_components(
+                event_id,
+                pre_hop_library_id,
+                pre_hop_instance_id,
+                "destination",
+            ),
+        }
+    }
+}
+
+fn f4_template_components(
+    event_id: &EventId,
+    library_id: &LibraryId,
+    stage: &'static str,
+    template_ordinal: u64,
+    decision: &'static str,
+    breakpoint: Option<u64>,
+) -> Vec<(&'static str, String)> {
+    let mut components = vec![
+        ("event_id", event_id.as_str().to_owned()),
+        ("library_id", library_id.as_str().to_owned()),
+        ("stage", stage.to_owned()),
+        ("template_ordinal", template_ordinal.to_string()),
+        ("decision", decision.to_owned()),
+    ];
+    if let Some(breakpoint) = breakpoint {
+        components.push(("breakpoint", breakpoint.to_string()));
+    }
+    components
+}
+
+fn f4_error_components(
+    event_id: &EventId,
+    library_id: &LibraryId,
+    template_ordinal: u64,
+    mate: F4Mate,
+    cycle: u64,
+    decision: &'static str,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("event_id", event_id.as_str().to_owned()),
+        ("library_id", library_id.as_str().to_owned()),
+        ("stage", "error".to_owned()),
+        ("template_ordinal", template_ordinal.to_string()),
+        ("mate", mate.canonical_value().to_owned()),
+        ("cycle", cycle.to_string()),
+        ("decision", decision.to_owned()),
+    ]
+}
+
+fn f4_contamination_components(
+    event_id: &EventId,
+    recipient_library_id: &LibraryId,
+    stage: &'static str,
+    recipient_id: &IndividualId,
+    decision: &'static str,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("event_id", event_id.as_str().to_owned()),
+        (
+            "recipient_library_id",
+            recipient_library_id.as_str().to_owned(),
+        ),
+        ("stage", stage.to_owned()),
+        ("recipient_id", recipient_id.as_str().to_owned()),
+        ("decision", decision.to_owned()),
+    ]
+}
+
+fn f4_index_hop_components(
+    event_id: &EventId,
+    pre_hop_library_id: &LibraryId,
+    pre_hop_instance_id: F4IndexHopInstance<'_>,
+    decision: &'static str,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("event_id", event_id.as_str().to_owned()),
+        ("pre_hop_library_id", pre_hop_library_id.as_str().to_owned()),
+        ("stage", "index_hop".to_owned()),
+        (
+            "pre_hop_instance_id",
+            pre_hop_instance_id.as_str().to_owned(),
+        ),
+        ("decision", decision.to_owned()),
+    ]
+}
+
+/// Deriva la subsemilla exclusiva de una decisión F4.
+///
+/// El nombre del catálogo constituye el ámbito de derivación v2; los
+/// componentes posteriores siguen el orden literal de DTC-086. Cada llamada
+/// devuelve una nueva semilla ChaCha12 y nunca avanza un flujo compartido.
+pub fn derive_f4_technical_subseed(
+    root: RootSeed,
+    decision: F4TechnicalDecision<'_>,
+) -> Result<Subseed, Diagnostic> {
+    let components = decision.canonical_components();
+    let components = components
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect::<Vec<_>>();
+    Ok(Subseed(blake3::derive_key(
+        DERIVATION_CONTEXT,
+        &canonical_material_v2(root, F4_TECHNICAL_RNG_CATALOG, &components)?,
+    )))
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RandomSamplingError {
@@ -729,7 +1312,14 @@ fn f4_uniform_closed_with_source(
         return Ok(minimum);
     }
     let numerator = f4_uniform_index_with_source(rng, F4_FIFTY_THREE_BIT_BOUND)?;
-    Ok(minimum + (maximum - minimum) * numerator as f64 / F4_FIFTY_THREE_BIT_MAX as f64)
+    if numerator == 0 {
+        return Ok(minimum);
+    }
+    if numerator == F4_FIFTY_THREE_BIT_MAX {
+        return Ok(maximum);
+    }
+    let fraction = numerator as f64 / F4_FIFTY_THREE_BIT_MAX as f64;
+    Ok((1.0 - fraction) * minimum + fraction * maximum)
 }
 
 /// Permuta sin reemplazo solo el prefijo solicitado de una lista canónica F4.

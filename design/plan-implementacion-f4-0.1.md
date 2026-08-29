@@ -151,16 +151,17 @@ cuando F3 esté cerrado, sin anticipar un formato de perfil empírico.
     permutación y un inserto aceptado y rechazado; `cargo clippy --workspace
     --all-targets --all-features --locked -- -D warnings` pasa.
 
-- ☐ F4.0.2. Publicar el catálogo de claves `f4-technical-v3` sobre esas
+- ✅ F4.0.2. Publicar el catálogo de claves `f4-technical-v3` sobre esas
   primitivas, con una clave ChaCha12 nueva por decisión.
   - Depende de: F4.0.1.
   - Procede de: DTC-086/088, REQ-DAT-15/70–71 y arquitectura §5.5.
   - Cambia: claves canónicas para fragmento, quimera, error, contaminación e
     *index hopping*, con tipos internos de componentes. No activa ninguno de
     sus consumidores ni añade configuración F4.
-  - Se comprueba con: `cargo test --test f4_rng_catalog --locked`; vectores de
-    subsemillas y resultados prueban regeneración, reordenación y aislamiento
-    entre ámbitos.
+  - Se comprueba con: `cargo test --test f4_rng_catalog --locked`; 5 vectores
+    de subsemilla y resultado prueban regeneración, reordenación, aislamiento,
+    literales DTC-086 y la interpolación cerrada en los extremos numéricos.
+    Revisión independiente completada sin hallazgos pendientes.
 
 - ☐ F4.0.3. Añadir `id-catalog-v3` y las derivaciones deterministas
   `PreHopInstanceId` y `TechnicalPairId`, sin emitir todavía una pareja.
