@@ -604,10 +604,21 @@ pub const POISSON_COUNT_ALGORITHM: &str = "poisson-count-v1";
 pub const HWE_COMPOSITION_ALGORITHM: &str = "hwe-composition-v1";
 pub const F_DIPLOID_GENOTYPE_ALGORITHM: &str = "f-diploid-genotype-v1";
 pub const PHASE_PERMUTATION_ALGORITHM: &str = "phase-permutation-v1";
+pub const F4_UNIFORM_INDEX_ALGORITHM: &str = "uniform-index-v1";
+pub const F4_UNIFORM_OPEN_53_ALGORITHM: &str = "uniform-open-53-v1";
+pub const F4_UNIFORM_CLOSED_53_ALGORITHM: &str = "uniform-closed-53-bit-v1";
+pub const F4_BERNOULLI_ALGORITHM: &str = "bernoulli-v1";
+pub const F4_PARTIAL_FISHER_YATES_ALGORITHM: &str = "partial-fisher-yates-v1";
+pub const F4_TRUNCATED_NORMAL_ALGORITHM: &str = "normal-truncated-box-muller-v1";
+
+const F4_FIFTY_THREE_BIT_BOUND: u64 = 1_u64 << 53;
+const F4_FIFTY_THREE_BIT_MAX: u64 = F4_FIFTY_THREE_BIT_BOUND - 1;
+const F4_PI: f64 = f64::from_bits(0x4009_21fb_5444_2d18);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RandomSamplingError {
     InvalidBound,
+    InvalidProbability,
     InvalidWeights,
     InvalidInterval,
     InvalidLambda,
@@ -630,6 +641,166 @@ fn open_unit_f64_with_source(rng: &mut impl RandomWordSource) -> f64 {
 
 pub fn uniform_u64_below(rng: &mut LocalRng, n: u64) -> Result<u64, RandomSamplingError> {
     uniform_u64_below_with_source(rng, n)
+}
+
+/// Uniforme discreto F4 definido por DTC-088.
+///
+/// A diferencia del consumidor histórico [`uniform_u64_below`], esta primitiva
+/// rechaza la cola superior de un espacio completo de 64 bits. Su contrato y
+/// sus vectores no se comparten con fases anteriores.
+pub fn f4_uniform_index(rng: &mut LocalRng, n: u64) -> Result<u64, RandomSamplingError> {
+    f4_uniform_index_with_source(rng, n)
+}
+
+fn f4_uniform_index_with_source(
+    rng: &mut impl RandomWordSource,
+    n: u64,
+) -> Result<u64, RandomSamplingError> {
+    if n == 0 {
+        return Err(RandomSamplingError::InvalidBound);
+    }
+    if n == 1 {
+        return Ok(0);
+    }
+    // L = 2^64 - (2^64 mod n). Si el resto es cero, L no cabe en `u64` y
+    // todo el espacio es aceptable. En otro caso, L sí es representable.
+    let remainder = (u64::MAX % n + 1) % n;
+    let limit = (remainder != 0).then(|| u64::MAX - (remainder - 1));
+    loop {
+        let value = rng.next_word();
+        if limit.is_none_or(|bound| value < bound) {
+            return Ok(value % n);
+        }
+    }
+}
+
+/// Uniforme abierto F4 con 53 bits efectivos, `(0, 1)`.
+#[must_use]
+pub fn f4_uniform_open_53(rng: &mut LocalRng) -> f64 {
+    f4_uniform_open_53_with_source(rng)
+}
+
+fn f4_uniform_open_53_with_source(rng: &mut impl RandomWordSource) -> f64 {
+    let value = f4_uniform_index_with_source(rng, F4_FIFTY_THREE_BIT_BOUND)
+        .expect("2^53 is a valid fixed F4 uniform bound");
+    (value as f64 + 0.5) / F4_FIFTY_THREE_BIT_BOUND as f64
+}
+
+/// Bernoulli F4. Las probabilidades exactas 0 y 1 no consumen aleatoriedad.
+pub fn f4_bernoulli(rng: &mut LocalRng, probability: f64) -> Result<bool, RandomSamplingError> {
+    f4_bernoulli_with_source(rng, probability)
+}
+
+fn f4_bernoulli_with_source(
+    rng: &mut impl RandomWordSource,
+    probability: f64,
+) -> Result<bool, RandomSamplingError> {
+    if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
+        return Err(RandomSamplingError::InvalidProbability);
+    }
+    if probability == 0.0 {
+        return Ok(false);
+    }
+    if probability == 1.0 {
+        return Ok(true);
+    }
+    let numerator = f4_uniform_index_with_source(rng, F4_FIFTY_THREE_BIT_BOUND)?;
+    Ok(numerator as f64 / (F4_FIFTY_THREE_BIT_BOUND as f64) < probability)
+}
+
+/// Uniforme cerrado F4 para un intervalo finito `[minimum, maximum]`.
+pub fn f4_uniform_closed(
+    rng: &mut LocalRng,
+    minimum: f64,
+    maximum: f64,
+) -> Result<f64, RandomSamplingError> {
+    f4_uniform_closed_with_source(rng, minimum, maximum)
+}
+
+fn f4_uniform_closed_with_source(
+    rng: &mut impl RandomWordSource,
+    minimum: f64,
+    maximum: f64,
+) -> Result<f64, RandomSamplingError> {
+    if !minimum.is_finite() || !maximum.is_finite() || minimum > maximum {
+        return Err(RandomSamplingError::InvalidInterval);
+    }
+    if minimum == maximum {
+        return Ok(minimum);
+    }
+    let numerator = f4_uniform_index_with_source(rng, F4_FIFTY_THREE_BIT_BOUND)?;
+    Ok(minimum + (maximum - minimum) * numerator as f64 / F4_FIFTY_THREE_BIT_MAX as f64)
+}
+
+/// Permuta sin reemplazo solo el prefijo solicitado de una lista canónica F4.
+pub fn f4_partial_fisher_yates<T>(
+    rng: &mut LocalRng,
+    values: &mut [T],
+    selected_count: usize,
+) -> Result<(), RandomSamplingError> {
+    f4_partial_fisher_yates_with_source(rng, values, selected_count)
+}
+
+fn f4_partial_fisher_yates_with_source<T>(
+    rng: &mut impl RandomWordSource,
+    values: &mut [T],
+    selected_count: usize,
+) -> Result<(), RandomSamplingError> {
+    if selected_count > values.len() {
+        return Err(RandomSamplingError::InsufficientCandidates);
+    }
+    for index in 0..selected_count {
+        let remaining = values.len() - index;
+        let offset = f4_uniform_index_with_source(
+            rng,
+            u64::try_from(remaining).map_err(|_| RandomSamplingError::NumericFailure)?,
+        )?;
+        let other = index
+            .checked_add(usize::try_from(offset).map_err(|_| RandomSamplingError::NumericFailure)?)
+            .ok_or(RandomSamplingError::NumericFailure)?;
+        values.swap(index, other);
+    }
+    Ok(())
+}
+
+/// Normal truncada F4 de DTC-088, redondeada al entero más próximo.
+pub fn f4_truncated_normal(
+    rng: &mut LocalRng,
+    mean: f64,
+    standard_deviation: f64,
+    minimum: i64,
+    maximum: i64,
+) -> Result<i64, RandomSamplingError> {
+    f4_truncated_normal_with_source(rng, mean, standard_deviation, minimum, maximum)
+}
+
+fn f4_truncated_normal_with_source(
+    rng: &mut impl RandomWordSource,
+    mean: f64,
+    standard_deviation: f64,
+    minimum: i64,
+    maximum: i64,
+) -> Result<i64, RandomSamplingError> {
+    if !mean.is_finite()
+        || !standard_deviation.is_finite()
+        || standard_deviation <= 0.0
+        || minimum > maximum
+    {
+        return Err(RandomSamplingError::InvalidInterval);
+    }
+    loop {
+        let first = f4_uniform_open_53_with_source(rng);
+        let second = f4_uniform_open_53_with_source(rng);
+        let z = libm::sqrt(-2.0 * libm::log(first)) * libm::cos(2.0 * F4_PI * second);
+        let rounded = (mean + standard_deviation * z).round();
+        if !rounded.is_finite() || rounded < i64::MIN as f64 || rounded > i64::MAX as f64 {
+            return Err(RandomSamplingError::NumericFailure);
+        }
+        let candidate = rounded as i64;
+        if (minimum..=maximum).contains(&candidate) {
+            return Ok(candidate);
+        }
+    }
 }
 
 fn uniform_u64_below_with_source(
@@ -1029,9 +1200,12 @@ fn poisson_count_with_source(
 mod tests {
     use super::{
         RandomSamplingError, RandomWordSource, categorical_f64_with_source,
-        fisher_yates_with_source, linear_uniform_with_source, log_uniform_with_source,
-        neumaier_sum, open_unit_f64_with_source, poisson_count_with_source,
-        uniform_u64_below_with_source, weighted_without_replacement_with_source,
+        f4_bernoulli_with_source, f4_partial_fisher_yates_with_source,
+        f4_truncated_normal_with_source, f4_uniform_closed_with_source,
+        f4_uniform_index_with_source, f4_uniform_open_53_with_source, fisher_yates_with_source,
+        linear_uniform_with_source, log_uniform_with_source, neumaier_sum,
+        open_unit_f64_with_source, poisson_count_with_source, uniform_u64_below_with_source,
+        weighted_without_replacement_with_source,
     };
 
     struct Scripted {
@@ -1112,6 +1286,79 @@ mod tests {
         let mut ptrs = Scripted::new(&[1 << 63, 0]);
         assert_eq!(poisson_count_with_source(&mut ptrs, 10.0, None), Ok(10));
         assert_eq!(ptrs.consumed, 2);
+    }
+
+    #[test]
+    fn f4_primitives_follow_dtc088_values_bounds_and_consumption() {
+        let mut index = Scripted::new(&[u64::MAX, 5]);
+        assert_eq!(f4_uniform_index_with_source(&mut index, 3), Ok(2));
+        assert_eq!(index.consumed, 2);
+        assert_eq!(
+            f4_uniform_index_with_source(&mut Scripted::new(&[]), 0),
+            Err(RandomSamplingError::InvalidBound)
+        );
+        let mut singleton = Scripted::new(&[]);
+        assert_eq!(f4_uniform_index_with_source(&mut singleton, 1), Ok(0));
+        assert_eq!(singleton.consumed, 0);
+
+        let mut open = Scripted::new(&[0]);
+        assert_eq!(
+            f4_uniform_open_53_with_source(&mut open).to_bits(),
+            (0.5_f64 / (1_u64 << 53) as f64).to_bits()
+        );
+        assert_eq!(open.consumed, 1);
+
+        let mut bernoulli = Scripted::new(&[0]);
+        assert_eq!(f4_bernoulli_with_source(&mut bernoulli, 0.5), Ok(true));
+        assert_eq!(bernoulli.consumed, 1);
+        let mut endpoints = Scripted::new(&[]);
+        assert_eq!(f4_bernoulli_with_source(&mut endpoints, 0.0), Ok(false));
+        assert_eq!(f4_bernoulli_with_source(&mut endpoints, 1.0), Ok(true));
+        assert_eq!(endpoints.consumed, 0);
+        assert_eq!(
+            f4_bernoulli_with_source(&mut endpoints, f64::NAN),
+            Err(RandomSamplingError::InvalidProbability)
+        );
+
+        let mut closed = Scripted::new(&[u64::MAX]);
+        assert_eq!(
+            f4_uniform_closed_with_source(&mut closed, 1.0, 3.0),
+            Ok(3.0)
+        );
+        let mut closed_singleton = Scripted::new(&[]);
+        assert_eq!(
+            f4_uniform_closed_with_source(&mut closed_singleton, 2.0, 2.0),
+            Ok(2.0)
+        );
+        assert_eq!(closed_singleton.consumed, 0);
+
+        let mut permutation = Scripted::new(&[3, 1]);
+        let mut values = [0, 1, 2, 3];
+        assert_eq!(
+            f4_partial_fisher_yates_with_source(&mut permutation, &mut values, 2),
+            Ok(())
+        );
+        assert_eq!(values, [3, 2, 1, 0]);
+        assert_eq!(
+            f4_partial_fisher_yates_with_source(&mut Scripted::new(&[]), &mut values, 5),
+            Err(RandomSamplingError::InsufficientCandidates)
+        );
+
+        let half = 1_u64 << 52;
+        let mut normal = Scripted::new(&[half, half, half, 0]);
+        assert_eq!(0.5_f64.round(), 1.0, "ties round away from zero");
+        assert_eq!((-0.5_f64).round(), -1.0, "ties round away from zero");
+        assert_eq!(
+            f4_truncated_normal_with_source(&mut normal, 0.0, 1.0, 1, 1),
+            Ok(1)
+        );
+        assert_eq!(normal.consumed, 4);
+        let mut invalid_normal = Scripted::new(&[]);
+        assert_eq!(
+            f4_truncated_normal_with_source(&mut invalid_normal, 0.0, 0.0, 1, 1),
+            Err(RandomSamplingError::InvalidInterval)
+        );
+        assert_eq!(invalid_normal.consumed, 0);
     }
 
     #[test]

@@ -137,29 +137,53 @@ cuando F3 esté cerrado, sin anticipar un formato de perfil empírico.
 
 ## 5. F4.0 — Catálogo RNG técnico
 
-- ☐ F4.0.1. Publicar `f4-technical-v3` exactamente como DTC-086,
-  definir de una vez el inventario completo de campos F4 en TOML general v2,
-  configuración efectiva/manifiesto general v4 y manifiesto de evento v2, y
-  registrar el catálogo en los dos últimos.
+- ✅ F4.0.1. Implementar las primitivas aleatorias normativas de DTC-088 sin
+  admitir todavía configuración F4 ni producir lecturas.
   - Depende de: PAUSA-DISEÑO-F4.
-  - Procede de: DTC-037–040/082/086–088, REQ-CONF-66/72–84/101/113,
-    REQ-DAT-12/15/18/24–40/68–73, REQ-WGS-01/04/07–11,
-    REQ-CONT-01–16, REQ-MAN-34–42/53–54/60–62/77/85 y REQ-REP-22/23.
-  - Cambia: proveedor de aleatoriedad, `id-catalog-v3` con
-    `PreHopInstanceId` y `TechnicalPairId` y los esquemas finales de los cuatro contratos F4,
-    incluidos los campos de perfil, cobertura, artefactos, contaminación,
-    demultiplexado y agregados; los hitos posteriores solo conectan
-    productores/validadores a campos ya fijados, sin mutar versiones ni esquemas.
-  - Se comprueba con: `cargo test --test f4_rng_catalog --locked`; vectores
-    literales de subsemillas/resultados, ramas 0/1, rechazo de cardinalidad
-    imposible, permutación de bibliotecas y ejecución paralela; vectores BLAKE3
-    de ambas clases de ID; y
-    `cargo test --test f4_schema_versions --locked`, que prueba escritores
-    exactos y rechazo de versión ausente, anterior, posterior o desconocida
-    en los cuatro contratos de DTC-082.
+  - Procede de: DTC-037–040/086/088 y arquitectura §5.5.
+  - Cambia: el proveedor de aleatoriedad compartido y
+    `randomness::tests::f4_primitives_follow_dtc088_values_bounds_and_consumption`;
+    incorpora únicamente `uniform-index-v1`,
+    `uniform-open-53-v1`, `bernoulli-v1`, Fisher–Yates parcial y la normal
+    truncada. No crea campos TOML, versiones, manifiestos ni tipos de lectura.
+  - Se comprueba con: `cargo test randomness::tests::f4_primitives_follow_dtc088_values_bounds_and_consumption --locked`; vectores
+    literales cubren rechazo, extremos 0/1 sin consumo, límites inclusivos,
+    permutación y un inserto aceptado y rechazado; `cargo clippy --workspace
+    --all-targets --all-features --locked -- -D warnings` pasa.
 
-  **Contrato F4 cerrado por F4.0.1.** Estos son los únicos campos nuevos de
-  autoría y sus proyecciones obligatorias; las rutas no listadas se rechazan.
+- ☐ F4.0.2. Publicar el catálogo de claves `f4-technical-v3` sobre esas
+  primitivas, con una clave ChaCha12 nueva por decisión.
+  - Depende de: F4.0.1.
+  - Procede de: DTC-086/088, REQ-DAT-15/70–71 y arquitectura §5.5.
+  - Cambia: claves canónicas para fragmento, quimera, error, contaminación e
+    *index hopping*, con tipos internos de componentes. No activa ninguno de
+    sus consumidores ni añade configuración F4.
+  - Se comprueba con: `cargo test --test f4_rng_catalog --locked`; vectores de
+    subsemillas y resultados prueban regeneración, reordenación y aislamiento
+    entre ámbitos.
+
+- ☐ F4.0.3. Añadir `id-catalog-v3` y las derivaciones deterministas
+  `PreHopInstanceId` y `TechnicalPairId`, sin emitir todavía una pareja.
+  - Depende de: F4.0.2.
+  - Procede de: DTC-037/039/086–087 y REQ-DAT-18/68/71.
+  - Cambia: `src/identity.rs`, `src/technical_identity.rs`, el recurso de
+    catálogo y pruebas de vectores; conserva literalmente las clases v2.
+  - Se comprueba con: `cargo test --test f4_technical_identity --locked`;
+    vectores BLAKE3 prueban repetición, caracteres, longitud, reordenación y
+    colisión de ambas clases nuevas.
+
+- ☐ F4.0.4. Cerrar la independencia entre decisiones técnicas ya publicadas.
+  - Depende de: F4.0.1–F4.0.3.
+  - Procede de: DTC-086/088 y REQ-DAT-15/70–71.
+  - Cambia: solo *fixtures* y comparadores de prueba; no modifica el catálogo.
+  - Se comprueba con: `cargo test --test f4_rng_isolation --locked`; un vector
+    manual compara regeneración, reordenación, hilos y una transferencia
+    simultánea sin cadenas.
+
+  **Inventario F4 ya acordado, pero no materializado por F4.0.** Estos son los
+  campos de autoría y proyecciones que sus hitos propietarios conectarán cuando
+  exista un productor real; F4.0 no publica esquemas, documentos vacíos ni
+  cambios de versión.
 
   | Contrato | Ruta, tipo y unidad | Obligatorio, predeterminado y restricción |
   |---|---|---|
@@ -167,17 +191,6 @@ cuando F3 esté cerrado, sin anticipar un formato de perfil empírico.
   | Configuración efectiva v4 | technical_event conserva todos los valores anteriores ya resueltos; profile={id:string, resource_path:relative-path, sha256:hex64, preparation:enum PCR-free}; rng_catalog:string, id_catalog={version:string, derivations:{v1:[class],v2:[class]}}; libraries es lista ordenada por individual_id de {individual_id,library_id,i7,i5,is_contamination_recipient}. | Todos los predeterminados se materializan; no contiene campos de autoría ausentes ni read_count. Las listas v1/v2 del catálogo son no vacías, disjuntas y cubren respectivamente las clases heredadas y PH_/TP_; libraries coincide exactamente con individual_ids. |
   | Manifiesto general v4 | Conserva manifest_kind:string, schema_version:string, status:enum, run_id, root_seed, diagnostics:lista y referencias heredadas. technical_events contiene por evento {event_id, effective_config:{path,size_bytes:u64,sha256:hex64}, profile:{id,sha256}, rng_catalog, id_catalog, event_manifest:{path,size_bytes:u64,sha256:hex64}}. | Una entrada por el único evento; toda ruta es relativa, todo tamaño es ≥0 y cada sha256 tiene 64 hexadecimales. status y diagnósticos siguen el contrato F3 de publicación. |
   | Manifiesto de evento v2 | Conserva manifest_kind:string, schema_version:string, event_id, status, reference_id, batch_id, event_subseed, diagnostics y artefactos heredados. profile={id,resource_path,sha256,preparation}; rng_catalog:string; id_catalog={version,derivations}; libraries es lista de {individual_id,library_id,read_group_id,i7,i5}; coverage={target_x,basic_x,final_x,denominator_bases,n_bases}; artifacts={chimera:{rate,realized_pairs},pcr:{applicable:false},optical_duplicates:{realized_pairs:0},gc:{mode:neutral},adapters:{enabled:false}}; contamination={range_percent,recipients,realized_by_recipient}; demultiplexing={index_hopping_rate,reassigned_pairs,discarded_pairs,unassigned_pairs}; errors={per_mate:[{mate,opportunities,errors,realized_rate}]}; outputs es lista de {path,size_bytes:u64,sha256,kind}. | Campos numéricos son finitos y no negativos salvo los Phred/porcentajes ya restringidos en configuración. Libraries coincide con la configuración efectiva; outputs contiene exactamente R1/R2 por biblioteca final. No guarda procedencia ni IDs individuales, FASTQ limpio, BAM/CRAM, mapeo ni entradas externas. |
-
-- ☐ F4.0.2. Probar la regeneración de una pareja desde su clave y que cobertura,
-  quimera, error, contaminación y *index hopping* no consumen ni alteran el
-  ámbito de otra decisión.
-  - Depende de: F4.0.1.
-  - Procede de: DTC-086/088 y REQ-DAT-15/70–71.
-  - Cambia: sólo fixtures y comparadores de prueba; conserva el catálogo como
-    contrato único.
-  - Se comprueba con: `cargo test --test f4_rng_isolation --locked`; un vector
-    manual compara regeneración, reordenación, hilos y una transferencia
-    simultánea sin cadenas.
 
 > **PAUSA-F4.0.** Confirmar vectores literales de `f4-technical-v3`, incluidos
 > los dos extremos de porcentaje, quimera y error; confirmar además el vector
@@ -193,12 +206,12 @@ conserva dos *mates* con una identidad de pareja única.
 - ☐ F4.1.1. Convertir el contrato fijo `illumina-se-minimal-v1` de F3 en la
   frontera del único perfil F4 Illumina PE versionado, sin asignar valores
   cuantitativos no aprobados.
-  - Depende de: PAUSA-DISEÑO-F4, F4.0.2, PAUSA-F4.0 y DTPD-106 aprobada.
+  - Depende de: PAUSA-DISEÑO-F4, F4.0.4, PAUSA-F4.0 y DTPD-106 aprobada.
   - Procede de: REQ-TEC-01/05/09–10, REQ-DAT-12/14/16/18, REQ-CONF-66/82/101–102,
     REQ-MAN-54/60/78 y arquitectura §5.5/§6.
   - Cambia: `src/application.rs`, `src/configuration.rs`,
     `src/technical_identity.rs`, `src/event_manifest.rs` y contratos TOML/JSON
-    vigentes; conecta perfil y preparación a campos ya declarados por F4.0.1,
+    vigentes; conecta perfil y preparación al inventario ya acordado,
     sin compatibilidad; verifica
     el recurso y SHA-256 fijados por DTPD-106 y registra ID,
     versión, recurso, digest, preparación y parámetros/sustituciones con
@@ -387,7 +400,7 @@ con muestreo WGS básico separado de la evidencia final.
   rango y repartir sus unidades al azar entre los otros individuos de su misma
   población. Por defecto recibe toda la población seleccionada, con subconjunto
   explícito opcional, sin crear otra biblioteca ni mezclar disposiciones.
-  - Depende de: PAUSA-DISEÑO-F4, F4.0.2, F4.1.3, F4.2.2, F4.3.3 y
+  - Depende de: PAUSA-DISEÑO-F4, F4.0.4, F4.1.3, F4.2.2, F4.3.3 y
     PAUSA-F4.3.
   - Procede de: REQ-CONF-75–77, REQ-CONT-01–09/15–16 y REQ-DAT-25–28/69/71.
   - Cambia: configuración, planificador de asignación y manifiesto;
@@ -436,7 +449,7 @@ con muestreo WGS básico separado de la evidencia final.
 - ☐ F4.5.1. Validar UDI obligatorios y simular *index hopping* únicamente entre
   bibliotecas UDI de la tanda, con descarte defensivo de combinaciones
   inesperadas.
-  - Depende de: PAUSA-DISEÑO-F4, F4.0.2, F4.4.2 y PAUSA-F4.4.
+  - Depende de: PAUSA-DISEÑO-F4, F4.0.4, F4.4.2 y PAUSA-F4.4.
   - Procede de: REQ-CONF-78–81, REQ-DAT-29–32/70–71, REQ-CONT-10–11 y DTC-087.
   - Cambia: configuración de tanda, plan de demultiplexado y validación de
     colisiones; cada biblioteca declara `i7` e `i5` de exactamente ocho bases
