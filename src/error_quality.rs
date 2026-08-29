@@ -230,6 +230,11 @@ pub enum ErrorQualityError {
         cycle: u16,
         value: f64,
     },
+    InvalidFinalPhred {
+        mate: TechnicalMate,
+        cycle: u16,
+        value: f64,
+    },
     InvalidBase {
         mate: TechnicalMate,
         cycle: u16,
@@ -248,6 +253,7 @@ impl fmt::Display for ErrorQualityError {
             Self::InvalidFinalProbability { .. } => {
                 f.write_str("probabilidad final de error F4 inválida")
             }
+            Self::InvalidFinalPhred { .. } => f.write_str("Phred final emitido F4 fuera de 0..=93"),
             Self::InvalidBase { .. } => f.write_str("base verdadera F4 inválida"),
             Self::CounterOverflow => f.write_str("contador agregado F4 desbordado"),
             Self::Random(error) => write!(f, "muestreo F4 inválido: {error:?}"),
@@ -350,15 +356,9 @@ fn transform_mate(
         if !matches!(base, b'A' | b'C' | b'G' | b'T') {
             return Err(ErrorQualityError::InvalidBase { mate, cycle, base });
         }
-        let quality = effective_phred_for_cycle(profile, mate, cycle, settings)?;
-        let probability = final_error_probability(quality, settings.error_scale(mate));
-        if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
-            return Err(ErrorQualityError::InvalidFinalProbability {
-                mate,
-                cycle,
-                value: probability,
-            });
-        }
+        let adjusted_phred = effective_phred_for_cycle(profile, mate, cycle, settings)?;
+        let probability = final_error_probability(adjusted_phred, settings.error_scale(mate));
+        let emitted_phred = emitted_phred_from_probability(probability, mate, cycle)?;
         counts.opportunities = counts
             .opportunities
             .checked_add(1)
@@ -399,7 +399,7 @@ fn transform_mate(
             base
         };
         sequence.push(observed);
-        phred.push(quality);
+        phred.push(emitted_phred);
     }
     Ok((
         ObservedMate {
@@ -430,6 +430,36 @@ fn interpolated_phred(curve: QualityCurve, cycle: u16) -> Option<u8> {
 
 fn final_error_probability(phred: u8, scale: f64) -> f64 {
     libm::pow(10.0, -f64::from(phred) / 10.0) * scale
+}
+
+fn emitted_phred_from_probability(
+    probability: f64,
+    mate: TechnicalMate,
+    cycle: u16,
+) -> Result<u8, ErrorQualityError> {
+    if !probability.is_finite() || !(0.0..=1.0).contains(&probability) || probability == 0.0 {
+        return Err(ErrorQualityError::InvalidFinalProbability {
+            mate,
+            cycle,
+            value: probability,
+        });
+    }
+
+    let phred = -10.0 * libm::log10(probability);
+    let rounded = phred.round();
+    if !rounded.is_finite() || !(0.0..=93.0).contains(&rounded) {
+        return Err(ErrorQualityError::InvalidFinalPhred {
+            mate,
+            cycle,
+            value: rounded,
+        });
+    }
+
+    u8::try_from(rounded as i32).map_err(|_| ErrorQualityError::InvalidFinalPhred {
+        mate,
+        cycle,
+        value: rounded,
+    })
 }
 
 fn profile_mate(mate: TechnicalMate) -> ProfileMate {

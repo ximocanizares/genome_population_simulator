@@ -2,7 +2,7 @@
 //! literales DTPD-106 y no llaman al interpolador ni al productor.
 
 use genome_population_simulator::error_quality::{
-    ErrorQualitySettings, effective_phred_for_cycle, transform_paired_end,
+    ErrorQualityError, ErrorQualitySettings, effective_phred_for_cycle, transform_paired_end,
 };
 use genome_population_simulator::fastq_output::encode_fastq_sanger_qualities;
 use genome_population_simulator::haplotype::{Individual, Ploidy};
@@ -159,21 +159,88 @@ fn n_is_preserved_at_phred_zero_without_an_error_opportunity() {
 #[test]
 fn mate_error_streams_are_isolated_from_r1_adjustments() {
     let (root, event, pair, profile) = pair_from(&vec![b'A'; 250]);
-    let r1_disabled = ErrorQualitySettings::new(-36, -35, 0.0, 1.0).expect("settings");
-    let both_enabled = ErrorQualitySettings::new(-36, -35, 1.0, 1.0).expect("settings");
-    let left = transform_paired_end(root, &event, &pair, profile, r1_disabled).expect("left");
-    let right = transform_paired_end(root, &event, &pair, profile, both_enabled).expect("right");
+    let lower_r1_scale = ErrorQualitySettings::new(-35, -35, 0.5, 1.0).expect("settings");
+    let neutral_r1_scale = ErrorQualitySettings::new(-35, -35, 1.0, 1.0).expect("settings");
+    let left = transform_paired_end(root, &event, &pair, profile, lower_r1_scale).expect("left");
+    let right =
+        transform_paired_end(root, &event, &pair, profile, neutral_r1_scale).expect("right");
 
     assert_eq!(left.observed().r2(), right.observed().r2());
     assert_eq!(left.report().r2(), right.report().r2());
-    assert_eq!(left.report().r1().errors(), 0);
-    assert_eq!(right.report().r1().errors(), 1);
 }
 
 #[test]
-fn invalid_probability_and_fastq_phred_are_rejected_without_saturation() {
+fn error_scale_recalculates_the_emitted_fastq_phred_from_final_probability() {
     let (root, event, pair, profile) = pair_from(&vec![b'A'; 250]);
-    let invalid_probability = ErrorQualitySettings::new(-36, -35, 2.0, 1.0).expect("settings");
-    assert!(transform_paired_end(root, &event, &pair, profile, invalid_probability).is_err());
+    let doubled = ErrorQualitySettings::new(0, 0, 2.0, 2.0).expect("settings");
+    let transformed =
+        transform_paired_end(root, &event, &pair, profile, doubled).expect("transform");
+
+    // Oráculo independiente: Q36 × 2 da
+    // -10 log10(2 × 10^-3.6) = 32.9897..., que redondea a Q33.
+    // Para R2, Q35 × 2 da 31.9897..., que redondea a Q32.
+    assert_eq!(transformed.observed().r1().phred(), &[33]);
+    assert_eq!(transformed.observed().r2().phred(), &[32]);
+    assert_eq!(
+        encode_fastq_sanger_qualities(transformed.observed().r1().phred()).expect("Sanger"),
+        b"B"
+    );
+}
+
+#[test]
+fn final_probability_and_emitted_phred_boundaries_are_rejected_without_saturation() {
+    let (root, event, pair, profile) = pair_from(&vec![b'A'; 250]);
+
+    // Q36 con escala 10^-5.7 da exactamente Q93 tras la conversión inversa.
+    let maximum_representable =
+        ErrorQualitySettings::new(0, 0, 1.995_262_314_968_879_5e-6, 1.0).expect("settings");
+    let transformed =
+        transform_paired_end(root, &event, &pair, profile, maximum_representable).expect("Q93");
+    assert_eq!(transformed.observed().r1().phred(), &[93]);
+    assert_eq!(
+        encode_fastq_sanger_qualities(transformed.observed().r1().phred()).expect("Sanger"),
+        b"~"
+    );
+
+    let zero_probability = ErrorQualitySettings::new(0, 0, 0.0, 1.0).expect("settings");
+    assert!(matches!(
+        transform_paired_end(root, &event, &pair, profile, zero_probability),
+        Err(ErrorQualityError::InvalidFinalProbability {
+            mate: TechnicalMate::R1,
+            cycle: 1,
+            value,
+        }) if value == 0.0
+    ));
+
+    let above_one_probability = ErrorQualitySettings::new(-36, -35, 2.0, 1.0).expect("settings");
+    assert!(matches!(
+        transform_paired_end(root, &event, &pair, profile, above_one_probability),
+        Err(ErrorQualityError::InvalidFinalProbability {
+            mate: TechnicalMate::R1,
+            cycle: 1,
+            value,
+        }) if value == 2.0
+    ));
+
+    // Q36 con escala 10^-5.8 da una calidad final Q94, fuera del rango
+    // FASTQ permitido; no se admite saturarla a Q93.
+    let unrepresentable_phred =
+        ErrorQualitySettings::new(0, 0, 1.584_893_192_461_114e-6, 1.0).expect("settings");
+    assert!(matches!(
+        transform_paired_end(root, &event, &pair, profile, unrepresentable_phred),
+        Err(ErrorQualityError::InvalidFinalPhred {
+            mate: TechnicalMate::R1,
+            cycle: 1,
+            value,
+        }) if value == 94.0
+    ));
+
+    assert!(matches!(
+        ErrorQualitySettings::new(0, 0, f64::INFINITY, 1.0),
+        Err(ErrorQualityError::InvalidErrorScale {
+            mate: TechnicalMate::R1,
+            value,
+        }) if value.is_infinite()
+    ));
     assert!(encode_fastq_sanger_qualities(&[94]).is_err());
 }

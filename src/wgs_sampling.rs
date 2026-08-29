@@ -116,6 +116,66 @@ pub struct WgsReadPlan {
     haploid_eligible_length: u64,
 }
 
+/// Plan cuantitativo de una biblioteca Illumina PE antes de formar fragmentos.
+///
+/// El denominador conserva la referencia estructural haploide completa: las
+/// secuencias demasiado cortas para el inserto mínimo siguen contando aquí,
+/// pero se declaran aparte con cobertura básica cero. Así una deleción o una
+/// referencia de mapeo no puede cambiar el significado de la cobertura
+/// solicitada.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WgsPairedEndPlan {
+    target_coverage: f64,
+    pair_count: u64,
+    haploid_reference_length: u64,
+    emitted_bases_per_pair: u64,
+    equivalent_coverage: f64,
+    zero_coverage_sequences: Vec<SequenceId>,
+}
+
+impl WgsPairedEndPlan {
+    /// Cobertura común solicitada para el evento, en veces la referencia
+    /// estructural haploide.
+    #[must_use]
+    pub const fn target_coverage(&self) -> f64 {
+        self.target_coverage
+    }
+
+    /// Número entero de parejas derivado del objetivo, nunca una entrada de
+    /// configuración independiente.
+    #[must_use]
+    pub const fn pair_count(&self) -> u64 {
+        self.pair_count
+    }
+
+    /// Denominador estructural: todas las secuencias de referencia una vez,
+    /// sin ploidía y sin filtrar las que no admiten un inserto PE.
+    #[must_use]
+    pub const fn haploid_reference_length(&self) -> u64 {
+        self.haploid_reference_length
+    }
+
+    /// Bases emitidas por pareja. Incluye R1 y R2 aunque sus intervalos se
+    /// solapen sobre el mismo inserto.
+    #[must_use]
+    pub const fn emitted_bases_per_pair(&self) -> u64 {
+        self.emitted_bases_per_pair
+    }
+
+    /// Cobertura que equivale al número entero de parejas derivado.
+    #[must_use]
+    pub const fn equivalent_coverage(&self) -> f64 {
+        self.equivalent_coverage
+    }
+
+    /// Secuencias estructurales excluidas del muestreo PE por no alojar el
+    /// inserto mínimo. Su cobertura WGS básica es exactamente cero.
+    #[must_use]
+    pub fn zero_coverage_sequences(&self) -> &[SequenceId] {
+        &self.zero_coverage_sequences
+    }
+}
+
 impl WgsReadPlan {
     #[must_use]
     pub const fn read_count(self) -> u64 {
@@ -138,9 +198,78 @@ pub enum WgsSamplingError {
     NoEligibleSequence { read_length: u64 },
     LengthOverflow,
     InvalidCoverageMean,
+    InvalidPairedEndCoverage,
+    PairCountOverflow,
     Random(RandomSamplingError),
     TechnicalIdentity(Diagnostic),
     Materialization(MaterializationError),
+}
+
+/// Resuelve la cobertura F4 a parejas Illumina PE completas.
+///
+/// La conversión es determinista: `target_x * haploid_length / (2 * read_length)`
+/// se redondea a la pareja más cercana y un empate de media pareja asciende.
+/// No usa el contador Poisson single-end de F3: la estocasticidad básica PE
+/// pertenece a los fragmentos, copias y posiciones seleccionados después.
+pub fn resolve_wgs_paired_end_plan(
+    reference: &Reference,
+    profile: F4TechnicalProfile,
+    read_length: u16,
+    target_coverage: f64,
+) -> Result<WgsPairedEndPlan, WgsSamplingError> {
+    if !target_coverage.is_finite() || target_coverage < 0.0 {
+        return Err(WgsSamplingError::InvalidPairedEndCoverage);
+    }
+    if !profile.common_read_length().contains(read_length)
+        || read_length > profile.insert_length().minimum_bases()
+    {
+        return Err(WgsSamplingError::NoEligibleSequence {
+            read_length: u64::from(read_length),
+        });
+    }
+
+    let haploid_reference_length =
+        reference
+            .sequences()
+            .iter()
+            .try_fold(0_u64, |total, sequence| {
+                total
+                    .checked_add(sequence.length())
+                    .ok_or(WgsSamplingError::LengthOverflow)
+            })?;
+    let emitted_bases_per_pair = u64::from(read_length)
+        .checked_mul(2)
+        .ok_or(WgsSamplingError::LengthOverflow)?;
+    let raw_pair_count =
+        target_coverage * (haploid_reference_length as f64) / (emitted_bases_per_pair as f64);
+    if !raw_pair_count.is_finite() || raw_pair_count > u64::MAX as f64 {
+        return Err(WgsSamplingError::PairCountOverflow);
+    }
+    // `round` se aleja de cero en el empate; el dominio ya garantiza que el
+    // valor es no negativo, por lo que implementa exactamente empate hacia
+    // arriba sin una tolerancia numérica ad hoc.
+    let pair_count = raw_pair_count.round() as u64;
+    let equivalent_coverage = if haploid_reference_length == 0 {
+        0.0
+    } else {
+        (pair_count as f64) * (emitted_bases_per_pair as f64) / (haploid_reference_length as f64)
+    };
+    let minimum_insert = u64::from(profile.insert_length().minimum_bases());
+    let zero_coverage_sequences = reference
+        .sequences()
+        .iter()
+        .filter(|sequence| sequence.length() < minimum_insert)
+        .map(|sequence| sequence.id().clone())
+        .collect();
+
+    Ok(WgsPairedEndPlan {
+        target_coverage,
+        pair_count,
+        haploid_reference_length,
+        emitted_bases_per_pair,
+        equivalent_coverage,
+        zero_coverage_sequences,
+    })
 }
 
 struct EligibleCopy<'a> {
@@ -424,13 +553,87 @@ pub struct WgsPairedEndSampler<'a> {
     identities: &'a TechnicalIdentityPlan,
     profile: F4TechnicalProfile,
     read_length: u16,
+    effective_insert_maximum_bases: u16,
+    coverage_plan: Option<WgsPairedEndPlan>,
     remaining_pairs: u64,
     next_ordinal: u64,
     identity_deriver: F4TechnicalIdentityDeriver,
     failed: bool,
 }
 
+struct PairCountConstruction {
+    pair_count: u64,
+    coverage_plan: Option<WgsPairedEndPlan>,
+    allow_empty_eligible_space: bool,
+}
+
 impl<'a> WgsPairedEndSampler<'a> {
+    /// Construye el único muestreador PE admisible en F4 a partir de la
+    /// cobertura común del evento. No expone un objetivo por número de parejas.
+    pub fn new_for_coverage(
+        reference: &'a Reference,
+        individual: &'a Individual,
+        identities: &'a TechnicalIdentityPlan,
+        profile: F4TechnicalProfile,
+        read_length: u16,
+        target_coverage: f64,
+    ) -> Result<Self, WgsSamplingError> {
+        let plan = resolve_wgs_paired_end_plan(reference, profile, read_length, target_coverage)?;
+        Self::new_with_pair_count(
+            reference,
+            individual,
+            identities,
+            profile,
+            read_length,
+            PairCountConstruction {
+                pair_count: plan.pair_count(),
+                coverage_plan: Some(plan),
+                allow_empty_eligible_space: true,
+            },
+        )
+    }
+
+    /// Alias explícito para consumidores que nombran el campo de configuración
+    /// `target_coverage_wgs`.
+    pub fn new_for_target_coverage(
+        reference: &'a Reference,
+        individual: &'a Individual,
+        identities: &'a TechnicalIdentityPlan,
+        profile: F4TechnicalProfile,
+        read_length: u16,
+        target_coverage: f64,
+    ) -> Result<Self, WgsSamplingError> {
+        Self::new_for_coverage(
+            reference,
+            individual,
+            identities,
+            profile,
+            read_length,
+            target_coverage,
+        )
+    }
+
+    /// Plan de cobertura que originó esta biblioteca F4.
+    ///
+    /// El constructor interno `new_for_pair_count` de F4.1 no tiene uno: su
+    /// entero solo permite probar la formación de pares antes de F4.2.
+    #[must_use]
+    pub fn coverage_plan(&self) -> Option<&WgsPairedEndPlan> {
+        self.coverage_plan.as_ref()
+    }
+
+    /// Límite superior efectivo del inserto sorteado para esta biblioteca.
+    ///
+    /// Si alguna copia elegible es más corta que el máximo del perfil, el
+    /// sorteo se condiciona al intervalo que puede alojar al menos una copia.
+    /// Este valor permite que el informe distinga ese condicionamiento de los
+    /// límites configurados por el perfil. La elección posterior de copia y
+    /// comienzo sigue filtrando las candidatas que alojan cada inserto concreto.
+    #[must_use]
+    pub const fn effective_insert_maximum_bases(&self) -> u16 {
+        self.effective_insert_maximum_bases
+    }
+
     pub fn new_for_pair_count(
         reference: &'a Reference,
         individual: &'a Individual,
@@ -438,6 +641,28 @@ impl<'a> WgsPairedEndSampler<'a> {
         profile: F4TechnicalProfile,
         read_length: u16,
         pair_count: u64,
+    ) -> Result<Self, WgsSamplingError> {
+        Self::new_with_pair_count(
+            reference,
+            individual,
+            identities,
+            profile,
+            read_length,
+            PairCountConstruction {
+                pair_count,
+                coverage_plan: None,
+                allow_empty_eligible_space: false,
+            },
+        )
+    }
+
+    fn new_with_pair_count(
+        reference: &'a Reference,
+        individual: &'a Individual,
+        identities: &'a TechnicalIdentityPlan,
+        profile: F4TechnicalProfile,
+        read_length: u16,
+        construction: PairCountConstruction,
     ) -> Result<Self, WgsSamplingError> {
         if identities.reference_id() != reference.id() {
             return Err(WgsSamplingError::TechnicalPlanReferenceMismatch);
@@ -455,8 +680,11 @@ impl<'a> WgsPairedEndSampler<'a> {
                 read_length: u64::from(read_length),
             });
         }
-        if pair_count > 0
-            && !has_copy_for_insert(individual, profile.insert_length().minimum_bases())?
+        let effective_insert_maximum_bases = effective_insert_maximum_bases(individual, profile)?;
+        let has_eligible_copy = effective_insert_maximum_bases.is_some();
+        if construction.pair_count > 0
+            && !has_eligible_copy
+            && !construction.allow_empty_eligible_space
         {
             return Err(WgsSamplingError::NoEligibleSequence {
                 read_length: u64::from(profile.insert_length().minimum_bases()),
@@ -468,7 +696,21 @@ impl<'a> WgsPairedEndSampler<'a> {
             identities,
             profile,
             read_length,
-            remaining_pairs: pair_count,
+            // Si hay al menos una copia de tamaño mínimo, el máximo está
+            // acotado tanto por el perfil como por la copia más larga. Así no
+            // puede salir un inserto sin candidatas (p. ej. 301--450 sobre
+            // una biblioteca cuya copia más larga mide 300 pb).
+            effective_insert_maximum_bases: effective_insert_maximum_bases
+                .unwrap_or_else(|| profile.insert_length().minimum_bases()),
+            coverage_plan: construction.coverage_plan,
+            // Una referencia puede estar formada solo por secuencias más
+            // cortas que el inserto mínimo. F4 las registra a cero y no aborta
+            // el evento; no se inventan extremos, inserciones ni reintentos.
+            remaining_pairs: if has_eligible_copy {
+                construction.pair_count
+            } else {
+                0
+            },
             next_ordinal: 0,
             identity_deriver: F4TechnicalIdentityDeriver::new(
                 identities.root_seed(),
@@ -496,7 +738,7 @@ impl<'a> WgsPairedEndSampler<'a> {
             f64::from(distribution.mean_bases()),
             f64::from(distribution.standard_deviation_bases()),
             i64::from(distribution.minimum_bases()),
-            i64::from(distribution.maximum_bases()),
+            i64::from(self.effective_insert_maximum_bases),
         )
         .map_err(WgsSamplingError::Random)?;
         let insert = u64::try_from(insert).map_err(|_| WgsSamplingError::LengthOverflow)?;
@@ -559,21 +801,36 @@ impl Iterator for WgsPairedEndSampler<'_> {
     }
 }
 
-fn has_copy_for_insert(individual: &Individual, insert: u16) -> Result<bool, WgsSamplingError> {
-    let insert = u64::from(insert);
+/// Devuelve el máximo de la distribución que puede alojar alguna copia actual.
+///
+/// Se conserva el mínimo del perfil como frontera de elegibilidad; por debajo
+/// de él no hay espacio PE. Sobre ese mínimo, condicionar la normal truncada
+/// evita que una muestra válida en el perfil sea imposible para todas las
+/// copias de esta biblioteca.
+fn effective_insert_maximum_bases(
+    individual: &Individual,
+    profile: F4TechnicalProfile,
+) -> Result<Option<u16>, WgsSamplingError> {
+    let minimum = u64::from(profile.insert_length().minimum_bases());
+    let maximum = u64::from(profile.insert_length().maximum_bases());
+    let mut largest = None;
     for genotype in individual.sequences() {
         for copy in genotype.copies() {
-            if copy
+            let current_length = copy
                 .segments()
                 .current_length()
-                .map_err(|_| WgsSamplingError::LengthOverflow)?
-                >= insert
-            {
-                return Ok(true);
+                .map_err(|_| WgsSamplingError::LengthOverflow)?;
+            if current_length >= minimum {
+                largest = Some(largest.unwrap_or(0_u64).max(current_length));
             }
         }
     }
-    Ok(false)
+    let Some(largest) = largest else {
+        return Ok(None);
+    };
+    u16::try_from(largest.min(maximum))
+        .map(Some)
+        .map_err(|_| WgsSamplingError::LengthOverflow)
 }
 
 fn fragment_candidates<'a>(
