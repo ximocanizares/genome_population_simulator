@@ -284,7 +284,7 @@
     },
     "technical_event": {
       "type": "object", "additionalProperties": false,
-      "required": ["event_id", "individual_ids", "libraries", "profile", "read_length", "quality", "rng_catalog", "id_catalog", "target"],
+      "required": ["event_id", "individual_ids", "libraries", "profile", "read_length", "quality", "artifacts", "rng_catalog", "id_catalog", "target"],
       "properties": {
         "event_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
         "individual_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
@@ -292,6 +292,7 @@
         "profile": {"$ref": "#/$defs/technical_profile"},
         "read_length": {"type": "integer", "minimum": 1, "maximum": 150},
         "quality": {"type": "object", "additionalProperties": false, "required": ["acgt_phred", "n_phred"], "properties": {"acgt_phred": {"const": 40}, "n_phred": {"const": 0}}},
+        "artifacts": {"$ref": "#/$defs/technical_artifacts"},
         "rng_catalog": {"const": "f4-technical-v3"},
         "id_catalog": {"$ref": "#/$defs/id_catalog"},
         "target": {"type": "object", "additionalProperties": false, "required": ["coverage_wgs"], "properties": {"coverage_wgs": {"type": "number", "minimum": 0}}}
@@ -307,6 +308,7 @@
       }
     },
     "technical_profile": {"type":"object","additionalProperties":false,"required":["id","resource_path","sha256","preparation"],"properties":{"id":{"const":"gps-hiseqx-pcrfree-pe150-v1"},"resource_path":{"const":"resources/f4/gps-hiseqx-pcrfree-pe150-v1.json"},"sha256":{"const":"3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea"},"preparation":{"const":"pcr_free"}}},
+    "technical_artifacts": {"type":"object","additionalProperties":false,"required":["pcr","optical_duplicates"],"properties":{"pcr":{"type":"object","additionalProperties":false,"required":["applicable"],"properties":{"applicable":{"const":false}}},"optical_duplicates":{"type":"object","additionalProperties":false,"required":["realized_pairs"],"properties":{"realized_pairs":{"const":0}}}}},
     "id_catalog": {"type":"object","additionalProperties":false,"required":["version","derivations"],"properties":{"version":{"const":"3"},"derivations":{"type":"object","additionalProperties":false,"required":["v1","v2"],"properties":{"v1":{"const":["execution","reference","individual","event","batch","library","read_group","template"]},"v2":{"const":["PreHopInstanceId","TechnicalPairId"]}}}}},
     "reversible_text": {
       "type": "object",

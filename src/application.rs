@@ -285,6 +285,20 @@ impl EffectiveTechnicalEvent {
     pub const fn n_phred(&self) -> u8 {
         ILLUMINA_SE_MINIMAL_N_PHRED
     }
+
+    /// El perfil inicial no usa amplificación; por tanto no existe una tasa
+    /// PCR efectiva que pueda configurar o materializar F4.
+    #[must_use]
+    pub const fn pcr_duplicates_applicable(&self) -> bool {
+        false
+    }
+
+    /// El perfil inicial tampoco modela duplicados ópticos. El recuento es un
+    /// hecho efectivo, no una tasa de entrada ni el resultado de un sorteo.
+    #[must_use]
+    pub const fn realized_optical_duplicate_pairs(&self) -> u64 {
+        0
+    }
 }
 
 /// Origen efectivo del recurso canónico F2.2.7.

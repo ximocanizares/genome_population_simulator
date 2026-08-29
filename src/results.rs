@@ -387,6 +387,12 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
         },
         "read_length": event.read_length(),
         "quality": {"acgt_phred": event.acgt_phred(), "n_phred": event.n_phred()},
+        "artifacts": {
+            "pcr": {"applicable": event.pcr_duplicates_applicable()},
+            "optical_duplicates": {
+                "realized_pairs": event.realized_optical_duplicate_pairs(),
+            },
+        },
         "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
         "id_catalog": f4_id_catalog_value(),
         "libraries": resolved_technical_libraries(config, event),
@@ -4475,12 +4481,13 @@ fn validate_effective_technical_event(
     path: &Path,
 ) -> Result<(), Diagnostic> {
     let event = effective_object(effective, "technical_event", path)?;
-    const FIELDS: [&str; 9] = [
+    const FIELDS: [&str; 10] = [
         "event_id",
         "individual_ids",
         "profile",
         "read_length",
         "quality",
+        "artifacts",
         "libraries",
         "rng_catalog",
         "id_catalog",
@@ -4522,6 +4529,30 @@ fn validate_effective_technical_event(
         || effective_nonnegative_u64(quality, "n_phred", path)? != 0
     {
         return Err(effective_error(path, "calidad técnica mínima inválida"));
+    }
+    let artifacts = effective_object(event, "artifacts", path)?;
+    validate_effective_closed_object(
+        artifacts,
+        &["pcr", "optical_duplicates"],
+        "technical_event.artifacts",
+        path,
+    )?;
+    let pcr = effective_object(artifacts, "pcr", path)?;
+    validate_effective_closed_object(pcr, &["applicable"], "technical_event.artifacts.pcr", path)?;
+    let optical_duplicates = effective_object(artifacts, "optical_duplicates", path)?;
+    validate_effective_closed_object(
+        optical_duplicates,
+        &["realized_pairs"],
+        "technical_event.artifacts.optical_duplicates",
+        path,
+    )?;
+    if pcr.get("applicable") != Some(&Value::Bool(false))
+        || effective_nonnegative_u64(optical_duplicates, "realized_pairs", path)? != 0
+    {
+        return Err(effective_error(
+            path,
+            "artefactos de duplicación del perfil PCR-free inválidos",
+        ));
     }
     let mut individuals = BTreeSet::new();
     let individual_ids = effective_array(event, "individual_ids", path)?;
