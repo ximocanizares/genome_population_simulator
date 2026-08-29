@@ -7,9 +7,11 @@ use genome_population_simulator::adapters::{admit_toml_header, parse_declared_co
 use genome_population_simulator::application::build_effective_config;
 use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::event_manifest::{
-    EventManifest, EventManifestArtifact, EventManifestReference, event_manifest_bytes,
-    event_manifest_document, event_manifest_relative_path, validate_event_manifest_bytes,
+    EventManifest, EventManifestArtifact, EventManifestCoverage, EventManifestReference,
+    event_manifest_bytes, event_manifest_document, event_manifest_relative_path,
+    validate_event_manifest_bytes,
 };
+use genome_population_simulator::fastq_validation::F4CoverageReport;
 use genome_population_simulator::identity::ReferenceId;
 use genome_population_simulator::randomness::RootSeed;
 use genome_population_simulator::results::{ArtifactRecord, UnitState};
@@ -123,6 +125,13 @@ fn each_selected_library_has_one_canonical_fastq_result() {
         .as_array_mut()
         .expect("artifacts")
         .push(second_r2);
+    let mut second_coverage = two_libraries["coverage"][0].clone();
+    second_coverage["individual_id"] = json!("sample-B");
+    second_coverage["library_id"] = json!("LIB_sample-B");
+    two_libraries["coverage"]
+        .as_array_mut()
+        .expect("coverage")
+        .push(second_coverage);
     assert!(validate_document(&two_libraries).is_ok());
     two_libraries["artifacts"]
         .as_array_mut()
@@ -165,6 +174,14 @@ fn state_diagnostics_and_artifact_coherence_is_checked_externally() {
     let (manifest, _) = complete_manifest();
     let complete = event_manifest_document(&manifest).expect("event document");
 
+    let mut complete_without_coverage = complete.clone();
+    complete_without_coverage["coverage"] = json!([]);
+    assert_rejected_by_both(
+        &root,
+        "complete-without-coverage",
+        &complete_without_coverage,
+    );
+
     let mut complete_with_diagnostic = complete.clone();
     complete_with_diagnostic["diagnostics"] = json!([format_diagnostic()]);
     assert_rejected_by_both(&root, "complete-with-diagnostic", &complete_with_diagnostic);
@@ -179,6 +196,10 @@ fn state_diagnostics_and_artifact_coherence_is_checked_externally() {
 
     let failed = failed_document(&complete);
     assert_accepted_by_both(&root, "failed", &failed);
+
+    let mut failed_with_coverage = failed.clone();
+    failed_with_coverage["coverage"] = complete["coverage"].clone();
+    assert_rejected_by_both(&root, "failed-with-coverage", &failed_with_coverage);
 
     let mut ordered_diagnostics = failed.clone();
     ordered_diagnostics["diagnostics"]
@@ -265,6 +286,12 @@ fn complete_manifest() -> (EventManifest<'static>, &'static str) {
             diagnostic: None,
         },
     ]));
+    let coverage = Box::leak(Box::new([EventManifestCoverage {
+        individual_id: individual,
+        library_id: library.library_id(),
+        report: F4CoverageReport::from_base_counts(30.0, 30_000, 30_000, 0, 1_000, 0)
+            .expect("coverage"),
+    }]));
     (
         EventManifest {
             event,
@@ -275,6 +302,7 @@ fn complete_manifest() -> (EventManifest<'static>, &'static str) {
                 fasta,
             },
             artifacts,
+            coverage,
             diagnostics: &[],
         },
         "reads-main",
@@ -332,6 +360,7 @@ fn failed_document(complete: &serde_json::Value) -> serde_json::Value {
     failed["artifacts"][0]["state"] = json!("failed");
     failed["artifacts"][0]["artifact"] = serde_json::Value::Null;
     failed["artifacts"][0]["diagnostic_code"] = json!("GPS-FMT-006");
+    failed["coverage"] = json!([]);
     failed["diagnostics"] = json!([format_diagnostic()]);
     failed
 }

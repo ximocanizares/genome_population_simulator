@@ -44,6 +44,85 @@ pub struct WgsCoverageObservation {
     relative_deviation: Option<f64>,
 }
 
+/// Las tres medidas de cobertura F4 de una biblioteca.
+///
+/// El objetivo solo se compara con la WGS básica previa a efectos técnicos.
+/// La cobertura FASTQ final se informa separadamente y, cuando F4.4 todavía
+/// no ha sustituido parejas, todas sus bases son propias y ninguna es
+/// contaminante. `n_bases` cuenta las `N` observadas en el FASTQ final, por lo
+/// que puede superar el denominador estructural a coberturas mayores que una.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct F4CoverageReport {
+    target_x: f64,
+    basic_wgs_x: f64,
+    final_fastq_own_x: f64,
+    final_fastq_contaminant_x: f64,
+    denominator_bases: u64,
+    n_bases: u64,
+}
+
+impl F4CoverageReport {
+    /// Construye el resumen desde contadores ya validados por el productor o
+    /// por la relectura independiente.
+    pub fn from_base_counts(
+        target_x: f64,
+        basic_wgs_bases: u64,
+        final_fastq_own_bases: u64,
+        final_fastq_contaminant_bases: u64,
+        denominator_bases: u64,
+        n_bases: u64,
+    ) -> Result<Self, FastqValidationError> {
+        if !target_x.is_finite() || target_x < 0.0 {
+            return Err(FastqValidationError::InvalidCoverageSummary);
+        }
+        let final_fastq_bases = final_fastq_own_bases
+            .checked_add(final_fastq_contaminant_bases)
+            .ok_or(FastqValidationError::CounterOverflow)?;
+        if denominator_bases == 0 || n_bases > final_fastq_bases {
+            return Err(FastqValidationError::InvalidCoverageSummary);
+        }
+        let denominator = denominator_bases as f64;
+        Ok(Self {
+            target_x,
+            basic_wgs_x: (basic_wgs_bases as f64) / denominator,
+            final_fastq_own_x: (final_fastq_own_bases as f64) / denominator,
+            final_fastq_contaminant_x: (final_fastq_contaminant_bases as f64) / denominator,
+            denominator_bases,
+            n_bases,
+        })
+    }
+
+    #[must_use]
+    pub const fn target_x(self) -> f64 {
+        self.target_x
+    }
+
+    #[must_use]
+    pub const fn basic_wgs_x(self) -> f64 {
+        self.basic_wgs_x
+    }
+
+    #[must_use]
+    pub const fn final_fastq_own_x(self) -> f64 {
+        self.final_fastq_own_x
+    }
+
+    #[must_use]
+    pub const fn final_fastq_contaminant_x(self) -> f64 {
+        self.final_fastq_contaminant_x
+    }
+
+    #[must_use]
+    pub const fn denominator_bases(self) -> u64 {
+        self.denominator_bases
+    }
+
+    #[must_use]
+    pub const fn n_bases(self) -> u64 {
+        self.n_bases
+    }
+}
+
 impl WgsCoverageObservation {
     #[must_use]
     pub const fn target_coverage(self) -> Option<f64> {
@@ -76,6 +155,7 @@ pub struct FastqValidationReport {
     unknown_base_count: u64,
     verified_origin_count: u64,
     coverage: WgsCoverageObservation,
+    f4_coverage: F4CoverageReport,
 }
 
 impl FastqValidationReport {
@@ -108,6 +188,12 @@ impl FastqValidationReport {
     pub const fn coverage(&self) -> WgsCoverageObservation {
         self.coverage
     }
+
+    /// Medidas F4 sin equiparar la cobertura final con el objetivo.
+    #[must_use]
+    pub const fn f4_coverage(&self) -> F4CoverageReport {
+        self.f4_coverage
+    }
 }
 
 /// Error de una inconsistencia determinista del FASTQ o de la reproducción de
@@ -133,6 +219,7 @@ pub enum FastqValidationError {
         detail: &'static str,
     },
     CounterOverflow,
+    InvalidCoverageSummary,
 }
 
 /// Error al reproducir localmente las decisiones que originaron una biblioteca.
@@ -178,7 +265,6 @@ pub fn validate_wgs_fastq(
         .map_err(FastqValidationError::Replay)?;
     validate_declared_artifact(expected_artifact, identities, individual)?;
     let expected_count = replay.read_count;
-    let haploid_eligible_length = replay.haploid_eligible_length;
     let mut file = File::open(fastq_path).map_err(|error| io_error(fastq_path, "open", error))?;
     validate_canonical_bgzf_eof(&mut file, fastq_path, expected_count)?;
     file.seek(SeekFrom::Start(0))
@@ -260,11 +346,22 @@ pub fn validate_wgs_fastq(
     let base_count = expected_count
         .checked_mul(WGS_READ_LENGTH)
         .ok_or(FastqValidationError::CounterOverflow)?;
-    let realized_coverage = (base_count as f64) / (haploid_eligible_length as f64);
     let target_coverage = match target {
         EffectiveTechnicalEventTarget::CoverageWgs(value) => Some(value),
         EffectiveTechnicalEventTarget::ReadCount(_) => None,
     };
+    let structural_denominator_bases = reference.total_length();
+    let f4_coverage = F4CoverageReport::from_base_counts(
+        target_coverage.unwrap_or(0.0),
+        base_count,
+        base_count,
+        0,
+        structural_denominator_bases,
+        unknown_base_count,
+    )?;
+    // Esta observación histórica conserva su API, pero su valor realizado es
+    // la WGS básica: es la única medida que se compara con el objetivo.
+    let realized_coverage = f4_coverage.basic_wgs_x();
     let absolute_deviation = target_coverage.map(|value| (realized_coverage - value).abs());
     let relative_deviation = target_coverage
         .and_then(|value| (value != 0.0).then(|| (realized_coverage - value).abs() / value.abs()));
@@ -286,6 +383,7 @@ pub fn validate_wgs_fastq(
             absolute_deviation,
             relative_deviation,
         },
+        f4_coverage,
     })
 }
 
@@ -510,7 +608,6 @@ struct ReplayedWgsPlan<'a> {
     eligible_copies: Vec<ReplayedEligibleCopy<'a>>,
     total_start_count: u64,
     read_count: u64,
-    haploid_eligible_length: u64,
 }
 
 struct ReplayedWgsOrigin {
@@ -597,7 +694,6 @@ impl<'a> ReplayedWgsPlan<'a> {
             eligible_copies,
             total_start_count,
             read_count,
-            haploid_eligible_length,
         })
     }
 

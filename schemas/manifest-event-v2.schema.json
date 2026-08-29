@@ -4,7 +4,7 @@
   "title": "Manifiesto de evento técnico GPS v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["manifest_kind", "schema_version", "event_id", "event_type", "technology", "rng_catalog", "id_catalog", "state", "profile", "technical_batch_id", "selected_individuals", "event_subseed", "reference", "artifacts", "diagnostics"],
+  "required": ["manifest_kind", "schema_version", "event_id", "event_type", "technology", "rng_catalog", "id_catalog", "state", "profile", "technical_batch_id", "selected_individuals", "event_subseed", "reference", "coverage", "artifacts", "diagnostics"],
   "properties": {
     "manifest_kind": { "const": "gps_event_manifest" },
     "schema_version": { "const": "2" },
@@ -22,6 +22,7 @@
     },
     "event_subseed": { "$ref": "#/$defs/digest" },
     "reference": { "$ref": "#/$defs/reference" },
+    "coverage": { "type": "array", "items": { "$ref": "#/$defs/coverage" } },
     "artifacts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/event_artifact" } },
     "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
   },
@@ -31,6 +32,7 @@
       "then": {
         "properties": {
           "artifacts": { "items": { "properties": { "state": { "const": "complete" } }, "required": ["state"] } },
+          "coverage": { "minItems": 1 },
           "diagnostics": { "maxItems": 0 }
         }
       }
@@ -43,6 +45,7 @@
             "contains": { "properties": { "state": { "enum": ["incomplete", "failed"] } }, "required": ["state"] },
             "minContains": 1
           },
+          "coverage": { "maxItems": 0 },
           "diagnostics": { "minItems": 1 }
         }
       }
@@ -120,6 +123,21 @@
       "type": "object", "additionalProperties": false,
       "required": ["reference_id", "fasta"],
       "properties": { "reference_id": { "$ref": "#/$defs/id" }, "fasta": { "$ref": "#/$defs/artifact" } }
+    },
+    "coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["individual_id", "library_id", "target_x", "basic_x", "final_x", "denominator_bases", "n_bases"],
+      "properties": {
+        "individual_id": { "$ref": "#/$defs/id" }, "library_id": { "$ref": "#/$defs/id" },
+        "target_x": { "type": "number", "minimum": 0 }, "basic_x": { "type": "number", "minimum": 0 },
+        "final_x": { "$ref": "#/$defs/final_coverage" },
+        "denominator_bases": { "type": "integer", "minimum": 1 }, "n_bases": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "final_coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["own_x", "contaminant_x"],
+      "properties": { "own_x": { "type": "number", "minimum": 0 }, "contaminant_x": { "type": "number", "minimum": 0 } }
     },
     "diagnostic": {
       "type": "object", "additionalProperties": false,

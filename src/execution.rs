@@ -10,8 +10,8 @@ use crate::configuration::ExpectedConfigKind;
 use crate::coordinates::BasePosition;
 use crate::diagnostics::Diagnostic;
 use crate::event_manifest::{
-    EventManifest, EventManifestArtifact, EventManifestReference, event_manifest_bytes,
-    event_manifest_relative_path, validate_event_manifest_bytes,
+    EventManifest, EventManifestArtifact, EventManifestCoverage, EventManifestReference,
+    event_manifest_bytes, event_manifest_relative_path, validate_event_manifest_bytes,
 };
 use crate::fastq_output::write_wgs_fastq;
 use crate::fastq_validation::validate_wgs_fastq;
@@ -562,6 +562,7 @@ struct TechnicalEventArtifact {
     state: UnitState,
     artifact: Option<ArtifactRecord>,
     diagnostic: Option<Diagnostic>,
+    coverage: Option<crate::fastq_validation::F4CoverageReport>,
 }
 
 #[cfg(test)]
@@ -610,7 +611,7 @@ fn publish_technical_event(
                 WgsLibrarySampler::new(reference, individual, &identities, event.target())
                     .map_err(|error| technical_event_error("wgs_sampler", format!("{error:?}")))?;
             let publication = write_wgs_fastq(workspace, &mut sampler)?;
-            if let Err(cause) = validate_closed_wgs_fastq(
+            let coverage = match validate_closed_wgs_fastq(
                 &workspace.root().join(&publication.artifact().path),
                 publication.artifact(),
                 reference,
@@ -618,19 +619,23 @@ fn publish_technical_event(
                 &identities,
                 &event.target(),
             ) {
-                workspace.discard_last_artifact(publication.artifact())?;
-                return Err(cause);
-            }
-            Ok(publication)
+                Ok(coverage) => coverage,
+                Err(cause) => {
+                    workspace.discard_last_artifact(publication.artifact())?;
+                    return Err(cause);
+                }
+            };
+            Ok((publication, coverage))
         });
         match result {
-            Ok(publication) => outputs.push(TechnicalEventArtifact {
+            Ok((publication, coverage)) => outputs.push(TechnicalEventArtifact {
                 individual_id: library.individual_id().clone(),
                 library_id: library.library_id().clone(),
                 id: publication.artifact().id.clone(),
                 state: UnitState::Complete,
                 artifact: Some(publication.artifact().clone()),
                 diagnostic: None,
+                coverage: Some(coverage),
             }),
             Err(cause) => {
                 outputs.push(TechnicalEventArtifact {
@@ -640,6 +645,7 @@ fn publish_technical_event(
                     state: UnitState::Failed,
                     artifact: None,
                     diagnostic: Some(cause.clone()),
+                    coverage: None,
                 });
                 for library in libraries.iter().skip(index + 1) {
                     outputs.push(TechnicalEventArtifact {
@@ -649,6 +655,7 @@ fn publish_technical_event(
                         state: UnitState::Incomplete,
                         artifact: None,
                         diagnostic: Some(cause.clone()),
+                        coverage: None,
                     });
                 }
                 let link = write_event_manifest(
@@ -692,9 +699,9 @@ fn validate_closed_wgs_fastq(
     individual: &crate::haplotype::Individual,
     identities: &crate::technical_identity::TechnicalIdentityPlan,
     target: &crate::application::EffectiveTechnicalEventTarget,
-) -> Result<(), Diagnostic> {
-    validate_wgs_fastq(path, artifact, reference, individual, identities, *target)
-        .map(|_| ())
+) -> Result<crate::fastq_validation::F4CoverageReport, Diagnostic> {
+    let coverage = validate_wgs_fastq(path, artifact, reference, individual, identities, *target)
+        .map(|report| report.f4_coverage())
         .map_err(|error| technical_event_error("validate_wgs_fastq", error.to_string()))?;
     #[cfg(test)]
     if FORCE_FASTQ_REVALIDATION_FAILURE.replace(false) {
@@ -703,7 +710,7 @@ fn validate_closed_wgs_fastq(
             "injected independent validation failure",
         ));
     }
-    Ok(())
+    Ok(coverage)
 }
 
 fn write_event_manifest(
@@ -728,6 +735,25 @@ fn write_event_manifest(
             diagnostic: output.diagnostic.as_ref(),
         })
         .collect::<Vec<_>>();
+    let coverage = if state == UnitState::Complete {
+        outputs
+            .iter()
+            .map(|output| {
+                Ok(EventManifestCoverage {
+                    individual_id: &output.individual_id,
+                    library_id: &output.library_id,
+                    report: output.coverage.ok_or_else(|| {
+                        technical_event_error(
+                            "technical_event.coverage",
+                            "una salida completa no tiene informe de cobertura",
+                        )
+                    })?,
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?
+    } else {
+        Vec::new()
+    };
     let document = EventManifest {
         event,
         state,
@@ -737,6 +763,7 @@ fn write_event_manifest(
             fasta: reference_fasta,
         },
         artifacts: &artifacts,
+        coverage: &coverage,
         diagnostics,
     };
     let bytes = event_manifest_bytes(&document)?;

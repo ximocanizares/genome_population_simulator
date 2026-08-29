@@ -867,6 +867,7 @@ mod tests {
                 fasta: &reference,
             },
             artifacts: &complete_artifacts,
+            coverage: &[],
             diagnostics: &[],
         };
         let event_path = event_manifest_relative_path(event.event_id());
@@ -952,6 +953,7 @@ mod tests {
                 fasta: &reference,
             },
             artifacts: &failed_artifacts,
+            coverage: &[],
             diagnostics: std::slice::from_ref(&event_failure),
         };
         let replacement = event_manifest_bytes(&failed_event).expect("tampered event bytes");

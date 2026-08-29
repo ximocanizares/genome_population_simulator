@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use crate::application::EffectiveTechnicalEvent;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
 use crate::fastq_output::paired_fastq_relative_paths;
+use crate::fastq_validation::F4CoverageReport;
 use crate::identity::{EventId, IndividualId, LibraryId, ReadGroupId, ReferenceId};
 use crate::results::{ArtifactRecord, UnitState, json_document_bytes, validate_relative_link};
 use crate::technical_identity::TechnicalIdentityPlan;
@@ -49,6 +50,14 @@ pub struct EventManifestArtifact<'a> {
     pub diagnostic: Option<&'a Diagnostic>,
 }
 
+/// Resumen de cobertura final de una biblioteca, sin procedencia por lectura.
+#[derive(Clone, Copy, Debug)]
+pub struct EventManifestCoverage<'a> {
+    pub individual_id: &'a IndividualId,
+    pub library_id: &'a LibraryId,
+    pub report: F4CoverageReport,
+}
+
 /// Hechos del primer evento técnico que el escritor registra sin inferirlos de
 /// rutas, nombres de fichero o mensajes.
 pub struct EventManifest<'a> {
@@ -57,6 +66,7 @@ pub struct EventManifest<'a> {
     pub identities: &'a TechnicalIdentityPlan,
     pub reference: EventManifestReference<'a>,
     pub artifacts: &'a [EventManifestArtifact<'a>],
+    pub coverage: &'a [EventManifestCoverage<'a>],
     pub diagnostics: &'a [Diagnostic],
 }
 
@@ -114,6 +124,25 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
             })
         })
         .collect::<Vec<_>>();
+    let mut coverage = manifest.coverage.to_vec();
+    coverage.sort_by_key(|entry| (entry.individual_id.as_str(), entry.library_id.as_str()));
+    let coverage = coverage
+        .into_iter()
+        .map(|entry| {
+            json!({
+                "individual_id": entry.individual_id.as_str(),
+                "library_id": entry.library_id.as_str(),
+                "target_x": entry.report.target_x(),
+                "basic_x": entry.report.basic_wgs_x(),
+                "final_x": {
+                    "own_x": entry.report.final_fastq_own_x(),
+                    "contaminant_x": entry.report.final_fastq_contaminant_x(),
+                },
+                "denominator_bases": entry.report.denominator_bases(),
+                "n_bases": entry.report.n_bases(),
+            })
+        })
+        .collect::<Vec<_>>();
     let document = json!({
         "manifest_kind": EVENT_MANIFEST_KIND,
         "schema_version": EVENT_MANIFEST_SCHEMA_VERSION,
@@ -141,6 +170,7 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
             "reference_id": manifest.reference.reference_id.as_str(),
             "fasta": manifest.reference.fasta.to_json(),
         },
+        "coverage": coverage,
         "artifacts": artifacts,
         "diagnostics": canonical_diagnostics(manifest.diagnostics),
     });
@@ -191,6 +221,7 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
         path,
     )?;
     let reference = validate_reference(required_value(root, "reference", path)?, path)?;
+    let coverage = validate_coverage(required_value(root, "coverage", path)?, &selected, path)?;
     let diagnostics = validate_diagnostics(required_value(root, "diagnostics", path)?, path)?;
     let artifact_states = validate_artifacts(
         required_value(root, "artifacts", path)?,
@@ -201,6 +232,18 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
         path,
     )?;
     validate_event_state(state, &artifact_states, &diagnostics, path)?;
+    if state == UnitState::Complete && coverage.len() != selected.len() {
+        return Err(event_error(
+            path,
+            "falta cobertura de una biblioteca completa",
+        ));
+    }
+    if state != UnitState::Complete && !coverage.is_empty() {
+        return Err(event_error(
+            path,
+            "un evento no completo no publica cobertura F4",
+        ));
+    }
     Ok(())
 }
 
@@ -218,6 +261,7 @@ const ROOT_FIELDS: &[&str] = &[
     "selected_individuals",
     "event_subseed",
     "reference",
+    "coverage",
     "artifacts",
     "diagnostics",
 ];
@@ -317,6 +361,36 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
         return Err(event_error(
             &path,
             "falta el resultado FASTQ de una biblioteca seleccionada",
+        ));
+    }
+    if manifest.state == UnitState::Complete {
+        let coverage_libraries = manifest
+            .coverage
+            .iter()
+            .map(|entry| (entry.individual_id.as_str(), entry.library_id.as_str()))
+            .collect::<BTreeSet<_>>();
+        let planned_libraries = manifest
+            .identities
+            .libraries()
+            .map(|library| {
+                (
+                    library.individual_id().as_str(),
+                    library.library_id().as_str(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        if coverage_libraries.len() != manifest.coverage.len()
+            || coverage_libraries != planned_libraries
+        {
+            return Err(event_error(
+                &path,
+                "cobertura por biblioteca incompleta o repetida",
+            ));
+        }
+    } else if !manifest.coverage.is_empty() {
+        return Err(event_error(
+            &path,
+            "un evento no completo no publica cobertura F4",
         ));
     }
     Ok(())
@@ -485,6 +559,85 @@ fn validate_selected_individuals(
         previous = Some(individual.as_str().to_owned());
     }
     Ok(selected)
+}
+
+fn validate_coverage(
+    value: &Value,
+    selected: &BTreeMap<String, String>,
+    path: &Path,
+) -> Result<BTreeSet<(String, String)>, Diagnostic> {
+    let values = required_array(value, "coverage", path)?;
+    let mut coverage_libraries = BTreeSet::new();
+    let mut previous = None::<(String, String)>;
+    for value in values {
+        let entry = required_object(value, "coverage[]", path)?;
+        validate_closed(
+            entry,
+            &[
+                "individual_id",
+                "library_id",
+                "target_x",
+                "basic_x",
+                "final_x",
+                "denominator_bases",
+                "n_bases",
+            ],
+            "coverage[]",
+            path,
+        )?;
+        let individual = required_string(entry, "individual_id", path)?;
+        let library = required_string(entry, "library_id", path)?;
+        let ordering = (individual.to_owned(), library.to_owned());
+        if selected.get(individual).map(String::as_str) != Some(library)
+            || previous.as_ref().is_some_and(|prior| prior >= &ordering)
+            || !coverage_libraries.insert(ordering.clone())
+        {
+            return Err(event_error(
+                path,
+                "coberturas no son únicas, ordenadas o compatibles con las bibliotecas",
+            ));
+        }
+        previous = Some(ordering);
+        for field in ["target_x", "basic_x"] {
+            validate_nonnegative_finite(entry, field, path)?;
+        }
+        let final_x = required_object(
+            required_value(entry, "final_x", path)?,
+            "coverage[].final_x",
+            path,
+        )?;
+        validate_closed(
+            final_x,
+            &["own_x", "contaminant_x"],
+            "coverage[].final_x",
+            path,
+        )?;
+        for field in ["own_x", "contaminant_x"] {
+            validate_nonnegative_finite(final_x, field, path)?;
+        }
+        let _denominator = entry
+            .get("denominator_bases")
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .ok_or_else(|| event_error(path, "denominador de cobertura inválido"))?;
+        let _n_bases = entry
+            .get("n_bases")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| event_error(path, "recuento N de cobertura inválido"))?;
+    }
+    Ok(coverage_libraries)
+}
+
+fn validate_nonnegative_finite(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    if !matches!(object.get(field).and_then(Value::as_f64), Some(value) if value.is_finite() && value >= 0.0)
+    {
+        return Err(event_error(path, format!("{field} de cobertura inválida")));
+    }
+    Ok(())
 }
 
 fn validate_reference(value: &Value, path: &Path) -> Result<ArtifactRecord, Diagnostic> {

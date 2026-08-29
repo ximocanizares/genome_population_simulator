@@ -1492,6 +1492,7 @@ fn validate_physical_technical_event(
                 && profile.get("read_length") == technical_event.get("read_length")
                 && profile.get("quality") == technical_event.get("quality")
         });
+    validate_f4_coverage_against_effective(&event, technical_event, reference, effective_path)?;
     if event.get("event_id").and_then(Value::as_str) != Some(event_id.as_str())
         || event.get("event_subseed").and_then(Value::as_str)
             != Some(expected_event_subseed.as_str())
@@ -1510,6 +1511,41 @@ fn validate_physical_technical_event(
             effective_path,
             "el manifiesto técnico físico no coincide con la configuración efectiva, semilla o referencia",
         ));
+    }
+    Ok(())
+}
+
+/// Comprueba los hechos que el manifiesto F4 puede contrastar sin convertir la
+/// observación FASTQ final en una nueva configuración u objetivo.
+fn validate_f4_coverage_against_effective(
+    event: &Value,
+    technical_event: &serde_json::Map<String, Value>,
+    reference: &Reference,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    let target = effective_object(technical_event, "target", effective_path)?;
+    let target_x = target
+        .get("coverage_wgs")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .ok_or_else(|| effective_error(effective_path, "objetivo WGS técnico inválido"))?;
+    let expected_denominator = reference.total_length();
+    let coverage = event
+        .get("coverage")
+        .and_then(Value::as_array)
+        .ok_or_else(|| effective_error(effective_path, "falta cobertura F4 de evento"))?;
+    for entry in coverage {
+        let entry = entry
+            .as_object()
+            .ok_or_else(|| effective_error(effective_path, "cobertura F4 de evento inválida"))?;
+        if entry.get("target_x").and_then(Value::as_f64) != Some(target_x)
+            || entry.get("denominator_bases").and_then(Value::as_u64) != Some(expected_denominator)
+        {
+            return Err(effective_error(
+                effective_path,
+                "la cobertura F4 no coincide con el objetivo o denominador estructural efectivo",
+            ));
+        }
     }
     Ok(())
 }
