@@ -59,7 +59,7 @@ fn unknown_fields_are_rejected_with_location() {
 fn population_snv_modes_are_exclusive_at_the_toml_boundary() {
     let supplied = parse(
         br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "supplied"
 input_path = "input.tsv"
@@ -83,7 +83,7 @@ length = 1
     ));
 
     let invalid = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "reuse"
 input_path = "input.tsv"
@@ -113,7 +113,7 @@ length = 1
 #[test]
 fn dtc049_tolerance_defaults_and_is_limited_in_the_general_toml() {
     let base = r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "ref-main"

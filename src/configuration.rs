@@ -222,6 +222,16 @@ pub struct DeclaredTechnicalEvent {
     pub event_id: Located<String>,
     pub individual_ids: Vec<Located<String>>,
     pub target: DeclaredTechnicalEventTarget,
+    pub read_length_bases: Option<Located<u64>>,
+    pub libraries: Vec<DeclaredTechnicalLibrary>,
+}
+
+/// UDI de la única biblioteca de un individuo dentro de la tanda F4.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredTechnicalLibrary {
+    pub individual_id: Located<String>,
+    pub i7: Located<String>,
+    pub i5: Located<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

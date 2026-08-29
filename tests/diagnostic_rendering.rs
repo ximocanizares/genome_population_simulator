@@ -35,7 +35,7 @@ fn human_and_json_are_rendered_from_the_same_structured_diagnostic() {
 
 #[test]
 fn json_rendering_escapes_path_control_characters_without_emitting_jsonl() {
-    let bytes = b"config_kind = \"general\"\nschema_version = \"2\"\n".to_vec();
+    let bytes = b"config_kind = \"general\"\nschema_version = \"1\"\n".to_vec();
     let diagnostic = admit_toml_header(
         Path::new("fixture-\"quoted\"\nline.toml"),
         bytes,

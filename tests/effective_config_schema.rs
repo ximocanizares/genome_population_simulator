@@ -138,7 +138,7 @@ fn initial_population_statistics_schema_is_closed_and_typed() {
 #[test]
 fn effective_initial_population_schema_enforces_local_bounds_and_f_diploidy() {
     let schema: Value =
-        serde_json::from_str(include_str!("../schemas/effective-config-v3.schema.json"))
+        serde_json::from_str(include_str!("../schemas/effective-config-v4.schema.json"))
             .expect("effective schema JSON");
     let cohort_schema = &schema["$defs"]["initial_population"];
     assert_eq!(
@@ -207,34 +207,48 @@ fn effective_initial_population_schema_enforces_local_bounds_and_f_diploidy() {
 }
 
 #[test]
-fn v3_effective_technical_event_is_closed_and_keeps_the_minimal_profile_fixed() {
+fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
     let mut valid = effective_config("simulated", false);
     valid["technical_event"] = json!({
         "event_id": "reads-main",
         "individual_ids": ["sample-A"],
-        "profile": "illumina-se-minimal-v1",
+        "libraries": [{"individual_id": "sample-A", "library_id": "LIB_sample-A", "i7": "ACGTACGT", "i5": "TGCATGCA", "is_contamination_recipient": true}],
+        "profile": {"id": "gps-hiseqx-pcrfree-pe150-v1", "resource_path": "resources/f4/gps-hiseqx-pcrfree-pe150-v1.json", "sha256": "3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea", "preparation": "pcr_free"},
+        "rng_catalog": "f4-technical-v3",
+        "id_catalog": {"version":"3", "derivations":{"v1":["execution","reference","individual","event","batch","library","read_group","template"],"v2":["PreHopInstanceId","TechnicalPairId"]}},
         "read_length": 150,
         "quality": {"acgt_phred": 40, "n_phred": 0},
-        "target": {"coverage_wgs": 0.0},
+        "target": {"coverage_wgs": 30.0},
     });
-    assert_valid("v3-technical-event", &valid);
+    assert_valid("v4-technical-event", &valid);
+
+    let mut zero_coverage = valid.clone();
+    zero_coverage["technical_event"]["target"]["coverage_wgs"] = json!(0.0);
+    assert_valid("v4-technical-event-zero-coverage", &zero_coverage);
+
+    let mut negative_coverage = valid.clone();
+    negative_coverage["technical_event"]["target"]["coverage_wgs"] = json!(-0.1);
+    assert_invalid("v4-technical-event-negative-coverage", &negative_coverage);
 
     for (name, pointer, replacement) in [
         (
             "profile",
             "/technical_event/profile",
-            json!("future-profile"),
+            json!({"id": "future-profile", "resource_path": "resources/f4/gps-hiseqx-pcrfree-pe150-v1.json", "sha256": "3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea", "preparation": "pcr_free"}),
         ),
         ("length", "/technical_event/read_length", json!(151)),
         ("quality", "/technical_event/quality/n_phred", json!(1)),
     ] {
         let mut invalid = valid.clone();
         *invalid.pointer_mut(pointer).expect(name) = replacement;
-        assert_invalid(&format!("v3-technical-event-{name}"), &invalid);
+        assert_invalid(&format!("v4-technical-event-{name}"), &invalid);
     }
     let mut double_target = valid;
     double_target["technical_event"]["target"]["read_count"] = json!(0);
-    assert_invalid("v3-technical-event-double-target", &double_target);
+    assert_invalid(
+        "v4-technical-event-read-count-is-not-admitted",
+        &double_target,
+    );
 }
 
 #[test]
@@ -461,7 +475,7 @@ fn effective_config(source: &str, with_reduction: bool) -> Value {
     };
     json!({
         "effective_config_kind": "gps_effective_config",
-        "schema_version": "3",
+        "schema_version": "4",
         "source_path": "config/general.toml",
         "ploidy": 2,
         "normalization": {"tolerance": 1e-9, "canonical_order": "population_id,contig,position,ref,alt,variant_id,source_id", "sum_algorithm": "neumaier_sum_v1"},
@@ -564,7 +578,7 @@ fn assert_external(name: &str, document: &Value, expected_success: bool) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("python3")
         .arg(root.join("tests/external_jsonschema_validator.py"))
-        .arg(root.join("schemas/effective-config-v3.schema.json"))
+        .arg(root.join("schemas/effective-config-v4.schema.json"))
         .arg(&instance)
         .output()
         .expect("independent Python validator");

@@ -282,7 +282,7 @@ fn invalid_configuration_exits_two_without_destination_or_provisional() {
     let output = Command::new(env!("CARGO_BIN_EXE_genome-population-simulator"))
         .args([
             "run",
-            "tests/fixtures/config/invalid-version-two.toml",
+            "tests/fixtures/config/invalid-version-one.toml",
             "--output",
         ])
         .arg(&destination)
@@ -334,7 +334,7 @@ fn write_slow_supplied_config(root: &Path) -> (PathBuf, PathBuf) {
     fs::write(&reference, fasta).expect("reference");
     let config = root.join("slow-general.toml");
     let mut text = format!(
-        "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"{}\"\n\
+        "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
          [reference]\nkind = \"supplied\"\nid = \"reference-main\"\nfasta = \"reference.fa\"\n\
          [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\
          [[reduced_references]]\nid = \"reference-small\"\nsource_reference_id = \"reference-main\"\nregion_size_bases = 10\ntarget_bases = 100\n",

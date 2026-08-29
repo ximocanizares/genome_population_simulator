@@ -208,24 +208,19 @@ cuando F3 esté cerrado, sin anticipar un formato de perfil empírico.
 bibliotecas de la única población seleccionada son compatibles y una unidad PE
 conserva dos *mates* con una identidad de pareja única.
 
-- ☐ F4.1.1. Convertir el contrato fijo `illumina-se-minimal-v1` de F3 en la
-  frontera del único perfil F4 Illumina PE versionado, sin asignar valores
-  cuantitativos no aprobados.
+- ☐ F4.1.1. Incorporar internamente el único perfil F4 Illumina PE versionado,
+  sin activar todavía contratos publicados ni asignar valores cuantitativos no
+  aprobados.
   - Depende de: PAUSA-DISEÑO-F4, F4.0.4, PAUSA-F4.0 y DTPD-106 aprobada.
   - Procede de: REQ-TEC-01/05/09–10, REQ-DAT-12/14/16/18, REQ-CONF-66/82/101–102,
     REQ-MAN-54/60/78 y arquitectura §5.5/§6.
-  - Cambia: `src/application.rs`, `src/configuration.rs`,
-    `src/technical_identity.rs`, `src/event_manifest.rs` y contratos TOML/JSON
-    vigentes; conecta perfil y preparación al inventario ya acordado,
-    sin compatibilidad; verifica
-    el recurso y SHA-256 fijados por DTPD-106 y registra ID,
-    versión, recurso, digest, preparación y parámetros/sustituciones con
-    procedencia. Rechaza Illumina SE, tecnologías de lectura larga, perfiles
-    desconocidos y cualquier intento de declarar más de un evento o población
-    en F4.
-  - Se comprueba con: `cargo test --test f4_profiles --locked`; oráculo de
-    admisión comprueba perfiles, versiones, exclusividad y hechos del manifiesto;
-    puertas comunes.
+  - Cambia: módulo/tipos internos de perfil y recurso versionado; verifica el
+    recurso y SHA-256 fijados por DTPD-106 y expone ID, versión, preparación y
+    parámetros autorizados a F4.1.2–F4.1.3. F3 conserva su perfil SE y sus
+    contratos publicados hasta que F4.1.3 active la transición atómica DTC-082.
+  - Se comprueba con: `cargo test --test f4_profiles --locked`; oráculo del
+    recurso comprueba ID, digest, preparación, parámetros y rechazo de perfiles
+    desconocidos, sin ejecutar ni declarar una salida PE; puertas comunes.
 
 - ☐ F4.1.2. Generalizar las identidades técnicas para plantilla, instancia
   pre-salto y mate sin renombrar ni colisionar con las plantillas SE F3.
@@ -254,7 +249,8 @@ conserva dos *mates* con una identidad de pareja única.
   - Depende de: F4.1.2 y DTPD-106 aprobada.
   - Procede de: REQ-DAT-12/15/18/65–66, REQ-WGS-01–11 y REQ-VAL-07.
   - Cambia: `src/wgs_sampling.rs`, nuevo módulo de pares y
-    `src/fastq_output.rs`; R1 es directo desde el extremo izquierdo y R2 el
+    `src/fastq_output.rs`, configuración y manifiestos; activa atómicamente
+    DTC-082 al existir el primer productor PE verificable. R1 es directo desde el extremo izquierdo y R2 el
     complemento inverso desde el derecho; ambos mates proceden del mismo
     fragmento y mantienen extremos y `N` literal/Phred 0. F4 no admite un
     objetivo numérico: F4.2 deriva el número entero de parejas desde cobertura.

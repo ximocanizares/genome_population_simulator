@@ -16,6 +16,8 @@ from config_editor import (  # noqa: E402
     REDUCTION_OBJECTIVE_REMOVE_PERCENT,
     ReductionRow,
     SequenceRow,
+    TechnicalEventForm,
+    TechnicalLibraryRow,
     default_form,
     editor_integer,
     ordered_editor_rows,
@@ -29,6 +31,27 @@ from config_editor import (  # noqa: E402
 
 
 class ConfigEditorTests(unittest.TestCase):
+    def test_technical_event_v2_round_trips_and_rejects_non_contractual_fields(self) -> None:
+        form = default_form()
+        form.technical_event = TechnicalEventForm(
+            event_id="reads-main",
+            individual_ids=["sample-A"],
+            coverage_wgs="0",
+            libraries=[TechnicalLibraryRow("sample-A", "ACGTACGT", "TGCATGCA")],
+            read_length_bases=150,
+        )
+        rendered = render_general_toml(form)
+        self.assertIn("[technical_event]", rendered)
+        self.assertIn("target_coverage_wgs = 0", rendered)
+        self.assertEqual(parse_general_toml(rendered), form)
+
+        with self.assertRaises(EditorError) as raised:
+            parse_general_toml(rendered.replace('i7 = "ACGTACGT"', 'i7 = "ACGT"'))
+        self.assertEqual(raised.exception.path, "technical_event.libraries[0].i7")
+        with self.assertRaises(EditorError) as raised:
+            parse_general_toml(rendered.replace("target_coverage_wgs = 0", "read_count = 0"))
+        self.assertEqual(raised.exception.path, "technical_event")
+
     def test_fasta_header_reader_preserves_order_and_uses_scaffold_as_safe_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fasta = Path(directory) / "reference.fa"
@@ -96,6 +119,13 @@ class ConfigEditorTests(unittest.TestCase):
 
         self.assertEqual(first, reordered)
         self.assertEqual(parse_general_toml(render_general_toml(first)), first)
+        self.assertIn('schema_version = "2"', render_general_toml(first))
+
+    def test_editor_rejects_the_replaced_v1_contract(self) -> None:
+        source = (ROOT / "tests" / "fixtures" / "config" / "general-minimal.toml").read_text()
+        with self.assertRaises(EditorError) as raised:
+            parse_general_toml(source.replace('schema_version = "2"', 'schema_version = "1"', 1))
+        self.assertEqual(raised.exception.path, "schema_version")
 
     def test_imported_toml_strings_are_plain_python_values_for_marimo_controls(self) -> None:
         form = parse_general_toml(
@@ -108,7 +138,7 @@ class ConfigEditorTests(unittest.TestCase):
 
     def test_supplied_paths_with_spaces_and_exact_percent_survive_round_trip(self) -> None:
         source = """config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "supplied"
 id = "reference-main"
@@ -134,7 +164,7 @@ reduction_percent = 33.333333333333333333
 
     def test_sequence_and_reduction_order_are_normative(self) -> None:
         source = """config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "supplied"
 id = "reference-main"
@@ -167,7 +197,7 @@ target_bases = 5
 
     def test_population_snv_modes_round_trip_without_future_parameters(self) -> None:
         base = """config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "reference-main"
@@ -251,7 +281,7 @@ max_alt_af = 0.9''',
 
     def test_initial_population_ploidy_type_error_keeps_its_indexed_path(self) -> None:
         source = """config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "reference-main"

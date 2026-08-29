@@ -26,7 +26,7 @@ fn build(text: &str) -> Result<(), genome_population_simulator::diagnostics::Dia
 fn generated_config(parameters: &str) -> String {
     format!(
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "generate"
 [population_snvs.generate]
@@ -50,7 +50,7 @@ length = 10
 fn config(mode: &str, path_key: &str) -> String {
     format!(
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "{mode}"
 {path_key} = ""
@@ -87,7 +87,7 @@ fn supplied_and_reuse_paths_must_not_be_empty() {
 #[test]
 fn generate_requires_the_closed_f2_2_5_contract() {
     let text = r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "generate"
 [population_snvs.generate]
@@ -197,7 +197,7 @@ fn generate_rejects_incompatible_count_and_frequency_contracts() {
     let invalid = config("generate", "generate");
     assert!(parse(&invalid).is_err());
     let invalid_frequency = r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "generate"
 [population_snvs.generate]

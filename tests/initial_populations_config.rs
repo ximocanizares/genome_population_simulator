@@ -29,7 +29,7 @@ fn build(
 fn config(populations: &str) -> String {
     format!(
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 {populations}
 [reference]
@@ -261,7 +261,7 @@ fn f_diploid_is_exclusive_to_diploids_and_validates_its_coefficient() {
 #[test]
 fn authoring_schema_and_rust_accept_the_same_initial_cohort_shape() {
     let schema: serde_json::Value =
-        serde_json::from_str(include_str!("../schemas/config-general-v1.schema.json"))
+        serde_json::from_str(include_str!("../schemas/config-general-v2.schema.json"))
             .expect("authoring schema JSON");
     let cohort_schema = &schema["$defs"]["initial_population"];
     assert_eq!(
@@ -428,7 +428,7 @@ fn assert_authoring_schema(name: &str, initial_population: Value, expected_succe
         &instance,
         serde_json::to_vec(&json!({
             "config_kind": "general",
-            "schema_version": "1",
+            "schema_version": "2",
             "reference": {
                 "kind": "simulated",
                 "id": "ref-main",
@@ -443,7 +443,7 @@ fn assert_authoring_schema(name: &str, initial_population: Value, expected_succe
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let output = Command::new("python3")
         .arg(root.join("tests/external_jsonschema_validator.py"))
-        .arg(root.join("schemas/config-general-v1.schema.json"))
+        .arg(root.join("schemas/config-general-v2.schema.json"))
         .arg(&instance)
         .output()
         .expect("independent Python validator");

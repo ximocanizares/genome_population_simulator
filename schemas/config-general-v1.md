@@ -1,9 +1,14 @@
-# Esquema de autoría TOML: configuración general v1 en F2.3.4
+# Histórico: esquema de autoría TOML v1 (no vigente)
 
-La vista estructural versionada que puede consumir la interfaz local se publica
-en `config-general-v1.schema.json`. Describe forma, tipos, dominios básicos y
-anotaciones de autoría, pero no sustituye la admisión ni la validación semántica
-del binario Rust.
+Este documento se conserva únicamente como evidencia histórica. El contrato
+activo es `config-general-v2.schema.json` y su documentación es
+`config-general-v2.md`; el runtime rechaza `schema_version = "1"`. En
+particular, la descripción F3 single-end y `read_count` que sigue no son
+consumibles ni deben usarse para crear configuraciones nuevas.
+
+La antigua vista estructural se conserva en
+`config-general-v1.schema.json` exclusivamente como evidencia histórica. La
+interfaz local y el binario Rust no la consumen ni admiten configuraciones v1.
 
 F2.2.1 conserva un único documento general, con cabecera obligatoria:
 

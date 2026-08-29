@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manifest-event-v2.schema.json",
+  "title": "Manifiesto de evento técnico GPS v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_kind", "schema_version", "event_id", "event_type", "technology", "rng_catalog", "id_catalog", "state", "profile", "technical_batch_id", "selected_individuals", "event_subseed", "reference", "artifacts", "diagnostics"],
+  "properties": {
+    "manifest_kind": { "const": "gps_event_manifest" },
+    "schema_version": { "const": "2" },
+    "event_id": { "$ref": "#/$defs/id" },
+    "event_type": { "const": "technical_sequencing" },
+    "technology": { "const": "illumina-short-read-pe-v1" },
+    "rng_catalog": { "const": "f4-technical-v3" },
+    "id_catalog": { "$ref": "#/$defs/id_catalog" },
+    "state": { "enum": ["incomplete", "complete", "failed"] },
+    "profile": { "$ref": "#/$defs/profile" },
+    "technical_batch_id": { "$ref": "#/$defs/id" },
+    "selected_individuals": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "$ref": "#/$defs/selected_individual" }
+    },
+    "event_subseed": { "$ref": "#/$defs/digest" },
+    "reference": { "$ref": "#/$defs/reference" },
+    "artifacts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/event_artifact" } },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "complete" } }, "required": ["state"] },
+      "then": {
+        "properties": {
+          "artifacts": { "items": { "properties": { "state": { "const": "complete" } }, "required": ["state"] } },
+          "diagnostics": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "state": { "enum": ["incomplete", "failed"] } }, "required": ["state"] },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "contains": { "properties": { "state": { "enum": ["incomplete", "failed"] } }, "required": ["state"] },
+            "minContains": 1
+          },
+          "diagnostics": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "properties": {
+        "artifacts": {
+          "allOf": [
+            { "contains": { "properties": { "mate": { "const": 1 } }, "required": ["mate"] }, "minContains": 1 },
+            { "contains": { "properties": { "mate": { "const": 2 } }, "required": ["mate"] }, "minContains": 1 }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id_catalog": {"type":"object","additionalProperties":false,"required":["version","derivations"],"properties":{"version":{"const":"3"},"derivations":{"type":"object","additionalProperties":false,"required":["v1","v2"],"properties":{"v1":{"const":["execution","reference","individual","event","batch","library","read_group","template"]},"v2":{"const":["PreHopInstanceId","TechnicalPairId"]}}}}},
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "relative_path": {
+      "type": "string",
+      "pattern": "^(?!INCOMPLETE$)(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[\\u0000-\\u001f\\u007f])(?!.*\\/$).+$"
+    },
+    "checksum": {
+      "type": "object", "additionalProperties": false,
+      "required": ["algorithm", "digest"],
+      "properties": { "algorithm": { "const": "sha256" }, "digest": { "$ref": "#/$defs/digest" } }
+    },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "path", "size_bytes", "checksum"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "kind": { "$ref": "#/$defs/id" },
+        "path": { "$ref": "#/$defs/relative_path" }, "size_bytes": { "type": "integer", "minimum": 0 },
+        "checksum": { "$ref": "#/$defs/checksum" }
+      }
+    },
+    "fastq_artifact": {
+      "allOf": [
+        { "$ref": "#/$defs/artifact" },
+        {
+          "properties": {
+            "path": {
+              "allOf": [
+                { "$ref": "#/$defs/relative_path" },
+                { "pattern": "^outputs/fastq/[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,63}_R[12]\\.fastq\\.gz$" }
+              ]
+            }
+          },
+          "required": ["path"]
+        }
+      ]
+    },
+    "profile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "resource_path", "sha256", "preparation", "read_length", "quality"],
+      "properties": {
+        "id": { "const": "gps-hiseqx-pcrfree-pe150-v1" }, "read_length": { "type": "integer", "minimum": 1, "maximum": 150 },
+        "resource_path": { "const": "resources/f4/gps-hiseqx-pcrfree-pe150-v1.json" },
+        "sha256": { "const": "3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea" },
+        "preparation": { "const": "pcr_free" },
+        "quality": {
+          "type": "object", "additionalProperties": false,
+          "required": ["acgt_phred", "n_phred"],
+          "properties": { "acgt_phred": { "const": 40 }, "n_phred": { "const": 0 } }
+        }
+      }
+    },
+    "selected_individual": {
+      "type": "object", "additionalProperties": false,
+      "required": ["individual_id", "library_id", "read_group_id", "i7", "i5"],
+      "properties": { "individual_id": { "$ref": "#/$defs/id" }, "library_id": { "$ref": "#/$defs/id" }, "read_group_id": { "$ref": "#/$defs/id" }, "i7": {"type": "string", "pattern": "^[ACGT]{8}$"}, "i5": {"type": "string", "pattern": "^[ACGT]{8}$"} }
+    },
+    "reference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference_id", "fasta"],
+      "properties": { "reference_id": { "$ref": "#/$defs/id" }, "fasta": { "$ref": "#/$defs/artifact" } }
+    },
+    "diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": { "code": { "$ref": "#/$defs/diagnostic_code" }, "message": { "type": "string", "minLength": 1 } }
+    },
+    "diagnostic_code": {
+      "type": "string",
+      "enum": [
+        "GPS-CONF-001", "GPS-CONF-002", "GPS-CONF-003", "GPS-CONF-004", "GPS-CONF-005", "GPS-CONF-006", "GPS-CONF-007", "GPS-CONF-008", "GPS-CONF-009", "GPS-CONF-010", "GPS-CONF-011", "GPS-CONF-012", "GPS-CONF-013", "GPS-CONF-014", "GPS-CONF-015", "GPS-CONF-016", "GPS-CONF-017", "GPS-CONF-018", "GPS-CONF-019", "GPS-CONF-020", "GPS-CONF-021", "GPS-CONF-022",
+        "GPS-INPUT-001", "GPS-INPUT-002",
+        "GPS-FMT-001", "GPS-FMT-002", "GPS-FMT-003", "GPS-FMT-004", "GPS-FMT-005", "GPS-FMT-006", "GPS-FMT-007",
+        "GPS-DOMAIN-001", "GPS-DOMAIN-002", "GPS-DOMAIN-003", "GPS-DOMAIN-004",
+        "GPS-RES-001", "GPS-RES-002",
+        "GPS-TOOL-001", "GPS-TOOL-002", "GPS-TOOL-003",
+        "GPS-IO-001", "GPS-IO-002", "GPS-IO-003", "GPS-IO-004", "GPS-IO-005",
+        "GPS-INTERNAL-001"
+      ]
+    },
+    "event_artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "state", "individual_id", "library_id", "mate", "artifact", "diagnostic_code"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "kind": { "const": "fastq" },
+        "state": { "enum": ["incomplete", "complete", "failed"] },
+        "individual_id": { "$ref": "#/$defs/id" }, "library_id": { "$ref": "#/$defs/id" },
+        "mate": { "enum": [1, 2] },
+        "artifact": { "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
+        "diagnostic_code": { "oneOf": [{ "$ref": "#/$defs/diagnostic_code" }, { "type": "null" }] }
+      },
+      "allOf": [
+        { "if": { "properties": { "state": { "const": "complete" }, "mate": { "const": 1 } }, "required": ["state", "mate"] }, "then": { "properties": { "artifact": { "allOf": [{ "$ref": "#/$defs/fastq_artifact" }, { "properties": { "path": { "pattern": "_R1\\.fastq\\.gz$" } } }] }, "diagnostic_code": { "type": "null" } } } },
+        { "if": { "properties": { "state": { "const": "complete" }, "mate": { "const": 2 } }, "required": ["state", "mate"] }, "then": { "properties": { "artifact": { "allOf": [{ "$ref": "#/$defs/fastq_artifact" }, { "properties": { "path": { "pattern": "_R2\\.fastq\\.gz$" } } }] }, "diagnostic_code": { "type": "null" } } } },
+        { "if": { "properties": { "state": { "enum": ["incomplete", "failed"] } }, "required": ["state"] }, "then": { "properties": { "artifact": { "type": "null" }, "diagnostic_code": { "$ref": "#/$defs/diagnostic_code" } } } }
+      ]
+    }
+  }
+}

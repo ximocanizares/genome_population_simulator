@@ -24,7 +24,7 @@ fn general_at(
 #[test]
 fn supplied_reference_paths_trim_accidental_edges_preserve_internal_spaces_and_resolve_relatives() {
     let base = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "supplied"
 id = "ref"
@@ -46,7 +46,7 @@ length = 1
     );
 
     let relative_source = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "supplied"
 id = "ref"
@@ -96,7 +96,7 @@ fn simulated_reference_preserves_sequence_count_lengths_classes_and_composition(
 #[test]
 fn multiple_sequences_preserve_order_classes_lengths_and_total_size() {
     let source = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "ref-multiple"
@@ -146,7 +146,7 @@ length = 5
 #[test]
 fn reduced_reference_requires_a_supplied_source_reference() {
     let source = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "0000000000000000000000000000000000000000000000000000000000000000"
 [reference]
 kind = "simulated"
@@ -177,7 +177,7 @@ target_bases = 50
 #[test]
 fn composition_uses_fixed_tolerance_and_effective_values_are_normalized() {
     let source = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "ref"
@@ -205,7 +205,7 @@ length = 10
 #[test]
 fn simulated_reference_accepts_an_independent_unknown_base_fraction() {
     let source = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "ref"
@@ -233,7 +233,7 @@ length = 10
 #[test]
 fn total_size_overflow_is_rejected_without_wrapping() {
     let source = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "supplied"
 id = "ref"
@@ -255,7 +255,7 @@ length = 1
 #[test]
 fn future_root_and_nested_fields_are_rejected() {
     let base = r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "supplied"
 id = "ref"
@@ -289,7 +289,7 @@ length = 1
     }
 
     let nested = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "supplied"
 id = "ref"
@@ -313,7 +313,7 @@ ploidy = 2
 #[test]
 fn global_ploidy_is_effective_and_limited_to_one_through_ten() {
     let base = r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "ref"
@@ -351,7 +351,7 @@ length = 1
 #[test]
 fn reference_source_fields_are_mutually_exclusive() {
     let simulated_with_fasta = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "ref"
@@ -367,7 +367,7 @@ class = "chromosome"
 length = 1
 "#;
     let supplied_with_composition = br#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "supplied"
 id = "ref"

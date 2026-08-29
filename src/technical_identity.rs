@@ -59,8 +59,121 @@ impl TechnicalLibraryIdentity {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TechnicalTemplateIdentity {
     template_id: TemplateId,
+    library_id: LibraryId,
     template_ordinal: TemplateOrdinal,
     subseed: Subseed,
+}
+
+/// Rol de un miembro de una pareja *paired-end*.
+///
+/// Es deliberadamente distinto de un ordinal de plantilla: una plantilla F3
+/// puede seguir siendo una lectura SE, mientras que una unidad PE tiene
+/// exactamente estos dos roles. La identidad final de pareja no se deriva aquí;
+/// eso solo sucede tras el demultiplexado en F4.5.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum TechnicalMate {
+    R1,
+    R2,
+}
+
+impl TechnicalMate {
+    /// Número que ocupará el campo `mate` de la cabecera FASTQ cuando F4.5
+    /// materialice la pareja final.
+    #[must_use]
+    pub const fn number(self) -> u8 {
+        match self {
+            Self::R1 => 1,
+            Self::R2 => 2,
+        }
+    }
+
+    #[must_use]
+    pub const fn all() -> [Self; 2] {
+        [Self::R1, Self::R2]
+    }
+}
+
+/// Unidad PE propia antes de contaminación e *index hopping*.
+///
+/// Conserva la plantilla F3 sin cambiar su `TemplateId` y le asocia la
+/// instancia transitoria `PH_` que DTC-087 deriva para F4. No retiene bases,
+/// calidades ni un identificador final `TP_`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreHopTechnicalPairIdentity {
+    template: TechnicalTemplateIdentity,
+    pre_hop_instance_id: PreHopInstanceId,
+}
+
+impl PreHopTechnicalPairIdentity {
+    #[must_use]
+    pub const fn template(&self) -> &TechnicalTemplateIdentity {
+        &self.template
+    }
+
+    #[must_use]
+    pub const fn pre_hop_instance_id(&self) -> &PreHopInstanceId {
+        &self.pre_hop_instance_id
+    }
+
+    /// Una unidad PE siempre conserva ambos mates; no representa estados con
+    /// un mate huérfano.
+    #[must_use]
+    pub const fn mate_roles(&self) -> [TechnicalMate; 2] {
+        TechnicalMate::all()
+    }
+}
+
+/// Relación final de una identidad de pareja con sus dos mates.
+///
+/// F4.1 solo modela esta cardinalidad. La derivación BLAKE3 de
+/// `TechnicalPairId` y la cabecera FASTQ con UDI pertenecen exclusivamente a
+/// F4.5, después del demultiplexado.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TechnicalPairIdentity {
+    technical_pair_id: TechnicalPairId,
+}
+
+/// Identidad de uno de los dos mates de una pareja final.
+///
+/// El par `(technical_pair_id, mate)` es la relación interna que F4.5 usará
+/// para materializar R1 y R2. No construye ni serializa una cabecera FASTQ.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TechnicalMateIdentity {
+    technical_pair_id: TechnicalPairId,
+    mate: TechnicalMate,
+}
+
+impl TechnicalMateIdentity {
+    #[must_use]
+    pub const fn technical_pair_id(&self) -> &TechnicalPairId {
+        &self.technical_pair_id
+    }
+
+    #[must_use]
+    pub const fn mate(&self) -> TechnicalMate {
+        self.mate
+    }
+}
+
+impl TechnicalPairIdentity {
+    #[must_use]
+    pub const fn new(technical_pair_id: TechnicalPairId) -> Self {
+        Self { technical_pair_id }
+    }
+
+    #[must_use]
+    pub const fn technical_pair_id(&self) -> &TechnicalPairId {
+        &self.technical_pair_id
+    }
+
+    /// Una identidad final de pareja se comparte exactamente por R1 y R2.
+    #[must_use]
+    pub fn mates(&self) -> [TechnicalMateIdentity; 2] {
+        TechnicalMate::all().map(|mate| TechnicalMateIdentity {
+            technical_pair_id: self.technical_pair_id.clone(),
+            mate,
+        })
+    }
 }
 
 /// Derivador transitorio de las identidades F4 de `id-catalog-v3`.
@@ -98,6 +211,26 @@ impl F4TechnicalIdentityDeriver {
         )
     }
 
+    /// Asocia una plantilla F3 estable con su instancia PE propia previa al
+    /// salto. La biblioteca se toma de la propia plantilla, de modo que no se
+    /// puede derivar una instancia con una biblioteca ajena.
+    ///
+    /// Esta operación solo deriva `PH_`; no compone `TP_`, no crea una
+    /// cabecera FASTQ y no consume aleatoriedad. Los ámbitos de plantilla,
+    /// fragmento, mate y artefacto permanecen separados del ámbito de
+    /// cobertura conforme a DTC-086.
+    pub fn derive_own_pre_hop_pair(
+        &mut self,
+        template: TechnicalTemplateIdentity,
+    ) -> Result<PreHopTechnicalPairIdentity, Diagnostic> {
+        let pre_hop_instance_id =
+            self.derive_own_pre_hop_instance(template.library_id(), template.template_id())?;
+        Ok(PreHopTechnicalPairIdentity {
+            template,
+            pre_hop_instance_id,
+        })
+    }
+
     pub fn derive_contamination_pre_hop_instance(
         &mut self,
         recipient_library_id: &LibraryId,
@@ -131,6 +264,15 @@ impl TechnicalTemplateIdentity {
         &self.template_id
     }
 
+    /// Biblioteca estable que causó la plantilla.
+    ///
+    /// F3 la usa para construir `TPL_…`; F4 la reutiliza para derivar la
+    /// instancia propia `PH_` sin inferirla ni renombrar la plantilla.
+    #[must_use]
+    pub const fn library_id(&self) -> &LibraryId {
+        &self.library_id
+    }
+
     #[must_use]
     pub const fn template_ordinal(&self) -> TemplateOrdinal {
         self.template_ordinal
@@ -158,6 +300,13 @@ pub struct TechnicalIdentityPlan {
 }
 
 impl TechnicalIdentityPlan {
+    /// Raíz necesaria exclusivamente para derivar decisiones F4 aisladas.
+    /// No expone un generador mutable ni permite cambiar la semilla del plan.
+    #[must_use]
+    pub const fn root_seed(&self) -> RootSeed {
+        self.root_seed
+    }
+
     /// Referencia tipada que causó la identidad y la subsemilla del evento.
     ///
     /// Los consumidores deben compararla con la referencia del estado antes de
@@ -220,6 +369,7 @@ impl TechnicalIdentityPlan {
         )?;
         Ok(TechnicalTemplateIdentity {
             template_id,
+            library_id: library.library_id().clone(),
             template_ordinal,
             subseed,
         })

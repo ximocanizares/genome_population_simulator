@@ -57,7 +57,7 @@ fn class_and_version_rejections_are_stable_and_exit_two() {
             "GPS-CONF-005",
         ),
         (
-            include_str!("fixtures/config/invalid-version-two.toml"),
+            include_str!("fixtures/config/invalid-version-one.toml"),
             ExpectedConfigKind::General,
             "GPS-CONF-005",
         ),
@@ -107,7 +107,7 @@ fn malformed_and_duplicate_toml_are_localizable() {
 
 #[test]
 fn invalid_version_wins_before_unknown_semantic_content() {
-    let source = b"config_kind = \"general\"\nschema_version = \"2\"\nmystery = true\n";
+    let source = b"config_kind = \"general\"\nschema_version = \"1\"\nmystery = true\n";
     assert_eq!(
         rejected(
             std::str::from_utf8(source).expect("ASCII fixture"),

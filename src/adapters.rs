@@ -11,8 +11,8 @@ use crate::configuration::{
     DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
     DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
     DeclaredReference, DeclaredReferenceSource, DeclaredSequence, DeclaredTechnicalEvent,
-    DeclaredTechnicalEventTarget, DeclaredVcfOutput, ExpectedConfigKind, Located, SequenceClass,
-    SourceLocation, semantic_error,
+    DeclaredTechnicalEventTarget, DeclaredTechnicalLibrary, DeclaredVcfOutput, ExpectedConfigKind,
+    Located, SequenceClass, SourceLocation, semantic_error,
 };
 use crate::diagnostics::Diagnostic;
 
@@ -100,14 +100,16 @@ pub fn admit_toml_header(
             .with("path", path.display().to_string())
             .with("field", "schema_version")
     })?;
-    if version_value.get_ref().as_str() != Some("1") {
+    // DTC-082 activa atómicamente la frontera de autoría F4: el runtime no
+    // conserva lectores de TOML general v1 cuando ya puede producir PE real.
+    if version_value.get_ref().as_str() != Some("2") {
         return Err(Diagnostic::configuration(
             "GPS-CONF-005",
             "La versión de esquema declarada no está admitida.",
         )
         .with("path", path.display().to_string())
         .with("found", render_toml_value(version_value.get_ref()))
-        .with("accepted", "1")
+        .with("accepted", "2")
         .with(
             "location",
             SourceLocation::from_span(&bytes, version_value.span()).to_string(),
@@ -211,23 +213,19 @@ fn parse_technical_event(
             "event_id",
             "individual_ids",
             "target_coverage_wgs",
-            "read_count",
+            "read_length_bases",
+            "libraries",
         ],
     )?;
-    let target = match (
-        optional_number(admitted, event, "target_coverage_wgs")?,
-        optional_located_u64(admitted, event, "read_count")?,
-    ) {
-        (Some(coverage), None) => DeclaredTechnicalEventTarget::CoverageWgs(coverage),
-        (None, Some(read_count)) => DeclaredTechnicalEventTarget::ReadCount(read_count),
-        (Some(_), Some(_)) | (None, None) => {
-            return Err(semantic_error(
+    let target = optional_number(admitted, event, "target_coverage_wgs")?
+        .map(DeclaredTechnicalEventTarget::CoverageWgs)
+        .ok_or_else(|| {
+            semantic_error(
                 admitted,
-                "technical_event.target_coverage_wgs,technical_event.read_count",
-                "debe declarar exactamente uno de target_coverage_wgs o read_count",
-            ));
-        }
-    };
+                "technical_event.target_coverage_wgs",
+                "F4 exige una cobertura objetivo; read_count y pair_count no están admitidos",
+            )
+        })?;
     let individuals = required_array(admitted, event, "individual_ids")?;
     if individuals.is_empty() {
         return Err(semantic_error(
@@ -248,10 +246,34 @@ fn parse_technical_event(
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let libraries = required_array(admitted, event, "libraries")?
+        .iter()
+        .map(|value| {
+            let library = value
+                .get_ref()
+                .as_table()
+                .ok_or_else(|| wrong_type(admitted, "technical_event.libraries", value, "table"))?;
+            check_unknown(admitted, library, &["individual_id", "i7", "i5"])?;
+            Ok(DeclaredTechnicalLibrary {
+                individual_id: required_string(admitted, library, "individual_id")?,
+                i7: required_string(admitted, library, "i7")?,
+                i5: required_string(admitted, library, "i5")?,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    if libraries.is_empty() {
+        return Err(semantic_error(
+            admitted,
+            "technical_event.libraries",
+            "debe declarar exactamente una biblioteca por individuo",
+        ));
+    }
     Ok(Some(DeclaredTechnicalEvent {
         event_id: required_string(admitted, event, "event_id")?,
         individual_ids,
         target,
+        read_length_bases: optional_located_u64(admitted, event, "read_length_bases")?,
+        libraries,
     }))
 }
 

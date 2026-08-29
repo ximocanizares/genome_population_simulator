@@ -1,9 +1,8 @@
-//! Regresión de distribución: los documentos publicados por F1 `e14705a`
-//! conservan su contrato y se seleccionan por versión, no por los requisitos F2.
+//! Regresión de retirada: los documentos F1 archivados no se admiten como
+//! contratos publicados tras la transición atómica DTC-082.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use genome_population_simulator::results::{
     validate_effective_config_against_manifest_bytes, validate_general_manifest_bytes,
@@ -17,38 +16,32 @@ const F1_REDUCTION_EFFECTIVE: &[u8] =
 const F1_REDUCTION_MANIFEST: &[u8] = include_bytes!("fixtures/f1-e14705a-reduction/manifest.json");
 
 #[test]
-fn archived_e14705a_f1_documents_remain_valid_with_their_frozen_v1_readers() {
+fn archived_e14705a_f1_documents_are_rejected_without_a_legacy_reader() {
     let effective_path = Path::new("effective-config.json");
     let manifest_path = Path::new("manifest.json");
 
-    validate_general_manifest_bytes(manifest_path, F1_MANIFEST)
-        .expect("the archived F1 manifest must retain its v1 reader");
-    validate_effective_config_against_manifest_bytes(
+    let manifest_error = validate_general_manifest_bytes(manifest_path, F1_MANIFEST)
+        .expect_err("el manifiesto archivado v1 debe rechazarse");
+    assert_eq!(
+        manifest_error.context().get("schema").map(String::as_str),
+        Some("manifest-general-v4.schema.json")
+    );
+    let effective_error = validate_effective_config_against_manifest_bytes(
         effective_path,
         F1_EFFECTIVE,
-        manifest_path,
+        Path::new("archived/effective-config.json"),
         F1_MANIFEST,
     )
-    .expect("the archived F1 effective configuration must retain its v1 reader");
+    .expect_err("la configuración efectiva archivada v1 debe rechazarse");
+    assert_eq!(
+        effective_error.context().get("schema").map(String::as_str),
+        Some("effective-config-v4.schema.json")
+    );
 
     let effective: serde_json::Value = serde_json::from_slice(F1_EFFECTIVE).expect("golden JSON");
     let manifest: serde_json::Value = serde_json::from_slice(F1_MANIFEST).expect("golden JSON");
     assert_eq!(effective["schema_version"], "1");
     assert_eq!(manifest["schema_version"], "1");
-
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    assert_schema_accepts(
-        root,
-        "effective-config-v1.schema.json",
-        "effective-config.json",
-        F1_EFFECTIVE,
-    );
-    assert_schema_accepts(
-        root,
-        "manifest-general-v1.schema.json",
-        "manifest.json",
-        F1_MANIFEST,
-    );
 }
 
 #[test]
@@ -63,7 +56,7 @@ fn version_dispatch_is_closed_and_reports_the_schema_selected_by_the_document() 
     .expect_err("v1 unknown field");
     assert_eq!(
         error.context().get("schema").map(String::as_str),
-        Some("manifest-general-v1.schema.json")
+        Some("manifest-general-v4.schema.json")
     );
 
     let mut unsupported_effective: serde_json::Value =
@@ -78,22 +71,22 @@ fn version_dispatch_is_closed_and_reports_the_schema_selected_by_the_document() 
     .expect_err("unsupported version");
     assert_eq!(
         error.context().get("schema").map(String::as_str),
-        Some("effective-config-v3.schema.json")
+        Some("effective-config-v4.schema.json")
     );
     assert!(
         error
             .context()
             .get("detail")
-            .is_some_and(|detail| detail.contains("se admiten \"1\" y \"3\""))
+            .is_some_and(|detail| detail.contains("exclusivamente \"4\""))
     );
 }
 
 #[test]
-fn v1_pair_and_physical_validation_preserve_manifest_schema_and_path_on_manifest_failure() {
+fn old_pairs_and_physical_validation_report_the_current_schema_on_rejection() {
     let mut broken: serde_json::Value = serde_json::from_slice(F1_MANIFEST).expect("manifest");
     broken["unexpected"] = serde_json::json!(true);
     let manifest_path = Path::new("archived/manifest.json");
-    assert_manifest_v1_error(
+    assert_rejected_manifest_error(
         validate_effective_config_against_manifest_bytes(
             Path::new("archived/effective-config.json"),
             F1_EFFECTIVE,
@@ -101,7 +94,7 @@ fn v1_pair_and_physical_validation_preserve_manifest_schema_and_path_on_manifest
             &serde_json::to_vec(&broken).expect("JSON"),
         )
         .expect_err("the v1 pair must reject a corrupt manifest"),
-        manifest_path,
+        Path::new("archived/effective-config.json"),
     );
 
     let root = temporary("corrupt-v1-physical");
@@ -112,7 +105,7 @@ fn v1_pair_and_physical_validation_preserve_manifest_schema_and_path_on_manifest
     let mut broken: serde_json::Value =
         serde_json::from_slice(F1_REDUCTION_MANIFEST).expect("reduction manifest");
     broken["unexpected"] = serde_json::json!(true);
-    assert_manifest_v1_error(
+    assert_rejected_manifest_error(
         validate_published_resources(
             &root,
             &effective_path,
@@ -121,19 +114,19 @@ fn v1_pair_and_physical_validation_preserve_manifest_schema_and_path_on_manifest
             &serde_json::to_vec(&broken).expect("JSON"),
         )
         .expect_err("the v1 physical validator must reject a corrupt manifest"),
-        &physical_manifest_path,
+        &effective_path,
     );
     fs::remove_dir_all(root).expect("cleanup");
 }
 
-fn assert_manifest_v1_error(
+fn assert_rejected_manifest_error(
     error: genome_population_simulator::diagnostics::Diagnostic,
     path: &Path,
 ) {
     let expected_path = path.display().to_string();
     assert_eq!(
         error.context().get("schema").map(String::as_str),
-        Some("manifest-general-v1.schema.json")
+        Some("effective-config-v4.schema.json")
     );
     assert_eq!(
         error.context().get("path").map(String::as_str),
@@ -170,23 +163,6 @@ fn write_fixture_tree(root: &Path) {
         fs::create_dir_all(destination.parent().expect("fixture parent")).expect("fixture parent");
         fs::write(destination, bytes).expect("fixture file");
     }
-}
-
-fn assert_schema_accepts(root: &Path, schema: &str, name: &str, bytes: &[u8]) {
-    let instance = temporary(name);
-    fs::write(&instance, bytes).expect("write archived document");
-    let mut command = Command::new("python3");
-    command
-        .arg(root.join("tests/external_jsonschema_validator.py"))
-        .arg(root.join("schemas").join(schema))
-        .arg(&instance);
-    let output = command.output().expect("independent JSON Schema validator");
-    let _ = fs::remove_file(&instance);
-    assert!(
-        output.status.success(),
-        "the frozen {schema} rejected archived F1 {name}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 fn temporary(name: &str) -> PathBuf {

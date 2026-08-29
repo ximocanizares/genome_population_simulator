@@ -17,7 +17,7 @@ from config_editor import (
 class PopulationSnvsEditorTest(unittest.TestCase):
     def test_simulated_reference_round_trips_optional_n_fraction(self):
         source = '''config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "ref"
@@ -41,7 +41,7 @@ length = 5
             self.skipTest("jsonschema no está instalado en el entorno UI")
         from jsonschema import Draft202012Validator
 
-        schema = json.loads((Path(__file__).resolve().parents[1] / "schemas/config-general-v1.schema.json").read_text())
+        schema = json.loads((Path(__file__).resolve().parents[1] / "schemas/config-general-v2.schema.json").read_text())
         validator = Draft202012Validator(schema)
         generation = {
             "count_mode": "exact",
@@ -64,7 +64,7 @@ length = 5
         for mode, path in (("supplied", "input_path"), ("reuse", "metadata_path")):
             document = {
                 "config_kind": "general",
-                "schema_version": "1",
+                "schema_version": "2",
                 "reference": reference,
                 "population_snvs": {"mode": mode, path: "matrix", "generate": generation},
             }
@@ -72,7 +72,7 @@ length = 5
 
         inverted_af = {
             "config_kind": "general",
-            "schema_version": "1",
+            "schema_version": "2",
             "reference": reference,
             "population_snvs": {
                 "mode": "generate",
@@ -138,7 +138,7 @@ length = 5
             "stochastic",
         )
         source = '''config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "generate"
 [population_snvs.generate]
@@ -169,7 +169,7 @@ length = 1
         self.assertEqual(parse_general_toml(rendered), parse_general_toml(source))
     def test_generate_round_trip_preserves_poisson_regions_and_populations(self):
         source = '''config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "generate"
 [population_snvs.generate]
@@ -213,7 +213,7 @@ length = 2
 
     def test_generate_round_trip_preserves_spectrum_and_approved_profiles(self):
         source = '''config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "generate"
 [population_snvs.generate]
@@ -256,10 +256,10 @@ length = 1
 
     def test_generate_requires_its_nested_table(self):
         with self.assertRaises(EditorError):
-            parse_general_toml('''config_kind = "general"\nschema_version = "1"\n[population_snvs]\nmode = "generate"\n[reference]\nkind = "simulated"\nid = "ref"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = "chr1"\nclass = "chromosome"\nlength = 1\n''')
+            parse_general_toml('''config_kind = "general"\nschema_version = "2"\n[population_snvs]\nmode = "generate"\n[reference]\nkind = "simulated"\nid = "ref"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = "chr1"\nclass = "chromosome"\nlength = 1\n''')
 
     def test_supplied_and_reuse_reject_a_generate_table(self):
-        base = '''config_kind = "general"\nschema_version = "1"\n[population_snvs]\nmode = "{mode}"\n{path} = "matrix"\n[population_snvs.generate]\ncount_mode = "exact"\nlocus_count = 1\nspatial_mode = "uniform"\nsubstitution_profile = "uniform_snv12_v1"\n[[population_snvs.generate.populations]]\npopulation_id = "P1"\nfrequency_model = "uniform"\nmin_alt_af = 0.1\nmax_alt_af = 0.9\n[reference]\nkind = "simulated"\nid = "ref"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = "chr1"\nclass = "chromosome"\nlength = 1\n'''
+        base = '''config_kind = "general"\nschema_version = "2"\n[population_snvs]\nmode = "{mode}"\n{path} = "matrix"\n[population_snvs.generate]\ncount_mode = "exact"\nlocus_count = 1\nspatial_mode = "uniform"\nsubstitution_profile = "uniform_snv12_v1"\n[[population_snvs.generate.populations]]\npopulation_id = "P1"\nfrequency_model = "uniform"\nmin_alt_af = 0.1\nmax_alt_af = 0.9\n[reference]\nkind = "simulated"\nid = "ref"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = "chr1"\nclass = "chromosome"\nlength = 1\n'''
         for mode, path in (("supplied", "input_path"), ("reuse", "metadata_path")):
             with self.assertRaises(EditorError) as raised:
                 parse_general_toml(base.format(mode=mode, path=path))

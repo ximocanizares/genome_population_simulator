@@ -55,7 +55,7 @@ fn empty_population_matrix_requires_and_records_its_explicit_authorization() {
         &config,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "supplied"
 input_path = "{}"
@@ -147,7 +147,7 @@ fn cli_publishes_founder_keys_when_it_derives_initial_individual_ids() {
         &config,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "{}"
 [population_snvs]
 mode = "supplied"
@@ -230,7 +230,7 @@ fn normalized_multiallelic_matrix_keeps_zero_ref_through_validate_and_run() {
         &config,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "{}"
 normalization_tolerance = 0.000001
 [population_snvs]
@@ -321,7 +321,7 @@ fn globally_absent_alt_is_omitted_from_active_projection_for_supplied_and_reused
     let supplied = root.join("supplied.toml");
     let common = format!(
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "{}"
 [[initial_populations]]
 population_id = "P1"
@@ -344,7 +344,7 @@ length = 1
     fs::write(
         &supplied,
         format!(
-            "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"{}\"\n\
+            "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
              [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n{}",
             "2".repeat(64),
             matrix.display(),
@@ -387,7 +387,7 @@ length = 1
     fs::write(
         &reused,
         format!(
-            "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"{}\"\n\
+            "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
              [population_snvs]\nmode = \"reuse\"\nmetadata_path = \"{}\"\n{}",
             "2".repeat(64),
             supplied_output
@@ -460,7 +460,7 @@ fn direct_events_are_preflighted_before_publication_and_the_narrow_flag_is_trace
         &config,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [population_snvs]
 mode = "supplied"

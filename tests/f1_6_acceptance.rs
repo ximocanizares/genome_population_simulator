@@ -511,12 +511,12 @@ fn target_reduction_publishes_reconstructible_fasta_map_and_manifest() {
     );
     validate_json(
         &first.join("effective-config.json"),
-        "effective-config-v3.schema.json",
+        "effective-config-v4.schema.json",
         true,
     );
     validate_json(
         &first.join("manifest.json"),
-        "manifest-general-v3.schema.json",
+        "manifest-general-v4.schema.json",
         true,
     );
     validate_json(
@@ -1014,7 +1014,7 @@ target_bases = 7"#;
         );
         validate_json(
             &destination.join("manifest.json"),
-            "manifest-general-v3.schema.json",
+            "manifest-general-v4.schema.json",
             true,
         );
         fs::remove_dir_all(root).unwrap();

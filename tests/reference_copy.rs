@@ -315,7 +315,7 @@ fn write_supplied_config(path: &Path, fasta: &str, length: u64) {
         path,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 [reference]

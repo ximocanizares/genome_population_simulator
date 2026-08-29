@@ -117,6 +117,18 @@ pub fn fastq_relative_path(event_id: &str, individual_id: &str) -> PathBuf {
         .join(format!("{individual_id}.fastq.gz"))
 }
 
+/// Rutas finales reservadas para una pareja PE. F4.1 solo las define junto al
+/// productor de fragmentos; F4.5 escribirá las cabeceras finales después del
+/// demultiplexado, sin volver a introducir la ruta SE de F3.
+#[must_use]
+pub fn paired_fastq_relative_paths(event_id: &str, individual_id: &str) -> (PathBuf, PathBuf) {
+    let base = PathBuf::from("outputs").join("fastq").join(event_id);
+    (
+        base.join(format!("{individual_id}_R1.fastq.gz")),
+        base.join(format!("{individual_id}_R2.fastq.gz")),
+    )
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct FastqSummary {
     read_count: u64,

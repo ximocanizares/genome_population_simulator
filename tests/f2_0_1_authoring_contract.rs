@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-const AUTHORING_SCHEMA: &str = include_str!("../schemas/config-general-v1.schema.json");
+const AUTHORING_SCHEMA: &str = include_str!("../schemas/config-general-v2.schema.json");
 const DIAGNOSTIC_SCHEMA: &str = include_str!("../schemas/diagnostics-v1.schema.json");
 const DIAGNOSTIC_CATALOG: &str = include_str!("../catalogs/diagnostics-v2.tsv");
 
@@ -158,20 +158,36 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
         BTreeSet::from([
             "event_id".to_owned(),
             "individual_ids".to_owned(),
-            "read_count".to_owned(),
+            "libraries".to_owned(),
+            "read_length_bases".to_owned(),
             "target_coverage_wgs".to_owned(),
         ])
     );
     assert_eq!(
         strings_at(&schema, "/$defs/technical_event/required"),
-        BTreeSet::from(["event_id".to_owned(), "individual_ids".to_owned()])
+        BTreeSet::from([
+            "event_id".to_owned(),
+            "individual_ids".to_owned(),
+            "libraries".to_owned(),
+            "target_coverage_wgs".to_owned(),
+        ])
     );
     assert_eq!(
-        schema["$defs"]["technical_event"]["oneOf"]
-            .as_array()
-            .expect("technical target union")
-            .len(),
-        2
+        keys_at(&schema, "/$defs/technical_library/properties"),
+        BTreeSet::from(["i5".to_owned(), "i7".to_owned(), "individual_id".to_owned(),])
+    );
+    assert_eq!(
+        strings_at(&schema, "/$defs/technical_library/required"),
+        BTreeSet::from(["i5".to_owned(), "i7".to_owned(), "individual_id".to_owned()])
+    );
+    assert_eq!(
+        schema["$defs"]["technical_event"]["properties"]["target_coverage_wgs"]["minimum"],
+        0
+    );
+    assert!(
+        schema["$defs"]["technical_event"]["properties"]
+            .get("read_count")
+            .is_none()
     );
 
     for future_field in ["scenario_id", "scenarios", "route", "individuals"] {
@@ -193,7 +209,7 @@ fn authoring_resources_are_versioned_and_keep_rust_as_semantic_authority() {
         serde_json::from_str(DIAGNOSTIC_SCHEMA).expect("valid diagnostic schema");
 
     assert_eq!(schema["properties"]["config_kind"]["const"], "general");
-    assert_eq!(schema["properties"]["schema_version"]["const"], "1");
+    assert_eq!(schema["properties"]["schema_version"]["const"], "2");
     assert_eq!(schema["additionalProperties"], false);
     assert!(schema["description"].as_str().is_some_and(|description| {
         description.contains("binario Rust conserva la validación semántica")

@@ -31,7 +31,7 @@ fn invalid_header_and_future_fields_have_equivalent_diagnostics_without_publicat
         ("invalid-missing-version.toml", "GPS-CONF-004"),
         ("invalid-unknown-kind.toml", "GPS-CONF-003"),
         ("invalid-crossed-kind.toml", "GPS-CONF-003"),
-        ("invalid-version-two.toml", "GPS-CONF-005"),
+        ("invalid-version-one.toml", "GPS-CONF-005"),
         ("invalid-malformed.toml", "GPS-CONF-001"),
         ("invalid-duplicate-key.toml", "GPS-CONF-007"),
         ("invalid-unknown-field.toml", "GPS-CONF-006"),
@@ -119,7 +119,7 @@ fn simulated_reduction_is_rejected_by_run_without_publication() {
     fs::write(
         &input,
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "0000000000000000000000000000000000000000000000000000000000000000"
 [reference]
 kind = "simulated"

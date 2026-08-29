@@ -170,6 +170,59 @@ def _(BASES, imported_form, mo):
         value=imported_form.vcf_output_mode or "none",
         label="Vista VCF de verdad opcional",
     )
+    selected_technical_event = imported_form.technical_event
+    technical_event_mode_control = mo.ui.dropdown(
+        options=["none", "configured"],
+        value="configured" if selected_technical_event else "none",
+        label="Evento técnico paired-end F4",
+    )
+    technical_event_id_control = mo.ui.text(
+        value=selected_technical_event.event_id if selected_technical_event else "",
+        label="ID del evento técnico",
+        full_width=True,
+    )
+    technical_event_individual_ids_control = mo.ui.text(
+        value=", ".join(selected_technical_event.individual_ids)
+        if selected_technical_event
+        else "",
+        label="IDs de individuos (separados por comas)",
+        full_width=True,
+    )
+    technical_event_coverage_control = mo.ui.text(
+        value=selected_technical_event.coverage_wgs if selected_technical_event else "0",
+        label="Cobertura WGS objetivo (× haploide)",
+        full_width=True,
+    )
+    technical_event_read_length_control = mo.ui.text(
+        value=str(selected_technical_event.read_length_bases)
+        if selected_technical_event and selected_technical_event.read_length_bases is not None
+        else "",
+        label="Longitud de lectura opcional (1–150; vacío = 150)",
+        full_width=True,
+    )
+    technical_library_rows = [
+        {
+            "order": order,
+            "individual_id": library.individual_id,
+            "i7": library.i7,
+            "i5": library.i5,
+            "omit_if_blank": False,
+        }
+        for order, library in enumerate(
+            selected_technical_event.libraries if selected_technical_event else [], start=1
+        )
+    ] or [{
+        "order": 1,
+        "individual_id": "",
+        "i7": "",
+        "i5": "",
+        "omit_if_blank": True,
+    }]
+    technical_libraries_editor = mo.ui.data_editor(
+        technical_library_rows,
+        label="Bibliotecas UDI (i7/i5: exactamente 8 bases A/C/G/T; library_id se deriva en Rust)",
+        pagination=False,
+    )
     population_snvs_mode_control = mo.ui.dropdown(
         options=["none", "supplied", "reuse", "generate"],
         value=(selected_population_snvs.mode if selected_population_snvs else "none"),
@@ -361,6 +414,12 @@ def _(BASES, imported_form, mo):
         population_snvs_spectra_editor,
         initial_populations_editor,
         direct_events_editor,
+        technical_event_mode_control,
+        technical_event_id_control,
+        technical_event_individual_ids_control,
+        technical_event_coverage_control,
+        technical_event_read_length_control,
+        technical_libraries_editor,
         vcf_output_mode_control,
         read_fasta_headers_button,
     )
@@ -422,9 +481,17 @@ def _(
     ReductionRow,
     ReferenceForm,
     SequenceRow,
+    TechnicalEventForm,
+    TechnicalLibraryRow,
     composition_controls,
     direct_event_from_editor_row,
     direct_events_editor,
+    technical_event_mode_control,
+    technical_event_id_control,
+    technical_event_individual_ids_control,
+    technical_event_coverage_control,
+    technical_event_read_length_control,
+    technical_libraries_editor,
     editor_integer,
     fasta_control,
     fasta_browser,
@@ -533,6 +600,41 @@ def _(
                 ordered_editor_rows(active_direct_events, "direct_events"), start=0
             )
         ]
+        selected_technical_event = str(technical_event_mode_control.value)
+        active_technical_libraries = authored_editor_rows(
+            technical_libraries_editor.value, "individual_id"
+        )
+        technical_event = (
+            None
+            if selected_technical_event == "none"
+            else TechnicalEventForm(
+                event_id=str(technical_event_id_control.value).strip(),
+                individual_ids=[
+                    individual_id.strip()
+                    for individual_id in str(technical_event_individual_ids_control.value).split(",")
+                    if individual_id.strip()
+                ],
+                coverage_wgs=str(technical_event_coverage_control.value).strip(),
+                libraries=[
+                    TechnicalLibraryRow(
+                        individual_id=str(row["individual_id"]).strip(),
+                        i7=str(row["i7"]).strip(),
+                        i5=str(row["i5"]).strip(),
+                    )
+                    for row in ordered_editor_rows(
+                        active_technical_libraries, "technical_event.libraries"
+                    )
+                ],
+                read_length_bases=(
+                    None
+                    if not str(technical_event_read_length_control.value).strip()
+                    else editor_integer(
+                        technical_event_read_length_control.value,
+                        "technical_event.read_length_bases",
+                    )
+                ),
+            )
+        )
         selected_kind = str(reference_kind_control.value)
         selected_population_mode = str(population_snvs_mode_control.value)
         population_snvs = (
@@ -578,6 +680,7 @@ def _(
             population_snvs=population_snvs,
             initial_populations=authored_initial_populations,
             direct_events=authored_direct_events,
+            technical_event=technical_event,
             vcf_output_mode=(
                 None
                 if str(vcf_output_mode_control.value) == "none"
@@ -809,6 +912,12 @@ def _(
     diagnostic_summary,
     vcf_artifact_summary,
     vcf_output_mode_control,
+    technical_event_mode_control,
+    technical_event_id_control,
+    technical_event_individual_ids_control,
+    technical_event_coverage_control,
+    technical_event_read_length_control,
+    technical_libraries_editor,
 ):
     visible_error = authoring_error
     visible_preview = authoring_toml
@@ -916,6 +1025,18 @@ def _(
     outputs_panel = mo.vstack(
         [
             mo.md("## Salidas"),
+            technical_event_mode_control,
+            (
+                mo.vstack([
+                    technical_event_id_control,
+                    technical_event_individual_ids_control,
+                    technical_event_coverage_control,
+                    technical_event_read_length_control,
+                    technical_libraries_editor,
+                ])
+                if str(technical_event_mode_control.value) == "configured"
+                else mo.callout("No se solicitará evento técnico.", kind="neutral")
+            ),
             vcf_output_mode_control,
             mo.callout(
                 "No se solicitará VCF; truth.jsonl sigue siendo la verdad obligatoria."

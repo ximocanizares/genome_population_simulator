@@ -32,7 +32,7 @@ fn temporary() -> PathBuf {
 fn general(population_snvs: &str) -> String {
     format!(
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 {population_snvs}
 [reference]
@@ -405,7 +405,7 @@ fn discarded_variant_requires_every_declared_population_in_reuse_and_physical_va
         &config,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "supplied"
 input_path = "{}"
@@ -465,7 +465,7 @@ length = 2
         &reuse,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [population_snvs]
 mode = "reuse"
 metadata_path = "{}"
@@ -548,7 +548,7 @@ fn supplied_matrix_is_prepared_into_the_same_closed_resource_shape() {
         &config,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [population_snvs]
 mode = "supplied"
@@ -590,7 +590,7 @@ length = 20
         &reuse_config,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [population_snvs]
 mode = "reuse"

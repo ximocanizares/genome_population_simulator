@@ -202,6 +202,22 @@ class DirectEventRow:
 
 
 @dataclass(eq=True)
+class TechnicalLibraryRow:
+    individual_id: str
+    i7: str
+    i5: str
+
+
+@dataclass(eq=True)
+class TechnicalEventForm:
+    event_id: str
+    individual_ids: list[str]
+    coverage_wgs: str
+    libraries: list[TechnicalLibraryRow]
+    read_length_bases: int | None = None
+
+
+@dataclass(eq=True)
 class GeneralForm:
     seed: str | None
     ploidy: int
@@ -211,6 +227,7 @@ class GeneralForm:
     population_snvs: PopulationSnvsForm | None
     initial_populations: list[InitialPopulationRow]
     direct_events: list[DirectEventRow]
+    technical_event: TechnicalEventForm | None = None
     # `None` conserva la omisión normativa: no se publica una vista VCF.
     vcf_output_mode: str | None = None
 
@@ -231,6 +248,7 @@ def default_form() -> GeneralForm:
         population_snvs=None,
         initial_populations=[],
         direct_events=[],
+        technical_event=None,
         vcf_output_mode=None,
     )
 
@@ -364,6 +382,7 @@ def parse_general_toml(text: str) -> GeneralForm:
             "population_snvs",
             "initial_populations",
             "direct_events",
+            "technical_event",
             "vcf_output",
         },
         required={"config_kind", "schema_version", "reference"},
@@ -371,8 +390,8 @@ def parse_general_toml(text: str) -> GeneralForm:
     )
     if _string(document["config_kind"], "config_kind") != "general":
         raise EditorError("config_kind", 'debe ser "general"')
-    if _string(document["schema_version"], "schema_version") != "1":
-        raise EditorError("schema_version", 'debe ser "1"')
+    if _string(document["schema_version"], "schema_version") != "2":
+        raise EditorError("schema_version", 'debe ser "2"')
     seed = _seed(document["seed"]) if "seed" in document else None
     ploidy = _ploidy(document["ploidy"]) if "ploidy" in document else 2
     normalization_tolerance = (
@@ -393,6 +412,13 @@ def parse_general_toml(text: str) -> GeneralForm:
     )
     initial_populations = _parse_initial_populations(document.get("initial_populations", []))
     direct_events = _parse_direct_events(document.get("direct_events", []))
+    technical_event = (
+        _parse_technical_event(
+            _mapping(document["technical_event"], "technical_event")
+        )
+        if "technical_event" in document
+        else None
+    )
     vcf_output_mode = (
         _parse_vcf_output(_mapping(document["vcf_output"], "vcf_output"))
         if "vcf_output" in document
@@ -407,6 +433,7 @@ def parse_general_toml(text: str) -> GeneralForm:
         population_snvs,
         initial_populations,
         direct_events,
+        technical_event,
         vcf_output_mode,
     )
 
@@ -560,6 +587,52 @@ def _parse_direct_events(value: Any) -> list[DirectEventRow]:
     return events
 
 
+def _parse_technical_event(table: Mapping[str, Any]) -> TechnicalEventForm:
+    _keys(
+        table,
+        allowed={
+            "event_id",
+            "individual_ids",
+            "target_coverage_wgs",
+            "read_length_bases",
+            "libraries",
+        },
+        required={"event_id", "individual_ids", "target_coverage_wgs", "libraries"},
+        path="technical_event",
+    )
+    individual_ids = [
+        _string(value, "technical_event.individual_ids")
+        for value in _sequence(table["individual_ids"], "technical_event.individual_ids")
+    ]
+    if not individual_ids:
+        raise EditorError("technical_event.individual_ids", "no puede estar vacío")
+    if len(individual_ids) != len(set(individual_ids)):
+        raise EditorError("technical_event.individual_ids", "contiene IDs repetidos")
+    libraries: list[TechnicalLibraryRow] = []
+    for index, value in enumerate(_sequence(table["libraries"], "technical_event.libraries")):
+        path = f"technical_event.libraries[{index}]"
+        row = _mapping(value, path)
+        _keys(row, allowed={"individual_id", "i7", "i5"}, required={"individual_id", "i7", "i5"}, path=path)
+        i7 = _udi(row["i7"], f"{path}.i7")
+        i5 = _udi(row["i5"], f"{path}.i5")
+        libraries.append(TechnicalLibraryRow(_string(row["individual_id"], f"{path}.individual_id"), i7, i5))
+    if not libraries:
+        raise EditorError("technical_event.libraries", "no puede estar vacío")
+    return TechnicalEventForm(
+        event_id=_string(table["event_id"], "technical_event.event_id"),
+        individual_ids=individual_ids,
+        coverage_wgs=_non_negative_number_literal(
+            table["target_coverage_wgs"], "technical_event.target_coverage_wgs"
+        ),
+        libraries=libraries,
+        read_length_bases=(
+            _read_length(table["read_length_bases"], "technical_event.read_length_bases")
+            if "read_length_bases" in table
+            else None
+        ),
+    )
+
+
 def _parse_reference(table: Mapping[str, Any], path: str) -> ReferenceForm:
     kind = _string(table.get("kind"), f"{path}.kind")
     common = {"kind", "id", "sequences"}
@@ -679,7 +752,7 @@ def _parse_reductions(value: Any) -> list[ReductionRow]:
 def render_general_toml(form: GeneralForm) -> str:
     document = tomlkit.document()
     document.add("config_kind", "general")
-    document.add("schema_version", "1")
+    document.add("schema_version", "2")
     if form.seed is not None:
         document.add("seed", _seed(form.seed))
     document.add("ploidy", _ploidy(form.ploidy))
@@ -869,6 +942,40 @@ def render_general_toml(form: GeneralForm) -> str:
                 raise EditorError(f"{path}.kind", "debe ser snp, insertion o deletion")
             events.append(row)
         document.add("direct_events", events)
+    if form.technical_event is not None:
+        event = form.technical_event
+        if not event.individual_ids:
+            raise EditorError("technical_event.individual_ids", "no puede estar vacío")
+        if len(event.individual_ids) != len(set(event.individual_ids)):
+            raise EditorError("technical_event.individual_ids", "contiene IDs repetidos")
+        if not event.libraries:
+            raise EditorError("technical_event.libraries", "no puede estar vacío")
+        technical_event = tomlkit.table()
+        technical_event.add("event_id", event.event_id)
+        technical_event.add("individual_ids", event.individual_ids)
+        technical_event.add(
+            "target_coverage_wgs",
+            _non_negative_literal_item(
+                event.coverage_wgs, "technical_event.target_coverage_wgs"
+            ),
+        )
+        if event.read_length_bases is not None:
+            technical_event.add(
+                "read_length_bases",
+                _checked_read_length(
+                    event.read_length_bases, "technical_event.read_length_bases"
+                ),
+            )
+        libraries = tomlkit.aot()
+        for index, library in enumerate(event.libraries):
+            path = f"technical_event.libraries[{index}]"
+            row = tomlkit.table()
+            row.add("individual_id", library.individual_id)
+            row.add("i7", _udi(library.i7, f"{path}.i7"))
+            row.add("i5", _udi(library.i5, f"{path}.i5"))
+            libraries.append(row)
+        technical_event.add("libraries", libraries)
+        document.add("technical_event", technical_event)
     if form.vcf_output_mode is not None:
         if form.vcf_output_mode not in {"text", "bgzf"}:
             raise EditorError("vcf_output.mode", "debe ser text o bgzf")
@@ -1012,6 +1119,40 @@ def _number_literal(value: Any, path: str) -> str:
     if not isinstance(value, (Integer, Float)):
         raise EditorError(path, "se esperaba un número decimal")
     return value.as_string()
+
+
+def _non_negative_number_literal(value: Any, path: str) -> str:
+    literal = _number_literal(value, path)
+    try:
+        parsed = float(literal)
+    except ValueError as error:
+        raise EditorError(path, "debe ser un número finito mayor o igual que cero") from error
+    if not math.isfinite(parsed) or parsed < 0:
+        raise EditorError(path, "debe ser un número finito mayor o igual que cero")
+    return literal
+
+
+def _non_negative_literal_item(literal: str | None, path: str) -> Integer | Float:
+    item = _literal_item(literal, path)
+    _non_negative_number_literal(item, path)
+    return item
+
+
+def _read_length(value: Any, path: str) -> int:
+    return _checked_read_length(_positive_u64(value, path), path)
+
+
+def _checked_read_length(value: int, path: str) -> int:
+    if not 1 <= value <= 150:
+        raise EditorError(path, "debe pertenecer a 1..=150")
+    return value
+
+
+def _udi(value: Any, path: str) -> str:
+    text = _string(value, path)
+    if re.fullmatch(r"[ACGT]{8}", text) is None:
+        raise EditorError(path, "debe contener exactamente ocho bases A/C/G/T")
+    return text
 
 
 def _literal_item(literal: str | None, path: str) -> Integer | Float:

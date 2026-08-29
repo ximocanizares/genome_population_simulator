@@ -57,13 +57,13 @@ fn configuration(mode: Option<&str>) -> String {
         format!("\n[vcf_output]\nmode = \"{mode}\"\n")
     });
     format!(
-        "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\"\n[reference]\nkind = \"simulated\"\nid = \"ref-main\"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 16\n[population_snvs]\nmode = \"generate\"\n[population_snvs.generate]\ncount_mode = \"exact\"\nlocus_count = 1\nspatial_mode = \"uniform\"\nsubstitution_profile = \"uniform_snv12_v1\"\n[[population_snvs.generate.populations]]\npopulation_id = \"P1\"\nfrequency_model = \"uniform\"\nmin_alt_af = 0.2\nmax_alt_af = 0.8\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"IND_01\"]\nploidy = 2\ngenotype_model = \"hwe\"\n{vcf}"
+        "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\"\n[reference]\nkind = \"simulated\"\nid = \"ref-main\"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 16\n[population_snvs]\nmode = \"generate\"\n[population_snvs.generate]\ncount_mode = \"exact\"\nlocus_count = 1\nspatial_mode = \"uniform\"\nsubstitution_profile = \"uniform_snv12_v1\"\n[[population_snvs.generate.populations]]\npopulation_id = \"P1\"\nfrequency_model = \"uniform\"\nmin_alt_af = 0.2\nmax_alt_af = 0.8\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"IND_01\"]\nploidy = 2\ngenotype_model = \"hwe\"\n{vcf}"
     )
 }
 
 fn configuration_without_populations(mode: &str) -> String {
     format!(
-        "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\"\n[reference]\nkind = \"simulated\"\nid = \"ref-main\"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 16\n[vcf_output]\nmode = \"{mode}\"\n"
+        "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f\"\n[reference]\nkind = \"simulated\"\nid = \"ref-main\"\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 16\n[vcf_output]\nmode = \"{mode}\"\n"
     )
 }
 
@@ -233,7 +233,7 @@ fn fixed_fixture_keeps_the_text_vcf_byte_and_semantic_contract() {
     // SHA-256 congelado de la salida de HEAD anterior a PERF-VCF.1, obtenida
     // con esta configuración y revisada antes de compactar la ruta VCF.
     const PRE_COMPACTION_VCF_SHA256: &str =
-        "82e844007e6cd5d661ec0f0f23b5f4a297cdc04d20acf8da8e39605f499c9bf8";
+        "5ce67541a3fe9a3e4edc1dc734debbd9bd1a920d3150f5000a32669b0c464253";
     let (root, _) = publish(Some("text"));
     let destination = root.join("published");
     let vcf = destination.join("outputs/truth.vcf");

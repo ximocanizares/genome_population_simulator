@@ -27,6 +27,7 @@ use crate::randomness::{
     derive_subseed, resolve_root_seed,
 };
 use crate::reference_generation::normalize_composition_probabilities;
+use crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1;
 use crate::vcf_contract::VcfOutputMode;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -218,6 +219,30 @@ pub struct EffectiveTechnicalEvent {
     event_id: EventId,
     individual_ids: Vec<IndividualId>,
     target: EffectiveTechnicalEventTarget,
+    read_length: u16,
+    libraries: Vec<EffectiveTechnicalLibrary>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectiveTechnicalLibrary {
+    individual_id: IndividualId,
+    i7: String,
+    i5: String,
+}
+
+impl EffectiveTechnicalLibrary {
+    #[must_use]
+    pub const fn individual_id(&self) -> &IndividualId {
+        &self.individual_id
+    }
+    #[must_use]
+    pub fn i7(&self) -> &str {
+        &self.i7
+    }
+    #[must_use]
+    pub fn i5(&self) -> &str {
+        &self.i5
+    }
 }
 
 impl EffectiveTechnicalEvent {
@@ -237,13 +262,18 @@ impl EffectiveTechnicalEvent {
     }
 
     #[must_use]
+    pub fn libraries(&self) -> &[EffectiveTechnicalLibrary] {
+        &self.libraries
+    }
+
+    #[must_use]
     pub const fn profile(&self) -> &'static str {
-        ILLUMINA_SE_MINIMAL_V1
+        GPS_HISEQX_PCRFREE_PE150_V1
     }
 
     #[must_use]
     pub const fn read_length(&self) -> u16 {
-        ILLUMINA_SE_MINIMAL_READ_LENGTH
+        self.read_length
     }
 
     #[must_use]
@@ -839,10 +869,86 @@ fn effective_technical_event(
             EffectiveTechnicalEventTarget::ReadCount(*value.value())
         }
     };
+    let read_length = declared
+        .read_length_bases
+        .as_ref()
+        .map_or(u64::from(ILLUMINA_SE_MINIMAL_READ_LENGTH), |value| {
+            *value.value()
+        });
+    if !(1..=150).contains(&read_length) {
+        return Err(config_error(
+            general,
+            "technical_event.read_length_bases",
+            "debe estar entre 1 y 150 y no superar el inserto mínimo del perfil",
+        ));
+    }
+    let read_length = u16::try_from(read_length).map_err(|_| {
+        config_error(
+            general,
+            "technical_event.read_length_bases",
+            "no cabe en la longitud de lectura del perfil",
+        )
+    })?;
+    let mut libraries = Vec::with_capacity(declared.libraries.len());
+    let mut library_individuals = BTreeSet::new();
+    let mut i7_values = BTreeSet::new();
+    let mut i5_values = BTreeSet::new();
+    for library in &declared.libraries {
+        let individual_id = IndividualId::parse(
+            library.individual_id.value().clone(),
+            "technical_event.libraries",
+        )
+        .map_err(|error| with_initial_population_path(general, error))?;
+        if !selected.contains(&individual_id) || !library_individuals.insert(individual_id.clone())
+        {
+            return Err(config_error(
+                general,
+                "technical_event.libraries.individual_id",
+                "debe coincidir exactamente y sin repetidos con individual_ids",
+            ));
+        }
+        for (field, value) in [("i7", library.i7.value()), ("i5", library.i5.value())] {
+            if value.len() != 8
+                || !value
+                    .bytes()
+                    .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T'))
+            {
+                return Err(config_error(
+                    general,
+                    "technical_event.libraries",
+                    format!("{field} debe contener exactamente ocho bases A/C/G/T"),
+                ));
+            }
+        }
+        if !i7_values.insert(library.i7.value().clone())
+            || !i5_values.insert(library.i5.value().clone())
+        {
+            return Err(config_error(
+                general,
+                "technical_event.libraries",
+                "cada componente UDI i7 e i5 debe ser único en la tanda",
+            ));
+        }
+        libraries.push(EffectiveTechnicalLibrary {
+            individual_id,
+            i7: library.i7.value().clone(),
+            i5: library.i5.value().clone(),
+        });
+    }
+    if library_individuals != selected {
+        return Err(config_error(
+            general,
+            "technical_event.libraries",
+            "debe existir exactamente una biblioteca por individuo seleccionado",
+        ));
+    }
+    libraries.sort_by(|left, right| left.individual_id.cmp(&right.individual_id));
     Ok(Some(EffectiveTechnicalEvent {
         event_id,
         individual_ids,
         target,
+        read_length,
+        libraries,
     }))
 }
 

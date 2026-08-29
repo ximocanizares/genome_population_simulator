@@ -1,5 +1,5 @@
 config_kind = "scenario"
-schema_version = "1"
+schema_version = "2"
 id = "evolution-small"
 route = "evolution"
 

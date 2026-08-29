@@ -9,11 +9,16 @@ use crate::diagnostics::Diagnostic;
 use crate::haplotype::{HaplotypeCopy, HaplotypeCopyId, Individual};
 use crate::identity::{EventId, IndividualId, LibraryId, SequenceId};
 use crate::materialization::{MaterializationError, materialize_copy_interval};
-use crate::randomness::{RandomSamplingError, poisson_count, uniform_u64_below};
+use crate::paired_end::{PairedEndFragment, PairedEndPair, emit_paired_end};
+use crate::randomness::{
+    F4TechnicalDecision, RandomSamplingError, derive_f4_technical_subseed, f4_truncated_normal,
+    f4_uniform_index, poisson_count, uniform_u64_below,
+};
 use crate::reference::{Reference, ReferenceSequence};
 use crate::technical_identity::{
-    TechnicalIdentityPlan, TechnicalTemplateIdentity, TemplateOrdinal,
+    F4TechnicalIdentityDeriver, TechnicalIdentityPlan, TechnicalTemplateIdentity, TemplateOrdinal,
 };
+use crate::technical_profile::F4TechnicalProfile;
 
 pub const WGS_READ_LENGTH: u64 = ILLUMINA_SE_MINIMAL_READ_LENGTH as u64;
 pub const WGS_COUNT_ALGORITHM: &str = "wgs-coverage-poisson-v1";
@@ -406,4 +411,219 @@ fn reverse_complement_in_place(sequence: &mut [u8]) {
             _ => unreachable!("the reference and inserted-base domains are validated"),
         };
     }
+}
+
+/// Muestreador F4 de fragmentos PE antes de cobertura, errores y artefactos.
+///
+/// El número de parejas no forma parte de la configuración F4.1. Este tipo lo
+/// recibe como dato interno y verificable para que las pruebas y F4.2 puedan
+/// producir fragmentos sin abrir un objetivo alternativo de usuario.
+pub struct WgsPairedEndSampler<'a> {
+    reference: &'a Reference,
+    individual: &'a Individual,
+    identities: &'a TechnicalIdentityPlan,
+    profile: F4TechnicalProfile,
+    read_length: u16,
+    remaining_pairs: u64,
+    next_ordinal: u64,
+    identity_deriver: F4TechnicalIdentityDeriver,
+    failed: bool,
+}
+
+impl<'a> WgsPairedEndSampler<'a> {
+    pub fn new_for_pair_count(
+        reference: &'a Reference,
+        individual: &'a Individual,
+        identities: &'a TechnicalIdentityPlan,
+        profile: F4TechnicalProfile,
+        read_length: u16,
+        pair_count: u64,
+    ) -> Result<Self, WgsSamplingError> {
+        if identities.reference_id() != reference.id() {
+            return Err(WgsSamplingError::TechnicalPlanReferenceMismatch);
+        }
+        if individual.reference_id() != reference.id() {
+            return Err(WgsSamplingError::IndividualReferenceMismatch);
+        }
+        if identities.library(individual.id()).is_none() {
+            return Err(WgsSamplingError::MissingTechnicalLibrary);
+        }
+        if !profile.common_read_length().contains(read_length)
+            || read_length > profile.insert_length().minimum_bases()
+        {
+            return Err(WgsSamplingError::NoEligibleSequence {
+                read_length: u64::from(read_length),
+            });
+        }
+        if pair_count > 0
+            && !has_copy_for_insert(individual, profile.insert_length().minimum_bases())?
+        {
+            return Err(WgsSamplingError::NoEligibleSequence {
+                read_length: u64::from(profile.insert_length().minimum_bases()),
+            });
+        }
+        Ok(Self {
+            reference,
+            individual,
+            identities,
+            profile,
+            read_length,
+            remaining_pairs: pair_count,
+            next_ordinal: 0,
+            identity_deriver: F4TechnicalIdentityDeriver::new(
+                identities.root_seed(),
+                identities.event_id().clone(),
+            ),
+            failed: false,
+        })
+    }
+
+    fn sample_next_pair(&mut self, ordinal: u64) -> Result<PairedEndPair, WgsSamplingError> {
+        let template = self
+            .identities
+            .derive_template(self.individual.id(), TemplateOrdinal::new(ordinal))
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let library_id = template.library_id();
+        let event_id = self.identities.event_id();
+        let distribution = self.profile.insert_length();
+        let insert_seed = derive_f4_technical_subseed(
+            self.identities.root_seed(),
+            F4TechnicalDecision::fragment_insert_length(event_id, library_id, ordinal),
+        )
+        .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let insert = f4_truncated_normal(
+            &mut insert_seed.local_rng(),
+            f64::from(distribution.mean_bases()),
+            f64::from(distribution.standard_deviation_bases()),
+            i64::from(distribution.minimum_bases()),
+            i64::from(distribution.maximum_bases()),
+        )
+        .map_err(WgsSamplingError::Random)?;
+        let insert = u64::try_from(insert).map_err(|_| WgsSamplingError::LengthOverflow)?;
+        let candidates = fragment_candidates(self.reference, self.individual, insert)?;
+        let total = candidates.iter().try_fold(0_u64, |sum, candidate| {
+            sum.checked_add(candidate.start_count)
+                .ok_or(WgsSamplingError::LengthOverflow)
+        })?;
+        let copy_seed = derive_f4_technical_subseed(
+            self.identities.root_seed(),
+            F4TechnicalDecision::fragment_copy(event_id, library_id, ordinal),
+        )
+        .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let selected = f4_uniform_index(&mut copy_seed.local_rng(), total)
+            .map_err(WgsSamplingError::Random)?;
+        let candidate = select_fragment_candidate(&candidates, selected)?;
+        let start_seed = derive_f4_technical_subseed(
+            self.identities.root_seed(),
+            F4TechnicalDecision::fragment_start(event_id, library_id, ordinal),
+        )
+        .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let start = f4_uniform_index(&mut start_seed.local_rng(), candidate.start_count)
+            .map_err(WgsSamplingError::Random)?;
+        let end = start
+            .checked_add(insert)
+            .ok_or(WgsSamplingError::LengthOverflow)?;
+        let sequence = materialize_copy_interval(candidate.copy, self.reference, start, end)
+            .map_err(WgsSamplingError::Materialization)?;
+        let fragment =
+            PairedEndFragment::new(template, candidate.copy.id().clone(), start, sequence)
+                .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let pre_hop_identity = self
+            .identity_deriver
+            .derive_own_pre_hop_pair(fragment.template().clone())
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
+        emit_paired_end(fragment, pre_hop_identity, self.read_length)
+            .map_err(WgsSamplingError::TechnicalIdentity)
+    }
+}
+
+impl Iterator for WgsPairedEndSampler<'_> {
+    type Item = Result<PairedEndPair, WgsSamplingError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed || self.remaining_pairs == 0 {
+            return None;
+        }
+        let result = self.sample_next_pair(self.next_ordinal);
+        match result {
+            Ok(pair) => {
+                self.next_ordinal = self.next_ordinal.saturating_add(1);
+                self.remaining_pairs -= 1;
+                Some(Ok(pair))
+            }
+            Err(error) => {
+                self.failed = true;
+                Some(Err(error))
+            }
+        }
+    }
+}
+
+fn has_copy_for_insert(individual: &Individual, insert: u16) -> Result<bool, WgsSamplingError> {
+    let insert = u64::from(insert);
+    for genotype in individual.sequences() {
+        for copy in genotype.copies() {
+            if copy
+                .segments()
+                .current_length()
+                .map_err(|_| WgsSamplingError::LengthOverflow)?
+                >= insert
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn fragment_candidates<'a>(
+    reference: &'a Reference,
+    individual: &'a Individual,
+    insert: u64,
+) -> Result<Vec<EligibleCopy<'a>>, WgsSamplingError> {
+    let mut candidates = Vec::new();
+    for genotype in individual.sequences() {
+        if reference_sequence(reference, genotype.sequence_id()).is_none() {
+            return Err(WgsSamplingError::IndividualReferenceMismatch);
+        }
+        for copy in genotype.copies() {
+            let current_length = copy
+                .segments()
+                .current_length()
+                .map_err(|_| WgsSamplingError::LengthOverflow)?;
+            let Some(start_count) = current_length
+                .checked_sub(insert)
+                .and_then(|value| value.checked_add(1))
+            else {
+                continue;
+            };
+            candidates.push(EligibleCopy {
+                copy,
+                current_length,
+                start_count,
+            });
+        }
+    }
+    if candidates.is_empty() {
+        return Err(WgsSamplingError::NoEligibleSequence {
+            read_length: insert,
+        });
+    }
+    Ok(candidates)
+}
+
+fn select_fragment_candidate<'a>(
+    candidates: &'a [EligibleCopy<'a>],
+    selected: u64,
+) -> Result<&'a EligibleCopy<'a>, WgsSamplingError> {
+    let mut cursor = 0_u64;
+    for candidate in candidates {
+        cursor = cursor
+            .checked_add(candidate.start_count)
+            .ok_or(WgsSamplingError::LengthOverflow)?;
+        if selected < cursor {
+            return Ok(candidate);
+        }
+    }
+    Err(WgsSamplingError::LengthOverflow)
 }

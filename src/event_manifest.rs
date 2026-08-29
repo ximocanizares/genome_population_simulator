@@ -11,17 +11,19 @@ use serde_json::{Value, json};
 
 use crate::application::EffectiveTechnicalEvent;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
-use crate::fastq_output::fastq_relative_path;
+use crate::fastq_output::paired_fastq_relative_paths;
 use crate::identity::{EventId, IndividualId, LibraryId, ReadGroupId, ReferenceId};
 use crate::results::{ArtifactRecord, UnitState, json_document_bytes, validate_relative_link};
 use crate::technical_identity::TechnicalIdentityPlan;
+use crate::technical_identity::TechnicalMate;
 
-pub const EVENT_MANIFEST_SCHEMA_VERSION: &str = "1";
+/// DTC-082 activa esta versión junto con effective-config v4 y manifest v4.
+pub const EVENT_MANIFEST_SCHEMA_VERSION: &str = "2";
 pub const EVENT_MANIFEST_KIND: &str = "gps_event_manifest";
 pub const TECHNICAL_SEQUENCING_EVENT_TYPE: &str = "technical_sequencing";
 /// Tecnología del único perfil técnico que F3 admite. El perfil conserva sus
 /// parámetros efectivos; este identificador distingue la tecnología del evento.
-pub const ILLUMINA_SHORT_READ_TECHNOLOGY_V1: &str = "illumina-short-read-v1";
+pub const ILLUMINA_SHORT_READ_TECHNOLOGY_V1: &str = "illumina-short-read-pe-v1";
 const REFERENCE_FASTA_ARTIFACT_KIND: &str = "reference_fasta";
 const FASTQ_ARTIFACT_KIND: &str = "fastq";
 
@@ -42,6 +44,7 @@ pub struct EventManifestArtifact<'a> {
     pub state: UnitState,
     pub individual_id: &'a IndividualId,
     pub library_id: &'a LibraryId,
+    pub mate: TechnicalMate,
     pub artifact: Option<&'a ArtifactRecord>,
     pub diagnostic: Option<&'a Diagnostic>,
 }
@@ -73,10 +76,18 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
         .identities
         .libraries()
         .map(|library| {
+            let configured = manifest
+                .event
+                .libraries()
+                .iter()
+                .find(|configured| configured.individual_id() == library.individual_id())
+                .expect("effective event invariants require one UDI per library");
             json!({
                 "individual_id": library.individual_id().as_str(),
                 "library_id": library.library_id().as_str(),
                 "read_group_id": library.read_group_id().as_str(),
+                "i7": configured.i7(),
+                "i5": configured.i5(),
             })
         })
         .collect::<Vec<_>>();
@@ -97,6 +108,7 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
                 "state": artifact.state.as_str(),
                 "individual_id": artifact.individual_id.as_str(),
                 "library_id": artifact.library_id.as_str(),
+                "mate": artifact.mate.number(),
                 "artifact": artifact.artifact.map(ArtifactRecord::to_json),
                 "diagnostic_code": artifact.diagnostic.map(Diagnostic::code),
             })
@@ -108,9 +120,14 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
         "event_id": manifest.event.event_id().as_str(),
         "event_type": TECHNICAL_SEQUENCING_EVENT_TYPE,
         "technology": ILLUMINA_SHORT_READ_TECHNOLOGY_V1,
+        "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
+        "id_catalog": f4_id_catalog(),
         "state": manifest.state.as_str(),
         "profile": {
             "id": manifest.event.profile(),
+            "resource_path": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
+            "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
+            "preparation": "pcr_free",
             "read_length": manifest.event.read_length(),
             "quality": {
                 "acgt_phred": manifest.event.acgt_phred(),
@@ -152,6 +169,13 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
     let event_id = parse_id::<EventId>(required_string(root, "event_id", path)?, "event", path)?;
     require_text(root, "event_type", path, TECHNICAL_SEQUENCING_EVENT_TYPE)?;
     require_text(root, "technology", path, ILLUMINA_SHORT_READ_TECHNOLOGY_V1)?;
+    require_text(
+        root,
+        "rng_catalog",
+        path,
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG,
+    )?;
+    validate_f4_id_catalog(required_value(root, "id_catalog", path)?, path)?;
     let state = parse_state(required_string(root, "state", path)?, path)?;
     validate_profile(required_value(root, "profile", path)?, path)?;
     let _batch = parse_id::<crate::identity::BatchId>(
@@ -186,6 +210,8 @@ const ROOT_FIELDS: &[&str] = &[
     "event_id",
     "event_type",
     "technology",
+    "rng_catalog",
+    "id_catalog",
     "state",
     "profile",
     "technical_batch_id",
@@ -236,7 +262,7 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
     if diagnostics.len() != manifest.diagnostics.len() {
         return Err(event_error(&path, "diagnósticos repetidos"));
     }
-    let mut artifact_libraries = BTreeSet::new();
+    let mut artifact_mates = BTreeSet::new();
     for artifact in manifest.artifacts {
         let library = manifest
             .identities
@@ -250,11 +276,8 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
                 "un artefacto refiere una biblioteca ajena",
             ));
         }
-        if !artifact_libraries.insert(artifact.individual_id.as_str()) {
-            return Err(event_error(
-                &path,
-                "una biblioteca tiene más de un resultado FASTQ",
-            ));
+        if !artifact_mates.insert((artifact.individual_id.as_str(), artifact.mate)) {
+            return Err(event_error(&path, "una biblioteca repite un mate FASTQ"));
         }
         match artifact.state {
             UnitState::Complete => {
@@ -265,9 +288,10 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
                     || record.id != artifact.id
                     || record.kind != artifact.kind
                     || record.path
-                        != fastq_relative_path(
+                        != paired_path(
                             manifest.event.event_id().as_str(),
                             artifact.individual_id.as_str(),
+                            artifact.mate,
                         )
                 {
                     return Err(event_error(&path, "artefacto completo incoherente"));
@@ -283,10 +307,12 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
             }
         }
     }
-    if artifact_libraries.len() != planned.len()
-        || !planned
-            .iter()
-            .all(|individual| artifact_libraries.contains(individual.as_str()))
+    if artifact_mates.len() != planned.len() * 2
+        || !planned.iter().all(|individual| {
+            TechnicalMate::all()
+                .into_iter()
+                .all(|mate| artifact_mates.contains(&(individual.as_str(), mate)))
+        })
     {
         return Err(event_error(
             &path,
@@ -296,20 +322,92 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
     Ok(())
 }
 
+fn f4_id_catalog() -> Value {
+    json!({
+        "version": crate::identity::ID_CATALOG_VERSION,
+        "derivations": {
+            "v1": ["execution", "reference", "individual", "event", "batch", "library", "read_group", "template"],
+            "v2": ["PreHopInstanceId", "TechnicalPairId"],
+        }
+    })
+}
+
+fn validate_f4_id_catalog(value: &Value, path: &Path) -> Result<(), Diagnostic> {
+    let catalog = required_object(value, "id_catalog", path)?;
+    validate_closed(catalog, &["version", "derivations"], "id_catalog", path)?;
+    require_text(
+        catalog,
+        "version",
+        path,
+        crate::identity::ID_CATALOG_VERSION,
+    )?;
+    let derivations = required_object(
+        required_value(catalog, "derivations", path)?,
+        "id_catalog.derivations",
+        path,
+    )?;
+    validate_closed(derivations, &["v1", "v2"], "id_catalog.derivations", path)?;
+    let expected_v1 = [
+        "execution",
+        "reference",
+        "individual",
+        "event",
+        "batch",
+        "library",
+        "read_group",
+        "template",
+    ];
+    let expected_v2 = ["PreHopInstanceId", "TechnicalPairId"];
+    for (field, expected) in [
+        ("v1", expected_v1.as_slice()),
+        ("v2", expected_v2.as_slice()),
+    ] {
+        let values = required_array(required_value(derivations, field, path)?, field, path)?;
+        if values.iter().filter_map(Value::as_str).collect::<Vec<_>>() != expected {
+            return Err(event_error(path, "id_catalog incompatible"));
+        }
+    }
+    Ok(())
+}
+
 fn validate_profile(value: &Value, path: &Path) -> Result<(), Diagnostic> {
     let profile = required_object(value, "profile", path)?;
-    validate_closed(profile, &["id", "read_length", "quality"], "profile", path)?;
+    validate_closed(
+        profile,
+        &[
+            "id",
+            "resource_path",
+            "sha256",
+            "preparation",
+            "read_length",
+            "quality",
+        ],
+        "profile",
+        path,
+    )?;
     require_text(
         profile,
         "id",
         path,
-        crate::application::ILLUMINA_SE_MINIMAL_V1,
+        crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
     )?;
-    if profile.get("read_length").and_then(Value::as_u64)
-        != Some(u64::from(
-            crate::application::ILLUMINA_SE_MINIMAL_READ_LENGTH,
-        ))
-    {
+    require_text(
+        profile,
+        "resource_path",
+        path,
+        crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
+    )?;
+    require_text(
+        profile,
+        "sha256",
+        path,
+        crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
+    )?;
+    require_text(profile, "preparation", path, "pcr_free")?;
+    if !matches!(
+        profile.get("read_length").and_then(Value::as_u64),
+        Some(1..=150)
+    ) {
         return Err(event_error(path, "longitud de lectura de perfil inválida"));
     }
     let quality = required_object(
@@ -345,7 +443,7 @@ fn validate_selected_individuals(
         let item = required_object(value, "selected_individuals[]", path)?;
         validate_closed(
             item,
-            &["individual_id", "library_id", "read_group_id"],
+            &["individual_id", "library_id", "read_group_id", "i7", "i5"],
             "selected_individuals[]",
             path,
         )?;
@@ -361,6 +459,16 @@ fn validate_selected_individuals(
             "read_group",
             path,
         )?;
+        for field in ["i7", "i5"] {
+            let udi = required_string(item, field, path)?;
+            if udi.len() != 8
+                || !udi
+                    .bytes()
+                    .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T'))
+            {
+                return Err(event_error(path, "UDI de biblioteca inválido"));
+            }
+        }
         if previous
             .as_deref()
             .is_some_and(|prior| prior >= individual.as_str())
@@ -431,9 +539,9 @@ fn validate_artifacts(
     }
     let mut ids = BTreeSet::new();
     let mut paths = BTreeSet::new();
-    let mut artifact_libraries = BTreeSet::new();
+    let mut artifact_mates = BTreeSet::new();
     let mut states = Vec::with_capacity(values.len());
-    let mut previous = None::<(String, String, String)>;
+    let mut previous = None::<(String, String, u8, String)>;
     for value in values {
         let artifact = required_object(value, "artifacts[]", path)?;
         validate_closed(
@@ -444,6 +552,7 @@ fn validate_artifacts(
                 "state",
                 "individual_id",
                 "library_id",
+                "mate",
                 "artifact",
                 "diagnostic_code",
             ],
@@ -455,14 +564,19 @@ fn validate_artifacts(
         if kind != FASTQ_ARTIFACT_KIND {
             return Err(event_error(path, "F3 solo admite artefactos FASTQ"));
         }
-        let _ = parse_id::<crate::identity::TemplateId>(id, "artifact", path)?;
         let state = parse_state(required_string(artifact, "state", path)?, path)?;
         let individual = required_string(artifact, "individual_id", path)?;
         let library = required_string(artifact, "library_id", path)?;
-        let ordering = (individual.to_owned(), library.to_owned(), id.to_owned());
+        let mate = parse_mate(artifact, path)?;
+        let ordering = (
+            individual.to_owned(),
+            library.to_owned(),
+            mate.number(),
+            id.to_owned(),
+        );
         if selected.get(individual).map(String::as_str) != Some(library)
             || !ids.insert(id.to_owned())
-            || !artifact_libraries.insert(individual.to_owned())
+            || !artifact_mates.insert((individual.to_owned(), mate))
             || previous.as_ref().is_some_and(|prior| prior >= &ordering)
         {
             return Err(event_error(
@@ -477,7 +591,7 @@ fn validate_artifacts(
                     validate_artifact(required_non_null(artifact, "artifact", path)?, path)?;
                 if record.id != id
                     || record.kind != kind
-                    || record.path != fastq_relative_path(event_id.as_str(), individual)
+                    || record.path != paired_path(event_id.as_str(), individual, mate)
                     || !paths.insert(record.path.clone())
                     || record.id == reference.id
                     || record.path == reference.path
@@ -501,10 +615,12 @@ fn validate_artifacts(
         }
         states.push(state);
     }
-    if artifact_libraries.len() != selected.len()
-        || !selected
-            .keys()
-            .all(|individual| artifact_libraries.contains(individual))
+    if artifact_mates.len() != selected.len() * 2
+        || !selected.keys().all(|individual| {
+            TechnicalMate::all()
+                .into_iter()
+                .all(|mate| artifact_mates.contains(&(individual.clone(), mate)))
+        })
     {
         return Err(event_error(
             path,
@@ -512,6 +628,27 @@ fn validate_artifacts(
         ));
     }
     Ok(states)
+}
+
+fn paired_path(event_id: &str, individual_id: &str, mate: TechnicalMate) -> String {
+    let (r1, r2) = paired_fastq_relative_paths(event_id, individual_id);
+    match mate {
+        TechnicalMate::R1 => r1,
+        TechnicalMate::R2 => r2,
+    }
+    .to_string_lossy()
+    .into_owned()
+}
+
+fn parse_mate(
+    artifact: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<TechnicalMate, Diagnostic> {
+    match artifact.get("mate").and_then(Value::as_u64) {
+        Some(1) => Ok(TechnicalMate::R1),
+        Some(2) => Ok(TechnicalMate::R2),
+        _ => Err(event_error(path, "mate FASTQ inválido")),
+    }
 }
 
 fn validate_event_state(
@@ -719,6 +856,6 @@ fn event_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
         "Un documento JSON producido no satisface su esquema publicado.",
     )
     .with("path", path.display().to_string())
-    .with("schema", "manifest-event-v1.schema.json")
+    .with("schema", "manifest-event-v2.schema.json")
     .with("detail", detail.into())
 }

@@ -60,9 +60,9 @@ fn complete_manifest_requires_the_canonical_truth_artifact_and_minimum_category(
 }
 
 #[test]
-fn v3_complete_manifest_requires_complete_event_links_in_rust_and_external_schema() {
+fn v4_complete_manifest_requires_complete_event_links_in_rust_and_external_schema() {
     let mut document = complete_manifest();
-    document["schema_version"] = json!("3");
+    document["schema_version"] = json!("4");
     document["artifacts"]
         .as_array_mut()
         .expect("catalog")
@@ -81,22 +81,22 @@ fn v3_complete_manifest_requires_complete_event_links_in_rust_and_external_schem
         "manifest_artifact_id": "event-manifest-reads-main"
     }]);
 
-    assert_rejected("v3-complete-manifest-failed-event", &document);
+    assert_rejected("v4-complete-manifest-failed-event", &document);
 }
 
 #[test]
-fn v3_manifest_validation_reports_the_v3_schema_label() {
+fn v4_manifest_validation_reports_the_v4_schema_label() {
     let mut document = complete_manifest();
-    document["schema_version"] = json!("3");
+    document["schema_version"] = json!("4");
     document["state"] = json!("unexpected");
     let error = validate_general_manifest_bytes(
-        Path::new("manifest-v3.json"),
+        Path::new("manifest-v4.json"),
         &serde_json::to_vec(&document).expect("manifest JSON"),
     )
-    .expect_err("invalid v3 manifest");
+    .expect_err("invalid v4 manifest");
     assert_eq!(
         error.context().get("schema").map(String::as_str),
-        Some("manifest-general-v3.schema.json")
+        Some("manifest-general-v4.schema.json")
     );
 }
 
@@ -409,7 +409,7 @@ fn record(id: &str, kind: &str, path: &str) -> ArtifactRecord {
 fn complete_manifest() -> Value {
     json!({
         "manifest_kind": "gps_execution_manifest",
-        "schema_version": "2",
+        "schema_version": "4",
         "execution_id": "execution-001",
         "state": "complete",
         "configuration_input": {
@@ -434,6 +434,7 @@ fn complete_manifest() -> Value {
             artifact("effective-config", "effective_config", "effective-config.json"),
             artifact("truth-jsonl", "truth_jsonl", "outputs/truth.jsonl")
         ],
+        "technical_events": [],
         "diagnostics": []
     })
 }
@@ -441,7 +442,7 @@ fn complete_manifest() -> Value {
 fn failed_manifest() -> Value {
     json!({
         "manifest_kind": "gps_execution_manifest",
-        "schema_version": "2",
+        "schema_version": "4",
         "execution_id": "execution-failed-001",
         "state": "failed",
         "configuration_input": {
@@ -463,6 +464,7 @@ fn failed_manifest() -> Value {
         "artifacts": [
             artifact("config-general", "config_general_toml", "inputs/config/general.toml")
         ],
+        "technical_events": [],
         "diagnostics": [{
             "code": "GPS-IO-001",
             "message": "Una operación de lectura o escritura falló."
@@ -541,8 +543,8 @@ fn assert_external_bytes(name: &str, bytes: &[u8], expected_success: bool) {
         })
         .as_deref()
     {
-        Some("3") => "manifest-general-v3.schema.json",
-        _ => "manifest-general-v2.schema.json",
+        Some("4") => "manifest-general-v4.schema.json",
+        _ => "manifest-general-v4.schema.json",
     };
     let output = Command::new("python3")
         .arg(root.join("tests/external_manifest_validator.py"))

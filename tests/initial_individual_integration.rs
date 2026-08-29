@@ -47,7 +47,7 @@ fn reference() -> Reference {
 
 fn config() -> EffectiveConfig {
     let source = r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [[initial_populations]]
 population_id = "P1"
@@ -80,7 +80,7 @@ length = 6
 
 fn multi_individual_config() -> EffectiveConfig {
     let source = r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [[initial_populations]]
 population_id = "P1"

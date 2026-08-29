@@ -213,7 +213,7 @@ fn preparation_uses_independent_fasta_truth_and_canonical_order() {
 fn preparation_preserves_nonlexical_fasta_order_and_nonutf8_description() {
     let root = temporary();
     let configuration = r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 [reference]

@@ -562,7 +562,7 @@ fn write_percentage_fixture(root: &Path) -> PathBuf {
     fs::write(
         &config,
         format!(
-            "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"{}\"\n\
+            "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
              [reference]\nkind = \"supplied\"\nid = \"reference-main\"\nfasta = \"source.fa\"\n\
              [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\
              [[reduced_references]]\nid = \"reference-small\"\nsource_reference_id = \"reference-main\"\n\
@@ -587,7 +587,7 @@ fn write_direct_events_fixture(root: &Path) -> PathBuf {
     fs::write(
         &config,
         format!(
-            "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"{}\"\n\
+            "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
              [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\
              [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"I1\"]\nploidy = 2\ngenotype_model = \"hwe\"\n\
              [[direct_events]]\nevent_id = \"event-1\"\nindividual_id = \"I1\"\nphase = 0\nkind = \"snp\"\ncontig = \"chr1\"\nposition_1based = 1\nref = \"A\"\nalt = \"G\"\n\
@@ -615,7 +615,7 @@ fn write_founder_keys_fixture(root: &Path) -> PathBuf {
     fs::write(
         &config,
         format!(
-            "config_kind = \"general\"\nschema_version = \"1\"\nseed = \"{}\"\n\
+            "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
              [population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\
              [[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nfounder_keys = [\"founder-I1\"]\nploidy = 2\ngenotype_model = \"hwe\"\n\
              [reference]\nkind = \"supplied\"\nid = \"ref-main\"\nfasta = \"{}\"\n\

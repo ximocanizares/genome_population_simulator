@@ -41,11 +41,11 @@ fn simulated_cli_runs_repeat_logically_and_pass_independent_oracles() {
 
     validate_json(
         &first.join("effective-config.json"),
-        "effective-config-v3.schema.json",
+        "effective-config-v4.schema.json",
     );
     validate_json(
         &first.join("manifest.json"),
-        "manifest-general-v3.schema.json",
+        "manifest-general-v4.schema.json",
     );
     assert!(!first_fasta.with_extension("fa.fai").exists());
     let acceptance_fasta = root.join("acceptance.fa");
@@ -152,11 +152,11 @@ fn supplied_cli_preserves_n_and_exact_input_while_invalid_input_has_no_destinati
     assert!(acceptance_fasta.with_extension("fa.fai").is_file());
     validate_json(
         &destination.join("effective-config.json"),
-        "effective-config-v3.schema.json",
+        "effective-config-v4.schema.json",
     );
     validate_json(
         &destination.join("manifest.json"),
-        "manifest-general-v3.schema.json",
+        "manifest-general-v4.schema.json",
     );
 
     fs::write(&source, b">chrN\nACRTA\n").expect("invalid source");
@@ -176,7 +176,7 @@ fn partial_ac_composition_is_rejected_before_cli_execution() {
     fs::write(
         &config,
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [reference]
 kind = "simulated"
@@ -224,7 +224,7 @@ fn generated_composition_rejects_unknown_and_duplicate_keys_at_admission() {
             &config,
             format!(
                 r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "ref-invalid"
@@ -259,7 +259,7 @@ fn generated_composition_accepts_an_independent_n_fraction() {
     fs::write(
         &config,
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "ref-n"
@@ -328,7 +328,7 @@ fn write_supplied_config(path: &Path, fasta: &str, length: u64) {
         path,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 [reference]

@@ -801,6 +801,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "F4.1 retira la publicación FASTQ SE; F4.2/F4.5 cubrirán la pareja publicada"]
     fn publication_revalidates_event_manifests_immediately_before_rename() {
         let root = temporary("event-tampered-before-publish");
         fs::create_dir(&root).expect("root");
@@ -852,6 +853,7 @@ mod tests {
                 state: UnitState::Complete,
                 individual_id: library.individual_id(),
                 library_id: library.library_id(),
+                mate: crate::technical_identity::TechnicalMate::R1,
                 artifact: Some(artifact),
                 diagnostic: None,
             })
@@ -926,6 +928,7 @@ mod tests {
                 state: UnitState::Complete,
                 individual_id: libraries[0].individual_id(),
                 library_id: libraries[0].library_id(),
+                mate: crate::technical_identity::TechnicalMate::R1,
                 artifact: Some(&fastqs[0]),
                 diagnostic: None,
             },
@@ -935,6 +938,7 @@ mod tests {
                 state: UnitState::Failed,
                 individual_id: libraries[1].individual_id(),
                 library_id: libraries[1].library_id(),
+                mate: crate::technical_identity::TechnicalMate::R1,
                 artifact: None,
                 diagnostic: Some(&event_failure),
             },
@@ -993,7 +997,7 @@ mod tests {
 
     fn effective_technical_event() -> crate::application::EffectiveConfig {
         const CONFIG: &str = r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [population_snvs]
 mode = "generate"
@@ -1028,7 +1032,15 @@ genotype_model = "hwe"
 [technical_event]
 event_id = "reads-main"
 individual_ids = ["sample-A", "sample-B"]
-read_count = 1
+target_coverage_wgs = 1.0
+[[technical_event.libraries]]
+individual_id = "sample-A"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
+[[technical_event.libraries]]
+individual_id = "sample-B"
+i7 = "AAAACCCC"
+i5 = "GGGGTTTT"
 "#;
         let admitted = crate::adapters::admit_toml_header(
             Path::new("publication-event-regression.toml"),

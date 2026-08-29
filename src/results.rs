@@ -54,13 +54,12 @@ use crate::vcf_publication::{
     VCF_INDEX_ARTIFACT_ID, VCF_TBI_ARTIFACT_PATH, VCF_TEXT_ARTIFACT_PATH,
 };
 
-/// Versión vigente del manifiesto general. F3 añade enlaces tipados a los
-/// manifiestos de eventos ya cerrados, sin introducir conjuntos genéricos.
-pub const GENERAL_MANIFEST_SCHEMA_VERSION: &str = "3";
+/// Versión vigente del manifiesto general. DTC-082 la activa junto con el
+/// primer productor PE y no mantiene lectores F3.
+pub const GENERAL_MANIFEST_SCHEMA_VERSION: &str = "4";
 
-/// Versión vigente de la configuración efectiva. F3 usa una versión distinta
-/// para que un lector v2 estricto no interprete silenciosamente `technical_event`.
-pub const EFFECTIVE_CONFIG_SCHEMA_VERSION: &str = "3";
+/// Versión vigente de la configuración efectiva para el productor PE F4.
+pub const EFFECTIVE_CONFIG_SCHEMA_VERSION: &str = "4";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnitState {
@@ -294,7 +293,7 @@ pub fn effective_config_document_with_reductions(
         }),
     });
     if let Some(event) = config.technical_event() {
-        document["technical_event"] = technical_event_json(event);
+        document["technical_event"] = technical_event_json(config, event);
     }
     Ok(document)
 }
@@ -372,7 +371,7 @@ fn direct_event_json(event: &EffectiveDirectEvent) -> Value {
     }
 }
 
-fn technical_event_json(event: &EffectiveTechnicalEvent) -> Value {
+fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEvent) -> Value {
     let target = match event.target() {
         EffectiveTechnicalEventTarget::CoverageWgs(value) => json!({"coverage_wgs": value}),
         EffectiveTechnicalEventTarget::ReadCount(value) => json!({"read_count": value}),
@@ -380,10 +379,69 @@ fn technical_event_json(event: &EffectiveTechnicalEvent) -> Value {
     json!({
         "event_id": event.event_id().as_str(),
         "individual_ids": event.individual_ids().iter().map(|id| id.as_str()).collect::<Vec<_>>(),
-        "profile": event.profile(),
+        "profile": {
+            "id": event.profile(),
+            "resource_path": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
+            "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
+            "preparation": "pcr_free",
+        },
         "read_length": event.read_length(),
         "quality": {"acgt_phred": event.acgt_phred(), "n_phred": event.n_phred()},
+        "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
+        "id_catalog": f4_id_catalog_value(),
+        "libraries": resolved_technical_libraries(config, event),
         "target": target,
+    })
+}
+
+fn resolved_technical_libraries(
+    config: &EffectiveConfig,
+    event: &EffectiveTechnicalEvent,
+) -> Vec<Value> {
+    let reference_id = ReferenceId::parse(config.reference_id(), "effective_config")
+        .expect("effective configuration preserves a valid reference ID");
+    let identities = derive_technical_identity_plan(
+        config.reproducibility().root_seed(),
+        &reference_id,
+        event.event_id().clone(),
+        event.individual_ids(),
+    )
+    .expect("effective technical event preserves derivable identities");
+    identities
+        .libraries()
+        .map(|identity| {
+            let configured = event
+                .libraries()
+                .iter()
+                .find(|library| library.individual_id() == identity.individual_id())
+                .expect("effective event has one configured library per individual");
+            json!({
+                "individual_id": identity.individual_id().as_str(),
+                "library_id": identity.library_id().as_str(),
+                "i7": configured.i7(),
+                "i5": configured.i5(),
+                "is_contamination_recipient": true,
+            })
+        })
+        .collect()
+}
+
+fn f4_id_catalog_value() -> Value {
+    json!({
+        "version": crate::identity::ID_CATALOG_VERSION,
+        "derivations": {
+            "v1": ["execution", "reference", "individual", "event", "batch", "library", "read_group", "template"],
+            "v2": ["PreHopInstanceId", "TechnicalPairId"],
+        }
+    })
+}
+
+fn f4_technical_profile_object() -> Value {
+    json!({
+        "id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
+        "resource_path": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
+        "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
+        "preparation": "pcr_free",
     })
 }
 
@@ -442,11 +500,35 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
             "code": diagnostic.code(),
             "message": diagnostic.message(),
         })).collect::<Vec<_>>(),
+        "technical_events": manifest.events.map_or_else(Vec::new, |events| {
+            events.iter().map(|link| technical_event_manifest_json(link, manifest)).collect()
+        }),
     });
     if let Some(events) = manifest.events {
         document["events"] = Value::Array(events.iter().map(manifest_event_json).collect());
     }
     document
+}
+
+fn technical_event_manifest_json(
+    link: &ManifestEventLink,
+    manifest: &GeneralManifest<'_>,
+) -> Value {
+    let event_manifest = manifest
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.id == link.manifest_artifact_id);
+    json!({
+        "event_id": link.event_id,
+        "effective_config": manifest.effective_config.map(ArtifactRecord::to_json),
+        "profile": {
+            "id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
+            "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
+        },
+        "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
+        "id_catalog": f4_id_catalog_value(),
+        "event_manifest": event_manifest.map(ArtifactRecord::to_json),
+    })
 }
 
 fn manifest_event_json(link: &ManifestEventLink) -> Value {
@@ -765,13 +847,6 @@ pub fn validate_effective_config_against_manifest_bytes(
     manifest_bytes: &[u8],
 ) -> Result<(), Diagnostic> {
     match effective_schema_version(effective_path, effective_bytes)? {
-        "1" => validate_effective_config_v1_against_manifest_bytes(
-            effective_path,
-            effective_bytes,
-            manifest_path,
-            manifest_bytes,
-        )
-        .map_err(|error| retag_v1_pair_error(error, effective_path, manifest_path)),
         EFFECTIVE_CONFIG_SCHEMA_VERSION => validate_effective_config_v3_against_manifest_bytes(
             effective_path,
             effective_bytes,
@@ -1084,14 +1159,6 @@ pub fn validate_published_resources(
     manifest_bytes: &[u8],
 ) -> Result<(), Diagnostic> {
     match effective_schema_version(effective_path, effective_bytes)? {
-        "1" => validate_published_resources_v1(
-            root,
-            effective_path,
-            effective_bytes,
-            manifest_path,
-            manifest_bytes,
-        )
-        .map_err(|error| retag_v1_pair_error(error, effective_path, manifest_path)),
         EFFECTIVE_CONFIG_SCHEMA_VERSION => validate_published_resources_v3(
             root,
             effective_path,
@@ -1390,16 +1457,32 @@ fn validate_physical_technical_event(
             format!("manifiesto técnico ilegible: {error}"),
         )
     })?;
+    let configured_libraries = effective_array(technical_event, "libraries", effective_path)?;
     let selected = identities
         .libraries()
         .map(|library| {
-            json!({
+            let configured = configured_libraries
+                .iter()
+                .filter_map(Value::as_object)
+                .find(|configured| {
+                    configured.get("individual_id").and_then(Value::as_str)
+                        == Some(library.individual_id().as_str())
+                })
+                .ok_or_else(|| {
+                    effective_error(
+                        effective_path,
+                        "falta la UDI de una biblioteca técnica en la configuración efectiva",
+                    )
+                })?;
+            Ok(json!({
                 "individual_id": library.individual_id().as_str(),
                 "library_id": library.library_id().as_str(),
                 "read_group_id": library.read_group_id().as_str(),
-            })
+                "i7": effective_non_empty_text(configured, "i7", effective_path)?,
+                "i5": effective_non_empty_text(configured, "i5", effective_path)?,
+            }))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
     let expected_event_subseed = identities.event_subseed().to_hex();
     let profile_matches = event
         .get("profile")
@@ -1431,6 +1514,7 @@ fn validate_physical_technical_event(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn validate_published_resources_v1(
     root: &Path,
     effective_path: &Path,
@@ -1616,6 +1700,7 @@ fn validate_published_resources_v1(
     Ok(())
 }
 
+#[allow(dead_code)]
 fn validate_effective_targets_against_configuration_v1(
     root: &Path,
     effective: &serde_json::Map<String, Value>,
@@ -2303,7 +2388,9 @@ fn validate_effective_targets_against_configuration(
             "direct_events efectivo no coincide exactamente con el TOML resuelto",
         ));
     }
-    let expected_technical_event = expected.technical_event().map(technical_event_json);
+    let expected_technical_event = expected
+        .technical_event()
+        .map(|event| technical_event_json(&expected, event));
     if effective.get("technical_event") != expected_technical_event.as_ref() {
         return Err(effective_error(
             effective_path,
@@ -2565,7 +2652,7 @@ pub(crate) fn parse_general_manifest_bytes(
         });
     parse_general_manifest_bytes_unretagged(path, bytes).map_err(|error| {
         if schema_version.as_deref() == Some(GENERAL_MANIFEST_SCHEMA_VERSION) {
-            retag_format_schema(error, "manifest-general-v3.schema.json")
+            retag_format_schema(error, "manifest-general-v4.schema.json")
         } else {
             error
         }
@@ -2583,23 +2670,19 @@ fn parse_general_manifest_bytes_unretagged(
         .ok_or_else(|| manifest_error(path, "la raíz no es un objeto"))?;
     let schema_version = object.get("schema_version").and_then(Value::as_str);
     match schema_version {
-        Some("1") => {
-            return parse_general_manifest_v1_object(path, object)
-                .map_err(|error| retag_format_schema(error, "manifest-general-v1.schema.json"));
-        }
-        Some("2" | GENERAL_MANIFEST_SCHEMA_VERSION) => {}
+        Some(GENERAL_MANIFEST_SCHEMA_VERSION) => {}
         observed => {
             return Err(manifest_error_for_schema(
                 path,
-                "manifest-general-v3.schema.json",
+                "manifest-general-v4.schema.json",
                 format!(
-                    "versión de manifiesto no admitida: {:?}; se admiten \"1\", \"2\" y \"{}\"",
+                    "versión de manifiesto no admitida: {:?}; se admite exclusivamente \"{}\"",
                     observed, GENERAL_MANIFEST_SCHEMA_VERSION
                 ),
             ));
         }
     }
-    const FIELDS: [&str; 15] = [
+    const FIELDS: [&str; 16] = [
         "manifest_kind",
         "schema_version",
         "execution_id",
@@ -2615,15 +2698,11 @@ fn parse_general_manifest_bytes_unretagged(
         "artifacts",
         "diagnostics",
         "events",
+        "technical_events",
     ];
-    let fields = if schema_version == Some("2") {
-        &FIELDS[..14]
-    } else {
-        &FIELDS[..]
-    };
-    validate_closed_object(object, fields, "manifest.json", path)?;
+    validate_closed_object(object, &FIELDS, "manifest.json", path)?;
     if object.get("manifest_kind").and_then(Value::as_str) != Some("gps_execution_manifest")
-        || !matches!(schema_version, Some("2" | GENERAL_MANIFEST_SCHEMA_VERSION))
+        || schema_version != Some(GENERAL_MANIFEST_SCHEMA_VERSION)
     {
         return Err(manifest_error(path, "clase o versión incompatible"));
     }
@@ -2682,6 +2761,13 @@ fn parse_general_manifest_bytes_unretagged(
     let population_snvs =
         validate_manifest_population_snvs(object.get("population_snvs"), &catalog, path)?;
     let events = validate_manifest_events(object.get("events"), &records, &catalog, path)?;
+    validate_manifest_technical_events(
+        required_array(object, "technical_events", path)?,
+        &events,
+        effective_id,
+        &records,
+        path,
+    )?;
     validate_manifest_authorizations(object.get("authorizations"), path)?;
     if let Some(id) = population_snvs.as_deref() {
         let declared = object
@@ -2778,6 +2864,7 @@ fn parse_general_manifest_bytes_unretagged(
 /// Reads the frozen F1 manifest contract.  It deliberately does not route a
 /// v1 document through F2 requirements such as `truth.jsonl`, population-SNV
 /// metadata, authorizations, or VCF outputs.
+#[allow(dead_code)]
 fn parse_general_manifest_v1_object(
     path: &Path,
     object: &serde_json::Map<String, Value>,
@@ -2889,6 +2976,7 @@ fn parse_general_manifest_v1_object(
     }
 }
 
+#[allow(dead_code)]
 fn validate_effective_config_v1_against_manifest_bytes(
     effective_path: &Path,
     effective_bytes: &[u8],
@@ -3198,6 +3286,78 @@ fn validate_manifest_events(
         links.push((event_id.to_owned(), state, artifact_id.to_owned()));
     }
     Ok(links)
+}
+
+fn validate_manifest_technical_events(
+    values: &[Value],
+    events: &[(String, UnitState, String)],
+    effective_id: Option<&str>,
+    records: &[ArtifactRecord],
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    if values.len() != events.len() {
+        return Err(manifest_error(
+            path,
+            "technical_events no coincide con events",
+        ));
+    }
+    for (value, (event_id, _, manifest_id)) in values.iter().zip(events) {
+        let object = value
+            .as_object()
+            .ok_or_else(|| manifest_error(path, "technical_event inválido"))?;
+        const FIELDS: [&str; 6] = [
+            "event_id",
+            "effective_config",
+            "profile",
+            "rng_catalog",
+            "id_catalog",
+            "event_manifest",
+        ];
+        validate_closed_object(object, &FIELDS, "technical_events[]", path)?;
+        if required_non_empty_text(object, "event_id", path)? != event_id
+            || object.get("profile")
+                != Some(
+                    &json!({"id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1, "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256}),
+                )
+            || object.get("rng_catalog").and_then(Value::as_str)
+                != Some(crate::randomness::F4_TECHNICAL_RNG_CATALOG)
+            || object.get("id_catalog") != Some(&f4_id_catalog_value())
+        {
+            return Err(manifest_error(path, "inventario técnico F4 incompatible"));
+        }
+        validate_embedded_artifact(object.get("effective_config"), effective_id, records, path)?;
+        validate_embedded_artifact(
+            object.get("event_manifest"),
+            Some(manifest_id),
+            records,
+            path,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_embedded_artifact(
+    value: Option<&Value>,
+    expected_id: Option<&str>,
+    records: &[ArtifactRecord],
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    match (value, expected_id) {
+        (Some(Value::Null), None) => Ok(()),
+        (Some(value), Some(expected_id))
+            if value
+                == &records
+                    .iter()
+                    .find(|record| record.id == expected_id)
+                    .map_or(Value::Null, ArtifactRecord::to_json) =>
+        {
+            Ok(())
+        }
+        _ => Err(manifest_error(
+            path,
+            "artefacto técnico embebido no coincide con el catálogo",
+        )),
+    }
 }
 
 fn validate_manifest_population_snvs(
@@ -4279,12 +4439,15 @@ fn validate_effective_technical_event(
     path: &Path,
 ) -> Result<(), Diagnostic> {
     let event = effective_object(effective, "technical_event", path)?;
-    const FIELDS: [&str; 6] = [
+    const FIELDS: [&str; 9] = [
         "event_id",
         "individual_ids",
         "profile",
         "read_length",
         "quality",
+        "libraries",
+        "rng_catalog",
+        "id_catalog",
         "target",
     ];
     validate_effective_closed_object(event, &FIELDS, "technical_event", path)?;
@@ -4299,10 +4462,18 @@ fn validate_effective_technical_event(
             "event_id técnico colisiona con un evento directo",
         ));
     }
-    if effective_non_empty_text(event, "profile", path)? != "illumina-se-minimal-v1"
-        || effective_nonnegative_u64(event, "read_length", path)? != 150
+    let read_length = effective_nonnegative_u64(event, "read_length", path)?;
+    let profile = effective_object(event, "profile", path)?;
+    if Value::Object(profile.clone()) != f4_technical_profile_object()
+        || !(1..=150).contains(&read_length)
     {
         return Err(effective_error(path, "perfil técnico mínimo inválido"));
+    }
+    if effective_non_empty_text(event, "rng_catalog", path)?
+        != crate::randomness::F4_TECHNICAL_RNG_CATALOG
+        || event.get("id_catalog") != Some(&f4_id_catalog_value())
+    {
+        return Err(effective_error(path, "catálogo técnico F4 inválido"));
     }
     let quality = effective_object(event, "quality", path)?;
     validate_effective_closed_object(
@@ -4337,33 +4508,84 @@ fn validate_effective_technical_event(
             ));
         }
     }
-    let target = effective_object(event, "target", path)?;
-    let is_coverage = target.get("coverage_wgs");
-    let is_count = target.get("read_count");
-    match (is_coverage, is_count) {
-        (Some(coverage), None) => {
-            if !matches!(coverage.as_f64(), Some(value) if value.is_finite() && value >= 0.0) {
-                return Err(effective_error(path, "cobertura WGS técnica inválida"));
-            }
-        }
-        (None, Some(_)) => {
-            validate_effective_closed_object(
-                target,
-                &["read_count"],
-                "technical_event.target",
-                path,
-            )?;
-            let _ = effective_nonnegative_u64(target, "read_count", path)?;
-        }
-        _ => return Err(effective_error(path, "objetivo técnico inválido")),
+    let libraries = effective_array(event, "libraries", path)?;
+    if libraries.len() != individuals.len() {
+        return Err(effective_error(
+            path,
+            "libraries no coincide con individual_ids",
+        ));
     }
-    if is_coverage.is_some() {
+    let mut library_individuals = BTreeSet::new();
+    let mut i7 = BTreeSet::new();
+    let mut i5 = BTreeSet::new();
+    for library in libraries {
+        let library = library
+            .as_object()
+            .ok_or_else(|| effective_error(path, "library inválida"))?;
         validate_effective_closed_object(
-            target,
-            &["coverage_wgs"],
-            "technical_event.target",
+            library,
+            &[
+                "individual_id",
+                "library_id",
+                "i7",
+                "i5",
+                "is_contamination_recipient",
+            ],
+            "technical_event.libraries",
             path,
         )?;
+        let individual_id = IndividualId::parse(
+            effective_non_empty_text(library, "individual_id", path)?,
+            "effective_config",
+        )
+        .map_err(|_| effective_error(path, "library individual_id inválido"))?;
+        let expected_library = derive_technical_identity_plan(
+            RootSeed::parse(
+                "root",
+                effective_non_empty_text(effective_object(effective, "seed", path)?, "root", path)?,
+            )?,
+            &ReferenceId::parse(
+                effective_non_empty_text(
+                    effective_object(effective, "reference", path)?,
+                    "id",
+                    path,
+                )?,
+                "effective_config",
+            )?,
+            event_id.clone(),
+            &individuals.iter().cloned().collect::<Vec<_>>(),
+        )
+        .map_err(|_| effective_error(path, "biblioteca técnica no derivable"))?
+        .library(&individual_id)
+        .ok_or_else(|| effective_error(path, "library técnica no derivable"))?
+        .library_id()
+        .as_str()
+        .to_owned();
+        let valid_udi = |field: &str| {
+            effective_non_empty_text(library, field, path).map(|value| {
+                value.len() == 8
+                    && value
+                        .bytes()
+                        .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T'))
+            })
+        };
+        if !individuals.contains(&individual_id)
+            || !library_individuals.insert(individual_id)
+            || effective_non_empty_text(library, "library_id", path)? != expected_library
+            || library.get("is_contamination_recipient") != Some(&Value::Bool(true))
+            || !valid_udi("i7")?
+            || !valid_udi("i5")?
+            || !i7.insert(effective_non_empty_text(library, "i7", path)?.to_owned())
+            || !i5.insert(effective_non_empty_text(library, "i5", path)?.to_owned())
+        {
+            return Err(effective_error(path, "biblioteca UDI inválida o repetida"));
+        }
+    }
+    let target = effective_object(event, "target", path)?;
+    validate_effective_closed_object(target, &["coverage_wgs"], "technical_event.target", path)?;
+    if !matches!(target.get("coverage_wgs").and_then(Value::as_f64), Some(value) if value.is_finite() && value >= 0.0)
+    {
+        return Err(effective_error(path, "cobertura WGS técnica inválida"));
     }
     Ok(())
 }
@@ -5584,13 +5806,12 @@ fn effective_schema_version(path: &Path, bytes: &[u8]) -> Result<&'static str, D
         .as_object()
         .ok_or_else(|| effective_error(path, "la raíz no es un objeto"))?;
     match object.get("schema_version").and_then(Value::as_str) {
-        Some("1") => Ok("1"),
         Some(EFFECTIVE_CONFIG_SCHEMA_VERSION) => Ok(EFFECTIVE_CONFIG_SCHEMA_VERSION),
         observed => Err(effective_error_for_schema(
             path,
-            "effective-config-v3.schema.json",
+            "effective-config-v4.schema.json",
             format!(
-                "versión de configuración efectiva no admitida: {:?}; se admiten \"1\" y \"{}\"",
+                "versión de configuración efectiva no admitida: {:?}; se admite exclusivamente \"{}\"",
                 observed, EFFECTIVE_CONFIG_SCHEMA_VERSION
             ),
         )),
@@ -5623,6 +5844,7 @@ fn retag_format_schema(error: Diagnostic, schema: &'static str) -> Diagnostic {
     )
 }
 
+#[allow(dead_code)]
 fn retag_v1_pair_error(
     error: Diagnostic,
     effective_path: &Path,
@@ -5648,7 +5870,7 @@ fn retag_v1_pair_error(
 }
 
 fn manifest_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
-    manifest_error_for_schema(path, "manifest-general-v2.schema.json", detail)
+    manifest_error_for_schema(path, "manifest-general-v4.schema.json", detail)
 }
 
 fn manifest_error_for_schema(
@@ -5666,7 +5888,7 @@ fn manifest_error_for_schema(
 }
 
 fn effective_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
-    effective_error_for_schema(path, "effective-config-v3.schema.json", detail)
+    effective_error_for_schema(path, "effective-config-v4.schema.json", detail)
 }
 
 fn effective_error_for_schema(

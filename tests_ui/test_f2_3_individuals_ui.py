@@ -86,7 +86,7 @@ class F23IndividualsUiTests(unittest.TestCase):
 
     def test_empty_imported_ids_are_indexed_errors_or_reach_rust_without_filtering(self) -> None:
         source = """config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "reference-main"
@@ -202,7 +202,7 @@ bases = "A"
     def test_blank_individual_ids_requires_founder_keys_for_derived_ids(self) -> None:
         imported = parse_general_toml(
             """config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "reference-main"

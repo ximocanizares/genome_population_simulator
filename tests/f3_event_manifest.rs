@@ -13,6 +13,7 @@ use genome_population_simulator::event_manifest::{
 use genome_population_simulator::identity::ReferenceId;
 use genome_population_simulator::randomness::RootSeed;
 use genome_population_simulator::results::{ArtifactRecord, UnitState};
+use genome_population_simulator::technical_identity::TechnicalMate;
 use genome_population_simulator::technical_identity::derive_technical_identity_plan;
 use serde_json::json;
 
@@ -28,7 +29,7 @@ fn complete_technical_event_manifest_is_written_and_accepted_by_both_validators(
     let (manifest, event_id) = complete_manifest();
     let bytes = event_manifest_bytes(&manifest).expect("event JSON");
     let document: serde_json::Value = serde_json::from_slice(&bytes).expect("event document");
-    assert_eq!(document["technology"], "illumina-short-read-v1");
+    assert_eq!(document["technology"], "illumina-short-read-pe-v1");
     validate_event_manifest_bytes(Path::new("events/reads-main/manifest.json"), &bytes)
         .expect("Rust validator");
 
@@ -62,6 +63,14 @@ fn invalid_schema_and_invalid_library_link_are_rejected() {
     assert!(
         validate_event_manifest_bytes(Path::new("manifest.json"), &wrong_library_bytes).is_err()
     );
+
+    let mut single_end = event_manifest_document(&manifest).expect("event document");
+    single_end["artifacts"] = json!([single_end["artifacts"][0].clone()]);
+    assert_rejected_by_both(&root, "single-end-output", &single_end);
+
+    let mut single_end_profile = event_manifest_document(&manifest).expect("event document");
+    single_end_profile["profile"]["id"] = json!("illumina-se-minimal-v1");
+    assert_rejected_by_both(&root, "single-end-profile", &single_end_profile);
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -78,7 +87,7 @@ fn each_selected_library_has_one_canonical_fastq_result() {
     let mut repeated = duplicate["artifacts"][0].clone();
     repeated["id"] = json!("fastq-duplicate");
     repeated["artifact"]["id"] = json!("fastq-duplicate");
-    repeated["artifact"]["path"] = json!("outputs/fastq/reads-main/duplicate.fastq.gz");
+    repeated["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-A_R1.fastq.gz");
     duplicate["artifacts"]
         .as_array_mut()
         .expect("artifacts")
@@ -91,17 +100,29 @@ fn each_selected_library_has_one_canonical_fastq_result() {
         .expect("individuals")
         .push(json!({
             "individual_id": "sample-B", "library_id": "LIB_sample-B", "read_group_id": "RG_sample-B",
+            "i7": "GGGGGGGG", "i5": "CCCCCCCC",
         }));
     let mut second = two_libraries["artifacts"][0].clone();
     second["id"] = json!("fastq-sample-B");
     second["individual_id"] = json!("sample-B");
     second["library_id"] = json!("LIB_sample-B");
     second["artifact"]["id"] = json!("fastq-sample-B");
-    second["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-B.fastq.gz");
+    second["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-B_R1.fastq.gz");
     two_libraries["artifacts"]
         .as_array_mut()
         .expect("artifacts")
         .push(second);
+    let mut second_r2 = two_libraries["artifacts"][1].clone();
+    second_r2["id"] = json!("fastq-sample-B-r2");
+    second_r2["individual_id"] = json!("sample-B");
+    second_r2["library_id"] = json!("LIB_sample-B");
+    second_r2["mate"] = json!(2);
+    second_r2["artifact"]["id"] = json!("fastq-sample-B-r2");
+    second_r2["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-B_R2.fastq.gz");
+    two_libraries["artifacts"]
+        .as_array_mut()
+        .expect("artifacts")
+        .push(second_r2);
     assert!(validate_document(&two_libraries).is_ok());
     two_libraries["artifacts"]
         .as_array_mut()
@@ -119,12 +140,12 @@ fn complete_fastq_path_has_the_canonical_shape_and_correlates_to_its_event_and_i
 
     let mut malformed_shape = document.clone();
     malformed_shape["artifacts"][0]["artifact"]["path"] =
-        json!("outputs/fastq/reads-main/nested/sample-A.fastq.gz");
+        json!("outputs/fastq/reads-main/nested/sample-A_R1.fastq.gz");
     assert_rejected_by_both(&root, "malformed-fastq-path", &malformed_shape);
 
     let mut wrong_event = document;
     wrong_event["artifacts"][0]["artifact"]["path"] =
-        json!("outputs/fastq/other-event/sample-A.fastq.gz");
+        json!("outputs/fastq/other-event/sample-A_R1.fastq.gz");
     assert!(validate_document(&wrong_event).is_err());
     let wrong_event_path = root.join("wrong-event-fastq-path.json");
     fs::write(
@@ -209,21 +230,41 @@ fn complete_manifest() -> (EventManifest<'static>, &'static str) {
     let library = identities.library(individual).expect("library");
     let artifact_id =
         Box::leak(format!("fastq-{}", library.library_id().as_str()).into_boxed_str());
-    let fastq = Box::leak(Box::new(record(
+    let fastq_r1 = Box::leak(Box::new(record(
         artifact_id,
         "fastq",
-        "outputs/fastq/reads-main/sample-A.fastq.gz",
+        "outputs/fastq/reads-main/sample-A_R1.fastq.gz",
         DIGEST_B,
     )));
-    let artifacts = Box::leak(Box::new([EventManifestArtifact {
-        id: artifact_id,
-        kind: "fastq",
-        state: UnitState::Complete,
-        individual_id: individual,
-        library_id: library.library_id(),
-        artifact: Some(fastq),
-        diagnostic: None,
-    }]));
+    let artifact_r2 = Box::leak(format!("{artifact_id}-r2").into_boxed_str());
+    let fastq_r2 = Box::leak(Box::new(record(
+        artifact_r2,
+        "fastq",
+        "outputs/fastq/reads-main/sample-A_R2.fastq.gz",
+        DIGEST_A,
+    )));
+    let artifacts = Box::leak(Box::new([
+        EventManifestArtifact {
+            id: artifact_id,
+            kind: "fastq",
+            state: UnitState::Complete,
+            individual_id: individual,
+            library_id: library.library_id(),
+            mate: TechnicalMate::R1,
+            artifact: Some(fastq_r1),
+            diagnostic: None,
+        },
+        EventManifestArtifact {
+            id: artifact_r2,
+            kind: "fastq",
+            state: UnitState::Complete,
+            individual_id: individual,
+            library_id: library.library_id(),
+            mate: TechnicalMate::R2,
+            artifact: Some(fastq_r2),
+            diagnostic: None,
+        },
+    ]));
     (
         EventManifest {
             event,
@@ -241,7 +282,7 @@ fn complete_manifest() -> (EventManifest<'static>, &'static str) {
 }
 
 fn declared() -> genome_population_simulator::configuration::DeclaredGeneralConfig {
-    let text = b"config_kind = \"general\"\nschema_version = \"1\"\n\n[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nploidy = 2\ngenotype_model = \"hwe\"\nindividual_ids = [\"sample-A\"]\n\n[technical_event]\nevent_id = \"reads-main\"\nindividual_ids = [\"sample-A\"]\nread_count = 1\n";
+    let text = b"config_kind = \"general\"\nschema_version = \"2\"\n\n[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nploidy = 2\ngenotype_model = \"hwe\"\nindividual_ids = [\"sample-A\"]\n\n[technical_event]\nevent_id = \"reads-main\"\nindividual_ids = [\"sample-A\"]\ntarget_coverage_wgs = 30\n\n[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n";
     let admitted = admit_toml_header(
         Path::new("f3-event-manifest.toml"),
         text.to_vec(),
@@ -264,7 +305,7 @@ fn record(id: &str, kind: &str, path: &str, digest: &str) -> ArtifactRecord {
 fn assert_external(path: &Path, accepted: bool) {
     let output = Command::new("python3")
         .arg("tests/external_jsonschema_validator.py")
-        .arg("schemas/manifest-event-v1.schema.json")
+        .arg("schemas/manifest-event-v2.schema.json")
         .arg(path)
         .output()
         .expect("external JSON Schema validator");

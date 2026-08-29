@@ -29,6 +29,7 @@ static NONCE: AtomicU64 = AtomicU64::new(0);
 const ROOT_SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
 #[test]
+#[ignore = "F4.1 retira el ensamblado/publicación FASTQ SE de F3"]
 fn complete_execution_assembles_and_links_the_validated_event_manifest() {
     let root = temporary("complete");
     fs::create_dir_all(&root).expect("root");
@@ -129,6 +130,7 @@ fn complete_execution_assembles_and_links_the_validated_event_manifest() {
 }
 
 #[test]
+#[ignore = "F4.1 retira el ensamblado/publicación FASTQ SE de F3"]
 fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
     let root = temporary("failed");
     fs::create_dir_all(&root).expect("root");
@@ -171,6 +173,7 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
             state: UnitState::Complete,
             individual_id: library.individual_id(),
             library_id: library.library_id(),
+            mate: genome_population_simulator::technical_identity::TechnicalMate::R1,
             artifact: Some(&fastq),
             diagnostic: None,
         },
@@ -180,6 +183,7 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
             state: UnitState::Failed,
             individual_id: missing_library.individual_id(),
             library_id: missing_library.library_id(),
+            mate: genome_population_simulator::technical_identity::TechnicalMate::R1,
             artifact: None,
             diagnostic: Some(&failure),
         },
@@ -271,7 +275,7 @@ fn effective_event() -> genome_population_simulator::application::EffectiveConfi
 fn configuration() -> String {
     format!(
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "{ROOT_SEED}"
 [population_snvs]
 mode = "generate"

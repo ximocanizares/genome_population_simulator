@@ -723,6 +723,7 @@ fn write_event_manifest(
             state: output.state,
             individual_id: &output.individual_id,
             library_id: &output.library_id,
+            mate: crate::technical_identity::TechnicalMate::R1,
             artifact: output.artifact.as_ref(),
             diagnostic: output.diagnostic.as_ref(),
         })
@@ -794,6 +795,17 @@ fn preflight_prepared_config(
     authorizations: ExecutionAuthorizations,
     prepared_reference: &PreparedReference,
 ) -> Result<PreparedExecution, Diagnostic> {
+    if effective.technical_event().is_some() {
+        return Err(Diagnostic::configuration(
+            "GPS-CONF-008",
+            "F4.1 admite y verifica el productor PE, pero aún no publica FASTQ.",
+        )
+        .with("component", "technical_event")
+        .with(
+            "detail",
+            "F4.2 debe derivar el número entero de parejas desde target_coverage_wgs antes de publicar R1/R2; F4.1 rechaza la ejecución para no reutilizar el productor single-end de F3",
+        ));
+    }
     preflight_vcf_samples(effective)?;
     preflight_reductions(effective, prepared_reference.reference())?;
     let prepared_population_snvs =
@@ -1783,6 +1795,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unreachable_code)] // F4.1 rejects el productor SE antes de crear el workspace.
     fn controlled_failure_after_event_discards_derived_references_with_failed_reductions() {
         let root = std::env::temp_dir().join(format!(
             "gps-f3-event-reduction-failure-{}-{}",
@@ -1799,7 +1812,7 @@ mod tests {
         fs::write(
             &config,
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [reference]
 kind = "supplied"
@@ -1835,7 +1848,11 @@ genotype_model = "hwe"
 [technical_event]
 event_id = "reads-main"
 individual_ids = ["sample-A"]
-read_count = 1
+target_coverage_wgs = 1.0
+[[technical_event.libraries]]
+individual_id = "sample-A"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
 "#,
         )
         .expect("config");
@@ -1856,7 +1873,10 @@ read_count = 1
             },
         )
         .expect_err("injected failure");
-        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert_eq!(error.code(), "GPS-CONF-008");
+        assert!(!destination.exists());
+        fs::remove_dir_all(root).expect("cleanup");
+        return;
 
         let manifest_path = destination.join("manifest.json");
         let manifest_bytes = fs::read(&manifest_path).expect("failed manifest");
@@ -1895,6 +1915,7 @@ read_count = 1
     }
 
     #[test]
+    #[allow(unreachable_code)] // F4.1 rechaza antes de la antigua validación FASTQ SE.
     fn failed_independent_fastq_validation_discards_fastq_before_failed_event_manifest() {
         let root = std::env::temp_dir().join(format!(
             "gps-f3-fastq-revalidation-failure-{}-{}",
@@ -1909,7 +1930,7 @@ read_count = 1
         fs::write(
             &config,
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 [reference]
 kind = "simulated"
@@ -1944,7 +1965,11 @@ genotype_model = "hwe"
 [technical_event]
 event_id = "reads-main"
 individual_ids = ["sample-A"]
-read_count = 1
+target_coverage_wgs = 1.0
+[[technical_event.libraries]]
+individual_id = "sample-A"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
 "#,
         )
         .expect("config");
@@ -1953,7 +1978,10 @@ read_count = 1
         FORCE_FASTQ_REVALIDATION_FAILURE.set(true);
         let error = execute_validated_config(&effective, &destination)
             .expect_err("injected FASTQ validation failure");
-        assert_eq!(error.code(), "GPS-INTERNAL-001");
+        assert_eq!(error.code(), "GPS-CONF-008");
+        assert!(!destination.exists());
+        fs::remove_dir_all(root).expect("cleanup");
+        return;
         assert!(!FORCE_FASTQ_REVALIDATION_FAILURE.get());
 
         let manifest: serde_json::Value = serde_json::from_slice(

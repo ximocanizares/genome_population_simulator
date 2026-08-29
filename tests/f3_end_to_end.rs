@@ -36,6 +36,7 @@ const ALTERED_POSITION_1BASED: usize = 75;
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
 #[test]
+#[allow(unreachable_code)] // La aserción F4.1 sustituye el recorrido SE histórico de este cierre F3.
 fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
     let root = temporary();
     fs::create_dir_all(&root).expect("temporary root");
@@ -66,11 +67,21 @@ fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
     fs::write(&config, configuration(&fasta, &matrix)).expect("configuration");
 
     let destination = root.join("published");
-    execute_validated_config(
+    let execution = execute_validated_config(
         &load_and_validate_config(&config).expect("effective configuration"),
         &destination,
-    )
-    .expect("complete publication");
+    );
+    if let Err(error) = execution {
+        assert_eq!(error.code(), "GPS-CONF-008");
+        assert_eq!(
+            error.context().get("component").map(String::as_str),
+            Some("technical_event")
+        );
+        assert!(!destination.exists(), "F4.1 must not publish a SE fallback");
+        fs::remove_dir_all(root).expect("cleanup");
+        return;
+    }
+    panic!("F4.1 must reject FASTQ publication until F4.2 derives pair count");
 
     let manifest_path = destination.join("manifest.json");
     let effective_path = destination.join("effective-config.json");
@@ -84,7 +95,7 @@ fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
         &manifest_bytes,
     )
     .expect("published reference, truth, event and FASTQ are mutually verifiable");
-    assert_external_manifest_schema(&manifest_path, "manifest-general-v3.schema.json");
+    assert_external_manifest_schema(&manifest_path, "manifest-general-v4.schema.json");
 
     let published_reference = validate_supplied_fasta(
         &destination.join("resources/references/reference-known.fa"),
@@ -125,7 +136,7 @@ fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
     );
 
     let event_path = destination.join("events/reads-known/manifest.json");
-    assert_external_manifest_schema(&event_path, "manifest-event-v1.schema.json");
+    assert_external_manifest_schema(&event_path, "manifest-event-v2.schema.json");
     let event: serde_json::Value =
         serde_json::from_slice(&fs::read(&event_path).expect("event manifest")).expect("JSON");
     assert_eq!(event["state"], "complete");
@@ -239,7 +250,7 @@ fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
 fn configuration(fasta: &Path, matrix: &Path) -> String {
     format!(
         r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "{ROOT_SEED}"
 [population_snvs]
 mode = "supplied"
@@ -270,7 +281,12 @@ length = {READ_LENGTH}
 [technical_event]
 event_id = "reads-known"
 individual_ids = ["individual-known"]
-read_count = 1
+target_coverage_wgs = 1.0
+
+[[technical_event.libraries]]
+individual_id = "individual-known"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
 "#,
         matrix.display(),
         fasta.display(),

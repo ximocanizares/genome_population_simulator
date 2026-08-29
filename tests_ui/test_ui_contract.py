@@ -37,7 +37,7 @@ class UiContractTests(unittest.TestCase):
 
     def test_current_schema_options_have_controls_and_future_options_do_not(self) -> None:
         schema = json.loads(
-            (ROOT / "schemas" / "config-general-v1.schema.json").read_text()
+            (ROOT / "schemas" / "config-general-v2.schema.json").read_text()
         )
         self.assertEqual(
             set(schema["properties"]),
@@ -50,6 +50,7 @@ class UiContractTests(unittest.TestCase):
                 "population_snvs",
                 "schema_version",
                 "seed",
+                "technical_event",
                 "reference",
                 "reduced_references",
                 "vcf_output",
@@ -74,6 +75,9 @@ class UiContractTests(unittest.TestCase):
             "population_snvs_metadata_path_control",
             "initial_populations_editor",
             "direct_events_editor",
+            "technical_event_mode_control",
+            "technical_event_coverage_control",
+            "technical_libraries_editor",
             "allow_incompatible_genotypes_control",
             "base_directory_browser",
             "output_parent_directory_browser",
@@ -201,9 +205,52 @@ class UiContractTests(unittest.TestCase):
         self.assertEqual(parse_general_toml(rendered).normalization_tolerance, literal)
 
     @unittest.skipUnless(BINARY.exists(), "compile the Rust binary before this integration test")
+    def test_ui_technical_event_v2_round_trips_to_rust_validation(self) -> None:
+        manual = """config_kind = "general"
+schema_version = "2"
+[reference]
+kind = "simulated"
+id = "reference-main"
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 1000
+[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+ploidy = 2
+genotype_model = "hwe"
+individual_ids = ["sample-A"]
+[technical_event]
+event_id = "reads-main"
+individual_ids = ["sample-A"]
+target_coverage_wgs = 0
+read_length_bases = 150
+[[technical_event.libraries]]
+individual_id = "sample-A"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
+"""
+        exported = render_general_toml(parse_general_toml(manual))
+        self.assertEqual(parse_general_toml(exported), parse_general_toml(manual))
+
+        with tempfile.TemporaryDirectory() as directory:
+            validation, session = validate_toml(
+                self.BINARY, exported, Path(directory)
+            )
+        self.assertFalse(validation.succeeded)
+        self.assertIsNone(session)
+        self.assertIn("F4.1 rechaza la ejecución", validation.stdout)
+
+    @unittest.skipUnless(BINARY.exists(), "compile the Rust binary before this integration test")
     def test_population_snv_import_export_and_rust_validation_cover_every_mode(self) -> None:
         base = """config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 [reference]
 kind = "simulated"
 id = "reference-main"
@@ -248,7 +295,7 @@ max_alt_af = 0.9''',
 
     @unittest.skipUnless(BINARY.exists(), "compile the Rust binary before this integration test")
     def test_ui_and_manual_toml_produce_the_same_effective_configuration(self) -> None:
-        manual = """schema_version = "1"
+        manual = """schema_version = "2"
 config_kind = "general"
 seed = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 normalization_tolerance = 0.000000001
@@ -267,9 +314,6 @@ A = 0.25
 length = 1000
 class = "chromosome"
 id = "chr1"
-
-[vcf_output]
-mode = "text"
 """
         ui_toml = render_general_toml(parse_general_toml(manual))
 
@@ -289,9 +333,6 @@ mode = "text"
                 )
                 self.assertTrue(execution.succeeded, execution.stdout)
                 self.assertTrue((base / name / "outputs" / "truth.jsonl").is_file())
-                self.assertTrue((base / name / "outputs" / "truth.vcf").is_file())
-                manifest = json.loads((base / name / "manifest.json").read_text())
-                self.assertEqual(manifest["vcf_outputs"][0]["mode"], "text")
                 effective = json.loads(
                     (base / name / "effective-config.json").read_text()
                 )

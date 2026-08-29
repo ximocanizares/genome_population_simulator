@@ -45,7 +45,7 @@ fn temporary() -> PathBuf {
 
 fn generated_config() -> String {
     r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 normalization_tolerance = 0.000000000001
 [population_snvs]
@@ -221,7 +221,7 @@ fn supplied_matrix_provenance_reaches_an_explicit_snp_before_reproducible_random
         &config,
         format!(
             r#"config_kind = "general"
-schema_version = "1"
+schema_version = "2"
 seed = "1111111111111111111111111111111111111111111111111111111111111111"
 [population_snvs]
 mode = "supplied"
