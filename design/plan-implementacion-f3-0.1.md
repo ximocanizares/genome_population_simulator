@@ -5,8 +5,8 @@
 - **Título:** generación mínima de lecturas desde haplotipos.
 - **Versión:** 0.1.
 - **Fecha:** 27 de agosto de 2026.
-- **Estado:** F3.1 y F3.5.1–F3.5.4 completados; pendiente la pausa de revisión
-  de F3.
+- **Estado:** F3.1 y F3.5 completados; cierre extremo a extremo y revisión de
+  F3 superados.
 - **Ámbito:** F3.1 y F3.5 simplificados de la hoja de ruta vigente.
 - **Fuentes:** especificación §4.4 y §4.6–§4.8; arquitectura §5.5 y §6; DTC-005, DTC-013, DTC-016, DTC-018, DTC-024, DTC-031–032, DTC-035, DTC-037–045 y DTC-079; hoja de ruta F3 y trazabilidad vigente.
 
@@ -171,7 +171,11 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
   - Cambia: prueba integrada y nota breve de cierre; no amplía modelo técnico ni publica paquete/imagen.
   - Se comprueba con: cargo test --test f3_end_to_end --locked y validadores JSON Schema existentes. Demuestra configuración → referencia → individuo → verdad → FASTQ y que verdad no procede de evidencia. La matriz fija una posición distinta, de modo que no puede enmascarar el SNP directo de fase 0; puertas comunes.
 
-> **PAUSA-F3.5 / Revisión de F3.** Usar el primer conjunto FASTQ extremo a extremo antes de ampliar biología o técnica. Confirmar utilidad como entrada externa de mapeo/detección, hechos reales en estados/manifiestos y ausencia de escenarios, protocolos, persistencia, empaquetado u hardening F9.
+> **✅ PAUSA-F3.5 / Revisión de F3 superada.** `f3_end_to_end` usa un conjunto
+> extremo a extremo con verdad manual, una `N` y cobertura medida por separado
+> antes y después de publicar FASTQ. Confirma que F3 entrega una entrada FASTQ
+> válida para un mapeador o detector externo sin incorporar mapeo, perfiles,
+> pares, escenarios, persistencia, empaquetado u *hardening* F9.
 
 ## 10. Matriz de evidencia y riesgos
 
@@ -183,5 +187,8 @@ F3 no invoca validadores de BAM/CRAM, índices, minimap2 ni un SNP caller. La ve
 ## 11. Riesgos pendientes
 
 - F3 mínimo no equivale a perfil universal validado: F4 es propietario de perfiles cuantitativos, pares y degradaciones.
-- Antes del cierre, una verdad manual debe demostrar que cobertura WGS básica y final FASTQ se distinguen; la cobertura alineada es externa al simulador.
+- La prueba de cierre distingue cobertura WGS básica y FASTQ final: coinciden
+  numéricamente en el contrato mínimo F3 porque no hay degradaciones, pero se
+  miden desde hechos distintos. La cobertura alineada sigue siendo externa al
+  simulador.
 - El manifiesto de evento extiende el patrón F1 con hechos reales; no sustituye DTPD-108 ni F9.

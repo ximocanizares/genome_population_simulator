@@ -9,6 +9,15 @@ solo con el cambio de matriz, sin consumir FASTQ. Después valida el FASTQ media
 reproducción independiente de su origen y los esquemas JSON Schema externos de
 los manifiestos general v3 y de evento v1.
 
+El mismo caso incluye una `N` manual en la referencia: queda elegible, aparece
+literalmente en el FASTQ con Phred 0 y el validador independiente la contabiliza.
+También calcula por separado la cobertura WGS básica (un fragmento de 150 bases
+sobre 150 bases haploides) y la cobertura del FASTQ final publicada. Ambas dan
+1x en F3 porque su contrato mínimo no introduce descartes ni lecturas ajenas;
+la igualdad no se usa como una sustitución de la cobertura alineada externa.
+El manifiesto del evento se contrasta además con el evento, referencia,
+individuo y artefacto publicados, además de sus validadores de esquema.
+
 Al corromper el FASTQ después de la publicación, la verdad continúa siendo
 reconstruible y la validación independiente del FASTQ falla. Esto conserva la
 dirección `configuración → referencia → individuo → verdad → FASTQ`: la

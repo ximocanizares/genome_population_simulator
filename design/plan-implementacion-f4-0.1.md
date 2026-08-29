@@ -6,10 +6,9 @@
   alineamiento.
 - **Versión:** 0.1.
 - **Fecha:** 28 de agosto de 2026.
-- **Estado:** condicionado al cierre formal de F3; las decisiones propias de F4
-  están cerradas, pero no autoriza implementación hasta que F3 aporte su evidencia
-  de cobertura/manifiesto y cierre su pausa. BAM/CRAM permanece fuera de alcance
-  en DTF-055.
+- **Estado:** listo para implementación: F3 ha aportado evidencia de cobertura,
+  `N` y manifiesto extremo a extremo y ha cerrado su pausa. Las decisiones
+  propias de F4 están cerradas. BAM/CRAM permanece fuera de alcance en DTF-055.
 - **Ámbito:** F4.0–F4.7 de la hoja de ruta vigente, construido sobre el recorrido
   mínimo F3.1/F3.5 y sus artefactos `.fastq.gz`.
 - **Fuentes:** especificación §4.4, §4.6 y §4.9; arquitectura §3, §5.5, §6–§7,

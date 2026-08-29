@@ -29,6 +29,7 @@ use noodles_bgzf as bgzf;
 
 const ROOT_SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 const READ_LENGTH: usize = 150;
+const UNKNOWN_POSITION_1BASED: usize = 10;
 const MATRIX_POSITION_1BASED: usize = 25;
 const ALTERED_POSITION_1BASED: usize = 75;
 
@@ -38,7 +39,8 @@ static NONCE: AtomicU64 = AtomicU64::new(0);
 fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
     let root = temporary();
     fs::create_dir_all(&root).expect("temporary root");
-    let reference_bases = vec![b'A'; READ_LENGTH];
+    let mut reference_bases = vec![b'A'; READ_LENGTH];
+    reference_bases[UNKNOWN_POSITION_1BASED - 1] = b'N';
     let mut matrix_haplotype = reference_bases.clone();
     matrix_haplotype[MATRIX_POSITION_1BASED - 1] = b'T';
     let mut expected_haplotype = matrix_haplotype.clone();
@@ -127,12 +129,20 @@ fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
     let event: serde_json::Value =
         serde_json::from_slice(&fs::read(&event_path).expect("event manifest")).expect("JSON");
     assert_eq!(event["state"], "complete");
+    assert_eq!(event["event_id"], "reads-known");
+    assert_eq!(event["event_type"], "technical_sequencing");
+    assert_eq!(event["reference"]["reference_id"], "reference-known");
+    assert_eq!(
+        event["selected_individuals"][0]["individual_id"],
+        "individual-known"
+    );
     let artifact = event["artifacts"]
         .as_array()
         .expect("event artifacts")
         .first()
         .expect("one selected library");
     assert_eq!(artifact["state"], "complete");
+    assert_eq!(artifact["individual_id"], "individual-known");
     let fastq_artifact = artifact_record(&artifact["artifact"]);
     let fastq_path = destination.join(fastq_artifact.path.as_str());
     assert!(fastq_artifact.path.ends_with(".fastq.gz"));
@@ -156,7 +166,17 @@ fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
         "the one eligible 150-base interval must come from the independently known haplotype"
     );
     assert_eq!(lines[2], b"+\n");
-    assert_eq!(lines[3], [vec![b'I'; READ_LENGTH], vec![b'\n']].concat());
+    let expected_qualities = observed
+        .iter()
+        .map(|base| if *base == b'N' { b'!' } else { b'I' })
+        .chain(std::iter::once(b'\n'))
+        .collect::<Vec<_>>();
+    assert_eq!(lines[3], expected_qualities);
+    assert_eq!(
+        observed.iter().filter(|base| **base == b'N').count(),
+        1,
+        "the unknown base from the authoritative reference remains literal in FASTQ"
+    );
 
     let known_individual = known_individual(published_reference.reference());
     let identities = derive_technical_identity_plan(
@@ -177,6 +197,19 @@ fn known_truth_flows_from_configuration_to_a_verifiable_published_fastq() {
     .expect("independent FASTQ replay against known truth");
     assert_eq!(report.read_count(), 1);
     assert_eq!(report.verified_origin_count(), 1);
+    assert_eq!(report.unknown_base_count(), 1);
+
+    // La WGS básica se calcula antes de escribir el FASTQ: un único fragmento
+    // de 150 bases sobre una referencia haploide de 150 bases es 1x. La
+    // cobertura final se vuelve a medir desde el FASTQ publicado. En F3 ambas
+    // coinciden porque el contrato mínimo no descarta ni añade lecturas; no se
+    // confunden ni se interpreta esta igualdad como cobertura alineada.
+    let haploid_length = published_reference.reference().total_length();
+    let basic_wgs_coverage = READ_LENGTH as f64 / haploid_length as f64;
+    let final_fastq_coverage = report.base_count() as f64 / haploid_length as f64;
+    assert_eq!(basic_wgs_coverage, 1.0);
+    assert_eq!(final_fastq_coverage, 1.0);
+    assert_eq!(report.coverage().realized_coverage(), final_fastq_coverage);
 
     // La verdad se valida antes y después de dañar la evidencia: no se deriva
     // del FASTQ ni el FASTQ puede repararla. Su validación independiente sí
