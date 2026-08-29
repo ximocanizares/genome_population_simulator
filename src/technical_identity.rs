@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 use crate::diagnostics::Diagnostic;
 use crate::identity::{
     AutomaticIdRequest, BatchId, EventId, IdClass, IdentityRegistry, IndividualId, LibraryId,
-    ReadGroupId, ReferenceId, TemplateId, compose_template_id,
+    PreHopInstanceId, ReadGroupId, ReferenceId, TechnicalIdentityRegistry, TechnicalPairId,
+    TemplateId, compose_template_id,
 };
 use crate::randomness::{RootSeed, RuntimeSubseedScope, Subseed, derive_subseed};
 
@@ -60,6 +61,68 @@ pub struct TechnicalTemplateIdentity {
     template_id: TemplateId,
     template_ordinal: TemplateOrdinal,
     subseed: Subseed,
+}
+
+/// Derivador transitorio de las identidades F4 de `id-catalog-v3`.
+///
+/// No representa una pareja ni retiene bases, calidades o una biblioteca final:
+/// solo encapsula la raíz, el evento y el registro de colisiones que DTC-087
+/// exige durante la generación técnica.
+#[derive(Debug)]
+pub struct F4TechnicalIdentityDeriver {
+    root_seed: RootSeed,
+    event_id: EventId,
+    registry: TechnicalIdentityRegistry,
+}
+
+impl F4TechnicalIdentityDeriver {
+    #[must_use]
+    pub fn new(root_seed: RootSeed, event_id: EventId) -> Self {
+        Self {
+            root_seed,
+            event_id,
+            registry: TechnicalIdentityRegistry::default(),
+        }
+    }
+
+    pub fn derive_own_pre_hop_instance(
+        &mut self,
+        library_id: &LibraryId,
+        template_id: &TemplateId,
+    ) -> Result<PreHopInstanceId, Diagnostic> {
+        self.registry.derive_own_pre_hop_instance(
+            self.root_seed,
+            &self.event_id,
+            library_id,
+            template_id,
+        )
+    }
+
+    pub fn derive_contamination_pre_hop_instance(
+        &mut self,
+        recipient_library_id: &LibraryId,
+        source_pre_hop_instance_id: &PreHopInstanceId,
+    ) -> Result<PreHopInstanceId, Diagnostic> {
+        self.registry.derive_contamination_pre_hop_instance(
+            self.root_seed,
+            &self.event_id,
+            recipient_library_id,
+            source_pre_hop_instance_id,
+        )
+    }
+
+    pub fn derive_technical_pair(
+        &mut self,
+        final_library_id: &LibraryId,
+        pre_hop_instance_id: &PreHopInstanceId,
+    ) -> Result<TechnicalPairId, Diagnostic> {
+        self.registry.derive_technical_pair(
+            self.root_seed,
+            &self.event_id,
+            final_library_id,
+            pre_hop_instance_id,
+        )
+    }
 }
 
 impl TechnicalTemplateIdentity {

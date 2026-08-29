@@ -163,23 +163,25 @@ cuando F3 esté cerrado, sin anticipar un formato de perfil empírico.
     literales DTC-086 y la interpolación cerrada en los extremos numéricos.
     Revisión independiente completada sin hallazgos pendientes.
 
-- ☐ F4.0.3. Añadir `id-catalog-v3` y las derivaciones deterministas
+- ✅ F4.0.3. Añadir `id-catalog-v3` y las derivaciones deterministas
   `PreHopInstanceId` y `TechnicalPairId`, sin emitir todavía una pareja.
   - Depende de: F4.0.2.
   - Procede de: DTC-037/039/086–087 y REQ-DAT-18/68/71.
   - Cambia: `src/identity.rs`, `src/technical_identity.rs`, el recurso de
     catálogo y pruebas de vectores; conserva literalmente las clases v2.
   - Se comprueba con: `cargo test --test f4_technical_identity --locked`;
-    vectores BLAKE3 prueban repetición, caracteres, longitud, reordenación y
-    colisión de ambas clases nuevas.
+    4 pruebas y vectores BLAKE3 prueban repetición, caracteres, longitud,
+    reordenación y colisión de ambas clases nuevas. La revisión independiente
+    confirma la preservación literal del catálogo v2 y ausencia de hallazgos.
 
-- ☐ F4.0.4. Cerrar la independencia entre decisiones técnicas ya publicadas.
+- ✅ F4.0.4. Cerrar la independencia entre decisiones técnicas ya publicadas.
   - Depende de: F4.0.1–F4.0.3.
   - Procede de: DTC-086/088 y REQ-DAT-15/70–71.
   - Cambia: solo *fixtures* y comparadores de prueba; no modifica el catálogo.
-  - Se comprueba con: `cargo test --test f4_rng_isolation --locked`; un vector
-    manual compara regeneración, reordenación, hilos y una transferencia
-    simultánea sin cadenas.
+  - Se comprueba con: `cargo test --test f4_rng_isolation --locked`; dos
+    pruebas con vector literal comparan regeneración, reordenación, hilos y una
+    transferencia simultánea sin cadenas. La revisión independiente no deja
+    hallazgos.
 
   **Inventario F4 ya acordado, pero no materializado por F4.0.** Estos son los
   campos de autoría y proyecciones que sus hitos propietarios conectarán cuando
@@ -195,8 +197,10 @@ cuando F3 esté cerrado, sin anticipar un formato de perfil empírico.
 
 > **PAUSA-F4.0.** Confirmar vectores literales de `f4-technical-v3`, incluidos
 > los dos extremos de porcentaje, quimera y error; confirmar además el vector
-> determinista sin consumo RNG de `PreHopInstanceId`/`TechnicalPairId` y las cuatro pruebas de
-> versión antes de construir perfiles o pares.
+> determinista sin consumo RNG de `PreHopInstanceId`/`TechnicalPairId` antes de
+> construir perfiles o pares. Las pruebas de versión de TOML y manifiestos se
+> aplazan a los hitos propietarios: F4.0 no materializa ni publica esos
+> contratos.
 
 ## 6. F4.1 — Perfiles tecnológicos y pares
 

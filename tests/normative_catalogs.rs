@@ -10,6 +10,7 @@ const SUBSEED_CATALOG_V2: &str = include_str!("../catalogs/subseed-scopes-v2.tsv
 const SUBSEED_CATALOG: &str = include_str!("../catalogs/subseed-scopes-v3.tsv");
 const ID_CATALOG: &str = include_str!("../catalogs/id-classes-v1.tsv");
 const ID_CATALOG_V2: &str = include_str!("../catalogs/id-classes-v2.tsv");
+const ID_CATALOG_V3: &str = include_str!("../catalogs/id-classes-v3.tsv");
 const VARIANT_ID_CATALOG: &str = include_str!("../catalogs/variant-id-v1.tsv");
 const PARAMETER_CATALOG: &str = include_str!("../catalogs/parameter-families-v1.tsv");
 const SUBSEED_CONTEXT: &str = "genome_population_simulator/v1/subseed";
@@ -18,7 +19,7 @@ const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
 // These fingerprints are the review lock for the published v1 contracts. A
 // deliberate content change must use a new versioned artifact and add a new
 // fingerprint instead of replacing a v1 value here.
-const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 9] = [
+const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 10] = [
     (
         "catalogs/diagnostics-v1.tsv",
         DIAGNOSTIC_CATALOG_V1,
@@ -58,6 +59,11 @@ const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 9] = [
         "catalogs/id-classes-v2.tsv",
         ID_CATALOG_V2,
         "386267beeecd7e25638e0b5b677c8c10cca871847fe0d4566f964e042f074b57",
+    ),
+    (
+        "catalogs/id-classes-v3.tsv",
+        ID_CATALOG_V3,
+        "34dafd1d47a0f96a9e6030270ac2f7c84a0bf050ffc6926d7b919bdef8abf390",
     ),
     (
         "catalogs/parameter-families-v1.tsv",
@@ -108,6 +114,9 @@ fn published_v1_contracts_match_their_reviewed_content() {
     assert!(ID_CATALOG.starts_with(&format!("# derivation_version=1\n# context={ID_CONTEXT}\n")));
     assert!(ID_CATALOG_V2.starts_with(&format!(
         "# derivation_version=1\n# catalog_version=2\n# context={ID_CONTEXT}\n"
+    )));
+    assert!(ID_CATALOG_V3.starts_with(&format!(
+        "# catalog_version=3\n# context={ID_CONTEXT}\n# derivation_versions=v1,v2\n"
     )));
     assert!(PARAMETER_CATALOG.starts_with("# parameter_catalog_version=1\n"));
 
@@ -312,6 +321,10 @@ fn decode_hex(value: &str) -> Vec<u8> {
 }
 
 fn encode_material(root_hex: &str, components: &str) -> Vec<u8> {
+    encode_material_with_version(root_hex, components, 1)
+}
+
+fn encode_material_with_version(root_hex: &str, components: &str, version: u32) -> Vec<u8> {
     let root = decode_hex(root_hex);
     assert_eq!(root.len(), 32);
     let components: Vec<_> = components
@@ -323,7 +336,7 @@ fn encode_material(root_hex: &str, components: &str) -> Vec<u8> {
         })
         .collect();
     let mut material = root;
-    material.extend_from_slice(&1_u32.to_be_bytes());
+    material.extend_from_slice(&version.to_be_bytes());
     material.extend_from_slice(
         &u32::try_from(components.len())
             .expect("component count must fit u32")
@@ -580,5 +593,55 @@ fn id_vectors_separate_classes_and_encode_the_first_128_digest_bits() {
             assert_eq!(decode_base32_no_padding(encoded), decode_hex(&digest[..32]));
         }
         assert!(identifiers.insert(*identifier));
+    }
+}
+
+#[test]
+fn id_catalog_v3_preserves_v2_rows_and_adds_f4_v2_derivations() {
+    let v2_rows: Vec<_> = ID_CATALOG_V2
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    let rows: Vec<_> = ID_CATALOG_V3
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    assert_eq!(&rows[..v2_rows.len()], v2_rows);
+    assert_eq!(rows.len(), v2_rows.len() + 3);
+
+    for row in &rows[v2_rows.len()..] {
+        let fields: Vec<_> = row.split('|').collect();
+        assert_eq!(fields.len(), 9);
+        let [
+            class,
+            prefix,
+            _scope,
+            causes,
+            components,
+            root,
+            material,
+            digest,
+            identifier,
+        ] = fields.as_slice()
+        else {
+            panic!("ID catalog row must have nine fields");
+        };
+        assert!(matches!(*class, "PreHopInstanceId" | "TechnicalPairId"));
+        assert!(matches!(*prefix, "PH_" | "TP_"));
+        assert!(components.starts_with(&format!("class={class};")));
+        assert!(causes.starts_with("root,event_id,"));
+        assert_eq!(
+            encode_material_with_version(root, components, 2),
+            decode_hex(material)
+        );
+        assert_eq!(
+            blake3_derive_key(ID_CONTEXT, &decode_hex(material)).as_slice(),
+            decode_hex(digest)
+        );
+        assert!(identifier.starts_with(prefix));
+        assert_eq!(
+            decode_base32_no_padding(&identifier[prefix.len()..]),
+            decode_hex(&digest[..32])
+        );
     }
 }

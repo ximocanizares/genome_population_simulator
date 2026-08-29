@@ -7,7 +7,8 @@ use crate::diagnostics::Diagnostic;
 use crate::randomness::{DERIVATION_VERSION, RootSeed};
 
 pub const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
-pub const ID_CATALOG_VERSION: &str = "2";
+pub const ID_CATALOG_VERSION: &str = "3";
+pub const TECHNICAL_ID_DERIVATION_VERSION: u32 = 2;
 
 macro_rules! typed_id {
     ($name:ident, $category:literal) => {
@@ -48,6 +49,8 @@ typed_id!(BatchId, "batch");
 typed_id!(LibraryId, "library");
 typed_id!(ReadGroupId, "read_group");
 typed_id!(TemplateId, "template");
+typed_id!(PreHopInstanceId, "pre_hop_instance");
+typed_id!(TechnicalPairId, "technical_pair");
 
 /// Construye el ID de plantilla de F3 a partir de una biblioteca ya única en
 /// el evento y de su ordinal lógico canónico en decimal.
@@ -294,6 +297,150 @@ fn encode_base32(bytes: &[u8]) -> String {
         ));
     }
     encoded
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum TechnicalIdClass {
+    PreHopInstance,
+    TechnicalPair,
+}
+
+impl TechnicalIdClass {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::PreHopInstance => "PreHopInstanceId",
+            Self::TechnicalPair => "TechnicalPairId",
+        }
+    }
+
+    const fn prefix(self) -> &'static str {
+        match self {
+            Self::PreHopInstance => "PH_",
+            Self::TechnicalPair => "TP_",
+        }
+    }
+}
+
+/// Registro de colisiones de las identidades técnicas transitorias de F4.
+///
+/// Las dos clases usan la derivación v2 de `id-catalog-v3`; no comparten el
+/// material ni el registro de las clases heredadas v1.
+#[derive(Debug, Default)]
+pub struct TechnicalIdentityRegistry {
+    registered: BTreeSet<(TechnicalIdClass, String)>,
+}
+
+impl TechnicalIdentityRegistry {
+    /// Deriva una instancia propia antes de *index hopping*.
+    pub fn derive_own_pre_hop_instance(
+        &mut self,
+        root: RootSeed,
+        event_id: &EventId,
+        library_id: &LibraryId,
+        template_id: &TemplateId,
+    ) -> Result<PreHopInstanceId, Diagnostic> {
+        let text = derive_technical_id_text(
+            root,
+            TechnicalIdClass::PreHopInstance,
+            &[
+                ("class", TechnicalIdClass::PreHopInstance.name()),
+                ("event_id", event_id.as_str()),
+                ("library_id", library_id.as_str()),
+                ("origin", "own"),
+                ("template_id", template_id.as_str()),
+            ],
+        )?;
+        self.register(TechnicalIdClass::PreHopInstance, &text, "own")?;
+        Ok(PreHopInstanceId::from_automatic(text))
+    }
+
+    /// Deriva la copia de una instancia fuente en una biblioteca receptora.
+    pub fn derive_contamination_pre_hop_instance(
+        &mut self,
+        root: RootSeed,
+        event_id: &EventId,
+        recipient_library_id: &LibraryId,
+        source_pre_hop_instance_id: &PreHopInstanceId,
+    ) -> Result<PreHopInstanceId, Diagnostic> {
+        let text = derive_technical_id_text(
+            root,
+            TechnicalIdClass::PreHopInstance,
+            &[
+                ("class", TechnicalIdClass::PreHopInstance.name()),
+                ("event_id", event_id.as_str()),
+                ("library_id", recipient_library_id.as_str()),
+                ("origin", "contamination"),
+                (
+                    "source_pre_hop_instance_id",
+                    source_pre_hop_instance_id.as_str(),
+                ),
+            ],
+        )?;
+        self.register(TechnicalIdClass::PreHopInstance, &text, "contamination")?;
+        Ok(PreHopInstanceId::from_automatic(text))
+    }
+
+    /// Deriva la identidad de una pareja después del demultiplexado.
+    pub fn derive_technical_pair(
+        &mut self,
+        root: RootSeed,
+        event_id: &EventId,
+        final_library_id: &LibraryId,
+        pre_hop_instance_id: &PreHopInstanceId,
+    ) -> Result<TechnicalPairId, Diagnostic> {
+        let text = derive_technical_id_text(
+            root,
+            TechnicalIdClass::TechnicalPair,
+            &[
+                ("class", TechnicalIdClass::TechnicalPair.name()),
+                ("event_id", event_id.as_str()),
+                ("final_library_id", final_library_id.as_str()),
+                ("pre_hop_instance_id", pre_hop_instance_id.as_str()),
+            ],
+        )?;
+        self.register(TechnicalIdClass::TechnicalPair, &text, "final")?;
+        Ok(TechnicalPairId::from_automatic(text))
+    }
+
+    fn register(
+        &mut self,
+        class: TechnicalIdClass,
+        identifier: &str,
+        causes: &str,
+    ) -> Result<(), Diagnostic> {
+        if self.registered.insert((class, identifier.to_owned())) {
+            return Ok(());
+        }
+        Err(Diagnostic::domain(
+            "GPS-DOMAIN-002",
+            "La derivación de una identidad produjo una colisión.",
+        )
+        .with("identifier", identifier)
+        .with("category", class.name())
+        .with("causes", causes))
+    }
+}
+
+fn derive_technical_id_text(
+    root: RootSeed,
+    class: TechnicalIdClass,
+    components: &[(&str, &str)],
+) -> Result<String, Diagnostic> {
+    let component_count =
+        u32::try_from(components.len()).map_err(|_| identity_material_error("component_count"))?;
+    let mut material = Vec::new();
+    material.extend_from_slice(root.as_bytes());
+    material.extend_from_slice(&TECHNICAL_ID_DERIVATION_VERSION.to_be_bytes());
+    material.extend_from_slice(&component_count.to_be_bytes());
+    for (name, value) in components {
+        append_component(&mut material, name, value)?;
+    }
+    let digest = blake3::derive_key(ID_CONTEXT, &material);
+    Ok(format!(
+        "{}{}",
+        class.prefix(),
+        encode_base32(&digest[..16])
+    ))
 }
 
 /// Registro de unicidad por categoría y ámbito. Las categorías no se mezclan.

@@ -11,8 +11,8 @@ fn root() -> RootSeed {
 }
 
 #[test]
-fn identity_uses_the_active_v2_catalog() {
-    assert_eq!(ID_CATALOG_VERSION, "2");
+fn identity_uses_the_active_v3_catalog() {
+    assert_eq!(ID_CATALOG_VERSION, "3");
 }
 
 #[test]
