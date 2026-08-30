@@ -4,7 +4,10 @@
 //! al iterador produce una única lectura verdadera y la siguiente descarta su
 //! búfer, por lo que el estado residente no crece con el número de lecturas.
 
-use crate::application::{EffectiveTechnicalEventTarget, ILLUMINA_SE_MINIMAL_READ_LENGTH};
+use crate::application::{
+    EffectiveTechnicalEvent, EffectiveTechnicalEventTarget, ILLUMINA_SE_MINIMAL_READ_LENGTH,
+};
+use crate::chimera::{ChimeraAccumulator, ChimeraReport, ChimeraSettings, transform_paired_end};
 use crate::diagnostics::Diagnostic;
 use crate::haplotype::{HaplotypeCopy, HaplotypeCopyId, Individual};
 use crate::identity::{EventId, IndividualId, LibraryId, SequenceId};
@@ -203,6 +206,7 @@ pub enum WgsSamplingError {
     Random(RandomSamplingError),
     TechnicalIdentity(Diagnostic),
     Materialization(MaterializationError),
+    Chimera(crate::chimera::ChimeraError),
 }
 
 /// Resuelve la cobertura F4 a parejas Illumina PE completas.
@@ -558,6 +562,8 @@ pub struct WgsPairedEndSampler<'a> {
     remaining_pairs: u64,
     next_ordinal: u64,
     identity_deriver: F4TechnicalIdentityDeriver,
+    chimera_settings: ChimeraSettings,
+    chimera_accumulator: ChimeraAccumulator,
     failed: bool,
 }
 
@@ -690,6 +696,8 @@ impl<'a> WgsPairedEndSampler<'a> {
                 read_length: u64::from(profile.insert_length().minimum_bases()),
             });
         }
+        let chimera_settings =
+            ChimeraSettings::new(profile.chimera_rate()).map_err(WgsSamplingError::Chimera)?;
         Ok(Self {
             reference,
             individual,
@@ -716,8 +724,33 @@ impl<'a> WgsPairedEndSampler<'a> {
                 identities.root_seed(),
                 identities.event_id().clone(),
             ),
+            chimera_settings,
+            chimera_accumulator: ChimeraAccumulator::default(),
             failed: false,
         })
+    }
+
+    /// Configura la transformación de quimeras para este flujo. El constructor
+    /// conserva el valor de perfil inicial (`0`) hasta que una configuración F4
+    /// posterior autorice una tasa explícita.
+    #[must_use]
+    pub fn with_chimera_settings(mut self, settings: ChimeraSettings) -> Self {
+        self.chimera_settings = settings;
+        self
+    }
+
+    /// Conecta la tasa efectiva del evento al productor PE mediante el tipo
+    /// cerrado `ChimeraSettings`.
+    #[must_use]
+    pub fn with_effective_technical_event(mut self, event: &EffectiveTechnicalEvent) -> Self {
+        self.chimera_settings = event.chimera_settings();
+        self
+    }
+
+    /// Recuento agregado de quimeras ya emitidas por este flujo.
+    #[must_use]
+    pub const fn chimera_report(&self) -> ChimeraReport {
+        self.chimera_accumulator.report()
     }
 
     fn sample_next_pair(&mut self, ordinal: u64) -> Result<PairedEndPair, WgsSamplingError> {
@@ -774,8 +807,21 @@ impl<'a> WgsPairedEndSampler<'a> {
             .identity_deriver
             .derive_own_pre_hop_pair(fragment.template().clone())
             .map_err(WgsSamplingError::TechnicalIdentity)?;
-        emit_paired_end(fragment, pre_hop_identity, self.read_length)
-            .map_err(WgsSamplingError::TechnicalIdentity)
+        let pair = emit_paired_end(fragment, pre_hop_identity, self.read_length)
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let transformation = transform_paired_end(
+            self.identities.root_seed(),
+            event_id,
+            self.reference,
+            self.individual,
+            pair,
+            self.chimera_settings,
+        )
+        .map_err(WgsSamplingError::Chimera)?;
+        self.chimera_accumulator
+            .record(&transformation)
+            .map_err(WgsSamplingError::Chimera)?;
+        Ok(transformation.into_pair())
     }
 }
 

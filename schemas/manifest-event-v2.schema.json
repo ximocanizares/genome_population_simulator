@@ -4,7 +4,7 @@
   "title": "Manifiesto de evento técnico GPS v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["manifest_kind", "schema_version", "event_id", "event_type", "technology", "rng_catalog", "id_catalog", "state", "profile", "technical_batch_id", "selected_individuals", "event_subseed", "reference", "coverage", "artifacts", "diagnostics"],
+  "required": ["manifest_kind", "schema_version", "event_id", "event_type", "technology", "rng_catalog", "id_catalog", "state", "profile", "technical_batch_id", "selected_individuals", "event_subseed", "reference", "coverage", "artifacts", "outputs", "diagnostics"],
   "properties": {
     "manifest_kind": { "const": "gps_event_manifest" },
     "schema_version": { "const": "2" },
@@ -23,7 +23,8 @@
     "event_subseed": { "$ref": "#/$defs/digest" },
     "reference": { "$ref": "#/$defs/reference" },
     "coverage": { "type": "array", "items": { "$ref": "#/$defs/coverage" } },
-    "artifacts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/event_artifact" } },
+    "artifacts": { "$ref": "#/$defs/technical_artifacts" },
+    "outputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/event_artifact" } },
     "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
   },
   "allOf": [
@@ -31,7 +32,7 @@
       "if": { "properties": { "state": { "const": "complete" } }, "required": ["state"] },
       "then": {
         "properties": {
-          "artifacts": { "items": { "properties": { "state": { "const": "complete" } }, "required": ["state"] } },
+          "outputs": { "items": { "properties": { "state": { "const": "complete" } }, "required": ["state"] } },
           "coverage": { "minItems": 1 },
           "diagnostics": { "maxItems": 0 }
         }
@@ -41,7 +42,7 @@
       "if": { "properties": { "state": { "enum": ["incomplete", "failed"] } }, "required": ["state"] },
       "then": {
         "properties": {
-          "artifacts": {
+          "outputs": {
             "contains": { "properties": { "state": { "enum": ["incomplete", "failed"] } }, "required": ["state"] },
             "minContains": 1
           },
@@ -52,7 +53,7 @@
     },
     {
       "properties": {
-        "artifacts": {
+        "outputs": {
           "allOf": [
             { "contains": { "properties": { "mate": { "const": 1 } }, "required": ["mate"] }, "minContains": 1 },
             { "contains": { "properties": { "mate": { "const": 2 } }, "required": ["mate"] }, "minContains": 1 }
@@ -139,6 +140,7 @@
       "required": ["own_x", "contaminant_x"],
       "properties": { "own_x": { "type": "number", "minimum": 0 }, "contaminant_x": { "type": "number", "minimum": 0 } }
     },
+    "technical_artifacts": {"type":"object","additionalProperties":false,"required":["chimera","pcr","optical_duplicates","gc","adapters"],"properties":{"chimera":{"type":"object","additionalProperties":false,"required":["rate","realized_pairs"],"properties":{"rate":{"type":"number","minimum":0,"maximum":1},"realized_pairs":{"type":"integer","minimum":0}},"allOf":[{"if":{"properties":{"rate":{"const":0}},"required":["rate"]},"then":{"properties":{"realized_pairs":{"const":0}}}}]},"pcr":{"type":"object","additionalProperties":false,"required":["applicable"],"properties":{"applicable":{"const":false}}},"optical_duplicates":{"type":"object","additionalProperties":false,"required":["realized_pairs"],"properties":{"realized_pairs":{"const":0}}},"gc":{"type":"object","additionalProperties":false,"required":["mode"],"properties":{"mode":{"const":"neutral"}}},"adapters":{"type":"object","additionalProperties":false,"required":["enabled"],"properties":{"enabled":{"const":false}}}}},
     "diagnostic": {
       "type": "object", "additionalProperties": false,
       "required": ["code", "message"],

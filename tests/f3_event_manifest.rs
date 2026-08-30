@@ -52,7 +52,7 @@ fn invalid_schema_and_invalid_library_link_are_rejected() {
     fs::create_dir_all(&root).expect("test directory");
     let (manifest, _) = complete_manifest();
     let mut malformed = event_manifest_document(&manifest).expect("event document");
-    malformed["artifacts"][0]["artifact"]["checksum"]["digest"] = json!("A".repeat(64));
+    malformed["outputs"][0]["artifact"]["checksum"]["digest"] = json!("A".repeat(64));
     let malformed_bytes = serde_json::to_vec(&malformed).expect("malformed JSON");
     assert!(validate_event_manifest_bytes(Path::new("manifest.json"), &malformed_bytes).is_err());
     let malformed_path = root.join("malformed.json");
@@ -60,14 +60,14 @@ fn invalid_schema_and_invalid_library_link_are_rejected() {
     assert_external(&malformed_path, false);
 
     let mut wrong_library = event_manifest_document(&manifest).expect("event document");
-    wrong_library["artifacts"][0]["library_id"] = json!("LIB_not_selected");
+    wrong_library["outputs"][0]["library_id"] = json!("LIB_not_selected");
     let wrong_library_bytes = serde_json::to_vec(&wrong_library).expect("wrong library JSON");
     assert!(
         validate_event_manifest_bytes(Path::new("manifest.json"), &wrong_library_bytes).is_err()
     );
 
     let mut single_end = event_manifest_document(&manifest).expect("event document");
-    single_end["artifacts"] = json!([single_end["artifacts"][0].clone()]);
+    single_end["outputs"] = json!([single_end["outputs"][0].clone()]);
     assert_rejected_by_both(&root, "single-end-output", &single_end);
 
     let mut single_end_profile = event_manifest_document(&manifest).expect("event document");
@@ -77,22 +77,51 @@ fn invalid_schema_and_invalid_library_link_are_rejected() {
 }
 
 #[test]
+fn chimera_summary_is_closed_and_rejects_invalid_rate_counter_or_provenance() {
+    let root = temporary("chimera-summary");
+    fs::create_dir_all(&root).expect("test directory");
+    let (manifest, _) = complete_manifest();
+    let document = event_manifest_document(&manifest).expect("event document");
+
+    let mut invalid_rate = document.clone();
+    invalid_rate["artifacts"]["chimera"]["rate"] = json!(1.1);
+    assert_rejected_by_both(&root, "chimera-invalid-rate", &invalid_rate);
+
+    let mut invalid_counter = document.clone();
+    invalid_counter["artifacts"]["chimera"]["realized_pairs"] = json!("four");
+    assert_rejected_by_both(&root, "chimera-invalid-counter", &invalid_counter);
+
+    let mut zero_rate_with_realized_pairs = document.clone();
+    zero_rate_with_realized_pairs["artifacts"]["chimera"]["realized_pairs"] = json!(1);
+    assert_rejected_by_both(
+        &root,
+        "chimera-zero-rate-with-realized-pairs",
+        &zero_rate_with_realized_pairs,
+    );
+
+    let mut leaked_provenance = document;
+    leaked_provenance["artifacts"]["chimera"]["pair_ids"] = json!(["TP_hidden"]);
+    assert_rejected_by_both(&root, "chimera-provenance", &leaked_provenance);
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
 fn each_selected_library_has_one_canonical_fastq_result() {
     let (manifest, _) = complete_manifest();
     let document = event_manifest_document(&manifest).expect("event document");
 
     let mut missing = document.clone();
-    missing["artifacts"] = json!([]);
+    missing["outputs"] = json!([]);
     assert!(validate_document(&missing).is_err());
 
     let mut duplicate = document.clone();
-    let mut repeated = duplicate["artifacts"][0].clone();
+    let mut repeated = duplicate["outputs"][0].clone();
     repeated["id"] = json!("fastq-duplicate");
     repeated["artifact"]["id"] = json!("fastq-duplicate");
     repeated["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-A_R1.fastq.gz");
-    duplicate["artifacts"]
+    duplicate["outputs"]
         .as_array_mut()
-        .expect("artifacts")
+        .expect("outputs")
         .push(repeated);
     assert!(validate_document(&duplicate).is_err());
 
@@ -104,26 +133,26 @@ fn each_selected_library_has_one_canonical_fastq_result() {
             "individual_id": "sample-B", "library_id": "LIB_sample-B", "read_group_id": "RG_sample-B",
             "i7": "GGGGGGGG", "i5": "CCCCCCCC",
         }));
-    let mut second = two_libraries["artifacts"][0].clone();
+    let mut second = two_libraries["outputs"][0].clone();
     second["id"] = json!("fastq-sample-B");
     second["individual_id"] = json!("sample-B");
     second["library_id"] = json!("LIB_sample-B");
     second["artifact"]["id"] = json!("fastq-sample-B");
     second["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-B_R1.fastq.gz");
-    two_libraries["artifacts"]
+    two_libraries["outputs"]
         .as_array_mut()
-        .expect("artifacts")
+        .expect("outputs")
         .push(second);
-    let mut second_r2 = two_libraries["artifacts"][1].clone();
+    let mut second_r2 = two_libraries["outputs"][1].clone();
     second_r2["id"] = json!("fastq-sample-B-r2");
     second_r2["individual_id"] = json!("sample-B");
     second_r2["library_id"] = json!("LIB_sample-B");
     second_r2["mate"] = json!(2);
     second_r2["artifact"]["id"] = json!("fastq-sample-B-r2");
     second_r2["artifact"]["path"] = json!("outputs/fastq/reads-main/sample-B_R2.fastq.gz");
-    two_libraries["artifacts"]
+    two_libraries["outputs"]
         .as_array_mut()
-        .expect("artifacts")
+        .expect("outputs")
         .push(second_r2);
     let mut second_coverage = two_libraries["coverage"][0].clone();
     second_coverage["individual_id"] = json!("sample-B");
@@ -133,9 +162,9 @@ fn each_selected_library_has_one_canonical_fastq_result() {
         .expect("coverage")
         .push(second_coverage);
     assert!(validate_document(&two_libraries).is_ok());
-    two_libraries["artifacts"]
+    two_libraries["outputs"]
         .as_array_mut()
-        .expect("artifacts")
+        .expect("outputs")
         .reverse();
     assert!(validate_document(&two_libraries).is_err());
 }
@@ -148,12 +177,12 @@ fn complete_fastq_path_has_the_canonical_shape_and_correlates_to_its_event_and_i
     let document = event_manifest_document(&manifest).expect("event document");
 
     let mut malformed_shape = document.clone();
-    malformed_shape["artifacts"][0]["artifact"]["path"] =
+    malformed_shape["outputs"][0]["artifact"]["path"] =
         json!("outputs/fastq/reads-main/nested/sample-A_R1.fastq.gz");
     assert_rejected_by_both(&root, "malformed-fastq-path", &malformed_shape);
 
     let mut wrong_event = document;
-    wrong_event["artifacts"][0]["artifact"]["path"] =
+    wrong_event["outputs"][0]["artifact"]["path"] =
         json!("outputs/fastq/other-event/sample-A_R1.fastq.gz");
     assert!(validate_document(&wrong_event).is_err());
     let wrong_event_path = root.join("wrong-event-fastq-path.json");
@@ -218,7 +247,7 @@ fn state_diagnostics_and_artifact_coherence_is_checked_externally() {
 
     let mut invalid_code = failed;
     invalid_code["diagnostics"][0]["code"] = json!("GPS-BOGUS-001");
-    invalid_code["artifacts"][0]["diagnostic_code"] = json!("GPS-BOGUS-001");
+    invalid_code["outputs"][0]["diagnostic_code"] = json!("GPS-BOGUS-001");
     assert_rejected_by_both(&root, "invalid-diagnostic-code", &invalid_code);
 
     fs::remove_dir_all(root).expect("cleanup");
@@ -303,6 +332,8 @@ fn complete_manifest() -> (EventManifest<'static>, &'static str) {
             },
             artifacts,
             coverage,
+            chimera_rate: event.chimera_rate(),
+            realized_chimera_pairs: 0,
             diagnostics: &[],
         },
         "reads-main",
@@ -357,9 +388,9 @@ fn validate_document(
 fn failed_document(complete: &serde_json::Value) -> serde_json::Value {
     let mut failed = complete.clone();
     failed["state"] = json!("failed");
-    failed["artifacts"][0]["state"] = json!("failed");
-    failed["artifacts"][0]["artifact"] = serde_json::Value::Null;
-    failed["artifacts"][0]["diagnostic_code"] = json!("GPS-FMT-006");
+    failed["outputs"][0]["state"] = json!("failed");
+    failed["outputs"][0]["artifact"] = serde_json::Value::Null;
+    failed["outputs"][0]["diagnostic_code"] = json!("GPS-FMT-006");
     failed["coverage"] = json!([]);
     failed["diagnostics"] = json!([format_diagnostic()]);
     failed

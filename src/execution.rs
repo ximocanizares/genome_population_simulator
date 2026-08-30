@@ -764,6 +764,11 @@ fn write_event_manifest(
         },
         artifacts: &artifacts,
         coverage: &coverage,
+        chimera_rate: event.chimera_rate(),
+        // El escritor FASTQ F4.5 aún no consume el productor PE. Mientras la
+        // ejecución no haya recorrido parejas F4, el único hecho publicable
+        // es el contador agregado nulo; no se inventa procedencia.
+        realized_chimera_pairs: 0,
         diagnostics,
     };
     let bytes = event_manifest_bytes(&document)?;
@@ -787,6 +792,8 @@ fn write_event_manifest(
         event_id: event.event_id().as_str().to_owned(),
         state,
         manifest_artifact_id: artifact.id,
+        chimera_rate: event.chimera_rate(),
+        realized_chimera_pairs: 0,
     })
 }
 

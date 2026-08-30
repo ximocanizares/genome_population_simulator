@@ -6,6 +6,7 @@
 
 pub mod adapters;
 pub mod application;
+pub mod chimera;
 pub mod configuration;
 pub mod coordinates;
 pub mod diagnostics;

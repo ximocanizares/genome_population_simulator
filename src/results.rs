@@ -230,11 +230,15 @@ pub struct VcfManifestLink {
 /// Enlace del manifiesto general al único manifiesto de un evento real. El
 /// detalle técnico continúa en el documento de evento; la raíz solo enlaza su
 /// identidad, estado y artefacto físico validado.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ManifestEventLink {
     pub event_id: String,
     pub state: UnitState,
     pub manifest_artifact_id: String,
+    /// Resumen agregado duplicado en la raíz para inspección sin abrir el
+    /// documento de evento. No transporta procedencia por pareja.
+    pub chimera_rate: f64,
+    pub realized_chimera_pairs: u64,
 }
 
 pub struct GeneralManifest<'a> {
@@ -392,6 +396,9 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
         "read_length": event.read_length(),
         "quality": {"acgt_phred": event.acgt_phred(), "n_phred": event.n_phred()},
         "artifacts": {
+            "chimera": {
+                "rate": event.chimera_rate(),
+            },
             "pcr": {"applicable": event.pcr_duplicates_applicable()},
             "optical_duplicates": {
                 "realized_pairs": event.realized_optical_duplicate_pairs(),
@@ -543,6 +550,12 @@ fn technical_event_manifest_json(
         },
         "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
         "id_catalog": f4_id_catalog_value(),
+        "artifacts": {
+            "chimera": {
+                "rate": link.chimera_rate,
+                "realized_pairs": link.realized_chimera_pairs,
+            }
+        },
         "event_manifest": event_manifest.map(ArtifactRecord::to_json),
     })
 }
@@ -685,9 +698,9 @@ pub fn validate_published_event_manifests(
             .ok_or_else(|| manifest_error(manifest_path, "falta FASTA de evento"))?;
         validate_event_artifact_against_catalog(reference, &catalog, manifest_path)?;
         for artifact in event_document
-            .get("artifacts")
+            .get("outputs")
             .and_then(Value::as_array)
-            .ok_or_else(|| manifest_error(manifest_path, "faltan artefactos de evento"))?
+            .ok_or_else(|| manifest_error(manifest_path, "faltan salidas de evento"))?
         {
             if artifact.get("state").and_then(Value::as_str) == Some("complete") {
                 let physical = artifact.get("artifact").ok_or_else(|| {
@@ -1504,10 +1517,33 @@ fn validate_physical_technical_event(
         .get("profile")
         .and_then(Value::as_object)
         .is_some_and(|profile| {
-            profile.get("id") == technical_event.get("profile")
-                && profile.get("read_length") == technical_event.get("read_length")
-                && profile.get("quality") == technical_event.get("quality")
+            technical_event
+                .get("profile")
+                .and_then(Value::as_object)
+                .is_some_and(|technical_profile| {
+                    profile.get("id") == technical_profile.get("id")
+                        && profile.get("read_length") == technical_event.get("read_length")
+                        && profile.get("quality") == technical_event.get("quality")
+                })
         });
+    let effective_chimera_rate = technical_event
+        .get("artifacts")
+        .and_then(Value::as_object)
+        .and_then(|artifacts| artifacts.get("chimera"))
+        .and_then(Value::as_object)
+        .and_then(|chimera| chimera.get("rate"));
+    let event_chimera = event
+        .get("artifacts")
+        .and_then(Value::as_object)
+        .and_then(|artifacts| artifacts.get("chimera"));
+    let general_chimera = general
+        .get("technical_events")
+        .and_then(Value::as_array)
+        .and_then(|events| events.first())
+        .and_then(Value::as_object)
+        .and_then(|technical| technical.get("artifacts"))
+        .and_then(Value::as_object)
+        .and_then(|artifacts| artifacts.get("chimera"));
     validate_f4_coverage_against_effective(&event, technical_event, reference, effective_path)?;
     if event.get("event_id").and_then(Value::as_str) != Some(event_id.as_str())
         || event.get("event_subseed").and_then(Value::as_str)
@@ -1522,6 +1558,11 @@ fn validate_physical_technical_event(
             != Some(reference.id().as_str())
         || event.get("selected_individuals").and_then(Value::as_array) != Some(&selected)
         || !profile_matches
+        || event_chimera
+            .and_then(Value::as_object)
+            .and_then(|chimera| chimera.get("rate"))
+            != effective_chimera_rate
+        || event_chimera != general_chimera
     {
         return Err(effective_error(
             effective_path,
@@ -3357,12 +3398,13 @@ fn validate_manifest_technical_events(
         let object = value
             .as_object()
             .ok_or_else(|| manifest_error(path, "technical_event inválido"))?;
-        const FIELDS: [&str; 6] = [
+        const FIELDS: [&str; 7] = [
             "event_id",
             "effective_config",
             "profile",
             "rng_catalog",
             "id_catalog",
+            "artifacts",
             "event_manifest",
         ];
         validate_closed_object(object, &FIELDS, "technical_events[]", path)?;
@@ -3384,6 +3426,34 @@ fn validate_manifest_technical_events(
             records,
             path,
         )?;
+        let artifacts = object
+            .get("artifacts")
+            .and_then(Value::as_object)
+            .ok_or_else(|| manifest_error(path, "artefactos técnicos agregados inválidos"))?;
+        validate_closed_object(
+            artifacts,
+            &["chimera"],
+            "technical_events[].artifacts",
+            path,
+        )?;
+        let chimera = artifacts
+            .get("chimera")
+            .and_then(Value::as_object)
+            .ok_or_else(|| manifest_error(path, "resumen de quimera inválido"))?;
+        validate_closed_object(
+            chimera,
+            &["rate", "realized_pairs"],
+            "technical_events[].artifacts.chimera",
+            path,
+        )?;
+        let rate = chimera.get("rate").and_then(Value::as_f64);
+        let realized_pairs = chimera.get("realized_pairs").and_then(Value::as_u64);
+        if !matches!(rate, Some(rate) if rate.is_finite() && (0.0..=1.0).contains(&rate))
+            || realized_pairs.is_none()
+            || (rate == Some(0.0) && realized_pairs != Some(0))
+        {
+            return Err(manifest_error(path, "resumen de quimera inválido"));
+        }
     }
     Ok(())
 }
@@ -4543,10 +4613,24 @@ fn validate_effective_technical_event(
     let artifacts = effective_object(event, "artifacts", path)?;
     validate_effective_closed_object(
         artifacts,
-        &["pcr", "optical_duplicates", "gc", "adapters"],
+        &["chimera", "pcr", "optical_duplicates", "gc", "adapters"],
         "technical_event.artifacts",
         path,
     )?;
+    let chimera = effective_object(artifacts, "chimera", path)?;
+    validate_effective_closed_object(
+        chimera,
+        &["rate"],
+        "technical_event.artifacts.chimera",
+        path,
+    )?;
+    if !matches!(chimera.get("rate").and_then(Value::as_f64), Some(value) if value.is_finite() && (0.0..=1.0).contains(&value))
+    {
+        return Err(effective_error(
+            path,
+            "artefacto de quimera efectivo inválido",
+        ));
+    }
     let pcr = effective_object(artifacts, "pcr", path)?;
     validate_effective_closed_object(pcr, &["applicable"], "technical_event.artifacts.pcr", path)?;
     let optical_duplicates = effective_object(artifacts, "optical_duplicates", path)?;

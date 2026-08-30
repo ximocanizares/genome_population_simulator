@@ -95,6 +95,8 @@ fn target_basic_and_final_own_contaminant_coverages_are_published_separately() {
         },
         artifacts: &artifacts,
         coverage: &coverage,
+        chimera_rate: event.chimera_rate(),
+        realized_chimera_pairs: 4,
         diagnostics: &[],
     };
 
@@ -106,6 +108,14 @@ fn target_basic_and_final_own_contaminant_coverages_are_published_separately() {
     assert_eq!(coverage["final_x"]["contaminant_x"], json!(5.0));
     assert_eq!(coverage["denominator_bases"], json!(100));
     assert_eq!(coverage["n_bases"], json!(3));
+    assert_eq!(document["artifacts"]["chimera"]["rate"], json!(1.0));
+    assert_eq!(document["artifacts"]["chimera"]["realized_pairs"], json!(4));
+    assert!(document["artifacts"]["chimera"].get("pair_ids").is_none());
+    assert!(
+        document["artifacts"]["chimera"]
+            .get("coordinates")
+            .is_none()
+    );
 
     // `N` pertenece a las bases FASTQ observadas: a 2× puede superar el
     // denominador de referencia sin que deje de ser una cobertura válida.
@@ -133,7 +143,7 @@ fn target_basic_and_final_own_contaminant_coverages_are_published_separately() {
 }
 
 fn declared() -> genome_population_simulator::configuration::DeclaredGeneralConfig {
-    let text = b"config_kind = \"general\"\nschema_version = \"2\"\n\n[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 100\n\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nploidy = 2\ngenotype_model = \"hwe\"\nindividual_ids = [\"sample-A\"]\n\n[technical_event]\nevent_id = \"coverage-main\"\nindividual_ids = [\"sample-A\"]\ntarget_coverage_wgs = 10\n\n[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n";
+    let text = b"config_kind = \"general\"\nschema_version = \"2\"\n\n[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 100\n\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nploidy = 2\ngenotype_model = \"hwe\"\nindividual_ids = [\"sample-A\"]\n\n[technical_event]\nevent_id = \"coverage-main\"\nindividual_ids = [\"sample-A\"]\ntarget_coverage_wgs = 10\nchimera_rate = 1\n\n[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n";
     let admitted = admit_toml_header(
         Path::new("f4-coverage-reporting.toml"),
         text.to_vec(),

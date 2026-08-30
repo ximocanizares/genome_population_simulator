@@ -296,13 +296,14 @@
     },
     "technical_event_link": {
       "type": "object", "additionalProperties": false,
-      "required": ["event_id", "effective_config", "profile", "rng_catalog", "id_catalog", "event_manifest"],
+      "required": ["event_id", "effective_config", "profile", "rng_catalog", "id_catalog", "artifacts", "event_manifest"],
       "properties": {
         "event_id": { "$ref": "#/$defs/non_empty_id" },
         "effective_config": { "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] },
         "profile": { "type": "object", "additionalProperties": false, "required": ["id", "sha256"], "properties": {"id":{"const":"gps-hiseqx-pcrfree-pe150-v1"}, "sha256":{"const":"3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea"}}},
         "rng_catalog": { "const": "f4-technical-v3" },
         "id_catalog": { "$ref": "#/$defs/f4_id_catalog" },
+        "artifacts": {"type":"object","additionalProperties":false,"required":["chimera"],"properties":{"chimera":{"type":"object","additionalProperties":false,"required":["rate","realized_pairs"],"properties":{"rate":{"type":"number","minimum":0,"maximum":1},"realized_pairs":{"type":"integer","minimum":0}},"allOf":[{"if":{"properties":{"rate":{"const":0}},"required":["rate"]},"then":{"properties":{"realized_pairs":{"const":0}}}}]}}},
         "event_manifest": { "oneOf": [{ "$ref": "#/$defs/artifact" }, { "type": "null" }] }
       }
     },

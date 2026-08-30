@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::adapters::{admit_toml_header, parse_declared_config};
+use crate::chimera::ChimeraSettings;
 use crate::configuration::{
     DeclaredGeneralConfig, DeclaredPopulationSnvs, DeclaredReductionTarget,
     DeclaredReferenceSource, DeclaredTechnicalEventTarget, ExpectedConfigKind, SequenceClass,
@@ -220,6 +221,7 @@ pub struct EffectiveTechnicalEvent {
     individual_ids: Vec<IndividualId>,
     target: EffectiveTechnicalEventTarget,
     read_length: u16,
+    chimera_rate: f64,
     libraries: Vec<EffectiveTechnicalLibrary>,
 }
 
@@ -274,6 +276,20 @@ impl EffectiveTechnicalEvent {
     #[must_use]
     pub const fn read_length(&self) -> u16 {
         self.read_length
+    }
+
+    /// Tasa Bernoulli ya validada y materializada; por omisión es el neutro
+    /// del perfil (`0`).
+    #[must_use]
+    pub const fn chimera_rate(&self) -> f64 {
+        self.chimera_rate
+    }
+
+    /// Ajuste tipado que se entrega al muestreador PE sin volver a interpretar
+    /// la configuración.
+    #[must_use]
+    pub fn chimera_settings(&self) -> ChimeraSettings {
+        ChimeraSettings::new(self.chimera_rate).expect("effective chimera rate is validated")
     }
 
     #[must_use]
@@ -903,6 +919,22 @@ fn effective_technical_event(
             "no cabe en la longitud de lectura del perfil",
         )
     })?;
+    let chimera_rate = declared.chimera_rate.as_ref().map_or(Ok(0.0), |value| {
+        value.literal().parse::<f64>().map_err(|_| {
+            config_error(
+                general,
+                "technical_event.chimera_rate",
+                "debe ser un f64 válido",
+            )
+        })
+    })?;
+    if !chimera_rate.is_finite() || !(0.0..=1.0).contains(&chimera_rate) {
+        return Err(config_error(
+            general,
+            "technical_event.chimera_rate",
+            "debe ser una fracción finita entre 0 y 1",
+        ));
+    }
     let mut libraries = Vec::with_capacity(declared.libraries.len());
     let mut library_individuals = BTreeSet::new();
     let mut i7_values = BTreeSet::new();
@@ -962,6 +994,7 @@ fn effective_technical_event(
         individual_ids,
         target,
         read_length,
+        chimera_rate,
         libraries,
     }))
 }

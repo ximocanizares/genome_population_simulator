@@ -198,6 +198,8 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
         },
         artifacts: &failed_artifacts,
         coverage: &[],
+        chimera_rate: event.chimera_rate(),
+        realized_chimera_pairs: 0,
         diagnostics: std::slice::from_ref(&failure),
     };
     let bytes = event_manifest_bytes(&event_document).expect("failed event bytes");
@@ -229,6 +231,8 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
         event_id: "reads-main".to_owned(),
         state: UnitState::Failed,
         manifest_artifact_id: event_record.id,
+        chimera_rate: event.chimera_rate(),
+        realized_chimera_pairs: 0,
     }];
     let references = [ManifestReferenceLink {
         id: "reference-main".to_owned(),

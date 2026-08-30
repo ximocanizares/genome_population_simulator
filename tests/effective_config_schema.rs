@@ -228,7 +228,7 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
         "id_catalog": {"version":"3", "derivations":{"v1":["execution","reference","individual","event","batch","library","read_group","template"],"v2":["PreHopInstanceId","TechnicalPairId"]}},
         "read_length": 150,
         "quality": {"acgt_phred": 40, "n_phred": 0},
-        "artifacts": {"pcr": {"applicable": false}, "optical_duplicates": {"realized_pairs": 0}, "gc": {"mode": "neutral"}, "adapters": {"enabled": false}},
+        "artifacts": {"chimera": {"rate": 0.0}, "pcr": {"applicable": false}, "optical_duplicates": {"realized_pairs": 0}, "gc": {"mode": "neutral"}, "adapters": {"enabled": false}},
         "target": {"coverage_wgs": 30.0},
     });
     assert_valid("v4-technical-event", &valid);
@@ -249,6 +249,11 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
         ),
         ("length", "/technical_event/read_length", json!(151)),
         ("quality", "/technical_event/quality/n_phred", json!(1)),
+        (
+            "chimera-rate",
+            "/technical_event/artifacts/chimera/rate",
+            json!(1.1),
+        ),
         (
             "pcr-artifact",
             "/technical_event/artifacts/pcr/applicable",
@@ -281,6 +286,7 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
         assert_invalid(&format!("v4-technical-event-{name}"), &invalid);
     }
     for (name, parent, field) in [
+        ("chimera-required", "/technical_event/artifacts", "chimera"),
         (
             "profile-insert-length-required",
             "/technical_event/profile",

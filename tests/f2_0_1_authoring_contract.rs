@@ -156,6 +156,7 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
     assert_eq!(
         keys_at(&schema, "/$defs/technical_event/properties"),
         BTreeSet::from([
+            "chimera_rate".to_owned(),
             "event_id".to_owned(),
             "individual_ids".to_owned(),
             "libraries".to_owned(),

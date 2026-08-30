@@ -16,6 +16,7 @@ use genome_population_simulator::reference::{
 };
 use genome_population_simulator::results::{
     ArtifactRecord, ReferenceOutput, effective_config_document_with_reference,
+    validate_general_manifest_bytes,
 };
 use serde_json::json;
 
@@ -71,6 +72,7 @@ fn initial_profile_has_only_neutral_non_configurable_artifacts() {
     assert_eq!(
         document["technical_event"]["artifacts"],
         json!({
+            "chimera": {"rate": 0.0},
             "pcr": {"applicable": false},
             "optical_duplicates": {"realized_pairs": 0},
             "gc": {"mode": "neutral"},
@@ -267,6 +269,19 @@ fn published_f4_effective_config_rejects_mutated_duplicate_artifacts() {
         &manifest_bytes,
     )
     .expect("valid published F4 effective configuration");
+    validate_general_manifest_bytes(&manifest_path, &manifest_bytes)
+        .expect("valid general F4 chimera summary");
+    let mut zero_rate_with_realized_pairs = manifest.clone();
+    zero_rate_with_realized_pairs["technical_events"][0]["artifacts"]["chimera"]["realized_pairs"] =
+        json!(1);
+    assert!(
+        validate_general_manifest_bytes(
+            &manifest_path,
+            &serde_json::to_vec(&zero_rate_with_realized_pairs).expect("manifest JSON"),
+        )
+        .is_err(),
+        "zero chimera rate must prohibit realized pairs in the general manifest"
+    );
     for (name, mutation) in [
         ("pcr-applicable", DuplicateArtifactMutation::PcrApplicable),
         (
@@ -342,6 +357,7 @@ fn add_f4_technical_event_link(manifest: &mut serde_json::Value) {
         },
         "rng_catalog": "f4-technical-v3",
         "id_catalog": {"version":"3", "derivations":{"v1":["execution","reference","individual","event","batch","library","read_group","template"],"v2":["PreHopInstanceId","TechnicalPairId"]}},
+        "artifacts": {"chimera": {"rate": 0.0, "realized_pairs": 0}},
         "event_manifest": event_manifest,
     }]);
 }

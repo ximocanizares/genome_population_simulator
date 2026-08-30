@@ -214,6 +214,7 @@ fn parse_technical_event(
             "individual_ids",
             "target_coverage_wgs",
             "read_length_bases",
+            "chimera_rate",
             "libraries",
         ],
     )?;
@@ -273,6 +274,7 @@ fn parse_technical_event(
         individual_ids,
         target,
         read_length_bases: optional_located_u64(admitted, event, "read_length_bases")?,
+        chimera_rate: optional_number(admitted, event, "chimera_rate")?,
         libraries,
     }))
 }

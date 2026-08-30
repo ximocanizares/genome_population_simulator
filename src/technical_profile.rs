@@ -229,6 +229,13 @@ impl F4TechnicalProfile {
         self.insert_length
     }
 
+    /// Frecuencia predeterminada de quimeras del perfil incorporado. DTPD-106
+    /// fija el neutro: una tasa distinta requiere configuración F4 explícita.
+    #[must_use]
+    pub const fn chimera_rate(self) -> f64 {
+        0.0
+    }
+
     #[must_use]
     pub const fn quality_curve(self, mate: ProfileMate) -> QualityCurve {
         match mate {

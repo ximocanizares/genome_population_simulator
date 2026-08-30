@@ -223,6 +223,9 @@ pub struct DeclaredTechnicalEvent {
     pub individual_ids: Vec<Located<String>>,
     pub target: DeclaredTechnicalEventTarget,
     pub read_length_bases: Option<Located<u64>>,
+    /// Fracción Bernoulli por pareja limpia; el valor por omisión se resuelve
+    /// en la configuración efectiva del perfil F4.
+    pub chimera_rate: Option<DeclaredNumber>,
     pub libraries: Vec<DeclaredTechnicalLibrary>,
 }
 

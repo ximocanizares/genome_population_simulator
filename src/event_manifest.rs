@@ -67,6 +67,10 @@ pub struct EventManifest<'a> {
     pub reference: EventManifestReference<'a>,
     pub artifacts: &'a [EventManifestArtifact<'a>],
     pub coverage: &'a [EventManifestCoverage<'a>],
+    /// Hecho agregado de F4.3. Nunca contiene origen, ID ni coordenadas de
+    /// una pareja; esas piezas solo existen durante la transformación.
+    pub chimera_rate: f64,
+    pub realized_chimera_pairs: u64,
     pub diagnostics: &'a [Diagnostic],
 }
 
@@ -171,7 +175,17 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
             "fasta": manifest.reference.fasta.to_json(),
         },
         "coverage": coverage,
-        "artifacts": artifacts,
+        "artifacts": {
+            "chimera": {
+                "rate": manifest.chimera_rate,
+                "realized_pairs": manifest.realized_chimera_pairs,
+            },
+            "pcr": {"applicable": manifest.event.pcr_duplicates_applicable()},
+            "optical_duplicates": {"realized_pairs": manifest.event.realized_optical_duplicate_pairs()},
+            "gc": {"mode": "neutral"},
+            "adapters": {"enabled": false},
+        },
+        "outputs": artifacts,
         "diagnostics": canonical_diagnostics(manifest.diagnostics),
     });
     validate_event_manifest_bytes(
@@ -223,8 +237,9 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
     let reference = validate_reference(required_value(root, "reference", path)?, path)?;
     let coverage = validate_coverage(required_value(root, "coverage", path)?, &selected, path)?;
     let diagnostics = validate_diagnostics(required_value(root, "diagnostics", path)?, path)?;
-    let artifact_states = validate_artifacts(
-        required_value(root, "artifacts", path)?,
+    validate_technical_artifacts(required_value(root, "artifacts", path)?, path)?;
+    let artifact_states = validate_outputs(
+        required_value(root, "outputs", path)?,
         &event_id,
         &selected,
         &reference,
@@ -263,11 +278,22 @@ const ROOT_FIELDS: &[&str] = &[
     "reference",
     "coverage",
     "artifacts",
+    "outputs",
     "diagnostics",
 ];
 
 fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic> {
     let path = event_manifest_relative_path(manifest.event.event_id());
+    if manifest.chimera_rate != manifest.event.chimera_rate()
+        || !manifest.chimera_rate.is_finite()
+        || !(0.0..=1.0).contains(&manifest.chimera_rate)
+        || (manifest.chimera_rate == 0.0 && manifest.realized_chimera_pairs != 0)
+    {
+        return Err(event_error(
+            &path,
+            "la tasa de quimera no coincide con la configuración efectiva",
+        ));
+    }
     if manifest.identities.event_id() != manifest.event.event_id()
         || manifest.identities.reference_id() != manifest.reference.reference_id
     {
@@ -678,7 +704,72 @@ fn validate_diagnostics(value: &Value, path: &Path) -> Result<BTreeSet<String>, 
     Ok(codes)
 }
 
-fn validate_artifacts(
+/// Valida los únicos artefactos técnicos agregados activos en F4.3. El
+/// contrato es deliberadamente cerrado para que no se filtren listas de
+/// parejas, identificadores o coordenadas al manifiesto durable.
+fn validate_technical_artifacts(value: &Value, path: &Path) -> Result<(), Diagnostic> {
+    let artifacts = required_object(value, "artifacts", path)?;
+    validate_closed(
+        artifacts,
+        &["chimera", "pcr", "optical_duplicates", "gc", "adapters"],
+        "artifacts",
+        path,
+    )?;
+    let chimera = required_object(
+        required_value(artifacts, "chimera", path)?,
+        "artifacts.chimera",
+        path,
+    )?;
+    validate_closed(
+        chimera,
+        &["rate", "realized_pairs"],
+        "artifacts.chimera",
+        path,
+    )?;
+    let rate = chimera.get("rate").and_then(Value::as_f64);
+    let realized_pairs = chimera.get("realized_pairs").and_then(Value::as_u64);
+    if !matches!(rate, Some(rate) if rate.is_finite() && (0.0..=1.0).contains(&rate))
+        || realized_pairs.is_none()
+        || (rate == Some(0.0) && realized_pairs != Some(0))
+    {
+        return Err(event_error(path, "artefacto de quimera inválido"));
+    }
+    let pcr = required_object(
+        required_value(artifacts, "pcr", path)?,
+        "artifacts.pcr",
+        path,
+    )?;
+    let optical = required_object(
+        required_value(artifacts, "optical_duplicates", path)?,
+        "artifacts.optical_duplicates",
+        path,
+    )?;
+    let gc = required_object(required_value(artifacts, "gc", path)?, "artifacts.gc", path)?;
+    let adapters = required_object(
+        required_value(artifacts, "adapters", path)?,
+        "artifacts.adapters",
+        path,
+    )?;
+    validate_closed(pcr, &["applicable"], "artifacts.pcr", path)?;
+    validate_closed(
+        optical,
+        &["realized_pairs"],
+        "artifacts.optical_duplicates",
+        path,
+    )?;
+    validate_closed(gc, &["mode"], "artifacts.gc", path)?;
+    validate_closed(adapters, &["enabled"], "artifacts.adapters", path)?;
+    if pcr.get("applicable") != Some(&Value::Bool(false))
+        || optical.get("realized_pairs").and_then(Value::as_u64) != Some(0)
+        || gc.get("mode").and_then(Value::as_str) != Some("neutral")
+        || adapters.get("enabled") != Some(&Value::Bool(false))
+    {
+        return Err(event_error(path, "artefactos técnicos fijos inválidos"));
+    }
+    Ok(())
+}
+
+fn validate_outputs(
     value: &Value,
     event_id: &EventId,
     selected: &BTreeMap<String, String>,
@@ -686,7 +777,7 @@ fn validate_artifacts(
     diagnostics: &BTreeSet<String>,
     path: &Path,
 ) -> Result<Vec<UnitState>, Diagnostic> {
-    let values = required_array(value, "artifacts", path)?;
+    let values = required_array(value, "outputs", path)?;
     if values.is_empty() {
         return Err(event_error(path, "el evento no tiene resultados FASTQ"));
     }
@@ -696,7 +787,7 @@ fn validate_artifacts(
     let mut states = Vec::with_capacity(values.len());
     let mut previous = None::<(String, String, u8, String)>;
     for value in values {
-        let artifact = required_object(value, "artifacts[]", path)?;
+        let artifact = required_object(value, "outputs[]", path)?;
         validate_closed(
             artifact,
             &[
@@ -709,7 +800,7 @@ fn validate_artifacts(
                 "artifact",
                 "diagnostic_code",
             ],
-            "artifacts[]",
+            "outputs[]",
             path,
         )?;
         let id = required_string(artifact, "id", path)?;
