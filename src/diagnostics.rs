@@ -156,12 +156,12 @@ fn catalog_contract(code: &'static str) -> Option<CatalogContract> {
 fn diagnostic_catalog() -> &'static BTreeMap<&'static str, CatalogContract> {
     static CATALOG: OnceLock<BTreeMap<&'static str, CatalogContract>> = OnceLock::new();
     CATALOG.get_or_init(|| {
-        let source = include_str!("../catalogs/diagnostics-v2.tsv");
+        let source = include_str!("../catalogs/diagnostics-v3.tsv");
         assert!(
             source
                 .lines()
-                .any(|line| line == "# diagnostic_catalog_version=2"),
-            "diagnostics-v2.tsv does not declare version 2"
+                .any(|line| line == "# diagnostic_catalog_version=3"),
+            "diagnostics-v3.tsv does not declare version 3"
         );
         let mut catalog = BTreeMap::new();
         for line in source
@@ -169,7 +169,7 @@ fn diagnostic_catalog() -> &'static BTreeMap<&'static str, CatalogContract> {
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
         {
             let fields = line.split('|').collect::<Vec<_>>();
-            assert_eq!(fields.len(), 6, "invalid diagnostics-v2.tsv row: {line}");
+            assert_eq!(fields.len(), 6, "invalid diagnostics-v3.tsv row: {line}");
             let code = fields[0];
             let contract = CatalogContract {
                 code,
@@ -181,7 +181,7 @@ fn diagnostic_catalog() -> &'static BTreeMap<&'static str, CatalogContract> {
             };
             assert!(
                 catalog.insert(code, contract).is_none(),
-                "duplicate diagnostics-v2.tsv code: {code}"
+                "duplicate diagnostics-v3.tsv code: {code}"
             );
         }
         catalog
@@ -223,9 +223,9 @@ mod tests {
     use super::{Diagnostic, catalog_contract, diagnostic_matches_catalog};
 
     #[test]
-    fn every_active_runtime_diagnostic_matches_catalog_v2() {
+    fn every_active_runtime_diagnostic_matches_catalog_v3() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let catalog = include_str!("../catalogs/diagnostics-v2.tsv")
+        let catalog = include_str!("../catalogs/diagnostics-v3.tsv")
             .lines()
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .map(|line| {
@@ -248,7 +248,7 @@ mod tests {
             let static_code = catalog
                 .get_key_value(&code)
                 .map(|(code, _)| code.as_str())
-                .unwrap_or_else(|| panic!("active code absent from diagnostics-v2.tsv: {code}"));
+                .unwrap_or_else(|| panic!("active code absent from diagnostics-v3.tsv: {code}"));
             // Los códigos del productor son literales estáticos; esta conversión
             // solo presta esa vida al test sin ampliar la API de producción.
             let static_code: &'static str = Box::leak(static_code.to_owned().into_boxed_str());

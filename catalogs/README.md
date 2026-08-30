@@ -58,3 +58,8 @@ los primeros 128 bits del digest literal.
 Los códigos anteriores conservan significado y contexto; los nuevos códigos se
 usan para decimal exacto, objetivo o disposición inviables, mapa incoherente y
 coordenadas incompatibles.
+
+`diagnostics-v3.tsv` conserva v2 y añade el rechazo F4 de categorías
+*paired-end* observables y alineamiento directo, con el destino aplazado en el
+diagnóstico. No representa esos parámetros ni publica sus estadísticas o
+salidas.

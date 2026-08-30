@@ -384,6 +384,10 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
             "resource_path": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
             "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
             "preparation": "pcr_free",
+            "insert_length": {
+                "minimum_bases": 250,
+                "maximum_bases": 450,
+            },
         },
         "read_length": event.read_length(),
         "quality": {"acgt_phred": event.acgt_phred(), "n_phred": event.n_phred()},
@@ -392,6 +396,8 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
             "optical_duplicates": {
                 "realized_pairs": event.realized_optical_duplicate_pairs(),
             },
+            "gc": {"mode": "neutral"},
+            "adapters": {"enabled": false},
         },
         "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
         "id_catalog": f4_id_catalog_value(),
@@ -448,6 +454,10 @@ fn f4_technical_profile_object() -> Value {
         "resource_path": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
         "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
         "preparation": "pcr_free",
+        "insert_length": {
+            "minimum_bases": 250,
+            "maximum_bases": 450,
+        },
     })
 }
 
@@ -4533,7 +4543,7 @@ fn validate_effective_technical_event(
     let artifacts = effective_object(event, "artifacts", path)?;
     validate_effective_closed_object(
         artifacts,
-        &["pcr", "optical_duplicates"],
+        &["pcr", "optical_duplicates", "gc", "adapters"],
         "technical_event.artifacts",
         path,
     )?;
@@ -4552,6 +4562,23 @@ fn validate_effective_technical_event(
         return Err(effective_error(
             path,
             "artefactos de duplicación del perfil PCR-free inválidos",
+        ));
+    }
+    let gc = effective_object(artifacts, "gc", path)?;
+    validate_effective_closed_object(gc, &["mode"], "technical_event.artifacts.gc", path)?;
+    let adapters = effective_object(artifacts, "adapters", path)?;
+    validate_effective_closed_object(
+        adapters,
+        &["enabled"],
+        "technical_event.artifacts.adapters",
+        path,
+    )?;
+    if gc.get("mode").and_then(Value::as_str) != Some("neutral")
+        || adapters.get("enabled") != Some(&Value::Bool(false))
+    {
+        return Err(effective_error(
+            path,
+            "artefactos GC o adaptadores del perfil inicial inválidos",
         ));
     }
     let mut individuals = BTreeSet::new();
@@ -4986,7 +5013,7 @@ fn validate_diagnostics(values: &[Value], path: &Path) -> Result<(), Diagnostic>
         if !diagnostic_matches_catalog(code, message) {
             return Err(manifest_error(
                 path,
-                format!("el diagnóstico {code} no coincide con diagnostics-v2.tsv"),
+                format!("el diagnóstico {code} no coincide con diagnostics-v3.tsv"),
             ));
         }
     }

@@ -3,7 +3,8 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 const DIAGNOSTIC_CATALOG_V1: &str = include_str!("../catalogs/diagnostics-v1.tsv");
-const DIAGNOSTIC_CATALOG: &str = include_str!("../catalogs/diagnostics-v2.tsv");
+const DIAGNOSTIC_CATALOG_V2: &str = include_str!("../catalogs/diagnostics-v2.tsv");
+const DIAGNOSTIC_CATALOG: &str = include_str!("../catalogs/diagnostics-v3.tsv");
 const DIAGNOSTIC_SCHEMA: &str = include_str!("../schemas/diagnostics-v1.schema.json");
 const SUBSEED_CATALOG_V1: &str = include_str!("../catalogs/subseed-scopes-v1.tsv");
 const SUBSEED_CATALOG_V2: &str = include_str!("../catalogs/subseed-scopes-v2.tsv");
@@ -19,7 +20,7 @@ const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
 // These fingerprints are the review lock for the published v1 contracts. A
 // deliberate content change must use a new versioned artifact and add a new
 // fingerprint instead of replacing a v1 value here.
-const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 10] = [
+const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 11] = [
     (
         "catalogs/diagnostics-v1.tsv",
         DIAGNOSTIC_CATALOG_V1,
@@ -27,8 +28,13 @@ const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 10] = [
     ),
     (
         "catalogs/diagnostics-v2.tsv",
-        DIAGNOSTIC_CATALOG,
+        DIAGNOSTIC_CATALOG_V2,
         "24e6153b152e78236dfc2a3ae84e17f4c7ab733045b934d0fbf715ebcbdab432",
+    ),
+    (
+        "catalogs/diagnostics-v3.tsv",
+        DIAGNOSTIC_CATALOG,
+        "6e8a8fa3c8c1306ed360bad6de402649020d109a10fc0c5b4072d47df66f64f9",
     ),
     (
         "schemas/diagnostics-v1.schema.json",
@@ -104,7 +110,8 @@ fn sha256sum(input: &str) -> String {
 
 #[test]
 fn published_v1_contracts_match_their_reviewed_content() {
-    assert!(DIAGNOSTIC_CATALOG.starts_with("# diagnostic_catalog_version=2\n"));
+    assert!(DIAGNOSTIC_CATALOG_V2.starts_with("# diagnostic_catalog_version=2\n"));
+    assert!(DIAGNOSTIC_CATALOG.starts_with("# diagnostic_catalog_version=3\n"));
     assert!(SUBSEED_CATALOG_V1.starts_with(&format!(
         "# derivation_version=1\n# context={SUBSEED_CONTEXT}\n"
     )));
@@ -231,7 +238,8 @@ fn validate_diagnostic_catalog(catalog: &str) -> Result<usize, CatalogError> {
 
 #[test]
 fn published_diagnostic_catalog_is_well_formed_and_covers_every_category() {
-    assert_eq!(validate_diagnostic_catalog(DIAGNOSTIC_CATALOG), Ok(46));
+    assert_eq!(validate_diagnostic_catalog(DIAGNOSTIC_CATALOG_V2), Ok(46));
+    assert_eq!(validate_diagnostic_catalog(DIAGNOSTIC_CATALOG), Ok(47));
     for category in [
         "CONF", "INPUT", "FMT", "DOMAIN", "RES", "TOOL", "IO", "INTERNAL",
     ] {

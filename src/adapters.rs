@@ -1008,15 +1008,82 @@ fn check_unknown(
         .keys()
         .find(|key| !accepted.contains(&key.get_ref().as_ref()))
     {
+        let field = key.get_ref().as_ref();
+        if let Some(deferred_to) = deferred_f4_alignment_destination(field) {
+            return Err(Diagnostic::configuration(
+                "GPS-CONF-023",
+                "La configuración solicita una categoría PE observable o un alineamiento directo aplazado.",
+            )
+            .with("path", admitted.path().display().to_string())
+            .with("field", field)
+            .with("location", location(admitted, key.span()).to_string())
+            .with("deferred_to", deferred_to));
+        }
         return Err(Diagnostic::configuration(
             "GPS-CONF-006",
             "La configuración contiene un campo desconocido.",
         )
         .with("path", admitted.path().display().to_string())
-        .with("field", key.get_ref().as_ref())
+        .with("field", field)
         .with("location", location(admitted, key.span()).to_string()));
     }
     Ok(())
+}
+
+/// Clasifica nombres reservados que F4 rechaza antes de crear cualquier
+/// configuración efectiva, estadística o salida de alineamiento. No introduce
+/// una representación de estas categorías: solo reserva sus solicitudes para
+/// los destinos de diseño aprobados.
+fn deferred_f4_alignment_destination(field: &str) -> Option<&'static str> {
+    let family = match field {
+        "paired_end_observable"
+        | "paired_end_observables"
+        | "orientation_anomaly"
+        | "orientation_anomalies"
+        | "orientation_anomaly_rate"
+        | "orientation_anomaly_rates"
+        | "observed_insert_size"
+        | "observed_insert_sizes"
+        | "observed_insert_size_distribution"
+        | "observed_insert_size_distributions"
+        | "observed_insert_length"
+        | "observed_insert_lengths"
+        | "observed_insert_length_distribution"
+        | "observed_insert_length_distributions"
+        | "unaligned_mate"
+        | "unaligned_mates"
+        | "unaligned_mate_rate"
+        | "unaligned_mate_rates" => DeferredF4AlignmentFamily::ObservablePairedEnd,
+        "direct_alignment"
+        | "direct_alignments"
+        | "direct_alignment_mode"
+        | "direct_alignment_modes"
+        | "direct_alignment_category"
+        | "direct_alignment_categories"
+        | "synthetic_alignment"
+        | "synthetic_alignments"
+        | "synthetic_alignment_category"
+        | "synthetic_alignment_categories"
+        | "alignment_category"
+        | "alignment_categories" => DeferredF4AlignmentFamily::DirectAlignment,
+        _ => return None,
+    };
+    Some(family.destination())
+}
+
+#[derive(Clone, Copy)]
+enum DeferredF4AlignmentFamily {
+    ObservablePairedEnd,
+    DirectAlignment,
+}
+
+impl DeferredF4AlignmentFamily {
+    const fn destination(self) -> &'static str {
+        match self {
+            Self::ObservablePairedEnd => "DTF-055",
+            Self::DirectAlignment => "DTF-051",
+        }
+    }
 }
 
 fn required_value<'a>(

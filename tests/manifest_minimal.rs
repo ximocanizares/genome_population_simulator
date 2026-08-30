@@ -550,7 +550,7 @@ fn assert_external_bytes(name: &str, bytes: &[u8], expected_success: bool) {
         .arg(root.join("tests/external_manifest_validator.py"))
         .arg(root.join("schemas").join(schema))
         .arg(&instance)
-        .arg(root.join("catalogs/diagnostics-v2.tsv"))
+        .arg(root.join("catalogs/diagnostics-v3.tsv"))
         .output()
         .expect("independent Python validator");
     let _ = fs::remove_file(&instance);

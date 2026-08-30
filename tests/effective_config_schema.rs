@@ -3,6 +3,16 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use genome_population_simulator::adapters::{admit_toml_header, parse_declared_config};
+use genome_population_simulator::application::build_effective_config;
+use genome_population_simulator::configuration::ExpectedConfigKind;
+use genome_population_simulator::identity::{ReferenceId, SequenceId};
+use genome_population_simulator::reference::{
+    DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
+};
+use genome_population_simulator::results::{
+    ArtifactRecord, ReferenceOutput, effective_config_document_with_reference,
+};
 use serde_json::{Value, json};
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
@@ -213,12 +223,12 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
         "event_id": "reads-main",
         "individual_ids": ["sample-A"],
         "libraries": [{"individual_id": "sample-A", "library_id": "LIB_sample-A", "i7": "ACGTACGT", "i5": "TGCATGCA", "is_contamination_recipient": true}],
-        "profile": {"id": "gps-hiseqx-pcrfree-pe150-v1", "resource_path": "resources/f4/gps-hiseqx-pcrfree-pe150-v1.json", "sha256": "3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea", "preparation": "pcr_free"},
+        "profile": {"id": "gps-hiseqx-pcrfree-pe150-v1", "resource_path": "resources/f4/gps-hiseqx-pcrfree-pe150-v1.json", "sha256": "3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea", "preparation": "pcr_free", "insert_length": {"minimum_bases": 250, "maximum_bases": 450}},
         "rng_catalog": "f4-technical-v3",
         "id_catalog": {"version":"3", "derivations":{"v1":["execution","reference","individual","event","batch","library","read_group","template"],"v2":["PreHopInstanceId","TechnicalPairId"]}},
         "read_length": 150,
         "quality": {"acgt_phred": 40, "n_phred": 0},
-        "artifacts": {"pcr": {"applicable": false}, "optical_duplicates": {"realized_pairs": 0}},
+        "artifacts": {"pcr": {"applicable": false}, "optical_duplicates": {"realized_pairs": 0}, "gc": {"mode": "neutral"}, "adapters": {"enabled": false}},
         "target": {"coverage_wgs": 30.0},
     });
     assert_valid("v4-technical-event", &valid);
@@ -249,9 +259,46 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
             "/technical_event/artifacts/optical_duplicates/realized_pairs",
             json!(1),
         ),
+        (
+            "insert-minimum",
+            "/technical_event/profile/insert_length/minimum_bases",
+            json!(249),
+        ),
+        (
+            "insert-maximum",
+            "/technical_event/profile/insert_length/maximum_bases",
+            json!(451),
+        ),
+        ("gc", "/technical_event/artifacts/gc/mode", json!("biased")),
+        (
+            "adapters",
+            "/technical_event/artifacts/adapters/enabled",
+            json!(true),
+        ),
     ] {
         let mut invalid = valid.clone();
         *invalid.pointer_mut(pointer).expect(name) = replacement;
+        assert_invalid(&format!("v4-technical-event-{name}"), &invalid);
+    }
+    for (name, parent, field) in [
+        (
+            "profile-insert-length-required",
+            "/technical_event/profile",
+            "insert_length",
+        ),
+        ("gc-required", "/technical_event/artifacts", "gc"),
+        (
+            "adapters-required",
+            "/technical_event/artifacts",
+            "adapters",
+        ),
+    ] {
+        let mut invalid = valid.clone();
+        invalid
+            .pointer_mut(parent)
+            .and_then(Value::as_object_mut)
+            .expect(parent)
+            .remove(field);
         assert_invalid(&format!("v4-technical-event-{name}"), &invalid);
     }
     let mut double_target = valid;
@@ -260,6 +307,96 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
         "v4-technical-event-read-count-is-not-admitted",
         &double_target,
     );
+}
+
+#[test]
+fn externally_validates_the_published_f4_3_2_effective_document() {
+    let declared = parse_declared_config(
+        admit_toml_header(
+            Path::new("f4-3-2-schema.toml"),
+            br#"config_kind = "general"
+schema_version = "2"
+
+[reference]
+kind = "simulated"
+id = "reference-main"
+
+[reference.composition]
+A = 0.25
+C = 0.25
+G = 0.25
+T = 0.25
+
+[[reference.sequences]]
+id = "chr1"
+class = "chromosome"
+length = 100
+
+[[initial_populations]]
+population_id = "P1"
+individual_count = 1
+ploidy = 2
+genotype_model = "hwe"
+individual_ids = ["sample-A"]
+
+[technical_event]
+event_id = "reads-main"
+individual_ids = ["sample-A"]
+target_coverage_wgs = 1
+
+[[technical_event.libraries]]
+individual_id = "sample-A"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
+"#
+            .to_vec(),
+            ExpectedConfigKind::General,
+        )
+        .expect("admitted F4.3.2 configuration"),
+    )
+    .expect("declared F4.3.2 configuration");
+    let effective = build_effective_config(&declared).expect("effective F4.3.2 configuration");
+    let mut reference = Reference::new(
+        ReferenceId::parse("reference-main", "test").expect("reference ID"),
+        ReferenceOrigin::Generated,
+        vec![
+            ReferenceSequence::new(
+                SequenceId::parse("chr1", "test").expect("sequence ID"),
+                FastaHeader::parse(b"chr1").expect("FASTA header"),
+                SequenceClass::Chromosome,
+                &DnaSequence::try_from_bytes(&[b'A'; 100]).expect("DNA"),
+            )
+            .expect("reference sequence"),
+        ],
+    )
+    .expect("reference");
+    let fasta = ArtifactRecord {
+        id: "reference-main".to_owned(),
+        kind: "reference_fasta".to_owned(),
+        path: "references/reference-main.fasta".to_owned(),
+        size_bytes: 100,
+        digest: "a".repeat(64),
+    };
+    reference
+        .bind_authoritative_resource(fasta.path.clone().into())
+        .expect("authoritative resource");
+    let mut document = effective_config_document_with_reference(
+        &effective,
+        ReferenceOutput {
+            reference: &reference,
+            fasta: &fasta,
+        },
+    )
+    .expect("published F4.3.2 effective document");
+    // Esta forma de serialización se usa antes de enlazar el artefacto de
+    // estadísticas de la población; el esquema exige ese enlace solo si se
+    // publican cohortes iniciales.
+    document["initial_populations"] = json!([]);
+    document["authorizations"] = json!({
+        "allow_empty_snv_matrix": false,
+        "allow_incompatible_genotypes": false,
+    });
+    assert_valid("published-f4-3-2-effective-document", &document);
 }
 
 #[test]
