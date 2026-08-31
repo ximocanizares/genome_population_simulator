@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::adapters::{admit_toml_header, parse_declared_config};
+use crate::biological_contamination::BiologicalContaminationSettings;
 use crate::chimera::ChimeraSettings;
 use crate::configuration::{
     DeclaredGeneralConfig, DeclaredPopulationSnvs, DeclaredReductionTarget,
@@ -222,6 +223,7 @@ pub struct EffectiveTechnicalEvent {
     target: EffectiveTechnicalEventTarget,
     read_length: u16,
     chimera_rate: f64,
+    biological_contamination: BiologicalContaminationSettings,
     libraries: Vec<EffectiveTechnicalLibrary>,
 }
 
@@ -283,6 +285,11 @@ impl EffectiveTechnicalEvent {
     #[must_use]
     pub const fn chimera_rate(&self) -> f64 {
         self.chimera_rate
+    }
+
+    #[must_use]
+    pub const fn biological_contamination(&self) -> &BiologicalContaminationSettings {
+        &self.biological_contamination
     }
 
     /// Ajuste tipado que se entrega al muestreador PE sin volver a interpretar
@@ -935,6 +942,73 @@ fn effective_technical_event(
             "debe ser una fracción finita entre 0 y 1",
         ));
     }
+    let biological_contamination = {
+        let minimum_percent =
+            declared
+                .contamination_min_percent
+                .as_ref()
+                .map_or(Ok(0.0), |value| {
+                    value.literal().parse::<f64>().map_err(|_| {
+                        config_error(
+                            general,
+                            "technical_event.contamination_min_percent",
+                            "debe ser un f64 válido",
+                        )
+                    })
+                })?;
+        let maximum_percent =
+            declared
+                .contamination_max_percent
+                .as_ref()
+                .map_or(Ok(0.0), |value| {
+                    value.literal().parse::<f64>().map_err(|_| {
+                        config_error(
+                            general,
+                            "technical_event.contamination_max_percent",
+                            "debe ser un f64 válido",
+                        )
+                    })
+                })?;
+        let recipient_ids = declared
+            .contamination_recipient_ids
+            .as_ref()
+            .map(|ids| {
+                ids.iter()
+                    .map(|id| {
+                        IndividualId::parse(
+                            id.value().clone(),
+                            "technical_event.contamination_recipient_ids",
+                        )
+                        .map_err(|error| with_initial_population_path(general, error))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()
+            })
+            .transpose()?
+            .map(|mut ids| {
+                ids.sort();
+                ids
+            });
+        BiologicalContaminationSettings::new(minimum_percent, maximum_percent, recipient_ids)
+            .map_err(|error| {
+                config_error(
+                    general,
+                    "technical_event.contamination_min_percent/contamination_max_percent",
+                    error.to_string(),
+                )
+            })?
+    };
+    for recipient in biological_contamination
+        .configured_recipients()
+        .unwrap_or(&[])
+    {
+        if !selected.contains(recipient) {
+            return Err(config_error(
+                general,
+                "technical_event.contamination_recipient_ids",
+                format!("receptora fuera de individual_ids: {recipient}"),
+            ));
+        }
+    }
     let mut libraries = Vec::with_capacity(declared.libraries.len());
     let mut library_individuals = BTreeSet::new();
     let mut i7_values = BTreeSet::new();
@@ -995,6 +1069,7 @@ fn effective_technical_event(
         target,
         read_length,
         chimera_rate,
+        biological_contamination,
         libraries,
     }))
 }

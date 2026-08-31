@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::adapters::{admit_toml_header, parse_declared_config};
 use genome_population_simulator::application::{build_effective_config, load_and_validate_config};
+use genome_population_simulator::biological_contamination::contamination_target_pair_count;
 use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::event_manifest::{
     EventManifest, EventManifestArtifact, EventManifestCoverage, EventManifestReference,
@@ -13,9 +14,13 @@ use genome_population_simulator::event_manifest::{
 };
 use genome_population_simulator::execution::execute_validated_config;
 use genome_population_simulator::fastq_validation::F4CoverageReport;
-use genome_population_simulator::identity::{ReferenceId, derive_execution_id};
+use genome_population_simulator::identity::{
+    EventId, IndividualId, LibraryId, ReferenceId, derive_execution_id,
+};
 use genome_population_simulator::integrity::{configuration_digest, identify_file};
-use genome_population_simulator::randomness::RootSeed;
+use genome_population_simulator::randomness::{
+    F4TechnicalDecision, RootSeed, derive_f4_technical_subseed, f4_uniform_closed,
+};
 use genome_population_simulator::results::{
     ArtifactRecord, UnitState, validate_published_resources,
 };
@@ -61,8 +66,56 @@ fn physical_reader_accepts_coherent_f4_documents_and_rejects_independent_chimera
     );
 }
 
+#[test]
+fn physical_reader_rederives_the_neutral_contamination_summary_and_rejects_mutations() {
+    assert_contamination_case("valid", |_| {}, true);
+    assert_contamination_case(
+        "recipient-library",
+        |fixture| {
+            fixture.event["artifacts"]["biological_contamination"][0]["recipient_library_id"] =
+                json!("LIB_wrong");
+        },
+        false,
+    );
+    assert_contamination_case(
+        "range",
+        |fixture| {
+            fixture.event["artifacts"]["biological_contamination"][0]["percent_range"]["maximum"] =
+                json!(0.5);
+        },
+        false,
+    );
+    assert_contamination_case(
+        "rounded-target",
+        |fixture| {
+            fixture.event["artifacts"]["biological_contamination"][0]["target_pair_count"] =
+                json!(1);
+        },
+        false,
+    );
+    assert_contamination_case(
+        "realized-counts",
+        |fixture| {
+            fixture.event["artifacts"]["biological_contamination"][0]["retained_own_pair_count"] =
+                json!(4);
+        },
+        false,
+    );
+    assert_contamination_case(
+        "percent-subseed",
+        |fixture| {
+            fixture.event["artifacts"]["biological_contamination"][0]["subseeds"]["percent"] =
+                json!("f".repeat(64));
+        },
+        false,
+    );
+    assert_contamination_sampled_percent_rng_guard();
+}
+
 fn assert_case(label: &str, mutate: impl FnOnce(&mut Fixture), valid: bool) {
     let mut fixture = Fixture::new(label);
+    fixture.event["artifacts"]["biological_contamination"] =
+        json!([neutral_contamination_summary(&fixture)]);
     mutate(&mut fixture);
     fixture.persist();
     let result = validate_published_resources(
@@ -78,6 +131,114 @@ fn assert_case(label: &str, mutate: impl FnOnce(&mut Fixture), valid: bool) {
         assert!(result.is_err(), "{label} debe ser rechazado");
     }
     fs::remove_dir_all(fixture.root).expect("cleanup");
+}
+
+fn assert_contamination_case(label: &str, mutate: impl FnOnce(&mut Fixture), valid: bool) {
+    let mut fixture = Fixture::new(label);
+    fixture.event["artifacts"]["biological_contamination"] =
+        json!([neutral_contamination_summary(&fixture)]);
+    mutate(&mut fixture);
+    fixture.persist();
+    let result = validate_published_resources(
+        &fixture.output,
+        &fixture.effective_path,
+        &fs::read(&fixture.effective_path).expect("effective bytes"),
+        &fixture.manifest_path,
+        &fs::read(&fixture.manifest_path).expect("general bytes"),
+    );
+    if valid {
+        result.expect("resumen neutro coherente");
+    } else {
+        assert!(result.is_err(), "{label} debe ser rechazado");
+    }
+    fs::remove_dir_all(fixture.root).expect("cleanup");
+}
+
+fn assert_contamination_sampled_percent_rng_guard() {
+    let mut fixture = Fixture::new("sampled-percent-rng-guard");
+    fixture.event["artifacts"]["biological_contamination"] =
+        json!([neutral_contamination_summary(&fixture)]);
+    let record = &mut fixture.event["artifacts"]["biological_contamination"][0];
+    let sampled = record["sampled_percent"]
+        .as_f64()
+        .expect("sampled percentage");
+    let mutated = if sampled.to_bits() == 0.0_f64.to_bits() {
+        1.0
+    } else {
+        0.0
+    };
+    let clean = record["clean_pair_count"]
+        .as_u64()
+        .expect("clean pair count");
+    let target = contamination_target_pair_count(clean, mutated).expect("coherent target");
+    assert_eq!(target, 0, "the low non-degenerate range needs no donors");
+    record["sampled_percent"] = json!(mutated);
+    record["target_pair_count"] = json!(target);
+    record["donor_contributions"] = json!([]);
+    fixture.persist();
+
+    let error = validate_published_resources(
+        &fixture.output,
+        &fixture.effective_path,
+        &fs::read(&fixture.effective_path).expect("effective bytes"),
+        &fixture.manifest_path,
+        &fs::read(&fixture.manifest_path).expect("general bytes"),
+    )
+    .expect_err("a different in-range percentage must fail the RNG bit guard");
+    assert!(
+        error
+            .render_human()
+            .contains("porcentaje contaminante no coincide con la subsemilla F4"),
+        "the rejection must come from the sampled-percent RNG/to_bits guard: {}",
+        error.render_human()
+    );
+    fs::remove_dir_all(fixture.root).expect("cleanup");
+}
+
+fn neutral_contamination_summary(fixture: &Fixture) -> Value {
+    let recipient = fixture.event["selected_individuals"][0]["individual_id"]
+        .as_str()
+        .expect("recipient");
+    let library = fixture.event["selected_individuals"][0]["library_id"]
+        .as_str()
+        .expect("library");
+    let root = RootSeed::parse("fixture root", ROOT_SEED).expect("root seed");
+    let event = EventId::parse("reads-main", "fixture").expect("event");
+    let recipient = IndividualId::parse(recipient, "fixture").expect("recipient ID");
+    let library = LibraryId::parse(library, "fixture").expect("library ID");
+    let percent_subseed = derive_f4_technical_subseed(
+        root,
+        F4TechnicalDecision::contamination_percent(&event, &library, &recipient),
+    )
+    .expect("percent subseed");
+    let sampled_percent =
+        f4_uniform_closed(&mut percent_subseed.local_rng(), 0.0, 1.0).expect("sampled percent");
+    let target_pair_count =
+        contamination_target_pair_count(5, sampled_percent).expect("contamination target");
+    assert_eq!(target_pair_count, 0, "the fixture has no donor library");
+    let seed = |decision| {
+        derive_f4_technical_subseed(root, decision)
+            .expect("subseed")
+            .to_hex()
+    };
+    json!({
+        "recipient_id": recipient.as_str(),
+        "recipient_library_id": library.as_str(),
+        "percent_range": {"minimum": 0.0, "maximum": 1.0},
+        "sampled_percent": sampled_percent,
+        "clean_pair_count": 5,
+        "target_pair_count": target_pair_count,
+        "removed_own_pair_count": 0,
+        "inserted_contaminant_pair_count": 0,
+        "retained_own_pair_count": 5,
+        "final_pair_count": 5,
+        "subseeds": {
+            "percent": percent_subseed.to_hex(),
+            "donors": seed(F4TechnicalDecision::contamination_donors(&event, &library, &recipient)),
+            "removal": seed(F4TechnicalDecision::contamination_recipients(&event, &library, &recipient)),
+        },
+        "donor_contributions": [],
+    })
 }
 
 struct Fixture {
@@ -197,6 +358,7 @@ impl Fixture {
             coverage: &coverage,
             chimera_rate: event.chimera_rate(),
             realized_chimera_pairs: 0,
+            biological_contamination: &[],
             diagnostics: &[],
         };
         let event_path = output.join(event_manifest_relative_path(event.event_id()));
@@ -390,7 +552,7 @@ fn base_toml() -> String {
 
 fn technical_toml() -> String {
     format!(
-        "{}\n[technical_event]\nevent_id = \"reads-main\"\nindividual_ids = [\"sample-A\"]\ntarget_coverage_wgs = 1\n\n[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n",
+        "{}\n[technical_event]\nevent_id = \"reads-main\"\nindividual_ids = [\"sample-A\"]\ntarget_coverage_wgs = 1\ncontamination_min_percent = 0\ncontamination_max_percent = 1\n\n[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n",
         base_toml()
     )
 }

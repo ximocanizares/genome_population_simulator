@@ -22,7 +22,13 @@ menos una entrada `[[technical_event.libraries]]`. Cada biblioteca declara
 `individual_id`, `i7` e `i5`; ambos componentes UDI son exactamente ocho bases
 mayúsculas A/C/G/T. `read_length_bases`, si aparece, está entre 1 y 150; al
 omitirse se resuelve a 150. `chimera_rate`, si aparece, es una fracción finita
-en `[0,1]`; al omitirse se resuelve a `0`. `read_count` no forma parte de v2 y se rechaza.
+en `[0,1]`; al omitirse se resuelve a `0`. Los campos planos
+`contamination_min_percent` y `contamination_max_percent` son porcentajes
+finitos en `[0,100]`, se resuelven ambos a `0` al omitirse y deben respetar
+`min <= max`. `contamination_recipient_ids` es una lista opcional, no vacía y
+sin repetidos de individuos seleccionados; al omitirse se selecciona toda la
+población del evento. No existe una tabla anidada de contaminación.
+`read_count` no forma parte de v2 y se rechaza.
 `library_id` se deriva de forma determinista por Rust y no se autoriza en TOML.
 
 ```toml
@@ -32,6 +38,9 @@ individual_ids = ["sample-A"]
 target_coverage_wgs = 30
 read_length_bases = 150
 chimera_rate = 0
+contamination_min_percent = 0
+contamination_max_percent = 0
+# contamination_recipient_ids = ["sample-A"]
 
 [[technical_event.libraries]]
 individual_id = "sample-A"

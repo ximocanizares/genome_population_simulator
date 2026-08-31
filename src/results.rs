@@ -13,12 +13,14 @@ use crate::application::{
     EffectiveReducedReference, EffectiveReferenceSource, EffectiveTechnicalEvent,
     EffectiveTechnicalEventTarget, build_effective_config_with_entropy,
 };
+use crate::biological_contamination::contamination_target_pair_count;
 use crate::configuration::ExpectedConfigKind;
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
 use crate::event_manifest::{event_manifest_relative_path, validate_event_manifest_bytes};
 use crate::execution::declared_small_event;
 use crate::identity::{
-    EventId, FounderKey, IndividualId, PopulationId, ReferenceId, SequenceId, derive_execution_id,
+    EventId, FounderKey, IndividualId, LibraryId, PopulationId, ReferenceId, SequenceId,
+    derive_execution_id,
 };
 use crate::initial_individual_integration::IncompatibleGenotypeAuthorization;
 use crate::initial_individual_materialization::{
@@ -29,7 +31,10 @@ use crate::population_snvs::{
     PreparedPopulationSnvs, validate_reusable_population_snvs,
     validate_reusable_population_snvs_bytes,
 };
-use crate::randomness::{EntropySource, RootSeed, RuntimeSubseedScope, derive_subseed};
+use crate::randomness::{
+    EntropySource, F4TechnicalDecision, RootSeed, RuntimeSubseedScope, derive_f4_technical_subseed,
+    derive_subseed, f4_uniform_closed,
+};
 use crate::reference::{
     AlphabetValidation, Reference, ReferenceOrigin, ReferenceSequence, ReversibleText,
     SequenceClass,
@@ -406,6 +411,13 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
             "gc": {"mode": "neutral"},
             "adapters": {"enabled": false},
         },
+        "biological_contamination": {
+            "percent_range": {
+                "minimum": event.biological_contamination().minimum_percent(),
+                "maximum": event.biological_contamination().maximum_percent(),
+            },
+            "recipient_ids": resolved_contamination_recipients(event),
+        },
         "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
         "id_catalog": f4_id_catalog_value(),
         "libraries": resolved_technical_libraries(config, event),
@@ -426,6 +438,10 @@ fn resolved_technical_libraries(
         event.individual_ids(),
     )
     .expect("effective technical event preserves derivable identities");
+    let recipients = resolved_contamination_recipients(event)
+        .into_iter()
+        .filter_map(|value| value.as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>();
     identities
         .libraries()
         .map(|identity| {
@@ -439,9 +455,20 @@ fn resolved_technical_libraries(
                 "library_id": identity.library_id().as_str(),
                 "i7": configured.i7(),
                 "i5": configured.i5(),
-                "is_contamination_recipient": true,
+                "is_contamination_recipient": recipients.contains(identity.individual_id().as_str()),
             })
         })
+        .collect()
+}
+
+fn resolved_contamination_recipients(event: &EffectiveTechnicalEvent) -> Vec<Value> {
+    event
+        .biological_contamination()
+        .configured_recipients()
+        .map(|recipients| recipients.to_vec())
+        .unwrap_or_else(|| event.individual_ids().to_vec())
+        .into_iter()
+        .map(|id| json!(id.as_str()))
         .collect()
 }
 
@@ -1545,6 +1572,14 @@ fn validate_physical_technical_event(
         .and_then(Value::as_object)
         .and_then(|artifacts| artifacts.get("chimera"));
     validate_f4_coverage_against_effective(&event, technical_event, reference, effective_path)?;
+    validate_physical_biological_contamination_summary(
+        &event,
+        technical_event,
+        effective,
+        root_seed,
+        &event_id,
+        effective_path,
+    )?;
     if event.get("event_id").and_then(Value::as_str) != Some(event_id.as_str())
         || event.get("event_subseed").and_then(Value::as_str)
             != Some(expected_event_subseed.as_str())
@@ -1567,6 +1602,291 @@ fn validate_physical_technical_event(
         return Err(effective_error(
             effective_path,
             "el manifiesto técnico físico no coincide con la configuración efectiva, semilla o referencia",
+        ));
+    }
+    Ok(())
+}
+
+/// Contrasta el resumen agregado F4.4 con la configuración efectiva sin
+/// retener ni reconstruir parejas. La materialización solo entrega los hechos
+/// auditables del plan; aquí no se reintroduce procedencia individual.
+fn validate_physical_biological_contamination_summary(
+    event: &Value,
+    technical_event: &serde_json::Map<String, Value>,
+    effective: &serde_json::Map<String, Value>,
+    root_seed: &RootSeed,
+    event_id: &EventId,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    let contamination =
+        effective_object(technical_event, "biological_contamination", effective_path)?;
+    let range = effective_object(contamination, "percent_range", effective_path)?;
+    let minimum = range
+        .get("minimum")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| {
+            effective_error(effective_path, "mínimo efectivo de contaminación inválido")
+        })?;
+    let maximum = range
+        .get("maximum")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| {
+            effective_error(effective_path, "máximo efectivo de contaminación inválido")
+        })?;
+    let configured_recipients = effective_array(contamination, "recipient_ids", effective_path)?
+        .iter()
+        .map(|value| {
+            value.as_str().map(str::to_owned).ok_or_else(|| {
+                effective_error(
+                    effective_path,
+                    "receptora efectiva de contaminación inválida",
+                )
+            })
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    let selected_libraries = effective_array(technical_event, "libraries", effective_path)?
+        .iter()
+        .map(|value| {
+            let library = value.as_object().ok_or_else(|| {
+                effective_error(effective_path, "biblioteca técnica efectiva inválida")
+            })?;
+            Ok((
+                effective_non_empty_text(library, "individual_id", effective_path)?.to_owned(),
+                effective_non_empty_text(library, "library_id", effective_path)?.to_owned(),
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>, Diagnostic>>()?;
+    let populations = effective_array(effective, "initial_populations", effective_path)?
+        .iter()
+        .map(|value| {
+            let population = value.as_object().ok_or_else(|| {
+                effective_error(effective_path, "población inicial efectiva inválida")
+            })?;
+            let population_id =
+                effective_non_empty_text(population, "population_id", effective_path)?;
+            let individuals = effective_array(population, "individual_ids", effective_path)?;
+            individuals
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(|individual| (individual.to_owned(), population_id.to_owned()))
+                        .ok_or_else(|| {
+                            effective_error(effective_path, "individual inicial efectivo inválido")
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?
+        .into_iter()
+        .flatten()
+        .collect::<BTreeMap<_, _>>();
+    let records = event
+        .get("artifacts")
+        .and_then(Value::as_object)
+        .and_then(|artifacts| artifacts.get("biological_contamination"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| effective_error(effective_path, "falta resumen físico de contaminación"))?;
+    // Un resumen neutro puede omitirse. Cualquier intervalo positivo exige el
+    // plan entero antes de que la publicación PE (F4.5) pueda abrir una ruta.
+    if records.is_empty() {
+        if maximum == 0.0 {
+            return Ok(());
+        }
+        return Err(effective_error(
+            effective_path,
+            "un rango positivo de contaminación exige resumen por receptora",
+        ));
+    }
+    let mut observed_recipients = BTreeSet::new();
+    for value in records {
+        let record = value.as_object().ok_or_else(|| {
+            effective_error(effective_path, "resumen físico de contaminación inválido")
+        })?;
+        let recipient = effective_non_empty_text(record, "recipient_id", effective_path)?;
+        let recipient_library =
+            effective_non_empty_text(record, "recipient_library_id", effective_path)?;
+        if !configured_recipients.contains(recipient)
+            || selected_libraries.get(recipient).map(String::as_str) != Some(recipient_library)
+            || !observed_recipients.insert(recipient.to_owned())
+        {
+            return Err(effective_error(
+                effective_path,
+                "receptora o biblioteca del resumen de contaminación no coincide con la configuración efectiva",
+            ));
+        }
+        let record_range = effective_object(record, "percent_range", effective_path)?;
+        if record_range.get("minimum").and_then(Value::as_f64) != Some(minimum)
+            || record_range.get("maximum").and_then(Value::as_f64) != Some(maximum)
+        {
+            return Err(effective_error(
+                effective_path,
+                "rango del resumen de contaminación no coincide con la configuración efectiva",
+            ));
+        }
+        let sampled = record
+            .get("sampled_percent")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| effective_error(effective_path, "porcentaje contaminante inválido"))?;
+        let clean = record
+            .get("clean_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                effective_error(effective_path, "recuento limpio contaminante inválido")
+            })?;
+        let target = record
+            .get("target_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| effective_error(effective_path, "objetivo contaminante inválido"))?;
+        let removed = record
+            .get("removed_own_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                effective_error(effective_path, "recuento retirado contaminante inválido")
+            })?;
+        let inserted = record
+            .get("inserted_contaminant_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                effective_error(effective_path, "recuento insertado contaminante inválido")
+            })?;
+        let retained = record
+            .get("retained_own_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                effective_error(effective_path, "recuento retenido contaminante inválido")
+            })?;
+        let final_pairs = record
+            .get("final_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                effective_error(effective_path, "recuento final contaminante inválido")
+            })?;
+        let recipient_id = IndividualId::parse(recipient, "effective_config")
+            .map_err(|_| effective_error(effective_path, "receptora contaminante inválida"))?;
+        let library_id = LibraryId::parse(recipient_library, "effective_config").map_err(|_| {
+            effective_error(effective_path, "biblioteca receptora contaminante inválida")
+        })?;
+        let percent_subseed = derive_f4_technical_subseed(
+            *root_seed,
+            F4TechnicalDecision::contamination_percent(event_id, &library_id, &recipient_id),
+        )
+        .map_err(|_| {
+            effective_error(
+                effective_path,
+                "no se pudo rederivar una subsemilla contaminante",
+            )
+        })?;
+        let expected_subseeds = [
+            ("percent", Ok(percent_subseed)),
+            (
+                "donors",
+                derive_f4_technical_subseed(
+                    *root_seed,
+                    F4TechnicalDecision::contamination_donors(event_id, &library_id, &recipient_id),
+                ),
+            ),
+            (
+                "removal",
+                derive_f4_technical_subseed(
+                    *root_seed,
+                    F4TechnicalDecision::contamination_recipients(
+                        event_id,
+                        &library_id,
+                        &recipient_id,
+                    ),
+                ),
+            ),
+        ];
+        let subseeds = effective_object(record, "subseeds", effective_path)?;
+        for (name, expected) in expected_subseeds {
+            let expected = expected.map_err(|_| {
+                effective_error(
+                    effective_path,
+                    "no se pudo rederivar una subsemilla contaminante",
+                )
+            })?;
+            if subseeds.get(name).and_then(Value::as_str) != Some(expected.to_hex().as_str()) {
+                return Err(effective_error(
+                    effective_path,
+                    "subsemilla de contaminación no coincide con el catálogo F4",
+                ));
+            }
+        }
+        let expected_sampled =
+            f4_uniform_closed(&mut percent_subseed.local_rng(), minimum, maximum).map_err(
+                |_| {
+                    effective_error(
+                        effective_path,
+                        "no se pudo remuestrear el porcentaje contaminante",
+                    )
+                },
+            )?;
+        if sampled.to_bits() != expected_sampled.to_bits() {
+            return Err(effective_error(
+                effective_path,
+                "porcentaje contaminante no coincide con la subsemilla F4",
+            ));
+        }
+        if contamination_target_pair_count(clean, sampled).ok() != Some(target) {
+            return Err(effective_error(
+                effective_path,
+                "objetivo contaminante no coincide con el redondeo normativo",
+            ));
+        }
+        if removed != target
+            || inserted != target
+            || retained.checked_add(removed) != Some(clean)
+            || retained.checked_add(inserted) != Some(final_pairs)
+            || final_pairs != clean
+        {
+            return Err(effective_error(
+                effective_path,
+                "los contadores físicos de contaminación no conservan las parejas",
+            ));
+        }
+        let recipient_population = populations.get(recipient).ok_or_else(|| {
+            effective_error(
+                effective_path,
+                "receptora contaminante fuera de población seleccionada",
+            )
+        })?;
+        let contributions = effective_array(record, "donor_contributions", effective_path)?;
+        let contribution_total = contributions.iter().try_fold(0_u64, |total, value| {
+            let contribution = value
+                .as_object()
+                .ok_or_else(|| effective_error(effective_path, "aporte contaminante inválido"))?;
+            let donor = effective_non_empty_text(contribution, "individual_id", effective_path)?;
+            let pairs = contribution
+                .get("pairs")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| {
+                    effective_error(effective_path, "pares de aporte contaminante inválidos")
+                })?;
+            if donor == recipient
+                || !selected_libraries.contains_key(donor)
+                || populations.get(donor) != Some(recipient_population)
+            {
+                return Err(effective_error(
+                    effective_path,
+                    "donante contaminante fuera de la población seleccionada",
+                ));
+            }
+            total.checked_add(pairs).ok_or_else(|| {
+                effective_error(effective_path, "desbordamiento de aportes contaminantes")
+            })
+        })?;
+        if contribution_total != target {
+            return Err(effective_error(
+                effective_path,
+                "los aportes físicos de contaminación no suman el objetivo",
+            ));
+        }
+    }
+    if observed_recipients != configured_recipients {
+        return Err(effective_error(
+            effective_path,
+            "el resumen de contaminación no cubre exactamente las receptoras efectivas",
         ));
     }
     Ok(())
@@ -4561,13 +4881,14 @@ fn validate_effective_technical_event(
     path: &Path,
 ) -> Result<(), Diagnostic> {
     let event = effective_object(effective, "technical_event", path)?;
-    const FIELDS: [&str; 10] = [
+    const FIELDS: [&str; 11] = [
         "event_id",
         "individual_ids",
         "profile",
         "read_length",
         "quality",
         "artifacts",
+        "biological_contamination",
         "libraries",
         "rng_catalog",
         "id_catalog",
@@ -4597,6 +4918,29 @@ fn validate_effective_technical_event(
         || event.get("id_catalog") != Some(&f4_id_catalog_value())
     {
         return Err(effective_error(path, "catálogo técnico F4 inválido"));
+    }
+    let contamination = effective_object(event, "biological_contamination", path)?;
+    validate_effective_closed_object(
+        contamination,
+        &["percent_range", "recipient_ids"],
+        "technical_event.biological_contamination",
+        path,
+    )?;
+    let percent_range = effective_object(contamination, "percent_range", path)?;
+    validate_effective_closed_object(
+        percent_range,
+        &["minimum", "maximum"],
+        "technical_event.biological_contamination.percent_range",
+        path,
+    )?;
+    let minimum_percent = percent_range.get("minimum").and_then(Value::as_f64);
+    let maximum_percent = percent_range.get("maximum").and_then(Value::as_f64);
+    if !matches!((minimum_percent, maximum_percent), (Some(minimum), Some(maximum)) if minimum.is_finite() && maximum.is_finite() && (0.0..=100.0).contains(&minimum) && (0.0..=100.0).contains(&maximum) && minimum <= maximum)
+    {
+        return Err(effective_error(
+            path,
+            "rango de contaminación biológica inválido",
+        ));
     }
     let quality = effective_object(event, "quality", path)?;
     validate_effective_closed_object(
@@ -4686,6 +5030,27 @@ fn validate_effective_technical_event(
             ));
         }
     }
+    let recipient_ids = effective_array(contamination, "recipient_ids", path)?;
+    if recipient_ids.is_empty() {
+        return Err(effective_error(
+            path,
+            "contaminación biológica sin receptoras",
+        ));
+    }
+    let mut recipients = BTreeSet::new();
+    for recipient_id in recipient_ids {
+        let recipient_id = recipient_id.as_str().ok_or_else(|| {
+            effective_error(path, "receptora de contaminación biológica inválida")
+        })?;
+        let recipient_id = IndividualId::parse(recipient_id, "effective_config")
+            .map_err(|_| effective_error(path, "receptora de contaminación biológica inválida"))?;
+        if !individuals.contains(&recipient_id) || !recipients.insert(recipient_id) {
+            return Err(effective_error(
+                path,
+                "receptoras de contaminación inválidas o repetidas",
+            ));
+        }
+    }
     let libraries = effective_array(event, "libraries", path)?;
     if libraries.len() != individuals.len() {
         return Err(effective_error(
@@ -4748,9 +5113,10 @@ fn validate_effective_technical_event(
             })
         };
         if !individuals.contains(&individual_id)
-            || !library_individuals.insert(individual_id)
+            || !library_individuals.insert(individual_id.clone())
             || effective_non_empty_text(library, "library_id", path)? != expected_library
-            || library.get("is_contamination_recipient") != Some(&Value::Bool(true))
+            || library.get("is_contamination_recipient")
+                != Some(&Value::Bool(recipients.contains(&individual_id)))
             || !valid_udi("i7")?
             || !valid_udi("i5")?
             || !i7.insert(effective_non_empty_text(library, "i7", path)?.to_owned())

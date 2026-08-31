@@ -331,6 +331,20 @@ pub struct TechnicalIdentityRegistry {
 }
 
 impl TechnicalIdentityRegistry {
+    /// Incorpora una instancia ya emitida por otra frontera del mismo evento.
+    /// La causa original no hace falta para detectar una colisión: el ID es el
+    /// único valor que puede aparecer después en FASTQ.
+    pub fn register_existing_pre_hop_instance(
+        &mut self,
+        pre_hop_instance_id: &PreHopInstanceId,
+    ) -> Result<(), Diagnostic> {
+        self.register(
+            TechnicalIdClass::PreHopInstance,
+            pre_hop_instance_id.as_str(),
+            "existing",
+        )
+    }
+
     /// Deriva una instancia propia antes de *index hopping*.
     pub fn derive_own_pre_hop_instance(
         &mut self,

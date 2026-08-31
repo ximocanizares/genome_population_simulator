@@ -157,6 +157,9 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
         keys_at(&schema, "/$defs/technical_event/properties"),
         BTreeSet::from([
             "chimera_rate".to_owned(),
+            "contamination_max_percent".to_owned(),
+            "contamination_min_percent".to_owned(),
+            "contamination_recipient_ids".to_owned(),
             "event_id".to_owned(),
             "individual_ids".to_owned(),
             "libraries".to_owned(),

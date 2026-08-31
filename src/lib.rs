@@ -6,6 +6,7 @@
 
 pub mod adapters;
 pub mod application;
+pub mod biological_contamination;
 pub mod chimera;
 pub mod configuration;
 pub mod coordinates;

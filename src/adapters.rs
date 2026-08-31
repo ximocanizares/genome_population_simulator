@@ -215,6 +215,9 @@ fn parse_technical_event(
             "target_coverage_wgs",
             "read_length_bases",
             "chimera_rate",
+            "contamination_min_percent",
+            "contamination_max_percent",
+            "contamination_recipient_ids",
             "libraries",
         ],
     )?;
@@ -269,12 +272,39 @@ fn parse_technical_event(
             "debe declarar exactamente una biblioteca por individuo",
         ));
     }
+    let contamination_recipient_ids =
+        optional_array(admitted, event, "contamination_recipient_ids")?
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|value| {
+                        value
+                            .get_ref()
+                            .as_str()
+                            .map(|text| {
+                                Located::new(text.to_owned(), location(admitted, value.span()))
+                            })
+                            .ok_or_else(|| {
+                                wrong_type(
+                                    admitted,
+                                    "technical_event.contamination_recipient_ids",
+                                    value,
+                                    "string",
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()
+            })
+            .transpose()?;
     Ok(Some(DeclaredTechnicalEvent {
         event_id: required_string(admitted, event, "event_id")?,
         individual_ids,
         target,
         read_length_bases: optional_located_u64(admitted, event, "read_length_bases")?,
         chimera_rate: optional_number(admitted, event, "chimera_rate")?,
+        contamination_min_percent: optional_number(admitted, event, "contamination_min_percent")?,
+        contamination_max_percent: optional_number(admitted, event, "contamination_max_percent")?,
+        contamination_recipient_ids,
         libraries,
     }))
 }

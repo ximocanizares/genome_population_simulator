@@ -870,6 +870,7 @@ mod tests {
             coverage: &[],
             chimera_rate: event.chimera_rate(),
             realized_chimera_pairs: 0,
+            biological_contamination: &[],
             diagnostics: &[],
         };
         let event_path = event_manifest_relative_path(event.event_id());
@@ -960,6 +961,7 @@ mod tests {
             coverage: &[],
             chimera_rate: event.chimera_rate(),
             realized_chimera_pairs: 0,
+            biological_contamination: &[],
             diagnostics: std::slice::from_ref(&event_failure),
         };
         let replacement = event_manifest_bytes(&failed_event).expect("tampered event bytes");

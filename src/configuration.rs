@@ -226,6 +226,11 @@ pub struct DeclaredTechnicalEvent {
     /// Fracción Bernoulli por pareja limpia; el valor por omisión se resuelve
     /// en la configuración efectiva del perfil F4.
     pub chimera_rate: Option<DeclaredNumber>,
+    /// Límites planos de la mezcla biológica previa al demultiplexado. Si se
+    /// omiten ambos, el perfil inicial se mantiene neutro (0--0 %).
+    pub contamination_min_percent: Option<DeclaredNumber>,
+    pub contamination_max_percent: Option<DeclaredNumber>,
+    pub contamination_recipient_ids: Option<Vec<Located<String>>>,
     pub libraries: Vec<DeclaredTechnicalLibrary>,
 }
 

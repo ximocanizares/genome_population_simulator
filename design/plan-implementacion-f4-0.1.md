@@ -414,6 +414,12 @@ con muestreo WGS básico separado de la evidencia final.
     lecturas propias previas a contaminación; no admite matriz dirigida ni FASTQ
     externo, matriz dirigida o pesos manuales en F4. El resultado es un plan temporal de asignaciones por claves,
     sin secuencias, calidades ni FASTQ limpio.
+    La autoría usa los nombres planos `contamination_min_percent`,
+    `contamination_max_percent` y `contamination_recipient_ids`; no existe una
+    tabla TOML anidada. Mientras F4.4.2 no materialice las sustituciones, un
+    intervalo positivo se rechaza en preflight antes de crear el directorio de
+    publicación; el intervalo neutro tampoco habilita una publicación técnica
+    anticipada.
   - Se comprueba con: `cargo test --test f4_biological_contamination --locked`;
     oráculo de asignación entero verifica rango por receptora, 0/100 %, los
     vectores `k=0` y `k=2^53−1` de `uniform-closed-53-bit-v1` para un
@@ -423,6 +429,9 @@ con muestreo WGS básico separado de la evidencia final.
     FASTQ externo, matriz y pesos, y ausencia de
     reemplazo de una unidad de origen dentro de la misma receptora, sin cadenas
     ni dependencia del orden de receptoras;
+    el lector físico rederiva rango, redondeo, subsemillas, mapeo
+    receptora--biblioteca y aportes seleccionados de la misma población, y
+    rechaza mutaciones independientes de esos hechos;
     puertas comunes.
 
 - ☐ F4.4.2. Materializar sustitución biológica y sus recuentos agregados sin
@@ -437,7 +446,7 @@ con muestreo WGS básico separado de la evidencia final.
     agregados por donante y receptora. La copia conserva sus bases y calidades
     realizadas; no vuelve a consumir el RNG de error/calidad. El emisor la
     regenera bajo demanda desde su clave y la descarta tras escribirla.
-  - Se comprueba con: `cargo test --test f4_contamination_provenance --locked`;
+  - Se comprueba con: `cargo test --test f4_biological_contamination --locked`;
     lector independiente comprueba recuentos, IDs propio/contaminante distintos,
     reutilización entre receptoras, ausencia de pares huérfanos y que no se
     publica procedencia individual; puertas comunes.

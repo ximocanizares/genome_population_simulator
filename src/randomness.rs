@@ -1789,7 +1789,7 @@ fn poisson_count_with_source(
 #[cfg(test)]
 mod tests {
     use super::{
-        RandomSamplingError, RandomWordSource, categorical_f64_with_source,
+        F4_FIFTY_THREE_BIT_MAX, RandomSamplingError, RandomWordSource, categorical_f64_with_source,
         f4_bernoulli_with_source, f4_partial_fisher_yates_with_source,
         f4_truncated_normal_with_source, f4_uniform_closed_with_source,
         f4_uniform_index_with_source, f4_uniform_open_53_with_source, fisher_yates_with_source,
@@ -1910,11 +1910,18 @@ mod tests {
             Err(RandomSamplingError::InvalidProbability)
         );
 
-        let mut closed = Scripted::new(&[u64::MAX]);
+        let mut closed_lower = Scripted::new(&[0]);
+        assert_eq!(
+            f4_uniform_closed_with_source(&mut closed_lower, 1.0, 3.0),
+            Ok(1.0)
+        );
+        assert_eq!(closed_lower.consumed, 1);
+        let mut closed = Scripted::new(&[F4_FIFTY_THREE_BIT_MAX]);
         assert_eq!(
             f4_uniform_closed_with_source(&mut closed, 1.0, 3.0),
             Ok(3.0)
         );
+        assert_eq!(closed.consumed, 1);
         let mut closed_singleton = Scripted::new(&[]);
         assert_eq!(
             f4_uniform_closed_with_source(&mut closed_singleton, 2.0, 2.0),

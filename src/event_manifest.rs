@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 
 use crate::application::EffectiveTechnicalEvent;
+use crate::biological_contamination::{
+    BiologicalContaminationManifestRecipient, contamination_target_pair_count,
+};
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
 use crate::fastq_output::paired_fastq_relative_paths;
 use crate::fastq_validation::F4CoverageReport;
@@ -71,6 +74,9 @@ pub struct EventManifest<'a> {
     /// una pareja; esas piezas solo existen durante la transformación.
     pub chimera_rate: f64,
     pub realized_chimera_pairs: u64,
+    /// Vista agregada del plan y la materialización F4.4. No contiene claves
+    /// de pareja, IDs de instancia ni datos materializables individuales.
+    pub biological_contamination: &'a [BiologicalContaminationManifestRecipient],
     pub diagnostics: &'a [Diagnostic],
 }
 
@@ -180,6 +186,30 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
                 "rate": manifest.chimera_rate,
                 "realized_pairs": manifest.realized_chimera_pairs,
             },
+            "biological_contamination": manifest.biological_contamination.iter().map(|entry| json!({
+                "recipient_id": entry.recipient_id().as_str(),
+                "recipient_library_id": entry.recipient_library_id().as_str(),
+                "percent_range": {
+                    "minimum": entry.minimum_percent(),
+                    "maximum": entry.maximum_percent(),
+                },
+                "sampled_percent": entry.sampled_percent(),
+                "clean_pair_count": entry.clean_pair_count(),
+                "target_pair_count": entry.target_pair_count(),
+                "removed_own_pair_count": entry.removed_own_pair_count(),
+                "inserted_contaminant_pair_count": entry.inserted_contaminant_pair_count(),
+                "retained_own_pair_count": entry.retained_own_pair_count(),
+                "final_pair_count": entry.final_pair_count(),
+                "subseeds": {
+                    "percent": entry.percent_subseed().to_hex(),
+                    "donors": entry.donor_subseed().to_hex(),
+                    "removal": entry.removal_subseed().to_hex(),
+                },
+                "donor_contributions": entry.donor_contributions().iter().map(|(donor, count)| json!({
+                    "individual_id": donor.as_str(),
+                    "pairs": count,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
             "pcr": {"applicable": manifest.event.pcr_duplicates_applicable()},
             "optical_duplicates": {"realized_pairs": manifest.event.realized_optical_duplicate_pairs()},
             "gc": {"mode": "neutral"},
@@ -711,13 +741,24 @@ fn validate_technical_artifacts(value: &Value, path: &Path) -> Result<(), Diagno
     let artifacts = required_object(value, "artifacts", path)?;
     validate_closed(
         artifacts,
-        &["chimera", "pcr", "optical_duplicates", "gc", "adapters"],
+        &[
+            "chimera",
+            "biological_contamination",
+            "pcr",
+            "optical_duplicates",
+            "gc",
+            "adapters",
+        ],
         "artifacts",
         path,
     )?;
     let chimera = required_object(
         required_value(artifacts, "chimera", path)?,
         "artifacts.chimera",
+        path,
+    )?;
+    validate_biological_contamination_manifest(
+        required_value(artifacts, "biological_contamination", path)?,
         path,
     )?;
     validate_closed(
@@ -765,6 +806,176 @@ fn validate_technical_artifacts(value: &Value, path: &Path) -> Result<(), Diagno
         || adapters.get("enabled") != Some(&Value::Bool(false))
     {
         return Err(event_error(path, "artefactos técnicos fijos inválidos"));
+    }
+    Ok(())
+}
+
+fn validate_biological_contamination_manifest(
+    value: &Value,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    let records = required_array(value, "artifacts.biological_contamination", path)?;
+    let mut recipients = BTreeSet::new();
+    for value in records {
+        let record = required_object(value, "artifacts.biological_contamination[]", path)?;
+        validate_closed(
+            record,
+            &[
+                "recipient_id",
+                "recipient_library_id",
+                "percent_range",
+                "sampled_percent",
+                "clean_pair_count",
+                "target_pair_count",
+                "removed_own_pair_count",
+                "inserted_contaminant_pair_count",
+                "retained_own_pair_count",
+                "final_pair_count",
+                "subseeds",
+                "donor_contributions",
+            ],
+            "artifacts.biological_contamination[]",
+            path,
+        )?;
+        let recipient = required_string(record, "recipient_id", path)?;
+        let _ = parse_id::<IndividualId>(recipient, "individual", path)?;
+        let _ = parse_id::<LibraryId>(
+            required_string(record, "recipient_library_id", path)?,
+            "library",
+            path,
+        )?;
+        if !recipients.insert(recipient.to_owned()) {
+            return Err(event_error(
+                path,
+                "receptora de contaminación biológica repetida",
+            ));
+        }
+        let range = required_object(
+            required_value(record, "percent_range", path)?,
+            "percent_range",
+            path,
+        )?;
+        validate_closed(range, &["minimum", "maximum"], "percent_range", path)?;
+        let minimum = range.get("minimum").and_then(Value::as_f64);
+        let maximum = range.get("maximum").and_then(Value::as_f64);
+        let sampled = record.get("sampled_percent").and_then(Value::as_f64);
+        if !matches!((minimum, maximum, sampled), (Some(minimum), Some(maximum), Some(sampled)) if minimum.is_finite() && maximum.is_finite() && sampled.is_finite() && (0.0..=100.0).contains(&minimum) && (0.0..=100.0).contains(&maximum) && minimum <= sampled && sampled <= maximum)
+        {
+            return Err(event_error(
+                path,
+                "porcentaje de contaminación biológica inválido",
+            ));
+        }
+        let sampled = sampled
+            .ok_or_else(|| event_error(path, "porcentaje de contaminación biológica ausente"))?;
+        let clean = record
+            .get("clean_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| event_error(path, "recuento limpio de contaminación inválido"))?;
+        let target = record
+            .get("target_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| event_error(path, "objetivo de contaminación inválido"))?;
+        let removed = record
+            .get("removed_own_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| event_error(path, "recuento retirado de contaminación inválido"))?;
+        let inserted = record
+            .get("inserted_contaminant_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| event_error(path, "recuento insertado de contaminación inválido"))?;
+        let retained = record
+            .get("retained_own_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| event_error(path, "recuento retenido de contaminación inválido"))?;
+        let final_pairs = record
+            .get("final_pair_count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| event_error(path, "recuento final de contaminación inválido"))?;
+        if target > clean {
+            return Err(event_error(
+                path,
+                "objetivo de contaminación supera parejas limpias",
+            ));
+        }
+        let expected_target = contamination_target_pair_count(clean, sampled)
+            .map_err(|_| event_error(path, "objetivo de contaminación no es recomputable"))?;
+        if target != expected_target {
+            return Err(event_error(
+                path,
+                "objetivo de contaminación no aplica el redondeo normativo",
+            ));
+        }
+        if removed != target
+            || inserted != target
+            || retained.checked_add(removed) != Some(clean)
+            || retained.checked_add(inserted) != Some(final_pairs)
+            || final_pairs != clean
+        {
+            return Err(event_error(
+                path,
+                "los contadores realizados de contaminación no conservan las parejas",
+            ));
+        }
+        let subseeds =
+            required_object(required_value(record, "subseeds", path)?, "subseeds", path)?;
+        validate_closed(
+            subseeds,
+            &["percent", "donors", "removal"],
+            "subseeds",
+            path,
+        )?;
+        for value in ["percent", "donors", "removal"] {
+            validate_subseed_hex(required_string(subseeds, value, path)?, value, path)?;
+        }
+        let contributions = required_array(
+            required_value(record, "donor_contributions", path)?,
+            "donor_contributions",
+            path,
+        )?;
+        let mut donors = BTreeSet::new();
+        let mut total = 0_u64;
+        for value in contributions {
+            let contribution = required_object(value, "donor_contributions[]", path)?;
+            validate_closed(
+                contribution,
+                &["individual_id", "pairs"],
+                "donor_contributions[]",
+                path,
+            )?;
+            let donor = required_string(contribution, "individual_id", path)?;
+            let _ = parse_id::<IndividualId>(donor, "individual", path)?;
+            let pairs = contribution
+                .get("pairs")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| event_error(path, "aporte de donante inválido"))?;
+            if donor == recipient || pairs == 0 || !donors.insert(donor.to_owned()) {
+                return Err(event_error(path, "aporte de donante inválido"));
+            }
+            total = total
+                .checked_add(pairs)
+                .ok_or_else(|| event_error(path, "desbordamiento de aportes"))?;
+        }
+        if total != target {
+            return Err(event_error(
+                path,
+                "los aportes no suman el objetivo de contaminación",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_subseed_hex(value: &str, field: &str, path: &Path) -> Result<(), Diagnostic> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(event_error(
+            path,
+            format!("{field} no es una subsemilla hexadecimal de 64 caracteres"),
+        ));
     }
     Ok(())
 }

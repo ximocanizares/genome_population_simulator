@@ -244,6 +244,17 @@ impl F4TechnicalIdentityDeriver {
         )
     }
 
+    /// Registra una instancia `PH_` ya producida dentro del evento. F4.4 lo
+    /// usa antes de crear copias para que una colisión con una instancia propia
+    /// conocida sea un error, no un renombrado silencioso.
+    pub fn register_existing_pre_hop_instance(
+        &mut self,
+        pre_hop_instance_id: &PreHopInstanceId,
+    ) -> Result<(), Diagnostic> {
+        self.registry
+            .register_existing_pre_hop_instance(pre_hop_instance_id)
+    }
+
     pub fn derive_technical_pair(
         &mut self,
         final_library_id: &LibraryId,

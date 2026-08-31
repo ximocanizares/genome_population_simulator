@@ -97,6 +97,7 @@ fn target_basic_and_final_own_contaminant_coverages_are_published_separately() {
         coverage: &coverage,
         chimera_rate: event.chimera_rate(),
         realized_chimera_pairs: 4,
+        biological_contamination: &[],
         diagnostics: &[],
     };
 

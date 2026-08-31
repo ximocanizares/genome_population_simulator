@@ -769,6 +769,7 @@ fn write_event_manifest(
         // ejecución no haya recorrido parejas F4, el único hecho publicable
         // es el contador agregado nulo; no se inventa procedencia.
         realized_chimera_pairs: 0,
+        biological_contamination: &[],
         diagnostics,
     };
     let bytes = event_manifest_bytes(&document)?;

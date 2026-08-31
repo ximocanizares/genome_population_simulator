@@ -200,6 +200,7 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
         coverage: &[],
         chimera_rate: event.chimera_rate(),
         realized_chimera_pairs: 0,
+        biological_contamination: &[],
         diagnostics: std::slice::from_ref(&failure),
     };
     let bytes = event_manifest_bytes(&event_document).expect("failed event bytes");
