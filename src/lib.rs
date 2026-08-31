@@ -10,6 +10,7 @@ pub mod biological_contamination;
 pub mod chimera;
 pub mod configuration;
 pub mod coordinates;
+pub mod demultiplexing;
 pub mod diagnostics;
 pub mod domain;
 pub mod error_quality;

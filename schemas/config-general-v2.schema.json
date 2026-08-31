@@ -337,6 +337,7 @@
         "target_coverage_wgs": {"type": "number", "minimum": 0},
         "read_length_bases": {"type": "integer", "minimum": 1, "maximum": 150, "default": 150, "x-gps-unit": "bases"},
         "chimera_rate": {"type": "number", "minimum": 0, "maximum": 1, "default": 0, "x-gps-unit": "fraction"},
+        "index_hopping_rate": {"type": "number", "minimum": 0, "maximum": 1, "default": 0, "x-gps-unit": "fraction"},
         "contamination_min_percent": {"type": "number", "minimum": 0, "maximum": 100, "default": 0, "x-gps-unit": "percent"},
         "contamination_max_percent": {"type": "number", "minimum": 0, "maximum": 100, "default": 0, "x-gps-unit": "percent"},
         "contamination_recipient_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/identifier"}},

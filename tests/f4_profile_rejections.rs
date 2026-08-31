@@ -73,6 +73,7 @@ fn initial_profile_has_only_neutral_non_configurable_artifacts() {
         document["technical_event"]["artifacts"],
         json!({
             "chimera": {"rate": 0.0},
+            "index_hopping": {"rate": 0.0},
             "pcr": {"applicable": false},
             "optical_duplicates": {"realized_pairs": 0},
             "gc": {"mode": "neutral"},

@@ -161,6 +161,7 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
             "contamination_min_percent".to_owned(),
             "contamination_recipient_ids".to_owned(),
             "event_id".to_owned(),
+            "index_hopping_rate".to_owned(),
             "individual_ids".to_owned(),
             "libraries".to_owned(),
             "read_length_bases".to_owned(),

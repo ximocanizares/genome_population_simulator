@@ -228,7 +228,7 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
         "id_catalog": {"version":"3", "derivations":{"v1":["execution","reference","individual","event","batch","library","read_group","template"],"v2":["PreHopInstanceId","TechnicalPairId"]}},
         "read_length": 150,
         "quality": {"acgt_phred": 40, "n_phred": 0},
-        "artifacts": {"chimera": {"rate": 0.0}, "pcr": {"applicable": false}, "optical_duplicates": {"realized_pairs": 0}, "gc": {"mode": "neutral"}, "adapters": {"enabled": false}},
+        "artifacts": {"chimera": {"rate": 0.0}, "index_hopping": {"rate": 0.0}, "pcr": {"applicable": false}, "optical_duplicates": {"realized_pairs": 0}, "gc": {"mode": "neutral"}, "adapters": {"enabled": false}},
         "biological_contamination": {"percent_range": {"minimum": 0.0, "maximum": 0.0}, "recipient_ids": ["sample-A"]},
         "target": {"coverage_wgs": 30.0},
     });

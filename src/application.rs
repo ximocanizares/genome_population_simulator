@@ -223,6 +223,7 @@ pub struct EffectiveTechnicalEvent {
     target: EffectiveTechnicalEventTarget,
     read_length: u16,
     chimera_rate: f64,
+    index_hopping_rate: f64,
     biological_contamination: BiologicalContaminationSettings,
     libraries: Vec<EffectiveTechnicalLibrary>,
 }
@@ -285,6 +286,13 @@ impl EffectiveTechnicalEvent {
     #[must_use]
     pub const fn chimera_rate(&self) -> f64 {
         self.chimera_rate
+    }
+
+    /// Tasa Bernoulli posterior a contaminación biológica; por omisión usa el
+    /// valor neutro del perfil (`0`).
+    #[must_use]
+    pub const fn index_hopping_rate(&self) -> f64 {
+        self.index_hopping_rate
     }
 
     #[must_use]
@@ -942,6 +950,25 @@ fn effective_technical_event(
             "debe ser una fracción finita entre 0 y 1",
         ));
     }
+    let index_hopping_rate = declared
+        .index_hopping_rate
+        .as_ref()
+        .map_or(Ok(0.0), |value| {
+            value.literal().parse::<f64>().map_err(|_| {
+                config_error(
+                    general,
+                    "technical_event.index_hopping_rate",
+                    "debe ser un f64 válido",
+                )
+            })
+        })?;
+    if !index_hopping_rate.is_finite() || !(0.0..=1.0).contains(&index_hopping_rate) {
+        return Err(config_error(
+            general,
+            "technical_event.index_hopping_rate",
+            "debe ser una fracción finita entre 0 y 1",
+        ));
+    }
     let biological_contamination = {
         let minimum_percent =
             declared
@@ -1062,6 +1089,13 @@ fn effective_technical_event(
             "debe existir exactamente una biblioteca por individuo seleccionado",
         ));
     }
+    if index_hopping_rate > 0.0 && libraries.len() < 2 {
+        return Err(config_error(
+            general,
+            "technical_event.index_hopping_rate",
+            "una tasa positiva exige al menos dos bibliotecas declaradas",
+        ));
+    }
     libraries.sort_by(|left, right| left.individual_id.cmp(&right.individual_id));
     Ok(Some(EffectiveTechnicalEvent {
         event_id,
@@ -1069,6 +1103,7 @@ fn effective_technical_event(
         target,
         read_length,
         chimera_rate,
+        index_hopping_rate,
         biological_contamination,
         libraries,
     }))

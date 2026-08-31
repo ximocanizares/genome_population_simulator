@@ -404,6 +404,9 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
             "chimera": {
                 "rate": event.chimera_rate(),
             },
+            "index_hopping": {
+                "rate": event.index_hopping_rate(),
+            },
             "pcr": {"applicable": event.pcr_duplicates_applicable()},
             "optical_duplicates": {
                 "realized_pairs": event.realized_optical_duplicate_pairs(),
@@ -4957,7 +4960,14 @@ fn validate_effective_technical_event(
     let artifacts = effective_object(event, "artifacts", path)?;
     validate_effective_closed_object(
         artifacts,
-        &["chimera", "pcr", "optical_duplicates", "gc", "adapters"],
+        &[
+            "chimera",
+            "index_hopping",
+            "pcr",
+            "optical_duplicates",
+            "gc",
+            "adapters",
+        ],
         "technical_event.artifacts",
         path,
     )?;
@@ -4973,6 +4983,20 @@ fn validate_effective_technical_event(
         return Err(effective_error(
             path,
             "artefacto de quimera efectivo inválido",
+        ));
+    }
+    let index_hopping = effective_object(artifacts, "index_hopping", path)?;
+    validate_effective_closed_object(
+        index_hopping,
+        &["rate"],
+        "technical_event.artifacts.index_hopping",
+        path,
+    )?;
+    if !matches!(index_hopping.get("rate").and_then(Value::as_f64), Some(value) if value.is_finite() && (0.0..=1.0).contains(&value))
+    {
+        return Err(effective_error(
+            path,
+            "artefacto de index hopping efectivo inválido",
         ));
     }
     let pcr = effective_object(artifacts, "pcr", path)?;
