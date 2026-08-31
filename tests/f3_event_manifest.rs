@@ -7,9 +7,9 @@ use genome_population_simulator::adapters::{admit_toml_header, parse_declared_co
 use genome_population_simulator::application::build_effective_config;
 use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::event_manifest::{
-    EventManifest, EventManifestArtifact, EventManifestCoverage, EventManifestReference,
-    event_manifest_bytes, event_manifest_document, event_manifest_relative_path,
-    validate_event_manifest_bytes,
+    EventManifest, EventManifestArtifact, EventManifestCoverage, EventManifestDemultiplexing,
+    EventManifestFinalFastqSummary, EventManifestReference, event_manifest_bytes,
+    event_manifest_document, event_manifest_relative_path, validate_event_manifest_bytes,
 };
 use genome_population_simulator::fastq_validation::F4CoverageReport;
 use genome_population_simulator::identity::ReferenceId;
@@ -161,6 +161,13 @@ fn each_selected_library_has_one_canonical_fastq_result() {
         .as_array_mut()
         .expect("coverage")
         .push(second_coverage);
+    let mut second_summary = two_libraries["final_fastq_summary"][0].clone();
+    second_summary["individual_id"] = json!("sample-B");
+    second_summary["library_id"] = json!("LIB_sample-B");
+    two_libraries["final_fastq_summary"]
+        .as_array_mut()
+        .expect("summary")
+        .push(second_summary);
     assert!(validate_document(&two_libraries).is_ok());
     two_libraries["outputs"]
         .as_array_mut()
@@ -321,6 +328,18 @@ fn complete_manifest() -> (EventManifest<'static>, &'static str) {
         report: F4CoverageReport::from_base_counts(30.0, 30_000, 30_000, 0, 1_000, 0)
             .expect("coverage"),
     }]));
+    let summary = Box::leak(Box::new([EventManifestFinalFastqSummary {
+        individual_id: individual,
+        library_id: library.library_id(),
+        pair_count: 100,
+        read_count: 200,
+        base_count: 30_000,
+        own_pair_count: 100,
+        contaminant_pair_count: 0,
+        own_base_count: 30_000,
+        contaminant_base_count: 0,
+        n_base_count: 0,
+    }]));
     (
         EventManifest {
             event,
@@ -332,6 +351,10 @@ fn complete_manifest() -> (EventManifest<'static>, &'static str) {
             },
             artifacts,
             coverage,
+            final_fastq_summary: summary,
+            error_quality:
+                genome_population_simulator::event_manifest::EventManifestErrorQuality::neutral(),
+            demultiplexing: EventManifestDemultiplexing::disabled(),
             chimera_rate: event.chimera_rate(),
             realized_chimera_pairs: 0,
             biological_contamination: &[],
@@ -393,6 +416,7 @@ fn failed_document(complete: &serde_json::Value) -> serde_json::Value {
     failed["outputs"][0]["artifact"] = serde_json::Value::Null;
     failed["outputs"][0]["diagnostic_code"] = json!("GPS-FMT-006");
     failed["coverage"] = json!([]);
+    failed["final_fastq_summary"] = json!([]);
     failed["diagnostics"] = json!([format_diagnostic()]);
     failed
 }

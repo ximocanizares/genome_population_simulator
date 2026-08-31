@@ -1,6 +1,7 @@
 //! Oráculos de F4.4.1: el plan conserva claves y recuentos, nunca lecturas.
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -735,37 +736,115 @@ fn configuration_resolves_default_or_explicit_recipients_and_rejects_external_ma
 }
 
 #[test]
-fn positive_contamination_is_rejected_before_publication_for_isolated_and_multi_recipient_plans() {
-    let base = "config_kind = \"general\"\nschema_version = \"2\"\n\n[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 2\nploidy = 2\ngenotype_model = \"hwe\"\nindividual_ids = [\"sample-A\", \"sample-B\"]\n\n[technical_event]\nevent_id = \"contamination-main\"\nindividual_ids = [\"sample-A\", \"sample-B\"]\ntarget_coverage_wgs = 1\ncontamination_min_percent = 1\ncontamination_max_percent = 1\n{recipients}\n\n[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n\n[[technical_event.libraries]]\nindividual_id = \"sample-B\"\ni7 = \"CGTACGTA\"\ni5 = \"GCATGCAT\"\n";
-    for (label, recipients) in [
-        ("isolated", "contamination_recipient_ids = [\"sample-A\"]"),
-        ("multi", ""),
-    ] {
-        let text = base.replace("{recipients}", recipients);
-        let declared = parse_declared_config(
-            admit_toml_header(
-                std::path::Path::new(&format!("{label}-positive-contamination.toml")),
-                text.into_bytes(),
-                ExpectedConfigKind::General,
-            )
-            .expect("header"),
+fn positive_contamination_and_hopping_publish_reconciled_aggregate_manifest() {
+    let input_root = std::env::temp_dir().join(format!(
+        "gps-positive-contamination-input-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&input_root).expect("input root");
+    let fasta = input_root.join("reference.fa");
+    let matrix = input_root.join("population-snvs.tsv");
+    fs::write(&fasta, format!(">chr1\n{}\n", "A".repeat(1000))).expect("reference");
+    fs::write(
+        &matrix,
+        "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t500\tA\tT\tP1\t0.5\n",
+    )
+    .expect("matrix");
+    let text = "config_kind = \"general\"\nschema_version = \"2\"\n\n[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 2\nploidy = 2\ngenotype_model = \"hwe\"\nindividual_ids = [\"sample-A\", \"sample-B\"]\n\n[technical_event]\nevent_id = \"contamination-main\"\nindividual_ids = [\"sample-A\", \"sample-B\"]\ntarget_coverage_wgs = 1\ncontamination_min_percent = 50\ncontamination_max_percent = 50\ncontamination_recipient_ids = [\"sample-A\"]\nindex_hopping_rate = 1\n\n[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n\n[[technical_event.libraries]]\nindividual_id = \"sample-B\"\ni7 = \"CGTACGTA\"\ni5 = \"GCATGCAT\"\n";
+    let text = text.replacen(
+        "[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n",
+        &format!(
+            "[population_snvs]\nmode = \"supplied\"\ninput_path = \"{}\"\n\n[reference]\nkind = \"supplied\"\nid = \"reference-main\"\nfasta = \"{}\"\n",
+            matrix.display(),
+            fasta.display()
+        ),
+        1,
+    );
+    let declared = parse_declared_config(
+        admit_toml_header(
+            std::path::Path::new("positive-contamination.toml"),
+            text.as_bytes().to_vec(),
+            ExpectedConfigKind::General,
         )
-        .expect("declared");
-        let effective = build_effective_config(&declared).expect("effective");
-        let destination = std::env::temp_dir().join(format!(
-            "gps-positive-contamination-{label}-{}",
-            std::process::id()
-        ));
-        let error = execute_validated_config(&effective, &destination)
-            .expect_err("F4.2 still owns the unpublished PE boundary");
-        assert_eq!(error.code(), "GPS-CONF-008");
-        assert!(
-            error.render_human().contains("F4.2"),
-            "{label} must name the remaining paired-end publication boundary"
-        );
-        assert!(
-            !destination.exists(),
-            "{label} must not create a neutral or partial publication"
+        .expect("header"),
+    )
+    .expect("declared");
+    let effective = build_effective_config(&declared).expect("effective");
+    let destination = std::env::temp_dir().join(format!(
+        "gps-positive-contamination-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    execute_validated_config(&effective, &destination).expect("F4 final PE publication");
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(destination.join("events/contamination-main/manifest.json")).expect("manifest"),
+    )
+    .expect("JSON");
+    let demultiplexing = &manifest["demultiplexing"];
+    let reassigned = demultiplexing["reassigned_pairs"].as_u64().expect("total");
+    let reassigned_entries = demultiplexing["reassigned_by_sample"]
+        .as_array()
+        .expect("entries");
+    assert!(!reassigned_entries.is_empty());
+    assert_eq!(
+        reassigned_entries
+            .iter()
+            .map(|entry| entry["pair_count"].as_u64().expect("count"))
+            .sum::<u64>(),
+        reassigned
+    );
+    assert!(
+        reassigned_entries
+            .iter()
+            .all(|entry| entry["cause"] == "index_hopping"
+                && entry["source_library_id"] != entry["destination_library_id"])
+    );
+    let fastq_pairs = manifest["final_fastq_summary"]
+        .as_array()
+        .expect("summary")
+        .iter()
+        .map(|entry| entry["pair_count"].as_u64().expect("pair count"))
+        .sum::<u64>();
+    assert_eq!(
+        reassigned, fastq_pairs,
+        "rate-one hopping preserves all final pairs"
+    );
+    assert!(
+        manifest["final_fastq_summary"]
+            .as_array()
+            .expect("summary")
+            .iter()
+            .any(|entry| entry["contaminant_pair_count"]
+                .as_u64()
+                .expect("contaminants")
+                > 0)
+    );
+    let outputs = manifest["outputs"].as_array().expect("outputs");
+    assert_eq!(outputs.len(), 4, "two samples publish R1 and R2 only");
+    for mate in [1, 2] {
+        assert_eq!(
+            outputs
+                .iter()
+                .filter(|output| output["mate"] == mate && output["state"] == "complete")
+                .count(),
+            2,
+            "each sample has a complete R{mate}"
         );
     }
+    let serialized = serde_json::to_string(&manifest).expect("serialize");
+    for forbidden in ["PH_", "TP_", "technical_pair_id", "pair_ids"] {
+        assert!(
+            !serialized.contains(forbidden),
+            "durable provenance: {forbidden}"
+        );
+    }
+    fs::remove_dir_all(destination).expect("cleanup");
+    fs::remove_dir_all(input_root).expect("input cleanup");
 }

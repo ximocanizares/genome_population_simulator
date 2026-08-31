@@ -5,7 +5,8 @@ use genome_population_simulator::adapters::{admit_toml_header, parse_declared_co
 use genome_population_simulator::application::build_effective_config;
 use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::demultiplexing::{
-    Demultiplexer, DemultiplexingError, DemultiplexingLibrary, PostContaminationPair, Udi,
+    Demultiplexer, DemultiplexingCause, DemultiplexingError, DemultiplexingLibrary,
+    PostContaminationPair, Udi,
 };
 use genome_population_simulator::identity::{EventId, LibraryId, PreHopInstanceId};
 use genome_population_simulator::randomness::{
@@ -233,6 +234,20 @@ fn rate_one_transfers_each_post_contamination_pair_once_to_another_library() {
 
     assert_eq!(outcome.report().reassigned_pairs(), 3);
     assert_eq!(outcome.report().discarded_pairs(), 0);
+    let reassigned = outcome.report().reassigned_by_sample();
+    assert_eq!(
+        reassigned
+            .iter()
+            .map(|entry| entry.pair_count())
+            .sum::<u64>(),
+        3
+    );
+    assert!(reassigned.iter().all(|entry| {
+        entry.cause() == DemultiplexingCause::IndexHopping
+            && entry
+                .destination_library_id()
+                .is_some_and(|destination| destination != entry.source_library_id())
+    }));
     let all = outcome
         .final_libraries()
         .values()
@@ -310,6 +325,17 @@ fn unexpected_udi_is_defensively_discarded_and_only_aggregate_counts_remain() {
     assert_eq!(outcome.report().discarded_pairs(), 1);
     assert_eq!(outcome.report().unassigned_pairs(), 1);
     assert_eq!(outcome.report().reassigned_pairs(), 0);
+    for aggregates in [
+        outcome.report().discarded_by_sample(),
+        outcome.report().unassigned_by_sample(),
+    ] {
+        assert_eq!(aggregates.len(), 1);
+        let aggregate = &aggregates[0];
+        assert_eq!(aggregate.source_library_id(), &library("LIB_A"));
+        assert_eq!(aggregate.destination_library_id(), None);
+        assert_eq!(aggregate.cause(), DemultiplexingCause::UnrecognizedUdi);
+        assert_eq!(aggregate.pair_count(), 1);
+    }
     assert!(outcome.final_libraries().values().all(Vec::is_empty));
 }
 

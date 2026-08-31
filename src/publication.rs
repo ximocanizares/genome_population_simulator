@@ -592,8 +592,8 @@ mod tests {
     use crate::application::build_effective_config;
     use crate::configuration::ExpectedConfigKind;
     use crate::event_manifest::{
-        EventManifest, EventManifestArtifact, EventManifestReference, event_manifest_bytes,
-        event_manifest_relative_path, validate_event_manifest_bytes,
+        EventManifest, EventManifestArtifact, EventManifestDemultiplexing, EventManifestReference,
+        event_manifest_bytes, event_manifest_relative_path, validate_event_manifest_bytes,
     };
     use crate::identity::ReferenceId;
     use crate::randomness::RootSeed;
@@ -868,6 +868,9 @@ mod tests {
             },
             artifacts: &complete_artifacts,
             coverage: &[],
+            final_fastq_summary: &[],
+            error_quality: crate::event_manifest::EventManifestErrorQuality::neutral(),
+            demultiplexing: EventManifestDemultiplexing::disabled(),
             chimera_rate: event.chimera_rate(),
             realized_chimera_pairs: 0,
             biological_contamination: &[],
@@ -959,6 +962,9 @@ mod tests {
             },
             artifacts: &failed_artifacts,
             coverage: &[],
+            final_fastq_summary: &[],
+            error_quality: crate::event_manifest::EventManifestErrorQuality::neutral(),
+            demultiplexing: EventManifestDemultiplexing::disabled(),
             chimera_rate: event.chimera_rate(),
             realized_chimera_pairs: 0,
             biological_contamination: &[],

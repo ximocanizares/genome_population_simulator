@@ -212,6 +212,13 @@ impl ObservedPairTransformation {
     pub const fn report(&self) -> ErrorQualityReport {
         self.report
     }
+
+    /// Transfiere la vista observada al siguiente consumidor una vez que sus
+    /// métricas ya se han registrado. Evita duplicar los buffers R1/R2.
+    #[must_use]
+    pub fn into_observed(self) -> ObservedPair {
+        self.observed
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

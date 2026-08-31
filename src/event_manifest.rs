@@ -13,7 +13,9 @@ use crate::application::EffectiveTechnicalEvent;
 use crate::biological_contamination::{
     BiologicalContaminationManifestRecipient, contamination_target_pair_count,
 };
+use crate::demultiplexing::{DemultiplexingAggregate, DemultiplexingReport};
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
+use crate::error_quality::{ErrorQualityReport, ErrorQualitySettings, MateErrorCounts};
 use crate::fastq_output::paired_fastq_relative_paths;
 use crate::fastq_validation::F4CoverageReport;
 use crate::identity::{EventId, IndividualId, LibraryId, ReadGroupId, ReferenceId};
@@ -61,6 +63,136 @@ pub struct EventManifestCoverage<'a> {
     pub report: F4CoverageReport,
 }
 
+/// Resumen publicable de una pareja final. Sus campos son contadores de la
+/// biblioteca completa y no permiten recuperar una pareja, donante o clave.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EventManifestFinalFastqSummary<'a> {
+    pub individual_id: &'a IndividualId,
+    pub library_id: &'a LibraryId,
+    pub pair_count: u64,
+    pub read_count: u64,
+    pub base_count: u64,
+    pub own_pair_count: u64,
+    pub contaminant_pair_count: u64,
+    pub own_base_count: u64,
+    pub contaminant_base_count: u64,
+    pub n_base_count: u64,
+}
+
+/// Hechos efectivos de error y calidad por mate. Se agregan en toda la tanda:
+/// no identifican una lectura, donante ni pareja concreta.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EventManifestMateErrorQuality {
+    pub quality_shift: i16,
+    pub error_scale: f64,
+    pub opportunities: u64,
+    pub errors: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EventManifestErrorQuality {
+    pub r1: EventManifestMateErrorQuality,
+    pub r2: EventManifestMateErrorQuality,
+}
+
+impl EventManifestErrorQuality {
+    #[must_use]
+    pub fn from_report(settings: ErrorQualitySettings, report: ErrorQualityReport) -> Self {
+        Self {
+            r1: mate_error_quality(settings, TechnicalMate::R1, report.r1()),
+            r2: mate_error_quality(settings, TechnicalMate::R2, report.r2()),
+        }
+    }
+
+    #[must_use]
+    pub fn neutral() -> Self {
+        Self::from_report(
+            ErrorQualitySettings::default(),
+            ErrorQualityReport::default(),
+        )
+    }
+}
+
+fn mate_error_quality(
+    settings: ErrorQualitySettings,
+    mate: TechnicalMate,
+    counts: MateErrorCounts,
+) -> EventManifestMateErrorQuality {
+    EventManifestMateErrorQuality {
+        quality_shift: settings.quality_shift(mate),
+        error_scale: settings.error_scale(mate),
+        opportunities: counts.opportunities(),
+        errors: counts.errors(),
+    }
+}
+
+/// Hechos agregados del demultiplexado F4.5.1. Las rutas y los FASTQ son la
+/// única salida durable; el informe no serializa instancias ni destinos por
+/// pareja.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EventManifestDemultiplexing {
+    index_hopping_rate: f64,
+    reassigned_pairs: u64,
+    discarded_pairs: u64,
+    unassigned_pairs: u64,
+    reassigned_by_sample: Vec<DemultiplexingAggregate>,
+    discarded_by_sample: Vec<DemultiplexingAggregate>,
+    unassigned_by_sample: Vec<DemultiplexingAggregate>,
+}
+
+impl EventManifestDemultiplexing {
+    #[must_use]
+    pub fn from_report(report: DemultiplexingReport) -> Self {
+        Self {
+            index_hopping_rate: report.index_hopping_rate(),
+            reassigned_pairs: report.reassigned_pairs(),
+            discarded_pairs: report.discarded_pairs(),
+            unassigned_pairs: report.unassigned_pairs(),
+            reassigned_by_sample: report.reassigned_by_sample().to_vec(),
+            discarded_by_sample: report.discarded_by_sample().to_vec(),
+            unassigned_by_sample: report.unassigned_by_sample().to_vec(),
+        }
+    }
+
+    #[must_use]
+    pub fn disabled() -> Self {
+        Self {
+            index_hopping_rate: 0.0,
+            reassigned_pairs: 0,
+            discarded_pairs: 0,
+            unassigned_pairs: 0,
+            reassigned_by_sample: Vec::new(),
+            discarded_by_sample: Vec::new(),
+            unassigned_by_sample: Vec::new(),
+        }
+    }
+}
+
+fn demultiplexing_aggregates_document(entries: &[DemultiplexingAggregate]) -> Vec<Value> {
+    entries
+        .iter()
+        .map(|entry| {
+            let mut document = serde_json::Map::new();
+            document.insert(
+                "source_library_id".to_owned(),
+                Value::String(entry.source_library_id().as_str().to_owned()),
+            );
+            if let Some(destination) = entry.destination_library_id() {
+                document.insert(
+                    "destination_library_id".to_owned(),
+                    Value::String(destination.as_str().to_owned()),
+                );
+            }
+            document.insert(
+                "cause".to_owned(),
+                Value::String(entry.cause().as_str().to_owned()),
+            );
+            document.insert("pair_count".to_owned(), Value::from(entry.pair_count()));
+            Value::Object(document)
+        })
+        .collect()
+}
+
 /// Hechos del primer evento técnico que el escritor registra sin inferirlos de
 /// rutas, nombres de fichero o mensajes.
 pub struct EventManifest<'a> {
@@ -70,6 +202,9 @@ pub struct EventManifest<'a> {
     pub reference: EventManifestReference<'a>,
     pub artifacts: &'a [EventManifestArtifact<'a>],
     pub coverage: &'a [EventManifestCoverage<'a>],
+    pub final_fastq_summary: &'a [EventManifestFinalFastqSummary<'a>],
+    pub error_quality: EventManifestErrorQuality,
+    pub demultiplexing: EventManifestDemultiplexing,
     /// Hecho agregado de F4.3. Nunca contiene origen, ID ni coordenadas de
     /// una pareja; esas piezas solo existen durante la transformación.
     pub chimera_rate: f64,
@@ -153,6 +288,26 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
             })
         })
         .collect::<Vec<_>>();
+    let mut final_fastq_summary = manifest.final_fastq_summary.to_vec();
+    final_fastq_summary
+        .sort_by_key(|entry| (entry.individual_id.as_str(), entry.library_id.as_str()));
+    let final_fastq_summary = final_fastq_summary
+        .into_iter()
+        .map(|entry| {
+            json!({
+                "individual_id": entry.individual_id.as_str(),
+                "library_id": entry.library_id.as_str(),
+                "pair_count": entry.pair_count,
+                "read_count": entry.read_count,
+                "base_count": entry.base_count,
+                "own_pair_count": entry.own_pair_count,
+                "contaminant_pair_count": entry.contaminant_pair_count,
+                "own_base_count": entry.own_base_count,
+                "contaminant_base_count": entry.contaminant_base_count,
+                "n_base_count": entry.n_base_count,
+            })
+        })
+        .collect::<Vec<_>>();
     let document = json!({
         "manifest_kind": EVENT_MANIFEST_KIND,
         "schema_version": EVENT_MANIFEST_SCHEMA_VERSION,
@@ -181,6 +336,22 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
             "fasta": manifest.reference.fasta.to_json(),
         },
         "coverage": coverage,
+        "final_fastq_summary": final_fastq_summary,
+        "error_quality": {
+            "r1": error_quality_document(manifest.error_quality.r1),
+            "r2": error_quality_document(manifest.error_quality.r2),
+        },
+        "demultiplexing": {
+            "index_hopping_rate": manifest.demultiplexing.index_hopping_rate,
+            "reassigned_pairs": manifest.demultiplexing.reassigned_pairs,
+            "discarded_pairs": manifest.demultiplexing.discarded_pairs,
+            "unassigned_pairs": manifest.demultiplexing.unassigned_pairs,
+            "reassigned_by_sample": demultiplexing_aggregates_document(&manifest.demultiplexing.reassigned_by_sample),
+            "discarded_by_sample": demultiplexing_aggregates_document(&manifest.demultiplexing.discarded_by_sample),
+            "unassigned_by_sample": demultiplexing_aggregates_document(&manifest.demultiplexing.unassigned_by_sample),
+            "clean_fastq_published": false,
+            "individual_provenance_published": false,
+        },
         "artifacts": {
             "chimera": {
                 "rate": manifest.chimera_rate,
@@ -251,7 +422,7 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
     )?;
     validate_f4_id_catalog(required_value(root, "id_catalog", path)?, path)?;
     let state = parse_state(required_string(root, "state", path)?, path)?;
-    validate_profile(required_value(root, "profile", path)?, path)?;
+    let read_length = validate_profile(required_value(root, "profile", path)?, path)?;
     let _batch = parse_id::<crate::identity::BatchId>(
         required_string(root, "technical_batch_id", path)?,
         "batch",
@@ -266,6 +437,39 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
     )?;
     let reference = validate_reference(required_value(root, "reference", path)?, path)?;
     let coverage = validate_coverage(required_value(root, "coverage", path)?, &selected, path)?;
+    let final_fastq_summary = validate_final_fastq_summary(
+        required_value(root, "final_fastq_summary", path)?,
+        &selected,
+        read_length,
+        path,
+    )?;
+    validate_error_quality(required_value(root, "error_quality", path)?, path)?;
+    validate_final_fastq_summary_coverage(
+        required_value(root, "coverage", path)?,
+        required_value(root, "final_fastq_summary", path)?,
+        path,
+    )?;
+    let final_pair_count = required_array(
+        required_value(root, "final_fastq_summary", path)?,
+        "final_fastq_summary",
+        path,
+    )?
+    .iter()
+    .try_fold(0_u64, |total, summary| {
+        required_u64(
+            required_object(summary, "final_fastq_summary[]", path)?,
+            "pair_count",
+            path,
+        )?
+        .checked_add(total)
+        .ok_or_else(|| event_error(path, "pares FASTQ finales desbordan"))
+    })?;
+    validate_demultiplexing(
+        required_value(root, "demultiplexing", path)?,
+        &selected,
+        final_pair_count,
+        path,
+    )?;
     let diagnostics = validate_diagnostics(required_value(root, "diagnostics", path)?, path)?;
     validate_technical_artifacts(required_value(root, "artifacts", path)?, path)?;
     let artifact_states = validate_outputs(
@@ -277,16 +481,34 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
         path,
     )?;
     validate_event_state(state, &artifact_states, &diagnostics, path)?;
+    if state == UnitState::Complete && final_fastq_summary != coverage {
+        return Err(event_error(
+            path,
+            "resúmenes FASTQ y coberturas no cubren las mismas bibliotecas",
+        ));
+    }
     if state == UnitState::Complete && coverage.len() != selected.len() {
         return Err(event_error(
             path,
             "falta cobertura de una biblioteca completa",
         ));
     }
+    if state == UnitState::Complete && final_fastq_summary.len() != selected.len() {
+        return Err(event_error(
+            path,
+            "falta resumen FASTQ de una biblioteca completa",
+        ));
+    }
     if state != UnitState::Complete && !coverage.is_empty() {
         return Err(event_error(
             path,
             "un evento no completo no publica cobertura F4",
+        ));
+    }
+    if state != UnitState::Complete && !final_fastq_summary.is_empty() {
+        return Err(event_error(
+            path,
+            "un evento no completo no publica resúmenes FASTQ",
         ));
     }
     Ok(())
@@ -307,6 +529,9 @@ const ROOT_FIELDS: &[&str] = &[
     "event_subseed",
     "reference",
     "coverage",
+    "final_fastq_summary",
+    "error_quality",
+    "demultiplexing",
     "artifacts",
     "outputs",
     "diagnostics",
@@ -443,6 +668,19 @@ fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic>
                 "cobertura por biblioteca incompleta o repetida",
             ));
         }
+        let summary_libraries = manifest
+            .final_fastq_summary
+            .iter()
+            .map(|entry| (entry.individual_id.as_str(), entry.library_id.as_str()))
+            .collect::<BTreeSet<_>>();
+        if summary_libraries.len() != manifest.final_fastq_summary.len()
+            || summary_libraries != planned_libraries
+        {
+            return Err(event_error(
+                &path,
+                "resumen FASTQ por biblioteca incompleto o repetido",
+            ));
+        }
     } else if !manifest.coverage.is_empty() {
         return Err(event_error(
             &path,
@@ -500,7 +738,7 @@ fn validate_f4_id_catalog(value: &Value, path: &Path) -> Result<(), Diagnostic> 
     Ok(())
 }
 
-fn validate_profile(value: &Value, path: &Path) -> Result<(), Diagnostic> {
+fn validate_profile(value: &Value, path: &Path) -> Result<u64, Diagnostic> {
     let profile = required_object(value, "profile", path)?;
     validate_closed(
         profile,
@@ -534,12 +772,11 @@ fn validate_profile(value: &Value, path: &Path) -> Result<(), Diagnostic> {
         crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
     )?;
     require_text(profile, "preparation", path, "pcr_free")?;
-    if !matches!(
-        profile.get("read_length").and_then(Value::as_u64),
-        Some(1..=150)
-    ) {
-        return Err(event_error(path, "longitud de lectura de perfil inválida"));
-    }
+    let read_length = profile
+        .get("read_length")
+        .and_then(Value::as_u64)
+        .filter(|value| (1..=150).contains(value))
+        .ok_or_else(|| event_error(path, "longitud de lectura de perfil inválida"))?;
     let quality = required_object(
         required_value(profile, "quality", path)?,
         "profile.quality",
@@ -555,7 +792,7 @@ fn validate_profile(value: &Value, path: &Path) -> Result<(), Diagnostic> {
     {
         return Err(event_error(path, "calidad de perfil inválida"));
     }
-    Ok(())
+    Ok(read_length)
 }
 
 fn validate_selected_individuals(
@@ -682,6 +919,390 @@ fn validate_coverage(
             .ok_or_else(|| event_error(path, "recuento N de cobertura inválido"))?;
     }
     Ok(coverage_libraries)
+}
+
+fn validate_final_fastq_summary(
+    value: &Value,
+    selected: &BTreeMap<String, String>,
+    read_length: u64,
+    path: &Path,
+) -> Result<BTreeSet<(String, String)>, Diagnostic> {
+    let values = required_array(value, "final_fastq_summary", path)?;
+    let mut libraries = BTreeSet::new();
+    let mut previous = None::<(String, String)>;
+    for value in values {
+        let entry = required_object(value, "final_fastq_summary[]", path)?;
+        validate_closed(
+            entry,
+            &[
+                "individual_id",
+                "library_id",
+                "pair_count",
+                "read_count",
+                "base_count",
+                "own_pair_count",
+                "contaminant_pair_count",
+                "own_base_count",
+                "contaminant_base_count",
+                "n_base_count",
+            ],
+            "final_fastq_summary[]",
+            path,
+        )?;
+        let individual = required_string(entry, "individual_id", path)?;
+        let library = required_string(entry, "library_id", path)?;
+        let ordering = (individual.to_owned(), library.to_owned());
+        if selected.get(individual).map(String::as_str) != Some(library)
+            || previous.as_ref().is_some_and(|prior| prior >= &ordering)
+            || !libraries.insert(ordering.clone())
+        {
+            return Err(event_error(
+                path,
+                "resúmenes FASTQ no son únicos, ordenados o compatibles",
+            ));
+        }
+        previous = Some(ordering);
+        let pair_count = required_u64(entry, "pair_count", path)?;
+        let read_count = required_u64(entry, "read_count", path)?;
+        let base_count = required_u64(entry, "base_count", path)?;
+        let own_pairs = required_u64(entry, "own_pair_count", path)?;
+        let contaminant_pairs = required_u64(entry, "contaminant_pair_count", path)?;
+        let own_bases = required_u64(entry, "own_base_count", path)?;
+        let contaminant_bases = required_u64(entry, "contaminant_base_count", path)?;
+        let n_bases = required_u64(entry, "n_base_count", path)?;
+        let total_bases = own_bases
+            .checked_add(contaminant_bases)
+            .ok_or_else(|| event_error(path, "contadores agregados FASTQ desbordan"))?;
+        let expected_read_count = pair_count
+            .checked_mul(2)
+            .ok_or_else(|| event_error(path, "contador de lecturas FASTQ desborda"))?;
+        let expected_base_count = expected_read_count
+            .checked_mul(read_length)
+            .ok_or_else(|| event_error(path, "contador de bases FASTQ desborda"))?;
+        if own_pairs.checked_add(contaminant_pairs) != Some(pair_count)
+            || read_count != expected_read_count
+            || base_count != expected_base_count
+            || total_bases != expected_base_count
+            || n_bases > base_count
+        {
+            return Err(event_error(path, "contadores agregados FASTQ incoherentes"));
+        }
+    }
+    Ok(libraries)
+}
+
+fn validate_final_fastq_summary_coverage(
+    coverage: &Value,
+    summary: &Value,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    let coverage = required_array(coverage, "coverage", path)?;
+    let summary = required_array(summary, "final_fastq_summary", path)?;
+    if summary.is_empty() {
+        return Ok(());
+    }
+    let mut coverage_by_library = BTreeMap::new();
+    for entry in coverage {
+        let entry = required_object(entry, "coverage[]", path)?;
+        let final_x = required_object(
+            required_value(entry, "final_x", path)?,
+            "coverage[].final_x",
+            path,
+        )?;
+        coverage_by_library.insert(
+            (
+                required_string(entry, "individual_id", path)?,
+                required_string(entry, "library_id", path)?,
+            ),
+            (
+                required_u64(entry, "denominator_bases", path)?,
+                required_u64(entry, "n_bases", path)?,
+                final_x
+                    .get("own_x")
+                    .and_then(Value::as_f64)
+                    .ok_or_else(|| event_error(path, "cobertura propia inválida"))?,
+                final_x
+                    .get("contaminant_x")
+                    .and_then(Value::as_f64)
+                    .ok_or_else(|| event_error(path, "cobertura contaminante inválida"))?,
+            ),
+        );
+    }
+    for entry in summary {
+        let entry = required_object(entry, "final_fastq_summary[]", path)?;
+        let key = (
+            required_string(entry, "individual_id", path)?,
+            required_string(entry, "library_id", path)?,
+        );
+        let Some((denominator, n_bases, own_x, contaminant_x)) = coverage_by_library.get(&key)
+        else {
+            return Err(event_error(
+                path,
+                "resumen FASTQ no tiene cobertura asociada",
+            ));
+        };
+        let own_bases = required_u64(entry, "own_base_count", path)?;
+        let contaminant_bases = required_u64(entry, "contaminant_base_count", path)?;
+        if required_u64(entry, "n_base_count", path)? != *n_bases
+            || (own_bases as f64 / *denominator as f64).to_bits() != own_x.to_bits()
+            || (contaminant_bases as f64 / *denominator as f64).to_bits() != contaminant_x.to_bits()
+        {
+            return Err(event_error(
+                path,
+                "resumen FASTQ no coincide con su cobertura final",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_demultiplexing(
+    value: &Value,
+    selected: &BTreeMap<String, String>,
+    final_pair_count: u64,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    let report = required_object(value, "demultiplexing", path)?;
+    validate_closed(
+        report,
+        &[
+            "index_hopping_rate",
+            "reassigned_pairs",
+            "discarded_pairs",
+            "unassigned_pairs",
+            "reassigned_by_sample",
+            "discarded_by_sample",
+            "unassigned_by_sample",
+            "clean_fastq_published",
+            "individual_provenance_published",
+        ],
+        "demultiplexing",
+        path,
+    )?;
+    if !matches!(report.get("index_hopping_rate").and_then(Value::as_f64), Some(value) if value.is_finite() && (0.0..=1.0).contains(&value))
+        || report
+            .get("reassigned_pairs")
+            .and_then(Value::as_u64)
+            .is_none()
+        || report
+            .get("discarded_pairs")
+            .and_then(Value::as_u64)
+            .is_none()
+        || report
+            .get("unassigned_pairs")
+            .and_then(Value::as_u64)
+            .is_none()
+        || report.get("clean_fastq_published") != Some(&Value::Bool(false))
+        || report.get("individual_provenance_published") != Some(&Value::Bool(false))
+    {
+        return Err(event_error(
+            path,
+            "resumen de demultiplexado inválido o publica procedencia",
+        ));
+    }
+    let discarded = required_u64(report, "discarded_pairs", path)?;
+    let unassigned = required_u64(report, "unassigned_pairs", path)?;
+    let reassigned = required_u64(report, "reassigned_pairs", path)?;
+    let index_hopping_rate = report
+        .get("index_hopping_rate")
+        .and_then(Value::as_f64)
+        .expect("validated index_hopping_rate is finite");
+    if unassigned > discarded {
+        return Err(event_error(
+            path,
+            "parejas sin asignar exceden los descartes",
+        ));
+    }
+    if reassigned > final_pair_count {
+        return Err(event_error(
+            path,
+            "reasignaciones exceden las parejas FASTQ finales",
+        ));
+    }
+    if index_hopping_rate == 0.0 && reassigned != 0 {
+        return Err(event_error(
+            path,
+            "un índice de salto nulo no puede reasignar parejas",
+        ));
+    }
+    let selected_libraries = selected
+        .values()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    validate_demultiplexing_aggregates(
+        report,
+        "reassigned_by_sample",
+        "index_hopping",
+        true,
+        reassigned,
+        &selected_libraries,
+        path,
+    )?;
+    let discarded_by_sample = validate_demultiplexing_aggregates(
+        report,
+        "discarded_by_sample",
+        "unrecognized_udi",
+        false,
+        discarded,
+        &selected_libraries,
+        path,
+    )?;
+    let unassigned_by_sample = validate_demultiplexing_aggregates(
+        report,
+        "unassigned_by_sample",
+        "unrecognized_udi",
+        false,
+        unassigned,
+        &selected_libraries,
+        path,
+    )?;
+    if discarded_by_sample != unassigned_by_sample {
+        return Err(event_error(
+            path,
+            "descartes y parejas sin asignar no coinciden por biblioteca",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_demultiplexing_aggregates(
+    report: &serde_json::Map<String, Value>,
+    field: &str,
+    expected_cause: &str,
+    requires_destination: bool,
+    expected_total: u64,
+    selected_libraries: &BTreeSet<&str>,
+    path: &Path,
+) -> Result<BTreeMap<String, u64>, Diagnostic> {
+    let entries = report
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or_else(|| event_error(path, "agregados de demultiplexado inválidos"))?;
+    let mut total = 0_u64;
+    let mut previous = None;
+    let mut counts_by_source = BTreeMap::new();
+    for entry in entries {
+        let entry = entry
+            .as_object()
+            .ok_or_else(|| event_error(path, "agregado de demultiplexado inválido"))?;
+        let expected_fields: &[&str] = if requires_destination {
+            &[
+                "source_library_id",
+                "destination_library_id",
+                "cause",
+                "pair_count",
+            ]
+        } else {
+            &["source_library_id", "cause", "pair_count"]
+        };
+        validate_closed(entry, expected_fields, field, path)?;
+        let source = entry
+            .get("source_library_id")
+            .and_then(Value::as_str)
+            .filter(|value| valid_manifest_id(value) && selected_libraries.contains(value))
+            .ok_or_else(|| event_error(path, "origen de demultiplexado inválido"))?;
+        let destination = entry.get("destination_library_id").and_then(Value::as_str);
+        if requires_destination {
+            let destination = destination
+                .filter(|value| valid_manifest_id(value) && selected_libraries.contains(value))
+                .ok_or_else(|| event_error(path, "destino de demultiplexado inválido"))?;
+            if destination == source {
+                return Err(event_error(path, "reasignación de demultiplexado circular"));
+            }
+        } else if destination.is_some() {
+            return Err(event_error(path, "descarte de demultiplexado con destino"));
+        }
+        if entry.get("cause").and_then(Value::as_str) != Some(expected_cause) {
+            return Err(event_error(path, "causa de demultiplexado inválida"));
+        }
+        let count = required_u64(entry, "pair_count", path)?;
+        if count == 0 {
+            return Err(event_error(path, "agregado de demultiplexado vacío"));
+        }
+        total = total
+            .checked_add(count)
+            .ok_or_else(|| event_error(path, "recuento de demultiplexado desbordado"))?;
+        counts_by_source.insert(source.to_owned(), count);
+        let key = (source, expected_cause, destination.unwrap_or(""));
+        if previous.is_some_and(|previous_key| previous_key >= key) {
+            return Err(event_error(
+                path,
+                "agregados de demultiplexado desordenados",
+            ));
+        }
+        previous = Some(key);
+    }
+    if total != expected_total {
+        return Err(event_error(
+            path,
+            "agregados de demultiplexado no suman el total",
+        ));
+    }
+    Ok(counts_by_source)
+}
+
+fn valid_manifest_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    (1..=64).contains(&bytes.len())
+        && matches!(bytes.first(), Some(first) if first.is_ascii_alphanumeric())
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn error_quality_document(entry: EventManifestMateErrorQuality) -> Value {
+    json!({
+        "quality_shift": entry.quality_shift,
+        "error_scale": entry.error_scale,
+        "opportunities": entry.opportunities,
+        "errors": entry.errors,
+    })
+}
+
+fn validate_error_quality(value: &Value, path: &Path) -> Result<(), Diagnostic> {
+    let error_quality = required_object(value, "error_quality", path)?;
+    validate_closed(error_quality, &["r1", "r2"], "error_quality", path)?;
+    for mate in ["r1", "r2"] {
+        let entry = required_object(
+            required_value(error_quality, mate, path)?,
+            "error_quality mate",
+            path,
+        )?;
+        validate_closed(
+            entry,
+            &["quality_shift", "error_scale", "opportunities", "errors"],
+            "error_quality mate",
+            path,
+        )?;
+        if entry.get("quality_shift").and_then(Value::as_i64).is_none()
+            || !matches!(entry.get("error_scale").and_then(Value::as_f64), Some(value) if value.is_finite() && value >= 0.0)
+        {
+            return Err(event_error(
+                path,
+                "ajustes efectivos de error/calidad inválidos",
+            ));
+        }
+        let opportunities = required_u64(entry, "opportunities", path)?;
+        let errors = required_u64(entry, "errors", path)?;
+        if errors > opportunities {
+            return Err(event_error(
+                path,
+                "errores realizados exceden oportunidades",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn required_u64(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+    path: &Path,
+) -> Result<u64, Diagnostic> {
+    object
+        .get(field)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| event_error(path, format!("{field} no es entero sin signo")))
 }
 
 fn validate_nonnegative_finite(

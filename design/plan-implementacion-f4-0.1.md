@@ -486,7 +486,7 @@ con muestreo WGS básico separado de la evidencia final.
     permutación de bibliotecas, unicidad y colisión detectada;
     puertas comunes.
 
-- ☐ F4.5.2. Publicar una pareja final PE por individuo/evento y su resumen
+- ✅ F4.5.2. Publicar una pareja final PE por individuo/evento y su resumen
   agregado en manifiesto.
   - Depende de: F4.5.1, F4.2.3 y PAUSA-F4.4.
   - Procede de: REQ-DAT-17/33–36/40, REQ-RG-02/04/06, REQ-SAL-08/09,

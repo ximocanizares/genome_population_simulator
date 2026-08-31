@@ -11,10 +11,14 @@ use std::path::{Path, PathBuf};
 use crate::application::{
     ILLUMINA_SE_MINIMAL_ACGT_PHRED, ILLUMINA_SE_MINIMAL_N_PHRED, ILLUMINA_SE_MINIMAL_READ_LENGTH,
 };
+use crate::demultiplexing::DemultiplexedPair;
 use crate::diagnostics::Diagnostic;
+use crate::error_quality::ObservedPair;
+use crate::fastq_validation::validate_final_paired_fastq;
 use crate::identity::{LibraryId, compose_template_id};
 use crate::publication::ExecutionWorkspace;
 use crate::results::ArtifactRecord;
+use crate::technical_identity::TechnicalMate;
 use crate::wgs_sampling::{WGS_READ_LENGTH, WgsLibrarySampler, WgsSamplingError};
 use noodles_bgzf as bgzf;
 
@@ -31,6 +35,12 @@ const BGZF_EOF_MARKER: [u8; 28] = [
     0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43, 0x02, 0x00,
     0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
+
+#[cfg(test)]
+thread_local! {
+    static FORCE_FINAL_R2_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static FORCE_FINAL_PAIR_VALIDATION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 /// Codifica calidades numéricas estrictas como FASTQ Sanger (Phred+33).
 ///
@@ -59,6 +69,66 @@ pub struct FastqPublication {
     artifact: ArtifactRecord,
     read_count: u64,
     base_count: u64,
+}
+
+/// Los dos artefactos físicos y el único resumen agregado que sobreviven a la
+/// publicación PE. No conserva claves PH, diferencias por base ni relaciones
+/// de procedencia de las parejas que ya se escribieron.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FinalPairedFastqPublication {
+    r1: ArtifactRecord,
+    r2: ArtifactRecord,
+    pair_count: u64,
+    read_count: u64,
+    base_count: u64,
+    own_pair_count: u64,
+    contaminant_pair_count: u64,
+    own_base_count: u64,
+    contaminant_base_count: u64,
+    n_base_count: u64,
+}
+
+impl FinalPairedFastqPublication {
+    #[must_use]
+    pub const fn r1(&self) -> &ArtifactRecord {
+        &self.r1
+    }
+    #[must_use]
+    pub const fn r2(&self) -> &ArtifactRecord {
+        &self.r2
+    }
+    #[must_use]
+    pub const fn pair_count(&self) -> u64 {
+        self.pair_count
+    }
+    #[must_use]
+    pub const fn read_count(&self) -> u64 {
+        self.read_count
+    }
+    #[must_use]
+    pub const fn base_count(&self) -> u64 {
+        self.base_count
+    }
+    #[must_use]
+    pub const fn own_pair_count(&self) -> u64 {
+        self.own_pair_count
+    }
+    #[must_use]
+    pub const fn contaminant_pair_count(&self) -> u64 {
+        self.contaminant_pair_count
+    }
+    #[must_use]
+    pub const fn own_base_count(&self) -> u64 {
+        self.own_base_count
+    }
+    #[must_use]
+    pub const fn contaminant_base_count(&self) -> u64 {
+        self.contaminant_base_count
+    }
+    #[must_use]
+    pub const fn n_base_count(&self) -> u64 {
+        self.n_base_count
+    }
 }
 
 impl FastqPublication {
@@ -148,6 +218,254 @@ pub fn paired_fastq_relative_paths(event_id: &str, individual_id: &str) -> (Path
         base.join(format!("{individual_id}_R1.fastq.gz")),
         base.join(format!("{individual_id}_R2.fastq.gz")),
     )
+}
+
+/// Publica la única pareja FASTQ PE posterior al demultiplexado para una
+/// biblioteca. Las parejas se consumen tras escribir R1/R2: nunca se genera
+/// una copia limpia ni un fichero de procedencia.
+pub fn write_final_paired_fastq(
+    workspace: &mut ExecutionWorkspace,
+    event_id: &str,
+    individual_id: &str,
+    library_id: &LibraryId,
+    pairs: Vec<DemultiplexedPair<ObservedPair>>,
+) -> Result<FinalPairedFastqPublication, Diagnostic> {
+    let (r1_path, r2_path) = paired_fastq_relative_paths(event_id, individual_id);
+    let summary = summarize_final_pairs(&pairs)?;
+    let r1 = write_final_mate(
+        workspace,
+        &format!("fastq-{}-r1", library_id.as_str()),
+        &r1_path,
+        event_id,
+        library_id,
+        &pairs,
+        TechnicalMate::R1,
+    )?;
+    let r2 = match write_final_mate(
+        workspace,
+        &format!("fastq-{}-r2", library_id.as_str()),
+        &r2_path,
+        event_id,
+        library_id,
+        &pairs,
+        TechnicalMate::R2,
+    ) {
+        Ok(artifact) => artifact,
+        Err(error) => {
+            workspace.discard_last_artifact(&r1)?;
+            return Err(error);
+        }
+    };
+    if let Err(error) = validate_final_paired_fastq(
+        &workspace.root().join(&r1_path),
+        &r1,
+        &workspace.root().join(&r2_path),
+        &r2,
+    )
+    .and(maybe_inject_final_pair_validation_failure())
+    {
+        // R1/R2 son una única salida lógica: una falla conjunta no puede
+        // dejar artefactos ni catálogo parciales en el provisional.
+        workspace.discard_last_artifact(&r2)?;
+        workspace.discard_last_artifact(&r1)?;
+        return Err(invariant("write_final_paired_fastq", &error.to_string()));
+    }
+    Ok(FinalPairedFastqPublication {
+        r1,
+        r2,
+        pair_count: summary.pair_count,
+        read_count: summary.read_count,
+        base_count: summary.base_count,
+        own_pair_count: summary.own_pair_count,
+        contaminant_pair_count: summary.contaminant_pair_count,
+        own_base_count: summary.own_base_count,
+        contaminant_base_count: summary.contaminant_base_count,
+        n_base_count: summary.n_base_count,
+    })
+}
+
+fn maybe_inject_final_pair_validation_failure()
+-> Result<(), crate::fastq_validation::FastqValidationError> {
+    #[cfg(test)]
+    if FORCE_FINAL_PAIR_VALIDATION_FAILURE.replace(false) {
+        return Err(crate::fastq_validation::FastqValidationError::Structural {
+            path: "injected-final-pair".to_owned(),
+            record_ordinal: 0,
+            detail: "injected final-pair validation failure",
+        });
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct FinalPairSummary {
+    pair_count: u64,
+    read_count: u64,
+    base_count: u64,
+    own_pair_count: u64,
+    contaminant_pair_count: u64,
+    own_base_count: u64,
+    contaminant_base_count: u64,
+    n_base_count: u64,
+}
+
+fn write_final_mate(
+    workspace: &mut ExecutionWorkspace,
+    artifact_id: &str,
+    relative_path: &Path,
+    event_id: &str,
+    library_id: &LibraryId,
+    pairs: &[DemultiplexedPair<ObservedPair>],
+    mate: TechnicalMate,
+) -> Result<ArtifactRecord, Diagnostic> {
+    #[cfg(test)]
+    if mate == TechnicalMate::R2 && FORCE_FINAL_R2_FAILURE.replace(false) {
+        return Err(invariant(
+            "write_final_paired_fastq",
+            "injected R2 publication failure",
+        ));
+    }
+    let path = relative_path.to_owned();
+    workspace.write_streamed_artifact_with_validation(
+        artifact_id,
+        FASTQ_ARTIFACT_KIND,
+        relative_path,
+        |file| {
+            let level = bgzf::io::writer::CompressionLevel::new(FASTQ_GZIP_COMPRESSION_LEVEL)
+                .ok_or_else(|| invariant("write_final_paired_fastq", "invalid fixed gzip level"))?;
+            let mut compressed = bgzf::io::writer::Builder::default()
+                .set_compression_level(level)
+                .build_from_writer(file);
+            for pair in pairs {
+                if pair.final_library_id() != library_id {
+                    return Err(invariant(
+                        "write_final_paired_fastq",
+                        "pair belongs to a different final library",
+                    ));
+                }
+                write_final_record(&mut compressed, pair, mate, event_id, library_id)?;
+            }
+            compressed
+                .finish()
+                .map_err(|error| io_error(&path, "finish_final_fastq_gzip", error))?;
+            Ok(())
+        },
+        |temporary| {
+            crate::fastq_validation::validate_final_fastq_mate(temporary, mate)
+                .map_err(|error| invariant("write_final_paired_fastq", &error.to_string()))
+        },
+    )
+}
+
+fn write_final_record(
+    output: &mut impl Write,
+    pair: &DemultiplexedPair<ObservedPair>,
+    mate: TechnicalMate,
+    event_id: &str,
+    library_id: &LibraryId,
+) -> Result<(), Diagnostic> {
+    let observed = match mate {
+        TechnicalMate::R1 => pair.payload().r1(),
+        TechnicalMate::R2 => pair.payload().r2(),
+    };
+    if observed.mate() != mate {
+        return Err(invariant(
+            "write_final_paired_fastq",
+            "observed mate is inconsistent",
+        ));
+    }
+    output
+        .write_all(
+            format!(
+                "@GPS:{event_id}:{}:{} {}:N:0:{}\n",
+                library_id.as_str(),
+                pair.technical_identity().technical_pair_id().as_str(),
+                mate.number(),
+                pair.final_udi().literal(),
+            )
+            .as_bytes(),
+        )
+        .map_err(|error| io_error(Path::new("final-fastq"), "write_header", error))?;
+    output
+        .write_all(observed.sequence())
+        .and_then(|()| output.write_all(b"\n+\n"))
+        .map_err(|error| io_error(Path::new("final-fastq"), "write_sequence", error))?;
+    let qualities = encode_fastq_sanger_qualities(observed.phred())?;
+    output
+        .write_all(&qualities)
+        .and_then(|()| output.write_all(b"\n"))
+        .map_err(|error| io_error(Path::new("final-fastq"), "write_quality", error))
+}
+
+fn summarize_final_pairs(
+    pairs: &[DemultiplexedPair<ObservedPair>],
+) -> Result<FinalPairSummary, Diagnostic> {
+    let mut summary = FinalPairSummary::default();
+    for pair in pairs {
+        let r1_bases = u64::try_from(pair.payload().r1().sequence().len())
+            .map_err(|_| invariant("write_final_paired_fastq", "read length overflows u64"))?;
+        let r2_bases = u64::try_from(pair.payload().r2().sequence().len())
+            .map_err(|_| invariant("write_final_paired_fastq", "read length overflows u64"))?;
+        let bases = r1_bases
+            .checked_add(r2_bases)
+            .ok_or_else(|| invariant("write_final_paired_fastq", "read length overflows u64"))?;
+        summary.pair_count = summary
+            .pair_count
+            .checked_add(1)
+            .ok_or_else(|| invariant("write_final_paired_fastq", "pair count overflows u64"))?;
+        summary.read_count = summary
+            .read_count
+            .checked_add(2)
+            .ok_or_else(|| invariant("write_final_paired_fastq", "read count overflows u64"))?;
+        summary.base_count = summary
+            .base_count
+            .checked_add(bases)
+            .ok_or_else(|| invariant("write_final_paired_fastq", "base count overflows u64"))?;
+        if pair.is_contaminant() {
+            summary.contaminant_pair_count = summary
+                .contaminant_pair_count
+                .checked_add(1)
+                .ok_or_else(|| {
+                    invariant(
+                        "write_final_paired_fastq",
+                        "contaminant pair count overflows u64",
+                    )
+                })?;
+            summary.contaminant_base_count = summary
+                .contaminant_base_count
+                .checked_add(bases)
+                .ok_or_else(|| {
+                    invariant(
+                        "write_final_paired_fastq",
+                        "contaminant base count overflows u64",
+                    )
+                })?;
+        } else {
+            summary.own_pair_count = summary.own_pair_count.checked_add(1).ok_or_else(|| {
+                invariant("write_final_paired_fastq", "own pair count overflows u64")
+            })?;
+            summary.own_base_count =
+                summary.own_base_count.checked_add(bases).ok_or_else(|| {
+                    invariant("write_final_paired_fastq", "own base count overflows u64")
+                })?;
+        }
+        summary.n_base_count = summary
+            .n_base_count
+            .checked_add(
+                u64::try_from(
+                    pair.payload()
+                        .r1()
+                        .sequence()
+                        .iter()
+                        .chain(pair.payload().r2().sequence())
+                        .filter(|base| **base == b'N')
+                        .count(),
+                )
+                .map_err(|_| invariant("write_final_paired_fastq", "N base count overflows u64"))?,
+            )
+            .ok_or_else(|| invariant("write_final_paired_fastq", "N base count overflows u64"))?;
+    }
+    Ok(summary)
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -462,7 +780,12 @@ mod tests {
     use noodles_bgzf as bgzf;
 
     use super::validate_temporary_fastq;
-    use super::{ILLUMINA_SE_MINIMAL_READ_LENGTH, LibraryId, compose_template_id};
+    use super::{
+        FORCE_FINAL_PAIR_VALIDATION_FAILURE, FORCE_FINAL_R2_FAILURE,
+        ILLUMINA_SE_MINIMAL_READ_LENGTH, LibraryId, compose_template_id, write_final_paired_fastq,
+    };
+    use crate::demultiplexing::DemultiplexedPair;
+    use crate::error_quality::ObservedPair;
     use crate::publication::ExecutionWorkspace;
 
     static FASTQ_VALIDATION_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -682,5 +1005,44 @@ mod tests {
             "the rejected temporary FASTQ must be removed"
         );
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn paired_publication_rolls_back_on_injected_r2_or_joint_validation_failure() {
+        for (label, inject_r2) in [("r2", true), ("joint", false)] {
+            let root = temporary(label);
+            fs::create_dir(&root).expect("root");
+            let destination = root.join("published");
+            let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
+            let library_id = LibraryId::parse("library-final-test", "test").expect("library ID");
+            if inject_r2 {
+                FORCE_FINAL_R2_FAILURE.set(true);
+            } else {
+                FORCE_FINAL_PAIR_VALIDATION_FAILURE.set(true);
+            }
+            let result = write_final_paired_fastq(
+                &mut workspace,
+                "event-final-test",
+                "sample-final-test",
+                &library_id,
+                Vec::<DemultiplexedPair<ObservedPair>>::new(),
+            );
+            assert!(result.is_err(), "{label} failure must propagate");
+            assert!(
+                workspace.artifacts().is_empty(),
+                "{label} must not catalog a mate"
+            );
+            let r1 = workspace
+                .root()
+                .join("outputs/fastq/event-final-test/sample-final-test_R1.fastq.gz");
+            let r2 = workspace
+                .root()
+                .join("outputs/fastq/event-final-test/sample-final-test_R2.fastq.gz");
+            assert!(
+                !r1.exists() && !r2.exists(),
+                "{label} must not leave a mate"
+            );
+            fs::remove_dir_all(root).expect("cleanup");
+        }
     }
 }

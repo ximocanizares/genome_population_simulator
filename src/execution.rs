@@ -5,16 +5,27 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::adapters::{admit_toml_header, parse_declared_config};
-use crate::application::{EffectiveConfig, EffectiveDirectEvent, EffectiveReferenceSource};
+use crate::application::{
+    EffectiveConfig, EffectiveDirectEvent, EffectiveReferenceSource, EffectiveTechnicalEventTarget,
+};
+use crate::biological_contamination::{
+    BiologicalContaminationMaterializer, CleanLibraryPairs, CleanPairKey,
+    plan_biological_contamination,
+};
 use crate::configuration::ExpectedConfigKind;
 use crate::coordinates::BasePosition;
+use crate::demultiplexing::{Demultiplexer, DemultiplexingLibrary, PostContaminationPair, Udi};
 use crate::diagnostics::Diagnostic;
+use crate::error_quality::{
+    ErrorQualityAccumulator, ErrorQualitySettings, ObservedPairTransformation, transform_paired_end,
+};
 use crate::event_manifest::{
-    EventManifest, EventManifestArtifact, EventManifestCoverage, EventManifestReference,
+    EventManifest, EventManifestArtifact, EventManifestCoverage, EventManifestDemultiplexing,
+    EventManifestErrorQuality, EventManifestFinalFastqSummary, EventManifestReference,
     event_manifest_bytes, event_manifest_relative_path, validate_event_manifest_bytes,
 };
-use crate::fastq_output::write_wgs_fastq;
-use crate::fastq_validation::validate_wgs_fastq;
+use crate::fastq_output::write_final_paired_fastq;
+use crate::fastq_validation::F4CoverageReport;
 use crate::identity::{ReferenceId, derive_execution_id};
 use crate::initial_individual_integration::IncompatibleGenotypeAuthorization;
 use crate::initial_individual_materialization::{
@@ -58,6 +69,7 @@ use crate::small_event_composition::{
 };
 use crate::snp_application::{ApplicableSnp, TargetedSnp};
 use crate::technical_identity::derive_technical_identity_plan;
+use crate::technical_profile::resolve_f4_technical_profile;
 use crate::truth_projection::{TruthProjectionInput, project_truth, write_truth_artifact};
 use crate::truth_schema::{
     NamedDigest, TRUTH_COORDINATE_CONVENTION, TRUTH_DOCUMENT_KIND, TRUTH_SCHEMA_VERSION,
@@ -65,7 +77,7 @@ use crate::truth_schema::{
 };
 use crate::truth_validation::reference_content_sha256;
 use crate::vcf_publication::publish_truth_vcf;
-use crate::wgs_sampling::WgsLibrarySampler;
+use crate::wgs_sampling::WgsPairedEndSampler;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutionOutcome {
@@ -558,11 +570,30 @@ struct TechnicalEventAssemblyFailure {
 struct TechnicalEventArtifact {
     individual_id: crate::identity::IndividualId,
     library_id: crate::identity::LibraryId,
+    mate: crate::technical_identity::TechnicalMate,
     id: String,
     state: UnitState,
     artifact: Option<ArtifactRecord>,
     diagnostic: Option<Diagnostic>,
-    coverage: Option<crate::fastq_validation::F4CoverageReport>,
+}
+
+impl TechnicalEventArtifact {
+    fn complete(
+        individual_id: crate::identity::IndividualId,
+        library_id: crate::identity::LibraryId,
+        mate: crate::technical_identity::TechnicalMate,
+        artifact: ArtifactRecord,
+    ) -> Self {
+        Self {
+            individual_id,
+            library_id,
+            mate,
+            id: artifact.id.clone(),
+            state: UnitState::Complete,
+            artifact: Some(artifact),
+            diagnostic: None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -595,90 +626,342 @@ fn publish_technical_event(
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?
         .individuals()
         .iter()
-        .map(|value| (value.individual().id().clone(), value.individual()))
+        .map(|value| {
+            (
+                value.individual().id().clone(),
+                (value.individual(), value.population_id()),
+            )
+        })
         .collect::<BTreeMap<_, _>>();
     let libraries = identities.libraries().collect::<Vec<_>>();
-    let mut outputs = Vec::with_capacity(libraries.len());
-    for (index, library) in libraries.iter().enumerate() {
-        let individual = individuals.get(library.individual_id()).ok_or_else(|| {
-            technical_event_error(
-                "technical_event.individual_ids",
-                "un individuo seleccionado no tiene verdad materializada",
+    let profile = resolve_f4_technical_profile(event.profile()).map_err(|error| {
+        Box::new(TechnicalEventAssemblyFailure {
+            cause: technical_event_error("technical_profile", error.to_string()),
+            link: None,
+        })
+    })?;
+    let mut udis = BTreeMap::new();
+    let demultiplexing_libraries = event
+        .libraries()
+        .iter()
+        .map(|declared| {
+            let library = identities
+                .library(declared.individual_id())
+                .ok_or_else(|| {
+                    technical_event_error("technical_event.libraries", "biblioteca técnica ausente")
+                })?;
+            let udi = Udi::new(declared.i7(), declared.i5()).map_err(|error| {
+                technical_event_error("technical_event.udi", format!("{error:?}"))
+            })?;
+            udis.insert(library.library_id().clone(), udi.clone());
+            Ok(DemultiplexingLibrary::new(
+                library.library_id().clone(),
+                udi,
+            ))
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()
+        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+
+    // La primera pasada conserva exclusivamente las claves PH y los hechos de
+    // quimera; las secuencias se regeneran bajo demanda en la materialización.
+    let mut clean_libraries = Vec::with_capacity(libraries.len());
+    let mut realized_chimera_pairs = 0_u64;
+    for library in &libraries {
+        let (individual, population_id) =
+            individuals.get(library.individual_id()).ok_or_else(|| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error(
+                        "technical_event.individual_ids",
+                        "un individuo seleccionado no tiene verdad materializada",
+                    ),
+                    link: None,
+                })
+            })?;
+        let mut sampler = paired_sampler(reference, individual, &identities, profile, event)
+            .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        let mut keys = Vec::new();
+        for pair in &mut sampler {
+            let pair = pair.map_err(|error| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error("wgs_paired_sampler", format!("{error:?}")),
+                    link: None,
+                })
+            })?;
+            keys.push(CleanPairKey::new(
+                individual.id().clone(),
+                pair.pre_hop_identity().pre_hop_instance_id().clone(),
+            ));
+        }
+        realized_chimera_pairs = realized_chimera_pairs
+            .checked_add(sampler.chimera_report().realized_pairs())
+            .ok_or_else(|| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error("chimera", "contador de quimeras desbordado"),
+                    link: None,
+                })
+            })?;
+        clean_libraries.push(
+            CleanLibraryPairs::new(
+                individual.id().clone(),
+                (*population_id).clone(),
+                library.library_id().clone(),
+                keys,
             )
-        });
-        let result = individual.and_then(|individual| {
-            let mut sampler =
-                WgsLibrarySampler::new(reference, individual, &identities, event.target())
-                    .map_err(|error| technical_event_error("wgs_sampler", format!("{error:?}")))?;
-            let publication = write_wgs_fastq(workspace, &mut sampler)?;
-            let coverage = match validate_closed_wgs_fastq(
-                &workspace.root().join(&publication.artifact().path),
-                publication.artifact(),
-                reference,
-                individual,
-                &identities,
-                &event.target(),
-            ) {
-                Ok(coverage) => coverage,
-                Err(cause) => {
-                    workspace.discard_last_artifact(publication.artifact())?;
-                    return Err(cause);
-                }
-            };
-            Ok((publication, coverage))
-        });
-        match result {
-            Ok((publication, coverage)) => outputs.push(TechnicalEventArtifact {
-                individual_id: library.individual_id().clone(),
-                library_id: library.library_id().clone(),
-                id: publication.artifact().id.clone(),
-                state: UnitState::Complete,
-                artifact: Some(publication.artifact().clone()),
-                diagnostic: None,
-                coverage: Some(coverage),
-            }),
-            Err(cause) => {
-                outputs.push(TechnicalEventArtifact {
-                    individual_id: library.individual_id().clone(),
-                    library_id: library.library_id().clone(),
-                    id: format!("fastq-{}", library.library_id().as_str()),
-                    state: UnitState::Failed,
-                    artifact: None,
-                    diagnostic: Some(cause.clone()),
-                    coverage: None,
-                });
-                for library in libraries.iter().skip(index + 1) {
-                    outputs.push(TechnicalEventArtifact {
-                        individual_id: library.individual_id().clone(),
-                        library_id: library.library_id().clone(),
-                        id: format!("fastq-{}", library.library_id().as_str()),
-                        state: UnitState::Incomplete,
-                        artifact: None,
-                        diagnostic: Some(cause.clone()),
-                        coverage: None,
-                    });
-                }
-                let link = write_event_manifest(
-                    workspace,
-                    event,
-                    &identities,
-                    reference_fasta,
-                    &outputs,
-                    UnitState::Failed,
-                    std::slice::from_ref(&cause),
-                )
-                .map_err(|manifest_error| {
+            .map_err(|error| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error("biological_contamination", format!("{error:?}")),
+                    link: None,
+                })
+            })?,
+        );
+    }
+    let contamination_plan = plan_biological_contamination(
+        effective.reproducibility().root_seed(),
+        event.event_id(),
+        event.biological_contamination(),
+        &clean_libraries,
+    )
+    .map_err(|error| {
+        Box::new(TechnicalEventAssemblyFailure {
+            cause: technical_event_error("biological_contamination", format!("{error:?}")),
+            link: None,
+        })
+    })?;
+    let mut materializer = BiologicalContaminationMaterializer::new(
+        effective.reproducibility().root_seed(),
+        event.event_id().clone(),
+        &clean_libraries,
+    )
+    .map_err(|error| {
+        Box::new(TechnicalEventAssemblyFailure {
+            cause: technical_event_error("biological_contamination", format!("{error:?}")),
+            link: None,
+        })
+    })?;
+    let mut error_quality = ErrorQualityAccumulator::default();
+    let mut post_contamination = Vec::new();
+    let mut biological_manifest = Vec::new();
+    for recipient_plan in contamination_plan.recipients() {
+        let clean = clean_libraries
+            .iter()
+            .find(|library| library.individual_id() == recipient_plan.recipient_id())
+            .ok_or_else(|| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error("biological_contamination", "receptora ausente"),
+                    link: None,
+                })
+            })?;
+        let report = materializer
+            .emit_materialized_recipient(
+                recipient_plan,
+                clean,
+                |key| {
+                    regenerate_observed_pair(
+                        key,
+                        reference,
+                        &individuals,
+                        &identities,
+                        profile,
+                        event,
+                        effective.reproducibility().root_seed(),
+                    )
+                },
+                |materialized| {
+                    let report = materialized.payload().report();
+                    error_quality.record(report).map_err(|error| {
+                        technical_event_error("error_quality", format!("{error:?}"))
+                    })?;
+                    let recipient_library_id = materialized.recipient_library_id().clone();
+                    let udi = udis.get(&recipient_library_id).cloned().ok_or_else(|| {
+                        technical_event_error("demultiplexing", "UDI de receptora ausente")
+                    })?;
+                    let pre_hop_instance_id = materialized.pre_hop_instance_id().clone();
+                    let is_contaminant = materialized.is_contaminant();
+                    let observed = materialized.into_payload().into_observed();
+                    post_contamination.push(PostContaminationPair::new(
+                        recipient_library_id,
+                        pre_hop_instance_id,
+                        udi,
+                        is_contaminant,
+                        observed,
+                    ));
+                    Ok(())
+                },
+            )
+            .map_err(|error| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error("biological_contamination", format!("{error:?}")),
+                    link: None,
+                })
+            })?;
+        biological_manifest.push(
+            recipient_plan
+                .realized_manifest_recipient(&report)
+                .ok_or_else(|| {
                     Box::new(TechnicalEventAssemblyFailure {
-                        cause: manifest_error,
+                        cause: technical_event_error(
+                            "biological_contamination",
+                            "informe realizado incoherente",
+                        ),
+                        link: None,
+                    })
+                })?,
+        );
+    }
+    // Las bibliotecas fuera de un subconjunto explícito de receptoras no se
+    // pierden: pasan intactas a demultiplexado, regeneradas bajo demanda igual
+    // que las propias retenidas de una receptora.
+    for clean in &clean_libraries {
+        if contamination_plan
+            .recipients()
+            .iter()
+            .any(|plan| plan.recipient_id() == clean.individual_id())
+        {
+            continue;
+        }
+        for key in clean.own_pairs() {
+            let transformed = regenerate_observed_pair(
+                key,
+                reference,
+                &individuals,
+                &identities,
+                profile,
+                event,
+                effective.reproducibility().root_seed(),
+            )
+            .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+            error_quality
+                .record(transformed.report())
+                .map_err(|error| {
+                    Box::new(TechnicalEventAssemblyFailure {
+                        cause: technical_event_error("error_quality", format!("{error:?}")),
                         link: None,
                     })
                 })?;
-                return Err(Box::new(TechnicalEventAssemblyFailure {
-                    cause,
-                    link: Some(link),
-                }));
-            }
+            let udi = udis.get(clean.library_id()).cloned().ok_or_else(|| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error("demultiplexing", "UDI de biblioteca ausente"),
+                    link: None,
+                })
+            })?;
+            post_contamination.push(PostContaminationPair::new(
+                clean.library_id().clone(),
+                key.pre_hop_instance_id().clone(),
+                udi,
+                false,
+                transformed.into_observed(),
+            ));
         }
+    }
+    let mut demultiplexer = Demultiplexer::new(
+        effective.reproducibility().root_seed(),
+        event.event_id().clone(),
+        event.index_hopping_rate(),
+        demultiplexing_libraries,
+    )
+    .map_err(|error| {
+        Box::new(TechnicalEventAssemblyFailure {
+            cause: technical_event_error("demultiplexing", format!("{error:?}")),
+            link: None,
+        })
+    })?;
+    let demultiplexed = demultiplexer
+        .demultiplex(post_contamination)
+        .map_err(|error| {
+            Box::new(TechnicalEventAssemblyFailure {
+                cause: technical_event_error("demultiplexing", format!("{error:?}")),
+                link: None,
+            })
+        })?;
+    let demultiplexing = EventManifestDemultiplexing::from_report(demultiplexed.report().clone());
+    let mut final_libraries = demultiplexed.into_final_libraries();
+    let mut outputs = Vec::with_capacity(libraries.len() * 2);
+    let mut coverage = Vec::with_capacity(libraries.len());
+    let mut summaries = Vec::with_capacity(libraries.len());
+    for library in &libraries {
+        let individual = individuals
+            .get(library.individual_id())
+            .expect("selected above")
+            .0;
+        let pairs = final_libraries
+            .remove(library.library_id())
+            .ok_or_else(|| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error("demultiplexing", "biblioteca final ausente"),
+                    link: None,
+                })
+            })?;
+        let publication = write_final_paired_fastq(
+            workspace,
+            event.event_id().as_str(),
+            individual.id().as_str(),
+            library.library_id(),
+            pairs,
+        )
+        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        let basic_bases = clean_libraries
+            .iter()
+            .find(|clean| clean.library_id() == library.library_id())
+            .and_then(|clean| u64::try_from(clean.own_pairs().len()).ok())
+            .and_then(|pairs| pairs.checked_mul(2))
+            .and_then(|reads| reads.checked_mul(u64::from(event.read_length())))
+            .ok_or_else(|| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error("coverage", "bases WGS básicas desbordan"),
+                    link: None,
+                })
+            })?;
+        let target_x = match event.target() {
+            EffectiveTechnicalEventTarget::CoverageWgs(value) => value,
+            EffectiveTechnicalEventTarget::ReadCount(_) => {
+                basic_bases as f64 / reference.total_length() as f64
+            }
+        };
+        let report = F4CoverageReport::from_base_counts(
+            target_x,
+            basic_bases,
+            publication.own_base_count(),
+            publication.contaminant_base_count(),
+            reference.total_length(),
+            publication.n_base_count(),
+        )
+        .map_err(|error| {
+            Box::new(TechnicalEventAssemblyFailure {
+                cause: technical_event_error("coverage", error.to_string()),
+                link: None,
+            })
+        })?;
+        outputs.extend([
+            TechnicalEventArtifact::complete(
+                individual.id().clone(),
+                library.library_id().clone(),
+                crate::technical_identity::TechnicalMate::R1,
+                publication.r1().clone(),
+            ),
+            TechnicalEventArtifact::complete(
+                individual.id().clone(),
+                library.library_id().clone(),
+                crate::technical_identity::TechnicalMate::R2,
+                publication.r2().clone(),
+            ),
+        ]);
+        coverage.push(EventManifestCoverage {
+            individual_id: individual.id(),
+            library_id: library.library_id(),
+            report,
+        });
+        summaries.push(EventManifestFinalFastqSummary {
+            individual_id: individual.id(),
+            library_id: library.library_id(),
+            pair_count: publication.pair_count(),
+            read_count: publication.read_count(),
+            base_count: publication.base_count(),
+            own_pair_count: publication.own_pair_count(),
+            contaminant_pair_count: publication.contaminant_pair_count(),
+            own_base_count: publication.own_base_count(),
+            contaminant_base_count: publication.contaminant_base_count(),
+            n_base_count: publication.n_base_count(),
+        });
     }
     write_event_manifest(
         workspace,
@@ -686,41 +969,109 @@ fn publish_technical_event(
         &identities,
         reference_fasta,
         &outputs,
-        UnitState::Complete,
-        &[],
+        &coverage,
+        &summaries,
+        EventManifestErrorQuality::from_report(
+            ErrorQualitySettings::default(),
+            error_quality.report(),
+        ),
+        demultiplexing,
+        realized_chimera_pairs,
+        &biological_manifest,
     )
     .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))
 }
 
-fn validate_closed_wgs_fastq(
-    path: &Path,
-    artifact: &ArtifactRecord,
-    reference: &Reference,
-    individual: &crate::haplotype::Individual,
-    identities: &crate::technical_identity::TechnicalIdentityPlan,
-    target: &crate::application::EffectiveTechnicalEventTarget,
-) -> Result<crate::fastq_validation::F4CoverageReport, Diagnostic> {
-    let coverage = validate_wgs_fastq(path, artifact, reference, individual, identities, *target)
-        .map(|report| report.f4_coverage())
-        .map_err(|error| technical_event_error("validate_wgs_fastq", error.to_string()))?;
-    #[cfg(test)]
-    if FORCE_FASTQ_REVALIDATION_FAILURE.replace(false) {
-        return Err(technical_event_error(
-            "validate_wgs_fastq",
-            "injected independent validation failure",
-        ));
-    }
-    Ok(coverage)
+fn paired_sampler<'a>(
+    reference: &'a Reference,
+    individual: &'a crate::haplotype::Individual,
+    identities: &'a crate::technical_identity::TechnicalIdentityPlan,
+    profile: crate::technical_profile::F4TechnicalProfile,
+    event: &crate::application::EffectiveTechnicalEvent,
+) -> Result<WgsPairedEndSampler<'a>, Diagnostic> {
+    let sampler = match event.target() {
+        EffectiveTechnicalEventTarget::CoverageWgs(target) => {
+            WgsPairedEndSampler::new_for_coverage(
+                reference,
+                individual,
+                identities,
+                profile,
+                event.read_length(),
+                target,
+            )
+        }
+        // La configuración histórica de F3 se mantiene solo como cantidad
+        // interna de parejas; la salida sigue siendo PE y el manifiesto deja
+        // explícita la cobertura equivalente realizada.
+        EffectiveTechnicalEventTarget::ReadCount(pair_count) => {
+            WgsPairedEndSampler::new_for_pair_count(
+                reference,
+                individual,
+                identities,
+                profile,
+                event.read_length(),
+                pair_count,
+            )
+        }
+    };
+    sampler
+        .map(|sampler| sampler.with_effective_technical_event(event))
+        .map_err(|error| technical_event_error("wgs_paired_sampler", format!("{error:?}")))
 }
 
+fn regenerate_observed_pair(
+    key: &CleanPairKey,
+    reference: &Reference,
+    individuals: &BTreeMap<
+        crate::identity::IndividualId,
+        (
+            &crate::haplotype::Individual,
+            &crate::identity::PopulationId,
+        ),
+    >,
+    identities: &crate::technical_identity::TechnicalIdentityPlan,
+    profile: crate::technical_profile::F4TechnicalProfile,
+    event: &crate::application::EffectiveTechnicalEvent,
+    root_seed: crate::randomness::RootSeed,
+) -> Result<ObservedPairTransformation, Diagnostic> {
+    let individual = individuals
+        .get(key.source_individual_id())
+        .map(|(individual, _)| *individual)
+        .ok_or_else(|| technical_event_error("biological_contamination", "donante ausente"))?;
+    let sampler = paired_sampler(reference, individual, identities, profile, event)?;
+    for pair in sampler {
+        let pair = pair
+            .map_err(|error| technical_event_error("wgs_paired_sampler", format!("{error:?}")))?;
+        if pair.pre_hop_identity().pre_hop_instance_id() == key.pre_hop_instance_id() {
+            return transform_paired_end(
+                root_seed,
+                event.event_id(),
+                &pair,
+                profile,
+                ErrorQualitySettings::default(),
+            )
+            .map_err(|error| technical_event_error("error_quality", format!("{error:?}")));
+        }
+    }
+    Err(technical_event_error(
+        "biological_contamination",
+        "la clave limpia no se puede regenerar",
+    ))
+}
+
+#[allow(clippy::too_many_arguments)] // hechos ya cerrados de las fases F4; agruparlos escondería contratos distintos.
 fn write_event_manifest(
     workspace: &mut ExecutionWorkspace,
     event: &crate::application::EffectiveTechnicalEvent,
     identities: &crate::technical_identity::TechnicalIdentityPlan,
     reference_fasta: &ArtifactRecord,
     outputs: &[TechnicalEventArtifact],
-    state: UnitState,
-    diagnostics: &[Diagnostic],
+    coverage: &[EventManifestCoverage<'_>],
+    final_fastq_summary: &[EventManifestFinalFastqSummary<'_>],
+    error_quality: crate::event_manifest::EventManifestErrorQuality,
+    demultiplexing: EventManifestDemultiplexing,
+    realized_chimera_pairs: u64,
+    biological_contamination: &[crate::biological_contamination::BiologicalContaminationManifestRecipient],
 ) -> Result<ManifestEventLink, Diagnostic> {
     let artifacts = outputs
         .iter()
@@ -730,47 +1081,28 @@ fn write_event_manifest(
             state: output.state,
             individual_id: &output.individual_id,
             library_id: &output.library_id,
-            mate: crate::technical_identity::TechnicalMate::R1,
+            mate: output.mate,
             artifact: output.artifact.as_ref(),
             diagnostic: output.diagnostic.as_ref(),
         })
         .collect::<Vec<_>>();
-    let coverage = if state == UnitState::Complete {
-        outputs
-            .iter()
-            .map(|output| {
-                Ok(EventManifestCoverage {
-                    individual_id: &output.individual_id,
-                    library_id: &output.library_id,
-                    report: output.coverage.ok_or_else(|| {
-                        technical_event_error(
-                            "technical_event.coverage",
-                            "una salida completa no tiene informe de cobertura",
-                        )
-                    })?,
-                })
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>()?
-    } else {
-        Vec::new()
-    };
     let document = EventManifest {
         event,
-        state,
+        state: UnitState::Complete,
         identities,
         reference: EventManifestReference {
             reference_id: identities.reference_id(),
             fasta: reference_fasta,
         },
         artifacts: &artifacts,
-        coverage: &coverage,
+        coverage,
+        final_fastq_summary,
+        error_quality,
+        demultiplexing,
         chimera_rate: event.chimera_rate(),
-        // El escritor FASTQ F4.5 aún no consume el productor PE. Mientras la
-        // ejecución no haya recorrido parejas F4, el único hecho publicable
-        // es el contador agregado nulo; no se inventa procedencia.
-        realized_chimera_pairs: 0,
-        biological_contamination: &[],
-        diagnostics,
+        realized_chimera_pairs,
+        biological_contamination,
+        diagnostics: &[],
     };
     let bytes = event_manifest_bytes(&document)?;
     let relative_path = event_manifest_relative_path(event.event_id());
@@ -791,10 +1123,10 @@ fn write_event_manifest(
     )?;
     Ok(ManifestEventLink {
         event_id: event.event_id().as_str().to_owned(),
-        state,
+        state: UnitState::Complete,
         manifest_artifact_id: artifact.id,
         chimera_rate: event.chimera_rate(),
-        realized_chimera_pairs: 0,
+        realized_chimera_pairs,
     })
 }
 
@@ -830,17 +1162,6 @@ fn preflight_prepared_config(
     authorizations: ExecutionAuthorizations,
     prepared_reference: &PreparedReference,
 ) -> Result<PreparedExecution, Diagnostic> {
-    if effective.technical_event().is_some() {
-        return Err(Diagnostic::configuration(
-            "GPS-CONF-008",
-            "F4.1 admite y verifica el productor PE, pero aún no publica FASTQ.",
-        )
-        .with("component", "technical_event")
-        .with(
-            "detail",
-            "F4.2 debe derivar el número entero de parejas desde target_coverage_wgs antes de publicar R1/R2; F4.1 rechaza la ejecución para no reutilizar el productor single-end de F3",
-        ));
-    }
     preflight_vcf_samples(effective)?;
     preflight_reductions(effective, prepared_reference.reference())?;
     let prepared_population_snvs =
@@ -1830,7 +2151,8 @@ mod tests {
     }
 
     #[test]
-    #[allow(unreachable_code)] // F4.1 rejects el productor SE antes de crear el workspace.
+    #[ignore = "F4.5.2 sustituye la ruta SE histórica; la vía PE se cubre en f3_event_assembly"]
+    #[allow(unreachable_code)]
     fn controlled_failure_after_event_discards_derived_references_with_failed_reductions() {
         let root = std::env::temp_dir().join(format!(
             "gps-f3-event-reduction-failure-{}-{}",
@@ -1950,7 +2272,8 @@ i5 = "TGCATGCA"
     }
 
     #[test]
-    #[allow(unreachable_code)] // F4.1 rechaza antes de la antigua validación FASTQ SE.
+    #[ignore = "F4.5.2 elimina la validación SE histórica; la publicación PE valida ambos mates"]
+    #[allow(unreachable_code)]
     fn failed_independent_fastq_validation_discards_fastq_before_failed_event_manifest() {
         let root = std::env::temp_dir().join(format!(
             "gps-f3-fastq-revalidation-failure-{}-{}",

@@ -17,6 +17,7 @@ use crate::application::{
 };
 use crate::fastq_output::{FASTQ_ARTIFACT_KIND, fastq_relative_path};
 use crate::haplotype::{HaplotypeCopy, Individual};
+use crate::identity::{EventId, LibraryId, TechnicalPairId};
 use crate::materialization::{MaterializationError, materialize_copy_interval};
 use crate::randomness::{RandomSamplingError, poisson_count, uniform_u64_below};
 use crate::reference::Reference;
@@ -32,6 +33,7 @@ const BGZF_EOF_MARKER: [u8; 28] = [
     0x1f, 0x8b, 0x08, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x06, 0x00, 0x42, 0x43, 0x02, 0x00,
     0x1b, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
+const FINAL_FASTQ_MAXIMUM_LINE_LENGTH: usize = 256;
 
 /// Desviación observada de cobertura WGS. Es una observación estadística y no
 /// una política de aceptación: una desviación nunca convierte por sí sola el
@@ -220,6 +222,365 @@ pub enum FastqValidationError {
     },
     CounterOverflow,
     InvalidCoverageSummary,
+}
+
+/// Comprueba una sola salida PE descomprimida, sin consultar verdad biológica
+/// ni claves transitorias. La comparación contra esa verdad pertenece a F4.5.3.
+pub fn validate_final_fastq_mate(
+    path: &Path,
+    expected_mate: crate::technical_identity::TechnicalMate,
+) -> Result<(), FastqValidationError> {
+    let file = File::open(path).map_err(|error| io_error(path, "open_final_fastq", error))?;
+    validate_canonical_bgzf_eof(
+        &mut file
+            .try_clone()
+            .map_err(|error| io_error(path, "clone_final_fastq", error))?,
+        path,
+        0,
+    )?;
+    let mut reader = bgzf::io::Reader::new(file);
+    let mut lines = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut ordinal = 0_u64;
+    loop {
+        lines
+            .iter_mut()
+            .try_for_each(|line| read_final_line(&mut reader, line, path, ordinal))?;
+        if lines[0].is_empty() && lines[1].is_empty() && lines[2].is_empty() && lines[3].is_empty()
+        {
+            return Ok(());
+        }
+        if lines.iter().any(Vec::is_empty) {
+            return Err(FastqValidationError::Structural {
+                path: path.display().to_string(),
+                record_ordinal: ordinal,
+                detail: "FASTQ final has a truncated record",
+            });
+        }
+        validate_final_record(path, ordinal, &lines, expected_mate)?;
+        ordinal = ordinal
+            .checked_add(1)
+            .ok_or(FastqValidationError::CounterOverflow)?;
+    }
+}
+
+/// Comprueba que R1/R2 contienen exactamente las mismas parejas en el mismo
+/// orden y que sus hashes corresponden a los bytes comprimidos publicados.
+pub fn validate_final_paired_fastq(
+    r1_path: &Path,
+    r1_artifact: &ArtifactRecord,
+    r2_path: &Path,
+    r2_artifact: &ArtifactRecord,
+) -> Result<(), FastqValidationError> {
+    validate_final_fastq_mate(r1_path, crate::technical_identity::TechnicalMate::R1)?;
+    validate_final_fastq_mate(r2_path, crate::technical_identity::TechnicalMate::R2)?;
+    validate_final_artifact(r1_path, r1_artifact)?;
+    validate_final_artifact(r2_path, r2_artifact)?;
+    let mut r1 = bgzf::io::Reader::new(
+        File::open(r1_path).map_err(|error| io_error(r1_path, "open_final_r1", error))?,
+    );
+    let mut r2 = bgzf::io::Reader::new(
+        File::open(r2_path).map_err(|error| io_error(r2_path, "open_final_r2", error))?,
+    );
+    let mut ordinal = 0_u64;
+    loop {
+        let left = read_final_header(
+            &mut r1,
+            r1_path,
+            ordinal,
+            crate::technical_identity::TechnicalMate::R1,
+        )?;
+        let right = read_final_header(
+            &mut r2,
+            r2_path,
+            ordinal,
+            crate::technical_identity::TechnicalMate::R2,
+        )?;
+        if left.is_none() && right.is_none() {
+            return Ok(());
+        }
+        if left.is_none() || right.is_none() || left != right {
+            return Err(FastqValidationError::Structural {
+                path: format!("{} / {}", r1_path.display(), r2_path.display()),
+                record_ordinal: ordinal,
+                detail: "FASTQ final mates are orphaned or have different pair IDs",
+            });
+        }
+        ordinal = ordinal
+            .checked_add(1)
+            .ok_or(FastqValidationError::CounterOverflow)?;
+    }
+}
+
+fn validate_final_artifact(
+    path: &Path,
+    artifact: &ArtifactRecord,
+) -> Result<(), FastqValidationError> {
+    let identity =
+        crate::integrity::identify_file(path, Path::new(&artifact.path)).map_err(|error| {
+            FastqValidationError::Artifact {
+                path: path.display().to_string(),
+                field: "sha256",
+                expected: artifact.digest.clone(),
+                observed: error.render_human(),
+            }
+        })?;
+    if identity.size_bytes() != artifact.size_bytes {
+        return Err(FastqValidationError::Artifact {
+            path: path.display().to_string(),
+            field: "size_bytes",
+            expected: artifact.size_bytes.to_string(),
+            observed: identity.size_bytes().to_string(),
+        });
+    }
+    if identity.digest() != artifact.digest {
+        return Err(FastqValidationError::Artifact {
+            path: path.display().to_string(),
+            field: "sha256",
+            expected: artifact.digest.clone(),
+            observed: identity.digest().to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn read_final_line(
+    reader: &mut impl BufRead,
+    line: &mut Vec<u8>,
+    path: &Path,
+    ordinal: u64,
+) -> Result<(), FastqValidationError> {
+    line.clear();
+    loop {
+        let buffer = reader
+            .fill_buf()
+            .map_err(|error| io_error(path, "read_final_fastq", error))?;
+        if buffer.is_empty() {
+            break;
+        }
+        let take = buffer
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(buffer.len(), |index| index + 1);
+        if line
+            .len()
+            .checked_add(take)
+            .ok_or(FastqValidationError::CounterOverflow)?
+            > FINAL_FASTQ_MAXIMUM_LINE_LENGTH
+        {
+            return Err(FastqValidationError::Structural {
+                path: path.display().to_string(),
+                record_ordinal: ordinal,
+                detail: "FASTQ final line exceeds the profile bound",
+            });
+        }
+        line.extend_from_slice(&buffer[..take]);
+        let reached_newline = buffer[take - 1] == b'\n';
+        reader.consume(take);
+        if reached_newline {
+            break;
+        }
+    }
+    if !line.is_empty() && line.last() != Some(&b'\n') {
+        return Err(FastqValidationError::Structural {
+            path: path.display().to_string(),
+            record_ordinal: ordinal,
+            detail: "FASTQ final line is truncated",
+        });
+    }
+    Ok(())
+}
+
+fn validate_final_record(
+    path: &Path,
+    ordinal: u64,
+    lines: &[Vec<u8>; 4],
+    expected_mate: crate::technical_identity::TechnicalMate,
+) -> Result<(), FastqValidationError> {
+    let structural = |detail| FastqValidationError::Structural {
+        path: path.display().to_string(),
+        record_ordinal: ordinal,
+        detail,
+    };
+    let header = std::str::from_utf8(&lines[0])
+        .map_err(|_| structural("FASTQ final header is not UTF-8"))?
+        .strip_suffix('\n')
+        .ok_or_else(|| structural("FASTQ final header is truncated"))?;
+    let Some(header) = header.strip_prefix('@') else {
+        return Err(structural("FASTQ final header lacks @"));
+    };
+    parse_final_header(header, expected_mate).map_err(structural)?;
+    if lines[2] != b"+\n"
+        || lines[1].len() < 2
+        || lines[1].last() != Some(&b'\n')
+        || lines[3].len() != lines[1].len()
+        || lines[3].last() != Some(&b'\n')
+    {
+        return Err(structural("FASTQ final record structure is invalid"));
+    }
+    if !lines[1][..lines[1].len() - 1]
+        .iter()
+        .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T' | b'N'))
+        || !lines[3][..lines[3].len() - 1]
+            .iter()
+            .all(|quality| (b'!'..=b'~').contains(quality))
+    {
+        return Err(structural(
+            "FASTQ final sequence or quality alphabet is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn read_final_header(
+    reader: &mut impl BufRead,
+    path: &Path,
+    ordinal: u64,
+    expected_mate: crate::technical_identity::TechnicalMate,
+) -> Result<Option<FinalFastqHeader>, FastqValidationError> {
+    let mut lines = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    lines
+        .iter_mut()
+        .try_for_each(|line| read_final_line(reader, line, path, ordinal))?;
+    if lines.iter().all(Vec::is_empty) {
+        return Ok(None);
+    }
+    if lines.iter().any(Vec::is_empty) {
+        return Err(FastqValidationError::Structural {
+            path: path.display().to_string(),
+            record_ordinal: ordinal,
+            detail: "FASTQ final has a truncated record",
+        });
+    }
+    let header = std::str::from_utf8(&lines[0]).map_err(|_| FastqValidationError::Structural {
+        path: path.display().to_string(),
+        record_ordinal: ordinal,
+        detail: "FASTQ final header is not UTF-8",
+    })?;
+    let header = header
+        .strip_suffix('\n')
+        .ok_or_else(|| FastqValidationError::Structural {
+            path: path.display().to_string(),
+            record_ordinal: ordinal,
+            detail: "FASTQ final header is truncated",
+        })?;
+    let header = header
+        .strip_prefix('@')
+        .ok_or_else(|| FastqValidationError::Structural {
+            path: path.display().to_string(),
+            record_ordinal: ordinal,
+            detail: "FASTQ final header lacks @",
+        })?;
+    parse_final_header(header, expected_mate)
+        .map(Some)
+        .map_err(|detail| FastqValidationError::Structural {
+            path: path.display().to_string(),
+            record_ordinal: ordinal,
+            detail,
+        })
+}
+
+/// Identidad publicable de una pareja FASTQ final. No contiene ninguna clave
+/// previa al salto ni procedencia por lectura.
+#[derive(Debug, Eq, PartialEq)]
+struct FinalFastqHeader {
+    event_id: String,
+    library_id: String,
+    technical_pair_id: String,
+    udi: String,
+}
+
+fn parse_final_header(
+    header: &str,
+    expected_mate: crate::technical_identity::TechnicalMate,
+) -> Result<FinalFastqHeader, &'static str> {
+    let mut fields = header.split(' ');
+    let identity = fields.next().ok_or("FASTQ final header lacks identity")?;
+    let mate = fields
+        .next()
+        .ok_or("FASTQ final header lacks mate metadata")?;
+    if fields.next().is_some() {
+        return Err("FASTQ final header has extra fields");
+    }
+    let mut identity = identity.split(':');
+    if identity.next() != Some("GPS") {
+        return Err("FASTQ final header lacks GPS prefix");
+    }
+    let event_id = identity.next().ok_or("FASTQ final header lacks event ID")?;
+    let library_id = identity
+        .next()
+        .ok_or("FASTQ final header lacks library ID")?;
+    let technical_pair_id = identity
+        .next()
+        .ok_or("FASTQ final header lacks technical pair ID")?;
+    if identity.next().is_some() {
+        return Err("FASTQ final header has invalid identity fields");
+    }
+    EventId::parse(event_id, "final_fastq").map_err(|_| "FASTQ final event ID is invalid")?;
+    LibraryId::parse(library_id, "final_fastq").map_err(|_| "FASTQ final library ID is invalid")?;
+    TechnicalPairId::parse(technical_pair_id, "final_fastq")
+        .map_err(|_| "FASTQ final pair ID is invalid")?;
+    let expected_prefix = format!("{}:N:0:", expected_mate.number());
+    let udi = mate
+        .strip_prefix(&expected_prefix)
+        .ok_or("FASTQ final mate metadata is invalid")?;
+    let mut udi_components = udi.split('+');
+    if !udi_components.next().is_some_and(valid_udi_component)
+        || !udi_components.next().is_some_and(valid_udi_component)
+        || udi_components.next().is_some()
+    {
+        return Err("FASTQ final UDI is invalid");
+    }
+    Ok(FinalFastqHeader {
+        event_id: event_id.to_owned(),
+        library_id: library_id.to_owned(),
+        technical_pair_id: technical_pair_id.to_owned(),
+        udi: udi.to_owned(),
+    })
+}
+
+fn valid_udi_component(value: &str) -> bool {
+    value.len() == 8
+        && value
+            .bytes()
+            .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T'))
+}
+
+#[cfg(test)]
+mod final_header_tests {
+    use super::parse_final_header;
+    use crate::technical_identity::TechnicalMate;
+
+    const R1: &str =
+        "GPS:event-main:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 1:N:0:ACGTACGT+TGCATGCA";
+    const R2: &str =
+        "GPS:event-main:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 2:N:0:ACGTACGT+TGCATGCA";
+
+    #[test]
+    fn final_headers_require_gps_identity_and_matching_pair_components() {
+        let r1 = parse_final_header(R1, TechnicalMate::R1).expect("canonical R1");
+        let r2 = parse_final_header(R2, TechnicalMate::R2).expect("canonical R2");
+        assert_eq!(r1, r2);
+        for mutated in [
+            "GPS:event-other:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 2:N:0:ACGTACGT+TGCATGCA",
+            "GPS:event-main:library-other:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 2:N:0:ACGTACGT+TGCATGCA",
+            "GPS:event-main:library-main:TP_ZYXWVUTSRQPONMLKJIHGFEDCBA 2:N:0:ACGTACGT+TGCATGCA",
+            "GPS:event-main:library-main:TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 2:N:0:TGCATGCA+ACGTACGT",
+        ] {
+            let parsed =
+                parse_final_header(mutated, TechnicalMate::R2).expect("well-formed mutation");
+            assert_ne!(
+                r1, parsed,
+                "independent identity/UDI mutation must break the pair"
+            );
+        }
+        assert!(
+            parse_final_header(
+                "TP_ABCDEFGHIJKLMNOPQRSTUVWXYZ 1:N:0:ACGTACGT+TGCATGCA",
+                TechnicalMate::R1,
+            )
+            .is_err()
+        );
+    }
 }
 
 /// Error al reproducir localmente las decisiones que originaron una biblioteca.

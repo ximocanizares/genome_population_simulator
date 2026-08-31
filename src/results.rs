@@ -1562,10 +1562,20 @@ fn validate_physical_technical_event(
         .and_then(|artifacts| artifacts.get("chimera"))
         .and_then(Value::as_object)
         .and_then(|chimera| chimera.get("rate"));
+    let effective_index_hopping_rate = technical_event
+        .get("artifacts")
+        .and_then(Value::as_object)
+        .and_then(|artifacts| artifacts.get("index_hopping"))
+        .and_then(Value::as_object)
+        .and_then(|index_hopping| index_hopping.get("rate"));
     let event_chimera = event
         .get("artifacts")
         .and_then(Value::as_object)
         .and_then(|artifacts| artifacts.get("chimera"));
+    let event_index_hopping_rate = event
+        .get("demultiplexing")
+        .and_then(Value::as_object)
+        .and_then(|demultiplexing| demultiplexing.get("index_hopping_rate"));
     let general_chimera = general
         .get("technical_events")
         .and_then(Value::as_array)
@@ -1600,6 +1610,7 @@ fn validate_physical_technical_event(
             .and_then(Value::as_object)
             .and_then(|chimera| chimera.get("rate"))
             != effective_chimera_rate
+        || event_index_hopping_rate != effective_index_hopping_rate
         || event_chimera != general_chimera
     {
         return Err(effective_error(

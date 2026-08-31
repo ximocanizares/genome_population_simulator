@@ -6,8 +6,8 @@ use genome_population_simulator::application::{build_effective_config, load_and_
 use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::diagnostics::Diagnostic;
 use genome_population_simulator::event_manifest::{
-    EventManifest, EventManifestArtifact, EventManifestReference, event_manifest_bytes,
-    event_manifest_relative_path,
+    EventManifest, EventManifestArtifact, EventManifestDemultiplexing, EventManifestReference,
+    event_manifest_bytes, event_manifest_relative_path,
 };
 use genome_population_simulator::execution::execute_validated_config;
 use genome_population_simulator::identity::ReferenceId;
@@ -29,7 +29,6 @@ static NONCE: AtomicU64 = AtomicU64::new(0);
 const ROOT_SEED: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
 #[test]
-#[ignore = "F4.1 retira el ensamblado/publicación FASTQ SE de F3"]
 fn complete_execution_assembles_and_links_the_validated_event_manifest() {
     let root = temporary("complete");
     fs::create_dir_all(&root).expect("root");
@@ -56,8 +55,8 @@ fn complete_execution_assembles_and_links_the_validated_event_manifest() {
     let event: serde_json::Value =
         serde_json::from_slice(&fs::read(&event_path).expect("event bytes")).expect("event JSON");
     assert_eq!(event["state"], "complete");
-    let fastq = event["artifacts"].as_array().expect("FASTQ rows");
-    assert_eq!(fastq.len(), 2);
+    let fastq = event["outputs"].as_array().expect("FASTQ rows");
+    assert_eq!(fastq.len(), 4);
     for artifact in fastq {
         assert_eq!(artifact["state"], "complete");
         let path = artifact["artifact"]["path"].as_str().expect("FASTQ path");
@@ -198,6 +197,10 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
         },
         artifacts: &failed_artifacts,
         coverage: &[],
+        final_fastq_summary: &[],
+        error_quality:
+            genome_population_simulator::event_manifest::EventManifestErrorQuality::neutral(),
+        demultiplexing: EventManifestDemultiplexing::disabled(),
         chimera_rate: event.chimera_rate(),
         realized_chimera_pairs: 0,
         biological_contamination: &[],
@@ -306,7 +309,7 @@ T = 0.25
 [[reference.sequences]]
 id = "chr1"
 class = "chromosome"
-length = 200
+length = 500
 [[initial_populations]]
 population_id = "P1"
 individual_count = 2
@@ -316,7 +319,15 @@ genotype_model = "hwe"
 [technical_event]
 event_id = "reads-main"
 individual_ids = ["sample-A", "sample-B"]
-read_count = 1
+target_coverage_wgs = 1
+[[technical_event.libraries]]
+individual_id = "sample-A"
+i7 = "ACGTACGT"
+i5 = "TGCATGCA"
+[[technical_event.libraries]]
+individual_id = "sample-B"
+i7 = "GGGGGGGG"
+i5 = "CCCCCCCC"
 "#
     )
 }

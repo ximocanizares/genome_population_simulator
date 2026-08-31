@@ -4,7 +4,7 @@
   "title": "Manifiesto de evento técnico GPS v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["manifest_kind", "schema_version", "event_id", "event_type", "technology", "rng_catalog", "id_catalog", "state", "profile", "technical_batch_id", "selected_individuals", "event_subseed", "reference", "coverage", "artifacts", "outputs", "diagnostics"],
+  "required": ["manifest_kind", "schema_version", "event_id", "event_type", "technology", "rng_catalog", "id_catalog", "state", "profile", "technical_batch_id", "selected_individuals", "event_subseed", "reference", "coverage", "final_fastq_summary", "error_quality", "demultiplexing", "artifacts", "outputs", "diagnostics"],
   "properties": {
     "manifest_kind": { "const": "gps_event_manifest" },
     "schema_version": { "const": "2" },
@@ -23,11 +23,19 @@
     "event_subseed": { "$ref": "#/$defs/digest" },
     "reference": { "$ref": "#/$defs/reference" },
     "coverage": { "type": "array", "items": { "$ref": "#/$defs/coverage" } },
+    "final_fastq_summary": { "type": "array", "items": { "$ref": "#/$defs/final_fastq_summary" } },
+    "error_quality": { "$ref": "#/$defs/error_quality" },
+    "demultiplexing": { "$ref": "#/$defs/demultiplexing" },
     "artifacts": { "$ref": "#/$defs/technical_artifacts" },
     "outputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/event_artifact" } },
     "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
   },
   "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "complete" } }, "required": ["state"] },
+      "then": { "properties": { "final_fastq_summary": { "minItems": 1 } } },
+      "else": { "properties": { "final_fastq_summary": { "maxItems": 0 } } }
+    },
     {
       "if": { "properties": { "state": { "const": "complete" } }, "required": ["state"] },
       "then": {
@@ -140,6 +148,12 @@
       "required": ["own_x", "contaminant_x"],
       "properties": { "own_x": { "type": "number", "minimum": 0 }, "contaminant_x": { "type": "number", "minimum": 0 } }
     },
+    "final_fastq_summary": {"type":"object","additionalProperties":false,"required":["individual_id","library_id","pair_count","read_count","base_count","own_pair_count","contaminant_pair_count","own_base_count","contaminant_base_count","n_base_count"],"properties":{"individual_id":{"$ref":"#/$defs/id"},"library_id":{"$ref":"#/$defs/id"},"pair_count":{"type":"integer","minimum":0},"read_count":{"type":"integer","minimum":0},"base_count":{"type":"integer","minimum":0},"own_pair_count":{"type":"integer","minimum":0},"contaminant_pair_count":{"type":"integer","minimum":0},"own_base_count":{"type":"integer","minimum":0},"contaminant_base_count":{"type":"integer","minimum":0},"n_base_count":{"type":"integer","minimum":0}}},
+    "error_quality": {"type":"object","additionalProperties":false,"required":["r1","r2"],"properties":{"r1":{"$ref":"#/$defs/error_quality_mate"},"r2":{"$ref":"#/$defs/error_quality_mate"}}},
+    "error_quality_mate": {"type":"object","additionalProperties":false,"required":["quality_shift","error_scale","opportunities","errors"],"properties":{"quality_shift":{"type":"integer"},"error_scale":{"type":"number","minimum":0},"opportunities":{"type":"integer","minimum":0},"errors":{"type":"integer","minimum":0}}},
+    "demultiplexing": {"type":"object","additionalProperties":false,"required":["index_hopping_rate","reassigned_pairs","discarded_pairs","unassigned_pairs","reassigned_by_sample","discarded_by_sample","unassigned_by_sample","clean_fastq_published","individual_provenance_published"],"properties":{"index_hopping_rate":{"type":"number","minimum":0,"maximum":1},"reassigned_pairs":{"type":"integer","minimum":0},"discarded_pairs":{"type":"integer","minimum":0},"unassigned_pairs":{"type":"integer","minimum":0},"reassigned_by_sample":{"type":"array","items":{"$ref":"#/$defs/demultiplexing_reassignment"}},"discarded_by_sample":{"type":"array","items":{"$ref":"#/$defs/demultiplexing_discard"}},"unassigned_by_sample":{"type":"array","items":{"$ref":"#/$defs/demultiplexing_discard"}},"clean_fastq_published":{"const":false},"individual_provenance_published":{"const":false}}},
+    "demultiplexing_reassignment": {"type":"object","additionalProperties":false,"required":["source_library_id","destination_library_id","cause","pair_count"],"properties":{"source_library_id":{"$ref":"#/$defs/id"},"destination_library_id":{"$ref":"#/$defs/id"},"cause":{"const":"index_hopping"},"pair_count":{"type":"integer","minimum":1}}},
+    "demultiplexing_discard": {"type":"object","additionalProperties":false,"required":["source_library_id","cause","pair_count"],"properties":{"source_library_id":{"$ref":"#/$defs/id"},"cause":{"const":"unrecognized_udi"},"pair_count":{"type":"integer","minimum":1}}},
     "technical_artifacts": {"type":"object","additionalProperties":false,"required":["chimera","biological_contamination","pcr","optical_duplicates","gc","adapters"],"properties":{"chimera":{"type":"object","additionalProperties":false,"required":["rate","realized_pairs"],"properties":{"rate":{"type":"number","minimum":0,"maximum":1},"realized_pairs":{"type":"integer","minimum":0}},"allOf":[{"if":{"properties":{"rate":{"const":0}},"required":["rate"]},"then":{"properties":{"realized_pairs":{"const":0}}}}]},"biological_contamination":{"type":"array","items":{"$ref":"#/$defs/biological_contamination_recipient"}},"pcr":{"type":"object","additionalProperties":false,"required":["applicable"],"properties":{"applicable":{"const":false}}},"optical_duplicates":{"type":"object","additionalProperties":false,"required":["realized_pairs"],"properties":{"realized_pairs":{"const":0}}},"gc":{"type":"object","additionalProperties":false,"required":["mode"],"properties":{"mode":{"const":"neutral"}}},"adapters":{"type":"object","additionalProperties":false,"required":["enabled"],"properties":{"enabled":{"const":false}}}}},
     "biological_contamination_recipient": {"type":"object","additionalProperties":false,"required":["recipient_id","recipient_library_id","percent_range","sampled_percent","clean_pair_count","target_pair_count","removed_own_pair_count","inserted_contaminant_pair_count","retained_own_pair_count","final_pair_count","subseeds","donor_contributions"],"properties":{"recipient_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},"recipient_library_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},"percent_range":{"type":"object","additionalProperties":false,"required":["minimum","maximum"],"properties":{"minimum":{"type":"number","minimum":0,"maximum":100},"maximum":{"type":"number","minimum":0,"maximum":100}}},"sampled_percent":{"type":"number","minimum":0,"maximum":100},"clean_pair_count":{"type":"integer","minimum":0},"target_pair_count":{"type":"integer","minimum":0},"removed_own_pair_count":{"type":"integer","minimum":0},"inserted_contaminant_pair_count":{"type":"integer","minimum":0},"retained_own_pair_count":{"type":"integer","minimum":0},"final_pair_count":{"type":"integer","minimum":0},"subseeds":{"type":"object","additionalProperties":false,"required":["percent","donors","removal"],"properties":{"percent":{"type":"string","pattern":"^[0-9a-f]{64}$"},"donors":{"type":"string","pattern":"^[0-9a-f]{64}$"},"removal":{"type":"string","pattern":"^[0-9a-f]{64}$"}}},"donor_contributions":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["individual_id","pairs"],"properties":{"individual_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},"pairs":{"type":"integer","minimum":1}}}}}},
     "diagnostic": {

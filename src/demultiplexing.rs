@@ -156,12 +156,64 @@ impl<T> DemultiplexedPair<T> {
 
 /// Solo hechos agregados del demultiplexado. `unassigned_pairs` es el
 /// subconjunto de descartes cuyo UDI no pertenece a la tanda declarada.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum DemultiplexingCause {
+    IndexHopping,
+    UnrecognizedUdi,
+}
+
+impl DemultiplexingCause {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::IndexHopping => "index_hopping",
+            Self::UnrecognizedUdi => "unrecognized_udi",
+        }
+    }
+}
+
+/// Un hecho agregado del demultiplexado. No contiene identificadores de
+/// pareja ni UDI observados: solo biblioteca de origen, destino si existe,
+/// causa y recuento.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DemultiplexingAggregate {
+    source_library_id: LibraryId,
+    destination_library_id: Option<LibraryId>,
+    cause: DemultiplexingCause,
+    pair_count: u64,
+}
+
+impl DemultiplexingAggregate {
+    #[must_use]
+    pub const fn source_library_id(&self) -> &LibraryId {
+        &self.source_library_id
+    }
+
+    #[must_use]
+    pub const fn destination_library_id(&self) -> Option<&LibraryId> {
+        self.destination_library_id.as_ref()
+    }
+
+    #[must_use]
+    pub const fn cause(&self) -> DemultiplexingCause {
+        self.cause
+    }
+
+    #[must_use]
+    pub const fn pair_count(&self) -> u64 {
+        self.pair_count
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct DemultiplexingReport {
     index_hopping_rate: f64,
     reassigned_pairs: u64,
     discarded_pairs: u64,
     unassigned_pairs: u64,
+    reassigned_by_sample: Vec<DemultiplexingAggregate>,
+    discarded_by_sample: Vec<DemultiplexingAggregate>,
+    unassigned_by_sample: Vec<DemultiplexingAggregate>,
 }
 
 impl DemultiplexingReport {
@@ -184,6 +236,21 @@ impl DemultiplexingReport {
     pub const fn unassigned_pairs(&self) -> u64 {
         self.unassigned_pairs
     }
+
+    #[must_use]
+    pub fn reassigned_by_sample(&self) -> &[DemultiplexingAggregate] {
+        &self.reassigned_by_sample
+    }
+
+    #[must_use]
+    pub fn discarded_by_sample(&self) -> &[DemultiplexingAggregate] {
+        &self.discarded_by_sample
+    }
+
+    #[must_use]
+    pub fn unassigned_by_sample(&self) -> &[DemultiplexingAggregate] {
+        &self.unassigned_by_sample
+    }
 }
 
 /// Resultado efímero agrupado por biblioteca final y el resumen que podrá
@@ -203,6 +270,14 @@ impl<T> DemultiplexingOutcome<T> {
     #[must_use]
     pub const fn report(&self) -> &DemultiplexingReport {
         &self.report
+    }
+
+    /// Entrega las parejas ya clasificadas al único consumidor que publicará
+    /// FASTQ. Esta transferencia evita clonar su contenido o conservar una
+    /// instantánea de procedencia después de la salida final.
+    #[must_use]
+    pub fn into_final_libraries(self) -> BTreeMap<LibraryId, Vec<DemultiplexedPair<T>>> {
+        self.final_libraries
     }
 }
 
@@ -294,6 +369,9 @@ impl Demultiplexer {
             reassigned_pairs: 0,
             discarded_pairs: 0,
             unassigned_pairs: 0,
+            reassigned_by_sample: Vec::new(),
+            discarded_by_sample: Vec::new(),
+            unassigned_by_sample: Vec::new(),
         };
 
         for pair in pairs {
@@ -307,6 +385,18 @@ impl Demultiplexer {
             else {
                 report.discarded_pairs = checked_increment(report.discarded_pairs)?;
                 report.unassigned_pairs = checked_increment(report.unassigned_pairs)?;
+                record_aggregate(
+                    &mut report.discarded_by_sample,
+                    &pair.pre_hop_library_id,
+                    None,
+                    DemultiplexingCause::UnrecognizedUdi,
+                )?;
+                record_aggregate(
+                    &mut report.unassigned_by_sample,
+                    &pair.pre_hop_library_id,
+                    None,
+                    DemultiplexingCause::UnrecognizedUdi,
+                )?;
                 continue;
             };
             if &pair.observed_udi != pre_hop_udi {
@@ -350,6 +440,12 @@ impl Demultiplexer {
                         .cloned()
                         .ok_or(DemultiplexingError::MissingAlternativeLibrary)?;
                     report.reassigned_pairs = checked_increment(report.reassigned_pairs)?;
+                    record_aggregate(
+                        &mut report.reassigned_by_sample,
+                        &pair.pre_hop_library_id,
+                        Some(&final_library_id),
+                        DemultiplexingCause::IndexHopping,
+                    )?;
                 }
             }
             let final_udi = self
@@ -377,6 +473,41 @@ impl Demultiplexer {
             report,
         })
     }
+}
+
+fn record_aggregate(
+    aggregates: &mut Vec<DemultiplexingAggregate>,
+    source_library_id: &LibraryId,
+    destination_library_id: Option<&LibraryId>,
+    cause: DemultiplexingCause,
+) -> Result<(), DemultiplexingError> {
+    if let Some(existing) = aggregates.iter_mut().find(|entry| {
+        entry.source_library_id == *source_library_id
+            && entry.destination_library_id.as_ref() == destination_library_id
+            && entry.cause == cause
+    }) {
+        existing.pair_count = checked_increment(existing.pair_count)?;
+    } else {
+        aggregates.push(DemultiplexingAggregate {
+            source_library_id: source_library_id.clone(),
+            destination_library_id: destination_library_id.cloned(),
+            cause,
+            pair_count: 1,
+        });
+        aggregates.sort_by(|left, right| {
+            (
+                left.source_library_id.as_str(),
+                left.cause,
+                left.destination_library_id.as_ref().map(LibraryId::as_str),
+            )
+                .cmp(&(
+                    right.source_library_id.as_str(),
+                    right.cause,
+                    right.destination_library_id.as_ref().map(LibraryId::as_str),
+                ))
+        });
+    }
+    Ok(())
 }
 
 fn checked_increment(value: u64) -> Result<u64, DemultiplexingError> {

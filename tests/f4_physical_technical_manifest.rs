@@ -9,8 +9,8 @@ use genome_population_simulator::application::{build_effective_config, load_and_
 use genome_population_simulator::biological_contamination::contamination_target_pair_count;
 use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::event_manifest::{
-    EventManifest, EventManifestArtifact, EventManifestCoverage, EventManifestReference,
-    event_manifest_bytes, event_manifest_relative_path,
+    EventManifest, EventManifestArtifact, EventManifestCoverage, EventManifestDemultiplexing,
+    EventManifestReference, event_manifest_bytes, event_manifest_relative_path,
 };
 use genome_population_simulator::execution::execute_validated_config;
 use genome_population_simulator::fastq_validation::F4CoverageReport;
@@ -61,6 +61,13 @@ fn physical_reader_accepts_coherent_f4_documents_and_rejects_independent_chimera
         |fixture| {
             fixture.general["technical_events"][0]["artifacts"]["chimera"]["realized_pairs"] =
                 json!(1);
+        },
+        false,
+    );
+    assert_case(
+        "event-index-hopping-rate",
+        |fixture| {
+            fixture.event["demultiplexing"]["index_hopping_rate"] = json!(0.5);
         },
         false,
     );
@@ -344,8 +351,22 @@ impl Fixture {
         let coverage = [EventManifestCoverage {
             individual_id: library.individual_id(),
             library_id: library.library_id(),
-            report: F4CoverageReport::from_base_counts(1.0, 100, 100, 0, 100, 0).expect("coverage"),
+            report: F4CoverageReport::from_base_counts(1.0, 300, 300, 0, 100, 0).expect("coverage"),
         }];
+        let summary = [
+            genome_population_simulator::event_manifest::EventManifestFinalFastqSummary {
+                individual_id: library.individual_id(),
+                library_id: library.library_id(),
+                pair_count: 1,
+                read_count: 2,
+                base_count: 300,
+                own_pair_count: 1,
+                contaminant_pair_count: 0,
+                own_base_count: 300,
+                contaminant_base_count: 0,
+                n_base_count: 0,
+            },
+        ];
         let document = EventManifest {
             event,
             state: UnitState::Complete,
@@ -356,6 +377,10 @@ impl Fixture {
             },
             artifacts: &outputs,
             coverage: &coverage,
+            final_fastq_summary: &summary,
+            error_quality:
+                genome_population_simulator::event_manifest::EventManifestErrorQuality::neutral(),
+            demultiplexing: EventManifestDemultiplexing::disabled(),
             chimera_rate: event.chimera_rate(),
             realized_chimera_pairs: 0,
             biological_contamination: &[],
