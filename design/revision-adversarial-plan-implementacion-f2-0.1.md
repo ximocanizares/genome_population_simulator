@@ -110,7 +110,7 @@ parcial con destino final.
 2026.
 
 **Resolución:** F2 prueba positivamente la ausencia de complemento para todos
-sus casos representables y nunca fabrica pérdida; F5.5 aporta el primer caso
+sus casos representables y nunca fabrica pérdida; F6.5 aporta el primer caso
 positivo complejo/SV/BND real conforme a DTC-065/066.
 
 E7 aplica correctamente REQ-VER-24 y prohíbe crear complemento para un caso
@@ -121,7 +121,7 @@ ha demostrado una pérdida real en ese conjunto.
 
 **Corrección exigida:** si DTPD-103 no encuentra un caso literal de F2 con
 pérdida, cambiar la evidencia F2 por una prueba negativa de ausencia de
-complemento y trasladar el primer caso positivo a F5.5. No crear una entrada
+complemento y trasladar el primer caso positivo a F6.5. No crear una entrada
 redundante para cumplir la hoja de ruta.
 
 **Condición de cierre:** hoja de ruta, plan, trazabilidad y DTPD-103 piden el
@@ -468,7 +468,7 @@ Las seis decisiones quedaron resueltas el 15 de agosto de 2026:
 2. **DTPD-103:** contrato VCF completo mediante DTC-062 a DTC-066.
 3. **RAF2-004:** cuatro REQ amplios pasan a evidencia parcial F2 y cierre
    posterior, con 79 cierres exclusivos y nueve compartidos.
-4. **RAF2-007:** F2 prueba ausencia de complemento redundante y F5.5 aporta el
+4. **RAF2-007:** F2 prueba ausencia de complemento redundante y F6.5 aporta el
    primer positivo real.
 5. **REQ-CONF-130/RAF2-012:** HWE/F en F2 y distribución explícita en F6.2.
 6. **Importación Marimo/RAF2-017:** directorio autocontenido seguro según

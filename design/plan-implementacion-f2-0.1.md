@@ -387,7 +387,7 @@ indels pequeños sin confundir frecuencias, alelos, genotipos o recuentos.
 - ✅ F2.3.7. Cerrar integración y trazabilidad F2.3.
   - Depende de: F2.3.1–F2.3.6.
   - Procede de: requisitos y ACE implementados en F2.3; no cierra los
-    subpasos diferidos F5.5.a (variación aleatoria directa), F5.6.a (matrices
+    subpasos diferidos F6.5.a (variación aleatoria directa), F6.6.a (matrices
     por referencia) ni F7.2.a (mutación *de novo*).
   - Cambia: pruebas y nota de cierre; no añade otro ejecutor ni formato de
     verdad.

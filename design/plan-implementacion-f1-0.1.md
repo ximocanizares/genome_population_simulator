@@ -70,11 +70,11 @@ marcado como completo.
 - Individuos y haplotipos, variantes, VCF, verdad genotípica, lecturas,
   BAM/CRAM, mapeo y realismo técnico, que empiezan en F2–F4.
 - Referencias derivadas por cambios estructurales, variantes estructurales,
-  repeticiones y múltiples referencias complejas, que corresponden a F5. La
+  repeticiones y múltiples referencias complejas, que corresponden a F6. La
   reducción de preparación F1.6 es la única excepción y no representa un cambio
   biológico estructural.
-- Construcción efectiva de poblaciones, evolución, recombinación, selección,
-  familias y cruces, que corresponden a F6–F8. F1 solo deja preparado el
+- Construcción efectiva de poblaciones F5, evolución/recombinación/selección F7,
+  y familias/cruces F8. F1 solo deja preparado el
   resolvedor común que sus configuraciones necesitarán.
 - Optimización, paralelismo, presupuestos de recursos, exportación
   autocontenida y publicación de una versión, que corresponden a F9. Los
@@ -386,7 +386,7 @@ normativos y casos resistentes al reordenamiento.
 - ✅ C8. Auditar los diez REQ y cerrar únicamente la infraestructura demostrable de F1.3.
   - Depende de: C2–C7 y una configuración mínima validada de B.
   - Procede de: auditoría literal de los diez REQ inicialmente asignados a F1.3 y ACE-23.
-  - Cambia: matriz con 1 requisito superado, 3 trasladados a F1.5 y 6 reasignados a F4.5/F5.6/F9.7; conserva nueve pruebas parciales sin presentarlas como simulación, manifiesto, lecturas o artefactos reales.
+  - Cambia: matriz con 1 requisito superado, 3 trasladados a F1.5 y 6 reasignados a F4.5/F9.7; conserva nueve pruebas parciales sin presentarlas como simulación, manifiesto, lecturas o artefactos reales.
   - Se comprueba con: `cargo test --workspace --all-targets --locked`; vectores RNG repetidos, condiciones negativas y prueba completa de que una versión distinta no recibe garantía, distinguiendo esa infraestructura de los consumidores pendientes.
 
 ### Pausa obligatoria de revisión de F1.3
@@ -656,7 +656,7 @@ del original y sin dependencia de validadores externos en runtime.
   **Auditoría previa a la aprobación (14 de agosto de 2026):** las 27
   filas se reauditaron y todas tienen consumidor completo. REQ-REF-05 queda
   superado tras limitar v1 a cero o un FAI; REQ-EVO-63 queda superado con la
-  infraestructura propia de evento. REQ-EVO-78 reserva para F5.6 los enlaces a
+  infraestructura propia de evento. REQ-EVO-78 reserva para F5.4 los enlaces a
   resultados reales. A/B, las pruebas y las puertas generales pasan. F1.5 llega
   a la pausa obligatoria, pendiente en ese momento de la aprobación registrada
   a continuación.

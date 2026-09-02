@@ -145,7 +145,7 @@ publicado e identificable.
   fuente. El corpus cubre dos ALT/dos casos, un ALT/dos casos, un caso/varios
   registros, reordenación, duplicados e ID inexistente. En F2 no aparecen
   `GPS_LOSS`, `GPS_COMPLEMENT` ni complemento porque todos sus casos son
-  representables; F5.5 fijará la cardinalidad positiva multicaso únicamente
+  representables; F6.5 fijará la cardinalidad positiva multicaso únicamente
   sobre una pérdida real.
 
 ### RAF2-031 — El inventario de cierre omite siete obligaciones parciales asignadas a F2
@@ -160,11 +160,11 @@ publicado e identificable.
   | REQ | Trabajo que la trazabilidad exige ya en F2 | Cierre final |
   |---|---|---|
   | REQ-FMT-07 | lectura completa, normalización, consulta y oráculo VCF | F9.5 |
-  | REQ-VER-23 | declaraciones exactas de `GPS_CASE/GPS_LOSS/GPS_COMPLEMENT` | F5.5 |
-  | REQ-VER-24 | ausencia de complemento para casos representables | F5.5 |
-  | REQ-VER-25 | mecanismo y ausencia condicional sin fabricar pérdida | F5.5 |
-  | REQ-VER-26 | límite explícito de la reconstrucción positiva aplazada | F5.5 |
-  | REQ-MAN-31 | enlace condicional de ruta, tamaño y SHA-256 del complemento | F5.5 |
+  | REQ-VER-23 | declaraciones exactas de `GPS_CASE/GPS_LOSS/GPS_COMPLEMENT` | F6.5 |
+  | REQ-VER-24 | ausencia de complemento para casos representables | F6.5 |
+  | REQ-VER-25 | mecanismo y ausencia condicional sin fabricar pérdida | F6.5 |
+  | REQ-VER-26 | límite explícito de la reconstrucción positiva aplazada | F6.5 |
+  | REQ-MAN-31 | enlace condicional de ruta, tamaño y SHA-256 del complemento | F6.5 |
   | REQ-MAN-58 | versión, normalización, modo, índice, rutas y validación VCF | F9.5 |
 
 - **Riesgo:** F2 puede aprobarse con un recuento 79+9+2 aun faltando una de

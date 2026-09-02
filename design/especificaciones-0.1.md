@@ -1,8 +1,8 @@
 # Especificación del simulador de genomas y poblaciones
 
 - **Versión:** 0.2
-- **Estado:** borrador F2 simplificado, pendiente de revisión
-- **Fecha:** 21 de agosto de 2026
+- **Estado:** contrato F5 sintético reconstruido; implementación F5 pendiente
+- **Fecha:** 1 de septiembre de 2026
 - **Fuentes disponibles:** `README.md`, información confirmada por el usuario y
   la decisión posterior de usar Rust recogida en
   [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
@@ -32,8 +32,8 @@ La versión 0.1 sigue siendo un borrador documental. Sus requisitos son
 obligatorios y las 27 preguntas funcionales de la revisión anterior están
 resueltas. La ampliación del 10 de agosto de 2026 confirma la referencia
 reducida y la aplicación Marimo; la revisión del 12 de agosto resuelve matrices
-y espectros SNV; la revisión del 13 de agosto resuelve mediante DTC-055 el panel
-de bloques haplotípicos. Aún deben planificarse las representaciones que siguen
+y espectros SNV; la corrección F5 posterior sustituye DTC-055 por DTC-089 y
+resuelve los haplotipos sintéticos. Aún deben planificarse las representaciones que siguen
 abiertas y convertirse los ACE en pruebas.
 
 **Corrección de alcance F2 posterior al cierre F1.** F1 quedó cerrado en
@@ -399,8 +399,12 @@ o de cromosomas o *scaffolds* completos; y los cambios de ploidía o pérdidas
 cromosómicas asociados. En una duplicación parcial dentro de la misma secuencia,
 también queda fuera insertar la copia dentro de su intervalo fuente. Esta
 prohibición no afecta a la excepción confirmada para una fuente que abarque la
-secuencia completa (DTF-034). También se aplazan la generación de bloques de LD a partir
-de estadísticos objetivo y el cálculo interno de D, D' o r² (DTF-035).
+secuencia completa (DTF-034). **Corrección funcional de F5, 31 de agosto de
+2026:** F5 genera bloques haplotípicos desde frecuencias alélicas y un perfil
+objetivo `r²(d)` por distancia física. Calcula D y `r²`, no calcula D', y
+rechaza paneles o haplotipos aportados. REQ-EVO-40/43/44/74–77 y DTC-089
+contienen la definición completa; DTF-035 conserva únicamente extensiones
+posteriores de LD no definidas por ese contrato.
 
 El VCF de verdad predeterminado no pretende describir posiciones invariantes ni
 emitir bloques gVCF (DTF-036). La representación completa de genotipos y haplotipos
@@ -1442,7 +1446,9 @@ expansión frente a contracción, pero no el tamaño del salto.
   ámbito. En un locus multialélico, los recuentos de todos los alelos deben
   optimizarse conjuntamente, sumar C y minimizar la desviación global respecto a
   sus objetivos. La tolerancia predeterminada, aplicable solo a este modo, debe
-  ser 0,5/C y puede configurarse una más estricta. No alcanzar la tolerancia debe
+  ser 0,5/C y puede configurarse una más estricta para cada unidad efectiva
+  locus o bloque×subpoblación. La configuración efectiva y el manifiesto deben
+  conservar su valor declarado, efectivo y procedencia. No alcanzar la tolerancia debe
   ser un error. Todo empate entre soluciones óptimas debe resolverse al azar con
   la semilla, de forma reproducible, para evitar un sesgo sistemático. Una vez
   fijados los recuentos, las copias alélicas deben distribuirse aleatoriamente
@@ -2191,36 +2197,38 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   estocásticos. En el modo controlado, los recuentos genotípicos explícitos deben
   sumar el número de individuos aplicable, mientras que los recuentos alélicos o
   haplotípicos deben sumar C, el número de copias cromosómicas disponibles.
-- **REQ-EVO-40.** Para representar LD inicial, cada bloque debe declarar
-  explícitamente los haplotipos posibles y sus frecuencias conjuntas. Las
-  frecuencias deben someterse a la política general de suma, normalización y
-  error de REQ-CONF-106. La
-  generación desde D, D', r² u otros estadísticos objetivo no pertenece a la
-  primera versión. Las frecuencias haplotípicas deben ser la fuente de verdad y
-  las frecuencias alélicas deben derivarse de ellas. Si también se aportan
-  frecuencias alélicas, solo deben servir como validación y una discrepancia
-  fuera de tolerancia debe ser un error. Por defecto, las frecuencias
-  haplotípicas deben usarse como probabilidades. El modo controlado debe admitir
-  recuentos exactos de haplotipos por subpoblación cuya suma sea C, el número de
-  copias cromosómicas disponibles, y distribuirlos entre individuos de forma
-  reproducible condicionada al modelo genotípico o a plantillas explícitas.
+- **REQ-EVO-40.** Para representar el LD fundador de F5, el sistema debe generar
+  internamente, por bloque y subpoblación, una distribución finita de haplotipos
+  SNP a partir de frecuencias marginales y de un perfil objetivo `r²(d)`. No debe
+  aceptar haplotipos, frecuencias conjuntas ni paneles externos como entrada de
+  F5. La tabla generada y sus pesos normalizados son la fuente de verdad de los
+  fundadores; las marginales realizadas y el LD deben poder reconstruirse desde
+  ella. El modo probabilístico debe muestrear esos pesos y el modo controlado
+  debe fijar recuentos enteros factibles que sumen el número de copias C sin
+  modificar la tabla ni sus pesos.
 - **REQ-EVO-41.** Los bloques de LD de una misma subpoblación no deben
   solaparse. El sistema debe rechazar antes de simular dos bloques que compartan
-  cualquier variante. Las variantes fuera de los bloques deben generarse de
-  forma independiente respecto a las demás.
-- **REQ-EVO-42.** Un bloque de LD puede contener cualquier variante heredable:
-  SNP, *indels*, microsatélites u otras repeticiones en tándem, elementos
-  transponibles y variantes estructurales. Cada variante debe conservar sus
-  reglas de solapamiento, puntos de ruptura y compatibilidad estructural.
-- **REQ-EVO-43.** Los bloques de LD deben definir solo la asociación
-  haplotípica inicial. Durante la evolución y los cruces, la recombinación puede
-  romperlos y crear haplotipos nuevos conforme al mapa o tasa y a las
-  restricciones estructurales. El identificador del bloque inicial debe
-  conservarse para seguimiento, pero no debe implicar indivisibilidad.
-- **REQ-EVO-44.** En cada generación muestreada, el sistema debe calcular desde
-  la verdad faseada y conservar las frecuencias de los haplotipos de cada bloque
-  inicial. No debe calcular D, D' ni r² en la primera versión; esas medidas deben
-  poder obtenerse externamente a partir de las frecuencias guardadas.
+  cualquier variante. F5 no genera variantes fuera de sus bloques ni absorbe
+  los SNP independientes de fases anteriores: estos conservan su procedencia y
+  no participan en H×S, q o LD F5.
+- **REQ-EVO-42.** Los bloques F5 contienen exclusivamente SNP bialélicos. F6
+  puede asociar *indels*, microsatélites, otras repeticiones en tándem o
+  variantes estructurales con esa verdad fundadora según su contrato propio,
+  conservando reglas de solapamiento, puntos de ruptura y compatibilidad
+  estructural. Esa extensión no modifica los haplotipos SNP, perfiles ni
+  tolerancias de F5 y no introduce elementos transponibles como clase funcional.
+- **REQ-EVO-43.** Los bloques F5 definen exclusivamente la asociación
+  haplotípica inicial intrabloque. F5 no impone continuidad de donante ni LD
+  objetivo entre bloques y no rompe los haplotipos fundadores. F7.1 introduce la
+  primera meiosis y puede crear mosaicos conforme a su contrato propio. El
+  identificador estable del bloque fundador debe conservarse para poder seguir
+  posteriormente sus loci sin convertir el bloque en una unidad indivisible.
+- **REQ-EVO-44.** F5 debe calcular y conservar, desde su verdad faseada, las
+  frecuencias haplotípicas, marginales SNP, D y `r²` realizados de cada bloque y
+  subpoblación. En generaciones muestreadas posteriores deben conservarse las
+  frecuencias haplotípicas del bloque fundador y volver a calcularse D y `r²`
+  cuando exista al menos una pareja evaluable. Un denominador degenerado debe
+  registrarse como no evaluable, nunca como `r²=0`.
 - **REQ-EVO-45.** La observación de frecuencias haplotípicas debe servir para
   seguir el efecto de la recombinación y otros procesos biológicos. No debe
   presentarse como evaluación de programas externos ni de *SNP callers*.
@@ -2390,309 +2398,96 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   estado completo producido por el anterior. Antes de simular, el sistema debe
   validar sus dependencias y rechazar un orden ausente, ambiguo o imposible,
   identificando los eventos y la dependencia incumplida.
-- **REQ-EVO-74.** Una fase posterior debe admitir un panel suministrado formado
-  por bloques haplotípicos locales. El paquete canónico debe constar exactamente
-  de cinco ficheros enlazados: `panel_blocks.tsv`, `panel_sites.tsv`,
-  `panel_haplotype_alleles.tsv`, `panel_frequencies.tsv` y
-  `panel.metadata.json`. `panel_blocks.tsv` debe contener una fila por bloque con
-  `block_id`, `reference_id`, `sequence_id`, `start` y `end`. Las coordenadas
-  deben usar la convención común basada en 1 y cerrada. Los bloques no deben
-  solaparse y todos sus sitios deben quedar dentro de su intervalo. El paquete
-  debe estar ligado a una única referencia: todos los `reference_id` de
-  `panel_blocks.tsv` deben coincidir exactamente con
-  `panel.metadata.json.reference.reference_id`; el
-  `panel.metadata.json.reference.sha256` debe coincidir con el SHA-256
-  recalculado sobre los bytes del FASTA autoritativo; y todo `sequence_id` debe
-  existir en ese FASTA. Una mezcla de referencias, un ID o digest divergente o
-  una secuencia inexistente debe rechazarse antes de interpretar o crear
-  individuos.
-
-  Los cuatro TSV deben usar UTF-8 sin BOM, saltos LF y tabulador como único
-  separador. Deben terminar en LF, contener una única cabecera exacta y no
-  admitir comillas, líneas vacías, campos vacíos ni columnas adicionales. Sus
-  esquemas, en orden, deben ser los siguientes. En la tabla, `\t` representa un
-  único carácter de tabulación en la cabecera, no los dos caracteres barra y
-  letra t:
-
-  | Fichero | Cabecera exacta |
-  |---|---|
-  | `panel_blocks.tsv` | `block_id\treference_id\tsequence_id\tstart\tend` |
-  | `panel_sites.tsv` | `block_id\tsite_id\tposition\tref\talt` |
-  | `panel_haplotype_alleles.tsv` | `block_id\thaplotype_id\tsite_id\tallele_index` |
-  | `panel_frequencies.tsv` | `population_id\tblock_id\thaplotype_id\tfrequency` |
-
-  Los identificadores deben conservar la sintaxis ASCII de DTC-039. `start`,
-  `end` y `position` deben escribirse como enteros decimales positivos sin signo
-  ni ceros iniciales; `allele_index`, como entero decimal no negativo con las
-  mismas reglas. `frequency` debe usar la serialización decimal mínima que
-  recupera exactamente el mismo `f64`, conforme a DTC-049, sin notación no finita.
-
-  `panel_sites.tsv` debe contener el catálogo de sitios ordenado por bloque, con
-  una fila por sitio. `ref` debe contener una base A/C/G/T y `alt`, uno o varios
-  ALT A/C/G/T separados por comas, sin espacios, comillas ni alelos repetidos o
-  iguales a `ref`. El orden textual de `alt` debe definir `allele_index` 1..N;
-  `ref` debe corresponder siempre al índice 0. Cada haplotipo debe contener los alelos faseados de un único
-  bloque y su identidad debe ser local a ese bloque: la
-  identidad inequívoca es la pareja `block_id` + `haplotype_id`, y reutilizar un
-  mismo `haplotype_id` en otro bloque no debe relacionarlos. V1 solo debe admitir
-  SNP suministrados, bialélicos o multialélicos: `REF` y cada `ALT` deben ser
-  exactamente una base A, C, G o T. Debe rechazar `N`, *indels*, repeticiones,
-  variantes estructurales, alelos simbólicos, *breakends* y sitios repetidos o
-  solapados.
-
-  `panel_frequencies.tsv` debe contener exactamente una fila por
-  (`population_id`, `block_id`, `haplotype_id`), incluidos los valores 0 y 1.
-  Para cada población y bloque, las frecuencias deben ser finitas, pertenecer a
-  [0,1] y sumar 1 conforme a DTC-049. Una fila ausente o duplicada debe ser un
-  error, no debe interpretarse como frecuencia 0 y no debe existir una frecuencia
-  global ni herencia de frecuencias entre poblaciones. Las frecuencias alélicas
-  marginales deben poder derivarse sin otra fuente de verdad. La tabla
-  canónica `panel_haplotype_alleles.tsv` debe ser densa: para cada pareja
-  (`block_id`, `haplotype_id`) debe contener exactamente una asignación para cada
-  `site_id` del bloque. `allele_index=0` representa `REF` y los valores de 1 a N,
-  los `ALT` declarados para el sitio en ese mismo orden. Una asignación ausente,
-  duplicada o ajena al catálogo debe ser un error; una ausencia no equivale a
-  `REF` y v1 no admite alelos desconocidos ni ausentes en el panel. Dentro de un
-  mismo `block_id`, dos `haplotype_id` no deben tener el mismo vector completo y
-  ordenado de `allele_index`. Si varios haplotipos son equivalentes, la
-  validación debe rechazarlos e identificar el bloque y todos los IDs
-  implicados; no debe fusionarlos ni sumar sus frecuencias. La misma secuencia de
-  índices puede aparecer en bloques distintos porque representa sitios
-  diferentes. Un haplotipo de frecuencia 0 sigue siendo válido si su vector es
-  único. Cada bloque debe declarar al menos dos sitios SNP y al menos dos
-  vectores HAP distintos. Una población puede asignar frecuencia 1 a un único
-  HAP y 0 a todos los demás; el catálogo global sigue siendo válido incluso si
-  todas las poblaciones actuales lo hacen, y las filas con 0 deben conservarse.
-  Un sitio cuyo mismo ALT esté fijado en todos los HAP debe conservarse. En
-  cambio, un sitio con `allele_index=0` en todos los HAP no representa ninguna
-  variante respecto a la referencia y debe rechazarse como redundante. La matriz de
-  SNP independientes `alt_af` no puede contener ningún locus situado dentro del
-  intervalo completo de un bloque, aunque esa posición no sea un `site_id` del
-  panel. La validación debe detectar el conflicto antes de crear individuos, sin
-  prioridad ni sobrescritura, e identificar como mínimo la referencia,
-  secuencia, posición y fila o identidad de matriz conflictiva, además del
-  `block_id` y su intervalo. Fuera de los intervalos de bloque debe regir
-  DTC-054. `panel.metadata.json` debe declarar la clase y versión del recurso,
-  `panel_id`, la referencia y su SHA-256, y la convención de coordenadas basada
-  en 1 y cerrada. Para cada uno de los cuatro TSV debe registrar clase, ruta,
-  tamaño y SHA-256. También debe registrar la procedencia y la herramienta
-  creadora cuando existan. El JSON no debe duplicar las filas de las tablas.
-
-  El orden canónico debe ser único. `panel_blocks.tsv` debe ordenar por
-  `reference_id`, orden de `sequence_id` en el FASTA, `start`, `end` y
-  `block_id`; `panel_sites.tsv`, por el orden canónico del bloque, `position` y
-  `site_id`; `panel_haplotype_alleles.tsv`, por bloque, `haplotype_id` ASCII y
-  orden canónico del sitio; y `panel_frequencies.tsv`, por `population_id` ASCII,
-  bloque y `haplotype_id` ASCII. Deben ser únicas, respectivamente, las claves
-  `block_id`, (`block_id`,`site_id`),
-  (`block_id`,`haplotype_id`,`site_id`) y
-  (`population_id`,`block_id`,`haplotype_id`). La orden de preparación debe
-  rechazar cualquier entrada que no pueda llevarse sin ambigüedad a este orden.
-  Una única orden auxiliar del binario Rust, conceptualmente
-  `prepare-haplotype-panel`, debe recibir la referencia y las cuatro tablas,
-  validar su contrato y relaciones, crear una copia nueva en orden canónico,
-  calcular los SHA-256 de la referencia y de las tablas, generar
-  `panel.metadata.json` y publicar atómicamente el directorio. No debe modificar
-  los originales ni sobrescribir un destino existente. La simulación solo debe
-  aceptar el paquete completo: debe recalcular sus sumas y verificar referencia,
-  clases, versiones y rutas. Un fichero ausente o modificado o cualquier
-  incompatibilidad debe detener la ejecución antes de crear individuos.
-- **REQ-EVO-75.** En el modo sin recombinación, cada copia cromosómica fundadora
-  debe recibir en cada bloque un haplotipo local completo e intacto conforme a
-  sus frecuencias. A efectos del muestreo, cada bloque debe tratarse como un
-  locus multialélico cuyas categorías son sus haplotipos locales. Para cada
-  individuo de una población y ploidía P, deben asignarse P haplotipos locales a
-  sus copias haplotípicas biológicas identificadas. Hardy-Weinberg mediante el
-  modelo multinomial debe ser el modo predeterminado para P=1..10. El modelo F
-  debe reutilizar exactamente las fórmulas multialélicas aprobadas y solo debe
-  admitirse en diploides: F=0 coincide con Hardy-Weinberg y F=1 asigna a ambas
-  copias el mismo haplotipo local. F debe rechazarse en P=1 o P>2. Una
-  distribución explícita de combinaciones haplotípicas puede prevalecer
-  localmente conforme a REQ-EVO-49.
-
-  Cada población y bloque debe elegir uno de los dos modos normativos. El modo
-  probabilístico debe ser el predeterminado: sortea cada copia según las
-  frecuencias, permite reutilizar un haplotipo en sorteos distintos y produce
-  recuentos realizados estocásticos. El modo controlado debe solicitar o derivar
-  un vector entero de copias por haplotipo que sume C, construir ese multiconjunto
-  y asignarlo reproduciblemente sin alterar sus totales; no significa muestreo
-  sin reemplazo del catálogo. Cuando un modo controlado exija además recuentos
-  genotípicos finales exactos, la asignación debe ser compatible con HWE, F
-  diploide o la distribución explícita aplicable. Una incompatibilidad
-  matemática debe rechazarse antes de crear individuos, sin ajustar cantidades
-  ni relajar el modelo. Esta restricción no se aplica al modo probabilístico ni
-  convierte F en emparejamiento físico, autofecundación o pedigrí. Deben
-  registrarse los valores esperados, solicitados y realizados.
-
-  Los bloques deben muestrearse independientemente. Un mismo individuo puede
-  combinar haplotipos distintos en bloques diferentes y esa combinación no debe
-  expresar un donante común. V1 no debe imponer un LD objetivo entre bloques,
-  condicionar el haplotipo de un bloque al elegido en otro ni corregir el LD
-  interbloque realizado en una población finita. El modelado posterior de LD
-  entre bloques queda en DTF-044. Esta independencia entre bloques no modifica
-  la construcción recombinante fundadora dentro de cada bloque, que conserva
-  todas las reglas de REQ-EVO-76 y REQ-EVO-77. Cada asignación debe quedar ligada
-  de forma reproducible a la copia haplotípica biológica que la recibió. Los SNP situados
-  fuera de los intervalos de bloque deben proceder del
-  mecanismo vigente de loci independientes de la matriz `alt_af`; esto no
-  implica que las bases situadas entre bloques permanezcan iguales a la
-  referencia. En modo intacto debe seleccionarse exactamente un HAP por cada
-  población×individuo×copia×bloque y copiar conjuntamente todos sus
-  `allele_index`, sin cortes ni mosaicos. Antes de aplicar mutaciones posteriores,
-  el vector debe ser idéntico a un HAP del panel y un HAP con frecuencia 0 nunca
-  debe seleccionarse. Deben registrarse población, bloque, copia biológica y HAP
-  fundador. Las mutaciones de novo posteriores pueden modificar ese estado según
-  el flujo general, pero deben trazarse en una capa separada y no reescribir la
-  identidad ni el origen del HAP fundador.
-- **REQ-EVO-76.** En el modo con recombinación, cada individuo y bloque debe
-  generarse directamente; no debe existir un depósito prototipo seguido de un
-  segundo muestreo ni debe presentarse la operación como una meiosis histórica.
-  El productor de una copia final debe seleccionar primero un HAP primario según
-  las frecuencias del panel. La configuración debe declarar
-  `recombination_probability_per_interbase = r`, finita en (0,1]. Para un bloque
-  de longitud L existen L−1 uniones elegibles y cada una debe sortearse
-  independientemente en cada ejecución del productor. Por ello, K sigue
-  `Binomial(L−1,r)` y la probabilidad de al menos un punto es
-  `1−(1−r)^(L−1)`.
-
-  Cuando K=0, el productor debe devolver intacto el HAP primario. Cuando K sea
-  mayor o igual que 1, debe sortear un HAP secundario según las frecuencias de la
-  población; ambas fuentes pueden coincidir. Los puntos deben ser únicos, estar
-  ordenados y caer estrictamente dentro del intervalo del bloque; se deben
-  admitir varios cruces. Un punto x debe representar la unión situada después
-  de la base x, entre x y x+1; no debe desplazarse hasta un SNP. La salida debe
-  comenzar con la fuente primaria en `start` y alternar secundaria y primaria en
-  cada punto, siempre en orientación directa y sin inversión. Por ejemplo, para
-  `start=100`, `end=300` y puntos 150 y 240, los segmentos deben ser primaria
-  100–150, secundaria 151–240 y primaria 241–300. El productor
-  debe devolver ese mosaico como una copia final. No se deben corregir ni
-  descartar mosaicos para imponer recuentos de fuentes o resultados. DTC-055
-  define y cierra para F6.4 un único constructor común de segmentos y su variante
-  uniforme: recibe las dos fuentes y los puntos ya ordenados, alterna los
-  segmentos con estas convenciones y produce la copia reconstruible. F7.1 debe
-  reutilizar ese constructor; DTPD-111 solo debe decidir cómo los mapas y la
-  semántica meiótica proporcionan sus puntos, sin bloquear F6.4 ni crear un
-  algoritmo paralelo. Los mapas posteriores deben sustituir la probabilidad
-  uniforme por probabilidades dependientes de la posición sin crear otro motor. Los
-  bloques se procesan independientemente y una fuente elegida en uno no expresa
-  continuidad de donante en otro. Los SNP exteriores siguen DTC-054 y el panel
-  de entrada no se modifica. Tanto la fuente primaria como la secundaria deben
-  seleccionarse exclusivamente del panel original mediante
-  `panel_frequencies.tsv`. Un recombinante generado antes en la misma ejecución
-  nunca debe convertirse en fuente, las probabilidades no deben actualizarse y
-  el resultado no debe depender del orden de procesamiento. La recombinación
-  acumulada, la reproducción, las poblaciones evolutivas y el uso de haplotipos
-  descendientes como fuentes pertenecen a F7/F8 y quedan fuera de esta
-  inicialización. Todos los cruces sorteados deben conservarse en la traza,
-  incluidos los que no cambien ningún alelo observado y los pares cuyo efecto
-  alélico neto se cancele.
-
-  En diploides, para cada individuo y bloque debe sortearse primero una variable
-  de Bernoulli con probabilidad F. Si indica autozigosis —dos copias que proceden
-  de la misma realización genética—, se debe ejecutar una sola vez el productor
-  y asignar exactamente su mismo vector a ambas copias. En caso contrario, deben
-  ejecutarse dos productores independientes. Esto implementa directamente
-  `P(ii)=p_i²+F p_i(1−p_i)` y `P(ij)=2(1−F)p_i p_j` para la distribución
-  implícita de vectores finales. F=0 equivale a HWE y F=1 produce todos los
-  individuos homocigotos, sin representar autofecundación, apareamiento ni
-  pedigrí. Cuando P sea distinta de 2, deben ejecutarse P productores
-  independientes y F debe rechazarse.
-
-  Para cada población y bloque deben existir C=N×P copias finales. Estas deben
-  agruparse por su vector completo y ordenado y su frecuencia realizada debe ser
-  `n_h/C`. Un mosaico coincidente con un HAP del panel suma a ese vector sin
-  perder su procedencia recombinante; mosaicos nuevos idénticos comparten
-  categoría. Las frecuencias del panel son el objetivo para seleccionar las
-  fuentes, no frecuencias creadas por un conjunto intermedio.
-- **REQ-EVO-77.** Los modos con y sin recombinación deben ser mutuamente
-  excluyentes para una misma unidad de creación. La configuración debe separar
-  los dos ejes con nombres inequívocos:
-  `haplotype_construction = "intact" | "recombinant"` para construir los
-  haplotipos y `frequency_sampling = "probabilistic" | "controlled"` para
-  tratar sus frecuencias. `haplotype_construction` debe poder declararse como
-  valor general y mediante sustituciones por población y bloque compatibles con
-  DTC-033; la regla conjunta población+bloque debe prevalecer conforme a la
-  precedencia vigente. Poblaciones o bloques distintos pueden usar
-  construcciones distintas, pero una misma combinación población×bloque no
-  puede mezclar ambas. `intact` debe prohibir cualquier parámetro de
-  recombinación. `recombinant` debe exigir
-  `recombination_probability_per_interbase` finita y mayor que 0 y menor o igual
-  que 1 y solo debe admitir `frequency_sampling = "probabilistic"`. La
-  combinación `recombinant` + `controlled` debe rechazarse antes de crear
-  individuos e identificar ambos campos y el ámbito población×bloque efectivo.
-  `intact` debe admitir HWE, F diploide o una distribución genotípica explícita.
-  `recombinant` debe admitir únicamente HWE o F diploide; combinarlo con una
-  distribución genotípica explícita debe rechazarse antes de crear individuos e
-  identificar población, bloque y campos incompatibles. Condicionar una
-  distribución explícita sobre resultados recombinantes queda fuera de v1.
-  Que algunas copias obtengan K=0 por azar no cambia el modo efectivo. El
-  control exacto de fuentes o resultados recombinantes queda fuera de v1.
-  Deben registrar las frecuencias objetivo del panel para las fuentes y los
-  recuentos, frecuencias y genotipos realizados sobre las C copias finales por
-  población, bloque y vector completo, además de las subsemillas. En el modo
-  recombinante deben distinguir el número de ejecuciones del productor con K≥1
-  y el número de copias finales derivadas de ellas: una única salida duplicada
-  por F cuenta como un productor con cruce y dos copias finales derivadas. Por
-  cada productor con cruce deben registrar la fuente primaria, la secundaria,
-  los puntos y la procedencia ordenada de todos los segmentos. También deben
-  distinguir los vectores ausentes del catálogo de entrada. La
-  procedencia intacta y recombinante debe distinguirse aunque el vector final
-  coincida. También deben registrarse los genotipos esperados y realizados y el
-  F realizado, o «no aplicable» fuera de diploides. No se debe presentar como preservado un LD que la
-  recombinación haya modificado.
-
-  La aleatoriedad debe reutilizar exclusivamente el contrato nombrado y local de
-  DTC-037. Los ámbitos deben incluir `population_id`, `block_id`, `individual_id`
-  y, cuando corresponda, `copy_id`, y separar las decisiones de F/autozigosis,
-  fuente primaria, puntos interbase y fuente secundaria. La misma raíz, panel,
-  configuración y versión debe reproducir el resultado. Añadir o reordenar
-  individuos o bloques no debe alterar los IDs existentes, y cambiar `r` en un
-  bloque no debe afectar a otro. Cuando F duplique una salida, debe existir una
-  sola ejecución y procedencia del productor y dos copias biológicas enlazadas a
-  ella. Deben registrarse la versión de derivación, los ámbitos y las
-  subsemillas; no se debe introducir otro generador aleatorio.
-
-  Deben publicarse tres tablas obligatorias. `founder_block_assignments.tsv`
-  debe contener una fila por población, individuo, copia y bloque, con
-  `final_haplotype_id`, `origin_kind` y `process_id`; una salida duplicada por F
-  crea dos asignaciones enlazadas al mismo proceso. Todo productor debe tener un
-  `process_id` tipado conforme a DTC-039, incluso cuando K=0. `origin_kind` debe
-  admitir exactamente `intact` para K=0 y `recombined` para K≥1, aunque el vector
-  final coincida con un HAP del panel. Las dos copias duplicadas por F deben usar
-  el mismo `process_id` y `origin_kind`; no debe existir un origen
-  `autozygous_copy`.
-
-  `recombination_segments.tsv` debe contener una fila por
-  (`process_id`, `segment_index`) con bloque, `start`, `end` y HAP fuente,
-  suficiente para reconstruir la salida. Un proceso K=0 debe contener un único
-  segmento que cubra el bloque completo con su fuente primaria.
-  `realized_haplotype_frequencies.tsv` debe contener una fila por población,
-  bloque y HAP final con `copy_count`, `intact_copy_count`,
-  `recombined_copy_count` y frecuencia `n_h/C`, agrupando vectores idénticos.
-  Debe cumplirse `copy_count = intact_copy_count + recombined_copy_count`; una
-  copia duplicada por F debe contarse dos veces en la categoría de su proceso.
-  Las tres tablas deben compartir el contrato byte a byte de los TSV del panel:
-  UTF-8 sin BOM, LF incluido al final, tabulador, una cabecera exacta y ausencia
-  de comillas, líneas o campos vacíos y columnas extra. Sus cabeceras exactas,
-  donde `\t` representa un carácter de tabulación, deben ser:
-
-  | Fichero | Cabecera exacta |
-  |---|---|
-  | `founder_block_assignments.tsv` | `population_id\tindividual_id\tcopy_id\tblock_id\tfinal_haplotype_id\torigin_kind\tprocess_id` |
-  | `recombination_segments.tsv` | `process_id\tsegment_index\tblock_id\tstart\tend\tsource_haplotype_id` |
-  | `realized_haplotype_frequencies.tsv` | `population_id\tblock_id\thaplotype_id\tcopy_count\tintact_copy_count\trecombined_copy_count\tfrequency` |
-
-  Todos los campos terminados en `_id`, incluido `copy_id`, deben usar su forma
-  ASCII canónica conforme a DTC-039. `segment_index` y los tres recuentos deben
-  usar decimal no negativo sin signo ni ceros iniciales; `start` y `end`,
-  decimal positivo con las mismas reglas;
-  `frequency`, la forma decimal mínima *round-trip* de DTC-049. Las filas deben
-  ordenarse, respectivamente, por población, individuo, copia y orden canónico
-  de bloque; por proceso y `segment_index`; y por población, orden canónico de
-  bloque e ID de HAP. Esas mismas tuplas deben ser sus claves únicas. La clase y
-  versión de cada tabla pertenecen a su enlace de esquema/manifiesto y no deben
-  añadirse como columnas TSV. Cada tabla debe quedar enlazada desde el manifiesto
-  mediante clase, versión, ruta, tamaño y SHA-256.
+- **REQ-EVO-74.** F5 genera internamente bloques haplotípicos sintéticos sobre la
+  única referencia ya resuelta por el TOML general y exactamente un escenario
+  poblacional enlazado. El general es dueño de semilla, ploidía y referencia/hash; el
+  escenario se resuelve desde la ruta relativa al general y sus recursos desde
+  la ruta relativa al escenario. La configuración efectiva y manifiesto repiten
+  esos valores resueltos con igualdad obligatoria; en particular, la semilla
+  aparece como `f5.seed` en ambos JSON, es una cadena de exactamente 64
+  hexadecimales minúsculos y coincide con la semilla efectiva del general. F5 usa configuración general
+  v3, escenario F5 v1, configuración efectiva v5 y manifiesto general v5; las
+  versiones general v2, efectiva v4 y manifiesto v4 permanecen inmutables y no
+  pueden representar F5. El enlace ausente, repetido o expresado como lista se
+  rechaza. Los bloques y
+  posiciones son comunes a las subpoblaciones; cada bloque contiene al menos dos
+  SNP bialélicos A/C/G/T y cada subpoblación genera sus propios haplotipos y
+  frecuencias. F5 no admite panel externo, SV, indels, recombinación, mosaicos,
+  genealogía ni continuidad de donante entre bloques. F6 incorpora SV y F7.1 la
+  primera meiosis. Los bloques pueden ser adyacentes, pero no solapar ni cruzar
+  N o exclusiones. Tamaño y gaps SNP proceden de perfiles versionados. La
+  extensión exige exactamente uno de `block_count`, `covered_bases` o
+  `coverage_fraction`. `eligible_bases` cuenta solo A/C/G/T fuera de máscara;
+  `coverage_fraction` es un decimal finito en `(0,1]` y
+  `target_bases=floor(eligible_bases×coverage_fraction)`. Si resulta cero, si el
+  objetivo no es representable por bloques o falta espacio, falla. La suma de
+  longitudes debe ser exactamente `target_bases` en los dos modos de bases; en
+  `block_count`, el número de bloques debe ser exactamente el solicitado y la
+  cobertura realizada se informa. Ningún objetivo se reduce. F5 no consume la
+  matriz SNV independiente ni un panel o haplotipo suministrado.
+- **REQ-EVO-75.** Por bloque y subpoblación, F5 obtiene marginales SNP desde un
+  espectro configurable y una distribución finita de haplotipos desde un perfil
+  independiente. El perfil `r2(d)` usa intervalos físicos cerrados, disjuntos y
+  sin huecos que cubren todas las distancias enteras de `1` a la longitud máxima
+  admitida menos uno; cada fila fija media objetivo y tolerancia absoluta `0,05`.
+  Se evalúan todas las parejas intrabloque cuya marginal realizada esté entre 0 y
+  1; no se evalúan pares interbloque ni pares con SNP fijado. Un bin sin pareja
+  evaluable se informa `not_applicable`, no es error ni se sustituye por otro
+  bin; solo falla el bloque×subpoblación sin ninguna pareja evaluable. El primer
+  SNP tiene polaridad `+`; cada posterior usa Bernoulli(0,5) reproducible en ese
+  ámbito. En cada pareja evaluable, D debe ser positivo si las polaridades
+  coinciden y negativo en otro caso; el equilibrio de signos es esperado, no una
+  cuota. Las filas `weight` de los cuatro perfiles probabilísticos son
+  probabilidades en orden canónico: suman 1 conforme a DTC-049 o se rechazan;
+  no se interpretan como pesos relativos sin normalización trazada.
+- **REQ-EVO-76.** La búsqueda satisface marginales y LD con límites, tolerancia,
+  orden de desempate y mejor intento definidos en DTC-089. Al agotar el límite
+  configurable falla sin relajación y conserva diagnóstico completo. Fundadores
+  usan solo haplotipos completos e intactos: F5 no crea segmentos ni productores
+  recombinantes. El muestreo probabilístico es predeterminado. El controlado es
+  explícito, fija recuentos de haplotipos que suman exactamente `C=N×P`, exige
+  `|n_h/C-q_h|<=t` por haplotipo, donde `t` se resuelve por
+  bloque×subpoblación, vale `0,5/C` por defecto y solo puede configurarse en
+  `[0; 0,5/C]`; se rechaza antes del RNG propio de cuotas si esa cota es
+  imposible o si `F>0`. F se rechaza en P=1 y P>2; para P=2 duplica la primera
+  copia con probabilidad F y, de lo contrario, ambas se muestrean
+  independientemente. El modo se resuelve y registra para cada
+  bloque×subpoblación; F puede declararse para la población y sustituirse por
+  subpoblación, solo en diploides. F5 consume una ploidía homogénea ya resuelta;
+  el soporte completo de sustituciones por secuencia de REQ-CONF-06 se difiere.
+  El TOML declara un modo predeterminado por subpoblación y puede sustituirlo,
+  junto con `t`, para una pareja única `population_id`×`block_index`; efectivo
+  y manifiesto expanden una fila por bloque×subpoblación con modo solicitado,
+  modo efectivo, procedencia y tolerancias declarada/efectiva.
+- **REQ-EVO-77.** Antes de generar, F5 ejecuta un preflight versionado y resuelve
+  escenario, referencia, subpoblaciones, perfiles, IDs, RNG y todos los esquemas
+  completos sin publicar destino. Un éxito publica exactamente layout, sitios,
+  haplotipos, frecuencias objetivo/realizadas, evaluación LD, fundadores e
+  intentos; un fallo posterior publica solo su diagnóstico. Todos los enlaces
+  tienen ID, clase, versión, orden canónico, ruta, tamaño y SHA-256. Efectivo y manifiesto
+  registran semilla, catálogo RNG, perfiles, algoritmo, límites, mejor intento y
+  procedencia. El preflight calcula con overflow comprobado el coste global
+  bloques×subpoblaciones×intentos×(`H×S²` más propuestas×S), memoria, C de
+  fundadores, bases de referencia recorridas, tramos elegibles maximales
+  materializados y las consultas del recorrido directo de todos los tramos por
+  bloque e intento de layout, filas de perfil/normalización, bins máximos y bytes
+  de salida antes de crear temporales. Emisión y consultas de tramos son costes
+  distintos. La cota máxima de sitios por bloque se obtiene del
+  perfil antes del primer sorteo; operaciones, memoria de trabajo y bytes
+  publicados usan magnitudes y símbolos distintos. Los contratos físicos normativos —campos TOML, perfiles,
+  artefactos, manifiestos, RNG e IDs— son DTC-089. El preflight compara sus
+  cotas reproducibles con máximos efectivos no superiores a 2^28 unidades de
+  operación, 2^30 bytes de memoria de trabajo y 2^31 bytes publicados; el total
+  incluye las copias de configuración y toda salida obligatoria o activada no
+  F5 de la misma ejecución. No usa
+  perfiles externos, RAM detectada ni DTPD-115 para admitir. El éxito incluye,
+  además de los siete TSV, la proyección fundadora obligatoria
+  `outputs/truth.jsonl` v2 con enlace, tamaño, SHA-256 y versión de proyección.
+  `truth.jsonl` v1 permanece histórico e inmutable y no puede publicarse como
+  verdad F5. Todos los escalares del preflight conservados en configuración
+  efectiva y manifiesto deben coincidir exactamente entre ambas copias.
+  Marimo produce el mismo TOML
+  y muestra respuesta Rust; no interpreta biología ni mantiene contrato paralelo.
 - **REQ-EVO-78.** Cuando un evento produzca resultados biológicos o técnicos,
   su manifiesto propio y el manifiesto raíz deben enlazar todos esos resultados
   y conservar su relación con el evento, el conjunto, la referencia y el
@@ -3551,7 +3346,7 @@ a una probabilidad mayor de error.
   BAM o CRAM sintéticos e indicar DTF-051 como destino de la ampliación.
 - **REQ-DAT-20.** Los FASTQ, BAM y CRAM del modo realista deben cumplir los
   estándares de sus formatos y la versión oficial que se elija durante la
-  planificación. Todo BAM o CRAM que se incorpore desde F5.6 debe proceder de
+  planificación. Todo BAM o CRAM que se incorpore desde F6.6 debe proceder de
   un FASTQ final.
 - **REQ-DAT-21.** Cada evento con alineamientos debe usar exactamente un mapeador. Si
   la configuración no elige otro compatible, debe usar minimap2.
@@ -4073,7 +3868,8 @@ suele necesitar dos registros BND relacionados.
   aunque aporte varios ALT. `truth.jsonl` debe conservar para cada alelo final
   la relación explícita ALT↔lista canónica de casos fuente. La cardinalidad
   positiva entre varios casos y una entrada complementaria futura se concretará
-  en F5.5 únicamente a partir de una pérdida real.
+  en F6.5 únicamente a partir de una pérdida real. F5 no genera VCF, BND, SV
+  ni complemento de verdad.
 - **REQ-VER-26.** El complemento debe conservar todo el detalle que se perdería
   en VCF y que sea necesario para reconstruir la secuencia o cambio real, el
   haplotipo y la fase, las coordenadas y el genotipo simulado. El manifiesto debe
@@ -4578,7 +4374,10 @@ comparten una política de aceptación.
   diagnósticos, incluidos IDs, orden, enlaces y resolución de rutas relativas
   entre el documento general y sus escenarios. También debe rechazar antes de
   validar o ejecutar cualquier incompatibilidad entre la versión de la
-  aplicación y las versiones de esquema o catálogos del binario.
+  aplicación y las versiones de esquema o catálogos del binario. En F5, el
+  conjunto válido contiene exactamente el general v3 y un escenario F5 v1;
+  ausencia, lista, multiplicidad o versiones general v2/efectivo-manifiesto v4
+  se rechazan expresamente.
 - **REQ-VAL-55.** La validación de la matriz de frecuencias SNV debe comprobar
   el par TSV+JSON y sus SHA-256, referencia y coordenadas, coincidencia literal
   de `REF`, columnas y semántica `alt_af`, combinaciones población×ALT,
@@ -4593,51 +4392,23 @@ comparten una política de aceptación.
   alternativas. Sobre corpus y generador independientes debe comparar matriz,
   frecuencias y genotipos esperados y realizados sin exigir que una muestra
   finita reproduzca exactamente las frecuencias objetivo.
-- **REQ-VAL-56.** La validación del panel de haplotipos debe reconstruir cada
-  haplotipo local de entrada, derivar sus frecuencias alélicas y comprobar sus
-  sumas y cobertura completa por población y bloque en
-  `panel_frequencies.tsv`, incluidos ceros y fijados, sin valores globales ni
-  heredados. Debe verificar que los bloques no se solapen, que cada sitio esté
-  dentro de su intervalo, que solo existan SNP con alelos A/C/G/T y que no haya
-  sitios repetidos ni solapados. Debe comprobar la cobertura cartesiana exacta
-  bloque×haplotipo×sitio de `panel_haplotype_alleles.tsv`, la unicidad de cada
-  asignación y que todo `allele_index` pertenezca al catálogo del sitio; no debe
-  completar ausencias como `REF`. También debe comparar los vectores completos
-  de un mismo bloque y rechazar todos los haplotipos equivalentes, incluidos los
-  de frecuencia 0, informando bloque e IDs sin fusionarlos ni sumar
-  frecuencias. Antes de crear individuos debe demostrar que
-  cada `block.reference_id` coincide con
-  `metadata.reference.reference_id`, que `metadata.reference.sha256` coincide
-  con el SHA-256 recalculado del FASTA autoritativo y que cada `sequence_id`
-  existe en ese FASTA; debe rechazar mezclas, divergencias o secuencias
-  inexistentes antes de interpretar el panel. También debe demostrar que
-  ningún locus de la matriz `alt_af` cae dentro de un intervalo del panel; cada
-  conflicto debe informar referencia, secuencia, posición y fila o identidad de
-  matriz, además del `block_id` y su intervalo, sin elegir una fuente ganadora.
-  También debe exigir exactamente los cinco ficheros canónicos, comprobar la
-  clase y versión del JSON y verificar ruta, tamaño y SHA-256 de los cuatro TSV y
-  el enlace a la referencia. El contenido tabular solo debe proceder de los TSV,
-  no de una copia en los metadatos. En modo intacto debe detectar cualquier
-  combinación intrabloque ausente del panel. En la alternativa recombinante debe
-  usar un oráculo independiente que no llame a ninguna función de producción
-  examinada. Debe reconstruir los HAP del panel desde referencia, sitios y
-  alelos, y cada mosaico desde `recombination_segments.tsv`; recalcular el ID de
-  contenido; verificar todas las asignaciones; comprobar que la suma de
-  `copy_count` es C=N×P y que cada frecuencia es `copy_count/C`. Debe verificar
-  byte a byte las cabeceras, tipos, orden y claves de las tres tablas de salida,
-  rechazar columnas extra —incluidas clase o versión— y contrastar esas dos
-  propiedades con sus enlaces de esquema/manifiesto. El oráculo debe probar el
-  constructor uniforme cerrado por DTC-055 sin depender de mapas ni semántica
-  meiótica pendientes en DTPD-111.
-
-  El corpus debe incluir el rechazo de `r=0` en modo recombinante, un cruce
-  conocido, cruces múltiples, invisibles y cancelados, resultados repetidos y
-  F=0, intermedio y 1; F=1 debe producir homocigosis sin pedigrí ni
-  autofecundación. Debe comprobar repetición exacta, aislamiento al añadir o
-  reordenar individuos/bloques y paridad Marimo↔TOML. Debe corromper
-  deliberadamente cada tabla, hash, referencia, intervalo, alelo, frecuencia y
-  enlace y demostrar su detección.
-
+- **REQ-VAL-56.** La validación F5 debe usar un oráculo independiente del
+  constructor. Debe releer los siete TSV y reconstruir layout, elegibilidad,
+  objetivo racional exacto, H×S, q, marginales, polaridades, D y `r²`; comprobar
+  `max(q)`, 0,05 inclusivo, pares fijados, bins `not_applicable`, propuestas,
+  terminación y mejor intento. Debe verificar los campos, IDs, clases, versiones,
+  claves, orden, rutas, tamaños y SHA-256 normativos; recalcular IDs BLAKE3 y
+  vectores RNG; detectar corrupción; y comprobar cuotas, F, fundadores intactos,
+  identidades persistentes de copia y asignaciones por bloque separadas, los
+  resúmenes genotípicos esperado/realizado/recontado de REQ-MAN-70, manifiestos
+  de fallo y paridad Marimo→TOML→Rust sin reutilizar cachés del productor. Debe
+  leer `truth.jsonl` v2 desde su enlace y reconstruir por sí solo cada copia,
+  fase, pertenencia a subpoblación, locus, alelo, dosis y recuento fundador por
+  locus×subpoblación; el recuento no puede consultar los siete TSV ni el estado
+  del productor. Mutar por separado ruta, versión de
+  proyección, tamaño y SHA-256 debe invalidar la publicación. También debe
+  recomputar las cuatro auditorías físicas DTC-049 y las tres cotas de recursos,
+  incluidas sus fronteras exactas, sin ejecutar un perfil de rendimiento.
 ### 4.7. Manifiestos de la ejecución y de sus eventos
 
 Los manifiestos son ficheros estructurados de salida que registran lo que el
@@ -4987,7 +4758,18 @@ VCF y no constituya un experimento de secuenciación.
 - **REQ-MAN-70.** Cuando se use el modelo de equilibrio de Hardy-Weinberg o F
   para inicializar una población, debe registrar la ploidía, las frecuencias
   alélicas de entrada y realizadas y las probabilidades, frecuencias y recuentos
-  genotípicos esperados y realizados por locus y población o subpoblación. Si se
+  genotípicos esperados y realizados por locus y población o subpoblación, más
+  un recuento independiente reconstruido desde la proyección fundadora publicada
+  en `truth.jsonl`, sin reutilizar acumuladores ni recuentos del productor. Los
+  vectores por dosis deben incluir probabilidades, frecuencias y recuentos
+  esperados, frecuencias y recuentos realizados y frecuencias y recuentos
+  recontados; los recuentos esperados pueden ser fraccionarios y los realizados
+  y recontados deben ser enteros. Debe enlazar la fuente del recuento y exigir
+  igualdad entre realizado y recontado. En F5, cada copia y cada genotipo
+  publicados identifican estructuradamente `population_id`; el lector agrupa
+  exclusivamente los registros de `truth.jsonl` por
+  `site_id`×`population_id`, resuelve sus portadores y vuelve a calcular las
+  dosis sin consultar TSV, manifiesto ni acumuladores del productor. Si se
   usa F en diploides, debe registrar su objetivo y el F realizado por
   subpoblación y generación, incluidas estimaciones negativas. Para ploidía 1 o
   mayor que 2 debe registrar F realizado como «no aplicable». Debe identificar
@@ -5108,24 +4890,31 @@ VCF y no constituya un experimento de secuenciación.
   globales, loci activos y repartos antes/después; frecuencias y genotipos
   esperados y realizados; y toda autorización de genotipo incompatible o matriz
   vacía.
-- **REQ-MAN-92.** La creación desde un panel de haplotipos debe registrar su ruta
-  y la ruta y SHA-256 de `panel.metadata.json`, `panel_id`, referencia y
-  población, bloques e intervalos, identidades locales, frecuencias objetivo y
-  realizadas por bloque, modo con o sin recombinación, subsemillas y, cuando
-  corresponda, mapas, puntos de cruce y procedencia por segmentos. Cuando se
-  combine con una matriz `alt_af`, debe registrar ambos recursos y que se
-  comprobó que ningún locus independiente cae dentro de los intervalos de
-  bloque. En la alternativa recombinante fundadora debe registrar además la
-  configuración efectiva, F, `recombination_probability_per_interbase`, versión
-  de derivación, semillas y ámbitos, número de productores con cruce, número
-  total de cruces, vectores nuevos y coincidencias con HAP del panel. Debe enlazar
-  `founder_block_assignments.tsv`, `recombination_segments.tsv` y
-  `realized_haplotype_frequencies.tsv` por clase, versión, ruta, tamaño y SHA-256,
-  sin duplicar sus filas en el JSON.
-
-El formato y el esquema del manifiesto se elegirán durante la planificación de
-la implementación teniendo en cuenta que el núcleo se desarrollará en Rust.
-Esta decisión no forma parte de la especificación funcional.
+- **REQ-MAN-92.** F5 debe registrar escenario, referencia, subpoblaciones,
+  la semilla como `f5.seed` hex64 idéntica a la raíz efectiva/general, los cinco
+  perfiles, máscara, elegibles, objetivo racional/layout, marginales,
+  distribución haplotípica, D/`r²`, signos, límites, intentos y mejor resultado,
+  modo por bloque×subpoblación, cuotas, F realizado/ploidía, probabilidades,
+  frecuencias y recuentos genotípicos esperado/realizado/recontado por
+  locus×subpoblación, y catálogos RNG/ID. En éxito debe enlazar
+  exactamente los siete TSV F5, en el orden normativo, por ID, clase, versión,
+  ruta, tamaño y SHA-256, sin duplicar filas. En fallo controlado debe enlazar solo
+  `f5-failure.json` y no presentar temporales como artefactos biológicos. No debe
+  registrar panel, mapa, cruce, mosaico ni segmento recombinante. En éxito debe
+  enlazar además, en el campo separado `truth`, la proyección fundadora
+  `outputs/truth.jsonl` con clase `truth_jsonl`, esquema v2, versión de
+  proyección `f5-founder-truth-projection-v2`, tamaño y SHA-256. La v2 exige
+  identidad estructurada de escenario, subpoblación, copia fundadora, bloque y
+  sitio; `truth.jsonl` v1 permanece histórico e inmutable. Configuración
+  efectiva y manifiesto deben materializar las cuatro auditorías DTC-049 con
+  tolerancia, orden/algoritmo, valores, suma y delta antes y después, y las tres
+  cotas/límites del preflight de recursos junto con bases de referencia
+  procesadas, número de tramos elegibles, `S_bound`, bins, filas de
+  perfil/normalización/TSV/JSON y las tres aportaciones ajenas F5; no basta un
+  nombre de algoritmo o un hash que impida auditar los valores.
+Los manifiestos usan JSON y los esquemas versionados de DTC-035; DTC-089 fija
+el objeto y los enlaces F5. Cambiar su formato o semántica exige una nueva
+decisión y versión, no una elección durante la implementación.
 
 ### 4.8. Resultado mínimo de una ejecución
 
@@ -5141,7 +4930,11 @@ Esta decisión no forma parte de la especificación funcional.
   familias y poblaciones segregantes debe materializar todos los individuos de
   todos los eventos y poblaciones intermedias conforme a REQ-CRU-15. Este es el
   único alcance obligatorio de v1: no debe admitir niveles configurables ni
-  reducirlo automáticamente por el tamaño del escenario.
+  reducirlo automáticamente por el tamaño del escenario. En F5, el fichero es
+  `outputs/truth.jsonl` v2 y proyecta todas las copias, fases, pertenencias,
+  SNP, alelos y dosis de cada fundador mediante
+  `f5-founder-truth-projection-v2`; los siete
+  TSV no lo sustituyen.
 - **REQ-SAL-03.** Toda ejecución válida debe guardar en el directorio de
   resultados una copia de todos los ficheros de configuración realmente usados.
 - **REQ-SAL-04.** Toda ejecución válida debe producir el manifiesto general
@@ -5151,8 +4944,10 @@ Esta decisión no forma parte de la especificación funcional.
   forma predeterminada o por solicitud expresa, y todos sus eventos y conjuntos
   obligatorios estén completos conforme a REQ-SAL-21 a REQ-SAL-26.
 - **REQ-SAL-06.** Si no se solicita VCF, la verdad genotípica debe seguir siendo
-  accesible y reconstruible mediante el fichero de verdad obligatorio. Su
-  formato es `truth.jsonl` v1 y sus esquemas/validación siguen DTC-061.
+  accesible y reconstruible mediante el fichero de verdad obligatorio. Las
+  ejecuciones históricas F2–F4 conservan `truth.jsonl` v1 y DTC-061; F5 usa
+  `truth.jsonl` v2 y la proyección cerrada por DTC-089. Una versión no se
+  reinterpreta como la otra.
 - **REQ-SAL-07.** Cuando se use un FASTQ externo como fuente de contaminación,
   su copia en el directorio de resultados debe formar parte de las salidas
   activadas necesarias para que el experimento sea autocontenido y exportable.
@@ -5359,31 +5154,20 @@ Esta decisión no forma parte de la especificación funcional.
   genotipos incompatibles y matriz vacía deben mostrar individuos/loci o el
   resumen afectado y traducirse a los argumentos específicos, nunca a un
   `--force` general.
-- **REQ-UI-15.** En la fase posterior correspondiente, Marimo debe permitir
-  elegir el directorio del panel en una sección «Bloques haplotípicos en
-  población» y ofrecer acciones explícitas para prepararlo mediante la orden
-  auxiliar Rust y para validarlo. Debe mostrar un resumen de referencia,
-  bloques, sitios, HAP y poblaciones, y permitir mapear cada población del panel
-  a una población simulada. Una tabla por población y bloque debe ofrecer una selección excluyente
-  de `haplotype_construction` entre `intact` y `recombinant`, separada de
-  `frequency_sampling`, y admitir el valor general y las sustituciones por
-  población y bloque. Solo debe mostrar y exportar
-  `recombination_probability_per_interbase` cuando la construcción efectiva sea
-  `recombinant`; el control debe ser tipado. En modo intacto debe mostrar
-  `probabilistic` y `controlled`; en recombinante debe desactivar `controlled` y
-  explicar la incompatibilidad. F solo debe mostrarse para diploides.
-
-  La previsualización debe incluir frecuencias, `P(K>0)`, homocigosis esperada y
-  conflictos con `alt_af`. Para preparar el recurso debe invocar la misma orden
-  auxiliar del binario Rust y no reimplementar su validación. Cuando
-  también se seleccione una matriz `alt_af`,
-  la validación del binario debe mostrar cualquier locus de la matriz situado
-  dentro de un intervalo de bloque antes de ejecutar. La
-  interfaz debe mostrar que la recombinación puede alterar las asociaciones
-  originales y no debe interpretar el panel fuera del binario Rust. Una
-  validación vigente debe ser obligatoria antes de ejecutar. Tras la ejecución,
-  Marimo debe mostrar enlaces y resúmenes de las tres tablas obligatorias sin
-  cargar artefactos grandes completos.
+- **REQ-UI-15.** En F5, Marimo debe editar todos los campos del escenario
+  poblacional sintético: referencia, subpoblaciones, perfiles versionados y sus
+  hashes, máscara, objetivo exclusivo de bloques, límites y presupuestos,
+  ploidía, F y modo/tolerancia por bloque×subpoblación. Debe importar y exportar
+  exactamente un TOML general v3 con exactamente un escenario F5 v1 enlazado;
+  cero o varios escenarios F5 son errores, no variantes de autoría. Debe
+  previsualizar el preflight y, tras ejecutar Rust, resumir layout,
+  marginales, LD, intentos y fundadores mediante los artefactos validados. No
+  debe ofrecer selección o preparación de panel, haplotipos suministrados,
+  construcción recombinante ni mapas. Importar y exportar debe conservar
+  exactamente el mismo TOML que valida y ejecuta Rust.
+  F solo debe mostrarse cuando la ploidía sea 2 y `controlled` debe desactivarse
+  cuando F sea mayor que cero. Una validación vigente es obligatoria antes de
+  ejecutar; cualquier edición posterior la invalida.
 
 ## 5. Mapa conceptual del flujo
 
@@ -5513,7 +5297,7 @@ pendientes.
 | **ACE-53. Alineamientos sintéticos coherentes** | Queda aplazado en DTF-051 el modo directo, incluidas sus categorías, MAPQ, campos y validación propios | Decisión posterior de modo directo |
 | **ACE-54. Lecturas quiméricas** | Una tasa configurable transforma parejas limpias en quimeras sin cambiar su número. Para inserto `L`, el primer segmento es el prefijo de longitud `b`, con `b` uniforme en `1..L-1`; el segundo es un intervalo uniforme de longitud `L-b` de la lista canónica del mismo individuo y biblioteca. En la misma copia se excluyen intervalos que solapen o toquen el prefijo; ambos segmentos se leen en orientación directa antes de aplicar PE. Una falta de candidata detiene antes de publicar. F4 publica FASTQ y recuentos agregados, no procedencia individual ni alineamientos | Vector literal de fuentes, uniones, exclusiones y fallo sin candidata |
 | **ACE-55. Anomalías *paired-end*** | Aplazadas en DTF-055: orientación anómala, inserto observado inesperado y mate no alineado requieren BAM/CRAM y mapeo. F4 solo publica pares FASTQ normales y las quimeras explícitas de ACE-54 | Modelo, métricas y casos de prueba cuando exista mapeo |
-| **ACE-56. Grupo de lectura y archivo por individuo** | Cada individuo tiene exactamente una biblioteca, un grupo de lectura y, en modo realista, un FASTQ o pareja dentro del evento. Los identificadores de muestra, biblioteca, tanda, plataforma y grupo son consistentes entre FASTQ, manifiesto y, desde F5.6, `@RG`/`RG` de BAM o CRAM. F4 no publica procedencia individual; los vínculos transitorios solo permiten validar esas salidas. Cada conjunto futuro por referencia contiene un único BAM o CRAM final por individuo con ese grupo y nunca mezcla referencias | Cabeceras FASTQ, futuros campos `@RG`, validación por reproducción y casos de cardinalidad inválida |
+| **ACE-56. Grupo de lectura y archivo por individuo** | Cada individuo tiene exactamente una biblioteca, un grupo de lectura y, en modo realista, un FASTQ o pareja dentro del evento. Los identificadores de muestra, biblioteca, tanda, plataforma y grupo son consistentes entre FASTQ, manifiesto y, desde F6.6, `@RG`/`RG` de BAM o CRAM. F4 no publica procedencia individual; los vínculos transitorios solo permiten validar esas salidas. Cada conjunto futuro por referencia contiene un único BAM o CRAM final por individuo con ese grupo y nunca mezcla referencias | Cabeceras FASTQ, futuros campos `@RG`, validación por reproducción y casos de cardinalidad inválida |
 | **ACE-57. Una tecnología y una tanda por experimento** | Cada evento que genere FASTQ, BAM o CRAM constituye su único experimento de secuenciación, sin identidad separada, y contiene una tecnología, un perfil, exactamente una tanda y una biblioteca por individuo. Todas las bibliotecas se procesan conjuntamente y, si existen alineamientos, comparten mapeador. Otra biblioteca del individuo, tanda, perfil, tecnología o control exige otro evento. Los carriles se rechazan en v1. Un evento que solo materializa verdad o VCF no es un experimento y no admite campos técnicos | Casos válidos y rechazos por cardinalidad, carril o campo técnico indebido |
 | **ACE-58. CRAM predeterminado y referencia exacta** | Dentro de un evento que solicite alineamientos, cada individuo recibe un CRAM final salvo que se seleccione BAM como alternativa. Cada CRAM está ligado por cabecera y manifiesto a la copia FASTA exacta almacenada entre los recursos comunes, protegida por identificadores y comprobaciones de integridad; no puede asociarse a otra referencia. Una exportación del evento sí copia ese FASTA al paquete autocontenido | Campos, comprobaciones de integridad y casos de referencia incorrecta |
 | **ACE-59. Orden, índice y validación** | Cada BAM o CRAM final se entrega ordenado por coordenadas de forma predeterminada y con un índice compatible elegido según formato, tamaño y necesidad. La configuración y el manifiesto registran formato, orden e índice, y el resultado no se considera completo si alineamiento, índice y referencia no superan la validación conjunta | Herramientas, tipos exactos de índice y casos límite de tamaño |
@@ -5546,11 +5330,11 @@ pendientes.
 | **ACE-86. Linaje detallado de individuos muestreados** | Solo los individuos incluidos en muestreos o materializaciones adicionales solicitados exportan puntos de recombinación y origen de cada segmento. Cada segmento alcanza al individuo y copia haplotípica fundadores y las mutaciones de novo forman capas separadas. La ejecución conserva internamente lo necesario aunque no exporte antepasados intermedios; los resúmenes no enumeran ese detalle | Evolución muestreada/no muestreada y reconstrucción a través de un antepasado no materializado |
 | **ACE-87. Trazabilidad y límites estructurales** | Las coordenadas actuales se relacionan con las fundadoras cuando existe correspondencia, conservando orientación. Cada copia duplicada y cada inserción nueva tiene identificador estable; las deleciones conservan el intervalo fundador ausente. En una copia haplotípica se permiten eventos estructurales no solapados, incluso adyacentes, pero se rechaza solapamiento, anidamiento o modificación de una estructura previa. La única excepción entre fuente y destino de un mismo evento es la duplicación cuya fuente abarca la secuencia completa. Haplotipos distintos pueden solaparse. SNP e indels se permiten en segmentos modificados, salvo si solapan o atraviesan un punto de ruptura; la adyacencia se permite. Historias distintas pueden producir el mismo estado estructural canónico sin perder su trazabilidad | Formato de relaciones y equivalencia canónica; casos de historias distintas |
 | **ACE-88. Modelos de población inicial** | Cada locus o bloque y subpoblación usa modo probabilístico predeterminado o controlado explícito sin mezclarlos dentro de la unidad. Admite Hardy-Weinberg en ploidías 1–10: binomial por dosis en loci bialélicos y multinomial por composición en multialélicos. También admite frecuencias explícitas de genotipo o dosis y genotipos multilocus faseados. En Hardy-Weinberg controlado se fijan recuentos alélicos, pero los genotipos se distribuyen aleatoriamente condicionados al modelo, sin exigir recuentos genotípicos exactos salvo configuración explícita. Frecuencias y recuentos suman, respectivamente, 1 y el total aplicable; los datos incompatibles se rechazan | Casos HWE haploide, diploide y poliploide, bialélico y multialélico, por modo |
-| **ACE-89. LD y fase iniciales** | Por defecto, la población inicial asigna loci independientemente. El LD usa bloques no solapados con haplotipos y frecuencias conjuntas probabilísticas por defecto o recuentos controlados por subpoblación que suman C. Las frecuencias haplotípicas son la fuente de verdad y de ellas se derivan las alélicas; una frecuencia alélica aportada solo valida y una discrepancia fuera de tolerancia es error. Los recuentos se distribuyen entre individuos condicionados al modelo o plantillas. Los bloques conservan fase e identificador a lo largo de las generaciones, sin generar ni calcular D, D' o r² | Formato técnico de bloques, tolerancias y casos de prueba |
+| **ACE-89. LD y fase iniciales** | F5 genera por bloque×subpoblación una distribución haplotípica SNP-only desde marginales y un perfil de media `r²(d)`, sin panel ni haplotipos aportados. La tabla H×S y q son la fuente de verdad; desde ellas se reconstruyen marginales, D, `r²`, signos y frecuencias. El probabilístico muestrea q y el controlado usa únicamente cuotas enteras factibles que suman C. Los bloques conservan fase e identidad y permanecen intactos hasta la primera meiosis de F7.1 | Oráculo H×S/q/D/`r²`, fijos, bins, signos, cuotas y ausencia de panel/recombinación |
 | **ACE-90. Endogamia inicial** | F automático se configura para la población completa o se sustituye por subpoblación exclusivamente diploide, siempre entre 0 y 1 y nunca por locus, región o bloque. Usa las fórmulas bialélica o multialélica de REQ-EVO-47/48: F=0 coincide con Hardy-Weinberg, un valor intermedio modifica las probabilidades según esas fórmulas y F=1 produce homocigosis completa. F en ploidía 1 o mayor que 2 se rechaza antes de simular con ámbito y ploidía. En poliploides se usa HWE sin F o una distribución explícita local, que prevalece. F realizado se calcula solo en diploides, puede ser negativo sin constituir error y figura como «no aplicable» en las demás ploidías | Casos F=0, intermedio y 1; rechazo P=1 y P>2; distribución explícita poliploide; F realizado no aplicable |
 | **ACE-91. Fundadores trazables** | Todos los individuos de la población inicial son fundadores con identificadores estables propios. Cada copia haplotípica también tiene identificador propio aunque su secuencia coincida con otra, y toda traza posterior alcanza una copia fundadora concreta | Formato de identificadores y casos de reconstrucción |
 | **ACE-92. Selección de muestreos** | Un evento admite identificadores explícitos, selección aleatoria sin reemplazo o ambas, además de estratos no solapados por subpoblación, grupos y filtros de genotipo. Los explícitos se incorporan primero y se excluyen del sorteo. Duplicados, individuos incompatibles, estratos ambiguos o tamaños mayores que los elegibles detienen el evento sin reemplazo ni reducción silenciosa | Sintaxis de filtros y estratos y casos de prueba |
-| **ACE-93. Evento explícito inicial** | F4 admite inicialmente un único evento explícito con identificador, selección, una población, FASTQ y subsemilla. Generar FASTQ exige tecnología y perfil; BAM, CRAM y mapeador no forman parte de F4 y se incorporarán desde F5.6 sobre esos FASTQ finales. Un evento que solo materializa verdad o VCF carece de esos requisitos técnicos. Varios eventos o poblaciones se aplazan en DTF-050 | Rechazo de cardinalidad y caso de un evento |
+| **ACE-93. Evento explícito inicial** | F4 admite inicialmente un único evento explícito con identificador, selección, una población, FASTQ y subsemilla. Generar FASTQ exige tecnología y perfil; BAM, CRAM y mapeador no forman parte de F4 y se incorporarán desde F6.6 sobre esos FASTQ finales. Un evento que solo materializa verdad o VCF carece de esos requisitos técnicos. Varios eventos o poblaciones se aplazan en DTF-050 | Rechazo de cardinalidad y caso de un evento |
 | **ACE-94. Organización, atomicidad y exportación** | La raíz conserva una sola copia verificable de cada referencia e índice y un manifiesto general. Cada evento tiene directorio y manifiesto propios; la raíz enlaza su configuración resuelta, referencias y subsemilla incluso antes de que existan resultados. Cuando el evento produce resultados reales, ambos manifiestos los enlazan y los separan por referencia, sin crear resultados vacíos para salidas no activadas. Ejecución, evento, conjunto y artefacto distinguen estados incompleto, completo y fallido. Cada artefacto se publica atómicamente tras validarse; el éxito exige todas las unidades y la trazabilidad obligatoria completas. No se publica ni exporta una versión degradada por recursos. Los conjuntos completos independientes se conservan y el paquete autocontenido valida sus sumas antes y después | Preflight insuficiente, ausencia de degradación, esquema, sumas y formato |
 | **ACE-95. Coordenadas y límites estructurales** | La configuración usa coordenadas basadas en 1 e intervalos cerrados; cada formato externo usa su convención oficial mediante conversión documentada. Cada duplicación usa el estado inmediatamente anterior para interpretar origen y destino y conserva las correspondencias posteriores. Una fuente completa puede insertar la copia dentro de la misma secuencia; una fuente parcial solo puede usar un destino adyacente o externo a su intervalo. Inserciones, deleciones, inversiones y puntos de ruptura respetan las reglas terminales, y toda translocación conserva subeventos, segmentos y orientaciones sin vaciar una secuencia | Representación técnica y casos límite |
 | **ACE-96. Límite local de copias** | El máximo local predeterminado y provisional es 10 copias totales, incluida la original, por familia de copia e intervalo fundador dentro de cada copia haplotípica. Se contabiliza de forma acumulada y separada de ploidía y repeticiones en tándem. Un valor mayor requiere configuración explícita, genera una advertencia y activa una estimación previa de memoria, almacenamiento y volumen de datos. Si supera el presupuesto configurado se rechaza; si no, continúa. No existe otro máximo absoluto fijo y el valor predeterminado debe revisarse mediante pruebas de rendimiento | Pruebas de rendimiento y casos acumulativos y de presupuesto |
@@ -5561,7 +5345,7 @@ pendientes.
 | **ACE-101. VCF estable entre eventos** | Dos eventos con los mismos individuos, referencia y verdad producen VCF con idénticos identificadores locales, coordenadas, REF, ALT y genotipos aunque cambien tecnología, subsemilla, FASTQ, BAM/CRAM o degradaciones | Casos con eventos técnicos diferentes |
 | **ACE-102. ALT fijados y multialélicos** | Un ALT fijado en todas las muestras se incluye porque difiere de la referencia. Varios ALT representables en el mismo locus se reúnen en un registro multialélico normalizado y `GT` conserva ploidía, dosis y fase. Los casos no representables usan el complemento sin pérdida | Casos fijados, multialélicos, poliploides y solapados |
 | **ACE-103. Variantes pequeñas solapadas** | SNP e *indels* pueden solaparse en una copia haplotípica. Los explícitos exigen un orden, se aplican secuencialmente y usan el estado inmediatamente anterior como marco de coordenadas. La verdad actual y el VCF derivan de la secuencia final; el historial marca cada evento como activo, modificado o eliminado. Un objetivo ya eliminado detiene la configuración; no se ignora ni recoloca. Un SNP eliminado por una deleción no se emite como variante actual. Haplotipos distintos se resuelven independientemente y sus alelos finales pueden coexistir como ALT con fase y dosis. Varios eventos de un haplotipo que formen un alelo final se emiten como una sola variante o ALT compleja normalizada y usan complemento si hace falta | Casos secuenciales, multialélicos, complejos, de eliminación y de error |
-| **ACE-104. Modos de frecuencia alélica** | Cada locus o bloque usa exclusivamente modo probabilístico o controlado. El probabilístico es predeterminado, muestrea desde las probabilidades y registra esperado y realizado sin tolerancia controlada. El controlado, solo explícito, elige un vector de recuentos que suma C y minimiza conjuntamente la desviación; exige 0,5/C o una tolerancia más estricta. Después distribuye copias aleatoriamente entre individuos condicionado a Hardy-Weinberg binomial o multinomial, F automático diploide o la distribución explícita. En bloques LD controla recuentos haplotípicos por subpoblación. Restricciones incompatibles detienen y los empates se resuelven con la semilla y se registran | Casos por ploidía, multialelismo, bloques, modelo y restricciones |
+| **ACE-104. Modos de frecuencia alélica** | Cada locus o bloque×subpoblación usa exclusivamente modo probabilístico o controlado. El probabilístico es predeterminado, muestrea desde las probabilidades y registra esperado y realizado sin tolerancia controlada. El controlado, solo explícito, elige un vector de recuentos que suma C y minimiza conjuntamente la desviación; exige 0,5/C o una tolerancia más estricta resuelta para esa unidad. Después distribuye copias aleatoriamente entre individuos condicionado al modelo aplicable. En F5 el TOML admite un valor predeterminado por subpoblación y una sustitución única por `population_id`×`block_index`; efectivo y manifiesto expanden modo solicitado/efectivo, procedencia y tolerancia declarada/efectiva para todas las parejas. Controlado exige F=0; F>0 usa exclusivamente probabilístico. Restricciones incompatibles detienen y los empates siguen el orden o RNG normativo de su fase y se registran | Casos por ploidía, multialelismo, bloques, sustitución, modelo, tolerancia y restricciones |
 | **ACE-105. Normalización de probabilidades y frecuencias** | Todo conjunto que deba sumar 1 se compara con una tolerancia general configurable. Una desviación dentro de ella se normaliza y registra con valores y suma antes y después; una desviación mayor o una suma no normalizable produce un error. El valor predeterminado se fija en implementación. Esta tolerancia no sustituye `0,5/C` ni otras tolerancias específicas con otra finalidad | Valor predeterminado, precisión numérica y casos dentro, fuera y no normalizables |
 | **ACE-106. Catálogo declarativo común** | División, fundación, migración y selección de descendientes usan el mismo catálogo: identificadores, azar, población o grupo, alelo, genotipo, dosis o haplotipo en uno o varios loci, Y/O/NO y cantidad exacta o proporcional. Las proporciones son probabilidades individuales reproducibles y los números exactos seleccionan sin reemplazo o fallan por insuficiencia. Las reglas usan la verdad biológica. Scripts, código, funciones personalizadas y reglas desconocidas se rechazan; una regla nueva exige ampliar el programa y la especificación | Sintaxis técnica de las reglas y casos compartidos por los cuatro procesos |
 | **ACE-107. Colisiones en la generación aleatoria** | Los eventos explícitos se aplican primero en su orden declarado. Después, cada clase cuenta su espacio inicial de oportunidades, sortea una vez su recuento Poisson y se procesa en el orden duplicaciones, deleciones, inversiones, translocaciones, repeticiones en tándem, *indels* y SNP. Cada evento se elige solo entre candidatos válidos en el estado anterior y actualiza el espacio para el siguiente, sin reintentar candidatos inválidos, volver a sortear ni aplicar un límite de intentos. Si faltan destinos para completar el recuento, la generación falla sin aceptar menos ni advertir; se registran oportunidades, media y números sorteado, aceptado antes del fallo y finalmente activo | Casos con colisiones, agotamiento progresivo, denominador inicial y diferencia entre los tres recuentos |
@@ -5571,371 +5355,7 @@ pendientes.
 | **ACE-111. Sustituciones y precedencia entre ejes** | Cada parámetro parte de su regla base y solo admite los selectores de su familia. Una regla aplica cuando coinciden todos sus selectores; se eliminan las dominadas y una única máxima fija el valor. Una regla combinada domina las reglas parciales. Sin esa regla combinada, región frente a subpoblación e individuo frente a región son máximas incomparables y se rechazan aunque compartan valor; también se rechazan reglas duplicadas, regiones solapadas con iguales selectores no espaciales y selectores no admitidos. Generación domina fase, subpoblación domina población, locus domina región y secuencia, y una coincidencia concreta domina la ausencia dentro de los demás ejes. Un evento técnico nunca sustituye biología. Configuración efectiva y manifiesto conservan valor, regla ganadora, selectores y procedencia | Herencia base; todas las jerarquías internas; regla combinada; los dos conflictos cruzados; duplicado igual; regiones solapadas; selector no permitido; separación biológica/técnica; procedencia |
 | **ACE-112. Objetivo y selección de referencia reducida** | Un FASTA real validado origina otra referencia con ID propio. Exactamente uno de `target_bases` o `reduction_percent` fija un objetivo entero positivo y menor que el origen; `region_size_bases` es positivo. El porcentaje expresa bases eliminadas y retiene `floor(S × (100 − p) / 100)` con decimal exacto. El selector directo proporcional usa subsemilla propia, reparte bloques completos por longitud con capacidad comprobada y compone huecos sin enumerar bases; no reemplaza ni solapa, no duplica ni invierte y produce bloques completos más como máximo un residual para alcanzar exactamente el objetivo. Objetivo imposible, espacio insuficiente o parámetros incompatibles fallan antes de materializar | Casos con objetivo exacto/múltiplo/residual, porcentajes próximos a 0 y 100, rechazo de 0/100, objetivo igual/mayor que origen, semilla repetida, cromosomas/*scaffolds*, vector canónico, no solape y espacio insuficiente |
 | **ACE-113. Procedencia y reconstrucción de referencia reducida** | Los intervalos se ordenan por secuencia y coordenada, se concatenan en orientación directa, omiten secuencias sin selección y no crean secuencias vacías. Cada cromosoma o *scaffold* conserva `sequence_id` y clase. `N` se copia y cuenta. FASTA canónico, mapa derivada↔origen, SHA-256, configuración efectiva y manifiesto permiten reconstruir exactamente cada base y explican secuencias omitidas y residual | Reconstrucción con lector independiente, mapa con bordes base 1 cerrados y vectores base 0 semiabiertos, `sha256sum`, FASTA mixto con `N` y corrupción deliberada de cada enlace |
-| **ACE-114. Equivalencia de autoría Marimo** | Todas las opciones implementadas están en una de las nueve pestañas mínimas. Escalares usan controles tipados; listas y reglas, tablas con alta/baja/reordenación y selectores visibles. Importar, editar, previsualizar y exportar como unidad el TOML general y cero o varios escenarios conserva significado, IDs, orden y enlaces/rutas relativas. El binario Rust valida y resuelve; cualquier cambio de cualquier documento invalida la validación previa y una incompatibilidad, escenario ausente o duplicado se rechaza | Matriz opción→pestaña/control; conjunto sin escenarios y conjuntos multiescenario con rutas relativas/espacios/faltantes/duplicados; comparación UI→conjunto TOML→`EffectiveConfig` o diagnóstico con conjunto manual equivalente |
+| **ACE-114. Equivalencia de autoría Marimo** | Todas las opciones implementadas están en una de las nueve pestañas mínimas. Escalares usan controles tipados; listas y reglas, tablas con alta/baja/reordenación y selectores visibles. Importar, editar, previsualizar y exportar como unidad conserva significado, IDs, orden y enlaces/rutas relativas. F2–F4 mantienen su único TOML general; F5 usa exactamente un general v3 y un escenario F5 v1 enlazado. Cero o varios escenarios F5, un enlace duplicado o una versión v2/v4 presentada como F5 se rechazan. El binario Rust valida y resuelve, y cualquier cambio invalida la validación previa | Matriz opción→pestaña/control; F5 con una pareja general+escenario válida y casos ausente/duplicado/múltiple/versiones antiguas; comparación UI→conjunto TOML→`EffectiveConfig` o diagnóstico con conjunto manual equivalente |
 | **ACE-115. Ejecución segura y accesible desde Marimo** | La aplicación nunca ejecuta automáticamente ni usa shell. Una acción explícita tras validación vigente lanza `run` con argumentos separados y destino no-clobber revisado. Muestra estado, código, logs, diagnósticos y enlaces/resúmenes sin cargar artefactos genómicos grandes. Funciona localmente en Ubuntu/WSL2 Linux y ofrece teclado, foco, etiquetas, ayuda y estados no basados solo en color. Cada capacidad F2–F9 añade controles antes de cerrar | Proceso falso y binario real; cambio posterior a validar; destino existente; logs grandes y artefacto grande; revisión de teclado/foco/color; puerta transversal por hito |
 | **ACE-116. Población inicial desde frecuencias SNV** | La ejecución prepara, genera o reutiliza el par canónico TSV+JSON enlazado a una referencia exacta. Solo admite `alt_af`; genera loci bialélicos candidatos sin reemplazo mediante espacio, sustituciones y espectro explícitos y acepta multialelia suministrada. Las poblaciones asignan frecuencias independientemente, permiten 0/1 solo mediante `fixed`, usan siempre intervalos continuos `[min,max)` que no producen esos extremos, eliminan `ALT` globalmente ausentes sin reemplazo y conservan fijados. En modo `exact`, mayores restos fija las cuotas y una permutación reproducible independiente por población asocia las filas a todos los `variant_id`; el valor usa otro flujo, sin consumo para `fixed` ni cuotas cero, y nunca se asigna por coordenada. HWE es predeterminado y `F` solo diploide; cada individuo pertenece a una población y recibe genotipo/fase reproducibles sin LD ni corrección por muestra finita. Los dos perfiles humanos incorporados son aproximaciones descriptivas explícitas, nunca predeterminadas, exactas por superpoblación ni tasas universales; los perfiles suministrados pueden diferir por población. Las dos excepciones de ejecución son específicas, visibles y trazadas | Preparación y hashes; tabla y VCF rechazado; modos exacto con cuotas, permutación y flujo de valor separados, y estocástico; fronteras 0/1; ausencia de correlación espacial; aislamiento poblacional; consumo cero `fixed`/cuota cero; regiones/pesos; 12 sustituciones y Ti/Tv; perfiles uniforme/SFS 1000G aproximado/SNV12 Harris aproximado; receta compacta, fuente CC BY y SHA-256; ceros/fijados; matriz vacía; multialélico; HWE/F; subsemillas y reordenación; flags limitados; errores de suma, duplicado, referencia y `N` |
-| **ACE-117. Individuos desde panel de haplotipos** | Un paquete canónico de cinco ficheros contiene una única referencia, bloques locales, SNP A/C/G/T, HAP únicos y frecuencias densas y lo prepara una única orden Rust. Cada bloque tiene al menos dos sitios y HAP; admite población monomórfica y ALT fijado, pero rechaza sitio siempre REF, referencia/secuencia incompatible y loci `alt_af` dentro del intervalo. `haplotype_construction` se resuelve por población×bloque y se separa de `frequency_sampling`; intacto admite probabilístico/controlado y HWE, F diploide o distribución explícita; recombinante exige solo probabilístico, r en (0,1] y HWE o F diploide, y rechaza una distribución explícita. El productor recombinante opera directamente por individuo×bloque con fuentes exclusivas del panel y el constructor común uniforme cerrado por DTC-055; DTPD-111 solo conecta mapas y meiosis en F7.1. En diploides Bernoulli(F) ejecuta uno duplicado o dos independientes; P≠2 ejecuta P sin F. Un punto x es x\|x+1, alterna segmentos *forward* desde la primaria y conserva cruces invisibles. Un vector conocido reutiliza HAP y uno nuevo deriva ID por DTC-039 desde panel+bloque+contenido. RNG DTC-037 separa F, primaria, puntos y secundaria. Todo productor tiene `process_id`; `origin_kind` distingue exactamente K=0 intacto y K≥1 recombinado. C=N×P copias finales se agregan como `n_h/C` y separan recuentos intactos y recombinados. Tres TSV con cabeceras, tipos, orden y claves exactos conservan asignaciones, segmentos y frecuencias; clase/versión están en sus enlaces del manifiesto. Marimo invoca Rust, presenta controles compatibles y exige validación vigente. | Oráculo independiente que reconstruye HAP/mosaicos/IDs/asignaciones y verifica referencia única, C, `n_h/C`, recuentos por origen y contratos TSV; r=0 rechazado, cruces conocidos/múltiples/invisibles, F=0/intermedio/1, combinaciones de modelo admitidas y rechazadas, fuentes solo del panel, repetición/aislamiento, corrupción de tablas y enlaces, tres salidas y paridad Marimo↔TOML |
-
-Estos criterios son cualitativos y deberán convertirse en pruebas durante la
-planificación de la implementación.
-
-## 8. Estado de las decisiones funcionales
-
-Las 27 preguntas funcionales de la revisión
-[revision-adversarial-especificaciones-0.1.md](./revision-adversarial-especificaciones-0.1.md)
-están resueltas para v1. La ampliación posterior confirma la referencia reducida
-y la aplicación Marimo; el 14 de agosto de 2026 quedaron también cerrados el
-redondeo de `reduction_percent` y la elegibilidad de *scaffolds*. Añadir otro comportamiento,
-selector o clase de regla requerirá revisar expresamente esta especificación;
-las elecciones restantes de la sección 9 son técnicas y no pueden reabrir la
-semántica funcional confirmada.
-
-## 9. Decisiones técnicas aplazadas a la planificación de la implementación
-
-Esta sección solo delimita elecciones de representación e implementación. No
-resuelve ninguna de las decisiones funcionales de la sección 8. Cuando un
-párrafo menciona a la vez una cuestión funcional abierta y una elección
-técnica, primero debe resolverse la cuestión funcional; después podrá elegirse
-la técnica sin cambiar el comportamiento aprobado.
-
-**Formato y esquema de los ficheros de configuración y los manifiestos.** El
-formato y el esquema del fichero general, de los ficheros de configuración
-poblacional y de los manifiestos se elegirán durante la planificación de la
-implementación teniendo en cuenta que el núcleo se desarrollará en Rust. Todos
-deberán seguir siendo estructurados y legibles por el programa. Tampoco se fija
-todavía una sintaxis para describir el catálogo declarativo común, los cruces
-personalizados, los parentales expresos y
-las condiciones de selección. Su significado, capacidad expresiva y validación
-funcional ya están confirmados. La sintaxis elegida no podrá ejecutar scripts,
-código ni funciones personalizadas.
-
-**Integridad y exportación.** Se elegirán el algoritmo concreto de suma de
-comprobación, los esquemas exactos de los manifiestos general y de evento y el
-formato del paquete autocontenido. La elección deberá conservar sumas para todos
-los archivos relevantes y permitir exportar un evento con sus referencias,
-índices, configuraciones, metadatos, salidas y verificaciones necesarias.
-
-**Índices exigidos por cada operación.** Durante esa planificación se
-identificarán los tipos concretos de índice que exige cada operación o formato
-utilizado y se elegirán las herramientas de indexación. En v1, el único índice
-de referencia admitido es un FAI creado bajo demanda. La coexistencia de varios
-tipos de índice se decidirá posteriormente mediante DTF-048.
-
-**Generación aleatoria y reproducibilidad.** Durante la implementación y la
-validación se aplicará `poisson-count-v1` de DTC-067, que resuelve DTPD-120 con
-ramas Knuth/PTRS, `lambda<=2^52`, consumo RNG y matemática `libm` exactos,
-vectores congelados y oráculo estadístico independiente. No se evaluará otra
-distribución como opción de v1 ni un consumidor podrá recortar o volver a
-sortear el resultado. También se aplicará la estrategia técnica de subsemillas o
-  flujos aleatorios independientes y cómo demostrar las garantías separadas de
-  REQ-CONF-111 a REQ-CONF-115 entre versiones del programa, dependencias y
-  plataformas. Estas elecciones conservarán las medias esperadas configurables,
-  los resultados realizados y los niveles de reproducibilidad ya exigidos.
-
-**DECISIÓN TÉCNICA RESUELTA — coordenadas y selección de intervalos para
-referencias reducidas.** DTPD-101 y DTPD-116 quedan resueltas mediante DTC-056 y
-DTC-057. El dominio usa coordenadas internas base 0 semiabiertas y tipos
-etiquetados, mientras configuración y mapa conservan base 1 cerrada. El
-selector directo proporcional canónico reparte bloques completos por longitud,
-compone huecos sin recorrido por bases y reserva después el único residual;
-materializa en orden de secuencia y coordenada, con vector congelado y
-reconstrucción independiente.
-
-**DECISIÓN TÉCNICA RESUELTA — estado haplotípico y fichero obligatorio de
-verdad.** DTPD-102 queda resuelta por DTC-061. El estado interno es híbrido y
-segmentado, comparte referencias/fuentes y solo materializa secuencias completas
-bajo demanda. Su salida obligatoria es `truth.jsonl` v1, UTF-8 sin compresión,
-con cabecera inicial, registros tipados de copias/genotipos, orden canónico,
-recuentos/digests y longitud/SHA-256 en manifiesto. Esquemas por registro y un
-reconstructor semántico independiente deben detectar relaciones
-ausentes/duplicadas/desordenadas y exigir igualdad exacta entre genotipos y
-haplotipos. Todo VCF deriva de `truth.jsonl`; la compresión de la verdad queda
-para una fase posterior sin cambiar este modelo lógico.
-
-**DECISIÓN TÉCNICA RESUELTA — contrato VCF.** DTC-062 fija
-VCF 4.5 como única versión de salida, exige la línea exacta
-`##fileformat=VCFv4.5`, prioriza las representaciones estándar ampliamente
-interoperables y exige validación externa basada en htslib. DTC-063 fija como
-salida predeterminada `.vcf.gz` BGZF con exactamente un índice: TBI solo si
-todas las secuencias y posiciones caben en su límite normativo, aproximadamente
-2^29 bases por secuencia, y CSI si alguna lo supera. La alternativa explícita
-es `.vcf` de texto sin compresión ni índice. `EffectiveConfig` y manifiesto
-registran modo, tipo y rutas; VCF e índice se validan y publican atómicamente.
-DTC-064 fija además una normalización interna determinista y versionada desde
-los haplotipos finales: reconstrucción previa de cambios solapados sobre un
-intervalo `REF` común, recorte con anclaje, alineamiento a la izquierda y orden
-por referencia/coordenada. F2 emite como máximo un registro por `CHROM+POS`,
-agrupa todos los alelos compatibles como ALT multialélicos y no los descompone;
-`bcftools norm` es solo un oráculo externo. Varios BND relacionados en una
-posición quedan como excepción futura para SV/translocaciones. DTC-065 exige
-`GPS_CASE` multivaluado, único y canónicamente ordenado en todo registro, y
-`truth.jsonl` conserva la relación de cada ALT con sus casos fuente. Solo ante
-pérdida aparecen `GPS_LOSS` con código controlado y `GPS_COMPLEMENT`; el único
-`vcf-complement.jsonl` versionado del
-conjunto contiene una entrada completa por caso perdido y está ausente si no
-hay pérdidas. DTC-066 cierra DTPD-103 con aceptación/CI externa mediante
-`bcftools` y HTSlib/tabix 1.24, nunca en runtime, más un oráculo semántico
-independiente y un corpus positivo/de mutaciones. EBI `vcf-validator` no se usa
-como autoridad VCF 4.5.
-
-**DECISIÓN TÉCNICA RESUELTA — recuentos Poisson.** DTC-067 resuelve DTPD-120
-con `poisson-count-v1`: `lambda` finita en `0..=2^52`, cero sin consumo RNG,
-Knuth para valores menores que 10 y PTRS de Hörmann desde 10, uniformes abiertos
-derivados de un `next_u64` ChaCha12 y matemática de `libm` 0.2.16. Un valor o
-candidato fuera de los límites se rechaza sin consumir/recortar/resortear; un
-recuento superior al espacio falla mediante la regla existente. Configuración
-efectiva/manifiesto conservan versión, media, ámbito/subsemilla y sorteo, y los
-vectores/oráculos cubren fronteras y estabilidad Linux/WSL2.
-
-**DECISIÓN TÉCNICA RESUELTA — perfiles humanos compactos.** DTC-068 resuelve
-DTPD-121 con `human_1000g_global_sfs_approx_v1` y
-`human_harris2017_snv12_approx_v1`, ambos explícitos, compactos, aproximados y
-nunca predeterminados. El primero normaliza pesos 64:12:8 sobre
-`[1/5008,0.005)`, `[0.005,0.05)` y `[0.05,1)`; el límite 1 completa la cobertura
-pero nunca se sortea, y el mínimo `1/5008` pertenece a
-la receta publicada y no es universal. El segundo transforma las cinco filas
-continentales y 96 contextos de Harris y Pritchard a 12 sustituciones mediante
-promedio equitativo, colapso por hebra y complemento inverso. Fuente, licencia
-CC BY, fichero de 3.644 bytes, SHA-256, transformación y digests de salida se
-validan en F2.2.6 con un oráculo independiente. F2 no procesa el VCF Phase 3 ni
-usa `bcftools` para estos perfiles; el perfil empírico exacto queda en DTF-016.
-
-**DECISIÓN TÉCNICA RESUELTA — fronteras y selección aleatoria F2.** DTC-075
-conserva los intervalos semiabiertos, los extremos `fixed`, la selección SNV
-estática y la selección dinámica de indels. DTC-079 permite agrupar las
-utilidades y sus pruebas: no se exige un productor, expediente o paso separado
-para cada primitiva interna. Los contratos observables y la reproducibilidad
-siguen siendo obligatorios.
-
-**DECISIÓN TÉCNICA RESUELTA — aplicación Marimo simplificada.** DTC-079
-sustituye para F2 la concreción sobrediseñada de DTC-058. Marimo usa el entorno
-fijado por `pyproject.toml`/`uv.lock`, escucha en `127.0.0.1`, edita un
-único TOML general, invoca directamente `validate`/`run` y muestra
-diagnósticos y resúmenes. Rust conserva la semántica. F2 prueba instalación y
-arranque local; F9 conserva distribución, plataforma oficial, accesibilidad de
-entrega y endurecimiento.
-
-**DECISIÓN TÉCNICA APLAZADA — importación/exportación multidocumento.** DTC-069
-se recuperará con la primera fase que implemente escenarios reales. F2 importa y
-exporta únicamente el TOML general de la vía directa, conserva su significado y
-no sobrescribe accidentalmente un destino. No crea un grafo de documentos,
-copias privadas, preservación opaca ni defensas TOCTOU sin consumidor.
-**DECISIÓN TÉCNICA RESUELTA — matrices y espectros SNV.** DTPD-118 fija el par
-canónico TSV+JSON, la preparación y generación reutilizables, `alt_af` como única
-frecuencia, intervalos no solapados con muestreo fijo/lineal/logarítmico, modos
-estocástico y exacto por mayores restos, poblaciones independientes, espacio
-uniforme o ponderado y 12 sustituciones dirigidas. Los perfiles humanos
-aproximados DTC-068 son ejemplos versionados de selección expresa, no valores
-predeterminados ni perfiles exactos por población. La
-validación debe aportar vectores y productores/oráculos independientes. DTC-060
-liga la preparación a una entrada identificada y verificada del manifiesto F1;
-una ruta FASTA por sí sola no puede aportar `reference_id`.
-
-**DECISIÓN TÉCNICA RESUELTA — receta compacta.** DTPD-121 queda cerrada por
-DTC-068: F2.2.6 regenera recursos pequeños desde los literales publicados y el
-fichero eLife fijado, verifica atribución, tamaño, SHA-256, transformaciones y
-digests y no descarga ni procesa el VCF 1000 Genomes. La materialización exacta
-del VCF y perfiles empíricos exactos quedan en DTF-016/post-v1 y no bloquean F2.
-
-**DECISIÓN TÉCNICA RESUELTA — longitudes de indels F2.** DTC-059 fija por
-separado las longitudes exactas de inserción y deleción aleatorias, ambas con
-1 pb por omisión y dominio desde 1 pb hasta justo antes del umbral estructural
-efectivo. F2 no sortea longitudes ni admite una distribución para ellas.
-
-**BASE FUNCIONAL APROBADA — panel de haplotipos.** El panel representa
-bloques de LD locales, no cromosomas completos ni una identidad de haplotipo que
-se prolongue entre bloques. Cada bloque posee intervalo explícito y no solapado;
-los SNP exteriores a esos intervalos proceden de la matriz `alt_af` y ninguno de
-sus loci puede caer dentro de ellos. Ya se ha fijado que v1 solo admite SNP
-suministrados A/C/G/T, que
-`panel_haplotype_alleles.tsv` es densa y no admite asignaciones implícitas ni
-alelos desconocidos, y que `panel_frequencies.tsv` es densa por población,
-bloque y haplotipo. También queda fijado el paquete exacto de cuatro TSV y un
-`panel.metadata.json` que los enlaza por ruta, tamaño y SHA-256 sin duplicar sus
-tablas, y la orden Rust única que lo prepara sin modificar las entradas. El
-runtime solo acepta el paquete íntegro y compatible. La conversión desde VCF
-queda fuera de v1 en DTF-041: en esta versión se suministran las cuatro tablas o
-se generan externamente. La alternativa recombinante también pertenece a F6.4:
-genera directamente cada individuo y bloque mediante productores que usan solo
-el panel original; Bernoulli(F) decide uno duplicado o dos independientes en
-diploides. La probabilidad uniforme, los puntos x|x+1, la identidad por contenido,
-los ámbitos aleatorios, las tres salidas obligatorias y la interfaz Marimo están
-fijados.
-
-**DECISIÓN TÉCNICA RESUELTA — paneles de bloques haplotípicos.** DTPD-119 queda
-resuelta mediante DTC-055. Los TSV del panel, la semántica de origen/proceso, los
-modelos genotípicos y los contratos intacto/recombinante están fijados.
-`intact` admite HWE, F diploide o distribución explícita; `recombinant`, solo HWE
-o F diploide. Condicionar distribuciones explícitas sobre resultados
-recombinantes queda aplazado.
-Incorporar *indels*, repeticiones, variantes estructurales,
-alelos simbólicos o *breakends* al panel queda en DTF-040 y no presupone un
-formato futuro.
-
-**Tolerancias numéricas.** Durante la implementación se fijarán el valor
-predeterminado y la precisión de la tolerancia general usada cuando frecuencias
-o probabilidades deban sumar 1. La configuración podrá sustituir ese valor. Las
-pruebas deberán cubrir normalización dentro de tolerancia, rechazo fuera de ella
-y sumas no normalizables, conservando los valores antes y después. También se
-fijarán las tolerancias técnicas específicas aún pendientes. Ninguna sustituirá
-`0,5/C` ni otra tolerancia ya acordada con una finalidad distinta.
-
-**Representación técnica de coordenadas.** La configuración y el mapa de
-reducción usan coordenadas basadas en 1 e intervalos cerrados. DTC-056 fija la
-representación interna base 0 semiabierta, los puntos interbase separados y un
-único servicio con conversiones comprobadas que reutilizan F1.6, F2 y las fases
-posteriores. Cada formato externo conserva su convenio oficial. Los VCF de
-referencias distintas se construirán de forma independiente y no se definirá un
-algoritmo de correspondencia entre sus registros.
-
-**Ejecución de los procesos evolutivos.** Se elegirán los algoritmos que apliquen
-la secuencia obligatoria confirmada, N objetivo, intentos y realizado, y Ne realizado,
-selección, migración, eventos de
-subpoblaciones, reproducción y recombinación. Se concretarán la fórmula de Ne
-reproductivo y las reglas para declarar cuándo no es evaluable. La fórmula solo podrá usar
-los progenitores con descendencia y la desigualdad o varianza de sus
-contribuciones. También se concretará la fórmula de F realizado exclusivamente
-para diploides. Esta deberá comparar la heterocigosidad observada y esperada
-según las frecuencias alélicas, y conservar resultados negativos; en ploidía 1
-o mayor que 2 el resultado seguirá siendo «no aplicable». Estas decisiones
-técnicas no deben cambiar los significados funcionales ni las consecuencias de
-validación acordadas.
-
-**Estado genotípico faseado.** DTC-061 fija el estado interno híbrido de cadenas
-ordenadas de segmentos/modificaciones y el fichero externo obligatorio
-`truth.jsonl` v1, con esquemas por tipo y validación semántica independiente.
-Fase, dosis, copia, procedencia y coordenadas deben mantenerse hasta las copias
-haplotípicas finales y permitir reconstrucción completa. Las fases posteriores
-extenderán los tipos de modificación para mutaciones de novo, duplicaciones y
-otras SV sin sustituir este modelo ni exigir materializar todos los genomas
-históricos.
-
-**Representación VCF y complemento de verdad.** DTC-062 a DTC-066 resuelven
-versión, cabecera, compresión/índice, normalización, campos de enlace,
-`vcf-complement.jsonl` y validadores de aceptación de DTPD-103. Las fases de
-repeticiones en tándem y SV concretarán únicamente sus campos estándar o
-específicos y el criterio técnico de tamaño manejable, sin reabrir el contrato
-común. No podrán alterarse la cardinalidad entre casos, registros y entradas ni
-la semántica oficial de campos estándar. La validación debe demostrar la
-validez independiente del VCF y la reconstrucción sin pérdida a partir de las
-salidas enlazadas. El esquema identifica inequívocamente referencia, conjunto y
-muestras, usa `GT` con fase y ploidía reales y excluye `DP`, `AD`, `GQ`, `PL` y
-cualquier otro campo `FORMAT` derivado de observaciones o inferencias.
-
-**Repeticiones en tándem.** Se elegirá la representación técnica de la tasa y del
-sesgo entre expansión y contracción del modelo escalonado simple. Cada mutación
-seguirá cambiando exactamente una unidad completa. También se concretarán los
-modelos opcionales de mutaciones internas ya admitidos. Los límites prácticos de
-longitud y número de loci dependerán de los recursos, no de un límite funcional
-de motivo.
-
-**Estimación de recursos.** Se elegirán y calibrarán los modelos que estimen
-almacenamiento, memoria y tiempo y los umbrales que generan advertencias. Las
-pruebas compararán las estimaciones con consumos reales sin convertirlas en
-garantías exactas.
-
-**Perfiles WGS, mapeo y cobertura.** Se concretarán y validarán los perfiles WGS,
-parámetros y versiones de Illumina-like *single-end* y *paired-end*. Se
-elegirán las distribuciones, tasas y valores cuantitativos exactos de
-longitud, error y calidad y se comprobarán con datos adecuados para cada perfil.
-También se fijarán y probarán los *presets* y valores que minimap2 aplica
-automáticamente y la comprobación del muestreo uniforme y la cobertura
-aproximadamente Poisson. La planificación elegirá la versión concreta de
-minimap2, el catálogo inicial de mapeadores alternativos y las comprobaciones
-técnicas de compatibilidad de herramientas, perfiles, parámetros y referencias.
-Se elegirán además las distribuciones, tasas y valores cuantitativos exactos de
-duplicados, adaptadores, sesgo GC, quimeras, anomalías *paired-end* y las
-categorías y MAPQ sintéticos del modo directo. Estos valores se validarán con
-datos adecuados para Illumina-like. La elección cuantitativa no
-elimina el requisito de que cada degradación sea simulable, configurable y
-  trazable en v1. Tampoco cambia que minimap2 es el mapeador predeterminado,
-  sustituible por configuración, que cada evento que genere alineamientos usa
-  exactamente un mapeador ni que herramienta, versión y parámetros efectivos
-  deben quedar trazados.
-
-**Verdad y procedencia de lecturas.** F4 conserva únicamente el resumen agregado
-definido por DTPD-108; no existe un esquema de verdad ni fichero por lectura.
-La estimación
-automática desde datos reales, el contrato de entrada, el esquema del perfil
-empírico, sus métricas de fiabilidad y su reutilización no son decisiones de
-planificación de v1, sino trabajo futuro.
-
-**Validación interna contra la verdad.** Se elegirán las métricas, métodos
-estadísticos, ámbitos de agregación y esquema de los resultados estructurados
-que comparan FASTQ y BAM o CRAM con la verdad de origen. Las comprobaciones
-deterministas aplicarán errores; las magnitudes aleatorias se informarán sin
-tolerancias de aceptación y sin elevarse a error. Umbrales, intervalos
-estadísticos, categorías de aceptación y escalamiento configurable quedan para
-una versión futura. No se ejecutarán *SNP callers* para realizar esta validación.
-
-**SAM/BAM, CRAM y grupos de lectura.** Se elegirán las versiones oficiales
-exactas de SAM/BAM y CRAM, el catálogo concreto de campos de cabecera, el
-procedimiento para marcar duplicados y la forma técnica de combinar grupos en el
-único archivo final por individuo y referencia. Estas elecciones deben mantener
-la identificación inequívoca de referencia, muestra, evento, biblioteca, tanda
-y grupo de lectura; `SM` como identificador biológico estable; y el
-identificador `RG` único en toda la ejecución. Todos los archivos deberán
-cumplir la versión oficial elegida.
-
-**Contaminación externa y dirigida.** F4 queda limitado al porcentaje total
-sorteado por receptora y al reparto aleatorio entre individuos de su misma
-población. La sintaxis de matrices, pesos dirigidos, FASTQ externos, sus
-validaciones y los datos de integridad se aplazan en DTF-052 sin alterar la
-contaminación sustitutiva ni la procedencia por identificadores y recuentos.
-
-**Mutación.** Se elegirán las tasas predeterminadas, las distribuciones
-cuantitativas de longitud de *indels* y el formato del espectro SNP. Estas
-decisiones no podrán introducir dependencia de contexto SNP ni semántica
-específica de elementos transponibles en la primera versión.
-
-**Recombinación y reproducción poliploide.** Se elegirá el formato de los mapas,
-la generación técnica de posiciones, la comprobación de equivalencia del estado
-estructural canónico y la traza interna de bivalentes. La implementación deberá respetar el mínimo
-confirmado para cromosomas y la regla general con sustituciones por *scaffold*,
-usando exclusivamente cM o bases dentro de una misma regla.
-
-Además de confirmar Rust para el núcleo y minimap2 como mapeador predeterminado,
-esta especificación no elige formatos, índices, otras herramientas, algoritmos,
-*crates*, versión del lenguaje ni arquitectura. La sección 8 enumera las
-familias de decisiones funcionales que siguen abiertas para el alcance de v1.
-
-## 10. Próximos pasos de diseño
-
-1. Resolver las decisiones funcionales abiertas de la sección 8 antes de
-   planificar la fase que bloquea cada una.
-2. Concretar durante la planificación las tolerancias técnicas, la sintaxis del
-   catálogo declarativo común y los metadatos adicionales de muestreo. También
-   se elegirán la fórmula diploide de F realizado y la fórmula de Ne
-   reproductivo, sin reabrir su significado funcional ni adaptar F a otras
-   ploidías.
-3. Definir la representación técnica de intervalos y las pruebas estadísticas
-   del recuento Poisson de variantes aleatorias y del paso unitario de las
-   repeticiones en tándem.
-4. Elegir durante la planificación la sintaxis del grafo de cruces, de los
-   parentales expresos y de las condiciones de selección ya confirmadas.
-5. Concretar y validar con datos adecuados los perfiles Illumina-like
-   *single-end* y *paired-end*, la versión, *presets* y parámetros
-   de minimap2, el catálogo inicial de mapeadores compatibles y las tolerancias
-   del muestreo uniforme y la cobertura
-   aproximadamente Poisson.
-6. Definir el algoritmo de sumas de comprobación, los esquemas de los
-   manifiestos general y de evento y el formato de exportación autocontenida.
-7. Implementar y comprobar el rango por receptora y reparto aleatorio de
-   contaminación entre individuos de la misma población; las fuentes externas y
-   dirigidas quedan en DTF-052.
-8. Completar los perfiles cuantitativos de errores, calidades, duplicados,
-   adaptadores, sesgo GC, quimeras, anomalías *paired-end* y demás degradaciones
-   WGS admitidas.
-9. Definir los campos de cabecera y las versiones de SAM/BAM, CRAM y VCF que
-   identificarán referencia, muestra, evento, biblioteca, tanda y grupo
-   de lectura.
-10. Implementar y validar DTC-056/DTC-057 para coordenadas y el selector directo
-    proporcional reproducible de referencias reducidas, incluido su vector
-    canónico y reconstrucción independiente.
-11. Validar mediante F2.0 la instalación bloqueada y el arranque local fijados
-   por DTC-079, dejando empaquetado y plataforma oficial para F9,
-    versionar su contrato con esquemas, catálogos y binario y no trasladar reglas
-    biológicas a la interfaz.
-12. Completar los casos de prueba restantes y tomar las decisiones de
-    implementación cuando el comportamiento esperado esté suficientemente
-    definido.
+| **ACE-117. Haplotipos sintéticos y LD F5** | Un lector independiente valida el único general v3+escenario F5 v1, los cinco perfiles y sus hashes, el decimal racional de cobertura, elegibilidad A/C/G/T, factibilidad exacta y límites. Reconstruye los siete TSV y `truth.jsonl` v2: H×S, q, marginales, D/`r²`, bins, signos, propuestas, mejor intento, cuotas, F, copias, pertenencia, fase, genotipos y fundadores. Recuenta MAN-70 solo desde la verdad estructurada por locus×subpoblación, recalcula las auditorías DTC-049 y las cotas deterministas de operaciones/memoria/bytes 2^28/2^30/2^31, incluidas filas de perfil/normalización, bins y la cota de sitios previa al RNG; comprueba la igualdad de `f5.seed`, modo/tolerancia por bloque×subpoblación, coste acotado sin `2^H`, BLAKE3, RNG, enlaces/versiones/hashes y paridad Marimo→TOML→Rust. No acepta panel externo, SV, repeticiones, mosaicos ni recombinación F5 | Fixtures de cardinalidad/versiones, decimal extremo, objetivo no representable, perfiles/hash, H/S/celdas, D/`r²` degenerado, modos/tolerancias, fronteras de recursos, DTC-049, MAN-70 solo desde verdad v2, `f5.seed`, empate/agote, cuota imposible, F/P, cada artefacto/hashes, vectores ID/RNG y fallo sin artefactos biológicos |

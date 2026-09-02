@@ -173,7 +173,7 @@ originales, únicos y en orden canónico. No se crea un caso compuesto. El plan
 cubre dos ALT/dos casos, un ALT/dos casos y un caso repartido en varios
 registros. F2 no fabrica pérdida ni complemento: `GPS_LOSS`, `GPS_COMPLEMENT` y
 `vcf-complement.jsonl` deben estar ausentes en sus casos representables. La
-primera prueba positiva real queda asignada a F5.5.
+primera prueba positiva real queda asignada a F6.5.
 
 ## 9. Capacidades, plataforma, Marimo y perfiles compactos
 

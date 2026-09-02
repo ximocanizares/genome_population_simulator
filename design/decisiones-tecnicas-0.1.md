@@ -1,8 +1,8 @@
 # Registro de decisiones técnicas del simulador
 
 - **Versión:** 0.2
-- **Estado:** F1 cerrado; decisiones F2 simplificadas y pendientes de revisión
-- **Fecha:** 21 de agosto de 2026
+- **Estado:** F1 cerrado; DTC-089 cierra las decisiones técnicas F5
+- **Fecha:** 1 de septiembre de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Arquitectura relacionada:**
@@ -99,14 +99,14 @@ planificación; ya no existe una discrepancia entre fuentes.
 | <a id="dtc-046"></a>DTC-046 | La línea base inicial usa tres escenarios sintéticos del mismo recorrido: A, aceptación de 100 kbp; B, crecimiento con referencias de 1, 10 y 100 Mb; y C, observación de 1 Gb manual o programada. **DTC-078 limita F1 a ejecutar A/B/C en el entorno local disponible; la comparación nativa de publicación y OCI pertenece a F9.** Resolución de DTPD-013; REQ-NOF-01 a REQ-NOF-08; hoja de ruta F0.4, F1 y F9 | Obtener evidencia comparable de corrección y crecimiento sin convertir medidas iniciales en promesas de producto | Se miden tiempo total y por etapa, CPU cuando sea fiable, RSS máximo, bytes de entrada, temporales y salida, MB/s y número de ficheros o artefactos. Se usa una construcción optimizada y portable, sin `target-cpu=native`, configuración y semilla fijas, salida limpia y repeticiones suficientes. F1 registra el entorno local efectivo y conserva la línea base; F9 repite la aceptación de publicación en Ubuntu 24.04 nativo y OCI. No hay inicialmente objetivos de producto ni fallos por pequeñas variaciones temporales: corrección e integridad siguen siendo obligatorias. Umbrales y presupuestos permanecen en DTPD-115. Estos tamaños son cargas sintéticas, no una promesa de escala biológica futura |
 | <a id="dtc-047"></a>DTC-047 | Los validadores independientes de v1 son dependencias de pruebas, CI y aceptación de publicaciones; no se ejecutan sobre cada fichero de una ejecución normal ni requieren instalación por la persona usuaria. El runtime valida internamente los artefactos e invariantes que corresponden a su fase. **DTC-078 asigna a F1 únicamente los oráculos de TOML, FASTA, SHA-256 y JSON necesarios para sus salidas; listado/extracción de `.tar.gz` e inspección/arranque OCI se ejecutan en F9.** Resolución de DTPD-014; REQ-FMT-04/07, REQ-VAL-01 a REQ-VAL-51 y REQ-SAL-05; hoja de ruta F1 y F9.5 | Obtener un oráculo distinto del productor sin convertir herramientas de prueba en dependencias operativas ni duplicar todo el coste de validación en cada ejecución | FASTA se contrasta con `samtools faidx`, SHA-256 con `sha256sum` y documentos JSON con una implementación JSON Schema distinta. En F9, `.tar.gz` se contrasta mediante listado y extracción estándar y la imagen OCI mediante inspección y arranque de prueba. En sus fases, VCF se contrasta con bcftools y BAM/CRAM con samtools u otra referencia independiente. Los casos incluyen válidos, truncados, corruptos, campos desconocidos y errores de borde; CI fija y registra versiones y plataforma. El mismo escritor o lector nunca es el único oráculo. Validez formal y corrección biológica se prueban por separado. Una auditoría externa opcional en runtime queda fuera de v1. DTC-048 rige la fijación de versiones y las DTPD de formatos posteriores, sus validadores concretos |
 | <a id="dtc-048"></a>DTC-048 | El toolchain oficial inicial es exactamente Rust 1.97.1 stable, verificado como estable actual el 16 de julio de 2026. Al crear F1, `rust-toolchain.toml` fija `channel = "1.97.1"`, `profile = "minimal"`, los componentes `rustfmt` y `clippy` y el target `x86_64-unknown-linux-gnu`; la edición `2024` se declara en cada `Cargo.toml` o en el workspace, no en el fichero de toolchain. `Cargo.lock` se versiona para la aplicación y CI y entregas usan `--locked`. Resolución de DTPD-015; REQ-CONF-111 a REQ-CONF-115, REQ-MAN-05 y REQ-REP-22/23; hoja de ruta F1.1 | Hacer reproducible y auditable la construcción sin declarar una compatibilidad mínima que no se prueba ni trasladar Rust a las personas usuarias del binario o imagen | No existe otra MSRV inicial: el compilador admitido es el fijado. Manifiesto y metadatos registran rustc y Cargo, edición, lock o resolución efectiva y herramientas, sin prometer identidad binaria. Las versiones concretas de crates se eligen al implementar F1 después de comprobar compatibilidad y DTC-043 y quedan fijadas por el lock; una candidata evaluada no cuenta aún como fijada. Toda actualización de Rust o dependencias es deliberada y aislada y exige pruebas, validadores independientes, vectores de RNG y reproducibilidad y escenarios de rendimiento; después se vuelven a declarar garantías sin asumir equivalencia. Rust 1.97.1 sustituye la propuesta accidental basada en Rust 1.94.0 local. Las personas usuarias de binario o imagen no necesitan Rust |
-| <a id="dtc-049"></a>DTC-049 | Los valores numéricos configurables de probabilidad o frecuencia y sus tolerancias generales se representan como `f64`. Todo valor y tolerancia debe ser finito; una probabilidad o frecuencia pertenece al intervalo cerrado `[0,1]`. La tolerancia absoluta general es configurable en el intervalo cerrado `[0, 1e-6]` y vale `1e-9` por defecto. Resolución parcial de DTPD-110; REQ-CONF-106/107, REQ-VAL-40, REQ-MAN-81 y ACE-105 | Obtener una validación y normalización únicas, auditables y reproducibles sin convertir el orden físico o el paralelismo en parte accidental del resultado | Los valores se recorren en orden canónico estable por identidad y categoría y se suman con Neumaier, sin reducción paralela. Se calcula `delta = abs(suma - 1)` y el borde inclusivo acepta `delta <= tolerancia`. Si se acepta y la suma es positiva, finita y normalizable, cada valor se divide por la suma y se recomputan suma y delta con el mismo algoritmo y orden; si excede la tolerancia, la suma no es positiva o finita, la normalización no produce valores válidos o una entrada es inválida, se rechaza antes de simular. Configuración efectiva y manifiesto registran tolerancia efectiva, orden canónico, algoritmo y versión, suma y delta, y valores antes y después. Toda serialización decimal debe permitir recuperar exactamente el mismo `f64`; las garantías de reproducibilidad exigen conservar estas condiciones. Es una validación determinista de configuración: no altera DTC-024, no sustituye `0,5/C` ni ninguna tolerancia específica y no selecciona crate |
+| <a id="dtc-049"></a>DTC-049 | Los valores numéricos configurables de probabilidad o frecuencia y sus tolerancias generales se representan como `f64`. Todo valor y tolerancia debe ser finito; una probabilidad o frecuencia pertenece al intervalo cerrado `[0,1]`. La tolerancia absoluta general es configurable en el intervalo cerrado `[0, 1e-6]` y vale `1e-9` por defecto. Resolución general de DTPD-110, completada para F5 por DTC-089; REQ-CONF-106/107, REQ-VAL-40, REQ-MAN-81 y ACE-105 | Obtener una validación y normalización únicas, auditables y reproducibles sin convertir el orden físico o el paralelismo en parte accidental del resultado | Los valores se recorren en orden canónico estable por identidad y categoría y se suman con Neumaier, sin reducción paralela. Se calcula `delta = abs(suma - 1)` y el borde inclusivo acepta `delta <= tolerancia`. Si se acepta y la suma es positiva, finita y normalizable, cada valor se divide por la suma y se recomputan suma y delta con el mismo algoritmo y orden; si excede la tolerancia, la suma no es positiva o finita, la normalización no produce valores válidos o una entrada es inválida, se rechaza antes de simular. Configuración efectiva y manifiesto registran tolerancia efectiva, orden canónico, algoritmo y versión, suma y delta, y valores antes y después. Toda serialización decimal debe permitir recuperar exactamente el mismo `f64`; las garantías de reproducibilidad exigen conservar estas condiciones. Es una validación determinista de configuración: no altera DTC-024, no sustituye `0,5/C` ni ninguna tolerancia específica y no selecciona crate |
 
 | <a id="dtc-050"></a>DTC-050 | V1 incorpora en F1.6 una referencia reducida derivada de un FASTA real ya admitido por F1.5. Usa exactamente un objetivo por bases o porcentaje, selección reproducible sin reemplazo ni solapamiento, orden relativo/orientación conservados, como máximo un residual, `N` literal y publicación conjunta de FASTA canónico, mapa completo, SHA-256 y manifiesto. REQ-CONF-124 a REQ-CONF-127, REQ-REF-24 a REQ-REF-36, REQ-VAL-52/53, REQ-MAN-89/90 y REQ-SAL-27 | Decisión funcional explícita del 10 de agosto de 2026, completada el 14 de agosto de 2026 | `reduction_percent` expresa el porcentaje eliminado, pertenece a `(0,100)` y retiene `floor(S × (100 − p) / 100)`. El parser conserva el literal decimal TOML y efectúa el cálculo racional con aritmética comprobada; convertir antes a `f64` está prohibido. Todo objetivo debe ser menor que `S`. Cromosomas y *scaffolds* son elegibles, conservan ID y clase y nunca se mezclan. DTC-056/DTC-057 resuelven coordenadas y selección. La reducción no es captura dirigida ni variante estructural biológica |
 | <a id="dtc-051"></a>DTC-051 | Toda capacidad configurable de v1 debe estar disponible en Marimo además de TOML/CLI. La aplicación invoca `validate`/`run` sin shell; Rust, esquemas, `EffectiveConfig` y manifiestos conservan autoridad. F2 usa un TOML general y cada fase añade los controles de sus capacidades reales; los escenarios aparecen con su primer consumidor. REQ-UI-01 a REQ-UI-15 y REQ-VAL-54 a REQ-VAL-56 | Decisión funcional explícita del 10 de agosto de 2026, simplificada por DTC-079 | No autoriza Python dentro del núcleo, ejecución automática, reglas duplicadas, paquetes de resultados ni carga completa de artefactos grandes. DTC-079 concreta la interfaz local proporcional y F9 conserva distribución/endurecimiento. |
 | <a id="dtc-052"></a>DTC-052 | Los SNV heredables iniciales de F2 proceden de una matriz de frecuencias común a la población, suministrada o generada desde número/densidad, espacio, sustituciones y un espectro alélico explícito. Los loci son marginalmente independientes; Hardy-Weinberg es el modelo predeterminado y `F` solo se admite en diploides. REQ-CONF-128 a REQ-CONF-130, REQ-IND-60 a REQ-IND-65, REQ-VAL-55, REQ-MAN-91 y REQ-UI-14 | Decisión funcional explícita del 10 de agosto de 2026, ampliada tras revisar espectros empíricos | Separa creación de la matriz y muestreo de genotipos; no usa densidades SNP independientes por individuo, no inventa LD y no convierte 1000 Genomes o ExAC en un perfil universal. En F2, HWE cubre P=1..10 y F solo P=2; una distribución genotípica explícita no tiene esquema/controles y cierra REQ-CONF-130 en F6.2. DTC-054 resuelve los formatos, algoritmos y perfiles de DTPD-118 |
-| <a id="dtc-053"></a>DTC-053 | Una fase posterior admite un panel de bloques de LD locales para crear individuos. Su paquete canónico contiene exactamente `panel_blocks.tsv`, `panel_sites.tsv`, `panel_haplotype_alleles.tsv`, `panel_frequencies.tsv` y `panel.metadata.json`. El JSON declara clase/versión/`panel_id`, referencia y SHA-256, coordenadas base 1 cerradas y clase/ruta/tamaño/SHA-256 de cada TSV, más procedencia/herramienta cuando exista, sin duplicar tablas. Cada bloque declara `block_id`/`reference_id`/`sequence_id`/`start`/`end`; cada sitio ordenado, `block_id`/`site_id`/posición/`REF`/`ALT`. Los intervalos no se solapan y cada haplotipo se identifica por `block_id` + `haplotype_id`. V1 solo admite SNP suministrados bialélicos o multialélicos con `REF`/`ALT` de una base A/C/G/T. `panel_haplotype_alleles.tsv` es densa: una asignación por sitio y haplotipo, 0=`REF`, 1..N=`ALT`, sin ausencias, duplicados ni alelos fuera de catálogo. `panel_frequencies.tsv` es densa por población, bloque y haplotipo, incluidos 0/1, sin frecuencia global ni herencia entre poblaciones; sus sumas siguen DTC-049. Dentro del bloque se hereda la combinación local; fuera de sus intervalos, los SNP proceden de la matriz `alt_af`. Ningún locus de la matriz puede caer dentro de un intervalo de bloque: el conflicto detiene antes de crear individuos, identifica bloque/intervalo y locus/fila y no admite prioridad ni sobrescritura. El modo intacto conserva cada combinación intrabloque; la alternativa recombinante forma copias fundadoras directamente por individuo y bloque, reutiliza el motor común y conserva procedencia por segmentos. REQ-EVO-74 a REQ-EVO-77, REQ-VAL-56, REQ-MAN-92 y REQ-UI-15 | Decisión funcional explícita del 10 de agosto de 2026, precisada el 12–13 de agosto de 2026 | F6.4 incorpora paquete y ambas alternativas de inicialización; F7.1 reutiliza el motor común para meiosis después de resolver DTPD-111. La alternativa fundadora no es una meiosis histórica. No se infieren haplotipos desde frecuencias marginales, no se imputa `REF` o frecuencia 0 por ausencia ni se promete conservar LD después de recombinar. Otras clases de variante quedan en DTF-040 |
+| <a id="dtc-053"></a>DTC-053 | **Superada por DTC-089 para F5.** Conserva solo historia documental del panel externo; no es contrato ni entrada vigente. | Evitar retorno del modelo retirado | F5 sintético; F6 SV; F7.1 meiosis. |
 | <a id="dtc-054"></a>DTC-054 | DTPD-118 se resuelve con una matriz canónica `population_snvs.tsv` + `population_snvs.metadata.json`, ligada por SHA-256 a una referencia y con `alt_af` como única frecuencia. Una orden prepara entradas tabulares y otra genera el mismo recurso reutilizable. La generación produce candidatos bialélicos sin reemplazo; usa espacio uniforme o regiones no solapadas ponderadas, 12 sustituciones dirigidas y un espectro no solapado fijo/lineal/logarítmico en modo estocástico o exacto por mayores restos. REQ-CONF-128/129, REQ-IND-60 a REQ-IND-65, REQ-VAL-55, REQ-MAN-91, REQ-UI-14 y ACE-116 | Decisiones explícitas aprobadas el 12 de agosto de 2026 | Poblaciones y subsemillas son independientes; 0 y 1 son válidos, se eliminan sin reemplazo los `ALT` globalmente ausentes y se conservan los fijados; una suma ALT menor o igual que 1 conserva `REF=1-suma`, un exceso dentro de tolerancia se normaliza a 1 y otro mayor se rechaza. La multialelia aleatoria y conversión VCF se aplazan a DTF-039/038. `uniform_snv12_v1` es el valor de sustitución predeterminado; los perfiles humanos aproximados de DTC-068 son ejemplos explícitos, nunca implícitos ni tasas universales. Genotipos incompatibles y matriz vacía solo pueden continuar mediante autorizaciones específicas trazadas, no `--force` general. DTC-049 rige `f64`, Neumaier y tolerancia |
-| <a id="dtc-055"></a>DTC-055 | DTPD-119 se resuelve con un paquete canónico de bloques haplotípicos locales, preparado por una única orden Rust, y dos construcciones por población×bloque: intacta o recombinante fundadora. REQ-EVO-74 a REQ-EVO-77, REQ-VAL-56, REQ-MAN-92, REQ-UI-15 y ACE-117 | Permitir LD local y recombinación fundadora reproducible sin confundir bloques con cromosomas, F con reproducción ni la fuente poblacional con sus resultados | Los cuatro TSV tienen esquema y orden exactos y una única referencia; v1 solo admite SNP A/C/G/T y fuentes del panel original. Intacto admite muestreo probabilístico/controlado y HWE, F diploide o distribución explícita. Recombinante admite solo muestreo probabilístico y HWE o F diploide, usa productores directos, el constructor común uniforme cerrado aquí, puntos x\|x+1, IDs DTC-039 y RNG DTC-037, y rechaza distribución explícita; DTPD-111 solo conecta mapas/meiosis en F7.1. Los bloques se muestrean independientemente sin LD interbloque objetivo, mientras DTF-044 reserva esa dependencia posterior sin retirar la recombinación fundadora intrabloque. Tres TSV de salida con esquemas exactos y el manifiesto conservan asignaciones, segmentos, frecuencias y origen/proceso reconstruibles. DTF-040 a DTF-044 delimitan ampliaciones futuras |
+| <a id="dtc-055"></a>DTC-055 | **Superada por DTC-089 para F5.** Paquete y recombinación fundadora retirados. | Evitar dos contratos F5 | DTC-089 rige; F7.1 define meiosis. |
 | <a id="dtc-056"></a>DTC-056 | DTPD-101 se resuelve con una única representación interna base 0 semiabierta. Una posición de base, un punto interbase y un intervalo no son intercambiables; cada valor viaja etiquetado por `reference_id` y `sequence_id`. Configuración, mapa de reducción y demás contratos propios externos conservan base 1 cerrada, y cada formato ajeno mantiene su convenio oficial. REQ-REF-29/35/36, REQ-IND-38 a REQ-IND-40, REQ-VAL-53 y ACE-113 | Evitar desplazamientos silenciosos y disponer de un contrato común para reducción, variantes, segmentos, anclas y composición | Las magnitudes usan `u64` y aritmética comprobada. Un intervalo interno `[start,end)` exige `start < end` y longitud `end-start`; un punto interbase admite `0..=sequence_length`. La conversión externa `[s,e]`↔interna `[s−1,e)` es exclusiva de las fronteras, exacta y reversible; desbordamiento, referencia/secuencia incompatible o valor fuera de rango se rechaza sin recorte. Los DTO externos no atraviesan el dominio y F2 extiende el mismo servicio sin crear otra convención |
 | <a id="dtc-057"></a>DTC-057 | DTPD-116 usa un selector directo proporcional. Reparte las regiones completas entre secuencias según longitud, con desempate FASTA y capacidad comprobada, y sitúa bloques no solapados por composición directa de huecos; el residual se reserva en una secuencia factible y queda último en el orden de selección. REQ-CONF-126/127, REQ-REF-24 a REQ-REF-36, REQ-VAL-52/53, REQ-MAN-89/90 y ACE-112/113 | Obtener tamaño exacto, coste proporcional al número de bloques y azar reproducible sin reintentos | Preflight rechaza una disposición inviable antes de consumir RNG. El mapa conserva intervalos, clase y orden; materialización y mapa se ordenan por FASTA/coordenada. Un vector congelado y reconstrucción independiente verifican el contrato. |
 | <a id="dtc-058"></a>DTC-058 | **Superada para F2 por DTC-079.** Conserva la historia de la concreción inicial de Marimo, pero sus protocolos, almacén de sesión, endurecimiento y puertas experimentales no son obligaciones de F2. | Evitar que una decisión técnica histórica mantenga infraestructura sin consumidor | Las versiones efectivas quedan fijadas por `pyproject.toml` y `uv.lock`; F2 prueba instalación desde el repositorio, arranque local y recorrido con el binario. Distribución, plataforma oficial y endurecimiento se verifican en F9. |
@@ -123,8 +123,8 @@ la configuración efectiva conserva esa elección y el manifiesto enlaza el VCF
 único, la referencia, muestras, modo y el único índice aplicable. Tamaño y
 SHA-256 de VCF e índice se conservan exclusivamente en el catálogo físico.
 | <a id="dtc-064"></a>DTC-064 | La proyección VCF aplica una normalización interna determinista y versionada a partir de los haplotipos finales de `truth.jsonl`: recorte de prefijo/sufijo común sin perder el anclaje requerido, alineamiento a la izquierda contra la referencia y orden por catálogo de referencia y coordenada. `bcftools norm` es solo un oráculo externo de prueba, no una dependencia de ejecución. En F2 existe como máximo un registro por `CHROM+POS`; todos los alelos finales compatibles se integran como `ALT` de un único registro multialélico y no se descomponen automáticamente. Resuelve normalización/agrupación dentro de DTPD-103; REQ-FMT-05/06, REQ-VER-15/16/17/30/44 y ACE-25/29/30 | Derivar una representación canónica repetible de la verdad haplotípica sin introducir una segunda autoridad ni perder la relación entre alelos del mismo sitio | Ante cambios solapados se reconstruye primero el alelo final de cada haplotipo y se usa un intervalo `REF` común suficiente para representar alelos de longitudes distintas antes de recortar y alinear. Configuración efectiva/manifiesto registran la versión del algoritmo. La restricción de un registro por posición se limita a SNP e *indels* pequeños de F2: SV/translocaciones futuras podrán requerir varios BND relacionados, incluso en una misma posición, conforme al estándar. DTC-066 integra esta decisión en el cierre de DTPD-103 |
-| <a id="dtc-065"></a>DTC-065 | Todo registro VCF declara y usa `INFO/GPS_CASE` con `Number=.` y `Type=String`. Contiene los `case_id` originales únicos, en orden canónico, de todos los casos de `truth.jsonl` que aportan algún ALT; no se crea un caso compuesto y un caso aparece una sola vez aunque aporte varios ALT. `truth.jsonl` conserva para cada alelo final la relación ALT↔lista ordenada de casos fuente; si un ALT procede de varios casos, conserva todos. Un caso que abarca varios registros repite su ID en cada uno. Solo si el VCF pierde detalle añade `INFO/GPS_LOSS`, código cerrado/versionado y nunca texto libre, e `INFO/GPS_COMPLEMENT`, ID de la entrada enlazada. Resuelve RAF2-030 y `INFO`/complemento dentro de DTPD-103; REQ-VER-19/23 a REQ-VER-26, REQ-MAN-27/31, REQ-SAL-12 y ACE-33/108 | Mantener un VCF válido y una trazabilidad muchos-a-muchos explícita sin perder identidades originales, duplicarlas ni fabricar un caso compuesto | La cabecera declara los tres campos con número, tipo y descripción conformes a VCF 4.5. F2 prueba dos ALT/dos casos, un ALT/dos casos, un caso/varios registros, reordenación de entrada, duplicados e ID inexistente; como todos sus casos son representables, `GPS_LOSS`, `GPS_COMPLEMENT`, entradas y fichero permanecen ausentes. Cada conjunto genera como máximo un `vcf-complement.jsonl` versionado y solo ante pérdida real. La primera prueba positiva corresponde a F5.5 con un caso complejo/SV/BND real; allí se fijará la cardinalidad positiva multicaso del complemento sin alterar la lista `GPS_CASE`. Una pérdida literal descubierta en F2 puede probarse sin convertirse en puerta. DTC-066 integra esta decisión en el cierre de DTPD-103 |
-| <a id="dtc-066"></a>DTC-066 | DTPD-103 queda resuelta integrando DTC-062 a DTC-065 con una puerta externa de aceptación/CI fijada a `bcftools` 1.24 y `tabix`/HTSlib 1.24. Estas herramientas nunca son dependencia de ejecución del simulador. VCF de texto y BGZF deben superar lectura completa, comprobación de normalización contra el FASTA autoritativo y, para BGZF, apertura/consulta regional del único TBI o CSI exigido por DTC-063. EBI `vcf-validator` no es autoridad porque su soporte publicado no cubre VCF 4.5. REQ-FMT-05 a REQ-FMT-07, REQ-VER-06/15 a 17/23 a 26/44, REQ-VAL-28, REQ-SAL-12 y ACE-19/25/30/33/61 | Cerrar un contrato VCF único con aceptación reproducible y dos validaciones independientes, sin convertir herramientas externas en productoras o reparadoras de la salida | Un oráculo semántico independiente, sin llamar ni compartir la proyección productora, lee FASTA, `truth.jsonl`, VCF y el `vcf-complement.jsonl` opcional; comprueba REF/ALT/GT, dosis, fase, muestras, orden, unicidad `CHROM+POS` en F2, lista `GPS_CASE` canónica/sin duplicados y relaciones ALT↔casos existentes, ausencia F2 de `GPS_LOSS/GPS_COMPLEMENT`, cardinalidad caso↔registros y campos prohibidos. El corpus incluye dos ALT/dos casos, un ALT/dos casos, un caso/varios registros, orden de entrada, duplicado e ID inexistente, además de positivos texto, BGZF+TBI/BGZF+CSI y mutaciones individuales de cada invariante. La cardinalidad positiva del complemento se valida desde F5.5. Las invocaciones exactas y la comparación sin reparación quedan fijadas en la resolución de DTPD-103 |
+| <a id="dtc-065"></a>DTC-065 | Todo registro VCF declara y usa `INFO/GPS_CASE` con `Number=.` y `Type=String`. Contiene los `case_id` originales únicos, en orden canónico, de todos los casos de `truth.jsonl` que aportan algún ALT; no se crea un caso compuesto y un caso aparece una sola vez aunque aporte varios ALT. `truth.jsonl` conserva para cada alelo final la relación ALT↔lista ordenada de casos fuente; si un ALT procede de varios casos, conserva todos. Un caso que abarca varios registros repite su ID en cada uno. Solo si el VCF pierde detalle añade `INFO/GPS_LOSS`, código cerrado/versionado y nunca texto libre, e `INFO/GPS_COMPLEMENT`, ID de la entrada enlazada. Resuelve RAF2-030 y `INFO`/complemento dentro de DTPD-103; REQ-VER-19/23 a REQ-VER-26, REQ-MAN-27/31, REQ-SAL-12 y ACE-33/108 | Mantener un VCF válido y una trazabilidad muchos-a-muchos explícita sin perder identidades originales, duplicarlas ni fabricar un caso compuesto | La cabecera declara los tres campos con número, tipo y descripción conformes a VCF 4.5. F2 prueba dos ALT/dos casos, un ALT/dos casos, un caso/varios registros, reordenación de entrada, duplicados e ID inexistente; como todos sus casos son representables, `GPS_LOSS`, `GPS_COMPLEMENT`, entradas y fichero permanecen ausentes. Cada conjunto genera como máximo un `vcf-complement.jsonl` versionado y solo ante pérdida real. La primera prueba positiva corresponde a F6.5 con un caso complejo/SV/BND real; allí se fijará la cardinalidad positiva multicaso del complemento sin alterar la lista `GPS_CASE`. Una pérdida literal descubierta en F2 puede probarse sin convertirse en puerta. DTC-066 integra esta decisión en el cierre de DTPD-103 |
+| <a id="dtc-066"></a>DTC-066 | DTPD-103 queda resuelta integrando DTC-062 a DTC-065 con una puerta externa de aceptación/CI fijada a `bcftools` 1.24 y `tabix`/HTSlib 1.24. Estas herramientas nunca son dependencia de ejecución del simulador. VCF de texto y BGZF deben superar lectura completa, comprobación de normalización contra el FASTA autoritativo y, para BGZF, apertura/consulta regional del único TBI o CSI exigido por DTC-063. EBI `vcf-validator` no es autoridad porque su soporte publicado no cubre VCF 4.5. REQ-FMT-05 a REQ-FMT-07, REQ-VER-06/15 a 17/23 a 26/44, REQ-VAL-28, REQ-SAL-12 y ACE-19/25/30/33/61 | Cerrar un contrato VCF único con aceptación reproducible y dos validaciones independientes, sin convertir herramientas externas en productoras o reparadoras de la salida | Un oráculo semántico independiente, sin llamar ni compartir la proyección productora, lee FASTA, `truth.jsonl`, VCF y el `vcf-complement.jsonl` opcional; comprueba REF/ALT/GT, dosis, fase, muestras, orden, unicidad `CHROM+POS` en F2, lista `GPS_CASE` canónica/sin duplicados y relaciones ALT↔casos existentes, ausencia F2 de `GPS_LOSS/GPS_COMPLEMENT`, cardinalidad caso↔registros y campos prohibidos. El corpus incluye dos ALT/dos casos, un ALT/dos casos, un caso/varios registros, orden de entrada, duplicado e ID inexistente, además de positivos texto, BGZF+TBI/BGZF+CSI y mutaciones individuales de cada invariante. La cardinalidad positiva del complemento se valida en F6.5, su primer caso complejo/SV/BND real. Las invocaciones exactas y la comparación sin reparación quedan fijadas en la resolución de DTPD-103 |
 | <a id="dtc-067"></a>DTC-067 | DTPD-120 se resuelve mediante el algoritmo normativo `poisson-count-v1`. Admite `lambda` `f64` finita en `0.0..=2^52` (`4_503_599_627_370_496`), derivada conforme a DTC-022/026. `lambda=0` devuelve 0 sin consumir RNG; `0<lambda<10` usa inversión/Knuth y `lambda>=10` PTRS de Hörmann, con frontera inclusiva exacta. Cada uniforme abierto usa exactamente un `RngCore::next_u64()` del ChaCha12 local DTC-037 y `u = (((x >> 12) as f64) + 0.5) × 2^-52`. `exp`, `log`, `lgamma`, `floor` y `sqrt` proceden exclusivamente de `libm = =0.2.16`, nunca de matemática estándar. REQ-CONF-23 a REQ-CONF-25, REQ-IND-16 a REQ-IND-18, REQ-CONF-129 y ACE-10/109 | Obtener recuentos Poisson reproducibles entre Linux y WSL2, con consumo RNG y límites explícitos, sin hacer de la media un límite biológico | `lambda>2^52` se rechaza antes de consumir RNG con valor/límite/ámbito. Todo candidato fuera de `0..=2^53-1` o no representable exactamente como entero falla numéricamente; no hay cast saturante, recorte ni resorteo. Un recuento mayor que las oportunidades falla por la política existente, sin cambiar `lambda`. Se registran `algorithm_version`, `lambda`, ámbito/subsemilla y `sampled_count`. Vectores congelados cubren cero, subnormales, ambos lados de 10, medias representativas, *next-down*/2^52/*next-up* y máximo; un *hook* de prueba fuerza la rama rara fuera de rango. Oráculo ajeno y pruebas PMF/media/varianza —con `rand_distr` solo opcional/test-only— no reutilizan el productor. `libm` debe superar DTC-043, incluida licencia, auditoría y `build.rs` |
 | <a id="dtc-068"></a>DTC-068 | DTPD-121 se resuelve con dos perfiles humanos compactos, aproximados, explícitos y nunca predeterminados. `human_1000g_global_sfs_approx_v1` resume los recuentos publicados finales de 1000 Genomes con pesos 64:12:8 para `[1/5008,0.005)`, `[0.005,0.05)` y `[0.05,1)`; los dos primeros usan `log_uniform`, el tercero `linear_uniform` y DTC-049 normaliza. El límite superior 1 pertenece a la cobertura, pero el muestreo continuo nunca lo devuelve; `alt_af=1` exige `fixed=1`. `1/5008` procede de una copia entre las 5.008 copias autosómicas de 2.504 muestras y pertenece a esta receta, no es un límite universal. `human_harris2017_snv12_approx_v1` deriva de los 96 contextos de Harris y Pritchard (2017): normaliza por separado AFR/AMR/EUR/EAS/SAS, promedia las cinco filas con el mismo peso, agrega contextos a seis clases colapsadas por hebra, refleja cada clase a su sustitución complemento inversa con mitad del peso y normaliza los 12 cambios dirigidos. REQ-CONF-129, REQ-IND-61, REQ-VAL-55, REQ-MAN-91 y ACE-116 | Ofrecer dos ejemplos pequeños, reproducibles y descriptivos sin descargar ni procesar el VCF poblacional, inventar perfiles exactos por superpoblación o presentar una aproximación como tasa humana universal | Fuentes fijadas: artículo final 1000 Genomes `https://www.nature.com/articles/nature15393`; artículo eLife `https://elifesciences.org/articles/24284`; datos fuente DOI `https://doi.org/10.7554/eLife.24284.004`; fichero `https://cdn.elifesciences.org/articles/24284/elife-24284-fig1-data1-v2.txt`, 3.644 bytes, SHA-256 `970cc71578fc008ef4e0d75c7c460ab874073da7c5b5226c526b387627c97a7f`. Artículo y datos eLife se atribuyen bajo CC BY. La receta pequeña versiona literales, parser, orden, normalizaciones, complementos inversos y SHA-256 de los recursos incorporados; F2.2.6 la regenera y contrasta con un oráculo independiente. F2 no depende de `bcftools` para estos perfiles ni descarga/procesa el VCF Phase 3. Perfiles suministrados por población siguen admitidos. Materialización exacta del VCF y perfiles empíricos exactos pasan a DTF-016/post-v1 |
 | <a id="dtc-069"></a>DTC-069 | **Aplazada por DTC-079.** El conjunto multidocumento autocontenido se implementará cuando exista el primer consumidor real de escenarios. En F2, Marimo importa y exporta un único TOML general de la vía directa. | No anticipar un grafo de documentos, copias privadas y defensas TOCTOU que F2 no utiliza | El TOML debe seguir siendo válido para el binario, conservar IDs, orden y rutas relativas existentes y no sobrescribirse accidentalmente. La fase consumidora de escenarios recuperará los requisitos multidocumento que sigan siendo necesarios. |
@@ -329,137 +329,12 @@ publicado hace explícito el fin exacto para que una nueva línea no se acepte p
 la semántica particular de `$` de un motor. `boon` 0.6.1 se evaluó y descartó:
 no cerraba por sí solo esa diferencia y no forma parte de `Cargo.lock`.
 
-**Concreción aprobada de DTC-055 para el panel y los modos de construcción.** Una única
-orden Rust, conceptualmente `prepare-haplotype-panel`, recibe referencia y los
-cuatro TSV, valida sus relaciones, los copia en orden canónico, calcula SHA-256,
-genera `panel.metadata.json` y publica atómicamente sin modificar originales ni
-sobrescribir destinos. El runtime solo acepta el paquete completo y vuelve a
-verificar hashes, referencia, clases, versiones y rutas; Marimo invoca la misma
-orden. La conversión desde VCF queda en DTF-041.
-
-El paquete enlaza exactamente una referencia. Todo `reference_id` de
-`panel_blocks.tsv` coincide con `metadata.reference.reference_id`; el SHA-256
-recalculado del FASTA autoritativo coincide con
-`metadata.reference.sha256`; y cada `sequence_id` existe en ese FASTA. Mezclar
-referencias, declarar otro ID o digest o referir una secuencia inexistente se
-rechaza antes de interpretar individuos.
-
-Los cuatro TSV usan UTF-8 sin BOM, LF final y tabuladores, sin comillas, vacíos,
-líneas vacías ni campos extra. Sus cabeceras exactas son, respectivamente,
-`block_id/reference_id/sequence_id/start/end`,
-`block_id/site_id/position/ref/alt`,
-`block_id/haplotype_id/site_id/allele_index` y
-`population_id/block_id/haplotype_id/frequency`. Las barras solo separan columnas
-en esta descripción. `alt` contiene ALT A/C/G/T separados por comas sin espacios;
-su orden define 1..N y `ref`, 0. Enteros y `f64` usan las formas decimales
-canónicas vigentes. El orden estable y las claves únicas siguen bloque, orden
-FASTA/posición, HAP e identificadores ASCII conforme al esquema detallado en
-REQ-EVO-74.
-
-Cada vector completo de `allele_index` es único dentro de su bloque, incluso si
-su frecuencia es 0; los duplicados se rechazan informando todos los IDs, sin
-fusionarlos ni sumar frecuencias. Cada bloque se trata como un locus multialélico
-independiente. HWE/multinomial es predeterminado para P=1..10; F reutiliza las
-fórmulas multialélicas solo en diploides y, en construcción intacta, una
-distribución explícita puede prevalecer localmente. En modo probabilístico cada copia se sortea con reemplazo.
-En modo controlado, un vector entero por HAP que suma C forma un multiconjunto
-que se asigna sin alterar totales; la incompatibilidad con HWE, F o la
-distribución explícita se rechaza sin ajustar cantidades ni relajar el modelo.
-
-Cada bloque exige al menos dos sitios SNP y dos vectores HAP distintos. Las
-frecuencias no reducen el catálogo: una o todas las poblaciones pueden fijar un
-único HAP y conservar los demás con frecuencia 0. Un sitio fijado en el mismo ALT
-en todos los HAP se conserva; un sitio `REF` en todos se rechaza como redundante.
-La configuración separa `haplotype_construction` (`intact`/`recombinant`) de
-`frequency_sampling` (`probabilistic`/`controlled`). La construcción se resuelve
-por valor general y sustituciones población×bloque conforme a DTC-033; una unidad
-no mezcla modos. `intact` prohíbe el parámetro de recombinación y `recombinant`
-exige `recombination_probability_per_interbase` finita en (0,1]. K=0 puede
-ocurrir por azar sin convertir la unidad en intacta. La construcción intacta
-admite ambos muestreos; la recombinante solo admite `probabilistic` y rechaza
-`controlled` antes de individuos, identificando campos y ámbito. El control
-exacto de fuentes o mosaicos recombinantes queda en DTF-042.
-
-El modo intacto selecciona exactamente un HAP por
-población×individuo×copia×bloque, copia conjuntamente su vector y registra
-población, bloque, copia y HAP fundador. Un HAP de frecuencia 0 no se selecciona.
-El estado previo a mutaciones es idéntico al panel; las mutaciones de novo se
-trazan aparte y no cambian la identidad fundadora.
-
-El modo recombinante inicializa directamente cada individuo y bloque y no
-representa una meiosis histórica. Un productor selecciona una fuente primaria
-según el panel y sortea las L−1 uniones con
-`recombination_probability_per_interbase=r` finita en (0,1]. K=0 devuelve la
-primaria; K≥1 sortea una secundaria y el constructor común cerrado por DTC-055
-crea el mosaico con puntos únicos, ordenados e internos. DTPD-111 no bloquea
-F6.4: decidirá para F7.1 cómo conectar mapas y semántica meiótica a ese mismo
-constructor. El punto x es la unión x|x+1; la salida
-empieza con primaria en `start`, alterna en cada punto y usa segmentos *forward*
-cerrados, sin desplazar el cruce a un SNP ni introducir inversiones. Se conservan
-en la traza cruces alélicamente invisibles y pares con efecto neto cancelado. No existe depósito prototipo ni segundo
-muestreo, y no se corrigen o descartan mosaicos.
-
-Primaria y secundaria proceden siempre del panel original y de las frecuencias
-de la población. Los recombinantes ya creados no se incorporan como fuentes ni
-actualizan probabilidades; el procesamiento es independiente del orden. La
-recombinación acumulada y las fuentes descendientes quedan para F7/F8.
-
-En diploides, Bernoulli(F) decide si se ejecuta un productor y se duplica su
-vector en ambas copias o si se ejecutan dos productores independientes. Así se
-aplican exactamente las fórmulas multialélicas: F=0 es HWE y F=1 homocigosis
-completa, sin autofecundación ni pedigrí. Para P distinta de 2 se ejecutan P
-productores independientes y se rechaza F. Las C=N×P copias finales se agrupan y
-su frecuencia realizada es `n_h/C`; las frecuencias del panel son el objetivo de
-las fuentes.
-
-Un vector coincidente reutiliza el HAP local del panel. Uno nuevo recibe mediante
-DTC-039 un ID tipado determinista derivado de `panel_id` + `block_id` + vector
-canónico; no incluye individuo, orden, subsemilla ni evento. Se agregan vectores
-idénticos, pero cada productor/copia conserva fuentes, puntos, individuo, copia y
-subsemilla. Se distinguen productores con cruce y copias finales derivadas —una
-salida duplicada por F cuenta uno y dos, respectivamente—.
-
-Toda decisión aleatoria reutiliza DTC-037 con ámbitos por población, bloque,
-individuo y, cuando aplica, copia, separando F/autozigosis, primaria, puntos y
-secundaria. La misma raíz+panel+configuración+versión reproduce; reordenar o
-añadir otras identidades y cambiar `r` en otro bloque no perturban el resultado.
-Una salida duplicada por F mantiene un productor/procedencia y dos copias
-enlazadas. Se registran versión de derivación, ámbitos y subsemillas.
-
-Las salidas obligatorias son `founder_block_assignments.tsv` por copia y bloque,
-`recombination_segments.tsv` por proceso y segmento y
-`realized_haplotype_frequencies.tsv` por población, bloque y HAP final. El
-manifiesto las enlaza por clase/versión/ruta/tamaño/SHA-256 y resume configuración
-efectiva, F, r, RNG, productores con cruce, cruces totales, vectores nuevos y
-coincidencias con panel, sin duplicar tablas.
-
-Todo productor posee `process_id`, incluso con K=0. `origin_kind` vale únicamente
-`intact` si K=0 o `recombined` si K≥1; una duplicación por F produce dos
-asignaciones al mismo proceso y origen. Los procesos intactos tienen un segmento
-primario que cubre el bloque completo. La tabla de frecuencias no agrega un
-origen único: contiene recuento total, intacto y recombinado, exige que el total
-sea su suma y calcula `frequency=copy_count/C`.
-
-Las tres salidas usan exactamente las cabeceras tabuladas
-`population_id/individual_id/copy_id/block_id/final_haplotype_id/origin_kind/process_id`,
-`process_id/segment_index/block_id/start/end/source_haplotype_id` y
-`population_id/block_id/haplotype_id/copy_count/intact_copy_count/recombined_copy_count/frequency`;
-las barras solo separan columnas en esta descripción. Comparten UTF-8 sin BOM,
-LF final, ausencia de comillas, vacíos y columnas extra, tipos canónicos y orden
-y claves población+individuo+copia+bloque, proceso+índice y
-población+bloque+HAP. Clase/versión se declaran en el enlace del manifiesto y
-esquema, no como columnas.
-
-La construcción intacta admite HWE, F diploide o una distribución genotípica
-explícita. La recombinante admite solo HWE o F diploide; una distribución
-explícita se rechaza antes de individuos con población, bloque y campos. Su
-condicionamiento sobre resultados recombinantes queda en DTF-043.
-
-Marimo expone una sección poblacional que elige directorio, invoca las acciones
-Rust de preparar/validar, resume el panel, mapea poblaciones y edita la tabla
-población×bloque. Muestra los controles compatibles por construcción, r tipado y
-F solo diploide; previsualiza métricas devueltas por Rust, exige validación
-vigente antes de `run` y después enlaza las tres tablas sin cargarlas completas.
+**DTC-055: registro histórico cerrado.** La propuesta de panel externo y
+recombinación fundadora fue retirada íntegramente el 31 de agosto de 2026. Se
+conserva únicamente esta constancia de sustitución; no se conservan aquí
+formatos, algoritmos ni ejemplos ejecutables. DTC-089 es la única semántica F5
+activa. Una posible importación de panel requeriría una especificación futura
+nueva y la meiosis se diseña exclusivamente en F7.1.
 
 **Concreción aprobada de F1.5 para DTC-037.** El catálogo normativo de ámbitos
 se versiona separadamente de la codificación. El catálogo 2 añade el ámbito
@@ -761,17 +636,14 @@ son válidos: un `ALT` globalmente ausente se elimina y cuenta como candidato si
 reemplazo, mientras uno fijado se conserva. VCF→TSV y generación multialélica
 quedan en DTF-038/039.
 
-### DTPD-119. Formato y muestreo del panel de bloques haplotípicos (resuelta)
+### DTPD-119. Haplotipos sintéticos F5 (resuelta)
 
-Resuelta el 13 de agosto de 2026 mediante [DTC-055](#dtc-055). El panel usa
-bloques locales, cuatro TSV canónicos y `panel.metadata.json`, con preparación,
-integridad, catálogos densos, identidad por contenido y exclusión completa frente
-a loci `alt_af` dentro de los intervalos. La inicialización intacta y la
-recombinante se configuran por población×bloque con ejes separados. La
-recombinante usa exclusivamente muestreo probabilístico, HWE o F diploide,
-productores directos con fuentes del panel original, motor común, RNG DTC-037 y
-salidas reconstruibles. Distribuciones explícitas solo se admiten en intacto;
-DTF-040 a DTF-044 conservan las ampliaciones aplazadas.
+Resuelta por [DTC-089](#dtc-089). F5 construye internamente una distribución
+finita de haplotipos SNP-only por bloque×subpoblación y asigna fundadores
+intactos. No existe panel externo, paquete de preparación, construcción
+recombinante, mosaico ni fuente donante. F6 añade SV/variantes complejas y F7.1
+introduce la primera meiosis. Los contratos físicos, la búsqueda reproducible y
+los diagnósticos pertenecen exclusivamente a DTC-089.
 
 ### DTPD-120. Implementación reproducible de Poisson (resuelta)
 
@@ -822,18 +694,26 @@ DTF-016/post-v1 y no bloquean F2.2.
 
 ## 7. Decisiones de planificación posteriores
 
+> **Corrección de numeración F5/F6 (31 de agosto de 2026).** La población
+> inicial, incluidos F diploide, perfiles LD y fundadores intactos, pertenece a
+> F5 (F5.0–F5.6) bajo DTC-089. Las referencias
+> estructurales, SV, complemento VCF y multirreferencia pertenecen a F6
+> (F6.1–F6.6). Las menciones históricas previas a `F6.4` como consumidor del
+> panel se consideran retiradas; F5.3 materializa subpoblaciones antes de la
+> publicación y F5.5 solo audita la inmutabilidad del paquete.
+
 ### 7.1. Decisiones de planificación
 
 | ID | Decisión | Opciones | Recomendación razonada | Consecuencias | Bloquea |
 |---|---|---|---|---|---|
-| DTPD-104 | Adaptadores SAM/BAM/CRAM e índices | Crate; biblioteca nativa; herramientas externas; combinación | Comparar cumplimiento de estándar, CRAM con referencia exacta, ordenación, índices, cabeceras y distribución | Determina E/S, procesos, errores y rendimiento | F5.6 |
-| DTPD-105 | Concreción del adaptador de proceso externo para minimap2 y otros mapeadores | Descubrimiento explícito o ruta configurada; política de invocación y sandbox; compatibilidad de versiones; clasificación de códigos, señales y fallos | Partir del proceso externo ya decidido por DTC-043 y concretar descubrimiento, comando reproducible, aislamiento, compatibilidad y diagnóstico sin ocultar versión, parámetros, stdout, stderr ni código de salida | Afecta instalación, seguridad, logs y reproducibilidad; no reabre servicio frente a proceso | F5.6 |
+| DTPD-104 | Adaptadores SAM/BAM/CRAM e índices | Crate; biblioteca nativa; herramientas externas; combinación | Comparar cumplimiento de estándar, CRAM con referencia exacta, ordenación, índices, cabeceras y distribución | Determina E/S, procesos, errores y rendimiento | F6.6 |
+| DTPD-105 | Concreción del adaptador de proceso externo para minimap2 y otros mapeadores | Descubrimiento explícito o ruta configurada; política de invocación y sandbox; compatibilidad de versiones; clasificación de códigos, señales y fallos | Partir del proceso externo ya decidido por DTC-043 y concretar descubrimiento, comando reproducible, aislamiento, compatibilidad y diagnóstico sin ocultar versión, parámetros, stdout, stderr ni código de salida | Afecta instalación, seguridad, logs y reproducibilidad; no reabre servicio frente a proceso | F6.6 |
 | DTPD-106 (resuelta 2026-08-28) | Perfiles WGS cuantitativos incorporados | Perfil inicial propio `gps-hiseqx-pcrfree-pe150-v1`, recurso `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json`, SHA-256 `3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea`: aproximación sintética explícita, no calibración empírica. R1 usa Q36 (ciclos 1–10), interpolación lineal redondeada a Q32 (11–100) y a Q28 (101–150); R2 usa Q35, Q30 y Q25 en los mismos tramos. Admite longitud común 1–150 por prefijo y rechaza una mayor. El inserto usa `normal_truncated_box_muller_v1`, media 350 pb, desviación 20 pb, límites inclusivos 250–450 pb, uniformes abiertos de 53 bits, redondeo al entero más próximo con empate alejado de cero y sin variate normal en caché. ART `HSXn` es solo referencia comparativa externa, no se incorpora ni redistribuye. Tras cada error, la base alternativa se elige uniformemente entre las otras tres. PCR no aplicable, ópticos/quimeras/GC/*index hopping* a cero y contaminación `0–0 %`; sin adaptadores por no existir inserto menor que lectura. El orden es fragmento, quimera opcional, calidad/error, contaminación e *index hopping*; quimeras e *index hopping* se sortean Bernoulli e independientemente por pareja, el primero antes y el segundo después de contaminación. Las quimeras no cambian el número de parejas y *index hopping* las transfiere uniformemente a otra biblioteca. F4 no genera UDI inesperados, aunque los descarta defensivamente si llegan a la frontera; admite por evento desplazamiento de calidad y escala de error independientes para R1/R2, con valores neutros `0 Phred` y `1`, aplicados antes de recalcular coherentemente la calidad FASTQ final, codificada Sanger `Phred+33`, redondeada al entero más próximo y validada en `0..=93`; no hay selectores por individuo o región y siempre se publican los valores efectivos | Aprobación explícita del usuario en la ronda de diseño F4 del 2026-08-28; perfil literal y algoritmo aprobados como decisión técnica directa el 2026-08-28; evidencia: recurso versionado, especificación, arquitectura, plan y trazabilidad | El ID de perfil se conserva porque su semántica cuantitativa no cambió; solo el enlace al catálogo técnico no publicado pasa a v3. Sustituirlo por datos reales exige un nuevo ID/recurso/digest. DTF-053–056 conservan lo excluido | — |
 | DTPD-107 | Calibración empírica (retirada de v1) | Sin elección técnica en v1 | La decisión funcional DTC-023 aplaza la capacidad completa; cualquier diseño del estimador y del artefacto corresponde a DTF-016 | No bloquea ninguna fase de v1 | — |
 | DTPD-108 (resuelta 2026-08-28) | Procedencia agregada de lecturas | Registro por lectura; registros por bloques; resumen agregado | Conservar únicamente en manifiesto/resumen la semilla, perfil efectivo, cobertura objetivo/real, contaminación objetivo/real y aportes por donante, recuentos de quimeras, errores por mate con oportunidades/tasa realizada, duplicados y descartes, y hashes/tamaños FASTQ | Aprobación explícita del usuario en la ronda de diseño F4 del 2026-08-28; evidencia: contrato agregado incorporado en especificación, plan, trazabilidad y `git diff --check` superado | No existe fichero ni procedencia individual por lectura; reduce volumen y no cambia el FASTQ ni la verdad biológica | — |
-| DTPD-109 | Fórmulas de F diploide y Ne reproductivo realizado | Fórmulas publicadas aplicables a la heterocigosidad diploide y a las contribuciones observadas; estado no evaluable cuando corresponda | Evaluar contra el significado funcional confirmado y casos simulados; no adaptar F a P=1 o P>2 ni introducir un objetivo u optimización de Ne | Cambia estadísticas y pruebas, no los descendientes ni el genotipo; F fuera de diploides conserva «no aplicable» | F6.3 y F7.3 |
-| DTPD-110 | Distribuciones y tolerancias poblacionales posteriores | Catálogos de distribuciones aún no elegidos; tolerancias específicas de modelos poblacionales o estadísticos posteriores | Aplicar [DTC-049](#dtc-049) a toda probabilidad o frecuencia configurable y decidir aquí solo las distribuciones y tolerancias específicas cuando su fase defina la semántica; ninguna puede sustituir `0,5/C` | No reabre `f64`, suma, normalización ni tolerancia general ya resueltos; afecta modelos poblacionales posteriores y sus pruebas | F6.1/F6.2 |
-| DTPD-111 | Mapas, posiciones y comparación estructural para recombinación meiótica | Formatos tabulares candidatos; generación meiótica de puntos; interpolación de mapas; representación canónica comparable | Evaluar cobertura completa, monotonicidad, conversiones y equivalencia de segmentos, orden, orientación, copias y puntos de ruptura sin exigir el mismo ID histórico; conectar el resultado al constructor común DTC-055 | Afecta bivalentes, linaje y casos estructurales de F7.1; no reabre ni bloquea la variante uniforme fundadora de F6.4 y no puede crear otro constructor o introducir compatibilidad parcial | F7.1 |
+| DTPD-109 (resuelta 2026-09-01) | Fórmulas de F diploide y Ne reproductivo realizado | DTC-089 fija las probabilidades genotípicas multialélicas, `F_realized=1-H_observed/H_expected` y el Ne por contribuciones `Ne=(N_p*k_bar-1)/(k_bar-1+V_k/k_bar)` | Aplicar las fórmulas solo donde sus denominadores y datos están definidos; usar `not_applicable`/`not_evaluable` con causa y no adaptar F a otras ploidías | F5 informa F por bloque y Ne no aplicable; F7.3 calcula Ne sin convertirlo en objetivo ni modificar descendientes | — |
+| DTPD-110 (resuelta 2026-09-01) | Distribuciones y tolerancias poblacionales F5 | DTC-089 fija los cuatro catálogos distributivos, sus dominios, reducciones y las tolerancias inclusivas `max(q)`, `0.05` y la controlada efectiva por bloque×subpoblación en `[0,0.5/C]`, predeterminada `0.5/C`; DTC-049 conserva normalización general | Las fases posteriores solo pueden definir distribuciones nuevas mediante su propia decisión, sin reabrir ni reinterpretar DTPD-110 | Configuración inviable se rechaza antes del RNG propio de la etapa y búsqueda agotada se distingue de imposibilidad demostrada | — |
+| DTPD-111 | Mapas, posiciones y comparación estructural para recombinación meiótica | Formato de mapa, generación de puntos, interpolación, bivalentes y representación canónica de segmentos por definir | Diseñar en F7.1 un motor meiótico propio que consuma copias fundadoras/evolucionadas y emita mosaicos reconstruibles; validar cobertura, monotonicidad, orientación, puntos de ruptura y equivalencia estructural | Afecta solo F7.1 y posteriores. No reutiliza DTC-055, no presupone panel, no bloquea F5 y no introduce recombinación fundadora | F7.1 |
 | DTPD-112 | Representación de grafos y reglas declarativas | Estructuras anidadas; tablas de nodos/aristas; lenguaje declarativo limitado sin código | Elegir la sintaxis más validable que represente Y/O/NO, ámbitos y dependencias sin ejecutar código | Afecta mensajes de ciclo, migración, fundación y familias | F7.5 y F8.1 |
 | DTPD-113 | Paralelismo reproducible | Por referencia, individuo, evento, región o tareas; ejecución secuencial de referencia | Posponer la elección hasta perfilar y conservar ámbitos aleatorios y orden lógico independientes del planificador | Puede cambiar uso de memoria y orden de salida; no debe cambiar verdad | F9.3 |
 | DTPD-114 | Formato del paquete exportado | Directorio autocontenido; archivo contenedor; formatos archivados comprimidos | Elegir por interoperabilidad, preservación de permisos/rutas e integridad antes/después, con eventos grandes | Afecta portabilidad y almacenamiento duplicado | F9.6 |
@@ -903,13 +783,13 @@ decisiones conservan ampliaciones aplazadas; por ejemplo, F1 tiene semántica de
 completitud, pero no reanudación automática.
 
 DTC-049 resuelve la representación, suma, tolerancia general y normalización de
-REQ-CONF-106/107. DTPD-110 queda restringida a distribuciones y tolerancias
-poblacionales específicas posteriores y no reabre ese contrato general.
+REQ-CONF-106/107. DTPD-110 está cerrada por DTC-089; las distribuciones nuevas
+de fases posteriores exigen decisiones propias y no reabren ese contrato.
 
 Las decisiones de la tabla DTPD que no llevan la marca «resuelta» deben
 resolverse antes de ejecutar el hito que señalan. DTPD-106 y DTPD-108 quedan
 formalmente resueltas el 2026-08-28. DTPD-117, DTPD-118 y DTPD-119 ya están resueltas
-mediante DTC-079, DTC-054 y DTC-055, respectivamente. No bloquean
+mediante DTC-079, DTC-054 y DTC-089, respectivamente. No bloquean
 la redacción del plan de F1 salvo que su evaluación
 revele una incompatibilidad con un contrato base de configuración, identidad,
 referencia o reproducibilidad.
@@ -926,8 +806,8 @@ evidencia de plataforma. Dentro de ese grupo, DTC-054 cierra los formatos
 y algoritmos de la matriz SNV. F1 está cerrada en `e14705a` con cierre
 documental `efca265`; F2.0 queda definido por la frontera local proporcional de
 DTC-079, sin puerta experimental separada; F2.2/F2.3 ya no están bloqueadas por
-DTPD-118; F6.4 ya no
-está bloqueada por DTPD-119; y F7.1 continúa bloqueada por DTPD-111. Las
+DTPD-118; F5 ya no está bloqueada por DTPD-119, F6 no hereda su contrato y F7.1
+continúa bloqueada por DTPD-111. Las
 recomendaciones pendientes no se consideran aprobadas hasta que consten
 revisión y fecha.
 
@@ -937,3 +817,782 @@ revisión y fecha.
 `reference_id`, `sequence_id`/contig, `position_1based`, `ref` y `alt`. No
 incorpora fila, población, ruta, orden físico ni semilla. El vector y la
 codificación BLAKE3 quedan fijados en `catalogs/variant-id-v1.tsv`.
+<a id="dtc-089"></a>
+
+## DTC-089 — F5 sintético reproducible
+
+Esta decisión es la autoridad técnica única de F5 y sustituye por completo
+DTC-053 y DTC-055. F5 genera internamente haplotipos de SNP bialélicos A/C/G/T
+por bloque y subpoblación y asigna fundadores intactos. Rechaza paneles,
+haplotipos suministrados, `alt_af` intrabloque, *indels*, repeticiones, SV,
+mosaicos, recombinación, mapas, genealogía y `HaplotypeProcess`. F6 añade
+variación compleja y F7.1 define por primera vez la meiosis.
+
+### Escenario TOML canónico
+
+F5 es un conjunto de dos documentos de autoría cerrados, no un TOML aislado.
+El TOML general F5 (`config_kind="general"`, `schema_version="3"`) es dueño de
+`seed`, `ploidy`, `reference_id`, `reference_sha256` y de la única tabla
+`[f5_scenario]`, que contiene exactamente `scenario_id` y `scenario_path`. Una
+ejecución F5 exige esa tabla exactamente una vez: no admite una lista, un enlace
+ausente ni varios escenarios. Esta cardinalidad corresponde al único recorrido
+F5 y a su único conjunto de salidas directas; una ampliación multiescenario
+necesitará otra versión y rutas e identidades de salida propias. La tabla del
+general es exactamente:
+
+```toml
+[f5_scenario]
+scenario_id = "scenario"
+scenario_path = "scenarios/scenario.toml"
+```
+
+El escenario siguiente solo define la política F5. Se rechazan
+campos desconocidos, claves duplicadas y la ausencia de un campo obligatorio:
+
+```toml
+config_kind = "f5_scenario"
+schema_version = "1"
+scenario_id = "scenario"
+founder_count = 1
+
+[f5]
+profile_metadata_path = "profiles/profile.metadata.json"
+profile_metadata_sha256 = "<64 hex minúsculas>"
+inbreeding_f = 0.0
+max_layout_attempts = 1000
+max_haplotype_attempts = 100
+max_swap_proposals = 100000
+max_haplotype_cells = 16777216
+max_operation_units = 268435456
+max_working_memory_bytes = 1073741824
+max_output_bytes = 2147483648
+coverage_fraction = 0.10
+
+[[subpopulations]]
+population_id = "P1"
+individual_count = 1
+sampling = "probabilistic"
+founder_keys = ["f001"]
+
+# Sustitución opcional de una unidad bloque×subpoblación.
+#[[sampling_overrides]]
+#population_id = "P1"
+#block_index = 0
+#mode = "controlled"
+#controlled_max_abs_error = 0.0001
+```
+
+La ruta de `--config` se resuelve una vez contra el directorio de trabajo de la
+CLI y se normaliza; el directorio de ese TOML general es su origen.
+`f5_scenario.scenario_path` se resuelve contra ese origen, y los recursos del escenario
+contra el directorio del escenario ya resuelto; ninguna ruta admite `..`.
+`scenario_id` del enlace y del escenario deben ser idénticos. No hay búsqueda
+por workspace, variable de entorno ni directorio actual posterior. El general
+es la única autoridad TOML para semilla, ploidía y referencia; por tanto el
+escenario no puede redeclararlos. La semilla resuelta aparece exactamente en
+`effective-config.json#/seed`, `effective-config.json#/f5/seed` y
+`manifest.json#/f5/seed`; los tres campos son cadenas con patrón
+`^[0-9a-f]{64}$` y sus valores son idénticos. Si el TOML general declara
+`seed`, coinciden además con ese literal; si la omite, la raíz CSPRNG se resuelve
+antes de F5 y se copia sin transformación en los tres campos. Las demás copias
+resueltas en `effective-config.json` y `manifest.json` también son obligatorias
+e idénticas: los hashes son las mismas cadenas hexadecimales, `ploidy` el mismo entero, y referencia el mismo par
+ID+SHA-256. El hash de perfil es propiedad del escenario y sus copias efectiva
+y manifiesto también deben coincidir. F5 crea contratos externos nuevos:
+`config-general-v3.schema.json`, `effective-config-v5.schema.json` y
+`manifest-general-v5.schema.json`; el escenario usa
+`config-f5-scenario-v1.schema.json`. F5.0 publica estos cuatro esquemas completos
+junto con `profile-metadata-f5-v1.schema.json`, `truth-v2.schema.json`, los
+contratos completos de los siete TSV y `f5-failure-v1.schema.json`; ninguna
+etapa posterior añade campos ni extiende esos esquemas. Por tanto, las versiones no se confunden:
+general `"3"`, escenario F5 `"1"`, envoltura efectiva `"5"` con objeto F5
+`"1"`, y manifiesto general `"5"` con objeto F5 `"1"`. Los contratos general
+v2, efectivo v4 y manifiesto general v4 son históricos e inmutables: F5 no los
+extiende, reescribe ni acepta como documentos F5. `truth-v1.schema.json` y su
+contrato textual también son históricos e inmutables; F5 usa exclusivamente la
+nueva v2 descrita en «IDs, RNG y formatos de salida».
+
+`scenario_id`, `population_id` y los elementos de `founder_ids`/`founder_keys`
+cumplen DTC-039. La ploidía efectiva del general pertenece a `1..=10`,
+`founder_count>0` y es exactamente la suma comprobada de `individual_count>0`.
+Cada subpoblación usa exactamente uno de `founder_ids` o `founder_keys`, cuya
+longitud es `individual_count`; los IDs son globalmente únicos y las claves,
+únicas dentro de la subpoblación. `inbreeding_f` de `[f5]` es el F de población;
+cada subpoblación puede sustituirlo. Ambos son `f64` finitos en `[0,1]`, solo
+pueden aparecer con ploidía 2 y el global vale `0.0` si se omite. Con otra
+ploidía ambos deben estar ausentes y el valor efectivo es `null`/no aplicable;
+las copias se muestrean independientemente. `sampling` se declara por
+subpoblación y admite exactamente `probabilistic` —predeterminado— o
+`controlled`; es el modo solicitado predeterminado para sus bloques. Una fila
+`[[sampling_overrides]]` puede sustituirlo en exactamente un
+`population_id`×`block_index`. No puede haber dos filas para la misma pareja y
+cada índice debe pertenecer a `0..B-1`, donde B es el número de bloques resuelto
+antes del layout; se refiere al orden canónico final FASTA/inicio/fin. Cada fila
+contiene `mode` y, solo si es `controlled`, puede contener
+`controlled_max_abs_error`. El modo probabilístico prohíbe esa tolerancia. En
+controlado, la tolerancia efectiva es la declarada o, si se omite, `0.5/C` para
+esa subpoblación; debe ser finita y cumplir `0<=t<=0.5/C`. Esta tolerancia se
+aplica por haplotipo y no sustituye DTC-049. En diploides, cada unidad controlada
+exige F efectivo 0. Las rutas son relativas al escenario, no contienen `..`, y cada ruta tiene
+su SHA-256 compañero. `excluded_regions_path` y
+`excluded_regions_sha256` son opcionales como pareja inseparable.
+
+La opcionalidad exacta del TOML es esta; ninguna tabla ni campo adicional está
+permitido:
+
+| Tabla | Campo | Tipo/dominio | Presencia/valor efectivo |
+|---|---|---|---|
+| raíz | `config_kind` | cadena literal `f5_scenario` | obligatorio |
+| raíz | `schema_version` | cadena literal `1` | obligatorio |
+| raíz | `scenario_id` | ID DTC-039 | obligatorio; igual al enlace del general |
+| raíz | `founder_count` | entero `u64>0` | obligatorio; igual a la suma de individuos |
+| `[f5]` | `profile_metadata_path`, `profile_metadata_sha256` | ruta relativa normalizada y 64 hex minúsculas | obligatorios |
+| `[f5]` | `inbreeding_f` | `f64` finito `[0,1]` | F de población; solo P=2, opcional, predeterminado `0.0` |
+| `[f5]` | `max_layout_attempts`, `max_haplotype_attempts`, `max_swap_proposals`, `max_haplotype_cells` | enteros positivos con los máximos del párrafo siguiente | opcionales, con los cuatro predeterminados del párrafo siguiente |
+| `[f5]` | `max_operation_units`, `max_working_memory_bytes`, `max_output_bytes` | enteros positivos no mayores que los topes F5 v1 | opcionales; presupuestos efectivos del escenario |
+| `[f5]` | `excluded_regions_path`, `excluded_regions_sha256` | ruta y 64 hex minúsculas | ambos ausentes o ambos presentes |
+| `[f5]` | `block_count`, `covered_bases`, `coverage_fraction` | dominios del párrafo siguiente | exactamente uno presente; no hay predeterminado |
+| `[[subpopulations]]` | `population_id` | ID DTC-039 | obligatorio; único |
+| `[[subpopulations]]` | `individual_count` | entero `u64>0` | obligatorio |
+| `[[subpopulations]]` | `sampling` | `probabilistic` o `controlled` | opcional; predeterminado `probabilistic`; efectivo por bloque×subpoblación |
+| `[[subpopulations]]` | `inbreeding_f` | `f64` finito `[0,1]` | solo P=2; opcional; sustituye el F de población; en otra ploidía debe estar ausente |
+| `[[subpopulations]]` | `founder_ids`, `founder_keys` | lista de exactamente `individual_count` IDs DTC-039 | exactamente una presente; no hay predeterminado |
+| `[[sampling_overrides]]` | `population_id`, `block_index` | ID DTC-039 y `u32` en `0..B-1` | pareja obligatoria y única; la población debe existir |
+| `[[sampling_overrides]]` | `mode` | `probabilistic` o `controlled` | obligatorio; sustituye solo esa pareja |
+| `[[sampling_overrides]]` | `controlled_max_abs_error` | `f64` finito en `[0,0.5/C]` | opcional solo con `controlled`; predeterminado `0.5/C` |
+
+Debe existir al menos una `[[subpopulations]]`. El general puede expresar su
+ploidía global predeterminada y futuras sustituciones por secuencia de
+REQ-CONF-06, pero F5.0–F5.6 solo consume una ploidía efectiva homogénea: si el
+general resuelve valores distintos en las secuencias elegibles, F5 rechaza el
+escenario sin fingir soporte. El resolvedor completo y la prueba de
+REQ-CONF-06 se difieren a F6.1; F5 no puede declararlo cerrado. Un `founder_id` aportado se usa
+como `IndividualId`; una `founder_key` deriva el `IndividualId` mediante el
+contrato ya vigente población×clave de REQ-IND-25, sin ordinal físico. Ni la
+omisión de `seed` en el general ni un predeterminado efectivo autorizan omitirlo de
+`effective-config.json` o del manifiesto.
+
+Los cuatro límites algorítmicos son enteros positivos. Sus predeterminados y máximos son,
+respectivamente, `1000/100000`, `100/10000`, `100000/10000000` y
+`16777216/67108864`; excederlos es configuración inválida, no una petición de
+recursos. Los tres presupuestos F5 v1 tienen como valor predeterminado y máximo,
+respectivamente, `268435456` unidades de operación (2^28), `1073741824` bytes
+de memoria de trabajo (2^30) y `2147483648` bytes publicados (2^31). La persona
+usuaria puede reducirlos, nunca ampliarlos dentro de esta versión. Se exige exactamente uno de `block_count: u32>0`,
+`covered_bases: u64>0` o `coverage_fraction`. Esta última se escribe como literal
+decimal TOML sin signo ni exponente, con 1 a 18 cifras decimales, en `(0,1]`.
+El lector conserva el literal y forma el racional exacto `n/10^k`; está prohibido
+convertirlo primero a `f64`.
+
+`block_index`, `site_index`, `haplotype_rank`, `attempt_index` de layout y de
+haplotipos empiezan en 0 y son consecutivos en su ámbito. Los límites de
+intentos son cardinalidades: se ejecutan índices `0..limit-1`; `proposals` y
+`accepted` son recuentos, no el índice de la última propuesta.
+
+### Paquete de perfiles canónico
+
+`profile.metadata.json` es RFC 8259, usa JSON Schema 2020-12 con
+`additionalProperties:false` y contiene exactamente
+`profile_kind="f5_generation_profile"`, `schema_version="1"`, `profile_id`,
+`provenance_kind` (`built_in`, `user_supplied`), `source_citation`,
+`source_license` —cadena o `null`—, `source_sha256` —cadena o `null`—, y
+`files`. `files` contiene exactamente cinco objetos,
+ordenados como se enumeran abajo, con `artifact_kind`,
+`schema_version="1"`, `path`, `size_bytes` y `sha256`:
+
+`profile_id` cumple DTC-039; `source_citation` es una cadena UTF-8 no vacía;
+`source_sha256` usa 64 hex minúsculas cuando existe y `size_bytes` es `u64`.
+Cada `path` es el nombre de fichero literal de la primera columna, relativo al
+metadata, sin `..`; `sha256` son 64 hex minúsculas y los cinco paths son únicos.
+
+| Fichero / `artifact_kind` | Cabecera TSV exacta | Dominio |
+|---|---|---|
+| `block_lengths.tsv` / `f5_block_length_profile` | `length_min_bp\tlength_max_bp\tweight` | enteros `2<=min<=max`; intervalos disjuntos cuya unión es continua; peso finito `>0` |
+| `snp_gaps.tsv` / `f5_snp_gap_profile` | `gap_min_bp\tgap_max_bp\tweight` | enteros `1<=min<=max`; intervalos disjuntos; peso finito `>0` |
+| `snp_spectrum.tsv` / `f5_snp_spectrum` | `alt_af_min\talt_af_max\tweight` | `f64` finitos `0<=min<=max<=1`; intervalos disjuntos; peso finito `>0` |
+| `haplotype_weights.tsv` / `f5_haplotype_weights` | `haplotype_rank\tweight` | rangos decimales consecutivos `0..H-1`, `2<=H<=4096`; peso finito `>0` |
+| `ld_profile.tsv` / `f5_ld_profile` | `population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error` | IDs DTC-039; bins cerrados contiguos desde 1, objetivos `[0,1]`; `max_abs_error` es exactamente `0.05` en v1 |
+
+Todos los TSV usan UTF-8 sin BOM, tabulador, LF final, cabecera única, campos no
+vacíos, sin comillas, comentarios, líneas vacías ni columnas adicionales. Los
+enteros son decimales canónicos sin signo ni ceros iniciales; los `f64` usan el
+decimal mínimo de ida y vuelta exacta. Las filas se ordenan por mínimo de
+intervalo en los tres primeros TSV, por `haplotype_rank` y por
+`population_profile_id`+`distance_start_bp`, respectivamente; duplicados o
+desorden son error. Los `weight` son probabilidades, no pesos relativos: cada
+conjunto completo de filas de longitudes, gaps, espectro o rangos haplotípicos
+debe sumar 1 bajo DTC-049 en su orden canónico. Una desviación dentro de la
+tolerancia general se normaliza, conserva suma/valores antes y después en la
+configuración efectiva y manifiesto; otra desviación se rechaza. Una
+selección ponderada obtiene U con 53 bits en `[0,1)`, recorre q en
+orden de fila y elige la primera suma acumulada estrictamente mayor que U; la
+última fila absorbe solo el residuo numérico posible. Cada subpoblación debe
+tener exactamente un `population_profile_id` igual a su `population_id`; no
+existe remapeo implícito. Las rutas de `files` son relativas al JSON de metadata.
+
+Cada población debe cubrir mediante sus bins todas las distancias enteras desde
+1 hasta `Lmax-1`, aunque un layout concreto no las realice.
+
+El perfil incorporado reservado `human_ld_ragsdale_approx_v1` conserva la
+elección funcional previa: cada media `mu` digitalizada de `r²` de Ragsdale y
+Gravel se serializa directamente como `target_mean_r2=mu`. La antigua beta con
+`kappa=8.0` y sus cinco cuantiles queda como historia de la fuente, no participa
+en F5 ni cambia la media. El recurso conserva cita, bytes de digitalización,
+receta, valores y hashes; no es predeterminado y no se presenta como estimación
+exacta de 1000 Genomas.
+
+La máscara opcional `excluded_regions.tsv` usa cabecera exacta
+`region_id\tsequence_id\tstart_1based\tend_1based`, coordenadas cerradas válidas
+y filas ordenadas por orden FASTA, inicio, fin e ID. Sus intervalos no se
+solapan. Las bases elegibles son exclusivamente A/C/G/T fuera de máscara. Si E
+es su recuento, la fracción produce `T=floor(E*n/10^k)` con enteros comprobados.
+Antes de consumir RNG, un único recorrido secuencial de referencia y máscara
+procesa exactamente `reference_bases_processed=sum_s sequence_length_s` bases y
+produce la lista ordenada de tramos elegibles maximales; `tract_count` es su
+cardinalidad exacta. El recorrido mantiene solo un búfer acotado, el intervalo
+de máscara vigente y el tramo en curso: no carga la máscara completa, no
+construye un bitset ni otra colección por base. Como los intervalos de máscara
+son no vacíos y no se solapan, su número no puede superar las bases procesadas.
+La única materialización dependiente de la fragmentación es la lista de tramos.
+T=0 se rechaza. `covered_bases` fija T directamente. `block_count` fija B y deja
+aleatoria la suma de longitudes; los otros modos calculan el menor B positivo
+que satisface `B*Lmin<=T<=B*Lmax`. Para `block_count`, el preflight exige
+`B*Lmin<=E` y que `sum_t floor(tract_length_t/Lmin)>=B`, con tramos elegibles
+maximales ordenados. Para un objetivo T exige `T<=E` y
+`sum_t tract_length_t>=T`; la fragmentación restante pertenece a la búsqueda
+acotada, porque longitudes variables pueden cambiar el empaquetado. Si falla
+una de esas desigualdades, no existe B, se excede `u64` o el perfil no contiene
+un soporte continuo, el preflight devuelve `GPS-DOMAIN-101` sin consumir RNG.
+
+### Layout y marginales acotados
+
+Para un objetivo de bases, cada longitud se sortea condicionada a que el resto
+permanezca en `remaining_blocks*Lmin..remaining_blocks*Lmax`; en el último
+bloque la longitud es el residual exacto. El muestreo conserva los pesos
+renormalizados sobre valores factibles: el peso base de un entero v es
+`row_weight/(row_max-row_min+1)` y después se normalizan con Neumaier en v
+creciente; la elección categórica sigue la regla U53 anterior. Gaps usan la
+misma regla sin condicionamiento residual. Para `block_count`, todas las
+longitudes se sortean sin esa condición. En cada intento se ordenan de mayor a
+menor, con `block_index` como
+desempate, y cada bloque elige uniformemente un inicio entre los tramos elegibles
+que admiten su longitud, actualizados tras cada colocación. «Uniformemente»
+significa indexar todos los inicios válidos de todos esos tramos en orden
+FASTA/coordenada, obtener un único entero acotado por su recuento total y
+resolverlo por prefijos de recuentos; no se elige primero un tramo. Esa
+resolución usa un recorrido directo completo de la lista ordenada por cada
+bloque y por cada intento: no construye un índice auxiliar de tramos. Por ello
+la admisión presupuesta exactamente `L*B*tract_count` consultas de tramo como
+cota conservadora, aunque un intento o la búsqueda terminen antes. La lista se ordena
+por orden FASTA e inicio. Adyacencia es válida; solape, N o máscara no lo son.
+Un fallo descarta el intento completo. Tras éxito, los bloques se identifican en
+orden FASTA/inicio/fin; los SNP empiezan en la primera posición y sortean gaps
+hasta que el siguiente no cabe. Menos de dos SNP descarta el layout. La suma de
+longitudes debe ser exactamente T cuando T existe. `ref` es la base de la
+referencia y `site_alt` elige uniformemente una de las otras tres bases en orden
+ASCII; no existe transición/transversión implícita. Un bloque que produciría
+S>4096 sitios se rechaza con `GPS-RES-101`; junto con H<=4096 y el límite H×S,
+esto acota también las estadísticas S².
+
+Agotar `max_layout_attempts` devuelve `GPS-DOMAIN-106`, conserva número de
+bloques colocados y bases pendientes del mejor intento. El mejor minimiza
+`(unplaced_blocks, remaining_target_bases, placed_layout_bytes, attempt_index)`,
+donde `placed_layout_bytes` serializa longitud, orden FASTA e inicio como enteros
+big-endian. El error significa «no se halló layout dentro del límite», no
+imposibilidad matemática. Se distingue de
+`GPS-DOMAIN-101`, que solo se emite por una demostración exacta del preflight.
+
+El espectro elige una fila por peso y, dentro de un intervalo no degenerado, un
+`f64` uniforme `min+(max-min)U` con U de 53 bits en `[0,1)`; un intervalo
+degenerado no consume el uniforme de valor. Produce `p_i` por
+subpoblación×bloque×sitio. Para cada intento haplotípico se crea una matriz
+binaria H×S sin enumerar `2^H`: para cada columna no fijada se aplica una
+permutación Fisher–Yates independiente de las H filas, se recorren sus pesos
+acumulados y se elige entre el prefijo anterior y el que cruza `p_i` el que
+minimiza `|p_hat_i-p_i|`; un empate usa el prefijo anterior. `p_i=0/1` crea una
+columna constante sin RNG. Por construcción
+`marginal_max_abs_error=max_h(q_h)` y se exige
+`|p_hat_i-p_i|<=marginal_max_abs_error`; con pesos uniformes equivale a `1/H`.
+La única cota marginal activa es `max_h(q_h)`. Antes de sortear marginales se exige `H<=2^S` —para S>=12
+queda implícito por H<=4096—; después, con V columnas cuyo objetivo no es 0/1,
+se exige además `H<=2^V`. Incumplir cualquiera devuelve `GPS-DOMAIN-105`; la
+segunda comprobación ocurre tras esos sorteos pero antes de abrir un intento
+haplotípico. Dos filas con el mismo vector alélico son un duplicado inválido:
+participan en la puntuación,
+deben desaparecer mediante swaps y nunca se fusionan ni suman silenciosamente.
+
+### LD, búsqueda y terminación
+
+Toda aritmética binary64 de DTC-089 sigue el redondeo y la prohibición de FMA
+fijados abajo para los consumidores RNG. En orden canónico `h`, `i`, `j`, y con
+suma de Neumaier sin reducción paralela:
+
+`p_hat_i=Σ_h q_h x_hi`, `p_hat_ij=Σ_h q_h x_hi x_hj`,
+`D_ij=p_hat_ij-p_hat_i*p_hat_j` y
+`r²_ij=D_ij²/[p_hat_i(1-p_hat_i)p_hat_j(1-p_hat_j)]`.
+
+Denominador cero da `not_evaluable`, nunca cero. Cada bin agrega todas las
+parejas intrabloque de un bloque×subpoblación cuya distancia cae en él; la media
+se reduce por `(site_index_i,site_index_j)`. Cero parejas evaluables da
+`not_applicable`; si todos los bins lo son, el intento es inválido. El primer
+SNP tiene polaridad `positive`; cada posterior usa Bernoulli(0,5). En una pareja
+evaluable se exige D>0 para polaridades iguales y D<0 para distintas; D=0
+incumple. No hay cuota de signos.
+
+Cada propuesta consume, en este orden, cuatro muestreos enteros sin sesgo para
+`a in 0..H`, `b in 0..H-1`, `i in 0..S`, `j in 0..S-1`; `b>=a` y `j>=i` se
+incrementan, y después se ordena cada pareja. Solo `10/01↔01/10` es candidata.
+La propuesta se acepta únicamente si mejora estrictamente la tupla
+`(filas_duplicadas, bins_fuera_de_tolerancia, signos_incumplidos, max_error_r2,
+suma_error_r2, max_error_marginal, matrix_bytes)`. Los errores `f64` se calculan
+en orden de bin y población, con Neumaier para la suma; `matrix_bytes` empaqueta
+bits por filas, sitio creciente y bit más significativo primero. Un mapa de
+conteos de hashes de fila se actualiza solo para a/b y contrasta bytes ante
+colisión; así `filas_duplicadas=Σ_v max(0,count(v)-1)` cuesta O(S) por propuesta.
+No se acepta
+empate ni empeoramiento. Un intento termina al alcanzar cero en los tres campos
+de error discreto —duplicados, bins y signos— y todas las tolerancias, o al
+consumir `max_swap_proposals`. Se ejecutan
+exactamente los intentos necesarios hasta el primer éxito o
+`max_haplotype_attempts`.
+
+El mejor intento es el mínimo lexicográfico de esa tupla, con menor
+`attempt_index` como último desempate. El agotamiento devuelve
+`GPS-DOMAIN-104`, conserva ese intento en diagnóstico y no afirma
+imposibilidad. Un fallo exacto de dimensiones, `H*S>max_haplotype_cells`, cuota
+controlada o ausencia demostrada de toda pareja LD evaluable devuelve respectivamente
+`GPS-RES-101`, `GPS-DOMAIN-103` o `GPS-DOMAIN-102` antes
+de fundadores. Ningún fallo reduce H/S, cambia perfil/tolerancia, fusiona bins o
+acepta menos bloques.
+
+El coste por bloque×subpoblación×intento es
+`O(H*S² + max_swap_proposals*S)` tiempo: evaluar todos los pares ponderados
+requiere recorrer H filas por cada pareja de sitios; las actualizaciones 2×2
+aceptadas mantienen las estadísticas en `O(S)`. El contrato de admisión no deja
+las cotas de recursos en notación asintótica. Antes del primer consumo RNG, el
+preflight `f5-resource-accounting-v1` calcula con enteros comprobados y nombres
+dimensionalmente distintos:
+
+- `B`, número exacto de bloques resuelto desde el objetivo; `N_pop`, número de
+  subpoblaciones; `H`, filas de `haplotype_weights.tsv`; `A`, `Q` y `L`, los
+  tres límites de intentos/propuestas; `C_total=founder_count*ploidy`;
+- `L_max`, mayor longitud admitida; `gap_min`, menor gap admitido, y
+  `S_bound=1+floor((L_max-1)/gap_min)`. Esta es la cota de sitios de cualquier
+  bloque y se valida contra 4096 y `max_haplotype_cells` antes de sortear una
+  longitud o un gap; nunca se sustituye por el S realizado después del layout;
+- `reference_bases_processed`, suma exacta de las longitudes de todas las
+  secuencias resueltas que recorre el escáner; `tract_count`, número de tramos
+  elegibles maximales que materializa; `sequence_count`;
+  `K_bound=B*S_bound`; `pair_bound=S_bound*(S_bound-1)/2`;
+- `bin_count(p)`, número de filas LD del `population_id=p`, y
+  `bin_count_total=sum_p bin_count(p)`. Por tanto, la cota de filas de bins es
+  `B*bin_count_total`, no `B*N_pop*pair_bound`;
+- `profile_rows`, suma de filas de los cinco TSV de perfil, y
+  `normalization_rows`, suma de filas de los cuatro conjuntos normalizados;
+  ambos incluyen cada fila física aunque dos valores sean iguales;
+- `X=C_total*sequence_count`, número de copias por secuencia, y
+  `G_bound=founder_count*K_bound`, número máximo de genotipos SNP.
+
+La cota de filas de los siete TSV es
+`tsv_rows_bound=B+K_bound+B*N_pop*H+B*N_pop*S_bound+
+B*bin_count_total+B*C_total+B*N_pop*A`. La cota de elementos repetidos de los
+objetos JSON F5 es
+`json_rows_bound=founder_count+N_pop+3*B*N_pop+2*B*N_pop*H+
+B*N_pop*S_bound+2*normalization_rows+9`: fundadores; subpoblaciones; muestreo,
+empates y F por bloque×subpoblación; rangos candidatos/seleccionados de cada
+empate en su máximo; resúmenes por sitio; valores antes/después de las cuatro
+normalizaciones; siete enlaces TSV, `truth` y cabecera F5.
+
+El preflight común entrega tres magnitudes distintas: `other_operation_units`,
+`other_working_memory_bytes` y `other_output_bytes`, que cubren configuración
+copiada y toda salida obligatoria o activada ajena a F5. Ninguna se reutiliza
+como si tuviera otra unidad. Las cotas conservadoras F5 son:
+
+- `operation_units = other_operation_units + 2*reference_bases_processed +
+  tract_count + L*B*tract_count + profile_rows +
+  normalization_rows + L*B*(B+S_bound) +
+  B*N_pop*A*(H*S_bound*S_bound+Q*S_bound) + B*C_total +
+  X*K_bound + G_bound + B*N_pop*S_bound + tsv_rows_bound +
+  json_rows_bound`;
+- `working_memory_bytes = other_working_memory_bytes +
+  256*(B+tract_count+profile_rows+normalization_rows) +
+  B*N_pop*(ceil(H*S_bound/8)+64*H+256*S_bound+192*pair_bound) +
+  256*B*bin_count_total + 128*C_total + 65536`; el implementador puede
+  procesar secuencialmente y usar menos, pero toda reserva F5 debe caber aquí;
+- `truth_bound=65536+X*(4096+2048*K_bound)+4096*G_bound` y
+  `output_bytes = other_output_bytes + 1048576 +
+  4096*(tsv_rows_bound+json_rows_bound) + truth_bound`. El sobre de 4096 bytes
+  por fila/objeto y los sobres de verdad son máximos del contrato F5 v1 de
+  contabilidad; necesitarlos mayores es un defecto interno, no permiso para
+  rebasar el presupuesto. El término `2*reference_bases_processed` cubre una
+  unidad para leer y clasificar cada base y otra por base como cota del avance
+  del cursor de máscara; `tract_count` añade una unidad por tramo emitido. Los
+  factores `L*B*tract_count` son intentos×bloques×tramos y añaden una unidad por
+  consulta del recorrido directo obligatorio: no sustituyen ni duplican la
+  emisión. Por tanto, con todos los demás escalares iguales, pasar de un tramo
+  a 4096 aumenta operaciones exactamente en
+  `4095*(1+L*B)`, memoria de trabajo en `256*4095` bytes y no cambia
+  `output_bytes`, porque la lista no se publica y sus escalares caben en el
+  sobre fijo. Los 256 bytes por tramo cubren la lista transitoria; el búfer
+  secuencial y el
+  intervalo de máscara vigente están incluidos en los 65536 bytes fijos. La
+  lista no se publica: efectivo y manifiesto serializan solo sus dos escalares
+  de auditoría dentro del sobre fijo de 1048576 bytes, por lo que no añade una
+  fila repetida a `json_rows_bound`.
+
+Todas las sumas, productos, `ceil` y el cálculo de `S_bound` se ejecutan en el
+orden escrito con aritmética entera comprobada. El efectivo y el manifiesto
+conservan `reference_bases_processed`, `tract_count`,
+`site_bound_per_block=S_bound`, `bin_count_total`, `profile_rows`,
+`normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, las tres
+aportaciones `other_*` y los tres resultados; así un lector puede repetir la
+cuenta sin RNG.
+
+Cada resultado se compara inclusivamente con
+`max_operation_units`, `max_working_memory_bytes` y `max_output_bytes` y con los
+topes duros F5 v1 anteriores. El exceso u overflow devuelve `GPS-RES-101` antes
+de abrir temporales y registra las tres cotas, sus límites y el primer término
+que desbordó o excedió. Esta admisión determinista no ejecuta perfiles externos,
+no consulta RAM/CPU disponible y no promete tiempo de pared o RSS. Es distinta
+de DTPD-115: F9 podrá fijar objetivos de rendimiento y publicación, pero no es
+prerrequisito de F5 ni puede relajar estos topes de dominio. Está prohibido
+materializar o recorrer el conjunto potencia de las H filas.
+
+Los bytes usados por desempates, hashes o vectores no dependen del serializador
+TSV. `placed_layout_bytes` es la concatenación, por bloque en orden
+FASTA/inicio/fin/ID, de cuatro `u64` big-endian sin signo:
+`sequence_ordinal`, `start_1based`, `end_1based`, `length_bp`. `matrix_bytes`
+empieza con `H` y `S` como `u64` big-endian y continúa con H filas en
+`haplotype_rank` creciente; cada fila empaqueta `site_index` creciente, primer
+bit en el bit 7 de cada octeto, y rellena con ceros los bits bajos del último
+octeto. `alleles` es exactamente la vista ASCII de esos S bits (`0` o `1`), sin
+separador ni final de línea. Toda matriz, layout o vector de ID usa estas
+codificaciones exactas antes de SHA-256 o BLAKE3; cambiar anchura, endianidad,
+orden o relleno exige nueva versión de algoritmo y de artefacto.
+
+### Fundadores, F y factibilidad controlada
+
+El modo probabilístico muestrea una fila por copia con q. En diploides, primero
+muestrea la copia 0; con probabilidad F la copia 1 reutiliza exactamente esa fila
+y, si no, se muestrea independientemente. Esto produce, para categorías i/j,
+`P(ii)=q_i²+F*q_i*(1-q_i)` y `P(ij)=2*(1-F)*q_i*q_j`, i<j; en el caso bialélico
+son `p²+Fpq`, `2pq(1-F)` y `q²+Fpq`. F=0 coincide con HWE y F=1 produce
+homocigosis completa. P=1 o P>2 con F es error. `founder_f` se consume antes
+que `founder_sample` de la copia 1; si decide reutilizar, ese segundo flujo no
+se abre. F=0/1 no consume `founder_f`, conforme a la regla Bernoulli del
+catálogo.
+
+Controlado calcula `C=individual_count*ploidy`, cuotas ideales `C*q_h`, pisos y
+reparte el residual por mayor resto. Los restos binary64 se ordenan de mayor a
+menor; igualdad significa el mismo valor finito tras el cálculo normativo. Si
+un grupo de restos iguales cruza la frontera del residual, sus
+rangos se ordenan primero y se aplica una única Fisher–Yates al grupo con
+`controlled_quota_tie`, seleccionando el prefijo necesario. Grupos incluidos o
+excluidos por completo no consumen RNG. Antes de ese desempate se comprueba la
+cuota fija de cada rango y, para el grupo fronterizo, los dos estados posibles
+—piso o piso+1—; como todos comparten resto, esa comprobación O(H) demuestra la
+cota para todas las combinaciones sin enumerarlas. Para la pareja
+bloque×subpoblación se exige suma C y
+`|n_h/C-q_h|<=controlled_max_abs_error_effective` en ambos estados aplicables;
+su valor predeterminado es `0.5/C` y uno declarado solo puede ser más estricto.
+Si falla, devuelve
+`GPS-DOMAIN-103` antes de RNG. Una permutación Fisher–Yates de las C identidades de
+copia, inicialmente ordenadas por `individual_id` y `copy_index`, asigna el
+multiconjunto ordenado por `haplotype_rank`. No se prueba, corrige ni relaja otra
+cuota y F>0 es incompatible.
+
+Por población×bloque diploide se informa
+`F_realized=1-H_observed/H_expected`, donde
+`H_observed=heterozygous_individuals/individual_count`,
+`q_realized_h=n_h/C` y `H_expected=1-Σ_h q_realized_h²`; se usa la frecuencia
+realizada, no el objetivo q. Si `H_expected=0`, es `not_applicable`. F5 no
+reproduce y registra Ne reproductivo como `not_applicable`. En F7.3, con `N_p>=2`
+parentales elegibles, contribuciones gaméticas realizadas `k_j`,
+`k_bar=Σk_j/N_p` y varianza poblacional
+`V_k=Σ(k_j-k_bar)²/N_p`, se usa
+`Ne=(N_p*k_bar-1)/(k_bar-1+V_k/k_bar)`. `k_bar<=0`, denominador no positivo o
+datos incompletos dan `not_evaluable` con causa; Ne nunca es objetivo ni cambia
+descendientes. Con ello DTPD-109 queda resuelta.
+
+### IDs, RNG y formatos de salida
+
+Todos los IDs automáticos usan DTC-039, no concatenación textual. Cada fila del
+catálogo tiene exactamente estos componentes con nombre y valor UTF-8, en este
+orden:
+
+| Prefijo / `class` | Componentes exactos tras `class` |
+|---|---|
+| `BLK_` / `f5_block` | `execution_id`, `scenario_id`, `reference_id`, `block_index_u64` |
+| `SITE_` / `f5_site` | `execution_id`, `scenario_id`, `reference_id`, `block_index_u64`, `site_index_u64` |
+| `HAP_` / `f5_haplotype` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `block_index_u64`, `haplotype_rank_u64`, `alleles` |
+| `FCP_` / `f5_founder_copy` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `individual_id`, `sequence_id`, `copy_index_u32` |
+| `FHA_` / `f5_block_haplotype_assignment` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `block_index_u64`, `individual_id`, `copy_index_u32`, `haplotype_id` |
+
+`class` es el literal de la segunda columna, no el prefijo. Los enteros son
+decimales canónicos UTF-8;
+cada nombre y valor conserva su prefijo de longitud DTC-037, por lo que campos
+adyacentes nunca resultan ambiguos. Los prefijos son `BLK_`, `SITE_`, `HAP_`,
+`FCP_` y `FHA_`; se toman 128 bits BLAKE3 y Base32 sin relleno. `IndividualId`
+identifica al fundador una sola vez en toda la ejecución; `FCP_` identifica su
+copia biológica por secuencia y fase a través de todos los bloques de esa
+secuencia. `FHA_` no es una copia: es la asignación por bloque a un `HAP_` y
+nunca puede sustituir la identidad persistente de copia. Orden físico, ruta, hilo,
+intento y RNG no forman parte del ID. `alleles` solo se incluye para `HAP_`; el
+rango canónico distingue filas y el vector protege el contenido, mientras la
+validación impide publicar duplicados. Colisión detectada reutiliza
+`GPS-DOMAIN-002`, cuyo significado general ya es colisión de identidad.
+`id-catalog-v4` es el superconjunto estricto de v3 que añade únicamente estas
+cinco clases F5, sus componentes y vectores; conserva literalmente todas las
+filas anteriores y usa versión de derivación 1 mientras no cambien contexto ni
+codificación DTC-039. Antes de F5.1 publica por cada clase al menos un vector
+completo con componentes, material binario codificado, digest BLAKE3 de 32
+bytes, primeros 128 bits, Base32 y ID final prefijado.
+
+`f5-rng-catalog-v1` usa DTC-037/ChaCha12 y exactamente estos ámbitos:
+
+| decisión | componentes adicionales en orden | sal |
+|---|---|---|
+| `layout_length` | `scenario_id`, `stage`, `attempt_index_u64`, `block_index_u64` | vacía |
+| `layout_position` | `scenario_id`, `stage`, `attempt_index_u64`, `block_index_u64` | vacía |
+| `layout_gap` | `scenario_id`, `stage`, `attempt_index_u64`, `block_index_u64` | vacía |
+| `site_alt` | `scenario_id`, `block_id`, `site_id`, `stage` | vacía |
+| `marginal_spectrum` | `scenario_id`, `population_id`, `block_id`, `site_id`, `stage` | vacía |
+| `initial_column` | `scenario_id`, `population_id`, `block_id`, `stage`, `attempt_index_u64` | `site_index_u64` |
+| `polarity` | `scenario_id`, `population_id`, `block_id`, `stage`, `attempt_index_u64` | `site_index_u64` |
+| `swap_proposal` | `scenario_id`, `population_id`, `block_id`, `stage`, `attempt_index_u64` | vacía; un flujo secuencial por intento |
+| `founder_sample` | `scenario_id`, `population_id`, `block_id`, `individual_id`, `copy_index_u32`, `stage` | vacía |
+| `founder_f` | `scenario_id`, `population_id`, `block_id`, `individual_id`, `stage` | vacía |
+| `controlled_quota_tie` | `scenario_id`, `population_id`, `block_id`, `stage` | vacía; un flujo secuencial por bloque |
+| `founder_controlled_permutation` | `scenario_id`, `population_id`, `block_id`, `stage` | vacía |
+
+`stage` es literalmente el nombre de decisión de la primera columna. Los
+enteros de componente y sal son decimales canónicos UTF-8 dentro de DTC-037.
+Una sal no vacía se codifica como el último componente DTC-037, con nombre ASCII
+exacto `salt.<nombre_de_la_columna>` —aquí `salt.site_index_u64`— y su valor;
+una sal vacía no añade componente.
+Cada combinación distinta de componentes y sal deriva una subsemilla; una fila
+sin sal abre un único flujo secuencial en el orden de consumo descrito, y una
+fila con sal abre un flujo independiente por valor de sal. No se añade una sal
+textual redundante. Los
+enteros
+acotados usan rechazo desde `next_u64`: se descartan valores `>=floor(2^64/n)*n`
+y se devuelve `value%n`. Un U53 toma `bits53=next_u64()>>11` y
+`U=bits53/2^53` en binary64. Fisher–Yates recorre exactamente `i=len-1..1` y
+sortea `j` en `0..=i` con ese entero acotado. Bernoulli compara `bits53` con
+`floor(p*2^53)`; p=0/1 no consume RNG. Toda operación binary64 se evalúa en el
+orden escrito con redondeo IEEE 754 *round-to-nearest ties-to-even* entre
+operaciones y sin contracción FMA.
+
+El consumo por decisión también es cerrado: `layout_length`/`layout_gap`
+consumen un U53 por elección entre dos o más valores factibles;
+`layout_position` y `site_alt`, un entero acotado; `marginal_spectrum`, un U53
+para fila y otro para valor solo si el intervalo no es degenerado;
+`initial_column`, H−1 enteros por permutación no constante; `polarity`, un U53
+por sitio posterior al primero; `swap_proposal`, los cuatro enteros ya
+enumerados por propuesta; `founder_sample`, un U53 por muestreo independiente;
+`founder_f`, un U53 solo para 0<F<1; y la permutación controlada, C−1 enteros.
+`controlled_quota_tie` consume g−1 enteros solo para el único grupo de tamaño g
+que cruza la frontera. Una elección con una sola alternativa no consume RNG.
+El catálogo debe publicar al menos un vector completo por fila —material
+codificado, subsemilla y primeras cuatro palabras `u64`— antes de F5.1.
+
+Los siete TSV exactos de un éxito son:
+
+| Fichero / `artifact_id` / `artifact_kind` | Cabecera exacta | Clave/orden |
+|---|---|---|
+| `f5-block-layout.tsv` / `f5-01-block-layout-v1` / `f5_block_layout` | `block_id\tsequence_id\tstart_1based\tend_1based\tlength_bp` | orden FASTA, inicio, fin, ID |
+| `f5-sites.tsv` / `f5-02-sites-v1` / `f5_sites` | `block_id\tsite_index\tsite_id\tsequence_id\tposition_1based\tref\talt` | bloque, índice |
+| `f5-haplotypes.tsv` / `f5-03-haplotypes-v1` / `f5_haplotypes` | `population_id\tblock_id\thaplotype_id\thaplotype_rank\tq\talleles` | población, bloque, rango |
+| `f5-frequencies.tsv` / `f5-04-frequencies-v1` / `f5_frequencies` | `population_id\tblock_id\tsite_id\tpolarity\ttarget_alt_af\trealized_alt_af\tabs_error` | población, bloque, sitio |
+| `f5-ld-evaluation.tsv` / `f5-05-ld-evaluation-v1` / `f5_ld_evaluation` | `population_id\tblock_id\tdistance_start_bp\tdistance_end_bp\tstatus\tpair_count\tmean_r2\ttarget_mean_r2\tmax_abs_error\tabs_error` | población, bloque, inicio de bin |
+| `f5-founders.tsv` / `f5-06-founders-v1` / `f5_founders` | `population_id\tindividual_id\tsequence_id\tcopy_index\tblock_id\tfounder_copy_id\tblock_assignment_id\thaplotype_id` | población, individuo, secuencia, copia, bloque |
+| `f5-attempts.tsv` / `f5-07-attempts-v1` / `f5_attempts` | `population_id\tblock_id\tattempt_index\tproposals\taccepted\tduplicate_rows\tbins_outside\tsigns_failed\tmax_r2_error\tsum_r2_error\tmax_marginal_error\tselected_best` | población, bloque, intento |
+
+Rigen el mismo contrato byte a byte de los perfiles. `alleles` contiene
+exactamente S caracteres `0`/`1`; la `polarity` propia de cada población es
+`positive` o `negative` y por ello reside en `f5-frequencies.tsv`, no en la
+geometría común de `f5-sites.tsv`;
+`status` es `evaluated` o `not_applicable`. Solo en este último caso
+`mean_r2` y `abs_error` contienen el literal `NA`; ningún otro campo queda vacío.
+`selected_best` es `true/false` y existe una sola fila `true` por
+bloque×población. Frecuencias, errores y medias usan decimal `f64` de ida y vuelta.
+Todos los IDs referenciados existen en su tabla propietaria y tienen la clase
+indicada arriba; índices, recuentos, coordenadas y longitudes son enteros
+decimales canónicos no negativos, con coordenadas/longitudes positivas,
+`length_bp=end-start+1`, `site_index` y `haplotype_rank` consecutivos desde 0,
+`copy_index` en `0..ploidy-1`, `q` finito en `(0,1]` y suma 1 por
+población×bloque, frecuencias/errores/medias en `[0,1]`, y cada contador de
+intento cabe en los límites efectivos. `pair_count=0` si y solo si el estado es
+`not_applicable`; si es `evaluated`, es positivo y su error respeta el perfil.
+
+El `effective-config.json` vigente añade exactamente este objeto `f5`; todos los
+objetos rechazan propiedades adicionales:
+
+| Clave | Tipo y dominio |
+|---|---|
+| `schema_version` | cadena exacta `"1"` |
+| `scenario_id`, `reference_id` | ID DTC-039 |
+| `reference_sha256`, `seed` | 64 hex minúsculas |
+| `ploidy`, `founder_count` | enteros validados |
+| `subpopulations` | lista ordenada por `population_id` de objetos exactos `population_id`, `individual_count`, `inbreeding_f`, `inbreeding_f_source`, `sampling`, `founders`; `inbreeding_f` es `f64` en P=2 y `null` en otra ploidía; la fuente es `population` o `subpopulation`; `founders` contiene objetos `individual_id` y `founder_key` cadena o `null`, ordenados por ID |
+| `profile` | objeto exacto `profile_id`, `path`, `size_bytes`, `sha256` |
+| `mask` | `null` u objeto exacto `path`, `size_bytes`, `sha256` |
+| `target` | objeto exacto `kind`, `declared_value`, `numerator`, `denominator`, `target_bases`; `kind` es `block_count`, `covered_bases` o `coverage_fraction`; campos no aplicables son `null` |
+| `sampling` | lista ordenada por `population_id`+`block_id`, con una fila exacta por bloque×subpoblación: `population_id`, `block_id`, `block_index`, `requested_mode`, `effective_mode`, `source` (`subpopulation_default` o `block_override`), `controlled_max_abs_error_declared` y `controlled_max_abs_error_effective`; las tolerancias son `null` en probabilístico y la efectiva es finita en `[0,0.5/C]` en controlado, con `C=individual_count*ploidy` de esa subpoblación |
+| `normalizations` | cuatro objetos exactos en orden `block_lengths`, `snp_gaps`, `snp_spectrum`, `haplotype_weights`, cada uno con `set_kind`, `canonical_order`, `algorithm="neumaier-f64-v1"`, `tolerance`, `input_values`, `input_sum`, `input_delta`, `effective_values`, `output_sum`, `output_delta`; los números recuperan el mismo `f64` y materializan físicamente la auditoría DTC-049 |
+| `limits` | objeto exacto con los cuatro límites algorítmicos y los tres presupuestos efectivos TOML |
+| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v1"`, `reference_bases_processed`, `tract_count`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; los dos recuentos de elegibilidad y los tres valores calculados son enteros `u64`; los valores calculados no exceden sus límites |
+| `algorithms` | objeto exacto `layout="f5-layout-v1"`, `marginals="f5-spectrum-v1"`, `haplotypes="weighted-prefix-swap-v1"`, `ld="phased-r2-neumaier-v1"`, `controlled="largest-remainder-v1"`, `inbreeding="diploid-f-v1"`, `truth_projection="f5-founder-truth-projection-v2"` |
+| `rng_catalog`, `id_catalog` | objetos exactos `catalog_id`, `path`, `size_bytes`, `sha256` |
+
+En `normalizations`, `canonical_order` vale exactamente
+`length_min_bp`, `gap_min_bp`, `alt_af_min` o `haplotype_rank` según
+`set_kind`. `input_values` y `effective_values` son listas de objetos exactos
+`key`+`value` y conservan todas las claves canónicas y todos los pesos en ese
+orden; no se sustituyen por un digest ni por un resumen. El manifiesto copia
+estos cuatro objetos con igualdad semántica exacta respecto al efectivo.
+
+El objeto `f5` del `manifest.json` general contiene exactamente
+`schema_version`, `scenario_id`, `seed`, `reference_id`, `reference_sha256`, `profile`,
+`mask`, `eligible_bases:u64`, `target` —igual al efectivo—, `ploidy:u8`,
+`founder_count:u64`, `subpopulations`, `algorithms`, `rng_catalog`, `id_catalog`, `limits`,
+`resource_preflight`, `normalizations`,
+`attempt_summary`, `sampling`, `quota_ties`, `f_realized`,
+`initialization_summaries`, `truth` y `artifacts`. `attempt_summary`
+contiene exactamente `layout_attempts_used:u64`,
+`haplotype_attempts_total:u64`, `max_attempt_index:u64`; `f_realized` se ordena
+por población+bloque y contiene objetos exactos `population_id`, `block_id`,
+`target_f` (`f64` o `null`), `status` (`evaluated`/`not_applicable`) y `value`
+(`f64` o `null`); P distinto de 2 usa ambos valores `null` y `not_applicable`.
+`seed` cumple `^[0-9a-f]{64}$` y es idéntica a
+`effective-config.json#/seed` y `effective-config.json#/f5/seed`. `profile`,
+`mask`, `target`, `algorithms`, `rng_catalog`, `id_catalog`,
+`limits`, `resource_preflight` y `normalizations` reutilizan exactamente los
+objetos del efectivo. En particular, cada escalar de `resource_preflight` —no
+solo los tres totales— debe ser idéntico entre efectivo y manifiesto; ambos se
+rechazan si una copia discrepa aunque la fórmula pudiera producir el mismo
+total. `subpopulations` se
+ordena por ID y cada elemento contiene exactamente `population_id`,
+`individual_count`, `inbreeding_f` e `inbreeding_f_source` (`f64` o `null` con
+la misma regla de ploidía); no repite claves fundadoras ni el vector de
+individuos. `sampling` reutiliza la lista efectiva bloque×subpoblación y
+`schema_version` es
+la cadena `"1"`. `quota_ties` es una lista ordenada por población+bloque;
+queda vacía en probabilístico y, en controlado, contiene un objeto por frontera
+empatada con exactamente `population_id`, `block_id`, `remainder` binary64,
+`candidate_ranks` en orden ascendente, `select_count:u64` y `selected_ranks` en
+el orden sorteado. `candidate_ranks`+`select_count` representa de forma
+compacta todas las combinaciones óptimas; está prohibido enumerar sus
+subconjuntos.
+`initialization_summaries` se ordena por población, bloque y sitio y contiene
+exactamente `population_id`, `block_id`, `site_id`, `ploidy`, `model`,
+`requested_mode`, `effective_mode`, `input_alt_af`, `realized_alt_af`,
+`expected_genotype_probabilities`, `expected_genotype_frequencies`,
+`expected_genotype_counts`, `realized_genotype_frequencies`,
+`realized_genotype_counts`, `recounted_genotype_frequencies`,
+`recounted_genotype_counts`, `recount_source` y `recount_matches`.
+`model` es `hwe`, `diploid_f` o `controlled_hwe_conditioned_counts`. Cada vector
+es una lista de objetos `{dosage,value}` ordenada por dosis `0..ploidy`; los
+valores de probabilidad/frecuencia son `f64`, los recuentos esperados son
+`f64=N*probability` y los realizados/recontados son `u64` que suman
+`individual_count`. En controlado, la probabilidad esperada por dosis es la
+hipergeométrica inducida por permutar sin reemplazo las C copias con el recuento
+ALT fijado; no se vuelve a presentar como binomial no condicionada.
+`recount_source="outputs/truth.jsonl#f5-founder-truth-projection-v2"`; el oráculo que
+produce `recounted_*` solo lee la proyección publicada v2. Agrupa por el par
+estructurado `site_id`×`population_id`, exige exactamente los individuos y la
+ploidía declarados en la cabecera v2 y calcula cada dosis desde los portadores;
+no abre los siete TSV ni usa manifiesto, contadores, asignaciones o acumuladores
+del productor. `recount_matches` debe ser `true`.
+Así REQ-MAN-70 conserva probabilidades, frecuencias y recuentos esperados,
+realizados y recontados de forma independiente por locus×subpoblación.
+
+`truth` es el enlace obligatorio a la proyección fundadora canónica y contiene
+exactamente `artifact_id="truth-jsonl"`, `artifact_kind="truth_jsonl"`,
+`schema_version="2"`, `projection_version="f5-founder-truth-projection-v2"`,
+`path="outputs/truth.jsonl"`, `size_bytes` y `sha256`.
+
+`truth-v2.schema.json` es un esquema nuevo y autocontenido; no modifica ni usa
+como extensión abierta `truth-v1.schema.json`, cuyo `additionalProperties:false`
+y semántica permanecen byte a byte históricos. V2 conserva los registros y
+significados reconstruibles de DTC-061 y exige además los siguientes objetos
+cerrados para la proyección F5:
+
+- la cabecera `schema_version="2"` incorpora `projection`, con exactamente
+  `kind="f5_founder"`, `projection_version="f5-founder-truth-projection-v2"` y
+  `scenario_id`, y `populations`, ordenada por `population_id`, con objetos
+  exactos `population_id`, `individual_count` y `ploidy`;
+- cada `haplotype_copy` incorpora `founder_membership`, con exactamente
+  `population_id` y `founder_copy_id`. Su `identity` conserva la tupla
+  `(reference_id,individual_id,sequence_id,copy_index)`, por lo que el lector
+  puede unir cada portador a una única subpoblación sin inferirla del ID;
+- cada `genotype` SNP incorpora `f5_locus`, con exactamente `population_id`,
+  `block_id`, `site_id`, `ref` y `alt`. La población coincide con la membresía
+  de todas sus copias portadoras, el sitio pertenece al bloque y `ref`/`alt`
+  coinciden con locus y alelos tipados.
+
+La proyección emite una `haplotype_copy` por tupla FCP y un genotipo SNP por
+fundador y sitio a partir de FHA→HAP. Se ordenan primero las copias por
+referencia, población, individuo, secuencia y fase, y después los genotipos por
+referencia, población, bloque, sitio e individuo. El manifiesto no puede
+declarar éxito si falta el fichero, su hash no coincide o un reconstructor que
+solo lee `truth.jsonl` v2 no recupera exactamente identidad, pertenencia, fase,
+alelos, dosis y recuentos por locus×subpoblación. Publicar v1 con una proyección
+F5 es error de versión, no compatibilidad implícita.
+`artifacts` contiene exactamente siete enlaces en el orden anterior —que es
+también el orden lexicográfico de `artifact_id`—, cada uno con exactamente
+`artifact_id`, `artifact_kind`, `schema_version="1"`, `path`, `size_bytes` y
+`sha256`; sus siete valores literales son los de la tabla y no duplica filas
+TSV. Los tamaños son `u64`; toda ruta es relativa y normalizada.
+
+El catálogo público F5 añade sin reutilizar significado:
+`GPS-CONF-101` escenario/one-of/F/P/límite inválido; `GPS-FMT-101` perfil,
+máscara, TSV, JSON, versión, orden o hash inválido; `GPS-DOMAIN-101` layout
+demostrablemente inviable; `GPS-DOMAIN-102` ninguna pareja LD evaluable;
+`GPS-DOMAIN-103` cuota controlada inviable; `GPS-DOMAIN-104` búsqueda agotada;
+`GPS-DOMAIN-105` H vectores únicos imposibles para S;
+`GPS-DOMAIN-106` búsqueda de layout agotada;
+`GPS-RES-101` presupuesto/dimensión excedido; y `GPS-INTERNAL-101` overflow o
+resultado numérico no finito tras entradas válidas. Cada diagnóstico incluye
+escenario y, cuando existen, población, bloque, sitio, campo, ruta, intento,
+límite y valor efectivo. La corrupción de un artefacto publicado usa el código
+de formato vigente y las colisiones siguen usando `GPS-DOMAIN-002`.
+
+Un rechazo de preflight devuelve diagnóstico JSON DTC-044 y no abre ni publica
+destino. Un fallo controlado posterior publica, conforme a DTC-045, un manifiesto
+`fallido` con un objeto `f5_failure` que contiene exactamente `code`, `stage`,
+`scenario_id`, `population_id`, `block_id`, `limits`, `counters`, `best_layout`,
+`best_attempt` y `artifacts`; los tres IDs, límites, contadores y mejores
+intentos usan los mismos tipos del fichero diagnóstico descrito a continuación.
+`artifacts` contiene exactamente un enlace no biológico a
+`f5-failure.json`; no contiene `truth` ni lista ninguno de los siete TSV, aunque existieran
+temporales. `f5-failure.json` tiene `diagnostic_kind="f5_failure"`,
+`schema_version="1"` y exactamente `code`, `stage`, `scenario_id`,
+`population_id`/`block_id` —cadena o `null`—, `limits`, `counters`,
+`best_layout`, `best_attempt` y `artifacts=[]`. `limits` repite exactamente los
+cuatro límites algorítmicos y los tres presupuestos efectivos; `counters` contiene `layout_attempts_used`,
+`haplotype_attempts_used`, `swap_proposals` y `swap_accepted`, todos `u64`.
+`best_layout` es `null` o contiene `attempt_index`, `placed_blocks`,
+`unplaced_blocks`, `placed_bases`, `remaining_target_bases` y
+`layout_bytes_sha256`. `best_attempt` es `null` o contiene `attempt_index`,
+`duplicate_rows`, `bins_outside`, `signs_failed`, `max_r2_error`,
+`sum_r2_error`, `max_marginal_error` y `matrix_bytes_sha256`. Su
+enlace usa exactamente `artifact_id="f5-00-failure-v1"`,
+`artifact_kind="f5_failure"`, `schema_version="1"`, ruta, tamaño y SHA-256.
+Un éxito publica conjuntamente los siete TSV y la proyección fundadora
+`outputs/truth.jsonl`, o falla atómicamente. El oráculo independiente relee esos
+bytes, reconstruye H×S, q, marginales, D, r², bins, signos, puntuaciones,
+cuotas, F, IDs, hashes, mejor intento y estado fundador sin importar estado del
+productor. Marimo solo importa/exporta este TOML, invoca Rust sin *shell* y
+muestra su respuesta.
+
+Esta decisión cierra DTPD-110: los únicos catálogos distributivos F5 son
+intervalos enteros ponderados uniformes para longitudes/gaps, intervalos `f64`
+ponderados uniformes para marginales, pesos categóricos para H y medias `r²`
+por bin; las tolerancias son DTC-049 para normalización,
+`max_h(q_h)` para marginales, `0.05` inclusivo para LD y, para controlado, la
+tolerancia inclusiva efectiva de cada bloque×subpoblación en `[0,0.5/C]`, con
+`0.5/C` predeterminada. Una combinación controlada no factible se rechaza antes
+del RNG propio de cuotas. Las
+distribuciones de reproducción posteriores se deciden en sus fases y no
+bloquean F5.

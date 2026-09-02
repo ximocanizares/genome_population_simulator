@@ -1,9 +1,9 @@
 # Arquitectura del simulador de genomas y poblaciones
 
 - **Versión:** 0.2
-- **Estado:** F1 cerrado en `e14705a`/`efca265`; arquitectura F2 simplificada
-  para ejecución local confiable y pendiente de aprobación
-- **Fecha:** 21 de agosto de 2026
+- **Estado:** F1 cerrado en `e14705a`/`efca265`; arquitectura F5 sintética
+  cerrada documentalmente y pendiente de implementación tras F4
+- **Fecha:** 1 de septiembre de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Hoja de ruta:** [hoja-de-ruta-0.1.md](./hoja-de-ruta-0.1.md)
@@ -272,7 +272,7 @@ precedencia.
 | Variante o evento genómico | Identidad estable en el historial biológico | Clase, orden, marco de coordenadas previo, haplotipo afectado y estado final |
 | Espectro de frecuencias alélicas | Identidad y versión estables; puede ser incorporado o suministrado | Definición de frecuencia, valores o intervalos, pesos, población/fuente/filtros y transformación |
 | Matriz de frecuencias SNV | Inmutable una vez admitida o generada | Referencia exacta, poblaciones, loci/alelos, frecuencias, perfil y procedencia generadora |
-| Panel de bloques haplotípicos | Paquete inmutable de cinco ficheros durante la ejecución | `panel.metadata.json`, referencia exacta, cuatro TSV enlazados, bloques e intervalos no solapados, sitios SNP A/C/G/T, haplotipos de identidad local `block_id` + `haplotype_id`, asignaciones y frecuencias densas por población y bloque |
+| Distribución haplotípica F5 | Estado generado e inmutable por bloque×subpoblación | Perfil exacto, matriz H×S, pesos q, marginales, evaluación LD, intentos e IDs tipados; nunca procede de un panel externo |
 | Individuo | Único y no reutilizable en la ejecución | Referencia estructural, generación, población, parentales, haplotipos y observaciones |
 | Copia haplotípica | Distinta aunque tenga la misma secuencia que otra | Individuo, secuencia, índice de copia, ploidía, segmentos y fundador |
 | Población y subpoblación | Identidades no reutilizables | Generación, miembros, estado activa/extinguida y relaciones demográficas |
@@ -491,7 +491,7 @@ entrada. El manifiesto conserva ruta, tamaño y SHA-256, y el validador rechaza
 enlaces ausentes, múltiples, cruzados o entradas sobrantes. Todos los casos de
 F2 son representables y, por tanto, omiten `GPS_LOSS`, `GPS_COMPLEMENT` y el
 complemento. La cardinalidad positiva multicaso del complemento se definirá en
-F5.5 sobre un caso real con pérdida, no en F2.
+F6.5 sobre un caso real con pérdida, no en F2.
 
 La **representación técnica transitoria de lecturas** usa durante la generación
 el origen de fragmentos, las secuencias original y observada y las
@@ -640,7 +640,7 @@ unidades subordinadas; no se deduce de que exista algún fichero.
 | Coordenadas y transformaciones | Validar intervalos y convertir convenios sin ambigüedad | Coordenadas etiquetadas → coordenadas validadas o correspondencias | Posee reglas de conversión; consulta referencias y segmentos |
 | Motor de verdad genómica | Crear y transformar haplotipos y eventos | Referencia, cambios y flujos aleatorios → estado faseado | Posee el estado genotípico, eventos, segmentos y correspondencias |
 | Creación directa | Traducir la vía directa a operaciones del motor genómico | Configuración efectiva → individuos | Posee solo el estado de progreso; el motor posee la verdad resultante |
-| Fuentes de variación poblacional | Preparar, admitir, generar o reutilizar espectros y matrices SNV canónicas sin crear todavía individuos; posteriormente admitir paneles de haplotipos | Tabla mínima o par TSV+JSON/configuración/semilla → fuente poblacional inmutable, par publicado, auditoría o error | Posee recursos normalizados, IDs, versiones, perfiles, descartes y estadísticas de generación; consulta referencia, coordenadas, SHA-256, aleatoriedad y publicación |
+| Fuentes de variación poblacional | Preparar, admitir, generar o reutilizar la matriz SNV F2 y generar internamente perfiles/layout/haplotipos F5 sin crear todavía fundadores | Recursos versionados/configuración/semilla → fuente poblacional inmutable, auditoría o error | Posee recursos normalizados, IDs, versiones, perfiles y estadísticas; nunca admite panel ni comparte estado mutable entre F2 y F5 |
 | Inicialización poblacional | Crear fundadores, frecuencias, genotipos, LD, HWE y F diploide inicial | Fuente poblacional y configuración → población inicial o error previo | Posee estadísticas solicitadas/realizadas y el estado «no aplicable» de F fuera de diploides; entrega verdad al repositorio biológico |
 | Reproducción y recombinación | Validar ploidía y estructura canónica, formar bivalentes, gametos y descendencia trazable | Progenitores, mapas/tasas y flujo → descendientes o incompatibilidad reproductiva | Posee eventos de transmisión y comparaciones estructurales; consulta verdad parental |
 | Dinámica evolutiva | Ejecutar las ocho etapas generacionales en su orden fijo | Población y fases → población final e historial de etapas aplicadas u omitidas | Posee estado generacional y resúmenes; delega cambios genómicos |
@@ -748,7 +748,7 @@ exige que la persona usuaria los instale.
 | Coordenadas y transformaciones | Convenio ausente, intervalo fuera de límites o correspondencia inexistente | Probar extremos, inserciones, inversiones y conversiones de ida y vuelta donde sean definidas |
 | Motor de verdad genómica | Evento solapado prohibido, objetivo eliminado, destinos válidos insuficientes, punto de ruptura o ploidía inválidos | Materializar haplotipos conocidos; rechazar SNP o motivo sobre `N`, conservarla dentro de SV e inserciones explícitas y agotar de forma controlada el espacio válido |
 | Creación directa | Individuo incompleto o cambio incompatible | Crear individuos pequeños con cambios concretos y aleatorios controlados |
-| Fuentes e inicialización poblacional | Paquete/hash/referencia inválido; bloque/sitio/alelo/frecuencia incompatible; locus `alt_af` dentro de bloque; ejes o ámbitos ambiguos; recombinante+controlado o distribución explícita; r fuera de (0,1]; F fuera de diploides; ID, asignación, segmento, recuento o enlace incoherente | Validar corpus y corrupción con oráculo ajeno al productor; reconstruir HAP y mosaicos; probar productor directo, F=0/intermedio/1, puntos conocidos/múltiples/invisibles, fuentes solo del panel, IDs por contenido, suma C y `n_h/C`; repetición, aislamiento por identidad/bloque y paridad Marimo↔TOML |
+| Fuentes e inicialización poblacional | Referencia/perfil/hash o IDs inválidos; layout/sitio/frecuencia incompatibles; H/q/marginal/LD no factibles; F fuera de diploides; cuota controlada imposible; artefacto o enlace incoherente | Validar corpus y corrupción con oráculo ajeno al productor; reconstruir H×S, q, p_hat, D/r² y fundadores intactos; probar F=0/intermedio/1, suma C y `n_h/C`, agotamiento, aislamiento y paridad Marimo↔TOML |
 | Reproducción y recombinación | Referencias distintas, ploidía impar o desigual, estado estructural no idéntico, mapa incompleto o bivalente imposible | Probar diploides y tetraploides idénticos; SNP, *indels* pequeños y repeticiones distintos; cada clase SV heterocigota; SV fijada con historias distintas; *scaffold* intacto; SV de novo seguida de otro intento |
 | Dinámica evolutiva | Orden alternativo solicitado, población activa vacía no autorizada, mezcla de referencias estructurales tras migración o evento demográfico imposible | Ejecutar las ocho etapas, omitir una opcional en su posición, rechazar otro orden, ordenar varios eventos demográficos y comprobar el historial efectivo |
 | Selección de viabilidad | Locus ausente, múltiple, ambiguo o situado sobre `N`; dosis sin valor; aptitud negativa, no finita o máximo cero | Probar varias ploidías, rechazo de `N`, fallos antes de supervivencia y recombinación que conserva la identidad única |
@@ -915,8 +915,8 @@ probabilidad cero solo atraviesa la admisión con la autorización específica
 `--allow-incompatible-genotypes`; una matriz activa vacía exige
 `--allow-empty-snv-matrix`. Ambas decisiones se incorporan a configuración
 efectiva/manifiesto y no relajan otras invariantes. La matriz conserva solo
-frecuencias marginales, por lo que los loci son independientes y cualquier LD
-requiere el panel de haplotipos posterior.
+  frecuencias marginales, por lo que los loci F2 son independientes. F5 no
+  consume esa matriz: genera su propio LD sintético mediante DTC-089.
 
 Una cohorte inicial declara IDs aportados o, exclusivamente cuando estos se
 omiten, una `founder_key` estable por individuo. La derivación automática usa
@@ -952,364 +952,38 @@ revalidación publicada vuelve a resolver el TOML tipado, exige que configuraci�
 efectiva, manifiesto y sus esquemas coincidan y reconstruye las estadísticas
 antes de aceptar los enlaces.
 
-El panel de bloques haplotípicos cruza la misma frontera como otro recurso
-inmutable. El paquete contiene exactamente `panel_blocks.tsv`, `panel_sites.tsv`,
-`panel_haplotype_alleles.tsv`, `panel_frequencies.tsv` y `panel.metadata.json`.
-El JSON es la raíz del recurso: declara clase, versión, `panel_id`, referencia y
-SHA-256, coordenadas base 1 cerradas y, para cada TSV, clase, ruta, tamaño y
-SHA-256. Registra procedencia y herramienta cuando existan, pero no duplica las
-tablas. El adaptador verifica todos los enlaces antes de interpretar la fuente.
+F5 no cruza la frontera mediante un panel externo. La fuente poblacional
+sintética recibe solamente escenario TOML ya resuelto, referencia, máscaras y
+perfiles versionados. Geometría genera layout común; marginales, haplotipos y LD
+se generan por bloque×subpoblación. El constructor DTC-089 produce una tabla
+finita H×S, valida marginales/r2 y entrega fundadores intactos al repositorio de
+verdad. No acepta SV ni recombinación.
 
-El adaptador tabular comparte un contrato byte a byte para los cuatro TSV:
-UTF-8 sin BOM, LF incluido al final, campos separados por tabulador, una cabecera
-exacta, sin comillas, vacíos, líneas vacías ni columnas extra. Las cabeceras son
-`block_id reference_id sequence_id start end`,
-`block_id site_id position ref alt`,
-`block_id haplotype_id site_id allele_index` y
-`population_id block_id haplotype_id frequency`, donde los espacios de esta
-enumeración representan tabuladores en el fichero. Enteros positivos y no
-negativos usan decimal canónico sin signo ni ceros iniciales y `frequency` la
-representación decimal mínima *round-trip* de DTC-049.
+Los contratos físicos son el general v3, el único escenario v1 y los cinco
+perfiles de entrada y, en éxito, exactamente los siete TSV de layout, sitios,
+haplotipos, frecuencias, LD, fundadores e intentos de DTC-089, además de la
+proyección fundadora `outputs/truth.jsonl` v2, configuración efectiva v5 y
+manifiesto v5. Cada enlace declara ID, clase, `schema_version`, ruta relativa,
+tamaño y SHA-256. `f5-rng-catalog-v1` e `id-catalog-v4` se fijan antes de
+generar, publican vectores y aíslan escenario, población, bloque y decisión. Un
+lector/oráculo independiente reconstruye coordenadas, marginales, D/`r²`, mejor
+intento y hashes.
 
-Cada fila de `panel_blocks.tsv` declara `block_id`, `reference_id`,
-`sequence_id`, `start` y `end`; sus intervalos no se solapan. Cada fila de
-`panel_sites.tsv` declara `block_id`, `site_id`, posición, `REF` y los `ALT`
-ordenados, y todos los sitios quedan dentro de su bloque.
-El adaptador solo admite una referencia por paquete: contrasta todos los
-`block.reference_id` con `metadata.reference.reference_id`, recalcula el
-SHA-256 del FASTA autoritativo y lo contrasta con
-`metadata.reference.sha256`, y comprueba que cada `sequence_id` existe en ese
-FASTA. Cualquier mezcla, ID o digest divergente o secuencia inexistente falla en
-la frontera antes de entregar el panel al inicializador.
-Cada haplotipo pertenece a un único bloque y su identidad normativa combina
-`block_id` y `haplotype_id`; no existe una columna o identidad de donante que
-persista entre bloques. V1 admite aquí únicamente SNP suministrados cuyos `REF` y
-`ALT` son una base A/C/G/T. La columna `alt` serializa uno o varios ALT distintos
-mediante comas sin espacios; el orden textual define 1..N y `ref` define 0. La frontera rechaza las demás clases de variante,
-`N`, alelos simbólicos, *breakends* y sitios repetidos o solapados.
+El flujo es preflight → layout exacto → marginales → intentos multilocus →
+evaluación LD → fundadores → publicación atómica. Cualquier incompatibilidad,
+límite agotado, error marginal/r2 o ausencia de pareja evaluable falla antes de
+fundadores y preserva el mejor diagnóstico. Controlado se valida antes de
+muestrear y se rechaza con F>0; F se rechaza con P=1 o P>2. Marimo solo adapta
+el mismo TOML y muestra el resultado Rust.
 
-`panel_haplotype_alleles.tsv` es una relación densa: cada pareja bloque-haplotipo
-contiene exactamente una asignación por sitio, con 0 para `REF` y 1..N para los
-`ALT` declarados. El adaptador rechaza huecos, duplicados y valores ajenos al
-catálogo y nunca completa un hueco como `REF`. Tras ordenar por los sitios del
-bloque, compara el vector completo de `allele_index` de todos sus haplotipos. Si
-varios IDs tienen el mismo vector, rechaza el panel e informa el bloque y todos
-los IDs equivalentes; no los fusiona ni suma sus frecuencias. La unicidad solo se
-exige dentro del bloque y también se aplica a haplotipos con frecuencia 0.
-`panel_frequencies.tsv` también es densa: contiene una fila por población,
-bloque y haplotipo, incluidos 0 y 1.
-No existe frecuencia global ni herencia entre poblaciones; ausencia o duplicado
-son errores y cada suma población×bloque usa DTC-049.
+| Invariante F5 | Responsable | Comprobación aislada |
+|---|---|---|
+| Una referencia, layout compartido y bases elegibles | Geometría | oráculo de intervalos |
+| Marginales/LD aislados por subpoblación | Generador y evaluador LD | fixture permutado |
+| r2 intrabloque, fijos no evaluables | Evaluador LD | oráculo D/r2 |
+| Sin panel, SV ni meiosis | Admisión F5 | rechazos explícitos |
+| IDs/RNG/esquemas/manifiestos trazables | Procedencia F5 | lector y vectores |
 
-La escritura ordena bloques por referencia, orden FASTA de secuencia, límites e
-ID; sitios por bloque, posición e ID; alelos por bloque, HAP ASCII y sitio; y
-frecuencias por población ASCII, bloque y HAP ASCII. El adaptador exige las
-claves únicas de bloque, bloque+sitio, bloque+HAP+sitio y
-población+bloque+HAP, respectivamente, antes de calcular hashes.
-
-Cada bloque debe contener como mínimo dos sitios y dos vectores HAP distintos.
-El catálogo no se reduce por las frecuencias de las poblaciones: una o todas
-pueden concentrar frecuencia 1 en un único HAP y mantener a 0 los restantes. El
-validador conserva un sitio fijado en el mismo ALT en todos los HAP, pero rechaza
-como redundante un sitio cuyo `allele_index` sea 0 en todos ellos.
-
-F6.4 admite y valida el recurso y trata cada bloque como un locus multialélico
-cuyas categorías son sus haplotipos locales. Para cada individuo de ploidía P,
-el inicializador asigna P categorías a copias haplotípicas biológicas
-identificadas. Reutiliza HWE/multinomial para P=1..10 y exactamente el modelo F
-multialélico solo en diploides; F=0 coincide con HWE, F=1 asigna el mismo HAP a
-ambas copias y F se rechaza para P=1 o P>2. En construcción intacta, una
-distribución explícita de combinaciones puede prevalecer localmente conforme a
-REQ-EVO-49.
-
-La configuración mantiene dos ejes separados. `haplotype_construction` elige
-`intact` o `recombinant`, mientras `frequency_sampling` elige `probabilistic` o
-`controlled`. El primero admite un valor general y sustituciones por población y
-bloque mediante el resolvedor DTC-033; la regla conjunta población+bloque
-prevalece. Una unidad efectiva no mezcla construcciones, aunque otras unidades
-usen otra. `intact` rechaza parámetros de recombinación y `recombinant` exige
-`recombination_probability_per_interbase` y `frequency_sampling=probabilistic`.
-La combinación recombinante+controlado falla antes de individuos con ambos
-campos y el ámbito efectivo. Marimo proyecta esta misma unión discriminada y
-oculta el campo de probabilidad cuando no corresponde.
-
-El selector genotípico también forma una unión validada: `intact` admite HWE, F
-diploide o distribución explícita; `recombinant` solo HWE o F diploide. La
-combinación recombinante+distribución explícita falla antes de individuos e
-identifica población, bloque y campos. La arquitectura no reserva una ruta
-parcial para condicionar distribuciones explícitas sobre mosaicos.
-
-Cada población×bloque intacto usa el modo probabilístico predeterminado o el
-controlado explícito; el recombinante usa únicamente el probabilístico. El
-probabilístico sortea copias con reemplazo según las frecuencias.
-El controlado construye un multiconjunto desde recuentos enteros por HAP que
-suman C y lo asigna sin alterar los totales. Ambos se condicionan al modelo
-genotípico. Una incompatibilidad se rechaza antes de crear individuos; nunca se
-ajustan recuentos ni se relaja el modelo. Los ámbitos aleatorios separan bloques
-y ligan reproduciblemente cada asignación a la identidad de copia, sin expresar
-un donante común entre bloques. Se registran esperado, solicitado y realizado.
-
-Los SNP exteriores a los intervalos de bloque se obtienen de
-la matriz independiente `alt_af`, de modo que un individuo puede combinar
-haplotipos distintos entre bloques sin que las bases intermedias queden forzadas
-a la referencia. Antes de inicializar ningún individuo, Fuentes de variación
-poblacional comprueba cada posición de la matriz contra los intervalos del
-panel. Un locus situado dentro de un bloque produce un error con referencia,
-secuencia, posición y fila o identidad de matriz, además de `block_id` e
-intervalo. La frontera no expone prioridad, fusión ni sobrescritura y no entrega
-fuentes parcialmente admitidas al inicializador.
-
-La inicialización no mantiene estado de transición, donante común ni objetivo de
-LD entre bloques. El LD interbloque que aparezca por tamaño muestral se informa
-como realizado cuando corresponda, pero no condiciona ni repite asignaciones.
-DTF-044 reserva para una versión posterior las dependencias haplotípicas entre
-bloques. Esta frontera no altera el productor recombinante local descrito a
-continuación: sus fuentes, puntos y segmentos siguen perteneciendo a un único
-bloque.
-
-El modo recombinante también pertenece a la inicialización fundadora, no al flujo
-de meiosis histórica. No construye un depósito prototipo ni vuelve a muestrear.
-Un productor de copia final selecciona un HAP primario con las frecuencias del
-panel. Con `recombination_probability_per_interbase=r` finita en (0,1], prueba
-independientemente las L−1 uniones interbase: K~Binomial(L−1,r). K=0 devuelve la
-fuente primaria intacta. K≥1 selecciona una secundaria con las mismas
-frecuencias y delega al constructor común los puntos únicos, ordenados e internos
-y la alternancia de segmentos. DTC-055 cierra para F6.4 tanto el sorteo uniforme
-de puntos como este constructor: recibe dos fuentes y puntos ordenados y devuelve
-segmentos reconstruibles. DTPD-111 no es una dependencia de F6.4; en F7.1
-conectará mapas y semántica meiótica al mismo constructor. El punto x representa
-la unión x|x+1. El constructor
-empieza con la primaria en `start`, alterna en cada punto y produce segmentos
-cerrados *forward* sin inversión; 100–300 con puntos 150/240 produce P 100–150,
-S 151–240 y P 241–300. No ajusta puntos a sitios SNP. Las fuentes pueden coincidir, se admiten varios
-cruces y no se corrigen ni descartan mosaicos. Los mapas posteriores cambian las
-probabilidades por posición, no el motor.
-
-Las dos selecciones consultan exclusivamente el panel original y las frecuencias
-de su población. El repositorio de verdad recibe las salidas, pero nunca vuelve
-a ofrecerlas al productor durante esta inicialización. No se actualizan pesos ni
-catálogos, de modo que el orden de procesamiento no cambia la distribución. La
-recombinación acumulada y el uso de descendientes como fuentes pertenecen a
-F7/F8.
-
-La traza conserva todos los puntos generados, aunque fuentes iguales, regiones
-sin SNP o un número par de alternancias produzcan el mismo vector alélico. La
-identidad por contenido y la procedencia histórica son capas distintas.
-
-El inicializador invoca ese productor directamente por individuo y bloque. En
-diploides sortea primero Bernoulli(F): en autozigosis ejecuta un productor y
-asigna el mismo vector a las dos copias; en caso contrario ejecuta dos productores
-independientes. Así implementa directamente las fórmulas multialélicas aprobadas;
-F=0 es HWE y F=1 produce homocigosis completa sin representar reproducción o
-pedigrí. Para P distinta de 2 ejecuta P productores independientes y rechaza F.
-Las C=N×P copias finales se agrupan por vector y la frecuencia realizada es
-`n_h/C`. Las frecuencias del panel siguen siendo las probabilidades objetivo de
-las fuentes; no se crea otra distribución intermedia.
-
-La identidad final depende del contenido. Un vector que coincide con un HAP del
-panel reutiliza su identidad local. Para un vector nuevo, el servicio común de
-IDs aplica DTC-039 y deriva un ID tipado y determinista desde `panel_id`,
-`block_id` y el vector canónico ordenado de `allele_index`. Individuo, orden,
-subsemilla y evento no participan en la identidad. Por tanto, vectores iguales
-comparten ID y recuento y vectores distintos tienen IDs distintos; las colisiones
-se tratan con el contrato común, no con otro algoritmo. La procedencia permanece
-separada por ejecución y copia: fuentes, puntos, segmentos, individuo, copia y
-subsemilla.
-
-El repositorio distingue el número de productores con K≥1 del número de copias
-finales derivadas de ellos; una salida autozigótica duplicada cuenta una ejecución
-y dos copias. Registra además recuentos/frecuencias por vector, genotipos y F
-realizados y la procedencia intacta o mosaico. El panel no posee el resultado.
-
-El productor solicita todos sus flujos al servicio DTC-037. La clave de ámbito
-combina población, bloque, individuo y, salvo en la decisión compartida de
-autozigosis, copia; usa decisiones nombradas distintas para F, primaria, uniones
-interbase y secundaria. La versión de derivación forma parte del contrato. La
-identidad lógica evita que añadir o reordenar individuos/bloques cambie los ya
-existentes, y el ámbito de bloque evita que cambiar `r` contamine otros. Una
-salida duplicada por F conserva un único registro de productor enlazado a dos
-copias biológicas.
-
-La persistencia materializa tres proyecciones obligatorias y versionadas:
-`founder_block_assignments.tsv` indexa población/individuo/copia/bloque y enlaza
-HAP final, tipo de origen y proceso. Cada productor recibe un ID DTC-039, incluso
-con K=0; el origen es exactamente `intact` para K=0 o `recombined` para K≥1. La
-duplicación por F enlaza dos asignaciones al mismo proceso y origen, sin una
-categoría especial. `recombination_segments.tsv` ordena por
-proceso cada segmento reconstruible con bloque, límites y HAP fuente; y
-un proceso K=0 conserva un segmento primario para todo el bloque.
-`realized_haplotype_frequencies.tsv` agrega población/bloque/HAP final con
-recuento total, intacto y recombinado y `n_h/C`; el total debe ser la suma de los
-dos orígenes. El manifiesto enlaza cada una por clase,
-versión, ruta, tamaño y SHA-256 y solo resume configuración, F, r, RNG,
-productores con cruce, cruces totales, vectores nuevos y coincidencias con panel.
-
-Las tres proyecciones usan UTF-8 sin BOM, LF final, tabuladores, una cabecera
-exacta y ningún campo vacío, comilla, línea vacía o columna extra. Sus esquemas
-son `population_id individual_id copy_id block_id final_haplotype_id origin_kind process_id`,
-`process_id segment_index block_id start end source_haplotype_id` y
-`population_id block_id haplotype_id copy_count intact_copy_count recombined_copy_count frequency`;
-los espacios de esta descripción son tabuladores. Identificadores, ordinales,
-coordenadas, recuentos y `frequency` reutilizan las formas canónicas DTC-039 y
-DTC-049. El orden y clave son, respectivamente, población+individuo+copia+bloque,
-proceso+índice y población+bloque+HAP. Clase y versión residen en el enlace del
-manifiesto/esquema, no en columnas añadidas a los TSV.
-
-La pestaña poblacional de Marimo contiene la sección «Bloques haplotípicos en
-población». Su adaptador solo selecciona directorio, invoca preparar/validar y
-proyecta el resumen devuelto por Rust; no analiza tablas. Mantiene el mapeo entre
-poblaciones del panel y simuladas y una tabla de sustituciones población×bloque.
-La unión discriminada muestra muestreo probabilístico/controlado en intacto y r
-tipado en recombinante, con controlado desactivado y explicado; F solo aparece en
-diploides. La previsualización consume frecuencias, `P(K>0)`, homocigosis esperada
-y conflictos `alt_af` calculados por el binario. `run` exige validación vigente y
-la vista posterior enlaza/resume las tres tablas sin cargarlas completas.
-
-El repositorio de verdad conserva estados faseados, genealogía, procedencia y
-capas de cambio. Creación directa, inicialización poblacional, reproducción,
-recombinación, dinámica evolutiva y mutación acceden a él mediante operaciones
-de dominio explícitas. El orquestador decide qué componente invocar; los
-componentes no se llaman entre sí para alterar el orden funcional.
-
-Las fuentes normativas son REQ-REF-01 a REQ-REF-36, REQ-IND-01 a
-REQ-IND-65, REQ-DIR-01 a REQ-DIR-05, REQ-EVO-01 a REQ-EVO-77,
-REQ-POB-01 a REQ-POB-03, REQ-CRU-01 a REQ-CRU-45, REQ-REP-01 a
-REQ-REP-26, REQ-MIG-01 a REQ-MIG-09, REQ-SEL-01 a REQ-SEL-17,
-REQ-REC-01 a REQ-REC-29 y REQ-MUT-01 a REQ-MUT-15. Sus recorridos se
-aceptan con ACE-02 a ACE-14, ACE-24 a ACE-32, ACE-75 a ACE-91, ACE-95 a
-ACE-98, ACE-103 a ACE-107 y ACE-109 a ACE-117 según la asignación individual
-de la matriz de trazabilidad.
-
-### 7.3. Observación técnica
-
-La orquestación de eventos recibe una vista de solo lectura de la verdad y crea
-un contexto técnico aislado. Simulación WGS, artefactos, demultiplexado y
-alineamiento trabajan sobre ese contexto; los adaptadores de procesos externos
-solo traducen invocaciones y resultados, y no adquieren autoridad para cambiar
-la verdad.
-
-Para una herramienta consolidada como minimap2, el adaptador conserva la
-versión observada, los parámetros efectivos, el comando, entradas y salidas,
-código de salida, stdout y stderr. DTC-043 ya fija la ejecución como proceso
-externo. DTPD-105 concretará descubrimiento e invocación, sandbox, compatibilidad
-de versiones y clasificación de fallos, sin reabrir servicio frente a proceso;
-DTC-047 conserva los validadores independientes.
-
-Los FASTQ y demás evidencias nacen en el contexto del evento. Las vistas de
-verdad interoperable nacen del repositorio canónico y del contexto de una
-referencia, no de inferencias sobre las lecturas. Ambas ramas se reúnen
-únicamente al ensamblar y validar el conjunto de resultados.
-
-Esta frontera implementa REQ-TEC-01 a REQ-TEC-10, REQ-RG-01 a REQ-RG-07,
-REQ-DAT-01 a REQ-DAT-73, REQ-WGS-01 a REQ-WGS-14, REQ-CONT-01 a
-REQ-CONT-16 y REQ-VER-01 a REQ-VER-47. La comprobación funcional se
-distribuye entre ACE-15 a ACE-21, ACE-30, ACE-31, ACE-37 a ACE-63,
-ACE-66 y ACE-68 a ACE-74.
-
-### 7.4. Cierre y publicación
-
-F1 aplica esta frontera a la ejecución y a sus artefactos reales de
-configuración y referencia. No crea manifiestos de evento, conjuntos vacíos ni
-evidencias sintéticas para unidades que todavía no existen. Los productores de
-F2–F8 extenderán el mismo patrón al introducir cada unidad real.
-
-Cada productor escribe primero cada artefacto en su propio temporal. Solo tras
-cerrarlo, validarlo y comprobar tamaño y SHA-256 lo finaliza atómicamente dentro del
-directorio provisional de ejecución, acompañado de identidad, referencia,
-procedencia y métricas técnicas. Un temporal incompleto se retira o se ignora y
-nunca se cataloga como artefacto válido. El ensamblador forma conjuntos
-coherentes; los validadores consumen vistas de solo lectura y emiten resultados
-estructurados. El escritor recibe hechos ya producidos y genera JSON conforme a
-RFC 8259: un `manifest.json` general y uno por evento, validados respectivamente
-contra esquemas JSON Schema Draft 2020-12 distintos con definiciones comunes.
-Cada documento incluye `manifest_kind` y `schema_version`; en F4 son `"4"` para
-el manifiesto general y `"2"` para el manifiesto de evento. No reconstruye
-decisiones desde nombres o mensajes y el escritor emite solo la versión activa.
-
-Los manifiestos contienen directamente todo dato que REQ-MAN exige registrar o
-enumerar. Verdad, procedencia de lecturas, informes de validación, complemento
-VCF y los demás artefactos independientes conservan sus propios ficheros y se
-enlazan sin duplicarlos mediante identificador, ruta relativa, tipo, tamaño en
-bytes, algoritmo `sha256` y digest hexadecimal minúsculo de 64 caracteres. Las
-listas con semántica de conjunto se escriben en orden estable por identificador.
-V1 no usa fragmentos JSONL ni tablas auxiliares para
-repartir el contenido obligatorio del manifiesto.
-
-SHA-256 se calcula sobre todos los bytes exactos del fichero, sin normalizar
-texto, FASTA, JSON ni saltos de línea. Se calcula o verifica al copiar una
-entrada, al cerrar una salida, antes de exportarla y después de exportarla; una
-copia debe coincidir con su original. El cálculo puede ser incremental durante
-la E/S, pero ninguna comprobación exigida se sustituye por tamaño, fecha,
-metadatos o muestreo parcial. Cada fichero conserva su propio digest y una suma
-adicional del paquete no lo reemplaza. MD5 solo se añade, por separado, cuando
-lo exige un estándar genómico; BLAKE3 queda reservado a los dominios separados
-de derivación de subsemillas e IDs.
-
-El manifiesto declara para cada uno de los cuatro niveles de reproducibilidad
-`garantizado`, `no garantizado` o `no aplicable`, junto con condiciones,
-versiones, perfiles, herramientas y dependencias. La semilla raíz se registra
-aunque la haya generado el programa y pasa a ser una entrada reutilizable. V1
-no declara identidad binaria por defecto para ninguna clase de salida.
-
-El manifiesto relaciona cada identificador opaco con su clase, ámbito, causa y
-etiqueta opcional. La etiqueta y el nombre físico no tienen autoridad de
-identidad.
-
-La publicación es la última frontera y distingue tres recorridos. Un rechazo
-durante admisión o pre-simulación no publica destino; solo puede dejar el
-provisional de trabajo o un diagnóstico externo conforme a REQ-SAL-26. Si la
-ejecución ya comenzó y falla de forma controlada, el ensamblador conserva los
-artefactos y conjuntos independientes ya validados, los declara exportables,
-retira o ignora incompletos y cierra un `manifest.json` general válido con estado
-`fallido`, diagnóstico y catálogo de estados de unidades. Solo entonces puede
-aparecer el destino final como ejecución fallida, nunca completa. Ante SIGKILL,
-caída u otra interrupción no controlable queda el provisional marcado
-`INCOMPLETE`; habrá diagnóstico únicamente si alcanzó a escribirse.
-
-Los destinos finales completos o `fallido` se publican mediante un adaptador
-Linux propio que realiza una operación atómica no-clobber equivalente a
-`renameat2(..., RENAME_NOREPLACE)` dentro del mismo sistema de ficheros. Un
-destino existente produce `EEXIST` y rechazo. Un sistema de ficheros que no
-ofrezca la garantía se rechaza de forma identificable antes o durante la
-publicación; nunca se usa check-then-`std::fs::rename` ni otro fallback con
-carrera. Esta garantía lógica no implica `fsync` ni durabilidad física. Los
-estados y efectos funcionales de cierre están en REQ-VAL-01 a REQ-VAL-56,
-REQ-MAN-01 a REQ-MAN-92 y REQ-SAL-01 a REQ-SAL-27, con ACE-22 a ACE-24,
-ACE-33, ACE-34, ACE-36, ACE-46 a ACE-67, ACE-78, ACE-86 y ACE-92 a ACE-108.
-
-En el recorrido local ordinario, el provisional pertenece al proceso y no es
-una frontera frente a un atacante con acceso de escritura concurrente. F1 exige
-rutas relativas canónicas, permisos privados razonables, temporales propios,
-hashes y renombrado no-clobber; no enumera exhaustivamente el árbol para
-rechazar hardlinks, inodos externos o cada carrera TOCTOU. Esas defensas se
-evalúan en F9/CI si el despliegue declara ese modelo de amenaza.
-
-### 7.5. Construcción y publicación del programa (F9)
-
-El recorrido ordinario de desarrollo se ejecuta de forma nativa en Ubuntu
-24.04 sobre WSL2 y siempre dentro del sistema de ficheros Linux/ext4, nunca en
-`/mnt/c`. La plataforma nativa oficialmente validada es Ubuntu 24.04 LTS
-x86-64 GNU y la construcción de entrega usa el triple
-`x86_64-unknown-linux-gnu`, CPU portable y prohíbe `target-cpu=native`. Otras
-distribuciones x86-64 GNU pueden funcionar, pero no se prometen hasta probarlas
-en una matriz. Ningún contrato depende de WSL.
-
-Al comenzar F1, `rust-toolchain.toml` fija `channel = "1.97.1"`,
-`profile = "minimal"`, los componentes `rustfmt` y `clippy` y el target
-`x86_64-unknown-linux-gnu`. La edición `2024` se declara en cada `Cargo.toml` o
-en el workspace, no en `rust-toolchain.toml`. La aplicación versiona
-`Cargo.lock`; CI y entregas usan `--locked`. No existe otra MSRV y las entregas
-binarias no requieren Rust en el sistema de la persona usuaria.
-
-Antes de publicar, la candidata se comprueba en CI Ubuntu 24.04 LTS nativo y en
-el entorno OCI de referencia, cuya base y receta están fijadas por digest. Las
-pruebas cubren la operación no-clobber en el sistema de ficheros OCI admitido,
-señales, permisos, límites de recursos y procesos externos. El `.tar.gz` publica
-SHA-256 de sus bytes exactos. La imagen OCI se identifica por el digest
-`sha256:` de su descriptor de índice o manifiesto y conserva y verifica los
-descriptores de configuración y capas; si se exporta como archivo OCI, ese
-archivo publica además su SHA-256 independiente. Nada de ello implica identidad
-binaria entre compilaciones.
 
 ## 8. Invariantes de frontera
 
@@ -1322,7 +996,7 @@ responsables y puntos de control.
 | Toda entidad cruza fronteras con identidad tipada, no inferida de una etiqueta, ruta o nombre físico | Identidad de ejecución, catálogos y ensamblador de resultados | REQ-CONF-01 a REQ-CONF-14, REQ-TEC-01 a REQ-TEC-10 y REQ-MAN-01 a REQ-MAN-92 |
 | Toda coordenada viaja asociada a su referencia y convenio | Catálogo de referencias y servicio de coordenadas | REQ-REF-01 a REQ-REF-36 y REQ-VER-01 a REQ-VER-47 |
 | Una referencia reducida conserva origen, orientación, clase y mapa completo; FASTA, mapa y manifiesto se publican o fallan como unidad | Reducción de referencias, catálogo, coordenadas y ensamblador | REQ-REF-24 a REQ-REF-36, REQ-VAL-52/53, REQ-MAN-89/90 y REQ-SAL-27 |
-| Una matriz SNV canónica e íntegra se fija antes de crear individuos; todos comparten sus loci/frecuencias y solo genotipos/fase se muestrean por identidad. Preparación y generación integrada/independiente comparten productor; los descartes no se reponen. Un panel se conserva intacto y cualquier mosaico exige el motor común de recombinación | Fuentes de variación, inicialización poblacional y recombinación | REQ-CONF-128 a REQ-CONF-130, REQ-IND-60 a REQ-IND-65 y REQ-EVO-74 a REQ-EVO-77 |
+| La matriz SNV F2 se conserva como fuente independiente de sus consumidores. F5 no la consume: genera H×S sintética por bloque×subpoblación, funda copias intactas y no admite panel ni mosaico. La recombinación pertenece exclusivamente a F7.1 | Fuentes de variación, Inicializador F5 y reproducción F7.1 | REQ-CONF-128 a REQ-CONF-130, REQ-IND-60 a REQ-IND-65 y REQ-EVO-74 a REQ-EVO-77 |
 | Solo los motores biológicos escriben en el repositorio de verdad | Interfaces de dominio y repositorio de verdad | REQ-IND-01 a REQ-IND-65, REQ-EVO-01 a REQ-EVO-77 y REQ-CRU-01 a REQ-CRU-45 |
 | Los componentes técnicos observan instantáneas y no mutan genotipo, genealogía ni trayectoria | Orquestador de eventos y vistas de solo lectura | REQ-TEC-01 a REQ-TEC-10 y REQ-DAT-01 a REQ-DAT-73 |
 | `DeclaredConfig` conserva lo escrito y su ubicación; `EffectiveConfig` es inmutable durante cada ámbito de uso y mantiene la procedencia de la resolución | Adaptador TOML y resolvedor de configuración | REQ-CONF-01 a REQ-CONF-130 y REQ-MAN-01 a REQ-MAN-92 |
@@ -1360,7 +1034,9 @@ REQ-SAL-27. TOML fija la configuración de autoría; JSON fija
 `effective-config.json` y los manifiestos. Los esquemas de manifiesto usan JSON
 Schema Draft 2020-12. F4 exige TOML general `"2"`, configuración efectiva `"4"`,
 manifiesto general `"4"` y manifiesto de evento `"2"`, sin confundirlos con la
-versión del programa ni con el dialecto de JSON Schema. La salida JSON de diagnósticos es otra clase estructurada propia
+versión del programa ni con el dialecto de JSON Schema. F5 exige general `"3"`,
+escenario F5 `"1"`, configuración efectiva `"5"` y manifiesto general `"5"`;
+no modifica ni reutiliza los esquemas F4 v2/v4. La salida JSON de diagnósticos es otra clase estructurada propia
 y declara `diagnostic_kind: "gps_diagnostics"` y la misma versión de esquema.
 
 ### 9.2. Espacios lógicos
@@ -1423,7 +1099,8 @@ F1–F3 publicaron las versiones históricas 1–3. F4 consolida TOML general `"
 configuración efectiva `"4"`, manifiesto general `"4"` y manifiesto de evento
 `"2"`. No mantiene lectores ni migración para los contratos anteriores: los
 TOML y fixtures de prueba se actualizan o eliminan una vez, y el runtime rechaza
-otra versión.
+otra versión. F5 crea general `"3"`, efectivo `"5"` y manifiesto general `"5"`
+como contratos nuevos; los tres contratos F4 anteriores permanecen inmutables.
 
 ### 9.4. Entregas del programa
 
@@ -1700,8 +1377,8 @@ exportado tiene su propio SHA-256.
 Los diagnósticos, la publicación atómica, los escenarios iniciales y la
 validación independiente quedan fijados por DTC-044 a DTC-047. Esta arquitectura
 aplica además DTC-049 para `f64`, suma Neumaier, tolerancia absoluta general y
-normalización auditada de probabilidades y frecuencias; DTPD-110 solo conserva
-distribuciones y tolerancias poblacionales específicas posteriores. No se
+normalización auditada de probabilidades y frecuencias; DTC-089 cierra DTPD-110
+y las fases posteriores solo pueden añadir distribuciones mediante decisiones propias. No se
 seleccionan silenciosamente otros crates, conversores futuros, formatos aún
 abiertos, versiones de estándares genómicos, reglas de paralelismo ni objetivos
 cuantitativos de rendimiento. Tampoco amplía la garantía a versiones del
@@ -1714,18 +1391,10 @@ sustituye la concreción sobrediseñada de DTC-058 para F2: entorno bloqueado,
 servidor local, TOML general, invocación directa y pruebas de recorrido. La
 distribución y el endurecimiento permanecen en F9.
 
-DTC-052 asigna a una matriz común las frecuencias SNV iniciales, DTC-054 resuelve
-DTPD-118 con el par TSV+JSON, perfiles, preparación y generación reproducible, y
-DTC-053 separa el panel posterior de bloques haplotípicos locales. La matriz
-aporta los SNP independientes exteriores y el panel, las combinaciones conjuntas
-intrabloque; ningún locus de matriz puede caer dentro del intervalo de un bloque
-y una colisión se rechaza antes de crear individuos, sin prioridad ni
-sobrescritura. Las asignaciones de alelos y frecuencias del panel son densas y no
-admiten completar valores ausentes. El paquete, la preparación y el modo intacto
-están definidos. La alternativa recombinante fundadora usa productores directos,
-F, puntos, IDs, RNG y salidas trazables ya fijados. DTC-055 resuelve DTPD-119 y
-rechaza distribuciones genotípicas explícitas con construcción recombinante.
-Ninguna de estas fuentes puede poseer o reescribir la verdad resultante.
+DTC-052/DTC-054 rigen la matriz SNV independiente. DTC-089 rige F5: genera
+bloques sintéticos y haplotipos intactos por bloque×subpoblación, sin panel
+externo ni recombinación fundadora. Ninguna fuente puede poseer o reescribir la
+verdad resultante; F6 añade SV y F7.1 meiosis.
 
 DTC-061 resuelve DTPD-102 con la representación interna híbrida y su proyección
 obligatoria `truth.jsonl` v1, validada por esquemas de registro y reconstrucción
@@ -1779,3 +1448,72 @@ La arquitectura se considera comprobable cuando:
 - los fallos y resultados parciales tienen un estado no ambiguo;
 - un plan de implementación puede dividir el trabajo sin inventar nuevos
   componentes, contratos o decisiones técnicas.
+
+## 15. Arquitectura F5 — generador sintético de LD
+
+Esta sección define REQ-EVO-40/43/44/74–77 y DTC-089. F5.0
+empieza solo después del cierre de F4 y reutiliza su publicación, configuración
+efectiva y verdad; no depende de F6 ni F7.
+
+| Componente | Posee/valida | Produce/consume | Prohibición |
+|---|---|---|---|
+| Escenario F5 | único enlace `[f5_scenario]` desde TOML general v3, escenario v1 exacto, IDs, perfiles/hash, ploidía efectiva homogénea, límites y sustituciones de modo/tolerancia por bloque×subpoblación | un solo `EffectiveF5Scenario` dentro de efectivo v5 | rechaza cero/varios escenarios y general v2; resuelve cada ruta desde su documento origen; no abre un workspace ni consume RNG durante preflight |
+| Contratos F5 | esquemas completos general v3, escenario v1, efectivo v5, manifiesto v5, perfil, siete TSV, fallo v1 y verdad v2 | contratos cerrados que consumen todos los hitos posteriores | F5.4 solo instancia y valida esos contratos; no añade campos ni reabre esquemas; general v2, efectivo/manifiesto v4 y verdad v1 permanecen inmutables |
+| Geometría F5 | elegibilidad, máscara, layout y sitios | `f5-block-layout.tsv`, `f5-sites.tsv` | no crea frecuencias ni fundadores |
+| Constructor F5 | H, q, p, prefijos ponderados, matriz H×S, polaridades, propuestas e intentos | haplotipos, frecuencias y diagnóstico de intento | no enumera `2^H`, no lee panel, no segmenta ni recombina |
+| Evaluador LD | p_hat, D, r², bins y puntuación | evaluación LD y veredicto | no reutiliza estado mutable del constructor en el oráculo |
+| Inicializador fundador | q o n_h, F, `IndividualId`, `FCP_` por secuencia/fase y `FHA_` por bloque | `f5-founders.tsv`, pertenencia y verdad fundadora | no crea mosaicos ni proceso haplotípico |
+| Procedencia/oráculo | manifiesto v5, auditorías DTC-049, presupuestos, hashes, RNG/ID, `truth.jsonl` y lectura independiente | preflight, fallo o paquete completo | no publica parcial, no usa estado del productor para el recuento MAN-70 ni repara productor |
+
+El contrato entre Constructor y Evaluador es la matriz binaria ordenada, q
+normalizado, posiciones y perfil LD; solo el Evaluador calcula la puntuación
+aceptable de DTC-089. La evaluación inicial de una matriz cuesta `O(H*S²)` y
+cada propuesta 2×2 actualiza como máximo O(S) parejas. El preflight aplica
+`f5-resource-accounting-v1`. Antes de RNG deriva `S_bound` desde longitud máxima
+y gap mínimo del perfil; recorre referencia+máscara una vez, sin bitset por
+base, y materializa solo los tramos elegibles maximales. Cuenta como términos
+separados las bases de referencia procesadas, la emisión de esos tramos y las
+`L*B*tract_count` consultas del recorrido directo completo por bloque e intento
+de layout; no construye un índice auxiliar. Cuenta además bins por
+subpoblación, filas físicas de perfil y normalización, filas TSV/JSON y las
+contribuciones ajenas a F5. Usa símbolos distintos para unidades de operación,
+memoria y bytes de salida, y compara cada magnitud con su presupuesto efectivo
+y con los topes duros 2^28/2^30/2^31 de F5 v1 antes de crear temporales.
+Efectivo y manifiesto conservan con igualdad escalar exacta todos los factores y
+resultados necesarios para permitir un recálculo independiente. No consulta
+recursos del host ni ejecuta perfiles; DTPD-115
+sigue siendo una decisión F9 de expectativas de
+rendimiento y no relaja la admisión F5. La identidad de
+una fila es `haplotype_rank` y su `HaplotypeId`; una copia fundadora persistente
+tiene `FounderCopyId` (`FCP_`) y cada asignación de bloque, otro ID (`FHA_`). No
+existe `HaplotypeProcessId`. Un duplicado de alelos es
+otra categoría con otro rango, peso e ID y no se fusiona.
+
+La frontera física no inventa nombres: consume el general v3, el único escenario
+v1 y los cinco perfiles y publica exactamente los siete TSV, la proyección
+fundadora `outputs/truth.jsonl` v2, `effective-config.json` v5 y manifiesto v5,
+o el fallo definido en DTC-089. Los contratos general v2, efectivo v4 y
+manifiesto v4 permanecen byte a byte inmutables. Procedencia es el único escritor
+de enlaces, IDs, clases, versiones, tamaños y SHA-256. Escribe la raíz efectiva
+en `effective-config.json#/seed`, su copia F5 en
+`effective-config.json#/f5/seed` y la copia manifiesta en
+`manifest.json#/f5/seed`; las tres son 64 hexadecimales minúsculos e iguales.
+El proveedor RNG recibe los componentes binarios
+tipados del catálogo v1; Identidad recibe el catálogo BLAKE3 separado. El
+oráculo abre únicamente ficheros publicados y no puede acceder a matrices,
+cachés ni acumuladores del productor. Su lector de `truth.jsonl` v2 usa
+`founder_membership` y `f5_locus` para reconstruir copias, pertenencia, fase,
+alelos y dosis y para recontar MAN-70 solo por `site_id`×`population_id`, sin
+abrir los siete TSV; efectivo y manifiesto
+conservan además los cuatro vectores antes/después de DTC-049, no solo su hash.
+
+Invariantes: un escenario y una referencia por ejecución F5; layout común y datos aislados por
+bloque×subpoblación; SNP A/C/G/T; no solape/N/máscara; perfiles, RNG, IDs y
+esquemas versionados; parejas solo intrabloque; denominador r² degenerado no
+evaluable; bin vacío `not_applicable`; presupuesto agotado sin relajación;
+fundadores completos e intactos y pertenencia finalizada antes de artefactos.
+Cada pareja bloque×subpoblación tiene exactamente un modo solicitado/efectivo y
+una tolerancia controlada efectiva o `null`; `controlled` se valida antes de
+asignar y no coexiste con F>0. Marimo serializa
+el mismo conjunto TOML; Rust conserva la autoridad. F6 puede añadir estados SV sobre esta verdad
+cerrada y F7.1, no F5, será el único dueño de meiosis, mosaicos y recombinación.

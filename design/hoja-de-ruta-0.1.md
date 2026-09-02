@@ -2,8 +2,8 @@
 
 - **Versión:** 0.2
 - **Estado:** vigente; F0 aprobada, F1 cerrada en `e14705a`/`efca265`; F2
-  simplificada por DTC-079 y pendiente de revisión
-- **Fecha:** 21 de agosto de 2026
+  simplificada por DTC-079 y F5 reconstruida documentalmente
+- **Fecha:** 1 de septiembre de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
 - **Lenguaje del núcleo:** Rust
@@ -70,8 +70,8 @@ F0 Arquitectura
      └─ F2 Verdad genómica mínima
          └─ F3 Recorrido técnico mínimo
              └─ F4 Realismo técnico de secuenciación
-                 └─ F5 Variación y referencias complejas
-                     └─ F6 Población inicial
+                 └─ F5 Población inicial y haplotipos sintéticos
+                     └─ F6 Variación y referencias complejas
                          └─ F7 Evolución poblacional
                              └─ F8 Familias y segregantes
                                  └─ F9 Escalabilidad y consolidación
@@ -214,7 +214,7 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
   0/1 exactos solo proceden de `fixed`. DTC-071 fija los once ámbitos RNG F2 sin circularidad,
   DTC-072 sus consumidores no Poisson y DTC-075 separa selección SNV estática
   de selección indel dinámica con reenumeración tras cada evento. REQ-CONF-08/21 aportan aquí evidencia
-  parcial y cierran en F5.2/F7.2 según su alcance. DTPD-118 está resuelta por
+  parcial y cierran en F6.2/F7.2 según su alcance. DTPD-118 está resuelta por
   DTC-054.
 - **F2.3. Individuos directos desde población de origen.** Construir individuos
   asignados a una única población y muestrear la matriz mediante Hardy-Weinberg
@@ -224,7 +224,7 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
   explícitas, incluidas las dos autorizaciones limitadas y trazadas para
   genotipos incompatibles o matriz activa vacía; integrar los demás cambios y
   reconstruir cada haplotipo. REQ-IND-02/03 aportan aquí evidencia parcial sobre
-  una referencia estructural por individuo y cierran en F5.2. Activar preparación/generación/reutilización,
+  una referencia estructural por individuo y cierran en F6.2. Activar preparación/generación/reutilización,
   perfiles, población y modelo en la pestaña `Individuos`.
 - **F2.4. Verdad estructurada.** Publicar `truth.jsonl` v1 obligatorio, UTF-8
   sin comprimir, con cabecera, copias/genotipos tipados, orden e integridad;
@@ -251,7 +251,7 @@ SNP rechazado sobre `N`, una inserción aleatoria sin `N`, una explícita que la
 conserva y la ausencia de `vcf-complement.jsonl` para todos los casos F2
 representables, sin resolver `N` como A/C/G/T. F2 no fabrica una pérdida. Deja evidencia
 parcial de REQ-SAL-02 en F2.4.1/F2.4.3/F2.4.4 y de REQ-SAL-12 en
-F2.5.4/F2.5.5/F2.5.6; sus cierres completos siguen en F8.5 y F5.5,
+F2.5.4/F2.5.5/F2.5.6; sus cierres completos siguen en F8.5 y F6.5,
 respectivamente.
 
 > Revisión de F2: validar la verdad biológica antes de generar una sola lectura.
@@ -347,248 +347,46 @@ DTF-049 reserva PacBio HiFi. DTF-016 reserva también la materialización exacta
 poblacionales y perfiles empíricos exactos; no sustituye ni bloquea los dos
 ejemplos compactos aproximados de F2.2.
 
-### F5. Referencias y variación complejas
+### F5. Población inicial y haplotipos sintéticos
 
-**Objetivo:** ampliar la verdad genómica manteniendo reconstrucción, fase y
-separación estricta entre referencias.
+**Objetivo:** generar una población fundadora faseada con bloques de LD sintéticos,
+sin panel externo, SV ni meiosis. **Depende de:** F4 cerrada. F6 añade SV; F7.1
+inicia meiosis.
 
-**Depende de:** F4.
+- **F5.0. Contratos y preflight.** Cerrar los esquemas completos general v3,
+  escenario F5 v1, efectivo v5, manifiesto v5, perfiles/TSV/fallo y verdad v2
+  sin modificar v2/v4 ni verdad v1; admitir exactamente un escenario y
+  resolver referencia, subpoblaciones, perfiles, IDs, RNG, modo/tolerancia por
+  bloque×subpoblación, `f5.seed`, auditorías DTC-049, `S_bound`, bins, filas,
+  presupuestos dimensionalmente separados y diagnóstico.
+- **F5.1. Geometría y marginales.** Generar layout compartido, elegibilidad,
+  cobertura exacta y marginales por bloque×subpoblación.
+- **F5.2. Haplotipos y LD.** Aplicar DTC-089, r2(d), signos y mejor intento.
+- **F5.3. Fundadores intactos.** Muestrear probabilístico/controlado, F
+  diploide y verdad fundadora sin recombinación.
+- **F5.4. Procedencia y oráculo.** Publicar y validar los siete TSV y la
+  proyección fundadora `truth.jsonl` v2, incluidos MAN-70 recontado solo desde
+  verdad por locus×subpoblación, vectores, lector
+  independiente, cotas de recursos y manifiestos atómicos.
+- **F5.5. Auditoría de identidad y publicación.** Comprobar que identidad y
+  pertenencia, materializadas antes de los artefactos en F5.3, no se modifican
+  después del paquete atómico.
+- **F5.6. Marimo y cierre.** Comprobar paridad y gates de cierre.
 
-**Hitos:**
+No hay panel suministrado, construcción recombinante fundadora ni dependencia
+F5→F6; la trazabilidad antigua se migra por REQ-EVO-74–77 y ACE-117.
 
-- **F5.1. Referencias estructurales.** Crear referencias derivadas mediante
-  duplicaciones, deleciones, inversiones y translocaciones permitidas.
-- **F5.2. Variantes estructurales individuales.** Representar cambios
-  estructurales en haplotipos y conservar sus efectos finales, incluidas las `N`
-  internas de intervalos copiados, eliminados, invertidos o desplazados.
-- **F5.3. Ploidía general.** Admitir la ploidía confirmada por cromosoma o
-  *scaffold* sin diferencias entre individuos.
-- **F5.4. Repeticiones en tándem.** Añadir repeticiones en tándem dentro del
-  alcance y su modelo escalonado simple de expansión o contracción de una unidad
-  completa por mutación. Los elementos transponibles no son una clase funcional
-  de v1.
-- **F5.5. Variantes solapadas y complemento.** Resolver cambios secuenciales,
-  variantes eliminadas y alelos finales complejos. Cuando un caso pierda detalle
-  en VCF, enlazar sus registros con una única entrada complementaria y demostrar
-  la reconstrucción completa del par. Esta fase aporta la primera prueba
-  positiva obligatoria VCF+complemento mediante un caso complejo/SV/BND real.
-  **Subpaso diferido F5.5.a — variación aleatoria directa por individuo:**
-  incorporar en la creación inicial directa las cantidades medias o densidades
-  globales y sus sustituciones por individuo, distribuciones y regiones, y la
-  exclusión explícita respecto de la matriz SNV canónica; demostrar que cada
-  sustitución afecta solo a su individuo. Este subpaso conserva separados los
-  cambios *de novo* posteriores a la inicialización (F7.2.a) y cubre
-  REQ-CONF-20, REQ-CONF-22, REQ-IND-15, REQ-DIR-02 y la parte inicial de
-  REQ-IND-64.
-- **F5.6. Varios conjuntos de referencia.** Mapear las mismas muestras contra
-  referencias diferentes, producir BAM/CRAM y VCF independientes y demostrar
-  que el manifiesto del evento y el manifiesto raíz enlazan todos los resultados
-  reales con su evento, conjunto, referencia y artefacto conforme a REQ-EVO-78.
-  **Subpaso diferido F5.6.a — matrices SNV por referencia:** permitir y validar
-  enlaces de matriz canónica separados para cada referencia estructural, su
-  selección trazable y su publicación sin mezclar matrices entre referencias;
-  cierra la parte multirreferencia de REQ-CONF-128.
+### F6. Referencias y variación complejas
 
-**Resultado de salida:** individuos complejos reconstruibles y conjuntos
-independientes por referencia.
+**Objetivo:** ampliar la verdad F5 sin alterar sus fundadores intactos. **Depende
+de:** F5 cerrada. F6.1 crea referencias estructurales; F6.2 representa SV; F6.3
+generaliza ploidía; F6.4 añade repeticiones; F6.5 resuelve variantes complejas y
+complemento VCF; F6.6 separa conjuntos y matrices por referencia. F6 no hereda
+panel ni recombinación de F5. Su cierre demuestra reconstrucción, límites,
+solapamientos y aislamiento entre referencias.
 
-**Evidencia de cierre:** pruebas con verdad conocida demuestran transformaciones,
-límites, solapamientos y ausencia de mezcla entre referencias, incluida una SV
-que contiene `N` y la conserva donde corresponda.
-
-> Revisión de F5: confirmar que la complejidad estructural no rompe la verdad
-> mínima ni el realismo técnico establecido en F4.
-
-### F6. Población inicial
-
-**Objetivo:** crear poblaciones iniciales reproducibles sin ejecutar todavía su
-evolución a lo largo de generaciones.
-
-**Depende de:** F5.
-
-**Hitos:**
-
-- **F6.1. Creación probabilística y controlada.** Generar alelos, genotipos,
-  dosis y recuentos según el modo seleccionado.
-- **F6.2. Frecuencias y Hardy-Weinberg.** Aplicar y comprobar la distribución
-  binomial bialélica y la multinomial multialélica en ploidías 1–10, tanto en
-  modo probabilístico como controlado, reutilizando el muestreo matricial
-  probabilístico de F2.3 y extendiéndolo a subpoblaciones, recuentos controlados
-  y distribución genotípica explícita. Aquí cierran REQ-CONF-130 y
-  REQ-EVO-35/36/49.
-- **F6.3. Endogamia inicial.** Aplicar las fórmulas confirmadas de F automático
-  solo en diploides, probar F=0, valores intermedios y F=1, rechazar F en P=1 o
-  P>2 y registrar F realizado como «no aplicable» fuera de diploides, sin crear
-  una segunda implementación distinta de la usada para matrices en F2.3.
-- **F6.4. Paneles haplotípicos y desequilibrio de ligamiento.** Admitir un panel
-  canónico de cinco ficheros, preparado por una única orden Rust, con bloques de
-  LD no solapados, SNP A/C/G/T, haplotipos locales únicos y frecuencias densas por
-  población y bloque. Exigir una única referencia: cada ID de bloque coincide
-  con el ID del metadato, el SHA-256 recalculado del FASTA coincide con su digest
-  declarado y cada secuencia existe en ese FASTA. En construcción intacta, tratar cada bloque como locus
-  multialélico y reutilizar HWE, F diploide o distribución explícita y los modos
-  probabilístico o controlado comunes. Crear combinaciones intrabloque intactas sin recombinación,
-  ligarlas a copias biológicas y conservar el HAP fundador aunque mutaciones
-  posteriores formen otra capa. Separar `haplotype_construction`
-  intacto/recombinante de `frequency_sampling`
-  probabilístico/controlado y resolver el primero por población×bloque conforme
-  a DTC-033. Admitir ambos muestreos y HWE/F/distribución explícita en intacto;
-  en recombinante, solo muestreo probabilístico y HWE o F diploide. En esta alternativa, ejecutar productores directamente por
-  individuo×bloque: en diploides Bernoulli(F) elige uno duplicado o dos
-  independientes; en otras ploidías, P productores independientes. Cada
-  productor usa solo fuentes del panel original, sortea las uniones y devuelve
-  primaria intacta o mosaico; interpretar x como unión x|x+1, comenzar en la
-  primaria y alternar segmentos *forward* sin ajustar a SNP, conservando cruces
-  invisibles. Implementar en F6.4 la variante uniforme y el constructor común de
-  segmentos cerrados por DTC-055; F7.1 conectará mapas y meiosis al mismo
-  constructor tras DTPD-111, que no bloquea F6.4. Agrupar las C copias finales
-  por ID de contenido y calcular `n_h/C`, distinguiendo productores con cruce de
-  copias derivadas.
-  Incorporar en Marimo la sección poblacional para preparar/validar el panel,
-  mapear poblaciones, editar la tabla por bloque, previsualizar métricas y enlazar
-  las tres salidas obligatorias sin cargar artefactos grandes. Publicar estas
-  salidas con las cabeceras, claves, orden y serialización TSV exactos de
-  DTC-055, dejando clase/versión en sus enlaces de manifiesto.
-  Permitir HAP distintos entre bloques y obtener los SNP exteriores desde
-  `alt_af`. Rechazar cualquier locus de matriz dentro de un bloque, sin prioridad
-  ni sobrescritura. Consumir DTC-055, que cierra DTPD-119.
-
-  **Encaje de planificación pendiente para generación automática.** La
-  generación por el programa de bloques, SNP, haplotipos y frecuencias que
-  produzcan ese mismo paquete se ubica como preparación previa dentro de F6.4,
-  no en F2. Todavía no amplía el alcance ejecutable de este hito: la
-  especificación vigente solo obliga a admitir un panel suministrado y faltan
-  sus REQ/ACE, arquitectura y decisión técnica. Las decisiones cerradas, las
-  puertas y los bloqueos se mantienen en el
-  [preplan de generación automática de bloques de LD](./preplan-generacion-automatica-bloques-ld-0.1.md).
-  La preparación automática producirá el mismo paquete canónico de cinco
-  ficheros sin ampliarlo y enlazará desde su manifiesto cuatro informes TSV
-  externos de geometría, frecuencias, LD e intentos. La publicación opcional de
-  todas las parejas de `r²` queda reservada a DTF-047.
-  Cada perfil reutilizable de entrada será, tanto si está incorporado como si lo
-  suministra el usuario, un paquete validado de exactamente cuatro ficheros:
-  `block_lengths.tsv`, `snp_gaps.tsv`, `ld_profile.tsv` y
-  `profile.metadata.json`. La máscara de exclusión ligada a la referencia se
-  mantendrá fuera y se declarará y verificará por separado.
-  `block_lengths.tsv` tendrá la cabecera exacta
-  `length_min_bp<TAB>length_max_bp<TAB>weight`, serialización TSV canónica y
-  filas ordenadas, únicas y no solapadas; validará la suma según DTC-049 sin
-  normalizarla automáticamente.
-  `snp_gaps.tsv` aplicará el mismo contrato con cabecera exacta
-  `gap_min_bp<TAB>gap_max_bp<TAB>weight`; su tabla 1–5000 documentada es solo un
-  ejemplo ilustrativo y nunca un valor predeterminado.
-  `ld_profile.tsv` tendrá una fila canónica por población e intervalo, con
-  `population_profile_id`, límites, mínimo evaluable, tolerancia absoluta y los
-  cuantiles p10/p25/p50/p75/p90; todas las poblaciones compartirán exactamente
-  las mismas fronteras contiguas desde 1. Los valores CEU/YRI documentados serán
-  ilustrativos.
-  `profile.metadata.json` será un objeto cerrado que identificará el recurso,
-  su origen builtin o supplied, su derivación aproximada o empírica, el modelo
-  de cuantiles y la procedencia obligatoria, y enlazará exactamente los tres TSV
-  por nombre canónico, tamaño y SHA-256 recalculado, sin duplicar sus tablas.
-  La máscara opcional `excluded_regions.tsv` permanecerá fuera del paquete,
-  declarará intervalos cerrados base 1 no solapados sobre secuencias del FASTA y
-  quedará enlazada por SHA-256 junto con la identidad de la referencia. Su
-  ausencia no desactivará la exclusión automática de `N`, loci reservados o
-  bloques aceptados.
-  La configuración usará `[initial_population.ld_blocks]` con
-  `source = "generated"`, una única fuente `profile|profile_path`, una única
-  medida `block_count|covered_bases|coverage_fraction` y máscara opcional. Cada
-  población simulada se mapeará en su subsección a un
-  `population_profile_id` existente. Las sustituciones DTC-033 solo cambiarán
-  ese mapeo y nunca parchearán tablas o parámetros del builtin; la geometría
-  común se resolverá una sola vez.
-  La geometría será común e inmutable. Frecuencias, cuantización, inicialización,
-  cálculo de cuantiles Type 7, puntuación y recocido se resolverán
-  independientemente por población, con `population_attempt_index` propio. El score poblacional minimizará, en
-  orden canónico y con suma Neumaier, los excesos cuadrados de los cinco
-  cuantiles sobre sus tolerancias para sus intervalos activos. Solo aceptará
-  `score = 0.0` junto con la validación individual de cuantiles y mínimos;
-  temperatura, mejor score y mejores cuantiles serán también poblacionales.
-  El recocido usará `T0 = max(score_inicial, 1e-12)`, aceptará siempre mejoras y
-  empates y los empeoramientos con `U < exp(-delta_score/T)`. Enfriará
-  `T *= 0.95` tras cada 1000 propuestas, independientemente de cuántas se
-  acepten, y se detendrá inmediatamente al alcanzar un estado válido.
-  Para cada población se calculará
-  `population_haplotype_cells = sum(C * snp_count)` sobre sus bloques y su
-  intento quedará limitado a
-  `min(10_000_000, max(100_000, 100 * population_haplotype_cells))` movimientos
-  propuestos. `max_haplotype_attempts = 1000` se aplicará por población. Agotar
-  un intento reintentará solo esa población; agotar su límite hará fallar el
-  panel sin resortear las demás y sin convertir el agotamiento en imposibilidad.
-  Podrán conservarse resultados válidos internamente, pero la publicación será
-  atómica después de que todas las poblaciones superen el validador común. Solo
-  entonces se formará la unión densa final de HAP por bloque.
-  La derivación RNG 2 separará exactamente `ld_geometry`, `ld_site_alleles`,
-  `ld_population_frequencies`, `ld_haplotype_initialization`,
-  `ld_annealing_proposals` y `ld_annealing_acceptance`; este último consumirá
-  uniformes solo para empeoramientos y no desplazará propuestas posteriores.
-  Las derivaciones usarán exclusivamente IDs estables y
-  `population_attempt_index` donde corresponda, nunca ruta, reloj, hilo,
-  *scheduler* u orden accidental. Los ámbitos poblacionales incorporarán
-  `population_id`; cambiar, añadir o reordenar una población no alterará la
-  geometría ni frecuencias, haplotipos o recocido de las demás. Los catálogos v1
-  y v2 seguirán intactos y legibles. El futuro
-  `catalogs/subseed-scopes-v3.tsv` declarará `catalog_version = 3` y
-  `derivation_version = 2`, contendrá los ámbitos anteriores necesarios y los
-  seis ámbitos LD con vectores normativos propios. La generación automática
-  elegirá explícitamente catálogo 3 y derivación 2, sin mezclas silenciosas;
-  configuración efectiva y manifiesto registrarán catálogo, derivación,
-  contexto, ámbitos, componentes y subsemillas conforme a DTC-037/DTC-038. El
-  catálogo real solo se publicará tras cerrar las puertas normativas.
-  Los cuantiles empíricos usarán siempre Hyndman–Fan Type 7: sobre valores
-  ordenados, `t=(n-1)q`, interpolación entre `floor(t)` y `ceil(t)`, y `x[0]`
-  cuando `n=1`, para q 0.10/0.25/0.50/0.75/0.90. La misma regla regirá
-  generador, preflight, oráculo e informes.
-  El preflight enumerará, para cada pareja no fijada con recuentos `a`, `b` y
-  `C`, todos los recuentos conjuntos enteros entre `max(0,a+b-C)` y `min(a,b)`.
-  Derivará cotas relajadas de cada cuantil aplicando Type 7 a los mínimos y
-  máximos por pareja y solo declarará imposibilidad si la banda solicitada no
-  las interseca o faltan parejas evaluables. Ignorará compatibilidades
-  multilocus, no admitirá `--force` y se protegerá con enumeración exhaustiva en
-  fixtures pequeños para demostrar ausencia de falsos imposibles.
-  La representabilidad de `covered_bases` o `coverage_fraction` se comprobará
-  aparte de la colocación mediante un grafo exacto de residuos módulo la menor
-  longitud admisible que quepa en algún segmento elegible. Caminos mínimos
-  obtendrán la menor suma por residuo y predecesores: un objetivo será
-  representable si y solo si la menor suma de su residuo no lo supera, y se
-  reconstruirá una combinación testigo exacta con aritmética comprobada. Ese
-  testigo será evidencia del preflight y no sustituirá el muestreo ponderado.
-  Para `block_count`, solo exceder
-  `sum(floor(segment_length/min_allowed_length))` demostrará imposibilidad. Pasar
-  estas pruebas no demostrará colocabilidad conjunta; el layout agotado y la
-  imposibilidad de ejecutar el cálculo por recursos tendrán diagnósticos
-  separados y nunca se reclasificarán como suma imposible. Fixtures pequeños
-  usarán enumeración o programación dinámica independiente, incluidos intervalos
-  degenerados, huecos y recomposición del testigo.
-  Los oráculos de aislamiento cambiarán el perfil, reordenarán o añadirán una
-  población y exigirán que los artefactos poblacionales no relacionados, o sus
-  filas/proyecciones canónicas cuando compartan fichero, permanezcan idénticos.
-  También comprobarán que el fallo de una población no publica un panel parcial
-  ni resortea las demás.
-  Podrá ofrecer, siempre mediante selección explícita, el perfil
-  `human_ld_ragsdale_approx_v1`: una aproximación sintética y trazable a la
-  tendencia humana `r_div^2` de Ragsdale y Gravel (2020), nunca presentada como
-  cuantiles empíricos ni usada por defecto. Sus cinco cuantiles procederán de
-  una distribución Beta por población e intervalo, con media dada por la curva
-  y `kappa = 8.0` global, no configurable y versionado con el builtin, nunca
-  inferido ni ajustado durante la ejecución. Un perfil empírico exacto podrá
-  añadirse posteriormente sin bloquear esta primera capacidad. El `profile_id`
-  queda ratificado como identificador físico definitivo en todos los contratos.
-- **F6.5. Grupos y subpoblaciones.** Asignar identidades, pertenencias y
-  parámetros iniciales sin ambigüedades.
-- **F6.6. Fundadores.** Identificar individuos y copias haplotípicas fundadoras
-  de forma estable.
-
-**Resultado de salida:** población inicial completa, faseada y trazable, apta
-para evolución o para producir eventos técnicos.
-
-**Evidencia de cierre:** pruebas estadísticas y controladas validan recuentos,
-frecuencias, fase, F, bloques y reproducibilidad. Al menos una población inicial
-produce un evento técnico mediante el recorrido de F4 sin una ruta alternativa.
-
-> Revisión de F6: aprobar el estado inicial antes de introducir transmisión y
-> generaciones.
+> Revisión de F6: confirmar que la complejidad estructural no rompe la verdad
+> fundadora de F5 ni el realismo técnico establecido en F4.
 
 ### F7. Evolución poblacional
 
@@ -603,9 +401,8 @@ configurado de los procesos.
   estructural canónico idéntico, formar bivalentes al azar y transmitir la mitad
   de copias de cada parental con fase y procedencia reconstruibles. Incluir
   *scaffolds* sin recombinación y portadores de SV de novo incompatibles después.
-  Reutilizar el mismo motor, mapas y procedencia por segmentos que la
-  inicialización fundadora con panel de F6.4, sin convertir aquella creación en
-  una meiosis histórica ni introducir un algoritmo alternativo.
+  Definir el motor, mapas y procedencia por segmentos en F7.1; no reutiliza un
+  panel ni una inicialización recombinante F5, que no existen.
 - **F7.2. Mutación heredable.** Introducir SNP, *indels*, variantes estructurales
   y repeticiones según sus modelos y momentos confirmados. Contar por clase las
   oportunidades válidas en todas las copias descendientes actuales, registrar
@@ -749,8 +546,8 @@ configurable.
 | F2 | Aplicación base, matriz SNV e individuos faseados | Equivalencia Marimo→TOML, matriz suministrada/generada, HWE/F y reconstrucción independiente de haplotipos/VCF | Perfil implícito, loci distintos por individuo, genotipos/fase incorrectos o semántica duplicada en UI |
 | F3 | Primer recorrido extremo a extremo | FASTQ, compresión, hashes y comprobación contra la verdad biológica | Lecturas o metadatos técnicos incoherentes |
 | F4 | Realismo técnico WGS | Comparación de parámetros solicitados y realizados | Alterar la verdad con artefactos técnicos |
-| F5 | Variación y referencias complejas | Casos estructurales, VCF más complemento y aislamiento por referencia | Mezcla de referencias o pérdida de linaje o detalle complejo |
-| F6 | Población inicial y panel haplotípico intacto | Recuentos, frecuencias, reconstrucción del panel y pruebas estadísticas reproducibles | Frecuencias, fase, LD o F mal representados |
+| F5 | Población inicial y haplotipos sintéticos | Siete TSV, reconstrucción H×S/q/D/`r²`, fundadores y pruebas reproducibles | Frecuencias, fase, LD o F mal representados |
+| F6 | Variación y referencias complejas posteriores | Casos estructurales, VCF más complemento y aislamiento por referencia | Mezcla de referencias o pérdida de linaje o detalle complejo |
 | F7 | Evolución y recombinación meiótica | Reconstrucción de transmisiones, mosaicos y medidas realizadas | Orden evolutivo, puntos de cruce, procedencia o genealogía incorrectos |
 | F8 | Familias y segregantes | Casos mendelianos y grafos validados | Cruces o selección de descendientes erróneos |
 | F9 | Versión consolidada | Pruebas completas y escenarios de rendimiento | Fallos de escala, distribución o interoperabilidad |
@@ -781,5 +578,6 @@ F2.0 son ampliaciones posteriores: no se consideran implementadas ni aprobadas
 por aparecer en esta hoja y deben respetar los planes, puertas y pausas.
 
 Las fases F3–F9 no deben dividirse todavía en archivos, módulos, crates ni
-commits. Su desglose se hará progresivamente con la evidencia obtenida en las
-fases anteriores; F2 ya dispone de su plan 0.1, todavía pendiente de aprobación.
+commits salvo en su plan de fase aprobado. Su desglose se hace progresivamente
+con la evidencia obtenida en las fases anteriores. F5 dispone del plan 0.1
+jerárquico F5.0–F5.6 y no crea identificadores `REQ-F5-*` paralelos.
