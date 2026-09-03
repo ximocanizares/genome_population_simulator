@@ -1,0 +1,649 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "effective-config-v5.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "effective_config_kind",
+    "schema_version",
+    "source_path",
+    "seed",
+    "f5"
+  ],
+  "properties": {
+    "effective_config_kind": {
+      "const": "gps_effective_config"
+    },
+    "schema_version": {
+      "const": "5"
+    },
+    "source_path": {
+      "$ref": "#/$defs/path"
+    },
+    "seed": {
+      "$ref": "#/$defs/sha"
+    },
+    "f5": {
+      "$ref": "#/$defs/f5"
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+    },
+    "u64": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "path",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "profile_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "declared_value",
+        "numerator",
+        "denominator",
+        "target_bases"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "block_count",
+            "covered_bases",
+            "coverage_fraction"
+          ]
+        },
+        "declared_value": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "numerator": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/u64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "denominator": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/u64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_bases": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/u64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "subpopulation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "population_id",
+        "individual_count",
+        "inbreeding_f",
+        "inbreeding_f_source",
+        "sampling",
+        "founders"
+      ],
+      "properties": {
+        "population_id": {
+          "$ref": "#/$defs/id"
+        },
+        "individual_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "inbreeding_f": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "inbreeding_f_source": {
+          "enum": [
+            "population",
+            "subpopulation"
+          ]
+        },
+        "sampling": {
+          "enum": [
+            "probabilistic",
+            "controlled"
+          ]
+        },
+        "founders": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "individual_id",
+              "founder_key"
+            ],
+            "properties": {
+              "individual_id": {
+                "$ref": "#/$defs/id"
+              },
+              "founder_key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "population_id",
+        "block_id",
+        "block_index",
+        "requested_mode",
+        "effective_mode",
+        "source",
+        "controlled_max_abs_error_declared",
+        "controlled_max_abs_error_effective"
+      ],
+      "properties": {
+        "population_id": {
+          "$ref": "#/$defs/id"
+        },
+        "block_id": {
+          "$ref": "#/$defs/id"
+        },
+        "block_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "requested_mode": {
+          "enum": [
+            "probabilistic",
+            "controlled"
+          ]
+        },
+        "effective_mode": {
+          "enum": [
+            "probabilistic",
+            "controlled"
+          ]
+        },
+        "source": {
+          "enum": [
+            "subpopulation_default",
+            "block_override"
+          ]
+        },
+        "controlled_max_abs_error_declared": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "controlled_max_abs_error_effective": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "set_kind",
+        "canonical_order",
+        "algorithm",
+        "tolerance",
+        "input_values",
+        "input_sum",
+        "input_delta",
+        "effective_values",
+        "output_sum",
+        "output_delta"
+      ],
+      "properties": {
+        "set_kind": {
+          "enum": [
+            "block_lengths",
+            "snp_gaps",
+            "snp_spectrum",
+            "haplotype_weights"
+          ]
+        },
+        "canonical_order": {
+          "enum": [
+            "length_min_bp",
+            "gap_min_bp",
+            "alt_af_min",
+            "haplotype_rank"
+          ]
+        },
+        "algorithm": {
+          "const": "neumaier-f64-v1"
+        },
+        "tolerance": {
+          "type": "number"
+        },
+        "input_values": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/named_number"
+          }
+        },
+        "input_sum": {
+          "type": "number"
+        },
+        "input_delta": {
+          "type": "number"
+        },
+        "effective_values": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/named_number"
+          }
+        },
+        "output_sum": {
+          "type": "number"
+        },
+        "output_delta": {
+          "type": "number"
+        }
+      }
+    },
+    "named_number": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "number"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_layout_attempts",
+        "max_haplotype_attempts",
+        "max_swap_proposals",
+        "max_haplotype_cells",
+        "max_operation_units",
+        "max_working_memory_bytes",
+        "max_output_bytes"
+      ],
+      "properties": {
+        "max_layout_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "max_haplotype_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "max_swap_proposals": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "max_haplotype_cells": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "max_operation_units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "max_working_memory_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483648
+        }
+      }
+    },
+    "preflight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "reference_bases_processed",
+        "tract_count",
+        "retained_sequence_ids",
+        "site_bound_per_block",
+        "bin_count_total",
+        "profile_rows",
+        "normalization_rows",
+        "tsv_rows_bound",
+        "json_rows_bound",
+        "other_operation_units",
+        "other_working_memory_bytes",
+        "other_output_bytes",
+        "operation_units",
+        "working_memory_bytes",
+        "output_bytes",
+        "operation_limit",
+        "working_memory_limit_bytes",
+        "output_limit_bytes"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "f5-resource-accounting-v1"
+        },
+        "reference_bases_processed": {
+          "$ref": "#/$defs/u64"
+        },
+        "tract_count": {
+          "$ref": "#/$defs/u64"
+        },
+        "retained_sequence_ids": {
+          "$ref": "#/$defs/u64"
+        },
+        "site_bound_per_block": {
+          "$ref": "#/$defs/u64"
+        },
+        "bin_count_total": {
+          "$ref": "#/$defs/u64"
+        },
+        "profile_rows": {
+          "$ref": "#/$defs/u64"
+        },
+        "normalization_rows": {
+          "$ref": "#/$defs/u64"
+        },
+        "tsv_rows_bound": {
+          "$ref": "#/$defs/u64"
+        },
+        "json_rows_bound": {
+          "$ref": "#/$defs/u64"
+        },
+        "other_operation_units": {
+          "$ref": "#/$defs/u64"
+        },
+        "other_working_memory_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "other_output_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "operation_units": {
+          "$ref": "#/$defs/u64"
+        },
+        "working_memory_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "output_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "operation_limit": {
+          "$ref": "#/$defs/u64"
+        },
+        "working_memory_limit_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "output_limit_bytes": {
+          "$ref": "#/$defs/u64"
+        }
+      }
+    },
+    "algorithms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layout",
+        "marginals",
+        "haplotypes",
+        "ld",
+        "controlled",
+        "inbreeding",
+        "truth_projection"
+      ],
+      "properties": {
+        "layout": {
+          "const": "f5-layout-v1"
+        },
+        "marginals": {
+          "const": "f5-spectrum-v1"
+        },
+        "haplotypes": {
+          "const": "weighted-prefix-swap-v1"
+        },
+        "ld": {
+          "const": "phased-r2-neumaier-v1"
+        },
+        "controlled": {
+          "const": "largest-remainder-v1"
+        },
+        "inbreeding": {
+          "const": "diploid-f-v1"
+        },
+        "truth_projection": {
+          "const": "f5-founder-truth-projection-v2"
+        }
+      }
+    },
+    "catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "catalog_id",
+        "path",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "catalog_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "$ref": "#/$defs/path"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "f5": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "scenario_id",
+        "reference_id",
+        "reference_sha256",
+        "seed",
+        "ploidy",
+        "founder_count",
+        "subpopulations",
+        "profile",
+        "mask",
+        "target",
+        "sampling",
+        "normalizations",
+        "limits",
+        "resource_preflight",
+        "algorithms",
+        "rng_catalog",
+        "id_catalog"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1"
+        },
+        "scenario_id": {
+          "$ref": "#/$defs/id"
+        },
+        "reference_id": {
+          "$ref": "#/$defs/id"
+        },
+        "reference_sha256": {
+          "$ref": "#/$defs/sha"
+        },
+        "seed": {
+          "$ref": "#/$defs/sha"
+        },
+        "ploidy": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "founder_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "subpopulations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/subpopulation"
+          }
+        },
+        "profile": {
+          "$ref": "#/$defs/profile"
+        },
+        "mask": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/link"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "$ref": "#/$defs/target"
+        },
+        "sampling": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sampling"
+          }
+        },
+        "normalizations": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/normalization"
+          }
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        },
+        "resource_preflight": {
+          "$ref": "#/$defs/preflight"
+        },
+        "algorithms": {
+          "$ref": "#/$defs/algorithms"
+        },
+        "rng_catalog": {
+          "$ref": "#/$defs/catalog"
+        },
+        "id_catalog": {
+          "$ref": "#/$defs/catalog"
+        }
+      }
+    }
+  }
+}

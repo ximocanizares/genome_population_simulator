@@ -15,7 +15,7 @@ use crate::application::{
 };
 use crate::biological_contamination::contamination_target_pair_count;
 use crate::configuration::ExpectedConfigKind;
-use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
+use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog_version};
 use crate::event_manifest::{event_manifest_relative_path, validate_event_manifest_bytes};
 use crate::execution::declared_small_event;
 use crate::identity::{
@@ -3253,7 +3253,7 @@ fn parse_general_manifest_bytes_unretagged(
         path,
     )?;
     let diagnostics = required_array(object, "diagnostics", path)?;
-    validate_diagnostics(diagnostics, path)?;
+    validate_diagnostics(diagnostics, "3", path)?;
 
     match state {
         UnitState::Complete => {
@@ -3377,7 +3377,7 @@ fn parse_general_manifest_v1_object(
         path,
     )?;
     let diagnostics = required_array(object, "diagnostics", path)?;
-    validate_diagnostics(diagnostics, path)?;
+    validate_diagnostics(diagnostics, "3", path)?;
     match state {
         UnitState::Complete
             if configuration_input.is_null()
@@ -5485,7 +5485,11 @@ fn validate_artifact(value: &Value, path: &Path) -> Result<ArtifactRecord, Diagn
     })
 }
 
-fn validate_diagnostics(values: &[Value], path: &Path) -> Result<(), Diagnostic> {
+fn validate_diagnostics(
+    values: &[Value],
+    catalog_version: &str,
+    path: &Path,
+) -> Result<(), Diagnostic> {
     const FIELDS: [&str; 2] = ["code", "message"];
     for value in values {
         let object = value
@@ -5495,10 +5499,10 @@ fn validate_diagnostics(values: &[Value], path: &Path) -> Result<(), Diagnostic>
         let code = required_non_empty_text(object, "code", path)?;
         validate_diagnostic_code(code, path)?;
         let message = required_non_empty_text(object, "message", path)?;
-        if !diagnostic_matches_catalog(code, message) {
+        if !diagnostic_matches_catalog_version(catalog_version, code, message) {
             return Err(manifest_error(
                 path,
-                format!("el diagnóstico {code} no coincide con diagnostics-v3.tsv"),
+                format!("el diagnóstico {code} no coincide con diagnostics-v{catalog_version}.tsv"),
             ));
         }
     }

@@ -1,0 +1,25 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"profile-metadata-f5-v1.schema.json",
+  "type":"object", "additionalProperties":false,
+  "required":["profile_kind","schema_version","profile_id","provenance_kind","source_citation","source_license","source_sha256","files"],
+  "properties":{
+    "profile_kind":{"const":"f5_generation_profile"}, "schema_version":{"const":"1"},
+    "profile_id":{"$ref":"#/$defs/id"}, "provenance_kind":{"enum":["built_in","user_supplied"]},
+    "source_citation":{"type":"string","minLength":1}, "source_license":{"type":["string","null"]},
+    "source_sha256":{"oneOf":[{"$ref":"#/$defs/sha"},{"type":"null"}]},
+    "files":{"type":"array","minItems":5,"maxItems":5,"prefixItems":[
+      {"$ref":"#/$defs/block_lengths"},{"$ref":"#/$defs/snp_gaps"},{"$ref":"#/$defs/snp_spectrum"},{"$ref":"#/$defs/haplotype_weights"},{"$ref":"#/$defs/ld_profile"}
+    ],"items":false}
+  },
+  "$defs":{
+    "id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "sha":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "file":{"type":"object","additionalProperties":false,"required":["artifact_kind","schema_version","path","size_bytes","sha256"],"properties":{"artifact_kind":{"type":"string"},"schema_version":{"const":"1"},"path":{"type":"string"},"size_bytes":{"type":"integer","minimum":0,"maximum":18446744073709551615},"sha256":{"$ref":"#/$defs/sha"}}},
+    "block_lengths":{"allOf":[{"$ref":"#/$defs/file"},{"properties":{"artifact_kind":{"const":"f5_block_length_profile"},"path":{"const":"block_lengths.tsv"}},"required":["artifact_kind","path"]}]},
+    "snp_gaps":{"allOf":[{"$ref":"#/$defs/file"},{"properties":{"artifact_kind":{"const":"f5_snp_gap_profile"},"path":{"const":"snp_gaps.tsv"}},"required":["artifact_kind","path"]}]},
+    "snp_spectrum":{"allOf":[{"$ref":"#/$defs/file"},{"properties":{"artifact_kind":{"const":"f5_snp_spectrum"},"path":{"const":"snp_spectrum.tsv"}},"required":["artifact_kind","path"]}]},
+    "haplotype_weights":{"allOf":[{"$ref":"#/$defs/file"},{"properties":{"artifact_kind":{"const":"f5_haplotype_weights"},"path":{"const":"haplotype_weights.tsv"}},"required":["artifact_kind","path"]}]},
+    "ld_profile":{"allOf":[{"$ref":"#/$defs/file"},{"properties":{"artifact_kind":{"const":"f5_ld_profile"},"path":{"const":"ld_profile.tsv"}},"required":["artifact_kind","path"]}]}
+  }
+}

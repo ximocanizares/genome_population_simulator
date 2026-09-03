@@ -5,6 +5,7 @@ use std::process::{Command, Stdio};
 const DIAGNOSTIC_CATALOG_V1: &str = include_str!("../catalogs/diagnostics-v1.tsv");
 const DIAGNOSTIC_CATALOG_V2: &str = include_str!("../catalogs/diagnostics-v2.tsv");
 const DIAGNOSTIC_CATALOG: &str = include_str!("../catalogs/diagnostics-v3.tsv");
+const DIAGNOSTIC_CATALOG_V4: &str = include_str!("../catalogs/diagnostics-v4.tsv");
 const DIAGNOSTIC_SCHEMA: &str = include_str!("../schemas/diagnostics-v1.schema.json");
 const SUBSEED_CATALOG_V1: &str = include_str!("../catalogs/subseed-scopes-v1.tsv");
 const SUBSEED_CATALOG_V2: &str = include_str!("../catalogs/subseed-scopes-v2.tsv");
@@ -12,15 +13,17 @@ const SUBSEED_CATALOG: &str = include_str!("../catalogs/subseed-scopes-v3.tsv");
 const ID_CATALOG: &str = include_str!("../catalogs/id-classes-v1.tsv");
 const ID_CATALOG_V2: &str = include_str!("../catalogs/id-classes-v2.tsv");
 const ID_CATALOG_V3: &str = include_str!("../catalogs/id-classes-v3.tsv");
+const ID_CATALOG_V4: &str = include_str!("../catalogs/id-catalog-v4.tsv");
+const F5_RNG_CATALOG: &str = include_str!("../catalogs/f5-rng-catalog-v1.tsv");
 const VARIANT_ID_CATALOG: &str = include_str!("../catalogs/variant-id-v1.tsv");
 const PARAMETER_CATALOG: &str = include_str!("../catalogs/parameter-families-v1.tsv");
 const SUBSEED_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
 
-// These fingerprints are the review lock for the published v1 contracts. A
-// deliberate content change must use a new versioned artifact and add a new
-// fingerprint instead of replacing a v1 value here.
-const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 11] = [
+// These fingerprints are the review lock for the published contracts. A
+// deliberate content change must use a new versioned artifact and add its new
+// fingerprint instead of replacing a historical value here.
+const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 14] = [
     (
         "catalogs/diagnostics-v1.tsv",
         DIAGNOSTIC_CATALOG_V1,
@@ -35,6 +38,11 @@ const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 11] = [
         "catalogs/diagnostics-v3.tsv",
         DIAGNOSTIC_CATALOG,
         "6e8a8fa3c8c1306ed360bad6de402649020d109a10fc0c5b4072d47df66f64f9",
+    ),
+    (
+        "catalogs/diagnostics-v4.tsv",
+        DIAGNOSTIC_CATALOG_V4,
+        "cfe0c0c1eae5f77603729bff365ae6ea070410dab32dce4e5bbb2c8276f6a473",
     ),
     (
         "schemas/diagnostics-v1.schema.json",
@@ -70,6 +78,16 @@ const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 11] = [
         "catalogs/id-classes-v3.tsv",
         ID_CATALOG_V3,
         "34dafd1d47a0f96a9e6030270ac2f7c84a0bf050ffc6926d7b919bdef8abf390",
+    ),
+    (
+        "catalogs/id-catalog-v4.tsv",
+        ID_CATALOG_V4,
+        "218f8fe4f6a68ac4c4da9907c8aad5c017ceb4be04dee1198b2d8b7fa9410d3b",
+    ),
+    (
+        "catalogs/f5-rng-catalog-v1.tsv",
+        F5_RNG_CATALOG,
+        "5c2a1b68e744cc333c3b28a69263202b9b2cd5acdb4910db54cafcf6ff2fbc81",
     ),
     (
         "catalogs/parameter-families-v1.tsv",
@@ -109,7 +127,7 @@ fn sha256sum(input: &str) -> String {
 }
 
 #[test]
-fn published_v1_contracts_match_their_reviewed_content() {
+fn published_contracts_match_their_reviewed_content() {
     assert!(DIAGNOSTIC_CATALOG_V2.starts_with("# diagnostic_catalog_version=2\n"));
     assert!(DIAGNOSTIC_CATALOG.starts_with("# diagnostic_catalog_version=3\n"));
     assert!(SUBSEED_CATALOG_V1.starts_with(&format!(
@@ -125,6 +143,8 @@ fn published_v1_contracts_match_their_reviewed_content() {
     assert!(ID_CATALOG_V3.starts_with(&format!(
         "# catalog_version=3\n# context={ID_CONTEXT}\n# derivation_versions=v1,v2\n"
     )));
+    assert!(ID_CATALOG_V4.starts_with("# catalog_version=4\n# catalog_id=id-catalog-v4\n"));
+    assert!(F5_RNG_CATALOG.starts_with("# catalog_id=f5-rng-catalog-v1\n"));
     assert!(PARAMETER_CATALOG.starts_with("# parameter_catalog_version=1\n"));
 
     for (path, content, expected) in REVIEWED_CONTRACT_FINGERPRINTS {
@@ -240,6 +260,22 @@ fn validate_diagnostic_catalog(catalog: &str) -> Result<usize, CatalogError> {
 fn published_diagnostic_catalog_is_well_formed_and_covers_every_category() {
     assert_eq!(validate_diagnostic_catalog(DIAGNOSTIC_CATALOG_V2), Ok(46));
     assert_eq!(validate_diagnostic_catalog(DIAGNOSTIC_CATALOG), Ok(47));
+    assert_eq!(validate_diagnostic_catalog(DIAGNOSTIC_CATALOG_V4), Ok(57));
+    assert!(DIAGNOSTIC_CATALOG_V4.starts_with("# diagnostic_catalog_version=4\n"));
+    let v3_rows = DIAGNOSTIC_CATALOG
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<BTreeSet<_>>();
+    let v4_rows = DIAGNOSTIC_CATALOG_V4
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<BTreeSet<_>>();
+    assert!(v3_rows.is_subset(&v4_rows));
+    assert_eq!(v4_rows.difference(&v3_rows).count(), 10);
+    assert!(
+        v4_rows.difference(&v3_rows).all(|row| row.ends_with("|F5")),
+        "diagnostics-v4 must add only the ten F5 rows"
+    );
     for category in [
         "CONF", "INPUT", "FMT", "DOMAIN", "RES", "TOOL", "IO", "INTERNAL",
     ] {
@@ -511,6 +547,66 @@ fn blake3_derive_key(context: &str, material: &[u8]) -> [u8; 32] {
     blake3_one_chunk(material, key_words, DERIVE_KEY_MATERIAL)
 }
 
+fn chacha_quarter_round(state: &mut [u32; 16], a: usize, b: usize, c: usize, d: usize) {
+    state[a] = state[a].wrapping_add(state[b]);
+    state[d] ^= state[a];
+    state[d] = state[d].rotate_left(16);
+    state[c] = state[c].wrapping_add(state[d]);
+    state[b] ^= state[c];
+    state[b] = state[b].rotate_left(12);
+    state[a] = state[a].wrapping_add(state[b]);
+    state[d] ^= state[a];
+    state[d] = state[d].rotate_left(8);
+    state[c] = state[c].wrapping_add(state[d]);
+    state[b] ^= state[c];
+    state[b] = state[b].rotate_left(7);
+}
+
+fn chacha12_first_four_u64(seed: &[u8]) -> [u64; 4] {
+    assert_eq!(seed.len(), 32);
+    let mut state = [
+        0x6170_7865,
+        0x3320_646e,
+        0x7962_2d32,
+        0x6b20_6574,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ];
+    for (word, bytes) in state[4..12].iter_mut().zip(seed.chunks_exact(4)) {
+        *word = u32::from_le_bytes(bytes.try_into().expect("key word must contain four bytes"));
+    }
+    let original = state;
+    for _ in 0..6 {
+        chacha_quarter_round(&mut state, 0, 4, 8, 12);
+        chacha_quarter_round(&mut state, 1, 5, 9, 13);
+        chacha_quarter_round(&mut state, 2, 6, 10, 14);
+        chacha_quarter_round(&mut state, 3, 7, 11, 15);
+        chacha_quarter_round(&mut state, 0, 5, 10, 15);
+        chacha_quarter_round(&mut state, 1, 6, 11, 12);
+        chacha_quarter_round(&mut state, 2, 7, 8, 13);
+        chacha_quarter_round(&mut state, 3, 4, 9, 14);
+    }
+    for index in 0..16 {
+        state[index] = state[index].wrapping_add(original[index]);
+    }
+    std::array::from_fn(|index| {
+        let mut bytes = [0_u8; 8];
+        bytes[..4].copy_from_slice(&state[index * 2].to_le_bytes());
+        bytes[4..].copy_from_slice(&state[index * 2 + 1].to_le_bytes());
+        u64::from_le_bytes(bytes)
+    })
+}
+
 #[test]
 fn subseed_vectors_publish_exact_canonical_material() {
     let rows: Vec<_> = SUBSEED_CATALOG
@@ -652,4 +748,130 @@ fn id_catalog_v3_preserves_v2_rows_and_adds_f4_v2_derivations() {
             decode_hex(&digest[..32])
         );
     }
+}
+
+#[test]
+fn f5_rng_catalog_v1_publishes_independent_blake3_and_chacha12_vectors() {
+    assert!(F5_RNG_CATALOG.starts_with("# catalog_id=f5-rng-catalog-v1\n"));
+    let rows: Vec<_> = F5_RNG_CATALOG
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    assert_eq!(rows.len(), 12);
+    let mut decisions = BTreeSet::new();
+    for row in rows {
+        let fields: Vec<_> = row.split('|').collect();
+        assert_eq!(fields.len(), 9);
+        let [
+            decision,
+            components,
+            root,
+            material,
+            subseed,
+            first_word,
+            second_word,
+            third_word,
+            fourth_word,
+        ] = fields.as_slice()
+        else {
+            panic!("F5 RNG row must have nine fields");
+        };
+        assert!(decisions.insert(*decision));
+        assert!(components.contains(&format!("stage={decision}")));
+        assert_eq!(encode_material(root, components), decode_hex(material));
+        let expected_subseed = blake3_derive_key(SUBSEED_CONTEXT, &decode_hex(material));
+        assert_eq!(expected_subseed.as_slice(), decode_hex(subseed));
+        let expected_words =
+            chacha12_first_four_u64(&expected_subseed).map(|word| format!("{word:016x}"));
+        assert_eq!(
+            expected_words.as_slice(),
+            [*first_word, *second_word, *third_word, *fourth_word]
+        );
+    }
+    assert_eq!(
+        decisions,
+        BTreeSet::from([
+            "controlled_quota_tie",
+            "founder_controlled_permutation",
+            "founder_f",
+            "founder_sample",
+            "initial_column",
+            "layout_gap",
+            "layout_length",
+            "layout_position",
+            "marginal_spectrum",
+            "polarity",
+            "site_alt",
+            "swap_proposal",
+        ])
+    );
+    for forbidden in ["path=", "clock=", "thread=", "position=", "scheduler="] {
+        assert!(!F5_RNG_CATALOG.contains(forbidden));
+    }
+}
+
+#[test]
+fn id_catalog_v4_is_a_literal_v3_superset_with_five_f5_classes() {
+    assert!(ID_CATALOG_V4.starts_with("# catalog_version=4\n"));
+    let legacy_rows: Vec<_> = ID_CATALOG_V3
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    let rows: Vec<_> = ID_CATALOG_V4
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect();
+    assert_eq!(&rows[..legacy_rows.len()], legacy_rows);
+    assert_eq!(rows.len(), legacy_rows.len() + 5);
+
+    let mut classes = BTreeMap::new();
+    let mut identifiers = BTreeSet::new();
+    for row in &rows[legacy_rows.len()..] {
+        let fields: Vec<_> = row.split('|').collect();
+        assert_eq!(fields.len(), 9);
+        let [
+            class,
+            prefix,
+            scope,
+            _causes,
+            components,
+            root,
+            material,
+            digest,
+            identifier,
+        ] = fields.as_slice()
+        else {
+            panic!("F5 ID row must have nine fields");
+        };
+        assert!(identifier.starts_with(prefix));
+        assert!(components.starts_with(&format!("class={class};")));
+        assert_eq!(encode_material(root, components), decode_hex(material));
+        assert_eq!(
+            blake3_derive_key(ID_CONTEXT, &decode_hex(material)).as_slice(),
+            decode_hex(digest)
+        );
+        assert_eq!(
+            decode_base32_no_padding(&identifier[prefix.len()..]),
+            decode_hex(&digest[..32])
+        );
+        assert!(identifiers.insert(*identifier));
+        classes.insert(*class, (*prefix, *scope));
+    }
+
+    assert_eq!(
+        classes,
+        BTreeMap::from([
+            ("f5_block", ("BLK_", "execution")),
+            (
+                "f5_block_haplotype_assignment",
+                ("FHA_", "block_founder_copy")
+            ),
+            ("f5_founder_copy", ("FCP_", "founder_sequence_phase")),
+            ("f5_haplotype", ("HAP_", "block_population")),
+            ("f5_site", ("SITE_", "block")),
+        ])
+    );
+    assert!(ID_CATALOG_V4.contains("sequence_id=sequence-1;phase_id=phase-0"));
+    assert!(ID_CATALOG_V4.contains("founder_copy_id=FCP_"));
+    assert!(!ID_CATALOG_V4.contains("copy_index_u32"));
 }

@@ -63,3 +63,16 @@ coordenadas incompatibles.
 *paired-end* observables y alineamiento directo, con el destino aplazado en el
 diagnóstico. No representa esos parámetros ni publica sus estadísticas o
 salidas.
+
+`f5-rng-catalog-v1.tsv` publica los ámbitos aleatorios propios de F5 sin
+ampliar `subseed-scopes-v8`. Cada decisión deriva una subsemilla local
+independiente con el mismo material longitud-prefijado v1 y ChaCha12, e incluye
+las primeras cuatro palabras `u64` literales para congelar el contrato de
+inicialización del flujo.
+
+`id-catalog-v4.tsv` conserva literalmente las once filas de
+`id-classes-v3.tsv` y añade las cinco clases automáticas de F5: `BLK_`,
+`SITE_`, `HAP_`, `FCP_` y `FHA_`. `FCP_` identifica una copia fundadora por
+`sequence_id` y `phase_id`; `FHA_` identifica una asignación de bloque separada
+que enlaza `founder_copy_id` con `haplotype_id`. Los catálogos
+`id-classes-v1.tsv` a `id-classes-v3.tsv` permanecen inmutables.

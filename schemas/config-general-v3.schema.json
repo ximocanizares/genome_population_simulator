@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "config-general-v3.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["config_kind", "schema_version", "ploidy", "reference_id", "reference_path", "reference_sha256", "f5_scenario"],
+  "properties": {
+    "config_kind": {"const": "general"}, "schema_version": {"const": "3"},
+    "seed": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ploidy": {"type": "integer", "minimum": 1, "maximum": 10},
+    "reference_id": {"$ref": "#/$defs/id"}, "reference_path": {"$ref": "#/$defs/relative_path"}, "reference_sha256": {"$ref": "#/$defs/sha"},
+    "f5_scenario": {"type": "object", "additionalProperties": false, "required": ["scenario_id", "scenario_path"], "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "scenario_path": {"$ref": "#/$defs/relative_path"}}}
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {"type": "string", "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"}
+  }
+}

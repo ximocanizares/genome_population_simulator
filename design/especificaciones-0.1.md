@@ -4375,7 +4375,10 @@ comparten una política de aceptación.
   entre el documento general y sus escenarios. También debe rechazar antes de
   validar o ejecutar cualquier incompatibilidad entre la versión de la
   aplicación y las versiones de esquema o catálogos del binario. En F5, el
-  conjunto válido contiene exactamente el general v3 y un escenario F5 v1;
+  conjunto válido contiene exactamente el general v3 y un escenario F5 v1. El
+  general debe declarar `reference_path` relativa a su propio directorio, sin
+  `..`, y la validación debe comprobar el SHA-256 de esos bytes FASTA antes del
+  preflight de recursos;
   ausencia, lista, multiplicidad o versiones general v2/efectivo-manifiesto v4
   se rechazan expresamente.
 - **REQ-VAL-55.** La validación de la matriz de frecuencias SNV debe comprobar

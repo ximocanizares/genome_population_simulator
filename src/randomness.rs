@@ -7,7 +7,8 @@ use rand_chacha::ChaCha12Rng;
 use rand_chacha::rand_core::{Rng, SeedableRng};
 
 use crate::diagnostics::Diagnostic;
-use crate::identity::{EventId, IndividualId, LibraryId};
+use crate::identity::{EventId, LibraryId};
+use crate::identity::{F5BlockId, F5SiteId, IndividualId, PopulationId, ScenarioId};
 
 pub const DERIVATION_VERSION: u32 = 1;
 pub const F2_DERIVATION_VERSION: u32 = 2;
@@ -602,6 +603,567 @@ impl RandomWordSource for LocalRng {
     }
 }
 
+/// Decisión atómica del catálogo `f5-rng-catalog-v1`.
+///
+/// Los constructores fijan tanto el orden como la presencia de los componentes
+/// del catálogo. `stage` no es una entrada libre: es el literal de decisión.
+#[derive(Clone, Copy, Debug)]
+pub struct F5RandomDecision<'a>(F5RandomDecisionKind<'a>);
+
+#[derive(Clone, Copy, Debug)]
+enum F5RandomDecisionKind<'a> {
+    LayoutLength {
+        scenario_id: &'a ScenarioId,
+        attempt_index: u64,
+        block_index: u64,
+    },
+    LayoutPosition {
+        scenario_id: &'a ScenarioId,
+        attempt_index: u64,
+        block_index: u64,
+    },
+    LayoutGap {
+        scenario_id: &'a ScenarioId,
+        attempt_index: u64,
+        block_index: u64,
+    },
+    SiteAlt {
+        scenario_id: &'a ScenarioId,
+        block_id: &'a F5BlockId,
+        site_id: &'a F5SiteId,
+    },
+    MarginalSpectrum {
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        site_id: &'a F5SiteId,
+    },
+    InitialColumn {
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        attempt_index: u64,
+        site_index: u64,
+    },
+    Polarity {
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        attempt_index: u64,
+        site_index: u64,
+    },
+    SwapProposal {
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        attempt_index: u64,
+    },
+    FounderSample {
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        individual_id: &'a IndividualId,
+        copy_index: u32,
+    },
+    FounderF {
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        individual_id: &'a IndividualId,
+    },
+    ControlledQuotaTie {
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+    },
+    FounderControlledPermutation {
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+    },
+}
+
+impl<'a> F5RandomDecision<'a> {
+    #[must_use]
+    pub const fn layout_length(
+        scenario_id: &'a ScenarioId,
+        attempt_index: u64,
+        block_index: u64,
+    ) -> Self {
+        Self(F5RandomDecisionKind::LayoutLength {
+            scenario_id,
+            attempt_index,
+            block_index,
+        })
+    }
+    #[must_use]
+    pub const fn layout_position(
+        scenario_id: &'a ScenarioId,
+        attempt_index: u64,
+        block_index: u64,
+    ) -> Self {
+        Self(F5RandomDecisionKind::LayoutPosition {
+            scenario_id,
+            attempt_index,
+            block_index,
+        })
+    }
+    #[must_use]
+    pub const fn layout_gap(
+        scenario_id: &'a ScenarioId,
+        attempt_index: u64,
+        block_index: u64,
+    ) -> Self {
+        Self(F5RandomDecisionKind::LayoutGap {
+            scenario_id,
+            attempt_index,
+            block_index,
+        })
+    }
+    #[must_use]
+    pub const fn site_alt(
+        scenario_id: &'a ScenarioId,
+        block_id: &'a F5BlockId,
+        site_id: &'a F5SiteId,
+    ) -> Self {
+        Self(F5RandomDecisionKind::SiteAlt {
+            scenario_id,
+            block_id,
+            site_id,
+        })
+    }
+    #[must_use]
+    pub const fn marginal_spectrum(
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        site_id: &'a F5SiteId,
+    ) -> Self {
+        Self(F5RandomDecisionKind::MarginalSpectrum {
+            scenario_id,
+            population_id,
+            block_id,
+            site_id,
+        })
+    }
+    #[must_use]
+    pub const fn initial_column(
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        attempt_index: u64,
+        site_index: u64,
+    ) -> Self {
+        Self(F5RandomDecisionKind::InitialColumn {
+            scenario_id,
+            population_id,
+            block_id,
+            attempt_index,
+            site_index,
+        })
+    }
+    #[must_use]
+    pub const fn polarity(
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        attempt_index: u64,
+        site_index: u64,
+    ) -> Self {
+        Self(F5RandomDecisionKind::Polarity {
+            scenario_id,
+            population_id,
+            block_id,
+            attempt_index,
+            site_index,
+        })
+    }
+    #[must_use]
+    pub const fn swap_proposal(
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        attempt_index: u64,
+    ) -> Self {
+        Self(F5RandomDecisionKind::SwapProposal {
+            scenario_id,
+            population_id,
+            block_id,
+            attempt_index,
+        })
+    }
+    #[must_use]
+    pub const fn founder_sample(
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        individual_id: &'a IndividualId,
+        copy_index: u32,
+    ) -> Self {
+        Self(F5RandomDecisionKind::FounderSample {
+            scenario_id,
+            population_id,
+            block_id,
+            individual_id,
+            copy_index,
+        })
+    }
+    #[must_use]
+    pub const fn founder_f(
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+        individual_id: &'a IndividualId,
+    ) -> Self {
+        Self(F5RandomDecisionKind::FounderF {
+            scenario_id,
+            population_id,
+            block_id,
+            individual_id,
+        })
+    }
+    #[must_use]
+    pub const fn controlled_quota_tie(
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+    ) -> Self {
+        Self(F5RandomDecisionKind::ControlledQuotaTie {
+            scenario_id,
+            population_id,
+            block_id,
+        })
+    }
+    #[must_use]
+    pub const fn founder_controlled_permutation(
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+    ) -> Self {
+        Self(F5RandomDecisionKind::FounderControlledPermutation {
+            scenario_id,
+            population_id,
+            block_id,
+        })
+    }
+
+    fn canonical_components(self) -> Vec<(&'static str, String)> {
+        let mut components = Vec::with_capacity(7);
+        let (stage, salt) = match self.0 {
+            F5RandomDecisionKind::LayoutLength {
+                scenario_id,
+                attempt_index,
+                block_index,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("stage", "layout_length".to_owned()),
+                    ("attempt_index_u64", attempt_index.to_string()),
+                    ("block_index_u64", block_index.to_string()),
+                ]);
+                ("layout_length", None)
+            }
+            F5RandomDecisionKind::LayoutPosition {
+                scenario_id,
+                attempt_index,
+                block_index,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("stage", "layout_position".to_owned()),
+                    ("attempt_index_u64", attempt_index.to_string()),
+                    ("block_index_u64", block_index.to_string()),
+                ]);
+                ("layout_position", None)
+            }
+            F5RandomDecisionKind::LayoutGap {
+                scenario_id,
+                attempt_index,
+                block_index,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("stage", "layout_gap".to_owned()),
+                    ("attempt_index_u64", attempt_index.to_string()),
+                    ("block_index_u64", block_index.to_string()),
+                ]);
+                ("layout_gap", None)
+            }
+            F5RandomDecisionKind::SiteAlt {
+                scenario_id,
+                block_id,
+                site_id,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("site_id", site_id.as_str().to_owned()),
+                    ("stage", "site_alt".to_owned()),
+                ]);
+                ("site_alt", None)
+            }
+            F5RandomDecisionKind::MarginalSpectrum {
+                scenario_id,
+                population_id,
+                block_id,
+                site_id,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("population_id", population_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("site_id", site_id.as_str().to_owned()),
+                    ("stage", "marginal_spectrum".to_owned()),
+                ]);
+                ("marginal_spectrum", None)
+            }
+            F5RandomDecisionKind::InitialColumn {
+                scenario_id,
+                population_id,
+                block_id,
+                attempt_index,
+                site_index,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("population_id", population_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("stage", "initial_column".to_owned()),
+                    ("attempt_index_u64", attempt_index.to_string()),
+                ]);
+                ("initial_column", Some(site_index.to_string()))
+            }
+            F5RandomDecisionKind::Polarity {
+                scenario_id,
+                population_id,
+                block_id,
+                attempt_index,
+                site_index,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("population_id", population_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("stage", "polarity".to_owned()),
+                    ("attempt_index_u64", attempt_index.to_string()),
+                ]);
+                ("polarity", Some(site_index.to_string()))
+            }
+            F5RandomDecisionKind::SwapProposal {
+                scenario_id,
+                population_id,
+                block_id,
+                attempt_index,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("population_id", population_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("stage", "swap_proposal".to_owned()),
+                    ("attempt_index_u64", attempt_index.to_string()),
+                ]);
+                ("swap_proposal", None)
+            }
+            F5RandomDecisionKind::FounderSample {
+                scenario_id,
+                population_id,
+                block_id,
+                individual_id,
+                copy_index,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("population_id", population_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("individual_id", individual_id.as_str().to_owned()),
+                    ("copy_index_u32", copy_index.to_string()),
+                    ("stage", "founder_sample".to_owned()),
+                ]);
+                ("founder_sample", None)
+            }
+            F5RandomDecisionKind::FounderF {
+                scenario_id,
+                population_id,
+                block_id,
+                individual_id,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("population_id", population_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("individual_id", individual_id.as_str().to_owned()),
+                    ("stage", "founder_f".to_owned()),
+                ]);
+                ("founder_f", None)
+            }
+            F5RandomDecisionKind::ControlledQuotaTie {
+                scenario_id,
+                population_id,
+                block_id,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("population_id", population_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("stage", "controlled_quota_tie".to_owned()),
+                ]);
+                ("controlled_quota_tie", None)
+            }
+            F5RandomDecisionKind::FounderControlledPermutation {
+                scenario_id,
+                population_id,
+                block_id,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("population_id", population_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("stage", "founder_controlled_permutation".to_owned()),
+                ]);
+                ("founder_controlled_permutation", None)
+            }
+        };
+        debug_assert_eq!(
+            components
+                .iter()
+                .find(|(name, _)| *name == "stage")
+                .map(|(_, value)| value.as_str()),
+            Some(stage)
+        );
+        if let Some(site_index) = salt {
+            components.push(("salt.site_index_u64", site_index));
+        }
+        components
+    }
+}
+
+/// Deriva un ChaCha12 local de una decisión F5, sin flujo global compartido.
+pub fn derive_f5_subseed(
+    root: RootSeed,
+    decision: F5RandomDecision<'_>,
+) -> Result<Subseed, Diagnostic> {
+    let components = decision.canonical_components();
+    let borrowed = components
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect::<Vec<_>>();
+    Ok(Subseed(blake3::derive_key(
+        DERIVATION_CONTEXT,
+        &canonical_material(root, &borrowed)?,
+    )))
+}
+
+/// Codificación de desempate/layout de DTC-089: cuatro `u64` big-endian.
+#[must_use]
+pub fn f5_placed_layout_bytes(rows: &[(u64, u64, u64, u64)]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(rows.len().saturating_mul(32));
+    for (sequence_ordinal, start_1based, end_1based, length_bp) in rows {
+        for value in [sequence_ordinal, start_1based, end_1based, length_bp] {
+            bytes.extend_from_slice(&value.to_be_bytes());
+        }
+    }
+    bytes
+}
+
+/// Codificación de matriz binaria F5: H/S big-endian, filas por rango y bits
+/// MSB primero con relleno bajo a cero.
+pub fn f5_matrix_bytes(rows: &[Vec<bool>]) -> Result<Vec<u8>, RandomSamplingError> {
+    let haplotype_count =
+        u64::try_from(rows.len()).map_err(|_| RandomSamplingError::NumericFailure)?;
+    let site_count = rows.first().map_or(0, Vec::len);
+    if rows.iter().any(|row| row.len() != site_count) {
+        return Err(RandomSamplingError::InvalidMatrix);
+    }
+    let site_count_u64 =
+        u64::try_from(site_count).map_err(|_| RandomSamplingError::NumericFailure)?;
+    let bytes_per_row = site_count.div_ceil(8);
+    let payload = rows
+        .len()
+        .checked_mul(bytes_per_row)
+        .ok_or(RandomSamplingError::NumericFailure)?;
+    let mut bytes = Vec::with_capacity(
+        16usize
+            .checked_add(payload)
+            .ok_or(RandomSamplingError::NumericFailure)?,
+    );
+    bytes.extend_from_slice(&haplotype_count.to_be_bytes());
+    bytes.extend_from_slice(&site_count_u64.to_be_bytes());
+    for row in rows {
+        for chunk in row.chunks(8) {
+            let mut byte = 0_u8;
+            for (offset, allele) in chunk.iter().enumerate() {
+                if *allele {
+                    byte |= 1_u8 << (7 - offset);
+                }
+            }
+            bytes.push(byte);
+        }
+    }
+    Ok(bytes)
+}
+
+pub fn f5_uniform_index(rng: &mut LocalRng, n: u64) -> Result<u64, RandomSamplingError> {
+    f5_uniform_index_with_source(rng, n)
+}
+
+fn f5_uniform_index_with_source(
+    rng: &mut impl RandomWordSource,
+    n: u64,
+) -> Result<u64, RandomSamplingError> {
+    if n == 0 {
+        return Err(RandomSamplingError::InvalidBound);
+    }
+    if n == 1 {
+        return Ok(0);
+    }
+    let remainder = (u64::MAX % n + 1) % n;
+    let limit = (remainder != 0).then(|| u64::MAX - (remainder - 1));
+    loop {
+        let value = rng.next_word();
+        if limit.is_none_or(|bound| value < bound) {
+            return Ok(value % n);
+        }
+    }
+}
+
+/// Bernoulli DTC-089. Los extremos no abren ni avanzan el RNG.
+pub fn f5_bernoulli(rng: &mut LocalRng, probability: f64) -> Result<bool, RandomSamplingError> {
+    f5_bernoulli_with_source(rng, probability)
+}
+
+fn f5_bernoulli_with_source(
+    rng: &mut impl RandomWordSource,
+    probability: f64,
+) -> Result<bool, RandomSamplingError> {
+    if !probability.is_finite() || !(0.0..=1.0).contains(&probability) {
+        return Err(RandomSamplingError::InvalidProbability);
+    }
+    if probability == 0.0 {
+        return Ok(false);
+    }
+    if probability == 1.0 {
+        return Ok(true);
+    }
+    let threshold = (probability * (1_u64 << 53) as f64).floor() as u64;
+    Ok((rng.next_word() >> 11) < threshold)
+}
+
+pub fn f5_fisher_yates<T>(rng: &mut LocalRng, values: &mut [T]) -> Result<(), RandomSamplingError> {
+    f5_fisher_yates_with_source(rng, values)
+}
+
+fn f5_fisher_yates_with_source<T>(
+    rng: &mut impl RandomWordSource,
+    values: &mut [T],
+) -> Result<(), RandomSamplingError> {
+    for index in (1..values.len()).rev() {
+        let other = usize::try_from(f5_uniform_index_with_source(rng, (index + 1) as u64)?)
+            .map_err(|_| RandomSamplingError::NumericFailure)?;
+        values.swap(index, other);
+    }
+    Ok(())
+}
+
 pub const POISSON_COUNT_ALGORITHM: &str = "poisson-count-v1";
 pub const HWE_COMPOSITION_ALGORITHM: &str = "hwe-composition-v1";
 pub const F_DIPLOID_GENOTYPE_ALGORITHM: &str = "f-diploid-genotype-v1";
@@ -614,6 +1176,14 @@ pub const F4_PARTIAL_FISHER_YATES_ALGORITHM: &str = "partial-fisher-yates-v1";
 pub const F4_TRUNCATED_NORMAL_ALGORITHM: &str = "normal-truncated-box-muller-v1";
 /// Catálogo normativo de claves técnicas F4 de DTC-086.
 pub const F4_TECHNICAL_RNG_CATALOG: &str = "f4-technical-v3";
+/// Catálogo inmutable de ámbitos aleatorios de F5 (DTC-089).
+///
+/// Este catálogo no amplía `subseed-scopes-v8`: F5 publica sus decisiones en
+/// un artefacto independiente para no reescribir los vectores heredados.
+pub const F5_RNG_CATALOG: &str = "f5-rng-catalog-v1";
+pub const F5_UNIFORM_INDEX_ALGORITHM: &str = "uniform-index-v1";
+pub const F5_BERNOULLI_ALGORITHM: &str = "bernoulli-v1";
+pub const F5_FISHER_YATES_ALGORITHM: &str = "fisher-yates-v1";
 
 const F4_FIFTY_THREE_BIT_BOUND: u64 = 1_u64 << 53;
 const F4_FIFTY_THREE_BIT_MAX: u64 = F4_FIFTY_THREE_BIT_BOUND - 1;
@@ -1210,6 +1780,7 @@ pub enum RandomSamplingError {
     InvalidInbreedingCoefficient,
     NumericFailure,
     InsufficientCandidates,
+    InvalidMatrix,
 }
 
 /// Uniforme abierto normativo, compartido por los consumidores F2.
@@ -1792,9 +2363,11 @@ mod tests {
         F4_FIFTY_THREE_BIT_MAX, RandomSamplingError, RandomWordSource, categorical_f64_with_source,
         f4_bernoulli_with_source, f4_partial_fisher_yates_with_source,
         f4_truncated_normal_with_source, f4_uniform_closed_with_source,
-        f4_uniform_index_with_source, f4_uniform_open_53_with_source, fisher_yates_with_source,
-        linear_uniform_with_source, log_uniform_with_source, neumaier_sum,
-        open_unit_f64_with_source, poisson_count_with_source, uniform_u64_below_with_source,
+        f4_uniform_index_with_source, f4_uniform_open_53_with_source, f5_bernoulli_with_source,
+        f5_fisher_yates_with_source, f5_matrix_bytes, f5_placed_layout_bytes,
+        f5_uniform_index_with_source, fisher_yates_with_source, linear_uniform_with_source,
+        log_uniform_with_source, neumaier_sum, open_unit_f64_with_source,
+        poisson_count_with_source, uniform_u64_below_with_source,
         weighted_without_replacement_with_source,
     };
 
@@ -1956,6 +2529,77 @@ mod tests {
             Err(RandomSamplingError::InvalidInterval)
         );
         assert_eq!(invalid_normal.consumed, 0);
+    }
+
+    #[test]
+    fn f5_primitives_follow_dtc089_rejection_consumption_and_canonical_bytes() {
+        let mut index = Scripted::new(&[u64::MAX, 5]);
+        assert_eq!(f5_uniform_index_with_source(&mut index, 3), Ok(2));
+        assert_eq!(index.consumed, 2);
+        let mut invalid_index = Scripted::new(&[]);
+        assert_eq!(
+            f5_uniform_index_with_source(&mut invalid_index, 0),
+            Err(RandomSamplingError::InvalidBound)
+        );
+        assert_eq!(invalid_index.consumed, 0);
+        let mut singleton = Scripted::new(&[]);
+        assert_eq!(f5_uniform_index_with_source(&mut singleton, 1), Ok(0));
+        assert_eq!(singleton.consumed, 0);
+
+        let mut bernoulli = Scripted::new(&[0, u64::MAX]);
+        assert_eq!(f5_bernoulli_with_source(&mut bernoulli, 0.5), Ok(true));
+        assert_eq!(f5_bernoulli_with_source(&mut bernoulli, 0.5), Ok(false));
+        assert_eq!(bernoulli.consumed, 2);
+        let mut endpoints = Scripted::new(&[]);
+        assert_eq!(f5_bernoulli_with_source(&mut endpoints, 0.0), Ok(false));
+        assert_eq!(f5_bernoulli_with_source(&mut endpoints, 1.0), Ok(true));
+        assert_eq!(
+            f5_bernoulli_with_source(&mut endpoints, f64::NAN),
+            Err(RandomSamplingError::InvalidProbability)
+        );
+        assert_eq!(endpoints.consumed, 0);
+
+        let mut permutation = Scripted::new(&[1, 0, 1]);
+        let mut values = [0, 1, 2, 3];
+        assert_eq!(
+            f5_fisher_yates_with_source(&mut permutation, &mut values),
+            Ok(())
+        );
+        assert_eq!(values, [2, 3, 0, 1]);
+        assert_eq!(permutation.consumed, 3);
+        let mut trivial = Scripted::new(&[]);
+        let mut one = [42];
+        assert_eq!(f5_fisher_yates_with_source(&mut trivial, &mut one), Ok(()));
+        assert_eq!(trivial.consumed, 0);
+
+        assert_eq!(
+            f5_placed_layout_bytes(&[(1, 2, 5, 4), (255, 256, 511, 256)]),
+            [
+                0, 0, 0, 0, 0, 0, 0, 1, //
+                0, 0, 0, 0, 0, 0, 0, 2, //
+                0, 0, 0, 0, 0, 0, 0, 5, //
+                0, 0, 0, 0, 0, 0, 0, 4, //
+                0, 0, 0, 0, 0, 0, 0, 255, //
+                0, 0, 0, 0, 0, 0, 1, 0, //
+                0, 0, 0, 0, 0, 0, 1, 255, //
+                0, 0, 0, 0, 0, 0, 1, 0,
+            ]
+        );
+        assert_eq!(
+            f5_matrix_bytes(&[
+                vec![true, false, true, false, false, false, false, true, true],
+                vec![false, true, false, true, false, true, false, true, false],
+            ]),
+            Ok(vec![
+                0, 0, 0, 0, 0, 0, 0, 2, //
+                0, 0, 0, 0, 0, 0, 0, 9, //
+                0xa1, 0x80, 0x55, 0x00,
+            ])
+        );
+        assert_eq!(
+            f5_matrix_bytes(&[vec![true], vec![false, true]]),
+            Err(RandomSamplingError::InvalidMatrix)
+        );
     }
 
     #[test]

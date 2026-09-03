@@ -2,11 +2,12 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use genome_population_simulator::application::load_and_validate_config;
+use genome_population_simulator::application::{CliValidatedConfig, load_and_validate_cli_config};
 use genome_population_simulator::execution::{
     ExecutionAuthorizations, execute_validated_config_with_authorizations,
     preflight_validated_config_with_authorizations,
 };
+use genome_population_simulator::f5_preflight::{F5OtherResources, preflight_f5_resources};
 
 #[derive(Clone, Copy)]
 enum DiagnosticMode {
@@ -45,27 +46,25 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match load_and_validate_config(&parsed.path).and_then(|effective| match parsed.command {
-        CommandMode::Validate => {
-            preflight_validated_config_with_authorizations(&effective, parsed.authorizations)
-        }
-        CommandMode::Run => parsed.output.as_deref().map_or_else(
-            || {
-                Err(
-                    genome_population_simulator::diagnostics::Diagnostic::internal_invariant(
-                        "cli",
-                        "run_without_output_after_argument_validation",
-                    ),
-                )
-            },
-            |destination| {
-                execute_validated_config_with_authorizations(
-                    &effective,
-                    destination,
-                    parsed.authorizations,
-                )
-                .map(|_| ())
-            },
+    match load_and_validate_cli_config(&parsed.path).and_then(|effective| match (parsed.command, effective) {
+        (CommandMode::Validate, CliValidatedConfig::Legacy(effective)) =>
+            preflight_validated_config_with_authorizations(&effective, parsed.authorizations),
+        (CommandMode::Validate, CliValidatedConfig::F5(effective)) =>
+            preflight_f5_resources(&effective, F5OtherResources::default()).map(|_| ()),
+        (CommandMode::Run, CliValidatedConfig::F5(_)) => Err(
+            genome_population_simulator::diagnostics::Diagnostic::f5_configuration(
+                parsed.path.display().to_string(),
+                "command",
+                "run F5 no está habilitado en F5.0.4; la publicación pertenece a F5.4",
+            ),
+        ),
+        (CommandMode::Run, CliValidatedConfig::Legacy(effective)) => parsed.output.as_deref().map_or_else(
+            || Err(genome_population_simulator::diagnostics::Diagnostic::internal_invariant(
+                "cli", "run_without_output_after_argument_validation",
+            )),
+            |destination| execute_validated_config_with_authorizations(
+                &effective, destination, parsed.authorizations,
+            ).map(|_| ()),
         ),
     }) {
         Ok(()) => ExitCode::SUCCESS,

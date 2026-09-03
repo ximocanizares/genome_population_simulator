@@ -13,31 +13,55 @@ pub use crate::reference::SequenceClass;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConfigKind {
     General,
+    F5Scenario,
 }
 
 impl ConfigKind {
     pub(crate) fn parse(value: &str) -> Option<Self> {
-        (value == "general").then_some(Self::General)
+        match value {
+            "general" => Some(Self::General),
+            "f5_scenario" => Some(Self::F5Scenario),
+            _ => None,
+        }
     }
 
     #[must_use]
     pub const fn as_str(self) -> &'static str {
-        "general"
+        match self {
+            Self::General => "general",
+            Self::F5Scenario => "f5_scenario",
+        }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExpectedConfigKind {
     General,
+    /// Frontera de CLI: conserva general v2 y despacha general v3 al lector
+    /// F5 antes de interpretar el cuerpo del documento.
+    GeneralDispatch,
+    /// Entrada general exclusiva de F5. La versión 3 no es una extensión de
+    /// general v2 y por ello se admite por una frontera distinta.
+    F5General,
+    F5Scenario,
 }
 
 impl ExpectedConfigKind {
     pub(crate) const fn accepts(self, actual: ConfigKind) -> bool {
-        matches!((self, actual), (Self::General, ConfigKind::General))
+        matches!(
+            (self, actual),
+            (
+                Self::General | Self::GeneralDispatch | Self::F5General,
+                ConfigKind::General
+            ) | (Self::F5Scenario, ConfigKind::F5Scenario)
+        )
     }
 
     pub(crate) const fn as_str(self) -> &'static str {
-        "general"
+        match self {
+            Self::General | Self::GeneralDispatch | Self::F5General => "general",
+            Self::F5Scenario => "f5_scenario",
+        }
     }
 }
 
@@ -477,4 +501,65 @@ pub(crate) fn semantic_error(
     .with("path", source.path().display().to_string())
     .with("fields", fields.into())
     .with("detail", detail.into())
+}
+
+/// Contrato de autoría F5. Se mantiene separado de `DeclaredGeneralConfig`
+/// porque v3 reemplaza —no amplía— el documento general v2.
+#[derive(Clone, Debug)]
+pub struct DeclaredF5GeneralConfig {
+    pub source: AdmittedToml,
+    pub seed: Option<Located<String>>,
+    pub ploidy: Located<u64>,
+    pub reference_id: Located<String>,
+    pub reference_path: Located<String>,
+    pub reference_sha256: Located<String>,
+    pub scenario_id: Located<String>,
+    pub scenario_path: Located<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DeclaredF5Target {
+    BlockCount(Located<u64>),
+    CoveredBases(Located<u64>),
+    CoverageFraction(DeclaredNumber),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredF5Subpopulation {
+    pub population_id: Located<String>,
+    pub individual_count: Located<u64>,
+    pub sampling: Option<Located<String>>,
+    pub inbreeding_f: Option<DeclaredNumber>,
+    pub founder_ids: Option<Vec<Located<String>>>,
+    pub founder_keys: Option<Vec<Located<String>>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeclaredF5SamplingOverride {
+    pub population_id: Located<String>,
+    pub block_index: Located<u64>,
+    pub mode: Located<String>,
+    pub controlled_max_abs_error: Option<DeclaredNumber>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DeclaredF5Scenario {
+    pub source: AdmittedToml,
+    pub scenario_id: Located<String>,
+    pub founder_count: Located<u64>,
+    pub profile_metadata_path: Located<String>,
+    pub profile_metadata_sha256: Located<String>,
+    pub excluded_regions_path: Option<Located<String>>,
+    pub excluded_regions_sha256: Option<Located<String>>,
+    pub inbreeding_f: Option<DeclaredNumber>,
+    pub max_layout_attempts: Option<Located<u64>>,
+    pub max_haplotype_attempts: Option<Located<u64>>,
+    pub max_swap_proposals: Option<Located<u64>>,
+    pub max_haplotype_cells: Option<Located<u64>>,
+    pub max_operation_units: Option<Located<u64>>,
+    pub max_working_memory_bytes: Option<Located<u64>>,
+    pub max_output_bytes: Option<Located<u64>>,
+    pub target: DeclaredF5Target,
+    pub subpopulations: Vec<DeclaredF5Subpopulation>,
+    pub sampling_overrides: Vec<DeclaredF5SamplingOverride>,
 }

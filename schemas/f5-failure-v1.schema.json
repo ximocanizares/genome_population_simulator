@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "f5-failure-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "diagnostic_kind",
+    "schema_version",
+    "code",
+    "stage",
+    "scenario_id",
+    "population_id",
+    "block_id",
+    "limits",
+    "counters",
+    "best_layout",
+    "best_attempt",
+    "artifacts"
+  ],
+  "properties": {
+    "diagnostic_kind": {
+      "const": "f5_failure"
+    },
+    "schema_version": {
+      "const": "1"
+    },
+    "code": {
+      "$ref": "#/$defs/code"
+    },
+    "stage": {
+      "enum": [
+        "preflight",
+        "layout",
+        "haplotypes",
+        "founders",
+        "publication"
+      ]
+    },
+    "scenario_id": {
+      "$ref": "#/$defs/id"
+    },
+    "population_id": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "block_id": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/id"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "limits": {
+      "$ref": "#/$defs/limits"
+    },
+    "counters": {
+      "$ref": "#/$defs/counters"
+    },
+    "best_layout": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/best_layout"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "best_attempt": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/best_attempt"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 0
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "u64": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_layout_attempts",
+        "max_haplotype_attempts",
+        "max_swap_proposals",
+        "max_haplotype_cells",
+        "max_operation_units",
+        "max_working_memory_bytes",
+        "max_output_bytes"
+      ],
+      "properties": {
+        "max_layout_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "max_haplotype_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "max_swap_proposals": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "max_haplotype_cells": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "max_operation_units": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 268435456
+        },
+        "max_working_memory_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483648
+        }
+      }
+    },
+    "counters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layout_attempts_used",
+        "haplotype_attempts_used",
+        "swap_proposals",
+        "swap_accepted"
+      ],
+      "properties": {
+        "layout_attempts_used": {
+          "$ref": "#/$defs/u64"
+        },
+        "haplotype_attempts_used": {
+          "$ref": "#/$defs/u64"
+        },
+        "swap_proposals": {
+          "$ref": "#/$defs/u64"
+        },
+        "swap_accepted": {
+          "$ref": "#/$defs/u64"
+        }
+      }
+    },
+    "best_layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_index",
+        "placed_blocks",
+        "unplaced_blocks",
+        "placed_bases",
+        "remaining_target_bases",
+        "layout_bytes_sha256"
+      ],
+      "properties": {
+        "attempt_index": {
+          "$ref": "#/$defs/u64"
+        },
+        "placed_blocks": {
+          "$ref": "#/$defs/u64"
+        },
+        "unplaced_blocks": {
+          "$ref": "#/$defs/u64"
+        },
+        "placed_bases": {
+          "$ref": "#/$defs/u64"
+        },
+        "remaining_target_bases": {
+          "$ref": "#/$defs/u64"
+        },
+        "layout_bytes_sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "best_attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_index",
+        "duplicate_rows",
+        "bins_outside",
+        "signs_failed",
+        "max_r2_error",
+        "sum_r2_error",
+        "max_marginal_error",
+        "matrix_bytes_sha256"
+      ],
+      "properties": {
+        "attempt_index": {
+          "$ref": "#/$defs/u64"
+        },
+        "duplicate_rows": {
+          "$ref": "#/$defs/u64"
+        },
+        "bins_outside": {
+          "$ref": "#/$defs/u64"
+        },
+        "signs_failed": {
+          "$ref": "#/$defs/u64"
+        },
+        "max_r2_error": {
+          "type": "number"
+        },
+        "sum_r2_error": {
+          "type": "number"
+        },
+        "max_marginal_error": {
+          "type": "number"
+        },
+        "matrix_bytes_sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "code": {
+      "enum": [
+        "GPS-CONF-101",
+        "GPS-FMT-101",
+        "GPS-DOMAIN-101",
+        "GPS-DOMAIN-102",
+        "GPS-DOMAIN-103",
+        "GPS-DOMAIN-104",
+        "GPS-DOMAIN-105",
+        "GPS-DOMAIN-106",
+        "GPS-RES-101",
+        "GPS-INTERNAL-101"
+      ]
+    }
+  }
+}

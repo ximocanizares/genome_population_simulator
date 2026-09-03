@@ -6,13 +6,14 @@ use std::sync::Arc;
 use toml::de::{DeTable, DeValue};
 
 use crate::configuration::{
-    AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredDirectEvent, DeclaredGeneralConfig,
-    DeclaredInitialPopulation, DeclaredNumber, DeclaredPopulationSnvs,
-    DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
-    DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
-    DeclaredReference, DeclaredReferenceSource, DeclaredSequence, DeclaredTechnicalEvent,
-    DeclaredTechnicalEventTarget, DeclaredTechnicalLibrary, DeclaredVcfOutput, ExpectedConfigKind,
-    Located, SequenceClass, SourceLocation, semantic_error,
+    AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredDirectEvent,
+    DeclaredF5GeneralConfig, DeclaredF5SamplingOverride, DeclaredF5Scenario,
+    DeclaredF5Subpopulation, DeclaredF5Target, DeclaredGeneralConfig, DeclaredInitialPopulation,
+    DeclaredNumber, DeclaredPopulationSnvs, DeclaredPopulationSnvsGeneration,
+    DeclaredPopulationSnvsPopulation, DeclaredPopulationSnvsRegion, DeclaredReducedReference,
+    DeclaredReductionTarget, DeclaredReference, DeclaredReferenceSource, DeclaredSequence,
+    DeclaredTechnicalEvent, DeclaredTechnicalEventTarget, DeclaredTechnicalLibrary,
+    DeclaredVcfOutput, ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
 };
 use crate::diagnostics::Diagnostic;
 
@@ -102,14 +103,26 @@ pub fn admit_toml_header(
     })?;
     // DTC-082 activa atómicamente la frontera de autoría F4: el runtime no
     // conserva lectores de TOML general v1 cuando ya puede producir PE real.
-    if version_value.get_ref().as_str() != Some("2") {
+    let accepted_version = match expected {
+        ExpectedConfigKind::General => "2",
+        ExpectedConfigKind::GeneralDispatch => "2,3",
+        ExpectedConfigKind::F5General => "3",
+        ExpectedConfigKind::F5Scenario => "1",
+    };
+    let accepted = match expected {
+        ExpectedConfigKind::GeneralDispatch => {
+            matches!(version_value.get_ref().as_str(), Some("2" | "3"))
+        }
+        _ => version_value.get_ref().as_str() == Some(accepted_version),
+    };
+    if !accepted {
         return Err(Diagnostic::configuration(
             "GPS-CONF-005",
             "La versión de esquema declarada no está admitida.",
         )
         .with("path", path.display().to_string())
         .with("found", render_toml_value(version_value.get_ref()))
-        .with("accepted", "2")
+        .with("accepted", accepted_version)
         .with(
             "location",
             SourceLocation::from_span(&bytes, version_value.span()).to_string(),
@@ -120,6 +133,18 @@ pub fn admit_toml_header(
         Arc::from(bytes),
         kind,
     ))
+}
+
+/// La cabecera ya fue admitida por la frontera de CLI; por ello este lector
+/// pequeño no vuelve a decidir errores de sintaxis ni de discriminador.
+pub fn admitted_is_f5_general_v3(admitted: &AdmittedToml) -> bool {
+    let source = std::str::from_utf8(admitted.bytes()).expect("admitted TOML is UTF-8");
+    let parsed = DeTable::parse(source).expect("admitted TOML remains parseable");
+    parsed
+        .get_ref()
+        .get("schema_version")
+        .and_then(|value| value.get_ref().as_str())
+        .is_some_and(|version| version == "3")
 }
 
 fn invalid_kind(
@@ -197,6 +222,714 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
     .with_direct_events(direct_events)
     .with_vcf_output(vcf_output)
     .with_technical_event(technical_event))
+}
+
+/// Lee el general v3 cerrado de F5. No comparte el lector v2: admitir v3 por
+/// la ruta F1--F4 permitiría mezclar contratos de autoría incompatibles.
+pub fn parse_declared_f5_general(
+    admitted: AdmittedToml,
+) -> Result<DeclaredF5GeneralConfig, Diagnostic> {
+    if admitted.kind() != ConfigKind::General {
+        return Err(semantic_error(
+            &admitted,
+            "config_kind",
+            "F5 exige un documento general",
+        ));
+    }
+    let source = std::str::from_utf8(admitted.bytes())
+        .map_err(|error| semantic_error(&admitted, "document", error.to_string()))?;
+    let parsed = DeTable::parse(source)
+        .map_err(|error| semantic_error(&admitted, "document", error.to_string()))?;
+    let table = parsed.get_ref();
+    check_unknown(
+        &admitted,
+        table,
+        &[
+            "config_kind",
+            "schema_version",
+            "seed",
+            "ploidy",
+            "reference_id",
+            "reference_path",
+            "reference_sha256",
+            "f5_scenario",
+        ],
+    )?;
+    let seed = optional_located_string(&admitted, table, "seed")?;
+    if let Some(seed) = &seed {
+        require_sha256(&admitted, "seed", seed)?;
+    }
+    let ploidy = required_u64(&admitted, table, "ploidy")?;
+    if !(1..=10).contains(ploidy.value()) {
+        return Err(semantic_error(
+            &admitted,
+            "ploidy",
+            "debe pertenecer a 1..=10",
+        ));
+    }
+    let reference_id = required_string(&admitted, table, "reference_id")?;
+    require_id(&admitted, "reference_id", &reference_id)?;
+    let reference_path = required_string(&admitted, table, "reference_path")?;
+    require_relative_path(&admitted, "reference_path", &reference_path)?;
+    let reference_sha256 = required_string(&admitted, table, "reference_sha256")?;
+    require_sha256(&admitted, "reference_sha256", &reference_sha256)?;
+    let link = required_table(&admitted, table, "f5_scenario")?;
+    check_unknown(&admitted, link, &["scenario_id", "scenario_path"])?;
+    let scenario_id = required_string(&admitted, link, "scenario_id")?;
+    require_id(&admitted, "f5_scenario.scenario_id", &scenario_id)?;
+    let scenario_path = required_string(&admitted, link, "scenario_path")?;
+    require_relative_path(&admitted, "f5_scenario.scenario_path", &scenario_path)?;
+    Ok(DeclaredF5GeneralConfig {
+        source: admitted,
+        seed,
+        ploidy,
+        reference_id,
+        reference_path,
+        reference_sha256,
+        scenario_id,
+        scenario_path,
+    })
+}
+
+/// Lee el documento de política F5 v1, sin abrir perfiles ni máscaras. Esos
+/// recursos pertenecen al lector de perfiles de F5.0.2.
+pub fn parse_declared_f5_scenario(
+    admitted: AdmittedToml,
+) -> Result<DeclaredF5Scenario, Diagnostic> {
+    if admitted.kind() != ConfigKind::F5Scenario {
+        return Err(semantic_error(
+            &admitted,
+            "config_kind",
+            "se esperaba f5_scenario",
+        ));
+    }
+    let source = std::str::from_utf8(admitted.bytes())
+        .map_err(|error| semantic_error(&admitted, "document", error.to_string()))?;
+    let parsed = DeTable::parse(source)
+        .map_err(|error| semantic_error(&admitted, "document", error.to_string()))?;
+    let table = parsed.get_ref();
+    check_unknown(
+        &admitted,
+        table,
+        &[
+            "config_kind",
+            "schema_version",
+            "scenario_id",
+            "founder_count",
+            "f5",
+            "subpopulations",
+            "sampling_overrides",
+        ],
+    )?;
+    let scenario_id = required_string(&admitted, table, "scenario_id")?;
+    require_id(&admitted, "scenario_id", &scenario_id)?;
+    let founder_count = required_u64(&admitted, table, "founder_count")?;
+    if *founder_count.value() == 0 {
+        return Err(semantic_error(
+            &admitted,
+            "founder_count",
+            "debe ser positivo",
+        ));
+    }
+    let f5 = required_table(&admitted, table, "f5")?;
+    check_unknown(
+        &admitted,
+        f5,
+        &[
+            "profile_metadata_path",
+            "profile_metadata_sha256",
+            "excluded_regions_path",
+            "excluded_regions_sha256",
+            "inbreeding_f",
+            "max_layout_attempts",
+            "max_haplotype_attempts",
+            "max_swap_proposals",
+            "max_haplotype_cells",
+            "max_operation_units",
+            "max_working_memory_bytes",
+            "max_output_bytes",
+            "block_count",
+            "covered_bases",
+            "coverage_fraction",
+        ],
+    )?;
+    let profile_metadata_path = required_string(&admitted, f5, "profile_metadata_path")?;
+    require_relative_path(
+        &admitted,
+        "f5.profile_metadata_path",
+        &profile_metadata_path,
+    )?;
+    let profile_metadata_sha256 = required_string(&admitted, f5, "profile_metadata_sha256")?;
+    require_sha256(
+        &admitted,
+        "f5.profile_metadata_sha256",
+        &profile_metadata_sha256,
+    )?;
+    let excluded_regions_path = optional_located_string(&admitted, f5, "excluded_regions_path")?;
+    let excluded_regions_sha256 =
+        optional_located_string(&admitted, f5, "excluded_regions_sha256")?;
+    if excluded_regions_path.is_some() != excluded_regions_sha256.is_some() {
+        return Err(semantic_error(
+            &admitted,
+            "f5.excluded_regions_path,f5.excluded_regions_sha256",
+            "máscara y hash deben aparecer juntos",
+        ));
+    }
+    if let Some(path) = &excluded_regions_path {
+        require_relative_path(&admitted, "f5.excluded_regions_path", path)?;
+    }
+    if let Some(hash) = &excluded_regions_sha256 {
+        require_sha256(&admitted, "f5.excluded_regions_sha256", hash)?;
+    }
+    let inbreeding_f = optional_number(&admitted, f5, "inbreeding_f")?;
+    if let Some(value) = &inbreeding_f {
+        require_probability(&admitted, "f5.inbreeding_f", value)?;
+    }
+    let max_layout_attempts = optional_located_u64(&admitted, f5, "max_layout_attempts")?;
+    let max_haplotype_attempts = optional_located_u64(&admitted, f5, "max_haplotype_attempts")?;
+    let max_swap_proposals = optional_located_u64(&admitted, f5, "max_swap_proposals")?;
+    let max_haplotype_cells = optional_located_u64(&admitted, f5, "max_haplotype_cells")?;
+    let max_operation_units = optional_located_u64(&admitted, f5, "max_operation_units")?;
+    let max_working_memory_bytes = optional_located_u64(&admitted, f5, "max_working_memory_bytes")?;
+    let max_output_bytes = optional_located_u64(&admitted, f5, "max_output_bytes")?;
+    require_limit(
+        &admitted,
+        "f5.max_layout_attempts",
+        max_layout_attempts.as_ref(),
+        100_000,
+    )?;
+    require_limit(
+        &admitted,
+        "f5.max_haplotype_attempts",
+        max_haplotype_attempts.as_ref(),
+        10_000,
+    )?;
+    require_limit(
+        &admitted,
+        "f5.max_swap_proposals",
+        max_swap_proposals.as_ref(),
+        10_000_000,
+    )?;
+    require_limit(
+        &admitted,
+        "f5.max_haplotype_cells",
+        max_haplotype_cells.as_ref(),
+        67_108_864,
+    )?;
+    require_limit(
+        &admitted,
+        "f5.max_operation_units",
+        max_operation_units.as_ref(),
+        268_435_456,
+    )?;
+    require_limit(
+        &admitted,
+        "f5.max_working_memory_bytes",
+        max_working_memory_bytes.as_ref(),
+        1_073_741_824,
+    )?;
+    require_limit(
+        &admitted,
+        "f5.max_output_bytes",
+        max_output_bytes.as_ref(),
+        2_147_483_648,
+    )?;
+    let block_count = optional_located_u64(&admitted, f5, "block_count")?;
+    let covered_bases = optional_located_u64(&admitted, f5, "covered_bases")?;
+    let coverage_fraction = optional_number(&admitted, f5, "coverage_fraction")?;
+    if usize::from(block_count.is_some())
+        + usize::from(covered_bases.is_some())
+        + usize::from(coverage_fraction.is_some())
+        != 1
+    {
+        return Err(semantic_error(
+            &admitted,
+            "f5.block_count,f5.covered_bases,f5.coverage_fraction",
+            "se exige exactamente un objetivo",
+        ));
+    }
+    let target = if let Some(value) = block_count {
+        if *value.value() == 0 || *value.value() > u64::from(u32::MAX) {
+            return Err(semantic_error(
+                &admitted,
+                "f5.block_count",
+                "debe ser u32 positivo",
+            ));
+        }
+        DeclaredF5Target::BlockCount(value)
+    } else if let Some(value) = covered_bases {
+        if *value.value() == 0 {
+            return Err(semantic_error(
+                &admitted,
+                "f5.covered_bases",
+                "debe ser positivo",
+            ));
+        }
+        DeclaredF5Target::CoveredBases(value)
+    } else {
+        let value = coverage_fraction.expect("one-of checked");
+        require_coverage_fraction(&admitted, &value)?;
+        DeclaredF5Target::CoverageFraction(value)
+    };
+    let subpopulations = required_array(&admitted, table, "subpopulations")?
+        .iter()
+        .map(|entry| parse_f5_subpopulation(&admitted, entry))
+        .collect::<Result<Vec<_>, _>>()?;
+    let sampling_overrides = optional_array(&admitted, table, "sampling_overrides")?
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| parse_f5_override(&admitted, entry))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(DeclaredF5Scenario {
+        source: admitted,
+        scenario_id,
+        founder_count,
+        profile_metadata_path,
+        profile_metadata_sha256,
+        excluded_regions_path,
+        excluded_regions_sha256,
+        inbreeding_f,
+        max_layout_attempts,
+        max_haplotype_attempts,
+        max_swap_proposals,
+        max_haplotype_cells,
+        max_operation_units,
+        max_working_memory_bytes,
+        max_output_bytes,
+        target,
+        subpopulations,
+        sampling_overrides,
+    })
+}
+
+/// Comprueba las invariantes que requieren ambos documentos. Las rutas ya se
+/// han validado sintácticamente; su resolución física queda para el cargador.
+pub fn validate_declared_f5_pair(
+    general: &DeclaredF5GeneralConfig,
+    scenario: &DeclaredF5Scenario,
+) -> Result<(), Diagnostic> {
+    if general.scenario_id.value() != scenario.scenario_id.value() {
+        return Err(semantic_error(
+            &general.source,
+            "f5_scenario.scenario_id,scenario_id",
+            "los IDs de escenario no coinciden",
+        ));
+    }
+    let mut populations = std::collections::BTreeSet::new();
+    let mut ids = std::collections::BTreeSet::new();
+    let mut total = 0_u64;
+    for population in &scenario.subpopulations {
+        require_id(
+            &scenario.source,
+            "subpopulations.population_id",
+            &population.population_id,
+        )?;
+        if !populations.insert(population.population_id.value()) {
+            return Err(semantic_error(
+                &scenario.source,
+                "subpopulations.population_id",
+                "población repetida",
+            ));
+        }
+        if *population.individual_count.value() == 0 {
+            return Err(semantic_error(
+                &scenario.source,
+                "subpopulations.individual_count",
+                "debe ser positivo",
+            ));
+        }
+        total = total
+            .checked_add(*population.individual_count.value())
+            .ok_or_else(|| {
+                semantic_error(
+                    &scenario.source,
+                    "subpopulations.individual_count",
+                    "la suma desborda u64",
+                )
+            })?;
+        if population.founder_ids.is_some() == population.founder_keys.is_some() {
+            return Err(semantic_error(
+                &scenario.source,
+                "subpopulations.founder_ids,subpopulations.founder_keys",
+                "se exige exactamente uno",
+            ));
+        }
+        let founders = population
+            .founder_ids
+            .as_ref()
+            .or(population.founder_keys.as_ref())
+            .expect("one-of checked");
+        if founders.len()
+            != usize::try_from(*population.individual_count.value()).unwrap_or(usize::MAX)
+        {
+            return Err(semantic_error(
+                &scenario.source,
+                "subpopulations.founder_ids,subpopulations.founder_keys",
+                "la cardinalidad no coincide con individual_count",
+            ));
+        }
+        let mut local = std::collections::BTreeSet::new();
+        for founder in founders {
+            require_id(&scenario.source, "subpopulations.founders", founder)?;
+            if !local.insert(founder.value()) {
+                return Err(semantic_error(
+                    &scenario.source,
+                    "subpopulations.founders",
+                    "fundador repetido",
+                ));
+            }
+        }
+        if let Some(founder_ids) = &population.founder_ids {
+            for founder in founder_ids {
+                if !ids.insert(founder.value()) {
+                    return Err(semantic_error(
+                        &scenario.source,
+                        "subpopulations.founder_ids",
+                        "individual_id repetido globalmente",
+                    ));
+                }
+            }
+        }
+        if let Some(value) = &population.inbreeding_f {
+            require_probability(&scenario.source, "subpopulations.inbreeding_f", value)?;
+        }
+        let effective_f = population
+            .inbreeding_f
+            .as_ref()
+            .or(scenario.inbreeding_f.as_ref())
+            .map_or(0.0, |value| {
+                value.literal().parse::<f64>().unwrap_or(f64::NAN)
+            });
+        if population
+            .sampling
+            .as_ref()
+            .is_some_and(|mode| mode.value() == "controlled")
+            && effective_f != 0.0
+        {
+            return Err(semantic_error(
+                &scenario.source,
+                "subpopulations.sampling,inbreeding_f",
+                "controlled exige F efectivo igual a cero",
+            ));
+        }
+    }
+    if total != *scenario.founder_count.value() {
+        return Err(semantic_error(
+            &scenario.source,
+            "founder_count,subpopulations.individual_count",
+            "founder_count no coincide con la suma",
+        ));
+    }
+    if *general.ploidy.value() != 2
+        && (scenario.inbreeding_f.is_some()
+            || scenario
+                .subpopulations
+                .iter()
+                .any(|p| p.inbreeding_f.is_some()))
+    {
+        return Err(semantic_error(
+            &scenario.source,
+            "inbreeding_f,ploidy",
+            "F solo se admite con ploidía 2",
+        ));
+    }
+    let mut override_keys = std::collections::BTreeSet::new();
+    for override_ in &scenario.sampling_overrides {
+        if !populations.contains(override_.population_id.value()) {
+            return Err(semantic_error(
+                &scenario.source,
+                "sampling_overrides.population_id",
+                "población desconocida",
+            ));
+        }
+        if !override_keys.insert((
+            override_.population_id.value(),
+            *override_.block_index.value(),
+        )) {
+            return Err(semantic_error(
+                &scenario.source,
+                "sampling_overrides",
+                "sustitución duplicada",
+            ));
+        }
+        if override_.mode.value() == "probabilistic" && override_.controlled_max_abs_error.is_some()
+        {
+            return Err(semantic_error(
+                &scenario.source,
+                "sampling_overrides.controlled_max_abs_error",
+                "solo se admite en controlled",
+            ));
+        }
+        if override_.mode.value() == "controlled" {
+            if let Some(value) = &override_.controlled_max_abs_error {
+                require_probability(
+                    &scenario.source,
+                    "sampling_overrides.controlled_max_abs_error",
+                    value,
+                )?;
+            }
+            let population = scenario
+                .subpopulations
+                .iter()
+                .find(|population| {
+                    population.population_id.value() == override_.population_id.value()
+                })
+                .expect("membership was checked");
+            let effective_f = population
+                .inbreeding_f
+                .as_ref()
+                .or(scenario.inbreeding_f.as_ref())
+                .map_or(0.0, |value| {
+                    value.literal().parse::<f64>().unwrap_or(f64::NAN)
+                });
+            if effective_f != 0.0 {
+                return Err(semantic_error(
+                    &scenario.source,
+                    "sampling_overrides.mode,inbreeding_f",
+                    "controlled exige F efectivo igual a cero",
+                ));
+            }
+            if let Some(value) = &override_.controlled_max_abs_error {
+                let copies = population
+                    .individual_count
+                    .value()
+                    .checked_mul(*general.ploidy.value())
+                    .ok_or_else(|| {
+                        semantic_error(
+                            &scenario.source,
+                            "individual_count,ploidy",
+                            "el número de copias desborda u64",
+                        )
+                    })?;
+                let tolerance = value.literal().parse::<f64>().unwrap_or(f64::NAN);
+                if tolerance > 0.5 / copies as f64 {
+                    return Err(semantic_error(
+                        &scenario.source,
+                        "sampling_overrides.controlled_max_abs_error",
+                        "excede 0.5/C",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_f5_subpopulation(
+    admitted: &AdmittedToml,
+    value: &toml::Spanned<DeValue<'_>>,
+) -> Result<DeclaredF5Subpopulation, Diagnostic> {
+    let table = value
+        .get_ref()
+        .as_table()
+        .ok_or_else(|| wrong_type(admitted, "subpopulations", value, "table"))?;
+    check_unknown(
+        admitted,
+        table,
+        &[
+            "population_id",
+            "individual_count",
+            "sampling",
+            "inbreeding_f",
+            "founder_ids",
+            "founder_keys",
+        ],
+    )?;
+    let sampling = optional_located_string(admitted, table, "sampling")?;
+    if let Some(mode) = &sampling
+        && !matches!(mode.value().as_str(), "probabilistic" | "controlled")
+    {
+        return Err(semantic_error(
+            admitted,
+            "subpopulations.sampling",
+            "debe ser probabilistic o controlled",
+        ));
+    }
+    Ok(DeclaredF5Subpopulation {
+        population_id: required_string(admitted, table, "population_id")?,
+        individual_count: required_u64(admitted, table, "individual_count")?,
+        sampling,
+        inbreeding_f: optional_number(admitted, table, "inbreeding_f")?,
+        founder_ids: optional_f5_string_array(admitted, table, "founder_ids")?,
+        founder_keys: optional_f5_string_array(admitted, table, "founder_keys")?,
+    })
+}
+
+fn parse_f5_override(
+    admitted: &AdmittedToml,
+    value: &toml::Spanned<DeValue<'_>>,
+) -> Result<DeclaredF5SamplingOverride, Diagnostic> {
+    let table = value
+        .get_ref()
+        .as_table()
+        .ok_or_else(|| wrong_type(admitted, "sampling_overrides", value, "table"))?;
+    check_unknown(
+        admitted,
+        table,
+        &[
+            "population_id",
+            "block_index",
+            "mode",
+            "controlled_max_abs_error",
+        ],
+    )?;
+    let mode = required_string(admitted, table, "mode")?;
+    if !matches!(mode.value().as_str(), "probabilistic" | "controlled") {
+        return Err(semantic_error(
+            admitted,
+            "sampling_overrides.mode",
+            "debe ser probabilistic o controlled",
+        ));
+    }
+    let block_index = required_u64(admitted, table, "block_index")?;
+    if *block_index.value() > u64::from(u32::MAX) {
+        return Err(semantic_error(
+            admitted,
+            "sampling_overrides.block_index",
+            "debe pertenecer a u32",
+        ));
+    }
+    Ok(DeclaredF5SamplingOverride {
+        population_id: required_string(admitted, table, "population_id")?,
+        block_index,
+        mode,
+        controlled_max_abs_error: optional_number(admitted, table, "controlled_max_abs_error")?,
+    })
+}
+
+fn optional_f5_string_array(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+    field: &str,
+) -> Result<Option<Vec<Located<String>>>, Diagnostic> {
+    optional_array(admitted, table, field)?
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .get_ref()
+                        .as_str()
+                        .map(|text| Located::new(text.to_owned(), location(admitted, value.span())))
+                        .ok_or_else(|| wrong_type(admitted, field, value, "string"))
+                })
+                .collect()
+        })
+        .transpose()
+}
+
+fn require_id(
+    admitted: &AdmittedToml,
+    field: &str,
+    value: &Located<String>,
+) -> Result<(), Diagnostic> {
+    let text = value.value();
+    let valid = !text.is_empty()
+        && text.len() <= 64
+        && text.as_bytes()[0].is_ascii_alphanumeric()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+    valid
+        .then_some(())
+        .ok_or_else(|| semantic_error(admitted, field, "ID inválido conforme a DTC-039"))
+}
+
+fn require_sha256(
+    admitted: &AdmittedToml,
+    field: &str,
+    value: &Located<String>,
+) -> Result<(), Diagnostic> {
+    let valid = value.value().len() == 64
+        && value
+            .value()
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'));
+    valid.then_some(()).ok_or_else(|| {
+        semantic_error(
+            admitted,
+            field,
+            "debe ser SHA-256 hexadecimal en minúsculas",
+        )
+    })
+}
+
+fn require_relative_path(
+    admitted: &AdmittedToml,
+    field: &str,
+    value: &Located<String>,
+) -> Result<(), Diagnostic> {
+    // `Path::components` no sirve como frontera léxica: normaliza `//` y los
+    // segmentos `.` antes de que podamos distinguir una grafía no canónica.
+    // Esta comprobación replica el alfabeto y la segmentación de los esquemas
+    // F5 de autoría antes de construir cualquier `Path`.
+    let valid = !value.value().is_empty()
+        && !value.value().starts_with('/')
+        && !value.value().ends_with('/')
+        && value.value().split('/').all(|segment| {
+            !segment.is_empty()
+                && !matches!(segment, "." | "..")
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        });
+    valid.then_some(()).ok_or_else(|| {
+        semantic_error(
+            admitted,
+            field,
+            "debe ser una ruta relativa léxicamente normalizada",
+        )
+    })
+}
+
+fn require_probability(
+    admitted: &AdmittedToml,
+    field: &str,
+    value: &DeclaredNumber,
+) -> Result<(), Diagnostic> {
+    value
+        .literal()
+        .parse::<f64>()
+        .ok()
+        .filter(|number| number.is_finite() && (0.0..=1.0).contains(number))
+        .map(|_| ())
+        .ok_or_else(|| semantic_error(admitted, field, "debe ser finito y pertenecer a [0,1]"))
+}
+
+fn require_coverage_fraction(
+    admitted: &AdmittedToml,
+    value: &DeclaredNumber,
+) -> Result<(), Diagnostic> {
+    let literal = value.literal();
+    let valid_decimal = literal.split_once('.').is_some_and(|(whole, fraction)| {
+        (1..=18).contains(&fraction.len())
+            && fraction.bytes().all(|byte| byte.is_ascii_digit())
+            && match whole {
+                "0" => fraction.bytes().any(|byte| byte != b'0'),
+                "1" => fraction.bytes().all(|byte| byte == b'0'),
+                _ => false,
+            }
+    });
+    valid_decimal.then_some(()).ok_or_else(|| {
+        semantic_error(
+            admitted,
+            "f5.coverage_fraction",
+            "debe ser decimal literal en (0,1] con 1..=18 decimales",
+        )
+    })
+}
+
+fn require_limit(
+    admitted: &AdmittedToml,
+    field: &str,
+    value: Option<&Located<u64>>,
+    maximum: u64,
+) -> Result<(), Diagnostic> {
+    value.map_or(Ok(()), |value| {
+        (*value.value() > 0 && *value.value() <= maximum)
+            .then_some(())
+            .ok_or_else(|| semantic_error(admitted, field, format!("debe estar en 1..={maximum}")))
+    })
 }
 
 fn parse_technical_event(

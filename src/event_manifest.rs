@@ -14,7 +14,7 @@ use crate::biological_contamination::{
     BiologicalContaminationManifestRecipient, contamination_target_pair_count,
 };
 use crate::demultiplexing::{DemultiplexingAggregate, DemultiplexingReport};
-use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog};
+use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog_version};
 use crate::error_quality::{ErrorQualityReport, ErrorQualitySettings, MateErrorCounts};
 use crate::fastq_output::paired_fastq_relative_paths;
 use crate::fastq_validation::F4CoverageReport;
@@ -25,6 +25,9 @@ use crate::technical_identity::TechnicalMate;
 
 /// DTC-082 activa esta versión junto con effective-config v4 y manifest v4.
 pub const EVENT_MANIFEST_SCHEMA_VERSION: &str = "2";
+/// F4 publica manifiestos de evento bajo el catálogo diagnóstico v3. F5
+/// estrenará su propio documento v5 con el catálogo v4.
+const EVENT_MANIFEST_DIAGNOSTIC_CATALOG_VERSION: &str = "3";
 pub const EVENT_MANIFEST_KIND: &str = "gps_event_manifest";
 pub const TECHNICAL_SEQUENCING_EVENT_TYPE: &str = "technical_sequencing";
 /// Tecnología del único perfil técnico que F3 admite. El perfil conserva sus
@@ -1342,7 +1345,11 @@ fn validate_diagnostics(value: &Value, path: &Path) -> Result<BTreeSet<String>, 
         let code = required_string(diagnostic, "code", path)?;
         let message = required_string(diagnostic, "message", path)?;
         if previous.as_deref().is_some_and(|prior| prior >= code)
-            || !diagnostic_matches_catalog(code, message)
+            || !diagnostic_matches_catalog_version(
+                EVENT_MANIFEST_DIAGNOSTIC_CATALOG_VERSION,
+                code,
+                message,
+            )
             || !codes.insert(code.to_owned())
         {
             return Err(event_error(

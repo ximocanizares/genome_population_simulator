@@ -38,6 +38,40 @@ impl Diagnostic {
         Self::from_catalog(code)
     }
 
+    /// Factoría F5: no reutiliza el contrato histórico GPS-CONF-008 y siempre
+    /// materializa el contexto público obligatorio del catálogo F5.
+    #[must_use]
+    pub fn f5_configuration(
+        path: impl Into<String>,
+        fields: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self::from_catalog("GPS-CONF-101")
+            .with("path", path.into())
+            .with("fields", fields.into())
+            .with("detail", detail.into())
+    }
+
+    #[must_use]
+    pub fn into_f5_configuration(self) -> Self {
+        let mut context = self.context;
+        let path = context
+            .remove("path")
+            .unwrap_or_else(|| "<unknown>".to_owned());
+        let fields = context
+            .remove("fields")
+            .or_else(|| context.remove("field"))
+            .unwrap_or_else(|| "document".to_owned());
+        let detail = context
+            .remove("detail")
+            .unwrap_or_else(|| self.message.to_owned());
+        let mut diagnostic = Self::f5_configuration(path, fields, detail);
+        for (key, value) in context {
+            diagnostic = diagnostic.with(key, value);
+        }
+        diagnostic
+    }
+
     pub(crate) fn input(code: &'static str, _message: &'static str) -> Self {
         Self::from_catalog(code)
     }
@@ -153,15 +187,18 @@ fn catalog_contract(code: &'static str) -> Option<CatalogContract> {
     diagnostic_catalog().get(code).copied()
 }
 
+/// Catálogo activo para los diagnósticos que producen las rutas vigentes.
+/// Los documentos ya publicados no se validan contra él: su versión fija el
+/// catálogo histórico aplicable.
 fn diagnostic_catalog() -> &'static BTreeMap<&'static str, CatalogContract> {
     static CATALOG: OnceLock<BTreeMap<&'static str, CatalogContract>> = OnceLock::new();
     CATALOG.get_or_init(|| {
-        let source = include_str!("../catalogs/diagnostics-v3.tsv");
+        let source = include_str!("../catalogs/diagnostics-v4.tsv");
         assert!(
             source
                 .lines()
-                .any(|line| line == "# diagnostic_catalog_version=3"),
-            "diagnostics-v3.tsv does not declare version 3"
+                .any(|line| line == "# diagnostic_catalog_version=4"),
+            "diagnostics-v4.tsv does not declare version 4"
         );
         let mut catalog = BTreeMap::new();
         for line in source
@@ -169,7 +206,7 @@ fn diagnostic_catalog() -> &'static BTreeMap<&'static str, CatalogContract> {
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
         {
             let fields = line.split('|').collect::<Vec<_>>();
-            assert_eq!(fields.len(), 6, "invalid diagnostics-v3.tsv row: {line}");
+            assert_eq!(fields.len(), 6, "invalid diagnostics-v4.tsv row: {line}");
             let code = fields[0];
             let contract = CatalogContract {
                 code,
@@ -177,21 +214,48 @@ fn diagnostic_catalog() -> &'static BTreeMap<&'static str, CatalogContract> {
                 meaning: fields[2],
                 exit_code: fields[4]
                     .parse::<u8>()
-                    .expect("invalid diagnostics-v2.tsv exit code"),
+                    .expect("invalid diagnostics-v4.tsv exit code"),
             };
             assert!(
                 catalog.insert(code, contract).is_none(),
-                "duplicate diagnostics-v3.tsv code: {code}"
+                "duplicate diagnostics-v4.tsv code: {code}"
             );
         }
         catalog
     })
 }
 
-pub(crate) fn diagnostic_matches_catalog(code: &str, message: &str) -> bool {
-    diagnostic_catalog()
-        .get(code)
-        .is_some_and(|contract| message == contract.meaning)
+/// Comprueba un diagnóstico contra el catálogo congelado por un documento
+/// versionado. Una versión posterior puede añadir códigos, pero no los vuelve
+/// válidos retroactivamente en un manifiesto anterior.
+pub(crate) fn diagnostic_matches_catalog_version(
+    catalog_version: &str,
+    code: &str,
+    message: &str,
+) -> bool {
+    diagnostic_catalog_for_version(catalog_version)
+        .is_some_and(|catalog| catalog.get(code).is_some_and(|meaning| *meaning == message))
+}
+
+fn diagnostic_catalog_for_version(
+    catalog_version: &str,
+) -> Option<BTreeMap<&'static str, &'static str>> {
+    let source = match catalog_version {
+        "3" => include_str!("../catalogs/diagnostics-v3.tsv"),
+        "4" => include_str!("../catalogs/diagnostics-v4.tsv"),
+        _ => return None,
+    };
+    Some(
+        source
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| {
+                let fields = line.split('|').collect::<Vec<_>>();
+                assert_eq!(fields.len(), 6, "invalid diagnostics catalog row: {line}");
+                (fields[0], fields[2])
+            })
+            .collect(),
+    )
 }
 
 fn escape_json(value: &str) -> String {
@@ -220,12 +284,12 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    use super::{Diagnostic, catalog_contract, diagnostic_matches_catalog};
+    use super::{Diagnostic, catalog_contract, diagnostic_matches_catalog_version};
 
     #[test]
-    fn every_active_runtime_diagnostic_matches_catalog_v3() {
+    fn every_active_runtime_diagnostic_matches_active_catalog_v4() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let catalog = include_str!("../catalogs/diagnostics-v3.tsv")
+        let catalog = include_str!("../catalogs/diagnostics-v4.tsv")
             .lines()
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .map(|line| {
@@ -248,7 +312,7 @@ mod tests {
             let static_code = catalog
                 .get_key_value(&code)
                 .map(|(code, _)| code.as_str())
-                .unwrap_or_else(|| panic!("active code absent from diagnostics-v3.tsv: {code}"));
+                .unwrap_or_else(|| panic!("active code absent from diagnostics-v4.tsv: {code}"));
             // Los códigos del productor son literales estáticos; esta conversión
             // solo presta esa vida al test sin ampliar la API de producción.
             let static_code: &'static str = Box::leak(static_code.to_owned().into_boxed_str());
@@ -263,13 +327,33 @@ mod tests {
             assert_eq!(diagnostic.category(), declared.0);
             assert_eq!(diagnostic.message(), declared.1);
             assert_eq!(diagnostic.exit_code(), declared.2);
-            assert!(diagnostic_matches_catalog(&code, &declared.1));
-            assert!(!diagnostic_matches_catalog(&code, "significado alterado"));
+            assert!(diagnostic_matches_catalog_version("4", &code, &declared.1));
+            assert!(!diagnostic_matches_catalog_version(
+                "4",
+                &code,
+                "significado alterado"
+            ));
         }
         let unknown_code = format!("{}FMT-999", "GPS-");
-        assert!(!diagnostic_matches_catalog(
+        assert!(!diagnostic_matches_catalog_version(
+            "4",
             &unknown_code,
             "significado inventado"
+        ));
+    }
+
+    #[test]
+    fn versioned_catalog_validation_does_not_backport_f5_diagnostics() {
+        let message = "El escenario F5, su objetivo, F/P o sus límites no satisfacen el contrato de admisión.";
+        assert!(!diagnostic_matches_catalog_version(
+            "3",
+            "GPS-CONF-101",
+            message
+        ));
+        assert!(diagnostic_matches_catalog_version(
+            "4",
+            "GPS-CONF-101",
+            message
         ));
     }
 

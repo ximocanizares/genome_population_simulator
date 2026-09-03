@@ -1,0 +1,852 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "manifest-general-v5.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_kind",
+    "schema_version",
+    "execution_id",
+    "state",
+    "f5"
+  ],
+  "properties": {
+    "manifest_kind": {
+      "const": "gps_execution_manifest"
+    },
+    "schema_version": {
+      "const": "5"
+    },
+    "execution_id": {
+      "$ref": "#/$defs/id"
+    },
+    "state": {
+      "enum": [
+        "complete",
+        "failed"
+      ]
+    },
+    "f5": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/success"
+        },
+        {
+          "$ref": "#/$defs/failed"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "complete"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "f5": {
+            "$ref": "#/$defs/success"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "failed"
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "f5": {
+            "$ref": "#/$defs/failed"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "u64": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "artifact_kind",
+        "schema_version",
+        "path",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "artifact_id": {
+          "$ref": "#/$defs/id"
+        },
+        "artifact_kind": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "limits": {
+      "$ref": "f5-failure-v1.schema.json#/$defs/limits"
+    },
+    "counters": {
+      "$ref": "f5-failure-v1.schema.json#/$defs/counters"
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "scenario_id",
+        "seed",
+        "reference_id",
+        "reference_sha256",
+        "profile",
+        "mask",
+        "eligible_bases",
+        "target",
+        "ploidy",
+        "founder_count",
+        "subpopulations",
+        "algorithms",
+        "rng_catalog",
+        "id_catalog",
+        "limits",
+        "resource_preflight",
+        "normalizations",
+        "attempt_summary",
+        "sampling",
+        "quota_ties",
+        "f_realized",
+        "initialization_summaries",
+        "truth",
+        "artifacts"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1"
+        },
+        "scenario_id": {
+          "$ref": "#/$defs/id"
+        },
+        "seed": {
+          "$ref": "#/$defs/sha"
+        },
+        "reference_id": {
+          "$ref": "#/$defs/id"
+        },
+        "reference_sha256": {
+          "$ref": "#/$defs/sha"
+        },
+        "profile": {
+          "$ref": "effective-config-v5.schema.json#/$defs/profile"
+        },
+        "mask": {
+          "oneOf": [
+            {
+              "$ref": "effective-config-v5.schema.json#/$defs/link"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eligible_bases": {
+          "$ref": "#/$defs/u64"
+        },
+        "target": {
+          "$ref": "effective-config-v5.schema.json#/$defs/target"
+        },
+        "ploidy": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "founder_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "subpopulations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "population_id",
+              "individual_count",
+              "inbreeding_f",
+              "inbreeding_f_source"
+            ],
+            "properties": {
+              "population_id": {
+                "$ref": "#/$defs/id"
+              },
+              "individual_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 18446744073709551615
+              },
+              "inbreeding_f": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "inbreeding_f_source": {
+                "enum": [
+                  "population",
+                  "subpopulation"
+                ]
+              }
+            }
+          }
+        },
+        "algorithms": {
+          "$ref": "effective-config-v5.schema.json#/$defs/algorithms"
+        },
+        "rng_catalog": {
+          "$ref": "effective-config-v5.schema.json#/$defs/catalog"
+        },
+        "id_catalog": {
+          "$ref": "effective-config-v5.schema.json#/$defs/catalog"
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        },
+        "resource_preflight": {
+          "$ref": "effective-config-v5.schema.json#/$defs/preflight"
+        },
+        "normalizations": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "$ref": "effective-config-v5.schema.json#/$defs/normalization"
+          }
+        },
+        "attempt_summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "layout_attempts_used",
+            "haplotype_attempts_total",
+            "max_attempt_index"
+          ],
+          "properties": {
+            "layout_attempts_used": {
+              "$ref": "#/$defs/u64"
+            },
+            "haplotype_attempts_total": {
+              "$ref": "#/$defs/u64"
+            },
+            "max_attempt_index": {
+              "$ref": "#/$defs/u64"
+            }
+          }
+        },
+        "sampling": {
+          "type": "array",
+          "items": {
+            "$ref": "effective-config-v5.schema.json#/$defs/sampling"
+          }
+        },
+        "quota_ties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/quota_tie"
+          }
+        },
+        "f_realized": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/f_realized"
+          }
+        },
+        "initialization_summaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/initialization_summary"
+          }
+        },
+        "truth": {
+          "$ref": "#/$defs/truth_link"
+        },
+        "artifacts": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/link"
+                },
+                {
+                  "properties": {
+                    "artifact_id": {
+                      "const": "f5-01-block-layout-v1"
+                    },
+                    "artifact_kind": {
+                      "const": "f5_block_layout"
+                    },
+                    "path": {
+                      "const": "outputs/f5-block-layout.tsv"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/link"
+                },
+                {
+                  "properties": {
+                    "artifact_id": {
+                      "const": "f5-02-sites-v1"
+                    },
+                    "artifact_kind": {
+                      "const": "f5_sites"
+                    },
+                    "path": {
+                      "const": "outputs/f5-sites.tsv"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/link"
+                },
+                {
+                  "properties": {
+                    "artifact_id": {
+                      "const": "f5-03-haplotypes-v1"
+                    },
+                    "artifact_kind": {
+                      "const": "f5_haplotypes"
+                    },
+                    "path": {
+                      "const": "outputs/f5-haplotypes.tsv"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/link"
+                },
+                {
+                  "properties": {
+                    "artifact_id": {
+                      "const": "f5-04-frequencies-v1"
+                    },
+                    "artifact_kind": {
+                      "const": "f5_frequencies"
+                    },
+                    "path": {
+                      "const": "outputs/f5-frequencies.tsv"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/link"
+                },
+                {
+                  "properties": {
+                    "artifact_id": {
+                      "const": "f5-05-ld-evaluation-v1"
+                    },
+                    "artifact_kind": {
+                      "const": "f5_ld_evaluation"
+                    },
+                    "path": {
+                      "const": "outputs/f5-ld-evaluation.tsv"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/link"
+                },
+                {
+                  "properties": {
+                    "artifact_id": {
+                      "const": "f5-06-founders-v1"
+                    },
+                    "artifact_kind": {
+                      "const": "f5_founders"
+                    },
+                    "path": {
+                      "const": "outputs/f5-founders.tsv"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/link"
+                },
+                {
+                  "properties": {
+                    "artifact_id": {
+                      "const": "f5-07-attempts-v1"
+                    },
+                    "artifact_kind": {
+                      "const": "f5_attempts"
+                    },
+                    "path": {
+                      "const": "outputs/f5-attempts.tsv"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "items": false
+        }
+      }
+    },
+    "failed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "f5_failure"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1"
+        },
+        "f5_failure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "stage",
+            "scenario_id",
+            "population_id",
+            "block_id",
+            "limits",
+            "counters",
+            "best_layout",
+            "best_attempt",
+            "artifacts"
+          ],
+          "properties": {
+            "code": {
+              "$ref": "f5-failure-v1.schema.json#/$defs/code"
+            },
+            "stage": {
+              "enum": [
+                "preflight",
+                "layout",
+                "haplotypes",
+                "founders",
+                "publication"
+              ]
+            },
+            "scenario_id": {
+              "$ref": "#/$defs/id"
+            },
+            "population_id": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "block_id": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limits": {
+              "$ref": "#/$defs/limits"
+            },
+            "counters": {
+              "$ref": "#/$defs/counters"
+            },
+            "best_layout": {
+              "oneOf": [
+                {
+                  "$ref": "f5-failure-v1.schema.json#/$defs/best_layout"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "best_attempt": {
+              "oneOf": [
+                {
+                  "$ref": "f5-failure-v1.schema.json#/$defs/best_attempt"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "artifacts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "prefixItems": [
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/link"
+                    },
+                    {
+                      "properties": {
+                        "artifact_id": {
+                          "const": "f5-00-failure-v1"
+                        },
+                        "artifact_kind": {
+                          "const": "f5_failure"
+                        },
+                        "path": {
+                          "const": "outputs/f5-failure.json"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "items": false
+            }
+          }
+        }
+      }
+    },
+    "truth_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "artifact_kind",
+        "schema_version",
+        "projection_version",
+        "path",
+        "size_bytes",
+        "sha256"
+      ],
+      "properties": {
+        "artifact_id": {
+          "const": "truth-jsonl"
+        },
+        "artifact_kind": {
+          "const": "truth_jsonl"
+        },
+        "schema_version": {
+          "const": "2"
+        },
+        "projection_version": {
+          "const": "f5-founder-truth-projection-v2"
+        },
+        "path": {
+          "const": "outputs/truth.jsonl"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "quota_tie": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "population_id",
+        "block_id",
+        "remainder",
+        "candidate_ranks",
+        "select_count",
+        "selected_ranks"
+      ],
+      "properties": {
+        "population_id": {
+          "$ref": "#/$defs/id"
+        },
+        "block_id": {
+          "$ref": "#/$defs/id"
+        },
+        "remainder": {
+          "type": "number"
+        },
+        "candidate_ranks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/u64"
+          }
+        },
+        "select_count": {
+          "$ref": "#/$defs/u64"
+        },
+        "selected_ranks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/u64"
+          }
+        }
+      }
+    },
+    "f_realized": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "population_id",
+        "block_id",
+        "target_f",
+        "status",
+        "value"
+      ],
+      "properties": {
+        "population_id": {
+          "$ref": "#/$defs/id"
+        },
+        "block_id": {
+          "$ref": "#/$defs/id"
+        },
+        "target_f": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "evaluated",
+            "not_applicable"
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "dosage_number": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dosage",
+        "value"
+      ],
+      "properties": {
+        "dosage": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "value": {
+          "type": "number"
+        }
+      }
+    },
+    "dosage_count": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dosage",
+        "value"
+      ],
+      "properties": {
+        "dosage": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "value": {
+          "$ref": "#/$defs/u64"
+        }
+      }
+    },
+    "initialization_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "population_id",
+        "block_id",
+        "site_id",
+        "ploidy",
+        "model",
+        "requested_mode",
+        "effective_mode",
+        "input_alt_af",
+        "realized_alt_af",
+        "expected_genotype_probabilities",
+        "expected_genotype_frequencies",
+        "expected_genotype_counts",
+        "realized_genotype_frequencies",
+        "realized_genotype_counts",
+        "recounted_genotype_frequencies",
+        "recounted_genotype_counts",
+        "recount_source",
+        "recount_matches"
+      ],
+      "properties": {
+        "population_id": {
+          "$ref": "#/$defs/id"
+        },
+        "block_id": {
+          "$ref": "#/$defs/id"
+        },
+        "site_id": {
+          "$ref": "#/$defs/id"
+        },
+        "ploidy": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "model": {
+          "enum": [
+            "hwe",
+            "diploid_f",
+            "controlled_hwe_conditioned_counts"
+          ]
+        },
+        "requested_mode": {
+          "enum": [
+            "probabilistic",
+            "controlled"
+          ]
+        },
+        "effective_mode": {
+          "enum": [
+            "probabilistic",
+            "controlled"
+          ]
+        },
+        "input_alt_af": {
+          "type": "number"
+        },
+        "realized_alt_af": {
+          "type": "number"
+        },
+        "expected_genotype_probabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dosage_number"
+          }
+        },
+        "expected_genotype_frequencies": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dosage_number"
+          }
+        },
+        "expected_genotype_counts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dosage_number"
+          }
+        },
+        "realized_genotype_frequencies": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dosage_number"
+          }
+        },
+        "realized_genotype_counts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dosage_count"
+          }
+        },
+        "recounted_genotype_frequencies": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dosage_number"
+          }
+        },
+        "recounted_genotype_counts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dosage_count"
+          }
+        },
+        "recount_source": {
+          "const": "outputs/truth.jsonl#f5-founder-truth-projection-v2"
+        },
+        "recount_matches": {
+          "const": true
+        }
+      }
+    }
+  }
+}

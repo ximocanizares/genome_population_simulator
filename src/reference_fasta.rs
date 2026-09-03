@@ -75,6 +75,15 @@ pub fn validate_supplied_fasta_with_origin(
     reference_id: &str,
     expected: &[SequenceExpectation<'_>],
 ) -> Result<ValidatedSuppliedReference, Diagnostic> {
+    validate_supplied_fasta_inner(read_path, origin_path, reference_id, Some(expected))
+}
+
+fn validate_supplied_fasta_inner(
+    read_path: &Path,
+    origin_path: &Path,
+    reference_id: &str,
+    expected: Option<&[SequenceExpectation<'_>]>,
+) -> Result<ValidatedSuppliedReference, Diagnostic> {
     let file = File::open(read_path).map_err(|error| input_error(read_path, error))?;
     let digesting = DigestingReader::new(file);
     let mut reader = BufReader::new(digesting);
@@ -91,11 +100,13 @@ pub fn validate_supplied_fasta_with_origin(
         .with("detected_format", "gzip"));
     }
 
-    let expectations = expected
-        .iter()
-        .map(|item| (item.id, *item))
-        .collect::<BTreeMap<_, _>>();
-    let mut records = Vec::with_capacity(expected.len());
+    let expectations = expected.map(|items| {
+        items
+            .iter()
+            .map(|item| (item.id, *item))
+            .collect::<BTreeMap<_, _>>()
+    });
+    let mut records = Vec::with_capacity(expected.map_or(0, <[SequenceExpectation<'_>]>::len));
     let mut locations = BTreeMap::<String, u64>::new();
     let mut line = Vec::new();
     let mut line_number = 0_u64;
@@ -120,7 +131,7 @@ pub fn validate_supplied_fasta_with_origin(
                 records.push(finish_record(
                     read_path,
                     reference_id,
-                    &expectations,
+                    expectations.as_ref(),
                     &mut locations,
                     header,
                     bases,
@@ -151,7 +162,7 @@ pub fn validate_supplied_fasta_with_origin(
         records.push(finish_record(
             read_path,
             reference_id,
-            &expectations,
+            expectations.as_ref(),
             &mut locations,
             header,
             bases,
@@ -161,11 +172,12 @@ pub fn validate_supplied_fasta_with_origin(
     if records.is_empty() {
         return Err(empty_fasta(read_path));
     }
-    if records.len() != expected.len()
-        || records
-            .iter()
-            .zip(expected)
-            .any(|(record, expectation)| record.id().as_str() != expectation.id)
+    if let Some(expected) = expected
+        && (records.len() != expected.len()
+            || records
+                .iter()
+                .zip(expected)
+                .any(|(record, expectation)| record.id().as_str() != expectation.id))
     {
         return Err(configuration_mismatch(
             read_path,
@@ -288,7 +300,7 @@ pub fn query_fai_for_acceptance(
 fn finish_record(
     path: &Path,
     reference_id: &str,
-    expected: &BTreeMap<&str, SequenceExpectation<'_>>,
+    expected: Option<&BTreeMap<&str, SequenceExpectation<'_>>>,
     locations: &mut BTreeMap<String, u64>,
     header: FastaHeader,
     bases: Vec<u8>,
@@ -309,33 +321,43 @@ fn finish_record(
             format!("line {first_line}, line {header_line}"),
         ));
     }
-    let expectation = expected.get(header.id_text()).ok_or_else(|| {
-        configuration_mismatch(
-            path,
-            "reference.sequences.id",
-            format!("el FASTA contiene el ID no declarado {}", header.id_text()),
-        )
-    })?;
     let sequence =
         DnaSequence::try_from_bytes(&bases).map_err(|error| reference_error(path, error))?;
-    if sequence.len() != expectation.length {
-        return Err(configuration_mismatch(
-            path,
-            "reference.sequences.length",
-            format!(
-                "{} declara longitud {} y el FASTA contiene {}",
-                expectation.id,
-                expectation.length,
-                sequence.len()
-            ),
-        ));
-    }
-    let sequence_id = SequenceId::parse(expectation.id, reference_id)?;
-    ReferenceSequence::from_owned(sequence_id, header, expectation.class, sequence)
+    let (sequence_id, class) = if let Some(expected) = expected {
+        let expectation = expected.get(header.id_text()).ok_or_else(|| {
+            configuration_mismatch(
+                path,
+                "reference.sequences.id",
+                format!("el FASTA contiene el ID no declarado {}", header.id_text()),
+            )
+        })?;
+        if sequence.len() != expectation.length {
+            return Err(configuration_mismatch(
+                path,
+                "reference.sequences.length",
+                format!(
+                    "{} declara longitud {} y el FASTA contiene {}",
+                    expectation.id,
+                    expectation.length,
+                    sequence.len()
+                ),
+            ));
+        }
+        (
+            SequenceId::parse(expectation.id, reference_id)?,
+            expectation.class,
+        )
+    } else {
+        (
+            SequenceId::parse(header.id_text(), reference_id)?,
+            SequenceClass::Chromosome,
+        )
+    };
+    ReferenceSequence::from_owned(sequence_id, header, class, sequence)
         .map_err(|error| reference_error(path, error))
 }
 
-fn parse_header_with_noodles(
+pub(crate) fn parse_header_with_noodles(
     path: &Path,
     raw: &[u8],
     line_number: u64,
@@ -399,7 +421,7 @@ impl<R: Read> Read for DigestingReader<R> {
     }
 }
 
-fn input_error(path: &Path, error: io::Error) -> Diagnostic {
+pub(crate) fn input_error(path: &Path, error: io::Error) -> Diagnostic {
     Diagnostic::input(
         "GPS-INPUT-001",
         "No se puede abrir o leer una entrada declarada.",
@@ -408,7 +430,7 @@ fn input_error(path: &Path, error: io::Error) -> Diagnostic {
     .with("detail", error.to_string())
 }
 
-fn empty_header(path: &Path, line: u64) -> Diagnostic {
+pub(crate) fn empty_header(path: &Path, line: u64) -> Diagnostic {
     Diagnostic::format(
         "GPS-FMT-003",
         "Una cabecera FASTA no contiene un identificador de secuencia.",
@@ -417,7 +439,7 @@ fn empty_header(path: &Path, line: u64) -> Diagnostic {
     .with("location", format!("line {line}"))
 }
 
-fn empty_fasta(path: &Path) -> Diagnostic {
+pub(crate) fn empty_fasta(path: &Path) -> Diagnostic {
     Diagnostic::format(
         "GPS-FMT-002",
         "El FASTA no contiene ninguna secuencia no vacía.",
@@ -425,7 +447,7 @@ fn empty_fasta(path: &Path) -> Diagnostic {
     .with("path", path.display().to_string())
 }
 
-fn invalid_symbol(path: &Path, sequence: &str, position: u64, found: u8) -> Diagnostic {
+pub(crate) fn invalid_symbol(path: &Path, sequence: &str, position: u64, found: u8) -> Diagnostic {
     Diagnostic::format(
         "GPS-FMT-005",
         "Una secuencia contiene un símbolo de DNA no admitido.",

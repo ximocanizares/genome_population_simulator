@@ -1,0 +1,1057 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "truth-v2.schema.json",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/header"
+    },
+    {
+      "$ref": "#/$defs/copy"
+    },
+    {
+      "$ref": "#/$defs/genotype"
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "source_id"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "reference",
+            "founder",
+            "explicit",
+            "random",
+            "matrix"
+          ]
+        },
+        "source_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "sha256"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source_ref"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "copy_id": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference_id",
+        "individual_id",
+        "sequence_id",
+        "copy_index"
+      ],
+      "properties": {
+        "reference_id": {
+          "$ref": "#/$defs/id"
+        },
+        "individual_id": {
+          "$ref": "#/$defs/id"
+        },
+        "sequence_id": {
+          "$ref": "#/$defs/id"
+        },
+        "copy_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9
+        }
+      }
+    },
+    "header": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "document_kind",
+        "schema_version",
+        "execution_id",
+        "reference_id",
+        "reference_content_sha256",
+        "coordinate_convention",
+        "counts",
+        "source_digests",
+        "group_digests",
+        "projection",
+        "populations"
+      ],
+      "properties": {
+        "record_type": {
+          "const": "header"
+        },
+        "document_kind": {
+          "const": "gps_truth"
+        },
+        "schema_version": {
+          "const": "2"
+        },
+        "execution_id": {
+          "$ref": "#/$defs/id"
+        },
+        "reference_id": {
+          "$ref": "#/$defs/id"
+        },
+        "reference_content_sha256": {
+          "$ref": "#/$defs/sha"
+        },
+        "coordinate_convention": {
+          "const": "zero_based_half_open_v1"
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "copies",
+            "genotypes"
+          ],
+          "properties": {
+            "copies": {
+              "$ref": "#/$defs/u64"
+            },
+            "genotypes": {
+              "$ref": "#/$defs/u64"
+            }
+          }
+        },
+        "source_digests": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest"
+          }
+        },
+        "group_digests": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest"
+          }
+        },
+        "projection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "projection_version",
+            "scenario_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "f5_founder"
+            },
+            "projection_version": {
+              "const": "f5-founder-truth-projection-v2"
+            },
+            "scenario_id": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        },
+        "populations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "population_id",
+              "individual_count",
+              "ploidy"
+            ],
+            "properties": {
+              "population_id": {
+                "$ref": "#/$defs/id"
+              },
+              "individual_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 18446744073709551615
+              },
+              "ploidy": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            }
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "source"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "explicit",
+            "random",
+            "matrix"
+          ]
+        },
+        "version": {
+          "const": "1"
+        },
+        "source": {
+          "$ref": "#/$defs/source_ref"
+        },
+        "matrix": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "matrix_source_id",
+            "population_id",
+            "variant_id"
+          ],
+          "properties": {
+            "matrix_source_id": {
+              "$ref": "#/$defs/id"
+            },
+            "population_id": {
+              "$ref": "#/$defs/id"
+            },
+            "variant_id": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        }
+      }
+    },
+    "mod": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "position",
+            "reference",
+            "alternate",
+            "provenance"
+          ],
+          "properties": {
+            "kind": {
+              "const": "snp"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "position": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "reference": {
+              "enum": [
+                "A",
+                "C",
+                "G",
+                "T"
+              ]
+            },
+            "alternate": {
+              "enum": [
+                "A",
+                "C",
+                "G",
+                "T"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/provenance"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "point",
+            "bases",
+            "provenance"
+          ],
+          "properties": {
+            "kind": {
+              "const": "insertion"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "point": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "bases": {
+              "type": "string",
+              "pattern": "^[ACGTN]+$"
+            },
+            "provenance": {
+              "$ref": "#/$defs/provenance"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "start",
+            "end",
+            "provenance"
+          ],
+          "properties": {
+            "kind": {
+              "const": "deletion"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 18446744073709551615
+            },
+            "provenance": {
+              "$ref": "#/$defs/provenance"
+            }
+          }
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "reference_id",
+        "sequence_id",
+        "start",
+        "end",
+        "sequence_length"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source_ref"
+        },
+        "reference_id": {
+          "$ref": "#/$defs/id"
+        },
+        "sequence_id": {
+          "$ref": "#/$defs/id"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "sequence_length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        }
+      }
+    },
+    "current_snp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "position",
+        "reference",
+        "alternate",
+        "provenance"
+      ],
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/id"
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "reference": {
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T"
+          ]
+        },
+        "alternate": {
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T"
+          ]
+        },
+        "provenance": {
+          "$ref": "#/$defs/provenance"
+        }
+      }
+    },
+    "current_piece": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "source",
+            "snps"
+          ],
+          "properties": {
+            "kind": {
+              "const": "source"
+            },
+            "source": {
+              "$ref": "#/$defs/source"
+            },
+            "snps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/current_snp"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "bases",
+            "provenance"
+          ],
+          "properties": {
+            "kind": {
+              "const": "inserted"
+            },
+            "bases": {
+              "type": "string",
+              "pattern": "^[ACGTN]+$"
+            },
+            "provenance": {
+              "$ref": "#/$defs/provenance"
+            }
+          }
+        }
+      ]
+    },
+    "history_event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "position",
+            "provenance"
+          ],
+          "properties": {
+            "kind": {
+              "const": "snp"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "position": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            },
+            "provenance": {
+              "$ref": "#/$defs/provenance"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "point",
+            "bases",
+            "provenance"
+          ],
+          "properties": {
+            "kind": {
+              "const": "insertion"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "point": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "bases": {
+              "type": "string",
+              "pattern": "^[ACGTN]+$"
+            },
+            "provenance": {
+              "$ref": "#/$defs/provenance"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "start",
+            "end",
+            "provenance"
+          ],
+          "properties": {
+            "kind": {
+              "const": "deletion"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 18446744073709551615
+            },
+            "provenance": {
+              "$ref": "#/$defs/provenance"
+            }
+          }
+        }
+      ]
+    },
+    "copy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "identity",
+        "phase",
+        "provenance",
+        "segments",
+        "current_pieces",
+        "history",
+        "founder_membership"
+      ],
+      "properties": {
+        "record_type": {
+          "const": "haplotype_copy"
+        },
+        "identity": {
+          "$ref": "#/$defs/copy_id"
+        },
+        "phase": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "origin",
+            "sources"
+          ],
+          "properties": {
+            "origin": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/source_ref"
+              }
+            }
+          }
+        },
+        "segments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "modifications"
+            ],
+            "properties": {
+              "source": {
+                "$ref": "#/$defs/source"
+              },
+              "modifications": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/mod"
+                }
+              }
+            }
+          }
+        },
+        "current_pieces": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/current_piece"
+          }
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/history_event"
+          }
+        },
+        "founder_membership": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "population_id",
+            "founder_copy_id"
+          ],
+          "properties": {
+            "population_id": {
+              "$ref": "#/$defs/id"
+            },
+            "founder_copy_id": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        }
+      }
+    },
+    "locus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence_id",
+        "start",
+        "end"
+      ],
+      "properties": {
+        "sequence_id": {
+          "$ref": "#/$defs/id"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      }
+    },
+    "carrier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allele_index",
+        "copy"
+      ],
+      "properties": {
+        "allele_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "copy": {
+          "$ref": "#/$defs/copy_id"
+        }
+      }
+    },
+    "structural_event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "point",
+            "bases"
+          ],
+          "properties": {
+            "kind": {
+              "const": "insertion"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "point": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "bases": {
+              "type": "string",
+              "pattern": "^[ACGTN]+$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "start",
+            "end"
+          ],
+          "properties": {
+            "kind": {
+              "const": "deletion"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 18446744073709551615
+            }
+          }
+        }
+      ]
+    },
+    "piece_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "piece_index",
+        "start",
+        "end"
+      ],
+      "properties": {
+        "piece_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        }
+      }
+    },
+    "allele": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "reference"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "base"
+          ],
+          "properties": {
+            "kind": {
+              "const": "snp"
+            },
+            "base": {
+              "enum": [
+                "A",
+                "C",
+                "G",
+                "T"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "bases",
+            "final_haplotype_bases",
+            "source_event",
+            "piece_links"
+          ],
+          "properties": {
+            "kind": {
+              "const": "insertion"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "bases": {
+              "type": "string",
+              "pattern": "^[ACGTN]+$"
+            },
+            "final_haplotype_bases": {
+              "type": "string",
+              "pattern": "^[ACGTN]+$"
+            },
+            "source_event": {
+              "$ref": "#/$defs/structural_event"
+            },
+            "piece_links": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/piece_link"
+              }
+            }
+          },
+          "allOf": [
+            {
+              "properties": {
+                "source_event": {
+                  "properties": {
+                    "kind": {
+                      "const": "insertion"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "event_id",
+            "start",
+            "end",
+            "final_haplotype_bases",
+            "source_event",
+            "piece_links"
+          ],
+          "properties": {
+            "kind": {
+              "const": "deletion"
+            },
+            "event_id": {
+              "$ref": "#/$defs/id"
+            },
+            "start": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 18446744073709551615
+            },
+            "end": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 18446744073709551615
+            },
+            "final_haplotype_bases": {
+              "type": "string",
+              "pattern": "^[ACGTN]+$"
+            },
+            "source_event": {
+              "$ref": "#/$defs/structural_event"
+            },
+            "piece_links": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/piece_link"
+              }
+            }
+          },
+          "allOf": [
+            {
+              "properties": {
+                "source_event": {
+                  "properties": {
+                    "kind": {
+                      "const": "deletion"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "genotype": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "case_id",
+        "reference_id",
+        "individual_id",
+        "case_kind",
+        "locus",
+        "alleles",
+        "allele_dosages",
+        "carriers",
+        "f5_locus"
+      ],
+      "properties": {
+        "record_type": {
+          "const": "genotype"
+        },
+        "case_id": {
+          "$ref": "#/$defs/id"
+        },
+        "reference_id": {
+          "$ref": "#/$defs/id"
+        },
+        "individual_id": {
+          "$ref": "#/$defs/id"
+        },
+        "case_kind": {
+          "const": "snp"
+        },
+        "locus": {
+          "$ref": "#/$defs/locus"
+        },
+        "alleles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/allele"
+          }
+        },
+        "allele_dosages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          }
+        },
+        "carriers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/carrier"
+          }
+        },
+        "f5_locus": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "population_id",
+            "block_id",
+            "site_id",
+            "ref",
+            "alt"
+          ],
+          "properties": {
+            "population_id": {
+              "$ref": "#/$defs/id"
+            },
+            "block_id": {
+              "$ref": "#/$defs/id"
+            },
+            "site_id": {
+              "$ref": "#/$defs/id"
+            },
+            "ref": {
+              "$ref": "#/$defs/base"
+            },
+            "alt": {
+              "$ref": "#/$defs/base"
+            }
+          }
+        }
+      }
+    },
+    "base": {
+      "enum": [
+        "A",
+        "C",
+        "G",
+        "T"
+      ]
+    },
+    "u64": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    }
+  }
+}

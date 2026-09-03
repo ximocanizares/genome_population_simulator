@@ -8,6 +8,7 @@ use crate::randomness::{DERIVATION_VERSION, RootSeed};
 
 pub const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
 pub const ID_CATALOG_VERSION: &str = "3";
+pub const F5_ID_CATALOG: &str = "id-catalog-v4";
 pub const TECHNICAL_ID_DERIVATION_VERSION: u32 = 2;
 
 macro_rules! typed_id {
@@ -51,6 +52,17 @@ typed_id!(ReadGroupId, "read_group");
 typed_id!(TemplateId, "template");
 typed_id!(PreHopInstanceId, "pre_hop_instance");
 typed_id!(TechnicalPairId, "technical_pair");
+// F5 produces these identities. They deliberately are different domain types
+// from supplied `BlockId` and from each other, even though all serialize as a
+// compact ASCII identifier.
+typed_id!(F5BlockId, "f5_block");
+typed_id!(F5SiteId, "f5_site");
+typed_id!(F5HaplotypeId, "f5_haplotype");
+typed_id!(FounderCopyId, "f5_founder_copy");
+typed_id!(
+    FounderHaplotypeAssignmentId,
+    "f5_block_haplotype_assignment"
+);
 
 /// Construye el ID de plantilla de F3 a partir de una biblioteca ya única en
 /// el evento y de su ordinal lógico canónico en decimal.
@@ -455,6 +467,335 @@ fn derive_technical_id_text(
         class.prefix(),
         encode_base32(&digest[..16])
     ))
+}
+
+/// Registro de las cinco clases añadidas por `id-catalog-v4`.
+///
+/// Es independiente de las clases heredadas: publicar F5 no modifica sus
+/// materiales, vectores ni ámbitos de colisión.
+#[derive(Debug, Default)]
+pub struct F5IdentityRegistry {
+    registered: BTreeSet<(F5IdClass, String)>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct F5IdentityContext<'a> {
+    root: RootSeed,
+    execution_id: &'a ExecutionId,
+    scenario_id: &'a ScenarioId,
+    reference_id: &'a ReferenceId,
+}
+
+impl<'a> F5IdentityContext<'a> {
+    #[must_use]
+    pub const fn new(
+        root: RootSeed,
+        execution_id: &'a ExecutionId,
+        scenario_id: &'a ScenarioId,
+        reference_id: &'a ReferenceId,
+    ) -> Self {
+        Self {
+            root,
+            execution_id,
+            scenario_id,
+            reference_id,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct F5PopulationIdentityContext<'a> {
+    base: F5IdentityContext<'a>,
+    population_id: &'a PopulationId,
+}
+
+impl<'a> F5PopulationIdentityContext<'a> {
+    #[must_use]
+    pub const fn new(base: F5IdentityContext<'a>, population_id: &'a PopulationId) -> Self {
+        Self {
+            base,
+            population_id,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct F5FounderCopyScope<'a> {
+    individual_id: &'a IndividualId,
+    sequence_id: &'a SequenceId,
+    phase_id: &'a PhaseId,
+}
+
+impl<'a> F5FounderCopyScope<'a> {
+    #[must_use]
+    pub const fn new(
+        individual_id: &'a IndividualId,
+        sequence_id: &'a SequenceId,
+        phase_id: &'a PhaseId,
+    ) -> Self {
+        Self {
+            individual_id,
+            sequence_id,
+            phase_id,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct F5BlockHaplotypeAssignmentScope<'a> {
+    block_index: u64,
+    founder_copy_id: &'a FounderCopyId,
+    haplotype_id: &'a F5HaplotypeId,
+}
+
+impl<'a> F5BlockHaplotypeAssignmentScope<'a> {
+    #[must_use]
+    pub const fn new(
+        block_index: u64,
+        founder_copy_id: &'a FounderCopyId,
+        haplotype_id: &'a F5HaplotypeId,
+    ) -> Self {
+        Self {
+            block_index,
+            founder_copy_id,
+            haplotype_id,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum F5IdClass {
+    Block,
+    Site,
+    Haplotype,
+    FounderCopy,
+    BlockHaplotypeAssignment,
+}
+
+impl F5IdClass {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Block => "f5_block",
+            Self::Site => "f5_site",
+            Self::Haplotype => "f5_haplotype",
+            Self::FounderCopy => "f5_founder_copy",
+            Self::BlockHaplotypeAssignment => "f5_block_haplotype_assignment",
+        }
+    }
+    const fn prefix(self) -> &'static str {
+        match self {
+            Self::Block => "BLK_",
+            Self::Site => "SITE_",
+            Self::Haplotype => "HAP_",
+            Self::FounderCopy => "FCP_",
+            Self::BlockHaplotypeAssignment => "FHA_",
+        }
+    }
+}
+
+impl F5IdentityRegistry {
+    pub fn derive_block(
+        &mut self,
+        context: F5IdentityContext<'_>,
+        block_index: u64,
+    ) -> Result<F5BlockId, Diagnostic> {
+        let block_index = block_index.to_string();
+        self.derive(
+            context.root,
+            F5IdClass::Block,
+            &[
+                ("execution_id", context.execution_id.as_str()),
+                ("scenario_id", context.scenario_id.as_str()),
+                ("reference_id", context.reference_id.as_str()),
+                ("block_index_u64", &block_index),
+            ],
+        )
+        .map(F5BlockId::from_automatic)
+    }
+
+    pub fn derive_site(
+        &mut self,
+        context: F5IdentityContext<'_>,
+        block_index: u64,
+        site_index: u64,
+    ) -> Result<F5SiteId, Diagnostic> {
+        let block_index = block_index.to_string();
+        let site_index = site_index.to_string();
+        self.derive(
+            context.root,
+            F5IdClass::Site,
+            &[
+                ("execution_id", context.execution_id.as_str()),
+                ("scenario_id", context.scenario_id.as_str()),
+                ("reference_id", context.reference_id.as_str()),
+                ("block_index_u64", &block_index),
+                ("site_index_u64", &site_index),
+            ],
+        )
+        .map(F5SiteId::from_automatic)
+    }
+
+    pub fn derive_haplotype(
+        &mut self,
+        context: F5PopulationIdentityContext<'_>,
+        block_index: u64,
+        haplotype_rank: u64,
+        alleles: &str,
+    ) -> Result<F5HaplotypeId, Diagnostic> {
+        let block_index = block_index.to_string();
+        let haplotype_rank = haplotype_rank.to_string();
+        self.derive(
+            context.base.root,
+            F5IdClass::Haplotype,
+            &[
+                ("execution_id", context.base.execution_id.as_str()),
+                ("scenario_id", context.base.scenario_id.as_str()),
+                ("reference_id", context.base.reference_id.as_str()),
+                ("population_id", context.population_id.as_str()),
+                ("block_index_u64", &block_index),
+                ("haplotype_rank_u64", &haplotype_rank),
+                ("alleles", alleles),
+            ],
+        )
+        .map(F5HaplotypeId::from_automatic)
+    }
+
+    pub fn derive_founder_copy(
+        &mut self,
+        context: F5PopulationIdentityContext<'_>,
+        scope: F5FounderCopyScope<'_>,
+    ) -> Result<FounderCopyId, Diagnostic> {
+        self.derive(
+            context.base.root,
+            F5IdClass::FounderCopy,
+            &[
+                ("execution_id", context.base.execution_id.as_str()),
+                ("scenario_id", context.base.scenario_id.as_str()),
+                ("reference_id", context.base.reference_id.as_str()),
+                ("population_id", context.population_id.as_str()),
+                ("individual_id", scope.individual_id.as_str()),
+                ("sequence_id", scope.sequence_id.as_str()),
+                ("phase_id", scope.phase_id.as_str()),
+            ],
+        )
+        .map(FounderCopyId::from_automatic)
+    }
+
+    pub fn derive_block_haplotype_assignment(
+        &mut self,
+        context: F5PopulationIdentityContext<'_>,
+        scope: F5BlockHaplotypeAssignmentScope<'_>,
+    ) -> Result<FounderHaplotypeAssignmentId, Diagnostic> {
+        let block_index = scope.block_index.to_string();
+        self.derive(
+            context.base.root,
+            F5IdClass::BlockHaplotypeAssignment,
+            &[
+                ("execution_id", context.base.execution_id.as_str()),
+                ("scenario_id", context.base.scenario_id.as_str()),
+                ("reference_id", context.base.reference_id.as_str()),
+                ("population_id", context.population_id.as_str()),
+                ("block_index_u64", &block_index),
+                ("founder_copy_id", scope.founder_copy_id.as_str()),
+                ("haplotype_id", scope.haplotype_id.as_str()),
+            ],
+        )
+        .map(FounderHaplotypeAssignmentId::from_automatic)
+    }
+
+    fn derive(
+        &mut self,
+        root: RootSeed,
+        class: F5IdClass,
+        causes: &[(&str, &str)],
+    ) -> Result<String, Diagnostic> {
+        self.derive_with_digest(root, class, causes, |material| {
+            blake3::derive_key(ID_CONTEXT, material)
+        })
+    }
+
+    fn derive_with_digest(
+        &mut self,
+        root: RootSeed,
+        class: F5IdClass,
+        causes: &[(&str, &str)],
+        digest: impl FnOnce(&[u8]) -> [u8; 32],
+    ) -> Result<String, Diagnostic> {
+        let mut material = Vec::new();
+        material.extend_from_slice(root.as_bytes());
+        material.extend_from_slice(&DERIVATION_VERSION.to_be_bytes());
+        material.extend_from_slice(
+            &u32::try_from(causes.len() + 1)
+                .map_err(|_| identity_material_error("component_count"))?
+                .to_be_bytes(),
+        );
+        append_component(&mut material, "class", class.name())?;
+        for (name, value) in causes {
+            append_component(&mut material, name, value)?;
+        }
+        let digest = digest(&material);
+        let identifier = format!("{}{}", class.prefix(), encode_base32(&digest[..16]));
+        if self.registered.insert((class, identifier.clone())) {
+            return Ok(identifier);
+        }
+        Err(Diagnostic::domain(
+            "GPS-DOMAIN-002",
+            "La derivación de una identidad produjo una colisión.",
+        )
+        .with("identifier", identifier)
+        .with("category", class.name())
+        .with("causes", "automatic"))
+    }
+}
+
+#[cfg(test)]
+mod f5_collision_tests {
+    use super::{F5IdClass, F5IdentityRegistry};
+    use crate::randomness::RootSeed;
+
+    #[test]
+    fn distinct_f5_causes_reject_a_forced_digest_collision() {
+        let root = RootSeed::from_bytes([0x5a; 32]);
+        let forced_digest = [0xa5; 32];
+        let mut registry = F5IdentityRegistry::default();
+        let first_causes = [
+            ("execution_id", "RUN_collision"),
+            ("scenario_id", "scenario-f5"),
+            ("reference_id", "reference-main"),
+            ("population_id", "population-A"),
+            ("individual_id", "individual-A"),
+            ("sequence_id", "sequence-1"),
+            ("phase_id", "phase-0"),
+        ];
+        let second_causes = [
+            ("execution_id", "RUN_collision"),
+            ("scenario_id", "scenario-f5"),
+            ("reference_id", "reference-main"),
+            ("population_id", "population-A"),
+            ("individual_id", "individual-A"),
+            ("sequence_id", "sequence-1"),
+            ("phase_id", "phase-1"),
+        ];
+
+        let first = registry
+            .derive_with_digest(root, F5IdClass::FounderCopy, &first_causes, |_| {
+                forced_digest
+            })
+            .expect("first forced digest is registered");
+        let error = registry
+            .derive_with_digest(root, F5IdClass::FounderCopy, &second_causes, |_| {
+                forced_digest
+            })
+            .expect_err("different phase with the same forced digest must collide");
+
+        assert_eq!(error.code(), "GPS-DOMAIN-002");
+        assert_eq!(error.context().get("identifier"), Some(&first));
+        assert_eq!(
+            error.context().get("category").map(String::as_str),
+            Some("f5_founder_copy")
+        );
+        assert_ne!(first_causes, second_causes);
+    }
 }
 
 /// Registro de unicidad por categoría y ámbito. Las categorías no se mezclan.

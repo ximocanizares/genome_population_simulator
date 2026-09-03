@@ -832,7 +832,7 @@ variación compleja y F7.1 define por primera vez la meiosis.
 
 F5 es un conjunto de dos documentos de autoría cerrados, no un TOML aislado.
 El TOML general F5 (`config_kind="general"`, `schema_version="3"`) es dueño de
-`seed`, `ploidy`, `reference_id`, `reference_sha256` y de la única tabla
+`seed`, `ploidy`, `reference_id`, `reference_path`, `reference_sha256` y de la única tabla
 `[f5_scenario]`, que contiene exactamente `scenario_id` y `scenario_path`. Una
 ejecución F5 exige esa tabla exactamente una vez: no admite una lista, un enlace
 ausente ni varios escenarios. Esta cardinalidad corresponde al único recorrido
@@ -884,6 +884,9 @@ founder_keys = ["f001"]
 
 La ruta de `--config` se resuelve una vez contra el directorio de trabajo de la
 CLI y se normaliza; el directorio de ese TOML general es su origen.
+`reference_path` es obligatoria, relativa a ese origen y no admite `..`; sus
+bytes FASTA se validan contra `reference_id` y `reference_sha256` antes del
+preflight de recursos.
 `f5_scenario.scenario_path` se resuelve contra ese origen, y los recursos del escenario
 contra el directorio del escenario ya resuelto; ninguna ruta admite `..`.
 `scenario_id` del enlace y del escenario deben ser idénticos. No hay búsqueda
@@ -1182,7 +1185,9 @@ dimensionalmente distintos:
   longitud o un gap; nunca se sustituye por el S realizado después del layout;
 - `reference_bases_processed`, suma exacta de las longitudes de todas las
   secuencias resueltas que recorre el escáner; `tract_count`, número de tramos
-  elegibles maximales que materializa; `sequence_count`;
+  elegibles maximales que materializa; `sequence_count`; y
+  `retained_sequence_ids`, pico de IDs FASTA retenidos simultáneamente para
+  detectar duplicados;
   `K_bound=B*S_bound`; `pair_bound=S_bound*(S_bound-1)/2`;
 - `bin_count(p)`, número de filas LD del `population_id=p`, y
   `bin_count_total=sum_p bin_count(p)`. Por tanto, la cota de filas de bins es
@@ -1215,7 +1220,7 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   X*K_bound + G_bound + B*N_pop*S_bound + tsv_rows_bound +
   json_rows_bound`;
 - `working_memory_bytes = other_working_memory_bytes +
-  256*(B+tract_count+profile_rows+normalization_rows) +
+  256*(B+tract_count+retained_sequence_ids+profile_rows+normalization_rows) +
   B*N_pop*(ceil(H*S_bound/8)+64*H+256*S_bound+192*pair_bound) +
   256*B*bin_count_total + 128*C_total + 65536`; el implementador puede
   procesar secuencialmente y usar menos, pero toda reserva F5 debe caber aquí;
@@ -1233,16 +1238,16 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   a 4096 aumenta operaciones exactamente en
   `4095*(1+L*B)`, memoria de trabajo en `256*4095` bytes y no cambia
   `output_bytes`, porque la lista no se publica y sus escalares caben en el
-  sobre fijo. Los 256 bytes por tramo cubren la lista transitoria; el búfer
-  secuencial y el
-  intervalo de máscara vigente están incluidos en los 65536 bytes fijos. La
-  lista no se publica: efectivo y manifiesto serializan solo sus dos escalares
-  de auditoría dentro del sobre fijo de 1048576 bytes, por lo que no añade una
-  fila repetida a `json_rows_bound`.
+  sobre fijo. Los 256 bytes por tramo cubren la lista transitoria y los 256
+  bytes por ID retenido cubren el índice de detección de duplicados; el búfer
+  secuencial y el intervalo de máscara vigente están incluidos en los 65536
+  bytes fijos. La lista no se publica: efectivo y manifiesto serializan sus
+  tres escalares de auditoría del escaneo dentro del sobre fijo de 1048576
+  bytes, por lo que no añade una fila repetida a `json_rows_bound`.
 
 Todas las sumas, productos, `ceil` y el cálculo de `S_bound` se ejecutan en el
 orden escrito con aritmética entera comprobada. El efectivo y el manifiesto
-conservan `reference_bases_processed`, `tract_count`,
+conservan `reference_bases_processed`, `tract_count`, `retained_sequence_ids`,
 `site_bound_per_block=S_bound`, `bin_count_total`, `profile_rows`,
 `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, las tres
 aportaciones `other_*` y los tres resultados; así un lector puede repetir la
@@ -1325,8 +1330,8 @@ orden:
 | `BLK_` / `f5_block` | `execution_id`, `scenario_id`, `reference_id`, `block_index_u64` |
 | `SITE_` / `f5_site` | `execution_id`, `scenario_id`, `reference_id`, `block_index_u64`, `site_index_u64` |
 | `HAP_` / `f5_haplotype` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `block_index_u64`, `haplotype_rank_u64`, `alleles` |
-| `FCP_` / `f5_founder_copy` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `individual_id`, `sequence_id`, `copy_index_u32` |
-| `FHA_` / `f5_block_haplotype_assignment` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `block_index_u64`, `individual_id`, `copy_index_u32`, `haplotype_id` |
+| `FCP_` / `f5_founder_copy` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `individual_id`, `sequence_id`, `phase_id` |
+| `FHA_` / `f5_block_haplotype_assignment` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `block_index_u64`, `founder_copy_id`, `haplotype_id` |
 
 `class` es el literal de la segunda columna, no el prefijo. Los enteros son
 decimales canónicos UTF-8;
@@ -1441,7 +1446,7 @@ objetos rechazan propiedades adicionales:
 | `sampling` | lista ordenada por `population_id`+`block_id`, con una fila exacta por bloque×subpoblación: `population_id`, `block_id`, `block_index`, `requested_mode`, `effective_mode`, `source` (`subpopulation_default` o `block_override`), `controlled_max_abs_error_declared` y `controlled_max_abs_error_effective`; las tolerancias son `null` en probabilístico y la efectiva es finita en `[0,0.5/C]` en controlado, con `C=individual_count*ploidy` de esa subpoblación |
 | `normalizations` | cuatro objetos exactos en orden `block_lengths`, `snp_gaps`, `snp_spectrum`, `haplotype_weights`, cada uno con `set_kind`, `canonical_order`, `algorithm="neumaier-f64-v1"`, `tolerance`, `input_values`, `input_sum`, `input_delta`, `effective_values`, `output_sum`, `output_delta`; los números recuperan el mismo `f64` y materializan físicamente la auditoría DTC-049 |
 | `limits` | objeto exacto con los cuatro límites algorítmicos y los tres presupuestos efectivos TOML |
-| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v1"`, `reference_bases_processed`, `tract_count`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; los dos recuentos de elegibilidad y los tres valores calculados son enteros `u64`; los valores calculados no exceden sus límites |
+| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v1"`, `reference_bases_processed`, `tract_count`, `retained_sequence_ids`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; los tres recuentos del escaneo y los tres valores calculados son enteros `u64`; los valores calculados no exceden sus límites |
 | `algorithms` | objeto exacto `layout="f5-layout-v1"`, `marginals="f5-spectrum-v1"`, `haplotypes="weighted-prefix-swap-v1"`, `ld="phased-r2-neumaier-v1"`, `controlled="largest-remainder-v1"`, `inbreeding="diploid-f-v1"`, `truth_projection="f5-founder-truth-projection-v2"` |
 | `rng_catalog`, `id_catalog` | objetos exactos `catalog_id`, `path`, `size_bytes`, `sha256` |
 
@@ -1552,8 +1557,10 @@ demostrablemente inviable; `GPS-DOMAIN-102` ninguna pareja LD evaluable;
 `GPS-DOMAIN-103` cuota controlada inviable; `GPS-DOMAIN-104` búsqueda agotada;
 `GPS-DOMAIN-105` H vectores únicos imposibles para S;
 `GPS-DOMAIN-106` búsqueda de layout agotada;
-`GPS-RES-101` presupuesto/dimensión excedido; y `GPS-INTERNAL-101` overflow o
-resultado numérico no finito tras entradas válidas. Cada diagnóstico incluye
+`GPS-RES-101` presupuesto/dimensión excedido, incluido el overflow comprobado
+de una fórmula de preflight provocado por dimensiones declaradas; y
+`GPS-INTERNAL-101` overflow o resultado numérico no finito en una operación
+posterior que el preflight ya había demostrado acotada. Cada diagnóstico incluye
 escenario y, cuando existen, población, bloque, sitio, campo, ruta, intento,
 límite y valor efectivo. La corrupción de un artefacto publicado usa el código
 de formato vigente y las colisiones siguen usando `GPS-DOMAIN-002`.

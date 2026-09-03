@@ -1457,7 +1457,7 @@ efectiva y verdad; no depende de F6 ni F7.
 
 | Componente | Posee/valida | Produce/consume | Prohibición |
 |---|---|---|---|
-| Escenario F5 | único enlace `[f5_scenario]` desde TOML general v3, escenario v1 exacto, IDs, perfiles/hash, ploidía efectiva homogénea, límites y sustituciones de modo/tolerancia por bloque×subpoblación | un solo `EffectiveF5Scenario` dentro de efectivo v5 | rechaza cero/varios escenarios y general v2; resuelve cada ruta desde su documento origen; no abre un workspace ni consume RNG durante preflight |
+| Escenario F5 | `reference_path`+SHA en general v3, único enlace `[f5_scenario]`, escenario v1 exacto, IDs, perfiles/hash, ploidía efectiva homogénea, límites y sustituciones de modo/tolerancia por bloque×subpoblación | una referencia verificada y un solo `EffectiveF5Scenario` dentro de efectivo v5 | rechaza cero/varios escenarios y general v2; resuelve cada ruta desde su documento origen; no abre un workspace ni consume RNG durante preflight |
 | Contratos F5 | esquemas completos general v3, escenario v1, efectivo v5, manifiesto v5, perfil, siete TSV, fallo v1 y verdad v2 | contratos cerrados que consumen todos los hitos posteriores | F5.4 solo instancia y valida esos contratos; no añade campos ni reabre esquemas; general v2, efectivo/manifiesto v4 y verdad v1 permanecen inmutables |
 | Geometría F5 | elegibilidad, máscara, layout y sitios | `f5-block-layout.tsv`, `f5-sites.tsv` | no crea frecuencias ni fundadores |
 | Constructor F5 | H, q, p, prefijos ponderados, matriz H×S, polaridades, propuestas e intentos | haplotipos, frecuencias y diagnóstico de intento | no enumera `2^H`, no lee panel, no segmenta ni recombina |

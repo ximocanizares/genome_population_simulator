@@ -17,6 +17,8 @@ pub mod error_quality;
 pub mod event_manifest;
 pub mod exact_decimal;
 pub mod execution;
+pub mod f5_preflight;
+pub mod f5_profile;
 pub mod fastq_output;
 pub mod fastq_validation;
 pub mod haplotype;

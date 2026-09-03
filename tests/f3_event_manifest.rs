@@ -257,6 +257,14 @@ fn state_diagnostics_and_artifact_coherence_is_checked_externally() {
     invalid_code["outputs"][0]["diagnostic_code"] = json!("GPS-BOGUS-001");
     assert_rejected_by_both(&root, "invalid-diagnostic-code", &invalid_code);
 
+    let mut f5_only_diagnostic = failed_document(&complete);
+    f5_only_diagnostic["diagnostics"][0] = json!({
+        "code": "GPS-CONF-101",
+        "message": "El escenario F5, su objetivo, F/P o sus límites no satisfacen el contrato de admisión.",
+    });
+    f5_only_diagnostic["outputs"][0]["diagnostic_code"] = json!("GPS-CONF-101");
+    assert_rejected_by_both(&root, "f4-event-f5-diagnostic", &f5_only_diagnostic);
+
     fs::remove_dir_all(root).expect("cleanup");
 }
 

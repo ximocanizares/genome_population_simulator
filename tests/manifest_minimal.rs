@@ -101,6 +101,16 @@ fn v4_manifest_validation_reports_the_v4_schema_label() {
 }
 
 #[test]
+fn v4_failed_manifest_rejects_f5_only_diagnostic_in_rust_and_external_validator() {
+    let mut document = failed_manifest();
+    document["diagnostics"] = json!([{
+        "code": "GPS-CONF-101",
+        "message": "El escenario F5, su objetivo, F/P o sus límites no satisfacen el contrato de admisión.",
+    }]);
+    assert_rejected("v4-failed-manifest-f5-diagnostic", &document);
+}
+
+#[test]
 fn population_snvs_link_is_discriminated_by_mode_in_rust_and_schema() {
     let mut generated_without_id = complete_manifest();
     generated_without_id["population_snvs"] = json!({

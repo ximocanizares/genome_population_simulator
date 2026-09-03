@@ -76,6 +76,27 @@ impl ExactDecimal {
             .ok_or_else(|| percent_range(self))
     }
 
+    /// Calcula `floor(multiplicand * self)` sin un producto entero intermedio
+    /// de ancho fijo. El llamador conserva la autoridad sobre el intervalo
+    /// admitido; esta operación solo aplica la representación decimal exacta.
+    pub fn floor_product(&self, multiplicand: u64) -> Result<u64, Diagnostic> {
+        let product = multiply_decimal_by_u64(&self.coefficient, multiplicand);
+        if self.exponent10 >= 0 {
+            let zero_count = usize::try_from(self.exponent10)
+                .map_err(|_| invalid_decimal("exact_decimal", "exponent overflow"))?;
+            let mut integer = product;
+            integer
+                .try_reserve(zero_count)
+                .map_err(|_| invalid_decimal("exact_decimal", "allocation failed"))?;
+            integer.extend(std::iter::repeat_n('0', zero_count));
+            parse_domain_integer(&integer)
+        } else {
+            let decimal_places = usize::try_from(self.exponent10.unsigned_abs())
+                .map_err(|_| invalid_decimal("exact_decimal", "exponent overflow"))?;
+            floor_divide_by_power_of_ten(&product, decimal_places)
+        }
+    }
+
     fn compare_with_hundred(&self) -> Ordering {
         if self.coefficient == "0" {
             return Ordering::Less;
@@ -241,6 +262,13 @@ fn ceil_divide_by_power_of_ten(digits: &str, decimal_places: usize) -> Result<u6
         .ok_or_else(|| invalid_decimal("reduction_percent", "result overflow"))
 }
 
+fn floor_divide_by_power_of_ten(digits: &str, decimal_places: usize) -> Result<u64, Diagnostic> {
+    if decimal_places >= digits.len() {
+        return Ok(0);
+    }
+    parse_domain_integer(&digits[..digits.len() - decimal_places])
+}
+
 fn parse_domain_integer(digits: &str) -> Result<u64, Diagnostic> {
     digits
         .parse::<u64>()
@@ -306,6 +334,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(long.retained_after_percent(u64::MAX).unwrap(), 0);
+    }
+
+    #[test]
+    fn exact_floor_product_does_not_overflow_before_division() {
+        let half = ExactDecimal::parse("coverage_fraction", "0.500000000000000000").unwrap();
+        assert_eq!(half.floor_product(100).unwrap(), 50);
+        let almost_one = ExactDecimal::parse("coverage_fraction", "0.999999999999999999").unwrap();
+        assert_eq!(almost_one.floor_product(u64::MAX).unwrap(), u64::MAX - 19);
     }
 
     #[test]

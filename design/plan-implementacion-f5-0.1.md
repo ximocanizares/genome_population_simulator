@@ -89,7 +89,8 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
     tramos elegibles y catálogo diagnóstico F5.
   - Se comprueba con: decimal extremo, T=0, soporte discontinuo, T>E,
     layout imposible, `S_bound` previo al RNG, H×S excesivo, `bin_count` por
-    población, `reference_bases_processed`, `tract_count`, filas de
+    población, `reference_bases_processed`, `tract_count`, pico de IDs FASTA
+    retenidos, filas de
     perfil/normalización/TSV/JSON, aportaciones ajenas F5, cada término y
     overflow de las fórmulas,
     fronteras inclusivas 2^28 unidades/2^30 bytes de trabajo/2^31 bytes de
@@ -246,7 +247,8 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
   - Se comprueba con: éxito 7/7+truth, fallo 0/7+sin truth+diagnóstico, rechazo
     preflight sin destino, interrupción `INCOMPLETE`, JSON Schema independiente,
     igualdad exacta de las tres copias `seed`, cuatro normalizaciones completas,
-    `reference_bases_processed`, `tract_count`, `S_bound`, bins, filas,
+    `reference_bases_processed`, `tract_count`, pico de IDs FASTA retenidos,
+    `S_bound`, bins, filas,
     aportaciones ajenas y tres cotas/límites, con igualdad exacta entre efectivo
     y manifiesto, y resumen MAN-70 por dosis con `recount_source` e igualdad
     obligatoria.

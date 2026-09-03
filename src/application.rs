@@ -4,15 +4,20 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::adapters::{admit_toml_header, parse_declared_config};
+use crate::adapters::{
+    admit_toml_header, admitted_is_f5_general_v3, parse_declared_config, parse_declared_f5_general,
+    parse_declared_f5_scenario, validate_declared_f5_pair,
+};
 use crate::biological_contamination::BiologicalContaminationSettings;
 use crate::chimera::ChimeraSettings;
 use crate::configuration::{
-    DeclaredGeneralConfig, DeclaredPopulationSnvs, DeclaredReductionTarget,
-    DeclaredReferenceSource, DeclaredTechnicalEventTarget, ExpectedConfigKind, SequenceClass,
+    DeclaredF5GeneralConfig, DeclaredF5Scenario, DeclaredGeneralConfig, DeclaredPopulationSnvs,
+    DeclaredReductionTarget, DeclaredReferenceSource, DeclaredTechnicalEventTarget,
+    ExpectedConfigKind, SequenceClass,
 };
 use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
+use crate::f5_profile::{F5Profile, load_f5_profile};
 use crate::haplotype::{HaplotypePhase, Ploidy};
 use crate::identity::{
     AutomaticIdRequest, EventId, FounderKey, IdClass, IdentityRegistry, IndividualId, PopulationId,
@@ -201,6 +206,93 @@ pub struct EffectiveConfig {
     direct_events: Vec<EffectiveDirectEvent>,
     technical_event: Option<EffectiveTechnicalEvent>,
     vcf_output: Option<VcfOutputMode>,
+}
+
+/// Configuración F5 ya resuelta entre sus dos documentos de autoría y el
+/// paquete de perfil F5. La máscara y la referencia pertenecen a F5.0.4.
+#[derive(Clone, Debug)]
+pub struct EffectiveF5Config {
+    general_path: PathBuf,
+    scenario_path: PathBuf,
+    profile_metadata_path: PathBuf,
+    excluded_regions_path: Option<PathBuf>,
+    reference_path: PathBuf,
+    seed: String,
+    seed_origin: String,
+    ploidy: u8,
+    reference_id: String,
+    reference_sha256: String,
+    scenario_id: String,
+    profile: F5Profile,
+    general: DeclaredF5GeneralConfig,
+    scenario: DeclaredF5Scenario,
+}
+
+/// Resultado de la frontera CLI. La rama F5 solo admite y resuelve enlaces en
+/// F5.0.1; su ejecución se mantiene explícitamente aplazada.
+#[derive(Clone, Debug)]
+pub enum CliValidatedConfig {
+    Legacy(Box<EffectiveConfig>),
+    F5(Box<EffectiveF5Config>),
+}
+
+impl EffectiveF5Config {
+    #[must_use]
+    pub fn general_path(&self) -> &Path {
+        &self.general_path
+    }
+    #[must_use]
+    pub fn scenario_path(&self) -> &Path {
+        &self.scenario_path
+    }
+    #[must_use]
+    pub fn profile_metadata_path(&self) -> &Path {
+        &self.profile_metadata_path
+    }
+    #[must_use]
+    pub fn excluded_regions_path(&self) -> Option<&Path> {
+        self.excluded_regions_path.as_deref()
+    }
+    #[must_use]
+    pub fn reference_path(&self) -> &Path {
+        &self.reference_path
+    }
+    #[must_use]
+    pub fn seed(&self) -> &str {
+        &self.seed
+    }
+    #[must_use]
+    pub fn seed_origin(&self) -> &str {
+        &self.seed_origin
+    }
+    #[must_use]
+    pub const fn ploidy(&self) -> u8 {
+        self.ploidy
+    }
+    #[must_use]
+    pub fn reference_id(&self) -> &str {
+        &self.reference_id
+    }
+    #[must_use]
+    pub fn reference_sha256(&self) -> &str {
+        &self.reference_sha256
+    }
+    #[must_use]
+    pub fn scenario_id(&self) -> &str {
+        &self.scenario_id
+    }
+    #[must_use]
+    pub const fn profile(&self) -> &F5Profile {
+        &self.profile
+    }
+    #[must_use]
+    pub const fn declared_general(&self) -> &DeclaredF5GeneralConfig {
+        &self.general
+    }
+    #[must_use]
+    pub const fn declared_scenario(&self) -> &DeclaredF5Scenario {
+        &self.scenario
+    }
 }
 
 /// Perfil sintético único que F3 genera antes de que F4 incorpore perfiles
@@ -574,6 +666,171 @@ pub fn load_and_validate_config_with_entropy(
     let admitted = admit_toml_header(path, bytes, ExpectedConfigKind::General)?;
     let general = parse_declared_config(admitted)?;
     build_effective_config_with_entropy(&general, entropy)
+}
+
+/// Despacha general v2 al flujo histórico y general v3 al lector F5. La
+/// cabecera se admite una sola vez antes de seleccionar la semántica.
+pub fn load_and_validate_cli_config(path: &Path) -> Result<CliValidatedConfig, Diagnostic> {
+    let bytes = std::fs::read(path).map_err(|error| input_error(path, error))?;
+    let admitted = admit_toml_header(path, bytes, ExpectedConfigKind::GeneralDispatch)?;
+    if admitted_is_f5_general_v3(&admitted) {
+        return load_and_validate_f5_config(path)
+            .map(Box::new)
+            .map(CliValidatedConfig::F5);
+    }
+    let general = parse_declared_config(admitted)?;
+    build_effective_config_with_entropy(&general, &mut SystemEntropy)
+        .map(Box::new)
+        .map(CliValidatedConfig::Legacy)
+}
+
+/// Carga el par F5 desde la ruta de CLI. La ruta de CLI se ancla una sola vez
+/// al directorio actual; el escenario se ancla al directorio del general.
+pub fn load_and_validate_f5_config(path: &Path) -> Result<EffectiveF5Config, Diagnostic> {
+    load_and_validate_f5_config_with_entropy(path, &mut SystemEntropy)
+}
+
+pub fn load_and_validate_f5_config_with_entropy(
+    path: &Path,
+    entropy: &mut impl EntropySource,
+) -> Result<EffectiveF5Config, Diagnostic> {
+    let general_path = absolute_normalized_path(path)?;
+    let general_bytes =
+        std::fs::read(&general_path).map_err(|error| input_error(&general_path, error))?;
+    let admitted_general =
+        admit_toml_header(&general_path, general_bytes, ExpectedConfigKind::F5General)
+            .map_err(Diagnostic::into_f5_configuration)?;
+    let general =
+        parse_declared_f5_general(admitted_general).map_err(Diagnostic::into_f5_configuration)?;
+    let parent = general_path.parent().ok_or_else(|| {
+        config_error_f5(
+            &general.source,
+            "path",
+            "el general no tiene directorio padre",
+        )
+    })?;
+    let scenario_path = lexical_join(parent, Path::new(general.scenario_path.value()))?;
+    let reference_path = lexical_join(parent, Path::new(general.reference_path.value()))?;
+    let scenario_bytes =
+        std::fs::read(&scenario_path).map_err(|error| input_error(&scenario_path, error))?;
+    let admitted_scenario = admit_toml_header(
+        &scenario_path,
+        scenario_bytes,
+        ExpectedConfigKind::F5Scenario,
+    )
+    .map_err(Diagnostic::into_f5_configuration)?;
+    let scenario =
+        parse_declared_f5_scenario(admitted_scenario).map_err(Diagnostic::into_f5_configuration)?;
+    validate_declared_f5_pair(&general, &scenario).map_err(Diagnostic::into_f5_configuration)?;
+    let scenario_parent = scenario_path.parent().ok_or_else(|| {
+        config_error_f5(
+            &scenario.source,
+            "path",
+            "el escenario no tiene directorio padre",
+        )
+    })?;
+    let profile_metadata_path = lexical_join(
+        scenario_parent,
+        Path::new(scenario.profile_metadata_path.value()),
+    )?;
+    let excluded_regions_path = scenario
+        .excluded_regions_path
+        .as_ref()
+        .map(|path| lexical_join(scenario_parent, Path::new(path.value())))
+        .transpose()?;
+    let population_ids = scenario
+        .subpopulations
+        .iter()
+        .map(|population| population.population_id.value().clone())
+        .collect::<BTreeSet<_>>();
+    let profile = load_f5_profile(
+        &profile_metadata_path,
+        scenario.profile_metadata_sha256.value(),
+        &population_ids,
+    )?;
+    let (root_seed, origin) = resolve_root_seed(
+        general.seed.as_ref().map(|seed| seed.value().as_str()),
+        entropy,
+    )
+    .map_err(|error| error.with("path", general_path.display().to_string()))?;
+    Ok(EffectiveF5Config {
+        general_path,
+        scenario_path,
+        profile_metadata_path,
+        excluded_regions_path,
+        reference_path,
+        seed: root_seed.to_hex(),
+        seed_origin: origin.as_str().to_owned(),
+        ploidy: u8::try_from(*general.ploidy.value())
+            .map_err(|_| config_error_f5(&general.source, "ploidy", "ploidía fuera de rango"))?,
+        reference_id: general.reference_id.value().clone(),
+        reference_sha256: general.reference_sha256.value().clone(),
+        scenario_id: general.scenario_id.value().clone(),
+        profile,
+        general,
+        scenario,
+    })
+}
+
+fn absolute_normalized_path(path: &Path) -> Result<PathBuf, Diagnostic> {
+    use std::path::Component;
+
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| {
+                Diagnostic::io(
+                    "GPS-IO-001",
+                    "No se pudo resolver el directorio de trabajo.",
+                )
+                .with("detail", error.to_string())
+            })?
+            .join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::Normal(value) => normalized.push(value),
+            // La ruta inicial viene de la CLI y se ancla al cwd; `..` solo se
+            // prohíbe en los enlaces declarados, donde impediría la auditoría
+            // de la procedencia general→escenario→recurso.
+            Component::ParentDir => {
+                normalized.pop();
+            }
+        }
+    }
+    Ok(normalized)
+}
+
+fn lexical_join(base: &Path, child: &Path) -> Result<PathBuf, Diagnostic> {
+    use std::path::Component;
+    let mut result = PathBuf::new();
+    for component in base.components().chain(child.components()) {
+        match component {
+            Component::Prefix(_) | Component::RootDir => result.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::Normal(value) => result.push(value),
+            Component::ParentDir => {
+                return Err(Diagnostic::f5_configuration(
+                    child.display().to_string(),
+                    "path",
+                    "las rutas F5 no admiten ..",
+                ));
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn config_error_f5(
+    source: &crate::configuration::AdmittedToml,
+    field: &str,
+    detail: &str,
+) -> Diagnostic {
+    Diagnostic::f5_configuration(source.path().display().to_string(), field, detail)
 }
 
 pub fn validate_general_config(
