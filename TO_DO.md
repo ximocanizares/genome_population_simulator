@@ -29,3 +29,16 @@
   - La escritura es por flujo; se relee y valida el FASTQ descomprimido antes
     de publicar atómicamente. Tamaño y SHA-256 se calculan y verifican sobre
     los bytes gzip finales. Las pruebas incluyen decodificación con `gzip -cd`.
+
+## Controles de error de secuenciación PE
+
+- [ ] Exponer en el TOML del evento técnico F4 escalas de error independientes
+  para R1 y R2.
+  - Deben admitir el valor `0`, que produce exactamente cero sustituciones de
+    secuenciación en ese mate, y conservar `1` como perfil actual.
+  - La configuración efectiva y el manifiesto del evento deben registrar los
+    valores solicitados, efectivos, oportunidades y errores realizados por
+    mate; `error_scale = 0` exige `errors = 0`.
+  - Este control es una dependencia de VE-D02: permite un ensayo PE neutro de
+    validación externa con contaminación, quimeras e *index hopping* también
+    fijados a cero.

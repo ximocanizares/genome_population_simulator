@@ -136,15 +136,18 @@ No se ha instalado ni descargado ninguna herramienta.
 La configuración F4 pública permite fijar a cero quimeras, contaminación e
 *index hopping*. Sin embargo, el ejecutor aplica actualmente
 `ErrorQualitySettings::default()`: escala de error 1 y el perfil incorporado de
-calidades. Los campos de escala de error no forman parte del TOML general v2.
+calidades. Los campos de escala de error por mate no forman parte aún del TOML
+del evento técnico; su incorporación está registrada en `TO_DO.md`,
+«Controles de error de secuenciación PE».
 
 Por tanto, el programa actual no ofrece a la vez PE y ausencia de errores de
 secuenciación. F3 ofrece un perfil sin errores, pero es single-end. Antes de
 ejecutar el ensayo debe aprobarse una de estas salidas, sin resolverla dentro de
 este plan:
 
-1. añadir en el documento propietario de F4 un modo PE técnicamente neutro y su
-   contrato observable;
+1. añadir en el documento propietario de F4 controles TOML de escala de error
+   por mate y un contrato observable; el perfil neutro fija ambas escalas a 0,
+   además de quimeras, contaminación e *index hopping* a 0;
 2. aceptar para el piloto el perfil PE actual y retirar la condición «sin
    errores de secuenciación»;
 3. ejecutar primero un control SE neutro de F3, dejando el control PE solicitado
@@ -335,18 +338,18 @@ condiciones estructurales siguientes:
 
 | ID | Decisión pendiente | Opciones o recomendación no aprobada | Bloquea |
 |---|---|---|---|
-| VE-D01 | Propiedad y coordenada | Recomendada: banco externo DTF-024 con coordenada `VE`, no F5 ni F9.5 | Numeración ejecutable y documentos de origen |
-| VE-D02 | PE sin errores de secuenciación | Resolver la incompatibilidad de §5.3. Recomendada: definir primero el contrato PE neutro; no fingir neutralidad con el perfil actual | Generación de VE-SNP y VE-LD |
-| VE-D03 | Contenido exacto de VE-SNP | Recomendada: solo SNP bialélicos, sin multialelia ni *indels*, en la primera prueba | Configuración y comparador |
-| VE-D04 | Densidad y selección de loci | Fijar número/densidad, frecuencias y si se restringen a regiones únicas A/C/G/T | Generación y criterio de exactitud |
-| VE-D05 | Versiones y argumentos | Aprobar FreeBayes, minimap2, samtools y bcftools; decidir si se homologa todo con HTSlib 1.24 | Comandos reproducibles |
-| VE-D06 | Normalización y emparejamiento VCF | Decidir recorte/alineamiento izquierdo, descomposición multialélica, comparación por alelo y herramienta | Métricas SNP/indel |
-| VE-D07 | Regiones llamables | Fijar umbrales de profundidad, calidad de mapeo/base, repetición y tratamiento de `N` | Denominadores y umbrales |
-| VE-D08 | Umbrales de aprobación | Fijar sensibilidad, precisión, concordancia genotípica, tasa de no llamada y cobertura | Cierre científico |
-| VE-D09 | Métrica LD | Elegir estadístico, pares/bins y tolerancia. Recomendada para el piloto: comparar el mismo estadístico sin fase en verdad y llamada y etiquetarlo como conservación de señal, no fase | VE-LD |
-| VE-D10 | Recuperación de fase | Decidir si se exige. Si se exige, evaluar faseador y limitar la afirmación a bloques conectados/identificables | Afirmación sobre haplotipos |
-| VE-D11 | Multialelia e *indels* | Recomendada: excluirlos de VE-SNP 0.1 y crear después casos propios; no descartarlos silenciosamente del VCF | Comparación completa |
-| VE-D12 | Repeticiones | Decidir si basta una semilla fija para el piloto o se exigirán réplicas | Generalización del resultado |
+| VE-D01 | Propiedad y coordenada | **Aprobado:** banco externo DTF-024 con coordenada `VE`, no F5 ni F9.5 | Numeración ejecutable y documentos de origen |
+| VE-D02 | PE sin errores de secuenciación | Depende de la mejora F4 registrada en `TO_DO.md`: controles TOML de escala de error por R1/R2 y su auditoría. Recomendada: perfil PE neutro con ambas escalas y todos los artefactos configurables a 0; no fingir neutralidad con el perfil actual | Generación de VE-SNP y VE-LD |
+| VE-D03 | Contenido exacto de VE-SNP | **Aprobado:** solo SNP bialélicos, sin multialelia ni *indels*, en VE-SNP 0.1 | Configuración y comparador |
+| VE-D04 | Densidad y selección de loci | **Aprobado:** 1.000 SNP en posiciones A/C/G/T elegibles, no enmascaradas ni ambiguas, con frecuencia ALT uniforme en [0,1; 0,4) | Generación y criterio de exactitud |
+| VE-D05 | Versiones y argumentos | **Aprobado:** congelar minimap2 2.26-r1175, samtools/bcftools 1.21 locales y versión+hash de FreeBayes antes de ejecutar; HTSlib 1.24 no es requisito del banco externo | Comandos reproducibles |
+| VE-D06 | Normalización y emparejamiento VCF | **Aprobado para VE-SNP 0.1:** comparar SNP bialélicos por CHROM, posición, REF, ALT y GT por muestra; ignorar QUAL/FILTER/INFO/GPS_CASE. Normalización compleja se aplaza a multialelia/*indels* | Métricas SNP/indel |
+| VE-D07 | Regiones llamables | **Aprobado para VE-SNP 0.1:** A/C/G/T seleccionadas, no enmascaradas ni ambiguas, profundidad ≥10×, MAPQ ≥20 y BQ ≥20. `N`, máscara, repetición y baja llamabilidad quedan fuera de sus denominadores, pero requieren un ensayo posterior específico; no se silencian como ausencia de evidencia | Denominadores y umbrales |
+| VE-D08 | Umbrales de aprobación | **Aprobado:** en el PE neutro, sensibilidad, precisión y concordancia de GT del 100% en loci llamables; cero no llamadas. Cualquier discrepancia se investiga | Cierre científico |
+| VE-D09 | Métrica LD | **Aplazado:** el ensayo de LD poblacional se realizará después de elegir un faseador y su evaluación propia | VE-LD |
+| VE-D10 | Recuperación de fase | **Aprobado para VE 0.1:** no usar faseador. Inspeccionar solo fase local explícita y trazable emitida por FreeBayes; si no existe, registrar «fase no evaluable». Fase por bloques queda para después | Afirmación sobre haplotipos |
+| VE-D11 | Multialelia e *indels* | **Aprobado:** excluirlos deliberadamente de VE-SNP 0.1 y crear después casos propios; no descartarlos silenciosamente | Comparación completa |
+| VE-D12 | Repeticiones | **Aprobado:** una ejecución con semilla fija y una repetición exacta al cierre; réplicas con otras semillas se aplazan a un estudio de variabilidad | Generalización del resultado |
 
 ## 10. Plan propuesto
 
@@ -367,8 +370,9 @@ VE-D01 y las decisiones que lo bloqueen.
 - ☐ **VE.0.2. Resolver el escenario técnico PE neutro.**
   - Depende de: VE.0.1.
   - Procede de: §5.3 y VE-D02.
-  - Cambia: solo el documento propietario que se apruebe; si exige ampliar F4,
-    esa ampliación necesitará especificación, arquitectura y plan propios.
+  - Cambia: depende de completar primero la mejora F4 de `TO_DO.md`,
+    «Controles de error de secuenciación PE»; esa ampliación necesita su propia
+    especificación, arquitectura y plan antes de materializar VE.
   - Se comprueba con: una configuración admitida cuyo manifiesto demuestre cero
     contaminación, quimeras, *index hopping* y errores realizados, sin usar F5.
 
@@ -499,6 +503,21 @@ VE-D01 y las decisiones que lo bloqueen.
 > **PAUSA-VE.3 / CIERRE.** Aprobar por separado: interoperabilidad FASTQ/BAM,
 > recuperación SNP, conservación de LD y recuperación de fase si se ejecutó.
 
+### VE.4 — Ensayo posterior de regiones difíciles
+
+- ☐ **VE.4.1. Medir el comportamiento en regiones no llamables del piloto.**
+  - Depende de: PAUSA-VE.1 y un contrato específico de regiones difíciles.
+  - Procede de: VE-D07 y §6.5.
+  - Cambia: conjunto externo separado con `N`, regiones enmascaradas o
+    repetitivas y estratos de cobertura/MAPQ/BQ bajos; no modifica los
+    denominadores de VE-SNP 0.1.
+  - Se comprueba con: métricas estratificadas de mapeo, cobertura, no llamada,
+    FP y FN por tipo de región, acompañadas de la verdad y de una regla
+    explícita para cada ausencia de llamada.
+
+> **PAUSA-VE.4.** Revisar por separado los límites observados de las regiones
+> difíciles; no generalizar el resultado del piloto de regiones llamables.
+
 ## 11. Recursos y tiempo de planificación
 
 El único volumen calculable antes de ejecutar es el de 300 millones de bases y
@@ -534,6 +553,8 @@ reduce cobertura, individuos ni evidencia automáticamente.
 - variantes estructurales, repetición en tándem y comparación de llamadas
   complejas;
 - multialelia e *indels* hasta resolver VE-D11;
+- ensayo de regiones con `N`, máscara, repetición o baja llamabilidad, que se
+  conserva como VE.4 y no se descarta silenciosamente;
 - afirmaciones de fase de largo alcance no identificable con PE150;
 - comparaciones entre la referencia reducida y coordenadas del tomate original;
 - publicación, instalación o descarga de herramientas.
