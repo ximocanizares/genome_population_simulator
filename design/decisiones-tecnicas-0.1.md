@@ -1066,6 +1066,10 @@ maximales ordenados. Para un objetivo T exige `T<=E` y
 acotada, porque longitudes variables pueden cambiar el empaquetado. Si falla
 una de esas desigualdades, no existe B, se excede `u64` o el perfil no contiene
 un soporte continuo, el preflight devuelve `GPS-DOMAIN-101` sin consumir RNG.
+El resultado queda vinculado a `scenario_id`, identidad y SHA-256 de referencia,
+perfil y objetivo declarado: `block_count`, `covered_bases` o el racional
+reducido exacto de `coverage_fraction`. Un consumidor no puede reutilizarlo con
+otro objetivo aunque produzca el mismo B o T.
 
 ### Layout y marginales acotados
 
@@ -1076,8 +1080,12 @@ renormalizados sobre valores factibles: el peso base de un entero v es
 `row_weight/(row_max-row_min+1)` y después se normalizan con Neumaier en v
 creciente; la elección categórica sigue la regla U53 anterior. Gaps usan la
 misma regla sin condicionamiento residual. Para `block_count`, todas las
-longitudes se sortean sin esa condición. En cada intento se ordenan de mayor a
-menor, con `block_index` como
+longitudes se sortean sin esa condición. El selector de longitudes recorre los
+enteros factibles en orden creciente dos veces: primero para el total Neumaier
+y después para el prefijo que cruza U53; no colapsa filas ni sustituye esa
+semántica por una elección por banda. Su cardinalidad máxima es
+`length_support_cardinality=Lmax-Lmin+1` y se presupuesta antes de RNG. En cada
+intento se ordenan de mayor a menor, con `block_index` como
 desempate, y cada bloque elige uniformemente un inicio entre los tramos elegibles
 que admiten su longitud, actualizados tras cada colocación. «Uniformemente»
 significa indexar todos los inicios válidos de todos esos tramos en orden
@@ -1215,7 +1223,8 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
 
 - `operation_units = other_operation_units + 2*reference_bases_processed +
   tract_count + L*B*tract_count + profile_rows +
-  normalization_rows + L*B*(B+S_bound) +
+  normalization_rows + 2*L*B*length_support_cardinality +
+  L*B*(B+S_bound) +
   B*N_pop*A*(H*S_bound*S_bound+Q*S_bound) + B*C_total +
   X*K_bound + G_bound + B*N_pop*S_bound + tsv_rows_bound +
   json_rows_bound`;
@@ -1232,6 +1241,9 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   rebasar el presupuesto. El término `2*reference_bases_processed` cubre una
   unidad para leer y clasificar cada base y otra por base como cota del avance
   del cursor de máscara; `tract_count` añade una unidad por tramo emitido. Los
+  `2*L*B*length_support_cardinality` cubren las dos enumeraciones literales de
+  longitudes por intento y bloque; no se admiten recorridos no presupuestados.
+  Los
   factores `L*B*tract_count` son intentos×bloques×tramos y añaden una unidad por
   consulta del recorrido directo obligatorio: no sustituyen ni duplican la
   emisión. Por tanto, con todos los demás escalares iguales, pasar de un tramo

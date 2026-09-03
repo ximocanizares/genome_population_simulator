@@ -379,11 +379,19 @@ F5→F6; la trazabilidad antigua se migra por REQ-EVO-74–77 y ACE-117.
 ### F6. Referencias y variación complejas
 
 **Objetivo:** ampliar la verdad F5 sin alterar sus fundadores intactos. **Depende
-de:** F5 cerrada. F6.1 crea referencias estructurales; F6.2 representa SV; F6.3
-generaliza ploidía; F6.4 añade repeticiones; F6.5 resuelve variantes complejas y
-complemento VCF; F6.6 separa conjuntos y matrices por referencia. F6 no hereda
+de:** F5 cerrada. **F6.1. Referencias estructurales.** **F6.2. Variantes
+estructurales.** **F6.3. Ploidía generalizada.** **F6.4. Repeticiones.**
+**F6.5. Variantes complejas y complemento VCF.** **F6.6. Conjuntos y matrices
+por referencia.** F6 no hereda
 panel ni recombinación de F5. Su cierre demuestra reconstrucción, límites,
 solapamientos y aislamiento entre referencias.
+
+**Subpaso diferido:**
+
+- **F6.5.a. Variación aleatoria directa.** Configurar cantidad media o densidad,
+  unidad, distribuciones y regiones globales y por individuo, y comprobar que la
+  creación inicial directa consume las sustituciones individuales sin alterar la
+  matriz poblacional.
 
 > Revisión de F6: confirmar que la complejidad estructural no rompe la verdad
 > fundadora de F5 ni el realismo técnico establecido en F4.

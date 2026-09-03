@@ -52,6 +52,27 @@ impl Diagnostic {
             .with("detail", detail.into())
     }
 
+    /// Diagnóstico de inviabilidad demostrada de la geometría F5.
+    ///
+    /// Se expone para que los componentes geométricos puros puedan informar la
+    /// misma frontera estable que el preflight, sin necesitar una configuración
+    /// completa ni transformar el error en uno de configuración.
+    #[must_use]
+    pub fn f5_domain(scenario_id: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::from_catalog("GPS-DOMAIN-101")
+            .with("scenario_id", scenario_id.into())
+            .with("detail", detail.into())
+    }
+
+    /// Diagnóstico F5 para un overflow o resultado no finito que aparece
+    /// después de que el preflight haya demostrado las cotas del escenario.
+    #[must_use]
+    pub fn f5_internal(scenario_id: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::from_catalog("GPS-INTERNAL-101")
+            .with("scenario_id", scenario_id.into())
+            .with("detail", detail.into())
+    }
+
     #[must_use]
     pub fn into_f5_configuration(self) -> Self {
         let mut context = self.context;

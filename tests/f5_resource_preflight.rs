@@ -5,6 +5,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::load_and_validate_f5_config;
+use genome_population_simulator::f5_layout::F5BlockLengthPlan;
 use genome_population_simulator::f5_preflight::{
     F5_HARD_OPERATION_LIMIT, F5_HARD_OUTPUT_LIMIT, F5_HARD_WORKING_MEMORY_LIMIT, F5OtherResources,
     preflight_f5_resources,
@@ -348,7 +349,7 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
     assert_eq!(compact.bin_count_total(), 1);
     assert_eq!(compact.tsv_rows_bound(), 11);
     assert_eq!(compact.json_rows_bound(), 30);
-    assert_eq!(compact.operation_units(), 24_651);
+    assert_eq!(compact.operation_units(), 24_653);
     assert_eq!(compact.working_memory_bytes(), 70_465);
     assert_eq!(compact.output_bytes(), 1_306_624);
     assert_eq!(
@@ -899,5 +900,124 @@ fn zero_fractional_target_is_a_domain_failure_without_rng() {
     let error =
         preflight_f5_resources(&config, F5OtherResources::default()).expect_err("T=0 must fail");
     assert_eq!(error.code(), "GPS-DOMAIN-101");
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn block_length_plan_rejects_a_preflight_crossed_with_another_profile() {
+    let root = temporary("crossed-length-profile");
+    fs::create_dir_all(&root).expect("root");
+    let first_ld_profile = "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t1\t0.5\t0.05\n";
+    let second_ld_profile = "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t2\t0.5\t0.05\n";
+    let haplotypes = "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n";
+    let first_path = custom_configuration(
+        &root.join("first"),
+        "",
+        "AAA",
+        "length_min_bp\tlength_max_bp\tweight\n2\t2\t1\n",
+        haplotypes,
+        first_ld_profile,
+    );
+    let second_path = custom_configuration(
+        &root.join("second"),
+        "",
+        "AAA",
+        "length_min_bp\tlength_max_bp\tweight\n3\t3\t1\n",
+        haplotypes,
+        second_ld_profile,
+    );
+    let first = load_and_validate_f5_config(&first_path).expect("first configuration");
+    let second = load_and_validate_f5_config(&second_path).expect("second configuration");
+    let first_preflight =
+        preflight_f5_resources(&first, F5OtherResources::default()).expect("first preflight");
+
+    F5BlockLengthPlan::from_preflight(&first, &first_preflight)
+        .expect("the bound configuration and preflight must be accepted");
+    let error = F5BlockLengthPlan::from_preflight(&second, &first_preflight)
+        .expect_err("a preflight from another profile must be rejected");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(error.context()["fields"], "preflight.binding");
+    assert!(error.context()["detail"].contains("no pertenece"));
+    assert_ne!(
+        first_preflight.profile_metadata_sha256(),
+        second.declared_scenario().profile_metadata_sha256.value()
+    );
+    assert_eq!(first_preflight.block_length_minimum(), 2);
+    assert_eq!(first_preflight.block_length_maximum(), 2);
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn block_length_plan_binds_same_profile_preflights_to_the_declared_objective() {
+    let root = temporary("crossed-length-target");
+    fs::create_dir_all(&root).expect("root");
+    let block_path = configuration(&root.join("block"), None, "", "AAAA");
+    let covered_path = configuration(&root.join("covered"), None, "", "AAAA");
+    let fraction_path = configuration(&root.join("fraction"), None, "", "AAAA");
+    let equivalent_fraction_path =
+        configuration(&root.join("equivalent-fraction"), None, "", "AAAA");
+    replace_scenario(
+        &root.join("covered"),
+        "block_count = 1",
+        "covered_bases = 2",
+    );
+    replace_scenario(
+        &root.join("fraction"),
+        "block_count = 1",
+        "coverage_fraction = 0.5",
+    );
+    replace_scenario(
+        &root.join("equivalent-fraction"),
+        "block_count = 1",
+        "coverage_fraction = 0.50",
+    );
+
+    let block = load_and_validate_f5_config(&block_path).expect("block configuration");
+    let covered = load_and_validate_f5_config(&covered_path).expect("covered configuration");
+    let fraction = load_and_validate_f5_config(&fraction_path).expect("fraction configuration");
+    let equivalent_fraction = load_and_validate_f5_config(&equivalent_fraction_path)
+        .expect("equivalent fraction configuration");
+    assert_eq!(
+        block.declared_scenario().profile_metadata_sha256.value(),
+        covered.declared_scenario().profile_metadata_sha256.value(),
+        "the test must cross only objectives, not profiles"
+    );
+
+    let block_preflight =
+        preflight_f5_resources(&block, F5OtherResources::default()).expect("block preflight");
+    let fraction_preflight =
+        preflight_f5_resources(&fraction, F5OtherResources::default()).expect("fraction preflight");
+    for crossed in [&covered, &fraction] {
+        let error = F5BlockLengthPlan::from_preflight(crossed, &block_preflight)
+            .expect_err("a same-profile preflight must not cross target kinds");
+        assert_eq!(error.code(), "GPS-CONF-101");
+        assert_eq!(error.context()["fields"], "preflight.binding");
+    }
+    let error = F5BlockLengthPlan::from_preflight(&covered, &fraction_preflight)
+        .expect_err("covered_bases and coverage_fraction remain distinct objectives");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    F5BlockLengthPlan::from_preflight(&equivalent_fraction, &fraction_preflight)
+        .expect("equivalent decimal spellings bind to the same exact rational");
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn wide_literal_length_support_is_rejected_by_preflight_before_enumeration() {
+    let root = temporary("wide-length-support");
+    fs::create_dir_all(&root).expect("root");
+    let general = custom_configuration_with_gap(
+        &root,
+        "",
+        "AAA",
+        "length_min_bp\tlength_max_bp\tweight\n2\t134217729\t1\n",
+        "gap_min_bp\tgap_max_bp\tweight\n134217729\t134217729\t1\n",
+        "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t134217728\t0.5\t0.05\n",
+    );
+    let config = load_and_validate_f5_config(&general).expect("wide support configuration");
+    let error = preflight_f5_resources(&config, F5OtherResources::default())
+        .expect_err("the literal two-pass support cannot exceed the operation budget");
+    assert_eq!(error.code(), "GPS-RES-101");
+    assert!(error.context()["detail"].contains("length_support_cardinality"));
     fs::remove_dir_all(root).expect("cleanup");
 }

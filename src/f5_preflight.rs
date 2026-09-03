@@ -95,9 +95,28 @@ impl F5EligibleTract {
     }
 }
 
+/// Objetivo F5 declarado y resuelto que vincula el preflight con su consumidor.
+///
+/// La fracción se conserva como racional reducido, no como `f64`: dos
+/// literales que denotan el mismo racional son el mismo objetivo, pero nunca
+/// se confunden con `covered_bases` aunque den el mismo T en una referencia.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum F5ResolvedTarget {
+    BlockCount { declared_block_count: u64 },
+    CoveredBases { declared_covered_bases: u64 },
+    CoverageFraction { numerator: u64, denominator: u64 },
+}
+
 /// Resultado del preflight `f5-resource-accounting-v1`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct F5ResourcePreflight {
+    scenario_id: String,
+    reference_id: String,
+    reference_sha256: String,
+    profile_id: String,
+    profile_metadata_sha256: String,
+    block_length_minimum: u64,
+    block_length_maximum: u64,
     eligible_tracts: Vec<F5EligibleTract>,
     eligible_bases: u64,
     reference_bases_processed: u64,
@@ -118,12 +137,41 @@ pub struct F5ResourcePreflight {
     output_limit_bytes: u64,
     block_count: u64,
     target_bases: Option<u64>,
+    resolved_target: F5ResolvedTarget,
 }
 
 impl F5ResourcePreflight {
     #[must_use]
     pub const fn algorithm(&self) -> &'static str {
         F5_RESOURCE_ACCOUNTING_ALGORITHM
+    }
+    #[must_use]
+    pub fn scenario_id(&self) -> &str {
+        &self.scenario_id
+    }
+    #[must_use]
+    pub fn reference_id(&self) -> &str {
+        &self.reference_id
+    }
+    #[must_use]
+    pub fn reference_sha256(&self) -> &str {
+        &self.reference_sha256
+    }
+    #[must_use]
+    pub fn profile_id(&self) -> &str {
+        &self.profile_id
+    }
+    #[must_use]
+    pub fn profile_metadata_sha256(&self) -> &str {
+        &self.profile_metadata_sha256
+    }
+    #[must_use]
+    pub const fn block_length_minimum(&self) -> u64 {
+        self.block_length_minimum
+    }
+    #[must_use]
+    pub const fn block_length_maximum(&self) -> u64 {
+        self.block_length_maximum
     }
     #[must_use]
     pub fn eligible_tracts(&self) -> &[F5EligibleTract] {
@@ -206,6 +254,10 @@ impl F5ResourcePreflight {
     pub const fn target_bases(&self) -> Option<u64> {
         self.target_bases
     }
+    #[must_use]
+    pub const fn resolved_target(&self) -> &F5ResolvedTarget {
+        &self.resolved_target
+    }
 }
 
 /// Calcula toda la admisión de recursos F5 antes de RNG, layout o publicación.
@@ -276,7 +328,7 @@ fn preflight_resolved_f5_resources(
         ));
     }
 
-    let (block_count, target_bases) =
+    let (block_count, target_bases, resolved_target) =
         resolve_capacity(config, eligible_bases, &eligible_tracts, l_min, l_max)?;
     if config
         .declared_scenario()
@@ -325,6 +377,11 @@ fn preflight_resolved_f5_resources(
     let x = mul("X", c_total, sequence_count, config)?;
     let g_bound = mul("G_bound", founder_count, k_bound, config)?;
     let bin_count_total = sum_bins(config)?;
+    // El selector literal recorre cada entero factible dos veces (total y
+    // prefijo). La restricción residual nunca puede ampliar este soporte.
+    let length_support_cardinality = sub("length_support_cardinality", l_max, l_min, config)?
+        .checked_add(1)
+        .ok_or_else(|| resource(config, "overflow en length_support_cardinality"))?;
     let profile_rows = add_many(
         config,
         "profile_rows",
@@ -395,6 +452,17 @@ fn preflight_resolved_f5_resources(
             )?,
             profile_rows,
             normalization_rows,
+            mul(
+                "2*L*B*length_support_cardinality",
+                2,
+                mul(
+                    "L*B*length_support_cardinality",
+                    mul("L*B", layout_attempts, block_count, config)?,
+                    length_support_cardinality,
+                    config,
+                )?,
+                config,
+            )?,
             mul(
                 "L*B*(B+S_bound)",
                 mul("L*B", layout_attempts, block_count, config)?,
@@ -531,11 +599,22 @@ fn preflight_resolved_f5_resources(
         return Err(resource(
             config,
             format!(
-                "operation_units={operation_units}/{operation_limit}, working_memory_bytes={working_memory_bytes}/{working_memory_limit_bytes}, output_bytes={output_bytes}/{output_limit_bytes}"
+                "operation_units={operation_units}/{operation_limit}, working_memory_bytes={working_memory_bytes}/{working_memory_limit_bytes}, output_bytes={output_bytes}/{output_limit_bytes}, length_support_cardinality={length_support_cardinality}"
             ),
         ));
     }
     Ok(F5ResourcePreflight {
+        scenario_id: config.scenario_id().to_owned(),
+        reference_id: config.reference_id().to_owned(),
+        reference_sha256: config.reference_sha256().to_owned(),
+        profile_id: profile.profile_id().to_owned(),
+        profile_metadata_sha256: config
+            .declared_scenario()
+            .profile_metadata_sha256
+            .value()
+            .to_owned(),
+        block_length_minimum: l_min,
+        block_length_maximum: l_max,
         eligible_tracts,
         eligible_bases,
         reference_bases_processed,
@@ -556,6 +635,7 @@ fn preflight_resolved_f5_resources(
         output_limit_bytes,
         block_count,
         target_bases,
+        resolved_target,
     })
 }
 
@@ -565,7 +645,7 @@ fn resolve_capacity(
     tracts: &[F5EligibleTract],
     l_min: u64,
     l_max: u64,
-) -> Result<(u64, Option<u64>), Diagnostic> {
+) -> Result<(u64, Option<u64>, F5ResolvedTarget), Diagnostic> {
     match &config.declared_scenario().target {
         DeclaredF5Target::BlockCount(value) => {
             let b = *value.value();
@@ -579,14 +659,62 @@ fn resolve_capacity(
                     "block_count no cabe en los tramos elegibles",
                 ));
             }
-            Ok((b, None))
+            Ok((
+                b,
+                None,
+                F5ResolvedTarget::BlockCount {
+                    declared_block_count: b,
+                },
+            ))
         }
         DeclaredF5Target::CoveredBases(value) => {
-            target_capacity(config, *value.value(), eligible, tracts, l_min, l_max)
+            let target = *value.value();
+            target_capacity(config, target, eligible, tracts, l_min, l_max).map(|(b, t)| {
+                (
+                    b,
+                    t,
+                    F5ResolvedTarget::CoveredBases {
+                        declared_covered_bases: target,
+                    },
+                )
+            })
         }
         DeclaredF5Target::CoverageFraction(value) => {
             let target = fractional_target(eligible, value.literal(), config)?;
-            target_capacity(config, target, eligible, tracts, l_min, l_max)
+            let (numerator, denominator) = coverage_fraction_rational(value.literal(), config)?;
+            target_capacity(config, target, eligible, tracts, l_min, l_max).map(|(b, t)| {
+                (
+                    b,
+                    t,
+                    F5ResolvedTarget::CoverageFraction {
+                        numerator,
+                        denominator,
+                    },
+                )
+            })
+        }
+    }
+}
+
+/// Reconstruye el enlace del objetivo desde una configuración ya admitida.
+/// El consumidor de F5.1.1 lo usa para rechazar un preflight cruzado antes de
+/// abrir RNG o aceptar una geometría que correspondía a otro objetivo.
+pub(crate) fn resolved_target_for_config(
+    config: &EffectiveF5Config,
+) -> Result<F5ResolvedTarget, Diagnostic> {
+    match &config.declared_scenario().target {
+        DeclaredF5Target::BlockCount(value) => Ok(F5ResolvedTarget::BlockCount {
+            declared_block_count: *value.value(),
+        }),
+        DeclaredF5Target::CoveredBases(value) => Ok(F5ResolvedTarget::CoveredBases {
+            declared_covered_bases: *value.value(),
+        }),
+        DeclaredF5Target::CoverageFraction(value) => {
+            let (numerator, denominator) = coverage_fraction_rational(value.literal(), config)?;
+            Ok(F5ResolvedTarget::CoverageFraction {
+                numerator,
+                denominator,
+            })
         }
     }
 }
@@ -628,6 +756,64 @@ fn fractional_target(
     ExactDecimal::parse("f5.coverage_fraction", literal)
         .and_then(|fraction| fraction.floor_product(eligible))
         .map_err(|_| resource(config, "coverage_fraction exacta no cabe en u64"))
+}
+
+fn coverage_fraction_rational(
+    literal: &str,
+    config: &EffectiveF5Config,
+) -> Result<(u64, u64), Diagnostic> {
+    let (whole, fraction) = literal.split_once('.').ok_or_else(|| {
+        f5_configuration(config, "f5.coverage_fraction", "literal decimal ausente")
+    })?;
+    let places = u32::try_from(fraction.len()).map_err(|_| {
+        f5_configuration(
+            config,
+            "f5.coverage_fraction",
+            "la escala decimal no cabe en u32",
+        )
+    })?;
+    let denominator = 10_u64.checked_pow(places).ok_or_else(|| {
+        f5_configuration(
+            config,
+            "f5.coverage_fraction",
+            "el denominador decimal no cabe en u64",
+        )
+    })?;
+    let whole = whole.parse::<u64>().map_err(|_| {
+        f5_configuration(
+            config,
+            "f5.coverage_fraction",
+            "la parte entera no cabe en u64",
+        )
+    })?;
+    let fraction = fraction.parse::<u64>().map_err(|_| {
+        f5_configuration(
+            config,
+            "f5.coverage_fraction",
+            "la parte fraccionaria no cabe en u64",
+        )
+    })?;
+    let numerator = whole
+        .checked_mul(denominator)
+        .and_then(|value| value.checked_add(fraction))
+        .ok_or_else(|| {
+            f5_configuration(
+                config,
+                "f5.coverage_fraction",
+                "el numerador decimal no cabe en u64",
+            )
+        })?;
+    let divisor = gcd(numerator, denominator);
+    Ok((numerator / divisor, denominator / divisor))
+}
+
+const fn gcd(mut left: u64, mut right: u64) -> u64 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
 }
 
 fn sum_bins(config: &EffectiveF5Config) -> Result<u64, Diagnostic> {
@@ -1411,6 +1597,13 @@ fn domain(config: &EffectiveF5Config, detail: impl Into<String>) -> Diagnostic {
     )
     .with("scenario_id", config.scenario_id().to_owned())
     .with("detail", detail.into())
+}
+fn f5_configuration(
+    config: &EffectiveF5Config,
+    fields: impl Into<String>,
+    detail: impl Into<String>,
+) -> Diagnostic {
+    Diagnostic::f5_configuration(config.scenario_path().display().to_string(), fields, detail)
 }
 fn resource(config: &EffectiveF5Config, detail: impl Into<String>) -> Diagnostic {
     Diagnostic::resource(

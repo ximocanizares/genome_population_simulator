@@ -10,8 +10,8 @@ TEST-REQ-CONF-14	REQ-CONF-14	pass	F1.2	tests/effective_config.rs::changing_a_tom
 TEST-REQ-CONF-16	REQ-CONF-16	reassigned	F9.7	-	no puede cerrarse hasta comprobar todos los parámetros aleatorios de la versión
 TEST-REQ-CONF-17	REQ-CONF-17	reassigned	F9.7	-	requiere verificar conjuntamente individuos directos, fundadores y parentales de todas las vías
 TEST-REQ-CONF-18	REQ-CONF-18	reassigned	F9.7	-	requiere verificar existencia y categoría junto con consumo, no herencia y ausencia de modificación retroactiva en descendientes reales
-TEST-REQ-CONF-20	REQ-CONF-20	reassigned	F5.5	-	requiere modelar cantidad o densidad, unidad y consumo efectivo por individuo durante creación inicial directa
-TEST-REQ-CONF-22	REQ-CONF-22	reassigned	F5.5	-	requiere modelar distribuciones y regiones por individuo durante creación inicial directa
+TEST-REQ-CONF-20	REQ-CONF-20	reassigned	F6.5	-	requiere modelar cantidad o densidad, unidad y consumo efectivo por individuo durante creación inicial directa
+TEST-REQ-CONF-22	REQ-CONF-22	reassigned	F6.5	-	requiere modelar distribuciones y regiones por individuo durante creación inicial directa
 TEST-REQ-CONF-24	REQ-CONF-24	reassigned	F2.2	-	requiere sortear y observar el número realizado de eventos
 TEST-REQ-CONF-29	REQ-CONF-29	reassigned	F9.7	-	las fases prueban niveles reales y F9.7 audita la jerarquía completa
 TEST-REQ-CONF-30	REQ-CONF-30	reassigned	F9.7	-	requiere regiones y selectores no espaciales reales
@@ -30,7 +30,7 @@ TEST-REQ-CONF-120	REQ-CONF-120	reassigned	F9.7	-	requiere comprobar selectores y
 TEST-REQ-CONF-121	REQ-CONF-121	reassigned	F9.7	-	requiere auditar la matriz completa cuando todos los parámetros de las familias de v1 estén incorporados
 TEST-REQ-CONF-122	REQ-CONF-122	reassigned	F9.7	-	requiere comprobar que sustituciones técnicas no alteran genotipo, genealogía, trayectoria ni verdad y que eventos biológicos no se reinterpretan como técnicos
 TEST-REQ-IND-13	REQ-IND-13	reassigned	F2.2	-	requiere distribuir eventos reales uniformemente o por regiones configuradas
-TEST-REQ-IND-15	REQ-IND-15	reassigned	F5.5	-	requiere comprobar el consumo aislado de la región individual durante creación inicial directa
+TEST-REQ-IND-15	REQ-IND-15	reassigned	F6.5	-	requiere comprobar el consumo aislado de la región individual durante creación inicial directa
 TEST-REQ-IND-21	REQ-IND-21	reassigned	F2.2	-	requiere aplicar el valor espacial resuelto al generar eventos reales
 TEST-REQ-REP-02	REQ-REP-02	reassigned	F7.6	-	requiere representar intervalos de generaciones y consumir la tasa efectiva en reproducción
 TEST-REQ-VAL-40	REQ-VAL-40	reassigned	F2.2/F6.2	-	F2.2 valida la tolerancia general; F6.2 añade 0,5/C del modo controlado y su separación normativa

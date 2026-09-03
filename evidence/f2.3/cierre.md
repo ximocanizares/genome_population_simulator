@@ -55,9 +55,9 @@ del artefacto y confirma que la revalidación contra el TOML la rechaza.
 
 - F2.3 no incorpora generación individual aleatoria por cantidad o densidad,
   mutaciones *de novo*, VCF, paneles haplotípicos, escenarios, bundles ni OCI.
-- REQ-CONF-20/22, REQ-IND-15 y REQ-DIR-02 permanecen planificados en F5.5.a:
+- REQ-CONF-20/22, REQ-IND-15 y REQ-DIR-02 permanecen planificados en F6.5.a:
   cantidad/densidad, distribuciones/regiones y sustituciones por individuo de
-  la creación inicial aleatoria directa. REQ-IND-64 permanece parcial: F5.5.a
+  la creación inicial aleatoria directa. REQ-IND-64 permanece parcial: F6.5.a
   cierra esa creación y su exclusión frente a matriz, mientras F7.2.a cierra
   las mutaciones *de novo*. REQ-CONF-128 conserva evidencia parcial F2; F5.6.a
   es el destino explícito de matrices canónicas separadas por referencia.
