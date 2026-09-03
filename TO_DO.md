@@ -34,11 +34,16 @@
 
 - [ ] Exponer en el TOML del evento técnico F4 escalas de error independientes
   para R1 y R2.
-  - Deben admitir el valor `0`, que produce exactamente cero sustituciones de
-    secuenciación en ese mate, y conservar `1` como perfil actual.
+  - Conservarán `1` como perfil actual. El valor `0` no se usará para
+    representar ausencia de errores: una probabilidad cero no tiene un Phred
+    finito compatible con Q0–Q93.
+  - Añadir además `sequencing_errors = "disabled"` como modo PE neutro. Produce
+    exactamente cero sustituciones en ambos mates y registra de forma visible
+    que las calidades FASTQ conservadas no representan una probabilidad de
+    error realizada.
   - La configuración efectiva y el manifiesto del evento deben registrar los
     valores solicitados, efectivos, oportunidades y errores realizados por
-    mate; `error_scale = 0` exige `errors = 0`.
+    mate; el modo `disabled` exige `errors = 0`.
   - Este control es una dependencia de VE-D02: permite un ensayo PE neutro de
     validación externa con contaminación, quimeras e *index hopping* también
     fijados a cero.

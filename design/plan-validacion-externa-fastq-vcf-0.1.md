@@ -81,7 +81,7 @@ VCF verdadero.
 
 | Aspecto | Decisión confirmada |
 |---|---|
-| Datos de entrada | FASTQ, referencia y VCF de verdad generados y publicados por el simulador |
+| Datos de entrada | Cadena de dos ejecuciones del simulador: A publica la referencia reducida; B la importa y publica FASTQ y VCF de verdad contra esa referencia exacta |
 | Referencia | 500.000 bases derivadas de la referencia de tomate disponible |
 | Cohorte | 20 individuos |
 | Cobertura solicitada | 30× por individuo, con el denominador haploide del simulador |
@@ -146,8 +146,9 @@ ejecutar el ensayo debe aprobarse una de estas salidas, sin resolverla dentro de
 este plan:
 
 1. añadir en el documento propietario de F4 controles TOML de escala de error
-   por mate y un contrato observable; el perfil neutro fija ambas escalas a 0,
-   además de quimeras, contaminación e *index hopping* a 0;
+   por mate y el modo explícito `sequencing_errors="disabled"`; este modo
+   produce cero sustituciones, sin pretender representar probabilidad cero con
+   un Phred finito, y fija además quimeras, contaminación e *index hopping* a 0;
 2. aceptar para el piloto el perfil PE actual y retirar la condición «sin
    errores de secuenciación»;
 3. ejecutar primero un control SE neutro de F3, dejando el control PE solicitado
@@ -172,6 +173,9 @@ Cada ejecución de validación debe recibir mediante un manifiesto de ensayo:
   individuo→R1/R2→columna VCF;
 - versión del simulador, semilla y huella del estado del repositorio que produjo
   el conjunto;
+- identidad, configuración, semilla y manifiesto de la ejecución A de reducción,
+  y los mismos enlaces de la ejecución B que importó su FASTA; los FASTQ y VCF
+  solo pertenecen conjuntamente a B;
 - ejecutables, versiones y argumentos efectivos del flujo externo.
 
 Una entrada con referencia, muestra, hash o cardinalidad incompatible debe
@@ -198,9 +202,15 @@ El flujo debe conservar, al menos:
 - índice de minimap2 y su identificación;
 - un BAM coordinado e indexado por individuo, con grupo de lectura y `SM`
   coherentes con el identificador biológico;
+- tabla canónica biyectiva `individual_id → R1/R2 → RG.ID → RG.SM → RG.LB →
+  BAM`, comprobada contra las cabeceras y contra cada alineamiento;
 - informes por muestra de lecturas totales, mapeadas, primarias, secundarias,
   suplementarias, correctamente emparejadas y no mapeadas;
-- distribución de profundidad y cobertura según el criterio pendiente;
+- distribución de profundidad por base e intervalo, fracción de bases cubiertas
+  a ≥1× y ≥10×, mediana, cuantiles, coeficiente de variación, y número/longitud
+  de intervalos con cobertura cero;
+- número y proporción de pares no mapeados, además de su identidad y causa
+  cuando la herramienta pueda informarla;
 - VCF bruto de FreeBayes y su salida normalizada para comparación;
 - tablas de verdaderos positivos, falsos negativos y falsos positivos por
   locus, alelo, genotipo y muestra;
@@ -221,14 +231,26 @@ otra versión VCF, otros campos `INFO`, `QUAL` y `FILTER`, y no reproducirá
 - la misma referencia y el mismo conjunto ordenado de muestras;
 - equivalencia de `CHROM`, posición y alelos después de la normalización
   aprobada;
-- correspondencia de genotipos por muestra, separando alelos, dosis, datos
-  ausentes y fase;
+- correspondencia de genotipos por muestra mediante el multiconjunto de alelos
+  o dosis, separada de datos ausentes y de la fase;
 - tratamiento explícito de registros multialélicos y *indels*;
 - regiones excluidas por falta de llamabilidad o mapeo ambiguo;
 - campos del caller que son informativos pero no forman parte de la verdad.
 
 El VCF de verdad debe permanecer inmutable. La normalización produce una vista
 temporal o derivada identificada; nunca repara el original.
+
+La métrica principal de genotipo ignora el separador de fase: `0|1`, `1|0` y
+`0/1` son el mismo heterocigoto porque tienen la misma dosis. `./.` es una no
+llamada. La orientación y el separador de fase solo entran en una tabla de fase
+separada, y únicamente si el llamado publica fase local explícita y trazable.
+
+Aunque VE-SNP 0.1 solo genere verdad bialélica, el inventario incluye cada ALT
+de todos los registros llamados. Un ALT adicional en un locus verdadero, un
+SNP sin verdad, un *indel* o un registro multialélico sin correspondencia se
+clasifica como falso positivo técnico; no se elimina por estar fuera del alcance
+biológico. En el piloto PE neutro, cualquier falso positivo impide aprobar la
+precisión del 100 % hasta que se investigue.
 
 ### 6.5. Cobertura, alineamiento y recuperación
 
@@ -244,6 +266,16 @@ El informe debe separar:
 No se debe concluir que una referencia está «recompuesta» solo porque la tasa
 global de mapeo sea alta. Debe comprobarse también la distribución por base o
 intervalo y documentar huecos, repeticiones y alineamientos ambiguos.
+
+En VE-SNP 0.1, por tratarse del control PE neutro, se auditan por separado todas
+las bases A/C/G/T no enmascaradas de la referencia derivada: la fracción con
+cobertura ≥1× y ≥10×, los intervalos de profundidad cero y la dispersión de
+profundidad por muestra. La sensibilidad usa como denominador todas las
+variantes segregantes realizadas desde las posiciones candidatas, fijadas antes
+de ver los BAM: profundidad, MAPQ y BQ no pueden excluirlas después. Una
+ausencia de llamada o evidencia técnica insuficiente es un FN que se clasifica
+como límite de generación, referencia o alineamiento. El informe no puede
+sustituir estos valores por una cobertura media global.
 
 ### 6.6. Haplotipos y LD
 
@@ -265,8 +297,11 @@ considerarse un oráculo independiente sin una evaluación específica.
 
 ## 7. Arquitectura técnica mínima propuesta
 
-El banco externo queda fuera del runtime Rust del simulador. Sus componentes
-propuestos son:
+El banco externo queda fuera del runtime Rust del simulador. Se implementa como
+una herramienta Python independiente gestionada con `uv`: invoca procesos
+locales con argumentos separados, lee BAM/VCF con dependencias versionadas y
+publica su propio expediente. No usa contenedores ni incorpora minimap2,
+samtools o FreeBayes al simulador. Sus componentes son:
 
 | Componente | Responsabilidad única | Entrada | Salida o error observable |
 |---|---|---|---|
@@ -300,6 +335,12 @@ publicación del simulador
   original y comparar contra coordenadas de la referencia reducida.
 - Las 20 columnas del VCF de verdad, los `SM` de BAM y las 20 muestras llamadas
   deben formar el mismo conjunto biyectivo.
+- Cada BAM contiene un único grupo de lectura: `RG.ID` coincide con el
+  `read_group_id` publicado por F4, `RG.SM` con el individuo y `RG.LB` con su
+  biblioteca. Cada alineamiento porta `RG:Z` resoluble en esa cabecera.
+- La lista de BAM dada a FreeBayes es exactamente la tabla canónica, una vez por
+  individuo y en orden estable; no admite muestras añadidas, omitidas ni BAM con
+  varios `SM`.
 - El nombre o la ruta de un fichero no sustituyen su SHA-256 y su identidad en
   manifiesto.
 - Un proceso externo con código distinto de cero, salida truncada o versión no
@@ -319,9 +360,12 @@ condiciones estructurales siguientes:
    artefactos requeridos existen y los manifiestos están completos.
 2. **Alineamiento:** cada par FASTQ se consume una sola vez; el total de
    lecturas de entrada se explica como alineado o no alineado; cada BAM es
-   válido, coordinado, indexable y conserva la muestra correcta.
+   válido, coordinado, indexable y conserva la muestra correcta. Cada par no
+   mapeado se enumera por muestra y se investiga antes de aprobar el piloto
+   neutro.
 3. **Cobertura:** se informa la distribución acordada por muestra y región, no
-   solo una media global.
+   solo una media global: fracciones ≥1×/≥10×, mediana, cuantiles, dispersión y
+   todos los intervalos de cobertura cero. Ningún hueco queda sin clasificar.
 4. **Llamada:** FreeBayes finaliza sobre los 20 BAM y produce un VCF legible,
    normalizable y asociado a la referencia correcta.
 5. **SNP:** cada verdad, llamada y discordancia puede trazarse a locus, alelo,
@@ -330,26 +374,37 @@ condiciones estructurales siguientes:
 6. **LD/fase:** el informe separa la conservación estadística de LD de la
    recuperación de fase. No declara haplotipos exactos si no existe evidencia
    que conecte los loci.
-7. **Reproducibilidad:** una repetición con las mismas entradas y versiones
-   reproduce los resultados lógicos definidos; diferencias de metadatos o
-   compresión se registran por separado.
+7. **Reproducibilidad:** A→B se repite con las mismas configuraciones y semillas
+   y exige igualdad binaria de FASTA reducido, mapa, VCF, FASTQ y manifiestos.
+   El flujo externo se repite sobre esas mismas entradas y exige igualdad lógica
+   de BAM/VCF; tiempos, logs, índices y metadatos incidentales se registran por
+   separado.
 
 ## 9. Decisiones abiertas y recomendación inicial
 
 | ID | Decisión pendiente | Opciones o recomendación no aprobada | Bloquea |
 |---|---|---|---|
 | VE-D01 | Propiedad y coordenada | **Aprobado:** banco externo DTF-024 con coordenada `VE`, no F5 ni F9.5 | Numeración ejecutable y documentos de origen |
-| VE-D02 | PE sin errores de secuenciación | Depende de la mejora F4 registrada en `TO_DO.md`: controles TOML de escala de error por R1/R2 y su auditoría. Recomendada: perfil PE neutro con ambas escalas y todos los artefactos configurables a 0; no fingir neutralidad con el perfil actual | Generación de VE-SNP y VE-LD |
+| VE-D02 | PE sin errores de secuenciación | **Pendiente de implementación F4:** el contrato decidido exige controles TOML de escala por R1/R2 y `sequencing_errors="disabled"`. El modo neutro emitirá cero sustituciones, conservará calidades no probabilísticas marcadas como tales y fijará los artefactos configurables a 0 | Generación de VE-SNP |
 | VE-D03 | Contenido exacto de VE-SNP | **Aprobado:** solo SNP bialélicos, sin multialelia ni *indels*, en VE-SNP 0.1 | Configuración y comparador |
-| VE-D04 | Densidad y selección de loci | **Aprobado:** 1.000 SNP en posiciones A/C/G/T elegibles, no enmascaradas ni ambiguas, con frecuencia ALT uniforme en [0,1; 0,4) | Generación y criterio de exactitud |
+| VE-D04 | Densidad y selección de loci | **Aprobado:** 1.000 posiciones candidatas A/C/G/T elegibles, no enmascaradas ni ambiguas, con frecuencia ALT objetivo uniforme en [0,1; 0,4). El VCF conserva solo las variantes segregantes realizadas; se registran candidatos, frecuencias objetivo, genotipos realizados y recuento final, sin reintentar ni seleccionar para forzar 1.000 SNP | Generación y criterio de exactitud |
 | VE-D05 | Versiones y argumentos | **Aprobado:** congelar minimap2 2.26-r1175, samtools/bcftools 1.21 locales y versión+hash de FreeBayes antes de ejecutar; HTSlib 1.24 no es requisito del banco externo | Comandos reproducibles |
-| VE-D06 | Normalización y emparejamiento VCF | **Aprobado para VE-SNP 0.1:** comparar SNP bialélicos por CHROM, posición, REF, ALT y GT por muestra; ignorar QUAL/FILTER/INFO/GPS_CASE. Normalización compleja se aplaza a multialelia/*indels* | Métricas SNP/indel |
-| VE-D07 | Regiones llamables | **Aprobado para VE-SNP 0.1:** A/C/G/T seleccionadas, no enmascaradas ni ambiguas, profundidad ≥10×, MAPQ ≥20 y BQ ≥20. `N`, máscara, repetición y baja llamabilidad quedan fuera de sus denominadores, pero requieren un ensayo posterior específico; no se silencian como ausencia de evidencia | Denominadores y umbrales |
+| VE-D06 | Normalización y emparejamiento VCF | **Aprobado para VE-SNP 0.1:** comparar SNP bialélicos por CHROM, posición, REF, ALT y dosis por muestra; `0|1`, `1|0` y `0/1` son equivalentes. Fase se evalúa aparte. Ignorar QUAL/FILTER/INFO/GPS_CASE; normalización compleja se aplaza a multialelia/*indels* | Métricas SNP/indel |
+| VE-D07 | Regiones llamables | **Aprobado para VE-SNP 0.1:** todas las variantes segregantes realizadas desde las posiciones candidatas constituyen el denominador de sensibilidad, sin filtro posterior por profundidad/MAPQ/BQ. Esas métricas son diagnósticas; una baja llamabilidad o ausencia de llamada es FN y se clasifica. `N`, máscara y repetición se examinan en VE.4 | Denominadores y umbrales |
 | VE-D08 | Umbrales de aprobación | **Aprobado:** en el PE neutro, sensibilidad, precisión y concordancia de GT del 100% en loci llamables; cero no llamadas. Cualquier discrepancia se investiga | Cierre científico |
 | VE-D09 | Métrica LD | **Aplazado:** el ensayo de LD poblacional se realizará después de elegir un faseador y su evaluación propia | VE-LD |
 | VE-D10 | Recuperación de fase | **Aprobado para VE 0.1:** no usar faseador. Inspeccionar solo fase local explícita y trazable emitida por FreeBayes; si no existe, registrar «fase no evaluable». Fase por bloques queda para después | Afirmación sobre haplotipos |
-| VE-D11 | Multialelia e *indels* | **Aprobado:** excluirlos deliberadamente de VE-SNP 0.1 y crear después casos propios; no descartarlos silenciosamente | Comparación completa |
-| VE-D12 | Repeticiones | **Aprobado:** una ejecución con semilla fija y una repetición exacta al cierre; réplicas con otras semillas se aplazan a un estudio de variabilidad | Generalización del resultado |
+| VE-D11 | Multialelia e *indels* | **Aprobado:** excluirlos deliberadamente de la verdad VE-SNP 0.1 y crear después casos propios. Todo ALT adicional, *indel* o registro multialélico llamado se inventaría y cuenta como FP técnico; no se descarta silenciosamente | Comparación completa |
+| VE-D12 | Repeticiones | **Aprobado:** repetir A→B con mismas configuraciones y semillas, exigiendo SHA-256 idénticos de FASTA reducido, mapa, VCF, FASTQ y manifiestos. Repetir después el flujo externo sobre esas mismas entradas y exigir igualdad lógica de BAM/VCF; tiempos, logs, índices y metadatos incidentales se registran aparte. Réplicas con otras semillas se aplazan | Generalización del resultado |
+
+Los argumentos literales de VE-SNP 0.1 son `minimap2 -t 4 -ax sr -R
+<RG-canonico> referencia.fa R1.fastq.gz R2.fastq.gz | samtools sort -@ 4 -o
+<sample>.bam -`, seguido de `samtools index -@ 4 <sample>.bam` por muestra, y
+`freebayes -f referencia.fa -p 2
+--genotype-qualities --min-alternate-count 1 --min-alternate-fraction 0` sobre
+los veinte BAM canónicos. Se conserva el VCF bruto y no se aplica filtrado
+posterior que oculte ALT; las alineaciones secundarias/suplementarias se
+informan, mientras que cobertura y recuento de pares usan solo primarias.
 
 ## 10. Plan propuesto
 
@@ -373,8 +428,9 @@ VE-D01 y las decisiones que lo bloqueen.
   - Cambia: depende de completar primero la mejora F4 de `TO_DO.md`,
     «Controles de error de secuenciación PE»; esa ampliación necesita su propia
     especificación, arquitectura y plan antes de materializar VE.
-  - Se comprueba con: una configuración admitida cuyo manifiesto demuestre cero
-    contaminación, quimeras, *index hopping* y errores realizados, sin usar F5.
+  - Se comprueba con: una configuración admitida cuyo manifiesto demuestre el
+    modo `disabled`, cero sustituciones realizadas, calidades no probabilísticas
+    señaladas, y cero contaminación, quimeras e *index hopping*, sin usar F5.
 
 - ☐ **VE.0.3. Fijar contrato de comparación y umbrales.**
   - Depende de: VE.0.1.
@@ -394,36 +450,42 @@ VE-D01 y las decisiones que lo bloqueen.
 - ☐ **VE.1.1. Congelar el entorno externo y sus comprobaciones.**
   - Depende de: PAUSA-VE.0 y VE-D05.
   - Procede de: §§5.2, 6.1 y 7.
-  - Cambia: manifiesto de herramientas y receta de ejecución; no el runtime del
-    simulador.
-  - Se comprueba con: versiones exactas, hashes de ejecutables o imagen, ayuda
-    de cada comando y un fixture diminuto válido e inválido. Debe incluir
-    FreeBayes, hoy ausente.
+  - Cambia: herramienta Python VE gestionada con `uv`, manifiesto de
+    dependencias y receta de ejecución; no el runtime del simulador.
+  - Se comprueba con: versiones y hashes de ejecutables y dependencias Python,
+    ayuda de cada comando y un fixture diminuto válido e inválido. Debe incluir
+    FreeBayes, hoy ausente; no usa contenedor.
 
 - ☐ **VE.1.2. Derivar y congelar la referencia de tomate de 500.000 bases.**
   - Depende de: VE.1.1.
   - Procede de: F1.6, ACE-112/113 y §4.
   - Cambia: configuración de reducción del ensayo y su expediente externo.
-  - Se comprueba con: ejecución del simulador, reconstrucción independiente
+  - Se comprueba con: ejecución A del simulador, reconstrucción independiente
     FASTA fuente+mapa, longitud exacta 500.000, `samtools faidx`, SHA-256 y
     ausencia de mezcla entre coordenadas originales y derivadas.
 
 - ☐ **VE.1.3. Generar VE-SNP con 20 individuos y 30× PE.**
   - Depende de: VE.0.2–VE.0.3 y VE.1.2.
   - Procede de: §§4, 6.1–6.2 y VE-D03/04.
-  - Cambia: configuración de ensayo y directorio de resultados del simulador;
-    no F5.
-  - Se comprueba con: manifiestos y hashes; 20 pares R1/R2; VCF con las mismas
-    20 muestras; cobertura solicitada 30×; artefactos técnicos realizados a
-    cero según el contrato aprobado; validadores FASTQ/VCF externos.
+  - Cambia: ejecución B, cuya referencia principal suministrada es exactamente
+    el FASTA publicado por VE.1.2; genera SNP, VCF y FASTQ contra coordenadas
+    derivadas, no contra el tomate original ni contra otra referencia.
+  - Se comprueba con: manifiestos y hashes; 20 pares R1/R2; las 1.000 posiciones
+    candidatas y sus frecuencias objetivo; genotipos realizados y número de SNP
+    segregantes finalmente publicado en el VCF; cobertura solicitada 30×;
+    enlace A→B, identidad y SHA-256 de referencia iguales entre B, VCF y FASTQ;
+    artefactos técnicos realizados a cero según el contrato aprobado; validadores
+    FASTQ/VCF externos. No se reintenta ni filtra para alcanzar un número de SNP.
 
 - ☐ **VE.1.4. Alinear e indexar las 20 muestras con minimap2 y samtools.**
   - Depende de: VE.1.1 y VE.1.3.
   - Procede de: §§2, 6.3/6.5 y arquitectura §7.
   - Cambia: índices de referencia, BAM/BAI e informes externos por muestra.
   - Se comprueba con: `samtools quickcheck`, cabeceras `@SQ/@RG`, `SM` exacto,
-    conteo de lecturas explicable e informes de alineamiento y profundidad. Los
-    argumentos concretos se fijan en VE-D05; no se improvisan al ejecutar.
+    tabla biyectiva individuo→FASTQ→RG→BAM, `RG:Z` en cada alineamiento, conteo
+    de lecturas explicable, pares no mapeados enumerados e informes de
+    profundidad por base/intervalo que localicen huecos y midan homogeneidad.
+    Los argumentos concretos se fijan en VE-D05; no se improvisan al ejecutar.
 
 - ☐ **VE.1.5. Llamar conjuntamente VE-SNP con FreeBayes.**
   - Depende de: VE.1.4.
@@ -444,7 +506,11 @@ VE-D01 y las decisiones que lo bloqueen.
 > **PAUSA-VE.1.** Revisar los BAM, el VCF llamado, todas las discordancias y los
 > denominadores. No pasar a LD si el caso independiente no explica cada fallo.
 
-### VE.2 — Haplotipos y LD
+### VE.2 — Ampliación aplazada: haplotipos, LD y fase
+
+> **Fuera de VE 0.1.** Esta ampliación solo se abrirá después de VE.3, cuando
+> exista una salida F5 aprobada y se haya elegido y evaluado un faseador. No es
+> una dependencia de la repetición ni del cierre de VE-SNP.
 
 - ☐ **VE.2.1. Admitir una salida VE-LD de F5 sin acoplarse a su implementación.**
   - Depende de: PAUSA-VE.1 y de una salida F5 aprobada que publique verdad,
@@ -480,17 +546,21 @@ VE-D01 y las decisiones que lo bloqueen.
     loci no faseables separados y prueba negativa con loci no conectados. No se
     atribuye fase exacta a FreeBayes por el mero hecho de recuperar genotipos.
 
-> **PAUSA-VE.2.** Decidir si la evidencia demuestra recuperación de genotipos,
-> conservación de señal LD o fase por bloque. No fusionar esas conclusiones.
+> **PAUSA-VE.2.** Si esta ampliación se abre, decidir por separado si la
+> evidencia demuestra recuperación de genotipos, conservación de señal LD o
+> fase por bloque. No fusionar esas conclusiones.
 
 ### VE.3 — Repetición y cierre
 
 - ☐ **VE.3.1. Repetir los conjuntos aprobados y conservar recursos observados.**
-  - Depende de: PAUSA-VE.2 y VE-D12.
+  - Depende de: PAUSA-VE.1 y VE-D12.
   - Procede de: §§6.3 y 8.
-  - Cambia: repetición o réplicas aprobadas y tabla de recursos.
-  - Se comprueba con: igualdad lógica definida, hashes cuando procedan,
-    `/usr/bin/time` u observador equivalente y tamaños por etapa.
+  - Cambia: repetición exacta A→B de VE-SNP 0.1 y repetición del flujo externo,
+    con tabla de recursos.
+  - Se comprueba con: SHA-256 idénticos de FASTA reducido, mapa, VCF, FASTQ y
+    manifiestos A/B; igualdad lógica definida de BAM/VCF externo; `/usr/bin/time`
+    u observador equivalente y tamaños por etapa. Logs, índices, tiempos y
+    metadatos incidentales se comparan y registran por separado.
 
 - ☐ **VE.3.2. Ensamblar el expediente reproducible y revisar el cierre.**
   - Depende de: VE.3.1.
@@ -500,23 +570,8 @@ VE-D01 y las decisiones que lo bloqueen.
     completos, cero resultado parcial marcado como completo y revisión
     independiente de las afirmaciones científicas.
 
-> **PAUSA-VE.3 / CIERRE.** Aprobar por separado: interoperabilidad FASTQ/BAM,
-> recuperación SNP, conservación de LD y recuperación de fase si se ejecutó.
-
-### VE.4 — Ensayo posterior de regiones difíciles
-
-- ☐ **VE.4.1. Medir el comportamiento en regiones no llamables del piloto.**
-  - Depende de: PAUSA-VE.1 y un contrato específico de regiones difíciles.
-  - Procede de: VE-D07 y §6.5.
-  - Cambia: conjunto externo separado con `N`, regiones enmascaradas o
-    repetitivas y estratos de cobertura/MAPQ/BQ bajos; no modifica los
-    denominadores de VE-SNP 0.1.
-  - Se comprueba con: métricas estratificadas de mapeo, cobertura, no llamada,
-    FP y FN por tipo de región, acompañadas de la verdad y de una regla
-    explícita para cada ausencia de llamada.
-
-> **PAUSA-VE.4.** Revisar por separado los límites observados de las regiones
-> difíciles; no generalizar el resultado del piloto de regiones llamables.
+> **PAUSA-VE.3 / CIERRE VE 0.1.** Aprobar interoperabilidad FASTQ/BAM y
+> recuperación SNP. LD y fase pertenecen exclusivamente a VE.2 cuando se abra.
 
 ## 11. Recursos y tiempo de planificación
 
@@ -539,8 +594,8 @@ reduce cobertura, individuos ni evidencia automáticamente.
 |---|---|---|---|
 | VE.0 | Contrato ejecutable | Decisiones aprobadas y casos manuales inequívocos | Medir algo distinto de lo que se afirma |
 | VE.1 | Recuperación externa de SNP | FASTQ→BAM→FreeBayes→comparación por muestra/locus | Mezcla de referencia, muestra, representación VCF o denominador |
-| VE.2 | Evaluación separada de LD y fase | Verdad F5 independiente y mismo estimador | Confundir genotipo, LD, haplotipo y fase inferida |
-| VE.3 | Expediente reproducible | Manifiesto, hashes, versiones, recursos y revisión | Resultado no repetible o parcial presentado como cierre |
+| VE.2 (aplazada) | Evaluación separada de LD y fase | Verdad F5 independiente y mismo estimador | Confundir genotipo, LD, haplotipo y fase inferida |
+| VE.3 | Cierre reproducible de VE-SNP 0.1 | Manifiesto, hashes, versiones, recursos y revisión | Resultado no repetible o parcial presentado como cierre |
 
 ## 13. Trabajo excluido de esta versión
 
@@ -553,8 +608,11 @@ reduce cobertura, individuos ni evidencia automáticamente.
 - variantes estructurales, repetición en tándem y comparación de llamadas
   complejas;
 - multialelia e *indels* hasta resolver VE-D11;
-- ensayo de regiones con `N`, máscara, repetición o baja llamabilidad, que se
-  conserva como VE.4 y no se descarta silenciosamente;
+- VE.2: haplotipos, LD y fase inferida, hasta disponer de salida F5 aprobada y
+  faseador evaluado; no bloquea VE 0.1;
+- ensayo futuro de regiones con `N`, máscara, repetición o baja llamabilidad:
+  usará un contrato separado, métricas estratificadas de mapeo, cobertura, no
+  llamada, FP y FN, y no modificará los denominadores de VE-SNP 0.1;
 - afirmaciones de fase de largo alcance no identificable con PE150;
 - comparaciones entre la referencia reducida y coordenadas del tomate original;
 - publicación, instalación o descarga de herramientas.
