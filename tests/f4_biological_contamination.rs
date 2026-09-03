@@ -754,7 +754,7 @@ fn positive_contamination_and_hopping_publish_reconciled_aggregate_manifest() {
         "contig\tposition\tref\talt\tpopulation_id\talt_af\nchr1\t500\tA\tT\tP1\t0.5\n",
     )
     .expect("matrix");
-    let text = "config_kind = \"general\"\nschema_version = \"2\"\n\n[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 2\nploidy = 2\ngenotype_model = \"hwe\"\nindividual_ids = [\"sample-A\", \"sample-B\"]\n\n[technical_event]\nevent_id = \"contamination-main\"\nindividual_ids = [\"sample-A\", \"sample-B\"]\ntarget_coverage_wgs = 1\ncontamination_min_percent = 50\ncontamination_max_percent = 50\ncontamination_recipient_ids = [\"sample-A\"]\nindex_hopping_rate = 1\n\n[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n\n[[technical_event.libraries]]\nindividual_id = \"sample-B\"\ni7 = \"CGTACGTA\"\ni5 = \"GCATGCAT\"\n";
+    let text = "config_kind = \"general\"\nschema_version = \"2\"\n\n[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n\n[[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 2\nploidy = 2\ngenotype_model = \"hwe\"\nindividual_ids = [\"sample-A\", \"sample-B\"]\n\n[technical_event]\nevent_id = \"contamination-main\"\nindividual_ids = [\"sample-A\", \"sample-B\"]\ntarget_coverage_wgs = 1\nsequencing_errors = \"disabled\"\ncontamination_min_percent = 50\ncontamination_max_percent = 50\ncontamination_recipient_ids = [\"sample-A\"]\nindex_hopping_rate = 1\n\n[[technical_event.libraries]]\nindividual_id = \"sample-A\"\ni7 = \"ACGTACGT\"\ni5 = \"TGCATGCA\"\n\n[[technical_event.libraries]]\nindividual_id = \"sample-B\"\ni7 = \"CGTACGTA\"\ni5 = \"GCATGCAT\"\n";
     let text = text.replacen(
         "[reference]\nkind = \"simulated\"\nid = \"reference-main\"\n\n[reference.composition]\nA = 0.25\nC = 0.25\nG = 0.25\nT = 0.25\n",
         &format!(
@@ -787,6 +787,14 @@ fn positive_contamination_and_hopping_publish_reconciled_aggregate_manifest() {
         &fs::read(destination.join("events/contamination-main/manifest.json")).expect("manifest"),
     )
     .expect("JSON");
+    assert_eq!(manifest["error_quality"]["effective_mode"], "disabled");
+    assert_eq!(
+        manifest["error_quality"]["qualities_represent_realized_error_probability"],
+        false
+    );
+    for mate in ["r1", "r2"] {
+        assert_eq!(manifest["error_quality"][mate]["errors"], 0);
+    }
     let demultiplexing = &manifest["demultiplexing"];
     let reassigned = demultiplexing["reassigned_pairs"].as_u64().expect("total");
     let reassigned_entries = demultiplexing["reassigned_by_sample"]

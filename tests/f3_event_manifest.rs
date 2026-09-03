@@ -106,6 +106,26 @@ fn chimera_summary_is_closed_and_rejects_invalid_rate_counter_or_provenance() {
 }
 
 #[test]
+fn error_quality_adjustments_are_fixed_for_each_mate_in_rust_and_schema() {
+    let root = temporary("fixed-error-quality-adjustments");
+    fs::create_dir_all(&root).expect("test directory");
+    let (manifest, _) = complete_manifest();
+    let document = event_manifest_document(&manifest).expect("event document");
+
+    for (label, mate, field, value) in [
+        ("r1-quality-shift", "r1", "quality_shift", json!(1)),
+        ("r1-error-scale", "r1", "error_scale", json!(2.0)),
+        ("r2-quality-shift", "r2", "quality_shift", json!(-1)),
+        ("r2-error-scale", "r2", "error_scale", json!(0.5)),
+    ] {
+        let mut mutated = document.clone();
+        mutated["error_quality"][mate][field] = value;
+        assert_rejected_by_both(&root, label, &mutated);
+    }
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
 fn each_selected_library_has_one_canonical_fastq_result() {
     let (manifest, _) = complete_manifest();
     let document = event_manifest_document(&manifest).expect("event document");

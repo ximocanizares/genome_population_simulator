@@ -284,7 +284,7 @@
     },
     "technical_event": {
       "type": "object", "additionalProperties": false,
-      "required": ["event_id", "individual_ids", "libraries", "profile", "read_length", "quality", "artifacts", "biological_contamination", "rng_catalog", "id_catalog", "target"],
+      "required": ["event_id", "individual_ids", "libraries", "profile", "read_length", "quality", "sequencing_errors", "artifacts", "biological_contamination", "rng_catalog", "id_catalog", "target"],
       "properties": {
         "event_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
         "individual_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"}},
@@ -292,6 +292,7 @@
         "profile": {"$ref": "#/$defs/technical_profile"},
         "read_length": {"type": "integer", "minimum": 1, "maximum": 150},
         "quality": {"type": "object", "additionalProperties": false, "required": ["acgt_phred", "n_phred"], "properties": {"acgt_phred": {"const": 40}, "n_phred": {"const": 0}}},
+        "sequencing_errors": {"type":"object","additionalProperties":false,"required":["requested_mode","effective_mode","qualities_represent_realized_error_probability"],"properties":{"requested_mode":{"enum":["enabled","disabled"]},"effective_mode":{"enum":["enabled","disabled"]},"qualities_represent_realized_error_probability":{"type":"boolean"}},"allOf":[{"if":{"properties":{"effective_mode":{"const":"enabled"}},"required":["effective_mode"]},"then":{"properties":{"requested_mode":{"const":"enabled"},"qualities_represent_realized_error_probability":{"const":true}}}},{"if":{"properties":{"effective_mode":{"const":"disabled"}},"required":["effective_mode"]},"then":{"properties":{"requested_mode":{"const":"disabled"},"qualities_represent_realized_error_probability":{"const":false}}}}]},
         "artifacts": {"$ref": "#/$defs/technical_artifacts"},
         "biological_contamination": {"$ref": "#/$defs/biological_contamination"},
         "rng_catalog": {"const": "f4-technical-v3"},

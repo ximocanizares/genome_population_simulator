@@ -228,6 +228,7 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
         "id_catalog": {"version":"3", "derivations":{"v1":["execution","reference","individual","event","batch","library","read_group","template"],"v2":["PreHopInstanceId","TechnicalPairId"]}},
         "read_length": 150,
         "quality": {"acgt_phred": 40, "n_phred": 0},
+        "sequencing_errors": {"requested_mode": "enabled", "effective_mode": "enabled", "qualities_represent_realized_error_probability": true},
         "artifacts": {"chimera": {"rate": 0.0}, "index_hopping": {"rate": 0.0}, "pcr": {"applicable": false}, "optical_duplicates": {"realized_pairs": 0}, "gc": {"mode": "neutral"}, "adapters": {"enabled": false}},
         "biological_contamination": {"percent_range": {"minimum": 0.0, "maximum": 0.0}, "recipient_ids": ["sample-A"]},
         "target": {"coverage_wgs": 30.0},
@@ -250,6 +251,16 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
         ),
         ("length", "/technical_event/read_length", json!(151)),
         ("quality", "/technical_event/quality/n_phred", json!(1)),
+        (
+            "sequencing-errors-mode",
+            "/technical_event/sequencing_errors/effective_mode",
+            json!("future"),
+        ),
+        (
+            "sequencing-errors-quality-mark",
+            "/technical_event/sequencing_errors/qualities_represent_realized_error_probability",
+            json!(false),
+        ),
         (
             "chimera-rate",
             "/technical_event/artifacts/chimera/rate",
@@ -294,6 +305,11 @@ fn v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed() {
             "insert_length",
         ),
         ("gc-required", "/technical_event/artifacts", "gc"),
+        (
+            "sequencing-errors-required",
+            "/technical_event",
+            "sequencing_errors",
+        ),
         (
             "adapters-required",
             "/technical_event/artifacts",

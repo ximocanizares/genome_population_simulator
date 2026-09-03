@@ -71,6 +71,30 @@ fn physical_reader_accepts_coherent_f4_documents_and_rejects_independent_chimera
         },
         false,
     );
+    assert_case(
+        "event-sequencing-errors-mode",
+        |fixture| {
+            fixture.event["error_quality"]["requested_mode"] = json!("disabled");
+            fixture.event["error_quality"]["effective_mode"] = json!("disabled");
+            fixture.event["error_quality"]["qualities_represent_realized_error_probability"] =
+                json!(false);
+        },
+        false,
+    );
+    for (label, mate, field, value) in [
+        ("event-r1-quality-shift", "r1", "quality_shift", json!(1)),
+        ("event-r1-error-scale", "r1", "error_scale", json!(2.0)),
+        ("event-r2-quality-shift", "r2", "quality_shift", json!(-1)),
+        ("event-r2-error-scale", "r2", "error_scale", json!(0.5)),
+    ] {
+        assert_case(
+            label,
+            |fixture| {
+                fixture.event["error_quality"][mate][field] = value;
+            },
+            false,
+        );
+    }
 }
 
 #[test]

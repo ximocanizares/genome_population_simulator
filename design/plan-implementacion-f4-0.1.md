@@ -33,7 +33,7 @@ recuperará solo desde DTF-050.
 ## 2. Alcance, exclusiones y orden
 
 **Incluye:** perfil versionado incorporado de Illumina PE;
-longitud, cobertura, error y calidad; pares completos; quimeras, contaminación
+longitud, cobertura, modo de error y calidad; pares completos; quimeras, contaminación
 biológica y demultiplexado;
 resumen técnico agregado sin secuencias duplicadas y FASTQ finales comprimidos.
 
@@ -46,8 +46,8 @@ Q36→Q32→Q28 y R2 Q35→Q30→Q25 en los tres tramos declarados del recurso. 
 `HSXn` es una referencia comparativa externa y no se incorpora ni redistribuye.
 El inserto usa `normal_truncated_box_muller_v1` con media 350 pb, desviación
 20 pb y límites inclusivos 250–450 pb. Son configurables únicamente longitud
-común R1/R2 (1–150), cobertura, desplazamiento de calidad y escala de error por
-mate, rango y subconjunto de receptoras de contaminación, tasa de quimera e
+común R1/R2 (1–150), cobertura, el modo `sequencing_errors`, rango y subconjunto
+de receptoras de contaminación, tasa de quimera e
 *index hopping* y valores UDI obligatorios por biblioteca. Perfil, formato/longitud
 UDI, distribución de inserto y preparación son fijos. Cuando ocurre un error, el perfil inicial
 elige uniformemente una de las otras tres bases; una matriz empírica queda en
@@ -190,10 +190,10 @@ cuando F3 esté cerrado, sin anticipar un formato de perfil empírico.
 
   | Contrato | Ruta, tipo y unidad | Obligatorio, predeterminado y restricción |
   |---|---|---|
-  | TOML general v2 | [technical_event]: event_id (ID), individual_ids (lista no vacía de ID), target_coverage_wgs (f64, × haploide), read_length_bases (u16, bases), quality_shift_r1/quality_shift_r2 (i16, Phred), error_scale_r1/error_scale_r2 (f64), chimera_rate/index_hopping_rate (f64, fracción), contamination_min_percent/contamination_max_percent (f64, %), contamination_recipient_ids (lista opcional de ID) y [[technical_event.libraries]] con individual_id (ID), i7/i5 (ASCII). | event_id, individual_ids, cobertura y una biblioteca por individuo son obligatorios. El conjunto de individual_ids coincide exactamente, sin repetidos, con el de libraries. Longitud: 150; desplazamientos: 0; escalas: 1; tasas: 0; contaminación: 0–0 %; receptoras: toda la población. Cobertura/escalas son finitas, cobertura ≥0 y escalas ≥0; fracciones en [0,1]; porcentajes en [0,100] con mínimo ≤ máximo; longitud 1–150; UDI de 8 ACGT y únicos. read_count, perfiles alternativos, cobertura regional, matrices/pesos, FASTQ externo, salidas/mapeo/directo y campos desconocidos se rechazan. |
-  | Configuración efectiva v4 | technical_event conserva todos los valores anteriores ya resueltos; profile={id:string, resource_path:relative-path, sha256:hex64, preparation:enum PCR-free}; rng_catalog:string, id_catalog={version:string, derivations:{v1:[class],v2:[class]}}; libraries es lista ordenada por individual_id de {individual_id,library_id,i7,i5,is_contamination_recipient}. | Todos los predeterminados se materializan; no contiene campos de autoría ausentes ni read_count. Las listas v1/v2 del catálogo son no vacías, disjuntas y cubren respectivamente las clases heredadas y PH_/TP_; libraries coincide exactamente con individual_ids. |
+  | TOML general v2 | [technical_event]: event_id (ID), individual_ids (lista no vacía de ID), target_coverage_wgs (f64, × haploide), read_length_bases (u16, bases), sequencing_errors (`enabled`/`disabled`), chimera_rate/index_hopping_rate (f64, fracción), contamination_min_percent/contamination_max_percent (f64, %), contamination_recipient_ids (lista opcional de ID) y [[technical_event.libraries]] con individual_id (ID), i7/i5 (ASCII). | event_id, individual_ids, cobertura y una biblioteca por individuo son obligatorios. El conjunto de individual_ids coincide exactamente, sin repetidos, con el de libraries. Longitud: 150; `sequencing_errors`: `enabled`; tasas: 0; contaminación: 0–0 %; receptoras: toda la población. `disabled` emite cero sustituciones sin codificar una probabilidad cero ni alterar Phred; las escalas no forman parte del TOML de esta extensión. Cobertura es finita y ≥0; fracciones en [0,1]; porcentajes en [0,100] con mínimo ≤ máximo; longitud 1–150; UDI de 8 ACGT y únicos. read_count, perfiles alternativos, cobertura regional, matrices/pesos, FASTQ externo, salidas/mapeo/directo y campos desconocidos se rechazan. |
+  | Configuración efectiva v4 | technical_event conserva los valores ya resueltos y `sequencing_errors={requested_mode,effective_mode,qualities_represent_realized_error_probability}`; profile={id:string, resource_path:relative-path, sha256:hex64, preparation:enum PCR-free}; rng_catalog:string, id_catalog={version:string, derivations:{v1:[class],v2:[class]}}; libraries es lista ordenada por individual_id de {individual_id,library_id,i7,i5,is_contamination_recipient}. | Todos los predeterminados se materializan; no contiene campos de autoría ausentes ni read_count. Los dos modos deben coincidir y la marca vale solo para `enabled`. Las listas v1/v2 del catálogo son no vacías, disjuntas y cubren respectivamente las clases heredadas y PH_/TP_; libraries coincide exactamente con individual_ids. |
   | Manifiesto general v4 | Conserva manifest_kind:string, schema_version:string, status:enum, run_id, root_seed, diagnostics:lista y referencias heredadas. technical_events contiene por evento {event_id, effective_config:{path,size_bytes:u64,sha256:hex64}, profile:{id,sha256}, rng_catalog, id_catalog, event_manifest:{path,size_bytes:u64,sha256:hex64}}. | Una entrada por el único evento; toda ruta es relativa, todo tamaño es ≥0 y cada sha256 tiene 64 hexadecimales. status y diagnósticos siguen el contrato F3 de publicación. |
-  | Manifiesto de evento v2 | Conserva manifest_kind:string, schema_version:string, event_id, status, reference_id, batch_id, event_subseed, diagnostics y artefactos heredados. profile={id,resource_path,sha256,preparation}; rng_catalog:string; id_catalog={version,derivations}; libraries es lista de {individual_id,library_id,read_group_id,i7,i5}; coverage={target_x,basic_x,final_x,denominator_bases,n_bases}; artifacts={chimera:{rate,realized_pairs},pcr:{applicable:false},optical_duplicates:{realized_pairs:0},gc:{mode:neutral},adapters:{enabled:false}}; contamination={range_percent,recipients,realized_by_recipient}; demultiplexing={index_hopping_rate,reassigned_pairs,discarded_pairs,unassigned_pairs}; errors={per_mate:[{mate,opportunities,errors,realized_rate}]}; outputs es lista de {path,size_bytes:u64,sha256,kind}. | Campos numéricos son finitos y no negativos salvo los Phred/porcentajes ya restringidos en configuración. Libraries coincide con la configuración efectiva; outputs contiene exactamente R1/R2 por biblioteca final. No guarda procedencia ni IDs individuales, FASTQ limpio, BAM/CRAM, mapeo ni entradas externas. |
+  | Manifiesto de evento v2 | Conserva manifest_kind:string, schema_version:string, event_id, status, reference_id, batch_id, event_subseed, diagnostics y artefactos heredados. profile={id,resource_path,sha256,preparation}; rng_catalog:string; id_catalog={version,derivations}; libraries es lista de {individual_id,library_id,read_group_id,i7,i5}; coverage={target_x,basic_x,final_x,denominator_bases,n_bases}; artifacts={chimera:{rate,realized_pairs},pcr:{applicable:false},optical_duplicates:{realized_pairs:0},gc:{mode:neutral},adapters:{enabled:false}}; contamination={range_percent,recipients,realized_by_recipient}; demultiplexing={index_hopping_rate,reassigned_pairs,discarded_pairs,unassigned_pairs}; error_quality={requested_mode,effective_mode,qualities_represent_realized_error_probability,r1/r2:{quality_shift:0,error_scale:1,opportunities,errors}}; outputs es lista de {path,size_bytes:u64,sha256,kind}. | Los contadores agregados de oportunidades y errores viven solo en el manifiesto de evento, no en la configuración efectiva. Campos numéricos son finitos y no negativos salvo los Phred/porcentajes ya restringidos en configuración. Los modos y la marca deben coincidir con la configuración efectiva; `disabled` exige cero errores en ambos mates. Libraries coincide con la configuración efectiva; outputs contiene exactamente R1/R2 por biblioteca final. No guarda procedencia ni IDs individuales, FASTQ limpio, BAM/CRAM, mapeo ni entradas externas. |
 
 > **PAUSA-F4.0.** Confirmar vectores literales de `f4-technical-v3`, incluidos
 > los dos extremos de porcentaje, quimera y error; confirmar además el vector
@@ -583,3 +583,18 @@ F5 debe reutilizar este único recorrido con verdad/referencias complejas; F6
 debe demostrar que sus poblaciones alimentan el mismo recorrido; F9 cierra
 paralelismo, endurecimiento, paquetes, formatos/validadores consolidados y
 presupuestos. Ninguno justifica adelantar su implementación a F4.
+
+## 15. Extensión F4 — control PE neutro VE-D02
+
+- ✅ **F4-VE-D02.** `technical_event.sequencing_errors = "disabled"` conserva
+  el perfil de calidades, pero suprime todas las sustituciones R1/R2 sin usar
+  una escala cero. La configuración efectiva y el manifiesto publican los
+  modos solicitado y efectivo y la marca explícita de que las calidades no
+  representan probabilidad de error realizada; solo el manifiesto añade las
+  oportunidades y errores por mate. El validador exige `errors = 0` en este
+  modo. La regeneración usada por
+  quimeras, contaminación y demultiplexado recibe el mismo modo, por lo que no
+  puede reintroducir sustituciones. El valor omitido conserva el modo histórico
+  `enabled` y escala efectiva 1. No se añaden escalas TOML en esta extensión.
+  - Se comprueba con: `tests/f4_error_quality.rs`, la ejecución PE F4 y los
+    validadores de configuración efectiva y manifiesto v4/v2.

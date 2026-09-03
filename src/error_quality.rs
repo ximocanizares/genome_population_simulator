@@ -17,10 +17,35 @@ use crate::randomness::{
 use crate::technical_identity::TechnicalMate;
 use crate::technical_profile::{F4TechnicalProfile, ProfileMate, QualityCurve};
 
+/// Semántica efectiva de las sustituciones F4. `Disabled` es un control
+/// experimental: conserva el perfil de calidades, pero esas calidades ya no
+/// expresan una probabilidad de error realizada.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SequencingErrorsMode {
+    Enabled,
+    Disabled,
+}
+
+impl SequencingErrorsMode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Enabled => "enabled",
+            Self::Disabled => "disabled",
+        }
+    }
+
+    #[must_use]
+    pub const fn qualities_represent_realized_error_probability(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
 /// Ajustes efectivos globales del evento. Sus neutros se materializan siempre
 /// aunque la futura configuración los haya omitido.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ErrorQualitySettings {
+    sequencing_errors: SequencingErrorsMode,
     quality_shift_r1: i16,
     quality_shift_r2: i16,
     error_scale_r1: f64,
@@ -30,6 +55,7 @@ pub struct ErrorQualitySettings {
 impl Default for ErrorQualitySettings {
     fn default() -> Self {
         Self {
+            sequencing_errors: SequencingErrorsMode::Enabled,
             quality_shift_r1: 0,
             quality_shift_r2: 0,
             error_scale_r1: 1.0,
@@ -58,11 +84,23 @@ impl ErrorQualitySettings {
             });
         }
         Ok(Self {
+            sequencing_errors: SequencingErrorsMode::Enabled,
             quality_shift_r1,
             quality_shift_r2,
             error_scale_r1,
             error_scale_r2,
         })
+    }
+
+    #[must_use]
+    pub const fn with_sequencing_errors(mut self, mode: SequencingErrorsMode) -> Self {
+        self.sequencing_errors = mode;
+        self
+    }
+
+    #[must_use]
+    pub const fn sequencing_errors(self) -> SequencingErrorsMode {
+        self.sequencing_errors
     }
 
     #[must_use]
@@ -364,46 +402,56 @@ fn transform_mate(
             return Err(ErrorQualityError::InvalidBase { mate, cycle, base });
         }
         let adjusted_phred = effective_phred_for_cycle(profile, mate, cycle, settings)?;
-        let probability = final_error_probability(adjusted_phred, settings.error_scale(mate));
-        let emitted_phred = emitted_phred_from_probability(probability, mate, cycle)?;
         counts.opportunities = counts
             .opportunities
             .checked_add(1)
             .ok_or(ErrorQualityError::CounterOverflow)?;
-        let f4_mate = rng_mate(mate);
-        let decision = F4TechnicalDecision::error_bernoulli(
-            event_id,
-            library_id,
-            template_ordinal,
-            f4_mate,
-            u64::from(cycle),
-        );
-        let mut error_rng = derive_f4_technical_subseed(root_seed, decision)
-            .map_err(ErrorQualityError::Subseed)?
-            .local_rng();
-        let errored =
-            f4_bernoulli(&mut error_rng, probability).map_err(ErrorQualityError::Random)?;
-        let observed = if errored {
-            counts.errors = counts
-                .errors
-                .checked_add(1)
-                .ok_or(ErrorQualityError::CounterOverflow)?;
-            let decision = F4TechnicalDecision::error_substitution(
+        let (observed, emitted_phred) = if settings.sequencing_errors()
+            == SequencingErrorsMode::Disabled
+        {
+            // No se usa escala cero: se conservan literalmente bases y Phred
+            // del perfil y no se deriva ninguna decisión aleatoria de error.
+            (base, adjusted_phred)
+        } else {
+            let probability = final_error_probability(adjusted_phred, settings.error_scale(mate));
+            let emitted_phred = emitted_phred_from_probability(probability, mate, cycle)?;
+            let f4_mate = rng_mate(mate);
+            let decision = F4TechnicalDecision::error_bernoulli(
                 event_id,
                 library_id,
                 template_ordinal,
                 f4_mate,
                 u64::from(cycle),
             );
-            let mut substitution_rng = derive_f4_technical_subseed(root_seed, decision)
+            let mut error_rng = derive_f4_technical_subseed(root_seed, decision)
                 .map_err(ErrorQualityError::Subseed)?
                 .local_rng();
-            alternate_base(
-                base,
-                f4_uniform_index(&mut substitution_rng, 3).map_err(ErrorQualityError::Random)?,
-            )
-        } else {
-            base
+            let errored =
+                f4_bernoulli(&mut error_rng, probability).map_err(ErrorQualityError::Random)?;
+            let observed = if errored {
+                counts.errors = counts
+                    .errors
+                    .checked_add(1)
+                    .ok_or(ErrorQualityError::CounterOverflow)?;
+                let decision = F4TechnicalDecision::error_substitution(
+                    event_id,
+                    library_id,
+                    template_ordinal,
+                    f4_mate,
+                    u64::from(cycle),
+                );
+                let mut substitution_rng = derive_f4_technical_subseed(root_seed, decision)
+                    .map_err(ErrorQualityError::Subseed)?
+                    .local_rng();
+                alternate_base(
+                    base,
+                    f4_uniform_index(&mut substitution_rng, 3)
+                        .map_err(ErrorQualityError::Random)?,
+                )
+            } else {
+                base
+            };
+            (observed, emitted_phred)
         };
         sequence.push(observed);
         phred.push(emitted_phred);

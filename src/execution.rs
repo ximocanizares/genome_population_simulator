@@ -972,7 +972,7 @@ fn publish_technical_event(
         &coverage,
         &summaries,
         EventManifestErrorQuality::from_report(
-            ErrorQualitySettings::default(),
+            ErrorQualitySettings::default().with_sequencing_errors(event.sequencing_errors()),
             error_quality.report(),
         ),
         demultiplexing,
@@ -1048,7 +1048,7 @@ fn regenerate_observed_pair(
                 event.event_id(),
                 &pair,
                 profile,
-                ErrorQualitySettings::default(),
+                ErrorQualitySettings::default().with_sequencing_errors(event.sequencing_errors()),
             )
             .map_err(|error| technical_event_error("error_quality", format!("{error:?}")));
         }

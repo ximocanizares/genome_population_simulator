@@ -400,6 +400,11 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
         },
         "read_length": event.read_length(),
         "quality": {"acgt_phred": event.acgt_phred(), "n_phred": event.n_phred()},
+        "sequencing_errors": {
+            "requested_mode": event.sequencing_errors().as_str(),
+            "effective_mode": event.sequencing_errors().as_str(),
+            "qualities_represent_realized_error_probability": event.sequencing_errors().qualities_represent_realized_error_probability(),
+        },
         "artifacts": {
             "chimera": {
                 "rate": event.chimera_rate(),
@@ -1568,6 +1573,16 @@ fn validate_physical_technical_event(
         .and_then(|artifacts| artifacts.get("index_hopping"))
         .and_then(Value::as_object)
         .and_then(|index_hopping| index_hopping.get("rate"));
+    let effective_sequencing_errors = technical_event.get("sequencing_errors");
+    let event_sequencing_errors = event.get("error_quality").and_then(Value::as_object);
+    let sequencing_errors_match = event_sequencing_errors.is_some_and(|error_quality| {
+        effective_sequencing_errors.is_some_and(|effective_errors| {
+            error_quality.get("requested_mode") == effective_errors.get("requested_mode")
+                && error_quality.get("effective_mode") == effective_errors.get("effective_mode")
+                && error_quality.get("qualities_represent_realized_error_probability")
+                    == effective_errors.get("qualities_represent_realized_error_probability")
+        })
+    });
     let event_chimera = event
         .get("artifacts")
         .and_then(Value::as_object)
@@ -1612,6 +1627,7 @@ fn validate_physical_technical_event(
             != effective_chimera_rate
         || event_index_hopping_rate != effective_index_hopping_rate
         || event_chimera != general_chimera
+        || !sequencing_errors_match
     {
         return Err(effective_error(
             effective_path,
@@ -4895,12 +4911,13 @@ fn validate_effective_technical_event(
     path: &Path,
 ) -> Result<(), Diagnostic> {
     let event = effective_object(effective, "technical_event", path)?;
-    const FIELDS: [&str; 11] = [
+    const FIELDS: [&str; 12] = [
         "event_id",
         "individual_ids",
         "profile",
         "read_length",
         "quality",
+        "sequencing_errors",
         "artifacts",
         "biological_contamination",
         "libraries",
@@ -4967,6 +4984,31 @@ fn validate_effective_technical_event(
         || effective_nonnegative_u64(quality, "n_phred", path)? != 0
     {
         return Err(effective_error(path, "calidad técnica mínima inválida"));
+    }
+    let sequencing_errors = effective_object(event, "sequencing_errors", path)?;
+    validate_effective_closed_object(
+        sequencing_errors,
+        &[
+            "requested_mode",
+            "effective_mode",
+            "qualities_represent_realized_error_probability",
+        ],
+        "technical_event.sequencing_errors",
+        path,
+    )?;
+    let requested_mode = effective_non_empty_text(sequencing_errors, "requested_mode", path)?;
+    let effective_mode = effective_non_empty_text(sequencing_errors, "effective_mode", path)?;
+    let quality_mark = sequencing_errors
+        .get("qualities_represent_realized_error_probability")
+        .and_then(Value::as_bool);
+    if requested_mode != effective_mode
+        || !matches!(requested_mode, "enabled" | "disabled")
+        || quality_mark != Some(requested_mode == "enabled")
+    {
+        return Err(effective_error(
+            path,
+            "modo de errores de secuenciación efectivo inválido",
+        ));
     }
     let artifacts = effective_object(event, "artifacts", path)?;
     validate_effective_closed_object(

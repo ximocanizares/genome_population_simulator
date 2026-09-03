@@ -2,7 +2,8 @@
 //! literales DTPD-106 y no llaman al interpolador ni al productor.
 
 use genome_population_simulator::error_quality::{
-    ErrorQualityError, ErrorQualitySettings, effective_phred_for_cycle, transform_paired_end,
+    ErrorQualityError, ErrorQualitySettings, SequencingErrorsMode, effective_phred_for_cycle,
+    transform_paired_end,
 };
 use genome_population_simulator::fastq_output::encode_fastq_sanger_qualities;
 use genome_population_simulator::haplotype::{Individual, Ploidy};
@@ -154,6 +155,53 @@ fn n_is_preserved_at_phred_zero_without_an_error_opportunity() {
     assert_eq!(transformed.report().r1().errors(), 0);
     assert_eq!(transformed.report().r2().opportunities(), 0);
     assert_eq!(transformed.report().r2().errors(), 0);
+}
+
+#[test]
+fn disabled_mode_preserves_truth_and_profile_quality_with_zero_errors_per_mate() {
+    let (root, event, pair, profile) = pair_from(&vec![b'A'; 250]);
+    let disabled =
+        ErrorQualitySettings::default().with_sequencing_errors(SequencingErrorsMode::Disabled);
+    let transformed =
+        transform_paired_end(root, &event, &pair, profile, disabled).expect("disabled transform");
+
+    // Oráculo: la pareja fuente es la verdad antes de error/calidad. En el
+    // modo neutro ambas secuencias deben conservarse literalmente, incluidos
+    // los mates de orientación inversa, y las calidades son las del perfil.
+    assert_eq!(transformed.observed().r1().sequence(), pair.r1().sequence());
+    assert_eq!(transformed.observed().r2().sequence(), pair.r2().sequence());
+    assert_eq!(transformed.observed().r1().phred(), &[36]);
+    assert_eq!(transformed.observed().r2().phred(), &[35]);
+    assert_eq!(
+        format!(
+            "@r1\n{}\n+\n{}\n",
+            std::str::from_utf8(transformed.observed().r1().sequence()).expect("DNA"),
+            std::str::from_utf8(
+                &encode_fastq_sanger_qualities(transformed.observed().r1().phred())
+                    .expect("Sanger"),
+            )
+            .expect("quality"),
+        ),
+        "@r1\nA\n+\nE\n"
+    );
+    assert_eq!(transformed.report().r1().opportunities(), 1);
+    assert_eq!(transformed.report().r2().opportunities(), 1);
+    assert_eq!(transformed.report().r1().errors(), 0);
+    assert_eq!(transformed.report().r2().errors(), 0);
+    assert!(
+        !disabled
+            .sequencing_errors()
+            .qualities_represent_realized_error_probability()
+    );
+
+    let other_root = RootSeed::parse(
+        "other root",
+        "f00102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    )
+    .expect("other root");
+    let with_other_seed = transform_paired_end(other_root, &event, &pair, profile, disabled)
+        .expect("disabled transform");
+    assert_eq!(with_other_seed, transformed);
 }
 
 #[test]

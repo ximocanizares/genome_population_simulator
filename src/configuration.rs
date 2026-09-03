@@ -246,6 +246,9 @@ pub struct DeclaredTechnicalEvent {
     pub event_id: Located<String>,
     pub individual_ids: Vec<Located<String>>,
     pub target: DeclaredTechnicalEventTarget,
+    /// Modo explícito de sustituciones de secuenciación F4. Ausente conserva
+    /// el modelo probabilístico incorporado.
+    pub sequencing_errors: Option<Located<String>>,
     pub read_length_bases: Option<Located<u64>>,
     /// Fracción Bernoulli por pareja limpia; el valor por omisión se resuelve
     /// en la configuración efectiva del perfil F4.

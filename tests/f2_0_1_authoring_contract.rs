@@ -165,6 +165,7 @@ fn f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust() {
             "individual_ids".to_owned(),
             "libraries".to_owned(),
             "read_length_bases".to_owned(),
+            "sequencing_errors".to_owned(),
             "target_coverage_wgs".to_owned(),
         ])
     );

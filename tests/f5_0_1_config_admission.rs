@@ -196,15 +196,15 @@ fn rejects_unknown_fields_duplicate_founders_and_noncanonical_seed() {
 }
 
 #[test]
-fn legacy_schemas_remain_byte_for_byte_historical() {
+fn approved_versioned_contract_artifacts_remain_byte_for_byte_pinned() {
     let schemas = [
         (
             &include_bytes!("../schemas/config-general-v2.schema.json")[..],
-            "76ec2d384d8260ed728edfa0627ae5b9cf02fb0914594f0db14277ceec506e63",
+            "29bd4aeec6663f7a7f08095a075e4a71ffca216a803d8aa4f35c0d5130c84740",
         ),
         (
             &include_bytes!("../schemas/effective-config-v4.schema.json")[..],
-            "a1ec75343e88098e196af275f0346b1617bf8da2902346af924f3b0be438c700",
+            "1647da1cda5c512182dd7d9565c36d7dd6497e208c08acf6760efc0a2c3b5d3a",
         ),
         (
             &include_bytes!("../schemas/manifest-general-v4.schema.json")[..],

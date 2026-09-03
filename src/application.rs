@@ -16,6 +16,7 @@ use crate::configuration::{
     ExpectedConfigKind, SequenceClass,
 };
 use crate::diagnostics::Diagnostic;
+use crate::error_quality::SequencingErrorsMode;
 use crate::exact_decimal::ExactDecimal;
 use crate::f5_profile::{F5Profile, load_f5_profile};
 use crate::haplotype::{HaplotypePhase, Ploidy};
@@ -313,6 +314,7 @@ pub struct EffectiveTechnicalEvent {
     event_id: EventId,
     individual_ids: Vec<IndividualId>,
     target: EffectiveTechnicalEventTarget,
+    sequencing_errors: SequencingErrorsMode,
     read_length: u16,
     chimera_rate: f64,
     index_hopping_rate: f64,
@@ -356,6 +358,11 @@ impl EffectiveTechnicalEvent {
     #[must_use]
     pub const fn target(&self) -> EffectiveTechnicalEventTarget {
         self.target
+    }
+
+    #[must_use]
+    pub const fn sequencing_errors(&self) -> SequencingErrorsMode {
+        self.sequencing_errors
     }
 
     #[must_use]
@@ -1171,6 +1178,21 @@ fn effective_technical_event(
             EffectiveTechnicalEventTarget::ReadCount(*value.value())
         }
     };
+    let sequencing_errors = match declared
+        .sequencing_errors
+        .as_ref()
+        .map(|value| value.value().as_str())
+    {
+        None | Some("enabled") => SequencingErrorsMode::Enabled,
+        Some("disabled") => SequencingErrorsMode::Disabled,
+        Some(_) => {
+            return Err(config_error(
+                general,
+                "technical_event.sequencing_errors",
+                "debe ser enabled o disabled",
+            ));
+        }
+    };
     let read_length = declared
         .read_length_bases
         .as_ref()
@@ -1358,6 +1380,7 @@ fn effective_technical_event(
         event_id,
         individual_ids,
         target,
+        sequencing_errors,
         read_length,
         chimera_rate,
         index_hopping_rate,

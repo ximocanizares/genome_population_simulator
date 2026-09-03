@@ -32,12 +32,19 @@ sin repetidos de individuos seleccionados; al omitirse se selecciona toda la
 población del evento. No existe una tabla anidada de contaminación.
 `read_count` no forma parte de v2 y se rechaza.
 `library_id` se deriva de forma determinista por Rust y no se autoriza en TOML.
+`sequencing_errors` admite `"enabled"` (predeterminado) o `"disabled"`.
+El modo `disabled` es el control PE neutro de VE-D02: no representa una
+probabilidad cero ni usa `error_scale = 0`; emite exactamente cero
+sustituciones en R1 y R2, conserva los Phred del perfil y publica en la
+configuración efectiva y el manifiesto que esas calidades no representan una
+probabilidad de error realizada.
 
 ```toml
 [technical_event]
 event_id = "reads-main"
 individual_ids = ["sample-A"]
 target_coverage_wgs = 30
+sequencing_errors = "disabled" # control PE neutro; omitir para el modo actual
 read_length_bases = 150
 chimera_rate = 0
 index_hopping_rate = 0

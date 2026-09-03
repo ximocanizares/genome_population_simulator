@@ -15,7 +15,9 @@ use crate::biological_contamination::{
 };
 use crate::demultiplexing::{DemultiplexingAggregate, DemultiplexingReport};
 use crate::diagnostics::{Diagnostic, diagnostic_matches_catalog_version};
-use crate::error_quality::{ErrorQualityReport, ErrorQualitySettings, MateErrorCounts};
+use crate::error_quality::{
+    ErrorQualityReport, ErrorQualitySettings, MateErrorCounts, SequencingErrorsMode,
+};
 use crate::fastq_output::paired_fastq_relative_paths;
 use crate::fastq_validation::F4CoverageReport;
 use crate::identity::{EventId, IndividualId, LibraryId, ReadGroupId, ReferenceId};
@@ -94,6 +96,9 @@ pub struct EventManifestMateErrorQuality {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EventManifestErrorQuality {
+    pub requested_mode: SequencingErrorsMode,
+    pub effective_mode: SequencingErrorsMode,
+    pub qualities_represent_realized_error_probability: bool,
     pub r1: EventManifestMateErrorQuality,
     pub r2: EventManifestMateErrorQuality,
 }
@@ -102,6 +107,11 @@ impl EventManifestErrorQuality {
     #[must_use]
     pub fn from_report(settings: ErrorQualitySettings, report: ErrorQualityReport) -> Self {
         Self {
+            requested_mode: settings.sequencing_errors(),
+            effective_mode: settings.sequencing_errors(),
+            qualities_represent_realized_error_probability: settings
+                .sequencing_errors()
+                .qualities_represent_realized_error_probability(),
             r1: mate_error_quality(settings, TechnicalMate::R1, report.r1()),
             r2: mate_error_quality(settings, TechnicalMate::R2, report.r2()),
         }
@@ -341,6 +351,9 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
         "coverage": coverage,
         "final_fastq_summary": final_fastq_summary,
         "error_quality": {
+            "requested_mode": manifest.error_quality.requested_mode.as_str(),
+            "effective_mode": manifest.error_quality.effective_mode.as_str(),
+            "qualities_represent_realized_error_probability": manifest.error_quality.qualities_represent_realized_error_probability,
             "r1": error_quality_document(manifest.error_quality.r1),
             "r2": error_quality_document(manifest.error_quality.r2),
         },
@@ -542,6 +555,29 @@ const ROOT_FIELDS: &[&str] = &[
 
 fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic> {
     let path = event_manifest_relative_path(manifest.event.event_id());
+    if manifest.error_quality.requested_mode != manifest.event.sequencing_errors()
+        || manifest.error_quality.effective_mode != manifest.event.sequencing_errors()
+        || manifest
+            .error_quality
+            .qualities_represent_realized_error_probability
+            != manifest
+                .event
+                .sequencing_errors()
+                .qualities_represent_realized_error_probability()
+    {
+        return Err(event_error(
+            &path,
+            "el modo de errores no coincide con la configuración efectiva",
+        ));
+    }
+    if !has_fixed_error_quality_adjustments(manifest.error_quality.r1)
+        || !has_fixed_error_quality_adjustments(manifest.error_quality.r2)
+    {
+        return Err(event_error(
+            &path,
+            "F4 no admite ajustes de error/calidad distintos de quality_shift=0 y error_scale=1",
+        ));
+    }
     if manifest.chimera_rate != manifest.event.chimera_rate()
         || !manifest.chimera_rate.is_finite()
         || !(0.0..=1.0).contains(&manifest.chimera_rate)
@@ -1262,9 +1298,46 @@ fn error_quality_document(entry: EventManifestMateErrorQuality) -> Value {
     })
 }
 
+fn has_fixed_error_quality_adjustments(entry: EventManifestMateErrorQuality) -> bool {
+    entry.quality_shift == 0 && entry.error_scale == 1.0
+}
+
 fn validate_error_quality(value: &Value, path: &Path) -> Result<(), Diagnostic> {
     let error_quality = required_object(value, "error_quality", path)?;
-    validate_closed(error_quality, &["r1", "r2"], "error_quality", path)?;
+    validate_closed(
+        error_quality,
+        &[
+            "requested_mode",
+            "effective_mode",
+            "qualities_represent_realized_error_probability",
+            "r1",
+            "r2",
+        ],
+        "error_quality",
+        path,
+    )?;
+    let requested_mode = parse_sequencing_errors_mode(
+        required_string(error_quality, "requested_mode", path)?,
+        path,
+    )?;
+    let effective_mode = parse_sequencing_errors_mode(
+        required_string(error_quality, "effective_mode", path)?,
+        path,
+    )?;
+    let qualities_represent_realized_error_probability = error_quality
+        .get("qualities_represent_realized_error_probability")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| event_error(path, "marca de calidad de error inválida"))?;
+    if requested_mode != effective_mode
+        || qualities_represent_realized_error_probability
+            != effective_mode.qualities_represent_realized_error_probability()
+    {
+        return Err(event_error(
+            path,
+            "modo de error y marca de calidad incoherentes",
+        ));
+    }
+    let mut realized_errors = [0_u64; 2];
     for mate in ["r1", "r2"] {
         let entry = required_object(
             required_value(error_quality, mate, path)?,
@@ -1277,24 +1350,45 @@ fn validate_error_quality(value: &Value, path: &Path) -> Result<(), Diagnostic> 
             "error_quality mate",
             path,
         )?;
-        if entry.get("quality_shift").and_then(Value::as_i64).is_none()
-            || !matches!(entry.get("error_scale").and_then(Value::as_f64), Some(value) if value.is_finite() && value >= 0.0)
+        if entry.get("quality_shift").and_then(Value::as_i64) != Some(0)
+            || entry.get("error_scale").and_then(Value::as_f64) != Some(1.0)
         {
             return Err(event_error(
                 path,
-                "ajustes efectivos de error/calidad inválidos",
+                "F4 no admite ajustes de error/calidad distintos de quality_shift=0 y error_scale=1",
             ));
         }
         let opportunities = required_u64(entry, "opportunities", path)?;
-        let errors = required_u64(entry, "errors", path)?;
-        if errors > opportunities {
+        let mate_errors = required_u64(entry, "errors", path)?;
+        if mate_errors > opportunities {
             return Err(event_error(
                 path,
                 "errores realizados exceden oportunidades",
             ));
         }
+        realized_errors[usize::from(mate == "r2")] = mate_errors;
+    }
+    if effective_mode == SequencingErrorsMode::Disabled && realized_errors != [0, 0] {
+        return Err(event_error(
+            path,
+            "sequencing_errors disabled exige cero errores por mate",
+        ));
     }
     Ok(())
+}
+
+fn parse_sequencing_errors_mode(
+    value: &str,
+    path: &Path,
+) -> Result<SequencingErrorsMode, Diagnostic> {
+    match value {
+        "enabled" => Ok(SequencingErrorsMode::Enabled),
+        "disabled" => Ok(SequencingErrorsMode::Disabled),
+        _ => Err(event_error(
+            path,
+            "modo de errores de secuenciación inválido",
+        )),
+    }
 }
 
 fn required_u64(

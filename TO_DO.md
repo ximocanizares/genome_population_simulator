@@ -37,13 +37,14 @@
   - Conservarán `1` como perfil actual. El valor `0` no se usará para
     representar ausencia de errores: una probabilidad cero no tiene un Phred
     finito compatible con Q0–Q93.
-  - Añadir además `sequencing_errors = "disabled"` como modo PE neutro. Produce
-    exactamente cero sustituciones en ambos mates y registra de forma visible
-    que las calidades FASTQ conservadas no representan una probabilidad de
-    error realizada.
-  - La configuración efectiva y el manifiesto del evento deben registrar los
-    valores solicitados, efectivos, oportunidades y errores realizados por
-    mate; el modo `disabled` exige `errors = 0`.
-  - Este control es una dependencia de VE-D02: permite un ensayo PE neutro de
-    validación externa con contaminación, quimeras e *index hopping* también
-    fijados a cero.
+- [x] Añadir `sequencing_errors = "disabled"` como modo PE neutro. Produce
+  exactamente cero sustituciones en ambos mates sin usar `error_scale = 0` y
+  registra de forma visible que las calidades FASTQ conservadas no representan
+  una probabilidad de error realizada.
+  - La configuración efectiva registra los modos solicitado/efectivo y la
+    marca de calidad. El manifiesto del evento registra además, por mate,
+    `quality_shift = 0`, `error_scale = 1`, `opportunities` y `errors`; estos
+    contadores agregados no forman parte de la configuración efectiva y el modo
+    `disabled` exige `errors = 0`.
+  - Este control deja VE-D02 listo para un ensayo PE neutro que fije también a
+    cero contaminación, quimeras e *index hopping*.
