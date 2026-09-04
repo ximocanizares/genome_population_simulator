@@ -6,6 +6,8 @@
 //! bases completas antes de admitir los presupuestos. Solo retiene metadatos,
 //! el intervalo de máscara vigente y los tramos elegibles.
 
+#[cfg(test)]
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
@@ -13,23 +15,52 @@ use std::io::{BufRead, BufReader, Read};
 use sha2::{Digest, Sha256};
 
 use crate::application::EffectiveF5Config;
-use crate::configuration::DeclaredF5Target;
+use crate::configuration::{DeclaredF5Target, DeclaredNumber};
 use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
 use crate::identity::{ReferenceId, SequenceId};
 use crate::reference_fasta::{empty_fasta, empty_header, input_error, invalid_symbol};
 
-pub const F5_RESOURCE_ACCOUNTING_ALGORITHM: &str = "f5-resource-accounting-v1";
+/// v6 conserva las cotas v5 y añade la reserva física de los dos TOML, el
+/// metadata de perfil y sus cinco TSV antes de que se materialicen.
+///
+/// El total de inicios válidos debe conocerse antes de sortear el entero
+/// uniforme y el prefijo que lo resuelve solo puede recorrerse después. No se
+/// conserva un índice auxiliar de tramos, así que ambas pasadas se presuponen.
+pub const F5_RESOURCE_ACCOUNTING_ALGORITHM: &str = "f5-resource-accounting-v6";
 pub const F5_HARD_OPERATION_LIMIT: u64 = 1 << 28;
 pub const F5_HARD_WORKING_MEMORY_LIMIT: u64 = 1 << 30;
 pub const F5_HARD_OUTPUT_LIMIT: u64 = 1 << 31;
 
-const DEFAULT_MAX_LAYOUT_ATTEMPTS: u64 = 1_000;
+pub const F5_DEFAULT_MAX_LAYOUT_ATTEMPTS: u64 = 1_000;
 const DEFAULT_MAX_HAPLOTYPE_ATTEMPTS: u64 = 100;
 const DEFAULT_MAX_SWAP_PROPOSALS: u64 = 100_000;
 const DEFAULT_MAX_HAPLOTYPE_CELLS: u64 = 16_777_216;
 const F5_SCAN_FIXED_MEMORY_BYTES: u64 = 65_536;
 const F5_SCAN_RETAINED_ITEM_BYTES: u64 = 256;
+
+// El observador es exclusivamente instrumental: no forma parte de la
+// admisión ni existe en el binario de producción. F5.1.2 lo usa para probar
+// que la visita de capacidad presupuestada por v4 ocurre en el recorrido real.
+#[cfg(test)]
+thread_local! {
+    static CAPACITY_TRACT_VISITS: Cell<u64> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_capacity_tract_visits() {
+    CAPACITY_TRACT_VISITS.with(|visits| visits.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_capacity_tract_visits() -> u64 {
+    CAPACITY_TRACT_VISITS.with(Cell::get)
+}
+
+fn record_capacity_tract_visit() {
+    #[cfg(test)]
+    CAPACITY_TRACT_VISITS.with(|visits| visits.set(visits.get().saturating_add(1)));
+}
 
 /// Aportaciones obligatorias o activadas por la misma ejecución pero ajenas a
 /// F5. Se mantienen separadas para impedir mezclar unidades en la fórmula.
@@ -73,6 +104,17 @@ pub struct F5EligibleTract {
 }
 
 impl F5EligibleTract {
+    /// Constructor exclusivo de pruebas; producción solo recibe tramos del
+    /// escáner F5.0.4, que conserva sus invariantes de coordenadas.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn new(sequence_ordinal: u64, start_1based: u64, end_1based: u64) -> Self {
+        Self {
+            sequence_ordinal,
+            start_1based,
+            end_1based,
+        }
+    }
     #[must_use]
     pub const fn sequence_ordinal(self) -> u64 {
         self.sequence_ordinal
@@ -107,9 +149,362 @@ pub enum F5ResolvedTarget {
     CoverageFraction { numerator: u64, denominator: u64 },
 }
 
-/// Resultado del preflight `f5-resource-accounting-v1`.
+/// Identidad canónica de todas las entradas efectivas que condicionan la
+/// admisión o la ejecución F5. No depende de la ubicación de los documentos
+/// de autoría, pero sí de la presencia, ruta resuelta e identidad declarada de
+/// la máscara.
+///
+/// La codificación usa campos con longitud y órdenes canónicos de población y
+/// override; no concatena literales TOML ni ubicaciones de autoría. Así dos
+/// configuraciones semánticamente iguales comparten identidad, mientras que
+/// semilla/origen, fundadores, F, modo o tolerancia no pueden cruzar un
+/// preflight ya admitido.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct F5PreflightConfigurationIdentity {
+    canonical_bytes: Vec<u8>,
+}
+
+impl F5PreflightConfigurationIdentity {
+    fn from_config(config: &EffectiveF5Config) -> Result<Self, Diagnostic> {
+        let scenario = config.declared_scenario();
+        let mut canonical = CanonicalF5Identity::new();
+        canonical.field_text("scenario_id", config.scenario_id());
+        canonical.field_text("reference_id", config.reference_id());
+        canonical.field_text("reference_sha256", config.reference_sha256());
+        canonical.field_text("profile_id", config.profile().profile_id());
+        canonical.field_text(
+            "profile_metadata_sha256",
+            scenario.profile_metadata_sha256.value(),
+        );
+        canonical.field_text("seed", config.seed());
+        canonical.field_text("seed_origin", config.seed_origin());
+        canonical.field_u64("ploidy", u64::from(config.ploidy()));
+        canonical.field_u64("founder_count", *scenario.founder_count.value());
+        canonical.field_f64_bits(
+            "scenario_inbreeding_f",
+            Some(
+                canonical_f5_number(config, "f5.inbreeding_f", scenario.inbreeding_f.as_ref())?
+                    .unwrap_or(0.0_f64.to_bits()),
+            ),
+        );
+
+        match (
+            config.excluded_regions_path(),
+            scenario.excluded_regions_sha256.as_ref(),
+        ) {
+            (None, None) => canonical.field_none("excluded_regions"),
+            (Some(path), Some(digest)) => {
+                canonical.field_text("excluded_regions_path", &path.display().to_string());
+                canonical.field_text("excluded_regions_sha256", digest.value());
+            }
+            _ => {
+                return Err(f5_configuration(
+                    config,
+                    "excluded_regions",
+                    "la presencia de la ruta y del SHA-256 de máscara debe coincidir",
+                ));
+            }
+        }
+
+        match resolved_target_for_config(config)? {
+            F5ResolvedTarget::BlockCount {
+                declared_block_count,
+            } => {
+                canonical.field_text("target_kind", "block_count");
+                canonical.field_u64("target_block_count", declared_block_count);
+            }
+            F5ResolvedTarget::CoveredBases {
+                declared_covered_bases,
+            } => {
+                canonical.field_text("target_kind", "covered_bases");
+                canonical.field_u64("target_covered_bases", declared_covered_bases);
+            }
+            F5ResolvedTarget::CoverageFraction {
+                numerator,
+                denominator,
+            } => {
+                canonical.field_text("target_kind", "coverage_fraction");
+                canonical.field_u64("target_fraction_numerator", numerator);
+                canonical.field_u64("target_fraction_denominator", denominator);
+            }
+        }
+
+        let mut populations = scenario.subpopulations.iter().collect::<Vec<_>>();
+        populations.sort_unstable_by_key(|population| population.population_id.value());
+        canonical.field_u64(
+            "subpopulation_count",
+            u64::try_from(populations.len()).map_err(|_| {
+                f5_configuration(config, "subpopulations", "el recuento no cabe en u64")
+            })?,
+        );
+        for population in populations {
+            canonical.field_text(
+                "subpopulation.population_id",
+                population.population_id.value(),
+            );
+            canonical.field_u64(
+                "subpopulation.individual_count",
+                *population.individual_count.value(),
+            );
+            canonical.field_text(
+                "subpopulation.sampling",
+                population
+                    .sampling
+                    .as_ref()
+                    .map_or("probabilistic", |mode| mode.value()),
+            );
+            canonical.field_f64_bits(
+                "subpopulation.inbreeding_f",
+                Some(
+                    canonical_f5_number(
+                        config,
+                        "subpopulations.inbreeding_f",
+                        population
+                            .inbreeding_f
+                            .as_ref()
+                            .or(scenario.inbreeding_f.as_ref()),
+                    )?
+                    .unwrap_or(0.0_f64.to_bits()),
+                ),
+            );
+            match (&population.founder_ids, &population.founder_keys) {
+                (Some(founders), None) => {
+                    canonical.field_text("subpopulation.founder_kind", "founder_ids");
+                    canonical.field_u64(
+                        "subpopulation.founder_count",
+                        u64::try_from(founders.len()).map_err(|_| {
+                            f5_configuration(
+                                config,
+                                "subpopulations.founder_ids",
+                                "el recuento no cabe en u64",
+                            )
+                        })?,
+                    );
+                    for founder in founders {
+                        canonical.field_text("subpopulation.founder", founder.value());
+                    }
+                }
+                (None, Some(founders)) => {
+                    canonical.field_text("subpopulation.founder_kind", "founder_keys");
+                    canonical.field_u64(
+                        "subpopulation.founder_count",
+                        u64::try_from(founders.len()).map_err(|_| {
+                            f5_configuration(
+                                config,
+                                "subpopulations.founder_keys",
+                                "el recuento no cabe en u64",
+                            )
+                        })?,
+                    );
+                    for founder in founders {
+                        canonical.field_text("subpopulation.founder", founder.value());
+                    }
+                }
+                _ => {
+                    return Err(f5_configuration(
+                        config,
+                        "subpopulations.founder_ids,subpopulations.founder_keys",
+                        "la configuración efectiva no conserva exactamente un conjunto de fundadores",
+                    ));
+                }
+            }
+        }
+
+        let mut overrides = scenario.sampling_overrides.iter().collect::<Vec<_>>();
+        overrides.sort_unstable_by_key(|override_| {
+            (
+                override_.population_id.value(),
+                *override_.block_index.value(),
+            )
+        });
+        canonical.field_u64(
+            "sampling_override_count",
+            u64::try_from(overrides.len()).map_err(|_| {
+                f5_configuration(config, "sampling_overrides", "el recuento no cabe en u64")
+            })?,
+        );
+        for override_ in overrides {
+            canonical.field_text(
+                "sampling_override.population_id",
+                override_.population_id.value(),
+            );
+            canonical.field_u64(
+                "sampling_override.block_index",
+                *override_.block_index.value(),
+            );
+            canonical.field_text("sampling_override.mode", override_.mode.value());
+            let population = scenario
+                .subpopulations
+                .iter()
+                .find(|population| {
+                    population.population_id.value() == override_.population_id.value()
+                })
+                .ok_or_else(|| {
+                    f5_configuration(
+                        config,
+                        "sampling_overrides.population_id",
+                        "la configuración efectiva no conserva la población sustituida",
+                    )
+                })?;
+            let default_tolerance = 0.5
+                / (population
+                    .individual_count
+                    .value()
+                    .checked_mul(u64::from(config.ploidy()))
+                    .ok_or_else(|| {
+                        f5_configuration(
+                            config,
+                            "sampling_overrides.controlled_max_abs_error",
+                            "las copias efectivas desbordan u64",
+                        )
+                    })? as f64);
+            let tolerance = if override_.mode.value() == "controlled" {
+                canonical_f5_number(
+                    config,
+                    "sampling_overrides.controlled_max_abs_error",
+                    override_.controlled_max_abs_error.as_ref(),
+                )?
+                .unwrap_or(default_tolerance.to_bits())
+            } else {
+                0_u64
+            };
+            canonical.field_f64_bits(
+                "sampling_override.controlled_max_abs_error",
+                Some(tolerance),
+            );
+        }
+
+        canonical.field_u64(
+            "max_layout_attempts",
+            limit(
+                scenario.max_layout_attempts.as_ref(),
+                F5_DEFAULT_MAX_LAYOUT_ATTEMPTS,
+            ),
+        );
+        canonical.field_u64(
+            "max_haplotype_attempts",
+            limit(
+                scenario.max_haplotype_attempts.as_ref(),
+                DEFAULT_MAX_HAPLOTYPE_ATTEMPTS,
+            ),
+        );
+        canonical.field_u64(
+            "max_swap_proposals",
+            limit(
+                scenario.max_swap_proposals.as_ref(),
+                DEFAULT_MAX_SWAP_PROPOSALS,
+            ),
+        );
+        canonical.field_u64(
+            "max_haplotype_cells",
+            limit(
+                scenario.max_haplotype_cells.as_ref(),
+                DEFAULT_MAX_HAPLOTYPE_CELLS,
+            ),
+        );
+        canonical.field_u64(
+            "operation_limit",
+            limit(
+                scenario.max_operation_units.as_ref(),
+                F5_HARD_OPERATION_LIMIT,
+            ),
+        );
+        canonical.field_u64(
+            "working_memory_limit_bytes",
+            limit(
+                scenario.max_working_memory_bytes.as_ref(),
+                F5_HARD_WORKING_MEMORY_LIMIT,
+            ),
+        );
+        canonical.field_u64(
+            "output_limit_bytes",
+            limit(scenario.max_output_bytes.as_ref(), F5_HARD_OUTPUT_LIMIT),
+        );
+        Ok(Self {
+            canonical_bytes: canonical.finish(),
+        })
+    }
+}
+
+/// Codificador sin ambigüedades: cada etiqueta y valor llevan su longitud
+/// big-endian. Nunca se serializan posiciones, espacios TOML ni rutas de los
+/// dos documentos de autoría.
+struct CanonicalF5Identity {
+    bytes: Vec<u8>,
+}
+
+impl CanonicalF5Identity {
+    fn new() -> Self {
+        Self {
+            bytes: b"f5-preflight-configuration-v1".to_vec(),
+        }
+    }
+
+    fn field(&mut self, tag: &str, value: &[u8]) {
+        self.bytes.extend_from_slice(
+            &u64::try_from(tag.len())
+                .expect("las etiquetas de identidad F5 caben en u64")
+                .to_be_bytes(),
+        );
+        self.bytes.extend_from_slice(tag.as_bytes());
+        self.bytes.extend_from_slice(
+            &u64::try_from(value.len())
+                .expect("los valores de identidad F5 caben en u64")
+                .to_be_bytes(),
+        );
+        self.bytes.extend_from_slice(value);
+    }
+
+    fn field_text(&mut self, tag: &str, value: &str) {
+        self.field(tag, value.as_bytes());
+    }
+
+    fn field_u64(&mut self, tag: &str, value: u64) {
+        self.field(tag, &value.to_be_bytes());
+    }
+
+    fn field_f64_bits(&mut self, tag: &str, value: Option<u64>) {
+        match value {
+            Some(bits) => self.field(tag, &bits.to_be_bytes()),
+            None => self.field_none(tag),
+        }
+    }
+
+    fn field_none(&mut self, tag: &str) {
+        self.field(tag, b"none");
+    }
+
+    fn finish(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
+fn canonical_f5_number(
+    config: &EffectiveF5Config,
+    field: &str,
+    value: Option<&DeclaredNumber>,
+) -> Result<Option<u64>, Diagnostic> {
+    value
+        .map(|value| {
+            value
+                .literal()
+                .parse::<f64>()
+                .map(f64::to_bits)
+                .map_err(|_| {
+                    f5_configuration(
+                        config,
+                        field,
+                        "el valor efectivo no puede codificarse como binary64",
+                    )
+                })
+        })
+        .transpose()
+}
+
+/// Resultado del preflight `f5-resource-accounting-v6`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct F5ResourcePreflight {
+    configuration_identity: F5PreflightConfigurationIdentity,
     scenario_id: String,
     reference_id: String,
     reference_sha256: String,
@@ -120,6 +515,13 @@ pub struct F5ResourcePreflight {
     eligible_tracts: Vec<F5EligibleTract>,
     eligible_bases: u64,
     reference_bases_processed: u64,
+    fasta_bytes_processed: u64,
+    mask_bytes_processed: u64,
+    general_toml_bytes: u64,
+    scenario_toml_bytes: u64,
+    profile_metadata_bytes: u64,
+    profile_tsv_bytes: u64,
+    input_parser_peak_bytes: u64,
     tract_count: u64,
     retained_sequence_ids: u64,
     site_bound_per_block: u64,
@@ -135,6 +537,7 @@ pub struct F5ResourcePreflight {
     operation_limit: u64,
     working_memory_limit_bytes: u64,
     output_limit_bytes: u64,
+    max_layout_attempts: u64,
     block_count: u64,
     target_bases: Option<u64>,
     resolved_target: F5ResolvedTarget,
@@ -184,6 +587,42 @@ impl F5ResourcePreflight {
     #[must_use]
     pub const fn reference_bases_processed(&self) -> u64 {
         self.reference_bases_processed
+    }
+    /// Bytes crudos del FASTA recorridos por cada una de las dos pasadas F5.
+    #[must_use]
+    pub const fn fasta_bytes_processed(&self) -> u64 {
+        self.fasta_bytes_processed
+    }
+    /// Bytes crudos de la máscara recorridos durante el escáner de preflight.
+    #[must_use]
+    pub const fn mask_bytes_processed(&self) -> u64 {
+        self.mask_bytes_processed
+    }
+    /// Bytes físicos del TOML general retenidos durante la admisión F5.
+    #[must_use]
+    pub const fn general_toml_bytes(&self) -> u64 {
+        self.general_toml_bytes
+    }
+    /// Bytes físicos del TOML de escenario retenidos durante la admisión F5.
+    #[must_use]
+    pub const fn scenario_toml_bytes(&self) -> u64 {
+        self.scenario_toml_bytes
+    }
+    /// Bytes físicos del metadata JSON del perfil.
+    #[must_use]
+    pub const fn profile_metadata_bytes(&self) -> u64 {
+        self.profile_metadata_bytes
+    }
+    /// Suma de los cinco TSV físicos del perfil.
+    #[must_use]
+    pub const fn profile_tsv_bytes(&self) -> u64 {
+        self.profile_tsv_bytes
+    }
+    /// Reserva conservadora de lectura, retención y parser de los documentos
+    /// F5, calculada antes de abrir metadata o TSV.
+    #[must_use]
+    pub const fn input_parser_peak_bytes(&self) -> u64 {
+        self.input_parser_peak_bytes
     }
     #[must_use]
     pub const fn tract_count(&self) -> u64 {
@@ -246,6 +685,11 @@ impl F5ResourcePreflight {
     pub const fn output_limit_bytes(&self) -> u64 {
         self.output_limit_bytes
     }
+    /// Límite efectivo que el preflight admitió para el consumidor de layout.
+    #[must_use]
+    pub const fn max_layout_attempts(&self) -> u64 {
+        self.max_layout_attempts
+    }
     #[must_use]
     pub const fn block_count(&self) -> u64 {
         self.block_count
@@ -257,6 +701,24 @@ impl F5ResourcePreflight {
     #[must_use]
     pub const fn resolved_target(&self) -> &F5ResolvedTarget {
         &self.resolved_target
+    }
+
+    /// Comprueba el enlace semántico completo con la configuración efectiva,
+    /// sin incluir aportaciones ajenas que el consumidor debe entregar por
+    /// separado mediante `F5LayoutRequest::new_with_other_resources`.
+    pub(crate) fn matches_configuration(&self, config: &EffectiveF5Config) -> bool {
+        F5PreflightConfigurationIdentity::from_config(config)
+            .is_ok_and(|identity| identity == self.configuration_identity)
+    }
+
+    /// Comprueba también las contribuciones externas incorporadas a las tres
+    /// cotas de recursos del preflight.
+    pub(crate) fn matches_admission(
+        &self,
+        config: &EffectiveF5Config,
+        other: F5OtherResources,
+    ) -> bool {
+        self.matches_configuration(config) && self.other == other
     }
 }
 
@@ -274,14 +736,33 @@ fn preflight_resolved_f5_resources(
     scanned: F5ReferenceScan,
     other: F5OtherResources,
 ) -> Result<F5ResourcePreflight, Diagnostic> {
+    let configuration_identity = F5PreflightConfigurationIdentity::from_config(config)?;
     let F5ReferenceScan {
         eligible_tracts,
         eligible_bases,
         reference_bases_processed,
+        fasta_bytes_processed,
+        mask_bytes_processed,
         sequence_count,
         retained_sequence_ids,
     } = scanned;
     let tract_count = checked_usize("tract_count", eligible_tracts.len(), config)?;
+    let input_documents = config.input_documents();
+    let general_toml_bytes = input_documents.general_toml_bytes();
+    let scenario_toml_bytes = input_documents.scenario_toml_bytes();
+    let profile_metadata_bytes = input_documents.profile_metadata_bytes();
+    let profile_tsv_bytes = input_documents.profile_tsv_bytes();
+    let input_parser_peak_bytes = input_documents.parser_peak_bytes(config.scenario_id())?;
+    let input_document_bytes = add_many(
+        config,
+        "input_document_bytes",
+        [
+            general_toml_bytes,
+            scenario_toml_bytes,
+            profile_metadata_bytes,
+            profile_tsv_bytes,
+        ],
+    )?;
     let profile = config.profile();
     let l_min = profile
         .block_lengths()
@@ -352,7 +833,7 @@ fn preflight_resolved_f5_resources(
     let c_total = mul("C_total", founder_count, ploidy, config)?;
     let layout_attempts = limit(
         config.declared_scenario().max_layout_attempts.as_ref(),
-        DEFAULT_MAX_LAYOUT_ATTEMPTS,
+        F5_DEFAULT_MAX_LAYOUT_ATTEMPTS,
     );
     let haplotype_attempts = limit(
         config.declared_scenario().max_haplotype_attempts.as_ref(),
@@ -432,22 +913,65 @@ fn preflight_resolved_f5_resources(
         ],
     )?;
 
+    let layout_fragment_growth = triangular("B*(B-1)/2", block_count, config)?;
     let operation_units = add_many(
         config,
         "operation_units",
         [
             other.operation_units(),
+            // Los documentos de autoría y perfil se leen antes del preflight
+            // geométrico. Sus tamaños se recogen con metadata antes de abrir
+            // el perfil, y v6 registra esa E/S explícitamente.
+            input_document_bytes,
+            // El escáner de admisión y la recuperación REF posterior recorren
+            // cada byte físico del FASTA, incluidas cabeceras, descripciones y
+            // separadores de línea. El cursor de máscara avanza por base.
+            mul("2*fasta_bytes_processed", 2, fasta_bytes_processed, config)?,
+            reference_bases_processed,
+            // La máscara se lee y se hashea una vez durante el preflight. Sus
+            // IDs y filas no están acotados por la geometría de la referencia.
+            mask_bytes_processed,
+            tract_count,
+            // v4: una visita para comprobar la capacidad de los tramos y una
+            // para validar la lista enlazada antes de cualquier RNG.
+            mul("2*tract_count", 2, tract_count, config)?,
             mul(
-                "2*reference_bases_processed",
+                "2*L*(B*tract_count+B*(B-1)/2)",
                 2,
-                reference_bases_processed,
+                mul(
+                    "L*(B*tract_count+B*(B-1)/2)",
+                    layout_attempts,
+                    add(
+                        "B*tract_count+B*(B-1)/2",
+                        mul("B*tract_count", block_count, tract_count, config)?,
+                        layout_fragment_growth,
+                        config,
+                    )?,
+                    config,
+                )?,
                 config,
             )?,
-            tract_count,
+            // Cada intento copia la lista inicial y puede desplazar hasta tres
+            // veces los tramos vivos por bloque (remove + hasta dos insert).
+            // El término triangular cubre que cada división aumenta la lista
+            // como máximo en un tramo.
             mul(
-                "L*B*tract_count",
-                mul("L*B", layout_attempts, block_count, config)?,
-                tract_count,
+                "L*(tract_count+3*B*tract_count+3*B*(B-1)/2)",
+                layout_attempts,
+                add_many(
+                    config,
+                    "tract_count+3*B*tract_count+3*B*(B-1)/2",
+                    [
+                        tract_count,
+                        mul(
+                            "3*B*tract_count",
+                            3,
+                            mul("B*tract_count", block_count, tract_count, config)?,
+                            config,
+                        )?,
+                        mul("3*B*(B-1)/2", 3, layout_fragment_growth, config)?,
+                    ],
+                )?,
                 config,
             )?,
             profile_rows,
@@ -499,15 +1023,16 @@ fn preflight_resolved_f5_resources(
         "working_memory_bytes",
         [
             other.working_memory_bytes(),
+            input_parser_peak_bytes,
             mul(
-                "256*(B+tract_count+retained_sequence_ids+profile_rows+normalization_rows)",
+                "256*(4*B+2*tract_count+retained_sequence_ids+profile_rows+normalization_rows)",
                 F5_SCAN_RETAINED_ITEM_BYTES,
                 add_many(
                     config,
-                    "B+tract_count+retained_sequence_ids+profile_rows+normalization_rows",
+                    "4*B+2*tract_count+retained_sequence_ids+profile_rows+normalization_rows",
                     [
-                        block_count,
-                        tract_count,
+                        mul("4*B", 4, block_count, config)?,
+                        mul("2*tract_count", 2, tract_count, config)?,
                         retained_sequence_ids,
                         profile_rows,
                         normalization_rows,
@@ -604,6 +1129,7 @@ fn preflight_resolved_f5_resources(
         ));
     }
     Ok(F5ResourcePreflight {
+        configuration_identity,
         scenario_id: config.scenario_id().to_owned(),
         reference_id: config.reference_id().to_owned(),
         reference_sha256: config.reference_sha256().to_owned(),
@@ -618,6 +1144,13 @@ fn preflight_resolved_f5_resources(
         eligible_tracts,
         eligible_bases,
         reference_bases_processed,
+        fasta_bytes_processed,
+        mask_bytes_processed,
+        general_toml_bytes,
+        scenario_toml_bytes,
+        profile_metadata_bytes,
+        profile_tsv_bytes,
+        input_parser_peak_bytes,
         tract_count,
         retained_sequence_ids,
         site_bound_per_block,
@@ -633,6 +1166,7 @@ fn preflight_resolved_f5_resources(
         operation_limit,
         working_memory_limit_bytes,
         output_limit_bytes,
+        max_layout_attempts: layout_attempts,
         block_count,
         target_bases,
         resolved_target,
@@ -651,6 +1185,7 @@ fn resolve_capacity(
             let b = *value.value();
             if mul("B*Lmin", b, l_min, config)? > eligible
                 || tracts.iter().try_fold(0_u64, |sum, tract| {
+                    record_capacity_tract_visit();
                     add("sum(floor(tract/Lmin))", sum, tract.len() / l_min, config)
                 })? < b
             {
@@ -730,6 +1265,7 @@ fn target_capacity(
     if target == 0
         || target > eligible
         || tracts.iter().try_fold(0_u64, |sum, tract| {
+            record_capacity_tract_visit();
             add("sum(tract_length)", sum, tract.len(), config)
         })? < target
     {
@@ -840,6 +1376,8 @@ struct F5ReferenceScan {
     eligible_tracts: Vec<F5EligibleTract>,
     eligible_bases: u64,
     reference_bases_processed: u64,
+    fasta_bytes_processed: u64,
+    mask_bytes_processed: u64,
     sequence_count: u64,
     retained_sequence_ids: u64,
 }
@@ -924,7 +1462,7 @@ impl<'a> EligibleScan<'a> {
             .checked_add(1)
             .ok_or_else(|| resource(self.config, "tract_count no cabe en usize"))?;
         self.ensure_memory_bound(prospective_tract_count, self.retained_id_count)?;
-        self.tracts.try_reserve(1).map_err(|_| {
+        self.tracts.try_reserve_exact(1).map_err(|_| {
             resource(
                 self.config,
                 "la lista de tramos elegibles no cabe en memoria",
@@ -992,12 +1530,15 @@ impl<'a> EligibleScan<'a> {
 
     fn finish(mut self, sequence_count: u64) -> Result<F5ReferenceScan, Diagnostic> {
         self.masks.ensure_exhausted()?;
+        let mask_bytes_processed = self.masks.bytes_processed();
         let retained_sequence_ids =
             checked_usize("retained_sequence_ids", self.retained_id_count, self.config)?;
         Ok(F5ReferenceScan {
             eligible_tracts: self.tracts,
             eligible_bases: self.eligible,
             reference_bases_processed: self.processed,
+            fasta_bytes_processed: 0,
+            mask_bytes_processed,
             sequence_count,
             retained_sequence_ids,
         })
@@ -1182,7 +1723,8 @@ fn scan_reference_and_mask(
         return Err(empty_fasta(path));
     }
     ReferenceId::parse(config.reference_id(), "execution")?;
-    let observed_digest = format!("{:x}", reader.into_inner().finish());
+    let (observed_digest, fasta_bytes_processed) = reader.into_inner().finish();
+    let observed_digest = format!("{observed_digest:x}");
     if observed_digest != config.reference_sha256() {
         return Err(Diagnostic::input(
             "GPS-INPUT-002",
@@ -1192,7 +1734,9 @@ fn scan_reference_and_mask(
         .with("expected_digest", config.reference_sha256())
         .with("observed_digest", &observed_digest));
     }
-    scan.finish(sequence_count)
+    let mut result = scan.finish(sequence_count)?;
+    result.fasta_bytes_processed = fasta_bytes_processed;
+    Ok(result)
 }
 
 fn begin_fasta_sequence(
@@ -1323,6 +1867,7 @@ struct MaskStream<'a> {
     previous: Option<PreviousMaskInterval>,
     next_sequence_ordinal: u64,
     line_buffer: Vec<u8>,
+    bytes_processed: u64,
     config: &'a EffectiveF5Config,
 }
 
@@ -1335,6 +1880,7 @@ impl<'a> MaskStream<'a> {
                 previous: None,
                 next_sequence_ordinal: 0,
                 line_buffer: Vec::new(),
+                bytes_processed: 0,
                 config,
             });
         };
@@ -1359,6 +1905,7 @@ impl<'a> MaskStream<'a> {
             previous: None,
             next_sequence_ordinal: 0,
             line_buffer: header,
+            bytes_processed: 0,
             config,
         })
     }
@@ -1492,7 +2039,8 @@ impl<'a> MaskStream<'a> {
         let Some(reader) = self.reader.take() else {
             return Ok(());
         };
-        let observed = reader.into_inner().finish();
+        let (observed, bytes_processed) = reader.into_inner().finish();
+        self.bytes_processed = bytes_processed;
         let expected = self
             .config
             .declared_scenario()
@@ -1507,6 +2055,10 @@ impl<'a> MaskStream<'a> {
             ));
         }
         Ok(())
+    }
+
+    const fn bytes_processed(&self) -> u64 {
+        self.bytes_processed
     }
 }
 
@@ -1544,22 +2096,30 @@ fn read_bounded_mask_line<R: Read>(
 struct HashingReader<R> {
     inner: R,
     digest: Sha256,
+    bytes_processed: u64,
 }
 impl<R> HashingReader<R> {
     fn new(inner: R) -> Self {
         Self {
             inner,
             digest: Sha256::new(),
+            bytes_processed: 0,
         }
     }
-    fn finish(self) -> sha2::digest::Output<Sha256> {
-        self.digest.finalize()
+    fn finish(self) -> (sha2::digest::Output<Sha256>, u64) {
+        (self.digest.finalize(), self.bytes_processed)
     }
 }
 impl<R: Read> Read for HashingReader<R> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         let count = self.inner.read(buffer)?;
         self.digest.update(&buffer[..count]);
+        let counted_bytes = u64::try_from(count)
+            .map_err(|_| std::io::Error::other("contador de bytes no cabe en u64"))?;
+        self.bytes_processed = self
+            .bytes_processed
+            .checked_add(counted_bytes)
+            .ok_or_else(|| std::io::Error::other("contador de bytes excede u64"))?;
         Ok(count)
     }
 }
@@ -1639,6 +2199,17 @@ fn sub(term: &str, left: u64, right: u64, config: &EffectiveF5Config) -> Result<
 fn mul(term: &str, left: u64, right: u64, config: &EffectiveF5Config) -> Result<u64, Diagnostic> {
     left.checked_mul(right)
         .ok_or_else(|| resource(config, format!("overflow en {term}")))
+}
+
+fn triangular(term: &str, value: u64, config: &EffectiveF5Config) -> Result<u64, Diagnostic> {
+    let previous = value
+        .checked_sub(1)
+        .ok_or_else(|| resource(config, format!("{term} con B=0")))?;
+    if value.is_multiple_of(2) {
+        mul(term, value / 2, previous, config)
+    } else {
+        mul(term, value, previous / 2, config)
+    }
 }
 fn div(term: &str, left: u64, right: u64, config: &EffectiveF5Config) -> Result<u64, Diagnostic> {
     left.checked_div(right)

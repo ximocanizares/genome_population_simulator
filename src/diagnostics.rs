@@ -73,6 +73,23 @@ impl Diagnostic {
             .with("detail", detail.into())
     }
 
+    /// El preflight ya demostró que el espacio es posible, pero el límite de
+    /// intentos no halló una disposición física completa.
+    #[must_use]
+    pub fn f5_layout_exhausted(scenario_id: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::from_catalog("GPS-DOMAIN-106")
+            .with("scenario_id", scenario_id.into())
+            .with("detail", detail.into())
+    }
+
+    /// Un límite F5 comprobado por el preflight o por una cota local posterior.
+    #[must_use]
+    pub fn f5_resource(scenario_id: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self::from_catalog("GPS-RES-101")
+            .with("scenario_id", scenario_id.into())
+            .with("detail", detail.into())
+    }
+
     #[must_use]
     pub fn into_f5_configuration(self) -> Self {
         let mut context = self.context;

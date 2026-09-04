@@ -1,8 +1,12 @@
 //! Admisión y configuración efectiva mínima de F1.
 
 use std::collections::BTreeSet;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use sha2::{Digest, Sha256};
 
 use crate::adapters::{
     admit_toml_header, admitted_is_f5_general_v3, parse_declared_config, parse_declared_f5_general,
@@ -18,7 +22,7 @@ use crate::configuration::{
 use crate::diagnostics::Diagnostic;
 use crate::error_quality::SequencingErrorsMode;
 use crate::exact_decimal::ExactDecimal;
-use crate::f5_profile::{F5Profile, load_f5_profile};
+use crate::f5_profile::{F5_PROFILE_TSV_FILENAMES, F5Profile, load_f5_profile};
 use crate::haplotype::{HaplotypePhase, Ploidy};
 use crate::identity::{
     AutomaticIdRequest, EventId, FounderKey, IdClass, IdentityRegistry, IndividualId, PopulationId,
@@ -37,6 +41,12 @@ use crate::randomness::{
 use crate::reference_generation::normalize_composition_probabilities;
 use crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1;
 use crate::vcf_contract::VcfOutputMode;
+
+/// Antes de poder resolver el límite declarado por el escenario, el TOML
+/// general debe poder leerse sin reservar una cantidad arbitraria de memoria.
+/// La frontera CLI aplica esta misma cota antes de clasificar un general v2 o
+/// v3: la clase todavía no es fiable hasta alcanzar EOF.
+const F5_PRE_ADMISSION_TOML_LIMIT_BYTES: u64 = 65_536;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ValidatedGeneralSummary {
@@ -225,8 +235,291 @@ pub struct EffectiveF5Config {
     reference_sha256: String,
     scenario_id: String,
     profile: F5Profile,
+    bootstrap_documents: F5BootstrapDocuments,
+    input_documents: F5InputDocuments,
     general: DeclaredF5GeneralConfig,
     scenario: DeclaredF5Scenario,
+}
+
+/// Observación física de uno de los dos TOML que forman el bootstrap F5.
+///
+/// Esta pieza deliberadamente pequeña adelanta la firma que ampliará F5.1.2.2:
+/// el contador y SHA-256 se calculan mientras se lee el mismo handle. Aún no
+/// constituye `PhysicalInputIdentity` ni un recibo de admisión general.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct F5BootstrapDocument {
+    size_bytes: u64,
+    sha256: String,
+}
+
+impl F5BootstrapDocument {
+    #[must_use]
+    pub const fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
+
+    #[must_use]
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+}
+
+/// Los dos documentos ya leídos, medidos y hasheados por el bootstrap.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct F5BootstrapDocuments {
+    general: F5BootstrapDocument,
+    scenario: F5BootstrapDocument,
+}
+
+/// Resultado sellado del primer estado de admisión F5. No ha abierto ningún
+/// recurso posterior al escenario ni ha resuelto una semilla.
+#[derive(Clone, Debug)]
+pub struct F5BootstrapConfig {
+    general_path: PathBuf,
+    scenario_path: PathBuf,
+    profile_metadata_path: PathBuf,
+    excluded_regions_path: Option<PathBuf>,
+    reference_path: PathBuf,
+    documents: F5BootstrapDocuments,
+    general: DeclaredF5GeneralConfig,
+    scenario: DeclaredF5Scenario,
+}
+
+impl F5BootstrapConfig {
+    #[must_use]
+    pub fn documents(&self) -> &F5BootstrapDocuments {
+        &self.documents
+    }
+}
+
+impl F5BootstrapDocuments {
+    #[must_use]
+    pub const fn general(&self) -> &F5BootstrapDocument {
+        &self.general
+    }
+
+    #[must_use]
+    pub const fn scenario(&self) -> &F5BootstrapDocument {
+        &self.scenario
+    }
+}
+
+/// Tamaños físicos de todos los documentos que el lector F5 puede retener o
+/// parsear antes de iniciar el preflight geométrico. Se recopilan mediante
+/// `metadata` antes de abrir el metadata o cualquiera de sus cinco TSV.
+///
+/// No contienen identidad semántica: sus bytes de relleno no cambian el RNG ni
+/// el layout, pero sí forman parte de la reserva transitoria de admisión.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct F5InputDocuments {
+    general_toml_bytes: u64,
+    scenario_toml_bytes: u64,
+    profile_metadata_bytes: u64,
+    profile_tsv_bytes: u64,
+}
+
+impl F5InputDocuments {
+    fn collect(
+        general_toml_bytes: u64,
+        scenario_toml_bytes: u64,
+        profile_metadata_path: &Path,
+    ) -> Result<Self, Diagnostic> {
+        let profile_metadata_bytes = file_len(profile_metadata_path)?;
+        let profile_directory = profile_metadata_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
+        let profile_tsv_bytes =
+            F5_PROFILE_TSV_FILENAMES
+                .iter()
+                .try_fold(0_u64, |total, name| {
+                    total
+                        .checked_add(file_len(&profile_directory.join(name))?)
+                        .ok_or_else(|| {
+                            Diagnostic::f5_resource(
+                                "<unresolved>",
+                                "overflow al sumar los bytes físicos del paquete de perfil",
+                            )
+                        })
+                })?;
+        Ok(Self {
+            general_toml_bytes,
+            scenario_toml_bytes,
+            profile_metadata_bytes,
+            profile_tsv_bytes,
+        })
+    }
+
+    #[must_use]
+    pub const fn general_toml_bytes(self) -> u64 {
+        self.general_toml_bytes
+    }
+    #[must_use]
+    pub const fn scenario_toml_bytes(self) -> u64 {
+        self.scenario_toml_bytes
+    }
+    #[must_use]
+    pub const fn profile_metadata_bytes(self) -> u64 {
+        self.profile_metadata_bytes
+    }
+    #[must_use]
+    pub const fn profile_tsv_bytes(self) -> u64 {
+        self.profile_tsv_bytes
+    }
+
+    /// Cada lector conserva los bytes crudos mientras el parser construye sus
+    /// valores. Dos copias físicas cubren lectura+retención y los buffers de
+    /// parser; las estructuras por fila se cuentan separadamente en v6.
+    pub fn parser_peak_bytes(self, scenario_id: &str) -> Result<u64, Diagnostic> {
+        self.general_toml_bytes
+            .checked_add(self.scenario_toml_bytes)
+            .and_then(|total| total.checked_add(self.profile_metadata_bytes))
+            .and_then(|total| total.checked_add(self.profile_tsv_bytes))
+            .and_then(|total| total.checked_mul(2))
+            .ok_or_else(|| {
+                Diagnostic::f5_resource(
+                    scenario_id,
+                    "overflow en la reserva de lectura, retención y parser de documentos F5",
+                )
+            })
+    }
+}
+
+fn file_len(path: &Path) -> Result<u64, Diagnostic> {
+    std::fs::metadata(path)
+        .map(|metadata| metadata.len())
+        .map_err(|error| {
+            Diagnostic::input(
+                "GPS-INPUT-001",
+                "No se puede abrir o leer una entrada declarada.",
+            )
+            .with("path", path.display().to_string())
+            .with("detail", error.to_string())
+        })
+}
+
+#[derive(Debug)]
+struct BoundedF5Toml {
+    bytes: Vec<u8>,
+    document: F5BootstrapDocument,
+}
+
+/// Lee exactamente un documento TOML de bootstrap desde un único handle.
+///
+/// Tras retener como máximo 65.536 bytes, se lee un único byte adicional para
+/// distinguir EOF del exceso. Ese byte no entra ni en el búfer ni en el hash.
+fn read_bounded_f5_toml(path: &Path) -> Result<BoundedF5Toml, Diagnostic> {
+    let file = File::open(path).map_err(|error| input_error(path, error))?;
+    read_bounded_f5_toml_from_reader(path, file)
+}
+
+fn read_bounded_f5_toml_with_opener(
+    path: &Path,
+    opener: &mut impl FnMut(&Path) -> std::io::Result<File>,
+) -> Result<BoundedF5Toml, Diagnostic> {
+    let file = opener(path).map_err(|error| input_error(path, error))?;
+    read_bounded_f5_toml_from_reader(path, file)
+}
+
+/// Variante inyectable del lector acotado. Mantiene la lectura `límite + 1`
+/// separada del parser para que la cota se pueda demostrar sin materializar el
+/// resto de la entrada.
+fn read_bounded_f5_toml_from_reader(
+    path: &Path,
+    mut reader: impl Read,
+) -> Result<BoundedF5Toml, Diagnostic> {
+    let capacity = usize::try_from(F5_PRE_ADMISSION_TOML_LIMIT_BYTES).map_err(|_| {
+        Diagnostic::internal_invariant("f5_bootstrap", "toml_limit_does_not_fit_usize")
+    })?;
+    let mut bytes = Vec::with_capacity(capacity);
+    let mut digest = Sha256::new();
+    let mut chunk = [0_u8; 8_192];
+
+    while bytes.len() < capacity {
+        let remaining = capacity - bytes.len();
+        let chunk_len = chunk.len();
+        let read = reader
+            .read(&mut chunk[..remaining.min(chunk_len)])
+            .map_err(|error| input_error(path, error))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&chunk[..read]);
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+
+    if bytes.len() == capacity {
+        let mut excess = [0_u8; 1];
+        let read = reader
+            .read(&mut excess)
+            .map_err(|error| input_error(path, error))?;
+        if read != 0 {
+            // Antes de EOF no existe una versión ni un escenario fiables. No
+            // debe inventarse contexto F5 para un v2, un v3 o un documento que
+            // ni siquiera sea clasificable.
+            return Err(Diagnostic::input(
+                "GPS-INPUT-001",
+                "No se puede abrir o leer una entrada declarada.",
+            )
+            .with("path", path.display().to_string())
+            .with(
+                "detail",
+                format!(
+                    "toml_bytes>{F5_PRE_ADMISSION_TOML_LIMIT_BYTES}/{F5_PRE_ADMISSION_TOML_LIMIT_BYTES}; el byte 65537 confirma que el documento excede el límite físico antes de clasificarlo"
+                ),
+            ));
+        }
+    }
+
+    let size_bytes = u64::try_from(bytes.len()).map_err(|_| {
+        Diagnostic::internal_invariant("f5_bootstrap", "toml_buffer_length_does_not_fit_u64")
+    })?;
+    Ok(BoundedF5Toml {
+        bytes,
+        document: F5BootstrapDocument {
+            size_bytes,
+            sha256: format!("{:x}", digest.finalize()),
+        },
+    })
+}
+
+/// Coste mínimo y temporal del bootstrap. F5.1.2.2 sustituirá esta frontera
+/// por las transiciones tipadas del ledger v7; aquí no se autoriza ninguna
+/// apertura posterior hasta contrastar sus dos documentos ya parseados.
+fn admit_f5_bootstrap(
+    general: &F5BootstrapDocument,
+    scenario: &F5BootstrapDocument,
+    declared: &DeclaredF5Scenario,
+) -> Result<(), Diagnostic> {
+    let document_bytes = general
+        .size_bytes()
+        .checked_add(scenario.size_bytes())
+        .ok_or_else(|| {
+            Diagnostic::f5_resource(
+                declared.scenario_id.value(),
+                "overflow al sumar los documentos del bootstrap F5",
+            )
+        })?;
+    // Cada byte se conserva como documento admitido y como representación
+    // transitoria del parser. No se presupuestan perfil ni geometría aquí.
+    let bootstrap_bytes = document_bytes.checked_mul(2).ok_or_else(|| {
+        Diagnostic::f5_resource(
+            declared.scenario_id.value(),
+            "overflow al calcular la memoria transitoria del bootstrap F5",
+        )
+    })?;
+    let working_limit = declared
+        .max_working_memory_bytes
+        .as_ref()
+        .map_or(1_u64 << 30, |limit| *limit.value());
+    if bootstrap_bytes > working_limit {
+        return Err(Diagnostic::f5_resource(
+            declared.scenario_id.value(),
+            format!(
+                "working_memory_bytes={bootstrap_bytes}/{working_limit}, phase=bootstrap; general y escenario se rechazan antes de abrir perfil, referencia, máscara, destino o RNG"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// Resultado de la frontera CLI. La rama F5 solo admite y resuelve enlaces en
@@ -234,7 +527,7 @@ pub struct EffectiveF5Config {
 #[derive(Clone, Debug)]
 pub enum CliValidatedConfig {
     Legacy(Box<EffectiveConfig>),
-    F5(Box<EffectiveF5Config>),
+    F5(Box<F5BootstrapConfig>),
 }
 
 impl EffectiveF5Config {
@@ -285,6 +578,14 @@ impl EffectiveF5Config {
     #[must_use]
     pub const fn profile(&self) -> &F5Profile {
         &self.profile
+    }
+    #[must_use]
+    pub const fn input_documents(&self) -> F5InputDocuments {
+        self.input_documents
+    }
+    #[must_use]
+    pub const fn bootstrap_documents(&self) -> &F5BootstrapDocuments {
+        &self.bootstrap_documents
     }
     #[must_use]
     pub const fn declared_general(&self) -> &DeclaredF5GeneralConfig {
@@ -669,21 +970,61 @@ pub fn load_and_validate_config_with_entropy(
     path: &Path,
     entropy: &mut impl EntropySource,
 ) -> Result<EffectiveConfig, Diagnostic> {
-    let bytes = std::fs::read(path).map_err(|error| input_error(path, error))?;
+    // La API histórica sigue devolviendo exclusivamente el general v2, pero
+    // antes de EOF cualquier TOML puede ser el general v3 de F5. Comparte por
+    // ello la frontera física de 65.536+1 bytes con el dispatcher.
+    let BoundedF5Toml { bytes, .. } = read_bounded_f5_toml(path)?;
     let admitted = admit_toml_header(path, bytes, ExpectedConfigKind::General)?;
     let general = parse_declared_config(admitted)?;
     build_effective_config_with_entropy(&general, entropy)
 }
 
-/// Despacha general v2 al flujo histórico y general v3 al lector F5. La
-/// cabecera se admite una sola vez antes de seleccionar la semántica.
+/// Despacha general v2 al flujo histórico y general v3 al bootstrap F5.
+///
+/// La apertura física es única: primero se lee el documento completo bajo la
+/// cota común y solo entonces se clasifica su versión. El flujo histórico no
+/// cambia una vez admitido un general v2.
 pub fn load_and_validate_cli_config(path: &Path) -> Result<CliValidatedConfig, Diagnostic> {
-    let bytes = std::fs::read(path).map_err(|error| input_error(path, error))?;
+    load_and_validate_cli_config_with_toml_opener(path, &mut |opened_path: &Path| {
+        File::open(opened_path)
+    })
+}
+
+/// Variante instrumental del dispatcher para demostrar su frontera de apertura.
+///
+/// No altera el contrato de producción: el observador se invoca justo antes de
+/// cada apertura física de TOML del bootstrap.
+#[doc(hidden)]
+pub fn load_and_validate_cli_config_with_bootstrap_open_observer(
+    path: &Path,
+    observer: &mut impl FnMut(&Path),
+) -> Result<CliValidatedConfig, Diagnostic> {
+    load_and_validate_cli_config_with_toml_opener(path, &mut |opened_path| {
+        observer(opened_path);
+        File::open(opened_path)
+    })
+}
+
+fn load_and_validate_cli_config_with_toml_opener(
+    path: &Path,
+    opener: &mut impl FnMut(&Path) -> std::io::Result<File>,
+) -> Result<CliValidatedConfig, Diagnostic> {
+    let general_path = absolute_normalized_path(path)?;
+    let BoundedF5Toml { bytes, document } =
+        read_bounded_f5_toml_with_opener(&general_path, opener)?;
+    // `general_path` es solo la ruta física para abrir y resolver enlaces F5.
+    // La ruta de autoría que se publica en el flujo v2 es exactamente la que
+    // solicitó el llamador.
     let admitted = admit_toml_header(path, bytes, ExpectedConfigKind::GeneralDispatch)?;
     if admitted_is_f5_general_v3(&admitted) {
-        return load_and_validate_f5_config(path)
-            .map(Box::new)
-            .map(CliValidatedConfig::F5);
+        return bootstrap_f5_config_from_admitted_with_toml_opener(
+            general_path,
+            document,
+            admitted,
+            opener,
+        )
+        .map(Box::new)
+        .map(CliValidatedConfig::F5);
     }
     let general = parse_declared_config(admitted)?;
     build_effective_config_with_entropy(&general, &mut SystemEntropy)
@@ -702,11 +1043,34 @@ pub fn load_and_validate_f5_config_with_entropy(
     entropy: &mut impl EntropySource,
 ) -> Result<EffectiveF5Config, Diagnostic> {
     let general_path = absolute_normalized_path(path)?;
-    let general_bytes =
-        std::fs::read(&general_path).map_err(|error| input_error(&general_path, error))?;
-    let admitted_general =
-        admit_toml_header(&general_path, general_bytes, ExpectedConfigKind::F5General)
-            .map_err(Diagnostic::into_f5_configuration)?;
+    let BoundedF5Toml { bytes, document } = read_bounded_f5_toml(&general_path)?;
+    let admitted_general = admit_toml_header(path, bytes, ExpectedConfigKind::F5General)
+        .map_err(Diagnostic::into_f5_configuration)?;
+    let bootstrap = bootstrap_f5_config_from_admitted(general_path, document, admitted_general)?;
+    materialize_f5_config_after_bootstrap(bootstrap, entropy)
+}
+
+/// Continúa la admisión F5 a partir del general ya leído por el dispatcher.
+/// No vuelve a abrirlo ni vuelve a calcular su tamaño o hash en otro handle.
+fn bootstrap_f5_config_from_admitted(
+    general_path: PathBuf,
+    general_document: F5BootstrapDocument,
+    admitted_general: crate::configuration::AdmittedToml,
+) -> Result<F5BootstrapConfig, Diagnostic> {
+    bootstrap_f5_config_from_admitted_with_toml_opener(
+        general_path,
+        general_document,
+        admitted_general,
+        &mut |opened_path: &Path| File::open(opened_path),
+    )
+}
+
+fn bootstrap_f5_config_from_admitted_with_toml_opener(
+    general_path: PathBuf,
+    general_document: F5BootstrapDocument,
+    admitted_general: crate::configuration::AdmittedToml,
+    opener: &mut impl FnMut(&Path) -> std::io::Result<File>,
+) -> Result<F5BootstrapConfig, Diagnostic> {
     let general =
         parse_declared_f5_general(admitted_general).map_err(Diagnostic::into_f5_configuration)?;
     let parent = general_path.parent().ok_or_else(|| {
@@ -718,8 +1082,10 @@ pub fn load_and_validate_f5_config_with_entropy(
     })?;
     let scenario_path = lexical_join(parent, Path::new(general.scenario_path.value()))?;
     let reference_path = lexical_join(parent, Path::new(general.reference_path.value()))?;
-    let scenario_bytes =
-        std::fs::read(&scenario_path).map_err(|error| input_error(&scenario_path, error))?;
+    let BoundedF5Toml {
+        bytes: scenario_bytes,
+        document: scenario_document,
+    } = read_bounded_f5_toml_with_opener(&scenario_path, opener)?;
     let admitted_scenario = admit_toml_header(
         &scenario_path,
         scenario_bytes,
@@ -729,6 +1095,7 @@ pub fn load_and_validate_f5_config_with_entropy(
     let scenario =
         parse_declared_f5_scenario(admitted_scenario).map_err(Diagnostic::into_f5_configuration)?;
     validate_declared_f5_pair(&general, &scenario).map_err(Diagnostic::into_f5_configuration)?;
+    admit_f5_bootstrap(&general_document, &scenario_document, &scenario)?;
     let scenario_parent = scenario_path.parent().ok_or_else(|| {
         config_error_f5(
             &scenario.source,
@@ -745,11 +1112,51 @@ pub fn load_and_validate_f5_config_with_entropy(
         .as_ref()
         .map(|path| lexical_join(scenario_parent, Path::new(path.value())))
         .transpose()?;
+    Ok(F5BootstrapConfig {
+        general_path,
+        scenario_path,
+        profile_metadata_path,
+        excluded_regions_path,
+        reference_path,
+        documents: F5BootstrapDocuments {
+            general: general_document,
+            scenario: scenario_document,
+        },
+        general,
+        scenario,
+    })
+}
+
+/// Compatibilidad transitoria para los consumidores F5 previos a F5.1.2.3.
+/// La ruta CLI no llama a esta función: el perfil solo se cargará desde la
+/// siguiente transición del ledger v7.
+fn materialize_f5_config_after_bootstrap(
+    bootstrap: F5BootstrapConfig,
+    entropy: &mut impl EntropySource,
+) -> Result<EffectiveF5Config, Diagnostic> {
+    let F5BootstrapConfig {
+        general_path,
+        scenario_path,
+        profile_metadata_path,
+        excluded_regions_path,
+        reference_path,
+        documents,
+        general,
+        scenario,
+    } = bootstrap;
     let population_ids = scenario
         .subpopulations
         .iter()
         .map(|population| population.population_id.value().clone())
         .collect::<BTreeSet<_>>();
+    // La carga v7 del perfil se traslada al paso F5.1.2.3. La estructura
+    // heredada solo mantiene la compatibilidad de los consumidores F5 ya
+    // existentes; se alcanza exclusivamente después de sellar el bootstrap.
+    let input_documents = F5InputDocuments::collect(
+        documents.general().size_bytes(),
+        documents.scenario().size_bytes(),
+        &profile_metadata_path,
+    )?;
     let profile = load_f5_profile(
         &profile_metadata_path,
         scenario.profile_metadata_sha256.value(),
@@ -774,6 +1181,8 @@ pub fn load_and_validate_f5_config_with_entropy(
         reference_sha256: general.reference_sha256.value().clone(),
         scenario_id: general.scenario_id.value().clone(),
         profile,
+        bootstrap_documents: documents,
+        input_documents,
         general,
         scenario,
     })
@@ -2063,6 +2472,52 @@ fn config_error(
     .with("path", general.source().path().display().to_string())
     .with("fields", fields)
     .with("detail", detail.into())
+}
+
+#[cfg(test)]
+mod bounded_toml_tests {
+    use std::io::{self, Read};
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::{F5_PRE_ADMISSION_TOML_LIMIT_BYTES, read_bounded_f5_toml_from_reader};
+
+    struct CountingReader {
+        bytes: Vec<u8>,
+        offset: usize,
+        observed: Arc<AtomicUsize>,
+    }
+
+    impl Read for CountingReader {
+        fn read(&mut self, destination: &mut [u8]) -> io::Result<usize> {
+            let remaining = &self.bytes[self.offset..];
+            let count = remaining.len().min(destination.len());
+            destination[..count].copy_from_slice(&remaining[..count]);
+            self.offset += count;
+            self.observed.fetch_add(count, Ordering::Relaxed);
+            Ok(count)
+        }
+    }
+
+    #[test]
+    fn bounded_toml_reader_observes_only_the_excess_byte_and_never_materializes_it() {
+        let limit = usize::try_from(F5_PRE_ADMISSION_TOML_LIMIT_BYTES).expect("limit usize");
+        let observed = Arc::new(AtomicUsize::new(0));
+        let reader = CountingReader {
+            bytes: vec![b'#'; limit + 4_096],
+            offset: 0,
+            observed: Arc::clone(&observed),
+        };
+
+        let error = read_bounded_f5_toml_from_reader(Path::new("unclassified.toml"), reader)
+            .expect_err("the byte after the inclusive limit rejects the input");
+
+        assert_eq!(error.code(), "GPS-INPUT-001");
+        assert_eq!(observed.load(Ordering::Relaxed), limit + 1);
+        assert!(error.render_human().contains("byte 65537"));
+        assert!(!error.context().contains_key("scenario_id"));
+    }
 }
 
 #[cfg(test)]

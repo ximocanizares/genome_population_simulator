@@ -828,6 +828,10 @@ haplotipos suministrados, `alt_af` intrabloque, *indels*, repeticiones, SV,
 mosaicos, recombinación, mapas, genealogía y `HaplotypeProcess`. F6 añade
 variación compleja y F7.1 define por primera vez la meiosis.
 
+Revisión de admisión aprobada el 4 de septiembre de 2026: el algoritmo v7
+reemplaza los intermedios v5/v6 y pasa a ser la única autoridad de recursos y
+binding para F5.1.2.
+
 ### Escenario TOML canónico
 
 F5 es un conjunto de dos documentos de autoría cerrados, no un TOML aislado.
@@ -1093,8 +1097,14 @@ FASTA/coordenada, obtener un único entero acotado por su recuento total y
 resolverlo por prefijos de recuentos; no se elige primero un tramo. Esa
 resolución usa un recorrido directo completo de la lista ordenada por cada
 bloque y por cada intento: no construye un índice auxiliar de tramos. Por ello
-la admisión presupuesta exactamente `L*B*tract_count` consultas de tramo como
-cota conservadora, aunque un intento o la búsqueda terminen antes. La lista se ordena
+v3 fue sustituida por v4: las consultas de tramo se presuponen como
+`2*L*(B*tract_count+B*(B-1)/2)`. El primer sumando cuenta los tramos de
+preflight y el segundo los residuos que puede crear una división por bloque;
+una pasada calcula el total de inicios y la otra resuelve el prefijo del entero
+uniforme global, aunque un intento o la búsqueda terminen antes. V4 además
+presupuesta de forma separada la comprobación de capacidad, la validación de la
+lista, la copia por intento y los desplazamientos de `remove`/`insert`; por
+ello no atribuye esos costes indebidamente a las dos consultas de selección. La lista se ordena
 por orden FASTA e inicio. Adyacencia es válida; solape, N o máscara no lo son.
 Un fallo descarta el intento completo. Tras éxito, los bloques se identifican en
 orden FASTA/inicio/fin; los SNP empiezan en la primera posición y sortean gaps
@@ -1180,8 +1190,85 @@ El coste por bloque×subpoblación×intento es
 `O(H*S² + max_swap_proposals*S)` tiempo: evaluar todos los pares ponderados
 requiere recorrer H filas por cada pareja de sitios; las actualizaciones 2×2
 aceptadas mantienen las estadísticas en `O(S)`. El contrato de admisión no deja
-las cotas de recursos en notación asintótica. Antes del primer consumo RNG, el
-preflight `f5-resource-accounting-v1` calcula con enteros comprobados y nombres
+las cotas de recursos en notación asintótica.
+
+#### Admisión físicamente acotada y acumulativa
+
+`f5-resource-accounting-v7` sustituye por completo los parches intermedios v5 y
+v6. La admisión es una sola máquina de estados; no existe una carga previa que
+pueda abrir o materializar perfil, referencia o máscara al margen de ella. Sus
+estados, en este orden, son `bootstrap`, `profile_metadata`,
+`profile_table_block_lengths`, `profile_table_snp_gaps`,
+`profile_table_snp_spectrum`, `profile_table_haplotype_weights`,
+`profile_table_ld`, `reference_and_mask_scan`, `final_formula` y `sealed`. Una
+transición solo ocurre si operaciones, pico de memoria y salida siguen dentro
+de sus límites inclusivos. Un exceso u overflow deja el estado en `rejected` y
+prohíbe RNG, creación de destino y apertura de entradas posteriores.
+
+El dispatcher CLI no decide F5 mediante una sonda. Abre el TOML general una vez
+y lo lee completo con límite físico 65536 bytes; el byte 65537 solo sirve para
+confirmar el exceso. Clasifica y valida el documento después de EOF sobre ese
+mismo búfer. Esta cota se aplica antes de conocer la versión y, por tanto, a la
+ruta transparente de configuración general. El escenario tiene la misma cota.
+El bootstrap máximo son esos dos documentos pequeños: de él se obtiene
+`max_working_memory_bytes` sin cargar perfil ni recorrer referencia. El coste
+real del bootstrap se contrasta inmediatamente con los presupuestos leídos del
+escenario.
+
+Toda lectura usa un `BoundedInput` interno con contrato mínimo: rol, ruta
+normalizada desde el documento propietario, límite, handle abierto, contador
+`u64` y SHA-256 incremental. Lectura, medida y hash observan los mismos bytes.
+Antes de ampliar un búfer se carga en el ledger su nueva reserva; al llegar al
+límite se intenta leer como máximo un byte adicional. `metadata` no forma parte
+de la autoridad y no permite omitir esa comprobación. Al alcanzar EOF se emite
+un `PhysicalInputIdentity` con rol, ruta normalizada, tamaño observado y
+SHA-256; para enlaces declarados añade tamaño y hash esperados y exige igualdad.
+El orden y los roles exactos son `general_toml`, `scenario_toml`,
+`profile_metadata`, `profile_block_lengths`, `profile_snp_gaps`,
+`profile_snp_spectrum`, `profile_haplotype_weights`, `profile_ld`,
+`reference_fasta` y, solo si existe, `mask`. Los atributos del sistema de
+ficheros no forman parte de la identidad portable; si se consultan para mejorar
+un diagnóstico, se obtienen del handle abierto y nunca sustituyen tamaño ni
+digest observados.
+
+`profile.metadata.json` se abre solo tras admitir el bootstrap. Con
+`operation_remaining` y `memory_headroom` calculados mediante resta comprobada,
+su límite es
+`min(floor(operation_remaining/2),floor(memory_headroom/2))`, porque lectura y
+parser y sus dos representaciones transitorias cargan dos unidades por byte. Un
+límite cero rechaza sin abrir. El búfer se libera después de construir el objeto
+tipado. Antes de abrir un TSV se comprueba el
+coste total conocido de los cinco tamaños declarados. Cada tabla se abre
+después, por orden contractual, con límite `size_bytes+1`; lectura, hash y
+parseo usan el mismo búfer y este se libera antes de la tabla siguiente. Solo
+persisten filas de dominio y auditorías de normalización. Un tamaño o hash
+distinto es `GPS-INPUT-002`, no una oportunidad para recalcular el presupuesto.
+
+Antes de cualquier apertura el ledger reserva todos los costes futuros
+obligatorios ya conocidos. Un coste que depende de EOF, filas o geometría se
+carga incrementalmente antes de consumir el siguiente byte o retener el
+siguiente elemento. En particular, referencia y máscara no se abren si el
+perfil y las dimensiones ya resueltas dejan sin margen alguna dimensión.
+
+Antes de leer cada byte del primer recorrido FASTA el ledger reserva también la
+visita del segundo recorrido obligatorio. La referencia y la máscara se
+procesan en streaming; antes de retener un ID, fila o tramo se comprueba su
+reserva. El primer recorrido produce geometría elegible e identidad física de
+referencia y máscara. Después del layout, la recuperación REF abre otro handle,
+lee con límite `reference.size_bytes+1` y exige el mismo tamaño y SHA-256 antes
+de aceptar las bases. Este vínculo cubre cambios accidentales entre pasadas,
+pero no promete seguridad frente a sustitución hostil concurrente. No se
+materializa la referencia completa y la máscara no se relee.
+
+El resultado `SealedF5Admission` posee el escenario efectivo, perfil, tramos,
+dimensiones, ledger cerrado y un `F5AdmissionReceipt`. El receipt contiene
+`algorithm`, identidad semántica, lista de `PhysicalInputIdentity` por rol,
+límites, aportaciones `other_*`, fases y totales. Geometría solo acepta este
+objeto sellado; no acepta un receipt suelto ni escalares reconstruidos por el
+llamador. Así dos TOML semánticamente equivalentes pero con comentarios,
+padding o tamaños distintos no comparten preflight.
+
+Antes del primer consumo RNG v7 calcula con enteros comprobados y nombres
 dimensionalmente distintos:
 
 - `B`, número exacto de bloques resuelto desde el objetivo; `N_pop`, número de
@@ -1196,6 +1283,9 @@ dimensionalmente distintos:
   elegibles maximales que materializa; `sequence_count`; y
   `retained_sequence_ids`, pico de IDs FASTA retenidos simultáneamente para
   detectar duplicados;
+- `fasta_bytes_processed`, tamaño exacto de los bytes crudos del FASTA, que se
+  reserva dos veces; y `mask_bytes_processed`, bytes crudos que atraviesa una
+  vez el lector/hash de máscara (cero sin máscara);
   `K_bound=B*S_bound`; `pair_bound=S_bound*(S_bound-1)/2`;
 - `bin_count(p)`, número de filas LD del `population_id=p`, y
   `bin_count_total=sum_p bin_count(p)`. Por tanto, la cota de filas de bins es
@@ -1203,6 +1293,10 @@ dimensionalmente distintos:
 - `profile_rows`, suma de filas de los cinco TSV de perfil, y
   `normalization_rows`, suma de filas de los cuatro conjuntos normalizados;
   ambos incluyen cada fila física aunque dos valores sean iguales;
+- `general_toml_bytes`, `scenario_toml_bytes`, `profile_metadata_bytes` y
+  `profile_tsv_bytes`, suma de los cinco tamaños: bytes observados por sus
+  lectores, no por una consulta previa al sistema de ficheros; cada tamaño
+  individual permanece en `input_identities`;
 - `X=C_total*sequence_count`, número de copias por secuencia, y
   `G_bound=founder_count*K_bound`, número máximo de genotipos SNP.
 
@@ -1221,34 +1315,63 @@ El preflight común entrega tres magnitudes distintas: `other_operation_units`,
 copiada y toda salida obligatoria o activada ajena a F5. Ninguna se reutiliza
 como si tuviera otra unidad. Las cotas conservadoras F5 son:
 
-- `operation_units = other_operation_units + 2*reference_bases_processed +
-  tract_count + L*B*tract_count + profile_rows +
+- `operation_units = other_operation_units +
+  2*(general_toml_bytes+scenario_toml_bytes+profile_metadata_bytes+
+  profile_tsv_bytes) +
+  2*fasta_bytes_processed +
+  reference_bases_processed + mask_bytes_processed +
+  tract_count + 2*tract_count +
+  2*L*(B*tract_count+B*(B-1)/2) +
+  L*(tract_count+3*B*tract_count+3*B*(B-1)/2) + profile_rows +
   normalization_rows + 2*L*B*length_support_cardinality +
   L*B*(B+S_bound) +
   B*N_pop*A*(H*S_bound*S_bound+Q*S_bound) + B*C_total +
   X*K_bound + G_bound + B*N_pop*S_bound + tsv_rows_bound +
-  json_rows_bound`;
-- `working_memory_bytes = other_working_memory_bytes +
-  256*(B+tract_count+retained_sequence_ids+profile_rows+normalization_rows) +
+  json_rows_bound`; el factor dos de los documentos cuenta lectura/hash y
+  recorrido del parser sobre el búfer, y el factor dos del FASTA cuenta sus dos
+  handles; no se añade una visita de `metadata` inexistente;
+- `working_memory_bytes=max(bootstrap_peak, profile_metadata_peak,
+  profile_table_peaks, reference_and_mask_scan_peak,
+  final_formula_peak)`. Cada registro de fase contiene
+  `retained_before_bytes`, `transient_bytes`, `retained_after_bytes` y
+  `phase_peak_bytes`, y cumple
+  `phase_peak_bytes=other_working_memory_bytes+
+  max(retained_before_bytes,retained_after_bytes)+transient_bytes`. Los
+  documentos cargan dos veces sus
+  bytes observados mientras coexisten búfer y parser; los cinco TSV son fases
+  separadas. `final_formula_peak` conserva la cota productiva
+  `other_working_memory_bytes +
+  256*(4*B+2*tract_count+retained_sequence_ids+profile_rows+
+  normalization_rows) +
   B*N_pop*(ceil(H*S_bound/8)+64*H+256*S_bound+192*pair_bound) +
-  256*B*bin_count_total + 128*C_total + 65536`; el implementador puede
-  procesar secuencialmente y usar menos, pero toda reserva F5 debe caber aquí;
+  256*B*bin_count_total + 128*C_total + 65536`. Solo se suman estructuras que
+  coexisten; el ledger carga prospectivamente cada crecimiento y registra los
+  picos para que un lector independiente repita el máximo;
 - `truth_bound=65536+X*(4096+2048*K_bound)+4096*G_bound` y
   `output_bytes = other_output_bytes + 1048576 +
   4096*(tsv_rows_bound+json_rows_bound) + truth_bound`. El sobre de 4096 bytes
   por fila/objeto y los sobres de verdad son máximos del contrato F5 v1 de
   contabilidad; necesitarlos mayores es un defecto interno, no permiso para
-  rebasar el presupuesto. El término `2*reference_bases_processed` cubre una
-  unidad para leer y clasificar cada base y otra por base como cota del avance
-  del cursor de máscara; `tract_count` añade una unidad por tramo emitido. Los
+  rebasar el presupuesto. Los dos términos `fasta_bytes_processed` cubren,
+  respectivamente, todos los bytes que el escáner clasifica y todos los que la
+  pasada secuencial posterior recorre para recuperar REF y comprobar SHA-256;
+  incluyen cabeceras, descripciones y separadores, no solo bases. El término
+  `reference_bases_processed` cubre el avance del cursor de máscara por base y
+  `mask_bytes_processed` la lectura/hash única de sus filas e IDs. No se
+  materializa la referencia completa. `tract_count` añade una unidad por tramo emitido. Los
   `2*L*B*length_support_cardinality` cubren las dos enumeraciones literales de
   longitudes por intento y bloque; no se admiten recorridos no presupuestados.
   Los
-  factores `L*B*tract_count` son intentos×bloques×tramos y añaden una unidad por
-  consulta del recorrido directo obligatorio: no sustituyen ni duplican la
-  emisión. Por tanto, con todos los demás escalares iguales, pasar de un tramo
-  a 4096 aumenta operaciones exactamente en
-  `4095*(1+L*B)`, memoria de trabajo en `256*4095` bytes y no cambia
+  V4 añade `2*tract_count` para el recorrido de capacidad y la validación del
+  request antes de RNG. Los factores
+  `2*L*(B*tract_count+B*(B-1)/2)` son las dos consultas obligatorias del
+  recorrido directo: una calcula el total de inicios y otra resuelve su
+  prefijo, incluyendo como máximo un nuevo residuo por colocación previa. El
+  término `L*(tract_count+3*B*tract_count+3*B*(B-1)/2)` cubre la copia de
+  tramos por intento y los desplazamientos de `remove` y hasta dos `insert`.
+  No se usa un índice auxiliar. Por tanto, con todos los demás escalares
+  iguales, pasar de un tramo a 4096 aumenta operaciones exactamente en
+  `4095*(3+L+5*L*B)`, memoria de trabajo en `512*4095` bytes y no cambia
   `output_bytes`, porque la lista no se publica y sus escalares caben en el
   sobre fijo. Los 256 bytes por tramo cubren la lista transitoria y los 256
   bytes por ID retenido cubren el índice de detección de duplicados; el búfer
@@ -1257,19 +1380,41 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   tres escalares de auditoría del escaneo dentro del sobre fijo de 1048576
   bytes, por lo que no añade una fila repetida a `json_rows_bound`.
 
-Todas las sumas, productos, `ceil` y el cálculo de `S_bound` se ejecutan en el
-orden escrito con aritmética entera comprobada. El efectivo y el manifiesto
-conservan `reference_bases_processed`, `tract_count`, `retained_sequence_ids`,
+Todas las sumas, productos, `ceil`, reservas y el cálculo de `S_bound` se
+ejecutan en el orden escrito con aritmética entera comprobada. El efectivo y el
+manifiesto conservan `reference_bases_processed`, `fasta_bytes_processed`,
+`mask_bytes_processed`, `general_toml_bytes`, `scenario_toml_bytes`,
+`profile_metadata_bytes`, `profile_tsv_bytes`, las identidades físicas,
+los registros de fase, `tract_count`, `retained_sequence_ids`,
 `site_bound_per_block=S_bound`, `bin_count_total`, `profile_rows`,
 `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, las tres
 aportaciones `other_*` y los tres resultados; así un lector puede repetir la
-cuenta sin RNG.
+cuenta sin RNG. Los receipts v5/v6 no son entradas admitidas ni se migran: deben
+repetir la admisión v7 desde los ficheros fuente. General v3 y escenario v1 no
+cambian de significado; el objeto prerelease `resource_preflight` de efectivo y
+manifiesto v5 cambia de forma y exige actualización atómica de ambos esquemas y
+sus lectores antes de reanudar implementación.
+
+La prueba de frontera de `max_working_memory_bytes` no se construye modificando
+un TOML después de calcularlo, porque el propio literal forma parte de la
+identidad y del pico de bootstrap. Usa una línea de anchura fija
+`max_working_memory_bytes = <entero> # pad:<espacios>`: el entero es decimal
+canónico sin ceros iniciales y el comentario compensa su anchura. El generador
+itera serialización y cálculo v7 hasta un punto fijo, comprueba que dos
+iteraciones consecutivas producen los mismos bytes y conserva igual longitud
+física al construir la variante límite−1. El fixture no puede quedar junto a
+una potencia de diez que impida esa compensación. La prueba recalcula desde los
+bytes finales: el límite exacto admite, límite−1 rechaza, y cualquier edición de
+padding cambia SHA-256 y obliga a repetir la admisión.
 
 Cada resultado se compara inclusivamente con
 `max_operation_units`, `max_working_memory_bytes` y `max_output_bytes` y con los
-topes duros F5 v1 anteriores. El exceso u overflow devuelve `GPS-RES-101` antes
-de abrir temporales y registra las tres cotas, sus límites y el primer término
-que desbordó o excedió. Esta admisión determinista no ejecuta perfiles externos,
+topes duros F5 v1 anteriores. `GPS-RES-101` registra algoritmo, fase, rol,
+dimensión, acumulado/reserva, límite y primer término; un exceso físico indica
+además bytes observados antes del rechazo. `GPS-INPUT-001` conserva fallos de
+apertura/lectura y `GPS-INPUT-002`, desigualdad de tamaño o SHA-256. Los errores
+TOML/JSON/TSV solo se emiten después de la lectura acotada. Esta admisión
+determinista no ejecuta perfiles externos,
 no consulta RAM/CPU disponible y no promete tiempo de pared o RSS. Es distinta
 de DTPD-115: F9 podrá fijar objetivos de rendimiento y publicación, pero no es
 prerrequisito de F5 ni puede relajar estos topes de dominio. Está prohibido
@@ -1458,7 +1603,7 @@ objetos rechazan propiedades adicionales:
 | `sampling` | lista ordenada por `population_id`+`block_id`, con una fila exacta por bloque×subpoblación: `population_id`, `block_id`, `block_index`, `requested_mode`, `effective_mode`, `source` (`subpopulation_default` o `block_override`), `controlled_max_abs_error_declared` y `controlled_max_abs_error_effective`; las tolerancias son `null` en probabilístico y la efectiva es finita en `[0,0.5/C]` en controlado, con `C=individual_count*ploidy` de esa subpoblación |
 | `normalizations` | cuatro objetos exactos en orden `block_lengths`, `snp_gaps`, `snp_spectrum`, `haplotype_weights`, cada uno con `set_kind`, `canonical_order`, `algorithm="neumaier-f64-v1"`, `tolerance`, `input_values`, `input_sum`, `input_delta`, `effective_values`, `output_sum`, `output_delta`; los números recuperan el mismo `f64` y materializan físicamente la auditoría DTC-049 |
 | `limits` | objeto exacto con los cuatro límites algorítmicos y los tres presupuestos efectivos TOML |
-| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v1"`, `reference_bases_processed`, `tract_count`, `retained_sequence_ids`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; los tres recuentos del escaneo y los tres valores calculados son enteros `u64`; los valores calculados no exceden sus límites |
+| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v7"`, `input_identities`, `phases`, `reference_bases_processed`, `fasta_bytes_processed`, `mask_bytes_processed`, `general_toml_bytes`, `scenario_toml_bytes`, `profile_metadata_bytes`, `profile_tsv_bytes`, `tract_count`, `retained_sequence_ids`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; `input_identities` se ordena por rol contractual y cada objeto exacto contiene `role`, `normalized_path`, `observed_size_bytes`, `observed_sha256`, `declared_size_bytes` y `declared_sha256`, estos dos últimos `null` cuando no existen en el documento propietario; `phases` sigue el orden cerrado de la máquina de admisión y cada objeto contiene `phase`, `operation_units_cumulative`, `retained_before_bytes`, `transient_bytes`, `retained_after_bytes`, `phase_peak_bytes` y `output_bytes_reserved`; todos los recuentos son `u64`, los valores calculados no exceden sus límites y efectivo/manifiesto son iguales escalar y posicionalmente |
 | `algorithms` | objeto exacto `layout="f5-layout-v1"`, `marginals="f5-spectrum-v1"`, `haplotypes="weighted-prefix-swap-v1"`, `ld="phased-r2-neumaier-v1"`, `controlled="largest-remainder-v1"`, `inbreeding="diploid-f-v1"`, `truth_projection="f5-founder-truth-projection-v2"` |
 | `rng_catalog`, `id_catalog` | objetos exactos `catalog_id`, `path`, `size_bytes`, `sha256` |
 

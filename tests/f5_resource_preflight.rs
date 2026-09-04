@@ -4,15 +4,31 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use genome_population_simulator::application::load_and_validate_f5_config;
-use genome_population_simulator::f5_layout::F5BlockLengthPlan;
+use genome_population_simulator::application::{
+    load_and_validate_f5_config, load_and_validate_f5_config_with_entropy,
+};
+use genome_population_simulator::f5_layout::{
+    F5BlockLengthPlan, F5LayoutRequest, build_f5_physical_layout,
+};
 use genome_population_simulator::f5_preflight::{
     F5_HARD_OPERATION_LIMIT, F5_HARD_OUTPUT_LIMIT, F5_HARD_WORKING_MEMORY_LIMIT, F5OtherResources,
     preflight_f5_resources,
 };
+use genome_population_simulator::identity::ExecutionId;
+use genome_population_simulator::randomness::EntropySource;
 use sha2::{Digest, Sha256};
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug)]
+struct FixedEntropy([u8; 32]);
+
+impl EntropySource for FixedEntropy {
+    fn fill_root_seed(&mut self, destination: &mut [u8; 32]) -> Result<(), String> {
+        *destination = self.0;
+        Ok(())
+    }
+}
 
 fn temporary(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
@@ -181,6 +197,32 @@ fn replace_reference(root: &Path, fasta: &[u8]) {
     fs::write(path, format!("{rewritten}\n")).expect("general rewrite");
 }
 
+fn replace_profile_source_citation(root: &Path, citation: &str) {
+    let metadata_path = root.join("authoring/scenarios/profiles/profile.metadata.json");
+    let metadata = fs::read_to_string(&metadata_path).expect("profile metadata");
+    let replacement = format!(r#""source_citation":"{citation}""#);
+    let metadata = metadata.replace(r#""source_citation":"test""#, &replacement);
+    fs::write(&metadata_path, &metadata).expect("rewritten profile metadata");
+
+    let scenario_path = root.join("authoring/scenarios/scenario.toml");
+    let scenario = fs::read_to_string(&scenario_path).expect("scenario source");
+    let scenario = scenario
+        .lines()
+        .map(|line| {
+            if line.starts_with("profile_metadata_sha256 = ") {
+                format!(
+                    "profile_metadata_sha256 = \"{}\"",
+                    sha256(metadata.as_bytes())
+                )
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(scenario_path, format!("{scenario}\n")).expect("rewritten scenario");
+}
+
 fn replace_reference_with_repeated_base(root: &Path, base_count: usize) {
     let fasta_path = root.join("authoring/references/ref.fa");
     let mut fasta = fs::File::create(&fasta_path).expect("large reference");
@@ -343,68 +385,100 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
     assert_eq!(compact.retained_sequence_ids(), 1);
     assert_eq!(fragmented.tract_count(), 4_096);
     assert_eq!(fragmented.reference_bases_processed(), length as u64);
+    assert_eq!(
+        compact.fasta_bytes_processed(),
+        fs::metadata(root.join("compact/authoring/references/ref.fa"))
+            .expect("compact FASTA metadata")
+            .len()
+    );
+    assert_eq!(
+        fragmented.fasta_bytes_processed(),
+        fs::metadata(root.join("fragmented/authoring/references/ref.fa"))
+            .expect("fragmented FASTA metadata")
+            .len()
+    );
     assert_eq!(compact.eligible_bases(), fragmented.eligible_bases());
     assert_eq!(compact.profile_rows(), 6);
     assert_eq!(compact.normalization_rows(), 5);
     assert_eq!(compact.bin_count_total(), 1);
     assert_eq!(compact.tsv_rows_bound(), 11);
     assert_eq!(compact.json_rows_bound(), 30);
-    assert_eq!(compact.operation_units(), 24_653);
-    assert_eq!(compact.working_memory_bytes(), 70_465);
+    assert_eq!(compact.operation_units(), 39_305);
+    assert_eq!(compact.working_memory_bytes(), 76_037);
     assert_eq!(compact.output_bytes(), 1_306_624);
     assert_eq!(
         fragmented.operation_units() - compact.operation_units(),
-        4_095 * (1 + 1)
+        4_095 * (1 + 2 + 2 + 1 + 3) + fragmented.mask_bytes_processed()
+            - compact.mask_bytes_processed()
     );
     assert_eq!(
         fragmented.working_memory_bytes() - compact.working_memory_bytes(),
-        256 * 4_095
+        512 * 4_095
     );
     assert_eq!(fragmented.output_bytes(), compact.output_bytes());
 
-    for (label, limit, expected_ok) in [
-        (
-            "operations-exact",
-            format!("max_operation_units = {}\n", fragmented.operation_units()),
-            true,
-        ),
-        (
-            "operations-minus-one",
-            format!(
-                "max_operation_units = {}\n",
-                fragmented.operation_units() - 1
-            ),
-            false,
-        ),
-        (
-            "memory-exact",
-            format!(
-                "max_working_memory_bytes = {}\n",
-                fragmented.working_memory_bytes()
-            ),
-            true,
-        ),
-        (
-            "memory-minus-one",
-            format!(
-                "max_working_memory_bytes = {}\n",
-                fragmented.working_memory_bytes() - 1
-            ),
-            false,
-        ),
+    for (label, field, placeholder) in [
+        ("operations", "max_operation_units", 999_999_u64),
+        ("memory", "max_working_memory_bytes", 9_999_999_u64),
     ] {
-        let path = configuration(&root.join(label), Some(&mask), &limit, &bases);
-        let config = load_and_validate_f5_config(&path).expect("bounded configuration");
-        let result = preflight_f5_resources(&config, F5OtherResources::default());
-        if expected_ok {
-            result.expect("inclusive fragmented bound");
+        let placeholder_line = format!("{field} = {placeholder}\n");
+        let path = configuration(&root.join(label), Some(&mask), &placeholder_line, &bases);
+        let provisional = load_and_validate_f5_config(&path).expect("provisional configuration");
+        let provisional = preflight_f5_resources(&provisional, F5OtherResources::default())
+            .expect("provisional bound");
+        let exact = if field == "max_operation_units" {
+            provisional.operation_units()
         } else {
-            assert_eq!(
-                result.expect_err("bound minus one must reject").code(),
-                "GPS-RES-101"
-            );
-        }
+            provisional.working_memory_bytes()
+        };
+        assert_eq!(exact.to_string().len(), placeholder.to_string().len());
+        replace_scenario(
+            &root.join(label),
+            &placeholder_line,
+            &format!("{field} = {exact}\n"),
+        );
+        let exact_config = load_and_validate_f5_config(&path).expect("exact configuration");
+        preflight_f5_resources(&exact_config, F5OtherResources::default())
+            .expect("inclusive fragmented bound");
+        replace_scenario(
+            &root.join(label),
+            &format!("{field} = {exact}\n"),
+            &format!("{field} = {}\n", exact - 1),
+        );
+        let rejected = load_and_validate_f5_config(&path).expect("minus-one configuration");
+        assert_eq!(
+            preflight_f5_resources(&rejected, F5OtherResources::default())
+                .expect_err("bound minus one must reject")
+                .code(),
+            "GPS-RES-101"
+        );
     }
+
+    let exact_path = configuration(
+        &root.join("operations-exact-layout"),
+        Some(&mask),
+        "max_operation_units = 999999\n",
+        &bases,
+    );
+    let provisional = load_and_validate_f5_config(&exact_path).expect("layout provisional config");
+    let exact_operation = preflight_f5_resources(&provisional, F5OtherResources::default())
+        .expect("layout provisional bound")
+        .operation_units();
+    replace_scenario(
+        &root.join("operations-exact-layout"),
+        "max_operation_units = 999999\n",
+        &format!("max_operation_units = {exact_operation}\n"),
+    );
+    let exact_config = load_and_validate_f5_config(&exact_path).expect("exact layout config");
+    let exact_preflight = preflight_f5_resources(&exact_config, F5OtherResources::default())
+        .expect("the exact three-pass operation budget is admitted");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    build_f5_physical_layout(
+        F5LayoutRequest::new(&exact_config, &exact_preflight, &execution)
+            .expect("exact preflight binding"),
+    )
+    .expect("the admitted layout must complete its counted REF pass");
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -731,6 +805,192 @@ fn long_fasta_description_is_discarded_under_a_bounded_address_space() {
     fs::remove_dir_all(root).expect("cleanup");
 }
 
+#[test]
+fn fasta_descriptions_raise_v5_operation_budget_and_preserve_productive_rng_path() {
+    const DESCRIPTION_BYTES: usize = 80 * 1_024 * 1_024;
+    let short_root = temporary("fasta-bytes-short");
+    let long_root = temporary("fasta-bytes-long");
+    fs::create_dir_all(&short_root).expect("short root");
+    fs::create_dir_all(&long_root).expect("long root");
+
+    let short_general = configuration(&short_root, None, "max_operation_units = 199999999\n", "AA");
+    let long_general = configuration(&long_root, None, "max_operation_units = 199999999\n", "AA");
+    replace_reference_with_long_description(&long_root, DESCRIPTION_BYTES);
+
+    let short_config = load_and_validate_f5_config(&short_general).expect("short configuration");
+    let short = preflight_f5_resources(&short_config, F5OtherResources::default())
+        .expect("short preflight");
+    let long_config = load_and_validate_f5_config(&long_general).expect("long configuration");
+    let long =
+        preflight_f5_resources(&long_config, F5OtherResources::default()).expect("long preflight");
+
+    assert_eq!(
+        short.reference_bases_processed(),
+        long.reference_bases_processed()
+    );
+    assert_eq!(short.eligible_bases(), long.eligible_bases());
+    assert_eq!(short.tract_count(), long.tract_count());
+    assert_eq!(
+        short.fasta_bytes_processed(),
+        fs::metadata(short_root.join("authoring/references/ref.fa"))
+            .expect("short FASTA metadata")
+            .len()
+    );
+    assert_eq!(
+        long.fasta_bytes_processed(),
+        fs::metadata(long_root.join("authoring/references/ref.fa"))
+            .expect("long FASTA metadata")
+            .len()
+    );
+    assert_eq!(
+        long.fasta_bytes_processed() - short.fasta_bytes_processed(),
+        u64::try_from(DESCRIPTION_BYTES + 1).expect("description length fits u64")
+    );
+    assert_eq!(
+        long.operation_units() - short.operation_units(),
+        2 * (long.fasta_bytes_processed() - short.fasta_bytes_processed()),
+        "the raw header is traversed by the preflight and productive REF recovery passes"
+    );
+
+    replace_scenario(
+        &long_root,
+        "max_haplotype_cells = 16\nmax_operation_units = 199999999\n",
+        &format!(
+            "max_haplotype_cells = 16\nmax_operation_units = {}\n",
+            long.operation_units()
+        ),
+    );
+    let exact_config = load_and_validate_f5_config(&long_general).expect("exact configuration");
+    let exact = preflight_f5_resources(&exact_config, F5OtherResources::default())
+        .expect("exact v5 operation limit is inclusive");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let short_layout = build_f5_physical_layout(
+        F5LayoutRequest::new(&short_config, &short, &execution).expect("short request"),
+    )
+    .expect("short productive layout");
+    let long_layout = build_f5_physical_layout(
+        F5LayoutRequest::new(&exact_config, &exact, &execution).expect("long request"),
+    )
+    .expect("long productive layout");
+    assert_eq!(
+        long_layout, short_layout,
+        "FASTA descriptions do not affect layout or its named RNG streams"
+    );
+
+    replace_scenario(
+        &long_root,
+        &format!(
+            "max_haplotype_cells = 16\nmax_operation_units = {}\n",
+            long.operation_units()
+        ),
+        &format!(
+            "max_haplotype_cells = 16\nmax_operation_units = {}\n",
+            long.operation_units() - 1
+        ),
+    );
+    let rejected_config =
+        load_and_validate_f5_config(&long_general).expect("minus-one configuration");
+    assert_eq!(
+        preflight_f5_resources(&rejected_config, F5OtherResources::default())
+            .expect_err("one operation below the long-header bound must reject")
+            .code(),
+        "GPS-RES-101"
+    );
+
+    fs::remove_dir_all(short_root).expect("short cleanup");
+    fs::remove_dir_all(long_root).expect("long cleanup");
+}
+
+#[test]
+fn mask_bytes_raise_v5_operation_budget_with_equal_geometry_and_exact_limit() {
+    let short_root = temporary("mask-bytes-short");
+    let long_root = temporary("mask-bytes-long");
+    fs::create_dir_all(&short_root).expect("short root");
+    fs::create_dir_all(&long_root).expect("long root");
+    let short_mask = "region_id\tsequence_id\tstart_1based\tend_1based\na\tchr1\t3\t3\n";
+    let long_mask = format!(
+        "region_id\tsequence_id\tstart_1based\tend_1based\n{}\tchr1\t3\t3\n",
+        "m".repeat(60_000)
+    );
+    let short_general = configuration(
+        &short_root,
+        Some(short_mask),
+        "max_operation_units = 99999\n",
+        "AAA",
+    );
+    let long_general = configuration(
+        &long_root,
+        Some(&long_mask),
+        "max_operation_units = 99999\n",
+        "AAA",
+    );
+    let short_config = load_and_validate_f5_config(&short_general).expect("short configuration");
+    let short = preflight_f5_resources(&short_config, F5OtherResources::default())
+        .expect("short preflight");
+    let long_config = load_and_validate_f5_config(&long_general).expect("long configuration");
+    let long =
+        preflight_f5_resources(&long_config, F5OtherResources::default()).expect("long preflight");
+
+    assert_eq!(
+        short.reference_bases_processed(),
+        long.reference_bases_processed()
+    );
+    assert_eq!(short.eligible_bases(), long.eligible_bases());
+    assert_eq!(short.tract_count(), long.tract_count());
+    assert_eq!(
+        short.mask_bytes_processed(),
+        fs::metadata(short_root.join("authoring/scenarios/excluded_regions.tsv"))
+            .expect("short mask metadata")
+            .len()
+    );
+    assert_eq!(
+        long.mask_bytes_processed(),
+        fs::metadata(long_root.join("authoring/scenarios/excluded_regions.tsv"))
+            .expect("long mask metadata")
+            .len()
+    );
+    assert_eq!(
+        long.operation_units() - short.operation_units(),
+        long.mask_bytes_processed() - short.mask_bytes_processed(),
+        "row and region-ID bytes are scanned even when mask geometry is identical"
+    );
+
+    replace_scenario(
+        &long_root,
+        "max_haplotype_cells = 16\nmax_operation_units = 99999\n",
+        &format!(
+            "max_haplotype_cells = 16\nmax_operation_units = {}\n",
+            long.operation_units()
+        ),
+    );
+    let exact_config = load_and_validate_f5_config(&long_general).expect("exact configuration");
+    preflight_f5_resources(&exact_config, F5OtherResources::default())
+        .expect("exact mask-byte limit is inclusive");
+    replace_scenario(
+        &long_root,
+        &format!(
+            "max_haplotype_cells = 16\nmax_operation_units = {}\n",
+            long.operation_units()
+        ),
+        &format!(
+            "max_haplotype_cells = 16\nmax_operation_units = {}\n",
+            long.operation_units() - 1
+        ),
+    );
+    let rejected_config =
+        load_and_validate_f5_config(&long_general).expect("minus-one configuration");
+    assert_eq!(
+        preflight_f5_resources(&rejected_config, F5OtherResources::default())
+            .expect_err("one operation below the mask-byte bound must reject")
+            .code(),
+        "GPS-RES-101"
+    );
+
+    fs::remove_dir_all(short_root).expect("short cleanup");
+    fs::remove_dir_all(long_root).expect("long cleanup");
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn fragmented_tracts_are_budgeted_before_vector_growth() {
@@ -824,7 +1084,7 @@ fn retained_sequence_id_peak_is_persisted_in_the_published_memory_bound() {
 
     assert_eq!(result.retained_sequence_ids(), 129);
     assert_eq!(result.tract_count(), 1);
-    assert_eq!(result.working_memory_bytes(), 103_233);
+    assert_eq!(result.working_memory_bytes(), 108_525);
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -1019,5 +1279,444 @@ fn wide_literal_length_support_is_rejected_by_preflight_before_enumeration() {
         .expect_err("the literal two-pass support cannot exceed the operation budget");
     assert_eq!(error.code(), "GPS-RES-101");
     assert!(error.context()["detail"].contains("length_support_cardinality"));
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn disjoint_gap_profile_flows_from_preflight_to_reproducible_layout() {
+    let root = temporary("disjoint-gaps-layout");
+    fs::create_dir_all(&root).expect("root");
+    let general = custom_configuration_with_gap(
+        &root,
+        "",
+        "AAAA",
+        "length_min_bp\tlength_max_bp\tweight\n4\t4\t1\n",
+        "gap_min_bp\tgap_max_bp\tweight\n1\t1\t0.5\n3\t3\t0.5\n",
+        "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t3\t0.5\t0.05\n",
+    );
+    let config = load_and_validate_f5_config(&general).expect("disjoint gaps profile");
+    let preflight = preflight_f5_resources(&config, F5OtherResources::default())
+        .expect("preflight accepts disjoint gaps without GPS-DOMAIN-101");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let first = build_f5_physical_layout(
+        F5LayoutRequest::new(&config, &preflight, &execution).expect("bound request"),
+    )
+    .expect("layout");
+    let second = build_f5_physical_layout(
+        F5LayoutRequest::new(&config, &preflight, &execution).expect("bound request"),
+    )
+    .expect("same layout");
+    assert_eq!(first, second, "the exact root seed scopes the gap RNG");
+    assert_eq!(first.blocks().len(), 1);
+    assert!(first.blocks()[0].sites().len() >= 2);
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn layout_request_rejects_preflight_from_other_reference_before_layout_rng() {
+    let first_root = temporary("layout-preflight-reference-a");
+    let second_root = temporary("layout-preflight-reference-b");
+    fs::create_dir_all(&first_root).expect("first root");
+    fs::create_dir_all(&second_root).expect("second root");
+    let first_general = configuration(&first_root, None, "", "AAAA");
+    let second_general = configuration(&second_root, None, "", "CCCC");
+    let first = load_and_validate_f5_config(&first_general).expect("first config");
+    let preflight =
+        preflight_f5_resources(&first, F5OtherResources::default()).expect("first preflight");
+    let second = load_and_validate_f5_config(&second_general).expect("second config");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let error = F5LayoutRequest::new(&second, &preflight, &execution)
+        .expect_err("a preflight cannot cross a reference SHA boundary");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    replace_scenario(
+        &first_root,
+        "max_layout_attempts = 1",
+        "max_layout_attempts = 2",
+    );
+    let changed_attempt_limit = load_and_validate_f5_config(&first_general)
+        .expect("configuration with a different attempt limit");
+    let error = F5LayoutRequest::new(&changed_attempt_limit, &preflight, &execution)
+        .expect_err("a preflight cannot be reused with more layout attempts");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    fs::remove_dir_all(first_root).expect("first cleanup");
+    fs::remove_dir_all(second_root).expect("second cleanup");
+}
+
+#[test]
+fn preflight_binding_rejects_equal_capacity_masks_and_changed_resource_limits() {
+    let first_root = temporary("binding-mask-first");
+    let second_root = temporary("binding-mask-second");
+    let limits_root = temporary("binding-limits");
+    fs::create_dir_all(&first_root).expect("first root");
+    fs::create_dir_all(&second_root).expect("second root");
+    fs::create_dir_all(&limits_root).expect("limits root");
+    let first_mask = "region_id\tsequence_id\tstart_1based\tend_1based\na\tchr1\t1\t2\n";
+    let second_mask = "region_id\tsequence_id\tstart_1based\tend_1based\nb\tchr1\t5\t6\n";
+    let first_general = configuration(&first_root, Some(first_mask), "", "AAAAAA");
+    let second_general = configuration(&second_root, Some(second_mask), "", "AAAAAA");
+    let first = load_and_validate_f5_config(&first_general).expect("first masked configuration");
+    let second = load_and_validate_f5_config(&second_general).expect("second masked configuration");
+    let first_preflight =
+        preflight_f5_resources(&first, F5OtherResources::default()).expect("first preflight");
+    let second_preflight =
+        preflight_f5_resources(&second, F5OtherResources::default()).expect("second preflight");
+    assert_eq!(
+        first_preflight.eligible_bases(),
+        second_preflight.eligible_bases()
+    );
+    assert_eq!(
+        first_preflight.tract_count(),
+        second_preflight.tract_count()
+    );
+    assert_ne!(
+        first_preflight.eligible_tracts(),
+        second_preflight.eligible_tracts(),
+        "the regression needs different masks with the same accounting totals"
+    );
+    let error = F5BlockLengthPlan::from_preflight(&second, &first_preflight)
+        .expect_err("a preflight must retain the exact mask identity");
+    assert_eq!(error.code(), "GPS-CONF-101");
+
+    let limits_general = configuration(&limits_root, None, "max_operation_units = 9999\n", "AAAA");
+    let unrestricted = load_and_validate_f5_config(&limits_general).expect("unrestricted config");
+    let unrestricted_preflight = preflight_f5_resources(&unrestricted, F5OtherResources::default())
+        .expect("unrestricted preflight");
+    replace_scenario(
+        &limits_root,
+        "max_haplotype_cells = 16\nmax_operation_units = 9999\n",
+        &format!(
+            "max_haplotype_cells = 16\nmax_operation_units = {}\n",
+            unrestricted_preflight.operation_units()
+        ),
+    );
+    let limited = load_and_validate_f5_config(&limits_general).expect("same geometry, own limit");
+    preflight_f5_resources(&limited, F5OtherResources::default())
+        .expect("the exact operation bound remains admitted");
+    let error = F5BlockLengthPlan::from_preflight(&limited, &unrestricted_preflight)
+        .expect_err("a preflight must retain its operation limit");
+    assert_eq!(error.code(), "GPS-CONF-101");
+
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let error = F5LayoutRequest::new(&second, &first_preflight, &execution)
+        .expect_err("request must fail before opening layout RNG for a crossed mask");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    let error = F5LayoutRequest::new(&limited, &unrestricted_preflight, &execution)
+        .expect_err("request must fail before opening layout RNG for a crossed limit");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    fs::remove_dir_all(first_root).expect("first cleanup");
+    fs::remove_dir_all(second_root).expect("second cleanup");
+    fs::remove_dir_all(limits_root).expect("limits cleanup");
+}
+
+#[test]
+fn preflight_identity_binds_seed_and_seed_origin_before_layout_rng() {
+    let root = temporary("binding-seed-and-origin");
+    fs::create_dir_all(&root).expect("root");
+    let general = configuration(&root, None, "max_working_memory_bytes = 99999\n", "AAAA");
+    let first = load_and_validate_f5_config(&general).expect("declared seed configuration");
+    let preflight =
+        preflight_f5_resources(&first, F5OtherResources::default()).expect("first preflight");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+
+    let general_source = fs::read_to_string(&general).expect("general source");
+    fs::write(
+        &general,
+        general_source.replace(&"a".repeat(64), &"b".repeat(64)),
+    )
+    .expect("changed seed");
+    let changed_seed = load_and_validate_f5_config(&general).expect("changed seed configuration");
+    let error = F5LayoutRequest::new(&changed_seed, &preflight, &execution)
+        .expect_err("a preflight must not cross an effective seed");
+    assert_eq!(error.code(), "GPS-CONF-101");
+
+    fs::write(
+        &general,
+        general_source.replace(&format!("seed = \"{}\"\n", "a".repeat(64)), ""),
+    )
+    .expect("generated seed configuration");
+    let generated =
+        load_and_validate_f5_config_with_entropy(&general, &mut FixedEntropy([0xaa; 32]))
+            .expect("same seed bytes with generated origin");
+    assert_eq!(generated.seed(), first.seed());
+    assert_ne!(generated.seed_origin(), first.seed_origin());
+    let error = F5LayoutRequest::new(&generated, &preflight, &execution)
+        .expect_err("a preflight must not cross seed provenance");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn preflight_identity_binds_semantic_subpopulations_and_overrides_before_layout_rng() {
+    let root = temporary("binding-subpopulations-and-overrides");
+    fs::create_dir_all(&root).expect("root");
+    let general = configuration(&root, None, "", "AAAA");
+    let first = load_and_validate_f5_config(&general).expect("base configuration");
+    let preflight =
+        preflight_f5_resources(&first, F5OtherResources::default()).expect("base preflight");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let scenario = root.join("authoring/scenarios/scenario.toml");
+
+    let source = fs::read_to_string(&scenario).expect("scenario source");
+    fs::write(
+        &scenario,
+        source.replace(
+            "population_id = \"P1\"\nindividual_count = 1\nfounder_ids = [\"I1\"]\n",
+            "population_id = \"P1\"\nindividual_count = 1\nsampling = \"probabilistic\"\ninbreeding_f = 0.25\nfounder_ids = [\"I2\"]\n",
+        ),
+    )
+    .expect("semantic subpopulation change");
+    let changed_subpopulation =
+        load_and_validate_f5_config(&general).expect("changed subpopulation configuration");
+    let error = F5LayoutRequest::new(&changed_subpopulation, &preflight, &execution)
+        .expect_err("a preflight must bind sampling, F and founders");
+    assert_eq!(error.code(), "GPS-CONF-101");
+
+    fs::write(
+        &scenario,
+        format!(
+            "{source}\n[[sampling_overrides]]\npopulation_id = \"P1\"\nblock_index = 0\nmode = \"controlled\"\n"
+        ),
+    )
+    .expect("sampling override");
+    let changed_override = load_and_validate_f5_config(&general).expect("override configuration");
+    let error = F5LayoutRequest::new(&changed_override, &preflight, &execution)
+        .expect_err("a preflight must bind override population, block, mode and tolerance");
+    assert_eq!(error.code(), "GPS-CONF-101");
+
+    fs::write(
+        &scenario,
+        source.replace(
+            "founder_ids = [\"I1\"]\n",
+            "sampling = \"probabilistic\"\ninbreeding_f = 0.0\nfounder_ids = [\"I1\"]\n",
+        ),
+    )
+    .expect("equivalent effective defaults");
+    let equivalent = load_and_validate_f5_config(&general).expect("equivalent configuration");
+    F5LayoutRequest::new(&equivalent, &preflight, &execution)
+        .expect("canonical effective identity accepts equivalent defaults");
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn layout_request_binds_other_resource_contributions() {
+    let root = temporary("binding-other-resources");
+    fs::create_dir_all(&root).expect("root");
+    let general = configuration(&root, None, "", "AAAA");
+    let config = load_and_validate_f5_config(&general).expect("configuration");
+    let other = F5OtherResources::new(7, 11, 13);
+    let preflight = preflight_f5_resources(&config, other).expect("preflight with other costs");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let error = F5LayoutRequest::new(&config, &preflight, &execution)
+        .expect_err("the default request must not erase non-F5 contributions");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    let error = F5LayoutRequest::new_with_other_resources(
+        &config,
+        &preflight,
+        F5OtherResources::new(8, 11, 13),
+        &execution,
+    )
+    .expect_err("a distinct external operation contribution must be rejected");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    F5LayoutRequest::new_with_other_resources(&config, &preflight, other, &execution)
+        .expect("the exact external contributions remain bound");
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn layout_streams_large_fasta_and_keeps_the_admitted_working_bound() {
+    let root = temporary("stream-large-fasta");
+    fs::create_dir_all(&root).expect("root");
+    let general = configuration(&root, None, "max_working_memory_bytes = 99999\n", "AAAA");
+    let reference_bases = 2 * 1024 * 1024;
+    replace_reference_with_repeated_base(&root, reference_bases);
+    let unrestricted = load_and_validate_f5_config(&general).expect("large configuration");
+    let baseline = preflight_f5_resources(&unrestricted, F5OtherResources::default())
+        .expect("large-reference preflight");
+    assert!(
+        usize::try_from(baseline.working_memory_bytes()).expect("bound usize")
+            < reference_bases / 16,
+        "the admitted working bound is intentionally far below a materialized reference"
+    );
+    replace_scenario(
+        &root,
+        "max_haplotype_cells = 16\nmax_working_memory_bytes = 99999\n",
+        &format!(
+            "max_haplotype_cells = 16\nmax_working_memory_bytes = {}\n",
+            baseline.working_memory_bytes()
+        ),
+    );
+    let config = load_and_validate_f5_config(&general).expect("working-bound configuration");
+    let preflight = preflight_f5_resources(&config, F5OtherResources::default())
+        .expect("the exact low working bound is admitted");
+    assert_eq!(
+        preflight.working_memory_bytes(),
+        baseline.working_memory_bytes()
+    );
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let layout = build_f5_physical_layout(
+        F5LayoutRequest::new(&config, &preflight, &execution).expect("bound request"),
+    )
+    .expect("streaming REF recovery must not materialize the large sequence");
+    assert_eq!(layout.blocks().len(), 1);
+    assert!(
+        layout.blocks()[0]
+            .sites()
+            .iter()
+            .all(|site| site.reference_base() == b'A')
+    );
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn cli_admits_or_rejects_profile_document_bytes_before_materializing_them() {
+    let short_root = temporary("profile-input-short");
+    let long_root = temporary("profile-input-long");
+    fs::create_dir_all(&short_root).expect("short root");
+    fs::create_dir_all(&long_root).expect("long root");
+    let short_general = configuration(
+        &short_root,
+        None,
+        "max_working_memory_bytes = 99999\n",
+        "AA",
+    );
+    let long_general = configuration(&long_root, None, "max_working_memory_bytes = 99999\n", "AA");
+    replace_profile_source_citation(&long_root, &"c".repeat(4_096));
+
+    let short_config = load_and_validate_f5_config(&short_general).expect("short configuration");
+    let short = preflight_f5_resources(&short_config, F5OtherResources::default())
+        .expect("short preflight");
+    let long_config = load_and_validate_f5_config(&long_general).expect("long configuration");
+    let long =
+        preflight_f5_resources(&long_config, F5OtherResources::default()).expect("long preflight");
+    assert_eq!(short.eligible_bases(), long.eligible_bases());
+    assert_eq!(short.profile_rows(), long.profile_rows());
+    assert_eq!(
+        long.profile_metadata_bytes() - short.profile_metadata_bytes(),
+        4_092,
+        "the citation replaces the four-byte fixture literal"
+    );
+    assert_eq!(
+        long.input_parser_peak_bytes() - short.input_parser_peak_bytes(),
+        8_184,
+        "v6 reserves raw bytes plus the parser-retention copy"
+    );
+    assert_eq!(
+        long.working_memory_bytes() - short.working_memory_bytes(),
+        8_184
+    );
+
+    replace_scenario(
+        &long_root,
+        "max_working_memory_bytes = 99999\n",
+        &format!(
+            "max_working_memory_bytes = {}\n",
+            long.working_memory_bytes()
+        ),
+    );
+    let exact_config = load_and_validate_f5_config(&long_general).expect("exact config");
+    let exact = preflight_f5_resources(&exact_config, F5OtherResources::default())
+        .expect("the exact v6 memory limit is inclusive");
+    assert_eq!(exact.working_memory_bytes(), long.working_memory_bytes());
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    assert_eq!(
+        build_f5_physical_layout(
+            F5LayoutRequest::new(&short_config, &short, &execution).expect("short request"),
+        )
+        .expect("short layout"),
+        build_f5_physical_layout(
+            F5LayoutRequest::new(&exact_config, &exact, &execution).expect("long request"),
+        )
+        .expect("long layout"),
+        "admitted source citations do not affect named RNG streams or layout"
+    );
+
+    replace_scenario(
+        &long_root,
+        &format!(
+            "max_working_memory_bytes = {}\n",
+            long.working_memory_bytes()
+        ),
+        &format!(
+            "max_working_memory_bytes = {}\n",
+            long.working_memory_bytes() - 1
+        ),
+    );
+    let rejected = load_and_validate_f5_config(&long_general).expect("minus-one configuration");
+    assert_eq!(
+        preflight_f5_resources(&rejected, F5OtherResources::default())
+            .expect_err("the preflight owns the profile budget before F5.1.2.3")
+            .code(),
+        "GPS-RES-101"
+    );
+
+    fs::remove_dir_all(short_root).expect("short cleanup");
+    fs::remove_dir_all(long_root).expect("long cleanup");
+}
+
+#[test]
+fn cli_enforces_the_physical_toml_limit_before_materializing_a_comment() {
+    const TOML_LIMIT: usize = 65_536;
+    let root = temporary("toml-input-bound");
+    fs::create_dir_all(&root).expect("root");
+    let general = configuration(&root, None, "", "AA");
+    let original = fs::read(&general).expect("general TOML");
+    let mut exact = original.clone();
+    exact.extend(std::iter::repeat_n(b'#', TOML_LIMIT - exact.len()));
+    fs::write(&general, &exact).expect("exact TOML");
+
+    let exact_output = Command::new(env!("CARGO_BIN_EXE_genome-population-simulator"))
+        .args(["validate", general.to_str().expect("UTF-8 path")])
+        .output()
+        .expect("exact CLI validation");
+    assert!(
+        exact_output.status.success(),
+        "exact physical TOML limit failed: {}",
+        String::from_utf8_lossy(&exact_output.stderr)
+    );
+    let exact_config = load_and_validate_f5_config(&general).expect("exact configuration");
+    let exact_preflight = preflight_f5_resources(&exact_config, F5OtherResources::default())
+        .expect("exact preflight");
+
+    let mut oversized = exact;
+    oversized.push(b'#');
+    fs::write(&general, oversized).expect("oversized TOML");
+    let rejected = Command::new(env!("CARGO_BIN_EXE_genome-population-simulator"))
+        .args(["validate", general.to_str().expect("UTF-8 path")])
+        .output()
+        .expect("oversized CLI validation");
+    assert_eq!(rejected.status.code(), Some(2));
+    let rejected_stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(rejected_stderr.contains("GPS-INPUT-001"));
+    assert!(!rejected_stderr.contains("scenario_id="));
+    assert!(!rejected_stderr.contains("F5"));
+
+    fs::write(&general, original).expect("restore minimal TOML");
+    let minimal_config = load_and_validate_f5_config(&general).expect("minimal configuration");
+    let minimal_preflight = preflight_f5_resources(&minimal_config, F5OtherResources::default())
+        .expect("minimal preflight");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    assert_eq!(
+        build_f5_physical_layout(
+            F5LayoutRequest::new(&exact_config, &exact_preflight, &execution)
+                .expect("exact request"),
+        )
+        .expect("exact layout"),
+        build_f5_physical_layout(
+            F5LayoutRequest::new(&minimal_config, &minimal_preflight, &execution)
+                .expect("minimal request"),
+        )
+        .expect("minimal layout"),
+        "accepted TOML comments do not alter F5 RNG or layout"
+    );
     fs::remove_dir_all(root).expect("cleanup");
 }

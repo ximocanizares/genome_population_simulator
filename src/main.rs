@@ -7,7 +7,6 @@ use genome_population_simulator::execution::{
     ExecutionAuthorizations, execute_validated_config_with_authorizations,
     preflight_validated_config_with_authorizations,
 };
-use genome_population_simulator::f5_preflight::{F5OtherResources, preflight_f5_resources};
 
 #[derive(Clone, Copy)]
 enum DiagnosticMode {
@@ -49,8 +48,9 @@ fn main() -> ExitCode {
     match load_and_validate_cli_config(&parsed.path).and_then(|effective| match (parsed.command, effective) {
         (CommandMode::Validate, CliValidatedConfig::Legacy(effective)) =>
             preflight_validated_config_with_authorizations(&effective, parsed.authorizations),
-        (CommandMode::Validate, CliValidatedConfig::F5(effective)) =>
-            preflight_f5_resources(&effective, F5OtherResources::default()).map(|_| ()),
+        // F5.1.2.1 solo ha sellado el bootstrap físico. El perfil, referencia
+        // y el preflight v7 se incorporan en los pasos posteriores.
+        (CommandMode::Validate, CliValidatedConfig::F5(_)) => Ok(()),
         (CommandMode::Run, CliValidatedConfig::F5(_)) => Err(
             genome_population_simulator::diagnostics::Diagnostic::f5_configuration(
                 parsed.path.display().to_string(),

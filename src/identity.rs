@@ -501,6 +501,16 @@ impl<'a> F5IdentityContext<'a> {
             reference_id,
         }
     }
+
+    #[must_use]
+    pub const fn root_seed(self) -> RootSeed {
+        self.root
+    }
+
+    #[must_use]
+    pub const fn scenario_id(self) -> &'a ScenarioId {
+        self.scenario_id
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

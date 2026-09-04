@@ -110,8 +110,15 @@ fn normalizations() -> Value {
 
 fn preflight() -> Value {
     json!({
-        "algorithm": "f5-resource-accounting-v1",
+        "algorithm": "f5-resource-accounting-v6",
         "reference_bases_processed": 1,
+        "fasta_bytes_processed": 1,
+        "mask_bytes_processed": 0,
+        "general_toml_bytes": 1,
+        "scenario_toml_bytes": 1,
+        "profile_metadata_bytes": 1,
+        "profile_tsv_bytes": 5,
+        "input_parser_peak_bytes": 16,
         "tract_count": 1,
         "retained_sequence_ids": 1,
         "site_bound_per_block": 1,
@@ -543,6 +550,25 @@ fn authoring_schemas_match_u64_and_normalized_path_boundaries() {
 fn effective_profile_and_catalog_links_are_closed_and_instantiable() {
     let valid = effective();
     let mut cases = vec![(valid.clone(), true)];
+    for field in [
+        "fasta_bytes_processed",
+        "mask_bytes_processed",
+        "general_toml_bytes",
+        "scenario_toml_bytes",
+        "profile_metadata_bytes",
+        "profile_tsv_bytes",
+        "input_parser_peak_bytes",
+    ] {
+        let mut missing = valid.clone();
+        missing["f5"]["resource_preflight"]
+            .as_object_mut()
+            .expect("preflight object")
+            .remove(field);
+        cases.push((missing, false));
+    }
+    let mut stale_algorithm = valid.clone();
+    stale_algorithm["f5"]["resource_preflight"]["algorithm"] = json!("f5-resource-accounting-v5");
+    cases.push((stale_algorithm, false));
     for (object, id_field) in [
         ("profile", "profile_id"),
         ("rng_catalog", "catalog_id"),

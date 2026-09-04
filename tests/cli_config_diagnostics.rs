@@ -268,7 +268,7 @@ fn cli_dispatches_general_v3_from_an_unrelated_three_level_working_directory() {
 }
 
 #[test]
-fn f5_validate_requires_a_present_well_formed_profile_with_the_declared_hash() {
+fn f5_validate_bootstrap_does_not_open_profile_before_f5_1_2_3() {
     for case in ["absent", "corrupt", "hash"] {
         let root = destination(case);
         let general = write_f5_cli_fixture(&root);
@@ -306,21 +306,18 @@ fn f5_validate_requires_a_present_well_formed_profile_with_the_declared_hash() {
         }
         let output = root.join("out");
         let result = run("validate", &general, "human", &output);
-        assert_eq!(result.status.code(), Some(2), "{case}");
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        let expected = if case == "absent" {
-            "GPS-INPUT-001"
-        } else {
-            "GPS-FMT-101"
-        };
-        assert!(stderr.contains(expected), "{case}: {stderr}");
+        assert!(
+            result.status.success(),
+            "{case}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
         assert!(!output.exists());
         fs::remove_dir_all(root).expect("cleanup");
     }
 }
 
 #[test]
-fn f5_validate_resolves_reference_sha_and_runs_resource_preflight() {
+fn f5_validate_bootstrap_does_not_open_reference_or_run_preflight() {
     let root = destination("f5-cli-preflight");
     let general = write_f5_cli_fixture(&root);
     fs::write(
@@ -330,8 +327,7 @@ fn f5_validate_resolves_reference_sha_and_runs_resource_preflight() {
     .expect("mutated reference");
     let output = root.join("must-not-exist");
     let result = run("validate", &general, "human", &output);
-    assert_eq!(result.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&result.stderr).contains("GPS-INPUT-002"));
+    assert!(result.status.success());
     assert!(!output.exists());
 
     let general = write_f5_cli_fixture(&root);
@@ -346,8 +342,7 @@ fn f5_validate_resolves_reference_sha_and_runs_resource_preflight() {
     )
     .expect("resource limit");
     let result = run("validate", &general, "json", &output);
-    assert_eq!(result.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&result.stdout).contains("GPS-RES-101"));
+    assert!(result.status.success());
     assert!(!output.exists());
     fs::remove_dir_all(root).expect("cleanup");
 }

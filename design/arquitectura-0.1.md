@@ -1457,8 +1457,10 @@ efectiva y verdad; no depende de F6 ni F7.
 
 | Componente | Posee/valida | Produce/consume | Prohibición |
 |---|---|---|---|
-| Escenario F5 | `reference_path`+SHA en general v3, único enlace `[f5_scenario]`, escenario v1 exacto, IDs, perfiles/hash, ploidía efectiva homogénea, límites y sustituciones de modo/tolerancia por bloque×subpoblación | una referencia verificada y un solo `EffectiveF5Scenario` dentro de efectivo v5 | rechaza cero/varios escenarios y general v2; resuelve cada ruta desde su documento origen; no abre un workspace ni consume RNG durante preflight |
-| Contratos F5 | esquemas completos general v3, escenario v1, efectivo v5, manifiesto v5, perfil, siete TSV, fallo v1 y verdad v2 | contratos cerrados que consumen todos los hitos posteriores | F5.4 solo instancia y valida esos contratos; no añade campos ni reabre esquemas; general v2, efectivo/manifiesto v4 y verdad v1 permanecen inmutables |
+| Dispatcher y bootstrap F5 | bytes completos del TOML general y del escenario, versión/clase, rutas de origen, tamaño observado y SHA-256 | documentos de autoría acotados y sus identidades físicas | no usa una sonda parcial para clasificar, no llama a una lectura completa sin cota y no abre perfil, referencia, máscara, destino ni RNG |
+| Admisión F5 | presupuestos efectivos, contabilidad acumulativa por fase, identidades semánticas y físicas y orden de apertura | un único `SealedF5Admission` consumible por geometría y procedencia | no usa `metadata` como autorización de lectura, no cruza preflights entre bytes distintos y no admite una fase cuyo pico o coste acumulado exceda el restante |
+| Escenario F5 | `reference_path`+SHA en general v3, único enlace `[f5_scenario]`, escenario v1 exacto, IDs, perfiles/hash, ploidía efectiva homogénea, límites y sustituciones de modo/tolerancia por bloque×subpoblación | una referencia verificada y un solo `EffectiveF5Scenario` dentro de efectivo v5 | rechaza cero/varios escenarios y general v2; resuelve cada ruta desde su documento origen; no abre un workspace ni consume RNG durante la admisión |
+| Contratos F5 | esquemas completos general v3, escenario v1, efectivo v5 y manifiesto v5 con admisión v7, perfil, siete TSV, fallo v1 y verdad v2 | contratos cerrados que consumen todos los hitos posteriores | tras incorporar v7 de forma atómica, F5.4 solo instancia y valida esos contratos; no añade campos ni reabre esquemas; general v2, efectivo/manifiesto v4 y verdad v1 permanecen inmutables |
 | Geometría F5 | elegibilidad, máscara, layout y sitios | `f5-block-layout.tsv`, `f5-sites.tsv` | no crea frecuencias ni fundadores |
 | Constructor F5 | H, q, p, prefijos ponderados, matriz H×S, polaridades, propuestas e intentos | haplotipos, frecuencias y diagnóstico de intento | no enumera `2^H`, no lee panel, no segmenta ni recombina |
 | Evaluador LD | p_hat, D, r², bins y puntuación | evaluación LD y veredicto | no reutiliza estado mutable del constructor en el oráculo |
@@ -1468,22 +1470,78 @@ efectiva y verdad; no depende de F6 ni F7.
 El contrato entre Constructor y Evaluador es la matriz binaria ordenada, q
 normalizado, posiciones y perfil LD; solo el Evaluador calcula la puntuación
 aceptable de DTC-089. La evaluación inicial de una matriz cuesta `O(H*S²)` y
-cada propuesta 2×2 actualiza como máximo O(S) parejas. El preflight aplica
-`f5-resource-accounting-v1`. Antes de RNG deriva `S_bound` desde longitud máxima
-y gap mínimo del perfil; recorre referencia+máscara una vez, sin bitset por
-base, y materializa solo los tramos elegibles maximales. Cuenta como términos
-separados las bases de referencia procesadas, la emisión de esos tramos y las
-`L*B*tract_count` consultas del recorrido directo completo por bloque e intento
-de layout; no construye un índice auxiliar. Cuenta además bins por
-subpoblación, filas físicas de perfil y normalización, filas TSV/JSON y las
-contribuciones ajenas a F5. Usa símbolos distintos para unidades de operación,
-memoria y bytes de salida, y compara cada magnitud con su presupuesto efectivo
-y con los topes duros 2^28/2^30/2^31 de F5 v1 antes de crear temporales.
-Efectivo y manifiesto conservan con igualdad escalar exacta todos los factores y
-resultados necesarios para permitir un recálculo independiente. No consulta
-recursos del host ni ejecuta perfiles; DTPD-115
-sigue siendo una decisión F9 de expectativas de
-rendimiento y no relaja la admisión F5. La identidad de
+cada propuesta 2×2 actualiza como máximo O(S) parejas.
+
+La admisión aplica `f5-resource-accounting-v7` como una secuencia única. El
+dispatcher abre el TOML general una sola vez, lee hasta EOF con la cota inclusiva
+de 65536 bytes y calcula SHA-256 sobre esos mismos bytes; solo entonces lo
+clasifica. La cota es común a la entrada CLI transparente porque antes de leer
+el documento completo todavía no existe una clasificación fiable. Un byte 65537
+se observa únicamente para diagnosticar el exceso y nunca se incorpora al
+búfer. El escenario se trata igual. Estos dos documentos constituyen el
+bootstrap acotado: después de parsear el escenario ya se conocen los tres
+presupuestos y se rechaza su propio coste antes de abrir el perfil. No se
+materializa ninguna entrada grande para averiguar
+`max_working_memory_bytes`.
+
+El responsable de admisión mantiene un ledger —registro acumulativo de costes—
+con tres dimensiones que no se intercambian: unidades de operación consumidas o
+reservadas, pico de memoria de trabajo reservado y bytes máximos de salida. Cada
+fase declara los bytes persistentes retenidos antes y después y su transitorio
+máximo; su pico conservador suma el transitorio al mayor de ambos retenidos. El
+pico global es el máximo de los picos de fase, no la suma de búferes que nunca
+coexisten. Antes de abrir o ampliar el siguiente recurso, el ledger usa
+aritmética `u64` comprobada y verifica inclusivamente el presupuesto restante y
+los topes duros 2^28/2^30/2^31. Lectura, hash y medida física comparten el mismo
+handle; `metadata` puede enriquecer un diagnóstico, pero su longitud nunca
+autoriza una lectura. Toda ampliación de búfer o vector se comprueba antes de
+reservar capacidad.
+
+Tras el bootstrap, `profile.metadata.json` se lee bajo el menor límite derivado
+de las operaciones y memoria restantes. Sus cinco enlaces aportan tamaño y
+SHA-256 esperados. Antes de abrir los TSV se reserva su coste conocido; cada TSV
+se procesa secuencialmente con límite `tamaño_declarado+1`, hash y parser sobre
+el mismo búfer, y se descarta ese búfer antes del siguiente. Solo persisten los
+tipos de dominio y las auditorías DTC-049. Un tamaño o hash distinto se rechaza,
+aunque el contenido tenga el mismo significado.
+
+Antes de cada apertura se reservan todos los costes futuros obligatorios que ya
+se conocen. Los que solo pueden conocerse recorriendo una entrada streaming se
+cargan de forma incremental, siempre antes de leer el siguiente byte o retener
+el siguiente elemento. Por tanto, referencia y máscara no se abren si el perfil
+y las fórmulas ya resolubles agotan el presupuesto restante.
+
+La primera pasada de referencia y la única de máscara son streaming y cargan el
+ledger conforme leen bytes, bases, filas, IDs y tramos. Antes de leer un byte
+FASTA se reservan también las unidades de su segunda pasada obligatoria; por
+ello una descripción larga no puede agotar trabajo después de la admisión. La
+memoria se verifica antes de retener un ID o tramo. El resultado conserva
+`reference_bases_processed`, `fasta_bytes_processed`,
+`mask_bytes_processed`, la geometría elegible y una identidad física por rol:
+ruta normalizada desde el documento propietario, tamaño contado hasta EOF y
+SHA-256 de los mismos bytes. General, escenario, metadata y cada TSV tienen la
+misma clase de identidad.
+
+El único resultado exitoso es `SealedF5Admission`: escenario efectivo, perfil,
+tramos, dimensiones, ledger cerrado e identidades semánticas y físicas. El
+layout no acepta piezas sueltas ni un recibo construido por el llamador. Tras
+elegir los sitios, la recuperación REF abre de nuevo el FASTA, impone la cota
+`tamaño_recibido+1` y exige tamaño y SHA-256 idénticos antes de aceptar sus
+bases. Este vínculo evita reutilizar un preflight tras cambiar padding,
+comentarios o contenido y protege cambios accidentales entre pasadas; no
+pretende resolver sustituciones hostiles de ficheros concurrentes. No se
+materializa la referencia completa ni se vuelve a leer la máscara.
+
+El ledger conserva además las fórmulas biológicas y geométricas ya decididas:
+deriva `S_bound` antes de RNG, materializa solo tramos elegibles maximales y
+cuenta por separado bases, emisión, filas de perfil y normalización, filas
+TSV/JSON y las
+`2*L*(B*tract_count+B*(B-1)/2)` consultas directas completas de layout. No
+construye un índice auxiliar. Efectivo y manifiesto copian con igualdad exacta
+el algoritmo v7, las identidades de entrada, los totales por fase, los factores
+de recálculo y los tres resultados. No consulta recursos del host ni ejecuta
+perfiles; DTPD-115 sigue siendo una decisión F9 de expectativas de rendimiento
+y no relaja la admisión F5. La identidad de
 una fila es `haplotype_rank` y su `HaplotypeId`; una copia fundadora persistente
 tiene `FounderCopyId` (`FCP_`) y cada asignación de bloque, otro ID (`FHA_`). No
 existe `HaplotypeProcessId`. Un duplicado de alelos es

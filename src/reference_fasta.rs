@@ -66,6 +66,279 @@ pub fn validate_supplied_fasta(
     validate_supplied_fasta_with_origin(path, path, reference_id, expected)
 }
 
+/// Valida un FASTA suministrado cuando el consumidor solo necesita su orden
+/// físico y sus bases, no un catálogo de secuencias declarado por separado.
+///
+/// Conserva las mismas comprobaciones de bytes, cabeceras y alfabeto que la
+/// frontera con expectativas explícitas. F5 usa esta variante tras haber
+/// ligado la identidad completa de la referencia en su preflight.
+pub fn validate_supplied_fasta_unconstrained(
+    path: &Path,
+    reference_id: &str,
+) -> Result<ValidatedSuppliedReference, Diagnostic> {
+    validate_supplied_fasta_inner(path, path, reference_id, None)
+}
+
+/// Una base REF solicitada por coordenada durante la pasada de recuperación F5.
+///
+/// El lector que lo produce nunca retiene la secuencia completa: conserva la
+/// cabecera vigente y una fila por sitio solicitado.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct StreamedFastaSiteBase {
+    sequence_ordinal: u64,
+    sequence_id: SequenceId,
+    position_1based: u64,
+    base: u8,
+}
+
+/// Resultado de una pasada secuencial de recuperación de bases REF F5.
+///
+/// Además de las bases solicitadas conserva el número exacto de bases FASTA
+/// visitadas. El consumidor lo compara con el recuento del preflight: así una
+/// referencia que cambiase entre ambas pasadas no puede quedar oculta detrás
+/// de una coincidencia accidental de los sitios elegidos.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct StreamedFastaSiteBases {
+    sites: Vec<StreamedFastaSiteBase>,
+    reference_bases_processed: u64,
+}
+
+impl StreamedFastaSiteBases {
+    #[must_use]
+    pub(crate) fn sites(&self) -> &[StreamedFastaSiteBase] {
+        &self.sites
+    }
+
+    #[must_use]
+    pub(crate) const fn reference_bases_processed(&self) -> u64 {
+        self.reference_bases_processed
+    }
+}
+
+impl StreamedFastaSiteBase {
+    #[must_use]
+    pub const fn sequence_ordinal(&self) -> u64 {
+        self.sequence_ordinal
+    }
+
+    #[must_use]
+    pub fn sequence_id(&self) -> &SequenceId {
+        &self.sequence_id
+    }
+
+    #[must_use]
+    pub const fn position_1based(&self) -> u64 {
+        self.position_1based
+    }
+
+    #[must_use]
+    pub const fn base(&self) -> u8 {
+        self.base
+    }
+}
+
+/// Recupera solamente las bases solicitadas con una pasada secuencial del
+/// FASTA y verifica al final que los bytes siguen teniendo el SHA-256 ligado
+/// por el preflight. `sites` debe estar ordenado y no contener duplicados.
+///
+/// La rutina está deliberadamente separada del validador que materializa un
+/// `Reference`: F5 ya validó la referencia completa antes de la admisión y
+/// aquí solo necesita las bases REF de los SNP ya elegidos.
+pub(crate) fn stream_fasta_site_bases(
+    path: &Path,
+    reference_id: &str,
+    expected_sha256: &str,
+    sites: &[(u64, u64)],
+) -> Result<StreamedFastaSiteBases, Diagnostic> {
+    ReferenceId::parse(reference_id, "f5_layout")?;
+    if sites.iter().any(|(_, position)| *position == 0)
+        || sites.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(internal_error(
+            "F5 solicitó sitios FASTA no ordenados, repetidos o con coordenada cero",
+        ));
+    }
+    let file = File::open(path).map_err(|error| input_error(path, error))?;
+    let mut reader = BufReader::new(DigestingReader::new(file));
+    if reader
+        .fill_buf()
+        .map_err(|error| input_error(path, error))?
+        .starts_with(&[0x1f, 0x8b])
+    {
+        return Err(Diagnostic::format(
+            "GPS-FMT-001",
+            "El FASTA suministrado está comprimido y v1 solo admite texto sin comprimir.",
+        )
+        .with("path", path.display().to_string())
+        .with("detected_format", "gzip"));
+    }
+
+    let mut result = Vec::with_capacity(sites.len());
+    let mut requested_index = 0_usize;
+    let mut current_ordinal = None;
+    let mut current_id = None::<SequenceId>;
+    let mut current_length = 0_u64;
+    let mut reference_bases_processed = 0_u64;
+    let mut next_ordinal = 0_u64;
+    let mut at_line_start = true;
+    let mut in_header = false;
+    let mut header_id = Vec::new();
+    let mut header_token_finished = false;
+    let mut buffer = [0_u8; 65_536];
+
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| input_error(path, error))?;
+        if read == 0 {
+            break;
+        }
+        for raw in &buffer[..read] {
+            if in_header {
+                if *raw == b'\n' {
+                    let id = std::str::from_utf8(&header_id).map_err(|_| empty_header(path, 0))?;
+                    if id.is_empty() {
+                        return Err(empty_header(path, 0));
+                    }
+                    current_id = Some(SequenceId::parse(id, reference_id)?);
+                    current_ordinal = Some(next_ordinal);
+                    next_ordinal = next_ordinal.checked_add(1).ok_or_else(|| {
+                        internal_error("el ordinal de secuencia FASTA excede u64")
+                    })?;
+                    current_length = 0;
+                    in_header = false;
+                    at_line_start = true;
+                } else if *raw == b'\r' || raw.is_ascii_whitespace() {
+                    header_token_finished = true;
+                } else if !header_token_finished {
+                    header_id.push(*raw);
+                }
+                continue;
+            }
+
+            if at_line_start && *raw == b'>' {
+                ensure_streamed_sequence_complete(
+                    path,
+                    sites,
+                    requested_index,
+                    current_ordinal,
+                    current_length,
+                )?;
+                current_ordinal = None;
+                current_id = None;
+                current_length = 0;
+                header_id.clear();
+                header_token_finished = false;
+                in_header = true;
+                at_line_start = false;
+                continue;
+            }
+            if *raw == b'\n' {
+                at_line_start = true;
+                continue;
+            }
+            if *raw == b'\r' {
+                continue;
+            }
+            at_line_start = false;
+            let ordinal = current_ordinal.ok_or_else(|| empty_header(path, 0))?;
+            let sequence_id = current_id.as_ref().ok_or_else(|| empty_header(path, 0))?;
+            current_length = current_length
+                .checked_add(1)
+                .ok_or_else(|| internal_error("la posición FASTA excede u64"))?;
+            reference_bases_processed = reference_bases_processed
+                .checked_add(1)
+                .ok_or_else(|| internal_error("el recuento de bases FASTA visitadas excede u64"))?;
+            let base = raw.to_ascii_uppercase();
+            if !matches!(base, b'A' | b'C' | b'G' | b'T' | b'N') {
+                return Err(invalid_symbol(
+                    path,
+                    sequence_id.as_str(),
+                    current_length,
+                    *raw,
+                ));
+            }
+            if let Some((requested_ordinal, requested_position)) = sites.get(requested_index) {
+                if *requested_ordinal == ordinal && *requested_position < current_length {
+                    return Err(internal_error(
+                        "la pasada FASTA sobrepasó un sitio F5 que no pudo recuperar",
+                    ));
+                }
+                if *requested_ordinal == ordinal && *requested_position == current_length {
+                    result.push(StreamedFastaSiteBase {
+                        sequence_ordinal: ordinal,
+                        sequence_id: sequence_id.clone(),
+                        position_1based: current_length,
+                        base,
+                    });
+                    requested_index = requested_index
+                        .checked_add(1)
+                        .ok_or_else(|| internal_error("el índice de sitios FASTA excede usize"))?;
+                }
+            }
+        }
+    }
+    if in_header {
+        let id = std::str::from_utf8(&header_id).map_err(|_| empty_header(path, 0))?;
+        if id.is_empty() {
+            return Err(empty_header(path, 0));
+        }
+        let _ = SequenceId::parse(id, reference_id)?;
+        current_ordinal = Some(next_ordinal);
+        current_length = 0;
+    }
+    ensure_streamed_sequence_complete(
+        path,
+        sites,
+        requested_index,
+        current_ordinal,
+        current_length,
+    )?;
+    if requested_index != sites.len() {
+        return Err(internal_error(
+            "la pasada FASTA terminó antes de recuperar todos los sitios F5",
+        ));
+    }
+    let observed = reader.into_inner().finish(path);
+    if observed.digest() != expected_sha256 {
+        return Err(Diagnostic::input(
+            "GPS-INPUT-002",
+            "Una entrada cambió durante su copia o no coincide con su identidad declarada.",
+        )
+        .with("path", path.display().to_string())
+        .with("expected_digest", expected_sha256)
+        .with("observed_digest", observed.digest()));
+    }
+    Ok(StreamedFastaSiteBases {
+        sites: result,
+        reference_bases_processed,
+    })
+}
+
+fn ensure_streamed_sequence_complete(
+    path: &Path,
+    sites: &[(u64, u64)],
+    requested_index: usize,
+    ordinal: Option<u64>,
+    length: u64,
+) -> Result<(), Diagnostic> {
+    let Some(ordinal) = ordinal else {
+        return Ok(());
+    };
+    if length == 0 {
+        return Err(empty_fasta(path));
+    }
+    if sites
+        .get(requested_index)
+        .is_some_and(|(requested_ordinal, _)| *requested_ordinal == ordinal)
+    {
+        return Err(internal_error(
+            "un sitio F5 elegido no existe en la secuencia FASTA verificada",
+        ));
+    }
+    Ok(())
+}
+
 /// Valida los bytes leídos desde `read_path`, conservando `origin_path` como
 /// procedencia declarada. Esta separación permite que los consumidores usen
 /// la copia verificada de resultados sin perder la ruta de entrada original.

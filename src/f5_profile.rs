@@ -16,6 +16,16 @@ use crate::diagnostics::Diagnostic;
 /// Tolerancia general DTC-049 para pesos de un perfil F5.
 pub const F5_PROFILE_NORMALIZATION_TOLERANCE: f64 = 1e-9;
 pub const F5_PROFILE_NORMALIZATION_ALGORITHM: &str = "neumaier-f64-v1";
+/// Los cinco enlaces de un perfil F5 son un conjunto cerrado y ordenado. El
+/// preflight usa estos nombres para obtener tamaños físicos antes de abrir el
+/// metadata o materializar los TSV.
+pub const F5_PROFILE_TSV_FILENAMES: [&str; 5] = [
+    "block_lengths.tsv",
+    "snp_gaps.tsv",
+    "snp_spectrum.tsv",
+    "haplotype_weights.tsv",
+    "ld_profile.tsv",
+];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct F5Profile {
@@ -275,11 +285,11 @@ pub fn load_f5_profile(
         ));
     }
     let expected = [
-        ("block_lengths.tsv", "f5_block_length_profile"),
-        ("snp_gaps.tsv", "f5_snp_gap_profile"),
-        ("snp_spectrum.tsv", "f5_snp_spectrum"),
-        ("haplotype_weights.tsv", "f5_haplotype_weights"),
-        ("ld_profile.tsv", "f5_ld_profile"),
+        (F5_PROFILE_TSV_FILENAMES[0], "f5_block_length_profile"),
+        (F5_PROFILE_TSV_FILENAMES[1], "f5_snp_gap_profile"),
+        (F5_PROFILE_TSV_FILENAMES[2], "f5_snp_spectrum"),
+        (F5_PROFILE_TSV_FILENAMES[3], "f5_haplotype_weights"),
+        (F5_PROFILE_TSV_FILENAMES[4], "f5_ld_profile"),
     ];
     let mut contents = Vec::with_capacity(5);
     for (entry, (name, kind)) in files.iter().zip(expected) {

@@ -404,6 +404,13 @@
       "required": [
         "algorithm",
         "reference_bases_processed",
+        "fasta_bytes_processed",
+        "mask_bytes_processed",
+        "general_toml_bytes",
+        "scenario_toml_bytes",
+        "profile_metadata_bytes",
+        "profile_tsv_bytes",
+        "input_parser_peak_bytes",
         "tract_count",
         "retained_sequence_ids",
         "site_bound_per_block",
@@ -424,9 +431,30 @@
       ],
       "properties": {
         "algorithm": {
-          "const": "f5-resource-accounting-v1"
+          "const": "f5-resource-accounting-v6"
         },
         "reference_bases_processed": {
+          "$ref": "#/$defs/u64"
+        },
+        "fasta_bytes_processed": {
+          "$ref": "#/$defs/u64"
+        },
+        "mask_bytes_processed": {
+          "$ref": "#/$defs/u64"
+        },
+        "general_toml_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "scenario_toml_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "profile_metadata_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "profile_tsv_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "input_parser_peak_bytes": {
           "$ref": "#/$defs/u64"
         },
         "tract_count": {

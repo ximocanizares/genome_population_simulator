@@ -80,16 +80,20 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
     canónicos exactos de layout (`u64` big-endian) y matriz (cabecera H/S,
     orden de filas, bits MSB y relleno cero).
 - ☐ **F5.0.4.** Implementar el preflight puro
-  `f5-resource-accounting-v1` que resuelve referencia, perfiles, racional de
-  cobertura, capacidad, dimensiones y cotas globales de operaciones, memoria y
-  bytes publicados, con símbolos dimensionalmente distintos.
+  `f5-resource-accounting-v7` y su ledger acumulativo, que resuelve racional de
+  cobertura, capacidad, dimensiones y cotas de operaciones, pico de memoria y
+  bytes publicados con símbolos dimensionalmente distintos. Este núcleo no
+  abre ficheros: recibe observaciones de las fases físicamente acotadas de
+  F5.1.2 y no acepta tamaños obtenidos por `metadata` como autoridad.
   - Depende de: F5.0.3.
   - Procede de: REQ-EVO-74/76/77, ACE-117 y arquitectura §15.
   - Cambia: admisión, escáner secuencial referencia+máscara, lista acotada de
     tramos elegibles y catálogo diagnóstico F5.
   - Se comprueba con: decimal extremo, T=0, soporte discontinuo, T>E,
     layout imposible, `S_bound` previo al RNG, H×S excesivo, `bin_count` por
-    población, `reference_bases_processed`, `tract_count`, pico de IDs FASTA
+    población, `reference_bases_processed`, bytes físicos FASTA/máscara y de
+    TOML/metadata/TSV de perfil observados por el lector,
+    `tract_count`, pico de IDs FASTA
     retenidos, filas de
     perfil/normalización/TSV/JSON, aportaciones ajenas F5, cada término y
     overflow de las fórmulas,
@@ -97,21 +101,29 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
     salida —incluidas copias/configuración, salidas activadas no F5, manifiesto
     y `truth.jsonl`—, límites menores declarados,
     cero consulta de RAM/CPU o perfil externo, cero consumo RNG y cero destino.
+    Dos FASTA con la misma geometría y bases pero descripciones mínima y de
+    80 MiB aumentan la cota exactamente por sus bytes recorridos en preflight y
+    recuperación REF; el límite igual se admite y el límite menos uno se
+    rechaza antes de RNG. La misma prueba se aplica a una máscara con igual
+    geometría y distinto tamaño de `region_id`.
     Un fixture usa el mismo escenario con `block_count=1`, el mismo FASTA de
     una secuencia y dos máscaras con igual E: una deja un único tramo compacto
     y la otra 4096 tramos de longitud `Lmin`, separados por una base
     enmascarada. Debe reconstruir
     `reference_bases_processed=4096*Lmin+4095` y, manteniendo iguales todos los
     demás valores, obtener una diferencia exacta de operaciones
-    `4095*(1+max_layout_attempts*block_count)` —emisión más consultas directas—,
-    `256*4095` bytes de trabajo y cero bytes de salida entre ambas cuentas. Con
+    `4095*(3+max_layout_attempts+5*max_layout_attempts*block_count)` —emisión,
+    capacidad/request, copias y las dos consultas directas—,
+    `512*4095` bytes de trabajo y cero bytes de salida entre ambas cuentas. Con
     memoria y salida holgadas, la máscara fragmentada se acepta con el límite de
     operaciones igual a su cota y se rechaza con cota−1; en casos separados,
     con operaciones y salida holgadas, se acepta con el límite de memoria igual
     a su cota y se rechaza con cota−1. Cada rechazo usa `GPS-RES-101` antes de
     RNG y destino. El fixture reconstruye la fórmula con unidades homogéneas y
     comprueba igualdad escalar exacta del `resource_preflight` entre efectivo y
-    manifiesto; el sobre fijo de salida no depende de la fragmentación.
+    manifiesto; el sobre fijo de salida no depende de la fragmentación. El
+    fixture fuerza que `final_formula_peak` sea el máximo para que la diferencia
+    de memoria sea atribuible a la fragmentación, no a otro pico de fase.
 
 > **Revisión F5.0.** Aprobar TOML, perfiles, vectores, diagnósticos y pureza del
 > preflight. No continuar sin reconstrucción independiente de cada contrato.
@@ -125,13 +137,126 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
   - Cambia: geometría F5.
   - Se comprueba con: suma T exacta, residual final, pesos restringidos,
     overflow y un oráculo entero que prueba la factibilidad previa.
-- ☐ **F5.1.2.** Colocar bloques completos e insertar SNP mediante gaps, con
-  intentos transaccionales y orden/IDs canónicos.
+- ☐ **F5.1.2.** Integrar la admisión F5 físicamente acotada y, solo tras
+  sellarla, colocar bloques completos e insertar SNP mediante gaps con intentos
+  transaccionales y orden/IDs canónicos. Este hito sustituye las correcciones
+  incrementales v5/v6; se ejecuta en los subhitos siguientes y no incorpora
+  crates nuevas.
   - Depende de: F5.1.1.
-  - Procede de: REQ-EVO-74, REQ-EVO-77 y arquitectura §15.
-  - Cambia: geometría e identidades `BLK_`/`SITE_`.
-  - Se comprueba con: dos contigs, adyacencia, N, máscara, fragmentación,
-    menos de dos SNP, reintento, agotamiento e invariancia ante planificación.
+  - Procede de: REQ-EVO-74/76/77, REQ-VAL-54/56, REQ-MAN-70/92,
+    REQ-SAL-02, DTC-040/049/089 y arquitectura §15.
+  - Cambia: frontera CLI F5, carga de perfil, preflight, binding físico,
+    geometría e identidades `BLK_`/`SITE_`; no cambia RNG, biología, formatos de
+    perfil ni algoritmos de layout.
+
+  - ✅ **F5.1.2.1.** Sustituir la sonda CLI por el dispatcher completo acotado y
+    construir el bootstrap general+escenario.
+    - Depende de: F5.1.1 y núcleo F5.0.4.
+    - Procede de: arquitectura §15 y DTC-089 «Admisión físicamente acotada».
+    - Cambia: una sola apertura del general, límite inclusivo 65536+byte de
+      exceso, SHA-256/tamaño sobre el mismo handle, clasificación tras EOF y la
+      misma lectura acotada del escenario. Tras parsearlo crea el ledger y
+      contrasta el coste del bootstrap antes de cualquier otra apertura.
+    - Corrección de revisión v7: la misma frontera física precede también a los
+      cargadores públicos que todavía devuelven el general v2; hasta EOF no se
+      atribuye el documento a F5. El dispatcher conserva la ruta de autoría v2
+      solicitada para `source_path` y `configuration_input.original_path`, y
+      usa su forma normalizada solo para la apertura física y los enlaces F5.
+    - Se comprueba con: F5 cuyos discriminadores aparecen después de 4096
+      bytes; general y escenario de 65536/65537 bytes; TOML inválido al final;
+      espías de apertura que prueban cero perfil/referencia/máscara/destino/RNG
+      al fallar; v3 exacto, 65537 y muy grande por cada cargador público
+      pertinente, sin parser ni bytes posteriores al byte de exceso; diagnóstico
+      neutral para v2/v3/inclasificable grande; ruta relativa v2 publicada; y
+      fixture de anchura fija que alcanza el punto fijo de
+      `max_working_memory_bytes`, admite límite exacto y rechaza límite−1.
+
+  - ☐ **F5.1.2.2.** Implementar `BoundedInput`,
+    `PhysicalInputIdentity` y las transiciones del ledger sin `fs::read` ni
+    longitud de `metadata` como autorización.
+    - Depende de: F5.1.2.1.
+    - Procede de: DTC-040, REQ-VAL-54/56 y DTC-089.
+    - Cambia: contador/hash sobre los mismos bytes, comprobación prospectiva de
+      cada crecimiento, lectura `límite+1`, aritmética comprobada y diagnóstico
+      con algoritmo, fase, rol, dimensión, acumulado y límite.
+    - Se comprueba con: lector que entrega fragmentos de 1 byte, EOF exacto,
+      byte de exceso, error intermedio, overflow dirigido y mutación entre una
+      consulta de atributos y la lectura. El oráculo independiente recalcula
+      tamaño y SHA desde el fichero y demuestra que los atributos no deciden la
+      admisión.
+
+  - ☐ **F5.1.2.3.** Leer el paquete de perfil bajo el presupuesto restante.
+    - Depende de: F5.1.2.2.
+    - Procede de: REQ-EVO-74/75, DTC-049 y DTC-089 «Paquete de perfiles».
+    - Cambia: metadata bajo límite derivado del ledger; reserva previa del coste
+      total conocido de los cinco enlaces; TSV secuenciales bajo su tamaño
+      declarado+1; liberación del búfer antes de la tabla siguiente; retención
+      exclusiva de tipos de dominio y auditorías.
+    - Se comprueba con: metadata o cada TSV mayor que el restante, tamaño/SHA
+      declarado incorrecto, padding semánticamente neutro, presupuesto exacto y
+      exacto−1, pico por tabla y orden de aperturas. Una prueba independiente
+      registra handles y demuestra que ninguna tabla posterior se abre después
+      del primer rechazo.
+
+  **Pausa de revisión F5.1.2-A.** Aprobar dispatcher, bootstrap, lector, perfil
+  y ledger. Exigir ausencia mecánica de `fs::read` y de sondas parciales en la
+  ruta F5, pruebas exacto/exacto−1 y cero apertura posterior. No continuar con
+  referencia hasta corregir todos los hallazgos.
+
+  - ☐ **F5.1.2.4.** Integrar referencia y máscara en el mismo ledger.
+    - Depende de: revisión F5.1.2-A aprobada.
+    - Procede de: REQ-EVO-74/76, DTC-040 y DTC-089 «Layout».
+    - Cambia: primer FASTA y única máscara en streaming; reserva de dos visitas
+      por byte FASTA antes de leerlo; comprobación previa a retener IDs, filas y
+      tramos; receipt de tamaño/SHA observado en el mismo handle.
+    - Se comprueba con: descripciones FASTA y `region_id` largos, línea de
+      máscara excesiva, referencia/máscara vacía o truncada, límite exacto y
+      exacto−1 en operaciones y memoria, SHA incorrecto y espías que prueban
+      cero RNG/destino. El oráculo recuenta bytes, bases y tramos sin reutilizar
+      estructuras productivas.
+
+  - ☐ **F5.1.2.5.** Sellar `F5AdmissionReceipt`, exigir
+    `SealedF5Admission` en layout y acotar la recuperación REF.
+    - Depende de: F5.1.2.4.
+    - Procede de: REQ-VAL-54/56, REQ-MAN-70/92, REQ-SAL-02 y arquitectura §15.
+    - Cambia: binding conjunto de identidad semántica y de rol+ruta
+      normalizada+tamaño+SHA de general, escenario, metadata, cinco TSV,
+      referencia y máscara opcional; efectivo/manifiesto v5 copian algoritmo
+      v7, identidades y fases. La segunda pasada FASTA usa tamaño recibido+1 y
+      exige tamaño/SHA idénticos antes de aceptar REF.
+    - Se comprueba con: cruce de dos TOML semánticamente iguales con distinto
+      comentario/padding; intercambio de TSV; modificación, truncado y
+      crecimiento del FASTA entre pasadas; ausencia/presencia de máscara; y
+      desigualdad dirigida entre efectivo y manifiesto. Ningún receipt v5/v6 se
+      acepta ni se migra.
+
+  **Pausa de revisión F5.1.2-B.** Aprobar el modelo local de cambios
+  accidentales, el orden de fases, las identidades físicas, la reserva de la
+  segunda pasada y el binding sellado. No continuar con layout si un consumidor
+  todavía acepta escalares o receipts sueltos.
+
+  - ☐ **F5.1.2.6.** Revalidar el layout productivo y cerrar la sustitución v7.
+    - Depende de: revisión F5.1.2-B aprobada.
+    - Procede de: REQ-EVO-74/77 y DTC-089 «Layout».
+    - Cambia: integración final; elimina las rutas v5/v6 y sus pruebas que
+      afirmen admisión por metadata o por sonda, sin cambiar el algoritmo
+      biológico.
+    - Se comprueba con: dos contigs, adyacencia, N, máscara, fragmentación,
+      menos de dos SNP, reintento, agotamiento e invariancia ante planificación.
+      El fixture instrumental recorre carga, admisión, binding, streaming FASTA
+      y layout; fuerza ganador interior, último tramo, dos residuos y reintento;
+      desglosa capacidad/request, copias, reservas, total/prefijo, crecimiento,
+      división, `remove`/`insert`, reintentos y picos de fase. Un segundo oráculo
+      reconstruye `resource_preflight` v7 desde entradas y salidas, sin tipos ni
+      funciones productivas.
+    - Gates: `cargo fmt --check`, Clippy estricto, suite F5.1.2 dirigida, suite
+      completa, validación JSON Schema de efectivo/manifiesto y búsquedas
+      negativas de `f5-resource-accounting-v5`, v6, sonda 4096 y lectura
+      completa no acotada en la ruta F5.
+
+  **Pausa de cierre F5.1.2-C.** Cerrar solo con todos los gates verdes,
+  reconstrucción independiente v7, evidencia de fronteras exactas y
+  confirmación de cero RNG, destino o publicación antes de `sealed`.
 - ☐ **F5.1.3.** Generar `p_i` por bloque×subpoblación desde el espectro, aislando
   fila y valor y conservando 0/1 sin consumo indebido.
   - Depende de: F5.1.2.
@@ -310,8 +435,8 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
 
 | Hito | Resultado | Evidencia principal | Riesgo protegido |
 |---|---|---|---|
-| F5.0 | contratos v3/v1/v5 y preflight puro | cardinalidad/versiones, fórmulas/fronteras y cero publicación | entrada/identidad/recurso ambiguo |
-| F5.1 | layout y marginales | oráculo entero y aislamiento | coordenada/objetivo falso |
+| F5.0 | contratos v3/v1/v5 y núcleo contable v7 | cardinalidad/versiones, fórmulas/fronteras y cero publicación | entrada/identidad/recurso ambiguo |
+| F5.1 | admisión sellada, layout y marginales | lectores acotados, receipt físico, oráculos de cuenta/geometría y aislamiento | lectura no acotada, cruce de preflight o coordenada/objetivo falso |
 | F5.2 | H×S y LD acotados | oráculo D/`r²` y complejidad | LD plausible pero incorrecto |
 | F5.3 | fundadores, copias y pertenencia cerrados | fórmulas y reconstrucción | fase/F/cuota o identidad errónea |
 | F5.4 | siete TSV, verdad fundadora v2 y fallo inequívoco | reconstrucción `truth` por población/locus, MAN-70 solo desde verdad, DTC-049 y JSON Schema | procedencia parcial o autorreferente |
