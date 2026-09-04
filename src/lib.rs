@@ -17,6 +17,7 @@ pub mod error_quality;
 pub mod event_manifest;
 pub mod exact_decimal;
 pub mod execution;
+pub mod f5_admission;
 pub mod f5_layout;
 pub mod f5_preflight;
 pub mod f5_profile;

@@ -2,11 +2,8 @@
 
 use std::collections::BTreeSet;
 use std::fs::File;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-use sha2::{Digest, Sha256};
 
 use crate::adapters::{
     admit_toml_header, admitted_is_f5_general_v3, parse_declared_config, parse_declared_f5_general,
@@ -22,6 +19,7 @@ use crate::configuration::{
 use crate::diagnostics::Diagnostic;
 use crate::error_quality::SequencingErrorsMode;
 use crate::exact_decimal::ExactDecimal;
+use crate::f5_admission::{AdmissionPhase, BoundedInput, InputRole, PhysicalInputIdentity};
 use crate::f5_profile::{F5_PROFILE_TSV_FILENAMES, F5Profile, load_f5_profile};
 use crate::haplotype::{HaplotypePhase, Ploidy};
 use crate::identity::{
@@ -243,24 +241,27 @@ pub struct EffectiveF5Config {
 
 /// Observación física de uno de los dos TOML que forman el bootstrap F5.
 ///
-/// Esta pieza deliberadamente pequeña adelanta la firma que ampliará F5.1.2.2:
-/// el contador y SHA-256 se calculan mientras se lee el mismo handle. Aún no
-/// constituye `PhysicalInputIdentity` ni un recibo de admisión general.
+/// El contador y SHA-256 se calculan mientras se lee el mismo handle y se
+/// conservan ya como `PhysicalInputIdentity`. Aún no es un recibo de admisión.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct F5BootstrapDocument {
-    size_bytes: u64,
-    sha256: String,
+    identity: PhysicalInputIdentity,
 }
 
 impl F5BootstrapDocument {
     #[must_use]
     pub const fn size_bytes(&self) -> u64 {
-        self.size_bytes
+        self.identity.observed_size_bytes()
     }
 
     #[must_use]
     pub fn sha256(&self) -> &str {
-        &self.sha256
+        self.identity.observed_sha256()
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> &PhysicalInputIdentity {
+        &self.identity
     }
 }
 
@@ -409,15 +410,16 @@ struct BoundedF5Toml {
 /// distinguir EOF del exceso. Ese byte no entra ni en el búfer ni en el hash.
 fn read_bounded_f5_toml(path: &Path) -> Result<BoundedF5Toml, Diagnostic> {
     let file = File::open(path).map_err(|error| input_error(path, error))?;
-    read_bounded_f5_toml_from_reader(path, file)
+    read_bounded_f5_toml_from_reader(path, InputRole::GeneralToml, file)
 }
 
 fn read_bounded_f5_toml_with_opener(
     path: &Path,
+    role: InputRole,
     opener: &mut impl FnMut(&Path) -> std::io::Result<File>,
 ) -> Result<BoundedF5Toml, Diagnostic> {
     let file = opener(path).map_err(|error| input_error(path, error))?;
-    read_bounded_f5_toml_from_reader(path, file)
+    read_bounded_f5_toml_from_reader(path, role, file)
 }
 
 /// Variante inyectable del lector acotado. Mantiene la lectura `límite + 1`
@@ -425,38 +427,25 @@ fn read_bounded_f5_toml_with_opener(
 /// resto de la entrada.
 fn read_bounded_f5_toml_from_reader(
     path: &Path,
-    mut reader: impl Read,
+    role: InputRole,
+    reader: impl std::io::Read,
 ) -> Result<BoundedF5Toml, Diagnostic> {
-    let capacity = usize::try_from(F5_PRE_ADMISSION_TOML_LIMIT_BYTES).map_err(|_| {
-        Diagnostic::internal_invariant("f5_bootstrap", "toml_limit_does_not_fit_usize")
-    })?;
-    let mut bytes = Vec::with_capacity(capacity);
-    let mut digest = Sha256::new();
-    let mut chunk = [0_u8; 8_192];
-
-    while bytes.len() < capacity {
-        let remaining = capacity - bytes.len();
-        let chunk_len = chunk.len();
-        let read = reader
-            .read(&mut chunk[..remaining.min(chunk_len)])
-            .map_err(|error| input_error(path, error))?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&chunk[..read]);
-        bytes.extend_from_slice(&chunk[..read]);
-    }
-
-    if bytes.len() == capacity {
-        let mut excess = [0_u8; 1];
-        let read = reader
-            .read(&mut excess)
-            .map_err(|error| input_error(path, error))?;
-        if read != 0 {
-            // Antes de EOF no existe una versión ni un escenario fiables. No
-            // debe inventarse contexto F5 para un v2, un v3 o un documento que
-            // ni siquiera sea clasificable.
-            return Err(Diagnostic::input(
+    let bounded = BoundedInput::new(
+        role,
+        AdmissionPhase::Bootstrap,
+        path.to_path_buf(),
+        F5_PRE_ADMISSION_TOML_LIMIT_BYTES,
+        reader,
+    )
+    .read_to_end()
+    .map_err(|diagnostic| {
+        // Antes de EOF no existe una versión ni un escenario fiables. Se
+        // conserva, por tanto, el diagnóstico neutral de F5.1.2.1 aunque el
+        // lector común ya haya contado el byte de exceso físicamente.
+        if diagnostic.code() == "GPS-RES-101"
+            && diagnostic.context().get("dimension").is_some_and(|dimension| dimension == "physical_input_bytes")
+        {
+            Diagnostic::input(
                 "GPS-INPUT-001",
                 "No se puede abrir o leer una entrada declarada.",
             )
@@ -466,25 +455,20 @@ fn read_bounded_f5_toml_from_reader(
                 format!(
                     "toml_bytes>{F5_PRE_ADMISSION_TOML_LIMIT_BYTES}/{F5_PRE_ADMISSION_TOML_LIMIT_BYTES}; el byte 65537 confirma que el documento excede el límite físico antes de clasificarlo"
                 ),
-            ));
+            )
+        } else {
+            diagnostic
         }
-    }
-
-    let size_bytes = u64::try_from(bytes.len()).map_err(|_| {
-        Diagnostic::internal_invariant("f5_bootstrap", "toml_buffer_length_does_not_fit_u64")
     })?;
+    let (bytes, identity) = bounded.into_parts();
     Ok(BoundedF5Toml {
         bytes,
-        document: F5BootstrapDocument {
-            size_bytes,
-            sha256: format!("{:x}", digest.finalize()),
-        },
+        document: F5BootstrapDocument { identity },
     })
 }
 
-/// Coste mínimo y temporal del bootstrap. F5.1.2.2 sustituirá esta frontera
-/// por las transiciones tipadas del ledger v7; aquí no se autoriza ninguna
-/// apertura posterior hasta contrastar sus dos documentos ya parseados.
+/// Coste mínimo y temporal del bootstrap, contrastado antes de cualquier
+/// apertura posterior.
 fn admit_f5_bootstrap(
     general: &F5BootstrapDocument,
     scenario: &F5BootstrapDocument,
@@ -1011,7 +995,7 @@ fn load_and_validate_cli_config_with_toml_opener(
 ) -> Result<CliValidatedConfig, Diagnostic> {
     let general_path = absolute_normalized_path(path)?;
     let BoundedF5Toml { bytes, document } =
-        read_bounded_f5_toml_with_opener(&general_path, opener)?;
+        read_bounded_f5_toml_with_opener(&general_path, InputRole::GeneralToml, opener)?;
     // `general_path` es solo la ruta física para abrir y resolver enlaces F5.
     // La ruta de autoría que se publica en el flujo v2 es exactamente la que
     // solicitó el llamador.
@@ -1085,7 +1069,7 @@ fn bootstrap_f5_config_from_admitted_with_toml_opener(
     let BoundedF5Toml {
         bytes: scenario_bytes,
         document: scenario_document,
-    } = read_bounded_f5_toml_with_opener(&scenario_path, opener)?;
+    } = read_bounded_f5_toml_with_opener(&scenario_path, InputRole::ScenarioToml, opener)?;
     let admitted_scenario = admit_toml_header(
         &scenario_path,
         scenario_bytes,
@@ -2482,6 +2466,7 @@ mod bounded_toml_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::{F5_PRE_ADMISSION_TOML_LIMIT_BYTES, read_bounded_f5_toml_from_reader};
+    use crate::f5_admission::InputRole;
 
     struct CountingReader {
         bytes: Vec<u8>,
@@ -2510,8 +2495,12 @@ mod bounded_toml_tests {
             observed: Arc::clone(&observed),
         };
 
-        let error = read_bounded_f5_toml_from_reader(Path::new("unclassified.toml"), reader)
-            .expect_err("the byte after the inclusive limit rejects the input");
+        let error = read_bounded_f5_toml_from_reader(
+            Path::new("unclassified.toml"),
+            InputRole::GeneralToml,
+            reader,
+        )
+        .expect_err("the byte after the inclusive limit rejects the input");
 
         assert_eq!(error.code(), "GPS-INPUT-001");
         assert_eq!(observed.load(Ordering::Relaxed), limit + 1);

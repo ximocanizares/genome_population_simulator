@@ -171,7 +171,7 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
       fixture de anchura fija que alcanza el punto fijo de
       `max_working_memory_bytes`, admite límite exacto y rechaza límite−1.
 
-  - ☐ **F5.1.2.2.** Implementar `BoundedInput`,
+  - ✅ **F5.1.2.2.** Implementar `BoundedInput`,
     `PhysicalInputIdentity` y las transiciones del ledger sin `fs::read` ni
     longitud de `metadata` como autorización.
     - Depende de: F5.1.2.1.
