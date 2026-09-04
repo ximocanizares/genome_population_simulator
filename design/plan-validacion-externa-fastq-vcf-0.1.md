@@ -1,19 +1,20 @@
-# Borrador de especificación, arquitectura mínima y plan de validación externa FASTQ→VCF 0.1
+# Especificación, arquitectura mínima y plan de validación externa FASTQ→VCF 0.1
 
 ## 1. Estado y autoridad
 
-- **Fecha:** 2 de septiembre de 2026.
-- **Estado:** propuesta inicial no aprobada y no ejecutable.
+- **Fecha:** 4 de septiembre de 2026.
+- **Estado:** contrato VE-SNP 0.1 aprobado y listo para implementar. La
+  ejecución externa aún no se ha iniciado; VE.2 (haplotipos, LD y fase) sigue
+  aplazada.
 - **Finalidad:** definir una validación externa que parta únicamente de los
   FASTQ, la referencia y el VCF de verdad publicados por el simulador.
 - **Relación con el simulador:** trabajo paralelo a F5. No modifica F5, no
   presupone que F5 esté terminado y no forma parte de su cierre.
-- **Autoridad normativa:** ninguna. La especificación vigente excluye la
-  llamada de variantes y la evaluación de herramientas externas y las remite a
-  DTF-024. Este borrador propone el contrato de ese banco externo; no modifica
-  la especificación, la arquitectura ni la hoja de ruta del simulador.
-- **Coordenada propuesta:** `VE` (*validación externa*). Debe aprobarse o
-  sustituirse antes de ejecutar el plan. No se usa `F9.5`, porque F9 depende de
+- **Autoridad normativa:** banco externo DTF-024, con coordenada `VE`
+  (*validación externa*). La especificación vigente excluye la llamada de
+  variantes y la evaluación de herramientas externas del runtime del simulador;
+  este plan concreta ese banco sin modificar dicho runtime.
+- **Coordenada:** `VE`. No se usa `F9.5`, porque F9 depende de
   todas las fases que entren en la versión y este trabajo se ha solicitado en
   paralelo a F5.
 
@@ -117,7 +118,7 @@ manifiesto.
 - Las pruebas actuales demuestran lectura externa de FASTQ, publicación VCF y
   coherencia interna con `truth.jsonl`; no ejecutan minimap2 ni un caller.
 
-### 5.2. Herramientas observadas el 2 de septiembre de 2026
+### 5.2. Herramientas observadas el 4 de septiembre de 2026
 
 | Herramienta | Estado local observado | Consecuencia |
 |---|---|---|
@@ -125,37 +126,25 @@ manifiesto.
 | samtools | `1.21`, disponible | Permite ordenar, indexar y comprobar BAM |
 | bcftools | `1.21`, disponible | Es anterior a la versión 1.24 exigida por la puerta externa DTC-066 del simulador |
 | bgzip/tabix | HTSlib `1.19`, disponibles | Son anteriores a la versión 1.24 exigida por DTC-066 |
-| FreeBayes | no disponible | Bloquea la ejecución, no la redacción del contrato |
+| FreeBayes | `v1.3.10`, disponible | VE.1.1 debe congelar versión, ruta y SHA-256 del ejecutable antes de ejecutar |
 | WhatsHap/SHAPEIT4/Beagle | no disponibles | No debe darse por aprobado ningún faseador |
 | hap.py/RTG vcfeval/truvari | no disponibles | Debe decidirse el comparador antes de prometer equivalencia compleja |
 
-No se ha instalado ni descargado ninguna herramienta.
+El simulador no instala ni descarga herramientas. El banco VE usa las
+herramientas locales observadas y registra sus identidades en VE.1.1.
 
-### 5.3. Bloqueo de la primera prueba sin errores
+### 5.3. Escenario PE neutro disponible
 
-La configuración F4 pública permite fijar a cero quimeras, contaminación e
-*index hopping*. Sin embargo, el ejecutor aplica actualmente
-`ErrorQualitySettings::default()`: escala de error 1 y el perfil incorporado de
-calidades. Los campos de escala de error por mate no forman parte aún del TOML
-del evento técnico; su incorporación está registrada en `TO_DO.md`,
-«Controles de error de secuenciación PE».
+F4 ya admite `technical_event.sequencing_errors = "disabled"` (commit
+`07cde2c`). Este modo PE emite exactamente cero sustituciones en ambos mates,
+conserva las calidades del perfil y declara explícitamente que no representan
+una probabilidad de error realizada. La configuración efectiva y el manifiesto
+son coherentes con ese modo; el manifiesto registra oportunidades y cero errores
+por mate.
 
-Por tanto, el programa actual no ofrece a la vez PE y ausencia de errores de
-secuenciación. F3 ofrece un perfil sin errores, pero es single-end. Antes de
-ejecutar el ensayo debe aprobarse una de estas salidas, sin resolverla dentro de
-este plan:
-
-1. añadir en el documento propietario de F4 controles TOML de escala de error
-   por mate y el modo explícito `sequencing_errors="disabled"`; este modo
-   produce cero sustituciones, sin pretender representar probabilidad cero con
-   un Phred finito, y fija además quimeras, contaminación e *index hopping* a 0;
-2. aceptar para el piloto el perfil PE actual y retirar la condición «sin
-   errores de secuenciación»;
-3. ejecutar primero un control SE neutro de F3, dejando el control PE solicitado
-   para después.
-
-Las opciones 2 y 3 cambian el ensayo pedido. La opción 1 cambia el simulador y
-no queda autorizada por este borrador.
+VE-SNP debe usar ese modo y fijar a cero quimeras, contaminación e *index
+hopping*. Así queda cerrado el control técnico neutro sin usar
+`error_scale = 0` ni un Phred infinito.
 
 ## 6. Especificación funcional propuesta
 
@@ -380,15 +369,15 @@ condiciones estructurales siguientes:
    de BAM/VCF; tiempos, logs, índices y metadatos incidentales se registran por
    separado.
 
-## 9. Decisiones abiertas y recomendación inicial
+## 9. Decisiones y dependencias de ejecución
 
-| ID | Decisión pendiente | Opciones o recomendación no aprobada | Bloquea |
+| ID | Decisión o dependencia | Estado acordado | Bloquea |
 |---|---|---|---|
-| VE-D01 | Propiedad y coordenada | **Aprobado:** banco externo DTF-024 con coordenada `VE`, no F5 ni F9.5 | Numeración ejecutable y documentos de origen |
-| VE-D02 | PE sin errores de secuenciación | **Pendiente de implementación F4:** el contrato decidido exige controles TOML de escala por R1/R2 y `sequencing_errors="disabled"`. El modo neutro emitirá cero sustituciones, conservará calidades no probabilísticas marcadas como tales y fijará los artefactos configurables a 0 | Generación de VE-SNP |
+| VE-D01 | Propiedad y coordenada | **Aprobado:** banco externo DTF-024 con coordenada `VE`, no F5 ni F9.5 | No bloquea |
+| VE-D02 | PE sin errores de secuenciación | **Superado en F4:** `sequencing_errors="disabled"` produce cero sustituciones PE y marca las calidades no probabilísticas; VE fija además quimeras, contaminación e *index hopping* a cero | No bloquea VE-SNP |
 | VE-D03 | Contenido exacto de VE-SNP | **Aprobado:** solo SNP bialélicos, sin multialelia ni *indels*, en VE-SNP 0.1 | Configuración y comparador |
 | VE-D04 | Densidad y selección de loci | **Aprobado:** 1.000 posiciones candidatas A/C/G/T elegibles, no enmascaradas ni ambiguas, con frecuencia ALT objetivo uniforme en [0,1; 0,4). El VCF conserva solo las variantes segregantes realizadas; se registran candidatos, frecuencias objetivo, genotipos realizados y recuento final, sin reintentar ni seleccionar para forzar 1.000 SNP | Generación y criterio de exactitud |
-| VE-D05 | Versiones y argumentos | **Aprobado:** congelar minimap2 2.26-r1175, samtools/bcftools 1.21 locales y versión+hash de FreeBayes antes de ejecutar; HTSlib 1.24 no es requisito del banco externo | Comandos reproducibles |
+| VE-D05 | Versiones y argumentos | **Aprobado:** congelar minimap2 2.26-r1175, samtools/bcftools 1.21 locales y versión+hash de FreeBayes v1.3.10 antes de ejecutar; HTSlib 1.24 no es requisito del banco externo | VE.1.1, comandos reproducibles |
 | VE-D06 | Normalización y emparejamiento VCF | **Aprobado para VE-SNP 0.1:** comparar SNP bialélicos por CHROM, posición, REF, ALT y dosis por muestra; `0|1`, `1|0` y `0/1` son equivalentes. Fase se evalúa aparte. Ignorar QUAL/FILTER/INFO/GPS_CASE; normalización compleja se aplaza a multialelia/*indels* | Métricas SNP/indel |
 | VE-D07 | Regiones llamables | **Aprobado para VE-SNP 0.1:** todas las variantes segregantes realizadas desde las posiciones candidatas constituyen el denominador de sensibilidad, sin filtro posterior por profundidad/MAPQ/BQ. Esas métricas son diagnósticas; una baja llamabilidad o ausencia de llamada es FN y se clasifica. `N`, máscara y repetición se examinan en VE.4 | Denominadores y umbrales |
 | VE-D08 | Umbrales de aprobación | **Aprobado:** en el PE neutro, sensibilidad, precisión y concordancia de GT del 100% en loci llamables; cero no llamadas. Cualquier discrepancia se investiga | Cierre científico |
@@ -406,15 +395,15 @@ los veinte BAM canónicos. Se conserva el VCF bruto y no se aplica filtrado
 posterior que oculte ALT; las alineaciones secundarias/suplementarias se
 informan, mientras que cobertura y recuento de pares usan solo primarias.
 
-## 10. Plan propuesto
+## 10. Plan ejecutable
 
-Los identificadores siguientes usan la coordenada provisional `VE`. No se
-marcará ninguna casilla como completada ni se ejecutará un paso hasta aprobar
-VE-D01 y las decisiones que lo bloqueen.
+Los identificadores siguientes usan la coordenada aprobada `VE`. VE.0 está
+cerrado; VE.1.1 puede empezar. Ninguna instalación o ejecución de herramientas
+se considera superada hasta que VE.1.1 haya fijado y comprobado sus identidades.
 
 ### VE.0 — Cierre del contrato del banco externo
 
-- ☐ **VE.0.1. Aprobar alcance, vocabulario y afirmación científica.**
+- ✅ **VE.0.1. Aprobar alcance, vocabulario y afirmación científica.**
   - Depende de: ninguno.
   - Procede de: §§2–3 y VE-D01.
   - Cambia: documento propietario de DTF-024; no modifica la especificación del
@@ -422,17 +411,16 @@ VE-D01 y las decisiones que lo bloqueen.
   - Se comprueba con: acta que distingue alineamiento, consenso, recuperación
     de variantes, ensamblaje y fase.
 
-- ☐ **VE.0.2. Resolver el escenario técnico PE neutro.**
+- ✅ **VE.0.2. Resolver el escenario técnico PE neutro.**
   - Depende de: VE.0.1.
   - Procede de: §5.3 y VE-D02.
-  - Cambia: depende de completar primero la mejora F4 de `TO_DO.md`,
-    «Controles de error de secuenciación PE»; esa ampliación necesita su propia
-    especificación, arquitectura y plan antes de materializar VE.
+  - Cambia: F4 materializa el modo PE `disabled`; VE solo lo configura junto a
+    los demás artefactos técnicos neutros.
   - Se comprueba con: una configuración admitida cuyo manifiesto demuestre el
     modo `disabled`, cero sustituciones realizadas, calidades no probabilísticas
     señaladas, y cero contaminación, quimeras e *index hopping*, sin usar F5.
 
-- ☐ **VE.0.3. Fijar contrato de comparación y umbrales.**
+- ✅ **VE.0.3. Fijar contrato de comparación y umbrales.**
   - Depende de: VE.0.1.
   - Procede de: §§6.4–6.6 y VE-D03–VE-D12.
   - Cambia: tabla normativa de métricas, denominadores, normalización, regiones
@@ -441,9 +429,8 @@ VE-D01 y las decisiones que lo bloqueen.
     registro multialélico, región no llamable y par LD que no admitan dos
     clasificaciones distintas.
 
-> **PAUSA-VE.0.** No preparar scripts ni instalar herramientas hasta aprobar el
-> alcance, resolver PE neutro y cerrar la comparación que determinará éxito o
-> fallo.
+> **PAUSA-VE.0 cerrada.** El siguiente paso es VE.1.1: fijar el entorno local y
+> sus identidades antes de preparar o ejecutar el ensayo.
 
 ### VE.1 — Conjunto pequeño, alineamiento y SNP independientes
 
