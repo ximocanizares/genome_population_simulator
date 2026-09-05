@@ -185,7 +185,7 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
       tamaño y SHA desde el fichero y demuestra que los atributos no deciden la
       admisión.
 
-  - ☐ **F5.1.2.3.** Leer el paquete de perfil bajo el presupuesto restante.
+  - ✅ **F5.1.2.3.** Leer el paquete de perfil bajo el presupuesto restante.
     - Depende de: F5.1.2.2.
     - Procede de: REQ-EVO-74/75, DTC-049 y DTC-089 «Paquete de perfiles».
     - Cambia: metadata bajo límite derivado del ledger; reserva previa del coste
@@ -209,12 +209,13 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
       efectivo —y, por referencia, del manifiesto— y se añadió un oráculo de
       claves literal e independiente para ambas rutas. Esta proyección de .3
       no se presenta como el contrato final: `input_identities` y `phases`
-      siguen reservados a .5. Todas las correcciones aún requieren una nueva
-      revisión.
-      El subhito permanece abierto hasta una revisión independiente de la pausa
-      A; H10 sigue reservado a F5.1.2.6 y no se presenta como gate verde.
+      siguen reservados a .5. La revisión independiente de cierre del 5 de
+      septiembre de 2026 aprobó la pausa A: verificó los 27 campos escalares
+      publicables en .3, la reserva prospectiva de TSV, la dimensión
+      diagnóstica y las rutas públicas. H10 sigue reservado a F5.1.2.6 y no se
+      presenta como gate verde.
 
-  **Pausa de revisión F5.1.2-A.** Aprobar dispatcher, bootstrap, lector, perfil
+  **✅ Pausa de revisión F5.1.2-A.** Aprobar dispatcher, bootstrap, lector, perfil
   y ledger. Exigir ausencia mecánica de `fs::read` y de sondas parciales en la
   ruta F5, pruebas exacto/exacto−1 y cero apertura posterior. No continuar con
   referencia hasta corregir todos los hallazgos.
