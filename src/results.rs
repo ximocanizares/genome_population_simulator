@@ -41,7 +41,7 @@ use crate::reference::{
 };
 use crate::reference_fasta::{
     CANONICAL_FASTA_VERSION, CANONICAL_LINE_BASE_COUNT, SequenceExpectation,
-    validate_supplied_fasta,
+    reference_from_summary, validate_supplied_fasta, validate_supplied_fasta_summary,
 };
 use crate::reference_generation::COMPOSITION_TOLERANCE;
 use crate::reference_generation::{BaseFrequency, GeneratedSequenceSpec};
@@ -49,9 +49,8 @@ use crate::reference_reduction::{
     EligibleSequence, MaterializedPlan, materialize_selection, select_reduced_reference,
 };
 use crate::reference_reduction_io::{
-    MaterializedSource, REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION,
-    ReductionMapParameters, build_reduced_reference, reduction_map_document,
-    validate_reduction_map_document,
+    REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
+    build_reduced_reference, reduction_map_document, source_for, validate_reduction_map_document,
 };
 use crate::technical_identity::derive_technical_identity_plan;
 use crate::vcf_contract::{TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfIndexKind, VcfOutputMode};
@@ -1275,8 +1274,17 @@ fn validate_published_resources_v3(
     )
     .map_err(|error| physical_error(effective_path, "root_seed", &error))?;
     let reference_value = effective_object(effective, "reference", effective_path)?;
-    let source_reference =
-        read_physical_reference(root, reference_value, &artifact_paths, effective_path)?;
+    let source_reference = read_physical_reference(
+        root,
+        reference_value,
+        &artifact_paths,
+        effective_path,
+        if effective_needs_reference_bases(effective) {
+            CatalogBases::Materialized
+        } else {
+            CatalogBases::SummaryOnly
+        },
+    )?;
     validate_physical_technical_event(
         root,
         effective,
@@ -1414,8 +1422,13 @@ fn validate_published_resources_v3(
                 format!("selection_order de {id} no coincide con la subsemilla"),
             ));
         }
-        let expected_derived = build_reduced_reference(&MaterializedSource::new(source), &plan)
-            .map_err(|error| physical_error(effective_path, "build_reduced_reference", &error))?;
+        let expected_derived = build_reduced_reference(
+            source_for(source, None)
+                .map_err(|error| physical_error(effective_path, "reduction_source", &error))?
+                .as_ref(),
+            &plan,
+        )
+        .map_err(|error| physical_error(effective_path, "build_reduced_reference", &error))?;
         let fasta_id = effective_non_empty_text(reduction, "fasta_artifact_id", effective_path)?;
         let derived = read_reference_with_expected(
             root,
@@ -1447,7 +1460,9 @@ fn validate_published_resources_v3(
             ));
         }
         validate_reduction_map_document(
-            &MaterializedSource::new(source),
+            source_for(source, None)
+                .map_err(|error| physical_error(effective_path, "reduction_source", &error))?
+                .as_ref(),
             &derived,
             &map,
             ReductionMapParameters {
@@ -1998,8 +2013,17 @@ fn validate_published_resources_v1(
     )
     .map_err(|error| physical_error(effective_path, "root_seed", &error))?;
     let reference_value = effective_object(effective, "reference", effective_path)?;
-    let source_reference =
-        read_physical_reference(root, reference_value, &artifact_paths, effective_path)?;
+    let source_reference = read_physical_reference(
+        root,
+        reference_value,
+        &artifact_paths,
+        effective_path,
+        if effective_needs_reference_bases(effective) {
+            CatalogBases::Materialized
+        } else {
+            CatalogBases::SummaryOnly
+        },
+    )?;
     if reference_value.get("source").and_then(Value::as_str) == Some("simulated") {
         validate_generated_reference(
             reference_value,
@@ -2097,8 +2121,13 @@ fn validate_published_resources_v1(
                 format!("selection_order de {id} no coincide con la subsemilla"),
             ));
         }
-        let expected_derived = build_reduced_reference(&MaterializedSource::new(source), &plan)
-            .map_err(|error| physical_error(effective_path, "build_reduced_reference", &error))?;
+        let expected_derived = build_reduced_reference(
+            source_for(source, None)
+                .map_err(|error| physical_error(effective_path, "reduction_source", &error))?
+                .as_ref(),
+            &plan,
+        )
+        .map_err(|error| physical_error(effective_path, "build_reduced_reference", &error))?;
         let fasta_id = effective_non_empty_text(reduction, "fasta_artifact_id", effective_path)?;
         let derived = read_reference_with_expected(
             root,
@@ -2130,7 +2159,9 @@ fn validate_published_resources_v1(
             ));
         }
         validate_reduction_map_document(
-            &MaterializedSource::new(source),
+            source_for(source, None)
+                .map_err(|error| physical_error(effective_path, "reduction_source", &error))?
+                .as_ref(),
             &derived,
             &map,
             ReductionMapParameters {
@@ -2871,11 +2902,36 @@ struct EffectiveReductionLinks {
     source_fasta_artifact_id: String,
 }
 
+/// Indica si el documento efectivo declara alguna salida que trabaje sobre las
+/// bases de la referencia principal.
+///
+/// Una ejecución que solo deriva referencias reducidas no las necesita: el
+/// catálogo basta para comprobar ficha y alfabeto, y los tramos se piden por
+/// índice. Cualquier otra salida sí las recorre.
+fn effective_needs_reference_bases(effective: &serde_json::Map<String, Value>) -> bool {
+    // Las claves ausentes aparecen como `null` en el documento efectivo, así que
+    // no basta con comprobar que existan.
+    let declared = |key: &str| effective.get(key).is_some_and(|value| !value.is_null());
+    let non_empty = |key: &str| {
+        effective
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|values| !values.is_empty())
+    };
+    declared("population_snvs")
+        || declared("technical_event")
+        || declared("vcf_output")
+        || non_empty("initial_populations")
+        || non_empty("direct_events")
+        || non_empty("vcf_outputs")
+}
+
 fn read_physical_reference(
     root: &Path,
     reference: &serde_json::Map<String, Value>,
     artifact_paths: &BTreeMap<&str, &str>,
     effective_path: &Path,
+    bases: CatalogBases,
 ) -> Result<Reference, Diagnostic> {
     let id = effective_non_empty_text(reference, "id", effective_path)?;
     let sequences = effective_array(reference, "sequences", effective_path)?;
@@ -2888,9 +2944,22 @@ fn read_physical_reference(
         "unknown_base_count",
         artifact_paths,
         effective_path,
+        bases,
     )
 }
 
+/// Modo de lectura del catálogo físico.
+///
+/// La referencia de partida puede ser un genoma completo del que solo se
+/// comprueban ficha y alfabeto; una referencia derivada, en cambio, se compara
+/// base a base contra su reconstrucción y necesita cargarse.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CatalogBases {
+    Materialized,
+    SummaryOnly,
+}
+
+#[allow(clippy::too_many_arguments)] // cada argumento es un hecho distinto del catálogo publicado.
 fn read_physical_sequence_catalog(
     root: &Path,
     reference_id: &str,
@@ -2899,6 +2968,7 @@ fn read_physical_sequence_catalog(
     n_count_field: &str,
     artifact_paths: &BTreeMap<&str, &str>,
     effective_path: &Path,
+    bases: CatalogBases,
 ) -> Result<Reference, Diagnostic> {
     let mut expectations = Vec::with_capacity(sequences.len());
     for sequence in sequences {
@@ -2918,9 +2988,28 @@ fn read_physical_sequence_catalog(
         )
     })?;
     let path = root.join(relative);
-    let observed = validate_supplied_fasta(&path, reference_id, &expectations)
-        .map_err(|error| physical_error(effective_path, "validate_reference_fasta", &error))?
-        .into_reference();
+    // Cuando solo se comprueban ficha y alfabeto basta validar sin conservar las
+    // bases; quien las necesite las pide por índice. Una referencia que se
+    // compara base a base sí se carga: es pequeña por construcción.
+    let observed = match bases {
+        CatalogBases::SummaryOnly => {
+            let summary = validate_supplied_fasta_summary(&path, reference_id, &expectations)
+                .map_err(|error| {
+                    physical_error(effective_path, "validate_reference_fasta", &error)
+                })?;
+            reference_from_summary(
+                &summary,
+                reference_id,
+                crate::reference::ReferenceOrigin::Supplied {
+                    original_path: path.clone(),
+                },
+            )
+            .map_err(|error| physical_error(effective_path, "validate_reference_fasta", &error))?
+        }
+        CatalogBases::Materialized => validate_supplied_fasta(&path, reference_id, &expectations)
+            .map_err(|error| physical_error(effective_path, "validate_reference_fasta", &error))?
+            .into_reference(),
+    };
     for (declared, physical) in sequences.iter().zip(observed.sequences()) {
         let declared = declared
             .as_object()
@@ -2975,6 +3064,7 @@ fn read_reference_with_expected(
         "n_count",
         artifact_paths,
         effective_path,
+        CatalogBases::Materialized,
     )?;
     if observed.sequences().len() != expected.len() {
         return Err(effective_error(
@@ -3049,7 +3139,20 @@ fn compare_reference_bases(
                     || expected.class() != physical.class()
                     || expected.length() != physical.length()
                     || expected.unknown_base_count() != physical.unknown_base_count()
-                    || expected.sequence().as_bytes() != physical.sequence().as_bytes()
+                    // Las bases solo se comparan cuando ambas partes las
+                    // conservan. Si alguna se validó sin ellas, la
+                    // correspondencia con el fichero ya la garantizan su
+                    // SHA-256 y el recuento de bases desconocidas, que sí se
+                    // comprueban aquí arriba.
+                    || match (
+                        expected.sequence().as_bytes(),
+                        physical.sequence().as_bytes(),
+                    ) {
+                        (Ok(expected_bases), Ok(physical_bases)) => {
+                            expected_bases != physical_bases
+                        }
+                        _ => false,
+                    }
             })
     {
         return Err(effective_error(

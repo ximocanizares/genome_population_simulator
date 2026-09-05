@@ -16,7 +16,7 @@ use crate::randomness::{
     RandomSamplingError, RootSeed, RuntimeSubseedScope, categorical_f64, derive_subseed,
     fisher_yates, linear_uniform, log_uniform, open_unit_f64, poisson_count,
 };
-use crate::reference::Reference;
+use crate::reference::{Reference, ReferenceError};
 use crate::results::ResolvedManifestReference;
 
 use serde_json::{Value, json};
@@ -361,15 +361,16 @@ impl PreparedReferenceIdentity {
         &self.canonical_fingerprint
     }
 
-    #[must_use]
-    pub fn from_reference(reference: &Reference) -> Self {
-        Self::from_sequences(
-            reference.id().clone(),
-            reference
-                .sequences()
-                .iter()
-                .map(|sequence| (sequence.id().as_str(), sequence.sequence().as_bytes())),
-        )
+    /// Huella canónica de una referencia materializada.
+    ///
+    /// Falla si la referencia se validó sin conservar sus bases: la huella se
+    /// calcula sobre ellas y no puede derivarse de la ficha.
+    pub fn from_reference(reference: &Reference) -> Result<Self, ReferenceError> {
+        let mut sequences = Vec::with_capacity(reference.sequences().len());
+        for sequence in reference.sequences() {
+            sequences.push((sequence.id().as_str(), sequence.sequence().as_bytes()?));
+        }
+        Ok(Self::from_sequences(reference.id().clone(), sequences))
     }
 
     fn from_authoritative_fasta(reference_id: ReferenceId, fasta: &AuthoritativeFasta) -> Self {
@@ -566,6 +567,8 @@ impl PreparedPopulationSnvs {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PopulationSnvsPreparationError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     AuthoritativeFasta {
         detail: String,
     },
@@ -650,18 +653,21 @@ pub fn prepare_population_snvs_from_reference(
     tolerance: f64,
     allow_empty_matrix: bool,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
-    let prepared_reference = PreparedReferenceIdentity::from_reference(reference);
+    let prepared_reference = PreparedReferenceIdentity::from_reference(reference)
+        .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?;
+    let mut fasta_sequences = BTreeMap::new();
+    for sequence in reference.sequences() {
+        fasta_sequences.insert(
+            sequence.id().as_str().to_owned(),
+            sequence
+                .sequence()
+                .as_bytes()
+                .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?
+                .to_vec(),
+        );
+    }
     let fasta = AuthoritativeFasta {
-        sequences: reference
-            .sequences()
-            .iter()
-            .map(|sequence| {
-                (
-                    sequence.id().as_str().to_owned(),
-                    sequence.sequence().as_bytes().to_vec(),
-                )
-            })
-            .collect(),
+        sequences: fasta_sequences,
         order: reference
             .sequences()
             .iter()
@@ -1251,7 +1257,8 @@ pub fn validate_reusable_population_snvs_bytes(
         .ok_or_else(|| PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "metadata.reference inválida".to_owned(),
         })?;
-    let expected_reference = PreparedReferenceIdentity::from_reference(reference);
+    let expected_reference = PreparedReferenceIdentity::from_reference(reference)
+        .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?;
     let declared_reference = reference_object.get("reference_id").and_then(Value::as_str);
     let declared_fingerprint = reference_object
         .get("canonical_fingerprint")
@@ -1636,6 +1643,7 @@ pub fn validate_normalization_audit_document(
         if sequence
             .sequence()
             .as_bytes()
+            .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?
             .get(usize::try_from(position - 1).map_err(|_| audit_error("position"))?)
             .copied()
             != Some(reference_base)
@@ -2521,16 +2529,29 @@ pub struct PopulationSnvsGenerationConfig {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PopulationSnvsGenerationError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     InvalidCount,
     InvalidPopulation(String),
     DuplicatePopulation(String),
-    InvalidFrequencyInterval { population_id: String },
-    InvalidFrequencySpectrum { population_id: String },
-    InvalidRegion { contig: String },
-    OverlappingRegions { contig: String },
+    InvalidFrequencyInterval {
+        population_id: String,
+    },
+    InvalidFrequencySpectrum {
+        population_id: String,
+    },
+    InvalidRegion {
+        contig: String,
+    },
+    OverlappingRegions {
+        contig: String,
+    },
     InvalidWeight,
     EmptyEligibleSpace,
-    InsufficientEligibleSpace { requested: u64, available: u64 },
+    InsufficientEligibleSpace {
+        requested: u64,
+        available: u64,
+    },
     Random(RandomSamplingError),
     Reference(String),
 }
@@ -2610,17 +2631,19 @@ pub fn generate_population_snvs_from_reference_with_tolerance(
         config,
         GenerationReference {
             id: reference.id().clone(),
-            prepared_identity: PreparedReferenceIdentity::from_reference(reference),
+            prepared_identity: PreparedReferenceIdentity::from_reference(reference)
+                .map_err(|_| PopulationSnvsGenerationError::BasesNotMaterialized)?,
             sequences: reference
                 .sequences()
                 .iter()
                 .map(|sequence| {
-                    (
-                        sequence.id().clone(),
-                        sequence.sequence().as_bytes().to_vec(),
-                    )
+                    sequence
+                        .sequence()
+                        .as_bytes()
+                        .map(|bases| (sequence.id().clone(), bases.to_vec()))
+                        .map_err(|_| PopulationSnvsGenerationError::BasesNotMaterialized)
                 })
-                .collect(),
+                .collect::<Result<_, _>>()?,
         },
         root_seed,
         normalization_tolerance,

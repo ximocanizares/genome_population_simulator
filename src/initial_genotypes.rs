@@ -227,6 +227,8 @@ impl InitialPhasedGenotypes {
 /// Error anterior al sorteo o procedente de la utilidad RNG normativa.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InitialGenotypeSamplingError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     ReferenceMismatch {
         configured_reference_id: String,
         sampled_reference: PreparedReferenceIdentity,
@@ -250,6 +252,10 @@ pub enum InitialGenotypeSamplingError {
 impl fmt::Display for InitialGenotypeSamplingError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::BasesNotMaterialized => write!(
+                formatter,
+                "la referencia se validó sin conservar sus bases y el muestreo las necesita"
+            ),
             Self::ReferenceMismatch {
                 configured_reference_id,
                 sampled_reference,
@@ -536,7 +542,8 @@ fn preflight_reference(
     reference: &Reference,
     matrix: &PreparedPopulationSnvs,
 ) -> Result<(), InitialGenotypeSamplingError> {
-    let sampled_reference = PreparedReferenceIdentity::from_reference(reference);
+    let sampled_reference = PreparedReferenceIdentity::from_reference(reference)
+        .map_err(|_| InitialGenotypeSamplingError::BasesNotMaterialized)?;
     if sampled_reference.reference_id().as_str() != reference_id
         || matrix.prepared_reference() != &sampled_reference
     {

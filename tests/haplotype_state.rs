@@ -75,14 +75,24 @@ fn individual_has_every_sequence_and_one_distinct_phased_copy_per_ploidy_index()
 #[test]
 fn building_copies_keeps_unknown_bases_only_in_the_shared_reference() {
     let reference = reference();
-    let before = reference.sequences()[0].sequence().as_bytes().to_vec();
+    let before = reference.sequences()[0]
+        .sequence()
+        .as_bytes()
+        .expect("bases materializadas")
+        .to_vec();
     let individual = Individual::from_reference(
         IndividualId::parse("individual-n", "test").expect("individual id"),
         &reference,
         Ploidy::new(2).expect("ploidy"),
     );
 
-    assert_eq!(reference.sequences()[0].sequence().as_bytes(), before);
+    assert_eq!(
+        reference.sequences()[0]
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas"),
+        before
+    );
     assert_eq!(reference.sequences()[0].unknown_base_count(), 2);
     assert_eq!(
         individual

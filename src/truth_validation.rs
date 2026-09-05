@@ -60,7 +60,7 @@ impl<'truth> ValidatedTruthForVcf<'truth> {
                 actual: reference.id().as_str().to_owned(),
             });
         }
-        if self.reference_content_sha256 != reference_content_sha256(reference) {
+        if self.reference_content_sha256 != reference_content_sha256(reference)? {
             return Err(TruthValidationError::ReferenceDigestMismatch);
         }
         Ok(())
@@ -77,6 +77,8 @@ pub struct TruthStreamSummary {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TruthValidationError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     Io {
         line: u64,
         detail: String,
@@ -131,6 +133,14 @@ impl std::fmt::Display for TruthValidationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "{self:?}")
     }
+}
+
+/// Bases de una secuencia, o el error propio si no se materializaron.
+fn bases_of(sequence: &crate::reference::ReferenceSequence) -> Result<&[u8], TruthValidationError> {
+    sequence
+        .sequence()
+        .as_bytes()
+        .map_err(|_| TruthValidationError::BasesNotMaterialized)
 }
 
 impl std::error::Error for TruthValidationError {}
@@ -250,8 +260,11 @@ fn parse_wire_line(raw: &[u8], line_number: u64) -> Result<WireLine, TruthValida
 /// SHA-256 canónico del contenido de `Reference`: etiqueta de versión, id de
 /// referencia y, en orden, id, longitud y bases de cada secuencia. No depende
 /// de rutas, encabezados FASTA ni de un digest suministrado por el llamador.
-#[must_use]
-pub fn reference_content_sha256(reference: &Reference) -> String {
+/// Huella del contenido de una referencia materializada.
+///
+/// Falla si se validó sin conservar las bases: la huella se calcula sobre
+/// ellas y no puede derivarse de la ficha.
+pub fn reference_content_sha256(reference: &Reference) -> Result<String, TruthValidationError> {
     let mut digest = Sha256::new();
     digest.update(b"genome_population_simulator/reference-content/v1\0");
     digest.update(
@@ -268,9 +281,14 @@ pub fn reference_content_sha256(reference: &Reference) -> String {
         );
         digest.update(sequence.id().as_str().as_bytes());
         digest.update(sequence.length().to_be_bytes());
-        digest.update(sequence.sequence().as_bytes());
+        digest.update(
+            sequence
+                .sequence()
+                .as_bytes()
+                .map_err(|_| TruthValidationError::BasesNotMaterialized)?,
+        );
     }
-    format!("{:x}", digest.finalize())
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 fn validate_reference_digest(
@@ -288,7 +306,7 @@ fn validate_reference_digest(
     if matches.len() != 1 {
         return Err(TruthValidationError::MissingOrDuplicateReferenceDigest);
     }
-    if header.reference_content_sha256 != reference_content_sha256(reference) {
+    if header.reference_content_sha256 != reference_content_sha256(reference)? {
         return Err(TruthValidationError::ReferenceDigestMismatch);
     }
     Ok(())
@@ -677,7 +695,11 @@ fn replay_event(
                     identity: copy.identity.clone(),
                 }
             })?;
-            if sequence.sequence().as_bytes().get(index) != Some(&expected.as_bytes()[0]) {
+            let bases = sequence
+                .sequence()
+                .as_bytes()
+                .map_err(|_| TruthValidationError::BasesNotMaterialized)?;
+            if bases.get(index) != Some(&expected.as_bytes()[0]) {
                 return Err(TruthValidationError::SnpReferenceMismatch {
                     event_id: event_id.clone(),
                     position: *position,
@@ -1131,10 +1153,15 @@ fn materialize_replayed_copy(
             ReplayPiece::Source { source, snps } => {
                 let sequence = validated_source(copy, source, reference)?;
                 for snp in snps {
-                    let found = sequence.sequence().as_bytes()[usize::try_from(snp.position)
-                        .map_err(|_| TruthValidationError::SourceIntervalOutOfBounds {
+                    let bases = sequence
+                        .sequence()
+                        .as_bytes()
+                        .map_err(|_| TruthValidationError::BasesNotMaterialized)?;
+                    let found = bases[usize::try_from(snp.position).map_err(|_| {
+                        TruthValidationError::SourceIntervalOutOfBounds {
                             identity: copy.identity.clone(),
-                        })?];
+                        }
+                    })?];
                     if found != snp.reference.as_bytes()[0] {
                         return Err(TruthValidationError::SnpReferenceMismatch {
                             event_id: snp.event_id.clone(),
@@ -1162,7 +1189,7 @@ fn materialize_replayed_copy(
                             identity: copy.identity.clone(),
                         }
                     })?;
-                    bases.extend_from_slice(&sequence.sequence().as_bytes()[start_index..position]);
+                    bases.extend_from_slice(&bases_of(sequence)?[start_index..position]);
                     bases.push(snp.alternate.as_bytes()[0]);
                     cursor = snp.position.checked_add(1).ok_or_else(|| {
                         TruthValidationError::HistoryDoesNotReplay {
@@ -1180,7 +1207,7 @@ fn materialize_replayed_copy(
                         identity: copy.identity.clone(),
                     }
                 })?;
-                bases.extend_from_slice(&sequence.sequence().as_bytes()[start_index..end_index]);
+                bases.extend_from_slice(&bases_of(sequence)?[start_index..end_index]);
                 source_slices.push(SourceSlice {
                     start: source.start,
                     end: source.end,
@@ -1273,9 +1300,9 @@ fn validate_snp_genotype(
         .ok_or_else(|| mismatch(genotype, "la secuencia del locus no existe"))?;
     let position = usize::try_from(genotype.locus.start)
         .ok()
-        .filter(|position| *position < sequence.sequence().as_bytes().len())
+        .filter(|position| *position < sequence.length() as usize)
         .ok_or_else(|| mismatch(genotype, "el locus SNP sale de la referencia"))?;
-    let reference_base = sequence.sequence().as_bytes()[position];
+    let reference_base = bases_of(sequence)?[position];
     let mut expected = BTreeMap::new();
     for (identity, copy) in copies.iter().filter(|(identity, _)| {
         identity.reference_id == genotype.reference_id

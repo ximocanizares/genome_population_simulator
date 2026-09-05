@@ -947,7 +947,7 @@ mod tests {
             }));
         }
         copy_records.extend(genotype_records);
-        let reference_digest = reference_content_sha256(&reference);
+        let reference_digest = reference_content_sha256(&reference).expect("huella");
         (
             reference,
             TruthDocument {
@@ -1071,7 +1071,7 @@ mod tests {
                 schema_version: TRUTH_SCHEMA_VERSION.to_owned(),
                 execution_id: "RUN_01".to_owned(),
                 reference_id: "REF_main".to_owned(),
-                reference_content_sha256: reference_content_sha256(&reference),
+                reference_content_sha256: reference_content_sha256(&reference).expect("huella"),
                 coordinate_convention: TRUTH_COORDINATE_CONVENTION.to_owned(),
                 copy_count: 1,
                 genotype_count: 0,

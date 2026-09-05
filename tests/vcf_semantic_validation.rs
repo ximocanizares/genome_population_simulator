@@ -46,7 +46,7 @@ fn reference() -> Reference {
 fn truth() -> String {
     include_str!("fixtures/truth-v1/valid.jsonl").replacen(
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        &reference_content_sha256(&reference()),
+        &reference_content_sha256(&reference()).expect("huella"),
         1,
     )
 }
@@ -227,7 +227,8 @@ fn composed_truth() -> (
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON"))
         .collect::<Vec<_>>();
-    lines[0]["reference_content_sha256"] = serde_json::json!(reference_content_sha256(&reference));
+    lines[0]["reference_content_sha256"] =
+        serde_json::json!(reference_content_sha256(&reference).expect("huella"));
     lines[0]["counts"]["genotypes"] = serde_json::json!(2);
     let source = lines[1]["segments"][0]["source"].clone();
     lines[1]["segments"][0]["source"]["end"] = serde_json::json!(8);
@@ -343,7 +344,8 @@ fn insertion_bridge_truth() -> (
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON"))
         .collect::<Vec<_>>();
-    lines[0]["reference_content_sha256"] = serde_json::json!(reference_content_sha256(&reference));
+    lines[0]["reference_content_sha256"] =
+        serde_json::json!(reference_content_sha256(&reference).expect("huella"));
     lines[0]["counts"] = serde_json::json!({"copies":1,"genotypes":3});
     let source = serde_json::json!({"source":{"kind":"reference","source_id":"REF_main"},"reference_id":"REF_main","sequence_id":"chr1","start":0,"end":3,"sequence_length":3});
     let provenance = lines[1]["segments"][0]["modifications"][0]["provenance"].clone();
@@ -389,7 +391,7 @@ fn insertion_bridge_truth() -> (
             serde_json::json!({"kind":"snp","base":"A"}),
         ),
     ];
-    lines.insert(0, serde_json::json!({"record_type":"header","document_kind":"gps_truth","schema_version":"1","execution_id":"RUN_01","reference_id":"REF_main","reference_content_sha256":reference_content_sha256(&reference),"coordinate_convention":"zero_based_half_open_v1","counts":{"copies":1,"genotypes":3},"source_digests":[{"source":{"kind":"reference","source_id":"REF_main"},"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"source":{"kind":"matrix","source_id":"MATRIX_01"},"sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"group_digests":[{"source":{"kind":"matrix","source_id":"POP_01"},"sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}]}));
+    lines.insert(0, serde_json::json!({"record_type":"header","document_kind":"gps_truth","schema_version":"1","execution_id":"RUN_01","reference_id":"REF_main","reference_content_sha256":reference_content_sha256(&reference).expect("huella"),"coordinate_convention":"zero_based_half_open_v1","counts":{"copies":1,"genotypes":3},"source_digests":[{"source":{"kind":"reference","source_id":"REF_main"},"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"source":{"kind":"matrix","source_id":"MATRIX_01"},"sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"group_digests":[{"source":{"kind":"matrix","source_id":"POP_01"},"sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}]}));
     let jsonl = lines
         .into_iter()
         .map(|line| serde_json::to_string(&line).expect("serialize"))

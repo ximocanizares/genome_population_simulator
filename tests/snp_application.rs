@@ -81,7 +81,10 @@ fn explicit_on_sequence(
         .find(|sequence| sequence.id() == sequence_id)
         .expect("known sequence");
     let reference_base = CanonicalBase::from_byte(
-        sequence.sequence().as_bytes()[usize::try_from(offset).expect("offset")],
+        sequence
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas")[usize::try_from(offset).expect("offset")],
     )
     .expect("canonical reference");
     ApplicableSnp::explicit(
@@ -117,7 +120,10 @@ fn explicit(
 ) -> ApplicableSnp {
     let sequence = &reference.sequences()[0];
     let reference_base = CanonicalBase::from_byte(
-        sequence.sequence().as_bytes()[usize::try_from(offset).expect("offset")],
+        sequence
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas")[usize::try_from(offset).expect("offset")],
     )
     .expect("canonical reference");
     ApplicableSnp::explicit(

@@ -204,7 +204,8 @@ fn sampling_requires_the_reference_bound_to_the_prepared_matrix() {
         error,
         InitialGenotypeSamplingError::ReferenceMismatch {
             configured_reference_id: "ref-other".to_owned(),
-            sampled_reference: PreparedReferenceIdentity::from_reference(&reference),
+            sampled_reference: PreparedReferenceIdentity::from_reference(&reference)
+                .expect("bases materializadas"),
             prepared_reference: prepared.prepared_reference().clone(),
         }
     );
@@ -220,8 +221,10 @@ fn sampling_rejects_same_id_with_a_different_reference_fingerprint_before_rng() 
     let sampled_reference = reference_with_distinct_tail();
     assert_eq!(prepared_reference.id(), sampled_reference.id());
     assert_ne!(
-        PreparedReferenceIdentity::from_reference(&prepared_reference),
-        PreparedReferenceIdentity::from_reference(&sampled_reference),
+        PreparedReferenceIdentity::from_reference(&prepared_reference)
+            .expect("bases materializadas"),
+        PreparedReferenceIdentity::from_reference(&sampled_reference)
+            .expect("bases materializadas"),
         "a base outside the sampled locus still changes the canonical reference fingerprint"
     );
 
@@ -235,7 +238,8 @@ fn sampling_rejects_same_id_with_a_different_reference_fingerprint_before_rng() 
         error,
         InitialGenotypeSamplingError::ReferenceMismatch {
             configured_reference_id: "ref-main".to_owned(),
-            sampled_reference: PreparedReferenceIdentity::from_reference(&sampled_reference),
+            sampled_reference: PreparedReferenceIdentity::from_reference(&sampled_reference)
+                .expect("bases materializadas"),
             prepared_reference: prepared.prepared_reference().clone(),
         }
     );

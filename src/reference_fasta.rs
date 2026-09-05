@@ -15,6 +15,7 @@ use crate::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceError, ReferenceIndex, ReferenceIndexKind,
     ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
+use sha2::{Digest, Sha256};
 
 pub const CANONICAL_FASTA_VERSION: &str = "1";
 pub const CANONICAL_LINE_BASE_COUNT: usize = 80;
@@ -35,6 +36,17 @@ pub struct ValidatedSuppliedReference {
 }
 
 impl ValidatedSuppliedReference {
+    /// Reúne una referencia ya construida con la identidad observada del FASTA
+    /// del que procede. Permite entregar una referencia cuyo catálogo se validó
+    /// sin conservar las bases.
+    #[must_use]
+    pub const fn from_parts(reference: Reference, source_identity: ArtifactIdentity) -> Self {
+        Self {
+            reference,
+            source_identity,
+        }
+    }
+
     #[must_use]
     pub const fn reference(&self) -> &Reference {
         &self.reference
@@ -488,7 +500,13 @@ pub fn write_generated_fasta(
         .build_from_writer(destination);
     for sequence in reference.sequences() {
         let definition = fasta::record::Definition::new(sequence.id().as_str(), None);
-        let bases = fasta::record::Sequence::from(sequence.sequence().as_bytes().to_vec());
+        let bases = fasta::record::Sequence::from(
+            sequence
+                .sequence()
+                .as_bytes()
+                .map_err(|error| reference_error(Path::new("reference.fa"), error))?
+                .to_vec(),
+        );
         writer
             .write_record(&fasta::Record::new(definition, bases))
             .map_err(|error| {
@@ -543,6 +561,7 @@ impl SequenceSummary {
 pub struct ValidatedFastaSummary {
     sequences: Vec<SequenceSummary>,
     source_identity: ArtifactIdentity,
+    content_sha256: String,
 }
 
 impl ValidatedFastaSummary {
@@ -555,6 +574,49 @@ impl ValidatedFastaSummary {
     pub const fn source_identity(&self) -> &ArtifactIdentity {
         &self.source_identity
     }
+
+    /// Huella canónica del contenido, calculada en la misma pasada que valida
+    /// las bases. Reproduce el algoritmo de `reference_content_sha256`, que no
+    /// puede aplicarse sobre una referencia sin bases materializadas.
+    #[must_use]
+    pub fn content_sha256(&self) -> &str {
+        &self.content_sha256
+    }
+}
+
+/// Construye una referencia a partir de un catálogo validado sin bases.
+///
+/// Cada secuencia conserva su ficha —identificador, clase, cabecera, longitud y
+/// recuento de bases desconocidas— y declara que sus bases no se
+/// materializaron. Sirve a la ejecución que solo deriva referencias reducidas:
+/// planifica con el catálogo y pide después los tramos por índice.
+pub fn reference_from_summary(
+    summary: &ValidatedFastaSummary,
+    reference_id: &str,
+    origin: crate::reference::ReferenceOrigin,
+) -> Result<Reference, Diagnostic> {
+    let mut sequences = Vec::with_capacity(summary.sequences().len());
+    for entry in summary.sequences() {
+        let bases = DnaSequence::summary(entry.length(), entry.unknown_base_count())
+            .map_err(|error| reference_error(Path::new("reference.fa"), error))?;
+        sequences.push(
+            ReferenceSequence::from_owned(
+                entry.id().clone(),
+                entry.header().clone(),
+                entry.class(),
+                bases,
+            )
+            .map_err(|error| reference_error(Path::new("reference.fa"), error))?,
+        );
+    }
+    let mut reference = Reference::new(
+        ReferenceId::parse(reference_id, "execution")?,
+        origin,
+        sequences,
+    )
+    .map_err(|error| reference_error(Path::new("reference.fa"), error))?;
+    reference.bind_content_sha256(summary.content_sha256().to_owned());
+    Ok(reference)
 }
 
 /// Valida un FASTA suministrado sin retener sus bases.
@@ -598,6 +660,18 @@ pub fn validate_supplied_fasta_summary(
     let mut line = Vec::new();
     let mut line_number = 0_u64;
     let mut pending: Option<(FastaHeader, u64, u64, u64)> = None;
+    // Reproduce el algoritmo de `reference_content_sha256` sobre las bases que
+    // van pasando, para no tener que conservarlas solo por su huella.
+    let mut content = <Sha256 as Digest>::new();
+    content.update(b"genome_population_simulator/reference-content/v1\0");
+    content.update(
+        u64::try_from(reference_id.len())
+            .map_err(|_| internal_error("reference identifier length exceeds u64"))?
+            .to_be_bytes(),
+    );
+    content.update(reference_id.as_bytes());
+    let mut sequence_started = false;
+    let mut normalized = Vec::new();
 
     loop {
         line.clear();
@@ -631,11 +705,29 @@ pub fn validate_supplied_fasta_summary(
                 )?);
             }
             let header = parse_header_with_noodles(read_path, &raw_header, line_number)?;
+            let expectation = expectations.get(header.id_text()).ok_or_else(|| {
+                configuration_mismatch(
+                    read_path,
+                    "reference.sequences.id",
+                    format!("el FASTA contiene el ID no declarado {}", header.id_text()),
+                )
+            })?;
+            content.update(
+                u64::try_from(expectation.id.len())
+                    .map_err(|_| internal_error("sequence identifier length exceeds u64"))?
+                    .to_be_bytes(),
+            );
+            content.update(expectation.id.as_bytes());
+            content.update(expectation.length.to_be_bytes());
+            sequence_started = true;
             pending = Some((header, 0, 0, line_number));
         } else {
             let Some((header, length, unknown, _)) = pending.as_mut() else {
                 return Err(empty_header(read_path, line_number));
             };
+            // La huella canónica se calcula sobre las bases normalizadas, no
+            // sobre los bytes tal como vienen del fichero.
+            normalized.clear();
             for raw in &line {
                 let base = raw.to_ascii_uppercase();
                 if !matches!(base, b'A' | b'C' | b'G' | b'T' | b'N') {
@@ -652,6 +744,10 @@ pub fn validate_supplied_fasta_summary(
                 *length = length
                     .checked_add(1)
                     .ok_or_else(|| internal_error("FASTA sequence length exceeds u64"))?;
+                normalized.push(base);
+            }
+            if sequence_started {
+                content.update(&normalized);
             }
         }
     }
@@ -688,6 +784,7 @@ pub fn validate_supplied_fasta_summary(
     Ok(ValidatedFastaSummary {
         sequences,
         source_identity,
+        content_sha256: format!("{:x}", content.finalize()),
     })
 }
 

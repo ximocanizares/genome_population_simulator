@@ -9,6 +9,8 @@ use crate::segments::{CanonicalBase, CurrentIndelPiece, CurrentSourcePiece};
 /// Error al reconstruir una copia desde sus segmentos y una referencia concreta.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MaterializationError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     CopyReferenceMismatch,
     SourceReferenceMismatch,
     SourceSequenceMismatch,
@@ -243,6 +245,7 @@ fn append_source_interval(
         sequence
             .sequence()
             .as_bytes()
+            .map_err(|_| MaterializationError::BasesNotMaterialized)?
             .get(start_index..end_index)
             .ok_or(MaterializationError::IndexOverflow)?,
     );
@@ -311,11 +314,20 @@ fn materialize_current_source(
     for snp in source.snps() {
         append_source(
             destination,
-            sequence.sequence().as_bytes(),
+            sequence
+                .sequence()
+                .as_bytes()
+                .map_err(|_| MaterializationError::BasesNotMaterialized)?,
             cursor,
             snp.position().offset(),
         )?;
-        let found = byte_at(sequence.sequence().as_bytes(), snp.position().offset())?;
+        let found = byte_at(
+            sequence
+                .sequence()
+                .as_bytes()
+                .map_err(|_| MaterializationError::BasesNotMaterialized)?,
+            snp.position().offset(),
+        )?;
         if found != snp.reference().as_byte() {
             return Err(MaterializationError::SnpReferenceMismatch {
                 position: snp.position().offset(),
@@ -332,7 +344,10 @@ fn materialize_current_source(
     }
     append_source(
         destination,
-        sequence.sequence().as_bytes(),
+        sequence
+            .sequence()
+            .as_bytes()
+            .map_err(|_| MaterializationError::BasesNotMaterialized)?,
         cursor,
         source.source().end(),
     )
@@ -358,8 +373,13 @@ pub fn derive_snp_genotype(
             found: locus.position.sequence_length(),
         });
     }
-    let reference_base = byte_at(sequence.sequence().as_bytes(), locus.position.offset())
-        .map_err(GenotypeQueryError::Materialization)?;
+    let reference_base = byte_at(
+        sequence.sequence().as_bytes().map_err(|_| {
+            GenotypeQueryError::Materialization(MaterializationError::BasesNotMaterialized)
+        })?,
+        locus.position.offset(),
+    )
+    .map_err(GenotypeQueryError::Materialization)?;
     if reference_base != locus.reference.as_byte() {
         return Err(GenotypeQueryError::ReferenceBaseMismatch {
             expected: locus.reference,

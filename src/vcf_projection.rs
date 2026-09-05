@@ -211,11 +211,22 @@ impl Ord for ProjectedAlternateValue<'_> {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VcfProjectionError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     Truth(TruthValidationError),
-    MissingReferenceSequence { sequence_id: String },
-    SourceOutsideReference { copy: CopyIdentity },
-    NonCollinearSourcePieces { copy: CopyIdentity },
-    CannotAnchor { sequence_id: String, position: u64 },
+    MissingReferenceSequence {
+        sequence_id: String,
+    },
+    SourceOutsideReference {
+        copy: CopyIdentity,
+    },
+    NonCollinearSourcePieces {
+        copy: CopyIdentity,
+    },
+    CannotAnchor {
+        sequence_id: String,
+        position: u64,
+    },
     CoordinateOverflow,
 }
 
@@ -455,8 +466,13 @@ impl<'truth> CopyPath<'truth> {
                     let local_end = usize::try_from(window_end)
                         .map_err(|_| VcfProjectionError::CoordinateOverflow)?;
                     let offset = output.len();
-                    output
-                        .extend_from_slice(&sequence.sequence().as_bytes()[local_start..local_end]);
+                    output.extend_from_slice(
+                        &sequence
+                            .sequence()
+                            .as_bytes()
+                            .map_err(|_| VcfProjectionError::BasesNotMaterialized)?
+                            [local_start..local_end],
+                    );
                     for snp in *snps {
                         if window_start <= snp.position && snp.position < window_end {
                             let relative = usize::try_from(snp.position - window_start)
@@ -768,7 +784,10 @@ fn normalize_path_window<'truth>(
     {
         return normalize_direct_insertion(path, sequence, span, bases).map(Some);
     }
-    let reference_bases = sequence.sequence().as_bytes();
+    let reference_bases = sequence
+        .sequence()
+        .as_bytes()
+        .map_err(|_| VcfProjectionError::BasesNotMaterialized)?;
     let mut start = span.start;
     let end = span.end;
     let mut reference = reference_bases[usize::try_from(start)
@@ -825,7 +844,10 @@ fn normalize_direct_insertion<'truth>(
                 sequence_id: path.sequence_id.to_owned(),
                 position: span.start,
             })?;
-    let reference_bases = sequence.sequence().as_bytes();
+    let reference_bases = sequence
+        .sequence()
+        .as_bytes()
+        .map_err(|_| VcfProjectionError::BasesNotMaterialized)?;
     let mut anchor = reference_bases
         [usize::try_from(position).map_err(|_| VcfProjectionError::CoordinateOverflow)?];
     let initial_anchor = anchor;
@@ -988,7 +1010,7 @@ mod tests {
                 schema_version: TRUTH_SCHEMA_VERSION.into(),
                 execution_id: "RUN_01".into(),
                 reference_id: "REF_main".into(),
-                reference_content_sha256: reference_content_sha256(reference),
+                reference_content_sha256: reference_content_sha256(reference).expect("huella"),
                 coordinate_convention: TRUTH_COORDINATE_CONVENTION.into(),
                 copy_count: u64::try_from(copies.len()).expect("count"),
                 genotype_count: 0,

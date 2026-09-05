@@ -22,10 +22,18 @@ pub enum AlphabetValidation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReferenceError {
     EmptyDnaSequence,
-    InvalidDnaSymbol { position: u64, symbol: u8 },
+    /// Se pidieron las bases de una secuencia validada sin conservarlas.
+    BasesNotMaterialized,
+    InvalidDnaSymbol {
+        position: u64,
+        symbol: u8,
+    },
     EmptyHeaderId,
     NonUtf8HeaderId,
-    HeaderIdMismatch { expected: String, found: String },
+    HeaderIdMismatch {
+        expected: String,
+        found: String,
+    },
     EmptyReference,
     DuplicateSequenceId(String),
     LengthOverflow,
@@ -37,7 +45,15 @@ pub enum ReferenceError {
 /// Secuencia validada, normalizada solo en la representación interna.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DnaSequence {
-    bases: Vec<u8>,
+    /// Bases materializadas, o `None` cuando solo se validó la ficha.
+    ///
+    /// Una ejecución que solo deriva referencias reducidas valida el FASTA de
+    /// partida sin conservarlo: le bastan la longitud y el recuento de bases
+    /// desconocidas, y pide después por índice los tramos que necesita.
+    /// Separar la ficha de las bases impide que un consumidor use unas bases
+    /// que nunca se cargaron.
+    bases: Option<Vec<u8>>,
+    length: u64,
     unknown_base_count: u64,
 }
 
@@ -72,25 +88,50 @@ impl DnaSequence {
             *raw = base;
         }
 
+        let length = u64::try_from(bases.len()).map_err(|_| ReferenceError::LengthOverflow)?;
         Ok(Self {
-            bases,
+            bases: Some(bases),
+            length,
             unknown_base_count,
         })
     }
 
+    /// Ficha de una secuencia validada cuyas bases no se conservaron.
+    pub(crate) const fn summary(
+        length: u64,
+        unknown_base_count: u64,
+    ) -> Result<Self, ReferenceError> {
+        if length == 0 {
+            return Err(ReferenceError::EmptyDnaSequence);
+        }
+        Ok(Self {
+            bases: None,
+            length,
+            unknown_base_count,
+        })
+    }
+
+    /// Bases de la secuencia, cuando se materializaron.
+    pub fn as_bytes(&self) -> Result<&[u8], ReferenceError> {
+        self.bases
+            .as_deref()
+            .ok_or(ReferenceError::BasesNotMaterialized)
+    }
+
+    /// Indica si las bases están disponibles sin intentar leerlas.
     #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.bases
+    pub const fn is_materialized(&self) -> bool {
+        self.bases.is_some()
     }
 
     #[must_use]
-    pub fn len(&self) -> u64 {
-        u64::try_from(self.bases.len()).unwrap_or(u64::MAX)
+    pub const fn len(&self) -> u64 {
+        self.length
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.bases.is_empty()
+    pub const fn is_empty(&self) -> bool {
+        self.length == 0
     }
 
     #[must_use]
@@ -329,6 +370,8 @@ pub struct Reference {
     indexes: Vec<ReferenceIndex>,
     authoritative_resource: Option<PathBuf>,
     total_length: u64,
+    /// Huella del contenido calculada al validar sin conservar las bases.
+    content_sha256: Option<String>,
 }
 
 impl Reference {
@@ -355,6 +398,7 @@ impl Reference {
         Ok(Self {
             id,
             origin,
+            content_sha256: None,
             sequences,
             indexes: Vec::new(),
             authoritative_resource: None,
@@ -388,6 +432,16 @@ impl Reference {
     }
 
     #[must_use]
+    /// Huella del contenido, si se calculó al validar sin conservar las bases.
+    pub fn content_sha256(&self) -> Option<&str> {
+        self.content_sha256.as_deref()
+    }
+
+    /// Fija la huella calculada durante una validación sin bases.
+    pub fn bind_content_sha256(&mut self, digest: String) {
+        self.content_sha256 = Some(digest);
+    }
+
     pub fn authoritative_resource(&self) -> Option<&Path> {
         self.authoritative_resource.as_deref()
     }
@@ -437,7 +491,7 @@ mod tests {
     #[test]
     fn owned_dna_constructor_normalizes_in_place_and_counts_unknown_bases() {
         let sequence = DnaSequence::try_from_owned_bytes(b"aCnTn".to_vec()).expect("valid DNA");
-        assert_eq!(sequence.as_bytes(), b"ACNTN");
+        assert_eq!(sequence.as_bytes().expect("bases"), b"ACNTN");
         assert_eq!(sequence.unknown_base_count(), 2);
     }
 

@@ -40,6 +40,8 @@ pub struct GroupedVcfRecord {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VcfGroupingError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     Truth(TruthValidationError),
     UnknownCopy {
         copy: CopyIdentity,
@@ -352,14 +354,18 @@ fn validate_normalized_allele(
     let end_usize = usize::try_from(end).ok();
     let Some((start, end)) = start
         .zip(end_usize)
-        .filter(|(_, end)| *end <= sequence.sequence().as_bytes().len())
+        .filter(|(_, end)| *end <= sequence.length() as usize)
     else {
         return Err(VcfGroupingError::ReferenceOutOfBounds {
             sequence_id: allele.sequence_id.clone(),
             position: allele.position,
         });
     };
-    if sequence.sequence().as_bytes()[start..end] != *allele.reference.as_bytes() {
+    let bases = sequence
+        .sequence()
+        .as_bytes()
+        .map_err(|_| VcfGroupingError::BasesNotMaterialized)?;
+    if bases[start..end] != *allele.reference.as_bytes() {
         return Err(VcfGroupingError::ReferenceMismatch {
             sequence_id: allele.sequence_id.clone(),
             position: allele.position,
@@ -416,14 +422,18 @@ fn validate_projected_allele(
     let Some((start, end)) = usize::try_from(allele.position)
         .ok()
         .zip(usize::try_from(end).ok())
-        .filter(|(_, end)| *end <= sequence.sequence().as_bytes().len())
+        .filter(|(_, end)| *end <= sequence.length() as usize)
     else {
         return Err(VcfGroupingError::ReferenceOutOfBounds {
             sequence_id: allele.sequence_id.to_owned(),
             position: allele.position,
         });
     };
-    if sequence.sequence().as_bytes()[start..end] != *allele.reference.as_bytes() {
+    let bases = sequence
+        .sequence()
+        .as_bytes()
+        .map_err(|_| VcfGroupingError::BasesNotMaterialized)?;
+    if bases[start..end] != *allele.reference.as_bytes() {
         return Err(VcfGroupingError::ReferenceMismatch {
             sequence_id: allele.sequence_id.to_owned(),
             position: allele.position,
@@ -904,7 +914,7 @@ mod tests {
                 schema_version: TRUTH_SCHEMA_VERSION.into(),
                 execution_id: "RUN_01".into(),
                 reference_id: "REF_main".into(),
-                reference_content_sha256: reference_content_sha256(reference),
+                reference_content_sha256: reference_content_sha256(reference).expect("huella"),
                 coordinate_convention: TRUTH_COORDINATE_CONVENTION.into(),
                 copy_count: 2,
                 genotype_count: 2,
@@ -1050,7 +1060,7 @@ mod tests {
                 schema_version: TRUTH_SCHEMA_VERSION.into(),
                 execution_id: "RUN_01".into(),
                 reference_id: "REF_main".into(),
-                reference_content_sha256: reference_content_sha256(&reference),
+                reference_content_sha256: reference_content_sha256(&reference).expect("huella"),
                 coordinate_convention: TRUTH_COORDINATE_CONVENTION.into(),
                 copy_count: 1,
                 genotype_count: 2,

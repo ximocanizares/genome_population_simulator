@@ -43,8 +43,9 @@ use crate::population_snvs::{
 use crate::publication::ExecutionWorkspace;
 use crate::reference::Reference;
 use crate::reference_fasta::{
-    SequenceExpectation, ValidatedSuppliedReference, validate_supplied_fasta,
-    validate_supplied_fasta_with_origin, write_generated_fasta,
+    SequenceExpectation, ValidatedSuppliedReference, reference_from_summary,
+    validate_supplied_fasta, validate_supplied_fasta_summary, validate_supplied_fasta_with_origin,
+    write_generated_fasta,
 };
 use crate::reference_generation::{
     BaseFrequency, GeneratedSequenceSpec, generate_reference_with_unknown_fraction,
@@ -54,9 +55,8 @@ use crate::reference_reduction::{
     preflight_reduced_reference, select_reduced_reference,
 };
 use crate::reference_reduction_io::{
-    MaterializedSource, REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION,
-    ReductionMapParameters, build_reduced_reference, reduction_map_document,
-    validate_reduction_map_document,
+    REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
+    build_reduced_reference, reduction_map_document, source_for, validate_reduction_map_document,
 };
 use crate::results::{
     ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestEventLink,
@@ -213,7 +213,8 @@ fn execute_validated_config_with_effective_document(
         }
         // A partir de aquí la copia recargada es la única autoridad para
         // seleccionar intervalos y materializar bases derivadas.
-        let prepared_reductions = prepare_reductions(effective, reference)?;
+        let source_fasta = workspace.root().join(&source_artifact.path);
+        let prepared_reductions = prepare_reductions(effective, reference, &source_fasta)?;
         manifest_reductions = manifest_reduction_links(effective, &prepared_reductions);
         for reduction in &mut manifest_reductions {
             reduction.source_fasta_artifact_id = Some(source_artifact.id.clone());
@@ -273,7 +274,7 @@ fn execute_validated_config_with_effective_document(
                     .with("detail", error.to_string())
                 })?;
                 validate_reduction_map_document(
-                    &MaterializedSource::new(reference_output.reference),
+                    source_for(reference_output.reference, Some(&source_fasta))?.as_ref(),
                     &authoritative_derived,
                     &reparsed,
                     ReductionMapParameters {
@@ -513,6 +514,20 @@ fn write_execution_truth(
     Ok(document)
 }
 
+/// Huella del contenido de la referencia.
+///
+/// Cuando se validó sin conservar las bases, la huella se calculó durante esa
+/// misma pasada y viaja con ella: recalcularla exigiría volver a leer el FASTA.
+fn reference_content_digest(reference: &Reference) -> Result<String, Diagnostic> {
+    reference.content_sha256().map_or_else(
+        || {
+            reference_content_sha256(reference)
+                .map_err(|error| internal("truth_reference_digest", format!("{error:?}")))
+        },
+        |digest| Ok(digest.to_owned()),
+    )
+}
+
 fn empty_truth_document(
     execution_id: &str,
     reference: &Reference,
@@ -561,7 +576,7 @@ fn empty_truth_document(
             schema_version: TRUTH_SCHEMA_VERSION.to_owned(),
             execution_id: execution_id.to_owned(),
             reference_id: reference.id().as_str().to_owned(),
-            reference_content_sha256: reference_content_sha256(reference),
+            reference_content_sha256: reference_content_digest(reference)?,
             coordinate_convention: TRUTH_COORDINATE_CONVENTION.to_owned(),
             copy_count: 0,
             genotype_count: 0,
@@ -1820,8 +1835,48 @@ fn manifest_reduction_links(
         .collect()
 }
 
+/// Indica si la configuración necesita las bases de la referencia principal.
+///
+/// Una reducción no las necesita para planificar: le bastan identificador,
+/// clase y longitud, y pide después los tramos elegidos. Cualquier otra salida
+/// —matriz SNV, individuos, eventos directos, evento técnico o VCF— trabaja
+/// sobre la secuencia y obliga a materializarla.
+fn requires_materialized_bases(effective: &EffectiveConfig) -> bool {
+    effective.population_snvs().is_some()
+        || !effective.initial_populations().is_empty()
+        || !effective.direct_events().is_empty()
+        || effective.technical_event().is_some()
+        || effective.vcf_output().is_some()
+}
+
 fn prepare_reference(effective: &EffectiveConfig) -> Result<PreparedReference, Diagnostic> {
     match effective.reference_source() {
+        // Una ejecución que solo deriva referencias reducidas no necesita las
+        // bases del genoma de partida: planifica con el catálogo y pide después
+        // los tramos del plan. Validarlo sin retenerlas mantiene la memoria
+        // independiente del tamaño de ese genoma.
+        EffectiveReferenceSource::Supplied { original_path }
+            if !requires_materialized_bases(effective) =>
+        {
+            let summary = validate_supplied_fasta_summary(
+                original_path,
+                effective.reference_id(),
+                &sequence_expectations(effective),
+            )?;
+            let reference = reference_from_summary(
+                &summary,
+                effective.reference_id(),
+                crate::reference::ReferenceOrigin::Supplied {
+                    original_path: original_path.clone(),
+                },
+            )?;
+            Ok(PreparedReference::Supplied(
+                ValidatedSuppliedReference::from_parts(
+                    reference,
+                    summary.source_identity().clone(),
+                ),
+            ))
+        }
         EffectiveReferenceSource::Supplied { original_path } => validate_supplied_fasta(
             original_path,
             effective.reference_id(),
@@ -1864,6 +1919,7 @@ fn prepare_reference(effective: &EffectiveConfig) -> Result<PreparedReference, D
 fn prepare_reductions(
     effective: &EffectiveConfig,
     source: &Reference,
+    source_fasta: &Path,
 ) -> Result<Vec<PreparedReduction>, Diagnostic> {
     let eligible = eligible_sequences(source, effective)?;
     let mut prepared = Vec::with_capacity(effective.reduced_references().len());
@@ -1880,7 +1936,8 @@ fn prepare_reductions(
         let derived_id = ReferenceId::parse(reduction.id(), "execution")?;
         let plan = materialize_selection(&selection, &derived_id, &eligible)
             .map_err(|error| reduction_error(reduction.id(), effective, error))?;
-        let reference = build_reduced_reference(&MaterializedSource::new(source), &plan)?;
+        let source_bases = source_for(source, Some(source_fasta))?;
+        let reference = build_reduced_reference(source_bases.as_ref(), &plan)?;
         prepared.push(PreparedReduction { reference, plan });
     }
     Ok(prepared)
@@ -1938,12 +1995,33 @@ fn load_authoritative_reference(
     drop(prepared);
     let mut authoritative = match (effective.reference_source(), prepared_was_supplied) {
         (EffectiveReferenceSource::Supplied { original_path }, true) => {
-            let supplied = validate_supplied_fasta_with_origin(
-                &workspace.root().join(&artifact.path),
-                original_path,
-                effective.reference_id(),
-                &sequence_expectations(effective),
-            )?;
+            let physical_path = workspace.root().join(&artifact.path);
+            // La copia publicada se relee para comprobar que coincide con lo
+            // catalogado. Cuando la configuración no necesita las bases basta el
+            // catálogo: releerlas solo para descartarlas volvería a atar la
+            // memoria al tamaño del genoma.
+            let supplied = if requires_materialized_bases(effective) {
+                validate_supplied_fasta_with_origin(
+                    &physical_path,
+                    original_path,
+                    effective.reference_id(),
+                    &sequence_expectations(effective),
+                )?
+            } else {
+                let summary = validate_supplied_fasta_summary(
+                    &physical_path,
+                    effective.reference_id(),
+                    &sequence_expectations(effective),
+                )?;
+                let reference = reference_from_summary(
+                    &summary,
+                    effective.reference_id(),
+                    crate::reference::ReferenceOrigin::Supplied {
+                        original_path: original_path.clone(),
+                    },
+                )?;
+                ValidatedSuppliedReference::from_parts(reference, summary.source_identity().clone())
+            };
             if supplied.source_identity().size_bytes() != artifact.size_bytes
                 || supplied.source_identity().digest() != artifact.digest
             {
@@ -2554,11 +2632,24 @@ i5 = "TGCATGCA"
                 let reference = supplied.reference();
                 let mut sequences = reference.sequences().to_vec();
                 let first = &sequences[0];
-                let mut bases = first.sequence().as_bytes().to_vec();
-                for base in &mut bases {
-                    *base = if *base == b'N' { b'N' } else { b'A' };
-                }
-                let dna = DnaSequence::try_from_bytes(&bases)
+                // La referencia de un escenario que solo deriva reducciones se
+                // valida sin conservar las bases, así que el objeto obsoleto se
+                // fabrica alterando la ficha: si la selección lo usara en lugar
+                // de la copia recargada, el recuento falseado llegaría a la
+                // configuración efectiva y su validación física lo rechazaría.
+                let dna = first
+                    .sequence()
+                    .as_bytes()
+                    .map_or_else(
+                        |_| DnaSequence::summary(first.length(), first.unknown_base_count() + 1),
+                        |bases| {
+                            let stale = bases
+                                .iter()
+                                .map(|base| if *base == b'N' { b'N' } else { b'A' })
+                                .collect::<Vec<_>>();
+                            DnaSequence::try_from_bytes(&stale)
+                        },
+                    )
                     .map_err(|error| internal("test_stale_origin_dna", error))?;
                 sequences[0] = ReferenceSequence::new(
                     first.id().clone(),

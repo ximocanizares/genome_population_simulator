@@ -58,7 +58,10 @@ fn snp(
 ) -> TargetedSnp {
     let sequence = &reference.sequences()[0];
     let reference_base = CanonicalBase::from_byte(
-        sequence.sequence().as_bytes()[usize::try_from(offset).expect("offset")],
+        sequence
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas")[usize::try_from(offset).expect("offset")],
     )
     .expect("canonical base");
     TargetedSnp::new(

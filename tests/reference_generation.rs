@@ -36,8 +36,20 @@ fn generated_reference_respects_order_lengths_classes_and_degenerate_composition
     .expect("generated reference");
 
     assert_eq!(reference.total_length(), 8);
-    assert_eq!(reference.sequences()[0].sequence().as_bytes(), b"AAAAA");
-    assert_eq!(reference.sequences()[1].sequence().as_bytes(), b"AAA");
+    assert_eq!(
+        reference.sequences()[0]
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas"),
+        b"AAAAA"
+    );
+    assert_eq!(
+        reference.sequences()[1]
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas"),
+        b"AAA"
+    );
     assert_eq!(reference.sequences()[1].class(), SequenceClass::Scaffold);
     assert_eq!(reference.sequences()[0].unknown_base_count(), 0);
 }
@@ -60,9 +72,24 @@ fn generated_reference_is_repeated_by_seed_and_changes_with_another_seed() {
     )
     .unwrap();
 
-    let first = first.sequences()[0].sequence().as_bytes();
-    assert_eq!(first, repeated.sequences()[0].sequence().as_bytes());
-    assert_ne!(first, changed.sequences()[0].sequence().as_bytes());
+    let first = first.sequences()[0]
+        .sequence()
+        .as_bytes()
+        .expect("bases materializadas");
+    assert_eq!(
+        first,
+        repeated.sequences()[0]
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas")
+    );
+    assert_ne!(
+        first,
+        changed.sequences()[0]
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas")
+    );
     assert_eq!(first, b"CCCATGGGGAGGTCTAATCCAAGCGACTTACA");
     assert!(
         first
@@ -139,7 +166,10 @@ fn generated_reference_can_mark_an_independent_fraction_as_unknown() {
     .expect("generated reference with unknown bases");
 
     assert_eq!(
-        reference.sequences()[0].sequence().as_bytes(),
+        reference.sequences()[0]
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas"),
         b"NNNNNNNNNNNNNNNN"
     );
     assert_eq!(reference.sequences()[0].unknown_base_count(), 16);

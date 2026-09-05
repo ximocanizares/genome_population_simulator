@@ -31,7 +31,13 @@ fn supplied_fasta_preserves_n_case_crlf_and_non_utf8_header_bytes() {
     let validated =
         validate_supplied_fasta(&path, "ref-main", &expected).expect("valid supplied FASTA");
     let sequences = validated.reference().sequences();
-    assert_eq!(sequences[0].sequence().as_bytes(), b"ACGTN");
+    assert_eq!(
+        sequences[0]
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas"),
+        b"ACGTN"
+    );
     assert_eq!(sequences[0].header().raw_bytes(), b"chr1 description \xff");
     assert!(matches!(
         sequences[0].header().description(),

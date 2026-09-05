@@ -62,11 +62,15 @@ pub struct TruthProjectionInput<'a> {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TruthProjectionError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     MissingMatrix,
     MatrixReferenceMismatch,
     MatrixSourceMismatch,
     MissingDigest(TruthSourceRef),
-    InvalidUtf8Insertion { event_id: String },
+    InvalidUtf8Insertion {
+        event_id: String,
+    },
     Genotype(GenotypeQueryError),
     Materialization(MaterializationError),
     DuplicateCaseId(String),
@@ -151,7 +155,8 @@ pub fn project_truth(
             schema_version: TRUTH_SCHEMA_VERSION.to_owned(),
             execution_id: input.execution_id.to_owned(),
             reference_id: input.reference.id().as_str().to_owned(),
-            reference_content_sha256: reference_content_sha256(input.reference),
+            reference_content_sha256: reference_content_sha256(input.reference)
+                .map_err(|_| TruthProjectionError::BasesNotMaterialized)?,
             coordinate_convention: TRUTH_COORDINATE_CONVENTION.to_owned(),
             copy_count: u64::try_from(copy_count).expect("record count fits u64"),
             genotype_count: u64::try_from(genotype_count).expect("record count fits u64"),
@@ -1730,7 +1735,7 @@ genotype_model = "hwe""#
         .expect("F2.3 projection");
         assert_eq!(
             document.header.reference_content_sha256,
-            reference_content_sha256(&reference)
+            reference_content_sha256(&reference).expect("huella")
         );
         let mut bytes = Vec::new();
         write_truth_jsonl(&document, &mut bytes).expect("truth writer");

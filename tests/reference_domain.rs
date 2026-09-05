@@ -11,7 +11,10 @@ use genome_population_simulator::reference::{
 fn dna_accepts_both_cases_and_normalizes_only_the_internal_value() {
     let sequence = DnaSequence::try_from_bytes(b"aCgTnN").expect("valid DNA");
 
-    assert_eq!(sequence.as_bytes(), b"ACGTNN");
+    assert_eq!(
+        sequence.as_bytes().expect("bases materializadas"),
+        b"ACGTNN"
+    );
     assert_eq!(sequence.unknown_base_count(), 2);
     assert_eq!(
         sequence.validation(),
@@ -75,7 +78,13 @@ fn fasta_header_preserves_description_boundary_whitespace_reversibly() {
 fn reference_sequence_retains_the_validated_normalized_bases() {
     let sequence = sequence("chr1", SequenceClass::Chromosome, b"aCgTn");
 
-    assert_eq!(sequence.sequence().as_bytes(), b"ACGTN");
+    assert_eq!(
+        sequence
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas"),
+        b"ACGTN"
+    );
     assert_eq!(sequence.length(), 5);
     assert_eq!(sequence.unknown_base_count(), 1);
 }

@@ -152,6 +152,8 @@ impl InitialIndividualIntegration {
 /// Rechazo previo a cualquier cambio de la copia individual.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InitialIndividualIntegrationError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     IndividualReferenceMismatch,
     MatrixReferenceMismatch {
         matrix_reference: PreparedReferenceIdentity,
@@ -264,7 +266,8 @@ fn preflight_references(
     if individual.reference_id() != reference.id() {
         return Err(InitialIndividualIntegrationError::IndividualReferenceMismatch);
     }
-    let supplied_reference = PreparedReferenceIdentity::from_reference(reference);
+    let supplied_reference = PreparedReferenceIdentity::from_reference(reference)
+        .map_err(|_| InitialIndividualIntegrationError::BasesNotMaterialized)?;
     if matrix.prepared_reference() != &supplied_reference {
         return Err(InitialIndividualIntegrationError::MatrixReferenceMismatch {
             matrix_reference: matrix.prepared_reference().clone(),

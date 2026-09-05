@@ -82,7 +82,10 @@ fn differentiated_truth_state(reference: &Reference) -> Individual {
     let applications = [10_u64, 35, 60, 85, 110, 135]
         .into_iter()
         .map(|offset| {
-            let base = sequence.sequence().as_bytes()[usize::try_from(offset).expect("offset")];
+            let base = sequence
+                .sequence()
+                .as_bytes()
+                .expect("bases materializadas")[usize::try_from(offset).expect("offset")];
             let locus = SnpLocus::new(
                 BasePosition::new(
                     reference.id().clone(),

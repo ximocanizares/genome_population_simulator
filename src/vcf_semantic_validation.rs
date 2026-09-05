@@ -20,10 +20,20 @@ use crate::truth_validation::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VcfSemanticValidationError {
-    Io { path: String, detail: String },
-    Fasta { detail: String },
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
+    Io {
+        path: String,
+        detail: String,
+    },
+    Fasta {
+        detail: String,
+    },
     Truth(TruthValidationError),
-    Vcf { line: u64, detail: String },
+    Vcf {
+        line: u64,
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for VcfSemanticValidationError {
@@ -365,7 +375,10 @@ fn expected_records(
             oracle_path(
                 copy.identity.clone(),
                 &copy.current_pieces,
-                sequence.sequence().as_bytes(),
+                sequence
+                    .sequence()
+                    .as_bytes()
+                    .map_err(|_| VcfSemanticValidationError::BasesNotMaterialized)?,
             )?,
         ));
     }
@@ -391,7 +404,10 @@ fn expected_records(
         {
             alleles.extend(normalize_oracle_components(
                 path,
-                sequence.sequence().as_bytes(),
+                sequence
+                    .sequence()
+                    .as_bytes()
+                    .map_err(|_| VcfSemanticValidationError::BasesNotMaterialized)?,
                 &components,
             )?);
         }
@@ -979,10 +995,13 @@ fn validate_reference_allele(
         .checked_sub(1)
         .and_then(|value| usize::try_from(value).ok());
     let end = start.and_then(|start| start.checked_add(allele.len()));
-    if start
-        .zip(end)
-        .and_then(|(start, end)| sequence.sequence().as_bytes().get(start..end))
-        != Some(allele.as_bytes())
+    if start.zip(end).and_then(|(start, end)| {
+        sequence
+            .sequence()
+            .as_bytes()
+            .ok()
+            .and_then(|bases| bases.get(start..end))
+    }) != Some(allele.as_bytes())
     {
         return vcf_error(line, "REF no coincide con el FASTA autoritativo");
     }

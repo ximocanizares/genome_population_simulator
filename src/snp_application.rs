@@ -195,6 +195,8 @@ impl TargetedSnp {
 /// Rechazo de construcción, preflight o aplicación de SNP.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SnpApplicationError {
+    /// Se pidieron bases de una referencia validada sin conservarlas.
+    BasesNotMaterialized,
     InvalidMatrixVariantId {
         detail: String,
     },
@@ -353,13 +355,17 @@ fn validate_reference_base(
             found: b'?',
         }
     })?;
-    let found = sequence.sequence().as_bytes().get(offset).copied().ok_or(
-        SnpApplicationError::ReferenceBaseMismatch {
+    let found = sequence
+        .sequence()
+        .as_bytes()
+        .map_err(|_| SnpApplicationError::BasesNotMaterialized)?
+        .get(offset)
+        .copied()
+        .ok_or(SnpApplicationError::ReferenceBaseMismatch {
             position: locus.position().offset(),
             expected: locus.reference(),
             found: b'?',
-        },
-    )?;
+        })?;
     if found == b'N' {
         return Err(SnpApplicationError::ReferenceBaseUnknown {
             position: locus.position().offset(),

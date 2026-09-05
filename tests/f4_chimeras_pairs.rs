@@ -240,7 +240,8 @@ fn chimera_uses_a_manual_canonical_second_source_list_and_orients_pe_after_compo
             .find(|sequence| sequence.id() == expected.0.id().sequence_id())
             .expect("source sequence")
             .sequence()
-            .as_bytes()[expected.1 as usize..(expected.1 + suffix) as usize],
+            .as_bytes()
+            .expect("bases materializadas")[expected.1 as usize..(expected.1 + suffix) as usize],
     ]
     .concat();
     assert_eq!(transformed.pair().fragment().sequence(), expected_sequence);

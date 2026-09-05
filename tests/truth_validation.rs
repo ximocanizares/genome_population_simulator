@@ -35,7 +35,7 @@ fn reference_with_bases(bases: &[u8]) -> Reference {
 fn fixture() -> String {
     include_str!("fixtures/truth-v1/valid.jsonl").replacen(
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        &reference_content_sha256(&reference()),
+        &reference_content_sha256(&reference()).expect("huella"),
         1,
     )
 }

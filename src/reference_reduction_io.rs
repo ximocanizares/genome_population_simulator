@@ -127,6 +127,13 @@ impl ReductionSource for MaterializedSource<'_> {
         sequence
             .sequence()
             .as_bytes()
+            .map_err(|_| {
+                map_error(
+                    sequence_id.as_str(),
+                    "source_sequence",
+                    "la referencia se validó sin conservar sus bases",
+                )
+            })?
             .get(start..end)
             .map(<[u8]>::to_vec)
             .ok_or_else(|| {
@@ -251,8 +258,55 @@ impl ReductionSource for IndexedSource {
     }
 }
 
+/// Elige de dónde salen las bases de una referencia según estén o no cargadas.
+///
+/// Si la referencia se validó sin conservarlas, las sirve por índice desde el
+/// FASTA indicado; si están en memoria, las sirve desde ahí. El reconstructor no
+/// distingue una de otra.
+pub fn source_for<'a>(
+    reference: &'a Reference,
+    fasta_path: Option<&Path>,
+) -> Result<Box<dyn ReductionSource + 'a>, Diagnostic> {
+    let materialized = reference
+        .sequences()
+        .first()
+        .is_none_or(|sequence| sequence.sequence().is_materialized());
+    if materialized {
+        return Ok(Box::new(MaterializedSource::new(reference)));
+    }
+    let catalog = reference
+        .sequences()
+        .iter()
+        .map(|sequence| {
+            SourceSequenceEntry::new(sequence.id().clone(), sequence.class(), sequence.length())
+        })
+        .collect();
+    // La ruta explícita manda; si no la hay, sirve la que la referencia declara
+    // como origen o como recurso autoritativo.
+    let path = fasta_path
+        .map(Path::to_path_buf)
+        .or_else(|| reference.authoritative_resource().map(Path::to_path_buf))
+        .or_else(|| match reference.origin() {
+            crate::reference::ReferenceOrigin::Supplied { original_path } => {
+                Some(original_path.clone())
+            }
+            _ => None,
+        })
+        .ok_or_else(|| {
+            map_error(
+                reference.id().as_str(),
+                "source_sequence",
+                "no hay FASTA del que leer las bases por índice",
+            )
+        })?;
+    IndexedSource::new(reference.id().clone(), catalog, &path).map(|source| {
+        let boxed: Box<dyn ReductionSource + 'a> = Box::new(source);
+        boxed
+    })
+}
+
 pub fn build_reduced_reference(
-    source: &impl ReductionSource,
+    source: &dyn ReductionSource,
     plan: &MaterializedPlan,
 ) -> Result<Reference, Diagnostic> {
     if source.reference_id() != plan.source_reference_id() {
@@ -359,7 +413,7 @@ pub fn reduction_map_document(plan: &MaterializedPlan) -> Value {
 }
 
 pub fn validate_reduced_reference(
-    source: &impl ReductionSource,
+    source: &dyn ReductionSource,
     derived: &Reference,
     plan: &MaterializedPlan,
 ) -> Result<(), Diagnostic> {
@@ -391,7 +445,7 @@ pub fn validate_reduced_reference(
 /// que lo produjo. De este modo una divergencia del escritor no puede declararse
 /// validada únicamente porque el plan en memoria era correcto.
 pub fn validate_reduction_map_document(
-    source: &impl ReductionSource,
+    source: &dyn ReductionSource,
     derived: &Reference,
     document: &Value,
     parameters: ReductionMapParameters,
@@ -668,7 +722,14 @@ pub fn validate_reduction_map_document(
                 "falta una secuencia derivada en el mapa",
             ));
         };
-        if expected.as_slice() != sequence.sequence().as_bytes()
+        let observed_bases = sequence.sequence().as_bytes().map_err(|_| {
+            map_error(
+                derived_id,
+                "derived_sequence",
+                "la referencia derivada se validó sin conservar sus bases",
+            )
+        })?;
+        if expected.as_slice() != observed_bases
             || previous_derived_end.get(sequence.id().as_str()) != Some(&sequence.length())
         {
             return Err(map_error(

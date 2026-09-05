@@ -237,7 +237,13 @@ fn authoritative_representation_is_loaded_from_the_copy_and_keeps_original_prove
     );
     let sequence = &authoritative.reference().sequences()[0];
     assert_eq!(sequence.header().raw_bytes(), b"chr1 copied header");
-    assert_eq!(sequence.sequence().as_bytes(), b"ACGTN");
+    assert_eq!(
+        sequence
+            .sequence()
+            .as_bytes()
+            .expect("bases materializadas"),
+        b"ACGTN"
+    );
     assert_eq!(
         fs::read(&source).expect("mutated original"),
         b">chr1 mutated header\nAAAAA\n",
