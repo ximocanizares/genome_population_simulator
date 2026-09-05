@@ -948,8 +948,10 @@ fn finish_record(
             format!("line {first_line}, line {header_line}"),
         ));
     }
+    // Se consume el búfer ya acumulado en lugar de copiarlo: `try_from_bytes`
+    // duplicaría la secuencia entera y el pico pasaría al doble del genoma.
     let sequence =
-        DnaSequence::try_from_bytes(&bases).map_err(|error| reference_error(path, error))?;
+        DnaSequence::try_from_owned_bytes(bases).map_err(|error| reference_error(path, error))?;
     let (sequence_id, class) = if let Some(expected) = expected {
         let expectation = expected.get(header.id_text()).ok_or_else(|| {
             configuration_mismatch(
