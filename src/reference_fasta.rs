@@ -501,6 +501,248 @@ pub fn write_generated_fasta(
     Ok(())
 }
 
+/// Resumen de una secuencia validada sin conservar sus bases.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SequenceSummary {
+    id: SequenceId,
+    class: SequenceClass,
+    header: FastaHeader,
+    length: u64,
+    unknown_base_count: u64,
+}
+
+impl SequenceSummary {
+    #[must_use]
+    pub const fn id(&self) -> &SequenceId {
+        &self.id
+    }
+
+    #[must_use]
+    pub const fn class(&self) -> SequenceClass {
+        self.class
+    }
+
+    #[must_use]
+    pub const fn header(&self) -> &FastaHeader {
+        &self.header
+    }
+
+    #[must_use]
+    pub const fn length(&self) -> u64 {
+        self.length
+    }
+
+    #[must_use]
+    pub const fn unknown_base_count(&self) -> u64 {
+        self.unknown_base_count
+    }
+}
+
+/// Catálogo de un FASTA validado por completo sin materializar sus bases.
+#[derive(Clone, Debug)]
+pub struct ValidatedFastaSummary {
+    sequences: Vec<SequenceSummary>,
+    source_identity: ArtifactIdentity,
+}
+
+impl ValidatedFastaSummary {
+    #[must_use]
+    pub fn sequences(&self) -> &[SequenceSummary] {
+        &self.sequences
+    }
+
+    #[must_use]
+    pub const fn source_identity(&self) -> &ArtifactIdentity {
+        &self.source_identity
+    }
+}
+
+/// Valida un FASTA suministrado sin retener sus bases.
+///
+/// Aplica exactamente las mismas comprobaciones que [`validate_supplied_fasta`]
+/// —alfabeto A/C/G/T/N, identificadores únicos, cabeceras y longitudes
+/// declaradas— pero descarta cada base en cuanto la valida, de modo que la
+/// memoria no depende del tamaño del genoma. Sirve al consumidor que solo
+/// necesita el catálogo: la planificación de una reducción, que trabaja con
+/// longitudes, y la validación física de una publicación, que compara recuentos
+/// de `N`, cabeceras y alfabeto.
+///
+/// `reference_fasta_summary_matches_full_read` comprueba que ambos lectores
+/// coinciden secuencia a secuencia.
+pub fn validate_supplied_fasta_summary(
+    read_path: &Path,
+    reference_id: &str,
+    expected: &[SequenceExpectation<'_>],
+) -> Result<ValidatedFastaSummary, Diagnostic> {
+    let file = File::open(read_path).map_err(|error| input_error(read_path, error))?;
+    let digesting = DigestingReader::new(file);
+    let mut reader = BufReader::new(digesting);
+    if reader
+        .fill_buf()
+        .map_err(|error| input_error(read_path, error))?
+        .starts_with(&[0x1f, 0x8b])
+    {
+        return Err(Diagnostic::format(
+            "GPS-FMT-001",
+            "El FASTA suministrado está comprimido y v1 solo admite texto sin comprimir.",
+        )
+        .with("path", read_path.display().to_string())
+        .with("detected_format", "gzip"));
+    }
+    let expectations = expected
+        .iter()
+        .map(|item| (item.id, *item))
+        .collect::<BTreeMap<_, _>>();
+    let mut sequences = Vec::with_capacity(expected.len());
+    let mut locations = BTreeMap::<String, u64>::new();
+    let mut line = Vec::new();
+    let mut line_number = 0_u64;
+    let mut pending: Option<(FastaHeader, u64, u64, u64)> = None;
+
+    loop {
+        line.clear();
+        let read = reader
+            .read_until(b'\n', &mut line)
+            .map_err(|error| input_error(read_path, error))?;
+        if read == 0 {
+            break;
+        }
+        line_number = line_number
+            .checked_add(1)
+            .ok_or_else(|| internal_error("FASTA line number exceeds u64"))?;
+        while line
+            .last()
+            .is_some_and(|byte| *byte == b'\n' || *byte == b'\r')
+        {
+            line.pop();
+        }
+        if line.first() == Some(&b'>') {
+            let raw_header = line[1..].to_vec();
+            if let Some((header, length, unknown, header_line)) = pending.take() {
+                sequences.push(finish_summary(
+                    read_path,
+                    reference_id,
+                    &expectations,
+                    &mut locations,
+                    header,
+                    length,
+                    unknown,
+                    header_line,
+                )?);
+            }
+            let header = parse_header_with_noodles(read_path, &raw_header, line_number)?;
+            pending = Some((header, 0, 0, line_number));
+        } else {
+            let Some((header, length, unknown, _)) = pending.as_mut() else {
+                return Err(empty_header(read_path, line_number));
+            };
+            for raw in &line {
+                let base = raw.to_ascii_uppercase();
+                if !matches!(base, b'A' | b'C' | b'G' | b'T' | b'N') {
+                    let position = length
+                        .checked_add(1)
+                        .ok_or_else(|| internal_error("FASTA sequence position exceeds u64"))?;
+                    return Err(invalid_symbol(read_path, header.id_text(), position, *raw));
+                }
+                if base == b'N' {
+                    *unknown = unknown
+                        .checked_add(1)
+                        .ok_or_else(|| internal_error("FASTA unknown base count exceeds u64"))?;
+                }
+                *length = length
+                    .checked_add(1)
+                    .ok_or_else(|| internal_error("FASTA sequence length exceeds u64"))?;
+            }
+        }
+    }
+
+    if let Some((header, length, unknown, header_line)) = pending {
+        sequences.push(finish_summary(
+            read_path,
+            reference_id,
+            &expectations,
+            &mut locations,
+            header,
+            length,
+            unknown,
+            header_line,
+        )?);
+    }
+    if sequences.is_empty() {
+        return Err(empty_fasta(read_path));
+    }
+    if sequences.len() != expected.len()
+        || sequences
+            .iter()
+            .zip(expected)
+            .any(|(summary, expectation)| summary.id.as_str() != expectation.id)
+    {
+        return Err(configuration_mismatch(
+            read_path,
+            "reference.sequences",
+            "los IDs y el orden declarados no coinciden exactamente con el FASTA",
+        ));
+    }
+    let digesting = reader.into_inner();
+    let source_identity = digesting.finish(read_path);
+    Ok(ValidatedFastaSummary {
+        sequences,
+        source_identity,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_summary(
+    path: &Path,
+    reference_id: &str,
+    expected: &BTreeMap<&str, SequenceExpectation<'_>>,
+    locations: &mut BTreeMap<String, u64>,
+    header: FastaHeader,
+    length: u64,
+    unknown_base_count: u64,
+    header_line: u64,
+) -> Result<SequenceSummary, Diagnostic> {
+    if length == 0 {
+        return Err(empty_fasta(path).with("sequence", header.id_text()));
+    }
+    if let Some(first_line) = locations.insert(header.id_text().to_owned(), header_line) {
+        return Err(Diagnostic::format(
+            "GPS-FMT-004",
+            "Un identificador de secuencia FASTA está repetido.",
+        )
+        .with("path", path.display().to_string())
+        .with("identifier", header.id_text())
+        .with(
+            "locations",
+            format!("line {first_line}, line {header_line}"),
+        ));
+    }
+    let expectation = expected.get(header.id_text()).ok_or_else(|| {
+        configuration_mismatch(
+            path,
+            "reference.sequences.id",
+            format!("el FASTA contiene el ID no declarado {}", header.id_text()),
+        )
+    })?;
+    if length != expectation.length {
+        return Err(configuration_mismatch(
+            path,
+            "reference.sequences.length",
+            format!(
+                "{} declara longitud {} y el FASTA contiene {}",
+                expectation.id, expectation.length, length
+            ),
+        ));
+    }
+    Ok(SequenceSummary {
+        id: SequenceId::parse(expectation.id, reference_id)?,
+        class: expectation.class,
+        header,
+        length,
+        unknown_base_count,
+    })
+}
+
 /// Crea un FAI solo para el consumidor indexado de aceptación. El runtime F1
 /// normal no llama a esta función ni publica el índice resultante.
 pub fn create_fai_for_acceptance(

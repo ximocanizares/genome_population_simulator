@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::reference::{ReversibleText, SequenceClass};
-use genome_population_simulator::reference_fasta::{SequenceExpectation, validate_supplied_fasta};
+use genome_population_simulator::reference_fasta::{
+    SequenceExpectation, validate_supplied_fasta, validate_supplied_fasta_summary,
+};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -134,4 +136,95 @@ impl Drop for TestDirectory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
+}
+
+/// El lector de resumen y el completo aplican las mismas comprobaciones sobre
+/// los mismos bytes. Esta prueba los ata: si uno cambiase de criterio, dejarían
+/// de coincidir y la reducción trabajaría sobre un catálogo distinto del que
+/// valida la publicación.
+#[test]
+fn reference_fasta_summary_matches_full_read() {
+    let directory = TestDirectory::new("summary-parity");
+    let path = directory.path().join("reference.fa");
+    let bytes = b">chr1 description \xff\r\naCgTn\r\n>scaf-2\tboundary \r\nNNaa\r\n";
+    fs::write(&path, bytes).expect("write fixture");
+    let expected = [
+        SequenceExpectation {
+            id: "chr1",
+            class: SequenceClass::Chromosome,
+            length: 5,
+        },
+        SequenceExpectation {
+            id: "scaf-2",
+            class: SequenceClass::Scaffold,
+            length: 4,
+        },
+    ];
+
+    let full = validate_supplied_fasta(&path, "ref-main", &expected).expect("full read");
+    let summary = validate_supplied_fasta_summary(&path, "ref-main", &expected).expect("summary");
+
+    assert_eq!(
+        summary.sequences().len(),
+        full.reference().sequences().len()
+    );
+    for (observed, expected_sequence) in
+        summary.sequences().iter().zip(full.reference().sequences())
+    {
+        assert_eq!(observed.id(), expected_sequence.id());
+        assert_eq!(observed.class(), expected_sequence.class());
+        assert_eq!(observed.length(), expected_sequence.length());
+        assert_eq!(
+            observed.unknown_base_count(),
+            expected_sequence.unknown_base_count()
+        );
+        assert_eq!(
+            observed.header().raw_bytes(),
+            expected_sequence.header().raw_bytes()
+        );
+    }
+    assert_eq!(
+        summary.source_identity().digest(),
+        full.source_identity().digest()
+    );
+    assert_eq!(
+        summary.source_identity().size_bytes(),
+        full.source_identity().size_bytes()
+    );
+}
+
+/// Un símbolo fuera de A/C/G/T/N debe rechazarse igual sin retener las bases.
+#[test]
+fn reference_fasta_summary_rejects_the_same_invalid_symbol() {
+    let directory = TestDirectory::new("summary-symbol");
+    let path = directory.path().join("reference.fa");
+    fs::write(&path, b">chr1\nACGTR\n").expect("write fixture");
+    let expected = [SequenceExpectation {
+        id: "chr1",
+        class: SequenceClass::Chromosome,
+        length: 5,
+    }];
+
+    let full = validate_supplied_fasta(&path, "ref-main", &expected).expect_err("full rejects");
+    let summary =
+        validate_supplied_fasta_summary(&path, "ref-main", &expected).expect_err("summary rejects");
+    assert_eq!(summary.code(), full.code());
+}
+
+/// Una longitud declarada que no coincide se rechaza igual en ambos lectores.
+#[test]
+fn reference_fasta_summary_rejects_the_same_declared_length() {
+    let directory = TestDirectory::new("summary-length");
+    let path = directory.path().join("reference.fa");
+    fs::write(&path, b">chr1\nACGT\n").expect("write fixture");
+    let expected = [SequenceExpectation {
+        id: "chr1",
+        class: SequenceClass::Chromosome,
+        length: 99,
+    }];
+
+    let full = validate_supplied_fasta(&path, "ref-main", &expected).expect_err("full rejects");
+    let summary =
+        validate_supplied_fasta_summary(&path, "ref-main", &expected).expect_err("summary rejects");
+    assert_eq!(summary.code(), full.code());
 }
