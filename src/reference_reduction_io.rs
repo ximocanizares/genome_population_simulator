@@ -1,6 +1,11 @@
 //! Materialización canónica y mapa de una referencia reducida ya planificada.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
+
+use noodles_fasta as fasta;
 
 use serde_json::{Value, json};
 
@@ -131,6 +136,118 @@ impl ReductionSource for MaterializedSource<'_> {
                     "el intervalo fuente queda fuera de la secuencia",
                 )
             })
+    }
+}
+
+/// Sirve los tramos desde el FASTA en disco mediante un índice FAI.
+///
+/// El índice se construye en un temporal del llamador y no se publica: DTC-041
+/// fija que los índices solo se crean cuando se necesitan. La memoria no depende
+/// del tamaño del genoma, solo de los tramos que se piden.
+pub struct IndexedSource {
+    reference_id: ReferenceId,
+    catalog: Vec<SourceSequenceEntry>,
+    fasta_path: PathBuf,
+    index: fasta::fai::Index,
+}
+
+impl IndexedSource {
+    /// Construye el índice del FASTA ya validado y lo deja listo para consultas.
+    ///
+    /// El catálogo procede de la validación previa, no del índice: el FAI
+    /// describe posiciones, no la clase de cada secuencia ni su conformidad con
+    /// lo declarado.
+    pub fn new(
+        reference_id: ReferenceId,
+        catalog: Vec<SourceSequenceEntry>,
+        fasta_path: &Path,
+    ) -> Result<Self, Diagnostic> {
+        let file = File::open(fasta_path).map_err(|error| {
+            Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")
+                .with("path", fasta_path.display().to_string())
+                .with("operation", "open_for_index")
+                .with("detail", error.to_string())
+        })?;
+        let mut indexer = fasta::io::Indexer::new(BufReader::new(file));
+        let mut records = Vec::new();
+        loop {
+            match indexer.index_record() {
+                Ok(Some(record)) => records.push(record),
+                Ok(None) => break,
+                Err(error) => {
+                    return Err(Diagnostic::io(
+                        "GPS-IO-001",
+                        "Una operación de lectura o escritura falló.",
+                    )
+                    .with("path", fasta_path.display().to_string())
+                    .with("operation", "index_reference")
+                    .with("detail", error.to_string()));
+                }
+            }
+        }
+        Ok(Self {
+            reference_id,
+            catalog,
+            fasta_path: fasta_path.to_path_buf(),
+            index: fasta::fai::Index::from(records),
+        })
+    }
+}
+
+impl ReductionSource for IndexedSource {
+    fn reference_id(&self) -> &ReferenceId {
+        &self.reference_id
+    }
+
+    fn catalog(&self) -> &[SourceSequenceEntry] {
+        &self.catalog
+    }
+
+    fn interval(
+        &self,
+        sequence_id: &SequenceId,
+        start: usize,
+        end: usize,
+    ) -> Result<Vec<u8>, Diagnostic> {
+        let out_of_range = || {
+            map_error(
+                sequence_id.as_str(),
+                "source_interval",
+                "el intervalo fuente queda fuera de la secuencia",
+            )
+        };
+        if end < start {
+            return Err(out_of_range());
+        }
+        // Un intervalo vacío no es representable como región del índice, pero la
+        // fuente en memoria lo acepta devolviendo un fragmento vacío. Ambas
+        // deben ser indistinguibles, así que se conserva ese comportamiento.
+        if end == start {
+            return if self.catalog.iter().any(|entry| entry.id() == sequence_id) {
+                Ok(Vec::new())
+            } else {
+                Err(out_of_range())
+            };
+        }
+        // El FAI usa coordenadas de una base y extremos inclusivos; el mapa de
+        // reducción usa un intervalo semiabierto de base cero.
+        let region = format!("{}:{}-{}", sequence_id.as_str(), start + 1, end);
+        let region = region.parse().map_err(|_| out_of_range())?;
+        let mut reader = fasta::io::indexed_reader::Builder::default()
+            .set_index(self.index.clone())
+            .build_from_path(&self.fasta_path)
+            .map_err(|error| {
+                Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")
+                    .with("path", self.fasta_path.display().to_string())
+                    .with("operation", "open_indexed_reference")
+                    .with("detail", error.to_string())
+            })?;
+        let record = reader.query(&region).map_err(|_| out_of_range())?;
+        let bases = record.sequence().as_ref().to_ascii_uppercase();
+        if bases.len() != end - start {
+            return Err(out_of_range());
+        }
+        Ok(bases)
     }
 }
 
