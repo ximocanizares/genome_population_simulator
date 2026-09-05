@@ -9,7 +9,7 @@ use genome_population_simulator::execution::{ExecutionOutcome, execute_validated
 use genome_population_simulator::reference::{Reference, ReferenceSequence, SequenceClass};
 use genome_population_simulator::reference_fasta::{SequenceExpectation, validate_supplied_fasta};
 use genome_population_simulator::reference_reduction_io::{
-    ReductionMapParameters, validate_reduction_map_document,
+    MaterializedSource, ReductionMapParameters, validate_reduction_map_document,
 };
 use genome_population_simulator::results::UnitState;
 
@@ -664,7 +664,7 @@ target_bases = 13
     assert!(map.get("algorithm").is_none());
     let (source, derived) = load_map_references(&destination);
     validate_reduction_map_document(
-        &source,
+        &MaterializedSource::new(&source),
         &derived,
         &map,
         ReductionMapParameters {
@@ -689,8 +689,13 @@ fn serialized_map_validator_rejects_truncation_overlap_and_out_of_range() {
         region_size_bases: 5,
         target_bases: 13,
     };
-    validate_reduction_map_document(&source, &derived, &map, parameters)
-        .expect("valid serialized map");
+    validate_reduction_map_document(
+        &MaterializedSource::new(&source),
+        &derived,
+        &map,
+        parameters,
+    )
+    .expect("valid serialized map");
 
     let mut reordered_sequences = derived.sequences().to_vec();
     reordered_sequences.swap(0, 1);
@@ -701,7 +706,13 @@ fn serialized_map_validator_rejects_truncation_overlap_and_out_of_range() {
     )
     .expect("reordered derived fixture remains a valid reference");
     assert!(
-        validate_reduction_map_document(&source, &reordered_derived, &map, parameters).is_err()
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &reordered_derived,
+            &map,
+            parameters
+        )
+        .is_err()
     );
 
     let first = &derived.sequences()[0];
@@ -725,28 +736,56 @@ fn serialized_map_validator_rejects_truncation_overlap_and_out_of_range() {
     )
     .expect("class-mutated derived fixture remains structurally valid");
     assert!(
-        validate_reduction_map_document(&source, &changed_class_derived, &map, parameters).is_err()
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &changed_class_derived,
+            &map,
+            parameters
+        )
+        .is_err()
     );
 
     assert!(serde_json::from_slice::<serde_json::Value>(&bytes[..bytes.len() / 2]).is_err());
 
     let mut out_of_range = map.clone();
     out_of_range["segments"][0]["source_interval"]["end"] = serde_json::json!(999);
-    assert!(validate_reduction_map_document(&source, &derived, &out_of_range, parameters).is_err());
+    assert!(
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &derived,
+            &out_of_range,
+            parameters
+        )
+        .is_err()
+    );
 
     let mut unknown_root = map.clone();
     unknown_root
         .as_object_mut()
         .expect("root object")
         .insert("unknown_root".to_owned(), serde_json::json!(true));
-    assert!(validate_reduction_map_document(&source, &derived, &unknown_root, parameters).is_err());
+    assert!(
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &derived,
+            &unknown_root,
+            parameters
+        )
+        .is_err()
+    );
     let mut unknown_segment = map.clone();
     unknown_segment["segments"][0]
         .as_object_mut()
         .unwrap()
         .insert("unknown_segment".to_owned(), serde_json::json!(true));
     assert!(
-        validate_reduction_map_document(&source, &derived, &unknown_segment, parameters).is_err()
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &derived,
+            &unknown_segment,
+            parameters
+        )
+        .is_err()
     );
     let mut unknown_interval = map.clone();
     unknown_interval["segments"][0]["source_interval"]
@@ -754,7 +793,13 @@ fn serialized_map_validator_rejects_truncation_overlap_and_out_of_range() {
         .unwrap()
         .insert("unknown_interval".to_owned(), serde_json::json!(true));
     assert!(
-        validate_reduction_map_document(&source, &derived, &unknown_interval, parameters).is_err()
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &derived,
+            &unknown_interval,
+            parameters
+        )
+        .is_err()
     );
     for (name, document) in [
         ("unknown-root", &unknown_root),
@@ -783,19 +828,41 @@ fn serialized_map_validator_rejects_truncation_overlap_and_out_of_range() {
     swapped_labels["segments"][full_index]["segment_class"] = serde_json::json!("residual");
     swapped_labels["segments"][residual_index]["segment_class"] = serde_json::json!("full");
     assert!(
-        validate_reduction_map_document(&source, &derived, &swapped_labels, parameters).is_err()
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &derived,
+            &swapped_labels,
+            parameters
+        )
+        .is_err()
     );
 
     let mut wrong_order = map.clone();
     wrong_order["segments"][0]["materialization_order"] = serde_json::json!(2);
-    assert!(validate_reduction_map_document(&source, &derived, &wrong_order, parameters).is_err());
+    assert!(
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &derived,
+            &wrong_order,
+            parameters
+        )
+        .is_err()
+    );
 
     let mut derived_gap = map.clone();
     let start = derived_gap["segments"][0]["derived_interval"]["start"]
         .as_u64()
         .unwrap();
     derived_gap["segments"][0]["derived_interval"]["start"] = serde_json::json!(start + 1);
-    assert!(validate_reduction_map_document(&source, &derived, &derived_gap, parameters).is_err());
+    assert!(
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &derived,
+            &derived_gap,
+            parameters
+        )
+        .is_err()
+    );
 
     let mut derived_overlap = map.clone();
     let end = derived_overlap["segments"][0]["derived_interval"]["end"]
@@ -803,7 +870,13 @@ fn serialized_map_validator_rejects_truncation_overlap_and_out_of_range() {
         .unwrap();
     derived_overlap["segments"][0]["derived_interval"]["end"] = serde_json::json!(end + 1);
     assert!(
-        validate_reduction_map_document(&source, &derived, &derived_overlap, parameters).is_err()
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &derived,
+            &derived_overlap,
+            parameters
+        )
+        .is_err()
     );
 
     let segments = map["segments"].as_array().unwrap();
@@ -819,7 +892,15 @@ fn serialized_map_validator_rejects_truncation_overlap_and_out_of_range() {
     let mut overlap = map.clone();
     overlap["segments"][second]["source_interval"] =
         overlap["segments"][first]["source_interval"].clone();
-    assert!(validate_reduction_map_document(&source, &derived, &overlap, parameters).is_err());
+    assert!(
+        validate_reduction_map_document(
+            &MaterializedSource::new(&source),
+            &derived,
+            &overlap,
+            parameters
+        )
+        .is_err()
+    );
 
     let mut derived_overlap_between_segments = map.clone();
     let previous_end =
@@ -840,7 +921,7 @@ fn serialized_map_validator_rejects_truncation_overlap_and_out_of_range() {
         serde_json::json!(previous_end + later_length - 1);
     assert!(
         validate_reduction_map_document(
-            &source,
+            &MaterializedSource::new(&source),
             &derived,
             &derived_overlap_between_segments,
             parameters

@@ -49,8 +49,9 @@ use crate::reference_reduction::{
     EligibleSequence, MaterializedPlan, materialize_selection, select_reduced_reference,
 };
 use crate::reference_reduction_io::{
-    REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
-    build_reduced_reference, reduction_map_document, validate_reduction_map_document,
+    MaterializedSource, REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION,
+    ReductionMapParameters, build_reduced_reference, reduction_map_document,
+    validate_reduction_map_document,
 };
 use crate::technical_identity::derive_technical_identity_plan;
 use crate::vcf_contract::{TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfIndexKind, VcfOutputMode};
@@ -1413,7 +1414,7 @@ fn validate_published_resources_v3(
                 format!("selection_order de {id} no coincide con la subsemilla"),
             ));
         }
-        let expected_derived = build_reduced_reference(source, &plan)
+        let expected_derived = build_reduced_reference(&MaterializedSource::new(source), &plan)
             .map_err(|error| physical_error(effective_path, "build_reduced_reference", &error))?;
         let fasta_id = effective_non_empty_text(reduction, "fasta_artifact_id", effective_path)?;
         let derived = read_reference_with_expected(
@@ -1446,7 +1447,7 @@ fn validate_published_resources_v3(
             ));
         }
         validate_reduction_map_document(
-            source,
+            &MaterializedSource::new(source),
             &derived,
             &map,
             ReductionMapParameters {
@@ -2096,7 +2097,7 @@ fn validate_published_resources_v1(
                 format!("selection_order de {id} no coincide con la subsemilla"),
             ));
         }
-        let expected_derived = build_reduced_reference(source, &plan)
+        let expected_derived = build_reduced_reference(&MaterializedSource::new(source), &plan)
             .map_err(|error| physical_error(effective_path, "build_reduced_reference", &error))?;
         let fasta_id = effective_non_empty_text(reduction, "fasta_artifact_id", effective_path)?;
         let derived = read_reference_with_expected(
@@ -2129,7 +2130,7 @@ fn validate_published_resources_v1(
             ));
         }
         validate_reduction_map_document(
-            source,
+            &MaterializedSource::new(source),
             &derived,
             &map,
             ReductionMapParameters {

@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 
 use crate::diagnostics::Diagnostic;
-use crate::identity::SequenceId;
+use crate::identity::{ReferenceId, SequenceId};
 use crate::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
@@ -20,11 +20,125 @@ pub struct ReductionMapParameters {
     pub target_bases: u64,
 }
 
+/// Origen de las bases de una referencia para reconstruir una reducción.
+///
+/// La reconstrucción solo necesita recorrer el catálogo en orden y pedir los
+/// tramos que indica el mapa, nunca la secuencia entera. Separarlo del tipo
+/// `Reference` permite servir esos tramos desde memoria o desde un índice, sin
+/// que la lógica de reconstrucción sepa cuál de los dos la atiende.
+pub trait ReductionSource {
+    fn reference_id(&self) -> &ReferenceId;
+
+    /// Catálogo en el orden físico del FASTA.
+    fn catalog(&self) -> &[SourceSequenceEntry];
+
+    /// Bases del intervalo semiabierto `[start, end)` de una secuencia.
+    fn interval(
+        &self,
+        sequence_id: &SequenceId,
+        start: usize,
+        end: usize,
+    ) -> Result<Vec<u8>, Diagnostic>;
+}
+
+/// Entrada de catálogo: lo único que la reconstrucción necesita saber de una
+/// secuencia antes de pedir sus tramos.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceSequenceEntry {
+    id: SequenceId,
+    class: SequenceClass,
+    length: u64,
+}
+
+impl SourceSequenceEntry {
+    #[must_use]
+    pub const fn new(id: SequenceId, class: SequenceClass, length: u64) -> Self {
+        Self { id, class, length }
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> &SequenceId {
+        &self.id
+    }
+
+    #[must_use]
+    pub const fn class(&self) -> SequenceClass {
+        self.class
+    }
+
+    #[must_use]
+    pub const fn length(&self) -> u64 {
+        self.length
+    }
+}
+
+/// Sirve los tramos desde una referencia ya materializada en memoria.
+pub struct MaterializedSource<'a> {
+    reference: &'a Reference,
+    catalog: Vec<SourceSequenceEntry>,
+}
+
+impl<'a> MaterializedSource<'a> {
+    #[must_use]
+    pub fn new(reference: &'a Reference) -> Self {
+        let catalog = reference
+            .sequences()
+            .iter()
+            .map(|sequence| {
+                SourceSequenceEntry::new(sequence.id().clone(), sequence.class(), sequence.length())
+            })
+            .collect();
+        Self { reference, catalog }
+    }
+}
+
+impl ReductionSource for MaterializedSource<'_> {
+    fn reference_id(&self) -> &ReferenceId {
+        self.reference.id()
+    }
+
+    fn catalog(&self) -> &[SourceSequenceEntry] {
+        &self.catalog
+    }
+
+    fn interval(
+        &self,
+        sequence_id: &SequenceId,
+        start: usize,
+        end: usize,
+    ) -> Result<Vec<u8>, Diagnostic> {
+        let sequence = self
+            .reference
+            .sequences()
+            .iter()
+            .find(|sequence| sequence.id() == sequence_id)
+            .ok_or_else(|| {
+                map_error(
+                    sequence_id.as_str(),
+                    "source_sequence",
+                    "el mapa referencia una secuencia inexistente",
+                )
+            })?;
+        sequence
+            .sequence()
+            .as_bytes()
+            .get(start..end)
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| {
+                map_error(
+                    sequence_id.as_str(),
+                    "source_interval",
+                    "el intervalo fuente queda fuera de la secuencia",
+                )
+            })
+    }
+}
+
 pub fn build_reduced_reference(
-    source: &Reference,
+    source: &impl ReductionSource,
     plan: &MaterializedPlan,
 ) -> Result<Reference, Diagnostic> {
-    if source.id() != plan.source_reference_id() {
+    if source.reference_id() != plan.source_reference_id() {
         return Err(map_error(
             plan.derived_reference_id().as_str(),
             "source_reference",
@@ -33,7 +147,7 @@ pub fn build_reduced_reference(
     }
     let mut derived_sequences = Vec::new();
     let mut segments = plan.segments().iter().peekable();
-    for source_sequence in source.sequences() {
+    for source_sequence in source.catalog() {
         let Some(first_segment) = segments.peek() else {
             break;
         };
@@ -65,18 +179,8 @@ pub fn build_reduced_reference(
                     "la coordenada final no cabe en memoria direccionable",
                 )
             })?;
-            let fragment = source_sequence
-                .sequence()
-                .as_bytes()
-                .get(start..end)
-                .ok_or_else(|| {
-                    map_error(
-                        plan.derived_reference_id().as_str(),
-                        "source_interval",
-                        "el intervalo fuente queda fuera de la secuencia",
-                    )
-                })?;
-            bases.extend_from_slice(fragment);
+            let fragment = source.interval(source_sequence.id(), start, end)?;
+            bases.extend_from_slice(&fragment);
         }
         let id = SequenceId::parse(
             source_sequence.id().as_str(),
@@ -98,7 +202,7 @@ pub fn build_reduced_reference(
             "el mapa referencia una secuencia inexistente o fuera de orden",
         ));
     }
-    let source_reference_id = source.id().clone();
+    let source_reference_id = source.reference_id().clone();
     Reference::new(
         plan.derived_reference_id().clone(),
         ReferenceOrigin::Reduced {
@@ -138,7 +242,7 @@ pub fn reduction_map_document(plan: &MaterializedPlan) -> Value {
 }
 
 pub fn validate_reduced_reference(
-    source: &Reference,
+    source: &impl ReductionSource,
     derived: &Reference,
     plan: &MaterializedPlan,
 ) -> Result<(), Diagnostic> {
@@ -170,7 +274,7 @@ pub fn validate_reduced_reference(
 /// que lo produjo. De este modo una divergencia del escritor no puede declararse
 /// validada únicamente porque el plan en memoria era correcto.
 pub fn validate_reduction_map_document(
-    source: &Reference,
+    source: &impl ReductionSource,
     derived: &Reference,
     document: &Value,
     parameters: ReductionMapParameters,
@@ -198,7 +302,7 @@ pub fn validate_reduction_map_document(
         .filter(|value| *value == REDUCTION_MAP_SCHEMA_VERSION)
         .ok_or_else(|| map_error(derived_id, "schema_version", "versión de mapa inesperada"))?;
     if require_text(object, "source_reference_id", derived_id, "document")
-        != Some(source.id().as_str())
+        != Some(source.reference_id().as_str())
         || require_text(object, "derived_reference_id", derived_id, "document") != Some(derived_id)
     {
         return Err(map_error(
@@ -307,7 +411,7 @@ pub fn validate_reduction_map_document(
         let sequence_id = require_text(segment, "sequence_id", derived_id, "segment")
             .ok_or_else(|| map_error(derived_id, "sequence_id", "falta la secuencia"))?;
         let (sequence_index, source_sequence) = source
-            .sequences()
+            .catalog()
             .iter()
             .enumerate()
             .find(|(_, sequence)| sequence.id().as_str() == sequence_id)
@@ -395,7 +499,7 @@ pub fn validate_reduction_map_document(
         rebuilt
             .entry(sequence_id)
             .or_default()
-            .extend_from_slice(&source_sequence.sequence().as_bytes()[start..end]);
+            .extend_from_slice(&source.interval(source_sequence.id(), start, end)?);
         previous_source_end.insert(sequence_id, source_end);
         previous_derived_end.insert(sequence_id, derived_end);
     }
@@ -429,10 +533,10 @@ pub fn validate_reduction_map_document(
             ));
         }
         let source_class = source
-            .sequences()
+            .catalog()
             .iter()
             .find(|source_sequence| source_sequence.id().as_str() == sequence.id().as_str())
-            .map(ReferenceSequence::class);
+            .map(SourceSequenceEntry::class);
         if source_class != Some(sequence.class()) {
             return Err(map_error(
                 derived_id,

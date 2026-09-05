@@ -54,8 +54,9 @@ use crate::reference_reduction::{
     preflight_reduced_reference, select_reduced_reference,
 };
 use crate::reference_reduction_io::{
-    REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
-    build_reduced_reference, reduction_map_document, validate_reduction_map_document,
+    MaterializedSource, REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION,
+    ReductionMapParameters, build_reduced_reference, reduction_map_document,
+    validate_reduction_map_document,
 };
 use crate::results::{
     ArtifactRecord, ConfigurationInputRecord, GeneralManifest, ManifestEventLink,
@@ -272,7 +273,7 @@ fn execute_validated_config_with_effective_document(
                     .with("detail", error.to_string())
                 })?;
                 validate_reduction_map_document(
-                    reference_output.reference,
+                    &MaterializedSource::new(reference_output.reference),
                     &authoritative_derived,
                     &reparsed,
                     ReductionMapParameters {
@@ -1879,7 +1880,7 @@ fn prepare_reductions(
         let derived_id = ReferenceId::parse(reduction.id(), "execution")?;
         let plan = materialize_selection(&selection, &derived_id, &eligible)
             .map_err(|error| reduction_error(reduction.id(), effective, error))?;
-        let reference = build_reduced_reference(source, &plan)?;
+        let reference = build_reduced_reference(&MaterializedSource::new(source), &plan)?;
         prepared.push(PreparedReduction { reference, plan });
     }
     Ok(prepared)
