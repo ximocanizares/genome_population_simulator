@@ -106,17 +106,40 @@ derivada de tomate de 500.000 bases en trece contigs, sobre cuatro núcleos.
 | 2 | 2x | 10 | 112 s |
 | 2 | 4x | 1000 | 348 s |
 
-- [ ] El coste escala de forma superlineal en las dos dimensiones: doblar la
-  cobertura multiplica el tiempo por unos 3,6 y doblar la cohorte por unos 5,1.
-  El número de loci no influye, de modo que el coste está en la generación de
-  lecturas y no en el manejo de variantes.
-  - Que el exponente sea cercano a 2 **en la cobertura** es lo más sospechoso:
-    subir la cobertura solo añade lecturas, así que un crecimiento casi
-    cuadrático sugiere que algo recorre lo ya generado por cada lectura nueva.
-  - Consecuencia inmediata: un ensayo de 20 individuos a 30x sobre esta
-    referencia proyecta semanas de cómputo. La validación externa VE quedó
-    detenida por esto, conforme a §11 de su plan, que prohíbe recortar cobertura
-    o individuos de forma automática.
-  - Antes de optimizar hace falta un perfil que localice el punto exacto. La
-    hoja de ruta exige evidencia reproducible para una optimización, y F9.1 y
-    F9.2 siguen pendientes.
+- [x] **Resuelto.** El coste escalaba de forma casi cuadrática porque, al
+  publicar un evento técnico, la segunda pasada reiniciaba el muestreador por
+  cada pareja y recorría su serie desde el principio. Reproducirlas en una sola
+  pasada dejó el escalado lineal: el ensayo de 20 individuos a 30x pasó de
+  proyectar semanas a tardar 76 segundos. La corrección alcanza también las
+  parejas que aporta una donante, que solo se ejercitan con contaminación
+  activa y que la primera versión dejó sin tratar.
+  - Medir solo el escenario neutro ocultó la mitad del problema: con los
+    artefactos técnicos desactivados no se recorre la vía de la contaminación.
+    Conviene medir cada cambio de rendimiento con al menos dos configuraciones,
+    una neutra y otra con errores, quimeras, *index hopping* y contaminación.
+
+## Memoria de la referencia
+
+Medido el 5 de septiembre de 2026 sobre el tomate de 759 MB y sobre genomas
+simulados, con el binario de `d950aca`.
+
+| Ruta | Tiempo | Memoria | ¿Crece con el genoma? |
+|---|---:|---:|---|
+| Suministrada sin reducir ni matriz SNV | 12 s | 5,6 MB | no |
+| Suministrada reducida | 16 s | 8,3 MB | no |
+| Generación al azar de 50 Mb | 4,6 s | 152 MB | sí, unas 3 veces |
+| Suministrada con matriz SNV | 76 s | 1.544 MB | sí, unas 2 veces |
+
+Las dos primeras quedaron resueltas: validar sin conservar las bases y pedir los
+tramos por índice FAI deja su memoria independiente del genoma de partida.
+
+- [ ] Las dos últimas siguen creciendo con el genoma. El pico son dos lecturas
+  del FASTA que conviven dentro de la validación física de la publicación, cada
+  una con el genoma entero; con 50 Mb son exactamente dos bloques de 50 MB.
+  - Ambas arrancan en `validate_published_resources`, pero la segunda se pierde
+    en un `collect` de la biblioteca estándar y localizarla exige más perfilado.
+  - Un genoma humano proyecta del orden de 6 GB en la ruta con matriz SNV y
+    unos 9 GB generando al azar.
+  - `heaptrack` es la única herramienta de perfilado disponible en el entorno:
+    no hay `perf`, `valgrind` ni `gdb`. Basta para un cuello de memoria; para
+    uno de CPU haría falta instalar algo.
