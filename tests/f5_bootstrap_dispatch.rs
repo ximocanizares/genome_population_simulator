@@ -202,10 +202,10 @@ fn bootstrap_accepts_exact_general_and_scenario_limits_and_rejects_byte_65537() 
 #[test]
 fn dispatcher_opens_each_bootstrap_toml_once_and_records_identity_from_written_bytes() {
     let root = temporary("physical-identity-and-opens");
-    // Perfil y referencia se mantienen deliberadamente ausentes: cualquier
-    // apertura posterior al escenario cambiaría este éxito por un diagnóstico
-    // de entrada. El observador cubre las dos aperturas TOML físicas.
-    let profile_hash = "b".repeat(64);
+    // El dispatcher público completa ahora el perfil; el observador sigue
+    // cubriendo exclusivamente la frontera TOML y debe registrar una apertura
+    // por cada documento de autoría, no las aperturas del perfil.
+    let profile_hash = write_profile(&root.join("authoring/scenarios/profiles"));
     let general_bytes = pad_to_toml_limit(general()).into_bytes();
     let scenario_bytes = pad_to_toml_limit(scenario(&profile_hash, "999999")).into_bytes();
     let general_path = root.join("authoring/general.toml");
@@ -238,7 +238,7 @@ fn dispatcher_opens_each_bootstrap_toml_once_and_records_identity_from_written_b
             fs::canonicalize(&general_path).expect("canonical general"),
             fs::canonicalize(&scenario_path).expect("canonical scenario"),
         ],
-        "el dispatcher solo abre una vez cada TOML; perfil, referencia, máscara, destino y RNG no cruzan esta frontera"
+        "el dispatcher solo abre una vez cada TOML; referencia, máscara, destino y RNG no cruzan esta frontera"
     );
     fs::remove_dir_all(root).expect("cleanup");
 }

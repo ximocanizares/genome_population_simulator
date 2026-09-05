@@ -19,8 +19,11 @@ use crate::configuration::{
 use crate::diagnostics::Diagnostic;
 use crate::error_quality::SequencingErrorsMode;
 use crate::exact_decimal::ExactDecimal;
-use crate::f5_admission::{AdmissionPhase, BoundedInput, InputRole, PhysicalInputIdentity};
-use crate::f5_profile::{F5_PROFILE_TSV_FILENAMES, F5Profile, load_f5_profile};
+use crate::f5_admission::{
+    AdmissionPhase, BoundedInput, F5ResourceLedger, InputRole, LedgerCharge, LedgerLimits,
+    OperationCost, OutputReservation, PhysicalInputIdentity, WorkingMemoryPeak,
+};
+use crate::f5_profile::{F5Profile, load_f5_profile_under_budget};
 use crate::haplotype::{HaplotypePhase, Ploidy};
 use crate::identity::{
     AutomaticIdRequest, EventId, FounderKey, IdClass, IdentityRegistry, IndividualId, PopulationId,
@@ -235,6 +238,7 @@ pub struct EffectiveF5Config {
     profile: F5Profile,
     bootstrap_documents: F5BootstrapDocuments,
     input_documents: F5InputDocuments,
+    profile_input_identities: Vec<PhysicalInputIdentity>,
     general: DeclaredF5GeneralConfig,
     scenario: DeclaredF5Scenario,
 }
@@ -305,9 +309,10 @@ impl F5BootstrapDocuments {
     }
 }
 
-/// Tamaños físicos de todos los documentos que el lector F5 puede retener o
-/// parsear antes de iniciar el preflight geométrico. Se recopilan mediante
-/// `metadata` antes de abrir el metadata o cualquiera de sus cinco TSV.
+/// Tamaños físicos de todos los documentos que el lector F5 retuvo y parseó
+/// antes de iniciar el preflight geométrico. Se derivan exclusivamente de las
+/// seis identidades observadas, tras la admisión secuencial del metadata y sus
+/// cinco TSV.
 ///
 /// No contienen identidad semántica: sus bytes de relleno no cambian el RNG ni
 /// el layout, pero sí forman parte de la reserva transitoria de admisión.
@@ -317,28 +322,49 @@ pub struct F5InputDocuments {
     scenario_toml_bytes: u64,
     profile_metadata_bytes: u64,
     profile_tsv_bytes: u64,
+    profile_tsv_peak_bytes: u64,
 }
 
 impl F5InputDocuments {
-    fn collect(
+    fn from_observed(
         general_toml_bytes: u64,
         scenario_toml_bytes: u64,
-        profile_metadata_path: &Path,
+        identities: &[PhysicalInputIdentity],
     ) -> Result<Self, Diagnostic> {
-        let profile_metadata_bytes = file_len(profile_metadata_path)?;
-        let profile_directory = profile_metadata_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."));
-        let profile_tsv_bytes =
-            F5_PROFILE_TSV_FILENAMES
+        let (metadata, tables) = identities.split_first().ok_or_else(|| {
+            Diagnostic::f5_resource("<unresolved>", "faltan identidades físicas del perfil")
+        })?;
+        let expected_table_roles = [
+            InputRole::ProfileBlockLengths,
+            InputRole::ProfileSnpGaps,
+            InputRole::ProfileSnpSpectrum,
+            InputRole::ProfileHaplotypeWeights,
+            InputRole::ProfileLd,
+        ];
+        if metadata.role() != InputRole::ProfileMetadata
+            || tables.len() != expected_table_roles.len()
+            || tables
                 .iter()
-                .try_fold(0_u64, |total, name| {
+                .zip(expected_table_roles)
+                .any(|(identity, role)| identity.role() != role)
+        {
+            return Err(Diagnostic::f5_resource(
+                "<unresolved>",
+                "las identidades físicas del perfil no tienen el orden contractual",
+            ));
+        }
+        let profile_metadata_bytes = metadata.observed_size_bytes();
+        let (profile_tsv_bytes, profile_tsv_peak_bytes) =
+            tables
+                .iter()
+                .try_fold((0_u64, 0_u64), |(total, peak), identity| {
                     total
-                        .checked_add(file_len(&profile_directory.join(name))?)
+                        .checked_add(identity.observed_size_bytes())
+                        .map(|total| (total, peak.max(identity.observed_size_bytes())))
                         .ok_or_else(|| {
                             Diagnostic::f5_resource(
                                 "<unresolved>",
-                                "overflow al sumar los bytes físicos del paquete de perfil",
+                                "overflow al sumar los bytes observados del paquete de perfil",
                             )
                         })
                 })?;
@@ -347,6 +373,7 @@ impl F5InputDocuments {
             scenario_toml_bytes,
             profile_metadata_bytes,
             profile_tsv_bytes,
+            profile_tsv_peak_bytes,
         })
     }
 
@@ -367,35 +394,31 @@ impl F5InputDocuments {
         self.profile_tsv_bytes
     }
 
-    /// Cada lector conserva los bytes crudos mientras el parser construye sus
-    /// valores. Dos copias físicas cubren lectura+retención y los buffers de
-    /// parser; las estructuras por fila se cuentan separadamente en v6.
-    pub fn parser_peak_bytes(self, scenario_id: &str) -> Result<u64, Diagnostic> {
-        self.general_toml_bytes
-            .checked_add(self.scenario_toml_bytes)
-            .and_then(|total| total.checked_add(self.profile_metadata_bytes))
-            .and_then(|total| total.checked_add(self.profile_tsv_bytes))
-            .and_then(|total| total.checked_mul(2))
-            .ok_or_else(|| {
-                Diagnostic::f5_resource(
-                    scenario_id,
-                    "overflow en la reserva de lectura, retención y parser de documentos F5",
-                )
-            })
+    #[must_use]
+    pub const fn profile_tsv_peak_bytes(self) -> u64 {
+        self.profile_tsv_peak_bytes
     }
-}
 
-fn file_len(path: &Path) -> Result<u64, Diagnostic> {
-    std::fs::metadata(path)
-        .map(|metadata| metadata.len())
-        .map_err(|error| {
-            Diagnostic::input(
-                "GPS-INPUT-001",
-                "No se puede abrir o leer una entrada declarada.",
+    /// Cada parser conserva lectura y representación temporal de su propia
+    /// entrada. Los TSV son fases secuenciales, por lo que solo contribuye la
+    /// mayor tabla, no la suma de cinco búferes que no coexisten.
+    pub fn parser_peak_bytes(self, scenario_id: &str) -> Result<u64, Diagnostic> {
+        [
+            self.general_toml_bytes
+                .checked_add(self.scenario_toml_bytes)
+                .and_then(|total| total.checked_mul(2)),
+            self.profile_metadata_bytes.checked_mul(2),
+            self.profile_tsv_peak_bytes.checked_mul(2),
+        ]
+        .into_iter()
+        .try_fold(0_u64, |peak, value| value.map(|value| peak.max(value)))
+        .ok_or_else(|| {
+            Diagnostic::f5_resource(
+                scenario_id,
+                "overflow en la reserva de lectura, retención y parser de documentos F5",
             )
-            .with("path", path.display().to_string())
-            .with("detail", error.to_string())
         })
+    }
 }
 
 #[derive(Debug)]
@@ -566,6 +589,10 @@ impl EffectiveF5Config {
     #[must_use]
     pub const fn input_documents(&self) -> F5InputDocuments {
         self.input_documents
+    }
+    #[must_use]
+    pub fn profile_input_identities(&self) -> &[PhysicalInputIdentity] {
+        &self.profile_input_identities
     }
     #[must_use]
     pub const fn bootstrap_documents(&self) -> &F5BootstrapDocuments {
@@ -1001,19 +1028,81 @@ fn load_and_validate_cli_config_with_toml_opener(
     // solicitó el llamador.
     let admitted = admit_toml_header(path, bytes, ExpectedConfigKind::GeneralDispatch)?;
     if admitted_is_f5_general_v3(&admitted) {
-        return bootstrap_f5_config_from_admitted_with_toml_opener(
+        let bootstrap = bootstrap_f5_config_from_admitted_with_toml_opener(
             general_path,
             document,
             admitted,
             opener,
-        )
-        .map(Box::new)
-        .map(CliValidatedConfig::F5);
+        )?;
+        // `validate` completa F5.1.2.3, pero no materializa referencia ni
+        // solicita entropía: esas fases siguen fuera de su autoridad.
+        validate_f5_profile_after_bootstrap(&bootstrap)?;
+        return Ok(CliValidatedConfig::F5(Box::new(bootstrap)));
     }
     let general = parse_declared_config(admitted)?;
     build_effective_config_with_entropy(&general, &mut SystemEntropy)
         .map(Box::new)
         .map(CliValidatedConfig::Legacy)
+}
+
+fn validate_f5_profile_after_bootstrap(bootstrap: &F5BootstrapConfig) -> Result<(), Diagnostic> {
+    let population_ids = bootstrap
+        .scenario
+        .subpopulations
+        .iter()
+        .map(|population| population.population_id.value().clone())
+        .collect::<BTreeSet<_>>();
+    let mut ledger = profile_ledger_after_bootstrap(&bootstrap.scenario, &bootstrap.documents)?;
+    let _ = load_f5_profile_under_budget(
+        &bootstrap.profile_metadata_path,
+        bootstrap.scenario.profile_metadata_sha256.value(),
+        &population_ids,
+        &mut ledger,
+    )?;
+    Ok(())
+}
+
+/// Construye la única transición bootstrap→perfil usada por la CLI y la
+/// biblioteca. El pico del bootstrap queda en el histórico, mientras sus
+/// búferes se declaran liberados (`retained_after=0`) antes del metadata.
+fn profile_ledger_after_bootstrap(
+    scenario: &DeclaredF5Scenario,
+    documents: &F5BootstrapDocuments,
+) -> Result<F5ResourceLedger, Diagnostic> {
+    let operation_limit = scenario
+        .max_operation_units
+        .as_ref()
+        .map_or(1_u64 << 28, |limit| *limit.value());
+    let working_memory_limit = scenario
+        .max_working_memory_bytes
+        .as_ref()
+        .map_or(1_u64 << 30, |limit| *limit.value());
+    let output_limit = scenario
+        .max_output_bytes
+        .as_ref()
+        .map_or(1_u64 << 31, |limit| *limit.value());
+    let mut ledger = F5ResourceLedger::new(LedgerLimits::new(
+        OperationCost::new(operation_limit),
+        WorkingMemoryPeak::new(working_memory_limit),
+        OutputReservation::new(output_limit),
+    ));
+    let bootstrap_bytes = documents
+        .general()
+        .size_bytes()
+        .checked_add(documents.scenario().size_bytes())
+        .ok_or_else(|| {
+            Diagnostic::f5_resource(scenario.scenario_id.value(), "overflow de bootstrap")
+        })?;
+    let bootstrap_cost = bootstrap_bytes.checked_mul(2).ok_or_else(|| {
+        Diagnostic::f5_resource(scenario.scenario_id.value(), "overflow de coste bootstrap")
+    })?;
+    ledger.charge(
+        InputRole::GeneralToml,
+        LedgerCharge::Operation(OperationCost::new(bootstrap_cost)),
+    )?;
+    ledger.charge_memory_phase(InputRole::GeneralToml, 0, bootstrap_cost, 0)?;
+    ledger.transition_to(AdmissionPhase::ProfileMetadata)?;
+    Ok(ledger)
 }
 
 /// Carga el par F5 desde la ruta de CLI. La ruta de CLI se ancla una sola vez
@@ -1111,9 +1200,9 @@ fn bootstrap_f5_config_from_admitted_with_toml_opener(
     })
 }
 
-/// Compatibilidad transitoria para los consumidores F5 previos a F5.1.2.3.
-/// La ruta CLI no llama a esta función: el perfil solo se cargará desde la
-/// siguiente transición del ledger v7.
+/// Materializa el perfil inmediatamente después del bootstrap usando la misma
+/// contabilidad v7. La semilla se resuelve únicamente si las seis entradas
+/// físicas han sido admitidas.
 fn materialize_f5_config_after_bootstrap(
     bootstrap: F5BootstrapConfig,
     entropy: &mut impl EntropySource,
@@ -1133,18 +1222,18 @@ fn materialize_f5_config_after_bootstrap(
         .iter()
         .map(|population| population.population_id.value().clone())
         .collect::<BTreeSet<_>>();
-    // La carga v7 del perfil se traslada al paso F5.1.2.3. La estructura
-    // heredada solo mantiene la compatibilidad de los consumidores F5 ya
-    // existentes; se alcanza exclusivamente después de sellar el bootstrap.
-    let input_documents = F5InputDocuments::collect(
-        documents.general().size_bytes(),
-        documents.scenario().size_bytes(),
-        &profile_metadata_path,
-    )?;
-    let profile = load_f5_profile(
+    let mut ledger = profile_ledger_after_bootstrap(&scenario, &documents)?;
+    let loaded_profile = load_f5_profile_under_budget(
         &profile_metadata_path,
         scenario.profile_metadata_sha256.value(),
         &population_ids,
+        &mut ledger,
+    )?;
+    let (profile, profile_input_identities) = loaded_profile.into_parts();
+    let input_documents = F5InputDocuments::from_observed(
+        documents.general().size_bytes(),
+        documents.scenario().size_bytes(),
+        &profile_input_identities,
     )?;
     let (root_seed, origin) = resolve_root_seed(
         general.seed.as_ref().map(|seed| seed.value().as_str()),
@@ -1167,6 +1256,7 @@ fn materialize_f5_config_after_bootstrap(
         profile,
         bootstrap_documents: documents,
         input_documents,
+        profile_input_identities,
         general,
         scenario,
     })

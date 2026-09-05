@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -14,8 +15,12 @@ use genome_population_simulator::f5_preflight::{
     F5_HARD_OPERATION_LIMIT, F5_HARD_OUTPUT_LIMIT, F5_HARD_WORKING_MEMORY_LIMIT, F5OtherResources,
     preflight_f5_resources,
 };
-use genome_population_simulator::identity::ExecutionId;
-use genome_population_simulator::randomness::EntropySource;
+use genome_population_simulator::identity::{
+    ExecutionId, F5IdentityContext, F5IdentityRegistry, ReferenceId, ScenarioId,
+};
+use genome_population_simulator::randomness::{
+    EntropySource, F5RandomDecision, RootSeed, derive_f5_subseed,
+};
 use sha2::{Digest, Sha256};
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
@@ -40,6 +45,103 @@ fn temporary(label: &str) -> PathBuf {
 
 fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+fn assert_preflight_projection_validates_through_effective_and_manifest(
+    root: &Path,
+    projection: &serde_json::Value,
+) {
+    let bundle = root.join("schema-projection");
+    fs::create_dir_all(&bundle).expect("schema projection directory");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for schema in [
+        "effective-config-v5.schema.json",
+        "manifest-general-v5.schema.json",
+        "f5-failure-v1.schema.json",
+    ] {
+        fs::copy(repository.join("schemas").join(schema), bundle.join(schema))
+            .expect("schema dependency");
+    }
+    let instance = bundle.join("preflight.json");
+    fs::write(
+        &instance,
+        serde_json::to_vec(projection).expect("serialized public preflight projection"),
+    )
+    .expect("preflight instance");
+    for (wrapper, contract_ref) in [
+        (
+            "effective-preflight.schema.json",
+            "effective-config-v5.schema.json#/$defs/preflight",
+        ),
+        (
+            "manifest-preflight.schema.json",
+            "manifest-general-v5.schema.json#/$defs/success/properties/resource_preflight",
+        ),
+    ] {
+        let wrapper_path = bundle.join(wrapper);
+        fs::write(
+            &wrapper_path,
+            format!(
+                r#"{{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"{contract_ref}"}}"#
+            ),
+        )
+        .expect("wrapper schema");
+        let output = Command::new("python3")
+            .arg(repository.join("tests/external_jsonschema_validator.py"))
+            .arg(&wrapper_path)
+            .arg(&instance)
+            .output()
+            .expect("external JSON Schema validator");
+        assert!(
+            output.status.success(),
+            "{wrapper}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+fn assert_f5_1_2_3_v7_scalar_key_set(projection: &serde_json::Value) {
+    // Oráculo literal independiente de `to_contract_json` y de los esquemas.
+    // `input_identities` y `phases` pertenecen al cierre posterior F5.1.2.5;
+    // este subhito solo puede publicar los escalares v7 ya materializados.
+    let expected = [
+        "algorithm",
+        "reference_bases_processed",
+        "fasta_bytes_processed",
+        "mask_bytes_processed",
+        "general_toml_bytes",
+        "scenario_toml_bytes",
+        "profile_metadata_bytes",
+        "profile_tsv_bytes",
+        "tract_count",
+        "retained_sequence_ids",
+        "gap_support_cardinality",
+        "gap_selector_operation_units",
+        "site_bound_per_block",
+        "bin_count_total",
+        "profile_rows",
+        "normalization_rows",
+        "tsv_rows_bound",
+        "json_rows_bound",
+        "other_operation_units",
+        "other_working_memory_bytes",
+        "other_output_bytes",
+        "operation_units",
+        "working_memory_bytes",
+        "output_bytes",
+        "operation_limit",
+        "working_memory_limit_bytes",
+        "output_limit_bytes",
+    ]
+    .into_iter()
+    .collect::<BTreeSet<_>>();
+    let observed = projection
+        .as_object()
+        .expect("public v7 preflight object")
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(observed, expected);
 }
 
 fn write_profile(path: &Path) -> String {
@@ -177,6 +279,23 @@ fn replace_scenario(root: &Path, from: &str, to: &str) {
     let source = fs::read_to_string(&path).expect("scenario source");
     assert!(source.contains(from), "missing scenario fragment: {from}");
     fs::write(path, source.replace(from, to)).expect("scenario rewrite");
+}
+
+fn rename_scenario(root: &Path, current: &str, renamed: &str) {
+    for path in [
+        root.join("authoring/general.toml"),
+        root.join("authoring/scenarios/scenario.toml"),
+    ] {
+        let source = fs::read_to_string(&path).expect("scenario-bearing source");
+        fs::write(
+            path,
+            source.replace(
+                &format!("scenario_id = \"{current}\""),
+                &format!("scenario_id = \"{renamed}\""),
+            ),
+        )
+        .expect("scenario rename");
+    }
 }
 
 fn replace_reference(root: &Path, fasta: &[u8]) {
@@ -357,6 +476,35 @@ fn replace_reference_digest(root: &Path, observed: String) {
     fs::write(path, format!("{rewritten}\n")).expect("general rewrite");
 }
 
+struct FinalFormulaMemoryInputs {
+    block_count: u64,
+    tract_count: u64,
+    retained_sequence_ids: u64,
+    profile_rows: u64,
+    normalization_rows: u64,
+    population_count: u64,
+    haplotype_count: u64,
+    site_bound: u64,
+    bin_count_total: u64,
+    founder_copy_count: u64,
+}
+
+fn final_formula_memory_oracle(inputs: FinalFormulaMemoryInputs) -> u64 {
+    let pair_bound = inputs.site_bound * (inputs.site_bound - 1) / 2;
+    let hs_bytes = (inputs.haplotype_count * inputs.site_bound).div_ceil(8);
+    256 * (4 * inputs.block_count
+        + 2 * inputs.tract_count
+        + inputs.retained_sequence_ids
+        + inputs.profile_rows
+        + inputs.normalization_rows)
+        + inputs.block_count
+            * inputs.population_count
+            * (hs_bytes + 64 * inputs.haplotype_count + 256 * inputs.site_bound + 192 * pair_bound)
+        + 256 * inputs.block_count * inputs.bin_count_total
+        + 128 * inputs.founder_copy_count
+        + 65_536
+}
+
 #[test]
 fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
     let root = temporary("fragmented");
@@ -403,8 +551,27 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
     assert_eq!(compact.bin_count_total(), 1);
     assert_eq!(compact.tsv_rows_bound(), 11);
     assert_eq!(compact.json_rows_bound(), 30);
-    assert_eq!(compact.operation_units(), 39_305);
-    assert_eq!(compact.working_memory_bytes(), 76_037);
+    let operation_without_gap_selector = 41_579;
+    assert_eq!(compact.gap_selector_operation_units(), 4);
+    assert_eq!(
+        compact.operation_units(),
+        operation_without_gap_selector + compact.gap_selector_operation_units()
+    );
+    assert_eq!(
+        compact.working_memory_bytes(),
+        final_formula_memory_oracle(FinalFormulaMemoryInputs {
+            block_count: 1,
+            tract_count: 1,
+            retained_sequence_ids: 1,
+            profile_rows: 6,
+            normalization_rows: 5,
+            population_count: 1,
+            haplotype_count: 2,
+            site_bound: 2,
+            bin_count_total: 1,
+            founder_copy_count: 2,
+        })
+    );
     assert_eq!(compact.output_bytes(), 1_306_624);
     assert_eq!(
         fragmented.operation_units() - compact.operation_units(),
@@ -1084,7 +1251,21 @@ fn retained_sequence_id_peak_is_persisted_in_the_published_memory_bound() {
 
     assert_eq!(result.retained_sequence_ids(), 129);
     assert_eq!(result.tract_count(), 1);
-    assert_eq!(result.working_memory_bytes(), 108_525);
+    assert_eq!(
+        result.working_memory_bytes(),
+        final_formula_memory_oracle(FinalFormulaMemoryInputs {
+            block_count: 1,
+            tract_count: 1,
+            retained_sequence_ids: 129,
+            profile_rows: 6,
+            normalization_rows: 5,
+            population_count: 1,
+            haplotype_count: 2,
+            site_bound: 2,
+            bin_count_total: 1,
+            founder_copy_count: 2,
+        })
+    );
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -1279,6 +1460,205 @@ fn wide_literal_length_support_is_rejected_by_preflight_before_enumeration() {
         .expect_err("the literal two-pass support cannot exceed the operation budget");
     assert_eq!(error.code(), "GPS-RES-101");
     assert!(error.context()["detail"].contains("length_support_cardinality"));
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn public_layout_preserves_configured_scenario_in_plan_subseed_and_ids() {
+    let root = temporary("configured-scenario-identity");
+    fs::create_dir_all(&root).expect("root");
+    let general = configuration(&root, None, "", "AAAA");
+    rename_scenario(&root, "scenario", "configured-scenario");
+    let configured = load_and_validate_f5_config(&general).expect("renamed configuration");
+    let preflight = preflight_f5_resources(&configured, F5OtherResources::default())
+        .expect("renamed preflight");
+    let plan = F5BlockLengthPlan::from_preflight(&configured, &preflight).expect("bound plan");
+    assert_eq!(plan.scenario_id().as_str(), "configured-scenario");
+
+    let root_seed = RootSeed::parse("seed", configured.seed()).expect("root seed");
+    let scenario = ScenarioId::parse(configured.scenario_id(), "test").expect("scenario");
+    let reference = ReferenceId::parse(configured.reference_id(), "test").expect("reference");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let plan_subseed = derive_f5_subseed(
+        root_seed,
+        F5RandomDecision::layout_length(plan.scenario_id(), 0, 0),
+    )
+    .expect("plan subseed");
+    let configured_subseed =
+        derive_f5_subseed(root_seed, F5RandomDecision::layout_length(&scenario, 0, 0))
+            .expect("configured subseed");
+    assert_eq!(plan_subseed, configured_subseed);
+
+    let layout = build_f5_physical_layout(
+        F5LayoutRequest::new(&configured, &preflight, &execution).expect("request"),
+    )
+    .expect("layout");
+    let expected_block = F5IdentityRegistry::default()
+        .derive_block(
+            F5IdentityContext::new(root_seed, &execution, &scenario, &reference),
+            0,
+        )
+        .expect("independent block ID");
+    assert_eq!(layout.blocks()[0].block_id(), &expected_block);
+
+    rename_scenario(&root, "configured-scenario", "different-scenario");
+    let different = load_and_validate_f5_config(&general).expect("second renamed configuration");
+    let different_preflight =
+        preflight_f5_resources(&different, F5OtherResources::default()).expect("second preflight");
+    let different_plan =
+        F5BlockLengthPlan::from_preflight(&different, &different_preflight).expect("second plan");
+    let different_subseed = derive_f5_subseed(
+        root_seed,
+        F5RandomDecision::layout_length(different_plan.scenario_id(), 0, 0),
+    )
+    .expect("different subseed");
+    let different_layout = build_f5_physical_layout(
+        F5LayoutRequest::new(&different, &different_preflight, &execution).expect("second request"),
+    )
+    .expect("second layout");
+    assert_ne!(plan_subseed, different_subseed);
+    assert_ne!(
+        layout.blocks()[0].block_id(),
+        different_layout.blocks()[0].block_id(),
+        "scenario_id participates in the public block identity"
+    );
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn gap_support_cardinality_is_discontinuous_bounded_and_inclusive_before_rng() {
+    let root = temporary("gap-support-budget");
+    fs::create_dir_all(&root).expect("root");
+    let other = F5OtherResources::new(100_000, 0, 0);
+    let general = custom_configuration_with_gap(
+        &root,
+        "max_operation_units = 999999\n",
+        "AAAA",
+        "length_min_bp\tlength_max_bp\tweight\n4\t4\t1\n",
+        "gap_min_bp\tgap_max_bp\tweight\n1\t2\t0.5\n10\t12\t0.5\n",
+        "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t3\t0.5\t0.05\n",
+    );
+    let unrestricted = load_and_validate_f5_config(&general).expect("discontinuous support");
+    let baseline = preflight_f5_resources(&unrestricted, other).expect("bounded preflight");
+    assert_eq!(baseline.gap_support_cardinality(), 5);
+    assert_eq!(baseline.site_bound_per_block(), 4);
+    let maximum_gap_draws =
+        baseline.max_layout_attempts() * baseline.block_count() * baseline.site_bound_per_block();
+    assert_eq!(
+        baseline.gap_selector_operation_units(),
+        2 * maximum_gap_draws * baseline.gap_support_cardinality()
+    );
+    assert_eq!(baseline.operation_units().to_string().len(), 6);
+
+    replace_scenario(
+        &root,
+        "max_operation_units = 999999\n",
+        &format!("max_operation_units = {}\n", baseline.operation_units()),
+    );
+    let exact = load_and_validate_f5_config(&general).expect("exact configuration");
+    assert_eq!(
+        preflight_f5_resources(&exact, other)
+            .expect("inclusive operation bound")
+            .operation_units(),
+        baseline.operation_units()
+    );
+    replace_scenario(
+        &root,
+        &format!("max_operation_units = {}\n", baseline.operation_units()),
+        &format!("max_operation_units = {}\n", baseline.operation_units() - 1),
+    );
+    let minus_one = load_and_validate_f5_config(&general).expect("minus-one configuration");
+    let error = preflight_f5_resources(&minus_one, other)
+        .expect_err("gap traversal bound rejects before any layout RNG");
+    assert_eq!(error.code(), "GPS-RES-101");
+    assert!(error.context()["detail"].contains("gap_support_cardinality=5"));
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn public_v7_preflight_serializes_gap_terms_and_validates_both_contracts() {
+    let root = temporary("public-v7-projection");
+    fs::create_dir_all(&root).expect("root");
+    let general = custom_configuration_with_gap(
+        &root,
+        "max_operation_units = 999999\n",
+        "AAAA",
+        "length_min_bp\tlength_max_bp\tweight\n4\t4\t1\n",
+        "gap_min_bp\tgap_max_bp\tweight\n1\t2\t0.5\n10\t12\t0.5\n",
+        "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t3\t0.5\t0.05\n",
+    );
+    let config = load_and_validate_f5_config(&general).expect("public configuration");
+    let preflight = preflight_f5_resources(&config, F5OtherResources::default())
+        .expect("public resource calculation");
+    assert_eq!(
+        preflight.algorithm(),
+        genome_population_simulator::f5_admission::F5_RESOURCE_ACCOUNTING_ALGORITHM
+    );
+    assert_eq!(preflight.algorithm(), "f5-resource-accounting-v7");
+
+    let projection = preflight.to_contract_json();
+    assert_f5_1_2_3_v7_scalar_key_set(&projection);
+    assert_eq!(projection["algorithm"], preflight.algorithm());
+    assert_eq!(
+        projection["gap_support_cardinality"],
+        preflight.gap_support_cardinality()
+    );
+    assert_eq!(
+        projection["gap_selector_operation_units"],
+        preflight.gap_selector_operation_units()
+    );
+    assert_preflight_projection_validates_through_effective_and_manifest(&root, &projection);
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn trillion_wide_gap_support_is_rejected_without_enumeration() {
+    let root = temporary("trillion-gap-support");
+    fs::create_dir_all(&root).expect("root");
+    let general = custom_configuration_with_gap(
+        &root,
+        "",
+        "AAAA",
+        "length_min_bp\tlength_max_bp\tweight\n2\t2\t1\n",
+        "gap_min_bp\tgap_max_bp\tweight\n1\t1000000000000\t1\n",
+        "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t1\t0.5\t0.05\n",
+    );
+    let config = load_and_validate_f5_config(&general).expect("wide gap profile parses");
+    let error = preflight_f5_resources(&config, F5OtherResources::default())
+        .expect_err("the literal selector cost exceeds the hard operation bound");
+    assert_eq!(error.code(), "GPS-RES-101");
+    assert!(error.context()["detail"].contains("gap_support_cardinality=1000000000000"));
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn maximum_singleton_gap_exhausts_layout_normally_without_overflow() {
+    let root = temporary("maximum-singleton-gap");
+    fs::create_dir_all(&root).expect("root");
+    let general = custom_configuration_with_gap(
+        &root,
+        "",
+        "AA",
+        "length_min_bp\tlength_max_bp\tweight\n2\t2\t1\n",
+        "gap_min_bp\tgap_max_bp\tweight\n18446744073709551615\t18446744073709551615\t1\n",
+        "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t1\t0.5\t0.05\n",
+    );
+    let config = load_and_validate_f5_config(&general).expect("maximum singleton gap");
+    let preflight = preflight_f5_resources(&config, F5OtherResources::default())
+        .expect("singleton support stays bounded");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let error = build_f5_physical_layout(
+        F5LayoutRequest::new(&config, &preflight, &execution).expect("request"),
+    )
+    .expect_err("one-site attempt is insufficient");
+    assert_eq!(error.code(), "GPS-DOMAIN-106");
+    assert!(!error.diagnostic().render_human().contains("desborda"));
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -1576,7 +1956,7 @@ fn layout_streams_large_fasta_and_keeps_the_admitted_working_bound() {
 }
 
 #[test]
-fn cli_admits_or_rejects_profile_document_bytes_before_materializing_them() {
+fn profile_padding_changes_its_phase_without_summing_noncoexistent_peaks() {
     let short_root = temporary("profile-input-short");
     let long_root = temporary("profile-input-long");
     fs::create_dir_all(&short_root).expect("short root");
@@ -1606,11 +1986,12 @@ fn cli_admits_or_rejects_profile_document_bytes_before_materializing_them() {
     assert_eq!(
         long.input_parser_peak_bytes() - short.input_parser_peak_bytes(),
         8_184,
-        "v6 reserves raw bytes plus the parser-retention copy"
+        "the metadata phase reserves raw bytes plus its parser representation"
     );
     assert_eq!(
-        long.working_memory_bytes() - short.working_memory_bytes(),
-        8_184
+        long.working_memory_bytes(),
+        short.working_memory_bytes(),
+        "the unchanged final-formula phase remains the global maximum"
     );
 
     replace_scenario(

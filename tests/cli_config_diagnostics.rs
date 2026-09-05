@@ -268,7 +268,7 @@ fn cli_dispatches_general_v3_from_an_unrelated_three_level_working_directory() {
 }
 
 #[test]
-fn f5_validate_bootstrap_does_not_open_profile_before_f5_1_2_3() {
+fn f5_validate_rejects_missing_corrupt_or_mismatched_profile_before_reference() {
     for case in ["absent", "corrupt", "hash"] {
         let root = destination(case);
         let general = write_f5_cli_fixture(&root);
@@ -306,8 +306,9 @@ fn f5_validate_bootstrap_does_not_open_profile_before_f5_1_2_3() {
         }
         let output = root.join("out");
         let result = run("validate", &general, "human", &output);
-        assert!(
-            result.status.success(),
+        assert_eq!(
+            result.status.code(),
+            Some(2),
             "{case}: {}",
             String::from_utf8_lossy(&result.stderr)
         );
@@ -342,7 +343,7 @@ fn f5_validate_bootstrap_does_not_open_reference_or_run_preflight() {
     )
     .expect("resource limit");
     let result = run("validate", &general, "json", &output);
-    assert!(result.status.success());
+    assert_eq!(result.status.code(), Some(2));
     assert!(!output.exists());
     fs::remove_dir_all(root).expect("cleanup");
 }

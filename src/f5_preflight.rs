@@ -18,16 +18,10 @@ use crate::application::EffectiveF5Config;
 use crate::configuration::{DeclaredF5Target, DeclaredNumber};
 use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
+pub use crate::f5_admission::F5_RESOURCE_ACCOUNTING_ALGORITHM;
 use crate::identity::{ReferenceId, SequenceId};
 use crate::reference_fasta::{empty_fasta, empty_header, input_error, invalid_symbol};
 
-/// v6 conserva las cotas v5 y añade la reserva física de los dos TOML, el
-/// metadata de perfil y sus cinco TSV antes de que se materialicen.
-///
-/// El total de inicios válidos debe conocerse antes de sortear el entero
-/// uniforme y el prefijo que lo resuelve solo puede recorrerse después. No se
-/// conserva un índice auxiliar de tramos, así que ambas pasadas se presuponen.
-pub const F5_RESOURCE_ACCOUNTING_ALGORITHM: &str = "f5-resource-accounting-v6";
 pub const F5_HARD_OPERATION_LIMIT: u64 = 1 << 28;
 pub const F5_HARD_WORKING_MEMORY_LIMIT: u64 = 1 << 30;
 pub const F5_HARD_OUTPUT_LIMIT: u64 = 1 << 31;
@@ -501,7 +495,7 @@ fn canonical_f5_number(
         .transpose()
 }
 
-/// Resultado del preflight `f5-resource-accounting-v6`.
+/// Resultado del preflight `f5-resource-accounting-v7`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct F5ResourcePreflight {
     configuration_identity: F5PreflightConfigurationIdentity,
@@ -524,6 +518,8 @@ pub struct F5ResourcePreflight {
     input_parser_peak_bytes: u64,
     tract_count: u64,
     retained_sequence_ids: u64,
+    gap_support_cardinality: u64,
+    gap_selector_operation_units: u64,
     site_bound_per_block: u64,
     bin_count_total: u64,
     profile_rows: u64,
@@ -547,6 +543,42 @@ impl F5ResourcePreflight {
     #[must_use]
     pub const fn algorithm(&self) -> &'static str {
         F5_RESOURCE_ACCOUNTING_ALGORITHM
+    }
+    /// Proyección escalar v7 que efectivo y manifiesto pueden persistir en
+    /// F5.1.2.3. Conserva el pico del parser solo como contabilidad interna;
+    /// las identidades y fases públicas se incorporan conjuntamente al sellar
+    /// la admisión en F5.1.2.5.
+    #[must_use]
+    pub fn to_contract_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "algorithm": self.algorithm(),
+            "reference_bases_processed": self.reference_bases_processed,
+            "fasta_bytes_processed": self.fasta_bytes_processed,
+            "mask_bytes_processed": self.mask_bytes_processed,
+            "general_toml_bytes": self.general_toml_bytes,
+            "scenario_toml_bytes": self.scenario_toml_bytes,
+            "profile_metadata_bytes": self.profile_metadata_bytes,
+            "profile_tsv_bytes": self.profile_tsv_bytes,
+            "tract_count": self.tract_count,
+            "retained_sequence_ids": self.retained_sequence_ids,
+            "gap_support_cardinality": self.gap_support_cardinality,
+            "gap_selector_operation_units": self.gap_selector_operation_units,
+            "site_bound_per_block": self.site_bound_per_block,
+            "bin_count_total": self.bin_count_total,
+            "profile_rows": self.profile_rows,
+            "normalization_rows": self.normalization_rows,
+            "tsv_rows_bound": self.tsv_rows_bound,
+            "json_rows_bound": self.json_rows_bound,
+            "other_operation_units": self.other.operation_units(),
+            "other_working_memory_bytes": self.other.working_memory_bytes(),
+            "other_output_bytes": self.other.output_bytes(),
+            "operation_units": self.operation_units,
+            "working_memory_bytes": self.working_memory_bytes,
+            "output_bytes": self.output_bytes,
+            "operation_limit": self.operation_limit,
+            "working_memory_limit_bytes": self.working_memory_limit_bytes,
+            "output_limit_bytes": self.output_limit_bytes,
+        })
     }
     #[must_use]
     pub fn scenario_id(&self) -> &str {
@@ -632,6 +664,18 @@ impl F5ResourcePreflight {
     #[must_use]
     pub const fn retained_sequence_ids(&self) -> u64 {
         self.retained_sequence_ids
+    }
+    /// Número de gaps enteros con probabilidad positiva, sumado por los
+    /// intervalos disjuntos del perfil sin rellenar huecos entre ellos.
+    #[must_use]
+    pub const fn gap_support_cardinality(&self) -> u64 {
+        self.gap_support_cardinality
+    }
+    /// Cota conservadora de visitas del selector literal de gaps: dos pasadas
+    /// completas por cada sorteo potencial de cada bloque e intento.
+    #[must_use]
+    pub const fn gap_selector_operation_units(&self) -> u64 {
+        self.gap_selector_operation_units
     }
     #[must_use]
     pub const fn site_bound_per_block(&self) -> u64 {
@@ -762,7 +806,9 @@ fn preflight_resolved_f5_resources(
             profile_metadata_bytes,
             profile_tsv_bytes,
         ],
-    )?;
+    )?
+    .checked_mul(2)
+    .ok_or_else(|| resource(config, "overflow en 2*input_document_bytes"))?;
     let profile = config.profile();
     let l_min = profile
         .block_lengths()
@@ -863,6 +909,42 @@ fn preflight_resolved_f5_resources(
     let length_support_cardinality = sub("length_support_cardinality", l_max, l_min, config)?
         .checked_add(1)
         .ok_or_else(|| resource(config, "overflow en length_support_cardinality"))?;
+    // Los gaps pueden tener soporte discontinuo. El selector literal recorre
+    // todos los valores soportados para el total Neumaier y, conservadoramente,
+    // todos de nuevo para el prefijo. Cada bloque puede pedir como máximo
+    // S_bound gaps (S_bound-1 que caben y uno terminal que ya no cabe) en cada
+    // intento. Esta cota se calcula sin enumerar el soporte y antes de RNG.
+    let gap_support_cardinality =
+        profile
+            .snp_gaps()
+            .iter()
+            .try_fold(0_u64, |total, interval| {
+                let width = sub(
+                    "gap_interval_width",
+                    interval.maximum(),
+                    interval.minimum(),
+                    config,
+                )?
+                .checked_add(1)
+                .ok_or_else(|| resource(config, "overflow en gap_interval_width"))?;
+                add("gap_support_cardinality", total, width, config)
+            })?;
+    let gap_selector_operation_units = mul(
+        "2*L*B*S_bound*gap_support_cardinality",
+        2,
+        mul(
+            "L*B*S_bound*gap_support_cardinality",
+            mul(
+                "L*B*S_bound",
+                mul("L*B", layout_attempts, block_count, config)?,
+                site_bound_per_block,
+                config,
+            )?,
+            gap_support_cardinality,
+            config,
+        )?,
+        config,
+    )?;
     let profile_rows = add_many(
         config,
         "profile_rows",
@@ -919,9 +1001,9 @@ fn preflight_resolved_f5_resources(
         "operation_units",
         [
             other.operation_units(),
-            // Los documentos de autoría y perfil se leen antes del preflight
-            // geométrico. Sus tamaños se recogen con metadata antes de abrir
-            // el perfil, y v6 registra esa E/S explícitamente.
+            // Los documentos de autoría y perfil se leen y parsean antes del
+            // preflight geométrico: dos unidades por byte, observadas por sus
+            // propios handles, no por metadata del sistema de ficheros.
             input_document_bytes,
             // El escáner de admisión y la recuperación REF posterior recorren
             // cada byte físico del FASTA, incluidas cabeceras, descripciones y
@@ -987,6 +1069,7 @@ fn preflight_resolved_f5_resources(
                 )?,
                 config,
             )?,
+            gap_selector_operation_units,
             mul(
                 "L*B*(B+S_bound)",
                 mul("L*B", layout_attempts, block_count, config)?,
@@ -1018,12 +1101,11 @@ fn preflight_resolved_f5_resources(
         ],
     )?;
     let hs = mul("H*S_bound", h, site_bound_per_block, config)?;
-    let working_memory_bytes = add_many(
+    let final_formula_peak = add_many(
         config,
-        "working_memory_bytes",
+        "final_formula_peak",
         [
             other.working_memory_bytes(),
-            input_parser_peak_bytes,
             mul(
                 "256*(4*B+2*tract_count+retained_sequence_ids+profile_rows+normalization_rows)",
                 F5_SCAN_RETAINED_ITEM_BYTES,
@@ -1065,6 +1147,93 @@ fn preflight_resolved_f5_resources(
             F5_SCAN_FIXED_MEMORY_BYTES,
         ],
     )?;
+    // La memoria no es una cuota acumulativa: cada fase conserva solo sus
+    // estructuras propias. El resultado contractual es el mayor pico físico,
+    // no el presupuesto menos un máximo histórico ni una suma de parsers.
+    let bootstrap_peak = add_many(
+        config,
+        "bootstrap_peak",
+        [
+            other.working_memory_bytes(),
+            mul(
+                "2*(general_toml_bytes+scenario_toml_bytes)",
+                2,
+                add(
+                    "general_toml_bytes+scenario_toml_bytes",
+                    general_toml_bytes,
+                    scenario_toml_bytes,
+                    config,
+                )?,
+                config,
+            )?,
+        ],
+    )?;
+    let profile_metadata_peak = add_many(
+        config,
+        "profile_metadata_peak",
+        [
+            other.working_memory_bytes(),
+            mul(
+                "2*profile_metadata_bytes",
+                2,
+                profile_metadata_bytes,
+                config,
+            )?,
+        ],
+    )?;
+    let profile_table_peak = add_many(
+        config,
+        "profile_table_peak",
+        [
+            other.working_memory_bytes(),
+            mul(
+                "2*profile_tsv_peak_bytes",
+                2,
+                input_documents.profile_tsv_peak_bytes(),
+                config,
+            )?,
+            mul(
+                "256*(profile_rows+normalization_rows)",
+                F5_SCAN_RETAINED_ITEM_BYTES,
+                add(
+                    "profile_rows+normalization_rows",
+                    profile_rows,
+                    normalization_rows,
+                    config,
+                )?,
+                config,
+            )?,
+        ],
+    )?;
+    let reference_scan_peak = add_many(
+        config,
+        "reference_and_mask_scan_peak",
+        [
+            other.working_memory_bytes(),
+            F5_SCAN_FIXED_MEMORY_BYTES,
+            mul(
+                "256*(tract_count+retained_sequence_ids)",
+                F5_SCAN_RETAINED_ITEM_BYTES,
+                add(
+                    "tract_count+retained_sequence_ids",
+                    tract_count,
+                    retained_sequence_ids,
+                    config,
+                )?,
+                config,
+            )?,
+        ],
+    )?;
+    let working_memory_bytes = [
+        bootstrap_peak,
+        profile_metadata_peak,
+        profile_table_peak,
+        reference_scan_peak,
+        final_formula_peak,
+    ]
+    .into_iter()
+    .max()
+    .expect("five non-empty F5 memory phases");
     let truth_bound = add_many(
         config,
         "truth_bound",
@@ -1124,7 +1293,7 @@ fn preflight_resolved_f5_resources(
         return Err(resource(
             config,
             format!(
-                "operation_units={operation_units}/{operation_limit}, working_memory_bytes={working_memory_bytes}/{working_memory_limit_bytes}, output_bytes={output_bytes}/{output_limit_bytes}, length_support_cardinality={length_support_cardinality}"
+                "operation_units={operation_units}/{operation_limit}, working_memory_bytes={working_memory_bytes}/{working_memory_limit_bytes}, output_bytes={output_bytes}/{output_limit_bytes}, length_support_cardinality={length_support_cardinality}, gap_support_cardinality={gap_support_cardinality}, gap_selector_operation_units={gap_selector_operation_units}"
             ),
         ));
     }
@@ -1153,6 +1322,8 @@ fn preflight_resolved_f5_resources(
         input_parser_peak_bytes,
         tract_count,
         retained_sequence_ids,
+        gap_support_cardinality,
+        gap_selector_operation_units,
         site_bound_per_block,
         bin_count_total,
         profile_rows,

@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,6 +8,51 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::{Value, json};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+const F5_1_2_3_V7_SCALAR_KEYS: [&str; 27] = [
+    "algorithm",
+    "reference_bases_processed",
+    "fasta_bytes_processed",
+    "mask_bytes_processed",
+    "general_toml_bytes",
+    "scenario_toml_bytes",
+    "profile_metadata_bytes",
+    "profile_tsv_bytes",
+    "tract_count",
+    "retained_sequence_ids",
+    "gap_support_cardinality",
+    "gap_selector_operation_units",
+    "site_bound_per_block",
+    "bin_count_total",
+    "profile_rows",
+    "normalization_rows",
+    "tsv_rows_bound",
+    "json_rows_bound",
+    "other_operation_units",
+    "other_working_memory_bytes",
+    "other_output_bytes",
+    "operation_units",
+    "working_memory_bytes",
+    "output_bytes",
+    "operation_limit",
+    "working_memory_limit_bytes",
+    "output_limit_bytes",
+];
+
+fn assert_f5_1_2_3_v7_scalar_key_set(document: &Value, pointer: &str) {
+    // Oráculo literal independiente del productor, el esquema y `preflight()`.
+    // Identidades y fases se incorporan conjuntamente en F5.1.2.5.
+    let expected = F5_1_2_3_V7_SCALAR_KEYS.into_iter().collect::<BTreeSet<_>>();
+    let observed = document
+        .pointer(pointer)
+        .expect("resource_preflight pointer")
+        .as_object()
+        .expect("resource_preflight object")
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(observed, expected, "unexpected key set at {pointer}");
+}
 
 fn assert_external_cases(schema: &str, dependencies: &[&str], cases: Vec<(Value, bool)>) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -110,7 +156,7 @@ fn normalizations() -> Value {
 
 fn preflight() -> Value {
     json!({
-        "algorithm": "f5-resource-accounting-v6",
+        "algorithm": "f5-resource-accounting-v7",
         "reference_bases_processed": 1,
         "fasta_bytes_processed": 1,
         "mask_bytes_processed": 0,
@@ -118,9 +164,10 @@ fn preflight() -> Value {
         "scenario_toml_bytes": 1,
         "profile_metadata_bytes": 1,
         "profile_tsv_bytes": 5,
-        "input_parser_peak_bytes": 16,
         "tract_count": 1,
         "retained_sequence_ids": 1,
+        "gap_support_cardinality": 1,
+        "gap_selector_operation_units": 2,
         "site_bound_per_block": 1,
         "bin_count_total": 1,
         "profile_rows": 1,
@@ -549,16 +596,9 @@ fn authoring_schemas_match_u64_and_normalized_path_boundaries() {
 #[test]
 fn effective_profile_and_catalog_links_are_closed_and_instantiable() {
     let valid = effective();
+    assert_f5_1_2_3_v7_scalar_key_set(&valid, "/f5/resource_preflight");
     let mut cases = vec![(valid.clone(), true)];
-    for field in [
-        "fasta_bytes_processed",
-        "mask_bytes_processed",
-        "general_toml_bytes",
-        "scenario_toml_bytes",
-        "profile_metadata_bytes",
-        "profile_tsv_bytes",
-        "input_parser_peak_bytes",
-    ] {
+    for field in F5_1_2_3_V7_SCALAR_KEYS {
         let mut missing = valid.clone();
         missing["f5"]["resource_preflight"]
             .as_object_mut()
@@ -566,9 +606,14 @@ fn effective_profile_and_catalog_links_are_closed_and_instantiable() {
             .remove(field);
         cases.push((missing, false));
     }
-    let mut stale_algorithm = valid.clone();
-    stale_algorithm["f5"]["resource_preflight"]["algorithm"] = json!("f5-resource-accounting-v5");
-    cases.push((stale_algorithm, false));
+    for stale in ["f5-resource-accounting-v5", "f5-resource-accounting-v6"] {
+        let mut stale_algorithm = valid.clone();
+        stale_algorithm["f5"]["resource_preflight"]["algorithm"] = json!(stale);
+        cases.push((stale_algorithm, false));
+    }
+    let mut additional_term = valid.clone();
+    additional_term["f5"]["resource_preflight"]["uncontracted_term"] = json!(1);
+    cases.push((additional_term, false));
     for (object, id_field) in [
         ("profile", "profile_id"),
         ("rng_catalog", "catalog_id"),
@@ -628,8 +673,26 @@ fn failure_limits_and_codes_use_exact_f5_contract() {
 #[test]
 fn manifest_success_and_failure_branches_are_closed_and_literal() {
     let success = success_manifest();
+    assert_f5_1_2_3_v7_scalar_key_set(&success, "/f5/resource_preflight");
     let failure = failed_manifest("GPS-DOMAIN-104", limits());
     let mut cases = vec![(success.clone(), true), (failure.clone(), true)];
+
+    for field in F5_1_2_3_V7_SCALAR_KEYS {
+        let mut missing = success.clone();
+        missing["f5"]["resource_preflight"]
+            .as_object_mut()
+            .expect("manifest preflight object")
+            .remove(field);
+        cases.push((missing, false));
+    }
+    for stale in ["f5-resource-accounting-v5", "f5-resource-accounting-v6"] {
+        let mut stale_algorithm = success.clone();
+        stale_algorithm["f5"]["resource_preflight"]["algorithm"] = json!(stale);
+        cases.push((stale_algorithm, false));
+    }
+    let mut additional_preflight_term = success.clone();
+    additional_preflight_term["f5"]["resource_preflight"]["uncontracted_term"] = json!(1);
+    cases.push((additional_preflight_term, false));
 
     let mut wrong_truth_version = success.clone();
     wrong_truth_version["f5"]["truth"]["schema_version"] = json!("1");

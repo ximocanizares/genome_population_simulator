@@ -3,7 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use genome_population_simulator::diagnostics::Diagnostic;
 use genome_population_simulator::publication::ExecutionWorkspace;
@@ -137,19 +137,14 @@ fn complete_failed_and_incomplete_are_real_minimal_trees() {
     assert_final_tree(&complete, "complete");
 
     let failed = root.join("failed");
-    let (failed_config, failed_reference) = write_slow_supplied_config(&root);
-    let failed_child = Command::new(env!("CARGO_BIN_EXE_genome-population-simulator"))
-        .args(["run"])
-        .arg(&failed_config)
-        .arg("--output")
-        .arg(&failed)
+    let failure_barrier = root.join("release-controlled-failure");
+    let failed_child = child("failed", &failed, Some(&failure_barrier))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("real failed execution");
+        .expect("controlled failed execution");
     wait_for_provisionals(&failed, 1);
-    fs::rename(&failed_reference, root.join("reference-removed.fa"))
-        .expect("remove input after preflight");
+    fs::write(&failure_barrier, b"fail\n").expect("release controlled failure");
     let failed_output = failed_child.wait_with_output().expect("failed child");
     assert_eq!(failed_output.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&failed_output.stderr).contains("GPS-INPUT-001"));
@@ -317,34 +312,39 @@ fn process_child() {
                 }
             }
         }
+        "failed" => {
+            let config = workspace
+                .write_artifact(
+                    "config-general",
+                    "config_general_toml",
+                    Path::new("inputs/config/general.toml"),
+                    b"config_kind = \"general\"\nschema_version = \"2\"\n",
+                )
+                .expect("small controlled configuration copy");
+            let configuration = ConfigurationInputRecord {
+                kind: "general".to_owned(),
+                original_path: "controlled-small-general.toml".to_owned(),
+                copy: config,
+            };
+            let barrier = PathBuf::from(std::env::var_os("GPS_F14_BARRIER").expect("barrier"));
+            while !barrier.exists() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let missing = destination.with_extension("controlled-missing-input");
+            let diagnostic =
+                genome_population_simulator::application::load_and_validate_config(&missing)
+                    .expect_err("the controlled input is deliberately absent");
+            assert_eq!(diagnostic.code(), "GPS-INPUT-001");
+            write_failed_manifest(&mut workspace, Some(&configuration), &diagnostic);
+            workspace.publish().expect("publish controlled failure");
+            eprintln!("{}", diagnostic.render_human());
+            std::process::exit(diagnostic.exit_code().into());
+        }
         "wait" => loop {
             std::thread::park();
         },
         other => panic!("unknown child mode {other}"),
     }
-}
-
-fn write_slow_supplied_config(root: &Path) -> (PathBuf, PathBuf) {
-    let reference = root.join("reference.fa");
-    let mut fasta = String::from(">chr1\n");
-    for _ in 0..20 {
-        fasta.push_str(&"A".repeat(50));
-        fasta.push('\n');
-    }
-    fs::write(&reference, fasta).expect("reference");
-    let config = root.join("slow-general.toml");
-    let mut text = format!(
-        "config_kind = \"general\"\nschema_version = \"2\"\nseed = \"{}\"\n\
-         [reference]\nkind = \"supplied\"\nid = \"reference-main\"\nfasta = \"reference.fa\"\n\
-         [[reference.sequences]]\nid = \"chr1\"\nclass = \"chromosome\"\nlength = 1000\n\
-         [[reduced_references]]\nid = \"reference-small\"\nsource_reference_id = \"reference-main\"\nregion_size_bases = 10\ntarget_bases = 100\n",
-        "1".repeat(64)
-    );
-    // Tras crear el provisional, el orquestador copia estos bytes antes de
-    // abrir la referencia; da una ventana determinista al proceso padre.
-    text.push_str(&"# padding para fallo controlado\n".repeat(750_000));
-    fs::write(&config, text).expect("large config");
-    (config, reference)
 }
 
 fn controlled_diagnostic() -> Diagnostic {
@@ -449,8 +449,12 @@ fn assert_final_tree(destination: &Path, expected_state: &str) {
 
 fn temporary(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "gps-f14-process-{}-{}-{label}",
+        "gps-f14-process-{}-{}-{}-{label}",
         std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos(),
         NONCE.fetch_add(1, Ordering::Relaxed)
     ))
 }

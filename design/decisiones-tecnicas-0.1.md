@@ -1278,6 +1278,16 @@ dimensionalmente distintos:
   `S_bound=1+floor((L_max-1)/gap_min)`. Esta es la cota de sitios de cualquier
   bloque y se valida contra 4096 y `max_haplotype_cells` antes de sortear una
   longitud o un gap; nunca se sustituye por el S realizado después del layout;
+- `gap_support_cardinality=sum_r(gap_max_r-gap_min_r+1)`, cardinalidad exacta
+  de los intervalos disjuntos soportados, sin rellenar sus huecos. Cada bloque
+  puede solicitar como máximo `S_bound` gaps por intento: hasta `S_bound-1`
+  que caben y el gap terminal que no cabe. La cota conservadora del selector
+  literal es por tanto
+  `gap_selector_operation_units=2*L*B*S_bound*gap_support_cardinality`; cuenta
+  completas tanto la pasada Neumaier como la pasada de prefijo, aunque esta
+  última pueda terminar antes o una alternativa única no la necesite. Se
+  calcula con aritmética comprobada antes de abrir cualquier ámbito RNG y no
+  modifica la distribución ni su secuencia de consumo;
 - `reference_bases_processed`, suma exacta de las longitudes de todas las
   secuencias resueltas que recorre el escáner; `tract_count`, número de tramos
   elegibles maximales que materializa; `sequence_count`; y
@@ -1324,6 +1334,7 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   2*L*(B*tract_count+B*(B-1)/2) +
   L*(tract_count+3*B*tract_count+3*B*(B-1)/2) + profile_rows +
   normalization_rows + 2*L*B*length_support_cardinality +
+  2*L*B*S_bound*gap_support_cardinality +
   L*B*(B+S_bound) +
   B*N_pop*A*(H*S_bound*S_bound+Q*S_bound) + B*C_total +
   X*K_bound + G_bound + B*N_pop*S_bound + tsv_rows_bound +
@@ -1361,7 +1372,11 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   materializa la referencia completa. `tract_count` añade una unidad por tramo emitido. Los
   `2*L*B*length_support_cardinality` cubren las dos enumeraciones literales de
   longitudes por intento y bloque; no se admiten recorridos no presupuestados.
-  Los
+  Del mismo modo,
+  `2*L*B*S_bound*gap_support_cardinality` cubre conservadoramente las dos
+  enumeraciones literales del soporte discontinuo de gaps por cada sorteo
+  potencial, incluido el gap terminal que no cabe; no altera el selector ni
+  la secuencia RNG.
   V4 añade `2*tract_count` para el recorrido de capacidad y la validación del
   request antes de RNG. Los factores
   `2*L*(B*tract_count+B*(B-1)/2)` son las dos consultas obligatorias del
@@ -1387,7 +1402,8 @@ manifiesto conservan `reference_bases_processed`, `fasta_bytes_processed`,
 `profile_metadata_bytes`, `profile_tsv_bytes`, las identidades físicas,
 los registros de fase, `tract_count`, `retained_sequence_ids`,
 `site_bound_per_block=S_bound`, `bin_count_total`, `profile_rows`,
-`normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, las tres
+`normalization_rows`, `tsv_rows_bound`, `json_rows_bound`,
+`gap_support_cardinality`, `gap_selector_operation_units`, las tres
 aportaciones `other_*` y los tres resultados; así un lector puede repetir la
 cuenta sin RNG. Los receipts v5/v6 no son entradas admitidas ni se migran: deben
 repetir la admisión v7 desde los ficheros fuente. General v3 y escenario v1 no
@@ -1603,7 +1619,7 @@ objetos rechazan propiedades adicionales:
 | `sampling` | lista ordenada por `population_id`+`block_id`, con una fila exacta por bloque×subpoblación: `population_id`, `block_id`, `block_index`, `requested_mode`, `effective_mode`, `source` (`subpopulation_default` o `block_override`), `controlled_max_abs_error_declared` y `controlled_max_abs_error_effective`; las tolerancias son `null` en probabilístico y la efectiva es finita en `[0,0.5/C]` en controlado, con `C=individual_count*ploidy` de esa subpoblación |
 | `normalizations` | cuatro objetos exactos en orden `block_lengths`, `snp_gaps`, `snp_spectrum`, `haplotype_weights`, cada uno con `set_kind`, `canonical_order`, `algorithm="neumaier-f64-v1"`, `tolerance`, `input_values`, `input_sum`, `input_delta`, `effective_values`, `output_sum`, `output_delta`; los números recuperan el mismo `f64` y materializan físicamente la auditoría DTC-049 |
 | `limits` | objeto exacto con los cuatro límites algorítmicos y los tres presupuestos efectivos TOML |
-| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v7"`, `input_identities`, `phases`, `reference_bases_processed`, `fasta_bytes_processed`, `mask_bytes_processed`, `general_toml_bytes`, `scenario_toml_bytes`, `profile_metadata_bytes`, `profile_tsv_bytes`, `tract_count`, `retained_sequence_ids`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; `input_identities` se ordena por rol contractual y cada objeto exacto contiene `role`, `normalized_path`, `observed_size_bytes`, `observed_sha256`, `declared_size_bytes` y `declared_sha256`, estos dos últimos `null` cuando no existen en el documento propietario; `phases` sigue el orden cerrado de la máquina de admisión y cada objeto contiene `phase`, `operation_units_cumulative`, `retained_before_bytes`, `transient_bytes`, `retained_after_bytes`, `phase_peak_bytes` y `output_bytes_reserved`; todos los recuentos son `u64`, los valores calculados no exceden sus límites y efectivo/manifiesto son iguales escalar y posicionalmente |
+| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v7"`, `input_identities`, `phases`, `reference_bases_processed`, `fasta_bytes_processed`, `mask_bytes_processed`, `general_toml_bytes`, `scenario_toml_bytes`, `profile_metadata_bytes`, `profile_tsv_bytes`, `tract_count`, `retained_sequence_ids`, `gap_support_cardinality`, `gap_selector_operation_units`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; `input_identities` se ordena por rol contractual y cada objeto exacto contiene `role`, `normalized_path`, `observed_size_bytes`, `observed_sha256`, `declared_size_bytes` y `declared_sha256`, estos dos últimos `null` cuando no existen en el documento propietario; `phases` sigue el orden cerrado de la máquina de admisión y cada objeto contiene `phase`, `operation_units_cumulative`, `retained_before_bytes`, `transient_bytes`, `retained_after_bytes`, `phase_peak_bytes` y `output_bytes_reserved`; todos los recuentos son `u64`, los valores calculados no exceden sus límites y efectivo/manifiesto son iguales escalar y posicionalmente |
 | `algorithms` | objeto exacto `layout="f5-layout-v1"`, `marginals="f5-spectrum-v1"`, `haplotypes="weighted-prefix-swap-v1"`, `ld="phased-r2-neumaier-v1"`, `controlled="largest-remainder-v1"`, `inbreeding="diploid-f-v1"`, `truth_projection="f5-founder-truth-projection-v2"` |
 | `rng_catalog`, `id_catalog` | objetos exactos `catalog_id`, `path`, `size_bytes`, `sha256` |
 

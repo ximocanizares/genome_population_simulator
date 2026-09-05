@@ -5,13 +5,19 @@
 //! los pasos posteriores.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::path::Path;
-
-use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
+use std::fs::File;
+use std::path::{Path, PathBuf};
 
 use crate::diagnostics::Diagnostic;
+use crate::f5_admission::{
+    AdmissionPhase, BoundedInput, F5ResourceLedger, InputRole, LedgerCharge, OperationCost,
+    PhysicalInputIdentity, ResourceDimension, WorkingMemoryPeak,
+    input_identity_mismatch_diagnostic,
+};
+use crate::reference_fasta::input_error;
+use serde_json::{Map, Value};
+
+const F5_PROFILE_RETAINED_ITEM_BYTES: u64 = 256;
 
 /// Tolerancia general DTC-049 para pesos de un perfil F5.
 pub const F5_PROFILE_NORMALIZATION_TOLERANCE: f64 = 1e-9;
@@ -36,6 +42,27 @@ pub struct F5Profile {
     haplotype_weights: Vec<f64>,
     ld_bins: BTreeMap<String, Vec<LdBin>>,
     normalizations: Vec<F5NormalizationAudit>,
+}
+
+/// Resultado de la fase de perfil: el contenido tipado y las seis
+/// identidades físicas que un receipt posterior deberá sellar.
+#[derive(Clone, Debug)]
+pub(crate) struct LoadedF5Profile {
+    profile: F5Profile,
+    identities: Vec<PhysicalInputIdentity>,
+}
+
+impl LoadedF5Profile {
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn identities(&self) -> &[PhysicalInputIdentity] {
+        &self.identities
+    }
+
+    #[must_use]
+    pub(crate) fn into_parts(self) -> (F5Profile, Vec<PhysicalInputIdentity>) {
+        (self.profile, self.identities)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -222,13 +249,246 @@ impl F5Profile {
 
 /// Lee una vez el metadata y exactamente los cinco TSV enlazados. `population_ids`
 /// procede del escenario ya admitido y evita cualquier remapeo implícito.
-pub fn load_f5_profile(
+#[cfg(test)]
+fn load_f5_profile(
     metadata_path: &Path,
     expected_metadata_sha256: &str,
     population_ids: &BTreeSet<String>,
 ) -> Result<F5Profile, Diagnostic> {
-    let bytes = read(metadata_path)?;
-    verify_identity(metadata_path, &bytes, None, expected_metadata_sha256)?;
+    let mut ledger = F5ResourceLedger::new(crate::f5_admission::LedgerLimits::new(
+        OperationCost::new(u64::MAX),
+        WorkingMemoryPeak::new(u64::MAX),
+        crate::f5_admission::OutputReservation::new(u64::MAX),
+    ));
+    ledger.transition_to(AdmissionPhase::ProfileMetadata)?;
+    load_f5_profile_under_budget(
+        metadata_path,
+        expected_metadata_sha256,
+        population_ids,
+        &mut ledger,
+    )
+    .map(|loaded| loaded.profile)
+}
+
+/// Lee el paquete canónico bajo la fase actual del ledger. No consulta
+/// atributos del sistema: el límite del metadata se deriva antes de abrirlo y
+/// cada tabla usa el tamaño declarado más un byte para clasificar una
+/// discrepancia de identidad sin materializar una entrada arbitraria.
+pub(crate) fn load_f5_profile_under_budget(
+    metadata_path: &Path,
+    expected_metadata_sha256: &str,
+    population_ids: &BTreeSet<String>,
+    ledger: &mut F5ResourceLedger,
+) -> Result<LoadedF5Profile, Diagnostic> {
+    let metadata_limit = ledger.remaining_input_bytes(InputRole::ProfileMetadata)?;
+    let (profile_id, links, metadata_identity) = read_profile_metadata(
+        metadata_path,
+        expected_metadata_sha256,
+        metadata_limit,
+        ledger,
+    )?;
+
+    // Los cinco costes de lectura ya son conocidos al completar el metadata.
+    // Se reservan juntos, antes de abrir la primera tabla; la memoria es el
+    // máximo de una tabla porque los búferes no coexisten.
+    let mut total_table_bytes = 0_u64;
+    let mut maximum_table_transient_bytes = 0_u64;
+    for link in &links {
+        total_table_bytes = total_table_bytes.checked_add(link.size).ok_or_else(|| {
+            ledger.reject_resource(
+                InputRole::ProfileMetadata,
+                ResourceDimension::OperationUnits,
+                "overflow al sumar tamaños declarados de TSV",
+            )
+        })?;
+        let transient_bytes = link.size.checked_mul(2).ok_or_else(|| {
+            ledger.reject_resource(
+                InputRole::ProfileMetadata,
+                ResourceDimension::WorkingMemoryBytes,
+                "overflow al reservar búfer y parser del TSV declarado",
+            )
+        })?;
+        maximum_table_transient_bytes = maximum_table_transient_bytes.max(transient_bytes);
+    }
+    let table_operation_cost = total_table_bytes.checked_mul(2).ok_or_else(|| {
+        ledger.reject_resource(
+            InputRole::ProfileMetadata,
+            ResourceDimension::OperationUnits,
+            "overflow al reservar lectura/hash y parser de los TSV",
+        )
+    })?;
+    ledger.charge(
+        InputRole::ProfileMetadata,
+        LedgerCharge::Operation(OperationCost::new(table_operation_cost)),
+    )?;
+    ledger.reserve_transient_memory(InputRole::ProfileMetadata, maximum_table_transient_bytes)?;
+    let mut retained_rows = 0_u64;
+
+    let mut identities = Vec::with_capacity(6);
+    identities.push(metadata_identity);
+    let (block_path, block_bytes) = read_profile_table(
+        &links[0],
+        InputRole::ProfileBlockLengths,
+        AdmissionPhase::ProfileTableBlockLengths,
+        ledger,
+        &mut identities,
+        retained_rows,
+    )?;
+    let (block_lengths, block_lengths_audit) = parse_integer_intervals(
+        &block_path,
+        &block_bytes,
+        "length_min_bp\tlength_max_bp\tweight",
+        2,
+        F5NormalizationSet::BlockLengths,
+        ProfileParseContext::new(ledger, InputRole::ProfileBlockLengths, &mut retained_rows),
+    )?;
+    validate_continuous(&block_lengths, &block_path)?;
+    let l_max = block_lengths
+        .last()
+        .map(|interval| interval.maximum)
+        .ok_or_else(|| domain(&block_path, "el perfil de longitudes está vacío"))?;
+    drop(block_bytes);
+    let (gap_path, gap_bytes) = read_profile_table(
+        &links[1],
+        InputRole::ProfileSnpGaps,
+        AdmissionPhase::ProfileTableSnpGaps,
+        ledger,
+        &mut identities,
+        retained_rows,
+    )?;
+    let (snp_gaps, snp_gaps_audit) = parse_integer_intervals(
+        &gap_path,
+        &gap_bytes,
+        "gap_min_bp\tgap_max_bp\tweight",
+        1,
+        F5NormalizationSet::SnpGaps,
+        ProfileParseContext::new(ledger, InputRole::ProfileSnpGaps, &mut retained_rows),
+    )?;
+    drop(gap_bytes);
+    let (spectrum_path, spectrum_bytes) = read_profile_table(
+        &links[2],
+        InputRole::ProfileSnpSpectrum,
+        AdmissionPhase::ProfileTableSnpSpectrum,
+        ledger,
+        &mut identities,
+        retained_rows,
+    )?;
+    let (snp_spectrum, snp_spectrum_audit) = parse_float_intervals(
+        &spectrum_path,
+        &spectrum_bytes,
+        ledger,
+        InputRole::ProfileSnpSpectrum,
+        &mut retained_rows,
+    )?;
+    drop(spectrum_bytes);
+    let (weights_path, weights_bytes) = read_profile_table(
+        &links[3],
+        InputRole::ProfileHaplotypeWeights,
+        AdmissionPhase::ProfileTableHaplotypeWeights,
+        ledger,
+        &mut identities,
+        retained_rows,
+    )?;
+    let (haplotype_weights, haplotype_weights_audit) = parse_haplotype_weights(
+        &weights_path,
+        &weights_bytes,
+        ledger,
+        InputRole::ProfileHaplotypeWeights,
+        &mut retained_rows,
+    )?;
+    drop(weights_bytes);
+    let (ld_path, ld_bytes) = read_profile_table(
+        &links[4],
+        InputRole::ProfileLd,
+        AdmissionPhase::ProfileTableLd,
+        ledger,
+        &mut identities,
+        retained_rows,
+    )?;
+    let ld_bins = parse_ld_profile(
+        &ld_path,
+        &ld_bytes,
+        population_ids,
+        l_max,
+        ledger,
+        InputRole::ProfileLd,
+        &mut retained_rows,
+    )?;
+    drop(ld_bytes);
+    Ok(LoadedF5Profile {
+        profile: F5Profile {
+            profile_id,
+            block_lengths,
+            snp_gaps,
+            snp_spectrum,
+            haplotype_weights,
+            ld_bins,
+            normalizations: vec![
+                block_lengths_audit,
+                snp_gaps_audit,
+                snp_spectrum_audit,
+                haplotype_weights_audit,
+            ],
+        },
+        identities,
+    })
+}
+
+#[derive(Clone, Debug)]
+struct ProfileLink {
+    path: PathBuf,
+    size: u64,
+    digest: String,
+}
+
+fn read_bounded(
+    path: &Path,
+    role: InputRole,
+    phase: AdmissionPhase,
+    limit: u64,
+    ledger: &mut F5ResourceLedger,
+) -> Result<crate::f5_admission::BoundedInputRead, Diagnostic> {
+    let file = File::open(path).map_err(|error| input_error(path, error))?;
+    let input = BoundedInput::new(role, phase, path.to_path_buf(), limit, file);
+    if role == InputRole::ProfileMetadata {
+        input.read_to_end_with_ledger_counting_operations(ledger)
+    } else {
+        input.read_to_end_with_ledger(Some(ledger))
+    }
+}
+
+/// Construye los datos persistentes mínimos del metadata y deja caer tanto el
+/// búfer JSON como `serde_json::Value` antes de que se abra el primer TSV.
+fn read_profile_metadata(
+    metadata_path: &Path,
+    expected_metadata_sha256: &str,
+    metadata_limit: u64,
+    ledger: &mut F5ResourceLedger,
+) -> Result<(String, Vec<ProfileLink>, PhysicalInputIdentity), Diagnostic> {
+    let metadata = read_bounded(
+        metadata_path,
+        InputRole::ProfileMetadata,
+        AdmissionPhase::ProfileMetadata,
+        metadata_limit,
+        ledger,
+    )?;
+    let (bytes, identity) = metadata.into_parts();
+    verify_identity(metadata_path, &identity, None, expected_metadata_sha256)?;
+    ledger.charge(
+        InputRole::ProfileMetadata,
+        LedgerCharge::WorkingMemoryPeak(WorkingMemoryPeak::new(
+            identity
+                .observed_size_bytes()
+                .checked_mul(2)
+                .ok_or_else(|| {
+                    format_error(
+                        metadata_path,
+                        "size_bytes",
+                        "overflow al reservar lectura/hash y parser del metadata",
+                    )
+                })?,
+        )),
+    )?;
     let metadata: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format_error(metadata_path, "profile.metadata.json", error.to_string()))?;
     let root = object(&metadata, metadata_path, "metadata")?;
@@ -256,8 +516,10 @@ pub fn load_f5_profile(
         .then_some(())
         .ok_or_else(|| format_error(metadata_path, "schema_version", "versión inválida"))?;
     let profile_id = required_id(root, "profile_id", metadata_path)?.to_owned();
-    let provenance = required_string(root, "provenance_kind", metadata_path)?;
-    if !matches!(provenance, "built_in" | "user_supplied") {
+    if !matches!(
+        required_string(root, "provenance_kind", metadata_path)?,
+        "built_in" | "user_supplied"
+    ) {
         return Err(format_error(
             metadata_path,
             "provenance_kind",
@@ -291,7 +553,7 @@ pub fn load_f5_profile(
         (F5_PROFILE_TSV_FILENAMES[3], "f5_haplotype_weights"),
         (F5_PROFILE_TSV_FILENAMES[4], "f5_ld_profile"),
     ];
-    let mut contents = Vec::with_capacity(5);
+    let mut links = Vec::with_capacity(5);
     for (entry, (name, kind)) in files.iter().zip(expected) {
         let entry = object(entry, metadata_path, "files[]")?;
         exact_keys(
@@ -316,53 +578,35 @@ pub fn load_f5_profile(
                 "orden, clase, versión o ruta no canónicos",
             ));
         }
-        let size = required_u64(entry, "size_bytes", metadata_path)?;
-        let digest = required_sha(entry, "sha256", metadata_path)?;
-        let path = metadata_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(name);
-        let bytes = read(&path)?;
-        verify_identity(&path, &bytes, Some(size), digest)?;
-        contents.push((path, bytes));
+        links.push(ProfileLink {
+            path: metadata_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(name),
+            size: required_u64(entry, "size_bytes", metadata_path)?,
+            digest: required_sha(entry, "sha256", metadata_path)?.to_owned(),
+        });
     }
-    let (block_lengths, block_lengths_audit) = parse_integer_intervals(
-        &contents[0].0,
-        &contents[0].1,
-        "length_min_bp\tlength_max_bp\tweight",
-        2,
-        F5NormalizationSet::BlockLengths,
-    )?;
-    validate_continuous(&block_lengths, &contents[0].0)?;
-    let l_max = block_lengths
-        .last()
-        .map(|interval| interval.maximum)
-        .ok_or_else(|| domain(&contents[0].0, "el perfil de longitudes está vacío"))?;
-    let (snp_gaps, snp_gaps_audit) = parse_integer_intervals(
-        &contents[1].0,
-        &contents[1].1,
-        "gap_min_bp\tgap_max_bp\tweight",
-        1,
-        F5NormalizationSet::SnpGaps,
-    )?;
-    let (snp_spectrum, snp_spectrum_audit) = parse_float_intervals(&contents[2].0, &contents[2].1)?;
-    let (haplotype_weights, haplotype_weights_audit) =
-        parse_haplotype_weights(&contents[3].0, &contents[3].1)?;
-    let ld_bins = parse_ld_profile(&contents[4].0, &contents[4].1, population_ids, l_max)?;
-    Ok(F5Profile {
-        profile_id,
-        block_lengths,
-        snp_gaps,
-        snp_spectrum,
-        haplotype_weights,
-        ld_bins,
-        normalizations: vec![
-            block_lengths_audit,
-            snp_gaps_audit,
-            snp_spectrum_audit,
-            haplotype_weights_audit,
-        ],
-    })
+    Ok((profile_id, links, identity))
+}
+
+fn read_profile_table(
+    link: &ProfileLink,
+    role: InputRole,
+    phase: AdmissionPhase,
+    ledger: &mut F5ResourceLedger,
+    identities: &mut Vec<PhysicalInputIdentity>,
+    retained_rows: u64,
+) -> Result<(PathBuf, Vec<u8>), Diagnostic> {
+    ledger.transition_to(phase)?;
+    charge_profile_phase(ledger, role, retained_rows, link.size)?;
+    let file = File::open(&link.path).map_err(|error| input_error(&link.path, error))?;
+    let bounded = BoundedInput::new(role, phase, link.path.clone(), link.size, file)
+        .read_to_end_with_ledger_and_expected_identity(ledger, link.size, &link.digest)?;
+    let (bytes, identity) = bounded.into_parts();
+    verify_identity(&link.path, &identity, Some(link.size), &link.digest)?;
+    identities.push(identity);
+    Ok((link.path.clone(), bytes))
 }
 
 fn parse_integer_intervals(
@@ -371,11 +615,11 @@ fn parse_integer_intervals(
     header: &str,
     minimum: u64,
     set: F5NormalizationSet,
+    mut context: ProfileParseContext<'_>,
 ) -> Result<(Vec<WeightedInterval<u64>>, F5NormalizationAudit), Diagnostic> {
-    let rows = tsv_rows(path, bytes, header)?;
-    let mut result = Vec::with_capacity(rows.len());
-    let mut keys = Vec::with_capacity(rows.len());
-    for row in rows {
+    let mut result = Vec::new();
+    let mut keys = Vec::new();
+    tsv_for_each_row(path, bytes, header, |row| {
         let lo = canonical_u64(path, row[0])?;
         let hi = canonical_u64(path, row[1])?;
         let weight = canonical_f64(path, row[2])?;
@@ -388,13 +632,18 @@ fn parse_integer_intervals(
         {
             return Err(domain(path, "filas duplicadas, solapadas o desordenadas"));
         }
+        context.retain_row(bytes.len())?;
         result.push(WeightedInterval {
             minimum: lo,
             maximum: hi,
             weight,
         });
         keys.push(row[0].to_owned());
-    }
+        Ok(())
+    })?;
+    // La auditoría normalizada crea vectores propios. Su retención se admite
+    // antes de construirlos, no después de una asignación ya consumada.
+    context.retain_rows(result.len(), bytes.len())?;
     let audit = normalize_weights(path, set, keys, &mut result)?;
     Ok((result, audit))
 }
@@ -414,11 +663,13 @@ fn validate_continuous(intervals: &[WeightedInterval<u64>], path: &Path) -> Resu
 fn parse_float_intervals(
     path: &Path,
     bytes: &[u8],
+    ledger: &mut F5ResourceLedger,
+    role: InputRole,
+    retained_rows: &mut u64,
 ) -> Result<(Vec<WeightedInterval<f64>>, F5NormalizationAudit), Diagnostic> {
-    let rows = tsv_rows(path, bytes, "alt_af_min\talt_af_max\tweight")?;
-    let mut result = Vec::with_capacity(rows.len());
-    let mut keys = Vec::with_capacity(rows.len());
-    for row in rows {
+    let mut result = Vec::new();
+    let mut keys = Vec::new();
+    tsv_for_each_row(path, bytes, "alt_af_min\talt_af_max\tweight", |row| {
         let lo = canonical_f64(path, row[0])?;
         let hi = canonical_f64(path, row[1])?;
         let weight = canonical_f64(path, row[2])?;
@@ -431,6 +682,7 @@ fn parse_float_intervals(
         {
             return Err(domain(path, "intervalo o peso inválido"));
         }
+        retain_profile_row(ledger, role, retained_rows, bytes.len())?;
         if result
             .last()
             .is_some_and(|previous: &WeightedInterval<f64>| lo <= previous.maximum)
@@ -443,7 +695,9 @@ fn parse_float_intervals(
             weight,
         });
         keys.push(row[0].to_owned());
-    }
+        Ok(())
+    })?;
+    retain_profile_rows(ledger, role, retained_rows, result.len(), bytes.len())?;
     let audit = normalize_weights(path, F5NormalizationSet::SnpSpectrum, keys, &mut result)?;
     Ok((result, audit))
 }
@@ -451,24 +705,33 @@ fn parse_float_intervals(
 fn parse_haplotype_weights(
     path: &Path,
     bytes: &[u8],
+    ledger: &mut F5ResourceLedger,
+    role: InputRole,
+    retained_rows: &mut u64,
 ) -> Result<(Vec<f64>, F5NormalizationAudit), Diagnostic> {
-    let rows = tsv_rows(path, bytes, "haplotype_rank\tweight")?;
-    if !(2..=4096).contains(&rows.len()) {
-        return Err(domain(path, "H debe pertenecer a 2..=4096"));
-    }
-    let mut weights = Vec::with_capacity(rows.len());
-    let mut keys = Vec::with_capacity(rows.len());
-    for (rank, row) in rows.iter().enumerate() {
+    let mut weights = Vec::new();
+    let mut keys = Vec::new();
+    let mut rank = 0_usize;
+    tsv_for_each_row(path, bytes, "haplotype_rank\tweight", |row| {
         if canonical_u64(path, row[0])? != rank as u64 {
             return Err(domain(path, "haplotype_rank no es consecutivo"));
         }
+        retain_profile_row(ledger, role, retained_rows, bytes.len())?;
         let weight = canonical_f64(path, row[1])?;
         if !is_positive_probability(weight) {
             return Err(domain(path, "peso inválido"));
         }
         weights.push(weight);
         keys.push(row[0].to_owned());
+        rank = rank.checked_add(1).ok_or_else(|| {
+            Diagnostic::f5_resource("<unresolved>", "overflow de filas de haplotipos")
+        })?;
+        Ok(())
+    })?;
+    if !(2..=4096).contains(&weights.len()) {
+        return Err(domain(path, "H debe pertenecer a 2..=4096"));
     }
+    retain_profile_rows(ledger, role, retained_rows, weights.len(), bytes.len())?;
     let audit = normalize_slice(
         path,
         F5NormalizationSet::HaplotypeWeights,
@@ -483,44 +746,49 @@ fn parse_ld_profile(
     bytes: &[u8],
     populations: &BTreeSet<String>,
     l_max: u64,
+    ledger: &mut F5ResourceLedger,
+    role: InputRole,
+    retained_rows: &mut u64,
 ) -> Result<BTreeMap<String, Vec<LdBin>>, Diagnostic> {
-    let rows = tsv_rows(
+    let mut output = BTreeMap::<String, Vec<LdBin>>::new();
+    let mut previous: Option<(String, u64)> = None;
+    tsv_for_each_row(
         path,
         bytes,
         "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error",
-    )?;
-    let mut output = BTreeMap::<String, Vec<LdBin>>::new();
-    let mut previous: Option<(String, u64)> = None;
-    for row in rows {
-        let population = valid_id(path, row[0])?.to_owned();
-        let start = canonical_u64(path, row[1])?;
-        let end = canonical_u64(path, row[2])?;
-        let target = canonical_f64(path, row[3])?;
-        let error = canonical_f64(path, row[4])?;
-        if start == 0 || start > end || !is_probability(target) || error != 0.05 {
-            return Err(domain(path, "bin LD inválido"));
-        }
-        if previous
-            .as_ref()
-            .is_some_and(|key| key >= &(population.clone(), start))
-        {
-            return Err(domain(path, "filas LD duplicadas o desordenadas"));
-        }
-        let bins = output.entry(population.clone()).or_default();
-        if let Some(last) = bins.last() {
-            if last.distance_end_bp.checked_add(1) != Some(start) {
-                return Err(domain(path, "bins LD no contiguos"));
+        |row| {
+            let population = valid_id(path, row[0])?.to_owned();
+            let start = canonical_u64(path, row[1])?;
+            let end = canonical_u64(path, row[2])?;
+            let target = canonical_f64(path, row[3])?;
+            let error = canonical_f64(path, row[4])?;
+            if start == 0 || start > end || !is_probability(target) || error != 0.05 {
+                return Err(domain(path, "bin LD inválido"));
             }
-        } else if start != 1 {
-            return Err(domain(path, "bins LD deben empezar en 1"));
-        }
-        bins.push(LdBin {
-            distance_start_bp: start,
-            distance_end_bp: end,
-            target_mean_r2: target,
-        });
-        previous = Some((population, start));
-    }
+            retain_profile_row(ledger, role, retained_rows, bytes.len())?;
+            if previous
+                .as_ref()
+                .is_some_and(|key| key >= &(population.clone(), start))
+            {
+                return Err(domain(path, "filas LD duplicadas o desordenadas"));
+            }
+            let bins = output.entry(population.clone()).or_default();
+            if let Some(last) = bins.last() {
+                if last.distance_end_bp.checked_add(1) != Some(start) {
+                    return Err(domain(path, "bins LD no contiguos"));
+                }
+            } else if start != 1 {
+                return Err(domain(path, "bins LD deben empezar en 1"));
+            }
+            bins.push(LdBin {
+                distance_start_bp: start,
+                distance_end_bp: end,
+                target_mean_r2: target,
+            });
+            previous = Some((population, start));
+            Ok(())
+        },
+    )?;
     if output.len() != populations.len() || output.keys().any(|id| !populations.contains(id)) {
         return Err(domain(
             path,
@@ -542,11 +810,125 @@ fn parse_ld_profile(
     Ok(output)
 }
 
-fn tsv_rows<'a>(
+fn charge_profile_phase(
+    ledger: &mut F5ResourceLedger,
+    role: InputRole,
+    retained_rows: u64,
+    table_bytes: u64,
+) -> Result<(), Diagnostic> {
+    let retained = retained_rows
+        .checked_mul(F5_PROFILE_RETAINED_ITEM_BYTES)
+        .ok_or_else(|| {
+            ledger.reject_resource(
+                role,
+                ResourceDimension::WorkingMemoryBytes,
+                "overflow de retención del perfil",
+            )
+        })?;
+    let transient = table_bytes.checked_mul(2).ok_or_else(|| {
+        ledger.reject_resource(
+            role,
+            ResourceDimension::WorkingMemoryBytes,
+            "overflow de lectura y parser TSV",
+        )
+    })?;
+    ledger.charge_memory_phase(role, retained, transient, retained)
+}
+
+struct ProfileParseContext<'a> {
+    ledger: &'a mut F5ResourceLedger,
+    role: InputRole,
+    retained_rows: &'a mut u64,
+}
+
+impl<'a> ProfileParseContext<'a> {
+    fn new(ledger: &'a mut F5ResourceLedger, role: InputRole, retained_rows: &'a mut u64) -> Self {
+        Self {
+            ledger,
+            role,
+            retained_rows,
+        }
+    }
+
+    fn retain_row(&mut self, table_bytes: usize) -> Result<(), Diagnostic> {
+        retain_profile_row(self.ledger, self.role, self.retained_rows, table_bytes)
+    }
+
+    fn retain_rows(&mut self, rows: usize, table_bytes: usize) -> Result<(), Diagnostic> {
+        retain_profile_rows(
+            self.ledger,
+            self.role,
+            self.retained_rows,
+            rows,
+            table_bytes,
+        )
+    }
+}
+
+fn retain_profile_row(
+    ledger: &mut F5ResourceLedger,
+    role: InputRole,
+    retained_rows: &mut u64,
+    table_bytes: usize,
+) -> Result<(), Diagnostic> {
+    retain_profile_rows(ledger, role, retained_rows, 1, table_bytes)
+}
+
+fn retain_profile_rows(
+    ledger: &mut F5ResourceLedger,
+    role: InputRole,
+    retained_rows: &mut u64,
+    rows: usize,
+    table_bytes: usize,
+) -> Result<(), Diagnostic> {
+    let rows = u64::try_from(rows)
+        .map_err(|_| Diagnostic::f5_resource("<unresolved>", "overflow de filas de perfil"))?;
+    let after = retained_rows.checked_add(rows).ok_or_else(|| {
+        ledger.reject_resource(
+            role,
+            ResourceDimension::WorkingMemoryBytes,
+            "overflow de filas retenidas del perfil",
+        )
+    })?;
+    let before_bytes = retained_rows
+        .checked_mul(F5_PROFILE_RETAINED_ITEM_BYTES)
+        .ok_or_else(|| {
+            ledger.reject_resource(
+                role,
+                ResourceDimension::WorkingMemoryBytes,
+                "overflow de retención del perfil",
+            )
+        })?;
+    let after_bytes = after
+        .checked_mul(F5_PROFILE_RETAINED_ITEM_BYTES)
+        .ok_or_else(|| {
+            ledger.reject_resource(
+                role,
+                ResourceDimension::WorkingMemoryBytes,
+                "overflow de retención del perfil",
+            )
+        })?;
+    let transient = u64::try_from(table_bytes)
+        .map_err(|_| Diagnostic::f5_resource("<unresolved>", "overflow de bytes TSV"))?
+        .checked_mul(2)
+        .ok_or_else(|| {
+            ledger.reject_resource(
+                role,
+                ResourceDimension::WorkingMemoryBytes,
+                "overflow de lectura y parser TSV",
+            )
+        })?;
+    ledger.charge_memory_phase(role, before_bytes, transient, after_bytes)?;
+    *retained_rows = after;
+    Ok(())
+}
+
+fn tsv_for_each_row(
     path: &Path,
-    bytes: &'a [u8],
+    bytes: &[u8],
     expected_header: &str,
-) -> Result<Vec<Vec<&'a str>>, Diagnostic> {
+    mut visit: impl FnMut(&[&str]) -> Result<(), Diagnostic>,
+) -> Result<(), Diagnostic> {
     if bytes.starts_with(&[0xef, 0xbb, 0xbf]) || !bytes.ends_with(b"\n") || bytes.contains(&b'\r') {
         return Err(format_error(
             path,
@@ -560,7 +942,15 @@ fn tsv_rows<'a>(
     if lines.next() != Some(expected_header) {
         return Err(format_error(path, "header", "cabecera TSV no canónica"));
     }
-    let mut rows = Vec::new();
+    let expected_fields = expected_header.split('\t').count();
+    const MAX_CONTRACTUAL_FIELDS: usize = 5;
+    if expected_fields > MAX_CONTRACTUAL_FIELDS {
+        return Err(Diagnostic::internal_invariant(
+            "f5_profile",
+            "la cabecera contractual excede cinco campos TSV",
+        ));
+    }
+    let mut count = 0_u64;
     for line in lines {
         if line.is_empty() || line.contains('"') || line.starts_with('#') {
             return Err(format_error(
@@ -569,21 +959,35 @@ fn tsv_rows<'a>(
                 "fila vacía o sintaxis TSV prohibida",
             ));
         }
-        let fields = line.split('\t').collect::<Vec<_>>();
-        let expected_fields = expected_header.split('\t').count();
-        if fields.len() != expected_fields || fields.iter().any(|field| field.is_empty()) {
+        let mut fields = [""; MAX_CONTRACTUAL_FIELDS];
+        let mut field_count = 0_usize;
+        for field in line.split('\t') {
+            if field_count == expected_fields || field.is_empty() {
+                return Err(format_error(
+                    path,
+                    "row",
+                    "número de columnas o campo vacío inválido",
+                ));
+            }
+            fields[field_count] = field;
+            field_count += 1;
+        }
+        if field_count != expected_fields {
             return Err(format_error(
                 path,
                 "row",
                 "número de columnas o campo vacío inválido",
             ));
         }
-        rows.push(fields);
+        visit(&fields[..expected_fields])?;
+        count = count
+            .checked_add(1)
+            .ok_or_else(|| Diagnostic::f5_resource("<unresolved>", "overflow de filas TSV"))?;
     }
-    if rows.is_empty() {
+    if count == 0 {
         return Err(format_error(path, "row", "el TSV debe contener filas"));
     }
-    Ok(rows)
+    Ok(())
 }
 
 fn normalize_weights<T>(
@@ -689,31 +1093,27 @@ fn canonical_f64(path: &Path, value: &str) -> Result<f64, Diagnostic> {
     }
     Ok(parsed)
 }
-fn read(path: &Path) -> Result<Vec<u8>, Diagnostic> {
-    fs::read(path).map_err(|error| {
-        Diagnostic::input(
-            "GPS-INPUT-001",
-            "No se puede abrir o leer una entrada declarada.",
-        )
-        .with("path", path.display().to_string())
-        .with("detail", error.to_string())
-    })
-}
 fn verify_identity(
     path: &Path,
-    bytes: &[u8],
+    identity: &PhysicalInputIdentity,
     expected_size: Option<u64>,
     expected_sha: &str,
 ) -> Result<(), Diagnostic> {
-    let size = u64::try_from(bytes.len())
-        .map_err(|_| format_error(path, "size_bytes", "tamaño no representable"))?;
-    let digest = format!("{:x}", Sha256::digest(bytes));
+    let size = identity.observed_size_bytes();
+    let digest = identity.observed_sha256();
     if expected_size.is_some_and(|expected| expected != size) || digest != expected_sha {
-        return Err(format_error(
-            path,
-            "identity",
-            format!("size={size}; sha256={digest}"),
-        ));
+        let mut diagnostic = Diagnostic::input(
+            "GPS-INPUT-002",
+            "Una entrada cambió durante su copia o no coincide con su identidad declarada.",
+        )
+        .with("path", path.display().to_string())
+        .with("expected_digest", expected_sha)
+        .with("observed_digest", digest);
+        if let Some(expected_size) = expected_size {
+            diagnostic =
+                input_identity_mismatch_diagnostic(path, expected_size, expected_sha, size, digest);
+        }
+        return Err(diagnostic);
     }
     Ok(())
 }
@@ -833,17 +1233,29 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use sha2::{Digest, Sha256};
 
-    use super::{F5NormalizationSet, load_f5_profile};
+    use crate::f5_admission::{
+        AdmissionPhase, F5ResourceLedger, LedgerLimits, OperationCost, OutputReservation,
+        WorkingMemoryPeak,
+    };
+
+    use super::{
+        F5_PROFILE_TSV_FILENAMES, F5NormalizationSet, load_f5_profile, load_f5_profile_under_budget,
+    };
 
     static SERIAL: AtomicU64 = AtomicU64::new(0);
 
     fn fixture() -> PathBuf {
         let path = std::env::temp_dir().join(format!(
-            "gps-f5-profile-{}-{}",
+            "gps-f5-profile-{}-{}-{}",
             std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock after epoch")
+                .as_nanos(),
             SERIAL.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).expect("fixture directory");
@@ -922,6 +1334,57 @@ mod tests {
         .map_err(|error| error.render_human())
     }
 
+    fn ledger(operation_limit: u64, memory_limit: u64) -> F5ResourceLedger {
+        let mut ledger = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(operation_limit),
+            WorkingMemoryPeak::new(memory_limit),
+            OutputReservation::new(u64::MAX),
+        ));
+        ledger
+            .transition_to(AdmissionPhase::ProfileMetadata)
+            .expect("profile follows bootstrap");
+        ledger
+    }
+
+    fn profile_bytes(root: &Path) -> (u64, u64, u64) {
+        let metadata = fs::read(root.join("profile.metadata.json")).expect("metadata");
+        let tables = [
+            "block_lengths.tsv",
+            "snp_gaps.tsv",
+            "snp_spectrum.tsv",
+            "haplotype_weights.tsv",
+            "ld_profile.tsv",
+        ];
+        let (total, peak) = tables.iter().fold((0_u64, 0_u64), |(total, peak), name| {
+            let size = fs::metadata(root.join(name)).expect("table").len();
+            (total + size, peak.max(size))
+        });
+        (u64::try_from(metadata.len()).expect("size"), total, peak)
+    }
+
+    fn profile_memory_oracle(root: &Path) -> (u64, u64) {
+        let metadata_bytes = fs::metadata(root.join("profile.metadata.json"))
+            .expect("metadata")
+            .len();
+        let mut peak = 2 * metadata_bytes;
+        let mut retained_rows = 0_u64;
+        for (index, name) in F5_PROFILE_TSV_FILENAMES.iter().enumerate() {
+            let bytes = fs::read(root.join(name)).expect("table oracle bytes");
+            let row_count = std::str::from_utf8(&bytes)
+                .expect("fixture UTF-8")
+                .lines()
+                .count()
+                .checked_sub(1)
+                .expect("header") as u64;
+            retained_rows += row_count;
+            if index < 4 {
+                retained_rows += row_count;
+            }
+            peak = peak.max(2 * bytes.len() as u64 + 256 * retained_rows);
+        }
+        (peak, retained_rows * 256)
+    }
+
     #[test]
     fn reads_the_single_valid_canonical_profile_corpus() {
         let root = fixture();
@@ -936,6 +1399,317 @@ mod tests {
         assert_eq!(profile.ld_bins("P1").expect("P1")[0].distance_end_bp(), 9);
         assert_eq!(profile.normalizations().len(), 4);
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn profile_budget_is_exact_sequential_and_minus_one_stops_before_tables() {
+        let root = fixture();
+        let (metadata_bytes, table_bytes, _) = profile_bytes(&root);
+        let metadata = fs::read(root.join("profile.metadata.json")).expect("metadata");
+        let populations = BTreeSet::from(["P1".to_owned()]);
+
+        let operation_budget = 2 * (metadata_bytes + table_bytes);
+        let (memory_budget, retained_bytes) = profile_memory_oracle(&root);
+        let mut exact = ledger(operation_budget, memory_budget);
+        let loaded = load_f5_profile_under_budget(
+            &root.join("profile.metadata.json"),
+            &digest(&metadata),
+            &populations,
+            &mut exact,
+        )
+        .expect("the inclusive budget admits all five declared tables");
+        assert_eq!(loaded.identities().len(), 6);
+        assert_eq!(exact.phase(), AdmissionPhase::ProfileTableLd);
+        assert_eq!(exact.retained_memory_bytes(), retained_bytes);
+        assert_eq!(exact.totals().operation_units().value(), operation_budget);
+        assert_eq!(
+            exact.totals().working_memory_peak().value(),
+            memory_budget,
+            "el pico incluye los dominios y auditorías ya retenidos"
+        );
+
+        let mut minus_one = ledger(operation_budget - 1, memory_budget);
+        let error = load_f5_profile_under_budget(
+            &root.join("profile.metadata.json"),
+            &digest(&metadata),
+            &populations,
+            &mut minus_one,
+        )
+        .expect_err("all known table costs are reserved before opening the first table");
+        assert_eq!(error.code(), "GPS-RES-101");
+        assert_eq!(minus_one.phase(), AdmissionPhase::Rejected);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn metadata_and_table_oversize_are_rejected_by_the_derived_bounds() {
+        let root = fixture();
+        let (metadata_bytes, table_bytes, table_peak) = profile_bytes(&root);
+        let metadata = fs::read(root.join("profile.metadata.json")).expect("metadata");
+        let populations = BTreeSet::from(["P1".to_owned()]);
+        let mut metadata_too_large = ledger(u64::MAX, 2 * metadata_bytes - 1);
+        let error = load_f5_profile_under_budget(
+            &root.join("profile.metadata.json"),
+            &digest(&metadata),
+            &populations,
+            &mut metadata_too_large,
+        )
+        .expect_err("metadata cannot reserve a byte over the remaining budget");
+        assert_eq!(error.code(), "GPS-RES-101");
+        assert_eq!(metadata_too_large.phase(), AdmissionPhase::Rejected);
+
+        refresh_metadata(&root, "1", Some(1), None);
+        let undersized = fs::read(root.join("profile.metadata.json")).expect("metadata");
+        let mut table_too_large = ledger(
+            2 * (metadata_bytes + table_bytes),
+            2 * table_peak.max(metadata_bytes),
+        );
+        let error = load_f5_profile_under_budget(
+            &root.join("profile.metadata.json"),
+            &digest(&undersized),
+            &populations,
+            &mut table_too_large,
+        )
+        .expect_err("the declared size plus one is the physical table bound");
+        assert_eq!(error.code(), "GPS-INPUT-002");
+        assert_eq!(table_too_large.phase(), AdmissionPhase::Rejected);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn tsv_dominant_memory_limit_is_exact_and_minus_one_with_live_retention() {
+        let root = fixture();
+        let metadata = fs::read(root.join("profile.metadata.json")).expect("metadata");
+        let populations = BTreeSet::from(["P1".to_owned()]);
+        let (required, retained_bytes) = profile_memory_oracle(&root);
+        assert!(
+            required > 2 * metadata.len() as u64,
+            "a TSV phase dominates"
+        );
+        let mut exact = ledger(u64::MAX, required);
+        load_f5_profile_under_budget(
+            &root.join("profile.metadata.json"),
+            &digest(&metadata),
+            &populations,
+            &mut exact,
+        )
+        .expect("the inclusive profile phase peak is admitted");
+        assert_eq!(exact.retained_memory_bytes(), retained_bytes);
+
+        let mut minus_one = ledger(u64::MAX, required - 1);
+        let error = load_f5_profile_under_budget(
+            &root.join("profile.metadata.json"),
+            &digest(&metadata),
+            &populations,
+            &mut minus_one,
+        )
+        .expect_err("the retained profile plus parser do not fit");
+        assert_eq!(error.code(), "GPS-RES-101");
+        assert_eq!(minus_one.phase(), AdmissionPhase::Rejected);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn known_later_tsv_transient_is_reserved_before_opening_the_first_table() {
+        let root = fixture();
+        let metadata_path = root.join("profile.metadata.json");
+        let mut metadata: serde_json::Value =
+            serde_json::from_slice(&fs::read(&metadata_path).expect("metadata"))
+                .expect("metadata JSON");
+        let oversized_later_table = 10_000_u64;
+        metadata["files"][1]["size_bytes"] = oversized_later_table.into();
+        fs::write(
+            &metadata_path,
+            serde_json::to_vec(&metadata).expect("serialized metadata"),
+        )
+        .expect("metadata rewrite");
+        fs::remove_file(root.join("block_lengths.tsv")).expect("first-table opening spy");
+        let metadata = fs::read(&metadata_path).expect("rewritten metadata");
+        let populations = BTreeSet::from(["P1".to_owned()]);
+        let required_transient = 2 * oversized_later_table;
+
+        let mut minus_one = ledger(u64::MAX, required_transient - 1);
+        let error = load_f5_profile_under_budget(
+            &metadata_path,
+            &digest(&metadata),
+            &populations,
+            &mut minus_one,
+        )
+        .expect_err("the known later transient rejects before the absent first table opens");
+        assert_eq!(error.code(), "GPS-RES-101");
+        assert_eq!(error.context()["dimension"], "working_memory_bytes");
+        assert_eq!(error.context()["phase"], "profile_metadata");
+        assert_eq!(error.context()["role"], "profile_metadata");
+        assert_eq!(minus_one.phase(), AdmissionPhase::Rejected);
+
+        let mut exact = ledger(u64::MAX, required_transient);
+        let error = load_f5_profile_under_budget(
+            &metadata_path,
+            &digest(&metadata),
+            &populations,
+            &mut exact,
+        )
+        .expect_err("the exact reservation reaches the deliberately absent first table");
+        assert_eq!(error.code(), "GPS-INPUT-001");
+        assert_eq!(
+            exact.totals().working_memory_peak().value(),
+            required_transient,
+            "the exact prospective peak is reserved without retained rows"
+        );
+        assert_eq!(exact.retained_memory_bytes(), 0);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn excessive_tsv_columns_use_a_fixed_field_array_under_a_reduced_limit() {
+        let root = fixture();
+        let malicious = format!("{}1\n", "1\t".repeat(200_000));
+        write(
+            &root,
+            "block_lengths.tsv",
+            &format!("length_min_bp\tlength_max_bp\tweight\n{malicious}"),
+        );
+        refresh_metadata(&root, "1", None, None);
+        let metadata = fs::read(root.join("profile.metadata.json")).expect("metadata");
+        let table_bytes = fs::metadata(root.join("block_lengths.tsv"))
+            .expect("table")
+            .len();
+        let memory_limit = 2 * table_bytes;
+        let mut bounded = ledger(u64::MAX, memory_limit);
+        let error = load_f5_profile_under_budget(
+            &root.join("profile.metadata.json"),
+            &digest(&metadata),
+            &BTreeSet::from(["P1".to_owned()]),
+            &mut bounded,
+        )
+        .expect_err("the fourth field rejects a three-column table");
+        assert_eq!(error.code(), "GPS-FMT-101");
+        assert_eq!(bounded.totals().working_memory_peak().value(), memory_limit);
+        assert_eq!(bounded.retained_memory_bytes(), 0);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn normalization_audit_retention_is_charged_before_allocation() {
+        let root = fixture();
+        let mut table = String::from("length_min_bp\tlength_max_bp\tweight\n");
+        for value in 2..=101 {
+            table.push_str(&format!("{value}\t{value}\t0.001\n"));
+        }
+        write(&root, "block_lengths.tsv", &table);
+        refresh_metadata(&root, "1", None, None);
+        fs::remove_file(root.join("snp_gaps.tsv")).expect("later-open spy");
+        let metadata = fs::read(root.join("profile.metadata.json")).expect("metadata");
+        let table_bytes = fs::metadata(root.join("block_lengths.tsv"))
+            .expect("table")
+            .len();
+        let rows_only_limit = 2 * table_bytes + 100 * 256;
+        let mut bounded = ledger(u64::MAX, rows_only_limit);
+        let error = load_f5_profile_under_budget(
+            &root.join("profile.metadata.json"),
+            &digest(&metadata),
+            &BTreeSet::from(["P1".to_owned()]),
+            &mut bounded,
+        )
+        .expect_err("audit vectors require a prospective reservation");
+        assert_eq!(error.code(), "GPS-RES-101");
+        assert_eq!(bounded.phase(), AdmissionPhase::Rejected);
+        assert_eq!(
+            error.context().get("dimension"),
+            Some(&"working_memory_bytes".to_owned())
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn first_table_rejection_does_not_open_a_later_table() {
+        let root = fixture();
+        write(
+            &root,
+            "block_lengths.tsv",
+            "length_min_bp\tlength_max_bp\tweight\n2\t10\t0\n",
+        );
+        refresh_metadata(&root, "1", None, None);
+        fs::remove_file(root.join("snp_gaps.tsv")).expect("later table is an opening spy");
+        let metadata = fs::read(root.join("profile.metadata.json")).expect("metadata");
+        let mut ledger = ledger(u64::MAX, u64::MAX);
+        let error = load_f5_profile_under_budget(
+            &root.join("profile.metadata.json"),
+            &digest(&metadata),
+            &BTreeSet::from(["P1".to_owned()]),
+            &mut ledger,
+        )
+        .expect_err("the first parser rejection stops before the absent second table");
+        assert_eq!(error.code(), "GPS-FMT-101");
+        assert!(error.render_human().contains("block_lengths.tsv"));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn profile_identity_contract_uses_the_six_ordered_observations() {
+        let root = fixture();
+        let metadata_path = root.join("profile.metadata.json");
+        let metadata = fs::read(&metadata_path).expect("metadata");
+        let mut ledger = ledger(u64::MAX, u64::MAX);
+        let loaded = load_f5_profile_under_budget(
+            &metadata_path,
+            &digest(&metadata),
+            &BTreeSet::from(["P1".to_owned()]),
+            &mut ledger,
+        )
+        .expect("valid profile");
+        let roles = [
+            crate::f5_admission::InputRole::ProfileMetadata,
+            crate::f5_admission::InputRole::ProfileBlockLengths,
+            crate::f5_admission::InputRole::ProfileSnpGaps,
+            crate::f5_admission::InputRole::ProfileSnpSpectrum,
+            crate::f5_admission::InputRole::ProfileHaplotypeWeights,
+            crate::f5_admission::InputRole::ProfileLd,
+        ];
+        let names = [
+            "profile.metadata.json",
+            "block_lengths.tsv",
+            "snp_gaps.tsv",
+            "snp_spectrum.tsv",
+            "haplotype_weights.tsv",
+            "ld_profile.tsv",
+        ];
+        for ((identity, role), name) in loaded.identities().iter().zip(roles).zip(names) {
+            let bytes = fs::read(root.join(name)).expect("literal identity oracle");
+            assert_eq!(identity.role(), role);
+            assert_eq!(identity.normalized_path(), root.join(name));
+            assert_eq!(identity.observed_size_bytes(), bytes.len() as u64);
+            assert_eq!(identity.observed_sha256(), digest(&bytes));
+        }
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn each_tsv_excess_is_an_identity_rejection_before_the_next_open() {
+        for name in F5_PROFILE_TSV_FILENAMES {
+            let root = fixture();
+            let mut bytes = fs::read(root.join(name)).expect("table");
+            let declared_size = bytes.len().to_string();
+            bytes.extend(std::iter::repeat_n(b'x', 8_193));
+            fs::write(root.join(name), bytes).expect("oversized table");
+            let metadata = fs::read(root.join("profile.metadata.json")).expect("metadata");
+            let mut ledger = ledger(u64::MAX, u64::MAX);
+            let error = load_f5_profile_under_budget(
+                &root.join("profile.metadata.json"),
+                &digest(&metadata),
+                &BTreeSet::from(["P1".to_owned()]),
+                &mut ledger,
+            )
+            .expect_err("a table larger than its declared identity is rejected");
+            assert_eq!(error.code(), "GPS-INPUT-002", "{name}");
+            assert_eq!(
+                error.context().get("expected_size_bytes"),
+                Some(&declared_size),
+                "{name}"
+            );
+            assert!(error.render_human().contains(name));
+            fs::remove_dir_all(root).expect("cleanup");
+        }
     }
 
     #[test]
@@ -1131,7 +1905,11 @@ mod tests {
             let root = fixture();
             mutate(&root);
             let error = load(&root).expect_err(name);
-            assert!(error.contains("GPS-FMT-101"), "{name}: {error}");
+            if matches!(name, "size" | "sha") {
+                assert!(error.contains("GPS-INPUT-002"), "{name}: {error}");
+            } else {
+                assert!(error.contains("GPS-FMT-101"), "{name}: {error}");
+            }
             fs::remove_dir_all(root).expect("cleanup");
         }
     }

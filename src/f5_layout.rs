@@ -254,7 +254,7 @@ impl F5BlockLengthPlan {
         config: &EffectiveF5Config,
         preflight: &F5ResourcePreflight,
     ) -> Result<Self, Diagnostic> {
-        let scenario_id = ScenarioId::parse("scenario_id", config.scenario_id()).map_err(|_| {
+        let scenario_id = ScenarioId::parse(config.scenario_id(), "scenario_id").map_err(|_| {
             configuration(
                 config,
                 "scenario_id",
@@ -1634,19 +1634,29 @@ fn materialize_attempt(
                 .gap_distribution
                 .sample(scenario_id, &mut gap_rng)
                 .map_err(AttemptMaterialization::Diagnostic)?;
-            let next = sites
-                .last()
-                .copied()
-                .and_then(|position| position.checked_add(gap))
-                .ok_or_else(|| {
-                    AttemptMaterialization::Diagnostic(Diagnostic::f5_internal(
-                        scenario_id.as_str(),
-                        "la posición SNP desborda u64",
-                    ))
-                })?;
-            if next > block.end_1based {
+            let current = sites.last().copied().ok_or_else(|| {
+                AttemptMaterialization::Diagnostic(Diagnostic::f5_internal(
+                    scenario_id.as_str(),
+                    "el bloque no conserva su primer SNP",
+                ))
+            })?;
+            let remaining = block.end_1based.checked_sub(current).ok_or_else(|| {
+                AttemptMaterialization::Diagnostic(Diagnostic::f5_internal(
+                    scenario_id.as_str(),
+                    "la posición SNP quedó fuera del bloque",
+                ))
+            })?;
+            if gap > remaining {
                 break;
             }
+            // La comparación anterior demuestra que esta suma cabe y no supera
+            // el final del bloque, incluso para un gap u64::MAX válido.
+            let next = current.checked_add(gap).ok_or_else(|| {
+                AttemptMaterialization::Diagnostic(Diagnostic::f5_internal(
+                    scenario_id.as_str(),
+                    "la posición SNP desborda pese a la cota restante",
+                ))
+            })?;
             sites.push(next);
             if sites.len() > 4096 {
                 return Err(AttemptMaterialization::Diagnostic(Diagnostic::f5_resource(

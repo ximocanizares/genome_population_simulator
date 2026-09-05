@@ -197,6 +197,22 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
       exacto−1, pico por tabla y orden de aperturas. Una prueba independiente
       registra handles y demuestra que ninguna tabla posterior se abre después
       del primer rechazo.
+    - Estado reabierto (5 de septiembre de 2026): la revisión integral invalidó
+      la evidencia de cierre del día 4 mediante A1–A7. Las correcciones y sus
+      regresiones quedan registradas en
+      `evidence/f5.1.2/aplicacion-correcciones-integrales-2026-09-05.md`.
+      Una revisión independiente posterior detectó R1–R3 en versión externa,
+      reserva prospectiva de TSV y dimensión diagnóstica; las correcciones
+      locales también constan allí. Una revisión de cierre posterior rechazó
+      todavía R1 porque la proyección escalar v7 había heredado el campo
+      interno `input_parser_peak_bytes`: se retiró del productor y del esquema
+      efectivo —y, por referencia, del manifiesto— y se añadió un oráculo de
+      claves literal e independiente para ambas rutas. Esta proyección de .3
+      no se presenta como el contrato final: `input_identities` y `phases`
+      siguen reservados a .5. Todas las correcciones aún requieren una nueva
+      revisión.
+      El subhito permanece abierto hasta una revisión independiente de la pausa
+      A; H10 sigue reservado a F5.1.2.6 y no se presenta como gate verde.
 
   **Pausa de revisión F5.1.2-A.** Aprobar dispatcher, bootstrap, lector, perfil
   y ledger. Exigir ausencia mecánica de `fs::read` y de sondas parciales en la

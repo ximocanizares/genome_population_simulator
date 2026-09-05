@@ -199,6 +199,7 @@ pub enum LedgerCharge {
 pub struct F5ResourceLedger {
     limits: LedgerLimits,
     totals: LedgerTotals,
+    retained_memory_bytes: u64,
     phase: AdmissionPhase,
 }
 
@@ -212,6 +213,7 @@ impl F5ResourceLedger {
                 working_memory_peak: WorkingMemoryPeak::new(0),
                 output_bytes: OutputReservation::new(0),
             },
+            retained_memory_bytes: 0,
             phase: AdmissionPhase::Bootstrap,
         }
     }
@@ -224,6 +226,73 @@ impl F5ResourceLedger {
     #[must_use]
     pub const fn phase(&self) -> AdmissionPhase {
         self.phase
+    }
+
+    /// Memoria persistente que sigue viva al terminar la última transición
+    /// registrada. No es el pico histórico y, por tanto, es la base correcta
+    /// para derivar el headroom de la entrada siguiente.
+    #[must_use]
+    pub const fn retained_memory_bytes(&self) -> u64 {
+        self.retained_memory_bytes
+    }
+
+    /// Cota física disponible para la siguiente entrada materializada. Se
+    /// deriva del presupuesto que queda en las dos dimensiones que una lectura
+    /// puede consumir (trabajo y pico de búfer), nunca de `metadata`. Cada
+    /// byte de documento necesita dos unidades: lectura/hash y parser, y las
+    /// dos representaciones coexisten transitoriamente.
+    pub fn remaining_input_bytes(&mut self, role: InputRole) -> Result<u64, Diagnostic> {
+        if self.phase == AdmissionPhase::Rejected {
+            return Err(terminal_rejection_diagnostic());
+        }
+        if !role_matches_phase(role, self.phase) {
+            return Err(resource_diagnostic(
+                self.phase,
+                role,
+                ResourceDimension::OperationUnits,
+                0,
+                0,
+                "el rol no coincide con la fase para derivar su límite físico",
+            ));
+        }
+        let operation_remaining = self
+            .limits
+            .operation_units
+            .value()
+            .saturating_sub(self.totals.operation_units.value());
+        let memory_headroom = self
+            .limits
+            .working_memory_peak
+            .value()
+            .saturating_sub(self.retained_memory_bytes);
+        let operation_input_capacity = operation_remaining / 2;
+        let memory_input_capacity = memory_headroom / 2;
+        let limit = operation_input_capacity.min(memory_input_capacity);
+        if limit == 0 {
+            let (dimension, accumulated, maximum) =
+                if operation_input_capacity <= memory_input_capacity {
+                    (
+                        ResourceDimension::OperationUnits,
+                        self.totals.operation_units.value(),
+                        self.limits.operation_units.value(),
+                    )
+                } else {
+                    (
+                        ResourceDimension::WorkingMemoryBytes,
+                        self.retained_memory_bytes,
+                        self.limits.working_memory_peak.value(),
+                    )
+                };
+            return Err(self.reject(resource_diagnostic(
+                self.phase,
+                role,
+                dimension,
+                accumulated,
+                maximum,
+                "no queda presupuesto para abrir la siguiente entrada",
+            )));
+        }
+        Ok(limit)
     }
 
     /// Cambia a la siguiente fase de la máquina de admisión; no acepta saltos.
@@ -338,9 +407,91 @@ impl F5ResourceLedger {
         Ok(())
     }
 
+    /// Registra el pico de una fase sin convertir picos anteriores en una
+    /// reserva acumulativa.  Las estructuras persistentes de la fase anterior
+    /// y posterior pueden coexistir con su transitorio, pero dos fases ya
+    /// terminadas no lo hacen.
+    pub fn charge_memory_phase(
+        &mut self,
+        role: InputRole,
+        retained_before_bytes: u64,
+        transient_bytes: u64,
+        retained_after_bytes: u64,
+    ) -> Result<(), Diagnostic> {
+        if self.phase == AdmissionPhase::Rejected {
+            return Err(terminal_rejection_diagnostic());
+        }
+        if retained_before_bytes != self.retained_memory_bytes {
+            return Err(self.reject(resource_diagnostic(
+                self.phase,
+                role,
+                ResourceDimension::WorkingMemoryBytes,
+                retained_before_bytes,
+                self.retained_memory_bytes,
+                "la retención declarada no coincide con la memoria viva del ledger",
+            )));
+        }
+        let retained = retained_before_bytes.max(retained_after_bytes);
+        let peak = retained.checked_add(transient_bytes).ok_or_else(|| {
+            self.reject(overflow_diagnostic(
+                self.phase,
+                role,
+                ResourceDimension::WorkingMemoryBytes,
+                self.limits.working_memory_peak.value(),
+            ))
+        })?;
+        self.charge(
+            role,
+            LedgerCharge::WorkingMemoryPeak(WorkingMemoryPeak::new(peak)),
+        )?;
+        self.retained_memory_bytes = retained_after_bytes;
+        Ok(())
+    }
+
+    /// Comprueba un transitorio futuro ya conocido contra la retención viva
+    /// actual. Actualiza el máximo histórico admitido, pero no convierte la
+    /// reserva en retención ni altera la fase.
+    pub fn reserve_transient_memory(
+        &mut self,
+        role: InputRole,
+        transient_bytes: u64,
+    ) -> Result<(), Diagnostic> {
+        self.charge_memory_phase(
+            role,
+            self.retained_memory_bytes,
+            transient_bytes,
+            self.retained_memory_bytes,
+        )
+    }
+
     fn reject(&mut self, diagnostic: Diagnostic) -> Diagnostic {
         self.phase = AdmissionPhase::Rejected;
         diagnostic
+    }
+
+    /// Rechaza explícitamente una aritmética del consumidor que no puede
+    /// expresarse como una carga simple, preservando el estado terminal.
+    pub fn reject_resource(
+        &mut self,
+        role: InputRole,
+        dimension: ResourceDimension,
+        detail: &'static str,
+    ) -> Diagnostic {
+        let limit = match dimension {
+            ResourceDimension::OperationUnits => self.limits.operation_units.value(),
+            ResourceDimension::WorkingMemoryBytes | ResourceDimension::PhysicalInputBytes => {
+                self.limits.working_memory_peak.value()
+            }
+            ResourceDimension::OutputBytes => self.limits.output_bytes.value(),
+        };
+        self.reject(resource_diagnostic(
+            self.phase,
+            role,
+            dimension,
+            u64::MAX,
+            limit,
+            detail,
+        ))
     }
 
     fn restore_totals(&mut self, totals: LedgerTotals) {
@@ -541,7 +692,36 @@ impl<R: Read> BoundedInput<R> {
         self,
         ledger: Option<&mut F5ResourceLedger>,
     ) -> Result<BoundedInputRead, Diagnostic> {
-        self.read_to_end_with_reserver(ledger, |bytes, additional| {
+        self.read_to_end_with_reserver(ledger, false, None, |bytes, additional| {
+            bytes.try_reserve(additional).is_ok()
+        })
+    }
+
+    /// Igual que la lectura bajo ledger, pero clasifica el primer byte que
+    /// excede un tamaño declarado como discrepancia de identidad. Solo se
+    /// incorpora al hash observado; nunca se materializa en el búfer.
+    pub fn read_to_end_with_ledger_and_expected_identity(
+        self,
+        ledger: &mut F5ResourceLedger,
+        expected_size: u64,
+        expected_sha256: &str,
+    ) -> Result<BoundedInputRead, Diagnostic> {
+        self.read_to_end_with_reserver(
+            Some(ledger),
+            false,
+            Some((expected_size, expected_sha256)),
+            |bytes, additional| bytes.try_reserve(additional).is_ok(),
+        )
+    }
+
+    /// Variante para entradas cuyo coste de operación aún no puede conocerse
+    /// antes de EOF (el metadata). Reserva una unidad antes de cada byte; una
+    /// sonda EOF se revierte y nunca se contabiliza como contenido.
+    pub fn read_to_end_with_ledger_counting_operations(
+        self,
+        ledger: &mut F5ResourceLedger,
+    ) -> Result<BoundedInputRead, Diagnostic> {
+        self.read_to_end_with_reserver(Some(ledger), true, None, |bytes, additional| {
             bytes.try_reserve(additional).is_ok()
         })
     }
@@ -549,6 +729,8 @@ impl<R: Read> BoundedInput<R> {
     fn read_to_end_with_reserver(
         self,
         ledger: Option<&mut F5ResourceLedger>,
+        count_operations: bool,
+        expected_identity: Option<(u64, &str)>,
         mut reserve: impl FnMut(&mut Vec<u8>, usize) -> bool,
     ) -> Result<BoundedInputRead, Diagnostic> {
         self.validate_read_admission(ledger.as_deref())?;
@@ -600,6 +782,19 @@ impl<R: Read> BoundedInput<R> {
                             ));
                         }
                     };
+                    if let Some((expected_size, expected_sha256)) = expected_identity {
+                        digest.update(excess);
+                        return Err(reject_resource_error(
+                            &mut ledger,
+                            input_identity_mismatch_diagnostic(
+                                &normalized_path,
+                                expected_size,
+                                expected_sha256,
+                                accumulated,
+                                &format!("{:x}", digest.finalize()),
+                            ),
+                        ));
+                    }
                     return Err(reject_resource_error(
                         &mut ledger,
                         resource_diagnostic(
@@ -614,7 +809,11 @@ impl<R: Read> BoundedInput<R> {
                 }
                 break;
             }
-            let permitted = match usize::try_from(remaining.min(chunk.len() as u64)) {
+            let permitted = match usize::try_from(if count_operations {
+                remaining.min(1)
+            } else {
+                remaining.min(chunk.len() as u64)
+            }) {
                 Ok(permitted) => permitted,
                 Err(_) => {
                     return Err(reject_resource_error(
@@ -628,10 +827,20 @@ impl<R: Read> BoundedInput<R> {
                     ));
                 }
             };
+            let totals_before_operation = ledger.as_deref().map(F5ResourceLedger::totals);
+            if count_operations && let Some(ledger) = ledger.as_deref_mut() {
+                ledger.charge(role, LedgerCharge::Operation(OperationCost::new(2)))?;
+            }
             let read = reader
                 .read(&mut chunk[..permitted])
                 .map_err(|error| input_read_error(&normalized_path, error))?;
             if read == 0 {
+                if count_operations
+                    && let (Some(ledger), Some(totals)) =
+                        (ledger.as_deref_mut(), totals_before_operation)
+                {
+                    ledger.restore_totals(totals);
+                }
                 break;
             }
             let new_len = match bytes.len().checked_add(read) {
@@ -675,13 +884,16 @@ impl<R: Read> BoundedInput<R> {
                 {
                     ledger.restore_totals(totals);
                 }
-                return Err(resource_diagnostic(
-                    phase,
-                    role,
-                    ResourceDimension::WorkingMemoryBytes,
-                    new_len_u64,
-                    new_len_u64,
-                    "no se pudo reservar el crecimiento prospectivo del búfer",
+                return Err(reject_resource_error(
+                    &mut ledger,
+                    resource_diagnostic(
+                        phase,
+                        role,
+                        ResourceDimension::WorkingMemoryBytes,
+                        new_len_u64,
+                        new_len_u64,
+                        "no se pudo reservar el crecimiento prospectivo del búfer",
+                    ),
                 ));
             }
             digest.update(&chunk[..read]);
@@ -779,18 +991,136 @@ fn input_read_error(path: &Path, error: std::io::Error) -> Diagnostic {
     .with("detail", error.to_string())
 }
 
+pub(crate) fn input_identity_mismatch_diagnostic(
+    path: &Path,
+    expected_size: u64,
+    expected_sha256: &str,
+    observed_size: u64,
+    observed_sha256: &str,
+) -> Diagnostic {
+    Diagnostic::input(
+        "GPS-INPUT-002",
+        "Una entrada cambió durante su copia o no coincide con su identidad declarada.",
+    )
+    .with("path", path.display().to_string())
+    .with("expected_size_bytes", expected_size.to_string())
+    .with("observed_size_bytes", observed_size.to_string())
+    .with("expected_digest", expected_sha256)
+    .with("observed_digest", observed_sha256)
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::io::{Cursor, Read};
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     use super::{
-        AdmissionPhase, BoundedInput, F5ResourceLedger, InputRole, LedgerLimits, OperationCost,
-        OutputReservation, WorkingMemoryPeak,
+        AdmissionPhase, BoundedInput, F5ResourceLedger, InputRole, LedgerCharge, LedgerLimits,
+        OperationCost, OutputReservation, WorkingMemoryPeak,
     };
 
     #[test]
-    fn injected_buffer_reservation_failure_restores_ledger_totals() {
+    fn input_headroom_uses_live_retention_not_the_historical_peak() {
+        let mut ledger = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(1_000),
+            WorkingMemoryPeak::new(100),
+            OutputReservation::new(1_000),
+        ));
+        ledger
+            .charge(
+                InputRole::GeneralToml,
+                LedgerCharge::WorkingMemoryPeak(WorkingMemoryPeak::new(100)),
+            )
+            .expect("bootstrap peak at the inclusive limit");
+        ledger
+            .transition_to(AdmissionPhase::ProfileMetadata)
+            .expect("profile after bootstrap");
+        assert_eq!(ledger.retained_memory_bytes(), 0);
+        assert_eq!(
+            ledger
+                .remaining_input_bytes(InputRole::ProfileMetadata)
+                .expect("released bootstrap buffers leave headroom"),
+            50
+        );
+
+        ledger
+            .charge_memory_phase(InputRole::ProfileMetadata, 0, 20, 30)
+            .expect("metadata leaves typed retained values");
+        ledger
+            .transition_to(AdmissionPhase::ProfileTableBlockLengths)
+            .expect("first table after metadata");
+        assert_eq!(ledger.retained_memory_bytes(), 30);
+        assert_eq!(
+            ledger
+                .remaining_input_bytes(InputRole::ProfileBlockLengths)
+                .expect("headroom subtracts the live 30 bytes"),
+            35
+        );
+    }
+
+    #[test]
+    fn zero_input_limit_reports_the_limiting_divided_dimension_and_is_terminal() {
+        let mut operations = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(3),
+            WorkingMemoryPeak::new(100),
+            OutputReservation::new(100),
+        ));
+        operations
+            .charge(
+                InputRole::GeneralToml,
+                LedgerCharge::Operation(OperationCost::new(2)),
+            )
+            .expect("bootstrap operation charge");
+        operations
+            .transition_to(AdmissionPhase::ProfileMetadata)
+            .expect("metadata phase");
+        let error = operations
+            .remaining_input_bytes(InputRole::ProfileMetadata)
+            .expect_err("one remaining operation cannot admit one input byte");
+        assert_eq!(error.context()["dimension"], "operation_units");
+        assert_eq!(operations.phase(), AdmissionPhase::Rejected);
+
+        let mut memory = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(100),
+            WorkingMemoryPeak::new(3),
+            OutputReservation::new(100),
+        ));
+        memory
+            .charge_memory_phase(InputRole::GeneralToml, 0, 0, 2)
+            .expect("bootstrap retention");
+        memory
+            .transition_to(AdmissionPhase::ProfileMetadata)
+            .expect("metadata phase");
+        let error = memory
+            .remaining_input_bytes(InputRole::ProfileMetadata)
+            .expect_err("one remaining memory byte cannot admit one input byte");
+        assert_eq!(error.context()["dimension"], "working_memory_bytes");
+        assert_eq!(memory.phase(), AdmissionPhase::Rejected);
+
+        let mut tie = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(3),
+            WorkingMemoryPeak::new(3),
+            OutputReservation::new(100),
+        ));
+        tie.charge(
+            InputRole::GeneralToml,
+            LedgerCharge::Operation(OperationCost::new(2)),
+        )
+        .expect("bootstrap operation charge");
+        tie.charge_memory_phase(InputRole::GeneralToml, 0, 0, 2)
+            .expect("bootstrap retention");
+        tie.transition_to(AdmissionPhase::ProfileMetadata)
+            .expect("metadata phase");
+        let error = tie
+            .remaining_input_bytes(InputRole::ProfileMetadata)
+            .expect_err("a tie is rejected deterministically");
+        assert_eq!(error.context()["dimension"], "operation_units");
+        assert_eq!(tie.phase(), AdmissionPhase::Rejected);
+    }
+
+    #[test]
+    fn injected_buffer_reservation_failure_is_atomic_and_terminal() {
         let mut ledger = F5ResourceLedger::new(LedgerLimits::new(
             OperationCost::new(10),
             WorkingMemoryPeak::new(10),
@@ -808,11 +1138,42 @@ mod tests {
             1,
             Cursor::new(b"x".to_vec()),
         )
-        .read_to_end_with_reserver(Some(&mut ledger), |_bytes, _additional| false)
+        .read_to_end_with_reserver(Some(&mut ledger), false, None, |_bytes, _additional| false)
         .expect_err("injected allocation failure");
 
         assert_eq!(error.code(), "GPS-RES-101");
         assert_eq!(ledger.totals(), before);
-        assert_eq!(ledger.phase(), AdmissionPhase::ProfileMetadata);
+        assert_eq!(ledger.phase(), AdmissionPhase::Rejected);
+        assert!(
+            ledger
+                .transition_to(AdmissionPhase::ProfileTableBlockLengths)
+                .is_err(),
+            "el rechazo de reserva impide transiciones posteriores"
+        );
+
+        #[derive(Clone)]
+        struct SpyReader {
+            reads: Arc<Mutex<u64>>,
+        }
+        impl Read for SpyReader {
+            fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+                *self.reads.lock().expect("spy lock") += 1;
+                Ok(0)
+            }
+        }
+        let reads = Arc::new(Mutex::new(0));
+        let later = BoundedInput::new(
+            InputRole::ProfileBlockLengths,
+            AdmissionPhase::ProfileTableBlockLengths,
+            PathBuf::from("/authoring/profiles/block_lengths.tsv"),
+            1,
+            SpyReader {
+                reads: Arc::clone(&reads),
+            },
+        )
+        .read_to_end_with_ledger(Some(&mut ledger))
+        .expect_err("un ledger rechazado impide otra lectura");
+        assert_eq!(later.code(), "GPS-RES-101");
+        assert_eq!(*reads.lock().expect("spy lock"), 0, "cero I/O posterior");
     }
 }

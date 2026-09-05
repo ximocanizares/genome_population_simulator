@@ -48,8 +48,8 @@ fn main() -> ExitCode {
     match load_and_validate_cli_config(&parsed.path).and_then(|effective| match (parsed.command, effective) {
         (CommandMode::Validate, CliValidatedConfig::Legacy(effective)) =>
             preflight_validated_config_with_authorizations(&effective, parsed.authorizations),
-        // F5.1.2.1 solo ha sellado el bootstrap físico. El perfil, referencia
-        // y el preflight v7 se incorporan en los pasos posteriores.
+        // La validación F5 ya selló bootstrap y perfil; referencia y preflight
+        // pertenecen a las fases posteriores de admisión.
         (CommandMode::Validate, CliValidatedConfig::F5(_)) => Ok(()),
         (CommandMode::Run, CliValidatedConfig::F5(_)) => Err(
             genome_population_simulator::diagnostics::Diagnostic::f5_configuration(

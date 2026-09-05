@@ -1536,6 +1536,11 @@ El ledger conserva además las fórmulas biológicas y geométricas ya decididas
 deriva `S_bound` antes de RNG, materializa solo tramos elegibles maximales y
 cuenta por separado bases, emisión, filas de perfil y normalización, filas
 TSV/JSON y las
+dos pasadas literales de cada selector de gap mediante la cota conservadora
+`2*L*B*S_bound*gap_support_cardinality`, donde la cardinalidad suma solamente
+los intervalos disjuntos soportados. La cota incluye el gap terminal que no
+cabe, usa aritmética comprobada y se admite antes de RNG sin cambiar la
+distribución ni su secuencia de consumo. También cuenta las
 `2*L*(B*tract_count+B*(B-1)/2)` consultas directas completas de layout. No
 construye un índice auxiliar. Efectivo y manifiesto copian con igualdad exacta
 el algoritmo v7, las identidades de entrada, los totales por fase, los factores
