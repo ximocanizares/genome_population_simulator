@@ -151,6 +151,17 @@ fn execute_validated_config_with_effective_document(
         &configuration_digest,
     )?;
 
+    // Una ejecución carga el genoma tres veces en momentos distintos: al
+    // prepararlo, al releer la copia publicada como autoridad, y al validar
+    // físicamente esa publicación. Cada carga retiene todas las bases, de modo
+    // que dos que se solapen doblan el pico de memoria.
+    //
+    // Aquí se envuelve la preparada en `Option` para poder soltarla antes de
+    // escribir el manifiesto, que es lo que dispara la validación física. La
+    // otra liberación está en `load_authoritative_reference`. Hacen falta las
+    // dos: si solo se elimina uno de los dos solapamientos, el otro sostiene el
+    // mismo pico y la mejora no se observa.
+    let mut prepared_reference = Some(prepared_reference);
     let mut workspace = ExecutionWorkspace::create(destination)?;
     let mut configuration_input = None;
     let mut reference_artifact = None;
@@ -164,7 +175,9 @@ fn execute_validated_config_with_effective_document(
         configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
         reference_artifact = Some(write_reference(
             effective,
-            &prepared_reference,
+            prepared_reference
+                .as_ref()
+                .ok_or_else(|| internal("execute", "reference already released"))?,
             &mut workspace,
         )?);
         let source_artifact = reference_artifact
@@ -174,12 +187,18 @@ fn execute_validated_config_with_effective_document(
             id: effective.reference_id().to_owned(),
             fasta_artifact_id: source_artifact.id.clone(),
         });
-        prepared_reference = load_authoritative_reference(
+        prepared_reference = Some(load_authoritative_reference(
             effective,
             &workspace,
             source_artifact,
-            prepared_reference,
-        )?;
+            prepared_reference
+                .take()
+                .ok_or_else(|| internal("execute", "reference already released"))?,
+        )?);
+        let reference = prepared_reference
+            .as_ref()
+            .ok_or_else(|| internal("execute", "reference already released"))?
+            .reference();
         population_snvs = publish_prepared_population_snvs(
             prepared_execution.population_snvs.as_ref(),
             source_artifact,
@@ -193,13 +212,13 @@ fn execute_validated_config_with_effective_document(
         }
         // A partir de aquí la copia recargada es la única autoridad para
         // seleccionar intervalos y materializar bases derivadas.
-        let prepared_reductions = prepare_reductions(effective, prepared_reference.reference())?;
+        let prepared_reductions = prepare_reductions(effective, reference)?;
         manifest_reductions = manifest_reduction_links(effective, &prepared_reductions);
         for reduction in &mut manifest_reductions {
             reduction.source_fasta_artifact_id = Some(source_artifact.id.clone());
         }
         let reference_output = ReferenceOutput {
-            reference: prepared_reference.reference(),
+            reference,
             fasta: source_artifact,
         };
         for (index, prepared) in prepared_reductions.into_iter().enumerate() {
@@ -285,7 +304,7 @@ fn execute_validated_config_with_effective_document(
         let truth = write_execution_truth(
             &mut workspace,
             execution_id.as_str(),
-            prepared_reference.reference(),
+            reference,
             prepared_execution.population_snvs.as_ref(),
             prepared_execution.initial_individuals.as_ref(),
             source_artifact,
@@ -295,8 +314,7 @@ fn execute_validated_config_with_effective_document(
             effective,
         )?;
         if let Some(mode) = effective.vcf_output() {
-            let published =
-                publish_truth_vcf(&mut workspace, prepared_reference.reference(), &truth, mode)?;
+            let published = publish_truth_vcf(&mut workspace, reference, &truth, mode)?;
             vcf_outputs.push(VcfManifestLink {
                 state: UnitState::Complete,
                 reference_id: published.reference_id,
@@ -312,7 +330,7 @@ fn execute_validated_config_with_effective_document(
                 &mut workspace,
                 effective,
                 event,
-                prepared_reference.reference(),
+                reference,
                 source_artifact,
                 prepared_execution.initial_individuals.as_ref(),
             ) {
@@ -331,6 +349,12 @@ fn execute_validated_config_with_effective_document(
                 &reduction_outputs,
                 population_snvs.as_ref(),
             )?);
+        // Ningún artefacto posterior necesita ya las bases de la referencia. Se
+        // libera antes de escribir el manifiesto, porque esa escritura dispara
+        // la validación física, que relee el FASTA publicado y construye otra
+        // referencia completa. Sin esto ambas conviven y el pico de memoria
+        // dobla el tamaño del genoma de partida.
+        prepared_reference = None;
         let effective_record = workspace.write_artifact(
             "effective-config",
             "effective_config",
@@ -1777,8 +1801,13 @@ fn load_authoritative_reference(
     artifact: &ArtifactRecord,
     prepared: PreparedReference,
 ) -> Result<PreparedReference, Diagnostic> {
-    let mut authoritative = match (effective.reference_source(), prepared) {
-        (EffectiveReferenceSource::Supplied { original_path }, PreparedReference::Supplied(_)) => {
+    // Ningún brazo necesita la referencia ya preparada, solo su origen. Se
+    // libera antes de releer la copia publicada porque, de lo contrario, la
+    // preparada y la autoritativa conviven y el pico dobla el genoma.
+    let prepared_was_supplied = matches!(prepared, PreparedReference::Supplied(_));
+    drop(prepared);
+    let mut authoritative = match (effective.reference_source(), prepared_was_supplied) {
+        (EffectiveReferenceSource::Supplied { original_path }, true) => {
             let supplied = validate_supplied_fasta_with_origin(
                 &workspace.root().join(&artifact.path),
                 original_path,
@@ -1795,7 +1824,7 @@ fn load_authoritative_reference(
             }
             PreparedReference::Supplied(supplied)
         }
-        (EffectiveReferenceSource::Simulated, PreparedReference::Generated(_)) => {
+        (EffectiveReferenceSource::Simulated, false) => {
             let physical_path = workspace.root().join(&artifact.path);
             let parsed = validate_supplied_fasta(
                 &physical_path,

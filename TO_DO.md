@@ -2,6 +2,15 @@
 
 ## Mejoras de rendimiento resueltas
 
+- [x] Reducir a la mitad el pico de memoria de una ejecución con referencia
+  suministrada. Una ejecución cargaba el genoma tres veces —preparación,
+  recarga autoritativa y validación física de la publicación— y dos de esas
+  cargas se solapaban, de modo que el pico doblaba el tamaño del genoma de
+  partida. Liberar la referencia en los dos puntos donde deja de usarse baja el
+  pico de 1.631 MB a 867 MB con el tomate de 759 MB, y el tiempo de CPU un 11 %.
+  Los siete artefactos publicados quedan idénticos byte a byte.
+  - Hace falta corregir los dos solapamientos a la vez: al eliminar solo uno, el
+    otro sostiene el mismo pico y la medición no acusa ninguna mejora.
 - [x] Eliminar las validaciones físicas redundantes durante la publicación:
   una única validación completa se realiza tras escribir y releer
   `manifest.json`; antes del renombrado atómico se conservan las comprobaciones
