@@ -775,19 +775,36 @@ fn publish_technical_event(
                     link: None,
                 })
             })?;
+        let mut regenerated = RegeneratedPairs::build(
+            clean,
+            reference,
+            &individuals,
+            &identities,
+            profile,
+            event,
+            effective.reproducibility().root_seed(),
+        )
+        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         let report = materializer
             .emit_materialized_recipient(
                 recipient_plan,
                 clean,
                 |key| {
-                    regenerate_observed_pair(
-                        key,
-                        reference,
-                        &individuals,
-                        &identities,
-                        profile,
-                        event,
-                        effective.reproducibility().root_seed(),
+                    // Las parejas propias salen de la pasada única; las de una
+                    // donante pertenecen a otra serie y se reproducen aparte.
+                    regenerated.take(key).map_or_else(
+                        || {
+                            regenerate_observed_pair(
+                                key,
+                                reference,
+                                &individuals,
+                                &identities,
+                                profile,
+                                event,
+                                effective.reproducibility().root_seed(),
+                            )
+                        },
+                        Ok,
                     )
                 },
                 |materialized| {
@@ -843,17 +860,32 @@ fn publish_technical_event(
         {
             continue;
         }
+        let udi = udis.get(clean.library_id()).cloned().ok_or_else(|| {
+            Box::new(TechnicalEventAssemblyFailure {
+                cause: technical_event_error("demultiplexing", "UDI de biblioteca ausente"),
+                link: None,
+            })
+        })?;
+        let mut regenerated = RegeneratedPairs::build(
+            clean,
+            reference,
+            &individuals,
+            &identities,
+            profile,
+            event,
+            effective.reproducibility().root_seed(),
+        )
+        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         for key in clean.own_pairs() {
-            let transformed = regenerate_observed_pair(
-                key,
-                reference,
-                &individuals,
-                &identities,
-                profile,
-                event,
-                effective.reproducibility().root_seed(),
-            )
-            .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+            let transformed = regenerated.take(key).ok_or_else(|| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error(
+                        "biological_contamination",
+                        "la clave limpia no se puede regenerar",
+                    ),
+                    link: None,
+                })
+            })?;
             error_quality
                 .record(transformed.report())
                 .map_err(|error| {
@@ -862,16 +894,10 @@ fn publish_technical_event(
                         link: None,
                     })
                 })?;
-            let udi = udis.get(clean.library_id()).cloned().ok_or_else(|| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error("demultiplexing", "UDI de biblioteca ausente"),
-                    link: None,
-                })
-            })?;
             post_contamination.push(PostContaminationPair::new(
                 clean.library_id().clone(),
                 key.pre_hop_instance_id().clone(),
-                udi,
+                udi.clone(),
                 false,
                 transformed.into_observed(),
             ));
@@ -1043,6 +1069,12 @@ fn paired_sampler<'a>(
         .map_err(|error| technical_event_error("wgs_paired_sampler", format!("{error:?}")))
 }
 
+/// Reproduce una pareja concreta recorriendo la serie de su individuo desde el
+/// principio.
+///
+/// Solo se usa para las parejas de una donante: son una fracción pequeña y su
+/// individuo lo indica la propia clave. Las parejas propias de la receptora, que
+/// son la mayoría, salen de [`RegeneratedPairs`] en una sola pasada.
 fn regenerate_observed_pair(
     key: &CleanPairKey,
     reference: &Reference,
@@ -1081,6 +1113,82 @@ fn regenerate_observed_pair(
         "biological_contamination",
         "la clave limpia no se puede regenerar",
     ))
+}
+
+/// Reproduce en una sola pasada las parejas de una biblioteca, indexadas por
+/// identidad.
+///
+/// `CleanLibraryPairs` ordena sus claves para poder buscarlas por dicotomía, de
+/// modo que llegan en orden de identificador y no en el de generación: no sirve
+/// avanzar el muestreador clave a clave. Reiniciarlo por cada una, en cambio,
+/// recorre la serie entera cada vez y convierte el coste en cuadrático sobre el
+/// número de parejas.
+///
+/// Retener las parejas transformadas no empeora el pico de memoria: el llamador
+/// las acumula igualmente en `post_contamination` antes de demultiplexar.
+struct RegeneratedPairs {
+    pairs: BTreeMap<crate::identity::PreHopInstanceId, ObservedPairTransformation>,
+}
+
+impl RegeneratedPairs {
+    fn build(
+        clean: &CleanLibraryPairs,
+        reference: &Reference,
+        individuals: &BTreeMap<
+            crate::identity::IndividualId,
+            (
+                &crate::haplotype::Individual,
+                &crate::identity::PopulationId,
+            ),
+        >,
+        identities: &crate::technical_identity::TechnicalIdentityPlan,
+        profile: crate::technical_profile::F4TechnicalProfile,
+        event: &crate::application::EffectiveTechnicalEvent,
+        root_seed: crate::randomness::RootSeed,
+    ) -> Result<Self, Diagnostic> {
+        let individual = individuals
+            .get(clean.individual_id())
+            .map(|(individual, _)| *individual)
+            .ok_or_else(|| {
+                technical_event_error("biological_contamination", "individuo ausente")
+            })?;
+        let wanted = clean
+            .own_pairs()
+            .iter()
+            .map(|key| key.pre_hop_instance_id().clone())
+            .collect::<BTreeSet<_>>();
+        let sampler = paired_sampler(reference, individual, identities, profile, event)?;
+        let mut pairs = BTreeMap::new();
+        for pair in sampler {
+            let pair = pair.map_err(|error| {
+                technical_event_error("wgs_paired_sampler", format!("{error:?}"))
+            })?;
+            let instance = pair.pre_hop_identity().pre_hop_instance_id();
+            if !wanted.contains(instance) {
+                continue;
+            }
+            let instance = instance.clone();
+            let transformed = transform_paired_end(
+                root_seed,
+                event.event_id(),
+                &pair,
+                profile,
+                ErrorQualitySettings::default().with_sequencing_errors(event.sequencing_errors()),
+            )
+            .map_err(|error| technical_event_error("error_quality", format!("{error:?}")))?;
+            pairs.insert(instance, transformed);
+        }
+        Ok(Self { pairs })
+    }
+
+    /// Entrega la pareja de una clave propia desde la pasada única.
+    ///
+    /// Una clave de otra individua pertenece a una donante: no está en esta
+    /// serie y se reproduce aparte. Devolver un error aquí ocultaría ese caso
+    /// legítimo de la contaminación.
+    fn take(&mut self, key: &CleanPairKey) -> Option<ObservedPairTransformation> {
+        self.pairs.remove(key.pre_hop_instance_id())
+    }
 }
 
 #[allow(clippy::too_many_arguments)] // hechos ya cerrados de las fases F4; agruparlos escondería contratos distintos.
