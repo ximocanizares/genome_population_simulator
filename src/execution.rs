@@ -765,6 +765,38 @@ fn publish_technical_event(
     let mut error_quality = ErrorQualityAccumulator::default();
     let mut post_contamination = Vec::new();
     let mut biological_manifest = Vec::new();
+    // Las parejas que aporta una donante se conocen antes de materializar: el
+    // plan ya dice cuál sustituye a cuál. Se agrupan por individua para recorrer
+    // cada serie una sola vez, en lugar de recorrerla entera por cada pareja
+    // contaminada, que volvería el coste cuadrático igual que en las propias.
+    let mut donor_requests: BTreeMap<
+        crate::identity::IndividualId,
+        BTreeSet<crate::identity::PreHopInstanceId>,
+    > = BTreeMap::new();
+    for recipient_plan in contamination_plan.recipients() {
+        for assignment in recipient_plan.assignments() {
+            let source = assignment.source_pair();
+            donor_requests
+                .entry(source.source_individual_id().clone())
+                .or_default()
+                .insert(source.pre_hop_instance_id().clone());
+        }
+    }
+    let mut donor_pairs = BTreeMap::new();
+    for (individual_id, wanted) in &donor_requests {
+        let collected = RegeneratedPairs::collect(
+            individual_id,
+            wanted,
+            reference,
+            &individuals,
+            &identities,
+            profile,
+            event,
+            effective.reproducibility().root_seed(),
+        )
+        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        donor_pairs.insert(individual_id.clone(), collected);
+    }
     for recipient_plan in contamination_plan.recipients() {
         let clean = clean_libraries
             .iter()
@@ -790,22 +822,23 @@ fn publish_technical_event(
                 recipient_plan,
                 clean,
                 |key| {
-                    // Las parejas propias salen de la pasada única; las de una
-                    // donante pertenecen a otra serie y se reproducen aparte.
-                    regenerated.take(key).map_or_else(
-                        || {
-                            regenerate_observed_pair(
-                                key,
-                                reference,
-                                &individuals,
-                                &identities,
-                                profile,
-                                event,
-                                effective.reproducibility().root_seed(),
+                    // Las parejas propias salen de la pasada única de esta
+                    // biblioteca; las de una donante, de la serie que ya se
+                    // recorrió para su individua.
+                    regenerated
+                        .take(key)
+                        .or_else(|| {
+                            donor_pairs
+                                .get(key.source_individual_id())
+                                .and_then(|pairs| pairs.get(key.pre_hop_instance_id()))
+                                .cloned()
+                        })
+                        .ok_or_else(|| {
+                            technical_event_error(
+                                "biological_contamination",
+                                "la clave limpia no se puede regenerar",
                             )
-                        },
-                        Ok,
-                    )
+                        })
                 },
                 |materialized| {
                     let report = materialized.payload().report();
@@ -1069,52 +1102,6 @@ fn paired_sampler<'a>(
         .map_err(|error| technical_event_error("wgs_paired_sampler", format!("{error:?}")))
 }
 
-/// Reproduce una pareja concreta recorriendo la serie de su individuo desde el
-/// principio.
-///
-/// Solo se usa para las parejas de una donante: son una fracción pequeña y su
-/// individuo lo indica la propia clave. Las parejas propias de la receptora, que
-/// son la mayoría, salen de [`RegeneratedPairs`] en una sola pasada.
-fn regenerate_observed_pair(
-    key: &CleanPairKey,
-    reference: &Reference,
-    individuals: &BTreeMap<
-        crate::identity::IndividualId,
-        (
-            &crate::haplotype::Individual,
-            &crate::identity::PopulationId,
-        ),
-    >,
-    identities: &crate::technical_identity::TechnicalIdentityPlan,
-    profile: crate::technical_profile::F4TechnicalProfile,
-    event: &crate::application::EffectiveTechnicalEvent,
-    root_seed: crate::randomness::RootSeed,
-) -> Result<ObservedPairTransformation, Diagnostic> {
-    let individual = individuals
-        .get(key.source_individual_id())
-        .map(|(individual, _)| *individual)
-        .ok_or_else(|| technical_event_error("biological_contamination", "donante ausente"))?;
-    let sampler = paired_sampler(reference, individual, identities, profile, event)?;
-    for pair in sampler {
-        let pair = pair
-            .map_err(|error| technical_event_error("wgs_paired_sampler", format!("{error:?}")))?;
-        if pair.pre_hop_identity().pre_hop_instance_id() == key.pre_hop_instance_id() {
-            return transform_paired_end(
-                root_seed,
-                event.event_id(),
-                &pair,
-                profile,
-                ErrorQualitySettings::default().with_sequencing_errors(event.sequencing_errors()),
-            )
-            .map_err(|error| technical_event_error("error_quality", format!("{error:?}")));
-        }
-    }
-    Err(technical_event_error(
-        "biological_contamination",
-        "la clave limpia no se puede regenerar",
-    ))
-}
-
 /// Reproduce en una sola pasada las parejas de una biblioteca, indexadas por
 /// identidad.
 ///
@@ -1146,17 +1133,51 @@ impl RegeneratedPairs {
         event: &crate::application::EffectiveTechnicalEvent,
         root_seed: crate::randomness::RootSeed,
     ) -> Result<Self, Diagnostic> {
-        let individual = individuals
-            .get(clean.individual_id())
-            .map(|(individual, _)| *individual)
-            .ok_or_else(|| {
-                technical_event_error("biological_contamination", "individuo ausente")
-            })?;
         let wanted = clean
             .own_pairs()
             .iter()
             .map(|key| key.pre_hop_instance_id().clone())
             .collect::<BTreeSet<_>>();
+        Ok(Self {
+            pairs: Self::collect(
+                clean.individual_id(),
+                &wanted,
+                reference,
+                individuals,
+                identities,
+                profile,
+                event,
+                root_seed,
+            )?,
+        })
+    }
+
+    /// Recorre la serie de una individua una sola vez y transforma únicamente
+    /// las parejas pedidas.
+    #[allow(clippy::too_many_arguments)] // los mismos hechos cerrados de F4 que el resto de la fase.
+    fn collect(
+        individual_id: &crate::identity::IndividualId,
+        wanted: &BTreeSet<crate::identity::PreHopInstanceId>,
+        reference: &Reference,
+        individuals: &BTreeMap<
+            crate::identity::IndividualId,
+            (
+                &crate::haplotype::Individual,
+                &crate::identity::PopulationId,
+            ),
+        >,
+        identities: &crate::technical_identity::TechnicalIdentityPlan,
+        profile: crate::technical_profile::F4TechnicalProfile,
+        event: &crate::application::EffectiveTechnicalEvent,
+        root_seed: crate::randomness::RootSeed,
+    ) -> Result<BTreeMap<crate::identity::PreHopInstanceId, ObservedPairTransformation>, Diagnostic>
+    {
+        let individual = individuals
+            .get(individual_id)
+            .map(|(individual, _)| *individual)
+            .ok_or_else(|| {
+                technical_event_error("biological_contamination", "individuo ausente")
+            })?;
         let sampler = paired_sampler(reference, individual, identities, profile, event)?;
         let mut pairs = BTreeMap::new();
         for pair in sampler {
@@ -1178,7 +1199,7 @@ impl RegeneratedPairs {
             .map_err(|error| technical_event_error("error_quality", format!("{error:?}")))?;
             pairs.insert(instance, transformed);
         }
-        Ok(Self { pairs })
+        Ok(pairs)
     }
 
     /// Entrega la pareja de una clave propia desde la pasada única.
