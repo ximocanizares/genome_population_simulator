@@ -370,6 +370,10 @@ fn validate_supplied_fasta_inner(
     expected: Option<&[SequenceExpectation<'_>]>,
 ) -> Result<ValidatedSuppliedReference, Diagnostic> {
     let file = File::open(read_path).map_err(|error| input_error(read_path, error))?;
+    // Cota superior física para la reserva de cada secuencia: un FASTA no puede
+    // contener más bases que bytes tiene el fichero. Acota una longitud
+    // declarada errónea sin depender de que sea correcta.
+    let physical_size = file.metadata().ok().map(|metadata| metadata.len());
     let digesting = DigestingReader::new(file);
     let mut reader = BufReader::new(digesting);
     if reader
@@ -424,7 +428,18 @@ fn validate_supplied_fasta_inner(
                 )?);
             }
             let header = parse_header_with_noodles(read_path, raw_header, line_number)?;
-            pending = Some((header, Vec::new(), line_number));
+            // Reservar la longitud declarada evita que el vector crezca por
+            // duplicación: sin esto, cada doblado mantiene vivas la copia vieja
+            // y la nueva, y el pico llega al doble de la secuencia.
+            let capacity = expectations
+                .as_ref()
+                .and_then(|map| map.get(header.id_text()))
+                .map(|expectation| expectation.length)
+                .zip(physical_size)
+                .map(|(declared, physical)| declared.min(physical))
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(0);
+            pending = Some((header, Vec::with_capacity(capacity), line_number));
         } else {
             let Some((header, bases, _)) = pending.as_mut() else {
                 return Err(empty_header(read_path, line_number));

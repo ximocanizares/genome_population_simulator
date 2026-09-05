@@ -2918,7 +2918,16 @@ fn effective_needs_reference_bases(effective: &serde_json::Map<String, Value>) -
             .and_then(Value::as_array)
             .is_some_and(|values| !values.is_empty())
     };
-    declared("population_snvs")
+    // Una referencia simulada se comprueba regenerándola desde la semilla y
+    // comparándola base a base: sin bases, esa comparación no podría hacerse.
+    let simulated = effective
+        .get("reference")
+        .and_then(Value::as_object)
+        .and_then(|reference| reference.get("source"))
+        .and_then(Value::as_str)
+        == Some("simulated");
+    simulated
+        || declared("population_snvs")
         || declared("technical_event")
         || declared("vcf_output")
         || non_empty("initial_populations")

@@ -2047,10 +2047,12 @@ fn load_authoritative_reference(
                     "cataloged generated reference changed",
                 ));
             }
+            // Se consumen las secuencias en lugar de clonarlas: clonarlas
+            // mantendría vivas dos copias del genoma a la vez.
             let reference = Reference::new(
                 ReferenceId::parse(effective.reference_id(), "execution")?,
                 crate::reference::ReferenceOrigin::Generated,
-                parsed.reference().sequences().to_vec(),
+                parsed.into_reference().into_sequences(),
             )
             .map_err(|error| internal("reload_generated_reference", error))?;
             PreparedReference::Generated(reference)

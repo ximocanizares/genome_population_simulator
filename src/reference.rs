@@ -442,6 +442,15 @@ impl Reference {
         self.content_sha256 = Some(digest);
     }
 
+    /// Entrega las secuencias por valor.
+    ///
+    /// Permite reconstruir una referencia con otro origen sin clonar las bases:
+    /// clonarlas mantendría dos copias vivas y doblaría el pico de memoria.
+    #[must_use]
+    pub fn into_sequences(self) -> Vec<ReferenceSequence> {
+        self.sequences
+    }
+
     pub fn authoritative_resource(&self) -> Option<&Path> {
         self.authoritative_resource.as_deref()
     }
