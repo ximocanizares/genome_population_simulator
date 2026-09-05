@@ -159,7 +159,7 @@ manifiesto.
 | minimap2 | `2.26-r1175`, disponible | Permite preparar el mapeo, sujeto a aprobar preset y parámetros |
 | samtools | `1.21`, disponible | Permite ordenar, indexar y comprobar BAM |
 | bcftools | `1.21`, disponible | Es anterior a la versión 1.24 exigida por la puerta externa DTC-066 del simulador |
-| bgzip/tabix | HTSlib `1.19`, disponibles | Son anteriores a la versión 1.24 exigida por DTC-066 |
+| bgzip/tabix | HTSlib `1.19` en `/usr/bin`, disponibles | Son anteriores a la 1.24 de DTC-066 y también al 1.21 que embeben samtools y bcftools, instalados aparte en `/opt`. VE.1.1 no los congela porque el ensayo no los invoca |
 | FreeBayes | `v1.3.10`, disponible | VE.1.1 debe congelar versión, ruta y SHA-256 del ejecutable antes de ejecutar |
 | WhatsHap/SHAPEIT4/Beagle | no disponibles | No debe darse por aprobado ningún faseador |
 | hap.py/RTG vcfeval/truvari | no disponibles | Debe decidirse el comparador antes de prometer equivalencia compleja |
@@ -689,7 +689,7 @@ salidas son «lógicamente iguales».
 | VE-D01 | Propiedad y coordenada | **Aprobado:** banco externo DTF-024 con coordenada `VE`, no F5 ni F9.5 | No bloquea |
 | VE-D02 | PE sin errores de secuenciación | **Superado en F4:** `sequencing_errors="disabled"` produce cero sustituciones PE y marca las calidades no probabilísticas; VE fija además quimeras, contaminación e *index hopping* a cero | No bloquea VE-SNP |
 | VE-D03 | Contenido exacto de VE-SNP | **Aprobado:** solo SNP bialélicos, sin multialelia ni *indels*, en VE-SNP 0.1 | Configuración y comparador |
-| VE-D04 | Densidad y selección de loci | **Aprobado:** 1.000 posiciones candidatas A/C/G/T elegibles, no enmascaradas ni ambiguas, con frecuencia ALT objetivo uniforme en [0,1; 0,4). Los produce el generador F2.2 ya existente, sin código nuevo: `[population_snvs] mode="generate"`, `count_mode="exact"`, `locus_count=1000`, `spatial_mode="uniform"`, y por población `frequency_model="uniform"` con `min_alt_af=0.1` y `max_alt_af=0.4`. El VCF conserva solo las variantes segregantes realizadas: aquellas cuyos cuarenta haplotipos no resultaron todos REF ni todos ALT. Se registran candidatos, frecuencias objetivo, genotipos realizados y recuento final, sin reintentar ni seleccionar para forzar 1.000 SNP. La pérdida esperada por monomorfismo es de 1,08 loci y no supera 5 con probabilidad 0,999, de modo que un recuento en [995, 1000] es normal y uno sensiblemente menor acusa un fallo del generador, no azar. No se impone separación mínima entre loci: la fusión MNP que provoca la proximidad se resuelve en el comparador mediante VE-D13, no alterando la verdad | Generación y criterio de exactitud |
+| VE-D04 | Densidad y selección de loci | **Aprobado:** 1.000 posiciones candidatas A/C/G/T elegibles, no enmascaradas ni ambiguas, con frecuencia ALT objetivo uniforme en [0,1; 0,4). Los produce el generador F2.2 ya existente, sin código nuevo: `[population_snvs] mode="generate"`, `count_mode="exact"`, `locus_count=1000`, `spatial_mode="uniform"`, `substitution_profile="uniform_snv12_v1"`, y por población `frequency_model="uniform"` con `min_alt_af=0.1` y `max_alt_af=0.4`. El perfil de sustitución es obligatorio en el esquema y se elige uniforme porque el control es neutro: `human_harris2017_snv12_approx_v1` introduciría un sesgo de espectro mutacional que el ensayo no valida y que además no corresponde a tomate. El VCF conserva solo las variantes segregantes realizadas: aquellas cuyos cuarenta haplotipos no resultaron todos REF ni todos ALT. Se registran candidatos, frecuencias objetivo, genotipos realizados y recuento final, sin reintentar ni seleccionar para forzar 1.000 SNP. La pérdida esperada por monomorfismo es de 1,08 loci y no supera 5 con probabilidad 0,999, de modo que un recuento en [995, 1000] es normal y uno sensiblemente menor acusa un fallo del generador, no azar. No se impone separación mínima entre loci: la fusión MNP que provoca la proximidad se resuelve en el comparador mediante VE-D13, no alterando la verdad | Generación y criterio de exactitud |
 | VE-D05 | Versiones y argumentos | **Aprobado:** congelar minimap2 2.26-r1175, samtools/bcftools 1.21 locales y versión+hash de FreeBayes v1.3.10 antes de ejecutar. HTSlib 1.24 no es requisito del banco externo, pero su cierre no acredita DTC-066: esa puerta exige bcftools y tabix 1.24 y sigue pendiente para el simulador. El expediente lo declara expresamente para que el cierre de VE no se cite como prueba de interoperabilidad que no ha demostrado. Si la herramienta Python del banco embebe su propio HTSlib, su versión se congela también aquí | VE.1.1, comandos reproducibles |
 | VE-D06 | Normalización y emparejamiento VCF | **Aprobado para VE-SNP 0.1:** comparar SNP bialélicos por CHROM, posición, REF, ALT y dosis por muestra; `0|1`, `1|0` y `0/1` son equivalentes. Fase se evalúa aparte. Ignorar QUAL/FILTER/INFO/GPS_CASE; normalización compleja se aplaza a multialelia/*indels*. Los registros MNP se descomponen antes de comparar conforme a VE-D13 y sus SNP derivados usan estas mismas reglas | Métricas SNP/indel |
 | VE-D07 | Regiones llamables | **Aprobado para VE-SNP 0.1:** todas las variantes segregantes realizadas desde las posiciones candidatas constituyen el denominador de sensibilidad. Ninguna se retira del denominador por profundidad, MAPQ o BQ; esas magnitudes explican un FN, no lo eliminan. Los filtros de entrada del llamador sí existen y se declaran en §9: no se prohíben, se hacen visibles y su efecto se acredita por VE-D08. Una ausencia de llamada es FN y se clasifica por causa. `N`, máscara y repetición se examinan en el ensayo diferido de §13 | Denominadores y criterio de cierre |
@@ -794,21 +794,39 @@ superada hasta que VE.1.1 haya fijado y comprobado sus identidades.
 
 ### VE.1 — Conjunto pequeño, alineamiento y SNP independientes
 
-- ☐ **VE.1.1. Congelar el entorno externo y sus comprobaciones.**
+- ✅ **VE.1.1. Congelar el entorno externo y sus comprobaciones.**
   - Depende de: PAUSA-VE.0 y VE-D05.
   - Procede de: §§5.2, 6.1 y 7.
   - Cambia: herramienta Python VE gestionada con `uv`, manifiesto de
     dependencias y receta de ejecución; no el runtime del simulador.
   - Se comprueba con: versiones y hashes de ejecutables y dependencias Python,
-    ayuda de cada comando y un fixture diminuto válido e inválido. Las cinco
-    herramientas están instaladas —FreeBayes en `/usr/local/bin/freebayes`,
-    v1.3.10—, de modo que el paso congela identidades y no instala ni descarga
-    nada; §13 lo prohíbe. Tampoco usa contenedor.
+    ayuda de cada comando y un fixture diminuto válido e inválido. Todas las
+    herramientas están instaladas, de modo que el paso congela identidades y no
+    instala ni descarga nada; §13 lo prohíbe. Tampoco usa contenedor.
   - Vuelve a comprobar la enumeración de filtros inertes de §9 contra la versión
     congelada: un valor predeterminado que cambie de versión alteraría las
     métricas sin avisar.
+  - **Ejecutado el 5 de septiembre de 2026.** El banco vive en `ve/`, con
+    `pyproject.toml` propio y sin dependencias externas, separado del entorno de
+    Marimo para no acoplar dos conjuntos que evolucionan aparte.
+    `ve/environment.lock.json` congela ruta resuelta, tamaño, SHA-256 y versión
+    de minimap2 2.26-r1175, samtools 1.21, bcftools 1.21 y FreeBayes v1.3.10.
+    `python -m ve.environment verify` termina distinto de cero ante cualquier
+    diferencia. Doce pruebas cubren el lock válido, digest, versión y
+    herramienta alterados, lock ausente, documento de otra clase, herramienta no
+    instalada y herramienta instalada pero fuera del catálogo.
+  - `tabix` y `bgzip` no se congelan porque el ensayo no los invoca: conserva el
+    VCF bruto de FreeBayes como texto y `bcftools` lee `.vcf.gz` con su propio
+    HTSlib. Congelar una herramienta que no se usa daría una falsa sensación de
+    control sobre la discrepancia que describe §5.2. Si un paso posterior
+    necesitara comprimir o indexar, primero habría que resolver esa
+    discrepancia y volver a congelar.
+  - Los cinco filtros que §9 declara inertes se leyeron del binario congelado y
+    lo siguen siendo: `--min-supporting-allele-qsum`,
+    `--min-supporting-mapping-qsum`, `--min-alternate-qsum` y `--min-coverage`
+    valen cero, y `--read-max-mismatch-fraction` vale 1,0.
 
-- ☐ **VE.1.2. Derivar y congelar la referencia de tomate de 500.000 bases.**
+- ✅ **VE.1.2. Derivar y congelar la referencia de tomate de 500.000 bases.**
   - Depende de: VE.1.1.
   - Procede de: F1.6, ACE-112/113 y §4.
   - Cambia: configuración de reducción del ensayo y su expediente externo.
@@ -821,6 +839,29 @@ superada hasta que VE.1.1 haya fijado y comprobado sus identidades.
     dependen las causas `contig-edge` y `zero-depth` de §6.4.2, de modo que un
     ensayo con otra geometría cambia el reparto de causas sin cambiar el
     contrato.
+  - **Ejecutado el 5 de septiembre de 2026.** La configuración está en
+    `ve/assays/ve-snp-0.1/run-a.toml`, con la semilla declarada y trazable
+    `sha256("VE-SNP-0.1/run-A")`. Se ejecutó con un binario compilado desde el
+    commit publicado `2da9ea5` en un worktree aislado, no con el del árbol de
+    trabajo, que tenía cambios sin confirmar de otra tarea: un artefacto base
+    producido por un binario no identificable haría inverificable el resto del
+    ensayo. La reducción tardó 55 segundos.
+  - Resultado: **500.000 bases exactas en trece contigs** de 10.000, 60.000,
+    30.000 y 40.000 bases —este último en nueve de ellos—, repartidas en
+    cincuenta bloques. Coincide con la estimación de §5.4, que queda así
+    confirmada y deja de ser una previsión. La geometría publicada está en
+    `ve/assays/ve-snp-0.1/reference-geometry.json`.
+  - Comprobaciones superadas: `samtools faidx` indexa el FASTA; la
+    reconstrucción independiente desde el FASTA fuente y el mapa devuelve las
+    500.000 bases idénticas; los seis artefactos del manifiesto coinciden en
+    tamaño y SHA-256; y los bloques de cada contig no se solapan y suman su
+    longitud.
+  - La comprobación de no mezcla confirma VE-D15 con datos: los trece contigs
+    derivados **comparten nombre** con los del genoma fuente y **ninguno
+    comparte longitud**. El nombre no acredita identidad; la longitud sí.
+  - Observación de recursos: cada ejecución conserva una copia del FASTA fuente,
+    de modo que ocupa unos 760 MB. Conviene tenerlo en cuenta para la repetición
+    de VE.3.1, que producirá otro tanto.
 
 - ☐ **VE.1.3. Generar VE-SNP con 20 individuos y 30× PE.**
   - Depende de: VE.0.2–VE.0.3 y VE.1.2.

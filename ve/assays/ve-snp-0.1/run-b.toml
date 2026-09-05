@@ -1,0 +1,268 @@
+# Ejecucion B de VE-SNP 0.1: genera SNP, verdad, VCF y FASTQ contra la
+# referencia derivada por la ejecucion A.
+#
+# GENERADO por ve.assay_config desde la geometria publicada en VE.1.2.
+# No editar a mano: VE-D15 exige derivar las longitudes del mapa de A.
+
+config_kind = "general"
+schema_version = "2"
+seed = "2986c45543aaa394cd419b1a731dbe7dbbc3523943f7215515eb6f400bca596b"
+ploidy = 2
+
+[reference]
+kind = "supplied"
+id = "ve-snp-tomato-500k"
+fasta = "/home/ximo/devel/genome_population_simulator/results/ve-snp-0.1/run-a/resources/references/ve-snp-tomato-500k.fa"
+
+[[reference.sequences]]
+id = "SL4.0ch00"
+class = "scaffold"
+length = 10000
+
+[[reference.sequences]]
+id = "SL4.0ch01"
+class = "chromosome"
+length = 60000
+
+[[reference.sequences]]
+id = "SL4.0ch02"
+class = "chromosome"
+length = 40000
+
+[[reference.sequences]]
+id = "SL4.0ch03"
+class = "chromosome"
+length = 40000
+
+[[reference.sequences]]
+id = "SL4.0ch04"
+class = "chromosome"
+length = 40000
+
+[[reference.sequences]]
+id = "SL4.0ch05"
+class = "chromosome"
+length = 40000
+
+[[reference.sequences]]
+id = "SL4.0ch06"
+class = "chromosome"
+length = 30000
+
+[[reference.sequences]]
+id = "SL4.0ch07"
+class = "chromosome"
+length = 40000
+
+[[reference.sequences]]
+id = "SL4.0ch08"
+class = "chromosome"
+length = 40000
+
+[[reference.sequences]]
+id = "SL4.0ch09"
+class = "chromosome"
+length = 40000
+
+[[reference.sequences]]
+id = "SL4.0ch10"
+class = "chromosome"
+length = 40000
+
+[[reference.sequences]]
+id = "SL4.0ch11"
+class = "chromosome"
+length = 40000
+
+[[reference.sequences]]
+id = "SL4.0ch12"
+class = "chromosome"
+length = 40000
+
+# VE-D04: mil candidatos A/C/G/T, frecuencia ALT uniforme en [0,1; 0,4).
+# Sin separacion minima entre loci: la fusion MNP se resuelve en el
+# comparador por VE-D13, no alterando la verdad.
+[population_snvs]
+mode = "generate"
+
+[population_snvs.generate]
+count_mode = "exact"
+locus_count = 1000
+spatial_mode = "uniform"
+substitution_profile = "uniform_snv12_v1"
+
+[[population_snvs.generate.populations]]
+population_id = "pop-ve"
+frequency_model = "uniform"
+min_alt_af = 0.1
+max_alt_af = 0.4
+
+[[initial_populations]]
+population_id = "pop-ve"
+individual_count = 20
+ploidy = 2
+genotype_model = "hwe"
+individual_ids = [
+  "ind-01",
+  "ind-02",
+  "ind-03",
+  "ind-04",
+  "ind-05",
+  "ind-06",
+  "ind-07",
+  "ind-08",
+  "ind-09",
+  "ind-10",
+  "ind-11",
+  "ind-12",
+  "ind-13",
+  "ind-14",
+  "ind-15",
+  "ind-16",
+  "ind-17",
+  "ind-18",
+  "ind-19",
+  "ind-20",
+]
+
+# VE-D02: PE neutro. sequencing_errors disabled produce cero
+# sustituciones; quimeras, index hopping y contaminacion quedan a cero.
+[technical_event]
+event_id = "ve-snp-pe-neutral"
+target_coverage_wgs = 30
+read_length_bases = 150
+sequencing_errors = "disabled"
+chimera_rate = 0
+index_hopping_rate = 0
+contamination_min_percent = 0
+contamination_max_percent = 0
+individual_ids = [
+  "ind-01",
+  "ind-02",
+  "ind-03",
+  "ind-04",
+  "ind-05",
+  "ind-06",
+  "ind-07",
+  "ind-08",
+  "ind-09",
+  "ind-10",
+  "ind-11",
+  "ind-12",
+  "ind-13",
+  "ind-14",
+  "ind-15",
+  "ind-16",
+  "ind-17",
+  "ind-18",
+  "ind-19",
+  "ind-20",
+]
+
+# Una sola biblioteca por individuo (§7.1): F4 publica un unico par de
+# FASTQ por individuo, de modo que dos bibliotecas romperian la biyeccion.
+
+[[technical_event.libraries]]
+individual_id = "ind-01"
+i7 = "CAAAAAAA"
+i5 = "GAGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-02"
+i7 = "GAAAAAAA"
+i5 = "TAGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-03"
+i7 = "TAAAAAAA"
+i5 = "ACGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-04"
+i7 = "ACAAAAAA"
+i5 = "CCGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-05"
+i7 = "CCAAAAAA"
+i5 = "GCGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-06"
+i7 = "GCAAAAAA"
+i5 = "TCGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-07"
+i7 = "TCAAAAAA"
+i5 = "AGGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-08"
+i7 = "AGAAAAAA"
+i5 = "CGGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-09"
+i7 = "CGAAAAAA"
+i5 = "GGGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-10"
+i7 = "GGAAAAAA"
+i5 = "TGGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-11"
+i7 = "TGAAAAAA"
+i5 = "ATGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-12"
+i7 = "ATAAAAAA"
+i5 = "CTGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-13"
+i7 = "CTAAAAAA"
+i5 = "GTGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-14"
+i7 = "GTAAAAAA"
+i5 = "TTGCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-15"
+i7 = "TTAAAAAA"
+i5 = "AATCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-16"
+i7 = "AACAAAAA"
+i5 = "CATCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-17"
+i7 = "CACAAAAA"
+i5 = "GATCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-18"
+i7 = "GACAAAAA"
+i5 = "TATCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-19"
+i7 = "TACAAAAA"
+i5 = "ACTCAAAA"
+
+[[technical_event.libraries]]
+individual_id = "ind-20"
+i7 = "ACCAAAAA"
+i5 = "CCTCAAAA"
+
+# VCF de verdad en texto: VE-SNP conserva el VCF sin comprimir, de modo
+# que el ensayo no necesita bgzip ni tabix (VE.1.1).
+[vcf_output]
+mode = "text"

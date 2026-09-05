@@ -1,0 +1,403 @@
+{
+  "document_kind": "ve_realised_reference_geometry",
+  "schema_version": "1",
+  "derived_reference_id": "ve-snp-tomato-500k",
+  "source_reference_id": "tomato-sl4",
+  "fasta_sha256": "6dee1a2a81aa7546e44754f79b2040916efaef0abf24e0d5d09466f1b0df3823",
+  "contig_count": 13,
+  "total_bases": 500000,
+  "block_count": 50,
+  "contigs": [
+    {
+      "contig_id": "SL4.0ch00",
+      "length_bases": 10000,
+      "block_count": 1,
+      "source_intervals": [
+        {
+          "source_start": 7755566,
+          "source_end": 7765565,
+          "orientation": "forward",
+          "sequence_class": "scaffold"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch01",
+      "length_bases": 60000,
+      "block_count": 6,
+      "source_intervals": [
+        {
+          "source_start": 26223412,
+          "source_end": 26233411,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 27047334,
+          "source_end": 27057333,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 31989936,
+          "source_end": 31999935,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 39653448,
+          "source_end": 39663447,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 75069656,
+          "source_end": 75079655,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 83951568,
+          "source_end": 83961567,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch02",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 2340889,
+          "source_end": 2350888,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 9022954,
+          "source_end": 9032953,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 11643398,
+          "source_end": 11653397,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 36095242,
+          "source_end": 36105241,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch03",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 2683122,
+          "source_end": 2693121,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 24390319,
+          "source_end": 24400318,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 40333453,
+          "source_end": 40343452,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 64847465,
+          "source_end": 64857464,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch04",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 22511381,
+          "source_end": 22521380,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 23672174,
+          "source_end": 23682173,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 33867278,
+          "source_end": 33877277,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 54477904,
+          "source_end": 54487903,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch05",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 10521356,
+          "source_end": 10531355,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 16923426,
+          "source_end": 16933425,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 47759253,
+          "source_end": 47769252,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 54583003,
+          "source_end": 54593002,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch06",
+      "length_bases": 30000,
+      "block_count": 3,
+      "source_intervals": [
+        {
+          "source_start": 32218251,
+          "source_end": 32228250,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 36144925,
+          "source_end": 36154924,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 40856286,
+          "source_end": 40866285,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch07",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 13382466,
+          "source_end": 13392465,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 30932661,
+          "source_end": 30942660,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 36032695,
+          "source_end": 36042694,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 47844467,
+          "source_end": 47854466,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch08",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 17351089,
+          "source_end": 17361088,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 32918860,
+          "source_end": 32928859,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 38972170,
+          "source_end": 38982169,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 58265314,
+          "source_end": 58275313,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch09",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 5460175,
+          "source_end": 5470174,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 13661285,
+          "source_end": 13671284,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 29555892,
+          "source_end": 29565891,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 63653903,
+          "source_end": 63663902,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch10",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 16034222,
+          "source_end": 16044221,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 37509276,
+          "source_end": 37519275,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 41826633,
+          "source_end": 41836632,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 60628675,
+          "source_end": 60638674,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch11",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 16754563,
+          "source_end": 16764562,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 23080250,
+          "source_end": 23090249,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 26157175,
+          "source_end": 26167174,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 31429372,
+          "source_end": 31439371,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    },
+    {
+      "contig_id": "SL4.0ch12",
+      "length_bases": 40000,
+      "block_count": 4,
+      "source_intervals": [
+        {
+          "source_start": 18902648,
+          "source_end": 18912647,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 31733173,
+          "source_end": 31743172,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 45459494,
+          "source_end": 45469493,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        },
+        {
+          "source_start": 53874494,
+          "source_end": 53884493,
+          "orientation": "forward",
+          "sequence_class": "chromosome"
+        }
+      ]
+    }
+  ]
+}

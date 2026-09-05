@@ -1,0 +1,34 @@
+{
+  "document_kind": "ve_environment_lock",
+  "schema_version": "1",
+  "tools": [
+    {
+      "name": "minimap2",
+      "path": "/home/ximo/programas/minimap2/minimap2",
+      "size_bytes": 1001448,
+      "sha256": "d0ac533ae8ff3d5739db21ff3605b71aa86e64badc631945ebb4f69ea5674f11",
+      "version": "2.26-r1175"
+    },
+    {
+      "name": "samtools",
+      "path": "/opt/samtools/bin/samtools",
+      "size_bytes": 7117120,
+      "sha256": "7fddb57de1fa7100e0f212591eb2cda463675a680206d2676fb84fc15859dac0",
+      "version": "1.21"
+    },
+    {
+      "name": "bcftools",
+      "path": "/opt/bcftools/bin/bcftools",
+      "size_bytes": 9466728,
+      "sha256": "66f29a24d84ed1fcab31d19b26174a842d079f607a292317643be8a4a05d4f03",
+      "version": "1.21"
+    },
+    {
+      "name": "freebayes",
+      "path": "/home/ximo/programas/freebayes/freebayes-1.3.10-linux-amd64-static",
+      "size_bytes": 5085640,
+      "sha256": "83320381a502823e5d4dc346b5b93c2165e87d4f15c0bf6697b5f3d08af3e94c",
+      "version": "v1.3.10"
+    }
+  ]
+}

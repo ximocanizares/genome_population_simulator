@@ -1,0 +1,88 @@
+# Ejecución A de VE-SNP 0.1: deriva la referencia reducida.
+#
+# La semilla es trazable, no arbitraria: sha256("VE-SNP-0.1/run-A"). Debe estar
+# declarada porque, si falta, el simulador la toma del CSPRNG del sistema y la
+# repetición que exige §8.1 del plan dejaría de significar nada.
+#
+# La geometría (region_size_bases y target_bases) es un parámetro del ensayo por
+# VE-D14, no una constante del contrato. target_bases es obligatorio aquí porque
+# reduction_percent no da una longitud exacta.
+
+config_kind = "general"
+schema_version = "2"
+seed = "7062282a52ad4bc35ca0f3811e9881a865b1bc284e861ad220e9ac9cb767738f"
+
+[reference]
+kind = "supplied"
+id = "tomato-sl4"
+fasta = "/home/ximo/genomes/s_lycopersicum/4.00/S_lycopersicum_chromosomes.4.00.fa"
+[[reference.sequences]]
+id = "SL4.0ch00"
+class = "scaffold"
+length = 9643250
+
+[[reference.sequences]]
+id = "SL4.0ch01"
+class = "chromosome"
+length = 90863682
+
+[[reference.sequences]]
+id = "SL4.0ch02"
+class = "chromosome"
+length = 53473368
+
+[[reference.sequences]]
+id = "SL4.0ch03"
+class = "chromosome"
+length = 65298490
+
+[[reference.sequences]]
+id = "SL4.0ch04"
+class = "chromosome"
+length = 64459972
+
+[[reference.sequences]]
+id = "SL4.0ch05"
+class = "chromosome"
+length = 65269487
+
+[[reference.sequences]]
+id = "SL4.0ch06"
+class = "chromosome"
+length = 47258699
+
+[[reference.sequences]]
+id = "SL4.0ch07"
+class = "chromosome"
+length = 67883646
+
+[[reference.sequences]]
+id = "SL4.0ch08"
+class = "chromosome"
+length = 63995357
+
+[[reference.sequences]]
+id = "SL4.0ch09"
+class = "chromosome"
+length = 68513564
+
+[[reference.sequences]]
+id = "SL4.0ch10"
+class = "chromosome"
+length = 64792705
+
+[[reference.sequences]]
+id = "SL4.0ch11"
+class = "chromosome"
+length = 54379777
+
+[[reference.sequences]]
+id = "SL4.0ch12"
+class = "chromosome"
+length = 66688036
+
+[[reduced_references]]
+id = "ve-snp-tomato-500k"
+source_reference_id = "tomato-sl4"
+region_size_bases = 10000
+target_bases = 500000

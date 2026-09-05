@@ -83,3 +83,31 @@ que conviene tener presente.
     ancha para admitir cualquier cosa después de la tubería concedería
     precisamente lo que no se ha revisado.
   - Registrado solo como comportamiento conocido; no requiere cambio.
+
+## Rendimiento de la generación de lecturas (F3/F4)
+
+Medido el 5 de septiembre de 2026 con el binario de `2da9ea5`, referencia
+derivada de tomate de 500.000 bases en trece contigs, sobre cuatro núcleos.
+
+| Individuos | Cobertura | Loci | Tiempo |
+|---:|---:|---:|---:|
+| 2 | 1x | 1000 | 25–29 s |
+| 4 | 1x | 1000 | 137 s |
+| 2 | 2x | 1000 | 102 s |
+| 2 | 2x | 10 | 112 s |
+| 2 | 4x | 1000 | 348 s |
+
+- [ ] El coste escala de forma superlineal en las dos dimensiones: doblar la
+  cobertura multiplica el tiempo por unos 3,6 y doblar la cohorte por unos 5,1.
+  El número de loci no influye, de modo que el coste está en la generación de
+  lecturas y no en el manejo de variantes.
+  - Que el exponente sea cercano a 2 **en la cobertura** es lo más sospechoso:
+    subir la cobertura solo añade lecturas, así que un crecimiento casi
+    cuadrático sugiere que algo recorre lo ya generado por cada lectura nueva.
+  - Consecuencia inmediata: un ensayo de 20 individuos a 30x sobre esta
+    referencia proyecta semanas de cómputo. La validación externa VE quedó
+    detenida por esto, conforme a §11 de su plan, que prohíbe recortar cobertura
+    o individuos de forma automática.
+  - Antes de optimizar hace falta un perfil que localice el punto exacto. La
+    hoja de ruta exige evidencia reproducible para una optimización, y F9.1 y
+    F9.2 siguen pendientes.

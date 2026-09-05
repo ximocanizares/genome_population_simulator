@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(cargo test *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo fmt --all -- --check)",
+      "Bash(cargo build *)",
+      "Bash(cargo doc *)",
+      "Bash(cargo tree *)",
+      "Bash(cargo metadata *)",
+      "Bash(samtools --version)",
+      "Bash(minimap2 --version)",
+      "Bash(bcftools --version)",
+      "Bash(freebayes --version)",
+      "Bash(tabix --version)",
+      "Bash(bgzip --version)"
+    ]
+  }
+}
