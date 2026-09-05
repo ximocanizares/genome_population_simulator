@@ -48,3 +48,38 @@
     `disabled` exige `errors = 0`.
   - Este control deja VE-D02 listo para un ensayo PE neutro que fije también a
     cero contaminación, quimeras e *index hopping*.
+
+## Lista de permisos de Claude Code
+
+El 4 de septiembre de 2026 se añadió `.claude/settings.json` con una lista de
+permisos que evita las confirmaciones repetidas de las puertas Cargo. Quedan
+dos concesiones que se aceptaron a sabiendas y un comportamiento del emparejado
+que conviene tener presente.
+
+- [ ] `Bash(cargo test *)` y `Bash(cargo build *)` están permitidos sin
+  confirmación aunque no sean estrictamente de solo lectura: escriben en
+  `target/` y los tests crean directorios temporales. Se admitieron porque son
+  puertas obligatorias de `CONTRIBUTING.md` y sin ellas cada verificación
+  interrumpe con una pregunta.
+  - Revisar si conviene acotarlos a las formas exactas de `CONTRIBUTING.md`
+    —`cargo test --workspace --all-targets --locked` y el `cargo build` de
+    entrega— en lugar del comodín.
+  - Relacionado: quedan residuos `tmp-*/` en la raíz del árbol de trabajo, como
+    `tmp-genome-TDvk2K` del 10 de agosto de 2026. `.gitignore` los excluye con
+    `tmp*/`, así que no contaminan el repositorio, pero ninguna prueba los
+    limpia al terminar. Decidir si el destino temporal debe salir de la raíz o
+    si su limpieza pertenece a la propia prueba.
+- [ ] `Bash(cargo fmt --all -- --check)` se permitió como forma exacta y no como
+  comodín, porque `cargo fmt` sin `--check` reescribe el código fuente. No
+  ampliarlo a `Bash(cargo fmt *)`: concedería reescritura de fuentes sin
+  confirmación.
+  - `.claude/` no está bajo seguimiento de Git. Antes de versionarlo, decidir si
+    la lista pertenece al repositorio compartido o a `settings.local.json`.
+- [ ] Los patrones de la lista no cubren un comando compuesto: `samtools
+  --version` coincide, pero `samtools --version 2>&1 | head -2` no, porque la
+  tubería forma otra orden. La comprobación del 4 de septiembre de 2026 lo
+  confirmó ejecutando ambas formas.
+  - No ampliar los patrones con comodines para abarcarlas: una regla lo bastante
+    ancha para admitir cualquier cosa después de la tubería concedería
+    precisamente lo que no se ha revisado.
+  - Registrado solo como comportamiento conocido; no requiere cambio.
