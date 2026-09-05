@@ -6,7 +6,8 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::{
-    load_and_validate_f5_config, load_and_validate_f5_config_with_entropy,
+    EffectiveF5Config, load_and_validate_f5_config, load_and_validate_f5_config_with_entropy,
+    load_and_validate_f5_config_with_entropy_and_resources,
 };
 use genome_population_simulator::f5_layout::{
     F5BlockLengthPlan, F5LayoutRequest, build_f5_physical_layout,
@@ -33,6 +34,30 @@ impl EntropySource for FixedEntropy {
         *destination = self.0;
         Ok(())
     }
+}
+
+#[derive(Debug, Default)]
+struct CountingEntropy {
+    calls: usize,
+}
+
+impl EntropySource for CountingEntropy {
+    fn fill_root_seed(&mut self, destination: &mut [u8; 32]) -> Result<(), String> {
+        self.calls += 1;
+        *destination = [0xbb; 32];
+        Ok(())
+    }
+}
+
+fn load_with_resources(
+    path: &Path,
+    other: F5OtherResources,
+) -> Result<EffectiveF5Config, genome_population_simulator::diagnostics::Diagnostic> {
+    load_and_validate_f5_config_with_entropy_and_resources(
+        path,
+        &mut FixedEntropy([0xaa; 32]),
+        other,
+    )
 }
 
 fn temporary(label: &str) -> PathBuf {
@@ -281,6 +306,146 @@ fn replace_scenario(root: &Path, from: &str, to: &str) {
     fs::write(path, source.replace(from, to)).expect("scenario rewrite");
 }
 
+fn set_scenario_operation_limit(root: &Path, operation_limit: u64) {
+    let path = root.join("authoring/scenarios/scenario.toml");
+    let source = fs::read_to_string(&path).expect("scenario source");
+    let mut replaced = false;
+    let rewritten = source
+        .lines()
+        .map(|line| {
+            if line.starts_with("max_operation_units = ") {
+                replaced = true;
+                format!("max_operation_units = {operation_limit}")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(replaced, "scenario operation limit");
+    fs::write(path, format!("{rewritten}\n")).expect("scenario operation-limit rewrite");
+}
+
+fn literal_fixture_operation_oracle(root: &Path, mask: Option<&[u8]>) -> u64 {
+    let authoring = root.join("authoring");
+    let scenario = authoring.join("scenarios");
+    let profile = scenario.join("profiles");
+    let fasta = fs::read(authoring.join("references/ref.fa")).expect("literal FASTA bytes");
+    assert_eq!(fasta, b">chr1\nAAA\n");
+    match mask {
+        Some(expected) => assert_eq!(
+            fs::read(scenario.join("excluded_regions.tsv")).expect("literal mask bytes"),
+            expected
+        ),
+        None => assert!(!scenario.join("excluded_regions.tsv").exists()),
+    }
+
+    let general_bytes = fs::read(authoring.join("general.toml"))
+        .expect("literal general TOML bytes")
+        .len() as u64;
+    let scenario_bytes = fs::read(scenario.join("scenario.toml"))
+        .expect("literal scenario TOML bytes")
+        .len() as u64;
+    let metadata_bytes = fs::read(profile.join("profile.metadata.json"))
+        .expect("literal profile metadata bytes")
+        .len() as u64;
+    let profile_table_bytes = [
+        "block_lengths.tsv",
+        "snp_gaps.tsv",
+        "snp_spectrum.tsv",
+        "haplotype_weights.tsv",
+        "ld_profile.tsv",
+    ]
+    .into_iter()
+    .map(|name| {
+        fs::read(profile.join(name))
+            .expect("literal profile TSV bytes")
+            .len() as u64
+    })
+    .sum::<u64>();
+    let mask_bytes = mask.map_or(0, |bytes| bytes.len() as u64);
+
+    // Oráculo deliberadamente desplegado para este fixture literal. No usa
+    // `F5ResourcePreflight`, helpers aritméticos ni la fórmula productiva.
+    [
+        0,                   // other_operation_units
+        general_bytes,       // lectura/hash del TOML general
+        general_bytes,       // parser del TOML general
+        scenario_bytes,      // lectura/hash del escenario
+        scenario_bytes,      // parser del escenario
+        metadata_bytes,      // lectura/hash de metadata
+        metadata_bytes,      // parser de metadata
+        profile_table_bytes, // lectura/hash de los cinco TSV
+        profile_table_bytes, // parser de los cinco TSV
+        fasta.len() as u64,  // primer recorrido FASTA
+        fasta.len() as u64,  // recuperación REF posterior
+        3,                   // tres bases de referencia literales
+        mask_bytes,          // único recorrido físico de la máscara
+        1,                   // ID FASTA retenido para unicidad
+        1,                   // tramo emitido
+        1,                   // visita de capacidad del tramo
+        1,                   // visita de validación del tramo
+        1,                   // primera consulta directa de layout
+        1,                   // segunda consulta directa de layout
+        1,                   // copia del tramo en el intento de layout
+        3,                   // desplazamientos remove/insert del layout
+        6,                   // cuatro TSV con una fila y dos haplotipos
+        5,                   // 1 + 1 + 1 + 2 filas normalizadas
+        1,                   // pasada Neumaier del soporte de longitudes
+        1,                   // pasada de prefijo del soporte de longitudes
+        1,
+        1,
+        1,
+        1, // dos sorteos de gap, dos pasadas literales cada uno
+        1,
+        1,
+        1,  // B + S visitas de request para B=1, S=2
+        8,  // evaluación inicial: dos haplotipos, cuatro pares
+        2,  // propuesta: un swap por dos sitios
+        2,  // dos copias fundadoras del bloque
+        4,  // dos copias por una secuencia y dos sitios
+        2,  // dos genotipos SNP máximos
+        2,  // dos resúmenes de sitio
+        11, // filas TSV del fixture
+        30, // elementos JSON repetidos del fixture
+    ]
+    .into_iter()
+    .try_fold(0_u64, u64::checked_add)
+    .expect("literal fixture operation oracle fits u64")
+}
+
+fn remove_declared_seed(root: &Path) {
+    let path = root.join("authoring/general.toml");
+    let source = fs::read_to_string(&path).expect("general source");
+    fs::write(
+        path,
+        source.replace(&format!("seed = \"{}\"\n", "a".repeat(64)), ""),
+    )
+    .expect("seedless general");
+}
+
+fn replace_mask(root: &Path, contents: &[u8]) {
+    fs::write(
+        root.join("authoring/scenarios/excluded_regions.tsv"),
+        contents,
+    )
+    .expect("mask rewrite");
+    let scenario = root.join("authoring/scenarios/scenario.toml");
+    let source = fs::read_to_string(&scenario).expect("scenario source");
+    let rewritten = source
+        .lines()
+        .map(|line| {
+            if line.starts_with("excluded_regions_sha256 = ") {
+                format!("excluded_regions_sha256 = \"{}\"", sha256(contents))
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(scenario, format!("{rewritten}\n")).expect("scenario mask digest rewrite");
+}
+
 fn rename_scenario(root: &Path, current: &str, renamed: &str) {
     for path in [
         root.join("authoring/general.toml"),
@@ -378,6 +543,183 @@ fn replace_reference_with_repeated_base(root: &Path, base_count: usize) {
         .collect::<Vec<_>>()
         .join("\n");
     fs::write(path, format!("{rewritten}\n")).expect("general rewrite");
+}
+
+#[test]
+fn seedless_entropy_is_resolved_only_after_complete_physical_admission() {
+    let success_root = temporary("entropy-success");
+    fs::create_dir_all(&success_root).expect("success root");
+    let success = configuration(&success_root, None, "", "AAAA");
+    remove_declared_seed(&success_root);
+    let mut entropy = CountingEntropy::default();
+    let admitted = load_and_validate_f5_config_with_entropy(&success, &mut entropy)
+        .expect("successful seedless admission");
+    assert_eq!(entropy.calls, 1);
+    assert_eq!(admitted.seed(), "bb".repeat(32));
+
+    for (label, prepare) in [
+        ("fasta-missing", 0_u8),
+        ("fasta-invalid", 1),
+        ("fasta-sha", 2),
+    ] {
+        let root = temporary(label);
+        fs::create_dir_all(&root).expect("failure root");
+        let general = configuration(&root, None, "", "AAAA");
+        remove_declared_seed(&root);
+        let fasta = root.join("authoring/references/ref.fa");
+        match prepare {
+            0 => fs::remove_file(fasta).expect("remove FASTA"),
+            1 => replace_reference(&root, b">chr1\nA?AA\n"),
+            2 => fs::write(fasta, b">chr1\nAAAT\n").expect("mutate FASTA without digest"),
+            _ => unreachable!(),
+        }
+        let mut entropy = CountingEntropy::default();
+        load_and_validate_f5_config_with_entropy(&general, &mut entropy)
+            .expect_err("invalid FASTA admission");
+        assert_eq!(entropy.calls, 0, "{label}");
+        fs::remove_dir_all(root).expect("failure cleanup");
+    }
+
+    let valid_mask = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
+    for (label, prepare) in [("mask-missing", 0_u8), ("mask-invalid", 1), ("mask-sha", 2)] {
+        let root = temporary(label);
+        fs::create_dir_all(&root).expect("failure root");
+        let general = configuration(&root, Some(valid_mask), "", "AAAA");
+        remove_declared_seed(&root);
+        let mask = root.join("authoring/scenarios/excluded_regions.tsv");
+        match prepare {
+            0 => fs::remove_file(mask).expect("remove mask"),
+            1 => replace_mask(&root, b"bad-header\n"),
+            2 => fs::write(mask, valid_mask.replace("2\t2", "3\t3"))
+                .expect("mutate mask without digest"),
+            _ => unreachable!(),
+        }
+        let mut entropy = CountingEntropy::default();
+        let error = load_and_validate_f5_config_with_entropy(&general, &mut entropy)
+            .expect_err("invalid mask admission");
+        assert_eq!(
+            error.code(),
+            match prepare {
+                0 => "GPS-INPUT-001",
+                1 => "GPS-FMT-101",
+                2 => "GPS-INPUT-002",
+                _ => unreachable!(),
+            },
+            "{label}"
+        );
+        assert_eq!(entropy.calls, 0, "{label}");
+        fs::remove_dir_all(root).expect("failure cleanup");
+    }
+
+    for (label, mask) in [("fasta-budget", None), ("mask-budget", Some(valid_mask))] {
+        let root = temporary(label);
+        fs::create_dir_all(&root).expect("budget root");
+        let general = configuration(&root, mask, "max_operation_units = 9999\n", "AAAA");
+        remove_declared_seed(&root);
+        let mut baseline_entropy = CountingEntropy::default();
+        let baseline = load_and_validate_f5_config_with_entropy(&general, &mut baseline_entropy)
+            .expect("baseline admission");
+        let required = preflight_f5_resources(&baseline, F5OtherResources::default())
+            .expect("baseline preflight")
+            .operation_units();
+        replace_scenario(
+            &root,
+            "max_operation_units = 9999\n",
+            &format!("max_operation_units = {}\n", required - 1),
+        );
+        let mut entropy = CountingEntropy::default();
+        load_and_validate_f5_config_with_entropy(&general, &mut entropy)
+            .expect_err("operation limit minus one");
+        assert_eq!(entropy.calls, 0, "{label}");
+        fs::remove_dir_all(root).expect("budget cleanup");
+    }
+    fs::remove_dir_all(success_root).expect("success cleanup");
+}
+
+#[test]
+fn known_external_exhaustion_rejects_before_reference_or_mask_and_entropy() {
+    let root = temporary("known-other-before-input");
+    fs::create_dir_all(&root).expect("root");
+    let mask = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
+    let general = configuration(&root, Some(mask), "", "AAAA");
+    remove_declared_seed(&root);
+    fs::remove_file(root.join("authoring/references/ref.fa")).expect("remove reference sentinel");
+    fs::remove_file(root.join("authoring/scenarios/excluded_regions.tsv"))
+        .expect("remove mask sentinel");
+    let mut entropy = CountingEntropy::default();
+    let error = load_and_validate_f5_config_with_entropy_and_resources(
+        &general,
+        &mut entropy,
+        F5OtherResources::new(F5_HARD_OPERATION_LIMIT + 1, 0, 0),
+    )
+    .expect_err("known external work exceeds the ledger");
+    assert_eq!(error.code(), "GPS-RES-101");
+    assert_eq!(error.context()["dimension"], "operation_units");
+    assert_eq!(entropy.calls, 0);
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn public_preflight_reuses_the_initial_other_binding_without_late_io() {
+    let root = temporary("public-other-binding");
+    fs::create_dir_all(&root).expect("root");
+    let mask = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
+    let general = configuration(&root, Some(mask), "", "AAAA");
+    remove_declared_seed(&root);
+    let other = F5OtherResources::new(7, 11, 13);
+    let mut entropy = CountingEntropy::default();
+    let config =
+        load_and_validate_f5_config_with_entropy_and_resources(&general, &mut entropy, other)
+            .expect("initial staged admission");
+    assert_eq!(entropy.calls, 1);
+    let first = preflight_f5_resources(&config, other).expect("matching public recovery");
+
+    fs::remove_file(root.join("authoring/references/ref.fa")).expect("reference sentinel");
+    fs::remove_file(root.join("authoring/scenarios/excluded_regions.tsv")).expect("mask sentinel");
+    let second = preflight_f5_resources(&config, other)
+        .expect("matching recovery must neither reopen nor recalculate");
+    assert_eq!(second, first);
+    assert_eq!(
+        second.eligible_tracts().as_ptr(),
+        first.eligible_tracts().as_ptr()
+    );
+    assert_eq!(entropy.calls, 1);
+
+    let error = preflight_f5_resources(&config, F5OtherResources::new(8, 11, 13))
+        .expect_err("a late contribution must not authorize another admission");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(error.context()["fields"], "preflight.other_resources");
+    assert_eq!(entropy.calls, 1);
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn unsealed_scan_retains_reference_and_mask_identities_in_role_order() {
+    let root = temporary("scan-identities");
+    fs::create_dir_all(&root).expect("root");
+    let mask = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
+    let general = configuration(&root, Some(mask), "", "AAAA");
+    let config = load_and_validate_f5_config(&general).expect("admitted configuration");
+    let preflight = preflight_f5_resources(&config, F5OtherResources::default())
+        .expect("retained unsealed scan");
+    let identities = preflight.physical_input_identities();
+    assert_eq!(identities.len(), 2);
+    assert_eq!(identities[0].role().as_str(), "reference_fasta");
+    assert_eq!(identities[1].role().as_str(), "mask");
+    let fasta = b">chr1\nAAAA\n";
+    assert_eq!(identities[0].observed_size_bytes(), fasta.len() as u64);
+    assert_eq!(identities[0].observed_sha256(), sha256(fasta));
+    assert_eq!(identities[1].observed_size_bytes(), mask.len() as u64);
+    assert_eq!(identities[1].observed_sha256(), sha256(mask.as_bytes()));
+    assert_eq!(
+        identities[0].normalized_path(),
+        root.join("authoring/references/ref.fa")
+    );
+    assert_eq!(
+        identities[1].normalized_path(),
+        root.join("authoring/scenarios/excluded_regions.tsv")
+    );
+    fs::remove_dir_all(root).expect("cleanup");
 }
 
 fn replace_reference_with_long_description(root: &Path, description_bytes: usize) {
@@ -532,6 +874,13 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
     assert_eq!(compact.tract_count(), 1);
     assert_eq!(compact.retained_sequence_ids(), 1);
     assert_eq!(fragmented.tract_count(), 4_096);
+    let recovered = preflight_f5_resources(&fragmented_config, F5OtherResources::default())
+        .expect("public recovery of the admitted fragmented geometry");
+    assert_eq!(
+        fragmented.eligible_tracts().as_ptr(),
+        recovered.eligible_tracts().as_ptr(),
+        "public recovery must share the single admitted tract allocation"
+    );
     assert_eq!(fragmented.reference_bases_processed(), length as u64);
     assert_eq!(
         compact.fasta_bytes_processed(),
@@ -551,26 +900,28 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
     assert_eq!(compact.bin_count_total(), 1);
     assert_eq!(compact.tsv_rows_bound(), 11);
     assert_eq!(compact.json_rows_bound(), 30);
-    let operation_without_gap_selector = 41_579;
+    let operation_without_gap_selector = 41_580;
     assert_eq!(compact.gap_selector_operation_units(), 4);
     assert_eq!(
         compact.operation_units(),
         operation_without_gap_selector + compact.gap_selector_operation_units()
     );
+    let compact_final_formula = final_formula_memory_oracle(FinalFormulaMemoryInputs {
+        block_count: 1,
+        tract_count: 1,
+        retained_sequence_ids: 1,
+        profile_rows: 6,
+        normalization_rows: 5,
+        population_count: 1,
+        haplotype_count: 2,
+        site_bound: 2,
+        bin_count_total: 1,
+        founder_copy_count: 2,
+    });
+    let independent_scan_peak = 65_536 + 65_536 + 256 * (6 + 5 + 1 + 1);
     assert_eq!(
         compact.working_memory_bytes(),
-        final_formula_memory_oracle(FinalFormulaMemoryInputs {
-            block_count: 1,
-            tract_count: 1,
-            retained_sequence_ids: 1,
-            profile_rows: 6,
-            normalization_rows: 5,
-            population_count: 1,
-            haplotype_count: 2,
-            site_bound: 2,
-            bin_count_total: 1,
-            founder_copy_count: 2,
-        })
+        compact_final_formula.max(independent_scan_peak)
     );
     assert_eq!(compact.output_bytes(), 1_306_624);
     assert_eq!(
@@ -578,9 +929,22 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
         4_095 * (1 + 2 + 2 + 1 + 3) + fragmented.mask_bytes_processed()
             - compact.mask_bytes_processed()
     );
+    let fragmented_final_formula = final_formula_memory_oracle(FinalFormulaMemoryInputs {
+        block_count: 1,
+        tract_count: 4_096,
+        retained_sequence_ids: 1,
+        profile_rows: 6,
+        normalization_rows: 5,
+        population_count: 1,
+        haplotype_count: 2,
+        site_bound: 2,
+        bin_count_total: 1,
+        founder_copy_count: 2,
+    });
+    assert_eq!(fragmented.working_memory_bytes(), fragmented_final_formula);
     assert_eq!(
         fragmented.working_memory_bytes() - compact.working_memory_bytes(),
-        512 * 4_095
+        fragmented_final_formula - independent_scan_peak
     );
     assert_eq!(fragmented.output_bytes(), compact.output_bytes());
 
@@ -612,9 +976,8 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
             &format!("{field} = {exact}\n"),
             &format!("{field} = {}\n", exact - 1),
         );
-        let rejected = load_and_validate_f5_config(&path).expect("minus-one configuration");
         assert_eq!(
-            preflight_f5_resources(&rejected, F5OtherResources::default())
+            load_and_validate_f5_config(&path)
                 .expect_err("bound minus one must reject")
                 .code(),
             "GPS-RES-101"
@@ -650,18 +1013,19 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
 }
 
 #[test]
-fn reference_path_and_exact_sha_are_both_required_before_accounting() {
+fn admitted_reference_identity_is_reused_without_a_second_pass_in_point_four() {
     let root = temporary("reference-sha");
     fs::create_dir_all(&root).expect("root");
     let general = configuration(&root, None, "", "AAAA");
     let config = load_and_validate_f5_config(&general).expect("configuration");
     fs::write(root.join("authoring/references/ref.fa"), b">chr1\nAAAT\n")
         .expect("reference mutation");
-    let error = preflight_f5_resources(&config, F5OtherResources::default())
-        .expect_err("same ID with changed bytes must fail");
-    assert_eq!(error.code(), "GPS-INPUT-002");
-    assert!(error.render_human().contains("expected_digest"));
-    assert!(error.render_human().contains("observed_digest"));
+    let preflight = preflight_f5_resources(&config, F5OtherResources::default())
+        .expect(".4 reuses its admitted scan; mutation binding belongs to .5");
+    assert_eq!(
+        preflight.physical_input_identities()[0].observed_sha256(),
+        sha256(b">chr1\nAAAA\n")
+    );
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -704,10 +1068,9 @@ fn impossible_targets_and_override_outside_resolved_blocks_are_rejected() {
         fs::create_dir_all(&root).expect("root");
         let general = configuration(&root, None, "", "AAAA");
         replace_scenario(&root, "block_count = 1", target);
-        let config = load_and_validate_f5_config(&general).expect("configuration");
         assert_eq!(
-            preflight_f5_resources(&config, F5OtherResources::default())
-                .expect_err("impossible target")
+            load_and_validate_f5_config(&general)
+                .expect_err("impossible target is rejected during admission")
                 .code(),
             "GPS-DOMAIN-101"
         );
@@ -722,14 +1085,126 @@ fn impossible_targets_and_override_outside_resolved_blocks_are_rejected() {
         "founder_ids = [\"I1\"]",
         "founder_ids = [\"I1\"]\n\n[[sampling_overrides]]\npopulation_id = \"P1\"\nblock_index = 1\nmode = \"probabilistic\"",
     );
-    let config = load_and_validate_f5_config(&general).expect("configuration");
     assert_eq!(
-        preflight_f5_resources(&config, F5OtherResources::default())
-            .expect_err("override outside B")
+        load_and_validate_f5_config(&general)
+            .expect_err("override outside B is rejected during admission")
             .code(),
         "GPS-CONF-101"
     );
     fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn covered_bases_reserves_its_known_formula_before_opening_reference() {
+    let root = temporary("covered-known-before-reference");
+    fs::create_dir_all(&root).expect("root");
+    let general = custom_configuration(
+        &root,
+        "max_operation_units = 999999\n",
+        "AAAAAAAAAA",
+        "length_min_bp\tlength_max_bp\tweight\n2\t4\t1\n",
+        "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t3\t0.5\t0.05\n",
+    );
+    replace_scenario(&root, "block_count = 1", "covered_bases = 10");
+    let provisional = load_and_validate_f5_config(&general).expect("covered-bases admission");
+    let preflight = preflight_f5_resources(&provisional, F5OtherResources::default())
+        .expect("covered-bases preflight");
+    assert_eq!(preflight.block_count(), 3);
+
+    // Oráculo independiente de los términos que solo se aprenden al
+    // recorrer esta referencia de un tramo y una secuencia. El resto debe
+    // estar ya cargado al ledger antes de File::open.
+    let block_count = preflight.block_count();
+    let tract_count = preflight.tract_count();
+    let layout_attempts = preflight.max_layout_attempts();
+    let site_bound = preflight.site_bound_per_block();
+    let scan_learned = 2 * preflight.fasta_bytes_processed()
+        + preflight.reference_bases_processed()
+        + preflight.mask_bytes_processed()
+        + preflight.retained_sequence_ids()
+        + tract_count
+        + 2 * tract_count
+        + 2 * layout_attempts * block_count * tract_count
+        + layout_attempts * (tract_count + 3 * block_count * tract_count)
+        + 2 * preflight.retained_sequence_ids() * block_count * site_bound;
+    let known_at_original_width = preflight.operation_units() - scan_learned;
+
+    let scenario_path = root.join("authoring/scenarios/scenario.toml");
+    let original = fs::read_to_string(&scenario_path).expect("scenario source");
+    let original_len = original.len() as i128;
+    let mut exact = known_at_original_width;
+    loop {
+        let rewritten = original.replace(
+            "max_operation_units = 999999",
+            &format!("max_operation_units = {exact}"),
+        );
+        let adjusted = (i128::from(known_at_original_width)
+            + 2 * (rewritten.len() as i128 - original_len)) as u64;
+        if adjusted == exact {
+            fs::write(&scenario_path, rewritten).expect("exact known-cost scenario");
+            break;
+        }
+        exact = adjusted;
+    }
+    fs::remove_file(root.join("authoring/references/ref.fa")).expect("reference sentinel");
+    let exact_error = load_and_validate_f5_config(&general)
+        .expect_err("the exact known bound reaches the reference open");
+    assert_eq!(exact_error.code(), "GPS-INPUT-001");
+
+    replace_scenario(
+        &root,
+        &format!("max_operation_units = {exact}"),
+        &format!("max_operation_units = {}", exact - 1),
+    );
+    let minus_one = load_and_validate_f5_config(&general)
+        .expect_err("one less than the known formula rejects before reference");
+    assert_eq!(minus_one.code(), "GPS-RES-101");
+    assert_eq!(minus_one.context()["dimension"], "operation_units");
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn invalid_covered_bases_and_site_bounds_win_before_absent_reference() {
+    let invalid_target_root = temporary("invalid-covered-before-reference");
+    fs::create_dir_all(&invalid_target_root).expect("target root");
+    let general = custom_configuration(
+        &invalid_target_root,
+        "",
+        "AAAAAA",
+        "length_min_bp\tlength_max_bp\tweight\n3\t4\t1\n",
+        "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t3\t0.5\t0.05\n",
+    );
+    replace_scenario(&invalid_target_root, "block_count = 1", "covered_bases = 5");
+    fs::remove_file(invalid_target_root.join("authoring/references/ref.fa"))
+        .expect("target reference sentinel");
+    let error = load_and_validate_f5_config(&general)
+        .expect_err("invalid covered target must precede reference open");
+    assert_eq!(error.code(), "GPS-DOMAIN-101");
+
+    let site_root = temporary("invalid-site-bound-before-reference");
+    fs::create_dir_all(&site_root).expect("site root");
+    let general = custom_configuration(
+        &site_root,
+        "",
+        &"A".repeat(4_097),
+        "length_min_bp\tlength_max_bp\tweight\n4097\t4097\t1\n",
+        "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t4096\t0.5\t0.05\n",
+    );
+    replace_scenario(
+        &site_root,
+        "max_haplotype_cells = 16",
+        "max_haplotype_cells = 8192",
+    );
+    fs::remove_file(site_root.join("authoring/references/ref.fa"))
+        .expect("site reference sentinel");
+    let error =
+        load_and_validate_f5_config(&general).expect_err("S_bound must precede reference open");
+    assert_eq!(error.code(), "GPS-RES-101");
+    fs::remove_dir_all(invalid_target_root).expect("target cleanup");
+    fs::remove_dir_all(site_root).expect("site cleanup");
 }
 
 #[test]
@@ -754,10 +1229,9 @@ fn mask_scanner_is_ordered_across_sequences_and_has_a_bounded_row() {
         "r".repeat(65_536)
     );
     let general = configuration(&root, Some(&oversized), "", "AAAA");
-    let config = load_and_validate_f5_config(&general).expect("configuration");
     assert_eq!(
-        preflight_f5_resources(&config, F5OtherResources::default())
-            .expect_err("oversized row")
+        load_and_validate_f5_config(&general)
+            .expect_err("oversized row is rejected during admission")
             .code(),
         "GPS-FMT-101"
     );
@@ -776,10 +1250,9 @@ fn site_and_cell_bounds_bins_and_checked_formula_overflow_are_accounted() {
         "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
         "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t4096\t0.5\t0.05\n",
     );
-    let config = load_and_validate_f5_config(&general).expect("configuration");
     assert_eq!(
-        preflight_f5_resources(&config, F5OtherResources::default())
-            .expect_err("S bound")
+        load_and_validate_f5_config(&general)
+            .expect_err("S bound is rejected before reference I/O")
             .code(),
         "GPS-RES-101"
     );
@@ -795,10 +1268,9 @@ fn site_and_cell_bounds_bins_and_checked_formula_overflow_are_accounted() {
         "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
         "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t9\t0.5\t0.05\n",
     );
-    let config = load_and_validate_f5_config(&general).expect("configuration");
     assert_eq!(
-        preflight_f5_resources(&config, F5OtherResources::default())
-            .expect_err("H*S bound")
+        load_and_validate_f5_config(&general)
+            .expect_err("H*S bound is rejected during admission")
             .code(),
         "GPS-RES-101"
     );
@@ -829,14 +1301,13 @@ fn site_and_cell_bounds_bins_and_checked_formula_overflow_are_accounted() {
     let root = temporary("checked-overflow");
     fs::create_dir_all(&root).expect("root");
     let general = configuration(&root, None, "", "AAAA");
-    let config = load_and_validate_f5_config(&general).expect("configuration");
     for other in [
         F5OtherResources::new(u64::MAX, 0, 0),
         F5OtherResources::new(0, u64::MAX, 0),
         F5OtherResources::new(0, 0, u64::MAX),
     ] {
         assert_eq!(
-            preflight_f5_resources(&config, other)
+            load_with_resources(&general, other)
                 .expect_err("checked formula overflow")
                 .code(),
             "GPS-RES-101"
@@ -879,11 +1350,10 @@ fn site_bound_covers_one_and_the_inclusive_4096_boundary() {
         "max_haplotype_cells = 16",
         "max_haplotype_cells = 8192",
     );
-    let config = load_and_validate_f5_config(&general).expect("S_bound=4096 configuration");
-    let error = preflight_f5_resources(&config, F5OtherResources::default())
+    let error = load_and_validate_f5_config(&general)
         .expect_err("the independent global memory bound remains applicable");
     assert_eq!(error.code(), "GPS-RES-101");
-    assert!(error.render_human().contains("working_memory_bytes="));
+    assert_eq!(error.context()["dimension"], "working_memory_bytes");
     assert!(
         !error
             .render_human()
@@ -898,11 +1368,10 @@ fn large_fasta_with_small_budget_is_rejected_without_materializing_all_bases() {
     const CHILD_ROOT: &str = "GPS_F5_STREAMING_MEMORY_CHILD_ROOT";
     if let Some(root) = std::env::var_os(CHILD_ROOT) {
         let general = PathBuf::from(root).join("authoring/general.toml");
-        let config = load_and_validate_f5_config(&general).expect("child configuration");
-        let error = preflight_f5_resources(&config, F5OtherResources::default())
-            .expect_err("declared memory budget must reject");
+        let error = load_and_validate_f5_config(&general)
+            .expect_err("declared memory budget must reject during admission");
         assert_eq!(error.code(), "GPS-RES-101");
-        assert!(error.render_human().contains("working_memory_bytes="));
+        assert_eq!(error.context()["dimension"], "working_memory_bytes");
         return;
     }
 
@@ -939,11 +1408,10 @@ fn long_fasta_description_is_discarded_under_a_bounded_address_space() {
     const CHILD_ROOT: &str = "GPS_F5_LONG_HEADER_MEMORY_CHILD_ROOT";
     if let Some(root) = std::env::var_os(CHILD_ROOT) {
         let general = PathBuf::from(root).join("authoring/general.toml");
-        let config = load_and_validate_f5_config(&general).expect("child configuration");
-        let error = preflight_f5_resources(&config, F5OtherResources::default())
-            .expect_err("declared memory budget must reject");
+        let error = load_and_validate_f5_config(&general)
+            .expect_err("declared memory budget must reject during admission");
         assert_eq!(error.code(), "GPS-RES-101");
-        assert!(error.render_human().contains("working_memory_bytes="));
+        assert_eq!(error.context()["dimension"], "working_memory_bytes");
         return;
     }
 
@@ -1056,10 +1524,8 @@ fn fasta_descriptions_raise_v5_operation_budget_and_preserve_productive_rng_path
             long.operation_units() - 1
         ),
     );
-    let rejected_config =
-        load_and_validate_f5_config(&long_general).expect("minus-one configuration");
     assert_eq!(
-        preflight_f5_resources(&rejected_config, F5OtherResources::default())
+        load_and_validate_f5_config(&long_general)
             .expect_err("one operation below the long-header bound must reject")
             .code(),
         "GPS-RES-101"
@@ -1145,10 +1611,8 @@ fn mask_bytes_raise_v5_operation_budget_with_equal_geometry_and_exact_limit() {
             long.operation_units() - 1
         ),
     );
-    let rejected_config =
-        load_and_validate_f5_config(&long_general).expect("minus-one configuration");
     assert_eq!(
-        preflight_f5_resources(&rejected_config, F5OtherResources::default())
+        load_and_validate_f5_config(&long_general)
             .expect_err("one operation below the mask-byte bound must reject")
             .code(),
         "GPS-RES-101"
@@ -1158,17 +1622,133 @@ fn mask_bytes_raise_v5_operation_budget_with_equal_geometry_and_exact_limit() {
     fs::remove_dir_all(long_root).expect("long cleanup");
 }
 
+#[test]
+fn literal_byte_oracle_accepts_exact_operation_formula_and_rejects_minus_one() {
+    let mask = b"region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t3\t3\n";
+    for (label, mask) in [("without-mask", None), ("with-mask", Some(mask.as_slice()))] {
+        let root = temporary(label);
+        fs::create_dir_all(&root).expect("root");
+        let general = configuration(
+            &root,
+            mask.map(|bytes| std::str::from_utf8(bytes).expect("UTF-8 mask")),
+            "max_operation_units = 999999\n",
+            "AAA",
+        );
+
+        let baseline_config =
+            load_and_validate_f5_config(&general).expect("high-limit literal fixture");
+        let baseline = preflight_f5_resources(&baseline_config, F5OtherResources::default())
+            .expect("high-limit public preflight");
+        assert_eq!(
+            baseline.operation_units(),
+            literal_fixture_operation_oracle(&root, mask),
+            "term-by-term literal oracle differs before the exact-bound rewrite: {label}"
+        );
+
+        let mut candidate = 999_999_u64;
+        let exact = loop {
+            set_scenario_operation_limit(&root, candidate);
+            let observed = literal_fixture_operation_oracle(&root, mask);
+            if observed == candidate {
+                break observed;
+            }
+            candidate = observed;
+        };
+        let exact_config = load_and_validate_f5_config(&general).expect("exact literal fixture");
+        let exact_preflight = preflight_f5_resources(&exact_config, F5OtherResources::default())
+            .expect("exact public preflight");
+        assert_eq!(exact_preflight.operation_units(), exact, "{label}");
+        assert_eq!(
+            exact_preflight.fasta_bytes_processed(),
+            b">chr1\nAAA\n".len() as u64,
+            "{label}"
+        );
+        assert_eq!(
+            exact_preflight.mask_bytes_processed(),
+            mask.map_or(0, |bytes| bytes.len() as u64),
+            "{label}"
+        );
+
+        assert_eq!(
+            exact.to_string().len(),
+            (exact - 1).to_string().len(),
+            "the minus-one fixture must preserve the scenario byte count"
+        );
+        set_scenario_operation_limit(&root, exact - 1);
+        let error = load_and_validate_f5_config(&general)
+            .expect_err("one operation below the literal formula must reject");
+        assert_eq!(error.code(), "GPS-RES-101", "{label}");
+        assert_eq!(error.context()["dimension"], "operation_units", "{label}");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+}
+
+#[test]
+fn valid_mask_identity_changes_are_input_mismatches_before_entropy_or_destination() {
+    let declared = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
+    let changed = [
+        (
+            "shorter",
+            b"region_id\tsequence_id\tstart_1based\tend_1based\n".as_slice(),
+        ),
+        (
+            "longer",
+            b"region_id\tsequence_id\tstart_1based\tend_1based\nmask-longer\tchr1\t2\t2\n"
+                .as_slice(),
+        ),
+    ];
+    for (label, changed) in changed {
+        let root = temporary(label);
+        fs::create_dir_all(&root).expect("root");
+        let general = configuration(&root, Some(declared), "", "AAAA");
+        remove_declared_seed(&root);
+        fs::write(
+            root.join("authoring/scenarios/excluded_regions.tsv"),
+            changed,
+        )
+        .expect("mask changed without updating its declared digest");
+
+        let destination = root.join("must-not-exist");
+        let mut entropy = CountingEntropy::default();
+        let error = load_and_validate_f5_config_with_entropy(&general, &mut entropy)
+            .expect_err("stale mask identity");
+        assert_eq!(error.code(), "GPS-INPUT-002", "{label}");
+        assert_eq!(
+            error.context()["expected_digest"],
+            sha256(declared.as_bytes())
+        );
+        assert_eq!(error.context()["observed_digest"], sha256(changed));
+        assert_eq!(entropy.calls, 0, "{label}");
+        let output = Command::new(env!("CARGO_BIN_EXE_genome-population-simulator"))
+            .args([
+                "validate",
+                general.to_str().expect("UTF-8 path"),
+                "--output",
+                destination.to_str().expect("UTF-8 destination"),
+            ])
+            .output()
+            .expect("CLI validation of stale mask identity");
+        assert_eq!(output.status.code(), Some(2), "{label}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("GPS-INPUT-002"),
+            "{label}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!destination.exists(), "{label}");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn fragmented_tracts_are_budgeted_before_vector_growth() {
     const CHILD_ROOT: &str = "GPS_F5_FRAGMENTED_TRACTS_CHILD_ROOT";
     if let Some(root) = std::env::var_os(CHILD_ROOT) {
         let general = PathBuf::from(root).join("authoring/general.toml");
-        let config = load_and_validate_f5_config(&general).expect("child configuration");
-        let error = preflight_f5_resources(&config, F5OtherResources::default())
+        let error = load_and_validate_f5_config(&general)
             .expect_err("scan-time memory lower bound must reject");
         assert_eq!(error.code(), "GPS-RES-101");
-        assert!(error.render_human().contains("working_memory_bytes="));
+        assert_eq!(error.context()["dimension"], "working_memory_bytes");
         return;
     }
 
@@ -1203,14 +1783,12 @@ fn maximum_length_sequence_ids_are_budgeted_before_metadata_growth() {
     const CHILD_ROOT: &str = "GPS_F5_MANY_SEQUENCE_IDS_CHILD_ROOT";
     if let Some(root) = std::env::var_os(CHILD_ROOT) {
         let general = PathBuf::from(root).join("authoring/general.toml");
-        let config = load_and_validate_f5_config(&general).expect("child configuration");
-        let error = preflight_f5_resources(&config, F5OtherResources::default())
+        let error = load_and_validate_f5_config(&general)
             .expect_err("scan-time ID memory lower bound must reject");
         assert_eq!(error.code(), "GPS-RES-101");
-        let rendered = error.render_human();
-        assert!(rendered.contains("working_memory_bytes=131328/131072"));
-        assert!(rendered.contains("tract_count=0"));
-        assert!(rendered.contains("retained_sequence_ids=257"));
+        assert_eq!(error.context()["dimension"], "working_memory_bytes");
+        assert_eq!(error.context()["accumulated"], "131328");
+        assert_eq!(error.context()["limit"], "131072");
         return;
     }
 
@@ -1274,19 +1852,18 @@ fn resource_limit_includes_other_outputs_and_rejects_before_any_destination() {
     let root = temporary("limit");
     fs::create_dir_all(&root).expect("root");
     let general = configuration(&root, None, "", "AAAA");
-    let config = load_and_validate_f5_config(&general).expect("configuration");
-    let baseline =
-        preflight_f5_resources(&config, F5OtherResources::new(7, 11, 13)).expect("baseline");
-    assert_eq!(baseline.other_resources(), F5OtherResources::new(7, 11, 13));
+    let other = F5OtherResources::new(7, 11, 13);
+    let config = load_with_resources(&general, other).expect("configuration");
+    let baseline = preflight_f5_resources(&config, other).expect("baseline");
+    assert_eq!(baseline.other_resources(), other);
     let rejected_general = configuration(
         &root.join("rejected"),
         None,
         &format!("max_output_bytes = {}\n", baseline.output_bytes() - 1),
         "AAAA",
     );
-    let rejected = load_and_validate_f5_config(&rejected_general).expect("limited configuration");
-    let error = preflight_f5_resources(&rejected, F5OtherResources::new(7, 11, 13))
-        .expect_err("output budget must reject");
+    let error = load_with_resources(&rejected_general, other)
+        .expect_err("output budget must reject before returning a configuration");
     assert_eq!(error.code(), "GPS-RES-101");
     fs::remove_dir_all(root).expect("cleanup");
 }
@@ -1304,7 +1881,8 @@ fn hard_resource_bounds_are_inclusive_and_the_next_byte_is_rejected() {
         F5_HARD_WORKING_MEMORY_LIMIT - base.working_memory_bytes(),
         F5_HARD_OUTPUT_LIMIT - base.output_bytes(),
     );
-    let admitted = preflight_f5_resources(&config, exact).expect("inclusive bounds");
+    let exact_config = load_with_resources(&general, exact).expect("inclusive bounds");
+    let admitted = preflight_f5_resources(&exact_config, exact).expect("bound preflight");
     assert_eq!(admitted.operation_units(), F5_HARD_OPERATION_LIMIT);
     assert_eq!(
         admitted.working_memory_bytes(),
@@ -1312,7 +1890,7 @@ fn hard_resource_bounds_are_inclusive_and_the_next_byte_is_rejected() {
     );
     assert_eq!(admitted.output_bytes(), F5_HARD_OUTPUT_LIMIT);
     let error = preflight_f5_resources(
-        &config,
+        &exact_config,
         F5OtherResources::new(
             exact.operation_units(),
             exact.working_memory_bytes(),
@@ -1320,7 +1898,7 @@ fn hard_resource_bounds_are_inclusive_and_the_next_byte_is_rejected() {
         ),
     )
     .expect_err("one byte beyond the hard limit must fail");
-    assert_eq!(error.code(), "GPS-RES-101");
+    assert_eq!(error.code(), "GPS-CONF-101");
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -1337,9 +1915,7 @@ fn zero_fractional_target_is_a_domain_failure_without_rng() {
             "coverage_fraction = 0.000000000000000001",
         );
     fs::write(&scenario, source).expect("scenario rewrite");
-    let config = load_and_validate_f5_config(&general).expect("configuration");
-    let error =
-        preflight_f5_resources(&config, F5OtherResources::default()).expect_err("T=0 must fail");
+    let error = load_and_validate_f5_config(&general).expect_err("T=0 must fail during admission");
     assert_eq!(error.code(), "GPS-DOMAIN-101");
     fs::remove_dir_all(root).expect("cleanup");
 }
@@ -1455,11 +2031,10 @@ fn wide_literal_length_support_is_rejected_by_preflight_before_enumeration() {
         "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
         "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t134217728\t0.5\t0.05\n",
     );
-    let config = load_and_validate_f5_config(&general).expect("wide support configuration");
-    let error = preflight_f5_resources(&config, F5OtherResources::default())
+    let error = load_and_validate_f5_config(&general)
         .expect_err("the literal two-pass support cannot exceed the operation budget");
     assert_eq!(error.code(), "GPS-RES-101");
-    assert!(error.context()["detail"].contains("length_support_cardinality"));
+    assert_eq!(error.context()["dimension"], "operation_units");
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -1540,7 +2115,7 @@ fn gap_support_cardinality_is_discontinuous_bounded_and_inclusive_before_rng() {
         "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
         "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t3\t0.5\t0.05\n",
     );
-    let unrestricted = load_and_validate_f5_config(&general).expect("discontinuous support");
+    let unrestricted = load_with_resources(&general, other).expect("discontinuous support");
     let baseline = preflight_f5_resources(&unrestricted, other).expect("bounded preflight");
     assert_eq!(baseline.gap_support_cardinality(), 5);
     assert_eq!(baseline.site_bound_per_block(), 4);
@@ -1557,7 +2132,7 @@ fn gap_support_cardinality_is_discontinuous_bounded_and_inclusive_before_rng() {
         "max_operation_units = 999999\n",
         &format!("max_operation_units = {}\n", baseline.operation_units()),
     );
-    let exact = load_and_validate_f5_config(&general).expect("exact configuration");
+    let exact = load_with_resources(&general, other).expect("exact configuration");
     assert_eq!(
         preflight_f5_resources(&exact, other)
             .expect("inclusive operation bound")
@@ -1569,11 +2144,10 @@ fn gap_support_cardinality_is_discontinuous_bounded_and_inclusive_before_rng() {
         &format!("max_operation_units = {}\n", baseline.operation_units()),
         &format!("max_operation_units = {}\n", baseline.operation_units() - 1),
     );
-    let minus_one = load_and_validate_f5_config(&general).expect("minus-one configuration");
-    let error = preflight_f5_resources(&minus_one, other)
+    let error = load_with_resources(&general, other)
         .expect_err("gap traversal bound rejects before any layout RNG");
     assert_eq!(error.code(), "GPS-RES-101");
-    assert!(error.context()["detail"].contains("gap_support_cardinality=5"));
+    assert_eq!(error.context()["dimension"], "operation_units");
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -1627,11 +2201,10 @@ fn trillion_wide_gap_support_is_rejected_without_enumeration() {
         "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
         "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t1\t0.5\t0.05\n",
     );
-    let config = load_and_validate_f5_config(&general).expect("wide gap profile parses");
-    let error = preflight_f5_resources(&config, F5OtherResources::default())
+    let error = load_and_validate_f5_config(&general)
         .expect_err("the literal selector cost exceeds the hard operation bound");
     assert_eq!(error.code(), "GPS-RES-101");
-    assert!(error.context()["detail"].contains("gap_support_cardinality=1000000000000"));
+    assert_eq!(error.context()["dimension"], "operation_units");
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -1888,8 +2461,8 @@ fn layout_request_binds_other_resource_contributions() {
     let root = temporary("binding-other-resources");
     fs::create_dir_all(&root).expect("root");
     let general = configuration(&root, None, "", "AAAA");
-    let config = load_and_validate_f5_config(&general).expect("configuration");
     let other = F5OtherResources::new(7, 11, 13);
+    let config = load_with_resources(&general, other).expect("configuration");
     let preflight = preflight_f5_resources(&config, other).expect("preflight with other costs");
     let execution =
         ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
@@ -2031,10 +2604,9 @@ fn profile_padding_changes_its_phase_without_summing_noncoexistent_peaks() {
             long.working_memory_bytes() - 1
         ),
     );
-    let rejected = load_and_validate_f5_config(&long_general).expect("minus-one configuration");
     assert_eq!(
-        preflight_f5_resources(&rejected, F5OtherResources::default())
-            .expect_err("the preflight owns the profile budget before F5.1.2.3")
+        load_and_validate_f5_config(&long_general)
+            .expect_err("admission owns the profile and scan memory budget")
             .code(),
         "GPS-RES-101"
     );
@@ -2100,4 +2672,46 @@ fn cli_enforces_the_physical_toml_limit_before_materializing_a_comment() {
         "accepted TOML comments do not alter F5 RNG or layout"
     );
     fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn cli_validate_executes_point_four_without_creating_a_destination() {
+    let cases = [
+        "declared",
+        "missing-fasta",
+        "malformed-fasta",
+        "invalid-mask",
+    ];
+    for case in cases {
+        let root = temporary(case);
+        fs::create_dir_all(&root).expect("root");
+        let mask = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
+        let general = configuration(&root, (case == "invalid-mask").then_some(mask), "", "AAAA");
+        match case {
+            "missing-fasta" => {
+                fs::remove_file(root.join("authoring/references/ref.fa")).expect("remove FASTA");
+            }
+            "malformed-fasta" => replace_reference(&root, b">chr1\nAXAA\n"),
+            "invalid-mask" => replace_mask(&root, b"invalid\n"),
+            "declared" => {}
+            _ => unreachable!(),
+        }
+        let destination = root.join("must-not-exist");
+        let output = Command::new(env!("CARGO_BIN_EXE_genome-population-simulator"))
+            .args(["validate", general.to_str().expect("UTF-8 path")])
+            .output()
+            .expect("CLI validate");
+        assert_eq!(output.status.success(), case == "declared", "{case}");
+        assert!(
+            !destination.exists(),
+            "validate never creates a destination"
+        );
+        if case != "declared" {
+            assert!(
+                !output.stderr.is_empty(),
+                "{case} must report its rejection"
+            );
+        }
+        fs::remove_dir_all(root).expect("cleanup");
+    }
 }

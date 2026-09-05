@@ -239,6 +239,15 @@ pub struct EffectiveF5Config {
     bootstrap_documents: F5BootstrapDocuments,
     input_documents: F5InputDocuments,
     profile_input_identities: Vec<PhysicalInputIdentity>,
+    /// Estado interno de la admisión v7 después de bootstrap y perfil. La
+    /// primera visita FASTA/máscara lo continúa en F5.1.2.4; aún no es un
+    /// receipt sellado ni se proyecta a contratos públicos.
+    admission_ledger: F5ResourceLedger,
+    /// Resultado único de la primera pasada FASTA y de la máscara. Conserva
+    /// también las aportaciones externas que se admitieron antes de abrirlas;
+    /// .5 lo sellará sin recalcular ni duplicar la geometría retenida.
+    admitted_preflight: Option<crate::f5_preflight::F5ResourcePreflight>,
+    admitted_ledger: Option<F5ResourceLedger>,
     general: DeclaredF5GeneralConfig,
     scenario: DeclaredF5Scenario,
 }
@@ -529,8 +538,8 @@ fn admit_f5_bootstrap(
     Ok(())
 }
 
-/// Resultado de la frontera CLI. La rama F5 solo admite y resuelve enlaces en
-/// F5.0.1; su ejecución se mantiene explícitamente aplazada.
+/// Resultado de la frontera CLI. La rama F5 completa la admisión física .4,
+/// pero su ejecución y publicación siguen explícitamente aplazadas.
 #[derive(Clone, Debug)]
 pub enum CliValidatedConfig {
     Legacy(Box<EffectiveConfig>),
@@ -593,6 +602,14 @@ impl EffectiveF5Config {
     #[must_use]
     pub fn profile_input_identities(&self) -> &[PhysicalInputIdentity] {
         &self.profile_input_identities
+    }
+    #[must_use]
+    pub(crate) fn admission_ledger(&self) -> F5ResourceLedger {
+        self.admission_ledger.clone()
+    }
+    #[must_use]
+    pub(crate) fn admitted_preflight(&self) -> Option<&crate::f5_preflight::F5ResourcePreflight> {
+        self.admitted_preflight.as_ref()
     }
     #[must_use]
     pub const fn bootstrap_documents(&self) -> &F5BootstrapDocuments {
@@ -1034,9 +1051,9 @@ fn load_and_validate_cli_config_with_toml_opener(
             admitted,
             opener,
         )?;
-        // `validate` completa F5.1.2.3, pero no materializa referencia ni
-        // solicita entropía: esas fases siguen fuera de su autoridad.
-        validate_f5_profile_after_bootstrap(&bootstrap)?;
+        // `validate` ejecuta la misma admisión .4 que la biblioteca, pero no
+        // necesita resolver una semilla: no hay consumidor RNG ni publicación.
+        validate_f5_admission_after_bootstrap(&bootstrap)?;
         return Ok(CliValidatedConfig::F5(Box::new(bootstrap)));
     }
     let general = parse_declared_config(admitted)?;
@@ -1045,18 +1062,12 @@ fn load_and_validate_cli_config_with_toml_opener(
         .map(CliValidatedConfig::Legacy)
 }
 
-fn validate_f5_profile_after_bootstrap(bootstrap: &F5BootstrapConfig) -> Result<(), Diagnostic> {
-    let population_ids = bootstrap
-        .scenario
-        .subpopulations
-        .iter()
-        .map(|population| population.population_id.value().clone())
-        .collect::<BTreeSet<_>>();
-    let mut ledger = profile_ledger_after_bootstrap(&bootstrap.scenario, &bootstrap.documents)?;
-    let _ = load_f5_profile_under_budget(
-        &bootstrap.profile_metadata_path,
-        bootstrap.scenario.profile_metadata_sha256.value(),
-        &population_ids,
+fn validate_f5_admission_after_bootstrap(bootstrap: &F5BootstrapConfig) -> Result<(), Diagnostic> {
+    let provisional = prepare_f5_config_after_bootstrap(bootstrap.clone())?;
+    let mut ledger = provisional.admission_ledger();
+    let _ = crate::f5_preflight::admit_f5_resources_under_ledger(
+        &provisional,
+        crate::f5_preflight::F5OtherResources::default(),
         &mut ledger,
     )?;
     Ok(())
@@ -1115,12 +1126,27 @@ pub fn load_and_validate_f5_config_with_entropy(
     path: &Path,
     entropy: &mut impl EntropySource,
 ) -> Result<EffectiveF5Config, Diagnostic> {
+    load_and_validate_f5_config_with_entropy_and_resources(
+        path,
+        entropy,
+        crate::f5_preflight::F5OtherResources::default(),
+    )
+}
+
+/// Variante instrumental que incorpora contribuciones externas antes de abrir
+/// referencia o máscara. Producción usa actualmente el valor nulo.
+#[doc(hidden)]
+pub fn load_and_validate_f5_config_with_entropy_and_resources(
+    path: &Path,
+    entropy: &mut impl EntropySource,
+    other: crate::f5_preflight::F5OtherResources,
+) -> Result<EffectiveF5Config, Diagnostic> {
     let general_path = absolute_normalized_path(path)?;
     let BoundedF5Toml { bytes, document } = read_bounded_f5_toml(&general_path)?;
     let admitted_general = admit_toml_header(path, bytes, ExpectedConfigKind::F5General)
         .map_err(Diagnostic::into_f5_configuration)?;
     let bootstrap = bootstrap_f5_config_from_admitted(general_path, document, admitted_general)?;
-    materialize_f5_config_after_bootstrap(bootstrap, entropy)
+    materialize_f5_config_after_bootstrap(bootstrap, entropy, other)
 }
 
 /// Continúa la admisión F5 a partir del general ya leído por el dispatcher.
@@ -1206,6 +1232,34 @@ fn bootstrap_f5_config_from_admitted_with_toml_opener(
 fn materialize_f5_config_after_bootstrap(
     bootstrap: F5BootstrapConfig,
     entropy: &mut impl EntropySource,
+    other: crate::f5_preflight::F5OtherResources,
+) -> Result<EffectiveF5Config, Diagnostic> {
+    let mut effective = prepare_f5_config_after_bootstrap(bootstrap)?;
+    let mut ledger = effective.admission_ledger();
+    let mut preflight =
+        crate::f5_preflight::admit_f5_resources_under_ledger(&effective, other, &mut ledger)?;
+    // Solo un resultado completamente admitido puede pedir entropía. Las
+    // semillas declaradas conservan exactamente la misma resolución.
+    let (root_seed, origin) = resolve_root_seed(
+        effective
+            .general
+            .seed
+            .as_ref()
+            .map(|seed| seed.value().as_str()),
+        entropy,
+    )
+    .map_err(|error| error.with("path", effective.general_path.display().to_string()))?;
+    effective.seed = root_seed.to_hex();
+    effective.seed_origin = origin.as_str().to_owned();
+    preflight.bind_configuration(&effective)?;
+    effective.admitted_preflight = Some(preflight);
+    effective.admitted_ledger = Some(ledger);
+    Ok(effective)
+}
+
+/// Construye el estado tipado previo a referencia sin resolver entropía.
+fn prepare_f5_config_after_bootstrap(
+    bootstrap: F5BootstrapConfig,
 ) -> Result<EffectiveF5Config, Diagnostic> {
     let F5BootstrapConfig {
         general_path,
@@ -1229,25 +1283,21 @@ fn materialize_f5_config_after_bootstrap(
         &population_ids,
         &mut ledger,
     )?;
+    ledger.transition_to(AdmissionPhase::ReferenceAndMaskScan)?;
     let (profile, profile_input_identities) = loaded_profile.into_parts();
     let input_documents = F5InputDocuments::from_observed(
         documents.general().size_bytes(),
         documents.scenario().size_bytes(),
         &profile_input_identities,
     )?;
-    let (root_seed, origin) = resolve_root_seed(
-        general.seed.as_ref().map(|seed| seed.value().as_str()),
-        entropy,
-    )
-    .map_err(|error| error.with("path", general_path.display().to_string()))?;
     Ok(EffectiveF5Config {
         general_path,
         scenario_path,
         profile_metadata_path,
         excluded_regions_path,
         reference_path,
-        seed: root_seed.to_hex(),
-        seed_origin: origin.as_str().to_owned(),
+        seed: String::new(),
+        seed_origin: String::new(),
         ploidy: u8::try_from(*general.ploidy.value())
             .map_err(|_| config_error_f5(&general.source, "ploidy", "ploidía fuera de rango"))?,
         reference_id: general.reference_id.value().clone(),
@@ -1257,6 +1307,9 @@ fn materialize_f5_config_after_bootstrap(
         bootstrap_documents: documents,
         input_documents,
         profile_input_identities,
+        admission_ledger: ledger,
+        admitted_preflight: None,
+        admitted_ledger: None,
         general,
         scenario,
     })

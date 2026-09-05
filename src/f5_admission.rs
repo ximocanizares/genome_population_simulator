@@ -200,6 +200,7 @@ pub struct F5ResourceLedger {
     limits: LedgerLimits,
     totals: LedgerTotals,
     retained_memory_bytes: u64,
+    read_operation_escrow_units: u64,
     phase: AdmissionPhase,
 }
 
@@ -214,6 +215,7 @@ impl F5ResourceLedger {
                 output_bytes: OutputReservation::new(0),
             },
             retained_memory_bytes: 0,
+            read_operation_escrow_units: 0,
             phase: AdmissionPhase::Bootstrap,
         }
     }
@@ -234,6 +236,197 @@ impl F5ResourceLedger {
     #[must_use]
     pub const fn retained_memory_bytes(&self) -> u64 {
         self.retained_memory_bytes
+    }
+
+    #[must_use]
+    pub(crate) const fn remaining_operation_units(&self) -> u64 {
+        self.limits
+            .operation_units
+            .value()
+            .saturating_sub(self.totals.operation_units.value())
+    }
+
+    /// Capacidad prospectiva disponible para una lectura: headroom nuevo más
+    /// una fracción de trabajo futuro ya cargada que puede respaldar la sonda
+    /// EOF. El escrow sigue incluido en `totals`; no amplía el presupuesto.
+    #[must_use]
+    pub(crate) const fn available_read_operation_units(&self) -> u64 {
+        self.remaining_operation_units()
+            .saturating_add(self.read_operation_escrow_units)
+    }
+
+    /// Identifica trabajo futuro ya admitido que puede reclasificarse
+    /// temporalmente como lectura. Si la lectura entrega cero bytes, no cambia
+    /// ninguna magnitud; si entrega bytes, consume escrow y la fórmula final
+    /// deberá admitir el coste adicional antes de continuar.
+    pub(crate) fn earmark_read_operation_escrow(
+        &mut self,
+        role: InputRole,
+        units: u64,
+    ) -> Result<(), Diagnostic> {
+        let prospective = self
+            .read_operation_escrow_units
+            .checked_add(units)
+            .ok_or_else(|| {
+                self.reject_resource(
+                    role,
+                    ResourceDimension::OperationUnits,
+                    "overflow del escrow de lectura",
+                )
+            })?;
+        if prospective > self.totals.operation_units.value() {
+            return Err(self.reject(resource_diagnostic(
+                self.phase,
+                role,
+                ResourceDimension::OperationUnits,
+                prospective,
+                self.totals.operation_units.value(),
+                "el escrow de lectura no está respaldado por trabajo ya cargado",
+            )));
+        }
+        self.read_operation_escrow_units = prospective;
+        Ok(())
+    }
+
+    /// Reserva el coste máximo de una lectura física antes de invocar
+    /// `Read::read`. El llamador debe liquidarla incluso ante error de E/S.
+    pub(crate) fn reserve_read(
+        &mut self,
+        role: InputRole,
+        prospective_bytes: usize,
+        units_per_byte: u64,
+    ) -> Result<ReadReservation, Diagnostic> {
+        let prospective_bytes = u64::try_from(prospective_bytes).map_err(|_| {
+            self.reject_resource(
+                role,
+                ResourceDimension::OperationUnits,
+                "el bloque físico no cabe en u64",
+            )
+        })?;
+        let reserved_units = prospective_bytes
+            .checked_mul(units_per_byte)
+            .ok_or_else(|| {
+                self.reject_resource(
+                    role,
+                    ResourceDimension::OperationUnits,
+                    "overflow al reservar el bloque físico",
+                )
+            })?;
+        let before = self.totals.operation_units.value();
+        let normal_units = reserved_units.min(self.remaining_operation_units());
+        let escrow_units = reserved_units - normal_units;
+        if escrow_units > self.read_operation_escrow_units {
+            return Err(self.reject(resource_diagnostic(
+                self.phase,
+                role,
+                ResourceDimension::OperationUnits,
+                before.saturating_add(reserved_units),
+                self.limits.operation_units.value(),
+                "reserva prospectiva de lectura excede el límite inclusivo",
+            )));
+        }
+        self.charge(
+            role,
+            LedgerCharge::Operation(OperationCost::new(normal_units)),
+        )?;
+        Ok(ReadReservation {
+            role,
+            before,
+            prospective_bytes,
+            units_per_byte,
+            normal_units,
+            escrow_units,
+        })
+    }
+
+    /// Conserva solo el coste correspondiente a bytes realmente entregados.
+    /// La capacidad no usada —incluida la sonda EOF— vuelve al ledger.
+    pub(crate) fn settle_read(
+        &mut self,
+        reservation: ReadReservation,
+        observed_bytes: usize,
+    ) -> Result<(), Diagnostic> {
+        let observed_bytes = u64::try_from(observed_bytes).map_err(|_| {
+            self.reject_resource(
+                reservation.role,
+                ResourceDimension::OperationUnits,
+                "los bytes observados no caben en u64",
+            )
+        })?;
+        if observed_bytes > reservation.prospective_bytes {
+            return Err(self.reject(resource_diagnostic(
+                self.phase,
+                reservation.role,
+                ResourceDimension::OperationUnits,
+                observed_bytes,
+                reservation.prospective_bytes,
+                "el lector entregó más bytes que el bloque reservado",
+            )));
+        }
+        let observed_units = observed_bytes
+            .checked_mul(reservation.units_per_byte)
+            .ok_or_else(|| {
+                self.reject_resource(
+                    reservation.role,
+                    ResourceDimension::OperationUnits,
+                    "overflow al liquidar el bloque físico",
+                )
+            })?;
+        let normal_units = observed_units.min(reservation.normal_units);
+        let escrow_units = observed_units - normal_units;
+        if escrow_units > reservation.escrow_units
+            || escrow_units > self.read_operation_escrow_units
+        {
+            return Err(self.reject(resource_diagnostic(
+                self.phase,
+                reservation.role,
+                ResourceDimension::OperationUnits,
+                observed_units,
+                reservation
+                    .normal_units
+                    .saturating_add(reservation.escrow_units),
+                "la lectura entregó operaciones sin reserva prospectiva",
+            )));
+        }
+        self.read_operation_escrow_units -= escrow_units;
+        self.totals.operation_units = OperationCost::new(
+            reservation
+                .before
+                .checked_add(normal_units)
+                .ok_or_else(|| {
+                    self.reject_resource(
+                        reservation.role,
+                        ResourceDimension::OperationUnits,
+                        "overflow al liquidar el bloque físico",
+                    )
+                })?,
+        );
+        Ok(())
+    }
+
+    /// Convierte memoria nueva realmente retenida en estado vivo del ledger.
+    pub(crate) fn retain_memory(
+        &mut self,
+        role: InputRole,
+        additional_bytes: u64,
+        coexisting_transient_bytes: u64,
+    ) -> Result<(), Diagnostic> {
+        let after = self
+            .retained_memory_bytes
+            .checked_add(additional_bytes)
+            .ok_or_else(|| {
+                self.reject_resource(
+                    role,
+                    ResourceDimension::WorkingMemoryBytes,
+                    "overflow de memoria retenida",
+                )
+            })?;
+        self.charge_memory_phase(
+            role,
+            self.retained_memory_bytes,
+            coexisting_transient_bytes,
+            after,
+        )
     }
 
     /// Cota física disponible para la siguiente entrada materializada. Se
@@ -499,6 +692,16 @@ impl F5ResourceLedger {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ReadReservation {
+    role: InputRole,
+    before: u64,
+    prospective_bytes: u64,
+    units_per_byte: u64,
+    normal_units: u64,
+    escrow_units: u64,
+}
+
 const fn next_phase(phase: AdmissionPhase) -> AdmissionPhase {
     match phase {
         AdmissionPhase::Bootstrap => AdmissionPhase::ProfileMetadata,
@@ -604,6 +807,20 @@ pub struct PhysicalInputIdentity {
 }
 
 impl PhysicalInputIdentity {
+    #[must_use]
+    pub(crate) fn from_observed(
+        role: InputRole,
+        normalized_path: PathBuf,
+        observed_size_bytes: u64,
+        observed_sha256: String,
+    ) -> Self {
+        Self {
+            role,
+            normalized_path,
+            observed_size_bytes,
+            observed_sha256,
+        }
+    }
     #[must_use]
     pub const fn role(&self) -> InputRole {
         self.role
@@ -1175,5 +1392,121 @@ mod tests {
         .expect_err("un ledger rechazado impide otra lectura");
         assert_eq!(later.code(), "GPS-RES-101");
         assert_eq!(*reads.lock().expect("spy lock"), 0, "cero I/O posterior");
+    }
+
+    #[test]
+    fn physical_read_reservation_precedes_io_and_restores_unused_eof_capacity() {
+        #[derive(Clone)]
+        struct CountingReader {
+            cursor: Cursor<Vec<u8>>,
+            bytes_requested: Arc<Mutex<u64>>,
+        }
+        impl Read for CountingReader {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                *self.bytes_requested.lock().expect("counter lock") += buffer.len() as u64;
+                self.cursor.read(buffer)
+            }
+        }
+
+        let requested = Arc::new(Mutex::new(0));
+        let mut exact_reader = CountingReader {
+            cursor: Cursor::new(b"abcd".to_vec()),
+            bytes_requested: Arc::clone(&requested),
+        };
+        let mut exact = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(5),
+            WorkingMemoryPeak::new(1),
+            OutputReservation::new(1),
+        ));
+        exact
+            .charge(
+                InputRole::GeneralToml,
+                LedgerCharge::Operation(OperationCost::new(1)),
+            )
+            .expect("one already admitted future operation");
+        exact
+            .earmark_read_operation_escrow(InputRole::GeneralToml, 1)
+            .expect("the future operation backs the EOF probe");
+        let mut bytes = [0_u8; 4];
+        let reservation = exact
+            .reserve_read(InputRole::GeneralToml, bytes.len(), 1)
+            .expect("the full physical block is admitted before read");
+        let count = exact_reader.read(&mut bytes).expect("physical read");
+        exact
+            .settle_read(reservation, count)
+            .expect("exact delivered block");
+        let eof = exact
+            .reserve_read(InputRole::GeneralToml, 1, 1)
+            .expect("prospective EOF probe");
+        let count = exact_reader.read(&mut bytes[..1]).expect("EOF probe");
+        exact.settle_read(eof, count).expect("restore unused EOF");
+        assert_eq!(count, 0);
+        assert_eq!(exact.totals().operation_units().value(), 5);
+        assert_eq!(*requested.lock().expect("counter lock"), 5);
+
+        let delivered_reads = Arc::new(Mutex::new(0));
+        let mut delivered_reader = CountingReader {
+            cursor: Cursor::new(b"abcde".to_vec()),
+            bytes_requested: Arc::clone(&delivered_reads),
+        };
+        let mut delivered = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(5),
+            WorkingMemoryPeak::new(1),
+            OutputReservation::new(1),
+        ));
+        delivered
+            .charge(
+                InputRole::GeneralToml,
+                LedgerCharge::Operation(OperationCost::new(1)),
+            )
+            .expect("one already admitted future operation");
+        delivered
+            .earmark_read_operation_escrow(InputRole::GeneralToml, 1)
+            .expect("one-byte read escrow");
+        let first = delivered
+            .reserve_read(InputRole::GeneralToml, 4, 1)
+            .expect("four regular bytes are admitted");
+        let count = delivered_reader.read(&mut bytes).expect("four bytes");
+        delivered
+            .settle_read(first, count)
+            .expect("four bytes charged");
+        let borrowed = delivered
+            .reserve_read(InputRole::GeneralToml, 1, 1)
+            .expect("the last physical byte is backed by charged escrow");
+        let count = delivered_reader
+            .read(&mut bytes[..1])
+            .expect("fifth physical byte");
+        delivered
+            .settle_read(borrowed, count)
+            .expect("the actual byte consumes charged escrow");
+        assert_eq!(count, 1);
+        assert_eq!(delivered.totals().operation_units().value(), 5);
+        assert_eq!(*delivered_reads.lock().expect("counter lock"), 5);
+        assert!(
+            delivered
+                .charge(
+                    InputRole::GeneralToml,
+                    LedgerCharge::Operation(OperationCost::new(1)),
+                )
+                .is_err(),
+            "the displaced future operation cannot run without formula headroom"
+        );
+
+        let rejected_reads = Arc::new(Mutex::new(0));
+        let _rejected_reader = CountingReader {
+            cursor: Cursor::new(b"abcd".to_vec()),
+            bytes_requested: Arc::clone(&rejected_reads),
+        };
+        let mut minus_one = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(3),
+            WorkingMemoryPeak::new(1),
+            OutputReservation::new(1),
+        ));
+        assert!(
+            minus_one
+                .reserve_read(InputRole::GeneralToml, bytes.len(), 1)
+                .is_err()
+        );
+        assert_eq!(*rejected_reads.lock().expect("counter lock"), 0);
     }
 }

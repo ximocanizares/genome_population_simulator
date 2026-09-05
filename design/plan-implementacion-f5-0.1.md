@@ -231,6 +231,32 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
       exacto−1 en operaciones y memoria, SHA incorrecto y espías que prueban
       cero RNG/destino. El oráculo recuenta bytes, bases y tramos sin reutilizar
       estructuras productivas.
+    - Estado en corrección (5 de septiembre de 2026): C1–C6 están aplicados
+      localmente con regresiones focales y gates de formato, Clippy y
+      documentación correctos. La suite completa conserva únicamente H10
+      (en el cierre más reciente, `4961/4953`, +8), aplazado expresamente a
+      F5.1.2.6 como C7. La
+      contabilidad completa consta en
+      `evidence/f5.1.2/aplicacion-correcciones-f5.1.2.4-2026-09-05.md`.
+      F5.1.2.4 permanece abierto hasta la revisión independiente; no existe
+      todavía receipt sellado ni segunda visita física FASTA.
+    - Corrección residual (5 de septiembre de 2026): una revisión
+      independiente posterior reabrió C3/C5 mediante L1–L3: `other` podía
+      sustituirse después del escaneo, `covered_bases` reservaba con B=0 y la
+      geometría se clonaba antes de admitir su coexistencia. Los tres están
+      corregidos localmente con binding inicial, reserva conocida temprana y
+      backing único compartido. El checkbox continúa abierto hasta una nueva
+      revisión independiente; no se ha avanzado .5/.6 ni H10.
+    - Corrección residual final (5 de septiembre de 2026): C8 elimina de la
+      magnitud publicada las sondas EOF no observadas y las respalda con
+      trabajo futuro ya cargado, sin permitir lecturas físicas sin reserva;
+      un oráculo literal independiente, con y sin máscara, acepta la fórmula
+      exacta de DTC-089 y rechaza exacta−1. C9 clasifica un SHA de máscara
+      distinto como `GPS-INPUT-002`, con esperado/observado, mientras la
+      sintaxis malformada conserva `GPS-FMT-101`; ambas rutas rechazan antes de
+      entropía o destino. F5.1.2.4 sigue sin marcar hasta otra revisión
+      independiente. No se ha modificado la visibilidad pública provisional,
+      que podrá reevaluarse al sustituirla por el sellado interno de .5.
 
   - ☐ **F5.1.2.5.** Sellar `F5AdmissionReceipt`, exigir
     `SealedF5Admission` en layout y acotar la recuperación REF.

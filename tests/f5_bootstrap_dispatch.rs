@@ -211,6 +211,8 @@ fn dispatcher_opens_each_bootstrap_toml_once_and_records_identity_from_written_b
     let general_path = root.join("authoring/general.toml");
     let scenario_path = root.join("authoring/scenarios/scenario.toml");
     fs::create_dir_all(scenario_path.parent().expect("scenario parent")).expect("authoring");
+    fs::create_dir_all(root.join("authoring/references")).expect("reference directory");
+    fs::write(root.join("authoring/references/ref.fa"), b">chr1\nAA\n").expect("reference");
     fs::write(&general_path, &general_bytes).expect("general");
     fs::write(&scenario_path, &scenario_bytes).expect("scenario");
 
@@ -238,7 +240,7 @@ fn dispatcher_opens_each_bootstrap_toml_once_and_records_identity_from_written_b
             fs::canonicalize(&general_path).expect("canonical general"),
             fs::canonicalize(&scenario_path).expect("canonical scenario"),
         ],
-        "el dispatcher solo abre una vez cada TOML; referencia, máscara, destino y RNG no cruzan esta frontera"
+        "el observador cuenta solo los dos TOML; la admisión .4 abre después perfil y referencia sin reabrirlos"
     );
     fs::remove_dir_all(root).expect("cleanup");
 }

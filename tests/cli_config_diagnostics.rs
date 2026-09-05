@@ -318,7 +318,7 @@ fn f5_validate_rejects_missing_corrupt_or_mismatched_profile_before_reference() 
 }
 
 #[test]
-fn f5_validate_bootstrap_does_not_open_reference_or_run_preflight() {
+fn f5_validate_executes_physical_admission_without_destination() {
     let root = destination("f5-cli-preflight");
     let general = write_f5_cli_fixture(&root);
     fs::write(
@@ -328,7 +328,8 @@ fn f5_validate_bootstrap_does_not_open_reference_or_run_preflight() {
     .expect("mutated reference");
     let output = root.join("must-not-exist");
     let result = run("validate", &general, "human", &output);
-    assert!(result.status.success());
+    assert_eq!(result.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("GPS-INPUT-002"));
     assert!(!output.exists());
 
     let general = write_f5_cli_fixture(&root);

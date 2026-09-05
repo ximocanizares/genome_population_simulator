@@ -48,8 +48,8 @@ fn main() -> ExitCode {
     match load_and_validate_cli_config(&parsed.path).and_then(|effective| match (parsed.command, effective) {
         (CommandMode::Validate, CliValidatedConfig::Legacy(effective)) =>
             preflight_validated_config_with_authorizations(&effective, parsed.authorizations),
-        // La validación F5 ya selló bootstrap y perfil; referencia y preflight
-        // pertenecen a las fases posteriores de admisión.
+        // El dispatcher ya completó la admisión .4 (perfil, primera pasada
+        // FASTA y única máscara) sin RNG, destino ni publicación.
         (CommandMode::Validate, CliValidatedConfig::F5(_)) => Ok(()),
         (CommandMode::Run, CliValidatedConfig::F5(_)) => Err(
             genome_population_simulator::diagnostics::Diagnostic::f5_configuration(
