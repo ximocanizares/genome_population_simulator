@@ -220,9 +220,205 @@ pub fn paired_fastq_relative_paths(event_id: &str, individual_id: &str) -> (Path
     )
 }
 
+/// Escritor de la pareja FASTQ PE de una biblioteca que mantiene R1 y R2
+/// abiertos mientras llegan las parejas.
+///
+/// Antes las parejas se acumulaban todas en memoria porque cada mate se
+/// escribía en una pasada propia. Con los dos artefactos abiertos a la vez,
+/// cada pareja se escribe en cuanto se conoce su biblioteca final y se
+/// descarta acto seguido, de modo que el pico ya no crece con la cobertura ni
+/// con el tamaño del genoma. Los bytes publicados no cambian: el orden dentro
+/// de cada fichero sigue siendo el orden de llegada.
+#[derive(Debug)]
+pub struct FinalPairedFastqStream {
+    event_id: String,
+    library_id: LibraryId,
+    r1_path: PathBuf,
+    r2_path: PathBuf,
+    r1: crate::publication::OpenArtifact,
+    r2: crate::publication::OpenArtifact,
+    r1_writer: Option<bgzf::io::Writer<File>>,
+    r2_writer: Option<bgzf::io::Writer<File>>,
+    summary: FinalPairSummary,
+}
+
+impl FinalPairedFastqStream {
+    /// Reserva y abre los dos artefactos de la biblioteca. Ninguno entra en el
+    /// catálogo hasta `finish`; si el escritor se destruye antes, sus
+    /// temporales se eliminan.
+    pub fn open(
+        workspace: &mut ExecutionWorkspace,
+        event_id: &str,
+        individual_id: &str,
+        library_id: &LibraryId,
+    ) -> Result<Self, Diagnostic> {
+        let (r1_path, r2_path) = paired_fastq_relative_paths(event_id, individual_id);
+        let mut r1 = workspace.begin_streamed_artifact(
+            &format!("fastq-{}-r1", library_id.as_str()),
+            FASTQ_ARTIFACT_KIND,
+            &r1_path,
+        )?;
+        let mut r2 = workspace.begin_streamed_artifact(
+            &format!("fastq-{}-r2", library_id.as_str()),
+            FASTQ_ARTIFACT_KIND,
+            &r2_path,
+        )?;
+        let r1_writer = build_final_bgzf_writer(r1.take_file()?)?;
+        let r2_writer = build_final_bgzf_writer(r2.take_file()?)?;
+        Ok(Self {
+            event_id: event_id.to_owned(),
+            library_id: library_id.clone(),
+            r1_path,
+            r2_path,
+            r1,
+            r2,
+            r1_writer: Some(r1_writer),
+            r2_writer: Some(r2_writer),
+            summary: FinalPairSummary::default(),
+        })
+    }
+
+    #[must_use]
+    pub fn library_id(&self) -> &LibraryId {
+        &self.library_id
+    }
+
+    /// Escribe los dos mates de una pareja y suelta su contenido. La pareja se
+    /// consume: no queda ninguna copia después de esta llamada.
+    pub fn write_pair(&mut self, pair: DemultiplexedPair<ObservedPair>) -> Result<(), Diagnostic> {
+        if pair.final_library_id() != &self.library_id {
+            return Err(invariant(
+                "write_final_paired_fastq",
+                "pair belongs to a different final library",
+            ));
+        }
+        accumulate_final_pair(&mut self.summary, &pair)?;
+        let r1_writer = self
+            .r1_writer
+            .as_mut()
+            .ok_or_else(|| invariant("write_final_paired_fastq", "R1 stream is already closed"))?;
+        write_final_record(
+            r1_writer,
+            &pair,
+            TechnicalMate::R1,
+            &self.event_id,
+            &self.library_id,
+        )?;
+        let r2_writer = self
+            .r2_writer
+            .as_mut()
+            .ok_or_else(|| invariant("write_final_paired_fastq", "R2 stream is already closed"))?;
+        write_final_record(
+            r2_writer,
+            &pair,
+            TechnicalMate::R2,
+            &self.event_id,
+            &self.library_id,
+        )
+    }
+
+    /// Cierra los dos mates, los valida por separado y como pareja, y los
+    /// cataloga en el mismo orden que la vía anterior: R1 y después R2.
+    ///
+    /// Un fallo tras publicar R1 lo descarta, porque R1 y R2 son una sola
+    /// salida lógica y el provisional no puede quedar con una mitad.
+    pub fn finish(
+        mut self,
+        workspace: &mut ExecutionWorkspace,
+    ) -> Result<FinalPairedFastqPublication, Diagnostic> {
+        let summary = self.summary;
+        let r1_writer = self
+            .r1_writer
+            .take()
+            .ok_or_else(|| invariant("write_final_paired_fastq", "R1 stream is already closed"))?;
+        let r1_file = r1_writer
+            .finish()
+            .map_err(|error| io_error(&self.r1_path, "finish_final_fastq_gzip", error))?;
+        self.r1.restore_file(r1_file);
+        let r2_writer = self
+            .r2_writer
+            .take()
+            .ok_or_else(|| invariant("write_final_paired_fastq", "R2 stream is already closed"))?;
+        let r2_file = r2_writer
+            .finish()
+            .map_err(|error| io_error(&self.r2_path, "finish_final_fastq_gzip", error))?;
+        self.r2.restore_file(r2_file);
+
+        let Self {
+            r1_path,
+            r2_path,
+            r1,
+            r2,
+            ..
+        } = self;
+        let record_r1 = workspace.finish_streamed_artifact(r1, |temporary| {
+            crate::fastq_validation::validate_final_fastq_mate(temporary, TechnicalMate::R1)
+                .map_err(|error| invariant("write_final_paired_fastq", &error.to_string()))
+        })?;
+        let record_r2 = match maybe_inject_final_r2_failure().and_then(|()| {
+            workspace.finish_streamed_artifact(r2, |temporary| {
+                crate::fastq_validation::validate_final_fastq_mate(temporary, TechnicalMate::R2)
+                    .map_err(|error| invariant("write_final_paired_fastq", &error.to_string()))
+            })
+        }) {
+            Ok(record) => record,
+            Err(error) => {
+                workspace.discard_last_artifact(&record_r1)?;
+                return Err(error);
+            }
+        };
+        if let Err(error) = validate_final_paired_fastq(
+            &workspace.root().join(&r1_path),
+            &record_r1,
+            &workspace.root().join(&r2_path),
+            &record_r2,
+        )
+        .and(maybe_inject_final_pair_validation_failure())
+        {
+            // R1/R2 son una única salida lógica: una falla conjunta no puede
+            // dejar artefactos ni catálogo parciales en el provisional.
+            workspace.discard_last_artifact(&record_r2)?;
+            workspace.discard_last_artifact(&record_r1)?;
+            return Err(invariant("write_final_paired_fastq", &error.to_string()));
+        }
+        Ok(FinalPairedFastqPublication {
+            r1: record_r1,
+            r2: record_r2,
+            pair_count: summary.pair_count,
+            read_count: summary.read_count,
+            base_count: summary.base_count,
+            own_pair_count: summary.own_pair_count,
+            contaminant_pair_count: summary.contaminant_pair_count,
+            own_base_count: summary.own_base_count,
+            contaminant_base_count: summary.contaminant_base_count,
+            n_base_count: summary.n_base_count,
+        })
+    }
+}
+
+fn build_final_bgzf_writer(file: File) -> Result<bgzf::io::Writer<File>, Diagnostic> {
+    let level = bgzf::io::writer::CompressionLevel::new(FASTQ_GZIP_COMPRESSION_LEVEL)
+        .ok_or_else(|| invariant("write_final_paired_fastq", "invalid fixed gzip level"))?;
+    Ok(bgzf::io::writer::Builder::default()
+        .set_compression_level(level)
+        .build_from_writer(file))
+}
+
+fn maybe_inject_final_r2_failure() -> Result<(), Diagnostic> {
+    #[cfg(test)]
+    if FORCE_FINAL_R2_FAILURE.replace(false) {
+        return Err(invariant(
+            "write_final_paired_fastq",
+            "injected R2 publication failure",
+        ));
+    }
+    Ok(())
+}
+
 /// Publica la única pareja FASTQ PE posterior al demultiplexado para una
-/// biblioteca. Las parejas se consumen tras escribir R1/R2: nunca se genera
-/// una copia limpia ni un fichero de procedencia.
+/// biblioteca a partir de una colección ya reunida. La vía en flujo de
+/// `FinalPairedFastqStream` es la que usa la ejecución; esta forma conserva la
+/// interfaz por colección para las pruebas y para llamadores que ya la tienen.
 pub fn write_final_paired_fastq(
     workspace: &mut ExecutionWorkspace,
     event_id: &str,
@@ -230,58 +426,11 @@ pub fn write_final_paired_fastq(
     library_id: &LibraryId,
     pairs: Vec<DemultiplexedPair<ObservedPair>>,
 ) -> Result<FinalPairedFastqPublication, Diagnostic> {
-    let (r1_path, r2_path) = paired_fastq_relative_paths(event_id, individual_id);
-    let summary = summarize_final_pairs(&pairs)?;
-    let r1 = write_final_mate(
-        workspace,
-        &format!("fastq-{}-r1", library_id.as_str()),
-        &r1_path,
-        event_id,
-        library_id,
-        &pairs,
-        TechnicalMate::R1,
-    )?;
-    let r2 = match write_final_mate(
-        workspace,
-        &format!("fastq-{}-r2", library_id.as_str()),
-        &r2_path,
-        event_id,
-        library_id,
-        &pairs,
-        TechnicalMate::R2,
-    ) {
-        Ok(artifact) => artifact,
-        Err(error) => {
-            workspace.discard_last_artifact(&r1)?;
-            return Err(error);
-        }
-    };
-    if let Err(error) = validate_final_paired_fastq(
-        &workspace.root().join(&r1_path),
-        &r1,
-        &workspace.root().join(&r2_path),
-        &r2,
-    )
-    .and(maybe_inject_final_pair_validation_failure())
-    {
-        // R1/R2 son una única salida lógica: una falla conjunta no puede
-        // dejar artefactos ni catálogo parciales en el provisional.
-        workspace.discard_last_artifact(&r2)?;
-        workspace.discard_last_artifact(&r1)?;
-        return Err(invariant("write_final_paired_fastq", &error.to_string()));
+    let mut stream = FinalPairedFastqStream::open(workspace, event_id, individual_id, library_id)?;
+    for pair in pairs {
+        stream.write_pair(pair)?;
     }
-    Ok(FinalPairedFastqPublication {
-        r1,
-        r2,
-        pair_count: summary.pair_count,
-        read_count: summary.read_count,
-        base_count: summary.base_count,
-        own_pair_count: summary.own_pair_count,
-        contaminant_pair_count: summary.contaminant_pair_count,
-        own_base_count: summary.own_base_count,
-        contaminant_base_count: summary.contaminant_base_count,
-        n_base_count: summary.n_base_count,
-    })
+    stream.finish(workspace)
 }
 
 fn maybe_inject_final_pair_validation_failure()
@@ -307,54 +456,6 @@ struct FinalPairSummary {
     own_base_count: u64,
     contaminant_base_count: u64,
     n_base_count: u64,
-}
-
-fn write_final_mate(
-    workspace: &mut ExecutionWorkspace,
-    artifact_id: &str,
-    relative_path: &Path,
-    event_id: &str,
-    library_id: &LibraryId,
-    pairs: &[DemultiplexedPair<ObservedPair>],
-    mate: TechnicalMate,
-) -> Result<ArtifactRecord, Diagnostic> {
-    #[cfg(test)]
-    if mate == TechnicalMate::R2 && FORCE_FINAL_R2_FAILURE.replace(false) {
-        return Err(invariant(
-            "write_final_paired_fastq",
-            "injected R2 publication failure",
-        ));
-    }
-    let path = relative_path.to_owned();
-    workspace.write_streamed_artifact_with_validation(
-        artifact_id,
-        FASTQ_ARTIFACT_KIND,
-        relative_path,
-        |file| {
-            let level = bgzf::io::writer::CompressionLevel::new(FASTQ_GZIP_COMPRESSION_LEVEL)
-                .ok_or_else(|| invariant("write_final_paired_fastq", "invalid fixed gzip level"))?;
-            let mut compressed = bgzf::io::writer::Builder::default()
-                .set_compression_level(level)
-                .build_from_writer(file);
-            for pair in pairs {
-                if pair.final_library_id() != library_id {
-                    return Err(invariant(
-                        "write_final_paired_fastq",
-                        "pair belongs to a different final library",
-                    ));
-                }
-                write_final_record(&mut compressed, pair, mate, event_id, library_id)?;
-            }
-            compressed
-                .finish()
-                .map_err(|error| io_error(&path, "finish_final_fastq_gzip", error))?;
-            Ok(())
-        },
-        |temporary| {
-            crate::fastq_validation::validate_final_fastq_mate(temporary, mate)
-                .map_err(|error| invariant("write_final_paired_fastq", &error.to_string()))
-        },
-    )
 }
 
 fn write_final_record(
@@ -397,11 +498,13 @@ fn write_final_record(
         .map_err(|error| io_error(Path::new("final-fastq"), "write_quality", error))
 }
 
-fn summarize_final_pairs(
-    pairs: &[DemultiplexedPair<ObservedPair>],
-) -> Result<FinalPairSummary, Diagnostic> {
-    let mut summary = FinalPairSummary::default();
-    for pair in pairs {
+/// Suma una pareja al resumen agregado de la biblioteca. Se acumula al pasar,
+/// de modo que los contadores no exigen tener todas las parejas a la vez.
+fn accumulate_final_pair(
+    summary: &mut FinalPairSummary,
+    pair: &DemultiplexedPair<ObservedPair>,
+) -> Result<(), Diagnostic> {
+    {
         let r1_bases = u64::try_from(pair.payload().r1().sequence().len())
             .map_err(|_| invariant("write_final_paired_fastq", "read length overflows u64"))?;
         let r2_bases = u64::try_from(pair.payload().r2().sequence().len())
@@ -465,7 +568,7 @@ fn summarize_final_pairs(
             )
             .ok_or_else(|| invariant("write_final_paired_fastq", "N base count overflows u64"))?;
     }
-    Ok(summary)
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -781,7 +884,7 @@ mod tests {
 
     use super::validate_temporary_fastq;
     use super::{
-        FORCE_FINAL_PAIR_VALIDATION_FAILURE, FORCE_FINAL_R2_FAILURE,
+        FORCE_FINAL_PAIR_VALIDATION_FAILURE, FORCE_FINAL_R2_FAILURE, FinalPairedFastqStream,
         ILLUMINA_SE_MINIMAL_READ_LENGTH, LibraryId, compose_template_id, write_final_paired_fastq,
     };
     use crate::demultiplexing::DemultiplexedPair;
@@ -1044,5 +1147,39 @@ mod tests {
             );
             fs::remove_dir_all(root).expect("cleanup");
         }
+    }
+
+    #[test]
+    fn an_abandoned_paired_stream_publishes_nothing() {
+        let root = temporary("abandoned-stream");
+        fs::create_dir(&root).expect("root");
+        let destination = root.join("published");
+        let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
+        let library_id = LibraryId::parse("library-abandoned", "test").expect("library ID");
+        let stream = FinalPairedFastqStream::open(
+            &mut workspace,
+            "event-abandoned",
+            "sample-abandoned",
+            &library_id,
+        )
+        .expect("open the paired stream");
+        assert_eq!(stream.library_id(), &library_id);
+        // Los dos mates quedan abiertos a la vez: es lo que permite escribir
+        // cada pareja al pasar en lugar de reunirlas todas antes.
+        drop(stream);
+
+        assert!(
+            workspace.artifacts().is_empty(),
+            "an abandoned stream must not catalog a mate"
+        );
+        let directory = workspace.root().join("outputs/fastq/event-abandoned");
+        assert!(
+            fs::read_dir(&directory)
+                .expect("artifact directory")
+                .next()
+                .is_none(),
+            "an abandoned stream must not leave a temporary"
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }

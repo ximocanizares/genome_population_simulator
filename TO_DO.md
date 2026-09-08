@@ -118,6 +118,52 @@ derivada de tomate de 500.000 bases en trece contigs, sobre cuatro núcleos.
     Conviene medir cada cambio de rendimiento con al menos dos configuraciones,
     una neutra y otra con errores, quimeras, *index hopping* y contaminación.
 
+## Memoria del demultiplexado y la escritura FASTQ
+
+Medido el 8 de septiembre de 2026 con la referencia reducida de tomate de
+500.000 bases, sobre cuatro núcleos.
+
+| Ensayo | Antes | Después |
+|---|---:|---:|
+| 4 individuos, 16x, PE neutro | 202 MB | 100 MB |
+| 4 individuos, 16x, con artefactos | 206 MB | 103 MB |
+| 20 individuos, 30x, PE neutro | 1.615 MB | 468 MB |
+
+- [x] **Resuelto.** La ejecución acumulaba todas las parejas de todas las
+  bibliotecas antes de demultiplexar, de modo que el pico crecía con la
+  cobertura: cada pareja retenida costaba unos 1,5 kB y el ensayo de 20
+  individuos a 30x llegaba a 1.615 MB. Ahora los FASTQ R1 y R2 de todas las
+  bibliotecas se mantienen abiertos a la vez y cada pareja se escribe en cuanto
+  se conoce su biblioteca final, sin conservarla. El pico bajó un 71 % y el
+  tiempo de CPU un 20 % (81,8 a 65,8 segundos). Los artefactos publicados
+  quedan idénticos byte a byte, comprobado sobre los 173 MB y las veinte
+  bibliotecas del ensayo grande, y también con errores de secuenciación,
+  quimeras, *index hopping* y contaminación activos.
+  - Lo que lo hacía posible ya estaba en el diseño: el destino de una pareja
+    tras el *index hopping* depende solo de su biblioteca e instancia
+    anteriores al salto, nunca de las demás parejas. Por eso el demultiplexado
+    puede resolverse pareja a pareja sin cambiar ningún sorteo.
+  - `ExecutionWorkspace` necesitó un artefacto en flujo con vida propia
+    (`begin_streamed_artifact` / `finish_streamed_artifact`), porque la vía
+    anterior abría, validaba y publicaba en una sola llamada y no admitía dos
+    salidas simultáneas. Las garantías se conservan: el validador sigue
+    recibiendo el temporal, nada entra en el catálogo antes de renombrarse y
+    abandonar un flujo elimina su temporal.
+  - Al variar solo la cobertura, el pico dejó de moverse: 96,2 / 96,3 / 99,7 MB
+    para 4 individuos a 4x, 8x y 16x, donde antes eran 96,4 / 119,0 / 202,1 MB.
+
+- [ ] El pico restante todavía crece con la cobertura, aunque mucho más
+  despacio. La primera pasada conserva las claves PH de todas las parejas de
+  todas las bibliotecas (`CleanLibraryPairs`) para poder planificar la
+  contaminación biológica antes de materializar. Con 20 individuos son 190 MB a
+  8x, 279 MB a 15x y 468 MB a 30x: unos 12,6 MB por unidad de cobertura sobre
+  un término fijo de unos 90 MB, es decir del orden de 380 bytes por clave
+  retenida, que es lo que ocupan dos identificadores de texto.
+  - Es el siguiente candidato si hace falta bajar más. Reducirlo exige decidir
+    si el plan de contaminación puede formarse sin tener a la vez las claves de
+    todas las bibliotecas, o si basta con representar la clave de forma
+    compacta en lugar de dos cadenas.
+
 ## Memoria de la referencia
 
 Medido el 5 de septiembre de 2026 sobre el tomate de 759 MB y sobre genomas

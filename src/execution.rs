@@ -24,7 +24,7 @@ use crate::event_manifest::{
     EventManifestErrorQuality, EventManifestFinalFastqSummary, EventManifestReference,
     event_manifest_bytes, event_manifest_relative_path, validate_event_manifest_bytes,
 };
-use crate::fastq_output::write_final_paired_fastq;
+use crate::fastq_output::FinalPairedFastqStream;
 use crate::fastq_validation::F4CoverageReport;
 use crate::identity::{ReferenceId, derive_execution_id};
 use crate::initial_individual_integration::IncompatibleGenotypeAuthorization;
@@ -779,8 +779,38 @@ fn publish_technical_event(
         })
     })?;
     let mut error_quality = ErrorQualityAccumulator::default();
-    let mut post_contamination = Vec::new();
     let mut biological_manifest = Vec::new();
+    // El demultiplexado y la escritura final se preparan antes de generar: la
+    // biblioteca final de una pareja depende solo de su biblioteca e instancia
+    // anteriores al salto, de modo que cada pareja puede clasificarse y
+    // escribirse en cuanto existe. Así el pico no crece con la cobertura.
+    let mut demultiplexer = Demultiplexer::new(
+        effective.reproducibility().root_seed(),
+        event.event_id().clone(),
+        event.index_hopping_rate(),
+        demultiplexing_libraries,
+    )
+    .map_err(|error| {
+        Box::new(TechnicalEventAssemblyFailure {
+            cause: technical_event_error("demultiplexing", format!("{error:?}")),
+            link: None,
+        })
+    })?;
+    let mut streams: BTreeMap<crate::identity::LibraryId, FinalPairedFastqStream> = BTreeMap::new();
+    for library in &libraries {
+        let individual = individuals
+            .get(library.individual_id())
+            .expect("selected above")
+            .0;
+        let stream = FinalPairedFastqStream::open(
+            workspace,
+            event.event_id().as_str(),
+            individual.id().as_str(),
+            library.library_id(),
+        )
+        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        streams.insert(library.library_id().clone(), stream);
+    }
     // Las parejas que aporta una donante se conocen antes de materializar: el
     // plan ya dice cuál sustituye a cuál. Se agrupan por individua para recorrer
     // cada serie una sola vez, en lugar de recorrerla entera por cada pareja
@@ -868,14 +898,17 @@ fn publish_technical_event(
                     let pre_hop_instance_id = materialized.pre_hop_instance_id().clone();
                     let is_contaminant = materialized.is_contaminant();
                     let observed = materialized.into_payload().into_observed();
-                    post_contamination.push(PostContaminationPair::new(
-                        recipient_library_id,
-                        pre_hop_instance_id,
-                        udi,
-                        is_contaminant,
-                        observed,
-                    ));
-                    Ok(())
+                    write_demultiplexed_pair(
+                        &mut demultiplexer,
+                        &mut streams,
+                        PostContaminationPair::new(
+                            recipient_library_id,
+                            pre_hop_instance_id,
+                            udi,
+                            is_contaminant,
+                            observed,
+                        ),
+                    )
                 },
             )
             .map_err(|error| {
@@ -943,37 +976,21 @@ fn publish_technical_event(
                         link: None,
                     })
                 })?;
-            post_contamination.push(PostContaminationPair::new(
-                clean.library_id().clone(),
-                key.pre_hop_instance_id().clone(),
-                udi.clone(),
-                false,
-                transformed.into_observed(),
-            ));
+            write_demultiplexed_pair(
+                &mut demultiplexer,
+                &mut streams,
+                PostContaminationPair::new(
+                    clean.library_id().clone(),
+                    key.pre_hop_instance_id().clone(),
+                    udi.clone(),
+                    false,
+                    transformed.into_observed(),
+                ),
+            )
+            .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         }
     }
-    let mut demultiplexer = Demultiplexer::new(
-        effective.reproducibility().root_seed(),
-        event.event_id().clone(),
-        event.index_hopping_rate(),
-        demultiplexing_libraries,
-    )
-    .map_err(|error| {
-        Box::new(TechnicalEventAssemblyFailure {
-            cause: technical_event_error("demultiplexing", format!("{error:?}")),
-            link: None,
-        })
-    })?;
-    let demultiplexed = demultiplexer
-        .demultiplex(post_contamination)
-        .map_err(|error| {
-            Box::new(TechnicalEventAssemblyFailure {
-                cause: technical_event_error("demultiplexing", format!("{error:?}")),
-                link: None,
-            })
-        })?;
-    let demultiplexing = EventManifestDemultiplexing::from_report(demultiplexed.report().clone());
-    let mut final_libraries = demultiplexed.into_final_libraries();
+    let demultiplexing = EventManifestDemultiplexing::from_report(demultiplexer.take_report());
     let mut outputs = Vec::with_capacity(libraries.len() * 2);
     let mut coverage = Vec::with_capacity(libraries.len());
     let mut summaries = Vec::with_capacity(libraries.len());
@@ -982,22 +999,15 @@ fn publish_technical_event(
             .get(library.individual_id())
             .expect("selected above")
             .0;
-        let pairs = final_libraries
-            .remove(library.library_id())
-            .ok_or_else(|| {
-                Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error("demultiplexing", "biblioteca final ausente"),
-                    link: None,
-                })
-            })?;
-        let publication = write_final_paired_fastq(
-            workspace,
-            event.event_id().as_str(),
-            individual.id().as_str(),
-            library.library_id(),
-            pairs,
-        )
-        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        let stream = streams.remove(library.library_id()).ok_or_else(|| {
+            Box::new(TechnicalEventAssemblyFailure {
+                cause: technical_event_error("demultiplexing", "biblioteca final ausente"),
+                link: None,
+            })
+        })?;
+        let publication = stream
+            .finish(workspace)
+            .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         let basic_bases = clean_libraries
             .iter()
             .find(|clean| clean.library_id() == library.library_id())
@@ -1079,6 +1089,29 @@ fn publish_technical_event(
         &biological_manifest,
     )
     .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))
+}
+
+/// Clasifica una pareja y la escribe en el FASTQ de su biblioteca final.
+///
+/// Una pareja descartada por UDI ajeno a la tanda no se escribe: solo queda
+/// contada en los agregados del demultiplexado, igual que en la vía anterior.
+fn write_demultiplexed_pair(
+    demultiplexer: &mut Demultiplexer,
+    streams: &mut BTreeMap<crate::identity::LibraryId, FinalPairedFastqStream>,
+    pair: PostContaminationPair<crate::error_quality::ObservedPair>,
+) -> Result<(), Diagnostic> {
+    let Some(demultiplexed) = demultiplexer
+        .accept(pair)
+        .map_err(|error| technical_event_error("demultiplexing", format!("{error:?}")))?
+    else {
+        return Ok(());
+    };
+    streams
+        .get_mut(demultiplexed.final_library_id())
+        .ok_or_else(|| {
+            technical_event_error("demultiplexing", "biblioteca final sin flujo abierto")
+        })?
+        .write_pair(demultiplexed)
 }
 
 fn paired_sampler<'a>(

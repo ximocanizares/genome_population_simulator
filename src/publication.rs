@@ -29,6 +29,10 @@ pub struct ExecutionWorkspace {
     payload: PathBuf,
     artifacts: Vec<ArtifactRecord>,
     manifest_written: bool,
+    /// Identificadores y rutas de artefactos abiertos en flujo y todavía sin
+    /// publicar. El catálogo no los contiene aún, de modo que sin este
+    /// registro dos salidas simultáneas podrían reclamar el mismo nombre.
+    reserved: BTreeSet<(String, String)>,
 }
 
 impl ExecutionWorkspace {
@@ -77,6 +81,7 @@ impl ExecutionWorkspace {
                         provisional,
                         artifacts: Vec::new(),
                         manifest_written: false,
+                        reserved: BTreeSet::new(),
                     });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -169,6 +174,84 @@ impl ExecutionWorkspace {
             let _ = fs::remove_file(&temporary);
         }
         let record = result?;
+        self.artifacts.push(record.clone());
+        Ok(record)
+    }
+
+    /// Abre un artefacto cuyo temporal permanece disponible entre llamadas.
+    ///
+    /// A diferencia de `write_streamed_artifact_with_validation`, que abre,
+    /// valida y publica en una sola llamada, esto permite tener varias salidas
+    /// escribiéndose a la vez. Es lo que necesitan los FASTQ finales: R1 y R2
+    /// de todas las bibliotecas se llenan en un único recorrido de las parejas,
+    /// de modo que ninguna pareja tiene que conservarse en memoria.
+    ///
+    /// El artefacto no entra en el catálogo hasta `finish_streamed_artifact`.
+    /// Abandonar el handle elimina su temporal y no publica nada.
+    pub(crate) fn begin_streamed_artifact(
+        &mut self,
+        id: &str,
+        kind: &str,
+        relative_path: &Path,
+    ) -> Result<OpenArtifact, Diagnostic> {
+        self.check_new_artifact(id, relative_path)?;
+        let final_path = self.payload.join(relative_path);
+        let parent = final_path
+            .parent()
+            .ok_or_else(|| invalid_state(id, "artifact path has no provisional parent"))?;
+        fs::create_dir_all(parent).map_err(|error| io_error(parent, "create_dir_all", error))?;
+        let temporary = temporary_path(parent, &final_path, id)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| io_error(&temporary, "create_artifact_temporary", error))?;
+        let path_text = relative_path.to_string_lossy().replace('\\', "/");
+        self.reserved.insert((id.to_owned(), path_text));
+        Ok(OpenArtifact {
+            id: id.to_owned(),
+            kind: kind.to_owned(),
+            relative_path: relative_path.to_path_buf(),
+            final_path,
+            temporary,
+            file: Some(file),
+            published: false,
+        })
+    }
+
+    /// Cierra un artefacto abierto en flujo con las mismas comprobaciones que
+    /// la vía de una sola llamada: validar el temporal cerrado, identificarlo,
+    /// verificar la identidad y solo entonces hacerlo visible y catalogarlo.
+    pub(crate) fn finish_streamed_artifact(
+        &mut self,
+        mut artifact: OpenArtifact,
+        validate: impl FnOnce(&Path) -> Result<(), Diagnostic>,
+    ) -> Result<ArtifactRecord, Diagnostic> {
+        if self.manifest_written {
+            return Err(invalid_state(
+                &artifact.id,
+                "the artifact catalog is already closed",
+            ));
+        }
+        let result = (|| {
+            let mut file = artifact
+                .file
+                .take()
+                .ok_or_else(|| invalid_state(&artifact.id, "artifact stream is already closed"))?;
+            file.flush()
+                .map_err(|error| io_error(&artifact.temporary, "flush", error))?;
+            drop(file);
+            validate(&artifact.temporary)?;
+            let identity = identify_file(&artifact.temporary, &artifact.relative_path)?;
+            verify_identity(&artifact.temporary, &identity)?;
+            fs::rename(&artifact.temporary, &artifact.final_path)
+                .map_err(|error| io_error(&artifact.final_path, "finalize_artifact", error))?;
+            ArtifactRecord::from_identity(&artifact.id, &artifact.kind, &identity)
+        })();
+        let path_text = artifact.relative_path.to_string_lossy().replace('\\', "/");
+        self.reserved.remove(&(artifact.id.clone(), path_text));
+        let record = result?;
+        artifact.published = true;
         self.artifacts.push(record.clone());
         Ok(record)
     }
@@ -352,6 +435,16 @@ impl ExecutionWorkspace {
                 "artifact ID or path is already cataloged",
             ));
         }
+        if self
+            .reserved
+            .iter()
+            .any(|(held_id, held_path)| held_id == id || *held_path == path_text)
+        {
+            return Err(invalid_state(
+                id,
+                "artifact ID or path is already reserved by an open stream",
+            ));
+        }
         if self.manifest_written {
             return Err(invalid_state(id, "the artifact catalog is already closed"));
         }
@@ -481,6 +574,47 @@ impl ExecutionWorkspace {
             manifest_path,
             manifest_bytes,
         )
+    }
+}
+
+/// Artefacto en curso cuyo temporal vive entre llamadas.
+///
+/// Solo `ExecutionWorkspace::finish_streamed_artifact` lo publica. Si el
+/// handle se destruye antes —por un error o un desenrollado— el temporal se
+/// elimina, de modo que un fallo a mitad de escritura no deja restos en el
+/// provisional ni un artefacto parcial en el catálogo.
+#[derive(Debug)]
+pub(crate) struct OpenArtifact {
+    id: String,
+    kind: String,
+    relative_path: PathBuf,
+    final_path: PathBuf,
+    temporary: PathBuf,
+    file: Option<File>,
+    published: bool,
+}
+
+impl OpenArtifact {
+    /// Cede el fichero para envolverlo en un codificador. El handle queda sin
+    /// fichero hasta que `restore` lo devuelva, de manera que un cierre
+    /// olvidado se detecta en `finish_streamed_artifact`.
+    pub(crate) fn take_file(&mut self) -> Result<File, Diagnostic> {
+        self.file
+            .take()
+            .ok_or_else(|| invalid_state(&self.id, "artifact stream has no open file"))
+    }
+
+    pub(crate) fn restore_file(&mut self, file: File) {
+        self.file = Some(file);
+    }
+}
+
+impl Drop for OpenArtifact {
+    fn drop(&mut self) {
+        if !self.published {
+            self.file = None;
+            let _ = fs::remove_file(&self.temporary);
+        }
     }
 }
 
@@ -1066,5 +1200,56 @@ i5 = "GGGGTTTT"
         .expect("header");
         build_effective_config(&crate::adapters::parse_declared_config(admitted).expect("declared"))
             .expect("effective")
+    }
+
+    #[test]
+    fn an_open_stream_reserves_its_name_and_leaves_no_temporary_when_abandoned() {
+        let root = temporary("open-artifact");
+        fs::create_dir(&root).expect("root");
+        let destination = root.join("published");
+        let mut workspace = ExecutionWorkspace::create(&destination).expect("workspace");
+        let path = Path::new("outputs/stream.txt");
+        let mut open = workspace
+            .begin_streamed_artifact("stream", "text", path)
+            .expect("open the artifact");
+
+        // Mientras esté abierto, su nombre y su ruta están tomados aunque el
+        // catálogo todavía no lo contenga.
+        let repeated_id =
+            workspace.begin_streamed_artifact("stream", "text", Path::new("other.txt"));
+        assert!(repeated_id.is_err(), "a repeated ID must be rejected");
+        let repeated_path = workspace.begin_streamed_artifact("other", "text", path);
+        assert!(repeated_path.is_err(), "a repeated path must be rejected");
+        assert!(workspace.artifacts().is_empty());
+
+        // Un segundo artefacto distinto sí puede convivir con el primero.
+        let mut second = workspace
+            .begin_streamed_artifact("second", "text", Path::new("outputs/second.txt"))
+            .expect("open a second artifact");
+        let mut file = second.take_file().expect("second file");
+        file.write_all(b"second\n").expect("write");
+        second.restore_file(file);
+        let record = workspace
+            .finish_streamed_artifact(second, |_| Ok(()))
+            .expect("publish the second artifact");
+        assert_eq!(workspace.artifacts(), &[record]);
+
+        // Abandonar el primero elimina su temporal y no publica nada.
+        let mut file = open.take_file().expect("first file");
+        file.write_all(b"abandoned\n").expect("write");
+        open.restore_file(file);
+        drop(open);
+        assert!(!workspace.root().join(path).exists());
+        let remaining = fs::read_dir(workspace.root().join("outputs"))
+            .expect("outputs directory")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            remaining,
+            vec![std::ffi::OsString::from("second.txt")],
+            "only the published artifact may remain"
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }

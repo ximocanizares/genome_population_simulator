@@ -218,6 +218,19 @@ pub struct DemultiplexingReport {
 
 impl DemultiplexingReport {
     #[must_use]
+    const fn empty(index_hopping_rate: f64) -> Self {
+        Self {
+            index_hopping_rate,
+            reassigned_pairs: 0,
+            discarded_pairs: 0,
+            unassigned_pairs: 0,
+            reassigned_by_sample: Vec::new(),
+            discarded_by_sample: Vec::new(),
+            unassigned_by_sample: Vec::new(),
+        }
+    }
+
+    #[must_use]
     pub const fn index_hopping_rate(&self) -> f64 {
         self.index_hopping_rate
     }
@@ -305,6 +318,9 @@ pub struct Demultiplexer {
     libraries: BTreeMap<LibraryId, Udi>,
     udi_libraries: BTreeMap<Udi, LibraryId>,
     identity_deriver: F4TechnicalIdentityDeriver,
+    /// Agregados de la tanda en curso. Vive en el demultiplexador para que las
+    /// parejas puedan entrar de una en una, sin reunirlas antes.
+    report: DemultiplexingReport,
 }
 
 impl Demultiplexer {
@@ -348,12 +364,127 @@ impl Demultiplexer {
             libraries: by_library,
             udi_libraries: by_udi,
             identity_deriver: F4TechnicalIdentityDeriver::new(root_seed, event_id),
+            report: DemultiplexingReport::empty(index_hopping_rate),
         })
     }
 
-    /// Evalúa cada entrada una vez contra la misma instantánea post-biológica.
+    /// Clasifica una pareja contra la instantánea post-biológica.
+    ///
     /// Cada subsemilla depende de la biblioteca e instancia anteriores al
-    /// salto, de manera que el orden de entrada no cambia ningún sorteo.
+    /// salto, de manera que el orden de entrada no cambia ningún sorteo. Por
+    /// eso las parejas pueden entrar de una en una sin reunirlas antes: el
+    /// resultado de cada una es independiente de las demás. Devuelve `None`
+    /// cuando el UDI observado no pertenece a la tanda y la pareja se descarta.
+    pub fn accept<T>(
+        &mut self,
+        pair: PostContaminationPair<T>,
+    ) -> Result<Option<DemultiplexedPair<T>>, DemultiplexingError> {
+        let pre_hop_udi = self
+            .libraries
+            .get(&pair.pre_hop_library_id)
+            .ok_or(DemultiplexingError::UnknownPreHopLibrary)?;
+        let instance = F4IndexHopInstance::parse(pair.pre_hop_instance_id.as_str())
+            .map_err(DemultiplexingError::TechnicalIdentity)?;
+        let Some(mut final_library_id) = self.udi_libraries.get(&pair.observed_udi).cloned() else {
+            self.report.discarded_pairs = checked_increment(self.report.discarded_pairs)?;
+            self.report.unassigned_pairs = checked_increment(self.report.unassigned_pairs)?;
+            record_aggregate(
+                &mut self.report.discarded_by_sample,
+                &pair.pre_hop_library_id,
+                None,
+                DemultiplexingCause::UnrecognizedUdi,
+            )?;
+            record_aggregate(
+                &mut self.report.unassigned_by_sample,
+                &pair.pre_hop_library_id,
+                None,
+                DemultiplexingCause::UnrecognizedUdi,
+            )?;
+            return Ok(None);
+        };
+        if &pair.observed_udi != pre_hop_udi {
+            return Err(DemultiplexingError::InvalidUdi);
+        }
+        if self.index_hopping_rate > 0.0 {
+            let decision = F4TechnicalDecision::index_hop_bernoulli(
+                &self.event_id,
+                &pair.pre_hop_library_id,
+                instance,
+            );
+            let mut rng = derive_f4_technical_subseed(self.root_seed, decision)
+                .map_err(DemultiplexingError::TechnicalIdentity)?
+                .local_rng();
+            if f4_bernoulli(&mut rng, self.index_hopping_rate)
+                .map_err(DemultiplexingError::RandomSampling)?
+            {
+                let destination = F4TechnicalDecision::index_hop_destination(
+                    &self.event_id,
+                    &pair.pre_hop_library_id,
+                    instance,
+                );
+                let mut destination_rng = derive_f4_technical_subseed(self.root_seed, destination)
+                    .map_err(DemultiplexingError::TechnicalIdentity)?
+                    .local_rng();
+                let destination_index = usize::try_from(
+                    f4_uniform_index(
+                        &mut destination_rng,
+                        u64::try_from(self.libraries.len() - 1)
+                            .map_err(|_| DemultiplexingError::CounterOverflow)?,
+                    )
+                    .map_err(DemultiplexingError::RandomSampling)?,
+                )
+                .map_err(|_| DemultiplexingError::CounterOverflow)?;
+                final_library_id = self
+                    .libraries
+                    .keys()
+                    .filter(|library_id| *library_id != &pair.pre_hop_library_id)
+                    .nth(destination_index)
+                    .cloned()
+                    .ok_or(DemultiplexingError::MissingAlternativeLibrary)?;
+                self.report.reassigned_pairs = checked_increment(self.report.reassigned_pairs)?;
+                record_aggregate(
+                    &mut self.report.reassigned_by_sample,
+                    &pair.pre_hop_library_id,
+                    Some(&final_library_id),
+                    DemultiplexingCause::IndexHopping,
+                )?;
+            }
+        }
+        let final_udi = self
+            .libraries
+            .get(&final_library_id)
+            .cloned()
+            .ok_or(DemultiplexingError::UnknownPreHopLibrary)?;
+        let technical_pair_id = self
+            .identity_deriver
+            .derive_technical_pair(&final_library_id, &pair.pre_hop_instance_id)
+            .map_err(DemultiplexingError::TechnicalIdentity)?;
+        Ok(Some(DemultiplexedPair {
+            final_library_id,
+            final_udi,
+            technical_identity: TechnicalPairIdentity::new(technical_pair_id),
+            is_contaminant: pair.is_contaminant,
+            payload: pair.payload,
+        }))
+    }
+
+    /// Bibliotecas declaradas en la tanda, en el orden en que se catalogan.
+    pub fn library_ids(&self) -> impl Iterator<Item = &LibraryId> {
+        self.libraries.keys()
+    }
+
+    /// Entrega los agregados de la tanda y deja el demultiplexador listo para
+    /// otra. Solo el llamador que ya ha consumido todas las parejas lo llama.
+    #[must_use]
+    pub fn take_report(&mut self) -> DemultiplexingReport {
+        std::mem::replace(
+            &mut self.report,
+            DemultiplexingReport::empty(self.index_hopping_rate),
+        )
+    }
+
+    /// Evalúa una instantánea ya reunida. Equivale a pasar sus parejas por
+    /// `accept` en orden; la ejecución usa la vía en flujo para no conservarlas.
     pub fn demultiplex<T>(
         &mut self,
         pairs: Vec<PostContaminationPair<T>>,
@@ -364,113 +495,17 @@ impl Demultiplexer {
             .cloned()
             .map(|library_id| (library_id, Vec::new()))
             .collect::<BTreeMap<_, _>>();
-        let mut report = DemultiplexingReport {
-            index_hopping_rate: self.index_hopping_rate,
-            reassigned_pairs: 0,
-            discarded_pairs: 0,
-            unassigned_pairs: 0,
-            reassigned_by_sample: Vec::new(),
-            discarded_by_sample: Vec::new(),
-            unassigned_by_sample: Vec::new(),
-        };
-
         for pair in pairs {
-            let pre_hop_udi = self
-                .libraries
-                .get(&pair.pre_hop_library_id)
-                .ok_or(DemultiplexingError::UnknownPreHopLibrary)?;
-            let instance = F4IndexHopInstance::parse(pair.pre_hop_instance_id.as_str())
-                .map_err(DemultiplexingError::TechnicalIdentity)?;
-            let Some(mut final_library_id) = self.udi_libraries.get(&pair.observed_udi).cloned()
-            else {
-                report.discarded_pairs = checked_increment(report.discarded_pairs)?;
-                report.unassigned_pairs = checked_increment(report.unassigned_pairs)?;
-                record_aggregate(
-                    &mut report.discarded_by_sample,
-                    &pair.pre_hop_library_id,
-                    None,
-                    DemultiplexingCause::UnrecognizedUdi,
-                )?;
-                record_aggregate(
-                    &mut report.unassigned_by_sample,
-                    &pair.pre_hop_library_id,
-                    None,
-                    DemultiplexingCause::UnrecognizedUdi,
-                )?;
-                continue;
-            };
-            if &pair.observed_udi != pre_hop_udi {
-                return Err(DemultiplexingError::InvalidUdi);
+            if let Some(demultiplexed) = self.accept(pair)? {
+                final_libraries
+                    .get_mut(&demultiplexed.final_library_id)
+                    .ok_or(DemultiplexingError::UnknownPreHopLibrary)?
+                    .push(demultiplexed);
             }
-            if self.index_hopping_rate > 0.0 {
-                let decision = F4TechnicalDecision::index_hop_bernoulli(
-                    &self.event_id,
-                    &pair.pre_hop_library_id,
-                    instance,
-                );
-                let mut rng = derive_f4_technical_subseed(self.root_seed, decision)
-                    .map_err(DemultiplexingError::TechnicalIdentity)?
-                    .local_rng();
-                if f4_bernoulli(&mut rng, self.index_hopping_rate)
-                    .map_err(DemultiplexingError::RandomSampling)?
-                {
-                    let destination = F4TechnicalDecision::index_hop_destination(
-                        &self.event_id,
-                        &pair.pre_hop_library_id,
-                        instance,
-                    );
-                    let mut destination_rng =
-                        derive_f4_technical_subseed(self.root_seed, destination)
-                            .map_err(DemultiplexingError::TechnicalIdentity)?
-                            .local_rng();
-                    let destination_index = usize::try_from(
-                        f4_uniform_index(
-                            &mut destination_rng,
-                            u64::try_from(self.libraries.len() - 1)
-                                .map_err(|_| DemultiplexingError::CounterOverflow)?,
-                        )
-                        .map_err(DemultiplexingError::RandomSampling)?,
-                    )
-                    .map_err(|_| DemultiplexingError::CounterOverflow)?;
-                    final_library_id = self
-                        .libraries
-                        .keys()
-                        .filter(|library_id| *library_id != &pair.pre_hop_library_id)
-                        .nth(destination_index)
-                        .cloned()
-                        .ok_or(DemultiplexingError::MissingAlternativeLibrary)?;
-                    report.reassigned_pairs = checked_increment(report.reassigned_pairs)?;
-                    record_aggregate(
-                        &mut report.reassigned_by_sample,
-                        &pair.pre_hop_library_id,
-                        Some(&final_library_id),
-                        DemultiplexingCause::IndexHopping,
-                    )?;
-                }
-            }
-            let final_udi = self
-                .libraries
-                .get(&final_library_id)
-                .cloned()
-                .ok_or(DemultiplexingError::UnknownPreHopLibrary)?;
-            let technical_pair_id = self
-                .identity_deriver
-                .derive_technical_pair(&final_library_id, &pair.pre_hop_instance_id)
-                .map_err(DemultiplexingError::TechnicalIdentity)?;
-            final_libraries
-                .get_mut(&final_library_id)
-                .ok_or(DemultiplexingError::UnknownPreHopLibrary)?
-                .push(DemultiplexedPair {
-                    final_library_id,
-                    final_udi,
-                    technical_identity: TechnicalPairIdentity::new(technical_pair_id),
-                    is_contaminant: pair.is_contaminant,
-                    payload: pair.payload,
-                });
         }
         Ok(DemultiplexingOutcome {
             final_libraries,
-            report,
+            report: self.take_report(),
         })
     }
 }
