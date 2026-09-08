@@ -4,6 +4,7 @@
 //! FASTA, la semántica de `alt_af`, sumas, IDs canónicos y hashes operativos se
 //! incorpora en los pasos consumidores posteriores.
 
+use std::borrow::Cow;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 use std::fmt;
@@ -373,14 +374,14 @@ impl PreparedReferenceIdentity {
         Ok(Self::from_sequences(reference.id().clone(), sequences))
     }
 
-    fn from_authoritative_fasta(reference_id: ReferenceId, fasta: &AuthoritativeFasta) -> Self {
+    fn from_authoritative_fasta(reference_id: ReferenceId, fasta: &AuthoritativeFasta<'_>) -> Self {
         let mut sequences = fasta.sequences.iter().collect::<Vec<_>>();
         sequences.sort_by_key(|(id, _)| fasta.ordinal(id));
         Self::from_sequences(
             reference_id,
             sequences
                 .into_iter()
-                .map(|(id, bases)| (id.as_str(), bases.as_slice())),
+                .map(|(id, bases)| (id.as_str(), bases.as_ref())),
         )
     }
 
@@ -659,11 +660,12 @@ pub fn prepare_population_snvs_from_reference(
     for sequence in reference.sequences() {
         fasta_sequences.insert(
             sequence.id().as_str().to_owned(),
-            sequence
-                .sequence()
-                .as_bytes()
-                .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?
-                .to_vec(),
+            Cow::Borrowed(
+                sequence
+                    .sequence()
+                    .as_bytes()
+                    .map_err(|_| PopulationSnvsPreparationError::BasesNotMaterialized)?,
+            ),
         );
     }
     let fasta = AuthoritativeFasta {
@@ -687,7 +689,7 @@ pub fn prepare_population_snvs_from_reference(
 fn prepare_population_snvs(
     table: &PopulationSnvsTsv,
     prepared_reference: &PreparedReferenceIdentity,
-    fasta: &AuthoritativeFasta,
+    fasta: &AuthoritativeFasta<'_>,
     tolerance: f64,
     allow_empty_matrix: bool,
 ) -> Result<PreparedPopulationSnvs, PopulationSnvsPreparationError> {
@@ -1846,11 +1848,16 @@ fn parse_snv_base(
     }
 }
 
-struct AuthoritativeFasta {
-    sequences: BTreeMap<String, Vec<u8>>,
+/// Bases del FASTA autoritativo indexadas por secuencia.
+///
+/// Se prestan cuando ya están en memoria dentro de una referencia y se poseen
+/// cuando proceden de leer un fichero. Copiarlas siempre duplicaría el genoma:
+/// con un cromosoma grande, ese duplicado marca el pico de la ejecución.
+struct AuthoritativeFasta<'a> {
+    sequences: BTreeMap<String, Cow<'a, [u8]>>,
     order: BTreeMap<String, usize>,
 }
-impl AuthoritativeFasta {
+impl AuthoritativeFasta<'_> {
     fn ordinal(&self, id: &str) -> usize {
         self.order.get(id).copied().unwrap_or(usize::MAX)
     }
@@ -1863,7 +1870,7 @@ fn append_digest_component(digest: &mut Sha256, bytes: &[u8]) {
 
 fn load_authoritative_fasta(
     reference: &ResolvedManifestReference,
-) -> Result<AuthoritativeFasta, PopulationSnvsPreparationError> {
+) -> Result<AuthoritativeFasta<'static>, PopulationSnvsPreparationError> {
     let bytes = fs::read(reference.fasta_path()).map_err(|error| {
         PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: error.to_string(),
@@ -1888,7 +1895,7 @@ fn load_authoritative_fasta(
             ) {
                 if previous.is_empty()
                     || records
-                        .insert(previous.clone(), std::mem::take(&mut bases))
+                        .insert(previous.clone(), Cow::Owned(std::mem::take(&mut bases)))
                         .is_some()
                 {
                     return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
@@ -1906,7 +1913,7 @@ fn load_authoritative_fasta(
             detail: "FASTA vacío".to_owned(),
         });
     };
-    if last.is_empty() || records.insert(last.clone(), bases).is_some() {
+    if last.is_empty() || records.insert(last.clone(), Cow::Owned(bases)).is_some() {
         return Err(PopulationSnvsPreparationError::AuthoritativeFasta {
             detail: "cabecera FASTA duplicada o vacía".to_owned(),
         });
@@ -2565,10 +2572,14 @@ impl std::error::Error for PopulationSnvsGenerationError {}
 
 /// Vista mínima de una referencia ya validada: identidad, orden FASTA y bases.
 /// No reinterpreta rutas ni crea una identidad alternativa.
-struct GenerationReference {
+/// Referencia desde la que se genera una matriz nueva.
+///
+/// Las bases se prestan cuando ya están en memoria: copiarlas duplicaría el
+/// genoma y marcaría el pico de la ejecución.
+struct GenerationReference<'a> {
     id: ReferenceId,
     prepared_identity: PreparedReferenceIdentity,
-    sequences: Vec<(SequenceId, Vec<u8>)>,
+    sequences: Vec<(SequenceId, Cow<'a, [u8]>)>,
 }
 
 /// Genera la vista activa de una matriz nueva desde una referencia F1 resuelta.
@@ -2598,7 +2609,7 @@ pub fn generate_population_snvs(
                         SequenceId::parse(id, "generated_population_snvs").map_err(|_| {
                             PopulationSnvsGenerationError::Reference("invalid sequence".into())
                         })?,
-                        bases,
+                        Cow::Owned(bases.into_owned()),
                     ))
                 })
                 .collect::<Result<_, _>>()?,
@@ -2640,7 +2651,7 @@ pub fn generate_population_snvs_from_reference_with_tolerance(
                     sequence
                         .sequence()
                         .as_bytes()
-                        .map(|bases| (sequence.id().clone(), bases.to_vec()))
+                        .map(|bases| (sequence.id().clone(), Cow::Borrowed(bases)))
                         .map_err(|_| PopulationSnvsGenerationError::BasesNotMaterialized)
                 })
                 .collect::<Result<_, _>>()?,
@@ -3043,7 +3054,7 @@ impl PartialOrd for SelectedGeneratedLocus {
 
 fn generated_locus_available_count(
     config: &PopulationSnvsGenerationConfig,
-    sequences: &[(SequenceId, Vec<u8>)],
+    sequences: &[(SequenceId, Cow<'_, [u8]>)],
 ) -> Result<u64, PopulationSnvsGenerationError> {
     let mut available = 0_u64;
     for (id, bases) in sequences {
@@ -3074,7 +3085,7 @@ fn generated_locus_available_count(
 /// versiones anteriores para una misma semilla.
 fn select_generated_loci(
     config: &PopulationSnvsGenerationConfig,
-    sequences: &[(SequenceId, Vec<u8>)],
+    sequences: &[(SequenceId, Cow<'_, [u8]>)],
     root_seed: RootSeed,
     reference_id: &str,
     requested: usize,
@@ -3300,7 +3311,7 @@ fn validate_frequency_spectrum(
 
 pub(crate) fn validate_generation_regions(
     config: &PopulationSnvsGenerationConfig,
-    sequences: &[(SequenceId, Vec<u8>)],
+    sequences: &[(SequenceId, Cow<'_, [u8]>)],
 ) -> Result<(), PopulationSnvsGenerationError> {
     let lengths = sequences
         .iter()
