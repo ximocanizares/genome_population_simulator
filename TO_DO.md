@@ -224,24 +224,70 @@ bases, sobre cuatro núcleos. La línea de partida es `ab33d05`.
     copiaban tres veces y ahora las sostienen a la vez la clave, el registro y
     el conjunto de la regeneración.
 
-- [ ] El pico sigue creciendo con la cobertura, ahora a 9,7 MB por unidad, pero
-  las claves PH ya no son el consumidor principal. Con el reparto de arriba, el
-  siguiente candidato es el registro de colisiones de F4.5: conserva el texto
-  de cada `TechnicalPairId` de todo el evento (21,0 MB a 8x, del orden de
-  80 MB a 30x) y ninguna otra estructura lo sostiene, de modo que no hay nada
-  que compartir. Tocarlo es tocar una garantía de identidad (DTC-039), así que
-  conviene tratarlo como trabajo propio y con su evidencia.
-  - El otro término que crece es `RegeneratedPairs`: retiene las parejas
-    transformadas de una biblioteca entera, unos 800 bytes por pareja, porque
-    las claves llegan en orden de identificador y no en el de generación.
-    Emitirlas en el orden de la serie exigiría cambiar el orden de escritura de
-    los FASTQ, que es parte de la identidad binaria.
-  - El plan de contaminación, además, clona la lista completa de candidatas de
-    todas las demás bibliotecas por cada receptora. Con el texto compartido ya
-    no asigna cadenas, pero sigue copiando 32 bytes por clave y por receptora,
-    lo que es cuadrático en número de individuos. Ordenar referencias en lugar
-    de clones lo evitaría sin cambiar la permutación, porque el criterio de
-    orden es el mismo.
+### El registro de colisiones de identidades técnicas
+
+Medido el 8 de septiembre de 2026 con la misma referencia reducida. La línea de
+partida es `14b07d7`.
+
+| Ensayo | Antes | Después | Δ |
+|---|---:|---:|---:|
+| 20 individuos, 8x | 161,0 MB | 145,8 MB | −9 % |
+| 20 individuos, 15x | 229,6 MB | 184,8 MB | −20 % |
+| 20 individuos, 30x | 374,7 MB | 284,8 MB | −24 % |
+
+- [x] **Resuelto.** El registro conservaba el texto completo de cada
+  identificador técnico del evento, y el de un `TechnicalPairId` no lo sostiene
+  nadie más: eran unos 46 bytes por pareja. Ahora retiene sus 128 bits en lugar
+  del texto. No es una aproximación: un ID automático es el prefijo de su clase
+  seguido del Base32 de esos 128 bits (DTC-039), de modo que bytes y texto se
+  determinan mutuamente y se detectan exactamente las mismas colisiones.
+  - DTC-039 exige detectar también las colisiones de los identificadores
+    aportados, que no tienen por qué seguir esa forma. Por eso hay dos
+    conjuntos: uno de digests y otro que conserva el texto de lo que no puede
+    proceder de una derivación. El riesgo de separarlos sería que la misma
+    identidad viviera en ambos y su colisión pasara inadvertida, y por eso la
+    clasificación es canónica y no ambigua: un texto con la forma derivada se
+    anota entre los derivados aunque llegue como aportado. Se comprueba
+    recodificando los bytes y exigiendo el texto exacto, lo que descarta
+    longitudes distintas, símbolos fuera del alfabeto y los dos bits de relleno
+    a uno. Hay una prueba dedicada a ese cruce.
+  - La tupla `(clase, 128 bits)` ocupa 17 bytes sin relleno, frente a los 24 de
+    la que llevaba un puntero compartido, así que los nodos del árbol también
+    encogen: el pico de montículo pasó de 148,1 a 114,7 MB, con el texto `TP_`
+    eliminado (22,8 MB) y los nodos de 32,1 a 23,0 MB.
+  - Los artefactos publicados quedan idénticos byte a byte en las
+    configuraciones medidas, incluida la que activa errores de secuenciación,
+    quimeras, *index hopping* y contaminación.
+
+- [ ] **Lo que no funcionó, y por qué importa.** Liberar antes de tiempo lo que
+  ya no se usa —el registro del materializador de contaminación en cuanto
+  termina su bucle, y el inventario de claves limpias antes de publicar,
+  quedándose solo con el recuento de parejas propias que la cobertura necesita—
+  no movió el pico: 285,3 MB frente a 283,8 MB a 30x, dentro del ruido. Se
+  revirtió.
+  - La causa está medida: el pico de montículo vivo es de 114,7 MB mientras el
+    RSS máximo es de 285 MB. Esa diferencia es del asignador, que no devuelve
+    las páginas al sistema, de modo que liberar antes reduce el montículo vivo
+    pero no el máximo de residente. Es la misma causa por la que el
+    `shrink_to_fit` sobre el inventario tampoco sirvió.
+  - Conclusión para el trabajo futuro de memoria en este proyecto: **no basta
+    con liberar antes; hay que dejar de pedir**. Solo los cambios que reducen
+    lo que se asigna —compartir, compactar o no retener— mueven el RSS.
+
+- [ ] Términos que aún crecen con la cobertura, por orden de tamaño:
+  - El texto de las instancias `PH_`, 48 bytes por pareja (24,0 MB a 15x). Lo
+    sostienen a la vez la clave limpia y el conjunto de la regeneración, así
+    que no basta con tocar una de las dos.
+  - `RegeneratedPairs` retiene las parejas transformadas de una biblioteca
+    entera, unos 800 bytes por pareja, porque las claves llegan en orden de
+    identificador y no en el de generación. Emitirlas en el orden de la serie
+    exigiría cambiar el orden de escritura de los FASTQ, que es parte de la
+    identidad binaria.
+  - `plan_biological_contamination` clona la lista completa de candidatas de
+    las demás bibliotecas por cada receptora: 32 bytes por clave y receptora,
+    cuadrático en número de individuos. Ordenar referencias en lugar de clones
+    lo evitaría sin cambiar la permutación, porque el criterio de orden es el
+    mismo.
 
 ## Memoria de la referencia
 

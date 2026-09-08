@@ -351,12 +351,27 @@ impl TechnicalIdClass {
 /// Las dos clases usan la derivación v2 de `id-catalog-v3`; no comparten el
 /// material ni el registro de las clases heredadas v1.
 ///
-/// El registro guarda el texto compartido del identificador, no una copia: una
-/// instancia ya emitida por otra frontera se anota sin volver a asignar su
-/// texto, que la clave limpia sostiene igualmente.
+/// El registro no conserva el texto de un identificador derivado, sino sus
+/// 128 bits.
+///
+/// Un ID automático es el prefijo de su clase seguido del Base32 de los
+/// primeros 128 bits del BLAKE3 (DTC-039), de modo que esos 16 bytes y su
+/// texto se determinan mutuamente: retener los bytes detecta exactamente las
+/// mismas colisiones y ahorra el texto de cada pareja del evento, que en F4.5
+/// nadie más sostiene.
+///
+/// Un ID aportado no tiene por qué seguir esa forma, y DTC-039 exige detectar
+/// también sus colisiones, así que se conserva su texto. La clasificación es
+/// canónica y no ambigua: todo texto con la forma derivada va a `derived`,
+/// venga de una derivación o de una configuración, y solo lo que no puede
+/// proceder de una derivación va a `provided`. Por eso un aportado nunca puede
+/// esconder la colisión con un derivado.
 #[derive(Debug, Default)]
 pub struct TechnicalIdentityRegistry {
-    registered: BTreeSet<(TechnicalIdClass, Arc<str>)>,
+    /// `(clase, 128 bits)` ocupa 17 bytes sin relleno, frente a los 16 de un
+    /// puntero compartido más su asignación de texto.
+    derived: BTreeSet<(TechnicalIdClass, [u8; 16])>,
+    provided: BTreeSet<(TechnicalIdClass, Arc<str>)>,
 }
 
 impl TechnicalIdentityRegistry {
@@ -367,9 +382,9 @@ impl TechnicalIdentityRegistry {
         &mut self,
         pre_hop_instance_id: &PreHopInstanceId,
     ) -> Result<(), Diagnostic> {
-        self.register(
+        self.register_text(
             TechnicalIdClass::PreHopInstance,
-            Arc::clone(&pre_hop_instance_id.0),
+            &pre_hop_instance_id.0,
             "existing",
         )
     }
@@ -382,7 +397,7 @@ impl TechnicalIdentityRegistry {
         library_id: &LibraryId,
         template_id: &TemplateId,
     ) -> Result<PreHopInstanceId, Diagnostic> {
-        let text = derive_technical_id_text(
+        let (text, digest) = derive_technical_id(
             root,
             TechnicalIdClass::PreHopInstance,
             &[
@@ -393,8 +408,7 @@ impl TechnicalIdentityRegistry {
                 ("template_id", template_id.as_str()),
             ],
         )?;
-        let text = Arc::<str>::from(text);
-        self.register(TechnicalIdClass::PreHopInstance, Arc::clone(&text), "own")?;
+        self.register_derived(TechnicalIdClass::PreHopInstance, digest, "own")?;
         Ok(PreHopInstanceId::from_automatic(text))
     }
 
@@ -406,7 +420,7 @@ impl TechnicalIdentityRegistry {
         recipient_library_id: &LibraryId,
         source_pre_hop_instance_id: &PreHopInstanceId,
     ) -> Result<PreHopInstanceId, Diagnostic> {
-        let text = derive_technical_id_text(
+        let (text, digest) = derive_technical_id(
             root,
             TechnicalIdClass::PreHopInstance,
             &[
@@ -420,12 +434,7 @@ impl TechnicalIdentityRegistry {
                 ),
             ],
         )?;
-        let text = Arc::<str>::from(text);
-        self.register(
-            TechnicalIdClass::PreHopInstance,
-            Arc::clone(&text),
-            "contamination",
-        )?;
+        self.register_derived(TechnicalIdClass::PreHopInstance, digest, "contamination")?;
         Ok(PreHopInstanceId::from_automatic(text))
     }
 
@@ -437,7 +446,7 @@ impl TechnicalIdentityRegistry {
         final_library_id: &LibraryId,
         pre_hop_instance_id: &PreHopInstanceId,
     ) -> Result<TechnicalPairId, Diagnostic> {
-        let text = derive_technical_id_text(
+        let (text, digest) = derive_technical_id(
             root,
             TechnicalIdClass::TechnicalPair,
             &[
@@ -447,34 +456,58 @@ impl TechnicalIdentityRegistry {
                 ("pre_hop_instance_id", pre_hop_instance_id.as_str()),
             ],
         )?;
-        let text = Arc::<str>::from(text);
-        self.register(TechnicalIdClass::TechnicalPair, Arc::clone(&text), "final")?;
+        self.register_derived(TechnicalIdClass::TechnicalPair, digest, "final")?;
         Ok(TechnicalPairId::from_automatic(text))
     }
 
-    fn register(
+    /// Anota un identificador recién derivado por sus 128 bits.
+    fn register_derived(
         &mut self,
         class: TechnicalIdClass,
-        identifier: Arc<str>,
+        digest: [u8; 16],
         causes: &str,
     ) -> Result<(), Diagnostic> {
-        if self.registered.insert((class, Arc::clone(&identifier))) {
+        if self.derived.insert((class, digest)) {
             return Ok(());
         }
-        Err(Diagnostic::domain(
-            "GPS-DOMAIN-002",
-            "La derivación de una identidad produjo una colisión.",
-        )
-        .with("identifier", &*identifier)
-        .with("category", class.name())
-        .with("causes", causes))
+        Err(collision(class, &technical_id_text(class, &digest), causes))
     }
+
+    /// Anota un identificador del que solo se conoce su texto. Si tiene la
+    /// forma que produce una derivación, se anota entre los derivados —de otro
+    /// modo la misma identidad viviría en dos conjuntos y su colisión pasaría
+    /// inadvertida—; si no, se conserva el texto, que es lo único exacto.
+    fn register_text(
+        &mut self,
+        class: TechnicalIdClass,
+        identifier: &Arc<str>,
+        causes: &str,
+    ) -> Result<(), Diagnostic> {
+        if let Some(digest) = decode_derived_id(class, identifier) {
+            return self.register_derived(class, digest, causes);
+        }
+        if self.provided.insert((class, Arc::clone(identifier))) {
+            return Ok(());
+        }
+        Err(collision(class, identifier, causes))
+    }
+}
+
+fn collision(class: TechnicalIdClass, identifier: &str, causes: &str) -> Diagnostic {
+    Diagnostic::domain(
+        "GPS-DOMAIN-002",
+        "La derivación de una identidad produjo una colisión.",
+    )
+    .with("identifier", identifier)
+    .with("category", class.name())
+    .with("causes", causes)
 }
 
 #[cfg(test)]
 mod shared_text_tests {
     use super::{
-        EventId, LibraryId, PreHopInstanceId, TechnicalIdentityRegistry, compose_template_id,
+        EventId, LibraryId, PreHopInstanceId, TechnicalIdClass, TechnicalIdentityRegistry,
+        compose_template_id, decode_derived_id, technical_id_text,
     };
     use crate::randomness::RootSeed;
     use std::sync::Arc;
@@ -491,10 +524,10 @@ mod shared_text_tests {
         assert_eq!(copy.as_str(), "PH_SHARED");
     }
 
-    /// El registro de colisiones anota la instancia que ya sostiene otra
-    /// frontera sin duplicar su texto.
+    /// Un identificador aportado que no puede proceder de una derivación
+    /// conserva su texto, porque es lo único que lo identifica con exactitud.
     #[test]
-    fn the_registry_shares_the_text_of_an_existing_instance() {
+    fn a_provided_identifier_keeps_its_text() {
         let existing = PreHopInstanceId::parse("PH_EXISTING", "test").expect("valid identifier");
         let mut registry = TechnicalIdentityRegistry::default();
 
@@ -502,19 +535,25 @@ mod shared_text_tests {
             .register_existing_pre_hop_instance(&existing)
             .expect("a first registration is accepted");
 
+        assert!(registry.derived.is_empty());
         let stored = registry
-            .registered
+            .provided
             .iter()
             .map(|(_, text)| text)
             .find(|text| text.as_ref() == "PH_EXISTING")
             .expect("the instance is registered");
         assert!(Arc::ptr_eq(stored, &existing.0));
+
+        let error = registry
+            .register_existing_pre_hop_instance(&existing)
+            .expect_err("a repeated identifier collides");
+        assert_eq!(error.code(), "GPS-DOMAIN-002");
     }
 
-    /// Una instancia derivada comparte su texto con el registro y sigue
-    /// detectando una segunda anotación del mismo identificador.
+    /// Una instancia derivada se anota por sus 128 bits, sin conservar su
+    /// texto, y sigue detectando una segunda anotación del mismo identificador.
     #[test]
-    fn a_derived_instance_shares_its_text_and_still_detects_a_collision() {
+    fn a_derived_instance_is_registered_by_its_digest_and_still_detects_a_collision() {
         let root = RootSeed::from_bytes([0x11; 32]);
         let event_id = EventId::parse("EVT_shared", "test").expect("valid identifier");
         let library_id = LibraryId::parse("LIB_shared", "test").expect("valid identifier");
@@ -524,13 +563,19 @@ mod shared_text_tests {
         let derived = registry
             .derive_own_pre_hop_instance(root, &event_id, &library_id, &template_id)
             .expect("the first derivation is registered");
-        let stored = registry
-            .registered
+
+        // El texto no se retiene: lo que queda son sus bits, y reconstruirlos
+        // devuelve exactamente el mismo identificador.
+        assert!(registry.provided.is_empty());
+        let (_, digest) = registry
+            .derived
             .iter()
-            .map(|(_, text)| text)
-            .find(|text| text.as_ref() == derived.as_str())
+            .find(|(class, _)| *class == TechnicalIdClass::PreHopInstance)
             .expect("the derived instance is registered");
-        assert!(Arc::ptr_eq(stored, &derived.0));
+        assert_eq!(
+            technical_id_text(TechnicalIdClass::PreHopInstance, digest),
+            derived.as_str()
+        );
 
         let error = registry
             .register_existing_pre_hop_instance(&derived)
@@ -541,13 +586,86 @@ mod shared_text_tests {
             Some(derived.as_str())
         );
     }
+
+    /// El riesgo de separar los dos conjuntos sería que la misma identidad
+    /// viviera en ambos y su colisión pasara inadvertida. No ocurre: un texto
+    /// con la forma derivada se anota entre los derivados aunque llegue como
+    /// identificador aportado.
+    #[test]
+    fn a_provided_identifier_with_the_derived_shape_collides_with_the_derivation() {
+        let root = RootSeed::from_bytes([0x22; 32]);
+        let event_id = EventId::parse("EVT_shape", "test").expect("valid identifier");
+        let library_id = LibraryId::parse("LIB_shape", "test").expect("valid identifier");
+        let template_id = compose_template_id(&library_id, 0);
+
+        let mut deriving = TechnicalIdentityRegistry::default();
+        let derived = deriving
+            .derive_own_pre_hop_instance(root, &event_id, &library_id, &template_id)
+            .expect("the derivation is registered");
+
+        // El mismo texto, esta vez recorriendo la vía de un ID aportado.
+        let reparsed = PreHopInstanceId::parse(derived.as_str(), "test").expect("valid identifier");
+        let mut registry = TechnicalIdentityRegistry::default();
+        registry
+            .register_existing_pre_hop_instance(&reparsed)
+            .expect("a first registration is accepted");
+        assert!(registry.provided.is_empty(), "it is stored as derived");
+
+        let error = registry
+            .derive_own_pre_hop_instance(root, &event_id, &library_id, &template_id)
+            .expect_err("deriving the same identity collides");
+        assert_eq!(error.code(), "GPS-DOMAIN-002");
+    }
+
+    /// Solo el texto que una derivación pudo producir se reconoce como tal.
+    #[test]
+    fn only_a_canonical_text_decodes_to_its_digest() {
+        let digest = [0x5a_u8; 16];
+        let text = technical_id_text(TechnicalIdClass::TechnicalPair, &digest);
+        assert_eq!(
+            decode_derived_id(TechnicalIdClass::TechnicalPair, &text),
+            Some(digest)
+        );
+
+        // La clase forma parte de la identidad: el mismo texto no pertenece a
+        // la otra clase.
+        assert_eq!(
+            decode_derived_id(TechnicalIdClass::PreHopInstance, &text),
+            None
+        );
+        for rejected in [
+            "TP_SHORT",
+            "TP_AAAAAAAAAAAAAAAAAAAAAAAAAA1",
+            "TP_AAAAAAAAAAAAAAAAAAAAAAAA1A",
+            "PH_EXISTING",
+            "",
+        ] {
+            assert_eq!(
+                decode_derived_id(TechnicalIdClass::TechnicalPair, rejected),
+                None,
+                "{rejected} must not pass as a derived identifier"
+            );
+        }
+
+        // Los dos bits de relleno a uno no los produce ninguna derivación: el
+        // último símbolo canónico de estos bits es `A`, no `B`.
+        let canonical = technical_id_text(TechnicalIdClass::TechnicalPair, &[0_u8; 16]);
+        assert!(canonical.ends_with('A'));
+        let padded = format!("{}B", &canonical[..canonical.len() - 1]);
+        assert_eq!(
+            decode_derived_id(TechnicalIdClass::TechnicalPair, &padded),
+            None
+        );
+    }
 }
 
-fn derive_technical_id_text(
+/// Deriva un identificador técnico y entrega su texto junto a los 128 bits de
+/// los que procede, para que el registro de colisiones pueda retener solo estos.
+fn derive_technical_id(
     root: RootSeed,
     class: TechnicalIdClass,
     components: &[(&str, &str)],
-) -> Result<String, Diagnostic> {
+) -> Result<(String, [u8; 16]), Diagnostic> {
     let component_count =
         u32::try_from(components.len()).map_err(|_| identity_material_error("component_count"))?;
     let mut material = Vec::new();
@@ -558,11 +676,51 @@ fn derive_technical_id_text(
         append_component(&mut material, name, value)?;
     }
     let digest = blake3::derive_key(ID_CONTEXT, &material);
-    Ok(format!(
-        "{}{}",
-        class.prefix(),
-        encode_base32(&digest[..16])
-    ))
+    let mut truncated = [0_u8; 16];
+    truncated.copy_from_slice(&digest[..16]);
+    Ok((technical_id_text(class, &truncated), truncated))
+}
+
+/// Compone el texto de un identificador técnico a partir de sus 128 bits.
+fn technical_id_text(class: TechnicalIdClass, digest: &[u8; 16]) -> String {
+    format!("{}{}", class.prefix(), encode_base32(digest))
+}
+
+/// Devuelve los 128 bits de un texto que solo una derivación pudo producir.
+///
+/// Exige el prefijo de la clase y que recodificar los bytes reproduzca el texto
+/// exacto. Esa comprobación descarta cualquier variante no canónica —longitud
+/// distinta, un carácter fuera del alfabeto o los dos bits de relleno a uno—,
+/// de modo que un texto aceptado aquí procede necesariamente de los bytes que
+/// se devuelven, y ninguno rechazado puede coincidir con un identificador
+/// derivado.
+fn decode_derived_id(class: TechnicalIdClass, text: &str) -> Option<[u8; 16]> {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let encoded = text.strip_prefix(class.prefix())?.as_bytes();
+    if encoded.len() != 26 {
+        return None;
+    }
+    let mut digest = [0_u8; 16];
+    let mut buffer = 0_u32;
+    let mut bits = 0_u8;
+    let mut written = 0_usize;
+    for symbol in encoded {
+        let value = ALPHABET.iter().position(|candidate| candidate == symbol)?;
+        buffer = (buffer << 5) | u32::try_from(value).ok()?;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            if written == digest.len() {
+                return None;
+            }
+            digest[written] = u8::try_from((buffer >> bits) & 0xff).ok()?;
+            written += 1;
+        }
+    }
+    if written != digest.len() || encode_base32(&digest) != text[class.prefix().len()..] {
+        return None;
+    }
+    Some(digest)
 }
 
 /// Registro de las cinco clases añadidas por `id-catalog-v4`.
