@@ -133,13 +133,21 @@ simulados, con el binario de `d950aca`.
 Las dos primeras quedaron resueltas: validar sin conservar las bases y pedir los
 tramos por índice FAI deja su memoria independiente del genoma de partida.
 
-- [ ] Las dos últimas siguen creciendo con el genoma. El pico son dos lecturas
-  del FASTA que conviven dentro de la validación física de la publicación, cada
-  una con el genoma entero; con 50 Mb son exactamente dos bloques de 50 MB.
-  - Ambas arrancan en `validate_published_resources`, pero la segunda se pierde
-    en un `collect` de la biblioteca estándar y localizarla exige más perfilado.
-  - Un genoma humano proyecta del orden de 6 GB en la ruta con matriz SNV y
-    unos 9 GB generando al azar.
+Las dos últimas se redujeron a la mitad el 8 de septiembre de 2026 al dejar de
+copiar bases que ya estaban en memoria: la matriz SNV las duplicaba dos veces y
+la generación al azar una. La ruta con matriz SNV pasó de 1.544 a 780 MB con el
+tomate, y generar 50 Mb de 152 a 103 MB.
+
+- [ ] Cada una conserva todavía una copia del genoma, y esa sí la necesita su
+  comprobación: la matriz se valida contra las bases, y una referencia simulada
+  se compara con la que la semilla regenera. Bajar de ahí exige comparar
+  secuencia a secuencia en flujo, en lugar de tener las dos versiones completas
+  a la vez.
+  - No es una optimización más: cambia cómo se comprueba que lo publicado
+    coincide con la semilla, que es una garantía de reproducibilidad. Conviene
+    tratarlo como trabajo propio, con su evidencia.
+  - El pico quedaría en una secuencia en lugar de un genoma, de modo que un
+    cromosoma humano grande costaría unos 250 MB en vez de varios gigabytes.
   - `heaptrack` es la única herramienta de perfilado disponible en el entorno:
     no hay `perf`, `valgrind` ni `gdb`. Basta para un cuello de memoria; para
     uno de CPU haría falta instalar algo.
