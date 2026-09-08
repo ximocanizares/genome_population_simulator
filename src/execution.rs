@@ -702,6 +702,12 @@ fn publish_technical_event(
         .collect::<Result<Vec<_>, Diagnostic>>()
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
 
+    // El padrón fija el puesto de cada individua antes de recorrer nada, de
+    // modo que el orden del inventario no dependa de en qué orden se generen
+    // las parejas. Es lo que permite que una clave guarde un puesto en lugar de
+    // repetir el identificador de su individua un millón de veces.
+    let roster = crate::identity::IndividualRoster::new(individuals.keys().cloned())
+        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
     // La primera pasada conserva exclusivamente las claves PH y los hechos de
     // quimera; las secuencias se regeneran bajo demanda en la materialización.
     let mut clean_libraries = Vec::with_capacity(libraries.len());
@@ -717,6 +723,15 @@ fn publish_technical_event(
                     link: None,
                 })
             })?;
+        let seat = roster.seat(individual.id()).ok_or_else(|| {
+            Box::new(TechnicalEventAssemblyFailure {
+                cause: technical_event_error(
+                    "technical_event.individual_ids",
+                    "una individua seleccionada no figura en el padrón",
+                ),
+                link: None,
+            })
+        })?;
         let mut sampler = paired_sampler(reference, individual, &identities, profile, event)
             .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         let mut keys = Vec::new();
@@ -728,11 +743,9 @@ fn publish_technical_event(
                 })
             })?;
             keys.push(
-                CleanPairKey::new(
-                    individual.id().clone(),
-                    pair.pre_hop_identity().pre_hop_instance_id(),
-                )
-                .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?,
+                CleanPairKey::new(seat, pair.pre_hop_identity().pre_hop_instance_id()).map_err(
+                    |cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }),
+                )?,
             );
         }
         realized_chimera_pairs = realized_chimera_pairs
@@ -746,6 +759,7 @@ fn publish_technical_event(
         clean_libraries.push(
             CleanLibraryPairs::new(
                 individual.id().clone(),
+                seat,
                 (*population_id).clone(),
                 library.library_id().clone(),
                 keys,
@@ -819,20 +833,29 @@ fn publish_technical_event(
     // cada serie una sola vez, en lugar de recorrerla entera por cada pareja
     // contaminada, que volvería el coste cuadrático igual que en las propias.
     let mut donor_requests: BTreeMap<
-        crate::identity::IndividualId,
+        crate::identity::IndividualSeat,
         BTreeSet<crate::identity::CompactPreHopInstanceId>,
     > = BTreeMap::new();
     for recipient_plan in contamination_plan.recipients() {
         for assignment in recipient_plan.assignments() {
             let source = assignment.source_pair();
             donor_requests
-                .entry(source.source_individual_id().clone())
+                .entry(source.source_individual())
                 .or_default()
                 .insert(source.compact_pre_hop_instance_id());
         }
     }
     let mut donor_pairs = BTreeMap::new();
-    for (individual_id, wanted) in &donor_requests {
+    for (seat, wanted) in &donor_requests {
+        let individual_id = roster.individual_id(*seat).ok_or_else(|| {
+            Box::new(TechnicalEventAssemblyFailure {
+                cause: technical_event_error(
+                    "biological_contamination",
+                    "una donante no figura en el padrón",
+                ),
+                link: None,
+            })
+        })?;
         let collected = RegeneratedPairs::collect(
             individual_id,
             wanted,
@@ -844,7 +867,7 @@ fn publish_technical_event(
             effective.reproducibility().root_seed(),
         )
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
-        donor_pairs.insert(individual_id.clone(), collected);
+        donor_pairs.insert(*seat, collected);
     }
     for recipient_plan in contamination_plan.recipients() {
         let clean = clean_libraries
@@ -878,7 +901,7 @@ fn publish_technical_event(
                         .take(key)
                         .or_else(|| {
                             donor_pairs
-                                .get(key.source_individual_id())
+                                .get(&key.source_individual())
                                 .and_then(|pairs| pairs.get(&key.compact_pre_hop_instance_id()))
                                 .cloned()
                         })

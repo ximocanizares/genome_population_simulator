@@ -17,7 +17,8 @@ use genome_population_simulator::biological_contamination::{
 use genome_population_simulator::configuration::ExpectedConfigKind;
 use genome_population_simulator::execution::execute_validated_config;
 use genome_population_simulator::identity::{
-    EventId, IndividualId, LibraryId, PopulationId, PreHopInstanceId,
+    EventId, IndividualId, IndividualRoster, IndividualSeat, LibraryId, PopulationId,
+    PreHopInstanceId,
 };
 use genome_population_simulator::randomness::{
     F4TechnicalDecision, LocalRng, RootSeed, derive_f4_technical_subseed, f4_uniform_closed,
@@ -98,16 +99,30 @@ fn derived_instance(person: &str, ordinal: u8) -> PreHopInstanceId {
     instance(&format!("PH_{symbols}"))
 }
 
+/// Padrón de las individuas que usan estas pruebas, en el orden de sus
+/// identificadores. El inventario guarda el puesto de cada una en lugar de su
+/// identificador, y los puestos solo salen de aquí.
+fn roster() -> IndividualRoster {
+    IndividualRoster::new(["A", "B", "C", "D"].into_iter().map(id)).expect("roster")
+}
+
+fn seat(person: &str) -> IndividualSeat {
+    roster()
+        .seat(&id(person))
+        .expect("the person is in the roster")
+}
+
 fn clean(person: &str, pop: &str, count: u8) -> CleanLibraryPairs {
     let individual = id(person);
     let pairs = (0..count)
         .map(|ordinal| {
-            CleanPairKey::new(individual.clone(), &derived_instance(person, ordinal))
+            CleanPairKey::new(seat(person), &derived_instance(person, ordinal))
                 .expect("a derived instance is accepted")
         })
         .collect();
     CleanLibraryPairs::new(
         individual,
+        seat(person),
         population(pop),
         library(&format!("LIB_{person}")),
         pairs,
@@ -249,17 +264,14 @@ fn plan_uses_only_same_population_clean_pairs_without_replacement_or_chains() {
         );
         for assignment in recipient.assignments() {
             assert_ne!(
-                assignment.source_pair().source_individual_id(),
-                recipient.recipient_id()
+                assignment.source_pair().source_individual(),
+                seat(recipient.recipient_id().as_str())
             );
             assert_eq!(
-                assignment.removed_recipient_pair().source_individual_id(),
-                recipient.recipient_id()
+                assignment.removed_recipient_pair().source_individual(),
+                seat(recipient.recipient_id().as_str())
             );
-            assert_ne!(
-                assignment.source_pair().source_individual_id().as_str(),
-                "D"
-            );
+            assert_ne!(assignment.source_pair().source_individual(), seat("D"));
         }
     }
 }
@@ -322,7 +334,8 @@ fn one_clean_source_can_be_reused_by_different_recipients_but_never_from_contami
             .iter()
             .all(
                 |recipient| recipient.assignments().iter().all(|assignment| {
-                    assignment.source_pair().source_individual_id() != recipient.recipient_id()
+                    assignment.source_pair().source_individual()
+                        != seat(recipient.recipient_id().as_str())
                 })
             )
     );
@@ -400,7 +413,7 @@ fn materialization_replaces_recipient_pairs_with_new_recipient_instances_without
             recipient,
             &libraries[0],
             |source| {
-                let donor = source.source_individual_id() == &id("B");
+                let donor = source.source_individual() == seat("B");
                 if donor {
                     regenerated_sources += 1;
                 }
@@ -502,7 +515,7 @@ fn materialization_preserves_paired_donor_bytes_at_zero_and_hundred_percent() {
                 recipient,
                 &libraries[0],
                 |key| {
-                    Ok::<_, ()>(if key.source_individual_id() == &id("B") {
+                    Ok::<_, ()>(if key.source_individual() == seat("B") {
                         donor_payload.clone()
                     } else {
                         PairedPayload {

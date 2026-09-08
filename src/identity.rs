@@ -686,6 +686,60 @@ fn technical_id_text(class: TechnicalIdClass, digest: &[u8; 16]) -> String {
     format!("{}{}", class.prefix(), encode_base32(digest))
 }
 
+/// Puesto de una individua dentro del padrón de un evento.
+///
+/// Solo `IndividualRoster` los emite, y lo hace en el orden de los
+/// identificadores, de modo que comparar puestos equivale a comparar
+/// identificadores. Esa equivalencia es la que permite que el inventario de
+/// parejas limpias guarde un puesto en lugar de repetir el identificador de la
+/// individua en cada una de sus claves.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct IndividualSeat(u16);
+
+/// Padrón de las individuas de un evento, ordenado por identificador.
+///
+/// Los puestos se asignan al construirlo, nunca según el orden en que las
+/// parejas se vayan registrando: así el orden del inventario —y con él la
+/// selección de donantes de la contaminación— no depende de en qué orden se
+/// haya recorrido nada.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IndividualRoster {
+    individuals: Vec<IndividualId>,
+}
+
+impl IndividualRoster {
+    /// Forma el padrón ordenando por identificador y descartando repeticiones.
+    pub fn new(individuals: impl IntoIterator<Item = IndividualId>) -> Result<Self, Diagnostic> {
+        let mut individuals = individuals.into_iter().collect::<Vec<_>>();
+        individuals.sort();
+        individuals.dedup();
+        if u16::try_from(individuals.len()).is_err() {
+            return Err(Diagnostic::domain(
+                "GPS-DOMAIN-001",
+                "El padrón de individuas del evento excede el máximo representable.",
+            )
+            .with("individuals", individuals.len().to_string()));
+        }
+        Ok(Self { individuals })
+    }
+
+    /// Puesto de una individua, si pertenece al padrón.
+    #[must_use]
+    pub fn seat(&self, individual_id: &IndividualId) -> Option<IndividualSeat> {
+        self.individuals
+            .binary_search(individual_id)
+            .ok()
+            .and_then(|index| u16::try_from(index).ok())
+            .map(IndividualSeat)
+    }
+
+    /// Identificador de un puesto.
+    #[must_use]
+    pub fn individual_id(&self, seat: IndividualSeat) -> Option<&IndividualId> {
+        self.individuals.get(usize::from(seat.0))
+    }
+}
+
 /// Número de símbolos Base32 que codifican los 128 bits de un ID automático.
 const DERIVED_SYMBOL_COUNT: usize = 26;
 

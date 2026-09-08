@@ -9,7 +9,8 @@ use std::fmt;
 
 use crate::diagnostics::Diagnostic;
 use crate::identity::{
-    CompactPreHopInstanceId, EventId, IndividualId, LibraryId, PopulationId, PreHopInstanceId,
+    CompactPreHopInstanceId, EventId, IndividualId, IndividualSeat, LibraryId, PopulationId,
+    PreHopInstanceId,
 };
 use crate::randomness::{
     F4TechnicalDecision, RootSeed, Subseed, derive_f4_technical_subseed, f4_partial_fisher_yates,
@@ -81,7 +82,10 @@ impl BiologicalContaminationSettings {
 /// Clave transitoria de una pareja propia anterior a toda contaminación.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CleanPairKey {
-    source_individual_id: IndividualId,
+    /// La individua se guarda por su puesto en el padrón del evento, que se
+    /// ordena por identificador: comparar puestos equivale a compararlos, y el
+    /// inventario deja de repetir un identificador por cada una de sus parejas.
+    source_individual: IndividualSeat,
     /// La instancia se guarda por sus símbolos, sin asignación: el inventario
     /// retiene una clave por pareja de todo el evento y su texto era el mayor
     /// consumidor que crecía con la cobertura. El orden es el mismo, porque
@@ -91,18 +95,18 @@ pub struct CleanPairKey {
 
 impl CleanPairKey {
     pub fn new(
-        source_individual_id: IndividualId,
+        source_individual: IndividualSeat,
         pre_hop_instance_id: &PreHopInstanceId,
     ) -> Result<Self, Diagnostic> {
         Ok(Self {
-            source_individual_id,
+            source_individual,
             pre_hop_instance_id: CompactPreHopInstanceId::new(pre_hop_instance_id)?,
         })
     }
 
     #[must_use]
-    pub const fn source_individual_id(&self) -> &IndividualId {
-        &self.source_individual_id
+    pub const fn source_individual(&self) -> IndividualSeat {
+        self.source_individual
     }
 
     #[must_use]
@@ -121,6 +125,7 @@ impl CleanPairKey {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CleanLibraryPairs {
     individual_id: IndividualId,
+    individual: IndividualSeat,
     population_id: PopulationId,
     library_id: LibraryId,
     own_pairs: Vec<CleanPairKey>,
@@ -129,13 +134,14 @@ pub struct CleanLibraryPairs {
 impl CleanLibraryPairs {
     pub fn new(
         individual_id: IndividualId,
+        individual: IndividualSeat,
         population_id: PopulationId,
         library_id: LibraryId,
         mut own_pairs: Vec<CleanPairKey>,
     ) -> Result<Self, BiologicalContaminationError> {
         if own_pairs
             .iter()
-            .any(|pair| pair.source_individual_id() != &individual_id)
+            .any(|pair| pair.source_individual() != individual)
         {
             return Err(BiologicalContaminationError::ForeignOwnPair);
         }
@@ -145,6 +151,7 @@ impl CleanLibraryPairs {
         }
         Ok(Self {
             individual_id,
+            individual,
             population_id,
             library_id,
             own_pairs,
@@ -154,6 +161,11 @@ impl CleanLibraryPairs {
     #[must_use]
     pub const fn individual_id(&self) -> &IndividualId {
         &self.individual_id
+    }
+
+    #[must_use]
+    pub const fn individual(&self) -> IndividualSeat {
+        self.individual
     }
 
     #[must_use]
@@ -473,7 +485,7 @@ impl BiologicalContaminationMaterializer {
                 != usize::try_from(recipient_plan.target_pair_count())
                     .map_err(|_| BiologicalContaminationMaterializationError::CounterOverflow)?
             || !removed.iter().all(|key| {
-                key.source_individual_id() == clean_recipient.individual_id()
+                key.source_individual() == clean_recipient.individual()
                     && clean_recipient.own_pairs().binary_search(key).is_ok()
             })
         {
@@ -803,15 +815,22 @@ pub fn plan_biological_contamination(
                 },
             )
             .collect::<Vec<_>>();
-        let donor_contributions =
-            assignments
-                .iter()
-                .fold(BTreeMap::new(), |mut totals, assignment| {
-                    *totals
-                        .entry(assignment.source_pair().source_individual_id().clone())
-                        .or_insert(0) += 1;
-                    totals
-                });
+        // El recuento por donante se publica en el manifiesto, así que vuelve a
+        // nombrarlas por su identificador: el puesto es una representación
+        // interna del inventario, no un hecho publicable.
+        let donor_contributions = assignments.iter().try_fold(
+            BTreeMap::new(),
+            |mut totals, assignment| -> Result<_, BiologicalContaminationError> {
+                let donor = libraries
+                    .iter()
+                    .find(|library| {
+                        library.individual() == assignment.source_pair().source_individual()
+                    })
+                    .ok_or(BiologicalContaminationError::ForeignOwnPair)?;
+                *totals.entry(donor.individual_id().clone()).or_insert(0_u64) += 1;
+                Ok(totals)
+            },
+        )?;
         recipients.push(RecipientBiologicalContaminationPlan {
             recipient_id,
             recipient_library_id: recipient.library_id().clone(),

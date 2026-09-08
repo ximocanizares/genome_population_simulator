@@ -307,20 +307,48 @@ Medido el 8 de septiembre de 2026. La línea de partida es `eb51bee`.
     Conviene medirlo en limpio, porque una medida tomada mientras compilaba la
     batería aparentaba un 45 % de regresión que no existía.
 
-- [ ] Términos que aún crecen con la cobertura, por orden de tamaño:
-  - El vector del inventario, ahora 48 bytes por clave. Bajaría a 28 si el
-    individuo se guardara como un rango numérico en lugar de un identificador
-    compartido, pero los rangos tendrían que asignarse en orden de texto para
-    conservar la permutación, lo que exige una tabla y un contrato nuevo.
+### El identificador de la individua en cada clave
+
+Medido el 8 de septiembre de 2026. La línea de partida es `d48a6e9`.
+
+| Ensayo | Antes | Después | Δ |
+|---|---:|---:|---:|
+| 20 individuos, 30x | 236,3 MB | 217,5 MB | −8 % |
+
+- [x] **Resuelto.** Cada clave del inventario repetía el identificador de su
+  individua, un puntero compartido de 16 bytes que, con la alineación, dejaba
+  la clave en 48. Ahora guarda el puesto de la individua en el padrón del
+  evento, y la clave ocupa 28 bytes sin relleno. Los artefactos quedan
+  idénticos byte a byte.
+  - El riesgo era que un puesto mal asignado cambiara en silencio la selección
+    de donantes, porque el orden del inventario gobierna qué parejas se
+    sustituyen. Por eso los puestos no son un número cualquiera: `IndividualRoster`
+    los asigna al construirse, ordenados por identificador, y es el único que
+    los emite. Comparar puestos equivale así a comparar identificadores por
+    construcción, no por convención, y el orden no depende de en qué orden se
+    hayan generado las parejas.
+  - El puesto es una representación interna del inventario, no un hecho
+    publicable: el recuento por donante del manifiesto vuelve a nombrarlas por
+    su identificador.
+
+- [ ] **Lo que no funcionó.** Reservar la capacidad exacta del inventario en
+  lugar de dejar que el vector creciera por duplicación no movió el pico
+  (236,0 frente a 236,3 MB a 30x). Se revirtió, junto con el accesor que
+  exigía. La causa es la ya registrada: el asignador reutiliza el bloque que
+  libera al crecer, así que el exceso no llega a sumarse al máximo residente.
+
+- [ ] Términos que aún crecen con la cobertura:
   - `RegeneratedPairs` retiene las parejas transformadas de una biblioteca
     entera, unos 800 bytes por pareja, porque las claves llegan en orden de
     identificador y no en el de generación. Emitirlas en el orden de la serie
     exigiría cambiar el orden de escritura de los FASTQ, que es parte de la
-    identidad binaria.
+    identidad binaria: no es una optimización transparente, sino una decisión
+    sobre el formato publicado.
   - `plan_biological_contamination` clona la lista completa de candidatas de
     las demás bibliotecas por cada receptora: cuadrático en número de
-    individuos. Ordenar referencias en lugar de clones lo evitaría sin cambiar
-    la permutación, porque el criterio de orden es el mismo.
+    individuos, aunque ahora cada clave son 28 bytes y no contiene punteros.
+    Ordenar referencias en lugar de clones lo evitaría sin cambiar la
+    permutación, porque el criterio de orden es el mismo.
 
 ## Memoria de la referencia
 
