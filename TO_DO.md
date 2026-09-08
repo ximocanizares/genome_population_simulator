@@ -274,20 +274,53 @@ partida es `14b07d7`.
     con liberar antes; hay que dejar de pedir**. Solo los cambios que reducen
     lo que se asigna —compartir, compactar o no retener— mueven el RSS.
 
+### El texto de las instancias `PH_`
+
+Medido el 8 de septiembre de 2026. La línea de partida es `eb51bee`.
+
+| Ensayo | Antes | Después | Δ |
+|---|---:|---:|---:|
+| 20 individuos, 15x | 184,8 MB | 164,1 MB | −11 % |
+| 20 individuos, 30x | 284,8 MB | 236,3 MB | −17 % |
+
+- [x] **Resuelto.** El inventario de parejas limpias conserva una clave por
+  pareja de todo el evento, y cada una sostenía el texto de su instancia `PH_`:
+  una asignación de 48 bytes por pareja, 24,0 MB a 15x, el mayor consumidor que
+  crecía con la cobertura. Ahora la clave guarda los 26 símbolos Base32 de la
+  instancia, sin asignación. El prefijo es constante para la clase, así que
+  comparar los símbolos equivale a comparar el texto y **el orden del
+  inventario no se mueve**: ese orden gobierna `donor_candidates.sort()` y la
+  búsqueda por dicotomía, es decir, qué parejas sustituye la contaminación.
+  - Solo se admite la forma que produce una derivación. En una ejecución no hay
+    otra: una instancia `PH_` nunca se declara en configuración, siempre se
+    deriva. Las pruebas que usaban nombres legibles (`PH_A_0`) generan ahora
+    instancias canónicas que codifican persona y ordinal en `A`-`Z`, cuyo orden
+    ASCII coincide con el numérico, de modo que conservan el mismo orden
+    relativo y las mismas selecciones.
+  - `RegeneratedPairs` indexa por esa misma forma compacta, así que el bucle no
+    reconstruye un texto por pareja para buscar la suya.
+  - La clave pasa de 32 bytes más una asignación de 48, a 48 bytes sin
+    asignación: se ahorran 32 bytes y una asignación por pareja. Los artefactos
+    quedan idénticos byte a byte, que aquí es la comprobación decisiva: si el
+    orden hubiera cambiado, la contaminación habría elegido otras parejas.
+  - Sin coste en tiempo: 53,9 segundos frente a 55,3 en el ensayo de 30x.
+    Conviene medirlo en limpio, porque una medida tomada mientras compilaba la
+    batería aparentaba un 45 % de regresión que no existía.
+
 - [ ] Términos que aún crecen con la cobertura, por orden de tamaño:
-  - El texto de las instancias `PH_`, 48 bytes por pareja (24,0 MB a 15x). Lo
-    sostienen a la vez la clave limpia y el conjunto de la regeneración, así
-    que no basta con tocar una de las dos.
+  - El vector del inventario, ahora 48 bytes por clave. Bajaría a 28 si el
+    individuo se guardara como un rango numérico en lugar de un identificador
+    compartido, pero los rangos tendrían que asignarse en orden de texto para
+    conservar la permutación, lo que exige una tabla y un contrato nuevo.
   - `RegeneratedPairs` retiene las parejas transformadas de una biblioteca
     entera, unos 800 bytes por pareja, porque las claves llegan en orden de
     identificador y no en el de generación. Emitirlas en el orden de la serie
     exigiría cambiar el orden de escritura de los FASTQ, que es parte de la
     identidad binaria.
   - `plan_biological_contamination` clona la lista completa de candidatas de
-    las demás bibliotecas por cada receptora: 32 bytes por clave y receptora,
-    cuadrático en número de individuos. Ordenar referencias en lugar de clones
-    lo evitaría sin cambiar la permutación, porque el criterio de orden es el
-    mismo.
+    las demás bibliotecas por cada receptora: cuadrático en número de
+    individuos. Ordenar referencias en lugar de clones lo evitaría sin cambiar
+    la permutación, porque el criterio de orden es el mismo.
 
 ## Memoria de la referencia
 

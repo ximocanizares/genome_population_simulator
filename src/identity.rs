@@ -686,6 +686,55 @@ fn technical_id_text(class: TechnicalIdClass, digest: &[u8; 16]) -> String {
     format!("{}{}", class.prefix(), encode_base32(digest))
 }
 
+/// Número de símbolos Base32 que codifican los 128 bits de un ID automático.
+const DERIVED_SYMBOL_COUNT: usize = 26;
+
+/// Instancia `PH_` retenida por sus símbolos, sin asignación propia.
+///
+/// El inventario de parejas limpias conserva una instancia por pareja de todo
+/// el evento, y cada texto costaba una asignación. Como el prefijo es constante
+/// para la clase, guardar solo los 26 símbolos basta para reconstruir el
+/// identificador, y compararlos equivale a comparar el texto: el orden del
+/// inventario —que gobierna qué parejas sustituye la contaminación— no se
+/// mueve.
+///
+/// Solo admite la forma que produce una derivación. En una ejecución no hay
+/// otra: una instancia `PH_` nunca se declara en configuración, siempre se
+/// deriva.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CompactPreHopInstanceId([u8; DERIVED_SYMBOL_COUNT]);
+
+impl CompactPreHopInstanceId {
+    /// Compacta una instancia derivada; rechaza cualquier texto que una
+    /// derivación no haya podido producir.
+    pub fn new(instance: &PreHopInstanceId) -> Result<Self, Diagnostic> {
+        let class = TechnicalIdClass::PreHopInstance;
+        let text = instance.as_str();
+        if decode_derived_id(class, text).is_none() {
+            return Err(Diagnostic::domain(
+                "GPS-DOMAIN-001",
+                "Un identificador técnico no tiene la forma que produce su derivación.",
+            )
+            .with("identifier", text)
+            .with("category", class.name()));
+        }
+        let mut symbols = [0_u8; DERIVED_SYMBOL_COUNT];
+        symbols.copy_from_slice(&text.as_bytes()[class.prefix().len()..]);
+        Ok(Self(symbols))
+    }
+
+    /// Reconstruye el identificador completo.
+    #[must_use]
+    pub fn to_instance_id(self) -> PreHopInstanceId {
+        let class = TechnicalIdClass::PreHopInstance;
+        let mut text = String::with_capacity(class.prefix().len() + DERIVED_SYMBOL_COUNT);
+        text.push_str(class.prefix());
+        // Los símbolos provienen de un texto validado, así que son ASCII.
+        text.push_str(&String::from_utf8_lossy(&self.0));
+        PreHopInstanceId::from_automatic(text)
+    }
+}
+
 /// Devuelve los 128 bits de un texto que solo una derivación pudo producir.
 ///
 /// Exige el prefijo de la clase y que recodificar los bytes reproduzca el texto
@@ -697,7 +746,7 @@ fn technical_id_text(class: TechnicalIdClass, digest: &[u8; 16]) -> String {
 fn decode_derived_id(class: TechnicalIdClass, text: &str) -> Option<[u8; 16]> {
     const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     let encoded = text.strip_prefix(class.prefix())?.as_bytes();
-    if encoded.len() != 26 {
+    if encoded.len() != DERIVED_SYMBOL_COUNT {
         return None;
     }
     let mut digest = [0_u8; 16];

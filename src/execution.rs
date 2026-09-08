@@ -727,10 +727,13 @@ fn publish_technical_event(
                     link: None,
                 })
             })?;
-            keys.push(CleanPairKey::new(
-                individual.id().clone(),
-                pair.pre_hop_identity().pre_hop_instance_id().clone(),
-            ));
+            keys.push(
+                CleanPairKey::new(
+                    individual.id().clone(),
+                    pair.pre_hop_identity().pre_hop_instance_id(),
+                )
+                .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?,
+            );
         }
         realized_chimera_pairs = realized_chimera_pairs
             .checked_add(sampler.chimera_report().realized_pairs())
@@ -817,7 +820,7 @@ fn publish_technical_event(
     // contaminada, que volvería el coste cuadrático igual que en las propias.
     let mut donor_requests: BTreeMap<
         crate::identity::IndividualId,
-        BTreeSet<crate::identity::PreHopInstanceId>,
+        BTreeSet<crate::identity::CompactPreHopInstanceId>,
     > = BTreeMap::new();
     for recipient_plan in contamination_plan.recipients() {
         for assignment in recipient_plan.assignments() {
@@ -825,7 +828,7 @@ fn publish_technical_event(
             donor_requests
                 .entry(source.source_individual_id().clone())
                 .or_default()
-                .insert(source.pre_hop_instance_id().clone());
+                .insert(source.compact_pre_hop_instance_id());
         }
     }
     let mut donor_pairs = BTreeMap::new();
@@ -876,7 +879,7 @@ fn publish_technical_event(
                         .or_else(|| {
                             donor_pairs
                                 .get(key.source_individual_id())
-                                .and_then(|pairs| pairs.get(key.pre_hop_instance_id()))
+                                .and_then(|pairs| pairs.get(&key.compact_pre_hop_instance_id()))
                                 .cloned()
                         })
                         .ok_or_else(|| {
@@ -1160,10 +1163,10 @@ fn paired_sampler<'a>(
 /// recorre la serie entera cada vez y convierte el coste en cuadrático sobre el
 /// número de parejas.
 ///
-/// Retener las parejas transformadas no empeora el pico de memoria: el llamador
-/// las acumula igualmente en `post_contamination` antes de demultiplexar.
+/// Se indexan por la forma compacta de la instancia, que es la que sostiene el
+/// inventario: así el bucle no reconstruye un texto por pareja para buscarla.
 struct RegeneratedPairs {
-    pairs: BTreeMap<crate::identity::PreHopInstanceId, ObservedPairTransformation>,
+    pairs: BTreeMap<crate::identity::CompactPreHopInstanceId, ObservedPairTransformation>,
 }
 
 impl RegeneratedPairs {
@@ -1185,7 +1188,7 @@ impl RegeneratedPairs {
         let wanted = clean
             .own_pairs()
             .iter()
-            .map(|key| key.pre_hop_instance_id().clone())
+            .map(CleanPairKey::compact_pre_hop_instance_id)
             .collect::<BTreeSet<_>>();
         Ok(Self {
             pairs: Self::collect(
@@ -1206,7 +1209,7 @@ impl RegeneratedPairs {
     #[allow(clippy::too_many_arguments)] // los mismos hechos cerrados de F4 que el resto de la fase.
     fn collect(
         individual_id: &crate::identity::IndividualId,
-        wanted: &BTreeSet<crate::identity::PreHopInstanceId>,
+        wanted: &BTreeSet<crate::identity::CompactPreHopInstanceId>,
         reference: &Reference,
         individuals: &BTreeMap<
             crate::identity::IndividualId,
@@ -1219,8 +1222,10 @@ impl RegeneratedPairs {
         profile: crate::technical_profile::F4TechnicalProfile,
         event: &crate::application::EffectiveTechnicalEvent,
         root_seed: crate::randomness::RootSeed,
-    ) -> Result<BTreeMap<crate::identity::PreHopInstanceId, ObservedPairTransformation>, Diagnostic>
-    {
+    ) -> Result<
+        BTreeMap<crate::identity::CompactPreHopInstanceId, ObservedPairTransformation>,
+        Diagnostic,
+    > {
         let individual = individuals
             .get(individual_id)
             .map(|(individual, _)| *individual)
@@ -1233,11 +1238,12 @@ impl RegeneratedPairs {
             let pair = pair.map_err(|error| {
                 technical_event_error("wgs_paired_sampler", format!("{error:?}"))
             })?;
-            let instance = pair.pre_hop_identity().pre_hop_instance_id();
-            if !wanted.contains(instance) {
+            let instance = crate::identity::CompactPreHopInstanceId::new(
+                pair.pre_hop_identity().pre_hop_instance_id(),
+            )?;
+            if !wanted.contains(&instance) {
                 continue;
             }
-            let instance = instance.clone();
             let transformed = transform_paired_end(
                 root_seed,
                 event.event_id(),
@@ -1257,7 +1263,7 @@ impl RegeneratedPairs {
     /// serie y se reproduce aparte. Devolver un error aquí ocultaría ese caso
     /// legítimo de la contaminación.
     fn take(&mut self, key: &CleanPairKey) -> Option<ObservedPairTransformation> {
-        self.pairs.remove(key.pre_hop_instance_id())
+        self.pairs.remove(&key.compact_pre_hop_instance_id())
     }
 }
 

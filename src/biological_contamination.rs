@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::diagnostics::Diagnostic;
-use crate::identity::{EventId, IndividualId, LibraryId, PopulationId, PreHopInstanceId};
+use crate::identity::{
+    CompactPreHopInstanceId, EventId, IndividualId, LibraryId, PopulationId, PreHopInstanceId,
+};
 use crate::randomness::{
     F4TechnicalDecision, RootSeed, Subseed, derive_f4_technical_subseed, f4_partial_fisher_yates,
     f4_uniform_closed,
@@ -80,19 +82,22 @@ impl BiologicalContaminationSettings {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CleanPairKey {
     source_individual_id: IndividualId,
-    pre_hop_instance_id: PreHopInstanceId,
+    /// La instancia se guarda por sus símbolos, sin asignación: el inventario
+    /// retiene una clave por pareja de todo el evento y su texto era el mayor
+    /// consumidor que crecía con la cobertura. El orden es el mismo, porque
+    /// comparar los símbolos equivale a comparar el texto.
+    pre_hop_instance_id: CompactPreHopInstanceId,
 }
 
 impl CleanPairKey {
-    #[must_use]
-    pub const fn new(
+    pub fn new(
         source_individual_id: IndividualId,
-        pre_hop_instance_id: PreHopInstanceId,
-    ) -> Self {
-        Self {
+        pre_hop_instance_id: &PreHopInstanceId,
+    ) -> Result<Self, Diagnostic> {
+        Ok(Self {
             source_individual_id,
-            pre_hop_instance_id,
-        }
+            pre_hop_instance_id: CompactPreHopInstanceId::new(pre_hop_instance_id)?,
+        })
     }
 
     #[must_use]
@@ -101,8 +106,14 @@ impl CleanPairKey {
     }
 
     #[must_use]
-    pub const fn pre_hop_instance_id(&self) -> &PreHopInstanceId {
-        &self.pre_hop_instance_id
+    pub fn pre_hop_instance_id(&self) -> PreHopInstanceId {
+        self.pre_hop_instance_id.to_instance_id()
+    }
+
+    /// La forma compacta, para quien solo necesita comparar o indexar.
+    #[must_use]
+    pub const fn compact_pre_hop_instance_id(&self) -> CompactPreHopInstanceId {
+        self.pre_hop_instance_id
     }
 }
 
@@ -424,7 +435,7 @@ impl BiologicalContaminationMaterializer {
         let mut identity_deriver = F4TechnicalIdentityDeriver::new(root_seed, event_id);
         for pair in libraries.iter().flat_map(|library| library.own_pairs()) {
             identity_deriver
-                .register_existing_pre_hop_instance(pair.pre_hop_instance_id())
+                .register_existing_pre_hop_instance(&pair.pre_hop_instance_id())
                 .map_err(BiologicalContaminationMaterializationError::TechnicalIdentity)?;
         }
         Ok(Self { identity_deriver })
@@ -496,7 +507,7 @@ impl BiologicalContaminationMaterializer {
                 .identity_deriver
                 .derive_contamination_pre_hop_instance(
                     clean_recipient.library_id(),
-                    assignment.source_pair().pre_hop_instance_id(),
+                    &assignment.source_pair().pre_hop_instance_id(),
                 )
                 .map_err(BiologicalContaminationMaterializationError::TechnicalIdentity)?;
             emit(MaterializedBiologicalPair {

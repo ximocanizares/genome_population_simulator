@@ -83,14 +83,27 @@ fn root(last: u8) -> RootSeed {
     RootSeed::from_bytes(bytes)
 }
 
+/// Instancia con la forma que produce una derivación: el prefijo y 26 símbolos
+/// Base32, con los dos bits de relleno a cero.
+///
+/// El inventario solo admite esa forma, porque en una ejecución una instancia
+/// `PH_` siempre se deriva. Persona y ordinal se codifican en `A`-`Z`, cuyo
+/// orden ASCII coincide con el numérico, de modo que las claves conservan el
+/// mismo orden relativo que cuando estas pruebas usaban nombres legibles.
+fn derived_instance(person: &str, ordinal: u8) -> PreHopInstanceId {
+    let mut symbols = [b'A'; 26];
+    symbols[0] = person.as_bytes()[0];
+    symbols[1] = b'A' + ordinal;
+    let symbols = std::str::from_utf8(&symbols).expect("ASCII symbols");
+    instance(&format!("PH_{symbols}"))
+}
+
 fn clean(person: &str, pop: &str, count: u8) -> CleanLibraryPairs {
     let individual = id(person);
     let pairs = (0..count)
         .map(|ordinal| {
-            CleanPairKey::new(
-                individual.clone(),
-                instance(&format!("PH_{person}_{ordinal}")),
-            )
+            CleanPairKey::new(individual.clone(), &derived_instance(person, ordinal))
+                .expect("a derived instance is accepted")
         })
         .collect();
     CleanLibraryPairs::new(
@@ -434,12 +447,17 @@ fn materialization_replaces_recipient_pairs_with_new_recipient_instances_without
         .expect("one new contaminant");
     assert_eq!(contaminant.0, library("LIB_A"));
     assert!(contaminant.1.as_str().starts_with("PH_"));
-    assert!(contaminant.3.starts_with("observed:PH_B_"));
+    assert!(
+        libraries[1].own_pairs().iter().any(|source| {
+            contaminant.3 == format!("observed:{}", source.pre_hop_instance_id().as_str())
+        }),
+        "the contaminant payload comes from a pair of the donor inventory"
+    );
     assert!(
         !libraries[1]
             .own_pairs()
             .iter()
-            .any(|source| source.pre_hop_instance_id() == &contaminant.1),
+            .any(|source| source.pre_hop_instance_id() == contaminant.1),
         "the recipient gets a new PH instance and the donor inventory is untouched"
     );
     let aggregate = recipient
