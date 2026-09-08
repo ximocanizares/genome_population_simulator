@@ -373,12 +373,41 @@ no hay receptoras y el plan no se forma.
     binarios de forma consecutiva. La memoria no se ve afectada por esto; el
     tiempo, hasta en un factor de tres.
 
-- [ ] Término que aún crece con la cobertura: `RegeneratedPairs` retiene las
-  parejas transformadas de una biblioteca entera, unos 800 bytes por pareja,
-  porque las claves llegan en orden de identificador y no en el de generación.
-  Emitirlas en el orden de la serie exigiría cambiar el orden de escritura de
-  los FASTQ, que es parte de la identidad binaria: no es una optimización
-  transparente, sino una decisión sobre el formato publicado.
+### El buffer de parejas regeneradas
+
+Medido el 8 de septiembre de 2026. La línea de partida es `c0f8858`.
+
+- [ ] **No era un problema, y la cifra que lo señalaba era falsa.** Las notas
+  anteriores atribuían a `RegeneratedPairs` unos 800 bytes por pareja de una
+  biblioteca entera, y de ahí que pareciera el mayor término restante. Esa
+  cifra era una estimación, nunca una medida. Escribir cada pareja según sale
+  del muestreador, sin el mapa, no cambia el pico:
+
+  | Ensayo | Con mapa | Sin mapa |
+  |---|---:|---:|
+  | 20 individuos, 30x (50.000 parejas por biblioteca) | 217,5 MB | 217,5 MB |
+  | 2 individuos, 200x (333.000 parejas por biblioteca) | 395,3 MB | 395,1 MB |
+
+  Se probó también con pocas individuas y mucha cobertura precisamente porque
+  el mapa escala con las parejas *por biblioteca*, no con el total: si pesara
+  lo que se decía, con 333.000 parejas habría supuesto unos 200 MB de los 395.
+  No se observa nada. Se revirtió.
+  - El cambio no era transparente: escribir en orden de generación reordena los
+    registros del FASTQ, con otros SHA-256 y otros manifiestos. Se comprobó que
+    el contenido es el mismo —ordenando los registros de ambos ficheros, sus
+    resúmenes coinciden—, pero no compensa romper la identidad binaria a cambio
+    de nada.
+  - Queda como aviso: antes de aceptar un cambio que rompa una garantía,
+    comprobar con una medida que el beneficio existe. Aquí la garantía se iba a
+    entregar a cambio de un 18 % que era imaginario.
+
+- [ ] Dónde está realmente el pico, medido con el ensayo de 20 individuos a 30x:
+  147 MB corresponden a todo lo anterior al evento técnico —ejecutar sin
+  `[technical_event]` ya cuesta eso— y solo los 70 MB restantes son de F4. El
+  reparto de F4 según `heaptrack` a 15x, sobre un pico de montículo de 130 MB:
+  23,0 MB en los nodos de los dos registros de colisiones, 18,4 MB en el
+  inventario de claves y 19,9 MB en la proyección de verdad, que no pertenece a
+  F4. Bajar más exige mirar F0–F3, no seguir apretando F4.
 
 ## Memoria de la referencia
 
