@@ -68,7 +68,10 @@ pub fn generate_reference_with_unknown_fraction(
                 )
             });
         }
-        let sequence = DnaSequence::try_from_bytes(&bases).map_err(|error| {
+        // Se consume el búfer recién construido en lugar de copiarlo:
+        // `try_from_bytes` duplicaría la secuencia entera y el pico pasaría al
+        // doble del genoma generado.
+        let sequence = DnaSequence::try_from_owned_bytes(bases).map_err(|error| {
             internal_error(format!(
                 "generated A/C/G/T sequence was rejected: {error:?}"
             ))
