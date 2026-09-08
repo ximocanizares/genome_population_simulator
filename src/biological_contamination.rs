@@ -711,6 +711,12 @@ pub fn plan_biological_contamination(
     settings: &BiologicalContaminationSettings,
     libraries: &[CleanLibraryPairs],
 ) -> Result<BiologicalContaminationPlan, BiologicalContaminationError> {
+    // Índice de puesto a identificador, para nombrar a las donantes en el
+    // manifiesto sin recorrer las bibliotecas por cada asignación.
+    let individual_ids = libraries
+        .iter()
+        .map(|library| (library.individual(), library.individual_id()))
+        .collect::<BTreeMap<_, _>>();
     let by_individual = libraries
         .iter()
         .try_fold(BTreeMap::new(), |mut values, library| {
@@ -821,13 +827,10 @@ pub fn plan_biological_contamination(
         let donor_contributions = assignments.iter().try_fold(
             BTreeMap::new(),
             |mut totals, assignment| -> Result<_, BiologicalContaminationError> {
-                let donor = libraries
-                    .iter()
-                    .find(|library| {
-                        library.individual() == assignment.source_pair().source_individual()
-                    })
+                let donor = individual_ids
+                    .get(&assignment.source_pair().source_individual())
                     .ok_or(BiologicalContaminationError::ForeignOwnPair)?;
-                *totals.entry(donor.individual_id().clone()).or_insert(0_u64) += 1;
+                *totals.entry((*donor).clone()).or_insert(0_u64) += 1;
                 Ok(totals)
             },
         )?;

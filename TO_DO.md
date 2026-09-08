@@ -337,18 +337,48 @@ Medido el 8 de septiembre de 2026. La línea de partida es `d48a6e9`.
   exigía. La causa es la ya registrada: el asignador reutiliza el bloque que
   libera al crecer, así que el exceso no llega a sumarse al máximo residente.
 
-- [ ] Términos que aún crecen con la cobertura:
-  - `RegeneratedPairs` retiene las parejas transformadas de una biblioteca
-    entera, unos 800 bytes por pareja, porque las claves llegan en orden de
-    identificador y no en el de generación. Emitirlas en el orden de la serie
-    exigiría cambiar el orden de escritura de los FASTQ, que es parte de la
-    identidad binaria: no es una optimización transparente, sino una decisión
-    sobre el formato publicado.
-  - `plan_biological_contamination` clona la lista completa de candidatas de
-    las demás bibliotecas por cada receptora: cuadrático en número de
-    individuos, aunque ahora cada clave son 28 bytes y no contiene punteros.
-    Ordenar referencias en lugar de clones lo evitaría sin cambiar la
-    permutación, porque el criterio de orden es el mismo.
+### El clonado de candidatas del plan de contaminación
+
+Medido el 8 de septiembre de 2026 con un ensayo de 20 individuos y contaminación
+activa, que es el único que recorre esta vía: con `contamination_*_percent = 0`
+no hay receptoras y el plan no se forma.
+
+- [ ] **No era un problema.** `plan_biological_contamination` copia, por cada
+  receptora, el inventario completo de todas las demás bibliotecas para mezclar
+  las candidatas. Parecía un coste cuadrático que valía la pena evitar
+  recogiéndolas por referencia. Medido, no cambia nada: 240,4 frente a
+  239,9 MB de pico y 116,07 frente a 116,33 segundos de CPU. Se revirtió.
+  - La memoria no baja porque el plan se forma antes de materializar, y el pico
+    se alcanza después: el duplicado ya no vive cuando la ejecución llega a su
+    máximo.
+  - El tiempo tampoco, y tiene sentido: la copia es de valores contiguos de
+    28 bytes desde que la clave no contiene punteros. Ordenar esos valores es
+    más amigable con la caché que ordenar punteros que obligan a saltar por
+    memoria dispersa en cada comparación, de modo que lo que se ahorra en
+    copias se paga en el `sort`.
+  - Sí se conservó el índice de puesto a identificador para nombrar a las
+    donantes en el manifiesto, que sustituye una búsqueda lineal por biblioteca
+    en cada asignación. No se nota con veinte individuas, pero era un patrón
+    cuadrático introducido al pasar la clave a puestos, y el índice es además
+    más simple.
+
+- [ ] **Advertencia sobre las medidas de tiempo.** Las primeras lecturas de este
+  trabajo dieron 200 y 304 segundos para el mismo ensayo que en limpio tarda
+  116, y una de ellas llevó a concluir que el cambio empeoraba la CPU un 66 %
+  cuando no la cambia. La causa eran bucles de espera activa (`until …; do :;
+  done`, sin pausa) dejados en segundo plano: cada uno ocupa un núcleo de los
+  cuatro de la máquina.
+  - Antes de creerse una cifra de tiempo, comprobar que no hay nada más
+    corriendo (`uptime` debe dar una carga cercana a cero) y medir los dos
+    binarios de forma consecutiva. La memoria no se ve afectada por esto; el
+    tiempo, hasta en un factor de tres.
+
+- [ ] Término que aún crece con la cobertura: `RegeneratedPairs` retiene las
+  parejas transformadas de una biblioteca entera, unos 800 bytes por pareja,
+  porque las claves llegan en orden de identificador y no en el de generación.
+  Emitirlas en el orden de la serie exigiría cambiar el orden de escritura de
+  los FASTQ, que es parte de la identidad binaria: no es una optimización
+  transparente, sino una decisión sobre el formato publicado.
 
 ## Memoria de la referencia
 
