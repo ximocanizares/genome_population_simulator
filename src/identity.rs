@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::Arc;
 
 use crate::diagnostics::Diagnostic;
 use crate::randomness::{DERIVATION_VERSION, RootSeed};
@@ -11,20 +12,32 @@ pub const ID_CATALOG_VERSION: &str = "3";
 pub const F5_ID_CATALOG: &str = "id-catalog-v4";
 pub const TECHNICAL_ID_DERIVATION_VERSION: u32 = 2;
 
+/// El texto de un identificador vive en una asignación compartida e inmutable.
+///
+/// Un identificador no se modifica nunca después de construirse, y F4 clona el
+/// mismo valor millones de veces: la biblioteca de una pareja, el individuo de
+/// cada clave limpia o la copia que el registro de colisiones conserva. Con
+/// `Arc<str>` cada clon es un contador, no una asignación nueva, y el registro
+/// comparte el texto que ya sostiene la clave en lugar de duplicarlo. El orden,
+/// la igualdad, el hash y el `Debug` siguen siendo los del texto, de modo que
+/// ningún sorteo ni artefacto cambia.
 macro_rules! typed_id {
     ($name:ident, $category:literal) => {
         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub struct $name(String);
+        pub struct $name(Arc<str>);
 
         impl $name {
             pub fn parse(value: impl Into<String>, scope: &str) -> Result<Self, Diagnostic> {
                 let value = value.into();
                 validate_provided_id(&value, $category, scope)?;
-                Ok(Self(value))
+                Ok(Self(Arc::from(value)))
             }
 
-            fn from_automatic(value: String) -> Self {
-                Self(value)
+            /// Acepta el texto recién derivado o el que ya vive compartido,
+            /// de modo que el registro de colisiones y el identificador
+            /// puedan sostener una única asignación.
+            fn from_automatic(value: impl Into<Arc<str>>) -> Self {
+                Self(value.into())
             }
 
             #[must_use]
@@ -79,13 +92,13 @@ pub(crate) fn compose_template_id(library_id: &LibraryId, template_ordinal: u64)
 macro_rules! provided_typed_id {
     ($name:ident, $category:literal) => {
         #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-        pub struct $name(String);
+        pub struct $name(Arc<str>);
 
         impl $name {
             pub fn parse(value: impl Into<String>, scope: &str) -> Result<Self, Diagnostic> {
                 let value = value.into();
                 validate_provided_id(&value, $category, scope)?;
-                Ok(Self(value))
+                Ok(Self(Arc::from(value)))
             }
 
             #[must_use]
@@ -337,9 +350,13 @@ impl TechnicalIdClass {
 ///
 /// Las dos clases usan la derivación v2 de `id-catalog-v3`; no comparten el
 /// material ni el registro de las clases heredadas v1.
+///
+/// El registro guarda el texto compartido del identificador, no una copia: una
+/// instancia ya emitida por otra frontera se anota sin volver a asignar su
+/// texto, que la clave limpia sostiene igualmente.
 #[derive(Debug, Default)]
 pub struct TechnicalIdentityRegistry {
-    registered: BTreeSet<(TechnicalIdClass, String)>,
+    registered: BTreeSet<(TechnicalIdClass, Arc<str>)>,
 }
 
 impl TechnicalIdentityRegistry {
@@ -352,7 +369,7 @@ impl TechnicalIdentityRegistry {
     ) -> Result<(), Diagnostic> {
         self.register(
             TechnicalIdClass::PreHopInstance,
-            pre_hop_instance_id.as_str(),
+            Arc::clone(&pre_hop_instance_id.0),
             "existing",
         )
     }
@@ -376,7 +393,8 @@ impl TechnicalIdentityRegistry {
                 ("template_id", template_id.as_str()),
             ],
         )?;
-        self.register(TechnicalIdClass::PreHopInstance, &text, "own")?;
+        let text = Arc::<str>::from(text);
+        self.register(TechnicalIdClass::PreHopInstance, Arc::clone(&text), "own")?;
         Ok(PreHopInstanceId::from_automatic(text))
     }
 
@@ -402,7 +420,12 @@ impl TechnicalIdentityRegistry {
                 ),
             ],
         )?;
-        self.register(TechnicalIdClass::PreHopInstance, &text, "contamination")?;
+        let text = Arc::<str>::from(text);
+        self.register(
+            TechnicalIdClass::PreHopInstance,
+            Arc::clone(&text),
+            "contamination",
+        )?;
         Ok(PreHopInstanceId::from_automatic(text))
     }
 
@@ -424,26 +447,99 @@ impl TechnicalIdentityRegistry {
                 ("pre_hop_instance_id", pre_hop_instance_id.as_str()),
             ],
         )?;
-        self.register(TechnicalIdClass::TechnicalPair, &text, "final")?;
+        let text = Arc::<str>::from(text);
+        self.register(TechnicalIdClass::TechnicalPair, Arc::clone(&text), "final")?;
         Ok(TechnicalPairId::from_automatic(text))
     }
 
     fn register(
         &mut self,
         class: TechnicalIdClass,
-        identifier: &str,
+        identifier: Arc<str>,
         causes: &str,
     ) -> Result<(), Diagnostic> {
-        if self.registered.insert((class, identifier.to_owned())) {
+        if self.registered.insert((class, Arc::clone(&identifier))) {
             return Ok(());
         }
         Err(Diagnostic::domain(
             "GPS-DOMAIN-002",
             "La derivación de una identidad produjo una colisión.",
         )
-        .with("identifier", identifier)
+        .with("identifier", &*identifier)
         .with("category", class.name())
         .with("causes", causes))
+    }
+}
+
+#[cfg(test)]
+mod shared_text_tests {
+    use super::{
+        EventId, LibraryId, PreHopInstanceId, TechnicalIdentityRegistry, compose_template_id,
+    };
+    use crate::randomness::RootSeed;
+    use std::sync::Arc;
+
+    /// Clonar una identidad no vuelve a asignar su texto. F4 depende de esto:
+    /// cada clave limpia clona el individuo de su biblioteca.
+    #[test]
+    fn a_cloned_identity_shares_its_text() {
+        let original = PreHopInstanceId::parse("PH_SHARED", "test").expect("valid identifier");
+        let copy = original.clone();
+
+        assert!(Arc::ptr_eq(&original.0, &copy.0));
+        assert_eq!(original, copy);
+        assert_eq!(copy.as_str(), "PH_SHARED");
+    }
+
+    /// El registro de colisiones anota la instancia que ya sostiene otra
+    /// frontera sin duplicar su texto.
+    #[test]
+    fn the_registry_shares_the_text_of_an_existing_instance() {
+        let existing = PreHopInstanceId::parse("PH_EXISTING", "test").expect("valid identifier");
+        let mut registry = TechnicalIdentityRegistry::default();
+
+        registry
+            .register_existing_pre_hop_instance(&existing)
+            .expect("a first registration is accepted");
+
+        let stored = registry
+            .registered
+            .iter()
+            .map(|(_, text)| text)
+            .find(|text| text.as_ref() == "PH_EXISTING")
+            .expect("the instance is registered");
+        assert!(Arc::ptr_eq(stored, &existing.0));
+    }
+
+    /// Una instancia derivada comparte su texto con el registro y sigue
+    /// detectando una segunda anotación del mismo identificador.
+    #[test]
+    fn a_derived_instance_shares_its_text_and_still_detects_a_collision() {
+        let root = RootSeed::from_bytes([0x11; 32]);
+        let event_id = EventId::parse("EVT_shared", "test").expect("valid identifier");
+        let library_id = LibraryId::parse("LIB_shared", "test").expect("valid identifier");
+        let template_id = compose_template_id(&library_id, 0);
+        let mut registry = TechnicalIdentityRegistry::default();
+
+        let derived = registry
+            .derive_own_pre_hop_instance(root, &event_id, &library_id, &template_id)
+            .expect("the first derivation is registered");
+        let stored = registry
+            .registered
+            .iter()
+            .map(|(_, text)| text)
+            .find(|text| text.as_ref() == derived.as_str())
+            .expect("the derived instance is registered");
+        assert!(Arc::ptr_eq(stored, &derived.0));
+
+        let error = registry
+            .register_existing_pre_hop_instance(&derived)
+            .expect_err("a repeated identifier collides");
+        assert_eq!(error.code(), "GPS-DOMAIN-002");
+        assert_eq!(
+            error.context().get("identifier").map(String::as_str),
+            Some(derived.as_str())
+        );
     }
 }
 

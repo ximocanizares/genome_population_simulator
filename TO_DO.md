@@ -152,17 +152,96 @@ Medido el 8 de septiembre de 2026 con la referencia reducida de tomate de
   - Al variar solo la cobertura, el pico dejó de moverse: 96,2 / 96,3 / 99,7 MB
     para 4 individuos a 4x, 8x y 16x, donde antes eran 96,4 / 119,0 / 202,1 MB.
 
-- [ ] El pico restante todavía crece con la cobertura, aunque mucho más
-  despacio. La primera pasada conserva las claves PH de todas las parejas de
-  todas las bibliotecas (`CleanLibraryPairs`) para poder planificar la
-  contaminación biológica antes de materializar. Con 20 individuos son 190 MB a
-  8x, 279 MB a 15x y 468 MB a 30x: unos 12,6 MB por unidad de cobertura sobre
-  un término fijo de unos 90 MB, es decir del orden de 380 bytes por clave
-  retenida, que es lo que ocupan dos identificadores de texto.
-  - Es el siguiente candidato si hace falta bajar más. Reducirlo exige decidir
-    si el plan de contaminación puede formarse sin tener a la vez las claves de
-    todas las bibliotecas, o si basta con representar la clave de forma
-    compacta en lugar de dos cadenas.
+### Las claves PH que la primera pasada conserva
+
+Medido el 8 de septiembre de 2026 con la misma referencia reducida de 500.000
+bases, sobre cuatro núcleos. La línea de partida es `ab33d05`.
+
+| Ensayo | Antes | Después | Δ |
+|---|---:|---:|---:|
+| 4 individuos, 16x, PE neutro | 99,7 MB | 91,8 MB | −8 % |
+| 4 individuos, 16x, con artefactos | 102,8 MB | 91,7 MB | −11 % |
+| 20 individuos, 8x, PE neutro | 190,3 MB | 161,0 MB | −15 % |
+| 20 individuos, 15x, PE neutro | 279,2 MB | 229,6 MB | −18 % |
+| 20 individuos, 30x, PE neutro | 467,7 MB | 374,7 MB | −20 % |
+
+- [x] **Resuelto.** Una clave retenida ya no cuesta dos asignaciones de texto.
+  El texto de todo identificador tipado vive ahora en una asignación compartida
+  e inmutable (`Arc<str>` dentro de `typed_id!`), de modo que clonar una
+  identidad es incrementar un contador: el individuo, que se repite en todas
+  las claves de su biblioteca, se sostiene una sola vez, y el registro de
+  colisiones técnicas de F4 anota el mismo texto que la clave ya sostiene en
+  lugar de duplicarlo. El orden, la igualdad, el hash y el `Debug` siguen
+  siendo los del texto, así que ningún sorteo ni identificador se mueve: los
+  artefactos publicados quedan idénticos byte a byte (`diff -r`) en las cinco
+  configuraciones, incluida la que activa errores de secuenciación, quimeras,
+  *index hopping* y contaminación. La pendiente bajó de 12,6 a 9,7 MB por
+  unidad de cobertura sobre un término fijo de unos 84 MB, y el tiempo mejoró
+  también: el ensayo de 30x pasó de 69,8 a 60,5 segundos y las llamadas al
+  asignador cayeron un 27 % (118,6 a 86,2 millones en el ensayo de 8x).
+  - Reparto del pico según `heaptrack` con símbolos, ensayo de 20 individuos a
+    8x, en megabytes de montículo pedido:
+
+    | Consumidor | Antes | Después |
+    |---|---:|---:|
+    | Proyección de verdad (no depende de la cobertura) | 33,7 | 33,7 |
+    | Vector de claves limpias de las 20 bibliotecas | 15,0 | 10,0 |
+    | Texto de las instancias `PH_` (clave, registro y derivación) | 15,5 | 12,8 |
+    | Texto del individuo repetido en cada clave | 1,6 | 0,0 |
+    | Nodos del registro de colisiones de instancias `PH_` | 12,9 | 9,9 |
+    | Registro de colisiones de parejas técnicas `TP_` | 19,3 | 21,0 |
+    | Parejas regeneradas de la biblioteca en curso | 11,9 | 10,9 |
+    | **Pico de montículo** | **145,2** | **129,5** |
+    | **RSS máximo** | **190,3** | **161,0** |
+
+    El RSS baja más que el montículo pedido porque desaparecen unas 530.000
+    asignaciones vivas, y cada una costaba además su cabecera y su redondeo de
+    bloque.
+
+  - La parte variable de `PreHopInstanceId` **no** es un ordinal derivable en
+    la práctica: es base32 de los 16 primeros bytes de un BLAKE3 sobre
+    (semilla, evento, biblioteca, origen, plantilla). Se deriva del ordinal de
+    plantilla, sí, pero el orden de las claves es el del texto y ese orden
+    alimenta los sorteos de donante y de retirada; el alfabeto base32 no
+    conserva el orden de los bytes (`2` vale 50 y `A` vale 65), de modo que
+    ordenar por ordinal o por el dígito crudo daría otra permutación y otros
+    FASTQ. Por eso se descartó guardar solo el ordinal, y por eso una
+    representación compacta de longitud fija tampoco compensa: el texto tiene
+    que seguir estando para comparar.
+  - No hizo falta la vía invasiva —formar el plan de contaminación sin tener a
+    la vez las claves de todas las bibliotecas—. La representación compartida
+    bastó para bajar un 20 % sin tocar ninguna decisión técnica.
+  - Lo que no funcionó: `shrink_to_fit()` sobre el inventario de cada
+    biblioteca. La holgura del crecimiento duplicado existe (unos 1,5 MB de los
+    10 del vector a 8x), pero no se traduce en RSS, porque el asignador
+    reutiliza los búferes que liberó la biblioteca anterior. El pico de 30x
+    solo pasó de 374,7 a 373,6 MB, dentro del ruido, así que se descartó por no
+    pagar una copia por biblioteca a cambio de nada.
+  - Coste conocido del cambio: para un texto que nadie más sostiene, `Arc<str>`
+    gasta 16 bytes de cabecera de contadores en el montículo, así que el
+    registro de parejas técnicas subió unos 8 bytes por pareja (19,3 a
+    21,0 MB). Lo compensa con mucho el ahorro de las `PH_`, que antes se
+    copiaban tres veces y ahora las sostienen a la vez la clave, el registro y
+    el conjunto de la regeneración.
+
+- [ ] El pico sigue creciendo con la cobertura, ahora a 9,7 MB por unidad, pero
+  las claves PH ya no son el consumidor principal. Con el reparto de arriba, el
+  siguiente candidato es el registro de colisiones de F4.5: conserva el texto
+  de cada `TechnicalPairId` de todo el evento (21,0 MB a 8x, del orden de
+  80 MB a 30x) y ninguna otra estructura lo sostiene, de modo que no hay nada
+  que compartir. Tocarlo es tocar una garantía de identidad (DTC-039), así que
+  conviene tratarlo como trabajo propio y con su evidencia.
+  - El otro término que crece es `RegeneratedPairs`: retiene las parejas
+    transformadas de una biblioteca entera, unos 800 bytes por pareja, porque
+    las claves llegan en orden de identificador y no en el de generación.
+    Emitirlas en el orden de la serie exigiría cambiar el orden de escritura de
+    los FASTQ, que es parte de la identidad binaria.
+  - El plan de contaminación, además, clona la lista completa de candidatas de
+    todas las demás bibliotecas por cada receptora. Con el texto compartido ya
+    no asigna cadenas, pero sigue copiando 32 bytes por clave y por receptora,
+    lo que es cuadrático en número de individuos. Ordenar referencias en lugar
+    de clones lo evitaría sin cambiar la permutación, porque el criterio de
+    orden es el mismo.
 
 ## Memoria de la referencia
 
