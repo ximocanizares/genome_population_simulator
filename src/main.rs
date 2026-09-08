@@ -55,7 +55,7 @@ fn main() -> ExitCode {
             genome_population_simulator::diagnostics::Diagnostic::f5_configuration(
                 parsed.path.display().to_string(),
                 "command",
-                "run F5 no está habilitado en F5.0.4; la publicación pertenece a F5.4",
+                "run F5 todavía no está habilitado; la publicación pertenece a F5.4",
             ),
         ),
         (CommandMode::Run, CliValidatedConfig::Legacy(effective)) => parsed.output.as_deref().map_or_else(

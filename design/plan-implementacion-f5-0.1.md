@@ -4,10 +4,16 @@
 
 - **Fecha:** 1 de septiembre de 2026.
 - **Estado:** ejecutable de forma secuencial después del cierre verificable de
-  F4. No autoriza *commit*, publicación externa ni inicio de F6/F7.
+  F4. No autoriza publicación externa ni inicio de F6/F7. La cláusula original
+  decía además «no autoriza *commit*», que ningún otro plan del proyecto
+  contiene y que el historial contradice —hay commits de F5 en `main` desde su
+  aprobación—: se retira por inaplicada en lugar de mantenerla como norma
+  muerta.
 - **Fuentes normativas:** REQ-EVO-32–34/38–41/43/44/46–53/74–78 y los REQ de
   configuración, individuo, validación, manifiesto e interfaz asignados a F5 en
-  la matriz; ACE-89/90/104/117, DTC-089, arquitectura §15 y hoja de ruta §F5.
+  la matriz; ACE-89/90/91/104/114/115/117, DTC-089, arquitectura §15 y hoja de
+  ruta §F5. La matriz asigna a F5 también REQ-EVO-01 y REQ-EVO-03, fuera del
+  rango citado arriba.
 
 F5 genera internamente bloques y haplotipos SNP A/C/G/T, ajusta marginales y
 media `r²(d)` y asigna fundadores completos e intactos. No admite panel,
@@ -18,9 +24,47 @@ de artefactos; F5.5 solo audita que el paquete resultante no las modifique.
 
 La jerarquía única es F5.0–F5.6. Cada hito depende únicamente del anterior; no
 existe dependencia de revisión futura ni ciclo F5→F6/F7→F5. Los pasos de
-esquema crean versiones nuevas sin reescribir las ya publicadas. No queda
+esquema crean versiones nuevas sin reescribir las publicadas **externamente**;
+ningún esquema F5 lo está todavía, de modo que el contrato de
+`resource_preflight` puede completarse dentro de v5 sin crear una versión
+nueva. Esa distinción es necesaria: DTC-089 define `resource_preflight` como
+objeto exacto con `input_identities` y `phases`, y exige actualizar ambos
+esquemas y sus lectores antes de reanudar la implementación. No queda
 ninguna decisión funcional o técnica F5 pendiente: DTPD-115 pertenece a F9 y no
 es una puerta de admisión ni de ejecución de este plan.
+
+### 1.1. Revisión adversarial del 8 de septiembre de 2026
+
+Una revisión adversarial contrastó este plan contra DTC-089, los REQ, la
+arquitectura, la matriz de trazabilidad, el código F5 ya implementado, el
+historial de Git y la ejecución real: la batería completa, el test H10 aislado y
+un experimento con el binario sobre el fixture de fragmentación. Registró cuatro
+hallazgos graves, seis medios y cinco menores, y retiró siete sospechas al
+comprobarlas.
+
+| ID | Hallazgo | Estado |
+|---|---|---|
+| F5-R01 | El criterio «límite exacto admite / exacto−1 rechaza» omite la construcción de anchura fija que DTC-089 exige, de modo que seguirlo al pie de la letra produce fixtures imposibles; H10 falla exactamente por eso | **Cerrado** en F5.0.4, F5.1.2.4 y F5.1.2.6 |
+| F5-R02 | El esquema efectivo v5 ya publicado no tiene `input_identities` ni `phases`, y el plan promete a la vez no reabrir esquemas y copiarlos en .5 | **Cerrado** en §2 y F5.0.1, con trabajo de contrato pendiente |
+| F5-R03 | Subhitos cerrados con sus dependencias abiertas, estado del plan divergente de Git y verificación circular de F5.0.4 | **Cerrado** en F5.0.4 y en el estado de los hitos |
+| F5-R04 | `phase_id`, componente del identificador `FCP_`, no está definido en ningún documento ni tiene constructor F5 | **Abierto**: exige decidir sobre DTC-089 |
+
+Los medios y menores se corrigieron en la misma pasada: el fixture de máscaras
+comparables, la contradicción entre la cláusula de *commit* y el historial, el
+techo implícito que la cota de 65536 bytes impone al número de fundadores, la
+afirmación inexacta sobre `input_parser_peak_bytes`, el momento en que se valida
+el SHA del FASTA, el desvío real de H10, los comandos de las puertas, las
+referencias ACE/REQ omitidas en la cabecera y el volumen de registro de estado
+incrustado en el plan.
+
+Lo que la revisión **retiró** tras comprobarlo también importa, porque acota
+dónde no hay problema: las 46 filas de la matriz de trazabilidad son exactas y
+únicas e incluyen las tres que el plan nombra; el fixture de anchura fija de
+memoria existe y hace punto fijo; los catálogos RNG e ID de F5.0.3 están
+completos; no se han incorporado crates nuevas; las fórmulas del fixture de
+fragmentación se derivan exactamente de la fórmula v7; no queda `fs::read` en la
+ruta F5 fuera de pruebas; y **el modelo de presupuesto no tiene doble cuenta ni
+divergencia entre la reserva prospectiva y la fórmula final**.
 
 ## 2. Criterios de orden y puertas comunes
 
@@ -33,10 +77,34 @@ asignaciones ya incluidas en ese paquete. Los riesgos de error silencioso
 se contrastan con lectores u oráculos que no comparten el productor.
 
 Cada paso ejecuta las pruebas específicas indicadas y, antes de su pausa:
-`cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`
-y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
+las puertas exactas de `CONTRIBUTING.md` —`cargo fmt --all -- --check`,
+`cargo clippy --workspace --all-targets --locked -- -D warnings` y
+`cargo test --workspace --all-targets --locked`, más `cargo test --workspace
+--doc --locked`— restringiendo la última al subconjunto pertinente. El cierre
+ejecuta la suite completa. No se usa `--all-features`: el proyecto no declara
+ninguna.
+
+**Techo implícito de la cota de documento (F5-R08).** DTC-089 fija un límite
+físico inclusivo de 65536 bytes para el general y el escenario, y F5 exige que
+`founder_ids`/`founder_keys` tengan exactamente `individual_count` elementos.
+Ambas cosas juntas ponen un techo al tamaño de la población que ningún REQ
+declara: con claves cortas, del orden de cuatro o cinco mil fundadores, y menos
+si el escenario lleva algo más. La misma cota alcanza ya al general v2 y a la
+lista `individual_ids` de F4. El techo se declara aquí como límite conocido, y
+F5.0.1 lo comprueba con un documento legítimo próximo al límite; ampliarlo
+exigiría reabrir DTC-089 y no pertenece a F5.
 
 ## 3. F5.0 — contratos y preflight
+
+**Estado de los hitos de F5.0 y F5.1.1 (8 de septiembre de 2026).** Sus casillas
+figuraban sin marcar mientras F5.1.2.1–.3, que dependen de ellos, figuraban
+cerrados. Git registra `307995f` «cerrar contratos y preflight de F5» y
+`c73a14e` «cerrar planificador de longitudes F5.1.1», pero ninguno marcó una
+casilla, de modo que el plan nunca reflejó ese cierre. La casilla de cada hito
+se conserva abierta a propósito hasta que la revisión independiente de F5.1.2
+confirme que la sustitución v7 no los reabrió; lo que no puede repetirse es
+cerrar un subhito dependiente sin dejar constancia del estado de aquello de lo
+que depende.
 
 - ☐ **F5.0.1.** Crear y cerrar los contratos externos completos general v3,
   escenario F5 v1, efectivo v5, manifiesto general v5, perfil F5 v1, los siete
@@ -51,8 +119,13 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
     el escenario perfil/máscara/política, y efectivo/manifiesto comprueban sus
     copias iguales con versiones general 3, escenario 1, efectivo 5/F5 1 y
     manifiesto 5/F5 1, verdad 2 y
-    `truth_projection="f5-founder-truth-projection-v2"`. Ningún hito posterior amplía
-    estos esquemas.
+    `truth_projection="f5-founder-truth-projection-v2"`. Ningún hito posterior
+    amplía estos esquemas, con una excepción declarada: el objeto
+    `resource_preflight` se cierra en F5.1.2.5 con `input_identities` y
+    `phases`, que DTC-089 exige y que la proyección escalar de F5.1.2.3 dejó
+    fuera. Hasta entonces el esquema efectivo v5 publica solo los 27 campos
+    escalares y su `additionalProperties: false` los rechazaría, así que
+    completarlo es trabajo de .5 y no una versión nueva.
   - Se comprueba con: pareja mínima válida; rechazo de cero, lista o varios
     escenarios; rechazo de v2/v4 como F5; inmutabilidad byte a byte de los tres
     esquemas heredados; campos ausentes/desconocidos;
@@ -89,6 +162,13 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
   - Procede de: REQ-EVO-74/76/77, ACE-117 y arquitectura §15.
   - Cambia: admisión, escáner secuencial referencia+máscara, lista acotada de
     tramos elegibles y catálogo diagnóstico F5.
+  - El hito se cierra con las fórmulas y el ledger, que no abren ficheros y son
+    comprobables con observaciones inyectadas. Los fixtures que exigen recorrer
+    físicamente un FASTA o una máscara —el de 80 MiB de descripción, el de
+    `region_id` largo y el de 4096 tramos— se verifican en F5.1.2.4, que es
+    donde existe el escáner. Sin esa separación la comprobación sería circular:
+    F5.1.2.1 depende de este núcleo y este núcleo se verificaría con el lector
+    de F5.1.2.4.
   - Se comprueba con: decimal extremo, T=0, soporte discontinuo, T>E,
     layout imposible, `S_bound` previo al RNG, H×S excesivo, `bin_count` por
     población, `reference_bases_processed`, bytes físicos FASTA/máscara y de
@@ -101,6 +181,13 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
     salida —incluidas copias/configuración, salidas activadas no F5, manifiesto
     y `truth.jsonl`—, límites menores declarados,
     cero consulta de RAM/CPU o perfil externo, cero consumo RNG y cero destino.
+    Toda frontera «límite exacto admite, límite menos uno rechaza» se construye
+    con el literal de anchura fija y punto fijo de DTC-089, y en las tres
+    dimensiones, no solo en memoria de trabajo: los bytes del escenario entran
+    en la cota de operaciones como `2*scenario_toml_bytes`, de modo que escribir
+    el límite después de calcular la cota la cambia y hace el fixture
+    irrealizable. El documento base ya contiene la línea del límite con su
+    anchura definitiva; el punto fijo solo sustituye sus dígitos.
     Dos FASTA con la misma geometría y bases pero descripciones mínima y de
     80 MiB aumentan la cota exactamente por sus bytes recorridos en preflight y
     recuperación REF; el límite igual se admite y el límite menos uno se
@@ -109,7 +196,9 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
     Un fixture usa el mismo escenario con `block_count=1`, el mismo FASTA de
     una secuencia y dos máscaras con igual E: una deja un único tramo compacto
     y la otra 4096 tramos de longitud `Lmin`, separados por una base
-    enmascarada. Debe reconstruir
+    enmascarada. Las dos máscaras se igualan en bytes rellenando `region_id`,
+    porque 4095 filas frente a una cambian `mask_bytes_processed` y sin ese
+    relleno «iguales todos los demás valores» es falso. Debe reconstruir
     `reference_bases_processed=4096*Lmin+4095` y, manteniendo iguales todos los
     demás valores, obtener una diferencia exacta de operaciones
     `4095*(3+max_layout_attempts+5*max_layout_attempts*block_count)` —emisión,
@@ -205,7 +294,8 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
       reserva prospectiva de TSV y dimensión diagnóstica; las correcciones
       locales también constan allí. Una revisión de cierre posterior rechazó
       todavía R1 porque la proyección escalar v7 había heredado el campo
-      interno `input_parser_peak_bytes`: se retiró del productor y del esquema
+      interno `input_parser_peak_bytes`: se retiró de la proyección publicada
+              y del esquema
       efectivo —y, por referencia, del manifiesto— y se añadió un oráculo de
       claves literal e independiente para ambas rutas. Esta proyección de .3
       no se presenta como el contrato final: `input_identities` y `phases`
@@ -215,10 +305,19 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
       diagnóstica y las rutas públicas. H10 sigue reservado a F5.1.2.6 y no se
       presenta como gate verde.
 
+  > Los bloques de estado fechados de F5.1.2.3 y F5.1.2.4 se conservan porque
+  > documentan reaperturas que cambiaron el alcance, no avances rutinarios. El
+  > detalle contable vive en `evidence/f5.1.2/`; el plan no lo duplica.
+
   **✅ Pausa de revisión F5.1.2-A.** Aprobar dispatcher, bootstrap, lector, perfil
   y ledger. Exigir ausencia mecánica de `fs::read` y de sondas parciales en la
   ruta F5, pruebas exacto/exacto−1 y cero apertura posterior. No continuar con
   referencia hasta corregir todos los hallazgos.
+  Esta pausa se aprobó con el target `--lib` en rojo por H10, contra la puerta
+  común de §2. Se acepta como excepción declarada y acotada, no como práctica:
+  H10 vive en `src/f5_layout.rs`, pertenece a este mismo hito y su causa quedó
+  establecida (F5-R01). Ninguna pausa posterior se aprueba con un target en
+  rojo; F5.1.2.6 lo deja verde reescribiendo el fixture.
 
   - ☐ **F5.1.2.4.** Integrar referencia y máscara en el mismo ledger.
     - Depende de: revisión F5.1.2-A aprobada.
@@ -226,16 +325,20 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
     - Cambia: primer FASTA y única máscara en streaming; reserva de dos visitas
       por byte FASTA antes de leerlo; comprobación previa a retener IDs, filas y
       tramos; receipt de tamaño/SHA observado en el mismo handle.
+    - El SHA del FASTA se observa **dentro** del escaneo y bajo el ledger, no
+      antes del preflight: donde DTC-089 dice «antes del preflight de recursos»
+      describe el flujo anterior a v7, superado por el propio DTC-089 al
+      introducir el ledger. El escaneo es el único lector físico.
     - Se comprueba con: descripciones FASTA y `region_id` largos, línea de
       máscara excesiva, referencia/máscara vacía o truncada, límite exacto y
-      exacto−1 en operaciones y memoria, SHA incorrecto y espías que prueban
-      cero RNG/destino. El oráculo recuenta bytes, bases y tramos sin reutilizar
+      exacto−1 en operaciones y memoria —siempre con el literal de anchura fija
+      y punto fijo de F5.0.4, porque los bytes del escenario entran en la cota
+      de operaciones—, SHA incorrecto y espías que prueban cero RNG/destino. El oráculo recuenta bytes, bases y tramos sin reutilizar
       estructuras productivas.
     - Estado en corrección (5 de septiembre de 2026): C1–C6 están aplicados
       localmente con regresiones focales y gates de formato, Clippy y
       documentación correctos. La suite completa conserva únicamente H10
-      (en el cierre más reciente, `4961/4953`, +8), aplazado expresamente a
-      F5.1.2.6 como C7. La
+      (`4961/4952`, +9), aplazado expresamente a F5.1.2.6 como C7. La
       contabilidad completa consta en
       `evidence/f5.1.2/aplicacion-correcciones-f5.1.2.4-2026-09-05.md`.
       F5.1.2.4 permanece abierto hasta la revisión independiente; no existe
@@ -257,6 +360,22 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
       entropía o destino. F5.1.2.4 sigue sin marcar hasta otra revisión
       independiente. No se ha modificado la visibilidad pública provisional,
       que podrá reevaluarse al sustituirla por el sellado interno de .5.
+    - Causa de H10, establecida el 8 de septiembre de 2026 (F5-R01): **no es un
+      defecto del modelo de presupuesto**. El fixture calcula la cota sin la
+      línea del límite y después añade `max_operation_units = 4952`, cuyos
+      27 bytes entran dos veces en la cota; el exceso observado es exactamente
+      2×27 = 54, y declarar 5006 = 4952 + 54 admite el mismo fixture. Se
+      comprobó con el binario sobre el fixture, variando solo el literal a
+      anchura constante: sin línea admite, 4952 y 5005 rechazan con acumulado
+      5006, y 5006 admite. La reserva prospectiva del escaneo coincide con la
+      fórmula final, de modo que no hay doble cuenta ni divergencia.
+      Por tanto la aserción `preflight.operation_units() ==
+      baseline.operation_units()` del fixture es insatisfacible por
+      construcción en v7, y H10 no puede cerrarse ajustando una constante:
+      exige reescribir el fixture con la línea de anchura fija ya presente en
+      el documento base, como hace
+      `f5_bootstrap_dispatch::fixed_width_bootstrap_memory_limit_…` para
+      memoria.
 
   - ☐ **F5.1.2.5.** Sellar `F5AdmissionReceipt`, exigir
     `SealedF5Admission` en layout y acotar la recuperación REF.
@@ -283,7 +402,10 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
     - Procede de: REQ-EVO-74/77 y DTC-089 «Layout».
     - Cambia: integración final; elimina las rutas v5/v6 y sus pruebas que
       afirmen admisión por metadata o por sonda, sin cambiar el algoritmo
-      biológico.
+      biológico. Reescribe el fixture instrumental de H10 con la línea del
+      límite de anchura fija presente en el documento base, que es lo que ese
+      test necesita para ser satisfacible; su aserción actual de igualdad entre
+      la cota con y sin límite declarado no puede cumplirse en v7.
     - Se comprueba con: dos contigs, adyacencia, N, máscara, fragmentación,
       menos de dos SNP, reintento, agotamiento e invariancia ante planificación.
       El fixture instrumental recorre carga, admisión, binding, streaming FASTA
@@ -365,6 +487,17 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
 - ☐ **F5.3.3.** Materializar antes de toda salida las identidades de fundador y
   su pertenencia única: `IndividualId`, `FCP_` por secuencia/copia y `FHA_` por
   bloque como asignación separada.
+  - **Decisión abierta (F5-R04).** DTC-089 deriva `FCP_` de `…, sequence_id,
+    phase_id`, pero `phase_id` no está definido en ningún documento y `PhaseId`
+    es en el código un identificador aportado por la usuaria, sin constructor
+    F5; todo lo demás en F5 nombra la copia como `copy_index`. Mientras eso no
+    se resuelva, el oráculo de F5.4.2 no puede rederivar `FCP_` leyendo solo
+    `truth.jsonl`, que lleva `copy_index` y no `phase_id`, y dos
+    implementaciones podrían producir identificadores distintos para la misma
+    copia. La corrección más simple es sustituir `phase_id` por
+    `copy_index_u32` en la fila `FCP_` de DTC-089 y regenerar el vector de
+    `id-catalog-v4`: F5.0.3 sigue abierto y nada se ha publicado fuera. No se
+    aplica aquí porque cambia una decisión normativa.
   - Depende de: F5.3.2.
   - Procede de: REQ-EVO-32/43/53/76, REQ-POB-01, ACE-89/91/117 y arquitectura §15.
   - Cambia: repositorio de verdad, pertenencia y enlaces `FCP_`/`FHA_`→`HAP_`.
@@ -467,7 +600,7 @@ y el subconjunto `cargo test` pertinente. El cierre ejecuta la suite completa.
   - Cambia: evidencia de cierre y estado de trazabilidad, no contrato biológico.
   - Se comprueba con: recuento mecánico exacto 46, unicidad de los 46 REQ,
     presencia expresa de `REQ-VAL-54`/`REQ-MAN-70`/`REQ-SAL-02`,
-    `cargo fmt --check`, Clippy estricto, `cargo test`,
+    las tres puertas de `CONTRIBUTING.md` con `--locked`,
     lectores JSON/TSV/JSONL, oráculo, vectores, paridad y búsquedas negativas de panel,
     SV, repeticiones, BAM/CRAM y recombinación bajo F5.
 
