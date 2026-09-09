@@ -82,7 +82,7 @@ const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 14] = [
     (
         "catalogs/id-catalog-v4.tsv",
         ID_CATALOG_V4,
-        "218f8fe4f6a68ac4c4da9907c8aad5c017ceb4be04dee1198b2d8b7fa9410d3b",
+        "7e273a38f81c3896d63f2d46ae7c0b0358e02a9f3f502963bf4c3005714c5101",
     ),
     (
         "catalogs/f5-rng-catalog-v1.tsv",
@@ -866,12 +866,16 @@ fn id_catalog_v4_is_a_literal_v3_superset_with_five_f5_classes() {
                 "f5_block_haplotype_assignment",
                 ("FHA_", "block_founder_copy")
             ),
-            ("f5_founder_copy", ("FCP_", "founder_sequence_phase")),
+            ("f5_founder_copy", ("FCP_", "founder_sequence_copy")),
             ("f5_haplotype", ("HAP_", "block_population")),
             ("f5_site", ("SITE_", "block")),
         ])
     );
-    assert!(ID_CATALOG_V4.contains("sequence_id=sequence-1;phase_id=phase-0"));
+    // Una copia fundadora se identifica por su índice, no por una «fase»: en F5
+    // no hay meiosis que dé origen parental a las copias, y `copy_index` es el
+    // término del TSV de fundadores y de la proyección de verdad, de modo que
+    // el identificador puede rederivarse desde lo que se publica.
+    assert!(ID_CATALOG_V4.contains("sequence_id=sequence-1;copy_index_u32=0"));
     assert!(ID_CATALOG_V4.contains("founder_copy_id=FCP_"));
-    assert!(!ID_CATALOG_V4.contains("copy_index_u32"));
+    assert!(!ID_CATALOG_V4.contains("phase_id"));
 }

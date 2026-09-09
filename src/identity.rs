@@ -886,11 +886,18 @@ impl<'a> F5PopulationIdentityContext<'a> {
     }
 }
 
+/// Ámbito de una copia fundadora.
+///
+/// La copia se identifica por su índice, no por una «fase»: en F5 no hay
+/// meiosis, de modo que las copias de un individuo no tienen origen parental
+/// que las distinga. `copy_index` es además el término que usan el TSV de
+/// fundadores y la proyección de verdad, así que un lector puede rederivar el
+/// identificador desde lo que se publica.
 #[derive(Clone, Copy, Debug)]
 pub struct F5FounderCopyScope<'a> {
     individual_id: &'a IndividualId,
     sequence_id: &'a SequenceId,
-    phase_id: &'a PhaseId,
+    copy_index: u32,
 }
 
 impl<'a> F5FounderCopyScope<'a> {
@@ -898,12 +905,12 @@ impl<'a> F5FounderCopyScope<'a> {
     pub const fn new(
         individual_id: &'a IndividualId,
         sequence_id: &'a SequenceId,
-        phase_id: &'a PhaseId,
+        copy_index: u32,
     ) -> Self {
         Self {
             individual_id,
             sequence_id,
-            phase_id,
+            copy_index,
         }
     }
 }
@@ -1032,6 +1039,7 @@ impl F5IdentityRegistry {
         context: F5PopulationIdentityContext<'_>,
         scope: F5FounderCopyScope<'_>,
     ) -> Result<FounderCopyId, Diagnostic> {
+        let copy_index = scope.copy_index.to_string();
         self.derive(
             context.base.root,
             F5IdClass::FounderCopy,
@@ -1042,7 +1050,7 @@ impl F5IdentityRegistry {
                 ("population_id", context.population_id.as_str()),
                 ("individual_id", scope.individual_id.as_str()),
                 ("sequence_id", scope.sequence_id.as_str()),
-                ("phase_id", scope.phase_id.as_str()),
+                ("copy_index_u32", &copy_index),
             ],
         )
         .map(FounderCopyId::from_automatic)

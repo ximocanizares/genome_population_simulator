@@ -1,7 +1,7 @@
 use genome_population_simulator::identity::{
     ExecutionId, F5_ID_CATALOG, F5BlockHaplotypeAssignmentScope, F5FounderCopyScope,
-    F5IdentityContext, F5IdentityRegistry, F5PopulationIdentityContext, IndividualId, PhaseId,
-    PopulationId, ReferenceId, ScenarioId, SequenceId,
+    F5IdentityContext, F5IdentityRegistry, F5PopulationIdentityContext, IndividualId, PopulationId,
+    ReferenceId, ScenarioId, SequenceId,
 };
 use genome_population_simulator::randomness::RootSeed;
 
@@ -20,7 +20,6 @@ struct Inputs {
     population_id: PopulationId,
     individual_id: IndividualId,
     sequence_id: SequenceId,
-    phase_id: PhaseId,
 }
 
 fn inputs() -> Inputs {
@@ -32,7 +31,6 @@ fn inputs() -> Inputs {
         population_id: PopulationId::parse("population-A", "test").expect("population"),
         individual_id: IndividualId::parse("individual-A", "test").expect("individual"),
         sequence_id: SequenceId::parse("sequence-1", "test").expect("sequence"),
-        phase_id: PhaseId::parse("phase-0", "test").expect("phase"),
     }
 }
 
@@ -62,10 +60,10 @@ fn f5_id_catalog_v4_derives_distinct_typed_prefixes_for_founder_outputs() {
     let founder_copy = registry
         .derive_founder_copy(
             population,
-            F5FounderCopyScope::new(&ids.individual_id, &ids.sequence_id, &ids.phase_id),
+            F5FounderCopyScope::new(&ids.individual_id, &ids.sequence_id, 0),
         )
         .expect("founder copy");
-    assert_eq!(founder_copy.as_str(), "FCP_7TEWR4IDBCQZGCB2HTDB2YMQHY");
+    assert_eq!(founder_copy.as_str(), "FCP_3MYOBVN22OO7JPHBBXMUFWFJQQ");
 
     let assignment = registry
         .derive_block_haplotype_assignment(
@@ -73,11 +71,11 @@ fn f5_id_catalog_v4_derives_distinct_typed_prefixes_for_founder_outputs() {
             F5BlockHaplotypeAssignmentScope::new(7, &founder_copy, &haplotype),
         )
         .expect("assignment");
-    assert_eq!(assignment.as_str(), "FHA_UIUSDPQY5QSFM2TFRNLOZJTDSY");
+    assert_eq!(assignment.as_str(), "FHA_3H6PQOV7XJRT7HA3RGRDRDONFY");
 }
 
 #[test]
-fn f5_founder_ids_are_sensitive_to_phase_and_assignment_links() {
+fn f5_founder_ids_are_sensitive_to_copy_index_and_assignment_links() {
     let ids = inputs();
     let mut registry = F5IdentityRegistry::default();
     let base = F5IdentityContext::new(
@@ -87,19 +85,18 @@ fn f5_founder_ids_are_sensitive_to_phase_and_assignment_links() {
         &ids.reference_id,
     );
     let population = F5PopulationIdentityContext::new(base, &ids.population_id);
-    let phase_1 = PhaseId::parse("phase-1", "test").expect("phase");
     let first = registry
         .derive_founder_copy(
             population,
-            F5FounderCopyScope::new(&ids.individual_id, &ids.sequence_id, &ids.phase_id),
+            F5FounderCopyScope::new(&ids.individual_id, &ids.sequence_id, 0),
         )
-        .expect("phase-zero founder copy");
+        .expect("copy-zero founder copy");
     let second = registry
         .derive_founder_copy(
             population,
-            F5FounderCopyScope::new(&ids.individual_id, &ids.sequence_id, &phase_1),
+            F5FounderCopyScope::new(&ids.individual_id, &ids.sequence_id, 1),
         )
-        .expect("phase-one founder copy");
+        .expect("copy-one founder copy");
     assert_ne!(first, second);
 
     let first_haplotype = registry

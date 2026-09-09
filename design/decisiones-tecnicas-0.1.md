@@ -1409,7 +1409,11 @@ cuenta sin RNG. Los receipts v5/v6 no son entradas admitidas ni se migran: deben
 repetir la admisión v7 desde los ficheros fuente. General v3 y escenario v1 no
 cambian de significado; el objeto prerelease `resource_preflight` de efectivo y
 manifiesto v5 cambia de forma y exige actualización atómica de ambos esquemas y
-sus lectores antes de reanudar implementación.
+sus lectores en F5.1.2.5, junto con el sellado del receipt que produce
+`input_identities` y `phases`. La atomicidad se exige entre esquema, lectores y
+productor, que es lo que evita dos formas en circulación; hasta ese hito el
+esquema publica solo la proyección escalar del algoritmo v7, y su
+`additionalProperties: false` es deliberado: rechaza cualquier forma intermedia.
 
 La prueba de frontera de `max_working_memory_bytes` no se construye modificando
 un TOML después de calcularlo, porque el propio literal forma parte de la
@@ -1503,7 +1507,7 @@ orden:
 | `BLK_` / `f5_block` | `execution_id`, `scenario_id`, `reference_id`, `block_index_u64` |
 | `SITE_` / `f5_site` | `execution_id`, `scenario_id`, `reference_id`, `block_index_u64`, `site_index_u64` |
 | `HAP_` / `f5_haplotype` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `block_index_u64`, `haplotype_rank_u64`, `alleles` |
-| `FCP_` / `f5_founder_copy` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `individual_id`, `sequence_id`, `phase_id` |
+| `FCP_` / `f5_founder_copy` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `individual_id`, `sequence_id`, `copy_index_u32` |
 | `FHA_` / `f5_block_haplotype_assignment` | `execution_id`, `scenario_id`, `reference_id`, `population_id`, `block_index_u64`, `founder_copy_id`, `haplotype_id` |
 
 `class` es el literal de la segunda columna, no el prefijo. Los enteros son

@@ -45,9 +45,9 @@ comprobarlas.
 | ID | Hallazgo | Estado |
 |---|---|---|
 | F5-R01 | El criterio «límite exacto admite / exacto−1 rechaza» omite la construcción de anchura fija que DTC-089 exige, de modo que seguirlo al pie de la letra produce fixtures imposibles; H10 falla exactamente por eso | **Cerrado** en F5.0.4, F5.1.2.4 y F5.1.2.6 |
-| F5-R02 | El esquema efectivo v5 ya publicado no tiene `input_identities` ni `phases`, y el plan promete a la vez no reabrir esquemas y copiarlos en .5 | **Cerrado** en §2 y F5.0.1, con trabajo de contrato pendiente |
+| F5-R02 | El esquema efectivo v5 ya publicado no tiene `input_identities` ni `phases`, y el plan promete a la vez no reabrir esquemas y copiarlos en .5 | **Cerrado** el 9 de septiembre de 2026: DTC-089 fija la actualización atómica en F5.1.2.5, junto al sellado que produce esos objetos |
 | F5-R03 | Subhitos cerrados con sus dependencias abiertas, estado del plan divergente de Git y verificación circular de F5.0.4 | **Cerrado** en F5.0.4 y en el estado de los hitos |
-| F5-R04 | `phase_id`, componente del identificador `FCP_`, no está definido en ningún documento ni tiene constructor F5 | **Abierto**: exige decidir sobre DTC-089 |
+| F5-R04 | `phase_id`, componente del identificador `FCP_`, no está definido en ningún documento ni tiene constructor F5 | **Cerrado** el 9 de septiembre de 2026: `FCP_` se deriva de `copy_index_u32` |
 
 Los medios y menores se corrigieron en la misma pasada: el fixture de máscaras
 comparables, la contradicción entre la cláusula de *commit* y el historial, el
@@ -125,7 +125,10 @@ que depende.
     `phases`, que DTC-089 exige y que la proyección escalar de F5.1.2.3 dejó
     fuera. Hasta entonces el esquema efectivo v5 publica solo los 27 campos
     escalares y su `additionalProperties: false` los rechazaría, así que
-    completarlo es trabajo de .5 y no una versión nueva.
+    completarlo es trabajo de .5 y no una versión nueva. DTC-089 lo fija así
+    desde el 9 de septiembre de 2026: la actualización atómica de esquemas,
+    lectores y productor ocurre en F5.1.2.5, que es cuando el sellado produce
+    las identidades y las fases.
   - Se comprueba con: pareja mínima válida; rechazo de cero, lista o varios
     escenarios; rechazo de v2/v4 como F5; inmutabilidad byte a byte de los tres
     esquemas heredados; campos ausentes/desconocidos;
@@ -487,17 +490,18 @@ que depende.
 - ☐ **F5.3.3.** Materializar antes de toda salida las identidades de fundador y
   su pertenencia única: `IndividualId`, `FCP_` por secuencia/copia y `FHA_` por
   bloque como asignación separada.
-  - **Decisión abierta (F5-R04).** DTC-089 deriva `FCP_` de `…, sequence_id,
-    phase_id`, pero `phase_id` no está definido en ningún documento y `PhaseId`
-    es en el código un identificador aportado por la usuaria, sin constructor
-    F5; todo lo demás en F5 nombra la copia como `copy_index`. Mientras eso no
-    se resuelva, el oráculo de F5.4.2 no puede rederivar `FCP_` leyendo solo
-    `truth.jsonl`, que lleva `copy_index` y no `phase_id`, y dos
-    implementaciones podrían producir identificadores distintos para la misma
-    copia. La corrección más simple es sustituir `phase_id` por
-    `copy_index_u32` en la fila `FCP_` de DTC-089 y regenerar el vector de
-    `id-catalog-v4`: F5.0.3 sigue abierto y nada se ha publicado fuera. No se
-    aplica aquí porque cambia una decisión normativa.
+  - **Resuelto el 9 de septiembre de 2026 (F5-R04).** `FCP_` se deriva de
+    `copy_index_u32`, no de `phase_id`. La fila anterior contradecía a la propia
+    DTC-089, que en la proyección de verdad fija la identidad de una copia como
+    `(reference_id, individual_id, sequence_id, copy_index)` y da esa columna al
+    TSV de fundadores, mientras `PhaseId` es en el código un identificador
+    aportado por la usuaria y sin constructor F5. Biológicamente el nombre
+    también sobraba: en F5 no hay meiosis, de modo que las copias de un
+    individuo no tienen origen parental que las distinga; cuando F7 introduzca
+    la fase, será una propiedad de la copia y no su identidad. Con el cambio, el
+    oráculo de F5.4.2 puede rederivar `FCP_` leyendo solo `truth.jsonl`.
+    Se regeneraron el vector de `id-catalog-v4` y su huella de contrato; F5.0.3
+    sigue abierto y ningún artefacto F5 se ha publicado fuera.
   - Depende de: F5.3.2.
   - Procede de: REQ-EVO-32/43/53/76, REQ-POB-01, ACE-89/91/117 y arquitectura §15.
   - Cambia: repositorio de verdad, pertenencia y enlaces `FCP_`/`FHA_`→`HAP_`.
