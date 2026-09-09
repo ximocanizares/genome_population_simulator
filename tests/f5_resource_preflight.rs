@@ -557,10 +557,16 @@ fn seedless_entropy_is_resolved_only_after_complete_physical_admission() {
     assert_eq!(entropy.calls, 1);
     assert_eq!(admitted.seed(), "bb".repeat(32));
 
+    // Una referencia vacía o truncada la rechaza el escáner de este hito, no el
+    // lector de F1: son lectores distintos y la cobertura de uno no acredita al
+    // otro.
     for (label, prepare) in [
         ("fasta-missing", 0_u8),
         ("fasta-invalid", 1),
         ("fasta-sha", 2),
+        ("fasta-empty", 3),
+        ("fasta-header-only", 4),
+        ("fasta-truncated-header", 5),
     ] {
         let root = temporary(label);
         fs::create_dir_all(&root).expect("failure root");
@@ -571,6 +577,9 @@ fn seedless_entropy_is_resolved_only_after_complete_physical_admission() {
             0 => fs::remove_file(fasta).expect("remove FASTA"),
             1 => replace_reference(&root, b">chr1\nA?AA\n"),
             2 => fs::write(fasta, b">chr1\nAAAT\n").expect("mutate FASTA without digest"),
+            3 => replace_reference(&root, b""),
+            4 => replace_reference(&root, b">chr1\n"),
+            5 => replace_reference(&root, b">ch"),
             _ => unreachable!(),
         }
         let mut entropy = CountingEntropy::default();
@@ -581,7 +590,13 @@ fn seedless_entropy_is_resolved_only_after_complete_physical_admission() {
     }
 
     let valid_mask = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
-    for (label, prepare) in [("mask-missing", 0_u8), ("mask-invalid", 1), ("mask-sha", 2)] {
+    for (label, prepare) in [
+        ("mask-missing", 0_u8),
+        ("mask-invalid", 1),
+        ("mask-sha", 2),
+        ("mask-empty", 3),
+        ("mask-truncated-row", 4),
+    ] {
         let root = temporary(label);
         fs::create_dir_all(&root).expect("failure root");
         let general = configuration(&root, Some(valid_mask), "", "AAAA");
@@ -592,6 +607,11 @@ fn seedless_entropy_is_resolved_only_after_complete_physical_admission() {
             1 => replace_mask(&root, b"bad-header\n"),
             2 => fs::write(mask, valid_mask.replace("2\t2", "3\t3"))
                 .expect("mutate mask without digest"),
+            3 => replace_mask(&root, b""),
+            4 => replace_mask(
+                &root,
+                b"region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2",
+            ),
             _ => unreachable!(),
         }
         let mut entropy = CountingEntropy::default();
@@ -601,7 +621,10 @@ fn seedless_entropy_is_resolved_only_after_complete_physical_admission() {
             error.code(),
             match prepare {
                 0 => "GPS-INPUT-001",
-                1 => "GPS-FMT-101",
+                // Una máscara vacía o con la última fila sin LF es un fallo de
+                // formato, no de identidad: se clasifica antes de comparar el
+                // resumen declarado.
+                1 | 3 | 4 => "GPS-FMT-101",
                 2 => "GPS-INPUT-002",
                 _ => unreachable!(),
             },
@@ -1236,6 +1259,32 @@ fn mask_scanner_is_ordered_across_sequences_and_has_a_bounded_row() {
         "GPS-FMT-101"
     );
     fs::remove_dir_all(root).expect("cleanup");
+
+    // La frontera de la fila es inclusiva y exacta en 65536 bytes contando el
+    // LF, que es la capacidad reservada para el búfer: una fila de ese tamaño
+    // se admite y la siguiente se rechaza, de modo que nunca hay realloc.
+    let header = "region_id\tsequence_id\tstart_1based\tend_1based\n";
+    let suffix = "\tchr1\t1\t1\n";
+    for (label, row_bytes, accepted) in [("exact", 65_536_usize, true), ("excess", 65_537, false)] {
+        let root = temporary(&format!("mask-row-{label}"));
+        fs::create_dir_all(&root).expect("root");
+        let identifier = "r".repeat(row_bytes - suffix.len());
+        let mask = format!("{header}{identifier}{suffix}");
+        assert_eq!(mask.len() - header.len(), row_bytes, "{label}");
+        let general = configuration(&root, Some(&mask), "", "AAAA");
+        let outcome = load_and_validate_f5_config(&general);
+        if accepted {
+            outcome.expect("a row of exactly the bounded size is admitted");
+        } else {
+            assert_eq!(
+                outcome
+                    .expect_err("one byte past the bound is rejected")
+                    .code(),
+                "GPS-FMT-101"
+            );
+        }
+        fs::remove_dir_all(root).expect("cleanup");
+    }
 }
 
 #[test]
@@ -1487,6 +1536,10 @@ fn fasta_descriptions_raise_v5_operation_budget_and_preserve_productive_rng_path
         "the raw header is traversed by the preflight and productive REF recovery passes"
     );
 
+    // El literal sustituido debe conservar la anchura del marcador: los bytes del
+    // escenario entran en la cota como `2*scenario_toml_bytes`, de modo que una
+    // anchura distinta desplazaría la frontera que esta prueba acredita.
+    assert_eq!(long.operation_units().to_string().len(), 9);
     replace_scenario(
         &long_root,
         "max_haplotype_cells = 16\nmax_operation_units = 199999999\n",
@@ -1589,6 +1642,7 @@ fn mask_bytes_raise_v5_operation_budget_with_equal_geometry_and_exact_limit() {
         "row and region-ID bytes are scanned even when mask geometry is identical"
     );
 
+    assert_eq!(long.operation_units().to_string().len(), 5);
     replace_scenario(
         &long_root,
         "max_haplotype_cells = 16\nmax_operation_units = 99999\n",
@@ -2696,9 +2750,16 @@ fn cli_validate_executes_point_four_without_creating_a_destination() {
             "declared" => {}
             _ => unreachable!(),
         }
+        // El destino se pide de verdad: comprobar que no existe uno que nunca se
+        // solicitó no acredita nada.
         let destination = root.join("must-not-exist");
         let output = Command::new(env!("CARGO_BIN_EXE_genome-population-simulator"))
-            .args(["validate", general.to_str().expect("UTF-8 path")])
+            .args([
+                "validate",
+                general.to_str().expect("UTF-8 path"),
+                "--output",
+                destination.to_str().expect("UTF-8 path"),
+            ])
             .output()
             .expect("CLI validate");
         assert_eq!(output.status.success(), case == "declared", "{case}");

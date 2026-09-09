@@ -395,6 +395,33 @@ que depende.
       desigualdad dirigida entre efectivo y manifiesto. Ningún receipt v5/v6 se
       acepta ni se migra.
 
+    - Revisión independiente de cierre (9 de septiembre de 2026). Verificó C1–C9
+      y L1–L3 uno a uno contra el código, no contra la evidencia: todos
+      aplicados, ninguno reaparecido, ningún hallazgo grave. Confirmó además que
+      las cuatro fronteras exacto/exacto−1 de operaciones se construyen con
+      punto fijo o marcador de anchura fija, y que las dos que no lo hacían
+      acreditaban la frontera real por coincidencia; se les añadió la guarda.
+      El criterio «referencia o máscara vacía o truncada» carecía de regresión
+      en esta ruta —la cobertura de F1 ejercita otro lector— y se añadieron los
+      casos de referencia vacía, con solo cabecera y truncada, y de máscara
+      vacía y con la última fila sin LF. Se completaron también la frontera
+      inclusiva exacta de la fila de máscara en 65536 bytes y la comprobación de
+      destino, que no pedía ninguno y por tanto no acreditaba nada.
+    - Deuda conocida y acotada: `EligibleScan::ensure_memory_bound` es
+      inalcanzable, porque el ledger compara el mismo valor más la retención de
+      perfil y rechaza antes, y su diagnóstico no llevaría `dimension`, `phase`,
+      `role`, `accumulated` ni `limit`. No se retira porque en la ruta de IDs
+      adelanta la comprobación antes de `SequenceId::parse`, que es la
+      «comprobación previa a retener» que este hito exige; delegarla en el
+      ledger exigiría un método de consulta sin cobro que hoy no existe. Se
+      revisará al sellar el receipt en F5.1.2.5.
+    - Excepción declarada al bullet «reserva de dos visitas por byte FASTA antes
+      de leerlo»: el escrow de C8 permite entregar como máximo un byte de FASTA
+      y uno de máscara contra trabajo futuro ya cargado. Es de un solo uso, la
+      lectura siguiente rechaza, y el ledger exige que el escrow no supere los
+      totales. Sin esa excepción la magnitud publicada tendría que incluir las
+      sondas EOF que C8 retiró.
+
   **Pausa de revisión F5.1.2-B.** Aprobar el modelo local de cambios
   accidentales, el orden de fases, las identidades físicas, la reserva de la
   segunda pasada y el binding sellado. No continuar con layout si un consumidor
