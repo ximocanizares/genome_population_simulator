@@ -11,7 +11,7 @@ use std::path::Path;
 use crate::application::EffectiveF5Config;
 use crate::diagnostics::Diagnostic;
 use crate::f5_preflight::{
-    F5_DEFAULT_MAX_LAYOUT_ATTEMPTS, F5EligibleTract, F5OtherResources, F5ResourcePreflight,
+    F5_DEFAULT_MAX_LAYOUT_ATTEMPTS, F5EligibleTract, F5OtherResources, SealedF5Admission,
     resolved_target_for_config,
 };
 use crate::f5_profile::F5Profile;
@@ -252,7 +252,7 @@ pub struct F5BlockLengthPlan {
 impl F5BlockLengthPlan {
     pub fn from_preflight(
         config: &EffectiveF5Config,
-        preflight: &F5ResourcePreflight,
+        preflight: &SealedF5Admission,
     ) -> Result<Self, Diagnostic> {
         let scenario_id = ScenarioId::parse(config.scenario_id(), "scenario_id").map_err(|_| {
             configuration(
@@ -346,7 +346,18 @@ impl F5BlockLengthPlan {
     /// dejan un residual factible y el último bloque recibe ese residual sin
     /// abrir su ámbito RNG. En `block_count`, cada bloque usa la distribución
     /// completa e independiente.
-    pub fn sample(&self, root_seed: RootSeed, attempt_index: u64) -> Result<Vec<u64>, Diagnostic> {
+    /// Sortea las longitudes de un intento.
+    ///
+    /// No es público fuera del crate: `from_preflight` solo exige la mitad
+    /// semántica del binding, de modo que una cadena pública hasta aquí
+    /// permitiría abrir un ámbito RNG con una configuración físicamente
+    /// distinta de la que se admitió. La vía pública al sorteo es
+    /// `F5LayoutRequest`, que exige el receipt sellado.
+    pub(crate) fn sample(
+        &self,
+        root_seed: RootSeed,
+        attempt_index: u64,
+    ) -> Result<Vec<u64>, Diagnostic> {
         let scenario_id = &self.scenario_id;
         let capacity =
             usize::try_from(self.block_count).map_err(|_| allocation_resource(self.block_count))?;
@@ -771,7 +782,7 @@ impl F5PhysicalLayout {
 #[derive(Debug)]
 pub struct F5LayoutRequest<'a> {
     config: Option<&'a EffectiveF5Config>,
-    preflight: Option<&'a F5ResourcePreflight>,
+    preflight: Option<&'a SealedF5Admission>,
     execution_id: Option<&'a ExecutionId>,
     #[cfg(test)]
     test_inputs: Option<F5LayoutInputs<'a>>,
@@ -782,7 +793,7 @@ impl<'a> F5LayoutRequest<'a> {
     /// del escenario, referencia, perfil, objetivo o límite de intentos.
     pub fn new(
         config: &'a EffectiveF5Config,
-        preflight: &'a F5ResourcePreflight,
+        preflight: &'a SealedF5Admission,
         execution_id: &'a ExecutionId,
     ) -> Result<Self, Diagnostic> {
         Self::new_with_other_resources(config, preflight, F5OtherResources::default(), execution_id)
@@ -794,7 +805,7 @@ impl<'a> F5LayoutRequest<'a> {
     /// de menor coste antes de abrir RNG.
     pub fn new_with_other_resources(
         config: &'a EffectiveF5Config,
-        preflight: &'a F5ResourcePreflight,
+        preflight: &'a SealedF5Admission,
         other: F5OtherResources,
         execution_id: &'a ExecutionId,
     ) -> Result<Self, Diagnostic> {
@@ -870,7 +881,10 @@ struct F5LayoutInputs<'a> {
 struct F5StreamedReference<'a> {
     path: &'a Path,
     reference_id: &'a str,
-    sha256: &'a str,
+    /// Tamaño y SHA observados por la primera pasada y sellados en el receipt.
+    /// La segunda pasada exige ambos, no la copia declarada en el general.
+    sealed_size_bytes: u64,
+    sealed_sha256: &'a str,
     expected_bases_processed: u64,
 }
 
@@ -879,9 +893,10 @@ struct ResolvedProductionLayout<'a> {
     gap_distribution: F5SnpGapDistribution,
     root_seed: RootSeed,
     reference_id: ReferenceId,
-    preflight: &'a F5ResourcePreflight,
+    preflight: &'a SealedF5Admission,
     reference_path: &'a Path,
-    reference_sha256: &'a str,
+    sealed_reference_size_bytes: u64,
+    sealed_reference_sha256: &'a str,
 }
 
 impl<'a> ResolvedProductionLayout<'a> {
@@ -910,14 +925,19 @@ impl<'a> ResolvedProductionLayout<'a> {
                     "la identidad de referencia efectiva no es válida",
                 )
             })?;
+        let sealed_reference = preflight.receipt().reference_identity()?;
         Ok(Self {
             length_plan,
             gap_distribution,
             root_seed,
             reference_id,
             preflight,
-            reference_path: config.reference_path(),
-            reference_sha256: config.reference_sha256(),
+            // La ruta también procede del receipt: la segunda pasada recorre
+            // exactamente el fichero que la admisión abrió, no el que una
+            // configuración posterior declare.
+            reference_path: sealed_reference.normalized_path(),
+            sealed_reference_size_bytes: sealed_reference.observed_size_bytes(),
+            sealed_reference_sha256: sealed_reference.observed_sha256(),
         })
     }
 
@@ -930,7 +950,8 @@ impl<'a> ResolvedProductionLayout<'a> {
             streamed_reference: Some(F5StreamedReference {
                 path: self.reference_path,
                 reference_id: self.reference_id.as_str(),
-                sha256: self.reference_sha256,
+                sealed_size_bytes: self.sealed_reference_size_bytes,
+                sealed_sha256: self.sealed_reference_sha256,
                 expected_bases_processed: self.preflight.reference_bases_processed(),
             }),
             max_layout_attempts: self.preflight.max_layout_attempts(),
@@ -1716,7 +1737,8 @@ fn materialize_attempt(
         let streamed = stream_fasta_site_bases(
             reference.path,
             reference.reference_id,
-            reference.sha256,
+            reference.sealed_size_bytes,
+            reference.sealed_sha256,
             &requested_sites,
         )
         .map_err(AttemptMaterialization::Diagnostic)?;
@@ -2103,7 +2125,7 @@ mod tests {
         F5LayoutSequence, F5LengthFeasibility, F5SnpGapDistribution, build_f5_physical_layout,
     };
     use crate::application::load_and_validate_f5_config;
-    use crate::f5_preflight::{F5EligibleTract, F5OtherResources, preflight_f5_resources};
+    use crate::f5_preflight::{F5EligibleTract, F5OtherResources, recover_sealed_f5_admission};
     use crate::identity::{ExecutionId, F5IdentityContext, ReferenceId, ScenarioId, SequenceId};
     use crate::randomness::{RandomWordSource, RootSeed};
     use sha2::{Digest, Sha256};
@@ -2816,7 +2838,7 @@ mod tests {
         let baseline_general = write_production_layout_fixture(&root, None, seed_byte);
         let baseline_config = load_and_validate_f5_config(&baseline_general)
             .expect("the production fixture configuration is valid");
-        let baseline = preflight_f5_resources(&baseline_config, F5OtherResources::default())
+        let baseline = recover_sealed_f5_admission(&baseline_config, F5OtherResources::default())
             .expect("the production fixture is admitted before its exact limit is declared");
 
         let exact_general =
@@ -2825,7 +2847,7 @@ mod tests {
             .expect("the exact operation limit retains the production fixture");
         crate::f5_preflight::reset_test_capacity_tract_visits();
         super::reset_layout_instrumentation();
-        let preflight = preflight_f5_resources(&config, F5OtherResources::default())
+        let preflight = recover_sealed_f5_admission(&config, F5OtherResources::default())
             .expect("v4 admits operation_limit exactly equal to its bound");
         assert_eq!(preflight.operation_units(), baseline.operation_units());
         let execution = ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test")
@@ -2942,7 +2964,7 @@ mod tests {
             write_production_layout_fixture(&root, Some(baseline.operation_units() - 1), seed_byte);
         let rejected_config = load_and_validate_f5_config(&rejected_general)
             .expect("the cota-minus-one document is syntactically valid");
-        let rejected = preflight_f5_resources(&rejected_config, F5OtherResources::default())
+        let rejected = recover_sealed_f5_admission(&rejected_config, F5OtherResources::default())
             .expect_err("v4 rejects operation_limit one below the exact admitted bound");
         assert_eq!(rejected.code(), "GPS-RES-101");
         fs::remove_dir_all(root).expect("production fixture cleanup");

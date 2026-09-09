@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use crate::diagnostics::Diagnostic;
 use crate::f5_admission::{
-    AdmissionPhase, BoundedInput, F5ResourceLedger, InputRole, LedgerCharge, OperationCost,
-    PhysicalInputIdentity, ResourceDimension, WorkingMemoryPeak,
+    AdmissionPhase, AdmittedInputIdentity, BoundedInput, F5ResourceLedger, InputRole, LedgerCharge,
+    OperationCost, PhysicalInputIdentity, ResourceDimension, WorkingMemoryPeak,
     input_identity_mismatch_diagnostic,
 };
 use crate::reference_fasta::input_error;
@@ -44,23 +44,23 @@ pub struct F5Profile {
     normalizations: Vec<F5NormalizationAudit>,
 }
 
-/// Resultado de la fase de perfil: el contenido tipado y las seis
-/// identidades físicas que un receipt posterior deberá sellar.
+/// Resultado de la fase de perfil: el contenido tipado y las seis identidades
+/// físicas, ya con su identidad declarada, que el receipt sella.
 #[derive(Clone, Debug)]
 pub(crate) struct LoadedF5Profile {
     profile: F5Profile,
-    identities: Vec<PhysicalInputIdentity>,
+    identities: Vec<AdmittedInputIdentity>,
 }
 
 impl LoadedF5Profile {
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn identities(&self) -> &[PhysicalInputIdentity] {
+    pub(crate) fn identities(&self) -> &[AdmittedInputIdentity] {
         &self.identities
     }
 
     #[must_use]
-    pub(crate) fn into_parts(self) -> (F5Profile, Vec<PhysicalInputIdentity>) {
+    pub(crate) fn into_parts(self) -> (F5Profile, Vec<AdmittedInputIdentity>) {
         (self.profile, self.identities)
     }
 }
@@ -464,7 +464,7 @@ fn read_profile_metadata(
     expected_metadata_sha256: &str,
     metadata_limit: u64,
     ledger: &mut F5ResourceLedger,
-) -> Result<(String, Vec<ProfileLink>, PhysicalInputIdentity), Diagnostic> {
+) -> Result<(String, Vec<ProfileLink>, AdmittedInputIdentity), Diagnostic> {
     let metadata = read_bounded(
         metadata_path,
         InputRole::ProfileMetadata,
@@ -587,6 +587,9 @@ fn read_profile_metadata(
             digest: required_sha(entry, "sha256", metadata_path)?.to_owned(),
         });
     }
+    // El escenario declara el SHA del metadata, pero no su tamaño.
+    let identity =
+        AdmittedInputIdentity::new(identity, None, Some(expected_metadata_sha256.to_owned()))?;
     Ok((profile_id, links, identity))
 }
 
@@ -595,7 +598,7 @@ fn read_profile_table(
     role: InputRole,
     phase: AdmissionPhase,
     ledger: &mut F5ResourceLedger,
-    identities: &mut Vec<PhysicalInputIdentity>,
+    identities: &mut Vec<AdmittedInputIdentity>,
     retained_rows: u64,
 ) -> Result<(PathBuf, Vec<u8>), Diagnostic> {
     ledger.transition_to(phase)?;
@@ -605,7 +608,11 @@ fn read_profile_table(
         .read_to_end_with_ledger_and_expected_identity(ledger, link.size, &link.digest)?;
     let (bytes, identity) = bounded.into_parts();
     verify_identity(&link.path, &identity, Some(link.size), &link.digest)?;
-    identities.push(identity);
+    identities.push(AdmittedInputIdentity::new(
+        identity,
+        Some(link.size),
+        Some(link.digest.clone()),
+    )?);
     Ok((link.path.clone(), bytes))
 }
 

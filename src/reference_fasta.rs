@@ -150,8 +150,16 @@ impl StreamedFastaSiteBase {
 }
 
 /// Recupera solamente las bases solicitadas con una pasada secuencial del
-/// FASTA y verifica al final que los bytes siguen teniendo el SHA-256 ligado
-/// por el preflight. `sites` debe estar ordenado y no contener duplicados.
+/// FASTA y exige que su tamaño y su SHA-256 sigan siendo exactamente los que
+/// selló la admisión. `sites` debe estar ordenado y no contener duplicados.
+///
+/// La pasada nunca lee más de `expected_size_bytes + 1` bytes: ese byte
+/// adicional distingue una referencia que creció entre pasadas de una que
+/// sigue teniendo el tamaño sellado, sin materializar el crecimiento.
+///
+/// Cualquier discrepancia estructural encontrada durante el recorrido se
+/// aplaza hasta EOF para poder clasificarla: si el tamaño o el hash cambiaron,
+/// la causa es la referencia sustituida y no una invariante interna rota.
 ///
 /// La rutina está deliberadamente separada del validador que materializa un
 /// `Reference`: F5 ya validó la referencia completa antes de la admisión y
@@ -159,6 +167,7 @@ impl StreamedFastaSiteBase {
 pub(crate) fn stream_fasta_site_bases(
     path: &Path,
     reference_id: &str,
+    expected_size_bytes: u64,
     expected_sha256: &str,
     sites: &[(u64, u64)],
 ) -> Result<StreamedFastaSiteBases, Diagnostic> {
@@ -170,8 +179,13 @@ pub(crate) fn stream_fasta_site_bases(
             "F5 solicitó sitios FASTA no ordenados, repetidos o con coordenada cero",
         ));
     }
+    // Un byte por encima del tamaño sellado: suficiente para probar que la
+    // referencia creció, insuficiente para recorrer el crecimiento. La cota se
+    // aplica al lector físico, no solo al bucle, para que ni la lectura
+    // anticipada del búfer pueda rebasarla.
+    let permitted_bytes = expected_size_bytes.saturating_add(1);
     let file = File::open(path).map_err(|error| input_error(path, error))?;
-    let mut reader = BufReader::new(DigestingReader::new(file));
+    let mut reader = BufReader::new(DigestingReader::new(file).take(permitted_bytes));
     if reader
         .fill_buf()
         .map_err(|error| input_error(path, error))?
@@ -197,6 +211,8 @@ pub(crate) fn stream_fasta_site_bases(
     let mut header_id = Vec::new();
     let mut header_token_finished = false;
     let mut buffer = [0_u8; 65_536];
+    let mut observed_bytes = 0_u64;
+    let mut deferred = None::<Diagnostic>;
 
     loop {
         let read = reader
@@ -205,90 +221,120 @@ pub(crate) fn stream_fasta_site_bases(
         if read == 0 {
             break;
         }
-        for raw in &buffer[..read] {
-            if in_header {
-                if *raw == b'\n' {
-                    let id = std::str::from_utf8(&header_id).map_err(|_| empty_header(path, 0))?;
-                    if id.is_empty() {
-                        return Err(empty_header(path, 0));
+        observed_bytes = u64::try_from(read)
+            .ok()
+            .and_then(|read| observed_bytes.checked_add(read))
+            .ok_or_else(|| internal_error("el recuento de bytes FASTA visitados excede u64"))?;
+        if deferred.is_some() {
+            continue;
+        }
+        let mut parse = || -> Result<(), Diagnostic> {
+            for raw in &buffer[..read] {
+                if in_header {
+                    if *raw == b'\n' {
+                        let id =
+                            std::str::from_utf8(&header_id).map_err(|_| empty_header(path, 0))?;
+                        if id.is_empty() {
+                            return Err(empty_header(path, 0));
+                        }
+                        current_id = Some(SequenceId::parse(id, reference_id)?);
+                        current_ordinal = Some(next_ordinal);
+                        next_ordinal = next_ordinal.checked_add(1).ok_or_else(|| {
+                            internal_error("el ordinal de secuencia FASTA excede u64")
+                        })?;
+                        current_length = 0;
+                        in_header = false;
+                        at_line_start = true;
+                    } else if *raw == b'\r' || raw.is_ascii_whitespace() {
+                        header_token_finished = true;
+                    } else if !header_token_finished {
+                        header_id.push(*raw);
                     }
-                    current_id = Some(SequenceId::parse(id, reference_id)?);
-                    current_ordinal = Some(next_ordinal);
-                    next_ordinal = next_ordinal.checked_add(1).ok_or_else(|| {
-                        internal_error("el ordinal de secuencia FASTA excede u64")
-                    })?;
-                    current_length = 0;
-                    in_header = false;
-                    at_line_start = true;
-                } else if *raw == b'\r' || raw.is_ascii_whitespace() {
-                    header_token_finished = true;
-                } else if !header_token_finished {
-                    header_id.push(*raw);
+                    continue;
                 }
-                continue;
-            }
 
-            if at_line_start && *raw == b'>' {
-                ensure_streamed_sequence_complete(
-                    path,
-                    sites,
-                    requested_index,
-                    current_ordinal,
-                    current_length,
-                )?;
-                current_ordinal = None;
-                current_id = None;
-                current_length = 0;
-                header_id.clear();
-                header_token_finished = false;
-                in_header = true;
+                if at_line_start && *raw == b'>' {
+                    ensure_streamed_sequence_complete(
+                        path,
+                        sites,
+                        requested_index,
+                        current_ordinal,
+                        current_length,
+                    )?;
+                    current_ordinal = None;
+                    current_id = None;
+                    current_length = 0;
+                    header_id.clear();
+                    header_token_finished = false;
+                    in_header = true;
+                    at_line_start = false;
+                    continue;
+                }
+                if *raw == b'\n' {
+                    at_line_start = true;
+                    continue;
+                }
+                if *raw == b'\r' {
+                    continue;
+                }
                 at_line_start = false;
-                continue;
-            }
-            if *raw == b'\n' {
-                at_line_start = true;
-                continue;
-            }
-            if *raw == b'\r' {
-                continue;
-            }
-            at_line_start = false;
-            let ordinal = current_ordinal.ok_or_else(|| empty_header(path, 0))?;
-            let sequence_id = current_id.as_ref().ok_or_else(|| empty_header(path, 0))?;
-            current_length = current_length
-                .checked_add(1)
-                .ok_or_else(|| internal_error("la posición FASTA excede u64"))?;
-            reference_bases_processed = reference_bases_processed
-                .checked_add(1)
-                .ok_or_else(|| internal_error("el recuento de bases FASTA visitadas excede u64"))?;
-            let base = raw.to_ascii_uppercase();
-            if !matches!(base, b'A' | b'C' | b'G' | b'T' | b'N') {
-                return Err(invalid_symbol(
-                    path,
-                    sequence_id.as_str(),
-                    current_length,
-                    *raw,
-                ));
-            }
-            if let Some((requested_ordinal, requested_position)) = sites.get(requested_index) {
-                if *requested_ordinal == ordinal && *requested_position < current_length {
-                    return Err(internal_error(
-                        "la pasada FASTA sobrepasó un sitio F5 que no pudo recuperar",
+                let ordinal = current_ordinal.ok_or_else(|| empty_header(path, 0))?;
+                let sequence_id = current_id.as_ref().ok_or_else(|| empty_header(path, 0))?;
+                current_length = current_length
+                    .checked_add(1)
+                    .ok_or_else(|| internal_error("la posición FASTA excede u64"))?;
+                reference_bases_processed =
+                    reference_bases_processed.checked_add(1).ok_or_else(|| {
+                        internal_error("el recuento de bases FASTA visitadas excede u64")
+                    })?;
+                let base = raw.to_ascii_uppercase();
+                if !matches!(base, b'A' | b'C' | b'G' | b'T' | b'N') {
+                    return Err(invalid_symbol(
+                        path,
+                        sequence_id.as_str(),
+                        current_length,
+                        *raw,
                     ));
                 }
-                if *requested_ordinal == ordinal && *requested_position == current_length {
-                    result.push(StreamedFastaSiteBase {
-                        sequence_ordinal: ordinal,
-                        sequence_id: sequence_id.clone(),
-                        position_1based: current_length,
-                        base,
-                    });
-                    requested_index = requested_index
-                        .checked_add(1)
-                        .ok_or_else(|| internal_error("el índice de sitios FASTA excede usize"))?;
+                if let Some((requested_ordinal, requested_position)) = sites.get(requested_index) {
+                    if *requested_ordinal == ordinal && *requested_position < current_length {
+                        return Err(internal_error(
+                            "la pasada FASTA sobrepasó un sitio F5 que no pudo recuperar",
+                        ));
+                    }
+                    if *requested_ordinal == ordinal && *requested_position == current_length {
+                        result.push(StreamedFastaSiteBase {
+                            sequence_ordinal: ordinal,
+                            sequence_id: sequence_id.clone(),
+                            position_1based: current_length,
+                            base,
+                        });
+                        requested_index = requested_index.checked_add(1).ok_or_else(|| {
+                            internal_error("el índice de sitios FASTA excede usize")
+                        })?;
+                    }
                 }
             }
+            Ok(())
+        };
+        if let Err(diagnostic) = parse() {
+            deferred = Some(diagnostic);
         }
+    }
+    let observed = reader.into_inner().into_inner().finish(path);
+    if observed_bytes != expected_size_bytes || observed.digest() != expected_sha256 {
+        return Err(Diagnostic::input(
+            "GPS-INPUT-002",
+            "Una entrada cambió durante su copia o no coincide con su identidad declarada.",
+        )
+        .with("path", path.display().to_string())
+        .with("expected_size_bytes", expected_size_bytes.to_string())
+        .with("observed_size_bytes", observed_bytes.to_string())
+        .with("expected_digest", expected_sha256)
+        .with("observed_digest", observed.digest()));
+    }
+    if let Some(diagnostic) = deferred {
+        return Err(diagnostic);
     }
     if in_header {
         let id = std::str::from_utf8(&header_id).map_err(|_| empty_header(path, 0))?;
@@ -310,16 +356,6 @@ pub(crate) fn stream_fasta_site_bases(
         return Err(internal_error(
             "la pasada FASTA terminó antes de recuperar todos los sitios F5",
         ));
-    }
-    let observed = reader.into_inner().finish(path);
-    if observed.digest() != expected_sha256 {
-        return Err(Diagnostic::input(
-            "GPS-INPUT-002",
-            "Una entrada cambió durante su copia o no coincide con su identidad declarada.",
-        )
-        .with("path", path.display().to_string())
-        .with("expected_digest", expected_sha256)
-        .with("observed_digest", observed.digest()));
     }
     Ok(StreamedFastaSiteBases {
         sites: result,

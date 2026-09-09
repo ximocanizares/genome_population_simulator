@@ -9,8 +9,10 @@ use serde_json::{Value, json};
 
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
-const F5_1_2_3_V7_SCALAR_KEYS: [&str; 27] = [
+const F5_1_2_5_V7_CONTRACT_KEYS: [&str; 29] = [
     "algorithm",
+    "input_identities",
+    "phases",
     "reference_bases_processed",
     "fasta_bytes_processed",
     "mask_bytes_processed",
@@ -39,10 +41,12 @@ const F5_1_2_3_V7_SCALAR_KEYS: [&str; 27] = [
     "output_limit_bytes",
 ];
 
-fn assert_f5_1_2_3_v7_scalar_key_set(document: &Value, pointer: &str) {
+fn assert_f5_1_2_5_v7_contract_key_set(document: &Value, pointer: &str) {
     // Oráculo literal independiente del productor, el esquema y `preflight()`.
-    // Identidades y fases se incorporan conjuntamente en F5.1.2.5.
-    let expected = F5_1_2_3_V7_SCALAR_KEYS.into_iter().collect::<BTreeSet<_>>();
+    // F5.1.2.5 cierra el objeto: algoritmo, identidades, fases y escalares.
+    let expected = F5_1_2_5_V7_CONTRACT_KEYS
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     let observed = document
         .pointer(pointer)
         .expect("resource_preflight pointer")
@@ -154,9 +158,88 @@ fn normalizations() -> Value {
     ])
 }
 
+/// Orden contractual completo de roles, con la máscara declarada.
+const RECEIPT_ROLES: [&str; 10] = [
+    "general_toml",
+    "scenario_toml",
+    "profile_metadata",
+    "profile_block_lengths",
+    "profile_snp_gaps",
+    "profile_snp_spectrum",
+    "profile_haplotype_weights",
+    "profile_ld",
+    "reference_fasta",
+    "mask",
+];
+
+/// Orden cerrado de la máquina de admisión.
+const RECEIPT_PHASES: [&str; 9] = [
+    "bootstrap",
+    "profile_metadata",
+    "profile_table_block_lengths",
+    "profile_table_snp_gaps",
+    "profile_table_snp_spectrum",
+    "profile_table_haplotype_weights",
+    "profile_table_ld",
+    "reference_and_mask_scan",
+    "final_formula",
+];
+
+fn input_identities() -> Value {
+    Value::Array(
+        RECEIPT_ROLES
+            .into_iter()
+            .enumerate()
+            .map(|(index, role)| {
+                // Solo los cinco TSV declaran tamaño; el bootstrap no declara
+                // ninguna de las dos copias.
+                let declared_size = if (3..8).contains(&index) {
+                    json!(1)
+                } else {
+                    Value::Null
+                };
+                let declared_sha = if index < 2 {
+                    Value::Null
+                } else {
+                    json!("f".repeat(64))
+                };
+                json!({
+                    "role": role,
+                    "normalized_path": format!("/authoring/{role}"),
+                    "observed_size_bytes": 1,
+                    "observed_sha256": "f".repeat(64),
+                    "declared_size_bytes": declared_size,
+                    "declared_sha256": declared_sha
+                })
+            })
+            .collect(),
+    )
+}
+
+fn phases() -> Value {
+    Value::Array(
+        RECEIPT_PHASES
+            .into_iter()
+            .map(|phase| {
+                json!({
+                    "phase": phase,
+                    "operation_units_cumulative": 1,
+                    "retained_before_bytes": 0,
+                    "transient_bytes": 1,
+                    "retained_after_bytes": 0,
+                    "phase_peak_bytes": 1,
+                    "output_bytes_reserved": 0
+                })
+            })
+            .collect(),
+    )
+}
+
 fn preflight() -> Value {
     json!({
         "algorithm": "f5-resource-accounting-v7",
+        "input_identities": input_identities(),
+        "phases": phases(),
         "reference_bases_processed": 1,
         "fasta_bytes_processed": 1,
         "mask_bytes_processed": 0,
@@ -184,6 +267,69 @@ fn preflight() -> Value {
         "working_memory_limit_bytes": 1,
         "output_limit_bytes": 1
     })
+}
+
+/// Mutaciones dirigidas del objeto sellado que ambos contratos deben rechazar.
+fn preflight_receipt_rejections() -> Vec<Value> {
+    let mut rejections = Vec::new();
+    let mut unknown_identity_key = preflight();
+    unknown_identity_key["input_identities"][0]["provenance"] = json!("cli");
+    rejections.push(unknown_identity_key);
+
+    let mut unknown_role = preflight();
+    unknown_role["input_identities"][0]["role"] = json!("destination");
+    rejections.push(unknown_role);
+
+    let mut missing_declared = preflight();
+    missing_declared["input_identities"][0]
+        .as_object_mut()
+        .expect("identity object")
+        .remove("declared_size_bytes");
+    rejections.push(missing_declared);
+
+    let mut signed_observed_size = preflight();
+    signed_observed_size["input_identities"][8]["observed_size_bytes"] = json!(-1);
+    rejections.push(signed_observed_size);
+
+    let mut truncated_identities = preflight();
+    truncated_identities["input_identities"]
+        .as_array_mut()
+        .expect("identity list")
+        .truncate(8);
+    rejections.push(truncated_identities);
+
+    let mut repeated_identity = preflight();
+    let extra = repeated_identity["input_identities"][9].clone();
+    repeated_identity["input_identities"]
+        .as_array_mut()
+        .expect("identity list")
+        .push(extra);
+    rejections.push(repeated_identity);
+
+    let mut unknown_phase = preflight();
+    unknown_phase["phases"][0]["phase"] = json!("sealed");
+    rejections.push(unknown_phase);
+
+    let mut unknown_phase_key = preflight();
+    unknown_phase_key["phases"][8]["wall_clock_ms"] = json!(1);
+    rejections.push(unknown_phase_key);
+
+    let mut short_phases = preflight();
+    short_phases["phases"]
+        .as_array_mut()
+        .expect("phase list")
+        .truncate(8);
+    rejections.push(short_phases);
+
+    let mut long_phases = preflight();
+    let extra = long_phases["phases"][8].clone();
+    long_phases["phases"]
+        .as_array_mut()
+        .expect("phase list")
+        .push(extra);
+    rejections.push(long_phases);
+
+    rejections
 }
 
 fn profile_link() -> Value {
@@ -596,9 +742,9 @@ fn authoring_schemas_match_u64_and_normalized_path_boundaries() {
 #[test]
 fn effective_profile_and_catalog_links_are_closed_and_instantiable() {
     let valid = effective();
-    assert_f5_1_2_3_v7_scalar_key_set(&valid, "/f5/resource_preflight");
+    assert_f5_1_2_5_v7_contract_key_set(&valid, "/f5/resource_preflight");
     let mut cases = vec![(valid.clone(), true)];
-    for field in F5_1_2_3_V7_SCALAR_KEYS {
+    for field in F5_1_2_5_V7_CONTRACT_KEYS {
         let mut missing = valid.clone();
         missing["f5"]["resource_preflight"]
             .as_object_mut()
@@ -614,6 +760,11 @@ fn effective_profile_and_catalog_links_are_closed_and_instantiable() {
     let mut additional_term = valid.clone();
     additional_term["f5"]["resource_preflight"]["uncontracted_term"] = json!(1);
     cases.push((additional_term, false));
+    for rejection in preflight_receipt_rejections() {
+        let mut mutation = valid.clone();
+        mutation["f5"]["resource_preflight"] = rejection;
+        cases.push((mutation, false));
+    }
     for (object, id_field) in [
         ("profile", "profile_id"),
         ("rng_catalog", "catalog_id"),
@@ -673,11 +824,11 @@ fn failure_limits_and_codes_use_exact_f5_contract() {
 #[test]
 fn manifest_success_and_failure_branches_are_closed_and_literal() {
     let success = success_manifest();
-    assert_f5_1_2_3_v7_scalar_key_set(&success, "/f5/resource_preflight");
+    assert_f5_1_2_5_v7_contract_key_set(&success, "/f5/resource_preflight");
     let failure = failed_manifest("GPS-DOMAIN-104", limits());
     let mut cases = vec![(success.clone(), true), (failure.clone(), true)];
 
-    for field in F5_1_2_3_V7_SCALAR_KEYS {
+    for field in F5_1_2_5_V7_CONTRACT_KEYS {
         let mut missing = success.clone();
         missing["f5"]["resource_preflight"]
             .as_object_mut()
@@ -693,6 +844,11 @@ fn manifest_success_and_failure_branches_are_closed_and_literal() {
     let mut additional_preflight_term = success.clone();
     additional_preflight_term["f5"]["resource_preflight"]["uncontracted_term"] = json!(1);
     cases.push((additional_preflight_term, false));
+    for rejection in preflight_receipt_rejections() {
+        let mut mutation = success.clone();
+        mutation["f5"]["resource_preflight"] = rejection;
+        cases.push((mutation, false));
+    }
 
     let mut wrong_truth_version = success.clone();
     wrong_truth_version["f5"]["truth"]["schema_version"] = json!("1");
@@ -739,6 +895,52 @@ fn manifest_success_and_failure_branches_are_closed_and_literal() {
             "f5-failure-v1.schema.json",
         ],
         cases,
+    );
+}
+
+/// DTC-089 exige que cada escalar, identidad y fase de `resource_preflight`
+/// sea idéntico entre efectivo y manifiesto, «no solo los tres totales». El
+/// esquema comparte el mismo `$def` y, por tanto, no puede detectar por sí
+/// solo una desigualdad dirigida: esta prueba fija que la copia es exacta y
+/// que romperla en un único término sigue superando ambos esquemas.
+#[test]
+fn effective_and_manifest_copy_the_sealed_preflight_scalar_and_positionally() {
+    let effective_document = effective();
+    let manifest_document = success_manifest();
+    assert_eq!(
+        effective_document["f5"]["resource_preflight"],
+        manifest_document["f5"]["resource_preflight"]
+    );
+
+    let directed = [
+        ("/other_output_bytes", json!(1)),
+        ("/operation_units", json!(2)),
+        ("/input_identities/8/observed_sha256", json!("a".repeat(64))),
+        ("/input_identities/3/declared_size_bytes", json!(2)),
+        ("/phases/7/phase_peak_bytes", json!(2)),
+        ("/phases/0/phase", json!("profile_metadata")),
+    ];
+    let mut still_valid = Vec::new();
+    for (pointer, replacement) in directed {
+        let mut mutated = manifest_document.clone();
+        let target = mutated
+            .pointer_mut(&format!("/f5/resource_preflight{pointer}"))
+            .expect("directed pointer");
+        assert_ne!(*target, replacement, "the mutation must change the value");
+        *target = replacement;
+        assert_ne!(
+            effective_document["f5"]["resource_preflight"], mutated["f5"]["resource_preflight"],
+            "a directed inequality at {pointer} must be observable"
+        );
+        still_valid.push((mutated, true));
+    }
+    assert_external_cases(
+        "manifest-general-v5.schema.json",
+        &[
+            "effective-config-v5.schema.json",
+            "f5-failure-v1.schema.json",
+        ],
+        still_valid,
     );
 }
 

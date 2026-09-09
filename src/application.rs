@@ -20,8 +20,9 @@ use crate::diagnostics::Diagnostic;
 use crate::error_quality::SequencingErrorsMode;
 use crate::exact_decimal::ExactDecimal;
 use crate::f5_admission::{
-    AdmissionPhase, BoundedInput, F5ResourceLedger, InputRole, LedgerCharge, LedgerLimits,
-    OperationCost, OutputReservation, PhysicalInputIdentity, WorkingMemoryPeak,
+    AdmissionPhase, AdmittedInputIdentity, BoundedInput, F5AdmissionReceipt, F5ResourceLedger,
+    InputRole, LedgerCharge, LedgerLimits, OperationCost, OutputReservation, PhysicalInputIdentity,
+    WorkingMemoryPeak,
 };
 use crate::f5_profile::{F5Profile, load_f5_profile_under_budget};
 use crate::haplotype::{HaplotypePhase, Ploidy};
@@ -238,15 +239,15 @@ pub struct EffectiveF5Config {
     profile: F5Profile,
     bootstrap_documents: F5BootstrapDocuments,
     input_documents: F5InputDocuments,
-    profile_input_identities: Vec<PhysicalInputIdentity>,
-    /// Estado interno de la admisión v7 después de bootstrap y perfil. La
-    /// primera visita FASTA/máscara lo continúa en F5.1.2.4; aún no es un
-    /// receipt sellado ni se proyecta a contratos públicos.
+    profile_input_identities: Vec<AdmittedInputIdentity>,
+    /// Estado interno de la admisión v7 después de bootstrap y perfil, que la
+    /// primera visita FASTA/máscara continúa. No es contabilidad publicable
+    /// mientras la fórmula final no lo selle.
     admission_ledger: F5ResourceLedger,
-    /// Resultado único de la primera pasada FASTA y de la máscara. Conserva
-    /// también las aportaciones externas que se admitieron antes de abrirlas;
-    /// .5 lo sellará sin recalcular ni duplicar la geometría retenida.
-    admitted_preflight: Option<crate::f5_preflight::F5ResourcePreflight>,
+    /// Admisión sellada: la única pasada FASTA/máscara, sus aportaciones
+    /// externas y el receipt que une identidades y fases. Es lo único que abre
+    /// layout, y no recalcula ni duplica la geometría retenida.
+    admitted: Option<crate::f5_preflight::SealedF5Admission>,
     admitted_ledger: Option<F5ResourceLedger>,
     general: DeclaredF5GeneralConfig,
     scenario: DeclaredF5Scenario,
@@ -338,7 +339,7 @@ impl F5InputDocuments {
     fn from_observed(
         general_toml_bytes: u64,
         scenario_toml_bytes: u64,
-        identities: &[PhysicalInputIdentity],
+        identities: &[AdmittedInputIdentity],
     ) -> Result<Self, Diagnostic> {
         let (metadata, tables) = identities.split_first().ok_or_else(|| {
             Diagnostic::f5_resource("<unresolved>", "faltan identidades físicas del perfil")
@@ -600,16 +601,32 @@ impl EffectiveF5Config {
         self.input_documents
     }
     #[must_use]
-    pub fn profile_input_identities(&self) -> &[PhysicalInputIdentity] {
+    pub fn profile_input_identities(&self) -> &[AdmittedInputIdentity] {
         &self.profile_input_identities
+    }
+    /// Las ocho identidades físicas que esta configuración ya observó: los dos
+    /// TOML de autoría, el metadata y los cinco TSV, en orden de rol.
+    ///
+    /// Referencia y máscara no aparecen aquí porque pertenecen al escaneo, no
+    /// a la carga de documentos.
+    pub(crate) fn admitted_document_identities(&self) -> Vec<AdmittedInputIdentity> {
+        let mut identities = Vec::with_capacity(2 + self.profile_input_identities.len());
+        identities.push(AdmittedInputIdentity::undeclared(
+            self.bootstrap_documents.general().identity().clone(),
+        ));
+        identities.push(AdmittedInputIdentity::undeclared(
+            self.bootstrap_documents.scenario().identity().clone(),
+        ));
+        identities.extend_from_slice(&self.profile_input_identities);
+        identities
     }
     #[must_use]
     pub(crate) fn admission_ledger(&self) -> F5ResourceLedger {
         self.admission_ledger.clone()
     }
     #[must_use]
-    pub(crate) fn admitted_preflight(&self) -> Option<&crate::f5_preflight::F5ResourcePreflight> {
-        self.admitted_preflight.as_ref()
+    pub(crate) fn admitted(&self) -> Option<&crate::f5_preflight::SealedF5Admission> {
+        self.admitted.as_ref()
     }
     #[must_use]
     pub const fn bootstrap_documents(&self) -> &F5BootstrapDocuments {
@@ -1252,7 +1269,15 @@ fn materialize_f5_config_after_bootstrap(
     effective.seed = root_seed.to_hex();
     effective.seed_origin = origin.as_str().to_owned();
     preflight.bind_configuration(&effective)?;
-    effective.admitted_preflight = Some(preflight);
+    // El sellado cierra la contabilidad y une el receipt: identidades de las
+    // diez entradas posibles en orden de rol y fases en su orden cerrado.
+    let phases = ledger.seal_phases()?;
+    let identities = crate::f5_preflight::sealed_input_identities(
+        &effective.admitted_document_identities(),
+        &preflight,
+    );
+    let receipt = F5AdmissionReceipt::seal(identities, phases)?;
+    effective.admitted = Some(preflight.seal(receipt));
     effective.admitted_ledger = Some(ledger);
     Ok(effective)
 }
@@ -1308,7 +1333,7 @@ fn prepare_f5_config_after_bootstrap(
         input_documents,
         profile_input_identities,
         admission_ledger: ledger,
-        admitted_preflight: None,
+        admitted: None,
         admitted_ledger: None,
         general,
         scenario,

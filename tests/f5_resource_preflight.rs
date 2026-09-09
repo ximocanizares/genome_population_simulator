@@ -12,9 +12,10 @@ use genome_population_simulator::application::{
 use genome_population_simulator::f5_layout::{
     F5BlockLengthPlan, F5LayoutRequest, build_f5_physical_layout,
 };
+use genome_population_simulator::f5_preflight::SealedF5Admission;
 use genome_population_simulator::f5_preflight::{
     F5_HARD_OPERATION_LIMIT, F5_HARD_OUTPUT_LIMIT, F5_HARD_WORKING_MEMORY_LIMIT, F5OtherResources,
-    preflight_f5_resources,
+    recover_sealed_f5_admission,
 };
 use genome_population_simulator::identity::{
     ExecutionId, F5IdentityContext, F5IdentityRegistry, ReferenceId, ScenarioId,
@@ -25,6 +26,16 @@ use genome_population_simulator::randomness::{
 use sha2::{Digest, Sha256};
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
+
+/// Recupera la admisión sellada con el nombre que estas pruebas usaban antes
+/// del sellado de F5.1.2.5. Ningún consumidor productivo la conserva: layout y
+/// contrato exigen ya `SealedF5Admission`.
+fn preflight_f5_resources(
+    config: &EffectiveF5Config,
+    other: F5OtherResources,
+) -> Result<SealedF5Admission, genome_population_simulator::diagnostics::Diagnostic> {
+    recover_sealed_f5_admission(config, other)
+}
 
 #[derive(Debug)]
 struct FixedEntropy([u8; 32]);
@@ -125,12 +136,14 @@ fn assert_preflight_projection_validates_through_effective_and_manifest(
     }
 }
 
-fn assert_f5_1_2_3_v7_scalar_key_set(projection: &serde_json::Value) {
+fn assert_f5_1_2_5_v7_contract_key_set(projection: &serde_json::Value) {
     // Oráculo literal independiente de `to_contract_json` y de los esquemas.
-    // `input_identities` y `phases` pertenecen al cierre posterior F5.1.2.5;
-    // este subhito solo puede publicar los escalares v7 ya materializados.
+    // F5.1.2.5 cierra el objeto con `input_identities` y `phases` junto a los
+    // escalares ya materializados en F5.1.2.3.
     let expected = [
         "algorithm",
+        "input_identities",
+        "phases",
         "reference_bases_processed",
         "fasta_bytes_processed",
         "mask_bytes_processed",
@@ -167,6 +180,52 @@ fn assert_f5_1_2_3_v7_scalar_key_set(projection: &serde_json::Value) {
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
     assert_eq!(observed, expected);
+    for identity in projection["input_identities"]
+        .as_array()
+        .expect("sealed identity list")
+    {
+        let keys = identity
+            .as_object()
+            .expect("identity object")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            keys,
+            [
+                "role",
+                "normalized_path",
+                "observed_size_bytes",
+                "observed_sha256",
+                "declared_size_bytes",
+                "declared_sha256",
+            ]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+        );
+    }
+    for record in projection["phases"].as_array().expect("sealed phase list") {
+        let keys = record
+            .as_object()
+            .expect("phase object")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            keys,
+            [
+                "phase",
+                "operation_units_cumulative",
+                "retained_before_bytes",
+                "transient_bytes",
+                "retained_after_bytes",
+                "phase_peak_bytes",
+                "output_bytes_reserved",
+            ]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+        );
+    }
 }
 
 fn write_profile(path: &Path) -> String {
@@ -717,30 +776,89 @@ fn public_preflight_reuses_the_initial_other_binding_without_late_io() {
 }
 
 #[test]
-fn unsealed_scan_retains_reference_and_mask_identities_in_role_order() {
+fn sealed_receipt_binds_every_input_in_contractual_role_order_with_mask() {
     let root = temporary("scan-identities");
     fs::create_dir_all(&root).expect("root");
     let mask = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
     let general = configuration(&root, Some(mask), "", "AAAA");
     let config = load_and_validate_f5_config(&general).expect("admitted configuration");
-    let preflight = preflight_f5_resources(&config, F5OtherResources::default())
-        .expect("retained unsealed scan");
-    let identities = preflight.physical_input_identities();
-    assert_eq!(identities.len(), 2);
-    assert_eq!(identities[0].role().as_str(), "reference_fasta");
-    assert_eq!(identities[1].role().as_str(), "mask");
-    let fasta = b">chr1\nAAAA\n";
-    assert_eq!(identities[0].observed_size_bytes(), fasta.len() as u64);
-    assert_eq!(identities[0].observed_sha256(), sha256(fasta));
-    assert_eq!(identities[1].observed_size_bytes(), mask.len() as u64);
-    assert_eq!(identities[1].observed_sha256(), sha256(mask.as_bytes()));
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("sealed admission");
+    let identities = sealed.receipt().input_identities();
+    // Oráculo literal del orden contractual, independiente del enum productivo.
     assert_eq!(
-        identities[0].normalized_path(),
+        identities
+            .iter()
+            .map(|identity| identity.role().as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "general_toml",
+            "scenario_toml",
+            "profile_metadata",
+            "profile_block_lengths",
+            "profile_snp_gaps",
+            "profile_snp_spectrum",
+            "profile_haplotype_weights",
+            "profile_ld",
+            "reference_fasta",
+            "mask",
+        ]
+    );
+    let fasta = b">chr1\nAAAA\n";
+    let reference = &identities[8];
+    assert_eq!(reference.observed_size_bytes(), fasta.len() as u64);
+    assert_eq!(reference.observed_sha256(), sha256(fasta));
+    assert_eq!(reference.declared_size_bytes(), None);
+    assert_eq!(reference.declared_sha256(), Some(sha256(fasta).as_str()));
+    assert_eq!(
+        reference.normalized_path(),
         root.join("authoring/references/ref.fa")
     );
+    let sealed_mask = &identities[9];
+    assert_eq!(sealed_mask.observed_size_bytes(), mask.len() as u64);
+    assert_eq!(sealed_mask.observed_sha256(), sha256(mask.as_bytes()));
+    assert_eq!(sealed_mask.declared_size_bytes(), None);
     assert_eq!(
-        identities[1].normalized_path(),
+        sealed_mask.declared_sha256(),
+        Some(sha256(mask.as_bytes()).as_str())
+    );
+    assert_eq!(
+        sealed_mask.normalized_path(),
         root.join("authoring/scenarios/excluded_regions.tsv")
+    );
+    // Los dos TOML de autoría no tienen documento propietario que declare su
+    // identidad; los cinco TSV sí la tienen completa en el metadata.
+    for identity in &identities[..2] {
+        assert_eq!(identity.declared_size_bytes(), None);
+        assert_eq!(identity.declared_sha256(), None);
+    }
+    assert_eq!(identities[2].declared_size_bytes(), None);
+    assert!(identities[2].declared_sha256().is_some());
+    for identity in &identities[3..8] {
+        assert_eq!(
+            identity.declared_size_bytes(),
+            Some(identity.observed_size_bytes())
+        );
+        assert_eq!(identity.declared_sha256(), Some(identity.observed_sha256()));
+    }
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn sealed_receipt_without_a_declared_mask_stops_at_the_reference() {
+    let root = temporary("scan-identities-no-mask");
+    fs::create_dir_all(&root).expect("root");
+    let general = configuration(&root, None, "", "AAAA");
+    let config = load_and_validate_f5_config(&general).expect("admitted configuration");
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("sealed admission");
+    let identities = sealed.receipt().input_identities();
+    assert_eq!(identities.len(), 9);
+    assert_eq!(identities[8].role().as_str(), "reference_fasta");
+    assert!(
+        identities
+            .iter()
+            .all(|identity| identity.role().as_str() != "mask")
     );
     fs::remove_dir_all(root).expect("cleanup");
 }
@@ -1036,7 +1154,7 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
 }
 
 #[test]
-fn admitted_reference_identity_is_reused_without_a_second_pass_in_point_four() {
+fn the_sealed_reference_identity_is_reused_without_reopening_the_fasta() {
     let root = temporary("reference-sha");
     fs::create_dir_all(&root).expect("root");
     let general = configuration(&root, None, "", "AAAA");
@@ -1044,10 +1162,11 @@ fn admitted_reference_identity_is_reused_without_a_second_pass_in_point_four() {
     fs::write(root.join("authoring/references/ref.fa"), b">chr1\nAAAT\n")
         .expect("reference mutation");
     let preflight = preflight_f5_resources(&config, F5OtherResources::default())
-        .expect(".4 reuses its admitted scan; mutation binding belongs to .5");
+        .expect("recovering the sealed admission never reopens the reference");
     assert_eq!(
-        preflight.physical_input_identities()[0].observed_sha256(),
-        sha256(b">chr1\nAAAA\n")
+        preflight.receipt().input_identities()[8].observed_sha256(),
+        sha256(b">chr1\nAAAA\n"),
+        "the receipt keeps the bytes the single physical pass observed"
     );
     fs::remove_dir_all(root).expect("cleanup");
 }
@@ -2228,7 +2347,7 @@ fn public_v7_preflight_serializes_gap_terms_and_validates_both_contracts() {
     assert_eq!(preflight.algorithm(), "f5-resource-accounting-v7");
 
     let projection = preflight.to_contract_json();
-    assert_f5_1_2_3_v7_scalar_key_set(&projection);
+    assert_f5_1_2_5_v7_contract_key_set(&projection);
     assert_eq!(projection["algorithm"], preflight.algorithm());
     assert_eq!(
         projection["gap_support_cardinality"],
@@ -2505,8 +2624,16 @@ fn preflight_identity_binds_semantic_subpopulations_and_overrides_before_layout_
     )
     .expect("equivalent effective defaults");
     let equivalent = load_and_validate_f5_config(&general).expect("equivalent configuration");
-    F5LayoutRequest::new(&equivalent, &preflight, &execution)
+    // La mitad semántica del binding sigue siendo canónica: el plan de
+    // longitudes acepta la reescritura con los valores por omisión explícitos.
+    F5BlockLengthPlan::from_preflight(&equivalent, &preflight)
         .expect("canonical effective identity accepts equivalent defaults");
+    // La mitad física, en cambio, no: el escenario reescrito tiene otro SHA y
+    // F5.1.2.5 exige las dos mitades para abrir layout.
+    let error = F5LayoutRequest::new(&equivalent, &preflight, &execution)
+        .expect_err("the sealed receipt binds the exact bytes of the scenario it admitted");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(error.context()["fields"], "preflight.binding");
     fs::remove_dir_all(root).expect("cleanup");
 }
 
@@ -2775,4 +2902,327 @@ fn cli_validate_executes_point_four_without_creating_a_destination() {
         }
         fs::remove_dir_all(root).expect("cleanup");
     }
+}
+
+/// F5.1.2.5: la mitad semántica del binding no distingue dos TOML iguales que
+/// difieran en un comentario o en su relleno; la mitad física sí, porque el
+/// receipt sella el SHA observado de cada documento.
+#[test]
+fn sealed_receipt_rejects_semantically_equal_toml_with_different_comments() {
+    let root = temporary("sealed-toml-crossing");
+    fs::create_dir_all(&root).expect("root");
+    let general_path = configuration(&root, None, "", "AAAA");
+    let config = load_and_validate_f5_config(&general_path).expect("configuration");
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("sealed admission");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    build_f5_physical_layout(
+        F5LayoutRequest::new(&config, &sealed, &execution).expect("own binding"),
+    )
+    .expect("the sealed admission opens layout for its own bytes");
+
+    for (label, path) in [
+        ("scenario", root.join("authoring/scenarios/scenario.toml")),
+        ("general", general_path.clone()),
+    ] {
+        let original = fs::read_to_string(&path).expect("document source");
+        let padded = format!("{original}# {label} padding sin efecto semántico\n");
+        fs::write(&path, &padded).expect("padded document");
+        let reloaded = load_and_validate_f5_config(&general_path).expect("padded configuration");
+        // La identidad semántica no cambia: el plan de longitudes sigue ligado.
+        F5BlockLengthPlan::from_preflight(&reloaded, &sealed)
+            .expect("a comment does not change the semantic identity");
+        let error = F5LayoutRequest::new(&reloaded, &sealed, &execution)
+            .expect_err("the sealed receipt binds the exact bytes it admitted");
+        assert_eq!(error.code(), "GPS-CONF-101");
+        assert_eq!(error.context()["fields"], "preflight.binding");
+        // El cruce recíproco tampoco se admite.
+        let reloaded_seal = recover_sealed_f5_admission(&reloaded, F5OtherResources::default())
+            .expect("padded admission");
+        let error = F5LayoutRequest::new(&config, &reloaded_seal, &execution)
+            .expect_err("the reciprocal crossing is equally inadmissible");
+        assert_eq!(error.code(), "GPS-CONF-101");
+        fs::write(&path, original).expect("restored document");
+    }
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// El metadata declara tamaño y SHA de cada TSV, de modo que intercambiar dos
+/// tablas se rechaza al cargarlas; y una admisión sellada sobre el paquete
+/// original nunca puede abrir layout sobre el intercambiado.
+#[test]
+fn swapped_profile_tables_are_rejected_on_load_and_never_cross_a_sealed_receipt() {
+    let root = temporary("swapped-profile-tables");
+    fs::create_dir_all(&root).expect("root");
+    let general_path = configuration(&root, None, "", "AAAA");
+    let config = load_and_validate_f5_config(&general_path).expect("configuration");
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("sealed admission");
+    let identities = sealed.receipt().input_identities();
+    let gaps_digest = identities[4].observed_sha256().to_owned();
+    let spectrum_digest = identities[5].observed_sha256().to_owned();
+    assert_ne!(gaps_digest, spectrum_digest);
+
+    let profiles = root.join("authoring/scenarios/profiles");
+    let gaps = profiles.join("snp_gaps.tsv");
+    let spectrum = profiles.join("snp_spectrum.tsv");
+    let gaps_source = fs::read_to_string(&gaps).expect("gap table");
+    let spectrum_source = fs::read_to_string(&spectrum).expect("spectrum table");
+    fs::write(&gaps, &spectrum_source).expect("swapped gap table");
+    fs::write(&spectrum, &gaps_source).expect("swapped spectrum table");
+
+    let error = load_and_validate_f5_config(&general_path)
+        .expect_err("a swapped table contradicts the identity its metadata declares");
+    assert_eq!(error.code(), "GPS-INPUT-002");
+    assert!(
+        error.context()["path"].ends_with("snp_gaps.tsv"),
+        "the diagnostic must name the swapped table: {:?}",
+        error.context()["path"]
+    );
+
+    // El paquete intercambiado se reconstruye con su propio metadata: sus
+    // identidades físicas son legítimas, pero no las que el receipt selló.
+    let swapped_general = {
+        let swapped_root = root.join("swapped");
+        let path = custom_configuration_with_gap(
+            &swapped_root,
+            "",
+            "AAAA",
+            "length_min_bp\tlength_max_bp\tweight\n2\t2\t1\n",
+            "gap_min_bp\tgap_max_bp\tweight\n1\t2\t1\n",
+            "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
+            "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t1\t0.5\t0.05\n",
+        );
+        load_and_validate_f5_config(&path).expect("independent profile package")
+    };
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let error = F5LayoutRequest::new(&swapped_general, &sealed, &execution)
+        .expect_err("a sealed receipt does not admit another profile package");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(error.context()["fields"], "preflight.binding");
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// La recuperación REF exige tamaño y SHA idénticos a los sellados y nunca lee
+/// más de `tamaño + 1` bytes, de modo que un crecimiento se prueba con un solo
+/// byte en lugar de recorrerse.
+#[test]
+fn second_fasta_pass_rejects_modified_truncated_and_grown_references() {
+    let sealed_fasta = b">chr1\nAAAA\n";
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let cases: [(&str, Vec<u8>, u64); 3] = [
+        (
+            "modified",
+            b">chr1\nAAAT\n".to_vec(),
+            sealed_fasta.len() as u64,
+        ),
+        (
+            "truncated",
+            b">chr1\nAAA\n".to_vec(),
+            (sealed_fasta.len() - 1) as u64,
+        ),
+        (
+            "grown",
+            format!(">chr1\n{}\n", "A".repeat(20_000)).into_bytes(),
+            sealed_fasta.len() as u64 + 1,
+        ),
+    ];
+    for (label, replacement, expected_observed_size) in cases {
+        let root = temporary(&format!("second-pass-{label}"));
+        fs::create_dir_all(&root).expect("root");
+        let general_path = configuration(&root, None, "", "AAAA");
+        let config = load_and_validate_f5_config(&general_path).expect("configuration");
+        let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+            .expect("sealed admission");
+        let reference = sealed
+            .receipt()
+            .identity(genome_population_simulator::f5_admission::InputRole::ReferenceFasta)
+            .expect("sealed reference identity");
+        assert_eq!(reference.observed_size_bytes(), sealed_fasta.len() as u64);
+        assert_eq!(reference.observed_sha256(), sha256(sealed_fasta));
+
+        fs::write(root.join("authoring/references/ref.fa"), &replacement)
+            .expect("reference mutated between passes");
+        let error = build_f5_physical_layout(
+            F5LayoutRequest::new(&config, &sealed, &execution).expect("sealed binding"),
+        )
+        .expect_err("the second pass must not accept REF from another reference");
+        assert_eq!(error.code(), "GPS-INPUT-002", "case {label}");
+        assert_eq!(
+            error.context()["expected_size_bytes"],
+            sealed_fasta.len().to_string(),
+            "case {label}"
+        );
+        // El crecimiento se acredita con el byte sobrante, no recorriendo los
+        // 20.007 bytes del fichero sustituido.
+        assert_eq!(
+            error.context()["observed_size_bytes"],
+            expected_observed_size.to_string(),
+            "case {label}"
+        );
+        assert_eq!(
+            error.context()["expected_digest"],
+            sha256(sealed_fasta),
+            "case {label}"
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+}
+
+/// Una referencia intacta entre pasadas sigue admitiéndose, de modo que la
+/// cota `tamaño + 1` no rechaza el recorrido legítimo por su último byte.
+#[test]
+fn second_fasta_pass_accepts_the_exact_sealed_size() {
+    let root = temporary("second-pass-exact");
+    fs::create_dir_all(&root).expect("root");
+    let general_path = configuration(&root, None, "", "AAAA");
+    let config = load_and_validate_f5_config(&general_path).expect("configuration");
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("sealed admission");
+    let execution =
+        ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let layout = build_f5_physical_layout(
+        F5LayoutRequest::new(&config, &sealed, &execution).expect("sealed binding"),
+    )
+    .expect("an untouched reference recovers REF under the sealed bound");
+    assert_eq!(layout.blocks().len(), 1);
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Las fases selladas siguen el orden cerrado de la máquina de admisión, son
+/// continuas en retención y cierran exactamente los totales publicados.
+#[test]
+fn sealed_phases_follow_the_closed_admission_order_and_close_the_totals() {
+    let root = temporary("sealed-phases");
+    fs::create_dir_all(&root).expect("root");
+    let mask = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
+    let general = configuration(&root, Some(mask), "", "AAAA");
+    let config = load_and_validate_f5_config(&general).expect("configuration");
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("sealed admission");
+    let phases = sealed.receipt().phases();
+    // Oráculo literal del orden cerrado, independiente del enum productivo.
+    assert_eq!(
+        phases
+            .iter()
+            .map(|record| record.phase().as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "bootstrap",
+            "profile_metadata",
+            "profile_table_block_lengths",
+            "profile_table_snp_gaps",
+            "profile_table_snp_spectrum",
+            "profile_table_haplotype_weights",
+            "profile_table_ld",
+            "reference_and_mask_scan",
+            "final_formula",
+        ]
+    );
+    assert_eq!(phases[0].retained_before_bytes(), 0);
+    for pair in phases.windows(2) {
+        assert!(
+            pair[0].operation_units_cumulative() <= pair[1].operation_units_cumulative(),
+            "cumulative operations must not decrease"
+        );
+        assert!(pair[0].output_bytes_reserved() <= pair[1].output_bytes_reserved());
+        assert_eq!(
+            pair[0].retained_after_bytes(),
+            pair[1].retained_before_bytes(),
+            "retention must be continuous across phases"
+        );
+    }
+    for record in phases {
+        assert!(
+            record.phase_peak_bytes()
+                >= record
+                    .retained_before_bytes()
+                    .max(record.retained_after_bytes()),
+            "a phase peak never falls below its live retention"
+        );
+        assert!(record.phase_peak_bytes() <= sealed.working_memory_bytes());
+    }
+    let last = phases.last().expect("final formula record");
+    assert_eq!(last.operation_units_cumulative(), sealed.operation_units());
+    assert_eq!(last.output_bytes_reserved(), sealed.output_bytes());
+    assert_eq!(
+        phases
+            .iter()
+            .map(genome_population_simulator::f5_admission::AdmissionPhaseRecord::phase_peak_bytes)
+            .max(),
+        Some(sealed.working_memory_bytes())
+    );
+    fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// El receipt sellado publica el algoritmo v7 y su proyección reproduce, una a
+/// una, las identidades y fases que la admisión observó.
+#[test]
+fn sealed_projection_publishes_identities_and_phases_in_receipt_order() {
+    let root = temporary("sealed-projection");
+    fs::create_dir_all(&root).expect("root");
+    let mask = "region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t2\t2\n";
+    let general = configuration(&root, Some(mask), "", "AAAA");
+    let config = load_and_validate_f5_config(&general).expect("configuration");
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("sealed admission");
+    assert_eq!(sealed.receipt().algorithm(), "f5-resource-accounting-v7");
+
+    let projection = sealed.to_contract_json();
+    assert_f5_1_2_5_v7_contract_key_set(&projection);
+    let identities = projection["input_identities"]
+        .as_array()
+        .expect("identity list");
+    assert_eq!(identities.len(), 10);
+    for (published, sealed_identity) in identities.iter().zip(sealed.receipt().input_identities()) {
+        assert_eq!(published["role"], sealed_identity.role().as_str());
+        assert_eq!(
+            published["normalized_path"],
+            sealed_identity.normalized_path().display().to_string()
+        );
+        assert_eq!(
+            published["observed_size_bytes"],
+            sealed_identity.observed_size_bytes()
+        );
+        assert_eq!(
+            published["observed_sha256"],
+            sealed_identity.observed_sha256()
+        );
+        match sealed_identity.declared_size_bytes() {
+            Some(size) => assert_eq!(published["declared_size_bytes"], size),
+            None => assert!(published["declared_size_bytes"].is_null()),
+        }
+        match sealed_identity.declared_sha256() {
+            Some(digest) => assert_eq!(published["declared_sha256"], digest),
+            None => assert!(published["declared_sha256"].is_null()),
+        }
+    }
+    let published_phases = projection["phases"].as_array().expect("phase list");
+    assert_eq!(published_phases.len(), 9);
+    for (published, record) in published_phases.iter().zip(sealed.receipt().phases()) {
+        assert_eq!(published["phase"], record.phase().as_str());
+        assert_eq!(
+            published["operation_units_cumulative"],
+            record.operation_units_cumulative()
+        );
+        assert_eq!(
+            published["retained_before_bytes"],
+            record.retained_before_bytes()
+        );
+        assert_eq!(published["transient_bytes"], record.transient_bytes());
+        assert_eq!(
+            published["retained_after_bytes"],
+            record.retained_after_bytes()
+        );
+        assert_eq!(published["phase_peak_bytes"], record.phase_peak_bytes());
+        assert_eq!(
+            published["output_bytes_reserved"],
+            record.output_bytes_reserved()
+        );
+    }
+    assert_preflight_projection_validates_through_effective_and_manifest(&root, &projection);
+    fs::remove_dir_all(root).expect("cleanup");
 }

@@ -92,6 +92,77 @@ impl fmt::Display for AdmissionPhase {
     }
 }
 
+/// Orden cerrado de las fases que contabilizan recursos. `Sealed` y `Rejected`
+/// son estados terminales de la máquina y no registran contabilidad propia:
+/// el sellado cierra `FinalFormula` y el rechazo nunca produce un receipt.
+pub const ACCOUNTED_ADMISSION_PHASES: [AdmissionPhase; 9] = [
+    AdmissionPhase::Bootstrap,
+    AdmissionPhase::ProfileMetadata,
+    AdmissionPhase::ProfileTableBlockLengths,
+    AdmissionPhase::ProfileTableSnpGaps,
+    AdmissionPhase::ProfileTableSnpSpectrum,
+    AdmissionPhase::ProfileTableHaplotypeWeights,
+    AdmissionPhase::ProfileTableLd,
+    AdmissionPhase::ReferenceAndMaskScan,
+    AdmissionPhase::FinalFormula,
+];
+
+/// Contabilidad cerrada de una fase de admisión.
+///
+/// `transient_bytes` y `phase_peak_bytes` son máximos observados dentro de la
+/// fase; `operation_units_cumulative` y `output_bytes_reserved` son los totales
+/// acumulados del ledger en el instante en que la fase se cierra.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AdmissionPhaseRecord {
+    phase: AdmissionPhase,
+    operation_units_cumulative: u64,
+    retained_before_bytes: u64,
+    transient_bytes: u64,
+    retained_after_bytes: u64,
+    phase_peak_bytes: u64,
+    output_bytes_reserved: u64,
+}
+
+impl AdmissionPhaseRecord {
+    #[must_use]
+    pub const fn phase(&self) -> AdmissionPhase {
+        self.phase
+    }
+    #[must_use]
+    pub const fn operation_units_cumulative(&self) -> u64 {
+        self.operation_units_cumulative
+    }
+    #[must_use]
+    pub const fn retained_before_bytes(&self) -> u64 {
+        self.retained_before_bytes
+    }
+    #[must_use]
+    pub const fn transient_bytes(&self) -> u64 {
+        self.transient_bytes
+    }
+    #[must_use]
+    pub const fn retained_after_bytes(&self) -> u64 {
+        self.retained_after_bytes
+    }
+    #[must_use]
+    pub const fn phase_peak_bytes(&self) -> u64 {
+        self.phase_peak_bytes
+    }
+    #[must_use]
+    pub const fn output_bytes_reserved(&self) -> u64 {
+        self.output_bytes_reserved
+    }
+}
+
+/// Estado vivo de la fase todavía abierta. No es contabilidad publicable
+/// mientras la fase pueda seguir cobrando.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct OpenAdmissionPhase {
+    retained_before_bytes: u64,
+    transient_bytes: u64,
+    peak_bytes: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceDimension {
     OperationUnits,
@@ -202,6 +273,8 @@ pub struct F5ResourceLedger {
     retained_memory_bytes: u64,
     read_operation_escrow_units: u64,
     phase: AdmissionPhase,
+    closed_phases: Vec<AdmissionPhaseRecord>,
+    open_phase: OpenAdmissionPhase,
 }
 
 impl F5ResourceLedger {
@@ -217,6 +290,12 @@ impl F5ResourceLedger {
             retained_memory_bytes: 0,
             read_operation_escrow_units: 0,
             phase: AdmissionPhase::Bootstrap,
+            closed_phases: Vec::new(),
+            open_phase: OpenAdmissionPhase {
+                retained_before_bytes: 0,
+                transient_bytes: 0,
+                peak_bytes: 0,
+            },
         }
     }
 
@@ -506,8 +585,58 @@ impl F5ResourceLedger {
                 "transición de admisión fuera de orden",
             ));
         }
+        self.close_open_phase();
         self.phase = next;
         Ok(())
+    }
+
+    /// Cierra la fase vigente y abre la siguiente sobre la retención viva.
+    fn close_open_phase(&mut self) {
+        self.closed_phases.push(AdmissionPhaseRecord {
+            phase: self.phase,
+            operation_units_cumulative: self.totals.operation_units.value(),
+            retained_before_bytes: self.open_phase.retained_before_bytes,
+            transient_bytes: self.open_phase.transient_bytes,
+            retained_after_bytes: self.retained_memory_bytes,
+            phase_peak_bytes: self.open_phase.peak_bytes.max(self.retained_memory_bytes),
+            output_bytes_reserved: self.totals.output_bytes.value(),
+        });
+        self.open_phase = OpenAdmissionPhase {
+            retained_before_bytes: self.retained_memory_bytes,
+            transient_bytes: 0,
+            peak_bytes: self.retained_memory_bytes,
+        };
+    }
+
+    /// Cierra la contabilidad y entrega las nueve fases en su orden cerrado.
+    /// Solo la fórmula final puede sellar; un ledger rechazado o incompleto no
+    /// produce receipt, y un segundo sellado ya no encuentra fase que cerrar.
+    pub(crate) fn seal_phases(&mut self) -> Result<Vec<AdmissionPhaseRecord>, Diagnostic> {
+        if self.phase != AdmissionPhase::FinalFormula {
+            // Un segundo sellado es un error del llamador, no una admisión
+            // fallida: rechazar aquí convertiría una consulta en un cambio de
+            // estado y perdería el receipt ya emitido.
+            if self.phase == AdmissionPhase::Sealed {
+                return Err(resource_diagnostic(
+                    self.phase,
+                    InputRole::GeneralToml,
+                    ResourceDimension::OperationUnits,
+                    0,
+                    0,
+                    "la admisión ya está sellada y no puede volver a sellarse",
+                ));
+            }
+            return Err(self.reject(resource_diagnostic(
+                self.phase,
+                InputRole::GeneralToml,
+                ResourceDimension::OperationUnits,
+                0,
+                0,
+                "el sellado exige la fórmula final como fase vigente",
+            )));
+        }
+        self.transition_to(AdmissionPhase::Sealed)?;
+        Ok(self.closed_phases.clone())
     }
 
     /// Comprueba primero el nuevo total y solo después muta el ledger.
@@ -597,6 +726,9 @@ impl F5ResourceLedger {
             )));
         }
         self.totals = updated;
+        if let LedgerCharge::WorkingMemoryPeak(peak) = charge {
+            self.open_phase.peak_bytes = self.open_phase.peak_bytes.max(peak.value());
+        }
         Ok(())
     }
 
@@ -638,6 +770,7 @@ impl F5ResourceLedger {
             LedgerCharge::WorkingMemoryPeak(WorkingMemoryPeak::new(peak)),
         )?;
         self.retained_memory_bytes = retained_after_bytes;
+        self.open_phase.transient_bytes = self.open_phase.transient_bytes.max(transient_bytes);
         Ok(())
     }
 
@@ -687,9 +820,26 @@ impl F5ResourceLedger {
         ))
     }
 
-    fn restore_totals(&mut self, totals: LedgerTotals) {
-        self.totals = totals;
+    /// Punto de retorno de una reserva prospectiva que la lectura no llegó a
+    /// consumir. Restituye también el pico de la fase abierta, que de otro
+    /// modo publicaría una reserva revertida.
+    fn checkpoint(&self) -> LedgerCheckpoint {
+        LedgerCheckpoint {
+            totals: self.totals,
+            open_phase: self.open_phase,
+        }
     }
+
+    fn restore(&mut self, checkpoint: LedgerCheckpoint) {
+        self.totals = checkpoint.totals;
+        self.open_phase = checkpoint.open_phase;
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LedgerCheckpoint {
+    totals: LedgerTotals,
+    open_phase: OpenAdmissionPhase,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -840,6 +990,182 @@ impl PhysicalInputIdentity {
     pub fn observed_sha256(&self) -> &str {
         &self.observed_sha256
     }
+}
+
+/// Identidad física observada junto a la identidad que declara su documento
+/// propietario, cuando ese documento la declara.
+///
+/// El constructor rechaza cualquier contradicción, de modo que un receipt
+/// sellado no puede registrar a la vez un tamaño o SHA declarado y otro
+/// observado.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdmittedInputIdentity {
+    observed: PhysicalInputIdentity,
+    declared_size_bytes: Option<u64>,
+    declared_sha256: Option<String>,
+}
+
+impl AdmittedInputIdentity {
+    pub(crate) fn new(
+        observed: PhysicalInputIdentity,
+        declared_size_bytes: Option<u64>,
+        declared_sha256: Option<String>,
+    ) -> Result<Self, Diagnostic> {
+        if declared_size_bytes.is_some_and(|size| size != observed.observed_size_bytes())
+            || declared_sha256
+                .as_deref()
+                .is_some_and(|digest| digest != observed.observed_sha256())
+        {
+            return Err(input_identity_mismatch_diagnostic(
+                observed.normalized_path(),
+                declared_size_bytes.unwrap_or(observed.observed_size_bytes()),
+                declared_sha256
+                    .as_deref()
+                    .unwrap_or(observed.observed_sha256()),
+                observed.observed_size_bytes(),
+                observed.observed_sha256(),
+            ));
+        }
+        Ok(Self {
+            observed,
+            declared_size_bytes,
+            declared_sha256,
+        })
+    }
+
+    /// Entrada cuyo documento propietario no declara identidad alguna: los dos
+    /// TOML de autoría, que solo existen por su ruta.
+    pub(crate) const fn undeclared(observed: PhysicalInputIdentity) -> Self {
+        Self {
+            observed,
+            declared_size_bytes: None,
+            declared_sha256: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn observed(&self) -> &PhysicalInputIdentity {
+        &self.observed
+    }
+    #[must_use]
+    pub const fn role(&self) -> InputRole {
+        self.observed.role()
+    }
+    #[must_use]
+    pub fn normalized_path(&self) -> &Path {
+        self.observed.normalized_path()
+    }
+    #[must_use]
+    pub const fn observed_size_bytes(&self) -> u64 {
+        self.observed.observed_size_bytes()
+    }
+    #[must_use]
+    pub fn observed_sha256(&self) -> &str {
+        self.observed.observed_sha256()
+    }
+    #[must_use]
+    pub const fn declared_size_bytes(&self) -> Option<u64> {
+        self.declared_size_bytes
+    }
+    #[must_use]
+    pub fn declared_sha256(&self) -> Option<&str> {
+        self.declared_sha256.as_deref()
+    }
+}
+
+/// Roles obligatorios de un receipt sellado, en orden contractual. La máscara
+/// es el único rol opcional y siempre cierra la lista.
+const REQUIRED_RECEIPT_ROLES: [InputRole; 9] = [
+    InputRole::GeneralToml,
+    InputRole::ScenarioToml,
+    InputRole::ProfileMetadata,
+    InputRole::ProfileBlockLengths,
+    InputRole::ProfileSnpGaps,
+    InputRole::ProfileSnpSpectrum,
+    InputRole::ProfileHaplotypeWeights,
+    InputRole::ProfileLd,
+    InputRole::ReferenceFasta,
+];
+
+/// Recibo sellado de la admisión física F5 v7.
+///
+/// Une, en un único objeto indivisible, las identidades de todas las entradas
+/// realmente leídas y la contabilidad cerrada de cada fase. No existe ninguna
+/// vía de construcción desde un documento serializado: un receipt v5 o v6 no
+/// puede aceptarse ni migrarse, solo repetirse la admisión desde los ficheros.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct F5AdmissionReceipt {
+    input_identities: Vec<AdmittedInputIdentity>,
+    phases: Vec<AdmissionPhaseRecord>,
+}
+
+impl F5AdmissionReceipt {
+    pub(crate) fn seal(
+        input_identities: Vec<AdmittedInputIdentity>,
+        phases: Vec<AdmissionPhaseRecord>,
+    ) -> Result<Self, Diagnostic> {
+        let observed_roles = input_identities
+            .iter()
+            .map(AdmittedInputIdentity::role)
+            .collect::<Vec<_>>();
+        let expected_without_mask = REQUIRED_RECEIPT_ROLES.to_vec();
+        let mut expected_with_mask = expected_without_mask.clone();
+        expected_with_mask.push(InputRole::Mask);
+        if observed_roles != expected_without_mask && observed_roles != expected_with_mask {
+            return Err(receipt_invariant(
+                "las identidades selladas no siguen el orden contractual de roles",
+            ));
+        }
+        if phases
+            .iter()
+            .map(AdmissionPhaseRecord::phase)
+            .ne(ACCOUNTED_ADMISSION_PHASES)
+        {
+            return Err(receipt_invariant(
+                "las fases selladas no siguen el orden cerrado de la máquina de admisión",
+            ));
+        }
+        Ok(Self {
+            input_identities,
+            phases,
+        })
+    }
+
+    #[must_use]
+    pub const fn algorithm(&self) -> &'static str {
+        F5_RESOURCE_ACCOUNTING_ALGORITHM
+    }
+
+    #[must_use]
+    pub fn input_identities(&self) -> &[AdmittedInputIdentity] {
+        &self.input_identities
+    }
+
+    #[must_use]
+    pub fn phases(&self) -> &[AdmissionPhaseRecord] {
+        &self.phases
+    }
+
+    /// Identidad de la única entrada de un rol dado. La máscara es el único
+    /// rol que puede faltar.
+    #[must_use]
+    pub fn identity(&self, role: InputRole) -> Option<&AdmittedInputIdentity> {
+        self.input_identities
+            .iter()
+            .find(|identity| identity.role() == role)
+    }
+
+    /// La referencia siempre está sellada; el receipt no puede construirse sin
+    /// ella.
+    pub(crate) fn reference_identity(&self) -> Result<&AdmittedInputIdentity, Diagnostic> {
+        self.identity(InputRole::ReferenceFasta)
+            .ok_or_else(|| receipt_invariant("el receipt sellado no contiene la referencia"))
+    }
+}
+
+fn receipt_invariant(detail: &'static str) -> Diagnostic {
+    Diagnostic::f5_internal("<unresolved>", detail)
+        .with("algorithm", F5_RESOURCE_ACCOUNTING_ALGORITHM)
 }
 
 /// Resultado EOF de una lectura física acotada.
@@ -1044,7 +1370,7 @@ impl<R: Read> BoundedInput<R> {
                     ));
                 }
             };
-            let totals_before_operation = ledger.as_deref().map(F5ResourceLedger::totals);
+            let checkpoint_before_operation = ledger.as_deref().map(F5ResourceLedger::checkpoint);
             if count_operations && let Some(ledger) = ledger.as_deref_mut() {
                 ledger.charge(role, LedgerCharge::Operation(OperationCost::new(2)))?;
             }
@@ -1053,10 +1379,10 @@ impl<R: Read> BoundedInput<R> {
                 .map_err(|error| input_read_error(&normalized_path, error))?;
             if read == 0 {
                 if count_operations
-                    && let (Some(ledger), Some(totals)) =
-                        (ledger.as_deref_mut(), totals_before_operation)
+                    && let (Some(ledger), Some(checkpoint)) =
+                        (ledger.as_deref_mut(), checkpoint_before_operation)
                 {
-                    ledger.restore_totals(totals);
+                    ledger.restore(checkpoint);
                 }
                 break;
             }
@@ -1088,7 +1414,7 @@ impl<R: Read> BoundedInput<R> {
                     ));
                 }
             };
-            let totals_before_reservation = ledger.as_deref().map(F5ResourceLedger::totals);
+            let checkpoint_before_reservation = ledger.as_deref().map(F5ResourceLedger::checkpoint);
             if let Some(ledger) = ledger.as_deref_mut() {
                 ledger.charge(
                     role,
@@ -1096,10 +1422,10 @@ impl<R: Read> BoundedInput<R> {
                 )?;
             }
             if !reserve(&mut bytes, read) {
-                if let (Some(ledger), Some(totals)) =
-                    (ledger.as_deref_mut(), totals_before_reservation)
+                if let (Some(ledger), Some(checkpoint)) =
+                    (ledger.as_deref_mut(), checkpoint_before_reservation)
                 {
-                    ledger.restore_totals(totals);
+                    ledger.restore(checkpoint);
                 }
                 return Err(reject_resource_error(
                     &mut ledger,
@@ -1233,9 +1559,168 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::{
-        AdmissionPhase, BoundedInput, F5ResourceLedger, InputRole, LedgerCharge, LedgerLimits,
-        OperationCost, OutputReservation, WorkingMemoryPeak,
+        ACCOUNTED_ADMISSION_PHASES, AdmissionPhase, AdmittedInputIdentity, BoundedInput,
+        F5AdmissionReceipt, F5ResourceLedger, InputRole, LedgerCharge, LedgerLimits, OperationCost,
+        OutputReservation, PhysicalInputIdentity, WorkingMemoryPeak,
     };
+
+    fn observed(role: InputRole, digest: &str) -> PhysicalInputIdentity {
+        PhysicalInputIdentity::from_observed(
+            role,
+            PathBuf::from(format!("/authoring/{role}")),
+            4,
+            digest.to_owned(),
+        )
+    }
+
+    fn undeclared(role: InputRole) -> AdmittedInputIdentity {
+        AdmittedInputIdentity::undeclared(observed(role, &"a".repeat(64)))
+    }
+
+    /// Ledger mínimo que recorre las nueve fases sin cobrar nada más allá de
+    /// la transición, para poder sellar en las pruebas de invariante.
+    fn walked_ledger() -> F5ResourceLedger {
+        let mut ledger = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(1_000),
+            WorkingMemoryPeak::new(1_000),
+            OutputReservation::new(1_000),
+        ));
+        for phase in ACCOUNTED_ADMISSION_PHASES.into_iter().skip(1) {
+            ledger.transition_to(phase).expect("ordered transition");
+        }
+        ledger
+    }
+
+    #[test]
+    fn a_declared_identity_that_contradicts_the_observed_bytes_is_refused() {
+        let identity = observed(InputRole::ProfileBlockLengths, &"a".repeat(64));
+        let error = AdmittedInputIdentity::new(identity.clone(), Some(5), Some("a".repeat(64)))
+            .expect_err("a declared size that is not the observed one is a contradiction");
+        assert_eq!(error.code(), "GPS-INPUT-002");
+        assert_eq!(error.context()["expected_size_bytes"], "5");
+        assert_eq!(error.context()["observed_size_bytes"], "4");
+        let error = AdmittedInputIdentity::new(identity.clone(), Some(4), Some("b".repeat(64)))
+            .expect_err("a declared digest that is not the observed one is a contradiction");
+        assert_eq!(error.code(), "GPS-INPUT-002");
+        let admitted = AdmittedInputIdentity::new(identity, Some(4), Some("a".repeat(64)))
+            .expect("a coincident declaration is admissible");
+        assert_eq!(admitted.declared_size_bytes(), Some(4));
+        assert_eq!(admitted.declared_sha256(), Some("a".repeat(64).as_str()));
+    }
+
+    #[test]
+    fn a_receipt_requires_the_contractual_role_order_and_the_closed_phase_order() {
+        let mut ledger = walked_ledger();
+        let phases = ledger.seal_phases().expect("sealed phases");
+        let complete = [
+            InputRole::GeneralToml,
+            InputRole::ScenarioToml,
+            InputRole::ProfileMetadata,
+            InputRole::ProfileBlockLengths,
+            InputRole::ProfileSnpGaps,
+            InputRole::ProfileSnpSpectrum,
+            InputRole::ProfileHaplotypeWeights,
+            InputRole::ProfileLd,
+            InputRole::ReferenceFasta,
+        ]
+        .map(undeclared)
+        .to_vec();
+        F5AdmissionReceipt::seal(complete.clone(), phases.clone())
+            .expect("the mask is the only optional role");
+        let mut with_mask = complete.clone();
+        with_mask.push(undeclared(InputRole::Mask));
+        F5AdmissionReceipt::seal(with_mask.clone(), phases.clone()).expect("mask closes the list");
+
+        let mut mask_first = with_mask.clone();
+        mask_first.swap(0, 9);
+        let error = F5AdmissionReceipt::seal(mask_first, phases.clone())
+            .expect_err("the mask never precedes the authoring documents");
+        assert_eq!(error.code(), "GPS-INTERNAL-101");
+
+        let mut missing_reference = complete.clone();
+        missing_reference.pop();
+        let error = F5AdmissionReceipt::seal(missing_reference, phases.clone())
+            .expect_err("the reference is not optional");
+        assert_eq!(error.code(), "GPS-INTERNAL-101");
+
+        let mut repeated = complete.clone();
+        repeated.push(undeclared(InputRole::ReferenceFasta));
+        assert!(F5AdmissionReceipt::seal(repeated, phases.clone()).is_err());
+
+        let mut short_phases = phases.clone();
+        short_phases.pop();
+        let error = F5AdmissionReceipt::seal(complete.clone(), short_phases)
+            .expect_err("the nine accounted phases are mandatory");
+        assert_eq!(error.code(), "GPS-INTERNAL-101");
+
+        let mut reordered = phases;
+        reordered.swap(0, 1);
+        assert!(F5AdmissionReceipt::seal(complete, reordered).is_err());
+    }
+
+    #[test]
+    fn only_the_final_formula_can_seal_and_it_seals_once() {
+        let mut early = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(10),
+            WorkingMemoryPeak::new(10),
+            OutputReservation::new(10),
+        ));
+        let error = early
+            .seal_phases()
+            .expect_err("bootstrap cannot seal an admission");
+        assert_eq!(error.code(), "GPS-RES-101");
+        assert_eq!(early.phase(), AdmissionPhase::Rejected);
+
+        let mut ledger = walked_ledger();
+        let phases = ledger.seal_phases().expect("sealed phases");
+        assert_eq!(phases.len(), ACCOUNTED_ADMISSION_PHASES.len());
+        assert_eq!(ledger.phase(), AdmissionPhase::Sealed);
+        // Un segundo sellado falla sin envenenar el ledger: consultar no muta.
+        assert!(
+            ledger.seal_phases().is_err(),
+            "a sealed ledger cannot seal again"
+        );
+        assert_eq!(ledger.phase(), AdmissionPhase::Sealed);
+    }
+
+    /// M3: restaurar un punto de control devuelve también el pico de la fase
+    /// viva. Sin esta comprobación, una reserva revertida volvería a publicarse
+    /// en `phase_peak_bytes` y nadie se enteraría.
+    #[test]
+    fn restoring_a_checkpoint_also_reverts_the_live_phase_peak() {
+        let mut ledger = F5ResourceLedger::new(LedgerLimits::new(
+            OperationCost::new(1_000),
+            WorkingMemoryPeak::new(1_000),
+            OutputReservation::new(1_000),
+        ));
+        ledger
+            .charge(
+                InputRole::GeneralToml,
+                LedgerCharge::WorkingMemoryPeak(WorkingMemoryPeak::new(100)),
+            )
+            .expect("a modest peak is affordable");
+
+        let checkpoint = ledger.checkpoint();
+        ledger
+            .charge(
+                InputRole::GeneralToml,
+                LedgerCharge::WorkingMemoryPeak(WorkingMemoryPeak::new(900)),
+            )
+            .expect("the larger peak is still affordable");
+        ledger.restore(checkpoint);
+
+        // El pico revertido no puede sobrevivir al cierre de la fase.
+        ledger
+            .transition_to(AdmissionPhase::ProfileMetadata)
+            .expect("the bootstrap phase closes");
+        let closed = ledger.closed_phases.first().expect("the closed phase");
+        assert_eq!(
+            closed.phase_peak_bytes(),
+            100,
+            "a reverted reservation must not reach the published peak"
+        );
+        assert_eq!(ledger.totals().working_memory_peak().value(), 100);
+    }
 
     #[test]
     fn input_headroom_uses_live_retention_not_the_historical_peak() {

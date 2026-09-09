@@ -398,11 +398,117 @@
         }
       }
     },
+    "input_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "normalized_path",
+        "observed_size_bytes",
+        "observed_sha256",
+        "declared_size_bytes",
+        "declared_sha256"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "general_toml",
+            "scenario_toml",
+            "profile_metadata",
+            "profile_block_lengths",
+            "profile_snp_gaps",
+            "profile_snp_spectrum",
+            "profile_haplotype_weights",
+            "profile_ld",
+            "reference_fasta",
+            "mask"
+          ]
+        },
+        "normalized_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_size_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "observed_sha256": {
+          "$ref": "#/$defs/sha"
+        },
+        "declared_size_bytes": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/u64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "declared_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "admission_phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "operation_units_cumulative",
+        "retained_before_bytes",
+        "transient_bytes",
+        "retained_after_bytes",
+        "phase_peak_bytes",
+        "output_bytes_reserved"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "bootstrap",
+            "profile_metadata",
+            "profile_table_block_lengths",
+            "profile_table_snp_gaps",
+            "profile_table_snp_spectrum",
+            "profile_table_haplotype_weights",
+            "profile_table_ld",
+            "reference_and_mask_scan",
+            "final_formula"
+          ]
+        },
+        "operation_units_cumulative": {
+          "$ref": "#/$defs/u64"
+        },
+        "retained_before_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "transient_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "retained_after_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "phase_peak_bytes": {
+          "$ref": "#/$defs/u64"
+        },
+        "output_bytes_reserved": {
+          "$ref": "#/$defs/u64"
+        }
+      }
+    },
     "preflight": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "algorithm",
+        "input_identities",
+        "phases",
         "reference_bases_processed",
         "fasta_bytes_processed",
         "mask_bytes_processed",
@@ -433,6 +539,22 @@
       "properties": {
         "algorithm": {
           "const": "f5-resource-accounting-v7"
+        },
+        "input_identities": {
+          "type": "array",
+          "minItems": 9,
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/input_identity"
+          }
+        },
+        "phases": {
+          "type": "array",
+          "minItems": 9,
+          "maxItems": 9,
+          "items": {
+            "$ref": "#/$defs/admission_phase"
+          }
         },
         "reference_bases_processed": {
           "$ref": "#/$defs/u64"

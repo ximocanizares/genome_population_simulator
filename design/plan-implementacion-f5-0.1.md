@@ -322,7 +322,7 @@ que depende.
   establecida (F5-R01). Ninguna pausa posterior se aprueba con un target en
   rojo; F5.1.2.6 lo deja verde reescribiendo el fixture.
 
-  - ☐ **F5.1.2.4.** Integrar referencia y máscara en el mismo ledger.
+  - ✅ **F5.1.2.4.** Integrar referencia y máscara en el mismo ledger.
     - Depende de: revisión F5.1.2-A aprobada.
     - Procede de: REQ-EVO-74/76, DTC-040 y DTC-089 «Layout».
     - Cambia: primer FASTA y única máscara en streaming; reserva de dos visitas

@@ -21,8 +21,8 @@ use crate::diagnostics::Diagnostic;
 use crate::exact_decimal::ExactDecimal;
 pub use crate::f5_admission::F5_RESOURCE_ACCOUNTING_ALGORITHM;
 use crate::f5_admission::{
-    AdmissionPhase, F5ResourceLedger, InputRole, LedgerCharge, OperationCost, OutputReservation,
-    PhysicalInputIdentity, WorkingMemoryPeak,
+    AdmissionPhase, AdmittedInputIdentity, F5AdmissionReceipt, F5ResourceLedger, InputRole,
+    LedgerCharge, OperationCost, OutputReservation, PhysicalInputIdentity, WorkingMemoryPeak,
 };
 use crate::identity::{ReferenceId, SequenceId};
 use crate::reference_fasta::{empty_fasta, empty_header, input_error, invalid_symbol};
@@ -500,9 +500,13 @@ fn canonical_f5_number(
         .transpose()
 }
 
-/// Resultado del preflight `f5-resource-accounting-v7`.
+/// Resultado admitido —todavía no sellado— del preflight
+/// `f5-resource-accounting-v7`.
+///
+/// Es contabilidad interna: ningún consumidor puede derivar layout ni contrato
+/// de él hasta que `seal` lo une a su `F5AdmissionReceipt`.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct F5ResourcePreflight {
+pub(crate) struct F5ResourcePreflight {
     configuration_identity: F5PreflightConfigurationIdentity,
     scenario_id: String,
     reference_id: String,
@@ -545,222 +549,10 @@ pub struct F5ResourcePreflight {
     target_bases: Option<u64>,
     resolved_target: F5ResolvedTarget,
     /// Identidades de la primera pasada, todavía no selladas ni publicadas.
-    physical_input_identities: Vec<PhysicalInputIdentity>,
+    physical_input_identities: Vec<AdmittedInputIdentity>,
 }
 
 impl F5ResourcePreflight {
-    #[must_use]
-    pub const fn algorithm(&self) -> &'static str {
-        F5_RESOURCE_ACCOUNTING_ALGORITHM
-    }
-    /// Proyección escalar v7 que efectivo y manifiesto pueden persistir en
-    /// F5.1.2.3. Conserva el pico del parser solo como contabilidad interna;
-    /// las identidades y fases públicas se incorporan conjuntamente al sellar
-    /// la admisión en F5.1.2.5.
-    #[must_use]
-    pub fn to_contract_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "algorithm": self.algorithm(),
-            "reference_bases_processed": self.reference_bases_processed,
-            "fasta_bytes_processed": self.fasta_bytes_processed,
-            "mask_bytes_processed": self.mask_bytes_processed,
-            "general_toml_bytes": self.general_toml_bytes,
-            "scenario_toml_bytes": self.scenario_toml_bytes,
-            "profile_metadata_bytes": self.profile_metadata_bytes,
-            "profile_tsv_bytes": self.profile_tsv_bytes,
-            "tract_count": self.tract_count,
-            "retained_sequence_ids": self.retained_sequence_ids,
-            "gap_support_cardinality": self.gap_support_cardinality,
-            "gap_selector_operation_units": self.gap_selector_operation_units,
-            "site_bound_per_block": self.site_bound_per_block,
-            "bin_count_total": self.bin_count_total,
-            "profile_rows": self.profile_rows,
-            "normalization_rows": self.normalization_rows,
-            "tsv_rows_bound": self.tsv_rows_bound,
-            "json_rows_bound": self.json_rows_bound,
-            "other_operation_units": self.other.operation_units(),
-            "other_working_memory_bytes": self.other.working_memory_bytes(),
-            "other_output_bytes": self.other.output_bytes(),
-            "operation_units": self.operation_units,
-            "working_memory_bytes": self.working_memory_bytes,
-            "output_bytes": self.output_bytes,
-            "operation_limit": self.operation_limit,
-            "working_memory_limit_bytes": self.working_memory_limit_bytes,
-            "output_limit_bytes": self.output_limit_bytes,
-        })
-    }
-    #[must_use]
-    pub fn scenario_id(&self) -> &str {
-        &self.scenario_id
-    }
-    #[must_use]
-    pub fn reference_id(&self) -> &str {
-        &self.reference_id
-    }
-    #[must_use]
-    pub fn reference_sha256(&self) -> &str {
-        &self.reference_sha256
-    }
-    #[must_use]
-    pub fn profile_id(&self) -> &str {
-        &self.profile_id
-    }
-    #[must_use]
-    pub fn profile_metadata_sha256(&self) -> &str {
-        &self.profile_metadata_sha256
-    }
-    #[must_use]
-    pub const fn block_length_minimum(&self) -> u64 {
-        self.block_length_minimum
-    }
-    #[must_use]
-    pub const fn block_length_maximum(&self) -> u64 {
-        self.block_length_maximum
-    }
-    #[must_use]
-    pub fn eligible_tracts(&self) -> &[F5EligibleTract] {
-        &self.eligible_tracts
-    }
-    #[must_use]
-    pub const fn eligible_bases(&self) -> u64 {
-        self.eligible_bases
-    }
-    #[must_use]
-    pub const fn reference_bases_processed(&self) -> u64 {
-        self.reference_bases_processed
-    }
-    /// Bytes crudos del FASTA recorridos por cada una de las dos pasadas F5.
-    #[must_use]
-    pub const fn fasta_bytes_processed(&self) -> u64 {
-        self.fasta_bytes_processed
-    }
-    /// Bytes crudos de la máscara recorridos durante el escáner de preflight.
-    #[must_use]
-    pub const fn mask_bytes_processed(&self) -> u64 {
-        self.mask_bytes_processed
-    }
-    /// Bytes físicos del TOML general retenidos durante la admisión F5.
-    #[must_use]
-    pub const fn general_toml_bytes(&self) -> u64 {
-        self.general_toml_bytes
-    }
-    /// Bytes físicos del TOML de escenario retenidos durante la admisión F5.
-    #[must_use]
-    pub const fn scenario_toml_bytes(&self) -> u64 {
-        self.scenario_toml_bytes
-    }
-    /// Bytes físicos del metadata JSON del perfil.
-    #[must_use]
-    pub const fn profile_metadata_bytes(&self) -> u64 {
-        self.profile_metadata_bytes
-    }
-    /// Suma de los cinco TSV físicos del perfil.
-    #[must_use]
-    pub const fn profile_tsv_bytes(&self) -> u64 {
-        self.profile_tsv_bytes
-    }
-    /// Reserva conservadora de lectura, retención y parser de los documentos
-    /// F5, calculada antes de abrir metadata o TSV.
-    #[must_use]
-    pub const fn input_parser_peak_bytes(&self) -> u64 {
-        self.input_parser_peak_bytes
-    }
-    #[must_use]
-    pub const fn tract_count(&self) -> u64 {
-        self.tract_count
-    }
-    /// Pico de IDs FASTA retenidos simultáneamente para detectar duplicados.
-    #[must_use]
-    pub const fn retained_sequence_ids(&self) -> u64 {
-        self.retained_sequence_ids
-    }
-    /// Número de gaps enteros con probabilidad positiva, sumado por los
-    /// intervalos disjuntos del perfil sin rellenar huecos entre ellos.
-    #[must_use]
-    pub const fn gap_support_cardinality(&self) -> u64 {
-        self.gap_support_cardinality
-    }
-    /// Cota conservadora de visitas del selector literal de gaps: dos pasadas
-    /// completas por cada sorteo potencial de cada bloque e intento.
-    #[must_use]
-    pub const fn gap_selector_operation_units(&self) -> u64 {
-        self.gap_selector_operation_units
-    }
-    #[must_use]
-    pub const fn site_bound_per_block(&self) -> u64 {
-        self.site_bound_per_block
-    }
-    #[must_use]
-    pub const fn bin_count_total(&self) -> u64 {
-        self.bin_count_total
-    }
-    #[must_use]
-    pub const fn profile_rows(&self) -> u64 {
-        self.profile_rows
-    }
-    #[must_use]
-    pub const fn normalization_rows(&self) -> u64 {
-        self.normalization_rows
-    }
-    #[must_use]
-    pub const fn tsv_rows_bound(&self) -> u64 {
-        self.tsv_rows_bound
-    }
-    #[must_use]
-    pub const fn json_rows_bound(&self) -> u64 {
-        self.json_rows_bound
-    }
-    #[must_use]
-    pub const fn other_resources(&self) -> F5OtherResources {
-        self.other
-    }
-    #[must_use]
-    pub const fn operation_units(&self) -> u64 {
-        self.operation_units
-    }
-    #[must_use]
-    pub const fn working_memory_bytes(&self) -> u64 {
-        self.working_memory_bytes
-    }
-    #[must_use]
-    pub const fn output_bytes(&self) -> u64 {
-        self.output_bytes
-    }
-    #[must_use]
-    pub const fn operation_limit(&self) -> u64 {
-        self.operation_limit
-    }
-    #[must_use]
-    pub const fn working_memory_limit_bytes(&self) -> u64 {
-        self.working_memory_limit_bytes
-    }
-    #[must_use]
-    pub const fn output_limit_bytes(&self) -> u64 {
-        self.output_limit_bytes
-    }
-    /// Límite efectivo que el preflight admitió para el consumidor de layout.
-    #[must_use]
-    pub const fn max_layout_attempts(&self) -> u64 {
-        self.max_layout_attempts
-    }
-    #[must_use]
-    pub const fn block_count(&self) -> u64 {
-        self.block_count
-    }
-    #[must_use]
-    pub const fn target_bases(&self) -> Option<u64> {
-        self.target_bases
-    }
-    #[must_use]
-    pub const fn resolved_target(&self) -> &F5ResolvedTarget {
-        &self.resolved_target
-    }
-    #[doc(hidden)]
-    #[must_use]
-    pub fn physical_input_identities(&self) -> &[PhysicalInputIdentity] {
-        &self.physical_input_identities
-    }
-
     /// Comprueba el enlace semántico completo con la configuración efectiva,
     /// sin incluir aportaciones ajenas que el consumidor debe entregar por
     /// separado mediante `F5LayoutRequest::new_with_other_resources`.
@@ -789,18 +581,325 @@ impl F5ResourcePreflight {
         self.configuration_identity = F5PreflightConfigurationIdentity::from_config(config)?;
         Ok(())
     }
+
+    /// Sella la admisión uniendo la proyección v7 con su receipt. Es la única
+    /// transición de admitido a sellado y no recalcula ningún coste.
+    pub(crate) fn seal(self, receipt: F5AdmissionReceipt) -> SealedF5Admission {
+        SealedF5Admission {
+            receipt,
+            preflight: self,
+        }
+    }
 }
 
-/// Recupera la única admisión calculada antes de RNG, layout o publicación.
-/// No reabre entradas ni acepta aportaciones distintas a las ligadas entonces.
-pub fn preflight_f5_resources(
+/// Admisión F5 sellada: la única forma de la que un consumidor puede derivar
+/// layout, publicación o proyección de contrato.
+///
+/// Une el receipt —identidades físicas y contabilidad por fase— con la
+/// proyección de recursos v7 que las mismas lecturas produjeron. No existe
+/// constructor público: solo la máquina de admisión completa puede sellarla,
+/// y ningún receipt v5/v6 puede aceptarse ni migrarse a esta forma.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SealedF5Admission {
+    receipt: F5AdmissionReceipt,
+    preflight: F5ResourcePreflight,
+}
+
+impl SealedF5Admission {
+    #[must_use]
+    pub const fn algorithm(&self) -> &'static str {
+        F5_RESOURCE_ACCOUNTING_ALGORITHM
+    }
+
+    #[must_use]
+    pub const fn receipt(&self) -> &F5AdmissionReceipt {
+        &self.receipt
+    }
+
+    /// Proyección exacta de `resource_preflight` que efectivo y manifiesto v5
+    /// copian escalar y posicionalmente: algoritmo v7, identidades físicas en
+    /// orden de rol contractual, fases en el orden cerrado de la máquina y los
+    /// veintisiete escalares del algoritmo.
+    #[must_use]
+    pub fn to_contract_json(&self) -> serde_json::Value {
+        let preflight = &self.preflight;
+        serde_json::json!({
+            "algorithm": self.algorithm(),
+            "input_identities": self
+                .receipt
+                .input_identities()
+                .iter()
+                .map(|identity| {
+                    serde_json::json!({
+                        "role": identity.role().as_str(),
+                        "normalized_path": identity.normalized_path().display().to_string(),
+                        "observed_size_bytes": identity.observed_size_bytes(),
+                        "observed_sha256": identity.observed_sha256(),
+                        "declared_size_bytes": identity.declared_size_bytes(),
+                        "declared_sha256": identity.declared_sha256(),
+                    })
+                })
+                .collect::<Vec<_>>(),
+            "phases": self
+                .receipt
+                .phases()
+                .iter()
+                .map(|record| {
+                    serde_json::json!({
+                        "phase": record.phase().as_str(),
+                        "operation_units_cumulative": record.operation_units_cumulative(),
+                        "retained_before_bytes": record.retained_before_bytes(),
+                        "transient_bytes": record.transient_bytes(),
+                        "retained_after_bytes": record.retained_after_bytes(),
+                        "phase_peak_bytes": record.phase_peak_bytes(),
+                        "output_bytes_reserved": record.output_bytes_reserved(),
+                    })
+                })
+                .collect::<Vec<_>>(),
+            "reference_bases_processed": preflight.reference_bases_processed,
+            "fasta_bytes_processed": preflight.fasta_bytes_processed,
+            "mask_bytes_processed": preflight.mask_bytes_processed,
+            "general_toml_bytes": preflight.general_toml_bytes,
+            "scenario_toml_bytes": preflight.scenario_toml_bytes,
+            "profile_metadata_bytes": preflight.profile_metadata_bytes,
+            "profile_tsv_bytes": preflight.profile_tsv_bytes,
+            "tract_count": preflight.tract_count,
+            "retained_sequence_ids": preflight.retained_sequence_ids,
+            "gap_support_cardinality": preflight.gap_support_cardinality,
+            "gap_selector_operation_units": preflight.gap_selector_operation_units,
+            "site_bound_per_block": preflight.site_bound_per_block,
+            "bin_count_total": preflight.bin_count_total,
+            "profile_rows": preflight.profile_rows,
+            "normalization_rows": preflight.normalization_rows,
+            "tsv_rows_bound": preflight.tsv_rows_bound,
+            "json_rows_bound": preflight.json_rows_bound,
+            "other_operation_units": preflight.other.operation_units(),
+            "other_working_memory_bytes": preflight.other.working_memory_bytes(),
+            "other_output_bytes": preflight.other.output_bytes(),
+            "operation_units": preflight.operation_units,
+            "working_memory_bytes": preflight.working_memory_bytes,
+            "output_bytes": preflight.output_bytes,
+            "operation_limit": preflight.operation_limit,
+            "working_memory_limit_bytes": preflight.working_memory_limit_bytes,
+            "output_limit_bytes": preflight.output_limit_bytes,
+        })
+    }
+
+    /// Comprueba el binding completo antes de abrir cualquier ámbito RNG: la
+    /// identidad semántica, las aportaciones externas y —lo que .5 añade— las
+    /// identidades físicas de los ocho documentos que la configuración leyó.
+    ///
+    /// Dos TOML semánticamente iguales que difieran en un comentario o en su
+    /// relleno tienen la misma identidad semántica y distinto SHA observado;
+    /// solo esta segunda mitad del binding impide cruzarlos.
+    pub(crate) fn matches_admission(
+        &self,
+        config: &EffectiveF5Config,
+        other: F5OtherResources,
+    ) -> bool {
+        self.preflight.matches_admission(config, other) && self.matches_physical_documents(config)
+    }
+
+    fn matches_physical_documents(&self, config: &EffectiveF5Config) -> bool {
+        let expected = config.admitted_document_identities();
+        self.receipt
+            .input_identities()
+            .get(..expected.len())
+            .is_some_and(|sealed| sealed == expected)
+    }
+
+    /// Solo la mitad semántica del binding. `F5BlockLengthPlan` la usa para
+    /// comprobar objetivo, perfil y longitudes; la mitad física pertenece a la
+    /// puerta de layout, que es la que abre RNG y publicación.
+    pub(crate) fn matches_configuration(&self, config: &EffectiveF5Config) -> bool {
+        self.preflight.matches_configuration(config)
+    }
+
+    #[must_use]
+    pub fn scenario_id(&self) -> &str {
+        &self.preflight.scenario_id
+    }
+    #[must_use]
+    pub fn reference_id(&self) -> &str {
+        &self.preflight.reference_id
+    }
+    #[must_use]
+    pub fn reference_sha256(&self) -> &str {
+        &self.preflight.reference_sha256
+    }
+    #[must_use]
+    pub fn profile_id(&self) -> &str {
+        &self.preflight.profile_id
+    }
+    #[must_use]
+    pub fn profile_metadata_sha256(&self) -> &str {
+        &self.preflight.profile_metadata_sha256
+    }
+    #[must_use]
+    pub const fn block_length_minimum(&self) -> u64 {
+        self.preflight.block_length_minimum
+    }
+    #[must_use]
+    pub const fn block_length_maximum(&self) -> u64 {
+        self.preflight.block_length_maximum
+    }
+    #[must_use]
+    pub fn eligible_tracts(&self) -> &[F5EligibleTract] {
+        &self.preflight.eligible_tracts
+    }
+    #[must_use]
+    pub const fn eligible_bases(&self) -> u64 {
+        self.preflight.eligible_bases
+    }
+    #[must_use]
+    pub const fn reference_bases_processed(&self) -> u64 {
+        self.preflight.reference_bases_processed
+    }
+    /// Bytes crudos del FASTA recorridos por cada una de las dos pasadas F5.
+    #[must_use]
+    pub const fn fasta_bytes_processed(&self) -> u64 {
+        self.preflight.fasta_bytes_processed
+    }
+    /// Bytes crudos de la máscara recorridos durante el escáner de preflight.
+    #[must_use]
+    pub const fn mask_bytes_processed(&self) -> u64 {
+        self.preflight.mask_bytes_processed
+    }
+    /// Bytes físicos del TOML general retenidos durante la admisión F5.
+    #[must_use]
+    pub const fn general_toml_bytes(&self) -> u64 {
+        self.preflight.general_toml_bytes
+    }
+    /// Bytes físicos del TOML de escenario retenidos durante la admisión F5.
+    #[must_use]
+    pub const fn scenario_toml_bytes(&self) -> u64 {
+        self.preflight.scenario_toml_bytes
+    }
+    /// Bytes físicos del metadata JSON del perfil.
+    #[must_use]
+    pub const fn profile_metadata_bytes(&self) -> u64 {
+        self.preflight.profile_metadata_bytes
+    }
+    /// Suma de los cinco TSV físicos del perfil.
+    #[must_use]
+    pub const fn profile_tsv_bytes(&self) -> u64 {
+        self.preflight.profile_tsv_bytes
+    }
+    /// Reserva conservadora de lectura, retención y parser de los documentos
+    /// F5, calculada antes de abrir metadata o TSV.
+    #[must_use]
+    pub const fn input_parser_peak_bytes(&self) -> u64 {
+        self.preflight.input_parser_peak_bytes
+    }
+    #[must_use]
+    pub const fn tract_count(&self) -> u64 {
+        self.preflight.tract_count
+    }
+    /// Pico de IDs FASTA retenidos simultáneamente para detectar duplicados.
+    #[must_use]
+    pub const fn retained_sequence_ids(&self) -> u64 {
+        self.preflight.retained_sequence_ids
+    }
+    /// Número de gaps enteros con probabilidad positiva, sumado por los
+    /// intervalos disjuntos del perfil sin rellenar huecos entre ellos.
+    #[must_use]
+    pub const fn gap_support_cardinality(&self) -> u64 {
+        self.preflight.gap_support_cardinality
+    }
+    /// Cota conservadora de visitas del selector literal de gaps: dos pasadas
+    /// completas por cada sorteo potencial de cada bloque e intento.
+    #[must_use]
+    pub const fn gap_selector_operation_units(&self) -> u64 {
+        self.preflight.gap_selector_operation_units
+    }
+    #[must_use]
+    pub const fn site_bound_per_block(&self) -> u64 {
+        self.preflight.site_bound_per_block
+    }
+    #[must_use]
+    pub const fn bin_count_total(&self) -> u64 {
+        self.preflight.bin_count_total
+    }
+    #[must_use]
+    pub const fn profile_rows(&self) -> u64 {
+        self.preflight.profile_rows
+    }
+    #[must_use]
+    pub const fn normalization_rows(&self) -> u64 {
+        self.preflight.normalization_rows
+    }
+    #[must_use]
+    pub const fn tsv_rows_bound(&self) -> u64 {
+        self.preflight.tsv_rows_bound
+    }
+    #[must_use]
+    pub const fn json_rows_bound(&self) -> u64 {
+        self.preflight.json_rows_bound
+    }
+    #[must_use]
+    pub const fn other_resources(&self) -> F5OtherResources {
+        self.preflight.other
+    }
+    #[must_use]
+    pub const fn operation_units(&self) -> u64 {
+        self.preflight.operation_units
+    }
+    #[must_use]
+    pub const fn working_memory_bytes(&self) -> u64 {
+        self.preflight.working_memory_bytes
+    }
+    #[must_use]
+    pub const fn output_bytes(&self) -> u64 {
+        self.preflight.output_bytes
+    }
+    #[must_use]
+    pub const fn operation_limit(&self) -> u64 {
+        self.preflight.operation_limit
+    }
+    #[must_use]
+    pub const fn working_memory_limit_bytes(&self) -> u64 {
+        self.preflight.working_memory_limit_bytes
+    }
+    #[must_use]
+    pub const fn output_limit_bytes(&self) -> u64 {
+        self.preflight.output_limit_bytes
+    }
+    /// Límite efectivo que el preflight admitió para el consumidor de layout.
+    #[must_use]
+    pub const fn max_layout_attempts(&self) -> u64 {
+        self.preflight.max_layout_attempts
+    }
+    #[must_use]
+    pub const fn block_count(&self) -> u64 {
+        self.preflight.block_count
+    }
+    #[must_use]
+    pub const fn target_bases(&self) -> Option<u64> {
+        self.preflight.target_bases
+    }
+    #[must_use]
+    pub const fn resolved_target(&self) -> &F5ResolvedTarget {
+        &self.preflight.resolved_target
+    }
+}
+
+/// Recupera la única admisión sellada, calculada antes de RNG, layout o
+/// publicación. No reabre entradas ni acepta aportaciones distintas a las
+/// ligadas entonces.
+/// Recupera la admisión ya sellada de una configuración y comprueba que las
+/// aportaciones externas coinciden con las que se admitieron.
+///
+/// No sella: el sellado ocurre una sola vez, al materializar la configuración.
+/// La garantía física de este hito la impone `F5LayoutRequest`, que exige el
+/// receipt antes de abrir RNG o publicación.
+pub fn recover_sealed_f5_admission(
     config: &EffectiveF5Config,
     other: F5OtherResources,
-) -> Result<F5ResourcePreflight, Diagnostic> {
-    let admitted = config.admitted_preflight().ok_or_else(|| {
+) -> Result<SealedF5Admission, Diagnostic> {
+    let admitted = config.admitted().ok_or_else(|| {
         resource(
             config,
-            "la configuración F5 no conserva su preflight físico admitido",
+            "la configuración F5 no conserva su admisión física sellada",
         )
     })?;
     if !admitted.matches_admission(config, other) {
@@ -811,6 +910,23 @@ pub fn preflight_f5_resources(
         ));
     }
     Ok(admitted.clone())
+}
+
+/// Reúne, en orden de rol contractual, las identidades de las diez entradas
+/// posibles: los dos TOML de bootstrap, el metadata, los cinco TSV, la
+/// referencia y la máscara cuando el escenario la declara.
+///
+/// Las identidades no se recalculan: cada una procede del mismo handle que
+/// contó y hasheó sus bytes durante su fase.
+pub(crate) fn sealed_input_identities(
+    document_identities: &[AdmittedInputIdentity],
+    preflight: &F5ResourcePreflight,
+) -> Vec<AdmittedInputIdentity> {
+    let mut identities =
+        Vec::with_capacity(document_identities.len() + preflight.physical_input_identities.len());
+    identities.extend_from_slice(document_identities);
+    identities.extend_from_slice(&preflight.physical_input_identities);
+    identities
 }
 
 /// Ejecuta .4 sobre el ledger procedente del perfil. El resultado se conserva
@@ -1989,7 +2105,7 @@ pub(crate) struct F5ReferenceScan {
     mask_bytes_processed: u64,
     sequence_count: u64,
     retained_sequence_ids: u64,
-    physical_input_identities: Vec<PhysicalInputIdentity>,
+    physical_input_identities: Vec<AdmittedInputIdentity>,
 }
 
 struct EligibleScan<'a> {
@@ -2242,12 +2358,24 @@ impl<'a> EligibleScan<'a> {
             F5_HARD_WORKING_MEMORY_LIMIT,
         );
         if working_memory_bytes > working_memory_limit_bytes {
+            // Deuda de F5.1.2.4 revisada al sellar: el ledger rechaza antes por
+            // el mismo valor más la retención de perfil, así que esta rama es
+            // hoy inalcanzable. Se conserva porque adelanta la comprobación a
+            // antes de `SequenceId::parse` —la «comprobación previa a retener»
+            // que exige el hito— y se completa su contexto para que, si alguna
+            // vez se alcanza, diagnostique como el resto del ledger.
             return Err(resource(
                 self.config,
                 format!(
                     "working_memory_bytes={working_memory_bytes}/{working_memory_limit_bytes}, phase=reference_scan, tract_count={tracts}, retained_sequence_ids={ids}"
                 ),
-            ));
+            )
+            .with("algorithm", F5_RESOURCE_ACCOUNTING_ALGORITHM)
+            .with("phase", AdmissionPhase::ReferenceAndMaskScan.as_str())
+            .with("role", InputRole::ReferenceFasta.as_str())
+            .with("dimension", "working_memory_bytes")
+            .with("accumulated", working_memory_bytes.to_string())
+            .with("limit", working_memory_limit_bytes.to_string()));
         }
         Ok(())
     }
@@ -2477,14 +2605,19 @@ fn scan_reference_and_mask_under_ledger(
     }
     let mut result = scan.finish(sequence_count)?;
     result.fasta_bytes_processed = fasta_bytes_processed;
+    // El general declara el SHA de la referencia, nunca su tamaño.
     result.physical_input_identities.insert(
         0,
-        PhysicalInputIdentity::from_observed(
-            InputRole::ReferenceFasta,
-            path.to_path_buf(),
-            fasta_bytes_processed,
-            observed_digest,
-        ),
+        AdmittedInputIdentity::new(
+            PhysicalInputIdentity::from_observed(
+                InputRole::ReferenceFasta,
+                path.to_path_buf(),
+                fasta_bytes_processed,
+                observed_digest,
+            ),
+            None,
+            Some(config.reference_sha256().to_owned()),
+        )?,
     );
     Ok(result)
 }
@@ -2680,7 +2813,7 @@ struct MaskStream<'a> {
     next_sequence_ordinal: u64,
     line_buffer: Vec<u8>,
     bytes_processed: u64,
-    identity: Option<PhysicalInputIdentity>,
+    identity: Option<AdmittedInputIdentity>,
     config: &'a EffectiveF5Config,
 }
 
@@ -2898,15 +3031,20 @@ impl<'a> MaskStream<'a> {
             .with("expected_digest", expected)
             .with("observed_digest", &observed));
         }
-        self.identity = Some(PhysicalInputIdentity::from_observed(
-            InputRole::Mask,
-            self.config
-                .excluded_regions_path()
-                .expect("mask reader requires a path")
-                .to_path_buf(),
-            bytes_processed,
-            observed,
-        ));
+        // El escenario declara el SHA de la máscara, nunca su tamaño.
+        self.identity = Some(AdmittedInputIdentity::new(
+            PhysicalInputIdentity::from_observed(
+                InputRole::Mask,
+                self.config
+                    .excluded_regions_path()
+                    .expect("mask reader requires a path")
+                    .to_path_buf(),
+                bytes_processed,
+                observed,
+            ),
+            None,
+            Some(expected.clone()),
+        )?);
         Ok(())
     }
 
