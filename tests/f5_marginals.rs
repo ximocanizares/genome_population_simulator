@@ -386,6 +386,10 @@ fn the_table_covers_every_block_and_site_of_every_subpopulation_in_canonical_ord
     fs::remove_dir_all(&root).expect("cleanup");
 }
 
+/// La invariancia vale con la misma identidad de ejecución: `block_id` y
+/// `site_id` la incorporan, así que una política que derive `execution_id` de
+/// los bytes del escenario cambiaría los marginales al añadir una
+/// subpoblación. Aquí la ejecución se mantiene fija a propósito.
 #[test]
 fn reordering_or_adding_a_subpopulation_leaves_the_other_marginals_untouched() {
     let first_root = temporary("declared-order");

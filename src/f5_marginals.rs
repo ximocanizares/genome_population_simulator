@@ -12,9 +12,11 @@
 //! `marginal_spectrum`, el resultado de una subpoblación no depende de cuántas
 //! otras existan ni del orden en que se declaren.
 //!
-//! La cota `H<=2^S`, que DTC-089 exige *antes* de sortear marginales, pertenece
-//! a F5.2.1 junto con el resto de la construcción haplotípica; ningún camino
-//! productivo llama todavía a [`build_f5_marginals`].
+//! La cota `H<=2^S`, que DTC-089 exige *antes* de sortear marginales, se
+//! comprueba aquí. La segunda, `H<=2^V` sobre las columnas no fijadas, no
+//! puede comprobarse hasta conocer los marginales y por eso vive en
+//! `f5_haplotypes`, que es también quien llama a [`build_f5_marginals`] desde
+//! F5.2.1.
 
 use crate::application::EffectiveF5Config;
 use crate::diagnostics::Diagnostic;
@@ -74,7 +76,8 @@ impl F5SpectrumBand {
 /// Espectro validado de frecuencias objetivo.
 ///
 /// Conserva el orden del perfil, que DTC-089 exige creciente y disjunto, y
-/// admite pesos sin normalizar: el total se recalcula con Neumaier antes de
+/// exige pesos normalizados, porque la selección compara U con el prefijo sin
+/// reescalar, tal como fija DTC-089. El total se comprueba con Neumaier antes de
 /// resolver el prefijo.
 #[derive(Clone, Debug, PartialEq)]
 pub struct F5MarginalSpectrum {
@@ -110,6 +113,24 @@ impl F5MarginalSpectrum {
                 ));
             }
             previous = Some(band.maximum);
+        }
+        // La selección compara U con el prefijo sin reescalar, así que los
+        // pesos han de estar normalizados, con la misma tolerancia que exige
+        // el soporte de longitudes de F5.1.
+        let mut total = NeumaierSum::default();
+        for band in &bands {
+            total
+                .add(band.weight)
+                .map_err(|detail| domain(scenario_id, detail))?;
+        }
+        let total = total
+            .positive_total()
+            .map_err(|detail| domain(scenario_id, detail))?;
+        if (total - 1.0).abs() > 1e-9 {
+            return Err(domain(
+                scenario_id,
+                "los pesos del espectro no suman uno dentro de tolerancia",
+            ));
         }
         Ok(Self { bands })
     }
@@ -173,15 +194,13 @@ impl F5MarginalSpectrum {
             // Una elección con una sola alternativa no consume RNG.
             return Ok(*first);
         }
-        let mut total = NeumaierSum::default();
-        for band in &self.bands {
-            total.add(band.weight)?;
-        }
-        let total = total.positive_total()?;
-        let threshold = f5_uniform_53(rng) * total;
-        if !threshold.is_finite() {
-            return Err("el umbral del espectro no es finito");
-        }
+        // DTC-089: se recorre `q` en orden de fila y se elige la primera suma
+        // acumulada estrictamente mayor que U. Los pesos que el perfil entrega
+        // son los efectivos que DTC-049 ya normalizó, así que U no se reescala
+        // por el total: hacerlo divergía de la decisión cuando la suma
+        // compensada no daba exactamente 1, que es lo habitual con pesos no
+        // diádicos.
+        let threshold = f5_uniform_53(rng);
         let mut prefix = NeumaierSum::default();
         for band in &self.bands {
             if threshold < prefix.add(band.weight)? {
@@ -455,19 +474,21 @@ pub fn build_f5_marginals(
 /// Acumulador compensado de Neumaier.
 ///
 /// El soporte discreto de longitudes tiene el suyo dentro de `f5_layout`, que
-/// F5.1.2 cerró; aquí se repite en lugar de reabrir aquel módulo sellado.
+/// F5.1.2 cerró; aquí se repite en lugar de reabrir aquel módulo sellado. Los
+/// consumidores posteriores de DTC-089 —la construcción haplotípica de F5.2—
+/// reutilizan este, que por eso no lleva mensajes propios del espectro.
 #[derive(Clone, Copy, Debug, Default)]
-struct NeumaierSum {
+pub(crate) struct NeumaierSum {
     sum: f64,
     compensation: f64,
 }
 
 impl NeumaierSum {
     /// Acumula un sumando y devuelve el total corregido hasta ese punto.
-    fn add(&mut self, value: f64) -> Result<f64, &'static str> {
+    pub(crate) fn add(&mut self, value: f64) -> Result<f64, &'static str> {
         let next = self.sum + value;
         if !next.is_finite() {
-            return Err("la suma de pesos del espectro no es finita");
+            return Err("la suma compensada de pesos no es finita");
         }
         let correction = if self.sum.abs() >= value.abs() {
             (self.sum - next) + value
@@ -476,7 +497,7 @@ impl NeumaierSum {
         };
         let next_compensation = self.compensation + correction;
         if !next_compensation.is_finite() {
-            return Err("la compensación de pesos del espectro no es finita");
+            return Err("la compensación de pesos no es finita");
         }
         self.sum = next;
         self.compensation = next_compensation;
@@ -488,7 +509,7 @@ impl NeumaierSum {
         if total.is_finite() && total > 0.0 {
             Ok(total)
         } else {
-            Err("la suma compensada de pesos del espectro no es finita y positiva")
+            Err("la suma compensada de pesos no es finita y positiva")
         }
     }
 }
@@ -778,30 +799,71 @@ mod tests {
     }
 
     #[test]
-    fn unnormalized_weights_use_the_compensated_total() {
-        // Pesos que no suman uno: el umbral debe escalarse con el total real.
-        let spectrum = F5MarginalSpectrum::new(
+    fn unnormalized_weights_are_rejected() {
+        // La selección compara U con el prefijo sin reescalar, de modo que unos
+        // pesos que no sumen uno dejarían tramos de [0,1) sin fila.
+        let error = F5MarginalSpectrum::new(
             &scenario(),
             vec![
                 F5SpectrumBand::new(0.0, 0.0, 3.0),
                 F5SpectrumBand::new(1.0, 1.0, 1.0),
             ],
         )
-        .expect("espectro sin normalizar");
-        let exact = 3 * TWO_POW_53 / 4;
-        for (bits53, expected) in [
-            (0_u64, 0.0),
-            (exact - 1, 0.0),
-            (exact, 1.0),
-            (TWO_POW_53 - 1, 1.0),
-        ] {
-            let mut source = ScriptedWords::new(&[word_for(bits53)]);
-            assert_eq!(
-                spectrum.sample_with_source(&mut source),
-                Ok(expected),
-                "bits53={bits53}"
-            );
+        .expect_err("los pesos sin normalizar se rechazan");
+        assert_eq!(error.code(), "GPS-DOMAIN-101");
+    }
+
+    /// F51-R02: con pesos normalizados cuya suma compensada no es exactamente
+    /// uno, la regla de DTC-089 —«la primera suma acumulada estrictamente mayor
+    /// que U»— y la de reescalar por el total eligen filas distintas. Ninguna
+    /// prueba lo distinguía porque todos los fixtures usaban pesos diádicos.
+    #[test]
+    fn the_rule_compares_u_with_the_prefix_without_rescaling_by_the_total() {
+        let weights = [0.5554, 0.486, 0.401, 0.539, 0.501, 0.801];
+        let raw_total: f64 = {
+            let mut sum = NeumaierSum::default();
+            for weight in weights {
+                sum.add(weight).expect("suma finita");
+            }
+            sum.positive_total().expect("total positivo")
+        };
+        let normalized: Vec<f64> = weights.iter().map(|weight| weight / raw_total).collect();
+        let mut total = NeumaierSum::default();
+        for weight in &normalized {
+            total.add(*weight).expect("suma finita");
         }
+        let total = total.positive_total().expect("total positivo");
+        assert_ne!(total, 1.0, "el fixture necesita una suma distinta de uno");
+        assert!((total - 1.0).abs() <= 1e-9, "y dentro de la tolerancia");
+
+        let bands: Vec<F5SpectrumBand> = normalized
+            .iter()
+            .enumerate()
+            .map(|(index, weight)| {
+                let value = index as f64 / 10.0;
+                F5SpectrumBand::new(value, value, *weight)
+            })
+            .collect();
+        let spectrum = F5MarginalSpectrum::new(&scenario(), bands).expect("espectro normalizado");
+
+        // Prefijo cuarto: por debajo de U con la regla literal, por encima si se
+        // reescala por el total, que es menor que uno.
+        let mut prefix = NeumaierSum::default();
+        let mut fourth = 0.0;
+        for weight in normalized.iter().take(4) {
+            fourth = prefix.add(*weight).expect("suma finita");
+        }
+        let bits53 = (fourth * TWO_POW_53 as f64) as u64;
+        let mut source = ScriptedWords::new(&[word_for(bits53)]);
+        let observed = spectrum
+            .sample_with_source(&mut source)
+            .expect("fila seleccionada");
+        let literal = if (bits53 as f64 / TWO_POW_53 as f64) < fourth {
+            0.3
+        } else {
+            0.4
+        };
+        assert_eq!(observed, literal, "la regla es la literal de DTC-089");
     }
 
     /// H4: con pesos no diádicos la compensación deja de ser cero, así que

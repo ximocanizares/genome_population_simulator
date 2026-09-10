@@ -2000,6 +2000,15 @@ fn choose_weighted_integer_with_source(
 
     let bits53 = rng.next_word() >> 11;
     let unit = bits53 as f64 / (1_u64 << 53) as f64;
+    // Aquí U se reescala siempre, y no por imprecisión. Este selector lo usan
+    // tres rutas: las longitudes condicionadas al residual restringen el
+    // soporte a `lower..=upper`, y entonces `normalized_total` es la masa
+    // realmente disponible y puede ser mucho menor que uno —sin reescalar, con
+    // masa 0,3 el 70 % de los sorteos caería más allá del último prefijo y
+    // elegiría siempre el último valor—. Los gaps y las longitudes en modo
+    // `block_count` reciben el soporte completo, de modo que para ellas el
+    // factor es uno y no cambia nada. El espectro de F5.1.3 no comparte esta
+    // implementación y compara U con el prefijo tal cual, como fija DTC-089.
     let threshold = unit * normalized_total;
     if !threshold.is_finite() {
         return Err(WeightedIntegerError::Internal(

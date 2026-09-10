@@ -1033,7 +1033,17 @@ tolerancia general se normaliza, conserva suma/valores antes y después en la
 configuración efectiva y manifiesto; otra desviación se rechaza. Una
 selección ponderada obtiene U con 53 bits en `[0,1)`, recorre q en
 orden de fila y elige la primera suma acumulada estrictamente mayor que U; la
-última fila absorbe solo el residuo numérico posible. Cada subpoblación debe
+última fila absorbe solo el residuo numérico posible. U se compara con el
+prefijo tal cual, sin reescalar por la suma de pesos, porque los `q` son los
+efectivos ya normalizados por DTC-049; un conjunto cuyo total se aparte de uno
+más allá de la tolerancia se rechaza antes de sortear. La única excepción es el selector de
+enteros del layout, que reescala U por la masa acumulada siempre, porque
+comparte implementación con la ruta de longitudes condicionada al residual: ahí
+el soporte se restringe a `[remaining*Lmin, remaining*Lmax]` y la masa factible
+es estrictamente menor que uno, de modo que no reescalar sesgaría la elección
+hacia el último valor. Las otras dos rutas de ese selector —los gaps y las
+longitudes en modo `block_count`— reciben el soporte completo, así que allí el
+reescalado es un factor uno y no cambia la semántica. Cada subpoblación debe
 tener exactamente un `population_profile_id` igual a su `population_id`; no
 existe remapeo implícito. Las rutas de `files` son relativas al JSON de metadata.
 
@@ -1156,7 +1166,10 @@ Denominador cero da `not_evaluable`, nunca cero. Cada bin agrega todas las
 parejas intrabloque de un bloque×subpoblación cuya distancia cae en él; la media
 se reduce por `(site_index_i,site_index_j)`. Cero parejas evaluables da
 `not_applicable`; si todos los bins lo son, el intento es inválido. El primer
-SNP tiene polaridad `positive`; cada posterior usa Bernoulli(0,5). En una pareja
+SNP tiene polaridad `positive`; cada posterior usa Bernoulli(0,5), cuyo éxito
+es `positive` y cuyo fracaso es `negative`. Esa correspondencia fija la
+secuencia reproducible de polaridades de una semilla, de modo que pertenece al
+contrato y no a la implementación. En una pareja
 evaluable se exige D>0 para polaridades iguales y D<0 para distintas; D=0
 incumple. No hay cuota de signos.
 
@@ -1291,8 +1304,12 @@ dimensionalmente distintos:
 - `reference_bases_processed`, suma exacta de las longitudes de todas las
   secuencias resueltas que recorre el escáner; `tract_count`, número de tramos
   elegibles maximales que materializa; `sequence_count`; y
-  `retained_sequence_ids`, pico de IDs FASTA retenidos simultáneamente para
-  detectar duplicados;
+  `retained_sequence_ids`, IDs FASTA retenidos en el índice de unicidad que
+  detecta duplicados. Esta última magnitud sirve para dos unidades distintas y
+  esa doble lectura es deliberada: como pico simultáneo multiplica los 256
+  bytes de memoria, y como total acumulado aporta una unidad de operación por
+  identificador admitido. El conjunto solo crece, así que pico y total
+  coinciden;
 - `fasta_bytes_processed`, tamaño exacto de los bytes crudos del FASTA, que se
   reserva dos veces; y `mask_bytes_processed`, bytes crudos que atraviesa una
   vez el lector/hash de máscara (cero sin máscara);
@@ -1330,7 +1347,7 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   profile_tsv_bytes) +
   2*fasta_bytes_processed +
   reference_bases_processed + mask_bytes_processed +
-  tract_count + 2*tract_count +
+  retained_sequence_ids + tract_count + 2*tract_count +
   2*L*(B*tract_count+B*(B-1)/2) +
   L*(tract_count+3*B*tract_count+3*B*(B-1)/2) + profile_rows +
   normalization_rows + 2*L*B*length_support_cardinality +

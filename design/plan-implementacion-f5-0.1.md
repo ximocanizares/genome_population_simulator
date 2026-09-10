@@ -523,7 +523,13 @@ identificador del índice de copia.
 > prueba con pesos no diádicos que lo distingue de una suma ingenua. Los
 > marginales son independientes por subpoblación: cada sitio abre su propia
 > subsemilla, reordenar las subpoblaciones no cambia un valor y añadir una no
-> altera las anteriores.
+> altera las anteriores **con la misma identidad de ejecución**. Ese matiz
+> importa: `block_id` y `site_id` incorporan `execution_id`, de modo que si la
+> política de F5 lo deriva de los bytes del escenario —como hacen F1 a F4 con
+> el general—, añadir una subpoblación cambiaría los identificadores y con
+> ellos todos los marginales, sin alterar la geometría. La prueba que acredita
+> la invariancia fija la ejecución, y el material del `execution_id` de F5 se
+> decide al encadenar la cadena productiva.
 > - Queda declarado para F5.2.1: `build_f5_marginals` no tiene aún llamador
 >   productivo, y es ese hito quien debe encadenar layout, marginales y
 >   haplotipos.
@@ -538,6 +544,25 @@ identificador del índice de copia.
   - Se comprueba con: pesos uniformes/no uniformes, p 0/1, empate, H>`2^S`,
     duplicados eliminados por swaps o intento rechazado, H=4096 y prueba
     instrumental de ausencia de `2^H`.
+  - Estado implementado (10 de septiembre de 2026), a la espera de revisión.
+    `src/f5_haplotypes.rs` encadena por primera vez layout, marginales y
+    haplotipos: `build_f5_haplotype_attempt` llama a `build_f5_marginals`,
+    comprueba `H<=2^V` en todos los bloques antes de abrir ningún intento y
+    construye cada columna con permutación y prefijo compensado. La matriz
+    bit-packed almacena exactamente los bytes canónicos de `matrix_bytes`. Los
+    ámbitos `initial_column` y `polarity` reproducen su vector publicado y el
+    vector se cierra hasta el valor producido. Las filas duplicadas se cuentan
+    y se publican sin fusionarlas: DTC-089 encarga su eliminación a los swaps
+    de F5.2.3, de modo que este hito no rechaza el intento por sí mismo. La
+    ausencia de `2^H` la acreditan dos hechos independientes del algoritmo: la
+    prueba con H=4096 **termina** sobre la ruta productiva —18,6 ms en debug,
+    1,8 ms en release—, cosa que una enumeración de `2^4096` no haría nunca; y
+    el espía de palabras mide H−1 enteros exactos por permutación. El contador
+    de operaciones por bloque (469, 947, 1898, 3802 y 7610 para H=16..256 con
+    S=12, y 121 866 con H=4096) confirma que el coste sigue al modelo lineal,
+    pero **no demuestra** la ausencia de enumeración: solo se incrementa dentro
+    de bucles acotados por H, así que no podría crecer exponencialmente aunque
+    otra parte del código enumerase subconjuntos.
 - ☐ **F5.2.2.** Calcular p, p_ij, D, `r²`, bins y signos con orden y Neumaier
   normativos.
   - Depende de: F5.2.1.
