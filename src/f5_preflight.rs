@@ -685,6 +685,52 @@ impl SealedF5Admission {
         })
     }
 
+    /// Exige que las dos copias publicadas de `resource_preflight` sean
+    /// exactamente la proyección sellada, escalar y posicionalmente.
+    ///
+    /// DTC-089 obliga a que efectivo y manifiesto v5 copien el mismo objeto y
+    /// a rechazar la publicación si una de las dos copias discrepa. El esquema
+    /// no puede detectarlo por sí solo: ambos documentos comparten el mismo
+    /// `$def`, de modo que una desigualdad dirigida en un único término sigue
+    /// superando los dos esquemas. Esta es la puerta que sí la observa.
+    ///
+    /// Comparar cada copia contra la proyección sellada —y no una copia contra
+    /// la otra— es deliberadamente más fuerte: dos copias iguales entre sí pero
+    /// distintas de la admisión también se rechazan.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve `GPS-FMT-006` cuando un documento no contiene
+    /// `/f5/resource_preflight` o cuando su contenido difiere de la proyección
+    /// sellada; el detalle cita el puntero JSON del primer término divergente.
+    pub fn ensure_contract_copies_match(
+        &self,
+        effective_path: &Path,
+        effective: &serde_json::Value,
+        manifest_path: &Path,
+        manifest: &serde_json::Value,
+    ) -> Result<(), Diagnostic> {
+        let sealed = self.to_contract_json();
+        for (path, schema, document) in [
+            (effective_path, "effective-config-v5.schema.json", effective),
+            (manifest_path, "manifest-general-v5.schema.json", manifest),
+        ] {
+            let copy = document
+                .pointer(F5_RESOURCE_PREFLIGHT_POINTER)
+                .ok_or_else(|| {
+                    published_contract_error(
+                        path,
+                        schema,
+                        format!("falta {F5_RESOURCE_PREFLIGHT_POINTER}"),
+                    )
+                })?;
+            if let Some(divergence) = first_json_divergence(&sealed, copy, String::new()) {
+                return Err(published_contract_error(path, schema, divergence));
+            }
+        }
+        Ok(())
+    }
+
     /// Comprueba el binding completo antes de abrir cualquier ámbito RNG: la
     /// identidad semántica, las aportaciones externas y —lo que .5 añade— las
     /// identidades físicas de los ocho documentos que la configuración leyó.
@@ -880,6 +926,105 @@ impl SealedF5Admission {
     #[must_use]
     pub const fn resolved_target(&self) -> &F5ResolvedTarget {
         &self.preflight.resolved_target
+    }
+}
+
+/// Puntero JSON de la copia contractual en efectivo y manifiesto v5.
+const F5_RESOURCE_PREFLIGHT_POINTER: &str = "/f5/resource_preflight";
+
+fn published_contract_error(path: &Path, schema: &'static str, detail: String) -> Diagnostic {
+    Diagnostic::format(
+        "GPS-FMT-006",
+        "Un documento JSON producido no satisface su esquema publicado.",
+    )
+    .with("path", path.display().to_string())
+    .with("schema", schema)
+    .with("detail", detail)
+}
+
+/// Primer término divergente entre la proyección sellada y una copia
+/// publicada, expresado como puntero JSON relativo a `resource_preflight`.
+///
+/// Recorre objetos por clave ordenada y arrays por posición, de modo que el
+/// diagnóstico cita `/phases/7/phase_peak_bytes` y no «los objetos difieren».
+fn first_json_divergence(
+    sealed: &serde_json::Value,
+    published: &serde_json::Value,
+    pointer: String,
+) -> Option<String> {
+    match (sealed, published) {
+        (serde_json::Value::Object(sealed), serde_json::Value::Object(published)) => {
+            for (key, sealed_value) in sealed {
+                let child = format!("{pointer}/{key}");
+                let Some(published_value) = published.get(key) else {
+                    return Some(format!("{child}: ausente en la copia"));
+                };
+                if let Some(divergence) =
+                    first_json_divergence(sealed_value, published_value, child)
+                {
+                    return Some(divergence);
+                }
+            }
+            published
+                .keys()
+                .find(|key| !sealed.contains_key(*key))
+                .map(|key| format!("{pointer}/{key}: término no contratado en la copia"))
+        }
+        (serde_json::Value::Array(sealed), serde_json::Value::Array(published)) => {
+            if sealed.len() != published.len() {
+                return Some(format!(
+                    "{pointer}: la copia tiene {} elementos y la admisión {}",
+                    published.len(),
+                    sealed.len()
+                ));
+            }
+            sealed
+                .iter()
+                .zip(published)
+                .enumerate()
+                .find_map(|(index, (sealed, published))| {
+                    first_json_divergence(sealed, published, format!("{pointer}/{index}"))
+                })
+        }
+        (sealed, published) if sealed == published => None,
+        (sealed, published) => {
+            // Un término de tipo distinto se nombra por su puntero y sus tipos:
+            // volcar el subárbol entero produciría un detalle de varios miles
+            // de bytes —con rutas del sistema de ficheros dentro— que acabaría
+            // publicado en el manifiesto de fallo.
+            let pointer = if pointer.is_empty() {
+                F5_RESOURCE_PREFLIGHT_POINTER.to_owned()
+            } else {
+                pointer
+            };
+            if sealed.is_object()
+                || sealed.is_array()
+                || published.is_object()
+                || published.is_array()
+            {
+                return Some(format!(
+                    "{pointer}: la admisión selló {} y la copia publica {}",
+                    json_kind(sealed),
+                    json_kind(published)
+                ));
+            }
+            Some(format!(
+                "{pointer}: la admisión selló {sealed} y la copia publica {published}"
+            ))
+        }
+    }
+}
+
+/// Nombre del tipo JSON de un valor, para nombrar una divergencia de forma sin
+/// volcar su contenido.
+fn json_kind(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "nulo",
+        serde_json::Value::Bool(_) => "booleano",
+        serde_json::Value::Number(_) => "número",
+        serde_json::Value::String(_) => "cadena",
+        serde_json::Value::Array(_) => "lista",
+        serde_json::Value::Object(_) => "objeto",
     }
 }
 

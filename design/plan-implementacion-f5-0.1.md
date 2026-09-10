@@ -380,7 +380,7 @@ que depende.
       `f5_bootstrap_dispatch::fixed_width_bootstrap_memory_limit_…` para
       memoria.
 
-  - ☐ **F5.1.2.5.** Sellar `F5AdmissionReceipt`, exigir
+  - ✅ **F5.1.2.5.** Sellar `F5AdmissionReceipt`, exigir
     `SealedF5Admission` en layout y acotar la recuperación REF.
     - Depende de: F5.1.2.4.
     - Procede de: REQ-VAL-54/56, REQ-MAN-70/92, REQ-SAL-02 y arquitectura §15.
@@ -422,10 +422,23 @@ que depende.
       totales. Sin esa excepción la magnitud publicada tendría que incluir las
       sondas EOF que C8 retiró.
 
-  **Pausa de revisión F5.1.2-B.** Aprobar el modelo local de cambios
+  **✅ Pausa de revisión F5.1.2-B.** Aprobar el modelo local de cambios
   accidentales, el orden de fases, las identidades físicas, la reserva de la
   segunda pasada y el binding sellado. No continuar con layout si un consumidor
   todavía acepta escalares o receipts sueltos.
+  Aprobada el 10 de septiembre de 2026. `SealedF5Admission` es el único tipo
+  público y ningún consumidor acepta ya escalares ni receipts sueltos: no hay
+  constructor desde documento serializado, de modo que un receipt v5 o v6 no
+  puede migrarse. La revisión de código del hito no halló ningún defecto grave;
+  sus cinco hallazgos menores se corrigieron antes de cerrar, incluido el único
+  con consecuencia real: `F5BlockLengthPlan::sample` era público y, como
+  `from_preflight` solo exige la mitad semántica del binding, existía una cadena
+  pública capaz de abrir un ámbito RNG con una configuración físicamente
+  distinta de la admitida.
+  - Queda declarado para F5.1.2.6: no existe todavía productor de
+    `effective-config.json` ni de `manifest.json` v5 para F5, de modo que la
+    igualdad exigida entre ambos está acreditada por pruebas pero no ejercida
+    por código productivo. El comparador pertenece a ese hito.
 
   - ☐ **F5.1.2.6.** Revalidar el layout productivo y cerrar la sustitución v7.
     - Depende de: revisión F5.1.2-B aprobada.
@@ -448,6 +461,26 @@ que depende.
       completa, validación JSON Schema de efectivo/manifiesto y búsquedas
       negativas de `f5-resource-accounting-v5`, v6, sonda 4096 y lectura
       completa no acotada en la ruta F5.
+    - Estado implementado (10 de septiembre de 2026), a la espera de la pausa
+      F5.1.2-C. H10 quedó verde reescribiendo el fixture con la línea del
+      límite siempre presente y anchura fija: la sonda `9999` mide la cota
+      sobre el mismo documento, la cota resulta `5006 = 4952 + 2*27` y la
+      variante exacta−1 conserva la anchura. La igualdad insatisfacible se
+      sustituyó por el punto fijo `operation_units == max_operation_units`, y
+      el rechazo exacto−1 se comprueba donde v7 lo emite: dentro de la carga,
+      no al recuperar la admisión sellada. El fixture añade además el desglose
+      de picos de fase sobre el receipt sellado. Un segundo oráculo
+      independiente reconstruye la proyección v7 completa —veintisiete
+      escalares, `algorithm` incluido, más nueve identidades, diez con máscara,
+      y nueve fases— con y sin máscara. Una prueba de mutación lo acredita:
+      perturbar un solo campo del desglose por fase hace fallar exactamente ese
+      oráculo y ningún otro test del repositorio.
+      El comparador que .5 dejó pendiente existe ya como código productivo:
+      `SealedF5Admission::ensure_contract_copies_match` rechaza con
+      `GPS-FMT-006` cualquier copia de `/f5/resource_preflight` que difiera de
+      la admisión sellada, citando el puntero JSON divergente. Queda para
+      F5.4.3 el productor de efectivo/manifiesto que lo invoque: hoy el
+      comparador no tiene llamador productivo porque ese productor no existe.
 
   **Pausa de cierre F5.1.2-C.** Cerrar solo con todos los gates verdes,
   reconstrucción independiente v7, evidencia de fronteras exactas y

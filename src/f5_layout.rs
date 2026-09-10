@@ -2144,9 +2144,17 @@ mod tests {
         ))
     }
 
+    /// Escribe el documento base con la línea del límite **siempre presente**.
+    ///
+    /// Los bytes del escenario entran dos veces en la cota de operaciones, de
+    /// modo que añadir o quitar la línea `max_operation_units` desplaza la
+    /// propia cota. Sólo un literal de anchura constante mantiene el punto
+    /// fijo `operation_units == max_operation_units` que este fixture exige,
+    /// como ya hace `f5_bootstrap_dispatch::fixed_width_bootstrap_memory_…`
+    /// para memoria.
     fn write_production_layout_fixture(
         root: &Path,
-        operation_limit: Option<u64>,
+        operation_limit: u64,
         seed_byte: u8,
     ) -> PathBuf {
         let scenario_directory = root.join("authoring/scenarios");
@@ -2210,9 +2218,7 @@ mod tests {
             ),
         )
         .expect("production general");
-        let operation_limit = operation_limit.map_or_else(String::new, |limit| {
-            format!("max_operation_units = {limit}\n")
-        });
+        let operation_limit = format!("max_operation_units = {operation_limit}\n");
         fs::write(
             scenario_directory.join("scenario.toml"),
             format!(
@@ -2691,11 +2697,11 @@ mod tests {
         );
         assert!(
             super::tract_query_count() <= 2 * 2 * (2 + 1),
-            "dos intentos, dos bloques y un tramo inicial respetan la cota v4 de recorridos, incluidos los residuos"
+            "dos intentos, dos bloques y un tramo inicial respetan la cota v7 de recorridos, incluidos los residuos"
         );
         assert!(
             super::layout_vector_moves() <= 2 * (1 + 3 * 2 + 3),
-            "las copias y desplazamientos de remove/insert respetan la cota v4"
+            "las copias y desplazamientos de remove/insert respetan la cota v7"
         );
         assert_eq!(
             super::layout_reserved_slots(),
@@ -2760,13 +2766,13 @@ mod tests {
         let tract_count = 3_u64;
         assert!(
             traversals <= 2 * attempts * (blocks * tract_count + blocks * (blocks - 1) / 2),
-            "v4 accounts for every total/prefix traversal after fragment growth"
+            "v7 accounts for every total/prefix traversal after fragment growth"
         );
         assert!(
             moves
                 <= attempts
                     * (tract_count + 3 * blocks * tract_count + 3 * blocks * (blocks - 1) / 2),
-            "v4 accounts for copies and remove/insert shifts"
+            "v7 accounts for copies and remove/insert shifts"
         );
         assert_eq!(
             reserved,
@@ -2827,29 +2833,55 @@ mod tests {
         assert_eq!(executed, preflighted);
         assert!(
             executed <= preflighted,
-            "the last-tract winner cannot exceed the v4 two-pass tract budget"
+            "the last-tract winner cannot exceed the v7 two-pass tract budget"
         );
     }
 
     #[test]
-    fn production_v5_instrumentation_covers_fragmentation_interior_last_residues_and_retry() {
+    fn production_v7_instrumentation_covers_fragmentation_interior_last_residues_and_retry() {
         let root = production_fixture_root();
-        let seed_byte = 1;
-        let baseline_general = write_production_layout_fixture(&root, None, seed_byte);
-        let baseline_config = load_and_validate_f5_config(&baseline_general)
+        // Semilla testigo del contrato de regresión: es la misma que
+        // `fragmented_full_layout_accounts_for_interior_last_residues_and_retry`
+        // fija para el mismo escenario fragmentado, y la primera que fuerza a
+        // la vez ganador interior con dos residuos, último tramo y reintento.
+        let seed_byte = 2;
+        // Sonda de anchura fija: cuatro dígitos holgados que el documento
+        // admite y que ya ocupan exactamente los mismos bytes que la cota
+        // buscada. Sin este marcador la cota se mediría sobre un escenario
+        // más corto y el punto fijo sería insatisfacible.
+        let probe_limit = 9_999_u64;
+        let probe_general = write_production_layout_fixture(&root, probe_limit, seed_byte);
+        let baseline_config = load_and_validate_f5_config(&probe_general)
             .expect("the production fixture configuration is valid");
         let baseline = recover_sealed_f5_admission(&baseline_config, F5OtherResources::default())
-            .expect("the production fixture is admitted before its exact limit is declared");
+            .expect("the fixed-width probe admits the production fixture");
+        let exact_limit = baseline.operation_units();
+        assert_eq!(
+            exact_limit.to_string().len(),
+            probe_limit.to_string().len(),
+            "el punto fijo exige que sonda y cota ocupen los mismos bytes"
+        );
+        assert_eq!(
+            (exact_limit - 1).to_string().len(),
+            probe_limit.to_string().len(),
+            "la frontera exacta−1 también debe conservar la anchura"
+        );
 
-        let exact_general =
-            write_production_layout_fixture(&root, Some(baseline.operation_units()), seed_byte);
-        let config = load_and_validate_f5_config(&exact_general)
-            .expect("the exact operation limit retains the production fixture");
+        let exact_general = write_production_layout_fixture(&root, exact_limit, seed_byte);
+        // El escaneo de capacidad ocurre dentro de la carga, que es la que
+        // abre la referencia; `recover_sealed_f5_admission` ya no reabre nada.
         crate::f5_preflight::reset_test_capacity_tract_visits();
         super::reset_layout_instrumentation();
+        let config = load_and_validate_f5_config(&exact_general)
+            .expect("the exact operation limit retains the production fixture");
         let preflight = recover_sealed_f5_admission(&config, F5OtherResources::default())
-            .expect("v4 admits operation_limit exactly equal to its bound");
-        assert_eq!(preflight.operation_units(), baseline.operation_units());
+            .expect("v7 admits operation_limit exactly equal to its bound");
+        assert_eq!(
+            preflight.operation_units(),
+            exact_limit,
+            "la cota declarada es exactamente la que el documento consume"
+        );
+        assert_eq!(preflight.operation_limit(), exact_limit);
         let execution = ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test")
             .expect("execution identity");
         let layout = build_f5_physical_layout(
@@ -2876,11 +2908,11 @@ mod tests {
         );
         assert_eq!(
             capacity_visits, tracts,
-            "v4 capacity scan visits every preflight tract once"
+            "v7 capacity scan visits every preflight tract once"
         );
         assert_eq!(
             observed.request_tract_visits, tracts,
-            "v4 request validation visits every preflight tract once"
+            "v7 request validation visits every preflight tract once"
         );
         assert_eq!(
             observed.initial_tract_copies,
@@ -2899,11 +2931,11 @@ mod tests {
         );
         assert!(
             observed.total_tract_visits <= attempts * per_attempt_tract_visits,
-            "v4 total-start scans include at most T+B(B-1)/2 live tracts per block"
+            "v7 total-start scans include at most T+B(B-1)/2 live tracts per block"
         );
         assert!(
             observed.prefix_tract_visits <= attempts * per_attempt_tract_visits,
-            "v4 prefix scans have the same independent bound"
+            "v7 prefix scans have the same independent bound"
         );
         assert!(
             observed.fragment_growth <= attempts * blocks,
@@ -2915,16 +2947,16 @@ mod tests {
         );
         assert!(
             observed.remove_shifts <= attempts * per_attempt_shift_bound,
-            "remove shifts fit their v4 live-list bound"
+            "remove shifts fit their v7 live-list bound"
         );
         assert!(
             observed.insert_shifts <= 2 * attempts * per_attempt_shift_bound,
-            "the two possible inserts fit the remaining v4 shift bound"
+            "the two possible inserts fit the remaining v7 shift bound"
         );
         assert!(
             observed.initial_tract_copies + observed.remove_shifts + observed.insert_shifts
                 <= copy_and_shift_bound,
-            "v4 separately budgets copies plus remove/insert shifts"
+            "v7 separately budgets copies plus remove/insert shifts"
         );
         assert_eq!(observed.attempts_started, attempts);
         assert_eq!(
@@ -2934,16 +2966,52 @@ mod tests {
         );
         assert!(
             observed.peak_live_slots <= slot_bound,
-            "the production vectors fit v4's 2*T+4*B slot peak"
+            "the production vectors fit v7's 2*T+4*B slot peak"
         );
         assert_eq!(
             observed.peak_live_bytes,
             observed.peak_live_slots * 256,
-            "the measured slot peak uses the v4 256-byte accounting unit"
+            "the measured slot peak uses the v7 256-byte accounting unit"
         );
         assert!(
             observed.peak_live_bytes <= 256 * slot_bound,
-            "the production slot memory fits v4's 256*(2*T+4*B) component"
+            "the production slot memory fits v7's 256*(2*T+4*B) component"
+        );
+        // Picos de fase de la admisión que el mismo documento produjo: el
+        // fixture instrumental cierra así el desglose que .6 exige, desde la
+        // carga hasta la fórmula final, sobre el receipt sellado.
+        let phases = preflight.receipt().phases();
+        assert_eq!(
+            phases
+                .iter()
+                .map(crate::f5_admission::AdmissionPhaseRecord::phase)
+                .collect::<Vec<_>>(),
+            crate::f5_admission::ACCOUNTED_ADMISSION_PHASES.to_vec(),
+            "las nueve fases se publican en el orden cerrado de la máquina"
+        );
+        assert!(
+            phases
+                .windows(2)
+                .all(|pair| pair[0].operation_units_cumulative()
+                    <= pair[1].operation_units_cumulative()),
+            "el acumulado de operaciones por fase es monótono"
+        );
+        assert_eq!(
+            phases
+                .last()
+                .expect("nueve fases")
+                .operation_units_cumulative(),
+            preflight.operation_units(),
+            "la última fase cierra exactamente en la cota admitida"
+        );
+        assert_eq!(
+            phases
+                .iter()
+                .map(crate::f5_admission::AdmissionPhaseRecord::phase_peak_bytes)
+                .max()
+                .expect("nueve picos de fase"),
+            preflight.working_memory_bytes(),
+            "el pico publicado es el mayor pico de fase, no una suma"
         );
         assert!(
             observed
@@ -2960,13 +3028,21 @@ mod tests {
             "the failed attempt selects the final initial tract"
         );
 
-        let rejected_general =
-            write_production_layout_fixture(&root, Some(baseline.operation_units() - 1), seed_byte);
-        let rejected_config = load_and_validate_f5_config(&rejected_general)
-            .expect("the cota-minus-one document is syntactically valid");
-        let rejected = recover_sealed_f5_admission(&rejected_config, F5OtherResources::default())
-            .expect_err("v4 rejects operation_limit one below the exact admitted bound");
+        // La frontera exacta−1 conserva la anchura del literal, de modo que el
+        // documento consume la misma cota y sólo cambia el límite declarado.
+        // En v7 la admisión ocurre dentro de la carga: el rechazo llega antes
+        // de que exista una admisión sellada que recuperar.
+        let rejected_general = write_production_layout_fixture(&root, exact_limit - 1, seed_byte);
+        let rejected = load_and_validate_f5_config(&rejected_general)
+            .expect_err("v7 rejects operation_limit one below the exact admitted bound");
         assert_eq!(rejected.code(), "GPS-RES-101");
+        assert_eq!(rejected.context()["dimension"], "operation_units");
+        assert_eq!(rejected.context()["accumulated"], exact_limit.to_string());
+        assert_eq!(
+            rejected.context()["limit"],
+            (exact_limit - 1).to_string(),
+            "el rechazo cita el límite declarado, no la cota"
+        );
         fs::remove_dir_all(root).expect("production fixture cleanup");
     }
 
