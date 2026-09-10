@@ -101,12 +101,20 @@ figuraban sin marcar mientras F5.1.2.1–.3, que dependen de ellos, figuraban
 cerrados. Git registra `307995f` «cerrar contratos y preflight de F5» y
 `c73a14e` «cerrar planificador de longitudes F5.1.1», pero ninguno marcó una
 casilla, de modo que el plan nunca reflejó ese cierre. La casilla de cada hito
-se conserva abierta a propósito hasta que la revisión independiente de F5.1.2
-confirme que la sustitución v7 no los reabrió; lo que no puede repetirse es
+se conservó abierta a propósito hasta que la revisión independiente de F5.1.2
+confirmara que la sustitución v7 no los reabrió; lo que no puede repetirse es
 cerrar un subhito dependiente sin dejar constancia del estado de aquello de lo
 que depende.
 
-- ☐ **F5.0.1.** Crear y cerrar los contratos externos completos general v3,
+Las cinco casillas se cerraron el 10 de septiembre de 2026, al cerrarse F5.1.2.
+La condición se cumplió: las revisiones independientes de F5.1.2.4, .5 y .6
+recorrieron el preflight puro, el ledger, los catálogos y los esquemas —que es
+el contenido de F5.0— sin hallar en ellos ningún defecto, y el contrato de
+`resource_preflight` que F5.0.1 dejó incompleto se cerró en F5.1.2.5. El vector
+`FCP_` del catálogo de F5.0.3 se regeneró el 9 de septiembre al derivar el
+identificador del índice de copia.
+
+- ✅ **F5.0.1.** Crear y cerrar los contratos externos completos general v3,
   escenario F5 v1, efectivo v5, manifiesto general v5, perfil F5 v1, los siete
   TSV, fallo v1 y `truth.jsonl` v2; incorporar `f5_scenario` v1 como el único
   documento enlazado y resolver cada ruta desde el documento que la declara,
@@ -138,14 +146,14 @@ que depende.
     general resuelto, raíz efectiva, `f5.seed` efectivo y `f5.seed` manifiesto;
     discordancia de cualquier otra copia efectiva/manifiesto; y verdad v2 con
     población/copia/locus estructurados. Los esquemas legacy se comparan byte a byte.
-- ☐ **F5.0.2.** Implementar el lector único de `profile.metadata.json` y los
+- ✅ **F5.0.2.** Implementar el lector único de `profile.metadata.json` y los
   cinco TSV, con sus cabeceras, dominios, orden, claves, normalización y hashes.
   - Depende de: F5.0.1.
   - Procede de: REQ-EVO-74/75, ACE-117 y DTC-089 «Paquete de perfiles».
   - Cambia: recursos F5 y validación de entrada; no genera datos biológicos.
   - Se comprueba con: corpus válido y una mutación aislada de BOM, LF, cabecera,
     fila, intervalo, peso, población, versión, tamaño y SHA-256.
-- ☐ **F5.0.3.** Publicar los catálogos inmutables `f5-rng-catalog-v1` e ID F5,
+- ✅ **F5.0.3.** Publicar los catálogos inmutables `f5-rng-catalog-v1` e ID F5,
   incluidos material tipado, prefijos y vectores por ámbito.
   - Depende de: F5.0.2.
   - Procede de: REQ-EVO-77, REQ-VAL-56 y DTC-037/039/089.
@@ -155,7 +163,7 @@ que depende.
     rechazo, Fisher–Yates, Bernoulli 0/1 sin consumo, colisión dirigida y bytes
     canónicos exactos de layout (`u64` big-endian) y matriz (cabecera H/S,
     orden de filas, bits MSB y relleno cero).
-- ☐ **F5.0.4.** Implementar el preflight puro
+- ✅ **F5.0.4.** Implementar el preflight puro
   `f5-resource-accounting-v7` y su ledger acumulativo, que resuelve racional de
   cobertura, capacidad, dimensiones y cotas de operaciones, pico de memoria y
   bytes publicados con símbolos dimensionalmente distintos. Este núcleo no
@@ -222,14 +230,14 @@ que depende.
 
 ## 4. F5.1 — geometría y marginales
 
-- ☐ **F5.1.1.** Construir longitudes exactas condicionadas para
+- ✅ **F5.1.1.** Construir longitudes exactas condicionadas para
   `covered_bases`/`coverage_fraction` y estocásticas para `block_count`.
   - Depende de: F5.0.4.
   - Procede de: REQ-EVO-74, ACE-117 y DTC-089 «Layout».
   - Cambia: geometría F5.
   - Se comprueba con: suma T exacta, residual final, pesos restringidos,
     overflow y un oráculo entero que prueba la factibilidad previa.
-- ☐ **F5.1.2.** Integrar la admisión F5 físicamente acotada y, solo tras
+- ✅ **F5.1.2.** Integrar la admisión F5 físicamente acotada y, solo tras
   sellarla, colocar bloques completos e insertar SNP mediante gaps con intentos
   transaccionales y orden/IDs canónicos. Este hito sustituye las correcciones
   incrementales v5/v6; se ejecuta en los subhitos siguientes y no incorpora
@@ -440,7 +448,7 @@ que depende.
     igualdad exigida entre ambos está acreditada por pruebas pero no ejercida
     por código productivo. El comparador pertenece a ese hito.
 
-  - ☐ **F5.1.2.6.** Revalidar el layout productivo y cerrar la sustitución v7.
+  - ✅ **F5.1.2.6.** Revalidar el layout productivo y cerrar la sustitución v7.
     - Depende de: revisión F5.1.2-B aprobada.
     - Procede de: REQ-EVO-74/77 y DTC-089 «Layout».
     - Cambia: integración final; elimina las rutas v5/v6 y sus pruebas que
@@ -482,10 +490,22 @@ que depende.
       F5.4.3 el productor de efectivo/manifiesto que lo invoque: hoy el
       comparador no tiene llamador productivo porque ese productor no existe.
 
-  **Pausa de cierre F5.1.2-C.** Cerrar solo con todos los gates verdes,
+  **✅ Pausa de cierre F5.1.2-C.** Cerrar solo con todos los gates verdes,
   reconstrucción independiente v7, evidencia de fronteras exactas y
   confirmación de cero RNG, destino o publicación antes de `sealed`.
-- ☐ **F5.1.3.** Generar `p_i` por bloque×subpoblación desde el espectro, aislando
+  Aprobada el 10 de septiembre de 2026, con las cinco puertas en verde y la
+  batería completa sin ningún fallo: 718 pasan, 0 fallan. La reconstrucción
+  independiente v7 existe y es discriminante —una mutación de un solo campo del
+  desglose por fase hace fallar ese oráculo y ningún otro test—; las fronteras
+  exactas están acreditadas con literal de anchura fija en las tres dimensiones;
+  y ninguna vía pública abre RNG, destino o publicación antes del sellado, tras
+  cerrar en F5.1.2.5 la única que quedaba.
+  - H10 estuvo rojo desde el 5 de septiembre. No solo fallaba: abortaba en la
+    admisión, de modo que sus aserciones de layout nunca llegaban a ejecutarse.
+    Conviene recordarlo cuando un plan aplace un test a un hito posterior: lo
+    que se aplaza no es solo el fallo, sino toda la cobertura que ese test
+    afirmaba dar.
+- ✅ **F5.1.3.** Generar `p_i` por bloque×subpoblación desde el espectro, aislando
   fila y valor y conservando 0/1 sin consumo indebido.
   - Depende de: F5.1.2.
   - Procede de: REQ-EVO-40/75, ACE-89/117 y DTC-089.
@@ -493,8 +513,20 @@ que depende.
   - Se comprueba con: extremos, intervalo degenerado, uniformes de 53 bits,
     subpoblación añadida/reordenada y perfil sin selección implícita.
 
-> **Revisión F5.1.** Aprobar layout reconstruible, suma exacta e independencia
+> **✅ Revisión F5.1.** Aprobar layout reconstruible, suma exacta e independencia
 > de marginales antes de construir haplotipos.
+> Aprobada el 10 de septiembre de 2026. El layout es reconstruible y su
+> pertenencia se comprueba: la frontera de marginales rederiva cada `block_id` y
+> `site_id` y exige además el recuento sellado, porque dos ejecuciones que solo
+> difieren en el número de bloques comparten el identificador del bloque cero.
+> Las sumas usan el acumulador compensado en el orden escrito, y ahora hay una
+> prueba con pesos no diádicos que lo distingue de una suma ingenua. Los
+> marginales son independientes por subpoblación: cada sitio abre su propia
+> subsemilla, reordenar las subpoblaciones no cambia un valor y añadir una no
+> altera las anteriores.
+> - Queda declarado para F5.2.1: `build_f5_marginals` no tiene aún llamador
+>   productivo, y es ese hito quien debe encadenar layout, marginales y
+>   haplotipos.
 
 ## 5. F5.2 — tabla haplotípica y LD
 
