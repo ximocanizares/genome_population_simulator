@@ -1126,6 +1126,23 @@ fn f5_uniform_index_with_source(
     }
 }
 
+/// Los 53 bits altos de una palabra F5: `bits53 = next_u64() >> 11`.
+///
+/// Se expone aparte del uniforme en binary64 porque Bernoulli compara enteros
+/// y no debe perder ningún bit convirtiendo antes a `f64`.
+pub fn f5_bits_53(rng: &mut impl RandomWordSource) -> u64 {
+    rng.next_word() >> 11
+}
+
+/// U53 normativo de DTC-089: `U = bits53 / 2^53`, cerrado en 0 y abierto en 1.
+///
+/// A diferencia de [`f4_uniform_open_53`] no rechaza ninguna palabra ni
+/// desplaza el valor media unidad: consume exactamente una palabra, devuelve 0
+/// exacto y nunca devuelve 1. Es el único uniforme continuo de los ámbitos F5.
+pub fn f5_uniform_53(rng: &mut impl RandomWordSource) -> f64 {
+    f5_bits_53(rng) as f64 / F5_FIFTY_THREE_BIT_BOUND as f64
+}
+
 /// Bernoulli DTC-089. Los extremos no abren ni avanzan el RNG.
 pub fn f5_bernoulli(rng: &mut LocalRng, probability: f64) -> Result<bool, RandomSamplingError> {
     f5_bernoulli_with_source(rng, probability)
@@ -1144,8 +1161,8 @@ fn f5_bernoulli_with_source(
     if probability == 1.0 {
         return Ok(true);
     }
-    let threshold = (probability * (1_u64 << 53) as f64).floor() as u64;
-    Ok((rng.next_word() >> 11) < threshold)
+    let threshold = (probability * F5_FIFTY_THREE_BIT_BOUND as f64).floor() as u64;
+    Ok(f5_bits_53(rng) < threshold)
 }
 
 pub fn f5_fisher_yates<T>(rng: &mut LocalRng, values: &mut [T]) -> Result<(), RandomSamplingError> {
@@ -1185,6 +1202,7 @@ pub const F5_UNIFORM_INDEX_ALGORITHM: &str = "uniform-index-v1";
 pub const F5_BERNOULLI_ALGORITHM: &str = "bernoulli-v1";
 pub const F5_FISHER_YATES_ALGORITHM: &str = "fisher-yates-v1";
 
+const F5_FIFTY_THREE_BIT_BOUND: u64 = 1_u64 << 53;
 const F4_FIFTY_THREE_BIT_BOUND: u64 = 1_u64 << 53;
 const F4_FIFTY_THREE_BIT_MAX: u64 = F4_FIFTY_THREE_BIT_BOUND - 1;
 const F4_PI: f64 = f64::from_bits(0x4009_21fb_5444_2d18);

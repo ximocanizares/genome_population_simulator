@@ -64,6 +64,22 @@ impl Diagnostic {
             .with("detail", detail.into())
     }
 
+    /// La cardinalidad de haplotipos no cabe en los vectores binarios que el
+    /// bloque puede representar. DTC-089 lo exige antes de sortear marginales.
+    #[must_use]
+    pub fn f5_haplotype_cardinality(
+        scenario_id: impl Into<String>,
+        population_id: impl Into<String>,
+        block_id: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self::from_catalog("GPS-DOMAIN-105")
+            .with("scenario_id", scenario_id.into())
+            .with("population_id", population_id.into())
+            .with("block_id", block_id.into())
+            .with("detail", detail.into())
+    }
+
     /// Diagnóstico F5 para un overflow o resultado no finito que aparece
     /// después de que el preflight haya demostrado las cotas del escenario.
     #[must_use]

@@ -4,8 +4,9 @@ use genome_population_simulator::identity::{
     F5BlockId, F5SiteId, IndividualId, PopulationId, ScenarioId,
 };
 use genome_population_simulator::randomness::{
-    F5_RNG_CATALOG, F5_UNIFORM_INDEX_ALGORITHM, F5RandomDecision, RootSeed, derive_f5_subseed,
-    f5_bernoulli, f5_fisher_yates, f5_matrix_bytes, f5_placed_layout_bytes, f5_uniform_index,
+    F5_RNG_CATALOG, F5_UNIFORM_INDEX_ALGORITHM, F5RandomDecision, RandomWordSource, RootSeed,
+    derive_f5_subseed, f5_bernoulli, f5_bits_53, f5_fisher_yates, f5_matrix_bytes,
+    f5_placed_layout_bytes, f5_uniform_53, f5_uniform_index,
 };
 
 const F5_RNG_CATALOG_TSV: &str = include_str!("../catalogs/f5-rng-catalog-v1.tsv");
@@ -176,5 +177,75 @@ fn f5_layout_and_matrix_bytes_are_canonical_independent_of_later_writers() {
             0, 0, 0, 0, 0, 0, 0, 9, //
             0xa1, 0x80, 0x55, 0x00,
         ])
+    );
+}
+
+/// Fuente de palabras literales para acreditar el U53 sin depender de ChaCha.
+struct ScriptedWords {
+    words: Vec<u64>,
+    consumed: usize,
+}
+
+impl RandomWordSource for ScriptedWords {
+    fn next_word(&mut self) -> u64 {
+        let word = self.words[self.consumed];
+        self.consumed += 1;
+        word
+    }
+}
+
+#[test]
+fn f5_uniform_53_is_the_normative_high_bit_quotient_closed_in_zero_and_open_in_one() {
+    const TWO_POW_53: u64 = 1_u64 << 53;
+    // Los once bits bajos se descartan: dos palabras que solo difieran en
+    // ellos comparten U53.
+    let mut source = ScriptedWords {
+        words: vec![0, 0x7ff, u64::MAX, u64::MAX - 0x7ff, 1 << 11, 3 << 11],
+        consumed: 0,
+    };
+    assert_eq!(
+        f5_uniform_53(&mut source),
+        0.0,
+        "bits53=0 devuelve cero exacto"
+    );
+    assert_eq!(
+        f5_uniform_53(&mut source),
+        0.0,
+        "los once bits bajos no cuentan"
+    );
+    let maximum = f5_uniform_53(&mut source);
+    assert_eq!(maximum, (TWO_POW_53 - 1) as f64 / TWO_POW_53 as f64);
+    assert!(maximum < 1.0, "el U53 es abierto en uno");
+    assert_eq!(f5_uniform_53(&mut source), maximum);
+    assert_eq!(f5_uniform_53(&mut source), 1.0 / TWO_POW_53 as f64);
+    assert_eq!(f5_uniform_53(&mut source), 3.0 / TWO_POW_53 as f64);
+    assert_eq!(
+        source.consumed, 6,
+        "cada U53 consume exactamente una palabra"
+    );
+
+    // `f5_bits_53` es el mismo desplazamiento, sin pasar por binary64.
+    let mut bits = ScriptedWords {
+        words: vec![u64::MAX, 0x8000_0000_0000_07ff],
+        consumed: 0,
+    };
+    assert_eq!(f5_bits_53(&mut bits), TWO_POW_53 - 1);
+    assert_eq!(f5_bits_53(&mut bits), 1 << 52);
+
+    // El mismo flujo derivado da el mismo U53 que su palabra publicada.
+    let scenario_id = ScenarioId::parse("scenario-f5", "test").expect("scenario");
+    let population_id = PopulationId::parse("population-A", "test").expect("population");
+    let block_id = F5BlockId::parse("BLK_blockA", "test").expect("block");
+    let site_id = F5SiteId::parse("SITE_siteA", "test").expect("site");
+    let subseed = derive_f5_subseed(
+        root(),
+        F5RandomDecision::marginal_spectrum(&scenario_id, &population_id, &block_id, &site_id),
+    )
+    .expect("subseed");
+    let published = subseed.local_rng().next_u64();
+    let mut stream = subseed.local_rng();
+    assert_eq!(
+        f5_uniform_53(&mut stream),
+        (published >> 11) as f64 / TWO_POW_53 as f64
     );
 }
