@@ -1148,7 +1148,7 @@ pub fn f5_bernoulli(rng: &mut LocalRng, probability: f64) -> Result<bool, Random
     f5_bernoulli_with_source(rng, probability)
 }
 
-fn f5_bernoulli_with_source(
+pub(crate) fn f5_bernoulli_with_source(
     rng: &mut impl RandomWordSource,
     probability: f64,
 ) -> Result<bool, RandomSamplingError> {
@@ -1169,7 +1169,7 @@ pub fn f5_fisher_yates<T>(rng: &mut LocalRng, values: &mut [T]) -> Result<(), Ra
     f5_fisher_yates_with_source(rng, values)
 }
 
-fn f5_fisher_yates_with_source<T>(
+pub(crate) fn f5_fisher_yates_with_source<T>(
     rng: &mut impl RandomWordSource,
     values: &mut [T],
 ) -> Result<(), RandomSamplingError> {
