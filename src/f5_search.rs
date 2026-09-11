@@ -1,12 +1,14 @@
 //! Búsqueda local F5.2.3: propuestas 2×2, terminación y mejor intento.
 //!
-//! Este módulo es el primer llamador productivo de la cadena completa de F5.2:
-//! recibe el layout físico y la admisión sellada, deriva de ellos los
-//! marginales, construye cada intento haplotípico, lo refina con las
-//! propuestas 2×2 de DTC-089 y lo evalúa con el evaluador LD. Ni
-//! `build_f5_marginals`, ni `build_f5_haplotype_attempt`, ni
-//! `evaluate_f5_linkage_disequilibrium` tenían hasta ahora quien los
-//! encadenara.
+//! Este módulo es el primer llamador productivo de la cadena de F5.2: recibe
+//! el layout físico y la admisión sellada, deriva de ellos los marginales con
+//! `build_f5_marginals`, construye cada bloque×subpoblación de cada intento con
+//! `build_f5_block_attempt`, lo refina con las propuestas 2×2 de DTC-089 y lo
+//! evalúa con `evaluate_f5_block_with_pair_verdicts`. Las dos fronteras por
+//! intento completo —`build_f5_haplotype_attempt` y
+//! `evaluate_f5_linkage_disequilibrium`— siguen siendo públicas porque son la
+//! forma en que la batería reconstruye un intento entero y contrasta que el
+//! camino por bloque produce exactamente lo mismo; la búsqueda no las llama.
 //!
 //! # El alcance de los intentos es la unidad bloque×subpoblación
 //!
@@ -103,27 +105,39 @@
 //!
 //! - **Siembra canónica:** `H*S` visitas de fila para las S marginales más
 //!   `H*S*(S-1)/2` para las conjuntas, es decir `O(H*S²)`. El registro publica
-//!   ese recuento en `row_visits`, que vale exactamente `H*(S + S*(S-1)/2)`
-//!   **sea cual sea el presupuesto de propuestas**.
+//!   ese recuento dentro de `row_visits`, junto con las otras dos sumas
+//!   canónicas del intento.
 //! - **Cada propuesta:** cuatro enteros acotados y, si es candidata, dos
-//!   marginales movidas en `O(1)`, `2S-3` parejas actualizadas, dos filas
-//!   rehasheadas —`O(S/8)` bytes— y un recorrido de los `B` bins. **Ninguna
-//!   recorre las H filas.** El registro publica `pair_updates`, que vale
-//!   exactamente `candidate_proposals*(2S-3)` y se cuenta dentro de
-//!   `refresh_pair`.
+//!   marginales movidas en `O(1)`, `2S-3` parejas actualizadas, **solo los
+//!   bins que esas parejas tocan**, `S` marginales recorridas y dos filas
+//!   rehasheadas. **Ninguna recorre las H filas** ni depende de `B`: los bins
+//!   activos —los que alguna pareja nombra— están acotados por `S*(S-1)/2`.
+//!   El registro publica `pair_updates`, que vale exactamente
+//!   `candidate_proposals*(2S-3)` y se cuenta dentro de `refresh_pair`, y
+//!   `max_rebuild_visits`, que vale `max_rebuilds` por el número de bins
+//!   activos.
 //!
-//!   `row_visits` no es una identidad escrita a mano: el contador vive dentro
-//!   de `site_marginal` y `joint_marginal`, de modo que **cualquier** suma
-//!   canónica lo incrementa, la haga la siembra o la haga una propuesta. Que
-//!   valga `H*(S + S*(S-1)/2)` para cualquier presupuesto es, por tanto, una
-//!   medida y no una tautología.
+//!   `row_visits` mide las **tres** sumas canónicas del intento en un único
+//!   medidor: la siembra de la puntuación, la recomputación de las columnas
+//!   publicadas y la evaluación LD de cierre. Su valor es `H*(S+1)²` —el
+//!   desglose está en `canonical_row_visits`, en la batería— e **invariante
+//!   frente al presupuesto de propuestas**, de modo que una suma canónica
+//!   añadida dentro del bucle lo rompe.
+//!
+//!   Lo que la cifra **no** puede acreditar es la ausencia universal de
+//!   recorridos: mide las sumas que pasan por `site_marginal`,
+//!   `joint_marginal` y `refresh_realized_columns` **con el medidor que se les
+//!   pasa**. Un recorrido de las H filas escrito a mano, o uno que declare su
+//!   propio medidor, queda fuera de la cifra y la batería no lo vería.
 //! - **Cierre:** `O(H*S)` para recomputar canónicamente las columnas,
 //!   `O(H*S²)` para la evaluación LD de la unidad y `O(H*S/8)` para el
 //!   desempate lexicográfico de `matrix_bytes` contra el mejor candidato.
 //!
-//! El total es `O(H*S² + Q*(S+B))`, con `Q = max_swap_proposals`. DTC-089
-//! escribe `O(H*S² + Q*S)` porque `B` es una propiedad del perfil y no de la
-//! búsqueda; el término se declara aquí en lugar de esconderlo.
+//! El total es `O(H*S² + Q*S + A*B)`, con `Q = max_swap_proposals` y `A` los
+//! intentos: el término `A*B` es la siembra de los agregados de bin, que se
+//! hace una vez por intento y no dentro del bucle. El bucle cumple la cota
+//! `O(Q*S)` de DTC-089; el término de siembra se declara en lugar de
+//! esconderlo.
 //!
 //! La memoria añadida es la caché de parejas: 32 bytes por pareja intrabloque,
 //! más los veredictos canónicos que la guarda de cierre recoge.
@@ -133,12 +147,15 @@
 //!
 //! # Imposibilidad demostrada frente a búsqueda agotada
 //!
-//! `GPS-RES-101` por un fallo exacto de dimensiones —`H*S` por encima de
-//! `max_haplotype_cells`, o un lado por encima de 4096— no se comprueba aquí:
-//! la admisión sellada, que esta frontera exige y verifica, ya lo rechaza con
-//! ese mismo código sobre la cota `H*site_bound_per_block`, que domina el
-//! producto exacto del layout realizado. Repetirlo en la búsqueda añadiría una
-//! rama inalcanzable y no una red.
+//! Las cotas de dimensión tampoco se comprueban aquí, y cada una la impone
+//! quien corresponde: `H` fuera de `2..=4096` lo rechaza el lector del perfil
+//! con `GPS-FMT-101` —«H debe pertenecer a 2..=4096»—, mientras que
+//! `site_bound_per_block > 4096` y `H*site_bound_per_block >
+//! max_haplotype_cells` los rechaza la admisión sellada con `GPS-RES-101`. Esa
+//! cota domina el producto exacto del layout realizado, de modo que una
+//! comprobación en la búsqueda sería una rama inalcanzable y no una red. La
+//! frontera exige y verifica la admisión sellada, así que ninguna de las dos
+//! puede saltarse.
 //!
 //! `GPS-DOMAIN-102` se reserva para una **demostración** hecha sobre los
 //! marginales y antes de abrir ningún intento: un bloque con menos de dos
@@ -166,7 +183,7 @@ use crate::f5_ld::{
     f5_bin_abs_error, f5_bin_is_outside, f5_evaluability_factor, joint_marginal,
     pair_from_components, sign_rule_is_satisfied, site_marginal,
 };
-use crate::f5_marginals::{F5MarginalTable, NeumaierSum, build_f5_marginals};
+use crate::f5_marginals::{F5MarginalTable, F5RowVisits, NeumaierSum, build_f5_marginals};
 use crate::f5_preflight::{
     F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS, F5_DEFAULT_MAX_SWAP_PROPOSALS, F5OtherResources,
     SealedF5Admission,
@@ -214,6 +231,12 @@ pub struct F5AttemptRecord {
     candidate_proposals: u64,
     row_visits: u64,
     pair_updates: u64,
+    /// Visitas elementales del bucle de propuestas: parejas rehechas, bins
+    /// reajustados, marginales recorridas y bytes de fila rehasheados. Es lo
+    /// que `f5-resource-accounting-v7` presupuesta como `Q*S_bound`.
+    loop_operations: u64,
+    max_rebuilds: u64,
+    max_rebuild_visits: u64,
 }
 
 impl F5AttemptRecord {
@@ -310,12 +333,16 @@ impl F5AttemptRecord {
         self.candidate_proposals
     }
 
-    /// Visitas de fila que la búsqueda pidió a las sumas canónicas de `f5_ld`.
+    /// Visitas de fila de las tres sumas canónicas del intento.
     ///
-    /// El contador vive dentro de `site_marginal` y `joint_marginal`, de modo
-    /// que **toda** visita lo incrementa venga de donde venga. Vale
-    /// exactamente `H*S + H*S*(S-1)/2` por intento: si una propuesta hiciera
-    /// una suma canónica, el recuento crecería con el presupuesto.
+    /// Suma la siembra de la puntuación, la recomputación de las columnas
+    /// publicadas y la evaluación LD de cierre, todas sobre el mismo medidor:
+    /// vale `H*(S+1)²` y **no depende del presupuesto de propuestas**, de modo
+    /// que una suma canónica añadida al bucle lo rompe.
+    ///
+    /// Es una medida de las sumas que pasan por `site_marginal`,
+    /// `joint_marginal` y `refresh_realized_columns` con el medidor del
+    /// intento; no acredita que no exista ningún otro recorrido de las H filas.
     #[must_use]
     pub const fn row_visits(&self) -> u64 {
         self.row_visits
@@ -326,6 +353,34 @@ impl F5AttemptRecord {
     #[must_use]
     pub const fn pair_updates(&self) -> u64 {
         self.pair_updates
+    }
+
+    /// Visitas elementales del bucle de propuestas.
+    ///
+    /// Es el término que `f5-resource-accounting-v7` presupuesta como
+    /// `Q*S_bound`: parejas rehechas, bins reajustados, marginales recorridas
+    /// y bytes de fila rehasheados. **No depende del número de bins del
+    /// perfil**: un perfil con 255 bins y un bloque de dos sitios cuesta lo
+    /// mismo que uno con un solo bin.
+    #[must_use]
+    pub const fn loop_operations(&self) -> u64 {
+        self.loop_operations
+    }
+
+    /// Veces que el máximo de `r²` hubo que rehacerse: el bin que lo ostentaba
+    /// era el único y una propuesta lo bajó.
+    #[must_use]
+    pub const fn max_rebuilds(&self) -> u64 {
+        self.max_rebuilds
+    }
+
+    /// Bins visitados al rehacer el máximo. Vale
+    /// `max_rebuilds * (bins con al menos una pareja)`, **nunca**
+    /// `max_rebuilds * B`: el conjunto activo es fijo y está acotado por
+    /// `S*(S-1)/2`.
+    #[must_use]
+    pub const fn max_rebuild_visits(&self) -> u64 {
+        self.max_rebuild_visits
     }
 }
 
@@ -635,33 +690,44 @@ fn exhausted_failure(
     records: Vec<F5AttemptRecord>,
     max_attempts: u64,
 ) -> F5SearchFailure {
-    let offender = records
+    // Siempre hay un mejor intento sin terminar: se llega aquí solo cuando una
+    // unidad agotó su límite, y `max_haplotype_attempts` es un entero positivo
+    // por esquema y por la validación de límites, de modo que toda unidad
+    // ejecuta al menos un intento y deja su fila marcada. Si la invariante se
+    // rompiera, el diagnóstico honesto no es un `GPS-DOMAIN-104` con
+    // identificadores inventados —su contexto público exige población y
+    // bloque— sino una invariante interna.
+    let diagnostic = records
         .iter()
-        .find(|record| record.selected_best && !record.terminated);
-    let diagnostic = match offender {
-        Some(record) => Diagnostic::f5_haplotype_search_exhausted(
-            scenario_id.as_str(),
-            record.population_id.as_str(),
-            record.block_id.as_str(),
-            format!(
-                "best_attempt_index={};attempts={max_attempts};duplicate_rows={};bins_outside={};signs_failed={};max_r2_error={};sum_r2_error={};max_marginal_error={};evaluable_pairs={}",
-                record.attempt_index,
-                record.duplicate_rows,
-                record.bins_outside,
-                record.signs_failed,
-                record.max_r2_error,
-                record.sum_r2_error,
-                record.max_marginal_error,
-                record.evaluable_pairs,
-            ),
-        ),
-        None => Diagnostic::f5_haplotype_search_exhausted(
-            scenario_id.as_str(),
-            "<none>",
-            "<none>",
-            format!("max_haplotype_attempts={max_attempts} no permitió ejecutar ningún intento"),
-        ),
-    };
+        .find(|record| record.selected_best && !record.terminated)
+        .map_or_else(
+            || {
+                Diagnostic::f5_internal(
+                    scenario_id.as_str(),
+                    format!(
+                        "la búsqueda se agotó con max_haplotype_attempts={max_attempts} sin dejar ningún mejor intento sin terminar"
+                    ),
+                )
+            },
+            |record| {
+                Diagnostic::f5_haplotype_search_exhausted(
+                    scenario_id.as_str(),
+                    record.population_id.as_str(),
+                    record.block_id.as_str(),
+                    format!(
+                        "best_attempt_index={};attempts={max_attempts};duplicate_rows={};bins_outside={};signs_failed={};max_r2_error={};sum_r2_error={};max_marginal_error={};evaluable_pairs={}",
+                        record.attempt_index,
+                        record.duplicate_rows,
+                        record.bins_outside,
+                        record.signs_failed,
+                        record.max_r2_error,
+                        record.sum_r2_error,
+                        record.max_marginal_error,
+                        record.evaluable_pairs,
+                    ),
+                )
+            },
+        );
     F5SearchFailure {
         diagnostic: Box::new(diagnostic),
         records,
@@ -798,6 +864,7 @@ fn search_block(
 
     for attempt_index in 0..max_attempts {
         attempts_executed += 1;
+        let mut visits = F5RowVisits::default();
         let mut block = build_f5_block_attempt(config, marginals, block_ordinal, attempt_index)?;
         let (measure, state) = refine_block(
             scenario_id,
@@ -817,6 +884,7 @@ fn search_block(
             &mut block,
             attempt_index,
             max_proposals,
+            &mut visits,
         )?;
         let mut verdicts = Vec::new();
         let evaluation = evaluate_f5_block_with_pair_verdicts(
@@ -824,6 +892,7 @@ fn search_block(
             layout_block,
             &block,
             Some(&mut verdicts),
+            &mut visits,
         )?;
         let score = ScoreTuple {
             duplicate_rows: block.duplicate_rows(),
@@ -858,8 +927,11 @@ fn search_block(
             matrix_bytes_sha256: format!("{:x}", Sha256::digest(block.matrix().canonical_bytes())),
             selected_best: false,
             candidate_proposals: measure.candidate_proposals,
-            row_visits: measure.row_visits,
+            row_visits: visits.count(),
             pair_updates: measure.pair_updates,
+            loop_operations: measure.loop_operations,
+            max_rebuilds: measure.max_rebuilds,
+            max_rebuild_visits: measure.max_rebuild_visits,
         });
 
         let candidate = UnitCandidate {
@@ -931,12 +1003,8 @@ fn ensure_score_did_not_diverge(
     evaluation: &F5BlockLdEvaluation,
 ) -> Result<(), Diagnostic> {
     let internal = |detail: String| Diagnostic::f5_internal(scenario_id.as_str(), detail);
-    if state.current.duplicate_rows != canonical.duplicate_rows {
-        return Err(internal(format!(
-            "la puntuación incremental cuenta {} filas duplicadas y la canónica {}: ese recuento no cuelga de ninguna frontera de coma flotante",
-            state.current.duplicate_rows, canonical.duplicate_rows
-        )));
-    }
+    ensure_duplicate_rows_agree(state.current.duplicate_rows, canonical.duplicate_rows)
+        .map_err(internal)?;
     if verdicts.len() != state.pairs.len() {
         return Err(internal(format!(
             "el canon publicó {} veredictos de pareja y el estado incremental tiene {}",
@@ -951,12 +1019,11 @@ fn ensure_score_did_not_diverge(
             let incremental = state.pairs[index];
             let canonical_pair = verdicts[index];
             if incremental.evaluable != canonical_pair.evaluable {
-                // Frontera de evaluabilidad: `factor > 0.0`.
-                let at_the_boundary = canonical_pair.factor_i == 0.0
-                    || canonical_pair.factor_j == 0.0
-                    || f5_evaluability_factor(state.marginals[i]) == 0.0
-                    || f5_evaluability_factor(state.marginals[j]) == 0.0;
-                if !at_the_boundary {
+                if !evaluability_divergence_is_attributable(
+                    &canonical_pair,
+                    f5_evaluability_factor(state.marginals[i]),
+                    f5_evaluability_factor(state.marginals[j]),
+                ) {
                     return Err(internal(format!(
                         "la pareja ({i},{j}) es evaluable para la puntuación incremental ({}) y no para el canon ({}), sin ningún factor exactamente nulo que lo explique",
                         incremental.evaluable, canonical_pair.evaluable
@@ -966,9 +1033,7 @@ fn ensure_score_did_not_diverge(
             }
             if incremental.evaluable
                 && incremental.sign_ok != canonical_pair.sign_ok
-                // Frontera de signos: `D == 0.0` incumple.
-                && incremental.d != 0.0
-                && canonical_pair.d != 0.0
+                && !sign_divergence_is_attributable(incremental.d, canonical_pair.d)
             {
                 return Err(internal(format!(
                     "la pareja ({i},{j}) cumple la regla de signos para la puntuación incremental ({}) y no para el canon ({}), con D incremental {} y canónica {}: ninguna de las dos es exactamente cero",
@@ -979,12 +1044,9 @@ fn ensure_score_did_not_diverge(
     }
 
     for (index, (definition, evaluated)) in state.bins.iter().zip(evaluation.bins()).enumerate() {
-        let incremental = (state.bin_count[index] > 0).then(|| {
-            f5_bin_abs_error(
-                state.bin_total[index] / state.bin_count[index] as f64,
-                definition,
-            )
-        });
+        // Se lee el error **mantenido**, no uno recalculado: así la guarda
+        // vigila el valor con el que el bucle decidió.
+        let incremental = (state.bin_count[index] > 0).then(|| state.bin_error[index]);
         let (Some(incremental_error), Some(canonical_error)) = (incremental, evaluated.abs_error())
         else {
             if incremental.is_some() != evaluated.abs_error().is_some() {
@@ -997,9 +1059,7 @@ fn ensure_score_did_not_diverge(
         let incremental_outside = f5_bin_is_outside(incremental_error, definition);
         let canonical_outside = f5_bin_is_outside(canonical_error, definition);
         if incremental_outside != canonical_outside
-            // Frontera de bin: el error justo en la tolerancia inclusiva.
-            && incremental_error != definition.max_abs_error()
-            && canonical_error != definition.max_abs_error()
+            && !bin_divergence_is_attributable(incremental_error, canonical_error, definition)
         {
             return Err(internal(format!(
                 "el bin {index} queda fuera de tolerancia para una aritmética ({incremental_outside}) y dentro para la otra ({canonical_outside}), con errores {incremental_error} y {canonical_error} frente a {}",
@@ -1040,14 +1100,59 @@ fn ensure_score_did_not_diverge(
     Ok(())
 }
 
+/// Las filas duplicadas se cuentan sobre vectores de bits: no hay frontera de
+/// coma flotante que pueda explicar una diferencia, así que la igualdad es
+/// exacta y sin exención.
+fn ensure_duplicate_rows_agree(incremental: u64, canonical: u64) -> Result<(), String> {
+    if incremental == canonical {
+        return Ok(());
+    }
+    Err(format!(
+        "la puntuación incremental cuenta {incremental} filas duplicadas y la canónica {canonical}: ese recuento no cuelga de ninguna frontera de coma flotante"
+    ))
+}
+
+/// La regla de signos de DTC-089 es discontinua en `D == 0.0` —«D=0
+/// incumple»—, de modo que una `D` exactamente nula en cualquiera de las dos
+/// aritméticas explica que la otra, desplazada un ULP, caiga al lado contrario.
+/// Cualquier otro desacuerdo de signo es un defecto.
+const fn sign_divergence_is_attributable(incremental: f64, canonical: f64) -> bool {
+    incremental == 0.0 || canonical == 0.0
+}
+
+/// La evaluabilidad es `factor_i > 0 && factor_j > 0`, de modo que un factor
+/// exactamente nulo —una marginal exactamente 0 o 1— es su frontera.
+fn evaluability_divergence_is_attributable(
+    canonical: &F5CanonicalPairVerdict,
+    incremental_factor_i: f64,
+    incremental_factor_j: f64,
+) -> bool {
+    canonical.factor_i == 0.0
+        || canonical.factor_j == 0.0
+        || incremental_factor_i == 0.0
+        || incremental_factor_j == 0.0
+}
+
+/// La tolerancia de bin es inclusiva, de modo que un error exactamente igual a
+/// `max_abs_error` es su frontera.
+fn bin_divergence_is_attributable(
+    incremental_error: f64,
+    canonical_error: f64,
+    definition: &LdBin,
+) -> bool {
+    incremental_error == definition.max_abs_error() || canonical_error == definition.max_abs_error()
+}
+
 /// Coste, consumo y puntuación final de un intento de una unidad.
 #[derive(Clone, Copy, Debug)]
 struct BlockSearchMeasure {
     proposals: u64,
     candidate_proposals: u64,
     accepted: u64,
-    row_visits: u64,
     pair_updates: u64,
+    loop_operations: u64,
+    max_rebuilds: u64,
+    max_rebuild_visits: u64,
 }
 
 #[expect(
@@ -1063,6 +1168,7 @@ fn refine_block<'a>(
     block: &mut F5BlockHaplotypes,
     attempt_index: u64,
     max_proposals: u64,
+    visits: &mut F5RowVisits,
 ) -> Result<(BlockSearchMeasure, BlockSearchState<'a>), Diagnostic> {
     let block_id = block.block_id().clone();
     let internal = |detail: String| -> Diagnostic {
@@ -1115,15 +1221,21 @@ fn refine_block<'a>(
     }
 
     // El veredicto solo puede calcularse sobre columnas canónicas.
+    // El medidor del intento recoge las sumas canónicas de la siembra y del
+    // propio bucle, y después las de la recomputación de columnas. La
+    // evaluación LD de cierre cuenta en el mismo, ya en `search_block`.
+    visits.add(state.row_visits.count());
     block
-        .refresh_realized_columns(weights)
+        .refresh_realized_columns(weights, visits)
         .map_err(|detail| internal(detail.to_owned()))?;
     let measure = BlockSearchMeasure {
         proposals,
         candidate_proposals,
         accepted,
-        row_visits: state.row_visits,
         pair_updates: state.pair_updates,
+        loop_operations: state.loop_operations,
+        max_rebuilds: state.max_rebuilds,
+        max_rebuild_visits: state.max_rebuild_visits,
     };
     Ok((measure, state))
 }
@@ -1278,14 +1390,44 @@ struct BlockSearchState<'a> {
     pairs: Vec<PairState>,
     bin_total: Vec<f64>,
     bin_count: Vec<u64>,
-    bin_total_backup: Vec<f64>,
-    bin_count_backup: Vec<u64>,
+    /// Error del bin; solo significa algo cuando `bin_count > 0`.
+    bin_error: Vec<f64>,
+    /// Si el bin está fuera de tolerancia; ídem.
+    bin_outside: Vec<bool>,
+    /// Bins que tienen al menos una pareja asignada. El conjunto es fijo
+    /// —las distancias no cambian— y su tamaño está acotado por el número de
+    /// parejas, `S*(S-1)/2`, aunque el perfil declare muchos más bins.
+    active_bins: Vec<u32>,
+    bins_outside: u64,
+    sum_r2_error: f64,
+    max_r2_error: f64,
+    /// Cuántos bins aplicables alcanzan `max_r2_error`. Cuando cae a cero el
+    /// máximo se ha perdido y hay que rehacerlo sobre los bins activos.
+    max_r2_count: u32,
+    applicable_bins: u64,
+    /// Bins que la propuesta en curso ha tocado, con su estado anterior.
+    touched_bins: Vec<(u32, f64, u64, f64, bool)>,
+    bin_is_touched: Vec<bool>,
     evaluable_pairs: u64,
     signs_failed: u64,
     duplicates: DuplicateRowIndex,
     current: ScoreTuple,
-    row_visits: u64,
+    /// Medidor de las sumas canónicas que la siembra de este estado pidió.
+    /// Vive en el estado, y no como préstamo del intento, para que cualquier
+    /// suma canónica que alguien añadiese dentro de un método tenga a mano el
+    /// medidor correcto: `refine_block` lo vuelca al del intento.
+    row_visits: F5RowVisits,
     pair_updates: u64,
+    /// Visitas elementales del bucle de propuestas: parejas rehechas, bins
+    /// reajustados, marginales recorridas y bytes de fila rehasheados. Es lo
+    /// que `f5-resource-accounting-v7` presupuesta como `Q*S_bound`.
+    loop_operations: u64,
+    /// Veces que hubo que rehacer el máximo de `r²` y bins visitados al
+    /// hacerlo. Separados de `loop_operations` porque su identidad
+    /// —`visitas = veces * bins activos`— es la que acredita que el rehacer
+    /// recorre los bins **activos** y no los `B` declarados.
+    max_rebuilds: u64,
+    max_rebuild_visits: u64,
     touched: Vec<(usize, PairState)>,
     row_a_backup: Vec<u8>,
     row_b_backup: Vec<u8>,
@@ -1313,7 +1455,7 @@ impl<'a> BlockSearchState<'a> {
         if weights.len() != block.matrix().haplotype_count() {
             return Err("los pesos no acompañan a la matriz del bloque".to_owned());
         }
-        let mut row_visits = 0_u64;
+        let mut row_visits = F5RowVisits::default();
         let mut marginals = Vec::with_capacity(site_count);
         let mut targets = Vec::with_capacity(site_count);
         let mut polarity_positive = Vec::with_capacity(site_count);
@@ -1386,8 +1528,22 @@ impl<'a> BlockSearchState<'a> {
             }
         }
 
-        let bin_total = accumulators.iter().map(|total| total.value).collect();
-        let bin_count = accumulators.iter().map(|total| total.count).collect();
+        let bin_total: Vec<f64> = accumulators.iter().map(|total| total.value).collect();
+        let bin_count: Vec<u64> = accumulators.iter().map(|total| total.count).collect();
+        // Bins con al menos una pareja asignada. Las distancias no cambian
+        // durante la búsqueda, así que este conjunto es fijo: es lo que
+        // permite que ninguna propuesta dependa de `B`.
+        let mut named = vec![false; bins.len()];
+        for pair in &pairs {
+            if pair.bin != NO_BIN {
+                named[pair.bin as usize] = true;
+            }
+        }
+        let active_bins: Vec<u32> = named
+            .iter()
+            .enumerate()
+            .filter_map(|(index, used)| used.then_some(index as u32))
+            .collect();
         let mut duplicates = DuplicateRowIndex::new(fnv1a_64);
         for haplotype in 0..block.matrix().haplotype_count() {
             let row = block
@@ -1407,10 +1563,18 @@ impl<'a> BlockSearchState<'a> {
             marginal_tolerance: block.marginal_max_abs_error(),
             marginals,
             pairs,
-            bin_total_backup: vec![0.0; bins.len()],
-            bin_count_backup: vec![0; bins.len()],
             bin_total,
             bin_count,
+            bin_error: vec![0.0; bins.len()],
+            bin_outside: vec![false; bins.len()],
+            active_bins,
+            bins_outside: 0,
+            sum_r2_error: 0.0,
+            max_r2_error: 0.0,
+            max_r2_count: 0,
+            applicable_bins: 0,
+            touched_bins: Vec::with_capacity(2 * site_count),
+            bin_is_touched: vec![false; bins.len()],
             evaluable_pairs,
             signs_failed,
             duplicates,
@@ -1424,39 +1588,28 @@ impl<'a> BlockSearchState<'a> {
             },
             row_visits,
             pair_updates: 0,
+            loop_operations: 0,
+            max_rebuilds: 0,
+            max_rebuild_visits: 0,
             touched: Vec::with_capacity(2 * site_count),
             row_a_backup: vec![0; bytes_per_row],
             row_b_backup: vec![0; bytes_per_row],
             row_scratch: vec![0; bytes_per_row],
         };
-        state.current = state.tuple()?;
+        state.settle_all_bins()?;
+        state.current = state.tuple();
         Ok(state)
     }
 
     /// Los tres agregados de bin, escritos como los escribe `evaluate_block`:
     /// recorrido en orden de bin, tolerancia inclusiva y Neumaier para la suma.
-    fn tuple(&self) -> Result<ScoreTuple, String> {
-        let mut bins_outside = 0_u64;
-        let mut max_r2_error = 0.0_f64;
-        let mut compensated = NeumaierSum::default();
-        let mut sum_r2_error = 0.0_f64;
-        for (index, definition) in self.bins.iter().enumerate() {
-            if self.bin_count[index] == 0 {
-                continue;
-            }
-            let mean = self.bin_total[index] / self.bin_count[index] as f64;
-            if !mean.is_finite() {
-                return Err(format!("la media del bin {index} no es finita"));
-            }
-            let error = f5_bin_abs_error(mean, definition);
-            if f5_bin_is_outside(error, definition) {
-                bins_outside += 1;
-            }
-            if error > max_r2_error {
-                max_r2_error = error;
-            }
-            sum_r2_error = compensated.add(error).map_err(str::to_owned)?;
-        }
+    /// Los seis campos numéricos, sin recorrer los `B` bins.
+    ///
+    /// `bins_outside`, `max_r2_error` y `sum_r2_error` se mantienen por
+    /// incrementos sobre los bins que cada propuesta toca; solo
+    /// `max_marginal_error` recorre las `S` marginales, que es el término que
+    /// `f5-resource-accounting-v7` concede por propuesta.
+    fn tuple(&self) -> ScoreTuple {
         let mut max_marginal_error = 0.0_f64;
         for (realized, target) in self.marginals.iter().zip(self.targets.iter()) {
             let error = (realized - target).abs();
@@ -1464,14 +1617,178 @@ impl<'a> BlockSearchState<'a> {
                 max_marginal_error = error;
             }
         }
-        Ok(ScoreTuple {
+        ScoreTuple {
             duplicate_rows: self.duplicates.duplicates,
-            bins_outside,
+            bins_outside: self.bins_outside,
             signs_failed: self.signs_failed,
-            max_r2_error,
-            sum_r2_error,
+            max_r2_error: self.max_r2_error,
+            sum_r2_error: self.sum_r2_error,
             max_marginal_error,
-        })
+        }
+    }
+
+    /// Rehace los tres agregados de bin desde cero sobre los bins **activos**.
+    ///
+    /// Es la siembra, y también la salida de emergencia cuando el máximo se
+    /// pierde. Reproduce el orden y el acumulador de `evaluate_block`: recorre
+    /// los bins en orden creciente y suma los errores con Neumaier.
+    fn settle_all_bins(&mut self) -> Result<(), String> {
+        self.bins_outside = 0;
+        self.applicable_bins = 0;
+        self.max_r2_error = 0.0;
+        self.max_r2_count = 0;
+        let mut compensated = NeumaierSum::default();
+        let mut sum_r2_error = 0.0_f64;
+        for index in 0..self.bins.len() {
+            if self.bin_count[index] == 0 {
+                continue;
+            }
+            let error = self.settled_bin_error(index)?;
+            self.applicable_bins += 1;
+            if self.bin_outside[index] {
+                self.bins_outside += 1;
+            }
+            if error > self.max_r2_error {
+                self.max_r2_error = error;
+                self.max_r2_count = 1;
+            } else if error == self.max_r2_error {
+                self.max_r2_count += 1;
+            }
+            sum_r2_error = compensated.add(error).map_err(str::to_owned)?;
+        }
+        self.sum_r2_error = sum_r2_error;
+        Ok(())
+    }
+
+    /// Recalcula `bin_error` y `bin_outside` de un bin aplicable.
+    fn settled_bin_error(&mut self, index: usize) -> Result<f64, String> {
+        let mean = self.bin_total[index] / self.bin_count[index] as f64;
+        if !mean.is_finite() {
+            return Err(format!("la media del bin {index} no es finita"));
+        }
+        let error = f5_bin_abs_error(mean, &self.bins[index]);
+        self.bin_error[index] = error;
+        self.bin_outside[index] = f5_bin_is_outside(error, &self.bins[index]);
+        Ok(error)
+    }
+
+    /// Marca un bin como tocado por la propuesta en curso y guarda su estado.
+    fn mark_bin_touched(&mut self, index: usize) {
+        if self.bin_is_touched[index] {
+            return;
+        }
+        self.bin_is_touched[index] = true;
+        self.touched_bins.push((
+            index as u32,
+            self.bin_total[index],
+            self.bin_count[index],
+            self.bin_error[index],
+            self.bin_outside[index],
+        ));
+    }
+
+    /// Reajusta los tres agregados con los bins que la propuesta tocó.
+    ///
+    /// Dos fases, y en este orden: primero retira los valores anteriores de
+    /// **todos** los bins tocados y después inserta los nuevos. Hacerlo bin a
+    /// bin rompería el recuento del máximo, porque un bin insertado con el
+    /// máximo viejo quedaría olvidado al llegar otro mayor.
+    fn settle_touched_bins(&mut self) -> Result<(), String> {
+        for position in 0..self.touched_bins.len() {
+            // El cargo se paga **dentro** del bucle: escrito fuera sería otra
+            // identidad a mano, y un recorrido que cambiase de longitud no se
+            // vería en la cifra publicada.
+            self.loop_operations += 1;
+            let (_, _, previous_count, previous_error, previous_outside) =
+                self.touched_bins[position];
+            if previous_count == 0 {
+                continue;
+            }
+            self.applicable_bins -= 1;
+            if previous_outside {
+                self.bins_outside -= 1;
+            }
+            if previous_error == self.max_r2_error && self.max_r2_count > 0 {
+                self.max_r2_count -= 1;
+            }
+            self.sum_r2_error -= previous_error;
+        }
+        for position in 0..self.touched_bins.len() {
+            self.loop_operations += 1;
+            let index = self.touched_bins[position].0 as usize;
+            if self.bin_count[index] == 0 {
+                continue;
+            }
+            let error = self.settled_bin_error(index)?;
+            self.applicable_bins += 1;
+            if self.bin_outside[index] {
+                self.bins_outside += 1;
+            }
+            if error > self.max_r2_error {
+                self.max_r2_error = error;
+                self.max_r2_count = 1;
+            } else if error == self.max_r2_error {
+                self.max_r2_count += 1;
+            }
+            self.sum_r2_error += error;
+        }
+        // El máximo lo ostentaban solo bins tocados y todos bajaron: es el
+        // único caso que obliga a rehacerlo, y se rehace sobre los bins
+        // **activos**, cuyo número está acotado por `S*(S-1)/2` —el de parejas
+        // intrabloque— y no por los `B` que el perfil declare. Cuando
+        // `B <= S*(S-1)/2` los activos pueden llegar a ser todos; lo que el
+        // bucle de propuestas nunca hace es depender de `B`.
+        if self.max_r2_count == 0 && self.applicable_bins > 0 {
+            self.rebuild_max_from_active_bins();
+        } else if self.applicable_bins == 0 {
+            self.max_r2_error = 0.0;
+            self.max_r2_count = 0;
+        }
+        Ok(())
+    }
+
+    fn rebuild_max_from_active_bins(&mut self) {
+        self.max_rebuilds += 1;
+        self.max_r2_error = 0.0;
+        self.max_r2_count = 0;
+        for position in 0..self.active_bins.len() {
+            self.loop_operations += 1;
+            self.max_rebuild_visits += 1;
+            let index = self.active_bins[position] as usize;
+            if self.bin_count[index] == 0 {
+                continue;
+            }
+            let error = self.bin_error[index];
+            if error > self.max_r2_error {
+                self.max_r2_error = error;
+                self.max_r2_count = 1;
+            } else if error == self.max_r2_error {
+                self.max_r2_count += 1;
+            }
+        }
+    }
+
+    /// Deshace los bins tocados y limpia las marcas de la propuesta.
+    fn rollback_touched_bins(&mut self) {
+        for position in (0..self.touched_bins.len()).rev() {
+            self.loop_operations += 1;
+            let (index, total, count, error, outside) = self.touched_bins[position];
+            let index = index as usize;
+            self.bin_total[index] = total;
+            self.bin_count[index] = count;
+            self.bin_error[index] = error;
+            self.bin_outside[index] = outside;
+            self.bin_is_touched[index] = false;
+        }
+        self.touched_bins.clear();
+    }
+
+    /// Limpia las marcas conservando el estado, tras aceptar una propuesta.
+    fn commit_touched_bins(&mut self) {
+        for position in 0..self.touched_bins.len() {
+            self.bin_is_touched[self.touched_bins[position].0 as usize] = false;
+        }
+        self.touched_bins.clear();
     }
 
     /// Terminación de DTC-089 sobre el estado incremental.
@@ -1505,11 +1822,17 @@ impl<'a> BlockSearchState<'a> {
             .allele(row_a, site_i)
             .ok_or_else(|| "la propuesta nombra una casilla fuera de la matriz".to_owned())?;
 
-        self.bin_total_backup.copy_from_slice(&self.bin_total);
-        self.bin_count_backup.copy_from_slice(&self.bin_count);
+        // Nada de copiar los dos vectores de bin enteros: la propuesta toca a
+        // lo sumo `2S-3` bins distintos y solo esos se respaldan, con su
+        // estado anterior, dentro de `touched_bins`.
         let previous = self.current;
         let previous_signs_failed = self.signs_failed;
         let previous_evaluable_pairs = self.evaluable_pairs;
+        let previous_bins_outside = self.bins_outside;
+        let previous_sum_r2_error = self.sum_r2_error;
+        let previous_max_r2_error = self.max_r2_error;
+        let previous_max_r2_count = self.max_r2_count;
+        let previous_applicable_bins = self.applicable_bins;
         let previous_marginal_i = self.marginals[site_i];
         let previous_marginal_j = self.marginals[site_j];
         self.touched.clear();
@@ -1528,10 +1851,13 @@ impl<'a> BlockSearchState<'a> {
 
         self.apply_increments(matrix, proposal, alt_ai)?;
 
-        let candidate = self.tuple()?;
+        self.settle_touched_bins()?;
+        self.loop_operations += self.site_count as u64 + 8 * self.row_scratch.len() as u64 + 4;
+        let candidate = self.tuple();
         let accepted = proposal_is_accepted(&candidate, &previous, alt_ai);
 
         if accepted {
+            self.commit_touched_bins();
             self.current = candidate;
             return Ok(ProposalOutcome::Accepted);
         }
@@ -1554,10 +1880,14 @@ impl<'a> BlockSearchState<'a> {
         }
         self.marginals[site_i] = previous_marginal_i;
         self.marginals[site_j] = previous_marginal_j;
-        self.bin_total.copy_from_slice(&self.bin_total_backup);
-        self.bin_count.copy_from_slice(&self.bin_count_backup);
+        self.rollback_touched_bins();
         self.signs_failed = previous_signs_failed;
         self.evaluable_pairs = previous_evaluable_pairs;
+        self.bins_outside = previous_bins_outside;
+        self.sum_r2_error = previous_sum_r2_error;
+        self.max_r2_error = previous_max_r2_error;
+        self.max_r2_count = previous_max_r2_count;
+        self.applicable_bins = previous_applicable_bins;
         self.current = previous;
         Ok(ProposalOutcome::Rejected)
     }
@@ -1647,6 +1977,7 @@ impl<'a> BlockSearchState<'a> {
         };
         let index = pair_index(i, j, self.site_count);
         self.pair_updates += 1;
+        self.loop_operations += 1;
         let previous = self.pairs[index];
         self.touched.push((index, previous));
         if previous.evaluable {
@@ -1662,6 +1993,7 @@ impl<'a> BlockSearchState<'a> {
                 })?;
             }
             let bin = previous.bin as usize;
+            self.mark_bin_touched(bin);
             self.bin_total[bin] -= previous.r_squared;
             self.bin_count[bin] = self.bin_count[bin]
                 .checked_sub(1)
@@ -1687,6 +2019,7 @@ impl<'a> BlockSearchState<'a> {
                 self.signs_failed += 1;
             }
             let bin = updated.bin as usize;
+            self.mark_bin_touched(bin);
             self.bin_total[bin] += updated.r_squared;
             self.bin_count[bin] += 1;
         }
@@ -1892,11 +2225,15 @@ impl DuplicateRowIndex {
 #[cfg(test)]
 mod tests {
     use super::{
-        DuplicateRowIndex, ScoreTuple, SwapProposal, UnitOrderKey, block_has_terminated,
-        draw_proposal, fnv1a_64, open_swap_scope, order_key_is_better, pair_index,
-        proposal_is_accepted,
+        BlockSearchState, DuplicateRowIndex, NO_BIN, PairState, ScoreTuple, SwapProposal,
+        UnitOrderKey, bin_divergence_is_attributable, block_has_terminated, draw_proposal,
+        ensure_duplicate_rows_agree, ensure_score_did_not_diverge,
+        evaluability_divergence_is_attributable, fnv1a_64, open_swap_scope, order_key_is_better,
+        pair_index, proposal_is_accepted, sign_divergence_is_attributable,
     };
     use crate::f5_haplotypes::F5AlleleMatrix;
+    use crate::f5_ld::{F5BlockLdEvaluation, F5CanonicalPairVerdict};
+    use crate::f5_profile::LdBin;
     use crate::identity::{F5BlockId, PopulationId, ScenarioId};
     use crate::randomness::{RandomWordSource, RootSeed};
     use sha2::{Digest, Sha256};
@@ -1979,12 +2316,14 @@ mod tests {
     /// `b < a` no se incrementa y la pareja se ordena después.
     #[test]
     fn a_proposal_orders_each_pair_after_incrementing() {
-        let mut rng = ScriptedWords::new(vec![6, 2, 7, 7]);
+        // H = 8, S = 8: `a=6`, `b=2` con `b < a`, de modo que `b` no se
+        // incrementa y la ordenación deja `(2, 6)`. `i=7`, `j=0` con `j < i`,
+        // así que tampoco se incrementa y la ordenación deja `(0, 7)`.
+        let mut rng = ScriptedWords::new(vec![6, 2, 7, 0]);
         let proposal = draw_proposal(&mut rng, 8, 8).expect("propuesta");
-        // `b=2 < a=6` no se incrementa; ordenado da (2, 6).
-        // `j=7 >= i=7` se incrementa a 8... pero `j in 0..7` nunca vale 7.
-        assert_eq!(proposal.row_a, 2);
-        assert_eq!(proposal.row_b, 6);
+        assert_eq!((proposal.row_a, proposal.row_b), (2, 6));
+        assert_eq!((proposal.site_i, proposal.site_j), (0, 7));
+        assert_eq!(rng.consumed, 4);
     }
 
     /// El sorteo nunca produce `a == b` ni `i == j`.
@@ -2253,6 +2592,317 @@ mod tests {
             baseline,
             first_word("other", POPULATION, BLOCK, 0),
             "el ámbito ignora el escenario"
+        );
+    }
+
+    /// Estado mínimo para ejercitar la guarda: dos sitios, una pareja, sin
+    /// bins. Los campos se rellenan a mano porque la guarda es lo que se
+    /// prueba, no la siembra.
+    /// Bin único del estado de prueba, con tolerancia `0,05`.
+    fn guard_bin() -> LdBin {
+        LdBin::for_test(1, 1, 0.25, 0.05)
+    }
+
+    /// Estado mínimo con **un** bin, para ejercitar las ramas de bin.
+    ///
+    /// `bin_error` es el error que la puntuación incremental cree tener;
+    /// `applicable` dice si el bin tiene alguna pareja para ella.
+    fn state_for_bin_guard(bin_error: f64, applicable: bool) -> BlockSearchState<'static> {
+        let mut state = state_for_guard(true, 0.25, 0);
+        state.bins = Box::leak(Box::new([guard_bin()]));
+        state.bin_total = vec![bin_error + 0.25];
+        state.bin_count = vec![u64::from(applicable)];
+        state.bin_error = vec![bin_error];
+        state.bin_outside = vec![bin_error > 0.05];
+        state.bin_is_touched = vec![false];
+        state.active_bins = vec![0];
+        state
+    }
+
+    fn state_for_guard(sign_ok: bool, d: f64, duplicate_rows: u64) -> BlockSearchState<'static> {
+        const WEIGHTS: [f64; 2] = [0.5, 0.5];
+        const BINS: [LdBin; 0] = [];
+        let mut duplicates = DuplicateRowIndex::new(fnv1a_64);
+        for _ in 0..duplicate_rows {
+            duplicates.insert(b"\x01");
+        }
+        duplicates.insert(b"\x01");
+        BlockSearchState {
+            weights: &WEIGHTS,
+            bins: &BINS,
+            site_count: 2,
+            polarity_positive: vec![true, true],
+            targets: vec![0.5, 0.5],
+            marginal_tolerance: 0.5,
+            marginals: vec![0.5, 0.5],
+            pairs: vec![PairState {
+                joint: 0.5,
+                d,
+                r_squared: 1.0,
+                evaluable: true,
+                sign_ok,
+                bin: NO_BIN,
+            }],
+            bin_total: Vec::new(),
+            bin_count: Vec::new(),
+            bin_error: Vec::new(),
+            bin_outside: Vec::new(),
+            active_bins: Vec::new(),
+            bins_outside: 0,
+            sum_r2_error: 0.0,
+            max_r2_error: 0.0,
+            max_r2_count: 0,
+            applicable_bins: 0,
+            touched_bins: Vec::new(),
+            bin_is_touched: Vec::new(),
+            evaluable_pairs: 1,
+            signs_failed: u64::from(!sign_ok),
+            current: ScoreTuple {
+                duplicate_rows,
+                bins_outside: 0,
+                signs_failed: u64::from(!sign_ok),
+                max_r2_error: 0.0,
+                sum_r2_error: 0.0,
+                max_marginal_error: 0.0,
+            },
+            duplicates,
+            row_visits: crate::f5_marginals::F5RowVisits::default(),
+            pair_updates: 0,
+            loop_operations: 0,
+            max_rebuilds: 0,
+            max_rebuild_visits: 0,
+            touched: Vec::new(),
+            row_a_backup: vec![0],
+            row_b_backup: vec![0],
+            row_scratch: vec![0],
+        }
+    }
+
+    /// La guarda de divergencia **existe y dispara**.
+    ///
+    /// Las demás pruebas comprueban que no salta; esta exige que salte cuando
+    /// debe. Si `ensure_score_did_not_diverge` devolviera `Ok(())` sin mirar
+    /// nada, toda la atribución por frontera sería código sin red.
+    #[test]
+    fn the_divergence_guard_reports_what_no_boundary_explains() {
+        let scenario_id = ScenarioId::parse("scenario", "test").expect("escenario");
+        let population_id = PopulationId::parse("P1", "test").expect("población");
+        let block_id = F5BlockId::parse("BLK_Q3K5H3MRNH7HHOJZ4RZWGYYSTY", "test").expect("bloque");
+        let verdict = |d: f64, sign_ok: bool| {
+            vec![F5CanonicalPairVerdict {
+                d,
+                factor_i: 0.25,
+                factor_j: 0.25,
+                evaluable: true,
+                sign_ok,
+            }]
+        };
+        let canonical = |signs_failed: u64, duplicate_rows: u64| ScoreTuple {
+            duplicate_rows,
+            bins_outside: 0,
+            signs_failed,
+            max_r2_error: 0.0,
+            sum_r2_error: 0.0,
+            max_marginal_error: 0.0,
+        };
+        let evaluation = |signs_failed: u64| {
+            F5BlockLdEvaluation::for_test(
+                population_id.clone(),
+                block_id.clone(),
+                1,
+                signs_failed,
+                0,
+            )
+        };
+
+        // Acuerdo: la guarda calla.
+        let state = state_for_guard(true, 0.25, 0);
+        ensure_score_did_not_diverge(
+            &scenario_id,
+            &state,
+            &verdict(0.25, true),
+            &canonical(0, 0),
+            &evaluation(0),
+        )
+        .expect("sin divergencia la guarda no debe disparar");
+
+        // Signo divergente con las dos `D` no nulas: no hay frontera que lo
+        // explique.
+        let state = state_for_guard(true, 0.25, 0);
+        let error = ensure_score_did_not_diverge(
+            &scenario_id,
+            &state,
+            &verdict(-0.25, false),
+            &canonical(1, 0),
+            &evaluation(1),
+        )
+        .expect_err("la guarda debe reportar un signo divergente sin frontera");
+        assert_eq!(error.code(), "GPS-INTERNAL-101");
+        assert!(error.context()["detail"].contains("regla de signos"));
+
+        // El mismo desacuerdo con `D` canónica exactamente nula sí se exime.
+        let state = state_for_guard(true, 0.25, 0);
+        ensure_score_did_not_diverge(
+            &scenario_id,
+            &state,
+            &verdict(0.0, false),
+            &canonical(1, 0),
+            &evaluation(1),
+        )
+        .expect("un empate exacto en D=0 explica la divergencia");
+
+        // Filas duplicadas: sin exención posible.
+        let state = state_for_guard(true, 0.25, 2);
+        let error = ensure_score_did_not_diverge(
+            &scenario_id,
+            &state,
+            &verdict(0.25, true),
+            &canonical(0, 3),
+            &evaluation(0),
+        )
+        .expect_err("la guarda debe reportar una divergencia de filas duplicadas");
+        assert_eq!(error.code(), "GPS-INTERNAL-101");
+        assert!(error.context()["detail"].contains("filas duplicadas"));
+
+        // Evaluabilidad divergente sin ningún factor exactamente nulo.
+        let state = state_for_guard(true, 0.25, 0);
+        let not_evaluable = vec![F5CanonicalPairVerdict {
+            d: 0.25,
+            factor_i: 0.25,
+            factor_j: 0.25,
+            evaluable: false,
+            sign_ok: false,
+        }];
+        let error = ensure_score_did_not_diverge(
+            &scenario_id,
+            &state,
+            &not_evaluable,
+            &canonical(0, 0),
+            &evaluation(0),
+        )
+        .expect_err("la guarda debe reportar una evaluabilidad divergente");
+        assert_eq!(error.code(), "GPS-INTERNAL-101");
+        assert!(error.context()["detail"].contains("evaluable"));
+        // Con un factor canónico exactamente nulo sí se exime.
+        let at_the_boundary = vec![F5CanonicalPairVerdict {
+            factor_i: 0.0,
+            ..not_evaluable[0]
+        }];
+        ensure_score_did_not_diverge(
+            &scenario_id,
+            &state,
+            &at_the_boundary,
+            &canonical(0, 0),
+            &evaluation(0),
+        )
+        .expect("un factor exactamente nulo explica la divergencia");
+
+        // Bin fuera de tolerancia para una aritmética y dentro para la otra,
+        // con los dos errores lejos de la tolerancia.
+        let state = state_for_bin_guard(0.4, true);
+        let mut evaluated =
+            F5BlockLdEvaluation::for_test(population_id.clone(), block_id.clone(), 1, 0, 0);
+        evaluated.push_bin_for_test(guard_bin(), 1, 0.3, 0.01);
+        let error = ensure_score_did_not_diverge(
+            &scenario_id,
+            &state,
+            &verdict(0.25, true),
+            &canonical(0, 0),
+            &evaluated,
+        )
+        .expect_err("la guarda debe reportar un bin divergente lejos de la tolerancia");
+        assert_eq!(error.code(), "GPS-INTERNAL-101");
+        assert!(error.context()["detail"].contains("fuera de tolerancia"));
+
+        // El mismo desacuerdo con el error canónico justo en la tolerancia sí
+        // se exime.
+        let mut at_tolerance =
+            F5BlockLdEvaluation::for_test(population_id.clone(), block_id.clone(), 1, 0, 0);
+        at_tolerance.push_bin_for_test(guard_bin(), 1, 0.3, 0.05);
+        ensure_score_did_not_diverge(
+            &scenario_id,
+            &state,
+            &verdict(0.25, true),
+            &canonical(0, 0),
+            &at_tolerance,
+        )
+        .expect("un error justo en la tolerancia explica la divergencia");
+
+        // Aplicabilidad de bin: para una aritmética tiene parejas y para la
+        // otra no.
+        let state = state_for_bin_guard(0.4, false);
+        let mut applicable =
+            F5BlockLdEvaluation::for_test(population_id.clone(), block_id.clone(), 1, 0, 0);
+        applicable.push_bin_for_test(guard_bin(), 1, 0.3, 0.01);
+        let error = ensure_score_did_not_diverge(
+            &scenario_id,
+            &state,
+            &verdict(0.25, true),
+            &canonical(0, 0),
+            &applicable,
+        )
+        .expect_err("la guarda debe reportar una aplicabilidad divergente");
+        assert_eq!(error.code(), "GPS-INTERNAL-101");
+        assert!(error.context()["detail"].contains("aplicable"));
+    }
+
+    /// Las tres reglas de atribución eximen **solo** en su frontera exacta.
+    ///
+    /// Son la red de la guarda de divergencia: si una de ellas devolviera
+    /// siempre `true`, cualquier defecto quedaría justificado y
+    /// `GPS-INTERNAL-101` no se emitiría nunca.
+    #[test]
+    fn a_divergence_is_attributable_only_at_the_exact_boundary() {
+        // Filas duplicadas: sin exención posible.
+        assert!(ensure_duplicate_rows_agree(3, 3).is_ok());
+        assert!(
+            ensure_duplicate_rows_agree(3, 4).is_err(),
+            "una diferencia de filas duplicadas se dio por explicada"
+        );
+        assert!(ensure_duplicate_rows_agree(0, 1).is_err());
+
+        // Signos: la regla se parte en `D == 0.0`.
+        assert!(sign_divergence_is_attributable(0.0, -0.25));
+        assert!(sign_divergence_is_attributable(0.25, 0.0));
+        assert!(
+            !sign_divergence_is_attributable(0.25, -0.25),
+            "una divergencia de signo con las dos D no nulas se dio por explicada"
+        );
+        assert!(!sign_divergence_is_attributable(
+            f64::MIN_POSITIVE,
+            -f64::MIN_POSITIVE
+        ));
+
+        // Evaluabilidad: la regla se parte en `factor == 0.0`.
+        let verdict = |factor_i: f64, factor_j: f64| F5CanonicalPairVerdict {
+            d: 0.5,
+            factor_i,
+            factor_j,
+            evaluable: factor_i > 0.0 && factor_j > 0.0,
+            sign_ok: true,
+        };
+        assert!(evaluability_divergence_is_attributable(
+            &verdict(0.0, 0.25),
+            0.25,
+            0.25
+        ));
+        assert!(evaluability_divergence_is_attributable(
+            &verdict(0.25, 0.25),
+            0.0,
+            0.25
+        ));
+        assert!(
+            !evaluability_divergence_is_attributable(&verdict(0.25, 0.25), 0.25, 0.25),
+            "una divergencia de evaluabilidad sin ningún factor nulo se dio por explicada"
+        );
+
+        // Bins: la regla se parte en `error == max_abs_error`.
+        let definition = LdBin::for_test(1, 4, 0.25, 0.05);
+        assert!(bin_divergence_is_attributable(0.05, 0.2, &definition));
+        assert!(bin_divergence_is_attributable(0.2, 0.05, &definition));
+        assert!(
+            !bin_divergence_is_attributable(0.049_999_999, 0.050_000_001, &definition),
+            "una divergencia de bin lejos de la tolerancia se dio por explicada"
         );
     }
 

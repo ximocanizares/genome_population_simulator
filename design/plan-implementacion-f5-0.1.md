@@ -735,25 +735,69 @@ identificador del índice de copia.
   - Coste medido, por bloque×subpoblación×intento y con `B` bins del perfil:
     la siembra canónica cuesta `H*S + H*S*(S-1)/2` visitas de fila; cada
     propuesta candidata cuesta dos marginales movidas en `O(1)`, `2S-3` parejas
-    actualizadas, dos filas rehasheadas y un recorrido de los `B` bins, **sin
-    ninguna visita de fila**; una propuesta no candidata cuesta cuatro enteros
-    acotados y nada más; el cierre cuesta `O(H*S)` para recomputar las
-    columnas, `O(H*S²)` para la evaluación LD —que de paso recoge los
-    veredictos de la guarda—, `O(S²+B)` para la atribución y `O(H*S/8)` para el
-    desempate lexicográfico. El total es `O(H*S² + Q*(S+B))`, que **cumple** la
-    cota de DTC-089: el contrato escribe `O(H*S² + Q*S)` porque `B` es una
-    propiedad del perfil y no de la búsqueda, y el término se declara en lugar
-    de esconderse.
-    La medida no es una estimación ni una identidad escrita a mano: el contador
-    de visitas de fila vive **dentro** de `site_marginal` y `joint_marginal`, de
-    modo que cualquier suma canónica lo incrementa venga de donde venga, y
-    `pair_updates` se cuenta dentro de `refresh_pair`. La batería exige las
-    identidades exactas `row_visits = H*(S + S*(S-1)/2)` —invariante frente al
-    presupuesto de propuestas— y `pair_updates = candidate_proposals*(2S-3)`;
-    insertar un recorrido canónico `O(H*S)` en el bucle de propuestas rompe la
-    primera. La memoria añadida son 32 bytes por pareja intrabloque más los 32
-    del veredicto canónico, dentro de los `192*S*(S-1)/2` que
+    actualizadas, **solo los bins que esas parejas tocan**, `S` marginales
+    recorridas y dos filas rehasheadas; una propuesta no candidata cuesta
+    cuatro enteros acotados y nada más; el cierre cuesta `O(H*S)` para
+    recomputar las columnas, `O(H*S²)` para la evaluación LD —que de paso
+    recoge los veredictos de la guarda—, `O(S²+B)` para la atribución y
+    `O(H*S/8)` para el desempate lexicográfico. El total es
+    `O(H*S² + Q*S + A*B)`, con `A` los intentos: el término `A*B` es la siembra
+    de los agregados de bin, que se hace una vez por intento y **no** dentro del
+    bucle. El bucle cumple la cota `O(Q*S)` de DTC-089.
+    La corrección que lo hizo cierto llegó tras la revisión de cierre: el bucle
+    respaldaba los dos vectores de bin **enteros** por propuesta y rehacía los
+    tres agregados sobre los `B` bins, de modo que el coste crecía como
+    `B/S_bound` sin cota. Con un perfil legal de resolución por par de bases
+    —REQ-EVO-75 exige bins contiguos de 1 a `Lmax-1`— y un `gap_min` grande
+    frente a `Lmax`, un bloque de dos sitios con 255 bins llegó a costar 62
+    veces el presupuesto sellado de la admisión. Ahora `bins_outside`,
+    `sum_r2_error` y `max_r2_error` se mantienen por incrementos sobre los bins
+    tocados, y solo esos se respaldan. `max_r2_error` es un máximo y no admite
+    mantenimiento por incrementos cuando el bin que lo ostentaba baja: se
+    resuelve con el recuento de bins que alcanzan el máximo, y cuando cae a
+    cero —el único caso que obliga a rehacerlo— se rehace sobre los bins
+    **activos**, los que tienen alguna pareja asignada, cuyo conjunto es fijo
+    porque las distancias no cambian y cuyo tamaño está acotado por
+    `S*(S-1)/2`. Lo cierto, y es lo que importa, es que **el bucle de propuestas
+    no depende de `B`**: cuando `B <= S*(S-1)/2` los bins activos pueden llegar
+    a ser todos, y la siembra sí los recorre una vez por intento. La batería lo
+    fija por dos vías: dos fixtures de la misma geometría con uno o `L-1` bins,
+    cuyo recuento de visitas elementales del bucle debe ser **idéntico**; y la
+    identidad exacta `max_rebuild_visits = max_rebuilds * bins_activos`, con los
+    bins activos calculados por la propia prueba desde el layout y el perfil.
+    La medida no es una estimación: `pair_updates` se cuenta dentro de
+    `refresh_pair`, `loop_operations` cuenta las visitas elementales del bucle
+    y `row_visits` mide las **tres** sumas canónicas del intento —siembra,
+    recomputación de columnas y evaluación LD de cierre— en un único medidor.
+    La batería exige las identidades exactas
+    `row_visits = 2*H*(S + S*(S-1)/2) + H*S + H`, que se simplifica a
+    `H*(S+1)²` y es **invariante frente al presupuesto de propuestas**, y
+    `pair_updates = candidate_proposals*(2S-3)`, más la cota declarada
+    `loop_operations <= Q*(24 + 8*S_bound)`, que escribe la **forma** del coste
+    —una constante por propuesta más un término lineal en `S`— en lugar de un
+    múltiplo del presupuesto grueso de v7. Los cuatro bucles que reajustan bins
+    cargan su unidad **dentro** de la iteración, no en una línea escrita junto
+    al bucle: escrita fuera sería otra identidad a mano y un recorrido que
+    cambiase de longitud no se vería en la cifra, que es exactamente el defecto
+    que la revisión de cierre encontró y que esta corrección cierra.
+    Lo que `row_visits` **no** acredita: mide las sumas canónicas que pasan por
+    `site_marginal`, `joint_marginal` y `refresh_realized_columns` con el
+    medidor que se les pasa. Un recorrido de las H filas escrito a mano, o uno
+    que declare su propio medidor, queda fuera de la cifra y la batería no lo
+    vería. La afirmación anterior —«cualquier suma canónica lo incrementa venga
+    de donde venga»— era falsa y se ha retirado: el medidor vive ahora en el
+    estado de la búsqueda, de modo que una suma añadida dentro de un método
+    tiene a mano el correcto y sí rompe la identidad, pero eso es una
+    probabilidad, no una garantía.
+    La memoria añadida son 32 bytes por pareja intrabloque más los 32 del
+    veredicto canónico, dentro de los `192*S*(S-1)/2` que
     `f5-resource-accounting-v7` ya presupuesta.
+  - Las cotas de dimensión las impone cada cual en su sitio, y la búsqueda no
+    las duplica: `H` fuera de `2..=4096` lo rechaza el lector del perfil con
+    `GPS-FMT-101`, y `site_bound_per_block > 4096` o
+    `H*site_bound_per_block > max_haplotype_cells` los rechaza la admisión
+    sellada con `GPS-RES-101`. Esa cota domina el producto exacto del layout,
+    de modo que una comprobación aquí sería una rama inalcanzable.
   - M-2 de la revisión queda **cerrado sin cambiar el código**: los agregados
     de bin se mantienen con `+=`/`-=` planos sobre un total sembrado con
     Neumaier, y DTC-089 avala explícitamente esas actualizaciones incrementales
@@ -777,17 +821,52 @@ identificador del índice de copia.
     la regla compartida de tolerancia de bin; `src/f5_profile.rs` suma un
     constructor `LdBin::for_test` bajo `cfg(test)`. Ningún cambio deshace
     trabajo previo.
-  - Discriminación de la batería, medida contra ocho variantes defectuosas:
+  - Discriminación de la batería, medida contra doce variantes defectuosas:
     intento global todo-o-nada con 16 unidades (2 pruebas), recorrido canónico
-    `O(H*S)` dentro de la propuesta (3), `p_hat_j` obsoleta (4, con
-    `GPS-INTERNAL-101` desde la guarda), `p_hat_i` obsoleta (4), signo invertido
-    en el incremento de la conjunta (14), pareja `(i,j)` sin rehacer (6),
-    séptimo campo comparado por digest (2 unitarias) y ámbito RNG con índice
-    constante, tanto en el ayudante (1 unitaria + 1 de integración) como en el
-    llamador (1). Ninguna pasa desapercibida. Los tres campos instrumentales del
-    registro (`candidate_proposals`, `row_visits`, `pair_updates`) son `pub`
-    porque la batería vive en un crate aparte; no tienen destino en ningún
-    artefacto y su documentación lo dice.
+    `O(H*S)` dentro de la propuesta usando el medidor del estado (3),
+    `p_hat_j` obsoleta (4, con `GPS-INTERNAL-101` desde la guarda), `p_hat_i`
+    obsoleta (4), signo invertido en el incremento de la conjunta (14), pareja
+    `(i,j)` sin rehacer (6), séptimo campo comparado por digest (2 unitarias),
+    ámbito RNG con índice constante en el ayudante (1 unitaria + 1 de
+    integración) y en el llamador (1), recorrido de los `B` bins por propuesta
+    (1), guarda de divergencia devuelta a `Ok(())` (1 unitaria) y contraste bit
+    a bit de la columna publicada desactivado (1 unitaria).
+    Dos variantes **no** discriminan y quedan declaradas: un recorrido canónico
+    que declare su propio medidor local, que ninguna cifra publicada refleja; y
+    retirar de `build_block` la comprobación `abs_error > marginal_max_abs_error`,
+    que es una invariante interna cuya violación es inalcanzable por
+    construcción —el prefijo elegido y su vecino difieren en el peso de una
+    fila— y que por tanto ninguna prueba puede exigir. En su lugar, la batería
+    contrasta el `max_abs_error` **publicado** contra el máximo
+    `|p_hat_i - p_i|` de un oráculo entero, que es la parte que sí podría estar
+    mal.
+    Los cuatro campos instrumentales del registro (`candidate_proposals`,
+    `row_visits`, `pair_updates`, `loop_operations`) son `pub` porque la
+    batería vive en un crate aparte; no tienen destino en ningún artefacto y su
+    documentación lo dice.
+  - **Condición normativa pendiente, ajena a F5.2.** El término `Q*S_bound` de
+    `f5-resource-accounting-v7` es **insatisfacible por construcción**: con
+    `S_bound = 2` concede dos unidades por propuesta y DTC-089 exige cuatro
+    sorteos por propuesta, de modo que ninguna implementación puede cumplirlo.
+    Eso explica el factor residual que se mide incluso con el bucle óptimo. Se
+    resuelve de una de dos maneras —definiendo «unidad de operación» a una
+    granularidad más gruesa que la visita elemental, cosa que hoy **ningún
+    documento hace**, o pasando el término a `Q*(c + S_bound)`— y pertenece al
+    hito de la admisión, no a este. Debe resolverse **antes de que exista
+    contabilidad de recursos en tiempo de ejecución**; hasta entonces no afecta
+    a ninguna salida, porque la contabilidad es una cota de admisión y no un
+    medidor de ejecución.
+  - Residual declarado y no corregido: `settle_all_bins` recorre los `B` bins
+    una vez por intento y la siembra reserva cinco vectores de tamaño `B`, lo
+    que deja un término `A*bloques*N_pop*B` que v7 no presupuesta. Solo muerde
+    con `Q` diminuto, y se cerraría sembrando desde los bins que las parejas
+    nombran en lugar de desde los declarados. Queda para quien retome el
+    módulo.
+  - Limitación declarada de los oráculos: `D` y `r²` solo se contrastan con
+    pesos **diádicos** —uniformes o `1/2, 1/4, 1/8, 1/8`—, donde todo el
+    álgebra de DTC-089 cabe en `u128` sin perder un bit. Con pesos no diádicos
+    el oráculo racional desbordaría, de modo que esos fixtures comprueban el
+    desenlace y la guarda de divergencia, no los valores.
 
 > **Revisión F5.2.** Revisión independiente del oráculo LD, consumo RNG,
 > complejidad y mejor intento. No continuar con un resultado solo plausible.

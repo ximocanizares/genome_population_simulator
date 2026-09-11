@@ -471,6 +471,34 @@ pub fn build_f5_marginals(
     Ok(F5MarginalTable { blocks })
 }
 
+/// Medidor de visitas de fila de las sumas canónicas de F5.
+///
+/// Vive aquí, junto al acumulador compensado, porque lo comparten el
+/// constructor haplotípico, el evaluador LD y la búsqueda: las tres sumas
+/// canónicas de un intento —la siembra de la puntuación, la recomputación de
+/// las columnas publicadas y la evaluación LD de cierre— cuentan en **el
+/// mismo** ejemplar, de modo que la cifra publicada describe el intento y no
+/// una de sus fases.
+///
+/// Lo que el medidor **no** puede garantizar es que un recorrido nuevo lo use:
+/// quien escriba un bucle sobre las H filas con su propio contador quedaría
+/// fuera de la cifra. Es una medida de las sumas canónicas que pasan por
+/// `site_marginal`, `joint_marginal` y `refresh_realized_columns`, no una
+/// prueba de ausencia universal.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct F5RowVisits(u64);
+
+impl F5RowVisits {
+    pub(crate) const fn add(&mut self, rows: u64) {
+        self.0 += rows;
+    }
+
+    #[must_use]
+    pub(crate) const fn count(self) -> u64 {
+        self.0
+    }
+}
+
 /// Acumulador compensado de Neumaier.
 ///
 /// El soporte discreto de longitudes tiene el suyo dentro de `f5_layout`, que

@@ -66,6 +66,8 @@ struct Fixture<'a> {
     block_length: u64,
     weights: Vec<f64>,
     gap: u64,
+    /// Máximo del intervalo de gaps; por omisión, igual a `gap`.
+    gap_max: Option<u64>,
     spectrum: &'a str,
     /// Bins LD `(inicio, fin, media objetivo, tolerancia)`; cubren `1..=L-1`.
     bins: Vec<(u64, u64, f64, f64)>,
@@ -86,6 +88,7 @@ impl Default for Fixture<'_> {
             block_length: 4,
             weights: vec![0.25; 4],
             gap: 1,
+            gap_max: None,
             spectrum: CONTINUOUS_SPECTRUM,
             bins: vec![(1, 3, 0.5, 0.05)],
             max_haplotype_attempts: 8,
@@ -131,7 +134,11 @@ impl Fixture<'_> {
             (
                 "snp_gaps.tsv",
                 "f5_snp_gap_profile",
-                format!("gap_min_bp\tgap_max_bp\tweight\n{0}\t{0}\t1\n", self.gap),
+                format!(
+                    "gap_min_bp\tgap_max_bp\tweight\n{}\t{}\t1\n",
+                    self.gap,
+                    self.gap_max.unwrap_or(self.gap)
+                ),
             ),
             (
                 "snp_spectrum.tsv",
@@ -483,6 +490,25 @@ fn oracle_tuple(chain: &Chain, block: &F5BlockHaplotypes) -> OracleTuple {
         max_marginal_error,
         evaluable_pairs,
     }
+}
+
+/// Visitas de fila de las **tres** sumas canónicas de un intento.
+///
+/// - siembra de la puntuación: `H*S` marginales y `H*S*(S-1)/2` conjuntas;
+/// - recomputación de las columnas publicadas: `H*S`, más `H` del recuento de
+///   filas duplicadas;
+/// - evaluación LD de cierre: otra vez `H*S + H*S*(S-1)/2`.
+///
+/// La suma se simplifica a `H*(S+1)²`, y la prueba escribe las dos formas para
+/// que un cambio de fase se vea en el desglose y no solo en el total.
+fn canonical_row_visits(haplotypes: u64, sites: u64) -> u64 {
+    let pairs = sites * (sites - 1) / 2;
+    let seed = haplotypes * (sites + pairs);
+    let refresh = haplotypes * sites + haplotypes;
+    let closing = haplotypes * (sites + pairs);
+    let total = seed + refresh + closing;
+    assert_eq!(total, haplotypes * (sites + 1) * (sites + 1));
+    total
 }
 
 fn records_of<'a>(
@@ -1000,7 +1026,7 @@ fn exhaustion_does_not_relax_the_problem() {
     for record in failure.records() {
         assert_eq!(
             record.row_visits(),
-            haplotypes * (sites + sites * (sites - 1) / 2),
+            canonical_row_visits(haplotypes, sites),
             "H o S cambiaron en el intento {}",
             record.attempt_index()
         );
@@ -1096,8 +1122,8 @@ fn two_variable_columns_are_enough_to_open_the_search() {
     for record in &records {
         assert_eq!(
             record.row_visits(),
-            4 * (2 + 1),
-            "el bloque de dos sitios no recorrió H*(S + S*(S-1)/2)"
+            canonical_row_visits(4, 2),
+            "el bloque de dos sitios no recorrió las tres sumas canónicas"
         );
         assert_eq!(
             record.pair_updates(),
@@ -1161,7 +1187,7 @@ fn the_measured_cost_separates_the_canonical_pass_from_the_proposals() {
         };
         let chain = build_chain(&root, &fixture);
         let failure = search(&chain).expect_err("objetivo inalcanzable");
-        let seed_visits = haplotypes as u64 * (sites + sites * (sites - 1) / 2);
+        let attempt_visits = canonical_row_visits(haplotypes as u64, sites);
         for record in failure.records() {
             assert_eq!(
                 record.proposals(),
@@ -1170,7 +1196,7 @@ fn the_measured_cost_separates_the_canonical_pass_from_the_proposals() {
             );
             assert_eq!(
                 record.row_visits(),
-                seed_visits,
+                attempt_visits,
                 "{label}: una propuesta recorrió las H filas"
             );
             assert_eq!(
@@ -1179,7 +1205,7 @@ fn the_measured_cost_separates_the_canonical_pass_from_the_proposals() {
                 "{label}: una propuesta actualizó un número de parejas distinto de 2S-3"
             );
         }
-        measured.push(seed_visits);
+        measured.push(attempt_visits);
     }
     // Cuadruplicar el presupuesto no cambia el recorrido canónico de siembra.
     assert_eq!(measured[0], measured[1]);
@@ -1627,4 +1653,315 @@ fn every_attempt_draws_from_its_own_swap_scope() {
         checked += 1;
     }
     assert!(checked >= 8, "la prueba solo comprobó {checked} intentos");
+}
+
+/// El coste del bucle **no depende del número de bins del perfil**.
+///
+/// REQ-EVO-75 exige bins contiguos que cubran de 1 a `Lmax-1`, así que un
+/// perfil de resolución por par de bases es legal y admitido; y un `gap_min`
+/// grande frente a `Lmax` deja `S_bound` pequeño. Si cada propuesta recorriese
+/// los `B` bins —o respaldase los dos vectores de bin enteros—, el coste
+/// crecería como `B/S_bound` sin cota: con 255 bins y dos sitios por bloque
+/// llegó a ser 62 veces el presupuesto sellado de la admisión.
+///
+/// La prueba fija la geometría y solo cambia el número de bins: con un bin y
+/// con `L-1` bins de un par de bases, el recuento de visitas elementales del
+/// bucle debe ser **el mismo**. Y comprueba además que se mantiene dentro de un
+/// múltiplo pequeño y declarado del presupuesto `H*S_bound² + Q*S_bound` que
+/// `f5-resource-accounting-v7` concede por bloque×subpoblación×intento.
+#[test]
+fn the_proposal_loop_cost_does_not_depend_on_the_bin_count() {
+    /// Cota declarada de la **forma** del coste por propuesta: una constante
+    /// —los cuatro sorteos, los cuatro bits del intercambio y las cuatro
+    /// operaciones del índice de filas— más un término lineal en `S`. Es lo
+    /// que DTC-089 fija al decir que las actualizaciones 2×2 mantienen las
+    /// estadísticas en `O(S)`. Las «unidades de operación» de v7 son una
+    /// medida más gruesa que estas visitas elementales, así que la cota se
+    /// escribe con sus dos constantes a la vista en lugar de como un múltiplo
+    /// de `Q*S_bound`.
+    const CONSTANT_PER_PROPOSAL: u64 = 24;
+    const PER_SITE_PER_PROPOSAL: u64 = 8;
+    const PROPOSALS: u64 = 1_024;
+
+    let mut measured = Vec::new();
+    for (label, block_length, gap, one_bin_per_base) in [
+        ("L256-g128-1bin", 256_u64, 128_u64, false),
+        ("L256-g128-255bins", 256, 128, true),
+        ("L64-g32-1bin", 64, 32, false),
+        ("L64-g32-63bins", 64, 32, true),
+    ] {
+        let bins: Vec<(u64, u64, f64, f64)> = if one_bin_per_base {
+            (1..block_length)
+                .map(|distance| (distance, distance, 1.0, 0.05))
+                .collect()
+        } else {
+            vec![(1, block_length - 1, 1.0, 0.05)]
+        };
+        let bin_count = bins.len();
+        let root = temporary(label);
+        let fixture = Fixture {
+            block_count: 1,
+            block_length,
+            gap,
+            bins,
+            max_haplotype_attempts: 2,
+            max_swap_proposals: PROPOSALS,
+            ..Fixture::default()
+        };
+        let chain = build_chain(&root, &fixture);
+        let records = match search(&chain) {
+            Ok(success) => success.records().to_vec(),
+            Err(failure) => failure.records().to_vec(),
+        };
+        assert!(!records.is_empty(), "{label}: sin registros");
+        let site_bound = chain.sealed.site_bound_per_block();
+        let haplotypes = chain.config.profile().haplotype_weights().len() as u64;
+        let coarse_budget = haplotypes * site_bound * site_bound + PROPOSALS * site_bound;
+        for record in &records {
+            let bound =
+                record.proposals() * (CONSTANT_PER_PROPOSAL + PER_SITE_PER_PROPOSAL * site_bound);
+            assert!(
+                record.loop_operations() <= bound,
+                "{label}: el bucle costó {} visitas para {} propuestas, por encima de {bound} (presupuesto grueso de v7: {coarse_budget})",
+                record.loop_operations(),
+                record.proposals()
+            );
+        }
+        let total: u64 = records.iter().map(F5AttemptRecord::loop_operations).sum();
+        measured.push((label, bin_count, total, records.len()));
+    }
+
+    // Misma geometría, un bin frente a `L-1`: el coste debe coincidir.
+    assert_eq!(
+        measured[0].3, measured[1].3,
+        "los intentos no son comparables"
+    );
+    assert_eq!(
+        measured[0].2, measured[1].2,
+        "con {} bins el bucle costó {} y con {} bins costó {}",
+        measured[0].1, measured[0].2, measured[1].1, measured[1].2
+    );
+    assert_eq!(measured[2].3, measured[3].3);
+    assert_eq!(
+        measured[2].2, measured[3].2,
+        "con {} bins el bucle costó {} y con {} bins costó {}",
+        measured[2].1, measured[2].2, measured[3].1, measured[3].2
+    );
+    assert!(
+        measured[1].1 >= 255 && measured[3].1 >= 63,
+        "los fixtures de muchos bins no se construyeron"
+    );
+}
+
+/// El desempate final por `attempt_index`, alcanzado por la vía productiva.
+///
+/// Con `H=2`, `S=2`, espectro degenerado en `0,5` y un objetivo de bin
+/// inalcanzable, varios intentos producen **la misma matriz ganadora** y
+/// empatan en los siete campos de la tupla: el único árbitro que queda es el
+/// menor `attempt_index`, y es quien decide qué fila lleva `selected_best` en
+/// `f5-attempts.tsv`. Hasta aquí solo había prueba unitaria del comparador.
+#[test]
+fn the_attempt_index_tiebreak_is_reachable_end_to_end() {
+    const HALF_SPECTRUM: &str = "alt_af_min\talt_af_max\tweight\n0.5\t0.5\t1\n";
+    let root = temporary("tiebreak");
+    let fixture = Fixture {
+        weights: vec![0.5, 0.5],
+        block_count: 1,
+        block_length: 2,
+        spectrum: HALF_SPECTRUM,
+        bins: vec![(1, 1, 0.25, 0.05)],
+        max_haplotype_attempts: 40,
+        max_swap_proposals: 8,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let failure = search(&chain).expect_err("con r² en {0,1} el objetivo 0,25±0,05 no se alcanza");
+    assert_eq!(failure.code(), "GPS-DOMAIN-104");
+
+    let selected = failure
+        .records()
+        .iter()
+        .find(|record| record.selected_best())
+        .expect("un mejor intento");
+    // Intentos que empatan con el elegido en los siete campos de la tupla.
+    let tied: Vec<&F5AttemptRecord> = failure
+        .records()
+        .iter()
+        .filter(|record| {
+            record.duplicate_rows() == selected.duplicate_rows()
+                && record.bins_outside() == selected.bins_outside()
+                && record.signs_failed() == selected.signs_failed()
+                && record.max_r2_error() == selected.max_r2_error()
+                && record.sum_r2_error() == selected.sum_r2_error()
+                && record.max_marginal_error() == selected.max_marginal_error()
+                && record.matrix_bytes_sha256() == selected.matrix_bytes_sha256()
+                && record.evaluable_pairs() == selected.evaluable_pairs()
+                && record.terminated() == selected.terminated()
+        })
+        .collect();
+    assert!(
+        tied.len() >= 2,
+        "el fixture no produjo ningún empate completo: solo {} intento(s)",
+        tied.len()
+    );
+    let lowest = tied
+        .iter()
+        .map(|record| record.attempt_index())
+        .min()
+        .expect("empates");
+    assert_eq!(
+        selected.attempt_index(),
+        lowest,
+        "el desempate no eligió el menor attempt_index entre {} intentos idénticos",
+        tied.len()
+    );
+}
+
+/// Un bin sin ninguna pareja evaluable llega a `not_applicable` a través de la
+/// frontera productiva.
+///
+/// `f5-ld-evaluation.tsv` distingue `evaluated` de `not_applicable`, y el
+/// segundo no es un error ni se sustituye por otro bin. Hasta aquí solo se
+/// comprobaba sobre el evaluador suelto.
+#[test]
+fn an_empty_bin_reaches_not_applicable_through_the_search() {
+    let root = temporary("not-applicable");
+    // Bins de un par de bases sobre un bloque de cuatro bases cuyos dos sitios
+    // distan tres: solo el último bin puede contener parejas, y los otros dos
+    // quedan sin ninguna. El perfil sigue cubriendo `1..=Lmax-1`, como exige
+    // REQ-EVO-75.
+    let fixture = Fixture {
+        block_count: 1,
+        block_length: 4,
+        gap: 3,
+        bins: vec![(1, 1, 0.5, 0.05), (2, 2, 0.5, 0.05), (3, 3, 1.0, 0.05)],
+        max_haplotype_attempts: 2,
+        max_swap_proposals: 8,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let outcome = search(&chain);
+    let evaluation = match &outcome {
+        Ok(success) => success.ld_evaluation().to_vec(),
+        Err(failure) => {
+            assert_eq!(failure.code(), "GPS-DOMAIN-104");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        }
+    };
+    let block = &evaluation[0];
+    assert_eq!(block.bins().len(), 3, "los bins del perfil se fusionaron");
+    assert!(
+        block.bins()[2].is_evaluated(),
+        "el bin de distancia 3 no se evaluó"
+    );
+    for bin in &block.bins()[..2] {
+        assert!(
+            !bin.is_evaluated(),
+            "un bin sin parejas se dio por evaluado"
+        );
+        assert_eq!(bin.status(), "not_applicable");
+        assert_eq!(bin.pair_count(), 0);
+        assert_eq!(bin.mean_r2(), None);
+        assert_eq!(bin.abs_error(), None);
+        assert!(
+            bin.is_within_tolerance(),
+            "un bin vacío no está fuera de tolerancia"
+        );
+    }
+    assert_eq!(
+        block.bins_outside(),
+        u64::from(!block.bins()[2].is_within_tolerance()),
+        "un bin no aplicable contó como fuera de tolerancia"
+    );
+}
+
+/// Rehacer el máximo de `r²` recorre los bins **activos**, no los declarados.
+///
+/// El máximo no admite mantenimiento por incrementos cuando el bin que lo
+/// ostentaba baja, así que se rehace; y ese rehacer es el último sitio donde el
+/// coste podría volver a depender de `B`. La prueba elige una geometría con
+/// pocos sitios y muchos bins —gaps en `[30,40]` sobre bloques de 120 bases,
+/// con un bin por par de bases—, comprueba que el rehacer **dispara**, y exige
+/// la identidad exacta
+///
+/// ```text
+/// max_rebuild_visits = max_rebuilds * (bins con al menos una pareja)
+/// ```
+///
+/// El número de bins activos lo calcula la prueba por su cuenta, desde el
+/// layout y el perfil, sin preguntárselo al productor.
+#[test]
+fn rebuilding_the_maximum_visits_only_the_active_bins() {
+    let root = temporary("rebuild");
+    let block_length = 120_u64;
+    let fixture = Fixture {
+        block_count: 1,
+        block_length,
+        gap: 30,
+        gap_max: Some(40),
+        bins: (1..block_length)
+            .map(|distance| (distance, distance, 1.0, 0.05))
+            .collect(),
+        max_haplotype_attempts: 2,
+        max_swap_proposals: 1_024,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let records = match search(&chain) {
+        Ok(success) => success.records().to_vec(),
+        Err(failure) => failure.records().to_vec(),
+    };
+    assert!(!records.is_empty(), "sin registros");
+
+    // Bins activos, calculados aquí: los que contienen alguna distancia
+    // intrabloque. El conjunto no cambia durante la búsqueda porque las
+    // posiciones son del layout.
+    let layout_block = &chain.layout.blocks()[0];
+    let bins = chain
+        .config
+        .profile()
+        .ld_bins("P1")
+        .expect("bins del perfil");
+    let sites = layout_block.sites();
+    let mut active: BTreeSet<usize> = BTreeSet::new();
+    for i in 0..sites.len() {
+        for j in (i + 1)..sites.len() {
+            let distance = sites[j].position_1based() - sites[i].position_1based();
+            let bin = bins
+                .iter()
+                .position(|bin| {
+                    bin.distance_start_bp() <= distance && distance <= bin.distance_end_bp()
+                })
+                .expect("bin de la distancia");
+            active.insert(bin);
+        }
+    }
+    assert!(
+        active.len() < bins.len(),
+        "el fixture no distingue bins activos de declarados: {} de {}",
+        active.len(),
+        bins.len()
+    );
+    assert!(
+        active.len() > 1,
+        "el rehacer debe recorrer más de un bin para que la identidad discrimine"
+    );
+    assert!(
+        sites.len() * (sites.len() - 1) / 2 >= active.len(),
+        "los bins activos superan el número de parejas"
+    );
+
+    let rebuilds: u64 = records.iter().map(F5AttemptRecord::max_rebuilds).sum();
+    assert!(rebuilds > 0, "el rehacer del máximo no llegó a dispararse");
+    for record in &records {
+        assert_eq!(
+            record.max_rebuild_visits(),
+            record.max_rebuilds() * active.len() as u64,
+            "el rehacer visitó {} bins en {} disparos, y los activos son {}",
+            record.max_rebuild_visits(),
+            record.max_rebuilds(),
+            active.len()
+        );
+    }
 }

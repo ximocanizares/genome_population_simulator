@@ -771,9 +771,31 @@ fn four_thousand_ninety_six_haplotypes_stay_linear_in_h() {
     assert_eq!(site_count, 12, "S=12 es el mínimo que admite H=2^12");
     assert_eq!(block.matrix().haplotype_count(), haplotype_count);
     assert_eq!(block.marginal_max_abs_error(), 1.0 / haplotype_count as f64);
-    assert!(
-        block.max_abs_error() <= block.marginal_max_abs_error(),
-        "con pesos uniformes la cota es 1/H"
+    // El error marginal publicado se contrasta contra el máximo
+    // `|p_hat_i - p_i|` calculado con enteros: reafirmar la cota que
+    // `build_block` ya impone abortando no comprobaría nada que el propio
+    // constructor no garantice.
+    let (numerators, scale) = scaled_weights(chain.config.profile().haplotype_weights());
+    let unit: u128 = numerators.iter().sum();
+    assert_eq!(unit, 1_u128 << scale, "los pesos uniformes suman la unidad");
+    let mut expected_max_abs_error = 0.0_f64;
+    for (site, column) in block.columns().iter().enumerate() {
+        let mut realized = 0_u128;
+        for (haplotype, weight) in numerators.iter().enumerate() {
+            if block.matrix().allele(haplotype, site).expect("alelo") {
+                realized += weight;
+            }
+        }
+        let error = (realized as f64 / unit as f64 - column.target_alt_af()).abs();
+        assert_eq!(column.abs_error(), error, "el error de la columna {site}");
+        if error > expected_max_abs_error {
+            expected_max_abs_error = error;
+        }
+    }
+    assert_eq!(
+        block.max_abs_error(),
+        expected_max_abs_error,
+        "el máximo publicado no es el máximo de los errores por columna"
     );
 
     let cells = (haplotype_count * site_count) as u64;

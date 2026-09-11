@@ -31,7 +31,7 @@ use std::collections::BTreeMap;
 
 use crate::application::EffectiveF5Config;
 use crate::diagnostics::Diagnostic;
-use crate::f5_marginals::{F5BlockMarginals, F5MarginalTable, NeumaierSum};
+use crate::f5_marginals::{F5BlockMarginals, F5MarginalTable, F5RowVisits, NeumaierSum};
 use crate::identity::{F5BlockId, F5SiteId, PopulationId, ScenarioId};
 use crate::randomness::{
     F5RandomDecision, RandomWordSource, RootSeed, derive_f5_subseed, f5_bernoulli_with_source,
@@ -393,7 +393,11 @@ impl F5BlockHaplotypes {
     ///
     /// Devuelve el detalle correspondiente si los pesos no acompañan a la
     /// matriz o si una suma compensada deja de ser finita.
-    pub(crate) fn refresh_realized_columns(&mut self, weights: &[f64]) -> Result<(), &'static str> {
+    pub(crate) fn refresh_realized_columns(
+        &mut self,
+        weights: &[f64],
+        visits: &mut F5RowVisits,
+    ) -> Result<(), &'static str> {
         if weights.len() != self.matrix.haplotype_count() {
             return Err("los pesos no acompañan a la matriz del bloque");
         }
@@ -405,6 +409,7 @@ impl F5BlockHaplotypes {
         } = self;
         let mut max_abs_error = 0.0_f64;
         for (site, column) in columns.iter_mut().enumerate() {
+            visits.add(weights.len() as u64);
             let mut compensated = NeumaierSum::default();
             let mut realized = 0.0_f64;
             let mut alternate = 0_u64;
@@ -426,6 +431,8 @@ impl F5BlockHaplotypes {
             }
         }
         self.max_abs_error = max_abs_error;
+        // El recuento de filas duplicadas recorre las H filas una vez más.
+        visits.add(self.matrix.haplotype_count() as u64);
         self.duplicate_rows = self.matrix.duplicate_rows();
         Ok(())
     }

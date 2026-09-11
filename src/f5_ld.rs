@@ -53,7 +53,7 @@ use crate::application::EffectiveF5Config;
 use crate::diagnostics::Diagnostic;
 use crate::f5_haplotypes::{F5AlleleMatrix, F5BlockHaplotypes, F5HaplotypeAttempt};
 use crate::f5_layout::{F5LayoutBlock, F5PhysicalLayout};
-use crate::f5_marginals::NeumaierSum;
+use crate::f5_marginals::{F5RowVisits, NeumaierSum};
 use crate::f5_profile::LdBin;
 use crate::identity::{F5BlockId, PopulationId};
 
@@ -190,7 +190,7 @@ pub fn evaluate_f5_site_pair(
     site_index_i: usize,
     site_index_j: usize,
 ) -> Result<F5SitePair, F5LdError> {
-    let mut visits = 0_u64;
+    let mut visits = F5RowVisits::default();
     let p_hat_i = site_marginal(weights, matrix, site_index_i, &mut visits)?;
     let p_hat_j = site_marginal(weights, matrix, site_index_j, &mut visits)?;
     let p_hat_ij = joint_marginal(weights, matrix, site_index_i, site_index_j, &mut visits)?;
@@ -281,21 +281,24 @@ pub(crate) struct F5CanonicalPairVerdict {
 /// Un `x_hi` nulo aporta `0*q_h`, que ni mueve la suma ni la compensación, de
 /// modo que omitirlo produce exactamente los mismos bits que sumarlo.
 ///
-/// `visits` cuenta **una visita por fila recorrida**, venga la llamada de donde
-/// venga. Es la instrumentación con la que la búsqueda de F5.2.3 acredita que
-/// ninguna propuesta recorre las H filas: si alguien añadiera una suma canónica
-/// dentro del bucle de propuestas, el contador crecería con el presupuesto.
+/// `visits` cuenta una visita por fila recorrida en **el medidor que recibe**.
+/// Es la instrumentación con la que la búsqueda de F5.2.3 acredita que sus tres
+/// sumas canónicas por intento son las que dice y ninguna más: si alguien
+/// añadiera una llamada a esta función dentro del bucle de propuestas pasándole
+/// el medidor del intento, el recuento crecería con el presupuesto y la
+/// identidad publicada fallaría. No cubre un recorrido que declare su propio
+/// contador.
 pub(crate) fn site_marginal(
     weights: &[f64],
     matrix: &F5AlleleMatrix,
     site_index: usize,
-    visits: &mut u64,
+    visits: &mut F5RowVisits,
 ) -> Result<f64, F5LdError> {
     ensure_shape(weights, matrix, site_index)?;
     let mut compensated = NeumaierSum::default();
     let mut total = 0.0_f64;
     for (haplotype, weight) in weights.iter().enumerate() {
-        *visits += 1;
+        visits.add(1);
         if matrix
             .allele(haplotype, site_index)
             .ok_or(F5LdError::SiteOutOfRange)?
@@ -317,14 +320,14 @@ pub(crate) fn joint_marginal(
     matrix: &F5AlleleMatrix,
     site_index_i: usize,
     site_index_j: usize,
-    visits: &mut u64,
+    visits: &mut F5RowVisits,
 ) -> Result<f64, F5LdError> {
     ensure_shape(weights, matrix, site_index_i)?;
     ensure_shape(weights, matrix, site_index_j)?;
     let mut compensated = NeumaierSum::default();
     let mut total = 0.0_f64;
     for (haplotype, weight) in weights.iter().enumerate() {
-        *visits += 1;
+        visits.add(1);
         let alt_i = matrix
             .allele(haplotype, site_index_i)
             .ok_or(F5LdError::SiteOutOfRange)?;
@@ -525,6 +528,51 @@ impl F5BlockLdEvaluation {
     }
 }
 
+#[cfg(test)]
+impl F5BlockLdEvaluation {
+    /// Constructor literal para las pruebas de la guarda de divergencia de
+    /// F5.2.3. La vía productiva sigue siendo [`evaluate_block`].
+    /// Añade una fila de bin ya evaluada, para las pruebas de la guarda.
+    pub(crate) fn push_bin_for_test(
+        &mut self,
+        definition: LdBin,
+        pair_count: u64,
+        mean_r2: f64,
+        abs_error: f64,
+    ) {
+        self.bins.push(F5LdBinEvaluation {
+            distance_start_bp: definition.distance_start_bp(),
+            distance_end_bp: definition.distance_end_bp(),
+            target_mean_r2: definition.target_mean_r2(),
+            max_abs_error: definition.max_abs_error(),
+            pair_count,
+            mean_r2: Some(mean_r2),
+            abs_error: Some(abs_error),
+        });
+    }
+
+    pub(crate) fn for_test(
+        population_id: PopulationId,
+        block_id: F5BlockId,
+        evaluable_pairs: u64,
+        signs_failed: u64,
+        bins_outside: u64,
+    ) -> Self {
+        Self {
+            population_id,
+            block_index: 0,
+            block_id,
+            bins: Vec::new(),
+            evaluable_pairs,
+            not_evaluable_pairs: 0,
+            signs_failed,
+            bins_outside,
+            max_r2_error: 0.0,
+            sum_r2_error: 0.0,
+        }
+    }
+}
+
 /// Evaluación LD de un intento completo, en el orden canónico de la tabla
 /// haplotípica.
 #[derive(Clone, Debug, PartialEq)]
@@ -621,6 +669,7 @@ pub fn evaluate_f5_linkage_disequilibrium(
             layout_block,
             block,
             None,
+            &mut F5RowVisits::default(),
         )?);
     }
     Ok(F5LdEvaluation {
@@ -647,7 +696,13 @@ pub fn evaluate_f5_block_linkage_disequilibrium(
     layout_block: &F5LayoutBlock,
     block: &F5BlockHaplotypes,
 ) -> Result<F5BlockLdEvaluation, Diagnostic> {
-    evaluate_f5_block_with_pair_verdicts(config, layout_block, block, None)
+    evaluate_f5_block_with_pair_verdicts(
+        config,
+        layout_block,
+        block,
+        None,
+        &mut F5RowVisits::default(),
+    )
 }
 
 /// Igual que [`evaluate_f5_block_linkage_disequilibrium`], recogiendo además
@@ -661,6 +716,7 @@ pub(crate) fn evaluate_f5_block_with_pair_verdicts(
     layout_block: &F5LayoutBlock,
     block: &F5BlockHaplotypes,
     verdicts: Option<&mut Vec<F5CanonicalPairVerdict>>,
+    visits: &mut F5RowVisits,
 ) -> Result<F5BlockLdEvaluation, Diagnostic> {
     let scenario_path = config.scenario_path().display().to_string();
     let foreign = |detail: &'static str| {
@@ -689,9 +745,14 @@ pub(crate) fn evaluate_f5_block_with_pair_verdicts(
         layout_block,
         block,
         verdicts,
+        visits,
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "el evaluador necesita identidad, perfil, layout, bloque y, además, los dos canales que la búsqueda de F5.2.3 le pide: los veredictos por pareja y el medidor de visitas de fila del intento"
+)]
 fn evaluate_block(
     scenario_id: &str,
     foreign: &impl Fn(&'static str) -> Diagnostic,
@@ -700,12 +761,10 @@ fn evaluate_block(
     layout_block: &F5LayoutBlock,
     block: &F5BlockHaplotypes,
     mut verdicts: Option<&mut Vec<F5CanonicalPairVerdict>>,
+    visits: &mut F5RowVisits,
 ) -> Result<F5BlockLdEvaluation, Diagnostic> {
     let internal = |detail: String| Diagnostic::f5_internal(scenario_id, detail);
     let arithmetic = |error: F5LdError| Diagnostic::f5_internal(scenario_id, error.detail());
-    // El evaluador canónico no publica su recuento de visitas: su coste es fijo
-    // y quien lo mide es la búsqueda, sobre sus propias sumas.
-    let mut visits = 0_u64;
 
     if layout_block.block_id() != block.block_id() {
         return Err(foreign(
@@ -739,14 +798,9 @@ fn evaluate_block(
                 "el sitio del intento y el del layout no comparten identificador",
             ));
         }
-        let realized =
-            site_marginal(weights, block.matrix(), index, &mut visits).map_err(arithmetic)?;
-        if realized != column.realized_alt_af() {
-            return Err(internal(format!(
-                "la columna {index} publicó {} y el evaluador recalculó {realized}",
-                column.realized_alt_af()
-            )));
-        }
+        let realized = site_marginal(weights, block.matrix(), index, visits).map_err(arithmetic)?;
+        ensure_published_column_matches(index, column.realized_alt_af(), realized)
+            .map_err(internal)?;
         marginals.push(realized);
         positions.push(site.position_1based());
     }
@@ -765,7 +819,7 @@ fn evaluate_block(
                 j as u64,
                 marginals[i],
                 marginals[j],
-                joint_marginal(weights, block.matrix(), i, j, &mut visits).map_err(arithmetic)?,
+                joint_marginal(weights, block.matrix(), i, j, visits).map_err(arithmetic)?,
             );
             let polarities_match = block.columns()[i].polarity() == block.columns()[j].polarity();
             if let Some(collected) = verdicts.as_deref_mut() {
@@ -873,6 +927,25 @@ pub(crate) fn f5_bin_is_outside(error: f64, definition: &LdBin) -> bool {
     error > definition.max_abs_error()
 }
 
+/// La columna publicada debe ser **bit a bit** la suma canónica de su matriz.
+///
+/// Es la barrera que separa las dos aritméticas de F5.2.3: la puntuación del
+/// bucle es incremental, pero lo que se publica se recomputa, y si alguien
+/// olvidase recomputarlo el evaluador lo vería aquí en lugar de dejar pasar una
+/// columna que su matriz ya no realiza.
+fn ensure_published_column_matches(
+    index: usize,
+    published: f64,
+    recomputed: f64,
+) -> Result<(), String> {
+    if published == recomputed {
+        return Ok(());
+    }
+    Err(format!(
+        "la columna {index} publicó {published} y el evaluador recalculó {recomputed}"
+    ))
+}
+
 /// Acumulador de un bin mientras se recorren las parejas.
 ///
 /// `total` conserva el valor que devolvió la última llamada a
@@ -905,6 +978,22 @@ pub(crate) fn bin_of(bins: &[LdBin], distance: u64) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// La columna publicada y su recálculo deben coincidir **bit a bit**.
+    ///
+    /// Un solo ULP de diferencia es un fallo: la puntuación de la búsqueda es
+    /// incremental y solo la recomputación canónica puede publicarse. Si la
+    /// comprobación desapareciera, una columna obsoleta pasaría inadvertida.
+    #[test]
+    fn a_published_column_must_match_its_recomputation_bit_for_bit() {
+        assert!(ensure_published_column_matches(3, 0.25, 0.25).is_ok());
+        assert!(ensure_published_column_matches(3, 0.0, 0.0).is_ok());
+        let one_ulp_above = f64::from_bits(0.5_f64.to_bits() + 1);
+        let error = ensure_published_column_matches(3, 0.5, one_ulp_above)
+            .expect_err("un ULP de diferencia debe rechazarse");
+        assert!(error.contains("columna 3"), "{error}");
+        assert!(ensure_published_column_matches(0, 0.5, 0.4).is_err());
+    }
 
     /// La tolerancia del perfil es inclusiva, y lo es en el borde exacto.
     ///
