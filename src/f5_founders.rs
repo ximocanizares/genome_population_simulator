@@ -1,7 +1,7 @@
-//! F5.3.1. Modo por bloque×subpoblación, cuotas controladas y muestreo
-//! probabilístico de las copias fundadoras.
+//! F5.3.1 y F5.3.2. Modo por bloque×subpoblación, cuotas controladas,
+//! muestreo probabilístico de las copias fundadoras, F diploide y F realizado.
 //!
-//! DTC-089 «Fundadores, F y factibilidad controlada» fija tres cosas que este
+//! DTC-089 «Fundadores, F y factibilidad controlada» fija cinco cosas que este
 //! módulo implementa y ninguna más:
 //!
 //! 1. **Resolución de modo.** Cada bloque×subpoblación resuelve su modo
@@ -15,10 +15,21 @@
 //!    Fisher–Yates del grupo fronterizo y permutación Fisher–Yates de las `C`
 //!    identidades de copia que asigna el multiconjunto ordenado por
 //!    `haplotype_rank`.
+//! 4. **F diploide.** En `P=2` la copia 1 reutiliza con probabilidad `F`
+//!    exactamente la fila de la copia 0 del mismo individuo; `founder_f` se
+//!    consume **antes** que `founder_sample` de la copia 1 y, si decide
+//!    reutilizar, ese segundo flujo no se abre. `F=0` y `F=1` no consumen
+//!    `founder_f`. `F` declarado con `P=1` o `P>2` es error.
+//! 5. **F realizado.** Por población×bloque se publica `F_realized`,
+//!    `not_applicable` fuera de `P=2` y cuando `H_expected=0`.
 //!
-//! Lo que **no** hace, por pertenecer a otros hitos: F diploide y `F_realized`
-//! son de F5.3.2 —aquí solo se rechaza la combinación `F>0`×controlado, que
-//! DTC-089 declara incompatible—, y las identidades `FCP_`/`FHA_` y la
+//! El Ne reproductivo de DTC-089 es `not_applicable` en F5 **por
+//! construcción**: F5 no reproduce, aquí no se calcula ninguno y ningún
+//! esquema publicado tiene dónde escribirlo. Una búsqueda negativa sobre el
+//! módulo impide que la fórmula por contribuciones gaméticas de F7.3 aparezca.
+//!
+//! Lo que **no** hace, por pertenecer a otros hitos: la fórmula de Ne por
+//! contribuciones gaméticas es de F7.3, y las identidades `FCP_`/`FHA_` y la
 //! pertenencia publicada son de F5.3.3.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,7 +46,7 @@ use crate::identity::{
 };
 use crate::randomness::{
     F5RandomDecision, LocalRng, RandomWordSource, RootSeed, derive_f5_subseed,
-    f5_fisher_yates_with_source, f5_uniform_53,
+    f5_bernoulli_with_source, f5_fisher_yates_with_source, f5_uniform_53,
 };
 
 // ---------------------------------------------------------------------------
@@ -292,6 +303,69 @@ impl F5ControlledQuota {
     }
 }
 
+/// Estado de un `F_realized` publicado: evaluado o no aplicable.
+///
+/// No existe un tercer estado y `not_applicable` **nunca** se sustituye por
+/// cero: REQ-EVO-52 lo prohíbe expresamente.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum F5RealizedFStatus {
+    Evaluated,
+    NotApplicable,
+}
+
+impl F5RealizedFStatus {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Evaluated => "evaluated",
+            Self::NotApplicable => "not_applicable",
+        }
+    }
+}
+
+/// `F_realized` de una población×bloque, con la forma exacta que el manifiesto
+/// publica: `target_f`, `status` y `value`.
+///
+/// DTC-089: `F_realized = 1 - H_observed/H_expected`, con
+/// `H_observed = heterozygous_individuals/individual_count`,
+/// `q_realized_h = n_h/C` y `H_expected = 1 - Σ_h q_realized_h²`. La
+/// frecuencia es la **realizada**, no el objetivo `q` del perfil. Un valor
+/// negativo es un exceso de heterocigotos legítimo y se conserva (REQ-EVO-52).
+#[derive(Clone, Debug, PartialEq)]
+pub struct F5RealizedF {
+    population_id: PopulationId,
+    block_id: F5BlockId,
+    target_f: Option<f64>,
+    status: F5RealizedFStatus,
+    value: Option<f64>,
+}
+
+impl F5RealizedF {
+    #[must_use]
+    pub const fn population_id(&self) -> &PopulationId {
+        &self.population_id
+    }
+    #[must_use]
+    pub const fn block_id(&self) -> &F5BlockId {
+        &self.block_id
+    }
+    /// F efectivo de la subpoblación —el declarado o `0.0`— en `P=2`, y `None`
+    /// en cualquier otra ploidía, donde declarar F es error.
+    #[must_use]
+    pub const fn target_f(&self) -> Option<f64> {
+        self.target_f
+    }
+    #[must_use]
+    pub const fn status(&self) -> F5RealizedFStatus {
+        self.status
+    }
+    /// `Some` si y solo si el estado es `evaluated`.
+    #[must_use]
+    pub const fn value(&self) -> Option<f64> {
+        self.value
+    }
+}
+
 /// Unidad bloque×subpoblación resuelta y asignada.
 #[derive(Clone, Debug, PartialEq)]
 pub struct F5FounderUnit {
@@ -352,6 +426,7 @@ pub struct F5FounderAssignment {
     rosters: Vec<F5FounderRoster>,
     sampling: Vec<F5SamplingResolution>,
     units: Vec<F5FounderUnit>,
+    f_realized: Vec<F5RealizedF>,
 }
 
 impl F5FounderAssignment {
@@ -370,6 +445,13 @@ impl F5FounderAssignment {
     #[must_use]
     pub fn units(&self) -> &[F5FounderUnit] {
         &self.units
+    }
+    /// `F_realized` por población×bloque, en el mismo orden que
+    /// [`Self::sampling`] —población y después `block_id`— y con una fila
+    /// exacta por unidad, también fuera de `P=2`.
+    #[must_use]
+    pub fn f_realized(&self) -> &[F5RealizedF] {
+        &self.f_realized
     }
     /// Suma de las visitas de todas las unidades.
     #[must_use]
@@ -391,7 +473,8 @@ impl F5FounderAssignment {
 // Frontera pública
 // ---------------------------------------------------------------------------
 
-/// Resuelve modos y tolerancias y asigna una fila haplotípica a cada copia.
+/// Resuelve modos y tolerancias, asigna una fila haplotípica a cada copia,
+/// aplica F en diploides y publica `F_realized`.
 ///
 /// Consume la matriz ganadora de cada bloque×subpoblación que produjo F5.2.3:
 /// los rangos que asigna son filas de esa matriz y ningún peso se recalcula
@@ -402,9 +485,9 @@ impl F5FounderAssignment {
 ///
 /// - `GPS-CONF-101` si la sustitución nombra una población desconocida, repite
 ///   una pareja, sale de `0..B-1`, si el modo declarado no es un literal del
-///   contrato, si la búsqueda no cubre exactamente las unidades del escenario
-///   o si una subpoblación controlada declara `F>0`, combinación que DTC-089
-///   declara incompatible.
+///   contrato, si la búsqueda no cubre exactamente las unidades del escenario,
+///   si una subpoblación controlada declara `F>0` —combinación que DTC-089
+///   declara incompatible— o si una subpoblación declara F con `P=1` o `P>2`.
 /// - `GPS-DOMAIN-103` si la cuota controlada no puede satisfacerse dentro de
 ///   su tolerancia efectiva; siempre **antes** de abrir ningún RNG de cuotas.
 /// - `GPS-INTERNAL-101` ante una aritmética no finita o un desbordamiento
@@ -444,15 +527,35 @@ pub fn assign_f5_founders(
 
     // Las `C` identidades de copia de una subpoblación son las mismas en todos
     // sus bloques: se ordenan una vez, no una vez por unidad.
+    let ploidy = config.ploidy();
     let mut seats_by_population: BTreeMap<PopulationId, Vec<CopySeat>> = BTreeMap::new();
+    // F efectivo de cada subpoblación y su objetivo publicable, resueltos una
+    // vez por subpoblación: no dependen del bloque. Aquí se rechaza F con
+    // `P=1` o `P>2`, que REQ-EVO-48 exige identificando ámbito y ploidía.
+    let mut inbreeding_by_population: BTreeMap<PopulationId, (FounderInbreeding, Option<f64>)> =
+        BTreeMap::new();
     for roster in &rosters {
-        seats_by_population.insert(
-            roster.population_id.clone(),
-            copy_seats(roster, config.ploidy()),
-        );
+        seats_by_population.insert(roster.population_id.clone(), copy_seats(roster, ploidy));
+        let subpopulation = declared_subpopulation(config, &roster.population_id)?;
+        let declared = effective_inbreeding_f(config, subpopulation)?;
+        let inbreeding = resolve_founder_inbreeding(ploidy, declared).map_err(|detail| {
+            configuration(
+                config,
+                "subpopulations.inbreeding_f,ploidy",
+                format!(
+                    "la subpoblación {}: {detail}",
+                    roster.population_id.as_str()
+                ),
+            )
+        })?;
+        // DTC-089 publica `target_f` solo en diploides; en otra ploidía el
+        // objetivo es `null`, nunca cero.
+        let target_f = (ploidy == 2).then(|| declared.unwrap_or(0.0));
+        inbreeding_by_population.insert(roster.population_id.clone(), (inbreeding, target_f));
     }
 
     let mut units = Vec::with_capacity(sampling.len());
+    let mut f_realized = Vec::with_capacity(sampling.len());
     for row in &sampling {
         let seats = seats_by_population.get(&row.population_id).ok_or_else(|| {
             internal(
@@ -471,10 +574,25 @@ pub fn assign_f5_founders(
                 ),
             ));
         }
+        let (inbreeding, target_f) = inbreeding_by_population
+            .get(&row.population_id)
+            .copied()
+            .ok_or_else(|| {
+                internal(
+                    &scenario_id,
+                    "la fila de muestreo nombra una subpoblación sin F resuelto",
+                )
+            })?;
         let (assignments, quota, operations) = match row.effective_mode {
             F5SamplingMode::Probabilistic => {
-                let (assignments, operations) =
-                    sample_probabilistic_unit(&scenario_id, root_seed, row, seats, &prefix)?;
+                let (assignments, operations) = sample_probabilistic_unit(
+                    &scenario_id,
+                    root_seed,
+                    row,
+                    seats,
+                    &prefix,
+                    inbreeding,
+                )?;
                 (assignments, None, operations)
             }
             F5SamplingMode::Controlled => {
@@ -492,6 +610,16 @@ pub fn assign_f5_founders(
                 "una asignación nombra un rango haplotípico que la matriz no contiene",
             ));
         }
+        let (realized, realized_operations) = realized_f_row(
+            &scenario_id,
+            row,
+            ploidy,
+            target_f,
+            &assignments,
+            weights.len(),
+        )?;
+        let operations = operations.saturating_add(realized_operations);
+        f_realized.push(realized);
         units.push(F5FounderUnit {
             population_id: row.population_id.clone(),
             block_id: row.block_id.clone(),
@@ -507,6 +635,7 @@ pub fn assign_f5_founders(
         rosters,
         sampling,
         units,
+        f_realized,
     })
 }
 
@@ -797,7 +926,7 @@ fn resolve_f5_sampling(
             F5SamplingMode::Controlled => {
                 // DTC-089: la combinación `F>0` con controlado es
                 // incompatible y se rechaza antes de abrir ningún RNG.
-                let inbreeding = effective_inbreeding_f(config, subpopulation)?;
+                let inbreeding = effective_inbreeding_f(config, subpopulation)?.unwrap_or(0.0);
                 if inbreeding != 0.0 {
                     return Err(configuration(
                         config,
@@ -892,22 +1021,23 @@ fn declared_subpopulation<'a>(
         })
 }
 
-/// F efectivo de una subpoblación: el suyo, el de `[f5]` o `0.0`.
+/// F declarado para una subpoblación: el suyo o el de `[f5]`.
 ///
-/// Solo se usa para rechazar la combinación incompatible con el modo
-/// controlado; aplicar F y publicar `F_realized` pertenece a F5.3.2.
+/// Devuelve `None` cuando **ningún** documento lo declara, que no es lo mismo
+/// que declarar `0.0`: REQ-EVO-48 rechaza *configurar* F fuera de `P=2` y esa
+/// distinción es la que permite hacerlo.
 fn effective_inbreeding_f(
     config: &EffectiveF5Config,
     subpopulation: &DeclaredF5Subpopulation,
-) -> Result<f64, Diagnostic> {
+) -> Result<Option<f64>, Diagnostic> {
     let declared = subpopulation
         .inbreeding_f
         .as_ref()
         .or(config.declared_scenario().inbreeding_f.as_ref());
     let Some(number) = declared else {
-        return Ok(0.0);
+        return Ok(None);
     };
-    number.literal().parse::<f64>().map_err(|_| {
+    number.literal().parse::<f64>().map(Some).map_err(|_| {
         configuration(
             config,
             "inbreeding_f",
@@ -986,33 +1116,114 @@ fn copy_seats(roster: &F5FounderRoster, ploidy: u8) -> Vec<CopySeat> {
 // Modo probabilístico
 // ---------------------------------------------------------------------------
 
+/// F aplicable a las copias de una unidad probabilística.
+///
+/// Las tres variantes son exactamente los tres consumos que DTC-089 fija para
+/// `founder_f`: ninguno con `F=0`, ninguno con `F=1` y un U53 con `0<F<1`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FounderInbreeding {
+    /// `P≠2`, F sin declarar o `F=0`: cada copia se muestrea por su cuenta y
+    /// `founder_f` no se abre.
+    Independent,
+    /// `P=2` con `0<F<1`: la copia 1 consulta `founder_f` antes de su propio
+    /// `founder_sample`.
+    Bernoulli(f64),
+    /// `P=2` con `F=1`: la copia 1 reutiliza siempre y `founder_f` no se abre,
+    /// conforme a la regla Bernoulli del catálogo.
+    AlwaysReuse,
+}
+
+/// Resuelve el F aplicable a una subpoblación a partir de la ploidía efectiva
+/// y del F **declarado**.
+///
+/// `None` significa que ningún documento declaró F. REQ-EVO-48 rechaza
+/// configurar F con `P=1` o `P>2` —no solo aplicarlo—, de modo que aquí basta
+/// con que exista una declaración para rechazarla fuera de `P=2`, y el
+/// diagnóstico cita ámbito y ploidía.
+fn resolve_founder_inbreeding(
+    ploidy: u8,
+    declared: Option<f64>,
+) -> Result<FounderInbreeding, String> {
+    let Some(inbreeding) = declared else {
+        return Ok(FounderInbreeding::Independent);
+    };
+    if ploidy != 2 {
+        return Err(format!(
+            "declara inbreeding_f={inbreeding} y F solo se admite con ploidía 2; la ploidía efectiva es {ploidy}"
+        ));
+    }
+    if !inbreeding.is_finite() || !(0.0..=1.0).contains(&inbreeding) {
+        return Err(format!(
+            "declara inbreeding_f={inbreeding}, que no pertenece a [0,1]"
+        ));
+    }
+    if inbreeding == 0.0 {
+        return Ok(FounderInbreeding::Independent);
+    }
+    if inbreeding == 1.0 {
+        return Ok(FounderInbreeding::AlwaysReuse);
+    }
+    Ok(FounderInbreeding::Bernoulli(inbreeding))
+}
+
 fn sample_probabilistic_unit(
     scenario_id: &ScenarioId,
     root_seed: RootSeed,
     row: &F5SamplingResolution,
     seats: &[CopySeat],
     prefix: &HaplotypePrefix,
+    inbreeding: FounderInbreeding,
 ) -> Result<(Vec<F5CopyAssignment>, u64), Diagnostic> {
     let mut assignments = Vec::with_capacity(seats.len());
     let mut operations = 0_u64;
     // Las copias de un individuo se recorren juntas y en orden de
-    // `copy_index`: F5.3.2 añadirá aquí la reutilización de la fila de la
-    // copia 0 con probabilidad F sin reordenar ningún consumo.
+    // `copy_index`, de modo que la fila de la copia 0 sigue disponible cuando
+    // le toca a la copia 1 y la reutilización no necesita recorrer nada.
+    let mut previous: Option<(&IndividualId, u64)> = None;
     for seat in seats {
         operations = operations.saturating_add(1);
-        let mut rng = derive_f5_subseed(
-            root_seed,
-            F5RandomDecision::founder_sample(
-                scenario_id,
-                &row.population_id,
-                &row.block_id,
-                &seat.individual_id,
-                seat.copy_index,
-            ),
-        )?
-        .local_rng();
-        let (haplotype_rank, visits) = prefix.choose(&mut rng);
+        // Solo la copia 1 **del mismo individuo** puede reutilizar una fila.
+        let copy_zero_rank = match previous {
+            Some((individual, rank))
+                if seat.copy_index == 1 && *individual == seat.individual_id =>
+            {
+                Some(rank)
+            }
+            _ => None,
+        };
+        let (haplotype_rank, visits) = draw_copy_rank(
+            scenario_id,
+            inbreeding,
+            copy_zero_rank,
+            prefix,
+            || {
+                Ok(derive_f5_subseed(
+                    root_seed,
+                    F5RandomDecision::founder_f(
+                        scenario_id,
+                        &row.population_id,
+                        &row.block_id,
+                        &seat.individual_id,
+                    ),
+                )?
+                .local_rng())
+            },
+            || {
+                Ok(derive_f5_subseed(
+                    root_seed,
+                    F5RandomDecision::founder_sample(
+                        scenario_id,
+                        &row.population_id,
+                        &row.block_id,
+                        &seat.individual_id,
+                        seat.copy_index,
+                    ),
+                )?
+                .local_rng())
+            },
+        )?;
         operations = operations.saturating_add(visits);
+        previous = Some((&seat.individual_id, haplotype_rank));
         assignments.push(F5CopyAssignment {
             individual_id: seat.individual_id.clone(),
             copy_index: seat.copy_index,
@@ -1020,6 +1231,51 @@ fn sample_probabilistic_unit(
         });
     }
     Ok((assignments, operations))
+}
+
+/// Fila de una copia y **orden exacto en que abre sus ámbitos**.
+///
+/// `copy_zero_rank` es la fila de la copia 0 del mismo individuo, y solo la
+/// trae la copia 1 de un diploide. El orden que fija DTC-089 —`founder_f`
+/// antes que el `founder_sample` de la copia 1, y ese segundo flujo sin abrir
+/// cuando se reutiliza— no se observa en ninguna salida: por eso los dos
+/// ámbitos entran como cierres y las unitarias pueden comprobar cuál se abre,
+/// en qué orden y cuál no llega a invocarse.
+///
+/// Devuelve el rango y las visitas que costó, `founder_f` incluido.
+fn draw_copy_rank<R: RandomWordSource>(
+    scenario_id: &ScenarioId,
+    inbreeding: FounderInbreeding,
+    copy_zero_rank: Option<u64>,
+    prefix: &HaplotypePrefix,
+    open_f: impl FnOnce() -> Result<R, Diagnostic>,
+    open_sample: impl FnOnce() -> Result<R, Diagnostic>,
+) -> Result<(u64, u64), Diagnostic> {
+    let mut operations = 0_u64;
+    if let Some(rank) = copy_zero_rank {
+        let reuse = match inbreeding {
+            FounderInbreeding::Independent => false,
+            FounderInbreeding::AlwaysReuse => true,
+            FounderInbreeding::Bernoulli(probability) => {
+                let mut rng = open_f()?;
+                operations = operations.saturating_add(1);
+                f5_bernoulli_with_source(&mut rng, probability).map_err(|_| {
+                    internal(
+                        scenario_id,
+                        format!("el F efectivo {probability} no es una probabilidad"),
+                    )
+                })?
+            }
+        };
+        if reuse {
+            // El segundo flujo no se abre: la copia 1 recibe **exactamente**
+            // la fila de la copia 0.
+            return Ok((rank, operations));
+        }
+    }
+    let mut rng = open_sample()?;
+    let (rank, visits) = prefix.choose(&mut rng);
+    Ok((rank, operations.saturating_add(visits)))
 }
 
 /// Prefijos compensados de `q`, calculados **una vez por unidad**.
@@ -1494,6 +1750,142 @@ fn sample_controlled_unit(
 }
 
 // ---------------------------------------------------------------------------
+// F realizado
+// ---------------------------------------------------------------------------
+
+/// Fila `f_realized` de una unidad, en los dos modos y en toda ploidía, junto
+/// a las visitas que costó contarla.
+fn realized_f_row(
+    scenario_id: &ScenarioId,
+    row: &F5SamplingResolution,
+    ploidy: u8,
+    target_f: Option<f64>,
+    assignments: &[F5CopyAssignment],
+    haplotype_count: usize,
+) -> Result<(F5RealizedF, u64), Diagnostic> {
+    // Fuera de `P=2` no hay heterocigoto que contar: la fila se publica igual,
+    // con objetivo y valor nulos y estado `not_applicable`, nunca con un cero
+    // ni con una estimación adaptada (REQ-EVO-52).
+    let (value, operations) = if ploidy == 2 {
+        realized_diploid_f(assignments, haplotype_count)
+            .map_err(|detail| internal(scenario_id, detail))?
+    } else {
+        (None, 0)
+    };
+    Ok((
+        F5RealizedF {
+            population_id: row.population_id.clone(),
+            block_id: row.block_id.clone(),
+            target_f,
+            status: if value.is_some() {
+                F5RealizedFStatus::Evaluated
+            } else {
+                F5RealizedFStatus::NotApplicable
+            },
+            value,
+        },
+        operations,
+    ))
+}
+
+/// `F_realized = 1 - H_observed/H_expected` de una unidad **diploide**, o
+/// `None` cuando el denominador no lo permite, junto a las visitas que costó.
+///
+/// `H_observed = heterozygous_individuals/individual_count`,
+/// `q_realized_h = n_h/C` y `H_expected = 1 - Σ_h q_realized_h²`. La suma
+/// recorre los rangos en orden ascendente y se evalúa en el orden escrito, que
+/// es la regla binary64 de DTC-089; no interviene aquí la suma compensada de
+/// DTC-049, que gobierna las normalizaciones del perfil y no esta fórmula.
+///
+/// Devuelve `None` —`not_applicable`, nunca cero— cuando `H_expected` no es
+/// positivo. El caso del contrato es `H_expected = 0`: con una sola categoría
+/// realizada `q` vale 1 exacto y la resta da cero **exacto**, sin depender del
+/// redondeo. Las otras dos formas de no ser positivo —negativo o `NaN`— son
+/// defensa **inalcanzable**: con más de una categoría el mínimo exacto de
+/// `C² - Σ n_h²` es `2C - 2`, de modo que `H_expected >= 2/C - 2/C²` domina
+/// cualquier error de redondeo, y una búsqueda dirigida hasta `C = 2^51` no
+/// encontró ninguno. Se conservan porque un cociente sin denominador no es un
+/// resultado, no porque el contrato las prevea.
+///
+/// Un valor negativo es un exceso de heterocigotos y se conserva tal cual
+/// (REQ-EVO-52).
+///
+/// # Errors
+///
+/// Devuelve el detalle si las asignaciones no vienen emparejadas por individuo
+/// y copia, o si nombran un rango que la matriz no contiene: en un diploide
+/// ambas cosas son invariantes internas ya garantizadas por el muestreo.
+fn realized_diploid_f(
+    assignments: &[F5CopyAssignment],
+    haplotype_count: usize,
+) -> Result<(Option<f64>, u64), String> {
+    let mut counts = vec![0_u64; haplotype_count];
+    let mut individuals = 0_u64;
+    let mut heterozygous = 0_u64;
+    let mut index = 0_usize;
+    // El recuento es `O(C + H)` y se contabiliza **dentro** de sus dos bucles,
+    // igual que el resto del coste de la unidad.
+    let mut operations = 0_u64;
+    while index < assignments.len() {
+        operations = operations.saturating_add(1);
+        let first = &assignments[index];
+        let second = assignments.get(index + 1).ok_or_else(|| {
+            "una unidad diploide deja una copia sin pareja en su individuo".to_owned()
+        })?;
+        if first.copy_index != 0
+            || second.copy_index != 1
+            || first.individual_id != second.individual_id
+        {
+            return Err(format!(
+                "el individuo {} no aporta exactamente las copias 0 y 1 consecutivas",
+                first.individual_id.as_str()
+            ));
+        }
+        for assignment in [first, second] {
+            let slot = usize::try_from(assignment.haplotype_rank)
+                .ok()
+                .and_then(|rank| counts.get_mut(rank))
+                .ok_or_else(|| {
+                    "una asignación nombra un rango que la matriz no contiene".to_owned()
+                })?;
+            *slot += 1;
+        }
+        individuals += 1;
+        if first.haplotype_rank != second.haplotype_rank {
+            heterozygous += 1;
+        }
+        index += 2;
+    }
+    // `C=0` no tiene frecuencia realizada. El censo admitido exige al menos un
+    // individuo por subpoblación, de modo que la vía productiva no llega aquí;
+    // la rama existe para que la función sea total y la fijan las unitarias.
+    if individuals == 0 {
+        return Ok((None, operations));
+    }
+    let copies = assignments.len() as f64;
+    let h_observed = heterozygous as f64 / individuals as f64;
+    let mut homozygosity = 0.0_f64;
+    for count in &counts {
+        operations = operations.saturating_add(1);
+        let frequency = *count as f64 / copies;
+        homozygosity += frequency * frequency;
+    }
+    let h_expected = 1.0 - homozygosity;
+    // `== 0.0` es el caso del contrato; `< 0.0` y `NaN` son inalcanzables y se
+    // conservan solo para no dividir nunca sin denominador.
+    if h_expected.is_nan() || h_expected <= 0.0 {
+        return Ok((None, operations));
+    }
+    let value = 1.0 - h_observed / h_expected;
+    if !value.is_finite() {
+        return Err(format!(
+            "F realizado no finito con H_observed={h_observed} y H_expected={h_expected}"
+        ));
+    }
+    Ok((Some(value), operations))
+}
+
+// ---------------------------------------------------------------------------
 // Diagnósticos
 // ---------------------------------------------------------------------------
 
@@ -1511,11 +1903,16 @@ fn internal(scenario_id: &ScenarioId, detail: impl Into<String>) -> Diagnostic {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::{
-        F5RandomDecision, HaplotypePrefix, NeumaierSum, QuotaError, RankState, RootSeed,
-        derive_f5_subseed, plan_controlled_quota, select_tie_prefix,
+        CopySeat, F5CopyAssignment, F5RandomDecision, F5SamplingMode, F5SamplingResolution,
+        F5SamplingSource, FounderInbreeding, HaplotypePrefix, NeumaierSum, QuotaError, RankState,
+        RootSeed, derive_f5_subseed, draw_copy_rank, plan_controlled_quota, realized_diploid_f,
+        resolve_founder_inbreeding, sample_probabilistic_unit, select_tie_prefix,
     };
-    use crate::identity::{F5BlockId, PopulationId, ScenarioId};
+    use crate::diagnostics::Diagnostic;
+    use crate::identity::{F5BlockId, IndividualId, PopulationId, ScenarioId};
     use crate::randomness::{LocalRng, RandomWordSource};
 
     /// Flujo real de `controlled_quota_tie` para las unitarias del desempate.
@@ -1882,6 +2279,515 @@ mod tests {
         let tie = tie.expect("frontera empatada");
         assert_eq!(tie.candidate_ranks(), &[2, 3]);
         assert_eq!(tie.selected_ranks().len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // F diploide
+    // -----------------------------------------------------------------------
+
+    /// Escenario de las unitarias de F, que solo necesitan un identificador.
+    fn scenario_id() -> ScenarioId {
+        ScenarioId::parse("scenario", "test").expect("escenario")
+    }
+
+    /// Individuo de las unitarias de `F_realized`.
+    fn individual(label: &str) -> IndividualId {
+        IndividualId::parse(label.to_owned(), "test").expect("individuo")
+    }
+
+    /// Visitas que cuesta el paseo de prefijos con una palabra dada, para
+    /// separar del coste total el U53 que añade `founder_f`.
+    fn walk_cost(prefix: &HaplotypePrefix, word: u64) -> u64 {
+        let mut spy = SpySource::new(&[word]);
+        prefix.choose(&mut spy).1
+    }
+
+    /// Asignación suelta, para construir censos sintéticos.
+    fn assignment(label: &str, copy_index: u32, haplotype_rank: u64) -> F5CopyAssignment {
+        F5CopyAssignment {
+            individual_id: individual(label),
+            copy_index,
+            haplotype_rank,
+        }
+    }
+
+    /// Declarar F con `P=1` o `P>2` es error, y no declararlo nunca lo es.
+    ///
+    /// REQ-EVO-48 rechaza *configurar* F fuera de los diploides, no solo
+    /// aplicarlo: por eso la entrada es el F **declarado** y no un cero que no
+    /// distinguiría «sin declarar» de «declarado 0».
+    #[test]
+    fn declaring_f_outside_a_diploid_is_an_error() {
+        for ploidy in [1_u8, 3, 4, 10] {
+            for declared in [0.0, 0.25, 1.0] {
+                let detail = resolve_founder_inbreeding(ploidy, Some(declared))
+                    .expect_err("F fuera de P=2 debe rechazarse");
+                assert!(
+                    detail.contains("ploidía 2") && detail.contains(&ploidy.to_string()),
+                    "el rechazo debe citar ámbito y ploidía: {detail}"
+                );
+            }
+            assert_eq!(
+                resolve_founder_inbreeding(ploidy, None),
+                Ok(FounderInbreeding::Independent),
+                "sin F declarado, cualquier ploidía muestrea copias independientes"
+            );
+        }
+    }
+
+    /// Los tres consumos del catálogo: `F=0` y `F=1` no abren `founder_f`, y
+    /// solo `0<F<1` lo consulta.
+    #[test]
+    fn the_diploid_f_resolves_its_three_consumption_regimes() {
+        assert_eq!(
+            resolve_founder_inbreeding(2, Some(0.0)),
+            Ok(FounderInbreeding::Independent)
+        );
+        assert_eq!(
+            resolve_founder_inbreeding(2, Some(1.0)),
+            Ok(FounderInbreeding::AlwaysReuse)
+        );
+        assert_eq!(
+            resolve_founder_inbreeding(2, Some(0.25)),
+            Ok(FounderInbreeding::Bernoulli(0.25))
+        );
+        assert_eq!(
+            resolve_founder_inbreeding(2, None),
+            Ok(FounderInbreeding::Independent)
+        );
+        for invalid in [-0.25_f64, 1.5, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                resolve_founder_inbreeding(2, Some(invalid)).is_err(),
+                "F={invalid} no pertenece a [0,1]"
+            );
+        }
+    }
+
+    /// La copia 0 nunca consulta `founder_f`, cualquiera que sea F.
+    #[test]
+    fn the_first_copy_never_opens_the_f_scope() {
+        let prefix = HaplotypePrefix::new(&[0.5, 0.5]).expect("prefijos");
+        for inbreeding in [
+            FounderInbreeding::Independent,
+            FounderInbreeding::Bernoulli(0.5),
+            FounderInbreeding::AlwaysReuse,
+        ] {
+            let (rank, operations) = draw_copy_rank(
+                &scenario_id(),
+                inbreeding,
+                None,
+                &prefix,
+                || -> Result<SpySource, Diagnostic> {
+                    panic!("la copia 0 no puede abrir founder_f")
+                },
+                || Ok(SpySource::new(&[u64::MAX])),
+            )
+            .expect("copia 0 muestreada");
+            assert_eq!(rank, 1, "la palabra máxima elige el último rango");
+            assert_eq!(
+                operations,
+                walk_cost(&prefix, u64::MAX),
+                "solo el paseo de prefijos, sin el U53 de founder_f"
+            );
+        }
+    }
+
+    /// `0<F<1`: `founder_f` se abre **antes** que el `founder_sample` de la
+    /// copia 1 y, cuando decide reutilizar, ese segundo flujo no se abre.
+    ///
+    /// El orden no se ve en ninguna salida —los dos ámbitos derivan
+    /// subsemillas independientes—, de modo que solo esta observación directa
+    /// lo fija.
+    #[test]
+    fn the_f_scope_is_consumed_before_the_second_copy_sample() {
+        let prefix = HaplotypePrefix::new(&[0.5, 0.5]).expect("prefijos");
+        let threshold = (0.5_f64 * (1_u64 << 53) as f64).floor() as u64;
+
+        // Bits53 por debajo del umbral: reutiliza y `founder_sample` no se
+        // abre. El rango es el de la copia 0, no el que el prefijo elegiría.
+        let opened = RefCell::new(Vec::new());
+        let (rank, operations) = draw_copy_rank(
+            &scenario_id(),
+            FounderInbreeding::Bernoulli(0.5),
+            Some(0),
+            &prefix,
+            || {
+                opened.borrow_mut().push("founder_f");
+                Ok(SpySource::new(&[(threshold - 1) << 11]))
+            },
+            || -> Result<SpySource, Diagnostic> {
+                opened.borrow_mut().push("founder_sample");
+                panic!("reutilizar no puede abrir el segundo flujo")
+            },
+        )
+        .expect("copia 1 reutilizada");
+        assert_eq!(rank, 0, "la copia 1 reutiliza exactamente la fila de la 0");
+        assert_eq!(operations, 1, "un U53 de founder_f y ningún paseo");
+        assert_eq!(*opened.borrow(), vec!["founder_f"]);
+
+        // Bits53 en el umbral: no reutiliza y abre su propio muestreo,
+        // siempre después de `founder_f`.
+        let opened = RefCell::new(Vec::new());
+        let (rank, operations) = draw_copy_rank(
+            &scenario_id(),
+            FounderInbreeding::Bernoulli(0.5),
+            Some(0),
+            &prefix,
+            || {
+                opened.borrow_mut().push("founder_f");
+                Ok(SpySource::new(&[threshold << 11]))
+            },
+            || {
+                opened.borrow_mut().push("founder_sample");
+                Ok(SpySource::new(&[u64::MAX]))
+            },
+        )
+        .expect("copia 1 muestreada");
+        assert_eq!(rank, 1, "el muestreo independiente eligió su propia fila");
+        assert_eq!(
+            operations,
+            1 + walk_cost(&prefix, u64::MAX),
+            "el U53 de F y el paseo de prefijos"
+        );
+        assert_eq!(*opened.borrow(), vec!["founder_f", "founder_sample"]);
+    }
+
+    /// `F=0` y `F=1` no abren `founder_f`: el cierre que derivaría su
+    /// subsemilla no llega a invocarse, que es la regla Bernoulli literal del
+    /// catálogo.
+    #[test]
+    fn the_extreme_f_values_never_open_the_f_scope() {
+        let prefix = HaplotypePrefix::new(&[0.5, 0.5]).expect("prefijos");
+
+        // `F=0`: muestreo independiente de la copia 1.
+        let (rank, operations) = draw_copy_rank(
+            &scenario_id(),
+            FounderInbreeding::Independent,
+            Some(0),
+            &prefix,
+            || -> Result<SpySource, Diagnostic> { panic!("F=0 no consume founder_f") },
+            || Ok(SpySource::new(&[u64::MAX])),
+        )
+        .expect("copia 1 muestreada");
+        assert_eq!(rank, 1, "con F=0 la copia 1 se muestrea por su cuenta");
+        assert_eq!(
+            operations,
+            walk_cost(&prefix, u64::MAX),
+            "F=0 no añade el U53 de founder_f"
+        );
+
+        // `F=1`: reutilización completa sin abrir ninguno de los dos flujos.
+        let (rank, operations) = draw_copy_rank(
+            &scenario_id(),
+            FounderInbreeding::AlwaysReuse,
+            Some(1),
+            &prefix,
+            || -> Result<SpySource, Diagnostic> { panic!("F=1 no consume founder_f") },
+            || -> Result<SpySource, Diagnostic> { panic!("F=1 no abre el muestreo de la copia 1") },
+        )
+        .expect("copia 1 reutilizada");
+        assert_eq!(rank, 1, "homocigosis completa");
+        assert_eq!(operations, 0, "ningún sorteo");
+    }
+
+    /// Vector de la Bernoulli de F: la decisión es exactamente
+    /// `bits53 < floor(F*2^53)`, con el borde inferior y el superior.
+    #[test]
+    fn the_f_bernoulli_follows_the_catalogue_vector() {
+        let prefix = HaplotypePrefix::new(&[0.5, 0.5]).expect("prefijos");
+        let mut compared = 0_u64;
+        let mut reused = 0_u64;
+        for probability in [0.25_f64, 0.5, 0.75, 1.0 / 3.0] {
+            let threshold = (probability * (1_u64 << 53) as f64).floor() as u64;
+            for bits in [
+                0,
+                1,
+                threshold - 1,
+                threshold,
+                threshold + 1,
+                (1_u64 << 53) - 1,
+            ] {
+                let expected_reuse = bits < threshold;
+                let (rank, operations) = draw_copy_rank(
+                    &scenario_id(),
+                    FounderInbreeding::Bernoulli(probability),
+                    Some(0),
+                    &prefix,
+                    || Ok(SpySource::new(&[bits << 11])),
+                    // La palabra máxima elige el rango 1, distinto del 0 que
+                    // reutilizaría: la fila distingue las dos decisiones.
+                    || Ok(SpySource::new(&[u64::MAX])),
+                )
+                .expect("copia 1 resuelta");
+                assert_eq!(
+                    rank == 0,
+                    expected_reuse,
+                    "F={probability} con bits53={bits} debe {} reutilizar",
+                    if expected_reuse { "" } else { "no" }
+                );
+                assert_eq!(
+                    operations,
+                    if expected_reuse {
+                        1
+                    } else {
+                        1 + walk_cost(&prefix, u64::MAX)
+                    },
+                    "F={probability} con bits53={bits}: el U53 de F se consume siempre"
+                );
+                reused += u64::from(expected_reuse);
+                compared += 1;
+            }
+        }
+        assert_eq!(compared, 24, "la rejilla completa debe compararse");
+        assert!(
+            reused > 0 && reused < compared,
+            "la rejilla cubre ambas decisiones"
+        );
+    }
+
+    /// Semilla raíz de las unitarias que llaman al muestreo completo.
+    fn unit_root_seed() -> RootSeed {
+        RootSeed::parse(
+            "seed",
+            "a1a2a3a4a5a6a7a8b1b2b3b4b5b6b7b8c1c2c3c4c5c6c7c8d1d2d3d4d5d6d7d8",
+        )
+        .expect("semilla")
+    }
+
+    /// Fila probabilística sintética de `copies` copias.
+    fn probabilistic_row(copies: u64) -> F5SamplingResolution {
+        F5SamplingResolution {
+            population_id: PopulationId::parse("P1", "test").expect("población"),
+            block_id: F5BlockId::parse("BLK_TEST", "test").expect("bloque"),
+            block_index: 0,
+            requested_mode: F5SamplingMode::Probabilistic,
+            effective_mode: F5SamplingMode::Probabilistic,
+            source: F5SamplingSource::SubpopulationDefault,
+            controlled_max_abs_error_declared: None,
+            controlled_max_abs_error_effective: None,
+            controlled_max_abs_error_copies: None,
+            copies,
+        }
+    }
+
+    /// Fila que una copia sortearía por su cuenta, reconstruida desde su
+    /// ámbito con el recorrido secuencial y sin llamar al productor.
+    fn own_rank(row: &F5SamplingResolution, weights: &[f64], label: &str, copy_index: u32) -> u64 {
+        let mut rng = derive_f5_subseed(
+            unit_root_seed(),
+            F5RandomDecision::founder_sample(
+                &scenario_id(),
+                &row.population_id,
+                &row.block_id,
+                &individual(label),
+                copy_index,
+            ),
+        )
+        .expect("subsemilla")
+        .local_rng();
+        let threshold = (rng.next_u64() >> 11) as f64 / (1_u64 << 53) as f64;
+        sequential_walk(weights, threshold)
+    }
+
+    /// Solo la copia 1 **del mismo individuo** puede reutilizar una fila.
+    ///
+    /// El recorrido las entrega juntas y en orden, de modo que la comprobación
+    /// de identidad parece redundante; lo que esta prueba fija es que, si el
+    /// orden cambiara, una copia 1 no heredaría la fila de otro individuo.
+    #[test]
+    fn only_the_second_copy_of_the_same_individual_can_reuse_a_row() {
+        let weights = [0.5_f64, 0.5];
+        let prefix = HaplotypePrefix::new(&weights).expect("prefijos");
+        let root_seed = unit_root_seed();
+        let scenario = scenario_id();
+        let row = probabilistic_row(2);
+
+        // Pareja ajena cuyas filas independientes difieren: si la copia 1
+        // heredase la del asiento anterior, la diferencia se vería.
+        let first = own_rank(&row, &weights, "I0", 0);
+        let (label, expected) = ["I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8"]
+            .into_iter()
+            .map(|label| (label, own_rank(&row, &weights, label, 1)))
+            .find(|(_, rank)| *rank != first)
+            .expect("alguna copia 1 ajena sortea otra fila");
+        let seats = vec![
+            CopySeat {
+                individual_id: individual("I0"),
+                copy_index: 0,
+            },
+            CopySeat {
+                individual_id: individual(label),
+                copy_index: 1,
+            },
+        ];
+        // `F=1` reutilizaría siempre si la identidad no se comprobara.
+        let (assignments, _) = sample_probabilistic_unit(
+            &scenario,
+            root_seed,
+            &row,
+            &seats,
+            &prefix,
+            FounderInbreeding::AlwaysReuse,
+        )
+        .expect("unidad muestreada");
+        assert_eq!(assignments[0].haplotype_rank, first);
+        assert_eq!(
+            assignments[1].haplotype_rank, expected,
+            "la copia 1 de otro individuo se muestrea por su cuenta"
+        );
+    }
+
+    /// Solo la copia **1** hereda: con `P=3`, la copia 2 se muestrea por su
+    /// cuenta aunque el individuo sea el mismo y la reutilización esté activa.
+    ///
+    /// La vía productiva no llega aquí —F exige `P=2`—, pero sin la condición
+    /// sobre `copy_index` la reutilización se propagaría copia a copia en
+    /// cuanto otra ploidía la admitiera.
+    #[test]
+    fn only_the_second_copy_index_can_inherit_a_row() {
+        let weights = [0.5_f64, 0.5];
+        let prefix = HaplotypePrefix::new(&weights).expect("prefijos");
+        let scenario = scenario_id();
+        let row = probabilistic_row(3);
+
+        // Individuo cuya copia 2 sortearía una fila distinta de la copia 0, que
+        // es la que heredaría si la condición no existiera.
+        let (label, expected) = ["I0", "I1", "I2", "I3", "I4", "I5", "I6", "I7"]
+            .into_iter()
+            .map(|label| (label, own_rank(&row, &weights, label, 2)))
+            .find(|(label, rank)| *rank != own_rank(&row, &weights, label, 0))
+            .expect("alguna copia 2 sortea otra fila que su copia 0");
+        let seats = (0..3)
+            .map(|copy_index| CopySeat {
+                individual_id: individual(label),
+                copy_index,
+            })
+            .collect::<Vec<_>>();
+        let (assignments, _) = sample_probabilistic_unit(
+            &scenario,
+            unit_root_seed(),
+            &row,
+            &seats,
+            &prefix,
+            FounderInbreeding::AlwaysReuse,
+        )
+        .expect("unidad muestreada");
+        assert_eq!(
+            assignments[1].haplotype_rank, assignments[0].haplotype_rank,
+            "la copia 1 sí hereda"
+        );
+        assert_eq!(
+            assignments[2].haplotype_rank, expected,
+            "la copia 2 se muestrea por su cuenta"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F realizado
+    // -----------------------------------------------------------------------
+
+    /// `F_realized` bialélico contrastado con su racional exacto, con los tres
+    /// regímenes: homocigosis completa, exceso de heterocigotos y mezcla.
+    ///
+    /// El oráculo evalúa `1 - het*C²/(N*(C² - Σ n_h²))`, una expresión
+    /// distinta de la del productor y exacta en enteros para estos censos.
+    #[test]
+    fn the_realized_f_matches_its_rational_oracle() {
+        let cases: [(&[(u64, u64)], f64); 4] = [
+            // Dos individuos homocigotos de rangos distintos: H_obs=0.
+            (&[(0, 0), (1, 1)], 1.0),
+            // Dos heterocigotos: H_obs=1 y H_exp=1/2, F=-1.
+            (&[(0, 1), (0, 1)], -1.0),
+            // Mitad y mitad: H_obs=1/2, H_exp=1/2, F=0.
+            (&[(0, 0), (0, 1), (1, 1), (0, 1)], 0.0),
+            // Cuatro individuos con tres rangos: F=40/168.
+            (&[(0, 0), (1, 2), (0, 1), (2, 2)], 1.0 - 128.0 / 168.0),
+        ];
+        for (individuals, expected) in cases {
+            let mut assignments = Vec::new();
+            for (index, (left, right)) in individuals.iter().enumerate() {
+                let label = format!("I{index}");
+                assignments.push(assignment(&label, 0, *left));
+                assignments.push(assignment(&label, 1, *right));
+            }
+            let (value, operations) =
+                realized_diploid_f(&assignments, 3).expect("censo diploide bien formado");
+            let value = value.expect("H_expected positivo");
+            assert_eq!(
+                operations,
+                individuals.len() as u64 + 3,
+                "el recuento visita cada individuo y cada rango, y lo contabiliza"
+            );
+            assert!(
+                (value - expected).abs() <= 1e-12,
+                "F realizado {value} frente al racional {expected}"
+            );
+        }
+    }
+
+    /// Una sola categoría realizada deja `H_expected=0` y el estado es no
+    /// aplicable, **no** cero: el cociente no llega a evaluarse.
+    #[test]
+    fn a_null_expected_heterozygosity_is_not_applicable() {
+        let assignments = vec![
+            assignment("I0", 0, 2),
+            assignment("I0", 1, 2),
+            assignment("I1", 0, 2),
+            assignment("I1", 1, 2),
+        ];
+        assert_eq!(
+            realized_diploid_f(&assignments, 4)
+                .expect("censo bien formado")
+                .0,
+            None,
+            "con una sola categoría no hay heterocigosis esperada"
+        );
+        // Control positivo: basta mover una copia a otro rango para que la
+        // misma fórmula sí sea evaluable.
+        let mut mixed = assignments.clone();
+        mixed[3] = assignment("I1", 1, 0);
+        assert!(
+            realized_diploid_f(&mixed, 4)
+                .expect("censo bien formado")
+                .0
+                .is_some(),
+            "con dos categorías el denominador deja de ser nulo"
+        );
+    }
+
+    /// Sin copias no hay frecuencia realizada: la función es total y devuelve
+    /// no aplicable en lugar de dividir por cero.
+    #[test]
+    fn an_empty_unit_is_not_applicable() {
+        assert_eq!(
+            realized_diploid_f(&[], 2).expect("censo vacío"),
+            (None, 0),
+            "sin copias no se visita nada: el `NaN` del cociente vacío daría el \
+             mismo `None` pero recorrería los rangos"
+        );
+    }
+
+    /// Un censo diploide mal emparejado es una invariante rota, no un cálculo:
+    /// sin esta comprobación, dos copias 0 de individuos distintos contarían
+    /// como un individuo heterocigoto inexistente.
+    #[test]
+    fn a_broken_diploid_pairing_is_rejected_instead_of_counted() {
+        assert!(
+            realized_diploid_f(&[assignment("I0", 0, 0), assignment("I1", 0, 1)], 2).is_err(),
+            "dos copias 0 de individuos distintos no son un individuo"
+        );
+        assert!(
+            realized_diploid_f(&[assignment("I0", 1, 0), assignment("I0", 0, 1)], 2).is_err(),
+            "las copias deben venir en orden 0 y 1"
+        );
+        assert!(
+            realized_diploid_f(&[assignment("I0", 0, 0)], 2).is_err(),
+            "una copia suelta no completa un individuo"
+        );
+        assert!(
+            realized_diploid_f(&[assignment("I0", 0, 0), assignment("I0", 1, 7)], 2).is_err(),
+            "un rango fuera de la matriz no puede contarse"
+        );
     }
 
     // -----------------------------------------------------------------------

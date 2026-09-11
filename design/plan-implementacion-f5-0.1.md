@@ -1093,13 +1093,196 @@ identificador del índice de copia.
     sin un solo caso terminado. Las unitarias sí lo cubren —un grupo de cuatro
     que abarca el residual entero, y grupos de hasta ocho en la barrida del
     oráculo—, de modo que el hueco es del fixture y no del algoritmo.
-- ☐ **F5.3.2.** Aplicar F diploide y publicar F realizado; rechazar F en otras
+- ✅ **F5.3.2.** Aplicar F diploide y publicar F realizado; rechazar F en otras
   ploidías y registrar Ne no aplicable en F5.
   - Depende de: F5.3.1.
   - Procede de: REQ-EVO-46–52/76, DTPD-109 resuelta y DTC-089.
   - Cambia: emparejamiento y estadísticas fundadoras.
   - Se comprueba con: fórmulas bialélica/multialélica, F=0/intermedio/1,
     H_expected=0, P=1/P>2 y vector de Bernoulli.
+  - Implementado en `src/f5_founders.rs` sobre la frontera que dejó F5.3.1:
+    `sample_probabilistic_unit` recorre las copias juntas y en orden de
+    `copy_index`, y la copia 1 de un diploide consulta `founder_f` **antes** de
+    abrir su `founder_sample`. El resultado publica además `f_realized`, una
+    fila por población×bloque en el orden de `sampling`.
+    Decisiones locales:
+    - **El orden de consumo entra como cierres, no como comentario.** DTC-089
+      fija que `founder_f` se consume antes que el `founder_sample` de la copia
+      1 y que, al reutilizar, ese segundo flujo no se abre; ninguna salida
+      muestra ese orden, porque los dos ámbitos derivan subsemillas
+      independientes. `draw_copy_rank` recibe los dos ámbitos como cierres
+      —mismo patrón que `select_tie_prefix` en F5.3.1— y las unitarias
+      observan cuál se abre, en qué orden y cuál no llega a invocarse, pasando
+      un cierre que entra en pánico si se invoca.
+    - **`F=0` y `F=1` no derivan siquiera la subsemilla.** El contrato regula
+      el **consumo**, no la apertura: `f5_bernoulli` ya devuelve sin gastar
+      palabra en los extremos, y el crate tiene precedente de derivar y no
+      consumir —`F5SpectrumProfile::sample_site` y el propio `founder_sample`
+      de un perfil con un solo haplotipo—. No derivarla es entonces una
+      elección local, no una exigencia: ahorra una derivación BLAKE3 por
+      individuo y es inobservable. `FounderInbreeding` distingue los tres
+      regímenes —`Independent`, `Bernoulli(F)` y `AlwaysReuse`— y solo el del
+      medio invoca el cierre.
+    - **La guarda de ploidía recibe el F declarado, no un cero.** REQ-EVO-48
+      rechaza *configurar* F con `P=1` o `P>2`, no solo aplicarlo, y un `0.0`
+      efectivo no distingue «sin declarar» de «declarado 0». Por eso
+      `effective_inbreeding_f` devuelve `Option<f64>` y
+      `resolve_founder_inbreeding(ploidy, declarado)` rechaza cualquier
+      declaración fuera de `P=2`, citando ámbito y ploidía. La admisión ya lo
+      rechaza antes (`GPS-CONF-101`, campos `inbreeding_f,ploidy`), de modo que
+      la guarda del módulo es una segunda frontera; a diferencia de las
+      declaradas en F5.3.1, **esta sí tiene prueba propia**, porque la función
+      es pura y las unitarias la llaman directamente.
+    - **`H_expected = 0` es `not_applicable`, nunca cero; el resto de la rama
+      es defensa inalcanzable.** Con una sola categoría realizada `q` vale 1
+      exacto y la resta da cero **exacto**: ese caso, el del contrato, no
+      depende del redondeo y sí tiene prueba. Las otras dos formas de no ser
+      positivo —negativo o `NaN`— son inalcanzables: con más de una categoría
+      el mínimo exacto de `C² - Σ n_h²` es `2C - 2`, de modo que
+      `H_expected >= 2/C - 2/C²` domina cualquier error de redondeo. Restringir
+      la rama a `== 0.0` no hace fallar ninguna prueba, y así queda dicho: se
+      conserva para no dividir nunca sin denominador, no como lectura del
+      contrato.
+    - **`Σ q_realized²` se suma en orden de rango, sin compensación.** DTC-049
+      gobierna las normalizaciones del perfil, no esta fórmula, y DTC-089 exige
+      evaluar binary64 «en el orden escrito». Con una sola categoría realizada
+      la suma vale exactamente 1 y `H_expected` exactamente 0, que es el caso
+      del contrato.
+    - **`target_f` vale `Some(F efectivo)` en `P=2` aunque nadie lo declare.**
+      El contrato solo declara `null` para `P≠2`; en diploides el objetivo
+      efectivo es 0,0 cuando no se declara, igual que el `inbreeding_f` del
+      efectivo.
+    - **La precedencia `[f5]` → subpoblación es ahora gobernadora del
+      muestreo, y por eso tiene cobertura propia.** `effective_inbreeding_f`
+      existía desde F5.3.1, donde solo alimentaba un rechazo; aquí decide los
+      genotipos fundadores. El fixture de la batería aprende a escribir
+      `[f5] inbreeding_f` y tres pruebas de cadena fijan que el F de población
+      gobierna a quien no declara el suyo, que el de la subpoblación
+      **sustituye** al de población —no al revés— y que cada subpoblación
+      recibe el suyo y no el de otra. Sin ellas, las tres variantes
+      correspondientes pasaban la batería entera, y la de la precedencia
+      invertida produce homocigosis completa donde el contrato pide HWE.
+    - **`F_realized` se publica también en modo controlado.** El contrato lo
+      pide «por población×bloque diploide» sin restringirlo a un modo; con
+      cuota exacta la frecuencia realizada coincide con el objetivo `q`, y la
+      prueba lo comprueba con el mismo oráculo racional.
+    - **Ne no aplicable se registra por ausencia, no con un tipo nuevo.** La
+      primera versión publicaba `F5ReproductiveNe::NotApplicable`. Se ha
+      **retirado**: el objeto `f5` del manifiesto enumera sus claves de forma
+      cerrada y no incluye Ne, `manifest-general-v5.schema.json` tampoco y es
+      `additionalProperties:false`, de modo que el tipo no tenía ni tiene
+      consumidor, y su aserción era una tautología de tipos que ninguna edición
+      del productor podía romper. Lo que queda es lo que sí se puede demostrar:
+      F5 no calcula ningún Ne, y una búsqueda negativa de `k_bar`, `V_k`, `k_j`
+      y `N_p` sobre el módulo impide que la fórmula de F7.3 aparezca.
+      Observación declarada, no bloqueante: DTC-089 dice que F5 «registra Ne
+      reproductivo como `not_applicable`», pero ningún artefacto F5 publicado
+      tiene dónde escribirlo; si F5.4 necesita ese registro, hará falta abrir
+      un campo, y eso es decisión de contrato, no de este hito.
+    - **La búsqueda negativa de F5.3.1 se vuelve positiva.** Donde aquel hito
+      exigía que el módulo no nombrara `founder_f`, este exige que lo abra
+      **exactamente una vez**: un segundo consumidor no pasaría por las
+      unitarias que fijan el orden.
+    - **`realized_diploid_f` es total.** Un censo sin copias devuelve no
+      aplicable —`C=0` no tiene frecuencia realizada— y un emparejamiento roto
+      o un rango fuera de la matriz son invariante interna, no cálculo. Sin la
+      primera comprobación, dos copias 0 de individuos distintos contarían como
+      un heterocigoto inexistente.
+  - Guarda declarada sin prueba propia, por ser inalcanzable desde la vía
+    productiva: la que exige que cada fila de muestreo tenga F resuelto —el
+    mismo censo alimenta los asientos y el mapa de F—. **Borrarla no haría
+    fallar ninguna prueba** y así queda dicho. Las otras tres que lo parecían
+    sí la tienen, y las tres se comprobaron mutación a mutación: la identidad
+    del individuo antes de reutilizar —una unitaria llama a
+    `sample_probabilistic_unit` con una pareja ajena y `F=1`—, la condición
+    `copy_index == 1` —otra lo hace con tres asientos del mismo individuo y
+    `P=3`, donde sin ella la reutilización se propagaría a la copia 2— y el
+    censo vacío, cuya unitaria fija también el coste: sin la guarda, `0/0`
+    daría `NaN` y el mismo `None`, y lo único observable es que se recorrerían
+    los `H` rangos.
+  - Coste: la copia 1 diploide con `0<F<1` añade **una** visita, contabilizada
+    dentro de `draw_copy_rank` y devuelta al bucle que la suma, no junto a él.
+    El recuento de `F_realized` es `O(C + H)` —una visita por individuo y otra
+    por rango, contadas **dentro** de sus dos bucles— y se suma al
+    `F5FounderUnit::operations` de su unidad. La cota lineal de F5.3.1 sigue
+    vigente y su prueba pasa sin cambiarla; una cota inferior nueva, escrita
+    solo con las partes deterministas del modo controlado, falla si el recuento
+    se ejecuta fuera de la contabilidad.
+  - Pruebas y variante defectuosa que cada una atrapa. `tests/f5_founders.rs`
+    añade catorce pruebas de la cadena completa y `src/f5_founders.rs` doce
+    unitarias; la línea base pasa de 867 a 893. El oráculo de `F_realized` es
+    racional en `i128` —`1 - het*C²/(N*(C²-Σn_h²))`, una expresión distinta de
+    la del productor— y el de la Bernoulli reconstruye `bits53 < floor(F*2^53)`
+    desde el ámbito publicado. Cada prueba se verificó **contra su variante
+    defectuosa**, aplicada una a una sobre el productor:
+    - `F=0` reutiliza la fila de la copia 0 → el HWE copia a copia, el ámbito
+      por copia de F5.3.1 y los extremos que no abren `founder_f` (3);
+    - `F=1` no reutiliza → la homocigosis completa, `H_expected=0` y los
+      extremos (3);
+    - `F=0` o `F=1` resueltos como Bernoulli, que abriría el ámbito → los tres
+      regímenes de consumo, y con `F=0` también el HWE copia a copia (2);
+    - `founder_sample` abierto antes que `founder_f` → el orden de apertura y
+      los extremos (2);
+    - reutilizar abriendo igualmente el segundo flujo → los mismos dos;
+    - Bernoulli invertida → la reutilización intermedia, el vector de Bernoulli
+      y el orden (3);
+    - Bernoulli con `<=` en vez de `<` —mutando `randomness.rs`— → el vector de
+      Bernoulli y el orden (2);
+    - sin la guarda de ploidía → la unitaria de la declaración fuera de `P=2`;
+    - `H_expected=0` informado como cero → las dos pruebas de no aplicable, la
+      unitaria y la de la cadena;
+    - `H_observed` dividido por `C` en vez de por `N` → los dos oráculos de
+      `F_realized`;
+    - `F_realized` en valor absoluto, que borraría el exceso de heterocigotos →
+      los dos oráculos;
+    - frecuencia **objetivo** del perfil en lugar de la realizada —sustituyendo
+      `n_h/C` por el `q_h` diádico— → los dos oráculos de `F_realized`, el
+      reparto mixto y las dos pruebas de no aplicable (5);
+    - sin la guarda de emparejamiento → la unitaria del censo roto;
+    - `target_f` publicado también fuera de `P=2` → la prueba poliploide;
+    - `F_realized` calculado en toda ploidía → la poliploide, el caso haploide
+      mínimo y las cuotas controladas (3);
+    - reutilizar sin comprobar el individuo → la unitaria de la pareja ajena;
+    - recuento de `F_realized` sin contabilizar dentro de su bucle → el oráculo
+      unitario y la cota inferior del coste (2);
+    - recuento contabilizado pero no sumado al coste de la unidad → la cota
+      inferior;
+    - sin el respaldo al F de población (`.or(…)`) → la prueba del F de `[f5]`;
+    - precedencia invertida, el F de población ganando al de la subpoblación →
+      la prueba de la sustitución;
+    - F tomado de otra subpoblación (`values().next()`) → la prueba de las dos
+      subpoblaciones;
+    - F efectivo a la mitad → la reutilización intermedia **y** la prueba
+      distribucional;
+    - sin la guarda del censo vacío → su unitaria;
+    - sin la condición `copy_index == 1` → la unitaria de la copia 2 con `P=3`.
+  - Las demás pruebas fijan el **mecanismo** —la copia 1 reutiliza si y solo si
+    su Bernoulli lo dice—; una prueba distribucional añadida fija además las
+    **fórmulas** de REQ-EVO-47/48, que es lo que el plan enuncia como criterio
+    y lo que REQ-VAL-23 manda comprobar: con `F=1/2`, `q=(1/2,1/4,1/8,1/8)` y
+    8 000 individuos diploides contrasta las diez categorías `i<=j` contra
+    `q_i²+F·q_i(1-q_i)` y `2(1-F)·q_i·q_j`, con desviación máxima observada
+    0,0045 frente a una cota de 0,02. Su sensibilidad está medida: mata un F
+    efectivo a la mitad, pero **no** uno un 10 % menor, que sí mata la prueba
+    de mecanismo. Las dos son necesarias y ninguna sustituye a la otra.
+  - Bordes cubiertos: `F` exactamente 0 y 1, `F=1/2` con reutilización y
+    muestreo independiente en la misma unidad, un homocigoto **por muestreo
+    independiente** —que no es una reutilización—, `H_expected=0` por una sola
+    categoría realizada, `C` impar en `P=1` y `P=3` —imposible en diploides—,
+    censo vacío, censo mal emparejado, rango fuera de la matriz, cuota
+    controlada **no exacta** —`C=6` reparte `[3,1,1,1]` y la frecuencia
+    realizada deja de ser el objetivo, que es donde la variante «frecuencia
+    objetivo» se distingue en controlado— y reparto **mixto**, con una
+    sustitución que deja un bloque controlado y otro probabilístico en la misma
+    subpoblación.
+  - Deuda nombrada para F5.4: REQ-EVO-52 exige registrar también la
+    **procedencia** del F (`inbreeding_f_source`, `population` o
+    `subpopulation`). `effective_inbreeding_f` la conoce y la descarta, de modo
+    que F5.4 tendrá que repetir la resolución de precedencia al escribir el
+    efectivo y el manifiesto. No se devuelve aquí por el mismo motivo por el
+    que se retiró el tipo de Ne —superficie pública sin consumidor—, y la
+    lógica que tendría que replicar está ahora cubierta por las tres pruebas de
+    precedencia.
 - ☐ **F5.3.3.** Materializar antes de toda salida las identidades de fundador y
   su pertenencia única: `IndividualId`, `FCP_` por secuencia/copia y `FHA_` por
   bloque como asignación separada.
