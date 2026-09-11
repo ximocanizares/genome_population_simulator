@@ -536,7 +536,7 @@ identificador del índice de copia.
 
 ## 5. F5.2 — tabla haplotípica y LD
 
-- ☐ **F5.2.1.** Crear cada columna mediante permutación y prefijo ponderado, sin
+- ✅ **F5.2.1.** Crear cada columna mediante permutación y prefijo ponderado, sin
   enumerar subconjuntos, y verificar la cota única `max(q)`.
   - Depende de: F5.1.3.
   - Procede de: REQ-EVO-40/75/76, ACE-117 y DTC-089 «Layout y marginales».
@@ -563,13 +563,63 @@ identificador del índice de copia.
     pero **no demuestra** la ausencia de enumeración: solo se incrementa dentro
     de bucles acotados por H, así que no podría crecer exponencialmente aunque
     otra parte del código enumerase subconjuntos.
-- ☐ **F5.2.2.** Calcular p, p_ij, D, `r²`, bins y signos con orden y Neumaier
+- ✅ **F5.2.2.** Calcular p, p_ij, D, `r²`, bins y signos con orden y Neumaier
   normativos.
   - Depende de: F5.2.1.
   - Procede de: REQ-EVO-43/44/75, ACE-89/117 y arquitectura §15.
   - Cambia: Evaluador LD.
   - Se comprueba con: oráculo racional pequeño, D positivo/negativo/cero,
     r² 0/1/intermedio, fijados, bin vacío y ausencia de pares interbloque.
+  - Estado implementado y corregido tras revisión (11 de septiembre de 2026).
+    `src/f5_ld.rs` evalúa un intento completo contra el layout y el perfil LD:
+    recalcula `p_hat_i` desde la matriz —y exige que coincida bit a bit con el
+    que publicó la columna—, suma `p_hat_ij` en orden canónico `h` con el
+    `NeumaierSum` reutilizado de `f5_marginals`, y escribe `D` y `r²` en el
+    orden literal de DTC-089 sin `mul_add`. La agrupación del denominador es la
+    de los corchetes del contrato, `[p_i(1-p_i)] * [p_j(1-p_j)]`, y queda
+    fijada: la alternativa `((a*b)*c)*d` cambia el último bit en una tercera
+    parte de las parejas. `not_evaluable` es de pareja y `not_applicable` de
+    bin; ninguno se colapsa en un cero. El oráculo racional es exhaustivo sobre
+    las 256 matrices `4x2`, con pesos uniformes `1/4` y también no uniformes
+    `4/8, 2/8, 1/8, 1/8`, donde `p`, `p_ij`, `D` y `r²` son cocientes exactos
+    de enteros de 128 bits.
+  - Dos decisiones locales de aritmética, ambas cerradas en revisión:
+    - **La evaluabilidad se decide por factor, no por el producto.**
+      `normalize_slice` solo exige `|suma-1| <= 1e-9` *después* de dividir, así
+      que un perfil legal puede dejar pesos cuya suma compensada valga
+      `1.0000000000000002`; una columna monomórfica realiza entonces esa
+      marginal y su factor `p(1-p)` es negativo. Con dos columnas así el
+      producto de dos factores negativos es positivo y declararía evaluable una
+      pareja sin variación, con `r²` cercano a 1 y el signo incumplido. Exigir
+      `factor > 0` en cada lado cubre a la vez el cero del contrato y ese caso.
+      Una marginal fuera de `[0,1]` **no aborta**: DTC-089 no contempla abortar
+      ahí, y la primera implementación lo hacía.
+    - **`r²` se recorta a 1 donde nace.** En el acoplamiento perfecto
+      `D = fl(p - fl(p*p))` y el factor es `fl(p * fl(1-p))`: dos redondeos
+      distintos del mismo real, cuyo cociente supera 1 en una fracción
+      apreciable de los pesos decimales —máximo observado `1.0000000000442435`
+      con `w = 0,999999`—. Es la reconciliación entre la fórmula literal de
+      DTC-089 y el dominio `[0,1]` que `f5-ld-evaluation.tsv` exige a medias y
+      errores. Un solo `min` en el origen mantiene dentro del dominio `r²`, la
+      media del bin y su error, sin recortarlos por separado.
+  - Queda declarado para F5.2.3, y son condiciones de su diseño:
+    - `evaluate_f5_linkage_disequilibrium` **no tiene aún llamador productivo**,
+      igual que le ocurrió a `build_f5_marginals` antes de F5.2.1: es F5.2.3
+      quien debe encadenar layout, marginales, haplotipos y evaluación.
+    - El valor normativo de `p_hat_i` es la **suma canónica completa** sobre las
+      H filas, y el evaluador exige que la columna publicada coincida con ella
+      bit a bit. Las actualizaciones incrementales `O(S)` de las propuestas 2×2
+      sirven solo para **puntuar**; antes de volver a evaluar hay que recomputar
+      canónicamente la columna publicada. Si no, cada propuesta aceptada
+      abortará con `GPS-INTERNAL-101`.
+    - Un bloque sin ninguna pareja evaluable publica `bins_outside=0`,
+      `signs_failed=0`, `max_r2_error=0` y `sum_r2_error=0`: el mejor valor
+      posible en cinco de los siete campos de la tupla, de modo que un intento
+      degenerado ganaría la selección. F5.2.3 **debe consultar `is_valid()`
+      antes de la tupla**, tanto para terminar como para seleccionar.
+    - El veredicto de intento inválido se publica en `is_valid()` y no se
+      convierte aquí en `GPS-DOMAIN-102`/`104`: esa decisión pertenece a la
+      búsqueda, que es quien conoce todos los intentos.
 - ☐ **F5.2.3.** Ejecutar propuestas 2×2 y seleccionar el mejor intento con la
   tupla, consumo RNG, terminación y límites exactos de DTC-089.
   - Depende de: F5.2.2.

@@ -199,6 +199,7 @@ pub struct LdBin {
     distance_start_bp: u64,
     distance_end_bp: u64,
     target_mean_r2: f64,
+    max_abs_error: f64,
 }
 
 impl LdBin {
@@ -213,6 +214,13 @@ impl LdBin {
     #[must_use]
     pub const fn target_mean_r2(&self) -> f64 {
         self.target_mean_r2
+    }
+    /// Tolerancia absoluta declarada por la fila, inclusiva. El perfil solo
+    /// admite `0,05`, pero el evaluador LD la lee de aquí en lugar de repetir
+    /// la constante: `f5-ld-evaluation.tsv` publica el valor de la fila.
+    #[must_use]
+    pub const fn max_abs_error(&self) -> f64 {
+        self.max_abs_error
     }
 }
 
@@ -791,6 +799,7 @@ fn parse_ld_profile(
                 distance_start_bp: start,
                 distance_end_bp: end,
                 target_mean_r2: target,
+                max_abs_error: error,
             });
             previous = Some((population, start));
             Ok(())

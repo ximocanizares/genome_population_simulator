@@ -20,6 +20,7 @@ pub mod execution;
 pub mod f5_admission;
 pub mod f5_haplotypes;
 pub mod f5_layout;
+pub mod f5_ld;
 pub mod f5_marginals;
 pub mod f5_preflight;
 pub mod f5_profile;

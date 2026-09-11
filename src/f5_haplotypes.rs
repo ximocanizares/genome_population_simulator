@@ -148,6 +148,29 @@ impl F5AlleleMatrix {
     fn set(&mut self, haplotype: usize, site: usize) {
         self.data[haplotype * self.bytes_per_row + site / 8] |= 1_u8 << (7 - site % 8);
     }
+
+    /// Constructor literal para las pruebas unitarias del evaluador LD.
+    ///
+    /// Existe solo bajo `cfg(test)`: la vía productiva sigue siendo
+    /// [`build_f5_haplotype_attempt`], que es quien sostiene la relación entre
+    /// la matriz y los marginales. Aquí una fila es una cadena de `0`/`1` y la
+    /// matriz no pretende cumplir ninguna cota marginal.
+    #[cfg(test)]
+    pub(crate) fn from_rows(rows: &[&str]) -> Self {
+        let site_count = rows.first().map_or(0, |row| row.len());
+        let mut matrix = Self::zeroed(rows.len(), site_count).expect("matriz de prueba");
+        for (haplotype, row) in rows.iter().enumerate() {
+            assert_eq!(row.len(), site_count, "las filas deben medir lo mismo");
+            for (site, allele) in row.bytes().enumerate() {
+                match allele {
+                    b'0' => {}
+                    b'1' => matrix.set(haplotype, site),
+                    other => panic!("alelo {other} inesperado"),
+                }
+            }
+        }
+        matrix
+    }
 }
 
 /// Columna realizada de un bloque×subpoblación.
