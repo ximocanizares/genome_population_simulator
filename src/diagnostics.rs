@@ -64,6 +64,42 @@ impl Diagnostic {
             .with("detail", detail.into())
     }
 
+    /// Ninguna pareja LD puede ser evaluable con la geometría declarada.
+    ///
+    /// DTC-089 reserva `GPS-DOMAIN-102` para una **ausencia demostrada**, no
+    /// para un intento que no halló ninguna: la demostración se hace sobre los
+    /// marginales, antes de abrir ningún intento y antes de fundadores.
+    #[must_use]
+    pub fn f5_no_evaluable_ld_pair(
+        scenario_id: impl Into<String>,
+        population_id: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self::from_catalog("GPS-DOMAIN-102")
+            .with("scenario_id", scenario_id.into())
+            .with("population_id", population_id.into())
+            .with("detail", detail.into())
+    }
+
+    /// La búsqueda haplotípica agotó `max_haplotype_attempts` sin un intento
+    /// aceptable.
+    ///
+    /// No afirma imposibilidad: conserva el mejor intento del bloque y se
+    /// distingue de `GPS-DOMAIN-102`, que sí es una demostración.
+    #[must_use]
+    pub fn f5_haplotype_search_exhausted(
+        scenario_id: impl Into<String>,
+        population_id: impl Into<String>,
+        block_id: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self::from_catalog("GPS-DOMAIN-104")
+            .with("scenario_id", scenario_id.into())
+            .with("population_id", population_id.into())
+            .with("block_id", block_id.into())
+            .with("detail", detail.into())
+    }
+
     /// La cardinalidad de haplotipos no cabe en los vectores binarios que el
     /// bloque puede representar. DTC-089 lo exige antes de sortear marginales.
     #[must_use]

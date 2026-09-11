@@ -120,6 +120,24 @@ impl F5AlleleMatrix {
         bytes
     }
 
+    /// Orden **lexicográfico** de `matrix_bytes` sin materializarlo.
+    ///
+    /// DTC-089 hace de `matrix_bytes` el séptimo y último campo de la tupla, y
+    /// pide el mínimo lexicográfico de esa codificación. Comparar los bytes de
+    /// [`Self::canonical_bytes`] exigiría dos vectores de `16 + H*ceil(S/8)`
+    /// bytes por comparación; aquí se compara el mismo valor sin asignar nada.
+    ///
+    /// La equivalencia es exacta: la codificación empieza por `H` y `S` como
+    /// enteros big-endian de 64 bits, cuyo orden lexicográfico como bytes es el
+    /// orden numérico, y sigue con las filas empaquetadas, que son literalmente
+    /// `data`. Una prueba lo contrasta contra la materialización.
+    #[must_use]
+    pub fn canonical_cmp(&self, other: &Self) -> core::cmp::Ordering {
+        (self.haplotype_count, self.site_count)
+            .cmp(&(other.haplotype_count, other.site_count))
+            .then_with(|| self.data.cmp(&other.data))
+    }
+
     /// Filas repetidas: `Σ_v max(0, count(v)-1)` sobre los vectores alélicos.
     ///
     /// Dos filas con el mismo vector son un duplicado inválido; el recuento las
@@ -131,6 +149,47 @@ impl F5AlleleMatrix {
             *counts.entry(self.row(haplotype)).or_default() += 1;
         }
         counts.values().map(|count| count - 1).sum()
+    }
+
+    /// Intercambio 2×2 de DTC-089 sobre `(a, i)`, `(a, j)`, `(b, i)`, `(b, j)`.
+    ///
+    /// Solo la configuración `10/01 ↔ 01/10` es candidata; el llamador la
+    /// comprueba con [`Self::is_swap_candidate`] y esta función invierte los
+    /// cuatro bits sin volver a decidirlo. La operación es su propia inversa,
+    /// de modo que una propuesta rechazada se deshace repitiéndola.
+    ///
+    /// Los cuatro índices proceden de bucles y sorteos acotados por `H` y `S`;
+    /// fuera de rango la llamada no hace nada, porque el módulo no admite
+    /// índices ajenos.
+    pub(crate) fn apply_2x2_swap(&mut self, a: usize, b: usize, i: usize, j: usize) {
+        if a >= self.haplotype_count
+            || b >= self.haplotype_count
+            || i >= self.site_count
+            || j >= self.site_count
+        {
+            return;
+        }
+        for (haplotype, site) in [(a, i), (a, j), (b, i), (b, j)] {
+            self.flip(haplotype, site);
+        }
+    }
+
+    /// `true` si las cuatro casillas forman `10/01` o `01/10`.
+    ///
+    /// Equivale a exigir que cada fila difiera entre los dos sitios y que las
+    /// dos filas difieran en el primer sitio: las catorce configuraciones
+    /// restantes no son candidatas y se descartan sin aplicar el intercambio.
+    #[must_use]
+    pub(crate) fn is_swap_candidate(&self, a: usize, b: usize, i: usize, j: usize) -> bool {
+        let Some(alt_ai) = self.allele(a, i) else {
+            return false;
+        };
+        let (Some(alt_aj), Some(alt_bi), Some(alt_bj)) =
+            (self.allele(a, j), self.allele(b, i), self.allele(b, j))
+        else {
+            return false;
+        };
+        alt_ai != alt_aj && alt_bi != alt_bj && alt_ai != alt_bi
     }
 
     /// Índices calculados por bucles acotados a `haplotype_count`/`site_count`:
@@ -147,6 +206,10 @@ impl F5AlleleMatrix {
 
     fn set(&mut self, haplotype: usize, site: usize) {
         self.data[haplotype * self.bytes_per_row + site / 8] |= 1_u8 << (7 - site % 8);
+    }
+
+    fn flip(&mut self, haplotype: usize, site: usize) {
+        self.data[haplotype * self.bytes_per_row + site / 8] ^= 1_u8 << (7 - site % 8);
     }
 
     /// Constructor literal para las pruebas unitarias del evaluador LD.
@@ -297,6 +360,75 @@ impl F5BlockHaplotypes {
     pub const fn construction_operations(&self) -> u64 {
         self.construction_operations
     }
+
+    /// Matriz mutable para la búsqueda local de F5.2.3.
+    ///
+    /// Los intercambios 2×2 dejan deliberadamente las columnas publicadas sin
+    /// tocar: recomputarlas canónicamente cuesta `O(H*S)` y la búsqueda solo
+    /// puede pagarlo una vez por intento, no una vez por propuesta. Quien tome
+    /// esta matriz asume el deber de llamar después a
+    /// [`Self::refresh_realized_columns`]; si no lo hace, el evaluador LD
+    /// aborta con `GPS-INTERNAL-101` al comprobar que la columna publicada ya
+    /// no es la suma canónica de la matriz.
+    pub(crate) const fn matrix_mut_for_search(&mut self) -> &mut F5AlleleMatrix {
+        &mut self.matrix
+    }
+
+    /// Recomputa desde la matriz, y **canónicamente**, todo lo que un
+    /// intercambio puede haber invalidado.
+    ///
+    /// `realized_alt_af` vuelve a ser la suma de Neumaier en orden canónico
+    /// `h` sobre las H filas —el único valor normativo, y el que el evaluador
+    /// LD exige bit a bit—, y con ella se rehacen `abs_error`,
+    /// `alternate_haplotypes`, `max_abs_error` y el recuento de filas
+    /// duplicadas.
+    ///
+    /// A diferencia del constructor, **no aborta** cuando un error marginal
+    /// supera `marginal_max_abs_error`: la cota `max_h(q_h)` es una propiedad
+    /// de la construcción inicial, no de una matriz intercambiada, y DTC-089
+    /// la trata después como una tolerancia de terminación —el sexto campo de
+    /// la tupla— y no como una invariante interna rota.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve el detalle correspondiente si los pesos no acompañan a la
+    /// matriz o si una suma compensada deja de ser finita.
+    pub(crate) fn refresh_realized_columns(&mut self, weights: &[f64]) -> Result<(), &'static str> {
+        if weights.len() != self.matrix.haplotype_count() {
+            return Err("los pesos no acompañan a la matriz del bloque");
+        }
+        if self.columns.len() != self.matrix.site_count() {
+            return Err("las columnas publicadas no acompañan a la matriz del bloque");
+        }
+        let Self {
+            matrix, columns, ..
+        } = self;
+        let mut max_abs_error = 0.0_f64;
+        for (site, column) in columns.iter_mut().enumerate() {
+            let mut compensated = NeumaierSum::default();
+            let mut realized = 0.0_f64;
+            let mut alternate = 0_u64;
+            for (haplotype, weight) in weights.iter().enumerate() {
+                if matrix.bit(haplotype, site) {
+                    realized = compensated.add(*weight)?;
+                    alternate += 1;
+                }
+            }
+            let abs_error = (realized - column.target_alt_af).abs();
+            if !abs_error.is_finite() {
+                return Err("el error marginal recomputado no es finito");
+            }
+            column.realized_alt_af = realized;
+            column.abs_error = abs_error;
+            column.alternate_haplotypes = alternate;
+            if abs_error > max_abs_error {
+                max_abs_error = abs_error;
+            }
+        }
+        self.max_abs_error = max_abs_error;
+        self.duplicate_rows = self.matrix.duplicate_rows();
+        Ok(())
+    }
 }
 
 /// Un intento haplotípico completo: un bloque×subpoblación por fila, en el
@@ -339,54 +471,142 @@ impl F5HaplotypeAttempt {
 /// por intento gastaría entropía y operaciones fuera de lo admitido, en
 /// silencio, porque en esta fase no hay contabilidad en tiempo de ejecución.
 /// Quien recorra los intentos construye la tabla una vez con
-/// [`build_f5_marginals`], que ya exige la admisión sellada y la pertenencia
+/// `build_f5_marginals`, que ya exige la admisión sellada y la pertenencia
 /// del layout a esta ejecución.
 pub fn build_f5_haplotype_attempt(
     config: &EffectiveF5Config,
     marginals: &F5MarginalTable,
     attempt_index: u64,
 ) -> Result<F5HaplotypeAttempt, Diagnostic> {
-    let scenario_id = ScenarioId::parse(config.scenario_id(), "scenario_id").map_err(|_| {
-        Diagnostic::f5_configuration(
-            config.scenario_path().display().to_string(),
-            "scenario_id",
-            "no se pudo reconstruir como identidad tipada",
-        )
-    })?;
-    let root_seed = RootSeed::parse("seed", config.seed()).map_err(|_| {
-        Diagnostic::f5_configuration(
-            config.scenario_path().display().to_string(),
-            "seed",
-            "la semilla efectiva no es canónica",
-        )
-    })?;
-    let weights = config.profile().haplotype_weights();
-    let marginal_max_abs_error = validated_maximum_weight(&scenario_id, weights)?;
-
-    // Segunda cota de cardinalidad de DTC-089, para todos los bloques antes de
-    // abrir ningún intento: así ninguna subpoblación consume entropía cuando
-    // otra ya demuestra que su geometría no admite H vectores distintos.
-    for block in marginals.blocks() {
-        ensure_block_represents_every_haplotype(&scenario_id, weights.len(), block)?;
-    }
-
-    let mut permutation = vec![0_u32; weights.len()];
+    let context = F5HaplotypeContext::resolve(config)?;
+    ensure_f5_haplotype_cardinality(config, marginals)?;
+    let mut permutation = vec![0_u32; context.weights.len()];
     let mut blocks = Vec::with_capacity(marginals.blocks().len());
     for block in marginals.blocks() {
-        blocks.push(build_block(
-            &scenario_id,
-            root_seed,
-            weights,
-            marginal_max_abs_error,
-            attempt_index,
-            block,
-            &mut permutation,
-        )?);
+        blocks.push(context.build(attempt_index, block, &mut permutation)?);
     }
     Ok(F5HaplotypeAttempt {
         attempt_index,
         blocks,
     })
+}
+
+/// Construye **un solo** bloque×subpoblación del intento indicado.
+///
+/// DTC-089 cuenta los intentos por bloque×subpoblación —el coste es «por
+/// bloque×subpoblación×intento», `f5-attempts.tsv` se indexa por
+/// `(population_id, block_id, attempt_index)` y `attempt_summary` publica
+/// `haplotype_attempts_total` y `max_attempt_index` como escalares distintos—,
+/// de modo que quien busca necesita reconstruir una unidad sin rehacer las
+/// demás. Los ámbitos RNG `initial_column` y `polarity` ya llevan
+/// `population_id`, `block_id` y `attempt_index`, así que esta vía produce
+/// exactamente el mismo bloque que [`build_f5_haplotype_attempt`] para el
+/// mismo índice.
+///
+/// # Errors
+///
+/// Devuelve `GPS-CONF-101` si la configuración no reconstruye su identidad,
+/// `GPS-DOMAIN-101` si los pesos no son válidos, `GPS-DOMAIN-105` si el bloque
+/// no puede representar H vectores distintos y `GPS-INTERNAL-101` si la
+/// aritmética de la columna deja de estar definida.
+pub fn build_f5_block_attempt(
+    config: &EffectiveF5Config,
+    marginals: &F5MarginalTable,
+    block_ordinal: usize,
+    attempt_index: u64,
+) -> Result<F5BlockHaplotypes, Diagnostic> {
+    let context = F5HaplotypeContext::resolve(config)?;
+    let block = marginals.blocks().get(block_ordinal).ok_or_else(|| {
+        Diagnostic::f5_internal(
+            context.scenario_id.as_str(),
+            "la tabla de marginales no contiene el bloque solicitado",
+        )
+    })?;
+    // Comprobación local, `O(S)`: la variante de todos los bloques sigue
+    // siendo obligación de quien abre la búsqueda, y la expone
+    // [`ensure_f5_haplotype_cardinality`].
+    ensure_block_represents_every_haplotype(&context.scenario_id, context.weights.len(), block)?;
+    let mut permutation = vec![0_u32; context.weights.len()];
+    context.build(attempt_index, block, &mut permutation)
+}
+
+/// Segunda cota de cardinalidad de DTC-089 sobre **todos** los bloques.
+///
+/// Ocurre tras los sorteos marginales y antes de abrir ningún intento, de modo
+/// que ninguna subpoblación consume entropía cuando otra ya demuestra que su
+/// geometría no admite H vectores distintos.
+///
+/// # Errors
+///
+/// Devuelve `GPS-CONF-101` si la configuración no reconstruye su identidad,
+/// `GPS-DOMAIN-101` si los pesos no son válidos y `GPS-DOMAIN-105` si algún
+/// bloque incumple `H <= 2^V`.
+pub fn ensure_f5_haplotype_cardinality(
+    config: &EffectiveF5Config,
+    marginals: &F5MarginalTable,
+) -> Result<(), Diagnostic> {
+    let context = F5HaplotypeContext::resolve(config)?;
+    for block in marginals.blocks() {
+        ensure_block_represents_every_haplotype(
+            &context.scenario_id,
+            context.weights.len(),
+            block,
+        )?;
+    }
+    Ok(())
+}
+
+/// Preludio común a las dos fronteras de construcción: identidad tipada,
+/// semilla canónica, pesos del perfil y cota marginal `max_h(q_h)`.
+struct F5HaplotypeContext<'a> {
+    scenario_id: ScenarioId,
+    root_seed: RootSeed,
+    weights: &'a [f64],
+    marginal_max_abs_error: f64,
+}
+
+impl<'a> F5HaplotypeContext<'a> {
+    fn resolve(config: &'a EffectiveF5Config) -> Result<Self, Diagnostic> {
+        let scenario_id = ScenarioId::parse(config.scenario_id(), "scenario_id").map_err(|_| {
+            Diagnostic::f5_configuration(
+                config.scenario_path().display().to_string(),
+                "scenario_id",
+                "no se pudo reconstruir como identidad tipada",
+            )
+        })?;
+        let root_seed = RootSeed::parse("seed", config.seed()).map_err(|_| {
+            Diagnostic::f5_configuration(
+                config.scenario_path().display().to_string(),
+                "seed",
+                "la semilla efectiva no es canónica",
+            )
+        })?;
+        let weights = config.profile().haplotype_weights();
+        let marginal_max_abs_error = validated_maximum_weight(&scenario_id, weights)?;
+        Ok(Self {
+            scenario_id,
+            root_seed,
+            weights,
+            marginal_max_abs_error,
+        })
+    }
+
+    fn build(
+        &self,
+        attempt_index: u64,
+        block: &F5BlockMarginals,
+        permutation: &mut [u32],
+    ) -> Result<F5BlockHaplotypes, Diagnostic> {
+        build_block(
+            &self.scenario_id,
+            self.root_seed,
+            self.weights,
+            self.marginal_max_abs_error,
+            attempt_index,
+            block,
+            permutation,
+        )
+    }
 }
 
 /// `max_h(q_h)` sobre unos pesos que el perfil ya normalizó.
@@ -677,7 +897,7 @@ fn select_column<R: RandomWordSource>(
     })
 }
 
-const fn is_fixed_target(target: f64) -> bool {
+pub(crate) const fn is_fixed_target(target: f64) -> bool {
     target == 0.0 || target == 1.0
 }
 

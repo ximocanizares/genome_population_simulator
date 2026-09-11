@@ -222,6 +222,25 @@ impl LdBin {
     pub const fn max_abs_error(&self) -> f64 {
         self.max_abs_error
     }
+
+    /// Constructor literal para las pruebas de los consumidores del perfil.
+    ///
+    /// Existe solo bajo `cfg(test)`: la vía productiva sigue siendo el lector
+    /// de `ld_profile.tsv`, que es quien valida dominio, orden y cobertura.
+    #[cfg(test)]
+    pub(crate) const fn for_test(
+        distance_start_bp: u64,
+        distance_end_bp: u64,
+        target_mean_r2: f64,
+        max_abs_error: f64,
+    ) -> Self {
+        Self {
+            distance_start_bp,
+            distance_end_bp,
+            target_mean_r2,
+            max_abs_error,
+        }
+    }
 }
 
 impl F5Profile {

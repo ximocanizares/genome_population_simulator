@@ -32,9 +32,9 @@ pub const F5_HARD_WORKING_MEMORY_LIMIT: u64 = 1 << 30;
 pub const F5_HARD_OUTPUT_LIMIT: u64 = 1 << 31;
 
 pub const F5_DEFAULT_MAX_LAYOUT_ATTEMPTS: u64 = 1_000;
-const DEFAULT_MAX_HAPLOTYPE_ATTEMPTS: u64 = 100;
-const DEFAULT_MAX_SWAP_PROPOSALS: u64 = 100_000;
-const DEFAULT_MAX_HAPLOTYPE_CELLS: u64 = 16_777_216;
+pub const F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS: u64 = 100;
+pub const F5_DEFAULT_MAX_SWAP_PROPOSALS: u64 = 100_000;
+pub const F5_DEFAULT_MAX_HAPLOTYPE_CELLS: u64 = 16_777_216;
 const F5_SCAN_FIXED_MEMORY_BYTES: u64 = 65_536;
 const F5_SCAN_RETAINED_ITEM_BYTES: u64 = 256;
 
@@ -384,21 +384,21 @@ impl F5PreflightConfigurationIdentity {
             "max_haplotype_attempts",
             limit(
                 scenario.max_haplotype_attempts.as_ref(),
-                DEFAULT_MAX_HAPLOTYPE_ATTEMPTS,
+                F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS,
             ),
         );
         canonical.field_u64(
             "max_swap_proposals",
             limit(
                 scenario.max_swap_proposals.as_ref(),
-                DEFAULT_MAX_SWAP_PROPOSALS,
+                F5_DEFAULT_MAX_SWAP_PROPOSALS,
             ),
         );
         canonical.field_u64(
             "max_haplotype_cells",
             limit(
                 scenario.max_haplotype_cells.as_ref(),
-                DEFAULT_MAX_HAPLOTYPE_CELLS,
+                F5_DEFAULT_MAX_HAPLOTYPE_CELLS,
             ),
         );
         canonical.field_u64(
@@ -1131,7 +1131,7 @@ fn reserve_known_before_scan(
     )?;
     let max_cells = limit(
         config.declared_scenario().max_haplotype_cells.as_ref(),
-        DEFAULT_MAX_HAPLOTYPE_CELLS,
+        F5_DEFAULT_MAX_HAPLOTYPE_CELLS,
     );
     if mul("H*S_bound", h, site_bound, config)? > max_cells {
         return Err(resource(
@@ -1177,11 +1177,11 @@ fn reserve_known_before_scan(
     );
     let haplotype_attempts = limit(
         config.declared_scenario().max_haplotype_attempts.as_ref(),
-        DEFAULT_MAX_HAPLOTYPE_ATTEMPTS,
+        F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS,
     );
     let swap_proposals = limit(
         config.declared_scenario().max_swap_proposals.as_ref(),
-        DEFAULT_MAX_SWAP_PROPOSALS,
+        F5_DEFAULT_MAX_SWAP_PROPOSALS,
     );
     let k_bound = mul("K_bound", block_count, site_bound, config)?;
     let length_support = sub("length_support", l_max, l_min, config)?
@@ -1495,7 +1495,7 @@ fn preflight_resolved_f5_resources(
     }
     let max_cells = limit(
         config.declared_scenario().max_haplotype_cells.as_ref(),
-        DEFAULT_MAX_HAPLOTYPE_CELLS,
+        F5_DEFAULT_MAX_HAPLOTYPE_CELLS,
     );
     if mul("H*S_bound", h, site_bound_per_block, config)? > max_cells {
         return Err(resource(
@@ -1532,11 +1532,11 @@ fn preflight_resolved_f5_resources(
     );
     let haplotype_attempts = limit(
         config.declared_scenario().max_haplotype_attempts.as_ref(),
-        DEFAULT_MAX_HAPLOTYPE_ATTEMPTS,
+        F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS,
     );
     let swap_proposals = limit(
         config.declared_scenario().max_swap_proposals.as_ref(),
-        DEFAULT_MAX_SWAP_PROPOSALS,
+        F5_DEFAULT_MAX_SWAP_PROPOSALS,
     );
     let k_bound = mul("K_bound", block_count, site_bound_per_block, config)?;
     let pair_bound = div(

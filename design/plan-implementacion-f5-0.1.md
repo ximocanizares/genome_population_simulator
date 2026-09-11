@@ -620,7 +620,7 @@ identificador del índice de copia.
     - El veredicto de intento inválido se publica en `is_valid()` y no se
       convierte aquí en `GPS-DOMAIN-102`/`104`: esa decisión pertenece a la
       búsqueda, que es quien conoce todos los intentos.
-- ☐ **F5.2.3.** Ejecutar propuestas 2×2 y seleccionar el mejor intento con la
+- ✅ **F5.2.3.** Ejecutar propuestas 2×2 y seleccionar el mejor intento con la
   tupla, consumo RNG, terminación y límites exactos de DTC-089.
   - Depende de: F5.2.2.
   - Procede de: REQ-EVO-76/77, ACE-117 y DTC-089 «Búsqueda».
@@ -630,6 +630,164 @@ identificador del índice de copia.
   - Se comprueba con: propuesta no candidata, mejora, empate rechazado, éxito
     temprano, agotamiento, desempate por índice, complejidad medida y ausencia
     de relajación o falsa declaración de imposibilidad.
+  - Estado implementado y corregido tras revisión adversarial (11 de septiembre
+    de 2026). `src/f5_search.rs` es el primer llamador productivo de la cadena
+    completa: `search_f5_haplotypes` recibe configuración, admisión sellada,
+    identidad de ejecución y layout, deriva los marginales una sola vez,
+    **resuelve cada bloque×subpoblación por separado** —construyendo cada
+    intento con `build_f5_block_attempt`, refinándolo con las propuestas 2×2 y
+    evaluándolo con `evaluate_f5_block_linkage_disequilibrium`— y compone el
+    resultado con el ganador de cada unidad. Publica una fila por
+    bloque×subpoblación×intento con los campos de `f5-attempts.tsv` y, al
+    agotar, un `GPS-DOMAIN-104` que conserva el historial y el mejor intento.
+  - Decisiones locales registradas:
+    - **El alcance de la tupla y el de los intentos es el bloque×subpoblación.**
+      Los siete campos son magnitudes de una matriz, y los intentos se cuentan
+      igual: DTC-089 escribe el coste «por bloque×subpoblación×intento»,
+      `f5-attempts.tsv` se indexa por `(population_id, block_id,
+      attempt_index)` con «una sola fila `true` por bloque×población», el
+      contexto de `GPS-DOMAIN-104` nombra población y bloque, REQ-EVO-75 dice
+      que «solo falla el bloque×subpoblación sin ninguna pareja evaluable» y
+      `attempt_summary` publica `haplotype_attempts_total` y `max_attempt_index`
+      **como escalares distintos**, cosa que solo tiene sentido si cada unidad
+      lleva su cuenta. La primera versión hacía el intento global y todo-o-nada:
+      con `U` unidades que terminan de forma independiente con probabilidad `p`,
+      el intento global triunfa con `p^U`, de modo que un escenario resoluble
+      unidad a unidad se declaraba agotado —16 unidades que terminaban por su
+      cuenta como tarde en el intento 3 necesitaban ~320 intentos globales—. Eso
+      es justo lo que DTC-089 prohíbe al decir que el agotamiento «no afirma
+      imposibilidad». La independencia entre unidades está acreditada: DTC-089
+      prohíbe parejas LD interbloque, el layout las sitúa en intervalos
+      disjuntos, los tres ámbitos RNG llevan ya población, bloque e intento, y
+      `f5-founders.tsv` asigna un haplotipo por bloque por separado. Ningún
+      documento exige coherencia entre bloques en esta fase.
+    - **Dos aritméticas, una sola verdad, y una guarda que atribuye cada
+      divergencia.** DTC-089 fija la actualización de una propuesta en `O(S)`
+      —«las actualizaciones 2×2 aceptadas mantienen las estadísticas en
+      `O(S)`»— y la fórmula de admisión contabiliza ese coste exacto, de modo
+      que las marginales y las conjuntas se mueven por incremento y **la
+      puntuación del bucle es determinista pero no canónica**. Solo los valores
+      publicados lo son: al cerrar cada intento se recomputan canónicamente las
+      columnas (`refresh_realized_columns`) y se reevalúa la unidad.
+      La igualdad bit a bit entre las dos aritméticas no puede exigirse
+      —`m - q_a + q_b` no es la suma de Neumaier sobre el nuevo conjunto, y
+      hacer que lo fuera costaría `O(H)` por propuesta—, pero sí puede exigirse
+      que ninguna divergencia quede **sin atribuir**. Las tres reglas discretas
+      del contrato son discontinuas en un punto exacto —la de signos en
+      `D == 0.0`, la de evaluabilidad en `factor == 0.0`, la de bins en
+      `error == max_abs_error`—, así que `ensure_score_did_not_diverge`
+      contrasta las dos aritméticas **pareja a pareja** y **bin a bin** y solo
+      exime una divergencia si uno de sus dos valores está justo en la
+      frontera. Cualquier otra, y cualquier diferencia en `filas_duplicadas`
+      —que no cuelga de ninguna frontera de coma flotante—, es
+      `GPS-INTERNAL-101`. Los veredictos canónicos que la guarda compara se
+      recogen **durante** la evaluación canónica que ya se hace de todos modos,
+      de modo que no cuestan ninguna visita de fila adicional.
+      La medida que motivó la guarda queda registrada: con pesos
+      `0,3/0,2/0,3/0,2`, tres marginales incrementales quedaban en
+      `0,5000000000000001` frente a `0,5` y seis de quince parejas cambiaban de
+      veredicto de signo, todas sobre una `D` canónicamente nula. Con la
+      atribución por pareja esas seis quedan explicadas y ninguna otra
+      divergencia pasa desapercibida.
+    - **La validez y la terminación son claves anteriores a la tupla.** Un
+      bloque sin parejas evaluables tiene el mejor valor posible en cuatro de
+      los siete campos, así que la tupla sola premiaría un intento degenerado.
+      `block_has_terminated` consulta `is_valid()` primero y `order_key_is_better`
+      antepone terminación y validez, con el menor `attempt_index` como último
+      desempate.
+    - **`matrix_bytes` se compara byte a byte, dentro y fuera del bucle.**
+      Dentro, la regla `O(1)` del bit `(a,i)`: con `a<b` e `i<j` es el primer
+      bit que el intercambio cambia, de modo que la codificación nueva es menor
+      exactamente cuando ese bit valía 1. Fuera, entre intentos de una unidad,
+      `F5AlleleMatrix::canonical_cmp` compara la misma codificación sin
+      materializarla, en `O(H*S/8)` por intento. La primera versión comparaba el
+      SHA-256, que invierte el orden lexicográfico en la mitad de las parejas e
+      **incumplía** el «mínimo lexicográfico» del contrato; con el bucle dentro
+      del bloque solo hay que conservar en línea la matriz del mejor candidato
+      de esa unidad —la que ya hace falta para componer la salida—, así que
+      cumplirlo sale gratis. El digest se sigue publicando porque el esquema de
+      fallo lo exige, pero no decide nada.
+    - **`selected_best` significa una sola cosa.** Con el bucle por unidad, la
+      terminación es la primera clave de orden y el bucle para en el primer
+      intento que termina, de modo que el mínimo de la clave y la matriz
+      publicada son siempre el mismo intento. La ambigüedad que tenía la
+      primera versión —una cosa al tener éxito y otra al agotarse— se disuelve.
+    - **`GPS-RES-101` no se duplica aquí.** La admisión sellada, que la
+      frontera exige y verifica, ya rechaza `H*site_bound_per_block >
+      max_haplotype_cells`, cota que domina el producto exacto del layout.
+    - **`GPS-DOMAIN-102` es una demostración y se comprueba antes que la
+      cardinalidad.** Se emite sobre los marginales cuando un bloque tiene menos
+      de dos columnas no fijadas, y basta uno para detener el escenario
+      (REQ-EVO-75). Va **antes** de `H <= 2^V` a propósito: un bloque sin
+      columnas variables incumple las dos cosas, y de los dos diagnósticos el
+      que describe la causa es que no hay variación que medir, no que falte
+      cardinalidad.
+    - **`GPS-DOMAIN-103` no lo emite ninguna ruta de este hito**: la cuota
+      controlada pertenece a F5.3 y su diagnóstico nacerá allí. La ausencia es
+      deliberada, no un olvido.
+    - **El mapa de duplicados usa FNV-1a fijado y contrasta bytes**, y los
+      decrementos de los contadores usan `checked_sub`: un desajuste futuro
+      envolvería en release y dejaría `evaluable_pairs` gigante con
+      `is_valid()` siempre cierto.
+    - **La tolerancia de bin se escribe una sola vez**, en `f5_bin_abs_error` y
+      `f5_bin_is_outside` de `src/f5_ld.rs`, con una prueba que fija su carácter
+      inclusivo en el borde exacto y un ULP por encima.
+  - Coste medido, por bloque×subpoblación×intento y con `B` bins del perfil:
+    la siembra canónica cuesta `H*S + H*S*(S-1)/2` visitas de fila; cada
+    propuesta candidata cuesta dos marginales movidas en `O(1)`, `2S-3` parejas
+    actualizadas, dos filas rehasheadas y un recorrido de los `B` bins, **sin
+    ninguna visita de fila**; una propuesta no candidata cuesta cuatro enteros
+    acotados y nada más; el cierre cuesta `O(H*S)` para recomputar las
+    columnas, `O(H*S²)` para la evaluación LD —que de paso recoge los
+    veredictos de la guarda—, `O(S²+B)` para la atribución y `O(H*S/8)` para el
+    desempate lexicográfico. El total es `O(H*S² + Q*(S+B))`, que **cumple** la
+    cota de DTC-089: el contrato escribe `O(H*S² + Q*S)` porque `B` es una
+    propiedad del perfil y no de la búsqueda, y el término se declara en lugar
+    de esconderse.
+    La medida no es una estimación ni una identidad escrita a mano: el contador
+    de visitas de fila vive **dentro** de `site_marginal` y `joint_marginal`, de
+    modo que cualquier suma canónica lo incrementa venga de donde venga, y
+    `pair_updates` se cuenta dentro de `refresh_pair`. La batería exige las
+    identidades exactas `row_visits = H*(S + S*(S-1)/2)` —invariante frente al
+    presupuesto de propuestas— y `pair_updates = candidate_proposals*(2S-3)`;
+    insertar un recorrido canónico `O(H*S)` en el bucle de propuestas rompe la
+    primera. La memoria añadida son 32 bytes por pareja intrabloque más los 32
+    del veredicto canónico, dentro de los `192*S*(S-1)/2` que
+    `f5-resource-accounting-v7` ya presupuesta.
+  - M-2 de la revisión queda **cerrado sin cambiar el código**: los agregados
+    de bin se mantienen con `+=`/`-=` planos sobre un total sembrado con
+    Neumaier, y DTC-089 avala explícitamente esas actualizaciones incrementales
+    `O(S)`. La revisión no consiguió provocar un cambio de terminación con cinco
+    semillas y tres perfiles, y la búsqueda de una deriva que moviese un campo
+    discreto quedó escrita en
+    `the_incremental_score_never_diverges_from_the_canonical_one` con resultado
+    negativo. La aritmética de Neumaier gobierna los valores publicados y el
+    veredicto; la puntuación del bucle es determinista pero no canónica, y la
+    guarda por pareja es quien vigila que la deriva no cruce una frontera
+    discreta sin atribución.
+  - Alcance de archivos y cambios ajenos al módulo, todos aditivos: dos
+    constructores nuevos en `src/diagnostics.rs` para `GPS-DOMAIN-102` y
+    `GPS-DOMAIN-104`, que el catálogo ya declaraba y ninguna ruta construía;
+    `f5_uniform_index_with_source` pasa a `pub(crate)` en `src/randomness.rs`;
+    los tres límites predeterminados de `src/f5_preflight.rs` pasan a `pub` con
+    prefijo `F5_`; `src/f5_haplotypes.rs` suma `build_f5_block_attempt`,
+    `ensure_f5_haplotype_cardinality`, `canonical_cmp`, el intercambio 2×2 y la
+    recomputación canónica de columnas; `src/f5_ld.rs` suma
+    `evaluate_f5_block_linkage_disequilibrium`, el contador de visitas de fila y
+    la regla compartida de tolerancia de bin; `src/f5_profile.rs` suma un
+    constructor `LdBin::for_test` bajo `cfg(test)`. Ningún cambio deshace
+    trabajo previo.
+  - Discriminación de la batería, medida contra ocho variantes defectuosas:
+    intento global todo-o-nada con 16 unidades (2 pruebas), recorrido canónico
+    `O(H*S)` dentro de la propuesta (3), `p_hat_j` obsoleta (4, con
+    `GPS-INTERNAL-101` desde la guarda), `p_hat_i` obsoleta (4), signo invertido
+    en el incremento de la conjunta (14), pareja `(i,j)` sin rehacer (6),
+    séptimo campo comparado por digest (2 unitarias) y ámbito RNG con índice
+    constante, tanto en el ayudante (1 unitaria + 1 de integración) como en el
+    llamador (1). Ninguna pasa desapercibida. Los tres campos instrumentales del
+    registro (`candidate_proposals`, `row_visits`, `pair_updates`) son `pub`
+    porque la batería vive en un crate aparte; no tienen destino en ningún
+    artefacto y su documentación lo dice.
 
 > **Revisión F5.2.** Revisión independiente del oráculo LD, consumo RNG,
 > complejidad y mejor intento. No continuar con un resultado solo plausible.

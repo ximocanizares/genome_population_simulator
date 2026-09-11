@@ -1106,7 +1106,7 @@ pub fn f5_uniform_index(rng: &mut LocalRng, n: u64) -> Result<u64, RandomSamplin
     f5_uniform_index_with_source(rng, n)
 }
 
-fn f5_uniform_index_with_source(
+pub(crate) fn f5_uniform_index_with_source(
     rng: &mut impl RandomWordSource,
     n: u64,
 ) -> Result<u64, RandomSamplingError> {

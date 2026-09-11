@@ -169,7 +169,7 @@ impl F5SitePair {
 
 /// `D>0` si las polaridades coinciden, `D<0` si difieren; `D=0` incumple
 /// siempre. No hay cuota de signos.
-const fn sign_rule_is_satisfied(d: f64, polarities_match: bool) -> bool {
+pub(crate) const fn sign_rule_is_satisfied(d: f64, polarities_match: bool) -> bool {
     if polarities_match { d > 0.0 } else { d < 0.0 }
 }
 
@@ -190,9 +190,10 @@ pub fn evaluate_f5_site_pair(
     site_index_i: usize,
     site_index_j: usize,
 ) -> Result<F5SitePair, F5LdError> {
-    let p_hat_i = site_marginal(weights, matrix, site_index_i)?;
-    let p_hat_j = site_marginal(weights, matrix, site_index_j)?;
-    let p_hat_ij = joint_marginal(weights, matrix, site_index_i, site_index_j)?;
+    let mut visits = 0_u64;
+    let p_hat_i = site_marginal(weights, matrix, site_index_i, &mut visits)?;
+    let p_hat_j = site_marginal(weights, matrix, site_index_j, &mut visits)?;
+    let p_hat_ij = joint_marginal(weights, matrix, site_index_i, site_index_j, &mut visits)?;
     Ok(pair_from_components(
         site_index_i as u64,
         site_index_j as u64,
@@ -226,7 +227,7 @@ pub fn evaluate_f5_site_pair(
 ///    con `w = 0,999999`—. El TSV `f5-ld-evaluation.tsv` exige medias y errores
 ///    en `[0,1]`, así que un solo `min` en el origen deja dentro del dominio
 ///    tanto `r²` como la media y el error del bin, sin recortarlos aparte.
-fn pair_from_components(
+pub(crate) fn pair_from_components(
     site_index_i: u64,
     site_index_j: u64,
     p_hat_i: f64,
@@ -234,8 +235,8 @@ fn pair_from_components(
     p_hat_ij: f64,
 ) -> F5SitePair {
     let d = p_hat_ij - p_hat_i * p_hat_j;
-    let factor_i = p_hat_i * (1.0 - p_hat_i);
-    let factor_j = p_hat_j * (1.0 - p_hat_j);
+    let factor_i = f5_evaluability_factor(p_hat_i);
+    let factor_j = f5_evaluability_factor(p_hat_j);
     let denominator = factor_i * factor_j;
     let r_squared = (factor_i > 0.0 && factor_j > 0.0).then(|| (d * d / denominator).min(1.0));
     F5SitePair {
@@ -249,19 +250,52 @@ fn pair_from_components(
     }
 }
 
+/// Factor `p(1-p)` del denominador de `r²`, escrito una sola vez.
+///
+/// La evaluabilidad de una pareja es `factor_i > 0 && factor_j > 0`, de modo
+/// que `factor == 0.0` es la **frontera exacta** de esa regla. La búsqueda de
+/// F5.2.3 la necesita con la misma aritmética que el evaluador para poder
+/// atribuir una divergencia a la frontera en lugar de a un defecto.
+pub(crate) fn f5_evaluability_factor(marginal: f64) -> f64 {
+    marginal * (1.0 - marginal)
+}
+
+/// Veredicto canónico de una pareja intrabloque.
+///
+/// Existe para que la búsqueda de F5.2.3 pueda contrastar su puntuación
+/// incremental **pareja a pareja** contra el canon y atribuir cada divergencia
+/// a una frontera exacta del contrato. Se rellena durante la evaluación
+/// canónica que ya se hace de todos modos, de modo que no cuesta ninguna visita
+/// de fila adicional.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct F5CanonicalPairVerdict {
+    pub(crate) d: f64,
+    pub(crate) factor_i: f64,
+    pub(crate) factor_j: f64,
+    pub(crate) evaluable: bool,
+    pub(crate) sign_ok: bool,
+}
+
 /// `p_hat_i = Σ_h q_h x_hi` en orden canónico `h` y con Neumaier.
 ///
 /// Un `x_hi` nulo aporta `0*q_h`, que ni mueve la suma ni la compensación, de
 /// modo que omitirlo produce exactamente los mismos bits que sumarlo.
-fn site_marginal(
+///
+/// `visits` cuenta **una visita por fila recorrida**, venga la llamada de donde
+/// venga. Es la instrumentación con la que la búsqueda de F5.2.3 acredita que
+/// ninguna propuesta recorre las H filas: si alguien añadiera una suma canónica
+/// dentro del bucle de propuestas, el contador crecería con el presupuesto.
+pub(crate) fn site_marginal(
     weights: &[f64],
     matrix: &F5AlleleMatrix,
     site_index: usize,
+    visits: &mut u64,
 ) -> Result<f64, F5LdError> {
     ensure_shape(weights, matrix, site_index)?;
     let mut compensated = NeumaierSum::default();
     let mut total = 0.0_f64;
     for (haplotype, weight) in weights.iter().enumerate() {
+        *visits += 1;
         if matrix
             .allele(haplotype, site_index)
             .ok_or(F5LdError::SiteOutOfRange)?
@@ -275,17 +309,22 @@ fn site_marginal(
 }
 
 /// `p_hat_ij = Σ_h q_h x_hi x_hj` en orden canónico `h` y con Neumaier.
-fn joint_marginal(
+///
+/// `visits` cuenta una visita por fila recorrida, igual que en
+/// [`site_marginal`].
+pub(crate) fn joint_marginal(
     weights: &[f64],
     matrix: &F5AlleleMatrix,
     site_index_i: usize,
     site_index_j: usize,
+    visits: &mut u64,
 ) -> Result<f64, F5LdError> {
     ensure_shape(weights, matrix, site_index_i)?;
     ensure_shape(weights, matrix, site_index_j)?;
     let mut compensated = NeumaierSum::default();
     let mut total = 0.0_f64;
     for (haplotype, weight) in weights.iter().enumerate() {
+        *visits += 1;
         let alt_i = matrix
             .allele(haplotype, site_index_i)
             .ok_or(F5LdError::SiteOutOfRange)?;
@@ -581,12 +620,76 @@ pub fn evaluate_f5_linkage_disequilibrium(
             bins,
             layout_block,
             block,
+            None,
         )?);
     }
     Ok(F5LdEvaluation {
         attempt_index: attempt.attempt_index(),
         blocks,
     })
+}
+
+/// Evalúa el LD realizado de **un solo** bloque×subpoblación.
+///
+/// Existe porque DTC-089 cuenta los intentos por bloque×subpoblación: la
+/// búsqueda de F5.2.3 resuelve cada unidad por separado y necesita su veredicto
+/// canónico sin evaluar las demás. Produce exactamente la misma fila que
+/// [`evaluate_f5_linkage_disequilibrium`] para ese bloque.
+///
+/// # Errors
+///
+/// Devuelve `GPS-CONF-101` si el bloque y el fragmento de layout no describen
+/// la misma geometría o si el perfil no declara bins para la subpoblación, y
+/// `GPS-INTERNAL-101` si la aritmética de DTC-089 deja de estar definida o una
+/// distancia no cae en ningún bin.
+pub fn evaluate_f5_block_linkage_disequilibrium(
+    config: &EffectiveF5Config,
+    layout_block: &F5LayoutBlock,
+    block: &F5BlockHaplotypes,
+) -> Result<F5BlockLdEvaluation, Diagnostic> {
+    evaluate_f5_block_with_pair_verdicts(config, layout_block, block, None)
+}
+
+/// Igual que [`evaluate_f5_block_linkage_disequilibrium`], recogiendo además
+/// el veredicto canónico de cada pareja en el orden `(i, j)` creciente.
+///
+/// Es la vía que usa la búsqueda de F5.2.3 para atribuir las divergencias de su
+/// puntuación incremental. No repite ningún recorrido: los veredictos se
+/// apuntan mientras la evaluación canónica recorre las parejas.
+pub(crate) fn evaluate_f5_block_with_pair_verdicts(
+    config: &EffectiveF5Config,
+    layout_block: &F5LayoutBlock,
+    block: &F5BlockHaplotypes,
+    verdicts: Option<&mut Vec<F5CanonicalPairVerdict>>,
+) -> Result<F5BlockLdEvaluation, Diagnostic> {
+    let scenario_path = config.scenario_path().display().to_string();
+    let foreign = |detail: &'static str| {
+        Diagnostic::f5_configuration(scenario_path.clone(), "layout.identity", detail)
+    };
+    if layout_block.block_index() != block.block_index() {
+        return Err(foreign(
+            "el bloque del intento y el del layout no comparten índice",
+        ));
+    }
+    let bins = config
+        .profile()
+        .ld_bins(block.population_id().as_str())
+        .ok_or_else(|| {
+            Diagnostic::f5_configuration(
+                scenario_path.clone(),
+                "profile.ld_profile",
+                "el perfil no declara bins LD para la subpoblación del intento",
+            )
+        })?;
+    evaluate_block(
+        config.scenario_id(),
+        &foreign,
+        config.profile().haplotype_weights(),
+        bins,
+        layout_block,
+        block,
+        verdicts,
+    )
 }
 
 fn evaluate_block(
@@ -596,9 +699,13 @@ fn evaluate_block(
     bins: &[LdBin],
     layout_block: &F5LayoutBlock,
     block: &F5BlockHaplotypes,
+    mut verdicts: Option<&mut Vec<F5CanonicalPairVerdict>>,
 ) -> Result<F5BlockLdEvaluation, Diagnostic> {
     let internal = |detail: String| Diagnostic::f5_internal(scenario_id, detail);
     let arithmetic = |error: F5LdError| Diagnostic::f5_internal(scenario_id, error.detail());
+    // El evaluador canónico no publica su recuento de visitas: su coste es fijo
+    // y quien lo mide es la búsqueda, sobre sus propias sumas.
+    let mut visits = 0_u64;
 
     if layout_block.block_id() != block.block_id() {
         return Err(foreign(
@@ -632,7 +739,8 @@ fn evaluate_block(
                 "el sitio del intento y el del layout no comparten identificador",
             ));
         }
-        let realized = site_marginal(weights, block.matrix(), index).map_err(arithmetic)?;
+        let realized =
+            site_marginal(weights, block.matrix(), index, &mut visits).map_err(arithmetic)?;
         if realized != column.realized_alt_af() {
             return Err(internal(format!(
                 "la columna {index} publicó {} y el evaluador recalculó {realized}",
@@ -657,14 +765,24 @@ fn evaluate_block(
                 j as u64,
                 marginals[i],
                 marginals[j],
-                joint_marginal(weights, block.matrix(), i, j).map_err(arithmetic)?,
+                joint_marginal(weights, block.matrix(), i, j, &mut visits).map_err(arithmetic)?,
             );
+            let polarities_match = block.columns()[i].polarity() == block.columns()[j].polarity();
+            if let Some(collected) = verdicts.as_deref_mut() {
+                collected.push(F5CanonicalPairVerdict {
+                    d: pair.d(),
+                    factor_i: f5_evaluability_factor(marginals[i]),
+                    factor_j: f5_evaluability_factor(marginals[j]),
+                    evaluable: pair.r_squared().is_some(),
+                    sign_ok: pair.r_squared().is_some()
+                        && sign_rule_is_satisfied(pair.d(), polarities_match),
+                });
+            }
             let Some(r_squared) = pair.r_squared() else {
                 not_evaluable_pairs += 1;
                 continue;
             };
             evaluable_pairs += 1;
-            let polarities_match = block.columns()[i].polarity() == block.columns()[j].polarity();
             if !sign_rule_is_satisfied(pair.d(), polarities_match) {
                 signs_failed += 1;
             }
@@ -704,8 +822,8 @@ fn evaluate_block(
                     definition.distance_start_bp()
                 )));
             }
-            let error = (mean - definition.target_mean_r2()).abs();
-            if error > definition.max_abs_error() {
+            let error = f5_bin_abs_error(mean, definition);
+            if f5_bin_is_outside(error, definition) {
                 bins_outside += 1;
             }
             if error > max_r2_error {
@@ -741,6 +859,20 @@ fn evaluate_block(
     })
 }
 
+/// `|media - objetivo|` de un bin evaluado.
+///
+/// La regla se escribe una sola vez: la usan el evaluador canónico y la
+/// puntuación incremental de la búsqueda de F5.2.3, que si no la duplicaría.
+pub(crate) fn f5_bin_abs_error(mean: f64, definition: &LdBin) -> f64 {
+    (mean - definition.target_mean_r2()).abs()
+}
+
+/// La tolerancia del perfil es **inclusiva**: solo un error estrictamente
+/// mayor deja el bin fuera.
+pub(crate) fn f5_bin_is_outside(error: f64, definition: &LdBin) -> bool {
+    error > definition.max_abs_error()
+}
+
 /// Acumulador de un bin mientras se recorren las parejas.
 ///
 /// `total` conserva el valor que devolvió la última llamada a
@@ -763,7 +895,7 @@ impl BinAccumulator {
 
 /// Índice del bin que contiene la distancia. Los bins del perfil son cerrados,
 /// disjuntos, contiguos y ordenados, de modo que basta una búsqueda binaria.
-fn bin_of(bins: &[LdBin], distance: u64) -> Option<usize> {
+pub(crate) fn bin_of(bins: &[LdBin], distance: u64) -> Option<usize> {
     let index = bins.partition_point(|bin| bin.distance_end_bp() < distance);
     bins.get(index)
         .filter(|bin| bin.distance_start_bp() <= distance)
@@ -773,6 +905,26 @@ fn bin_of(bins: &[LdBin], distance: u64) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// La tolerancia del perfil es inclusiva, y lo es en el borde exacto.
+    ///
+    /// La regla vive en una sola función, que usan el evaluador canónico y la
+    /// puntuación incremental de la búsqueda. Un error igual a la tolerancia
+    /// **no** deja el bin fuera; el siguiente `f64` representable sí.
+    #[test]
+    fn the_bin_tolerance_is_inclusive_at_the_exact_boundary() {
+        let bin = LdBin::for_test(1, 4, 0.25, 0.05);
+        assert_eq!(f5_bin_abs_error(0.3, &bin), 0.049_999_999_999_999_99);
+        assert!(
+            !f5_bin_is_outside(0.05, &bin),
+            "el borde exacto quedó fuera"
+        );
+        assert!(!f5_bin_is_outside(0.0, &bin));
+        assert!(
+            f5_bin_is_outside(f64::from_bits(0.05_f64.to_bits() + 1), &bin),
+            "un ULP por encima de la tolerancia no quedó fuera"
+        );
+    }
 
     /// Cuatro pesos uniformes: todo racional del oráculo cabe en `u128` sin
     /// perder un bit, porque `1/4` y sus productos son diádicos exactos.
