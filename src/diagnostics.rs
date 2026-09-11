@@ -81,6 +81,27 @@ impl Diagnostic {
             .with("detail", detail.into())
     }
 
+    /// La cuota controlada de un bloque×subpoblación no puede satisfacerse
+    /// dentro de su tolerancia efectiva.
+    ///
+    /// DTC-089 lo exige **antes** de abrir el RNG propio de cuotas: la
+    /// comprobación `O(H)` de los estados aplicables demuestra la cota para
+    /// todas las combinaciones óptimas sin enumerar ninguna, y una cuota
+    /// inviable no se corrige, se relaja ni se sustituye por otra. El contexto
+    /// público del catálogo no incluye `block_id`, de modo que la unidad exacta
+    /// viaja en `detail`.
+    #[must_use]
+    pub fn f5_controlled_quota_infeasible(
+        scenario_id: impl Into<String>,
+        population_id: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self::from_catalog("GPS-DOMAIN-103")
+            .with("scenario_id", scenario_id.into())
+            .with("population_id", population_id.into())
+            .with("detail", detail.into())
+    }
+
     /// La búsqueda haplotípica agotó `max_haplotype_attempts` sin un intento
     /// aceptable.
     ///

@@ -873,7 +873,7 @@ identificador del índice de copia.
 
 ## 6. F5.3 — fundadores intactos y F
 
-- ☐ **F5.3.1.** Resolver para cada bloque×subpoblación el modo solicitado y
+- ✅ **F5.3.1.** Resolver para cada bloque×subpoblación el modo solicitado y
   efectivo —predeterminado de subpoblación o sustitución única por índice— y la
   tolerancia controlada declarada/efectiva; implementar muestreo probabilístico
   y cuotas por mayores restos con factibilidad previa y permutación de copias.
@@ -884,6 +884,215 @@ identificador del índice de copia.
     distintos, sustitución ausente/duplicada/fuera de rango, `null` en
     probabilístico, suma C, cota inclusiva predeterminada 0,5/C y una más
     estricta, empate reproducible por RNG, cuota imposible y F>0 incompatible.
+  - Estado implementado (11 de septiembre de 2026) y corregido tras la revisión
+    adversarial. `src/f5_founders.rs` resuelve, para cada bloque×subpoblación
+    de la búsqueda ganadora, el modo solicitado y efectivo, su origen y sus dos
+    tolerancias, y asigna una fila haplotípica a cada copia: en probabilístico,
+    un U53 por copia en su propio ámbito `founder_sample`; en controlado, el
+    reparto por mayores restos con factibilidad previa `O(H)`, desempate único
+    del grupo fronterizo con `controlled_quota_tie` y permutación Fisher–Yates
+    de las `C` identidades de copia con `founder_controlled_permutation`. Es la
+    primera ruta que emite `GPS-DOMAIN-103`, que hasta hoy no tenía ningún
+    emisor.
+  - Decisiones locales registradas:
+    - **`requested_mode` es el modo que el documento pide para esa unidad, no
+      el predeterminado de la subpoblación.** `source` es quien distingue de
+      dónde vino —`subpopulation_default` o `block_override`— y hace
+      innecesario reservar `requested_mode` para el predeterminado; con esta
+      lectura una sustitución que repite el modo de su subpoblación sigue
+      siendo distinguible. `effective_mode` coincide **siempre** con el
+      solicitado: DTC-089 prohíbe corregir o relajar una cuota, de modo que una
+      unidad inviable se rechaza y no se degrada a probabilístico. Es la misma
+      relación que F4 ya exige entre `requested_mode` y `effective_mode` de
+      `sequencing_errors`, donde el manifiesto y el efectivo se rechazan si
+      difieren.
+    - **Las filas se publican por `population_id`+`block_id`, no por
+      `block_index`.** Es el orden literal de la lista `sampling` del efectivo
+      y del manifiesto. No es el mismo orden: `block_id` es un identificador
+      derivado con BLAKE3, así que con dos o más bloques ambos órdenes divergen
+      —el fixture de `rows_are_ordered_by_population_and_block_id` lo
+      demuestra—. Las unidades asignadas se publican en ese mismo orden para
+      que no convivan dos órdenes canónicos en el mismo resultado; quien
+      necesite el orden del layout ordena por `block_index`, que cada fila
+      conserva.
+    - **`GPS-DOMAIN-103` cubre la cuota, no la combinación `F>0`×controlado.**
+      El catálogo dice literalmente que la cuota «no puede satisfacerse
+      exactamente dentro de su tolerancia», y con `F>0` no hay ninguna cuota
+      que no quepa: hay una configuración contradictoria. Por eso `F>0` con
+      controlado es `GPS-CONF-101`, que es además el código con el que la
+      admisión ya la rechaza hoy —`adapters.rs` comprueba el predeterminado de
+      la subpoblación y cada sustitución controlada—, y `GPS-DOMAIN-103` queda
+      para la cota incumplida y para el residual que ninguna cuota entera puede
+      sumar. REQ-EVO-76 agrupa los dos rechazos en la misma frase; lo que
+      comparten es el **momento**, no el código, y aquí los dos ocurren antes
+      de abrir ningún ámbito.
+    - **La cota se evalúa en copias, no en `n_h/C`.** `|n_h/C - q_h| <= t` se
+      comprueba multiplicada por `C`: `|n_h - C*q_h| <= t*C`, con el
+      predeterminado expresado exactamente como `0.5` copias y una tolerancia
+      declarada convertida con `t*C`. Es la misma desigualdad sin el cociente
+      `n_h/C`, que introduce un redondeo ajeno al contrato: `C*q_h` y su
+      distancia a un entero contiguo son exactos en binary64 con pesos
+      diádicos, mientras que `n_h/C` no lo es salvo con `C` potencia de dos.
+      - La primera versión comparaba `|n_h/C - q_h|` y **rechazaba cuotas que
+        el contrato admite**. El caso mínimo son tres fundadores haploides y
+        dos haplotipos equiprobables: el error exacto y la cota valen ambos
+        `1/6`, y en binary64 daban `0.16666666666666669` frente a
+        `0.16666666666666666`. La revisión midió el alcance en racionales sobre
+        `C = 1..64` —29 de 64 valores con pesos `1/2,1/4,1/8,1/8`, 22 con
+        `1/2,1/2` y 13 con `3/4,1/4`—, de modo que no era un caso de esquina.
+      - No es un cambio de contrato, sino su aplicación: DTC-089 tipa como
+        binary64 los **restos** y prohíbe la tolerancia en su **igualdad**, no
+        en la evaluación de una desigualdad que enuncia sobre `n_h/C` y `q_h`;
+        `0,5/C` es exactamente el umbral que hace admisible el redondeo al
+        entero más próximo, de modo que el resto `0,5` —el que genera el empate
+        fronterizo que el contrato regula con tanto detalle— cae **sobre** la
+        cota por diseño; y el proyecto ya evalúa condiciones así en aritmética
+        exacta. La tolerancia publicada sigue siendo la del contrato, por
+        haplotipo; la de copias es interna y el diagnóstico publica ambas.
+    - **El residuo de redondeo del paseo de prefijos lo absorbe el último rango
+      con peso positivo.** La mecánica es la misma con la que DTC-089 elige
+      banda del espectro —recorrer `q` en orden y quedarse con el primer
+      prefijo compensado estrictamente mayor que el U53—, pero `choose_band`
+      devuelve la última fila cuando ninguna cruza, y aquí eso podría dar una
+      copia a un `q_h = 0`. Un haplotipo de peso nulo no puede recibir copias
+      sin romper la frecuencia realizada. En el modo controlado la protección
+      es doble: un resto nulo nunca entra en el residual —los restos suman
+      exactamente el residual— y, si entrara, `|1 - 0| = 1 > 0.5` copias lo
+      rechazaría.
+    - **`H = 1` no consume RNG.** Es la regla general del catálogo —«una
+      elección con una sola alternativa no consume RNG»—, aplicada igual que en
+      `choose_band`. No es alcanzable por la cadena completa: la admisión del
+      perfil exige `H` en `2..=4096` y rechaza antes un perfil de un solo
+      haplotipo con `GPS-FMT-101`. La frontera del muestreo no puede depender
+      de esa comprobación ajena, y ese rango fija el techo real de 4096
+      haplotipos.
+    - **Un grupo solo es «frontera empatada» si el residual lo parte.** Con un
+      `select_count` estrictamente entre cero y `g` se abre
+      `controlled_quota_tie` y se publica el objeto de `quota_ties`; con
+      `select_count == g` o `0` el grupo está incluido o excluido por completo,
+      no consume RNG y no publica nada. Un grupo de tamaño 1 nunca cruza nada,
+      de modo que tampoco aparece: llamar «empate» a un único rango obligado
+      llenaría `quota_ties` de filas que no representan ninguna elección.
+    - **Nada del desempate ocurre antes de la factibilidad, y se puede
+      comprobar.** `plan_controlled_quota` no recibe ninguna fuente aleatoria:
+      no puede consumir una palabra aunque alguien reordene su cuerpo. Y
+      `select_tie_prefix` recibe el ámbito como un cierre que **solo invoca
+      cuando hay frontera**, de modo que «un grupo incluido o excluido por
+      completo no consume RNG» se prueba por la ausencia de la llamada, no por
+      la lectura del código.
+    - **El censo fundador se resuelve en este hito y se publica ordenado por
+      `individual_id`.** El ámbito `founder_sample` lleva `individual_id` entre
+      sus componentes, así que sin identidades no hay muestreo posible.
+      `resolve_f5_founder_roster` usa el `founder_id` aportado tal cual y
+      deriva el de cada `founder_key` con el contrato población×clave de
+      REQ-IND-25, el mismo `IdentityRegistry` que ya usa F1/F2. El orden por ID
+      es el que DTC-089 exige a la lista `founders` del efectivo y no cambia
+      ningún sorteo, porque las identidades de copia se ordenan igualmente
+      antes de permutarse. F5.3.3 debe **reutilizar** este censo para
+      materializar `FCP_`/`FHA_` y la pertenencia.
+    - **La frontera con F5.3.2 queda abierta y vacía.** El muestreo recorre las
+      copias de cada individuo juntas y en orden de `copy_index`; F5.3.2 solo
+      tiene que insertar, para `copy_index == 1` con `P = 2`, el `founder_f` y
+      la reutilización de la fila de la copia 0. Este hito no publica
+      `F_realized` ni calcula `P(ii)`/`P(ij)`, y una búsqueda negativa sobre el
+      propio módulo fija que no abre el ámbito `founder_f`.
+  - Guardas declaradas sin prueba propia, por ser inalcanzables desde la vía
+    productiva: la incompatibilidad `F>0`×controlado, la sustitución duplicada,
+    la sustitución que no corresponde a ninguna unidad y la comprobación de que
+    las cuotas suman `C` las garantizan antes la admisión —o el preflight, que
+    resuelve `B` y comprueba `block_index` en `0..B-1`— o la propia
+    construcción del reparto. Se conservan porque `assign_f5_founders` es una
+    frontera pública, pero **borrarlas no haría fallar ninguna prueba** y así
+    queda dicho; la revisión lo verificó mutación a mutación. La propiedad que
+    protege la última —la cuota suma `C` y las copias la realizan— sí la fija
+    `controlled_quotas_sum_c_and_match_the_integer_oracle`.
+  - Coste, por bloque×subpoblación: `O(C + H)` en los dos modos, medido por un
+    contador que se incrementa **dentro** de cada bucle y se publica en
+    `F5FounderUnit::operations`. La primera versión crecía como `C log C` y
+    declaraba el término menor: ordenaba los `H` restos —seis comparaciones con
+    los perfiles reales— y, sobre todo, **ordenaba las `C` asignaciones** al
+    final de cada unidad, cosa que el plan no mencionaba. La revisión lo midió
+    por la vía productiva: 25 visitas con `C=2` frente a un presupuesto de 8 y
+    14 344 frente a 2 048 con `C=512`, con la razón creciendo como `log2(C)`.
+    Las tres correcciones no tocan el RNG:
+    - la permutación controlada permuta los **índices** `0..C` en vez de las
+      identidades de copia. Fisher–Yates intercambia posiciones, de modo que la
+      secuencia RNG y la permutación resultante son idénticas, pero el
+      resultado se escribe ya en el orden canónico y no hay que reordenar `C`
+      asignaciones;
+    - el umbral de los mayores restos sale de una selección parcial
+      (`select_nth_unstable_by`) en `O(H)` y el grupo empatado de una pasada
+      lineal: ordenar los `H` restos no aportaba nada, porque dentro del grupo
+      el orden lo decide el desempate y fuera de él solo importa el lado;
+    - el paseo de prefijos del muestreo probabilístico se compone **una vez por
+      unidad** —el vector de prefijos compensados no depende de la copia— y
+      cada copia lo consulta por partición binaria, de modo que el coste baja
+      de `C*H` visitas a `C*log2(H)`. La tabla produce exactamente el mismo
+      rango que el recorrido secuencial, y una prueba lo contrasta sobre una
+      rejilla de 512 umbrales y siete perfiles.
+  - La identidad de los resultados se comprobó comparando todas las
+    asignaciones, cuotas y empates de seis escenarios —controlado con 2, 6, 9
+    y 16 copias y probabilístico con 8 y 9— antes y después de las tres
+    correcciones: son idénticos. Con ellas el término `B*C_total` de v7 cubre
+    el trabajo real y no queda ninguna condición de contabilidad declarada. El
+    contador mide el trabajo que el módulo ejecuta en sus bucles; una
+    ordenación reintroducida **sin contabilizar** no la vería, y por eso la
+    cota se declara también aquí.
+  - Limitación declarada de los oráculos: el contraste entero exige pesos
+    **diádicos**, donde `C*q_h`, sus pisos y sus restos son exactos en
+    binary64. Con la cota medida en copias, la estructura del reparto —pisos,
+    estados, grupo fronterizo y prefijo— **y el veredicto** de factibilidad se
+    contrastan para todo `C` de la barrida, sin excepción. La primera versión
+    dejaba los `C` no potencia de dos dentro de un `if let Ok(...)`: 156 de los
+    192 casos no comprobaban ningún rechazo —justo donde vivía el defecto de la
+    cota— y el recuento de suficiencia solo medía los 36 restantes. Ahora la
+    barrida exige comparar los 192 e incluir rechazos.
+  - Pruebas y variante defectuosa que cada una atrapa. `tests/f5_founders.rs`
+    recorre la cadena completa con 29 pruebas y `src/f5_founders.rs` añade
+    catorce unitarias con oráculo entero, fuente espía y oráculo del paseo
+    secuencial; la línea base pasa de 824 a 867. Cada una se verificó **contra
+    su variante defectuosa**, aplicada una a una sobre el productor:
+    - cota otra vez en unidades de `n_h/C` → caen las tres regresiones del
+      bloqueante —el caso haploide mínimo, el reparto de seis copias y la
+      barrida de cardinalidades—, el oráculo entero y la prueba de los dos
+      estados (5);
+    - restos ordenados de menor a mayor → el oráculo entero, la suma `C`, la
+      cota inclusiva, el empate y el orden de filas (9);
+    - comprobar solo el piso del grupo fronterizo → la cuota imposible, la de
+      los dos estados y el oráculo (4);
+    - cota exclusiva (`>=` en lugar de `>`) → 9 pruebas, la inclusiva incluida;
+    - umbral de la selección parcial con `>=` → 14 pruebas, entre ellas el
+      oráculo y la cuota imposible;
+    - prefijo empatado sin reiniciar al incluir el grupo entero → el oráculo
+      entero;
+    - sufijo en vez de prefijo del grupo empatado → el empate reproducible;
+    - candidatos empatados ordenados de mayor a menor → 5, el empate incluido;
+    - ámbito del desempate abierto siempre → la prueba de que un grupo sin
+      frontera no lo abre;
+    - desempate abierto con el ámbito de la permutación → el empate;
+    - no permutar los índices de copia → la permutación reproducible;
+    - asientos ordenados por copia y luego por individuo → la permutación y el
+      orden canónico;
+    - partición binaria con `<` en vez de `<=` → el oráculo del paseo
+      secuencial y la frontera exacta del U53;
+    - residuo de redondeo al último rango en vez del último positivo → el peso
+      nulo inalcanzable;
+    - modo solicitado tomado siempre del predeterminado → los dos modos y el
+      último índice legal;
+    - tolerancia declarada ignorada → la cota más estricta;
+    - filas ordenadas por `block_index` → el orden por `block_id`;
+    - censo sin ordenar por ID → las claves fundadoras en controlado;
+    - muestreo con `copy_index` fijado a 0 → el ámbito por copia;
+    - ordenación de las `C` asignaciones contabilizada → la cota lineal del
+      coste.
+  - Hueco declarado y no cubierto: **ningún fixture alcanza un grupo fronterizo
+    de más de dos rangos por la vía productiva**. Exige tres o más pesos con el
+    mismo resto y `C` que parta el grupo, y la búsqueda haplotípica no converge
+    con esos perfiles: se probaron 216 combinaciones de pesos uniformes de 4 y
+    8 rangos, cuatro longitudes de bloque, seis objetivos `r²` y tres semillas,
+    sin un solo caso terminado. Las unitarias sí lo cubren —un grupo de cuatro
+    que abarca el residual entero, y grupos de hasta ocho en la barrida del
+    oráculo—, de modo que el hueco es del fixture y no del algoritmo.
 - ☐ **F5.3.2.** Aplicar F diploide y publicar F realizado; rechazar F en otras
   ploidías y registrar Ne no aplicable en F5.
   - Depende de: F5.3.1.
