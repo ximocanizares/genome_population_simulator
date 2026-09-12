@@ -767,6 +767,26 @@ impl F5LayoutFailure {
         }
     }
 
+    /// Fallo **anterior al primer intento**: resolución de la solicitud,
+    /// identidad de ejecución y `validate_layout_request`. Cero intentos
+    /// consumidos es entonces la verdad.
+    ///
+    /// Sustituye a un `impl From<Diagnostic>` que cualquier `?` podía invocar
+    /// en silencio. Diez `?` del cuerpo del bucle lo hacían —el sorteo de
+    /// longitudes y nueve guardas de desbordamiento—, y uno de ellos devuelve
+    /// un error **de dominio** que depende del propio intento, de modo que el
+    /// cero era alcanzable en producción con `k>0`: justo el defecto que se
+    /// creía corregido. Sin la conversión implícita, un fallo del bucle **no
+    /// puede** llegar aquí: el cuerpo devuelve `Diagnostic` y una sola
+    /// conversión le añade lo consumido.
+    fn before_any_attempt(diagnostic: Diagnostic) -> Self {
+        Self {
+            diagnostic: Box::new(diagnostic),
+            best_layout: None,
+            attempts_used: 0,
+        }
+    }
+
     /// Fallo ocurrido **dentro** del bucle de intentos, con lo que llevaba
     /// consumido y el mejor candidato que ya existía.
     fn during_attempts(
@@ -778,20 +798,6 @@ impl F5LayoutFailure {
             diagnostic: Box::new(diagnostic),
             best_layout,
             attempts_used,
-        }
-    }
-}
-
-/// Conversión para los fallos **anteriores al primer intento**: validación de
-/// la solicitud, plan de longitudes y distribución de gaps. Cualquier fallo
-/// ocurrido dentro del bucle usa `during_attempts`, que sí
-/// conserva lo consumido.
-impl From<Diagnostic> for F5LayoutFailure {
-    fn from(diagnostic: Diagnostic) -> Self {
-        Self {
-            diagnostic: Box::new(diagnostic),
-            best_layout: None,
-            attempts_used: 0,
         }
     }
 }
@@ -1212,29 +1218,40 @@ pub fn build_f5_physical_layout(
         .test_inputs
         .is_none()
         .then(|| ResolvedProductionLayout::from_request(&request))
-        .transpose()?;
+        .transpose()
+        .map_err(F5LayoutFailure::before_any_attempt)?;
     #[cfg(not(test))]
-    let production = ResolvedProductionLayout::from_request(&request)?;
+    let production = ResolvedProductionLayout::from_request(&request)
+        .map_err(F5LayoutFailure::before_any_attempt)?;
     #[cfg(test)]
     let inputs = if let Some(inputs) = request.test_inputs {
         inputs
     } else {
         let production = production.as_ref().ok_or_else(|| {
-            Diagnostic::internal_invariant("f5_layout", "production layout not resolved")
+            F5LayoutFailure::before_any_attempt(Diagnostic::internal_invariant(
+                "f5_layout",
+                "production layout not resolved",
+            ))
         })?;
         let execution_id = request.execution_id.ok_or_else(|| {
-            Diagnostic::internal_invariant("f5_layout", "production request without execution")
+            F5LayoutFailure::before_any_attempt(Diagnostic::internal_invariant(
+                "f5_layout",
+                "production request without execution",
+            ))
         })?;
         production.inputs(execution_id)
     };
     #[cfg(not(test))]
     let inputs = {
         let execution_id = request.execution_id.ok_or_else(|| {
-            Diagnostic::internal_invariant("f5_layout", "production request without execution")
+            F5LayoutFailure::before_any_attempt(Diagnostic::internal_invariant(
+                "f5_layout",
+                "production request without execution",
+            ))
         })?;
         production.inputs(execution_id)
     };
-    validate_layout_request(&inputs)?;
+    validate_layout_request(&inputs).map_err(F5LayoutFailure::before_any_attempt)?;
     let scenario_id = inputs.length_plan.scenario_id();
     let mut best: Option<BestLayoutCandidate> = None;
     // Intentos realmente consumidos. Se actualiza al abrir cada iteración, de
@@ -1242,171 +1259,77 @@ pub fn build_f5_physical_layout(
     // diagnóstico con `?`— conoce lo gastado.
     let mut attempts_used = 0_u64;
 
-    for attempt_index in 0..inputs.max_layout_attempts {
-        attempts_used = attempt_index + 1;
-        #[cfg(test)]
-        record_attempt_started();
-        let lengths = inputs.length_plan.sample(inputs.root_seed, attempt_index)?;
-        let planned_bases = lengths.iter().try_fold(0_u64, |sum, length| {
-            sum.checked_add(*length).ok_or_else(|| {
-                Diagnostic::f5_internal(
-                    scenario_id.as_str(),
-                    "la suma de longitudes del intento desborda u64",
-                )
-            })
-        })?;
-        let mut pending = lengths
-            .into_iter()
-            .enumerate()
-            .map(|(index, length_bp)| {
-                Ok((
-                    u64::try_from(index).map_err(|_| {
-                        Diagnostic::f5_internal(scenario_id.as_str(), "block_index no cabe en u64")
-                    })?,
-                    length_bp,
-                ))
-            })
-            .collect::<Result<Vec<_>, Diagnostic>>()?;
-        #[cfg(test)]
-        record_live_slots(
-            inputs
-                .eligible_tracts
-                .len()
-                .saturating_add(pending.capacity()),
-        );
-        pending.sort_unstable_by(|left, right| {
-            right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0))
-        });
-        #[cfg(test)]
-        let pending_capacity = pending.capacity();
-        let free_capacity = inputs
-            .eligible_tracts
-            .len()
-            .checked_add(pending.len())
-            .ok_or_else(|| {
-                Diagnostic::f5_internal(
-                    scenario_id.as_str(),
-                    "la reserva de tramos libres desborda usize",
-                )
+    // El bucle vive en un cierre que devuelve `Diagnostic` para que **una
+    // sola** conversión, la de abajo, le añada los intentos consumidos y el
+    // mejor candidato. Sin él, los diez `?` del cuerpo —el sorteo de
+    // longitudes y las nueve guardas de desbordamiento— pasaban por
+    // `From<Diagnostic>` y publicaban `layout_attempts_used = 0` habiendo
+    // gastado k intentos. Y no es invariante interna: el sorteo puede
+    // devolver un error **de dominio** —«residual final fuera del soporte
+    // factible»— que depende del propio intento.
+    let outcome = (|| -> Result<Option<F5PhysicalLayout>, Diagnostic> {
+        for attempt_index in 0..inputs.max_layout_attempts {
+            attempts_used = attempt_index + 1;
+            #[cfg(test)]
+            record_attempt_started();
+            let lengths = inputs.length_plan.sample(inputs.root_seed, attempt_index)?;
+            let planned_bases = lengths.iter().try_fold(0_u64, |sum, length| {
+                sum.checked_add(*length).ok_or_else(|| {
+                    Diagnostic::f5_internal(
+                        scenario_id.as_str(),
+                        "la suma de longitudes del intento desborda u64",
+                    )
+                })
             })?;
-        record_reserved_slots(free_capacity);
-        let mut free = Vec::with_capacity(free_capacity);
-        for tract in inputs.eligible_tracts {
-            free.push(FreeTract {
-                sequence_ordinal: tract.sequence_ordinal(),
-                start_1based: tract.start_1based(),
-                end_1based: tract.end_1based(),
+            let mut pending = lengths
+                .into_iter()
+                .enumerate()
+                .map(|(index, length_bp)| {
+                    Ok((
+                        u64::try_from(index).map_err(|_| {
+                            Diagnostic::f5_internal(
+                                scenario_id.as_str(),
+                                "block_index no cabe en u64",
+                            )
+                        })?,
+                        length_bp,
+                    ))
+                })
+                .collect::<Result<Vec<_>, Diagnostic>>()?;
+            #[cfg(test)]
+            record_live_slots(
+                inputs
+                    .eligible_tracts
+                    .len()
+                    .saturating_add(pending.capacity()),
+            );
+            pending.sort_unstable_by(|left, right| {
+                right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0))
             });
-            record_initial_tract_copy();
-        }
-        let mut placed = Vec::with_capacity(pending.len());
-        record_reserved_slots(pending.len());
-        #[cfg(test)]
-        record_live_slots(
-            inputs
+            #[cfg(test)]
+            let pending_capacity = pending.capacity();
+            let free_capacity = inputs
                 .eligible_tracts
                 .len()
-                .saturating_add(pending_capacity)
-                .saturating_add(free.capacity())
-                .saturating_add(placed.capacity()),
-        );
-        let mut placement_failed = false;
-
-        for (source_block_index, length_bp) in pending {
-            let total_starts = total_starts_for_length(&free, length_bp).ok_or_else(|| {
-                Diagnostic::f5_internal(
-                    scenario_id.as_str(),
-                    "el total de inicios válidos desborda u64",
-                )
-            })?;
-            if total_starts == 0 {
-                placement_failed = true;
-                break;
-            }
-            let mut rng = derive_f5_subseed(
-                inputs.root_seed,
-                F5RandomDecision::layout_position(scenario_id, attempt_index, source_block_index),
-            )?
-            .local_rng();
-            let chosen = f5_uniform_index(&mut rng, total_starts).map_err(|_| {
-                Diagnostic::f5_internal(
-                    scenario_id.as_str(),
-                    "el selector uniforme de posición recibió un límite inválido",
-                )
-            })?;
-            let (tract_index, start_1based) = resolve_start_by_prefix(&free, length_bp, chosen)
+                .checked_add(pending.len())
                 .ok_or_else(|| {
                     Diagnostic::f5_internal(
                         scenario_id.as_str(),
-                        "el prefijo de inicios no resolvió una posición válida",
+                        "la reserva de tramos libres desborda usize",
                     )
                 })?;
-            #[cfg(test)]
-            LAYOUT_INSTRUMENTATION.with(|instrumentation| {
-                let tract = free[tract_index];
-                instrumentation.borrow_mut().placement_trace.push((
-                    attempt_index,
-                    tract_index,
-                    start_1based,
-                    tract.start_1based < start_1based,
-                    start_1based
-                        .checked_add(length_bp - 1)
-                        .is_some_and(|end| end < tract.end_1based),
-                ));
-            });
-            record_remove_shift(free.len().saturating_sub(tract_index + 1));
-            let tract = free.remove(tract_index);
-            let end_1based = start_1based.checked_add(length_bp - 1).ok_or_else(|| {
-                Diagnostic::f5_internal(scenario_id.as_str(), "el final de bloque desborda u64")
-            })?;
-            let mut insert_at = tract_index;
-            #[cfg(test)]
-            let mut inserted_residues = 0_u64;
-            if tract.start_1based < start_1based {
-                record_insert_shift(free.len().saturating_sub(insert_at));
-                free.insert(
-                    insert_at,
-                    FreeTract {
-                        sequence_ordinal: tract.sequence_ordinal,
-                        start_1based: tract.start_1based,
-                        end_1based: start_1based - 1,
-                    },
-                );
-                #[cfg(test)]
-                {
-                    inserted_residues += 1;
-                }
-                insert_at += 1;
+            record_reserved_slots(free_capacity);
+            let mut free = Vec::with_capacity(free_capacity);
+            for tract in inputs.eligible_tracts {
+                free.push(FreeTract {
+                    sequence_ordinal: tract.sequence_ordinal(),
+                    start_1based: tract.start_1based(),
+                    end_1based: tract.end_1based(),
+                });
+                record_initial_tract_copy();
             }
-            if end_1based < tract.end_1based {
-                record_insert_shift(free.len().saturating_sub(insert_at));
-                free.insert(
-                    insert_at,
-                    FreeTract {
-                        sequence_ordinal: tract.sequence_ordinal,
-                        start_1based: end_1based + 1,
-                        end_1based: tract.end_1based,
-                    },
-                );
-                #[cfg(test)]
-                {
-                    inserted_residues += 1;
-                }
-            }
-            #[cfg(test)]
-            {
-                if inserted_residues == 2 {
-                    record_division();
-                    record_fragment_growth();
-                }
-            }
-            placed.push(PlacedBlockDraft {
-                source_block_index,
-                length_bp,
-                sequence_ordinal: tract.sequence_ordinal,
-                start_1based,
-                end_1based,
-            });
+            let mut placed = Vec::with_capacity(pending.len());
+            record_reserved_slots(pending.len());
             #[cfg(test)]
             record_live_slots(
                 inputs
@@ -1416,66 +1339,182 @@ pub fn build_f5_physical_layout(
                     .saturating_add(free.capacity())
                     .saturating_add(placed.capacity()),
             );
-        }
+            let mut placement_failed = false;
 
-        placed.sort_unstable_by(|left, right| {
-            (left.sequence_ordinal, left.start_1based, left.end_1based).cmp(&(
-                right.sequence_ordinal,
-                right.start_1based,
-                right.end_1based,
-            ))
-        });
-        let placed_bases = placed.iter().try_fold(0_u64, |sum, block| {
-            sum.checked_add(block.length_bp).ok_or_else(|| {
+            for (source_block_index, length_bp) in pending {
+                let total_starts = total_starts_for_length(&free, length_bp).ok_or_else(|| {
+                    Diagnostic::f5_internal(
+                        scenario_id.as_str(),
+                        "el total de inicios válidos desborda u64",
+                    )
+                })?;
+                if total_starts == 0 {
+                    placement_failed = true;
+                    break;
+                }
+                let mut rng = derive_f5_subseed(
+                    inputs.root_seed,
+                    F5RandomDecision::layout_position(
+                        scenario_id,
+                        attempt_index,
+                        source_block_index,
+                    ),
+                )?
+                .local_rng();
+                let chosen = f5_uniform_index(&mut rng, total_starts).map_err(|_| {
+                    Diagnostic::f5_internal(
+                        scenario_id.as_str(),
+                        "el selector uniforme de posición recibió un límite inválido",
+                    )
+                })?;
+                let (tract_index, start_1based) = resolve_start_by_prefix(&free, length_bp, chosen)
+                    .ok_or_else(|| {
+                        Diagnostic::f5_internal(
+                            scenario_id.as_str(),
+                            "el prefijo de inicios no resolvió una posición válida",
+                        )
+                    })?;
+                #[cfg(test)]
+                LAYOUT_INSTRUMENTATION.with(|instrumentation| {
+                    let tract = free[tract_index];
+                    instrumentation.borrow_mut().placement_trace.push((
+                        attempt_index,
+                        tract_index,
+                        start_1based,
+                        tract.start_1based < start_1based,
+                        start_1based
+                            .checked_add(length_bp - 1)
+                            .is_some_and(|end| end < tract.end_1based),
+                    ));
+                });
+                record_remove_shift(free.len().saturating_sub(tract_index + 1));
+                let tract = free.remove(tract_index);
+                let end_1based = start_1based.checked_add(length_bp - 1).ok_or_else(|| {
+                    Diagnostic::f5_internal(scenario_id.as_str(), "el final de bloque desborda u64")
+                })?;
+                let mut insert_at = tract_index;
+                #[cfg(test)]
+                let mut inserted_residues = 0_u64;
+                if tract.start_1based < start_1based {
+                    record_insert_shift(free.len().saturating_sub(insert_at));
+                    free.insert(
+                        insert_at,
+                        FreeTract {
+                            sequence_ordinal: tract.sequence_ordinal,
+                            start_1based: tract.start_1based,
+                            end_1based: start_1based - 1,
+                        },
+                    );
+                    #[cfg(test)]
+                    {
+                        inserted_residues += 1;
+                    }
+                    insert_at += 1;
+                }
+                if end_1based < tract.end_1based {
+                    record_insert_shift(free.len().saturating_sub(insert_at));
+                    free.insert(
+                        insert_at,
+                        FreeTract {
+                            sequence_ordinal: tract.sequence_ordinal,
+                            start_1based: end_1based + 1,
+                            end_1based: tract.end_1based,
+                        },
+                    );
+                    #[cfg(test)]
+                    {
+                        inserted_residues += 1;
+                    }
+                }
+                #[cfg(test)]
+                {
+                    if inserted_residues == 2 {
+                        record_division();
+                        record_fragment_growth();
+                    }
+                }
+                placed.push(PlacedBlockDraft {
+                    source_block_index,
+                    length_bp,
+                    sequence_ordinal: tract.sequence_ordinal,
+                    start_1based,
+                    end_1based,
+                });
+                #[cfg(test)]
+                record_live_slots(
+                    inputs
+                        .eligible_tracts
+                        .len()
+                        .saturating_add(pending_capacity)
+                        .saturating_add(free.capacity())
+                        .saturating_add(placed.capacity()),
+                );
+            }
+
+            placed.sort_unstable_by(|left, right| {
+                (left.sequence_ordinal, left.start_1based, left.end_1based).cmp(&(
+                    right.sequence_ordinal,
+                    right.start_1based,
+                    right.end_1based,
+                ))
+            });
+            let placed_bases = placed.iter().try_fold(0_u64, |sum, block| {
+                sum.checked_add(block.length_bp).ok_or_else(|| {
+                    Diagnostic::f5_internal(
+                        scenario_id.as_str(),
+                        "la suma de bloques colocados desborda u64",
+                    )
+                })
+            })?;
+            let remaining_target_bases =
+                planned_bases.checked_sub(placed_bases).ok_or_else(|| {
+                    Diagnostic::f5_internal(
+                        scenario_id.as_str(),
+                        "los bloques colocados exceden la longitud planificada",
+                    )
+                })?;
+            let placed_layout_bytes = placed_layout_bytes(&placed);
+            let placed_count = u64::try_from(placed.len()).map_err(|_| {
                 Diagnostic::f5_internal(
                     scenario_id.as_str(),
-                    "la suma de bloques colocados desborda u64",
+                    "el recuento de bloques colocados no cabe en u64",
                 )
-            })
-        })?;
-        let remaining_target_bases = planned_bases.checked_sub(placed_bases).ok_or_else(|| {
-            Diagnostic::f5_internal(
-                scenario_id.as_str(),
-                "los bloques colocados exceden la longitud planificada",
-            )
-        })?;
-        let placed_layout_bytes = placed_layout_bytes(&placed);
-        let placed_count = u64::try_from(placed.len()).map_err(|_| {
-            Diagnostic::f5_internal(
-                scenario_id.as_str(),
-                "el recuento de bloques colocados no cabe en u64",
-            )
-        })?;
-        consider_best(
-            &mut best,
-            inputs.length_plan.block_count() - placed_count,
-            placed_count,
-            placed_bases,
-            remaining_target_bases,
-            placed_layout_bytes,
-            attempt_index,
-        );
+            })?;
+            consider_best(
+                &mut best,
+                inputs.length_plan.block_count() - placed_count,
+                placed_count,
+                placed_bases,
+                remaining_target_bases,
+                placed_layout_bytes,
+                attempt_index,
+            );
 
-        if placement_failed {
-            #[cfg(test)]
-            record_retry();
-            continue;
-        }
-        match materialize_attempt(&inputs, attempt_index, &placed) {
-            Ok(layout) => return Ok(layout),
-            Err(AttemptMaterialization::TooFewSites) => {
+            if placement_failed {
                 #[cfg(test)]
                 record_retry();
                 continue;
             }
-            Err(AttemptMaterialization::Diagnostic(error)) => {
-                return Err(F5LayoutFailure::during_attempts(
-                    error,
-                    attempts_used,
-                    best.map(BestLayoutCandidate::into_summary),
-                ));
+            match materialize_attempt(&inputs, attempt_index, &placed) {
+                Ok(layout) => return Ok(Some(layout)),
+                Err(AttemptMaterialization::TooFewSites) => {
+                    #[cfg(test)]
+                    record_retry();
+                    continue;
+                }
+                Err(AttemptMaterialization::Diagnostic(error)) => return Err(error),
             }
         }
+        Ok(None)
+    })();
+    if let Some(layout) = outcome.map_err(|error| {
+        F5LayoutFailure::during_attempts(
+            error,
+            attempts_used,
+            best.take().map(BestLayoutCandidate::into_summary),
+        )
+    })? {
+        return Ok(layout);
     }
     let best = best.ok_or_else(|| {
         F5LayoutFailure::during_attempts(
@@ -2618,6 +2657,64 @@ mod tests {
             root_seed: root,
             identity_context: context,
         }))
+    }
+
+    /// Un fallo **dentro** del bucle publica los intentos que consumió, no
+    /// cero.
+    ///
+    /// Es la regresión de N1. El cuerpo del bucle tiene diez `?` —el sorteo de
+    /// longitudes y nueve guardas de desbordamiento— que pasaban por
+    /// `impl From<Diagnostic>`, el cual fijaba `attempts_used: 0`. Un fallo en
+    /// el intento *k* publicaba entonces `layout_attempts_used = 0` en un
+    /// manifiesto. La conversión implícita ya no existe: el cuerpo devuelve
+    /// `Diagnostic` y una sola conversión le añade lo consumido, de modo que
+    /// ninguna vía del bucle puede volver a perderlo.
+    ///
+    /// El plan se construye aquí **directamente** porque la admisión rechaza
+    /// antes cualquier objetivo no representable —comprobado: cinco fixtures
+    /// con `covered_bases` mueren con `GPS-DOMAIN-101` sin llegar al layout—,
+    /// de modo que esta vía solo se alcanza saltándose esa puerta.
+    #[test]
+    fn a_failure_inside_the_attempt_loop_publishes_the_attempts_it_consumed() {
+        let plan = F5BlockLengthPlan {
+            scenario_id: scenario(),
+            distribution: F5BlockLengthDistribution {
+                bands: vec![F5BlockLengthBand::new(3, 3, 1.0)],
+                minimum: 3,
+                maximum: 3,
+            },
+            block_count: 2,
+            // Cinco bases entre dos bloques de tres: el reparto condicionado
+            // no tiene intervalo posible y el sorteo falla en el intento 0.
+            target_bases: Some(5),
+        };
+        let gaps = gap_distribution(1);
+        let sequences = [sequence(0, "contig-a", b"ACGTACGT")];
+        let tracts = [F5EligibleTract::new(0, 1, 8)];
+        let failure = run_layout(&plan, &gaps, &sequences, &tracts, 4, root_for_layout())
+            .expect_err("el sorteo de longitudes no tiene reparto posible");
+        // Un intento abierto y consumido, no cero.
+        assert_eq!(failure.attempts_used(), 1);
+        assert!(failure.best_layout().is_none());
+    }
+
+    /// Un fallo **anterior** al primer intento sí publica cero.
+    ///
+    /// Es la otra mitad del mismo contrato: `before_any_attempt` no es un
+    /// comodín, es la verdad de las tres vías que ocurren antes de abrir el
+    /// bucle.
+    #[test]
+    fn a_failure_before_the_first_attempt_publishes_no_attempts() {
+        let plan = fixed_plan(2, 2);
+        let gaps = gap_distribution(1);
+        let sequences = [sequence(0, "contig-a", b"ACGT")];
+        // Tramos fuera de orden: `validate_layout_request` los rechaza antes
+        // de abrir ningún intento.
+        let tracts = [F5EligibleTract::new(0, 3, 4), F5EligibleTract::new(0, 1, 2)];
+        let failure = run_layout(&plan, &gaps, &sequences, &tracts, 4, root_for_layout())
+            .expect_err("los tramos no conservan el orden");
+        assert_eq!(failure.attempts_used(), 0);
+        assert!(failure.best_layout().is_none());
     }
 
     #[test]

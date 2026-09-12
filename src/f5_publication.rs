@@ -1496,12 +1496,18 @@ where
 /// pueda cerrarlo con [`publish_f5_failure`].
 ///
 /// **Qué no puede publicar un fallo, y queda escrito.** `workspace` es `None`
-/// cuando el renombrado atómico ya había empezado —el destino existe o el
-/// sistema de ficheros no ofrece la garantía no-clobber— y cuando el propio
-/// intento de publicar el fallo vuelve a fallar: un `ENOSPC` real no deja
-/// escribir ni el diagnóstico. Esos casos **son** la interrupción de DTC-045 y
-/// dejan el provisional `INCOMPLETE`, que es exactamente lo que esa decisión
-/// reserva para ellos.
+/// en cuanto la publicación entra en [`ExecutionWorkspace::publish`], que toma
+/// `self` por valor: no solo cuando el renombrado ya empezó —destino existente
+/// o sistema de ficheros sin garantía no-clobber—, sino **también** cuando
+/// falla cualquiera de sus comprobaciones previas: el recuento del catálogo,
+/// el marcador `INCOMPLETE` y la **segunda pasada** de la puerta física. Ese
+/// último caso es justamente un `GPS-FMT-006` de etapa `publication`, y no
+/// poder publicarlo es defendible: significa que el provisional se alteró
+/// entre dos revalidaciones, de modo que ya no se sabe qué se estaría
+/// declarando. A esos casos se suma que publicar el fallo vuelva a fallar: un
+/// `ENOSPC` real no deja escribir ni el diagnóstico. Todos **son** la
+/// interrupción de DTC-045 y dejan el provisional `INCOMPLETE`, que es
+/// exactamente lo que esa decisión reserva para ellos.
 #[derive(Debug)]
 pub struct F5PublicationFailure {
     workspace: Option<ExecutionWorkspace>,
@@ -1943,20 +1949,45 @@ fn collect_payload_files(
         )
     })?;
     for entry in entries {
-        let path = entry
-            .map_err(|error| {
-                manifest_error(
-                    manifest_path,
-                    format!(
-                        "no se pudo leer una entrada de {}: {error}",
-                        directory.display()
-                    ),
-                )
-            })?
-            .path();
-        if path.is_dir() {
+        let entry = entry.map_err(|error| {
+            manifest_error(
+                manifest_path,
+                format!(
+                    "no se pudo leer una entrada de {}: {error}",
+                    directory.display()
+                ),
+            )
+        })?;
+        let path = entry.path();
+        // `file_type` no sigue enlaces, y `is_dir` sí. Un paquete que declara
+        // cada fichero por su huella no puede admitir un enlace en su árbol:
+        // el destino quedaría fuera de la carga útil y su contenido no sería
+        // el que se hasheó. Hoy es inalcanzable —el provisional es 0o700, lo
+        // crea el propio proceso y ninguna pieza F5 crea enlaces—, pero la
+        // recursión tampoco tiene tope y un ciclo la colgaría.
+        let kind = entry.file_type().map_err(|error| {
+            manifest_error(
+                manifest_path,
+                format!("no se pudo tipar {}: {error}", path.display()),
+            )
+        })?;
+        if kind.is_dir() {
             collect_payload_files(payload_root, &path, manifest_path, found)?;
             continue;
+        }
+        // La guarda no cambia el veredicto —el inventario ya vería el enlace
+        // como fichero sin declarar— sino la **razón**: dice que es un enlace
+        // en vez de limitarse a llamarlo no declarado. Lo que sí cambia el
+        // veredicto es tipar con `file_type` en lugar de `is_dir`, que seguía
+        // el enlace y recorría lo que hubiera detrás.
+        if !kind.is_file() {
+            return Err(manifest_error(
+                manifest_path,
+                format!(
+                    "{} no es un fichero regular ni un directorio: un paquete declarado por huella no admite enlaces",
+                    path.display()
+                ),
+            ));
         }
         let relative = path.strip_prefix(payload_root).map_err(|_| {
             manifest_error(

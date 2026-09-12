@@ -152,6 +152,11 @@ struct Fixture<'a> {
     seed: &'a str,
     slack: u64,
     scenario_inbreeding: Option<&'a str>,
+    /// Objetivo por bases cubiertas en lugar de por número de bloques. Fuerza
+    /// el reparto residual del plan de longitudes, que es la vía que puede
+    /// devolver «residual final fuera del soporte factible» **dentro** del
+    /// bucle de intentos.
+    covered_bases: Option<u64>,
 }
 
 impl Default for Fixture<'_> {
@@ -173,6 +178,7 @@ impl Default for Fixture<'_> {
             seed: SEED,
             slack: 1,
             scenario_inbreeding: None,
+            covered_bases: None,
         }
     }
 }
@@ -331,11 +337,14 @@ impl Fixture<'_> {
         fs::write(
             scenario_directory.join("scenario.toml"),
             format!(
-                "config_kind = \"f5_scenario\"\nschema_version = \"1\"\nscenario_id = \"scenario\"\nfounder_count = {founder_count}\n\n[f5]\nprofile_metadata_path = \"profiles/profile.metadata.json\"\nprofile_metadata_sha256 = \"{}\"\nmax_layout_attempts = 8\nmax_haplotype_attempts = {}\nmax_swap_proposals = {}\nmax_haplotype_cells = 65536\nblock_count = {}\n{}{subpopulations}{overrides}",
+                "config_kind = \"f5_scenario\"\nschema_version = \"1\"\nscenario_id = \"scenario\"\nfounder_count = {founder_count}\n\n[f5]\nprofile_metadata_path = \"profiles/profile.metadata.json\"\nprofile_metadata_sha256 = \"{}\"\nmax_layout_attempts = 8\nmax_haplotype_attempts = {}\nmax_swap_proposals = {}\nmax_haplotype_cells = 65536\n{}\n{}{subpopulations}{overrides}",
                 sha256(metadata.as_bytes()),
                 self.max_haplotype_attempts,
                 self.max_swap_proposals,
-                self.block_count,
+                self.covered_bases.map_or_else(
+                    || format!("block_count = {}", self.block_count),
+                    |bases| format!("covered_bases = {bases}"),
+                ),
                 self.scenario_inbreeding
                     .map_or(String::new(), |value| format!("inbreeding_f = {value}\n")),
             ),
@@ -1104,6 +1113,29 @@ fn every_divergence_between_the_two_copies_is_rejected_by_its_own_term() {
             "/f5/f5_failure",
         ),
     ];
+
+    // Vigésimo segunda divergencia, y la única que el inventario **no** puede
+    // ver: compara rutas, y esta cambia el identificador dejando la ruta
+    // intacta. Es el eje propio de la comparación catálogo/manifiesto, que se
+    // quedó sin prueba cuando el inventario adelantó a la que la ejercitaba.
+    let mut renamed = records.clone();
+    renamed[1].id = "f5-02-sitios-v1".to_owned();
+    let rejection = verify_published_f5_package(
+        &package.destination,
+        &package.destination.join(F5_MANIFEST_PATH),
+        &renamed,
+    )
+    .expect_err("un artifact_id ajeno sobre la misma ruta debe tumbar la puerta");
+    let detail = rejection
+        .context()
+        .get("detail")
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        detail.contains("f5-02-sitios-v1") && detail.contains("f5-02-sites-v1"),
+        "el rechazo debe citar los dos catálogos y dijo {detail:?}"
+    );
+    assert_eq!(rejection.code(), "GPS-FMT-006");
 
     for (label, mutate, expected) in cases {
         let staged = temporary(&format!("divergence-{}", label.replace(' ', "-")));
@@ -2877,4 +2909,47 @@ fn an_exhausted_layout_publishes_the_attempts_it_really_consumed() {
     let declaration = failure_declaration_from_published(&destination);
     audit_f5_failure_package(&destination, &declaration).expect("oráculo del fallo de layout");
     fs::remove_dir_all(&root).expect("retirar");
+}
+
+/// El inventario no admite un enlace simbólico en el árbol publicado.
+///
+/// Un paquete que declara cada fichero por su huella no puede contener un
+/// enlace: el destino queda fuera de la carga útil y su contenido no es el que
+/// se hasheó. Hoy es inalcanzable en producción —el provisional es `0o700`, lo
+/// crea el propio proceso y ninguna pieza F5 crea enlaces—, pero decidir con
+/// `is_dir()`, que **sí** sigue enlaces, dejaba además una recursión sin tope:
+/// un enlace a un ancestro la colgaría.
+///
+/// El caso elegido es un enlace a **directorio**, que es donde `is_dir()` y
+/// `file_type()` difieren de verdad. Con la guarda, el rechazo cita el enlace;
+/// sin ella, el recorrido lo atraviesa y acaba citando el fichero de dentro,
+/// que es un veredicto correcto por la razón equivocada.
+#[test]
+fn the_payload_inventory_refuses_a_symbolic_link() {
+    let package = publish("symlink", &Fixture::default());
+    let staged = temporary("symlink-staged");
+    copy_tree(&package.destination, &staged);
+    let records = package.records();
+    verify_published_f5_package(&staged, &staged.join(F5_MANIFEST_PATH), &records)
+        .expect("la copia íntegra pasa");
+
+    let aside = temporary("symlink-aside");
+    fs::create_dir_all(&aside).expect("directorio ajeno");
+    fs::write(aside.join("dentro.txt"), b"x\n").expect("fichero ajeno");
+    std::os::unix::fs::symlink(&aside, staged.join("enlace")).expect("enlace a directorio");
+
+    let rejection = verify_published_f5_package(&staged, &staged.join(F5_MANIFEST_PATH), &records)
+        .expect_err("un enlace no puede publicarse");
+    let detail = rejection
+        .context()
+        .get("detail")
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        detail.contains("enlace") && !detail.contains("dentro.txt"),
+        "el rechazo debe citar el enlace y no lo que hay detrás, y dijo {detail:?}"
+    );
+    assert_eq!(rejection.code(), "GPS-FMT-006");
+    fs::remove_dir_all(&staged).expect("retirar");
+    fs::remove_dir_all(&aside).expect("retirar");
 }

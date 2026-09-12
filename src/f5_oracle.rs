@@ -6630,19 +6630,39 @@ fn collect_failure_files(
         )
     })?;
     for entry in entries {
-        let child = entry
-            .map_err(|error| {
-                reject(
-                    F5OracleCause::ArtifactMissing,
-                    path,
-                    "payload",
-                    format!("entrada ilegible en {}: {error}", directory.display()),
-                )
-            })?
-            .path();
-        if child.is_dir() {
+        let entry = entry.map_err(|error| {
+            reject(
+                F5OracleCause::ArtifactMissing,
+                path,
+                "payload",
+                format!("entrada ilegible en {}: {error}", directory.display()),
+            )
+        })?;
+        let child = entry.path();
+        // `file_type` no sigue enlaces; `is_dir` sí. Un paquete declarado por
+        // huella no admite un enlace en su árbol.
+        let kind = entry.file_type().map_err(|error| {
+            reject(
+                F5OracleCause::ArtifactMissing,
+                path,
+                "payload",
+                format!("no se pudo tipar {}: {error}", child.display()),
+            )
+        })?;
+        if kind.is_dir() {
             collect_failure_files(payload_root, &child, path, found)?;
             continue;
+        }
+        if !kind.is_file() {
+            return Err(reject(
+                F5OracleCause::Link,
+                path,
+                "payload",
+                format!(
+                    "{} no es un fichero regular ni un directorio",
+                    child.display()
+                ),
+            ));
         }
         let relative = child.strip_prefix(payload_root).map_err(|_| {
             reject(

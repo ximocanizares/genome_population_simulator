@@ -2486,7 +2486,7 @@ identificador del índice de copia.
     cualquier otra causa de layout es cero. En un agotamiento de búsqueda, los
     cuatro contadores describen **la unidad que el diagnóstico nombra**: los
     agregados de otra unidad no explicarían por qué esta se agotó.
-  - **Cobertura.** 28 pruebas de integración y 4 unitarias. Ámbitos: ploidías
+  - **Cobertura.** 30 pruebas de integración y 6 unitarias. Ámbitos: ploidías
     1, 2 y 3, ambos modos con sus dos orígenes, `F` en `0` y `1`, las dos
     procedencias de `inbreeding_f` y su `null` fuera de `P=2`, IDs aportados y
     derivados, secuencia estéril, dos subpoblaciones, perfil diádico de cuatro
@@ -2654,9 +2654,7 @@ identificador del índice de copia.
     era `impl From<Diagnostic> for F5LayoutFailure`, que fijaba
     `best_layout: None`, de modo que un fallo en el intento 3 de 10 publicaba
     `layout_attempts_used = 0`. `F5LayoutFailure` conserva ahora
-    `attempts_used` en **todas** sus vías, `From<Diagnostic>` incluida —cero
-    solo para los fallos anteriores al primer intento—, y el informe lo lee en
-    vez de deducirlo. La prueba tautológica —cuatro `assert_eq!` sobre una
+    `attempts_used` y el informe lo lee en vez de deducirlo. La prueba tautológica —cuatro `assert_eq!` sobre una
     función pura de dos argumentos, séptima aparición del patrón— se sustituye
     por un agotamiento **real**: hueco mayor que el bloque, ningún intento
     coloca dos sitios, `GPS-DOMAIN-106` y los ocho intentos publicados.
@@ -2688,8 +2686,61 @@ identificador del índice de copia.
     fases las que deben caber: los dos excesos los crea el propio contrato,
     porque `final_formula_peak` presupuestó el escritor por flujo de F5.4.1 y
     **nunca modeló** ni la construcción de los dos documentos ni un lector del
-    paquete. La recomendación para cuando F5.6 la tome es **`f5-resource-accounting-v9`
-    con dos términos nuevos**, uno por cada pieza.
+    paquete. La recomendación para cuando F5.6 la tome es
+    **`f5-resource-accounting-v9` con dos términos nuevos**, uno por cada
+    pieza, con sus órdenes ya medidos: la construcción y comparación de los dos
+    documentos crece con **`O(B*N_pop)`** —`sampling`, `f_realized` y
+    `quota_ties`, que el contrato obliga a comparar término a término— y el
+    lector del paquete está acotado por **el registro más largo**, no por el
+    paquete, con la razón convergente que F5.4.2 midió. Y con su coste dicho:
+    v9 **reabre los dos esquemas**, porque el literal
+    `"f5-resource-accounting-v8"` es un `const` en
+    `effective-config-v5.schema.json` y, por referencia, en
+    `manifest-general-v5.schema.json`. Por eso no se hizo aquí.
+  - **Comprobación de cierre: cuatro flecos (2026-09-13).** Da **F5.4 cerrado**
+    tras reproducir sus **propios** ataques —el documento de fallo reescrito
+    con otra causa, otra etapa, otros contadores y un artefacto biológico, con
+    el enlace rehecho, muere dos veces: en la puerta con `GPS-FMT-006` y en el
+    oráculo con causa `Link`; el `orphan.json` cae en los dos estados citando
+    la ruta; y un fichero oculto en la raíz, otro dentro de `outputs/` y un
+    subdirectorio inesperado caen los tres—. Los picos, además, **mejoraron**
+    pese a recorrer el árbol y parsear un documento más: la puerta mide 0,79×
+    con `B=32` y 0,62× con `B=128`, frente a 0,87× y 0,71×.
+  - **N1: la afirmación anterior de H5 era falsa y queda corregida.** Se
+    escribió que el índice se conservaba «en todas sus vías, `From<Diagnostic>`
+    incluida», y **no era así**: esa conversión seguía fijando cero y seguía
+    siendo alcanzable desde **diez `?` del cuerpo del bucle**. La conversión
+    implícita **se ha retirado**: el cuerpo vive ahora en un cierre que
+    devuelve `Diagnostic` y una sola conversión le añade lo consumido, de modo
+    que ninguna vía del bucle puede volver a perderlo; los tres únicos sitios
+    anteriores al primer intento usan `before_any_attempt`, que declara el cero
+    como verdad y no como comodín. Dos pruebas nuevas cubren las dos mitades.
+    **Un matiz medido que corrige al revisor**: el error de dominio «residual
+    final fuera del soporte factible» **no** es alcanzable desde una
+    configuración admitida —cinco fixtures con `covered_bases` no
+    representable mueren antes con `GPS-DOMAIN-101`, y la aritmética de
+    intervalos del reparto condicionado mantiene el residuo factible por
+    construcción—, de modo que el cero en producción era alcanzable por las
+    guardas de desbordamiento, no por ese camino. La corrección es la misma y
+    es estructural, que es lo que importa.
+  - **N2: la comparación catálogo/manifiesto se quedó sin prueba.** Efecto
+    colateral de H2: el inventario adelantó a la única que la ejercitaba. No es
+    código muerto —el inventario compara **rutas** y el catálogo compara
+    **(id, ruta)**—, de modo que se añade la vigésimo segunda divergencia: un
+    `artifact_id` ajeno sobre la **misma ruta**, que solo el catálogo ve.
+  - **N3: la frontera de «no se puede publicar el fallo» era más ancha que su
+    docstring.** `ExecutionWorkspace::publish` toma `self` por valor, así que
+    **cualquiera** de sus comprobaciones previas al renombrado —catálogo,
+    marcador `INCOMPLETE` y la **segunda pasada** de la puerta— devuelve
+    también `None`. Ese último caso es justamente un `GPS-FMT-006` de etapa
+    `publication`, y no poder publicarlo es defendible: significa que el
+    provisional se alteró entre dos revalidaciones y ya no se sabe qué se
+    declararía. Queda escrito.
+  - **N4: el inventario seguía enlaces simbólicos.** Decidía con `is_dir()`,
+    que los sigue, y la recursión no tiene tope: un enlace a un ancestro la
+    colgaría. Tipa ahora con `entry.file_type()` y rechaza lo que no sea
+    fichero regular o directorio, en la puerta y en el oráculo. Lo que cambia
+    el veredicto es el tipado; la guarda cambia la **razón**, y así se dice.
   - **Un falso negativo evitado.** La primera versión de la prueba de rechazo
     de preflight usaba un `block_count` mayor esperando `GPS-DOMAIN-101`; el
     fixture **redimensiona el FASTA con el número de bloques**, de modo que el
