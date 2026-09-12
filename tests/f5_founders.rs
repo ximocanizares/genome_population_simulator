@@ -4309,6 +4309,123 @@ fn retained_bytes(identities: &F5FounderIdentities) -> usize {
     copies + membership + units
 }
 
+/// Bytes de la única asignación del texto de una identidad derivada.
+///
+/// Cada `FCP_`, `HAP_` o `FHA_` es un `Arc<str>`: la cabecera de dos contadores
+/// y los treinta caracteres del prefijo más el base32 de 128 bits.
+const SHARED_IDENTIFIER_BYTES: usize = 2 * size_of::<usize>() + 30;
+
+/// Bytes de una entrada del registro de colisiones.
+///
+/// La pareja `(clase, texto)` que vive en el nodo del árbol más la asignación
+/// de su texto, sin contar el redondeo del asignador ni el relleno parcial de
+/// los nodos.
+const REGISTERED_IDENTITY_BYTES: usize = size_of::<(u8, String)>() + 32;
+
+/// Reparto, término a término, de lo que la fase fundadora conserva viva.
+///
+/// Cada campo se compara contra el término de `final_formula_peak` que le
+/// corresponde: agregar los cuatro antes de comparar dejaría que un término
+/// sobrado tapase a otro corto, que es exactamente lo que ocurría con `64*H`.
+#[derive(Debug)]
+struct FounderTerms {
+    /// Copias `FCP_` con su pertenencia y su texto: `192*X`.
+    copies: u64,
+    /// Filas haplotípicas retenidas: `B*N_pop*(160+S_bound)*H`.
+    haplotype_rows: u64,
+    /// Asientos de `F5FounderUnit::assignments`, 32 B cada uno: `64*B*C_total`.
+    seats: u64,
+    /// Registro de colisiones: `128*(X+B*N_pop*H+B*C_total)`.
+    registry: u64,
+}
+
+impl FounderTerms {
+    fn total(&self) -> u64 {
+        self.copies + self.haplotype_rows + self.seats + self.registry
+    }
+
+    /// Ningún término vivo puede exceder el que v8 le concede.
+    fn assert_within(&self, budget: &Self, label: &str) {
+        for (name, live, granted) in [
+            ("copias", self.copies, budget.copies),
+            (
+                "filas haplotípicas",
+                self.haplotype_rows,
+                budget.haplotype_rows,
+            ),
+            ("asientos", self.seats, budget.seats),
+            ("registro", self.registry, budget.registry),
+        ] {
+            assert!(
+                live <= granted,
+                "{label}: {live} bytes vivos de {name} exceden los {granted} presupuestados"
+            );
+        }
+    }
+}
+
+/// Lo que la fase fundadora conserva viva a la vez, contado por el tamaño real
+/// de cada tipo más la única asignación de cada texto de identidad.
+///
+/// Es una **cota inferior** declarada, como [`retained_bytes`]: no cuenta el
+/// desbordamiento de nodo de los árboles ni el redondeo del asignador. Ese es
+/// el lado honesto para compararla contra un presupuesto que sí debe
+/// cubrirlos.
+fn founder_footprint(
+    identities: &F5FounderIdentities,
+    assignment: &F5FounderAssignment,
+) -> FounderTerms {
+    let copies = identities.copies().len()
+        * (size_of::<F5FounderCopy>()
+            + size_of::<FounderCopyId>()
+            + size_of::<usize>()
+            + SHARED_IDENTIFIER_BYTES);
+    let haplotype_rows: usize = identities
+        .units()
+        .iter()
+        .map(|unit| {
+            size_of::<F5UnitHaplotypes>()
+                + size_of::<usize>()
+                + unit.haplotype_ids().len()
+                    * (size_of::<F5HaplotypeId>() + SHARED_IDENTIFIER_BYTES)
+        })
+        .sum();
+    let seats: usize = assignment
+        .units()
+        .iter()
+        .map(|unit| size_of_val(unit.assignments()))
+        .sum();
+    FounderTerms {
+        copies: copies as u64,
+        haplotype_rows: haplotype_rows as u64,
+        seats: seats as u64,
+        registry: (identities.registered_identities() * REGISTERED_IDENTITY_BYTES) as u64,
+    }
+}
+
+/// Bytes que `f5-resource-accounting-v8` concede a esas mismas estructuras,
+/// escritos desde la fórmula de DTC-089 y no desde el código que la evalúa.
+fn founder_budget(
+    chain: &Chain,
+    populations: u64,
+    haplotypes: u64,
+    founder_count: u64,
+    ploidy: u64,
+    sequences: u64,
+) -> FounderTerms {
+    let blocks = chain.sealed.block_count();
+    let site_bound = chain.sealed.site_bound_per_block();
+    let c_total = founder_count * ploidy;
+    let copy_sequences = c_total * sequences;
+    let seats = blocks * c_total;
+    FounderTerms {
+        copies: 192 * copy_sequences,
+        haplotype_rows: blocks * populations * (160 + site_bound) * haplotypes,
+        seats: 64 * seats,
+        registry: 128 * (copy_sequences + blocks * populations * haplotypes + seats),
+    }
+}
+
 /// Lo que el repositorio retiene **no crece con el número de bloques**.
 ///
 /// Es la relación que faltaba y que habría detectado el defecto sin revisión:
@@ -4332,6 +4449,7 @@ fn the_retained_repository_does_not_grow_with_the_block_count() {
         232,
         "una tabla retenida nueva cambiaría el tamaño del repositorio"
     );
+    let haplotypes = 2; // `H` del fixture por defecto.
     let mut measured = Vec::new();
     for blocks in [2_u64, 8] {
         let root = temporary(&format!("retained-{blocks}"));
@@ -4372,6 +4490,13 @@ fn the_retained_repository_does_not_grow_with_the_block_count() {
             "B={blocks}: {retained} bytes retenidos exceden el pico sellado {}",
             chain.sealed.working_memory_bytes()
         );
+        // La relación que el paso 2 de B2 fija: todo lo que la fase fundadora
+        // conserva viva —tablas, textos, registro y asientos— cabe dentro de
+        // los términos que `final_formula_peak` le concede.
+        founder_footprint(&identities, &assignment).assert_within(
+            &founder_budget(&chain, 2, haplotypes as u64, 4, 2, 1),
+            &format!("B={blocks}"),
+        );
         measured.push((
             blocks,
             identities.copies().len(),
@@ -4386,7 +4511,6 @@ fn the_retained_repository_does_not_grow_with_the_block_count() {
         measured[0];
     let (_, copies_large, units_large, retained_large, emitted_large, registered_large) =
         measured[1];
-    let haplotypes = 2; // `H` del fixture por defecto.
 
     assert_eq!(
         copies_small, copies_large,
@@ -4415,10 +4539,10 @@ fn the_retained_repository_does_not_grow_with_the_block_count() {
         "cuadruplicar B cuadruplica las asignaciones emitidas"
     );
 
-    // El término que no se puede soltar: el registro de colisiones conserva una
-    // entrada por identidad derivada, y crece como `B*C_total`. Queda medido
-    // aquí porque es lo que la contabilidad de recursos tendrá que
-    // presupuestar; ninguna fórmula de `f5-resource-accounting-v7` lo contiene.
+    // El término dominante: el registro de colisiones conserva una entrada por
+    // identidad derivada y crece como `B*C_total`.
+    // `f5-resource-accounting-v8` lo presupuesta como
+    // `128*(X+B*N_pop*H+B*C_total)`; v7 no lo contenía en ninguna fórmula.
     assert_eq!(
         registered_small,
         copies_small + units_small * haplotypes + emitted_small,
@@ -4431,6 +4555,97 @@ fn the_retained_repository_does_not_grow_with_the_block_count() {
     assert!(
         registered_large > 3 * registered_small,
         "el registro crece con B aunque las tablas ya no lo hagan"
+    );
+}
+
+/// El presupuesto sellado **crece exactamente** con las estructuras
+/// fundadoras que la fase retiene, y no por casualidad.
+///
+/// La ploidía es la única dimensión que mueve `C_total` —y con él `X`, los
+/// asientos de asignación y las entradas del registro de identidades— sin
+/// tocar ninguna otra magnitud de `final_formula_peak`: bloques, tramos, IDs
+/// de secuencia, filas de perfil, normalizaciones, `H`, `S_bound` y bins
+/// quedan idénticos. La diferencia entre los dos picos sellados es por tanto
+/// la de los tres términos fundadores y de nada más, y esta prueba la escribe
+/// desde DTC-089 en lugar de leerla del código que la calcula.
+///
+/// Con v7 esta igualdad era `128*ΔC_total`: no contaba las copias por
+/// secuencia, ni los asientos, ni el registro. Suprimir hoy cualquiera de los
+/// tres términos, o devolver `192*X` a `128*C_total`, la mata.
+#[test]
+fn the_sealed_budget_grows_exactly_with_the_founder_structures_it_retains() {
+    let mut sealed = Vec::new();
+    let mut footprints = Vec::new();
+    for ploidy in [2_u64, 3] {
+        let root = temporary(&format!("budget-ploidy-{ploidy}"));
+        let fixture = Fixture {
+            subpopulations: vec![Subpopulation::new("P1", 2), Subpopulation::new("P2", 2)],
+            block_count: 2,
+            sequences: 1,
+            slack: 2,
+            ploidy,
+            ..Fixture::default()
+        };
+        let chain = build_chain(&root, &fixture);
+        let assignment = assign(&chain);
+        let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+        let mut identities = materialize_f5_founder_identities(
+            &chain.config,
+            &chain.sealed,
+            &execution,
+            &chain.layout,
+            &chain.search,
+            &assignment,
+        )
+        .expect("identidades fundadoras materializadas");
+        identities
+            .for_each_assignment(&assignment, |_| Ok(()))
+            .expect("recorrido de asignaciones");
+
+        // Lo retenido cabe en lo presupuestado también con ploidía impar, y
+        // término a término.
+        let footprint = founder_footprint(&identities, &assignment);
+        footprint.assert_within(
+            &founder_budget(&chain, 2, 2, 4, ploidy, 1),
+            &format!("ploidía {ploidy}"),
+        );
+        footprints.push(footprint.total());
+        sealed.push((
+            chain.sealed.working_memory_bytes(),
+            chain.sealed.block_count(),
+            chain.sealed.site_bound_per_block(),
+            chain.sealed.retained_sequence_ids(),
+        ));
+    }
+
+    let (diploid_peak, blocks, site_bound, sequences) = sealed[0];
+    let (triploid_peak, blocks_again, site_bound_again, sequences_again) = sealed[1];
+    assert_eq!(
+        blocks, blocks_again,
+        "la ploidía no mueve el número de bloques"
+    );
+    assert_eq!(site_bound, site_bound_again, "ni la cota de sitios");
+    assert_eq!(sequences, sequences_again, "ni las secuencias retenidas");
+
+    // Cuatro individuos, una secuencia: la copia extra de cada individuo añade
+    // `founder_count` copias a `C_total`, otras tantas a `X` y una por bloque
+    // a los asientos, y cada una de esas identidades entra en el registro.
+    let founder_count = 4_u64;
+    let extra_copies = founder_count * sequences;
+    let extra_seats = blocks * founder_count;
+    let expected = 192 * extra_copies + 64 * extra_seats + 128 * (extra_copies + extra_seats);
+    assert_eq!(
+        triploid_peak - diploid_peak,
+        expected,
+        "el pico sellado debe crecer exactamente por los términos fundadores"
+    );
+    assert!(
+        footprints[1] > footprints[0],
+        "la tercera copia de cada individuo retiene más de lo que retenían dos"
+    );
+    assert!(
+        footprints[1] - footprints[0] <= expected,
+        "lo que la ploidía añade de verdad no puede exceder lo que v8 le concede"
     );
 }
 

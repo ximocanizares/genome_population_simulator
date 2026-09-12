@@ -538,7 +538,7 @@
       ],
       "properties": {
         "algorithm": {
-          "const": "f5-resource-accounting-v7"
+          "const": "f5-resource-accounting-v8"
         },
         "input_identities": {
           "type": "array",

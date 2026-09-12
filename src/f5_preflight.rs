@@ -38,6 +38,34 @@ pub const F5_DEFAULT_MAX_HAPLOTYPE_CELLS: u64 = 16_777_216;
 const F5_SCAN_FIXED_MEMORY_BYTES: u64 = 65_536;
 const F5_SCAN_RETAINED_ITEM_BYTES: u64 = 256;
 
+/// Bytes que v8 concede por copia fundadora retenida.
+///
+/// El repositorio de identidades conserva una `F5FounderCopy` —72 B— por cada
+/// entrada de `X=C_total*sequence_count`, su entrada de pertenencia —el
+/// identificador compartido y la posición, 24 B— y la única asignación del
+/// texto `FCP_` —48 B—. Son 144 B medidos; el presupuesto los redondea al
+/// siguiente múltiplo de 64 ya presente en la fórmula.
+const F5_FOUNDER_COPY_BYTES: u64 = 192;
+
+/// Bytes que v8 concede por asiento de `F5FounderUnit::assignments`.
+///
+/// Cada `F5CopyAssignment` mide exactamente 32 B —identificador compartido,
+/// índice de copia y rango haplotípico— y hay `B*C_total`. El presupuesto
+/// dobla esa cifra para cubrir la holgura del vector por unidad y el texto de
+/// los `IndividualId`, que es una sola asignación por fundador y no por
+/// asiento.
+const F5_COPY_ASSIGNMENT_BYTES: u64 = 64;
+
+/// Bytes que v8 concede por identidad registrada.
+///
+/// DTC-039 exige que «toda colisión se detecta», de modo que el registro
+/// conserva una entrada por identidad derivada y no puede soltarla cuando su
+/// fila ya se ha escrito. Cada entrada es la pareja `(clase, texto)` —32 B en
+/// el nodo del árbol— más la asignación del texto —30 o 31 caracteres, 32 B
+/// con el redondeo del asignador—; el resto cubre el relleno parcial de los
+/// nodos y la cabecera del asignador.
+const F5_REGISTERED_IDENTITY_BYTES: u64 = 128;
+
 // El observador es exclusivamente instrumental: no forma parte de la
 // admisión ni existe en el binario de producción. F5.1.2 lo usa para probar
 // que la visita de capacidad presupuestada por v4 ocurre en el recorrido real.
@@ -501,7 +529,7 @@ fn canonical_f5_number(
 }
 
 /// Resultado admitido —todavía no sellado— del preflight
-/// `f5-resource-accounting-v7`.
+/// `f5-resource-accounting-v8`.
 ///
 /// Es contabilidad interna: ningún consumidor puede derivar layout ni contrato
 /// de él hasta que `seal` lo une a su `F5AdmissionReceipt`.
@@ -582,7 +610,7 @@ impl F5ResourcePreflight {
         Ok(())
     }
 
-    /// Sella la admisión uniendo la proyección v7 con su receipt. Es la única
+    /// Sella la admisión uniendo la proyección v8 con su receipt. Es la única
     /// transición de admitido a sellado y no recalcula ningún coste.
     pub(crate) fn seal(self, receipt: F5AdmissionReceipt) -> SealedF5Admission {
         SealedF5Admission {
@@ -596,7 +624,7 @@ impl F5ResourcePreflight {
 /// layout, publicación o proyección de contrato.
 ///
 /// Une el receipt —identidades físicas y contabilidad por fase— con la
-/// proyección de recursos v7 que las mismas lecturas produjeron. No existe
+/// proyección de recursos v8 que las mismas lecturas produjeron. No existe
 /// constructor público: solo la máquina de admisión completa puede sellarla,
 /// y ningún receipt v5/v6 puede aceptarse ni migrarse a esta forma.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -617,7 +645,7 @@ impl SealedF5Admission {
     }
 
     /// Proyección exacta de `resource_preflight` que efectivo y manifiesto v5
-    /// copian escalar y posicionalmente: algoritmo v7, identidades físicas en
+    /// copian escalar y posicionalmente: algoritmo v8, identidades físicas en
     /// orden de rol contractual, fases en el orden cerrado de la máquina y los
     /// veintisiete escalares del algoritmo.
     #[must_use]
@@ -1374,7 +1402,12 @@ fn reserve_known_before_scan(
                     "population_memory",
                     [
                         ceil_div("ceil(H*S/8)", hs, 8, config)?,
-                        mul("64*H", 64, h, config)?,
+                        mul(
+                            "(160+S)*H",
+                            add("160+S", 160, site_bound, config)?,
+                            h,
+                            config,
+                        )?,
                         mul("256*S", 256, site_bound, config)?,
                         mul("192*pair", 192, pair_bound, config)?,
                     ],
@@ -1387,7 +1420,31 @@ fn reserve_known_before_scan(
                 mul("B*bins", block_count, bin_count_total, config)?,
                 config,
             )?,
-            mul("128*C", 128, c_total, config)?,
+            // `sequence_count` todavía no se ha observado, de modo que la
+            // reserva usa `C_total`, que es `X` con una sola secuencia y por
+            // tanto una cota inferior del término final. Lo mismo vale para
+            // las entradas del registro que dependen de `X`.
+            mul("192*C", F5_FOUNDER_COPY_BYTES, c_total, config)?,
+            mul(
+                "64*B*C",
+                F5_COPY_ASSIGNMENT_BYTES,
+                mul("B*C", block_count, c_total, config)?,
+                config,
+            )?,
+            mul(
+                "128*identity_registry_entries",
+                F5_REGISTERED_IDENTITY_BYTES,
+                add_many(
+                    config,
+                    "identity_registry_entries",
+                    [
+                        c_total,
+                        mul("B*N*H", bn, h, config)?,
+                        mul("B*C", block_count, c_total, config)?,
+                    ],
+                )?,
+                config,
+            )?,
             F5_SCAN_FIXED_MEMORY_BYTES,
         ],
     )?;
@@ -1751,6 +1808,12 @@ fn preflight_resolved_f5_resources(
         ],
     )?;
     let hs = mul("H*S_bound", h, site_bound_per_block, config)?;
+    let block_copy_seats = mul("B*C_total", block_count, c_total, config)?;
+    let identity_registry_entries = add_many(
+        config,
+        "identity_registry_entries",
+        [x, mul("B*N_pop*H", bn, h, config)?, block_copy_seats],
+    )?;
     let final_formula_peak = add_many(
         config,
         "final_formula_peak",
@@ -1773,14 +1836,19 @@ fn preflight_resolved_f5_resources(
                 config,
             )?,
             mul(
-                "B*N_pop*(ceil(H*S/8)+64*H+256*S+192*pair)",
+                "B*N_pop*(ceil(H*S/8)+(160+S)*H+256*S+192*pair)",
                 bn,
                 add_many(
                     config,
                     "per_population_memory",
                     [
                         ceil_div("ceil(H*S/8)", hs, 8, config)?,
-                        mul("64*H", 64, h, config)?,
+                        mul(
+                            "(160+S)*H",
+                            add("160+S", 160, site_bound_per_block, config)?,
+                            h,
+                            config,
+                        )?,
                         mul("256*S", 256, site_bound_per_block, config)?,
                         mul("192*pair", 192, pair_bound, config)?,
                     ],
@@ -1793,7 +1861,19 @@ fn preflight_resolved_f5_resources(
                 mul("B*bin_count_total", block_count, bin_count_total, config)?,
                 config,
             )?,
-            mul("128*C_total", 128, c_total, config)?,
+            mul("192*X", F5_FOUNDER_COPY_BYTES, x, config)?,
+            mul(
+                "64*B*C_total",
+                F5_COPY_ASSIGNMENT_BYTES,
+                block_copy_seats,
+                config,
+            )?,
+            mul(
+                "128*identity_registry_entries",
+                F5_REGISTERED_IDENTITY_BYTES,
+                identity_registry_entries,
+                config,
+            )?,
             F5_SCAN_FIXED_MEMORY_BYTES,
         ],
     )?;

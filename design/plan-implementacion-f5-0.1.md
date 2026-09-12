@@ -164,7 +164,7 @@ identificador del índice de copia.
     canónicos exactos de layout (`u64` big-endian) y matriz (cabecera H/S,
     orden de filas, bits MSB y relleno cero).
 - ✅ **F5.0.4.** Implementar el preflight puro
-  `f5-resource-accounting-v7` y su ledger acumulativo, que resuelve racional de
+  `f5-resource-accounting-v8` y su ledger acumulativo, que resuelve racional de
   cobertura, capacidad, dimensiones y cotas de operaciones, pico de memoria y
   bytes publicados con símbolos dimensionalmente distintos. Este núcleo no
   abre ficheros: recibe observaciones de las fases físicamente acotadas de
@@ -791,7 +791,7 @@ identificador del índice de copia.
     probabilidad, no una garantía.
     La memoria añadida son 32 bytes por pareja intrabloque más los 32 del
     veredicto canónico, dentro de los `192*S*(S-1)/2` que
-    `f5-resource-accounting-v7` ya presupuesta.
+    `f5-resource-accounting-v8` ya presupuesta.
   - Las cotas de dimensión las impone cada cual en su sitio, y la búsqueda no
     las duplica: `H` fuera de `2..=4096` lo rechaza el lector del perfil con
     `GPS-FMT-101`, y `site_bound_per_block > 4096` o
@@ -845,7 +845,7 @@ identificador del índice de copia.
     batería vive en un crate aparte; no tienen destino en ningún artefacto y su
     documentación lo dice.
   - **Condición normativa pendiente, ajena a F5.2.** El término `Q*S_bound` de
-    `f5-resource-accounting-v7` es **insatisfacible por construcción**: con
+    `f5-resource-accounting-v8` es **insatisfacible por construcción**: con
     `S_bound = 2` concede dos unidades por propuesta y DTC-089 exige cuatro
     sorteos por propuesta, de modo que ninguna implementación puede cumplirlo.
     Eso explica el factor residual que se mide incluso con el bucle óptimo. Se
@@ -1525,7 +1525,7 @@ identificador del índice de copia.
       antes de derivar ningún `HAP_`.
     - **No se publica ningún contador de coste.** F5.3.1 y F5.3.2 publican
       `operations` porque el plan les pide complejidad medida; F5.3.3 no tiene
-      ningún requisito de coste y `f5-resource-accounting-v7` está cerrado, de
+      ningún requisito de coste y `f5-resource-accounting-v8` está cerrado, de
       modo que añadir un contador sería superficie pública sin consumidor, que
       es justo el motivo por el que F5.3.2 retiró el tipo de Ne.
     - **La deuda de `inbreeding_f_source` sigue en F5.4.** F5.3.3 no escribe
@@ -1720,11 +1720,105 @@ identificador del índice de copia.
       ahora dentro del cierre, recogidas una vez en un tipo `Materialized` de la
       batería, y la idempotencia compara copias, unidades, pertenencia y los dos
       recorridos en lugar de un `PartialEq` del repositorio.
-    - **Paso 2 detenido antes de empezar.** `schemas/effective-config-v5.schema.json`
-      fija `"algorithm": {"const": "f5-resource-accounting-v7"}` y
-      `schemas/manifest-general-v5.schema.json` lo hereda por `$ref`. Pasar a v8
-      reabriría dos esquemas publicados, que es condición de escalado; queda
-      pendiente de decisión y ningún término se ha contabilizado todavía.
+    - **Paso 2: la contabilidad pasa a `f5-resource-accounting-v8` (12 de
+      septiembre de 2026).** El paso 1 se detuvo porque
+      `schemas/effective-config-v5.schema.json` fija
+      `"algorithm": {"const": ...}` y `schemas/manifest-general-v5.schema.json`
+      lo hereda por `$ref`, de modo que cambiar el nombre reabre dos esquemas.
+      El usuario lo autorizó con el fundamento del §1 de este plan —«los pasos
+      de esquema crean versiones nuevas sin reescribir las publicadas
+      **externamente**; **ningún esquema F5 lo está todavía**»— y con el
+      precedente de DTC-089 l. 1210, donde v7 «sustituye por completo» los
+      parches v5 y v6. **No se crea una versión nueva de esquema**: efectivo y
+      manifiesto siguen siendo v5 y lo único que cambia es el valor del `const`
+      y sus lectores.
+      - **Los cuatro términos que v7 no acotaba**, todos medidos sobre la
+        cadena productiva:
+        - `192*X` sustituye a `128*C_total`. La razón que no bajaba de 1 en el
+          paso 1 era un desajuste de **recuento**, no un exceso del código: el
+          repositorio conserva una copia por individuo **y secuencia**, que es
+          `X=C_total*sequence_count`, ya definido por v7 para otros términos.
+          Cada entrada mide 72 B de copia, 24 B de pertenencia y 48 B del texto
+          `FCP_`: 144 B, que `128` tampoco cubría con una sola secuencia;
+        - `64*B*C_total` presupuesta los asientos de
+          `F5FounderUnit::assignments` de F5.3.1 —32 B exactos— que ninguna
+          fórmula contenía;
+        - `128*(X+B*N_pop*H+B*C_total)` presupuesta el registro de colisiones,
+          el término dominante. DTC-039 exige que toda colisión se detecte, de
+          modo que el registro conserva una entrada por identidad derivada;
+        - `(160+S_bound)*H` sustituye a `64*H`: una fila haplotípica retenida
+          cuesta 16 B de identificador, 48 B del texto `HAP_` y la parte
+          proporcional de su unidad —108 B—, y `S_bound` cubre además su fila
+          de la matriz ganadora, que se materializa por filas de `ceil(S/8)` y
+          no en el empaquetado exacto de `ceil(H*S_bound/8)`.
+      - **Medición en el mismo fixture del paso 1** —dos subpoblaciones de dos
+        individuos, `P=2`, `H=2`, `S_bound=3`, `C_total=8`—, contando ahora
+        todo lo que la fase conserva viva: tablas, textos de identidad,
+        registro y asientos.
+
+        | caso | vivo | v7 concedía | razón v7 | v8 concede | razón v8 |
+        |---|---|---|---|---|---|
+        | 1 secuencia, `B=2` | 4 544 B | 1 024 B | 4,44× | 7 960 B | **0,571** |
+        | 2 secuencias, `B=2` | 6 192 B | 1 024 B | 6,05× | 10 520 B | **0,589** |
+        | 1 secuencia, `B=8` | 13 232 B | 1 024 B | 12,92× | 24 160 B | **0,548** |
+
+        La razón baja de 1 con un margen del 41 al 45 %, y ningún término
+        individual queda corto: copias 1 136/1 536, filas haplotípicas
+        848/1 304, asientos 512/1 024 y registro 2 048/4 096 en el primer caso.
+        El pico sellado pasa de 80 900 a 87 324 B con `B=2` y de 110 864 a
+        131 952 B con `B=8`.
+      - **Ningún escenario legítimo se rechaza.** Cada término nuevo tiene un
+        gemelo de salida que v7 ya imponía y que muerde antes: `X` está acotado
+        por `truth_bound≥4096*X` contra el tope duro de salida —`X≤524 288`—
+        mientras la memoria admitiría `X≤3,3·10⁶`; `B*C_total` aparece en
+        `tsv_rows_bound` a 4 096 B por fila frente a los 192 B que v8 le suma;
+        y `B*N_pop*H` igual. La memoria nunca pasa a ser la cota que decide.
+      - **Punto fijo de los fixtures de anchura fija.** Ninguno de los términos
+        nuevos depende de los bytes de los documentos, de modo que
+        `final_formula_peak` sigue siendo el máximo y sigue siendo insensible a
+        la anchura del literal que la prueba escribe después. Las dos pruebas
+        que reescriben el límite —`profile_padding_changes_its_phase...` y
+        `layout_streams_large_fasta_...`— vuelven a calcular desde los bytes
+        finales y comprueban la igualdad: el punto fijo se alcanza en una
+        iteración, como antes, y no hubo que reabrirlo.
+      - **Sitios donde cambió el literal**: `src/f5_admission.rs`
+        —`F5_RESOURCE_ACCOUNTING_ALGORITHM`, único lector—,
+        `schemas/effective-config-v5.schema.json` —el `const`, que
+        `manifest-general-v5` hereda por `$ref`—, las cadenas de
+        `tests/f5_0_1_external_schemas.rs`, `tests/f5_resource_preflight.rs`,
+        `tests/f5_founders.rs` y `tests/f5_search.rs`, y la prosa de
+        `src/f5_preflight.rs`, `src/f5_search.rs`, `src/f5_layout.rs`,
+        `src/application.rs`, DTC-089 y la arquitectura. `catalogs/` no publica
+        ningún vector de esta contabilidad, así que no hay huella que regenerar.
+        `evidence/f5.1.2/` conserva «v7» porque son actas fechadas de aquel
+        hito, no contrato vigente.
+      - **Discriminación verificada**, mutando el productor y midiendo con
+        `--no-fail-fast`: devolver `192*X` a `128*C_total` mata la prueba nueva
+        del diferencial de ploidía —2 560 frente a 2 816— y las tres del
+        oráculo literal; suprimir `64*B*C_total` o el término del registro, lo
+        mismo; devolver `(160+S_bound)*H` a `64*H` mata las tres del oráculo
+        literal pero **no** la batería fundadora, porque el margen del registro
+        tapa el déficit en el agregado. Queda dicho: ese coeficiente lo fija el
+        oráculo de `tests/f5_resource_preflight.rs`, no la relación.
+      - **La prueba de la relación, ampliada al registro.**
+        `the_retained_repository_does_not_grow_with_the_block_count` compara
+        ahora **término a término** —copias, filas haplotípicas, asientos y
+        registro— contra los cuatro términos de DTC-089 escritos en la batería,
+        no leídos del código: agregarlos antes de comparar dejaría que un
+        término sobrado tapase a otro corto. La prueba nueva
+        `the_sealed_budget_grows_exactly_with_the_founder_structures_it_retains`
+        usa la ploidía, que es la única dimensión que mueve `C_total` sin tocar
+        bloques, tramos, IDs, filas de perfil, `H`, `S_bound` ni bins, y exige
+        que el pico sellado crezca **exactamente** por los tres términos
+        fundadores.
+      - **Observación fuera de alcance, no aplicada.** `F5HaplotypeSearch`
+        retiene un `F5AttemptRecord` por unidad×intento —hasta `B*N_pop*A`, del
+        orden de 264 B cada uno— que sigue vivo mientras se asignan fundadores
+        y que ninguna fórmula de memoria contabiliza. No se toca: es una
+        decisión de F5.2, cerrada tras su revisión adversarial, y presupuestarla
+        con `A=100` por omisión multiplicaría el pico de los fixtures actuales
+        muy por encima de sus límites declarados, que es la condición de parada
+        de este encargo. Queda anotado para quien reabra F5.2.
 
 > **Revisión F5.3.** Aprobar fórmulas, cuotas y verdad fundadora antes de
 > persistir el resultado completo.

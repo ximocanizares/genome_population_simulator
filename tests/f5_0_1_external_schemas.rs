@@ -41,7 +41,7 @@ const F5_1_2_5_V7_CONTRACT_KEYS: [&str; 29] = [
     "output_limit_bytes",
 ];
 
-fn assert_f5_1_2_5_v7_contract_key_set(document: &Value, pointer: &str) {
+fn assert_f5_1_2_5_v8_contract_key_set(document: &Value, pointer: &str) {
     // Oráculo literal independiente del productor, el esquema y `preflight()`.
     // F5.1.2.5 cierra el objeto: algoritmo, identidades, fases y escalares.
     let expected = F5_1_2_5_V7_CONTRACT_KEYS
@@ -237,7 +237,7 @@ fn phases() -> Value {
 
 fn preflight() -> Value {
     json!({
-        "algorithm": "f5-resource-accounting-v7",
+        "algorithm": "f5-resource-accounting-v8",
         "input_identities": input_identities(),
         "phases": phases(),
         "reference_bases_processed": 1,
@@ -742,7 +742,7 @@ fn authoring_schemas_match_u64_and_normalized_path_boundaries() {
 #[test]
 fn effective_profile_and_catalog_links_are_closed_and_instantiable() {
     let valid = effective();
-    assert_f5_1_2_5_v7_contract_key_set(&valid, "/f5/resource_preflight");
+    assert_f5_1_2_5_v8_contract_key_set(&valid, "/f5/resource_preflight");
     let mut cases = vec![(valid.clone(), true)];
     for field in F5_1_2_5_V7_CONTRACT_KEYS {
         let mut missing = valid.clone();
@@ -824,7 +824,7 @@ fn failure_limits_and_codes_use_exact_f5_contract() {
 #[test]
 fn manifest_success_and_failure_branches_are_closed_and_literal() {
     let success = success_manifest();
-    assert_f5_1_2_5_v7_contract_key_set(&success, "/f5/resource_preflight");
+    assert_f5_1_2_5_v8_contract_key_set(&success, "/f5/resource_preflight");
     let failure = failed_manifest("GPS-DOMAIN-104", limits());
     let mut cases = vec![(success.clone(), true), (failure.clone(), true)];
 

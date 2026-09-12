@@ -136,7 +136,7 @@ fn assert_preflight_projection_validates_through_effective_and_manifest(
     }
 }
 
-fn assert_f5_1_2_5_v7_contract_key_set(projection: &serde_json::Value) {
+fn assert_f5_1_2_5_v8_contract_key_set(projection: &serde_json::Value) {
     // Oráculo literal independiente de `to_contract_json` y de los esquemas.
     // F5.1.2.5 cierra el objeto con `input_identities` y `phases` junto a los
     // escalares ya materializados en F5.1.2.3.
@@ -175,7 +175,7 @@ fn assert_f5_1_2_5_v7_contract_key_set(projection: &serde_json::Value) {
     .collect::<BTreeSet<_>>();
     let observed = projection
         .as_object()
-        .expect("public v7 preflight object")
+        .expect("public v8 preflight object")
         .keys()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
@@ -970,11 +970,20 @@ struct FinalFormulaMemoryInputs {
     site_bound: u64,
     bin_count_total: u64,
     founder_copy_count: u64,
+    /// `sequence_count`: el segundo eje de la identidad de copia. El
+    /// repositorio conserva una copia por individuo **y** secuencia, de modo
+    /// que `X = C_total * sequence_count` y no `C_total`.
+    sequence_count: u64,
 }
 
 fn final_formula_memory_oracle(inputs: FinalFormulaMemoryInputs) -> u64 {
     let pair_bound = inputs.site_bound * (inputs.site_bound - 1) / 2;
     let hs_bytes = (inputs.haplotype_count * inputs.site_bound).div_ceil(8);
+    let copy_sequences = inputs.founder_copy_count * inputs.sequence_count;
+    let seats = inputs.block_count * inputs.founder_copy_count;
+    let registry_entries = copy_sequences
+        + inputs.block_count * inputs.population_count * inputs.haplotype_count
+        + seats;
     256 * (4 * inputs.block_count
         + 2 * inputs.tract_count
         + inputs.retained_sequence_ids
@@ -982,9 +991,14 @@ fn final_formula_memory_oracle(inputs: FinalFormulaMemoryInputs) -> u64 {
         + inputs.normalization_rows)
         + inputs.block_count
             * inputs.population_count
-            * (hs_bytes + 64 * inputs.haplotype_count + 256 * inputs.site_bound + 192 * pair_bound)
+            * (hs_bytes
+                + (160 + inputs.site_bound) * inputs.haplotype_count
+                + 256 * inputs.site_bound
+                + 192 * pair_bound)
         + 256 * inputs.block_count * inputs.bin_count_total
-        + 128 * inputs.founder_copy_count
+        + 192 * copy_sequences
+        + 64 * seats
+        + 128 * registry_entries
         + 65_536
 }
 
@@ -1058,6 +1072,7 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
         site_bound: 2,
         bin_count_total: 1,
         founder_copy_count: 2,
+        sequence_count: 1,
     });
     let independent_scan_peak = 65_536 + 65_536 + 256 * (6 + 5 + 1 + 1);
     assert_eq!(
@@ -1081,6 +1096,7 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
         site_bound: 2,
         bin_count_total: 1,
         founder_copy_count: 2,
+        sequence_count: 1,
     });
     assert_eq!(fragmented.working_memory_bytes(), fragmented_final_formula);
     assert_eq!(
@@ -1609,7 +1625,7 @@ fn long_fasta_description_is_discarded_under_a_bounded_address_space() {
 }
 
 #[test]
-fn fasta_descriptions_raise_v7_operation_budget_and_preserve_productive_rng_path() {
+fn fasta_descriptions_raise_v8_operation_budget_and_preserve_productive_rng_path() {
     const DESCRIPTION_BYTES: usize = 80 * 1_024 * 1_024;
     let short_root = temporary("fasta-bytes-short");
     let long_root = temporary("fasta-bytes-long");
@@ -1669,7 +1685,7 @@ fn fasta_descriptions_raise_v7_operation_budget_and_preserve_productive_rng_path
     );
     let exact_config = load_and_validate_f5_config(&long_general).expect("exact configuration");
     let exact = preflight_f5_resources(&exact_config, F5OtherResources::default())
-        .expect("exact v7 operation limit is inclusive");
+        .expect("exact v8 operation limit is inclusive");
     let execution =
         ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
     let short_layout = build_f5_physical_layout(
@@ -1708,7 +1724,7 @@ fn fasta_descriptions_raise_v7_operation_budget_and_preserve_productive_rng_path
 }
 
 #[test]
-fn mask_bytes_raise_v7_operation_budget_with_equal_geometry_and_exact_limit() {
+fn mask_bytes_raise_v8_operation_budget_with_equal_geometry_and_exact_limit() {
     let short_root = temporary("mask-bytes-short");
     let long_root = temporary("mask-bytes-long");
     fs::create_dir_all(&short_root).expect("short root");
@@ -2015,6 +2031,7 @@ fn retained_sequence_id_peak_is_persisted_in_the_published_memory_bound() {
             site_bound: 2,
             bin_count_total: 1,
             founder_copy_count: 2,
+            sequence_count: 129,
         })
     );
     fs::remove_dir_all(root).expect("cleanup");
@@ -2325,8 +2342,8 @@ fn gap_support_cardinality_is_discontinuous_bounded_and_inclusive_before_rng() {
 }
 
 #[test]
-fn public_v7_preflight_serializes_gap_terms_and_validates_both_contracts() {
-    let root = temporary("public-v7-projection");
+fn public_v8_preflight_serializes_gap_terms_and_validates_both_contracts() {
+    let root = temporary("public-v8-projection");
     fs::create_dir_all(&root).expect("root");
     let general = custom_configuration_with_gap(
         &root,
@@ -2344,10 +2361,10 @@ fn public_v7_preflight_serializes_gap_terms_and_validates_both_contracts() {
         preflight.algorithm(),
         genome_population_simulator::f5_admission::F5_RESOURCE_ACCOUNTING_ALGORITHM
     );
-    assert_eq!(preflight.algorithm(), "f5-resource-accounting-v7");
+    assert_eq!(preflight.algorithm(), "f5-resource-accounting-v8");
 
     let projection = preflight.to_contract_json();
-    assert_f5_1_2_5_v7_contract_key_set(&projection);
+    assert_f5_1_2_5_v8_contract_key_set(&projection);
     assert_eq!(projection["algorithm"], preflight.algorithm());
     assert_eq!(
         projection["gap_support_cardinality"],
@@ -2758,7 +2775,7 @@ fn profile_padding_changes_its_phase_without_summing_noncoexistent_peaks() {
     );
     let exact_config = load_and_validate_f5_config(&long_general).expect("exact config");
     let exact = preflight_f5_resources(&exact_config, F5OtherResources::default())
-        .expect("the exact v7 memory limit is inclusive");
+        .expect("the exact v8 memory limit is inclusive");
     assert_eq!(exact.working_memory_bytes(), long.working_memory_bytes());
     let execution =
         ExecutionId::parse("RUN_AQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
@@ -3158,7 +3175,7 @@ fn sealed_phases_follow_the_closed_admission_order_and_close_the_totals() {
     fs::remove_dir_all(root).expect("cleanup");
 }
 
-/// El receipt sellado publica el algoritmo v7 y su proyección reproduce, una a
+/// El receipt sellado publica el algoritmo v8 y su proyección reproduce, una a
 /// una, las identidades y fases que la admisión observó.
 #[test]
 fn sealed_projection_publishes_identities_and_phases_in_receipt_order() {
@@ -3169,10 +3186,10 @@ fn sealed_projection_publishes_identities_and_phases_in_receipt_order() {
     let config = load_and_validate_f5_config(&general).expect("configuration");
     let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
         .expect("sealed admission");
-    assert_eq!(sealed.receipt().algorithm(), "f5-resource-accounting-v7");
+    assert_eq!(sealed.receipt().algorithm(), "f5-resource-accounting-v8");
 
     let projection = sealed.to_contract_json();
-    assert_f5_1_2_5_v7_contract_key_set(&projection);
+    assert_f5_1_2_5_v8_contract_key_set(&projection);
     let identities = projection["input_identities"]
         .as_array()
         .expect("identity list");
@@ -3228,7 +3245,7 @@ fn sealed_projection_publishes_identities_and_phases_in_receipt_order() {
 }
 
 // ---------------------------------------------------------------------------
-// F5.1.2.6 — segundo oráculo de `resource_preflight` v7.
+// F5.1.2.6 — segundo oráculo de `resource_preflight` v8.
 //
 // Reconstruye el objeto contractual completo —algoritmo, identidades físicas,
 // las nueve fases y los veintisiete escalares— desde los bytes de las entradas
@@ -3328,23 +3345,33 @@ impl SealedProjectionOracle {
         self.founder_count * self.site_bound_total()
     }
 
-    /// Estructuras tipadas derivables del escenario: matriz haplotípica,
-    /// bins de LD y copias fundadoras.
-    fn derived_structures(&self) -> u64 {
+    /// Estructuras tipadas derivables del escenario: matriz haplotípica, bins
+    /// de LD, copias fundadoras, asientos de asignación y el registro de
+    /// identidades que detecta toda colisión.
+    ///
+    /// `copies` es `X` en la fórmula final y `C_total` en la reserva anterior
+    /// al escaneo, donde `sequence_count` todavía no se ha observado y
+    /// `C_total` es su cota inferior.
+    fn derived_structures(&self, copies: u64) -> u64 {
         let site_bound = self.site_bound();
         let pairs = site_bound * (site_bound - 1) / 2;
         let packed = (self.haplotype_count * site_bound).div_ceil(8);
+        let seats = self.block_count * self.founder_copies();
+        let registry =
+            copies + self.block_count * self.population_count * self.haplotype_count + seats;
         self.block_count
             * self.population_count
-            * (packed + 64 * self.haplotype_count + 256 * site_bound + 192 * pairs)
+            * (packed + (160 + site_bound) * self.haplotype_count + 256 * site_bound + 192 * pairs)
             + 256 * self.block_count * self.bin_count_total
-            + 128 * self.founder_copies()
+            + 192 * copies
+            + 64 * seats
+            + 128 * registry
     }
 
     /// Transitorio conocido de la fórmula final, reservado antes de abrir el
     /// FASTA: no incluye todavía tramos ni IDs.
     fn known_final_transient(&self) -> u64 {
-        1_024 * self.block_count + self.derived_structures() + 65_536
+        1_024 * self.block_count + self.derived_structures(self.founder_copies()) + 65_536
     }
 
     /// Pico de la fórmula final: vectores de bloques, tramos, IDs y filas del
@@ -3355,7 +3382,7 @@ impl SealedProjectionOracle {
             + self.retained_sequence_ids
             + self.profile_rows
             + self.normalization_rows)
-            + self.derived_structures()
+            + self.derived_structures(self.copy_sequences())
             + 65_536
     }
 
@@ -3385,7 +3412,7 @@ impl SealedProjectionOracle {
         1_048_576 + 4_096 * (self.tsv_rows_bound + self.json_rows_bound) + truth
     }
 
-    /// Reconstruye el objeto `resource_preflight` v7 completo.
+    /// Reconstruye el objeto `resource_preflight` v8 completo.
     fn project(&self, root: &Path, mask: Option<&[u8]>) -> serde_json::Value {
         let authoring = root.join("authoring");
         let scenario_directory = authoring.join("scenarios");
@@ -3605,7 +3632,7 @@ impl SealedProjectionOracle {
         }));
 
         serde_json::json!({
-            "algorithm": "f5-resource-accounting-v7",
+            "algorithm": "f5-resource-accounting-v8",
             "input_identities": identities,
             "phases": phases,
             "reference_bases_processed": self.reference_bases,
@@ -3638,10 +3665,10 @@ impl SealedProjectionOracle {
     }
 }
 
-/// F5.1.2.6: la proyección v7 completa se reconstruye desde las entradas y los
+/// F5.1.2.6: la proyección v8 completa se reconstruye desde las entradas y los
 /// hechos literales del fixture, sin tipos ni funciones productivas.
 #[test]
-fn an_independent_oracle_reconstructs_the_whole_v7_projection_from_inputs() {
+fn an_independent_oracle_reconstructs_the_whole_v8_projection_from_inputs() {
     let mask = b"region_id\tsequence_id\tstart_1based\tend_1based\nm1\tchr1\t3\t3\n";
     for (label, mask) in [
         ("oracle-without-mask", None),
@@ -3663,7 +3690,7 @@ fn an_independent_oracle_reconstructs_the_whole_v7_projection_from_inputs() {
         assert_eq!(
             projection,
             oracle.project(&root, mask),
-            "el oráculo independiente debe reconstruir la proyección v7: {label}"
+            "el oráculo independiente debe reconstruir la proyección v8: {label}"
         );
         // La reconstrucción también debe superar los dos esquemas publicados.
         assert_preflight_projection_validates_through_effective_and_manifest(&root, &projection);
@@ -3693,7 +3720,7 @@ fn effective_and_manifest_are_rejected_when_one_published_copy_diverges() {
         .ensure_contract_copies_match(&effective_path, &effective, &manifest_path, &manifest)
         .expect("dos copias fieles de la admisión sellada se aceptan");
 
-    // Desigualdad dirigida en cada clase de término del contrato v7.
+    // Desigualdad dirigida en cada clase de término del contrato v8.
     let directed = [
         ("/operation_units", serde_json::json!(1_u64)),
         ("/other_output_bytes", serde_json::json!(1_u64)),

@@ -829,8 +829,10 @@ mosaicos, recombinación, mapas, genealogía y `HaplotypeProcess`. F6 añade
 variación compleja y F7.1 define por primera vez la meiosis.
 
 Revisión de admisión aprobada el 4 de septiembre de 2026: el algoritmo v7
-reemplaza los intermedios v5/v6 y pasa a ser la única autoridad de recursos y
-binding para F5.1.2.
+reemplazó los intermedios v5/v6 y pasó a ser la única autoridad de recursos y
+binding para F5.1.2. La revisión F5.3, del 12 de septiembre de 2026, lo
+sustituye por v8, que contabiliza además el repositorio de identidades
+fundadoras; la autoridad es siempre la versión vigente, que es v8.
 
 ### Escenario TOML canónico
 
@@ -1207,8 +1209,8 @@ las cotas de recursos en notación asintótica.
 
 #### Admisión físicamente acotada y acumulativa
 
-`f5-resource-accounting-v7` sustituye por completo los parches intermedios v5 y
-v6. La admisión es una sola máquina de estados; no existe una carga previa que
+`f5-resource-accounting-v8` sustituye por completo a v7 y a los parches
+intermedios v5 y v6. La admisión es una sola máquina de estados; no existe una carga previa que
 pueda abrir o materializar perfil, referencia o máscara al margen de ella. Sus
 estados, en este orden, son `bootstrap`, `profile_metadata`,
 `profile_table_block_lengths`, `profile_table_snp_gaps`,
@@ -1281,7 +1283,7 @@ objeto sellado; no acepta un receipt suelto ni escalares reconstruidos por el
 llamador. Así dos TOML semánticamente equivalentes pero con comentarios,
 padding o tamaños distintos no comparten preflight.
 
-Antes del primer consumo RNG v7 calcula con enteros comprobados y nombres
+Antes del primer consumo RNG v8 calcula con enteros comprobados y nombres
 dimensionalmente distintos:
 
 - `B`, número exacto de bloques resuelto desde el objetivo; `N_pop`, número de
@@ -1371,10 +1373,40 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   `other_working_memory_bytes +
   256*(4*B+2*tract_count+retained_sequence_ids+profile_rows+
   normalization_rows) +
-  B*N_pop*(ceil(H*S_bound/8)+64*H+256*S_bound+192*pair_bound) +
-  256*B*bin_count_total + 128*C_total + 65536`. Solo se suman estructuras que
-  coexisten; el ledger carga prospectivamente cada crecimiento y registra los
-  picos para que un lector independiente repita el máximo;
+  B*N_pop*(ceil(H*S_bound/8)+(160+S_bound)*H+256*S_bound+192*pair_bound) +
+  256*B*bin_count_total + 192*X + 64*B*C_total +
+  128*identity_registry_entries + 65536`, con
+  `identity_registry_entries=X+B*N_pop*H+B*C_total`. Solo se suman estructuras
+  que coexisten; el ledger carga prospectivamente cada crecimiento y registra
+  los picos para que un lector independiente repita el máximo. Los cuatro
+  términos fundadores se leen así, y v8 los corrige respecto de v7 porque
+  ninguno acotaba lo que la fase productiva retiene de verdad:
+
+  - `192*X` sustituye a `128*C_total`. El repositorio de identidades conserva
+    una copia por individuo **y secuencia**, que es exactamente `X`, no
+    `C_total`: contar copias del individuo dejaba fuera el segundo eje de la
+    identidad y con una sola secuencia ya consumía tres cuartos del término.
+    Cada entrada mide 72 bytes de copia, 24 de su índice de pertenencia y 48
+    del texto `FCP_`, que es una asignación por identidad;
+  - `64*B*C_total` presupuesta los asientos de asignación por
+    bloque×subpoblación, que miden 32 bytes cada uno y no aparecían en ninguna
+    fórmula. El factor dos cubre la holgura del vector de cada unidad y el
+    texto de los `IndividualId`, que es una asignación por fundador y no por
+    asiento;
+  - `128*identity_registry_entries` presupuesta el registro de colisiones.
+    DTC-039 exige que «toda colisión se detecta», de modo que el registro
+    conserva una entrada por identidad derivada —`FCP_`, `HAP_` y `FHA_`— y no
+    puede soltarla cuando la fila que la nombraba ya se ha escrito. Es el
+    término dominante de la fase fundadora, porque `B*C_total` crece con el
+    número de bloques aunque las tablas retenidas no lo hagan. Cada entrada es
+    la pareja `(clase, texto)` de 32 bytes más la asignación de sus 30 o 31
+    caracteres; el resto cubre el relleno parcial de los nodos y la cabecera
+    del asignador;
+  - `(160+S_bound)*H` sustituye a `64*H`: una fila haplotípica retenida cuesta
+    16 bytes de identificador, 48 del texto `HAP_` y la parte proporcional de
+    la unidad y su índice, y `S_bound` cubre además su fila de la matriz
+    ganadora, que se materializa por filas completas de `ceil(S/8)` bytes y no
+    en el empaquetado exacto que `ceil(H*S_bound/8)` describe;
 - `truth_bound=65536+X*(4096+2048*K_bound)+4096*G_bound` y
   `output_bytes = other_output_bytes + 1048576 +
   4096*(tsv_rows_bound+json_rows_bound) + truth_bound`. El sobre de 4096 bytes
@@ -1422,14 +1454,14 @@ los registros de fase, `tract_count`, `retained_sequence_ids`,
 `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`,
 `gap_support_cardinality`, `gap_selector_operation_units`, las tres
 aportaciones `other_*` y los tres resultados; así un lector puede repetir la
-cuenta sin RNG. Los receipts v5/v6 no son entradas admitidas ni se migran: deben
-repetir la admisión v7 desde los ficheros fuente. General v3 y escenario v1 no
+cuenta sin RNG. Los receipts v5/v6/v7 no son entradas admitidas ni se migran: deben
+repetir la admisión v8 desde los ficheros fuente. General v3 y escenario v1 no
 cambian de significado; el objeto prerelease `resource_preflight` de efectivo y
 manifiesto v5 cambia de forma y exige actualización atómica de ambos esquemas y
 sus lectores en F5.1.2.5, junto con el sellado del receipt que produce
 `input_identities` y `phases`. La atomicidad se exige entre esquema, lectores y
 productor, que es lo que evita dos formas en circulación; hasta ese hito el
-esquema publica solo la proyección escalar del algoritmo v7, y su
+esquema publica solo la proyección escalar del algoritmo v8, y su
 `additionalProperties: false` es deliberado: rechaza cualquier forma intermedia.
 
 La prueba de frontera de `max_working_memory_bytes` no se construye modificando
@@ -1437,7 +1469,7 @@ un TOML después de calcularlo, porque el propio literal forma parte de la
 identidad y del pico de bootstrap. Usa una línea de anchura fija
 `max_working_memory_bytes = <entero> # pad:<espacios>`: el entero es decimal
 canónico sin ceros iniciales y el comentario compensa su anchura. El generador
-itera serialización y cálculo v7 hasta un punto fijo, comprueba que dos
+itera serialización y cálculo v8 hasta un punto fijo, comprueba que dos
 iteraciones consecutivas producen los mismos bytes y conserva igual longitud
 física al construir la variante límite−1. El fixture no puede quedar junto a
 una potencia de diez que impida esa compensación. La prueba recalcula desde los
@@ -1656,7 +1688,7 @@ objetos rechazan propiedades adicionales:
 | `sampling` | lista ordenada por `population_id`+`block_id`, con una fila exacta por bloque×subpoblación: `population_id`, `block_id`, `block_index`, `requested_mode`, `effective_mode`, `source` (`subpopulation_default` o `block_override`), `controlled_max_abs_error_declared` y `controlled_max_abs_error_effective`; las tolerancias son `null` en probabilístico y la efectiva es finita en `[0,0.5/C]` en controlado, con `C=individual_count*ploidy` de esa subpoblación |
 | `normalizations` | cuatro objetos exactos en orden `block_lengths`, `snp_gaps`, `snp_spectrum`, `haplotype_weights`, cada uno con `set_kind`, `canonical_order`, `algorithm="neumaier-f64-v1"`, `tolerance`, `input_values`, `input_sum`, `input_delta`, `effective_values`, `output_sum`, `output_delta`; los números recuperan el mismo `f64` y materializan físicamente la auditoría DTC-049 |
 | `limits` | objeto exacto con los cuatro límites algorítmicos y los tres presupuestos efectivos TOML |
-| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v7"`, `input_identities`, `phases`, `reference_bases_processed`, `fasta_bytes_processed`, `mask_bytes_processed`, `general_toml_bytes`, `scenario_toml_bytes`, `profile_metadata_bytes`, `profile_tsv_bytes`, `tract_count`, `retained_sequence_ids`, `gap_support_cardinality`, `gap_selector_operation_units`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; `input_identities` se ordena por rol contractual y cada objeto exacto contiene `role`, `normalized_path`, `observed_size_bytes`, `observed_sha256`, `declared_size_bytes` y `declared_sha256`, estos dos últimos `null` cuando no existen en el documento propietario; `phases` sigue el orden cerrado de la máquina de admisión y cada objeto contiene `phase`, `operation_units_cumulative`, `retained_before_bytes`, `transient_bytes`, `retained_after_bytes`, `phase_peak_bytes` y `output_bytes_reserved`; todos los recuentos son `u64`, los valores calculados no exceden sus límites y efectivo/manifiesto son iguales escalar y posicionalmente |
+| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v8"`, `input_identities`, `phases`, `reference_bases_processed`, `fasta_bytes_processed`, `mask_bytes_processed`, `general_toml_bytes`, `scenario_toml_bytes`, `profile_metadata_bytes`, `profile_tsv_bytes`, `tract_count`, `retained_sequence_ids`, `gap_support_cardinality`, `gap_selector_operation_units`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; `input_identities` se ordena por rol contractual y cada objeto exacto contiene `role`, `normalized_path`, `observed_size_bytes`, `observed_sha256`, `declared_size_bytes` y `declared_sha256`, estos dos últimos `null` cuando no existen en el documento propietario; `phases` sigue el orden cerrado de la máquina de admisión y cada objeto contiene `phase`, `operation_units_cumulative`, `retained_before_bytes`, `transient_bytes`, `retained_after_bytes`, `phase_peak_bytes` y `output_bytes_reserved`; todos los recuentos son `u64`, los valores calculados no exceden sus límites y efectivo/manifiesto son iguales escalar y posicionalmente |
 | `algorithms` | objeto exacto `layout="f5-layout-v1"`, `marginals="f5-spectrum-v1"`, `haplotypes="weighted-prefix-swap-v1"`, `ld="phased-r2-neumaier-v1"`, `controlled="largest-remainder-v1"`, `inbreeding="diploid-f-v1"`, `truth_projection="f5-founder-truth-projection-v2"` |
 | `rng_catalog`, `id_catalog` | objetos exactos `catalog_id`, `path`, `size_bytes`, `sha256` |
 

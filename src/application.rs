@@ -240,7 +240,7 @@ pub struct EffectiveF5Config {
     bootstrap_documents: F5BootstrapDocuments,
     input_documents: F5InputDocuments,
     profile_input_identities: Vec<AdmittedInputIdentity>,
-    /// Estado interno de la admisión v7 después de bootstrap y perfil, que la
+    /// Estado interno de la admisión v8 después de bootstrap y perfil, que la
     /// primera visita FASTA/máscara continúa. No es contabilidad publicable
     /// mientras la fórmula final no lo selle.
     admission_ledger: F5ResourceLedger,
@@ -1244,7 +1244,7 @@ fn bootstrap_f5_config_from_admitted_with_toml_opener(
 }
 
 /// Materializa el perfil inmediatamente después del bootstrap usando la misma
-/// contabilidad v7. La semilla se resuelve únicamente si las seis entradas
+/// contabilidad v8. La semilla se resuelve únicamente si las seis entradas
 /// físicas han sido admitidas.
 fn materialize_f5_config_after_bootstrap(
     bootstrap: F5BootstrapConfig,

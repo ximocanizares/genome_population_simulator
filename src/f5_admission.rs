@@ -1,4 +1,4 @@
-//! Frontera física y contabilidad incremental de la admisión F5 v7.
+//! Frontera física y contabilidad incremental de la admisión F5 v8.
 //!
 //! Este módulo no conoce parsers de perfil, referencia ni layout. Su contrato
 //! es deliberadamente pequeño: un mismo handle cuenta, hashea y acota una
@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::diagnostics::Diagnostic;
 
-pub const F5_RESOURCE_ACCOUNTING_ALGORITHM: &str = "f5-resource-accounting-v7";
+pub const F5_RESOURCE_ACCOUNTING_ALGORITHM: &str = "f5-resource-accounting-v8";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum InputRole {
@@ -265,7 +265,7 @@ pub enum LedgerCharge {
     Output(OutputReservation),
 }
 
-/// Ledger acumulativo de la máquina de estados v7.
+/// Ledger acumulativo de la máquina de estados v8.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct F5ResourceLedger {
     limits: LedgerLimits,
@@ -1087,7 +1087,7 @@ const REQUIRED_RECEIPT_ROLES: [InputRole; 9] = [
     InputRole::ReferenceFasta,
 ];
 
-/// Recibo sellado de la admisión física F5 v7.
+/// Recibo sellado de la admisión física F5 v8.
 ///
 /// Une, en un único objeto indivisible, las identidades de todas las entradas
 /// realmente leídas y la contabilidad cerrada de cada fase. No existe ninguna

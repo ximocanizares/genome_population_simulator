@@ -1460,7 +1460,7 @@ efectiva y verdad; no depende de F6 ni F7.
 | Dispatcher y bootstrap F5 | bytes completos del TOML general y del escenario, versión/clase, rutas de origen, tamaño observado y SHA-256 | documentos de autoría acotados y sus identidades físicas | no usa una sonda parcial para clasificar, no llama a una lectura completa sin cota y no abre perfil, referencia, máscara, destino ni RNG |
 | Admisión F5 | presupuestos efectivos, contabilidad acumulativa por fase, identidades semánticas y físicas y orden de apertura | un único `SealedF5Admission` consumible por geometría y procedencia | no usa `metadata` como autorización de lectura, no cruza preflights entre bytes distintos y no admite una fase cuyo pico o coste acumulado exceda el restante |
 | Escenario F5 | `reference_path`+SHA en general v3, único enlace `[f5_scenario]`, escenario v1 exacto, IDs, perfiles/hash, ploidía efectiva homogénea, límites y sustituciones de modo/tolerancia por bloque×subpoblación | una referencia verificada y un solo `EffectiveF5Scenario` dentro de efectivo v5 | rechaza cero/varios escenarios y general v2; resuelve cada ruta desde su documento origen; no abre un workspace ni consume RNG durante la admisión |
-| Contratos F5 | esquemas completos general v3, escenario v1, efectivo v5 y manifiesto v5 con admisión v7, perfil, siete TSV, fallo v1 y verdad v2 | contratos cerrados que consumen todos los hitos posteriores | tras incorporar v7 de forma atómica, F5.4 solo instancia y valida esos contratos; no añade campos ni reabre esquemas; general v2, efectivo/manifiesto v4 y verdad v1 permanecen inmutables |
+| Contratos F5 | esquemas completos general v3, escenario v1, efectivo v5 y manifiesto v5 con admisión v8, perfil, siete TSV, fallo v1 y verdad v2 | contratos cerrados que consumen todos los hitos posteriores | tras incorporar v8 de forma atómica, F5.4 solo instancia y valida esos contratos; no añade campos ni reabre esquemas; general v2, efectivo/manifiesto v4 y verdad v1 permanecen inmutables |
 | Geometría F5 | elegibilidad, máscara, layout y sitios | `f5-block-layout.tsv`, `f5-sites.tsv` | no crea frecuencias ni fundadores |
 | Constructor F5 | H, q, p, prefijos ponderados, matriz H×S, polaridades, propuestas e intentos | haplotipos, frecuencias y diagnóstico de intento | no enumera `2^H`, no lee panel, no segmenta ni recombina |
 | Evaluador LD | p_hat, D, r², bins y puntuación | evaluación LD y veredicto | no reutiliza estado mutable del constructor en el oráculo |
@@ -1472,7 +1472,7 @@ normalizado, posiciones y perfil LD; solo el Evaluador calcula la puntuación
 aceptable de DTC-089. La evaluación inicial de una matriz cuesta `O(H*S²)` y
 cada propuesta 2×2 actualiza como máximo O(S) parejas.
 
-La admisión aplica `f5-resource-accounting-v7` como una secuencia única. El
+La admisión aplica `f5-resource-accounting-v8` como una secuencia única. El
 dispatcher abre el TOML general una sola vez, lee hasta EOF con la cota inclusiva
 de 65536 bytes y calcula SHA-256 sobre esos mismos bytes; solo entonces lo
 clasifica. La cota es común a la entrada CLI transparente porque antes de leer
@@ -1543,7 +1543,7 @@ cabe, usa aritmética comprobada y se admite antes de RNG sin cambiar la
 distribución ni su secuencia de consumo. También cuenta las
 `2*L*(B*tract_count+B*(B-1)/2)` consultas directas completas de layout. No
 construye un índice auxiliar. Efectivo y manifiesto copian con igualdad exacta
-el algoritmo v7, las identidades de entrada, los totales por fase, los factores
+el algoritmo v8, las identidades de entrada, los totales por fase, los factores
 de recálculo y los tres resultados. No consulta recursos del host ni ejecuta
 perfiles; DTPD-115 sigue siendo una decisión F9 de expectativas de rendimiento
 y no relaja la admisión F5. La identidad de

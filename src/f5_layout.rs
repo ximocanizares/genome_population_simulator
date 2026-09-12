@@ -2706,11 +2706,11 @@ mod tests {
         );
         assert!(
             super::tract_query_count() <= 2 * 2 * (2 + 1),
-            "dos intentos, dos bloques y un tramo inicial respetan la cota v7 de recorridos, incluidos los residuos"
+            "dos intentos, dos bloques y un tramo inicial respetan la cota v8 de recorridos, incluidos los residuos"
         );
         assert!(
             super::layout_vector_moves() <= 2 * (1 + 3 * 2 + 3),
-            "las copias y desplazamientos de remove/insert respetan la cota v7"
+            "las copias y desplazamientos de remove/insert respetan la cota v8"
         );
         assert_eq!(
             super::layout_reserved_slots(),
@@ -2775,13 +2775,13 @@ mod tests {
         let tract_count = 3_u64;
         assert!(
             traversals <= 2 * attempts * (blocks * tract_count + blocks * (blocks - 1) / 2),
-            "v7 accounts for every total/prefix traversal after fragment growth"
+            "v8 accounts for every total/prefix traversal after fragment growth"
         );
         assert!(
             moves
                 <= attempts
                     * (tract_count + 3 * blocks * tract_count + 3 * blocks * (blocks - 1) / 2),
-            "v7 accounts for copies and remove/insert shifts"
+            "v8 accounts for copies and remove/insert shifts"
         );
         assert_eq!(
             reserved,
@@ -2842,12 +2842,12 @@ mod tests {
         assert_eq!(executed, preflighted);
         assert!(
             executed <= preflighted,
-            "the last-tract winner cannot exceed the v7 two-pass tract budget"
+            "the last-tract winner cannot exceed the v8 two-pass tract budget"
         );
     }
 
     #[test]
-    fn production_v7_instrumentation_covers_fragmentation_interior_last_residues_and_retry() {
+    fn production_v8_instrumentation_covers_fragmentation_interior_last_residues_and_retry() {
         let root = production_fixture_root();
         // Semilla testigo del contrato de regresión: es la misma que
         // `fragmented_full_layout_accounts_for_interior_last_residues_and_retry`
@@ -2884,7 +2884,7 @@ mod tests {
         let config = load_and_validate_f5_config(&exact_general)
             .expect("the exact operation limit retains the production fixture");
         let preflight = recover_sealed_f5_admission(&config, F5OtherResources::default())
-            .expect("v7 admits operation_limit exactly equal to its bound");
+            .expect("v8 admits operation_limit exactly equal to its bound");
         assert_eq!(
             preflight.operation_units(),
             exact_limit,
@@ -2917,11 +2917,11 @@ mod tests {
         );
         assert_eq!(
             capacity_visits, tracts,
-            "v7 capacity scan visits every preflight tract once"
+            "v8 capacity scan visits every preflight tract once"
         );
         assert_eq!(
             observed.request_tract_visits, tracts,
-            "v7 request validation visits every preflight tract once"
+            "v8 request validation visits every preflight tract once"
         );
         assert_eq!(
             observed.initial_tract_copies,
@@ -2940,11 +2940,11 @@ mod tests {
         );
         assert!(
             observed.total_tract_visits <= attempts * per_attempt_tract_visits,
-            "v7 total-start scans include at most T+B(B-1)/2 live tracts per block"
+            "v8 total-start scans include at most T+B(B-1)/2 live tracts per block"
         );
         assert!(
             observed.prefix_tract_visits <= attempts * per_attempt_tract_visits,
-            "v7 prefix scans have the same independent bound"
+            "v8 prefix scans have the same independent bound"
         );
         assert!(
             observed.fragment_growth <= attempts * blocks,
@@ -2956,16 +2956,16 @@ mod tests {
         );
         assert!(
             observed.remove_shifts <= attempts * per_attempt_shift_bound,
-            "remove shifts fit their v7 live-list bound"
+            "remove shifts fit their v8 live-list bound"
         );
         assert!(
             observed.insert_shifts <= 2 * attempts * per_attempt_shift_bound,
-            "the two possible inserts fit the remaining v7 shift bound"
+            "the two possible inserts fit the remaining v8 shift bound"
         );
         assert!(
             observed.initial_tract_copies + observed.remove_shifts + observed.insert_shifts
                 <= copy_and_shift_bound,
-            "v7 separately budgets copies plus remove/insert shifts"
+            "v8 separately budgets copies plus remove/insert shifts"
         );
         assert_eq!(observed.attempts_started, attempts);
         assert_eq!(
@@ -2975,16 +2975,16 @@ mod tests {
         );
         assert!(
             observed.peak_live_slots <= slot_bound,
-            "the production vectors fit v7's 2*T+4*B slot peak"
+            "the production vectors fit v8's 2*T+4*B slot peak"
         );
         assert_eq!(
             observed.peak_live_bytes,
             observed.peak_live_slots * 256,
-            "the measured slot peak uses the v7 256-byte accounting unit"
+            "the measured slot peak uses the v8 256-byte accounting unit"
         );
         assert!(
             observed.peak_live_bytes <= 256 * slot_bound,
-            "the production slot memory fits v7's 256*(2*T+4*B) component"
+            "the production slot memory fits v8's 256*(2*T+4*B) component"
         );
         // Picos de fase de la admisión que el mismo documento produjo: el
         // fixture instrumental cierra así el desglose que .6 exige, desde la
@@ -3039,11 +3039,11 @@ mod tests {
 
         // La frontera exacta−1 conserva la anchura del literal, de modo que el
         // documento consume la misma cota y sólo cambia el límite declarado.
-        // En v7 la admisión ocurre dentro de la carga: el rechazo llega antes
+        // En v8 la admisión ocurre dentro de la carga: el rechazo llega antes
         // de que exista una admisión sellada que recuperar.
         let rejected_general = write_production_layout_fixture(&root, exact_limit - 1, seed_byte);
         let rejected = load_and_validate_f5_config(&rejected_general)
-            .expect_err("v7 rejects operation_limit one below the exact admitted bound");
+            .expect_err("v8 rejects operation_limit one below the exact admitted bound");
         assert_eq!(rejected.code(), "GPS-RES-101");
         assert_eq!(rejected.context()["dimension"], "operation_units");
         assert_eq!(rejected.context()["accumulated"], exact_limit.to_string());

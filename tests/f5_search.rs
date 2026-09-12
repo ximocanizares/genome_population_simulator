@@ -1668,14 +1668,14 @@ fn every_attempt_draws_from_its_own_swap_scope() {
 /// con `L-1` bins de un par de bases, el recuento de visitas elementales del
 /// bucle debe ser **el mismo**. Y comprueba además que se mantiene dentro de un
 /// múltiplo pequeño y declarado del presupuesto `H*S_bound² + Q*S_bound` que
-/// `f5-resource-accounting-v7` concede por bloque×subpoblación×intento.
+/// `f5-resource-accounting-v8` concede por bloque×subpoblación×intento.
 #[test]
 fn the_proposal_loop_cost_does_not_depend_on_the_bin_count() {
     /// Cota declarada de la **forma** del coste por propuesta: una constante
     /// —los cuatro sorteos, los cuatro bits del intercambio y las cuatro
     /// operaciones del índice de filas— más un término lineal en `S`. Es lo
     /// que DTC-089 fija al decir que las actualizaciones 2×2 mantienen las
-    /// estadísticas en `O(S)`. Las «unidades de operación» de v7 son una
+    /// estadísticas en `O(S)`. Las «unidades de operación» de v8 son una
     /// medida más gruesa que estas visitas elementales, así que la cota se
     /// escribe con sus dos constantes a la vista en lugar de como un múltiplo
     /// de `Q*S_bound`.
@@ -1722,7 +1722,7 @@ fn the_proposal_loop_cost_does_not_depend_on_the_bin_count() {
                 record.proposals() * (CONSTANT_PER_PROPOSAL + PER_SITE_PER_PROPOSAL * site_bound);
             assert!(
                 record.loop_operations() <= bound,
-                "{label}: el bucle costó {} visitas para {} propuestas, por encima de {bound} (presupuesto grueso de v7: {coarse_budget})",
+                "{label}: el bucle costó {} visitas para {} propuestas, por encima de {bound} (presupuesto grueso de v8: {coarse_budget})",
                 record.loop_operations(),
                 record.proposals()
             );

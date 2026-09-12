@@ -2188,9 +2188,9 @@ impl F5FounderIdentities {
     /// Es el término que **no** se puede soltar: DTC-039 exige que toda
     /// colisión se detecte, de modo que el registro conserva una entrada por
     /// identidad derivada aunque su fila ya se haya escrito. Crece como
-    /// `C_total*secuencias + B*subpoblaciones*H + B*C_total`, y
-    /// `f5-resource-accounting`
-    /// no lo contabiliza en ninguna de sus fórmulas.
+    /// `X + B*subpoblaciones*H + B*C_total`, que es el término dominante de
+    /// la fase fundadora, y `f5-resource-accounting-v8` lo presupuesta a 128
+    /// bytes por entrada dentro de `final_formula_peak`.
     #[must_use]
     pub fn registered_identities(&self) -> usize {
         self.registry.len()
