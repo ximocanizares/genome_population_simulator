@@ -362,6 +362,46 @@ impl F5ReferenceSequences {
         Self::default()
     }
 
+    /// Construye las longitudes desde la admisión sellada, que es donde el
+    /// escaneo de referencia las midió.
+    ///
+    /// F5.4.1 dejó `F5ReferenceSequences` como entrada explícita porque
+    /// ninguna pieza F5 la conservaba; F5.4.3 cierra esa deuda cableándola al
+    /// único productor posible. El resultado sigue pasando por las mismas
+    /// guardas de [`write_f5_success_artifacts`] —recuento, cobertura de las
+    /// secuencias pobladas y suma de bases—, que ahora son redundantes por
+    /// construcción y por eso valen como comprobación cruzada.
+    ///
+    /// # Errors
+    ///
+    /// `GPS-CONF-101` si la admisión selló un identificador de secuencia que
+    /// no es una identidad tipada, una longitud nula o un identificador
+    /// repetido.
+    pub fn from_sealed(sealed: &SealedF5Admission) -> Result<Self, Diagnostic> {
+        let mut sequences = Self::new();
+        for (sequence_id, length_bp) in sealed.sequence_lengths() {
+            let typed = SequenceId::parse(sequence_id.clone(), sealed.reference_id()).map_err(
+                |_| {
+                    Diagnostic::f5_configuration(
+                        sealed.scenario_id(),
+                        "reference.sequence_id",
+                        format!("la admisión selló el identificador {sequence_id}, que no es una identidad tipada"),
+                    )
+                },
+            )?;
+            if !sequences.insert(typed, *length_bp) {
+                return Err(Diagnostic::f5_configuration(
+                    sealed.scenario_id(),
+                    "reference.sequence_length",
+                    format!(
+                        "la admisión selló la secuencia {sequence_id} con longitud {length_bp} y ya estaba declarada o su longitud es nula"
+                    ),
+                ));
+            }
+        }
+        Ok(sequences)
+    }
+
     /// Declara la longitud de una secuencia. Devuelve `false` —y no cambia
     /// nada— si la longitud es cero o si la secuencia ya estaba declarada.
     ///

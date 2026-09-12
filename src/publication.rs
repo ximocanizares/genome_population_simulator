@@ -29,6 +29,23 @@ pub struct ExecutionWorkspace {
     payload: PathBuf,
     artifacts: Vec<ArtifactRecord>,
     manifest_written: bool,
+    /// El manifiesto que cerró el catálogo es el general v5 de F5.
+    ///
+    /// v5 no es una ampliación de v4: su raíz no tiene `artifacts`, ni
+    /// `references`, ni `effective_config_artifact_id`, de modo que el lector
+    /// v4 lo rechazaría por versión antes de mirar nada. Esta marca elige, en
+    /// el cierre y otra vez en la publicación, la puerta física que
+    /// corresponde a la familia escrita.
+    f5_manifest: bool,
+    /// Documentos raíz del paquete que ningún catálogo enumera.
+    ///
+    /// `manifest.json` nunca estuvo en el catálogo —su auto-hash no tendría
+    /// solución finita— y `effective-config.json` v5 tampoco puede estarlo: el
+    /// objeto `artifacts` del manifiesto v5 es una lista cerrada de
+    /// exactamente los siete TSV. Se registran aquí para impedir que dos
+    /// escrituras reclamen el mismo nombre o que un documento raíz pise la
+    /// ruta de un artefacto.
+    root_documents: BTreeSet<String>,
     /// Identificadores y rutas de artefactos abiertos en flujo y todavía sin
     /// publicar. El catálogo no los contiene aún, de modo que sin este
     /// registro dos salidas simultáneas podrían reclamar el mismo nombre.
@@ -81,6 +98,8 @@ impl ExecutionWorkspace {
                         provisional,
                         artifacts: Vec::new(),
                         manifest_written: false,
+                        f5_manifest: false,
+                        root_documents: BTreeSet::new(),
                         reserved: BTreeSet::new(),
                     });
                 }
@@ -102,6 +121,18 @@ impl ExecutionWorkspace {
     #[must_use]
     pub fn destination(&self) -> &Path {
         &self.destination
+    }
+
+    /// Raíz de la carga útil que se renombrará al destino.
+    ///
+    /// La expone para que un lector independiente pueda juzgar los artefactos
+    /// ya escritos **antes** de que exista el destino final: es lo que el
+    /// recuento MAN-70 de F5.4.3 necesita, y hacerlo sobre el provisional es
+    /// justamente lo que impide publicar un paquete que su propio oráculo
+    /// rechazaría.
+    #[must_use]
+    pub fn payload_root(&self) -> &Path {
+        &self.payload
     }
 
     #[must_use]
@@ -322,6 +353,174 @@ impl ExecutionWorkspace {
         Ok(record)
     }
 
+    /// Escribe un documento raíz del paquete que ningún catálogo enumera.
+    ///
+    /// Es la vía de `effective-config.json`: el manifiesto v5 no puede
+    /// enlazarlo —su lista `artifacts` está cerrada a los siete TSV— y por
+    /// tanto tampoco puede compararse con el catálogo. Sigue escribiéndose
+    /// como todos los demás: a un temporal propio que se renombra ya completo,
+    /// de modo que una interrupción no deja un documento raíz a medias.
+    ///
+    /// # Errors
+    ///
+    /// `GPS-INTERNAL-001` si el nombre no es un componente relativo simple, si
+    /// ya lo reclama un artefacto u otro documento raíz o si el catálogo ya
+    /// está cerrado; `GPS-IO-001` ante un fallo de escritura.
+    pub fn write_root_document(&mut self, name: &str, bytes: &[u8]) -> Result<(), Diagnostic> {
+        if self.manifest_written {
+            return Err(invalid_state(
+                name,
+                "the artifact catalog is already closed",
+            ));
+        }
+        let relative = Path::new(name);
+        validate_relative_path(relative)?;
+        if relative.components().count() != 1 {
+            return Err(invalid_state(
+                name,
+                "a root document is a single path component",
+            ));
+        }
+        if name == "manifest.json" {
+            return Err(invalid_state(
+                name,
+                "manifest.json is written by its own closing gate",
+            ));
+        }
+        if self.artifacts.iter().any(|artifact| artifact.path == name)
+            || self.reserved.iter().any(|(_, path)| path == name)
+            || !self.root_documents.insert(name.to_owned())
+        {
+            return Err(invalid_state(
+                name,
+                "root document path is already cataloged, reserved or written",
+            ));
+        }
+        let final_path = self.payload.join(relative);
+        let temporary = temporary_path(&self.payload, &final_path, name)?;
+        let result = (|| {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+                .map_err(|error| io_error(&temporary, "create_root_document_temporary", error))?;
+            file.write_all(bytes)
+                .map_err(|error| io_error(&temporary, "write", error))?;
+            file.flush()
+                .map_err(|error| io_error(&temporary, "flush", error))?;
+            drop(file);
+            fs::rename(&temporary, &final_path)
+                .map_err(|error| io_error(&final_path, "finalize_root_document", error))
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+            self.root_documents.remove(name);
+        }
+        result
+    }
+
+    /// Cierra el catálogo con el manifiesto general v5 de F5.
+    ///
+    /// Escribe el temporal, lo renombra, **relee los bytes publicados** y los
+    /// juzga con la puerta física de F5, que vuelve a abrir cada artefacto
+    /// enlazado y recomputa su tamaño y SHA-256. No comparte ninguna
+    /// comprobación con la familia v4: ni el catálogo `artifacts` de la raíz,
+    /// ni los manifiestos de evento, ni el efectivo v4 existen aquí.
+    ///
+    /// # Errors
+    ///
+    /// `GPS-INTERNAL-001` si el manifiesto ya está cerrado, `GPS-FMT-006` si
+    /// el documento publicado no satisface el contrato v5 o no corresponde al
+    /// paquete físico, y `GPS-IO-001`/`GPS-IO-002` ante fallos de escritura o
+    /// de identidad.
+    pub fn write_f5_manifest<T: serde::Serialize>(
+        &mut self,
+        document: &T,
+    ) -> Result<(), Diagnostic> {
+        if self.manifest_written {
+            return Err(invalid_state(
+                "manifest-general",
+                "the general manifest is already finalized",
+            ));
+        }
+        self.verify_catalog()?;
+        let manifest_path = self.payload.join("manifest.json");
+        let temporary = self.payload.join(format!(
+            ".manifest.json.gps-tmp-{}-{}",
+            std::process::id(),
+            TEMPORARY_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let result = (|| {
+            let file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)
+                .map_err(|error| io_error(&temporary, "create_manifest_temporary", error))?;
+            // El documento se serializa **directamente al fichero**: el
+            // manifiesto v5 crece con `B*N_pop*S` y materializar su texto
+            // costaba, solo él, más que todo el pico que la admisión sella.
+            let mut writer = std::io::BufWriter::new(file);
+            serde_json::to_writer_pretty(&mut writer, document).map_err(|error| {
+                invalid_state(
+                    "manifest-general",
+                    format!("manifest is not serializable: {error}"),
+                )
+            })?;
+            writer
+                .write_all(b"\n")
+                .map_err(|error| io_error(&temporary, "write", error))?;
+            let mut file = writer
+                .into_inner()
+                .map_err(|error| io_error(&temporary, "flush", error.into_error()))?;
+            file.flush()
+                .map_err(|error| io_error(&temporary, "flush", error))?;
+            drop(file);
+            fs::rename(&temporary, &manifest_path)
+                .map_err(|error| io_error(&manifest_path, "finalize_manifest", error))
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+
+    /// Ejecuta la puerta física sobre el manifiesto v5 ya escrito y cierra el
+    /// catálogo.
+    ///
+    /// Está separada de [`Self::write_f5_manifest`] para que el llamador pueda
+    /// soltar el documento que lo produjo **antes** de juzgarlo: la puerta
+    /// relee el fichero publicado y no debe coexistir con la copia en memoria.
+    /// Sin esa separación, el objeto `f5` y los resúmenes MAN-70 seguían vivos
+    /// durante la verificación y sumaban su tamaño al pico.
+    ///
+    /// # Errors
+    ///
+    /// `GPS-INTERNAL-001` si el manifiesto ya está cerrado o si no se ha
+    /// escrito, y `GPS-FMT-006`/`GPS-IO-001` si la puerta lo rechaza.
+    pub fn close_f5_manifest(&mut self) -> Result<(), Diagnostic> {
+        if self.manifest_written {
+            return Err(invalid_state(
+                "manifest-general",
+                "the general manifest is already finalized",
+            ));
+        }
+        let manifest_path = self.payload.join("manifest.json");
+        if !manifest_path.is_file() {
+            return Err(invalid_state(
+                "manifest-general",
+                "the F5 manifest has not been written yet",
+            ));
+        }
+        crate::f5_publication::verify_published_f5_package(
+            &self.payload,
+            &manifest_path,
+            &self.artifacts,
+        )?;
+        self.manifest_written = true;
+        self.f5_manifest = true;
+        Ok(())
+    }
+
     /// Escribe, relee y valida físicamente el manifiesto general. `manifest.json`
     /// no entra en el catálogo porque su auto-hash no tendría solución finita.
     pub fn write_general_manifest(&mut self, bytes: &[u8]) -> Result<(), Diagnostic> {
@@ -389,15 +588,25 @@ impl ExecutionWorkspace {
             ));
         }
         let manifest_path = self.payload.join("manifest.json");
-        let manifest = fs::read(&manifest_path)
-            .map_err(|error| io_error(&manifest_path, "read_manifest", error))?;
-        let declared = parse_general_manifest_bytes(&manifest_path, &manifest)?;
-        compare_catalogs(&declared, &self.artifacts)?;
         // Revalida todos los enlaces físicos sobre los bytes que realmente se
         // van a publicar. Entre el cierre del manifiesto y este punto todavía
-        // puede haberse alterado el árbol provisional.
-        validate_published_event_manifests(&self.payload, &manifest_path, &manifest)?;
-        self.validate_effective_config(&manifest_path, &manifest)?;
+        // puede haberse alterado el árbol provisional. La familia v5 lee el
+        // manifiesto por flujo y no lo materializa; la v4 conserva su lectura
+        // completa, porque sus lectores la exigen.
+        if self.f5_manifest {
+            crate::f5_publication::verify_published_f5_package(
+                &self.payload,
+                &manifest_path,
+                &self.artifacts,
+            )?;
+        } else {
+            let manifest = fs::read(&manifest_path)
+                .map_err(|error| io_error(&manifest_path, "read_manifest", error))?;
+            let declared = parse_general_manifest_bytes(&manifest_path, &manifest)?;
+            compare_catalogs(&declared, &self.artifacts)?;
+            validate_published_event_manifests(&self.payload, &manifest_path, &manifest)?;
+            self.validate_effective_config(&manifest_path, &manifest)?;
+        }
         self.rename_payload()?;
         // Desde este punto el destino ya es un árbol final limpio. El wrapper
         // exterior solo registra un residuo de limpieza si el proceso cae.
@@ -443,6 +652,16 @@ impl ExecutionWorkspace {
             return Err(invalid_state(
                 id,
                 "artifact ID or path is already reserved by an open stream",
+            ));
+        }
+        // El invariante de `root_documents` es simétrico: un documento raíz no
+        // puede pisar la ruta de un artefacto **ni al revés**. Sin esta mitad,
+        // un artefacto podía reclamar `effective-config.json` ya escrito,
+        // sobrescribirlo y entrar además en el catálogo.
+        if self.root_documents.contains(&path_text) {
+            return Err(invalid_state(
+                id,
+                "artifact path is already written as a root document",
             ));
         }
         if self.manifest_written {
@@ -492,6 +711,22 @@ impl ExecutionWorkspace {
         self.artifacts
             .retain(|artifact| retained_ids.contains(&artifact.id));
         Ok(())
+    }
+
+    /// Retira **todos** los artefactos ya escritos y sus ficheros.
+    ///
+    /// Es la puerta de un fallo controlado F5: DTC-089 prohíbe que el paquete
+    /// fallido liste ninguno de los siete TSV «aunque existieran temporales»,
+    /// de modo que el catálogo se vacía y los ficheros se borran antes de
+    /// escribir el diagnóstico. Reutiliza `retain_only_artifacts` con el
+    /// conjunto vacío para no tener dos borradores del mismo invariante.
+    ///
+    /// # Errors
+    ///
+    /// `GPS-INTERNAL-001` si el catálogo ya está cerrado y `GPS-IO-001` si un
+    /// fichero no puede retirarse.
+    pub fn discard_all_artifacts(&mut self) -> Result<(), Diagnostic> {
+        self.retain_only_artifacts(&BTreeSet::new())
     }
 
     #[cfg(test)]
@@ -1200,6 +1435,94 @@ i5 = "GGGGTTTT"
         .expect("header");
         build_effective_config(&crate::adapters::parse_declared_config(admitted).expect("declared"))
             .expect("effective")
+    }
+
+    #[test]
+    fn a_root_document_claims_its_name_and_never_enters_the_catalog() {
+        let root = temporary("root-document");
+        fs::create_dir(&root).expect("root");
+        let mut workspace = ExecutionWorkspace::create(&root.join("published")).expect("workspace");
+        workspace
+            .write_artifact(
+                "sites",
+                "f5_sites",
+                Path::new("outputs/f5-sites.tsv"),
+                b"header\n",
+            )
+            .expect("artifact");
+
+        workspace
+            .write_root_document("effective-config.json", b"{}\n")
+            .expect("root document");
+        assert_eq!(
+            fs::read(workspace.root().join("effective-config.json")).expect("reread"),
+            b"{}\n"
+        );
+        // No entra en el catálogo: el manifiesto v5 no puede enlazarlo.
+        assert_eq!(workspace.artifacts().len(), 1);
+        assert_eq!(workspace.artifacts()[0].id, "sites");
+
+        // Nombre repetido, ruta de un artefacto, `manifest.json` y ruta
+        // compuesta se rechazan por igual.
+        for (name, reason) in [
+            ("effective-config.json", "repetido"),
+            ("outputs/f5-sites.tsv", "ruta de artefacto"),
+            ("manifest.json", "manifiesto"),
+            ("outputs/extra.json", "ruta compuesta"),
+            ("INCOMPLETE", "marcador"),
+        ] {
+            assert!(
+                workspace.write_root_document(name, b"{}\n").is_err(),
+                "{name} debe rechazarse: {reason}"
+            );
+        }
+        // La dirección contraria del mismo invariante: un artefacto no puede
+        // reclamar la ruta de un documento raíz ya escrito. Antes de la
+        // revisión la sobrescribía devolviendo `Ok` y se catalogaba.
+        let collision =
+            workspace.write_artifact("colision", "f5", Path::new("effective-config.json"), b"x\n");
+        assert!(
+            collision.is_err(),
+            "un artefacto no puede pisar un documento raíz"
+        );
+        assert_eq!(workspace.artifacts().len(), 1);
+        assert_eq!(
+            fs::read(workspace.root().join("effective-config.json")).expect("reread"),
+            b"{}\n",
+            "el documento raíz conserva sus bytes"
+        );
+        // Y ningún temporal sobrevive a los rechazos.
+        let residue = fs::read_dir(workspace.root())
+            .expect("payload")
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().contains(".gps-tmp-"));
+        assert!(!residue);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn discarding_all_artifacts_empties_the_catalog_and_the_tree() {
+        let root = temporary("discard-all");
+        fs::create_dir(&root).expect("root");
+        let mut workspace = ExecutionWorkspace::create(&root.join("published")).expect("workspace");
+        for (id, path) in [
+            ("sites", "outputs/f5-sites.tsv"),
+            ("truth", "outputs/truth.jsonl"),
+        ] {
+            workspace
+                .write_artifact(id, "f5", Path::new(path), b"x\n")
+                .expect("artifact");
+        }
+        assert_eq!(workspace.artifacts().len(), 2);
+        workspace.discard_all_artifacts().expect("discard");
+        assert!(workspace.artifacts().is_empty());
+        assert!(!workspace.root().join("outputs/f5-sites.tsv").exists());
+        assert!(!workspace.root().join("outputs/truth.jsonl").exists());
+        // El mismo identificador vuelve a estar libre.
+        workspace
+            .write_artifact("sites", "f5", Path::new("outputs/f5-sites.tsv"), b"y\n")
+            .expect("reuse");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

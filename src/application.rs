@@ -1159,6 +1159,7 @@ pub fn load_and_validate_f5_config_with_entropy_and_resources(
     other: crate::f5_preflight::F5OtherResources,
 ) -> Result<EffectiveF5Config, Diagnostic> {
     let general_path = absolute_normalized_path(path)?;
+    require_publishable_general_name(&general_path)?;
     let BoundedF5Toml { bytes, document } = read_bounded_f5_toml(&general_path)?;
     let admitted_general = admit_toml_header(path, bytes, ExpectedConfigKind::F5General)
         .map_err(Diagnostic::into_f5_configuration)?;
@@ -1338,6 +1339,40 @@ fn prepare_f5_config_after_bootstrap(
         general,
         scenario,
     })
+}
+
+/// El nombre del general tiene que ser publicable.
+///
+/// Los cinco enlaces que los documentos declaran —escenario, referencia,
+/// metadata, máscara y los cinco TSV de perfil— ya pasan por
+/// `require_relative_path`, pero el nombre del **propio** general lo elige el
+/// usuario en la línea de órdenes y nadie lo validaba. `effective-config.json`
+/// lo publica como `source_path`, cuyo `$defs/path` admite exactamente
+/// `[A-Za-z0-9._-]`, de modo que un `mi general.toml` o un
+/// `general (copia).toml` ejecutaba admisión, layout, búsqueda, fundadores,
+/// identidades, los ocho artefactos y el recuento MAN-70 **completos** antes
+/// de morir al serializar el efectivo. La frontera correcta es la admisión: se
+/// rechaza aquí, antes de abrir el fichero, y el diagnóstico dice qué
+/// renombrar en lugar de culpar al esquema del documento producido.
+fn require_publishable_general_name(general_path: &Path) -> Result<(), Diagnostic> {
+    let publishable = general_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            !name.is_empty()
+                && !matches!(name, "." | "..")
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        });
+    if publishable {
+        return Ok(());
+    }
+    Err(Diagnostic::f5_configuration(
+        general_path.display().to_string(),
+        "general_path",
+        "el nombre del documento general se publica en effective-config.json y solo admite [A-Za-z0-9._-]; renómbralo antes de ejecutar",
+    ))
 }
 
 fn absolute_normalized_path(path: &Path) -> Result<PathBuf, Diagnostic> {

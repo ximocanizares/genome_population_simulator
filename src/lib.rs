@@ -42,6 +42,7 @@ pub mod f5_marginals;
 pub mod f5_oracle;
 pub mod f5_preflight;
 pub mod f5_profile;
+pub mod f5_publication;
 pub mod f5_search;
 pub mod fastq_output;
 pub mod fastq_validation;

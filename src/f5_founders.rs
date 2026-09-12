@@ -23,10 +23,13 @@
 //! 5. **F realizado.** Por población×bloque se publica `F_realized`,
 //!    `not_applicable` fuera de `P=2` y cuando `H_expected=0`.
 //!
-//! El Ne reproductivo de DTC-089 es `not_applicable` en F5 **por
-//! construcción**: F5 no reproduce, aquí no se calcula ninguno y ningún
-//! esquema publicado tiene dónde escribirlo. Una búsqueda negativa sobre el
-//! módulo impide que la fórmula por contribuciones gaméticas de F7.3 aparezca.
+//! El Ne reproductivo **no le aplica a F5**, que no reproduce: aquí no se
+//! calcula ninguno y ningún documento publicado tiene dónde escribirlo. Así lo
+//! dice DTC-089 desde su corrección de 2026-09-12, que retiró la afirmación de
+//! que F5 lo «registra como `not_applicable`» —irrealizable, porque ni el
+//! objeto `f5` del manifiesto ni su esquema tienen el campo y REQ-MAN-92 no lo
+//! pide—. Una búsqueda negativa sobre el módulo impide que la fórmula por
+//! contribuciones gaméticas de F7.3 aparezca.
 //!
 //! F5.3.3 añade la sexta pieza, que no decide nada y solo materializa: las
 //! identidades de fundador y su pertenencia única —`IndividualId`, `FCP_` por
@@ -102,6 +105,32 @@ impl F5SamplingSource {
         match self {
             Self::SubpopulationDefault => "subpopulation_default",
             Self::BlockOverride => "block_override",
+        }
+    }
+}
+
+/// Documento del que procede el `F` efectivo de una subpoblación.
+///
+/// DTC-089 exige `inbreeding_f_source` en cada subpoblación del efectivo y del
+/// manifiesto, y admite exactamente dos literales. La regla es la del propio
+/// resolutor: la fuente es `subpopulation` **si y solo si** la subpoblación
+/// declara su propio `inbreeding_f`; en cualquier otro caso —el escenario lo
+/// declara para todas, o no lo declara nadie y el efectivo vale `0` en
+/// diploides— la fuente es `population`. Un `F` ausente no tiene una tercera
+/// fuente: el valor efectivo procede del ámbito poblacional, que es el que lo
+/// deja sin declarar.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum F5InbreedingSource {
+    Population,
+    Subpopulation,
+}
+
+impl F5InbreedingSource {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Population => "population",
+            Self::Subpopulation => "subpopulation",
         }
     }
 }
@@ -196,11 +225,21 @@ impl F5FounderIndividual {
 /// Es el orden que DTC-089 exige a la lista `founders` del efectivo, y el que
 /// F5.3.3 y F5.4 heredan al reutilizar este censo. No cambia ningún sorteo:
 /// las identidades de copia se ordenan igualmente antes de permutarse.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct F5FounderRoster {
     population_id: PopulationId,
     individual_count: u64,
     copies: u64,
+    /// `F` tal y como el documento lo declara, sin resolver contra la ploidía.
+    /// Lo consume la asignación, que es quien rechaza `F` fuera de `P=2`.
+    declared_inbreeding_f: Option<f64>,
+    /// `F` publicable: `f64` en `P=2` —cero cuando nadie lo declaró— y `null`
+    /// en cualquier otra ploidía, como exige DTC-089.
+    inbreeding_f: Option<f64>,
+    inbreeding_f_source: F5InbreedingSource,
+    /// Modo predeterminado de la subpoblación, antes de cualquier sustitución
+    /// por bloque. Es el literal `sampling` del efectivo.
+    default_sampling: F5SamplingMode,
     individuals: Vec<F5FounderIndividual>,
 }
 
@@ -217,6 +256,21 @@ impl F5FounderRoster {
     #[must_use]
     pub const fn copies(&self) -> u64 {
         self.copies
+    }
+    /// `inbreeding_f` publicable de esta subpoblación.
+    #[must_use]
+    pub const fn inbreeding_f(&self) -> Option<f64> {
+        self.inbreeding_f
+    }
+    /// `inbreeding_f_source` publicable de esta subpoblación.
+    #[must_use]
+    pub const fn inbreeding_f_source(&self) -> F5InbreedingSource {
+        self.inbreeding_f_source
+    }
+    /// Modo predeterminado declarado por la subpoblación.
+    #[must_use]
+    pub const fn default_sampling(&self) -> F5SamplingMode {
+        self.default_sampling
     }
     #[must_use]
     pub fn individuals(&self) -> &[F5FounderIndividual] {
@@ -546,8 +600,7 @@ pub fn assign_f5_founders(
     let mut populations: BTreeMap<PopulationId, PopulationFounders> = BTreeMap::new();
     for roster in &rosters {
         seats_by_population.insert(roster.population_id.clone(), copy_seats(roster, ploidy));
-        let subpopulation = declared_subpopulation(config, &roster.population_id)?;
-        let declared = effective_inbreeding_f(config, subpopulation)?;
+        let declared = roster.declared_inbreeding_f;
         let inbreeding = resolve_founder_inbreeding(ploidy, declared).map_err(|detail| {
             configuration(
                 config,
@@ -567,6 +620,7 @@ pub fn assign_f5_founders(
                 copies: roster.copies,
                 inbreeding,
                 target_f,
+                default_sampling: roster.default_sampling,
             },
         );
     }
@@ -736,10 +790,33 @@ pub fn resolve_f5_founder_roster(
                 "la cardinalidad fundadora no coincide con individual_count",
             ));
         }
+        let declared_inbreeding_f = effective_inbreeding_f(config, subpopulation)?;
+        let inbreeding_f_source = if subpopulation.inbreeding_f.is_some() {
+            F5InbreedingSource::Subpopulation
+        } else {
+            F5InbreedingSource::Population
+        };
+        let default_sampling = match subpopulation.sampling.as_ref() {
+            // `probabilistic` es el modo predeterminado del contrato.
+            None => F5SamplingMode::Probabilistic,
+            Some(mode) => F5SamplingMode::parse(mode.value()).ok_or_else(|| {
+                configuration(
+                    config,
+                    "subpopulations.sampling",
+                    "el modo declarado no es probabilistic ni controlled",
+                )
+            })?,
+        };
         rosters.push(F5FounderRoster {
             population_id,
             individual_count,
             copies,
+            declared_inbreeding_f,
+            // DTC-089 publica `inbreeding_f` solo en diploides; en otra
+            // ploidía es `null`, nunca cero.
+            inbreeding_f: (ploidy == 2).then(|| declared_inbreeding_f.unwrap_or(0.0)),
+            inbreeding_f_source,
+            default_sampling,
             individuals,
         });
     }
@@ -909,18 +986,7 @@ fn resolve_f5_sampling(
                 "la búsqueda nombra una subpoblación que el escenario no declara",
             )
         })?;
-        let subpopulation = declared_subpopulation(config, &block.population_id)?;
-        let default_mode = match subpopulation.sampling.as_ref() {
-            // `probabilistic` es el modo predeterminado del contrato.
-            None => F5SamplingMode::Probabilistic,
-            Some(mode) => F5SamplingMode::parse(mode.value()).ok_or_else(|| {
-                configuration(
-                    config,
-                    "subpopulations.sampling",
-                    "el modo declarado no es probabilistic ni controlled",
-                )
-            })?,
-        };
+        let default_mode = founders.default_sampling;
         let key = (block.population_id.clone(), block.block_index);
         let substitution = overrides.get(&key);
         if substitution.is_some() {
@@ -1046,24 +1112,6 @@ fn resolve_f5_sampling(
             .then_with(|| left.block_id.cmp(&right.block_id))
     });
     Ok(rows)
-}
-
-fn declared_subpopulation<'a>(
-    config: &'a EffectiveF5Config,
-    population_id: &PopulationId,
-) -> Result<&'a DeclaredF5Subpopulation, Diagnostic> {
-    config
-        .declared_scenario()
-        .subpopulations
-        .iter()
-        .find(|subpopulation| subpopulation.population_id.value() == population_id.as_str())
-        .ok_or_else(|| {
-            configuration(
-                config,
-                "subpopulations.population_id",
-                "la subpoblación resuelta no existe en el escenario declarado",
-            )
-        })
 }
 
 /// F declarado para una subpoblación: el suyo o el de `[f5]`.
@@ -1206,6 +1254,9 @@ struct PopulationFounders {
     inbreeding: FounderInbreeding,
     /// `target_f` publicable: `Some` solo en diploides.
     target_f: Option<f64>,
+    /// Modo predeterminado ya resuelto por el censo, para no volver a
+    /// interpretar el literal del documento en dos sitios distintos.
+    default_sampling: F5SamplingMode,
 }
 
 /// Resuelve el F aplicable a una subpoblación a partir de la ploidía efectiva
@@ -3743,6 +3794,10 @@ mod tests {
             population_id,
             individual_count: individuals.len() as u64,
             copies: individuals.len() as u64 * 2,
+            declared_inbreeding_f: None,
+            inbreeding_f: Some(0.0),
+            inbreeding_f_source: super::F5InbreedingSource::Population,
+            default_sampling: F5SamplingMode::Probabilistic,
             individuals,
         }
     }

@@ -2366,7 +2366,7 @@ identificador del índice de copia.
       `false && A || B` contra el que el encargo advertía. Corregido con
       `+ anchor.len()`; sin la corrección, desactivar la guarda de `case_id`
       dejaba la batería verde y el oráculo DTC-061 sin probar.
-- ☐ **F5.4.3.** Instanciar la configuración efectiva y el manifiesto conforme
+- ✅ **F5.4.3.** Instanciar la configuración efectiva y el manifiesto conforme
   a los esquemas completos de F5.0, con las claves y siete enlaces TSV exactos
   —ID, clase, versión, ruta, tamaño y hash—, el enlace
   `truth` separado, las auditorías físicas DTC-049, las cotas/límites de recursos
@@ -2383,6 +2383,222 @@ identificador del índice de copia.
     aportaciones ajenas y tres cotas/límites, con igualdad exacta entre efectivo
     y manifiesto, y resumen MAN-70 por dosis con `recount_source` e igualdad
     obligatoria.
+  - **Módulo y frontera.** `src/f5_publication.rs`, con
+    `publish_f5_success`/`publish_f5_failure` y la puerta física pública
+    `verify_published_f5_package`. `src/publication.rs` gana tres piezas
+    genéricas: `payload_root`, `write_root_document` y `write_f5_manifest`, más
+    `discard_all_artifacts`. v5 **no** es una ampliación de v4 —su raíz no
+    tiene `artifacts`, ni `references`, ni `effective_config_artifact_id`—, de
+    modo que la familia del manifiesto elige la puerta física en el cierre y
+    otra vez antes del renombrado; la vía v4 queda intacta.
+  - **`effective-config.json` es documento raíz, no artefacto.** La lista
+    `artifacts` del manifiesto v5 es cerrada a los siete TSV —`prefixItems`
+    con `items:false`— y no tiene campo donde enlazar el efectivo. Catalogarlo
+    lo dejaría sin declarar, que es justo lo que v4 evitaba con
+    `effective_config_artifact_id`. Viaja junto a `manifest.json` con la misma
+    disciplina de temporal y renombrado. Consecuencia deliberada: un fallo
+    controlado **no** lo publica, y la puerta física comprueba su ausencia en
+    lugar de confiar en la purga del catálogo, porque la purga solo alcanza a
+    los artefactos.
+  - **Rutas publicables.** `$defs/path` prohíbe la ruta absoluta, de modo que
+    la ruta física no es publicable: vive, completa y con su SHA-256 observado,
+    en `resource_preflight.input_identities[].normalized_path`, cuyo esquema no
+    tiene patrón. Las rutas del efectivo son **relativas a la raíz de
+    autoría** —el directorio del general—, y `source_path` es el nombre del
+    general. Una ruta de autoría con un carácter fuera de `[A-Za-z0-9._-]` no
+    es representable en el contrato publicado, y **la admisión la rechaza
+    antes** con `GPS-CONF-101`: los cinco enlaces declarados por
+    `require_relative_path` y el nombre del propio general por
+    `require_publishable_general_name`. La rama equivalente de
+    `publishable_path` es profundidad defensiva y hoy es inalcanzable. Es una
+    consecuencia del esquema, no una restricción añadida aquí.
+  - **Los resúmenes MAN-70 son entrada, no cálculo.** `recounted_*` solo puede
+    nacer de releer `outputs/truth.jsonl`, y REQ-MAN-70 prohíbe reutilizar
+    acumuladores del productor. `publish_f5_success` recibe el recuento como
+    una función del llamador, a la que entrega la raíz de carga útil ya escrita
+    y la declaración que este hito construye. El productor **no puede**
+    fabricar un `F5InitializationSummary`: sus campos son privados de F5.4.2,
+    de modo que el tipo impide la autocertificación. Si la vía productiva
+    comparase realizado y recontado producidos por el mismo lector, la
+    igualdad sería vacua; aquí realizado y recontado vienen ambos del oráculo
+    y la igualdad que el manifiesto publica es la que ese lector ya exigió
+    sobre los bytes.
+  - **El oráculo queda fuera del flujo, y se dice.** `f5-resource-accounting-v8`
+    no reserva ni un byte para él y su pico medido en F5.4.2 es ≈4,2 veces
+    `working_memory_bytes`. F5.4.3 **no lo ejecuta**: la frontera lo recibe.
+    Darle un término propio exigiría v9, y el literal v8 está en los dos
+    esquemas que este hito no puede tocar; declararlo como aportación ajena
+    exigiría sellar la admisión con `F5OtherResources` distinto de
+    `default()`, que las cinco fronteras F5 anteriores fijan literalmente. La
+    condición sigue abierta y se vuelve bloqueante en el primer `run`
+    productivo, es decir en F5.6.
+  - **Deuda 1 cerrada: `inbreeding_f_source`.** `effective_inbreeding_f` ya no
+    descarta la procedencia: `resolve_f5_founder_roster` la resuelve y el
+    censo la publica junto al `F` ya resuelto contra la ploidía. La regla,
+    declarada: la fuente es `subpopulation` **si y solo si** la subpoblación
+    declara su propio `inbreeding_f`; en cualquier otro caso —el escenario lo
+    declara para todas, o nadie lo declara y el efectivo vale `0` en
+    diploides— es `population`, porque el valor efectivo procede entonces del
+    ámbito poblacional. El censo absorbe también el modo predeterminado de la
+    subpoblación, de modo que el literal `sampling` se interpreta **una** vez
+    y `resolve_f5_sampling` lo consume en lugar de repetir el análisis.
+  - **Deuda 2 cerrada: las longitudes de secuencia.** El escaneo de admisión es
+    el único punto de la ejecución donde la longitud existe —nace de contar
+    bases y muere al cambiar de cabecera; el tramo elegible más alto no la da,
+    porque una cola de `N` la deja corta—. `EligibleScan::record_retained_id`
+    la retiene junto al identificador, bajo el mismo cargo de 256 bytes por
+    secuencia que v8 ya concede a `retained_sequence_ids`: **no añade ningún
+    término a la fórmula**. `F5ReferenceSequences::from_sealed` la cablea, y
+    las guardas de F5.4.1 —recuento, cobertura de las secuencias pobladas y
+    suma de bases— pasan a ser redundantes por construcción y valen como
+    comprobación cruzada. **Medido por la revisión adversarial**: 96 B por
+    secuencia frente a los 256 del presupuesto, con 400 secuencias de
+    identificador máximo. Con un matiz que no estaba dicho y ahora sí:
+    `from_sealed` construye un **segundo** catálogo que coexiste con el vector
+    sellado y cuesta 127 B por secuencia, de modo que el total real es
+    **223 B por secuencia, un 87 % del presupuesto**. Cabe, y queda declarado.
+  - **Deuda 3 cerrada corrigiendo el contrato: Ne reproductivo (2026-09-12).**
+    DTC-089 decía que «F5 no reproduce y registra Ne reproductivo como
+    `not_applicable`». Esa frase estaba **sola contra tres fuentes**, una de
+    ellas la propia decisión que la contenía: la enumeración del objeto `f5`
+    del manifiesto —escrita en ese mismo DTC-089— no contiene ningún campo
+    donde escribirlo; `manifest-general-v5.schema.json` es
+    `additionalProperties:false` y tampoco lo tiene; y REQ-MAN-92, que enumera
+    lo que F5 debe registrar, no lo pide. **Se corrige DTC-089**, no el
+    esquema: la frase queda en que F5 no reproduce y que el Ne reproductivo no
+    le aplica —no lo calcula ni lo registra—, con la razón escrita en el
+    propio contrato para que nadie vuelva a tropezar con ella, y remitiendo la
+    fórmula por contribuciones a F7.3, que es la primera fase con parentales.
+    **La enmienda es decisión expresa del usuario**, tomada tras plantearle las
+    tres opciones —corregir la frase, añadir el campo al manifiesto o aplazarlo
+    a la Revisión F5.4— y no una resolución del implementador.
+    Dos alternativas descartadas: **añadir el campo** cumpliría la letra de
+    una frase contradiciendo las otras tres, reabriría un esquema que este
+    hito tiene prohibido tocar y añadiría superficie que ningún consumidor
+    lee, que es exactamente por lo que `F5ReproductiveNe` se retiró en F5.3.2;
+    **dejarla abierta** arrastraría la contradicción a F5.5 y F5.6. La
+    búsqueda negativa `f5_never_computes_a_reproductive_ne` de F5.3.2 sigue
+    pasando y ni `src/`, ni `schemas/`, ni `catalogs/` mencionan
+    `reproductive_ne`.
+  - **Contadores de un fallo controlado.** `layout_attempts_used` de un
+    agotamiento de layout es `max_layout_attempts`, porque `F5BestLayout` solo
+    existe por la vía de agotamiento y esa vía recorre el bucle entero; en
+    cualquier otra causa de layout es cero. En un agotamiento de búsqueda, los
+    cuatro contadores describen **la unidad que el diagnóstico nombra**: los
+    agregados de otra unidad no explicarían por qué esta se agotó.
+  - **Cobertura.** 21 pruebas de integración y 5 unitarias. Ámbitos: ploidías
+    1, 2 y 3, ambos modos con sus dos orígenes, `F` en `0` y `1`, las dos
+    procedencias de `inbreeding_f` y su `null` fuera de `P=2`, IDs aportados y
+    derivados, secuencia estéril, dos subpoblaciones, perfil diádico de cuatro
+    pesos y bins `evaluated`/`not_applicable`. Los tres documentos que el hito
+    instancia validan contra sus esquemas con el validador Python externo.
+  - **Verificación de discriminación.** Catorce variantes defectuosas se
+    introdujeron y se retiraron; **trece** tumban la batería. Fuente de F
+    siempre `population`, longitud de secuencia desplazada en uno, copia
+    doctorada de `resource_preflight` en el manifiesto, igualdad
+    efectivo/manifiesto retirada, fallo que no purga los artefactos,
+    `verify_link` que cree el tamaño y el hash declarados, `source_path`
+    absoluto, normalizaciones resumidas a su primer valor, octavo enlace en
+    `artifacts`, revalidación previa al renombrado retirada, comparación
+    catálogo/enlaces retirada, `inbreeding_f` nunca `null` y comprobación de
+    artefactos biológicos supervivientes retirada. La batería de divergencias
+    recorre **veintiuna** mutaciones de los dos documentos publicados y exige
+    que el rechazo cite el término tocado, no solo que falle.
+  - **La superviviente.** Retirar la guarda `!summary.recount_matches()` del
+    constructor del manifiesto no mata ninguna mutación, y es exacto: el
+    oráculo rechaza antes de devolver un resumen desigual, de modo que hoy la
+    guarda es inalcanzable por construcción del tipo. Lo que sí tiene dientes
+    es la comprobación equivalente de la puerta física sobre el documento
+    publicado —`recount_source` y `recount_matches`—, que dos mutaciones matan.
+    Se conserva la guarda porque el llamador del recuento es una función
+    ajena y el contrato no puede descansar en que ninguna futura la relaje.
+  - **Revisión adversarial aplicada (2026-09-12).** Un bloqueante, dos graves,
+    un menor y varias notas. El revisor retiró ocho sospechas tras
+    comprobarlas: catalogar el efectivo es **imposible** por
+    `prefixItems`+`items:false`; las 21 mutaciones de divergencia no esconden
+    ningún falso negativo —la prueba afirma primero que el paquete íntegro
+    pasa—; la igualdad efectivo/manifiesto no es circular porque relee del
+    disco; y la superviviente declarada es inalcanzable por construcción del
+    tipo, exactamente donde se dijo.
+  - **B-1: la puerta física picaba hasta 13,3 veces el presupuesto.** Ninguna
+    de las tres pruebas que vigilaban el pico —escritor, repositorio y
+    oráculo— cubría esta fase, de modo que el defecto era invisible; y la
+    versión anterior de esta entrada afirmaba que el oráculo era la única
+    pieza fuera de la fórmula, lo que era **falso**:
+    `verify_published_f5_package` sí se ejecuta, y dos veces. Corregido en
+    cuatro pasos, midiendo con el arnés `peak_bytes` después de cada uno:
+    prestar las dos listas de subpoblaciones en vez de clonarlas
+    (9,57 → 9,56×); **tipar la puerta** con `serde` para que
+    `initialization_summaries` —el término que crece con `B*N_pop*S` y que,
+    con `arbitrary_precision`, cuesta unas siete veces su texto— se **salte**
+    en vez de materializarse (9,56 → **0,87×**); emitir esos mismos resúmenes
+    por flujo al serializar y escribir el manifiesto **directamente al
+    fichero**; y leer los dos documentos por flujo en la puerta. Resultado:
+    la puerta pasa de **9,57× a 0,87×** con `B=32` y de **12,59× a 0,71×** con
+    `B=128`.
+    `the_verification_peak_fits_the_sealed_budget_and_does_not_grow_with_the_block_count`
+    es la prueba que faltaba y mata la regresión con 9,29×.
+  - **Lo que sigue sin caber, con su cifra.** La publicación **completa** pasa
+    de **19,08× a 1,63×** con `B=32` —314 412 frente a 193 120— y a **1,36×**
+    con `B=128` —763 759 frente a 562 432—. Lo que sobra es el objeto `f5` del
+    manifiesto más lo que la puerta obliga a materializar para compararlo con
+    el efectivo, ambos `O(B*N_pop)`: `sampling`, `f_realized` y `quota_ties`,
+    que DTC-089 obliga a comparar término a término entre los dos documentos.
+    `f5-resource-accounting-v8` **nunca modeló la construcción de los dos
+    documentos**: su `final_formula_peak` presupuesta el escritor por flujo de
+    F5.4.1, que cumple con 0,2-0,4×. La desviación queda acotada por
+    `the_whole_publication_stays_within_twice_the_sealed_budget_without_the_oracle`,
+    declarada aquí con su número y **elevada como bloqueante de F5.6**, donde
+    coincide con la condición del oráculo.
+  - **G-1: se publicaba un `code` que el propio esquema rechaza.**
+    `f5-failure-v1.schema.json` cierra `code` a diez literales y el catálogo
+    público de diagnósticos es más ancho: `GPS-INTERNAL-001`, `GPS-IO-001` y
+    `GPS-FMT-006` son las causas **naturales** de la etapa `publication` y
+    ninguna pertenece al enumerado. `from_diagnostic` tomaba el código sin
+    filtrar y publicaba atómicamente, con destino final creado, un manifiesto
+    que su propio esquema rechaza. Corregido con el tipo cerrado
+    `F5FailureCode`: una causa ajena se publica como `GPS-INTERNAL-101` —que
+    sí pertenece— **conservando el código original en el diagnóstico**, bajo
+    la clave `published_failure_code`. La puerta comprueba además `code` y
+    `stage` contra sus enumerados, y una prueba de esquema externo recorre las
+    cinco etapas y la causa ajena.
+  - **G-2: un general con un espacio en el nombre reventaba al final.**
+    `require_relative_path` impone el alfabeto de `$defs/path` a los cinco
+    enlaces declarados, pero el nombre del **propio** general lo elige el
+    usuario en la línea de órdenes y nadie lo validaba: con `mi general.toml`
+    se ejecutaban admisión, layout, búsqueda, fundadores, identidades, los
+    ocho artefactos y el recuento MAN-70 **completos** antes del rechazo, con
+    un diagnóstico que culpaba al esquema del documento producido. La frontera
+    correcta es la admisión: `require_publishable_general_name` lo rechaza con
+    `GPS-CONF-101` y `fields=general_path` antes de abrir el fichero, y el
+    detalle dice qué renombrar.
+  - **M-1 y las notas.** El invariante de `root_documents` solo se cumplía en
+    una dirección: un artefacto podía reclamar `effective-config.json` ya
+    escrito, sobrescribirlo y catalogarse; `check_new_artifact` lo consulta
+    ahora y la prueba cubre las dos direcciones. `layout_attempts_used` se
+    extrae a una función pura y se prueba, porque `F5BestLayout` no tiene
+    constructor público y un fixture que agote el layout no sirve —el propio
+    fixture redimensiona el FASTA con `block_count`, que es el falso negativo
+    ya documentado—. `recount_matches` se emite desde el resumen y no como
+    literal. `RECOUNT_SOURCE` se importa de `f5_oracle` en vez de duplicarse.
+    `F5FailureStage::Preflight` se documenta como variante **sin productor
+    posible**: DTC-089 prohíbe que un rechazo de preflight abra destino.
+    `F5FounderRoster` pierde `Eq` —cambio de API pública— porque conserva un
+    `f64`; `PartialEq` basta para todo su uso.
+  - **Un hueco que la corrección cerró de paso.** Al tipar la puerta con
+    `deny_unknown_fields` y campos obligatorios, el objeto `/f5` de los dos
+    documentos queda **cerrado dentro del productor** y no solo en el
+    validador externo: sus veinticinco y dieciocho claves exactas son ahora
+    las de un tipo.
+  - **Un falso negativo evitado.** La primera versión de la prueba de rechazo
+    de preflight usaba un `block_count` mayor esperando `GPS-DOMAIN-101`; el
+    fixture **redimensiona el FASTA con el número de bloques**, de modo que el
+    objetivo siempre cabía y la admisión no rechazaba nada. La prueba habría
+    pasado solo cuando el `block_count` era tan grande que excedía el
+    presupuesto, midiendo una causa distinta de la anunciada. Se sustituyó por
+    dos rechazos de admisión explícitos y de causas distintas —presupuesto
+    excedido e identidad de perfil que no coincide—, ambos con destino y
+    provisional inexistentes.
 
 > **Revisión F5.4.** No continuar sin demostrar publicación atómica y oráculo
 > independiente sobre éxito y fallo.

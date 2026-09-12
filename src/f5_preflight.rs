@@ -576,6 +576,16 @@ pub(crate) struct F5ResourcePreflight {
     block_count: u64,
     target_bases: Option<u64>,
     resolved_target: F5ResolvedTarget,
+    /// Longitud de cada secuencia retenida, en orden FASTA.
+    ///
+    /// El escaneo de admisión es el único lugar donde la longitud existe: el
+    /// tramo elegible más alto no la da —una cola de `N` la deja corta— y el
+    /// layout solo retiene bloques. `truth.jsonl` v2 exige `sequence_length`
+    /// en cada copia fundadora, de modo que sin este vector la vía productiva
+    /// no podría publicar la proyección. Retiene una entrada por secuencia
+    /// retenida, exactamente lo que `256*retained_sequence_ids` ya concede en
+    /// `f5-resource-accounting-v8`: no añade ningún término a la fórmula.
+    sequence_lengths: Vec<(String, u64)>,
     /// Identidades de la primera pasada, todavía no selladas ni publicadas.
     physical_input_identities: Vec<AdmittedInputIdentity>,
 }
@@ -873,6 +883,16 @@ impl SealedF5Admission {
     #[must_use]
     pub const fn retained_sequence_ids(&self) -> u64 {
         self.preflight.retained_sequence_ids
+    }
+    /// Longitud de cada secuencia retenida, en orden FASTA.
+    ///
+    /// Es la única fuente admitida del `sequence_length` que `truth.jsonl` v2
+    /// exige en cada copia fundadora. Ninguna fase posterior la recalcula: el
+    /// layout no ve la referencia completa y la recuperación REF por flujo
+    /// solo lee las coordenadas de los sitios.
+    #[must_use]
+    pub fn sequence_lengths(&self) -> &[(String, u64)] {
+        &self.preflight.sequence_lengths
     }
     /// Número de gaps enteros con probabilidad positiva, sumado por los
     /// intervalos disjuntos del perfil sin rellenar huecos entre ellos.
@@ -1494,6 +1514,7 @@ fn preflight_resolved_f5_resources(
         mask_bytes_processed,
         sequence_count,
         retained_sequence_ids,
+        sequence_lengths,
         physical_input_identities,
     } = scanned;
     let tract_count = checked_usize("tract_count", eligible_tracts.len(), config)?;
@@ -2119,6 +2140,7 @@ fn preflight_resolved_f5_resources(
         block_count,
         target_bases,
         resolved_target,
+        sequence_lengths,
         physical_input_identities,
     })
 }
@@ -2330,6 +2352,7 @@ pub(crate) struct F5ReferenceScan {
     mask_bytes_processed: u64,
     sequence_count: u64,
     retained_sequence_ids: u64,
+    sequence_lengths: Vec<(String, u64)>,
     physical_input_identities: Vec<AdmittedInputIdentity>,
 }
 
@@ -2338,6 +2361,7 @@ struct EligibleScan<'a> {
     masks: MaskStream<'a>,
     tracts: Vec<F5EligibleTract>,
     retained_id_count: usize,
+    sequence_lengths: Vec<(String, u64)>,
     eligible: u64,
     processed: u64,
     ordinal: u64,
@@ -2438,6 +2462,7 @@ impl<'a> EligibleScan<'a> {
             masks: MaskStream::new(config, ledger)?,
             tracts: Vec::new(),
             retained_id_count: 0,
+            sequence_lengths: Vec::new(),
             eligible: 0,
             processed: 0,
             ordinal: 0,
@@ -2535,7 +2560,14 @@ impl<'a> EligibleScan<'a> {
         self.ensure_memory_bound(self.tracts.len(), prospective_id_count)
     }
 
-    fn record_retained_id(&mut self) -> Result<(), Diagnostic> {
+    /// Retiene el identificador y la longitud de una secuencia ya cerrada.
+    ///
+    /// La longitud viaja con el ID porque es el único punto de la ejecución
+    /// donde existe: nace de contar bases y muere al cambiar de cabecera. Se
+    /// retiene bajo el mismo cargo de 256 bytes por secuencia que la fórmula
+    /// v8 ya concede a `retained_sequence_ids`, de modo que no añade ningún
+    /// término nuevo.
+    fn record_retained_id(&mut self, sequence_id: &str, length_bp: u64) -> Result<(), Diagnostic> {
         // Incluye el ID retenido y, cuando B ya es conocido, el trabajo futuro
         // X*K que esta nueva secuencia hace obligatorio.
         self.ledger.charge(
@@ -2551,6 +2583,14 @@ impl<'a> EligibleScan<'a> {
             F5_SCAN_RETAINED_ITEM_BYTES,
             self.coexisting_transient_bytes,
         )?;
+        self.sequence_lengths.try_reserve_exact(1).map_err(|_| {
+            resource(
+                self.config,
+                "el catálogo de longitudes de secuencia no cabe en memoria admitida",
+            )
+        })?;
+        self.sequence_lengths
+            .push((sequence_id.to_owned(), length_bp));
         Ok(())
     }
 
@@ -2619,6 +2659,7 @@ impl<'a> EligibleScan<'a> {
             mask_bytes_processed,
             sequence_count,
             retained_sequence_ids,
+            sequence_lengths: self.sequence_lengths,
             physical_input_identities,
         })
     }
@@ -3004,7 +3045,7 @@ fn finish_fasta_sequence(
         .ok_or_else(|| resource(config, "sequence_count no cabe en usize"))?;
     scan.ensure_retained_id_capacity(prospective_id_count)?;
     SequenceId::parse(&sequence.id, config.reference_id())?;
-    scan.record_retained_id()?;
+    scan.record_retained_id(&sequence.id, sequence.length)?;
     locations.try_reserve_exact(1).map_err(|_| {
         resource(
             config,

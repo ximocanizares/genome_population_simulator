@@ -1553,7 +1553,15 @@ Por población×bloque diploide se informa
 `H_observed=heterozygous_individuals/individual_count`,
 `q_realized_h=n_h/C` y `H_expected=1-Σ_h q_realized_h²`; se usa la frecuencia
 realizada, no el objetivo q. Si `H_expected=0`, es `not_applicable`. F5 no
-reproduce y registra Ne reproductivo como `not_applicable`. En F7.3, con `N_p>=2`
+reproduce y el Ne reproductivo **no le aplica**: no lo calcula ni lo registra,
+y ningún documento F5 lo publica. La versión anterior de esta frase decía que
+F5 «registra Ne reproductivo como `not_applicable`», lo que era irrealizable y
+queda corregido aquí: la enumeración del objeto `f5` del manifiesto general,
+fijada por esta misma decisión, no contiene ningún campo donde escribirlo;
+`manifest-general-v5.schema.json` es `additionalProperties:false` y tampoco lo
+tiene; y REQ-MAN-92, que enumera lo que F5 debe registrar, no lo pide. La
+fórmula de Ne por contribuciones pertenece a F7.3, que es la primera fase con
+parentales y contribuciones gaméticas. En F7.3, con `N_p>=2`
 parentales elegibles, contribuciones gaméticas realizadas `k_j`,
 `k_bar=Σk_j/N_p` y varianza poblacional
 `V_k=Σ(k_j-k_bar)²/N_p`, se usa
