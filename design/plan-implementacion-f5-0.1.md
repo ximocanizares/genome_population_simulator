@@ -1532,10 +1532,10 @@ identificador del índice de copia.
       `effective-config.json#/f5/subpopulations` ni el manifiesto, que son los
       únicos consumidores de la procedencia del F; no le da consumidor y se deja
       donde F5.3.2 la dejó.
-  - Cómo se comprobó, y contra qué falla cada prueba (24 de integración en
-    `tests/f5_founders.rs`, 3 unitarias en `src/f5_founders.rs` y una de
+  - Cómo se comprobó, y contra qué falla cada prueba (32 de integración en
+    `tests/f5_founders.rs`, 4 unitarias en `src/f5_founders.rs` y una de
     coherencia cruzada en `tests/normative_catalogs.rs`; batería completa
-    921 pasan / 0 fallan / 12 ignoradas, frente a las 893 previas):
+    930 pasan / 0 fallan / 12 ignoradas, frente a las 893 previas):
     - **Reconstructor.** `assert_every_identity_is_rederivable` rederive cada
       `FCP_`, `HAP_` y `FHA_` desde lo publicado —población, individuo,
       secuencia, copia, `block_index`, alelos e identificadores enlazados— más
@@ -1647,6 +1647,84 @@ identificador del índice de copia.
     reparte los rangos; `inbreeding_f > 0`, donde la copia 1 reutiliza la fila de
     la copia 0 y debe conservar aun así su propio `FCP_` y su propio `FHA_`; y
     la ploidía 3, añadida al recorrido de ploidías.
+  - **B2 — el repositorio deja de retener lo que crece con `B` (12 de
+    septiembre de 2026).** La revisión de cierre midió que lo retenido excedía
+    entre 7 y 8 veces el término `128*C_total` que `final_formula_peak`
+    presupuesta, con `B*C_total*136 B` de asignaciones que **ninguna fórmula
+    contabiliza**. El usuario eligió la forma perezosa y, después, contabilizar
+    lo que falte.
+    - **Lo que se conserva**: las copias `FCP_` con su índice de pertenencia
+      —lo que F5.4 necesita en acceso aleatorio para `founder_membership`— y,
+      por bloque×subpoblación, los `H` identificadores `HAP_` a 16 bytes. Se
+      deja de conservar `alleles`, recomputable de la matriz ganadora que
+      F5.2.3 ya retiene; `f5_haplotype_alleles` es ahora pública para que quien
+      escriba el TSV lo haga desde la misma matriz de la que salió el material
+      del identificador.
+    - **Lo que se produce a demanda**: `for_each_assignment` deriva cada `FHA_`
+      y lo entrega sin retenerlo, recorriendo copia × bloque, que es la clave de
+      `f5-founders.tsv`. El otro orden publicado, el de `f5-haplotypes.tsv`, lo
+      sirve `units()` sin recorrer nada: las unidades ya están por
+      `population_id`+`block_id` y los rangos son el índice del vector. Ninguna
+      de las dos claves obliga a una segunda pasada ni a ordenar `B*C_total`
+      filas; desaparece el `sort_by` que había.
+    - **«Materializar antes de toda salida» se sostiene así: la pasada previa es
+      la derivación, y lo que prueba que ocurrió es el registro.** El registro
+      de identidades vive dentro del repositorio y detecta toda colisión
+      conforme a DTC-039. La garantía de que nada se publica a medias no la da
+      la retención, sino DTC-089: el éxito publica los siete TSV y la
+      proyección de verdad de forma atómica o falla entero, de modo que una
+      colisión a mitad del recorrido aborta antes de publicar.
+    - **El recorrido es único.** Derivar un `FHA_` dos veces es una colisión, de
+      modo que `for_each_assignment` se consume una sola vez y lo dice con un
+      diagnóstico propio en lugar de un `GPS-DOMAIN-002` confuso. Antes de
+      recorrer comprueba que la asignación recibida es la que materializó el
+      repositorio, posición a posición por subpoblación y bloque.
+    - **Medición, en el mismo fixture, antes y frente al presupuesto**
+      —dos subpoblaciones de dos individuos, `P=2`, `H=2`, `S=3`,
+      `128*C_total = 1024 B`—:
+
+      | caso | antes | después | factor antes | factor después |
+      |---|---|---|---|---|
+      | 1 secuencia, `B=2` | 3 672 B | 1 248 B | 3,6× | 1,2× |
+      | 2 secuencias, `B=2` | 4 440 B | 2 016 B | 4,3× | 2,0× |
+      | 1 secuencia, `B=8` | 12 384 B | 2 688 B | 12,1× | 2,6× |
+
+      Proyectado a `B=1000`, una subpoblación, `H=4`, `C_total=2000` y una
+      secuencia: las tablas pasan de ≈272 MB a ≈344 KB, de ~1 063× a ~1,34×.
+    - **La razón no baja de 1, y el número es ese.** `128*C_total` concede 128
+      bytes por copia del **individuo**, y el repositorio tiene una copia por
+      individuo **y secuencia** —72 B— más su entrada de pertenencia —24 B—:
+      con una sola secuencia eso ya consume el 75 % del presupuesto, y las
+      unidades, que la fórmula no contempla en absoluto, lo desbordan. Es
+      exactamente lo que el paso 2 tiene que contabilizar.
+    - **El término dominante que queda no son las tablas, sino el registro de
+      colisiones**, que conserva una entrada por identidad derivada:
+      `C_total*secuencias + B*subpoblaciones*H + B*C_total`. A escala de
+      producción son ~2·10⁶ entradas, del orden de 180 MB, y ninguna fórmula lo
+      contabiliza. `F5FounderIdentities::registered_identities` lo publica para
+      que el paso 2 pueda presupuestarlo y para que la prueba pueda medirlo.
+    - **Prueba de la relación que faltaba**:
+      `the_retained_repository_does_not_grow_with_the_block_count` compara dos
+      cadenas idénticas salvo `B` —2 y 8— y fija que las copias no cambian, que
+      lo retenido solo crece por los `HAP_` de cada unidad y **exactamente** por
+      su tamaño, que lo retenido no excede el pico sellado, que las asignaciones
+      emitidas sí crecen como `B*C_total` y que el registro crece con ellas. Un
+      alambre de tropiezo sobre `size_of::<F5FounderIdentities>()` detecta una
+      tabla retenida nueva, que `retained_bytes` no vería porque solo recorre la
+      superficie pública.
+    - **Discriminación verificada**: un identificador retenido de más por unidad
+      mata 18 pruebas, incluida la de la relación; una tabla retenida nueva mata
+      el alambre de tropiezo —256 frente a 232 bytes—; sin la guarda del
+      recorrido único muere su prueba; sin la de la asignación propia, la suya.
+    - **Ninguna prueba se perdió**: las que recorrían `assignments()` acumulan
+      ahora dentro del cierre, recogidas una vez en un tipo `Materialized` de la
+      batería, y la idempotencia compara copias, unidades, pertenencia y los dos
+      recorridos en lugar de un `PartialEq` del repositorio.
+    - **Paso 2 detenido antes de empezar.** `schemas/effective-config-v5.schema.json`
+      fija `"algorithm": {"const": "f5-resource-accounting-v7"}` y
+      `schemas/manifest-general-v5.schema.json` lo hereda por `$ref`. Pasar a v8
+      reabriría dos esquemas publicados, que es condición de escalado; queda
+      pendiente de decisión y ningún término se ha contabilizado todavía.
 
 > **Revisión F5.3.** Aprobar fórmulas, cuotas y verdad fundadora antes de
 > persistir el resultado completo.

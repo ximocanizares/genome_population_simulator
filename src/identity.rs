@@ -968,6 +968,22 @@ impl F5IdClass {
 }
 
 impl F5IdentityRegistry {
+    /// Identidades registradas hasta ahora.
+    ///
+    /// DTC-039 exige que «toda colisión se detecta», de modo que el registro
+    /// conserva una entrada por identidad derivada y no puede soltarla aunque
+    /// la fila que la nombraba ya se haya escrito. Publicar el recuento permite
+    /// medir ese término, que es el que crece con el número de identidades.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.registered.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.registered.is_empty()
+    }
+
     pub fn derive_block(
         &mut self,
         context: F5IdentityContext<'_>,

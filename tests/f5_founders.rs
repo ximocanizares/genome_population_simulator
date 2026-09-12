@@ -15,10 +15,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::{EffectiveF5Config, load_and_validate_f5_config};
+use genome_population_simulator::diagnostics::Diagnostic;
 use genome_population_simulator::f5_founders::{
-    F5FounderAssignment, F5FounderCopy, F5FounderIdentities, F5FounderUnit, F5HaplotypeIdentity,
-    F5RealizedFStatus, F5SamplingMode, F5SamplingSource, assign_f5_founders,
-    materialize_f5_founder_identities, resolve_f5_founder_roster,
+    F5BlockAssignment, F5FounderAssignment, F5FounderCopy, F5FounderIdentities, F5FounderUnit,
+    F5RealizedFStatus, F5SamplingMode, F5SamplingSource, F5UnitHaplotypes, assign_f5_founders,
+    f5_haplotype_alleles, materialize_f5_founder_identities, resolve_f5_founder_roster,
 };
 use genome_population_simulator::f5_layout::{
     F5LayoutRequest, F5PhysicalLayout, build_f5_physical_layout,
@@ -27,7 +28,9 @@ use genome_population_simulator::f5_preflight::{
     F5OtherResources, SealedF5Admission, recover_sealed_f5_admission,
 };
 use genome_population_simulator::f5_search::{F5HaplotypeSearch, search_f5_haplotypes};
-use genome_population_simulator::identity::{ExecutionId, FounderCopyId, IndividualId, ScenarioId};
+use genome_population_simulator::identity::{
+    ExecutionId, F5BlockId, F5HaplotypeId, FounderCopyId, IndividualId, PopulationId, ScenarioId,
+};
 use genome_population_simulator::randomness::{
     F5RandomDecision, RootSeed, derive_f5_subseed, f5_uniform_index,
 };
@@ -359,12 +362,103 @@ fn assign(chain: &Chain) -> F5FounderAssignment {
         .expect("asignación fundadora completa")
 }
 
+/// Fila haplotípica tal como `f5-haplotypes.tsv` la publicaría.
+///
+/// El repositorio conserva el `HAP_` y no la cadena de alelos; quien escribe el
+/// TSV la recompone desde la matriz ganadora, que es la misma de la que salió
+/// el material del identificador. Esta batería hace lo mismo.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PublishedHaplotype {
+    population_id: PopulationId,
+    block_id: F5BlockId,
+    block_index: u64,
+    haplotype_rank: u64,
+    alleles: String,
+    haplotype_id: F5HaplotypeId,
+}
+
+impl PublishedHaplotype {
+    const fn population_id(&self) -> &PopulationId {
+        &self.population_id
+    }
+    const fn block_id(&self) -> &F5BlockId {
+        &self.block_id
+    }
+    const fn block_index(&self) -> u64 {
+        self.block_index
+    }
+    const fn haplotype_rank(&self) -> u64 {
+        self.haplotype_rank
+    }
+    fn alleles(&self) -> &str {
+        &self.alleles
+    }
+    const fn haplotype_id(&self) -> &F5HaplotypeId {
+        &self.haplotype_id
+    }
+}
+
+/// El repositorio más lo que un escritor habría recogido de sus dos recorridos.
+///
+/// Las pruebas sí pueden retener las `B*C_total` asignaciones: sus fixtures son
+/// diminutos. El productor no, y por eso `for_each_assignment` las entrega una
+/// a una. Este tipo concentra esa diferencia en un solo sitio.
+struct Materialized {
+    identities: F5FounderIdentities,
+    haplotypes: Vec<PublishedHaplotype>,
+    assignments: Vec<F5BlockAssignment>,
+}
+
+impl Materialized {
+    fn copies(&self) -> &[F5FounderCopy] {
+        self.identities.copies()
+    }
+    fn units(&self) -> &[F5UnitHaplotypes] {
+        self.identities.units()
+    }
+    fn haplotypes(&self) -> &[PublishedHaplotype] {
+        &self.haplotypes
+    }
+    fn assignments(&self) -> &[F5BlockAssignment] {
+        &self.assignments
+    }
+    fn copy(&self, founder_copy_id: &FounderCopyId) -> Option<&F5FounderCopy> {
+        self.identities.copy(founder_copy_id)
+    }
+}
+
+/// Recompone las filas de `f5-haplotypes.tsv` desde el repositorio y la matriz.
+fn published_haplotypes(
+    chain: &Chain,
+    identities: &F5FounderIdentities,
+) -> Vec<PublishedHaplotype> {
+    let mut rows = Vec::new();
+    for unit in identities.units() {
+        let matrix = chain
+            .search
+            .block(unit.population_id(), unit.block_index())
+            .expect("bloque ganador")
+            .matrix();
+        for (rank, haplotype_id) in unit.haplotype_ids().iter().enumerate() {
+            rows.push(PublishedHaplotype {
+                population_id: unit.population_id().clone(),
+                block_id: unit.block_id().clone(),
+                block_index: unit.block_index(),
+                haplotype_rank: rank as u64,
+                alleles: f5_haplotype_alleles(matrix, rank).expect("alelos de la fila"),
+                haplotype_id: haplotype_id.clone(),
+            });
+        }
+    }
+    rows
+}
+
 /// Identidades fundadoras de la cadena completa, con la identidad de ejecución
-/// que la produjo.
-fn materialize(chain: &Chain) -> F5FounderIdentities {
+/// que la produjo y sus dos recorridos ya recogidos.
+fn materialize(chain: &Chain) -> Materialized {
     let assignment = assign(chain);
     let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
-    materialize_f5_founder_identities(
+    let mut identities = materialize_f5_founder_identities(
         &chain.config,
         &chain.sealed,
         &execution,
@@ -372,7 +466,20 @@ fn materialize(chain: &Chain) -> F5FounderIdentities {
         &chain.search,
         &assignment,
     )
-    .expect("identidades fundadoras materializadas")
+    .expect("identidades fundadoras materializadas");
+    let haplotypes = published_haplotypes(chain, &identities);
+    let mut assignments = Vec::new();
+    identities
+        .for_each_assignment(&assignment, |row| {
+            assignments.push(row.clone());
+            Ok(())
+        })
+        .expect("recorrido de asignaciones");
+    Materialized {
+        identities,
+        haplotypes,
+        assignments,
+    }
 }
 
 /// Perfil **diádico** que termina: `H=4` con pesos `1/2, 1/4, 1/8, 1/8`.
@@ -2638,7 +2745,7 @@ fn founder_copy_components(
 /// Rederiva cada `FCP_`, `HAP_` y `FHA_` leyendo solo lo que el repositorio
 /// publica más el escenario, la referencia, la ejecución y la semilla
 /// efectiva, y sin llamar a ninguna función del productor.
-fn assert_every_identity_is_rederivable(chain: &Chain, identities: &F5FounderIdentities) {
+fn assert_every_identity_is_rederivable(chain: &Chain, identities: &Materialized) {
     let root = root_seed_bytes(chain.config.seed());
     let scenario_id = chain.config.scenario_id();
     let reference_id = chain.config.reference_id();
@@ -2815,11 +2922,22 @@ fn every_published_founder_identity_is_rederivable_by_an_independent_reader() {
         "H filas por bloque×subpoblación"
     );
     assert_every_identity_is_rederivable(&chain, &identities);
-    assert_eq!(
-        identities,
-        materialize(&chain),
-        "materializar dos veces las mismas entradas da el mismo repositorio"
-    );
+
+    // Idempotencia: materializar dos veces las mismas entradas da lo mismo. Se
+    // compara lo conservado —copias y unidades— y lo recogido de los dos
+    // recorridos, que es todo lo que el repositorio produce.
+    let repeated = materialize(&chain);
+    assert_eq!(identities.copies(), repeated.copies());
+    assert_eq!(identities.units(), repeated.units());
+    assert_eq!(identities.haplotypes(), repeated.haplotypes());
+    assert_eq!(identities.assignments(), repeated.assignments());
+    for copy in identities.copies() {
+        assert_eq!(
+            identities.copy(copy.founder_copy_id()),
+            repeated.copy(copy.founder_copy_id()),
+            "la pertenencia también es idéntica"
+        );
+    }
 }
 
 /// Los IDs aportados por la usuaria y los derivados de una clave conviven en
@@ -3343,7 +3461,7 @@ fn the_haplotype_rows_publish_every_rank_with_the_alleles_of_the_winning_matrix(
                 haplotype.population_id() == unit.population_id()
                     && haplotype.block_index() == unit.block_index()
             })
-            .map(F5HaplotypeIdentity::haplotype_rank)
+            .map(PublishedHaplotype::haplotype_rank)
             .collect::<Vec<_>>();
         let haplotype_count = chain
             .search
@@ -4164,4 +4282,269 @@ fn the_integer_quota_oracle_accepts_non_dyadic_profiles() {
         PROFILES.len() * 3 * 2,
         "cinco perfiles × tres tamaños × dos bloques"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Lo retenido frente a lo presupuestado
+// ---------------------------------------------------------------------------
+
+/// Bytes que el repositorio retiene, contados por el tamaño real de cada tipo.
+///
+/// No cuenta el desbordamiento de nodo de los `BTreeMap` ni el texto compartido
+/// de los identificadores, que es una sola asignación por identidad: es una
+/// **cota inferior** de lo retenido, que es el lado conservador para la
+/// pregunta que interesa —cómo crece— y el honesto para la que compara contra
+/// el presupuesto.
+fn retained_bytes(identities: &F5FounderIdentities) -> usize {
+    let copies = size_of_val(identities.copies());
+    // Una entrada de pertenencia: el identificador y la posición.
+    let membership = identities.copies().len() * (size_of::<FounderCopyId>() + size_of::<usize>());
+    let units: usize = identities
+        .units()
+        .iter()
+        .map(|unit| {
+            size_of::<F5UnitHaplotypes>() + size_of_val(unit.haplotype_ids()) + size_of::<usize>()
+        })
+        .sum();
+    copies + membership + units
+}
+
+/// Lo que el repositorio retiene **no crece con el número de bloques**.
+///
+/// Es la relación que faltaba y que habría detectado el defecto sin revisión:
+/// la versión anterior retenía `B*C_total` asignaciones de 136 bytes y
+/// `B*N_pop*H` filas haplotípicas con su cadena de alelos, de modo que
+/// multiplicar `B` por cuatro multiplicaba lo retenido por casi cuatro mientras
+/// la admisión sellaba el mismo presupuesto.
+///
+/// Ahora el único término que crece con `B` son los `H` identificadores `HAP_`
+/// de cada unidad, y la prueba fija su tamaño **exacto**. Las asignaciones
+/// `FHA_` se entregan una a una y no se retienen: su número sí crece con `B`.
+#[test]
+fn the_retained_repository_does_not_grow_with_the_block_count() {
+    // Alambre de tropiezo: el repositorio conserva exactamente los campos que
+    // no crecen con `B` —contexto de derivación, registro, copias, pertenencia,
+    // unidades y su índice—. Retener otra tabla añadiría un campo y cambiaría
+    // este tamaño, que `retained_bytes` no podría ver porque solo recorre la
+    // superficie pública.
+    assert_eq!(
+        size_of::<F5FounderIdentities>(),
+        232,
+        "una tabla retenida nueva cambiaría el tamaño del repositorio"
+    );
+    let mut measured = Vec::new();
+    for blocks in [2_u64, 8] {
+        let root = temporary(&format!("retained-{blocks}"));
+        let fixture = Fixture {
+            subpopulations: vec![Subpopulation::new("P1", 2), Subpopulation::new("P2", 2)],
+            block_count: blocks,
+            sequences: 1,
+            // Holgura para que los ocho bloques quepan; la geometría no
+            // interviene en lo que se mide, solo `B`.
+            slack: 2,
+            ..Fixture::default()
+        };
+        let chain = build_chain(&root, &fixture);
+        let assignment = assign(&chain);
+        let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+        let mut identities = materialize_f5_founder_identities(
+            &chain.config,
+            &chain.sealed,
+            &execution,
+            &chain.layout,
+            &chain.search,
+            &assignment,
+        )
+        .expect("identidades fundadoras materializadas");
+
+        let mut emitted = 0_usize;
+        identities
+            .for_each_assignment(&assignment, |_| {
+                emitted += 1;
+                Ok(())
+            })
+            .expect("recorrido de asignaciones");
+
+        let retained = retained_bytes(&identities);
+        // La promesa que la admisión selló para toda la fase.
+        assert!(
+            retained as u64 <= chain.sealed.working_memory_bytes(),
+            "B={blocks}: {retained} bytes retenidos exceden el pico sellado {}",
+            chain.sealed.working_memory_bytes()
+        );
+        measured.push((
+            blocks,
+            identities.copies().len(),
+            identities.units().len(),
+            retained,
+            emitted,
+            identities.registered_identities(),
+        ));
+    }
+
+    let (_, copies_small, units_small, retained_small, emitted_small, registered_small) =
+        measured[0];
+    let (_, copies_large, units_large, retained_large, emitted_large, registered_large) =
+        measured[1];
+    let haplotypes = 2; // `H` del fixture por defecto.
+
+    assert_eq!(
+        copies_small, copies_large,
+        "las copias no dependen del número de bloques"
+    );
+    assert_eq!(copies_small, 8, "dos subpoblaciones de dos individuos, P=2");
+    assert_eq!(units_small, 2 * 2, "B×N_pop unidades");
+    assert_eq!(units_large, 8 * 2);
+
+    // El único crecimiento es el de las unidades, y es exactamente el suyo.
+    let per_unit = size_of::<F5UnitHaplotypes>()
+        + haplotypes * size_of::<F5HaplotypeId>()
+        + size_of::<usize>();
+    assert_eq!(
+        retained_large - retained_small,
+        (units_large - units_small) * per_unit,
+        "lo retenido solo puede crecer por los HAP_ de cada unidad"
+    );
+
+    // Las asignaciones sí crecen como `B*C_total`, y por eso no se retienen.
+    assert_eq!(emitted_small, 2 * copies_small, "B=2 por C_total=8");
+    assert_eq!(emitted_large, 8 * copies_large, "B=8 por C_total=8");
+    assert_eq!(
+        emitted_large,
+        4 * emitted_small,
+        "cuadruplicar B cuadruplica las asignaciones emitidas"
+    );
+
+    // El término que no se puede soltar: el registro de colisiones conserva una
+    // entrada por identidad derivada, y crece como `B*C_total`. Queda medido
+    // aquí porque es lo que la contabilidad de recursos tendrá que
+    // presupuestar; ninguna fórmula de `f5-resource-accounting-v7` lo contiene.
+    assert_eq!(
+        registered_small,
+        copies_small + units_small * haplotypes + emitted_small,
+        "FCP_ por copia, HAP_ por rango y FHA_ por asignación"
+    );
+    assert_eq!(
+        registered_large,
+        copies_large + units_large * haplotypes + emitted_large
+    );
+    assert!(
+        registered_large > 3 * registered_small,
+        "el registro crece con B aunque las tablas ya no lo hagan"
+    );
+}
+
+/// El recorrido de asignaciones es **único**: repetirlo derivaría cada `FHA_`
+/// por segunda vez, que es una colisión.
+#[test]
+fn the_assignment_traversal_can_only_be_consumed_once() {
+    let root = temporary("single-traversal");
+    let chain = build_chain(&root, &Fixture::default());
+    let assignment = assign(&chain);
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    let mut identities = materialize_f5_founder_identities(
+        &chain.config,
+        &chain.sealed,
+        &execution,
+        &chain.layout,
+        &chain.search,
+        &assignment,
+    )
+    .expect("identidades fundadoras materializadas");
+
+    identities
+        .for_each_assignment(&assignment, |_| Ok(()))
+        .expect("el primer recorrido materializa las asignaciones");
+    let error = identities
+        .for_each_assignment(&assignment, |_| Ok(()))
+        .expect_err("el segundo recorrido no puede repetir la derivación");
+    assert_eq!(error.code(), "GPS-INTERNAL-101");
+    assert!(format!("{error:?}").contains("ya se materializaron"));
+}
+
+/// Una asignación que no es la que materializó el repositorio se rechaza antes
+/// de derivar ningún `FHA_`.
+#[test]
+fn a_traversal_with_another_assignment_is_rejected() {
+    let root = temporary("foreign-traversal");
+    let chain = build_chain(
+        &root,
+        &Fixture {
+            block_count: 2,
+            ..Fixture::default()
+        },
+    );
+    let other_root = temporary("foreign-traversal-other");
+    let other = build_chain(
+        &other_root,
+        &Fixture {
+            subpopulations: vec![Subpopulation::new("Q1", 1)],
+            block_count: 2,
+            ..Fixture::default()
+        },
+    );
+    let assignment = assign(&chain);
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    let mut identities = materialize_f5_founder_identities(
+        &chain.config,
+        &chain.sealed,
+        &execution,
+        &chain.layout,
+        &chain.search,
+        &assignment,
+    )
+    .expect("identidades fundadoras materializadas");
+
+    let foreign = assign(&other);
+    let error = identities
+        .for_each_assignment(&foreign, |_| {
+            panic!("no puede visitarse ninguna fila");
+        })
+        .expect_err("la asignación es de otra configuración");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("assignment.identity")
+    );
+    // El recorrido no se consumió: la asignación propia sigue siendo válida.
+    let mut emitted = 0_usize;
+    identities
+        .for_each_assignment(&assignment, |_| {
+            emitted += 1;
+            Ok(())
+        })
+        .expect("el recorrido propio sigue disponible");
+    assert_eq!(emitted, 2 * 2);
+}
+
+/// El error del visitante se propaga sin envolverlo y detiene el recorrido.
+#[test]
+fn the_visitor_error_stops_the_traversal() {
+    let root = temporary("visitor-error");
+    let chain = build_chain(&root, &Fixture::default());
+    let assignment = assign(&chain);
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    let mut identities = materialize_f5_founder_identities(
+        &chain.config,
+        &chain.sealed,
+        &execution,
+        &chain.layout,
+        &chain.search,
+        &assignment,
+    )
+    .expect("identidades fundadoras materializadas");
+
+    let mut visited = 0_usize;
+    let error = identities
+        .for_each_assignment(&assignment, |_| {
+            visited += 1;
+            if visited == 2 {
+                return Err(Diagnostic::f5_internal("scenario", "el escritor falló"));
+            }
+            Ok(())
+        })
+        .expect_err("el error del visitante llega al llamador");
+    assert_eq!(error.code(), "GPS-INTERNAL-101");
+    assert!(format!("{error:?}").contains("el escritor falló"));
+    assert_eq!(visited, 2, "el recorrido se detiene en la fila que falló");
 }

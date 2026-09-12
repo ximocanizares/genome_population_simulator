@@ -2018,23 +2018,24 @@ impl F5FounderCopy {
     }
 }
 
-/// Fila haplotípica materializada de un bloque×subpoblación: su rango, sus
-/// alelos y su `HAP_`.
+/// Las filas haplotípicas materializadas de un bloque×subpoblación.
 ///
-/// `alleles` es la fila de la matriz ganadora tal cual: exactamente `S`
-/// caracteres `0`/`1`. La polaridad de DTC-089 es una propiedad publicada del
-/// sitio en `f5-frequencies.tsv` y no reescribe estos bits.
+/// Conserva **solo los identificadores**, uno por `haplotype_rank` y en orden
+/// ascendente: 16 bytes por rango. No conserva `alleles`, que es recomputable
+/// de la matriz ganadora que F5.2.3 ya retiene —ver
+/// [`f5_haplotype_alleles`]— y costaba `S` bytes más por fila. La polaridad de
+/// DTC-089 es una propiedad publicada del sitio en `f5-frequencies.tsv` y no
+/// reescribe esos bits.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct F5HaplotypeIdentity {
+pub struct F5UnitHaplotypes {
     population_id: PopulationId,
     block_id: F5BlockId,
     block_index: u64,
-    haplotype_rank: u64,
-    alleles: String,
-    haplotype_id: F5HaplotypeId,
+    sequence_id: SequenceId,
+    haplotype_ids: Vec<F5HaplotypeId>,
 }
 
-impl F5HaplotypeIdentity {
+impl F5UnitHaplotypes {
     #[must_use]
     pub const fn population_id(&self) -> &PopulationId {
         &self.population_id
@@ -2049,17 +2050,15 @@ impl F5HaplotypeIdentity {
     pub const fn block_index(&self) -> u64 {
         self.block_index
     }
+    /// Secuencia del bloque, que es la de las copias que lo reciben.
     #[must_use]
-    pub const fn haplotype_rank(&self) -> u64 {
-        self.haplotype_rank
+    pub const fn sequence_id(&self) -> &SequenceId {
+        &self.sequence_id
     }
+    /// `HAP_` por `haplotype_rank`, indexados por el propio rango.
     #[must_use]
-    pub fn alleles(&self) -> &str {
-        &self.alleles
-    }
-    #[must_use]
-    pub const fn haplotype_id(&self) -> &F5HaplotypeId {
-        &self.haplotype_id
+    pub fn haplotype_ids(&self) -> &[F5HaplotypeId] {
+        &self.haplotype_ids
     }
 }
 
@@ -2125,20 +2124,44 @@ impl F5BlockAssignment {
     }
 }
 
-/// Repositorio de identidades fundadoras materializado **antes de toda
-/// salida**.
+/// Repositorio de identidades fundadoras.
 ///
-/// Contiene las tres poblaciones de identidades que F5.4 escribe y ninguna
-/// más: las copias `FCP_` con su pertenencia, las filas `HAP_` de cada
-/// bloque×subpoblación y las asignaciones `FHA_` que enlazan unas con otras.
+/// Conserva **solo** lo que F5.4 necesita en acceso aleatorio y lo que no
+/// crece con el número de bloques: las copias `FCP_` con su pertenencia y, por
+/// bloque×subpoblación, los identificadores `HAP_` de sus `H` rangos. Las
+/// asignaciones `FHA_` no se retienen: [`Self::for_each_assignment`] las
+/// deriva y las entrega una a una en el orden de `f5-founders.tsv`.
+///
+/// «Materializar antes de toda salida» se sostiene así: **la pasada previa es
+/// la derivación, y lo que prueba que ocurrió es el registro**. El registro de
+/// identidades vive dentro del repositorio y detecta toda colisión conforme a
+/// DTC-039; una colisión a mitad del recorrido aborta antes de que DTC-089
+/// permita publicar nada, porque el éxito publica los siete TSV y la
+/// proyección de verdad de forma atómica o falla entero.
+///
 /// No abre ningún RNG ni decide ninguna asignación: consume la que F5.3.1 y
 /// F5.3.2 ya resolvieron.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub struct F5FounderIdentities {
+    root_seed: RootSeed,
+    execution_id: ExecutionId,
+    scenario_id: ScenarioId,
+    reference_id: ReferenceId,
+    /// Ruta del escenario, para que el diagnóstico de una pieza ajena en el
+    /// recorrido conserve el mismo contexto que el de la materialización.
+    scenario_path: String,
+    /// Vivo mientras el repositorio lo esté: es la prueba de que cada
+    /// identidad se derivó una sola vez.
+    registry: F5IdentityRegistry,
     copies: Vec<F5FounderCopy>,
-    haplotypes: Vec<F5HaplotypeIdentity>,
-    assignments: Vec<F5BlockAssignment>,
     membership: BTreeMap<FounderCopyId, usize>,
+    units: Vec<F5UnitHaplotypes>,
+    /// Índices de `units` por subpoblación y secuencia, en orden de
+    /// `block_id`: es el recorrido que `f5-founders.tsv` necesita y tiene una
+    /// entrada por unidad, no por copia.
+    units_by_sequence: BTreeMap<(PopulationId, SequenceId), Vec<usize>>,
+    /// El recorrido de asignaciones deriva `FHA_`; repetirlo colisionaría.
+    assignments_visited: bool,
 }
 
 impl F5FounderIdentities {
@@ -2148,18 +2171,29 @@ impl F5FounderIdentities {
     pub fn copies(&self) -> &[F5FounderCopy] {
         &self.copies
     }
-    /// Filas haplotípicas ordenadas por `population_id`, `block_id` y
-    /// `haplotype_rank`, que es la clave de `f5-haplotypes.tsv`.
+
+    /// Unidades ordenadas por `population_id` y `block_id`, que con el rango
+    /// ascendente dentro de cada una es la clave de `f5-haplotypes.tsv`.
+    ///
+    /// La columna `alleles` de ese fichero se recompone con
+    /// [`f5_haplotype_alleles`] desde la matriz ganadora, que es la misma de la
+    /// que salió el componente del `HAP_`.
     #[must_use]
-    pub fn haplotypes(&self) -> &[F5HaplotypeIdentity] {
-        &self.haplotypes
+    pub fn units(&self) -> &[F5UnitHaplotypes] {
+        &self.units
     }
-    /// Asignaciones ordenadas por `population_id`, `individual_id`,
-    /// `sequence_id`, `copy_index` y `block_id`, que es la clave de
-    /// `f5-founders.tsv`.
+
+    /// Identidades registradas: `FCP_`, `HAP_` y, tras el recorrido, `FHA_`.
+    ///
+    /// Es el término que **no** se puede soltar: DTC-039 exige que toda
+    /// colisión se detecte, de modo que el registro conserva una entrada por
+    /// identidad derivada aunque su fila ya se haya escrito. Crece como
+    /// `C_total*secuencias + B*subpoblaciones*H + B*C_total`, y
+    /// `f5-resource-accounting`
+    /// no lo contabiliza en ninguna de sus fórmulas.
     #[must_use]
-    pub fn assignments(&self) -> &[F5BlockAssignment] {
-        &self.assignments
+    pub fn registered_identities(&self) -> usize {
+        self.registry.len()
     }
 
     /// Resuelve la pertenencia de una copia desde su identidad publicada.
@@ -2175,6 +2209,129 @@ impl F5FounderIdentities {
             .get(founder_copy_id)
             .and_then(|position| self.copies.get(*position))
     }
+
+    /// Deriva cada `FHA_` y lo entrega **sin retenerlo**, en el orden de
+    /// `f5-founders.tsv`: población, individuo, secuencia, copia y bloque.
+    ///
+    /// Recorre las copias —que ya están en esa clave— y, dentro de cada una,
+    /// los bloques de su secuencia por `block_id`. El otro orden publicado, el
+    /// de `f5-haplotypes.tsv`, lo sirve [`Self::units`] sin recorrer nada, de
+    /// modo que ninguna de las dos claves obliga a una segunda pasada ni a
+    /// ordenar `B*C_total` filas.
+    ///
+    /// Solo puede recorrerse **una vez**: cada `FHA_` se deriva aquí y el
+    /// registro rechaza una segunda derivación de la misma tupla. Esa pasada
+    /// única es la materialización que el hito exige antes de toda salida.
+    ///
+    /// # Errors
+    ///
+    /// - `GPS-CONF-101` si la asignación recibida no es la que materializó
+    ///   este repositorio, o si el recorrido ya se consumió.
+    /// - `GPS-DOMAIN-002` si la derivación de un `FHA_` repite un
+    ///   identificador ya registrado.
+    /// - `GPS-INTERNAL-101` si una unidad nombra una copia o un rango
+    ///   haplotípico que sus productores no publicaron.
+    /// - El error que devuelva `visit`, que se propaga sin envolverlo.
+    pub fn for_each_assignment(
+        &mut self,
+        assignment: &F5FounderAssignment,
+        mut visit: impl FnMut(&F5BlockAssignment) -> Result<(), Diagnostic>,
+    ) -> Result<(), Diagnostic> {
+        if self.assignments_visited {
+            return Err(internal(
+                &self.scenario_id,
+                "las asignaciones fundadoras ya se materializaron: derivar un FHA_ dos veces es una colisión",
+            ));
+        }
+        self.ensure_same_assignment(assignment)?;
+        self.assignments_visited = true;
+        let context = F5IdentityContext::new(
+            self.root_seed,
+            &self.execution_id,
+            &self.scenario_id,
+            &self.reference_id,
+        );
+        for copy in &self.copies {
+            let key = (copy.population_id.clone(), copy.sequence_id.clone());
+            let Some(unit_indices) = self.units_by_sequence.get(&key) else {
+                continue;
+            };
+            let population = F5PopulationIdentityContext::new(context, &copy.population_id);
+            for index in unit_indices {
+                let unit = &self.units[*index];
+                let seats = assignment.units()[*index].assignments();
+                // `assignments()` está ordenado por individuo y copia, que es
+                // la clave por la que se busca.
+                let seat = seats
+                    .binary_search_by(|seat| {
+                        (&seat.individual_id, seat.copy_index)
+                            .cmp(&(&copy.individual_id, copy.copy_index))
+                    })
+                    .map(|position| &seats[position])
+                    .map_err(|_| {
+                        internal(
+                            &self.scenario_id,
+                            "una unidad no asignó ninguna fila a una copia materializada",
+                        )
+                    })?;
+                let haplotype_id = usize::try_from(seat.haplotype_rank)
+                    .ok()
+                    .and_then(|rank| unit.haplotype_ids.get(rank))
+                    .ok_or_else(|| {
+                        internal(
+                            &self.scenario_id,
+                            "una asignación nombra un rango haplotípico que la matriz no contiene",
+                        )
+                    })?;
+                let block_assignment_id = self.registry.derive_block_haplotype_assignment(
+                    population,
+                    F5BlockHaplotypeAssignmentScope::new(
+                        unit.block_index,
+                        &copy.founder_copy_id,
+                        haplotype_id,
+                    ),
+                )?;
+                visit(&F5BlockAssignment {
+                    population_id: copy.population_id.clone(),
+                    individual_id: copy.individual_id.clone(),
+                    sequence_id: copy.sequence_id.clone(),
+                    copy_index: copy.copy_index,
+                    block_id: unit.block_id.clone(),
+                    block_index: unit.block_index,
+                    founder_copy_id: copy.founder_copy_id.clone(),
+                    block_assignment_id,
+                    haplotype_id: haplotype_id.clone(),
+                    haplotype_rank: seat.haplotype_rank,
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    /// La asignación del recorrido debe ser la que materializó el repositorio.
+    ///
+    /// Las unidades llegan en el mismo orden en que se materializaron, de modo
+    /// que basta comparar posición a posición su subpoblación y su bloque: una
+    /// asignación de otra ejecución o de otra configuración no coincide.
+    fn ensure_same_assignment(&self, assignment: &F5FounderAssignment) -> Result<(), Diagnostic> {
+        let mismatched = assignment.units().len() != self.units.len()
+            || assignment
+                .units()
+                .iter()
+                .zip(&self.units)
+                .any(|(unit, materialized)| {
+                    unit.population_id != materialized.population_id
+                        || unit.block_id != materialized.block_id
+                });
+        if mismatched {
+            return Err(Diagnostic::f5_configuration(
+                self.scenario_path.clone(),
+                "assignment.identity",
+                "la asignación recibida no es la que materializó estas identidades",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Lo único que la identidad necesita saber de un bloque colocado.
@@ -2187,6 +2344,12 @@ struct BlockGeometry {
 
 /// Materializa las identidades de fundador y su pertenencia única antes de
 /// toda salida.
+///
+/// Lo que devuelve conserva las copias `FCP_` con su pertenencia y los `HAP_`
+/// de cada bloque×subpoblación; los `FHA_` los deriva
+/// [`F5FounderIdentities::for_each_assignment`] sin retenerlos. Nada de lo
+/// conservado crece con el número de bloques salvo los `H` identificadores de
+/// cada unidad, que son 16 bytes cada uno.
 ///
 /// Deriva con DTC-039/DTC-037 —nunca por concatenación textual— el `FCP_` de
 /// cada copia por secuencia, el `HAP_` de cada fila haplotípica y el `FHA_` de
@@ -2299,8 +2462,8 @@ pub fn materialize_f5_founder_identities(
         .map(|block| ((block.population_id(), block.block_index()), block))
         .collect();
 
-    let mut haplotypes = Vec::new();
-    let mut assignments = Vec::new();
+    let mut units = Vec::with_capacity(assignment.units().len());
+    let mut units_by_sequence: BTreeMap<(PopulationId, SequenceId), Vec<usize>> = BTreeMap::new();
     for unit in assignment.units() {
         let block = geometry.get(&unit.block_index()).ok_or_else(|| {
             internal(
@@ -2343,114 +2506,48 @@ pub fn materialize_f5_founder_identities(
                 ),
             ));
         }
-        let mut rows = Vec::with_capacity(matrix.haplotype_count());
+        let mut haplotype_ids = Vec::with_capacity(matrix.haplotype_count());
         for rank in 0..matrix.haplotype_count() {
-            let alleles = allele_string(matrix, rank).ok_or_else(|| {
+            // `alleles` es componente del material y se consume aquí; no se
+            // retiene, porque la matriz ganadora lo reproduce.
+            let alleles = f5_haplotype_alleles(matrix, rank).ok_or_else(|| {
                 internal(
                     &scenario_id,
                     "la matriz ganadora no conserva la fila de un rango haplotípico",
                 )
             })?;
-            let haplotype_rank = rank as u64;
-            let haplotype_id = registry.derive_haplotype(
+            haplotype_ids.push(registry.derive_haplotype(
                 population,
                 unit.block_index(),
-                haplotype_rank,
+                rank as u64,
                 &alleles,
-            )?;
-            rows.push(haplotype_id.clone());
-            haplotypes.push(F5HaplotypeIdentity {
-                population_id: unit.population_id().clone(),
-                block_id: block.block_id.clone(),
-                block_index: unit.block_index(),
-                haplotype_rank,
-                alleles,
-                haplotype_id,
-            });
+            )?);
         }
-        for seat in unit.assignments() {
-            // `copies` ya está en la clave que buscamos —población, individuo,
-            // secuencia y copia—, de modo que la pertenencia se localiza sin
-            // construir ningún índice paralelo ni clonar la clave.
-            let position = copies
-                .binary_search_by(|copy| {
-                    (
-                        &copy.population_id,
-                        &copy.individual_id,
-                        &copy.sequence_id,
-                        copy.copy_index,
-                    )
-                        .cmp(&(
-                            unit.population_id(),
-                            seat.individual_id(),
-                            &block.sequence_id,
-                            seat.copy_index(),
-                        ))
-                })
-                .map_err(|_| {
-                    internal(
-                        &scenario_id,
-                        "una asignación nombra una copia sin pertenencia materializada",
-                    )
-                })?;
-            let founder_copy_id = copies[position].founder_copy_id.clone();
-            let haplotype_id = usize::try_from(seat.haplotype_rank())
-                .ok()
-                .and_then(|rank| rows.get(rank))
-                .ok_or_else(|| {
-                    internal(
-                        &scenario_id,
-                        "una asignación nombra un rango haplotípico que la matriz no contiene",
-                    )
-                })?
-                .clone();
-            let block_assignment_id = registry.derive_block_haplotype_assignment(
-                population,
-                F5BlockHaplotypeAssignmentScope::new(
-                    unit.block_index(),
-                    &founder_copy_id,
-                    &haplotype_id,
-                ),
-            )?;
-            assignments.push(F5BlockAssignment {
-                population_id: unit.population_id().clone(),
-                individual_id: seat.individual_id().clone(),
-                sequence_id: block.sequence_id.clone(),
-                copy_index: seat.copy_index(),
-                block_id: block.block_id.clone(),
-                block_index: unit.block_index(),
-                founder_copy_id,
-                block_assignment_id,
-                haplotype_id,
-                haplotype_rank: seat.haplotype_rank(),
-            });
-        }
+        units_by_sequence
+            .entry((unit.population_id().clone(), block.sequence_id.clone()))
+            .or_default()
+            .push(units.len());
+        units.push(F5UnitHaplotypes {
+            population_id: unit.population_id().clone(),
+            block_id: block.block_id.clone(),
+            block_index: unit.block_index(),
+            sequence_id: block.sequence_id.clone(),
+            haplotype_ids,
+        });
     }
-    // Las unidades llegan por `population_id`+`block_id`; `f5-founders.tsv` se
-    // indexa por población, individuo, secuencia, copia y bloque. La clave es
-    // única en cada fila, de modo que el orden es total.
-    assignments.sort_by(|left, right| {
-        (
-            &left.population_id,
-            &left.individual_id,
-            &left.sequence_id,
-            left.copy_index,
-            &left.block_id,
-        )
-            .cmp(&(
-                &right.population_id,
-                &right.individual_id,
-                &right.sequence_id,
-                right.copy_index,
-                &right.block_id,
-            ))
-    });
 
     Ok(F5FounderIdentities {
+        root_seed,
+        execution_id: execution_id.clone(),
+        scenario_id,
+        reference_id,
+        scenario_path: config.scenario_path().display().to_string(),
+        registry,
         copies,
-        haplotypes,
-        assignments,
         membership,
+        units,
+        units_by_sequence,
+        assignments_visited: false,
     })
 }
 
@@ -2561,8 +2658,13 @@ fn conflicting_membership(
 }
 
 /// Fila de la matriz ganadora como los `S` caracteres `0`/`1` que DTC-089 hace
-/// componente del `HAP_`.
-fn allele_string(matrix: &F5AlleleMatrix, haplotype: usize) -> Option<String> {
+/// componente del `HAP_` y columna `alleles` de `f5-haplotypes.tsv`.
+///
+/// Es público porque el repositorio de identidades **no** retiene esa cadena:
+/// quien escriba el TSV la recompone desde la misma matriz de la que salió el
+/// material del identificador. Devuelve `None` si el rango no existe.
+#[must_use]
+pub fn f5_haplotype_alleles(matrix: &F5AlleleMatrix, haplotype: usize) -> Option<String> {
     let mut alleles = String::with_capacity(matrix.site_count());
     for site in 0..matrix.site_count() {
         alleles.push(if matrix.allele(haplotype, site)? {
