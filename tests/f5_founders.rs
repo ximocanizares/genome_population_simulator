@@ -16,15 +16,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::{EffectiveF5Config, load_and_validate_f5_config};
 use genome_population_simulator::f5_founders::{
-    F5FounderAssignment, F5FounderUnit, F5RealizedFStatus, F5SamplingMode, F5SamplingSource,
-    assign_f5_founders,
+    F5FounderAssignment, F5FounderCopy, F5FounderIdentities, F5FounderUnit, F5HaplotypeIdentity,
+    F5RealizedFStatus, F5SamplingMode, F5SamplingSource, assign_f5_founders,
+    materialize_f5_founder_identities, resolve_f5_founder_roster,
 };
-use genome_population_simulator::f5_layout::{F5LayoutRequest, build_f5_physical_layout};
+use genome_population_simulator::f5_layout::{
+    F5LayoutRequest, F5PhysicalLayout, build_f5_physical_layout,
+};
 use genome_population_simulator::f5_preflight::{
     F5OtherResources, SealedF5Admission, recover_sealed_f5_admission,
 };
 use genome_population_simulator::f5_search::{F5HaplotypeSearch, search_f5_haplotypes};
-use genome_population_simulator::identity::{ExecutionId, IndividualId, ScenarioId};
+use genome_population_simulator::identity::{ExecutionId, FounderCopyId, IndividualId, ScenarioId};
 use genome_population_simulator::randomness::{
     F5RandomDecision, RootSeed, derive_f5_subseed, f5_uniform_index,
 };
@@ -60,6 +63,8 @@ struct Subpopulation<'a> {
     inbreeding_f: Option<&'a str>,
     /// Declara `founder_keys` en lugar de `founder_ids`.
     keys: bool,
+    /// Identificadores fundadores literales; sin ellos se generan `<id>-I<n>`.
+    founder_ids: Option<&'a [&'a str]>,
 }
 
 impl<'a> Subpopulation<'a> {
@@ -70,6 +75,7 @@ impl<'a> Subpopulation<'a> {
             sampling: None,
             inbreeding_f: None,
             keys: false,
+            founder_ids: None,
         }
     }
 
@@ -85,6 +91,12 @@ impl<'a> Subpopulation<'a> {
 
     const fn keys(mut self) -> Self {
         self.keys = true;
+        self
+    }
+
+    /// Fija los identificadores fundadores literales de la subpoblación.
+    const fn founders(mut self, founder_ids: &'a [&'a str]) -> Self {
+        self.founder_ids = Some(founder_ids);
         self
     }
 }
@@ -104,6 +116,9 @@ struct Fixture<'a> {
     overrides: Vec<Substitution<'a>>,
     block_count: u64,
     block_length: u64,
+    /// Secuencias de la referencia sintética; `block_count` debe ser múltiplo
+    /// suyo, de modo que cada secuencia reciba exactamente los mismos bloques.
+    sequences: u64,
     weights: Vec<&'a str>,
     gap: u64,
     spectrum: &'a str,
@@ -125,6 +140,7 @@ impl Default for Fixture<'_> {
             overrides: Vec::new(),
             block_count: 2,
             block_length: 3,
+            sequences: 1,
             // `H=2` mantiene `r²` en 0 o 1, de modo que el objetivo 1,0 es
             // alcanzable y la búsqueda termina en pocos intentos.
             weights: vec!["0.5", "0.5"],
@@ -210,12 +226,23 @@ impl Fixture<'_> {
         fs::write(profile_directory.join("profile.metadata.json"), &metadata).expect("metadata");
 
         let bases = b"ACGT";
+        assert!(
+            self.sequences >= 1 && self.block_count.is_multiple_of(self.sequences),
+            "cada secuencia debe recibir el mismo número entero de bloques"
+        );
         let span =
-            usize::try_from(self.block_length * self.block_count * self.slack).expect("span");
-        let sequence = (0..span)
-            .map(|index| char::from(bases[index % 4]))
-            .collect::<String>();
-        let fasta = format!(">chr1\n{sequence}\n");
+            usize::try_from(self.block_length * (self.block_count / self.sequences) * self.slack)
+                .expect("span");
+        let mut fasta = String::new();
+        for ordinal in 0..self.sequences {
+            // Cada secuencia empieza en una base distinta: dos secuencias con
+            // el mismo contenido seguirían siendo dos secuencias, pero así el
+            // fixture no puede confundirlas por accidente.
+            let sequence = (0..span)
+                .map(|index| char::from(bases[(index + ordinal as usize) % 4]))
+                .collect::<String>();
+            fasta.push_str(&format!(">chr{}\n{sequence}\n", ordinal + 1));
+        }
         fs::write(root.join("authoring/references/ref.fa"), &fasta).expect("reference");
         let general = root.join("authoring/general.toml");
         fs::write(
@@ -233,10 +260,20 @@ impl Fixture<'_> {
         let mut founder_count = 0_u64;
         for subpopulation in &self.subpopulations {
             founder_count += subpopulation.individual_count;
-            let founders = (0..subpopulation.individual_count)
-                .map(|index| format!("\"{}-I{index}\"", subpopulation.id))
-                .collect::<Vec<_>>()
-                .join(", ");
+            let founders = subpopulation.founder_ids.map_or_else(
+                || {
+                    (0..subpopulation.individual_count)
+                        .map(|index| format!("\"{}-I{index}\"", subpopulation.id))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+                |ids| {
+                    ids.iter()
+                        .map(|id| format!("\"{id}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+            );
             let field = if subpopulation.keys {
                 "founder_keys"
             } else {
@@ -283,6 +320,7 @@ impl Fixture<'_> {
 struct Chain {
     config: EffectiveF5Config,
     sealed: SealedF5Admission,
+    layout: F5PhysicalLayout,
     search: F5HaplotypeSearch,
     root: PathBuf,
 }
@@ -310,6 +348,7 @@ fn build_chain(root: &Path, fixture: &Fixture<'_>) -> Chain {
     Chain {
         config,
         sealed,
+        layout,
         search,
         root: root.to_path_buf(),
     }
@@ -318,6 +357,22 @@ fn build_chain(root: &Path, fixture: &Fixture<'_>) -> Chain {
 fn assign(chain: &Chain) -> F5FounderAssignment {
     assign_f5_founders(&chain.config, &chain.sealed, &chain.search)
         .expect("asignación fundadora completa")
+}
+
+/// Identidades fundadoras de la cadena completa, con la identidad de ejecución
+/// que la produjo.
+fn materialize(chain: &Chain) -> F5FounderIdentities {
+    let assignment = assign(chain);
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    materialize_f5_founder_identities(
+        &chain.config,
+        &chain.sealed,
+        &execution,
+        &chain.layout,
+        &chain.search,
+        &assignment,
+    )
+    .expect("identidades fundadoras materializadas")
 }
 
 /// Perfil **diádico** que termina: `H=4` con pesos `1/2, 1/4, 1/8, 1/8`.
@@ -2447,4 +2502,1380 @@ fn the_founder_f_scope_is_opened_exactly_once_in_the_module() {
         source.contains("F5RandomDecision::founder_sample"),
         "la búsqueda solo vale si el módulo sí abre los ámbitos suyos"
     );
+}
+
+// ---------------------------------------------------------------------------
+// F5.3.3. Identidades fundadoras, pertenencia y reconstructor independiente
+// ---------------------------------------------------------------------------
+
+/// Contexto BLAKE3 de DTC-039, copiado del encabezado de `id-catalog-v4`.
+const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
+/// Versión de derivación que el catálogo fija para las cinco clases F5.
+const ID_DERIVATION_VERSION: u32 = 1;
+
+/// Un componente DTC-037: longitud del nombre, nombre, longitud del valor y
+/// valor, todos UTF-8 y con la longitud en `u32` big-endian.
+fn push_component(material: &mut Vec<u8>, name: &str, value: &str) {
+    material.extend_from_slice(&u32::try_from(name.len()).expect("nombre").to_be_bytes());
+    material.extend_from_slice(name.as_bytes());
+    material.extend_from_slice(&u32::try_from(value.len()).expect("valor").to_be_bytes());
+    material.extend_from_slice(value.as_bytes());
+}
+
+/// Codificación canónica DTC-037 del material de un identificador automático.
+fn id_material(root: &[u8; 32], class: &str, components: &[(&str, String)]) -> Vec<u8> {
+    let mut material = Vec::new();
+    material.extend_from_slice(root);
+    material.extend_from_slice(&ID_DERIVATION_VERSION.to_be_bytes());
+    material.extend_from_slice(
+        &u32::try_from(components.len() + 1)
+            .expect("recuento")
+            .to_be_bytes(),
+    );
+    push_component(&mut material, "class", class);
+    for (name, value) in components {
+        push_component(&mut material, name, value);
+    }
+    material
+}
+
+/// Base32 sin relleno escrita bit a bit, sin reutilizar la del productor.
+fn base32(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let bits = bytes.len() * 8;
+    (0..bits.div_ceil(5))
+        .map(|group| {
+            let mut index = 0_usize;
+            for offset in 0..5 {
+                let bit = group * 5 + offset;
+                let set = bit < bits && (bytes[bit / 8] >> (7 - bit % 8)) & 1 == 1;
+                index = (index << 1) | usize::from(set);
+            }
+            char::from(ALPHABET[index])
+        })
+        .collect()
+}
+
+/// Rederiva un identificador automático desde sus componentes publicados.
+fn derived_identifier(
+    root: &[u8; 32],
+    prefix: &str,
+    class: &str,
+    components: &[(&str, String)],
+) -> String {
+    let material = id_material(root, class, components);
+    let digest = blake3::derive_key(ID_CONTEXT, &material);
+    format!("{prefix}{}", base32(&digest[..16]))
+}
+
+fn decode_hex(text: &str) -> Vec<u8> {
+    assert!(text.len().is_multiple_of(2), "hexadecimal de longitud par");
+    text.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            u8::from_str_radix(std::str::from_utf8(pair).expect("hexadecimal"), 16)
+                .expect("hexadecimal")
+        })
+        .collect()
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn root_seed_bytes(seed: &str) -> [u8; 32] {
+    decode_hex(seed).try_into().expect("semilla de 256 bits")
+}
+
+/// Componentes que el catálogo da a `FCP_`, en su orden exacto.
+fn founder_copy_components(
+    scenario_id: &str,
+    reference_id: &str,
+    copy: &F5FounderCopy,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("execution_id", EXECUTION.to_owned()),
+        ("scenario_id", scenario_id.to_owned()),
+        ("reference_id", reference_id.to_owned()),
+        ("population_id", copy.population_id().as_str().to_owned()),
+        ("individual_id", copy.individual_id().as_str().to_owned()),
+        ("sequence_id", copy.sequence_id().as_str().to_owned()),
+        ("copy_index_u32", copy.copy_index().to_string()),
+    ]
+}
+
+/// Rederiva cada `FCP_`, `HAP_` y `FHA_` leyendo solo lo que el repositorio
+/// publica más el escenario, la referencia, la ejecución y la semilla
+/// efectiva, y sin llamar a ninguna función del productor.
+fn assert_every_identity_is_rederivable(chain: &Chain, identities: &F5FounderIdentities) {
+    let root = root_seed_bytes(chain.config.seed());
+    let scenario_id = chain.config.scenario_id();
+    let reference_id = chain.config.reference_id();
+
+    for copy in identities.copies() {
+        let expected = derived_identifier(
+            &root,
+            "FCP_",
+            "f5_founder_copy",
+            &founder_copy_components(scenario_id, reference_id, copy),
+        );
+        assert_eq!(
+            copy.founder_copy_id().as_str(),
+            expected,
+            "la copia {}/{}/{}/{} no rederiva su FCP_",
+            copy.population_id(),
+            copy.individual_id(),
+            copy.sequence_id(),
+            copy.copy_index()
+        );
+    }
+
+    for haplotype in identities.haplotypes() {
+        let expected = derived_identifier(
+            &root,
+            "HAP_",
+            "f5_haplotype",
+            &[
+                ("execution_id", EXECUTION.to_owned()),
+                ("scenario_id", scenario_id.to_owned()),
+                ("reference_id", reference_id.to_owned()),
+                (
+                    "population_id",
+                    haplotype.population_id().as_str().to_owned(),
+                ),
+                ("block_index_u64", haplotype.block_index().to_string()),
+                ("haplotype_rank_u64", haplotype.haplotype_rank().to_string()),
+                ("alleles", haplotype.alleles().to_owned()),
+            ],
+        );
+        assert_eq!(
+            haplotype.haplotype_id().as_str(),
+            expected,
+            "la fila {} del bloque {} no rederiva su HAP_",
+            haplotype.haplotype_rank(),
+            haplotype.block_id()
+        );
+    }
+
+    for assignment in identities.assignments() {
+        let expected = derived_identifier(
+            &root,
+            "FHA_",
+            "f5_block_haplotype_assignment",
+            &[
+                ("execution_id", EXECUTION.to_owned()),
+                ("scenario_id", scenario_id.to_owned()),
+                ("reference_id", reference_id.to_owned()),
+                (
+                    "population_id",
+                    assignment.population_id().as_str().to_owned(),
+                ),
+                ("block_index_u64", assignment.block_index().to_string()),
+                (
+                    "founder_copy_id",
+                    assignment.founder_copy_id().as_str().to_owned(),
+                ),
+                (
+                    "haplotype_id",
+                    assignment.haplotype_id().as_str().to_owned(),
+                ),
+            ],
+        );
+        assert_eq!(
+            assignment.block_assignment_id().as_str(),
+            expected,
+            "la asignación de {} en {} no rederiva su FHA_",
+            assignment.founder_copy_id(),
+            assignment.block_id()
+        );
+
+        // La asignación enlaza dos identidades ya publicadas y no inventa
+        // ninguna: su copia y su fila existen en las otras dos tablas.
+        let copy = identities
+            .copy(assignment.founder_copy_id())
+            .expect("la asignación resuelve su pertenencia");
+        assert_eq!(copy.population_id(), assignment.population_id());
+        assert_eq!(copy.individual_id(), assignment.individual_id());
+        assert_eq!(copy.sequence_id(), assignment.sequence_id());
+        assert_eq!(copy.copy_index(), assignment.copy_index());
+        assert!(
+            identities.haplotypes().iter().any(|haplotype| {
+                haplotype.haplotype_id() == assignment.haplotype_id()
+                    && haplotype.block_id() == assignment.block_id()
+                    && haplotype.population_id() == assignment.population_id()
+                    && haplotype.haplotype_rank() == assignment.haplotype_rank()
+            }),
+            "la asignación nombra una fila haplotípica que no se publicó"
+        );
+    }
+}
+
+/// El oráculo de identidades debe reproducir los vectores congelados del
+/// catálogo antes de poder juzgar al productor.
+///
+/// Sin esta prueba, un oráculo equivocado y un productor equivocado de la
+/// misma forma se darían la razón mutuamente.
+#[test]
+fn the_independent_id_oracle_reproduces_the_frozen_catalog_vectors() {
+    const CATALOG: &str = include_str!("../catalogs/id-catalog-v4.tsv");
+    let mut checked = 0_usize;
+    for line in CATALOG.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields = line.split('|').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 9, "fila del catálogo: {line}");
+        let (class, prefix) = (fields[0], fields[1]);
+        if !class.starts_with("f5_") {
+            continue;
+        }
+        let mut components = fields[4]
+            .split(';')
+            .map(|component| component.split_once('=').expect("componente nombre=valor"));
+        let declared_class = components.next().expect("clase");
+        assert_eq!(declared_class, ("class", class));
+        let components = components
+            .map(|(name, value)| (name, value.to_owned()))
+            .collect::<Vec<_>>();
+        let root: [u8; 32] = decode_hex(fields[5]).try_into().expect("raíz de 256 bits");
+        let borrowed = components
+            .iter()
+            .map(|(name, value)| (*name, value.clone()))
+            .collect::<Vec<_>>();
+        let material = id_material(&root, class, &borrowed);
+        assert_eq!(encode_hex(&material), fields[6], "material de {class}");
+        let digest = blake3::derive_key(ID_CONTEXT, &material);
+        assert_eq!(encode_hex(&digest), fields[7], "digest de {class}");
+        assert_eq!(
+            derived_identifier(&root, prefix, class, &borrowed),
+            fields[8],
+            "identificador de {class}"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 5, "las cinco clases F5 del catálogo");
+}
+
+/// Reconstructor completo: dos subpoblaciones —una con IDs aportados y otra
+/// con claves derivadas—, dos secuencias, dos bloques y `P=2`.
+#[test]
+fn every_published_founder_identity_is_rederivable_by_an_independent_reader() {
+    let root = temporary("reconstructor");
+    let fixture = Fixture {
+        subpopulations: vec![
+            Subpopulation::new("P1", 2),
+            Subpopulation::new("P2", 2).keys(),
+        ],
+        sequences: 2,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let identities = materialize(&chain);
+
+    assert_eq!(
+        identities.copies().len(),
+        2 * 2 * 2 * 2,
+        "N*P por secuencia"
+    );
+    assert_eq!(identities.assignments().len(), 2 * 2 * 2 * 2);
+    assert_eq!(
+        identities.haplotypes().len(),
+        2 * 2 * chain.config.profile().haplotype_weights().len(),
+        "H filas por bloque×subpoblación"
+    );
+    assert_every_identity_is_rederivable(&chain, &identities);
+    assert_eq!(
+        identities,
+        materialize(&chain),
+        "materializar dos veces las mismas entradas da el mismo repositorio"
+    );
+}
+
+/// Los IDs aportados por la usuaria y los derivados de una clave conviven en
+/// la misma ejecución y producen copias con el mismo contrato.
+#[test]
+fn provided_and_derived_individual_ids_produce_the_same_copy_contract() {
+    let root = temporary("provided-and-derived");
+    let fixture = Fixture {
+        subpopulations: vec![
+            Subpopulation::new("P1", 2).founders(&["given-a", "given-b"]),
+            Subpopulation::new("P2", 2).keys(),
+        ],
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let identities = materialize(&chain);
+
+    let provided = identities
+        .copies()
+        .iter()
+        .filter(|copy| copy.population_id().as_str() == "P1")
+        .map(|copy| copy.individual_id().as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        provided,
+        BTreeSet::from(["given-a", "given-b"]),
+        "un founder_id aportado se usa literalmente"
+    );
+    let derived = identities
+        .copies()
+        .iter()
+        .filter(|copy| copy.population_id().as_str() == "P2")
+        .map(|copy| copy.individual_id().as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(derived.len(), 2);
+    assert!(
+        derived.iter().all(|id| id.starts_with("IND_")),
+        "una founder_key deriva su IndividualId: {derived:?}"
+    );
+    assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// Una copia conserva **una** identidad a través de todos los bloques de su
+/// secuencia, y cada bloque le da una asignación distinta.
+#[test]
+fn one_copy_keeps_a_single_identity_across_every_block_of_its_sequence() {
+    let root = temporary("copy-across-blocks");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 2)],
+        block_count: 2,
+        sequences: 1,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let identities = materialize(&chain);
+
+    let blocks = identities
+        .assignments()
+        .iter()
+        .map(|assignment| assignment.block_id().as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(blocks.len(), 2, "el fixture debe tener dos bloques");
+
+    let mut by_copy: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut assignment_ids: BTreeSet<&str> = BTreeSet::new();
+    for assignment in identities.assignments() {
+        by_copy
+            .entry(assignment.founder_copy_id().as_str())
+            .or_default()
+            .insert(assignment.block_id().as_str());
+        assert!(
+            assignment_ids.insert(assignment.block_assignment_id().as_str()),
+            "dos asignaciones no pueden compartir FHA_"
+        );
+        assert_ne!(
+            assignment.block_assignment_id().as_str(),
+            assignment.founder_copy_id().as_str(),
+            "FHA_ no puede sustituir a FCP_"
+        );
+    }
+    assert_eq!(by_copy.len(), 4, "N*P copias de una sola secuencia");
+    for (copy, seen) in &by_copy {
+        assert_eq!(
+            seen.len(),
+            2,
+            "la copia {copy} debe aparecer en los dos bloques con el mismo FCP_"
+        );
+    }
+    assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// Un individuo tiene una copia propia **por secuencia**: dos secuencias
+/// producen dos `FCP_` distintos para el mismo `copy_index`, y cada bloque usa
+/// el de su propia secuencia.
+#[test]
+fn an_individual_has_one_copy_identity_per_sequence() {
+    let root = temporary("copy-per-sequence");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 1)],
+        block_count: 2,
+        sequences: 2,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let identities = materialize(&chain);
+
+    let sequences = identities
+        .copies()
+        .iter()
+        .map(|copy| copy.sequence_id().as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        sequences,
+        BTreeSet::from(["chr1", "chr2"]),
+        "las dos secuencias pobladas del layout"
+    );
+    assert_eq!(
+        identities.copies().len(),
+        4,
+        "1 individuo × 2 copias × 2 secuencias"
+    );
+
+    for copy_index in 0..2_u32 {
+        let ids = identities
+            .copies()
+            .iter()
+            .filter(|copy| copy.copy_index() == copy_index)
+            .map(|copy| copy.founder_copy_id().as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            ids.len(),
+            2,
+            "la copia {copy_index} tiene un FCP_ distinto por secuencia"
+        );
+    }
+
+    // Cada bloque vive en una secuencia y sus asignaciones usan exactamente
+    // las copias de esa secuencia.
+    let mut sequence_of_block: BTreeMap<&str, &str> = BTreeMap::new();
+    for assignment in identities.assignments() {
+        let sequence = sequence_of_block
+            .entry(assignment.block_id().as_str())
+            .or_insert_with(|| assignment.sequence_id().as_str());
+        assert_eq!(
+            *sequence,
+            assignment.sequence_id().as_str(),
+            "un bloque no puede recibir copias de dos secuencias"
+        );
+        let copy = identities
+            .copy(assignment.founder_copy_id())
+            .expect("pertenencia");
+        assert_eq!(copy.sequence_id(), assignment.sequence_id());
+    }
+    assert_eq!(
+        sequence_of_block.values().collect::<BTreeSet<_>>().len(),
+        2,
+        "los dos bloques del fixture están en secuencias distintas"
+    );
+    assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// La ploidía fija cuántas copias existen y qué índices publican: `P=1` no
+/// materializa ninguna copia 1 y `P=2` materializa exactamente dos por
+/// secuencia.
+#[test]
+fn the_copy_identities_follow_the_effective_ploidy() {
+    for ploidy in [1_u64, 2, 3] {
+        let root = temporary(&format!("ploidy-{ploidy}"));
+        let fixture = Fixture {
+            subpopulations: vec![Subpopulation::new("P1", 3)],
+            ploidy,
+            ..Fixture::default()
+        };
+        let chain = build_chain(&root, &fixture);
+        let identities = materialize(&chain);
+
+        let expected = 3 * ploidy as usize;
+        assert_eq!(
+            identities.copies().len(),
+            expected,
+            "N*P copias con P={ploidy}"
+        );
+        let indices = identities
+            .copies()
+            .iter()
+            .map(F5FounderCopy::copy_index)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            indices,
+            (0..ploidy as u32).collect::<BTreeSet<_>>(),
+            "los índices de copia con P={ploidy}"
+        );
+        assert_eq!(
+            identities.assignments().len(),
+            expected * 2,
+            "una asignación por copia y bloque"
+        );
+        assert_every_identity_is_rederivable(&chain, &identities);
+    }
+}
+
+/// La pertenencia es total, única e inyectiva: cada copia publicada tiene
+/// exactamente un `FCP_` y cada `FCP_` resuelve una sola subpoblación.
+#[test]
+fn every_copy_has_exactly_one_membership_and_every_membership_one_copy() {
+    let root = temporary("membership");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 2), Subpopulation::new("P2", 3)],
+        sequences: 2,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let identities = materialize(&chain);
+
+    let mut identifiers: BTreeSet<&str> = BTreeSet::new();
+    let mut tuples: BTreeSet<(&str, &str, &str, u32)> = BTreeSet::new();
+    let mut population_of: BTreeMap<&str, &str> = BTreeMap::new();
+    for copy in identities.copies() {
+        assert!(
+            identifiers.insert(copy.founder_copy_id().as_str()),
+            "un FCP_ repetido es una pertenencia duplicada"
+        );
+        assert!(
+            tuples.insert((
+                copy.population_id().as_str(),
+                copy.individual_id().as_str(),
+                copy.sequence_id().as_str(),
+                copy.copy_index(),
+            )),
+            "una tupla de identidad repetida es una pertenencia duplicada"
+        );
+        assert_eq!(
+            identities
+                .copy(copy.founder_copy_id())
+                .expect("pertenencia")
+                .population_id(),
+            copy.population_id()
+        );
+        // Un individuo pertenece a una sola subpoblación en toda la ejecución.
+        let population = population_of
+            .entry(copy.individual_id().as_str())
+            .or_insert_with(|| copy.population_id().as_str());
+        assert_eq!(*population, copy.population_id().as_str());
+    }
+    assert_eq!(
+        identifiers.len(),
+        5 * 2 * 2,
+        "(2+3) individuos × 2 secuencias × P=2"
+    );
+    assert_eq!(population_of.len(), 5);
+
+    // Ninguna asignación queda sin pertenencia y ninguna copia queda sin
+    // asignación en los bloques de su secuencia.
+    let mut assigned: BTreeSet<&str> = BTreeSet::new();
+    for assignment in identities.assignments() {
+        assert!(
+            identities.copy(assignment.founder_copy_id()).is_some(),
+            "pertenencia ausente para {}",
+            assignment.founder_copy_id()
+        );
+        assigned.insert(assignment.founder_copy_id().as_str());
+    }
+    assert_eq!(assigned, identifiers, "toda copia recibe asignación");
+
+    // Un `FCP_` que nadie materializó no tiene pertenencia: la consulta no
+    // puede devolver una copia cualquiera.
+    let unknown = FounderCopyId::parse("FCP_AAAAAAAAAAAAAAAAAAAAAAAAAA", "test").expect("id");
+    assert!(identities.copy(&unknown).is_none());
+}
+
+/// DTC-089: `IndividualId` identifica al fundador una sola vez en toda la
+/// ejecución. El cruce entre dos subpoblaciones ya se rechaza en la admisión,
+/// antes de que ninguna identidad se materialice.
+///
+/// Esta prueba fija **dónde** vive el invariante: `f5_founders` conserva una
+/// guarda propia, con pruebas unitarias, porque una pertenencia duplicada no
+/// produciría colisión de `FCP_`, pero ninguna configuración admitida puede
+/// alcanzarla.
+#[test]
+fn an_individual_declared_in_two_subpopulations_is_rejected_before_any_identity() {
+    let root = temporary("shared-individual");
+    let fixture = Fixture {
+        subpopulations: vec![
+            Subpopulation::new("P1", 2).founders(&["shared", "only-p1"]),
+            Subpopulation::new("P2", 2).founders(&["shared", "only-p2"]),
+        ],
+        ..Fixture::default()
+    };
+    let general = fixture.write(&root);
+    let failure = load_and_validate_f5_config(&general).expect_err("fundador compartido");
+    assert_eq!(failure.code(), "GPS-CONF-101");
+    assert_eq!(
+        failure.context().get("fields").map(String::as_str),
+        Some("subpopulations.founder_ids")
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// La misma `founder_key` en dos subpoblaciones **no** es el mismo fundador:
+/// la clave se deriva en el ámbito de su población, de modo que produce dos
+/// `IndividualId` distintos, dos pertenencias distintas y dos `FCP_` distintos.
+#[test]
+fn the_same_founder_key_in_two_subpopulations_yields_two_founders() {
+    let root = temporary("shared-key");
+    let fixture = Fixture {
+        subpopulations: vec![
+            Subpopulation::new("P1", 2).keys().founders(&["k0", "k1"]),
+            Subpopulation::new("P2", 2).keys().founders(&["k0", "k1"]),
+        ],
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let identities = materialize(&chain);
+
+    let individuals = identities
+        .copies()
+        .iter()
+        .map(|copy| copy.individual_id().as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        individuals.len(),
+        4,
+        "dos claves por subpoblación, no dos en total"
+    );
+    let identifiers = identities
+        .copies()
+        .iter()
+        .map(|copy| copy.founder_copy_id().as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(identifiers.len(), identities.copies().len());
+    for copy in identities.copies() {
+        assert_eq!(
+            identities
+                .copy(copy.founder_copy_id())
+                .expect("pertenencia")
+                .population_id(),
+            copy.population_id()
+        );
+    }
+    assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// El layout aporta la secuencia de cada copia: si no lo produjo esta
+/// ejecución, sus identificadores de bloque no se rederivan y la
+/// materialización se rechaza antes de derivar ninguna identidad.
+#[test]
+fn a_layout_from_another_execution_is_rejected() {
+    let root = temporary("foreign-layout");
+    let chain = build_chain(&root, &Fixture::default());
+    let assignment = assign(&chain);
+    let foreign = ExecutionId::parse("RUN_BQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let error = materialize_f5_founder_identities(
+        &chain.config,
+        &chain.sealed,
+        &foreign,
+        &chain.layout,
+        &chain.search,
+        &assignment,
+    )
+    .expect_err("el layout no pertenece a esa ejecución");
+    assert_eq!(error.code(), "GPS-CONF-101");
+}
+
+/// La admisión sellada de otra configuración no autoriza materializar estas
+/// identidades.
+#[test]
+fn a_sealed_admission_from_another_configuration_is_rejected() {
+    let own_root = temporary("own-admission");
+    let other_root = temporary("other-admission");
+    let own = build_chain(&own_root, &Fixture::default());
+    let other = build_chain(
+        &other_root,
+        &Fixture {
+            subpopulations: vec![Subpopulation::new("Q1", 2)],
+            ..Fixture::default()
+        },
+    );
+    let assignment = assign(&own);
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    let error = materialize_f5_founder_identities(
+        &own.config,
+        &other.sealed,
+        &execution,
+        &own.layout,
+        &own.search,
+        &assignment,
+    )
+    .expect_err("la admisión sellada es de otra configuración");
+    assert_eq!(error.code(), "GPS-CONF-101");
+}
+
+/// Cada tabla se publica en la clave que DTC-089 le da.
+#[test]
+fn every_published_table_is_ordered_by_its_own_key() {
+    let root = temporary("order");
+    // Una sola secuencia con dos bloques: así cada copia tiene **dos** filas y
+    // `block_id` es la componente que desempata. Con un bloque por secuencia la
+    // tupla anterior ya sería única y la quinta clave nunca se ejercitaría.
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P2", 2), Subpopulation::new("P1", 2)],
+        sequences: 1,
+        block_count: 2,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let identities = materialize(&chain);
+
+    let copies = identities
+        .copies()
+        .iter()
+        .map(|copy| {
+            (
+                copy.population_id().as_str(),
+                copy.individual_id().as_str(),
+                copy.sequence_id().as_str(),
+                copy.copy_index(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut sorted = copies.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        copies, sorted,
+        "copias por población, individuo, secuencia y copia"
+    );
+
+    let haplotypes = identities
+        .haplotypes()
+        .iter()
+        .map(|haplotype| {
+            (
+                haplotype.population_id().as_str(),
+                haplotype.block_id().as_str(),
+                haplotype.haplotype_rank(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut sorted = haplotypes.clone();
+    sorted.sort_unstable();
+    assert_eq!(haplotypes, sorted, "filas por población, bloque y rango");
+
+    let assignments = identities
+        .assignments()
+        .iter()
+        .map(|assignment| {
+            (
+                assignment.population_id().as_str(),
+                assignment.individual_id().as_str(),
+                assignment.sequence_id().as_str(),
+                assignment.copy_index(),
+                assignment.block_id().as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut sorted = assignments.clone();
+    sorted.sort_unstable();
+    assert_eq!(
+        assignments, sorted,
+        "asignaciones por población, individuo, secuencia, copia y bloque"
+    );
+
+    // La quinta componente solo discrimina si ordenar por `block_id` y por
+    // `block_index` dan resultados distintos.
+    let mut by_index = identities
+        .assignments()
+        .iter()
+        .map(|assignment| (assignment.block_index(), assignment.block_id().as_str()))
+        .collect::<Vec<_>>();
+    by_index.sort_unstable();
+    by_index.dedup();
+    assert_eq!(by_index.len(), 2, "el fixture debe tener dos bloques");
+    assert_ne!(
+        by_index[0].1 < by_index[1].1,
+        by_index[0].0 < by_index[1].0,
+        "los dos órdenes deben divergir para que la prueba distinga"
+    );
+    let blocks_per_copy = identities.assignments().len() / identities.copies().len();
+    assert_eq!(
+        blocks_per_copy, 2,
+        "cada copia debe recibir los dos bloques"
+    );
+}
+
+/// Las filas haplotípicas publican **todos** los rangos de la matriz ganadora
+/// con sus alelos literales, que es lo que DTC-089 hace componente del `HAP_`.
+#[test]
+fn the_haplotype_rows_publish_every_rank_with_the_alleles_of_the_winning_matrix() {
+    let root = temporary("haplotype-rows");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 2)],
+        ..dyadic_fixture()
+    };
+    let chain = build_chain(&root, &fixture);
+    let identities = materialize(&chain);
+
+    for haplotype in identities.haplotypes() {
+        let block = chain
+            .search
+            .block(haplotype.population_id(), haplotype.block_index())
+            .expect("bloque ganador");
+        let matrix = block.matrix();
+        let rank = usize::try_from(haplotype.haplotype_rank()).expect("rango");
+        let expected = (0..matrix.site_count())
+            .map(|site| {
+                if matrix.allele(rank, site).expect("alelo") {
+                    '1'
+                } else {
+                    '0'
+                }
+            })
+            .collect::<String>();
+        assert_eq!(haplotype.alleles(), expected);
+        assert_eq!(haplotype.alleles().len(), matrix.site_count());
+    }
+
+    for unit in assign(&chain).units() {
+        let published = identities
+            .haplotypes()
+            .iter()
+            .filter(|haplotype| {
+                haplotype.population_id() == unit.population_id()
+                    && haplotype.block_index() == unit.block_index()
+            })
+            .map(F5HaplotypeIdentity::haplotype_rank)
+            .collect::<Vec<_>>();
+        let haplotype_count = chain
+            .search
+            .block(unit.population_id(), unit.block_index())
+            .expect("bloque")
+            .matrix()
+            .haplotype_count() as u64;
+        assert_eq!(published, (0..haplotype_count).collect::<Vec<_>>());
+
+        // La asignación enlaza exactamente el rango que F5.3.1 sorteó.
+        for seat in unit.assignments() {
+            let assignment = identities
+                .assignments()
+                .iter()
+                .find(|assignment| {
+                    assignment.population_id() == unit.population_id()
+                        && assignment.block_index() == unit.block_index()
+                        && assignment.individual_id() == seat.individual_id()
+                        && assignment.copy_index() == seat.copy_index()
+                })
+                .expect("la asignación publicada de esa copia");
+            assert_eq!(assignment.haplotype_rank(), seat.haplotype_rank());
+            let row = identities
+                .haplotypes()
+                .iter()
+                .find(|haplotype| {
+                    haplotype.population_id() == unit.population_id()
+                        && haplotype.block_index() == unit.block_index()
+                        && haplotype.haplotype_rank() == seat.haplotype_rank()
+                })
+                .expect("la fila publicada de ese rango");
+            assert_eq!(
+                assignment.haplotype_id(),
+                row.haplotype_id(),
+                "el FHA_ debe enlazar el HAP_ del rango que se le asignó"
+            );
+        }
+    }
+}
+
+/// F5 no rompe ni recompone haplotipos: el módulo no nombra un proceso
+/// haplotípico, un cruce, un mosaico ni un mapa de recombinación, y la
+/// identidad de la copia no se deriva de una fase.
+#[test]
+fn the_module_never_names_a_haplotype_process_a_cross_a_mosaic_or_a_map() {
+    let source = include_str!("../src/f5_founders.rs");
+    for forbidden in [
+        "HaplotypeProcess",
+        "haplotype_process",
+        "PhaseId",
+        "phase_id",
+        "mosaic",
+        "mosaico",
+        "recombin",
+        "CrossId",
+        "cross_id",
+        "genetic_map",
+        "recombination_map",
+        "centimorgan",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "F5 no crea mosaicos ni proceso haplotípico: {forbidden}"
+        );
+    }
+    // La búsqueda negativa solo vale si el módulo sí nombra lo suyo.
+    assert!(source.contains("F5FounderCopyScope"));
+    assert!(source.contains("F5BlockHaplotypeAssignmentScope"));
+    assert!(source.contains("copy_index"));
+}
+
+/// Layout, búsqueda y asignación de la **misma** configuración bajo otra
+/// identidad de ejecución.
+///
+/// Los ámbitos RNG de F5 no llevan `execution_id`, de modo que la geometría
+/// sale idéntica y lo único que cambia son los identificadores derivados: es
+/// justo la pieza ajena que la materialización debe reconocer.
+fn chain_under(
+    chain: &Chain,
+    execution: &ExecutionId,
+) -> (F5PhysicalLayout, F5HaplotypeSearch, F5FounderAssignment) {
+    let layout = build_f5_physical_layout(
+        F5LayoutRequest::new(&chain.config, &chain.sealed, execution).expect("solicitud de layout"),
+    )
+    .expect("layout físico");
+    let search = search_f5_haplotypes(&chain.config, &chain.sealed, execution, &layout)
+        .expect("búsqueda haplotípica terminada");
+    let assignment = assign_f5_founders(&chain.config, &chain.sealed, &search)
+        .expect("asignación fundadora completa");
+    (layout, search, assignment)
+}
+
+/// Un layout de **otra referencia** de la misma ejecución publica copias sobre
+/// secuencias que la referencia propia no contiene.
+///
+/// Escenario, referencia, semilla, ejecución y `block_count` coinciden, así que
+/// ni la admisión sellada ni la rederivación de `block_id` lo distinguen: lo
+/// distingue que sus bloques no caben en ningún tramo elegible propio.
+#[test]
+fn a_layout_of_another_reference_in_the_same_execution_is_rejected() {
+    let own_root = temporary("own-reference");
+    let foreign_root = temporary("foreign-reference");
+    let own = build_chain(
+        &own_root,
+        &Fixture {
+            sequences: 1,
+            block_count: 2,
+            ..Fixture::default()
+        },
+    );
+    let foreign = build_chain(
+        &foreign_root,
+        &Fixture {
+            sequences: 2,
+            block_count: 2,
+            ..Fixture::default()
+        },
+    );
+    // El layout ajeno coloca un bloque en `chr2`, que la referencia propia no
+    // tiene: sin la comprobación de tramos se publicarían `FCP_` fantasma.
+    assert!(
+        foreign
+            .layout
+            .blocks()
+            .iter()
+            .any(|block| block.sequence_id().as_str() == "chr2")
+    );
+    let assignment = assign(&own);
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    let error = materialize_f5_founder_identities(
+        &own.config,
+        &own.sealed,
+        &execution,
+        &foreign.layout,
+        &own.search,
+        &assignment,
+    )
+    .expect_err("el layout es de otra referencia");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("layout.geometry")
+    );
+}
+
+/// La dirección contraria también: un layout con **menos** secuencias sitúa sus
+/// bloques en coordenadas que ningún tramo propio contiene.
+#[test]
+fn a_layout_with_coordinates_outside_the_own_tracts_is_rejected() {
+    let own_root = temporary("own-tracts");
+    let foreign_root = temporary("foreign-tracts");
+    let own = build_chain(
+        &own_root,
+        &Fixture {
+            sequences: 2,
+            block_count: 2,
+            ..Fixture::default()
+        },
+    );
+    let foreign = build_chain(
+        &foreign_root,
+        &Fixture {
+            sequences: 1,
+            block_count: 2,
+            ..Fixture::default()
+        },
+    );
+    let assignment = assign(&own);
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    let error = materialize_f5_founder_identities(
+        &own.config,
+        &own.sealed,
+        &execution,
+        &foreign.layout,
+        &own.search,
+        &assignment,
+    )
+    .expect_err("el layout ocupa coordenadas ajenas");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("layout.geometry")
+    );
+}
+
+/// El recuento de bloques se comprueba, y no lo cubre la contención: los tres
+/// bloques del layout ajeno caben de sobra dentro del único tramo propio.
+#[test]
+fn a_layout_with_another_block_count_is_rejected() {
+    let own_root = temporary("own-block-count");
+    let foreign_root = temporary("foreign-block-count");
+    let own = build_chain(
+        &own_root,
+        &Fixture {
+            block_count: 2,
+            slack: 2,
+            ..Fixture::default()
+        },
+    );
+    let foreign = build_chain(
+        &foreign_root,
+        &Fixture {
+            block_count: 3,
+            ..Fixture::default()
+        },
+    );
+    assert_eq!(foreign.layout.blocks().len(), 3);
+    for block in foreign.layout.blocks() {
+        assert!(
+            block.end_1based() <= 12,
+            "el layout ajeno debe caber en el tramo propio para aislar el recuento"
+        );
+    }
+    let assignment = assign(&own);
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    let error = materialize_f5_founder_identities(
+        &own.config,
+        &own.sealed,
+        &execution,
+        &foreign.layout,
+        &own.search,
+        &assignment,
+    )
+    .expect_err("el layout tiene otro número de bloques");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("preflight.block_count")
+    );
+}
+
+/// Una asignación construida sobre la búsqueda de **otra** ejecución nombra
+/// bloques con otros `BLK_`.
+#[test]
+fn an_assignment_from_another_execution_is_rejected() {
+    let root = temporary("foreign-assignment");
+    let chain = build_chain(&root, &Fixture::default());
+    let own = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    let other = ExecutionId::parse("RUN_BQWGL4DQ5HJMZYWT3U4EDNLTJ4", "test").expect("execution");
+    let (_, _, foreign_assignment) = chain_under(&chain, &other);
+    let error = materialize_f5_founder_identities(
+        &chain.config,
+        &chain.sealed,
+        &own,
+        &chain.layout,
+        &chain.search,
+        &foreign_assignment,
+    )
+    .expect_err("la asignación es de otra ejecución");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("assignment.identity")
+    );
+}
+
+/// `alleles` debe medir los `S` sitios de **su** bloque: una matriz ganadora de
+/// otra geometría se rechaza antes de derivar ningún `HAP_`.
+#[test]
+fn a_winning_matrix_with_another_site_count_is_rejected() {
+    let own_root = temporary("own-sites");
+    let foreign_root = temporary("foreign-sites");
+    let own = build_chain(&own_root, &Fixture::default());
+    let foreign = build_chain(
+        &foreign_root,
+        &Fixture {
+            gap: 2,
+            bins: vec![(1, 2, 1.0, 0.05)],
+            ..Fixture::default()
+        },
+    );
+    let own_sites = own.layout.blocks()[0].sites().len();
+    let foreign_sites = foreign.search.blocks()[0].matrix().site_count();
+    assert_ne!(
+        own_sites, foreign_sites,
+        "el fixture ajeno debe tener otra cardinalidad de sitios"
+    );
+    let assignment = assign(&own);
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("execution");
+    let error = materialize_f5_founder_identities(
+        &own.config,
+        &own.sealed,
+        &execution,
+        &own.layout,
+        &foreign.search,
+        &assignment,
+    )
+    .expect_err("la matriz no tiene los sitios de su bloque");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("search.geometry")
+    );
+}
+
+/// Un `founder_id` literal con el texto exacto de un `IND_` derivado de una
+/// `founder_key` de otra subpoblación es el mismo fundador dos veces.
+///
+/// La admisión no puede verlo —trabaja sobre el documento declarado, donde el
+/// identificador derivado todavía no existe—, así que lo rechaza el censo.
+#[test]
+fn a_literal_founder_id_equal_to_a_derived_one_is_rejected() {
+    let derived_root = temporary("derived-identity");
+    let colliding_root = temporary("colliding-identity");
+    let keys = ["k0", "k1"];
+    let derived_fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P2", 2).keys().founders(&keys)],
+        ..Fixture::default()
+    };
+    let general = derived_fixture.write(&derived_root);
+    let config = load_and_validate_f5_config(&general).expect("configuración F5 admitida");
+    let rosters = resolve_f5_founder_roster(&config).expect("censo fundador");
+    let derived = rosters[0].individuals()[0]
+        .individual_id()
+        .as_str()
+        .to_owned();
+    assert!(derived.starts_with("IND_"), "{derived} debe ser derivado");
+    let _ = fs::remove_dir_all(&derived_root);
+
+    let literal = [derived.as_str()];
+    let colliding = Fixture {
+        subpopulations: vec![
+            Subpopulation::new("P1", 1).founders(&literal),
+            Subpopulation::new("P2", 2).keys().founders(&keys),
+        ],
+        ..Fixture::default()
+    };
+    let general = colliding.write(&colliding_root);
+    let config = load_and_validate_f5_config(&general)
+        .expect("la admisión no puede distinguir el literal de un derivado");
+    let error = resolve_f5_founder_roster(&config).expect_err("el mismo fundador dos veces");
+    assert_eq!(error.code(), "GPS-CONF-101");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("subpopulations.founder_ids,subpopulations.founder_keys")
+    );
+    assert!(
+        format!("{error:?}").contains(&derived),
+        "el diagnóstico nombra al fundador repetido"
+    );
+    let _ = fs::remove_dir_all(&colliding_root);
+}
+
+/// El orden de `sequence_id` es el **lexicográfico** de la columna, no el de
+/// aparición en el FASTA.
+///
+/// Con diez secuencias los dos órdenes divergen: el FASTA da `chr1 … chr10` y
+/// la columna da `chr1, chr10, chr2, …`. Es el fixture que distingue las dos
+/// lecturas posibles de la clave que DTC-089 escribe como «secuencia».
+#[test]
+fn the_sequence_key_is_lexicographic_and_not_the_fasta_order() {
+    let root = temporary("lexicographic-sequences");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 1)],
+        sequences: 10,
+        block_count: 10,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let identities = materialize(&chain);
+
+    let published = identities
+        .copies()
+        .iter()
+        .map(|copy| copy.sequence_id().as_str())
+        .collect::<Vec<_>>();
+    let mut lexicographic = published.clone();
+    lexicographic.sort_unstable();
+    assert_eq!(
+        published, lexicographic,
+        "la columna ordena su propio valor"
+    );
+
+    let mut order = Vec::new();
+    for sequence in &published {
+        if order.last() != Some(sequence) {
+            order.push(*sequence);
+        }
+    }
+    let mut fasta = chain
+        .layout
+        .blocks()
+        .iter()
+        .map(|block| (block.sequence_ordinal(), block.sequence_id().as_str()))
+        .collect::<Vec<_>>();
+    fasta.sort_unstable();
+    fasta.dedup();
+    let fasta_order = fasta
+        .iter()
+        .map(|(_, sequence)| *sequence)
+        .collect::<Vec<_>>();
+    assert_eq!(order.len(), 10);
+    assert_eq!(fasta_order.len(), 10);
+    assert_eq!(order[1], "chr10", "lexicográfico: chr10 va detrás de chr1");
+    assert_eq!(fasta_order[1], "chr2", "FASTA: chr2 va detrás de chr1");
+    assert_ne!(
+        order, fasta_order,
+        "con chr1…chr10 los dos órdenes tienen que divergir"
+    );
+    assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// El modo controlado materializa sus enlaces igual que el probabilístico: la
+/// permutación de F5.3.1 reparte los rangos y cada copia conserva su `FCP_`.
+#[test]
+fn the_controlled_mode_materializes_its_links() {
+    let root = temporary("controlled-links");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 8).sampling("controlled")],
+        ..dyadic_fixture()
+    };
+    let chain = build_chain(&root, &fixture);
+    let assignment = assign(&chain);
+    let identities = materialize(&chain);
+
+    assert!(
+        assignment
+            .units()
+            .iter()
+            .all(|unit| unit.mode() == F5SamplingMode::Controlled && unit.quota().is_some()),
+        "el fixture debe resolverse en controlado"
+    );
+    assert_eq!(identities.copies().len(), 16, "N=8 con P=2");
+    for unit in assignment.units() {
+        for seat in unit.assignments() {
+            let row = identities
+                .assignments()
+                .iter()
+                .find(|row| {
+                    row.population_id() == unit.population_id()
+                        && row.block_index() == unit.block_index()
+                        && row.individual_id() == seat.individual_id()
+                        && row.copy_index() == seat.copy_index()
+                })
+                .expect("la asignación publicada de esa copia");
+            assert_eq!(row.haplotype_rank(), seat.haplotype_rank());
+            let expected = identities
+                .haplotypes()
+                .iter()
+                .find(|haplotype| {
+                    haplotype.population_id() == unit.population_id()
+                        && haplotype.block_index() == unit.block_index()
+                        && haplotype.haplotype_rank() == seat.haplotype_rank()
+                })
+                .expect("la fila publicada de ese rango");
+            assert_eq!(row.haplotype_id(), expected.haplotype_id());
+        }
+    }
+    assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// Con `F>0` la copia 1 puede reutilizar la fila de la copia 0, pero **no** su
+/// identidad: cada copia conserva su `FCP_` y cada bloque su `FHA_`.
+#[test]
+fn a_reused_row_never_collapses_two_copies_into_one_identity() {
+    let root = temporary("inbreeding-links");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 6).inbreeding("0.5")],
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let assignment = assign(&chain);
+    let identities = materialize(&chain);
+
+    let reused = assignment
+        .units()
+        .iter()
+        .flat_map(|unit| {
+            unit.assignments()
+                .iter()
+                .filter(|seat| seat.copy_index() == 1)
+                .filter(|seat| {
+                    unit.assignments().iter().any(|other| {
+                        other.copy_index() == 0
+                            && other.individual_id() == seat.individual_id()
+                            && other.haplotype_rank() == seat.haplotype_rank()
+                    })
+                })
+        })
+        .count();
+    assert!(reused > 0, "con F=1/2 alguna copia debe compartir fila");
+
+    let copy_ids = identities
+        .copies()
+        .iter()
+        .map(|copy| copy.founder_copy_id().as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(copy_ids.len(), identities.copies().len());
+    let assignment_ids = identities
+        .assignments()
+        .iter()
+        .map(|row| row.block_assignment_id().as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(assignment_ids.len(), identities.assignments().len());
+    assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// Una secuencia **retenida por la referencia pero sin bloques** no aporta
+/// ninguna copia fundadora, y eso no es un error.
+///
+/// DTC-089 identifica la copia «por secuencia … a través de todos los bloques
+/// de esa secuencia», y las tuplas FCP son las de las secuencias que el layout
+/// puebla. La consecuencia está escrita en DTC-089 y es deliberada: el fundador
+/// no tiene copia de la secuencia vacía en `truth.jsonl`, aunque la referencia
+/// la retenga.
+///
+/// El caso exige holgura: con `slack: 1` cada secuencia recibe exactamente sus
+/// bloques y la divergencia es estructuralmente imposible. Con `slack: 3` y
+/// esta semilla el layout coloca los dos bloques en `chr1` y deja `chr2` vacía.
+#[test]
+fn a_retained_sequence_without_blocks_publishes_no_copy() {
+    const SEED: &str = "0000000000000000000000000000000000000000000000000000000000000001";
+    let root = temporary("unpopulated-sequence");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 1)],
+        sequences: 2,
+        block_count: 2,
+        slack: 3,
+        seed: SEED,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    assert_eq!(
+        chain.sealed.retained_sequence_ids(),
+        2,
+        "la referencia retiene chr1 y chr2"
+    );
+    let mut populated = chain
+        .layout
+        .blocks()
+        .iter()
+        .map(|block| block.sequence_id().as_str())
+        .collect::<Vec<_>>();
+    populated.sort_unstable();
+    populated.dedup();
+    assert_eq!(
+        populated,
+        vec!["chr1"],
+        "el fixture debe dejar chr2 retenida y sin bloques"
+    );
+
+    let identities = materialize(&chain);
+    let published = identities
+        .copies()
+        .iter()
+        .map(|copy| copy.sequence_id().as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        published,
+        BTreeSet::from(["chr1"]),
+        "las copias son las de las secuencias pobladas, no las retenidas"
+    );
+    assert_eq!(
+        identities.copies().len(),
+        2,
+        "un individuo, dos copias, una sola secuencia poblada"
+    );
+    assert!(
+        (identities.copies().len() as u64) < chain.sealed.retained_sequence_ids() * 2,
+        "publicar por secuencia retenida daría el doble de copias"
+    );
+    // Toda copia publicada recibe asignación en los dos bloques de su
+    // secuencia: no queda ninguna copia huérfana ni ninguna secuencia a medias.
+    assert_eq!(identities.assignments().len(), 4);
+    assert_every_identity_is_rederivable(&chain, &identities);
 }

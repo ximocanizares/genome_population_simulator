@@ -1731,7 +1731,19 @@ cerrados para la proyección F5:
   coinciden con locus y alelos tipados.
 
 La proyección emite una `haplotype_copy` por tupla FCP y un genotipo SNP por
-fundador y sitio a partir de FHA→HAP. Se ordenan primero las copias por
+fundador y sitio a partir de FHA→HAP. Las tuplas FCP son exactamente el producto
+de las subpoblaciones, sus fundadores, las secuencias que el layout **puebla** y
+`copy_index` en `0..P-1`: una secuencia que la referencia retiene pero que no
+recibe ningún bloque no aporta ninguna copia, igual que no aporta ninguna fila a
+`f5-founders.tsv`. La consecuencia es deliberada y no se suaviza: en una
+ejecución cuya referencia retiene 25 secuencias y cuyo layout puebla 24, ningún
+fundador tiene copia de la secuencia 25 en `truth.jsonl`, aunque la referencia la
+retenga y las fases posteriores la hereden; un lector que espere una copia por
+secuencia retenida está leyendo mal el contrato. La alternativa —materializar
+también las copias vacías— obligaría a que la admisión sellara los
+identificadores de secuencia y no solo su recuento, y rechazar la divergencia
+tumbaría configuraciones legítimas, porque con muchas secuencias y pocos bloques
+lo normal es que la mayoría no reciba ninguno. Se ordenan primero las copias por
 referencia, población, individuo, secuencia y fase, y después los genotipos por
 referencia, población, bloque, sitio e individuo. El manifiesto no puede
 declarar éxito si falta el fichero, su hash no coincide o un reconstructor que

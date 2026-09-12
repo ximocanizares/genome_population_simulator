@@ -28,21 +28,30 @@
 //! esquema publicado tiene dónde escribirlo. Una búsqueda negativa sobre el
 //! módulo impide que la fórmula por contribuciones gaméticas de F7.3 aparezca.
 //!
+//! F5.3.3 añade la sexta pieza, que no decide nada y solo materializa: las
+//! identidades de fundador y su pertenencia única —`IndividualId`, `FCP_` por
+//! secuencia y copia, `HAP_` por fila haplotípica y `FHA_` por bloque como
+//! asignación separada— derivadas con DTC-039 **antes de toda salida**.
+//!
 //! Lo que **no** hace, por pertenecer a otros hitos: la fórmula de Ne por
-//! contribuciones gaméticas es de F7.3, y las identidades `FCP_`/`FHA_` y la
-//! pertenencia publicada son de F5.3.3.
+//! contribuciones gaméticas es de F7.3, y escribir los siete TSV y la
+//! proyección de verdad es de F5.4.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::application::EffectiveF5Config;
 use crate::configuration::{DeclaredF5SamplingOverride, DeclaredF5Subpopulation};
 use crate::diagnostics::Diagnostic;
+use crate::f5_haplotypes::{F5AlleleMatrix, F5BlockHaplotypes};
+use crate::f5_layout::F5PhysicalLayout;
 use crate::f5_marginals::NeumaierSum;
 use crate::f5_preflight::{F5OtherResources, SealedF5Admission};
 use crate::f5_search::F5HaplotypeSearch;
 use crate::identity::{
-    AutomaticIdRequest, F5BlockId, FounderKey, IdClass, IdentityRegistry, IndividualId,
-    PopulationId, ScenarioId,
+    AutomaticIdRequest, ExecutionId, F5BlockHaplotypeAssignmentScope, F5BlockId,
+    F5FounderCopyScope, F5HaplotypeId, F5IdentityContext, F5IdentityRegistry,
+    F5PopulationIdentityContext, FounderCopyId, FounderHaplotypeAssignmentId, FounderKey, IdClass,
+    IdentityRegistry, IndividualId, PopulationId, ReferenceId, ScenarioId, SequenceId,
 };
 use crate::randomness::{
     F5RandomDecision, LocalRng, RandomWordSource, RootSeed, derive_f5_subseed,
@@ -645,11 +654,24 @@ pub fn assign_f5_founders(
 /// `founder_key` deriva el suyo con el contrato población×clave de REQ-IND-25,
 /// el mismo que ya usa la vía F1/F2, sin ordinal físico.
 ///
+/// DTC-089 exige que `IndividualId` identifique al fundador **una sola vez en
+/// toda la ejecución**. La admisión ya rechaza un `founder_id` literal repetido
+/// globalmente y el registro de identidades rechaza dos claves que deriven el
+/// mismo identificador, pero nadie cruzaba las dos mitades: un `founder_id`
+/// literal con el texto exacto de un `IND_` derivado de una `founder_key` de
+/// otra subpoblación es sintácticamente válido y pasaba la admisión. Aquí se
+/// cierra, que es el primer punto donde ambos conjuntos existen a la vez: la
+/// admisión trabaja sobre el documento declarado, donde los identificadores
+/// derivados todavía no se han construido, y derivarlos allí obligaría a la
+/// máquina de admisión a abrir la derivación de identidades con la semilla
+/// raíz, cosa que hoy no hace.
+///
 /// # Errors
 ///
 /// `GPS-CONF-101` si la subpoblación no conserva exactamente un conjunto de
-/// fundadores, si un identificador no es válido, si `C` desborda `u64` o si la
-/// derivación de una clave colisiona.
+/// fundadores, si un identificador no es válido, si `C` desborda `u64`, si la
+/// derivación de una clave colisiona o si un mismo `IndividualId` aparece en
+/// más de una subpoblación.
 pub fn resolve_f5_founder_roster(
     config: &EffectiveF5Config,
 ) -> Result<Vec<F5FounderRoster>, Diagnostic> {
@@ -658,6 +680,7 @@ pub fn resolve_f5_founder_roster(
     let ploidy = u64::from(config.ploidy());
     let mut registry = IdentityRegistry::default();
     let mut rosters = Vec::with_capacity(config.declared_scenario().subpopulations.len());
+    let mut declared_individuals: BTreeSet<IndividualId> = BTreeSet::new();
     for subpopulation in &config.declared_scenario().subpopulations {
         let population_id =
             PopulationId::parse(subpopulation.population_id.value().clone(), "population_id")
@@ -683,6 +706,18 @@ pub fn resolve_f5_founder_roster(
             subpopulation,
             &mut registry,
         )?;
+        for individual in &individuals {
+            if !declared_individuals.insert(individual.individual_id.clone()) {
+                return Err(configuration(
+                    config,
+                    "subpopulations.founder_ids,subpopulations.founder_keys",
+                    format!(
+                        "el fundador {} aparece en más de una subpoblación, y DTC-089 lo identifica una sola vez en toda la ejecución",
+                        individual.individual_id.as_str()
+                    ),
+                ));
+            }
+        }
         individuals.sort_by(|left, right| left.individual_id.cmp(&right.individual_id));
         if individuals.len() as u64 != individual_count {
             return Err(configuration(
@@ -1886,6 +1921,611 @@ fn realized_diploid_f(
 }
 
 // ---------------------------------------------------------------------------
+// F5.3.3 — identidades fundadoras, pertenencia y enlaces `FCP_`/`FHA_`→`HAP_`
+// ---------------------------------------------------------------------------
+
+/// Copia fundadora persistente: su `FCP_` y la subpoblación a la que
+/// pertenece.
+///
+/// La tupla publicada es exactamente la que DTC-089 da a la proyección de
+/// verdad —`(reference_id, individual_id, sequence_id, copy_index)`— más la
+/// pertenencia, de modo que un lector rederiva el `FCP_` con DTC-039 sin
+/// preguntar al productor. La referencia es única por ejecución F5 y vive en la
+/// configuración efectiva, no en cada fila.
+///
+/// La copia se identifica por su índice, no por una fase: en F5 no hay meiosis
+/// y el identificador de fase es aportado por la usuaria y sin constructor F5
+/// (F5-R04).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct F5FounderCopy {
+    population_id: PopulationId,
+    individual_id: IndividualId,
+    sequence_id: SequenceId,
+    copy_index: u32,
+    founder_copy_id: FounderCopyId,
+}
+
+impl F5FounderCopy {
+    /// La pertenencia de la copia: la única subpoblación que la contiene.
+    #[must_use]
+    pub const fn population_id(&self) -> &PopulationId {
+        &self.population_id
+    }
+    #[must_use]
+    pub const fn individual_id(&self) -> &IndividualId {
+        &self.individual_id
+    }
+    #[must_use]
+    pub const fn sequence_id(&self) -> &SequenceId {
+        &self.sequence_id
+    }
+    #[must_use]
+    pub const fn copy_index(&self) -> u32 {
+        self.copy_index
+    }
+    #[must_use]
+    pub const fn founder_copy_id(&self) -> &FounderCopyId {
+        &self.founder_copy_id
+    }
+}
+
+/// Fila haplotípica materializada de un bloque×subpoblación: su rango, sus
+/// alelos y su `HAP_`.
+///
+/// `alleles` es la fila de la matriz ganadora tal cual: exactamente `S`
+/// caracteres `0`/`1`. La polaridad de DTC-089 es una propiedad publicada del
+/// sitio en `f5-frequencies.tsv` y no reescribe estos bits.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct F5HaplotypeIdentity {
+    population_id: PopulationId,
+    block_id: F5BlockId,
+    block_index: u64,
+    haplotype_rank: u64,
+    alleles: String,
+    haplotype_id: F5HaplotypeId,
+}
+
+impl F5HaplotypeIdentity {
+    #[must_use]
+    pub const fn population_id(&self) -> &PopulationId {
+        &self.population_id
+    }
+    #[must_use]
+    pub const fn block_id(&self) -> &F5BlockId {
+        &self.block_id
+    }
+    /// El índice que DTC-039 usa como componente del `HAP_`; el orden canónico
+    /// del layout lo recupera desde `f5-block-layout.tsv`.
+    #[must_use]
+    pub const fn block_index(&self) -> u64 {
+        self.block_index
+    }
+    #[must_use]
+    pub const fn haplotype_rank(&self) -> u64 {
+        self.haplotype_rank
+    }
+    #[must_use]
+    pub fn alleles(&self) -> &str {
+        &self.alleles
+    }
+    #[must_use]
+    pub const fn haplotype_id(&self) -> &F5HaplotypeId {
+        &self.haplotype_id
+    }
+}
+
+/// Asignación por bloque de una copia a una fila haplotípica.
+///
+/// DTC-089 es explícita: `FHA_` **no es una copia**, es la asignación por
+/// bloque a un `HAP_` y nunca sustituye la identidad persistente de la copia.
+/// Por eso esta fila conserva las dos identidades y no deriva una de la otra.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct F5BlockAssignment {
+    population_id: PopulationId,
+    individual_id: IndividualId,
+    sequence_id: SequenceId,
+    copy_index: u32,
+    block_id: F5BlockId,
+    block_index: u64,
+    founder_copy_id: FounderCopyId,
+    block_assignment_id: FounderHaplotypeAssignmentId,
+    haplotype_id: F5HaplotypeId,
+    haplotype_rank: u64,
+}
+
+impl F5BlockAssignment {
+    #[must_use]
+    pub const fn population_id(&self) -> &PopulationId {
+        &self.population_id
+    }
+    #[must_use]
+    pub const fn individual_id(&self) -> &IndividualId {
+        &self.individual_id
+    }
+    #[must_use]
+    pub const fn sequence_id(&self) -> &SequenceId {
+        &self.sequence_id
+    }
+    #[must_use]
+    pub const fn copy_index(&self) -> u32 {
+        self.copy_index
+    }
+    #[must_use]
+    pub const fn block_id(&self) -> &F5BlockId {
+        &self.block_id
+    }
+    #[must_use]
+    pub const fn block_index(&self) -> u64 {
+        self.block_index
+    }
+    #[must_use]
+    pub const fn founder_copy_id(&self) -> &FounderCopyId {
+        &self.founder_copy_id
+    }
+    #[must_use]
+    pub const fn block_assignment_id(&self) -> &FounderHaplotypeAssignmentId {
+        &self.block_assignment_id
+    }
+    #[must_use]
+    pub const fn haplotype_id(&self) -> &F5HaplotypeId {
+        &self.haplotype_id
+    }
+    #[must_use]
+    pub const fn haplotype_rank(&self) -> u64 {
+        self.haplotype_rank
+    }
+}
+
+/// Repositorio de identidades fundadoras materializado **antes de toda
+/// salida**.
+///
+/// Contiene las tres poblaciones de identidades que F5.4 escribe y ninguna
+/// más: las copias `FCP_` con su pertenencia, las filas `HAP_` de cada
+/// bloque×subpoblación y las asignaciones `FHA_` que enlazan unas con otras.
+/// No abre ningún RNG ni decide ninguna asignación: consume la que F5.3.1 y
+/// F5.3.2 ya resolvieron.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct F5FounderIdentities {
+    copies: Vec<F5FounderCopy>,
+    haplotypes: Vec<F5HaplotypeIdentity>,
+    assignments: Vec<F5BlockAssignment>,
+    membership: BTreeMap<FounderCopyId, usize>,
+}
+
+impl F5FounderIdentities {
+    /// Copias ordenadas por `population_id`, `individual_id`, `sequence_id` y
+    /// `copy_index`.
+    #[must_use]
+    pub fn copies(&self) -> &[F5FounderCopy] {
+        &self.copies
+    }
+    /// Filas haplotípicas ordenadas por `population_id`, `block_id` y
+    /// `haplotype_rank`, que es la clave de `f5-haplotypes.tsv`.
+    #[must_use]
+    pub fn haplotypes(&self) -> &[F5HaplotypeIdentity] {
+        &self.haplotypes
+    }
+    /// Asignaciones ordenadas por `population_id`, `individual_id`,
+    /// `sequence_id`, `copy_index` y `block_id`, que es la clave de
+    /// `f5-founders.tsv`.
+    #[must_use]
+    pub fn assignments(&self) -> &[F5BlockAssignment] {
+        &self.assignments
+    }
+
+    /// Resuelve la pertenencia de una copia desde su identidad publicada.
+    ///
+    /// Es la operación que la proyección de verdad necesita para escribir
+    /// `founder_membership` sin inferir la subpoblación del identificador, y
+    /// es total e inyectiva por construcción: cada `FCP_` se deriva una sola
+    /// vez y el registro de identidades rechaza cualquier repetición con
+    /// `GPS-DOMAIN-002`.
+    #[must_use]
+    pub fn copy(&self, founder_copy_id: &FounderCopyId) -> Option<&F5FounderCopy> {
+        self.membership
+            .get(founder_copy_id)
+            .and_then(|position| self.copies.get(*position))
+    }
+}
+
+/// Lo único que la identidad necesita saber de un bloque colocado.
+#[derive(Clone, Debug)]
+struct BlockGeometry {
+    block_id: F5BlockId,
+    sequence_id: SequenceId,
+    site_count: usize,
+}
+
+/// Materializa las identidades de fundador y su pertenencia única antes de
+/// toda salida.
+///
+/// Deriva con DTC-039/DTC-037 —nunca por concatenación textual— el `FCP_` de
+/// cada copia por secuencia, el `HAP_` de cada fila haplotípica y el `FHA_` de
+/// cada asignación por bloque, y comprueba que ningún fundador pertenece a más
+/// de una subpoblación. Las copias existen por cada secuencia que el layout
+/// puebla: DTC-089 identifica la copia «por secuencia … a través de todos los
+/// bloques de esa secuencia», y una secuencia sin bloques no aporta ninguna
+/// fila a `f5-founders.tsv` ni ningún genotipo a la proyección de verdad.
+///
+/// Exige la admisión sellada y la identidad de ejecución porque el layout que
+/// aporta las secuencias debe ser el de esta ejecución: cada `block_id` se
+/// rederiva y cada bloque debe caber dentro de un tramo elegible de **esta**
+/// admisión, con su mismo ordinal de secuencia y sus mismas coordenadas.
+///
+/// # Errors
+///
+/// - `GPS-CONF-101` si la admisión sellada no es la de esta configuración, si
+///   el escenario, la referencia o la semilla efectiva no son canónicos, si el
+///   layout recibido no lo produjo esta ejecución o no cabe en sus tramos
+///   elegibles, si la asignación recibida nombra bloques de otra ejecución, si
+///   la matriz ganadora no tiene los sitios de su bloque o si un
+///   `individual_id` aparece en más de una subpoblación.
+/// - `GPS-DOMAIN-002` si la derivación de un `FCP_`, un `HAP_` o un `FHA_`
+///   repite un identificador ya registrado.
+/// - `GPS-INTERNAL-101` si una unidad asignada nombra un bloque, una matriz,
+///   una copia o un rango haplotípico que sus productores no publicaron.
+pub fn materialize_f5_founder_identities(
+    config: &EffectiveF5Config,
+    sealed: &SealedF5Admission,
+    execution_id: &ExecutionId,
+    layout: &F5PhysicalLayout,
+    search: &F5HaplotypeSearch,
+    assignment: &F5FounderAssignment,
+) -> Result<F5FounderIdentities, Diagnostic> {
+    if !sealed.matches_admission(config, F5OtherResources::default()) {
+        return Err(configuration(
+            config,
+            "preflight.binding",
+            "la admisión sellada no corresponde a esta configuración",
+        ));
+    }
+    let scenario_id = ScenarioId::parse(config.scenario_id(), "scenario_id")
+        .map_err(|_| configuration(config, "scenario_id", "no es una identidad tipada"))?;
+    let reference_id = ReferenceId::parse(config.reference_id(), "reference_id")
+        .map_err(|_| configuration(config, "reference_id", "no es una identidad tipada"))?;
+    let root_seed = RootSeed::parse("seed", config.seed())
+        .map_err(|_| configuration(config, "seed", "la semilla efectiva no es canónica"))?;
+    let context = F5IdentityContext::new(root_seed, execution_id, &scenario_id, &reference_id);
+    let geometry = index_layout_blocks(config, context, layout, sealed)?;
+    // Las secuencias pobladas son el segundo eje de la identidad de copia; el
+    // conjunto ordenado las recorre una sola vez por individuo.
+    let sequences: BTreeSet<SequenceId> = geometry
+        .values()
+        .map(|block| block.sequence_id.clone())
+        .collect();
+
+    let mut registry = F5IdentityRegistry::default();
+    if let Some((individual_id, previous, current)) = conflicting_membership(assignment.rosters()) {
+        return Err(configuration(
+            config,
+            "subpopulations.founder_ids,subpopulations.founder_keys",
+            format!(
+                "el fundador {} pertenece a {} y a {}, y DTC-089 lo identifica una sola vez en toda la ejecución",
+                individual_id.as_str(),
+                previous.as_str(),
+                current.as_str()
+            ),
+        ));
+    }
+
+    // Los tres bucles recorren el censo en su orden canónico —subpoblaciones
+    // por `population_id`, individuos por `individual_id`, secuencias por
+    // `sequence_id` y copias por índice—, de modo que `copies` queda ordenado
+    // por la clave con la que después se busca cada pertenencia.
+    let ploidy = u32::from(config.ploidy());
+    let mut copies = Vec::new();
+    let mut membership: BTreeMap<FounderCopyId, usize> = BTreeMap::new();
+    for roster in assignment.rosters() {
+        let population = F5PopulationIdentityContext::new(context, roster.population_id());
+        for individual in roster.individuals() {
+            for sequence_id in &sequences {
+                for copy_index in 0..ploidy {
+                    let founder_copy_id = registry.derive_founder_copy(
+                        population,
+                        F5FounderCopyScope::new(
+                            individual.individual_id(),
+                            sequence_id,
+                            copy_index,
+                        ),
+                    )?;
+                    let position = copies.len();
+                    membership.insert(founder_copy_id.clone(), position);
+                    copies.push(F5FounderCopy {
+                        population_id: roster.population_id().clone(),
+                        individual_id: individual.individual_id().clone(),
+                        sequence_id: sequence_id.clone(),
+                        copy_index,
+                        founder_copy_id,
+                    });
+                }
+            }
+        }
+    }
+
+    // Un índice por bloque×subpoblación; barrer la lista de la búsqueda una vez
+    // por unidad recorrería `B*P` filas `B*P` veces.
+    let winners: BTreeMap<(&PopulationId, u64), &F5BlockHaplotypes> = search
+        .blocks()
+        .iter()
+        .map(|block| ((block.population_id(), block.block_index()), block))
+        .collect();
+
+    let mut haplotypes = Vec::new();
+    let mut assignments = Vec::new();
+    for unit in assignment.units() {
+        let block = geometry.get(&unit.block_index()).ok_or_else(|| {
+            internal(
+                &scenario_id,
+                "una unidad asignada nombra un bloque que el layout no colocó",
+            )
+        })?;
+        // `BLK_` se deriva del índice y del contexto, así que dos piezas de la
+        // misma ejecución no pueden discrepar aquí; una asignación construida
+        // sobre la búsqueda de **otra** ejecución sí.
+        if &block.block_id != unit.block_id() {
+            return Err(configuration(
+                config,
+                "assignment.identity",
+                "la asignación recibida no la produjo esta ejecución: su identificador de bloque no coincide con el del layout",
+            ));
+        }
+        let population = F5PopulationIdentityContext::new(context, unit.population_id());
+        let matrix = winners
+            .get(&(unit.population_id(), unit.block_index()))
+            .ok_or_else(|| {
+                internal(
+                    &scenario_id,
+                    "una unidad asignada nombra un bloque×subpoblación que la búsqueda no resolvió",
+                )
+            })?
+            .matrix();
+        // La matriz ganadora tiene una columna por sitio de **su** bloque: sin
+        // esta comprobación, `alleles` podría medir los sitios de otro y nadie
+        // lo notaría, porque el `HAP_` se deriva de la cadena publicada.
+        if matrix.site_count() != block.site_count {
+            return Err(configuration(
+                config,
+                "search.geometry",
+                format!(
+                    "la matriz ganadora del bloque {} tiene {} sitios y su bloque colocado tiene {}",
+                    unit.block_index(),
+                    matrix.site_count(),
+                    block.site_count
+                ),
+            ));
+        }
+        let mut rows = Vec::with_capacity(matrix.haplotype_count());
+        for rank in 0..matrix.haplotype_count() {
+            let alleles = allele_string(matrix, rank).ok_or_else(|| {
+                internal(
+                    &scenario_id,
+                    "la matriz ganadora no conserva la fila de un rango haplotípico",
+                )
+            })?;
+            let haplotype_rank = rank as u64;
+            let haplotype_id = registry.derive_haplotype(
+                population,
+                unit.block_index(),
+                haplotype_rank,
+                &alleles,
+            )?;
+            rows.push(haplotype_id.clone());
+            haplotypes.push(F5HaplotypeIdentity {
+                population_id: unit.population_id().clone(),
+                block_id: block.block_id.clone(),
+                block_index: unit.block_index(),
+                haplotype_rank,
+                alleles,
+                haplotype_id,
+            });
+        }
+        for seat in unit.assignments() {
+            // `copies` ya está en la clave que buscamos —población, individuo,
+            // secuencia y copia—, de modo que la pertenencia se localiza sin
+            // construir ningún índice paralelo ni clonar la clave.
+            let position = copies
+                .binary_search_by(|copy| {
+                    (
+                        &copy.population_id,
+                        &copy.individual_id,
+                        &copy.sequence_id,
+                        copy.copy_index,
+                    )
+                        .cmp(&(
+                            unit.population_id(),
+                            seat.individual_id(),
+                            &block.sequence_id,
+                            seat.copy_index(),
+                        ))
+                })
+                .map_err(|_| {
+                    internal(
+                        &scenario_id,
+                        "una asignación nombra una copia sin pertenencia materializada",
+                    )
+                })?;
+            let founder_copy_id = copies[position].founder_copy_id.clone();
+            let haplotype_id = usize::try_from(seat.haplotype_rank())
+                .ok()
+                .and_then(|rank| rows.get(rank))
+                .ok_or_else(|| {
+                    internal(
+                        &scenario_id,
+                        "una asignación nombra un rango haplotípico que la matriz no contiene",
+                    )
+                })?
+                .clone();
+            let block_assignment_id = registry.derive_block_haplotype_assignment(
+                population,
+                F5BlockHaplotypeAssignmentScope::new(
+                    unit.block_index(),
+                    &founder_copy_id,
+                    &haplotype_id,
+                ),
+            )?;
+            assignments.push(F5BlockAssignment {
+                population_id: unit.population_id().clone(),
+                individual_id: seat.individual_id().clone(),
+                sequence_id: block.sequence_id.clone(),
+                copy_index: seat.copy_index(),
+                block_id: block.block_id.clone(),
+                block_index: unit.block_index(),
+                founder_copy_id,
+                block_assignment_id,
+                haplotype_id,
+                haplotype_rank: seat.haplotype_rank(),
+            });
+        }
+    }
+    // Las unidades llegan por `population_id`+`block_id`; `f5-founders.tsv` se
+    // indexa por población, individuo, secuencia, copia y bloque. La clave es
+    // única en cada fila, de modo que el orden es total.
+    assignments.sort_by(|left, right| {
+        (
+            &left.population_id,
+            &left.individual_id,
+            &left.sequence_id,
+            left.copy_index,
+            &left.block_id,
+        )
+            .cmp(&(
+                &right.population_id,
+                &right.individual_id,
+                &right.sequence_id,
+                right.copy_index,
+                &right.block_id,
+            ))
+    });
+
+    Ok(F5FounderIdentities {
+        copies,
+        haplotypes,
+        assignments,
+        membership,
+    })
+}
+
+/// Índice de los bloques colocados, rederivando cada `block_id`.
+///
+/// Un índice repetido no necesita guarda propia: la segunda derivación produce
+/// el mismo identificador y el registro la rechaza como colisión.
+fn index_layout_blocks(
+    config: &EffectiveF5Config,
+    context: F5IdentityContext<'_>,
+    layout: &F5PhysicalLayout,
+    sealed: &SealedF5Admission,
+) -> Result<BTreeMap<u64, BlockGeometry>, Diagnostic> {
+    if u64::try_from(layout.blocks().len()).ok() != Some(sealed.block_count()) {
+        return Err(configuration(
+            config,
+            "preflight.block_count",
+            "el layout recibido no pertenece a la admisión sellada de esta configuración",
+        ));
+    }
+    // Tramos elegibles de **esta** admisión, indexados por ordinal de
+    // secuencia. El layout coloca cada bloque dentro de uno de ellos y solo los
+    // parte al consumirlos, de modo que la contención es exacta: un bloque de
+    // otra referencia nombra un ordinal que no existe o unas coordenadas que
+    // ningún tramo propio contiene.
+    let mut eligible: BTreeMap<u64, Vec<(u64, u64)>> = BTreeMap::new();
+    for tract in sealed.eligible_tracts() {
+        eligible
+            .entry(tract.sequence_ordinal())
+            .or_default()
+            .push((tract.start_1based(), tract.end_1based()));
+    }
+    let mut registry = F5IdentityRegistry::default();
+    let mut blocks = BTreeMap::new();
+    for block in layout.blocks() {
+        let expected = registry
+            .derive_block(context, block.block_index())
+            .map_err(|_| {
+                configuration(
+                    config,
+                    "layout.identity",
+                    "no se pudo rederivar el identificador de un bloque colocado",
+                )
+            })?;
+        if &expected != block.block_id() {
+            return Err(configuration(
+                config,
+                "layout.identity",
+                "el layout recibido no lo produjo esta ejecución: su identificador de bloque no coincide",
+            ));
+        }
+        let contained = eligible
+            .get(&block.sequence_ordinal())
+            .is_some_and(|tracts| {
+                tracts.iter().any(|(start, end)| {
+                    *start <= block.start_1based() && block.end_1based() <= *end
+                })
+            });
+        if !contained {
+            return Err(configuration(
+                config,
+                "layout.geometry",
+                format!(
+                    "el bloque {} ocupa {}:{}-{}, que no cabe en ningún tramo elegible de esta referencia",
+                    block.block_index(),
+                    block.sequence_id().as_str(),
+                    block.start_1based(),
+                    block.end_1based()
+                ),
+            ));
+        }
+        blocks.insert(
+            block.block_index(),
+            BlockGeometry {
+                block_id: block.block_id().clone(),
+                sequence_id: block.sequence_id().clone(),
+                site_count: block.sites().len(),
+            },
+        );
+    }
+    Ok(blocks)
+}
+
+/// El primer fundador que pertenece a dos subpoblaciones, si lo hay.
+///
+/// DTC-089: «`IndividualId` identifica al fundador una sola vez en toda la
+/// ejecución». El rechazo vive en [`resolve_f5_founder_roster`], que es quien
+/// puede emitirlo pronto y con las tres vías cruzadas —literal↔literal,
+/// derivado↔derivado y literal↔derivado—; esta función es la red que protege
+/// al repositorio de identidades de un censo que no viniera de allí. Sigue
+/// existiendo porque una pertenencia duplicada **no** produciría colisión de
+/// `FCP_` —`population_id` es componente del material, de modo que los dos
+/// identificadores serían distintos— y la proyección de verdad publicaría un
+/// portador con dos pertenencias. Como ningún censo admitido puede llegar roto,
+/// se prueba de forma unitaria, sobre censos construidos a mano.
+fn conflicting_membership(
+    rosters: &[F5FounderRoster],
+) -> Option<(&IndividualId, &PopulationId, &PopulationId)> {
+    let mut seen: BTreeMap<&IndividualId, &PopulationId> = BTreeMap::new();
+    for roster in rosters {
+        for individual in roster.individuals() {
+            if let Some(previous) = seen.insert(individual.individual_id(), &roster.population_id) {
+                return Some((individual.individual_id(), previous, &roster.population_id));
+            }
+        }
+    }
+    None
+}
+
+/// Fila de la matriz ganadora como los `S` caracteres `0`/`1` que DTC-089 hace
+/// componente del `HAP_`.
+fn allele_string(matrix: &F5AlleleMatrix, haplotype: usize) -> Option<String> {
+    let mut alleles = String::with_capacity(matrix.site_count());
+    for site in 0..matrix.site_count() {
+        alleles.push(if matrix.allele(haplotype, site)? {
+            '1'
+        } else {
+            '0'
+        });
+    }
+    Some(alleles)
+}
+
+// ---------------------------------------------------------------------------
 // Diagnósticos
 // ---------------------------------------------------------------------------
 
@@ -1906,10 +2546,11 @@ mod tests {
     use std::cell::RefCell;
 
     use super::{
-        CopySeat, F5CopyAssignment, F5RandomDecision, F5SamplingMode, F5SamplingResolution,
-        F5SamplingSource, FounderInbreeding, HaplotypePrefix, NeumaierSum, QuotaError, RankState,
-        RootSeed, derive_f5_subseed, draw_copy_rank, plan_controlled_quota, realized_diploid_f,
-        resolve_founder_inbreeding, sample_probabilistic_unit, select_tie_prefix,
+        CopySeat, F5CopyAssignment, F5FounderIndividual, F5FounderRoster, F5RandomDecision,
+        F5SamplingMode, F5SamplingResolution, F5SamplingSource, FounderInbreeding, HaplotypePrefix,
+        NeumaierSum, QuotaError, RankState, RootSeed, conflicting_membership, derive_f5_subseed,
+        draw_copy_rank, plan_controlled_quota, realized_diploid_f, resolve_founder_inbreeding,
+        sample_probabilistic_unit, select_tie_prefix,
     };
     use crate::diagnostics::Diagnostic;
     use crate::identity::{F5BlockId, IndividualId, PopulationId, ScenarioId};
@@ -2923,5 +3564,61 @@ mod tests {
                 "16 rangos exigen como mucho 5 comparaciones, no 16: {visits}"
             );
         }
+    }
+
+    /// Censo de prueba: la pertenencia se comprueba sobre censos construidos a
+    /// mano porque ninguna configuración admitida puede producir uno roto.
+    fn roster(population: &str, individuals: &[&str]) -> F5FounderRoster {
+        let population_id = PopulationId::parse(population, "test").expect("población");
+        let individuals = individuals
+            .iter()
+            .map(|individual| F5FounderIndividual {
+                individual_id: IndividualId::parse(*individual, "test").expect("individuo"),
+                founder_key: None,
+            })
+            .collect::<Vec<_>>();
+        F5FounderRoster {
+            population_id,
+            individual_count: individuals.len() as u64,
+            copies: individuals.len() as u64 * 2,
+            individuals,
+        }
+    }
+
+    /// Un fundador en dos subpoblaciones es pertenencia duplicada: sus `FCP_`
+    /// no colisionarían, porque `population_id` es componente del material.
+    #[test]
+    fn a_founder_in_two_subpopulations_is_a_duplicated_membership() {
+        let rosters = [
+            roster("P1", &["alpha", "beta"]),
+            roster("P2", &["beta", "gamma"]),
+        ];
+        let (individual_id, previous, current) =
+            conflicting_membership(&rosters).expect("la pertenencia duplicada se detecta");
+        assert_eq!(individual_id.as_str(), "beta");
+        assert_eq!(previous.as_str(), "P1");
+        assert_eq!(current.as_str(), "P2");
+    }
+
+    /// Un fundador repetido dentro de un mismo censo también es pertenencia
+    /// duplicada, y ahí las dos subpoblaciones nombradas coinciden.
+    #[test]
+    fn a_founder_repeated_inside_one_roster_is_also_rejected() {
+        let rosters = [roster("P1", &["alpha", "alpha"])];
+        let (individual_id, previous, current) =
+            conflicting_membership(&rosters).expect("la repetición local se detecta");
+        assert_eq!(individual_id.as_str(), "alpha");
+        assert_eq!(previous.as_str(), "P1");
+        assert_eq!(current.as_str(), "P1");
+    }
+
+    /// Censos disjuntos no producen ningún conflicto.
+    #[test]
+    fn disjoint_rosters_have_no_membership_conflict() {
+        let rosters = [
+            roster("P1", &["alpha", "beta"]),
+            roster("P2", &["gamma", "delta"]),
+        ];
+        assert!(conflicting_membership(&rosters).is_none());
     }
 }

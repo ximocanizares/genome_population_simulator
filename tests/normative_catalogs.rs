@@ -82,7 +82,7 @@ const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 14] = [
     (
         "catalogs/id-catalog-v4.tsv",
         ID_CATALOG_V4,
-        "7e273a38f81c3896d63f2d46ae7c0b0358e02a9f3f502963bf4c3005714c5101",
+        "56f47f65cd625ab830ab73247b516a49eb65e6a92b7f2f531804e4183a510b9b",
     ),
     (
         "catalogs/f5-rng-catalog-v1.tsv",
@@ -878,4 +878,49 @@ fn id_catalog_v4_is_a_literal_v3_superset_with_five_f5_classes() {
     assert!(ID_CATALOG_V4.contains("sequence_id=sequence-1;copy_index_u32=0"));
     assert!(ID_CATALOG_V4.contains("founder_copy_id=FCP_"));
     assert!(!ID_CATALOG_V4.contains("phase_id"));
+}
+
+/// Un vector que nombra otro identificador como componente debe nombrar uno que
+/// el propio catálogo derive.
+///
+/// Sin esta comprobación un vector queda internamente consistente —su material,
+/// su digest y su identificador se corresponden— mientras apunta a un
+/// identificador que ninguna fila produce; es lo que ocurrió cuando F5-R04
+/// regeneró `f5_founder_copy` y dejó atrás el `FCP_` incrustado en la fila
+/// `f5_block_haplotype_assignment`.
+#[test]
+fn every_identifier_named_by_a_vector_is_derived_by_another_row_of_the_catalog() {
+    let rows: Vec<_> = ID_CATALOG_V4
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.split('|').collect::<Vec<_>>())
+        .collect();
+    let derived: BTreeSet<&str> = rows.iter().map(|fields| fields[8]).collect();
+    // Forma estricta de un identificador derivado: prefijo de clase y los 26
+    // caracteres Base32 de 128 bits. `LIB_SOURCE` o `TPL_LIB_SOURCE_7` son
+    // etiquetas de ejemplo, no derivaciones, y quedan fuera.
+    let is_derived_shape = |value: &str| {
+        value.rsplit_once('_').is_some_and(|(_, tail)| {
+            tail.len() == 26
+                && tail
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || (b'2'..=b'7').contains(&byte))
+        })
+    };
+    let mut checked = 0_usize;
+    for fields in &rows {
+        for component in fields[4].split(';') {
+            let (name, value) = component.split_once('=').expect("nombre=valor");
+            if !is_derived_shape(value) {
+                continue;
+            }
+            assert!(
+                derived.contains(value),
+                "{}: el componente {name}={value} no lo deriva ninguna fila del catálogo",
+                fields[0]
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked >= 6, "el catálogo debe encadenar varios vectores");
 }

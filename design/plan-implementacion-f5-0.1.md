@@ -1283,7 +1283,7 @@ identificador del índice de copia.
     que se retiró el tipo de Ne —superficie pública sin consumidor—, y la
     lógica que tendría que replicar está ahora cubierta por las tres pruebas de
     precedencia.
-- ☐ **F5.3.3.** Materializar antes de toda salida las identidades de fundador y
+- ✅ **F5.3.3.** Materializar antes de toda salida las identidades de fundador y
   su pertenencia única: `IndividualId`, `FCP_` por secuencia/copia y `FHA_` por
   bloque como asignación separada.
   - **Resuelto el 9 de septiembre de 2026 (F5-R04).** `FCP_` se deriva de
@@ -1305,6 +1305,249 @@ identificador del índice de copia.
     identidad a través de bloques/secuencias, pertenencia ausente/duplicada e
     IDs aportados/derivados; búsqueda negativa de `HaplotypeProcess`, cruces,
     mosaicos o mapas.
+  - Estado implementado (12 de septiembre de 2026), pendiente de la revisión
+    adversarial de la pausa «Revisión F5.3». `src/f5_founders.rs` añade
+    `materialize_f5_founder_identities`, que consume la asignación de F5.3.1 y
+    F5.3.2 —no decide ninguna, no abre ningún ámbito RNG— y publica un
+    `F5FounderIdentities` con tres tablas y una consulta de pertenencia: las
+    copias `FCP_` por subpoblación, individuo, secuencia y `copy_index`; las
+    filas `HAP_` de cada bloque×subpoblación con sus alelos; y las asignaciones
+    `FHA_` que enlazan copia y fila en cada bloque. `copy()` resuelve la
+    pertenencia de un `FCP_` publicado, que es lo que `founder_membership`
+    necesita para no inferir la subpoblación del identificador.
+  - Decisiones locales registradas:
+    - **Vive en `src/f5_founders.rs`, no en un módulo nuevo.** Es el
+      «Inicializador fundador» de arquitectura §15, que posee a la vez `q`/`n_h`,
+      F, `IndividualId`, `FCP_` y `FHA_`; separar la materialización habría
+      dejado la guarda de pertenencia sin poder probarse, porque los censos y
+      unidades que necesita tienen campos privados y solo un módulo hijo puede
+      construirlos. La búsqueda negativa de F5.3.1/F5.3.2 sigue apuntando al
+      mismo fichero y ahora cubre también lo que F5.3.3 prohíbe.
+    - **Las copias existen por cada secuencia que el layout puebla, no por cada
+      secuencia de la referencia. Decidido y cerrado; escrito en DTC-089.**
+      DTC-089 identifica la copia «por secuencia … a través de todos los bloques
+      de esa secuencia», `f5-founders.tsv` no tiene ninguna fila sin bloque y la
+      proyección de verdad no tendría ningún genotipo que emitir para una
+      secuencia vacía. La revisión adversarial dejó abierta la semántica: una
+      secuencia **retenida** por la referencia y sin bloques no recibe copia, y
+      eso podía ser deliberado o un defecto. El usuario lo cerró el 12 de
+      septiembre de 2026 manteniendo esta conducta. Las otras dos opciones se
+      descartaron por su coste: materializar también las copias vacías exigiría
+      que la admisión sellara los **identificadores** de secuencia y no solo su
+      recuento —reabrir el sellado—, y rechazar la divergencia tumbaría
+      configuraciones legítimas, porque con muchas secuencias y pocos bloques lo
+      normal es que la mayoría no reciba ninguno. Es, por tanto, la única opción
+      que no reabre un contrato cerrado, y **su coste está declarado en
+      DTC-089**: en una ejecución que retiene 25 secuencias y puebla 24, ningún
+      fundador tiene copia de la secuencia 25 en `truth.jsonl`. La afirmación
+      anterior de esta entrada —«la admisión solo conserva el recuento»— describía
+      una limitación en vez de la decisión, y además sugería que el recuento no
+      bastaba para **detectar** la divergencia, cuando sí basta: lo que no
+      permite es nombrar la secuencia ausente.
+      La prueba `a_retained_sequence_without_blocks_publishes_no_copy` fija la
+      semántica: con `slack: 3`, dos secuencias, dos bloques y una semilla que
+      los coloca ambos en `chr1`, `chr2` queda retenida y sin copias, y eso no
+      es un error. Con el `slack: 1` del fixture por defecto el caso es
+      estructuralmente imposible, que es por lo que ninguna prueba anterior lo
+      tocaba.
+    - **Cada tabla se publica en la clave literal que DTC-089 da a su fichero.**
+      «Población, individuo, secuencia, copia, bloque» nombra columnas, y el
+      orden es el de sus valores; donde DTC-089 quiere el orden FASTA lo dice
+      expresamente, como en `f5-block-layout.tsv` («orden FASTA, inicio, fin,
+      ID»). Por eso `sequence_id` y `block_id` ordenan lexicográficamente y no
+      por ordinal de secuencia ni por `block_index`. Es la misma lectura que
+      F5.3.1 registró para la lista `sampling`. El orden contractual de los
+      artefactos sigue siendo de F5.4.1; aquí solo se entrega ya ordenado para
+      que no convivan dos órdenes canónicos.
+    - **`HAP_` se materializa aquí, para todos los rangos de cada
+      bloque×subpoblación.** El plan asigna a F5.3.3 los «enlaces
+      `FCP_`/`FHA_`→`HAP_`», y `FHA_` toma `haplotype_id` como componente: sin
+      `HAP_` no hay `FHA_`. Se derivan los `H` rangos, no solo los asignados,
+      porque `f5-haplotypes.tsv` publica la fila aunque ninguna copia la reciba
+      y porque la identidad debe estar materializada antes de toda salida.
+      `alleles` es la fila de la matriz ganadora tal cual: la polaridad de
+      DTC-089 es una propiedad publicada del sitio en `f5-frequencies.tsv` y no
+      reescribe esos bits.
+    - **El `block_index` se conserva en las filas publicadas.** Es componente
+      DTC-039 de `BLK_`, `HAP_` y `FHA_`, y ninguno de los siete TSV lo escribe;
+      un lector externo lo recupera del ordinal de fila de `f5-block-layout.tsv`,
+      que está en orden FASTA/inicio/fin. Conservarlo aquí evita que F5.4 tenga
+      que reconstruirlo para derivar nada.
+    - **La unicidad global del `IndividualId` se cierra en el censo, no en la
+      admisión.** La primera redacción de esta entrada afirmaba que ninguna
+      configuración admitida podía romper la pertenencia; era falso para la
+      mitad del dominio y la revisión adversarial lo reprodujo: `adapters.rs`
+      cruza los `founder_ids` **literales** entre sí, pero los `IndividualId`
+      derivados de `founder_keys` viven en otro registro y nunca se contrastan
+      contra los literales, y `validate_provided_id` acepta el texto `IND_…`.
+      Un `founder_id` literal igual a un `IND_` derivado de otra subpoblación
+      pasaba la admisión. El cruce se añade en `resolve_f5_founder_roster`, que
+      es el primer punto donde ambos conjuntos existen: la admisión trabaja
+      sobre el documento declarado, donde el identificador derivado todavía no
+      se ha construido, y derivarlo allí obligaría a la máquina de admisión a
+      abrir la derivación de identidades con la semilla raíz, cosa que hoy no
+      hace. `conflicting_membership` se conserva como red del repositorio
+      —una pertenencia duplicada **no** produciría colisión de `FCP_`, porque
+      `population_id` es componente del material— y se prueba de forma unitaria
+      sobre censos construidos a mano.
+    - **El layout se vincula por identidad y por geometría.** La secuencia de
+      cada copia viene del layout, de modo que un layout ajeno cambiaría
+      silenciosamente los `FCP_`. Rederivar cada `block_id` —como F5.1.3 ya hace
+      sobre sus marginales— vincula la ejecución pero **no** la geometría:
+      `BLK_` y `SITE_` se derivan de índices, así que dos layouts de la misma
+      ejecución con las mismas dimensiones y distintas coordenadas comparten
+      identificadores. La primera redacción declaró ese hueco irresoluble «sin
+      cambiar el material de una clase publicada»; era falso, y la revisión
+      adversarial lo explotó con dos referencias de la misma ejecución, una de
+      una secuencia y otra de dos, publicando `FCP_` sobre un `chr2` inexistente.
+      Se cierra sin tocar ningún material publicado: cada bloque debe caber
+      dentro de un **tramo elegible de esta admisión sellada**, con su mismo
+      ordinal de secuencia y sus mismas coordenadas. La contención es exacta
+      porque el layout coloca cada bloque dentro de esos tramos y solo los parte
+      al consumirlos, y cierra las dos direcciones —secuencia que no existe y
+      coordenadas fuera del tramo propio—. Residuo declarado: la admisión
+      sellada conserva ordinales de secuencia, no identificadores, de modo que
+      un layout cuyo `sequence_id` difiera pero cuyo ordinal y coordenadas
+      coincidan seguiría pasando; publicar esos identificadores es de F5.4.
+      Seguimiento nombrado: la contención no comprueba `Σ length_bp` contra el
+      objetivo de DTC-089 porque `sealed.target_bases()` es `None` en toda la
+      familia de fixtures —el objetivo se declara por `block_count`—, de modo
+      que la guarda sería inalcanzable y no probable. Le corresponde a quien
+      añada al fixture el objetivo `covered_bases`.
+    - **La comparación `block_id` del layout contra el de la unidad se conserva
+      y se prueba.** No forma parte del vínculo del layout —ambos se derivan del
+      mismo índice y contexto—, pero sí vincula la **asignación**: una
+      construida sobre la búsqueda de otra ejecución nombra otros `BLK_`. Emite
+      `GPS-CONF-101` sobre `assignment.identity`, no un interno.
+    - **La matriz ganadora debe tener los sitios de su bloque.** `alleles` es
+      componente del `HAP_`, así que una matriz de otra geometría produciría
+      identificadores internamente consistentes sobre una cadena que no
+      describe el bloque. Se comprueba `site_count` contra los sitios colocados
+      antes de derivar ningún `HAP_`.
+    - **No se publica ningún contador de coste.** F5.3.1 y F5.3.2 publican
+      `operations` porque el plan les pide complejidad medida; F5.3.3 no tiene
+      ningún requisito de coste y `f5-resource-accounting-v7` está cerrado, de
+      modo que añadir un contador sería superficie pública sin consumidor, que
+      es justo el motivo por el que F5.3.2 retiró el tipo de Ne.
+    - **La deuda de `inbreeding_f_source` sigue en F5.4.** F5.3.3 no escribe
+      `effective-config.json#/f5/subpopulations` ni el manifiesto, que son los
+      únicos consumidores de la procedencia del F; no le da consumidor y se deja
+      donde F5.3.2 la dejó.
+  - Cómo se comprobó, y contra qué falla cada prueba (24 de integración en
+    `tests/f5_founders.rs`, 3 unitarias en `src/f5_founders.rs` y una de
+    coherencia cruzada en `tests/normative_catalogs.rs`; batería completa
+    921 pasan / 0 fallan / 12 ignoradas, frente a las 893 previas):
+    - **Reconstructor.** `assert_every_identity_is_rederivable` rederive cada
+      `FCP_`, `HAP_` y `FHA_` desde lo publicado —población, individuo,
+      secuencia, copia, `block_index`, alelos e identificadores enlazados— más
+      escenario, referencia, ejecución y semilla efectiva, con una
+      implementación propia de DTC-037, BLAKE3 y Base32 que no llama a ninguna
+      función del productor. Antes de juzgarlo,
+      `the_independent_id_oracle_reproduces_the_frozen_catalog_vectors`
+      reproduce material, digest e identificador de las **cinco** filas F5 de
+      `id-catalog-v4`: un oráculo equivocado se detecta contra el vector
+      congelado, no contra el productor.
+    - Sensibilidad medida, aplicando cada defecto y ejecutando la batería:
+      - `FCP_` derivado sin `copy_index` → 9 pruebas;
+      - copias materializadas solo de la primera secuencia → 4, y la guarda de
+        pertenencia ausente emite su `GPS-INTERNAL-101`;
+      - `FHA_` derivado con `block_index` constante → 6;
+      - `FHA_` enlazando siempre la fila 0 → 7;
+      - `conflicting_membership` neutralizado → las 2 unitarias de pertenencia;
+      - sin el orden canónico de las asignaciones → la prueba de orden;
+      - alelos leídos siempre de la fila 0 → la prueba de filas haplotípicas;
+      - sin rederivar el `block_id` del layout → la prueba del layout ajeno;
+      - sin el vínculo con la admisión sellada → la suya;
+      - productor invirtiendo `individual_id` y `sequence_id` en el material de
+        `FCP_` → 6, incluido el reconstructor;
+      - oráculo con versión de derivación 2 → 7, incluida la del catálogo;
+      - pertenencia apuntando siempre a la primera copia → 7;
+      - `copy()` devolviendo la primera copia ante un `FCP_` desconocido → la de
+        pertenencia;
+      - conjunto de secuencias sin orden (`HashSet`) → 2, por la aserción de
+        determinismo;
+      - «mosaico» escrito en el módulo → la búsqueda negativa;
+      - sin la contención en tramos elegibles → las dos del layout ajeno;
+      - sin el control de recuento de bloques → la suya;
+      - sin la comparación `block_id` layout↔unidad → la de la asignación de
+        otra ejecución;
+      - sin la comprobación de sitios de la matriz → la suya;
+      - sin el cruce literal↔derivado del censo → la del `founder_id` literal
+        igual a un `IND_` derivado;
+      - asignaciones ordenadas por `block_index` en vez de `block_id` → la de
+        orden, que antes de corregir su fixture sobrevivía;
+      - vector `FHA_` del catálogo con el `FCP_` antiguo → la coherencia cruzada
+        de `normative_catalogs`, además de la huella y la del superconjunto;
+      - copias publicadas también para las secuencias retenidas sin bloques → 4,
+        empezando por la que fija la semántica de DTC-089.
+    - Bordes cubiertos: un individuo con **dos** secuencias, la misma copia a
+      través de **dos** bloques de una secuencia, `P=1` y `P=2`, `founder_ids`
+      aportados y `founder_keys` derivados en la misma ejecución, la misma
+      `founder_key` en dos subpoblaciones —que son dos fundadores, no uno—, el
+      `individual_id` literal compartido entre dos subpoblaciones —rechazado ya
+      en la admisión— y el literal igual a un derivado —rechazado en el censo—,
+      un `FCP_` desconocido sin pertenencia, dos subpoblaciones declaradas en
+      orden inverso al canónico, `P=1`, `P=2` y `P=3`, el modo controlado,
+      `inbreeding_f>0` con reutilización de fila, diez secuencias donde el
+      orden lexicográfico y el FASTA divergen, una secuencia retenida y sin
+      bloques, y la materialización repetida, que da el mismo repositorio.
+  - Correcciones tras la revisión adversarial Opus 5 alto (12 de septiembre de
+    2026). La revisión confirmó el núcleo —los cinco materiales DTC-037 con sus
+    componentes exactos y en orden, `FCP_` desde `copy_index_u32`, `FHA_` como
+    asignación separada, `copy()` total e inyectiva, cero ámbitos RNG, `HAP_`
+    para los `H` rangos, idempotencia— y señaló cinco graves, cuatro de ellos
+    aplicados aquí:
+    - **Layout ajeno de la misma ejecución (grave, aplicado).** Ver la decisión
+      de vinculación del layout, reescrita arriba. Pruebas: layout de otra
+      referencia con una secuencia que la propia no tiene; layout con
+      coordenadas fuera de los tramos propios; y layout con otro recuento de
+      bloques, con el fixture ajustado (`slack: 2`) para que sus tres bloques
+      quepan dentro del tramo propio y el recuento quede aislado de la
+      contención. Las tres mueren si se borra su guarda.
+    - **Unicidad global del `IndividualId` (grave, aplicado).** Ver la decisión
+      reescrita arriba. Prueba: se deriva primero el `IND_` de una `founder_key`
+      de `P2` y después se declara ese texto como `founder_id` literal de `P1`;
+      la admisión lo acepta y `resolve_f5_founder_roster` lo rechaza con
+      `GPS-CONF-101`.
+    - **La prueba de orden no ejercitaba `block_id` (grave, aplicado).** Su
+      fixture tenía un bloque por secuencia, así que la tupla anterior ya era
+      única y la quinta clave nunca desempataba: ordenar por `block_index` no
+      mataba ninguna prueba. Ahora usa una secuencia con dos bloques, comprueba
+      que cada copia recibe los dos y que los dos órdenes divergen de verdad.
+    - **Vector `FHA_` del catálogo incoherente (grave preexistente, aplicado).**
+      `id-catalog-v4` incrustaba `founder_copy_id=FCP_7TEWR4IDBCQZGCB2HTDB2YMQHY`,
+      de la era `phase_id`, mientras su fila `f5_founder_copy` deriva
+      `FCP_3MYOBVN22OO7JPHBBXMUFWFJQQ`: F5-R04 regeneró una fila y no la otra.
+      La fila seguía siendo internamente consistente, de modo que ni el
+      reconstructor ni `tests/f5_identity.rs` podían verlo. Se regeneró con el
+      precedente explícito de F5-R04 —F5.0.3 sigue abierto y ningún artefacto F5
+      se ha publicado fuera—: componente, material, digest e identificador. El
+      nuevo identificador es `FHA_3H6PQOV7XJRT7HA3RGRDRDONFY`, que es
+      exactamente el que `tests/f5_identity.rs` ya exigía al productor, así que
+      catálogo y código quedan de acuerdo. Se actualizó la huella de contrato de
+      `tests/normative_catalogs.rs` —único cambio de esa prueba junto a la nueva
+      comprobación— y se añadió la **coherencia cruzada**: todo identificador
+      que un vector nombre como componente debe derivarlo otra fila del mismo
+      catálogo. Restaurar el `FCP_` antiguo la mata.
+    - **Índice de la búsqueda (observación, aplicado).** El barrido lineal de
+      `search.block(...)` por unidad recorría `B*P` filas `B*P` veces; se
+      sustituye por un `BTreeMap` construido una vez, sin superficie pública
+      nueva. El revisor midió y no observó el término cuadrático a las escalas
+      del fixture; el cambio es barato y se aplica igualmente. Los `B*P*H`
+      vectores de alelos siguen siendo `String`: es la forma que DTC-039 hace
+      componente del `HAP_` y la que `f5-haplotypes.tsv` publica.
+    - **H-2 (semántica con consecuencia biológica): resuelto por el usuario el
+      12 de septiembre de 2026.** Se mantiene la conducta —copias solo para las
+      secuencias que el layout puebla— y se documenta en DTC-089, no solo aquí.
+      Ver la decisión reescrita arriba.
+  - Huecos de cobertura cerrados por la revisión: el orden lexicográfico de
+    `sequence_id` frente al orden FASTA —con diez secuencias `chr1…chr10` los
+    dos divergen y ningún fixture anterior los distinguía, de modo que la
+    decisión de orden no estaba probada—; el modo **controlado**, que las
+    catorce pruebas iniciales no tocaban y donde la permutación de F5.3.1
+    reparte los rangos; `inbreeding_f > 0`, donde la copia 1 reutiliza la fila de
+    la copia 0 y debe conservar aun así su propio `FCP_` y su propio `FHA_`; y
+    la ploidía 3, añadida al recorrido de ploidías.
 
 > **Revisión F5.3.** Aprobar fórmulas, cuotas y verdad fundadora antes de
 > persistir el resultado completo.
