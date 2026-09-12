@@ -147,6 +147,9 @@ pub const F5_MAN70_RECOUNT_SOURCE: &str = "outputs/truth.jsonl#f5-founder-truth-
 pub const F5_ORACLE_ID_CATALOG: &str = "id-catalog-v4";
 /// Catálogo de subsemillas del que salen los vectores congelados.
 pub const F5_ORACLE_RNG_CATALOG: &str = "f5-rng-catalog-v1";
+/// Decisiones exactas de `f5-rng-catalog-v1`: las tres que este módulo
+/// rederiva y las nueve que declara creídas.
+pub const F5_RNG_CATALOG_DECISIONS: usize = 12;
 /// Los nueve objetos fijos que `json_rows_bound` reserva al manifiesto.
 const F5_MANIFEST_FIXED_OBJECTS: u64 = 9;
 
@@ -434,6 +437,11 @@ pub struct F5DeclaredTruthLink {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct F5DeclaredBounds {
     pub block_count: u64,
+    /// Bases elegibles que la admisión selló. El oráculo no abre la
+    /// referencia, de modo que no puede recomputarlas; sí puede exigir que no
+    /// sean menos que las que el layout colocó, que es la cota inferior
+    /// observable desde `f5-block-layout.tsv`.
+    pub eligible_bases: u64,
     pub site_bound_per_block: u64,
     pub bin_count_total: u64,
     pub max_haplotype_attempts: u64,
@@ -471,6 +479,19 @@ pub struct F5PackageDeclaration {
     pub bounds: F5DeclaredBounds,
     pub id_catalog_id: String,
     pub rng_catalog_id: String,
+    /// `attempt_summary` del manifiesto. Dos de sus tres términos son
+    /// funciones puras de `f5-attempts.tsv` y aquí se contrastan con él;
+    /// `layout_attempts_used` no es observable desde ningún TSV publicado y
+    /// queda declarado.
+    pub attempt_summary: F5DeclaredAttemptSummary,
+}
+
+/// `attempt_summary` declarado por el manifiesto.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct F5DeclaredAttemptSummary {
+    pub layout_attempts_used: u64,
+    pub haplotype_attempts_total: u64,
+    pub max_attempt_index: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -1171,8 +1192,14 @@ fn validate_rng_catalog() -> Checked<()> {
             }
         }
     }
-    if seen == 0 {
-        return Err(catalog_reject("el catálogo RNG no trae ninguna decisión"));
+    // El catálogo tiene **doce** filas y el reparto 3+9 de este módulo —tres
+    // rederivadas y nueve creídas— se sostiene sobre ellas. Exigir solo que no
+    // esté vacío dejaba al oráculo autovalidándose contra una sola decisión si
+    // el catálogo se recortaba.
+    if seen != F5_RNG_CATALOG_DECISIONS {
+        return Err(catalog_reject(format!(
+            "el catálogo RNG trae {seen} decisiones y el contrato fija {F5_RNG_CATALOG_DECISIONS}"
+        )));
     }
     Ok(())
 }
@@ -2923,11 +2950,15 @@ fn read_layout(
     let mut block_index_of = BTreeMap::new();
     let mut sequence_order: Vec<String> = Vec::new();
     let mut previous: Option<(usize, u64, u64)> = None;
+    let mut placed_bases = 0_u64;
     while cursor.advance()? {
         let block_index = cursor.rows - 1;
         let start = cursor.u64(F5OracleCause::BlockLayout, 2)?;
         let end = cursor.u64(F5OracleCause::BlockLayout, 3)?;
         let length = cursor.u64(F5OracleCause::BlockLayout, 4)?;
+        placed_bases = placed_bases.checked_add(length).ok_or_else(|| {
+            resource_reject(path, "la suma de longitudes del layout desborda u64")
+        })?;
         if start == 0 || start > end || length != end - start + 1 {
             return Err(reject(
                 F5OracleCause::BlockLayout,
@@ -3010,6 +3041,19 @@ fn read_layout(
                 "el layout publica {} bloques y la admisión selló {}",
                 blocks.len(),
                 bounds.block_count
+            ),
+        ));
+    }
+    // `eligible_bases` no se puede recomputar sin abrir la referencia, pero sí
+    // acotar: todo bloque colocado ocupa bases elegibles, de modo que la suma
+    // de sus longitudes es una cota inferior observable. La superior —las
+    // bases que el escaneo recorrió— la comprueba la puerta física.
+    if placed_bases > bounds.eligible_bases {
+        return Err(resource_reject(
+            path,
+            format!(
+                "el layout coloca {placed_bases} bases y el manifiesto declara {} elegibles",
+                bounds.eligible_bases
             ),
         ));
     }
@@ -3279,6 +3323,7 @@ fn read_attempts(
     let mut previous_attempt: Option<u64> = None;
     let mut best_count = 0_u64;
     let mut index = usize::MAX;
+    let mut max_attempt_index = 0_u64;
     while cursor.advance()? {
         let next = unit_index(
             declaration,
@@ -3311,6 +3356,7 @@ fn read_attempts(
             ));
         }
         previous_attempt = Some(attempt);
+        max_attempt_index = max_attempt_index.max(attempt);
         if attempt >= declaration.bounds.max_haplotype_attempts {
             return Err(resource_reject(
                 path,
@@ -3378,6 +3424,33 @@ fn read_attempts(
         ));
     }
     walk.finish(F5OracleCause::Attempt, path)?;
+    // `attempt_summary` del manifiesto: dos de sus tres términos son funciones
+    // puras de estas filas y aquí se contrastan con ellas. El tercero,
+    // `layout_attempts_used`, no es observable desde ningún TSV publicado y
+    // queda declarado; se dice para que no se confunda con un olvido.
+    let summary = declaration.attempt_summary;
+    if summary.haplotype_attempts_total != cursor.rows {
+        return Err(reject(
+            F5OracleCause::Attempt,
+            path,
+            "attempt_summary.haplotype_attempts_total",
+            format!(
+                "el manifiesto declara {} intentos y el fichero trae {}",
+                summary.haplotype_attempts_total, cursor.rows
+            ),
+        ));
+    }
+    if summary.max_attempt_index != max_attempt_index {
+        return Err(reject(
+            F5OracleCause::Attempt,
+            path,
+            "attempt_summary.max_attempt_index",
+            format!(
+                "el manifiesto declara {} y el mayor índice publicado es {max_attempt_index}",
+                summary.max_attempt_index
+            ),
+        ));
+    }
     Ok(cursor.rows)
 }
 
@@ -6156,4 +6229,430 @@ mod tests {
         assert_eq!(fixed[1], 0.0);
         assert!((fixed[0] + fixed[2] - 1.0).abs() < 1e-12);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Oráculo del paquete de fallo
+// ---------------------------------------------------------------------------
+
+/// Lo que una ejecución declara de su fallo controlado y el oráculo contrasta
+/// contra los bytes publicados.
+///
+/// Es el gemelo de [`F5PackageDeclaration`] para el otro estado. Ninguno de
+/// sus campos es un acumulador del productor: son las cifras que el manifiesto
+/// fallido publica y que, si el paquete no las sostiene, deben rechazarse.
+#[derive(Clone, Debug, PartialEq)]
+pub struct F5FailureDeclaration {
+    pub code: String,
+    pub stage: String,
+    pub scenario_id: String,
+    pub population_id: Option<String>,
+    pub block_id: Option<String>,
+    /// Los cuatro límites algorítmicos y los tres presupuestos efectivos, en
+    /// el orden del esquema.
+    pub limits: [u64; 7],
+    /// `layout_attempts_used`, `haplotype_attempts_used`, `swap_proposals` y
+    /// `swap_accepted`.
+    pub counters: [u64; 4],
+    /// Los dos objetos opcionales, tal y como el manifiesto los publica.
+    ///
+    /// Viajan como JSON porque el contrato los define como «`null` u objeto
+    /// cerrado» y lo que el oráculo tiene que comprobar es que el diagnóstico
+    /// publique **exactamente** lo mismo que su manifiesto, sin reinterpretar
+    /// ninguno de sus catorce campos.
+    pub best_layout: serde_json::Value,
+    pub best_attempt: serde_json::Value,
+    pub link: F5DeclaredLink,
+}
+
+/// Los diez literales exactos de `f5-failure-v1.schema.json#/$defs/code`.
+const F5_FAILURE_CODES: [&str; 10] = [
+    "GPS-CONF-101",
+    "GPS-FMT-101",
+    "GPS-DOMAIN-101",
+    "GPS-DOMAIN-102",
+    "GPS-DOMAIN-103",
+    "GPS-DOMAIN-104",
+    "GPS-DOMAIN-105",
+    "GPS-DOMAIN-106",
+    "GPS-RES-101",
+    "GPS-INTERNAL-101",
+];
+
+/// Las cinco etapas exactas del contrato.
+const F5_FAILURE_STAGES: [&str; 5] = [
+    "preflight",
+    "layout",
+    "haplotypes",
+    "founders",
+    "publication",
+];
+
+/// Las siete claves de `limits`, en el orden del esquema.
+const F5_FAILURE_LIMIT_KEYS: [&str; 7] = [
+    "max_layout_attempts",
+    "max_haplotype_attempts",
+    "max_swap_proposals",
+    "max_haplotype_cells",
+    "max_operation_units",
+    "max_working_memory_bytes",
+    "max_output_bytes",
+];
+
+/// Las cuatro claves de `counters`, en el orden del esquema.
+const F5_FAILURE_COUNTER_KEYS: [&str; 4] = [
+    "layout_attempts_used",
+    "haplotype_attempts_used",
+    "swap_proposals",
+    "swap_accepted",
+];
+
+/// Ruta publicada del diagnóstico de un fallo controlado.
+pub const F5_FAILURE_DOCUMENT_PATH: &str = "outputs/f5-failure.json";
+
+/// Audita un paquete **fallido** desde sus bytes.
+///
+/// El oráculo de F5.4.2 exige los siete TSV y `truth.jsonl`: no tiene modo de
+/// fallo, de modo que la mitad «fallo» del criterio de la Revisión F5.4 no
+/// estaba demostrada porque no estaba implementada. Esta función la cubre y no
+/// comparte ninguna estructura con el productor:
+///
+/// 1. relee `outputs/f5-failure.json` y comprueba sus doce claves, el
+///    enumerado cerrado de `code`, las cinco etapas y `artifacts=[]`;
+/// 2. contrasta los **nueve términos comunes** contra la declaración;
+/// 3. exige que los contadores quepan en los límites declarados;
+/// 4. **enumera el árbol** y exige que no exista ninguno de los ocho ficheros
+///    biológicos ni ningún fichero sin declarar;
+/// 5. reabre el enlace y recomputa su tamaño y SHA-256.
+///
+/// # Errors
+///
+/// [`F5OracleRejection`], cuya [`F5OracleCause`] nombra el contrato incumplido.
+pub fn audit_f5_failure_package(
+    payload_root: &Path,
+    declaration: &F5FailureDeclaration,
+) -> Checked<()> {
+    let path = F5_FAILURE_DOCUMENT_PATH;
+    if !F5_FAILURE_CODES.contains(&declaration.code.as_str()) {
+        return Err(reject(
+            F5OracleCause::ByteContract,
+            path,
+            "code",
+            format!("{} no pertenece al catálogo cerrado", declaration.code),
+        ));
+    }
+    if !F5_FAILURE_STAGES.contains(&declaration.stage.as_str()) {
+        return Err(reject(
+            F5OracleCause::ByteContract,
+            path,
+            "stage",
+            format!("{} no es una de las cinco etapas", declaration.stage),
+        ));
+    }
+    let document = read_failure_document(payload_root, path)?;
+    let text = |key: &str| -> Checked<String> {
+        document
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                reject(
+                    F5OracleCause::ByteContract,
+                    path,
+                    key,
+                    "falta o no es cadena",
+                )
+            })
+    };
+    if text("diagnostic_kind")? != "f5_failure" || text("schema_version")? != "1" {
+        return Err(reject(
+            F5OracleCause::ByteContract,
+            path,
+            "diagnostic_kind",
+            "clase o versión incompatible con f5-failure-v1",
+        ));
+    }
+    const KEYS: [&str; 12] = [
+        "diagnostic_kind",
+        "schema_version",
+        "code",
+        "stage",
+        "scenario_id",
+        "population_id",
+        "block_id",
+        "limits",
+        "counters",
+        "best_layout",
+        "best_attempt",
+        "artifacts",
+    ];
+    if document.len() != KEYS.len() || KEYS.iter().any(|key| !document.contains_key(*key)) {
+        return Err(reject(
+            F5OracleCause::ByteContract,
+            path,
+            "object",
+            format!("el objeto cerrado exige {KEYS:?}"),
+        ));
+    }
+    if document
+        .get("artifacts")
+        .and_then(serde_json::Value::as_array)
+        .is_none_or(|artifacts| !artifacts.is_empty())
+    {
+        return Err(reject(
+            F5OracleCause::Link,
+            path,
+            "artifacts",
+            "el diagnóstico publica una lista de artefactos no vacía",
+        ));
+    }
+    // Los nueve términos comunes, contra la declaración.
+    for (key, declared) in [
+        ("code", declaration.code.clone()),
+        ("stage", declaration.stage.clone()),
+        ("scenario_id", declaration.scenario_id.clone()),
+    ] {
+        if text(key)? != declared {
+            return Err(reject(
+                F5OracleCause::ByteContract,
+                path,
+                key,
+                format!(
+                    "el diagnóstico publica {} y se declara {declared}",
+                    text(key)?
+                ),
+            ));
+        }
+    }
+    for (key, declared) in [
+        ("population_id", declaration.population_id.as_deref()),
+        ("block_id", declaration.block_id.as_deref()),
+    ] {
+        let published = document.get(key).and_then(|value| match value {
+            serde_json::Value::Null => None,
+            other => other.as_str(),
+        });
+        if published != declared {
+            return Err(reject(
+                F5OracleCause::ByteContract,
+                path,
+                key,
+                format!("el diagnóstico publica {published:?} y se declara {declared:?}"),
+            ));
+        }
+    }
+    let numbers = |key: &str, keys: &[&str]| -> Checked<Vec<u64>> {
+        let object = document
+            .get(key)
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| {
+                reject(
+                    F5OracleCause::ByteContract,
+                    path,
+                    key,
+                    "falta o no es objeto",
+                )
+            })?;
+        if object.len() != keys.len() || keys.iter().any(|name| !object.contains_key(*name)) {
+            return Err(reject(
+                F5OracleCause::ByteContract,
+                path,
+                key,
+                format!("el objeto cerrado exige {keys:?}"),
+            ));
+        }
+        keys.iter()
+            .map(|name| {
+                object
+                    .get(*name)
+                    .and_then(serde_json::Value::as_u64)
+                    .ok_or_else(|| reject(F5OracleCause::ByteContract, path, name, "no es un u64"))
+            })
+            .collect()
+    };
+    let limits = numbers("limits", &F5_FAILURE_LIMIT_KEYS)?;
+    if limits != declaration.limits {
+        return Err(reject(
+            F5OracleCause::ResourceBound,
+            path,
+            "limits",
+            format!(
+                "el diagnóstico publica {limits:?} y se declaran {:?}",
+                declaration.limits
+            ),
+        ));
+    }
+    let counters = numbers("counters", &F5_FAILURE_COUNTER_KEYS)?;
+    if counters != declaration.counters {
+        return Err(reject(
+            F5OracleCause::Attempt,
+            path,
+            "counters",
+            format!(
+                "el diagnóstico publica {counters:?} y se declaran {:?}",
+                declaration.counters
+            ),
+        ));
+    }
+    for (key, declared) in [
+        ("best_layout", &declaration.best_layout),
+        ("best_attempt", &declaration.best_attempt),
+    ] {
+        let published = document.get(key).unwrap_or(&serde_json::Value::Null);
+        if published != declared {
+            return Err(reject(
+                F5OracleCause::Attempt,
+                path,
+                key,
+                "el diagnóstico y el manifiesto publican objetos distintos",
+            ));
+        }
+        if !matches!(
+            published,
+            serde_json::Value::Null | serde_json::Value::Object(_)
+        ) {
+            return Err(reject(
+                F5OracleCause::ByteContract,
+                path,
+                key,
+                "el contrato admite null u objeto cerrado",
+            ));
+        }
+    }
+    // Los contadores caben en los límites efectivos: intentos de layout en
+    // `max_layout_attempts`, de haplotipos en `max_haplotype_attempts` y
+    // propuestas en `max_swap_proposals`; las aceptadas nunca exceden las
+    // propuestas.
+    for (index, limit, name) in [
+        (0_usize, 0_usize, "layout_attempts_used"),
+        (1, 1, "haplotype_attempts_used"),
+        (2, 2, "swap_proposals"),
+    ] {
+        if counters[index] > limits[limit] {
+            return Err(resource_reject(
+                path,
+                format!(
+                    "{name}={} excede su límite efectivo {}",
+                    counters[index], limits[limit]
+                ),
+            ));
+        }
+    }
+    if counters[3] > counters[2] {
+        return Err(reject(
+            F5OracleCause::Attempt,
+            path,
+            "swap_accepted",
+            "se aceptan más propuestas de las que se hicieron",
+        ));
+    }
+    // El árbol publicado, enumerado: ni un artefacto biológico ni un fichero
+    // sin declarar.
+    let mut found = BTreeSet::new();
+    collect_failure_files(payload_root, payload_root, path, &mut found)?;
+    let declared = BTreeSet::from(["manifest.json".to_owned(), path.to_owned()]);
+    if found != declared {
+        return Err(reject(
+            F5OracleCause::Link,
+            path,
+            "payload",
+            format!("el árbol publicado es {found:?} y un fallo publica {declared:?}"),
+        ));
+    }
+    // Y el enlace declarado corresponde a los bytes.
+    let link = &declaration.link;
+    if link.artifact_id != "f5-00-failure-v1"
+        || link.artifact_kind != "f5_failure"
+        || link.schema_version != "1"
+        || link.path != path
+    {
+        return Err(reject(
+            F5OracleCause::Link,
+            path,
+            "artifact_id",
+            format!(
+                "el enlace declara {}/{}/{}/{}",
+                link.artifact_id, link.artifact_kind, link.schema_version, link.path
+            ),
+        ));
+    }
+    let (size_bytes, sha256) = measure_artifact(payload_root, path)?;
+    if size_bytes != link.size_bytes || sha256 != link.sha256 {
+        return Err(reject(
+            F5OracleCause::Link,
+            path,
+            "sha256",
+            format!(
+                "el enlace declara {} bytes y {} y el fichero mide {size_bytes} con {sha256}",
+                link.size_bytes, link.sha256
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn read_failure_document(
+    payload_root: &Path,
+    path: &str,
+) -> Checked<serde_json::Map<String, serde_json::Value>> {
+    let reader = open_artifact(payload_root, path)?;
+    let value: serde_json::Value = serde_json::from_reader(reader).map_err(|error| {
+        reject(
+            F5OracleCause::ByteContract,
+            path,
+            "json",
+            format!("no es un documento JSON legible: {error}"),
+        )
+    })?;
+    match value {
+        serde_json::Value::Object(object) => Ok(object),
+        _ => Err(reject(
+            F5OracleCause::ByteContract,
+            path,
+            "json",
+            "la raíz no es un objeto",
+        )),
+    }
+}
+
+fn collect_failure_files(
+    payload_root: &Path,
+    directory: &Path,
+    path: &str,
+    found: &mut BTreeSet<String>,
+) -> Checked<()> {
+    let entries = std::fs::read_dir(directory).map_err(|error| {
+        reject(
+            F5OracleCause::ArtifactMissing,
+            path,
+            "payload",
+            format!("no se pudo recorrer {}: {error}", directory.display()),
+        )
+    })?;
+    for entry in entries {
+        let child = entry
+            .map_err(|error| {
+                reject(
+                    F5OracleCause::ArtifactMissing,
+                    path,
+                    "payload",
+                    format!("entrada ilegible en {}: {error}", directory.display()),
+                )
+            })?
+            .path();
+        if child.is_dir() {
+            collect_failure_files(payload_root, &child, path, found)?;
+            continue;
+        }
+        let relative = child.strip_prefix(payload_root).map_err(|_| {
+            reject(
+                F5OracleCause::ArtifactMissing,
+                path,
+                "payload",
+                format!("{} no cuelga de la carga útil", child.display()),
+            )
+        })?;
+        found.insert(relative.to_string_lossy().replace('\\', "/"));
+    }
+    Ok(())
 }

@@ -29,9 +29,10 @@ use genome_population_simulator::f5_layout::{
     F5LayoutRequest, F5PhysicalLayout, build_f5_physical_layout,
 };
 use genome_population_simulator::f5_oracle::{
-    F5DeclaredBounds, F5DeclaredLdBin, F5DeclaredLink, F5DeclaredMode, F5DeclaredRealizedF,
-    F5DeclaredSampling, F5DeclaredSpectrumBand, F5DeclaredSubpopulation, F5DeclaredTruthLink,
-    F5GenotypeModel, F5OracleCause, F5PackageDeclaration, audit_f5_package, recount_f5_man70,
+    F5_RNG_CATALOG_DECISIONS, F5DeclaredAttemptSummary, F5DeclaredBounds, F5DeclaredLdBin,
+    F5DeclaredLink, F5DeclaredMode, F5DeclaredRealizedF, F5DeclaredSampling,
+    F5DeclaredSpectrumBand, F5DeclaredSubpopulation, F5DeclaredTruthLink, F5GenotypeModel,
+    F5OracleCause, F5PackageDeclaration, audit_f5_package, recount_f5_man70,
 };
 use genome_population_simulator::f5_preflight::{
     F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS, F5_DEFAULT_MAX_SWAP_PROPOSALS, F5OtherResources,
@@ -593,6 +594,7 @@ fn declaration_for(published: &Published) -> F5PackageDeclaration {
         },
         bounds: F5DeclaredBounds {
             block_count: sealed.block_count(),
+            eligible_bases: sealed.eligible_bases(),
             site_bound_per_block: sealed.site_bound_per_block(),
             bin_count_total: sealed.bin_count_total(),
             max_haplotype_attempts: scenario
@@ -610,6 +612,11 @@ fn declaration_for(published: &Published) -> F5PackageDeclaration {
         },
         id_catalog_id: "id-catalog-v4".to_owned(),
         rng_catalog_id: "f5-rng-catalog-v1".to_owned(),
+        attempt_summary: F5DeclaredAttemptSummary {
+            layout_attempts_used: chain.layout.successful_attempt_index() + 1,
+            haplotype_attempts_total: chain.search.haplotype_attempts_total(),
+            max_attempt_index: chain.search.max_attempt_index(),
+        },
     }
 }
 
@@ -2651,4 +2658,22 @@ fn a_bin_whose_error_exceeds_its_tolerance_is_refused() {
         }
     }
     assert_eq!(staged.audit(), Err(F5OracleCause::LinkageDisequilibrium));
+}
+
+/// El catálogo RNG publicado tiene las doce decisiones que el oráculo exige.
+///
+/// `validate_rng_catalog` cerraba con `seen == 0`, de modo que un catálogo
+/// recortado a una fila dejaba al oráculo autovalidándose contra una sola
+/// decisión mientras su reparto 3+9 —tres rederivadas, nueve declaradas
+/// creídas— seguía escrito sobre doce. La constante y el fichero se contrastan
+/// aquí: si alguien añade o quita una fila sin tocar la cifra, esto muere.
+#[test]
+fn the_published_rng_catalogue_has_the_twelve_decisions_the_oracle_demands() {
+    const CATALOG: &str = include_str!("../catalogs/f5-rng-catalog-v1.tsv");
+    let rows = CATALOG
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with("decision"))
+        .count();
+    assert_eq!(rows, F5_RNG_CATALOG_DECISIONS);
+    assert_eq!(F5_RNG_CATALOG_DECISIONS, 12);
 }

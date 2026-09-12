@@ -40,6 +40,18 @@
 //!   existe** ninguno de los siete TSV ni `outputs/truth.jsonl`, existieran o
 //!   no como temporales. No es una promesa: es una comprobación.
 //!
+//! ## Terreno compartido con F5.4.1 y F5.4.2
+//!
+//! `F5_TSV_CONTRACTS`, `F5_TSV_SCHEMA_VERSION` y los cinco `F5_TRUTH_*` los
+//! importan **los tres módulos**: el escritor los usa para producir, el
+//! oráculo para juzgar y este para declarar. Son una sola definición en
+//! `f5_artifacts.rs` precisamente para que no puedan divergir: si el contrato
+//! cambiara un identificador, una clase o una ruta, los tres se romperían a la
+//! vez y ninguno podría aprobar lo que otro escribió. Los enumerados de código
+//! y etapa de un fallo, en cambio, viven aquí y el oráculo tiene los suyos:
+//! son el contrato del **esquema**, no del escritor, y duplicarlos es lo que
+//! permite que el oráculo no herede la lectura del productor.
+//!
 //! ## El oráculo queda fuera de este flujo, y por qué se dice
 //!
 //! `f5-resource-accounting-v8` no reserva ni un byte para el oráculo, cuyo
@@ -52,6 +64,7 @@
 //! `haplotype_copy`. La condición no se resuelve aquí porque hacerlo exigiría
 //! reabrir v8, que F5.0 cerró y cuyo literal está en los dos esquemas.
 
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -74,9 +87,10 @@ use crate::f5_founders::{
 };
 use crate::f5_layout::{F5BestLayout, F5LayoutFailure, F5PhysicalLayout};
 use crate::f5_oracle::{
-    F5_MAN70_RECOUNT_SOURCE, F5DeclaredBounds, F5DeclaredLdBin, F5DeclaredLink, F5DeclaredMode,
-    F5DeclaredRealizedF, F5DeclaredSampling, F5DeclaredSpectrumBand, F5DeclaredSubpopulation,
-    F5DeclaredTruthLink, F5InitializationSummary, F5PackageDeclaration,
+    F5_MAN70_RECOUNT_SOURCE, F5DeclaredAttemptSummary, F5DeclaredBounds, F5DeclaredLdBin,
+    F5DeclaredLink, F5DeclaredMode, F5DeclaredRealizedF, F5DeclaredSampling,
+    F5DeclaredSpectrumBand, F5DeclaredSubpopulation, F5DeclaredTruthLink, F5InitializationSummary,
+    F5PackageDeclaration,
 };
 use crate::f5_preflight::{
     F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS, F5_DEFAULT_MAX_HAPLOTYPE_CELLS,
@@ -454,9 +468,12 @@ fn optional_number(value: Option<f64>) -> Value {
 
 /// `sampling` del efectivo y del manifiesto: la misma lista, una fila por
 /// bloque×subpoblación, ordenada por `population_id` y `block_id`.
-fn sampling_json(assignment: &F5FounderAssignment) -> Result<Value, Diagnostic> {
+fn sampling_json(
+    declaration: &F5PackageDeclaration,
+    assignment: &F5FounderAssignment,
+) -> Result<Value, Diagnostic> {
     let mut rows = Vec::with_capacity(assignment.sampling().len());
-    for row in assignment.sampling() {
+    for (declared, row) in declaration.sampling.iter().zip(assignment.sampling()) {
         let block_index = u32::try_from(row.block_index()).map_err(|_| {
             document_error(
                 F5_EFFECTIVE_CONFIG_PATH,
@@ -467,17 +484,17 @@ fn sampling_json(assignment: &F5FounderAssignment) -> Result<Value, Diagnostic> 
             )
         })?;
         rows.push(json!({
-            "population_id": row.population_id().as_str(),
-            "block_id": row.block_id().as_str(),
+            "population_id": declared.population_id,
+            "block_id": declared.block_id,
             "block_index": block_index,
-            "requested_mode": row.requested_mode().as_str(),
-            "effective_mode": row.effective_mode().as_str(),
+            "requested_mode": declared.requested_mode.as_str(),
+            "effective_mode": declared.effective_mode.as_str(),
             "source": row.source().as_str(),
             "controlled_max_abs_error_declared": optional_number(
-                row.controlled_max_abs_error_declared(),
+                declared.controlled_max_abs_error_declared,
             ),
             "controlled_max_abs_error_effective": optional_number(
-                row.controlled_max_abs_error_effective(),
+                declared.controlled_max_abs_error_effective,
             ),
         }));
     }
@@ -517,31 +534,13 @@ fn effective_subpopulations_json(assignment: &F5FounderAssignment) -> Value {
     )
 }
 
-/// `subpopulations` del manifiesto: los cuatro campos exactos, sin repetir
-/// claves fundadoras ni el vector de individuos.
-fn manifest_subpopulations_json(assignment: &F5FounderAssignment) -> Value {
-    Value::Array(
-        assignment
-            .rosters()
-            .iter()
-            .map(|roster| {
-                json!({
-                    "population_id": roster.population_id().as_str(),
-                    "individual_count": roster.individual_count(),
-                    "inbreeding_f": optional_number(roster.inbreeding_f()),
-                    "inbreeding_f_source": roster.inbreeding_f_source().as_str(),
-                })
-            })
-            .collect(),
-    )
-}
-
 // ---------------------------------------------------------------------------
 // Documentos v5
 // ---------------------------------------------------------------------------
 
 fn effective_document(
     request: &F5PublicationRequest<'_>,
+    declaration: &F5PackageDeclaration,
     shared: &SharedContract,
 ) -> Result<Value, Diagnostic> {
     let (config, sealed, assignment) = (request.config, request.sealed, request.assignment);
@@ -563,7 +562,10 @@ fn effective_document(
         "subpopulations".to_owned(),
         effective_subpopulations_json(assignment),
     );
-    f5.insert("sampling".to_owned(), sampling_json(assignment)?);
+    f5.insert(
+        "sampling".to_owned(),
+        sampling_json(declaration, assignment)?,
+    );
     shared.insert_into(&mut f5);
     let source = config.general_path().file_name().ok_or_else(|| {
         document_error(
@@ -768,85 +770,121 @@ fn quota_ties_json(assignment: &F5FounderAssignment) -> Value {
     )
 }
 
-fn f_realized_json(assignment: &F5FounderAssignment) -> Value {
-    Value::Array(
-        assignment
-            .f_realized()
-            .iter()
-            .map(|row| {
-                json!({
-                    "population_id": row.population_id().as_str(),
-                    "block_id": row.block_id().as_str(),
-                    "target_f": optional_number(row.target_f()),
-                    "status": row.status().as_str(),
-                    "value": optional_number(row.value()),
-                })
-            })
-            .collect(),
-    )
-}
-
 /// El objeto `f5` de un éxito, **sin** `initialization_summaries`: esos se
 /// emiten por flujo al serializar, en su posición alfabética.
 fn success_manifest_f5(
     request: &F5PublicationRequest<'_>,
-    artifacts: &F5SuccessArtifacts,
+    declaration: &F5PackageDeclaration,
     summaries: &[F5InitializationSummary],
     shared: &SharedContract,
 ) -> Result<Map<String, Value>, Diagnostic> {
-    let config = request.config;
-    let sealed = request.sealed;
-    let search = request.search;
     let assignment = request.assignment;
-    let layout_attempts_used = request
-        .layout
-        .successful_attempt_index()
-        .checked_add(1)
-        .ok_or_else(|| {
-            manifest_error(
-                Path::new(F5_MANIFEST_PATH),
-                "attempt_summary.layout_attempts_used: el índice del intento con éxito desborda",
-            )
-        })?;
     let mut f5 = Map::new();
+    // Todo lo que la declaración ya contiene se **deriva de ella**, no se
+    // vuelve a leer del productor: el oráculo juzga esa declaración, y si el
+    // manifiesto se construyera en paralelo desde las mismas estructuras el
+    // oráculo estaría aprobando un documento distinto del publicado. Hoy
+    // coincidirían, pero nada estructural lo garantizaría.
     f5.insert("schema_version".to_owned(), json!(F5_OBJECT_SCHEMA_VERSION));
-    f5.insert("scenario_id".to_owned(), json!(config.scenario_id()));
-    f5.insert("seed".to_owned(), json!(config.seed()));
-    f5.insert("reference_id".to_owned(), json!(config.reference_id()));
+    f5.insert("scenario_id".to_owned(), json!(declaration.scenario_id));
+    f5.insert("seed".to_owned(), json!(declaration.seed));
+    f5.insert("reference_id".to_owned(), json!(declaration.reference_id));
     f5.insert(
         "reference_sha256".to_owned(),
-        json!(sealed.reference_sha256()),
+        json!(declaration.reference_sha256),
     );
-    f5.insert("eligible_bases".to_owned(), json!(sealed.eligible_bases()));
-    f5.insert("ploidy".to_owned(), json!(config.ploidy()));
+    f5.insert(
+        "eligible_bases".to_owned(),
+        json!(declaration.bounds.eligible_bases),
+    );
+    f5.insert("ploidy".to_owned(), json!(declaration.ploidy));
     f5.insert(
         "founder_count".to_owned(),
-        json!(*config.declared_scenario().founder_count.value()),
+        json!(*request.config.declared_scenario().founder_count.value()),
     );
+    // `inbreeding_f_source` y el `block_index` y `source` de cada fila de
+    // muestreo son los tres únicos términos que la declaración de F5.4.2 no
+    // transporta —su contrato es cerrado y este hito no lo reabre—, de modo
+    // que siguen viniendo del censo y de la resolución de muestreo. El resto
+    // de cada objeto sale de la declaración.
     f5.insert(
         "subpopulations".to_owned(),
-        manifest_subpopulations_json(assignment),
+        Value::Array(
+            declaration
+                .subpopulations
+                .iter()
+                .zip(assignment.rosters())
+                .map(|(declared, roster)| {
+                    json!({
+                        "population_id": declared.population_id,
+                        "individual_count": declared.individual_count,
+                        "inbreeding_f": optional_number(declared.inbreeding_f),
+                        "inbreeding_f_source": roster.inbreeding_f_source().as_str(),
+                    })
+                })
+                .collect(),
+        ),
     );
     f5.insert(
         "attempt_summary".to_owned(),
         json!({
-            "layout_attempts_used": layout_attempts_used,
-            "haplotype_attempts_total": search.haplotype_attempts_total(),
-            "max_attempt_index": search.max_attempt_index(),
+            "layout_attempts_used": declaration.attempt_summary.layout_attempts_used,
+            "haplotype_attempts_total": declaration.attempt_summary.haplotype_attempts_total,
+            "max_attempt_index": declaration.attempt_summary.max_attempt_index,
         }),
     );
-    f5.insert("sampling".to_owned(), sampling_json(assignment)?);
+    f5.insert(
+        "sampling".to_owned(),
+        sampling_json(declaration, assignment)?,
+    );
     f5.insert("quota_ties".to_owned(), quota_ties_json(assignment));
-    f5.insert("f_realized".to_owned(), f_realized_json(assignment));
+    f5.insert(
+        "f_realized".to_owned(),
+        Value::Array(
+            declaration
+                .f_realized
+                .iter()
+                .map(|row| {
+                    json!({
+                        "population_id": row.population_id,
+                        "block_id": row.block_id,
+                        "target_f": optional_number(row.target_f),
+                        "status": row.status,
+                        "value": optional_number(row.value),
+                    })
+                })
+                .collect(),
+        ),
+    );
     ensure_recounts_match(summaries)?;
-    f5.insert("truth".to_owned(), artifacts.truth().to_json());
+    f5.insert(
+        "truth".to_owned(),
+        json!({
+            "artifact_id": declaration.truth.artifact_id,
+            "artifact_kind": declaration.truth.artifact_kind,
+            "schema_version": declaration.truth.schema_version,
+            "projection_version": declaration.truth.projection_version,
+            "path": declaration.truth.path,
+            "size_bytes": declaration.truth.size_bytes,
+            "sha256": declaration.truth.sha256,
+        }),
+    );
     f5.insert(
         "artifacts".to_owned(),
         Value::Array(
-            artifacts
-                .artifacts()
+            declaration
+                .artifacts
                 .iter()
-                .map(crate::f5_artifacts::F5ArtifactLink::to_json)
+                .map(|link| {
+                    json!({
+                        "artifact_id": link.artifact_id,
+                        "artifact_kind": link.artifact_kind,
+                        "schema_version": link.schema_version,
+                        "path": link.path,
+                        "size_bytes": link.size_bytes,
+                        "sha256": link.sha256,
+                    })
+                })
                 .collect(),
         ),
     );
@@ -959,20 +997,22 @@ impl F5FailureCode {
     }
 }
 
-/// Intentos de layout consumidos por un fallo de esa etapa.
+/// Reduce cualquier causa al enumerado cerrado del esquema de fallo.
 ///
-/// `F5BestLayout` solo nace por la vía del agotamiento, y esa vía recorre el
-/// bucle `0..max_layout_attempts` entero: su presencia **es** la prueba de que
-/// se consumieron todos. Cualquier otra causa de layout —inviabilidad
-/// demostrada, materialización fallida— aborta antes de dejar un mejor
-/// intento, y el contador es cero. La regla vive en una función propia porque
-/// `F5BestLayout` no tiene constructor público y un fixture que agote el
-/// layout no sirve: el propio fixture redimensiona el FASTA con `block_count`.
-const fn layout_attempts_used(has_best_layout: bool, max_layout_attempts: u64) -> u64 {
-    if has_best_layout {
-        max_layout_attempts
-    } else {
-        0
+/// El catálogo público de diagnósticos es más ancho que
+/// `f5-failure-v1.schema.json#/$defs/code`. Una causa que no pertenezca se
+/// publica como `GPS-INTERNAL-101` —que sí pertenece— y el diagnóstico
+/// conserva **el código real**, anotando bajo `published_failure_code` cuál se
+/// publicó en su lugar. Las tres vías de construcción usan esta función: sin
+/// ella, dos de ellas degradaban el código en silencio.
+fn publishable_code(diagnostic: Diagnostic) -> (F5FailureCode, Diagnostic) {
+    let observed = diagnostic.code();
+    match F5FailureCode::parse(observed) {
+        Some(code) => (code, diagnostic),
+        None => (
+            F5FailureCode::Internal,
+            diagnostic.with("published_failure_code", F5FailureCode::Internal.as_str()),
+        ),
     }
 }
 
@@ -1005,31 +1045,25 @@ pub struct F5FailureReport {
 }
 
 impl F5FailureReport {
-    /// Fallo de layout: `best_layout` existe exactamente cuando la búsqueda se
-    /// agotó, y ese agotamiento recorre siempre los `max_layout_attempts`
-    /// completos, que es de donde sale `layout_attempts_used`.
+    /// Fallo de layout. `layout_attempts_used` lo dice el propio fallo: no se
+    /// deduce de la presencia de un mejor candidato, que existe desde el
+    /// primer intento porque `consider_best` corre antes de materializar.
     #[must_use]
-    pub fn from_layout(
-        config: &EffectiveF5Config,
-        sealed: &SealedF5Admission,
-        failure: &F5LayoutFailure,
-    ) -> Self {
-        let best_layout = failure.best_layout().cloned();
-        let layout_attempts_used =
-            layout_attempts_used(best_layout.is_some(), sealed.max_layout_attempts());
+    pub fn from_layout(config: &EffectiveF5Config, failure: &F5LayoutFailure) -> Self {
+        let (code, diagnostic) = publishable_code(failure.diagnostic().clone());
         Self {
-            code: F5FailureCode::parse(failure.code()).unwrap_or(F5FailureCode::Internal),
+            code,
             stage: F5FailureStage::Layout,
             scenario_id: config.scenario_id().to_owned(),
             population_id: failure.context().get("population_id").cloned(),
             block_id: failure.context().get("block_id").cloned(),
             counters: F5FailureCounters {
-                layout_attempts_used,
+                layout_attempts_used: failure.attempts_used(),
                 ..F5FailureCounters::default()
             },
-            best_layout,
+            best_layout: failure.best_layout().cloned(),
             best_attempt: None,
-            diagnostic: failure.diagnostic().clone(),
+            diagnostic,
         }
     }
 
@@ -1066,8 +1100,9 @@ impl F5FailureReport {
             .iter()
             .find(|record| unit(record) && record.selected_best())
             .cloned();
+        let (code, diagnostic) = publishable_code(failure.diagnostic().clone());
         Self {
-            code: F5FailureCode::parse(failure.code()).unwrap_or(F5FailureCode::Internal),
+            code,
             stage: F5FailureStage::Haplotypes,
             scenario_id: config.scenario_id().to_owned(),
             population_id,
@@ -1075,7 +1110,7 @@ impl F5FailureReport {
             counters,
             best_layout: None,
             best_attempt,
-            diagnostic: failure.diagnostic().clone(),
+            diagnostic,
         }
     }
 
@@ -1088,20 +1123,7 @@ impl F5FailureReport {
         stage: F5FailureStage,
         diagnostic: Diagnostic,
     ) -> Self {
-        // El catálogo público de diagnósticos es más ancho que el enumerado
-        // cerrado del esquema de fallo. Una causa no enumerada —y las
-        // naturales de la etapa `publication` lo son: `GPS-INTERNAL-001`,
-        // `GPS-IO-001`, `GPS-FMT-006`— se publica como `GPS-INTERNAL-101`,
-        // que sí pertenece al enumerado, **conservando el código original en
-        // el contexto del diagnóstico** para no perder la causa real.
-        let observed = diagnostic.code();
-        let (code, diagnostic) = match F5FailureCode::parse(observed) {
-            Some(code) => (code, diagnostic),
-            None => (
-                F5FailureCode::Internal,
-                diagnostic.with("published_failure_code", F5FailureCode::Internal.as_str()),
-            ),
-        };
+        let (code, diagnostic) = publishable_code(diagnostic);
         Self {
             code,
             stage,
@@ -1382,6 +1404,7 @@ impl<'a> F5PublicationRequest<'a> {
             },
             bounds: F5DeclaredBounds {
                 block_count: self.sealed.block_count(),
+                eligible_bases: self.sealed.eligible_bases(),
                 site_bound_per_block: self.sealed.site_bound_per_block(),
                 bin_count_total: self.sealed.bin_count_total(),
                 max_haplotype_attempts: scenario
@@ -1399,6 +1422,11 @@ impl<'a> F5PublicationRequest<'a> {
             },
             id_catalog_id: F5_ID_CATALOG.to_owned(),
             rng_catalog_id: F5_RNG_CATALOG.to_owned(),
+            attempt_summary: F5DeclaredAttemptSummary {
+                layout_attempts_used: self.layout.successful_attempt_index().saturating_add(1),
+                haplotype_attempts_total: self.search.haplotype_attempts_total(),
+                max_attempt_index: self.search.max_attempt_index(),
+            },
         }
     }
 }
@@ -1433,7 +1461,84 @@ pub fn publish_f5_success<R>(
     request: &F5PublicationRequest<'_>,
     identities: &mut F5FounderIdentities,
     recount: R,
-) -> Result<PathBuf, Diagnostic>
+) -> Result<PathBuf, Box<F5PublicationFailure>>
+where
+    R: FnOnce(&Path, &F5PackageDeclaration) -> Result<Vec<F5InitializationSummary>, Diagnostic>,
+{
+    let attempt = |workspace: &mut ExecutionWorkspace| -> Result<(), Diagnostic> {
+        publish_f5_success_into(workspace, request, identities, recount)
+    };
+    match attempt(&mut workspace) {
+        Ok(()) => workspace.publish().map_err(|diagnostic| {
+            Box::new(F5PublicationFailure {
+                workspace: None,
+                diagnostic,
+            })
+        }),
+        Err(diagnostic) => Err(Box::new(F5PublicationFailure {
+            workspace: Some(workspace),
+            diagnostic,
+        })),
+    }
+}
+
+/// Fallo de [`publish_f5_success`] que **devuelve el provisional** al llamador.
+///
+/// DTC-045 distingue tres resultados y solo uno deja el provisional
+/// `INCOMPLETE`: la **interrupción no controlable**. Un fallo controlado
+/// posterior al comienzo —un recuento MAN-70 que rechaza, una identidad que no
+/// cuadra, una puerta física que tumba el paquete— tiene que «publicar
+/// atómicamente el directorio final como fallido». Con la firma anterior eso
+/// era imposible: el `ExecutionWorkspace` entraba por valor y al devolver
+/// `Err` ya estaba destruido, de modo que el llamador se quedaba sin con qué
+/// publicar y el único rastro era un provisional marcado como si el proceso
+/// hubiera muerto. Se devuelve el provisional **vivo** para que el llamador
+/// pueda cerrarlo con [`publish_f5_failure`].
+///
+/// **Qué no puede publicar un fallo, y queda escrito.** `workspace` es `None`
+/// cuando el renombrado atómico ya había empezado —el destino existe o el
+/// sistema de ficheros no ofrece la garantía no-clobber— y cuando el propio
+/// intento de publicar el fallo vuelve a fallar: un `ENOSPC` real no deja
+/// escribir ni el diagnóstico. Esos casos **son** la interrupción de DTC-045 y
+/// dejan el provisional `INCOMPLETE`, que es exactamente lo que esa decisión
+/// reserva para ellos.
+#[derive(Debug)]
+pub struct F5PublicationFailure {
+    workspace: Option<ExecutionWorkspace>,
+    diagnostic: Diagnostic,
+}
+
+impl F5PublicationFailure {
+    /// El provisional vivo, si el fallo admite publicar un paquete `failed`.
+    #[must_use]
+    pub fn into_workspace(self) -> Option<ExecutionWorkspace> {
+        self.workspace
+    }
+
+    #[must_use]
+    pub const fn diagnostic(&self) -> &Diagnostic {
+        &self.diagnostic
+    }
+
+    #[must_use]
+    pub fn into_diagnostic(self) -> Diagnostic {
+        self.diagnostic
+    }
+
+    /// Descompone el fallo en sus dos mitades, que es lo que necesita un
+    /// llamador que va a publicar el paquete `failed`.
+    #[must_use]
+    pub fn into_parts(self) -> (Option<ExecutionWorkspace>, Diagnostic) {
+        (self.workspace, self.diagnostic)
+    }
+}
+
+fn publish_f5_success_into<R>(
+    workspace: &mut ExecutionWorkspace,
+    request: &F5PublicationRequest<'_>,
+    identities: &mut F5FounderIdentities,
+    recount: R,
+) -> Result<(), Diagnostic>
 where
     R: FnOnce(&Path, &F5PackageDeclaration) -> Result<Vec<F5InitializationSummary>, Diagnostic>,
 {
@@ -1447,13 +1552,13 @@ where
             request.assignment,
             &request.sequences,
         )?;
-        write_f5_success_artifacts(&mut workspace, &success, identities)?
+        write_f5_success_artifacts(workspace, &success, identities)?
     };
     let declaration = request.declaration(&artifacts);
     let summaries = recount(workspace.payload_root(), &declaration)?;
     let shared = SharedContract::build(request.config, request.sealed)?;
-    let effective = effective_document(request, &shared)?;
-    let f5 = success_manifest_f5(request, &artifacts, &summaries, &shared)?;
+    let effective = effective_document(request, &declaration, &shared)?;
+    let f5 = success_manifest_f5(request, &declaration, &summaries, &shared)?;
     // La puerta de F5.0 compara cada escalar de `resource_preflight` contra la
     // proyección sellada, no una copia contra la otra: dos copias iguales
     // entre sí pero distintas de la admisión también se rechazan. El
@@ -1482,8 +1587,7 @@ where
     // fichero publicado y mantenerlo vivo sumaría su tamaño al pico.
     drop(f5);
     drop(summaries);
-    workspace.close_f5_manifest()?;
-    workspace.publish()
+    workspace.close_f5_manifest()
 }
 
 /// Publica un fallo controlado: `outputs/f5-failure.json`, el manifiesto
@@ -1618,8 +1722,7 @@ mod gate {
         pub(super) reference_sha256: Value,
         pub(super) profile: Value,
         pub(super) mask: Value,
-        #[allow(dead_code)]
-        eligible_bases: IgnoredAny,
+        pub(super) eligible_bases: u64,
         pub(super) target: Value,
         pub(super) ploidy: Value,
         pub(super) founder_count: Value,
@@ -1633,6 +1736,11 @@ mod gate {
         #[allow(dead_code)]
         attempt_summary: IgnoredAny,
         pub(super) sampling: Value,
+        /// Declarado **no observable** desde los bytes publicados, igual que
+        /// en F5.4.2: ningún TSV enumera los rangos empatados de una cuota
+        /// controlada, de modo que ni la puerta ni el oráculo pueden
+        /// contrastarlos. Queda dicho aquí para que no se confunda con un
+        /// olvido.
         #[allow(dead_code)]
         quota_ties: IgnoredAny,
         #[allow(dead_code)]
@@ -1663,26 +1771,39 @@ mod gate {
         pub(super) f5_failure: Failure,
     }
 
+    /// Los nueve términos comunes que `f5-failure.json` y el objeto
+    /// `f5_failure` del manifiesto tienen que publicar **iguales**.
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     pub(super) struct Failure {
         pub(super) code: String,
         pub(super) stage: String,
-        #[allow(dead_code)]
-        scenario_id: Value,
-        #[allow(dead_code)]
-        population_id: IgnoredAny,
-        #[allow(dead_code)]
-        block_id: IgnoredAny,
-        #[allow(dead_code)]
-        limits: IgnoredAny,
-        #[allow(dead_code)]
-        counters: IgnoredAny,
-        #[allow(dead_code)]
-        best_layout: IgnoredAny,
-        #[allow(dead_code)]
-        best_attempt: IgnoredAny,
+        pub(super) scenario_id: Value,
+        pub(super) population_id: Value,
+        pub(super) block_id: Value,
+        pub(super) limits: Value,
+        pub(super) counters: Value,
+        pub(super) best_layout: Value,
+        pub(super) best_attempt: Value,
         pub(super) artifacts: Vec<Link>,
+    }
+
+    /// `outputs/f5-failure.json`, con sus doce claves exactas.
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(super) struct FailureDiagnostic {
+        pub(super) diagnostic_kind: String,
+        pub(super) schema_version: String,
+        pub(super) code: String,
+        pub(super) stage: String,
+        pub(super) scenario_id: Value,
+        pub(super) population_id: Value,
+        pub(super) block_id: Value,
+        pub(super) limits: Value,
+        pub(super) counters: Value,
+        pub(super) best_layout: Value,
+        pub(super) best_attempt: Value,
+        pub(super) artifacts: Vec<IgnoredAny>,
     }
 
     /// Las dieciocho claves exactas del objeto `f5` del efectivo.
@@ -1775,6 +1896,85 @@ fn verify_link(
         ));
     }
     catalog.push((link.artifact_id.clone(), link.path.clone()));
+    Ok(())
+}
+
+/// Enumera la carga útil y exige que sea **exactamente** el conjunto
+/// declarado.
+///
+/// La puerta anterior comprobaba una lista literal de rutas prohibidas con
+/// `exists()`, de modo que cualquier fichero que ningún manifiesto declarase
+/// —un documento raíz escrito por el llamador, un residuo— llegaba al destino
+/// final sin ruta, tamaño ni digest, en los **dos** estados. No es
+/// hipotético: DTC-035 exige conservar la configuración original como copia
+/// TOML exacta y en v5 esa copia solo puede ser un documento raíz, porque
+/// `artifacts` es `prefixItems`+`items:false`. El primer consumidor del hueco
+/// será F5.6.
+fn verify_payload_inventory(
+    payload_root: &Path,
+    manifest_path: &Path,
+    declared: &BTreeSet<String>,
+) -> Result<(), Diagnostic> {
+    let mut found = BTreeSet::new();
+    collect_payload_files(payload_root, payload_root, manifest_path, &mut found)?;
+    if &found == declared {
+        return Ok(());
+    }
+    let undeclared = found.difference(declared).cloned().collect::<Vec<_>>();
+    let missing = declared.difference(&found).cloned().collect::<Vec<_>>();
+    Err(manifest_error(
+        manifest_path,
+        format!(
+            "la carga útil no coincide con lo declarado: sobran {undeclared:?} y faltan {missing:?}"
+        ),
+    ))
+}
+
+fn collect_payload_files(
+    payload_root: &Path,
+    directory: &Path,
+    manifest_path: &Path,
+    found: &mut BTreeSet<String>,
+) -> Result<(), Diagnostic> {
+    let entries = std::fs::read_dir(directory).map_err(|error| {
+        manifest_error(
+            manifest_path,
+            format!("no se pudo recorrer {}: {error}", directory.display()),
+        )
+    })?;
+    for entry in entries {
+        let path = entry
+            .map_err(|error| {
+                manifest_error(
+                    manifest_path,
+                    format!(
+                        "no se pudo leer una entrada de {}: {error}",
+                        directory.display()
+                    ),
+                )
+            })?
+            .path();
+        if path.is_dir() {
+            collect_payload_files(payload_root, &path, manifest_path, found)?;
+            continue;
+        }
+        let relative = path.strip_prefix(payload_root).map_err(|_| {
+            manifest_error(
+                manifest_path,
+                format!("{} no cuelga de la carga útil", path.display()),
+            )
+        })?;
+        let text = relative
+            .to_str()
+            .ok_or_else(|| {
+                manifest_error(
+                    manifest_path,
+                    format!("{} no es una ruta UTF-8", relative.display()),
+                )
+            })?
+            .replace('\\', "/");
+        found.insert(text);
+    }
     Ok(())
 }
 
@@ -1918,6 +2118,42 @@ fn verify_success(
             ));
         }
     }
+
+    // `eligible_bases` no viaja al efectivo y el oráculo no puede recomputarlo
+    // —no abre la referencia—, pero el propio manifiesto publica la cota
+    // superior en `resource_preflight.reference_bases_processed`: las bases
+    // elegibles son un subconjunto de las recorridas. La cota inferior
+    // —las bases que el layout colocó— la comprueba el oráculo.
+    let processed = f5
+        .resource_preflight
+        .get("reference_bases_processed")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            manifest_error(
+                manifest_path,
+                "/f5/resource_preflight/reference_bases_processed: falta o no es u64",
+            )
+        })?;
+    if f5.eligible_bases > processed {
+        return Err(manifest_error(
+            manifest_path,
+            format!(
+                "/f5/eligible_bases: {} excede las {processed} bases que el escaneo recorrió",
+                f5.eligible_bases
+            ),
+        ));
+    }
+
+    // El árbol publicado es exactamente el conjunto declarado: los siete TSV,
+    // la verdad y los dos documentos raíz. Ni uno más.
+    let mut declared = F5_TSV_CONTRACTS
+        .iter()
+        .map(|contract| contract.path().to_owned())
+        .collect::<BTreeSet<_>>();
+    declared.insert(F5_TRUTH_PATH.to_owned());
+    declared.insert(F5_MANIFEST_PATH.to_owned());
+    declared.insert(F5_EFFECTIVE_CONFIG_PATH.to_owned());
+    verify_payload_inventory(payload_root, manifest_path, &declared)?;
 
     let effective_path = payload_root.join(F5_EFFECTIVE_CONFIG_PATH);
     let effective: gate::EffectiveDocument =
@@ -2134,18 +2370,79 @@ fn verify_failure(
         "/f5/f5_failure/artifacts/0",
         catalog,
     )?;
-    // Ningún artefacto biológico puede sobrevivir en el árbol que se va a
-    // renombrar, existiera o no como temporal.
-    for forbidden in F5_TSV_CONTRACTS
-        .iter()
-        .map(crate::f5_artifacts::F5TsvContract::path)
-        .chain([F5_TRUTH_PATH, F5_EFFECTIVE_CONFIG_PATH])
+    // El árbol publicado es exactamente el manifiesto y el diagnóstico:
+    // ningún artefacto biológico sobrevive, existiera o no como temporal, y
+    // ningún fichero sin declarar se cuela. Enumerarlo es lo que distingue
+    // esta comprobación de la lista literal de rutas prohibidas que tenía
+    // antes, que no veía nada fuera de ella.
+    let declared = BTreeSet::from([F5_MANIFEST_PATH.to_owned(), F5_FAILURE_PATH.to_owned()]);
+    verify_payload_inventory(payload_root, manifest_path, &declared)?;
+    verify_failure_diagnostic(payload_root, manifest_path, &failure)
+}
+
+/// El diagnóstico publicado y su copia en el manifiesto dicen **lo mismo**.
+///
+/// La puerta anterior leía `code`, `stage` y el enlace del manifiesto y no
+/// abría nunca `outputs/f5-failure.json`: un paquete cuyo diagnóstico
+/// contradijera a su propio manifiesto en causa, etapa, contadores y
+/// artefactos pasaba, incluso rehaciendo el enlace con el tamaño y el SHA-256
+/// nuevos. El bucle de los nueve términos estaba escrito en la batería; aquí
+/// se promueve al productor, igual que F5.4.2 promovió el lector de F5.4.1.
+fn verify_failure_diagnostic(
+    payload_root: &Path,
+    manifest_path: &Path,
+    manifest: &gate::Failure,
+) -> Result<(), Diagnostic> {
+    let document_path = payload_root.join(F5_FAILURE_PATH);
+    let document: gate::FailureDiagnostic = parse(&document_path, manifest_path, F5_FAILURE_PATH)?;
+    if document.diagnostic_kind != F5_FAILURE_DIAGNOSTIC_KIND
+        || document.schema_version != F5_FAILURE_SCHEMA_VERSION
     {
-        if payload_root.join(forbidden).exists() {
-            return Err(manifest_error(
-                manifest_path,
-                format!("un fallo controlado no publica {forbidden}"),
-            ));
+        return Err(manifest_error(
+            manifest_path,
+            format!("{F5_FAILURE_PATH}: clase o versión incompatible con f5-failure-v1"),
+        ));
+    }
+    if !document.artifacts.is_empty() {
+        return Err(manifest_error(
+            manifest_path,
+            format!(
+                "{F5_FAILURE_PATH}/artifacts: el contrato exige la lista vacía y publica {}",
+                document.artifacts.len()
+            ),
+        ));
+    }
+    let mismatch = |term: &str| {
+        manifest_error(
+            manifest_path,
+            format!("{F5_FAILURE_PATH}/{term}: el diagnóstico y el manifiesto discrepan"),
+        )
+    };
+    if document.code != manifest.code {
+        return Err(mismatch("code"));
+    }
+    if document.stage != manifest.stage {
+        return Err(mismatch("stage"));
+    }
+    for (term, left, right) in [
+        ("scenario_id", &document.scenario_id, &manifest.scenario_id),
+        (
+            "population_id",
+            &document.population_id,
+            &manifest.population_id,
+        ),
+        ("block_id", &document.block_id, &manifest.block_id),
+        ("limits", &document.limits, &manifest.limits),
+        ("counters", &document.counters, &manifest.counters),
+        ("best_layout", &document.best_layout, &manifest.best_layout),
+        (
+            "best_attempt",
+            &document.best_attempt,
+            &manifest.best_attempt,
+        ),
+    ] {
+        if left != right {
+            return Err(mismatch(term));
         }
     }
     Ok(())
@@ -2179,6 +2476,12 @@ mod tests {
         for key in SHARED_OBJECTS {
             shared.insert(key.to_owned(), json!({"synthetic": key}));
         }
+        // `resource_preflight` es el único cuyo contenido la puerta sí mira:
+        // de él sale la cota superior de `eligible_bases`.
+        shared.insert(
+            "resource_preflight".to_owned(),
+            json!({"reference_bases_processed": 1024_u64}),
+        );
         shared
     }
 
@@ -2341,6 +2644,10 @@ mod tests {
 
     /// Un artefacto del provisional que el manifiesto no enlaza impide cerrar
     /// el catálogo: el paquete publicado no puede contener nada sin declarar.
+    ///
+    /// Quien lo ve primero es el inventario del árbol, que cita la **ruta**;
+    /// la comparación con el catálogo, que cita el identificador, es la
+    /// segunda red. Se comprueba la ruta porque es lo que la puerta dice.
     #[test]
     fn an_artifact_the_manifest_does_not_link_blocks_the_closing_gate() {
         let rejection = staged_workspace_with("extra-artifact", true)
@@ -2350,7 +2657,7 @@ mod tests {
             rejection
                 .context()
                 .get("detail")
-                .is_some_and(|detail| detail.contains("f5-08-extra-v1")),
+                .is_some_and(|detail| detail.contains("outputs/f5-extra.tsv")),
             "{:?}",
             rejection.context()
         );
@@ -2384,20 +2691,6 @@ mod tests {
         );
         assert!(!destination.exists());
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// La regla de `layout_attempts_used` de un fallo de layout.
-    ///
-    /// `F5BestLayout` no tiene constructor público y un fixture que agote el
-    /// layout no sirve —el fixture redimensiona el FASTA con `block_count`—,
-    /// de modo que la regla se prueba donde sí puede probarse: en la función
-    /// pura que la contiene.
-    #[test]
-    fn an_exhausted_layout_consumed_every_attempt_and_any_other_cause_consumed_none() {
-        assert_eq!(layout_attempts_used(true, 8), 8);
-        assert_eq!(layout_attempts_used(true, 1), 1);
-        assert_eq!(layout_attempts_used(false, 8), 0);
-        assert_eq!(layout_attempts_used(false, 0), 0);
     }
 
     /// Ninguna causa ajena al enumerado cerrado del esquema puede publicarse.

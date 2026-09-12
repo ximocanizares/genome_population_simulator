@@ -2486,7 +2486,7 @@ identificador del índice de copia.
     cualquier otra causa de layout es cero. En un agotamiento de búsqueda, los
     cuatro contadores describen **la unidad que el diagnóstico nombra**: los
     agregados de otra unidad no explicarían por qué esta se agotó.
-  - **Cobertura.** 21 pruebas de integración y 5 unitarias. Ámbitos: ploidías
+  - **Cobertura.** 28 pruebas de integración y 4 unitarias. Ámbitos: ploidías
     1, 2 y 3, ambos modos con sus dos orígenes, `F` en `0` y `1`, las dos
     procedencias de `inbreeding_f` y su `null` fuera de `P=2`, IDs aportados y
     derivados, secuencia estéril, dos subpoblaciones, perfil diádico de cuatro
@@ -2558,8 +2558,9 @@ identificador del índice de copia.
     filtrar y publicaba atómicamente, con destino final creado, un manifiesto
     que su propio esquema rechaza. Corregido con el tipo cerrado
     `F5FailureCode`: una causa ajena se publica como `GPS-INTERNAL-101` —que
-    sí pertenece— **conservando el código original en el diagnóstico**, bajo
-    la clave `published_failure_code`. La puerta comprueba además `code` y
+    sí pertenece— **conservando el código original como código del
+    diagnóstico**, y anotando bajo `published_failure_code` cuál se publicó en
+    su lugar. La puerta comprueba además `code` y
     `stage` contra sus enumerados, y una prueba de esquema externo recorre las
     cinco etapas y la causa ajena.
   - **G-2: un general con un espacio en el nombre reventaba al final.**
@@ -2590,6 +2591,105 @@ identificador del índice de copia.
     documentos queda **cerrado dentro del productor** y no solo en el
     validador externo: sus veinticinco y dieciocho claves exactas son ahora
     las de un tipo.
+  - **Revisión F5.4 (cierre independiente) aplicada (2026-09-12).** Devolvió
+    **NO CERRADO** por un motivo exacto: su criterio es «publicación atómica y
+    oráculo independiente sobre éxito **y fallo**», y la mitad «fallo» no
+    estaba demostrada **porque no estaba implementada**. Dos bloqueantes y
+    cuatro menores, todos aplicados.
+  - **H1: el paquete de fallo no tenía oráculo.** `audit_f5_package` exige los
+    siete TSV y `truth.jsonl` y no tiene modo de fallo; y la puerta física
+    leía `code`, `stage` y el enlace **del manifiesto** sin abrir nunca
+    `outputs/f5-failure.json`. Reproducido: reescribiendo el diagnóstico con
+    otra causa, otra etapa, `layout_attempts_used=999` y un artefacto
+    biológico, y **rehaciendo el enlace**, la puerta devolvía `Ok(())`. Dos
+    piezas: `verify_failure_diagnostic` promueve al productor el bucle de los
+    **nueve términos comunes** que ya estaba escrito en la batería —igual que
+    F5.4.2 promovió el lector de F5.4.1—, y `audit_f5_failure_package` es el
+    gemelo del oráculo para el otro estado: doce claves, enumerados cerrados
+    de código y etapa, `artifacts=[]`, los nueve términos contra la
+    declaración, los contadores dentro de los límites efectivos, el árbol
+    **enumerado** y el enlace recomputado.
+  - **H2: un fichero que nadie declara llegaba al destino.** Ninguna de las dos
+    ramas recorría el árbol: la de éxito no miraba y la de fallo comprobaba
+    `exists()` sobre nueve rutas literales. Reproducido en los **dos** estados
+    con un documento raíz `orphan.json`. `verify_payload_inventory` enumera la
+    carga útil y exige igualdad exacta con el conjunto declarado: los siete
+    TSV, la verdad y los dos documentos raíz en éxito; el manifiesto y el
+    diagnóstico en fallo. No es hipotético: DTC-035 exige conservar la
+    configuración original como copia TOML y en v5 esa copia **solo puede ser**
+    un documento raíz, porque `artifacts` es `prefixItems`+`items:false`.
+  - **H3: la etapa `publication` no tenía productor posible, y ahora lo tiene.**
+    DTC-045 lo resuelve sin ambigüedad: «Tras comenzar, un fallo controlado …
+    publica atómicamente el directorio final como fallido». Un recuento MAN-70
+    rechazado es un fallo controlado posterior al comienzo, y con la firma
+    anterior el `ExecutionWorkspace` entraba por valor: al devolver `Err` ya
+    estaba destruido y el llamador se quedaba sin con qué publicar, dejando
+    solo el provisional `INCOMPLETE` que DTC-045 reserva a la **interrupción no
+    controlable**. `publish_f5_success` devuelve ahora
+    `Result<PathBuf, Box<F5PublicationFailure>>`, que **entrega el provisional
+    vivo**. Se eligió el tipo suma y no `&mut ExecutionWorkspace` porque hace
+    explícita la entrega en la firma: con `&mut`, el llamador se quedaría un
+    provisional a medio escribir sin ninguna señal de que le toca cerrarlo.
+    **Qué no puede publicar un fallo, escrito y no supuesto**: `workspace` es
+    `None` cuando el renombrado ya había empezado —destino existente o sistema
+    de ficheros sin garantía no-clobber— y cuando publicar el fallo vuelve a
+    fallar; un `ENOSPC` real no deja escribir ni el diagnóstico. Esos casos
+    **son** la interrupción de DTC-045. Esto da sentido retroactivo a G-1: el
+    tipo `F5FailureCode` protegía una etapa que ningún llamador podía producir.
+  - **H4: tres términos sin juez.** `eligible_bases`, `attempt_summary` y
+    `quota_ties` no estaban en las dieciocho claves del efectivo ni en la
+    declaración. Ahora: `eligible_bases` queda acotado por arriba en la puerta
+    —no puede exceder `resource_preflight.reference_bases_processed`, que el
+    propio manifiesto publica— y por abajo en el oráculo —no puede ser menor
+    que las bases que el layout colocó, que el oráculo suma de
+    `f5-block-layout.tsv`—; `attempt_summary` viaja a la declaración y el
+    oráculo contrasta sus dos términos derivables contra las filas de
+    `f5-attempts.tsv`, dejando `layout_attempts_used` declarado porque ningún
+    TSV lo publica. `quota_ties` queda **declarado no observable**, como en
+    F5.4.2, y ahora también en `f5_publication.rs`.
+  - **H5: `layout_attempts_used` publicaba un dato falso.** La regla decía que
+    cualquier causa distinta del agotamiento aborta antes de dejar un mejor
+    intento, y es **falsa**: `consider_best` corre **antes** de
+    `materialize_attempt` en la misma iteración. Lo que descartaba el candidato
+    era `impl From<Diagnostic> for F5LayoutFailure`, que fijaba
+    `best_layout: None`, de modo que un fallo en el intento 3 de 10 publicaba
+    `layout_attempts_used = 0`. `F5LayoutFailure` conserva ahora
+    `attempts_used` en **todas** sus vías, `From<Diagnostic>` incluida —cero
+    solo para los fallos anteriores al primer intento—, y el informe lo lee en
+    vez de deducirlo. La prueba tautológica —cuatro `assert_eq!` sobre una
+    función pura de dos argumentos, séptima aparición del patrón— se sustituye
+    por un agotamiento **real**: hueco mayor que el bloque, ningún intento
+    coloca dos sitios, `GPS-DOMAIN-106` y los ocho intentos publicados.
+  - **H6: `validate_rng_catalog` solo exigía que el catálogo no estuviera
+    vacío** mientras el reparto 3+9 de ese módulo se sostiene sobre doce filas.
+    Cierra con `seen != F5_RNG_CATALOG_DECISIONS`, y una prueba contrasta la
+    constante contra el fichero publicado.
+  - **La costura del oráculo, cerrada.** `publish_f5_success` entregaba al
+    oráculo una declaración construida desde la memoria del productor y luego
+    armaba el manifiesto **por segunda vez** desde las mismas estructuras: el
+    oráculo aprobaba una construcción paralela a la publicada. Ahora la
+    declaración se construye **una vez** y el objeto `f5` se **deriva de
+    ella**. Los tres únicos términos que no puede transportar —
+    `inbreeding_f_source` y el `block_index` y `source` de cada fila de
+    muestreo— siguen viniendo del censo y de la resolución, porque el contrato
+    de `F5PackageDeclaration` es de F5.4.2 y este hito no lo reabre; queda
+    dicho término a término en el código.
+  - **La demostración de atomicidad es de frontera de biblioteca.** Todo lo que
+    la Revisión F5.4 dio por demostrado —`RENAME_NOREPLACE` sin fallback,
+    `OpenArtifact::Drop`, `INCOMPLETE` en el envoltorio y nunca en el árbol
+    renombrable, la revalidación previa al renombrado— se prueba **con
+    fixtures sobre la frontera de biblioteca**: `application.rs` y `main.rs` no
+    invocan ninguna de las cuatro fronteras F5, y las únicas pruebas de
+    interrupción y concurrencia **entre procesos** recorren F1. **F5.6 debe
+    repetirla sobre el proceso**, con la interrupción y la concurrencia que
+    DTC-045 exige probar en WSL2/ext4 y Ubuntu nativo.
+  - **Dictamen sobre las dos piezas fuera de v8.** La revisión independiente
+    concluye —y se registra así— que **es v8 el que está incompleto**, no las
+    fases las que deben caber: los dos excesos los crea el propio contrato,
+    porque `final_formula_peak` presupuestó el escritor por flujo de F5.4.1 y
+    **nunca modeló** ni la construcción de los dos documentos ni un lector del
+    paquete. La recomendación para cuando F5.6 la tome es **`f5-resource-accounting-v9`
+    con dos términos nuevos**, uno por cada pieza.
   - **Un falso negativo evitado.** La primera versión de la prueba de rechazo
     de preflight usaba un `block_count` mayor esperando `GPS-DOMAIN-101`; el
     fixture **redimensiona el FASTA con el número de bloques**, de modo que el

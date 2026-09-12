@@ -40,9 +40,10 @@ use genome_population_simulator::f5_layout::{
     F5LayoutRequest, F5PhysicalLayout, build_f5_physical_layout,
 };
 use genome_population_simulator::f5_oracle::{
-    F5DeclaredBounds, F5DeclaredLdBin, F5DeclaredLink, F5DeclaredMode, F5DeclaredRealizedF,
-    F5DeclaredSampling, F5DeclaredSpectrumBand, F5DeclaredSubpopulation, F5DeclaredTruthLink,
-    F5PackageDeclaration, audit_f5_package,
+    F5DeclaredAttemptSummary, F5DeclaredBounds, F5DeclaredLdBin, F5DeclaredLink, F5DeclaredMode,
+    F5DeclaredRealizedF, F5DeclaredSampling, F5DeclaredSpectrumBand, F5DeclaredSubpopulation,
+    F5DeclaredTruthLink, F5FailureDeclaration, F5PackageDeclaration, audit_f5_failure_package,
+    audit_f5_package,
 };
 use genome_population_simulator::f5_preflight::{
     F5OtherResources, SealedF5Admission, recover_sealed_f5_admission,
@@ -547,7 +548,8 @@ fn try_publish(label: &str, fixture: &Fixture<'_>) -> Result<Package, Diagnostic
                     .map(|report| report.initialization_summaries().to_vec())
                     .map_err(|rejection| rejection.diagnostic().clone())
             },
-        )?
+        )
+        .map_err(|failure| failure.into_diagnostic())?
     };
     assert_eq!(published, destination);
     Ok(Package { chain, destination })
@@ -680,6 +682,7 @@ fn declaration_from_published(package: &Package) -> F5PackageDeclaration {
         bounds: F5DeclaredBounds {
             // B no viaja en ningún documento: se cuenta en las filas del
             // layout publicado, que es la tabla propietaria de los bloques.
+            eligible_bases: number(&f5["eligible_bases"]),
             block_count: (String::from_utf8(package.bytes("outputs/f5-block-layout.tsv"))
                 .expect("UTF-8")
                 .lines()
@@ -696,6 +699,11 @@ fn declaration_from_published(package: &Package) -> F5PackageDeclaration {
         },
         id_catalog_id: text(&f5["id_catalog"]["catalog_id"]),
         rng_catalog_id: text(&f5["rng_catalog"]["catalog_id"]),
+        attempt_summary: F5DeclaredAttemptSummary {
+            layout_attempts_used: number(&f5["attempt_summary"]["layout_attempts_used"]),
+            haplotype_attempts_total: number(&f5["attempt_summary"]["haplotype_attempts_total"]),
+            max_attempt_index: number(&f5["attempt_summary"]["max_attempt_index"]),
+        },
     }
 }
 
@@ -1137,6 +1145,10 @@ fn every_divergence_between_the_two_copies_is_rejected_by_its_own_term() {
 /// Etiqueta, mutación de una de las dos copias y término que el rechazo debe
 /// citar.
 type DivergenceCase = (&'static str, fn(&mut Value, &mut Value), &'static str);
+
+/// Etiqueta, mutación de un documento publicado y término que el rechazo debe
+/// citar.
+type DocumentCase = (&'static str, fn(&mut Value), &'static str);
 
 fn copy_tree(source: &Path, destination: &Path) {
     fs::create_dir_all(destination).expect("destino");
@@ -1885,7 +1897,7 @@ fn a_rejected_recount_publishes_no_destination() {
         })
         .expect_err("un recuento rechazado no publica")
     };
-    assert_eq!(rejection.code(), "GPS-INTERNAL-101");
+    assert_eq!(rejection.diagnostic().code(), "GPS-INTERNAL-101");
     assert!(!destination.exists());
     assert!(!destination.join(F5_MANIFEST_PATH).exists());
 }
@@ -2314,5 +2326,555 @@ fn a_general_whose_name_is_not_publishable_is_rejected_by_admission() {
     fs::create_dir_all(&root).expect("raíz");
     let (general, _) = Fixture::default().write(&root);
     load_and_validate_f5_config(&general).expect("general.toml es publicable");
+    fs::remove_dir_all(&root).expect("retirar");
+}
+
+// ---------------------------------------------------------------------------
+// El paquete de fallo, auditado desde sus bytes
+// ---------------------------------------------------------------------------
+
+/// Publica un fallo controlado real y devuelve su destino y su cadena.
+fn publish_failure(label: &str, stage: F5FailureStage, diagnostic: Diagnostic) -> (Chain, PathBuf) {
+    let root = temporary(label);
+    fs::create_dir_all(&root).expect("raíz");
+    let chain = build_chain(&root, &Fixture::default());
+    let destination = chain.root.join("published");
+    let workspace = ExecutionWorkspace::create(&destination).expect("provisional");
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("ejecución");
+    let report = F5FailureReport::from_diagnostic(&chain.config, None, stage, diagnostic);
+    publish_f5_failure(workspace, &chain.config, &chain.sealed, &execution, &report)
+        .expect("fallo publicado");
+    (chain, destination)
+}
+
+/// Declaración del paquete de fallo, reconstruida **desde el manifiesto
+/// publicado**.
+fn failure_declaration_from_published(destination: &Path) -> F5FailureDeclaration {
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(destination.join(F5_MANIFEST_PATH)).expect("leer"))
+            .expect("JSON");
+    let failure = &manifest["f5"]["f5_failure"];
+    let link = &failure["artifacts"][0];
+    let text = |value: &Value| value.as_str().expect("cadena").to_owned();
+    let optional = |value: &Value| value.as_str().map(str::to_owned);
+    let numbers = |object: &Value, keys: &[&str]| {
+        keys.iter()
+            .map(|key| object[*key].as_u64().expect("u64"))
+            .collect::<Vec<_>>()
+    };
+    let limits = numbers(
+        &failure["limits"],
+        &[
+            "max_layout_attempts",
+            "max_haplotype_attempts",
+            "max_swap_proposals",
+            "max_haplotype_cells",
+            "max_operation_units",
+            "max_working_memory_bytes",
+            "max_output_bytes",
+        ],
+    );
+    let counters = numbers(
+        &failure["counters"],
+        &[
+            "layout_attempts_used",
+            "haplotype_attempts_used",
+            "swap_proposals",
+            "swap_accepted",
+        ],
+    );
+    F5FailureDeclaration {
+        code: text(&failure["code"]),
+        stage: text(&failure["stage"]),
+        scenario_id: text(&failure["scenario_id"]),
+        population_id: optional(&failure["population_id"]),
+        block_id: optional(&failure["block_id"]),
+        limits: limits.try_into().expect("siete límites"),
+        counters: counters.try_into().expect("cuatro contadores"),
+        best_layout: failure["best_layout"].clone(),
+        best_attempt: failure["best_attempt"].clone(),
+        link: F5DeclaredLink {
+            artifact_id: text(&link["artifact_id"]),
+            artifact_kind: text(&link["artifact_kind"]),
+            schema_version: text(&link["schema_version"]),
+            path: text(&link["path"]),
+            size_bytes: link["size_bytes"].as_u64().expect("u64"),
+            sha256: text(&link["sha256"]),
+        },
+    }
+}
+
+/// El oráculo independiente acepta un paquete de fallo íntegro.
+#[test]
+fn the_independent_oracle_accepts_a_whole_failed_package() {
+    let (chain, destination) = publish_failure(
+        "failure-oracle",
+        F5FailureStage::Founders,
+        Diagnostic::f5_controlled_quota_infeasible("scenario", "P1", "cuota inviable"),
+    );
+    let declaration = failure_declaration_from_published(&destination);
+    assert_eq!(declaration.code, "GPS-DOMAIN-103");
+    assert_eq!(declaration.stage, "founders");
+    audit_f5_failure_package(&destination, &declaration)
+        .unwrap_or_else(|rejection| panic!("{}", rejection.diagnostic().render_human()));
+    drop(chain);
+}
+
+/// Cada corrupción del paquete de fallo muere por su causa.
+///
+/// Es el eje que la Revisión F5.4 exige y que no existía: la puerta leía
+/// `code`, `stage` y el enlace **del manifiesto** y nunca abría
+/// `outputs/f5-failure.json`, de modo que un diagnóstico que contradijera a su
+/// propio manifiesto en causa, etapa, contadores y artefactos pasaba —incluso
+/// rehaciendo el enlace con el tamaño y el SHA-256 nuevos—. La batería aplica
+/// la misma disciplina que la del éxito: el paquete íntegro pasa primero,
+/// `assert_ne!` sobre los bytes, enlace rehecho y causa contrastada.
+#[test]
+fn every_byte_mutation_of_a_failed_package_dies_of_its_own_cause() {
+    let (chain, source) = publish_failure(
+        "failure-mutations",
+        F5FailureStage::Founders,
+        Diagnostic::f5_controlled_quota_infeasible("scenario", "P1", "cuota inviable"),
+    );
+    let intact = failure_declaration_from_published(&source);
+    audit_f5_failure_package(&source, &intact).expect("el paquete íntegro pasa primero");
+    let records = failure_records(&source);
+    verify_published_f5_package(&source, &source.join(F5_MANIFEST_PATH), &records)
+        .expect("y su puerta física también");
+
+    let cases: Vec<DocumentCase> = vec![
+        (
+            "causa ajena al manifiesto",
+            |d| d["code"] = json!("GPS-DOMAIN-101"),
+            "code",
+        ),
+        (
+            "etapa ajena al manifiesto",
+            |d| d["stage"] = json!("layout"),
+            "stage",
+        ),
+        (
+            "escenario ajeno",
+            |d| d["scenario_id"] = json!("otro"),
+            "scenario_id",
+        ),
+        (
+            "población inventada",
+            |d| d["population_id"] = json!("PZ"),
+            "population_id",
+        ),
+        (
+            "bloque inventado",
+            |d| d["block_id"] = json!("BLK_X"),
+            "block_id",
+        ),
+        (
+            "un límite movido",
+            |d| d["limits"]["max_swap_proposals"] = json!(7_u64),
+            "limits",
+        ),
+        (
+            "contador de layout inventado",
+            |d| d["counters"]["layout_attempts_used"] = json!(999_u64),
+            "counters",
+        ),
+        (
+            "mejor layout inventado",
+            |d| {
+                d["best_layout"] = json!({
+                    "attempt_index": 0,
+                    "placed_blocks": 1,
+                    "unplaced_blocks": 0,
+                    "placed_bases": 3,
+                    "remaining_target_bases": 0,
+                    "layout_bytes_sha256": "a".repeat(64),
+                });
+            },
+            "best_layout",
+        ),
+        (
+            "artefacto biológico en el diagnóstico",
+            |d| d["artifacts"] = json!([{"path": "outputs/f5-sites.tsv"}]),
+            "artifacts",
+        ),
+        (
+            "clase del diagnóstico",
+            |d| d["diagnostic_kind"] = json!("gps_diagnostics"),
+            "diagnostic_kind",
+        ),
+        ("clave de más", |d| d["extra"] = json!(1), "object"),
+    ];
+
+    for (label, mutate, expected) in cases {
+        let staged = temporary(&format!("failure-mutation-{}", label.replace(' ', "-")));
+        copy_tree(&source, &staged);
+        let document_path = staged.join(F5_FAILURE_PATH);
+        let original = fs::read(&document_path).expect("leer");
+        let mut document: Value = serde_json::from_slice(&original).expect("JSON");
+        mutate(&mut document);
+        let mutated = serde_json::to_vec_pretty(&document).expect("JSON");
+        assert_ne!(original, mutated, "«{label}» no tocó ningún byte");
+        fs::write(&document_path, &mutated).expect("escribir");
+
+        // El enlace se rehace con los bytes nuevos: sin esto toda mutación
+        // moriría por el SHA-256 y taparía su causa.
+        let mut declaration = intact.clone();
+        declaration.link.size_bytes = mutated.len() as u64;
+        declaration.link.sha256 = sha256(&mutated);
+        let rejection = audit_f5_failure_package(&staged, &declaration)
+            .expect_err(&format!("«{label}» debe morir"));
+        let detail = rejection.diagnostic().render_human();
+        assert!(
+            detail.contains(expected),
+            "«{label}»: se esperaba que el rechazo citara {expected:?} y dijo {detail:?}"
+        );
+        fs::remove_dir_all(&staged).expect("retirar");
+    }
+    drop(chain);
+}
+
+fn failure_records(destination: &Path) -> Vec<ArtifactRecord> {
+    let bytes = fs::read(destination.join(F5_FAILURE_PATH)).expect("leer");
+    vec![ArtifactRecord {
+        id: F5_FAILURE_ARTIFACT_ID.to_owned(),
+        kind: "f5_failure".to_owned(),
+        path: F5_FAILURE_PATH.to_owned(),
+        size_bytes: bytes.len() as u64,
+        digest: sha256(&bytes),
+    }]
+}
+
+/// La puerta física también contrasta el diagnóstico contra el manifiesto.
+#[test]
+fn the_gate_rejects_a_diagnostic_that_contradicts_its_own_manifest() {
+    let (chain, source) = publish_failure(
+        "failure-gate",
+        F5FailureStage::Founders,
+        Diagnostic::f5_controlled_quota_infeasible("scenario", "P1", "cuota inviable"),
+    );
+    let records = failure_records(&source);
+    verify_published_f5_package(&source, &source.join(F5_MANIFEST_PATH), &records)
+        .expect("el paquete íntegro pasa");
+
+    let cases: Vec<DocumentCase> = vec![
+        ("causa", |d| d["code"] = json!("GPS-DOMAIN-101"), "code"),
+        ("etapa", |d| d["stage"] = json!("layout"), "stage"),
+        (
+            "contadores",
+            |d| d["counters"]["layout_attempts_used"] = json!(999_u64),
+            "counters",
+        ),
+    ];
+    for (label, mutate, expected) in cases {
+        let staged = temporary(&format!("failure-gate-{label}"));
+        copy_tree(&source, &staged);
+        let document_path = staged.join(F5_FAILURE_PATH);
+        let original = fs::read(&document_path).expect("leer");
+        let mut document: Value = serde_json::from_slice(&original).expect("JSON");
+        mutate(&mut document);
+        let mutated = serde_json::to_vec_pretty(&document).expect("JSON");
+        assert_ne!(original, mutated, "«{label}» no tocó ningún byte");
+        fs::write(&document_path, &mutated).expect("escribir");
+        // El enlace del manifiesto se rehace: la mutación no puede morir por
+        // el hash.
+        let manifest_path = staged.join(F5_MANIFEST_PATH);
+        let mut manifest: Value =
+            serde_json::from_slice(&fs::read(&manifest_path).expect("leer")).expect("JSON");
+        manifest["f5"]["f5_failure"]["artifacts"][0]["size_bytes"] = json!(mutated.len() as u64);
+        manifest["f5"]["f5_failure"]["artifacts"][0]["sha256"] = json!(sha256(&mutated));
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).expect("JSON")).expect("escribir");
+        let staged_records = failure_records(&staged);
+        let rejection = verify_published_f5_package(&staged, &manifest_path, &staged_records)
+            .expect_err(&format!("«{label}» debe tumbar la puerta"));
+        let detail = rejection
+            .context()
+            .get("detail")
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            detail.contains(expected),
+            "«{label}»: se esperaba {expected:?} y dijo {detail:?}"
+        );
+        fs::remove_dir_all(&staged).expect("retirar");
+    }
+    drop(chain);
+}
+
+/// Un fichero que ningún manifiesto declara **no** llega al destino, en los
+/// dos estados.
+///
+/// Ninguna de las dos ramas de la puerta recorría el árbol: la de éxito no
+/// miraba, y la de fallo comprobaba `exists()` sobre nueve rutas literales. Un
+/// documento raíz escrito por el llamador —que es la única forma que v5 tiene
+/// de conservar la copia TOML que DTC-035 exige, porque `artifacts` es
+/// `prefixItems`+`items:false`— se publicaba sin ruta, tamaño ni digest.
+#[test]
+fn an_undeclared_file_never_reaches_the_destination_in_either_state() {
+    // Éxito.
+    let root = temporary("orphan-success");
+    fs::create_dir_all(&root).expect("raíz");
+    let mut chain = build_chain(&root, &Fixture::default());
+    let destination = chain.root.join("published");
+    let mut workspace = ExecutionWorkspace::create(&destination).expect("provisional");
+    workspace
+        .write_root_document("orphan.json", b"{}\n")
+        .expect("documento huérfano");
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("ejecución");
+    let request = F5PublicationRequest::new(
+        &chain.config,
+        &chain.sealed,
+        &execution,
+        &chain.layout,
+        &chain.search,
+        &chain.assignment,
+    )
+    .expect("solicitud");
+    let failure = publish_f5_success(
+        workspace,
+        &request,
+        &mut chain.identities,
+        |payload, decl| {
+            audit_f5_package(payload, decl)
+                .map(|report| report.initialization_summaries().to_vec())
+                .map_err(|rejection| rejection.diagnostic().clone())
+        },
+    )
+    .expect_err("un fichero sin declarar no puede publicarse");
+    let (_, diagnostic) = failure.into_parts();
+    assert_eq!(diagnostic.code(), "GPS-FMT-006");
+    assert!(
+        diagnostic
+            .context()
+            .get("detail")
+            .is_some_and(|detail| detail.contains("orphan.json")),
+        "{:?}",
+        diagnostic.context()
+    );
+    assert!(!destination.exists());
+    drop(chain);
+
+    // Fallo.
+    let root = temporary("orphan-failure");
+    fs::create_dir_all(&root).expect("raíz");
+    let chain = build_chain(&root, &Fixture::default());
+    let destination = chain.root.join("published");
+    let mut workspace = ExecutionWorkspace::create(&destination).expect("provisional");
+    workspace
+        .write_root_document("orphan.json", b"{}\n")
+        .expect("documento huérfano");
+    let report = F5FailureReport::from_diagnostic(
+        &chain.config,
+        None,
+        F5FailureStage::Founders,
+        Diagnostic::f5_controlled_quota_infeasible("scenario", "P1", "cuota"),
+    );
+    let rejection =
+        publish_f5_failure(workspace, &chain.config, &chain.sealed, &execution, &report)
+            .expect_err("tampoco en un fallo");
+    assert!(
+        rejection
+            .context()
+            .get("detail")
+            .is_some_and(|detail| detail.contains("orphan.json")),
+        "{:?}",
+        rejection.context()
+    );
+    assert!(!destination.exists());
+    drop(chain);
+}
+
+/// Un recuento MAN-70 rechazado es un **fallo controlado** y publica su
+/// paquete `failed`.
+///
+/// DTC-045 reserva el provisional `INCOMPLETE` a la interrupción no
+/// controlable y obliga a que un fallo controlado posterior al comienzo
+/// «publique atómicamente el directorio final como fallido». Con la firma
+/// anterior era imposible: el `ExecutionWorkspace` entraba por valor y al
+/// devolver `Err` ya estaba destruido, de modo que el llamador se quedaba sin
+/// con qué publicar. Ahora lo recibe de vuelta.
+#[test]
+fn a_rejected_recount_publishes_a_failed_package_instead_of_an_incomplete_provisional() {
+    let root = temporary("recount-failure");
+    fs::create_dir_all(&root).expect("raíz");
+    let mut chain = build_chain(&root, &Fixture::default());
+    let destination = chain.root.join("published");
+    let workspace = ExecutionWorkspace::create(&destination).expect("provisional");
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("ejecución");
+    let failure = {
+        let request = F5PublicationRequest::new(
+            &chain.config,
+            &chain.sealed,
+            &execution,
+            &chain.layout,
+            &chain.search,
+            &chain.assignment,
+        )
+        .expect("solicitud");
+        publish_f5_success(workspace, &request, &mut chain.identities, |_, _| {
+            Err(Diagnostic::f5_internal("scenario", "el recuento rechaza"))
+        })
+        .expect_err("el recuento rechaza")
+    };
+    let (workspace, diagnostic) = failure.into_parts();
+    let workspace = workspace.expect("el provisional vuelve vivo al llamador");
+    assert_eq!(diagnostic.code(), "GPS-INTERNAL-101");
+
+    // El llamador cierra el paquete como fallido, que es lo que DTC-045 pide.
+    let report = F5FailureReport::from_diagnostic(
+        &chain.config,
+        Some(&chain.layout),
+        F5FailureStage::Publication,
+        diagnostic,
+    );
+    assert_eq!(report.stage(), F5FailureStage::Publication);
+    let published =
+        publish_f5_failure(workspace, &chain.config, &chain.sealed, &execution, &report)
+            .expect("el fallo controlado se publica");
+    assert_eq!(published, destination);
+
+    // Destino `failed`, con su diagnóstico y sin artefactos biológicos.
+    let mut files = BTreeSet::new();
+    collect_files(&destination, &destination, &mut files);
+    assert_eq!(
+        files,
+        BTreeSet::from([F5_MANIFEST_PATH.to_owned(), F5_FAILURE_PATH.to_owned()])
+    );
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(destination.join(F5_MANIFEST_PATH)).expect("leer"))
+            .expect("JSON");
+    assert_eq!(manifest["state"], json!("failed"));
+    assert_eq!(manifest["f5"]["f5_failure"]["stage"], json!("publication"));
+    // Y el oráculo independiente lo acepta.
+    let declaration = failure_declaration_from_published(&destination);
+    audit_f5_failure_package(&destination, &declaration).expect("oráculo del fallo");
+    // Ya no queda ningún provisional `INCOMPLETE`: esa marca es de la
+    // interrupción, no de un fallo controlado.
+    let residue = fs::read_dir(&chain.root)
+        .expect("raíz")
+        .filter_map(Result::ok)
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .contains("gps-incomplete-")
+        });
+    assert!(!residue, "un fallo controlado no deja provisional");
+    drop(chain);
+}
+
+/// Los tres términos que no tenían juez ya lo tienen.
+#[test]
+fn eligible_bases_and_the_attempt_summary_are_now_contrasted() {
+    let package = publish("unjudged-terms", &wide_fixture());
+    let declaration = declaration_from_published(&package);
+    audit_f5_package(&package.destination, &declaration).expect("paquete íntegro");
+    let records = package.records();
+    let manifest_path = package.destination.join(F5_MANIFEST_PATH);
+
+    // `eligible_bases` contra la cota superior que el propio preflight publica.
+    let staged = temporary("unjudged-eligible");
+    copy_tree(&package.destination, &staged);
+    let mut manifest: Value =
+        serde_json::from_slice(&fs::read(staged.join(F5_MANIFEST_PATH)).expect("leer"))
+            .expect("JSON");
+    manifest["f5"]["eligible_bases"] = json!(999_999_u64);
+    fs::write(
+        staged.join(F5_MANIFEST_PATH),
+        serde_json::to_vec(&manifest).expect("JSON"),
+    )
+    .expect("escribir");
+    let rejection = verify_published_f5_package(&staged, &staged.join(F5_MANIFEST_PATH), &records)
+        .expect_err("eligible_bases inventado debe morir");
+    assert!(
+        rejection
+            .context()
+            .get("detail")
+            .is_some_and(|detail| detail.contains("/f5/eligible_bases")),
+        "{:?}",
+        rejection.context()
+    );
+    fs::remove_dir_all(&staged).expect("retirar");
+
+    // Y `attempt_summary` contra `f5-attempts.tsv`, que el oráculo recorre.
+    for (label, mutate, expected) in [
+        (
+            "total de intentos",
+            "haplotype_attempts_total",
+            "haplotype_attempts_total",
+        ),
+        ("índice mayor", "max_attempt_index", "max_attempt_index"),
+    ] {
+        let mut mutated = declaration.clone();
+        match mutate {
+            "haplotype_attempts_total" => {
+                mutated.attempt_summary.haplotype_attempts_total += 1;
+            }
+            _ => mutated.attempt_summary.max_attempt_index += 1,
+        }
+        let rejection = audit_f5_package(&package.destination, &mutated)
+            .expect_err(&format!("«{label}» debe morir"));
+        let detail = rejection.diagnostic().render_human();
+        assert!(
+            detail.contains(expected),
+            "«{label}»: se esperaba {expected:?} y dijo {detail:?}"
+        );
+    }
+    // El paquete íntegro sigue pasando su puerta.
+    verify_published_f5_package(&package.destination, &manifest_path, &records)
+        .expect("el íntegro pasa");
+}
+
+/// Un layout agotado publica los intentos que **realmente** consumió.
+///
+/// La regla anterior deducía el contador de la presencia de un mejor
+/// candidato, y era falsa: `consider_best` corre antes de `materialize_attempt`
+/// en la misma iteración, de modo que un fallo del intento *k* ya tiene
+/// candidato, y `From<Diagnostic>` lo descartaba dejando el contador a cero.
+/// Un fallo en el intento 3 de 10 publicaba `layout_attempts_used = 0`: un
+/// dato falso en un manifiesto publicado. La prueba que lo cubría eran cuatro
+/// `assert_eq!` sobre una función pura de dos argumentos, que no podía fallar.
+#[test]
+fn an_exhausted_layout_publishes_the_attempts_it_really_consumed() {
+    let root = temporary("layout-exhausted");
+    fs::create_dir_all(&root).expect("raíz");
+    // Hueco mayor que el bloque: ningún intento coloca dos sitios, de modo que
+    // todos caen por `TooFewSites` y la búsqueda de layout se agota.
+    let fixture = Fixture {
+        block_length: 3,
+        gap: 5,
+        block_count: 1,
+        bins: vec![(1, 2, 1.0, 0.05)],
+        ..Fixture::default()
+    };
+    let (general, _) = fixture.write(&root);
+    let config = load_and_validate_f5_config(&general).expect("configuración admitida");
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("admisión sellada");
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("ejecución");
+    let failure = build_f5_physical_layout(
+        F5LayoutRequest::new(&config, &sealed, &execution).expect("solicitud"),
+    )
+    .expect_err("el layout debe agotarse");
+    assert_eq!(failure.code(), "GPS-DOMAIN-106");
+    // Los ocho intentos que el escenario declara, no cero.
+    assert_eq!(failure.attempts_used(), sealed.max_layout_attempts());
+    assert_eq!(failure.attempts_used(), 8);
+    assert!(failure.best_layout().is_some());
+
+    let report = F5FailureReport::from_layout(&config, &failure);
+    let destination = root.join("published");
+    let workspace = ExecutionWorkspace::create(&destination).expect("provisional");
+    publish_f5_failure(workspace, &config, &sealed, &execution, &report)
+        .expect("fallo de layout publicado");
+    let document: Value =
+        serde_json::from_slice(&fs::read(destination.join(F5_FAILURE_PATH)).expect("leer"))
+            .expect("JSON");
+    assert_eq!(document["stage"], json!("layout"));
+    assert_eq!(document["code"], json!("GPS-DOMAIN-106"));
+    assert_eq!(document["counters"]["layout_attempts_used"], json!(8_u64));
+    assert!(!document["best_layout"].is_null());
+    // Y el oráculo del fallo lo acepta.
+    let declaration = failure_declaration_from_published(&destination);
+    audit_f5_failure_package(&destination, &declaration).expect("oráculo del fallo de layout");
     fs::remove_dir_all(&root).expect("retirar");
 }

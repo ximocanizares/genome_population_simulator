@@ -714,6 +714,14 @@ impl F5BestLayout {
 pub struct F5LayoutFailure {
     diagnostic: Box<Diagnostic>,
     best_layout: Option<F5BestLayout>,
+    /// Intentos de layout realmente consumidos cuando el fallo ocurrió.
+    ///
+    /// No se deduce de `best_layout`: `consider_best` se ejecuta **antes** que
+    /// `materialize_attempt` en la misma iteración, de modo que un fallo del
+    /// intento *k* ya tiene candidato, y `From<Diagnostic>` lo descartaba
+    /// dejando el contador a cero. Un manifiesto fallido publicaba entonces
+    /// `layout_attempts_used = 0` habiendo consumido tres de diez.
+    attempts_used: u64,
 }
 
 impl F5LayoutFailure {
@@ -724,6 +732,13 @@ impl F5LayoutFailure {
     #[must_use]
     pub const fn best_layout(&self) -> Option<&F5BestLayout> {
         self.best_layout.as_ref()
+    }
+    /// Intentos consumidos: el índice alcanzado más uno si el fallo ocurrió
+    /// dentro del bucle, `max_layout_attempts` si se agotó y cero si ocurrió
+    /// antes de abrir el primer intento.
+    #[must_use]
+    pub const fn attempts_used(&self) -> u64 {
+        self.attempts_used
     }
     #[must_use]
     pub const fn code(&self) -> &'static str {
@@ -738,7 +753,7 @@ impl F5LayoutFailure {
         *self.diagnostic
     }
 
-    fn exhausted(scenario_id: &str, best_layout: F5BestLayout) -> Self {
+    fn exhausted(scenario_id: &str, best_layout: F5BestLayout, attempts_used: u64) -> Self {
         let detail = format!(
             "best_attempt_index={};unplaced_blocks={};remaining_target_bases={}",
             best_layout.attempt_index,
@@ -748,15 +763,35 @@ impl F5LayoutFailure {
         Self {
             diagnostic: Box::new(Diagnostic::f5_layout_exhausted(scenario_id, detail)),
             best_layout: Some(best_layout),
+            attempts_used,
+        }
+    }
+
+    /// Fallo ocurrido **dentro** del bucle de intentos, con lo que llevaba
+    /// consumido y el mejor candidato que ya existía.
+    fn during_attempts(
+        diagnostic: Diagnostic,
+        attempts_used: u64,
+        best_layout: Option<F5BestLayout>,
+    ) -> Self {
+        Self {
+            diagnostic: Box::new(diagnostic),
+            best_layout,
+            attempts_used,
         }
     }
 }
 
+/// Conversión para los fallos **anteriores al primer intento**: validación de
+/// la solicitud, plan de longitudes y distribución de gaps. Cualquier fallo
+/// ocurrido dentro del bucle usa `during_attempts`, que sí
+/// conserva lo consumido.
 impl From<Diagnostic> for F5LayoutFailure {
     fn from(diagnostic: Diagnostic) -> Self {
         Self {
             diagnostic: Box::new(diagnostic),
             best_layout: None,
+            attempts_used: 0,
         }
     }
 }
@@ -1202,8 +1237,13 @@ pub fn build_f5_physical_layout(
     validate_layout_request(&inputs)?;
     let scenario_id = inputs.length_plan.scenario_id();
     let mut best: Option<BestLayoutCandidate> = None;
+    // Intentos realmente consumidos. Se actualiza al abrir cada iteración, de
+    // modo que **cualquier** salida del bucle —incluida la que propaga un
+    // diagnóstico con `?`— conoce lo gastado.
+    let mut attempts_used = 0_u64;
 
     for attempt_index in 0..inputs.max_layout_attempts {
+        attempts_used = attempt_index + 1;
         #[cfg(test)]
         record_attempt_started();
         let lengths = inputs.length_plan.sample(inputs.root_seed, attempt_index)?;
@@ -1428,18 +1468,29 @@ pub fn build_f5_physical_layout(
                 record_retry();
                 continue;
             }
-            Err(AttemptMaterialization::Diagnostic(error)) => return Err(error.into()),
+            Err(AttemptMaterialization::Diagnostic(error)) => {
+                return Err(F5LayoutFailure::during_attempts(
+                    error,
+                    attempts_used,
+                    best.map(BestLayoutCandidate::into_summary),
+                ));
+            }
         }
     }
     let best = best.ok_or_else(|| {
-        Diagnostic::f5_internal(
-            scenario_id.as_str(),
-            "no se registró ningún intento de layout",
+        F5LayoutFailure::during_attempts(
+            Diagnostic::f5_internal(
+                scenario_id.as_str(),
+                "no se registró ningún intento de layout",
+            ),
+            attempts_used,
+            None,
         )
     })?;
     Err(F5LayoutFailure::exhausted(
         scenario_id.as_str(),
         best.into_summary(),
+        attempts_used,
     ))
 }
 

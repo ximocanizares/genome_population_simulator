@@ -664,6 +664,14 @@ impl ExecutionWorkspace {
                 "artifact path is already written as a root document",
             ));
         }
+        // `manifest.json` es el otro eje de la misma asimetría:
+        // `write_root_document` lo rechaza y esta vía no lo reservaba.
+        if path_text == "manifest.json" {
+            return Err(invalid_state(
+                id,
+                "manifest.json is reserved for the closing gate",
+            ));
+        }
         if self.manifest_written {
             return Err(invalid_state(id, "the artifact catalog is already closed"));
         }
@@ -1484,6 +1492,14 @@ i5 = "GGGGTTTT"
         assert!(
             collision.is_err(),
             "un artefacto no puede pisar un documento raíz"
+        );
+        // Y el mismo eje para `manifest.json`, que `write_root_document` ya
+        // rechazaba y el catálogo no reservaba.
+        assert!(
+            workspace
+                .write_artifact("manifiesto", "f5", Path::new("manifest.json"), b"x\n")
+                .is_err(),
+            "un artefacto no puede reclamar manifest.json"
         );
         assert_eq!(workspace.artifacts().len(), 1);
         assert_eq!(
