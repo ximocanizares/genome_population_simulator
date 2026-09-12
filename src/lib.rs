@@ -1,8 +1,23 @@
 //! Núcleo del simulador de genomas y poblaciones.
 //!
+//! ## `unsafe` prohibido en la biblioteca, y por qué la prohibición vive aquí
+//!
+//! `#![forbid(unsafe_code)]` cubre **todo** `src/`: ningún módulo de la
+//! biblioteca publicada puede escribir `unsafe`, y un intento de hacerlo es
+//! error de compilación, no un aviso. La prohibición estuvo en
+//! `[lints.rust]` de `Cargo.toml` hasta la revisión de F5.4.1; desde allí
+//! alcanzaba también a los objetivos de prueba, donde `forbid` no puede
+//! levantarse, y eso impedía instalar el `#[global_allocator]` contador que
+//! mide el pico real del escritor de artefactos F5 contra el presupuesto que
+//! la admisión sella. Mover el atributo aquí deja la garantía de la
+//! biblioteca **idéntica** y libera únicamente a `tests/`. No lo devuelvas a
+//! `Cargo.toml`: no se relajó nada, se acotó al lugar que debía cubrir.
+//!
 //! La biblioteca mantiene separadas las fronteras de dominio, aplicación y
 //! adaptadores. Las fases posteriores añadirán comportamiento detrás de estas
 //! fronteras sin filtrar tipos de dependencias externas al dominio.
+
+#![forbid(unsafe_code)]
 
 pub mod adapters;
 pub mod application;
@@ -18,6 +33,7 @@ pub mod event_manifest;
 pub mod exact_decimal;
 pub mod execution;
 pub mod f5_admission;
+pub mod f5_artifacts;
 pub mod f5_founders;
 pub mod f5_haplotypes;
 pub mod f5_layout;

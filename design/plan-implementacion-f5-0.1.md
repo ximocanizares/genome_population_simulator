@@ -1825,7 +1825,7 @@ identificador del índice de copia.
 
 ## 7. F5.4 — artefactos, fallo y oráculo
 
-- ☐ **F5.4.1.** Escribir conforme a los contratos ya cerrados en F5.0
+- ✅ **F5.4.1.** Escribir conforme a los contratos ya cerrados en F5.0
   exactamente los siete TSV de éxito y la proyección fundadora obligatoria
   `outputs/truth.jsonl` v2 mediante `f5-founder-truth-projection-v2`, con sus
   IDs, clases, claves y orden.
@@ -1838,6 +1838,279 @@ identificador del índice de copia.
     canónica; desde `truth.jsonl` reconstruye por sí solo toda tupla FCP, fase,
     SNP, alelo, dosis y genotipo. Cada copia aporta `founder_membership`, cada
     genotipo `f5_locus`, y falla ante población, versión/path/hash alterados o v1.
+  - **Implementado el 12 de septiembre de 2026.** Módulo nuevo
+    `src/f5_artifacts.rs` y batería `tests/f5_artifacts.rs`; `src/lib.rs` lo
+    registra y `src/truth_projection.rs` eleva `case_id` a `pub(crate)` para
+    que la proyección v2 use el mismo identificador de caso que v1 en lugar de
+    reimplementarlo. Ningún esquema cambia y ningún hito anterior se reabre.
+    - **Frontera.** `F5SuccessRequest::new` enlaza configuración, admisión
+      sellada, ejecución, layout, búsqueda, asignación y longitudes de
+      secuencia, y rechaza antes de abrir ningún fichero una admisión que no
+      sea la de esa configuración. `write_f5_success_artifacts` devuelve los
+      siete `F5ArtifactLink` en el orden de la tabla —que es el lexicográfico
+      de `artifact_id`— y el `F5TruthLink` aparte, cada uno con su objeto
+      cerrado en `to_json`. F5.4.3 los copiará al manifiesto; este hito no
+      escribe manifiesto, efectivo ni fallo.
+    - **Decisión 0 — cada término de una clave nombra una columna de su
+      propio fichero.** Es la regla completa de la que cuelga la decisión 1, y
+      cierra sola las siete claves de DTC-089 sin dejar ningún término
+      ambiguo:
+
+      | Fichero | Clave de DTC-089 | Columnas que la nombran |
+      |---|---|---|
+      | `f5-block-layout.tsv` | FASTA, inicio, fin, ID | `sequence_id` (por ordinal FASTA), `start_1based`, `end_1based`, `block_id`; la clave está escrita entera porque «FASTA» no es columna |
+      | `f5-sites.tsv` | bloque, índice | `block_id`, `site_index` |
+      | `f5-haplotypes.tsv` | población, bloque, rango | `population_id`, `block_id`, `haplotype_rank` |
+      | `f5-frequencies.tsv` | población, bloque, sitio | `population_id`, `block_id`, **`site_id`** |
+      | `f5-ld-evaluation.tsv` | población, bloque, inicio de bin | `population_id`, `block_id`, `distance_start_bp` |
+      | `f5-founders.tsv` | población, individuo, secuencia, copia, bloque | `population_id`, `individual_id`, `sequence_id`, `copy_index`, `block_id` |
+      | `f5-attempts.tsv` | población, bloque, intento | `population_id`, `block_id`, `attempt_index` |
+
+      La consecuencia que faltaba: **`f5-frequencies.tsv` no publica
+      `site_index`**, de modo que su «sitio» solo puede ser `site_id`. El
+      escritor lo emitía en el orden posicional de `block.columns()` —el del
+      `site_index`— y ahora ordena por `site_id` dentro de cada bloque, con un
+      vector de hasta `S_bound` índices por bloque. Los genotipos de
+      `truth.jsonl`, cuya clave DTC-089 escribe «referencia, población,
+      bloque, sitio e individuo», siguen la misma lectura: el único campo de
+      sitio de un genotipo es el `site_id` de `f5_locus`. El oráculo de la
+      batería ya no deriva el orden esperado de `f5-sites.tsv` —eso consagraba
+      al productor—: exige la terna literal `(population_id, block_id,
+      site_id)` estrictamente creciente.
+    - **Decisión 1 — «bloque» como clave de orden es `block_id`.** Es la única
+      lectura compatible con F5.3, que el encargo prohíbe reabrir:
+      `resolve_f5_sampling` ordena por `population_id`+`block_id`, DTC-089 pide
+      esa misma pareja para la lista `sampling` del efectivo, y F5.3.3 declara
+      que su recorrido de asignaciones **es** el orden de `f5-founders.tsv` y
+      que sus unidades **son** el de `f5-haplotypes.tsv`. Los seis ficheros
+      cuya clave dice «bloque» usan por tanto `block_id`. El séptimo,
+      `f5-block-layout.tsv`, no dice «bloque»: su clave está escrita entera
+      —«FASTA, inicio, fin, ID»— y es la geometría, es decir `block_index`
+      ascendente. La distinción no es cosmética: `block_index` es componente
+      del material del `BLK_` y ninguna columna lo publica, de modo que un
+      lector independiente solo puede recuperarlo del ordinal de fila del
+      layout. La batería lo usa como oráculo de orden: rederiva los `BLK_`
+      desde ese ordinal y falla si el layout se desordena.
+    - **Decisión 2 — las longitudes de secuencia son una entrada explícita.**
+      `truth.jsonl` exige `sequence_length` en cada fuente de segmento y
+      ninguna pieza F5 previa la conserva: el layout retiene bloques y la
+      admisión tramos elegibles, cuyo último extremo no es la longitud.
+      `F5ReferenceSequences` la aporta, el escritor exige una entrada por
+      secuencia poblada y comprueba que cada bloque cabe en ella. Es una
+      entrada por secuencia retenida, exactamente lo que
+      `256*retained_sequence_ids` de `final_formula_peak` ya concede. **F5.4.3
+      debe cablearla desde el escaneo de admisión**; mientras tanto solo la
+      batería la construye.
+    - **Decisión 3 — forma de la copia fundadora.** Un fundador F5 es la
+      referencia con los SNP de sus bloques aplicados, de modo que cada
+      `haplotype_copy` publica **un** segmento por secuencia completa,
+      `[0, sequence_length)`, cuyas modificaciones son los sitios donde su fila
+      haplotípica lleva el alelo alternativo; `current_pieces` repite esa vista
+      y `history` los mismos hitos. Un bit a 1 de la matriz es el alelo
+      alternativo con independencia de la polaridad: DTC-089 usa la polaridad
+      solo en la regla de signos de LD.
+      **Corrección de la revisión F5.4.1:** `truth_bound` acota **bytes de
+      salida**, no memoria de trabajo —solo entra en `output_bytes`,
+      `src/f5_preflight.rs`— y `final_formula_peak` no reserva ni un byte por
+      copia serializada. Materializar el registro con tres
+      `collect::<Vec<Value>>()` vivos a la vez costaba 2,3× el pico sellado
+      con `B=8` y 6,2× con `B=128`. El registro `haplotype_copy` se serializa
+      ahora **por flujo**: se escriben sus claves en el orden canónico de
+      `serde_json::Map` y las tres vistas recorren el búfer de `CopySnp` tres
+      veces sin construir ningún `Value`. Los bytes publicados son idénticos,
+      byte a byte, a los de la versión materializada.
+    - **Decisión 4 — `reference_content_sha256` es el SHA-256 del FASTA
+      sellado.** F5 no transforma la referencia, de modo que la huella de su
+      contenido y la del artefacto declarado coinciden por construcción; no se
+      inventa una huella semántica que nadie calcula.
+    - **Decisión 5 — dos `source_digests` constantes.** La referencia
+      —`kind="reference"`— y el perfil —`kind="matrix"`, con el SHA-256 de su
+      metadato—. La procedencia fina viaja **por SNP** en
+      `provenance.matrix`, que nombra el `HAP_` del que salió el alelo, la
+      subpoblación y el `SITE_`. Así la cabecera no crece con los bloques y la
+      traza FHA→HAP sigue siendo recuperable desde `truth.jsonl`.
+    - **Decisión 6 — cada genotipo publica siempre los dos alelos del sitio**,
+      también cuando la dosis de uno es cero, para que el recuento MAN-70 por
+      dosis `0..ploidy` lea un índice de alelo estable en vez de deducirlo de
+      los alelos que resultaron presentes.
+    - **Decisión 7 — los SNP de una copia se ordenan por coordenada antes de
+      serializarse.** Los bloques llegan en la clave publicada, que es un
+      digest, y la secuencia de la copia es física. Se ordena el búfer de
+      **una** copia, acotado por los sitios de su secuencia; ninguna tabla de
+      filas se ordena.
+    - **Streaming, y qué se retiene.** Las ocho salidas se escriben por flujo.
+      `f5-founders.tsv` y `truth.jsonl` se abren a la vez y comparten la
+      **única** pasada de `for_each_assignment`, porque comparten su clave
+      —población, individuo, secuencia y fase—; derivar dos veces un `FHA_`
+      es una colisión y la prueba lo fija. Lo único que el escritor retiene son
+      índices de posición: `B` para el layout, `B` ordenados por `block_id`
+      para los sitios, `B*N_pop` para las unidades y otros tantos para los
+      tramos del historial de intentos. `final_formula_peak` ya concede
+      `256*4*B` y `B*N_pop*(…+256*S_bound+…)`, muy por encima. Ninguna tabla de
+      filas vive en memoria: `f5-attempts.tsv` publica el tramo contiguo de
+      cada unidad sin copiarlo ni reordenarlo, y los genotipos se emiten unidad
+      a unidad desde la matriz ganadora.
+    - **La retención de `F5AttemptRecord` sigue sin contabilizar, y este hito
+      no la agrava ni puede resolverla.** Escribir `f5-attempts.tsv`
+      incrementalmente **no** libera nada: `search_f5_haplotypes` devuelve el
+      historial completo y el escritor es el último paso de la cadena, de modo
+      que los `B*N_pop*A` registros ya han vivido durante la asignación y la
+      materialización antes de que exista un `ExecutionWorkspace`. Eliminar la
+      retención exige que la búsqueda acepte un sumidero y escriba cada intento
+      según lo ejecuta, lo que reabre la frontera pública de F5.2 y obliga a
+      abrir el destino antes de saber si la ejecución tendrá éxito —y un fallo
+      no puede publicar ninguno de los siete—. Queda anotado, como en F5.3.3,
+      para quien reabra F5.2.
+    - **Batería.** 33 pruebas en `tests/f5_artifacts.rs` —28 originales más
+      las cinco de la revisión F5.4.1: fidelidad de `truth.jsonl`, ejecución
+      ajena, declaración de secuencias más ancha que la sellada, validación
+      del documento publicado contra su esquema externo y pico del escritor
+      medido con asignador contador—. El lector es
+      independiente: reimplementa DTC-037, BLAKE3 y Base32, se valida antes
+      contra los cinco vectores congelados de `id-catalog-v4` —material
+      canónico, digest e identificador—, y desde ahí rederiva los `BLK_`,
+      `SITE_`, `HAP_`, `FCP_` y `FHA_` de los ficheros. `reconstruct_from_truth`
+      no abre ningún TSV: recupera identidad, pertenencia, fase, alelos, dosis y
+      recuentos por locus×subpoblación desde `truth.jsonl` v2 y exige que las
+      dosis salgan de los portadores; `check_package` cruza después esa
+      reconstrucción con los siete ficheros. El recuento por
+      `site_id`×`population_id` se comprueba aparte: su histograma de dosis
+      suma exactamente los individuos declarados en la cabecera v2, ninguna
+      dosis excede la ploidía y el total de alelos alternativos coincide con la
+      suma por individuo. Cobertura de ámbitos: dos
+      subpoblaciones con censos distintos, dos secuencias pobladas y una
+      estéril, ploidías 1, 2 y 3, modos probabilístico y controlado con
+      sustitución por unidad, `F` de población 0 y 1, identificadores
+      fundadores aportados y derivados, y bins LD `evaluated` y
+      `not_applicable` en el mismo fichero.
+    - **Discriminación verificada**, mutando el productor con `--no-fail-fast`.
+      Primera ronda, 15 mutaciones: cabecera v1, copia sin
+      `founder_membership`, `f5_locus` de otra subpoblación, sitios en orden de
+      layout, genotipos por individuo antes que por sitio, fase constante,
+      alelos invertidos, intentos en el orden de la búsqueda, recuento de
+      copias desviado, dosis intercambiadas, SNP de la copia sin ordenar,
+      enlace de verdad con versión 1, `NA` en un bin evaluado y haplotipos en
+      el orden de la búsqueda matan entre 11 y 13 pruebas cada una. **La
+      decimoquinta no mató ninguna**: fijar `polarity` a `positive` producía un
+      paquete internamente coherente, porque la polaridad no es rederivable
+      desde los propios ficheros. El agujero se cerró con cinco pruebas de
+      fidelidad que contrastan contra el valor que F5.2 publicó las columnas
+      cuya verdad no vive en los bytes —polaridad, las tres frecuencias, los
+      diez campos LD, los nueve contadores de intento y `q`—, más la exigencia
+      de que la polaridad publicada no sea constante. Segunda ronda, 10
+      mutaciones de sustitución de columna —polaridad fijada, realizada por
+      objetivo, `proposals` por `accepted`, objetivo LD por su tolerancia, `q`
+      constante, `length_bp` desplazado, `abs_error` por el objetivo,
+      `site_index` fijado, `block_assignment_id` por el `FCP_` y genotipo sin
+      portadores—: fijar la
+      polaridad y sustituir `proposals` por `accepted` matan exactamente la
+      prueba de fidelidad que les corresponde, y las siete restantes matan 16
+      pruebas cada una. **La `q` constante tampoco mataba ninguna al
+      principio**, porque el fixture ancho usa pesos uniformes `0,5/0,5` y hacía
+      degenerada la columna; con el perfil diádico `1/2, 1/4, 1/8, 1/8` la mata
+      su prueba de fidelidad. Las dos lagunas son la misma lección de F5.3.2:
+      el fixture tiene que distinguir la clave que decide.
+    - **Corrupción aislada.** `every_isolated_corruption_is_detected_by_an_independent_reader`
+      aplica 52 mutaciones a los bytes ya publicados —BOM, CRLF, LF final
+      ausente, línea vacía, comentario, columna de más, cabecera alterada,
+      celda entrecomillada, desórdenes de las seis claves, identificadores
+      dañados de las cinco clases, `NA` fuera de su único caso, decimal no
+      mínimo, alelo volteado, `selected_best` ausente, duplicado o no booleano,
+      `truth` publicado como v1, versión y clase de proyección ajenas,
+      proyección ausente, censo y recuentos de cabecera alterados, huella no
+      hexadecimal, pertenencia y locus de otra subpoblación, dosis y portador
+      alterados, fase distinta del índice de copia, copias desordenadas, alelo
+      alternativo cambiado y sitio del locus cambiado— y exige que **cada una**
+      sea rechazada. `a_missing_artifact_is_detected` cubre la ausencia del
+      fichero y `every_link_declares_the_literal_path_size_and_digest_of_its_bytes`,
+      la ruta literal, el tamaño `u64` y el SHA-256 de sus bytes.
+    - **Revisión adversarial F5.4.1, correcciones aplicadas.** Nueve
+      hallazgos; ocho aplicados y uno pendiente de una decisión del usuario.
+      - **H1 — el escritor no cabía en su propio presupuesto (grave).**
+        Corregido con la serialización por flujo de la decisión 3. Medido con
+        asignador contador sobre `write_f5_success_artifacts`: antes
+        233 868 / 847 360 / 3 502 772 B con `B=8/32/128` contra 100 792 /
+        193 120 / 562 432 B sellados —2,32×, 4,39× y 6,23×—; después
+        31 560 / 40 130 / 96 637 B, es decir 0,31, 0,21 y 0,17 del sellado, y
+        el crecimiento total de `B=8` a `B=128` baja de 3 268 904 B a
+        65 077 B, que es lo que cuestan los índices de posición.
+        La prueba `the_writer_peak_fits_the_sealed_budget_and_does_not_grow_with_the_block_count`
+        fija la relación con dos valores de `B`, como el gemelo de F5.3
+        `the_retained_repository_does_not_grow_with_the_block_count`: exige
+        `pico <= sealed.working_memory_bytes()` y acota el crecimiento por
+        bloque a un kibibyte, un orden de magnitud por debajo de los ~25 KiB
+        por bloque que costaba materializar los registros. Con el escritor
+        anterior falla en los tres casos.
+      - **Decisión 8 — `#![forbid(unsafe_code)]` vive en los raíces de
+        `src/`, no en `Cargo.toml`.** Medir el pico exige instalar un
+        `#[global_allocator]` contador, y `forbid` no puede levantarse en el
+        objetivo donde se aplica: desde `[lints.rust]` de `Cargo.toml`
+        alcanzaba también a `tests/` e impedía la única medición honesta de
+        la relación que H1 destapó. El atributo pasa a `src/lib.rs` y a
+        `src/main.rs` —dos raíces de crate distintos, de modo que la
+        prohibición se repite en ambos— con una nota que explica por qué está
+        ahí, para que nadie lo devuelva a `Cargo.toml` creyendo que se relajó
+        por descuido. **No se relajó ningún contrato:** ningún documento
+        normativo —`CONTRIBUTING.md`, `AGENTS.md` ni los de `design/`— fijaba
+        la ubicación, y la garantía sobre lo publicado queda idéntica: ni un
+        `unsafe` en `src/`. Comprobado introduciendo un bloque `unsafe` en
+        `src/f5_artifacts.rs` y otro en `src/main.rs`: ambos son error de
+        compilación —«usage of an `unsafe` block», con el `forbid` citado
+        como origen— y se retiraron tras la comprobación. Lo único que queda
+        fuera son los objetivos de prueba, donde el asignador contador
+        declara su `unsafe impl GlobalAlloc` con la justificación de
+        seguridad escrita: cada método delega en `System` y solo añade un
+        contador de enteros.
+      - **H2 — «sitio» leído de dos maneras (grave).** Aplicado: decisión 0,
+        `write_frequencies` y `stream_genotypes` ordenan por `site_id`, y
+        `check_package` compara contra la clave literal en vez de derivarla de
+        `f5-sites.tsv`.
+      - **H3 — `execution_id` ajeno (grave).** Aplicado. `F5FounderIdentities`
+        publica `execution_id()` y el escritor rechaza con `GPS-CONF-101`
+        —campo `execution.identity`— una solicitud cuya ejecución no sea la
+        que derivó los identificadores. Se conserva el parámetro, que es lo
+        que permite probar el rechazo.
+      - **H4 — seis mutaciones supervivientes (grave).** Aplicado. El lector
+        deja de comprobar solo la forma: exige que las fuentes de cada copia
+        sean exactamente las de `source_digests`, que la procedencia de cada
+        SNP nombre la matriz declarada y la subpoblación de su copia, que las
+        tres vistas repitan la misma procedencia y que ningún `case_id` se
+        repita. La prueba nueva
+        `the_published_truth_carries_the_digests_the_trace_and_the_cases_it_received`
+        contrasta contra la cadena las dos huellas de la cabecera, los dos
+        `source_digests`, el `HAP_` que `f5-founders.tsv` asignó a cada copia
+        en el bloque del sitio y el `case_id` de cada genotipo con un oráculo
+        propio de DTC-061. Las seis mutaciones pasan a matar: 1 prueba las de
+        `matrix_source_id` y `reference_content_sha256`, y 20 las otras
+        cuatro.
+      - **H5 — `F5ReferenceSequences` sin atadura (menor).** Aplicado: la
+        declaración no puede nombrar más secuencias que
+        `retained_sequence_ids` ni sumar más bases que
+        `reference_bases_processed`, de modo que un `chr1 = 1e9` sobre una
+        referencia de seis bases se rechaza.
+      - **H6 — el `truth.jsonl` publicado no se validaba (menor).** Aplicado:
+        cada línea publicada pasa por `truth-v2.schema.json` con ploidías 1, 2
+        y 3, y la prueba fija que el `case_id` mide exactamente 64 caracteres,
+        el máximo de `$defs/id`.
+      - **H7, H8 y H9 (menores).** Aplicados: `mean_r2` y `abs_error` faltan
+        si y solo si el bin es `not_applicable`; el layout afirma que el
+        ordinal de fila es el `block_index` del que cuelga el `BLK_`; e
+        `insert` de `F5ReferenceSequences` es `#[must_use]`.
+      - **Huecos de cobertura cerrados.** El escritor comprueba además que
+        `attempt_index` y `proposals` caben en los límites efectivos, que
+        `copy_index` pertenece a `0..ploidy-1` y que los pesos haplotípicos
+        suman 1 por población y bloque.
+      - **Oráculos circulares.** Se corrigió el de H2 y el de la polaridad,
+        que ahora ordena su `expected` por la clave literal en vez de heredar
+        el orden de emisión del productor. El tercero
+        —`the_published_founder_rows_are_the_single_assignment_traversal`,
+        que compara contra `for_each_assignment` de una segunda cadena— **se
+        conserva a propósito**: su objeto no es la verdad de las filas, que
+        `check_package` rederiva con el oráculo independiente de DTC-037, sino
+        la invariante de F5.3.3 de que el escritor publica esa pasada **sin
+        reordenarla**; expresarla sin nombrar la pasada la vaciaría de
+        contenido.
+
 - ☐ **F5.4.2.** Implementar el oráculo independiente desde los bytes cerrados de
   los siete TSV y `truth.jsonl`, incluido el recuento MAN-70 que no comparte
   contadores, asignaciones ni acumuladores del productor.

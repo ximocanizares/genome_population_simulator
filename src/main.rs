@@ -1,3 +1,8 @@
+//! Binario del simulador. Es un crate raíz distinto del de la biblioteca, de
+//! modo que repite la prohibición: ver la nota de `src/lib.rs` sobre por qué
+//! `forbid(unsafe_code)` vive en los raíces de `src/` y no en `Cargo.toml`.
+#![forbid(unsafe_code)]
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;

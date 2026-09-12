@@ -1230,7 +1230,7 @@ fn record_order(left: &TruthRecord, right: &TruthRecord) -> std::cmp::Ordering {
             )),
     }
 }
-fn case_id(
+pub(crate) fn case_id(
     population: &str,
     individual: &str,
     sequence: &str,

@@ -2165,6 +2165,17 @@ pub struct F5FounderIdentities {
 }
 
 impl F5FounderIdentities {
+    /// La ejecución con la que se derivó **cada** identidad de este
+    /// repositorio.
+    ///
+    /// Es el `execution_id` que cualquier consumidor debe publicar: rederivar
+    /// un `FCP_`, un `HAP_` o un `FHA_` desde otro no reproduce ninguno de los
+    /// identificadores ya materializados.
+    #[must_use]
+    pub const fn execution_id(&self) -> &ExecutionId {
+        &self.execution_id
+    }
+
     /// Copias ordenadas por `population_id`, `individual_id`, `sequence_id` y
     /// `copy_index`.
     #[must_use]
