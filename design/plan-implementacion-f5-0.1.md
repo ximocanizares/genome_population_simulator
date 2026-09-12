@@ -2111,7 +2111,7 @@ identificador del índice de copia.
         reordenarla**; expresarla sin nombrar la pasada la vaciaría de
         contenido.
 
-- ☐ **F5.4.2.** Implementar el oráculo independiente desde los bytes cerrados de
+- ✅ **F5.4.2.** Implementar el oráculo independiente desde los bytes cerrados de
   los siete TSV y `truth.jsonl`, incluido el recuento MAN-70 que no comparte
   contadores, asignaciones ni acumuladores del productor.
   - Depende de: F5.4.1.
@@ -2123,6 +2123,249 @@ identificador del índice de copia.
     El recuento agrupa `site_id`×`population_id` leyendo solo `truth.jsonl` v2,
     sin abrir los TSV ni consultar el manifiesto;
     cada mutación debe fallar por la causa correspondiente.
+  - **Implementado el 12 de septiembre de 2026; revisión adversarial aplicada
+    el mismo día.** Módulo nuevo `src/f5_oracle.rs` y batería
+    `tests/f5_oracle.rs`; `src/lib.rs` lo registra. No se tocó
+    `src/f5_artifacts.rs` ni ningún otro productor: el hito no destapó ningún
+    defecto del escritor. La revisión sí destapó **un bloqueante y cinco
+    graves en el oráculo**, todos aplicados: el alelo alternativo y el objetivo
+    marginal se creían en vez de rederivarse, un ayudante de la batería mutaba
+    la clave en vez del valor, una guarda del cierre de unidad marginal estaba
+    muerta, una decimotercera variante defectuosa sobrevivía sin declararse y
+    el recuento de filas JSON no contaba lo que decía contar.
+    - **Frontera e independencia.** `audit_f5_package(payload_root,
+      declaration)` recibe la ruta del paquete y una `F5PackageDeclaration`
+      con las cifras que F5.4.3 copiará al manifiesto, y contrasta las
+      segundas contra los primeros. **No recibe** `F5PhysicalLayout`,
+      `F5HaplotypeSearch`, `F5FounderAssignment`, `F5FounderIdentities` ni
+      `F5SuccessArtifacts`: ni un contador, ni una asignación, ni un
+      acumulador del productor entra en el módulo. `recount_f5_man70(path)`
+      es una función aparte que abre **solo** `truth.jsonl`; una prueba la
+      ejecuta en un directorio donde ese fichero es lo único que existe.
+    - **Decisión 0 — promoción, no duplicación ni sustitución.** La batería
+      de F5.4.1 ya traía un lector propio y un `check_package` con 52
+      mutaciones. Se **promueve** su disciplina a código productivo y se
+      extiende al alcance entero del hito —RNG, D/`r²`, intentos, cuota,
+      F, DTC-049, cotas y MAN-70—, con errores tipados `Diagnostic` y una
+      causa enumerada en lugar de `String`. No se sustituye la de F5.4.1
+      porque `tests/f5_artifacts.rs` está fuera del alcance de este encargo y
+      porque es la evidencia propia del **escritor**: el oráculo juzga el
+      paquete, aquella juzga quien lo escribe. La superposición está acotada
+      —lector de bytes y rederivación de IDs— y F5.6.3 puede retirarla
+      haciendo que aquella batería llame a `audit_f5_package`.
+    - **Decisión 1 — la causa forma parte del contrato.** El plan exige que
+      cada mutación falle «por la causa correspondiente», y un `String` no
+      permite comprobarlo. `F5OracleRejection` lleva una `F5OracleCause` de
+      21 variantes junto al diagnóstico público (`GPS-FMT-101`,
+      `GPS-RES-101` o `GPS-INTERNAL-101`, con la causa también en su
+      contexto). Las dos tablas de mutación contrastan la causa, no solo el
+      fallo.
+    - **Decisión 2 — el oráculo se valida antes de usarse.** `IdOracle` y
+      `SubseedOracle` reimplementan el material canónico, BLAKE3 `derive_key`,
+      Base32 y el ChaCha12 local, y sus constructores reproducen **primero**
+      los cinco vectores F5 de `catalogs/id-catalog-v4.tsv` y todas las
+      subsemillas y palabras de `catalogs/f5-rng-catalog-v1.tsv`. Si no los
+      reproducen, el oráculo no juzga a nadie: devuelve `GPS-INTERNAL-101`.
+    - **Decisión 3 — se rederivan las tres decisiones RNG cuyos componentes
+      los bytes publican.** La primera versión decía que la polaridad era «la
+      única», y **era falsa**: la revisión adversarial la destapó y con ella
+      dos huecos, uno bloqueante.
+      - `site_alt(scenario_id, block_id, site_id)` fija el **alelo
+        alternativo** con `f5_uniform_index(rng, 3)` entre las tres bases
+        distintas de REF, en orden `ACGT`. Sus tres componentes están
+        publicados: `block_id` y `site_id` en `f5-sites.tsv` y `scenario_id`
+        en la declaración.
+      - `marginal_spectrum(scenario_id, population_id, block_id, site_id)`
+        fija el **objetivo marginal**, con la mecánica cerrada de DTC-089
+        —fila y valor, cada uno con su propio U53 y solo cuando tiene más de
+        una alternativa—. Sus cuatro componentes están en la propia fila de
+        `f5-frequencies.tsv`.
+      - `polarity(scenario_id, population_id, block_id, attempt_index,
+        site_index)` fija la **polaridad** con una Bernoulli(0,5). Su
+        `attempt_index` es el único componente que no vive en una columna: lo
+        da la fila `selected_best` de `f5-attempts.tsv`, que es el intento del
+        que salió la matriz ganadora, y eso convierte `selected_best` en un
+        dato necesario y no decorativo.
+
+      Las demás decisiones del catálogo —longitudes, posiciones y huecos del
+      layout, columnas iniciales, propuestas de intercambio, muestreo
+      fundador, F, desempate de cuota y permutación controlada— no publican
+      alguno de sus componentes y quedan declaradas fuera.
+    - **Decisión 3 bis — las bandas del espectro entran en la declaración.**
+      Rederivar el objetivo marginal exige `alt_af_min`, `alt_af_max` y el
+      peso efectivo de cada banda. El efectivo publica las dos primeras cifras
+      de cada fila —su auditoría DTC-049 lleva `alt_af_min` como clave y el
+      peso como valor efectivo— y el oráculo **las cruza**; `alt_af_max` no
+      aparece en ningún documento publicado y viene del perfil, atado por
+      `profile_metadata_sha256`, que el oráculo contrasta contra
+      `source_digests` de la verdad. Es la misma frontera que ya tenían
+      `ld_bins` y `haplotype_weights`, y queda declarada como tal en el
+      módulo. Se eligió rederivar en vez de declarar la frontera porque
+      `input_alt_af` de los resúmenes MAN-70 es precisamente ese valor: creerlo
+      habría dejado el vector esperado de REQ-MAN-70 sin ninguna atadura.
+    - **Decisión 4 — `expected_*` de MAN-70 usa la frecuencia realizada.**
+      `realized_alt_af` es `Σ_h q_h x_hi`, la probabilidad exacta de que una
+      copia muestreada probabilísticamente lleve el alelo alternativo. El
+      modelo es binomial en `hwe`, la mezcla de identidad por descendencia en
+      `diploid_f` —`p²+Fp(1-p)`, `2p(1-p)(1-F)`, `(1-p)²+Fp(1-p)`, que es
+      exactamente lo que `sample_probabilistic_unit` realiza— y la
+      hipergeométrica inducida por permutar sin reemplazo las `C` copias en
+      `controlled_hwe_conditioned_counts`. En este último el recuento alélico
+      fijado `K` **no** es `realized_alt_af*C`: la cuota reparte `n_h` enteros,
+      de modo que `K` es el número de copias de la unidad cuya fila lleva el
+      alelo alternativo, que `f5-founders.tsv` y `f5-haplotypes.tsv` publican.
+    - **Decisión 5 — `json_rows_bound` no acota las líneas de
+      `truth.jsonl`.** Es una interpretación que el propio oráculo destapó al
+      medirse: con censo 4 y ocho bloques la proyección publica 105 líneas y
+      el bound vale 104. Sus términos son los del efectivo y el manifiesto
+      —censo, muestreo, F realizado, resúmenes MAN-70 y filas de
+      normalización— y su término de locus es `B*N_pop*S_bound`, **sin** el
+      censo; las líneas de la proyección crecen con `individual_count` y viven
+      en `output_bytes` a través de `truth_bound`. El oráculo acota por tanto
+      las filas JSON que el manifiesto publicará, y los bytes de la proyección
+      por `output_bytes`. No se cambió ninguna fórmula: se corrigió la lectura
+      antes de que F5.4.3 la heredara.
+
+      La revisión añadió que la cifra no contaba lo que decía contar: faltaban
+      `founder_count` y los nueve objetos fijos. Con ellos son **64** filas en
+      el fixture ancho —3 fundadores, 2 subpoblaciones, 8 de muestreo, 8 de F
+      realizado, 24 resúmenes MAN-70, 2×5 de normalización y 9 fijas—, y la
+      prueba fija ese entero exacto en vez de comprobar solo `<= bound`. Los
+      `2*B*N_pop*H` rangos de `quota_ties` **no son observables desde los
+      bytes** —ningún TSV los enumera—, de modo que la cifra es una **cota
+      inferior** y el accesor se llama `observable_json_rows` para decirlo.
+    - **Una guarda muerta y su riesgo, cerrados.** El cierre de unidad de
+      `f5-frequencies.tsv` comparaba `realized_alt_af.len()` con el número de
+      sitios del bloque, y ese vector se dimensiona al visitar la unidad: la
+      comparación nunca podía ser cierta. Borrar la última fila por `site_id`
+      de una unidad moría de rebote, por `max_marginal_error` o por el
+      `pair_count` de un bin, con causa `Attempt` en lugar de `Marginal`. La
+      sustituye un cierre real —los sitios publicados contra los del bloque, al
+      cambiar de unidad y al terminar el fichero—. Eso cierra **por
+      construcción** el riesgo que la revisión marcó sin reproducir: un sitio
+      omitido cuya marginal realizada y objetivo fuesen cero no habría movido
+      ni `max_marginal_error` ni ningún bin, y se habría publicado un resumen
+      MAN-70 con `recount_matches = true` para un sitio polimórfico. Ahora la
+      omisión se detecta por cardinalidad, sin depender de ningún valor, de
+      modo que el fixture que lo exhibiría ya no puede construirse.
+    - **Guardas inalcanzables, declaradas.** Cuatro defensas se conservan sin
+      poder alcanzarse desde `audit_f5_package` y se anotan como tales en el
+      código, igual que hace el resto del proyecto: la ploidía del recuento
+      —que la cabecera ya contrastó—, el reparto total de la cuota —que el
+      censo ya implica—, el recuento de bloques de una copia y la suma de
+      `allele_dosages` contra la ploidía. Una quinta, `position <
+      sequence_length`, no es alcanzable por la auditoría completa —el cruce
+      con `f5-sites.tsv` mata antes cualquier posición movida— pero **sí por la
+      frontera pública del recuento**, que no abre ningún TSV, y ahí se prueba.
+    - **Fronteras declaradas, no supuestas.** Tres cifras se creen y el módulo
+      lo dice: el **orden FASTA** del layout se aproxima por orden de primera
+      aparición, porque ningún documento publica el diccionario ordenado de
+      secuencias —la admisión sella su recuento, no su lista—; la **auditoría
+      DTC-049**, el espectro, los bins LD y los pesos se rehacen desde los
+      valores que la propia declaración trae, atados al perfil solo por
+      `profile_metadata_sha256`, que el oráculo sí cruza contra
+      `source_digests`; y `recompute_realized_f` es una **transcripción
+      literal** de la fórmula de DTC-089 —el orden binary64 no compensado es
+      parte del contrato—, con entrada independiente y tres casos racionales
+      exactos, incluida la estimación negativa que REQ-EVO-52 conserva. Se
+      declara además que el módulo comparte con el productor los literales de
+      `F5_TSV_CONTRACTS` y `F5_TRUTH_*`: son el contrato que se juzga, no
+      estado, pero son la única dependencia textual entre los dos módulos.
+    - **Decisión 6 — dos bloques de una secuencia no pueden solaparse.**
+      DTC-089 escribe la clave del layout como «FASTA, inicio, fin» y el orden
+      estricto no prohíbe por sí solo que un bloque termine dentro del
+      siguiente. El oráculo lo prohíbe porque de ello depende que `case_id`
+      identifique un caso: dos loci de un mismo individuo en la misma
+      coordenada darían el mismo `case_id`. Con el solape prohibido, la
+      unicidad de `case_id` se comprueba con una entrada por **locus** y no
+      por genotipo, que es lo que impedía que el recuento creciera con el
+      paquete.
+    - **Memoria.** El oráculo no materializa el paquete: cruza
+      `f5-founders.tsv` con las copias de `truth.jsonl` en paso acompasado
+      —ambas llegan en la misma clave— y retiene lo mismo que el productor:
+      geometría `B` y `B*S`, matrices ganadoras en bits `B*N_pop*H*S`, un
+      rango por asiento `B*C_total` y un vector de dosis por locus. El
+      recuento MAN-70, que no puede compartir nada con lo anterior, retiene
+      una entrada por copia. La única concesión sobre `working_memory_bytes`
+      es el registro `haplotype_copy` que el lector tiene **en vuelo**: el
+      escritor lo emite por flujo y la fórmula lo contabiliza en
+      `output_bytes`, pero interpretarlo obliga a materializarlo una vez.
+      **El exceso crece linealmente con `B`**, porque una copia cubre los
+      bloques de su secuencia; lo que lo salva es que el registro más largo
+      crece también linealmente, de modo que **la razón entre ambos
+      converge**: medida, vale 4,56 con `B=8`, 7,67 con `B=32` y 8,48 con
+      `B=128`, que es ya la asíntota del árbol `serde_json::Value` con
+      `arbitrary_precision`. Decir «acotado por el registro más largo, no por
+      el paquete» sin más sería engañoso, y la primera versión lo decía; lo
+      acotado es la razón. No es el defecto de F5.4.1 —allí el pico crecía con
+      el **número** de registros, no con su tamaño—.
+      `the_oracle_peak_keeps_a_bounded_ratio_to_the_record_it_holds` mide los
+      tres tamaños, exige la razón por debajo de diez y comprueba además que
+      multiplicar por dieciséis los genotipos no duplica el pico.
+    - **Condición para F5.4.3 y F5.5.** `f5-resource-accounting-v8` **no
+      reserva ni un byte para el oráculo**, cuyo pico es del orden de 4,2 veces
+      `working_memory_bytes` en el fixture medido. Ejecutarlo dentro del flujo
+      de una ejecución exigirá antes un término propio en la fórmula o un
+      lector por flujo del registro `haplotype_copy`. Mientras sea una
+      herramienta de aceptación posterior, la cuestión no se plantea.
+    - **Cobertura.** 18 pruebas de integración y 9 unitarias.
+      `every_isolated_byte_mutation_dies_of_its_own_cause` recorre **74**
+      corrupciones de bytes —contrato de bytes, layout, sitios, H×S/q,
+      marginal, polaridad, D/`r²`, intento, asignación, identidades y
+      `truth.jsonl`— y `every_isolated_declaration_mutation_dies_of_its_own_cause`
+      **31** de la declaración —semilla, catálogos, DTC-049, modo, cuota,
+      tolerancia, F y las siete cotas—. Cada una contrasta la causa exacta.
+      Las 21 causas del enumerado quedan cubiertas. Los ámbitos: ploidías 1,
+      2 y 3, ambos modos, `F=0` y `F=1`, IDs aportados y derivados, secuencia
+      estéril, dos subpoblaciones, bins `evaluated` y `not_applicable` y un
+      perfil diádico de cuatro pesos distintos.
+    - **Mutación de bytes y enlace.** Una corrupción cambia siempre el
+      SHA-256, de modo que juzgarla con el enlace intacto la mataría siempre
+      por `Link` y taparía su causa. La batería rehace el enlace con los bytes
+      mutados —el caso del defecto que reescribe artefacto y declaración a la
+      vez— y comprueba la mitad del enlace por separado, con cuatro casos
+      dedicados.
+    - **Verificación de discriminación.** **Dieciocho** variantes defectuosas
+      del oráculo se introdujeron y se retiraron: ALT creído, objetivo
+      marginal creído, marginal realizada creída, media y error LD creídos,
+      cierre de unidad marginal retirado, cruce copia/TSV de SNP retirado,
+      `case_id` creído, portador repetido admitido, igualdad
+      realizado/recontado retirada, tolerancia de bin LD retirada, cota de
+      secuencia del recuento retirada, polaridad no rederivada, identidades
+      creídas, cuota controlada no comprobada, F realizado creído, DTC-049 no
+      auditado, contadores del mejor intento creídos y dosis recontada desde
+      `allele_dosages`. **Diecisiete fallan** la batería; varias cambiando la
+      causa de una mutación concreta, lo que es la prueba más fuerte de que la
+      causa forma parte del contrato.
+    - **La superviviente y su atribución corregida.** Retirar **solo** la
+      comparación entre realizado y recontado no mata ninguna mutación. La
+      primera versión de esta entrada dijo que la igualdad era «redundante por
+      construcción» y que su papel era disparar si se debilitaba cualquier
+      eslabón; **la revisión demostró que ambas afirmaciones estaban mal
+      atribuidas**. Lo cierto, y reproducido en las dos direcciones: la
+      igualdad **sí tiene dientes**, y los tiene frente a la guarda de
+      portador repetido. Con esa guarda en pie, «portador repetido con sus
+      dosis ajustadas» muere por la verdad; retirando solo la guarda, muere
+      **por MAN-70**, es decir por la igualdad; retirando las dos, **pasa
+      inadvertida**. Lo que sí es cierto es que ninguna mutación la aísla
+      mientras el resto de la cadena está en pie.
+    - **Cuatro mutaciones que cambiaron de causa al escribirlas.** «frecuencia
+      realizada movida» y «media r² movida» morían por el error asociado, no
+      por la recomputación; se añadieron sus gemelas coherentes —que mueven
+      también `abs_error` y se quedan dentro de la tolerancia— y solo rehacer
+      `Σ_h q_h x_hi` y `D`/`r²` las mata. «objetivo marginal movido» no movía
+      el error, y su gemela lo mueve dejando intacto el máximo de su unidad.
+      Y la sustitución del ALT solo se vuelve concluyente cuando cambia sus
+      **cinco** vistas y el `case_id`: con una sola, la coherencia interna la
+      mata antes de llegar al sorteo.
+    - **Un falso negativo en la propia batería.** `replace_after` buscaba el
+      literal a sustituir **desde el inicio del ancla**, de modo que «case_id
+      ajeno» y «huella de la referencia alterada» acertaban una letra de la
+      clave —`"cbse_id"`, `"reference_content_shz256"`— y morían por
+      `exact_object` sin tocar el valor. Es exactamente el patrón
+      `false && A || B` contra el que el encargo advertía. Corregido con
+      `+ anchor.len()`; sin la corrección, desactivar la guarda de `case_id`
+      dejaba la batería verde y el oráculo DTC-061 sin probar.
 - ☐ **F5.4.3.** Instanciar la configuración efectiva y el manifiesto conforme
   a los esquemas completos de F5.0, con las claves y siete enlaces TSV exactos
   —ID, clase, versión, ruta, tamaño y hash—, el enlace
