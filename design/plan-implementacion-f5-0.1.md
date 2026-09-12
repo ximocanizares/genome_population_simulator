@@ -1093,6 +1093,105 @@ identificador del índice de copia.
     sin un solo caso terminado. Las unitarias sí lo cubren —un grupo de cuatro
     que abarca el residual entero, y grupos de hasta ocho en la barrida del
     oráculo—, de modo que el hueco es del fixture y no del algoritmo.
+  - **Correcciones tras la revisión independiente de cierre F5.3 (12 de
+    septiembre de 2026).** Se aplican sobre F5.3.1 sin reabrir ninguna de sus
+    decisiones.
+    - **La semántica de la cota controlada queda declarada en DTC-089.** La
+      revisión observó que la desigualdad literal del contrato,
+      `|n_h/C-q_h|<=t`, no es la que el código evalúa, y recomendó evaluarla de
+      forma exacta en enteros sobre los pesos binary64. El usuario resolvió el
+      12 de septiembre de 2026 **mantener la evaluación en copias y escribirla
+      en el contrato**: la cuota ideal normativa es `fl(C*q_h)` y la cota es
+      `|n_h - fl(C*q_h)| <= t*C`, con el predeterminado aportando `0,5` exacto.
+      La raíz es que `0,5/C` es exactamente el umbral de redondeo al entero más
+      próximo, y ese umbral solo es satisfacible en aritmética exacta: con `q`
+      normalizado en binary64, un ideal semientero cae un ulp fuera.
+      - Alternativa descartada 1, **evaluación exacta estricta sobre los pesos
+        binary64**: rechaza configuraciones ordinarias. Verificado con
+        `q={0,7, 0,3}` y cinco fundadores haploides —`fl(5*0,7)=3,5` y
+        `fl(5*0,3)=1,5`, ambos semienteros exactos—: en decimales exactos la
+        cuota `[3,2]` cumple la cota con igualdad, `|3/5-7/10|=|2/5-3/10|=1/10`,
+        y evaluando sobre los pesos binary64 **ninguna** de las seis cuotas
+        enteras la cumple. Es el defecto de F5.3.1 con otro disfraz: allí se
+        rechazaba la mitad de los censos legales por un ulp; aquí se
+        rechazarían las configuraciones cuyo ideal cae en un semientero.
+      - Alternativa descartada 2, **ensanchar la tolerancia unos ulp**:
+        obligaría a elegir y justificar un margen y cambiaría el valor
+        publicado en `controlled_max_abs_error_effective` del efectivo y del
+        manifiesto.
+      - Consecuencia declarada en DTC-089 y no suavizada: un validador
+        independiente que compruebe la desigualdad literal sobre los pesos
+        binary64 puede encontrar cuotas publicadas que la exceden en un ulp.
+        La desigualdad normativa es la de copias y quien valide debe usar esa.
+      - Prueba:
+        `a_half_integer_ideal_is_accepted_because_the_bound_is_evaluated_in_copies`
+        fija el caso, comprueba que la cuota publicada `[3,2]` cumple la cota
+        con **igualdad** y que las dos alternativas descartadas la rechazarían.
+        Discriminación por los dos lados: evaluar `|n/C-q|` en binary64 mata 7
+        pruebas de integración y 2 unitarias; evaluar un ulp por debajo de
+        `0,5` —que es el efecto de la evaluación exacta en este dato— mata 13.
+    - **El `0,5` exacto en copias ya tiene prueba.** Era la única defensa del
+      cambio que motivó la revisión de F5.3.1 y no existía: sustituirlo por
+      `default_tolerance * C` sobrevivía a la batería entera, porque los dos
+      valores solo divergen para `C` como 49, 98 o 103 y **ninguna prueba usaba
+      `C > 16`**. `the_default_copy_tolerance_is_exactly_one_half_and_not_a_rescaled_one`
+      lo fija con `C=49`, `q={1/2,1/2}` y controlado: el exacto acepta la cuota
+      `[25,24]` con error exactamente medio y el reescalado —`0,49999999999999994`—
+      la rechaza con `GPS-DOMAIN-103`.
+    - **El oráculo entero de cuotas ya admite pesos no diádicos.** Abortaba con
+      «el oráculo exige pesos diádicos», de modo que la clase de entrada que
+      revela la semántica de la cota no podía llegar a la comprobación. Ahora
+      convierte el ideal normativo `fl(C*q_h)` a su racional exacto —todo
+      binary64 es un racional diádico— y opera en `u128`.
+      `the_integer_quota_oracle_accepts_non_dyadic_profiles` barre cinco
+      perfiles de dos rangos con decimales no diádicos por `C ∈ {5, 7, 10}`:
+      quince combinaciones, treinta unidades bloque×subpoblación, incluidos los
+      ideales semienteros, los que caen un ulp por debajo de un entero
+      —`fl(7*0,7)=4,8999999999999995`— y los que dejan un rango con cero copias.
+      Al extenderlo se corrigió una propiedad que era un artefacto de los pesos
+      diádicos: el residual se cuenta desde los **pisos**, no desde la suma de
+      restos, porque `Σ fl(C*q_h)` no vale exactamente `C`.
+      Los perfiles de tres rangos quedan fuera del barrido porque la geometría
+      mínima del fixture no le da a la búsqueda LD ninguna matriz que cumpla a
+      la vez bins y signos; el perfil diádico de `H=4` cubre el caso
+      multirrango.
+    - **El modo controlado ya está probado fuera de diploides.**
+      `the_controlled_mode_works_outside_diploids` fija `P=1` y `P=3` con el
+      perfil diádico: cuota exacta, `copy_index` recorriendo `0..P-1`,
+      identidades materializadas y `F_realized` no aplicable.
+    - **Precedencia de diagnóstico corregida.** Con `P=3`, `inbreeding_f=0,5` y
+      controlado salía «la unidad controlada exige F efectivo igual a cero» en
+      vez del de ploidía, porque `resolve_f5_sampling` corría antes que
+      `resolve_founder_inbreeding` y releía el literal. Ahora el F se resuelve
+      y se valida contra la ploidía **antes**, y llega a `resolve_f5_sampling`
+      ya tipado en `PopulationFounders`, que además sustituye la búsqueda lineal
+      del censo por bloque. La combinación sigue siendo inalcanzable desde la
+      vía productiva —`adapters.rs` la rechaza en la admisión—, así que el
+      cambio no tiene prueba de integración posible y así queda dicho; lo que sí
+      se prueba es la lectura de la que depende el rechazo,
+      `FounderInbreeding::effective_value`, cuyas dos direcciones enmascaradas
+      por la admisión mata la unitaria correspondiente.
+    - **Son dos, no una, las guardas duplicadas en `adapters.rs`.** La entrada
+      anterior nombraba solo la incompatibilidad `F>0`×controlado; el tope
+      `t <= 0.5/C` de la tolerancia declarada también lo comprueba antes
+      `adapters.rs` para cada sustitución controlada, y neutralizar cualquiera
+      de las dos sobrevive a la batería.
+    - **`HaplotypePrefix::single` pasa a llamarse `single_rank`.** La regla del
+      catálogo exime del sorteo a «una elección con una sola alternativa», y el
+      campo fijaba «un solo haplotipo». Coinciden porque el perfil exige
+      `weight > 0` en cada fila y `2 <= H <= 4096`, pero el nombre y el
+      comentario decían la regla y comprobaban la implementación. No se cambia
+      el comportamiento: derivarlo del número de pesos **positivos** alteraría
+      el consumo de RNG en un caso que el perfil no admite.
+    - Anotado para la revisión de catálogos, sin cambiar nada: `GPS-DOMAIN-103`
+      no puede llevar `block_id` estructurado porque el catálogo de
+      diagnósticos fija su contexto como `scenario_id,population_id,detail`, y
+      está congelado por huella. F5.3.1 lo mete en `detail`, que es lo correcto.
+    - Anotado, sin cambiarlo: `adapters.rs` rechaza una subpoblación con
+      `controlled` y `F>0` aunque **todas** sus unidades estén sustituidas a
+      `probabilistic`. DTC-089 impone la restricción por unidad, no por
+      predeterminado; es un sobre-rechazo teórico y la guarda por unidad de
+      `resolve_f5_sampling` es la correcta.
 - ✅ **F5.3.2.** Aplicar F diploide y publicar F realizado; rechazar F en otras
   ploidías y registrar Ne no aplicable en F5.
   - Depende de: F5.3.1.

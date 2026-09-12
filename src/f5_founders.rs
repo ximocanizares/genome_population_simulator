@@ -532,17 +532,18 @@ pub fn assign_f5_founders(
 
     let rosters = resolve_f5_founder_roster(config)?;
     let blocks = index_search_blocks(config, sealed, search, &rosters, weights.len())?;
-    let sampling = resolve_f5_sampling(config, &rosters, &blocks)?;
 
     // Las `C` identidades de copia de una subpoblación son las mismas en todos
     // sus bloques: se ordenan una vez, no una vez por unidad.
     let ploidy = config.ploidy();
     let mut seats_by_population: BTreeMap<PopulationId, Vec<CopySeat>> = BTreeMap::new();
     // F efectivo de cada subpoblación y su objetivo publicable, resueltos una
-    // vez por subpoblación: no dependen del bloque. Aquí se rechaza F con
-    // `P=1` o `P>2`, que REQ-EVO-48 exige identificando ámbito y ploidía.
-    let mut inbreeding_by_population: BTreeMap<PopulationId, (FounderInbreeding, Option<f64>)> =
-        BTreeMap::new();
+    // vez por subpoblación —no dependen del bloque— y **antes** de resolver el
+    // muestreo. Aquí se rechaza F con `P=1` o `P>2`, que REQ-EVO-48 exige
+    // identificando ámbito y ploidía; resolverlo antes hace que ese
+    // diagnóstico gane al de la incompatibilidad con el modo controlado, que
+    // es el que describe la causa más profunda.
+    let mut populations: BTreeMap<PopulationId, PopulationFounders> = BTreeMap::new();
     for roster in &rosters {
         seats_by_population.insert(roster.population_id.clone(), copy_seats(roster, ploidy));
         let subpopulation = declared_subpopulation(config, &roster.population_id)?;
@@ -560,8 +561,16 @@ pub fn assign_f5_founders(
         // DTC-089 publica `target_f` solo en diploides; en otra ploidía el
         // objetivo es `null`, nunca cero.
         let target_f = (ploidy == 2).then(|| declared.unwrap_or(0.0));
-        inbreeding_by_population.insert(roster.population_id.clone(), (inbreeding, target_f));
+        populations.insert(
+            roster.population_id.clone(),
+            PopulationFounders {
+                copies: roster.copies,
+                inbreeding,
+                target_f,
+            },
+        );
     }
+    let sampling = resolve_f5_sampling(config, &populations, &blocks)?;
 
     let mut units = Vec::with_capacity(sampling.len());
     let mut f_realized = Vec::with_capacity(sampling.len());
@@ -583,15 +592,16 @@ pub fn assign_f5_founders(
                 ),
             ));
         }
-        let (inbreeding, target_f) = inbreeding_by_population
-            .get(&row.population_id)
-            .copied()
-            .ok_or_else(|| {
-                internal(
-                    &scenario_id,
-                    "la fila de muestreo nombra una subpoblación sin F resuelto",
-                )
-            })?;
+        let PopulationFounders {
+            inbreeding,
+            target_f,
+            ..
+        } = *populations.get(&row.population_id).ok_or_else(|| {
+            internal(
+                &scenario_id,
+                "la fila de muestreo nombra una subpoblación sin F resuelto",
+            )
+        })?;
         let (assignments, quota, operations) = match row.effective_mode {
             F5SamplingMode::Probabilistic => {
                 let (assignments, operations) = sample_probabilistic_unit(
@@ -885,23 +895,20 @@ fn index_search_blocks(
 /// `block_id` como exige la lista `sampling` del efectivo.
 fn resolve_f5_sampling(
     config: &EffectiveF5Config,
-    rosters: &[F5FounderRoster],
+    populations: &BTreeMap<PopulationId, PopulationFounders>,
     blocks: &[UnitBlock],
 ) -> Result<Vec<F5SamplingResolution>, Diagnostic> {
     let overrides = index_overrides(config)?;
     let mut consumed: BTreeSet<(PopulationId, u64)> = BTreeSet::new();
     let mut rows = Vec::with_capacity(blocks.len());
     for block in blocks {
-        let roster = rosters
-            .iter()
-            .find(|roster| roster.population_id == block.population_id)
-            .ok_or_else(|| {
-                configuration(
-                    config,
-                    "search.population_id",
-                    "la búsqueda nombra una subpoblación que el escenario no declara",
-                )
-            })?;
+        let founders = *populations.get(&block.population_id).ok_or_else(|| {
+            configuration(
+                config,
+                "search.population_id",
+                "la búsqueda nombra una subpoblación que el escenario no declara",
+            )
+        })?;
         let subpopulation = declared_subpopulation(config, &block.population_id)?;
         let default_mode = match subpopulation.sampling.as_ref() {
             // `probabilistic` es el modo predeterminado del contrato.
@@ -946,7 +953,7 @@ fn resolve_f5_sampling(
             None => (default_mode, F5SamplingSource::SubpopulationDefault, None),
         };
 
-        let default_tolerance = 0.5 / roster.copies as f64;
+        let default_tolerance = 0.5 / founders.copies as f64;
         let (declared, effective, copies_tolerance) = match requested_mode {
             F5SamplingMode::Probabilistic => {
                 if declared.is_some() {
@@ -960,8 +967,11 @@ fn resolve_f5_sampling(
             }
             F5SamplingMode::Controlled => {
                 // DTC-089: la combinación `F>0` con controlado es
-                // incompatible y se rechaza antes de abrir ningún RNG.
-                let inbreeding = effective_inbreeding_f(config, subpopulation)?.unwrap_or(0.0);
+                // incompatible y se rechaza antes de abrir ningún RNG. El F
+                // llega ya resuelto y validado contra la ploidía, de modo que
+                // una subpoblación con `P≠2` que declara F recibe el
+                // diagnóstico de ploidía y no éste.
+                let inbreeding = founders.inbreeding.effective_value();
                 if inbreeding != 0.0 {
                     return Err(configuration(
                         config,
@@ -987,7 +997,7 @@ fn resolve_f5_sampling(
                 // `0.5/C` reescalado, que no vuelve a valer 0,5 para todo `C`.
                 let copies_tolerance = match declared {
                     None => 0.5,
-                    Some(value) => value * roster.copies as f64,
+                    Some(value) => value * founders.copies as f64,
                 };
                 if !copies_tolerance.is_finite() || copies_tolerance < 0.0 {
                     return Err(configuration(
@@ -1011,7 +1021,7 @@ fn resolve_f5_sampling(
             controlled_max_abs_error_declared: declared,
             controlled_max_abs_error_effective: effective,
             controlled_max_abs_error_copies: copies_tolerance,
-            copies: roster.copies,
+            copies: founders.copies,
         });
     }
     // Cada sustitución debe corresponder a una unidad real de esta ejecución.
@@ -1166,6 +1176,36 @@ enum FounderInbreeding {
     /// `P=2` con `F=1`: la copia 1 reutiliza siempre y `founder_f` no se abre,
     /// conforme a la regla Bernoulli del catálogo.
     AlwaysReuse,
+}
+
+impl FounderInbreeding {
+    /// El F efectivo que representa esta resolución.
+    ///
+    /// `Independent` vale exactamente `0`: sus tres orígenes —F sin declarar,
+    /// `F=0` y `P≠2` sin declaración— son los tres casos en los que DTC-089 no
+    /// aplica ninguna endogamia. `P≠2` **con** declaración no llega aquí,
+    /// porque [`resolve_founder_inbreeding`] lo rechaza antes.
+    const fn effective_value(self) -> f64 {
+        match self {
+            Self::Independent => 0.0,
+            Self::Bernoulli(value) => value,
+            Self::AlwaysReuse => 1.0,
+        }
+    }
+}
+
+/// Lo que una fila de muestreo necesita de su subpoblación, resuelto **una
+/// sola vez** antes de recorrer los bloques: su `C` y su F ya tipado.
+///
+/// Resolver el F aquí, y no dentro del bucle, fija además la precedencia de
+/// diagnósticos: una subpoblación con `P≠2` que declara F es un error de
+/// ploidía, y debe decirlo aunque además sea controlada.
+#[derive(Clone, Copy, Debug)]
+struct PopulationFounders {
+    copies: u64,
+    inbreeding: FounderInbreeding,
+    /// `target_f` publicable: `Some` solo en diploides.
+    target_f: Option<f64>,
 }
 
 /// Resuelve el F aplicable a una subpoblación a partir de la ploidía efectiva
@@ -1327,8 +1367,16 @@ struct HaplotypePrefix {
     prefixes: Vec<f64>,
     /// Último rango con peso positivo, que absorbe el residuo de redondeo.
     last_positive: u64,
-    /// `true` cuando solo hay un haplotipo: no hay elección ni RNG.
-    single: bool,
+    /// `true` cuando la unidad tiene **un solo rango**: no hay elección ni RNG.
+    ///
+    /// No es exactamente la regla del catálogo, que exime del sorteo a «una
+    /// elección con una sola alternativa»: con `H >= 2` y un único peso
+    /// positivo la elección también sería determinista y aquí sí consumiría un
+    /// U53. Coinciden porque el perfil exige `weight > 0` en cada fila y
+    /// `2 <= H <= 4096`, de modo que un solo rango es la única forma de tener
+    /// una sola alternativa. Queda dicho que lo que este campo fija es el
+    /// número de rangos, no el de alternativas.
+    single_rank: bool,
 }
 
 impl HaplotypePrefix {
@@ -1351,7 +1399,7 @@ impl HaplotypePrefix {
         }
         let last_positive = last_positive.ok_or("ningún haplotipo tiene peso positivo")?;
         Ok(Self {
-            single: weights.len() == 1,
+            single_rank: weights.len() == 1,
             prefixes,
             last_positive,
         })
@@ -1359,12 +1407,13 @@ impl HaplotypePrefix {
 
     /// Rango elegido y visitas que costó localizarlo.
     ///
-    /// Una elección con una sola alternativa no consume RNG. En cualquier otro
+    /// Un solo rango no consume RNG, que bajo el perfil admitido es lo mismo
+    /// que la regla del catálogo sobre una sola alternativa. En cualquier otro
     /// caso consume exactamente un U53, y el residuo de redondeo —cuando el
     /// umbral no llega a ningún prefijo— lo absorbe el último rango con peso
     /// positivo, no la última fila: un `q_h` nulo no puede recibir copias.
     fn choose(&self, rng: &mut impl RandomWordSource) -> (u64, u64) {
-        if self.single {
+        if self.single_rank {
             return (0, 0);
         }
         let threshold = f5_uniform_53(rng);
@@ -3620,5 +3669,19 @@ mod tests {
             roster("P2", &["gamma", "delta"]),
         ];
         assert!(conflicting_membership(&rosters).is_none());
+    }
+
+    /// El F efectivo de cada resolución, que es la lectura de la que depende el
+    /// rechazo de `F>0`×controlado.
+    ///
+    /// Las dos direcciones que la vía productiva enmascara —la admisión ya
+    /// rechaza esa combinación— son que `AlwaysReuse` dejase de valer 1 o que
+    /// `Bernoulli` dejase de devolver su propio valor: cualquiera de las dos
+    /// abriría la puerta a una unidad controlada con endogamia.
+    #[test]
+    fn the_effective_f_of_each_resolution_is_its_declared_value() {
+        assert_eq!(FounderInbreeding::Independent.effective_value(), 0.0);
+        assert_eq!(FounderInbreeding::Bernoulli(0.25).effective_value(), 0.25);
+        assert_eq!(FounderInbreeding::AlwaysReuse.effective_value(), 1.0);
     }
 }

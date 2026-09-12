@@ -1494,6 +1494,22 @@ cota para todas las combinaciones sin enumerarlas. Para la pareja
 bloque×subpoblación se exige suma C y
 `|n_h/C-q_h|<=controlled_max_abs_error_effective` en ambos estados aplicables;
 su valor predeterminado es `0.5/C` y uno declarado solo puede ser más estricto.
+La cuota ideal normativa es `fl(C*q_h)` —el producto evaluado en binary64 sobre
+el `q_h` ya normalizado, no el real `C*q_h`— y la desigualdad se evalúa **en
+copias**: `|n_h - fl(C*q_h)| <= t*C`, donde el predeterminado aporta el valor
+`0.5` **exacto** y no `(0.5/C)*C`, que no vuelve a valer `0.5` para todo `C`.
+El motivo es que `0.5/C` es exactamente el umbral de redondeo al entero más
+próximo, y ese umbral solo es satisfacible en aritmética exacta: en cuanto `q`
+es una normalización binary64, un ideal semientero cae un ulp fuera y perfiles
+corrientes se quedan sin ninguna cuota legal. Está verificado con
+`q={0.7,0.3}`, cinco fundadores haploides y la tolerancia predeterminada: en
+decimales exactos la cuota `[3,2]` cumple la cota con igualdad —`|3/5-7/10|` y
+`|2/5-3/10|` valen ambos `1/10`—, mientras que evaluando `|n_h/C-q_h|` sobre los
+pesos binary64 **ninguna** de las seis cuotas enteras la cumple. La consecuencia
+se declara sin suavizarla: un validador independiente que compruebe la
+desigualdad literal `|n_h/C-q_h|<=t` sobre los pesos binary64 puede encontrar
+cuotas publicadas que la exceden en un ulp; no es un incumplimiento, sino que la
+desigualdad normativa es la de copias y quien valide debe usar esa.
 Si falla, devuelve
 `GPS-DOMAIN-103` antes de RNG. Una permutación Fisher–Yates de las C identidades de
 copia, inicialmente ordenadas por `individual_id` y `copy_index`, asigna el

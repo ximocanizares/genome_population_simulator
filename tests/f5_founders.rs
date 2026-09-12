@@ -409,36 +409,59 @@ fn five_haplotype_fixture<'a>() -> Fixture<'a> {
 // Oráculo racional exacto del reparto por mayores restos
 // ---------------------------------------------------------------------------
 
-/// Pesos declarados como numeradores enteros sobre un denominador diádico.
+/// Pesos efectivos de un perfil de la batería.
 ///
-/// Los perfiles de esta batería declaran pesos que ya suman exactamente 1 y
-/// son múltiplos de una potencia de dos, de modo que la normalización DTC-049
-/// los divide por `1.0` y los deja intactos: el peso efectivo es exactamente
-/// `numerador/denominador` y el oráculo trabaja sin perder un bit. La
-/// aserción de la suma lo comprueba en cada llamada.
-fn integer_weights(declared: &[&str]) -> (Vec<u128>, u128) {
+/// Los perfiles de estas pruebas suman exactamente 1 en binary64 con la suma
+/// compensada, de modo que la normalización DTC-049 los divide por `1.0` y el
+/// peso efectivo es el declarado. La aserción lo comprueba en cada llamada: un
+/// perfil que no lo cumpliera exigiría replicar aquí la normalización, y el
+/// oráculo dejaría de ser independiente.
+fn effective_weights(declared: &[&str]) -> Vec<f64> {
     let values: Vec<f64> = declared
         .iter()
         .map(|weight| weight.parse::<f64>().expect("peso decimal"))
         .collect();
-    let mut denominator: u128 = 1;
-    while values
-        .iter()
-        .any(|value| (value * denominator as f64).fract() != 0.0)
-    {
-        denominator *= 2;
-        assert!(denominator <= 1 << 40, "el oráculo exige pesos diádicos");
+    let mut compensated = NeumaierOracle::default();
+    let mut sum = 0.0_f64;
+    for value in &values {
+        sum = compensated.add(*value);
     }
-    let numerators: Vec<u128> = values
-        .iter()
-        .map(|value| (value * denominator as f64) as u128)
-        .collect();
     assert_eq!(
-        numerators.iter().sum::<u128>(),
-        denominator,
-        "los pesos declarados deben sumar exactamente 1"
+        sum, 1.0,
+        "los pesos declarados deben sumar exactamente 1 en binary64"
     );
-    (numerators, denominator)
+    values
+}
+
+/// Un `f64` finito y no negativo como racional **exacto**.
+///
+/// Todo binary64 es un racional diádico: mantisa por una potencia de dos. Es lo
+/// que permite al oráculo trabajar sin perder un bit con pesos que **no** son
+/// diádicos en decimal, como `0,3`, cuya representación sí lo es en binario.
+fn exact_rational(value: f64) -> (u128, u128) {
+    assert!(value.is_finite() && value >= 0.0, "{value} no es admisible");
+    if value == 0.0 {
+        return (0, 1);
+    }
+    let bits = value.to_bits();
+    let raw_exponent = ((bits >> 52) & 0x7ff) as i32;
+    let raw_mantissa = bits & ((1_u64 << 52) - 1);
+    let (mantissa, exponent) = if raw_exponent == 0 {
+        (u128::from(raw_mantissa), -1074_i32)
+    } else {
+        (
+            u128::from(raw_mantissa | (1_u64 << 52)),
+            raw_exponent - 1075,
+        )
+    };
+    if exponent >= 0 {
+        assert!(exponent < 64, "el oráculo acota el numerador");
+        (mantissa << exponent, 1)
+    } else {
+        let shift = u32::try_from(-exponent).expect("exponente");
+        assert!(shift < 100, "el oráculo acota el denominador a 2^100");
+        (mantissa, 1_u128 << shift)
+    }
 }
 
 /// Suma de Neumaier escrita desde su definición, para el oráculo del paseo de
@@ -462,34 +485,57 @@ impl NeumaierOracle {
     }
 }
 
-/// Comprueba en enteros exactos todo lo que el reparto por mayores restos
+/// Comprueba en racionales exactos todo lo que el reparto por mayores restos
 /// debe cumplir, sin reproducir ningún sorteo:
 ///
-/// 1. cada `n_h` es el piso o el piso más uno de `C*q_h`;
+/// 1. cada `n_h` es el piso o el piso más uno del ideal normativo `fl(C*q_h)`;
 /// 2. la suma es exactamente `C`;
-/// 3. el número de incrementos es el residual `C - Σ pisos`;
+/// 3. el número de incrementos es el residual `C - Σ pisos`, contado desde los
+///    pisos y no desde los restos: con ideales `fl(C*q_h)` la suma de los
+///    ideales no vale exactamente `C` —`fl(7*0,7)+fl(7*0,3)` se queda un ulp
+///    corto— y solo los pisos son enteros exactos;
 /// 4. ningún rango incrementado tiene un resto menor que uno no incrementado;
-/// 5. cada `n_h` respeta la cota `|n_h/C - q_h| <= t` como racional exacto.
+/// 5. cada `n_h` respeta la cota **en copias** `|n_h - fl(C*q_h)| <= t*C`.
+///
+/// El ideal es `fl(C*q_h)` —el producto en binary64— porque es el que DTC-089
+/// declara normativo, y la cota se evalúa en copias por el mismo motivo. El
+/// oráculo no vuelve a multiplicar en `f64`: convierte ese producto a su
+/// racional exacto y opera en `u128`, de modo que acepta pesos que no son
+/// diádicos en decimal —`0,3`, `0,7`— sin perder un bit. `tolerance` es la
+/// tolerancia **en copias**: `(1, 2)` es el `0,5` exacto predeterminado.
 fn assert_largest_remainder(
     counts: &[u64],
     declared: &[&str],
     copies: u64,
     tolerance: (u128, u128),
 ) {
-    let (numerators, denominator) = integer_weights(declared);
+    let weights = effective_weights(declared);
     let (tolerance_numerator, tolerance_denominator) = tolerance;
-    assert_eq!(counts.len(), numerators.len(), "un recuento por rango");
+    assert_eq!(counts.len(), weights.len(), "un recuento por rango");
+    let copies_f64 = copies as f64;
+    // Ideal normativo de cada rango: `fl(C*q_h)`, ya como racional exacto.
+    let ideals: Vec<(u128, u128)> = weights
+        .iter()
+        .map(|weight| exact_rational(copies_f64 * *weight))
+        .collect();
+    let common = ideals
+        .iter()
+        .map(|(_, denominator)| *denominator)
+        .max()
+        .expect("al menos un rango");
     let copies = u128::from(copies);
-    let mut residual = 0_u128;
+    let mut floors_total = 0_u128;
     let mut increments = 0_u128;
     let mut incremented_remainders: Vec<u128> = Vec::new();
     let mut untouched_remainders: Vec<u128> = Vec::new();
     let mut total = 0_u128;
-    for (rank, numerator) in numerators.iter().enumerate() {
-        let ideal = copies * numerator;
-        let floor = ideal / denominator;
-        let remainder = ideal % denominator;
-        residual += remainder;
+    for (rank, (numerator, denominator)) in ideals.iter().enumerate() {
+        assert_eq!(common % denominator, 0, "denominadores potencia de dos");
+        let floor = numerator / denominator;
+        // Restos llevados al denominador común, para poder compararlos y
+        // sumarlos sin dividir nunca.
+        let remainder = (numerator % denominator) * (common / denominator);
+        floors_total += floor;
         let count = u128::from(counts[rank]);
         assert!(
             count == floor || count == floor + 1,
@@ -503,23 +549,18 @@ fn assert_largest_remainder(
         }
         total += count;
 
-        // `|n/C - w/D| <= tn/td`  ⟺  `|n*D - C*w| * td <= tn * C * D`.
-        let left = (count * denominator) as i128 - (copies * numerator) as i128;
+        // `|n - num/den| <= tn/td`  ⟺  `|n*den - num| * td <= tn * den`.
+        let left = (count * denominator) as i128 - *numerator as i128;
         assert!(
-            left.unsigned_abs() * tolerance_denominator
-                <= tolerance_numerator * copies * denominator,
-            "rango {rank}: la cuota {count} incumple la cota exacta"
+            left.unsigned_abs() * tolerance_denominator <= tolerance_numerator * denominator,
+            "rango {rank}: la cuota {count} incumple la cota exacta en copias"
         );
     }
     assert_eq!(total, copies, "la cuota no suma C");
-    assert_eq!(
-        residual % denominator,
-        0,
-        "la suma de restos debe ser un entero de copias"
-    );
+    assert!(floors_total <= copies, "los pisos no pueden superar C");
     assert_eq!(
         increments,
-        residual / denominator,
+        copies - floors_total,
         "el número de incrementos debe ser el residual"
     );
     let minimum_incremented = incremented_remainders.iter().min().copied().unwrap_or(0);
@@ -1017,13 +1058,8 @@ fn controlled_quotas_sum_c_and_match_the_integer_oracle() {
                 quota.counts(),
                 "{label}: las copias no realizan la cuota"
             );
-            // Cota efectiva predeterminada `0,5/C`, como racional `1/(2C)`.
-            assert_largest_remainder(
-                quota.counts(),
-                &weights,
-                copies,
-                (1, u128::from(2 * copies)),
-            );
+            // Cota efectiva predeterminada: `0,5` exacto **en copias**.
+            assert_largest_remainder(quota.counts(), &weights, copies, (1, 2));
         }
     }
 }
@@ -1295,7 +1331,7 @@ fn the_minimal_haploid_case_meets_its_bound_exactly() {
         let mut sorted = quota.counts().to_vec();
         sorted.sort_unstable();
         assert_eq!(sorted, vec![1, 2], "tres copias entre dos haplotipos");
-        assert_largest_remainder(quota.counts(), &fixture.weights, 3, (1, 6));
+        assert_largest_remainder(quota.counts(), &fixture.weights, 3, (1, 2));
     }
 }
 
@@ -1321,7 +1357,7 @@ fn six_copies_split_the_dyadic_profile_without_rejection() {
             quota.tie().is_none(),
             "los restos 0, 0,5, 0,75 y 0,75 no dejan frontera partida"
         );
-        assert_largest_remainder(quota.counts(), &fixture.weights, 6, (1, 12));
+        assert_largest_remainder(quota.counts(), &fixture.weights, 6, (1, 2));
     }
 }
 
@@ -1344,12 +1380,7 @@ fn every_legal_copy_count_accepts_its_quota() {
         for unit in assignment.units() {
             let quota = unit.quota().expect("cuota controlada");
             assert_eq!(quota.counts().iter().sum::<u64>(), copies, "C={copies}");
-            assert_largest_remainder(
-                quota.counts(),
-                &fixture.weights,
-                copies,
-                (1, u128::from(2 * copies)),
-            );
+            assert_largest_remainder(quota.counts(), &fixture.weights, copies, (1, 2));
         }
     }
 }
@@ -3878,4 +3909,259 @@ fn a_retained_sequence_without_blocks_publishes_no_copy() {
     // secuencia: no queda ninguna copia huérfana ni ninguna secuencia a medias.
     assert_eq!(identities.assignments().len(), 4);
     assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// El predeterminado en copias es `0.5` **exacto**, no `0.5/C` reescalado.
+///
+/// Desde la resolución de la cota controlada, ese `0,5` exacto **es** el valor
+/// normativo que DTC-089 declara, no una conveniencia de implementación: la
+/// cota se evalúa en copias —`|n_h - fl(C*q_h)| <= t*C`— y el predeterminado
+/// aporta el `0,5` literal, porque `(0.5/C)*C` deja de valer `0,5`
+/// para muchos `C`. Con `C=49` vale `0.49999999999999994`, de modo que el
+/// reescalado rechaza con `GPS-DOMAIN-103` una cuota que la cota inclusiva del
+/// contrato acepta: `q={1/2,1/2}` reparte `[25,24]` y su error es exactamente
+/// medio individuo.
+///
+/// El caso exige `C` impar y mayor que 16; ninguna prueba anterior pasaba de
+/// ahí, y por eso el reescalado sobrevivía a la batería entera.
+#[test]
+fn the_default_copy_tolerance_is_exactly_one_half_and_not_a_rescaled_one() {
+    // La divergencia es del `f64`, no del fixture: se comprueba aquí para que
+    // la prueba falle por su causa y no por una elección de `C` equivocada.
+    let copies = 49.0_f64;
+    assert_ne!((0.5 / copies) * copies, 0.5);
+    assert!((0.5 / copies) * copies < 0.5);
+
+    let root = temporary("exact-half-tolerance");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 49).sampling("controlled")],
+        ploidy: 1,
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let assignment = assign(&chain);
+
+    for unit in assignment.units() {
+        let quota = unit.quota().expect("controlado publica su cuota");
+        assert_eq!(quota.copies(), 49);
+        let mut counts = quota.counts().to_vec();
+        counts.sort_unstable();
+        assert_eq!(
+            counts,
+            vec![24, 25],
+            "la cuota entera de q={{1/2,1/2}} con C=49 reparte 24 y 25"
+        );
+        // La cota se cumple justo en el borde: medio individuo de error.
+        assert_eq!(quota.max_abs_error_effective(), 0.5 / 49.0);
+        for count in quota.counts() {
+            let error = (*count as f64 - 49.0 * 0.5).abs();
+            assert_eq!(error, 0.5, "el error en copias es exactamente medio");
+        }
+    }
+    let identities = materialize(&chain);
+    assert_eq!(
+        identities.copies().len(),
+        49,
+        "P=1 da una copia por individuo"
+    );
+    assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// El modo controlado no es solo diploide: la costura F5.3.1→F5.3.3 se fija
+/// también en `P=1` y `P=3`.
+///
+/// Con el perfil diádico y `C` potencia de dos la cuota es exacta, `copy_index`
+/// recorre `0..P-1`, cada copia recibe su `FCP_` y cada bloque su `FHA_`, y
+/// `F_realized` es `not_applicable` fuera de `P=2`.
+#[test]
+fn the_controlled_mode_works_outside_diploids() {
+    for (ploidy, individuals) in [(1_u64, 16_u64), (3, 16)] {
+        let root = temporary(&format!("controlled-ploidy-{ploidy}"));
+        let fixture = Fixture {
+            subpopulations: vec![Subpopulation::new("P1", individuals).sampling("controlled")],
+            ploidy,
+            ..dyadic_fixture()
+        };
+        let chain = build_chain(&root, &fixture);
+        let assignment = assign(&chain);
+        let identities = materialize(&chain);
+        let copies = individuals * ploidy;
+
+        for (unit, realized) in assignment.units().iter().zip(assignment.f_realized()) {
+            assert_eq!(unit.mode(), F5SamplingMode::Controlled);
+            let quota = unit.quota().expect("controlado publica su cuota");
+            assert_eq!(quota.copies(), copies);
+            assert_eq!(quota.counts().iter().sum::<u64>(), copies);
+            assert_largest_remainder(quota.counts(), &fixture.weights, copies, (1, 2));
+            assert_eq!(
+                realized.status(),
+                F5RealizedFStatus::NotApplicable,
+                "fuera de P=2 el F realizado no aplica"
+            );
+            assert_eq!(unit.assignments().len() as u64, copies);
+        }
+
+        let indices = identities
+            .copies()
+            .iter()
+            .map(F5FounderCopy::copy_index)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(indices, (0..ploidy as u32).collect::<BTreeSet<_>>());
+        assert_eq!(identities.copies().len() as u64, copies);
+        assert_eq!(
+            identities.assignments().len() as u64,
+            copies * fixture.block_count
+        );
+        assert_every_identity_is_rederivable(&chain, &identities);
+    }
+}
+
+/// La cuota ideal normativa es `fl(C*q_h)` y la cota se evalúa **en copias**.
+///
+/// `q={0,7, 0,3}` con cinco fundadores haploides es el caso que lo revela. En
+/// decimales exactos —lo que la usuaria escribe— la cuota cumple la cota **con
+/// igualdad**: `|3/5-7/10|` y `|2/5-3/10|` valen ambos `1/10`, que es la
+/// tolerancia predeterminada `0,5/C`. En binary64, en cambio, `0,3` es
+/// `0,29999999999999998890`, el ideal de cada rango cae en un semientero
+/// exacto —`fl(5*0,7)=3,5` y `fl(5*0,3)=1,5`— y la desigualdad literal
+/// `|n_h/C-q_h|<=t` se excede en un ulp.
+///
+/// DTC-089 resuelve que la desigualdad normativa es la de copias. Esta prueba
+/// la fija por los dos lados: comprueba que la cuota publicada la cumple con
+/// igualdad, y que las dos alternativas descartadas —evaluar `|n/C-q|` en
+/// binary64 y evaluarla exactamente en racionales sobre esos mismos pesos— la
+/// rechazarían.
+#[test]
+fn a_half_integer_ideal_is_accepted_because_the_bound_is_evaluated_in_copies() {
+    let weights = ["0.7", "0.3"];
+    let root = temporary("half-integer-ideal");
+    let fixture = Fixture {
+        subpopulations: vec![Subpopulation::new("P1", 5).sampling("controlled")],
+        ploidy: 1,
+        weights: weights.to_vec(),
+        ..Fixture::default()
+    };
+    let chain = build_chain(&root, &fixture);
+    let assignment = assign(&chain);
+
+    let effective = effective_weights(&weights);
+    for unit in assignment.units() {
+        let quota = unit.quota().expect("controlado publica su cuota");
+        assert_eq!(quota.copies(), 5);
+        assert_eq!(quota.counts().iter().sum::<u64>(), 5);
+        assert_eq!(
+            quota.counts(),
+            &[3, 2],
+            "el desempate del grupo fronterizo publica esta cuota"
+        );
+        assert_largest_remainder(quota.counts(), &weights, 5, (1, 2));
+
+        for (rank, count) in quota.counts().iter().enumerate() {
+            let ideal = 5.0_f64 * effective[rank];
+            // El ideal cae en un semientero exacto y la cota se cumple justo.
+            assert_eq!(ideal.fract(), 0.5);
+            assert_eq!((*count as f64 - ideal).abs(), 0.5);
+        }
+
+        // Alternativa descartada 1: la desigualdad literal en binary64.
+        let literal_tolerance = 0.5 / 5.0;
+        let literal_rejects =
+            quota.counts().iter().enumerate().any(|(rank, count)| {
+                (*count as f64 / 5.0 - effective[rank]).abs() > literal_tolerance
+            });
+        assert!(
+            literal_rejects,
+            "evaluar |n/C-q| en binary64 rechazaría esta cuota legal"
+        );
+
+        // Alternativa descartada 2: la misma desigualdad en racionales
+        // exactos sobre los pesos binary64. `|n/C - q| <= 1/10` se comprueba
+        // como `|n*den - C*num| * 10 <= C * den`.
+        let exact_rejects = quota.counts().iter().enumerate().any(|(rank, count)| {
+            let (numerator, denominator) = exact_rational(effective[rank]);
+            let left = (u128::from(*count) * denominator) as i128 - (5 * numerator) as i128;
+            left.unsigned_abs() * 10 > 5 * denominator
+        });
+        assert!(
+            exact_rejects,
+            "evaluar la desigualdad en racionales exactos sobre los pesos binary64 también la rechazaría"
+        );
+    }
+
+    // Y en decimales exactos, que es lo que la usuaria declaró, la cuota es
+    // legal con igualdad: `|3/5-7/10| = |2/5-3/10| = 1/10`.
+    for (count, (numerator, denominator)) in
+        [3_i128, 2].into_iter().zip([(7_i128, 10_i128), (3, 10)])
+    {
+        assert_eq!(
+            (count * denominator - 5 * numerator).abs() * 10,
+            5 * denominator
+        );
+    }
+
+    let identities = materialize(&chain);
+    assert_every_identity_is_rederivable(&chain, &identities);
+}
+
+/// Barrido de perfiles **no diádicos** contra el oráculo racional exacto.
+///
+/// Hasta ahora el oráculo abortaba con «el oráculo exige pesos diádicos», de
+/// modo que la clase de entrada que revela la semántica de la cota no podía
+/// llegar a la comprobación. Con el ideal normativo `fl(C*q_h)` convertido a su
+/// racional exacto, el oráculo valida cualquier perfil cuyo peso efectivo sea
+/// el declarado.
+///
+/// Quince combinaciones —treinta unidades bloque×subpoblación—: cinco perfiles
+/// cuyos decimales no son diádicos, con `C ∈ {5, 7, 10}` en haploides. Entre
+/// ellas están los ideales semienteros de `0,7/0,3` con `C=5`, los que caen un
+/// ulp por debajo de un entero —`fl(7*0,7)=4,8999999999999995`— y los que dan
+/// un rango con cero copias —`0,9/0,1` con `C=5`—.
+#[test]
+fn the_integer_quota_oracle_accepts_non_dyadic_profiles() {
+    // Cinco perfiles de dos rangos cuyos decimales no son diádicos. Los de
+    // tres rangos quedan fuera de este barrido porque la geometría mínima del
+    // fixture —`S=3` con `H=3`— no le da a la búsqueda LD ninguna matriz que
+    // cumpla a la vez bins y signos, no por nada de la cuota; el perfil
+    // diádico de `H=4` ya cubre el caso multirrango.
+    const PROFILES: [&[&str]; 5] = [
+        &["0.7", "0.3"],
+        &["0.6", "0.4"],
+        &["0.9", "0.1"],
+        &["0.8", "0.2"],
+        &["0.55", "0.45"],
+    ];
+    let mut checked = 0_usize;
+    for (profile_index, weights) in PROFILES.iter().enumerate() {
+        for individuals in [5_u64, 7, 10] {
+            let root = temporary(&format!("non-dyadic-{profile_index}-{individuals}"));
+            // `H=2` solo realiza `r²` en 0 o 1, de modo que su objetivo
+            // alcanzable es 1,0. El perfil de pesos es lo único que el barrido
+            // varía respecto del fixture por defecto.
+            let fixture = Fixture {
+                subpopulations: vec![Subpopulation::new("P1", individuals).sampling("controlled")],
+                ploidy: 1,
+                weights: weights.to_vec(),
+                max_haplotype_attempts: 512,
+                max_swap_proposals: 2048,
+                ..Fixture::default()
+            };
+            let chain = build_chain(&root, &fixture);
+            let assignment = assign(&chain);
+            for unit in assignment.units() {
+                let quota = unit.quota().expect("controlado publica su cuota");
+                assert_eq!(quota.copies(), individuals);
+                assert_largest_remainder(quota.counts(), weights, individuals, (1, 2));
+                checked += 1;
+            }
+            // Las identidades se materializan igual sobre una cuota no diádica.
+            let identities = materialize(&chain);
+            assert_eq!(identities.copies().len() as u64, individuals);
+            assert_every_identity_is_rederivable(&chain, &identities);
+        }
+    }
+    assert_eq!(
+        checked,
+        PROFILES.len() * 3 * 2,
+        "cinco perfiles × tres tamaños × dos bloques"
+    );
 }
