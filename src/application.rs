@@ -2758,8 +2758,9 @@ pub fn f5_execution_id(config: &EffectiveF5Config) -> Result<ExecutionId, Diagno
 /// `audit_f5_package` entra como el recuento MAN-70 que la publicación exige,
 /// sobre la raíz de carga útil que `publish` renombra **sin tocar** al
 /// destino; `audit_f5_identity_closure` corre después sobre el destino ya
-/// renombrado, que es el que su testigo acredita. En la mitad «fallo» el
-/// gemelo es `audit_f5_failure_closure`.
+/// renombrado, que es el que su testigo acredita. En la mitad «fallo» corren
+/// los dos gemelos sobre el destino ya renombrado: `audit_f5_failure_closure`
+/// acredita el testigo y `audit_f5_failure_package` relee el paquete.
 ///
 /// # Errors
 ///
@@ -2776,6 +2777,108 @@ pub fn execute_validated_f5_config<'a>(
             .map(|report| report.initialization_summaries().to_vec())
             .map_err(crate::f5_oracle::F5OracleRejection::into_diagnostic)
     })
+}
+
+/// Audita el paquete `failed` ya renombrado con el oráculo independiente.
+///
+/// Es la mitad que F5.6.1 no pudo componer. `audit_f5_failure_package` exige
+/// una [`crate::f5_oracle::F5FailureDeclaration`] que el orquestador no
+/// conserva, y reconstruirla desde el informe en memoria haría la auditoría
+/// autocertificante: el productor declararía lo que el productor escribió. Se
+/// reconstruye por tanto desde el **manifiesto publicado**, de modo que el
+/// auditor contrasta dos documentos del paquete —`manifest.json` y
+/// `outputs/f5-failure.json`— y reabre los bytes del enlace, sin tocar ninguna
+/// caché del productor.
+///
+/// # Errors
+///
+/// El diagnóstico del oráculo si el paquete publicado no sostiene lo que su
+/// propio manifiesto declara.
+fn audit_published_f5_failure(destination: &Path) -> Result<(), Diagnostic> {
+    use crate::f5_oracle::{F5DeclaredLink, F5FailureDeclaration, audit_f5_failure_package};
+    use crate::f5_publication::F5_MANIFEST_PATH;
+
+    let path = destination.join(F5_MANIFEST_PATH);
+    let bytes = std::fs::read(&path).map_err(|error| {
+        Diagnostic::f5_configuration(
+            path.to_string_lossy().as_ref(),
+            "manifest",
+            format!("no se pudo releer el manifiesto publicado: {error}"),
+        )
+    })?;
+    let manifest: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| {
+        Diagnostic::f5_configuration(
+            path.to_string_lossy().as_ref(),
+            "manifest",
+            format!("el manifiesto publicado no es JSON: {error}"),
+        )
+    })?;
+    let failure = &manifest["f5"]["f5_failure"];
+    let invalid = |field: &str| {
+        Diagnostic::f5_configuration(
+            path.to_string_lossy().as_ref(),
+            field,
+            "el manifiesto publicado no describe su propio fallo",
+        )
+    };
+    let text = |value: &serde_json::Value, field: &str| {
+        value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| invalid(field))
+    };
+    let numbers = |object: &serde_json::Value, keys: &[&str], field: &'static str| {
+        keys.iter()
+            .map(|key| object[*key].as_u64().ok_or_else(|| invalid(field)))
+            .collect::<Result<Vec<_>, Diagnostic>>()
+    };
+    let limits = numbers(
+        &failure["limits"],
+        &[
+            "max_layout_attempts",
+            "max_haplotype_attempts",
+            "max_swap_proposals",
+            "max_haplotype_cells",
+            "max_operation_units",
+            "max_working_memory_bytes",
+            "max_output_bytes",
+        ],
+        "limits",
+    )?;
+    let counters = numbers(
+        &failure["counters"],
+        &[
+            "layout_attempts_used",
+            "haplotype_attempts_used",
+            "swap_proposals",
+            "swap_accepted",
+        ],
+        "counters",
+    )?;
+    let link = &failure["artifacts"][0];
+    let declaration = F5FailureDeclaration {
+        code: text(&failure["code"], "code")?,
+        stage: text(&failure["stage"], "stage")?,
+        scenario_id: text(&failure["scenario_id"], "scenario_id")?,
+        population_id: failure["population_id"].as_str().map(str::to_owned),
+        block_id: failure["block_id"].as_str().map(str::to_owned),
+        limits: limits.try_into().map_err(|_| invalid("limits"))?,
+        counters: counters.try_into().map_err(|_| invalid("counters"))?,
+        best_layout: failure["best_layout"].clone(),
+        best_attempt: failure["best_attempt"].clone(),
+        link: F5DeclaredLink {
+            artifact_id: text(&link["artifact_id"], "artifacts")?,
+            artifact_kind: text(&link["artifact_kind"], "artifacts")?,
+            schema_version: text(&link["schema_version"], "artifacts")?,
+            path: text(&link["path"], "artifacts")?,
+            size_bytes: link["size_bytes"]
+                .as_u64()
+                .ok_or_else(|| invalid("artifacts"))?,
+            sha256: text(&link["sha256"], "artifacts")?,
+        },
+    };
+    audit_f5_failure_package(destination, &declaration)
+        .map_err(crate::f5_oracle::F5OracleRejection::into_diagnostic)
 }
 
 /// Variante instrumental con el recuento MAN-70 inyectado.
@@ -2836,7 +2939,10 @@ where
             &empty,
         ) {
             Ok(failed) => match audit_f5_failure_closure(failed.destination(), &failed, &empty) {
-                Ok(_) => report.diagnostic().clone(),
+                Ok(_) => match audit_published_f5_failure(failed.destination()) {
+                    Ok(()) => report.diagnostic().clone(),
+                    Err(diagnostic) => diagnostic,
+                },
                 Err(rejection) => rejection.into_diagnostic(),
             },
             Err(diagnostic) => diagnostic,

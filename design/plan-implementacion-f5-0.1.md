@@ -3275,7 +3275,7 @@ identificador del índice de copia.
     por el lector y por el esquema. Y **`kappa` no aparece hoy en ninguna ruta
     de cálculo**: sus únicas apariciones en el árbol son prosa de este plan y de
     DTC-089, ninguna en `src/`, `tests/` ni `ui/`.
-- ☐ **F5.6.3.** Ejecutar todos los gates, guardar evidencia y auditar las 46
+- ✅ **F5.6.3.** Ejecutar todos los gates, guardar evidencia y auditar las 46
   filas exactas de la matriz REQ→ACE→hito→prueba con hito F5, incluidas
   `REQ-VAL-54`, `REQ-MAN-70` y `REQ-SAL-02`, sin omitir filas compartidas ni
   incorporar filas ajenas al alcance.
@@ -3293,6 +3293,92 @@ identificador del índice de copia.
     demuestre que ninguna vía de publicación de F5.6 llama a
     `publish_f5_success` ni a `publish_f5_failure` fuera de los envoltorios que
     sellan.
+  - **Ejecutado (13 de septiembre de 2026), pendiente de revisión.** La casilla
+    sigue en ☐ hasta que la Revisión F5.6 la apruebe. El acta está en
+    `evidence/f5.6/cierre.md` y las comprobaciones nuevas en
+    `tests/f5_6_closure.rs`.
+  - **Recuento mecánico, y por qué lo es.** 46 filas, 46 REQ distintos y los
+    tres nombrados. El recuento sale de **contar la tabla** término a término
+    —el campo Hito admite varios hitos separados por `/`, así que `F2.0/F5.6`
+    cuenta y `F50.1` no— y se contrasta contra tres verdades que se mantienen
+    por separado: el literal del contrato, la prosa de la §1 de la matriz y la
+    prosa de esta misma entrada. No hay ninguna lista de 46 identificadores
+    escrita a mano. `the_projection_discriminates_a_changed_matrix` demuestra
+    sobre una tabla sintética que añadir, quitar o reasignar una fila mueve el
+    recuento, y cuatro mutaciones sobre la matriz real lo confirman.
+  - **Las 46 filas estaban todas en «Planificada».** La matriz describía la
+    evidencia *prevista* y no la observada, de modo que no servía como gate de
+    cierre. Las 46 pasan ahora a declarar lo que F5 cerró, con citas que una
+    prueba comprueba que existen y que son pruebas. Las seis filas compartidas
+    con F6, F7 y F8 conservan expresamente su parte pendiente.
+  - **Hueco encontrado y cerrado: la cota de ploidía de F5.** REQ-CONF-65 exige
+    rechazar una ploidía fuera de `1..=10` identificando el problema. La guarda
+    existe en `src/adapters.rs` y **no tenía prueba**: la batería de F5.0.1 solo
+    sustituía `ploidy = 2` por `ploidy = 1`, que es legal, y la construcción del
+    efectivo se limita después a una conversión a `u8`.
+    `the_f5_admission_rejects_a_ploidy_outside_one_to_ten` la cubre y muere
+    contra esa misma variante defectuosa.
+  - **Defecto material encontrado y corregido: la cota de propuestas del
+    auditor de fallo.** `audit_f5_failure_package` rechazaba con `GPS-RES-101`
+    el paquete que la propia cadena productiva publica al agotarse la búsqueda,
+    porque comparaba los tres contadores contra `limits` **posición a
+    posición** y a `swap_proposals` le aplicaba `max_swap_proposals`. El
+    contrato dice otra cosa en dos sitios: DTC-089 l. 1196 fija
+    `max_swap_proposals` como presupuesto de **un intento** —«Un intento
+    termina … o al consumir `max_swap_proposals`»— y l. 1847-1848 enumera
+    `swap_proposals` junto a `haplotype_attempts_used`, que es **acumulado**.
+    El productor hacía lo correcto. Reproducido con el binario: `32 * 256 =
+    8192` frente a un límite de `256`. La cota correcta es el producto,
+    `swap_proposals <= max_swap_proposals * haplotype_attempts_used`, con
+    `checked_mul` —techo contractual `10^7 * 10^4 = 10^11`— y `swap_proposals`
+    **fuera** del bucle posicional, que es lo que hacía pasar por simetría una
+    coincidencia de índices. El porqué queda escrito en el código citando las
+    dos líneas de DTC-089. La cota es **ajustada**: el productor acumula los
+    dos contadores en el mismo recorrido. El defecto era de **F5.4.2** y solo
+    podía aparecer al componer el auditor sobre un agotamiento **real**, que es
+    por lo que ninguna revisión por hito lo vio. Discriminación comprobada por
+    los dos lados: con la cota vieja la prueba falla al aceptar, y con una cota
+    `u64::MAX` falla al rechazar.
+  - **Los cuatro auditores quedan compuestos en producción.** Resuelta la cota,
+    `audit_f5_failure_package` ya puede componerse:
+    `audit_published_f5_failure` reconstruye la `F5FailureDeclaration` desde el
+    **manifiesto publicado** —no desde el informe en memoria, que haría la
+    auditoría autocertificante— y corre sobre el destino ya renombrado, después
+    de `audit_f5_failure_closure`. La composición se demuestra por
+    **comportamiento**: un agotamiento real devuelve `GPS-DOMAIN-104` y no el
+    diagnóstico de ningún auditor, y devolviendo la cota vieja el orquestador
+    pasa a devolver `GPS-RES-101`, lo que solo puede ocurrir si el auditor está
+    compuesto y se alcanza.
+  - **Atomicidad de proceso, cerrada en WSL2/ext4.** Interrupción real por
+    `SIGKILL` y concurrencia **entre procesos** sobre el `run` F5, con el solape
+    comprobado y no supuesto. Tres mutaciones de `src/publication.rs` —retirar
+    `RENAME_NOREPLACE`, abrir los permisos del provisional y renombrar el
+    marcador `INCOMPLETE`— matan las pruebas. La primera mutación de permisos
+    **no mutó** —una llamada posterior a `set_permissions` la revertía— y quedó
+    registrada. **Pendiente la mitad que DTC-045 pide en Ubuntu nativo.**
+  - **Deudas recontadas.** Siguen exactas: el dictamen de que **es v8 el
+    incompleto** y la recomendación de `f5-resource-accounting-v9` con dos
+    términos nuevos que reabriría los dos esquemas; la desviación de hasta 2x
+    del presupuesto sellado, misma raíz; el docstring de F5.3 que anuncia
+    `GPS-CONF-101` donde el código devuelve `GPS-INTERNAL-101`; y DTC-066. La
+    condición «bloqueante en el primer `run` productivo» **ya no es teórica**:
+    ese `run` existe desde F5.6.1 y compone `audit_f5_package`, de modo que la
+    cadena productiva ejecuta una pieza que su contrato de recursos no modela.
+    Caber con holgura —7,4 a 8,1 MiB frente a 1 GiB— no es estar declarado. La
+    superposición entre el oráculo de F5.4.2 y la batería del escritor de
+    F5.4.1 **no se retira**: el plan decía «puede», no hay defecto y
+    `tests/f5_artifacts.rs` es evidencia propia del escritor. DTF-058 sigue
+    aplazada y no bloquea.
+  - **Puertas.** `fmt`, `clippy -D warnings`, `test --workspace --all-targets
+    --locked --no-fail-fast` (**1098 pasan, 0 fallan, 12 ignoradas**, frente a
+    1085/0/12 al empezar; las ignoradas **no cambian**),
+    `test --doc --locked` (2/0/0), `build --release --locked --target
+    x86_64-unknown-linux-gnu` y `doc --no-deps`, todas en verde y sin avisos.
+    **Lado Python:** `marimo check --strict` exit 0; `pytest tests` 7 pasan y 1
+    se omite; `pytest tests_ui` 94 pasan y **2 fallan**, `test_f2_5_vcf_ui`
+    (F2.5) y `test_ui_technical_event_v2_round_trips_to_rust_validation` (F3,
+    desplazada por F4.1). Los dos son preexistentes, ajenos a F5 y quedan
+    declarados con su causa en el acta en vez de escondidos.
 
 > **Revisión F5.6.** No iniciar F6 ni F7 hasta aprobar las evidencias y confirmar
 > que no quedan decisiones funcionales o técnicas F5 abiertas.

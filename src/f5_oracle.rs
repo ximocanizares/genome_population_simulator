@@ -6320,7 +6320,11 @@ pub const F5_FAILURE_DOCUMENT_PATH: &str = "outputs/f5-failure.json";
 /// 1. relee `outputs/f5-failure.json` y comprueba sus doce claves, el
 ///    enumerado cerrado de `code`, las cinco etapas y `artifacts=[]`;
 /// 2. contrasta los **nueve términos comunes** contra la declaración;
-/// 3. exige que los contadores quepan en los límites declarados;
+/// 3. exige que los contadores quepan en la cota que cada uno tiene: los dos
+///    de intentos en su límite homónimo y las propuestas en
+///    `max_swap_proposals * haplotype_attempts_used`, porque
+///    `max_swap_proposals` presupuesta **un intento** y `swap_proposals` es
+///    acumulado (DTC-089 l. 1196 y l. 1847-1848);
 /// 4. **enumera el árbol** y exige que no exista ninguno de los ocho ficheros
 ///    biológicos ni ningún fichero sin declarar;
 /// 5. reabre el enlace y recomputa su tamaño y SHA-256.
@@ -6519,24 +6523,67 @@ pub fn audit_f5_failure_package(
             ));
         }
     }
-    // Los contadores caben en los límites efectivos: intentos de layout en
-    // `max_layout_attempts`, de haplotipos en `max_haplotype_attempts` y
-    // propuestas en `max_swap_proposals`; las aceptadas nunca exceden las
-    // propuestas.
-    for (index, limit, name) in [
-        (0_usize, 0_usize, "layout_attempts_used"),
-        (1, 1, "haplotype_attempts_used"),
-        (2, 2, "swap_proposals"),
+    // Los dos contadores de intentos caben cada uno en **su propio** límite:
+    // los de layout en `max_layout_attempts` y los de haplotipos en
+    // `max_haplotype_attempts`. Son los únicos dos cuya correspondencia con
+    // `limits` es contador contra su límite homónimo.
+    for (index, name) in [
+        (0_usize, "layout_attempts_used"),
+        (1, "haplotype_attempts_used"),
     ] {
-        if counters[index] > limits[limit] {
+        if counters[index] > limits[index] {
             return Err(resource_reject(
                 path,
                 format!(
                     "{name}={} excede su límite efectivo {}",
-                    counters[index], limits[limit]
+                    counters[index], limits[index]
                 ),
             ));
         }
+    }
+    // `swap_proposals` **no** se compara contra `max_swap_proposals`, y por eso
+    // sale del bucle anterior: que los tres compartieran recorrido posicional
+    // hacía pasar por simetría lo que era una coincidencia de índices.
+    //
+    // DTC-089 l. 1196 fija `max_swap_proposals` como presupuesto de **un
+    // intento** —«Un intento termina … o al consumir `max_swap_proposals`»— y
+    // l. 1847-1848 enumera `swap_proposals` junto a `haplotype_attempts_used`,
+    // que es **acumulado** sobre los intentos; leer el tercero como «de un
+    // intento» rompería la coherencia de su propio grupo. La cota que el
+    // contrato sostiene es por tanto el producto: cada uno de los
+    // `haplotype_attempts_used` intentos consume como mucho
+    // `max_swap_proposals` propuestas. Sin el producto, todo agotamiento de
+    // búsqueda —donde el acumulado vale exactamente
+    // `max_haplotype_attempts * max_swap_proposals`— se rechazaría con una
+    // causa de recurso falsa.
+    //
+    // La cota es **ajustada**, no holgada: el productor acumula los dos
+    // contadores en el mismo recorrido —un intento sumado y sus propuestas
+    // sumadas por cada registro de la unidad que el diagnóstico nombra—, de
+    // modo que `swap_proposals` es la suma de `haplotype_attempts_used`
+    // sumandos y ninguno puede pasar de `max_swap_proposals`. Un fallo que no
+    // nace de la búsqueda deja los dos en cero y la cota sigue valiendo.
+    //
+    // El producto se hace con `checked_mul`: el techo contractual es
+    // `10^7 * 10^4 = 10^11` y cabe de sobra en `u64`, pero un desbordamiento
+    // silencioso aquí abriría la cota en lugar de cerrarla.
+    let proposal_bound = limits[2].checked_mul(counters[1]).ok_or_else(|| {
+        resource_reject(
+            path,
+            format!(
+                "la cota de propuestas desborda: max_swap_proposals={} por haplotype_attempts_used={}",
+                limits[2], counters[1]
+            ),
+        )
+    })?;
+    if counters[2] > proposal_bound {
+        return Err(resource_reject(
+            path,
+            format!(
+                "swap_proposals={} excede max_swap_proposals={} por haplotype_attempts_used={}",
+                counters[2], limits[2], counters[1]
+            ),
+        ));
     }
     if counters[3] > counters[2] {
         return Err(reject(
