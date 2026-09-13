@@ -1472,7 +1472,7 @@ normalizado, posiciones y perfil LD; solo el Evaluador calcula la puntuación
 aceptable de DTC-089. La evaluación inicial de una matriz cuesta `O(H*S²)` y
 cada propuesta 2×2 actualiza como máximo O(S) parejas.
 
-La admisión aplica `f5-resource-accounting-v8` como una secuencia única. El
+La admisión aplica `f5-resource-accounting-v9` como una secuencia única. El
 dispatcher abre el TOML general una sola vez, lee hasta EOF con la cota inclusiva
 de 65536 bytes y calcula SHA-256 sobre esos mismos bytes; solo entonces lo
 clasifica. La cota es común a la entrada CLI transparente porque antes de leer
@@ -1492,7 +1492,7 @@ máximo; su pico conservador suma el transitorio al mayor de ambos retenidos. El
 pico global es el máximo de los picos de fase, no la suma de búferes que nunca
 coexisten. Antes de abrir o ampliar el siguiente recurso, el ledger usa
 aritmética `u64` comprobada y verifica inclusivamente el presupuesto restante y
-los topes duros 2^28/2^30/2^31. Lectura, hash y medida física comparten el mismo
+los topes duros 2^32/2^33/2^31. Lectura, hash y medida física comparten el mismo
 handle; `metadata` puede enriquecer un diagnóstico, pero su longitud nunca
 autoriza una lectura. Toda ampliación de búfer o vector se comprueba antes de
 reservar capacidad.

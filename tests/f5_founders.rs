@@ -4403,7 +4403,7 @@ fn founder_footprint(
     }
 }
 
-/// Bytes que `f5-resource-accounting-v8` concede a esas mismas estructuras,
+/// Bytes que `f5-resource-accounting-v9` concede a esas mismas estructuras,
 /// escritos desde la fórmula de DTC-089 y no desde el código que la evalúa.
 fn founder_budget(
     chain: &Chain,
@@ -4541,7 +4541,7 @@ fn the_retained_repository_does_not_grow_with_the_block_count() {
 
     // El término dominante: el registro de colisiones conserva una entrada por
     // identidad derivada y crece como `B*C_total`.
-    // `f5-resource-accounting-v8` lo presupuesta como
+    // `f5-resource-accounting-v9` lo presupuesta como
     // `128*(X+B*N_pop*H+B*C_total)`; v7 no lo contenía en ninguna fórmula.
     assert_eq!(
         registered_small,

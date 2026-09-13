@@ -27,8 +27,27 @@ use crate::f5_admission::{
 use crate::identity::{ReferenceId, SequenceId};
 use crate::reference_fasta::{empty_fasta, empty_header, input_error, invalid_symbol};
 
-pub const F5_HARD_OPERATION_LIMIT: u64 = 1 << 28;
-pub const F5_HARD_WORKING_MEMORY_LIMIT: u64 = 1 << 30;
+/// Tope duro y predeterminado de unidades de operación (2^32).
+///
+/// La cota no acota la biología: la domina el escaneo obligatorio de la
+/// referencia, que cuesta `2*fasta_bytes + reference_bases`. Con 2^28 el
+/// tomate reducido al 10 % —79 230 297 B y 78 252 003 bases— ya consumía
+/// 236 712 597 unidades, el 88 % del techo, antes de abrir un solo bloque; el
+/// genoma completo (795 562 190 B) lo excedía 8,8 veces. 2^32 admite el tomate
+/// entero y deja unos 1,9 G de margen para el trabajo real.
+///
+/// Es a la vez el **predeterminado** cuando el escenario omite
+/// `max_operation_units` y el **máximo** que el escenario puede declarar: la
+/// persona usuaria puede reducirlo, nunca ampliarlo (DTC-089). Nunca se
+/// deriva de la máquina; declararlo es la única forma de cambiarlo.
+pub const F5_HARD_OPERATION_LIMIT: u64 = 1 << 32;
+/// Tope duro y predeterminado de memoria de trabajo (2^33 B = 8 GiB).
+///
+/// Mismo contrato que [`F5_HARD_OPERATION_LIMIT`]: predeterminado y máximo a
+/// la vez, reducible y nunca detectado de la RAM del equipo.
+pub const F5_HARD_WORKING_MEMORY_LIMIT: u64 = 1 << 33;
+/// Tope duro y predeterminado de bytes publicados (2^31 B). No lo cambia
+/// esta revisión del contrato.
 pub const F5_HARD_OUTPUT_LIMIT: u64 = 1 << 31;
 
 pub const F5_DEFAULT_MAX_LAYOUT_ATTEMPTS: u64 = 1_000;
@@ -529,7 +548,7 @@ fn canonical_f5_number(
 }
 
 /// Resultado admitido —todavía no sellado— del preflight
-/// `f5-resource-accounting-v8`.
+/// `f5-resource-accounting-v9`.
 ///
 /// Es contabilidad interna: ningún consumidor puede derivar layout ni contrato
 /// de él hasta que `seal` lo une a su `F5AdmissionReceipt`.
@@ -584,7 +603,7 @@ pub(crate) struct F5ResourcePreflight {
     /// en cada copia fundadora, de modo que sin este vector la vía productiva
     /// no podría publicar la proyección. Retiene una entrada por secuencia
     /// retenida, exactamente lo que `256*retained_sequence_ids` ya concede en
-    /// `f5-resource-accounting-v8`: no añade ningún término a la fórmula.
+    /// `f5-resource-accounting-v9`: no añade ningún término a la fórmula.
     sequence_lengths: Vec<(String, u64)>,
     /// Identidades de la primera pasada, todavía no selladas ni publicadas.
     physical_input_identities: Vec<AdmittedInputIdentity>,
@@ -1379,16 +1398,32 @@ fn reserve_known_before_scan(
         InputRole::ReferenceFasta,
         2 + u64::from(config.excluded_regions_path().is_some()),
     )?;
+    // Reserva prospectiva con los mismos sobres v9 de la fórmula final. No
+    // incluye `4096*X` ni `2048*C_total*K_bound` porque `sequence_count`
+    // todavía no se conoce en bootstrap; la fórmula final carga el resto.
     let known_output = add_many(
         config,
         "known_future_output_bytes",
         [
             other.output_bytes(),
             1_048_576,
+            mul("1024*tsv_rows", 1_024, tsv_rows, config)?,
             mul(
-                "4096*(tsv_rows+json_rows)",
-                4_096,
-                add("tsv_rows+json_rows", tsv_rows, json_rows, config)?,
+                "S_bound*B*N*H",
+                site_bound,
+                mul("B*N*H", bn, h, config)?,
+                config,
+            )?,
+            mul("1024*json_rows", 1_024, json_rows, config)?,
+            mul(
+                "512*(ploidy+1)*B*N*S",
+                mul(
+                    "512*(ploidy+1)",
+                    512,
+                    add("ploidy+1", u64::from(config.ploidy()), 1, config)?,
+                    config,
+                )?,
+                mul("B*N*S", bn, site_bound, config)?,
                 config,
             )?,
             65_536,
@@ -1695,14 +1730,20 @@ fn preflight_resolved_f5_resources(
             )
         })?;
     let bn = mul("B*N_pop", block_count, n_pop, config)?;
+    // Dos dimensiones derivadas que v9 necesita nombrar porque sus registros
+    // no caben en un sobre constante. No son escalares publicados nuevos: se
+    // recomputan igual que `tsv_rows_bound` y `json_rows_bound`, desde
+    // `block_count`, las subpoblaciones del escenario y las filas del perfil.
+    let haplotype_rows_bound = mul("B*N_pop*H", bn, h, config)?;
+    let site_summary_rows_bound = mul("B*N_pop*S_bound", bn, site_bound_per_block, config)?;
     let tsv_rows_bound = add_many(
         config,
         "tsv_rows_bound",
         [
             block_count,
             k_bound,
-            mul("B*N_pop*H", bn, h, config)?,
-            mul("B*N_pop*S_bound", bn, site_bound_per_block, config)?,
+            haplotype_rows_bound,
+            site_summary_rows_bound,
             mul("B*bin_count_total", block_count, bin_count_total, config)?,
             mul("B*C_total", block_count, c_total, config)?,
             mul("B*N_pop*A", bn, haplotype_attempts, config)?,
@@ -1715,8 +1756,8 @@ fn preflight_resolved_f5_resources(
             founder_count,
             n_pop,
             mul("3*B*N_pop", 3, bn, config)?,
-            mul("2*B*N_pop*H", 2, mul("B*N_pop*H", bn, h, config)?, config)?,
-            mul("B*N_pop*S_bound", bn, site_bound_per_block, config)?,
+            mul("2*B*N_pop*H", 2, haplotype_rows_bound, config)?,
+            site_summary_rows_bound,
             mul("2*normalization_rows", 2, normalization_rows, config)?,
             9,
         ],
@@ -2001,40 +2042,56 @@ fn preflight_resolved_f5_resources(
     .into_iter()
     .max()
     .expect("five non-empty F5 memory phases");
+    // `truth_bound` v9. Hay `X` registros `haplotype_copy` —uno por copia y
+    // secuencia poblada—, pero las incidencias SNP que esos registros publican
+    // **no** son `X*K_bound`: cada copia lleva solo los sitios de los bloques
+    // colocados en **su** secuencia, de modo que sumando todas las secuencias
+    // de una misma copia-de-individuo se obtiene como máximo `K_bound`. El
+    // número de copias-de-individuo es `C_total`, no `X`. Contar `X*K_bound`
+    // multiplicaba cada SNP por `sequence_count`.
     let truth_bound = add_many(
         config,
         "truth_bound",
         [
             65_536,
+            mul("4096*X", 4_096, x, config)?,
             mul(
-                "X*(4096+2048*K_bound)",
-                x,
-                add(
-                    "4096+2048*K_bound",
-                    4_096,
-                    mul("2048*K_bound", 2_048, k_bound, config)?,
-                    config,
-                )?,
+                "2048*C_total*K_bound",
+                2_048,
+                mul("C_total*K_bound", c_total, k_bound, config)?,
                 config,
             )?,
             mul("4096*G_bound", 4_096, g_bound, config)?,
         ],
     )?;
+    // Los sobres por fila/elemento v9. El sobre constante de 4096 bytes de v8
+    // no era cota superior de dos clases cuyo tamaño depende de una dimensión
+    // declarada: la fila de `f5-haplotypes.tsv` lleva `alleles` con
+    // exactamente `S_bound` caracteres, y el resumen por sitio lleva siete
+    // matrices de dosis de `ploidy+1` entradas.
     let output_bytes = add_many(
         config,
         "output_bytes",
         [
             other.output_bytes(),
             1_048_576,
+            mul("1024*tsv_rows_bound", 1_024, tsv_rows_bound, config)?,
             mul(
-                "4096*(tsv_rows_bound+json_rows_bound)",
-                4_096,
-                add(
-                    "tsv_rows_bound+json_rows_bound",
-                    tsv_rows_bound,
-                    json_rows_bound,
+                "S_bound*haplotype_rows_bound",
+                site_bound_per_block,
+                haplotype_rows_bound,
+                config,
+            )?,
+            mul("1024*json_rows_bound", 1_024, json_rows_bound, config)?,
+            mul(
+                "512*(ploidy+1)*site_summary_rows_bound",
+                mul(
+                    "512*(ploidy+1)",
+                    512,
+                    add("ploidy+1", ploidy, 1, config)?,
                     config,
                 )?,
+                site_summary_rows_bound,
                 config,
             )?,
             truth_bound,

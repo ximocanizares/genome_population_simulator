@@ -24,6 +24,9 @@ use crate::f5_admission::{
     InputRole, LedgerCharge, LedgerLimits, OperationCost, OutputReservation, PhysicalInputIdentity,
     WorkingMemoryPeak,
 };
+use crate::f5_preflight::{
+    F5_HARD_OPERATION_LIMIT, F5_HARD_OUTPUT_LIMIT, F5_HARD_WORKING_MEMORY_LIMIT,
+};
 use crate::f5_profile::{F5Profile, load_f5_profile_under_budget};
 use crate::haplotype::{HaplotypePhase, Ploidy};
 use crate::identity::{
@@ -527,7 +530,7 @@ fn admit_f5_bootstrap(
     let working_limit = declared
         .max_working_memory_bytes
         .as_ref()
-        .map_or(1_u64 << 30, |limit| *limit.value());
+        .map_or(F5_HARD_WORKING_MEMORY_LIMIT, |limit| *limit.value());
     if bootstrap_bytes > working_limit {
         return Err(Diagnostic::f5_resource(
             declared.scenario_id.value(),
@@ -1099,18 +1102,22 @@ fn profile_ledger_after_bootstrap(
     scenario: &DeclaredF5Scenario,
     documents: &F5BootstrapDocuments,
 ) -> Result<F5ResourceLedger, Diagnostic> {
+    // Los tres predeterminados son exactamente los tres topes duros: no se
+    // reescriben aquí como literales porque una copia silenciosa es la que
+    // sobrevive a un cambio de contrato y deja el bootstrap con el techo
+    // viejo mientras el resto del flujo usa el nuevo.
     let operation_limit = scenario
         .max_operation_units
         .as_ref()
-        .map_or(1_u64 << 28, |limit| *limit.value());
+        .map_or(F5_HARD_OPERATION_LIMIT, |limit| *limit.value());
     let working_memory_limit = scenario
         .max_working_memory_bytes
         .as_ref()
-        .map_or(1_u64 << 30, |limit| *limit.value());
+        .map_or(F5_HARD_WORKING_MEMORY_LIMIT, |limit| *limit.value());
     let output_limit = scenario
         .max_output_bytes
         .as_ref()
-        .map_or(1_u64 << 31, |limit| *limit.value());
+        .map_or(F5_HARD_OUTPUT_LIMIT, |limit| *limit.value());
     let mut ledger = F5ResourceLedger::new(LedgerLimits::new(
         OperationCost::new(operation_limit),
         WorkingMemoryPeak::new(working_memory_limit),

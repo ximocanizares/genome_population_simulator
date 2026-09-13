@@ -1668,7 +1668,7 @@ fn every_attempt_draws_from_its_own_swap_scope() {
 /// con `L-1` bins de un par de bases, el recuento de visitas elementales del
 /// bucle debe ser **el mismo**. Y comprueba además que se mantiene dentro de un
 /// múltiplo pequeño y declarado del presupuesto `H*S_bound² + Q*S_bound` que
-/// `f5-resource-accounting-v8` concede por bloque×subpoblación×intento.
+/// `f5-resource-accounting-v9` concede por bloque×subpoblación×intento.
 #[test]
 fn the_proposal_loop_cost_does_not_depend_on_the_bin_count() {
     /// Cota declarada de la **forma** del coste por propuesta: una constante

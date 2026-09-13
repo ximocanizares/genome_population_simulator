@@ -2155,7 +2155,7 @@ fn peak_bytes<T>(body: impl FnOnce() -> T) -> (T, u64) {
 }
 
 /// La clausura **no** añade una tercera pieza fuera de
-/// `f5-resource-accounting-v8` junto al oráculo y la publicación: su pico cabe
+/// `f5-resource-accounting-v9` junto al oráculo y la publicación: su pico cabe
 /// dentro del presupuesto de memoria de trabajo que la admisión selló.
 ///
 /// Lo que el pico sigue es el **mayor registro publicado**, porque la

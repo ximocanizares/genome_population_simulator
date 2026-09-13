@@ -16,6 +16,9 @@ use crate::configuration::{
     DeclaredVcfOutput, ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
 };
 use crate::diagnostics::Diagnostic;
+use crate::f5_preflight::{
+    F5_HARD_OPERATION_LIMIT, F5_HARD_OUTPUT_LIMIT, F5_HARD_WORKING_MEMORY_LIMIT,
+};
 
 pub fn admit_toml_header(
     path: &Path,
@@ -416,23 +419,27 @@ pub fn parse_declared_f5_scenario(
         max_haplotype_cells.as_ref(),
         67_108_864,
     )?;
+    // Los tres presupuestos citan el tope duro, no una copia decimal: es la
+    // misma cifra que el preflight aplica por omisión y que los tres esquemas
+    // declaran como `maximum`. Reducir es legítimo; ampliar por encima del
+    // techo es configuración inválida (DTC-089).
     require_limit(
         &admitted,
         "f5.max_operation_units",
         max_operation_units.as_ref(),
-        268_435_456,
+        F5_HARD_OPERATION_LIMIT,
     )?;
     require_limit(
         &admitted,
         "f5.max_working_memory_bytes",
         max_working_memory_bytes.as_ref(),
-        1_073_741_824,
+        F5_HARD_WORKING_MEMORY_LIMIT,
     )?;
     require_limit(
         &admitted,
         "f5.max_output_bytes",
         max_output_bytes.as_ref(),
-        2_147_483_648,
+        F5_HARD_OUTPUT_LIMIT,
     )?;
     let block_count = optional_located_u64(&admitted, f5, "block_count")?;
     let covered_bases = optional_located_u64(&admitted, f5, "covered_bases")?;

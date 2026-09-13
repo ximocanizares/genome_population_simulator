@@ -141,7 +141,7 @@
 //!
 //! La memoria añadida es la caché de parejas: 32 bytes por pareja intrabloque,
 //! más los veredictos canónicos que la guarda de cierre recoge.
-//! `f5-resource-accounting-v8` presupuesta `192*S*(S-1)/2` bytes por
+//! `f5-resource-accounting-v9` presupuesta `192*S*(S-1)/2` bytes por
 //! bloque×subpoblación para ese fin, de modo que la caché cabe con holgura en
 //! lo ya admitido y no reabre la contabilidad sellada.
 //!
@@ -233,7 +233,7 @@ pub struct F5AttemptRecord {
     pair_updates: u64,
     /// Visitas elementales del bucle de propuestas: parejas rehechas, bins
     /// reajustados, marginales recorridas y bytes de fila rehasheados. Es lo
-    /// que `f5-resource-accounting-v8` presupuesta como `Q*S_bound`.
+    /// que `f5-resource-accounting-v9` presupuesta como `Q*S_bound`.
     loop_operations: u64,
     max_rebuilds: u64,
     max_rebuild_visits: u64,
@@ -366,7 +366,7 @@ impl F5AttemptRecord {
 
     /// Visitas elementales del bucle de propuestas.
     ///
-    /// Es el término que `f5-resource-accounting-v8` presupuesta como
+    /// Es el término que `f5-resource-accounting-v9` presupuesta como
     /// `Q*S_bound`: parejas rehechas, bins reajustados, marginales recorridas
     /// y bytes de fila rehasheados. **No depende del número de bins del
     /// perfil**: un perfil con 255 bins y un bloque de dos sitios cuesta lo
@@ -1330,7 +1330,7 @@ enum ProposalOutcome {
 
 /// Estado de una pareja intrabloque dentro de la caché de puntuación.
 ///
-/// `f5-resource-accounting-v8` presupuesta `192*S*(S-1)/2` bytes de parejas por
+/// `f5-resource-accounting-v9` presupuesta `192*S*(S-1)/2` bytes de parejas por
 /// bloque×subpoblación; estos 32, más los 32 del veredicto canónico que la
 /// guarda de cierre recoge, caben holgadamente, y son los que permiten que una
 /// propuesta cueste `O(S)` en lugar de `O(H*S)`.
@@ -1429,7 +1429,7 @@ struct BlockSearchState<'a> {
     pair_updates: u64,
     /// Visitas elementales del bucle de propuestas: parejas rehechas, bins
     /// reajustados, marginales recorridas y bytes de fila rehasheados. Es lo
-    /// que `f5-resource-accounting-v8` presupuesta como `Q*S_bound`.
+    /// que `f5-resource-accounting-v9` presupuesta como `Q*S_bound`.
     loop_operations: u64,
     /// Veces que hubo que rehacer el máximo de `r²` y bins visitados al
     /// hacerlo. Separados de `loop_operations` porque su identidad
@@ -1617,7 +1617,7 @@ impl<'a> BlockSearchState<'a> {
     /// `bins_outside`, `max_r2_error` y `sum_r2_error` se mantienen por
     /// incrementos sobre los bins que cada propuesta toca; solo
     /// `max_marginal_error` recorre las `S` marginales, que es el término que
-    /// `f5-resource-accounting-v8` concede por propuesta.
+    /// `f5-resource-accounting-v9` concede por propuesta.
     fn tuple(&self) -> ScoreTuple {
         let mut max_marginal_error = 0.0_f64;
         for (realized, target) in self.marginals.iter().zip(self.targets.iter()) {

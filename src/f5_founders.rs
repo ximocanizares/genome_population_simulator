@@ -2251,7 +2251,7 @@ impl F5FounderIdentities {
     /// colisión se detecte, de modo que el registro conserva una entrada por
     /// identidad derivada aunque su fila ya se haya escrito. Crece como
     /// `X + B*subpoblaciones*H + B*C_total`, que es el término dominante de
-    /// la fase fundadora, y `f5-resource-accounting-v8` lo presupuesta a 128
+    /// la fase fundadora, y `f5-resource-accounting-v9` lo presupuesta a 128
     /// bytes por entrada dentro de `final_formula_peak`.
     #[must_use]
     pub fn registered_identities(&self) -> usize {

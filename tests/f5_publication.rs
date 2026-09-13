@@ -1207,7 +1207,7 @@ fn the_published_preflight_carries_the_scalars_the_contract_enumerates() {
     let package = publish("preflight", &fixture);
     let effective = package.effective();
     let preflight = &effective["f5"]["resource_preflight"];
-    assert_eq!(preflight["algorithm"], json!("f5-resource-accounting-v8"));
+    assert_eq!(preflight["algorithm"], json!("f5-resource-accounting-v9"));
 
     // El FASTA del fixture: dos secuencias pobladas y una estéril, todas de
     // `span` bases. Ninguna cabecera cuenta como base procesada.
@@ -1257,11 +1257,11 @@ fn the_published_preflight_carries_the_scalars_the_contract_enumerates() {
 
     // Las tres cotas y sus tres límites duros.
     for (used, limit, hard) in [
-        ("operation_units", "operation_limit", 1_u64 << 28),
+        ("operation_units", "operation_limit", 1_u64 << 32),
         (
             "working_memory_bytes",
             "working_memory_limit_bytes",
-            1 << 30,
+            1 << 33,
         ),
         ("output_bytes", "output_limit_bytes", 1 << 31),
     ] {
@@ -1796,8 +1796,15 @@ fn an_exhausted_search_publishes_its_best_attempt_and_counters() {
 fn a_preflight_rejection_opens_no_destination() {
     // Dos rechazos de admisión de causas distintas: la geometría demostrada
     // inviable y el presupuesto excedido.
+    //
+    // El conteo de bloques del caso «over-budget» se escaló ×16 —4096→65536—
+    // cuando el techo de operaciones subió de 2^28 a 2^32 el 2026-09-13. Es el
+    // mismo factor que subió el techo, de modo que el fixture sigue en el mismo
+    // punto relativo: rechaza por `operation_units` en la fase
+    // `reference_and_mask_scan`, con 121 916 035 339 frente a 4 294 967 296.
+    // Con 4096 ya no excedía nada y la prueba no discriminaba.
     for (label, block_count, corrupt_digest, code, exit_code) in [
-        ("over-budget", 4096_u64, false, "GPS-RES-101", 2_u64),
+        ("over-budget", 65_536_u64, false, "GPS-RES-101", 2_u64),
         ("profile-digest", 2, true, "GPS-INPUT-002", 2),
     ] {
         let root = temporary(&format!("preflight-rejection-{label}"));
@@ -2164,7 +2171,7 @@ fn the_verification_peak_fits_the_sealed_budget_and_does_not_grow_with_the_block
 /// este hito declara: el oráculo queda fuera del flujo y su pico no entra en
 /// esta cuenta.
 ///
-/// **Lo que no cabe y por qué.** `f5-resource-accounting-v8` nunca modeló la
+/// **Lo que no cabe y por qué.** `f5-resource-accounting-v9` nunca modeló la
 /// construcción de los dos documentos: su `final_formula_peak` presupuesta el
 /// escritor por flujo de F5.4.1, que cumple con 0,2-0,4×. Lo que sobra aquí
 /// es el objeto `f5` del manifiesto más lo que la puerta obliga a

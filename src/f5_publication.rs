@@ -54,7 +54,7 @@
 //!
 //! ## El oráculo queda fuera de este flujo, y por qué se dice
 //!
-//! `f5-resource-accounting-v8` no reserva ni un byte para el oráculo, cuyo
+//! `f5-resource-accounting-v9` no reserva ni un byte para el oráculo, cuyo
 //! pico medido en F5.4.2 es del orden de 4,2 veces `working_memory_bytes`.
 //! F5.4.3 **no lo ejecuta**: [`publish_f5_success`] recibe el recuento MAN-70
 //! como una función que el llamador aporta, junto con la declaración que este

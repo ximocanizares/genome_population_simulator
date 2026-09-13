@@ -1079,7 +1079,20 @@ fn fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively() {
         compact.working_memory_bytes(),
         compact_final_formula.max(independent_scan_peak)
     );
-    assert_eq!(compact.output_bytes(), 1_306_624);
+    // Cota de salida v9 escrita término a término desde DTC-089, no copiada de
+    // la ejecución. El fixture tiene `B=1`, `N_pop=1`, `H=2`, `S_bound=2`,
+    // `founder_count=1`, `ploidy=2` —luego `C_total=2`, `K_bound=2`, `X=2` y
+    // `G_bound=2`—, 11 filas TSV y 30 elementos JSON. Lo que el cambio de
+    // máscara mide —que solo se mueven los términos de tramo— lo sigue
+    // afirmando la igualdad `fragmented == compact` de más abajo; este literal
+    // solo fija la fórmula, y v8 daba aquí 1 306 624 porque contaba
+    // `X*(4096+2048*K_bound)` en vez de `4096*X + 2048*C_total*K_bound`.
+    let truth_bound = 65_536 + 4_096 * 2 + 2_048 * (2 * 2) + 4_096 * 2;
+    let row_envelopes = 1_024 * 11 + 2 * 2 + 1_024 * 30 + 512 * (2 + 1) * 2;
+    assert_eq!(
+        compact.output_bytes(),
+        1_048_576 + row_envelopes + truth_bound
+    );
     assert_eq!(
         fragmented.operation_units() - compact.operation_units(),
         4_095 * (1 + 2 + 2 + 1 + 3) + fragmented.mask_bytes_processed()
@@ -1529,10 +1542,18 @@ fn site_bound_covers_one_and_the_inclusive_4096_boundary() {
         "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
         "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t4095\t0.5\t0.05\n",
     );
+    // El presupuesto de memoria se **declara**, no se hereda del tope duro.
+    // Con `S=4096` el fixture reserva 1 611 348 544 B en el escaneo de la
+    // referencia: eso excedía el tope antiguo de 2^30 por sí solo, de modo que
+    // la prueba dependía en silencio de la magnitud del predeterminado y murió
+    // al subirlo a 2^33. El 4096 **no** se toca —es la frontera inclusiva de
+    // `site_bound_per_block` que esta prueba fija, y escalarla la destruiría—;
+    // lo que se fija es la cota que debe rechazar. Declarar menos es legítimo
+    // (DTC-089) y deja la prueba inmune a futuros cambios de techo.
     replace_scenario(
         &root,
         "max_haplotype_cells = 16",
-        "max_haplotype_cells = 8192",
+        "max_haplotype_cells = 8192\nmax_working_memory_bytes = 1073741824",
     );
     let error = load_and_validate_f5_config(&general)
         .expect_err("the independent global memory bound remains applicable");
@@ -1544,6 +1565,221 @@ fn site_bound_covers_one_and_the_inclusive_4096_boundary() {
             .contains("site_bound_per_block supera 4096")
     );
     fs::remove_dir_all(root).expect("cleanup");
+}
+
+/// Reescribe la referencia con `sequence_count` secuencias elegibles idénticas.
+///
+/// La geometría de cada secuencia no cambia: solo cambia cuántas hay, que es la
+/// única variable que estas pruebas quieren mover.
+fn replace_reference_with_uniform_sequences(root: &Path, sequence_count: usize, bases: usize) {
+    let fasta_path = root.join("authoring/references/ref.fa");
+    let mut fasta = fs::File::create(&fasta_path).expect("multi-sequence reference");
+    let mut digest = Sha256::new();
+    for ordinal in 0..sequence_count {
+        let record = format!(">seq{ordinal:04}\n{}\n", "A".repeat(bases));
+        fasta.write_all(record.as_bytes()).expect("sequence record");
+        digest.update(record.as_bytes());
+    }
+    drop(fasta);
+    replace_reference_digest(root, format!("{:x}", digest.finalize()));
+}
+
+/// Sustituye la ploidía declarada conservando la anchura física de la línea.
+fn replace_general_ploidy(root: &Path, ploidy: u64) {
+    let path = root.join("authoring/general.toml");
+    let source = fs::read_to_string(&path).expect("general source");
+    assert!(
+        source.contains("ploidy = 2\n"),
+        "falta la ploidía declarada"
+    );
+    assert!(
+        (1..=9).contains(&ploidy),
+        "el fixture conserva un solo dígito para no mover general_toml_bytes"
+    );
+    fs::write(
+        path,
+        source.replace("ploidy = 2\n", &format!("ploidy = {ploidy}\n")),
+    )
+    .expect("general rewrite");
+}
+
+/// `truth_bound` cobra cada SNP **una vez por copia**, no una por copia y
+/// secuencia.
+///
+/// Existe una `haplotype_copy` por copia y secuencia poblada —de ahí `X`—, pero
+/// esa copia solo lleva los sitios de los bloques colocados en **su** secuencia.
+/// Sumando todas las secuencias de una misma copia-de-individuo se recorren como
+/// máximo los `K_bound` sitios del escenario una sola vez, de modo que las
+/// incidencias SNP publicadas están acotadas por `C_total*K_bound`. Añadir una
+/// secuencia solo puede añadir **registros de copia**, nunca incidencias nuevas:
+/// por eso el crecimiento correcto es `4096*C_total` por secuencia.
+///
+/// **Discrimina.** v8 cobraba `X*(4096+2048*K_bound)` y habría hecho crecer la
+/// cota en `(4096+2048*K_bound)*C_total = 73 728` por secuencia con este
+/// fixture, nueve veces el crecimiento correcto de 8 192.
+#[test]
+fn the_truth_bound_charges_each_snp_once_per_copy_not_once_per_sequence() {
+    let bound_for = |sequence_count: usize| -> (u64, u64) {
+        let root = temporary(&format!("truth-multiplicity-{sequence_count}"));
+        fs::create_dir_all(&root).expect("root");
+        let general = configuration(&root, None, "", &"A".repeat(64));
+        replace_scenario(&root, "block_count = 1", "block_count = 8");
+        replace_reference_with_uniform_sequences(&root, sequence_count, 64);
+        let config = load_and_validate_f5_config(&general).expect("configuración admisible");
+        let admitted =
+            preflight_f5_resources(&config, F5OtherResources::default()).expect("preflight");
+        let measured = (admitted.output_bytes(), admitted.site_bound_per_block());
+        fs::remove_dir_all(root).expect("cleanup");
+        measured
+    };
+
+    let (one_sequence, site_bound) = bound_for(1);
+    let (four_sequences, site_bound_again) = bound_for(4);
+    // Control positivo: el fixture tiene geometría real, no degenerada. Sin
+    // esto, `S_bound = 0` haría coincidir la cuenta correcta y la incorrecta.
+    assert_eq!(site_bound, 2, "S_bound = 1 + (L_max-1)/gap_min = 1 + 1/1");
+    assert_eq!(
+        site_bound, site_bound_again,
+        "la geometría no puede moverse"
+    );
+    let k_bound = 8 * site_bound;
+    assert_eq!(k_bound, 16, "K_bound = B*S_bound");
+
+    // `C_total = founder_count * ploidy` con `founder_count = 1` y ploidía 2.
+    let c_total = 2;
+    assert_eq!(
+        four_sequences - one_sequence,
+        4_096 * c_total * 3,
+        "tres secuencias más solo añaden tres juegos de registros de copia"
+    );
+    assert_ne!(
+        four_sequences - one_sequence,
+        (4_096 + 2_048 * k_bound) * c_total * 3,
+        "el crecimiento de v8 tiene que haber desaparecido"
+    );
+}
+
+/// El sobre de la fila de `f5-haplotypes.tsv` **sigue a `S_bound`**.
+///
+/// Esa fila lleva `alleles` con exactamente `S` caracteres (contrato
+/// `f5-tsv-v1`), de modo que ningún sobre constante puede acotarla: su peor caso
+/// contractual es `3*64 + 20 + 24 + 5 TAB + 1 LF + S_bound = 242 + S_bound`, que
+/// con `S_bound = 4096` vale 4 338 B y desborda el sobre de 4 096 de v8. v9 le
+/// concede `1024 + S_bound`.
+///
+/// **Discrimina.** Se mueve solo `H`, que es la única dimensión que multiplica
+/// filas haplotípicas sin tocar la verdad ni los resúmenes por sitio. Bajo v9 el
+/// crecimiento por rango haplotípico depende de `S_bound`; bajo v8 valía
+/// `4096 + 2*4096 = 12 288` para cualquier `S_bound`, de modo que las dos
+/// diferencias habrían sido **iguales** y la última aserción moriría.
+#[test]
+fn the_haplotype_row_envelope_tracks_the_site_bound() {
+    let bound_for = |length_max: usize, haplotypes: usize| -> u64 {
+        let root = temporary(&format!("haplotype-row-{length_max}-{haplotypes}"));
+        fs::create_dir_all(&root).expect("root");
+        let weights = (0..haplotypes)
+            .map(|rank| format!("{rank}\t{}\n", 1.0 / haplotypes as f64))
+            .collect::<String>();
+        let general = custom_configuration(
+            &root,
+            // Con `S_bound = 4096` la fase de escaneo reserva 1 609 MiB por las
+            // parejas de sitios: el presupuesto se **declara**, no se hereda del
+            // tope duro, que no se toca.
+            "max_working_memory_bytes = 2147483648\n",
+            &"A".repeat(2 * length_max),
+            &format!("length_min_bp\tlength_max_bp\tweight\n{length_max}\t{length_max}\t1\n"),
+            &format!("haplotype_rank\tweight\n{weights}"),
+            &format!(
+                "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t{}\t0.5\t0.05\n",
+                length_max - 1
+            ),
+        );
+        replace_scenario(
+            &root,
+            "max_haplotype_cells = 16",
+            "max_haplotype_cells = 16384",
+        );
+        let config = load_and_validate_f5_config(&general).expect("configuración admisible");
+        let admitted =
+            preflight_f5_resources(&config, F5OtherResources::default()).expect("preflight");
+        assert_eq!(
+            admitted.site_bound_per_block(),
+            length_max as u64,
+            "con gap_min = 1 el S_bound es exactamente L_max"
+        );
+        let bytes = admitted.output_bytes();
+        fs::remove_dir_all(root).expect("cleanup");
+        bytes
+    };
+
+    // Un rango haplotípico más añade, con `B = N_pop = 1`: una fila TSV (1024),
+    // su ancho de alelos (`S_bound`), dos elementos JSON de rangos candidatos y
+    // seleccionados (2*1024) y dos valores de normalización (2*1024).
+    let per_rank = |site_bound: u64| 1_024 + site_bound + 2 * 1_024 + 2 * 1_024;
+    let narrow = bound_for(2, 3) - bound_for(2, 2);
+    let wide = bound_for(6, 3) - bound_for(6, 2);
+    assert_eq!(narrow, per_rank(2));
+    assert_eq!(wide, per_rank(6));
+    assert_eq!(
+        wide - narrow,
+        6 - 2,
+        "el sobre de la fila haplotípica tiene que crecer con S_bound"
+    );
+
+    // La frontera contractual: con `S_bound = 4096` la fila publicada mide hasta
+    // `242 + 4096 = 4338` bytes y el sobre constante de v8 le concedía 4096, es
+    // decir **menos** de lo que el contrato permite publicar. v9 le concede
+    // `1024 + 4096 = 5120`, que la cubre con margen 1,18×.
+    let maximum = bound_for(4_096, 3) - bound_for(4_096, 2);
+    assert_eq!(maximum, per_rank(4_096));
+    let widest_published_row = 3 * 64 + 20 + 24 + 5 + 1 + 4_096;
+    assert_eq!(widest_published_row, 4_338);
+    assert!(
+        1_024 + 4_096 >= widest_published_row,
+        "el sobre v9 de la fila haplotípica tiene que cubrir su ancho contractual"
+    );
+    assert!(
+        4_096 < widest_published_row,
+        "control: el sobre constante de v8 no llegaba, que es el defecto corregido"
+    );
+}
+
+/// El sobre del resumen por sitio **sigue a la ploidía declarada**.
+///
+/// El resumen por sitio publica siete matrices de dosis de `ploidy+1` entradas,
+/// de modo que su tamaño crece con la ploidía: 1 722 B con ploidía 2 y 4 354 B
+/// con ploidía 10 en el peor caso contractual, que desborda el sobre de 4 096 de
+/// v8. v9 le concede `1024 + 512*(ploidy+1)`.
+///
+/// **Discrimina.** Al subir la ploidía de 2 a 4 la cota v9 crece exactamente
+/// 20 480 B y la v8 habría crecido 24 576: la aserción muere contra v8.
+#[test]
+fn the_site_summary_envelope_tracks_the_declared_ploidy() {
+    let bound_for = |ploidy: u64| -> u64 {
+        let root = temporary(&format!("site-summary-ploidy-{ploidy}"));
+        fs::create_dir_all(&root).expect("root");
+        let general = configuration(&root, None, "", "AA");
+        replace_general_ploidy(&root, ploidy);
+        let config = load_and_validate_f5_config(&general).expect("configuración admisible");
+        let admitted =
+            preflight_f5_resources(&config, F5OtherResources::default()).expect("preflight");
+        assert_eq!(admitted.site_bound_per_block(), 2);
+        let bytes = admitted.output_bytes();
+        fs::remove_dir_all(root).expect("cleanup");
+        bytes
+    };
+
+    // `B = N_pop = founder_count = sequence_count = 1`, `S_bound = K_bound = 2`.
+    // Pasar de ploidía 2 a 4 duplica `C_total` de 2 a 4 y mueve cuatro términos:
+    // las filas de `f5-founders.tsv` (`1024*B*ΔC_total`), el sobre del resumen
+    // por sitio (`512*Δploidy*B*N_pop*S_bound`), los registros de copia
+    // (`4096*ΔC_total*sequence_count`) y las incidencias SNP
+    // (`2048*ΔC_total*K_bound`).
+    let delta_c_total = 2;
+    let expected =
+        1_024 * delta_c_total + 512 * 2 * 2 + 4_096 * delta_c_total + 2_048 * delta_c_total * 2;
+    assert_eq!(expected, 20_480);
+    assert_eq!(bound_for(4) - bound_for(2), expected);
 }
 
 #[cfg(target_os = "linux")]
@@ -2210,16 +2446,23 @@ fn block_length_plan_binds_same_profile_preflights_to_the_declared_objective() {
 
 #[test]
 fn wide_literal_length_support_is_rejected_by_preflight_before_enumeration() {
+    // El soporte de longitudes se escaló ×16 —2^27+1 → 2^31+1— cuando el techo
+    // de operaciones subió de 2^28 a 2^32 el 2026-09-13, junto con el gap y el
+    // bin de LD para que el perfil siga siendo coherente. La propiedad es la
+    // misma: la cardinalidad del soporte es tal que **dos pasadas literales**
+    // valen exactamente el techo, de modo que el resto de cargas lo excede y el
+    // preflight rechaza antes de enumerar. Verificado que discrimina: con el
+    // perfil coherente a la mitad, `expect_err` muere porque ya no hay rechazo.
     let root = temporary("wide-length-support");
     fs::create_dir_all(&root).expect("root");
     let general = custom_configuration_with_gap(
         &root,
         "",
         "AAA",
-        "length_min_bp\tlength_max_bp\tweight\n2\t134217729\t1\n",
-        "gap_min_bp\tgap_max_bp\tweight\n134217729\t134217729\t1\n",
+        "length_min_bp\tlength_max_bp\tweight\n2\t2147483649\t1\n",
+        "gap_min_bp\tgap_max_bp\tweight\n2147483649\t2147483649\t1\n",
         "haplotype_rank\tweight\n0\t0.5\n1\t0.5\n",
-        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t134217728\t0.5\t0.05\n",
+        "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t2147483648\t0.5\t0.05\n",
     );
     let error = load_and_validate_f5_config(&general)
         .expect_err("the literal two-pass support cannot exceed the operation budget");
@@ -2361,7 +2604,7 @@ fn public_v8_preflight_serializes_gap_terms_and_validates_both_contracts() {
         preflight.algorithm(),
         genome_population_simulator::f5_admission::F5_RESOURCE_ACCOUNTING_ALGORITHM
     );
-    assert_eq!(preflight.algorithm(), "f5-resource-accounting-v8");
+    assert_eq!(preflight.algorithm(), "f5-resource-accounting-v9");
 
     let projection = preflight.to_contract_json();
     assert_f5_1_2_5_v8_contract_key_set(&projection);
@@ -3186,7 +3429,7 @@ fn sealed_projection_publishes_identities_and_phases_in_receipt_order() {
     let config = load_and_validate_f5_config(&general).expect("configuration");
     let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
         .expect("sealed admission");
-    assert_eq!(sealed.receipt().algorithm(), "f5-resource-accounting-v8");
+    assert_eq!(sealed.receipt().algorithm(), "f5-resource-accounting-v9");
 
     let projection = sealed.to_contract_json();
     assert_f5_1_2_5_v8_contract_key_set(&projection);
@@ -3315,7 +3558,7 @@ impl SealedProjectionOracle {
             json_rows_bound: 30,
             gap_selector_operation_units: 4,
             operation_limit,
-            working_memory_limit_bytes: 1 << 30,
+            working_memory_limit_bytes: 1 << 33,
             output_limit_bytes: 1 << 31,
         }
     }
@@ -3396,20 +3639,41 @@ impl SealedProjectionOracle {
         self.profile_retained_bytes() + 256 * (self.tract_count + self.retained_sequence_ids)
     }
 
+    /// `haplotype_rows_bound = B * N_pop * H`, las filas de
+    /// `f5-haplotypes.tsv`, únicas cuyo ancho crece con `S_bound`.
+    const fn haplotype_rows_bound(&self) -> u64 {
+        self.block_count * self.population_count * self.haplotype_count
+    }
+
+    /// `site_summary_rows_bound = B * N_pop * S_bound`, los resúmenes por
+    /// sitio, únicos cuyo ancho crece con la ploidía.
+    const fn site_summary_rows_bound(&self) -> u64 {
+        self.block_count * self.population_count * self.site_bound()
+    }
+
+    /// Los cuatro sobres por fila/elemento de v9.
+    fn row_envelopes(&self) -> u64 {
+        1_024 * self.tsv_rows_bound
+            + self.site_bound() * self.haplotype_rows_bound()
+            + 1_024 * self.json_rows_bound
+            + 512 * (self.ploidy + 1) * self.site_summary_rows_bound()
+    }
+
     /// Envolvente de salida ya conocida antes de cerrar la fórmula final.
     fn known_output_bytes(&self) -> u64 {
-        1_048_576
-            + 4_096 * (self.tsv_rows_bound + self.json_rows_bound)
-            + 65_536
-            + 4_096 * self.founder_site_bound()
+        1_048_576 + self.row_envelopes() + 65_536 + 4_096 * self.founder_site_bound()
     }
 
     /// Envolvente final de salida, con la cota de verdad completa.
+    ///
+    /// `truth_bound` v9 cuenta `X` registros de copia y `C_total * K_bound`
+    /// incidencias SNP: una copia solo lleva los sitios de **su** secuencia.
     fn output_bytes(&self) -> u64 {
         let truth = 65_536
-            + self.copy_sequences() * (4_096 + 2_048 * self.site_bound_total())
+            + 4_096 * self.copy_sequences()
+            + 2_048 * self.founder_copies() * self.site_bound_total()
             + 4_096 * self.founder_site_bound();
-        1_048_576 + 4_096 * (self.tsv_rows_bound + self.json_rows_bound) + truth
+        1_048_576 + self.row_envelopes() + truth
     }
 
     /// Reconstruye el objeto `resource_preflight` v8 completo.
@@ -3632,7 +3896,7 @@ impl SealedProjectionOracle {
         }));
 
         serde_json::json!({
-            "algorithm": "f5-resource-accounting-v8",
+            "algorithm": "f5-resource-accounting-v9",
             "input_identities": identities,
             "phases": phases,
             "reference_bases_processed": self.reference_bases,

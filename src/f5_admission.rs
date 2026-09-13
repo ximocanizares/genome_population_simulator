@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::diagnostics::Diagnostic;
 
-pub const F5_RESOURCE_ACCOUNTING_ALGORITHM: &str = "f5-resource-accounting-v8";
+pub const F5_RESOURCE_ACCOUNTING_ALGORITHM: &str = "f5-resource-accounting-v9";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum InputRole {

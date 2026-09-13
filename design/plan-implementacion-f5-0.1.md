@@ -188,7 +188,7 @@ identificador del índice de copia.
     retenidos, filas de
     perfil/normalización/TSV/JSON, aportaciones ajenas F5, cada término y
     overflow de las fórmulas,
-    fronteras inclusivas 2^28 unidades/2^30 bytes de trabajo/2^31 bytes de
+    fronteras inclusivas 2^32 unidades/2^33 bytes de trabajo/2^31 bytes de
     salida —incluidas copias/configuración, salidas activadas no F5, manifiesto
     y `truth.jsonl`—, límites menores declarados,
     cero consulta de RAM/CPU o perfil externo, cero consumo RNG y cero destino.
@@ -3535,3 +3535,390 @@ identificador del índice de copia.
 | F5.4 | siete TSV, verdad fundadora v2 y fallo inequívoco | reconstrucción `truth` por población/locus, MAN-70 solo desde verdad, DTC-049 y JSON Schema | procedencia parcial o autorreferente |
 | F5.5 | paquete inmutable auditado | mutación posterior prohibida | historia implícita |
 | F5.6 | interfaz y cierre | paridad, gates y auditoría | contrato paralelo o alcance filtrado |
+
+## 11. Cambio de contrato posterior al cierre — techos de recursos (2026-09-13)
+
+F5 quedó cerrado tras su revisión de cierre y **ninguna de sus decisiones se
+reabre**. Lo que cambia aquí es un contrato posterior y acotado, por decisión
+expresa del usuario: los techos de `max_operation_units` y
+`max_working_memory_bytes` suben de 2^28 a **2^32** unidades y de 2^30 a
+**2^33** bytes. El techo de bytes publicados sigue en **2^31**.
+
+### 11.1. Medición que lo motiva
+
+La cota de operaciones no acotaba la biología: acotaba el **tamaño del genoma**,
+porque el modelo de coste carga `2*fasta_bytes + reference_bases` solo por
+recorrer la referencia y la máscara.
+
+| Referencia | Bytes | Bases | Coste mínimo del escaneo | Frente a 2^28 |
+|---|---|---|---|---|
+| Tomate 10 %, 2 cromosomas | 10,2 MB | — | 30,4 M | 0,11× |
+| **Tomate 10 % completo** | **79 230 297** | **78 252 003** | **236 712 597** | **0,88×** |
+| Tomate completo | 795 562 190 | — | 2 374 M | **8,8×** |
+
+El 88 % del techo se consumía leyendo el fichero. Un `run` de 100 individuos
+sobre el tomate reducido se rechazaba en la fase `reference_and_mask_scan`, con
+la reserva prospectiva del FASTA y **sin llegar a abrirlo**.
+
+### 11.2. Decisión sobre el predeterminado: sube con el máximo
+
+Hoy el predeterminado **es** el máximo: una sola constante sirve para los dos
+papeles. Separarlos exigiría una segunda constante, un segundo número visible
+en los esquemas y una regla nueva en DTC-089 que nadie pidió. Y no compraría
+protección: el techo no reserva nada, es un dispositivo de **rechazo** que
+aborta antes de abrir la referencia, de modo que un predeterminado bajo no
+abarata una ejecución cara —solo adelanta su negativa—, y la negativa medida se
+disparaba al **leer el fichero**, no al hacer biología. Un predeterminado bajo
+obligaría además a declarar el presupuesto en todo escenario que trabaje sobre
+un genoma real, que es exactamente la fricción que esta corrección elimina.
+Quien quiera el rechazo temprano conserva la capacidad de pedirlo: basta
+declarar `max_operation_units = 268435456`, y se demuestra abajo que funciona.
+
+### 11.3. La prohibición de detección se mantiene, y por qué
+
+`especificaciones-0.1.md` sigue prohibiendo «perfiles externos, RAM detectada
+ni DTPD-115 para admitir», y la prohibición **no se toca**. La razón es de
+validabilidad: el presupuesto se publica en `resource_preflight` del efectivo y
+del manifiesto, y ACE-117 exige que un oráculo independiente **recalcule** las
+cotas. Si el techo dependiera del equipo, el validador dejaría de poder validar
+y la misma configuración admitiría en una máquina y no en otra. Verificado con
+una búsqueda negativa sobre `src/` —`sysinfo`, `meminfo`, `MemTotal`,
+`total_memory`, `available_memory`, `sysconf`, `sysctl`, `getrlimit`,
+`num_cpus`, `available_parallelism`, `cgroup`, `memory.max`, `DTPD-115`— con
+dos controles positivos: el mismo patrón inyectado como canario **sí** aparece,
+y el mismo corpus **sí** devuelve las consultas al sistema operativo que F5
+legítimamente hace (`getrandom`, apertura de ficheros). La única coincidencia
+es `src/vcf_publication.rs:819`, dentro de `#[cfg(test)] mod tests`: mide el
+`VmHWM` del **propio proceso de prueba** para una aserción del escritor VCF de
+F2/F3 y no interviene en ninguna admisión.
+
+### 11.4. Dónde vivía el literal
+
+Ocho sitios, tres de ellos **no** previstos en el encargo y descubiertos al
+ampliar la búsqueda a la ortografía con separadores (`268_435_456`):
+
+| Sitio | Papel | Qué era |
+|---|---|---|
+| `src/f5_preflight.rs` | canónico | `F5_HARD_OPERATION_LIMIT` / `F5_HARD_WORKING_MEMORY_LIMIT` |
+| `src/application.rs` (`profile_ledger_after_bootstrap`) | **copia** | `1_u64 << 28` / `1_u64 << 30` / `1_u64 << 31` |
+| `src/application.rs` (`admit_f5_bootstrap`) | **copia** | `1_u64 << 30` |
+| `src/adapters.rs` (`parse_declared_f5_scenario`) | **copia** | `268_435_456` / `1_073_741_824` / `2_147_483_648` |
+| `schemas/config-f5-scenario-v1.schema.json` | contrato | `maximum` |
+| `schemas/effective-config-v5.schema.json` | contrato | `maximum` |
+| `schemas/f5-failure-v1.schema.json` | contrato | `maximum` |
+| `ui/f5_editor.py` (`F5_INTEGER_BOUNDS`) | contrato | cota de la UI |
+
+Las cuatro copias de Rust se sustituyen por la constante: una copia decimal
+silenciosa es la que sobrevive a un cambio de contrato. En particular la de
+`adapters.rs` habría dejado la admisión rechazando por 2^28 mientras el
+preflight ya admitía por 2^32.
+
+Para que la deriva no pueda repetirse hay ahora un **juez**: nadie ataba la
+constante de Rust a ningún esquema —la UI solo estaba atada a
+`config-f5-scenario-v1`—.
+`the_three_hard_budget_ceilings_are_the_three_schema_maxima` compara los tres
+topes duros contra los nueve `minimum`/`maximum` de los tres esquemas, con
+control positivo de que las nueve comparaciones ocurrieron.
+
+### 11.5. Demostración sobre el tomate de 79 MB
+
+Escenario real: 100 individuos, ploidía 2, 170 bloques × 2 sitios = **340 SNP**,
+sobre `tomato-sl4-retain-10pct.fa` (79 230 297 B, 78 252 003 bases, 13
+secuencias). El paquete publica y el manifiesto declara:
+
+```
+algorithm                  = f5-resource-accounting-v8
+fasta_bytes_processed      = 79230297
+reference_bases_processed  = 78252003
+tract_count                = 59
+operation_units            = 510329658   (1,90x el techo viejo; 11,9 % del nuevo)
+operation_limit            = 4294967296
+working_memory_bytes       = 7897938     (0,09 % del techo nuevo)
+working_memory_limit_bytes = 8589934592
+output_bytes               = 2118623232
+output_limit_bytes         = 2147483648
+```
+
+Mismo escenario, declarando el techo viejo, rechaza en 0,07 s **sin abrir la
+referencia**; sin declararlo, admite en 14 s:
+
+```
+max_operation_units = 268435456 -> GPS-RES-101 accumulated="272532099"
+   limit="268435456" phase="reference_and_mask_scan" role="reference_fasta"   EXIT=2
+sin declarar (2^32)             -> EXIT=0
+max_operation_units = 1         -> GPS-RES-101 accumulated="3400" limit="1"
+   phase="bootstrap"                                                          EXIT=2
+max_operation_units = 4294967297 -> GPS-CONF-101 "debe estar en 1..=4294967296" EXIT=2
+max_working_memory_bytes = 8589934592  -> EXIT=0
+max_working_memory_bytes = 8589934593  -> GPS-CONF-101 "debe estar en 1..=8589934592"
+```
+
+**Límite que ahora manda, y no se toca.** Con 100 individuos, el techo de
+**bytes publicados** (2^31, deliberadamente intacto) es el que acota: la cota de
+salida son 4096 B por fila y admite unas 524 288 filas, de modo que 100
+individuos × 1000 SNP la exceden (5 850 284 032 B medidos, 2,7× el techo) y 100
+× 340 caben con el 98,7 % ocupado. Subir operaciones y memoria **no** hace
+pasar un `run` de 1000 SNP con 100 individuos; lo que bloquea ya no es el
+genoma sino el volumen publicado, que es lo que esa cota debe acotar. Queda
+declarado, no resuelto.
+
+### 11.6. Pruebas nuevas y su discriminación
+
+Cada una se verificó **matando** la variante correspondiente sobre copias de
+respaldo fuera de git, comprobando primero que la mutación mutó:
+
+| Mutante | Prueba que muere |
+|---|---|
+| `F5_HARD_OPERATION_LIMIT` vuelve a `1 << 28` | juez esquema↔constante, y `...admit_their_value...` |
+| `config-f5-scenario-v1` vuelve a `268435456` | juez esquema↔constante |
+| `effective-config-v5` vuelve a `268435456` | juez esquema↔constante |
+| `f5-failure-v1` vuelve a `268435456` | juez esquema↔constante |
+| `config-f5-scenario-v1` vuelve a `268435456` | fronteras por el validador **externo** de Python |
+| `require_limit` deja de acotar por arriba | `...reject_the_next_one` |
+| `require_limit` vuelve a `268_435_456` | «el techo exacto debe admitirse» |
+
+`the_three_budget_ceilings_admit_their_value_and_reject_the_next_one` cubre las
+tres dimensiones en los cuatro puntos que importan: reducir a 1 admite, el
+techo exacto admite, techo+1 rechaza **citando el rango**, y 0 rechaza.
+
+### 11.7. Fixtures de frontera reabiertos, y los dos que no
+
+El cambio de techo reabrió **tres** fronteras, todas por la misma causa:
+estaban dimensionadas contra la magnitud del predeterminado en vez de contra
+una cota declarada. Ninguna se «arregló para que pase»: de cada una se
+demuestra que sigue discriminando.
+
+| Fixture | Qué hacía | Resolución |
+|---|---|---|
+| `wide_literal_length_support_is_rejected_by_preflight_before_enumeration` | soporte de longitudes cuyas **dos pasadas literales** valen el techo | escalado ×16 coherente —longitud, gap y bin de LD— de 2^27+1 a 2^31+1 |
+| `site_bound_covers_one_and_the_inclusive_4096_boundary` | con `S=4096` rechaza la **cota global de memoria**, no la regla de `site_bound` | el presupuesto se **declara** en 2^30; el 4096 no se toca |
+| `a_preflight_rejection_opens_no_destination` (caso `over-budget`) | un rechazo de presupuesto no abre destino | `block_count` escalado ×16, de 4096 a 65536 |
+
+El 4096 del segundo es la **frontera inclusiva contractual** de
+`site_bound_per_block` que esa prueba fija: escalarla habría destruido lo que
+prueba. Por eso ahí se declara la cota en vez de agrandar el fixture, que es
+además lo que deja la prueba inmune a cualquier cambio de techo futuro.
+Medición: ese fixture reserva 1 611 348 544 B en `reference_and_mask_scan`
+—por encima de 2^30, muy por debajo de 2^33—. El tercero rechaza por
+`operation_units` con 121 916 035 339 frente a 4 294 967 296.
+
+**Los dos fixtures de punto fijo de F5.1.2.4 no se reabrieron, y era
+previsible:** `fixed_width_bootstrap_memory_limit_is_inclusive_and_minus_one_stops_before_profile_and_rng`
+y el fixture productivo de `src/f5_layout.rs` declaran un límite **derivado del
+propio documento** con literal de anchura fija —seis dígitos y cuatro dígitos
+respectivamente—, no el tope duro. Un cambio de techo no los toca porque nunca
+dependieron del techo. Es el argumento a favor de la técnica, y es la misma
+receta que se aplica arriba al fixture de 4096.
+
+## 12. `f5-resource-accounting-v9`: la cota de salida deja de estar 6× alta (13 de septiembre de 2026)
+
+La corrección de techos de §11 dejó declarado, no resuelto, que el **límite de
+bytes publicados** era el que bloqueaba el caso objetivo del usuario: 100
+individuos diploides × 1000 SNP sobre las 13 secuencias del tomate reducido
+pedía 5 874 860 032 B contra un techo de 2 147 483 648. El techo de 2³¹ **no se
+toca**. Lo que se corrige es la cota, que estaba mal en dos sitios distintos.
+
+### 12.1. La premisa del encargo era falsa, y la medición lo demuestra
+
+El encargo pedía **estrechar los sobres por registro** porque parecían 6,5× y
+23× por encima de lo publicado. Derivados desde `truth-v2.schema.json` y desde
+los literales exactos de `src/f5_artifacts.rs`, no lo están:
+
+| Clase de registro | Peor caso derivado | Sobre | Margen |
+|---|---|---|---|
+| Por SNP dentro de una copia | **1 659 B** | 2 048 | **1,23×** |
+| Parte fija de `haplotype_copy` | 1 566 B | 4 096 | 2,62× |
+| `genotype`, ploidía 10 | **3 692 B** | 4 096 | **1,11×** |
+| Fila TSV más ancha (`f5-founders.tsv`) | 476 B | 1 024 | 2,15× |
+| Elemento JSON de ancho fijo (muestreo) | 419 B | 1 024 | 2,44× |
+
+**Los dos sobres que el encargo quería estrechar se quedan como están.** La
+apariencia de exceso venía de dos errores de lectura, y conviene dejarlos
+escritos porque cualquiera los repetiría:
+
+1. **Un SNP se publica tres veces en la misma copia** —modificación del
+   segmento, SNP vigente del fragmento e hito del historial—, cada una con su
+   procedencia completa. Los ~314 B que se midieron son **una** de las tres
+   vistas. El coste real por SNP, medido por regresión sobre los 240 registros
+   de copia de un paquete real, es **953,56 B**; la derivación desde el esquema
+   con esos mismos identificadores da **954**. Tres bytes de error sobre 240
+   registros;
+2. el genotipo no mide 180 B sino **710** con ploidía 2 e identificadores
+   cortos —derivado: 712—, y crece con la ploidía porque su lista `carriers`
+   tiene exactamente `ploidy` entradas.
+
+### 12.2. Defecto 1: la cota de verdad contaba cada SNP una vez por secuencia
+
+`truth_bound` reservaba `X*(4096+2048*K_bound)` con `X=C_total*sequence_count`.
+Hay una `haplotype_copy` por copia y secuencia poblada, pero esa copia solo
+lleva los sitios de los bloques colocados en **su** secuencia. Sumando todas las
+secuencias de una misma copia-de-individuo se recorren como máximo los
+`K_bound` sitios del escenario **una sola vez**, y el número de
+copias-de-individuo es `C_total`. Medido sobre un paquete real de 13 secuencias:
+
+```
+incidencias SNP publicadas                       2 028
+cota correcta   C_total*K_bound =  20*200 =      4 000   (holgura 1,97x)
+cota vigente v8 X*K_bound       = 260*200 =     52 000   (13x = sequence_count)
+```
+
+La corrección es `truth_bound = 65536 + 4096*X + 2048*C_total*K_bound +
+4096*G_bound`. **La demostración queda escrita junto a la fórmula en DTC-089**,
+no solo el resultado: sin ella alguien «restaura» el `X` creyendo que faltaba.
+
+### 12.3. Defecto 2: el sobre constante de 4096 no era cota superior de dos clases
+
+Al derivar el sobre por fila apareció lo contrario de lo que el encargo
+esperaba: **dos clases de registro desbordan el sobre constante**, porque su
+ancho depende de una dimensión declarada y no de una longitud fija.
+
+- **Fila de `f5-haplotypes.tsv`.** Su columna `alleles` tiene *exactamente* `S`
+  caracteres (contrato `f5-tsv-v1`) con `S_bound` hasta 4096. Peor caso
+  `242 + S_bound`, es decir **4 338 B**, contra un sobre de 4 096. El modelo se
+  verificó contra tres ejecuciones reales, exacto al byte: `S=10 → 82`,
+  `S=51 → 123`, y la parte constante es 2+30+30+1+3+6 con los identificadores
+  derivados del fixture;
+- **Resumen por sitio** de `initialization_summaries`. Publica **siete**
+  matrices de dosis de `ploidy+1` entradas. Medido: **1 095 B** con ploidía 2 y
+  **2 714 B** con ploidía 10, ambos con identificadores cortos; peor caso
+  contractual **4 354 B** con ploidía 10, contra el mismo sobre de 4 096.
+
+Los sobres nuevos, con su origen y su margen:
+
+| Sobre | Cubre | Peor caso | Margen |
+|---|---|---|---|
+| `1024` por fila TSV | 7 identificadores y un índice de `f5-founders.tsv` | 476 B | 2,15× |
+| `+ S_bound` por fila haplotípica | los `S` caracteres de `alleles`; los 1024 cubren sus 242 B constantes | 242+S | 4,23× sobre la parte constante |
+| `1024` por elemento JSON | el objeto de muestreo por bloque×subpoblación | 419 B | 2,44× |
+| `+ 512*(ploidy+1)` por resumen por sitio | `329*(ploidy+1)` B de las siete matrices de dosis; los 1024 cubren sus 735 B constantes | 1064+329·P | 1,47×–1,53× uniforme |
+
+`haplotype_rows_bound = B*N_pop*H` y `site_summary_rows_bound = B*N_pop*S_bound`
+**no son escalares publicados nuevos**: ya son sumandos de `tsv_rows_bound` y
+`json_rows_bound`, y se recomputan exactamente igual que ellos. El esquema
+`effective-config-v5` no cambia de forma; solo cambia el `const` del algoritmo.
+
+### 12.4. El caso objetivo, ejecutado
+
+```
+$ genome-population-simulator run .../general.toml --output ... --diagnostics json
+EXIT=0                                                        (6,8 s, release)
+
+algorithm                    = f5-resource-accounting-v9
+fasta_bytes_processed        = 79230297      (13 secuencias, 78 252 003 bases)
+retained_sequence_ids        = 13
+site_bound_per_block         = 10            (B=100 -> K_bound = 1000 SNP)
+operation_units              = 507216604 / 4294967296     (11,8 %)
+working_memory_bytes         = 6288636 / 8589934592       ( 0,07 %)
+output_bytes                 = 864675792 / 2147483648     (40,3 %)
+state                        = complete
+paquete publicado            = 180 806 458 B   (truth.jsonl: 175 001 276 B)
+```
+
+Antes de la corrección ese mismo escenario daba `output_bytes=5874860032`,
+2,74× el techo. La cota es ahora 4,78× el paquete que realmente se publica, y
+esa holgura es honesta: el ~50 % de alelos REF que no se publican como
+modificación y los identificadores cortos frente a los 64 caracteres del
+contrato.
+
+### 12.5. Que la cota sigue siendo superior, y que nada que pasaba deja de pasar
+
+Cinco paquetes publicados, con la cota v8 reconstruida desde los mismos
+escalares publicados:
+
+| Escenario | v8 | v9 | Reducción | Paquete real | ¿v9 ≥ real? |
+|---|---|---|---|---|---|
+| 10 ind, P=2, B=20, S=10 | 127 885 312 | 21 625 232 | 5,91× | 4 191 779 | sí |
+| 2 ind, P=2, B=4, **S=51** | 29 417 472 | 6 156 696 | 4,78× | 1 286 529 | sí |
+| 4 ind, **P=10**, B=10, S=10 | 117 743 616 | 15 229 128 | 7,73× | 3 646 079 | sí |
+| tomate 100 ind, 170×2 | 2 157 617 152 | 339 853 992 | 6,35× | 67 223 324 | sí |
+| tomate 100 ind × 1000 SNP | 5 874 860 032 | 864 675 792 | 6,79× | 180 806 458 | sí |
+
+Los dos escenarios que estresan las clases corregidas —`S=51` y ploidía 10—
+están incluidos deliberadamente: son donde el sobre **sube**, y aun así la cota
+total baja, porque cada fila haplotípica va acompañada de sus `S_bound` filas
+por sitio y cada resumen por sitio, de los `2*B*N_pop*H` elementos de rangos que
+bajan de 4096 a 1024. Ninguna de las cinco se rechaza y las cinco siguen
+acotando por arriba lo publicado.
+
+### 12.6. Dónde vivía el literal v8, y que ninguno quedó atrás
+
+Se buscó con las dos ortografías —`accounting-v8` y `accounting_v8`— sobre
+`src/`, `tests/`, `schemas/`, `design/`, `ui/` y `*.toml`.
+
+| Sitio | Papel | Resuelto |
+|---|---|---|
+| `src/f5_admission.rs` (`F5_RESOURCE_ACCOUNTING_ALGORITHM`) | **canónico**, única constante | v9 |
+| `schemas/effective-config-v5.schema.json` | `const` del contrato | v9 |
+| `schemas/manifest-general-v5.schema.json` | `$ref` al anterior: **no tenía copia** | nada que cambiar |
+| `src/{f5_preflight, f5_publication, f5_search, f5_founders, f5_closure}.rs` | prosa del algoritmo vigente | v9 |
+| `tests/{f5_publication, f5_resource_preflight, f5_0_1_external_schemas}.rs` | aserciones sobre el literal | v9 |
+| `tests/{f5_oracle, f5_founders, f5_search, f5_closure}.rs` | prosa | v9 |
+| `design/{decisiones-tecnicas, arquitectura}-0.1.md` | contrato vigente | v9 |
+| `evidence/f5.6/cierre.md`, §11 de este plan, narrativa histórica | **historia**, no contrato | intacto a propósito |
+
+A diferencia de §11.4 **no había copias silenciosas**: el rediseño de v8 dejó
+una sola constante de Rust y un solo `const` de esquema, y el manifiesto ya
+referenciaba el esquema efectivo en vez de duplicarlo. `ui/f5_editor.py` nunca
+nombró el algoritmo. El juez de techos
+`the_three_hard_budget_ceilings_are_the_three_schema_maxima` no se toca y sigue
+verde: esta corrección no mueve ningún `maximum`.
+
+Cuatro símbolos de prueba conservan `v8` en su nombre
+—`an_independent_oracle_reconstructs_the_whole_v8_projection_from_inputs`,
+`assert_f5_1_2_5_v8_contract_key_set`,
+`fasta_descriptions_raise_v8_operation_budget_and_preserve_productive_rng_path`
+y `mask_bytes_raise_v8_operation_budget_with_equal_geometry_and_exact_limit`—.
+Es deliberado y se declara: el primero está citado por
+`design/trazabilidad-requisitos-0.1.md`, que no entra en el alcance de este
+cambio, y renombrar solo tres de los cuatro dejaría la peor de las dos
+situaciones. Ninguno de los cuatro contiene el literal del contrato.
+
+### 12.7. Pruebas nuevas y su discriminación
+
+Cada una se verificó **matando** la variante defectuosa sobre una copia de
+`src/f5_preflight.rs` guardada fuera de git, comprobando por SHA que la mutación
+mutó y que la restauración devolvió el fichero byte a byte.
+
+| Mutante | Pruebas que mueren | Observado |
+|---|---|---|
+| `truth_bound` vuelve a `X*(4096+2048*K_bound)` | `the_truth_bound_charges_each_snp_once_per_copy_not_once_per_sequence` | 221 184 en vez de 24 576 |
+| El sobre por fila vuelve a `4096*tsv_rows_bound` constante | `the_haplotype_row_envelope_tracks_the_site_bound`, `the_site_summary_envelope_tracks_the_declared_ploidy`, `fragmented_mask_...`, `an_independent_oracle_...` | 8 192 en vez de 5 122 |
+| Desaparece `512*(ploidy+1)*site_summary_rows_bound` | `the_site_summary_envelope_tracks_the_declared_ploidy`, `fragmented_mask_...`, `an_independent_oracle_...` | 18 432 en vez de 20 480 |
+
+Las tres pruebas nuevas llevan **control positivo** contra la aserción que no
+puede fallar: la de multiplicidad comprueba antes que `S_bound = 2` y
+`K_bound = 16`, porque con geometría degenerada la cuenta correcta y la
+incorrecta coincidirían; la de la fila haplotípica mide el crecimiento a **tres**
+valores de `S_bound` —2, 6 y la frontera contractual 4096— y exige que las
+diferencias difieran exactamente en `ΔS_bound`, que es justo lo que un sobre
+constante no puede producir.
+
+El fixture `fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively`
+tenía un literal `1_306_624`. **No se ha sustituido por el valor observado**: se
+ha reescrito como la fórmula v9 término a término con las dimensiones del propio
+fixture, y lo que esa prueba mide —que un cambio de máscara solo mueve los
+términos de tramo— lo sigue afirmando su igualdad `fragmented == compact`, que
+no depende del literal.
+
+### 12.8. La deuda de v9 después de este cambio
+
+El acta `evidence/f5.6/cierre.md` declaró `f5-resource-accounting-v9` con
+**destino F9.7** y dos términos de **memoria** pendientes. Este cambio **no la
+cierra** y no toca la memoria:
+
+- **Sigue abierta, destino F9.7:** el pico del **oráculo del paquete** y el de la
+  **construcción/comparación de los dos documentos**, `O(B*N_pop)`, que
+  `final_formula_peak` nunca modeló. Sin cambios;
+- **Sigue abierta, mismo destino:** `Q*S_bound`, insatisfacible por construcción,
+  que el acta recontó como contradicción normativa;
+- **Cerrado aquí:** el tercer punto, que apareció al derivar y no estaba en el
+  acta: **el sobre constante por fila/elemento no era cota superior**. Deja de
+  serlo un problema para la fila de haplotipos y para el resumen por sitio;
+- **Acercada:** la deuda de memoria queda más visible, no menos. Mientras la
+  cota de salida sobrestimaba 6×, cualquier medición de holgura estaba
+  enmascarada por ese factor. Ya no lo está.
+
+El nombre `v9` queda **consumido** por esta corrección de salida. Quien retome
+los dos términos de memoria escribirá `v10`, y el precedente de reapertura
+atómica —esquema, lectores y productor a la vez— es el de este cambio y el de
+v7→v8: ningún esquema F5 está publicado externamente (§1).

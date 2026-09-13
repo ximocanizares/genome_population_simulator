@@ -237,7 +237,7 @@ fn phases() -> Value {
 
 fn preflight() -> Value {
     json!({
-        "algorithm": "f5-resource-accounting-v8",
+        "algorithm": "f5-resource-accounting-v9",
         "input_identities": input_identities(),
         "phases": phases(),
         "reference_bases_processed": 1,
@@ -736,6 +736,26 @@ fn authoring_schemas_match_u64_and_normalized_path_boundaries() {
         *rejected.pointer_mut(pointer).expect("u64 field") = max_plus_one.clone();
         scenario_cases.push((rejected, false));
     }
+    // Los tres presupuestos: el techo exacto lo admite el validador externo,
+    // el siguiente entero lo rechaza. El oráculo es el validador de Python
+    // leyendo el esquema publicado, no la constante de Rust.
+    for (field, ceiling) in [
+        ("max_operation_units", 4_294_967_296_u64),
+        ("max_working_memory_bytes", 8_589_934_592),
+        ("max_output_bytes", 2_147_483_648),
+    ] {
+        let mut accepted = scenario.clone();
+        accepted["f5"][field] = json!(ceiling);
+        scenario_cases.push((accepted, true));
+
+        let mut rejected = scenario.clone();
+        rejected["f5"][field] = json!(ceiling + 1);
+        scenario_cases.push((rejected, false));
+
+        let mut zero = scenario.clone();
+        zero["f5"][field] = json!(0);
+        scenario_cases.push((zero, false));
+    }
     assert_external_cases("config-f5-scenario-v1.schema.json", &[], scenario_cases);
 }
 
@@ -791,8 +811,8 @@ fn failure_limits_and_codes_use_exact_f5_contract() {
         ("max_haplotype_attempts", 10_000),
         ("max_swap_proposals", 10_000_000),
         ("max_haplotype_cells", 67_108_864),
-        ("max_operation_units", 268_435_456),
-        ("max_working_memory_bytes", 1_073_741_824),
+        ("max_operation_units", 4_294_967_296),
+        ("max_working_memory_bytes", 8_589_934_592),
         ("max_output_bytes", 2_147_483_648),
     ];
     let mut cases = vec![(failure_document("GPS-CONF-101", limits()), true)];
@@ -873,8 +893,8 @@ fn manifest_success_and_failure_branches_are_closed_and_literal() {
         ("max_haplotype_attempts", 10_000),
         ("max_swap_proposals", 10_000_000),
         ("max_haplotype_cells", 67_108_864),
-        ("max_operation_units", 268_435_456),
-        ("max_working_memory_bytes", 1_073_741_824),
+        ("max_operation_units", 4_294_967_296),
+        ("max_working_memory_bytes", 8_589_934_592),
         ("max_output_bytes", 2_147_483_648),
     ];
     for (field, maximum) in bounds {
@@ -1001,4 +1021,64 @@ fn truth_v2_validates_standalone_with_historical_closed_definitions() {
             (invalid_genotype, false),
         ],
     );
+}
+
+/// Los tres topes duros de Rust son los tres `maximum` de los tres esquemas.
+///
+/// El literal del techo vive en cinco sitios —`src/f5_preflight.rs` y los tres
+/// esquemas, más la tabla de la UI que `tests_ui` ya contrasta contra
+/// `config-f5-scenario-v1`—. Hasta aquí nadie ataba la constante de Rust a
+/// ningún esquema: subir el techo en el código y olvidar uno de los tres
+/// ficheros producía un escenario que el preflight admite y el validador
+/// externo rechaza, o al revés. Este juez cierra esa deriva.
+///
+/// El oráculo no es circular: los `maximum` se leen del JSON publicado, no de
+/// la constante, y la constante no se lee del JSON.
+#[test]
+fn the_three_hard_budget_ceilings_are_the_three_schema_maxima() {
+    use genome_population_simulator::f5_preflight::{
+        F5_HARD_OPERATION_LIMIT, F5_HARD_OUTPUT_LIMIT, F5_HARD_WORKING_MEMORY_LIMIT,
+    };
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let documents = [
+        ("config-f5-scenario-v1.schema.json", "/$defs/f5/properties"),
+        (
+            "effective-config-v5.schema.json",
+            "/$defs/limits/properties",
+        ),
+        ("f5-failure-v1.schema.json", "/$defs/limits/properties"),
+    ];
+    let ceilings = [
+        ("max_operation_units", F5_HARD_OPERATION_LIMIT),
+        ("max_working_memory_bytes", F5_HARD_WORKING_MEMORY_LIMIT),
+        ("max_output_bytes", F5_HARD_OUTPUT_LIMIT),
+    ];
+
+    let mut observed = 0_u32;
+    for (schema, container) in documents {
+        let document: Value = serde_json::from_str(
+            &fs::read_to_string(root.join("schemas").join(schema)).expect("schema readable"),
+        )
+        .expect("schema is JSON");
+        for (field, ceiling) in ceilings {
+            let node = document
+                .pointer(&format!("{container}/{field}"))
+                .unwrap_or_else(|| panic!("{schema} declara {field} en {container}"));
+            assert_eq!(
+                node["minimum"].as_u64(),
+                Some(1),
+                "{schema}/{field}: el mínimo del presupuesto es 1"
+            );
+            assert_eq!(
+                node["maximum"].as_u64(),
+                Some(ceiling),
+                "{schema}/{field}: el esquema y el tope duro de Rust divergen"
+            );
+            observed += 1;
+        }
+    }
+    // Control positivo: sin él, un puntero mal escrito o una lista vacía
+    // dejaría pasar la prueba sin haber comparado nada.
+    assert_eq!(observed, 9, "las nueve comparaciones deben haber ocurrido");
 }

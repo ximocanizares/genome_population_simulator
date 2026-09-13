@@ -79,7 +79,7 @@
 //! leen—, y por eso el pico sigue al tamaño del mayor registro publicado, que
 //! es el mismo término que el escritor ya sostuvo al producirlo.
 //!
-//! **No añade una tercera pieza fuera de `f5-resource-accounting-v8` junto al
+//! **No añade una tercera pieza fuera de `f5-resource-accounting-v9` junto al
 //! oráculo y la publicación**: su pico cabe **dentro** del presupuesto de
 //! memoria de trabajo que la admisión selló, de modo que no necesita ninguna
 //! declaración fuera de la fórmula. La batería lo mide con el asignador

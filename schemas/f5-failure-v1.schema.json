@@ -140,12 +140,12 @@
         "max_operation_units": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 268435456
+          "maximum": 4294967296
         },
         "max_working_memory_bytes": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 1073741824
+          "maximum": 8589934592
         },
         "max_output_bytes": {
           "type": "integer",

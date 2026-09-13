@@ -869,8 +869,8 @@ max_layout_attempts = 1000
 max_haplotype_attempts = 100
 max_swap_proposals = 100000
 max_haplotype_cells = 16777216
-max_operation_units = 268435456
-max_working_memory_bytes = 1073741824
+max_operation_units = 4294967296
+max_working_memory_bytes = 8589934592
 max_output_bytes = 2147483648
 coverage_fraction = 0.10
 
@@ -985,9 +985,44 @@ Los cuatro límites algorítmicos son enteros positivos. Sus predeterminados y m
 respectivamente, `1000/100000`, `100/10000`, `100000/10000000` y
 `16777216/67108864`; excederlos es configuración inválida, no una petición de
 recursos. Los tres presupuestos F5 v1 tienen como valor predeterminado y máximo,
-respectivamente, `268435456` unidades de operación (2^28), `1073741824` bytes
-de memoria de trabajo (2^30) y `2147483648` bytes publicados (2^31). La persona
-usuaria puede reducirlos, nunca ampliarlos dentro de esta versión. Se exige exactamente uno de `block_count: u32>0`,
+respectivamente, `4294967296` unidades de operación (2^32), `8589934592` bytes
+de memoria de trabajo (2^33) y `2147483648` bytes publicados (2^31). La persona
+usuaria puede reducirlos, nunca ampliarlos dentro de esta versión.
+
+Los dos primeros techos subieron desde 2^28 y 2^30 el 2026-09-13 por decisión
+expresa del usuario, y el predeterminado subió con el máximo. El motivo está
+medido: la cota de operaciones no acota la biología sino el **tamaño del
+genoma**, porque el modelo de coste carga dos pasadas completas sobre el FASTA
+más las bases recorridas. Con 2^28, el tomate reducido al 10 % —79 230 297 B y
+78 252 003 bases— consumía 236 712 597 unidades, el 88 % del techo, antes de
+abrir un solo bloque; el tomate completo (795 562 190 B) costaba 2 374 M, 8,8
+veces el techo. Un `run` real de 100 individuos sobre la referencia reducida se
+rechazaba en la fase `reference_and_mask_scan`, con la reserva prospectiva del
+FASTA y sin llegar a abrirlo. 2^32 admite el genoma entero con unos 1,9 G de
+margen para el trabajo real, y 2^33 B —8 GiB— da holgura de memoria para
+genomas mayores: el pico medido en ese `run` fue de 7 897 938 B, el 0,09 % del
+techo nuevo.
+
+Predeterminado y máximo siguen siendo la misma cifra a propósito. El techo no
+reserva nada: es un dispositivo de rechazo que aborta antes de abrir la
+referencia, de modo que un predeterminado bajo no abarata una ejecución cara,
+solo adelanta su negativa —y la negativa medida se disparaba al **leer el
+fichero**, no al hacer biología—. Separar predeterminado y máximo obligaría
+además a declarar el presupuesto en todo escenario que trabaje sobre un genoma
+real, que es exactamente la regla que esta corrección elimina. Quien quiera el
+rechazo temprano conserva la capacidad de pedirlo: basta declarar
+`max_operation_units = 268435456`.
+
+Lo que **no** cambia: el valor efectivo lo declara el escenario, no la
+máquina. No se consulta RAM ni CPU detectadas, ni perfiles externos, ni
+DTPD-115, para admitir. La razón es de validabilidad, no de gusto: el
+presupuesto se publica en `resource_preflight` del efectivo y del manifiesto y
+ACE-117 exige que un oráculo independiente recalcule las cotas; si el techo
+dependiera del equipo, el validador dejaría de poder validar y la misma
+configuración admitiría en una máquina y no en otra. El techo de bytes
+publicados sigue en 2^31.
+
+Se exige exactamente uno de `block_count: u32>0`,
 `covered_bases: u64>0` o `coverage_fraction`. Esta última se escribe como literal
 decimal TOML sin signo ni exponente, con 1 a 18 cifras decimales, en `(0,1]`.
 El lector conserva el literal y forma el racional exacto `n/10^k`; está prohibido
@@ -1214,8 +1249,13 @@ las cotas de recursos en notación asintótica.
 
 #### Admisión físicamente acotada y acumulativa
 
-`f5-resource-accounting-v8` sustituye por completo a v7 y a los parches
-intermedios v5 y v6. La admisión es una sola máquina de estados; no existe una carga previa que
+`f5-resource-accounting-v9` sustituye por completo a v8 y, con él, a v7 y a los
+parches intermedios v5 y v6. Frente a v8 corrige **dos defectos de la
+contabilidad de salida**, ambos del lado de la cota y ninguno del techo: la
+**multiplicidad** de la cota de verdad, que contaba cada SNP una vez por copia
+**y secuencia**, y los **sobres por fila/elemento**, que eran constantes y por
+tanto no acotaban las dos clases de registro cuyo tamaño depende de una
+dimensión declarada. La admisión es una sola máquina de estados; no existe una carga previa que
 pueda abrir o materializar perfil, referencia o máscara al margen de ella. Sus
 estados, en este orden, son `bootstrap`, `profile_metadata`,
 `profile_table_block_lengths`, `profile_table_snp_gaps`,
@@ -1332,7 +1372,13 @@ dimensionalmente distintos:
   lectores, no por una consulta previa al sistema de ficheros; cada tamaño
   individual permanece en `input_identities`;
 - `X=C_total*sequence_count`, número de copias por secuencia, y
-  `G_bound=founder_count*K_bound`, número máximo de genotipos SNP.
+  `G_bound=founder_count*K_bound`, número máximo de genotipos SNP;
+- `haplotype_rows_bound=B*N_pop*H`, filas de `f5-haplotypes.tsv`, y
+  `site_summary_rows_bound=B*N_pop*S_bound`, resúmenes por sitio. Son las dos
+  únicas clases de registro cuyo ancho depende de una dimensión declarada y no
+  de una longitud fija del contrato, de modo que un sobre constante no puede
+  acotarlas. No son escalares publicados nuevos: se recomputan exactamente como
+  `tsv_rows_bound` y `json_rows_bound`, de los que ya son sumandos.
 
 La cota de filas de los siete TSV es
 `tsv_rows_bound=B+K_bound+B*N_pop*H+B*N_pop*S_bound+
@@ -1412,13 +1458,57 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
     la unidad y su índice, y `S_bound` cubre además su fila de la matriz
     ganadora, que se materializa por filas completas de `ceil(S/8)` bytes y no
     en el empaquetado exacto que `ceil(H*S_bound/8)` describe;
-- `truth_bound=65536+X*(4096+2048*K_bound)+4096*G_bound` y
+- `truth_bound=65536+4096*X+2048*C_total*K_bound+4096*G_bound` y
   `output_bytes = other_output_bytes + 1048576 +
-  4096*(tsv_rows_bound+json_rows_bound) + truth_bound`. El sobre de 4096 bytes
-  por fila/objeto y los sobres de verdad son máximos del contrato F5 v1 de
+  1024*tsv_rows_bound + S_bound*haplotype_rows_bound +
+  1024*json_rows_bound + 512*(ploidy+1)*site_summary_rows_bound +
+  truth_bound`. Los cinco sobres son máximos del contrato F5 v1 de
   contabilidad; necesitarlos mayores es un defecto interno, no permiso para
-  rebasar el presupuesto. Los dos términos `fasta_bytes_processed` cubren,
-  respectivamente, todos los bytes que el escáner clasifica y todos los que la
+  rebasar el presupuesto. Cada uno se deriva de los campos que el esquema
+  obliga a publicar y de sus longitudes máximas —identificador de 64
+  caracteres, `u64` de 20 dígitos, literal `f64` mínimo de ida y vuelta de 24,
+  enumerados cerrados— y **no** de ninguna ejecución:
+
+  - `2048` por SNP dentro de una copia. **Un SNP se publica tres veces en el
+    mismo registro** —modificación del segmento, SNP vigente del fragmento e
+    hito del historial—, y las tres llevan su procedencia completa. El peor
+    caso contractual de las tres vistas juntas es **1659 bytes**; el sobre deja
+    **1,23×**. No es un sobre generoso: es ajustado, y quien lo mida contra una
+    sola de las tres vistas obtendrá un tercio del coste real;
+  - `4096` por registro de copia, sin sus SNP: peor caso **1566 bytes**,
+    margen **2,62×**;
+  - `4096` por genotipo: su lista `carriers` tiene exactamente `ploidy`
+    entradas, de modo que el peor caso es **3692 bytes** con ploidía 10 y el
+    margen, **1,11×**. Tampoco es generoso;
+  - `1024` por fila TSV y por elemento JSON repetido. La fila más ancha es la
+    de `f5-founders.tsv`, con siete identificadores y un índice: **476
+    bytes**, margen **2,15×**. El elemento JSON más ancho de ancho fijo es el
+    de muestreo por bloque×subpoblación: **419 bytes**, margen **2,44×**;
+  - `S_bound` adicional por fila de `f5-haplotypes.tsv`. Su columna `alleles`
+    tiene **exactamente `S` caracteres**, con `S_bound` hasta 4096, de modo que
+    ningún sobre constante la acota: su parte constante son 242 bytes —tres
+    identificadores, un `u64`, un `f64`, cinco TAB y un LF— que los 1024 cubren
+    con margen 4,23×, y el resto crece byte a byte con el sitio;
+  - `512*(ploidy+1)` adicional por resumen por sitio. Publica **siete** matrices
+    de dosis de `ploidy+1` entradas de hasta 47 bytes, es decir `329*(ploidy+1)`
+    bytes que crecen con la ploidía, más 735 bytes constantes que los 1024
+    cubren con margen 1,39×. Su peor caso contractual es 1722 bytes con ploidía
+    2 y **4354 con ploidía 10**, que desbordaba el sobre constante de 4096.
+
+  **Por qué la verdad se cuenta por copia y no por copia y secuencia.** Existe
+  una `haplotype_copy` por copia y secuencia poblada —de ahí el término
+  `4096*X`—, pero esa copia solo lleva los sitios de los bloques colocados en
+  **su** secuencia. Los bloques se reparten entre secuencias sin repetirse, así
+  que sumando todas las secuencias de una misma copia-de-individuo se recorren
+  como máximo los `K_bound` sitios del escenario **una sola vez**. El número de
+  copias-de-individuo es `C_total`, no `X`, y por tanto las incidencias SNP
+  publicadas están acotadas por `C_total*K_bound`. Contar `X*K_bound`
+  multiplicaba cada SNP por `sequence_count`, que es exactamente el factor que
+  v8 sobrestimaba: con trece secuencias, trece veces. Quien vea el término y
+  crea que falta un `X` está leyendo el contrato al revés: añadir una secuencia
+  añade **registros de copia**, nunca incidencias nuevas.
+
+  Los dos términos `fasta_bytes_processed` cubren, respectivamente, todos los bytes que el escáner clasifica y todos los que la
   pasada secuencial posterior recorre para recuperar REF y comprobar SHA-256;
   incluyen cabeceras, descripciones y separadores, no solo bases. El término
   `reference_bases_processed` cubre el avance del cursor de máscara por base y
@@ -1459,8 +1549,8 @@ los registros de fase, `tract_count`, `retained_sequence_ids`,
 `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`,
 `gap_support_cardinality`, `gap_selector_operation_units`, las tres
 aportaciones `other_*` y los tres resultados; así un lector puede repetir la
-cuenta sin RNG. Los receipts v5/v6/v7 no son entradas admitidas ni se migran: deben
-repetir la admisión v8 desde los ficheros fuente. General v3 y escenario v1 no
+cuenta sin RNG. Los receipts v5/v6/v7/v8 no son entradas admitidas ni se migran: deben
+repetir la admisión v9 desde los ficheros fuente. General v3 y escenario v1 no
 cambian de significado; el objeto prerelease `resource_preflight` de efectivo y
 manifiesto v5 cambia de forma y exige actualización atómica de ambos esquemas y
 sus lectores en F5.1.2.5, junto con el sellado del receipt que produce
@@ -1701,7 +1791,7 @@ objetos rechazan propiedades adicionales:
 | `sampling` | lista ordenada por `population_id`+`block_id`, con una fila exacta por bloque×subpoblación: `population_id`, `block_id`, `block_index`, `requested_mode`, `effective_mode`, `source` (`subpopulation_default` o `block_override`), `controlled_max_abs_error_declared` y `controlled_max_abs_error_effective`; las tolerancias son `null` en probabilístico y la efectiva es finita en `[0,0.5/C]` en controlado, con `C=individual_count*ploidy` de esa subpoblación |
 | `normalizations` | cuatro objetos exactos en orden `block_lengths`, `snp_gaps`, `snp_spectrum`, `haplotype_weights`, cada uno con `set_kind`, `canonical_order`, `algorithm="neumaier-f64-v1"`, `tolerance`, `input_values`, `input_sum`, `input_delta`, `effective_values`, `output_sum`, `output_delta`; los números recuperan el mismo `f64` y materializan físicamente la auditoría DTC-049 |
 | `limits` | objeto exacto con los cuatro límites algorítmicos y los tres presupuestos efectivos TOML |
-| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v8"`, `input_identities`, `phases`, `reference_bases_processed`, `fasta_bytes_processed`, `mask_bytes_processed`, `general_toml_bytes`, `scenario_toml_bytes`, `profile_metadata_bytes`, `profile_tsv_bytes`, `tract_count`, `retained_sequence_ids`, `gap_support_cardinality`, `gap_selector_operation_units`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; `input_identities` se ordena por rol contractual y cada objeto exacto contiene `role`, `normalized_path`, `observed_size_bytes`, `observed_sha256`, `declared_size_bytes` y `declared_sha256`, estos dos últimos `null` cuando no existen en el documento propietario; `phases` sigue el orden cerrado de la máquina de admisión y cada objeto contiene `phase`, `operation_units_cumulative`, `retained_before_bytes`, `transient_bytes`, `retained_after_bytes`, `phase_peak_bytes` y `output_bytes_reserved`; todos los recuentos son `u64`, los valores calculados no exceden sus límites y efectivo/manifiesto son iguales escalar y posicionalmente |
+| `resource_preflight` | objeto exacto `algorithm="f5-resource-accounting-v9"`, `input_identities`, `phases`, `reference_bases_processed`, `fasta_bytes_processed`, `mask_bytes_processed`, `general_toml_bytes`, `scenario_toml_bytes`, `profile_metadata_bytes`, `profile_tsv_bytes`, `tract_count`, `retained_sequence_ids`, `gap_support_cardinality`, `gap_selector_operation_units`, `site_bound_per_block`, `bin_count_total`, `profile_rows`, `normalization_rows`, `tsv_rows_bound`, `json_rows_bound`, `other_operation_units`, `other_working_memory_bytes`, `other_output_bytes`, `operation_units`, `working_memory_bytes`, `output_bytes`, `operation_limit`, `working_memory_limit_bytes`, `output_limit_bytes`; `input_identities` se ordena por rol contractual y cada objeto exacto contiene `role`, `normalized_path`, `observed_size_bytes`, `observed_sha256`, `declared_size_bytes` y `declared_sha256`, estos dos últimos `null` cuando no existen en el documento propietario; `phases` sigue el orden cerrado de la máquina de admisión y cada objeto contiene `phase`, `operation_units_cumulative`, `retained_before_bytes`, `transient_bytes`, `retained_after_bytes`, `phase_peak_bytes` y `output_bytes_reserved`; todos los recuentos son `u64`, los valores calculados no exceden sus límites y efectivo/manifiesto son iguales escalar y posicionalmente |
 | `algorithms` | objeto exacto `layout="f5-layout-v1"`, `marginals="f5-spectrum-v1"`, `haplotypes="weighted-prefix-swap-v1"`, `ld="phased-r2-neumaier-v1"`, `controlled="largest-remainder-v1"`, `inbreeding="diploid-f-v1"`, `truth_projection="f5-founder-truth-projection-v2"` |
 | `rng_catalog`, `id_catalog` | objetos exactos `catalog_id`, `path`, `size_bytes`, `sha256` |
 

@@ -223,3 +223,61 @@ fn approved_versioned_contract_artifacts_remain_byte_for_byte_pinned() {
         assert_eq!(format!("{:x}", sha2::Sha256::digest(bytes)), expected);
     }
 }
+
+/// Los tres presupuestos admiten su techo exacto, rechazan el siguiente y
+/// siguen dejándose reducir.
+///
+/// DTC-089 permite reducir y prohíbe ampliar. Tras subir los dos primeros
+/// techos —2^28→2^32 unidades y 2^30→2^33 bytes de trabajo el 2026-09-13— no
+/// bastaba con que el preflight aceptase más: el lector del TOML llevaba su
+/// propia copia decimal del máximo y habría seguido rechazando en la
+/// admisión un escenario que el preflight ya admite.
+///
+/// La prueba discrimina en las dos direcciones: con el techo viejo el caso
+/// «techo exacto» falla, y sin la guarda de `require_limit` falla el caso
+/// «techo+1». El diagnóstico se contrasta contra el rango citado, no contra
+/// su mera existencia.
+#[test]
+fn the_three_budget_ceilings_admit_their_value_and_reject_the_next_one() {
+    use genome_population_simulator::f5_preflight::{
+        F5_HARD_OPERATION_LIMIT, F5_HARD_OUTPUT_LIMIT, F5_HARD_WORKING_MEMORY_LIMIT,
+    };
+
+    let ceilings = [
+        (
+            "max_operation_units",
+            F5_HARD_OPERATION_LIMIT,
+            4_294_967_296_u64,
+        ),
+        (
+            "max_working_memory_bytes",
+            F5_HARD_WORKING_MEMORY_LIMIT,
+            8_589_934_592,
+        ),
+        ("max_output_bytes", F5_HARD_OUTPUT_LIMIT, 2_147_483_648),
+    ];
+    for (field, ceiling, literal) in ceilings {
+        // El techo vigente es el que el contrato publica: si la constante se
+        // moviese sin mover DTC-089 y los esquemas, esta igualdad lo delata.
+        assert_eq!(ceiling, literal, "{field}: techo distinto del contratado");
+
+        assert!(
+            parse_scenario(&scenario(&format!("{field} = 1\n"))).is_ok(),
+            "{field}: reducir el presupuesto sigue siendo legítimo"
+        );
+        assert!(
+            parse_scenario(&scenario(&format!("{field} = {ceiling}\n"))).is_ok(),
+            "{field}: el techo exacto debe admitirse"
+        );
+        let error = parse_scenario(&scenario(&format!("{field} = {}\n", ceiling + 1)))
+            .expect_err("declarar por encima del techo es configuración inválida");
+        assert!(
+            error.contains(&format!("1..={ceiling}")),
+            "{field}: el diagnóstico debe citar el rango, y dijo: {error}"
+        );
+        assert!(
+            parse_scenario(&scenario(&format!("{field} = 0\n"))).is_err(),
+            "{field}: cero no es un presupuesto"
+        );
+    }
+}

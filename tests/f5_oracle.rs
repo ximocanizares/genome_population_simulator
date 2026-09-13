@@ -2386,7 +2386,7 @@ const ORACLE_RECORD_ALLOWANCE: u64 = 10;
 /// ganadoras en bits, un rango por asiento y un vector de dosis por locus— más
 /// el índice de sitios por copia que el recuento MAN-70 necesita para resolver
 /// portadores sin abrir ningún TSV. Todo eso son términos que
-/// `f5-resource-accounting-v8` ya concede a las mismas dimensiones.
+/// `f5-resource-accounting-v9` ya concede a las mismas dimensiones.
 ///
 /// Lo que **no** cabe en `working_memory_bytes` es el registro
 /// `haplotype_copy` que el lector parsea: el escritor lo emite por flujo y la
