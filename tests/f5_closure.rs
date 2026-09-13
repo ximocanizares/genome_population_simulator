@@ -38,8 +38,8 @@
 //!
 //! Que una prueba falle contra un paquete corrupto no demuestra que fije la
 //! comprobación que anuncia. Cada comprobación de `src/f5_closure.rs` se
-//! desactiva por separado y se mide qué prueba muere. Treinta mutaciones,
-//! **una sola superviviente** y declarada:
+//! desactiva por separado y se mide qué prueba muere. Treinta y seis
+//! mutaciones, **tres supervivientes** y las tres declaradas abajo:
 //!
 //! | Comprobación desactivada | Prueba que muere |
 //! |---|---|
@@ -73,12 +73,27 @@
 //! | orden de la pertenencia | `a_duplicated_membership_record_is_rejected` |
 //! | recuento de pertenencias | `a_missing_membership_record_is_rejected` |
 //! | corte en el primer genotipo | ocho pruebas, entre ellas la de ámbitos y la de pico |
+//! | clase fundadora sellada en el testigo | `the_founder_kind_is_sealed_and_cannot_be_supplied_by_a_later_object` |
+//! | canonicalización obligatoria del destino | `a_closure_over_a_vanished_package_is_missing` |
+//! | apertura del documento de fallo | `a_failure_closure_over_a_vanished_package_is_missing` |
+//! | causa `Missing` al abrir un artefacto | `a_deleted_artifact_of_the_published_package_is_missing` |
 //!
-//! La única superviviente declarada es `check_repository_order`: desactivarla
-//! no mata ninguna prueba porque **ninguna configuración admitida la alcanza**.
-//! No es una comprobación sobre el paquete sino una precondición de las dos
-//! búsquedas binarias de la propia auditoría, y se conserva por eso. Queda
-//! escrito en vez de disimulado.
+//! **Tres ramas declaradas sin prueba que las mate**, todas defensivas y
+//! ninguna alcanzable desde una configuración admitida:
+//!
+//! - `check_repository_order`, precondición de la búsqueda binaria de
+//!   unidades. Lo que protege es un **falso negativo de la propia auditoría**:
+//!   una búsqueda binaria sobre datos desordenados devolvería «ausente» sobre
+//!   identidades presentes y la clausura rechazaría un paquete correcto citando
+//!   una causa falsa.
+//! - La rama `None` de `sealed_founder_kinds`, que solo se toma si la
+//!   configuración que publica no es la que su admisión sella. Lo que sí se
+//!   fija es que la guarda **exista**, con el control positivo de
+//!   `the_closure_audit_takes_no_census`; lo que se clasifica con ella lo mata
+//!   la mutación de la clase fundadora.
+//! - La rama «subpoblación ausente de las selladas» de
+//!   `F5ClosureWitness::founder_kind`: el paquete publica las subpoblaciones de
+//!   la misma configuración que las selló.
 //!
 //! El mismo estudio, en sus dos rondas, corrigió cuatro defectos de esta
 //! batería: cuatro pruebas que pasaban por una comprobación distinta de la que
@@ -488,12 +503,7 @@ struct Package {
 
 impl Package {
     fn audit(&self) -> Result<F5ClosureReport, F5ClosureRejection> {
-        audit_f5_identity_closure(
-            &self.destination,
-            &self.witness,
-            &self.chain.identities,
-            &self.chain.assignment,
-        )
+        audit_f5_identity_closure(&self.destination, &self.witness, &self.chain.identities)
     }
     /// Audita el destino ya publicado **después** de alterarlo en su sitio.
     ///
@@ -862,7 +872,6 @@ fn a_repository_rebuilt_after_publication_cannot_accredit_the_package() {
         &package.destination,
         &rebuilt.witness,
         &rebuilt.chain.identities,
-        &rebuilt.chain.assignment,
     )
     .expect_err("un testigo de otro paquete no acredita este");
     assert_rejection(
@@ -891,13 +900,9 @@ fn an_unconsumed_equivalent_repository_breaks_the_conservation_law() {
         "sin consumir, el repositorio nuevo registra lo mismo que el sello"
     );
 
-    let rejection = audit_f5_identity_closure(
-        &package.destination,
-        &package.witness,
-        &fresh.identities,
-        &fresh.assignment,
-    )
-    .expect_err("un repositorio sin consumir no publicó estas asignaciones");
+    let rejection =
+        audit_f5_identity_closure(&package.destination, &package.witness, &fresh.identities)
+            .expect_err("un repositorio sin consumir no publicó estas asignaciones");
     assert_rejection(
         &rejection,
         F5ClosureCause::Conservation,
@@ -923,7 +928,6 @@ fn a_witness_from_another_execution_is_rejected() {
         &other.destination,
         &other.witness,
         &package.chain.identities,
-        &package.chain.assignment,
     )
     .expect_err("un testigo ajeno no avala este repositorio");
     assert_rejection(
@@ -932,6 +936,95 @@ fn a_witness_from_another_execution_is_rejected() {
         "execution_id",
         "el sello es de la ejecución",
     );
+}
+
+/// **La sonda del censo ajeno, ahora irrepresentable.**
+///
+/// La clasificación aportado/derivado se leía del censo que la auditoría
+/// recibía como cuarto parámetro suelto. Publicando con `founder_keys` y
+/// auditando con una segunda cadena que declara `founder_ids` **literales
+/// iguales a los `IND_` derivados**, los dos recuentos que el plan nombra como
+/// evidencia del hito se invertían y la auditoría devolvía `Ok`. Ningún
+/// auditor lo cubría: el censo no está en el paquete.
+///
+/// Aquí se construyen los dos paquetes de la sonda —el derivado y el literal
+/// que lo imita byte a byte— y se comprueba que cada uno clasifica lo suyo,
+/// que el testigo del uno no acredita al otro y que el censo ya **no es un
+/// parámetro** de la auditoría.
+#[test]
+fn the_founder_kind_is_sealed_and_cannot_be_supplied_by_a_later_object() {
+    let derived = publish(
+        "kind-derived",
+        &Fixture {
+            subpopulations: vec![Subpopulation::new("P1", 2).keys()],
+            ..Fixture::default()
+        },
+    );
+    let derived_report = derived.audit().expect("clausura auditada");
+    assert_eq!(derived_report.derived_individuals(), 2);
+    assert_eq!(derived_report.supplied_individuals(), 0);
+
+    // Los `IND_` que esa ejecución derivó, leídos del paquete publicado.
+    let mut literals = founders_rows(&derived.destination)
+        .iter()
+        .map(|row| row[1].clone())
+        .collect::<Vec<_>>();
+    literals.sort_unstable();
+    literals.dedup();
+    assert_eq!(literals.len(), 2);
+    assert!(literals.iter().all(|id| id.starts_with("IND_")));
+
+    // La segunda cadena de la sonda: los mismos identificadores, declarados
+    // ahora como `founder_ids` literales.
+    let borrowed = literals.iter().map(String::as_str).collect::<Vec<_>>();
+    let supplied = publish(
+        "kind-supplied",
+        &Fixture {
+            subpopulations: vec![Subpopulation::new("P1", 2).founders(&borrowed)],
+            ..Fixture::default()
+        },
+    );
+    let supplied_report = supplied.audit().expect("clausura auditada");
+    assert_eq!(supplied_report.supplied_individuals(), 2);
+    assert_eq!(supplied_report.derived_individuals(), 0);
+
+    // Cruzar los dos no invierte nada: el testigo acredita su destino.
+    let rejection = audit_f5_identity_closure(
+        &derived.destination,
+        &supplied.witness,
+        &supplied.chain.identities,
+    )
+    .expect_err("un testigo de otro paquete no acredita este");
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::Seal,
+        "destination",
+        "el testigo acredita",
+    );
+}
+
+/// Y el censo **no es un parámetro** de la auditoría: la sonda anterior ya no
+/// tiene por dónde entrar.
+///
+/// Guarda **léxica**, como las otras dos: lo que impide de verdad la
+/// sustitución es la firma, que el compilador sostiene.
+#[test]
+fn the_closure_audit_takes_no_census() {
+    let source = include_str!("../src/f5_closure.rs");
+    for signature in [
+        "pub fn audit_f5_identity_closure(",
+        "pub fn audit_f5_failure_closure(",
+    ] {
+        let body = source.split(signature).nth(1).expect("la firma existe");
+        let parameters = body.split(')').next().expect("los parámetros");
+        assert!(
+            !parameters.contains("F5FounderAssignment"),
+            "{signature} no puede recibir el censo: la clase fundadora va sellada"
+        );
+    }
+    // Control positivo: la clase sí se congela al sellar.
+    assert!(source.contains("fn sealed_founder_kinds("));
+    assert!(source.contains("sealed.matches_admission("));
 }
 
 /// Dos repositorios de censo distinto no comparten testigo.
@@ -962,13 +1055,9 @@ fn two_repositories_with_different_censuses_do_not_share_a_witness() {
         "los dos censos tienen que diferir"
     );
 
-    let rejection = audit_f5_identity_closure(
-        &small.destination,
-        &small.witness,
-        &large.identities,
-        &large.assignment,
-    )
-    .expect_err("el testigo no selló este repositorio");
+    let rejection =
+        audit_f5_identity_closure(&small.destination, &small.witness, &large.identities)
+            .expect_err("el testigo no selló este repositorio");
     assert_rejection(
         &rejection,
         F5ClosureCause::Seal,
@@ -1503,6 +1592,39 @@ fn a_truth_copy_the_repository_never_closed_is_rejected() {
     );
 }
 
+/// **La mutación posterior más canónica de todas: borrar un artefacto.**
+///
+/// `F5ClosureCause::Missing` no tenía ninguna aparición en esta batería y es
+/// alcanzable por el ataque más simple que existe contra un paquete publicado.
+#[test]
+fn a_deleted_artifact_of_the_published_package_is_missing() {
+    let package = publish("deleted-artifact", &wide_fixture());
+    let rejection = package.audit_after(|root| {
+        fs::remove_file(root.join(F5_TSV_CONTRACTS[FOUNDERS].path())).expect("borrar");
+    });
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::Missing,
+        "path",
+        "outputs/f5-founders.tsv",
+    );
+}
+
+/// Y borrar la proyección de verdad tampoco pasa desapercibido.
+#[test]
+fn a_deleted_truth_projection_is_missing() {
+    let package = publish("deleted-truth", &wide_fixture());
+    let rejection = package.audit_after(|root| {
+        fs::remove_file(root.join(F5_TRUTH_PATH)).expect("borrar");
+    });
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::Missing,
+        "path",
+        "outputs/truth.jsonl",
+    );
+}
+
 /// Un documento de verdad vacío.
 #[test]
 fn an_empty_truth_document_is_rejected() {
@@ -1675,6 +1797,60 @@ fn a_failed_package_publishes_no_founder_identity() {
         F5ClosureCause::Unclosed,
         "path",
         "un paquete fallido publica un artefacto biológico",
+    );
+}
+
+/// **La clausura de fallo no puede acreditar un paquete que ya no existe.**
+///
+/// La versión anterior no abría ni un byte: el sello miraba memoria y los ocho
+/// ficheros biológicos se exigían **ausentes**, condición que un destino
+/// borrado entero satisface trivialmente. Con `rm -rf` del destino devolvía
+/// `Ok`, y también al borrar solo el documento de fallo.
+#[test]
+fn a_failure_closure_over_a_vanished_package_is_missing() {
+    // 1. Destino borrado entero.
+    let (chain, destination, witness) = publish_failure("failure-vanished", &Fixture::default());
+    audit_f5_failure_closure(&destination, &witness, &chain.identities)
+        .expect("control positivo: el fallo publicado sí cierra");
+    fs::remove_dir_all(&destination).expect("borrar el destino");
+    let rejection = audit_f5_failure_closure(&destination, &witness, &chain.identities)
+        .expect_err("un destino borrado no puede acreditarse");
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::Missing,
+        "destination",
+        "no resuelve",
+    );
+
+    // 2. Destino intacto, documento de fallo borrado.
+    let (chain, destination, witness) = publish_failure("failure-docless", &Fixture::default());
+    audit_f5_failure_closure(&destination, &witness, &chain.identities)
+        .expect("control positivo: el fallo publicado sí cierra");
+    fs::remove_file(destination.join("outputs/f5-failure.json")).expect("borrar el diagnóstico");
+    let rejection = audit_f5_failure_closure(&destination, &witness, &chain.identities)
+        .expect_err("un fallo sin su diagnóstico no es un fallo publicado");
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::Missing,
+        "path",
+        "outputs/f5-failure.json",
+    );
+}
+
+/// La clausura de éxito tampoco acredita un destino borrado.
+#[test]
+fn a_closure_over_a_vanished_package_is_missing() {
+    let package = publish("success-vanished", &Fixture::default());
+    package.audit().expect("control positivo");
+    fs::remove_dir_all(&package.destination).expect("borrar el destino");
+    let rejection = package
+        .audit()
+        .expect_err("un destino borrado no se acredita");
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::Missing,
+        "destination",
+        "no resuelve",
     );
 }
 
@@ -1869,11 +2045,20 @@ fn the_closure_audit_cannot_derive_an_identity_by_its_signature() {
     // Y no escribe: ninguna vía de escritura del sistema de ficheros.
     for writer in [
         "File::create",
+        "File::options",
         "fs::write",
         "fs::create_dir",
         "fs::remove",
         "fs::rename",
+        "fs::copy",
+        "fs::hard_link",
+        "fs::set_permissions",
+        "fs::soft_link",
+        // `::symlink(` y no `symlink`, que casaría con `symlink_metadata`,
+        // que es lectura.
+        "::symlink(",
         "OpenOptions",
+        "Command",
     ] {
         assert!(
             !source.contains(writer),
@@ -2002,11 +2187,11 @@ fn the_closure_audit_peak_fits_the_sealed_budget_and_holds_one_record_at_a_time(
         ),
         // Censo variable, bloques fijos: de dos copias a dieciséis.
         (
-            "census-1",
+            "census-4",
             Fixture {
                 block_count: 8,
                 slack: 2,
-                subpopulations: vec![Subpopulation::new("P1", 1)],
+                subpopulations: vec![Subpopulation::new("P1", 4)],
                 ..Fixture::default()
             },
         ),
@@ -2051,16 +2236,19 @@ fn the_closure_audit_peak_fits_the_sealed_budget_and_holds_one_record_at_a_time(
     let (small_copies, small_peak, small_longest) = measured[2];
     let (large_copies, large_peak, large_longest) = measured[3];
     assert!(
-        large_copies >= 8 * small_copies,
-        "el censo tiene que multiplicarse: {large_copies} frente a {small_copies} copias"
+        large_copies >= 2 * small_copies,
+        "el censo tiene que doblarse: {large_copies} frente a {small_copies} copias"
     );
-    // Y lo que explica el crecimiento del pico **no** es el censo sino el
-    // registro: multiplicar por ocho las copias solo mueve el pico lo que se
-    // movió el mayor registro publicado.
-    let explained = 2 * large_longest.saturating_sub(small_longest) + 8192;
+    // Y lo que explica el movimiento del pico **no** es el censo sino el
+    // registro. El par 8→16 copias no atraviesa ninguna duplicación de búfer,
+    // de modo que la cota se exige **sin** holgura añadida: solo la diferencia
+    // del mayor registro publicado, duplicada porque `read_line` crece
+    // duplicando. Medido, el pico ni siquiera sube: baja 178 bytes mientras el
+    // censo se dobla.
+    let explained = 2 * large_longest.saturating_sub(small_longest);
     assert!(
         large_peak.saturating_sub(small_peak) <= explained,
-        "el pico creció {} bytes con el censo y el mayor registro solo explica {explained}",
+        "el pico creció {} bytes al doblar el censo y el mayor registro solo explica {explained}",
         large_peak.saturating_sub(small_peak)
     );
 }

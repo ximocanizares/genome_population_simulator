@@ -2889,20 +2889,63 @@ identificador del índice de copia.
     además la lectura correcta del hito: alterar el paquete ya publicado *es*
     la mutación posterior que F5.5 prohíbe.
   - **Una precondición inalcanzable, declarada.** `check_repository_order`
-    comprueba el orden canónico de unidades y censo antes de dos búsquedas
-    binarias. Desactivarla no mata ninguna prueba porque ninguna configuración
+    comprueba el orden canónico de unidades antes de su búsqueda binaria. Desactivarla no mata ninguna prueba porque ninguna configuración
     admitida la alcanza. Se conserva porque lo que protege es un **falso
     negativo de la propia auditoría**: una búsqueda binaria sobre datos
     desordenados devolvería «ausente» sobre identidades presentes y la clausura
     rechazaría un paquete correcto citando una causa falsa. Queda escrito en
-    vez de disimulado, igual que la clasificación aportado/derivado, cuyas dos
-    ramas de «ausente» tampoco son alcanzables.
+    vez de disimulado, igual que las dos ramas defensivas del testigo.
   - **Sin llamador en producción, como el oráculo.** F5 todavía no tiene
     orquestador —es F5.6—, de modo que `audit_f5_identity_closure` se ejercita
     desde la batería exactamente igual que `audit_f5_package`.
   - **Ámbitos cubiertos.** Ploidías 1/2/3, modos probabilístico y controlado,
     `F` en 0.0 y 1.0, identidades aportadas y derivadas, dos subpoblaciones,
     dos secuencias pobladas más una estéril, y paquete de éxito y de fallo.
+  - **Corrección de la Revisión F5.5 (cierre): el testigo sellaba el
+    repositorio pero no el censo.** Era la pieza que **ningún auditor
+    cubría** —el censo no está en el paquete, de modo que el oráculo de F5.4.2
+    no puede verlo— y la clausura lo recibía como cuarto parámetro suelto.
+    Publicando con `founder_keys` y auditando con una segunda cadena que
+    declarase `founder_ids` literales iguales a los `IND_` derivados, los dos
+    recuentos que este plan nombra como evidencia del hito **se invertían** y
+    la auditoría devolvía `Ok`. La clase fundadora de cada subpoblación se
+    congela ahora en el testigo al sellar, tomada de la configuración que
+    publica y solo si `matches_admission` la admite —`SealedF5Admission` cubre
+    `subpopulation.founder_kind` en su material canónico—, y **el censo deja de
+    ser un parámetro de la auditoría**: la sonda ya no es representable, que es
+    más fuerte que rechazarla. Con el censo desaparece también la mitad de
+    `check_repository_order` que validaba su orden, que protegía un objeto que
+    no era el que publicó. `F5PublicationRequest` gana dos accesores de solo
+    lectura —`config()` y `sealed()`— y nada más de F5.4.3 cambia.
+  - **Corrección de la Revisión F5.5 (cierre): la clausura de fallo acreditaba
+    un paquete inexistente.** No abría ni un byte: el sello miraba memoria, la
+    acreditación caía a comparación literal cuando ninguna ruta canonicalizaba
+    y el bucle de artefactos biológicos estaba construido sobre una **ausencia**
+    que un destino borrado satisface trivialmente. Con `rm -rf` del destino, y
+    también borrando solo el documento de fallo, devolvía `Ok`. Ahora la
+    canonicalización es **obligatoria** en las dos mitades —una ruta que no
+    resuelve es `Missing`, que es lo que es— y la mitad «fallo» abre
+    `outputs/f5-failure.json` sin leerlo: una afirmación positiva sobre el
+    disco. Juzgar su contenido sigue siendo de `audit_f5_failure_package`.
+  - **`F5ClosureCause::Missing` pasa a tener pruebas.** No tenía ninguna
+    aparición en la batería y es alcanzable por la mutación posterior más
+    canónica que existe: borrar un artefacto publicado. Tres pruebas nuevas —el
+    TSV fundador, la proyección de verdad y el destino entero— la fijan.
+  - **Dos afirmaciones rebajadas a lo que es cierto.** El contrato de LF **no**
+    estaba unificado: `walk_truth_membership` rompe en el primer genotipo y la
+    última línea del documento es siempre un genotipo, de modo que el LF final
+    de `truth.jsonl` nunca se mira. La afirmación pasa a ser «los dos recorridos
+    exigen LF en cada línea que leen»; cerrar el recorrido costaría una pasada
+    entera por un contrato que la puerta física y el oráculo ya sostienen. Y la
+    cota diferencial del pico deja de apoyarse en un `+8192` que dejaba pasar
+    8 KiB sin explicar: con el par 8→16 copias, que no atraviesa ninguna
+    duplicación de búfer, se exige la diferencia del mayor registro **sin
+    holgura** —y medido, el pico ni sube: baja 178 bytes mientras el censo se
+    dobla—.
+  - **Guarda léxica de «no escribe», ampliada.** Enumeraba seis vías; enumera
+    ahora trece, con `File::options`, `fs::copy`, `fs::hard_link`,
+    `fs::set_permissions`, `::symlink(` y `Command`. Lo que sostiene la
+    propiedad de verdad sigue siendo la huella byte a byte, que sí es completa.
   - **Cuatro notas menores de la Revisión F5.5, aplicadas.** El contrato de
     bytes se **unifica**: los dos recorridos exigen LF final, como el oráculo,
     con una sola función. La primera línea de `truth.jsonl` tiene que **ser**
@@ -2918,10 +2961,15 @@ identificador del índice de copia.
     `GPS-INTERNAL-101`. La prueba de este hito fija el código real; el docstring
     de F5.3 es el que no corresponde. No se toca por la prohibición de revertir
     cambios ajenos: queda anotado para quien reabra F5.3.
+  - **Obligación de proceso, escrita en F5.6.** La garantía «para auditar hay
+    que haber publicado» basta para la precedencia y no como obligación de
+    proceso: F5.6.1 y F5.6.3 recogen ahora que el orquestador publique
+    **exclusivamente** por los envoltorios que sellan y componga los dos
+    auditores sobre el destino ya renombrado.
   - **Puertas.** `fmt`, `clippy -D warnings`, `test --workspace --all-targets`
-    (1070 pasan, 0 fallan, 12 ignoradas, frente a la línea base de 1049/0/12
-    tras la primera entrega de este hito y de 1029/0/12 antes de él),
-    `test --doc`, `build --release` y `doc --no-deps`, todas en verde.
+    (1076 pasan, 0 fallan, 12 ignoradas, frente a 1070/0/12 al cerrar el hito y
+    1029/0/12 antes de empezarlo), `test --doc`, `build --release` y
+    `doc --no-deps`, todas en verde.
 
 > **Revisión F5.5.** Confirmar que identidad y pertenencia precedieron a la
 > publicación y que el hito no modifica el paquete atómico.
@@ -2937,6 +2985,15 @@ identificador del índice de copia.
     un general v3+escenario v1, rechazo de cero/varios/v2-v4, edición de
     sustituciones modo/tolerancia y presupuestos, invalidación tras editar y
     paridad de efectivo, diagnóstico y hashes con TOML manual.
+  - **Obligación de proceso heredada de la Revisión F5.5.** El adaptador de
+    proceso debe publicar **exclusivamente** por `seal_and_publish_f5_success` y
+    `seal_and_publish_f5_failure`, nunca por `publish_f5_success` ni
+    `publish_f5_failure` directamente. La garantía de F5.5.1 es «para auditar
+    hay que haber publicado», que basta para la precedencia y **no** basta como
+    obligación de proceso: un orquestador que llame a las funciones de F5.4.3
+    —que siguen siendo `pub`, y así se quedan: bajarlas a `pub(crate)`
+    reabriría la frontera de un hito cerrado— obtiene un destino **sin
+    testigo** y deja la clausura inaplicable sin ninguna señal.
 - ☐ **F5.6.2.** Incorporar el perfil opcional
   `human_ld_ragsdale_approx_v1` mediante su recurso versionado y receta de medias,
   sin beta/cuantiles activos ni selección predeterminada.
@@ -2956,7 +3013,12 @@ identificador del índice de copia.
     presencia expresa de `REQ-VAL-54`/`REQ-MAN-70`/`REQ-SAL-02`,
     las tres puertas de `CONTRIBUTING.md` con `--locked`,
     lectores JSON/TSV/JSONL, oráculo, vectores, paridad y búsquedas negativas de panel,
-    SV, repeticiones, BAM/CRAM y recombinación bajo F5.
+    SV, repeticiones, BAM/CRAM y recombinación bajo F5, **los dos auditores
+    compuestos sobre el destino ya renombrado** —`audit_f5_package` y
+    `audit_f5_identity_closure`, éxito y fallo— y una búsqueda negativa que
+    demuestre que ninguna vía de publicación de F5.6 llama a
+    `publish_f5_success` ni a `publish_f5_failure` fuera de los envoltorios que
+    sellan.
 
 > **Revisión F5.6.** No iniciar F6 ni F7 hasta aprobar las evidencias y confirmar
 > que no quedan decisiones funcionales o técnicas F5 abiertas.

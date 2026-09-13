@@ -1299,6 +1299,23 @@ impl<'a> F5PublicationRequest<'a> {
         })
     }
 
+    /// La configuración efectiva que esta publicación usa.
+    ///
+    /// Es la que el paquete publica y la que la admisión sellada admite. Se
+    /// expone para que la clausura de F5.5.1 pueda congelar en su testigo la
+    /// clase fundadora de cada subpoblación **en el momento de publicar**, en
+    /// vez de leerla de un objeto que le entreguen después.
+    #[must_use]
+    pub const fn config(&self) -> &'a EffectiveF5Config {
+        self.config
+    }
+
+    /// La admisión sellada que esta publicación consume.
+    #[must_use]
+    pub const fn sealed(&self) -> &'a SealedF5Admission {
+        self.sealed
+    }
+
     /// La declaración que el oráculo independiente contrasta contra los bytes
     /// y que el manifiesto copiará.
     fn declaration(&self, artifacts: &F5SuccessArtifacts) -> F5PackageDeclaration {

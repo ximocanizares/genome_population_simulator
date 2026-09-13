@@ -33,7 +33,18 @@
 //!    sería una identidad creada después de F5.3; ni una menos, que sería una
 //!    fila publicada sin derivar. En la mitad «fallo» la ley es la igualdad
 //!    estricta: publicar un fallo **no deriva ninguna** identidad.
-//! 3. **Imposibilidad de mutar.** La auditoría recibe `&F5FounderIdentities`,
+//! 3. **La clase fundadora también va sellada.** La Revisión F5.5 encontró la
+//!    pieza que **ningún auditor cubría**: el censo **no está en el paquete**,
+//!    de modo que el oráculo de F5.4.2 no puede verlo, y esta clausura lo
+//!    recibía como cuarto parámetro suelto. Una segunda cadena que declarase
+//!    `founder_ids` literales iguales a los `IND_` derivados **invertía** los
+//!    dos recuentos que el hito publica como evidencia, y la auditoría decía
+//!    `Ok`. Ahora la clase de cada subpoblación se congela en el testigo al
+//!    sellar, tomada de la configuración que publica y solo si
+//!    `matches_admission` la admite —`SealedF5Admission` cubre
+//!    `subpopulation.founder_kind` en su material canónico—, y el censo **deja
+//!    de ser un parámetro**: la sonda ya no es representable.
+//! 4. **Imposibilidad de mutar.** La auditoría recibe `&F5FounderIdentities`,
 //!    una referencia compartida. Derivar una identidad exige `&mut self`
 //!    —`for_each_assignment` es el único camino— y el registro es privado del
 //!    módulo fundador. Por tanto **ningún paso de F5.5 puede crear, sustituir
@@ -85,9 +96,9 @@ use serde::Deserialize;
 use crate::application::EffectiveF5Config;
 use crate::diagnostics::Diagnostic;
 use crate::f5_artifacts::{F5_TRUTH_PATH, F5_TSV_CONTRACTS};
-use crate::f5_founders::{F5FounderAssignment, F5FounderIdentities};
+use crate::f5_founders::F5FounderIdentities;
 use crate::f5_oracle::{F5_FAILURE_DOCUMENT_PATH, F5InitializationSummary, F5PackageDeclaration};
-use crate::f5_preflight::SealedF5Admission;
+use crate::f5_preflight::{F5OtherResources, SealedF5Admission};
 use crate::f5_publication::{
     F5FailureReport, F5PublicationFailure, F5PublicationRequest, publish_f5_failure,
     publish_f5_success,
@@ -287,6 +298,24 @@ impl F5IdentitySeal {
 pub struct F5ClosureWitness {
     seal: F5IdentitySeal,
     destination: PathBuf,
+    /// Clase fundadora de cada subpoblación, **congelada al sellar** y
+    /// ordenada por `population_id`.
+    ///
+    /// Es la corrección de la Revisión F5.5: la clasificación
+    /// aportado/derivado se leía del censo que la auditoría recibía como
+    /// cuarto parámetro suelto, de modo que una segunda cadena que declarase
+    /// `founder_ids` literales iguales a los `IND_` derivados **invertía** los
+    /// dos recuentos que el plan nombra como evidencia del hito, y la
+    /// auditoría devolvía `Ok`. Ningún auditor lo cubría: el censo **no está
+    /// en el paquete**, de modo que el oráculo de F5.4.2 no puede verlo.
+    ///
+    /// Ahora la clase viaja en el testigo, tomada de la configuración que
+    /// publica, y el censo deja de ser un parámetro: la sonda ya no es
+    /// representable.
+    ///
+    /// `None` cuando esa configuración **no** es la que su admisión sella: el
+    /// testigo existe pero no clasifica nada, y la auditoría lo rechaza.
+    founder_kinds: Option<Vec<(String, bool)>>,
 }
 
 impl F5ClosureWitness {
@@ -301,10 +330,27 @@ impl F5ClosureWitness {
         &self.destination
     }
 
-    /// El testigo tiene que acreditar el paquete que se está auditando.
+    /// El testigo tiene que acreditar el paquete que se está auditando, y ese
+    /// paquete tiene que **existir**.
+    ///
+    /// Las dos rutas se canonicalizan y la canonicalización es **obligatoria**:
+    /// la versión anterior caía a la comparación literal cuando alguna no
+    /// existía, de modo que un destino borrado se comparaba igual a sí mismo y
+    /// acreditaba un paquete inexistente. Ahora una ruta que no resuelve es
+    /// `Missing`, que es lo que es.
     fn ensure_accredits(&self, payload_root: &Path) -> Checked<()> {
-        let same = same_location(&self.destination, payload_root);
-        if same {
+        let resolve = |path: &Path| -> Checked<PathBuf> {
+            path.canonicalize().map_err(|error| {
+                reject(
+                    F5ClosureCause::Missing,
+                    "witness",
+                    "destination",
+                    format!("{} no resuelve: {error}", path.display()),
+                )
+            })
+        };
+        let accredited = resolve(&self.destination)?;
+        if accredited == resolve(payload_root)? {
             return Ok(());
         }
         Err(reject(
@@ -318,19 +364,58 @@ impl F5ClosureWitness {
             ),
         ))
     }
+
+    /// La clase fundadora sellada de una subpoblación: `true` si su identidad
+    /// se derivó de una `founder_key`.
+    fn founder_kind(&self, population_id: &str, path: &str) -> Checked<bool> {
+        let kinds = self.founder_kinds.as_ref().ok_or_else(|| {
+            reject(
+                F5ClosureCause::Seal,
+                "witness",
+                "founder_kinds",
+                "la configuración que publicó no es la que su admisión sella",
+            )
+        })?;
+        kinds
+            .binary_search_by(|(candidate, _)| candidate.as_str().cmp(population_id))
+            .map(|position| kinds[position].1)
+            .map_err(|_| {
+                reject(
+                    F5ClosureCause::Roster,
+                    path,
+                    "population_id",
+                    format!("{population_id} no es ninguna de las subpoblaciones selladas"),
+                )
+            })
+    }
 }
 
-/// Dos rutas nombran el mismo directorio.
+/// Clase fundadora de cada subpoblación, tomada de la configuración que
+/// publica y solo si su admisión sellada la admite.
 ///
-/// Se canonicalizan cuando el sistema de ficheros lo permite —para que
-/// `./destino` y `destino` no se tomen por distintos— y se cae a la
-/// comparación literal cuando alguna no existe, que es el caso en el que la
-/// auditoría va a fallar de todos modos al abrir el artefacto.
-fn same_location(left: &Path, right: &Path) -> bool {
-    match (left.canonicalize(), right.canonicalize()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => left == right,
+/// `SealedF5Admission` cubre `subpopulation.founder_kind` en su material
+/// canónico, de modo que `matches_admission` es la comprobación que ata esta
+/// lectura al sello y no a un objeto en memoria cualquiera.
+fn sealed_founder_kinds(
+    config: &EffectiveF5Config,
+    sealed: &SealedF5Admission,
+) -> Option<Vec<(String, bool)>> {
+    if !sealed.matches_admission(config, F5OtherResources::default()) {
+        return None;
     }
+    let mut kinds = config
+        .declared_scenario()
+        .subpopulations
+        .iter()
+        .map(|subpopulation| {
+            (
+                subpopulation.population_id.value().clone(),
+                subpopulation.founder_keys.is_some(),
+            )
+        })
+        .collect::<Vec<_>>();
+    kinds.sort_by(|left, right| left.0.cmp(&right.0));
+    Some(kinds)
 }
 
 /// Sella el repositorio y publica el éxito, en ese orden.
@@ -353,8 +438,13 @@ where
     R: FnOnce(&Path, &F5PackageDeclaration) -> Result<Vec<F5InitializationSummary>, Diagnostic>,
 {
     let seal = F5IdentitySeal::seal(identities);
+    let founder_kinds = sealed_founder_kinds(request.config(), request.sealed());
     let destination = publish_f5_success(workspace, request, identities, recount)?;
-    Ok(F5ClosureWitness { seal, destination })
+    Ok(F5ClosureWitness {
+        seal,
+        destination,
+        founder_kinds,
+    })
 }
 
 /// Sella el repositorio y publica el fallo controlado, en ese orden.
@@ -377,8 +467,13 @@ pub fn seal_and_publish_f5_failure(
     identities: &F5FounderIdentities,
 ) -> Result<F5ClosureWitness, Diagnostic> {
     let seal = F5IdentitySeal::seal(identities);
+    let founder_kinds = sealed_founder_kinds(config, sealed);
     let destination = publish_f5_failure(workspace, config, sealed, execution_id, report)?;
-    Ok(F5ClosureWitness { seal, destination })
+    Ok(F5ClosureWitness {
+        seal,
+        destination,
+        founder_kinds,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -461,13 +556,12 @@ pub fn audit_f5_identity_closure(
     payload_root: &Path,
     witness: &F5ClosureWitness,
     identities: &F5FounderIdentities,
-    assignment: &F5FounderAssignment,
 ) -> Checked<F5ClosureReport> {
     witness.ensure_accredits(payload_root)?;
     let seal = &witness.seal;
     check_seal(seal, identities)?;
-    check_repository_order(identities, assignment)?;
-    let report = walk_founders(payload_root, identities, assignment)?;
+    check_repository_order(identities)?;
+    let report = walk_founders(payload_root, witness, identities)?;
     check_conservation(seal, identities, report.assignments)?;
     walk_truth_membership(payload_root, identities, report.copies)?;
     Ok(report)
@@ -495,6 +589,13 @@ pub fn audit_f5_failure_closure(
     identities: &F5FounderIdentities,
 ) -> Checked<F5ClosureReport> {
     witness.ensure_accredits(payload_root)?;
+    // **Una afirmación positiva sobre el disco.** Sin ella la mitad «fallo»
+    // era una comprobación construida entera sobre ausencias —el sello mira
+    // memoria y los ocho ficheros biológicos se exigen ausentes—, y un destino
+    // borrado entero, o sin su documento de fallo, la satisfacía. Se abre el
+    // diagnóstico y no se lee: juzgar su contenido es de
+    // `audit_f5_failure_package`, no de aquí.
+    drop(open_for_reading(payload_root, F5_FAILURE_DOCUMENT_PATH)?);
     let seal = &witness.seal;
     check_seal(seal, identities)?;
     // La ley de conservación de la mitad «fallo»: publicar un fallo **no
@@ -615,20 +716,20 @@ fn check_conservation(
     Ok(())
 }
 
-/// Las dos búsquedas binarias de la auditoría exigen su orden canónico.
+/// La búsqueda binaria de unidades exige su orden canónico.
 ///
 /// Es una **precondición de la propia auditoría**, no un hallazgo sobre el
-/// paquete: el repositorio y el censo declaran ese orden en su contrato y
-/// ninguna configuración admitida lo rompe —el estudio de mutación de la
-/// batería lo confirma: desactivar esta función no tumba ninguna prueba—. Se
-/// conserva porque lo que protege es un **falso negativo de esta auditoría**:
-/// una búsqueda binaria sobre datos desordenados devolvería «ausente» sobre
+/// paquete: el repositorio declara ese orden en su contrato y ninguna
+/// configuración admitida lo rompe —el estudio de mutación de la batería lo
+/// confirma: desactivar esta función no tumba ninguna prueba—. Se conserva
+/// porque lo que protege es un **falso negativo de esta auditoría**: una
+/// búsqueda binaria sobre datos desordenados devolvería «ausente» sobre
 /// identidades presentes y la clausura rechazaría un paquete correcto citando
 /// una causa falsa. Cuesta un recorrido lineal y no retiene nada.
-fn check_repository_order(
-    identities: &F5FounderIdentities,
-    assignment: &F5FounderAssignment,
-) -> Checked<()> {
+///
+/// La mitad que validaba el orden del censo desapareció con el censo: la
+/// clase fundadora vive ahora en el testigo, ordenada al sellar.
+fn check_repository_order(identities: &F5FounderIdentities) -> Checked<()> {
     if identities.units().windows(2).any(|pair| {
         (
             pair[0].population_id().as_str(),
@@ -644,35 +745,6 @@ fn check_repository_order(
             "units",
             "las unidades cerradas no llegan ordenadas por población y bloque",
         ));
-    }
-    if assignment
-        .rosters()
-        .windows(2)
-        .any(|pair| pair[0].population_id() >= pair[1].population_id())
-    {
-        return Err(reject(
-            F5ClosureCause::Seal,
-            "assignment",
-            "rosters",
-            "el censo cerrado no llega ordenado por subpoblación",
-        ));
-    }
-    for roster in assignment.rosters() {
-        if roster
-            .individuals()
-            .windows(2)
-            .any(|pair| pair[0].individual_id() >= pair[1].individual_id())
-        {
-            return Err(reject(
-                F5ClosureCause::Seal,
-                "assignment",
-                "rosters.individuals",
-                format!(
-                    "el censo de {} no llega ordenado por individuo",
-                    roster.population_id().as_str()
-                ),
-            ));
-        }
     }
     Ok(())
 }
@@ -727,8 +799,8 @@ impl CopyKey {
 #[allow(clippy::too_many_lines)]
 fn walk_founders(
     payload_root: &Path,
+    witness: &F5ClosureWitness,
     identities: &F5FounderIdentities,
-    assignment: &F5FounderAssignment,
 ) -> Checked<F5ClosureReport> {
     let contract = &F5_TSV_CONTRACTS[FOUNDERS];
     let path = contract.path();
@@ -856,7 +928,7 @@ fn walk_founders(
                     .is_none_or(|last| last.other_individual(fields[0], fields[1]))
                 {
                     report.individuals += 1;
-                    if classify_individual(assignment, fields[0], fields[1], path)? {
+                    if witness.founder_kind(fields[0], path)? {
                         report.derived_individuals += 1;
                     } else {
                         report.supplied_individuals += 1;
@@ -951,45 +1023,6 @@ fn walk_founders(
     Ok(report)
 }
 
-/// `true` si la identidad del individuo se derivó de una `founder_key`.
-///
-/// Es una **clasificación**, no una comprobación: sus dos ramas de «ausente»
-/// no son alcanzables desde una configuración admitida, porque la fila ya
-/// probó su individuo contra la copia cerrada y toda copia cerrada lleva un
-/// individuo que el censo resolvió. Se conservan para que un cambio futuro que
-/// rompa esa cadena falle en voz alta en lugar de clasificar mal.
-fn classify_individual(
-    assignment: &F5FounderAssignment,
-    population_id: &str,
-    individual_id: &str,
-    path: &str,
-) -> Checked<bool> {
-    let roster = assignment
-        .rosters()
-        .binary_search_by(|candidate| candidate.population_id().as_str().cmp(population_id))
-        .map(|position| &assignment.rosters()[position])
-        .map_err(|_| {
-            reject(
-                F5ClosureCause::Roster,
-                path,
-                "population_id",
-                format!("{population_id} no es ninguna de las subpoblaciones del censo cerrado"),
-            )
-        })?;
-    roster
-        .individuals()
-        .binary_search_by(|candidate| candidate.individual_id().as_str().cmp(individual_id))
-        .map(|position| roster.individuals()[position].founder_key().is_some())
-        .map_err(|_| {
-            reject(
-                F5ClosureCause::Roster,
-                path,
-                "individual_id",
-                format!("{individual_id} no está en el censo cerrado de {population_id}"),
-            )
-        })
-}
-
 /// Cada identificador ocupa el lugar de su propia clase, no el de otra.
 fn check_class(value: &str, prefix: &str, path: &str, field: &str) -> Checked<()> {
     if value.starts_with(prefix) {
@@ -1012,11 +1045,16 @@ fn check_class(value: &str, prefix: &str, path: &str, field: &str) -> Checked<()
 /// `truth.jsonl` es el único artefacto que publica `founder_membership`, de
 /// modo que es el único sitio donde «pertenencia ausente o duplicada» puede
 /// comprobarse sobre bytes.
-/// El LF final es obligatorio en los dos recorridos, como en el oráculo.
+/// Los dos recorridos exigen LF **en cada línea que leen**, como el oráculo.
 ///
-/// Los dos ficheros lo exigen por el mismo contrato v1/v2 y con la misma
-/// causa: una línea sin LF final es una línea truncada, y aceptarla en uno de
-/// los dos recorridos dejaría un contrato de bytes distinto según el fichero.
+/// La afirmación es esa y no más, y la Revisión F5.5 corrigió la anterior, que
+/// decía «LF final» y era falsa: `walk_truth_membership` rompe en el primer
+/// genotipo y la última línea de `truth.jsonl` es siempre un genotipo, de modo
+/// que el LF **final** del documento nunca se mira. Un documento sin él se
+/// acepta aquí; uno truncado dentro de la sección de copias sí se rechaza.
+/// Cerrar el recorrido costaría una pasada entera por un contrato que la
+/// puerta física de F5.4.3 y el oráculo de F5.4.2 ya sostienen sobre el
+/// fichero completo, de modo que se rebaja la afirmación en vez de pagarla.
 fn strip_lf<'a>(line: &'a str, path: &str) -> Checked<&'a str> {
     line.strip_suffix('\n').ok_or_else(|| {
         reject(
