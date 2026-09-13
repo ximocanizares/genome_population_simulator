@@ -261,6 +261,15 @@ impl F5AttemptRecord {
     }
 
     /// Propuestas consumidas del presupuesto `max_swap_proposals`.
+    ///
+    /// **Invariante de la que cuelga la cota del auditor de fallo.** Este valor
+    /// es el de **un** intento y no puede pasar de `max_swap_proposals`: el
+    /// bucle de propuestas termina al agotar ese presupuesto (DTC-089 l. 1196).
+    /// El contador acumulado que publica `f5-failure.json` suma un sumando por
+    /// intento, de modo que `audit_f5_failure_package` lo acota con
+    /// `max_swap_proposals * haplotype_attempts_used`. Si algún día un intento
+    /// pudiera consumir más que su presupuesto, esa cota dejaría de ser válida
+    /// y habría que revisarla en `src/f5_oracle.rs` a la vez.
     #[must_use]
     pub const fn proposals(&self) -> u64 {
         self.proposals

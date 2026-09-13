@@ -369,7 +369,12 @@ fn target_json(
     }))
 }
 
-fn limits_json(
+/// Los siete límites del contrato, derivados de la autoría admitida.
+///
+/// Es `pub(crate)` porque el auditor del paquete de fallo los necesita **sin
+/// leerlos del manifiesto**: si los tomara de ahí compararía la serialización
+/// del productor consigo misma. La regla vive aquí una sola vez.
+pub(crate) fn limits_json(
     config: &EffectiveF5Config,
     sealed: &SealedF5Admission,
 ) -> Result<Value, Diagnostic> {

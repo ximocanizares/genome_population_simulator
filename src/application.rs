@@ -2784,17 +2784,29 @@ pub fn execute_validated_f5_config<'a>(
 /// Es la mitad que F5.6.1 no pudo componer. `audit_f5_failure_package` exige
 /// una [`crate::f5_oracle::F5FailureDeclaration`] que el orquestador no
 /// conserva, y reconstruirla desde el informe en memoria haría la auditoría
-/// autocertificante: el productor declararía lo que el productor escribió. Se
-/// reconstruye por tanto desde el **manifiesto publicado**, de modo que el
-/// auditor contrasta dos documentos del paquete —`manifest.json` y
-/// `outputs/f5-failure.json`— y reabre los bytes del enlace, sin tocar ninguna
-/// caché del productor.
+/// autocertificante: el productor declararía lo que el productor escribió.
+///
+/// Tomarla entera del manifiesto **tampoco** basta, y la Revisión F5.6 lo
+/// demostró: `diagnostic_document` y `manifest_document` salen los dos de
+/// `common_json`, de modo que los nueve términos comunes son la misma
+/// serialización emitida dos veces y el auditor los compararía consigo mismos.
+/// Los dos que tienen fuente **contractual** —`scenario_id` y los siete
+/// `limits`— se derivan por eso de la autoría admitida y de la admisión
+/// sellada, no del manifiesto: así el auditor contrasta **contrato contra
+/// bytes**. Los demás términos —código, etapa, contadores, mejor intento— son
+/// medida del productor y no tienen otra fuente que comparar; lo que el
+/// auditor exige de ellos es coherencia entre los dos documentos, el árbol
+/// enumerado y el rehash del enlace.
 ///
 /// # Errors
 ///
 /// El diagnóstico del oráculo si el paquete publicado no sostiene lo que su
-/// propio manifiesto declara.
-fn audit_published_f5_failure(destination: &Path) -> Result<(), Diagnostic> {
+/// autoría admitida y su propio manifiesto declaran.
+fn audit_published_f5_failure(
+    destination: &Path,
+    config: &EffectiveF5Config,
+    sealed: &crate::f5_preflight::SealedF5Admission,
+) -> Result<(), Diagnostic> {
     use crate::f5_oracle::{F5DeclaredLink, F5FailureDeclaration, audit_f5_failure_package};
     use crate::f5_publication::F5_MANIFEST_PATH;
 
@@ -2832,8 +2844,12 @@ fn audit_published_f5_failure(destination: &Path) -> Result<(), Diagnostic> {
             .map(|key| object[*key].as_u64().ok_or_else(|| invalid(field)))
             .collect::<Result<Vec<_>, Diagnostic>>()
     };
+    // Los siete límites salen de la **autoría admitida**, con la misma regla
+    // que el productor usó al publicarlos. Un manifiesto que declare otros
+    // muere en el auditor, que los contrasta contra los bytes del documento.
+    let contractual_limits = crate::f5_publication::limits_json(config, sealed)?;
     let limits = numbers(
-        &failure["limits"],
+        &contractual_limits,
         &[
             "max_layout_attempts",
             "max_haplotype_attempts",
@@ -2859,7 +2875,10 @@ fn audit_published_f5_failure(destination: &Path) -> Result<(), Diagnostic> {
     let declaration = F5FailureDeclaration {
         code: text(&failure["code"], "code")?,
         stage: text(&failure["stage"], "stage")?,
-        scenario_id: text(&failure["scenario_id"], "scenario_id")?,
+        // El escenario es el de la autoría admitida, no el que el manifiesto
+        // diga que es: es el término que la revisión fabricó sin que nadie lo
+        // notara.
+        scenario_id: config.scenario_id().to_owned(),
         population_id: failure["population_id"].as_str().map(str::to_owned),
         block_id: failure["block_id"].as_str().map(str::to_owned),
         limits: limits.try_into().map_err(|_| invalid("limits"))?,
@@ -2902,6 +2921,36 @@ where
         &crate::f5_oracle::F5PackageDeclaration,
     ) -> Result<Vec<crate::f5_oracle::F5InitializationSummary>, Diagnostic>,
 {
+    execute_validated_f5_config_with_probes(config, destination, recount, Ok)
+}
+
+/// Variante instrumental con el recuento **y** la clausura de identidad
+/// inyectables.
+///
+/// La clausura real corre siempre; la sonda solo puede convertir su **éxito**
+/// en un rechazo, que es la única forma de recorrer desde una batería la
+/// degradación del destino sin corromper el paquete desde fuera del proceso.
+/// Un defecto real del productor llega por el mismo camino.
+///
+/// # Errors
+///
+/// Los mismos que [`execute_validated_f5_config`].
+#[doc(hidden)]
+pub fn execute_validated_f5_config_with_probes<'a, R, C>(
+    config: &EffectiveF5Config,
+    destination: &'a Path,
+    recount: R,
+    closure_probe: C,
+) -> Result<F5ExecutionOutcome<'a>, Diagnostic>
+where
+    R: FnOnce(
+        &Path,
+        &crate::f5_oracle::F5PackageDeclaration,
+    ) -> Result<Vec<crate::f5_oracle::F5InitializationSummary>, Diagnostic>,
+    C: FnOnce(
+        crate::f5_closure::F5ClosureReport,
+    ) -> Result<crate::f5_closure::F5ClosureReport, Diagnostic>,
+{
     use crate::f5_closure::{
         F5ClosureRejection, audit_f5_failure_closure, audit_f5_identity_closure,
         seal_and_publish_f5_failure, seal_and_publish_f5_success,
@@ -2939,7 +2988,7 @@ where
             &empty,
         ) {
             Ok(failed) => match audit_f5_failure_closure(failed.destination(), &failed, &empty) {
-                Ok(_) => match audit_published_f5_failure(failed.destination()) {
+                Ok(_) => match audit_published_f5_failure(failed.destination(), config, &sealed) {
                     Ok(()) => report.diagnostic().clone(),
                     Err(diagnostic) => diagnostic,
                 },
@@ -3029,12 +3078,39 @@ where
             return Err(published_failure(&mut workspace, &report));
         }
     };
-    let closure = audit_f5_identity_closure(destination, &witness, &identities)
-        .map_err(F5ClosureRejection::into_diagnostic)?;
+    let audited = audit_f5_identity_closure(destination, &witness, &identities)
+        .map_err(F5ClosureRejection::into_diagnostic)
+        .and_then(closure_probe);
+    let closure = match audited {
+        Ok(closure) => closure,
+        Err(rejection) => return Err(degrade_rejected_destination(destination, rejection)),
+    };
     Ok(F5ExecutionOutcome {
         destination,
         closure,
     })
+}
+
+/// Aparta el destino que la clausura acaba de rechazar y enriquece el motivo.
+///
+/// Sin esto, el paquete defectuoso se queda en el destino final con
+/// `state="complete"`, sin marcador ni documento de fallo, y el único testigo
+/// del rechazo es el código de salida del proceso. La mitad «éxito» de la
+/// cadena ya convierte en paquete `failed` cualquier rechazo **anterior** al
+/// renombrado; esta es la mitad que solo puede descubrirse después.
+fn degrade_rejected_destination(destination: &Path, rejection: Diagnostic) -> Diagnostic {
+    match crate::publication::demote_rejected_destination(destination) {
+        Ok(demoted) => rejection.with("demoted_destination", demoted.display().to_string()),
+        // No poder apartarlo es peor noticia que el rechazo: se dice entera.
+        Err(failure) => rejection.with("demotion_failed", "true").with(
+            "demotion_detail",
+            failure
+                .context()
+                .get("detail")
+                .cloned()
+                .unwrap_or_else(|| failure.code().to_owned()),
+        ),
+    }
 }
 
 #[cfg(test)]

@@ -956,6 +956,59 @@ fn input_error(path: &Path, error: std::io::Error) -> Diagnostic {
         .with("detail", error.to_string())
 }
 
+/// Degrada un destino ya renombrado que su propio auditor acaba de rechazar.
+///
+/// La atomicidad de DTC-045 protege el renombrado, no lo que se descubre
+/// **después** de él: `audit_f5_identity_closure` solo puede acreditar el
+/// destino final —`ensure_accredits` exige el árbol ya renombrado—, de modo que
+/// cuando cumple su función el paquete defectuoso ya ocupa el destino. Sin esta
+/// degradación, el único testigo del rechazo sería el código de salida del
+/// proceso, que se pierde en cuanto el directorio cambia de manos, y F6 o F7
+/// leerían del disco un `manifest.json` con `state="complete"` indistinguible
+/// de un paquete bueno.
+///
+/// El orden importa y es deliberado: **primero** el marcador dentro del árbol,
+/// que lo vuelve inconsumible aunque todo lo demás falle, y **después** el
+/// renombrado que libera el destino. Un árbol degradado no es un árbol
+/// publicado, así que llevar `INCOMPLETE` dentro no contradice la invariante
+/// de DTC-045: lo que esa invariante prohíbe es publicar un árbol con marcador.
+///
+/// # Errors
+///
+/// [`Diagnostic`] de entrada/salida si no se puede marcar ni apartar el árbol.
+/// El llamador debe propagar entonces el rechazo original **y** este fallo: un
+/// destino que no se pudo degradar es peor noticia que el rechazo que lo causó.
+pub fn demote_rejected_destination(destination: &Path) -> Result<PathBuf, Diagnostic> {
+    let marker = destination.join(INCOMPLETE_MARKER);
+    fs::write(&marker, b"rejected-by-audit\n")
+        .map_err(|error| io_error(&marker, "write_rejection_marker", error))?;
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| invalid_state("execution", "destination has no file name"))?;
+    for _ in 0..128 {
+        let counter = WORKSPACE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let rejected = parent.join(format!(
+            ".{name}.gps-rejected-{}-{counter}",
+            std::process::id()
+        ));
+        if rejected.exists() {
+            continue;
+        }
+        return match fs::rename(destination, &rejected) {
+            Ok(()) => Ok(rejected),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => Err(io_error(destination, "demote_rejected", error)),
+        };
+    }
+    Err(invalid_state(
+        "execution",
+        "no free name to demote the rejected destination",
+    ))
+}
+
 fn io_error(path: &Path, operation: &str, error: std::io::Error) -> Diagnostic {
     Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")
         .with("path", path.display().to_string())

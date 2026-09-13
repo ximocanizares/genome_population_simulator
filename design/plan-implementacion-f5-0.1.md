@@ -2025,7 +2025,11 @@ identificador del índice de copia.
       fichero y `every_link_declares_the_literal_path_size_and_digest_of_its_bytes`,
       la ruta literal, el tamaño `u64` y el SHA-256 de sus bytes.
     - **Revisión adversarial F5.4.1, correcciones aplicadas.** Nueve
-      hallazgos; ocho aplicados y uno pendiente de una decisión del usuario.
+      hallazgos, los **nueve aplicados**. (La redacción anterior decía «ocho
+      aplicados y uno pendiente de una decisión del usuario»; las nueve
+      entradas H1–H9 dicen «Corregido» o «Aplicado» y no hay ninguna decisión
+      registrada en ningún sitio. La frase quedó obsoleta y la retira F5.6.3,
+      condición documental de la Revisión F5.6.)
       - **H1 — el escritor no cabía en su propio presupuesto (grave).**
         Corregido con la serialización por flujo de la decisión 3. Medido con
         asignador contador sobre `write_f5_success_artifacts`: antes
@@ -2994,8 +2998,11 @@ identificador del índice de copia.
     —que siguen siendo `pub`, y así se quedan: bajarlas a `pub(crate)`
     reabriría la frontera de un hito cerrado— obtiene un destino **sin
     testigo** y deja la clausura inaplicable sin ninguna señal.
-  - **Implementado (2026-09-13), pendiente de revisión adversarial.** La casilla
-    sigue en ☐ hasta que la revisión la apruebe.
+  - **Implementado (2026-09-13) y aprobado por su revisión adversarial**, cuyas
+    correcciones se recogen más abajo. (La redacción anterior decía que la
+    casilla «sigue en ☐ hasta que la revisión la apruebe»; la revisión se aplicó
+    el mismo día y la casilla está en ✅. Frase obsoleta retirada por F5.6.3, al
+    hilo de la condición documental de la Revisión F5.6.)
   - **Decisión material: `run` F5 queda cableado.** Antes de este hito
     `src/main.rs` devolvía «run F5 todavía no está habilitado» y ninguna de las
     cuatro fronteras F5 tenía llamador productivo. La comprobación que el hito
@@ -3293,10 +3300,10 @@ identificador del índice de copia.
     demuestre que ninguna vía de publicación de F5.6 llama a
     `publish_f5_success` ni a `publish_f5_failure` fuera de los envoltorios que
     sellan.
-  - **Ejecutado (13 de septiembre de 2026), pendiente de revisión.** La casilla
-    sigue en ☐ hasta que la Revisión F5.6 la apruebe. El acta está en
-    `evidence/f5.6/cierre.md` y las comprobaciones nuevas en
-    `tests/f5_6_closure.rs`.
+  - **Ejecutado (13 de septiembre de 2026) y aprobado con condiciones por la
+    Revisión F5.6.** El acta está en `evidence/f5.6/cierre.md` y las
+    comprobaciones nuevas en `tests/f5_6_closure.rs`. Las condiciones de la
+    revisión —G1, G2 y los puntos documentales— quedan aplicadas más abajo.
   - **Recuento mecánico, y por qué lo es.** 46 filas, 46 REQ distintos y los
     tres nombrados. El recuento sale de **contar la tabla** término a término
     —el campo Hito admite varios hitos separados por `/`, así que `F2.0/F5.6`
@@ -3369,9 +3376,112 @@ identificador del índice de copia.
     F5.4.1 **no se retira**: el plan decía «puede», no hay defecto y
     `tests/f5_artifacts.rs` es evidencia propia del escritor. DTF-058 sigue
     aplazada y no bloquea.
+  - **Revisión F5.6 aplicada (13 de septiembre de 2026): evidencias aprobadas
+    con condiciones, y F6/F7 no todavía.** La revisión volvió a medir cada
+    cifra del acta y coincide al dígito; comprobó el recuento mecánico y sus
+    mutaciones, que ninguna fila cambió Requisito, ACE ni Hito, que las 213
+    citas de la matriz y las 31 del acta existen y son pruebas, y que los
+    cuatro auditores están compuestos **por comportamiento**, matando cada uno
+    por separado con binario instrumentado. Devolvió dos hallazgos graves.
+    - **G1 — un paquete rechazado por su propio auditor quedaba publicado como
+      completo.** `audit_f5_identity_closure` solo puede acreditar el destino ya
+      renombrado —`ensure_accredits` lo exige—, de modo que cuando cumple su
+      función el paquete defectuoso **ya ocupa el destino final**: la CLI
+      devolvía `exit=2` y en disco quedaban los diez ficheros con
+      `manifest.json → "state":"complete"`, sin marcador ni documento de fallo.
+      El único testigo era el código de salida, que se pierde en cuanto el
+      directorio cambia de manos, y F6/F7 leen paquetes F5 del disco.
+      Adelantar la auditoría no sirve, así que la corrección es la **degradación
+      posterior**: `demote_rejected_destination` escribe `INCOMPLETE` dentro del
+      árbol —primero, para que quede inconsumible aunque lo demás falle— y lo
+      renombra a `.<nombre>.gps-rejected-<pid>-<n>`, liberando el destino; el
+      diagnóstico gana `demoted_destination`, o `demotion_failed` si ni eso se
+      pudo. Un árbol degradado no es un árbol publicado, así que llevar el
+      marcador dentro no contradice DTC-045. La prueba es de **vía productiva**
+      —`a_closure_rejection_after_the_rename_leaves_no_complete_package`, con la
+      clausura real corriendo siempre y una sonda que convierte su éxito en
+      rechazo— y muere contra la variante anterior.
+    - **G2 — los nueve términos comunes se comparaban consigo mismos.**
+      `diagnostic_document` y `manifest_document` salen los dos de
+      `common_json`: son la misma serialización emitida dos veces. La revisión
+      lo demostró fabricando `scenario_id` en `common_json` y viendo pasar la
+      suite entera. El acta decía que el cuarto auditor contrasta «dos
+      documentos independientes» y **no lo eran**. Corregido donde hay fuente
+      contractual: `audit_published_f5_failure` recibe ahora `config` y
+      `sealed`, toma `scenario_id` de la autoría admitida y los siete `limits`
+      de `limits_json(config, sealed)` —que pasa a `pub(crate)` para no
+      duplicar la regla—, de modo que contrasta **contrato contra bytes**. Los
+      demás términos —código, etapa, contadores, mejor intento— son medida del
+      productor y no tienen otra fuente que comparar: de ellos el auditor exige
+      coherencia entre documentos, árbol enumerado y rehash del enlace, y así
+      queda dicho en vez de presentarse como independencia. La asimetría que la
+      revisión señala es real: la mitad de éxito nunca tuvo el problema porque
+      `F5PublicationRequest::declaration` construye desde la configuración
+      admitida y la asignación.
+  - **Decisión escrita: `f5-resource-accounting-v9` se reclasifica.** El plan
+    declaró la condición «bloqueante en el primer `run` productivo, es decir en
+    F5.6». Ese `run` existe desde F5.6.1 y **compone `audit_f5_package`**, de
+    modo que la condición se cumplió y nadie la declaró resuelta. Se resuelve
+    aquí como **decisión tomada, no como condición olvidada**: v9 **no se exige
+    antes de F6**, porque reabrir `effective-config-v5.schema.json` y
+    `manifest-general-v5.schema.json` por una cota que hoy no se mide en
+    ejecución no lo justifica. **Destino: F9.7**, con la consolidación de
+    contratos, o antes si aparece contabilidad de recursos en tiempo de
+    ejecución. El matiz que hace falta escribir: las piezas caben contra el
+    **límite configurable** —8 MiB frente a 1 GiB— pero **no contra
+    `final_formula_peak`**, que es justo lo que v8 no modela y lo que F5.4.2
+    midió en ≈4,2× para el oráculo y hasta 2× para la publicación.
+  - **Tres deudas más, recontadas con destino.** No estaban en la primera
+    redacción del acta y la Revisión F5.6 las echó en falta.
+    - **`Q*S_bound` insatisfacible por construcción** (este plan, «Condición
+      normativa pendiente, ajena a F5.2»). Con `S_bound = 2` concede dos
+      unidades por propuesta y DTC-089 exige cuatro sorteos, de modo que
+      ninguna implementación puede cumplirlo. El término **sigue vivo** en
+      `src/f5_preflight.rs`. Su destino declarado era «el hito de la admisión»,
+      que cerró sin resolverlo: la deuda quedó **huérfana**. No es deuda de
+      trabajo sino **contradicción normativa** —un contrato que nada puede
+      satisfacer— y merece dictamen: o se redefine «unidad de operación» a una
+      granularidad más gruesa que la visita elemental, cosa que hoy ningún
+      documento hace, o el término pasa a `Q*(c + S_bound)`, como el propio
+      plan propone. **Destino: la misma revisión de contrato que decida v9**,
+      porque las dos reabren `f5-resource-accounting`.
+    - **Residual `A*bloques*N_pop*B` de `settle_all_bins`** (este plan).
+      v8 añadió cuatro términos y **ninguno es éste**. Solo muerde con `Q`
+      diminuto. **Destino: quien retome `src/f5_search.rs`**, sembrando desde
+      los bins que las parejas nombran en lugar de desde los declarados.
+    - **`EligibleScan::ensure_memory_bound`** (este plan, F5.1.2). Se declaró
+      que «se revisará al sellar el receipt en F5.1.2.5», y F5.1.2.5 cerró sin
+      revisarla. Sigue inalcanzable porque el ledger rechaza antes.
+      **Destino: quien reabra `src/f5_preflight.rs`**, junto al término
+      anterior.
+  - **La mitad «nativa» de la atomicidad, reformulada.** La Revisión F5.6 no la
+    exige antes de F6 y su argumento se adopta: lo que las dos pruebas de
+    proceso ejercitan es un contrato del **núcleo Linux** sobre procesos
+    reales, y WSL2 ejecuta un núcleo real sobre ext4. El riesgo residual no es
+    de distribución sino de **sistema de ficheros**, porque `RENAME_NOREPLACE`
+    no está soportado en todos. La deuda pasa a decir «sistema de ficheros de
+    despliegue objetivo», no «Ubuntu nativo». Comprobado al reformularla:
+    `publication.rs` **ya declara** qué hace si `renameat2` falla por falta de
+    soporte —`ENOSYS`, `EINVAL` o `EOPNOTSUPP` dan `GPS-IO-004`, «El sistema de
+    ficheros no ofrece publicación atómica no-clobber»—, con prueba unitaria.
+    Lo que falta no es la declaración sino **ejercitarla sobre un sistema de
+    ficheros que de verdad no lo soporte**. **Destino: la aceptación de
+    despliegue.**
+  - **Notas de la revisión, aplicadas.** El lector de citas exige ahora el
+    prefijo `test_` en Python, con control positivo y negativo —antes una
+    función auxiliar citada habría colado—; se retiran las dos aserciones que
+    no podían fallar, que eran el décimo caso del patrón en el proyecto; el
+    recuento se ancla además por **huella** —SHA-256 de los 46 identificadores
+    ordenados— porque el cardinal no distingue un **intercambio compensado**,
+    y la huella sí: comprobado quitando `REQ-POB-01` de F5 y metiendo
+    `REQ-CONF-06`, que deja 46 y 46 y aun así muere. La cota de propuestas
+    **no** se toca —es exactamente ajustada, `256 × 32` da igualdad estricta— y
+    la invariante de la que cuelga queda escrita en `src/f5_search.rs`, en
+    `F5AttemptRecord::proposals()`.
   - **Puertas.** `fmt`, `clippy -D warnings`, `test --workspace --all-targets
-    --locked --no-fail-fast` (**1098 pasan, 0 fallan, 12 ignoradas**, frente a
-    1085/0/12 al empezar; las ignoradas **no cambian**),
+    --locked --no-fail-fast` (**1100 pasan, 0 fallan, 12 ignoradas**, frente a
+    1085/0/12 al empezar y 1098/0/12 antes de aplicar la Revisión F5.6; las
+    ignoradas **no cambian**),
     `test --doc --locked` (2/0/0), `build --release --locked --target
     x86_64-unknown-linux-gnu` y `doc --no-deps`, todas en verde y sin avisos.
     **Lado Python:** `marimo check --strict` exit 0; `pytest tests` 7 pasan y 1

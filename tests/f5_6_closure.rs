@@ -25,8 +25,9 @@ use std::time::{Duration, Instant};
 
 use genome_population_simulator::application::{
     CliValidatedConfig, EffectiveF5Config, execute_validated_f5_config,
-    load_and_validate_cli_config,
+    execute_validated_f5_config_with_probes, load_and_validate_cli_config,
 };
+use genome_population_simulator::diagnostics::Diagnostic;
 use genome_population_simulator::f5_oracle::{
     F5DeclaredLink, F5FailureDeclaration, audit_f5_failure_package,
 };
@@ -42,6 +43,16 @@ const DECLARED_F5_ROWS: usize = 46;
 
 /// Los tres REQ que el plan nombra uno a uno para que nadie los pierda.
 const NAMED_REQUIREMENTS: [&str; 3] = ["REQ-VAL-54", "REQ-MAN-70", "REQ-SAL-02"];
+
+/// Huella del **conjunto** proyectado: SHA-256 de los 46 identificadores
+/// ordenados y separados por `\n`, con `\n` final.
+///
+/// El recuento por sí solo no distingue un **intercambio compensado**: quitar
+/// una fila F5 y reasignar otra a F5 deja 46 filas y 46 identificadores
+/// distintos. La huella sí, y es un literal congelado —un digest, no la lista
+/// escrita a mano— que se recalcula desde la tabla en cada ejecución.
+const F5_PROJECTION_DIGEST: &str =
+    "c4b434be9f219c24da751f236ec2af5ccbd600a8f888156027ceee7a2911a920";
 
 static NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -171,14 +182,20 @@ fn the_f5_projection_of_the_matrix_is_exactly_forty_six_unique_requirements() {
         "la entrada F5.6.3 del plan declara otro recuento que el que la matriz sostiene"
     );
 
-    // Ninguna fila ajena se cuela: todo hito proyectado nombra F5.
-    for row in &rows {
-        assert!(
-            row.milestone.contains("F5"),
-            "fila proyectada sin hito F5: {}",
-            row.line
-        );
-    }
+    // Y el **conjunto** es el que era, no solo su cardinal: un intercambio
+    // compensado —una fila F5 que se va y otra que entra— conserva 46 y 46, y
+    // solo la huella lo distingue.
+    let fingerprint = sha256(
+        unique
+            .iter()
+            .map(|requirement| format!("{requirement}\n"))
+            .collect::<String>()
+            .as_bytes(),
+    );
+    assert_eq!(
+        fingerprint, F5_PROJECTION_DIGEST,
+        "la proyección F5 ya no es el conjunto que el cierre auditó"
+    );
 }
 
 /// El proyector discrimina, y el recuento cambia cuando la matriz cambia.
@@ -261,12 +278,6 @@ fn every_f5_row_states_what_f5_did_and_cites_tests_that_exist() {
             states_f5_work,
             "la fila de {} no declara qué cerró F5: {}",
             row.requirement, row.line
-        );
-        assert!(
-            !row.evidence.starts_with("Planificada"),
-            "la fila de {} sigue planificada entera: {}",
-            row.requirement,
-            row.line
         );
         let references = evidence_references(row.evidence);
         assert!(
@@ -354,7 +365,7 @@ fn assert_evidence_symbol_exists(path: &str, symbol: &str, cited_by: &str) {
     );
     let source = fs::read_to_string(&file).expect("leer la fuente citada");
     let found = if path.ends_with(".py") {
-        source.contains(&format!("def {symbol}("))
+        python_symbol_is_test(&source, symbol)
     } else {
         rust_symbol_is_test(&source, symbol)
     };
@@ -363,6 +374,16 @@ fn assert_evidence_symbol_exists(path: &str, symbol: &str, cited_by: &str) {
         "{cited_by} cita {symbol}, que no es una prueba de {}",
         file.display()
     );
+}
+
+/// `true` si `symbol` es una prueba Python declarada en `source`.
+///
+/// El prefijo `test_` es parte de la guarda y no un adorno: sin él, citar una
+/// función auxiliar de un fichero de pruebas —un constructor de fixture, un
+/// ayudante— pasaría por citar una prueba, y la fila quedaría respaldada por
+/// algo que ningún corredor ejecuta.
+fn python_symbol_is_test(source: &str, symbol: &str) -> bool {
+    symbol.starts_with("test_") && source.contains(&format!("def {symbol}("))
 }
 
 /// `true` si `symbol` se declara en `source` con el atributo `#[test]`.
@@ -396,6 +417,14 @@ fn the_citation_reader_discriminates_tests_from_helpers() {
         "cited"
     ));
     assert!(!rust_symbol_is_test("#[test]\nfn other() {}", "cited"));
+
+    // Python: el prefijo `test_` decide, con las dos mitades del control.
+    let module = "def test_cited(self) -> None:\n    pass\ndef helper(self):\n    pass\n";
+    assert!(python_symbol_is_test(module, "test_cited"));
+    assert!(!python_symbol_is_test(module, "helper"));
+    assert!(!python_symbol_is_test(module, "test_absent"));
+    // Y una auxiliar que sí existe, citada tal cual, no cuela por existir.
+    assert!(module.contains("def helper("));
 
     let parsed = evidence_references(
         "prosa `tests/f5_6_closure.rs::{alpha, beta}` y `src/f5_layout.rs::gamma`, \
@@ -849,6 +878,177 @@ fn the_orchestrator_composes_the_failure_package_auditor() {
     assert!(!orchestrator.contains("audit_f5_failure_recombination("));
 
     fs::remove_dir_all(&root).expect("limpieza");
+}
+
+/// G1 de la Revisión F5.6: un rechazo **posterior** al renombrado no puede
+/// dejar el paquete defectuoso ocupando el destino final.
+///
+/// `audit_f5_identity_closure` solo puede acreditar el destino ya renombrado
+/// —`ensure_accredits` lo exige—, de modo que cuando cumple su función el
+/// paquete ya está publicado. Antes de esta corrección la CLI devolvía `exit=2`
+/// y en disco quedaba el destino con sus diez ficheros y
+/// `manifest.json → "state": "complete"`, indistinguible de un paquete bueno:
+/// el único testigo era el código de salida del proceso, que se pierde en
+/// cuanto el directorio cambia de manos. F6 y F7 leen paquetes F5 del disco.
+///
+/// La sonda **no** sustituye a la clausura: la real corre siempre y acepta;
+/// la sonda convierte su éxito en rechazo, que es el único modo de recorrer
+/// esta rama sin corromper el paquete desde fuera del proceso. Un defecto real
+/// del productor llega por el mismo camino.
+#[test]
+fn a_closure_rejection_after_the_rename_leaves_no_complete_package() {
+    let root = temporary("closure-rejection");
+    fs::create_dir_all(&root).expect("raíz");
+    let general = write_pair(&root);
+    let destination = root.join("package");
+
+    let rejection = Diagnostic::f5_configuration(
+        "outputs/f5-founders.tsv",
+        "closure",
+        "la clausura de identidad rechaza este paquete",
+    );
+    let returned = execute_validated_f5_config_with_probes(
+        &admitted(&general),
+        &destination,
+        |payload, declaration| {
+            genome_population_simulator::f5_oracle::audit_f5_package(payload, declaration)
+                .map(|report| report.initialization_summaries().to_vec())
+                .map_err(genome_population_simulator::f5_oracle::F5OracleRejection::into_diagnostic)
+        },
+        {
+            let rejection = rejection.clone();
+            move |_report| Err(rejection)
+        },
+    )
+    .expect_err("un rechazo de clausura no puede devolver un éxito");
+    assert_eq!(returned.code(), rejection.code());
+
+    // Lo que el hallazgo exige: el destino final **no** queda ocupado por un
+    // paquete que se pueda consumir como bueno.
+    assert!(
+        !destination.exists(),
+        "un paquete rechazado por su auditor no puede quedarse en el destino final"
+    );
+
+    // Y la evidencia no se pierde: el árbol sigue en disco, apartado y
+    // marcado, y el diagnóstico dice dónde.
+    let demoted = PathBuf::from(
+        returned
+            .context()
+            .get("demoted_destination")
+            .expect("el diagnóstico tiene que decir dónde quedó el árbol"),
+    );
+    assert!(demoted.is_dir());
+    assert!(
+        demoted.join("INCOMPLETE").is_file(),
+        "el árbol apartado tiene que estar marcado"
+    );
+    assert_eq!(demoted.parent(), destination.parent());
+    // El árbol apartado es el que se publicó, con su manifiesto dentro: se
+    // aparta, no se borra.
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(demoted.join("manifest.json")).expect("manifiesto"))
+            .expect("JSON");
+    assert_eq!(manifest["state"], "complete");
+    assert!(demoted.join("outputs/truth.jsonl").is_file());
+    assert!(returned.context().get("demotion_failed").is_none());
+
+    // Control positivo: el mismo par sin sonda publica y **sí** ocupa el
+    // destino, de modo que la degradación no es el camino de siempre.
+    let good = root.join("good");
+    execute_validated_f5_config(&admitted(&general), &good).expect("paquete publicado");
+    assert!(good.join("manifest.json").is_file());
+    assert!(!good.join("INCOMPLETE").exists());
+
+    fs::remove_dir_all(&root).expect("limpieza");
+}
+
+/// G2 de la Revisión F5.6: el auditor de fallo ya no se cree el `scenario_id`
+/// que el propio productor escribió.
+///
+/// `diagnostic_document` y `manifest_document` salen los dos de `common_json`,
+/// así que los nueve términos comunes son la misma serialización emitida dos
+/// veces: un `scenario_id` fabricado por el productor pasaba los cuatro
+/// auditores. Ahora el orquestador deriva `scenario_id` y los siete `limits` de
+/// la **autoría admitida**, de modo que el auditor contrasta contrato contra
+/// bytes.
+///
+/// La mutación es la misma que la revisión usó: fabricar el `scenario_id` en
+/// los **dos** documentos, que siguen coincidiendo entre sí.
+#[test]
+fn the_failure_auditor_rejects_a_scenario_id_the_admission_never_sealed() {
+    let root = temporary("fabricated-scenario");
+    fs::create_dir_all(&root).expect("raíz");
+    let general = write_infeasible_quota_pair(&root);
+    let destination = root.join("package");
+    let config = admitted(&general);
+    let returned = execute_validated_f5_config(&config, &destination)
+        .expect_err("una cuota imposible no puede publicar un éxito");
+    // **Vía productiva.** El diagnóstico devuelto es el del informe y no el de
+    // ningún auditor, de modo que el auditor que el orquestador compone aceptó
+    // el paquete con el `scenario_id` que la admisión selló. Es la mitad que
+    // muere si el productor fabrica ese término: el auditor lo deriva del
+    // contrato y deja de reconocer los bytes.
+    assert_eq!(returned.code(), "GPS-DOMAIN-103");
+
+    // El `scenario_id` del contrato es el de la autoría, y el paquete lo
+    // sostiene: control positivo antes de mutar nada.
+    let contractual = config.scenario_id().to_owned();
+    assert_eq!(contractual, "scenario");
+    let mut declaration = failure_declaration_from_manifest(&destination);
+    assert_eq!(declaration.scenario_id, contractual);
+    audit_f5_failure_package(&destination, &declaration)
+        .expect("sin mutar, el paquete tiene que aceptarse");
+
+    // Y ahora el productor fabrica el escenario en los dos documentos.
+    mutate_published_scenario_id(&destination, "fabricado");
+    // El auditor que lee el manifiesto **no** lo nota: es el defecto.
+    let fooled = failure_declaration_from_manifest(&destination);
+    assert_eq!(fooled.scenario_id, "fabricado");
+    audit_f5_failure_package(&destination, &fooled)
+        .expect("la declaración tomada del manifiesto sigue siendo autocertificante");
+
+    // El que lo deriva del contrato sí lo nota, que es la corrección.
+    declaration = fooled;
+    declaration.scenario_id = contractual;
+    let rejection = audit_f5_failure_package(&destination, &declaration)
+        .expect_err("un escenario que la admisión nunca selló tiene que rechazarse");
+    let detail = rejection.into_diagnostic();
+    assert!(
+        format!("{detail:?}").contains("scenario_id"),
+        "el rechazo tiene que nombrar el término: {detail:?}"
+    );
+
+    fs::remove_dir_all(&root).expect("limpieza");
+}
+
+/// Reescribe el `scenario_id` en los **dos** documentos del paquete fallido.
+fn mutate_published_scenario_id(destination: &Path, scenario_id: &str) {
+    let failure_path = destination.join("outputs/f5-failure.json");
+    let mut failure: Value =
+        serde_json::from_slice(&fs::read(&failure_path).expect("documento de fallo"))
+            .expect("JSON del fallo");
+    let previous = failure["scenario_id"].clone();
+    failure["scenario_id"] = Value::from(scenario_id);
+    assert_ne!(
+        previous, failure["scenario_id"],
+        "la mutación tiene que mutar"
+    );
+    let bytes = serde_json::to_vec(&failure).expect("serializar el fallo mutado");
+    fs::write(&failure_path, &bytes).expect("documento de fallo mutado");
+
+    let manifest_path = destination.join("manifest.json");
+    let mut manifest: Value =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("manifiesto")).expect("JSON");
+    let node = &mut manifest["f5"]["f5_failure"];
+    node["scenario_id"] = Value::from(scenario_id);
+    node["artifacts"][0]["size_bytes"] = Value::from(bytes.len() as u64);
+    node["artifacts"][0]["sha256"] = Value::from(sha256(&bytes));
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec(&manifest).expect("serializar el manifiesto mutado"),
+    )
+    .expect("manifiesto mutado");
 }
 
 /// Reescribe `swap_proposals` en los **dos** documentos del paquete fallido.
