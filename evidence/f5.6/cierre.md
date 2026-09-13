@@ -7,11 +7,11 @@ deudas que F5 deja declaradas.
 **Entorno:** WSL2 sobre ext4, Ubuntu 24.04, Rust 1.97.1, edición 2024, target
 `x86_64-unknown-linux-gnu`. Compilación dentro del repositorio.
 
-> **Estado: evidencias aprobadas con condiciones por la Revisión F5.6, y las
-> condiciones aplicadas.** La auditoría destapó **tres defectos materiales**
-> —uno propio, en la §5, y dos que devolvió la revisión, en la §5 bis— y los
-> tres quedan resueltos, no aplazados. **F6 y F7 no se inician todavía**,
-> conforme al dictamen de la revisión.
+> **Estado: F5 cerrado.** Evidencias aprobadas por la Revisión F5.6 y **F6/F7
+> habilitados**. La auditoría destapó **tres defectos materiales** —uno propio,
+> en la §5, y dos que devolvió la revisión, en la §5 bis— y los tres quedan
+> resueltos, no aplazados. Las tres notas finales de la revisión se aplican en
+> la §5 ter.
 
 ## 1. Recuento mecánico de la proyección F5
 
@@ -313,11 +313,15 @@ autodeclaraba.
 Corregido **donde hay fuente contractual**: `audit_published_f5_failure` recibe
 ahora `config` y `sealed`, toma `scenario_id` de la autoría admitida y los siete
 `limits` de `limits_json(config, sealed)` —que pasa a `pub(crate)` para no
-duplicar la regla sin juez—. Los demás términos comunes —código, etapa,
-contadores, mejor intento— son **medida del productor** y no tienen otra fuente
-que comparar; de ellos el auditor exige coherencia entre los dos documentos, el
-árbol enumerado y el rehash del enlace. Eso es lo que dice ahora el acta, en vez
-de llamarlo independencia.
+duplicar la regla sin juez—. De los demás términos comunes hay que distinguir dos clases, y la
+primera redacción de este acta los metía en el mismo saco:
+
+- **`code`, `stage`, los contadores y el mejor intento** son **medida** del
+  productor y no tienen otra fuente que comparar —cuál fue el fallo lo mide
+  quien falló—. De ellos el auditor exige coherencia entre los dos documentos,
+  el árbol enumerado y el rehash del enlace, y nada más puede exigir.
+- **`population_id` sí es acotable**, y la §5 ter lo acota: cuál subpoblación
+  falló es medida, pero **que exista** es contrato.
 
 `tests/f5_6_closure.rs::the_failure_auditor_rejects_a_scenario_id_the_admission_never_sealed`
 fija las dos mitades: la **vía productiva** —un fallo real devuelve el
@@ -336,6 +340,77 @@ derivada del contrato rechaza.
 | con la corrección | no | pasa |
 
 La segunda fila es exactamente el defecto: en producción nadie se enteraba.
+
+## 5 ter. Las tres notas finales de la Revisión F5.6
+
+Con ellas **F5 queda cerrado y F6/F7 habilitados**. El revisor reprodujo lo
+suyo sin leer esta parte: la sonda de G1 sobre binario propio y par de autoría
+propio, la mutación de G2, la huella recalculada aparte —sale **idéntica**—, el
+intercambio compensado, la cita a un auxiliar de Python y la cadena completa en
+cuatro casos con **sus** fixtures. Y confirmó la mitad de vía productiva de G2:
+con el productor mintiendo y `application.rs` revertido, cinco de las seis
+pruebas vuelven a verde, luego su muerte la causa la derivación contractual y no
+otra cosa. Probó además los flancos de G1: ruta relativa degrada bien, **tres
+rechazos seguidos dejan tres árboles distintos sin colisión**, y el destino
+queda libre para un `run` bueno posterior.
+
+### N1 — la corrección de G2 no estaba fijada por ninguna prueba
+
+Es la más importante de las tres, y es **la décima aparición del patrón, esta
+vez en la propia corrección**. Reproducido: revirtiendo
+`scenario_id: config.scenario_id().to_owned()` a leerlo del manifiesto y
+**dejando el productor honesto**, la batería daba **1100 / 0 / 12**. Nada moría.
+
+La causa es precisa:
+`the_failure_auditor_rejects_a_scenario_id_the_admission_never_sealed`
+construía la declaración **a mano**, de modo que ejercitaba el *oráculo* y no la
+**fuente de verdad de la composición**. La protección existía y estaba probada,
+pero un refactor que «simplificara» la derivación de vuelta al manifiesto no
+habría despertado a nadie.
+
+La mitad que faltaba: `audit_published_f5_failure` se exporta como
+`#[doc(hidden)] pub` —con el porqué escrito en su propio docstring— y la prueba
+la recorre **sobre el paquete ya alterado**, después de
+`mutate_published_scenario_id`. **Verificado**: con esa mitad, la misma
+reversión, productor honesto, muere con
+
+    la composición tiene que rechazar el escenario fabricado: ()
+
+### N2 — `population_id` es acotable por el contrato y no se acotaba
+
+El matiz del revisor es correcto y se adopta. `code`, `stage`, contadores y
+mejor intento son medida del productor; `population_id` **no**: tiene que ser
+una de las subpoblaciones admitidas, y fabricado en `common_json` sobrevivía a
+los cuatro auditores, muriendo solo en dos unitarias del productor.
+
+`audit_published_f5_failure` exige ahora **pertenencia al conjunto admitido**
+—no igualdad derivada, porque cuál subpoblación falló sí es medida— y rechaza
+con `GPS-CONF-101` y `fields="population_id"`.
+`tests/f5_6_closure.rs::the_composition_bounds_the_population_id_to_the_admitted_subpopulations`
+lo fija con las dos mitades: la subpoblación publicada está admitida y se
+acepta; una ajena, escrita en los **dos** documentos, se rechaza.
+**Discrimina**: desactivada la guarda, la prueba muere.
+
+### N3 — los árboles degradados se acumulan, y es a propósito
+
+Tres rechazos de clausura dejan **tres directorios ocultos** `.<nombre>.gps-
+rejected-<pid>-<n>`, con permisos `0700`, y **nada los limpia**. Es preservación
+de evidencia deliberada, no un descuido: el árbol que un auditor rechazó es el
+material con el que se diagnostica el defecto del productor, y borrarlo sería
+destruir la única copia. Queda dicho aquí para que no sorprenda a quien opere el
+sistema: **la limpieza es manual**, y el revisor comprobó que tres rechazos
+seguidos producen tres árboles distintos sin colisión de nombres.
+
+### Dos reservas que el revisor declara, y que este acta conserva como tales
+
+1. **La rama `demotion_failed` no está reproducida.** No pudo forzarse desde
+   fuera del proceso. Por inspección su peor caso es seguro, porque el marcador
+   se escribe **antes** del renombrado: un fallo posterior deja el destino en su
+   nombre publicado pero **ya marcado `INCOMPLETE`**. Queda anotada como **no
+   reproducida**, no como comprobada.
+2. **El manifiesto dentro del árbol apartado sigue diciendo `state:"complete"`**,
+   y es asumido a propósito: el discriminador es el marcador, el directorio está
+   oculto y en `0700`, y la prueba de G1 lo fija. Aceptable, y así queda.
 
 ## 6. Atomicidad en frontera de proceso — deuda heredada, cerrada aquí
 
@@ -414,17 +489,18 @@ no-clobber»—, con prueba unitaria. Lo que falta no es la declaración sino
 |---|---|
 | `cargo fmt --all -- --check` | exit 0, sin diferencias |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0, **0 avisos** |
-| `cargo test --workspace --all-targets --locked --no-fail-fast` | exit 0 — **1100 pasan, 0 fallan, 12 ignoradas**, 0 avisos |
+| `cargo test --workspace --all-targets --locked --no-fail-fast` | exit 0 — **1101 pasan, 0 fallan, 12 ignoradas**, 0 avisos |
 | `cargo test --workspace --doc --locked` | exit 0 — 2 pasan, 0 fallan, 0 ignoradas |
 | `cargo build --release --locked --target x86_64-unknown-linux-gnu` | exit 0, 0 avisos, 1 m 37 s |
 | `cargo doc --no-deps` | exit 0, **0 avisos** |
 
 Línea base al empezar el hito, medida en el mismo árbol: **1085 / 0 / 12**, 0
-avisos; tras aplicar el defecto de la §5, **1098 / 0 / 12**. El delta total es
-**+15 pruebas que pasan y ninguna ignorada nueva**: las quince de
-`tests/f5_6_closure.rs`, todas verdes —trece del cierre más las dos que la
-Revisión F5.6 exigió para G1 y G2—. El recuento de ignoradas se queda en **12**
-porque los tres defectos materiales se corrigieron en vez de aplazarse.
+avisos; **1098 / 0 / 12** tras el defecto de la §5 y **1100 / 0 / 12** tras los
+dos graves de la §5 bis. El delta total es **+16 pruebas que pasan y ninguna
+ignorada nueva**: las dieciséis de `tests/f5_6_closure.rs`, todas verdes —trece
+del cierre, dos de G1 y G2, y una de las notas finales—. El recuento de
+ignoradas se queda en **12** porque los tres defectos materiales se corrigieron
+en vez de aplazarse.
 
 ### Python — dir a dir
 
@@ -477,4 +553,6 @@ Los **tres defectos materiales** —la cota de propuestas de la §5 y los dos
 graves de la §5 bis— **quedan resueltos, no aplazados**. Nada de lo anterior es
 una regresión introducida por F5.6.3 y nada estaba oculto.
 
-**F6 y F7 no se inician todavía**, conforme al dictamen de la Revisión F5.6.
+**F5 queda cerrado y F6/F7 quedan habilitados**, conforme al dictamen de la
+Revisión F5.6. Ninguno de los puntos abiertos de arriba lo bloquea: todos tienen
+destino y ninguno es una regresión de esta fase.

@@ -2798,11 +2798,19 @@ pub fn execute_validated_f5_config<'a>(
 /// auditor exige de ellos es coherencia entre los dos documentos, el árbol
 /// enumerado y el rehash del enlace.
 ///
+/// # Instrumental
+///
+/// Es `pub` y `doc(hidden)` porque es la **fuente de verdad de la
+/// composición**: una batería que construya la declaración a mano ejercita el
+/// oráculo, no esto, y un refactor que devolviera `scenario_id` al manifiesto
+/// no despertaría a nadie. La Revisión F5.6 lo comprobó y por eso se exporta.
+///
 /// # Errors
 ///
 /// El diagnóstico del oráculo si el paquete publicado no sostiene lo que su
 /// autoría admitida y su propio manifiesto declaran.
-fn audit_published_f5_failure(
+#[doc(hidden)]
+pub fn audit_published_f5_failure(
     destination: &Path,
     config: &EffectiveF5Config,
     sealed: &crate::f5_preflight::SealedF5Admission,
@@ -2871,6 +2879,24 @@ fn audit_published_f5_failure(
         ],
         "counters",
     )?;
+    // `population_id` **sí** es acotable por el contrato, a diferencia del
+    // código, la etapa y los contadores: si el fallo nombra una subpoblación,
+    // tiene que ser una de las admitidas. No se deriva —cuál falló es medida
+    // del productor— pero sí se exige **pertenencia** al conjunto sellado.
+    let population_id = failure["population_id"].as_str().map(str::to_owned);
+    if let Some(named) = population_id.as_deref()
+        && !config
+            .declared_scenario()
+            .subpopulations
+            .iter()
+            .any(|subpopulation| subpopulation.population_id.value() == named)
+    {
+        return Err(Diagnostic::f5_configuration(
+            path.to_string_lossy().as_ref(),
+            "population_id",
+            format!("{named} no es ninguna de las subpoblaciones admitidas"),
+        ));
+    }
     let link = &failure["artifacts"][0];
     let declaration = F5FailureDeclaration {
         code: text(&failure["code"], "code")?,
@@ -2879,7 +2905,7 @@ fn audit_published_f5_failure(
         // diga que es: es el término que la revisión fabricó sin que nadie lo
         // notara.
         scenario_id: config.scenario_id().to_owned(),
-        population_id: failure["population_id"].as_str().map(str::to_owned),
+        population_id,
         block_id: failure["block_id"].as_str().map(str::to_owned),
         limits: limits.try_into().map_err(|_| invalid("limits"))?,
         counters: counters.try_into().map_err(|_| invalid("counters"))?,

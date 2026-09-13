@@ -3478,10 +3478,41 @@ identificador del índice de copia.
     **no** se toca —es exactamente ajustada, `256 × 32` da igualdad estricta— y
     la invariante de la que cuelga queda escrita en `src/f5_search.rs`, en
     `F5AttemptRecord::proposals()`.
+  - **Tres notas finales de la Revisión F5.6, aplicadas. F5 cerrado y F6/F7
+    habilitados.**
+    - **N1 — la corrección de G2 no estaba fijada por ninguna prueba.** Es la
+      **décima aparición del patrón, esta vez en la propia corrección**.
+      Revirtiendo `scenario_id` al manifiesto con el **productor honesto**, la
+      batería daba 1100/0/12 y nada moría: la prueba construía la declaración a
+      mano, de modo que ejercitaba el **oráculo** y no la fuente de verdad de la
+      **composición**. `audit_published_f5_failure` se exporta como
+      `#[doc(hidden)] pub` —con el porqué en su docstring— y la prueba la
+      recorre sobre el paquete ya alterado. Verificado: esa misma reversión
+      muere ahora con «la composición tiene que rechazar el escenario
+      fabricado».
+    - **N2 — `population_id` es acotable y no se acotaba.** El matiz del
+      revisor se adopta: `code`, `stage`, contadores y mejor intento son medida
+      del productor, pero la subpoblación que el fallo nombra tiene que ser una
+      de las **admitidas**. La composición exige ahora **pertenencia al conjunto
+      sellado** —no igualdad derivada, porque cuál falló sí es medida— y
+      rechaza con `GPS-CONF-101`/`fields="population_id"`. Fabricada en
+      `common_json` sobrevivía a los cuatro auditores.
+    - **N3 — los árboles degradados se acumulan, a propósito.** Tres rechazos
+      dejan tres directorios ocultos `0700` y **nada los limpia**: es
+      preservación de evidencia, porque el árbol rechazado es el material con
+      el que se diagnostica el defecto. La limpieza es **manual** y queda dicho
+      en el acta para quien opere el sistema.
+    - **Dos reservas declaradas, no resueltas y no falseadas.** La rama
+      `demotion_failed` **no está reproducida** —no pudo forzarse desde fuera
+      del proceso; por inspección su peor caso es seguro, porque el marcador se
+      escribe antes del renombrado—, y el manifiesto **dentro** del árbol
+      apartado sigue diciendo `state:"complete"`, que es asumido: el
+      discriminador es el marcador, el directorio está oculto y en `0700`, y la
+      prueba de G1 lo fija.
   - **Puertas.** `fmt`, `clippy -D warnings`, `test --workspace --all-targets
-    --locked --no-fail-fast` (**1100 pasan, 0 fallan, 12 ignoradas**, frente a
-    1085/0/12 al empezar y 1098/0/12 antes de aplicar la Revisión F5.6; las
-    ignoradas **no cambian**),
+    --locked --no-fail-fast` (**1101 pasan, 0 fallan, 12 ignoradas**, frente a
+    1085/0/12 al empezar, 1098/0/12 antes de aplicar la Revisión F5.6 y
+    1100/0/12 antes de sus tres notas finales; las ignoradas **no cambian**),
     `test --doc --locked` (2/0/0), `build --release --locked --target
     x86_64-unknown-linux-gnu` y `doc --no-deps`, todas en verde y sin avisos.
     **Lado Python:** `marimo check --strict` exit 0; `pytest tests` 7 pasan y 1

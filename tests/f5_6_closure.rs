@@ -24,13 +24,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use genome_population_simulator::application::{
-    CliValidatedConfig, EffectiveF5Config, execute_validated_f5_config,
+    CliValidatedConfig, EffectiveF5Config, audit_published_f5_failure, execute_validated_f5_config,
     execute_validated_f5_config_with_probes, load_and_validate_cli_config,
 };
 use genome_population_simulator::diagnostics::Diagnostic;
 use genome_population_simulator::f5_oracle::{
     F5DeclaredLink, F5FailureDeclaration, audit_f5_failure_package,
 };
+use genome_population_simulator::f5_preflight::{F5OtherResources, recover_sealed_f5_admission};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -1019,7 +1020,106 @@ fn the_failure_auditor_rejects_a_scenario_id_the_admission_never_sealed() {
         "el rechazo tiene que nombrar el término: {detail:?}"
     );
 
+    // **La mitad que faltaba, y es la que fija la corrección.** Lo anterior
+    // ejercita el *oráculo* con una declaración construida a mano; lo que
+    // decide si el `scenario_id` sale del contrato o del manifiesto es la
+    // composición, y esa vive en `audit_published_f5_failure`. Recorrerla
+    // sobre el paquete ya alterado es lo único que mata un refactor que
+    // «simplifique» la derivación de vuelta al manifiesto.
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("admisión sellada");
+    audit_published_f5_failure(&destination, &config, &sealed)
+        .expect_err("la composición tiene que rechazar el escenario fabricado");
+
     fs::remove_dir_all(&root).expect("limpieza");
+}
+
+/// La composición acota `population_id` al conjunto de subpoblaciones
+/// admitidas, que es lo único acotable de los términos que el productor mide.
+///
+/// `code`, `stage`, los contadores y el mejor intento no tienen otra fuente
+/// que comparar: cuál fue el fallo lo mide el productor. `population_id` sí la
+/// tiene —cuál subpoblación falló es medida, pero **que exista** es contrato—,
+/// y fabricado en `common_json` sobrevivía a los cuatro auditores.
+#[test]
+fn the_composition_bounds_the_population_id_to_the_admitted_subpopulations() {
+    let root = temporary("foreign-population");
+    fs::create_dir_all(&root).expect("raíz");
+    let general = write_infeasible_quota_pair(&root);
+    let destination = root.join("package");
+    let config = admitted(&general);
+    execute_validated_f5_config(&config, &destination)
+        .expect_err("una cuota imposible no puede publicar un éxito");
+    let sealed = recover_sealed_f5_admission(&config, F5OtherResources::default())
+        .expect("admisión sellada");
+
+    // Control positivo: la subpoblación publicada **sí** está admitida.
+    let published = published_failure_population(&destination);
+    assert_eq!(published.as_deref(), Some("P1"));
+    assert!(
+        config
+            .declared_scenario()
+            .subpopulations
+            .iter()
+            .any(|subpopulation| subpopulation.population_id.value() == "P1")
+    );
+    audit_published_f5_failure(&destination, &config, &sealed)
+        .expect("sin mutar, la composición tiene que aceptar");
+
+    // Y una subpoblación que la admisión nunca selló se rechaza.
+    mutate_published_population_id(&destination, "P_AJENA");
+    assert_eq!(
+        published_failure_population(&destination).as_deref(),
+        Some("P_AJENA"),
+        "la mutación tiene que mutar"
+    );
+    let rejection = audit_published_f5_failure(&destination, &config, &sealed)
+        .expect_err("una subpoblación ajena a la admisión tiene que rechazarse");
+    assert_eq!(
+        rejection.context().get("fields").map(String::as_str),
+        Some("population_id")
+    );
+
+    fs::remove_dir_all(&root).expect("limpieza");
+}
+
+/// La subpoblación que el manifiesto publica para su fallo.
+fn published_failure_population(destination: &Path) -> Option<String> {
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(destination.join("manifest.json")).expect("manifiesto"))
+            .expect("JSON");
+    manifest["f5"]["f5_failure"]["population_id"]
+        .as_str()
+        .map(str::to_owned)
+}
+
+/// Reescribe el `population_id` en los **dos** documentos del paquete fallido.
+fn mutate_published_population_id(destination: &Path, population_id: &str) {
+    let failure_path = destination.join("outputs/f5-failure.json");
+    let mut failure: Value =
+        serde_json::from_slice(&fs::read(&failure_path).expect("documento de fallo"))
+            .expect("JSON del fallo");
+    let previous = failure["population_id"].clone();
+    failure["population_id"] = Value::from(population_id);
+    assert_ne!(
+        previous, failure["population_id"],
+        "la mutación tiene que mutar"
+    );
+    let bytes = serde_json::to_vec(&failure).expect("serializar el fallo mutado");
+    fs::write(&failure_path, &bytes).expect("documento de fallo mutado");
+
+    let manifest_path = destination.join("manifest.json");
+    let mut manifest: Value =
+        serde_json::from_slice(&fs::read(&manifest_path).expect("manifiesto")).expect("JSON");
+    let node = &mut manifest["f5"]["f5_failure"];
+    node["population_id"] = Value::from(population_id);
+    node["artifacts"][0]["size_bytes"] = Value::from(bytes.len() as u64);
+    node["artifacts"][0]["sha256"] = Value::from(sha256(&bytes));
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec(&manifest).expect("serializar el manifiesto mutado"),
+    )
+    .expect("manifiesto mutado");
 }
 
 /// Reescribe el `scenario_id` en los **dos** documentos del paquete fallido.
