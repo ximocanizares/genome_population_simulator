@@ -2404,6 +2404,51 @@ struct BlockGeometry {
     site_count: usize,
 }
 
+/// Repositorio fundador **vacío** ligado a esta configuración y ejecución.
+///
+/// F5.6.1 lo necesita para la mitad «fallo» de DTC-045: `seal_and_publish_f5_failure`
+/// exige un repositorio, y un fallo controlado anterior a F5.3 —layout agotado,
+/// búsqueda haplotípica agotada, cuota fundadora inviable— no ha derivado
+/// ninguna identidad. Sin esta forma, esas tres etapas no tendrían productor de
+/// paquete `failed` y `F5FailureStage` declararía cinco variantes con una sola
+/// alcanzable.
+///
+/// **Es aditivo y no deriva nada.** No abre BLAKE3, no consulta el catálogo de
+/// IDs y no toca `registry`, de modo que la ley de conservación que
+/// `audit_f5_failure_closure` exige —publicar un fallo no deriva ninguna
+/// identidad— se cumple por construcción: el registro está vacío antes del
+/// sello y vacío después de publicar.
+///
+/// # Errors
+///
+/// `GPS-CONF-101` si el escenario, la referencia o la semilla efectiva de la
+/// configuración no son identidades tipadas, que es el mismo rechazo que
+/// [`materialize_f5_founder_identities`] emite por las mismas tres causas.
+pub fn empty_f5_founder_identities(
+    config: &EffectiveF5Config,
+    execution_id: &ExecutionId,
+) -> Result<F5FounderIdentities, Diagnostic> {
+    let scenario_id = ScenarioId::parse(config.scenario_id(), "scenario_id")
+        .map_err(|_| configuration(config, "scenario_id", "no es una identidad tipada"))?;
+    let reference_id = ReferenceId::parse(config.reference_id(), "reference_id")
+        .map_err(|_| configuration(config, "reference_id", "no es una identidad tipada"))?;
+    let root_seed = RootSeed::parse("seed", config.seed())
+        .map_err(|_| configuration(config, "seed", "la semilla efectiva no es canónica"))?;
+    Ok(F5FounderIdentities {
+        root_seed,
+        execution_id: execution_id.clone(),
+        scenario_id,
+        reference_id,
+        scenario_path: config.scenario_path().display().to_string(),
+        registry: F5IdentityRegistry::default(),
+        copies: Vec::new(),
+        membership: BTreeMap::new(),
+        units: Vec::new(),
+        units_by_sequence: BTreeMap::new(),
+        assignments_visited: false,
+    })
+}
+
 /// Materializa las identidades de fundador y su pertenencia única antes de
 /// toda salida.
 ///

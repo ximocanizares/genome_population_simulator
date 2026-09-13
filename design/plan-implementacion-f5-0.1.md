@@ -2976,7 +2976,7 @@ identificador del índice de copia.
 
 ## 9. F5.6 — Marimo y cierre
 
-- ☐ **F5.6.1.** Añadir los controles F5 a Marimo sin panel ni recombinación y
+- ✅ **F5.6.1.** Añadir los controles F5 a Marimo sin panel ni recombinación y
   ejecutar el mismo `validate`/`run` Rust.
   - Depende de: F5.5.1.
   - Procede de: REQ-UI-15, ACE-114/115/117 y DTC-051/089.
@@ -2994,6 +2994,204 @@ identificador del índice de copia.
     —que siguen siendo `pub`, y así se quedan: bajarlas a `pub(crate)`
     reabriría la frontera de un hito cerrado— obtiene un destino **sin
     testigo** y deja la clausura inaplicable sin ninguna señal.
+  - **Implementado (2026-09-13), pendiente de revisión adversarial.** La casilla
+    sigue en ☐ hasta que la revisión la apruebe.
+  - **Decisión material: `run` F5 queda cableado.** Antes de este hito
+    `src/main.rs` devolvía «run F5 todavía no está habilitado» y ninguna de las
+    cuatro fronteras F5 tenía llamador productivo. La comprobación que el hito
+    pide —«paridad de **efectivo**, diagnóstico y **hashes** con TOML manual»—
+    no es formulable sin `effective-config.json`, `manifest.json` ni los ocho
+    artefactos, de modo que encadenar la ejecución es parte del hito y no un
+    añadido. `application.rs` gana `execute_validated_f5_config`
+    —admisión → layout → búsqueda → asignación → identidades → publicación— y
+    `main.rs` enruta `(Run, F5)` a ella.
+  - **Material del `execution_id` de F5, que la Revisión F5.1 dejó abierto
+    «al encadenar la cadena productiva».** Es la concatenación de los SHA-256
+    **observados** de los dos documentos de autoría, en orden de rol (general y
+    después escenario), pasada por `configuration_digest` y por
+    `derive_execution_id`, que es el mismo camino que F1–F4 usan con su único
+    documento. No puede ser solo el general: el general enlaza el escenario
+    **por ruta y sin hash**, así que dos escenarios distintos compartirían
+    identidad de ejecución y, con ella, `block_id` y `site_id`. La prueba
+    `the_execution_identity_covers_both_authored_documents` lo fija y su
+    mutación —suprimir el término del escenario— produce exactamente el
+    layout **idéntico** que la Revisión F5.1 anticipó.
+  - **DTC-045: las cinco etapas publican `failed`.** La primera redacción abría
+    el provisional **después** de las cuatro etapas en memoria y dejaba sin
+    destino los fallos de layout, búsqueda y fundadores. La revisión adversarial
+    lo rechazó con razón: definir «comenzar» como «cuando este código abre el
+    provisional» hace la regla **autocumplida** y dependiente del orden de las
+    líneas, la Revisión F5.4 ya resolvió el caso análogo —un recuento MAN-70
+    rechazado **sí** publica `failed`— y esas etapas ya han abierto ámbitos RNG
+    derivados del `execution_id`: la simulación ha comenzado. Ahora el
+    provisional se crea **antes** del layout y `F5FailureStage` tiene productor
+    en cuatro de sus cinco variantes: `Layout`, `Haplotypes`, `Founders` y
+    `Publication`. **`Preflight` queda sin productor por prohibición del
+    contrato, no por omisión**: DTC-089 impide que un rechazo de preflight abra
+    destino, de modo que darle uno sería romper el contrato y no completar una
+    cobertura. Queda escrito para que nadie la «arregle» más adelante.
+    Para ello `f5_founders.rs` gana `empty_f5_founder_identities`, un
+    repositorio **vacío** ligado a configuración y ejecución: es **aditivo**, no
+    deriva ninguna identidad, no toca el registro y no revierte nada de F5.3.
+    La ley de conservación del fallo —publicar un fallo no deriva ninguna
+    identidad— se cumple por construcción.
+  - **Los dos auditores, compuestos.** `audit_f5_package` entra como el
+    recuento MAN-70 que `publish_f5_success` exige, sobre la raíz de carga útil
+    que `publish` renombra **sin tocar** al destino; `audit_f5_identity_closure`
+    corre después sobre el destino ya renombrado, que es el que su testigo
+    acredita. En la mitad «fallo» el gemelo es `audit_f5_failure_closure`.
+    `audit_f5_failure_package` necesita una `F5FailureDeclaration` que el
+    orquestador no conserva: queda para F5.6.3, que ya la pide.
+  - **Obligación de proceso, comprobada con control positivo.**
+    `the_orchestrator_publishes_only_through_the_sealing_wrappers` busca
+    `publish_f5_success(` y `publish_f5_failure(` **no precedidos por
+    `seal_and_`** —una búsqueda ingenua daría siempre positivo, porque el
+    nombre del envoltorio contiene el del envuelto— en `application.rs` y
+    `main.rs`, con dos controles positivos: que el orquestador sí nombra los
+    envoltorios y que la **misma** búsqueda encuentra la llamada desnuda donde
+    vive, en `f5_closure.rs`.
+  - **Componente Python.** `ui/f5_editor.py` (nuevo) modela el par: tipos,
+    enumerados, las tres expresiones regulares de los esquemas y una tabla de
+    cotas enteras que una prueba contrasta contra `minimum`/`maximum` de los
+    dos ficheros JSON Schema, para no duplicar reglas sin juez (DTC-051).
+    **El renderizado se escribe a mano y no con `tomlkit`**: los bytes
+    exportados son parte del contrato —el nombre del general se publica en
+    `effective-config.json#/source_path` y la identidad de ejecución sale de
+    los SHA-256 de los dos documentos—, de modo que el orden de claves, los
+    espacios y los literales decimales tienen que quedar bajo una sola función
+    que una prueba pueda fijar contra un TOML manual. `ui/process_adapter.py`
+    gana `write_f5_pair`, `validate_f5_pair`, `run_f5_pair`, la sesión
+    `ValidatedF5Session` —que conserva los **bytes** de los dos documentos y el
+    nombre del general, no un resumen— y `f5_package_summary`, que resume el
+    paquete leyendo solo el manifiesto acotado. Los dos documentos se escriben
+    en el directorio de autoría y no en un temporal anónimo: sus enlaces son
+    rutas relativas que Rust resuelve desde ahí, y el nombre del general se
+    publica.
+  - **Pestaña poblacional.** Las nueve pestañas mínimas de ACE-114 no cambian:
+    el escenario F5 entra en «Poblaciones» con sus veinticinco controles, la
+    importación de pareja, los dos documentos exportables y los botones de
+    `validate`/`run` propios. `F` solo se edita con ploidía 2 y se retira del
+    documento cuando la ploidía deja de serlo; `controlled` se declara
+    desactivado cuando `F` es mayor que cero. No hay panel, haplotipos
+    suministrados, construcción recombinante ni mapas, y una prueba lo busca
+    con control positivo.
+  - **Dos pruebas ajenas actualizadas, y por qué no es revertir.**
+    `tests_ui/test_ui_contract.py` listaba `scenario_id` como «opción futura
+    ausente»: F5.6.1 es el hito que la incorpora, de modo que pasa a exigir su
+    control y conserva prohibidos panel, construcción recombinante y mapas.
+    `tests/cli_config_diagnostics.rs` fijaba que `run` F5 devolvía
+    `GPS-CONF-101` con el texto «la publicación pertenece a F5.4»; ahora fija
+    que publica los diez ficheros, que `source_path` es el **nombre** del
+    documento aunque se invoque por una ruta relativa desde un directorio
+    ajeno, y que un segundo `run` al mismo destino se rechaza con `GPS-IO-003`
+    sin sobrescribir. Su perfil de fixture pasa de `target_mean_r2=0.5` a `1`
+    para que el escenario sea **factible**: la admisión que esas pruebas miden
+    no depende de ese valor. El espectro **no** se toca —la primera redacción
+    afirmaba que también hacía falta y era falso: comprobado aislando el
+    cambio, con `[0,1)` y `target_mean_r2 = 1` las siete pruebas pasan—.
+  - **Medida del primer `run` productivo** (binario `--release`, WSL2/ext4):
+    `B=2,N_pop=1` 7,4 MiB RSS y <10 ms; `B=8,N_pop=2` 7,5 MiB y 20 ms;
+    `B=16,N_pop=2` 8,1 MiB y 40 ms, con paquetes de 108 KiB, 372 KiB y 668 KiB.
+    Las **dos piezas fuera de `f5-resource-accounting-v8`** —la construcción y
+    comparación de los dos documentos, `O(B*N_pop)`, y el lector del paquete,
+    acotado por el registro más largo— caben con holgura dentro del presupuesto
+    de memoria de trabajo sellado (1 GiB por omisión) en los tres tamaños. La
+    deuda de v9 **no se toca**: reabriría `effective-config-v5.schema.json` y
+    `manifest-general-v5.schema.json`, que este hito tiene prohibido. Se
+    observa además que el libro mayor v8 rechaza un escenario sobredimensionado
+    **antes** de abrir la referencia (`GPS-RES-101`, fase
+    `reference_and_mask_scan`), que es la guarda que se vuelve exigible al
+    haber `run`.
+  - **Deuda heredada que sigue abierta.** La demostración de atomicidad es de
+    **frontera de biblioteca**: este hito añade la primera prueba de proceso
+    —destino existente rechazado sin sobrescribir— pero **no** cubre
+    interrupción ni concurrencia entre procesos, que DTC-045 exige probar y que
+    hoy solo recorren F1. Queda para F5.6.3, que ahora sí puede hacerlo porque
+    existe un `run` F5.
+  - **Revisión adversarial F5.6.1 aplicada (2026-09-13).** Devolvió
+    **integrable con condiciones**, con un bloqueante de pérdida de datos.
+    - **B1 — el par F5 machacaba un general v2 ajeno.** `_replaceable_f5_document`
+      aceptaba por `config_kind = "general"`, que es **también** el de los
+      generales v2 que las otras ocho pestañas editan; con el destino por
+      omisión `<repo>/general.toml`, la primera validación F5 lo destruía. Ahora
+      la cabecera admisible es `config_kind` **y** `schema_version`, las dos
+      primeras líneas exactas que emite el renderizador, en
+      `F5_DOCUMENT_HEADERS`. La prueba colocaba el documento ajeno en la ruta
+      del **escenario**, donde el rol no coincidía y no cazaba nada; ahora cubre
+      el general v2 en la ruta del general.
+    - **G2 — importar y exportar no conservaba el TOML.** El renderizador impone
+      un orden de claves único, de modo que un escenario legal en otro orden no
+      volvía igual y, como el `execution_id` sale de los SHA-256 observados, la
+      misma autoría dejaba de ser la misma ejecución. `F5Pair` conserva ahora
+      los **bytes importados** y `f5_pair_documents` los reemite mientras sigan
+      describiendo el formulario vigente —lo comprueba **reparseando el
+      origen**, no lo supone— y cede al renderizador en cuanto un control
+      cambia. Dos órdenes legales distintos quedan fijados en la batería.
+    - **G3 — la rama que publica el `failed` no tenía prueba de comportamiento.**
+      Ahora hay dos: una inyecta un recuento MAN-70 que rechaza —por
+      `execute_validated_f5_config_with_recount`, instrumental y `doc(hidden)`,
+      que existe porque esa rama no se alcanza de otro modo sin corromper el
+      provisional desde fuera del proceso— y otra agota la búsqueda haplotípica
+      con un objetivo de LD inviable. Las dos comprueban el destino publicado,
+      `state="failed"`, la etapa, la ausencia de los ocho ficheros biológicos y
+      que el diagnóstico devuelto es el del informe.
+    - **G4 — el material del `execution_id` no tenía vector ni oráculo.**
+      Intercambiar sus dos líneas dejaba 1080/0. Ahora hay un vector congelado
+      con dos SHA-256 literales y, sobre todo, una **rederivación independiente**
+      desde semilla y digest con las mismas primitivas públicas que
+      `src/results.rs` usa para F1–F4, más la comprobación de que el material es
+      exactamente `general ‖ escenario` y de que el orden contrario da otra
+      identidad.
+    - **G5 — DTC-045.** Ver la entrada propia de más arriba.
+    - **M6 — `run` repetía entera la admisión física.** El dispatcher
+      materializaba, descartaba y `run` volvía a admitir: medido con `strace`,
+      `ref.fa` se abría **tres** veces y el metadata y `ld_profile.tsv` **dos**.
+      `CliValidatedConfig::F5` lleva ahora el `EffectiveF5Config` ya admitido,
+      como la rama `Legacy`. Medido de nuevo: `validate` abre cada entrada
+      **una** vez y `run` abre `ref.fa` **dos** —la admisión y la lectura
+      productiva de bases, que no es una segunda admisión— y el metadata y el
+      perfil **una**. `validate_f5_admission_after_bootstrap` desaparece por
+      falta de llamador.
+    - **M7a — la regla del nombre publicable estaba duplicada sin juez.** Vivía
+      en el orquestador Rust y en `_PUBLISHABLE_NAME` del adaptador, y divergía:
+      `validate` la aceptaba y `run` la rechazaba. Ahora vive **una sola vez**
+      en la admisión del dispatcher, de modo que `validate` y `run` la aplican
+      igual, y el adaptador conserva solo una guarda de **contención** —no
+      escribir fuera del directorio de autoría—, que es otra regla. Hay prueba
+      Rust y prueba Python.
+    - **M7b — `controlled` se anunciaba pero no se desactivaba.** REQ-UI-15 dice
+      «desactivarse». `render_f5_scenario_toml` rechaza ahora la combinación, de
+      modo que el documento no llega a existir; Rust ya la rechaza por su cuenta
+      en la subpoblación y por unidad, así que la interfaz no inventa regla.
+    - **M7c — `run` F5 aceptaba y descartaba en silencio** las dos
+      autorizaciones estrechas de la matriz SNV de F2. Ahora las rechaza con
+      diagnóstico, en `validate` y en `run`.
+    - **M7d — `f5_package_summary` podía levantar `ValueError`** por su
+      `zip(..., strict=True)` ante un manifiesto con un enlace de más o de
+      menos. Comprueba el recuento antes.
+    - **M7e — con cero subpoblaciones el renderizador emitía un escenario que su
+      propio parser rechazaba**, y la interfaz lo mostraba en verde. Ahora lo
+      exige también al renderizar.
+    - **Notas aplicadas.** El control positivo de la guarda de auditores
+      distingue un nombre presente y cercano de uno ausente y cercano; las
+      aserciones de clausura pasan de «mayor que cero» a la fórmula del fixture
+      —un individuo, dos copias, aportado y no derivado—;
+      `execute_validated_f5_config_with_entropy` desaparece, que era `pub` sin
+      llamador; las tres expresiones regulares de los esquemas se contrastan
+      ahora contra sus `pattern`, igual que `F5_INTEGER_BOUNDS`; y el comentario
+      «Once ficheros» pasa a «Diez», que es lo que la aserción exige.
+  - **Puertas.** `fmt`, `clippy -D warnings`, `test --workspace --all-targets`
+    (1084 pasan, 0 fallan, 12 ignoradas, frente a 1076/0/12 al empezar y
+    1080/0/12 antes de aplicar la revisión), `test --doc` (2/0/0),
+    `build --release --target x86_64-unknown-linux-gnu` y `doc --no-deps` sin
+    avisos, todas en verde. **Lado Python:** `marimo check --strict
+    ui/gps_app.py` pasa de **rojo** (1 crítico `multiple-definitions` sobre
+    `selected_technical_event`, preexistente) a **verde**; `pytest tests` 7
+    pasan y 1 se omite, sin cambio; `pytest tests_ui` pasa de 65 a 94 pruebas y
+    de 80 a 180 subpruebas, conservando **los dos fallos preexistentes**
+    —`test_f2_5_vcf_ui` y
+    `test_ui_technical_event_v2_round_trips_to_rust_validation`— que ya fallaban
+    en `ed30562` y quedan fuera del alcance de este hito.
 - ☐ **F5.6.2.** Incorporar el perfil opcional
   `human_ld_ragsdale_approx_v1` mediante su recurso versionado y receta de medias,
   sin beta/cuantiles activos ni selección predeterminada.

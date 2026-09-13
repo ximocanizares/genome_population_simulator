@@ -58,7 +58,7 @@ fn write_f5_profile(profile_dir: &Path) -> String {
         (
             "ld_profile.tsv",
             "f5_ld_profile",
-            "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t9\t0.5\t0.05\n",
+            "population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error\nP1\t1\t9\t1\t0.05\n",
         ),
     ];
     let links = files
@@ -261,9 +261,51 @@ fn cli_dispatches_general_v3_from_an_unrelated_three_level_working_directory() {
         .arg(&output)
         .output()
         .expect("F5 run");
-    assert_eq!(run.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&run.stderr).contains("GPS-CONF-101"));
-    assert!(!output.exists());
+    // F5.6.1 encadena `run`: el mismo par, invocado por una ruta relativa
+    // desde un directorio ajeno, publica su paquete en el destino pedido.
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    for relative_artifact in [
+        "manifest.json",
+        "effective-config.json",
+        "outputs/f5-block-layout.tsv",
+        "outputs/f5-sites.tsv",
+        "outputs/f5-haplotypes.tsv",
+        "outputs/f5-frequencies.tsv",
+        "outputs/f5-ld-evaluation.tsv",
+        "outputs/f5-founders.tsv",
+        "outputs/f5-attempts.tsv",
+        "outputs/truth.jsonl",
+    ] {
+        assert!(
+            output.join(relative_artifact).is_file(),
+            "falta {relative_artifact} en el paquete publicado"
+        );
+    }
+    // El nombre del general se publica: la ruta de invocación es relativa y
+    // ajena, y aun así `source_path` es exactamente el nombre del documento.
+    let effective_document =
+        fs::read_to_string(output.join("effective-config.json")).expect("efectivo publicado");
+    assert!(
+        effective_document.contains("\"source_path\": \"general.toml\""),
+        "{effective_document}"
+    );
+    // DTC-045: el destino no se sobrescribe ni se mezcla.
+    let again = Command::new(BINARY)
+        .current_dir(&foreign_cwd)
+        .args(["run", relative.to_str().expect("relative path"), "--output"])
+        .arg(&output)
+        .output()
+        .expect("F5 run repetido");
+    assert!(!again.status.success());
+    assert!(
+        String::from_utf8_lossy(&again.stderr).contains("GPS-IO-003"),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
     fs::remove_dir_all(root).expect("cleanup");
 }
 

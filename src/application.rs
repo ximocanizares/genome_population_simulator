@@ -27,8 +27,8 @@ use crate::f5_admission::{
 use crate::f5_profile::{F5Profile, load_f5_profile_under_budget};
 use crate::haplotype::{HaplotypePhase, Ploidy};
 use crate::identity::{
-    AutomaticIdRequest, EventId, FounderKey, IdClass, IdentityRegistry, IndividualId, PopulationId,
-    ReferenceId, SequenceId,
+    AutomaticIdRequest, EventId, ExecutionId, FounderKey, IdClass, IdentityRegistry, IndividualId,
+    PopulationId, ReferenceId, SequenceId,
 };
 use crate::population_snvs::{
     FrequencyAssignmentMode, FrequencySampling, FrequencySpectrumComponent,
@@ -539,12 +539,17 @@ fn admit_f5_bootstrap(
     Ok(())
 }
 
-/// Resultado de la frontera CLI. La rama F5 completa la admisión física .4,
-/// pero su ejecución y publicación siguen explícitamente aplazadas.
+/// Resultado de la frontera CLI.
+///
+/// La rama F5 lleva la configuración **ya admitida**: el dispatcher completa
+/// la admisión física .4 una sola vez y `run` la reutiliza, igual que hace la
+/// rama histórica con su `EffectiveConfig`. Repetirla abriría referencia,
+/// perfil y máscara por segunda vez, ensancharía la ventana TOCTOU y
+/// desmentiría la contabilidad publicada, que sella **una** pasada.
 #[derive(Clone, Debug)]
 pub enum CliValidatedConfig {
     Legacy(Box<EffectiveConfig>),
-    F5(Box<F5BootstrapConfig>),
+    F5(Box<EffectiveF5Config>),
 }
 
 impl EffectiveF5Config {
@@ -1062,32 +1067,29 @@ fn load_and_validate_cli_config_with_toml_opener(
     // solicitó el llamador.
     let admitted = admit_toml_header(path, bytes, ExpectedConfigKind::GeneralDispatch)?;
     if admitted_is_f5_general_v3(&admitted) {
+        // El nombre del general se publica en `effective-config.json`: la
+        // regla vive aquí, de modo que `validate` y `run` la aplican igual y
+        // ningún otro lenguaje necesita repetirla (DTC-051).
+        require_publishable_general_name(&general_path)?;
         let bootstrap = bootstrap_f5_config_from_admitted_with_toml_opener(
             general_path,
             document,
             admitted,
             opener,
         )?;
-        // `validate` ejecuta la misma admisión .4 que la biblioteca, pero no
-        // necesita resolver una semilla: no hay consumidor RNG ni publicación.
-        validate_f5_admission_after_bootstrap(&bootstrap)?;
-        return Ok(CliValidatedConfig::F5(Box::new(bootstrap)));
+        // La admisión .4 corre **una** vez y su resultado viaja: `validate` la
+        // usa y la descarta; `run` la reutiliza sin reabrir nada.
+        let effective = materialize_f5_config_after_bootstrap(
+            bootstrap,
+            &mut SystemEntropy,
+            crate::f5_preflight::F5OtherResources::default(),
+        )?;
+        return Ok(CliValidatedConfig::F5(Box::new(effective)));
     }
     let general = parse_declared_config(admitted)?;
     build_effective_config_with_entropy(&general, &mut SystemEntropy)
         .map(Box::new)
         .map(CliValidatedConfig::Legacy)
-}
-
-fn validate_f5_admission_after_bootstrap(bootstrap: &F5BootstrapConfig) -> Result<(), Diagnostic> {
-    let provisional = prepare_f5_config_after_bootstrap(bootstrap.clone())?;
-    let mut ledger = provisional.admission_ledger();
-    let _ = crate::f5_preflight::admit_f5_resources_under_ledger(
-        &provisional,
-        crate::f5_preflight::F5OtherResources::default(),
-        &mut ledger,
-    )?;
-    Ok(())
 }
 
 /// Construye la única transición bootstrap→perfil usada por la CLI y la
@@ -2659,6 +2661,274 @@ fn config_error(
     .with("path", general.source().path().display().to_string())
     .with("fields", fields)
     .with("detail", detail.into())
+}
+
+// ---------------------------------------------------------------------------
+// F5.6.1 — cadena productiva de `run`
+// ---------------------------------------------------------------------------
+
+/// Lo que una ejecución F5 publicada deja al llamador.
+///
+/// No es un artefacto: el paquete ya está en disco y este valor solo nombra
+/// dónde quedó y qué contaron sus auditores, para que la frontera CLI y las
+/// baterías puedan contrastarlo sin releer el destino.
+#[derive(Clone, Copy, Debug)]
+pub struct F5ExecutionOutcome<'a> {
+    destination: &'a Path,
+    closure: crate::f5_closure::F5ClosureReport,
+}
+
+impl F5ExecutionOutcome<'_> {
+    /// Destino final, ya renombrado.
+    #[must_use]
+    pub const fn destination(&self) -> &Path {
+        self.destination
+    }
+    /// Recuentos de la clausura de identidad sobre ese destino.
+    #[must_use]
+    pub const fn closure(&self) -> crate::f5_closure::F5ClosureReport {
+        self.closure
+    }
+}
+
+/// Material canónico del `execution_id` de F5.
+///
+/// F1 a F4 lo derivan del digest del **único** documento de autoría. F5 tiene
+/// dos y el general **no** declara el hash del escenario, de modo que usar
+/// solo el general daría la misma identidad de ejecución a dos escenarios
+/// distintos: `block_id` y `site_id` la incorporan, así que dos escenarios
+/// distintos compartirían identificadores de bloque y de sitio. El material
+/// es, por tanto, la concatenación de los dos SHA-256 observados, en orden de
+/// rol —general y después escenario—, calculados sobre el mismo handle que
+/// los leyó y sin volver a abrirlos. Los dos cubren todo lo declarado: el
+/// general fija referencia y su hash, y el escenario fija perfil, máscara,
+/// límites, objetivo, subpoblaciones y sustituciones con sus hashes.
+///
+/// El orden **no** es indiferente: intercambiarlo cambia todos los
+/// `execution_id`, `block_id` y `site_id` de F5. `f5_execution_id` lo fija con
+/// un vector y una rederivación independiente desde semilla y digest.
+fn f5_execution_material(documents: &F5BootstrapDocuments) -> String {
+    let mut material = String::with_capacity(128);
+    material.push_str(documents.general().sha256());
+    material.push_str(documents.scenario().sha256());
+    material
+}
+
+/// Identidad de ejecución F5, derivada del mismo camino que F1 a F4.
+///
+/// # Errors
+///
+/// `GPS-CONF-017` si la semilla efectiva no es canónica y el diagnóstico de
+/// `configuration_digest` o de la derivación si el material desborda.
+pub fn f5_execution_id(config: &EffectiveF5Config) -> Result<ExecutionId, Diagnostic> {
+    let material = f5_execution_material(config.bootstrap_documents());
+    let root_seed = crate::randomness::RootSeed::parse("seed", config.seed())?;
+    crate::identity::derive_execution_id(
+        root_seed,
+        &crate::integrity::configuration_digest(material.as_bytes())?,
+    )
+}
+
+/// Ejecuta la cadena productiva F5 y publica su paquete en `destination`.
+///
+/// # Orden, y por qué el provisional llega antes que el layout
+///
+/// DTC-045 distingue el rechazo de pre-simulación —que no publica destino— del
+/// fallo controlado **posterior al comienzo**, que «publica atómicamente el
+/// directorio final como fallido». La simulación F5 comienza cuando se abre el
+/// primer ámbito RNG derivado del `execution_id`, y eso ocurre ya en el
+/// layout. Por eso el provisional se crea **antes** que él: layout, búsqueda
+/// haplotípica, asignación fundadora, materialización de identidades y
+/// publicación tienen las cinco un productor de paquete `failed`. Definir
+/// «comenzar» como «cuando este código abre el provisional» haría la regla
+/// autocumplida y dependiente del orden de las líneas.
+///
+/// La admisión física **no** se repite: llega ya sellada en `config`, que el
+/// dispatcher materializó una sola vez.
+///
+/// # Obligación de proceso
+///
+/// Publica **exclusivamente** por [`crate::f5_closure::seal_and_publish_f5_success`]
+/// y [`crate::f5_closure::seal_and_publish_f5_failure`]. Llamar a
+/// `publish_f5_success` o a `publish_f5_failure` daría un destino **sin
+/// testigo** y dejaría la clausura de F5.5.1 inaplicable sin ninguna señal.
+///
+/// # Auditores
+///
+/// `audit_f5_package` entra como el recuento MAN-70 que la publicación exige,
+/// sobre la raíz de carga útil que `publish` renombra **sin tocar** al
+/// destino; `audit_f5_identity_closure` corre después sobre el destino ya
+/// renombrado, que es el que su testigo acredita. En la mitad «fallo» el
+/// gemelo es `audit_f5_failure_closure`.
+///
+/// # Errors
+///
+/// Cualquier diagnóstico de las cinco etapas, de la publicación o de los
+/// auditores. Un fallo controlado publica el paquete `failed` y **aun así**
+/// devuelve el diagnóstico de su informe, para que la frontera CLI conserve su
+/// código de salida.
+pub fn execute_validated_f5_config<'a>(
+    config: &EffectiveF5Config,
+    destination: &'a Path,
+) -> Result<F5ExecutionOutcome<'a>, Diagnostic> {
+    execute_validated_f5_config_with_recount(config, destination, |payload, declaration| {
+        crate::f5_oracle::audit_f5_package(payload, declaration)
+            .map(|report| report.initialization_summaries().to_vec())
+            .map_err(crate::f5_oracle::F5OracleRejection::into_diagnostic)
+    })
+}
+
+/// Variante instrumental con el recuento MAN-70 inyectado.
+///
+/// Producción usa siempre `audit_f5_package`; esta forma existe para que una
+/// batería pueda recorrer la rama de **publicación fallida**, que de otro modo
+/// solo se alcanzaría corrompiendo el provisional desde fuera del proceso.
+///
+/// # Errors
+///
+/// Los mismos que [`execute_validated_f5_config`].
+#[doc(hidden)]
+pub fn execute_validated_f5_config_with_recount<'a, R>(
+    config: &EffectiveF5Config,
+    destination: &'a Path,
+    recount: R,
+) -> Result<F5ExecutionOutcome<'a>, Diagnostic>
+where
+    R: FnOnce(
+        &Path,
+        &crate::f5_oracle::F5PackageDeclaration,
+    ) -> Result<Vec<crate::f5_oracle::F5InitializationSummary>, Diagnostic>,
+{
+    use crate::f5_closure::{
+        F5ClosureRejection, audit_f5_failure_closure, audit_f5_identity_closure,
+        seal_and_publish_f5_failure, seal_and_publish_f5_success,
+    };
+    use crate::f5_founders::{
+        assign_f5_founders, empty_f5_founder_identities, materialize_f5_founder_identities,
+    };
+    use crate::f5_layout::{F5LayoutFailure, F5LayoutRequest, build_f5_physical_layout};
+    use crate::f5_preflight::{F5OtherResources, recover_sealed_f5_admission};
+    use crate::f5_publication::{F5FailureReport, F5FailureStage, F5PublicationRequest};
+    use crate::f5_search::{F5SearchFailure, search_f5_haplotypes};
+    use crate::publication::ExecutionWorkspace;
+
+    let sealed = recover_sealed_f5_admission(config, F5OtherResources::default())?;
+    let execution_id = f5_execution_id(config)?;
+    let empty = empty_f5_founder_identities(config, &execution_id)?;
+
+    // El destino que ya existe es un rechazo previo al comienzo: no se abre
+    // provisional, no se consume RNG y no se publica nada.
+    let mut workspace = Some(ExecutionWorkspace::create(destination)?);
+    // Cada etapa entrega el provisional a la publicación del fallo, o lo
+    // conserva para la siguiente. `take` hace imposible usarlo dos veces.
+    let published_failure = |workspace: &mut Option<ExecutionWorkspace>,
+                             report: &F5FailureReport|
+     -> Diagnostic {
+        let Some(provisional) = workspace.take() else {
+            return report.diagnostic().clone();
+        };
+        match seal_and_publish_f5_failure(
+            provisional,
+            config,
+            &sealed,
+            &execution_id,
+            report,
+            &empty,
+        ) {
+            Ok(failed) => match audit_f5_failure_closure(failed.destination(), &failed, &empty) {
+                Ok(_) => report.diagnostic().clone(),
+                Err(rejection) => rejection.into_diagnostic(),
+            },
+            Err(diagnostic) => diagnostic,
+        }
+    };
+
+    let layout =
+        match build_f5_physical_layout(F5LayoutRequest::new(config, &sealed, &execution_id)?) {
+            Ok(layout) => layout,
+            Err(failure) => {
+                let report = F5FailureReport::from_layout(config, &failure);
+                drop::<F5LayoutFailure>(failure);
+                return Err(published_failure(&mut workspace, &report));
+            }
+        };
+    let search = match search_f5_haplotypes(config, &sealed, &execution_id, &layout) {
+        Ok(search) => search,
+        Err(failure) => {
+            let report = F5FailureReport::from_search(config, &layout, &failure);
+            drop::<F5SearchFailure>(failure);
+            return Err(published_failure(&mut workspace, &report));
+        }
+    };
+    let assignment = match assign_f5_founders(config, &sealed, &search) {
+        Ok(assignment) => assignment,
+        Err(diagnostic) => {
+            let report = F5FailureReport::from_diagnostic(
+                config,
+                Some(&layout),
+                F5FailureStage::Founders,
+                diagnostic,
+            );
+            return Err(published_failure(&mut workspace, &report));
+        }
+    };
+    let mut identities = match materialize_f5_founder_identities(
+        config,
+        &sealed,
+        &execution_id,
+        &layout,
+        &search,
+        &assignment,
+    ) {
+        Ok(identities) => identities,
+        Err(diagnostic) => {
+            let report = F5FailureReport::from_diagnostic(
+                config,
+                Some(&layout),
+                F5FailureStage::Founders,
+                diagnostic,
+            );
+            return Err(published_failure(&mut workspace, &report));
+        }
+    };
+
+    let provisional = workspace.take().ok_or_else(|| {
+        Diagnostic::internal_invariant("f5_execution", "workspace_consumed_before_publication")
+    })?;
+    let request = F5PublicationRequest::new(
+        config,
+        &sealed,
+        &execution_id,
+        &layout,
+        &search,
+        &assignment,
+    )?;
+    let witness = match seal_and_publish_f5_success(provisional, &request, &mut identities, recount)
+    {
+        Ok(witness) => witness,
+        Err(failure) => {
+            let (returned, diagnostic) = failure.into_parts();
+            // Sin provisional vivo no hay nada que publicar: es la
+            // interrupción que DTC-045 reserva al `INCOMPLETE`.
+            let Some(returned) = returned else {
+                return Err(diagnostic);
+            };
+            workspace = Some(returned);
+            let report = F5FailureReport::from_diagnostic(
+                config,
+                Some(&layout),
+                F5FailureStage::Publication,
+                diagnostic,
+            );
+            return Err(published_failure(&mut workspace, &report));
+        }
+    };
+    let closure = audit_f5_identity_closure(destination, &witness, &identities)
+        .map_err(F5ClosureRejection::into_diagnostic)?;
+    Ok(F5ExecutionOutcome {
+        destination,
+        closure,
+    })
 }
 
 #[cfg(test)]

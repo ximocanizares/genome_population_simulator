@@ -86,8 +86,12 @@ class UiContractTests(unittest.TestCase):
         ):
             with self.subTest(control=control):
                 self.assertIn(control, source)
+        # F5.6.1 incorpora el escenario poblacional sintético: `scenario_id`
+        # deja de ser una opción futura y pasa a tener control propio, con su
+        # matriz campo→control en `tests_ui/test_f5_6_1_scenario_ui.py`. Panel,
+        # construcción recombinante y mapas siguen prohibidos.
+        self.assertIn("f5_scenario_id_control", source)
         for future_option in (
-            "scenario_id",
             "population_control",
             "haplotype_construction",
             "recombination_probability_per_interbase",

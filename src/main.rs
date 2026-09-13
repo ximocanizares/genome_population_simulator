@@ -7,7 +7,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use genome_population_simulator::application::{CliValidatedConfig, load_and_validate_cli_config};
+use genome_population_simulator::application::{
+    CliValidatedConfig, execute_validated_f5_config, load_and_validate_cli_config,
+};
 use genome_population_simulator::execution::{
     ExecutionAuthorizations, execute_validated_config_with_authorizations,
     preflight_validated_config_with_authorizations,
@@ -55,14 +57,19 @@ fn main() -> ExitCode {
             preflight_validated_config_with_authorizations(&effective, parsed.authorizations),
         // El dispatcher ya completó la admisión .4 (perfil, primera pasada
         // FASTA y única máscara) sin RNG, destino ni publicación.
-        (CommandMode::Validate, CliValidatedConfig::F5(_)) => Ok(()),
-        (CommandMode::Run, CliValidatedConfig::F5(_)) => Err(
-            genome_population_simulator::diagnostics::Diagnostic::f5_configuration(
-                parsed.path.display().to_string(),
-                "command",
-                "run F5 todavía no está habilitado; la publicación pertenece a F5.4",
-            ),
-        ),
+        (CommandMode::Validate, CliValidatedConfig::F5(_)) =>
+            reject_legacy_authorizations(&parsed.path, parsed.authorizations),
+        // F5.6.1 encadena la ejecución productiva. El destino se publica
+        // exclusivamente por los envoltorios que sellan.
+        (CommandMode::Run, CliValidatedConfig::F5(effective)) => {
+            reject_legacy_authorizations(&parsed.path, parsed.authorizations)?;
+            parsed.output.as_deref().map_or_else(
+                || Err(genome_population_simulator::diagnostics::Diagnostic::internal_invariant(
+                    "cli", "run_without_output_after_argument_validation",
+                )),
+                |destination| execute_validated_f5_config(&effective, destination).map(|_| ()),
+            )
+        }
         (CommandMode::Run, CliValidatedConfig::Legacy(effective)) => parsed.output.as_deref().map_or_else(
             || Err(genome_population_simulator::diagnostics::Diagnostic::internal_invariant(
                 "cli", "run_without_output_after_argument_validation",
@@ -139,6 +146,36 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<ParsedArgs, &'st
         output,
         authorizations,
     })
+}
+
+/// Las dos autorizaciones estrechas son de la matriz SNV de F2: F5 no tiene
+/// ninguna vía que pueda consumirlas.
+///
+/// Aceptarlas y descartarlas en silencio era inocuo mientras `run` F5 siempre
+/// fallaba; con la cadena productiva encadenada, dejaría creer que una
+/// ejecución quedó autorizada cuando ninguna autorización se aplicó.
+fn reject_legacy_authorizations(
+    path: &std::path::Path,
+    authorizations: ExecutionAuthorizations,
+) -> Result<(), genome_population_simulator::diagnostics::Diagnostic> {
+    let rejected = match (
+        authorizations.allow_empty_snv_matrix,
+        authorizations.allow_incompatible_genotypes,
+    ) {
+        (false, false) => return Ok(()),
+        (true, false) => "--allow-empty-snv-matrix",
+        (false, true) => "--allow-incompatible-genotypes",
+        (true, true) => "--allow-empty-snv-matrix,--allow-incompatible-genotypes",
+    };
+    Err(
+        genome_population_simulator::diagnostics::Diagnostic::f5_configuration(
+            path.display().to_string(),
+            "command",
+            format!(
+                "{rejected} pertenece a la matriz SNV de F2 y F5 no tiene ninguna vía que pueda consumirlo"
+            ),
+        ),
+    )
 }
 
 fn usage() -> &'static str {

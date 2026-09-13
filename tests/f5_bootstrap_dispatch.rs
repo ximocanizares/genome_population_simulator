@@ -226,7 +226,7 @@ fn dispatcher_opens_each_bootstrap_toml_once_and_records_identity_from_written_b
         panic!("general v3 must dispatch to F5");
     };
 
-    let documents = bootstrap.documents();
+    let documents = bootstrap.bootstrap_documents();
     assert_eq!(documents.general().size_bytes(), general_bytes.len() as u64);
     assert_eq!(documents.general().sha256(), sha256(&general_bytes));
     assert_eq!(

@@ -30,15 +30,35 @@ def _():
         reduction_from_editor_row,
         render_general_toml,
     )
+    from f5_editor import (
+        F5GeneralForm,
+        F5Pair,
+        F5ScenarioForm,
+        F5_SAMPLING_MODES,
+        F5_TARGET_KINDS,
+        available_sampling_modes,
+        default_f5_pair,
+        f5_override_editor_rows,
+        f5_override_from_editor_row,
+        f5_pair_documents,
+        f5_subpopulation_editor_rows,
+        f5_subpopulation_from_editor_row,
+        import_f5_pair,
+        inbreeding_is_available,
+        pair_without_inbreeding,
+    )
     from process_adapter import (
         DEFAULT_BINARY,
         PROJECT_ROOT,
         ProcessAdapterError,
         diagnostic_summary,
+        f5_package_summary,
         initial_population_statistics_summary,
         truth_artifact_summary,
         vcf_artifact_summary,
+        run_f5_pair,
         run_toml,
+        validate_f5_pair,
         validate_toml,
     )
     from ui_panels import (
@@ -54,6 +74,24 @@ def _():
         DirectEventRow,
         DEFAULT_BINARY,
         EditorError,
+        F5GeneralForm,
+        F5Pair,
+        F5ScenarioForm,
+        F5_SAMPLING_MODES,
+        F5_TARGET_KINDS,
+        available_sampling_modes,
+        default_f5_pair,
+        f5_override_editor_rows,
+        f5_override_from_editor_row,
+        f5_package_summary,
+        f5_pair_documents,
+        f5_subpopulation_editor_rows,
+        f5_subpopulation_from_editor_row,
+        import_f5_pair,
+        inbreeding_is_available,
+        pair_without_inbreeding,
+        run_f5_pair,
+        validate_f5_pair,
         GeneralForm,
         InitialPopulationRow,
         PopulationSnvsForm,
@@ -600,13 +638,13 @@ def _(
                 ordered_editor_rows(active_direct_events, "direct_events"), start=0
             )
         ]
-        selected_technical_event = str(technical_event_mode_control.value)
+        _selected_technical_event = str(technical_event_mode_control.value)
         active_technical_libraries = authored_editor_rows(
             technical_libraries_editor.value, "individual_id"
         )
         technical_event = (
             None
-            if selected_technical_event == "none"
+            if _selected_technical_event == "none"
             else TechnicalEventForm(
                 event_id=str(technical_event_id_control.value).strip(),
                 individual_ids=[
@@ -855,11 +893,523 @@ def _(
 
 
 @app.cell
+def _(mo):
+    # F5.6.1. La importación F5 es de **pareja**: exactamente un general v3 y
+    # exactamente un escenario v1. Cero o varios son errores de autoría.
+    f5_pair_upload = mo.ui.file(
+        filetypes=[".toml"],
+        multiple=True,
+        max_size=2_000_000,
+        label="Importar la pareja F5: general v3 y escenario v1",
+    )
+    return (f5_pair_upload,)
+
+
+@app.cell
+def _(EditorError, default_f5_pair, f5_pair_upload, import_f5_pair):
+    f5_import_error = None
+    imported_f5_pair = default_f5_pair()
+    if f5_pair_upload.value:
+        try:
+            imported_f5_pair = import_f5_pair(
+                [
+                    (uploaded.name, uploaded.contents.decode("utf-8"))
+                    for uploaded in f5_pair_upload.value
+                ]
+            )
+        except (UnicodeDecodeError, EditorError) as error:
+            f5_import_error = str(error)
+    return f5_import_error, imported_f5_pair
+
+
+@app.cell
+def _(
+    F5_SAMPLING_MODES,
+    F5_TARGET_KINDS,
+    f5_override_editor_rows,
+    f5_subpopulation_editor_rows,
+    imported_f5_pair,
+    mo,
+):
+    _general = imported_f5_pair.general
+    _scenario = imported_f5_pair.scenario
+    f5_seed_control = mo.ui.text(
+        value=_general.seed or "",
+        label="Semilla raíz F5 (64 hexadecimales; vacío la resuelve Rust)",
+        full_width=True,
+    )
+    f5_ploidy_control = mo.ui.number(
+        start=1, stop=10, step=1, value=_general.ploidy, label="Ploidía F5"
+    )
+    f5_reference_id_control = mo.ui.text(
+        value=_general.reference_id, label="ID de la referencia"
+    )
+    f5_reference_path_control = mo.ui.text(
+        value=_general.reference_path,
+        label="Ruta relativa del FASTA de referencia",
+        full_width=True,
+    )
+    f5_reference_sha256_control = mo.ui.text(
+        value=_general.reference_sha256,
+        label="SHA-256 de la referencia",
+        full_width=True,
+    )
+    f5_general_scenario_id_control = mo.ui.text(
+        value=_general.scenario_id, label="ID del escenario enlazado por el general"
+    )
+    f5_general_scenario_path_control = mo.ui.text(
+        value=_general.scenario_path,
+        label="Ruta relativa del único escenario F5 enlazado",
+        full_width=True,
+    )
+    f5_scenario_link_controls = mo.vstack(
+        [f5_general_scenario_id_control, f5_general_scenario_path_control]
+    )
+    f5_scenario_id_control = mo.ui.text(
+        value=_scenario.scenario_id, label="ID declarado por el escenario"
+    )
+    f5_founder_count_control = mo.ui.text(
+        value=str(_scenario.founder_count), label="Fundadores del escenario"
+    )
+    f5_profile_metadata_path_control = mo.ui.text(
+        value=_scenario.profile_metadata_path,
+        label="Ruta relativa del metadata del perfil versionado",
+        full_width=True,
+    )
+    f5_profile_metadata_sha256_control = mo.ui.text(
+        value=_scenario.profile_metadata_sha256,
+        label="SHA-256 del metadata del perfil",
+        full_width=True,
+    )
+    f5_excluded_regions_path_control = mo.ui.text(
+        value=_scenario.excluded_regions_path or "",
+        label="Ruta relativa de la máscara de regiones excluidas (opcional)",
+        full_width=True,
+    )
+    f5_excluded_regions_sha256_control = mo.ui.text(
+        value=_scenario.excluded_regions_sha256 or "",
+        label="SHA-256 de la máscara (obligatorio si hay máscara)",
+        full_width=True,
+    )
+    f5_inbreeding_control = mo.ui.text(
+        value=_scenario.inbreeding_f or "",
+        label="F del escenario (solo ploidía 2; vacío lo omite)",
+    )
+    f5_max_layout_attempts_control = mo.ui.text(
+        value="" if _scenario.max_layout_attempts is None else str(_scenario.max_layout_attempts),
+        label="max_layout_attempts",
+    )
+    f5_max_haplotype_attempts_control = mo.ui.text(
+        value="" if _scenario.max_haplotype_attempts is None else str(_scenario.max_haplotype_attempts),
+        label="max_haplotype_attempts",
+    )
+    f5_max_swap_proposals_control = mo.ui.text(
+        value="" if _scenario.max_swap_proposals is None else str(_scenario.max_swap_proposals),
+        label="max_swap_proposals",
+    )
+    f5_max_haplotype_cells_control = mo.ui.text(
+        value="" if _scenario.max_haplotype_cells is None else str(_scenario.max_haplotype_cells),
+        label="max_haplotype_cells",
+    )
+    f5_max_operation_units_control = mo.ui.text(
+        value="" if _scenario.max_operation_units is None else str(_scenario.max_operation_units),
+        label="max_operation_units",
+    )
+    f5_max_working_memory_bytes_control = mo.ui.text(
+        value="" if _scenario.max_working_memory_bytes is None else str(_scenario.max_working_memory_bytes),
+        label="max_working_memory_bytes",
+    )
+    f5_max_output_bytes_control = mo.ui.text(
+        value="" if _scenario.max_output_bytes is None else str(_scenario.max_output_bytes),
+        label="max_output_bytes",
+    )
+    f5_target_kind_control = mo.ui.dropdown(
+        options=list(F5_TARGET_KINDS),
+        value=_scenario.target_kind,
+        label="Objetivo exclusivo del escenario",
+    )
+    f5_target_value_control = mo.ui.text(
+        value=_scenario.target_value, label="Valor del objetivo"
+    )
+    f5_subpopulations_editor = mo.ui.data_editor(
+        f5_subpopulation_editor_rows(_scenario),
+        label=(
+            "Subpoblaciones: population_id, individual_count, founder_kind "
+            "(founder_ids|founder_keys), founders separados por espacios, "
+            f"sampling ({'|'.join(F5_SAMPLING_MODES)}) y F"
+        ),
+        pagination=False,
+    )
+    f5_sampling_overrides_editor = mo.ui.data_editor(
+        f5_override_editor_rows(_scenario)
+        or [
+            {
+                "order": 1,
+                "population_id": "",
+                "block_index": 0,
+                "mode": "probabilistic",
+                "controlled_max_abs_error": "",
+            }
+        ],
+        label=(
+            "Sustituciones por bloque×subpoblación: modo y tolerancia "
+            "(fila con población vacía se omite)"
+        ),
+        pagination=False,
+    )
+    return (
+        f5_excluded_regions_path_control,
+        f5_excluded_regions_sha256_control,
+        f5_founder_count_control,
+        f5_general_scenario_id_control,
+        f5_general_scenario_path_control,
+        f5_inbreeding_control,
+        f5_max_haplotype_attempts_control,
+        f5_max_haplotype_cells_control,
+        f5_max_layout_attempts_control,
+        f5_max_operation_units_control,
+        f5_max_output_bytes_control,
+        f5_max_swap_proposals_control,
+        f5_max_working_memory_bytes_control,
+        f5_ploidy_control,
+        f5_profile_metadata_path_control,
+        f5_profile_metadata_sha256_control,
+        f5_reference_id_control,
+        f5_reference_path_control,
+        f5_reference_sha256_control,
+        f5_sampling_overrides_editor,
+        f5_scenario_id_control,
+        f5_scenario_link_controls,
+        f5_seed_control,
+        f5_subpopulations_editor,
+        f5_target_kind_control,
+        f5_target_value_control,
+    )
+
+
+@app.cell
+def _(
+    EditorError,
+    F5GeneralForm,
+    F5Pair,
+    F5ScenarioForm,
+    editor_integer,
+    f5_excluded_regions_path_control,
+    f5_excluded_regions_sha256_control,
+    f5_founder_count_control,
+    f5_general_scenario_id_control,
+    f5_general_scenario_path_control,
+    f5_inbreeding_control,
+    f5_max_haplotype_attempts_control,
+    f5_max_haplotype_cells_control,
+    f5_max_layout_attempts_control,
+    f5_max_operation_units_control,
+    f5_max_output_bytes_control,
+    f5_max_swap_proposals_control,
+    f5_max_working_memory_bytes_control,
+    f5_override_from_editor_row,
+    f5_pair_documents,
+    f5_ploidy_control,
+    f5_profile_metadata_path_control,
+    f5_profile_metadata_sha256_control,
+    f5_reference_id_control,
+    f5_reference_path_control,
+    f5_reference_sha256_control,
+    f5_sampling_overrides_editor,
+    f5_scenario_id_control,
+    f5_seed_control,
+    f5_subpopulation_from_editor_row,
+    f5_subpopulations_editor,
+    f5_target_kind_control,
+    f5_target_value_control,
+    imported_f5_pair,
+    ordered_editor_rows,
+    pair_without_inbreeding,
+):
+    f5_preview_error = None
+    f5_general_toml = ""
+    f5_scenario_toml = ""
+
+    def _f5_optional(control, name):
+        text = str(control.value).strip()
+        return editor_integer(text, f"f5.{name}") if text else None
+
+    def _f5_authored(rows, path):
+        # Una fila sin `population_id` es el hueco vacío del editor, no una
+        # subpoblación ni una sustitución: se omite antes de ordenar.
+        return ordered_editor_rows(
+            [row for row in rows if str(row.get("population_id", "")).strip()], path
+        )
+
+    try:
+        # Los bytes importados viajan con el par: `f5_pair_documents` los
+        # reemite mientras sigan describiendo el formulario vigente y deja de
+        # hacerlo en cuanto un control cambia (REQ-UI-15).
+        _f5_pair = F5Pair(
+            general=F5GeneralForm(
+                seed=str(f5_seed_control.value).strip() or None,
+                ploidy=editor_integer(f5_ploidy_control.value, "ploidy"),
+                reference_id=str(f5_reference_id_control.value).strip(),
+                reference_path=str(f5_reference_path_control.value).strip(),
+                reference_sha256=str(f5_reference_sha256_control.value).strip(),
+                scenario_id=str(f5_general_scenario_id_control.value).strip(),
+                scenario_path=str(f5_general_scenario_path_control.value).strip(),
+            ),
+            scenario=F5ScenarioForm(
+                scenario_id=str(f5_scenario_id_control.value).strip(),
+                founder_count=editor_integer(
+                    str(f5_founder_count_control.value).strip(), "founder_count"
+                ),
+                profile_metadata_path=str(
+                    f5_profile_metadata_path_control.value
+                ).strip(),
+                profile_metadata_sha256=str(
+                    f5_profile_metadata_sha256_control.value
+                ).strip(),
+                target_kind=str(f5_target_kind_control.value),
+                target_value=str(f5_target_value_control.value).strip(),
+                subpopulations=[
+                    f5_subpopulation_from_editor_row(row, f"subpopulations[{index}]")
+                    for index, row in enumerate(
+                        _f5_authored(f5_subpopulations_editor.value, "subpopulations")
+                    )
+                ],
+                sampling_overrides=[
+                    f5_override_from_editor_row(row, f"sampling_overrides[{index}]")
+                    for index, row in enumerate(
+                        _f5_authored(
+                            f5_sampling_overrides_editor.value, "sampling_overrides"
+                        )
+                    )
+                ],
+                excluded_regions_path=str(
+                    f5_excluded_regions_path_control.value
+                ).strip()
+                or None,
+                excluded_regions_sha256=str(
+                    f5_excluded_regions_sha256_control.value
+                ).strip()
+                or None,
+                inbreeding_f=str(f5_inbreeding_control.value).strip() or None,
+                max_layout_attempts=_f5_optional(
+                    f5_max_layout_attempts_control, "max_layout_attempts"
+                ),
+                max_haplotype_attempts=_f5_optional(
+                    f5_max_haplotype_attempts_control, "max_haplotype_attempts"
+                ),
+                max_swap_proposals=_f5_optional(
+                    f5_max_swap_proposals_control, "max_swap_proposals"
+                ),
+                max_haplotype_cells=_f5_optional(
+                    f5_max_haplotype_cells_control, "max_haplotype_cells"
+                ),
+                max_operation_units=_f5_optional(
+                    f5_max_operation_units_control, "max_operation_units"
+                ),
+                max_working_memory_bytes=_f5_optional(
+                    f5_max_working_memory_bytes_control, "max_working_memory_bytes"
+                ),
+                max_output_bytes=_f5_optional(
+                    f5_max_output_bytes_control, "max_output_bytes"
+                ),
+            ),
+            general_source=imported_f5_pair.general_source,
+            scenario_source=imported_f5_pair.scenario_source,
+        )
+        f5_general_toml, f5_scenario_toml = f5_pair_documents(
+            pair_without_inbreeding(_f5_pair)
+        )
+    except EditorError as error:
+        f5_preview_error = str(error)
+    return f5_general_toml, f5_preview_error, f5_scenario_toml
+
+
+@app.cell
+def _(f5_import_error, f5_preview_error):
+    f5_authoring_error = f5_import_error or f5_preview_error
+    return (f5_authoring_error,)
+
+
+@app.cell
+def _(PROJECT_ROOT, f5_authoring_error, mo):
+    f5_authoring_directory_control = mo.ui.text(
+        value=str(PROJECT_ROOT),
+        label="Directorio de autoría donde se escriben los dos documentos F5",
+        full_width=True,
+    )
+    f5_authoring_directory_browser = mo.ui.file_browser(
+        initial_path=PROJECT_ROOT,
+        selection_mode="directory",
+        multiple=False,
+        label="O seleccione el directorio de autoría local",
+    )
+    f5_general_name_control = mo.ui.text(
+        value="general.toml",
+        label="Nombre del general: se publica en effective-config.json",
+    )
+    f5_overwrite_control = mo.ui.checkbox(
+        value=False,
+        label="Sobrescribir los documentos existentes del directorio de autoría",
+    )
+    f5_output_directory_control = mo.ui.text(
+        value=str(PROJECT_ROOT / "results" / "marimo-f5-run"),
+        label="Directorio del paquete F5 (debe no existir)",
+        full_width=True,
+    )
+    f5_validate_button = mo.ui.run_button(
+        label="Validar la pareja F5 con Rust",
+        kind="success",
+        disabled=bool(f5_authoring_error),
+    )
+    return (
+        f5_authoring_directory_browser,
+        f5_authoring_directory_control,
+        f5_general_name_control,
+        f5_output_directory_control,
+        f5_overwrite_control,
+        f5_validate_button,
+    )
+
+
+@app.cell
+def _(
+    ProcessAdapterError,
+    binary_path_control,
+    f5_authoring_directory_browser,
+    f5_authoring_directory_control,
+    f5_general_name_control,
+    f5_general_toml,
+    f5_overwrite_control,
+    f5_scenario_toml,
+    f5_validate_button,
+    mo,
+    validate_f5_pair,
+):
+    from pathlib import Path as _F5Path
+
+    f5_validation_error = None
+    f5_validation_result = None
+    f5_validated_session = None
+    if f5_validate_button.value:
+        try:
+            with mo.status.spinner(title="Validando la pareja F5 con Rust…"):
+                f5_validation_result, f5_validated_session = validate_f5_pair(
+                    _F5Path(binary_path_control.value),
+                    f5_general_toml,
+                    f5_scenario_toml,
+                    (
+                        _F5Path(f5_authoring_directory_browser.path(0))
+                        if f5_authoring_directory_browser.value
+                        else _F5Path(f5_authoring_directory_control.value.strip())
+                    ),
+                    general_name=str(f5_general_name_control.value).strip(),
+                    overwrite=f5_overwrite_control.value,
+                )
+        except ProcessAdapterError as error:
+            f5_validation_error = str(error)
+    return f5_validation_error, f5_validation_result, f5_validated_session
+
+
+@app.cell
+def _(f5_authoring_error, f5_validated_session, mo):
+    # REQ-UI-15: una validación vigente es obligatoria antes de ejecutar.
+    f5_run_button = mo.ui.run_button(
+        label="Ejecutar el escenario F5",
+        kind="warn",
+        disabled=bool(f5_authoring_error) or f5_validated_session is None,
+    )
+    return (f5_run_button,)
+
+
+@app.cell
+def _(
+    ProcessAdapterError,
+    binary_path_control,
+    f5_authoring_directory_browser,
+    f5_authoring_directory_control,
+    f5_general_name_control,
+    f5_general_toml,
+    f5_output_directory_control,
+    f5_run_button,
+    f5_scenario_toml,
+    f5_validated_session,
+    mo,
+    run_f5_pair,
+):
+    from pathlib import Path as _F5RunPath
+
+    f5_run_error = None
+    f5_run_result = None
+    if f5_run_button.value and f5_validated_session is not None:
+        try:
+            with mo.status.spinner(title="Ejecutando el escenario F5…"):
+                f5_run_result = run_f5_pair(
+                    f5_validated_session,
+                    f5_general_toml,
+                    f5_scenario_toml,
+                    _F5RunPath(binary_path_control.value),
+                    (
+                        _F5RunPath(f5_authoring_directory_browser.path(0))
+                        if f5_authoring_directory_browser.value
+                        else _F5RunPath(f5_authoring_directory_control.value.strip())
+                    ),
+                    _F5RunPath(f5_output_directory_control.value.strip()),
+                    general_name=str(f5_general_name_control.value).strip(),
+                )
+        except ProcessAdapterError as error:
+            f5_run_error = str(error)
+    return f5_run_error, f5_run_result
+
+
+@app.cell
 def _(
     allow_empty_snv_matrix_control,
     allow_incompatible_genotypes_control,
     authoring_error,
     authoring_toml,
+    f5_authoring_directory_browser,
+    f5_authoring_directory_control,
+    f5_authoring_error,
+    f5_excluded_regions_path_control,
+    f5_excluded_regions_sha256_control,
+    f5_founder_count_control,
+    f5_general_name_control,
+    f5_general_toml,
+    f5_inbreeding_control,
+    f5_max_haplotype_attempts_control,
+    f5_max_haplotype_cells_control,
+    f5_max_layout_attempts_control,
+    f5_max_operation_units_control,
+    f5_max_output_bytes_control,
+    f5_max_swap_proposals_control,
+    f5_max_working_memory_bytes_control,
+    f5_output_directory_control,
+    f5_overwrite_control,
+    f5_package_summary,
+    f5_pair_upload,
+    f5_ploidy_control,
+    f5_profile_metadata_path_control,
+    f5_profile_metadata_sha256_control,
+    f5_reference_id_control,
+    f5_reference_path_control,
+    f5_reference_sha256_control,
+    f5_run_button,
+    f5_run_error,
+    f5_run_result,
+    f5_sampling_overrides_editor,
+    f5_scenario_id_control,
+    f5_scenario_link_controls,
+    f5_scenario_toml,
+    f5_seed_control,
+    f5_subpopulations_editor,
+    f5_target_kind_control,
+    f5_target_value_control,
+    f5_validate_button,
+    f5_validation_error,
+    f5_validation_result,
+    f5_validated_session,
+    available_sampling_modes,
+    inbreeding_is_available,
     base_directory_control,
     base_directory_browser,
     binary_path_control,
@@ -1008,6 +1558,170 @@ def _(
             else mo.callout("No se ha seleccionado una matriz SNV.", kind="neutral")
         )
     )
+    if f5_validation_error:
+        f5_validation_status = mo.callout(
+            f5_validation_error, kind="danger", title="No se pudo validar la pareja F5"
+        )
+    elif f5_validation_result is None:
+        f5_validation_status = mo.callout(
+            "Pendiente de validar la pareja F5 con Rust.", kind="neutral"
+        )
+    elif f5_validation_result.succeeded:
+        f5_validation_status = mo.callout(
+            "Pareja F5 admitida: el preflight de recursos, el perfil versionado "
+            "y la referencia ya se resolvieron.",
+            kind="success",
+        )
+    else:
+        f5_validation_status = mo.callout(
+            f5_validation_result.stdout or f5_validation_result.stderr,
+            kind="danger",
+            title=f"Validación F5 rechazada (código {f5_validation_result.returncode})",
+        )
+    if f5_run_error:
+        f5_run_status = mo.callout(
+            f5_run_error, kind="danger", title="No se pudo ejecutar el escenario F5"
+        )
+    elif f5_run_result is None:
+        f5_run_status = mo.callout("Ejecución F5 no iniciada.", kind="neutral")
+    elif f5_run_result.succeeded:
+        f5_run_status = mo.callout(
+            f"Paquete F5 publicado en {f5_run_result.output_directory}.", kind="success"
+        )
+    else:
+        f5_run_status = mo.callout(
+            f5_run_result.stdout or f5_run_result.stderr,
+            kind="danger",
+            title=f"Ejecución F5 fallida (código {f5_run_result.returncode})",
+        )
+    f5_package_summary_text = (
+        f5_package_summary(f5_run_result.output_directory)
+        if f5_run_result is not None
+        and f5_run_result.succeeded
+        and f5_run_result.output_directory is not None
+        else "El resumen del paquete F5 aparecerá tras una ejecución correcta."
+    )
+    # F5.6.1. El escenario poblacional sintético: un general v3 y un único
+    # escenario F5 v1. Sin panel externo, haplotipos suministrados,
+    # construcción recombinante ni mapas (REQ-UI-15).
+    f5_status = (
+        mo.callout(f5_authoring_error, kind="danger", title="Error de autoría F5")
+        if f5_authoring_error
+        else mo.callout(
+            "Pareja F5 estructuralmente completa. Valide con Rust antes de ejecutar.",
+            kind="success",
+        )
+    )
+    f5_inbreeding_controls = (
+        mo.vstack([f5_inbreeding_control])
+        if inbreeding_is_available(int(f5_ploidy_control.value))
+        else mo.callout(
+            "F solo se edita con ploidía 2; con otra ploidía no se publica.",
+            kind="neutral",
+        )
+    )
+    f5_offered_sampling_modes = available_sampling_modes(
+        str(f5_inbreeding_control.value).strip() or None
+    )
+    f5_budget_controls = mo.vstack(
+        [
+            f5_max_layout_attempts_control,
+            f5_max_haplotype_attempts_control,
+            f5_max_swap_proposals_control,
+            f5_max_haplotype_cells_control,
+            f5_max_operation_units_control,
+            f5_max_working_memory_bytes_control,
+            f5_max_output_bytes_control,
+        ]
+    )
+    f5_panel = mo.vstack(
+        [
+            mo.md("### Escenario poblacional sintético F5"),
+            f5_pair_upload,
+            f5_status,
+            mo.md("#### General v3"),
+            f5_seed_control,
+            f5_ploidy_control,
+            f5_reference_id_control,
+            f5_reference_path_control,
+            f5_reference_sha256_control,
+            f5_scenario_link_controls,
+            mo.md("#### Escenario F5 v1"),
+            f5_scenario_id_control,
+            f5_founder_count_control,
+            f5_profile_metadata_path_control,
+            f5_profile_metadata_sha256_control,
+            f5_excluded_regions_path_control,
+            f5_excluded_regions_sha256_control,
+            f5_inbreeding_controls,
+            mo.md("#### Objetivo exclusivo, límites y presupuestos"),
+            f5_target_kind_control,
+            f5_target_value_control,
+            f5_budget_controls,
+            mo.md("#### Subpoblaciones y sustituciones por bloque×subpoblación"),
+            f5_subpopulations_editor,
+            f5_sampling_overrides_editor,
+            mo.callout(
+                "Modos de muestreo ofrecidos con el F declarado: "
+                + ", ".join(f5_offered_sampling_modes)
+                + (
+                    "."
+                    if len(f5_offered_sampling_modes) > 1
+                    else "; `controlled` se desactiva porque F es mayor que cero."
+                ),
+                kind="info",
+            ),
+            mo.ui.text_area(
+                value=f5_general_toml,
+                label="General v3 exportable",
+                rows=12,
+                disabled=True,
+                full_width=True,
+            ),
+            mo.ui.text_area(
+                value=f5_scenario_toml,
+                label="Escenario F5 v1 exportable",
+                rows=16,
+                disabled=True,
+                full_width=True,
+            ),
+            mo.hstack(
+                [
+                    mo.download(
+                        f5_general_toml,
+                        filename=str(f5_general_name_control.value).strip()
+                        or "general.toml",
+                        mimetype="application/toml",
+                        disabled=bool(f5_authoring_error),
+                        label="Exportar el general v3",
+                    ),
+                    mo.download(
+                        f5_scenario_toml,
+                        filename="scenario.toml",
+                        mimetype="application/toml",
+                        disabled=bool(f5_authoring_error),
+                        label="Exportar el escenario F5 v1",
+                    ),
+                ]
+            ),
+            mo.md("#### Preflight y ejecución F5"),
+            f5_authoring_directory_control,
+            f5_authoring_directory_browser,
+            f5_general_name_control,
+            f5_overwrite_control,
+            f5_output_directory_control,
+            mo.hstack([f5_validate_button, f5_run_button]),
+            f5_validation_status,
+            f5_run_status,
+            mo.ui.text_area(
+                value=f5_package_summary_text,
+                label="Resumen del paquete F5 publicado (solo desde el manifiesto)",
+                rows=10,
+                disabled=True,
+                full_width=True,
+            ),
+        ]
+    )
     populations_panel = mo.vstack(
         [
             mo.md("## Poblaciones"),
@@ -1019,6 +1733,7 @@ def _(
                 "La interfaz solo conserva la forma estructural; Rust valida la semántica.",
                 kind="info",
             ),
+            f5_panel,
         ]
     )
     vcf_mode = str(vcf_output_mode_control.value)
