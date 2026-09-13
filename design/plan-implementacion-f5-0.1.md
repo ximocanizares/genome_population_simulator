@@ -2756,7 +2756,7 @@ identificador del índice de copia.
 
 ## 8. F5.5 — auditoría de identidad y publicación cerrada
 
-- ☐ **F5.5.1.** Auditar que el paquete publicado solo lee identidad, copias,
+- ✅ **F5.5.1.** Auditar que el paquete publicado solo lee identidad, copias,
   pertenencia y asignaciones ya cerradas en F5.3; ningún paso F5.5 puede crear,
   sustituir o modificar esos datos.
   - Depende de: F5.4.3.
@@ -2765,6 +2765,163 @@ identificador del índice de copia.
   - Se comprueba con: mutación posterior prohibida, pertenencia ausente/duplicada,
     IDs aportados/derivados, igualdad FCP/FHA y ausencia de migración, selección
     o genealogía.
+  - **Interpretación elegida: las dos mitades, separadas por su naturaleza, y
+    ninguna publica nada.** El hito pide dos cosas distintas y solo una de
+    ellas puede salir de los bytes. (a) Que el paquete **coincida** con las
+    identidades que F5.3 cerró y que ninguna se creara después es una
+    propiedad **temporal**: un fichero no atestigua en qué orden se derivó lo
+    que contiene, de modo que la precedencia solo se demuestra relacionando el
+    repositorio cerrado con los bytes publicados. (b) Que **ninguna ruta de
+    F5.5 pueda escribir** en esos datos es una propiedad **del tipo y del
+    recorrido**: la auditoría recibe `&F5FounderIdentities` y derivar exige
+    `&mut self`, de modo que lo impide el comprobador de préstamos, no una
+    promesa. Se implementan las dos. Lo que **no** se hace es repetir F5.4.2:
+    el oráculo ya rederiva cada `FCP_`, `HAP_` y `FHA_` desde los bytes de
+    forma independiente, y volver a validarlos aquí sería el oráculo circular
+    que esta base de código ya ha pagado siete veces.
+  - **Dónde vive la evidencia: en una comprobación que no publica nada.** No
+    hay octavo artefacto —`artifacts` es un `prefixItems` de siete con
+    `items:false`—, no se toca el manifiesto y no se reabre ningún esquema. La
+    auditoría devuelve un `F5ClosureReport` en memoria y la batería lo fija.
+    El paquete atómico queda intacto: una prueba mide el árbol publicado byte
+    a byte antes y después de auditarlo, y valida el instrumento aparte
+    cambiando un byte sobre una copia.
+  - **Módulo y frontera.** `src/f5_closure.rs`, con `seal_and_publish_f5_success`,
+    `seal_and_publish_f5_failure`, `F5ClosureWitness`, `audit_f5_identity_closure`
+    y `audit_f5_failure_closure`, y la batería `tests/f5_closure.rs`. Ningún
+    otro módulo cambia salvo el registro en `src/lib.rs`: F5.4.3 se consume,
+    no se modifica.
+  - **Corrección de la Revisión F5.5: un sello suelto no atestiguaba nada, y
+    ahora hay testigo.** La primera versión guardaba cuatro cifras del
+    repositorio sin consumir y las comparaba después de publicar. La revisión
+    adversarial demostró que eso no prueba precedencia: las cuatro cifras son
+    una **función determinista del repositorio sin consumir**, de modo que
+    rematerializar un repositorio equivalente **después** de que el paquete
+    existiera, sellarlo entonces y consumir su recorrido con un visitante vacío
+    avalaba el paquete viejo. La propiedad temporal era cierta por construcción
+    —`for_each_assignment` es el único `&mut self` y la publicación lo
+    consume—, pero **la auditoría, que es el producto del hito, no la
+    atestiguaba**. Ahora la auditoría exige un `F5ClosureWitness`, que solo
+    nace de `seal_and_publish_f5_success` o `seal_and_publish_f5_failure`
+    —sellan y **luego** publican— y que guarda el destino publicado. Un
+    repositorio reconstruido a posteriori no puede acreditar un paquete ya
+    publicado: obtener un testigo obliga a publicar, publicar obliga a un
+    destino nuevo —`ExecutionWorkspace` rechaza uno existente— y el testigo
+    nombra ese destino nuevo. El constructor del sello pasa a ser privado del
+    módulo.
+  - **Adaptación declarada: no se reabre la frontera de F5.4.3.** La revisión
+    pedía que `publish_f5_success` recibiera y devolviera el testigo. Eso
+    cambiaría su firma pública y la de todos sus llamadores, que son de un hito
+    ya cerrado. Se obtiene la **misma** semántica —sellar, publicar, devolver
+    el testigo que ata las dos cosas— con dos envoltorios en `f5_closure` que
+    delegan en `publish_f5_success` y `publish_f5_failure` sin tocarlos ni
+    cambiar sus errores. La garantía es idéntica porque el testigo no tiene
+    constructor público: solo esos dos envoltorios lo crean, y ambos publican.
+  - **Ley de conservación, en sus dos mitades.** En el éxito, entre el sello y
+    la auditoría el registro solo puede crecer en **exactamente una `FHA_` por
+    fila de `f5-founders.tsv`**: las que deriva la pasada única de
+    `for_each_assignment`. Ni una más —sería una identidad creada después de
+    F5.3— ni una menos —sería una fila publicada sin derivar—. No es una
+    comparación de valores, de modo que no puede ser circular.
+  - **Corrección de la Revisión F5.5: la mitad «fallo» no aplicaba su ley.** La
+    primera versión solo comprobaba que el registro no **encogiese**, y el
+    registro nunca encoge: derivar el recorrido completo después de publicar un
+    fallo pasaba la auditoría, y la única aserción que sostenía esa mitad
+    miraba el repositorio, no el veredicto. Ahora la mitad «fallo» exige
+    **igualdad estricta** —publicar un fallo no deriva ninguna identidad— con
+    causa `Conservation`, y tiene prueba que muere si se desactiva. La rama del
+    registro encogido, que era inalcanzable, se retiró.
+  - **Qué se comprueba contra los bytes.** Cada fila de `f5-founders.tsv`
+    resuelve su `FCP_` en el repositorio y su tupla —pertenencia, individuo,
+    secuencia e índice de copia— tiene que ser la cerrada; su `HAP_` tiene que
+    ser uno de los que F5.3 cerró para ese bloque×subpoblación; las tres clases
+    de identificador ocupan su propio lugar, que es la mitad de «igualdad
+    FCP/FHA» que un paquete puede romper. El conjunto de copias publicadas es
+    **exactamente** el cerrado, y `outputs/truth.jsonl` —único artefacto con
+    `founder_membership`— publica esa misma pertenencia, completa y sin
+    repeticiones.
+  - **IDs aportados y derivados.** El censo cerrado dice cuál de las dos vías
+    resolvió cada `IndividualId`, y el informe publica los dos recuentos. La
+    batería los contrasta contra la declaración del fixture y, aparte, contra
+    el prefijo de clase `IND_` de los derivados.
+  - **Ausencia de migración, selección y genealogía.** Se comprueba en dos
+    planos. Sobre bytes, la cabecera exacta de `f5-founders.tsv`: el fichero
+    que sostiene la identidad fundadora no admite una columna de parental, de
+    origen migratorio ni de eficacia biológica porque no admite ninguna columna
+    más. Sobre el texto del módulo, una **guarda léxica declarada como tal**,
+    con control positivo, igual que `f5_never_computes_a_reproductive_ne`.
+  - **Memoria: no hay tercera pieza fuera de `f5-resource-accounting-v8`.** La
+    auditoría sostiene **un registro cada vez** y no retiene nada proporcional
+    a `B*C_total`, al censo ni al número de identidades. Los registros de
+    verdad se deserializan contra una estructura de cuatro campos y no contra
+    un árbol JSON —lo que descarta `segments`, `history` y `current_pieces`
+    conforme se leen—; la primera versión, que sí materializaba el árbol,
+    picaba 132 566 bytes frente a los 100 792 sellados y **no cabía**. La
+    versión final pica 23 120 bytes con `B=8` y 70 672 con `B=32`, frente a
+    100 792 y 193 120 sellados, de modo que cabe dentro del presupuesto de la
+    admisión y no necesita ninguna declaración fuera de la fórmula. La prueba
+    acota además el pico contra el mayor registro publicado.
+  - **Cada prueba discrimina, y se midió dos veces.** En la primera ronda se
+    desactivaron doce comprobaciones; la Revisión F5.5 midió veintinueve y
+    encontró **diecisiete sin prueba**, cuatro de ellas nombradas por este
+    mismo plan como la evidencia del hito. La segunda ronda cubre **treinta
+    mutaciones con una sola superviviente**, la precondición declarada abajo.
+    La tabla completa vive en el encabezado de `tests/f5_closure.rs`. Se
+    añadieron pruebas discriminantes para la cabecera exacta, las clases `FCP_`
+    y `HAP_`, la tupla `sequence_id`/`copy_index`, la pertenencia ausente en el
+    registro, la unidad no cerrada, la copia no cerrada en la verdad, la
+    identidad de la verdad, la copia repetida, el avance de bloques, el LF
+    final, las columnas de más y de menos, el documento vacío, el documento sin
+    cabecera y las dos ramas del sello.
+  - **Lo que el estudio corrigió de la propia batería.** En la primera ronda,
+    **cuatro pruebas pasaban por una comprobación distinta de la que
+    anunciaban** —la de pertenencia por el orden, la de renombrado por la
+    búsqueda en el censo—: el orden se juzga ahora **después** de las
+    comparaciones de identidad y toda prueba fija también el campo y un
+    fragmento del detalle. En total se retiraron **cuatro aserciones que no
+    podían fallar**: la igualdad de individuos contra la suma de
+    `individual_count`, los dos ceros del informe de fallo —sustituidos por el
+    contraste contra un paquete de éxito del mismo fixture—, la tautología
+    `aportados + derivados == individuos` y el recuento de columnas implicado
+    por la igualdad literal de la cabecera.
+  - **Las corrupciones se aplican sobre el destino publicado, no sobre una
+    copia.** Es consecuencia del testigo —acredita un destino concreto— y es
+    además la lectura correcta del hito: alterar el paquete ya publicado *es*
+    la mutación posterior que F5.5 prohíbe.
+  - **Una precondición inalcanzable, declarada.** `check_repository_order`
+    comprueba el orden canónico de unidades y censo antes de dos búsquedas
+    binarias. Desactivarla no mata ninguna prueba porque ninguna configuración
+    admitida la alcanza. Se conserva porque lo que protege es un **falso
+    negativo de la propia auditoría**: una búsqueda binaria sobre datos
+    desordenados devolvería «ausente» sobre identidades presentes y la clausura
+    rechazaría un paquete correcto citando una causa falsa. Queda escrito en
+    vez de disimulado, igual que la clasificación aportado/derivado, cuyas dos
+    ramas de «ausente» tampoco son alcanzables.
+  - **Sin llamador en producción, como el oráculo.** F5 todavía no tiene
+    orquestador —es F5.6—, de modo que `audit_f5_identity_closure` se ejercita
+    desde la batería exactamente igual que `audit_f5_package`.
+  - **Ámbitos cubiertos.** Ploidías 1/2/3, modos probabilístico y controlado,
+    `F` en 0.0 y 1.0, identidades aportadas y derivadas, dos subpoblaciones,
+    dos secuencias pobladas más una estéril, y paquete de éxito y de fallo.
+  - **Cuatro notas menores de la Revisión F5.5, aplicadas.** El contrato de
+    bytes se **unifica**: los dos recorridos exigen LF final, como el oráculo,
+    con una sola función. La primera línea de `truth.jsonl` tiene que **ser**
+    la cabecera v2 y no solo existir: si faltara, la primera copia se
+    consumiría en su lugar y el rechazo saldría con una causa falsa, que es el
+    defecto ya corregido en el otro recorrido. El `allow(too_many_lines)` lleva
+    justificación y condición de retirada. Y la prueba de pico mueve ahora
+    **las dos** magnitudes por separado —bloques con censo fijo y censo con
+    bloques fijos—: multiplicar por ocho las copias mueve el pico solo lo que
+    se movió el mayor registro publicado.
+  - **Nota fuera de alcance.** `src/f5_founders.rs:2285` documenta
+    `GPS-CONF-101` para «el recorrido ya se consumió» y el código devuelve
+    `GPS-INTERNAL-101`. La prueba de este hito fija el código real; el docstring
+    de F5.3 es el que no corresponde. No se toca por la prohibición de revertir
+    cambios ajenos: queda anotado para quien reabra F5.3.
+  - **Puertas.** `fmt`, `clippy -D warnings`, `test --workspace --all-targets`
+    (1070 pasan, 0 fallan, 12 ignoradas, frente a la línea base de 1049/0/12
+    tras la primera entrega de este hito y de 1029/0/12 antes de él),
+    `test --doc`, `build --release` y `doc --no-deps`, todas en verde.
 
 > **Revisión F5.5.** Confirmar que identidad y pertenencia precedieron a la
 > publicación y que el hito no modifica el paquete atómico.

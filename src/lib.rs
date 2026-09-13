@@ -34,6 +34,7 @@ pub mod exact_decimal;
 pub mod execution;
 pub mod f5_admission;
 pub mod f5_artifacts;
+pub mod f5_closure;
 pub mod f5_founders;
 pub mod f5_haplotypes;
 pub mod f5_layout;
