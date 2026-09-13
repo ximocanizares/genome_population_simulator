@@ -15,6 +15,7 @@ use crate::f5_admission::{
     input_identity_mismatch_diagnostic,
 };
 use crate::f5_artifacts::f5_canonical_decimal;
+use crate::randomness::{POISSON_COUNT_ALGORITHM, POISSON_COUNT_MAX_LAMBDA};
 use crate::reference_fasta::input_error;
 use serde_json::{Map, Value};
 
@@ -41,8 +42,101 @@ pub struct F5Profile {
     snp_gaps: Vec<WeightedInterval<u64>>,
     snp_spectrum: Vec<WeightedInterval<f64>>,
     haplotype_weights: Vec<f64>,
+    haplotype_count_distribution: Option<F5HaplotypeCountDistribution>,
     ld_bins: BTreeMap<String, Vec<LdBin>>,
     normalizations: Vec<F5NormalizationAudit>,
+}
+
+/// Distribución declarada del número de haplotipos de **cada** bloque.
+///
+/// Su presencia es lo único que separa el comportamiento heredado del nuevo.
+/// Sin ella, H es `haplotype_weights.len()` en todas las unidades y ningún
+/// ámbito aleatorio se abre. Con ella, cada bloque×subpoblación sortea
+/// `Poisson(lambda)` y **pinza** el resultado en `[minimum, maximum]`.
+///
+/// El pinzamiento acumula en los dos extremos toda la masa que la Poisson
+/// deja fuera del intervalo: `P(H = minimum)` vale `P(N <= minimum)` y
+/// `P(H = maximum)` vale `P(N >= maximum)`. Con `lambda` cerca de `maximum`
+/// esa acumulación deja de ser despreciable, de modo que el perfil debe
+/// elegir `lambda` holgadamente por debajo de `maximum` si quiere que la cola
+/// superior sea rara. Se prefiere al rechazo con reintentos porque el
+/// pinzamiento acota el número de **sorteos** a uno por bloque×subpoblación y
+/// el rechazo no acota ninguno. Las palabras que consume cada sorteo sí quedan
+/// sin cota —`poisson-count-v1` es un muestreador por rechazo— y el preflight
+/// no las contabiliza.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct F5HaplotypeCountDistribution {
+    lambda: f64,
+    minimum: u64,
+    maximum: u64,
+}
+
+impl F5HaplotypeCountDistribution {
+    /// Construye la distribución comprobando los tres límites normativos.
+    ///
+    /// # Errors
+    ///
+    /// Devuelve el detalle si `lambda` sale del dominio que DTC-067 fija para
+    /// `poisson-count-v1` —finita en `(0, 2^52]`— o si
+    /// `2 <= minimum <= maximum <= 4096` no se cumple, que son los mismos
+    /// extremos que [`parse_haplotype_weights`] impone a H.
+    ///
+    /// El extremo superior no es decorativo: DTC-067 exige rechazar
+    /// `lambda > 2^52` **antes de consumir RNG**. Comprobarlo aquí, en la
+    /// admisión del perfil, es lo que impide que una lambda inadmisible
+    /// atraviese el layout y los marginales —gastando entropía— para morir
+    /// después como error interno por un defecto de entrada.
+    pub const fn new(lambda: f64, minimum: u64, maximum: u64) -> Result<Self, &'static str> {
+        if !lambda.is_finite() || lambda <= 0.0 {
+            return Err("lambda debe ser finita y positiva");
+        }
+        if lambda > POISSON_COUNT_MAX_LAMBDA {
+            return Err("lambda no puede superar 2^52, el dominio de poisson-count-v1");
+        }
+        if minimum < 2 {
+            return Err("h_min debe ser al menos 2");
+        }
+        if maximum > 4096 {
+            return Err("h_max no puede superar 4096");
+        }
+        if minimum > maximum {
+            return Err("h_min no puede superar h_max");
+        }
+        Ok(Self {
+            lambda,
+            minimum,
+            maximum,
+        })
+    }
+
+    #[must_use]
+    pub const fn lambda(&self) -> f64 {
+        self.lambda
+    }
+
+    #[must_use]
+    pub const fn minimum(&self) -> u64 {
+        self.minimum
+    }
+
+    /// `h_max`: la cota superior que el preflight contabiliza y que la
+    /// admisión exige representable en cada bloque.
+    #[must_use]
+    pub const fn maximum(&self) -> u64 {
+        self.maximum
+    }
+
+    /// Pinza un recuento sorteado al intervalo declarado.
+    #[must_use]
+    pub const fn clamp(&self, drawn: u64) -> u64 {
+        if drawn < self.minimum {
+            self.minimum
+        } else if drawn > self.maximum {
+            self.maximum
+        } else {
+            drawn
+        }
+    }
 }
 
 /// Resultado de la fase de perfil: el contenido tipado y las seis identidades
@@ -265,6 +359,23 @@ impl F5Profile {
     pub fn haplotype_weights(&self) -> &[f64] {
         &self.haplotype_weights
     }
+    /// Distribución por bloque, o `None` cuando el perfil no la declara.
+    #[must_use]
+    pub const fn haplotype_count_distribution(&self) -> Option<F5HaplotypeCountDistribution> {
+        self.haplotype_count_distribution
+    }
+    /// `h_max`: cota superior del número de haplotipos de **cualquier**
+    /// bloque, conocida sin ejecutar nada.
+    ///
+    /// Sin distribución declarada es el número de pesos, que es el H de todos
+    /// los bloques. Con distribución declarada sigue siendo el número de
+    /// pesos, porque el lector exige que la tabla traiga exactamente `h_max`
+    /// filas: así el presupuesto que DTC-089 deriva de `H` en el preflight ya
+    /// es el que deriva de `h_max`, sin cambiar ninguna fórmula.
+    #[must_use]
+    pub fn haplotype_count_bound(&self) -> usize {
+        self.haplotype_weights.len()
+    }
     #[must_use]
     pub fn ld_bins(&self, population_id: &str) -> Option<&[LdBin]> {
         self.ld_bins.get(population_id).map(Vec::as_slice)
@@ -309,12 +420,13 @@ pub(crate) fn load_f5_profile_under_budget(
     ledger: &mut F5ResourceLedger,
 ) -> Result<LoadedF5Profile, Diagnostic> {
     let metadata_limit = ledger.remaining_input_bytes(InputRole::ProfileMetadata)?;
-    let (profile_id, links, metadata_identity) = read_profile_metadata(
-        metadata_path,
-        expected_metadata_sha256,
-        metadata_limit,
-        ledger,
-    )?;
+    let (profile_id, haplotype_count_distribution, links, metadata_identity) =
+        read_profile_metadata(
+            metadata_path,
+            expected_metadata_sha256,
+            metadata_limit,
+            ledger,
+        )?;
 
     // Los cinco costes de lectura ya son conocidos al completar el metadata.
     // Se reservan juntos, antes de abrir la primera tabla; la memoria es el
@@ -425,6 +537,24 @@ pub(crate) fn load_f5_profile_under_budget(
         &mut retained_rows,
     )?;
     drop(weights_bytes);
+    // La tabla de pesos **es** el vector de tamaño `h_max`: el bloque toma sus
+    // primeros H por rango y los renormaliza. Exigirlo aquí es lo que hace
+    // que `haplotype_count_bound` valga a la vez `weights.len()` y `h_max`, y
+    // por tanto que el presupuesto que el preflight deriva de H siga siendo
+    // una cota superior sin tocar ninguna de sus fórmulas.
+    if let Some(distribution) = haplotype_count_distribution {
+        let declared = u64::try_from(haplotype_weights.len())
+            .map_err(|_| domain(&weights_path, "H no cabe en u64"))?;
+        if declared != distribution.maximum() {
+            return Err(domain(
+                &weights_path,
+                format!(
+                    "la tabla declara {declared} pesos y la distribución fija h_max={}",
+                    distribution.maximum()
+                ),
+            ));
+        }
+    }
     let (ld_path, ld_bytes) = read_profile_table(
         &links[4],
         InputRole::ProfileLd,
@@ -450,6 +580,7 @@ pub(crate) fn load_f5_profile_under_budget(
             snp_gaps,
             snp_spectrum,
             haplotype_weights,
+            haplotype_count_distribution,
             ld_bins,
             normalizations: vec![
                 block_lengths_audit,
@@ -487,12 +618,19 @@ fn read_bounded(
 
 /// Construye los datos persistentes mínimos del metadata y deja caer tanto el
 /// búfer JSON como `serde_json::Value` antes de que se abra el primer TSV.
+type ParsedProfileMetadata = (
+    String,
+    Option<F5HaplotypeCountDistribution>,
+    Vec<ProfileLink>,
+    AdmittedInputIdentity,
+);
+
 fn read_profile_metadata(
     metadata_path: &Path,
     expected_metadata_sha256: &str,
     metadata_limit: u64,
     ledger: &mut F5ResourceLedger,
-) -> Result<(String, Vec<ProfileLink>, AdmittedInputIdentity), Diagnostic> {
+) -> Result<ParsedProfileMetadata, Diagnostic> {
     let metadata = read_bounded(
         metadata_path,
         InputRole::ProfileMetadata,
@@ -520,29 +658,44 @@ fn read_profile_metadata(
     let metadata: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format_error(metadata_path, "profile.metadata.json", error.to_string()))?;
     let root = object(&metadata, metadata_path, "metadata")?;
-    exact_keys(
-        root,
-        &[
-            "profile_kind",
-            "schema_version",
-            "profile_id",
-            "provenance_kind",
-            "source_citation",
-            "source_license",
-            "source_sha256",
-            "files",
-        ],
-        metadata_path,
-        "metadata",
-    )?;
+    // La versión del metadata decide **el conjunto cerrado de claves**, no un
+    // parche opcional sobre el mismo conjunto: un metadata v1 con la clave de
+    // la distribución se rechaza, y un v2 sin ella también. Así la v1 sigue
+    // significando exactamente lo que significaba y ningún perfil heredado
+    // puede adquirir una distribución por descuido.
+    let schema_version = required_string(root, "schema_version", metadata_path)?;
+    let declares_distribution = match schema_version {
+        "1" => false,
+        "2" => true,
+        _ => {
+            return Err(format_error(
+                metadata_path,
+                "schema_version",
+                "versión inválida",
+            ));
+        }
+    };
+    let mut expected_keys = vec![
+        "profile_kind",
+        "schema_version",
+        "profile_id",
+        "provenance_kind",
+        "source_citation",
+        "source_license",
+        "source_sha256",
+        "files",
+    ];
+    if declares_distribution {
+        expected_keys.push("haplotype_count_distribution");
+    }
+    exact_keys(root, &expected_keys, metadata_path, "metadata")?;
     required_string(root, "profile_kind", metadata_path)?
         .eq("f5_generation_profile")
         .then_some(())
         .ok_or_else(|| format_error(metadata_path, "profile_kind", "literal inválido"))?;
-    required_string(root, "schema_version", metadata_path)?
-        .eq("1")
-        .then_some(())
-        .ok_or_else(|| format_error(metadata_path, "schema_version", "versión inválida"))?;
+    let haplotype_count_distribution = declares_distribution
+        .then(|| parse_haplotype_count_distribution(root, metadata_path))
+        .transpose()?;
     let profile_id = required_id(root, "profile_id", metadata_path)?.to_owned();
     if !matches!(
         required_string(root, "provenance_kind", metadata_path)?,
@@ -618,7 +771,53 @@ fn read_profile_metadata(
     // El escenario declara el SHA del metadata, pero no su tamaño.
     let identity =
         AdmittedInputIdentity::new(identity, None, Some(expected_metadata_sha256.to_owned()))?;
-    Ok((profile_id, links, identity))
+    Ok((profile_id, haplotype_count_distribution, links, identity))
+}
+
+/// Lee el objeto `haplotype_count_distribution` del metadata v2.
+///
+/// Los tres campos son obligatorios y cerrados. `lambda` es un número JSON
+/// finito y positivo; `h_min` y `h_max` son enteros que respetan los mismos
+/// extremos `2..=4096` que ya impone la tabla de pesos.
+fn parse_haplotype_count_distribution(
+    root: &Map<String, Value>,
+    metadata_path: &Path,
+) -> Result<F5HaplotypeCountDistribution, Diagnostic> {
+    let entry = object(
+        root.get("haplotype_count_distribution").ok_or_else(|| {
+            format_error(
+                metadata_path,
+                "haplotype_count_distribution",
+                "debe ser un objeto",
+            )
+        })?,
+        metadata_path,
+        "haplotype_count_distribution",
+    )?;
+    exact_keys(
+        entry,
+        &["algorithm", "lambda", "h_min", "h_max"],
+        metadata_path,
+        "haplotype_count_distribution",
+    )?;
+    if required_string(entry, "algorithm", metadata_path)? != POISSON_COUNT_ALGORITHM {
+        return Err(format_error(
+            metadata_path,
+            "haplotype_count_distribution.algorithm",
+            "solo se admite el muestreador normativo de recuentos",
+        ));
+    }
+    let lambda = entry.get("lambda").and_then(Value::as_f64).ok_or_else(|| {
+        format_error(
+            metadata_path,
+            "haplotype_count_distribution.lambda",
+            "debe ser un número",
+        )
+    })?;
+    let minimum = required_u64(entry, "h_min", metadata_path)?;
+    let maximum = required_u64(entry, "h_max", metadata_path)?;
+    F5HaplotypeCountDistribution::new(lambda, minimum, maximum)
+        .map_err(|detail| format_error(metadata_path, "haplotype_count_distribution", detail))
 }
 
 fn read_profile_table(
@@ -1362,6 +1561,192 @@ mod tests {
         }).collect::<Vec<_>>().join(",");
         fs::write(root.join("profile.metadata.json"), format!(r#"{{"profile_kind":"f5_generation_profile","schema_version":"{version}","profile_id":"test_profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"files":[{files}]}}"#)).expect("metadata");
     }
+    /// Reescribe el metadata con la versión y el objeto de distribución que se
+    /// le den. `distribution` se inserta literal, de modo que una prueba puede
+    /// colocarlo en un metadata v1 o dejarlo fuera de uno v2.
+    fn metadata_with(root: &Path, version: &str, distribution: Option<&str>) {
+        refresh_metadata(root, version, None, None);
+        let path = root.join("profile.metadata.json");
+        let document = fs::read_to_string(&path).expect("metadata");
+        let rewritten = match distribution {
+            None => document,
+            Some(object) => {
+                let anchor = r#","files":["#;
+                let inserted = document.replace(
+                    anchor,
+                    &format!(r#","haplotype_count_distribution":{object},"files":["#),
+                );
+                assert_ne!(inserted, document, "la inserción tiene que insertar");
+                inserted
+            }
+        };
+        fs::write(&path, rewritten).expect("metadata reescrito");
+    }
+
+    const POISSON_2_4: &str =
+        r#"{"algorithm":"poisson-count-v1","lambda":3.0,"h_min":2,"h_max":4}"#;
+
+    /// Un metadata v2 declara la distribución y la tabla de pesos **es** el
+    /// vector de tamaño `h_max`.
+    #[test]
+    fn a_v2_profile_carries_the_haplotype_count_distribution() {
+        let root = fixture();
+        write(
+            &root,
+            "haplotype_weights.tsv",
+            "haplotype_rank	weight
+0	0.25
+1	0.25
+2	0.25
+3	0.25
+",
+        );
+        metadata_with(&root, "2", Some(POISSON_2_4));
+        let profile = load_profile(&root).expect("perfil v2 admitido");
+        let distribution = profile
+            .haplotype_count_distribution()
+            .expect("distribución declarada");
+        assert_eq!(distribution.lambda(), 3.0);
+        assert_eq!(distribution.minimum(), 2);
+        assert_eq!(distribution.maximum(), 4);
+        assert_eq!(
+            profile.haplotype_count_bound(),
+            4,
+            "h_max y el número de pesos tienen que ser la misma cifra"
+        );
+        assert_eq!(profile.haplotype_weights().len(), 4);
+    }
+
+    /// La versión del metadata decide el conjunto cerrado de claves.
+    #[test]
+    fn the_metadata_version_decides_whether_the_distribution_may_appear() {
+        let root = fixture();
+        write(
+            &root,
+            "haplotype_weights.tsv",
+            "haplotype_rank	weight
+0	0.25
+1	0.25
+2	0.25
+3	0.25
+",
+        );
+
+        metadata_with(&root, "1", Some(POISSON_2_4));
+        let rejection = load(&root).expect_err("v1 no admite la clave");
+        assert!(
+            rejection.contains("faltan o sobran campos"),
+            "v1 con distribución: {rejection}"
+        );
+
+        metadata_with(&root, "2", None);
+        let rejection = load(&root).expect_err("v2 exige la clave");
+        assert!(
+            rejection.contains("faltan o sobran campos"),
+            "v2 sin distribución: {rejection}"
+        );
+
+        metadata_with(&root, "3", Some(POISSON_2_4));
+        let rejection = load(&root).expect_err("no existe una v3");
+        assert!(
+            rejection.contains("versión inválida"),
+            "v3 inexistente: {rejection}"
+        );
+    }
+
+    /// La tabla de pesos tiene que traer exactamente `h_max` filas.
+    ///
+    /// De esa igualdad depende que el presupuesto que el preflight deriva de
+    /// `H` sea ya el que deriva de `h_max`: si la tabla pudiera ser más corta,
+    /// un bloque podría sortear más filas de las contabilizadas.
+    #[test]
+    fn the_weight_table_must_have_exactly_h_max_rows() {
+        let root = fixture();
+        // La tabla del fixture trae dos pesos y la distribución fija h_max=4.
+        metadata_with(&root, "2", Some(POISSON_2_4));
+        let rejection = load(&root).expect_err("dos pesos no son cuatro");
+        assert!(
+            rejection.contains("la tabla declara 2 pesos y la distribución fija h_max=4"),
+            "{rejection}"
+        );
+    }
+
+    /// Los tres límites de la distribución son normativos.
+    ///
+    /// El extremo superior de `lambda` se prueba por los dos lados: `2^52`
+    /// exacto se admite y el siguiente `f64` representable se rechaza. Sin el
+    /// caso positivo, una guarda que rechazase todo valor grande —o el propio
+    /// `2^52`— pasaría desapercibida.
+    #[test]
+    fn the_declared_interval_and_lambda_are_bounded() {
+        let root = fixture();
+        metadata_with(
+            &root,
+            "2",
+            Some(
+                r#"{"algorithm":"poisson-count-v1","lambda":4503599627370496.0,"h_min":2,"h_max":2}"#,
+            ),
+        );
+        let profile = load_profile(&root).expect("lambda igual a 2^52 pertenece al dominio");
+        assert_eq!(
+            profile
+                .haplotype_count_distribution()
+                .expect("distribución")
+                .lambda(),
+            4_503_599_627_370_496.0
+        );
+
+        for (object, needle) in [
+            (
+                r#"{"algorithm":"poisson-count-v1","lambda":0.0,"h_min":2,"h_max":2}"#,
+                "lambda debe ser finita y positiva",
+            ),
+            (
+                // `2^52` es el máximo admisible y `2^52+1024` el siguiente f64
+                // representable por encima: la frontera se prueba desde el
+                // lado que la cruza, no con un valor arbitrariamente grande.
+                r#"{"algorithm":"poisson-count-v1","lambda":4503599627371520.0,"h_min":2,"h_max":2}"#,
+                "lambda no puede superar 2^52",
+            ),
+            (
+                r#"{"algorithm":"poisson-count-v1","lambda":1e300,"h_min":2,"h_max":2}"#,
+                "lambda no puede superar 2^52",
+            ),
+            (
+                r#"{"algorithm":"poisson-count-v1","lambda":1.0,"h_min":1,"h_max":2}"#,
+                "h_min debe ser al menos 2",
+            ),
+            (
+                r#"{"algorithm":"poisson-count-v1","lambda":1.0,"h_min":2,"h_max":4097}"#,
+                "h_max no puede superar 4096",
+            ),
+            (
+                r#"{"algorithm":"poisson-count-v1","lambda":1.0,"h_min":3,"h_max":2}"#,
+                "h_min no puede superar h_max",
+            ),
+            (
+                r#"{"algorithm":"other-sampler-v1","lambda":1.0,"h_min":2,"h_max":2}"#,
+                "solo se admite el muestreador normativo",
+            ),
+        ] {
+            let root = fixture();
+            metadata_with(&root, "2", Some(object));
+            let rejection = load(&root).expect_err(object);
+            assert!(rejection.contains(needle), "{object}: {rejection}");
+        }
+    }
+
+    fn load_profile(root: &Path) -> Result<super::F5Profile, String> {
+        let bytes = fs::read(root.join("profile.metadata.json")).expect("metadata bytes");
+        let populations = BTreeSet::from(["P1".to_owned()]);
+        load_f5_profile(
+            &root.join("profile.metadata.json"),
+            &digest(&bytes),
+            &populations,
+        )
+        .map_err(|error| error.render_human())
+    }
+
     fn load(root: &Path) -> Result<(), String> {
         let bytes = fs::read(root.join("profile.metadata.json")).expect("metadata bytes");
         let populations = BTreeSet::from(["P1".to_owned()]);

@@ -7,13 +7,16 @@
 //! con su rechazo, prefijo ponderado exacto sobre racionales diádicos y regla
 //! de empate. El oráculo no llama a ninguna función productiva de muestreo.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use genome_population_simulator::application::{EffectiveF5Config, load_and_validate_f5_config};
 use genome_population_simulator::f5_haplotypes::{
-    F5BlockHaplotypes, F5HaplotypeAttempt, F5Polarity, build_f5_haplotype_attempt,
+    F5BlockHaplotypes, F5HaplotypeAttempt, F5Polarity, build_f5_block_attempt,
+    build_f5_haplotype_attempt, ensure_f5_haplotype_cardinality, f5_block_haplotype_count,
+    f5_block_haplotype_weights, resolve_f5_block_weights,
 };
 use genome_population_simulator::f5_layout::{
     F5LayoutRequest, F5PhysicalLayout, build_f5_physical_layout,
@@ -22,7 +25,8 @@ use genome_population_simulator::f5_marginals::{F5MarginalTable, build_f5_margin
 use genome_population_simulator::f5_preflight::{
     F5OtherResources, SealedF5Admission, recover_sealed_f5_admission,
 };
-use genome_population_simulator::identity::{ExecutionId, PopulationId, ScenarioId};
+use genome_population_simulator::f5_profile::F5HaplotypeCountDistribution;
+use genome_population_simulator::identity::{ExecutionId, F5BlockId, PopulationId, ScenarioId};
 use genome_population_simulator::randomness::{F5RandomDecision, RootSeed, derive_f5_subseed};
 use sha2::{Digest, Sha256};
 
@@ -58,6 +62,13 @@ struct Fixture<'a> {
     weights: Vec<f64>,
     spectrum: &'a str,
     max_haplotype_cells: u64,
+    seed: &'a str,
+    /// Múltiplo de la longitud de la secuencia frente al mínimo `B*L`. El
+    /// empaquetado exacto no siempre cabe en ocho intentos de layout.
+    slack: u64,
+    /// `(lambda, h_min, h_max)` del metadata v2. `None` escribe el metadata v1
+    /// literal, idéntico al de antes de esta ampliación.
+    distribution: Option<(&'a str, u64, u64)>,
 }
 
 impl Default for Fixture<'_> {
@@ -69,6 +80,9 @@ impl Default for Fixture<'_> {
             weights: vec![0.25; 4],
             spectrum: CONTINUOUS_SPECTRUM,
             max_haplotype_cells: 65_536,
+            seed: SEED,
+            slack: 1,
+            distribution: None,
         }
     }
 }
@@ -129,13 +143,19 @@ impl Fixture<'_> {
             })
             .collect::<Vec<_>>()
             .join(",");
-        let metadata = format!(
-            r#"{{"profile_kind":"f5_generation_profile","schema_version":"1","profile_id":"profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"files":[{links}]}}"#
-        );
+        let metadata = match self.distribution {
+            None => format!(
+                r#"{{"profile_kind":"f5_generation_profile","schema_version":"1","profile_id":"profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"files":[{links}]}}"#
+            ),
+            Some((lambda, minimum, maximum)) => format!(
+                r#"{{"profile_kind":"f5_generation_profile","schema_version":"2","profile_id":"profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"haplotype_count_distribution":{{"algorithm":"poisson-count-v1","lambda":{lambda},"h_min":{minimum},"h_max":{maximum}}},"files":[{links}]}}"#
+            ),
+        };
         fs::write(profile_directory.join("profile.metadata.json"), &metadata).expect("metadata");
 
         let bases = b"ACGT";
-        let span = usize::try_from(self.block_length * self.block_count).expect("span");
+        let span =
+            usize::try_from(self.block_length * self.block_count * self.slack).expect("span");
         let sequence = (0..span)
             .map(|index| char::from(bases[index % 4]))
             .collect::<String>();
@@ -145,7 +165,8 @@ impl Fixture<'_> {
         fs::write(
             &general,
             format!(
-                "config_kind = \"general\"\nschema_version = \"3\"\nseed = \"{SEED}\"\nploidy = 2\nreference_id = \"ref\"\nreference_path = \"references/ref.fa\"\nreference_sha256 = \"{}\"\n\n[f5_scenario]\nscenario_id = \"scenario\"\nscenario_path = \"scenarios/scenario.toml\"\n",
+                "config_kind = \"general\"\nschema_version = \"3\"\nseed = \"{}\"\nploidy = 2\nreference_id = \"ref\"\nreference_path = \"references/ref.fa\"\nreference_sha256 = \"{}\"\n\n[f5_scenario]\nscenario_id = \"scenario\"\nscenario_path = \"scenarios/scenario.toml\"\n",
+                self.seed,
                 sha256(fasta.as_bytes())
             ),
         )
@@ -887,4 +908,457 @@ fn several_attempts_share_one_marginal_table() {
         second.blocks()[0].matrix().canonical_bytes()
     );
     fs::remove_dir_all(&root).expect("cleanup");
+}
+
+// ---------------------------------------------------------------------------
+// H por bloque: distribución declarada, sorteo y pinzamiento
+// ---------------------------------------------------------------------------
+
+/// Alturas de la matriz de cada bloque×subpoblación del intento `0`.
+fn drawn_counts(chain: &Chain) -> Vec<usize> {
+    attempt(chain, 0)
+        .blocks()
+        .iter()
+        .map(|block| block.matrix().haplotype_count())
+        .collect()
+}
+
+/// Sin distribución declarada, H es el número de pesos **y los pesos son los
+/// del perfil, bit a bit**.
+///
+/// La segunda mitad es la que discrimina, y el vector no es cualquiera: estos
+/// cinco pesos suman `0,9999999999999999` en la aritmética compensada, de modo
+/// que el perfil los divide por esa suma y el resultado vuelve a sumar
+/// `1,0000000000000002`. Volver a dividir —renormalizar un vector que ya está
+/// normalizado— mueve el último bit de cada `q` y con él `realized_alt_af`,
+/// `marginal_max_abs_error` y los bytes de `f5-haplotypes.tsv`. Con un vector
+/// cuya suma cayera en el uno exacto la segunda división sería inocua y la
+/// prueba no discriminaría nada.
+#[test]
+fn an_undeclared_distribution_keeps_the_profile_weights_bit_for_bit() {
+    let root = temporary("no-distribution");
+    let declared = [0.038_71, 0.279_724, 0.288_479, 0.026_267, 0.366_82];
+    let chain = build_chain(
+        &root,
+        &Fixture {
+            weights: declared.to_vec(),
+            ..Fixture::default()
+        },
+    );
+    assert_eq!(
+        chain.config.profile().haplotype_count_distribution(),
+        None,
+        "el metadata v1 no puede traer distribución"
+    );
+    // Los pesos efectivos del perfil, ya normalizados por DTC-049. Son estos
+    // —y no los declarados— los que cada bloque tiene que usar literales.
+    let effective_profile = chain.config.profile().haplotype_weights().to_vec();
+    assert_eq!(effective_profile.len(), declared.len());
+    let maximum = effective_profile.iter().copied().fold(0.0_f64, f64::max);
+
+    let blocks = attempt(&chain, 0);
+    assert!(!blocks.blocks().is_empty(), "el fixture produce bloques");
+    for block in blocks.blocks() {
+        assert_eq!(block.matrix().haplotype_count(), declared.len());
+        let effective =
+            f5_block_haplotype_weights(&effective_profile, block.matrix().haplotype_count())
+                .expect("pesos del bloque");
+        assert_eq!(
+            effective.iter().map(|w| w.to_bits()).collect::<Vec<_>>(),
+            effective_profile
+                .iter()
+                .map(|w| w.to_bits())
+                .collect::<Vec<_>>(),
+            "los pesos del bloque no son los del perfil bit a bit"
+        );
+        assert_eq!(
+            block.marginal_max_abs_error().to_bits(),
+            maximum.to_bits(),
+            "la cota marginal es max_h(q_h) sobre los pesos literales"
+        );
+    }
+}
+
+/// El sorteo depende de la semilla raíz y de nada más.
+///
+/// La comparación se hace **a identidad fija**: el mismo `scenario_id`, la
+/// misma subpoblación y los mismos `block_id` con dos semillas distintas. Es
+/// la única forma de aislar el efecto de la semilla sobre el sorteo, porque
+/// cambiar la semilla de un escenario completo cambia también el layout y con
+/// él los `block_id`, de modo que los recuentos se moverían aunque el ámbito
+/// no mirase la semilla.
+#[test]
+fn the_drawn_count_is_reproducible_with_its_seed_and_moves_with_another() {
+    const OTHER_SEED: &str = "0f0e0d0c0b0a09080706050403020100f0e0d0c0b0a090807060504030201000";
+    let scenario = ScenarioId::parse("scenario", "test").expect("escenario");
+    let population = PopulationId::parse("P1", "test").expect("subpoblación");
+    // Dieciséis identidades de bloque distintas y bien formadas: `BLK_` más
+    // veintiséis caracteres del alfabeto Base32 de DTC-039.
+    let blocks = "ABCDEFGHIJKLMNOP"
+        .chars()
+        .map(|first| {
+            F5BlockId::parse(format!("BLK_{first}{}", "A".repeat(25)), "test").expect("bloque")
+        })
+        .collect::<Vec<_>>();
+    let distribution = F5HaplotypeCountDistribution::new(4.0, 2, 8).expect("distribución");
+    let counts = |seed: &str| {
+        let root = RootSeed::parse("seed", seed).expect("semilla canónica");
+        blocks
+            .iter()
+            .map(|block| {
+                f5_block_haplotype_count(&scenario, root, Some(distribution), 8, &population, block)
+                    .expect("recuento sorteado")
+            })
+            .collect::<Vec<_>>()
+    };
+    let first = counts(SEED);
+    assert_eq!(
+        first,
+        counts(SEED),
+        "la misma semilla no reproduce el sorteo"
+    );
+    assert_ne!(first, counts(OTHER_SEED), "otra semilla no mueve el sorteo");
+
+    // Y la cadena completa reproduce la misma lista de alturas dos veces.
+    let chain_counts = |label| {
+        let root = temporary(label);
+        let chain = build_chain(
+            &root,
+            &Fixture {
+                populations: &["P1", "P2"],
+                block_count: 4,
+                slack: 3,
+                weights: vec![0.125; 8],
+                distribution: Some(("4.0", 2, 8)),
+                ..Fixture::default()
+            },
+        );
+        let counts = drawn_counts(&chain);
+        (chain, counts)
+    };
+    let (_a, a) = chain_counts("draw-chain-a");
+    let (_b, b) = chain_counts("draw-chain-b");
+    assert_eq!(a.len(), 8, "dos subpoblaciones por cuatro bloques");
+    assert_eq!(a, b, "la cadena no reproduce sus alturas");
+}
+
+/// Todo recuento sorteado cae en `[h_min, h_max]`, y los dos pinzamientos son
+/// alcanzables.
+///
+/// Las dos lambdas extremas no son decoración: con `lambda` muy por encima de
+/// `h_max` el muestreador casi nunca devuelve un valor admisible y **todo** el
+/// resultado viene del pinzamiento superior; con `lambda` muy por debajo de
+/// `h_min`, del inferior. Sin ellas, un pinzamiento roto en un solo extremo
+/// pasaría inadvertido.
+#[test]
+fn every_drawn_count_lands_inside_the_declared_interval_and_both_clamps_bite() {
+    // Siete pesos decimales exactos que suman uno: `h_max` tiene que ser el
+    // número de filas de la tabla.
+    let weights = vec![0.1, 0.1, 0.1, 0.1, 0.2, 0.2, 0.2];
+    let counts_for = |lambda, label| {
+        let root = temporary(label);
+        let chain = build_chain(
+            &root,
+            &Fixture {
+                populations: &["P1", "P2"],
+                block_count: 4,
+                slack: 3,
+                weights: weights.clone(),
+                distribution: Some((lambda, 3, 7)),
+                ..Fixture::default()
+            },
+        );
+        let counts = drawn_counts(&chain);
+        (chain, counts)
+    };
+
+    let (_middle, middle) = counts_for("5.0", "clamp-middle");
+    assert_eq!(middle.len(), 8, "dos subpoblaciones por cuatro bloques");
+    assert!(
+        middle.iter().all(|count| (3..=7).contains(count)),
+        "un recuento sale del intervalo declarado: {middle:?}"
+    );
+
+    let (_high, high) = counts_for("400.0", "clamp-high");
+    assert_eq!(
+        high,
+        vec![7; 8],
+        "con lambda muy por encima de h_max todo debe pinzarse arriba"
+    );
+
+    let (_low, low) = counts_for("0.01", "clamp-low");
+    assert_eq!(
+        low,
+        vec![3; 8],
+        "con lambda muy por debajo de h_min todo debe pinzarse abajo"
+    );
+}
+
+/// Los pesos de un bloque son el prefijo de rango renormalizado.
+///
+/// El contraste es con un oráculo racional exacto en `u128`: los pesos
+/// declarados se descomponen en diádicos, se suma el prefijo con enteros y se
+/// compara `q_h * Σ` contra `w_h` sin pasar por `f64`. La cota marginal
+/// publicada por el bloque tiene que ser el máximo de esos pesos.
+#[test]
+fn the_block_weights_are_the_rank_prefix_renormalized() {
+    let root = temporary("prefix-weights");
+    let declared = vec![0.4, 0.3, 0.2, 0.05, 0.03, 0.02];
+    let chain = build_chain(
+        &root,
+        &Fixture {
+            populations: &["P1", "P2"],
+            block_count: 4,
+            slack: 3,
+            weights: declared.clone(),
+            distribution: Some(("3.0", 2, 6)),
+            ..Fixture::default()
+        },
+    );
+    let blocks = attempt(&chain, 0);
+    let mut smaller_than_declared = 0_usize;
+    for block in blocks.blocks() {
+        let count = block.matrix().haplotype_count();
+        let effective = f5_block_haplotype_weights(&declared, count).expect("pesos del bloque");
+        assert_eq!(effective.len(), count);
+        if count < declared.len() {
+            smaller_than_declared += 1;
+        }
+        // Oráculo racional: Σ_{k<H} w_k sobre un denominador común.
+        let numerator = |value: f64| {
+            let (mantissa, exponent) = dyadic(value);
+            assert!(exponent <= 60, "peso {value} no cabe en la escala");
+            mantissa << (60 - exponent)
+        };
+        let total: u128 = declared[..count].iter().copied().map(numerator).sum();
+        for (rank, weight) in effective.iter().enumerate() {
+            let expected = numerator(declared[rank]) as f64 / total as f64;
+            assert!(
+                (weight - expected).abs() <= 4.0 * f64::EPSILON,
+                "q[{rank}]={weight} y el racional exacto vale {expected}"
+            );
+        }
+        let sum: f64 = effective.iter().sum();
+        assert!(
+            (sum - 1.0).abs() <= 1e-12,
+            "los pesos del bloque suman {sum}"
+        );
+        let maximum = effective.iter().copied().fold(0.0_f64, f64::max);
+        assert_eq!(
+            block.marginal_max_abs_error().to_bits(),
+            maximum.to_bits(),
+            "la cota marginal no es max_h(q_h) de este bloque"
+        );
+    }
+    assert!(
+        smaller_than_declared > 0,
+        "el fixture tiene que producir algún bloque con H menor que h_max"
+    );
+}
+
+/// La admisión rechaza con `h_max`, no con el recuento sorteado.
+///
+/// El fixture está elegido para que la diferencia sea observable y la prueba
+/// lo **comprueba en vez de suponerlo**: antes de exigir el rechazo mide, en
+/// cada bloque, las columnas no fijadas `V` y el recuento que su sorteo
+/// produce, y afirma que todos los sorteos caben en sus `2^V` combinaciones y
+/// que algún bloque no admite `h_max`. Con esas dos condiciones, una
+/// comprobación que mirase el H sorteado aceptaría el escenario; solo mirar
+/// `h_max` lo rechaza. Es también lo que impide que el mismo escenario sea
+/// válido con una semilla e inválido con otra.
+#[test]
+fn admission_rejects_h_max_beyond_two_pow_v_even_when_every_draw_would_fit() {
+    let root = temporary("h-max-beyond-v");
+    let chain = build_chain(
+        &root,
+        &Fixture {
+            populations: &["P1", "P2"],
+            block_count: 4,
+            slack: 3,
+            // Cinco sitios por bloque: `2^S = 32` admite `h_max = 16`, de modo
+            // que la primera cota no se dispara y el rechazo tiene que venir
+            // de la segunda. La banda degenerada en 0 fija parte de las
+            // columnas y deja `V` por debajo de `S`.
+            block_length: 5,
+            spectrum: "alt_af_min\talt_af_max\tweight\n0\t0\t0.34\n0.5\t0.5\t0.66\n",
+            weights: vec![0.0625; 16],
+            distribution: Some(("2.0", 2, 16)),
+            ..Fixture::default()
+        },
+    );
+    let marginals = marginals_of(&chain);
+    let drawn = resolve_f5_block_weights(&chain.config, &marginals).expect("pesos por bloque");
+    assert_eq!(drawn.len(), marginals.blocks().len());
+
+    let mut some_block_cannot_hold_h_max = false;
+    for (block, weights) in marginals.blocks().iter().zip(&drawn) {
+        let variable = block
+            .sites()
+            .iter()
+            .filter(|site| site.target_alt_af() != 0.0 && site.target_alt_af() != 1.0)
+            .count();
+        let capacity = 1_usize << variable;
+        assert!(
+            weights.len() <= capacity,
+            "el sorteo del bloque {} no cabe en sus 2^{variable} vectores: H={}",
+            block.block_id().as_str(),
+            weights.len()
+        );
+        if capacity < 16 {
+            some_block_cannot_hold_h_max = true;
+        }
+    }
+    assert!(
+        some_block_cannot_hold_h_max,
+        "el fixture tiene que dejar algún bloque cuyas columnas libres no admiten h_max"
+    );
+
+    let error = ensure_f5_haplotype_cardinality(&chain.config, &marginals)
+        .expect_err("h_max=16 no cabe en las 2^V combinaciones de todos los bloques");
+    assert_eq!(error.code(), "GPS-DOMAIN-105");
+    assert!(
+        error.context()["detail"].contains("hasta 16 haplotipos"),
+        "el diagnóstico tiene que citar h_max: {}",
+        error.context()["detail"]
+    );
+}
+
+/// La primera cota, `h_max <= 2^S`, tampoco depende del sorteo.
+///
+/// Con tres sitios por bloque y `h_max = 16`, ningún recuento sorteado llega a
+/// los dieciséis que la cota rechaza, y aun así el escenario no se admite.
+#[test]
+fn the_first_cardinality_bound_also_uses_h_max_and_not_the_draw() {
+    let root = temporary("h-max-beyond-s");
+    let chain = build_chain(
+        &root,
+        &Fixture {
+            weights: vec![0.0625; 16],
+            distribution: Some(("2.0", 2, 16)),
+            ..Fixture::default()
+        },
+    );
+    let error = build_f5_marginals(
+        &chain.config,
+        &chain.sealed,
+        &chain.execution,
+        &chain.layout,
+    )
+    .expect_err("h_max=16 no cabe en 2^3 vectores");
+    assert_eq!(error.code(), "GPS-DOMAIN-105");
+    assert!(
+        error.context()["detail"].contains("hasta 16 haplotipos"),
+        "el diagnóstico tiene que citar h_max: {}",
+        error.context()["detail"]
+    );
+}
+
+/// La cota `B*N_pop*h_max` domina las filas que los bloques construyen de
+/// verdad, y **sobra** cuando el sorteo no llega a `h_max`.
+///
+/// Es la mitad que un paquete publicado no puede enseñar: un escenario cuyos
+/// bloques tomaran todos `h_max` no terminaría la búsqueda LD del fixture de
+/// publicación, de modo que la holgura se mide aquí, sobre el intento. Sin la
+/// desigualdad estricta la prueba pasaría con un sorteo constante en `h_max`,
+/// que es exactamente el caso en que la cota deja de tener holgura.
+#[test]
+fn the_h_max_bound_dominates_the_rows_every_block_builds() {
+    let root = temporary("h-max-bound");
+    let chain = build_chain(
+        &root,
+        &Fixture {
+            populations: &["P1", "P2"],
+            block_count: 4,
+            slack: 3,
+            weights: vec![0.125; 8],
+            distribution: Some(("4.0", 2, 8)),
+            ..Fixture::default()
+        },
+    );
+    let h_max = chain.config.profile().haplotype_count_bound() as u64;
+    assert_eq!(h_max, 8, "la tabla de pesos es el vector de tamaño h_max");
+    let counts = drawn_counts(&chain);
+    let units = counts.len() as u64;
+    let bound = units * h_max;
+    let built: u64 = counts.iter().map(|count| *count as u64).sum();
+    assert!(built <= bound, "{built} filas frente a la cota {bound}");
+    assert!(
+        built < bound,
+        "el sorteo tiene que dejar holgura frente a h_max: {counts:?}"
+    );
+    // Y la cota sellada, que es la que el contrato publica, sigue por encima
+    // de esas filas sin haber ejecutado nada para conocerlas.
+    assert!(
+        chain.sealed.tsv_rows_bound() >= built,
+        "tsv_rows_bound={} frente a {built} filas haplotípicas",
+        chain.sealed.tsv_rows_bound()
+    );
+}
+
+/// Con distribución declarada, la vía de un bloque reproduce el intento
+/// entero.
+///
+/// La equivalencia heredada se probaba sin distribución, donde `H` es una
+/// constante del perfil y las dos vías no pueden divergir. Con sorteo sí
+/// pueden: son dos resoluciones independientes del mismo ámbito, y si una
+/// llevara `attempt_index` o mirase otro bloque, el bloque suelto dejaría de
+/// coincidir con su posición en el intento.
+#[test]
+fn the_per_block_builder_reproduces_the_whole_attempt_under_a_declared_distribution() {
+    let root = temporary("per-block-drawn");
+    let chain = build_chain(
+        &root,
+        &Fixture {
+            populations: &["P1", "P2"],
+            block_count: 4,
+            slack: 3,
+            weights: vec![0.125; 8],
+            distribution: Some(("4.0", 2, 8)),
+            ..Fixture::default()
+        },
+    );
+    let marginals = marginals_of(&chain);
+
+    // `resolve_f5_block_weights` es la tabla que la búsqueda resuelve una vez
+    // y entrega a cada intento. Tiene que coincidir, bloque a bloque, con lo
+    // que el constructor resuelve por su cuenta: son dos resoluciones
+    // independientes del mismo ámbito y si una mirase otro bloque —o el
+    // primero— la búsqueda construiría matrices con pesos ajenos.
+    let resolved = resolve_f5_block_weights(&chain.config, &marginals).expect("pesos por bloque");
+    let reference = build_f5_haplotype_attempt(&chain.config, &marginals, 0).expect("intento");
+    assert_eq!(resolved.len(), reference.blocks().len());
+    for (weights, block) in resolved.iter().zip(reference.blocks()) {
+        assert_eq!(
+            weights.len(),
+            block.matrix().haplotype_count(),
+            "la tabla de pesos y el bloque {} no resuelven el mismo H",
+            block.block_id().as_str()
+        );
+        let maximum = weights.iter().copied().fold(0.0_f64, f64::max);
+        assert_eq!(
+            block.marginal_max_abs_error().to_bits(),
+            maximum.to_bits(),
+            "la tabla de pesos y el bloque {} no resuelven el mismo vector",
+            block.block_id().as_str()
+        );
+    }
+
+    let mut varied = BTreeSet::new();
+    for attempt_index in 0..3 {
+        let whole = build_f5_haplotype_attempt(&chain.config, &marginals, attempt_index)
+            .expect("intento completo");
+        for (ordinal, block) in whole.blocks().iter().enumerate() {
+            varied.insert(block.matrix().haplotype_count());
+            let alone = build_f5_block_attempt(&chain.config, &marginals, ordinal, attempt_index)
+                .expect("bloque suelto");
+            assert_eq!(
+                &alone, block,
+                "el bloque {ordinal} del intento {attempt_index} difiere de su reconstrucción"
+            );
+        }
+    }
+    assert!(
+        varied.len() > 1,
+        "el fixture tiene que producir alturas distintas: {varied:?}"
+    );
 }

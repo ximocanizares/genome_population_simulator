@@ -4,12 +4,13 @@ use genome_population_simulator::identity::{
     F5BlockId, F5SiteId, IndividualId, PopulationId, ScenarioId,
 };
 use genome_population_simulator::randomness::{
-    F5_RNG_CATALOG, F5_UNIFORM_INDEX_ALGORITHM, F5RandomDecision, RandomWordSource, RootSeed,
-    derive_f5_subseed, f5_bernoulli, f5_bits_53, f5_fisher_yates, f5_matrix_bytes,
-    f5_placed_layout_bytes, f5_uniform_53, f5_uniform_index,
+    F5_RNG_CATALOG, F5_RNG_CATALOG_V1, F5_RNG_CATALOG_V2, F5_UNIFORM_INDEX_ALGORITHM,
+    F5RandomDecision, RandomWordSource, RootSeed, derive_f5_subseed, f5_bernoulli, f5_bits_53,
+    f5_fisher_yates, f5_matrix_bytes, f5_placed_layout_bytes, f5_uniform_53, f5_uniform_index,
 };
 
-const F5_RNG_CATALOG_TSV: &str = include_str!("../catalogs/f5-rng-catalog-v1.tsv");
+const F5_RNG_CATALOG_V1_TSV: &str = include_str!("../catalogs/f5-rng-catalog-v1.tsv");
+const F5_RNG_CATALOG_TSV: &str = include_str!("../catalogs/f5-rng-catalog-v2.tsv");
 
 fn root() -> RootSeed {
     RootSeed::from_bytes([
@@ -44,9 +45,37 @@ fn expected_rows() -> BTreeMap<&'static str, (&'static str, [u64; 4])> {
 
 #[test]
 fn f5_rng_catalog_constants_name_the_frozen_contract() {
-    assert_eq!(F5_RNG_CATALOG, "f5-rng-catalog-v1");
+    assert_eq!(F5_RNG_CATALOG_V1, "f5-rng-catalog-v1");
+    assert_eq!(F5_RNG_CATALOG_V2, "f5-rng-catalog-v2");
+    assert_eq!(F5_RNG_CATALOG, F5_RNG_CATALOG_V2);
     assert_eq!(F5_UNIFORM_INDEX_ALGORITHM, "uniform-index-v1");
-    assert!(F5_RNG_CATALOG_TSV.starts_with("# catalog_id=f5-rng-catalog-v1\n"));
+    assert!(F5_RNG_CATALOG_V1_TSV.starts_with("# catalog_id=f5-rng-catalog-v1\n"));
+    assert!(F5_RNG_CATALOG_TSV.starts_with("# catalog_id=f5-rng-catalog-v2\n"));
+}
+
+/// v2 conserva v1 **literal**: misma cabecera salvo el identificador y las
+/// mismas doce filas, seguidas de `block_haplotype_count`.
+///
+/// Sin esto, una reescritura del material o de una palabra de una decisión
+/// heredada pasaría desapercibida al subir de catálogo, y con ella cambiarían
+/// en silencio los bytes de cualquier paquete anterior.
+#[test]
+fn f5_rng_catalog_v2_extends_v1_without_rewriting_a_single_frozen_row() {
+    let v1 = F5_RNG_CATALOG_V1_TSV.lines().collect::<Vec<_>>();
+    let v2 = F5_RNG_CATALOG_TSV.lines().collect::<Vec<_>>();
+    assert_eq!(v2.len(), v1.len() + 1, "v2 añade exactamente una fila");
+    assert_eq!(v1[0], "# catalog_id=f5-rng-catalog-v1");
+    assert_eq!(v2[0], "# catalog_id=f5-rng-catalog-v2");
+    assert_eq!(
+        &v2[1..v1.len()],
+        &v1[1..],
+        "v2 reescribe una línea heredada"
+    );
+    assert!(
+        v2[v1.len()].starts_with("block_haplotype_count|"),
+        "la fila añadida no es la del recuento haplotípico: {}",
+        v2[v1.len()]
+    );
 }
 
 #[test]
@@ -114,6 +143,10 @@ fn f5_rng_catalog_v1_has_literal_subseed_and_chacha12_vectors() {
                 &population_id,
                 &block_id,
             ),
+        ),
+        (
+            "block_haplotype_count",
+            F5RandomDecision::block_haplotype_count(&scenario_id, &population_id, &block_id),
         ),
     ];
     let expected = expected_rows();

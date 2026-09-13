@@ -40,10 +40,11 @@ use genome_population_simulator::f5_layout::{
     F5LayoutRequest, F5PhysicalLayout, build_f5_physical_layout,
 };
 use genome_population_simulator::f5_oracle::{
-    F5DeclaredAttemptSummary, F5DeclaredBounds, F5DeclaredLdBin, F5DeclaredLink, F5DeclaredMode,
+    F5DeclaredAttemptSummary, F5DeclaredBounds, F5DeclaredHaplotypeCount,
+    F5DeclaredHaplotypeCountDistribution, F5DeclaredLdBin, F5DeclaredLink, F5DeclaredMode,
     F5DeclaredRealizedF, F5DeclaredSampling, F5DeclaredSpectrumBand, F5DeclaredSubpopulation,
-    F5DeclaredTruthLink, F5FailureDeclaration, F5PackageDeclaration, audit_f5_failure_package,
-    audit_f5_package,
+    F5DeclaredTruthLink, F5FailureDeclaration, F5OracleCause, F5PackageDeclaration,
+    audit_f5_failure_package, audit_f5_package,
 };
 use genome_population_simulator::f5_preflight::{
     F5OtherResources, SealedF5Admission, recover_sealed_f5_admission,
@@ -58,6 +59,7 @@ use genome_population_simulator::f5_search::{
 };
 use genome_population_simulator::identity::{ExecutionId, SequenceId};
 use genome_population_simulator::publication::ExecutionWorkspace;
+use genome_population_simulator::randomness::F5_RNG_CATALOG_V1;
 use genome_population_simulator::results::ArtifactRecord;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -152,6 +154,9 @@ struct Fixture<'a> {
     seed: &'a str,
     slack: u64,
     scenario_inbreeding: Option<&'a str>,
+    /// `(lambda, h_min, h_max)` de la distribución del recuento haplotípico.
+    /// `None` escribe un metadata v1 idéntico al de antes de esta ampliación.
+    haplotype_count_distribution: Option<(&'a str, u64, u64)>,
     /// Objetivo por bases cubiertas en lugar de por número de bloques. Fuerza
     /// el reparto residual del plan de longitudes, que es la vía que puede
     /// devolver «residual final fuera del soporte factible» **dentro** del
@@ -178,6 +183,7 @@ impl Default for Fixture<'_> {
             seed: SEED,
             slack: 1,
             scenario_inbreeding: None,
+            haplotype_count_distribution: None,
             covered_bases: None,
         }
     }
@@ -248,9 +254,14 @@ impl Fixture<'_> {
             })
             .collect::<Vec<_>>()
             .join(",");
-        let metadata = format!(
-            r#"{{"profile_kind":"f5_generation_profile","schema_version":"1","profile_id":"profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"files":[{links}]}}"#
-        );
+        let metadata = match self.haplotype_count_distribution {
+            None => format!(
+                r#"{{"profile_kind":"f5_generation_profile","schema_version":"1","profile_id":"profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"files":[{links}]}}"#
+            ),
+            Some((lambda, minimum, maximum)) => format!(
+                r#"{{"profile_kind":"f5_generation_profile","schema_version":"2","profile_id":"profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"haplotype_count_distribution":{{"algorithm":"poisson-count-v1","lambda":{lambda},"h_min":{minimum},"h_max":{maximum}}},"files":[{links}]}}"#
+            ),
+        };
         fs::write(profile_directory.join("profile.metadata.json"), &metadata).expect("metadata");
 
         let bases = b"ACGT";
@@ -625,6 +636,27 @@ fn declaration_from_published(package: &Package) -> F5PackageDeclaration {
         profile_id: text(&f5["profile"]["profile_id"]),
         profile_metadata_sha256: text(&f5["profile"]["sha256"]),
         haplotype_weights: profile.haplotype_weights().to_vec(),
+        haplotype_count_distribution: f5.get("haplotype_count_distribution").map(|row| {
+            F5DeclaredHaplotypeCountDistribution {
+                lambda: row["lambda"].as_f64().expect("lambda"),
+                minimum: number(&row["h_min"]),
+                maximum: number(&row["h_max"]),
+            }
+        }),
+        haplotype_counts: f5
+            .get("haplotype_counts")
+            .map(|rows| {
+                rows.as_array()
+                    .expect("recuentos")
+                    .iter()
+                    .map(|row| F5DeclaredHaplotypeCount {
+                        population_id: text(&row["population_id"]),
+                        block_id: text(&row["block_id"]),
+                        haplotype_count: number(&row["haplotype_count"]),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         snp_spectrum: profile
             .snp_spectrum()
             .iter()
@@ -2959,4 +2991,379 @@ fn the_payload_inventory_refuses_a_symbolic_link() {
     assert_eq!(rejection.code(), "GPS-FMT-006");
     fs::remove_dir_all(&staged).expect("retirar");
     fs::remove_dir_all(&aside).expect("retirar");
+}
+
+// ---------------------------------------------------------------------------
+// Recuento haplotípico por bloque
+// ---------------------------------------------------------------------------
+
+/// Los ocho artefactos de carga útil de un escenario sin distribución
+/// declarada, congelados antes de que esta decisión existiera.
+const FROZEN_PAYLOAD: [(&str, &str); 8] = [
+    (
+        "outputs/f5-block-layout.tsv",
+        "339bb26079c44b51227f6dd6f8b7bbb770e23009d5f4fe124c381b489eaad921",
+    ),
+    (
+        "outputs/f5-sites.tsv",
+        "3b9783f1383e028574666cb9d08628912b26dffd799c380c495fdca9f07db4ad",
+    ),
+    (
+        "outputs/f5-haplotypes.tsv",
+        "d77e68a05f72342dbc9560dbaab19da8c8ce81bc4cea66744e17624308b89b97",
+    ),
+    (
+        "outputs/f5-frequencies.tsv",
+        "a66181b1bd1edd030a0cadd4384d2e3fad1d11e9daecb1a6f5969b0a53225d42",
+    ),
+    (
+        "outputs/f5-ld-evaluation.tsv",
+        "a1deb437c1b4abc2099a73d879acd8b955c831d8fff5f5d49074a86b0083816a",
+    ),
+    (
+        "outputs/f5-founders.tsv",
+        "5ea07ee71ef4fc8eca475c364d10b5e07b69d876a4dc6f3c398353775cca0d0d",
+    ),
+    (
+        "outputs/f5-attempts.tsv",
+        "d77bc320aeb0303847f1a37396d811c01e946c665f6dc0a7361a3ed1d46e2a08",
+    ),
+    (
+        "outputs/truth.jsonl",
+        "2cd098160bcf1b4546f26163840e54796b1346cd03285bcf656e0eeab6778f29",
+    ),
+];
+
+/// El objeto `rng_catalog` que ese mismo escenario publicaba antes de esta
+/// ampliación, congelado entero.
+///
+/// Los siete TSV y la verdad no lo ven: vive en los dos documentos raíz, cuyos
+/// bytes **no** son comparables entre ejecuciones porque llevan rutas del
+/// árbol de trabajo. Este objeto sí lo es, y es exactamente lo que subir todas
+/// las ejecuciones a v2 habría cambiado sin que ninguna decisión cambiara.
+const FROZEN_V1_CATALOG: &str = r#"{"catalog_id":"f5-rng-catalog-v1","path":"catalogs/f5-rng-catalog-v1.tsv","sha256":"5c2a1b68e744cc333c3b28a69263202b9b2cd5acdb4910db54cafcf6ff2fbc81","size_bytes":8490}"#;
+
+/// Un perfil sin distribución declarada publica **los mismos bytes** y sigue
+/// nombrando el catálogo v1.
+///
+/// Las huellas no se recalculan aquí ni se comparan contra otra ejecución del
+/// mismo binario: se midieron sobre el árbol **anterior** a esta ampliación
+/// —el commit `0b4bcc1`, con el mismo fixture— y se copiaron literales. Por
+/// eso cualquier cambio en la construcción, en los pesos efectivos, en el
+/// orden de las filas o en el catálogo publicado las rompe, y por eso la
+/// comparación no es circular.
+#[test]
+fn a_profile_without_a_distribution_keeps_its_published_bytes_and_its_v1_catalogue() {
+    let package = publish("heritage-bytes", &Fixture::default());
+    for (path, digest) in FROZEN_PAYLOAD {
+        assert_eq!(
+            sha256(&package.bytes(path)),
+            digest,
+            "{path} ya no publica los bytes congelados"
+        );
+    }
+    let manifest = package.manifest();
+    let f5 = &manifest["f5"];
+    let frozen: Value = serde_json::from_str(FROZEN_V1_CATALOG).expect("catálogo congelado");
+    assert_eq!(
+        f5["rng_catalog"], frozen,
+        "el catálogo publicado ya no es el que este escenario nombraba"
+    );
+    assert!(
+        f5.get("haplotype_count_distribution").is_none(),
+        "un perfil v1 no puede publicar la distribución"
+    );
+    assert!(
+        f5.get("haplotype_counts").is_none(),
+        "un perfil v1 no puede publicar recuentos"
+    );
+    assert_eq!(
+        package.effective()["f5"]["rng_catalog"],
+        f5["rng_catalog"],
+        "efectivo y manifiesto tienen que nombrar el mismo catálogo"
+    );
+}
+
+/// Fixture con distribución declarada cuyo sorteo se pinza siempre a `h_min`.
+///
+/// `lambda = 0,5` deja la Poisson casi siempre en 0 o 1, de modo que todos los
+/// bloques toman `H = 2` y la terminación LD sigue siendo alcanzable. El
+/// intervalo **no** es degenerado —`h_max` vale 4—, así que un recuento
+/// publicado de 3 o de 4 seguiría dentro del intervalo declarado: la única
+/// forma de rechazarlo es volver a sortear.
+fn drawn_count_fixture() -> Fixture<'static> {
+    Fixture {
+        weights: vec!["0.25", "0.25", "0.25", "0.25"],
+        haplotype_count_distribution: Some(("0.5", 2, 4)),
+        ..Fixture::default()
+    }
+}
+
+/// Con distribución declarada el paquete publica la decisión, sube al catálogo
+/// v2 y escribe los pesos **renormalizados** del prefijo.
+///
+/// El último punto es el que ata el sorteo a los bytes: el perfil declara
+/// cuatro pesos de `0,25` y cada bloque publica dos filas de `0,5`. Si el
+/// prefijo no se renormalizara, `q` seguiría valiendo `0,25` y la suma por
+/// unidad no daría uno.
+#[test]
+fn a_declared_distribution_publishes_its_decision_the_v2_catalogue_and_renormalised_weights() {
+    let package = publish("drawn-count", &drawn_count_fixture());
+    let manifest = package.manifest();
+    let f5 = &manifest["f5"];
+    assert_eq!(f5["rng_catalog"]["catalog_id"], "f5-rng-catalog-v2");
+    assert_eq!(
+        f5["haplotype_count_distribution"],
+        json!({"algorithm": "poisson-count-v1", "lambda": 0.5, "h_min": 2, "h_max": 4})
+    );
+    let counts = f5["haplotype_counts"].as_array().expect("recuentos");
+    assert_eq!(
+        counts.len(),
+        f5["sampling"].as_array().expect("muestreo").len(),
+        "una fila de recuento por unidad"
+    );
+    for row in counts {
+        assert_eq!(row["haplotype_count"], 2);
+    }
+    // Los dos documentos raíz siguen validando contra sus esquemas externos con
+    // las dos claves nuevas dentro.
+    assert_external_cases(
+        "effective-config-v5.schema.json",
+        &[],
+        vec![(package.effective(), true)],
+    );
+    assert_external_cases(
+        "manifest-general-v5.schema.json",
+        &[
+            "effective-config-v5.schema.json",
+            "f5-failure-v1.schema.json",
+        ],
+        vec![(manifest.clone(), true)],
+    );
+
+    let haplotypes = String::from_utf8(package.bytes("outputs/f5-haplotypes.tsv"))
+        .expect("f5-haplotypes.tsv en UTF-8");
+    let rows = haplotypes.lines().skip(1).collect::<Vec<_>>();
+    assert_eq!(rows.len(), 2 * counts.len(), "dos filas por unidad");
+    for row in rows {
+        let fields = row.split('\t').collect::<Vec<_>>();
+        assert_eq!(fields[4], "0.5", "el prefijo no llegó renormalizado: {row}");
+    }
+}
+
+/// Fixture cuyo sorteo se pinza siempre en `h_max`, y con `h_max` igual al
+/// número de pesos declarados.
+///
+/// Sirve para un fin muy concreto: con `H = h_max = weights.len()` los pesos
+/// del bloque **son** el vector declarado literal, de modo que un paquete así
+/// es indistinguible, fila a fila, de uno sin distribución. Es la única forma
+/// de ejercitar la guarda de los recuentos huérfanos: en cualquier otro
+/// fixture, quitar la distribución de la declaración hace fallar antes el
+/// recuento de filas o la comparación de `q`, y la guarda queda sin prueba.
+fn saturated_count_fixture() -> Fixture<'static> {
+    Fixture {
+        weights: vec!["0.5", "0.5"],
+        haplotype_count_distribution: Some(("30.0", 2, 2)),
+        ..Fixture::default()
+    }
+}
+
+/// El oráculo rechaza un recuento publicado que su propio sorteo no produce.
+///
+/// La mutación que **aísla** la rederivación es la de la lambda: los recuentos
+/// declarados siguen siendo los que publica `f5-haplotypes.tsv`, de modo que
+/// contar filas no delata nada; lo único que cambia es la distribución de la
+/// que esos recuentos tendrían que salir. Un oráculo que se creyera la cifra
+/// publicada aceptaría el paquete. La mutación del recuento es más floja a
+/// propósito —también la caza el recuento de filas— y se conserva porque es la
+/// forma en que un productor defectuoso lo rompería.
+///
+/// Las otras dos mutaciones cierran los dos huecos de la declaración: unos
+/// recuentos sin distribución no son rederivables desde ningún ámbito, y una
+/// distribución sin recuentos no deja nada que comparar.
+#[test]
+fn the_oracle_rejects_a_published_count_that_its_own_draw_does_not_produce() {
+    let package = publish("drawn-count-oracle", &drawn_count_fixture());
+    let root = &package.destination;
+    let honest = declaration_from_published(&package);
+    assert_eq!(
+        honest.haplotype_counts.len(),
+        2,
+        "el fixture publica dos unidades"
+    );
+    assert!(
+        audit_f5_package(root, &honest).is_ok(),
+        "la declaración honesta tiene que pasar"
+    );
+
+    // La lambda declarada cambia y los recuentos no: con `lambda = 30` el
+    // sorteo se pinza en `h_max = 4` y ya no es el `2` que el paquete publica.
+    let mut relambda = declaration_from_published(&package);
+    let tampered = F5DeclaredHaplotypeCountDistribution {
+        lambda: 30.0,
+        minimum: 2,
+        maximum: 4,
+    };
+    assert_ne!(
+        Some(tampered),
+        honest.haplotype_count_distribution,
+        "la mutación tiene que mutar"
+    );
+    relambda.haplotype_count_distribution = Some(tampered);
+    assert_eq!(
+        relambda.haplotype_counts, honest.haplotype_counts,
+        "los recuentos declarados no se tocan: el recuento de filas no puede delatar nada"
+    );
+    let rejection = audit_f5_package(root, &relambda)
+        .expect_err("los recuentos publicados no salen de esa lambda");
+    assert_eq!(rejection.cause(), F5OracleCause::Haplotype);
+
+    let mut inflated = declaration_from_published(&package);
+    inflated.haplotype_counts[0].haplotype_count = 3;
+    assert_ne!(
+        inflated.haplotype_counts, honest.haplotype_counts,
+        "la mutación tiene que mutar"
+    );
+    let rejection = audit_f5_package(root, &inflated).expect_err("H=3 no sale del sorteo");
+    assert_eq!(rejection.cause(), F5OracleCause::Haplotype);
+
+    // Una distribución sin recuentos: lo que la caza es la búsqueda por unidad,
+    // que no encuentra ninguno. La guarda de cardinalidad está implicada por
+    // ella en este sentido y **solo** tiene trabajo propio en el contrario, el
+    // de las filas sobrantes, que es el caso siguiente.
+    let mut orphan_distribution = declaration_from_published(&package);
+    orphan_distribution.haplotype_counts.clear();
+    let rejection = audit_f5_package(root, &orphan_distribution)
+        .expect_err("una distribución sin recuentos no deja nada que comparar");
+    assert_eq!(rejection.cause(), F5OracleCause::Haplotype);
+
+    // Una fila de más que nombra una unidad inexistente: todas las unidades
+    // reales siguen declaradas y resolviendo, de modo que la búsqueda por
+    // unidad no ve nada raro. Solo la cardinalidad lo rechaza.
+    let mut surplus = declaration_from_published(&package);
+    surplus.haplotype_counts.push(F5DeclaredHaplotypeCount {
+        population_id: "P9".to_owned(),
+        block_id: surplus.haplotype_counts[0].block_id.clone(),
+        haplotype_count: 2,
+    });
+    assert_eq!(
+        surplus.haplotype_counts.len(),
+        honest.haplotype_counts.len() + 1,
+        "la mutación tiene que añadir exactamente una fila"
+    );
+    let rejection = audit_f5_package(root, &surplus)
+        .expect_err("una fila de recuento sobrante no puede pasar inadvertida");
+    assert_eq!(rejection.cause(), F5OracleCause::Haplotype);
+}
+
+/// Unos recuentos publicados sin la distribución que los produce se rechazan.
+///
+/// El paquete es el del fixture saturado: `H = h_max = 2` y dos pesos
+/// declarados, de modo que sus filas son **idénticas** a las de un paquete sin
+/// distribución. Quitar la distribución de la declaración no mueve ni el
+/// número de filas ni una sola `q`, así que ni el recuento de filas ni la
+/// comparación de pesos pueden delatar nada: lo único que queda en pie es la
+/// guarda que rechaza recuentos sin distribución. El catálogo baja a v1 con
+/// ella, porque el oráculo exige esa correspondencia y si no el rechazo
+/// llegaría por `Randomness` sin tocar la guarda.
+#[test]
+fn published_counts_without_the_distribution_that_produces_them_are_rejected() {
+    let package = publish("orphan-counts", &saturated_count_fixture());
+    let root = &package.destination;
+    let honest = declaration_from_published(&package);
+    assert!(
+        honest
+            .haplotype_counts
+            .iter()
+            .all(|row| row.haplotype_count as usize == honest.haplotype_weights.len()),
+        "el fixture tiene que saturar H en h_max para que las filas sean indistinguibles"
+    );
+    assert!(
+        audit_f5_package(root, &honest).is_ok(),
+        "la declaración honesta tiene que pasar"
+    );
+
+    let mut orphan_counts = declaration_from_published(&package);
+    orphan_counts.haplotype_count_distribution = None;
+    orphan_counts.rng_catalog_id = F5_RNG_CATALOG_V1.to_owned();
+    let rejection = audit_f5_package(root, &orphan_counts)
+        .expect_err("unos recuentos sin distribución no son rederivables");
+    assert_eq!(
+        rejection.cause(),
+        F5OracleCause::Haplotype,
+        "el rechazo tiene que venir de la guarda de los recuentos"
+    );
+
+    // Control: sin esos recuentos la misma declaración **sí** pasa, de modo
+    // que lo que la guarda rechaza es exactamente su presencia y no otra cosa
+    // del camino sin distribución.
+    let mut without_counts = orphan_counts;
+    without_counts.haplotype_counts.clear();
+    assert!(
+        audit_f5_package(root, &without_counts).is_ok(),
+        "sin recuentos declarados, el paquete saturado es indistinguible de uno sin distribución"
+    );
+}
+
+/// El presupuesto derivado con `h_max` sigue dominando lo que el paquete
+/// publica.
+///
+/// DTC-089 obliga a derivar el presupuesto **sin ejecutar nada**, de modo que
+/// el preflight no puede conocer el H de ningún bloque y contabiliza
+/// `B*N_pop*h_max`. Aquí se comprueba la dominación sobre los bytes reales del
+/// paquete. Que la cota además **sobre** cuando el sorteo no llega a `h_max`
+/// no puede comprobarse en un paquete publicado —un escenario cuyos bloques
+/// tomen `h_max` no termina la búsqueda LD de este fixture—, y se comprueba en
+/// `the_h_max_bound_dominates_the_rows_every_block_builds` de
+/// `tests/f5_haplotypes.rs`, que trabaja sobre el intento y no sobre el
+/// paquete.
+#[test]
+fn the_budget_derived_from_h_max_still_dominates_what_the_package_publishes() {
+    let package = publish("drawn-count-budget", &drawn_count_fixture());
+    let manifest = package.manifest();
+    let f5 = &manifest["f5"];
+    let sealed = &package.chain.sealed;
+
+    let units = f5["sampling"].as_array().expect("muestreo").len() as u64;
+    let h_max = f5["haplotype_count_distribution"]["h_max"]
+        .as_u64()
+        .expect("h_max");
+    let haplotype_rows_bound = units * h_max;
+    let published_rows = String::from_utf8(package.bytes("outputs/f5-haplotypes.tsv"))
+        .expect("f5-haplotypes.tsv en UTF-8")
+        .lines()
+        .count() as u64
+        - 1;
+    assert!(
+        published_rows <= haplotype_rows_bound,
+        "{published_rows} filas frente a la cota {haplotype_rows_bound}"
+    );
+
+    // Las dos cotas selladas que crecen con esas filas siguen dominando lo
+    // publicado, contado sobre los bytes reales del paquete.
+    let mut tsv_rows = 0_u64;
+    let mut payload_bytes = 0_u64;
+    for link in links_of(&manifest) {
+        let relative = link["path"].as_str().expect("ruta");
+        let bytes = package.bytes(relative);
+        payload_bytes += bytes.len() as u64;
+        if relative.ends_with(".tsv") {
+            tsv_rows += String::from_utf8(bytes)
+                .expect("TSV en UTF-8")
+                .lines()
+                .count() as u64
+                - 1;
+        }
+    }
+    payload_bytes += package.bytes("outputs/truth.jsonl").len() as u64;
+    assert!(
+        tsv_rows <= sealed.tsv_rows_bound(),
+        "{tsv_rows} filas TSV frente a tsv_rows_bound={}",
+        sealed.tsv_rows_bound()
+    );
+    assert!(
+        payload_bytes <= sealed.output_bytes(),
+        "{payload_bytes} bytes frente a output_bytes={}",
+        sealed.output_bytes()
+    );
 }

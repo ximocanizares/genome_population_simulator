@@ -45,7 +45,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::application::EffectiveF5Config;
 use crate::configuration::{DeclaredF5SamplingOverride, DeclaredF5Subpopulation};
 use crate::diagnostics::Diagnostic;
-use crate::f5_haplotypes::{F5AlleleMatrix, F5BlockHaplotypes};
+use crate::f5_haplotypes::{F5AlleleMatrix, F5BlockHaplotypes, f5_block_haplotype_weights};
 use crate::f5_layout::F5PhysicalLayout;
 use crate::f5_marginals::NeumaierSum;
 use crate::f5_preflight::{F5OtherResources, SealedF5Admission};
@@ -572,20 +572,29 @@ pub fn assign_f5_founders(
     let root_seed = RootSeed::parse("seed", config.seed())
         .map_err(|_| configuration(config, "seed", "la semilla efectiva no es canónica"))?;
 
-    let weights = config.profile().haplotype_weights();
-    if weights.is_empty() {
+    let declared_weights = config.profile().haplotype_weights();
+    if declared_weights.is_empty() {
         return Err(configuration(
             config,
             "profile.haplotype_weights",
             "el perfil admitido no conserva ningún peso haplotípico",
         ));
     }
-    let haplotype_count = weights.len() as u64;
-    let prefix = HaplotypePrefix::new(weights)
-        .map_err(|detail| configuration(config, "profile.haplotype_weights", detail))?;
 
     let rosters = resolve_f5_founder_roster(config)?;
-    let blocks = index_search_blocks(config, sealed, search, &rosters, weights.len())?;
+    let blocks = index_search_blocks(config, sealed, search, &rosters, declared_weights.len())?;
+    // Altura de la matriz ganadora de cada unidad. Los fundadores no vuelven a
+    // sortear H: lo leen de la matriz que la búsqueda dejó, que es la misma
+    // que el paquete publica y la que el oráculo rederiva.
+    let haplotype_counts = blocks
+        .iter()
+        .map(|block| {
+            (
+                (block.population_id.clone(), block.block_index),
+                block.haplotype_count,
+            )
+        })
+        .collect::<BTreeMap<(PopulationId, u64), usize>>();
 
     // Las `C` identidades de copia de una subpoblación son las mismas en todos
     // sus bloques: se ordenan una vez, no una vez por unidad.
@@ -629,6 +638,20 @@ pub fn assign_f5_founders(
     let mut units = Vec::with_capacity(sampling.len());
     let mut f_realized = Vec::with_capacity(sampling.len());
     for row in &sampling {
+        let haplotype_count_usize = *haplotype_counts
+            .get(&(row.population_id.clone(), row.block_index))
+            .ok_or_else(|| {
+                internal(
+                    &scenario_id,
+                    "la fila de muestreo nombra una unidad sin matriz ganadora",
+                )
+            })?;
+        let weights = f5_block_haplotype_weights(declared_weights, haplotype_count_usize)
+            .map_err(|detail| configuration(config, "profile.haplotype_weights", detail))?;
+        let weights = weights.as_slice();
+        let haplotype_count = haplotype_count_usize as u64;
+        let prefix = HaplotypePrefix::new(weights)
+            .map_err(|detail| configuration(config, "profile.haplotype_weights", detail))?;
         let seats = seats_by_population.get(&row.population_id).ok_or_else(|| {
             internal(
                 &scenario_id,
@@ -903,6 +926,10 @@ struct UnitBlock {
     population_id: PopulationId,
     block_id: F5BlockId,
     block_index: u64,
+    /// Filas de la matriz ganadora de esta unidad. Con distribución declarada
+    /// varía de un bloque a otro; sin ella es el número de pesos del perfil en
+    /// todas.
+    haplotype_count: usize,
 }
 
 /// Índice de los bloques ganadores por población, con la comprobación de que
@@ -917,12 +944,33 @@ fn index_search_blocks(
     let block_count = sealed.block_count();
     let mut seen: BTreeSet<(PopulationId, u64)> = BTreeSet::new();
     let mut blocks = Vec::with_capacity(search.blocks().len());
+    // Sin distribución declarada la altura de toda matriz es **exactamente** el
+    // número de pesos, igual que antes de que H pudiera variar: la red heredada
+    // se conserva literal. Con distribución declarada el intervalo admisible es
+    // el que ella fija, no un `2..=h_max` genérico.
+    let distribution = config.profile().haplotype_count_distribution();
     for block in search.blocks() {
-        if block.matrix().haplotype_count() != haplotype_count {
+        let rows = block.matrix().haplotype_count();
+        let admissible = match distribution {
+            None => rows == haplotype_count,
+            Some(distribution) => u64::try_from(rows).is_ok_and(|rows| {
+                (distribution.minimum()..=distribution.maximum()).contains(&rows)
+            }),
+        };
+        if !admissible {
             return Err(configuration(
                 config,
                 "search.matrix",
-                "la matriz ganadora no tiene tantas filas como pesos el perfil",
+                match distribution {
+                    None => {
+                        "la matriz ganadora no tiene tantas filas como pesos el perfil".to_owned()
+                    }
+                    Some(distribution) => format!(
+                        "la matriz ganadora tiene {rows} filas y la distribución declarada admite {}..={}",
+                        distribution.minimum(),
+                        distribution.maximum()
+                    ),
+                },
             ));
         }
         if block.block_index() >= block_count {
@@ -953,6 +1001,7 @@ fn index_search_blocks(
             population_id: block.population_id().clone(),
             block_id: block.block_id().clone(),
             block_index: block.block_index(),
+            haplotype_count: rows,
         });
     }
     let expected = u64::try_from(rosters.len())

@@ -15,6 +15,7 @@ const ID_CATALOG_V2: &str = include_str!("../catalogs/id-classes-v2.tsv");
 const ID_CATALOG_V3: &str = include_str!("../catalogs/id-classes-v3.tsv");
 const ID_CATALOG_V4: &str = include_str!("../catalogs/id-catalog-v4.tsv");
 const F5_RNG_CATALOG: &str = include_str!("../catalogs/f5-rng-catalog-v1.tsv");
+const F5_RNG_CATALOG_V2: &str = include_str!("../catalogs/f5-rng-catalog-v2.tsv");
 const VARIANT_ID_CATALOG: &str = include_str!("../catalogs/variant-id-v1.tsv");
 const PARAMETER_CATALOG: &str = include_str!("../catalogs/parameter-families-v1.tsv");
 const SUBSEED_CONTEXT: &str = "genome_population_simulator/v1/subseed";
@@ -23,7 +24,7 @@ const ID_CONTEXT: &str = "genome_population_simulator/v1/id";
 // These fingerprints are the review lock for the published contracts. A
 // deliberate content change must use a new versioned artifact and add its new
 // fingerprint instead of replacing a historical value here.
-const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 14] = [
+const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 15] = [
     (
         "catalogs/diagnostics-v1.tsv",
         DIAGNOSTIC_CATALOG_V1,
@@ -90,6 +91,11 @@ const REVIEWED_CONTRACT_FINGERPRINTS: [(&str, &str, &str); 14] = [
         "5c2a1b68e744cc333c3b28a69263202b9b2cd5acdb4910db54cafcf6ff2fbc81",
     ),
     (
+        "catalogs/f5-rng-catalog-v2.tsv",
+        F5_RNG_CATALOG_V2,
+        "c6d2487cac44e78305401b00e1afcc1b346517fb4599cd2953e32a90de045a48",
+    ),
+    (
         "catalogs/parameter-families-v1.tsv",
         PARAMETER_CATALOG,
         "5507a763b91520449a022bd6e371cb4f03cafa5547a68ea8c0e1cfc3221b9a7a",
@@ -145,6 +151,7 @@ fn published_contracts_match_their_reviewed_content() {
     )));
     assert!(ID_CATALOG_V4.starts_with("# catalog_version=4\n# catalog_id=id-catalog-v4\n"));
     assert!(F5_RNG_CATALOG.starts_with("# catalog_id=f5-rng-catalog-v1\n"));
+    assert!(F5_RNG_CATALOG_V2.starts_with("# catalog_id=f5-rng-catalog-v2\n"));
     assert!(PARAMETER_CATALOG.starts_with("# parameter_catalog_version=1\n"));
 
     for (path, content, expected) in REVIEWED_CONTRACT_FINGERPRINTS {
@@ -753,6 +760,7 @@ fn id_catalog_v3_preserves_v2_rows_and_adds_f4_v2_derivations() {
 #[test]
 fn f5_rng_catalog_v1_publishes_independent_blake3_and_chacha12_vectors() {
     assert!(F5_RNG_CATALOG.starts_with("# catalog_id=f5-rng-catalog-v1\n"));
+    assert!(F5_RNG_CATALOG_V2.starts_with("# catalog_id=f5-rng-catalog-v2\n"));
     let rows: Vec<_> = F5_RNG_CATALOG
         .lines()
         .filter(|line| !line.is_empty() && !line.starts_with('#'))

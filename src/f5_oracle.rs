@@ -15,14 +15,18 @@
 //!   rederiva `BLK_`, `SITE_`, `HAP_`, `FCP_` y `FHA_` desde las columnas
 //!   publicadas.
 //! - **Subsemillas DTC-089.** Reimplementa el material de subsemilla, el
-//!   ChaCha12 local, el rechazo por muestreo de `f5_uniform_index` y el U53 de
-//!   `f5_uniform_53`; se valida contra `catalogs/f5-rng-catalog-v1.tsv` y
-//!   rederiva **las tres decisiones cuyos componentes los bytes publican**: el
-//!   alelo alternativo de cada sitio (`site_alt`), su marginal objetivo
-//!   (`marginal_spectrum`) y su polaridad (`polarity`). Las demás —longitudes,
-//!   posiciones y huecos del layout, columnas iniciales, propuestas de
-//!   intercambio, muestreo fundador, F, desempates de cuota y permutación
-//!   controlada— no publican alguno de sus componentes y quedan fuera.
+//!   ChaCha12 local, el rechazo por muestreo de `f5_uniform_index`, el U53 de
+//!   `f5_uniform_53` y el muestreador de recuentos `poisson-count-v1`; se
+//!   valida contra `catalogs/f5-rng-catalog-v1.tsv` y
+//!   `catalogs/f5-rng-catalog-v2.tsv`, y rederiva **las cuatro decisiones cuyos
+//!   componentes los bytes publican**: el alelo alternativo de cada sitio
+//!   (`site_alt`), su marginal objetivo (`marginal_spectrum`), su polaridad
+//!   (`polarity`) y el recuento haplotípico de cada bloque×subpoblación
+//!   (`block_haplotype_count`, solo cuando el perfil declara su distribución).
+//!   Las demás —longitudes, posiciones y huecos del layout, columnas
+//!   iniciales, propuestas de intercambio, muestreo fundador, F, desempates de
+//!   cuota y permutación controlada— no publican alguno de sus componentes y
+//!   quedan fuera.
 //! - **Aritmética DTC-089.** Neumaier propio para `p_hat`, `p_hat_ij`, `D`,
 //!   `r²`, medias por bin y errores, con la misma agrupación literal que fija
 //!   la decisión, de modo que la comparación es bit a bit.
@@ -146,11 +150,22 @@ pub const F5_ORACLE_ALGORITHM: &str = "f5-acceptance-oracle-v1";
 pub const F5_MAN70_RECOUNT_SOURCE: &str = "outputs/truth.jsonl#f5-founder-truth-projection-v2";
 /// Catálogo de identidades del que salen los vectores congelados.
 pub const F5_ORACLE_ID_CATALOG: &str = "id-catalog-v4";
-/// Catálogo de subsemillas del que salen los vectores congelados.
+/// Catálogos de subsemillas de los que salen los vectores congelados.
+///
+/// Un paquete declara v1 o v2, y **cuál de los dos no es opcional**: v2
+/// exactamente cuando el perfil declara la distribución del recuento
+/// haplotípico, porque solo entonces puede abrirse `block_haplotype_count`.
+/// El oráculo valida los dos ficheros congelados antes de usar su propia
+/// criptografía, de modo que rederiva los trece vectores aunque el paquete
+/// que juzga use solo doce.
 pub const F5_ORACLE_RNG_CATALOG: &str = "f5-rng-catalog-v1";
+pub const F5_ORACLE_RNG_CATALOG_V2: &str = "f5-rng-catalog-v2";
 /// Decisiones exactas de `f5-rng-catalog-v1`: las tres que este módulo
 /// rederiva y las nueve que declara creídas.
 pub const F5_RNG_CATALOG_DECISIONS: usize = 12;
+/// Decisiones exactas de `f5-rng-catalog-v2`: las doce de v1 y
+/// `block_haplotype_count`, que este módulo también rederiva.
+pub const F5_RNG_CATALOG_V2_DECISIONS: usize = 13;
 /// Los nueve objetos fijos que `json_rows_bound` reserva al manifiesto.
 const F5_MANIFEST_FIXED_OBJECTS: u64 = 9;
 
@@ -163,6 +178,7 @@ const NOT_AVAILABLE: &str = "NA";
 
 const ID_CATALOG_TSV: &str = include_str!("../catalogs/id-catalog-v4.tsv");
 const RNG_CATALOG_TSV: &str = include_str!("../catalogs/f5-rng-catalog-v1.tsv");
+const RNG_CATALOG_V2_TSV: &str = include_str!("../catalogs/f5-rng-catalog-v2.tsv");
 
 const BLOCK_LAYOUT: usize = 0;
 const SITES: usize = 1;
@@ -469,6 +485,14 @@ pub struct F5PackageDeclaration {
     pub profile_id: String,
     pub profile_metadata_sha256: String,
     pub haplotype_weights: Vec<f64>,
+    /// Distribución del recuento haplotípico que el perfil declara, o `None`
+    /// cuando H es el número de pesos en todas las unidades.
+    pub haplotype_count_distribution: Option<F5DeclaredHaplotypeCountDistribution>,
+    /// H publicado de cada bloque×subpoblación, en el mismo orden canónico que
+    /// `sampling`. Solo se declara cuando hay distribución: el oráculo **no**
+    /// se lo cree, lo rederiva del ámbito `block_haplotype_count` y lo compara
+    /// contra esta lista y contra las filas de `f5-haplotypes.tsv`.
+    pub haplotype_counts: Vec<F5DeclaredHaplotypeCount>,
     pub snp_spectrum: Vec<F5DeclaredSpectrumBand>,
     pub subpopulations: Vec<F5DeclaredSubpopulation>,
     pub sampling: Vec<F5DeclaredSampling>,
@@ -485,6 +509,22 @@ pub struct F5PackageDeclaration {
     /// `layout_attempts_used` no es observable desde ningún TSV publicado y
     /// queda declarado.
     pub attempt_summary: F5DeclaredAttemptSummary,
+}
+
+/// Distribución declarada del recuento haplotípico por bloque.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct F5DeclaredHaplotypeCountDistribution {
+    pub lambda: f64,
+    pub minimum: u64,
+    pub maximum: u64,
+}
+
+/// Recuento haplotípico publicado de un bloque×subpoblación.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct F5DeclaredHaplotypeCount {
+    pub population_id: String,
+    pub block_id: String,
+    pub haplotype_count: u64,
 }
 
 /// `attempt_summary` declarado por el manifiesto.
@@ -1129,6 +1169,100 @@ impl SubseedOracle {
             "negative"
         })
     }
+
+    /// Recuento haplotípico de un bloque×subpoblación, rederivado.
+    ///
+    /// Reimplementa `poisson-count-v1` —inversión por producto de uniformes
+    /// bajo `lambda < 10` y el rechazo transformado de Hörmann por encima— y
+    /// pinza el resultado en `[h_min, h_max]`. Los tres componentes de la
+    /// decisión están publicados: `population_id` y `block_id` los trae cada
+    /// fila de `f5-haplotypes.tsv` y `scenario_id` la declaración.
+    ///
+    /// **Lo que esta rederivación ata son los recuentos, no la lambda.** El
+    /// oráculo no abre el perfil: recibe `lambda`, `h_min` y `h_max` de la
+    /// declaración y comprueba que los recuentos publicados salgan de ellos.
+    /// Como el pinzamiento destruye información —toda la masa fuera del
+    /// intervalo colapsa en sus extremos—, muchas lambdas distintas producen
+    /// los mismos recuentos y el oráculo las acepta todas. Cerrar esa frontera
+    /// exigiría releer el metadata del perfil, que es la misma concesión ya
+    /// declarada para la auditoría DTC-049, el espectro, los bins LD y los
+    /// pesos.
+    fn block_haplotype_count(
+        &self,
+        population_id: &str,
+        block_id: &str,
+        distribution: F5DeclaredHaplotypeCountDistribution,
+    ) -> Checked<u64> {
+        let components = vec![
+            ("scenario_id", self.scenario_id.clone()),
+            ("population_id", population_id.to_owned()),
+            ("block_id", block_id.to_owned()),
+            ("stage", "block_haplotype_count".to_owned()),
+        ];
+        let material = canonical_material(&self.root, &components)?;
+        let subseed = blake3::derive_key(SUBSEED_CONTEXT, &material);
+        let mut rng = ChaCha12Rng::from_seed(subseed);
+        let drawn = poisson_count(&mut rng, distribution.lambda).ok_or_else(|| {
+            catalog_reject("la lambda declarada no admite el muestreador de recuentos")
+        })?;
+        Ok(drawn.clamp(distribution.minimum, distribution.maximum))
+    }
+}
+
+/// Uniforme abierto de 52 bits que consume `poisson-count-v1`.
+fn open_unit(rng: &mut ChaCha12Rng) -> f64 {
+    (((rng.next_u64() >> 12) as f64) + 0.5) * (1.0 / 4_503_599_627_370_496.0)
+}
+
+/// Reimplementación de `poisson-count-v1` sin llamar al productor.
+///
+/// Devuelve `None` cuando la lambda no pertenece al dominio del muestreador.
+fn poisson_count(rng: &mut ChaCha12Rng, lambda: f64) -> Option<u64> {
+    const MAX_LAMBDA: f64 = 4_503_599_627_370_496.0;
+    if !lambda.is_finite() || !(0.0..=MAX_LAMBDA).contains(&lambda) {
+        return None;
+    }
+    if lambda == 0.0 {
+        return Some(0);
+    }
+    if lambda < 10.0 {
+        let threshold = libm::exp(-lambda);
+        let mut product = 1.0_f64;
+        let mut count = 0_u64;
+        loop {
+            product *= open_unit(rng);
+            if product <= threshold {
+                return Some(count);
+            }
+            count = count.checked_add(1)?;
+        }
+    }
+    let sqrt_lambda = libm::sqrt(lambda);
+    let b = 0.931 + 2.53 * sqrt_lambda;
+    let a = -0.059 + 0.02483 * b;
+    let inverse_alpha = 1.1239 + 1.1328 / (b - 3.4);
+    let vr = 0.9277 - 3.6224 / (b - 2.0);
+    let log_lambda = libm::log(lambda);
+    loop {
+        let u = open_unit(rng) - 0.5;
+        let v = open_unit(rng);
+        let us = 0.5 - u.abs();
+        let candidate = libm::floor((2.0 * a / us + b) * u + lambda + 0.43);
+        if !(0.0..=9_007_199_254_740_991.0).contains(&candidate) {
+            return None;
+        }
+        if us >= 0.07 && v <= vr {
+            return Some(candidate as u64);
+        }
+        if us < 0.013 && v > us {
+            continue;
+        }
+        let left = libm::log(v * inverse_alpha / (a / (us * us) + b));
+        let right = -lambda + candidate * log_lambda - libm::lgamma(candidate + 1.0);
+        if left <= right {
+            return Some(candidate as u64);
+        }
+    }
 }
 
 /// Entero uniforme en `0..n` con el rechazo por muestreo de DTC-089.
@@ -1154,10 +1288,16 @@ fn uniform_53(rng: &mut ChaCha12Rng) -> f64 {
     (rng.next_u64() >> 11) as f64 / FIFTY_THREE_BIT_BOUND as f64
 }
 
-/// Reproduce las subsemillas y las cuatro primeras palabras de cada decisión.
+/// Reproduce las subsemillas y las cuatro primeras palabras de cada decisión
+/// de los **dos** catálogos congelados.
 fn validate_rng_catalog() -> Checked<()> {
+    validate_frozen_rng_catalog(RNG_CATALOG_TSV, F5_RNG_CATALOG_DECISIONS)?;
+    validate_frozen_rng_catalog(RNG_CATALOG_V2_TSV, F5_RNG_CATALOG_V2_DECISIONS)
+}
+
+fn validate_frozen_rng_catalog(catalog: &str, expected_decisions: usize) -> Checked<()> {
     let mut seen = 0_usize;
-    for line in RNG_CATALOG_TSV.lines() {
+    for line in catalog.lines() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -1198,13 +1338,13 @@ fn validate_rng_catalog() -> Checked<()> {
             }
         }
     }
-    // El catálogo tiene **doce** filas y el reparto 3+9 de este módulo —tres
-    // rederivadas y nueve creídas— se sostiene sobre ellas. Exigir solo que no
-    // esté vacío dejaba al oráculo autovalidándose contra una sola decisión si
-    // el catálogo se recortaba.
-    if seen != F5_RNG_CATALOG_DECISIONS {
+    // El reparto de este módulo —las rederivadas y las creídas— se sostiene
+    // sobre un número exacto de filas. Exigir solo que no esté vacío dejaba al
+    // oráculo autovalidándose contra una sola decisión si el catálogo se
+    // recortaba.
+    if seen != expected_decisions {
         return Err(catalog_reject(format!(
-            "el catálogo RNG trae {seen} decisiones y el contrato fija {F5_RNG_CATALOG_DECISIONS}"
+            "el catálogo RNG trae {seen} decisiones y el contrato fija {expected_decisions}"
         )));
     }
     Ok(())
@@ -2913,6 +3053,10 @@ struct Unit {
     bits: Vec<u64>,
     words: usize,
     haplotypes: usize,
+    /// Pesos efectivos **de esta unidad**: el prefijo de rango del vector
+    /// declarado con la altura de su matriz, renormalizado por el propio
+    /// oráculo. Sin distribución declarada es el vector completo, literal.
+    weights: Vec<f64>,
     sites: usize,
     /// `attempt_index` de la fila `selected_best`.
     best_attempt: Option<u64>,
@@ -3221,6 +3365,7 @@ fn build_units(declaration: &F5PackageDeclaration, geometry: &Geometry) -> Vec<U
                 bits: Vec::new(),
                 words: 0,
                 haplotypes: 0,
+                weights: Vec::new(),
                 sites,
                 best_attempt: None,
                 best_counters: None,
@@ -3464,16 +3609,137 @@ fn read_attempts(
 }
 
 /// `f5-haplotypes.tsv`: rangos, `q`, `H*S` y la rederivación de cada `HAP_`.
+/// Pesos efectivos de un bloque con `haplotype_count` filas.
+///
+/// El oráculo los rehace con su propio Neumaier: toma el prefijo de rango del
+/// vector declarado y lo divide por su suma compensada. Con el vector
+/// completo no divide —el vector ya está normalizado y dividir movería sus
+/// últimos bits—, que es exactamente la regla que el productor aplica.
+fn oracle_block_weights(declared: &[f64], haplotype_count: usize) -> Checked<Vec<f64>> {
+    let path = F5_TSV_CONTRACTS[HAPLOTYPES].path();
+    if haplotype_count < 2 || haplotype_count > declared.len() {
+        return Err(reject(
+            F5OracleCause::Haplotype,
+            path,
+            "haplotype_rank",
+            format!(
+                "un bloque publica {haplotype_count} filas y el perfil declara {} pesos",
+                declared.len()
+            ),
+        ));
+    }
+    let prefix = &declared[..haplotype_count];
+    if haplotype_count == declared.len() {
+        return Ok(prefix.to_vec());
+    }
+    let total = neumaier_total(prefix.iter().copied());
+    if !total.is_finite() || total <= 0.0 {
+        return Err(reject(
+            F5OracleCause::Haplotype,
+            path,
+            "q",
+            format!("el prefijo de {haplotype_count} pesos suma {total}"),
+        ));
+    }
+    Ok(prefix.iter().map(|weight| *weight / total).collect())
+}
+
+/// Recuento haplotípico que **cada** unidad debe publicar.
+///
+/// Sin distribución declarada es el número de pesos del perfil, como siempre.
+/// Con distribución declarada se rederiva del ámbito `block_haplotype_count`
+/// y se contrasta contra la lista publicada: el oráculo no lee el H del
+/// paquete y se lo cree, lo sortea él y exige que coincidan los dos.
+fn expected_haplotype_counts(
+    declaration: &F5PackageDeclaration,
+    subseeds: &SubseedOracle,
+    units: &[Unit],
+) -> Checked<Vec<usize>> {
+    let path = F5_TSV_CONTRACTS[HAPLOTYPES].path();
+    let Some(distribution) = declaration.haplotype_count_distribution else {
+        if !declaration.haplotype_counts.is_empty() {
+            return Err(reject(
+                F5OracleCause::Haplotype,
+                path,
+                "haplotype_count",
+                "se publican recuentos haplotípicos sin declarar la distribución que los produce",
+            ));
+        }
+        return Ok(vec![declaration.haplotype_weights.len(); units.len()]);
+    };
+    if declaration.haplotype_counts.len() != units.len() {
+        return Err(reject(
+            F5OracleCause::Haplotype,
+            path,
+            "haplotype_count",
+            format!(
+                "se declaran {} recuentos haplotípicos y el paquete tiene {} unidades",
+                declaration.haplotype_counts.len(),
+                units.len()
+            ),
+        ));
+    }
+    let declared_by_unit: BTreeMap<(&str, &str), u64> = declaration
+        .haplotype_counts
+        .iter()
+        .map(|row| {
+            (
+                (row.population_id.as_str(), row.block_id.as_str()),
+                row.haplotype_count,
+            )
+        })
+        .collect();
+    let mut expected = Vec::with_capacity(units.len());
+    for unit in units {
+        let redrawn =
+            subseeds.block_haplotype_count(&unit.population_id, &unit.block_id, distribution)?;
+        let declared = *declared_by_unit
+            .get(&(unit.population_id.as_str(), unit.block_id.as_str()))
+            .ok_or_else(|| {
+                reject(
+                    F5OracleCause::Haplotype,
+                    path,
+                    "haplotype_count",
+                    format!(
+                        "no se declara recuento haplotípico para {}×{}",
+                        unit.population_id, unit.block_id
+                    ),
+                )
+            })?;
+        if declared != redrawn {
+            return Err(reject(
+                F5OracleCause::Haplotype,
+                path,
+                "haplotype_count",
+                format!(
+                    "{}×{} declara H={declared} y el ámbito block_haplotype_count sortea {redrawn}",
+                    unit.population_id, unit.block_id
+                ),
+            ));
+        }
+        expected.push(usize::try_from(redrawn).map_err(|_| {
+            reject(
+                F5OracleCause::Haplotype,
+                path,
+                "haplotype_count",
+                "el recuento haplotípico no cabe en usize",
+            )
+        })?);
+    }
+    Ok(expected)
+}
+
 fn read_haplotypes(
     payload_root: &Path,
     declaration: &F5PackageDeclaration,
     geometry: &Geometry,
     oracle: &IdOracle,
+    subseeds: &SubseedOracle,
     units: &mut [Unit],
 ) -> Checked<u64> {
     let path = F5_TSV_CONTRACTS[HAPLOTYPES].path();
-    let expected_weights = &declaration.haplotype_weights;
-    if expected_weights.is_empty() {
+    let declared_weights = &declaration.haplotype_weights;
+    if declared_weights.is_empty() {
         return Err(reject(
             F5OracleCause::Haplotype,
             path,
@@ -3481,7 +3747,7 @@ fn read_haplotypes(
             "la declaración no trae ningún peso haplotípico",
         ));
     }
-    let weights_total = neumaier_total(expected_weights.iter().copied());
+    let weights_total = neumaier_total(declared_weights.iter().copied());
     if (weights_total - 1.0).abs() > F5_PROFILE_NORMALIZATION_TOLERANCE {
         return Err(reject(
             F5OracleCause::Haplotype,
@@ -3489,6 +3755,10 @@ fn read_haplotypes(
             "q",
             format!("los pesos declarados suman {weights_total} y no 1"),
         ));
+    }
+    let expected_counts = expected_haplotype_counts(declaration, subseeds, units)?;
+    for (unit, count) in units.iter_mut().zip(expected_counts.iter().copied()) {
+        unit.weights = oracle_block_weights(declared_weights, count)?;
     }
     let mut cursor = TsvCursor::open(open_artifact(payload_root, path)?, HAPLOTYPES)?;
     let mut walk = UnitWalk::new(units.len());
@@ -3506,12 +3776,13 @@ fn read_haplotypes(
             index = next;
             let sites = units[index].sites;
             let words = sites.div_ceil(64).max(1);
+            let haplotypes = units[index].weights.len();
             units[index].words = words;
-            units[index].bits = vec![0; words * expected_weights.len()];
-            units[index].haplotypes = expected_weights.len();
+            units[index].bits = vec![0; words * haplotypes];
+            units[index].haplotypes = haplotypes;
         }
         let rank = cursor.u64(F5OracleCause::Haplotype, 3)?;
-        let unit = &mut units[index];
+        let unit = &units[index];
         if rank != unit.haplotype_ids.len() as u64 {
             return Err(reject(
                 F5OracleCause::Haplotype,
@@ -3528,12 +3799,12 @@ fn read_haplotypes(
                 "el rango no cabe en usize",
             )
         })?;
-        if position >= expected_weights.len() {
+        if position >= unit.weights.len() {
             return Err(reject(
                 F5OracleCause::Haplotype,
                 path,
                 "haplotype_rank",
-                "la unidad publica más filas que pesos declara el perfil",
+                "la unidad publica más filas que el recuento rederivado admite",
             ));
         }
         let q = cursor.f64(F5OracleCause::Haplotype, 4)?;
@@ -3545,14 +3816,14 @@ fn read_haplotypes(
                 format!("q={q} no pertenece a (0,1]"),
             ));
         }
-        if q != expected_weights[position] {
+        if q != unit.weights[position] {
             return Err(reject(
                 F5OracleCause::Haplotype,
                 path,
                 "q",
                 format!(
-                    "la unidad publica q={q} en el rango {rank} y el perfil efectivo declara {}",
-                    expected_weights[position]
+                    "la unidad publica q={q} en el rango {rank} y el prefijo renormalizado vale {}",
+                    unit.weights[position]
                 ),
             ));
         }
@@ -3588,17 +3859,17 @@ fn read_haplotypes(
     }
     walk.finish(F5OracleCause::Haplotype, path)?;
     for unit in units.iter() {
-        if unit.haplotype_ids.len() != expected_weights.len() {
+        if unit.haplotype_ids.len() != unit.weights.len() {
             return Err(reject(
                 F5OracleCause::Haplotype,
                 path,
                 "row",
                 format!(
-                    "la unidad {}×{} publica {} filas y el perfil declara {}",
+                    "la unidad {}×{} publica {} filas y el recuento rederivado es {}",
                     unit.population_id,
                     unit.block_id,
                     unit.haplotype_ids.len(),
-                    expected_weights.len()
+                    unit.weights.len()
                 ),
             ));
         }
@@ -3653,7 +3924,6 @@ fn read_frequencies(
     units: &mut [Unit],
 ) -> Checked<u64> {
     let path = F5_TSV_CONTRACTS[FREQUENCIES].path();
-    let weights = &declaration.haplotype_weights;
     let mut cursor = TsvCursor::open(open_artifact(payload_root, path)?, FREQUENCIES)?;
     let mut walk = UnitWalk::new(units.len());
     let mut index = usize::MAX;
@@ -3746,7 +4016,9 @@ fn read_frequencies(
                 ),
             ));
         }
-        let recomputed = realized_marginal(&units[index], weights, site_index);
+        // Los pesos son los de **esta** unidad: el prefijo renormalizado que
+        // `read_haplotypes` fijó al rederivar su recuento haplotípico.
+        let recomputed = realized_marginal(&units[index], &units[index].weights, site_index);
         if realized != recomputed {
             return Err(reject(
                 F5OracleCause::Marginal,
@@ -3927,7 +4199,6 @@ fn read_ld_evaluation(
     units: &[Unit],
 ) -> Checked<u64> {
     let path = F5_TSV_CONTRACTS[LD_EVALUATION].path();
-    let weights = &declaration.haplotype_weights;
     let mut cursor = TsvCursor::open(open_artifact(payload_root, path)?, LD_EVALUATION)?;
     let mut walk = UnitWalk::new(units.len());
     let mut index = usize::MAX;
@@ -3968,7 +4239,7 @@ fn read_ld_evaluation(
             let block_index = units[index].block_index as usize;
             recomputed = Some(recompute_ld(
                 &units[index],
-                weights,
+                &units[index].weights,
                 &geometry.sites[block_index],
                 &bins,
             ));
@@ -5028,7 +5299,14 @@ fn audit_sampling(
             }
             let tolerance_copies = effective * copies as f64;
             for (rank, count) in unit.rank_counts.iter().enumerate() {
-                let target = declaration.haplotype_weights[rank] * copies as f64;
+                let target = unit.weights.get(rank).copied().ok_or_else(|| {
+                    reject(
+                        F5OracleCause::Sampling,
+                        path,
+                        "quota",
+                        "la cuota nombra un rango que la unidad no publica",
+                    )
+                })? * copies as f64;
                 if (*count as f64 - target).abs() > tolerance_copies {
                     return Err(reject(
                         F5OracleCause::Sampling,
@@ -5357,15 +5635,24 @@ pub fn audit_f5_package(
     payload_root: &Path,
     declaration: &F5PackageDeclaration,
 ) -> Checked<F5OracleReport> {
+    // El catálogo RNG no es una preferencia del publicador: v2 exactamente
+    // cuando hay distribución declarada, v1 exactamente cuando no la hay. Un
+    // paquete que sortease recuentos y publicase v1 —o al revés— describiría
+    // mal el espacio de decisiones del que salen sus bytes.
+    let expected_rng_catalog = if declaration.haplotype_count_distribution.is_some() {
+        F5_ORACLE_RNG_CATALOG_V2
+    } else {
+        F5_ORACLE_RNG_CATALOG
+    };
     if declaration.id_catalog_id != F5_ORACLE_ID_CATALOG
-        || declaration.rng_catalog_id != F5_ORACLE_RNG_CATALOG
+        || declaration.rng_catalog_id != expected_rng_catalog
     {
         return Err(reject(
             F5OracleCause::Randomness,
             "effective-config.json#/f5",
             "id_catalog,rng_catalog",
             format!(
-                "se declaran {}/{} y los catálogos vigentes son {F5_ORACLE_ID_CATALOG}/{F5_ORACLE_RNG_CATALOG}",
+                "se declaran {}/{} y los catálogos vigentes son {F5_ORACLE_ID_CATALOG}/{expected_rng_catalog}",
                 declaration.id_catalog_id, declaration.rng_catalog_id
             ),
         ));
@@ -5413,7 +5700,14 @@ pub fn audit_f5_package(
     let by_id = sites_by_id(&geometry);
     let mut units = build_units(declaration, &geometry);
     let attempt_rows = read_attempts(payload_root, declaration, &geometry, &mut units)?;
-    let haplotype_rows = read_haplotypes(payload_root, declaration, &geometry, &ids, &mut units)?;
+    let haplotype_rows = read_haplotypes(
+        payload_root,
+        declaration,
+        &geometry,
+        &ids,
+        &subseeds,
+        &mut units,
+    )?;
     // Los contadores del mejor intento que solo dependen de la matriz se
     // comprueban aquí; los que dependen de los bins, al cerrar cada unidad LD.
     for unit in &units {
@@ -5956,6 +6250,7 @@ mod tests {
             bits: Vec::new(),
             words: 1,
             haplotypes,
+            weights: vec![1.0 / haplotypes as f64; haplotypes],
             sites: 0,
             best_attempt: None,
             best_counters: None,

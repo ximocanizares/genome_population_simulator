@@ -264,6 +264,61 @@
             "$ref": "effective-config-v5.schema.json#/$defs/normalization"
           }
         },
+        "haplotype_count_distribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "algorithm",
+            "lambda",
+            "h_min",
+            "h_max"
+          ],
+          "properties": {
+            "algorithm": {
+              "const": "poisson-count-v1"
+            },
+            "lambda": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 4503599627370496
+            },
+            "h_min": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 4096
+            },
+            "h_max": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 4096
+            }
+          }
+        },
+        "haplotype_counts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "population_id",
+              "block_id",
+              "haplotype_count"
+            ],
+            "properties": {
+              "population_id": {
+                "$ref": "#/$defs/id"
+              },
+              "block_id": {
+                "$ref": "#/$defs/id"
+              },
+              "haplotype_count": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 4096
+              }
+            }
+          }
+        },
         "attempt_summary": {
           "type": "object",
           "additionalProperties": false,

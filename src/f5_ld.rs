@@ -51,7 +51,9 @@ use std::fmt;
 
 use crate::application::EffectiveF5Config;
 use crate::diagnostics::Diagnostic;
-use crate::f5_haplotypes::{F5AlleleMatrix, F5BlockHaplotypes, F5HaplotypeAttempt};
+use crate::f5_haplotypes::{
+    F5AlleleMatrix, F5BlockHaplotypes, F5HaplotypeAttempt, f5_block_haplotype_weights,
+};
 use crate::f5_layout::{F5LayoutBlock, F5PhysicalLayout};
 use crate::f5_marginals::{F5RowVisits, NeumaierSum};
 use crate::f5_profile::LdBin;
@@ -634,7 +636,6 @@ pub fn evaluate_f5_linkage_disequilibrium(
 ) -> Result<F5LdEvaluation, Diagnostic> {
     let scenario_id = config.scenario_id();
     let scenario_path = config.scenario_path().display().to_string();
-    let weights = config.profile().haplotype_weights();
     let foreign = |detail: &'static str| {
         Diagnostic::f5_configuration(scenario_path.clone(), "layout.identity", detail)
     };
@@ -661,10 +662,11 @@ pub fn evaluate_f5_linkage_disequilibrium(
                     "el perfil no declara bins LD para la subpoblación del intento",
                 )
             })?;
+        let weights = block_effective_weights(config, block)?;
         blocks.push(evaluate_block(
             scenario_id,
             &foreign,
-            weights,
+            &weights,
             bins,
             layout_block,
             block,
@@ -737,16 +739,41 @@ pub(crate) fn evaluate_f5_block_with_pair_verdicts(
                 "el perfil no declara bins LD para la subpoblación del intento",
             )
         })?;
+    let weights = block_effective_weights(config, block)?;
     evaluate_block(
         config.scenario_id(),
         &foreign,
-        config.profile().haplotype_weights(),
+        &weights,
         bins,
         layout_block,
         block,
         verdicts,
         visits,
     )
+}
+
+/// Pesos efectivos del bloque: el prefijo de rango del vector declarado con la
+/// altura que la propia matriz publica, renormalizado.
+///
+/// El evaluador no vuelve a sortear H: lo lee de la matriz construida, que es
+/// la misma altura que el paquete publica. Si esa altura no fuera un prefijo
+/// legítimo del vector del perfil, [`f5_block_haplotype_weights`] lo rechaza
+/// aquí en vez de evaluar un LD sobre pesos que no suman uno.
+fn block_effective_weights(
+    config: &EffectiveF5Config,
+    block: &F5BlockHaplotypes,
+) -> Result<Vec<f64>, Diagnostic> {
+    f5_block_haplotype_weights(
+        config.profile().haplotype_weights(),
+        block.matrix().haplotype_count(),
+    )
+    .map_err(|detail| {
+        Diagnostic::f5_configuration(
+            config.scenario_path().display().to_string(),
+            "profile.haplotype_weights",
+            format!("bloque {}: {detail}", block.block_id().as_str()),
+        )
+    })
 }
 
 #[expect(

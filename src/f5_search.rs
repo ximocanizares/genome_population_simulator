@@ -174,8 +174,8 @@ use sha2::{Digest, Sha256};
 use crate::application::EffectiveF5Config;
 use crate::diagnostics::Diagnostic;
 use crate::f5_haplotypes::{
-    F5AlleleMatrix, F5BlockHaplotypes, build_f5_block_attempt, ensure_f5_haplotype_cardinality,
-    is_fixed_target,
+    F5AlleleMatrix, F5BlockHaplotypes, build_f5_block_attempt_with_weights,
+    ensure_f5_haplotype_cardinality, is_fixed_target, resolve_f5_block_weights,
 };
 use crate::f5_layout::{F5LayoutBlock, F5PhysicalLayout};
 use crate::f5_ld::{
@@ -560,7 +560,6 @@ pub fn search_f5_haplotypes(
     })?;
 
     let marginals = build_f5_marginals(config, sealed, execution_id, layout)?;
-    let weights = config.profile().haplotype_weights();
 
     // Las dos comprobaciones previas de DTC-089, antes de abrir ningún intento
     // y, por tanto, antes de fundadores. El orden importa: un bloque sin
@@ -570,6 +569,18 @@ pub fn search_f5_haplotypes(
     // cardinalidad cuando el problema es que no hay variación que medir.
     ensure_some_pair_can_be_evaluable(&scenario_id, &marginals)?;
     ensure_f5_haplotype_cardinality(config, &marginals)?;
+
+    // Pesos efectivos de cada bloque×subpoblación, resueltos **una sola vez**
+    // —después de las dos cotas de cardinalidad, que ya se comprobaron con
+    // `h_max`, y antes de abrir ningún intento— y reutilizados por todos los
+    // intentos de la unidad. H es una dimensión de la unidad y no del intento:
+    // su ámbito no lleva `attempt_index`, de modo que resolverlo dentro del
+    // constructor daría el mismo vector y pagaría una derivación de subsemilla
+    // y un muestreo Poisson por intento. El mismo vector alimenta la
+    // construcción, el bucle de propuestas y el evaluador LD, así que no hay
+    // dos fuentes de verdad que puedan divergir. Sin distribución declarada
+    // cada vector es el del perfil, literal y sin abrir ningún ámbito.
+    let block_weights = resolve_f5_block_weights(config, &marginals)?;
 
     let scenario = config.declared_scenario();
     let max_attempts = scenario
@@ -597,6 +608,15 @@ pub fn search_f5_haplotypes(
                     "layout.identity",
                     "los marginales nombran un bloque que este layout no contiene",
                 )
+            })?;
+        let weights = block_weights
+            .get(block_ordinal)
+            .ok_or_else(|| F5SearchFailure {
+                diagnostic: Box::new(Diagnostic::f5_internal(
+                    scenario_id.as_str(),
+                    "los pesos por bloque no acompañan a la tabla de marginales",
+                )),
+                records: records.clone(),
             })?;
         let unit = search_block(
             config,
@@ -874,7 +894,13 @@ fn search_block(
     for attempt_index in 0..max_attempts {
         attempts_executed += 1;
         let mut visits = F5RowVisits::default();
-        let mut block = build_f5_block_attempt(config, marginals, block_ordinal, attempt_index)?;
+        let mut block = build_f5_block_attempt_with_weights(
+            config,
+            marginals,
+            block_ordinal,
+            attempt_index,
+            weights,
+        )?;
         let (measure, state) = refine_block(
             scenario_id,
             root_seed,

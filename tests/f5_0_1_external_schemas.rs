@@ -654,10 +654,52 @@ fn externally_validates_general_scenario_and_profile_in_isolated_bundles() {
     });
     let mut invalid_profile = profile.clone();
     invalid_profile["files"][0]["path"] = json!("snp_gaps.tsv");
+    // Un metadata v1 con la distribución del recuento haplotípico no es v1: su
+    // conjunto de claves es cerrado y el validador externo tiene que decirlo.
+    let mut v1_with_distribution = profile.clone();
+    v1_with_distribution["haplotype_count_distribution"] =
+        json!({"algorithm": "poisson-count-v1", "lambda": 3.0, "h_min": 2, "h_max": 4});
     assert_external_cases(
         "profile-metadata-f5-v1.schema.json",
         &[],
-        vec![(profile, true), (invalid_profile, false)],
+        vec![
+            (profile.clone(), true),
+            (invalid_profile, false),
+            (v1_with_distribution.clone(), false),
+        ],
+    );
+
+    let mut v2 = v1_with_distribution;
+    v2["schema_version"] = json!("2");
+    let mut v2_without_distribution = v2.clone();
+    v2_without_distribution
+        .as_object_mut()
+        .expect("objeto")
+        .remove("haplotype_count_distribution");
+    let mut v2_with_h_min_below_two = v2.clone();
+    v2_with_h_min_below_two["haplotype_count_distribution"]["h_min"] = json!(1);
+    let mut v2_with_foreign_sampler = v2.clone();
+    v2_with_foreign_sampler["haplotype_count_distribution"]["algorithm"] = json!("other-v1");
+    // `2^52` es el techo de `poisson-count-v1` en DTC-067: el esquema lo
+    // admite y rechaza el siguiente `f64` representable por encima.
+    let mut v2_at_lambda_ceiling = v2.clone();
+    v2_at_lambda_ceiling["haplotype_count_distribution"]["lambda"] =
+        json!(4_503_599_627_370_496_f64);
+    let mut v2_above_lambda_ceiling = v2.clone();
+    v2_above_lambda_ceiling["haplotype_count_distribution"]["lambda"] =
+        json!(4_503_599_627_371_520_f64);
+    assert_external_cases(
+        "profile-metadata-f5-v2.schema.json",
+        &[],
+        vec![
+            (v2, true),
+            (profile, false),
+            (v2_without_distribution, false),
+            (v2_with_h_min_below_two, false),
+            (v2_with_foreign_sampler, false),
+            (v2_at_lambda_ceiling, true),
+            (v2_above_lambda_ceiling, false),
+        ],
     );
 }
 

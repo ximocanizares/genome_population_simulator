@@ -1054,7 +1054,7 @@ metadata, sin `..`; `sha256` son 64 hex minúsculas y los cinco paths son único
 | `block_lengths.tsv` / `f5_block_length_profile` | `length_min_bp\tlength_max_bp\tweight` | enteros `2<=min<=max`; intervalos disjuntos cuya unión es continua; peso finito `>0` |
 | `snp_gaps.tsv` / `f5_snp_gap_profile` | `gap_min_bp\tgap_max_bp\tweight` | enteros `1<=min<=max`; intervalos disjuntos; peso finito `>0` |
 | `snp_spectrum.tsv` / `f5_snp_spectrum` | `alt_af_min\talt_af_max\tweight` | `f64` finitos `0<=min<=max<=1`; intervalos disjuntos; peso finito `>0` |
-| `haplotype_weights.tsv` / `f5_haplotype_weights` | `haplotype_rank\tweight` | rangos decimales consecutivos `0..H-1`, `2<=H<=4096`; peso finito `>0` |
+| `haplotype_weights.tsv` / `f5_haplotype_weights` | `haplotype_rank\tweight` | rangos decimales consecutivos `0..h_max-1`, `2<=h_max<=4096`; peso finito `>0` |
 | `ld_profile.tsv` / `f5_ld_profile` | `population_profile_id\tdistance_start_bp\tdistance_end_bp\ttarget_mean_r2\tmax_abs_error` | IDs DTC-039; bins cerrados contiguos desde 1, objetivos `[0,1]`; `max_abs_error` es exactamente `0.05` en v1 |
 
 Todos los TSV usan UTF-8 sin BOM, tabulador, LF final, cabecera única, campos no
@@ -1186,11 +1186,72 @@ minimiza `|p_hat_i-p_i|`; un empate usa el prefijo anterior. `p_i=0/1` crea una
 columna constante sin RNG. Por construcción
 `marginal_max_abs_error=max_h(q_h)` y se exige
 `|p_hat_i-p_i|<=marginal_max_abs_error`; con pesos uniformes equivale a `1/H`.
-La única cota marginal activa es `max_h(q_h)`. Antes de sortear marginales se exige `H<=2^S` —para S>=12
-queda implícito por H<=4096—; después, con V columnas cuyo objetivo no es 0/1,
-se exige además `H<=2^V`. Incumplir cualquiera devuelve `GPS-DOMAIN-105`; la
-segunda comprobación ocurre tras esos sorteos pero antes de abrir un intento
-haplotípico. Dos filas con el mismo vector alélico son un duplicado inválido:
+La única cota marginal activa es `max_h(q_h)`, y es **por bloque**: cuando H
+varía entre bloques los pesos efectivos de cada uno son distintos y su máximo
+también, de modo que cada fila publica su propia cota y la verifica contra sus
+propias columnas.
+
+Antes de sortear marginales se exige `h_max<=2^S` —para S>=12
+queda implícito por `h_max<=4096`—; después, con V columnas cuyo objetivo no es
+0/1, se exige además `h_max<=2^V`. Incumplir cualquiera devuelve
+`GPS-DOMAIN-105`; la segunda comprobación ocurre tras esos sorteos pero antes de
+abrir un intento haplotípico y **antes de sortear ningún recuento
+haplotípico**. Las dos cotas usan `h_max` y no el H de ningún bloque: con la
+cota superior el veredicto de admisión no puede depender de un sorteo, y por
+tanto un mismo escenario no puede resultar válido con una semilla e inválido
+con otra. El constructor repite la comprobación con el H realmente construido,
+pero solo como red: la cota superior ya la implica.
+
+#### Recuento haplotípico por bloque
+
+`H` es por omisión el número de filas de `haplotype_weights.tsv`, igual en
+todas las unidades. Un perfil con metadata `schema_version="2"` declara además
+un objeto cerrado `haplotype_count_distribution` con
+`algorithm="poisson-count-v1"`, `lambda` finita en `(0, 2^52]` —el dominio que
+DTC-067 fija para ese muestreador, y cuyo extremo superior se rechaza **antes
+de consumir RNG**, en el lector del perfil—, `h_min` y `h_max`,
+y entonces **cada** bloque×subpoblación sortea su H abriendo el ámbito
+`block_haplotype_count`, muestreando `Poisson(lambda)` y **pinzando** el
+resultado en `[h_min, h_max]`.
+
+La versión del metadata decide el conjunto cerrado de claves: una v1 con la
+clave se rechaza y una v2 sin ella también, de modo que ningún perfil heredado
+puede adquirir una distribución por descuido. Los límites son los mismos que ya
+impone la tabla de pesos: `2<=h_min<=h_max<=4096`. La tabla de pesos **es** el
+vector de tamaño `h_max`: se exige que traiga exactamente `h_max` filas.
+
+Los pesos efectivos de un bloque con H haplotipos son los `H` primeros pesos
+declarados **por rango**, renormalizados por su suma compensada. Cuando `H`
+coincide con el tamaño declarado el vector se usa literal, sin dividir: el
+perfil ya lo normalizó bajo DTC-049 y dividirlo por una suma compensada que no
+vale exactamente uno movería el último bit de cada `q`. No hay un segundo
+objeto aleatorio que sortear ni publicar.
+
+El truncamiento es por pinzamiento y no por rechazo con reintentos porque el
+rechazo no acota el número de sorteos y el presupuesto de operaciones sí. La
+consecuencia estadística está declarada: el pinzamiento acumula en los extremos
+toda la masa que la Poisson deja fuera del intervalo —`P(H=h_min)` vale
+`P(N<=h_min)` y `P(H=h_max)` vale `P(N>=h_max)`—, de modo que un perfil que
+quiera una cola superior rara debe elegir `lambda` holgadamente por debajo de
+`h_max`.
+
+El oráculo independiente rederiva ese sorteo con su propia reimplementación
+de `poisson-count-v1`. Queda dicho que esa reimplementación es una
+**transcripción literal** del muestreador productor —mismas constantes, mismas
+ramas, mismo consumo—, de modo que no aporta independencia algebraica: una
+constante mal transcrita se habría copiado igual. La independencia del
+muestreador viene de donde ya venía, DTC-067: los vectores congelados de
+`src/randomness.rs` y el oráculo ajeno de `tests/f2_rng.rs`, que no comparten
+código con el productor. Lo que el oráculo F5 sí aporta por su cuenta es el
+material de subsemilla, el ChaCha12 y la comparación contra los bytes
+publicados.
+
+El H de cada bloque se publica explícito en `manifest.json` como
+`/f5/haplotype_counts`, junto a `/f5/haplotype_count_distribution`; las dos
+claves existen o faltan juntas y solo aparecen cuando el perfil declara la
+distribución. Aunque el H sea recontable desde `f5-haplotypes.tsv`, publicarlo
+permite que el oráculo compare su propio sorteo contra una cifra declarada en
+vez de reconstruirla. Dos filas con el mismo vector alélico son un duplicado inválido:
 participan en la puntuación,
 deben desaparecer mediante swaps y nunca se fusionan ni suman silenciosamente.
 
@@ -1332,7 +1393,8 @@ Antes del primer consumo RNG v8 calcula con enteros comprobados y nombres
 dimensionalmente distintos:
 
 - `B`, número exacto de bloques resuelto desde el objetivo; `N_pop`, número de
-  subpoblaciones; `H`, filas de `haplotype_weights.tsv`; `A`, `Q` y `L`, los
+  subpoblaciones; `H`, filas de `haplotype_weights.tsv`, que es a la vez `h_max`
+  porque el lector exige esa igualdad; `A`, `Q` y `L`, los
   tres límites de intentos/propuestas; `C_total=founder_count*ploidy`;
 - `L_max`, mayor longitud admitida; `gap_min`, menor gap admitido, y
   `S_bound=1+floor((L_max-1)/gap_min)`. Esta es la cota de sitios de cualquier
@@ -1373,12 +1435,18 @@ dimensionalmente distintos:
   individual permanece en `input_identities`;
 - `X=C_total*sequence_count`, número de copias por secuencia, y
   `G_bound=founder_count*K_bound`, número máximo de genotipos SNP;
-- `haplotype_rows_bound=B*N_pop*H`, filas de `f5-haplotypes.tsv`, y
+- `haplotype_rows_bound=B*N_pop*h_max`, filas de `f5-haplotypes.tsv`, y
   `site_summary_rows_bound=B*N_pop*S_bound`, resúmenes por sitio. Son las dos
   únicas clases de registro cuyo ancho depende de una dimensión declarada y no
   de una longitud fija del contrato, de modo que un sobre constante no puede
   acotarlas. No son escalares publicados nuevos: se recomputan exactamente como
-  `tsv_rows_bound` y `json_rows_bound`, de los que ya son sumandos.
+  `tsv_rows_bound` y `json_rows_bound`, de los que ya son sumandos. El
+  presupuesto se deriva **sin ejecutar nada**, de modo que el preflight no
+  puede conocer el H de ningún bloque: contabiliza `h_max`, que domina
+  cualquier sorteo. Con distribución declarada la cota deja holgura —un bloque
+  pinzado a `h_min` publica menos filas de las contabilizadas— y sigue siendo
+  cota superior. La fórmula no cambia: `H` ya vale `h_max` por la igualdad que
+  el lector del perfil exige entre el número de pesos y `h_max`.
 
 La cota de filas de los siete TSV es
 `tsv_rows_bound=B+K_bound+B*N_pop*H+B*N_pop*S_bound+
@@ -1730,7 +1798,9 @@ codificación DTC-039. Antes de F5.1 publica por cada clase al menos un vector
 completo con componentes, material binario codificado, digest BLAKE3 de 32
 bytes, primeros 128 bits, Base32 y ID final prefijado.
 
-`f5-rng-catalog-v1` usa DTC-037/ChaCha12 y exactamente estos ámbitos:
+`f5-rng-catalog-v1` usa DTC-037/ChaCha12 y exactamente estos ámbitos;
+`f5-rng-catalog-v2` conserva los doce literales y añade el decimotercero,
+`block_haplotype_count`:
 
 | decisión | componentes adicionales en orden | sal |
 |---|---|---|
@@ -1746,6 +1816,19 @@ bytes, primeros 128 bits, Base32 y ID final prefijado.
 | `founder_f` | `scenario_id`, `population_id`, `block_id`, `individual_id`, `stage` | vacía |
 | `controlled_quota_tie` | `scenario_id`, `population_id`, `block_id`, `stage` | vacía; un flujo secuencial por bloque |
 | `founder_controlled_permutation` | `scenario_id`, `population_id`, `block_id`, `stage` | vacía |
+| `block_haplotype_count` | `scenario_id`, `population_id`, `block_id`, `stage` | vacía; solo en v2 |
+
+`block_haplotype_count` **no** lleva `attempt_index_u64`: H es una dimensión de
+la unidad, no del intento, y un H que cambiara entre intentos daría matrices de
+alturas distintas para el mismo bloque×subpoblación, con lo que ningún rango
+haplotípico sería estable para los fundadores ni para los artefactos.
+
+Una ejecución publica el catálogo del que salen **sus** decisiones, no el más
+alto que el binario implemente: un perfil que no declara la distribución del
+recuento haplotípico no puede abrir `block_haplotype_count` y publica
+`f5-rng-catalog-v1`, con su ruta, su tamaño y su huella intactos. Es lo que
+mantiene byte a byte el `manifest.json` y el `effective-config.json` de todos
+los paquetes anteriores a esa ampliación.
 
 `stage` es literalmente el nombre de decisión de la primera columna. Los
 enteros de componente y sal son decimales canónicos UTF-8 dentro de DTC-037.
@@ -1774,7 +1857,9 @@ por sitio posterior al primero; `swap_proposal`, los cuatro enteros ya
 enumerados por propuesta; `founder_sample`, un U53 por muestreo independiente;
 `founder_f`, un U53 solo para 0<F<1; y la permutación controlada, C−1 enteros.
 `controlled_quota_tie` consume g−1 enteros solo para el único grupo de tamaño g
-que cruza la frontera. Una elección con una sola alternativa no consume RNG.
+que cruza la frontera. `block_haplotype_count` consume un único muestreo
+`poisson-count-v1` por bloque×subpoblación, y solo si el perfil declara la
+distribución. Una elección con una sola alternativa no consume RNG.
 El catálogo debe publicar al menos un vector completo por fila —material
 codificado, subsemilla y primeras cuatro palabras `u64`— antes de F5.1.
 

@@ -2205,7 +2205,20 @@ muestra. Estos ámbitos deben identificarse siempre de forma explícita.
   fundadores; las marginales realizadas y el LD deben poder reconstruirse desde
   ella. El modo probabilístico debe muestrear esos pesos y el modo controlado
   debe fijar recuentos enteros factibles que sumen el número de copias C sin
-  modificar la tabla ni sus pesos.
+  modificar la tabla ni sus pesos. El número de haplotipos H de esa
+  distribución debe poder variar entre bloques, para que la diversidad
+  haplotípica cambie entre regiones genómicas como cambia en la realidad. La
+  variación es opcional y se declara en el perfil, nunca en el escenario: sin
+  declaración, H es el número de pesos declarados y es el mismo en todas las
+  unidades. Cuando se declara, el perfil fija una distribución de Poisson
+  truncada por `lambda`, `h_min` y `h_max`, cada bloque×subpoblación sortea su
+  H con la semilla de la ejecución y el resultado se pinza en `[h_min, h_max]`.
+  Los pesos de un bloque son los `H` primeros pesos declarados por rango,
+  renormalizados; no existe un segundo objeto aleatorio. La contabilidad de
+  recursos y las dos cotas de cardinalidad deben derivarse de `h_max`, de modo
+  que la admisión de un escenario no pueda depender del sorteo. El H de cada
+  bloque debe publicarse explícito y un validador independiente debe poder
+  rederivarlo, no leerlo.
 - **REQ-EVO-41.** Los bloques de LD de una misma subpoblación no deben
   solaparse. El sistema debe rechazar antes de simular dos bloques que compartan
   cualquier variante. F5 no genera variantes fuera de sus bloques ni absorbe

@@ -29,8 +29,9 @@ use genome_population_simulator::f5_layout::{
     F5LayoutRequest, F5PhysicalLayout, build_f5_physical_layout,
 };
 use genome_population_simulator::f5_oracle::{
-    F5_RNG_CATALOG_DECISIONS, F5DeclaredAttemptSummary, F5DeclaredBounds, F5DeclaredLdBin,
-    F5DeclaredLink, F5DeclaredMode, F5DeclaredRealizedF, F5DeclaredSampling,
+    F5_RNG_CATALOG_DECISIONS, F5_RNG_CATALOG_V2_DECISIONS, F5DeclaredAttemptSummary,
+    F5DeclaredBounds, F5DeclaredHaplotypeCount, F5DeclaredHaplotypeCountDistribution,
+    F5DeclaredLdBin, F5DeclaredLink, F5DeclaredMode, F5DeclaredRealizedF, F5DeclaredSampling,
     F5DeclaredSpectrumBand, F5DeclaredSubpopulation, F5DeclaredTruthLink, F5GenotypeModel,
     F5OracleCause, F5PackageDeclaration, audit_f5_package, recount_f5_man70,
 };
@@ -130,6 +131,9 @@ struct Fixture<'a> {
     seed: &'a str,
     slack: u64,
     scenario_inbreeding: Option<&'a str>,
+    /// `(lambda, h_min, h_max)` de la distribución del recuento haplotípico.
+    /// `None` escribe un metadata v1 idéntico al de antes de esta ampliación.
+    haplotype_count_distribution: Option<(&'a str, u64, u64)>,
 }
 
 impl Default for Fixture<'_> {
@@ -151,6 +155,7 @@ impl Default for Fixture<'_> {
             seed: SEED,
             slack: 1,
             scenario_inbreeding: None,
+            haplotype_count_distribution: None,
         }
     }
 }
@@ -220,9 +225,14 @@ impl Fixture<'_> {
             })
             .collect::<Vec<_>>()
             .join(",");
-        let metadata = format!(
-            r#"{{"profile_kind":"f5_generation_profile","schema_version":"1","profile_id":"profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"files":[{links}]}}"#
-        );
+        let metadata = match self.haplotype_count_distribution {
+            None => format!(
+                r#"{{"profile_kind":"f5_generation_profile","schema_version":"1","profile_id":"profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"files":[{links}]}}"#
+            ),
+            Some((lambda, minimum, maximum)) => format!(
+                r#"{{"profile_kind":"f5_generation_profile","schema_version":"2","profile_id":"profile","provenance_kind":"user_supplied","source_citation":"test","source_license":null,"source_sha256":null,"haplotype_count_distribution":{{"algorithm":"poisson-count-v1","lambda":{lambda},"h_min":{minimum},"h_max":{maximum}}},"files":[{links}]}}"#
+            ),
+        };
         fs::write(profile_directory.join("profile.metadata.json"), &metadata).expect("metadata");
 
         let bases = b"ACGT";
@@ -481,6 +491,31 @@ fn declared_mode(mode: F5SamplingMode) -> F5DeclaredMode {
 ///
 /// El oráculo no recibe ninguna de estas estructuras: recibe sus cifras, y las
 /// contrasta contra los bytes.
+/// H publicado de cada bloque×subpoblación, en el orden canónico
+/// `(population_id, block_id)`; vacío cuando el perfil no declara la
+/// distribución, que es lo que el oráculo exige en ese caso.
+fn declared_haplotype_counts(
+    profile: &genome_population_simulator::f5_profile::F5Profile,
+    search: &F5HaplotypeSearch,
+) -> Vec<F5DeclaredHaplotypeCount> {
+    if profile.haplotype_count_distribution().is_none() {
+        return Vec::new();
+    }
+    let mut rows = search
+        .blocks()
+        .iter()
+        .map(|block| F5DeclaredHaplotypeCount {
+            population_id: block.population_id().as_str().to_owned(),
+            block_id: block.block_id().as_str().to_owned(),
+            haplotype_count: block.matrix().haplotype_count() as u64,
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        (&left.population_id, &left.block_id).cmp(&(&right.population_id, &right.block_id))
+    });
+    rows
+}
+
 fn declaration_for(published: &Published) -> F5PackageDeclaration {
     let chain = &published.chain;
     let config = &chain.config;
@@ -568,6 +603,14 @@ fn declaration_for(published: &Published) -> F5PackageDeclaration {
         profile_id: sealed.profile_id().to_owned(),
         profile_metadata_sha256: sealed.profile_metadata_sha256().to_owned(),
         haplotype_weights: profile.haplotype_weights().to_vec(),
+        haplotype_count_distribution: profile.haplotype_count_distribution().map(|distribution| {
+            F5DeclaredHaplotypeCountDistribution {
+                lambda: distribution.lambda(),
+                minimum: distribution.minimum(),
+                maximum: distribution.maximum(),
+            }
+        }),
+        haplotype_counts: declared_haplotype_counts(profile, &chain.search),
         snp_spectrum: profile
             .snp_spectrum()
             .iter()
@@ -2660,20 +2703,28 @@ fn a_bin_whose_error_exceeds_its_tolerance_is_refused() {
     assert_eq!(staged.audit(), Err(F5OracleCause::LinkageDisequilibrium));
 }
 
-/// El catálogo RNG publicado tiene las doce decisiones que el oráculo exige.
+/// Los dos catálogos RNG publicados tienen las decisiones que el oráculo
+/// exige.
 ///
 /// `validate_rng_catalog` cerraba con `seen == 0`, de modo que un catálogo
 /// recortado a una fila dejaba al oráculo autovalidándose contra una sola
-/// decisión mientras su reparto 3+9 —tres rederivadas, nueve declaradas
-/// creídas— seguía escrito sobre doce. La constante y el fichero se contrastan
-/// aquí: si alguien añade o quita una fila sin tocar la cifra, esto muere.
+/// decisión mientras su reparto —las rederivadas y las creídas— seguía escrito
+/// sobre doce. Las constantes y los ficheros se contrastan aquí: si alguien
+/// añade o quita una fila sin tocar la cifra, esto muere.
 #[test]
-fn the_published_rng_catalogue_has_the_twelve_decisions_the_oracle_demands() {
-    const CATALOG: &str = include_str!("../catalogs/f5-rng-catalog-v1.tsv");
-    let rows = CATALOG
-        .lines()
-        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with("decision"))
-        .count();
-    assert_eq!(rows, F5_RNG_CATALOG_DECISIONS);
+fn the_published_rng_catalogues_have_the_decisions_the_oracle_demands() {
+    const V1: &str = include_str!("../catalogs/f5-rng-catalog-v1.tsv");
+    const V2: &str = include_str!("../catalogs/f5-rng-catalog-v2.tsv");
+    let rows = |catalog: &str| {
+        catalog
+            .lines()
+            .filter(|line| {
+                !line.is_empty() && !line.starts_with('#') && !line.starts_with("decision")
+            })
+            .count()
+    };
+    assert_eq!(rows(V1), F5_RNG_CATALOG_DECISIONS);
     assert_eq!(F5_RNG_CATALOG_DECISIONS, 12);
+    assert_eq!(rows(V2), F5_RNG_CATALOG_V2_DECISIONS);
+    assert_eq!(F5_RNG_CATALOG_V2_DECISIONS, 13);
 }

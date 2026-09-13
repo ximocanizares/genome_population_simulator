@@ -70,6 +70,13 @@ independiente con el mismo material longitud-prefijado v1 y ChaCha12, e incluye
 las primeras cuatro palabras `u64` literales para congelar el contrato de
 inicialización del flujo.
 
+`f5-rng-catalog-v2.tsv` conserva literalmente las doce filas de v1 —material,
+subsemilla y las cuatro palabras de cada decisión— y añade una sola:
+`block_haplotype_count`, el ámbito del recuento haplotípico de un
+bloque×subpoblación. Una ejecución publica el catálogo del que salen **sus**
+decisiones: un perfil que no declara la distribución del recuento no puede
+abrir ese ámbito y publica v1, con su ruta y su huella intactas.
+
 `id-catalog-v4.tsv` conserva literalmente las once filas de
 `id-classes-v3.tsv` y añade las cinco clases automáticas de F5: `BLK_`,
 `SITE_`, `HAP_`, `FCP_` y `FHA_`. `FCP_` identifica una copia fundadora por

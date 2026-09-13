@@ -565,6 +565,7 @@ fn no_f5_source_or_schema_names_a_panel_sv_repeat_alignment_or_recombination() {
         "schemas/manifest-general-v5.schema.json",
         "schemas/f5-failure-v1.schema.json",
         "schemas/profile-metadata-f5-v1.schema.json",
+        "schemas/profile-metadata-f5-v2.schema.json",
         "schemas/truth-v2.schema.json",
     ] {
         let document = fs::read_to_string(root.join(schema))

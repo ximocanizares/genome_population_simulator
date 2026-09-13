@@ -424,7 +424,12 @@ pub fn build_f5_marginals(
         ));
     }
 
-    let haplotype_count = config.profile().haplotype_weights().len();
+    // `h_max`, no el H sorteado de ningún bloque: esta cota se comprueba antes
+    // de abrir el primer ámbito aleatorio de marginales y, por tanto, mucho
+    // antes de que exista un recuento haplotípico por bloque. Usar la cota
+    // superior la hace más exigente y, sobre todo, independiente de la
+    // semilla.
+    let haplotype_count = config.profile().haplotype_count_bound();
     let mut blocks = Vec::with_capacity(population_ids.len().saturating_mul(layout.blocks().len()));
     for population_id in &population_ids {
         for block in layout.blocks() {
@@ -440,7 +445,7 @@ pub fn build_f5_marginals(
                     population_id.as_str(),
                     block.block_id().as_str(),
                     format!(
-                        "el perfil declara {haplotype_count} haplotipos y el bloque solo admite {} con {} sitios",
+                        "el perfil admite hasta {haplotype_count} haplotipos y el bloque solo admite {} con {} sitios",
                         capacity.unwrap_or(0),
                         block.sites().len()
                     ),

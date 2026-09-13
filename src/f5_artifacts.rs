@@ -82,7 +82,7 @@ use crate::diagnostics::Diagnostic;
 use crate::f5_founders::{
     F5BlockAssignment, F5FounderAssignment, F5FounderIdentities, f5_haplotype_alleles,
 };
-use crate::f5_haplotypes::F5AlleleMatrix;
+use crate::f5_haplotypes::{F5AlleleMatrix, f5_block_haplotype_weights};
 use crate::f5_layout::{F5LayoutBlock, F5PhysicalLayout};
 use crate::f5_preflight::{
     F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS, F5_DEFAULT_MAX_SWAP_PROPOSALS, F5OtherResources,
@@ -1041,39 +1041,66 @@ fn write_haplotypes(
 ) -> Result<F5ArtifactLink, Diagnostic> {
     let contract = &F5_TSV_CONTRACTS[HAPLOTYPES];
     let config = request.config;
-    let weights = config.profile().haplotype_weights();
-    let mut total = 0.0_f64;
-    for weight in weights {
-        if !weight.is_finite() || *weight <= 0.0 || *weight > 1.0 {
-            return Err(internal(
-                config,
-                "un peso haplotípico efectivo no es finito ni pertenece a (0,1]",
-            ));
-        }
-        total += *weight;
-    }
-    // Los pesos son los mismos en todas las unidades, de modo que comprobar
-    // una vez que suman 1 lo comprueba por población×bloque, que es como
-    // DTC-089 lo exige.
-    if (total - 1.0).abs() > 1e-9 {
-        return Err(internal(
-            config,
-            format!(
-                "los pesos haplotípicos publicados suman {total} y no 1 por población y bloque"
-            ),
-        ));
-    }
+    let declared_weights = config.profile().haplotype_weights();
+    // Red heredada, conservada en la forma que sigue valiendo con H variable:
+    // sin distribución declarada la altura de toda matriz es **exactamente**
+    // el número de pesos; con ella, un valor del intervalo declarado. Sin esta
+    // comprobación el escritor derivaba los pesos de la altura que la matriz
+    // trajera, de modo que una altura absurda producía un vector coherente
+    // consigo mismo y no había nada que la delatase aquí.
+    let distribution = config.profile().haplotype_count_distribution();
     let units = identities.units();
     let search = request.search;
     stream_tsv(workspace, contract, |writer| {
         for (position, unit) in units.iter().enumerate() {
             let matrix = search.blocks()[plan.unit_to_search[position]].matrix();
-            if matrix.haplotype_count() != weights.len()
-                || unit.haplotype_ids().len() != weights.len()
-            {
+            // Los pesos son ahora **de la unidad**: el prefijo de rango del
+            // vector declarado con la altura de su matriz, renormalizado. La
+            // suma se comprueba en cada unidad, no una vez para todas, porque
+            // con H por bloque ya no hay un único vector que comprobar.
+            let rows = matrix.haplotype_count();
+            let admissible = match distribution {
+                None => rows == declared_weights.len(),
+                Some(distribution) => u64::try_from(rows).is_ok_and(|rows| {
+                    (distribution.minimum()..=distribution.maximum()).contains(&rows)
+                }),
+            };
+            if !admissible {
                 return Err(internal(
                     config,
-                    "la matriz ganadora y el perfil no publican el mismo número de filas",
+                    format!(
+                        "la matriz de {}×{} publica {rows} filas, que el perfil no admite",
+                        unit.population_id().as_str(),
+                        unit.block_id().as_str()
+                    ),
+                ));
+            }
+            let weights = f5_block_haplotype_weights(declared_weights, rows)
+                .map_err(|detail| internal(config, detail))?;
+            let mut total = 0.0_f64;
+            for weight in &weights {
+                if !weight.is_finite() || *weight <= 0.0 || *weight > 1.0 {
+                    return Err(internal(
+                        config,
+                        "un peso haplotípico efectivo no es finito ni pertenece a (0,1]",
+                    ));
+                }
+                total += *weight;
+            }
+            if (total - 1.0).abs() > 1e-9 {
+                return Err(internal(
+                    config,
+                    format!(
+                        "los pesos haplotípicos publicados suman {total} y no 1 en {}×{}",
+                        unit.population_id().as_str(),
+                        unit.block_id().as_str()
+                    ),
+                ));
+            }
+            if unit.haplotype_ids().len() != weights.len() {
+                return Err(internal(
+                    config,
+                    "la matriz ganadora y las identidades no publican el mismo número de filas",
                 ));
             }
             for (rank, haplotype_id) in unit.haplotype_ids().iter().enumerate() {

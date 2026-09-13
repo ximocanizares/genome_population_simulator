@@ -964,7 +964,10 @@ perfiles de entrada y, en éxito, exactamente los siete TSV de layout, sitios,
 haplotipos, frecuencias, LD, fundadores e intentos de DTC-089, además de la
 proyección fundadora `outputs/truth.jsonl` v2, configuración efectiva v5 y
 manifiesto v5. Cada enlace declara ID, clase, `schema_version`, ruta relativa,
-tamaño y SHA-256. `f5-rng-catalog-v1` e `id-catalog-v4` se fijan antes de
+tamaño y SHA-256. El catálogo RNG de F5 —`f5-rng-catalog-v1`, o
+`f5-rng-catalog-v2` cuando el perfil declara la distribución del recuento
+haplotípico y por tanto la ejecución puede abrir `block_haplotype_count`— e
+`id-catalog-v4` se fijan antes de
 generar, publican vectores y aíslan escenario, población, bloque y decisión. Un
 lector/oráculo independiente reconstruye coordenadas, marginales, D/`r²`, mejor
 intento y hashes.

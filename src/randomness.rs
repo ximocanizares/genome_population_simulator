@@ -681,6 +681,11 @@ enum F5RandomDecisionKind<'a> {
         population_id: &'a PopulationId,
         block_id: &'a F5BlockId,
     },
+    BlockHaplotypeCount {
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+    },
 }
 
 impl<'a> F5RandomDecision<'a> {
@@ -841,6 +846,25 @@ impl<'a> F5RandomDecision<'a> {
         block_id: &'a F5BlockId,
     ) -> Self {
         Self(F5RandomDecisionKind::FounderControlledPermutation {
+            scenario_id,
+            population_id,
+            block_id,
+        })
+    }
+
+    /// Ámbito del recuento haplotípico de un bloque×subpoblación.
+    ///
+    /// No lleva `attempt_index`: H es una dimensión de la unidad, no del
+    /// intento. Si dependiera del intento, dos intentos de la misma unidad
+    /// producirían matrices de alturas distintas y ni los fundadores ni los
+    /// artefactos podrían indexar un rango haplotípico estable.
+    #[must_use]
+    pub const fn block_haplotype_count(
+        scenario_id: &'a ScenarioId,
+        population_id: &'a PopulationId,
+        block_id: &'a F5BlockId,
+    ) -> Self {
+        Self(F5RandomDecisionKind::BlockHaplotypeCount {
             scenario_id,
             population_id,
             block_id,
@@ -1022,6 +1046,19 @@ impl<'a> F5RandomDecision<'a> {
                 ]);
                 ("founder_controlled_permutation", None)
             }
+            F5RandomDecisionKind::BlockHaplotypeCount {
+                scenario_id,
+                population_id,
+                block_id,
+            } => {
+                components.extend([
+                    ("scenario_id", scenario_id.as_str().to_owned()),
+                    ("population_id", population_id.as_str().to_owned()),
+                    ("block_id", block_id.as_str().to_owned()),
+                    ("stage", "block_haplotype_count".to_owned()),
+                ]);
+                ("block_haplotype_count", None)
+            }
         };
         debug_assert_eq!(
             components
@@ -1182,6 +1219,14 @@ pub(crate) fn f5_fisher_yates_with_source<T>(
 }
 
 pub const POISSON_COUNT_ALGORITHM: &str = "poisson-count-v1";
+/// Mayor `lambda` que admite `poisson-count-v1`: `2^52`.
+///
+/// DTC-067 la fija y exige que un valor mayor **se rechace antes de consumir
+/// RNG**, con valor, límite y ámbito. La constante vive aquí para que el
+/// muestreador y quien valide una lambda declarada consuman la misma cifra: si
+/// solo el muestreador la conociera, un validador podría admitir una lambda
+/// que después muere como error interno a mitad de ejecución.
+pub const POISSON_COUNT_MAX_LAMBDA: f64 = 4_503_599_627_370_496.0;
 pub const HWE_COMPOSITION_ALGORITHM: &str = "hwe-composition-v1";
 pub const F_DIPLOID_GENOTYPE_ALGORITHM: &str = "f-diploid-genotype-v1";
 pub const PHASE_PERMUTATION_ALGORITHM: &str = "phase-permutation-v1";
@@ -1197,7 +1242,25 @@ pub const F4_TECHNICAL_RNG_CATALOG: &str = "f4-technical-v3";
 ///
 /// Este catálogo no amplía `subseed-scopes-v8`: F5 publica sus decisiones en
 /// un artefacto independiente para no reescribir los vectores heredados.
-pub const F5_RNG_CATALOG: &str = "f5-rng-catalog-v1";
+///
+/// v2 añade `block_haplotype_count`, el ámbito del recuento haplotípico por
+/// bloque×subpoblación. Las doce filas de v1 se conservan **literales**: el
+/// material, la subsemilla y las cuatro primeras palabras de cada decisión
+/// heredada son las mismas, de modo que subir de catálogo no reescribe
+/// ninguna decisión ya congelada.
+///
+/// Una ejecución publica el catálogo del que salen **sus** decisiones, no el
+/// más alto que el binario conoce: un escenario cuyo perfil no declara la
+/// distribución del recuento haplotípico no puede abrir
+/// `block_haplotype_count` y publica [`F5_RNG_CATALOG_V1`]. Eso es lo que
+/// mantiene byte a byte los paquetes anteriores a esta ampliación; publicar
+/// v2 en todos habría cambiado el `manifest.json` de cada uno de ellos sin
+/// que ninguna decisión cambiase.
+pub const F5_RNG_CATALOG_V1: &str = "f5-rng-catalog-v1";
+/// Catálogo de una ejecución que sí declara la distribución del recuento.
+pub const F5_RNG_CATALOG_V2: &str = "f5-rng-catalog-v2";
+/// Catálogo más alto que este binario implementa.
+pub const F5_RNG_CATALOG: &str = F5_RNG_CATALOG_V2;
 pub const F5_UNIFORM_INDEX_ALGORITHM: &str = "uniform-index-v1";
 pub const F5_BERNOULLI_ALGORITHM: &str = "bernoulli-v1";
 pub const F5_FISHER_YATES_ALGORITHM: &str = "fisher-yates-v1";
@@ -2325,8 +2388,7 @@ fn poisson_count_with_source(
     lambda: f64,
     candidate_override: Option<f64>,
 ) -> Result<u64, RandomSamplingError> {
-    const MAX_LAMBDA: f64 = 4_503_599_627_370_496.0;
-    if !lambda.is_finite() || !(0.0..=MAX_LAMBDA).contains(&lambda) {
+    if !lambda.is_finite() || !(0.0..=POISSON_COUNT_MAX_LAMBDA).contains(&lambda) {
         return Err(RandomSamplingError::InvalidLambda);
     }
     if lambda == 0.0 {

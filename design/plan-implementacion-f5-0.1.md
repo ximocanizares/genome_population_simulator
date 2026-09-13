@@ -4086,3 +4086,172 @@ La primera es la que importa: el literal que la mata sale **leído de vuelta de
 `outputs/f5-haplotypes.tsv`**, no de una expectativa escrita junto al bucle. Las
 tres mutaciones se hicieron sobre copias fuera de git y se comprobó por SHA que
 la mutación mutó y que la restauración devolvió el fichero byte a byte.
+
+## 13. Ampliación: recuento haplotípico por bloque (13 de septiembre de 2026)
+
+### 13.1. Qué cambia y qué no
+
+Hasta esta ampliación `H` era global: salía de `weights.len()` y todos los
+bloques de todas las subpoblaciones compartían el mismo número de haplotipos y
+los mismos pesos. Ahora el perfil puede declarar una distribución y cada
+bloque×subpoblación sortea su propio `H`. La diversidad haplotípica varía entre
+regiones genómicas, que es como varía en la realidad.
+
+La ampliación es **opcional y retrocompatible**. Sin la declaración no se abre
+ningún ámbito aleatorio nuevo, `H` sigue siendo el número de pesos, los pesos se
+usan literales y el paquete publicado es el mismo byte a byte. La verificación
+no es una afirmación: las huellas de los ocho artefactos de carga útil que
+`tests/f5_publication.rs::a_profile_without_a_distribution_keeps_its_published_bytes_and_its_v1_catalogue`
+compara se midieron sobre el árbol anterior —el commit `0b4bcc1`, con el mismo
+fixture— y se copiaron literales al código de prueba.
+
+### 13.2. Decisiones
+
+| Decisión | Contenido |
+|---|---|
+| Dónde se declara | Metadata del perfil `schema_version="2"`, objeto cerrado `haplotype_count_distribution` con `algorithm`, `lambda`, `h_min` y `h_max`. La versión decide el conjunto de claves: una v1 con la clave se rechaza y una v2 sin ella también. `lambda` se valida contra el dominio de DTC-067, `(0, 2^52]`, en el lector del perfil y en los dos esquemas: fuera de él el muestreador falla, y DTC-067 exige que ese rechazo ocurra **antes de consumir RNG** y no como error interno a mitad de ejecución. |
+| Muestreador | `poisson-count-v1`, que ya es normativo, está escrito con `libm` y lo usan otros cuatro módulos. No se escribe uno nuevo. |
+| Truncamiento | Pinzamiento a `[h_min, h_max]`, no rechazo con reintentos: el pinzamiento acota el número de **sorteos** a exactamente uno por bloque×subpoblación, mientras que el rechazo repetiría el sorteo un número de veces que nada acota. Lo que **no** queda acotado ni contabilizado son las palabras que consume cada sorteo —el rechazo transformado de `poisson-count-v1` puede repetir su bucle interno, y con `lambda` cerca de 10 se han medido hasta cuarenta palabras—; el preflight no añade ningún término por ellas. Sí siguen acotadas las dos dimensiones que el contrato presupuesta: la memoria, por `h_max` dentro del sobre de 160 bytes por haplotipo, y las filas publicadas, por `B*N_pop*h_max`. Queda declarado que el pinzamiento acumula masa en los extremos. |
+| Pesos del bloque | Los `H` primeros pesos declarados por rango, renormalizados. Con `H` igual al tamaño declarado el vector se usa **literal**, sin dividir. No hay un segundo objeto aleatorio. |
+| Tamaño de la tabla | `haplotype_weights.tsv` debe traer exactamente `h_max` filas. De esa igualdad depende que el presupuesto que el preflight deriva de `H` sea ya el que deriva de `h_max`, sin tocar ninguna fórmula. |
+| Ámbito nuevo | `block_haplotype_count`, indexado por `scenario_id`, `population_id` y `block_id`. **Sin** `attempt_index`: `H` es una dimensión de la unidad, no del intento. |
+| Catálogo | `f5-rng-catalog-v2` conserva las doce filas de v1 literales y añade la decimotercera. Una ejecución publica el catálogo del que salen **sus** decisiones: v1 sin distribución declarada, v2 con ella. |
+| Publicación | `/f5/haplotype_count_distribution` y `/f5/haplotype_counts` en el manifiesto, ambas o ninguna, solo con distribución declarada. |
+| Oráculo | Rederiva el sorteo con su propia reimplementación de `poisson-count-v1` y lo compara contra la cifra publicada y contra las filas de `f5-haplotypes.tsv`. No lo lee y se lo cree. |
+
+### 13.3. La cota de cardinalidad, corregida en su justificación
+
+El encargo pedía verificar una lectura previa: que `V` —las columnas cuyo
+objetivo no es 0/1— fuera derivable en admisión porque `is_fixed_target` mira el
+objetivo declarado en el perfil. **Esa lectura es incorrecta.** `target_alt_af`
+no es declarado: lo sortea `F5Spectrum::sample_site` abriendo el ámbito
+`marginal_spectrum`, eligiendo una banda por peso y, si no es degenerada, un
+`f64` dentro de ella. `V` depende por tanto de la semilla.
+
+La solución elegida sobrevive intacta con otra justificación, porque el
+problema que se quería evitar era otro. Las dos cotas de cardinalidad **nunca**
+vivieron en el preflight: `H<=2^S` se comprueba al construir los marginales y
+`H<=2^V` justo después, antes de abrir el primer intento. Las dos dependían ya
+de sorteos previos —la longitud del bloque, los huecos, el marginal de cada
+sitio—, de modo que la propiedad «la admisión decide antes de ejecutar» ya no
+era literal para ellas antes de esta ampliación.
+
+Lo que sí se conserva, y es lo que importaba, es que **el veredicto no dependa
+del sorteo de `H`**: las dos cotas se comprueban con `h_max`, que domina
+cualquier sorteo, y se comprueban antes de abrir el ámbito
+`block_haplotype_count`. Un mismo escenario no puede ser válido con una semilla
+e inválido con otra *por causa del recuento haplotípico*. La comprobación del
+constructor se conserva con el `H` realmente construido, como red, y queda
+documentada como implicada por la anterior.
+
+### 13.3 bis. Lo que el presupuesto no ve
+
+El preflight no gana ningún término por el sorteo del recuento, y la §13.2 lo
+dice ahora sin adornos. No es un olvido: `poisson-count-v1` es un muestreador
+por rechazo y el número de palabras de un sorteo **no tiene cota superior**, de
+modo que un término honesto no existe. Lo que la ampliación sí conserva es lo
+que el contrato presupuesta —memoria y filas publicadas—, y el sorteo añade una
+sola derivación de subsemilla y un muestreo por bloque×subpoblación, no por
+intento. Añadir un término con una cota inventada habría sido peor que no
+tenerlo: la fórmula dejaría de ser derivable por escrito.
+
+### 13.4. Lo que arrastra
+
+- `f5_search` resuelve los pesos de cada unidad **una vez** y los reutiliza en
+  todos sus intentos a través de `build_f5_block_attempt_with_weights`: el
+  ámbito no lleva `attempt_index`, de modo que volver a sortear por intento
+  daría el mismo valor y pagaría una derivación de subsemilla y un muestreo
+  Poisson por intento sin cambiar un solo byte. La frontera pública
+  `build_f5_block_attempt` sigue resolviéndolos por su cuenta, que es lo que
+  sostiene su equivalencia declarada con `build_f5_haplotype_attempt`.
+- `f5_ld`, `f5_founders` y `f5_artifacts` derivan los pesos de la altura que la
+  matriz publica en vez de leer el vector global del perfil.
+- El búfer de permutación se dimensiona una vez con `h_max` y cada bloque toma
+  su prefijo.
+- `marginal_max_abs_error` pasa a ser por bloque: con pesos distintos en cada
+  unidad, su máximo también lo es.
+- La puerta de manifiesto de `f5_publication` admite las dos claves nuevas y
+  exige que vayan juntas y que haya una fila por unidad de `sampling`.
+- **`effective-config.json` no lleva la distribución, y es deliberado.** El
+  objeto compartido entre efectivo y manifiesto son los nueve que DTC-089
+  enumera, y el perfil aparece en ellos como enlace —ruta, tamaño y SHA—. La
+  distribución vive dentro del metadata del perfil, de modo que
+  `profile.sha256` ya la fija: copiarla al efectivo añadiría una segunda
+  autoridad sobre la misma cifra que podría divergir de la primera. El
+  manifiesto sí la publica porque allí acompaña a los recuentos realizados, que
+  no son configuración sino resultado y no tienen otra fuente. El catálogo RNG,
+  que el efectivo sí lleva, dice además si esa distribución existe: v2 solo
+  cuando la hay.
+- `schemas/profile-metadata-f5-v2.schema.json` es nuevo y no reescribe la v1.
+  `schemas/manifest-general-v5.schema.json` gana dos propiedades **opcionales**
+  sin tocar su lista `required`: subir la versión del documento habría cambiado
+  el `schema_version` de todos los paquetes heredados, que es exactamente lo
+  que la retrocompatibilidad byte a byte prohíbe. Es la misma distinción que
+  §1 ya fija para los esquemas F5 no publicados externamente.
+
+### 13.5. Discriminación de las pruebas nuevas
+
+Cada mutación se aplicó sobre una copia fuera de git, se comprobó por SHA que
+la mutación mutó y que la restauración devolvió el fichero byte a byte.
+
+| Mutante | Prueba que muere | Mensaje observado |
+|---|---|---|
+| `f5_block_haplotype_weights` pierde el atajo del vector completo y renormaliza siempre | `an_undeclared_distribution_keeps_the_profile_weights_bit_for_bit` | `los pesos del bloque no son los del perfil bit a bit … left: [4585739519966210813, …] right: [4585739519966210814, …]` |
+| `f5_rng_catalog_for` publica siempre v2 | `a_profile_without_a_distribution_keeps_its_published_bytes_and_its_v1_catalogue` | `se declaran id-catalog-v4/f5-rng-catalog-v2 y los catálogos vigentes son id-catalog-v4/f5-rng-catalog-v1` |
+| El sorteo deriva su subsemilla de una raíz constante | `the_drawn_count_is_reproducible_with_its_seed_and_moves_with_another` | `assertion left != right failed: otra semilla no mueve el sorteo` |
+| `clamp` pierde la rama superior | `every_drawn_count_lands_inside_the_declared_interval_and_both_clamps_bite` | `bloque … el recuento haplotípico del bloque no cabe en los pesos declarados` |
+| `clamp` pierde la rama inferior | la misma | el mismo diagnóstico en otro bloque |
+| El prefijo no se renormaliza | `the_block_weights_are_the_rank_prefix_renormalized` | `q[0]=0.4 y el racional exacto vale 0.4444444444444445` |
+| La segunda cota mira el `H` sorteado en vez de `h_max` | `admission_rejects_h_max_beyond_two_pow_v_even_when_every_draw_would_fit` | `h_max=16 no cabe en las 2^V combinaciones de todos los bloques: ()` |
+| La primera cota mira `h_min` en vez de `h_max` | `the_first_cardinality_bound_also_uses_h_max_and_not_the_draw` | `h_max=16 no cabe en 2^3 vectores: F5MarginalTable { … }` |
+| El oráculo se cree el recuento publicado en vez de rederivarlo | `the_oracle_rejects_a_published_count_that_its_own_draw_does_not_produce` | `los recuentos publicados no salen de esa lambda: F5OracleReport { … }` |
+| Todo bloque toma `h_max` | `the_h_max_bound_dominates_the_rows_every_block_builds` | `el sorteo tiene que dejar holgura frente a h_max: [8, 8, 8, 8, 8, 8, 8, 8]` |
+| La tabla de pesos puede ser más corta que `h_max` | `the_weight_table_must_have_exactly_h_max_rows` | `dos pesos no son cuatro: ()` |
+| La clave de la distribución es opcional en cualquier versión | `the_metadata_version_decides_whether_the_distribution_may_appear` | `v1 no admite la clave: ()` |
+| `F5HaplotypeCountDistribution::new` pierde la guarda `h_min >= 2` | `the_declared_interval_and_lambda_are_bounded` | `{"algorithm":"poisson-count-v1","lambda":1.0,"h_min":1,"h_max":2}: ()` |
+| El perfil olvida la distribución que leyó | `a_v2_profile_carries_the_haplotype_count_distribution` | `distribución declarada` |
+| Una fila heredada de v2 cambia una palabra | `f5_rng_catalog_v2_extends_v1_without_rewriting_a_single_frozen_row` | `assertion left == right failed: v2 reescribe una línea heredada` |
+| `f5-haplotypes.tsv` publica el peso declarado en vez del del bloque | `a_declared_distribution_publishes_its_decision_the_v2_catalogue_and_renormalised_weights` | `la unidad publica q=0.25 en el rango 0 y el prefijo renormalizado vale 0.5` |
+| `F5HaplotypeCountDistribution::new` pierde la guarda `lambda <= 2^52` | `the_declared_interval_and_lambda_are_bounded` | `{"algorithm":"poisson-count-v1","lambda":4503599627371520.0,"h_min":2,"h_max":2}: ()` |
+| La guarda de los recuentos huérfanos desaparece entera | `published_counts_without_the_distribution_that_produces_them_are_rejected` | `unos recuentos sin distribución no son rederivables: F5OracleReport { … }` |
+| La guarda de cardinalidad de los recuentos desaparece entera | `the_oracle_rejects_a_published_count_that_its_own_draw_does_not_produce` | `una fila de recuento sobrante no puede pasar inadvertida: F5OracleReport { … }` |
+| `resolve_f5_block_weights` resuelve todos los bloques con el ámbito del primero | `the_per_block_builder_reproduces_the_whole_attempt_under_a_declared_distribution` | `la tabla de pesos y el bloque BLK_KEG5VVL3SEVTQNX26QLL6NH34U no resuelven el mismo H … left: 4 right: 5` |
+
+La revisión adversarial del 13 de septiembre encontró una **tercera** aserción
+sin discriminación que esta tabla no había declarado, y esa es la lección de la
+ronda. El caso `orphan_counts` decía cubrir la guarda de los recuentos
+huérfanos y no la tocaba: al poner la distribución a `None`, la declaración
+seguía nombrando el catálogo v2 y el rechazo llegaba por `Randomness` mucho
+antes. Borrar la guarda entera dejaba pasar las 1124 pruebas. El arreglo tiene
+dos partes, porque una sola no bastaba: bajar también el catálogo a v1 **y**
+mover el caso a un fixture saturado —`H = h_max = weights.len()`— cuyas filas
+son indistinguibles de las de un paquete sin distribución, de modo que ni el
+recuento de filas ni la comparación de `q` pueden delatar nada y solo queda la
+guarda. Con el catálogo corregido pero el fixture original, borrar la guarda
+**seguía** pasando: la comparación de `q` la sustituía. Lo mismo con la guarda
+de cardinalidad, que solo tiene trabajo propio en la dirección de las filas
+sobrantes y ahora tiene un caso que la ejercita ahí.
+
+Dos aserciones quedan declaradas **sin discriminación propia**, sin adornos:
+
+- La mitad «la misma semilla reproduce el sorteo» de
+  `the_drawn_count_is_reproducible_with_its_seed_and_moves_with_another` está
+  implicada por que el sorteo sea una función pura de la semilla y de la
+  identidad del bloque. No existe una mutación razonable que la mate sin matar
+  antes la otra mitad.
+- `the_budget_derived_from_h_max_still_dominates_what_the_package_publishes`
+  comprueba la dominación sobre los bytes de un paquete real, pero no la
+  holgura: un escenario cuyos bloques tomen todos `h_max` no termina la
+  búsqueda LD de ese fixture, de modo que la mutación correspondiente muere
+  antes de llegar a la aserción. La holgura se comprueba en
+  `the_h_max_bound_dominates_the_rows_every_block_builds`, que trabaja sobre el
+  intento y no sobre el paquete.
+
+Y dos redes quedan **sin prueba, por inalcanzables**: la de
+`index_search_blocks` y la de `write_haplotypes` que comprueban que la altura de
+la matriz ganadora pertenece a lo que el perfil admite. Ninguna es alcanzable
+desde una configuración admitida —la búsqueda construye la matriz con los
+mismos pesos que después se derivan de su altura—, y la heredada tampoco lo
+era ni tenía prueba. Se restituyen en la forma que sigue valiendo con H
+variable: igualdad exacta con el número de pesos sin distribución declarada, y
+pertenencia a `[h_min, h_max]` con ella.

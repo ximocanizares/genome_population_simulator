@@ -90,10 +90,10 @@ use crate::f5_founders::{
 };
 use crate::f5_layout::{F5BestLayout, F5LayoutFailure, F5PhysicalLayout};
 use crate::f5_oracle::{
-    F5_MAN70_RECOUNT_SOURCE, F5DeclaredAttemptSummary, F5DeclaredBounds, F5DeclaredLdBin,
-    F5DeclaredLink, F5DeclaredMode, F5DeclaredRealizedF, F5DeclaredSampling,
-    F5DeclaredSpectrumBand, F5DeclaredSubpopulation, F5DeclaredTruthLink, F5InitializationSummary,
-    F5PackageDeclaration,
+    F5_MAN70_RECOUNT_SOURCE, F5DeclaredAttemptSummary, F5DeclaredBounds, F5DeclaredHaplotypeCount,
+    F5DeclaredHaplotypeCountDistribution, F5DeclaredLdBin, F5DeclaredLink, F5DeclaredMode,
+    F5DeclaredRealizedF, F5DeclaredSampling, F5DeclaredSpectrumBand, F5DeclaredSubpopulation,
+    F5DeclaredTruthLink, F5InitializationSummary, F5PackageDeclaration,
 };
 use crate::f5_preflight::{
     F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS, F5_DEFAULT_MAX_HAPLOTYPE_CELLS,
@@ -103,7 +103,7 @@ use crate::f5_search::{F5AttemptRecord, F5HaplotypeSearch, F5SearchFailure};
 use crate::identity::{ExecutionId, F5_ID_CATALOG};
 use crate::integrity::identify_file;
 use crate::publication::ExecutionWorkspace;
-use crate::randomness::F5_RNG_CATALOG;
+use crate::randomness::{F5_RNG_CATALOG_V1, F5_RNG_CATALOG_V2, POISSON_COUNT_ALGORITHM};
 use crate::results::{ArtifactRecord, json_document_bytes};
 
 // ---------------------------------------------------------------------------
@@ -124,12 +124,38 @@ pub const F5_FAILURE_ARTIFACT_ID: &str = "f5-00-failure-v1";
 pub const F5_FAILURE_ARTIFACT_KIND: &str = "f5_failure";
 pub const F5_FAILURE_SCHEMA_VERSION: &str = "1";
 pub const F5_FAILURE_DIAGNOSTIC_KIND: &str = "f5_failure";
-/// Rutas publicadas de los dos catálogos normativos F5.
-pub const F5_RNG_CATALOG_PATH: &str = "catalogs/f5-rng-catalog-v1.tsv";
+/// Rutas publicadas de los catálogos normativos F5.
+pub const F5_RNG_CATALOG_V1_PATH: &str = "catalogs/f5-rng-catalog-v1.tsv";
+pub const F5_RNG_CATALOG_V2_PATH: &str = "catalogs/f5-rng-catalog-v2.tsv";
 pub const F5_ID_CATALOG_PATH: &str = "catalogs/id-catalog-v4.tsv";
 
-const RNG_CATALOG_BYTES: &[u8] = include_bytes!("../catalogs/f5-rng-catalog-v1.tsv");
+const RNG_CATALOG_V1_BYTES: &[u8] = include_bytes!("../catalogs/f5-rng-catalog-v1.tsv");
+const RNG_CATALOG_V2_BYTES: &[u8] = include_bytes!("../catalogs/f5-rng-catalog-v2.tsv");
 const ID_CATALOG_BYTES: &[u8] = include_bytes!("../catalogs/id-catalog-v4.tsv");
+
+/// Catálogo RNG **de la ejecución**: v2 solo cuando el perfil declara la
+/// distribución del recuento haplotípico y, por tanto, el ámbito
+/// `block_haplotype_count` puede abrirse. Un escenario que no la declara
+/// publica el mismo catálogo, con la misma huella, que antes de que este
+/// ámbito existiera.
+#[must_use]
+pub fn f5_rng_catalog_for(
+    config: &EffectiveF5Config,
+) -> (&'static str, &'static str, &'static [u8]) {
+    if config.profile().haplotype_count_distribution().is_some() {
+        (
+            F5_RNG_CATALOG_V2,
+            F5_RNG_CATALOG_V2_PATH,
+            RNG_CATALOG_V2_BYTES,
+        )
+    } else {
+        (
+            F5_RNG_CATALOG_V1,
+            F5_RNG_CATALOG_V1_PATH,
+            RNG_CATALOG_V1_BYTES,
+        )
+    }
+}
 
 /// Los siete algoritmos exactos del objeto `algorithms`, en el orden de
 /// DTC-089. Ninguno es configurable: F5 solo publica estos.
@@ -294,7 +320,10 @@ impl SharedContract {
             mask,
             target: target_json(config, sealed)?,
             algorithms: algorithms_json(),
-            rng_catalog: catalog_json(F5_RNG_CATALOG, F5_RNG_CATALOG_PATH, RNG_CATALOG_BYTES),
+            rng_catalog: {
+                let (catalog_id, path, bytes) = f5_rng_catalog_for(config);
+                catalog_json(catalog_id, path, bytes)
+            },
             id_catalog: catalog_json(F5_ID_CATALOG, F5_ID_CATALOG_PATH, ID_CATALOG_BYTES),
             limits: limits_json(config, sealed)?,
             resource_preflight: sealed.to_contract_json(),
@@ -833,6 +862,36 @@ fn success_manifest_f5(
                 .collect(),
         ),
     );
+    // Las dos claves del recuento haplotípico solo existen cuando el perfil
+    // declara la distribución. Un escenario heredado publica el mismo objeto
+    // `f5`, byte a byte, que antes de que esta decisión existiera.
+    if let Some(distribution) = declaration.haplotype_count_distribution {
+        f5.insert(
+            "haplotype_count_distribution".to_owned(),
+            json!({
+                "algorithm": POISSON_COUNT_ALGORITHM,
+                "lambda": distribution.lambda,
+                "h_min": distribution.minimum,
+                "h_max": distribution.maximum,
+            }),
+        );
+        f5.insert(
+            "haplotype_counts".to_owned(),
+            Value::Array(
+                declaration
+                    .haplotype_counts
+                    .iter()
+                    .map(|row| {
+                        json!({
+                            "population_id": row.population_id,
+                            "block_id": row.block_id,
+                            "haplotype_count": row.haplotype_count,
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
     f5.insert(
         "attempt_summary".to_owned(),
         json!({
@@ -1366,6 +1425,24 @@ impl<'a> F5PublicationRequest<'a> {
             profile_id: self.sealed.profile_id().to_owned(),
             profile_metadata_sha256: self.sealed.profile_metadata_sha256().to_owned(),
             haplotype_weights: profile.haplotype_weights().to_vec(),
+            haplotype_count_distribution: profile.haplotype_count_distribution().map(
+                |distribution| F5DeclaredHaplotypeCountDistribution {
+                    lambda: distribution.lambda(),
+                    minimum: distribution.minimum(),
+                    maximum: distribution.maximum(),
+                },
+            ),
+            // El H de cada unidad se publica **explícito** aunque sea
+            // recontable desde `f5-haplotypes.tsv`: así el oráculo compara su
+            // propio sorteo contra una cifra declarada, en vez de contra un
+            // recuento de filas que él mismo tendría que reconstruir. Sin
+            // distribución declarada la lista va vacía y el documento no gana
+            // ninguna clave.
+            haplotype_counts: if profile.haplotype_count_distribution().is_some() {
+                declared_haplotype_counts(self.search)
+            } else {
+                Vec::new()
+            },
             snp_spectrum: profile
                 .snp_spectrum()
                 .iter()
@@ -1446,7 +1523,7 @@ impl<'a> F5PublicationRequest<'a> {
                 output_limit_bytes: self.sealed.output_limit_bytes(),
             },
             id_catalog_id: F5_ID_CATALOG.to_owned(),
-            rng_catalog_id: F5_RNG_CATALOG.to_owned(),
+            rng_catalog_id: f5_rng_catalog_for(self.config).0.to_owned(),
             attempt_summary: F5DeclaredAttemptSummary {
                 layout_attempts_used: self.layout.successful_attempt_index().saturating_add(1),
                 haplotype_attempts_total: self.search.haplotype_attempts_total(),
@@ -1454,6 +1531,24 @@ impl<'a> F5PublicationRequest<'a> {
             },
         }
     }
+}
+
+/// H publicado de cada bloque×subpoblación, en el orden canónico
+/// `(population_id, block_id)` que usa la lista `sampling`.
+fn declared_haplotype_counts(search: &F5HaplotypeSearch) -> Vec<F5DeclaredHaplotypeCount> {
+    let mut rows = search
+        .blocks()
+        .iter()
+        .map(|block| F5DeclaredHaplotypeCount {
+            population_id: block.population_id().as_str().to_owned(),
+            block_id: block.block_id().as_str().to_owned(),
+            haplotype_count: block.matrix().haplotype_count() as u64,
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|left, right| {
+        (&left.population_id, &left.block_id).cmp(&(&right.population_id, &right.block_id))
+    });
+    rows
 }
 
 const fn declared_mode(mode: F5SamplingMode) -> F5DeclaredMode {
@@ -1742,7 +1837,13 @@ mod gate {
         pub(super) f5: SuccessF5,
     }
 
-    /// Las veinticinco claves exactas del objeto `f5` de un éxito.
+    /// Las veinticinco claves exactas del objeto `f5` de un éxito, más las
+    /// dos que solo existen cuando el perfil declara la distribución del
+    /// recuento haplotípico.
+    ///
+    /// Las dos nuevas son `Option` y **no** pueden aparecer por separado: la
+    /// puerta lo comprueba tras deserializar, porque `serde` no sabe expresar
+    /// «ambas o ninguna».
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     pub(super) struct SuccessF5 {
@@ -1764,6 +1865,10 @@ mod gate {
         pub(super) limits: Value,
         pub(super) resource_preflight: Value,
         pub(super) normalizations: Value,
+        #[serde(default)]
+        pub(super) haplotype_count_distribution: Option<Value>,
+        #[serde(default)]
+        pub(super) haplotype_counts: Option<Vec<Value>>,
         #[allow(dead_code)]
         attempt_summary: IgnoredAny,
         pub(super) sampling: Value,
@@ -2170,6 +2275,29 @@ fn verify_success(
                 manifest_path,
                 format!(
                     "/f5/initialization_summaries/{index}: recount_source debe ser {RECOUNT_SOURCE} y recount_matches true"
+                ),
+            ));
+        }
+    }
+
+    // Las dos claves del recuento haplotípico van juntas o no van. Una
+    // distribución sin recuentos dejaría al oráculo sin nada que comparar, y
+    // unos recuentos sin distribución no serían rederivables desde ningún
+    // ámbito. `serde` no sabe expresarlo, así que lo dice esta puerta.
+    if f5.haplotype_count_distribution.is_some() != f5.haplotype_counts.is_some() {
+        return Err(manifest_error(
+            manifest_path,
+            "/f5: haplotype_count_distribution y haplotype_counts se publican juntos o no se publican",
+        ));
+    }
+    if let Some(counts) = &f5.haplotype_counts {
+        let units = f5.sampling.as_array().map_or(0, Vec::len);
+        if counts.len() != units {
+            return Err(manifest_error(
+                manifest_path,
+                format!(
+                    "/f5/haplotype_counts: {} filas frente a las {units} unidades de /f5/sampling",
+                    counts.len()
                 ),
             ));
         }

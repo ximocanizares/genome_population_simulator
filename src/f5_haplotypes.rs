@@ -1,5 +1,14 @@
 //! Construcción haplotípica inicial de F5: la matriz binaria H×S de un intento.
 //!
+//! `H` es por omisión el número de pesos que declara el perfil, igual en todas
+//! las unidades. Si el perfil declara `haplotype_count_distribution`, cada
+//! bloque×subpoblación sortea su propio `H` en el ámbito
+//! `block_haplotype_count` —`Poisson(lambda)` pinzada en `[h_min, h_max]`— y
+//! sus pesos efectivos son los `H` primeros pesos declarados **por rango**,
+//! renormalizados. Las dos cotas de cardinalidad y el presupuesto de recursos
+//! se derivan siempre de `h_max`, nunca del sorteo, de modo que la admisión de
+//! un escenario no puede depender de la semilla.
+//!
 //! DTC-089 cierra cómo se crea esa matriz **sin enumerar los `2^H`**
 //! subconjuntos de filas. Para cada columna cuyo objetivo `p_i` no está fijado
 //! se permutan las H filas con una Fisher–Yates independiente, se recorren sus
@@ -32,10 +41,11 @@ use std::collections::BTreeMap;
 use crate::application::EffectiveF5Config;
 use crate::diagnostics::Diagnostic;
 use crate::f5_marginals::{F5BlockMarginals, F5MarginalTable, F5RowVisits, NeumaierSum};
+use crate::f5_profile::F5HaplotypeCountDistribution;
 use crate::identity::{F5BlockId, F5SiteId, PopulationId, ScenarioId};
 use crate::randomness::{
     F5RandomDecision, RandomWordSource, RootSeed, derive_f5_subseed, f5_bernoulli_with_source,
-    f5_fisher_yates_with_source,
+    f5_fisher_yates_with_source, poisson_count,
 };
 
 /// Polaridad de un sitio dentro de una subpoblación.
@@ -487,7 +497,11 @@ pub fn build_f5_haplotype_attempt(
 ) -> Result<F5HaplotypeAttempt, Diagnostic> {
     let context = F5HaplotypeContext::resolve(config)?;
     ensure_f5_haplotype_cardinality(config, marginals)?;
-    let mut permutation = vec![0_u32; context.weights.len()];
+    // El búfer se dimensiona con `h_max`, no con el H de ningún bloque: es la
+    // única longitud que sirve para todos y la que el preflight presupuestó.
+    // `select_column` exige que la permutación mida exactamente H, así que
+    // cada bloque recibe el prefijo de su propia altura.
+    let mut permutation = vec![0_u32; context.haplotype_count_bound()];
     let mut blocks = Vec::with_capacity(marginals.blocks().len());
     for block in marginals.blocks() {
         blocks.push(context.build(attempt_index, block, &mut permutation)?);
@@ -522,6 +536,51 @@ pub fn build_f5_block_attempt(
     block_ordinal: usize,
     attempt_index: u64,
 ) -> Result<F5BlockHaplotypes, Diagnostic> {
+    build_block_attempt(config, marginals, block_ordinal, attempt_index, None)
+}
+
+/// Igual que [`build_f5_block_attempt`], con los pesos de la unidad ya
+/// resueltos.
+///
+/// Es la vía que usa la búsqueda. El ámbito `block_haplotype_count` no lleva
+/// `attempt_index`, de modo que resolverlo dentro del constructor daría el
+/// mismo vector en cada intento y pagaría una derivación de subsemilla y un
+/// muestreo Poisson por intento y por bloque sin cambiar un solo byte. Quien
+/// recorre los intentos de una unidad lo resuelve una vez con
+/// [`resolve_f5_block_weights`] y lo entrega aquí.
+///
+/// Los pesos entregados tienen que ser los de **esa** unidad: la función los
+/// valida como pesos —finitos, en `(0,1]`, al menos dos— y comprueba que su
+/// número no supere `h_max`, pero no puede saber si salieron del sorteo de
+/// otro bloque. La vía pública los resuelve por su cuenta y no admite ese
+/// error.
+///
+/// # Errors
+///
+/// Los mismos que [`build_f5_block_attempt`].
+pub(crate) fn build_f5_block_attempt_with_weights(
+    config: &EffectiveF5Config,
+    marginals: &F5MarginalTable,
+    block_ordinal: usize,
+    attempt_index: u64,
+    weights: &[f64],
+) -> Result<F5BlockHaplotypes, Diagnostic> {
+    build_block_attempt(
+        config,
+        marginals,
+        block_ordinal,
+        attempt_index,
+        Some(weights),
+    )
+}
+
+fn build_block_attempt(
+    config: &EffectiveF5Config,
+    marginals: &F5MarginalTable,
+    block_ordinal: usize,
+    attempt_index: u64,
+    resolved: Option<&[f64]>,
+) -> Result<F5BlockHaplotypes, Diagnostic> {
     let context = F5HaplotypeContext::resolve(config)?;
     let block = marginals.blocks().get(block_ordinal).ok_or_else(|| {
         Diagnostic::f5_internal(
@@ -531,23 +590,147 @@ pub fn build_f5_block_attempt(
     })?;
     // Comprobación local, `O(S)`: la variante de todos los bloques sigue
     // siendo obligación de quien abre la búsqueda, y la expone
-    // [`ensure_f5_haplotype_cardinality`].
-    ensure_block_represents_every_haplotype(&context.scenario_id, context.weights.len(), block)?;
-    let mut permutation = vec![0_u32; context.weights.len()];
-    context.build(attempt_index, block, &mut permutation)
+    // [`ensure_f5_haplotype_cardinality`]. Se hace con `h_max` —no con el H
+    // sorteado— para que la admisión de un bloque no dependa de su sorteo.
+    ensure_block_represents_every_haplotype(
+        &context.scenario_id,
+        context.haplotype_count_bound(),
+        block,
+    )?;
+    let mut permutation = vec![0_u32; context.haplotype_count_bound()];
+    match resolved {
+        None => context.build(attempt_index, block, &mut permutation),
+        Some(weights) => {
+            if weights.len() > context.haplotype_count_bound() {
+                return Err(Diagnostic::f5_internal(
+                    context.scenario_id.as_str(),
+                    "los pesos entregados traen más filas de las que el perfil declara",
+                ));
+            }
+            context.build_with_weights(attempt_index, block, &mut permutation, weights)
+        }
+    }
+}
+
+/// Sortea el número de haplotipos de un bloque×subpoblación.
+///
+/// Sin distribución declarada devuelve `declared_count` —el tamaño del vector
+/// de pesos del perfil— **sin abrir ningún ámbito aleatorio**: ese es el
+/// camino heredado y produce exactamente los mismos bytes que antes de que
+/// esta decisión existiera.
+///
+/// Con distribución declarada abre el ámbito `block_haplotype_count`, que no
+/// lleva `attempt_index` porque H es una dimensión de la unidad y no del
+/// intento, sortea `Poisson(lambda)` con el muestreador normativo
+/// `poisson-count-v1` y **pinza** el resultado en `[h_min, h_max]`. El
+/// pinzamiento, y no el rechazo con reintentos, es lo que mantiene acotado el
+/// número de sorteos: exactamente uno por bloque×subpoblación.
+///
+/// # Errors
+///
+/// Devuelve `GPS-INTERNAL-101` si la subsemilla no puede derivarse. El
+/// muestreador no puede rechazar la lambda: el lector del perfil ya exigió que
+/// pertenezca al dominio `(0, 2^52]` que DTC-067 fija, de modo que esa rama es
+/// inalcanzable desde una configuración admitida y se conserva porque el
+/// muestreador devuelve `Result`.
+pub fn f5_block_haplotype_count(
+    scenario_id: &ScenarioId,
+    root_seed: RootSeed,
+    distribution: Option<F5HaplotypeCountDistribution>,
+    declared_count: usize,
+    population_id: &PopulationId,
+    block_id: &F5BlockId,
+) -> Result<usize, Diagnostic> {
+    let Some(distribution) = distribution else {
+        return Ok(declared_count);
+    };
+    let mut rng = derive_f5_subseed(
+        root_seed,
+        F5RandomDecision::block_haplotype_count(scenario_id, population_id, block_id),
+    )?
+    .local_rng();
+    let drawn = poisson_count(&mut rng, distribution.lambda()).map_err(|_| {
+        Diagnostic::f5_internal(
+            scenario_id.as_str(),
+            "el muestreador de recuentos rechazó la lambda declarada",
+        )
+    })?;
+    let clamped = distribution.clamp(drawn);
+    usize::try_from(clamped).map_err(|_| {
+        Diagnostic::f5_internal(
+            scenario_id.as_str(),
+            "el recuento haplotípico sorteado no cabe en usize",
+        )
+    })
+}
+
+/// Pesos efectivos de un bloque cuyo H es `haplotype_count`.
+///
+/// Son los `haplotype_count` primeros pesos declarados **por rango**,
+/// renormalizados para que vuelvan a sumar uno. No hay un segundo objeto
+/// aleatorio: el vector del perfil es el de tamaño `h_max` y cada bloque se
+/// queda con su prefijo.
+///
+/// Cuando `haplotype_count` es el tamaño declarado el vector se devuelve
+/// **literal**, sin dividir por su suma. No es una optimización: dividir por
+/// una suma compensada que no vale exactamente uno movería los últimos bits
+/// de cada `q` y cambiaría los bytes de `f5-haplotypes.tsv` de todos los
+/// paquetes que no declaran distribución.
+///
+/// # Errors
+///
+/// Devuelve el detalle si el prefijo pedido no existe, si algún peso deja de
+/// pertenecer a `(0,1]` o si la suma compensada no es utilizable.
+pub fn f5_block_haplotype_weights(
+    declared: &[f64],
+    haplotype_count: usize,
+) -> Result<Vec<f64>, &'static str> {
+    if haplotype_count < 2 || haplotype_count > declared.len() {
+        return Err("el recuento haplotípico del bloque no cabe en los pesos declarados");
+    }
+    let prefix = &declared[..haplotype_count];
+    if prefix
+        .iter()
+        .any(|weight| !weight.is_finite() || *weight <= 0.0 || *weight > 1.0)
+    {
+        return Err("peso de haplotipo fuera de (0,1]");
+    }
+    if haplotype_count == declared.len() {
+        return Ok(prefix.to_vec());
+    }
+    let mut compensated = NeumaierSum::default();
+    let mut total = 0.0_f64;
+    for weight in prefix {
+        total = compensated.add(*weight)?;
+    }
+    if !total.is_finite() || total <= 0.0 {
+        return Err("el prefijo de pesos no tiene una suma positiva y finita");
+    }
+    let renormalized = prefix
+        .iter()
+        .map(|weight| *weight / total)
+        .collect::<Vec<f64>>();
+    if renormalized
+        .iter()
+        .any(|weight| !weight.is_finite() || *weight <= 0.0 || *weight > 1.0)
+    {
+        return Err("la renormalización del prefijo produjo un peso inválido");
+    }
+    Ok(renormalized)
 }
 
 /// Segunda cota de cardinalidad de DTC-089 sobre **todos** los bloques.
 ///
-/// Ocurre tras los sorteos marginales y antes de abrir ningún intento, de modo
-/// que ninguna subpoblación consume entropía cuando otra ya demuestra que su
-/// geometría no admite H vectores distintos.
+/// Ocurre tras los sorteos marginales y antes de abrir ningún intento —y
+/// antes de sortear ningún recuento haplotípico—, de modo que ninguna
+/// subpoblación consume entropía cuando otra ya demuestra que su geometría no
+/// admite `h_max` vectores distintos.
 ///
 /// # Errors
 ///
 /// Devuelve `GPS-CONF-101` si la configuración no reconstruye su identidad,
 /// `GPS-DOMAIN-101` si los pesos no son válidos y `GPS-DOMAIN-105` si algún
-/// bloque incumple `H <= 2^V`.
+/// bloque incumple `h_max <= 2^V`.
 pub fn ensure_f5_haplotype_cardinality(
     config: &EffectiveF5Config,
     marginals: &F5MarginalTable,
@@ -556,7 +739,7 @@ pub fn ensure_f5_haplotype_cardinality(
     for block in marginals.blocks() {
         ensure_block_represents_every_haplotype(
             &context.scenario_id,
-            context.weights.len(),
+            context.haplotype_count_bound(),
             block,
         )?;
     }
@@ -564,12 +747,18 @@ pub fn ensure_f5_haplotype_cardinality(
 }
 
 /// Preludio común a las dos fronteras de construcción: identidad tipada,
-/// semilla canónica, pesos del perfil y cota marginal `max_h(q_h)`.
+/// semilla canónica, pesos declarados del perfil y, si el perfil la declara,
+/// la distribución del recuento haplotípico por bloque.
+///
+/// La cota marginal `max_h(q_h)` **ya no vive aquí**: con H por bloque los
+/// pesos efectivos son distintos en cada unidad y su máximo también, de modo
+/// que la cota se calcula dentro de [`Self::build`], sobre los pesos de ese
+/// bloque, y se publica en su fila.
 struct F5HaplotypeContext<'a> {
     scenario_id: ScenarioId,
     root_seed: RootSeed,
-    weights: &'a [f64],
-    marginal_max_abs_error: f64,
+    declared_weights: &'a [f64],
+    distribution: Option<F5HaplotypeCountDistribution>,
 }
 
 impl<'a> F5HaplotypeContext<'a> {
@@ -588,14 +777,23 @@ impl<'a> F5HaplotypeContext<'a> {
                 "la semilla efectiva no es canónica",
             )
         })?;
-        let weights = config.profile().haplotype_weights();
-        let marginal_max_abs_error = validated_maximum_weight(&scenario_id, weights)?;
+        let declared_weights = config.profile().haplotype_weights();
+        // Los pesos declarados se validan una vez, antes de cualquier sorteo:
+        // un perfil con un peso fuera de `(0,1]` falla igual declare o no
+        // distribución, y falla antes de gastar entropía.
+        validated_maximum_weight(&scenario_id, declared_weights)?;
         Ok(Self {
             scenario_id,
             root_seed,
-            weights,
-            marginal_max_abs_error,
+            declared_weights,
+            distribution: config.profile().haplotype_count_distribution(),
         })
+    }
+
+    /// `h_max`: el H de todos los bloques cuando no hay distribución y la cota
+    /// superior de cualquier sorteo cuando la hay.
+    const fn haplotype_count_bound(&self) -> usize {
+        self.declared_weights.len()
     }
 
     fn build(
@@ -604,16 +802,78 @@ impl<'a> F5HaplotypeContext<'a> {
         block: &F5BlockMarginals,
         permutation: &mut [u32],
     ) -> Result<F5BlockHaplotypes, Diagnostic> {
+        let weights = self.block_weights(block)?;
+        self.build_with_weights(attempt_index, block, permutation, &weights)
+    }
+
+    /// Construye el bloque con unos pesos ya resueltos, sin volver a sortear H.
+    fn build_with_weights(
+        &self,
+        attempt_index: u64,
+        block: &F5BlockMarginals,
+        permutation: &mut [u32],
+        weights: &[f64],
+    ) -> Result<F5BlockHaplotypes, Diagnostic> {
+        let marginal_max_abs_error = validated_maximum_weight(&self.scenario_id, weights)?;
         build_block(
             &self.scenario_id,
             self.root_seed,
-            self.weights,
-            self.marginal_max_abs_error,
+            weights,
+            marginal_max_abs_error,
             attempt_index,
             block,
             permutation,
         )
     }
+
+    /// Sortea H para el bloque y devuelve sus pesos efectivos.
+    fn block_weights(&self, block: &F5BlockMarginals) -> Result<Vec<f64>, Diagnostic> {
+        let haplotype_count = f5_block_haplotype_count(
+            &self.scenario_id,
+            self.root_seed,
+            self.distribution,
+            self.declared_weights.len(),
+            block.population_id(),
+            block.block_id(),
+        )?;
+        f5_block_haplotype_weights(self.declared_weights, haplotype_count).map_err(|detail| {
+            Diagnostic::f5_domain(
+                self.scenario_id.as_str(),
+                format!(
+                    "bloque {} de {}: {detail}",
+                    block.block_id().as_str(),
+                    block.population_id().as_str()
+                ),
+            )
+        })
+    }
+}
+
+/// Pesos efectivos de cada bloque×subpoblación de un escenario, en el orden
+/// canónico de la tabla de marginales.
+///
+/// Es la vía por la que la búsqueda resuelve H **una sola vez por unidad** y
+/// la reutiliza en todos sus intentos a través de
+/// [`build_f5_block_attempt_with_weights`]: el ámbito `block_haplotype_count`
+/// no lleva `attempt_index`, de modo que volver a sortearlo por intento daría
+/// el mismo valor y gastaría una derivación de subsemilla y un muestreo
+/// Poisson por intento sin cambiar un solo byte.
+///
+/// # Errors
+///
+/// Devuelve `GPS-CONF-101` si la configuración no reconstruye su identidad,
+/// `GPS-DOMAIN-101` si los pesos no son válidos y `GPS-INTERNAL-101` si el
+/// sorteo no puede completarse.
+pub fn resolve_f5_block_weights(
+    config: &EffectiveF5Config,
+    marginals: &F5MarginalTable,
+) -> Result<Vec<Vec<f64>>, Diagnostic> {
+    let context = F5HaplotypeContext::resolve(config)?;
+    marginals
+        .blocks()
+        .iter()
+        .map(|block| context.block_weights(block))
+        .collect()
 }
 
 /// `max_h(q_h)` sobre unos pesos que el perfil ya normalizó.
@@ -648,6 +908,13 @@ fn validated_maximum_weight(scenario_id: &ScenarioId, weights: &[f64]) -> Result
 /// de abrir un intento haplotípico: con V columnas no fijadas solo existen
 /// `2^V` vectores alélicos distintos, de modo que un H mayor obligaría a
 /// duplicar filas y ningún intercambio podría deshacerlo.
+///
+/// Quien la usa como **admisión** le pasa `h_max`, no el H de un bloque: con
+/// la cota superior el veredicto no puede depender del sorteo de ningún
+/// recuento, y por tanto un mismo escenario no puede ser válido con una
+/// semilla e inválido con otra por esta causa. La llamada de
+/// [`build_block`] repite la comprobación con el H construido y es solo una
+/// red: la cota superior ya la implica.
 fn ensure_block_represents_every_haplotype(
     scenario_id: &ScenarioId,
     haplotype_count: usize,
@@ -669,7 +936,7 @@ fn ensure_block_represents_every_haplotype(
             block.population_id().as_str(),
             block.block_id().as_str(),
             format!(
-                "el perfil declara {haplotype_count} haplotipos y las {variable_sites} columnas no fijadas del bloque solo distinguen {}",
+                "el perfil admite hasta {haplotype_count} haplotipos y las {variable_sites} columnas no fijadas del bloque solo distinguen {}",
                 capacity.unwrap_or(0)
             ),
         ));
@@ -689,6 +956,18 @@ fn build_block(
     let haplotype_count = weights.len();
     let site_count = block.sites().len();
     let internal = |detail: String| Diagnostic::f5_internal(scenario_id.as_str(), detail);
+
+    // Red de seguridad de la cota `H <= 2^V`. La admisión ya la exigió con
+    // `h_max`, que domina cualquier sorteo, así que este rechazo es
+    // inalcanzable mientras esa comprobación siga corriendo antes; se conserva
+    // porque es la única que ve el H realmente construido.
+    ensure_block_represents_every_haplotype(scenario_id, haplotype_count, block)?;
+    let buffer_length = permutation.len();
+    let permutation = permutation.get_mut(..haplotype_count).ok_or_else(|| {
+        internal(format!(
+            "el búfer de permutación mide {buffer_length} y el bloque construye {haplotype_count} filas"
+        ))
+    })?;
 
     let mut matrix = F5AlleleMatrix::zeroed(haplotype_count, site_count).ok_or_else(|| {
         internal(format!(
