@@ -1058,7 +1058,12 @@ Gravel se serializa directamente como `target_mean_r2=mu`. La antigua beta con
 `kappa=8.0` y sus cinco cuantiles queda como historia de la fuente, no participa
 en F5 ni cambia la media. El recurso conserva cita, bytes de digitalización,
 receta, valores y hashes; no es predeterminado y no se presenta como estimación
-exacta de 1000 Genomas.
+exacta de 1000 Genomas. Queda **reservado y no incorporado** desde el 13 de
+septiembre de 2026, porque la fuente publica la caída de `r²_÷` en centimorgans
+—desde 0,03 cM— y `ld_profile.tsv` la necesita en pares de base desde 1, de modo
+que completar el rango exigiría una tasa de recombinación supuesta y una
+extrapolación por debajo del primer punto medido; el registro está en F5.6.2 de
+[plan-implementacion-f5-0.1.md](./plan-implementacion-f5-0.1.md).
 
 La máscara opcional `excluded_regions.tsv` usa cabecera exacta
 `region_id\tsequence_id\tstart_1based\tend_1based`, coordenadas cerradas válidas

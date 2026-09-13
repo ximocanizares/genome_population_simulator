@@ -3192,19 +3192,95 @@ identificador del índice de copia.
     —`test_f2_5_vcf_ui` y
     `test_ui_technical_event_v2_round_trips_to_rust_validation`— que ya fallaban
     en `ed30562` y quedan fuera del alcance de este hito.
-- ☐ **F5.6.2.** Incorporar el perfil opcional
-  `human_ld_ragsdale_approx_v1` mediante su recurso versionado y receta de medias,
-  sin beta/cuantiles activos ni selección predeterminada.
+- ☐ **F5.6.2 — aplazada como ampliación futura (13 de septiembre de 2026).**
+  Incorporar el perfil opcional `human_ld_ragsdale_approx_v1` mediante su
+  recurso versionado y receta de medias, sin beta/cuantiles activos ni
+  selección predeterminada.
   - Depende de: F5.6.1.
   - Procede de: DTC-089 «Paquete de perfiles» y decisión funcional preservada.
-  - Cambia: recurso incorporado, licencia/cita y fixtures.
-  - Se comprueba con: SHA-256 de fuente/recurso, reproducción de cada `mu`,
-    ausencia de `kappa` en cálculo y selección exclusivamente explícita.
+  - Cambia: **nada**. El hito no se implementa: no hay recurso incorporado, ni
+    licencia o cita nuevas, ni fixtures. No existe `resources/f5/`.
+  - Se comprobaría con: SHA-256 de fuente/recurso, reproducción de cada `mu`,
+    ausencia de `kappa` en cálculo y selección exclusivamente explícita. Esas
+    cuatro comprobaciones siguen siendo el encargo de quien lo retome.
+  - **Decisión del usuario, 13 de septiembre de 2026: aplazamiento.** El perfil
+    incorporado nunca fue obligatorio. El borrador retirado que lo propuso decía
+    que la primera versión «**podrá** incluir» el perfil y nunca «deberá»
+    (`git show 81e6589:design/borrador-generacion-automatica-bloques-0.1.md`,
+    §2.1). F5 se cierra sin él: un perfil suministrado por la persona usuaria
+    cubre el mismo contrato y atraviesa el mismo validador. El aplazamiento
+    queda registrado como **DTF-058** en
+    `registro-ampliaciones-futuras-0.1.md`, que es el registro único de
+    capacidades funcionales excluidas de v1.
+  - **Motivo que decide: la fuente no cubre el rango de distancias que el perfil
+    necesita.** El eje x de la figura está en **centimorgans**, de 0,03 a 1 cM;
+    `ld_profile.tsv` trabaja en **pares de base** y sus bins deben cubrir todas
+    las distancias enteras de 1 a `Lmax-1`. Con la equivalencia humana habitual
+    de 1 cM ≈ 1 Mb —una aproximación, no un dato del artículo— la curva cubre de
+    unos 30 kb a 1 Mb, con dos consecuencias. Primera: convertir centimorgans a
+    pares de base exige una **tasa de recombinación supuesta** que ningún
+    contrato fija, que varía por región y población y que es justo lo que la
+    figura promedia. Segunda: de 1 pb a unos 30 kb **no hay ningún dato**, y ese
+    tramo es el grueso del rango exigido, de modo que habría que extrapolar
+    varios órdenes de magnitud por debajo del primer punto medido y publicarlo
+    bajo una cita ajena, que es precisamente lo que DTC-089 evita al exigir
+    «bytes de digitalización» y no una curva ajustada. **No es un problema de
+    licencia ni de precisión: la premisa del hito era errónea.** Quien lo retome
+    con esa misma figura se encontrará el mismo muro, y lo descubriría después
+    de digitalizar.
+  - **Dos hallazgos de la fuente, comprobados sobre la figura del preprint CC BY
+    y conservados para que nadie los «corrija» al revés.** El panel correcto es
+    el **2C**, como decía el borrador: su eje es `r²_÷`, el estimador que
+    DTC-089 manda usar, mientras que el **2B** es `r²_RH`, el de Rogers-Huff,
+    que el propio borrador prohíbe confundir con él; un resumen de búsqueda web
+    afirmó lo contrario y la imagen lo desmiente. Y las poblaciones publicadas
+    son **YRI, CDX, CEU, MXL y PUR**: el borrador retirado declaraba
+    `["CEU", "CHB", "MXL", "PUR", "YRI"]`, es decir **CDX, no CHB**, que son
+    poblaciones distintas —Dai de Xishuangbanna frente a Han de Pekín—. Quien
+    retome el hito debe usar CDX o no podrá llamar al perfil una aproximación a
+    esa figura.
+  - **Licencia: solo el preprint es digitalizable.** El artículo de revista
+    —*Molecular Biology and Evolution* 37(3):923-932 (2020), Oxford University
+    Press— es «all rights reserved». El preprint en bioRxiv
+    ([10.1101/557488](https://www.biorxiv.org/content/10.1101/557488v4)), mismo
+    título y mismos autores, es CC BY 4.0. Cualquier digitalización futura debe
+    partir de esta segunda versión y citarla como tal.
+  - **Cuatro decisiones materiales que siguen abiertas, además de los bytes.**
+    Primera: el paquete son **cinco** TSV y DTC-089 fija la procedencia solo de
+    las medias de LD; `block_lengths.tsv`, `snp_gaps.tsv`, `snp_spectrum.tsv` y
+    `haplotype_weights.tsv` del perfil incorporado no tienen fuente normativa
+    —el precedente F2.2.6 resuelve un caso análogo con literales propios
+    (64:12:8) y no con una digitalización—. Segunda: `src/f5_profile.rs` exige
+    que los bins de cada población terminen **exactamente** en `Lmax-1`, con
+    `Lmax` el máximo de `block_lengths.tsv` del mismo paquete, así que elegir
+    las longitudes de bloque y elegir hasta dónde llega la curva son una sola
+    decisión. Tercera: DTC-089 exige `population_profile_id` **igual** al
+    `population_id` de la subpoblación, sin remapeo, de modo que publicar
+    YRI/CDX/CEU/MXL/PUR obliga a quien use el perfil a nombrar así sus
+    subpoblaciones. Cuarta: `source_citation` y `source_license` son campos
+    obligatorios del metadata y hay que rellenarlos con las condiciones reales
+    de la versión digitalizada.
+  - **Tres verificaciones del estado actual que el aplazamiento no pierde.**
+    La **selección exclusivamente explícita ya se cumple estructuralmente**:
+    `schemas/config-f5-scenario-v1.schema.json` exige siempre
+    `profile_metadata_path` y `profile_metadata_sha256`, no hay predeterminado y
+    no existe ninguna resolución tipo `builtin:` en `src/` —la sintaxis
+    `profile = "builtin:human_ld_ragsdale_approx_v1"` murió con el borrador
+    retirado—; el único valor con forma de predeterminado es el marcador de
+    formulario `"profiles/profile.metadata.json"` de `ui/f5_editor.py`, que no
+    debe repuntarse nunca a un paquete incorporado. Un perfil incorporado
+    **no necesitaría vía de carga nueva**: entra por la misma frontera sellada
+    que uno suministrado, con sus **seis** identidades físicas —metadata y cinco
+    TSV— en `input_identities`, y `provenance_kind:"built_in"` ya está admitido
+    por el lector y por el esquema. Y **`kappa` no aparece hoy en ninguna ruta
+    de cálculo**: sus únicas apariciones en el árbol son prosa de este plan y de
+    DTC-089, ninguna en `src/`, `tests/` ni `ui/`.
 - ☐ **F5.6.3.** Ejecutar todos los gates, guardar evidencia y auditar las 46
   filas exactas de la matriz REQ→ACE→hito→prueba con hito F5, incluidas
   `REQ-VAL-54`, `REQ-MAN-70` y `REQ-SAL-02`, sin omitir filas compartidas ni
   incorporar filas ajenas al alcance.
-  - Depende de: F5.6.2.
+  - Depende de: F5.6.1. F5.6.2 queda aplazada como ampliación futura y no
+    bloquea el cierre.
   - Procede de: todos los REQ/ACE F5 y reglas de avance de la hoja de ruta.
   - Cambia: evidencia de cierre y estado de trazabilidad, no contrato biológico.
   - Se comprueba con: recuento mecánico exacto 46, unicidad de los 46 REQ,
