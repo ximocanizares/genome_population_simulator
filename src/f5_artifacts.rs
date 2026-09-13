@@ -114,6 +114,38 @@ pub const F5_TRUTH_PROJECTION_VERSION: &str = "f5-founder-truth-projection-v2";
 /// `projection.kind` de la cabecera v2.
 pub const F5_TRUTH_PROJECTION_KIND: &str = "f5_founder";
 
+/// Anchura máxima, en bytes, del literal decimal canónico de un `f64` F5.
+///
+/// `f64::to_string` es **posicional, nunca exponencial**: su anchura no la fija
+/// la precisión sino el exponente, de modo que no está acotada por los
+/// diecisiete dígitos significativos de la ida y vuelta. `f64::MIN_POSITIVE`
+/// ocupa 326 bytes y `f64::MAX`, 309. La notación exponencial sí está acotada
+/// por construcción: signo, un dígito, el punto, los dieciséis decimales que
+/// bastan para la ida y vuelta, la `e`, su signo y tres dígitos de exponente.
+pub const F5_CANONICAL_DECIMAL_MAX_BYTES: usize = 24;
+
+/// Literal decimal canónico de un `f64` publicado en un TSV F5.
+///
+/// Es el literal mínimo de ida y vuelta **de anchura acotada**: la forma
+/// posicional cuando cabe en [`F5_CANONICAL_DECIMAL_MAX_BYTES`] y la
+/// exponencial en cuanto no cabe. Las dos recuperan exactamente el mismo `f64`
+/// y la elección es una función determinista del valor, así que el mismo `f64`
+/// produce siempre los mismos bytes. Es lo que hace que la cota de 1024 bytes
+/// por fila TSV de `f5-resource-accounting-v9` sea cota superior: sin ella una
+/// sola columna `f64` podía ocupar trece veces esa cota.
+///
+/// Es también la forma que la admisión exige a los perfiles y la que el oráculo
+/// independiente reexige sobre los bytes publicados, de modo que acota además
+/// la anchura decimal **declarable** en una entrada.
+#[must_use]
+pub fn f5_canonical_decimal(value: f64) -> String {
+    let positional = value.to_string();
+    if positional.len() <= F5_CANONICAL_DECIMAL_MAX_BYTES {
+        return positional;
+    }
+    format!("{value:e}")
+}
+
 /// Un TSV del contrato: identificador, clase, ruta y cabecera literales.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct F5TsvContract {
@@ -1060,7 +1092,7 @@ fn write_haplotypes(
                     unit.population_id().as_str(),
                     unit.block_id().as_str(),
                     haplotype_id.as_str(),
-                    decimal(weights[rank]),
+                    f5_canonical_decimal(weights[rank]),
                 )
                 .map_err(|error| io(contract.path, "write_row", &error))?;
             }
@@ -1126,9 +1158,9 @@ fn write_frequencies(
                     block.block_id().as_str(),
                     column.site_id().as_str(),
                     column.polarity().as_str(),
-                    decimal(column.target_alt_af()),
-                    decimal(column.realized_alt_af()),
-                    decimal(column.abs_error()),
+                    f5_canonical_decimal(column.target_alt_af()),
+                    f5_canonical_decimal(column.realized_alt_af()),
+                    f5_canonical_decimal(column.abs_error()),
                 )
                 .map_err(|error| io(contract.path, "write_row", &error))?;
             }
@@ -1892,17 +1924,11 @@ fn write_record(writer: &mut impl Write, value: &Value) -> Result<(), Diagnostic
         .map_err(|error| io(F5_TRUTH_PATH, "write_record", &error))
 }
 
-/// Literal decimal mínimo de ida y vuelta, el mismo que la admisión exige a
-/// los perfiles.
-fn decimal(value: f64) -> String {
-    value.to_string()
-}
-
 fn finite_decimal(config: &EffectiveF5Config, value: f64) -> Result<String, Diagnostic> {
     if !value.is_finite() {
         return Err(internal(config, "un f64 publicado no es finito"));
     }
-    Ok(decimal(value))
+    Ok(f5_canonical_decimal(value))
 }
 
 fn bounded_decimal(config: &EffectiveF5Config, value: f64) -> Result<String, Diagnostic> {
@@ -1912,7 +1938,7 @@ fn bounded_decimal(config: &EffectiveF5Config, value: f64) -> Result<String, Dia
             "una media o error LD publicado no pertenece a [0,1]",
         ));
     }
-    Ok(decimal(value))
+    Ok(f5_canonical_decimal(value))
 }
 
 /// Base canónica como literal estático: la proyección la escribe tres veces

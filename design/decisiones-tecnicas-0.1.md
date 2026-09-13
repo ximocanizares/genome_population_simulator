@@ -1466,8 +1466,8 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   contabilidad; necesitarlos mayores es un defecto interno, no permiso para
   rebasar el presupuesto. Cada uno se deriva de los campos que el esquema
   obliga a publicar y de sus longitudes máximas —identificador de 64
-  caracteres, `u64` de 20 dígitos, literal `f64` mínimo de ida y vuelta de 24,
-  enumerados cerrados— y **no** de ninguna ejecución:
+  caracteres, `u64` de 20 dígitos, literal decimal de un `f64` de 24 bytes
+  **por construcción**, enumerados cerrados— y **no** de ninguna ejecución:
 
   - `2048` por SNP dentro de una copia. **Un SNP se publica tres veces en el
     mismo registro** —modificación del segmento, SNP vigente del fragmento e
@@ -1478,12 +1478,22 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
   - `4096` por registro de copia, sin sus SNP: peor caso **1566 bytes**,
     margen **2,62×**;
   - `4096` por genotipo: su lista `carriers` tiene exactamente `ploidy`
-    entradas, de modo que el peor caso es **3692 bytes** con ploidía 10 y el
-    margen, **1,11×**. Tampoco es generoso;
+    entradas, de modo que el peor caso crece 289 bytes por copia —1091 con
+    ploidía 1, **3692 con la ploidía máxima 10**— y el margen es **1,11×**.
+    Tampoco es generoso, y por eso el sobre queda **atado a la ploidía máxima
+    del contrato**: subirla a 12 llevaría el peor caso a 4270 bytes, y la
+    implementación lo convierte en un error de compilación en vez de en una
+    cota rota en silencio;
   - `1024` por fila TSV y por elemento JSON repetido. La fila más ancha es la
-    de `f5-founders.tsv`, con siete identificadores y un índice: **476
-    bytes**, margen **2,15×**. El elemento JSON más ancho de ancho fijo es el
-    de muestreo por bloque×subpoblación: **419 bytes**, margen **2,44×**;
+    de `f5-founders.tsv`, con siete identificadores y un índice: **476 bytes**,
+    publicada una sola vez, margen **2,15×**. El elemento JSON más ancho de
+    ancho fijo es el de muestreo por bloque×subpoblación, **419 bytes**, pero
+    `sampling`, `normalizations` y `subpopulations` se publican en **los dos
+    documentos** —efectivo y manifiesto— mientras `json_rows_bound` los cuenta
+    una sola vez: el coste real por elemento contado es **838 bytes** y el
+    margen, **1,22×**. Los resúmenes por sitio, `f_realized` y los nueve
+    enlaces solo aparecen en el manifiesto, de modo que su multiplicidad es
+    uno;
   - `S_bound` adicional por fila de `f5-haplotypes.tsv`. Su columna `alleles`
     tiene **exactamente `S` caracteres**, con `S_bound` hasta 4096, de modo que
     ningún sobre constante la acota: su parte constante son 242 bytes —tres
@@ -1494,6 +1504,28 @@ como si tuviera otra unidad. Las cotas conservadoras F5 son:
     bytes que crecen con la ploidía, más 735 bytes constantes que los 1024
     cubren con margen 1,39×. Su peor caso contractual es 1722 bytes con ploidía
     2 y **4354 con ploidía 10**, que desbordaba el sobre constante de 4096.
+
+  **La anchura decimal de un `f64` no es una propiedad del tipo: es una
+  construcción.** `f64::to_string` es **posicional y nunca exponencial**, de
+  modo que su anchura no la fijan los diecisiete dígitos significativos que
+  basta conservar para la ida y vuelta, sino el exponente:
+  `f64::MIN_POSITIVE` ocupa **326 bytes** y `f64::MAX`, 309. Los 24 bytes de las
+  derivaciones de arriba solo se garantizan por construcción, y de dos maneras
+  distintas según el documento:
+
+  - en **JSON** los escribe el serializador en notación exponencial en cuanto la
+    posicional sería larga, y su anchura máxima es la del propio formato: signo,
+    un dígito, el punto, los dieciséis decimales de la ida y vuelta, la `e`, su
+    signo y tres dígitos de exponente;
+  - en **TSV** los escribe el *literal decimal canónico F5*, que es el mínimo de
+    ida y vuelta **de anchura acotada**: la forma posicional mientras quepa en 24
+    bytes y la exponencial en cuanto no quepa. Las dos recuperan exactamente el
+    mismo `f64` y la elección es función determinista del valor. Es la misma
+    forma que la admisión exige a los perfiles y que el oráculo independiente
+    reexige sobre los bytes publicados, de modo que acota además la anchura
+    decimal **declarable** en una entrada. Sin ella una sola fila de
+    `f5-attempts.tsv`, con sus tres columnas `f64`, podía ocupar 1243 bytes y la
+    cota de 1024 dejaba de serlo.
 
   **Por qué la verdad se cuenta por copia y no por copia y secuencia.** Existe
   una `haplotype_copy` por copia y secuencia poblada —de ahí el término

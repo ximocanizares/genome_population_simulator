@@ -317,6 +317,12 @@ fn the_closure_record_cites_real_tests_and_declares_the_inherited_failures() {
             "el acta no puede esconder el fallo preexistente {inherited}"
         );
     }
+    // `evidence/f5.6/cierre.md` es **historia**: recuenta la deuda con el nombre
+    // que el algoritmo tenía el día del cierre. La cadena `v8` se fija aquí a
+    // propósito y no se actualiza a `v9` con el renombrado, porque el acta no se
+    // reescribe. Lo que v9 corrigió fue la cota de **salida**; los dos términos
+    // de memoria que el acta recuenta siguen abiertos con destino F9.7, y quien
+    // los cierre escribirá `v10` y actualizará este recuento con su propia acta.
     for debt in ["DTF-058", "f5-resource-accounting-v8"] {
         assert!(CLOSURE.contains(debt), "el acta tiene que recontar {debt}");
     }

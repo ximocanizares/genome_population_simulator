@@ -24,6 +24,7 @@ use crate::f5_admission::{
     AdmissionPhase, AdmittedInputIdentity, F5AdmissionReceipt, F5ResourceLedger, InputRole,
     LedgerCharge, OperationCost, OutputReservation, PhysicalInputIdentity, WorkingMemoryPeak,
 };
+use crate::haplotype::Ploidy;
 use crate::identity::{ReferenceId, SequenceId};
 use crate::reference_fasta::{empty_fasta, empty_header, input_error, invalid_symbol};
 
@@ -50,6 +51,47 @@ pub const F5_HARD_WORKING_MEMORY_LIMIT: u64 = 1 << 33;
 /// esta revisión del contrato.
 pub const F5_HARD_OUTPUT_LIMIT: u64 = 1 << 31;
 
+/// Sobre por fila publicada de los siete TSV F5.
+///
+/// Cubre la fila más ancha del contrato, la de `f5-founders.tsv` con siete
+/// identificadores y un índice: 476 bytes, margen 2,15×. La fila de
+/// `f5-haplotypes.tsv` recibe además `S_bound` bytes por su columna `alleles`.
+/// La cota solo se sostiene porque cada columna `f64` está acotada a
+/// [`crate::f5_artifacts::F5_CANONICAL_DECIMAL_MAX_BYTES`].
+pub const F5_TSV_ROW_ENVELOPE_BYTES: u64 = 1_024;
+/// Sobre por elemento JSON repetido de efectivo y manifiesto.
+///
+/// `sampling`, `normalizations` y `subpopulations` se publican en los **dos**
+/// documentos mientras `json_rows_bound` los cuenta una vez, de modo que el
+/// coste por elemento contado es el doble de su peor caso: 838 bytes, margen
+/// 1,22×.
+pub const F5_JSON_ELEMENT_ENVELOPE_BYTES: u64 = 1_024;
+/// Suplemento por copia del resumen por sitio, que publica siete matrices de
+/// dosis de `ploidy+1` entradas.
+pub const F5_SITE_SUMMARY_PLOIDY_BYTES: u64 = 512;
+
+/// Sobre por registro `genotype` publicado en `truth.jsonl`.
+///
+/// Su lista `carriers` tiene **exactamente `ploidy`** entradas, de modo que el
+/// peor caso contractual crece con la ploidía: 1091 bytes con ploidía 1 y 3692
+/// con [`Ploidy::MAX`]. Ese crecimiento es de 289 bytes por copia —el objeto
+/// `carrier` con tres identificadores de 64 caracteres, su índice de copia y su
+/// coma—, y los 802 restantes son la parte que no depende de la ploidía.
+const F5_GENOTYPE_ENVELOPE_BYTES: u64 = 4_096;
+/// Parte del registro `genotype` que no depende de la ploidía.
+const F5_GENOTYPE_FIXED_WORST_CASE_BYTES: u64 = 802;
+/// Coste contractual de cada entrada de `carriers`.
+const F5_GENOTYPE_CARRIER_WORST_CASE_BYTES: u64 = 289;
+/// El sobre solo es cota superior mientras la ploidía máxima no suba. Atarlo
+/// aquí convierte una subida de [`Ploidy::MAX`] en un error de compilación en
+/// vez de en una cota silenciosamente rota: con ploidía 12 el peor caso sería
+/// 4270 bytes.
+const _: () = assert!(
+    F5_GENOTYPE_FIXED_WORST_CASE_BYTES + F5_GENOTYPE_CARRIER_WORST_CASE_BYTES * Ploidy::MAX as u64
+        <= F5_GENOTYPE_ENVELOPE_BYTES,
+    "el sobre por genotipo deja de ser cota superior con esta ploidía máxima"
+);
+
 pub const F5_DEFAULT_MAX_LAYOUT_ATTEMPTS: u64 = 1_000;
 pub const F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS: u64 = 100;
 pub const F5_DEFAULT_MAX_SWAP_PROPOSALS: u64 = 100_000;
@@ -57,7 +99,7 @@ pub const F5_DEFAULT_MAX_HAPLOTYPE_CELLS: u64 = 16_777_216;
 const F5_SCAN_FIXED_MEMORY_BYTES: u64 = 65_536;
 const F5_SCAN_RETAINED_ITEM_BYTES: u64 = 256;
 
-/// Bytes que v8 concede por copia fundadora retenida.
+/// Bytes que v9 concede por copia fundadora retenida.
 ///
 /// El repositorio de identidades conserva una `F5FounderCopy` —72 B— por cada
 /// entrada de `X=C_total*sequence_count`, su entrada de pertenencia —el
@@ -66,7 +108,7 @@ const F5_SCAN_RETAINED_ITEM_BYTES: u64 = 256;
 /// siguiente múltiplo de 64 ya presente en la fórmula.
 const F5_FOUNDER_COPY_BYTES: u64 = 192;
 
-/// Bytes que v8 concede por asiento de `F5FounderUnit::assignments`.
+/// Bytes que v9 concede por asiento de `F5FounderUnit::assignments`.
 ///
 /// Cada `F5CopyAssignment` mide exactamente 32 B —identificador compartido,
 /// índice de copia y rango haplotípico— y hay `B*C_total`. El presupuesto
@@ -75,7 +117,7 @@ const F5_FOUNDER_COPY_BYTES: u64 = 192;
 /// asiento.
 const F5_COPY_ASSIGNMENT_BYTES: u64 = 64;
 
-/// Bytes que v8 concede por identidad registrada.
+/// Bytes que v9 concede por identidad registrada.
 ///
 /// DTC-039 exige que «toda colisión se detecta», de modo que el registro
 /// conserva una entrada por identidad derivada y no puede soltarla cuando su
@@ -639,7 +681,7 @@ impl F5ResourcePreflight {
         Ok(())
     }
 
-    /// Sella la admisión uniendo la proyección v8 con su receipt. Es la única
+    /// Sella la admisión uniendo la proyección v9 con su receipt. Es la única
     /// transición de admitido a sellado y no recalcula ningún coste.
     pub(crate) fn seal(self, receipt: F5AdmissionReceipt) -> SealedF5Admission {
         SealedF5Admission {
@@ -653,7 +695,7 @@ impl F5ResourcePreflight {
 /// layout, publicación o proyección de contrato.
 ///
 /// Une el receipt —identidades físicas y contabilidad por fase— con la
-/// proyección de recursos v8 que las mismas lecturas produjeron. No existe
+/// proyección de recursos v9 que las mismas lecturas produjeron. No existe
 /// constructor público: solo la máquina de admisión completa puede sellarla,
 /// y ningún receipt v5/v6 puede aceptarse ni migrarse a esta forma.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -674,7 +716,7 @@ impl SealedF5Admission {
     }
 
     /// Proyección exacta de `resource_preflight` que efectivo y manifiesto v5
-    /// copian escalar y posicionalmente: algoritmo v8, identidades físicas en
+    /// copian escalar y posicionalmente: algoritmo v9, identidades físicas en
     /// orden de rol contractual, fases en el orden cerrado de la máquina y los
     /// veintisiete escalares del algoritmo.
     #[must_use]
@@ -1407,19 +1449,24 @@ fn reserve_known_before_scan(
         [
             other.output_bytes(),
             1_048_576,
-            mul("1024*tsv_rows", 1_024, tsv_rows, config)?,
+            mul("1024*tsv_rows", F5_TSV_ROW_ENVELOPE_BYTES, tsv_rows, config)?,
             mul(
                 "S_bound*B*N*H",
                 site_bound,
                 mul("B*N*H", bn, h, config)?,
                 config,
             )?,
-            mul("1024*json_rows", 1_024, json_rows, config)?,
+            mul(
+                "1024*json_rows",
+                F5_JSON_ELEMENT_ENVELOPE_BYTES,
+                json_rows,
+                config,
+            )?,
             mul(
                 "512*(ploidy+1)*B*N*S",
                 mul(
                     "512*(ploidy+1)",
-                    512,
+                    F5_SITE_SUMMARY_PLOIDY_BYTES,
                     add("ploidy+1", u64::from(config.ploidy()), 1, config)?,
                     config,
                 )?,
@@ -1429,7 +1476,7 @@ fn reserve_known_before_scan(
             65_536,
             mul(
                 "4096*G",
-                4_096,
+                F5_GENOTYPE_ENVELOPE_BYTES,
                 mul("G", founder_count, k_bound, config)?,
                 config,
             )?,
@@ -2061,7 +2108,7 @@ fn preflight_resolved_f5_resources(
                 mul("C_total*K_bound", c_total, k_bound, config)?,
                 config,
             )?,
-            mul("4096*G_bound", 4_096, g_bound, config)?,
+            mul("4096*G_bound", F5_GENOTYPE_ENVELOPE_BYTES, g_bound, config)?,
         ],
     )?;
     // Los sobres por fila/elemento v9. El sobre constante de 4096 bytes de v8
@@ -2075,19 +2122,29 @@ fn preflight_resolved_f5_resources(
         [
             other.output_bytes(),
             1_048_576,
-            mul("1024*tsv_rows_bound", 1_024, tsv_rows_bound, config)?,
+            mul(
+                "1024*tsv_rows_bound",
+                F5_TSV_ROW_ENVELOPE_BYTES,
+                tsv_rows_bound,
+                config,
+            )?,
             mul(
                 "S_bound*haplotype_rows_bound",
                 site_bound_per_block,
                 haplotype_rows_bound,
                 config,
             )?,
-            mul("1024*json_rows_bound", 1_024, json_rows_bound, config)?,
+            mul(
+                "1024*json_rows_bound",
+                F5_JSON_ELEMENT_ENVELOPE_BYTES,
+                json_rows_bound,
+                config,
+            )?,
             mul(
                 "512*(ploidy+1)*site_summary_rows_bound",
                 mul(
                     "512*(ploidy+1)",
-                    512,
+                    F5_SITE_SUMMARY_PLOIDY_BYTES,
                     add("ploidy+1", ploidy, 1, config)?,
                     config,
                 )?,
@@ -2622,7 +2679,7 @@ impl<'a> EligibleScan<'a> {
     /// La longitud viaja con el ID porque es el único punto de la ejecución
     /// donde existe: nace de contar bases y muere al cambiar de cabecera. Se
     /// retiene bajo el mismo cargo de 256 bytes por secuencia que la fórmula
-    /// v8 ya concede a `retained_sequence_ids`, de modo que no añade ningún
+    /// v9 ya concede a `retained_sequence_ids`, de modo que no añade ningún
     /// término nuevo.
     fn record_retained_id(&mut self, sequence_id: &str, length_bp: u64) -> Result<(), Diagnostic> {
         // Incluye el ID retenido y, cuando B ya es conocido, el trabajo futuro

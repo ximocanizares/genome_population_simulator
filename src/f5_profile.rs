@@ -14,6 +14,7 @@ use crate::f5_admission::{
     OperationCost, PhysicalInputIdentity, ResourceDimension, WorkingMemoryPeak,
     input_identity_mismatch_diagnostic,
 };
+use crate::f5_artifacts::f5_canonical_decimal;
 use crate::reference_fasta::input_error;
 use serde_json::{Map, Value};
 
@@ -1115,15 +1116,19 @@ fn canonical_u64(path: &Path, value: &str) -> Result<u64, Diagnostic> {
         .parse()
         .map_err(|_| domain(path, "entero fuera de u64"))
 }
+/// Exige el literal decimal canónico de F5, que es el mínimo de ida y vuelta
+/// **de anchura acotada**. La anchura no es un detalle estético: `f64::to_string`
+/// es posicional y llega a 326 bytes, de modo que sin esta cota una columna de
+/// perfil podía desbordar por sí sola la cota de 1024 bytes por fila publicada.
 fn canonical_f64(path: &Path, value: &str) -> Result<f64, Diagnostic> {
     let parsed = value
         .parse::<f64>()
         .map_err(|_| format_error(path, "float", "f64 inválido"))?;
-    if !parsed.is_finite() || parsed.to_string() != value {
+    if !parsed.is_finite() || f5_canonical_decimal(parsed) != value {
         return Err(format_error(
             path,
             "float",
-            "f64 no usa el decimal mínimo de ida y vuelta",
+            "f64 no usa el decimal canónico de ida y vuelta y anchura acotada",
         ));
     }
     Ok(parsed)

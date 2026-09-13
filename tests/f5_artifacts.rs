@@ -21,8 +21,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use genome_population_simulator::application::{EffectiveF5Config, load_and_validate_f5_config};
 use genome_population_simulator::diagnostics::Diagnostic;
 use genome_population_simulator::f5_artifacts::{
-    F5_TSV_CONTRACTS, F5ReferenceSequences, F5SuccessArtifacts, F5SuccessRequest,
-    write_f5_success_artifacts,
+    F5_CANONICAL_DECIMAL_MAX_BYTES, F5_TSV_CONTRACTS, F5ReferenceSequences, F5SuccessArtifacts,
+    F5SuccessRequest, f5_canonical_decimal, write_f5_success_artifacts,
 };
 use genome_population_simulator::f5_founders::{
     F5FounderAssignment, F5FounderIdentities, assign_f5_founders, materialize_f5_founder_identities,
@@ -31,7 +31,7 @@ use genome_population_simulator::f5_layout::{
     F5LayoutRequest, F5PhysicalLayout, build_f5_physical_layout,
 };
 use genome_population_simulator::f5_preflight::{
-    F5OtherResources, SealedF5Admission, recover_sealed_f5_admission,
+    F5_TSV_ROW_ENVELOPE_BYTES, F5OtherResources, SealedF5Admission, recover_sealed_f5_admission,
 };
 use genome_population_simulator::f5_search::{F5HaplotypeSearch, search_f5_haplotypes};
 use genome_population_simulator::identity::{ExecutionId, SequenceId};
@@ -4122,5 +4122,294 @@ fn the_writer_peak_fits_the_sealed_budget_and_does_not_grow_with_the_block_count
         "el pico creció {} bytes al pasar de {small_blocks} a {large_blocks} bloques, \
          más de los {allowance} que los índices de posición necesitan",
         large_peak.saturating_sub(small_peak)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Sobres por fila de `f5-resource-accounting-v9` contra los bytes publicados
+// ---------------------------------------------------------------------------
+
+/// Columnas `f64` de cada TSV, por índice, en el orden de `F5_TSV_CONTRACTS`.
+///
+/// Son las únicas cuyo ancho no lo fija el contrato con una longitud máxima
+/// —identificador, entero, enumerado o base— sino el valor. `NA` aparece en dos
+/// de ellas cuando el bin no es evaluable y también cabe en la cota.
+const DECIMAL_COLUMNS: [&[usize]; 7] = [
+    &[],           // f5-block-layout
+    &[],           // f5-sites
+    &[4],          // f5-haplotypes: q
+    &[4, 5, 6],    // f5-frequencies: target, realized, abs_error
+    &[6, 7, 8, 9], // f5-ld-evaluation: mean_r2, target, max_abs_error, abs_error
+    &[],           // f5-founders
+    &[8, 9, 10],   // f5-attempts: max_r2, sum_r2, max_marginal
+];
+
+/// Forma contractual de una fila TSV: cuántas columnas de cada clase lleva.
+///
+/// Cada clase tiene una anchura máxima que el contrato fija —identificador de
+/// 64 caracteres, `u64` de 20 dígitos, base de 1, enumerado su literal más
+/// largo, decimal su anchura canónica— salvo `alleles`, que tiene exactamente
+/// `S_bound` caracteres. Los separadores son un TAB por columna menos uno más
+/// el LF final, es decir tantos bytes como columnas.
+struct RowShape {
+    identifiers: u64,
+    integers: u64,
+    decimals: u64,
+    bases: u64,
+    widest_enum: u64,
+    columns: u64,
+    /// Solo `f5-haplotypes.tsv`, por su columna `alleles`.
+    alleles: bool,
+}
+
+impl RowShape {
+    /// Peor caso contractual de la fila, en bytes, compuesto clase a clase.
+    fn worst_case_bytes(&self, site_bound: u64, decimal_bytes: u64) -> u64 {
+        64 * self.identifiers
+            + 20 * self.integers
+            + decimal_bytes * self.decimals
+            + self.bases
+            + self.widest_enum
+            + self.columns
+            + if self.alleles { site_bound } else { 0 }
+    }
+}
+
+const fn shape(
+    identifiers: u64,
+    integers: u64,
+    decimals: u64,
+    bases: u64,
+    widest_enum: u64,
+    columns: u64,
+    alleles: bool,
+) -> RowShape {
+    RowShape {
+        identifiers,
+        integers,
+        decimals,
+        bases,
+        widest_enum,
+        columns,
+        alleles,
+    }
+}
+
+/// Las siete formas, en el orden de `F5_TSV_CONTRACTS`. Los enumerados más
+/// largos son `negative`, `not_applicable` y `false`.
+fn row_shapes() -> [RowShape; 7] {
+    [
+        shape(2, 3, 0, 0, 0, 5, false),   // f5-block-layout
+        shape(3, 2, 0, 2, 0, 7, false),   // f5-sites
+        shape(3, 1, 1, 0, 0, 6, true),    // f5-haplotypes
+        shape(3, 0, 3, 0, 8, 7, false),   // f5-frequencies
+        shape(2, 3, 4, 0, 14, 10, false), // f5-ld-evaluation
+        shape(7, 1, 0, 0, 0, 8, false),   // f5-founders
+        shape(2, 6, 3, 0, 5, 12, false),  // f5-attempts
+    ]
+}
+
+/// Cada fila publicada cabe en el sobre que la admisión le reservó, ese sobre
+/// cubre el peor caso contractual de la fila, y ningún literal decimal
+/// publicado desborda su anchura canónica.
+///
+/// **Qué mide y por qué hacía falta.** `f5-resource-accounting-v9` reserva
+/// [`F5_TSV_ROW_ENVELOPE_BYTES`] por fila TSV —más `S_bound` en la de
+/// haplotipos, por su columna `alleles`—. Hasta ahora ninguna prueba comparaba
+/// esa reserva con **bytes publicados de verdad**: se comparaban fórmulas contra
+/// fórmulas. Esta los mide sobre el paquete, y consume la constante del
+/// preflight en vez de repetir su literal, de modo que no puede quedarse atrás
+/// si el sobre cambia.
+///
+/// **La cota por fila se sostiene por composición, no por medición, y conviene
+/// decirlo sin adornos.** La cadena es `medido <= peor caso <= sobre`, y sus dos
+/// eslabones son aserciones distintas:
+///
+/// 1. *Composición.* El peor caso contractual de la fila —columnas fijas más `k`
+///    decimales de anchura canónica— cabe en el sobre. **Es el eslabón que
+///    sostiene la cota.** La ejercitan dos mutaciones: bajar
+///    [`F5_TSV_ROW_ENVELOPE_BYTES`] y ensanchar
+///    [`F5_CANONICAL_DECIMAL_MAX_BYTES`].
+/// 2. *Medición contra el peor caso.* Ninguna fila publicada supera el peor caso
+///    de su propia forma. La ejercita devolver el formateador a `to_string()`:
+///    la fila de `f5-haplotypes.tsv` pasa a medir 398 bytes contra un peor caso
+///    de 245.
+/// 3. *Anchura de campo.* Ningún decimal publicado excede su anchura canónica,
+///    que es la premisa de (1). La ejercita la misma mutación, y también
+///    `the_canonical_decimal_is_bounded_by_construction_and_round_trips`.
+///
+/// La cuarta aserción —que la fila medida cabe en el sobre— es la que enuncia el
+/// contrato literalmente, y **está implicada por (1) y (2)**: ninguna mutación de
+/// esta batería puede dispararla sin disparar antes una de las dos. Se conserva
+/// porque es la frase del contrato y no cuesta nada, no porque aporte poder
+/// discriminante. No hay forma de ejercitarla por separado: el peor caso
+/// contractual de la fila de `f5-attempts.tsv`, con sus tres columnas `f64`, no
+/// es alcanzable con los valores que una ejecución produce, de modo que ninguna
+/// fila real se acerca al sobre.
+///
+/// **El fixture.** Declara el peso haplotípico más estrecho que el contrato
+/// admite —`is_probability` solo exige `(0,1]`, así que un subnormal entra— y lo
+/// escribe **con el propio formateador canónico**, de modo que el perfil es
+/// admisible tanto con la anchura acotada como sin ella: lo que discrimina es la
+/// medición, no la admisión.
+#[test]
+fn published_rows_fit_their_envelope_and_no_decimal_exceeds_its_canonical_width() {
+    let narrowest = f5_canonical_decimal(f64::MIN_POSITIVE);
+    let fixture = Fixture {
+        weights: vec![narrowest.as_str(), "0.5", "0.5"],
+        ..Fixture::default()
+    };
+    let published = publish("published-row-envelope", &fixture);
+    let site_bound = published.chain.sealed.site_bound_per_block();
+    let package = published.package();
+    let shapes = row_shapes();
+
+    let mut published_narrowest = 0_u64;
+    let mut rows_measured = 0_u64;
+    let mut compositions_checked = 0_u64;
+    for (index, contract) in F5_TSV_CONTRACTS.iter().enumerate() {
+        let shape = &shapes[index];
+        let envelope = F5_TSV_ROW_ENVELOPE_BYTES + if shape.alleles { site_bound } else { 0 };
+
+        // Controles positivos de la tabla de formas: si se desviara del
+        // contrato, las tres aserciones medirían otra cosa sin avisar.
+        assert_eq!(
+            shape.columns,
+            u64::try_from(contract.header().split('\t').count()).expect("columnas"),
+            "{}: la forma declara {} columnas",
+            contract.path(),
+            shape.columns
+        );
+        assert_eq!(
+            shape.decimals,
+            u64::try_from(DECIMAL_COLUMNS[index].len()).expect("decimales"),
+            "{}: la forma y las columnas decimales no concuerdan",
+            contract.path()
+        );
+
+        // (2) Composición: el peor caso contractual cabe en el sobre.
+        let worst_case = shape.worst_case_bytes(
+            site_bound,
+            u64::try_from(F5_CANONICAL_DECIMAL_MAX_BYTES).expect("anchura"),
+        );
+        compositions_checked += 1;
+        assert!(
+            worst_case <= envelope,
+            "{}: el peor caso contractual de la fila son {worst_case} B y su sobre v9 reserva {envelope}",
+            contract.path()
+        );
+
+        let rows = read_tsv(&package, index).expect("TSV publicado legible");
+        let text =
+            std::str::from_utf8(package.file(contract.path()).expect("artefacto")).expect("UTF-8");
+        // (1) Medición: cada fila real cabe en el sobre y en su peor caso.
+        for line in text.lines().skip(1) {
+            let measured = u64::try_from(line.len() + 1).expect("fila medible");
+            rows_measured += 1;
+            assert!(
+                measured <= envelope,
+                "{}: una fila publicada mide {measured} B y su sobre v9 reserva {envelope}",
+                contract.path()
+            );
+            assert!(
+                measured <= worst_case,
+                "{}: una fila publicada mide {measured} B y su peor caso contractual son {worst_case}",
+                contract.path()
+            );
+        }
+        // (3) Anchura de campo.
+        for row in &rows {
+            for column in DECIMAL_COLUMNS[index] {
+                let field = &row[*column];
+                if field == "NA" {
+                    continue;
+                }
+                if field == &narrowest {
+                    published_narrowest += 1;
+                }
+                assert!(
+                    field.len() <= F5_CANONICAL_DECIMAL_MAX_BYTES,
+                    "{}: el literal {field:?} mide {} B y la anchura canónica es {F5_CANONICAL_DECIMAL_MAX_BYTES}",
+                    contract.path(),
+                    field.len()
+                );
+            }
+        }
+    }
+
+    // Controles positivos: sin ellos la prueba pasaría sobre un paquete vacío o
+    // sobre un fixture cuyos decimales fueran todos cortos por casualidad.
+    assert_eq!(
+        compositions_checked, 7,
+        "las siete formas tienen que medirse"
+    );
+    assert!(rows_measured >= 7, "se midieron {rows_measured} filas");
+    assert!(
+        published_narrowest > 0,
+        "el subnormal declarado tiene que haber llegado a una columna publicada"
+    );
+    assert_eq!(
+        f64::MIN_POSITIVE.to_string().len(),
+        326,
+        "control: el valor elegido es realmente extremo en la forma posicional"
+    );
+}
+
+/// La anchura decimal canónica está acotada **por construcción**, y va y vuelve.
+///
+/// Barre `f64` adversarios —los extremos del tipo y un generador determinista—
+/// y exige las dos propiedades de las que cuelga la cota por fila: el literal
+/// nunca excede [`F5_CANONICAL_DECIMAL_MAX_BYTES`] y recupera exactamente el
+/// mismo `f64`. La segunda impide «acotar» truncando.
+///
+/// **Cómo discrimina.** Con `f5_canonical_decimal` devolviendo `to_string()`, el
+/// primer subnormal del barrido da 326 bytes y la aserción muere.
+#[test]
+fn the_canonical_decimal_is_bounded_by_construction_and_round_trips() {
+    let check = |value: f64| {
+        let literal = f5_canonical_decimal(value);
+        assert!(
+            literal.len() <= F5_CANONICAL_DECIMAL_MAX_BYTES,
+            "{literal:?} mide {} B",
+            literal.len()
+        );
+        assert_eq!(
+            literal.parse::<f64>().map(f64::to_bits),
+            Ok(value.to_bits()),
+            "{literal:?} no recupera el mismo f64"
+        );
+    };
+    for value in [
+        f64::MIN_POSITIVE,
+        -f64::MIN_POSITIVE,
+        f64::MIN,
+        f64::MAX,
+        f64::from_bits(1),
+        -f64::from_bits(1),
+        0.0,
+        -0.0,
+        0.5,
+        0.1 + 0.2,
+        1e-300,
+        1e300,
+    ] {
+        check(value);
+    }
+    // Barrido determinista sobre patrones de bits, sin RNG del sistema.
+    let mut bits = 0_u64;
+    let mut finite = 0_u64;
+    for _ in 0..200_000 {
+        bits = bits
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let value = f64::from_bits(bits);
+        if value.is_finite() {
+            finite += 1;
+            check(value);
+        }
+    }
+    assert!(
+        finite > 100_000,
+        "control: el barrido tiene que haber probado f64 finitos, y probó {finite}"
     );
 }

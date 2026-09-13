@@ -2,8 +2,12 @@
 
 Todos los TSV F5 v1 son UTF-8 sin BOM, separador TAB, LF final obligatorio,
 cabecera única, sin comillas, comentarios, líneas vacías ni columnas extra. Los
-enteros son decimales canónicos sin signo y los `f64` usan el literal mínimo de
-ida y vuelta. Cada fichero se ordena por la clave indicada.
+enteros son decimales canónicos sin signo y los `f64` usan el literal decimal
+canónico F5: el mínimo de ida y vuelta **de anchura acotada a 24 bytes**, que es
+la forma posicional mientras quepa y la exponencial en cuanto no quepa. La cota
+de anchura es normativa y no estética: `f64::to_string` es posicional y llega a
+326 bytes, con lo que una sola columna desbordaría la cota de bytes publicados
+que `f5-resource-accounting-v9` reserva por fila. Cada fichero se ordena por la clave indicada.
 
 Cada enlace de manifiesto es un objeto cerrado `artifact_id`, `artifact_kind`,
 `schema_version="1"`, `path`, `size_bytes:u64` y `sha256` hexadecimal en

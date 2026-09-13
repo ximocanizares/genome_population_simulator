@@ -1,4 +1,4 @@
-//! Frontera física y contabilidad incremental de la admisión F5 v8.
+//! Frontera física y contabilidad incremental de la admisión F5 v9.
 //!
 //! Este módulo no conoce parsers de perfil, referencia ni layout. Su contrato
 //! es deliberadamente pequeño: un mismo handle cuenta, hashea y acota una
@@ -265,7 +265,7 @@ pub enum LedgerCharge {
     Output(OutputReservation),
 }
 
-/// Ledger acumulativo de la máquina de estados v8.
+/// Ledger acumulativo de la máquina de estados v9.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct F5ResourceLedger {
     limits: LedgerLimits,
@@ -1087,7 +1087,7 @@ const REQUIRED_RECEIPT_ROLES: [InputRole; 9] = [
     InputRole::ReferenceFasta,
 ];
 
-/// Recibo sellado de la admisión física F5 v8.
+/// Recibo sellado de la admisión física F5 v9.
 ///
 /// Une, en un único objeto indivisible, las identidades de todas las entradas
 /// realmente leídas y la contabilidad cerrada de cada fase. No existe ninguna

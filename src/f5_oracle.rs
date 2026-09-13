@@ -129,6 +129,7 @@ use crate::diagnostics::Diagnostic;
 use crate::f5_artifacts::{
     F5_TRUTH_ARTIFACT_ID, F5_TRUTH_ARTIFACT_KIND, F5_TRUTH_PATH, F5_TRUTH_PROJECTION_KIND,
     F5_TRUTH_PROJECTION_VERSION, F5_TRUTH_SCHEMA_VERSION, F5_TSV_CONTRACTS, F5_TSV_SCHEMA_VERSION,
+    f5_canonical_decimal,
 };
 use crate::f5_profile::{
     F5_PROFILE_NORMALIZATION_ALGORITHM, F5_PROFILE_NORMALIZATION_TOLERANCE, F5NamedProbability,
@@ -517,7 +518,12 @@ impl F5GenotypeModel {
     }
 }
 
-/// Resumen MAN-70 de un locus×subpoblación, con los nueve vectores por dosis.
+/// Resumen MAN-70 de un locus×subpoblación, con los siete vectores por dosis.
+///
+/// Siete, no nueve: esperados —probabilidades, frecuencias y recuentos—,
+/// realizados —frecuencias y recuentos— y recontados —frecuencias y recuentos—.
+/// Cada uno tiene `ploidy+1` entradas, que es lo que hace que el sobre de este
+/// registro en `f5-resource-accounting-v9` crezca con la ploidía.
 #[derive(Clone, Debug, PartialEq)]
 pub struct F5InitializationSummary {
     population_id: String,
@@ -1419,16 +1425,19 @@ fn canonical_u64(cause: F5OracleCause, path: &str, value: &str) -> Checked<u64> 
         .map_err(|_| reject(cause, path, "integer", format!("{value:?} no cabe en u64")))
 }
 
+/// Reexige sobre los bytes publicados el literal decimal canónico de F5. Como
+/// el resto de contratos literales que este módulo comparte —rutas, clases y
+/// versiones—, la forma canónica es contrato y no estado del productor.
 fn canonical_f64(cause: F5OracleCause, path: &str, value: &str) -> Checked<f64> {
     let parsed: f64 = value
         .parse()
         .map_err(|_| reject(cause, path, "float", format!("{value:?} no es un f64")))?;
-    if !parsed.is_finite() || parsed.to_string() != value {
+    if !parsed.is_finite() || f5_canonical_decimal(parsed) != value {
         return Err(reject(
             cause,
             path,
             "float",
-            format!("{value:?} no es el decimal mínimo de ida y vuelta"),
+            format!("{value:?} no es el decimal canónico de anchura acotada"),
         ));
     }
     Ok(parsed)

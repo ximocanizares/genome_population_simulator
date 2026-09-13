@@ -3729,8 +3729,8 @@ los literales exactos de `src/f5_artifacts.rs`, no lo están:
 | Por SNP dentro de una copia | **1 659 B** | 2 048 | **1,23×** |
 | Parte fija de `haplotype_copy` | 1 566 B | 4 096 | 2,62× |
 | `genotype`, ploidía 10 | **3 692 B** | 4 096 | **1,11×** |
-| Fila TSV más ancha (`f5-founders.tsv`) | 476 B | 1 024 | 2,15× |
-| Elemento JSON de ancho fijo (muestreo) | 419 B | 1 024 | 2,44× |
+| Fila TSV más ancha (`f5-founders.tsv`), publicada una vez | 476 B | 1 024 | 2,15× |
+| Elemento JSON de ancho fijo (muestreo), publicado en los **dos** documentos | 2×419 = 838 B | 1 024 | 1,22× |
 
 **Los dos sobres que el encargo quería estrechar se quedan como están.** La
 apariencia de exceso venía de dos errores de lectura, y conviene dejarlos
@@ -3789,7 +3789,7 @@ Los sobres nuevos, con su origen y su margen:
 |---|---|---|---|
 | `1024` por fila TSV | 7 identificadores y un índice de `f5-founders.tsv` | 476 B | 2,15× |
 | `+ S_bound` por fila haplotípica | los `S` caracteres de `alleles`; los 1024 cubren sus 242 B constantes | 242+S | 4,23× sobre la parte constante |
-| `1024` por elemento JSON | el objeto de muestreo por bloque×subpoblación | 419 B | 2,44× |
+| `1024` por elemento JSON | el objeto de muestreo por bloque×subpoblación, **publicado en efectivo y manifiesto** mientras `json_rows_bound` lo cuenta una vez | 2×419 = 838 B | 1,22× |
 | `+ 512*(ploidy+1)` por resumen por sitio | `329*(ploidy+1)` B de las siete matrices de dosis; los 1024 cubren sus 735 B constantes | 1064+329·P | 1,47×–1,53× uniforme |
 
 `haplotype_rows_bound = B*N_pop*H` y `site_summary_rows_bound = B*N_pop*S_bound`
@@ -3856,10 +3856,30 @@ Se buscó con las dos ortografías —`accounting-v8` y `accounting_v8`— sobre
 | `design/{decisiones-tecnicas, arquitectura}-0.1.md` | contrato vigente | v9 |
 | `evidence/f5.6/cierre.md`, §11 de este plan, narrativa histórica | **historia**, no contrato | intacto a propósito |
 
-A diferencia de §11.4 **no había copias silenciosas**: el rediseño de v8 dejó
-una sola constante de Rust y un solo `const` de esquema, y el manifiesto ya
-referenciaba el esquema efectivo en vez de duplicarlo. `ui/f5_editor.py` nunca
-nombró el algoritmo. El juez de techos
+A diferencia de §11.4 **no había copias silenciosas del literal**: el rediseño
+de v8 dejó una sola constante de Rust y un solo `const` de esquema, y el
+manifiesto ya referenciaba el esquema efectivo en vez de duplicarlo.
+`ui/f5_editor.py` nunca nombró el algoritmo.
+
+**Pero esta tabla decía «ninguno quedó atrás» y era falsa dos veces.** La
+primera revisión adversarial encontró **34 menciones** en prosa dentro de `src/`
+que la búsqueda del literal completo no ve porque escriben solo `v8`, una de
+ellas en la primera línea de `src/f5_admission.rs`, el fichero que declara la
+constante v9. La segunda encontró **una más**, y en un fichero que la primera
+pasada ya había editado: `production_v8_instrumentation_covers_...`, un
+**identificador de Rust**. Ni siquiera `\bv8\b` lo encuentra, porque el guion
+bajo es carácter de palabra.
+
+El recuento exacto es **35**: 33 corregidas en `src/{application, f5_admission,
+f5_layout, f5_preflight, f5_publication}.rs`, y dos que **no** se tocan y quedan
+declaradas —la de `src/randomness.rs` nombra `subseed-scopes-v8`, que es otro
+contrato, y la de `src/f5_preflight.rs` compara a propósito con el sobre
+constante de v8—. La lección, ya en su forma completa: **una búsqueda del
+identificador completo no cubre la prosa que lo abrevia, y una búsqueda por
+palabra no cubre los identificadores que lo incrustan**. Para un renombrado de
+contrato hay que buscar la subcadena desnuda.
+
+El juez de techos
 `the_three_hard_budget_ceilings_are_the_three_schema_maxima` no se toca y sigue
 verde: esta corrección no mueve ningún `maximum`.
 
@@ -3922,3 +3942,147 @@ El nombre `v9` queda **consumido** por esta corrección de salida. Quien retome
 los dos términos de memoria escribirá `v10`, y el precedente de reapertura
 atómica —esquema, lectores y productor a la vez— es el de este cambio y el de
 v7→v8: ningún esquema F5 está publicado externamente (§1).
+
+### 12.9. Revisión adversarial de v9: la anchura decimal no estaba acotada
+
+La revisión declaró la parte B **integrable con condiciones**. El hallazgo raíz
+invalida una premisa que estaba bajo los cinco sobres de §12.3, y se reprodujo
+antes de tocar nada:
+
+```
+f64::MIN_POSITIVE.to_string().len() == 326
+5e-324_f64.to_string().len()        == 326
+1e-300_f64.to_string().len()        == 302
+f64::MAX.to_string().len()          == 309
+```
+
+**`f64::to_string` es posicional y nunca exponencial.** Su anchura no la fijan
+los diecisiete dígitos significativos de la ida y vuelta sino el exponente. Los
+«24 bytes» que §12.3 usó para derivar cada sobre solo valen para la notación
+exponencial que el serializador JSON emite —y el JSON sí la emite—, **no** para
+los TSV, que escribían `value.to_string()`. La fila de `f5-attempts.tsv` lleva
+tres columnas `f64`: su peor caso contractual era **1243 bytes** contra un sobre
+de 1024, y `output_bytes` dejaba de ser cota superior.
+
+**Corrección: un literal decimal canónico de anchura acotada.** Es la forma
+posicional mientras quepa en 24 bytes y la exponencial en cuanto no quepa; las
+dos recuperan exactamente el mismo `f64` y la elección es función determinista
+del valor. Una sola función, `f5_canonical_decimal`, la usan el escritor de los
+siete TSV, el lector de perfiles de entrada y el lector independiente del
+oráculo, que ya compartían la forma canónica anterior comparando contra
+`to_string()`. Se eligió frente a las otras dos opciones porque arregla a la vez
+las siete columnas `f64` de cuatro ficheros sin añadir ningún término a la
+fórmula, y porque **acota de paso la anchura declarable** en un perfil de
+entrada: la tercera opción sale gratis como consecuencia, no como mecanismo
+aparte. Ningún valor de ningún fixture cambia de bytes: todos tienen forma
+posicional de 24 bytes o menos.
+
+**La prueba que faltaba, y lo que mide.** No existía ninguna que comparase
+**bytes publicados** con el sobre; se comparaban fórmulas contra fórmulas.
+`published_rows_fit_their_envelope_and_no_decimal_exceeds_its_canonical_width`
+publica un paquete, recorre las filas de los siete TSV midiendo su longitud real
+contra 1024 —más `S_bound` en la de haplotipos— y mide además cada campo decimal
+contra su anchura canónica. El fixture declara el peso haplotípico más estrecho
+que el contrato admite —`is_probability` solo exige `(0,1]`, así que un
+subnormal entra— y lo escribe **con el propio formateador canónico**, de modo
+que el perfil es admisible tanto con la anchura acotada como sin ella: lo que
+discrimina es la medición, no la admisión. Lleva tres controles positivos: que
+se midió alguna fila, que el subnormal declarado **llegó** a una columna
+publicada, y que el valor elegido es realmente extremo en forma posicional.
+
+**Alcance honesto del defecto.** Es un defecto de **cota**, no un desbordamiento
+alcanzable hoy: intentando construirlo, el máximo alcanzable por fila se queda
+en unos 810 bytes, porque `max_abs_error` está fijado por contrato a `0.05` y
+los demás `f64` anchos de una misma fila son diferencias que se acortan cuando
+uno de sus operandos es corto. Nada en el contrato lo impedía —`finite_decimal`
+solo exige finitud—, y eso basta para que `1024*tsv_rows_bound` no fuera cota
+superior; pero no se afirma un exploit que no se pudo construir.
+
+**No bloqueantes de la misma revisión, aplicados en la misma pasada.**
+
+| Hallazgo | Resolución |
+|---|---|
+| Márgenes 2,15× y 2,44× medidos sobre **una** copia | Medido: `sampling`, `normalizations` y `subpopulations` se publican en los **dos** documentos y `json_rows_bound` los cuenta una vez, luego el margen JSON real es **1,22×** (838 B de 1024). El de la fila TSV **sí** era 2,15×: los siete TSV se publican una sola vez. Ninguna constante se aprieta con estas cifras |
+| 34 menciones en prosa a `v8` en `src/` | 32 renombradas; las dos restantes declaradas en §12.6, que además decía «ninguno quedó atrás» y se ha corregido |
+| El sobre de 4096 por genotipo no estaba atado a `Ploidy::MAX` | Atado con una aserción `const`: con ploidía 12 el peor caso sería 4270 B y **la compilación falla**, en vez de romperse la cota en silencio |
+| `src/f5_oracle.rs` decía «nueve» vectores por dosis | Son **siete**, y se explica cuáles y por qué su ancho crece con la ploidía |
+| `tests/f5_6_closure.rs` fija la cadena retirada `v8` | Anotado: `evidence/f5.6/cierre.md` es historia y no se reescribe; la deuda que recuenta sigue con destino F9.7 y quien la cierre escribirá `v10` |
+
+**Pendiente declarado, no corregido.** El sobre fijo de 65 536 bytes de
+`truth_bound` cubre la cabecera de `truth.jsonl`, cuyo array `populations` tiene
+una entrada por subpoblación. Con entradas de unos 120 bytes en el peor caso
+contractual eso son unas 546 subpoblaciones, y el contrato no acota `N_pop`. No
+entra en esta ronda: se declara aquí para que la decida quien corresponda, junto
+a los dos términos de memoria de F9.7.
+
+### 12.10. Segunda revisión adversarial: lo que faltaba por atar
+
+**La cota por fila se sostiene por composición, y ahora está aserida.** La
+primera versión de la prueba medía bytes publicados contra el sobre, pero
+ninguna mutación de la batería ejercitaba esa aserción: bajo cualquiera moría
+antes la de anchura de campo. Aislado por el revisor, con el formateador en
+`to_string()` **y** la anchura canónica subida a 4096, la prueba pasaba en verde
+publicando una columna `q` de 326 bytes. La causa no es un descuido de la
+prueba: es que la cadena real es `medido <= peor caso <= sobre` y el eslabón que
+sostiene la cota es el segundo, que la medición sola no puede alcanzar —el peor
+caso contractual de la fila de `f5-attempts.tsv` no lo produce ninguna
+ejecución—. La prueba asiere ahora los dos eslabones por separado, con una tabla
+de **formas de fila** —cuántos identificadores, enteros, decimales, bases y
+enumerados lleva cada uno de los siete TSV— cuyo recuento de columnas y de
+decimales se contrasta contra la cabecera literal del contrato. La cuarta
+aserción, la que enuncia el contrato palabra por palabra, queda declarada en el
+docstring como **implicada** por las otras dos, sin adornos: se conserva porque
+es la frase del contrato, no porque discrimine.
+
+**El sobre estaba escrito dos veces y sin atar.** `1024` vivía como literal en
+la fórmula final, en la reserva prospectiva del bootstrap y en la prueba, de modo
+que cambiarlo en el preflight dejaba la prueba midiendo otra cosa en silencio.
+Es la misma disciplina que §11.4 estableció para los tres techos, y se aplica
+igual: `F5_TSV_ROW_ENVELOPE_BYTES`, `F5_JSON_ELEMENT_ENVELOPE_BYTES`,
+`F5_SITE_SUMMARY_PLOIDY_BYTES` y `F5_GENOTYPE_ENVELOPE_BYTES` son constantes
+únicas que consumen los dos caminos del preflight, y la prueba consume la
+primera.
+
+**Una aserción que no podía fallar, en una línea que esta ronda ya había
+tocado.** `src/f5_layout.rs` tenía `assert_eq!(executed, preflighted)` seguido de
+`assert!(executed <= preflighted, ...)`: la segunda está implicada por la
+primera. Es **preexistente** —la pasada anterior solo le renombró el mensaje de
+v8 a v9, y pasó por encima sin verla—, y es el defecto número uno del proyecto en
+su forma de manual. Queda una sola aserción, la igualdad, que es la más fuerte y
+subsume el presupuesto; el presupuesto sobrevive en su mensaje.
+
+**Deuda registrada, no corregida: una puerta de Python que no corre desde el 25
+de agosto de 2026.** La puerta canónica de los cierres de F2 es
+`uv run --frozen python -m unittest discover -s tests`, y hoy **aborta**:
+
+```
+tests/test_process_adapter.py, línea 6: import pytest
+ModuleNotFoundError: No module named 'pytest'
+Ran 8 tests — FAILED (errors=1, skipped=1)
+```
+
+`pytest` no está instalado ni declarado en `pyproject.toml`. El módulo lo
+importa desde el commit `6139fe9` (25 de agosto de 2026), de modo que bajo la
+puerta real `test_process_adapter.py` no se ejecuta desde entonces; solo corre si
+se invoca con `--with pytest`, que es como la declaró el acta de F5.6 y como
+estaba corriendo hasta ahora. **No se arregla aquí**: es ajeno a v9 y tocar
+`pyproject.toml` o el módulo excede el alcance de esta ronda. Destino: quien
+reabra las puertas de Python, que deberá decidir entre declarar `pytest` como
+dependencia de desarrollo o reescribir ese módulo en `unittest`. Los informes de
+esta fase etiquetan desde ahora cada fila con el comando literal ejecutado.
+
+### 12.11. Discriminación de esta ronda
+
+| Mutante | Prueba que muere | Mensaje observado |
+|---|---|---|
+| `f5_canonical_decimal` vuelve a `value.to_string()` | `published_rows_fit_..._canonical_width` | `outputs/f5-haplotypes.tsv: el literal "0.000…022250738585072014" mide 326 B y la anchura canónica es 24` |
+| El mismo mutante | `the_canonical_decimal_is_bounded_by_construction_and_round_trips` | `"0.000…022250738585072014" mide 326 B` |
+| `Ploidy::MAX` sube de 10 a 12 | la aserción `const` del sobre por genotipo | `error[E0080]: evaluation panicked: el sobre por genotipo deja de ser cota superior con esta ploidía máxima` |
+| `F5_TSV_ROW_ENVELOPE_BYTES` baja a 128 | la **composición** de `published_rows_fit_...` | `f5-block-layout.tsv: el peor caso contractual de la fila son 193 B y su sobre v9 reserva 128` |
+| `F5_CANONICAL_DECIMAL_MAX_BYTES` sube a 4096, con el formateador intacto | la **composición** | `f5-haplotypes.tsv: el peor caso contractual de la fila son 4317 B y su sobre v9 reserva 1027` |
+| `f5_canonical_decimal` vuelve a `to_string()` | la **medición contra el peor caso** | `f5-haplotypes.tsv: una fila publicada mide 398 B y su peor caso contractual son 245` |
+
+La primera es la que importa: el literal que la mata sale **leído de vuelta de
+`outputs/f5-haplotypes.tsv`**, no de una expectativa escrita junto al bucle. Las
+tres mutaciones se hicieron sobre copias fuera de git y se comprobó por SHA que
+la mutación mutó y que la restauración devolvió el fichero byte a byte.

@@ -62,7 +62,10 @@
 //! —hoy, nadie: la vía `run` de F5 la abre F5.6— deberá antes darle un término
 //! propio en la fórmula o sustituirla por un lector por flujo del registro
 //! `haplotype_copy`. La condición no se resuelve aquí porque hacerlo exigiría
-//! reabrir v8, que F5.0 cerró y cuyo literal está en los dos esquemas.
+//! reabrir la contabilidad de recursos, cuyo literal es un `const` de
+//! `effective-config-v5` al que el manifiesto se refiere por `$ref`. Sigue
+//! declarada como deuda con destino F9.7: la corrección de v9 fue de la cota de
+//! **salida** y no tocó los dos términos de memoria que faltan.
 
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -1466,7 +1469,7 @@ const fn declared_mode(mode: F5SamplingMode) -> F5DeclaredMode {
 /// El recuento MAN-70 **no se ejecuta aquí**: `recount` lo aporta el llamador y
 /// recibe la raíz de carga útil ya escrita y la declaración que este módulo
 /// construyó. Es la frontera que deja el pico del oráculo fuera de la fórmula
-/// v8, que no lo presupuesta.
+/// v9, que no lo presupuesta.
 ///
 /// Nada se publica a medias: el destino final solo aparece cuando los dos
 /// documentos raíz y los ocho ficheros han pasado la puerta física. Si
