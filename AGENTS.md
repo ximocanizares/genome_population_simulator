@@ -1,3 +1,10 @@
+> **HISTÓRICO. No es autoridad.**
+>
+> Este fichero corresponde a la etapa en que el proyecto se trabajaba con
+> Codex, y sus niveles (`gpt-5.6-luna`, `terra`, `sol`) ya no se usan. La
+> política de agentes vigente está en **`CLAUDE.md`**, que lo sustituye por
+> completo. Se conserva solo como registro de cómo se decidía antes.
+
 # Política de agentes del proyecto
 
 Estas instrucciones se aplican a todos los agentes que trabajen en este
