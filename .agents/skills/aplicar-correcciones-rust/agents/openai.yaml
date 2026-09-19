@@ -1,4 +1,0 @@
-interface:
-  display_name: "Aplicar correcciones Rust"
-  short_description: "Aplica hallazgos aprobados de revisiones Rust"
-  default_prompt: "Usa $aplicar-correcciones-rust para verificar y aplicar de forma conservadora los hallazgos aprobados de esta revisión Rust."

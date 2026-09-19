@@ -1,4 +1,0 @@
-interface:
-  display_name: "Auditar clonaciones Rust"
-  short_description: "Detecta copias y asignaciones innecesarias en Rust"
-  default_prompt: "Usa $auditar-clonaciones-rust para localizar clonaciones costosas en este código Rust y separar correcciones claras de cambios que necesitan medición."

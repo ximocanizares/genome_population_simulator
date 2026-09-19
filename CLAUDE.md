@@ -170,7 +170,7 @@ declarado en los dos raíces de crate (`src/lib.rs` y `src/main.rs`).
 | Arquitectura | `design/arquitectura-0.1.md` |
 | Plan de la fase en curso | `design/plan-implementacion-fN-0.1.md` |
 | Ampliaciones aplazadas (DTF-xxx) | `design/registro-ampliaciones-futuras-0.1.md` |
-| Skills del proyecto (diez, en castellano) | `.agents/skills/*/SKILL.md` |
+| Skills del proyecto (diez, en castellano) | `.claude/skills/*/SKILL.md` |
 
 Ante un conflicto entre el código y un documento normativo, **manda el
 documento**, y la contradicción se resuelve antes de seguir. Una cifra o una
@@ -185,7 +185,11 @@ cuando `f64::to_string` puede dar 326).
 `auditar-clonaciones-rust`, `ejecutar-plan-rust`, `planificar-implementaciones`,
 `redactar-arquitectura`, `redactar-especificaciones`, `redactar-texto-tecnico`.
 
-Cada encargo debe citar las que apliquen.
+Viven en `.claude/skills/`, que es donde Claude Code las descubre: se ofrecen
+solas y se invocan por su nombre. Hasta el 19 de septiembre de 2026 estuvieron
+en `.agents/skills/`, la ruta de Codex, donde **no se cargaban**; había que
+abrirlas a mano como ficheros y citar su ruta en cada encargo. Si alguna vez
+dejan de aparecer en la lista de skills, ese es el primer sitio donde mirar.
 
 ## 7. Puertas
 

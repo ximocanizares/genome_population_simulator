@@ -1,4 +1,0 @@
-interface:
-  display_name: "Planificar implementaciones Rust"
-  short_description: "Planifica implementaciones Rust claras y verificables"
-  default_prompt: "Usa $planificar-implementaciones para convertir esta especificación y arquitectura en un plan de implementación Rust ordenado y verificable."

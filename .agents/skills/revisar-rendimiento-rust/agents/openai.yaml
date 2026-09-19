@@ -1,4 +1,0 @@
-interface:
-  display_name: "Revisar rendimiento Rust"
-  short_description: "Evalúa rendimiento Rust con medidas verificables"
-  default_prompt: "Usa $revisar-rendimiento-rust para evaluar el rendimiento de este código Rust mediante perfiles, pruebas de rendimiento y experimentos reproducibles."
