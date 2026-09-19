@@ -27,16 +27,21 @@ y estos valores solo el punto de partida.
 
 ---
 
-## 2. El protocolo que importa aquí es el que no lleva PCR
+## 2. Las dos preparaciones, y por qué ahora hacen falta las dos
 
-El proyecto admite **exclusivamente preparación de biblioteca sin PCR**, y el
-perfil amplificado está aplazado. Por eso la columna que se propone adoptar es
-la del protocolo sin PCR. La columna con PCR se conserva solo para documentar la
-diferencia y por si algún día se reabre el perfil amplificado.
+Cuando se escribió este documento, el proyecto admitía **exclusivamente
+preparación sin PCR** y el perfil amplificado estaba aplazado, de modo que la
+columna con PCR era solo informativa. **El 19 de septiembre de 2026 el
+responsable decidió simular también bibliotecas amplificadas**, así que ahora
+**las dos columnas son de uso**, y el diseño correspondiente vive en
+`design/diseno-bibliotecas-pcr-0.1.md`.
 
 Que el tartamudeo exista sin PCR no es una excepción: el deslizamiento de la
-polimerasa ocurre también en la amplificación en agrupación sobre la celda y en
-la propia síntesis durante la secuenciación. Es menor, pero está.
+polimerasa ocurre también en la amplificación en puente sobre la celda y en la
+propia síntesis durante la secuenciación, y a ello se suma el mosaicismo
+somático de las células de partida. Es menor que con amplificación, pero está —
+y la sección 3.1 detalla qué contiene exactamente cada columna, porque de ahí
+depende no contar dos veces el mismo fenómeno.
 
 ---
 
@@ -57,6 +62,61 @@ repetición. Fuente: Gymrek (2016), tabla 1.
 
 **La tasa decrece con la longitud del motivo**, y los homopolímeros son con
 diferencia los peores.
+
+### 3.1. Las dos columnas son totales, no componentes
+
+Es el malentendido más fácil de cometer con esta tabla, y llevaría a contar dos
+veces el mismo fenómeno.
+
+Los dos conjuntos que compara la fuente pasaron por las **mismas** células, la
+**misma** amplificación en puente sobre la celda y la **misma** síntesis
+durante la secuenciación. Lo único que los distingue es el paso de PCR de
+preparación. Por tanto:
+
+- la **columna sin PCR** ya contiene, sumados y sin posibilidad de separarlos,
+  el **mosaicismo somático** de las células de partida, el deslizamiento de la
+  **amplificación en puente** y el de la **síntesis**;
+- la **columna con PCR** contiene todo lo anterior **más** la PCR de
+  biblioteca.
+
+**Decisión del proyecto (19 de septiembre de 2026):** el mosaicismo somático se
+queda **dentro** de la tasa sin PCR y **no se modela aparte**. Modelarlo por
+separado obligaría a descontarlo de esta cifra, y la medición no permite
+hacerlo. Nótese además que el mosaicismo somático no es un artefacto: son
+células que de verdad llevan longitudes distintas. Si algún día se modelara,
+correspondería a la **verdad** del individuo y no a las lecturas, de modo que
+no cabe en una fase cuyo contrato prohíbe que los eventos técnicos alteren la
+verdad.
+
+### 3.2. Cómo se componen, sin contar dos veces
+
+Para una biblioteca amplificada **no** se suma nada a la columna con PCR: ya
+está todo dentro. Lo que hay que hacer es **despejar** el incremento propio de
+la PCR de biblioteca, suponiendo que los dos procesos actúan de forma
+independiente:
+
+```
+r_pcr = 1 − (1 − r_con) / (1 − r_sin)
+```
+
+y aplicar después las dos partes, la de base y la de PCR. La composición
+devuelve exactamente la fracción medida: `1 − (1−r_sin)(1−r_pcr) = r_con`.
+
+| Motivo (pb) | Con PCR (medido) | Sin PCR (medido) | Solo la PCR (despejado) | Recompuesto |
+|---|---|---|---|---|
+| 1 | 0,1700 | 0,0270 | 0,1470 | **0,1700** |
+| 2 | 0,0380 | 0,0110 | 0,0273 | **0,0380** |
+| 3 | 0,0110 | 0,0029 | 0,0081 | **0,0110** |
+| 4 | 0,0069 | 0,0016 | 0,0053 | **0,0069** |
+| 5 | 0,0074 | 0,0015 | 0,0059 | **0,0074** |
+| 6 | 0,0140 | 0,0010 | 0,0130 | **0,0140** |
+
+**Consecuencia de orden.** Una biblioteca amplificada a la que le falte la
+parte de base se queda solo en la columna despejada, y **subestima** el
+tartamudeo: un 14 % menos en homopolímeros, 28 % en dinucleótidos, 26 % en
+trinucleótidos, 23 % en tetranucleótidos y 20 % en pentanucleótidos. La
+preparación con PCR **no puede implantarse sin el tartamudeo sin PCR**; no es
+una preferencia, es que la aritmética no cierra.
 
 **No adoptar el 14× de los hexanucleótidos como dato.** El propio autor advierte
 que esa diferencia «probablemente se debe a ruido derivado de la escasa cantidad
