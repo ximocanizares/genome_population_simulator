@@ -204,6 +204,25 @@ MARIMO_SKIP_UPDATE_CHECK=1 uv run --frozen marimo check --strict ui/gps_app.py
 uv run --frozen python -m unittest discover -s tests_ui
 ```
 
+**Dependencias externas de las puertas.** Este proyecto tiene un problema
+recurrente con ellas: sus pruebas de Rust **lanzan procesos externos**
+—`python3` para el validador de esquemas, `bcftools` y `tabix` como jueces del
+formato VCF— y el resultado de la batería depende de qué encuentre el camino de
+búsqueda. Ha mordido tres veces. Antes de dar por buena una cifra de pruebas,
+comprobar que se midió con el entorno correcto.
+
+- **Hay que instalar también las dependencias de desarrollo**, no solo las de
+  uso: `uv sync --all-groups` o equivalente. Sin ellas faltan 41 pruebas,
+  porque el validador de esquemas se lanza como proceso externo y no encuentra
+  su módulo. La versión está **fijada a propósito** en la 4.10.3: las modernas
+  retiran la pieza que el validador usa.
+- **`bcftools` y `tabix` deben ser exactamente 1.24**, que es lo que DTC-066
+  —la decisión que fija la puerta externa del formato VCF— exige. Se instalaron
+  compiladas en `/usr/local` el 20 de septiembre de 2026, que va por delante de
+  `/usr/bin` sin tocar el `.bashrc` ni desinstalar las del sistema, de las que
+  depende `vcftools`. Con ellas, la prueba que comparaba la normalización
+  contra ese juez externo dejó de estar ignorada.
+
 **Trampa de `pytest`:** no está instalado ni declarado en `pyproject.toml`. La
 puerta canónica es `unittest`, y bajo ella `tests/test_process_adapter.py`
 aborta con `ModuleNotFoundError` desde el commit `6139fe9` (25/08/2026): lleva
@@ -211,8 +230,9 @@ sin ejecutarse desde entonces. Solo corre con `uv run --with pytest`. Deuda
 registrada en el plan de F5, sin destino asignado.
 
 Fallos preexistentes y ajenos que **no** hay que perseguir: dos en `tests_ui`
-(F2.5 VCF UI y F4.1 evento técnico) y doce pruebas ignoradas históricas de
-F3/F4.
+(F2.5 VCF UI y F4.1 evento técnico) y once pruebas ignoradas históricas de
+F3/F4 —eran doce hasta que la de normalización con `bcftools` se encendió el
+20 de septiembre de 2026—.
 
 ## 8. Entorno
 

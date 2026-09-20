@@ -2004,7 +2004,6 @@ mod tests {
     /// puertas verdes locales: requiere bcftools 1.24, que el entorno actual
     /// todavía no suministra. Comprueba que `norm` no repara los vectores.
     #[test]
-    #[ignore = "DTC-066 requires exactly bcftools 1.24"]
     fn external_bcftools_norm_oracle_matches_frozen_small_allele_vectors_without_repair() {
         let observed = Command::new("bcftools")
             .arg("--version")

@@ -10,3 +10,6 @@ dependencies = [
 
 [tool.uv]
 package = false
+dev-dependencies = [
+    "jsonschema==4.10.3",
+]
