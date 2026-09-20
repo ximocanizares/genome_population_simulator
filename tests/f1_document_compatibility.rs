@@ -77,8 +77,29 @@ fn version_dispatch_is_closed_and_reports_the_schema_selected_by_the_document() 
         error
             .context()
             .get("detail")
-            .is_some_and(|detail| detail.contains("exclusivamente \"4\""))
+            .is_some_and(|detail| detail.contains("se admiten \"4\" y \"6\""))
     );
+
+    // El despacho sigue cerrado después de abrir la versión 6 para los
+    // documentos generales v4: solo esas dos versiones se admiten, y cualquier
+    // otra se rechaza nombrando el esquema.
+    for rejected in ["1", "3", "5", "7"] {
+        let mut document: serde_json::Value =
+            serde_json::from_slice(F1_EFFECTIVE).expect("golden effective configuration");
+        document["schema_version"] = serde_json::json!(rejected);
+        let error = validate_effective_config_against_manifest_bytes(
+            Path::new("effective-config.json"),
+            &serde_json::to_vec(&document).expect("JSON"),
+            Path::new("manifest.json"),
+            F1_MANIFEST,
+        )
+        .expect_err("versión no admitida");
+        assert_eq!(
+            error.context().get("schema").map(String::as_str),
+            Some("effective-config-v4.schema.json"),
+            "versión rechazada: {rejected}"
+        );
+    }
 }
 
 #[test]

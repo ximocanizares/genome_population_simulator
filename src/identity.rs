@@ -124,6 +124,9 @@ provided_typed_id!(PhaseId, "phase");
 provided_typed_id!(GroupId, "group");
 provided_typed_id!(BlockId, "block");
 provided_typed_id!(CrossId, "cross");
+// El identificador del locus de repetición lo declara el usuario y se valida
+// por unicidad (decisión S-11): no estrena clase de identificador automático.
+provided_typed_id!(RepeatLocusId, "repeat_locus");
 
 /// Etiqueta Unicode opcional y sin autoridad de identidad.
 #[derive(Clone, Debug, Eq, PartialEq)]

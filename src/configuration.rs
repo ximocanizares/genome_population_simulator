@@ -215,6 +215,80 @@ pub struct DeclaredReference {
     pub id: Located<String>,
     pub source: DeclaredReferenceSource,
     pub sequences: Vec<DeclaredSequence>,
+    /// Loci de repetición en tándem declarados sobre esta referencia. Solo el
+    /// documento general v4 puede traerlos; en v2 la clave es desconocida.
+    pub repeat_loci: Vec<DeclaredRepeatLocus>,
+    /// Mínimos de la guarda de admisión con referencia real (F6.4.2). Se
+    /// declaran una sola vez para toda la referencia; si faltan, mandan los
+    /// valores por omisión, que la configuración efectiva publica igualmente.
+    pub repeat_admission: Option<DeclaredRepeatAdmission>,
+}
+
+/// Un locus de repetición tal y como lo escribe el usuario.
+///
+/// El intervalo se declara **entero, inicio y final**, y no solo el inicio: la
+/// pureza y la tirada más larga se miden **dentro de un intervalo**, y sin
+/// final no hay dónde medirlas. La alternativa —extender el tracto desde el
+/// inicio mientras el motivo siga apareciendo— es un algoritmo que nadie ha
+/// fijado y queda fuera de este trabajo.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredRepeatLocus {
+    pub id: Located<String>,
+    pub sequence: Located<String>,
+    /// Base uno, inclusivo.
+    pub start: Located<u64>,
+    /// Base uno, inclusivo.
+    pub end: Located<u64>,
+    /// Los motivos del locus, **en orden**. Un locus corriente declara uno con
+    /// la clave `motif`; un microsatélite compuesto declara varios con `motifs`,
+    /// y entonces cada alelo da su número de unidades por bloque.
+    pub motifs: Vec<Located<String>>,
+    /// Cierto cuando el usuario escribió la clave plural. Es lo que decide si
+    /// un alelo puede declarar su número de unidades como escalar.
+    pub declared_as_list: bool,
+    /// Tope propio del tamaño del tracto, **en unidades** (F6.4.3.1).
+    pub max_units: Option<Located<u64>>,
+    /// Mínimos de admisión **propios de este locus**, que sustituyen a los
+    /// generales. El mismo número no significa lo mismo según el motivo: tres
+    /// unidades de un mononucleótido son tres bases, que salen por azar a cada
+    /// paso; tres de un tetranucleótido son doce, que no.
+    pub admission: Option<DeclaredRepeatAdmission>,
+    pub alleles: Vec<DeclaredRepeatAllele>,
+}
+
+/// Un alelo declarado del locus, con su frecuencia.
+///
+/// Se declara **o** por número de unidades más sus interrupciones, **o** por su
+/// secuencia exacta, que es lo que permite una referencia simulada. Nunca se
+/// declara una pureza: la pureza es siempre una salida calculada.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredRepeatAllele {
+    /// Número de unidades **por bloque**, en el orden de los motivos del locus.
+    /// Un locus de un solo motivo lleva aquí un único valor, que es lo que el
+    /// usuario escribió como escalar.
+    pub units: Vec<Located<u64>>,
+    /// Secuencia exacta del tracto. Solo se admite con **un** motivo: unas bases
+    /// sueltas no pueden decir dónde acaba un bloque y empieza el siguiente, y
+    /// esa es justamente la información que la estructura en bloques aporta.
+    pub sequence: Option<Located<String>>,
+    pub frequency: DeclaredNumber,
+    pub interruptions: Vec<DeclaredRepeatInterruption>,
+}
+
+/// Una interrupción declarada dentro de un alelo definido por unidades.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredRepeatInterruption {
+    /// Desplazamiento en base cero desde el comienzo del tracto.
+    pub offset: Located<u64>,
+    /// Bases que sustituyen a las del motivo a partir de ese desplazamiento.
+    pub bases: Located<String>,
+}
+
+/// Mínimos configurables de la guarda de admisión con referencia real.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredRepeatAdmission {
+    pub min_purity: Option<DeclaredNumber>,
+    pub min_longest_run_units: Option<Located<u64>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -369,6 +443,10 @@ pub struct DeclaredDirectEvent {
 #[derive(Clone, Debug)]
 pub struct DeclaredGeneralConfig {
     source: AdmittedToml,
+    /// Versión declarada del documento general: `"2"` o `"4"`. Decide qué
+    /// versión de configuración efectiva se publica y si las repeticiones son
+    /// un campo del contrato o un campo desconocido.
+    document_version: String,
     seed: Option<Located<String>>,
     ploidy: Option<Located<u64>>,
     normalization_tolerance: Option<DeclaredNumber>,
@@ -393,6 +471,9 @@ impl DeclaredGeneralConfig {
     ) -> Self {
         Self {
             source,
+            // El lector la fija con `with_document_version` en cuanto la ha
+            // leído; la versión 2 es la histórica y sirve de valor de partida.
+            document_version: "2".to_owned(),
             seed,
             ploidy,
             normalization_tolerance,
@@ -404,6 +485,11 @@ impl DeclaredGeneralConfig {
             direct_events: Vec::new(),
             technical_event: None,
         }
+    }
+
+    pub(crate) fn with_document_version(mut self, document_version: String) -> Self {
+        self.document_version = document_version;
+        self
     }
 
     pub(crate) fn with_initial_populations(
@@ -452,6 +538,12 @@ impl DeclaredGeneralConfig {
     #[must_use]
     pub const fn normalization_tolerance(&self) -> Option<&DeclaredNumber> {
         self.normalization_tolerance.as_ref()
+    }
+
+    /// Versión declarada del documento general.
+    #[must_use]
+    pub fn document_version(&self) -> &str {
+        &self.document_version
     }
 
     #[must_use]

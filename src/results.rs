@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::application::{
-    EffectiveConfig, EffectiveDirectEvent, EffectiveInitialGenotypeModel,
+    DeclaredDocumentVersion, EffectiveConfig, EffectiveDirectEvent, EffectiveInitialGenotypeModel,
     EffectiveReducedReference, EffectiveReferenceSource, EffectiveTechnicalEvent,
     EffectiveTechnicalEventTarget, build_effective_config_with_entropy,
 };
@@ -52,6 +52,7 @@ use crate::reference_reduction_io::{
     REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
     build_reduced_reference, reduction_map_document, source_for, validate_reduction_map_document,
 };
+use crate::tandem_repeat::{BlockAnnotation, RepeatMotif};
 use crate::technical_identity::derive_technical_identity_plan;
 use crate::vcf_contract::{TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfIndexKind, VcfOutputMode};
 use crate::vcf_publication::{
@@ -65,6 +66,11 @@ pub const GENERAL_MANIFEST_SCHEMA_VERSION: &str = "4";
 
 /// Versión vigente de la configuración efectiva para el productor PE F4.
 pub const EFFECTIVE_CONFIG_SCHEMA_VERSION: &str = "4";
+
+/// Versión de configuración efectiva que abre este trabajo, para los
+/// documentos generales v4 que pueden declarar repeticiones en tándem. Un
+/// documento general v2 sigue publicando la versión 4, byte a byte como antes.
+pub const EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS: &str = "6";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnitState {
@@ -280,7 +286,7 @@ pub fn effective_config_document_with_reductions(
     });
     let mut document = json!({
         "effective_config_kind": "gps_effective_config",
-        "schema_version": EFFECTIVE_CONFIG_SCHEMA_VERSION,
+        "schema_version": config.document_version().effective_config_schema_version(),
         "source_path": config.source_path(),
         "ploidy": config.ploidy().copy_count(),
         "normalization": {
@@ -304,7 +310,89 @@ pub fn effective_config_document_with_reductions(
     if let Some(event) = config.technical_event() {
         document["technical_event"] = technical_event_json(config, event);
     }
+    if config.document_version() == DeclaredDocumentVersion::V4 {
+        // Los mínimos de la guarda se publican siempre que el documento pueda
+        // declarar repeticiones, se hayan declarado o no: quien lea el
+        // documento tiene que ver contra qué umbral se admitió el tracto.
+        document["repeat_loci"] = repeat_loci_json(config)?;
+        document["repeat_admission"] = json!({
+            "min_purity": config.repeat_admission().min_purity(),
+            "min_longest_run_units": config.repeat_admission().min_longest_run_units(),
+        });
+    }
     Ok(document)
+}
+
+/// Publica cada locus con su motivo, su intervalo, su tope, sus alelos y la
+/// **auditoría** de la normalización de sus frecuencias.
+///
+/// De cada alelo se publican la secuencia, la frecuencia **declarada tal y como
+/// se escribió**, la frecuencia **efectiva** ya normalizada, y los valores
+/// realizados que se derivan de la secuencia: unidades, pureza, interrupciones y
+/// tirada más larga. La pureza no se puede declarar, solo leer.
+///
+/// Se publican las dos frecuencias porque, si la suma declarada no era
+/// exactamente uno, la normalizada **no es la que el usuario escribió**, y
+/// publicar solo una de las dos bajo un nombre que sugiere la otra es
+/// exactamente el error que DTC-049 obliga a evitar.
+fn repeat_loci_json(config: &EffectiveConfig) -> Result<Value, Diagnostic> {
+    let mut loci = Vec::with_capacity(config.repeat_loci().len());
+    for locus in config.repeat_loci() {
+        let normalization = locus.normalization();
+        loci.push(json!({
+            "id": locus.id(),
+            "sequence_id": locus.sequence_id(),
+            "start": locus.start()?,
+            "end": locus.end()?,
+            "motifs": locus.motifs().iter().map(RepeatMotif::as_text).collect::<Vec<_>>(),
+            "motif_lengths": locus.motifs().iter().map(RepeatMotif::length).collect::<Vec<_>>(),
+            "max_units": locus.max_units(),
+            "admission": {
+                "min_purity": locus.admission().min_purity(),
+                "min_longest_run_units": locus.admission().min_longest_run_units(),
+            },
+            "frequency_normalization": {
+                "tolerance": normalization.tolerance(),
+                "sum_algorithm": "neumaier_sum_v1",
+                "canonical_order": "locus_id,allele_index",
+                "original_sum": normalization.original_sum(),
+                "original_delta": normalization.original_delta(),
+                "effective_sum": normalization.effective_sum(),
+                "effective_delta": normalization.effective_delta(),
+            },
+            "alleles": locus.alleles().iter().map(|allele| {
+                let annotation = allele.tract().annotation();
+                // Los bloques se publican como **listas paralelas**, que es la
+                // forma que el estándar VCF 4.5 define para una repetición
+                // compuesta: cuántas secuencias repetidas tiene el alelo, y por
+                // cada una su motivo, la longitud del motivo, el número de
+                // copias —decimal, porque puede acabar en unidad parcial— y las
+                // bases totales. Publicarlas aquí con la misma forma hace que la
+                // proyección al VCF sea un volcado y no una traducción.
+                json!({
+                    "sequence": allele.tract().as_text(),
+                    "declared_frequency": allele.declared_frequency(),
+                    "effective_frequency": allele.frequency(),
+                    "units": annotation.units_as_f64(),
+                    "purity": annotation.purity_as_f64(),
+                    "longest_run_units": annotation.longest_run_units(),
+                    "repeat_sequence_count": annotation.blocks().len(),
+                    "block_motifs": annotation.blocks().iter()
+                        .map(|block| block.motif().as_text()).collect::<Vec<_>>(),
+                    "block_motif_lengths": annotation.blocks().iter()
+                        .map(|block| block.motif().length()).collect::<Vec<_>>(),
+                    "block_unit_counts": annotation.blocks().iter()
+                        .map(BlockAnnotation::units_as_f64).collect::<Vec<_>>(),
+                    "block_bases": annotation.blocks().iter()
+                        .map(BlockAnnotation::length).collect::<Vec<_>>(),
+                    "interruptions": annotation.interruptions().iter().map(|interruption| {
+                        json!({"offset": interruption.start(), "length": interruption.length()})
+                    }).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>(),
+        }));
+    }
+    Ok(Value::Array(loci))
 }
 
 fn effective_initial_populations_json(config: &EffectiveConfig) -> Value {
@@ -911,12 +999,14 @@ pub fn validate_effective_config_against_manifest_bytes(
     manifest_bytes: &[u8],
 ) -> Result<(), Diagnostic> {
     match effective_schema_version(effective_path, effective_bytes)? {
-        EFFECTIVE_CONFIG_SCHEMA_VERSION => validate_effective_config_v3_against_manifest_bytes(
-            effective_path,
-            effective_bytes,
-            manifest_path,
-            manifest_bytes,
-        ),
+        EFFECTIVE_CONFIG_SCHEMA_VERSION | EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS => {
+            validate_effective_config_v3_against_manifest_bytes(
+                effective_path,
+                effective_bytes,
+                manifest_path,
+                manifest_bytes,
+            )
+        }
         _ => unreachable!("effective_schema_version only returns supported versions"),
     }
 }
@@ -983,10 +1073,22 @@ fn validate_effective_config_v3_against_manifest_bytes(
             fields.push(field);
         }
     }
+    // La sección de repeticiones **pertenece a la versión 6 y solo a ella**: su
+    // presencia en un documento v4 y su ausencia en uno v6 son errores de
+    // forma, no campos opcionales. Por eso se añaden a la lista cerrada según
+    // la versión declarada y no según si aparecen.
+    let declared_version = object.get("schema_version").and_then(Value::as_str);
+    if declared_version == Some(EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS) {
+        fields.push("repeat_loci");
+        fields.push("repeat_admission");
+    }
     validate_effective_closed_object(object, &fields, "effective-config.json", effective_path)?;
     if object.get("effective_config_kind").and_then(Value::as_str) != Some("gps_effective_config")
-        || object.get("schema_version").and_then(Value::as_str)
-            != Some(EFFECTIVE_CONFIG_SCHEMA_VERSION)
+        || !matches!(
+            declared_version,
+            Some(EFFECTIVE_CONFIG_SCHEMA_VERSION)
+                | Some(EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS)
+        )
     {
         return Err(effective_error(
             effective_path,
@@ -1223,13 +1325,15 @@ pub fn validate_published_resources(
     manifest_bytes: &[u8],
 ) -> Result<(), Diagnostic> {
     match effective_schema_version(effective_path, effective_bytes)? {
-        EFFECTIVE_CONFIG_SCHEMA_VERSION => validate_published_resources_v3(
-            root,
-            effective_path,
-            effective_bytes,
-            manifest_path,
-            manifest_bytes,
-        ),
+        EFFECTIVE_CONFIG_SCHEMA_VERSION | EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS => {
+            validate_published_resources_v3(
+                root,
+                effective_path,
+                effective_bytes,
+                manifest_path,
+                manifest_bytes,
+            )
+        }
         _ => unreachable!("effective_schema_version only returns supported versions"),
     }
 }
@@ -6481,6 +6585,13 @@ fn validate_reference_output(
                 original_path: observed,
             },
         ) => original_path == observed,
+        // **Aviso para el paso que conecte la inserción de tractos.** El origen
+        // `ReferenceOrigin::TractInsertion` caerá aquí y la comparación dirá que
+        // no coincide, porque la fuente efectiva sigue siendo la suministrada
+        // mientras la referencia publicada ya es la derivada. Hoy no hay error
+        // porque ningún camino produce todavía esa referencia; en cuanto lo
+        // haya, esta rama necesita su propio caso y la fuente efectiva necesita
+        // saber que la referencia se derivó.
         _ => false,
     };
     if !origin_matches
@@ -6545,12 +6656,17 @@ fn effective_schema_version(path: &Path, bytes: &[u8]) -> Result<&'static str, D
         .ok_or_else(|| effective_error(path, "la raíz no es un objeto"))?;
     match object.get("schema_version").and_then(Value::as_str) {
         Some(EFFECTIVE_CONFIG_SCHEMA_VERSION) => Ok(EFFECTIVE_CONFIG_SCHEMA_VERSION),
+        Some(EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS) => {
+            Ok(EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS)
+        }
         observed => Err(effective_error_for_schema(
             path,
             "effective-config-v4.schema.json",
             format!(
-                "versión de configuración efectiva no admitida: {:?}; se admite exclusivamente \"{}\"",
-                observed, EFFECTIVE_CONFIG_SCHEMA_VERSION
+                "versión de configuración efectiva no admitida: {:?}; se admiten \"{}\" y \"{}\"",
+                observed,
+                EFFECTIVE_CONFIG_SCHEMA_VERSION,
+                EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS
             ),
         )),
     }

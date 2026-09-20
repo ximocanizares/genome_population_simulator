@@ -214,7 +214,7 @@ No se inventan. El plan trabaja alrededor de ellas y dice cómo.
 | # | Qué falta | Por qué no hay recomendación | Cómo se planifica alrededor |
 |---|---|---|---|
 | **P-1** | **Cómo crece la probabilidad de resbalón con la longitud de la tirada ininterrumpida.** Es el coeficiente de la pendiente del modelo lineal | **Corregido el 20/09/2026:** la primera versión decía que la fuente estaba tras muro de pago. **Es falso**: Fungtammasan y colaboradores (2015) está en acceso abierto en Europe PMC, identificador PMC4417121, y la curva se puede recuperar de su figura 1A. Lo que falta ya no es acceso ni licencia —es **CC BY-NC**, que no impide reproducirla en un uso no comercial— sino **digitalizar la curva**. Y la forma sí está publicada y adoptada: Raz y col. (2019) fijan la dependencia **lineal por ciclo** | El coeficiente existe y es configurable, **arrancando en cero**, con lo que la probabilidad se reduce a la fracción medida por longitud de motivo, que sí está calibrada. El manifiesto lo publica como no calibrado. F4.8.2 prueba con un fixture que la función **sí** depende de la tirada más larga cuando el coeficiente es positivo, y F4.8.3 que con el coeficiente en cero reproduce la tabla |
-| **P-2** | **Qué versión de `bcftools` y `tabix` vale para la puerta externa del VCF.** La decisión vigente exige **1.24 para las dos** | Es la decisión pendiente DP-F6-14 del plan de variación compleja, que enumera opciones y **no recomienda ninguna** | **Dato corregido el 20/09/2026:** el entorno tiene `bcftools` **1.21**, `samtools` **1.21** y `tabix` (HTSlib) **1.19**, comprobado ejecutando `--version`; la primera versión decía 1.21 para `tabix`. F6.5.1.1 ejecuta la comprobación con lo instalado, **registra las dos versiones en la evidencia** y **no etiqueta la puerta externa como superada**. El paso no se bloquea, porque el oráculo semántico propio del proyecto sí discrimina |
+| **P-2** | **Qué versión de `bcftools` y `tabix` vale para la puerta externa del VCF.** La decisión vigente exige **1.24 para las dos** | **RESUELTO el 20/09/2026 instalando lo que el contrato pedía**, en vez de decidir entre las opciones. Se compilaron HTSlib 1.24 y `bcftools` 1.24 en `/usr/local`, que precede a `/usr/bin` tanto en el camino por defecto como en el de `sudo`; no se desinstaló nada, porque `vcftools` depende del paquete del sistema | Ninguno. La puerta externa **sí** puede ejecutarse y etiquetarse como superada. Además se encendió la prueba de normalización contra `bcftools` que llevaba ignorada desde que se escribió DTC-066: la batería pasa de 1126 a 1127 y de doce ignoradas a once |
 | **P-3** | **Los valores de las probabilidades de contracción y expansión** por longitud de motivo | **RESUELTO el 20/09/2026 en su forma, no en sus valores.** Se buscó fuente para los pesos y **no hay ninguna adoptable**: las cifras publicadas están repartidas entre trabajos distintos, sobre marcadores humanos concretos, y juntarlas en un vector sería **síntesis propia disfrazada de fuente**. La estructura sigue fijada por Raz y col. (2019) | Los pesos siguen **obligatorios y sin valor por omisión**, pero la documentación lleva un **ejemplo trabajado** marcado como ilustrativo, con sus fuentes y su advertencia de procedencia. Ver «El ejemplo trabajado de los pesos» más abajo |
 
 | **P-4** | **Cómo produce el generador de deslizamiento biológico un abanico de alelos *con sus frecuencias*.** Aplicar un servicio de pasos N veces produce **una** secuencia de alelos, no una distribución | **RESUELTO el 20/09/2026.** El responsable adopta la forma candidata tal cual. Sobre la pregunta 4, su criterio: que el alelo de la referencia se pierda o no **depende de los parámetros** que se den —con media de pasos baja la mayoría de linajes no se mueven—, de modo que no se fuerza su presencia | Ninguno. F6.4.11 a F6.4.13 **desbloqueados**; la entrega 5 es ejecutable |
@@ -551,6 +551,67 @@ biología.
 > podría no hacerse nunca— sino una **condición de cierre**. Hasta entonces los
 > alelos y sus frecuencias los declara el usuario.
 
+
+#### S-30 — un locus admite **varios motivos**, en bloques (20/09/2026)
+
+**Decidido después de la primera parada de la entrega 1**, al hacerse efectivos
+los mínimos de admisión y descubrirse que rechazaban un caso legítimo.
+
+Un locus pasa a admitir una **lista ordenada de bloques**, cada uno con su motivo
+y su número de unidades, en vez de un motivo único. Un locus de un solo motivo es
+el caso de un bloque y **se comporta exactamente igual que antes**.
+
+**El caso que lo motiva es real.** Un microsatélite compuesto del tipo
+`(TCTA)n(TCTG)n(TCTA)n` —la forma de muchos marcadores forenses— declarado con un
+solo motivo sobre el intervalo entero mide pureza 40/60 y lo rechaza el mínimo por
+omisión de 0,8, cuando en realidad es perfectamente regular: lo que pasa es que su
+regularidad tiene tres tramos.
+
+**Y acerca el modelo al estándar en vez de alejarlo.** El VCF 4.5 ya lo contempla:
+su ejemplo literal es `(CAG)10(TG)7(CAGG)3`, con un campo que cuenta cuántas
+secuencias repetidas tiene el alelo y **listas paralelas** de secuencia del
+motivo, longitud del motivo, número de copias y bases totales. Estábamos usando un
+subconjunto de esos campos sin aprovechar para qué fueron diseñados. La
+configuración efectiva los publica ya con esa forma, de modo que la proyección al
+VCF sea un volcado y no una traducción.
+
+**Las tres reglas:**
+
+1. **La tirada ininterrumpida más larga se mide sobre todos los bloques y gana la
+   más larga, sea del motivo que sea.** Es lo biológicamente correcto: la
+   polimerasa resbala donde hay más repetición seguida, no donde el usuario puso
+   el primer motivo.
+2. **El paso del tartamudeo gana o pierde una unidad del bloque donde ocurre el
+   resbalón**, es decir, del motivo de la tirada más larga.
+3. **La pureza se sigue midiendo sobre bases** y sobre el tracto completo,
+   sumando las copias completas de todos los bloques.
+
+**Lo que no cambia:** la descomposición voraz, con su dirección fijada de
+izquierda a derecha, sigue valiendo **dentro de cada bloque**.
+
+**Una frontera que la decisión impone y conviene ver.** La **estructura en
+bloques se declara; no puede derivarse**. Dadas unas bases sueltas no hay forma de
+saber dónde acaba un motivo y empieza el siguiente. Por eso la forma «secuencia
+exacta» del alelo solo se admite con **un** motivo: con varios habría que adivinar
+los cortes. Todo lo numérico —copias, pureza, interrupciones, tiradas— se sigue
+derivando de las bases dentro del tramo de cada bloque.
+
+#### S-31 — los mínimos de admisión, también por locus (20/09/2026)
+
+**Decidido junto con S-30.** La pureza mínima y la tirada mínima pueden
+declararse **dentro de la tabla del locus**, y los generales quedan como **valor
+de partida** para los que no los declaren. Los valores por omisión siguen siendo
+**0,8 y 3 unidades**.
+
+**El motivo: el mismo número no significa lo mismo según el motivo.** Tres
+unidades de un mononucleótido son tres bases, que aparecen por azar
+constantemente; tres unidades de un tetranucleótido son doce, que no. Con un
+umbral único, o deja pasar basura en los motivos cortos o rechaza loci legítimos
+en los largos.
+
+**Ampliación posible, registrada y no hecha:** en el futuro podría ajustarse
+**por longitud de motivo**, de modo que el suelo saliera de una tabla en vez de
+declararse locus a locus. Hoy no se hace.
 
 #### Bloque «cómo se publica la verdad» — S-08 y S-05 (20/09/2026)
 
@@ -2817,6 +2878,7 @@ propuesta pendiente sino un defecto.
 | El modelo escalonado aplicado **generación tras generación** | Fase de evolución. La entrega 5 hace **una sola tirada** para inicializar la diversidad y no invade eso |
 | Mutaciones internas de pureza, interrupciones o motivo | Paso F6.4.5. REQ-CONF-63 las exige desactivadas por omisión |
 | Generación aleatoria de loci por regiones | Paso F6.4.6 |
+| **Mínimos de admisión ajustados por longitud de motivo**, en vez de declarados locus a locus | Registrado por el responsable el 20/09/2026 junto a la decisión S-31. Hoy el suelo se declara por locus, con el general como valor de partida; derivarlo de la longitud del motivo es una ampliación posible y **no se hace** |
 | Asignación **explícita de individuos concretos** con combinaciones de alelos específicas | Después de este trabajo; la decisión S-04 la invirtió respecto de las frecuencias, que son lo primero |
 | Fichero complementario del VCF y catálogo de códigos de pérdida | Hito de variantes complejas. No hace falta: el alelo explícito con su secuencia no pierde nada |
 | Conjuntos y matrices por referencia de mapeo, BAM, CRAM y mapeo real | Hito de conjuntos y matrices por referencia |

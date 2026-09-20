@@ -16,6 +16,7 @@ use crate::configuration::{
     DeclaredReductionTarget, DeclaredReferenceSource, DeclaredTechnicalEventTarget,
     ExpectedConfigKind, SequenceClass,
 };
+use crate::coordinates::{ClosedInterval1, GenomicInterval};
 use crate::diagnostics::Diagnostic;
 use crate::error_quality::SequencingErrorsMode;
 use crate::exact_decimal::ExactDecimal;
@@ -31,7 +32,7 @@ use crate::f5_profile::{F5Profile, load_f5_profile_under_budget};
 use crate::haplotype::{HaplotypePhase, Ploidy};
 use crate::identity::{
     AutomaticIdRequest, EventId, ExecutionId, FounderKey, IdClass, IdentityRegistry, IndividualId,
-    PopulationId, ReferenceId, SequenceId,
+    PopulationId, ReferenceId, RepeatLocusId, SequenceId,
 };
 use crate::population_snvs::{
     FrequencyAssignmentMode, FrequencySampling, FrequencySpectrumComponent,
@@ -41,9 +42,10 @@ use crate::population_snvs::{
 };
 use crate::randomness::{
     EntropySource, ReproducibilityMetadata, RuntimeSubseedScope, Subseed, SystemEntropy,
-    derive_subseed, resolve_root_seed,
+    derive_subseed, neumaier_sum, resolve_root_seed,
 };
 use crate::reference_generation::normalize_composition_probabilities;
+use crate::tandem_repeat::{RepeatMotif, TandemRepeatLocus, TandemRepeatTract};
 use crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1;
 use crate::vcf_contract::VcfOutputMode;
 
@@ -58,7 +60,17 @@ pub struct ValidatedGeneralSummary {
     pub total_genome_size: u64,
 }
 
+/// Tope por omisión del tamaño del tracto, **en unidades completas**
+/// (pendiente P-5, confirmado por el responsable el 20/09/2026).
+///
+/// Un microsatélite de trabajo rara vez pasa de treinta o cuarenta unidades, de
+/// modo que doscientas no limitan ningún uso previsto y actúan solo como red
+/// contra un error de escritura. Quien quiera simular expansiones patológicas
+/// —cientos o miles de unidades— debe subirlo explícitamente.
+pub const DEFAULT_REPEAT_MAX_UNITS: u64 = 200;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
+
 pub struct EffectiveSequence {
     id: String,
     class: SequenceClass,
@@ -79,6 +91,224 @@ impl EffectiveSequence {
     #[must_use]
     pub const fn length(&self) -> u64 {
         self.length
+    }
+}
+
+/// Versión del documento general que dio origen a la configuración efectiva.
+///
+/// Manda qué versión de configuración efectiva se publica: un documento v2
+/// sigue publicando `effective-config-v4` **byte a byte** como antes, y solo el
+/// v4, que es el que puede declarar repeticiones, publica v6.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeclaredDocumentVersion {
+    V2,
+    V4,
+}
+
+impl DeclaredDocumentVersion {
+    /// Versión del documento de configuración efectiva que le corresponde.
+    #[must_use]
+    pub const fn effective_config_schema_version(self) -> &'static str {
+        match self {
+            Self::V2 => "4",
+            Self::V4 => "6",
+        }
+    }
+
+    #[must_use]
+    pub const fn effective_config_schema_file(self) -> &'static str {
+        match self {
+            Self::V2 => "effective-config-v4.schema.json",
+            Self::V4 => "effective-config-v6.schema.json",
+        }
+    }
+}
+
+/// Un alelo de repetición ya resuelto: su **secuencia materializada** y la
+/// frecuencia con la que se sortea entre las copias haplotípicas.
+///
+/// No guarda número de unidades ni pureza: los dos se derivan del tracto, que
+/// es la única autoridad (decisión S-02).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectiveRepeatAllele {
+    tract: TandemRepeatTract,
+    declared_frequency: f64,
+    frequency: f64,
+}
+
+impl EffectiveRepeatAllele {
+    #[must_use]
+    pub const fn tract(&self) -> &TandemRepeatTract {
+        &self.tract
+    }
+
+    /// Frecuencia **tal y como el usuario la escribió**, sin normalizar.
+    ///
+    /// Se conserva y se publica aparte porque, si la suma declarada no era
+    /// exactamente uno, el valor normalizado **no es el que el usuario
+    /// escribió** y no habría dónde consultarlo.
+    #[must_use]
+    pub const fn declared_frequency(&self) -> f64 {
+        self.declared_frequency
+    }
+
+    /// Frecuencia **normalizada**, que es la que consume el sorteo.
+    #[must_use]
+    pub const fn frequency(&self) -> f64 {
+        self.frequency
+    }
+}
+
+/// Auditoría de la normalización de las frecuencias de un locus.
+///
+/// DTC-049 no se conforma con normalizar: exige **recomputar** la suma y su
+/// desviación después de normalizar y publicar las dos, junto con la tolerancia
+/// efectiva y el algoritmo. Es lo que permite comprobar desde fuera que la
+/// normalización cerró y con qué margen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RepeatFrequencyNormalization {
+    tolerance: f64,
+    original_sum: f64,
+    original_delta: f64,
+    effective_sum: f64,
+    effective_delta: f64,
+}
+
+impl RepeatFrequencyNormalization {
+    #[must_use]
+    pub const fn tolerance(self) -> f64 {
+        self.tolerance
+    }
+
+    #[must_use]
+    pub const fn original_sum(self) -> f64 {
+        self.original_sum
+    }
+
+    #[must_use]
+    pub const fn original_delta(self) -> f64 {
+        self.original_delta
+    }
+
+    #[must_use]
+    pub const fn effective_sum(self) -> f64 {
+        self.effective_sum
+    }
+
+    #[must_use]
+    pub const fn effective_delta(self) -> f64 {
+        self.effective_delta
+    }
+}
+
+/// Un locus de repetición ya resuelto.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EffectiveRepeatLocus {
+    /// El locus del dominio, con su identificador tipado, su intervalo en el
+    /// servicio común de coordenadas y su motivo validado.
+    ///
+    /// La frontera de configuración **no** mantiene una representación paralela
+    /// con campos crudos: había dos del mismo concepto y una de ellas, la
+    /// tipada, no tenía usuarios.
+    declaration: TandemRepeatLocus,
+    max_units: u64,
+    admission: EffectiveRepeatAdmission,
+    alleles: Vec<EffectiveRepeatAllele>,
+    normalization: RepeatFrequencyNormalization,
+}
+
+impl EffectiveRepeatLocus {
+    #[must_use]
+    pub const fn declaration(&self) -> &TandemRepeatLocus {
+        &self.declaration
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &str {
+        self.declaration.id().as_str()
+    }
+
+    #[must_use]
+    pub fn sequence_id(&self) -> &str {
+        self.declaration.interval().sequence_id().as_str()
+    }
+
+    /// Inicio del intervalo en **base uno, inclusivo**, convertido por el
+    /// servicio común de coordenadas y no por una suma a mano.
+    pub fn start(&self) -> Result<u64, Diagnostic> {
+        Ok(self.closed_interval()?.start())
+    }
+
+    /// Final del intervalo en **base uno, inclusivo**.
+    pub fn end(&self) -> Result<u64, Diagnostic> {
+        Ok(self.closed_interval()?.end())
+    }
+
+    fn closed_interval(&self) -> Result<ClosedInterval1, Diagnostic> {
+        self.declaration.interval().to_closed_1().map_err(|error| {
+            Diagnostic::internal_invariant("application", "repeat_locus_interval")
+                .with("detail", format!("{error:?}"))
+        })
+    }
+
+    /// Los motivos del locus, en orden.
+    #[must_use]
+    pub fn motifs(&self) -> &[RepeatMotif] {
+        self.declaration.motifs()
+    }
+
+    /// El motivo cuando el locus tiene uno solo.
+    #[must_use]
+    pub fn single_motif(&self) -> Option<&RepeatMotif> {
+        self.declaration.single_motif()
+    }
+
+    /// Mínimos de admisión **efectivos de este locus**: los suyos si los declara
+    /// y, si no, los generales.
+    #[must_use]
+    pub const fn admission(&self) -> EffectiveRepeatAdmission {
+        self.admission
+    }
+
+    /// Tope propio del tamaño del tracto, en **unidades completas**.
+    #[must_use]
+    pub const fn max_units(&self) -> u64 {
+        self.max_units
+    }
+
+    #[must_use]
+    pub fn alleles(&self) -> &[EffectiveRepeatAllele] {
+        &self.alleles
+    }
+
+    #[must_use]
+    pub const fn normalization(&self) -> RepeatFrequencyNormalization {
+        self.normalization
+    }
+}
+
+/// Mínimos de la guarda de admisión con referencia real, ya resueltos.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectiveRepeatAdmission {
+    min_purity: f64,
+    min_longest_run_units: u64,
+}
+
+impl EffectiveRepeatAdmission {
+    /// Valores por omisión: se publican siempre, se declaren o no.
+    pub const DEFAULT: Self = Self {
+        min_purity: 0.8,
+        min_longest_run_units: 3,
+    };
+
+    #[must_use]
+    pub const fn min_purity(self) -> f64 {
+        self.min_purity
+    }
+
+    #[must_use]
+    pub const fn min_longest_run_units(self) -> u64 {
+        self.min_longest_run_units
     }
 }
 
@@ -222,6 +452,9 @@ pub struct EffectiveConfig {
     direct_events: Vec<EffectiveDirectEvent>,
     technical_event: Option<EffectiveTechnicalEvent>,
     vcf_output: Option<VcfOutputMode>,
+    document_version: DeclaredDocumentVersion,
+    repeat_loci: Vec<EffectiveRepeatLocus>,
+    repeat_admission: EffectiveRepeatAdmission,
 }
 
 /// Configuración F5 ya resuelta entre sus dos documentos de autoría y el
@@ -928,6 +1161,23 @@ impl EffectiveConfig {
     #[must_use]
     pub fn source_path(&self) -> &str {
         &self.source_path
+    }
+
+    /// Versión del documento general que la originó, que es la que decide qué
+    /// versión de configuración efectiva se publica.
+    #[must_use]
+    pub const fn document_version(&self) -> DeclaredDocumentVersion {
+        self.document_version
+    }
+
+    #[must_use]
+    pub fn repeat_loci(&self) -> &[EffectiveRepeatLocus] {
+        &self.repeat_loci
+    }
+
+    #[must_use]
+    pub const fn repeat_admission(&self) -> EffectiveRepeatAdmission {
+        self.repeat_admission
     }
 
     #[must_use]
@@ -1641,6 +1891,13 @@ pub fn build_effective_config_with_entropy(
             original_path: resolve_link(general.source().path(), fasta.value()),
         },
     };
+    let repeat_admission = effective_repeat_admission(general)?;
+    let repeat_loci = effective_repeat_loci(
+        general,
+        &sequences,
+        normalization.tolerance,
+        repeat_admission,
+    )?;
     let reproducibility = ReproducibilityMetadata::new(root_seed, seed_origin);
     let initial_populations = effective_initial_populations(general, root_seed)?;
     let population_snvs = effective_population_snvs(general)?;
@@ -1712,6 +1969,12 @@ pub fn build_effective_config_with_entropy(
         direct_events,
         technical_event,
         vcf_output,
+        document_version: match general.document_version() {
+            "4" => DeclaredDocumentVersion::V4,
+            _ => DeclaredDocumentVersion::V2,
+        },
+        repeat_loci,
+        repeat_admission,
     })
 }
 
@@ -2630,6 +2893,498 @@ fn parse_unknown_base_fraction(
         ));
     }
     Ok(value)
+}
+
+/// Resuelve los loci de repetición declarados.
+///
+/// # El tope se comprueba **antes** de materializar nada
+///
+/// Un alelo que rebasa el tope se rechaza **sin construir su secuencia**. La
+/// versión anterior materializaba primero y comparaba después, y un error de
+/// dedo de nueve cifras consumía gigabytes y decenas de segundos antes de
+/// emitir el rechazo correcto —o no llegaba a emitirlo—. El tope existe
+/// justamente «para que un error de dedo no genere un tracto desmesurado», de
+/// modo que materializarlo primero anulaba su razón de ser.
+///
+/// El diagnóstico nombra **el locus y el alelo**, no el individuo: con
+/// frecuencias (decisión S-04) el alelo se conoce al leer la configuración,
+/// antes de que exista ningún individuo al que asignárselo.
+///
+/// # Los mínimos de admisión se aplican también al alelo declarado
+///
+/// La guarda de admisión sobre la referencia real —que compara el tracto que
+/// hay en el genoma contra estos mismos mínimos— **todavía no existe**. Lo que
+/// sí existe, y se aplica aquí, es la misma comparación sobre el alelo que el
+/// usuario declara. Publicar los mínimos sin aplicarlos a nada sería publicar
+/// el cartel de una guarda inexistente: quien leyera la configuración efectiva
+/// concluiría que un alelo de pureza cero pasó un umbral de 0,8.
+///
+/// Y es la comprobación correcta por sí misma: un alelo que no contiene ni una
+/// copia de su propio motivo no es un alelo de ese locus venga de donde venga, y
+/// además haría fallar más adelante al paso de unidades sobre la tirada más
+/// larga.
+fn effective_repeat_loci(
+    general: &DeclaredGeneralConfig,
+    sequences: &[EffectiveSequence],
+    tolerance: f64,
+    admission: EffectiveRepeatAdmission,
+) -> Result<Vec<EffectiveRepeatLocus>, Diagnostic> {
+    let reference_id = ReferenceId::parse(general.reference().id.value().as_str(), "execution")
+        .map_err(|diagnostic| {
+            diagnostic.with("path", general.source().path().display().to_string())
+        })?;
+    let mut resolved: Vec<EffectiveRepeatLocus> =
+        Vec::with_capacity(general.reference().repeat_loci.len());
+    for locus in &general.reference().repeat_loci {
+        // El identificador del locus es **tipado**: lo declara el usuario y se
+        // valida con la misma sintaxis que el resto de identificadores
+        // aportados. Sin esto, un identificador con espacios o acentos se
+        // admitía, se ejecutaba y se publicaba, y solo el validador externo de
+        // la configuración efectiva lo cazaba después, contra su propio patrón.
+        let locus_id = RepeatLocusId::parse(locus.id.value().as_str(), "repeat_locus").map_err(
+            |diagnostic| {
+                diagnostic
+                    .with("path", general.source().path().display().to_string())
+                    .with("location", locus.id.location().to_string())
+            },
+        )?;
+        let mut motifs = Vec::with_capacity(locus.motifs.len());
+        for declared in &locus.motifs {
+            motifs.push(
+                RepeatMotif::new(declared.value().as_bytes()).map_err(|error| {
+                    repeat_error(
+                        general,
+                        "reference.repeat_loci.motif",
+                        locus.id.value(),
+                        error.detail(),
+                    )
+                })?,
+            );
+        }
+        let sequence = sequences
+            .iter()
+            .find(|sequence| sequence.id() == locus.sequence.value())
+            .ok_or_else(|| {
+                repeat_error(
+                    general,
+                    "reference.repeat_loci.sequence",
+                    locus.id.value(),
+                    format!("secuencia desconocida: {}", locus.sequence.value()),
+                )
+            })?;
+        let sequence_id =
+            SequenceId::parse(sequence.id(), reference_id.as_str()).map_err(|diagnostic| {
+                diagnostic.with("path", general.source().path().display().to_string())
+            })?;
+        // El intervalo pasa por el servicio común de coordenadas, que es quien
+        // convierte de base uno cerrada a base cero semiabierta y quien
+        // comprueba que cabe en la secuencia. Aquí no se resta ni se suma uno.
+        let closed =
+            ClosedInterval1::new(*locus.start.value(), *locus.end.value()).map_err(|error| {
+                repeat_error(
+                    general,
+                    "reference.repeat_loci.start,reference.repeat_loci.end",
+                    locus.id.value(),
+                    format!("intervalo declarado inválido: {error:?}"),
+                )
+            })?;
+        let interval = GenomicInterval::from_closed_1(
+            reference_id.clone(),
+            sequence_id,
+            closed,
+            sequence.length(),
+        )
+        .map_err(|error| {
+            repeat_error(
+                general,
+                "reference.repeat_loci.start,reference.repeat_loci.end",
+                locus.id.value(),
+                format!(
+                    "el intervalo {}..{} no cabe en {} ({} bases): {error:?}",
+                    locus.start.value(),
+                    locus.end.value(),
+                    sequence.id(),
+                    sequence.length()
+                ),
+            )
+        })?;
+        // Dos loci que se solapan describirían el mismo tracto dos veces y
+        // producirían dos alelos sobre las mismas bases.
+        if let Some(previous) = resolved.iter().find(|other| {
+            other.declaration().interval().sequence_id() == interval.sequence_id()
+                && other.declaration().interval().start() < interval.end()
+                && interval.start() < other.declaration().interval().end()
+        }) {
+            return Err(repeat_error(
+                general,
+                "reference.repeat_loci.start,reference.repeat_loci.end",
+                locus.id.value(),
+                format!("su intervalo se solapa con el del locus {}", previous.id()),
+            ));
+        }
+        // La guarda de intervalo contra motivo vive en el tipo del dominio, no
+        // reescrita aquí: una sola representación del mismo concepto.
+        let declaration =
+            TandemRepeatLocus::new(locus_id, interval, motifs.clone()).map_err(|error| {
+                repeat_error(
+                    general,
+                    "reference.repeat_loci.start,reference.repeat_loci.end",
+                    locus.id.value(),
+                    error.detail(),
+                )
+            })?;
+        // Los mínimos del locus sustituyen a los generales, que quedan como
+        // valor de partida. El mismo número no significa lo mismo según el
+        // motivo, y un umbral único o deja pasar basura en los motivos cortos o
+        // rechaza loci legítimos en los largos.
+        let locus_admission = resolve_admission(general, locus.admission.as_ref(), admission)
+            .map_err(|diagnostic| diagnostic.with("fields", "reference.repeat_loci.min_purity"))?;
+        let max_units = locus
+            .max_units
+            .as_ref()
+            .map_or(DEFAULT_REPEAT_MAX_UNITS, |declared| *declared.value());
+        if max_units == 0 {
+            return Err(repeat_error(
+                general,
+                "reference.repeat_loci.max_units",
+                locus.id.value(),
+                "el tope debe ser un entero positivo en unidades",
+            ));
+        }
+
+        let mut declared_weights = Vec::with_capacity(locus.alleles.len());
+        let mut tracts = Vec::with_capacity(locus.alleles.len());
+        for (index, allele) in locus.alleles.iter().enumerate() {
+            // ANTES de materializar: el tope se decide sobre lo declarado.
+            if let Some(units) = declared_unit_count(&motifs, allele)
+                && units > max_units as f64
+            {
+                return Err(repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles",
+                    locus.id.value(),
+                    format!(
+                        "el alelo {index} mide {units} unidades y rebasa el tope de {max_units}"
+                    ),
+                ));
+            }
+            let tract = materialize_declared_allele(general, locus, &motifs, index, allele)?;
+            let annotation = tract.annotation();
+            // Red por si la forma declarada no permitía contar las unidades de
+            // antemano. Hoy siempre permite, así que esta rama no se ejercita;
+            // se conserva porque el tope es un contrato y no puede depender de
+            // que la forma declarada sea una de las dos de hoy.
+            if annotation.units_as_f64() > max_units as f64 {
+                return Err(repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles",
+                    locus.id.value(),
+                    format!(
+                        "el alelo {index} mide {} unidades y rebasa el tope de {max_units}",
+                        annotation.units_as_f64()
+                    ),
+                ));
+            }
+            if annotation.purity_as_f64() < locus_admission.min_purity() {
+                return Err(repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles",
+                    locus.id.value(),
+                    format!(
+                        "el alelo {index} tiene pureza {} y el mínimo declarado es {}",
+                        annotation.purity_as_f64(),
+                        locus_admission.min_purity()
+                    ),
+                ));
+            }
+            if annotation.longest_run_units() < locus_admission.min_longest_run_units() {
+                return Err(repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles",
+                    locus.id.value(),
+                    format!(
+                        "el alelo {index} tiene una tirada más larga de {} unidades y el mínimo declarado es {}",
+                        annotation.longest_run_units(),
+                        locus_admission.min_longest_run_units()
+                    ),
+                ));
+            }
+            let frequency = allele.frequency.literal().parse::<f64>().map_err(|_| {
+                repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles.frequency",
+                    locus.id.value(),
+                    format!("el alelo {index} declara una frecuencia decimal inválida"),
+                )
+            })?;
+            if !frequency.is_finite() || !(0.0..=1.0).contains(&frequency) {
+                return Err(repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles.frequency",
+                    locus.id.value(),
+                    format!("el alelo {index} declara una frecuencia fuera de [0,1]"),
+                ));
+            }
+            declared_weights.push(frequency);
+            tracts.push(tract);
+        }
+        // DTC-049: suma compensada con **el mismo** algoritmo que consume el
+        // sorteo categórico, y auditoría recomputada después de normalizar.
+        let original_sum = neumaier_sum(declared_weights.iter().copied());
+        if !original_sum.is_finite()
+            || original_sum <= 0.0
+            || (original_sum - 1.0).abs() > tolerance
+        {
+            return Err(repeat_error(
+                general,
+                "reference.repeat_loci.alleles.frequency",
+                locus.id.value(),
+                format!(
+                    "las frecuencias suman {original_sum} y se apartan de 1 más que {tolerance}"
+                ),
+            ));
+        }
+        let effective_weights: Vec<f64> = declared_weights
+            .iter()
+            .map(|weight| weight / original_sum)
+            .collect();
+        // Recomputar sobre lo normalizado, no dar por hecho que suma 1: es lo
+        // que el resto del proyecto hace y lo que hace publicable la auditoría.
+        let effective_sum = neumaier_sum(effective_weights.iter().copied());
+        let normalization = RepeatFrequencyNormalization {
+            tolerance,
+            original_sum,
+            original_delta: (original_sum - 1.0).abs(),
+            effective_sum,
+            effective_delta: (effective_sum - 1.0).abs(),
+        };
+        let alleles = tracts
+            .into_iter()
+            .zip(declared_weights.iter().copied())
+            .zip(effective_weights)
+            .map(
+                |((tract, declared_frequency), frequency)| EffectiveRepeatAllele {
+                    tract,
+                    declared_frequency,
+                    frequency,
+                },
+            )
+            .collect();
+        resolved.push(EffectiveRepeatLocus {
+            declaration,
+            max_units,
+            admission: locus_admission,
+            alleles,
+            normalization,
+        });
+    }
+    Ok(resolved)
+}
+
+/// Número **total** de unidades que la declaración implica, sin materializar
+/// nada. Es lo que el tope compara, y sumar los bloques es lo correcto: lo que
+/// el tope protege es el tamaño del tracto entero.
+///
+/// Devuelve `None` cuando la declaración no es una de las dos formas válidas;
+/// en ese caso el diagnóstico correcto lo produce la materialización.
+fn declared_unit_count(
+    motifs: &[RepeatMotif],
+    allele: &crate::configuration::DeclaredRepeatAllele,
+) -> Option<f64> {
+    match (allele.units.is_empty(), &allele.sequence) {
+        (false, None) if allele.units.len() == motifs.len() => {
+            Some(allele.units.iter().map(|units| *units.value() as f64).sum())
+        }
+        (true, Some(sequence)) if motifs.len() == 1 => {
+            Some(sequence.value().len() as f64 / motifs[0].length() as f64)
+        }
+        _ => None,
+    }
+}
+
+/// Materializa la secuencia del alelo desde su declaración compacta.
+///
+/// Las dos formas son excluyentes: **o** el número de unidades de cada bloque
+/// con sus interrupciones, **o** la secuencia exacta. Una interrupción
+/// **sustituye** las bases que ocupan su desplazamiento —absoluto dentro del
+/// tracto— y conserva la longitud, de modo que la estructura en bloques no se
+/// mueve.
+///
+/// La secuencia exacta solo se admite con **un** motivo: unas bases sueltas no
+/// pueden decir dónde acaba un bloque y empieza el siguiente, y esa es
+/// justamente la información que la estructura aporta.
+fn materialize_declared_allele(
+    general: &DeclaredGeneralConfig,
+    locus: &crate::configuration::DeclaredRepeatLocus,
+    motifs: &[RepeatMotif],
+    index: usize,
+    allele: &crate::configuration::DeclaredRepeatAllele,
+) -> Result<TandemRepeatTract, Diagnostic> {
+    match (allele.units.is_empty(), &allele.sequence) {
+        (false, Some(_)) | (true, None) => Err(repeat_error(
+            general,
+            "reference.repeat_loci.alleles",
+            locus.id.value(),
+            format!("el alelo {index} debe declarar units o sequence, exactamente uno"),
+        )),
+        (true, Some(sequence)) => {
+            if motifs.len() != 1 {
+                return Err(repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles.sequence",
+                    locus.id.value(),
+                    format!(
+                        "el alelo {index} declara su secuencia exacta y el locus tiene {} motivos: una secuencia no puede decir dónde acaba un bloque y empieza el siguiente",
+                        motifs.len()
+                    ),
+                ));
+            }
+            if !allele.interruptions.is_empty() {
+                return Err(repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles.interruptions",
+                    locus.id.value(),
+                    format!(
+                        "el alelo {index} declara su secuencia exacta: las interrupciones ya están en ella"
+                    ),
+                ));
+            }
+            TandemRepeatTract::new(motifs[0].clone(), sequence.value().as_bytes()).map_err(
+                |error| {
+                    repeat_error(
+                        general,
+                        "reference.repeat_loci.alleles.sequence",
+                        locus.id.value(),
+                        format!("el alelo {index}: {}", error.detail()),
+                    )
+                },
+            )
+        }
+        (false, None) => {
+            let specification: Vec<(RepeatMotif, u64)> = motifs
+                .iter()
+                .cloned()
+                .zip(allele.units.iter().map(|units| *units.value()))
+                .collect();
+            let tract = TandemRepeatTract::pure_blocks(&specification).map_err(|error| {
+                repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles.units",
+                    locus.id.value(),
+                    format!("el alelo {index}: {}", error.detail()),
+                )
+            })?;
+            if allele.interruptions.is_empty() {
+                return Ok(tract);
+            }
+            let mut bases = tract.bases().to_vec();
+            for interruption in &allele.interruptions {
+                let offset = usize::try_from(*interruption.offset.value()).map_err(|_| {
+                    repeat_error(
+                        general,
+                        "reference.repeat_loci.alleles.interruptions.offset",
+                        locus.id.value(),
+                        format!("el alelo {index} declara un desplazamiento inalcanzable"),
+                    )
+                })?;
+                let replacement = interruption.bases.value().as_bytes();
+                if replacement.is_empty() || offset + replacement.len() > bases.len() {
+                    return Err(repeat_error(
+                        general,
+                        "reference.repeat_loci.alleles.interruptions",
+                        locus.id.value(),
+                        format!(
+                            "el alelo {index} tiene una interrupción en {offset} que no cabe en sus {} bases",
+                            bases.len()
+                        ),
+                    ));
+                }
+                bases[offset..offset + replacement.len()].copy_from_slice(replacement);
+            }
+            // La sustitución conserva la longitud, así que los bloques del
+            // tracto puro siguen valiendo tal cual.
+            TandemRepeatTract::from_blocks(tract.blocks().to_vec(), bases).map_err(|error| {
+                repeat_error(
+                    general,
+                    "reference.repeat_loci.alleles.interruptions",
+                    locus.id.value(),
+                    format!("el alelo {index}: {}", error.detail()),
+                )
+            })
+        }
+    }
+}
+
+/// Resuelve unos mínimos declarados contra los que sirven de valor de partida.
+///
+/// Es la misma función para los generales —cuyo valor de partida son los de
+/// omisión— y para los de cada locus, cuyo valor de partida son los generales.
+fn resolve_admission(
+    general: &DeclaredGeneralConfig,
+    declared: Option<&crate::configuration::DeclaredRepeatAdmission>,
+    fallback: EffectiveRepeatAdmission,
+) -> Result<EffectiveRepeatAdmission, Diagnostic> {
+    let Some(declared) = declared else {
+        return Ok(fallback);
+    };
+    let min_purity = match &declared.min_purity {
+        None => fallback.min_purity(),
+        Some(value) => {
+            let parsed = value
+                .literal()
+                .parse::<f64>()
+                .map_err(|_| config_error(general, "min_purity", "debe ser un decimal válido"))?;
+            if !parsed.is_finite() || !(0.0..=1.0).contains(&parsed) {
+                return Err(config_error(
+                    general,
+                    "min_purity",
+                    "debe ser finito y pertenecer a [0,1]",
+                ));
+            }
+            parsed
+        }
+    };
+    let min_longest_run_units = declared
+        .min_longest_run_units
+        .as_ref()
+        .map_or(fallback.min_longest_run_units(), |value| *value.value());
+    if min_longest_run_units == 0 {
+        return Err(config_error(
+            general,
+            "min_longest_run_units",
+            "debe ser un entero positivo",
+        ));
+    }
+    Ok(EffectiveRepeatAdmission {
+        min_purity,
+        min_longest_run_units,
+    })
+}
+
+/// Mínimos **generales**, que sirven de valor de partida para los loci que no
+/// declaren los suyos.
+fn effective_repeat_admission(
+    general: &DeclaredGeneralConfig,
+) -> Result<EffectiveRepeatAdmission, Diagnostic> {
+    resolve_admission(
+        general,
+        general.reference().repeat_admission.as_ref(),
+        EffectiveRepeatAdmission::DEFAULT,
+    )
+    .map_err(|diagnostic| diagnostic.with("fields", "reference.repeat_admission"))
+}
+
+fn repeat_error(
+    general: &DeclaredGeneralConfig,
+    fields: &str,
+    locus_id: &str,
+    detail: impl Into<String>,
+) -> Diagnostic {
+    config_error(
+        general,
+        fields,
+        format!("locus {locus_id}: {}", detail.into()),
+    )
 }
 
 fn resolve_link(general_path: &Path, declared: &str) -> PathBuf {

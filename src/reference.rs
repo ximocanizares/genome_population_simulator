@@ -329,8 +329,19 @@ impl ReferenceSequence {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReferenceOrigin {
     Generated,
-    Supplied { original_path: PathBuf },
-    Reduced { source_reference_id: ReferenceId },
+    Supplied {
+        original_path: PathBuf,
+    },
+    Reduced {
+        source_reference_id: ReferenceId,
+    },
+    /// Referencia derivada por **inserción de tractos** sobre una real. Lleva
+    /// identidad propia por la misma razón que la reducida: el genoma final no
+    /// es el fichero suministrado y ningún resultado puede quedar atribuido a
+    /// un genoma que no existe (decisión S-03, punto 3).
+    TractInsertion {
+        source_reference_id: ReferenceId,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]

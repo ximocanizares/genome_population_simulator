@@ -2263,7 +2263,14 @@ fn linear_uniform_preflight(min: f64, max: f64) -> Result<(), RandomSamplingErro
     }
 }
 
-fn neumaier_sum(values: impl IntoIterator<Item = f64>) -> f64 {
+/// Suma compensada de Neumaier, el algoritmo `neumaier_sum_v1` que DTC-049
+/// exige para normalizar pesos.
+///
+/// Se expone al resto de la biblioteca a propósito: es **la misma** que consume
+/// el sorteo categórico normativo, de modo que quien valide un reparto de
+/// frecuencias y quien después lo sortee usan exactamente la misma aritmética y
+/// no pueden discrepar por el último bit.
+pub(crate) fn neumaier_sum(values: impl IntoIterator<Item = f64>) -> f64 {
     let mut sum = 0.0;
     let mut correction = 0.0;
     for value in values {

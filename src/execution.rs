@@ -1903,6 +1903,20 @@ fn manifest_reduction_links(
 /// clase y longitud, y pide después los tramos elegidos. Cualquier otra salida
 /// —matriz SNV, individuos, eventos directos, evento técnico o VCF— trabaja
 /// sobre la secuencia y obliga a materializarla.
+///
+/// # Pendiente del paso F6.4.2, anotado aquí porque es donde se arregla
+///
+/// La guarda de admisión con referencia real —comprobar que en la posición
+/// declarada hay de verdad un tracto del motivo declarado— **todavía no
+/// existe**, y esta lista es la razón: **no menciona las repeticiones**, de modo
+/// que un escenario que solo declare loci llega con la referencia sin
+/// materializar y la guarda no tendría bases que mirar.
+///
+/// La corrección tiene nombre y es esta línea: añadir
+/// `|| !effective.repeat_loci().is_empty()`. Se deja sin añadir a propósito
+/// mientras no exista la guarda, porque materializar el genoma entero sin que
+/// nadie lo lea sería pagar la memoria por nada. Quien escriba F6.4.2 empieza
+/// por aquí.
 fn requires_materialized_bases(effective: &EffectiveConfig) -> bool {
     effective.population_snvs().is_some()
         || !effective.initial_populations().is_empty()

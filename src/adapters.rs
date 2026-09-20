@@ -11,7 +11,8 @@ use crate::configuration::{
     DeclaredF5Subpopulation, DeclaredF5Target, DeclaredGeneralConfig, DeclaredInitialPopulation,
     DeclaredNumber, DeclaredPopulationSnvs, DeclaredPopulationSnvsGeneration,
     DeclaredPopulationSnvsPopulation, DeclaredPopulationSnvsRegion, DeclaredReducedReference,
-    DeclaredReductionTarget, DeclaredReference, DeclaredReferenceSource, DeclaredSequence,
+    DeclaredReductionTarget, DeclaredReference, DeclaredReferenceSource, DeclaredRepeatAdmission,
+    DeclaredRepeatAllele, DeclaredRepeatInterruption, DeclaredRepeatLocus, DeclaredSequence,
     DeclaredTechnicalEvent, DeclaredTechnicalEventTarget, DeclaredTechnicalLibrary,
     DeclaredVcfOutput, ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
 };
@@ -107,14 +108,20 @@ pub fn admit_toml_header(
     // DTC-082 activa atómicamente la frontera de autoría F4: el runtime no
     // conserva lectores de TOML general v1 cuando ya puede producir PE real.
     let accepted_version = match expected {
-        ExpectedConfigKind::General => "2",
-        ExpectedConfigKind::GeneralDispatch => "2,3",
+        ExpectedConfigKind::General => "2,4",
+        ExpectedConfigKind::GeneralDispatch => "2,3,4",
         ExpectedConfigKind::F5General => "3",
         ExpectedConfigKind::F5Scenario => "1",
     };
     let accepted = match expected {
         ExpectedConfigKind::GeneralDispatch => {
-            matches!(version_value.get_ref().as_str(), Some("2" | "3"))
+            matches!(version_value.get_ref().as_str(), Some("2" | "3" | "4"))
+        }
+        // La ruta general admite el v2 histórico y el v4 que abre este trabajo.
+        // El v4 es una **extensión** del v2: todo documento v2 válido lo sigue
+        // siendo sin cambiar un byte, y solo el v4 puede declarar repeticiones.
+        ExpectedConfigKind::General => {
+            matches!(version_value.get_ref().as_str(), Some("2" | "4"))
         }
         _ => version_value.get_ref().as_str() == Some(accepted_version),
     };
@@ -205,7 +212,17 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
     let seed = optional_located_string(&admitted, table, "seed")?;
     let ploidy = optional_located_u64(&admitted, table, "ploidy")?;
     let normalization_tolerance = optional_number(&admitted, table, "normalization_tolerance")?;
-    let reference = parse_reference(&admitted, required_table(&admitted, table, "reference")?)?;
+    let document_version = table
+        .get("schema_version")
+        .and_then(|value| value.get_ref().as_str())
+        .unwrap_or("2")
+        .to_owned();
+    let declares_repeats = document_version == "4";
+    let reference = parse_reference(
+        &admitted,
+        required_table(&admitted, table, "reference")?,
+        declares_repeats,
+    )?;
     let reduced = parse_reduced_references(&admitted, table)?;
     let population_snvs = parse_population_snvs(&admitted, table)?;
     let initial_populations = parse_initial_populations(&admitted, table)?;
@@ -221,6 +238,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
         reduced,
         population_snvs,
     )
+    .with_document_version(document_version)
     .with_initial_populations(initial_populations)
     .with_direct_events(direct_events)
     .with_vcf_output(vcf_output)
@@ -1609,12 +1627,24 @@ fn required_non_empty_string(
 fn parse_reference(
     admitted: &AdmittedToml,
     table: &DeTable<'_>,
+    declares_repeats: bool,
 ) -> Result<DeclaredReference, Diagnostic> {
-    check_unknown(
-        admitted,
-        table,
-        &["kind", "id", "fasta", "sequences", "composition"],
-    )?;
+    // Un documento v2 no conoce las repeticiones: sus claves son campos
+    // desconocidos, igual que cualquier otra que no esté en el contrato.
+    let known: &[&str] = if declares_repeats {
+        &[
+            "kind",
+            "id",
+            "fasta",
+            "sequences",
+            "composition",
+            "repeat_loci",
+            "repeat_admission",
+        ]
+    } else {
+        &["kind", "id", "fasta", "sequences", "composition"]
+    };
+    check_unknown(admitted, table, known)?;
     let id = required_string(admitted, table, "id")?;
     let kind = required_string(admitted, table, "kind")?;
     let source = match kind.value().as_str() {
@@ -1705,11 +1735,308 @@ fn parse_reference(
             length: required_u64(admitted, sequence, "length")?,
         });
     }
+    let repeat_loci = if declares_repeats {
+        parse_repeat_loci(admitted, table)?
+    } else {
+        Vec::new()
+    };
+    let repeat_admission = if declares_repeats {
+        parse_repeat_admission(admitted, table)?
+    } else {
+        None
+    };
     Ok(DeclaredReference {
         id,
         source,
         sequences,
+        repeat_loci,
+        repeat_admission,
     })
+}
+
+/// Mínimos de admisión declarados **dentro** de la tabla del locus.
+fn parse_locus_admission(
+    admitted: &AdmittedToml,
+    locus: &DeTable<'_>,
+) -> Result<Option<DeclaredRepeatAdmission>, Diagnostic> {
+    let min_purity = optional_number(admitted, locus, "min_purity")?;
+    let min_longest_run_units = optional_located_u64(admitted, locus, "min_longest_run_units")?;
+    if min_purity.is_none() && min_longest_run_units.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(DeclaredRepeatAdmission {
+        min_purity,
+        min_longest_run_units,
+    }))
+}
+
+/// Lee el número de unidades del alelo, escalar o por bloque.
+fn parse_allele_units(
+    admitted: &AdmittedToml,
+    allele: &DeTable<'_>,
+    locus_id: &str,
+    block_count: usize,
+) -> Result<Vec<Located<u64>>, Diagnostic> {
+    let Some(value) = allele.get("units") else {
+        return Ok(Vec::new());
+    };
+    if let Some(values) = value.get_ref().as_array() {
+        let mut units = Vec::with_capacity(values.len());
+        for item in values {
+            let parsed = item
+                .get_ref()
+                .as_integer()
+                .and_then(|integer| u64::from_str_radix(integer.as_str(), integer.radix()).ok())
+                .ok_or_else(|| {
+                    wrong_type(
+                        admitted,
+                        "reference.repeat_loci.alleles.units",
+                        item,
+                        "non-negative integer",
+                    )
+                })?;
+            units.push(Located::new(parsed, location(admitted, item.span())));
+        }
+        if units.len() != block_count {
+            return Err(semantic_error(
+                admitted,
+                "reference.repeat_loci.alleles.units",
+                format!(
+                    "el locus {locus_id} tiene {block_count} motivos y un alelo declara {} números de unidades: hace falta uno por bloque",
+                    units.len()
+                ),
+            ));
+        }
+        return Ok(units);
+    }
+    let scalar = optional_located_u64(admitted, allele, "units")?;
+    match scalar {
+        None => Ok(Vec::new()),
+        Some(scalar) => {
+            if block_count != 1 {
+                return Err(semantic_error(
+                    admitted,
+                    "reference.repeat_loci.alleles.units",
+                    format!(
+                        "el locus {locus_id} tiene {block_count} motivos: su alelo necesita un número de unidades por bloque, no uno solo"
+                    ),
+                ));
+            }
+            Ok(vec![scalar])
+        }
+    }
+}
+
+fn parse_repeat_admission(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<Option<DeclaredRepeatAdmission>, Diagnostic> {
+    let Some(admission) = optional_table(admitted, table, "repeat_admission")? else {
+        return Ok(None);
+    };
+    check_unknown(
+        admitted,
+        admission,
+        &["min_purity", "min_longest_run_units"],
+    )?;
+    Ok(Some(DeclaredRepeatAdmission {
+        min_purity: optional_number(admitted, admission, "min_purity")?,
+        min_longest_run_units: optional_located_u64(admitted, admission, "min_longest_run_units")?,
+    }))
+}
+
+/// Rechaza cualquier intento de **declarar** la pureza de un locus o de un
+/// alelo, nombrando el locus y el parámetro.
+fn reject_declared_purity(admitted: &AdmittedToml, locus: &DeTable<'_>) -> Result<(), Diagnostic> {
+    const DECLARED_PURITY_KEYS: &[&str] = &["purity", "target_purity", "purity_target"];
+    let locus_id = locus
+        .get("id")
+        .and_then(|value| value.get_ref().as_str())
+        .unwrap_or("<sin id>")
+        .to_owned();
+    let mut tables: Vec<&DeTable<'_>> = vec![locus];
+    let alleles = locus
+        .get("alleles")
+        .and_then(|value| value.get_ref().as_array());
+    if let Some(alleles) = alleles {
+        tables.extend(alleles.iter().filter_map(|item| item.get_ref().as_table()));
+    }
+    for table in tables {
+        for key in table.keys() {
+            let field = key.get_ref().as_ref();
+            if DECLARED_PURITY_KEYS.contains(&field) {
+                return Err(semantic_error(
+                    admitted,
+                    "reference.repeat_loci",
+                    format!(
+                        "locus {locus_id}: la pureza no se declara, se calcula desde la secuencia; \
+                         retire el parámetro {field}"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_repeat_loci(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+) -> Result<Vec<DeclaredRepeatLocus>, Diagnostic> {
+    let Some(values) = optional_array(admitted, table, "repeat_loci")? else {
+        return Ok(Vec::new());
+    };
+    let mut loci = Vec::with_capacity(values.len());
+    let mut ids = std::collections::BTreeSet::new();
+    for value in values {
+        let locus = value
+            .get_ref()
+            .as_table()
+            .ok_or_else(|| wrong_type(admitted, "reference.repeat_loci", value, "table"))?;
+        // La pureza es siempre una **salida** calculada, nunca una entrada
+        // (decisión S-06). El esquema cerrado ya la rechazaría como campo
+        // desconocido, pero entonces el diagnóstico solo nombraría el campo;
+        // aquí se nombran además el locus y el parámetro, que es lo que la
+        // decisión exige y lo que permite entender el rechazo.
+        reject_declared_purity(admitted, locus)?;
+        check_unknown(
+            admitted,
+            locus,
+            &[
+                "id",
+                "sequence",
+                "start",
+                "end",
+                "motif",
+                "motifs",
+                "max_units",
+                "min_purity",
+                "min_longest_run_units",
+                "alleles",
+            ],
+        )?;
+        let id = required_string(admitted, locus, "id")?;
+        if !ids.insert(id.value().clone()) {
+            return Err(semantic_error(
+                admitted,
+                "reference.repeat_loci.id",
+                format!("identificador de locus repetido: {}", id.value()),
+            ));
+        }
+        // `motif` y `motifs` son excluyentes: el singular es el atajo de un solo
+        // bloque y es lo que escribe todo documento que no sea compuesto.
+        let singular = optional_located_string(admitted, locus, "motif")?;
+        let plural = optional_array(admitted, locus, "motifs")?;
+        let (motifs, declared_as_list) = match (singular, plural) {
+            (Some(_), Some(_)) => {
+                return Err(semantic_error(
+                    admitted,
+                    "reference.repeat_loci.motif,reference.repeat_loci.motifs",
+                    format!(
+                        "el locus {} declara motif y motifs; son excluyentes",
+                        id.value()
+                    ),
+                ));
+            }
+            (None, None) => {
+                return Err(semantic_error(
+                    admitted,
+                    "reference.repeat_loci.motif",
+                    format!("el locus {} no declara ningún motivo", id.value()),
+                ));
+            }
+            (Some(single), None) => (vec![single], false),
+            (None, Some(values)) => {
+                if values.is_empty() {
+                    return Err(semantic_error(
+                        admitted,
+                        "reference.repeat_loci.motifs",
+                        format!("el locus {} declara una lista de motivos vacía", id.value()),
+                    ));
+                }
+                let mut parsed = Vec::with_capacity(values.len());
+                for value in values {
+                    let text = value.get_ref().as_str().ok_or_else(|| {
+                        wrong_type(admitted, "reference.repeat_loci.motifs", value, "string")
+                    })?;
+                    parsed.push(Located::new(
+                        text.to_string(),
+                        location(admitted, value.span()),
+                    ));
+                }
+                (parsed, true)
+            }
+        };
+        let admission = parse_locus_admission(admitted, locus)?;
+        let alleles_values = required_array(admitted, locus, "alleles")?;
+        if alleles_values.is_empty() {
+            return Err(semantic_error(
+                admitted,
+                "reference.repeat_loci.alleles",
+                format!("el locus {} no declara ningún alelo", id.value()),
+            ));
+        }
+        let mut alleles = Vec::with_capacity(alleles_values.len());
+        for allele_value in alleles_values {
+            let allele = allele_value.get_ref().as_table().ok_or_else(|| {
+                wrong_type(
+                    admitted,
+                    "reference.repeat_loci.alleles",
+                    allele_value,
+                    "table",
+                )
+            })?;
+            check_unknown(
+                admitted,
+                allele,
+                &["units", "sequence", "frequency", "interruptions"],
+            )?;
+            let interruptions = match optional_array(admitted, allele, "interruptions")? {
+                None => Vec::new(),
+                Some(items) => {
+                    let mut parsed = Vec::with_capacity(items.len());
+                    for item in items {
+                        let interruption = item.get_ref().as_table().ok_or_else(|| {
+                            wrong_type(
+                                admitted,
+                                "reference.repeat_loci.alleles.interruptions",
+                                item,
+                                "table",
+                            )
+                        })?;
+                        check_unknown(admitted, interruption, &["offset", "bases"])?;
+                        parsed.push(DeclaredRepeatInterruption {
+                            offset: required_u64(admitted, interruption, "offset")?,
+                            bases: required_string(admitted, interruption, "bases")?,
+                        });
+                    }
+                    parsed
+                }
+            };
+            // `units` admite un entero cuando el locus tiene un solo motivo, y
+            // una lista con un valor por bloque cuando tiene varios. Es un solo
+            // concepto con un atajo, no dos claves distintas.
+            let units = parse_allele_units(admitted, allele, id.value(), motifs.len())?;
+            alleles.push(DeclaredRepeatAllele {
+                units,
+                sequence: optional_located_string(admitted, allele, "sequence")?,
+                frequency: required_number(admitted, allele, "frequency")?,
+                interruptions,
+            });
+        }
+        loci.push(DeclaredRepeatLocus {
+            id,
+            sequence: required_string(admitted, locus, "sequence")?,
+            start: required_u64(admitted, locus, "start")?,
+            end: required_u64(admitted, locus, "end")?,
+            motifs,
+            declared_as_list,
+            max_units: optional_located_u64(admitted, locus, "max_units")?,
+            admission,
+            alleles,
+        });
+    }
+    Ok(loci)
 }
 
 fn parse_reduced_references(

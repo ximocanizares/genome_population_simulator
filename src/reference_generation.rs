@@ -2,7 +2,7 @@
 
 use crate::diagnostics::Diagnostic;
 use crate::identity::{ReferenceId, SequenceId};
-use crate::randomness::{RootSeed, RuntimeSubseedScope, derive_subseed};
+use crate::randomness::{RandomWordSource, RootSeed, RuntimeSubseedScope, derive_subseed};
 use crate::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
@@ -20,6 +20,22 @@ pub struct GeneratedSequenceSpec<'a> {
     pub id: &'a str,
     pub class: SequenceClass,
     pub length: u64,
+}
+
+/// Región declarada con su **secuencia exacta**, colocada antes del relleno.
+///
+/// Es donde entran los microsatélites de una referencia simulada (decisión
+/// S-03). Los cambios estructurales —duplicaciones, inversiones,
+/// translocaciones— **no** entran aquí: van con el hito estructural y
+/// **después** de generar la secuencia.
+#[derive(Clone, Copy, Debug)]
+pub struct DeclaredRegion<'a> {
+    /// Secuencia de la referencia simulada en la que cae la región.
+    pub sequence_id: &'a str,
+    /// Desplazamiento en base cero desde el comienzo de la secuencia.
+    pub start: u64,
+    /// Bases literales que ocupan la región. No se sortean.
+    pub bases: &'a [u8],
 }
 
 pub fn generate_reference(
@@ -40,15 +56,67 @@ pub fn generate_reference_with_unknown_fraction(
     composition: &[BaseFrequency],
     unknown_base_fraction: f64,
 ) -> Result<Reference, Diagnostic> {
-    let cumulative = validate_composition(composition)?;
-    let unknown_base_fraction = validate_unknown_base_fraction(unknown_base_fraction)?;
+    generate_reference_with_regions(
+        reference_id,
+        root_seed,
+        specs,
+        composition,
+        unknown_base_fraction,
+        &[],
+    )
+}
+
+/// Genera la referencia en el orden que fija la decisión S-03: **número de
+/// secuencias y tamaño → regiones declaradas con su secuencia exacta →
+/// relleno al azar** con los parámetros de composición.
+///
+/// El orden es observable en **una sola** magnitud: el relleno consume
+/// exactamente una palabra aleatoria por base **no declarada**, no una por base
+/// de la secuencia. Un generador que rellenase primero y sobrescribiese después
+/// produciría el mismo FASTA y solo se distingue por ese consumo.
+///
+/// Con la lista de regiones vacía el consumo y los bytes son idénticos a los
+/// del generador anterior, que es lo que sostiene la congelación de la línea
+/// base.
+pub fn generate_reference_with_regions(
+    reference_id: &str,
+    root_seed: RootSeed,
+    specs: &[GeneratedSequenceSpec<'_>],
+    composition: &[BaseFrequency],
+    unknown_base_fraction: f64,
+    regions: &[DeclaredRegion<'_>],
+) -> Result<Reference, Diagnostic> {
     let mut rng = derive_subseed(
         root_seed,
         RuntimeSubseedScope::ReferenceGeneration { reference_id },
     )?
     .local_rng();
+    generate_reference_from_source(
+        reference_id,
+        specs,
+        composition,
+        unknown_base_fraction,
+        regions,
+        &mut rng,
+    )
+}
+
+/// Igual que [`generate_reference_with_regions`], pero sobre una fuente de
+/// palabras instrumentable, de modo que una prueba pueda **contar** cuántas
+/// consume el relleno. Es el único observable que separa los dos órdenes.
+pub fn generate_reference_from_source(
+    reference_id: &str,
+    specs: &[GeneratedSequenceSpec<'_>],
+    composition: &[BaseFrequency],
+    unknown_base_fraction: f64,
+    regions: &[DeclaredRegion<'_>],
+    words: &mut impl RandomWordSource,
+) -> Result<Reference, Diagnostic> {
+    let cumulative = validate_composition(composition)?;
+    let unknown_base_fraction = validate_unknown_base_fraction(unknown_base_fraction)?;
+    let placements = plan_regions(specs, regions)?;
     let mut sequences = Vec::with_capacity(specs.len());
-    for spec in specs {
+    for (index, spec) in specs.iter().enumerate() {
         let length = usize::try_from(spec.length).map_err(|_| resource_error(spec.length))?;
         if length == 0 {
             return Err(configuration_error(
@@ -56,17 +124,28 @@ pub fn generate_reference_with_unknown_fraction(
                 format!("{} has zero length", spec.id),
             ));
         }
-        let mut bases = Vec::with_capacity(length);
-        for _ in 0..length {
-            let unit = u64_to_unit_interval(rng.next_u64());
-            bases.push(if unit < unknown_base_fraction {
+        // Paso 1: las regiones declaradas, con su secuencia exacta.
+        let mut bases = vec![0_u8; length];
+        let mut declared = vec![false; length];
+        for placement in placements.iter().filter(|item| item.spec_index == index) {
+            let start = placement.start;
+            bases[start..start + placement.bases.len()].copy_from_slice(placement.bases);
+            declared[start..start + placement.bases.len()].fill(true);
+        }
+        // Paso 2: el relleno al azar, que solo toca lo que no está declarado.
+        for (offset, slot) in bases.iter_mut().enumerate() {
+            if declared[offset] {
+                continue;
+            }
+            let unit = u64_to_unit_interval(words.next_word());
+            *slot = if unit < unknown_base_fraction {
                 b'N'
             } else {
                 select_base(
                     (unit - unknown_base_fraction) / (1.0 - unknown_base_fraction),
                     &cumulative,
                 )
-            });
+            };
         }
         // Se consume el búfer recién construido en lugar de copiarlo:
         // `try_from_bytes` duplicaría la secuencia entera y el pico pasaría al
@@ -98,6 +177,92 @@ pub fn generate_reference_with_unknown_fraction(
             "generated reference construction failed: {error:?}"
         ))
     })
+}
+
+struct RegionPlacement<'a> {
+    spec_index: usize,
+    start: usize,
+    bases: &'a [u8],
+}
+
+/// Valida las regiones **antes** de generar nada: secuencia conocida, alfabeto
+/// admitido, cabida dentro de la secuencia y ausencia de solapamiento.
+fn plan_regions<'a>(
+    specs: &[GeneratedSequenceSpec<'_>],
+    regions: &[DeclaredRegion<'a>],
+) -> Result<Vec<RegionPlacement<'a>>, Diagnostic> {
+    let mut planned: Vec<RegionPlacement<'a>> = Vec::with_capacity(regions.len());
+    for region in regions {
+        if region.bases.is_empty() {
+            return Err(configuration_error(
+                "reference.regions.bases",
+                format!("region on {} declares no bases", region.sequence_id),
+            ));
+        }
+        for &base in region.bases {
+            if !matches!(base, b'A' | b'C' | b'G' | b'T' | b'N') {
+                return Err(configuration_error(
+                    "reference.regions.bases",
+                    format!(
+                        "region on {} contains 0x{base:02x}, which is not A, C, G, T or N",
+                        region.sequence_id
+                    ),
+                ));
+            }
+        }
+        let spec_index = specs
+            .iter()
+            .position(|spec| spec.id == region.sequence_id)
+            .ok_or_else(|| {
+                configuration_error(
+                    "reference.regions.sequence",
+                    format!(
+                        "unknown sequence {} for a declared region",
+                        region.sequence_id
+                    ),
+                )
+            })?;
+        let length = region.bases.len() as u64;
+        let end = region.start.checked_add(length).ok_or_else(|| {
+            configuration_error(
+                "reference.regions.start",
+                format!("region on {} overflows the sequence", region.sequence_id),
+            )
+        })?;
+        if end > specs[spec_index].length {
+            return Err(configuration_error(
+                "reference.regions.start,reference.regions.bases",
+                format!(
+                    "region on {} spans [{}, {end}) and runs past the {}-base sequence",
+                    region.sequence_id, region.start, specs[spec_index].length
+                ),
+            ));
+        }
+        let start = usize::try_from(region.start).map_err(|_| resource_error(region.start))?;
+        for existing in &planned {
+            if existing.spec_index != spec_index {
+                continue;
+            }
+            let existing_end = existing.start + existing.bases.len();
+            if start < existing_end && existing.start < start + region.bases.len() {
+                return Err(configuration_error(
+                    "reference.regions",
+                    format!(
+                        "two declared regions on {} overlap: [{}, {existing_end}) and [{start}, {})",
+                        region.sequence_id,
+                        existing.start,
+                        start + region.bases.len()
+                    ),
+                ));
+            }
+        }
+        planned.push(RegionPlacement {
+            spec_index,
+            start,
+            bases: region.bases,
+        });
+    }
+    Ok(planned)
 }
 
 fn validate_unknown_base_fraction(value: f64) -> Result<f64, Diagnostic> {
