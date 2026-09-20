@@ -82,20 +82,20 @@ de la sección 11 del diseño de bibliotecas con PCR.
 | **S-13** | En qué punto exacto del recorrido se aplica el tartamudeo | Después de la quimera y antes de calidad y errores. **Aceptado y verificado en el código**, ver «Decisiones confirmadas» | D-13 | F4.8.4 |
 | **S-14** | El modelo de probabilidad | **CORREGIDO el 20/09/2026**: forma lineal confirmada por la literatura, pero el predictor pasa a ser la tirada más larga; estructura del paso, publicada, ver «Decisiones confirmadas» | D-14 | F4.8.2, F4.8.3 |
 | **S-15** | Qué pasa con la longitud del fragmento | La molécula cambia de longitud y el inserto con ella, sin compensar. **Aceptado**, ver «Decisiones confirmadas» | D-15 (a) | F4.8.5 |
-| **S-16** | Compatibilidad con lo ya publicado | Congelación byte a byte **acotada a los escenarios que no declaran loci de repetición** (ver contradicción C-1, que corrige la ficha) | D-16, corregida | F4.8.6, F4.9.10 |
-| **S-17** | Si la interfaz Marimo es condición de cierre | **Sí para el tartamudeo y sí, en versión mínima, para los loci** (ver contradicción C-6, que corrige la ficha: sin control de loci, el control de tartamudeo no sirve para nada) | D-17, corregida | F6.4.9.1, F4.8.9, F4.9.12 |
-| **S-18** | Si esto es un hito propio o adelanta el hito de repeticiones | **Adelanta pasos existentes** de la fase de variación compleja, con la corrección de dependencia escrita, y añade hitos nuevos a la fase de realismo técnico con su cambio de contrato documentado | D-18 (b) | Sección 4, sección 9 |
-| **S-19** | Cómo se expresa la cantidad de material de partida de la PCR | **Parejas por molécula** (`mean_pairs_per_molecule`), con la fracción esperada de duplicados publicada como orientación | PCR 1 (a) | F4.9.3, F4.9.5 |
-| **S-20** | Cómo actúa el sesgo por composición | **Rechazo con tope de intentos** y aceptación del último, contada. Se aplica al **elegir la molécula**, no al repartir copias | PCR 2 (a) | F4.9.6 |
-| **S-21** | Genealogía dentro de la familia | **Progenitor uniforme entre las parejas anteriores y ciclo de divergencia geométrico** con `q = 1/(1+e)` | PCR 3 (a) | F4.10.2 |
-| **S-22** | Heterogeneidad de eficiencia entre moléculas | **Incluir las clases de eficiencia desde el principio**, opcionales y **sin valores predeterminados** | PCR 4 (a) | F4.9.3, F4.9.7 |
-| **S-23** | Quimeras con PCR | **Por pareja, como hoy.** La quimera heredada por la familia queda para más adelante | PCR 5 (a) | F4.9.7 |
+| **S-16** | Compatibilidad con lo ya publicado | Congelación acotada a escenarios sin loci declarados. **Aceptado**, ver «Decisiones confirmadas» | D-16, corregida | F4.8.6, F4.9.10 |
+| **S-17** | Si la interfaz Marimo es condición de cierre | Interfaz como condición de cierre, para tartamudeo **y** loci. **Aceptado, con alcance mayor del previsto**, ver «Decisiones confirmadas» | D-17, corregida | F6.4.9.1, F4.8.9, F4.9.12 |
+| **S-18** | Si esto es un hito propio o adelanta el hito de repeticiones | Adelanta pasos existentes y añade hitos nuevos. **Aceptado, con la advertencia de que hoy se parece más a un hito propio**, ver «Decisiones confirmadas» | D-18 (b) | Sección 4, sección 9 |
+| **S-19** | Cómo se expresa la cantidad de material de partida de la PCR | **CAMBIADO el 20/09/2026**: el usuario declara la **fracción de duplicados**, obligatoria y sin valor por defecto; el parámetro interno se deriva, ver «Decisiones confirmadas» | PCR 1 (a) | F4.9.3, F4.9.5 |
+| **S-20** | Cómo actúa el sesgo por composición | Rechazo con tope de intentos, aceptación del último **contada**, aplicado al elegir la molécula. **Aceptado**, ver «Decisiones confirmadas» | PCR 2 (a) | F4.9.6 |
+| **S-21** | Genealogía dentro de la familia | Progenitor uniforme y divergencia geométrica, declarada como aproximación. **Aceptado**, ver «Decisiones confirmadas» | PCR 3 (a) | F4.10.2 |
+| **S-22** | Heterogeneidad de eficiencia entre moléculas | Clases de eficiencia desde el principio, opcionales y sin valores por defecto. **Aceptado, y respaldado por Best y col.**, ver «Decisiones confirmadas» | PCR 4 (a) | F4.9.3, F4.9.7 |
+| **S-23** | Quimeras con PCR | Quimeras por pareja, la heredada para más adelante. **Aceptado, y respaldado por Kebschull y Zador**, ver «Decisiones confirmadas» | PCR 5 (a) | F4.9.7 |
 | **S-24** | Cómo se dan las tasas de resbalón por ciclo | Derivadas de las dos columnas de la calibración y del número de ciclos. **Aceptado**, ver «Decisiones confirmadas» | PCR 6 (a) | F4.10.3 |
-| **S-25** | Perfil tecnológico | **Recurso hermano** `resources/f4/gps-hiseqx-pcr-pe150-v1.json`, dejando intacto el recurso sin PCR y su SHA-256 | PCR 7 (a) | F4.9.1 |
+| **S-25** | Perfil tecnológico | Recurso hermano, dejando intacto el de sin PCR y su huella. **Aceptado**, ver «Decisiones confirmadas» | PCR 7 (a) | F4.9.1 |
 | **S-26** | Versiones de esquema | Las versiones nuevas las abre este trabajo y la fase de variación compleja las completa mientras no se publiquen fuera. **Aceptado**, ver «Decisiones confirmadas» | PCR 8 (a) | F6.1.1.1, F4.9.3 |
-| **S-27** | La cota de recursos | **Se publica** en el manifiesto y se prueba, **sin rechazo**. La imposición pertenece a la fase de presupuesto de recursos | PCR 9 (a) | F4.9.9 |
-| **S-28** | Cobertura de moléculas distintas en el manifiesto | **Se añade** `unique_molecule_x`, que es lo que un analista compara tras eliminar duplicados | PCR 10 (a) | F4.9.8 |
-| **S-29** | Reparto en entregas | **Dos entregas** en el diseño; este plan las convierte en **cuatro**, por la razón aritmética de la sección 3 | PCR 11 (a), refinada | Sección 3 |
+| **S-27** | La cota de recursos | Se publica en el manifiesto, sin rechazo. **Aceptado y verificado**: la fase de secuenciación nunca ha tenido control de recursos, ver «Decisiones confirmadas» | PCR 9 (a) | F4.9.9 |
+| **S-28** | Cobertura de moléculas distintas en el manifiesto | Se añade la cobertura de moléculas distintas. **Aceptado**, ver «Decisiones confirmadas» | PCR 10 (a) | F4.9.8 |
+| **S-29** | Reparto en entregas | **AMPLIADO el 20/09/2026**: cuatro entregas más una quinta, el generador de alelos por deslizamiento biológico, ver «Decisiones confirmadas» | PCR 11 (a), refinada | Sección 3 |
 
 **Por qué falta S-10.** La numeración de los supuestos sigue a la de las fichas
 del expediente: S-01 corresponde a D-01, S-02 a D-02, y así hasta S-18. **No
@@ -653,6 +653,123 @@ Esto responde la pregunta que [S-06](#) había dejado aplazada.
 **Fuentes:** Raz y col. (2019), NAR 47(5):2436–2445, CC BY 4.0; y *Flanking
 Variation Influences Rates of Stutter in Simple Repeats*, Genes 2017,
 PMC5704242, para la tirada más larga y sus contraejemplos.
+
+
+### Bloque «la amplificación» — S-19 a S-28 (20/09/2026)
+
+**Siete aceptados**, tres de ellos ahora con respaldo de las referencias
+verificadas el 19 de septiembre:
+
+- **Clases de eficiencia** entre moléculas, opcionales y sin valores por
+  defecto. Best y col. (2015) encuentran que esa heterogeneidad es
+  **independiente de la secuencia** y de las condiciones globales, de modo que
+  modelarla como clase aleatoria por molécula no es arbitrario.
+- **Quimeras por pareja**, la heredada por la familia para más adelante.
+  Kebschull y Zador (2015) midieron que los cambios de plantilla son **raros y
+  limitados a números de copia bajos**: el aplazamiento está respaldado por
+  medición, no por comodidad.
+- **Sesgo por composición** al elegir la molécula, con rechazo y tope de
+  intentos. Benjamini y Speed (2012) establecen que lo que manda es la
+  composición **del fragmento completo**. Se acepta el atajo de aceptar el
+  último intento **porque queda contado**: el usuario puede ver cuántas veces
+  se agotó el tope y juzgar si el sesgo le afecta.
+- **Genealogía** con progenitor uniforme y divergencia geométrica, declarada
+  como aproximación del coalescente y no como forma exacta.
+- **Perfil tecnológico** como recurso hermano, dejando intacto el de sin PCR y
+  su huella.
+- **Cota de recursos publicada, no impuesta.** Verificado: la fase de
+  secuenciación **nunca ha tenido** control de recursos —los límites viven solo
+  en la vía de haplotipos—, así que imponerlo aquí estrenaría algo que no le
+  corresponde.
+- **Cobertura de moléculas distintas** en el manifiesto: es lo que un analista
+  compara tras eliminar duplicados.
+
+#### S-19 — el usuario declara la fracción de duplicados, no «parejas por molécula»
+
+**Cambiado.** La propuesta pedía declarar `mean_pairs_per_molecule`. Esa es la
+variable del modelo, no la del usuario: un biólogo piensa en el porcentaje de
+duplicados que ve en su informe de calidad. Se invierte: **se declara la
+fracción de duplicados** y el sistema deriva el parámetro interno y **publica la
+fracción realizada**. Es además el patrón que el proyecto ya usa en todas
+partes: declarar un objetivo y publicar lo realizado con su tolerancia.
+
+#### Por qué no se fija un valor por defecto, pese a haberlo buscado
+
+Se buscó uno defendible y **no lo hay**, por una razón que conviene dejar
+escrita para que nadie lo intente de nuevo sin saberlo.
+
+Shen H., Liu P., Li Z. y col. (2019), *Advanced Whole Genome Sequencing Using an
+Entirely PCR-free Massively Parallel Sequencing Workflow*, bioRxiv
+doi:10.1101/2019.12.20.885517, CC BY 4.0, miden a 30× con tres réplicas:
+bibliotecas **con PCR, ~1,5 %**; bibliotecas **sin PCR en plataformas Illumina,
+10,43 %–13,62 %**. Duplicados identificados con Picard.
+
+**Las cifras se contradicen con su propia etiqueta:** las bibliotecas *sin* PCR
+salen con muchos más duplicados que las que *sí* la llevan, lo cual es imposible
+si lo medido fueran duplicados de PCR. **Interpretación —no es algo que el
+artículo afirme—:** Picard marca como duplicado cualquier par que caiga en las
+mismas coordenadas, y las celdas de flujo con patrón —HiSeq X, HiSeq 4000,
+NovaSeq, justo las comparadas— generan copias por la química de agrupación
+**sin ninguna PCR de por medio**.
+
+Por tanto **esas cifras miden otra cosa que nuestro parámetro**: nosotros
+queremos la fracción de parejas procedentes de la **misma molécula original por
+amplificación**; Picard da la fracción de parejas que **caen en el mismo sitio**.
+Adoptar 1,5 % o 10 % consagraría en el proyecto un número que mide otro
+fenómeno. Se añade que **no se puede determinar de qué plataforma es el 1,5 %**,
+y este simulador es de Illumina.
+
+**Lo que sí queda establecido:** la tasa **no depende apreciablemente de la
+profundidad** en el rango normal —midieron de 10× a 46× y se mantiene—, así que
+un valor por defecto no necesitaría ir atado a una profundidad. Ese obstáculo
+queda descartado; el que impide fijarlo es el de arriba.
+
+**Decisión:** parámetro **obligatorio y sin valor por defecto**, con un **ejemplo
+trabajado en la documentación** que use una cifra concreta marcada como
+ilustrativa y con su fuente, para no partir de cero. Y se documenta
+explícitamente que el parámetro es la fracción **atribuible a la
+amplificación**, **no** la que marca Picard: quien compare ambas sin saberlo no
+las verá cuadrar nunca.
+
+**La mejor fuente para este número son los informes de calidad del propio
+laboratorio**, no una media de genomas humanos ajenos.
+
+
+### Bloque «proceso y alcance» — S-16, S-17, S-18 y S-29 (20/09/2026)
+
+**Aceptados en el fondo**, pero las decisiones del 20 de septiembre **han
+cambiado su tamaño**, y eso se registra aquí para que el plan no se lea como
+algo menor de lo que es.
+
+**S-16.** Congelación byte a byte acotada a los escenarios que **no** declaran
+loci de repetición. Sin cambio.
+
+**S-17 — la interfaz mínima es el doble de lo previsto.** Cuando se escribió la
+ficha, «mínima» significaba una tabla de loci y alelos. Con lo decidido hoy hace
+falta: declarar loci con **motivo y posición**, declarar alelos con sus
+**interrupciones**, y declarar **frecuencias** por locus. Sigue siendo
+razonable, pero hay que presupuestarlo por lo que es.
+
+**S-18 — esto ya no es solo «adelantar pasos que existen».** La ficha decía que
+se aprovechaban pasos del plan de la fase de variación compleja, y en parte
+sigue siendo cierto. Pero hoy se han añadido **tres piezas que no existían en
+ningún plan**, y las tres tocan fases cerradas:
+
+1. el **generador de referencia simulada con regiones definidas** —el actual
+   solo sabe rellenar al azar (`src/reference_generation.rs`)—;
+2. la **tabla de correspondencia de coordenadas** —la reducción nunca ha movido
+   coordenadas y `src/coordinates.rs` no tiene nada equivalente—;
+3. la **corrección de la especificación** sobre el umbral de 50 pb.
+
+El trabajo se parece más a un **hito propio** que a un adelanto, y el plan debe
+usar esa palabra para que nadie lo subestime al leerlo.
+
+**S-29 — cinco entregas, no cuatro.** Las cuatro del plan se mantienen:
+microsatélites que varían entre individuos; tartamudeo de base sin amplificar;
+preparación amplificada; y tartamudeo clonal heredable. Se añade una **quinta**:
+el **generador de alelos por deslizamiento biológico**, que es condición de
+cierre y no tenía sitio en ninguna de las cuatro. Se pone como entrega propia
+para que se vea que existe en vez de quedar escondida dentro de otra.
 
 
 ## 4. Cómo se numera, y puertas comunes
