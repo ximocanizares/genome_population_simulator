@@ -69,14 +69,14 @@ de la sección 11 del diseño de bibliotecas con PCR.
 | # | Qué se decide, en llano | Opción adoptada | Ficha | Pasos que la usan |
 |---|---|---|---|---|
 | **S-01** | Dónde se declaran los loci y los alelos, y qué versión de fichero de configuración nace | Esquema general **v4** que extiende la vía directa: tabla `[[tandem_repeat_loci]]` y clase `kind = "tandem_repeat"` dentro de `direct_events`. Sin escenario enlazado nuevo | D-01 (a) | F6.1.1.1, F6.4.8 |
-| **S-02** | Cómo se guarda el alelo dentro del estado genotípico | **Modificación pequeña tipada**: variante nueva `SmallModification::TandemRepeat` junto a `Snp`, `Insertion` y `Deletion`, que materializa como la inserción o la deleción equivalente. **No** se crea ninguna clase de segmento estructural | D-02 (a) | F6.4.3, F6.4.3.2 |
+| **S-02** | Cómo se guarda el alelo dentro del estado genotípico | ~~Modificación pequeña con el número de unidades~~ → **RESUELTO el 20/09/2026, ver «Decisiones confirmadas»**: variante pequeña nueva que **lleva la secuencia** del tracto, no un contador | D-02, corregida | F6.4.3, F6.4.3.2 |
 | **S-03** | De dónde sale el tracto que hay en la referencia | Las dos vías, **empezando por la suministrada**: se admite un FASTA que ya contiene el tracto y se comprueba el intervalo declarado; después se siembra el tracto en la referencia simulada | D-03 (c), con (a) primero | F6.4.2 |
 | **S-04** | Cómo se asignan los alelos a los individuos | **Explícito** en el fichero general ahora; frecuencias alélicas por locus y población, después. La forma del TOML de ahora no debe impedir añadir las frecuencias luego | D-04 (a) ahora, (c) después | F6.1.1.1, F6.4.3 |
 | **S-05** | Qué pasa con un alelo que se separa 50 pb o más de la referencia | **Rechazo antes de simular**, identificando locus, individuo y copia. El corte queda íntegramente en territorio de *indels* pequeños | D-05 (a) | F6.4.3.1, F6.4.8 |
-| **S-06** | Pureza e interrupciones: qué se declara y qué se calcula | **Interrupciones declaradas** como pares (desplazamiento dentro del tracto, base); **pureza calculada y publicada** como valor realizado. Una configuración que declare una pureza objetivo se rechaza | D-06 (a) | F6.4.1, F6.4.8 |
+| **S-06** | Pureza e interrupciones | **RESUELTO el 20/09/2026, ver «Decisiones confirmadas»**: la pureza siempre se calcula, nunca se declara; las interrupciones vienen de la referencia si es real, o se escriben si es simulada | D-06, reformulada | — |
 | **S-07** | Por qué extremo se ganan o se pierden unidades | **Extremo derecho del tracto**, unidades completas; el resto del tracto queda byte a byte igual al de la referencia, y la diferencia es siempre un *indel* limpio | D-07 (a) | F6.4.1.1, F6.4.3 |
 | **S-08** | Forma de la verdad publicada | **Caso *indel* con metadatos de repetición**: mismos tipos de registro, más `locus_id`, `motif` y `units` en el alelo, en una versión nueva del esquema de verdad (v3). `truth-v1` y `truth-v2` no cambian ni un byte | D-08 (a) | F6.4.3.2 |
-| **S-09** | Campos del VCF y qué es «tamaño manejable» | **Campos de repetición en tándem del estándar 4.5**, declarados en la cabecera, con alelos explícitos en `REF`/`ALT`. El umbral de «manejable» es **el mismo** que separa *indel* de variante estructural (50 pb por omisión). **Sin fichero complementario** | D-09 (a) | F6.5.1.1 |
+| **S-09** | Campos del VCF y umbral de «tamaño manejable» | **RESUELTO el 20/09/2026, ver «Decisiones confirmadas»**: campos de repetición del estándar, alelos explícitos siempre, **sin umbral de tamaño** | D-09, corregida | — |
 | **S-11** | Ámbitos de aleatoriedad e identificadores | Identificador del locus **declarado por el usuario** y validado por unicidad, sin clase de identificador automático nueva. Para el tartamudeo, catálogo técnico nuevo **`f4-technical-v4`** con etapa `stutter` y componentes `[event_id, library_id, stutter, template_ordinal, locus_id, decision]`, indexada por `locus_id` y no por posición | D-11 | F4.8.1 |
 | **S-12** | Si cabe un artefacto de PCR en una fase que declara no usar PCR | **Nombrarlo por su mecanismo** para el caso sin amplificar: deslizamiento de la polimerasa en la amplificación en puente y en la síntesis, que existe en el perfil vigente. Para la biblioteca amplificada, el usuario ya decidió reabrir DTF-056 (ver contradicción C-3) | D-12 (a), ampliada | F4.8.1, sección 9 |
 | **S-13** | En qué punto exacto del recorrido se aplica el tartamudeo | **Después de la quimera y antes de calidad y errores**, con un `stutter::transform_paired_end` de la misma forma que los dos que ya existen | D-13 | F4.8.4 |
@@ -208,6 +208,60 @@ cierre del hito de repeticiones de la fase de variación compleja.
 
 ---
 
+
+---
+
+## Decisiones confirmadas por el responsable
+
+Lo que sigue **ya no es supuesto**: está decidido y sustituye a la fila
+correspondiente de la tabla de arriba.
+
+### S-02 — el alelo guarda su secuencia, no un contador (20/09/2026)
+
+**Decidido.** El alelo de un microsatélite en una copia haplotípica se guarda
+como una **clase nueva del mundo de las variantes pequeñas** —junto al cambio
+de base, la inserción y la deleción, y **no** como segmento estructural— que
+lleva el **intervalo de referencia** que sustituye, la **secuencia realizada**
+del tracto, y su anotación: motivo, número de unidades y las interrupciones.
+El número de unidades y la pureza se **derivan** de la secuencia; no se
+almacenan por separado, para que no puedan contradecirla.
+
+**Por qué se corrigió la recomendación.** Guardar solo el número de unidades no
+puede expresar un tracto **impuro** —uno con bases que rompen el motivo—, y la
+mayoría de los microsatélites reales lo son. Además contradecía la decisión
+D-06, ya adoptada, que hace al usuario declarar las interrupciones una a una:
+con un contador no hay dónde ponerlas. La propia ficha D-06 planteaba un tercer
+hueco, qué le pasa al patrón de interrupciones cuando el alelo cambia de
+longitud, **que con un contador no tiene respuesta posible** y con la secuencia
+no necesita ninguna regla: el patrón es el que la secuencia diga.
+
+**Lo que lo hace barato.** `InsertionModification` (`src/segments.rs`) **ya
+guarda secuencia** (`bases: Arc<[u8]>`), de modo que la estructura no estrena
+capacidad. Y el trío intervalo de referencia + secuencia alternativa +
+anotación **es el modelo del propio VCF** para una repetición en tándem, así
+que la proyección es directa y no una traducción.
+
+**Beneficio científico, no solo de representación.** Los tractos interrumpidos
+**tartamudean menos** que los puros, y la posición de la interrupción importa.
+Con la secuencia eso es modelable; con un contador no hay nada que mirar. Como
+el tartamudeo es el objetivo del encargo, pesa.
+
+**Declaración compacta, almacenamiento exacto.** Declarar cada alelo como una
+cadena de bases en el TOML reventaría el límite de tamaño del fichero general
+(contradicción C-5). Por eso se separan las dos cosas: por locus se declara un
+puñado de alelos —motivo, número de unidades y su lista de interrupciones si la
+tiene— y a los individuos se les **asigna** un alelo por índice o por
+frecuencia. El programa materializa la secuencia desde esa definición.
+
+**Frontera de alcance, confirmada.** Este trabajo **varía tractos que ya existen
+y están declarados**. La aparición de microsatélites **nuevos** por inserción o
+duplicación es trabajo estructural futuro y queda fuera.
+
+**Consecuencia pendiente de ajustar:** el presupuesto de tamaño de salida debe
+contar las bases del tracto en la verdad y en el VCF. Es un término pequeño,
+pero el contrato de recursos es estricto y no puede descubrirse a mitad.
+
+
 ## 3. El orden es forzoso, y por qué. El reparto en entregas
 
 ### 3.1. La aritmética manda el orden
@@ -290,6 +344,111 @@ paso pendiente. Ese rechazo está planificado de todos modos en F4.9.10, porque
 también hace falta en el orden recomendado mientras la entrega 4 no exista.
 
 ---
+
+### S-09 — campos del estándar, alelos explícitos, y ningún umbral (20/09/2026)
+
+**Decidido.** El VCF usa los **campos de repetición en tándem del propio
+estándar** —secuencia del motivo, longitud del motivo, número de copias, bases
+totales y número de unidades distintas— declarados en la cabecera, y publica
+los alelos **siempre de forma explícita**, con la secuencia completa en `REF` y
+`ALT`. **No se fija ningún umbral de tamaño**, ni por longitud del tracto ni
+por tamaño de la diferencia. No hay entrada complementaria, porque no hay
+pérdida.
+
+**Por qué se retira el umbral de 50 pb que la ficha proponía.** Se leyó la
+especificación de VCF 4.5 (25 de febrero de 2026, 50 páginas) y **no contiene
+ningún umbral de tamaño** para esta elección. Su criterio, literal en la
+sección de repeticiones en tándem, es otro:
+
+> «When the exact sequence is known, the variant can be represented as a
+> non-symbolic ALT allele. […] When the exact sequence is not known, or when
+> reporting tandem repeat "summary" information, the variant can be represented
+> as `<CNV:TR>` copy number variants […]»
+
+Es decir, el estándar distingue por **si se conoce la secuencia exacta**, no
+por su longitud. La única cifra que aparece en ese contexto es un ejemplo con
+un tracto de diez mil bases, representado de forma simbólica **por ser un
+resumen, no por ser largo**.
+
+**Un simulador siempre conoce la secuencia exacta: la ha generado él.** Nunca
+hay incertidumbre que resumir, de modo que la forma explícita aplica siempre y
+la simbólica nunca. El umbral de 50 pb era una convención de variantes
+estructurales importada de fuera del estándar, que además no aplica a este
+caso.
+
+**Lo que el estándar no tiene, y cómo se cubre.** No hay campo de pureza ni de
+interrupciones. El estándar expresa un tracto impuro **descomponiéndolo en
+unidades consecutivas**, y de sus longitudes se calcula la pureza. Aun así, la
+afirmación de la ficha de que «usando el estándar no hay pérdida de detalle»
+solo es cierta **gracias a [S-02](#)**: como el alelo lleva su secuencia,
+`REF` y `ALT` contienen el tracto base por base y no puede perderse nada; los
+campos de repetición son anotación encima. Con la versión descartada —guardar
+solo un contador— sí habría habido pérdida real.
+
+**Consecuencia:** el hito de variantes complejas y complemento del VCF sigue
+fuera del alcance, que era lo que esta ficha decidía.
+
+**Fuente:** [especificación VCF 4.5](https://samtools.github.io/hts-specs/VCFv4.5.pdf),
+sección de repeticiones en tándem. Sustituye a la nota del plan que declaraba
+sin verificar los nombres y tipos de estos campos: quedan verificados.
+
+
+### S-06 — la pureza siempre se calcula; las interrupciones vienen de donde venga la referencia (20/09/2026)
+
+**Decidido, y reformulado respecto a la ficha.** La ficha planteaba elegir entre
+declarar las interrupciones, declarar una pureza con colocación determinista, o
+declarar una pureza con colocación sorteada. El responsable señaló que la
+pregunta está mal puesta, porque **hay dos situaciones distintas según de dónde
+venga la referencia**, y el código ya las distingue: `ReferenceOrigin`
+(`src/reference.rs`) tiene las variantes `Generated`, `Supplied` y `Reduced`.
+
+**Con referencia real** —suministrada o reducida a partir de un genoma real—
+los microsatélites **ya están ahí** con las interrupciones que tengan. No se
+declaran: se declara **la posición del locus y su motivo**, y la secuencia se
+**lee de la referencia**. La pureza es entonces un valor observado.
+
+> **Validación que esto obliga a añadir.** Al declarar un locus con su motivo
+> hay que **comprobar que en esa posición hay realmente un tracto de ese
+> motivo**, y rechazar la configuración indicando el locus si no lo hay. Sin
+> esa guarda se anotaría como microsatélite un trozo cualquiera del genoma.
+
+**Con referencia simulada** el tracto no existe hasta que se crea, así que se
+declara qué insertar, **pudiendo dar la secuencia exacta** con sus impurezas.
+
+**Lo común, que es la decisión de fondo: la pureza es siempre una salida, nunca
+una entrada.** En el caso real se calcula de lo que hay; en el simulado, de lo
+que se escribió. En ninguno hace falta inventar una regla de colocación, que
+era justo el problema que la ficha intentaba resolver y que así **desaparece**.
+Una configuración que declare una pureza objetivo se rechaza antes de simular,
+indicando el locus y el parámetro.
+
+**Por qué no la colocación sorteada.** Tiene un defecto silencioso: si las
+interrupciones se sortean, cambiar la semilla **mueve la secuencia de la
+referencia**, y con ella todo lo demás.
+
+**Argumento biológico a favor de declarar la secuencia y no un número.** Dos
+alelos con el **mismo número de unidades** pero interrupciones en distinto
+sitio son alelos **distintos**, y en genética de poblaciones y en forense esa
+diferencia se usa precisamente para separar alelos que por longitud serían
+indistinguibles. Un valor de pureza no puede expresarlo; una secuencia sí.
+
+**Frontera con el simulador.** La referencia fija **el tracto**; el **número de
+cambios de ese microsatélite entre los individuos lo genera el simulador**. Son
+dos cosas separadas: una es el punto de partida, la otra la variación que se
+simula sobre él.
+
+**Cuestión que se traslada al paso del tartamudeo.** Cuando un alelo gana o
+pierde una unidad, ¿dónde se añade o se quita respecto a las interrupciones?
+Con la secuencia guardada la pregunta tiene respuesta posible; queda anotada
+para ese paso y no se resuelve aquí.
+
+**Nota sobre el umbral de tamaño, cerrada por el responsable.** Cómo un programa
+de análisis posterior interprete un cambio —variación del número de
+repeticiones o rotura de secuencia— **no es asunto de este simulador**. Se
+producen las lecturas con las secuencias correctas y el VCF con la verdad;
+acertar al interpretarlas es precisamente lo que un simulador sirve para poner
+a prueba.
+
 
 ## 4. Cómo se numera, y puertas comunes
 
