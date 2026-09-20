@@ -276,3 +276,125 @@ método.
   sección 4.
 - **Si estos valores valen para tomate**, más allá del argumento de la sección 1
   de que el artefacto depende del tracto y no del organismo.
+
+---
+
+## 9. La dependencia con la longitud del tracto, digitalizada (20/09/2026)
+
+Cierra parcialmente lo que estaba pendiente. La fuente es **Fungtammasan y
+col. (2015)**, figura 1A, panel superior izquierdo: proporción de lecturas
+erróneas en **escala logarítmica** frente a la longitud del tracto en pares de
+base, con curvas separadas para mononucleótidos y dinucleótidos, con y sin PCR.
+
+**Valores leídos de la figura**, como `log₁₀` de la proporción. Mononucleótidos:
+
+| Tracto (pb) | Sin PCR | Con PCR |
+|---|---|---|
+| 5 | −5,4 | −5,3 |
+| 7 | −4,1 | −3,8 |
+| 9 | −3,0 | −2,7 |
+| 11 | −2,2 | −1,8 |
+| 13 | −1,65 | −1,25 |
+| 15 | −1,3 | −0,85 |
+
+Dinucleótidos, que abarcan tractos más largos:
+
+| Tracto (pb) | Sin PCR | Con PCR |
+|---|---|---|
+| 10 | −3,6 | −3,4 |
+| 18 | −2,3 | −2,0 |
+| 26 | −1,6 | −1,35 |
+| 34 | −1,25 | −0,9 |
+
+**La forma, que es lo más sólido de todo esto:** en escala logarítmica la curva
+**sube casi recta hasta unos 10–12 pb y después se aplana**. Eso es crecimiento
+exponencial con meseta, y es coherente con una probabilidad **lineal por
+ciclo**: al acumular ciclos, una tasa lineal produce una fracción observada que
+satura. Las dos literaturas no se contradicen.
+
+**Contraste con la tabla de la sección 3, que es tranquilizador.** Gymrek mide
+0,17 con PCR en homopolímeros, es decir `log₁₀ = −0,77`; la figura da −0,85 a
+15 pb. Y 0,027 sin PCR es `−1,57`, frente a −1,3 leído. Mismo orden, con las
+diferencias esperables entre muestras y profundidades distintas.
+
+### Tres advertencias, y la tercera impide cerrar el pendiente del todo
+
+1. **Estos valores se leyeron a ojo de una figura**, en escala logarítmica y a
+   partir de una imagen de 680 píxeles de ancho. La incertidumbre es de unas
+   **±0,15 unidades logarítmicas**, que en lineal es del orden del ±40 %. Sirven
+   para la forma y el orden de magnitud, **no como calibración fina**.
+2. **Los números exactos existen y son accesibles.** Los autores publican los
+   ficheros de tasas de error en un historial de Galaxy enlazado desde el
+   artículo. No se pudieron descargar automáticamente porque la página es una
+   aplicación interactiva, pero **quien quiera precisión debe bajarlos de ahí**
+   en vez de usar esta tabla.
+3. **El artículo no dice cuántos ciclos de PCR usó.** Y esto es lo decisivo:
+   estas cifras son **de extremo a extremo**, y nuestro modelo necesita la
+   **pendiente por ciclo**. Convertir unas en otra exige conocer el número de
+   ciclos, que no está. Por tanto el coeficiente **sigue arrancando en cero** y
+   el pendiente sigue abierto en su parte cuantitativa, aunque ya no por falta
+   de acceso.
+
+**Condiciones de la medición**, que conviene tener presentes: los datos con PCR
+son de un varón humano a 150× y los de sin PCR de la muestra NA12882 a 245×,
+ambos en el mismo tipo de instrumento con lecturas de 100 bases en pareja. Son
+**muestras y profundidades distintas**, la misma salvedad que afecta a la tabla
+de la sección 3.
+
+---
+
+## 10. La fracción de duplicados: hay teoría, y valida la fórmula (20/09/2026)
+
+Se buscó una fuente mejor para el valor de duplicados y apareció algo más útil
+que un número: **una teoría con anclajes publicados**.
+
+**Rochette N. C., Rivera-Colón A. G., Walsh J., Sanger T. J.,
+Campbell-Staton S. C. y Catchen J. M. (2022–2023).** *On the causes,
+consequences, and avoidance of PCR duplicates: towards a theory of library
+complexity.* bioRxiv doi:10.1101/2022.10.10.511638; publicado en *Molecular
+Ecology Resources* (2023), PMID 37062860.
+
+**Su hallazgo central desmonta la intuición habitual.** La tasa de duplicados
+la determina **la razón entre profundidad y complejidad** —parejas de lecturas
+secuenciadas dividido por moléculas distintas de partida—, y **solo esa razón
+importa**, no los valores absolutos. El **número de ciclos de PCR juega un
+papel menor**: el ruido de amplificación solo influye apreciablemente cuando la
+razón está entre un décimo y uno.
+
+**Y eso valida el parámetro interno de este diseño**, porque las parejas por
+molécula **son** exactamente esa razón. No es una variable inventada por
+conveniencia del modelo: es la magnitud que la teoría señala como la que manda.
+
+**Anclajes publicados frente a nuestra fórmula.** Los autores dan dos, «con
+independencia del ruido de la PCR»:
+
+| Razón | Publicado | Nuestra fórmula `1 − (1 − e^(−m))/m` |
+|---|---|---|
+| 0,1 | **5–15 %** | **4,8 %** |
+| 1,0 | **35–60 %** | **36,8 %** |
+
+Nuestra fórmula cae **en el borde inferior de los dos rangos**, que es
+exactamente donde debe caer un modelo **sin ruido de amplificación**: el ruido
+real solo puede añadir duplicados, nunca quitarlos. La coincidencia del extremo
+inferior en los dos anclajes es una comprobación independiente de que la
+fórmula es la correcta y de que su sesgo es el esperado y va en la dirección
+segura.
+
+**Ejemplo trabajado, ya con respaldo**, para la documentación del parámetro:
+
+| Fracción declarada | Razón implicada |
+|---|---|
+| 1 % | 0,02 |
+| 2,5 % | 0,05 |
+| 9,4 % | 0,2 |
+| 21,3 % | 0,5 |
+
+**Sigue sin fijarse un valor por omisión**, y ahora por una razón mejor
+fundada: la teoría demuestra que la tasa depende de la **complejidad de la
+biblioteca y la profundidad de cada experimento**, no de una constante del
+protocolo. Un valor por omisión afirmaría algo que la propia teoría niega. El
+número correcto es el del informe de calidad del laboratorio.
+
+**Nota de licencia:** el programa que acompaña al artículo está bajo licencia
+GPL versión 3; de aquí no se toma código, solo los anclajes numéricos y el
+resultado teórico, que se citan.
