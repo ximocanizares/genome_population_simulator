@@ -2,19 +2,38 @@
 
 ## 1. Estado, autoridad y alcance
 
-- **Fecha:** 19 de septiembre de 2026.
-- **Estado:** **ejecutable bajo supuestos declarados.** Este plan es una
-  excepción a la regla que prohíbe a un plan decidir diseño. Las veintiocho
-  fichas de decisión abiertas que reparten los dos documentos de origen se han
-  resuelto **adoptando la opción que cada documento recomienda**, y cada
-  adopción está marcada como **supuesto** en la tabla de la sección 2 y en el
-  paso que la usa. El usuario puede leer esa tabla, confirmar o cambiar
-  cualquier fila, y el plan sigue siendo válido: cambiar un supuesto cambia los
-  pasos que lo citan y ningún otro.
-- **Por qué la excepción.** El plan de la fase de variación compleja
+- **Fecha:** 19 de septiembre de 2026. **Reescrito el 20 de septiembre de
+  2026** contra las decisiones cerradas por el responsable y contra los
+  hallazgos de la revisión adversarial de ese mismo día.
+- **Estado:** **ejecutable en las entregas 1 a 4; la quinta, parcialmente
+  bloqueada** por una decisión que el responsable no llegó a fijar —el
+  pendiente **P-4**, cómo el generador de deslizamiento biológico produce una
+  distribución de frecuencias y no una sola secuencia de alelos—. Las
+  veintiocho decisiones que los dos documentos
+  de origen dejaban abiertas **están cerradas**: el responsable las resolvió
+  una a una el 20 de septiembre y el registro literal de cada una vive en la
+  sección «Decisiones confirmadas por el responsable». Cinco de ellas
+  **corrigieron** la recomendación que este plan había adoptado. Los pasos de
+  las secciones 5 a 9 están escritos contra lo decidido, no contra lo
+  recomendado.
+- **Cómo nació y por qué la tabla de supuestos sigue aquí.** La primera versión
+  de este plan fue una excepción a la regla que prohíbe a un plan decidir
+  diseño: adoptó la recomendación de cada ficha y la marcó como supuesto, para
+  que el responsable pudiera confirmarla o cambiarla de un vistazo. Funcionó, y
+  por eso la tabla de la sección 2 se conserva: es el **registro de qué se
+  propuso**, y la columna de estado dice cuál se aceptó y cuál se corrigió.
+  Leerla ya no sirve para decidir —eso está hecho— sino para entender por qué
+  un paso dice lo que dice.
+- **Por qué existió la excepción.** El plan de la fase de variación compleja
   (`plan-implementacion-f6-0.1.md`) se paró ante cada decisión abierta y dejó
-  21 de sus 46 pasos bloqueados. Un plan hueco no sirve para trabajar. Aquí se
-  adopta lo recomendado, se dice en voz alta y se deja revocable.
+  21 de sus 46 pasos bloqueados. Un plan hueco no sirve para trabajar.
+- **Revisión adversarial del 20 de septiembre de 2026.** Declaró el plan no
+  integrable: los treinta y ocho pasos seguían escritos contra lo recomendado y
+  no contra lo decidido; siete piezas decididas no tenían ningún paso; la
+  sección de correcciones a otros documentos proponía consagrar en la
+  especificación algo que acababa de rechazarse; cuatro hechos afirmados eran
+  falsos; y diez pruebas no discriminaban. Todo ello está aplicado en esta
+  versión, y los cuatro hechos falsos se enumeran en la sección 1.1.
 - **Fuentes normativas y de diseño:**
   - `design/expediente-decisiones-repeticiones-tandem-0.1.md` — corte mínimo
     para tener microsatélites que varíen entre individuos, dieciocho fichas de
@@ -36,31 +55,100 @@
 - **Modelo de forma:** el plan de la fase de población fundadora
   (`plan-implementacion-f5-0.1.md`), y en particular su sección 11, que es el
   precedente de cómo este proyecto documenta un **cambio de contrato posterior
-  al cierre de una fase**. La sección 9 de este plan copia esa forma.
+  al cierre de una fase**. La sección 10 de este plan copia esa forma.
 - **Qué entrega.** Dos cosas que el usuario pidió, en este orden:
   1. **Microsatélites que varían entre individuos**: loci de repetición
-     declarados en coordenadas de la referencia y alelos —números de unidades—
-     distintos entre individuos y entre las dos copias de un mismo individuo,
+     declarados sobre una referencia, con unos pocos alelos por locus —cada uno
+     con **su secuencia**, no con un contador— y sus **frecuencias**, que el
+     simulador sortea entre los individuos y entre las dos copias de cada uno,
      publicados en la verdad y en el VCF.
   2. **Tartamudeo visible en las lecturas**: el cambio del número de unidades
      observado por deslizamiento de la polimerasa, primero en la biblioteca sin
      amplificar y después en la amplificada por PCR, con sus duplicados y su
      herencia por linaje.
-- **Qué no entrega, y dónde queda:** sección 12.
+
+  Y una tercera que el responsable añadió como **condición de cierre**, no como
+  ampliación aplazada: el **generador de alelos por deslizamiento biológico**,
+  que produce el abanico de alelos y sus frecuencias en vez de exigir que el
+  usuario los escriba. Mientras no exista, la simulación de microsatélites no
+  puede darse por cerrada.
+- **Esto es un hito propio, no un adelanto.** La primera versión lo presentaba
+  como «adelantar pasos que ya existen». Ya no basta: tres piezas decididas el
+  20 de septiembre **no existían en ningún plan** y dos de ellas tocan fases
+  cerradas —el generador de referencia simulada con regiones definidas y la
+  publicación de la correspondencia de coordenadas—. El plan conserva las
+  coordenadas de los pasos que sí anticipa, para no perder la trazabilidad, y
+  abre coordenadas nuevas donde no hay nada que anticipar.
+- **Qué no entrega, y dónde queda:** sección 13.
 - **Prohibiciones que este plan hereda y no relaja.** No autoriza *commit* ni
   publicación externa. No revierte trabajo ajeno. No se etiqueta una puerta con
   un comando que no se haya ejecutado. Las copias de seguridad de cualquier
   mutación van **fuera de git**; nunca `git checkout --`.
 
+### 1.1. Cuatro hechos que este plan afirmaba y son falsos
+
+Se enumeran porque tres de ellos **abarataban o encarecían trabajo**, y uno
+cambia lo que puede citarse como fuente. Los dos primeros los he comprobado yo
+mismo en el repositorio; los dos últimos proceden de la revisión adversarial,
+que los verificó contra las fuentes publicadas, y los recojo atribuidos a ella
+porque no he repetido esa comprobación.
+
+1. **«Insertar un tracto sería la primera operación del proyecto que mueve
+   coordenadas» — falso, y abarata el trabajo.** La reducción de referencia
+   **ya reubica** cada segmento: `src/reference_reduction.rs`, en la función
+   que materializa el plan de reducción, lleva un desplazamiento acumulado por
+   secuencia y construye un `derived_interval` distinto del `source_interval`;
+   y `schemas/reference-reduction-map-v1.schema.json` **ya publica los dos
+   intervalos por segmento**, con su orden de materialización y su orientación.
+   La tabla de correspondencia que la decisión S-03 exige es por tanto una
+   **extensión de un mapa que existe y está publicado**, no maquinaria nueva.
+   Comprobado el 20 de septiembre de 2026.
+2. **`tabix` es 1.19, no 1.21.** El entorno tiene `bcftools` 1.21, `samtools`
+   1.21 y `tabix` (HTSlib) **1.19**. La puerta externa exige 1.24 para las dos.
+   Comprobado ejecutando `--version`.
+3. **«Los dos conjuntos de la calibración pasaron por las mismas células» —
+   falso.** Son **dos individuos distintos**, de proyectos distintos: uno de
+   Papuasia Nueva Guinea secuenciado con PCR a 25,9× y otro de Pakistán sin PCR
+   a 37,6×, y el primero además en una corrida agrupada. Que cada columna sea un
+   **total** sigue en pie, y con ello el orden forzoso de la sección 3.1; lo que
+   se debilita es atribuir la diferencia **solo** a la PCR, porque puede llevar
+   dentro efectos de individuo y de lote. Las tasas por ciclo derivadas de esa
+   resta son, por tanto, más toscas de lo que el texto daba a entender.
+   Corregido también en `design/calibracion-tartamudeo-0.1.md`.
+4. **La fuente de la dependencia con la longitud del tracto no está tras muro
+   de pago.** Fungtammasan y colaboradores (2015) está en acceso abierto en
+   Europe PMC con el identificador PMC4417121, y la curva ajustada **se puede
+   recuperar** de su figura 1A. El pendiente P-1 deja de ser «no accesible» y
+   pasa a ser «accesible, sin digitalizar todavía». Y la licencia, que la
+   primera corrección dejaba por comprobar, **se conoce: CC BY-NC**, que
+   permite reproducir la curva en este proyecto mientras su uso no sea
+   comercial. Corregido también en el documento de calibración.
+
+Y una quinta corrección, menor pero con consecuencias de licencia: **la fuente
+de las cifras de duplicados no es CC BY**, declara todos los derechos
+reservados; y **sí se sabe de qué plataforma es cada cifra** —el 1,5 % es una
+plataforma MGI **con** PCR y el 10 %–13 % es Illumina **sin** PCR—, de modo que
+no hay ninguna contradicción interna que explicar: son plataformas distintas.
+La conclusión de no fijar un valor por omisión se sostiene, pero **por otra
+razón**: el parámetro depende de la masa de ADN de entrada, de los ciclos y del
+laboratorio.
+
 ---
 
 ## 2. Tabla de supuestos
 
-**Cómo se lee.** Cada fila es una decisión que los documentos de origen dejaron
-abierta y que este plan ha resuelto adoptando lo que ese documento recomienda.
-La columna «Opción adoptada» es lo que el plan da por decidido. La columna
-«Pasos que la usan» dice exactamente qué hay que rehacer si el usuario cambia
-la fila.
+**Cómo se lee, y para qué sirve ya.** Cada fila fue una decisión que los
+documentos de origen dejaron abierta y que la primera versión de este plan
+resolvió adoptando la recomendación de su documento, marcándola como supuesto.
+**El 20 de septiembre de 2026 el responsable las cerró todas**, y la columna
+«Opción adoptada» recoge ya el resultado: «Aceptado» cuando la recomendación se
+mantuvo, y en mayúsculas cuando cambió. Los cinco cambios son S-02, S-04, S-05,
+S-07 más S-14, y S-19; S-03, S-09 y S-29 se reformularon o ampliaron. El
+razonamiento completo de cada una está en «Decisiones confirmadas por el
+responsable», y **manda ese texto, no esta tabla**, que es un índice.
+
+La columna «Pasos que la usan» sirve para lo mismo que antes: dice qué hay que
+rehacer si alguna vez se revisa la decisión.
 
 Las diecisiete primeras proceden del expediente de repeticiones (fichas D-01 a
 D-18, menos D-10, que es una confirmación y no una decisión). Las once últimas,
@@ -69,23 +157,23 @@ de la sección 11 del diseño de bibliotecas con PCR.
 | # | Qué se decide, en llano | Opción adoptada | Ficha | Pasos que la usan |
 |---|---|---|---|---|
 | **S-01** | Dónde se declaran los loci y los alelos, y qué versión de fichero de configuración nace | Tabla propia en el fichero general que ya se usa, sin documento enlazado nuevo. **Aceptado**, ver «Decisiones confirmadas» | D-01 (a) | F6.1.1.1, F6.4.8 |
-| **S-02** | Cómo se guarda el alelo dentro del estado genotípico | ~~Modificación pequeña con el número de unidades~~ → **RESUELTO el 20/09/2026, ver «Decisiones confirmadas»**: variante pequeña nueva que **lleva la secuencia** del tracto, no un contador | D-02, corregida | F6.4.3, F6.4.3.2 |
-| **S-03** | De dónde sale el tracto que hay en la referencia | **Reformulado el 20/09/2026**: las dos vías, con el orden del generador simulado fijado y la inserción en referencia real admitida con tabla de correspondencia, ver «Decisiones confirmadas» | D-03 (c), con (a) primero | F6.4.2 |
-| **S-04** | Cómo se asignan los alelos a los individuos | **INVERTIDO el 20/09/2026**: frecuencias por locus **ahora**; asignación explícita de individuos concretos, después, ver «Decisiones confirmadas» | D-04 (a) ahora, (c) después | F6.1.1.1, F6.4.3 |
+| **S-02** | Cómo se guarda el alelo dentro del estado genotípico | ~~Modificación pequeña con el número de unidades~~ → **RESUELTO el 20/09/2026, ver «Decisiones confirmadas»**: variante pequeña nueva que **lleva la secuencia** del tracto, no un contador | D-02, corregida | F6.4.1, F6.4.3, F6.4.3.3, F6.5.1.1 |
+| **S-03** | De dónde sale el tracto que hay en la referencia | **Reformulado el 20/09/2026**: las dos vías, con el orden del generador simulado fijado y la inserción en referencia real admitida con tabla de correspondencia, ver «Decisiones confirmadas» | D-03 (c), con (a) primero | F1.7.1, F1.7.2, F6.4.2 |
+| **S-04** | Cómo se asignan los alelos a los individuos | **INVERTIDO el 20/09/2026**: frecuencias por locus **ahora**; asignación explícita de individuos concretos, después, ver «Decisiones confirmadas» | D-04 (a) ahora, (c) después | F6.1.1.1, F6.4.3.2, F6.4.11 |
 | **S-05** | Qué pasa con un alelo que se separa 50 pb o más de la referencia | **CORREGIDO el 20/09/2026**: las repeticiones **no** se someten al umbral de 50 pb, con corrección de la especificación y un tope propio configurable, ver «Decisiones confirmadas» | D-05 (a) | F6.4.3.1, F6.4.8 |
-| **S-06** | Pureza e interrupciones | **RESUELTO el 20/09/2026, ver «Decisiones confirmadas»**: la pureza siempre se calcula, nunca se declara; las interrupciones vienen de la referencia si es real, o se escriben si es simulada | D-06, reformulada | — |
-| **S-07** | Por qué extremo se ganan o se pierden unidades | **CORREGIDO el 20/09/2026**: el resbalón ocurre en la **tirada ininterrumpida más larga**, no en el extremo derecho, ver «Decisiones confirmadas» | D-07 (a) | F6.4.1.1, F6.4.3 |
-| **S-08** | Forma de la verdad publicada | Caso de inserción o deleción con metadatos de repetición, en versión nueva del esquema de verdad. **Aceptado**, ver «Decisiones confirmadas» | D-08 (a) | F6.4.3.2 |
-| **S-09** | Campos del VCF y umbral de «tamaño manejable» | **RESUELTO el 20/09/2026, ver «Decisiones confirmadas»**: campos de repetición del estándar, alelos explícitos siempre, **sin umbral de tamaño** | D-09, corregida | — |
-| **S-11** | Ámbitos de aleatoriedad e identificadores | Identificador del locus declarado por el usuario y validado por unicidad; catálogo técnico nuevo para el tartamudeo. **Aceptado**, ver «Decisiones confirmadas» | D-11 | F4.8.1 |
-| **S-12** | Si cabe un artefacto de PCR en una fase que declara no usar PCR | Nombrarlo por su mecanismo en el caso sin amplificar. **Aceptado**, ver «Decisiones confirmadas» | D-12 (a), ampliada | F4.8.1, sección 9 |
+| **S-06** | Pureza e interrupciones | **RESUELTO el 20/09/2026, ver «Decisiones confirmadas»**: la pureza siempre se calcula, nunca se declara; las interrupciones vienen de la referencia si es real, o se escriben si es simulada | D-06, reformulada | F6.4.1, F6.4.2, F6.4.8 |
+| **S-07** | Por qué extremo se ganan o se pierden unidades | **CORREGIDO el 20/09/2026**: el resbalón ocurre en la **tirada ininterrumpida más larga**, no en el extremo derecho, ver «Decisiones confirmadas» | D-07 (a) | F6.4.1.1, F4.8.2, F4.8.4, F4.10.4 |
+| **S-08** | Forma de la verdad publicada | Caso de inserción o deleción con metadatos de repetición, en versión nueva del esquema de verdad. **Aceptado**, ver «Decisiones confirmadas» | D-08 (a) | F6.4.3.3 |
+| **S-09** | Campos del VCF y umbral de «tamaño manejable» | **RESUELTO el 20/09/2026, ver «Decisiones confirmadas»**: campos de repetición del estándar, alelos explícitos siempre, **sin umbral de tamaño** | D-09, corregida | F6.5.1.1 |
+| **S-11** | Ámbitos de aleatoriedad e identificadores | Identificador del locus declarado por el usuario y validado por unicidad; catálogo técnico nuevo para el tartamudeo. **Aceptado**, ver «Decisiones confirmadas» | D-11 | F4.8.1, F6.4.3.2, F4.10.1, F6.4.11 |
+| **S-12** | Si cabe un artefacto de PCR en una fase que declara no usar PCR | Nombrarlo por su mecanismo en el caso sin amplificar. **Aceptado**, ver «Decisiones confirmadas» | D-12 (a), ampliada | F4.8.1, sección 10 |
 | **S-13** | En qué punto exacto del recorrido se aplica el tartamudeo | Después de la quimera y antes de calidad y errores. **Aceptado y verificado en el código**, ver «Decisiones confirmadas» | D-13 | F4.8.4 |
 | **S-14** | El modelo de probabilidad | **CORREGIDO el 20/09/2026**: forma lineal confirmada por la literatura, pero el predictor pasa a ser la tirada más larga; estructura del paso, publicada, ver «Decisiones confirmadas» | D-14 | F4.8.2, F4.8.3 |
 | **S-15** | Qué pasa con la longitud del fragmento | La molécula cambia de longitud y el inserto con ella, sin compensar. **Aceptado**, ver «Decisiones confirmadas» | D-15 (a) | F4.8.5 |
 | **S-16** | Compatibilidad con lo ya publicado | Congelación acotada a escenarios sin loci declarados. **Aceptado**, ver «Decisiones confirmadas» | D-16, corregida | F4.8.6, F4.9.10 |
 | **S-17** | Si la interfaz Marimo es condición de cierre | Interfaz como condición de cierre, para tartamudeo **y** loci. **Aceptado, con alcance mayor del previsto**, ver «Decisiones confirmadas» | D-17, corregida | F6.4.9.1, F4.8.9, F4.9.12 |
-| **S-18** | Si esto es un hito propio o adelanta el hito de repeticiones | Adelanta pasos existentes y añade hitos nuevos. **Aceptado, con la advertencia de que hoy se parece más a un hito propio**, ver «Decisiones confirmadas» | D-18 (b) | Sección 4, sección 9 |
-| **S-19** | Cómo se expresa la cantidad de material de partida de la PCR | **CAMBIADO el 20/09/2026**: el usuario declara la **fracción de duplicados**, obligatoria y sin valor por defecto; el parámetro interno se deriva, ver «Decisiones confirmadas» | PCR 1 (a) | F4.9.3, F4.9.5 |
+| **S-18** | Si esto es un hito propio o adelanta el hito de repeticiones | Adelanta pasos existentes y añade hitos nuevos. **Aceptado, con la advertencia de que hoy se parece más a un hito propio**, ver «Decisiones confirmadas» | D-18 (b) | Sección 4, sección 10 |
+| **S-19** | Cómo se expresa la cantidad de material de partida de la PCR | **CAMBIADO el 20/09/2026**: el usuario declara la **fracción de duplicados**, obligatoria y sin valor por defecto; el parámetro interno se deriva, ver «Decisiones confirmadas» | PCR 1 (a) | F4.9.3, F4.9.4, F4.9.13 |
 | **S-20** | Cómo actúa el sesgo por composición | Rechazo con tope de intentos, aceptación del último **contada**, aplicado al elegir la molécula. **Aceptado**, ver «Decisiones confirmadas» | PCR 2 (a) | F4.9.6 |
 | **S-21** | Genealogía dentro de la familia | Progenitor uniforme y divergencia geométrica, declarada como aproximación. **Aceptado**, ver «Decisiones confirmadas» | PCR 3 (a) | F4.10.2 |
 | **S-22** | Heterogeneidad de eficiencia entre moléculas | Clases de eficiencia desde el principio, opcionales y sin valores por defecto. **Aceptado, y respaldado por Best y col.**, ver «Decisiones confirmadas» | PCR 4 (a) | F4.9.3, F4.9.7 |
@@ -125,9 +213,19 @@ No se inventan. El plan trabaja alrededor de ellas y dice cómo.
 
 | # | Qué falta | Por qué no hay recomendación | Cómo se planifica alrededor |
 |---|---|---|---|
-| **P-1** | **Cómo crece la tasa de tartamudeo con la longitud del tracto.** Son los coeficientes `b` y `u₀` del modelo | La calibración lo dice sin rodeos: Fungtammasan y colaboradores (2015) lo describen, pero el artículo está tras muro de pago y **no se ha podido extraer la curva ajustada**; «no debe inventarse uno» | Los parámetros existen y son configurables, **con `b = 0` como valor de partida**, con lo que la probabilidad se reduce a la fracción medida por longitud de motivo, que sí está calibrada. El manifiesto publica `tract_length_dependence: not_calibrated`. F4.8.2 prueba que la función **sí** depende de `u` cuando `b > 0`; F4.8.3 prueba que con `b = 0` reproduce la tabla |
-| **P-2** | **Qué versión de `bcftools` y `tabix` vale para la puerta externa del VCF.** El entorno tiene 1.21 y la decisión vigente exige 1.24 | Es la decisión pendiente DP-F6-14 del plan de variación compleja, que enumera opciones y **no recomienda ninguna** | F6.5.1.1 ejecuta la comprobación con la versión instalada y **registra la evidencia como no contractual, diciendo la versión**. La puerta externa **no se etiqueta como superada**. El paso no se bloquea, porque el oráculo semántico propio del proyecto sí discrimina |
-| **P-3** | **Los pesos por omisión del conjunto de pasos** —cuánto pesa perder una unidad frente a perder dos o ganar una | La calibración establece el hecho cualitativo («sesgo fuerte hacia perder repeticiones», «la distribución del tamaño es parecida con y sin PCR») pero **no publica los pesos**, y el expediente escribe `{−2, −1, +1}` como ejemplo | El conjunto de pasos y sus pesos son **obligatorios** en la configuración cuando el tartamudeo está activo: sin valor predeterminado, igual que el diseño con PCR hace con los ciclos y la eficiencia. F4.8.3 rechaza una configuración de tartamudeo sin pesos declarados |
+| **P-1** | **Cómo crece la probabilidad de resbalón con la longitud de la tirada ininterrumpida.** Es el coeficiente de la pendiente del modelo lineal | **Corregido el 20/09/2026:** la primera versión decía que la fuente estaba tras muro de pago. **Es falso**: Fungtammasan y colaboradores (2015) está en acceso abierto en Europe PMC, identificador PMC4417121, y la curva se puede recuperar de su figura 1A. Lo que falta ya no es acceso ni licencia —es **CC BY-NC**, que no impide reproducirla en un uso no comercial— sino **digitalizar la curva**. Y la forma sí está publicada y adoptada: Raz y col. (2019) fijan la dependencia **lineal por ciclo** | El coeficiente existe y es configurable, **arrancando en cero**, con lo que la probabilidad se reduce a la fracción medida por longitud de motivo, que sí está calibrada. El manifiesto lo publica como no calibrado. F4.8.2 prueba con un fixture que la función **sí** depende de la tirada más larga cuando el coeficiente es positivo, y F4.8.3 que con el coeficiente en cero reproduce la tabla |
+| **P-2** | **Qué versión de `bcftools` y `tabix` vale para la puerta externa del VCF.** La decisión vigente exige **1.24 para las dos** | Es la decisión pendiente DP-F6-14 del plan de variación compleja, que enumera opciones y **no recomienda ninguna** | **Dato corregido el 20/09/2026:** el entorno tiene `bcftools` **1.21**, `samtools` **1.21** y `tabix` (HTSlib) **1.19**, comprobado ejecutando `--version`; la primera versión decía 1.21 para `tabix`. F6.5.1.1 ejecuta la comprobación con lo instalado, **registra las dos versiones en la evidencia** y **no etiqueta la puerta externa como superada**. El paso no se bloquea, porque el oráculo semántico propio del proyecto sí discrimina |
+| **P-3** | **Los valores de las probabilidades de contracción y expansión** por longitud de motivo | **RESUELTO el 20/09/2026 en su forma, no en sus valores.** Se buscó fuente para los pesos y **no hay ninguna adoptable**: las cifras publicadas están repartidas entre trabajos distintos, sobre marcadores humanos concretos, y juntarlas en un vector sería **síntesis propia disfrazada de fuente**. La estructura sigue fijada por Raz y col. (2019) | Los pesos siguen **obligatorios y sin valor por omisión**, pero la documentación lleva un **ejemplo trabajado** marcado como ilustrativo, con sus fuentes y su advertencia de procedencia. Ver «El ejemplo trabajado de los pesos» más abajo |
+
+| **P-4** | **Cómo produce el generador de deslizamiento biológico un abanico de alelos *con sus frecuencias*.** Aplicar un servicio de pasos N veces produce **una** secuencia de alelos, no una distribución | **RESUELTO el 20/09/2026.** El responsable adopta la forma candidata tal cual. Sobre la pregunta 4, su criterio: que el alelo de la referencia se pierda o no **depende de los parámetros** que se den —con media de pasos baja la mayoría de linajes no se mueven—, de modo que no se fuerza su presencia | Ninguno. F6.4.11 a F6.4.13 **desbloqueados**; la entrega 5 es ejecutable |
+| **P-5** | **El valor por omisión del tope propio de tamaño del tracto** | **RESUELTO el 20/09/2026: 200 unidades.** El responsable confirma el valor propuesto. Razón registrada: un microsatélite de trabajo rara vez pasa de 30 o 40 unidades, de modo que 200 no limita ningún uso previsto y actúa solo como red contra un error de escritura; y el tracto se materializa en memoria y se publica en la verdad y en el VCF, así que un tope enorme permitiría generar ficheros desmesurados por descuido. Quien quiera simular expansiones patológicas —cientos o miles de unidades— debe subirlo explícitamente | Ninguno |
+
+**Un desajuste menor que se registra en vez de taparse.** Los predictores de Raz
+y col. incluyen el **tipo** de motivo —distinguen `A` de `C`, y `AC` de `AG` y
+de `AT`—, mientras que la calibración de este proyecto es **por longitud de
+motivo**. Es un desajuste conocido, no un error: se anota aquí y en el
+manifiesto, y no se corrige inventando una tabla por tipo de motivo que nadie
+ha medido para este uso.
 
 ### 2.2. Contradicciones encontradas al adoptar las recomendaciones
 
@@ -151,7 +249,7 @@ escenarios sin loci declarados. Con loci declarados, el tartamudeo de base está
 **activo** con las tasas de la calibración, y lo que sigue desactivado por
 omisión es el **tartamudeo heredable de PCR**, que solo existe con preparación
 amplificada. REQ-DAT-80 y REQ-CONF-132 deben reescribirse con esa acotación
-antes de aprobarse; la redacción está en la sección 10.
+antes de aprobarse; la redacción está en la sección 11.
 
 **C-2. Dos formas distintas del mismo modelo.** La calibración §5 propone la
 forma de tres parámetros de HipSTR —probabilidad de añadir, probabilidad de
@@ -177,7 +275,7 @@ amplificadas, y por tanto **divide** DTF-056. No es un choque real, sino un
 solapamiento de fechas: la recomendación (a) de D-12 sigue siendo la forma
 correcta de nombrar el tartamudeo **sin** PCR, que existe en los dos perfiles, y
 la reapertura cubre la preparación amplificada. El plan usa las dos cosas y lo
-dice en la sección 9.
+dice en la sección 10.
 
 **C-4. La ficha D-18 nombra menos coordenadas de las que el corte toca.** Dice
 «adelantar F6.4.1 y F6.4.3». El corte necesita además el paso de la referencia
@@ -186,14 +284,16 @@ con el tracto (F6.4.2), el del registro en configuración efectiva y manifiesto
 (F6.1.1) y un subconjunto del paso de proyección VCF (F6.5.1). Se resuelve
 nombrándolos todos en la sección 4.
 
-**C-5. Un límite conocido que la opción adoptada en S-04 alcanza pronto.**
-DTC-089 fija un techo duro de 65536 bytes al fichero general. Declarar cada
-alelo a mano cuesta de 70 a 90 bytes; con 100 individuos diploides y 5 loci son
-entre 70 y 90 kB, es decir, **se rompe el techo antes de llegar a un estudio de
-tamaño normal**. No es una contradicción con otra decisión adoptada, pero sí un
-límite que el plan declara y comprueba (F6.1.1.1), y la razón por la que la
-forma del TOML debe admitir después las frecuencias alélicas sin cambiar de
-versión de esquema otra vez.
+**C-5. Un límite conocido que la recomendación original alcanzaba pronto, y que
+la decisión del responsable elimina.** DTC-089 fija un techo duro de 65536
+bytes al fichero general. Declarar cada alelo a mano cuesta de 70 a 90 bytes;
+con 100 individuos diploides y 5 loci son entre 70 y 90 kB, es decir, **se
+rompe el techo antes de llegar a un estudio de tamaño normal**. Esta
+contradicción es una de las razones por las que el responsable **invirtió**
+S-04: se declaran unos pocos alelos por locus con sus **frecuencias**, y el
+simulador sortea los individuos, con lo que el coste del fichero deja de crecer
+con el número de individuos. **Queda resuelta**, y el paso F6.1.1.1 la
+comprueba con un documento próximo al techo para que no vuelva por otra puerta.
 
 **C-6. La asimetría de D-17 deja la interfaz inservible para lo que pide el
 usuario.** D-17 recomienda control Marimo para el tartamudeo y lo difiere para
@@ -211,12 +311,12 @@ cierre del hito de repeticiones de la fase de variación compleja.
 
 ---
 
-## Decisiones confirmadas por el responsable
+### 2.3. Decisiones confirmadas por el responsable
 
 Lo que sigue **ya no es supuesto**: está decidido y sustituye a la fila
 correspondiente de la tabla de arriba.
 
-### S-02 — el alelo guarda su secuencia, no un contador (20/09/2026)
+#### S-02 — el alelo guarda su secuencia, no un contador (20/09/2026)
 
 **Decidido.** El alelo de un microsatélite en una copia haplotípica se guarda
 como una **clase nueva del mundo de las variantes pequeñas** —junto al cambio
@@ -262,90 +362,7 @@ contar las bases del tracto en la verdad y en el VCF. Es un término pequeño,
 pero el contrato de recursos es estricto y no puede descubrirse a mitad.
 
 
-## 3. El orden es forzoso, y por qué. El reparto en entregas
-
-### 3.1. La aritmética manda el orden
-
-Las dos columnas de la calibración —«con PCR» y «sin PCR»— son **totales, no
-componentes**. Los dos conjuntos que la fuente comparó pasaron por las mismas
-células, la misma amplificación en puente sobre la celda y la misma síntesis de
-secuenciación; lo único que los distingue es el paso de PCR de preparación. Por
-tanto la columna sin PCR **ya contiene** el mosaicismo somático de la muestra,
-el deslizamiento del puente y el de la síntesis, y la columna con PCR contiene
-todo eso **más** la PCR de biblioteca.
-
-El diseño con PCR no suma nada a la columna con PCR: **despeja** el incremento
-propio de la amplificación,
-
-```
-r_pcr = 1 − (1 − r_con) / (1 − r_sin)
-```
-
-y lo compone después con la parte de base, de modo que
-`1 − (1−r_sin)(1−r_pcr) = r_con`, exactamente la fracción medida.
-
-**Consecuencia que fija el orden de este plan:** una preparación amplificada
-entregada **sin** el tartamudeo de base se queda solo en el incremento
-despejado y subestima el tartamudeo en un 14 % en homopolímeros, 28 % en
-dinucleótidos, 26 % en trinucleótidos, 23 % en tetranucleótidos y 20 % en
-pentanucleótidos. No es una preferencia de orden: es que la aritmética no
-cierra. La preparación amplificada va **después** del tartamudeo de base.
-
-### 3.2. Qué no depende de que existan los microsatélites, y qué sí
-
-| Pieza | ¿Necesita loci de repetición? |
-|---|---|
-| Perfil amplificado, variante `Pcr`, configuración, esquemas y rechazos | **No** |
-| Muestreo por familias, copias de los primeros ciclos, tamaño de familia | **No** |
-| Duplicados y su oráculo por bytes | **No** |
-| Aceptación por composición de bases | **No** |
-| Recuentos del manifiesto, fracción esperada y realizada, cobertura de moléculas distintas, cota de recursos | **No** |
-| Tartamudeo de base (agrupación y síntesis) | **Sí** |
-| Genealogía de la familia y tartamudeo heredable | **Sí**, y además necesita el tartamudeo de base |
-
-### 3.3. El reparto: cuatro entregas, no dos
-
-El diseño con PCR recomienda **dos** entregas: primero la amplificación con sus
-duplicados y su composición, que no depende de nada de la fase de variación
-compleja; después el tartamudeo clonal. Este plan **respeta esa separación pero
-reordena y subdivide**, y quedan cuatro:
-
-| Entrega | Contenido | Coordenadas | Depende de |
-|---|---|---|---|
-| **1** | Microsatélites que varían entre individuos: loci, alelos por copia, verdad, VCF, manifiesto, interfaz | F6.4.0–F6.4.9.1 (adelanto) | Nada |
-| **2** | Tartamudeo de base, sin amplificar | F4.8.1–F4.8.9 | Entrega 1 |
-| **3** | Preparación amplificada: familias, duplicados, composición, cota | F4.9.1–F4.9.12 | Nada técnicamente; **ordenada aquí por la aritmética** |
-| **4** | Tartamudeo clonal heredable por linaje | F4.10.1–F4.10.6 | Entregas 1, 2 y 3 |
-
-**Por qué cuatro y no dos.**
-
-1. **Porque lo que el usuario pidió cabe en las dos primeras.** Microsatélites
-   que varían entre individuos y tartamudeo visible en las lecturas se entregan
-   al terminar la entrega 2, sin haber tocado el contrato de duplicados ni de
-   sesgo por composición. Una entrega única que empezara por la amplificación
-   retrasaría el resultado pedido detrás de un cambio de contrato grande.
-2. **Porque la aritmética prohíbe el orden contrario.** Poner la amplificación
-   antes del tartamudeo de base dejaría existir, aunque fuera unos días, una
-   biblioteca amplificada que subestima el tartamudeo entre un 14 % y un 28 %.
-3. **Porque la primera versión del esquema la abre quien la necesita.** El
-   supuesto S-26 dice que las versiones nuevas las abre el trabajo que llegue
-   primero. Con este orden, las abre la entrega 1 —que es la que tiene el
-   contrato de entrada más grande— y las entregas 3 y 4 las completan dentro de
-   la misma versión mientras no estén publicadas fuera.
-4. **Porque la entrega 3 sigue siendo verificable sola**, que es la virtud que
-   el diseño reclamaba para ella: sus doce pasos no citan ni un locus.
-
-**Qué se pierde y cómo se compensa.** Si el usuario prefiriera el orden del
-diseño —amplificación primero—, el plan sigue siendo válido intercambiando las
-entregas 3 y 2, **con una condición inexcusable**: mientras falte el tartamudeo
-de base, la configuración debe **rechazar** la combinación de preparación
-amplificada con loci de repetición declarados, con un diagnóstico que nombre el
-paso pendiente. Ese rechazo está planificado de todos modos en F4.9.10, porque
-también hace falta en el orden recomendado mientras la entrega 4 no exista.
-
----
-
-### S-09 — campos del estándar, alelos explícitos, y ningún umbral (20/09/2026)
+#### S-09 — campos del estándar, alelos explícitos, y ningún umbral (20/09/2026)
 
 **Decidido.** El VCF usa los **campos de repetición en tándem del propio
 estándar** —secuencia del motivo, longitud del motivo, número de copias, bases
@@ -393,7 +410,7 @@ sección de repeticiones en tándem. Sustituye a la nota del plan que declaraba
 sin verificar los nombres y tipos de estos campos: quedan verificados.
 
 
-### S-06 — la pureza siempre se calcula; las interrupciones vienen de donde venga la referencia (20/09/2026)
+#### S-06 — la pureza siempre se calcula; las interrupciones vienen de donde venga la referencia (20/09/2026)
 
 **Decidido, y reformulado respecto a la ficha.** La ficha planteaba elegir entre
 declarar las interrupciones, declarar una pureza con colocación determinista, o
@@ -450,7 +467,7 @@ acertar al interpretarlas es precisamente lo que un simulador sirve para poner
 a prueba.
 
 
-### Bloque «cómo se declara todo» — S-01, S-03, S-04, S-11 y S-26 (20/09/2026)
+#### Bloque «cómo se declara todo» — S-01, S-03, S-04, S-11 y S-26 (20/09/2026)
 
 **Aceptados sin cambio:** dónde se declaran los loci (tabla propia en el fichero
 general que ya se usa), el identificador del locus (lo pone el usuario, se
@@ -458,7 +475,7 @@ valida que no se repita, sin clase de identificador automático nueva) y las
 versiones de esquema (las abre este trabajo, la fase de variación compleja las
 completa mientras no estén publicadas fuera).
 
-#### S-03 — de dónde sale el tracto, reformulado
+##### S-03 — de dónde sale el tracto, reformulado
 
 **Las dos vías, y con el orden fijado.** Con **referencia simulada** el orden es:
 número de cromosomas y tamaño → **regiones definidas con su secuencia, que es
@@ -480,16 +497,23 @@ sostener:
    correspondencia**. Sin esa regla, declarar dos inserciones seguidas es
    ambiguo. Es válido porque el resultado es **un solo genoma final** y todo lo
    posterior habla en sus coordenadas.
-2. **Sería la primera operación del proyecto que mueve coordenadas.** Se
-   comprobó: la reducción de hoy toma regiones enteras y nunca ha necesitado
-   reubicar nada, y `src/coordinates.rs` tiene tipos de posición e intervalo
-   pero **ninguna correspondencia entre dos versiones de una referencia**. La
-   tabla es trabajo nuevo, no una extensión.
+2. **~~Sería la primera operación del proyecto que mueve coordenadas.~~
+   Corregido el 20/09/2026: es FALSO, y abarata el trabajo.** La reducción de
+   referencia **ya reubica** cada segmento: en `src/reference_reduction.rs`, la
+   función que materializa el plan de reducción lleva un desplazamiento
+   acumulado por secuencia y construye un `derived_interval` distinto del
+   `source_interval`; y `schemas/reference-reduction-map-v1.schema.json` **ya
+   publica los dos intervalos por segmento**, con su orden de materialización,
+   su clase y su orientación. Es verdad que `src/coordinates.rs` no tiene un
+   tipo de correspondencia entre dos versiones de una referencia, pero el
+   **documento** que hace ese papel existe, está publicado y tiene esquema. La
+   tabla que esta decisión exige es por tanto una **extensión de ese mapa**, no
+   maquinaria nueva. El paso F1.7.2 la construye así.
 3. El genoma final **no es el fichero suministrado**, así que se publica como
    **referencia derivada con identidad propia**, igual que las reducciones. De
    otro modo los resultados quedarían atribuidos a un genoma que no existe.
 
-#### S-04 — frecuencias ahora, individuos concretos después
+##### S-04 — frecuencias ahora, individuos concretos después
 
 Se **invierte** la recomendación. Por locus se declaran unos pocos alelos con
 sus **frecuencias**, y el simulador **sortea** los individuos. Declarar a mano
@@ -499,7 +523,7 @@ revienta el límite de tamaño del fichero general (contradicción C-5).
 La asignación **explícita de individuos concretos con combinaciones de alelos
 específicas** queda para más adelante.
 
-#### El deslizamiento biológico, y por qué no es el tartamudeo
+##### El deslizamiento biológico, y por qué no es el tartamudeo
 
 El responsable aclaró que la variación entre individuos nace de **deslizamiento
 biológico** —el de la replicación del ADN a lo largo de las generaciones—, no
@@ -528,7 +552,7 @@ biología.
 > alelos y sus frecuencias los declara el usuario.
 
 
-### Bloque «cómo se publica la verdad» — S-08 y S-05 (20/09/2026)
+#### Bloque «cómo se publica la verdad» — S-08 y S-05 (20/09/2026)
 
 **S-08, aceptado sin cambio.** El alelo se publica como un caso de inserción o
 deleción con metadatos de repetición —locus, motivo y número de unidades—, en
@@ -536,7 +560,7 @@ una versión nueva del esquema de verdad. Las versiones anteriores no cambian ni
 un byte. Encaja con [S-02](#): como el alelo lleva su secuencia, el caso de
 inserción o deleción ya la contiene y los metadatos solo la anotan.
 
-#### S-05 — las repeticiones no se someten al umbral de 50 pb
+##### S-05 — las repeticiones no se someten al umbral de 50 pb
 
 **Precisión previa, porque se confundieron dos cosas.** Esta ficha **no** trata
 la representación en el VCF, que quedó resuelta en [S-09](#) —siempre
@@ -574,8 +598,17 @@ ninguno.
 propio, configurable**, para que un error de dedo no genere un tracto
 desmesurado. Rechaza antes de simular, identificando locus, individuo y copia.
 
+> **Nota del plan, que no cambia la decisión.** La frase «identificando locus,
+> individuo y copia» se escribió cuando los alelos se declaraban individuo a
+> individuo. Con **frecuencias** —decisión S-04, tomada el mismo día— el alelo
+> que rebasa el tope se conoce **al leer la configuración**, antes de que
+> exista ningún individuo al que asignárselo, de modo que el diagnóstico solo
+> puede nombrar **el locus y el alelo**. El paso F6.4.3.1 lo recoge así. Si el
+> responsable prefiere conservar además individuo y copia, habría que mover la
+> comprobación a después del sorteo, que es más tarde y menos útil.
 
-### Bloque «mecánica del tartamudeo» — S-07, S-12, S-13, S-14, S-15 y S-24 (20/09/2026)
+
+#### Bloque «mecánica del tartamudeo» — S-07, S-12, S-13, S-14, S-15 y S-24 (20/09/2026)
 
 **Aceptados sin cambio:** el punto del recorrido (después de la quimera y antes
 de calidad y errores, **verificado en el código**: la quimera rematerializa el
@@ -585,7 +618,7 @@ compensar, porque así es como el fenómeno se detecta en datos reales; cómo se
 derivan las tasas por ciclo de las dos columnas de la calibración; y nombrar el
 artefacto por su mecanismo en el caso sin amplificar.
 
-#### Dos correcciones, ambas con respaldo publicado
+##### Dos correcciones, ambas con respaldo publicado
 
 Se buscó si existía un modelo publicado en vez de inventar la forma, y existe.
 
@@ -597,7 +630,7 @@ modelo «lineal, un paso arriba y hasta tres abajo» es una **cadena de Markov e
 tiempo discreto donde cada ciclo de PCR es un paso**, con probabilidades de
 transición **linealmente dependientes de la longitud actual del tracto**.
 
-#### S-14 — la forma lineal se confirma; cambia el predictor
+##### S-14 — la forma lineal se confirma; cambia el predictor
 
 **Se retira una crítica equivocada.** Se objetó que la forma lineal era una
 aproximación tosca, porque la literatura describe crecimiento exponencial con
@@ -618,7 +651,7 @@ contracciones de hasta tres unidades por ciclo y expansiones de una sola, con
 sesgo hacia la contracción. Se adopta esa estructura; los **valores** siguen sin
 fuente (ver más abajo).
 
-#### S-07 — el resbalón ocurre en la tirada más larga, no en el extremo derecho
+##### S-07 — el resbalón ocurre en la tirada más larga, no en el extremo derecho
 
 La propuesta era ganar o perder unidades **siempre por el extremo derecho**.
 Para un tracto **puro** da igual: el resultado es idéntico. Para un tracto
@@ -636,7 +669,7 @@ diferencia sigue siendo una inserción o deleción limpia.
 
 Esto responde la pregunta que [S-06](#) había dejado aplazada.
 
-#### Tres salvedades que se registran, no se ocultan
+##### Tres salvedades que se registran, no se ocultan
 
 1. **Raz y col. no publican los valores de los parámetros**, solo el método de
    ajuste. Tenemos la **forma**, no los números: la dependencia con la longitud
@@ -645,17 +678,22 @@ Esto responde la pregunta que [S-06](#) había dejado aplazada.
    `AG`, `AT`—, no solo su longitud. La calibración de este proyecto es por
    longitud de motivo. Desajuste menor, anotado.
 3. La literatura forense advierte que la tirada más larga **tiene
-   contraejemplos**, que la variación en los flancos a 7 pb influye, y que con
-   secuenciación masiva un alelo puede producir tartamudeos desde partes
-   distintas, lo que pide refinar el concepto. **No es una ley: es el mejor
-   predictor conocido.**
+   contraejemplos** y que la variación en los flancos influye. **No es una ley:
+   es el mejor predictor conocido.**
+4. **Atribución corregida el 20/09/2026.** La observación de que, con
+   secuenciación masiva, un mismo alelo puede producir tartamudeos originados
+   en **partes distintas del tracto** —lo que obliga a refinar el concepto de
+   «la» tirada más larga— es de **Vilsen y colaboradores (2018)**, no del
+   artículo de *Genes* de 2017 al que la primera redacción se la atribuía.
 
-**Fuentes:** Raz y col. (2019), NAR 47(5):2436–2445, CC BY 4.0; y *Flanking
-Variation Influences Rates of Stutter in Simple Repeats*, Genes 2017,
-PMC5704242, para la tirada más larga y sus contraejemplos.
+**Fuentes:** Raz y col. (2019), NAR 47(5):2436–2445, CC BY 4.0, para la forma
+del modelo; *Flanking Variation Influences Rates of Stutter in Simple Repeats*,
+Genes 2017, PMC5704242, para la tirada más larga como predictor y la influencia
+de los flancos; y Vilsen y col. (2018) para el matiz de los orígenes múltiples
+en secuenciación masiva.
 
 
-### Bloque «la amplificación» — S-19 a S-28 (20/09/2026)
+#### Bloque «la amplificación» — S-19 a S-28 (20/09/2026)
 
 **Siete aceptados**, tres de ellos ahora con respaldo de las referencias
 verificadas el 19 de septiembre:
@@ -684,7 +722,7 @@ verificadas el 19 de septiembre:
 - **Cobertura de moléculas distintas** en el manifiesto: es lo que un analista
   compara tras eliminar duplicados.
 
-#### S-19 — el usuario declara la fracción de duplicados, no «parejas por molécula»
+##### S-19 — el usuario declara la fracción de duplicados, no «parejas por molécula»
 
 **Cambiado.** La propuesta pedía declarar `mean_pairs_per_molecule`. Esa es la
 variable del modelo, no la del usuario: un biólogo piensa en el porcentaje de
@@ -693,49 +731,67 @@ fracción de duplicados** y el sistema deriva el parámetro interno y **publica 
 fracción realizada**. Es además el patrón que el proyecto ya usa en todas
 partes: declarar un objetivo y publicar lo realizado con su tolerancia.
 
-#### Por qué no se fija un valor por defecto, pese a haberlo buscado
+##### Por qué no se fija un valor por defecto, pese a haberlo buscado
 
 Se buscó uno defendible y **no lo hay**, por una razón que conviene dejar
 escrita para que nadie lo intente de nuevo sin saberlo.
 
 Shen H., Liu P., Li Z. y col. (2019), *Advanced Whole Genome Sequencing Using an
 Entirely PCR-free Massively Parallel Sequencing Workflow*, bioRxiv
-doi:10.1101/2019.12.20.885517, CC BY 4.0, miden a 30× con tres réplicas:
-bibliotecas **con PCR, ~1,5 %**; bibliotecas **sin PCR en plataformas Illumina,
-10,43 %–13,62 %**. Duplicados identificados con Picard.
+doi:10.1101/2019.12.20.885517, miden a 30× con tres réplicas: bibliotecas **con
+PCR, ~1,5 %**; bibliotecas **sin PCR en plataformas Illumina, 10,43 %–13,62 %**.
+Duplicados identificados con Picard.
 
-**Las cifras se contradicen con su propia etiqueta:** las bibliotecas *sin* PCR
-salen con muchos más duplicados que las que *sí* la llevan, lo cual es imposible
-si lo medido fueran duplicados de PCR. **Interpretación —no es algo que el
-artículo afirme—:** Picard marca como duplicado cualquier par que caiga en las
-mismas coordenadas, y las celdas de flujo con patrón —HiSeq X, HiSeq 4000,
-NovaSeq, justo las comparadas— generan copias por la química de agrupación
-**sin ninguna PCR de por medio**.
+> **Dos correcciones del 20 de septiembre, y una de ellas invalida el
+> razonamiento original.**
+>
+> **Primera, de licencia:** este preprint **no es CC BY**; declara todos los
+> derechos reservados. Se cita, no se reproduce. La primera redacción le
+> atribuía CC BY 4.0 y es falso.
+>
+> **Segunda, de hecho:** la primera redacción decía que «no se puede determinar
+> de qué plataforma es el 1,5 %» y construía sobre eso una contradicción
+> aparente —«las bibliotecas sin PCR salen con más duplicados que las que sí la
+> llevan»— que resolvía conjeturando cómo marca Picard. **Sí se puede
+> determinar, y no hay contradicción**: el 1,5 % es una plataforma **MGI con**
+> PCR y el 10 %–13 % es **Illumina sin** PCR. Son plataformas distintas, así
+> que las cifras no son comparables entre sí y no hay nada que explicar. El
+> razonamiento original era erróneo.
 
-Por tanto **esas cifras miden otra cosa que nuestro parámetro**: nosotros
-queremos la fracción de parejas procedentes de la **misma molécula original por
-amplificación**; Picard da la fracción de parejas que **caen en el mismo sitio**.
-Adoptar 1,5 % o 10 % consagraría en el proyecto un número que mide otro
-fenómeno. Se añade que **no se puede determinar de qué plataforma es el 1,5 %**,
-y este simulador es de Illumina.
+**La conclusión se mantiene, por la razón buena.** No se fija valor por omisión
+**porque el parámetro depende de la masa de ADN de entrada, del número de
+ciclos y del laboratorio**, no porque las cifras publicadas midan otra cosa. Y
+sigue siendo cierto y útil distinguir en la documentación entre la fracción
+**atribuible a la amplificación**, que es la nuestra, y la que marca una
+herramienta de análisis contando parejas que caen en el mismo sitio, que
+incluye además las copias de la química de agrupación: quien compare ambas sin
+saberlo no las verá cuadrar nunca.
 
 **Lo que sí queda establecido:** la tasa **no depende apreciablemente de la
 profundidad** en el rango normal —midieron de 10× a 46× y se mantiene—, así que
-un valor por defecto no necesitaría ir atado a una profundidad. Ese obstáculo
-queda descartado; el que impide fijarlo es el de arriba.
+un valor por omisión no necesitaría ir atado a una profundidad. Ese obstáculo
+queda descartado.
 
-**Decisión:** parámetro **obligatorio y sin valor por defecto**, con un **ejemplo
-trabajado en la documentación** que use una cifra concreta marcada como
-ilustrativa y con su fuente, para no partir de cero. Y se documenta
-explícitamente que el parámetro es la fracción **atribuible a la
-amplificación**, **no** la que marca Picard: quien compare ambas sin saberlo no
-las verá cuadrar nunca.
+**El ejemplo trabajado, con una salvedad que apareció al revisarlo.** La fuente
+da **dos** valores para bibliotecas amplificadas, **1,5 % y 0,9 %**, no uno. Por
+tanto la diferencia «medio punto atribuible a la amplificación» que se anotó en
+una versión anterior **no puede darse por buena sin comprobar a qué condición
+corresponde cada uno de los dos valores y cuál es el término sin amplificar con
+el que se compara**. El paso que escriba la documentación tiene esa
+comprobación como requisito previo: **o cita la condición exacta de cada cifra,
+o no usa el ejemplo**. Y en cualquier caso viajará con dos salvedades: que es
+de una plataforma **MGI y no Illumina**, y que es un ejemplo, no un valor por
+omisión. Consagrar otra cifra sin comprobar sería repetir el error que este
+plan lleva dos rondas corrigiendo.
+
+**Decisión:** parámetro **obligatorio y sin valor por omisión**, con ese ejemplo
+trabajado en la documentación.
 
 **La mejor fuente para este número son los informes de calidad del propio
 laboratorio**, no una media de genomas humanos ajenos.
 
 
-### Bloque «proceso y alcance» — S-16, S-17, S-18 y S-29 (20/09/2026)
+#### Bloque «proceso y alcance» — S-16, S-17, S-18 y S-29 (20/09/2026)
 
 **Aceptados en el fondo**, pero las decisiones del 20 de septiembre **han
 cambiado su tamaño**, y eso se registra aquí para que el plan no se lea como
@@ -757,8 +813,12 @@ ningún plan**, y las tres tocan fases cerradas:
 
 1. el **generador de referencia simulada con regiones definidas** —el actual
    solo sabe rellenar al azar (`src/reference_generation.rs`)—;
-2. la **tabla de correspondencia de coordenadas** —la reducción nunca ha movido
-   coordenadas y `src/coordinates.rs` no tiene nada equivalente—;
+2. la **tabla de correspondencia de coordenadas** entre el genoma suministrado
+   y el genoma final con el tracto insertado. **Corregido el 20/09/2026:** la
+   primera redacción decía que la reducción «nunca ha movido coordenadas», y es
+   falso —ya publica intervalo de origen y derivado por segmento—, de modo que
+   esta pieza es una **extensión de un mapa que existe**, y es la más barata de
+   las tres, no la más cara;
 3. la **corrección de la especificación** sobre el umbral de 50 pb.
 
 El trabajo se parece más a un **hito propio** que a un adelanto, y el plan debe
@@ -772,43 +832,217 @@ cierre y no tenía sitio en ninguna de las cuatro. Se pone como entrega propia
 para que se vea que existe en vez de quedar escondida dentro de otra.
 
 
+### El ejemplo trabajado de los pesos del paso (20/09/2026)
+
+**No es una calibración y no debe usarse como tal.** Es una forma de partida
+para que quien escriba su primer escenario no invente de cero. Va en la
+documentación del parámetro, **nunca** como valor por omisión: los pesos siguen
+siendo obligatorios.
+
+**Forma ilustrativa**, tomando como unidad el paso de una unidad hacia abajo:
+
+| Paso | Peso relativo |
+|---|---|
+| **−1** unidad | 100 |
+| **+1** unidad | 20 |
+| **−2** unidades | 10 |
+| **−3** unidades | 1 |
+
+**De dónde sale cada orden de magnitud**, y por qué no es una calibración:
+
+- El paso de **una unidad hacia arriba** se sitúa en torno al **1–2 %** de la
+  altura del alelo y el de **dos unidades hacia abajo** en el **0,5–1 %**, según
+  Aponte, Gettings, Duewer, Coble y Vallone, *Sequence-based Analysis of Stutter
+  at STR Loci: Characterization and Utility*, Instituto Nacional de Estándares y
+  Tecnología de Estados Unidos, sobre dos marcadores comparando secuenciación
+  masiva y electroforesis capilar.
+- El de **tres unidades hacia abajo** va de **0,04 % a 0,35 %** según el
+  marcador, en la literatura forense de filtrado de tartamudeo.
+- El de **una unidad hacia abajo**, dominante, suele situarse en el **5–10 %**
+  en tetranucleótidos.
+
+**Las tres advertencias, que pesan más que la tabla:**
+
+1. **Cada cifra viene de un trabajo distinto**, sobre marcadores distintos.
+   Componerlas en un solo vector es una **operación propia**, no un resultado
+   publicado. Por eso la tabla da órdenes de magnitud relativos y no
+   probabilidades.
+2. **Son tetranucleótidos humanos forenses**, y este parámetro es **por longitud
+   de motivo**. El desajuste es el mismo que impidió fijar un valor por omisión
+   a la fracción de duplicados.
+3. La propia fuente advierte que **la variación depende del motivo concreto** y
+   que la tirada ininterrumpida **no lo explica todo**: dentro de una misma
+   longitud de motivo hay dispersión entre marcadores. Un valor por omisión
+   ocultaría esa dispersión.
+
+**Lo que la tabla sí sostiene, y es lo útil:** que el paso de una unidad domina
+en las dos direcciones; que **bajar una es unas cinco veces más frecuente que
+subir una**, lo que realiza el sesgo de contracción que la calibración exige; y
+que los pasos múltiples **caen muy deprisa**, un orden de magnitud por unidad
+adicional. Esa forma sí está respaldada por las tres fuentes a la vez, aunque
+los números concretos no.
+
+
+## 3. El orden es forzoso, y por qué. El reparto en entregas
+
+### 3.1. La aritmética manda el orden
+
+Las dos columnas de la calibración —«con PCR» y «sin PCR»— son **totales, no
+componentes**. Cada conjunto pasó por una celda de flujo con su amplificación
+en puente y por la síntesis de la secuenciación, de modo que la columna sin PCR
+**ya contiene** el mosaicismo somático de la muestra, el deslizamiento del
+puente y el de la síntesis, y la columna con PCR contiene todo eso **más** la
+PCR de biblioteca. Restar, y no sumar, es por tanto lo correcto.
+
+> **Precisión que corrige una afirmación falsa de la primera versión.** El plan
+> decía que «los dos conjuntos pasaron por las mismas células». **No es cierto:
+> son dos individuos distintos**, de proyectos distintos —uno de Papuasia Nueva
+> Guinea con PCR a 25,9× y otro de Pakistán sin PCR a 37,6×, el primero además
+> en una corrida agrupada—. Que cada columna sea un total no depende de eso y
+> sigue en pie, igual que el orden forzoso que se deduce abajo. Lo que sí se
+> debilita es atribuir la diferencia **solo** a la PCR: la resta puede llevar
+> dentro efectos de individuo y de lote. En consecuencia, **las tasas por ciclo
+> derivadas son toscas**, el manifiesto debe publicarlas marcadas como tales, y
+> el paso F4.10.3 lo dice en su propio texto.
+
+El diseño con PCR no suma nada a la columna con PCR: **despeja** el incremento
+propio de la amplificación,
+
+```
+r_pcr = 1 − (1 − r_con) / (1 − r_sin)
+```
+
+y lo compone después con la parte de base, de modo que
+`1 − (1−r_sin)(1−r_pcr) = r_con`, exactamente la fracción medida.
+
+**Consecuencia que fija el orden de este plan:** una preparación amplificada
+entregada **sin** el tartamudeo de base se queda solo en el incremento
+despejado y subestima el tartamudeo en un 14 % en homopolímeros, 28 % en
+dinucleótidos, 26 % en trinucleótidos, 23 % en tetranucleótidos y 20 % en
+pentanucleótidos. No es una preferencia de orden: es que la aritmética no
+cierra. La preparación amplificada va **después** del tartamudeo de base.
+
+> **El rango «14 % a 28 %» vale para motivos de 1 a 5 pares de base.** Los
+> hexanucleótidos dan **7 %**, no porque el fenómeno sea distinto, sino porque
+> su fila es la menos fiable de la tabla: el propio autor advierte que la
+> diferencia entre sus dos columnas procede probablemente del ruido de haber
+> analizado pocos loci. Siempre que este plan cite el rango, lo acota así.
+
+### 3.2. Qué no depende de que existan los microsatélites, y qué sí
+
+| Pieza | ¿Necesita loci de repetición? |
+|---|---|
+| Perfil amplificado, variante `Pcr`, configuración, esquemas y rechazos | **No** |
+| Muestreo por familias, copias de los primeros ciclos, tamaño de familia | **No** |
+| Duplicados y su oráculo por bytes | **No** |
+| Aceptación por composición de bases | **No** |
+| Recuentos del manifiesto, fracción esperada y realizada, cobertura de moléculas distintas, cota de recursos | **No** |
+| Tartamudeo de base (agrupación y síntesis) | **Sí** |
+| Genealogía de la familia y tartamudeo heredable | **Sí**, y además necesita el tartamudeo de base |
+| Generador de alelos por deslizamiento biológico | **Sí**, y además necesita que el alelo lleve su secuencia |
+
+### 3.3. El reparto: cinco entregas, no dos
+
+El diseño con PCR recomienda **dos** entregas: primero la amplificación con sus
+duplicados y su composición, que no depende de nada de la fase de variación
+compleja; después el tartamudeo clonal. Este plan **respeta esa separación pero
+reordena y subdivide**, y el responsable añadió una quinta el 20 de septiembre.
+Quedan cinco:
+
+| Entrega | Contenido | Coordenadas | Depende de |
+|---|---|---|---|
+| **1** | Microsatélites que varían entre individuos: referencia con el tracto, loci, alelos con su secuencia, sorteo por frecuencias, verdad, VCF, manifiesto, interfaz | F6.4.0, F1.7.1–F1.7.2, F6.4.1–F6.4.1.1, F6.1.1.1, F6.4.2, F6.4.3–F6.4.3.3, F6.5.1.1, F6.4.8–F6.4.8.1, F6.4.9.1 | Nada |
+| **2** | Tartamudeo de base, sin amplificar | F4.8.1–F4.8.9 | Entrega 1 |
+| **3** | Preparación amplificada: familias, duplicados, composición, cota | F4.9.1–F4.9.13 | Nada técnicamente; **ordenada aquí por la aritmética** |
+| **4** | Tartamudeo clonal heredable por linaje | F4.10.1–F4.10.6 | Entregas 1, 2 y 3 |
+| **5** | Generador de alelos por deslizamiento biológico, **condición de cierre**. **F6.4.11 a F6.4.13 desbloqueados el 20/09/2026 (antes bloqueados por P-4**; F6.4.4 no | F6.4.4, F6.4.11–F6.4.13 | Entrega 1; independiente de las entregas 2 a 4 |
+
+**Por qué cinco y no dos.**
+
+1. **Porque lo que el usuario pidió cabe en las dos primeras.** Microsatélites
+   que varían entre individuos y tartamudeo visible en las lecturas se entregan
+   al terminar la entrega 2, sin haber tocado el contrato de duplicados ni de
+   sesgo por composición. Una entrega única que empezara por la amplificación
+   retrasaría el resultado pedido detrás de un cambio de contrato grande.
+2. **Porque la aritmética prohíbe el orden contrario.** Poner la amplificación
+   antes del tartamudeo de base dejaría existir, aunque fuera unos días, una
+   biblioteca amplificada que subestima el tartamudeo entre un 14 % y un 28 %.
+3. **Porque la primera versión del esquema la abre quien la necesita.** El
+   supuesto S-26 dice que las versiones nuevas las abre el trabajo que llegue
+   primero. Con este orden, las abre la entrega 1 —que es la que tiene el
+   contrato de entrada más grande— y las entregas 3 y 4 las completan dentro de
+   la misma versión mientras no estén publicadas fuera.
+4. **Porque la entrega 3 sigue siendo verificable sola**, que es la virtud que
+   el diseño reclamaba para ella: sus trece pasos no citan ni un locus.
+5. **Porque la quinta no cabía dentro de ninguna de las otras y no es
+   opcional.** El generador de alelos por deslizamiento biológico es lo que
+   convierte «el usuario escribe los alelos y sus frecuencias» en «el simulador
+   los genera». El responsable lo declaró **condición de cierre**, no ampliación
+   aplazada: la simulación de microsatélites no puede darse por terminada sin
+   él. Se le da entrega propia precisamente para que se vea, en vez de quedar
+   escondido como un paso más dentro de la primera.
+
+**Por qué la quinta va la última y no la primera.** No es una preferencia: para
+generar un abanico de alelos por deslizamiento hace falta que exista el alelo,
+que lleve su secuencia y que haya dónde publicarlo, y eso es justo lo que
+entrega la primera. Y va después de las entregas 2 a 4 solo por prioridad del
+usuario —ver el tartamudeo antes—, no por dependencia técnica: si se
+prefiriera, puede ejecutarse inmediatamente después de la entrega 1 sin tocar
+nada de lo demás.
+
+**Qué se pierde y cómo se compensa.** Si el usuario prefiriera el orden del
+diseño —amplificación primero—, el plan sigue siendo válido intercambiando las
+entregas 3 y 2, **con una condición inexcusable**: mientras falte el tartamudeo
+de base, la configuración debe **rechazar** la combinación de preparación
+amplificada con loci de repetición declarados, con un diagnóstico que nombre el
+paso pendiente. Ese rechazo está planificado de todos modos en F4.9.10, porque
+también hace falta en el orden recomendado mientras la entrega 4 no exista.
+
+---
+
 ## 4. Cómo se numera, y puertas comunes
 
 ### 4.1. Numeración
 
-Este trabajo cruza dos fases, una cerrada y otra sin empezar. Siguiendo la
-recomendación de la ficha D-18 (supuesto S-18), **no** se crea una numeración
-nueva:
+Este trabajo cruza **tres** fases: la del núcleo reproducible y la del realismo
+técnico, ambas cerradas, y la de variación compleja, sin empezar. La decisión
+S-18 pide que se le llame **hito propio** y no adelanto, porque tres de sus
+piezas no existen en ningún plan. A la vez, perder la trazabilidad con los
+pasos que sí existen sería un retroceso. Se hacen las dos cosas:
 
-- Los pasos de la entrega 1 **adelantan pasos que ya existen** en el plan de la
-  fase de variación compleja, con su coordenada intacta: F6.4.1, F6.4.2,
-  F6.4.3, F6.4.8 y F6.4.9. Cuando el corte necesita solo una parte de un paso
-  mayor de aquel plan, se usa una subdivisión excepcional: **F6.1.1.1** es el
-  subconjunto de repeticiones del paso de contratos externos, y **F6.5.1.1** el
-  subconjunto de repeticiones del paso de proyección VCF. **F6.4.0** es nuevo y
-  es la línea base de evidencias.
-- Los pasos de las entregas 2, 3 y 4 son **hitos nuevos de la fase de realismo
-  técnico**, numerados a continuación de los que existen, que llegan hasta
-  F4.7: **F4.8** (tartamudeo de base), **F4.9** (preparación amplificada) y
-  **F4.10** (tartamudeo clonal). Su cambio de contrato se documenta en la
-  sección 9, con la forma de la sección 11 del plan de la fase de población
-  fundadora.
+- Donde este trabajo **anticipa** un paso que ya está escrito en el plan de la
+  fase de variación compleja, conserva su coordenada: F6.4.1, F6.4.2, F6.4.3,
+  F6.4.4, F6.4.8 y F6.4.9. Cuando solo necesita **una parte** de un paso mayor
+  de aquel plan, usa una subdivisión: **F6.1.1.1** es el subconjunto de
+  repeticiones del paso de contratos externos y **F6.5.1.1** el de la
+  proyección al VCF.
+- Donde **no hay nada que anticipar**, abre coordenada nueva: **F6.4.0** es la
+  línea base de evidencias; **F6.4.11** a **F6.4.13** son el generador de
+  alelos por deslizamiento biológico; **F1.7.1** y **F1.7.2** son el trabajo de
+  referencia que cae en la fase del núcleo reproducible, cuyo último hito hoy
+  es F1.6; y **F4.8**, **F4.9** y **F4.10** son hitos nuevos de la fase de
+  realismo técnico, cuyo último hito hoy es F4.7.
+
+**Tres coordenadas caen en fases cerradas** —F1.7.1, F1.7.2 y todo F4.8 a
+F4.10— y por tanto exigen el cambio de contrato de la sección 10. No hay forma
+de evitarlo: el tracto vive en la referencia, que es de la primera fase, y el
+tartamudeo vive en el motor de lecturas, que es de la cuarta.
 
 **Correcciones de dependencia que este plan declara** y que hay que aplicar al
-plan de la fase de variación compleja (sección 10):
+plan de la fase de variación compleja (sección 11):
 
 - **F6.4.3 ya no depende del primer paso del hito de variantes estructurales.**
   La cadena de segmentos (`src/segments.rs`) ya sostiene modificaciones tipadas
-  por copia haplotípica —`Snp`, `Insertion`, `Deletion`— y
-  `src/materialization.rs` ya las materializa. Un alelo de repetición es,
-  mecánicamente, una inserción o una deleción de unidades completas con
-  etiqueta.
-- **F6.4.2 ya no depende de derivar una referencia estructural.** El generador
-  de referencias simuladas (`src/reference_generation.rs`) y el escritor FASTA
-  canónico (`src/reference_fasta.rs`) existen desde la primera fase.
-- **F6.5.1.1 no arrastra el fichero complementario del VCF.** El proyecto emite
-  `VCFv4.5`, cuyo estándar ya define campos propios de repetición en tándem; si
-  el formato lo expresa, no hay pérdida que complementar.
+  por copia haplotípica, y una de ellas, la inserción, **ya guarda secuencia**
+  en un `Arc<[u8]>`. El alelo de repetición es una clase hermana de esas, no un
+  segmento estructural.
+- **F6.4.2 ya no depende de derivar una referencia estructural.**
+- **F6.5.1.1 no arrastra el fichero complementario del VCF**, porque los campos
+  de repetición del estándar más el alelo explícito no pierden nada.
+- **F6.4.4 se adelanta** y se usa para lo que la decisión S-04 exige: generar
+  el abanico de alelos **una sola vez**, para inicializar la diversidad. Su
+  aplicación generación tras generación sigue siendo de la fase de evolución y
+  no se invade.
 
 ### 4.2. Puertas
 
@@ -826,19 +1060,25 @@ MARIMO_SKIP_UPDATE_CHECK=1 uv run --frozen marimo check --strict ui/gps_app.py
 uv run --frozen python -m unittest discover -s tests_ui
 ```
 
-- **Base de partida:** `cargo test --workspace --all-targets --locked` da hoy
-  **1126 pasan, 0 fallan, 12 ignoradas**. Toda entrega declara su recuento
-  nuevo y la diferencia.
+- **Base de partida: se mide, no se cita.** Circulan dos recuentos distintos de
+  la batería de Rust —1124 y 1126— en documentos distintos del proyecto, y este
+  plan **no fija ninguno**: el paso F6.4.0 ejecuta la batería, registra el
+  recuento exacto en la línea base y es contra ese número contra el que se
+  comparan los hitos. Citar de memoria un recuento que nadie ha vuelto a medir
+  es exactamente el error que este proyecto ya ha pagado.
 - `./scripts/check-independent-validators.sh` **falla si el directorio ya
   existe** y debe dar **5 PASS**. Cada hito usa un directorio propio:
   `evidence/repeats-f6-4`, `evidence/stutter-f4-8`, `evidence/pcr-f4-9`,
-  `evidence/clonal-f4-10`.
+  `evidence/clonal-f4-10` y `evidence/slippage-f6-4-11`.
 - `uv run --frozen python -m unittest discover -s tests_ui` da hoy **96
   ejecutadas con 2 fallos preexistentes y ajenos** (interfaz del VCF de la fase
   2 y del evento técnico de la fase 4). No se persiguen. Tampoco las doce
   pruebas ignoradas históricas.
 - **`pytest` no es puerta.** No está instalado ni declarado en
   `pyproject.toml`. Ningún paso de este plan lo cita.
+- **La puerta externa del VCF no se puede etiquetar como superada.** Exige
+  `bcftools` y `tabix` en la versión 1.24; el entorno tiene `bcftools` 1.21,
+  `samtools` 1.21 y `tabix` (HTSlib) **1.19**. Es el pendiente P-2.
 - **Regla de cierre de la interfaz** (hoja de ruta §7): toda opción
   configurable que este plan implemente exige control en Marimo y equivalencia
   interfaz → TOML → configuración efectiva antes de cerrar su hito.
@@ -848,8 +1088,10 @@ uv run --frozen python -m unittest discover -s tests_ui
 Cada paso dice **contra qué variante defectuosa concreta** debe fallar la
 prueba que pide. Es la respuesta al defecto recurrente número uno del proyecto:
 pruebas que no pueden fallar por el defecto que dicen cubrir, que apareció diez
-veces durante la fase de población fundadora y que hace pocos días dejó al
-descubierto dos guardas del verificador frente a una batería de 1124 pruebas.
+veces durante la fase de población fundadora, que dejó al descubierto dos
+guardas del verificador frente a la batería entera, y que la revisión
+adversarial del 20 de septiembre volvió a encontrar **diez veces** en la
+primera versión de este plan.
 
 Reglas, sin excepción:
 
@@ -859,256 +1101,571 @@ Reglas, sin excepción:
 4. Si una aserción **no puede ejercitarse**, se dice en su docstring, sin
    adornos, en vez de fingir que discrimina.
 5. Cuando un fixture ordinario no ejercita la guarda —porque otra comprobación
-   caza antes la discrepancia—, hace falta un fixture **saturado**, que haga
-   indistinguible todo lo demás. Los pasos que lo necesitan lo dicen.
+   caza antes la discrepancia—, hace falta un fixture **saturado**. Los pasos
+   que lo necesitan lo dicen y explican qué tiene que saturar.
+6. **Una prueba que solo comprueba que la implementación hace lo que el diseño
+   dice no valida el diseño.** Cuando una comprobación sea de ese tipo
+   —tautológica—, se declara así en su docstring en vez de presentarla como
+   validación del modelo. Afecta a F4.10.5.
 
 ---
 
-## 5. Entrega 1 — Microsatélites que varían entre individuos (adelanto de F6.4)
+## 5. Entrega 1 — Microsatélites que varían entre individuos
 
-Resultado: loci de repetición en tándem declarados en coordenadas de una
-referencia, alelos por copia haplotípica que difieren entre individuos, y su
-publicación en la verdad, en el VCF y en el manifiesto, con control en la
-interfaz. Sin tartamudeo todavía.
+Resultado: una referencia con tractos de microsatélite en posiciones conocidas,
+unos pocos alelos por locus **con su secuencia completa** y sus frecuencias,
+sorteados entre los individuos y entre las dos copias de cada uno, y publicados
+en la verdad, en el VCF y en el manifiesto, con control en la interfaz. Sin
+tartamudeo todavía.
+
+**Lo que cambia respecto de la primera versión de este plan, en una frase:** el
+alelo ya **no es un número de unidades** sino una secuencia con su anotación;
+los individuos ya **no se declaran uno a uno** sino que se sortean de unas
+frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
 
 - ☐ **F6.4.0.** Línea base de evidencias, medida **antes** de tocar una sola
   línea de código y guardada **fuera de git**.
   - Depende de: ninguno.
-  - Procede de: CLAUDE.md §4 y la prueba 1 de la sección 10 del diseño con PCR,
-    que recuerda que medir los hashes después de tocar el código es circular.
-  - Cambia: nada del repositorio. Crea
-    `/tmp/gps-baseline-<fecha>/` con: `sha256sum` de los FASTQ finales, la
-    verdad, el VCF de verdad, la configuración efectiva y los dos manifiestos
-    de al menos dos ejecuciones de referencia; la salida completa de
-    `cargo test --workspace --all-targets --locked`; y el SHA del `HEAD`
-    (`11d26e5`).
+  - Procede de: CLAUDE.md §4; prueba 1 de la sección 10 del diseño con PCR, que
+    recuerda que medir los hashes después de tocar el código es circular.
+  - Cambia: nada del repositorio. Crea `/tmp/gps-baseline-<fecha>/` con:
+    `sha256sum` de los FASTQ finales, la verdad, el VCF de verdad, la
+    configuración efectiva y los dos manifiestos de al menos dos ejecuciones de
+    referencia; la salida completa de
+    `cargo test --workspace --all-targets --locked` **con su recuento exacto de
+    pruebas que pasan, fallan y se ignoran**; y la identidad del árbol de
+    trabajo.
   - Se comprueba con: el fichero de hashes existe, tiene una línea por
-    artefacto y **ninguna** ruta bajo el árbol de git. **Debe fallar contra:**
-    una línea base capturada después del primer cambio —se detecta porque el
-    `HEAD` registrado no coincide con el de la captura.
+    artefacto y ninguna ruta bajo el árbol de git; el recuento de pruebas
+    registrado es el que devolvió el comando, no una cifra copiada de un
+    documento.
+  - **Cómo se identifica la línea base, corregido dos veces.** La primera
+    versión anotaba el `HEAD`, que **no discrimina**: un cambio sin *commit*
+    deja exactamente el mismo `HEAD`. La segunda propuso el **hash del árbol**
+    del *commit*, `git rev-parse HEAD^{tree}`, y **tampoco discrimina**: ese
+    hash es función del *commit* y de nada más, no mira el directorio de
+    trabajo. Comprobado el 20 de septiembre de 2026 con dos ficheros
+    modificados sin preparar: `git rev-parse HEAD^{tree}` y `git write-tree`
+    devolvieron **el mismo hash** que antes de tocarlos.
+  - **Lo que sí discrimina**, y es lo que el paso registra: **(1)** la salida de
+    `git status --porcelain`, que **debe estar vacía**; **(2)** el `HEAD`; y
+    **(3)** un **hash del contenido real de los ficheros en disco**, calculado
+    sobre el árbol de trabajo y no sobre ningún objeto de git —por ejemplo
+    `find src schemas resources ui scripts -type f | sort | xargs sha256sum |
+    sha256sum`—. El tercero es el único que cambia cuando cambia un fichero sin
+    prepararlo ni confirmarlo.
+  - **Debe fallar contra:** una línea base capturada con el árbol ya modificado
+    —la (1) y la (3) la cazan—; y, si alguien retirase la (1) creyéndola
+    redundante, una capturada tras un cambio sin *commit*, que solo la (3)
+    caza. *Se comprueba que la (3) discrimina* modificando un byte de un
+    fichero cualquiera bajo `src/`, recalculando y exigiendo que el hash
+    cambie, y restaurándolo después desde la copia de seguridad fuera de git.
 
-- ☐ **F6.4.1.** Modelo de dominio del locus de repetición, puro: motivo
-  A/C/G/T no vacío y sin `N`, longitud de unidad coincidente con la del motivo,
-  número de copias de referencia, intervalo en la referencia, patrón de
-  interrupciones **declarado** como pares (desplazamiento dentro del tracto,
-  base sustituta) y **pureza calculada** como valor realizado.
-  - Depende de: ninguno. Es código puro sobre secuencias en memoria; no hay
-    FASTA, ni TOML, ni aleatoriedad.
+- ☐ **F1.7.1.** Generador de referencia simulada **con regiones definidas**, en
+  este orden: número de secuencias y tamaño → **regiones declaradas con su
+  secuencia exacta, que es donde entran los microsatélites** → relleno al azar
+  con los parámetros de composición que ya existen.
+  - Depende de: ninguno.
+  - Procede de: REQ-REF-19, REQ-CONF-56; decisión **S-03**.
+  - Cambia: `src/reference_generation.rs`; escribe por el escritor FASTA
+    canónico `src/reference_fasta.rs`, que no cambia.
+  - **Por qué es trabajo nuevo y no una reordenación.** El generador actual
+    **solo sabe rellenar al azar**: no tiene regiones declaradas ni orden entre
+    ellas. Cae en la fase del núcleo reproducible, que está cerrada, y por eso
+    lleva coordenada propia y entra en el cambio de contrato de la sección 10.
+  - **Qué queda fuera, dicho aquí para que no se cuele:** los cambios
+    estructurales —duplicaciones, inversiones, translocaciones— **no** entran.
+    Van con el hito estructural y **después** de generar la secuencia.
+  - Se comprueba con: una región declarada aparece **exactamente** en su
+    coordenada, localizada con `grep -ob` externo al productor; el relleno
+    aleatorio respeta las fracciones de base configuradas fuera de las regiones
+    declaradas; misma semilla, mismo FASTA byte a byte; dos regiones declaradas
+    que se solapan se rechazan antes de generar, nombrando las dos; una región
+    que rebasa el final de la secuencia se rechaza; y —**esta es la que
+    discrimina el orden**— un generador instrumentado confirma que el relleno
+    consume exactamente **la longitud de la secuencia menos las bases de las
+    regiones declaradas**, no la longitud entera.
+  - **Debe fallar contra:** un generador que **rellene primero y sobrescriba
+    después**. *Corregido:* las cinco comprobaciones de secuencia y rechazo que
+    la versión anterior de este paso pedía **las cumple ese mutante sin
+    despeinarse**, porque el resultado final es idéntico: la región queda en su
+    sitio y la composición observable fuera de ella es la misma. El **único**
+    observable que separa los dos órdenes es el **consumo de aleatoriedad**, y
+    por eso la prueba del contador es obligatoria y no un adorno. Va en la
+    docstring. También debe fallar contra una escritura que coloque la región
+    una base más allá, que el `grep -ob` externo caza.
+
+- ☐ **F1.7.2.** **Inserción de un tracto en una referencia real** y publicación
+  del resultado como **referencia derivada con identidad propia**, con la
+  **tabla de correspondencia** entre las coordenadas del genoma suministrado y
+  las del genoma final.
+  - Depende de: F1.7.1 (comparte el contrato de región declarada).
+  - Procede de: REQ-REF-08–11 y REQ-MAN-07 por analogía con la referencia
+    reducida; decisión **S-03**, puntos 1 y 3.
+  - Cambia: `src/reference.rs`, `src/reference_reduction_io.rs` o un módulo
+    hermano, y una **versión nueva** del esquema del mapa de coordenadas.
+  - **Cuánto cuesta realmente, corregido.** La primera versión de este plan
+    decía que sería «la primera operación del proyecto que mueve coordenadas».
+    **Es falso.** La reducción de referencia ya reubica cada segmento con un
+    desplazamiento acumulado por secuencia
+    (`src/reference_reduction.rs`), y `schemas/reference-reduction-map-v1.schema.json`
+    **ya publica** `source_interval` y `derived_interval` por segmento, con su
+    orden de materialización y su orientación. Esta pieza es una **extensión de
+    ese mapa a un segundo tipo de operación**, no maquinaria nueva. Es la más
+    barata de las tres piezas que la decisión S-18 llama nuevas.
+  - **Las dos reglas que hay que sostener.** Primera: las posiciones que
+    declara el usuario se refieren **al genoma de partida**, y el sistema las
+    traduce a las del genoma final y publica la correspondencia; sin esa regla,
+    declarar dos inserciones seguidas es ambiguo. Segunda: el genoma final **no
+    es el fichero suministrado**, así que se publica con identidad propia,
+    igual que las reducciones, para que ningún resultado quede atribuido a un
+    genoma que no existe.
+  - Se comprueba con: tras insertar un tracto de 30 bases en la posición 1000
+    de una secuencia, una posición declarada en 2000 sobre el genoma de partida
+    aparece en 2030 en el mapa publicado, y la base que hay allí es la misma
+    que había en 2000 del original, comparada byte a byte; **dos** inserciones
+    seguidas en la misma secuencia dan un mapa en el que la segunda posición
+    declarada sigue refiriéndose al original y no al intermedio; el mapa valida
+    contra su esquema con `python3 -m jsonschema`; la referencia derivada tiene
+    identificador propio y el manifiesto la nombra como derivada de la
+    suministrada; el mapa de la **reducción** existente no cambia ni un byte.
+    **Debe fallar contra:** una implementación que interprete la segunda
+    posición declarada en coordenadas del genoma ya modificado —la prueba de
+    las dos inserciones es la única que lo caza, y una sola inserción **no
+    discrimina**, lo que va en la docstring—; una que publique el resultado con
+    el identificador del FASTA suministrado.
+
+- ☐ **F6.4.1.** Modelo de dominio del locus de repetición, puro: intervalo en
+  la referencia, motivo A/C/G/T no vacío y sin `N`, **secuencia realizada del
+  tracto**, y la anotación **derivada de esa secuencia** —número de unidades,
+  pureza, lista de interrupciones y **tirada ininterrumpida más larga** del
+  motivo—.
+  - Depende de: ninguno. Es código puro sobre secuencias en memoria.
   - Procede de: REQ-CONF-57/59/60, REQ-IND-32/33/34, REQ-REF-23, ACE-31/110;
-    supuesto **S-06**; paso F6.4.1 del plan de la fase de variación compleja,
-    que este paso **desbloquea** al cerrar su decisión pendiente sobre la
-    realización de interrupciones.
+    decisiones **S-02** y **S-06**.
   - Cambia: módulo nuevo `src/tandem_repeat.rs`.
-  - Se comprueba con: `(ACG)×5` produce quince bases; longitud de unidad
-    declarada 4 para el motivo `ACG` rechazada; motivo vacío, motivo `ACN` y
-    motivo en minúsculas mal normalizado rechazados, cada uno identificando el
-    locus; una configuración que declare una **pureza objetivo** rechazada con
-    el parámetro nombrado; sin interrupciones la pureza realizada vale
-    exactamente 1; con dos bases interrumpidas de veinte la pureza realizada
-    vale exactamente 0,9; la secuencia realizada solo contiene A/C/G/T. **Debe
-    fallar contra:** un validador que compare la longitud declarada con la del
-    motivo en mayúsculas pero acepte `acn`; una pureza realizada que cuente las
-    interrupciones sobre las unidades en vez de sobre las bases del tracto; un
-    lector que acepte silenciosamente la pureza como entrada y la ignore.
+  - **La regla que gobierna el módulo entero:** nada de lo anotado se almacena
+    por separado de la secuencia; **todo se deriva de ella**, para que no pueda
+    contradecirla. La pureza es siempre una **salida**, nunca una entrada.
+  - **El intervalo NO tiene por qué ser múltiplo de la longitud del motivo, y
+    el número de unidades puede ser fraccionario.** Esto corrige una
+    contradicción interna de la versión anterior de este plan, que aquí
+    rechazaba «un motivo cuya longitud no divide el intervalo» mientras el paso
+    del VCF exigía que «un tracto con unidad parcial produzca un valor no
+    entero». No podían ser ciertas las dos.
+  - **Y la que manda es esta, por biología.** Las interrupciones reales suelen
+    ser de **una sola base** —una `T` dentro de un `(CA)n`—, con lo que el
+    intervalo deja de ser múltiplo del motivo. Con la regla anterior, la guarda
+    de admisión de F6.4.2 habría admitido el tracto real impuro y este modelo
+    lo habría rechazado acto seguido. El propio estándar del VCF trae como
+    ejemplo `(CAG)5(CA)1(CAG)4`, que un modelo de múltiplos exactos no puede
+    representar.
+  - **Definiciones exactas, para que no haya dos implementaciones razonables.**
+    El **número de unidades** es la longitud del intervalo dividida por la del
+    motivo, y puede tener parte fraccionaria. La **pureza** es la proporción de
+    bases del intervalo que pertenecen a copias **completas y exactas** del
+    motivo. La **tirada ininterrumpida más larga** se cuenta en copias completas
+    y consecutivas. La descomposición en unidades que los campos del VCF piden
+    la hace F6.5.1.1 a partir de esta misma secuencia.
+  - Se comprueba con: `(ACG)×5` produce quince bases y anota cinco unidades,
+    pureza 1, ninguna interrupción y tirada más larga 5; un tracto
+    `AC AC AC GG AC AC` anota doce bases, **seis** unidades, pureza **10/12**
+    sobre bases, una interrupción y tirada más larga **3**, no 6; **el ejemplo
+    del estándar `(CAG)5(CA)1(CAG)4` se admite** y anota veintinueve bases,
+    **29/3 = 9,667 unidades**, pureza **27/29** y tirada más larga **5**; un
+    tracto `CACACATCACA` con una interrupción de **una sola base** se admite y
+    anota **5,5 unidades**; motivo vacío y motivo con `N` se rechazan
+    identificando el locus; una configuración que declare una **pureza
+    objetivo** se rechaza nombrando el locus y el parámetro; dos tractos con el
+    **mismo número de unidades** y la interrupción en sitio distinto producen
+    anotaciones distintas y secuencias distintas.
+  - **Debe fallar contra:** **un modelo que exija que el intervalo sea múltiplo
+    del motivo** —los dos fixtures de unidad parcial lo cazan, y son los que
+    esta corrección añade—; un número de unidades redondeado a entero, que el
+    de 5,5 caza; una pureza contada sobre unidades en vez de sobre bases, que
+    el fixture de la interrupción de una sola base distingue —contada sobre
+    unidades daría 5/6, sobre bases 10/11—; un modelo que guarde la pureza
+    recibida en vez de calcularla; un cálculo de la tirada más larga que
+    devuelva el número **total** de unidades, que el fixture impuro distingue;
+    una anotación que colapse dos alelos de igual longitud y distinta
+    interrupción en el mismo objeto.
 
-- ☐ **F6.4.1.1.** Realización del tracto con un número de unidades distinto del
-  de la referencia: las unidades se añaden o se quitan **por el extremo
-  derecho** del tracto, en unidades completas, y el resto del tracto queda byte
-  a byte igual al de la referencia, interrupciones incluidas.
+- ☐ **F6.4.1.1.** La operación «aplicar un paso de ±k unidades a un tracto»:
+  las unidades se ganan o se pierden **en la tirada ininterrumpida más larga**
+  del motivo, con desempate por la **primera por la izquierda**, y el resto del
+  tracto queda **byte a byte igual**, de modo que la diferencia sigue siendo
+  una inserción o una deleción contigua y limpia.
   - Depende de: F6.4.1.
-  - Procede de: supuesto **S-07**; ficha D-07, que advierte de que este es
-    «exactamente el tipo de detalle que dos implementaciones resuelven distinto
-    sin que ninguna prueba lo note».
+  - Procede de: decisión **S-07**, que corrige la convención del extremo
+    derecho; Raz y col. (2019) y la literatura forense para el hecho de que la
+    polimerasa resbala donde el motivo corre sin interrupción.
   - Cambia: `src/tandem_repeat.rs`.
-  - Se comprueba con: un tracto con una interrupción en la tercera unidad y
-    alelos de 5, 7 y 3 unidades; las bases anteriores al extremo derecho son
-    idénticas en los tres, comparadas byte a byte, y la diferencia frente a la
-    referencia es exactamente una inserción o una deleción contigua de
-    `k·(longitud del motivo)` bases. **Debe fallar contra:** una realización
-    que **regenere** el tracto entero desde el motivo y las interrupciones —que
-    es la opción (c) de la ficha—, porque entonces la interrupción se recoloca
-    y la diferencia deja de ser un *indel* limpio. *Cuidado:* con un tracto
-    **sin** interrupciones la regeneración da el mismo resultado y la prueba no
-    discrimina; el fixture **debe** llevar interrupción, y su docstring debe
-    decirlo.
+  - **Por qué se retiró el extremo derecho, y por qué la prueba de la primera
+    versión era falsa.** Con la convención del extremo derecho, un tracto de
+    cinco unidades con una interrupción en la tercera se compone de dos tiradas,
+    [1–2] y [4–5]; quitar dos unidades **vacía una de ellas y deja la otra
+    intacta**, mueve la pureza por una decisión nuestra y no por biología. La
+    primera versión de este plan pedía además comprobar que «las bases
+    anteriores al extremo derecho son idénticas», aserción que bajo la
+    convención nueva es **falsa por construcción**: con las tiradas empatadas
+    gana la izquierda, y las bases que cambian son justamente esas. Se retira.
+  - Se comprueba con: en un tracto puro de diez unidades, quitar una deja las
+    nueve restantes idénticas y la diferencia es una deleción contigua de una
+    unidad; en un tracto con tiradas de 3 y 5 unidades, el paso se aplica en la
+    de 5 y la de 3 queda **byte a byte intacta**, comprobado sobre las bases;
+    con tiradas **empatadas** de 4 y 4, el paso cae en la de la izquierda, y el
+    resultado es reproducible; aplicar `+1` y luego `−1` devuelve la secuencia
+    original byte a byte. **Debe fallar contra:** la convención del extremo
+    derecho —el fixture de tiradas 3 y 5, con la más larga a la izquierda, la
+    caza—; un desempate no determinista; una implementación que regenere el
+    tracto desde el motivo, que recolocaría las interrupciones. *Cuidado, en la
+    docstring:* con un tracto **puro** todas las convenciones coinciden y
+    **ninguna prueba discrimina**; los fixtures de este paso son impuros a
+    propósito, y el de tiradas empatadas es el único que ejercita el desempate.
 
-- ☐ **F6.1.1.1.** Contrato de entrada del corte: esquema general **v4** que
-  extiende la vía directa con la tabla `[[tandem_repeat_loci]]` —`locus_id`,
-  `contig`, `start_1based`, `end_1based`, `motif`, interrupciones— y la clase
-  `kind = "tandem_repeat"` dentro de `direct_events`, con `locus_id`, `phase` y
-  `units`; y configuración efectiva **v6**.
+- ☐ **F6.1.1.1.** Contrato de entrada: esquema general **v4** y configuración
+  efectiva **v6**. Declara, por locus: identificador, secuencia, **inicio y
+  final del intervalo**, y motivo; una **lista corta de alelos**, cada uno con
+  su número de unidades y sus interrupciones si las tiene, o con su secuencia
+  exacta cuando la referencia es simulada; las **frecuencias** de esos alelos;
+  y el **tope propio configurable** de tamaño del tracto.
+  - **El usuario declara el intervalo entero, inicio y final, y no solo el
+    inicio.** Hacía falta decirlo: la pureza y la tirada más larga se miden
+    **dentro de un intervalo**, y sin final no hay dónde medirlas. La
+    alternativa —que el programa extienda el tracto desde el inicio mientras el
+    motivo siga apareciendo— es un algoritmo que nadie ha fijado, tendría que
+    decidir cuándo parar ante una interrupción y **queda fuera de este
+    trabajo**.
   - Depende de: F6.4.1.
-  - Procede de: REQ-CONF-60, REQ-MAN-29, DTC-089; supuestos **S-01**, **S-04**,
-    **S-26**; corrección C-5.
+  - Procede de: REQ-CONF-60, REQ-MAN-29, DTC-089; decisiones **S-01**,
+    **S-02**, **S-04**, **S-05** y **S-26**; contradicción **C-5**, que esta
+    forma resuelve.
   - Cambia: `schemas/config-general-v4.schema.json` y
-    `schemas/effective-config-v6.schema.json` nuevos;
-    `src/configuration.rs`, `src/adapters.rs`, `src/results.rs`. **Ningún
-    esquema v1 a v5 cambia, ni `truth-v1`, ni `truth-v2`.**
-  - Se comprueba con: pareja mínima válida admitida; clave desconocida dentro
-    de la tabla de loci rechazada (`additionalProperties: false`);
-    identificador de locus repetido rechazado por unicidad; un alelo que cita un
-    `locus_id` inexistente rechazado nombrando el evento; validación externa con
-    `python3 -m jsonschema` en Draft 2020-12, que es ajena al productor;
-    comparación **byte a byte** de los esquemas heredados contra los de
-    `11d26e5`; un documento legítimo de 65536 bytes admitido y el de 65537
-    rechazado; y —esta es la que importa— **un fichero general v2 sin loci
-    sigue publicando `effective-config-v4`, no v6**. **Debe fallar contra:** un
-    lector que promueva todo documento a v6; un esquema heredado con una
-    propiedad añadida; un esquema nuevo con `additionalProperties: true`.
-  - *Límite declarado (C-5):* con la declaración explícita de alelos, 100
-    individuos diploides y 5 loci ocupan entre 70 y 90 kB y **no caben** en el
-    techo de 65536 bytes de DTC-089. El paso lo comprueba con un documento que
-    lo rebasa y lo registra como límite conocido, no como defecto. La vía por
-    frecuencias alélicas (S-04, segunda mitad) es la salida, y la forma del
-    TOML de este paso no debe impedirla.
+    `schemas/effective-config-v6.schema.json` nuevos; `src/configuration.rs`,
+    `src/adapters.rs`, `src/results.rs`. **Ningún esquema v1 a v5 cambia, ni
+    `truth-v1`, ni `truth-v2`.**
+  - **Declaración compacta, almacenamiento exacto.** Es la razón de que se
+    separen las dos cosas: escribir la cadena de bases de cada alelo de cada
+    individuo reventaría el techo de 65536 bytes del fichero general, mientras
+    que un puñado de definiciones de alelo por locus más sus frecuencias cabe
+    de sobra y **no crece con el número de individuos**. El programa
+    materializa la secuencia desde la definición.
+  - Se comprueba con: pareja mínima válida admitida; clave desconocida
+    rechazada (`additionalProperties: false`); identificador de locus repetido
+    rechazado; frecuencias que no suman 1 dentro de la tolerancia de DTC-049
+    rechazadas nombrando el locus; una frecuencia negativa rechazada; un alelo
+    sin frecuencia y una frecuencia sin alelo rechazados; **un escenario con
+    500 individuos y 5 loci cabe holgadamente en el techo de 65536 bytes**, que
+    es la comprobación de que C-5 está resuelta; un documento legítimo de 65536
+    bytes admitido y el de 65537 rechazado; validación externa con
+    `python3 -m jsonschema`; comparación byte a byte de los esquemas heredados;
+    y **un fichero general v2 sin loci sigue publicando `effective-config-v4`,
+    no v6**. **Debe fallar contra:** un lector que promueva todo documento a
+    v6; un esquema heredado con una propiedad añadida; una validación de
+    frecuencias que acepte cualquier reparto.
 
-- ☐ **F6.4.2.** El tracto en la referencia, por las dos vías: (a) **referencia
-  suministrada** que ya lo contiene, con una comprobación de admisión que
-  verifique que el intervalo declarado es el motivo repetido un número entero
-  de veces con sus interrupciones declaradas, y (b) **referencia simulada** con
-  el tracto sembrado.
-  - Depende de: F6.4.1.1, F6.1.1.1.
-  - Procede de: REQ-REF-19/23, REQ-CONF-56; supuesto **S-03**. Corrección de
-    dependencia: **ya no depende** de derivar una referencia estructural.
-  - Cambia: `src/reference.rs` (admisión) y `src/reference_generation.rs`
-    (siembra); el escritor FASTA canónico `src/reference_fasta.rs` no cambia.
-  - Se comprueba con: un FASTA de juguete escrito a mano con `(AC)×10` en las
-    coordenadas declaradas es admitido; el mismo con una base cambiada dentro
-    del tracto es rechazado nombrando el locus y el desplazamiento; un
-    intervalo declarado que no es múltiplo entero del motivo es rechazado; en
-    la vía simulada, el FASTA contiene la secuencia realizada en la coordenada
-    declarada, localizada con `grep -ob` externo, y misma semilla da mismo
-    FASTA. **Debe fallar contra:** una escritura que coloque el locus una base
-    más allá —el `grep -ob` externo la caza—; una admisión que compare solo la
-    longitud del intervalo y no su contenido.
+- ☐ **F6.4.2.** **Guarda de admisión con referencia real:** al declarar un
+  locus sobre una referencia suministrada o reducida, comprobar que en esa
+  posición **hay realmente un tracto de ese motivo**, y rechazar la
+  configuración identificando el locus si no lo hay.
+  - Depende de: F6.1.1.1, F1.7.2.
+  - Procede de: decisión **S-06**, que introduce expresamente esta guarda:
+    «sin ella se anotaría como microsatélite un trozo cualquiera del genoma».
+  - Cambia: `src/reference.rs`, `src/tandem_repeat.rs`.
+  - **El criterio, que la decisión no fijaba y sin el cual no hay guarda.** Una
+    guarda que exija el motivo **perfecto** rechazaría tractos reales
+    legítimos, que casi siempre son impuros —era el defecto de la primera
+    versión de este plan, que rechazaba «una base cambiada dentro del tracto»—.
+    Una que no exija nada no es guarda. El criterio es por tanto un **mínimo de
+    pureza configurable**, con la pureza medida como en F6.4.1, más **un mínimo
+    de unidades completas en la tirada más larga**. Ambos tienen valor por
+    omisión, se publican en la configuración efectiva y **son lo que hace que
+    exista una variante defectuosa posible**.
+  - Se comprueba con: un tracto puro se admite; un tracto real impuro por
+    encima del mínimo de pureza se admite —este es el caso que la primera
+    versión rechazaba por error—; una región **sin ninguna repetición del
+    motivo** se rechaza nombrando el locus, la pureza medida y el mínimo; un
+    tracto justo por debajo del mínimo se rechaza y justo por encima se admite,
+    lo que demuestra que el umbral se lee y no está codificado; bajar el mínimo
+    en la configuración convierte el rechazo en admisión. **Debe fallar
+    contra:** una guarda que exija pureza 1, que rechazaría el caso real
+    legítimo; una guarda ausente, que admitiría la región sin repeticiones; un
+    mínimo codificado en el programa en vez de leído.
 
-- ☐ **F6.4.3.** El alelo por copia haplotípica: variante nueva
-  `SmallModification::TandemRepeat` con `locus_id`, número de unidades y ancla,
-  que se materializa como la inserción o la deleción equivalente.
+- ☐ **F6.4.3.** El alelo por copia haplotípica: **clase nueva del mundo de las
+  variantes pequeñas**, junto al cambio de base, la inserción y la deleción,
+  que lleva el **intervalo de referencia** que sustituye, la **secuencia
+  realizada** del tracto y su anotación —motivo, unidades, interrupciones—
+  derivada de esa secuencia.
   - Depende de: F6.4.2.
-  - Procede de: REQ-IND-32/33, REQ-CONF-58/59, ACE-103, DTC-061; supuesto
-    **S-02**. Corrección de dependencia: **ya no depende** del primer paso del
-    hito de variantes estructurales.
-  - Cambia: `src/segments.rs` (la variante y su validación de extensión y
-    orden), `src/materialization.rs`, `src/small_event_composition.rs`.
-  - Se comprueba con: las dos copias de un diploide con 5 y 7 unidades
-    materializan longitudes distintas y secuencias distintas; tres individuos
-    con 4, 5 y 9 unidades producen tres secuencias distintas en el mismo locus;
-    dos modificaciones sobre el mismo tracto se rechazan por solapamiento, como
-    ya hace `SegmentError::OverlappingModifications`; la reconstrucción por un
-    lector independiente devuelve el número de unidades declarado. **Debe
-    fallar contra:** una materialización que use el número de copias **de la
-    referencia** para ambas copias haplotípicas —el caso 5/7 la caza—; una
-    variante que guarde el *indel* pero pierda el número de unidades, que es lo
-    que REQ-IND-33 prohíbe.
+  - Procede de: REQ-IND-32/33, REQ-CONF-58/59, ACE-103, DTC-061; decisión
+    **S-02**. Corrección de dependencia: no depende del hito de variantes
+    estructurales.
+  - Cambia: `src/segments.rs`, `src/materialization.rs`,
+    `src/small_event_composition.rs`.
+  - **Lo que lo hace barato.** `InsertionModification` ya guarda secuencia en
+    un `Arc<[u8]>`, de modo que la estructura no estrena capacidad. Y el trío
+    intervalo de referencia + secuencia alternativa + anotación **es el modelo
+    del propio VCF** para una repetición en tándem, así que la proyección de
+    F6.5.1.1 es directa y no una traducción.
+  - **Frontera de alcance.** Este trabajo **varía tractos que ya existen y
+    están declarados**. La aparición de microsatélites **nuevos** por inserción
+    o duplicación es trabajo estructural futuro y queda fuera.
+  - Se comprueba con: las dos copias de un diploide con alelos de 5 y 7
+    unidades materializan secuencias distintas; **dos alelos con el mismo
+    número de unidades y la interrupción en sitio distinto materializan
+    secuencias distintas y se distinguen en el estado**, que es lo que un
+    contador no podía expresar; dos modificaciones sobre el mismo tracto se
+    rechazan por solapamiento, como ya hace
+    `SegmentError::OverlappingModifications`; un lector independiente
+    reconstruye la secuencia y, de ella, el número de unidades y la pureza.
+    **Debe fallar contra:** una materialización que use la secuencia de la
+    referencia para las dos copias; **una representación que guarde solo el
+    número de unidades**, que colapsaría los dos alelos de igual longitud y
+    distinta interrupción en el mismo objeto —es la variante defectuosa que
+    sustituye a la de «perder el número de unidades», que con la secuencia
+    guardada ya no tiene sentido porque no hay número que perder—; una
+    anotación que se almacene aparte y pueda contradecir la secuencia, que se
+    caza mutando la anotación y exigiendo que el modelo la recalcule.
 
-- ☐ **F6.4.3.1.** Umbral de 50 pb: rechazo antes de simular de todo alelo cuya
-  diferencia con la referencia **alcance** el umbral configurable que separa
-  *indels* pequeños de variantes estructurales, identificando locus, individuo
-  y copia.
+- ☐ **F6.4.3.1.** **Tope propio configurable** del tamaño del tracto, que
+  sustituye al umbral de 50 pb: rechazo antes de simular de todo alelo cuya
+  longitud, o cuya diferencia con la referencia, rebase el tope declarado,
+  identificando **el locus y el alelo**.
   - Depende de: F6.4.3.
-  - Procede de: REQ-CONF-55, REQ-IND-31; supuesto **S-05**.
-  - Cambia: `src/configuration.rs`, `src/tandem_repeat.rs`.
-  - Se comprueba con: motivo de 4 pb y alelo con 12 unidades de más (48 pb)
-    admitido; con 13 (52 pb) rechazado nombrando locus, individuo y copia; con
-    el umbral configurado a 20 pb, el de 48 pb pasa a rechazarse, lo que
-    demuestra que se lee el valor configurado y no una constante. **Debe fallar
-    contra:** un umbral aplicado solo al generar y no al validar la entrada —el
-    caso del umbral configurado a 20 lo caza—; una comparación estricta
-    `> umbral` donde REQ-IND-31 exige `>=`.
+  - Procede de: decisión **S-05**, que retira expresamente el umbral de 50 pb
+    para las repeticiones y lo sustituye por esta salvaguarda «para que un
+    error de dedo no genere un tracto desmesurado».
+  - Cambia: `src/configuration.rs`, `src/tandem_repeat.rs`,
+    `schemas/config-general-v4.schema.json`.
+  - **Por qué no el umbral de 50 pb.** Un alelo `(CA)40` frente a uno `(CA)10`
+    difiere en 60 bases y **no es una variante estructural en ningún sentido**:
+    es un polimorfismo de longitud de un microsatélite. El umbral existe para
+    separar inserciones de secuencia **nueva** de reordenamientos; aplicarlo a
+    un tracto repetido es un error de categoría. Y aprieta más de lo que su
+    ficha admitía: muerde a partir de 25 unidades de diferencia en un
+    dinucleótido, cifra que una población diversa alcanza.
+  - **Por qué se identifica el locus y el alelo, y no el individuo.** Con
+    alelos declarados a mano el rechazo podía nombrar individuo y copia. Con
+    **frecuencias** (S-04) ya no: el alelo que rebasa el tope se conoce **al
+    leer la configuración**, antes de que exista ningún individuo al que
+    asignárselo. Nombrar individuo y copia aquí era un resto del modelo
+    anterior.
+  - **Su contrato, que hay que fijar aquí porque no existe en ningún sitio:**
+    una clave propia en la tabla del locus, llamada explícitamente en
+    **unidades** —`max_units`—, de dominio entero y positivo, publicada en la
+    configuración efectiva. **Valor por omisión propuesto: 200 unidades**,
+    holgado para cualquier microsatélite real y estrecho para un error de dedo;
+    es el pendiente **P-5** y está a confirmar. El comportamiento no depende de
+    ese número: los fixtures configuran el tope explícitamente.
+  - Se comprueba con: con el tope en 60 unidades, un alelo de 60 se admite y
+    uno de 61 se rechaza **nombrando el locus y el alelo**; **con el tope en 20
+    unidades, el alelo de 60 pasa a rechazarse**, lo que demuestra que se lee
+    el valor configurado y no una constante; una clave `max_bases` se rechaza
+    **como campo desconocido**, porque el esquema es cerrado; un alelo de 30
+    unidades de un dinucleótido —60 pares de base, que el umbral retirado
+    habría rechazado— **se admite**. **Debe fallar contra:** un tope codificado
+    en el programa —la prueba del tope a 20 lo caza—; la supervivencia del
+    umbral de 50 pares de base en cualquiera de los tres momentos en que
+    REQ-IND-31 lo exigía, que la prueba del dinucleótido de 60 pares de base
+    caza; un esquema abierto, que la clave `max_bases` caza.
+  - *Corregido:* la versión anterior pedía que «un tope expresado en pares de
+    base se rechace nombrando el parámetro». **No es realizable**: un entero no
+    lleva unidad consigo, de modo que el programa no puede distinguir 60
+    unidades de 60 pares de base. Lo único comprobable es el **nombre de la
+    clave**, y por eso la prueba es la del campo desconocido.
 
-- ☐ **F6.4.3.2.** Verdad publicada, versión **v3**: el caso sigue siendo de
-  tipo *indel* y el alelo gana `locus_id`, `motif` y `units`. `truth-v1` y
-  `truth-v2` no cambian ni un byte, y una ejecución sin loci de repetición
-  publica exactamente lo que publica hoy.
+- ☐ **F6.4.3.2.** **Sorteo de los genotipos desde las frecuencias del locus**,
+  con su ámbito de azar propio: cada copia haplotípica de cada individuo recibe
+  un alelo del locus sorteado de las frecuencias declaradas.
   - Depende de: F6.4.3.1.
-  - Procede de: REQ-VER-22 —que prohíbe expresamente dejar el detalle restante
-    únicamente en el manifiesto—, REQ-IND-33; supuesto **S-08**. Cierra la
-    decisión pendiente DP-F6-03 en su parte de repeticiones, y solo en esa.
+  - Procede de: decisión **S-04**, que invierte la recomendación original;
+    REQ-DAT-15, DTC-037, DTC-072 y DTC-081 para la disciplina de aleatoriedad.
+  - Cambia: `src/randomness.rs` (ámbito nuevo), `src/initial_genotypes.rs` o
+    módulo hermano.
+  - **Esto consume azar, y la primera versión de este plan no lo cubría.** Con
+    alelos declarados a mano no se consumía ni un número aleatorio; con
+    frecuencias sí. Hace falta por tanto: un **ámbito de semilla propio**,
+    identificado por el evento y las identidades estables —individuo, copia y
+    **identificador de locus**, nunca la posición ni el orden físico—; y un
+    **algoritmo normativo**, que es `categorical-f64-v1` (DTC-072), ya
+    existente, sin primitiva nueva. Los pesos se normalizan con la suma
+    compensada de DTC-049.
+  - Se comprueba con: vectores congelados del sorteo para una terna
+    individuo/copia/locus; misma semilla, mismos genotipos; **insertar un
+    individuo al principio de la lista no cambia el genotipo de ninguno de los
+    demás**, comparado por identificador y no por posición, y **reordenar la
+    lista de individuos tampoco**; **añadir un locus en un cromosoma que
+    ordena antes que los existentes no cambia los genotipos de los loci
+    previos**; con una frecuencia de 1 para un alelo, todos los individuos lo
+    reciben y **no se consume aleatoriedad**, contado con un generador
+    instrumentado; con dos alelos al **0,9 y 0,1**, sobre mil copias y semilla
+    congelada, la proporción observada cae dentro del intervalo binomial
+    declarado alrededor de 0,9.
+  - **Debe fallar contra:** un ámbito indexado por el **orden** de los
+    individuos o por la **posición** del locus —las pruebas de insertar al
+    principio, reordenar y añadir un locus que ordena antes son las que lo
+    cazan—; un sorteo que consuma con frecuencia 1; **un reparto uniforme que
+    ignore los pesos**, que la proporción de 0,9 caza.
+  - *Corregido, dos veces en el mismo paso.* La versión anterior usaba **dos
+    alelos al 50 %**, y ese fixture es **degenerado**: una elección uniforme
+    que ignore los pesos produce exactamente la misma distribución que la
+    ponderada, de modo que el mutante sobrevivía. Y pedía **«añadir un
+    individuo al final»**, que **no caza** un ámbito indexado por orden, porque
+    añadir al final deja intactos todos los ordinales anteriores; hay que
+    **insertar al principio o reordenar**. Lo mismo con el locus: añadirlo en
+    un cromosoma que ordene **después** no desplaza nada. Va en la docstring.
+
+- ☐ **F6.4.3.3.** Verdad publicada, versión **v3**: el alelo se publica como un
+  caso de inserción o deleción con metadatos de repetición —locus, motivo y
+  número de unidades—, y como el alelo lleva su secuencia, el caso ya la
+  contiene y los metadatos solo la anotan. `truth-v1` y `truth-v2` no cambian
+  ni un byte.
+  - Depende de: F6.4.3.2.
+  - Procede de: REQ-VER-22, REQ-IND-33; decisión **S-08**. Cierra la decisión
+    pendiente DP-F6-03 en su parte de repeticiones.
   - Cambia: `schemas/truth-v3.schema.json` nuevo, `src/truth_schema.rs`,
     `src/truth_projection.rs`, `src/truth_validation.rs`.
-  - Se comprueba con: el registro de un diploide 5/7 lleva los dos alelos con
-    su fase, su `locus_id`, su motivo y su número de unidades; el validador de
-    verdad existente sigue aceptando un documento v2 sin cambios; `sha256sum`
-    de la verdad de una ejecución **sin** loci, comparado con el de F6.4.0,
-    idéntico; los dos esquemas heredados comparados byte a byte. **Debe fallar
-    contra:** una proyección que publique el *indel* y omita el número de
-    unidades; un cambio que promueva a v3 las ejecuciones sin repeticiones —el
-    `sha256sum` contra la línea base lo caza.
+  - **Cuándo se promueve la versión, que hacía falta fijar.** La verdad pasa a
+    la versión 3 **cuando se publica al menos un alelo de repetición**, no por
+    el mero hecho de que la configuración declare loci. Un escenario que
+    declare un locus cuyo único alelo es el de la referencia no produce ninguna
+    variante que publicar, y su verdad sigue siendo la versión 2, byte a byte
+    igual a la de antes. Es lo que hace posible la comprobación (c) de F4.8.6,
+    y es coherente con la regla de que un fichero general v2 siga publicando
+    configuración efectiva v4.
+  - Se comprueba con: el registro de un diploide con dos alelos distintos lleva
+    los dos con su fase, su locus, su motivo y su número de unidades, y la
+    secuencia de cada uno; **dos alelos de igual longitud y distinta
+    interrupción producen registros distinguibles**; el validador de verdad
+    existente sigue aceptando un documento v2 sin cambios; `sha256sum` de la
+    verdad de una ejecución **sin** loci, idéntico al de la línea base; los dos
+    esquemas heredados comparados byte a byte; **un escenario con un locus
+    declarado cuyo único alelo es el de la referencia publica verdad en la
+    versión 2 y byte a byte igual a la línea base**. **Debe fallar contra:**
+    una proyección que publique solo el número de unidades y no la secuencia,
+    que la prueba de los dos alelos de igual longitud caza; un cambio que
+    promueva a v3 las ejecuciones sin repeticiones; **una promoción disparada
+    por la declaración del locus en vez de por la publicación de un alelo**,
+    que la prueba del alelo de referencia único caza y que dejaría sin base la
+    comprobación (c) de F4.8.6.
 
-- ☐ **F6.5.1.1.** Proyección al VCF de los alelos de repetición: campos de
-  repetición en tándem **del estándar `VCFv4.5`** declarados en la cabecera,
-  con alelos explícitos en `REF` y `ALT`, y el umbral de «tamaño manejable»
-  fijado en el **mismo** umbral que separa *indel* de variante estructural.
-  - Depende de: F6.4.3.2.
-  - Procede de: REQ-VER-20/22, ACE-31, DTC-064 y DTC-066; supuesto **S-09**;
-    confirmación D-10. Cierra la decisión pendiente DP-F6-06 y, al hacerlo,
-    **mantiene fuera del corte el fichero complementario del VCF, su catálogo
-    de códigos de pérdida y su esquema**.
-  - Cambia: `src/vcf_contract.rs` (cabecera), `src/vcf_projection.rs`,
+- ☐ **F6.5.1.1.** Proyección al VCF: campos de repetición en tándem **del
+  estándar `VCFv4.5`** declarados en la cabecera, y alelos **siempre
+  explícitos**, con la secuencia completa en `REF` y `ALT`. **Sin ningún umbral
+  de tamaño** y sin entrada complementaria.
+  - Depende de: F6.4.3.3.
+  - Procede de: REQ-VER-20/22, ACE-31, DTC-064, DTC-066; decisión **S-09**;
+    confirmación D-10. Cierra la decisión pendiente DP-F6-06 y mantiene fuera
+    del alcance el hito de variantes complejas y complemento del VCF.
+  - Cambia: `src/vcf_contract.rs`, `src/vcf_projection.rs`,
     `src/vcf_representation.rs`, `src/vcf_semantic_validation.rs`.
-  - **Primero, verificar el estándar.** Antes de escribir una sola línea de
-    cabecera, comprobar contra la especificación publicada de `VCFv4.5` los
-    nombres, números y tipos exactos de los campos de repetición en tándem que
-    la versión 4.4 introdujo y la 4.5 conserva, y **dejar la cita en el
-    código**. El proyecto ya pagó una vez el precio de dar por buena una cifra
-    no comprobada; no se repite.
-  - Se comprueba con: un diploide 5/7 produce **un** registro con dos
-    alternativas y genotipo faseado, alineado a la izquierda del tracto, tal
-    como DTC-064 obliga; la cabecera declara cada campo de repetición usado y
-    ninguno más; el oráculo semántico propio reconstruye el número de unidades
-    desde `REF`/`ALT` y lo compara con la verdad; y la comprobación externa con
-    las herramientas instaladas. **Debe fallar contra:** una cabecera que use
-    un campo no declarado; una proyección que emita dos registros para el mismo
-    sitio en vez de uno multialélico; un campo de repetición cuyo valor
-    contradiga el número de unidades de la verdad.
-  - **Pendiente P-2, dicho sin adornos:** la puerta externa del VCF exige
-    `bcftools` y `tabix` en la versión 1.24, y el entorno tiene 1.21. Este paso
-    ejecuta la comprobación con 1.21, **registra la versión en la evidencia** y
-    **no etiqueta la puerta externa como superada**. El oráculo semántico
-    propio sí discrimina y es el que sostiene el paso.
+  - **Por qué no hay umbral.** El criterio del estándar no es la longitud sino
+    **si se conoce la secuencia exacta**: la forma explícita cuando se conoce,
+    la simbólica cuando se está resumiendo. **Un simulador siempre la conoce,
+    porque la ha generado él**, de modo que la forma explícita aplica siempre.
+    El umbral de 50 pb era una convención de variantes estructurales importada
+    de fuera del estándar.
+  - **Tipos, ya verificados contra la especificación**, con dos precisiones.
+    Primera: el campo que expresa el número de copias es de tipo **decimal
+    (`Float`)**, no entero, porque un tracto puede terminar en una unidad
+    parcial —lo que F6.4.1 ahora admite—. Declararlo entero produciría un VCF
+    que una herramienta conforme rechaza. Segunda: el estándar dice que si ese
+    campo **se omite** se asume **cero** fuera de los alelos simbólicos, de
+    modo que omitirlo no es «no decir nada» sino **afirmar cero**. El proyecto
+    lo emite **explícito para cada alelo**, incluido el de referencia.
+  - Se comprueba con: un diploide con dos alelos produce **un** registro con
+    dos alternativas y genotipo faseado, alineado a la izquierda del tracto
+    como DTC-064 obliga; la cabecera declara cada campo usado, con su número y
+    su tipo, y ninguno más; el campo de número de copias se emite como decimal
+    y un tracto con unidad parcial produce un valor no entero; **cada alelo
+    del registro, incluido el de referencia, lleva su número de copias
+    explícito**, y el oráculo comprueba que cada valor **se corresponde con la
+    longitud del alelo al que acompaña**, en su mismo orden; el oráculo
+    semántico propio reconstruye la secuencia del alelo desde `REF`/`ALT` y la
+    compara con la verdad; **ningún registro usa representación simbólica**,
+    comprobado con una búsqueda negativa con control positivo, ni siquiera con
+    un tracto de diez mil bases. **Debe fallar contra:** una cabecera que
+    declare el número de copias como entero; una proyección que recaiga en la
+    forma simbólica por encima de algún tamaño, que la prueba del tracto de
+    diez mil bases caza; dos registros para el mismo sitio en vez de uno
+    multialélico; **un campo de número de copias omitido para algún alelo**,
+    que el estándar interpretaría como cero y que la comprobación de
+    correspondencia por orden caza; una lista de valores desalineada respecto
+    de la de alelos, que es el error silencioso más probable de este campo.
+  - **Pendiente P-2, dicho sin adornos:** la puerta externa exige `bcftools` y
+    `tabix` 1.24, y el entorno tiene 1.21 y **1.19**. Este paso ejecuta la
+    comprobación con lo instalado, **registra las dos versiones en la
+    evidencia** y **no etiqueta la puerta como superada**.
 
-- ☐ **F6.4.8.** Registro en configuración efectiva y manifiesto: loci y
-  parámetros configurados, procedencia concreta o aleatoria, motivo, unidad,
-  número de copias o longitud, y los **valores realizados** de pureza e
-  interrupciones.
+- ☐ **F6.4.8.** Registro en configuración efectiva y manifiesto: loci y sus
+  parámetros, procedencia de la referencia, motivo, alelos con su secuencia y
+  sus frecuencias declaradas, **frecuencias realizadas** tras el sorteo, tope
+  configurado, mínimos de la guarda de admisión, y los **valores realizados**
+  de pureza e interrupciones por alelo.
   - Depende de: F6.5.1.1.
-  - Procede de: REQ-MAN-29, REQ-VAL-48; supuestos **S-01**, **S-05**, **S-06**.
-  - Cambia: `src/event_manifest.rs`, `src/results.rs`, `schemas/manifest-general-v6.schema.json`.
-  - Se comprueba con: validación externa de los dos documentos con
-    `python3 -m jsonschema`; la pureza publicada coincide con la calculada a
-    mano sobre el tracto del fixture; el umbral efectivo publicado coincide con
-    el configurado, no con el predeterminado, cuando la configuración lo
-    sustituye. **Debe fallar contra:** un manifiesto que registre la pureza
-    declarada como realizada —imposible aquí, porque no se declara, y por eso
-    la aserción que lo vigila es la del **umbral sustituido**, que sí puede
-    fallar; se dice así en su docstring.
+  - Procede de: REQ-MAN-29, REQ-VAL-48; decisiones **S-01**, **S-04**,
+    **S-05**, **S-06**.
+  - Cambia: `src/event_manifest.rs`, `src/results.rs`,
+    `schemas/manifest-general-v6.schema.json`.
+  - Se comprueba con: validación externa de los dos documentos; la pureza
+    publicada por alelo coincide con la calculada a mano sobre su secuencia;
+    **la frecuencia realizada difiere de la declarada** en un corpus pequeño y
+    converge a ella en uno grande, que es lo que distingue publicar lo realizado
+    de copiar lo declarado; el tope y los mínimos publicados son los
+    configurados, no los de omisión, cuando la configuración los sustituye.
+    **Debe fallar contra:** un manifiesto que publique la frecuencia declarada
+    como realizada —la prueba del corpus pequeño lo caza, y con un corpus
+    grande **no discrimina**, lo que va en la docstring—; un manifiesto que
+    publique los valores de omisión cuando la configuración los sustituye.
 
-- ☐ **F6.4.9.1.** Interfaz Marimo, versión mínima: tabla de loci de repetición
-  y tabla de alelos por individuo y copia, con equivalencia
-  interfaz → TOML → configuración efectiva.
+- ☐ **F6.4.8.1.** **Ajustar el presupuesto de tamaño de salida** para que
+  cuente las bases del tracto que la verdad y el VCF ahora publican.
   - Depende de: F6.4.8.
-  - Procede de: REQ-UI-01/03/04/05, hoja de ruta §7; supuesto **S-17**
-    corregido por la contradicción **C-6**: sin este control, el control de
-    tartamudeo de la entrega 2 no permite producir ni una lectura tartamudeada.
-  - Cambia: `ui/config_editor.py`, `ui/ui_panels.py`, `ui/gps_app.py`;
-    prueba nueva en `tests_ui/`.
-  - Se comprueba con: ida y vuelta de la interfaz al TOML y del TOML a la
-    configuración efectiva, al estilo de
-    `tests_ui/test_f5_6_1_scenario_ui.py`; ausencia de controles para lo que el
-    corte no admite —pureza objetivo, generación aleatoria de loci, modelo de
-    mutación escalonado—; `MARIMO_SKIP_UPDATE_CHECK=1 uv run --frozen marimo
-    check --strict ui/gps_app.py` sin avisos. **Debe fallar contra:** un
-    control de pureza objetivo presente; una ida y vuelta que pierda las
-    interrupciones declaradas.
+  - Procede de: DTC-089 y la consecuencia que la decisión **S-02** dejó
+    anotada: «el presupuesto de tamaño de salida debe contar las bases del
+    tracto en la verdad y en el VCF; es un término pequeño, pero el contrato de
+    recursos es estricto y no puede descubrirse a mitad».
+  - Cambia: el modelo de coste de salida donde viva, junto a las constantes de
+    DTC-089.
+  - Se comprueba con: un escenario con loci declarados produce una cota de
+    bytes de salida **estrictamente mayor** que el mismo sin ellos, y la
+    diferencia es al menos las bases de los alelos publicados; la cota sigue
+    siendo **superior o igual** a los bytes realmente escritos, comprobado
+    sobre un escenario con alelos largos; un escenario sin loci da exactamente
+    la cota de antes. **Debe fallar contra:** una cota que ignore el término
+    nuevo —el escenario con alelos largos la caza, porque los bytes escritos la
+    rebasarían—; una que lo cuente también cuando no hay loci, que la
+    comparación con la línea base caza.
 
-> **Revisión del hito de la entrega 1.** Comprobar el modelo del locus, la
-> realización por el extremo derecho, el alelo por copia, el umbral, la verdad
-> v3, el VCF y la interfaz, con sus evidencias. Ejecutar la batería completa de
-> puertas de la sección 4.2 con
+- ☐ **F6.4.9.1.** Interfaz Marimo: declarar loci **con motivo y posición**,
+  declarar alelos **con sus interrupciones**, y declarar **frecuencias** por
+  locus, con equivalencia interfaz → TOML → configuración efectiva.
+  - Depende de: F6.4.8.1.
+  - Procede de: REQ-UI-01/03/04/05, hoja de ruta §7; decisión **S-17**, que
+    advierte de que «mínima» hoy significa **el doble** de lo que significaba
+    cuando se escribió la ficha; contradicción **C-6**.
+  - Cambia: `ui/config_editor.py`, `ui/ui_panels.py`, `ui/gps_app.py`; prueba
+    nueva en `tests_ui/`.
+  - Se comprueba con: ida y vuelta de la interfaz al TOML y del TOML a la
+    configuración efectiva; las interrupciones declaradas sobreviven la ida y
+    la vuelta; las frecuencias se normalizan y se rechaza un reparto inválido
+    **en la interfaz**, no solo en el lector; ausencia de controles para lo que
+    el corte no admite —pureza objetivo, generación aleatoria de loci—;
+    `marimo check --strict` sin avisos. **Debe fallar contra:** un control de
+    pureza objetivo presente; una ida y vuelta que pierda las interrupciones,
+    que es justo lo que se perdería si la interfaz siguiera pensando en número
+    de unidades.
+
+> **Revisión del hito de la entrega 1.** Comprobar la referencia con el tracto
+> y su mapa de coordenadas, el modelo del locus con la secuencia, la operación
+> sobre la tirada más larga, la guarda de admisión con su criterio, el sorteo
+> por frecuencias y su ámbito de azar, la verdad v3, el VCF sin umbral, el
+> presupuesto de salida y la interfaz. Ejecutar la batería completa con
 > `./scripts/check-independent-validators.sh evidence/repeats-f6-4`. Confirmar
-> que `sha256sum` de los artefactos de una ejecución **sin** loci coincide con
-> la línea base de F6.4.0. No continuar hasta confirmar el resultado.
+> que los artefactos de una ejecución **sin** loci coinciden byte a byte con la
+> línea base de F6.4.0. Aplicar la parte de la sección 10 que corresponde a la
+> fase del núcleo reproducible. No continuar hasta confirmar el resultado.
 
 ---
 
@@ -1122,232 +1679,270 @@ la síntesis de la secuenciación. **La verdad del individuo no cambia.**
 **Cómo se nombra, y por qué no contradice el contrato de la fase.** Una
 biblioteca «sin PCR» evita la amplificación en la preparación, pero no evita
 toda polimerasa: la formación de agrupaciones en la celda es amplificación en
-puente, y la secuenciación por síntesis es copia con polimerasa. El
-deslizamiento ocurre en ambas, y por eso los microsatélites tartamudean también
-en datos de genoma completo sin PCR. El requisito nuevo debe decir
-explícitamente que **este artefacto no es una preparación amplificada**, que no
-introduce duplicados y que el perfil sigue registrándose como sin PCR
-(supuesto **S-12**).
+puente, y la secuenciación por síntesis es copia con polimerasa. El requisito
+nuevo debe decir que **este artefacto no es una preparación amplificada**, que
+no introduce duplicados y que el perfil sigue registrándose como sin PCR
+(decisión **S-12**).
 
 - ☐ **F4.8.1.** Decisión técnica nueva y catálogo de ámbitos aleatorios
-  **`f4-technical-v4`**, que extiende el vigente `f4-technical-v3` con la etapa
-  `stutter` y los componentes
-  `[event_id, library_id, stutter, template_ordinal, locus_id, decision]`, con
-  `decision` en `bernoulli` y `step`, indexada por **identificador de locus** y
-  nunca por la posición del tracto dentro de la molécula.
+  **`f4-technical-v4`**, que extiende el vigente con la etapa `stutter` y los
+  componentes `[event_id, library_id, stutter, template_ordinal, locus_id,
+  decision]`, indexada por **identificador de locus** y nunca por la posición
+  del tracto dentro de la molécula.
   - Depende de: cierre de la entrega 1.
-  - Procede de: REQ-DAT-15, DTC-037, DTC-081, DTC-086, DTC-088; supuestos
-    **S-11** y **S-12**. Fila nueva propuesta en
-    `design/decisiones-tecnicas-0.1.md`: **DTC-090** (provisional).
+  - Procede de: REQ-DAT-15, DTC-037, DTC-081, DTC-086, DTC-088; decisiones
+    **S-11** y **S-12**. Fila nueva propuesta: **DTC-090** (provisional).
   - Cambia: `src/randomness.rs`.
   - **Aclaración que la decisión debe llevar por escrito:** DTC-067 obliga a
     que los **recuentos** aleatorios salgan de `poisson-count-v1`. Aquí no hay
-    ningún recuento de sucesos sobre oportunidades: hay un ensayo binario y una
-    elección entre alternativas. Los consumidores que corresponden ya existen
-    —`bernoulli-v1`, `uniform-index-v1` (DTC-088) y `categorical-f64-v1`
-    (DTC-072)— y **DTC-067 no los prohíbe aquí**. Decirlo evita que alguien lea
-    la regla al revés.
+    recuento de sucesos sobre oportunidades: hay un ensayo binario y una
+    elección entre alternativas, y los consumidores que corresponden ya existen
+    —`bernoulli-v1` y `uniform-index-v1` (DTC-088), `categorical-f64-v1`
+    (DTC-072)—. Decirlo evita que alguien lea la regla al revés.
   - Se comprueba con: vectores congelados de derivación de subsemilla para una
-    terna evento/biblioteca/locus; el catálogo vigente `f4-technical-v3` sigue
-    produciendo exactamente las mismas subsemillas que antes, comparadas con la
-    línea base. **Debe fallar contra:** una extensión que renumere o reordene
-    las etapas existentes —los vectores del catálogo vigente lo cazan.
+    terna evento/biblioteca/locus; el catálogo vigente sigue produciendo
+    exactamente las mismas subsemillas que antes, comparadas con la línea base.
+    **Debe fallar contra:** una extensión que renumere o reordene las etapas
+    existentes.
 
-- ☐ **F4.8.2.** Modelo `stutter-v1`, puro: probabilidad
-  `p = min(p_max, max(0, a + b·(u − u₀)))` por longitud de motivo, donde `u` es
-  el número de unidades completas **contenidas en la molécula**; y sorteo
-  categórico sobre un conjunto declarado de pasos en unidades enteras con sus
-  pesos. **Sin reintentos**: un paso solo entra en el sorteo si deja al menos
-  una unidad completa en el tracto y deja la molécula no más corta que la
-  lectura. Si ningún paso es viable, no hay tartamudeo y **no se consume
-  aleatoriedad**.
-  - Depende de: F4.8.1.
-  - Procede de: REQ-DAT-77 propuesto, DTC-072, DTC-088; supuesto **S-14**;
-    pendientes **P-1** y **P-3**.
+- ☐ **F4.8.2.** Modelo `stutter-v1`, puro, con la **forma publicada**: la
+  probabilidad de resbalón por ciclo depende **linealmente de la longitud de la
+  tirada ininterrumpida más larga** del motivo contenida en la molécula, y el
+  tamaño del paso sigue una estructura **asimétrica** —contracciones de hasta
+  tres unidades, expansiones de una sola, con sesgo hacia la contracción—.
+  **Sin reintentos**: los pasos inviables se excluyen **antes** de sortear.
+  - Depende de: F4.8.1, F6.4.1.
+  - Procede de: decisión **S-14**; Raz y col. (2019), NAR 47(5):2436–2445,
+    CC BY 4.0, que infieren el modelo midiendo el ruido *in vitro* y fijan la
+    dependencia lineal **por ciclo**; DTC-072, DTC-088; pendientes **P-1** y
+    **P-3**.
   - Cambia: módulo nuevo `src/stutter.rs`.
-  - Se comprueba con: **(a)** la función de probabilidad, llamada
-    directamente, es estrictamente mayor para un tracto de 30 unidades que para
-    uno de 6 con el mismo motivo cuando `b > 0`, y **igual** cuando `b = 0`,
-    que es el valor de partida de P-1; **(b)** con la misma longitud **en pares
-    de base** —un mononucleótido de 30 unidades y un tetranucleótido de 7 más
-    dos bases— la probabilidad es mayor para el mononucleótido; **(c)** el
-    filtrado previo excluye los pasos inviables y un generador instrumentado
-    confirma que **no se consume** aleatoriedad cuando no queda ningún paso
-    viable; **(d)** con peso 1 a la contracción y 0 a la expansión, todas las
-    moléculas que tartamudean salen más cortas, y un segundo caso con pesos
-    repartidos confirma que el categórico sí se ejercita. **Debe fallar
-    contra:** un modelo con probabilidad constante que ignore la longitud del
-    tracto (prueba a); un modelo que dependa solo de los pares de base del
-    tracto y no de la longitud del motivo (prueba b); una implementación que
-    sortee y descarte en vez de filtrar antes (prueba c, que cuenta el consumo,
-    no el resultado); un signo invertido (prueba d). *Cuidado:* el caso con
-    peso 1 no consume aleatoriedad en el categórico, de modo que por sí solo no
-    discrimina un categórico roto; de ahí el segundo caso.
-  - **P-3 y P-1, dichos en el paso:** el conjunto de pasos y sus pesos son
-    **obligatorios** cuando el tartamudeo está activo, sin valor
-    predeterminado, porque la calibración establece el sesgo hacia la
-    contracción pero no publica los pesos. El coeficiente `b` de la dependencia
-    con la longitud del tracto vale **0** de partida y el manifiesto lo publica
-    como no calibrado.
+  - **El predictor es la tirada más larga, no el número total de unidades.** Es
+    lo que cambió respecto de la primera versión de este plan: en genética
+    forense está establecido que la tirada ininterrumpida más larga predice el
+    tartamudeo mejor que la longitud total del alelo, y es coherente con que
+    las interrupciones **estabilicen** el tracto. El valor lo calcula F6.4.1 y
+    este paso lo consume; no se recalcula aquí.
+  - **La forma lineal no es una aproximación tosca, y conviene dejarlo escrito
+    porque parece serlo.** La literatura describe la fracción observada de
+    extremo a extremo con una curva que satura. Son **dos magnitudes
+    distintas**: la dependencia lineal es de la probabilidad **por ciclo**, y
+    la curva con meseta sale de acumular esa probabilidad sobre muchos ciclos.
+    Ambas son ciertas y no se contradicen.
+  - Se comprueba con:
+    **(a) el predictor.** Dos tractos con el **mismo número total de unidades**
+    y **distinta tirada más larga** —por ejemplo diez unidades en una sola
+    tirada frente a diez unidades partidas en tiradas de seis y cuatro— dan
+    probabilidades **distintas**, y mayor la del primero, cuando el coeficiente
+    es positivo.
+    **(b) la longitud del motivo.** Un mononucleótido y un tetranucleótido con
+    la **misma longitud en pares de base** dan mayor probabilidad al
+    mononucleótido.
+    **(c) la asimetría.** El conjunto de pasos admitidos es exactamente
+    `{−3, −2, −1, +1}`; una configuración que declare `+2` se rechaza.
+    **(d) el filtrado previo.** Un generador instrumentado confirma que,
+    **cuando solo queda un paso viable**, el sorteo categórico **no consume**
+    aleatoriedad. El fixture lo consigue con un tracto de una sola unidad
+    completa, donde las tres contracciones dejarían el tracto sin ninguna y
+    solo la expansión de una unidad sobrevive al filtrado.
+    **Debe fallar contra:** un modelo cuyo predictor sea el **número total de
+    unidades** —prueba (a), que es la única que lo caza—; un modelo que dependa
+    solo de los pares de base y no de la longitud del motivo —prueba (b)—; una
+    estructura simétrica de pasos —prueba (c)—; una implementación que sortee
+    entre los cuatro pasos y **descarte** los inviables en vez de filtrarlos
+    antes —prueba (d), que cuenta el consumo, no el resultado.
+  - *Corregido:* la versión anterior pedía comprobar que no se consume
+    aleatoriedad «cuando ningún paso deja el tracto viable». **Ese caso no
+    existe y no tiene fixture posible**: una expansión de una unidad es
+    **siempre** viable, porque ni vacía el tracto ni acorta la molécula. La
+    aserción no podía fallar nunca. La comprobación que sí discrimina es la del
+    candidato único.
+  - *Cuidado, y va en la docstring de la prueba (a):* **con tractos puros el
+    número total de unidades y la tirada más larga coinciden**, de modo que un
+    fixture puro **no discrimina** entre los dos predictores. El fixture tiene
+    que ser impuro y con el total igualado a propósito. Era el defecto exacto
+    de la primera versión de este plan.
 
-- ☐ **F4.8.3.** Tasas por longitud de motivo tomadas de la calibración: la
-  columna **sin PCR** de `design/calibracion-tartamudeo-0.1.md`, que con `b = 0`
-  es directamente el valor de `a` por longitud de motivo. La procedencia
-  —Gymrek (2016), CC BY 4.0, **humano, Illumina**— viaja con los valores en la
+- ☐ **F4.8.3.** Tasas por longitud de motivo tomadas de la **columna sin PCR**
+  de la calibración, que con el coeficiente de la tirada en cero son
+  directamente la probabilidad por longitud de motivo. La procedencia —humano,
+  Illumina, con su fuente y su licencia— viaja con los valores en la
   configuración efectiva y en el manifiesto.
   - Depende de: F4.8.2.
   - Procede de: REQ-CONF-131/132 propuestos; contradicciones **C-1** y **C-2**;
-    calibración §3.
-  - Cambia: `src/stutter.rs`, `src/technical_profile.rs`,
-    `schemas/config-general-v4.schema.json`,
-    `schemas/effective-config-v6.schema.json`.
+    pendientes **P-1** y **P-3**.
+  - Cambia: `src/stutter.rs`, `src/technical_profile.rs`, los dos esquemas
+    nuevos.
   - **Valores de partida** (fracción de lecturas afectadas, columna sin PCR):
     motivo de 1 pb, 0,027; 2 pb, 0,011; 3 pb, 0,0029; 4 pb, 0,0016; 5 pb,
-    0,0015; 6 pb, 0,0010, **este último marcado como el menos fiable de la
-    tabla**, porque el propio autor advierte que la diferencia de los
-    hexanucleótidos procede probablemente del ruido de analizar pocos loci.
+    0,0015; 6 pb, 0,0010, **este último marcado como el menos fiable**, porque
+    el propio autor advierte que procede del ruido de analizar pocos loci.
+  - **Qué se configura y qué no.** La **estructura** del paso no se configura:
+    la fija el algoritmo (F4.8.2). Los **pesos relativos** dentro de esa
+    estructura son **obligatorios** cuando el tartamudeo está activo, sin valor
+    por omisión, porque la fuente publica el método de ajuste pero no los
+    valores. El **coeficiente de la tirada** arranca en cero y se publica como
+    no calibrado (P-1).
   - Se comprueba con: la configuración efectiva publica los seis valores, la
-    cita de la fuente y la etiqueta de especie y tecnología; una configuración
-    con tartamudeo activo y **sin** pesos de paso declarados se rechaza
-    nombrando el parámetro; una tasa fuera de `[0,1]`, un paso expresado en
-    bases en vez de en unidades y un modelo distinto del admitido se rechazan
-    antes de simular. **Debe fallar contra:** unos valores predeterminados
-    embebidos en el código sin la etiqueta de procedencia; una configuración
-    sin pesos que se acepte con un reparto implícito.
+    cita de la fuente, la etiqueta de especie y tecnología y la marca de no
+    calibrado del coeficiente; con el coeficiente en cero, la probabilidad
+    calculada **reproduce exactamente** la tabla por longitud de motivo; una
+    configuración con tartamudeo activo y **sin** pesos declarados se rechaza
+    nombrando el parámetro; un peso negativo, una tasa fuera de `[0,1]` y un
+    paso expresado en bases se rechazan antes de simular. **Debe fallar
+    contra:** unos valores embebidos en el programa sin la etiqueta de
+    procedencia; una configuración sin pesos aceptada con un reparto implícito;
+    un coeficiente distinto de cero por omisión, que afirmaría una calibración
+    que no existe.
 
 - ☐ **F4.8.4.** `stutter::transform_paired_end`, con la misma forma que los dos
   transformadores que ya existen, aplicado **después de la quimera y antes de
   calidad y errores**. Una única decisión por molécula y tracto, aplicada a la
-  molécula completa antes de volver a emitir R1 y R2.
+  molécula completa —reutilizando la operación de F6.4.1.1, es decir, **en la
+  tirada más larga**— antes de volver a emitir R1 y R2.
   - Depende de: F4.8.3.
-  - Procede de: REQ-DAT-74/75/76 propuestos; supuesto **S-13**.
-  - Cambia: `src/stutter.rs`, `src/execution.rs` (el orden del recorrido),
-    `src/wgs_sampling.rs` si el punto de inserción lo exige.
+  - Procede de: REQ-DAT-74/75/76 propuestos; decisiones **S-07** y **S-13**.
+  - Cambia: `src/stutter.rs`, `src/execution.rs`, `src/wgs_sampling.rs` si el
+    punto de inserción lo exige.
   - **Por qué ahí y no antes.** `src/chimera.rs` vuelve a materializar el
     prefijo del fragmento desde la copia haplotípica y lo compara **byte a
-    byte** con el prefijo del fragmento que recibe; si no coinciden devuelve
-    `ChimeraError::PairSourceMismatch`. Un fragmento ya modificado por el
-    tartamudeo rompería esa comprobación cada vez que la molécula resultara
-    elegida para formar quimera. Después de la quimera, la pareja todavía lleva
-    su fragmento completo, de modo que la molécula sigue disponible para
-    reescribirla y volver a emitir las dos lecturas.
-  - Se comprueba con: **(a) coherencia del par** sobre un fixture
-    **saturado**: copia haplotípica lo bastante corta para forzar el inserto
-    mínimo del perfil, 250 pb, de modo que R1 y R2 —de 150 pb— compartan las 50
-    bases centrales, y un tracto de 30 pb colocado **íntegramente dentro de ese
-    solapamiento**; se cuentan las unidades en R1 y en el complemento inverso
-    de R2 y se exige que sean iguales. **(b) quimera**: un corpus con tasa de
-    quimera y tasa de tartamudeo altas a la vez no produce ni un
-    `ChimeraError::PairSourceMismatch`. **Debe fallar contra:** un tartamudeo
-    aplicado **por lectura** (prueba a); una implementación que modifique el
-    fragmento **antes** de la quimera (prueba b). *Cuidado, y va en la
-    docstring:* un fixture en el que solo R1 cubra el tracto **no discrimina**
-    —la aserción se cumple sola—, y con la media de inserto de 350 pb la
-    mayoría de las parejas están en ese caso; de ahí el fixture saturado. Y sin
-    tasa de quimera alta, la prueba (b) no ejercita el camino que dice cubrir.
+    byte**; si no coincide devuelve `ChimeraError::PairSourceMismatch`. Un
+    fragmento ya modificado rompería esa comprobación. Después de la quimera la
+    pareja todavía lleva su fragmento completo, de modo que la molécula sigue
+    disponible.
+  - Se comprueba con:
+    **(a) coherencia del par**, sobre un fixture **saturado**: copia
+    haplotípica lo bastante corta para forzar el inserto mínimo del perfil, 250
+    pb, de modo que R1 y R2 —de 150 pb— compartan las 50 bases centrales, y un
+    tracto de 30 pb **íntegramente dentro de ese solapamiento**; se cuentan las
+    unidades en R1 y en el complemento inverso de R2 y se exige que coincidan.
+    **(b) quimera**: un corpus con tasa de quimera y de tartamudeo altas a la
+    vez no produce ni un `ChimeraError::PairSourceMismatch`.
+    **(c) dónde cae el paso**: sobre un tracto impuro con tiradas de 3 y 5
+    unidades **y la tirada de 3 a la derecha**, la molécula tartamudeada
+    conserva esa tirada de 3 byte a byte. *La posición importa y va en la
+    docstring:* si la tirada larga estuviera a la derecha, la convención de la
+    tirada más larga y la del extremo derecho coincidirían y la prueba no
+    discriminaría nada.
+    **Debe fallar contra:** un tartamudeo aplicado **por lectura** (a); una
+    implementación que modifique el fragmento **antes** de la quimera (b); una
+    que aplique el paso por el extremo derecho en vez de en la tirada más larga
+    (c). *Cuidado, en la docstring:* un fixture en el que solo R1 cubra el
+    tracto **no discrimina** —la aserción se cumple sola— y con la media de
+    inserto de 350 pb la mayoría de las parejas están en ese caso; y sin tasa
+    de quimera alta, la prueba (b) no ejercita el camino que dice cubrir.
 
-- ☐ **F4.8.5.** La molécula cambia de longitud en `k·(longitud del motivo)` y
-  con ella el tamaño de inserto observado. No se compensa materializando
-  secuencia flanqueante ni recortando. Las dos lecturas conservan la longitud
-  del perfil.
+- ☐ **F4.8.5.** La molécula cambia de longitud en el número de unidades por la
+  longitud del motivo, y con ella el inserto observado. No se compensa ni se
+  descarta la molécula. Las dos lecturas conservan la longitud del perfil.
   - Depende de: F4.8.4.
-  - Procede de: REQ-DAT-78 propuesto; supuesto **S-15**.
+  - Procede de: REQ-DAT-78 propuesto; decisión **S-15**.
   - Cambia: `src/stutter.rs`, `src/paired_end.rs`.
   - Se comprueba con: una molécula que pierde una unidad de un motivo de 4 pb
     produce un fragmento exactamente 4 pb más corto, observado **sobre la
-    molécula**, no sobre las lecturas; las dos lecturas siguen midiendo 150 pb;
-    una contracción que dejaría la molécula más corta que la lectura queda
-    excluida del sorteo por el filtrado de F4.8.2 y no produce ningún error
-    duro. **Debe fallar contra:** una implementación que recorte o rellene para
-    conservar la longitud sorteada. *Cuidado:* observar las lecturas no
-    discrimina, porque siguen midiendo lo mismo pase lo que pase; la aserción
-    tiene que mirar la molécula.
+    molécula**; las dos lecturas siguen midiendo 150 pb; una contracción que
+    dejaría la molécula más corta que la lectura queda excluida por el filtrado
+    de F4.8.2 y no produce ningún error duro. **Debe fallar contra:** una
+    implementación que recorte o rellene para conservar la longitud sorteada.
+    *Cuidado:* observar las lecturas **no discrimina**, porque siguen midiendo
+    lo mismo pase lo que pase; la aserción tiene que mirar la molécula.
 
 - ☐ **F4.8.6.** Compatibilidad con lo ya publicado, **acotada**: una ejecución
   de un escenario que **no declara loci de repetición** publica exactamente los
-  mismos bytes que antes de que el tartamudeo existiera. Un escenario que **sí**
-  los declara tartamudea con las tasas de la calibración, y esa es la corrección
-  C-1.
+  mismos bytes que antes de que el tartamudeo existiera.
   - Depende de: F4.8.5.
-  - Procede de: REQ-DAT-80 propuesto **con la acotación de C-1**, DTC-081;
-    supuesto **S-16**.
+  - Procede de: REQ-DAT-80 propuesto con la acotación de **C-1**, DTC-081;
+    decisión **S-16**.
   - Cambia: nada; es una prueba de sistema y su evidencia.
-  - Se comprueba con: **(a)** `sha256sum` de los dos FASTQ, la verdad, el VCF,
-    la configuración efectiva y los dos manifiestos de un escenario **sin**
-    loci, comparados con la línea base de F6.4.0; **(b)** un generador
-    instrumentado confirma **cero consumo** en la etapa `stutter` en ese
-    escenario; **(c)** el mismo escenario **con** un locus declarado y su tasa
-    de calibración produce FASTQ **distintos** y verdad, VCF y manifiestos de
-    verdad **idénticos**; **(d)** dos ejecuciones idénticas salvo en la tasa de
-    tartamudeo difieren solo en los FASTQ y en los recuentos técnicos
-    agregados. **Debe fallar contra:** una implementación que consuma
-    aleatoriedad con la tasa a cero o que desplace el ordinal de plantilla
-    (pruebas a y b); una implementación que aplique el tartamudeo a la **copia
-    haplotípica** en vez de a la molécula, es decir, que cambie el genotipo
-    (prueba c); una lectura de la congelación como absoluta, que dejaría el
-    caso con loci en cero tartamudeo (prueba c, que exige que los FASTQ
-    **difieran**). *Cuidado:* si en la prueba (c) los FASTQ salieran iguales, la
-    comparación de verdad pasaría por el motivo equivocado; por eso la
-    diferencia de los FASTQ es una aserción, no una observación.
+  - Se comprueba con:
+    **(a)** `sha256sum` de los dos FASTQ, la verdad, el VCF, la configuración
+    efectiva y los dos manifiestos de un escenario **sin** loci, comparados con
+    la línea base de F6.4.0.
+    **(b)** un generador instrumentado confirma **cero consumo** en la etapa
+    `stutter` en ese escenario.
+    **(c)** el mismo escenario **con un locus declarado cuyo único alelo es el
+    de la referencia, a frecuencia 1**, produce **FASTQ distintos** y **la
+    verdad y el VCF de verdad idénticos** a los de (a), byte a byte. *Los
+    artefactos se enumeran uno a uno a propósito:* la **configuración
+    efectiva** y el **manifiesto general** **tienen que diferir**, porque el
+    fichero general pasa a la versión 4 al declarar el locus, la configuración
+    efectiva sube en consecuencia a la versión 6 y REQ-MAN-29 obliga a
+    registrar el locus. Exigir su identidad, como hacía la versión anterior de
+    este paso, era pedir lo imposible. La verdad y el VCF sí pueden ser
+    idénticos, y lo son gracias a la regla de promoción que fija F6.4.3.3:
+    sin alelo de repetición publicado, la verdad no sube de versión.
+    **(d)** dos ejecuciones idénticas salvo en la tasa de tartamudeo difieren
+    solo en los FASTQ y en los recuentos técnicos agregados.
+    **Debe fallar contra:** una implementación que consuma aleatoriedad con la
+    tasa a cero o que desplace el ordinal de plantilla (a y b); una que aplique
+    el tartamudeo a la **copia haplotípica** en vez de a la molécula, es decir,
+    que cambie el genotipo (c); una lectura de la congelación como absoluta,
+    que dejaría el caso con loci en cero tartamudeo (c, que exige que los FASTQ
+    **difieran**).
+  - *Por qué el alelo de referencia a frecuencia 1, y no un locus polimórfico.*
+    La primera versión de este plan pedía «el mismo escenario con un locus
+    declarado» y exigía verdad idéntica. **Es imposible de cumplir** si el
+    locus es polimórfico: entonces hay alelos que publicar y la verdad cambia
+    legítimamente. Con el alelo de referencia a frecuencia 1 el tracto existe
+    —y por tanto tartamudea— pero no hay ninguna variante que publicar, que es
+    justo lo que hace la comparación posible. Va en la docstring.
 
 - ☐ **F4.8.7.** Configuración efectiva y manifiesto del tartamudeo: activación,
   parámetros efectivos por longitud de motivo y por locus, versión del
-  algoritmo, versión del catálogo de ámbitos aleatorios y, como **recuentos
-  agregados**, moléculas evaluadas, moléculas que tartamudearon y distribución
-  de los pasos aplicados por locus. Nada por lectura ni por pareja.
+  algoritmo, versión del catálogo de ámbitos y, como **recuentos agregados**,
+  moléculas evaluadas, moléculas que tartamudearon y distribución de los pasos
+  aplicados por locus. Nada por lectura ni por pareja.
   - Depende de: F4.8.6.
-  - Procede de: REQ-MAN-93 propuesto, REQ-DAT-56 —que prohíbe conservar
-    procedencia por lectura—; supuesto **S-14**; pendientes **P-1** y **P-3**.
-  - Cambia: `src/event_manifest.rs`, `schemas/manifest-event-v3.schema.json`
-    nuevo.
-  - Se comprueba con: validación externa del manifiesto con
-    `python3 -m jsonschema`; la suma de la distribución de pasos por locus es
-    igual al número de moléculas que tartamudearon; el manifiesto marca los
-    parámetros con `calibration: "gymrek-2016-human-illumina"` y la dependencia
-    con la longitud del tracto como `not_calibrated`; ningún campo nombra una
-    lectura o una pareja concreta (`grep` negativo con control positivo). **Debe
-    fallar contra:** un manifiesto que publique el número **esperado** de
-    moléculas tartamudeadas en vez del realizado; una procedencia por pareja
-    filtrada.
+  - Procede de: REQ-MAN-93 propuesto, REQ-DAT-56; decisión **S-14**;
+    pendientes **P-1** y **P-3**.
+  - Cambia: `src/event_manifest.rs`, `schemas/manifest-event-v3.schema.json`.
+  - Se comprueba con: validación externa del manifiesto; la suma de la
+    distribución de pasos por locus es igual al número de moléculas que
+    tartamudearon; el manifiesto marca los parámetros con su calibración de
+    origen, el coeficiente de la tirada como no calibrado, y **el desajuste
+    conocido** de que la fuente del modelo distingue el *tipo* de motivo
+    mientras la calibración del proyecto va por longitud; ningún campo nombra
+    una lectura o una pareja concreta, comprobado con una búsqueda negativa con
+    control positivo. **Debe fallar contra:** un manifiesto que publique el
+    número **esperado** de moléculas tartamudeadas en vez del realizado; una
+    procedencia por pareja filtrada; la ausencia de la marca de no calibrado,
+    que haría pasar por medido un coeficiente que nadie ha medido.
 
 - ☐ **F4.8.8.** Validador independiente del tartamudeo: reproduce las
-  decisiones desde la semilla de la ejecución **sin reutilizar el código
-  productor**, y comprueba sobre los FASTQ finales que las dos lecturas de cada
-  pareja que cubren un mismo tracto muestran el mismo número de unidades.
+  decisiones desde la semilla **sin reutilizar el código productor**, y
+  comprueba sobre los FASTQ finales que las dos lecturas de cada pareja que
+  cubren un mismo tracto muestran el mismo número de unidades.
   - Depende de: F4.8.7.
   - Procede de: REQ-VAL-57 propuesto, arquitectura §11.
-  - Cambia: validador nuevo bajo `tests/`, más su entrada en
-    `scripts/check-independent-validators.sh` si procede.
+  - Cambia: validador nuevo bajo `tests/`.
   - Se comprueba con: el validador coincide con los recuentos agregados del
     manifiesto sobre el fixture saturado de F4.8.4;
     `./scripts/check-independent-validators.sh evidence/stutter-f4-8` da **5
     PASS**. **Debe fallar contra:** un validador que lea los bytes publicados
-    por el productor en vez de recomponerlos desde la semilla —se detecta
-    mutando un recuento del manifiesto y exigiendo que el validador lo rechace.
+    por el productor en vez de recomponerlos —se detecta mutando un recuento
+    del manifiesto y exigiendo que el validador lo rechace.
 
 - ☐ **F4.8.9.** Interfaz Marimo del tartamudeo: activación, parámetros por
-  longitud de motivo, conjunto de pasos y pesos, y sustituciones por locus, con
+  longitud de motivo, pesos de los pasos y sustituciones por locus, con
   equivalencia interfaz → TOML → configuración efectiva.
   - Depende de: F4.8.8, F6.4.9.1.
-  - Procede de: REQ-UI-01/03/04/05, hoja de ruta §7; supuesto **S-17**
-    corregido por **C-6**.
-  - Cambia: `ui/config_editor.py`, `ui/ui_panels.py`; prueba nueva en
-    `tests_ui/`.
-  - Se comprueba con: ida y vuelta completa; ausencia de control para un modelo
-    distinto del admitido y para un paso expresado en bases;
-    `marimo check --strict` sin avisos; y **la comprobación que C-6 motiva**:
-    partiendo solo de la interfaz, se puede construir un escenario completo con
-    un locus y una tasa que produzca lecturas tartamudeadas. **Debe fallar
-    contra:** una interfaz con parámetros de tartamudeo y sin forma de declarar
-    un locus, que es exactamente lo que la ficha D-17 recomendaba y este plan
-    corrige.
+  - Procede de: REQ-UI-01/03/04/05, hoja de ruta §7; decisión **S-17**;
+    contradicción **C-6**.
+  - Cambia: `ui/config_editor.py`, `ui/ui_panels.py`; prueba en `tests_ui/`.
+  - Se comprueba con: ida y vuelta completa; no hay control para un paso `+2`
+    ni para un modelo distinto del admitido; `marimo check --strict` sin
+    avisos; y **la comprobación que C-6 motiva**: partiendo solo de la
+    interfaz, se puede construir un escenario completo —referencia, locus,
+    alelos, frecuencias y tasa— que produzca lecturas tartamudeadas. **Debe
+    fallar contra:** una interfaz con parámetros de tartamudeo y sin forma de
+    declarar un locus con su motivo, sus alelos y sus frecuencias.
 
-> **Revisión del hito de la entrega 2.** Comprobar el punto de inserción en el
-> recorrido, la coherencia del par sobre el fixture saturado, la congelación
-> acotada, la verdad intacta, el validador independiente y la interfaz.
-> Ejecutar la batería completa con
+> **Revisión del hito de la entrega 2.** Comprobar el predictor sobre el
+> fixture de total igualado, el punto de inserción, la coherencia del par sobre
+> el fixture saturado, la congelación acotada, la verdad intacta, el validador
+> independiente y la interfaz. Ejecutar la batería completa con
 > `./scripts/check-independent-validators.sh evidence/stutter-f4-8`. Aplicar el
-> cambio de contrato de la sección 9 en su parte de tartamudeo y **repetir la
+> cambio de contrato de la sección 10 en su parte de tartamudeo y **repetir la
 > evidencia de cierre de la fase de realismo técnico**. No continuar hasta
 > confirmar el resultado.
 
@@ -1358,30 +1953,34 @@ introduce duplicados y que el perfil sigue registrándose como sin PCR
 Resultado: un modo de preparación `pcr`, alternativo al único que hoy existe,
 en el que el recorrido técnico deja de producir una pareja por fragmento y pasa
 a producir **familias de amplificación**: grupos de parejas que descienden de
-la misma molécula original. De esa estructura salen los duplicados, la
+la misma molécula original. De ahí salen los duplicados, la
 sobrerrepresentación de unas moléculas frente a otras y el sesgo por
-composición de bases. **Ningún paso de este hito cita un locus de repetición.**
+composición. **Ningún paso de este hito cita un locus de repetición.**
 
 **Cómo se acota lo inacotable.** No se simula la población de moléculas, que
 crece como `2^ciclos`. Se muestrea **hacia atrás** desde las parejas que se van
 a publicar: como el número de parejas `N` de una biblioteca ya es determinista
-desde la cobertura, se generan familias una tras otra hasta cubrirlas, y cada
-familia cuesta un número de operaciones acotado por constantes de contrato. La
-cota resultante es lineal en `N`.
+desde la cobertura, se generan familias hasta cubrirlas, y cada familia cuesta
+un número de operaciones acotado por constantes de contrato.
+
+**Lo que cambia respecto de la primera versión de este plan:** el usuario ya no
+declara «parejas por molécula», que es la variable del modelo, sino la
+**fracción de duplicados**, que es la que un biólogo ve en su informe de
+calidad. El parámetro interno se **deriva por inversión numérica**, y eso
+exige un paso propio que antes no existía.
 
 - ☐ **F4.9.1.** Perfil hermano `resources/f4/gps-hiseqx-pcr-pe150-v1.json`,
-  idéntico al vigente en lectura, inserto, calidad y error, con
-  `"preparation": "pcr"` y un bloque de amplificación con sus dominios; y
-  variante `Pcr` en `LibraryPreparation`.
-  - Depende de: cierre de la entrega 2 (por el orden aritmético de §3.1; no hay
-    dependencia técnica).
-  - Procede de: REQ-CONF-82, REQ-CONF-89 reescrito; supuesto **S-25**.
+  idéntico al vigente en lectura, inserto, calidad y error, con preparación
+  `pcr` y un bloque de amplificación con sus dominios; y variante `Pcr` en
+  `LibraryPreparation`.
+  - Depende de: cierre de la entrega 2 (por el orden aritmético de §3.1).
+  - Procede de: REQ-CONF-82, REQ-CONF-89 reescrito; decisión **S-25**.
   - Cambia: recurso nuevo; `src/technical_profile.rs`.
-  - Se comprueba con: el recurso vigente y su SHA-256 **no cambian**, comparados
-    byte a byte contra la línea base; el perfil nuevo se carga y declara su
+  - Se comprueba con: el recurso vigente y su SHA-256 no cambian, comparados
+    byte a byte con la línea base; el perfil nuevo se carga y declara su
     preparación. **Debe fallar contra:** una edición del recurso vigente para
-    meter las dos preparaciones en uno solo, que rompería los `const` de los
-    tres esquemas publicados y el hash congelado.
+    meter las dos preparaciones en uno, que rompería los valores fijos de los
+    tres esquemas publicados y la huella congelada.
 
 - ☐ **F4.9.2.** Constantes de contrato en una sola constante de Rust cada una
   —30 ciclos, 6 ciclos explícitos, 256 de tamaño máximo de familia, 16 intentos
@@ -1394,162 +1993,258 @@ cota resultante es lineal en `N`.
   - Se comprueba con: una prueba que compare cada constante con su máximo en
     cada esquema y en la interfaz, **con control positivo de que las
     comparaciones ocurrieron**. **Debe fallar contra:** un máximo cambiado en
-    un solo esquema. *Motivo:* una copia decimal silenciosa es exactamente lo
-    que sobrevivió a un cambio de contrato la vez anterior.
+    un solo esquema. *Motivo:* una copia decimal silenciosa es lo que sobrevivió
+    a un cambio de contrato la vez anterior.
 
-- ☐ **F4.9.3.** Configuración del modo amplificado y sus rechazos: tabla
-  `[technical_event.pcr]` admitida **solo** con `library_preparation = "pcr"` y
-  obligatoria en ese caso; ciclos, eficiencia y parejas por molécula **sin
-  valor predeterminado**; ciclos explícitos, tamaño máximo de familia, intentos,
-  curva de composición y clases de eficiencia opcionales dentro de su dominio.
+- ☐ **F4.9.3.** Configuración del modo amplificado y sus rechazos. El usuario
+  declara **la fracción de duplicados esperada**, los **ciclos** y la
+  **eficiencia por ciclo**, los tres **obligatorios y sin valor por omisión**;
+  y opcionalmente ciclos explícitos, tamaño máximo de familia, intentos de
+  composición, curva de composición y clases de eficiencia.
   - Depende de: F4.9.2.
-  - Procede de: REQ-CONF-134/135/136 propuestos; supuestos **S-19**, **S-22**,
-    **S-26**.
-  - Cambia: `schemas/config-general-v4.schema.json`,
-    `schemas/effective-config-v6.schema.json`, `src/configuration.rs`,
-    `src/adapters.rs`, `src/application.rs`.
+  - Procede de: REQ-CONF-134/135/136 propuestos; decisiones **S-19** y
+    **S-22**; decisión **S-26** para las versiones.
+  - Cambia: los dos esquemas nuevos, `src/configuration.rs`, `src/adapters.rs`,
+    `src/application.rs`.
+  - **Qué significa exactamente el número que el usuario declara, y hay que
+    escribirlo en el contrato.** Es la fracción **esperada para una biblioteca
+    homogénea**, no la realizada, y la realizada es **mayor** por **tres**
+    motivos acumulativos, no dos: las **clases de eficiencia**, la **curva de
+    composición** y —el que faltaba— la **desigualdad de los primeros ciclos**,
+    que concentra las parejas en menos familias **aunque no haya ni clases ni
+    curva**. Basta con que los ciclos explícitos sean más de cero, que es el
+    caso por omisión. Quien espere que las dos fracciones coincidan no las verá
+    cuadrar nunca. El manifiesto publica la realizada aparte (F4.9.9).
+  - **Y qué no es.** No es la fracción que marca una herramienta de análisis
+    contando parejas que caen en el mismo sitio: esa incluye además las copias
+    de la química de agrupación, que no son PCR. La documentación lo dice con
+    el ejemplo trabajado de la decisión S-19 —medio punto porcentual atribuible
+    a la amplificación dentro de una misma plataforma—, marcado como ejemplo y
+    con la salvedad de que no es Illumina.
   - Se comprueba con: la batería de rechazos, cada uno citando parámetro y
-    valor — preparación sin PCR con tabla de amplificación presente; `pcr` sin
-    ciclos; 31 ciclos; eficiencia 0; parejas por molécula negativas; curva con
-    eficiencia 0 o con nudos decrecientes; clases cuyos pesos no suman 1 dentro
-    de la tolerancia de DTC-049. **Debe fallar contra:** un esquema con
+    valor —preparación sin PCR con tabla de amplificación presente; `pcr` sin
+    fracción de duplicados; sin ciclos; 31 ciclos; eficiencia 0; fracción de
+    duplicados negativa o igual o mayor que 1; curva con eficiencia 0 o con
+    nudos decrecientes; clases cuyos pesos no suman 1 dentro de la tolerancia
+    de DTC-049—. **Debe fallar contra:** un esquema con
     `additionalProperties: true` en la tabla nueva; un dominio abierto en
-    cualquiera de los siete parámetros.
+    cualquiera de los parámetros; un valor por omisión materializado para la
+    fracción de duplicados, que afirmaría una calibración inexistente.
 
-- ☐ **F4.9.4.** Distribución del número de copias tras los primeros ciclos, por
-  programación dinámica exacta sobre los estados `1..=2^(ciclos explícitos)`, y
-  su versión **sesgada por tamaño** —`p*(z) ∝ z · p(z)`—, que es la que se
-  sortea, porque una familia observada es más probable cuantas más copias tenga
-  su molécula.
+- ☐ **F4.9.4.** **Inversión numérica** de la fracción de duplicados: dada la
+  fracción esperada `f` que el usuario declara, derivar el parámetro interno
+  `m` —parejas por molécula— que la produce en una biblioteca homogénea, donde
+  `f(m) = 1 − (1 − e^(−m))/m`.
   - Depende de: F4.9.3.
-  - Procede de: diseño con PCR §5.5; Sun (1995) y Weiss y von Haeseler (1995)
-    como origen del proceso de ramificación.
-  - Cambia: módulo nuevo `src/pcr_amplification.rs`.
+  - Procede de: decisión **S-19**. **Este paso no existía**: la primera versión
+    del plan declaraba `m` directamente y por eso no hacía falta. El diseño con
+    PCR había descartado esta opción **precisamente porque exigía una inversión
+    numérica cuya reproducibilidad habría que fijar**; ahora es obligatoria, y
+    fijar esa reproducibilidad es el contenido del paso.
+  - Cambia: `src/pcr_amplification.rs`.
+  - **El método, fijado aquí, con sus dos mitades.** `f` es continua y
+    **estrictamente creciente** en `m`, con `f(0) = 0` y límite 1, de modo que
+    la inversa existe y es única. Se calcula por **bisección sobre el intervalo
+    `[0, M_MAX]` con `M_MAX = 64` y exactamente 64 iteraciones**, sin criterio
+    de parada por tolerancia. Agotar la resolución de un `f64` en ese intervalo
+    cuesta entre 53 y 68 pasos según el tope, así que 64 bastan y sobran. No se
+    usa Newton, cuyo número de pasos depende del punto de partida.
+  - **La exponencial procede exclusivamente de `libm = =0.2.16`, nunca de la
+    matemática estándar.** Esta mitad no es una elección de este plan: es
+    política vigente del proyecto, literal en DTC-067 —«`exp`, `log`, `lgamma`,
+    `floor` y `sqrt` proceden exclusivamente de `libm = =0.2.16`, nunca de
+    matemática estándar»— y repetida en DTC-072 para `log` y `exp`. La versión
+    fijada ya está en `Cargo.toml` y ya superó la evaluación de dependencias.
+  - **Por qué hacen falta las dos mitades, y por qué la afirmación anterior era
+    falsa.** La versión anterior de este paso decía que «un número fijo de
+    iteraciones da el mismo resultado bit a bit en toda plataforma». **No es
+    cierto**: la bisección compara `f(mid)` con el objetivo, y `f` contiene una
+    exponencial; si esa exponencial es la de la biblioteca del sistema, su
+    último bit varía entre plataformas, la comparación cae del otro lado y la
+    bisección se va por otra rama **aunque el número de iteraciones sea el
+    mismo**. El número fijo garantiza el mismo **coste**, no el mismo
+    **resultado**. La revisión lo midió: **194 875 de dos millones** de
+    exponenciales difieren en bits entre implementaciones, y **2 591 de 20 000**
+    fracciones objetivo acaban dando una `m` distinta con 64 iteraciones fijas.
+    La redacción correcta es: **mismo resultado en toda plataforma porque la
+    exponencial es la de la librería fijada y el número de pasos es fijo.**
+  - **Los dos casos límite, y el primero no es un adorno.** `f = 0` devuelve
+    `m = 0` **por retorno anticipado, sin iterar**. Sin ese retorno la
+    bisección devuelve un residuo del orden de `10⁻¹⁸` en vez de cero
+    —comprobado al reproducirlo—, y ese residuo **rompe la identidad byte a
+    byte** de F4.9.11, porque un `m` que no es exactamente cero hace que el
+    tamaño de familia deje de ser trivial y se consuma aleatoriedad. Es la
+    clase de defecto que no da error y cambia todos los FASTQ. El segundo: una
+    `f` por encima de la que `M_MAX` puede producir se **rechaza antes de
+    simular**, nombrando el parámetro, el valor y el máximo alcanzable; no se
+    pinza en silencio.
+  - **Lo que se publica.** La configuración efectiva publica la `f` declarada,
+    la `m` derivada con precisión de ida y vuelta, el número de iteraciones y
+    el nombre del método. La reproducibilidad de una ejecución se ancla en la
+    `m` publicada, no en volver a derivarla.
+  - Se comprueba con: la inversión de las fracciones que el diseño ya tiene
+    calculadas en el sentido directo —`m = 0,02` da 1 %, `m = 0,1` da 4,8 % y
+    `m = 0,5` da 21 %— devuelve esos `m` dentro de la precisión declarada,
+    comparada contra el cálculo directo hecho **a mano**, no contra la propia
+    inversión; `f = 0` devuelve `m = 0` exacto y el contador de iteraciones
+    vale cero; una `f` inalcanzable se rechaza; la función directa es
+    estrictamente creciente sobre una malla de cien puntos, que es la
+    precondición que hace única la inversa; el número de iteraciones es
+    **constante** para toda entrada distinta de cero; y —**esta es la que
+    protege el determinismo**— una búsqueda negativa sobre el módulo,
+    con control positivo, confirma que **no se llama a la exponencial de la
+    matemática estándar** en ninguna ruta de la inversión, solo a la de
+    `libm = =0.2.16`.
+  - **Debe fallar contra:** una bisección con criterio de parada por tolerancia
+    en vez de iteraciones fijas —la prueba del contador constante la caza—;
+    **una implementación que use `f64::exp` de la matemática estándar**, que
+    solo la búsqueda negativa caza, porque en una sola plataforma **los
+    resultados coinciden y ninguna prueba numérica la distingue**; **la
+    supresión del retorno anticipado de fracción cero**, que devolvería un
+    residuo del orden de `10⁻¹⁸` y que la prueba de `m = 0` exacto y la de
+    identidad byte a byte de F4.9.11 cazan; un pinzamiento silencioso de la
+    fracción inalcanzable; una inversión validada contra sí misma, que se evita
+    comparando con el cálculo directo a mano.
+  - *Cuidado, y va en la docstring:* una prueba de reproducibilidad ejecutada
+    **dos veces en la misma máquina** no discrimina nada sobre el determinismo
+    entre plataformas, porque la exponencial del sistema es determinista dentro
+    de un sistema. La versión anterior de este paso se apoyaba en esa prueba, y
+    por eso no protegía lo que decía proteger.
+
+- ☐ **F4.9.5.** Distribución del número de copias tras los primeros ciclos, por
+  programación dinámica exacta, y su versión **sesgada por tamaño**, que es la
+  que se sortea porque una familia observada es más probable cuantas más copias
+  tenga su molécula.
+  - Depende de: F4.9.4.
+  - Procede de: diseño con PCR §5.5; Sun (1995) y Weiss y von Haeseler (1995).
+  - Cambia: `src/pcr_amplification.rs`.
   - Se comprueba con: con 3 ciclos explícitos y eficiencia 0,5, la distribución
-    de copias en `1..8` coincide con una **enumeración a mano** de los ocho
-    caminos, y la sesgada por tamaño tiene media `E[Z²]/E[Z]`. **Debe fallar
+    en `1..8` coincide con una **enumeración a mano** de los ocho caminos, y la
+    sesgada por tamaño tiene la media que le corresponde. **Debe fallar
     contra:** una programación dinámica que olvide el término «no se copia»;
     una que no sesgue por tamaño. *Cuidado:* la enumeración se escribe a mano;
     reusar la propia programación dinámica como oráculo sería circular.
 
-- ☐ **F4.9.5.** Tamaño de familia: Poisson de media `λ` **condicionada a al
-  menos una pareja** y **pinzada** en el máximo declarado, construida por
-  multiplicación sucesiva y normalizada con la suma compensada de DTC-049, y
-  sorteada con **un solo** `categorical-f64-v1`. La configuración efectiva
-  publica la fracción esperada de duplicados de una biblioteca homogénea,
-  `1 − (1 − e^-m)/m`, como orientación.
-  - Depende de: F4.9.4.
-  - Procede de: DTC-049, DTC-072; REQ-CONF-137 propuesto; supuesto **S-19**.
+- ☐ **F4.9.6.** Tamaño de familia: Poisson de media `λ` **condicionada a al
+  menos una pareja** y **pinzada** en el máximo declarado, normalizada con la
+  suma compensada de DTC-049 y sorteada con **un solo** `categorical-f64-v1`.
+  - Depende de: F4.9.5.
+  - Procede de: DTC-049, DTC-072; REQ-CONF-137 propuesto.
   - **Por qué no `poisson-count-v1`:** su muestreo por rechazo no acota el
-    número de sorteos y su cola no está pinzada, y el proyecto ya fijó en
-    DTC-089 y en el commit `a1f8104` que un recuento se **pinza** en vez de
-    rechazarse, «porque el rechazo no acota el número de sorteos y el
-    presupuesto de operaciones sí». La decisión técnica nueva debe decirlo
-    expresamente para que nadie lea DTC-067 como una prohibición.
+    número de sorteos y su cola no está pinzada, y el proyecto ya fijó que un
+    recuento se **pinza** en vez de rechazarse, «porque el rechazo no acota el
+    número de sorteos y el presupuesto de operaciones sí». La decisión técnica
+    nueva debe decirlo para que nadie lea DTC-067 como una prohibición.
   - Cambia: `src/pcr_amplification.rs`.
   - Se comprueba con: para `λ = 0,3` y máximo 4, los pesos coinciden con los
-    calculados a mano y el último recoge **toda** la masa de la cola,
-    `P(K ≥ 4 | K ≥ 1)`; con `λ = 0` no se consume aleatoriedad, contado con un
-    generador instrumentado; la fracción esperada publicada vale 1 % con
-    `m = 0,02`, 4,8 % con `m = 0,1` y 21 % con `m = 0,5`. **Debe fallar
-    contra:** unos pesos normalizados sobre `1..máximo` **sin pinzar la cola**
-    —la comparación con los pesos a mano lo caza—; un `λ = 0` que consuma.
+    calculados a mano y el último recoge **toda** la masa de la cola; con
+    `λ = 0` no se consume aleatoriedad, contado con un generador instrumentado.
+    **Debe fallar contra:** unos pesos normalizados sin pinzar la cola —la
+    comparación con los pesos a mano lo caza—; un `λ = 0` que consuma.
 
-- ☐ **F4.9.6.** Aceptación por composición de bases **al elegir la molécula**:
-  fracción GC del fragmento sobre A/C/G/T (las `N` no cuentan en numerador ni
-  en denominador; un fragmento sin A/C/G/T recibe factor 1), factor
-  `G = ((1 + e·g(GC)) / (1 + e))^c`, y un `bernoulli-v1(G)` que acepta. Si
-  rechaza, se repite el sorteo del fragmento con un componente `attempt`
-  añadido a la clave; **agotado el tope, se acepta el último intento y se
-  cuenta**.
-  - Depende de: F4.9.5.
-  - Procede de: REQ-CONF-94/95 reescritos, REQ-DAT-52 reescrito; supuesto
-    **S-20**; Benjamini y Speed (2012), que muestran que es el contenido del
-    **fragmento completo**, no el de la lectura, lo que importa.
+- ☐ **F4.9.7.** Aceptación por composición de bases **al elegir la molécula**,
+  con rechazo y **tope de intentos**; agotado el tope, **se acepta el último
+  intento y se cuenta**.
+  - Depende de: F4.9.6.
+  - Procede de: REQ-CONF-94/95 y REQ-DAT-52 reescritos; decisión **S-20**;
+    Benjamini y Speed (2012), que establecen que lo que manda es la composición
+    **del fragmento completo**.
   - **Por qué al elegir y no al repartir copias.** Con pocas parejas por
     molécula —el caso normal— casi todas las familias tienen tamaño 1 tanto en
-    regiones ricas como pobres en GC, y meter la composición en el tamaño de
-    familia no cambia casi nada. La infrarrepresentación real de una región
-    viene de las moléculas que **no llegan a observarse**, y eso solo puede
-    expresarse al elegir cuál da lugar a la familia.
+    regiones ricas como pobres en GC. La infrarrepresentación real viene de las
+    moléculas que **no llegan a observarse**, y eso solo puede expresarse al
+    elegir cuál da lugar a la familia.
   - Cambia: `src/pcr_amplification.rs`, `src/wgs_sampling.rs`.
-  - Se comprueba con: **(a)** referencia con una mitad al 30 % de GC y otra al
-    70 %, curva que da factor 1 a la primera y 0,2 a la segunda, 10 ciclos y
-    `m = 0,01`: la fracción de familias en la segunda mitad cae al orden de
-    0,009, muy por debajo de 0,5; **(b)** con una curva que rechaza casi
-    siempre y un tope de 2 intentos, el recuento de familias aceptadas al
-    agotar el tope es alto, y con 16 intentos es menor. **Debe fallar contra:**
-    una implementación que aplique la composición solo al tamaño de familia
-    —con `m = 0,01` daría aproximadamente 0,5 (prueba a)—; un rechazo **sin**
-    tope, que no termina (prueba b, ejecutada con límite de tiempo externo).
-    *Cuidado:* con `m` grande la variante defectuosa también produce sesgo y no
-    se distingue; el fixture **exige** `m` pequeño, y su docstring lo dice.
+  - Se comprueba con:
+    **(a)** referencia con una mitad al 30 % de GC y otra al 70 %, curva que da
+    factor 1 a la primera y 0,2 a la segunda, 10 ciclos y fracción de
+    duplicados pequeña: la proporción de familias en la segunda mitad cae muy
+    por debajo de 0,5, al orden que la fórmula predice.
+    **(b)** con una curva que rechaza casi siempre y un tope de **2** intentos,
+    el recuento de **familias aceptadas al agotar el tope es estrictamente
+    mayor que cero**, y con 16 intentos es **menor** que con 2.
+    **Debe fallar contra:** una implementación que aplique la composición solo
+    al tamaño de familia, que con fracción de duplicados pequeña daría
+    aproximadamente 0,5 (a); un rechazo **sin tope**, que nunca contaría
+    ninguna familia aceptada al agotarlo y dejaría el recuento en cero (b).
+  - *Cuidado, corregido:* la primera versión declaraba que la variante
+    defectuosa de (b) era «un mutante que no termina», y **no es cierto**: con
+    una curva que rechaza «casi siempre» el bucle **sí termina**, solo que
+    tarde, de modo que la prueba quedaba dependiendo del reloj y era
+    intermitente. El discriminador real es el **recuento de aceptadas al agotar
+    el tope**, que un rechazo sin tope deja necesariamente en cero. Va en la
+    docstring. Con fracción de duplicados grande la variante defectuosa de (a)
+    también produce sesgo y no se distingue, así que el fixture la exige
+    pequeña.
 
-- ☐ **F4.9.7.** Muestreo por familias integrado en `WgsPairedEndSampler`,
-  conservando su contrato externo: sigue siendo un iterador que produce
-  exactamente `N` parejas con ordinales `0..N-1`. Clase de eficiencia, copias
-  tras los primeros ciclos, molécula aceptada, tamaño de familia, y después una
-  pareja por miembro con **identidad técnica propia**. La quimera se sigue
-  decidiendo **por pareja** sobre la molécula sin modificar, de modo que su
-  comparación byte a byte se conserva intacta.
-  - Depende de: F4.9.6.
-  - Procede de: REQ-DAT-18, REQ-DAT-47 reescrito, REQ-DAT-81 propuesto,
-    DTC-087; supuestos **S-22** y **S-23**.
-  - Cambia: `src/wgs_sampling.rs`, `src/pcr_amplification.rs`,
-    `src/randomness.rs` (etapa `amplification` del catálogo, sin las decisiones
-    de linaje, que llegan en la entrega 4).
-  - Se comprueba con: **(a)** con errores de secuenciación desactivados,
-    quimera a cero y sin loci, el número de parejas cuyas secuencias R1 y R2
-    coinciden con otra, **contado por un oráculo que solo lee el FASTQ**, es
-    igual al recuento de duplicados del manifiesto; y con `m = 0,5` ese número
-    es **mayor que cero**; **(b)** las parejas de una familia no aparecen
-    adyacentes en el fichero publicado, porque la escritura ordena por
-    identificador de instancia, como en un FASTQ real; **(c)** añadir una
-    biblioteca no cambia las familias de las demás. **Debe fallar contra:** un
-    manifiesto que publique el recuento **esperado** en vez del realizado; una
-    implementación que sortee el tamaño de familia pero emita una sola pareja
-    (prueba a, cuya exigencia de «mayor que cero» evita que pase por el motivo
-    equivocado); un ámbito indexado por orden de biblioteca (prueba c).
-    *Cuidado:* con los errores de secuenciación activados los duplicados dejan
-    de ser idénticos y la prueba (a) no discrimina; el fixture los desactiva y
-    la docstring lo dice.
-
-- ☐ **F4.9.8.** Recuentos agregados del manifiesto: familias, parejas, parejas
-  duplicadas, fracción realizada de duplicados, histograma de tamaños de
-  familia, familias truncadas al final de la biblioteca, intentos de
-  composición totales y agotados; y la **cobertura de moléculas distintas**,
-  que es la que un analista ve tras eliminar duplicados. Nada por pareja.
+- ☐ **F4.9.8.** Muestreo por familias integrado en `WgsPairedEndSampler`,
+  conservando su contrato externo: sigue produciendo exactamente `N` parejas
+  con ordinales `0..N-1`. Cada pareja de una familia tiene **identidad técnica
+  propia**. La quimera se sigue decidiendo **por pareja** sobre la molécula sin
+  modificar, de modo que su comparación byte a byte se conserva intacta.
   - Depende de: F4.9.7.
-  - Procede de: REQ-MAN-45 reescrito, REQ-WGS-11, REQ-DAT-56; supuesto **S-28**.
-  - Cambia: `src/event_manifest.rs`, `schemas/manifest-event-v3.schema.json`.
-  - Se comprueba con: la suma del histograma por su índice es igual al número
-    de parejas; la fracción realizada es `1 − familias/N`; la cobertura de
-    moléculas distintas es la básica multiplicada por `familias/N`; validación
-    externa del manifiesto. **Debe fallar contra:** un histograma que cuente
-    familias en vez de parejas en alguna celda; una cobertura de moléculas
-    distintas calculada desde la fracción esperada en vez de la realizada.
+  - Procede de: REQ-DAT-18, REQ-DAT-47 reescrito, REQ-DAT-81 propuesto,
+    DTC-087; decisiones **S-22** y **S-23**.
+  - Cambia: `src/wgs_sampling.rs`, `src/pcr_amplification.rs`,
+    `src/randomness.rs` (etapa `amplification`, sin las decisiones de linaje).
+  - Se comprueba con:
+    **(a)** con errores de secuenciación desactivados, quimera a cero y sin
+    loci, el número de parejas cuyas secuencias R1 y R2 coinciden con otra,
+    **contado por un oráculo que solo lee el FASTQ**, es igual al recuento de
+    duplicados del manifiesto; y con una fracción de duplicados alta es
+    **mayor que cero**.
+    **(b)** las parejas de una familia **no** aparecen adyacentes en el fichero
+    publicado, porque la escritura ordena por identificador de instancia.
+    **(c)** añadir una biblioteca no cambia las familias de las demás.
+    **Debe fallar contra:** un manifiesto que publique el recuento esperado en
+    vez del realizado; una implementación que sortee el tamaño de familia pero
+    emita una sola pareja (a, cuya exigencia de «mayor que cero» evita que pase
+    por el motivo equivocado); un ámbito indexado por orden de biblioteca (c).
+    *Cuidado:* con los errores activados los duplicados dejan de ser idénticos
+    y (a) no discrimina; el fixture los desactiva y la docstring lo dice.
 
-- ☐ **F4.9.9.** Cota de recursos **publicada, no impuesta**: operaciones y
-  memoria derivadas de la configuración y de la geometría conocida antes de
-  abrir el primer ámbito aleatorio, con aritmética entera, publicadas en el
-  manifiesto como valores **calculados sin ejecutar** y no como medidas.
+- ☐ **F4.9.9.** Recuentos agregados del manifiesto: familias, parejas, parejas
+  duplicadas, **fracción realizada** de duplicados, histograma de tamaños de
+  familia, familias truncadas al final, intentos de composición totales y
+  agotados, y la **cobertura de moléculas distintas**. Nada por pareja.
   - Depende de: F4.9.8.
-  - Procede de: REQ-MAN-94 propuesto; supuesto **S-27**; diseño con PCR §6.
-  - **Qué se publica.** Por encima del coste que el recorrido ya tiene,
-    `ops ≤ N × [22 211 + 16·P + 60·T] + N × X_pair + 98 304`, donde `P` es el
-    número de copias haplotípicas, `T` una cota del número de tractos que caben
-    en un inserto y `X_pair` el coste por pareja que este trabajo no modifica;
-    y una memoria añadida **independiente de `N` y del genoma**. Se declara
-    además que el recorrido regenera cada biblioteca **dos veces**, de modo que
-    el coste efectivo es el doble.
-  - **Qué no se acota, dicho expresamente.** El número de palabras de generador
-    de los sorteos por rechazo que el recorrido ya usa —la normal truncada del
-    inserto y el índice uniforme— no tiene cota superior en el peor caso, y
-    DTC-088 y el commit `a1f8104` ya lo reconocen. Este trabajo no añade ningún
-    sorteo por rechazo nuevo: todas sus distribuciones son categóricos de una
-    palabra o ensayos de Bernoulli. Sí multiplica por el tope de intentos los
-    sorteos de inserto de una familia.
+  - Procede de: REQ-MAN-45 reescrito, REQ-WGS-11, REQ-DAT-56; decisión
+    **S-28**.
+  - Cambia: `src/event_manifest.rs`, `schemas/manifest-event-v3.schema.json`.
+  - Se comprueba con: la suma del histograma ponderada por su índice es igual
+    al número de parejas; la fracción realizada es uno menos familias entre
+    parejas; **el par de ejecuciones que aísla el mecanismo**: con **cero
+    ciclos explícitos**, curva neutra y sin clases, la fracción realizada
+    coincide con la declarada dentro de la tolerancia muestral; con **tres
+    ciclos explícitos** y todo lo demás igual, es **estrictamente mayor**; la
+    cobertura de moléculas distintas se deriva de la realizada; validación
+    externa del manifiesto.
+  - **Debe fallar contra:** un manifiesto que copie la fracción declarada en el
+    campo de la realizada —el par de ejecuciones lo caza, porque la segunda
+    tendría que subir y no subiría—; una implementación que no propague la
+    desigualdad de los primeros ciclos al tamaño de familia; un histograma que
+    cuente familias en vez de parejas en alguna celda. *Cuidado, en la
+    docstring:* una **sola** ejecución no discrimina, porque declarada y
+    realizada quedan cerca; y la versión anterior de este paso usaba las clases
+    de eficiencia como único mecanismo, cuando el de los primeros ciclos actúa
+    ya por omisión y es el que hay que aislar.
+
+- ☐ **F4.9.10.** Cota de recursos **publicada, no impuesta**: operaciones y
+  memoria derivadas de la configuración y de la geometría conocida antes de
+  abrir el primer ámbito aleatorio, publicadas como valores **calculados sin
+  ejecutar** y no como medidas.
+  - Depende de: F4.9.9.
+  - Procede de: REQ-MAN-94 propuesto; decisión **S-27**, verificada: la fase de
+    secuenciación **nunca ha tenido** control de recursos, de modo que imponer
+    aquí un rechazo estrenaría algo que no le corresponde.
   - Cambia: `src/pcr_amplification.rs`, `src/event_manifest.rs`.
+  - **Lo que no se acota, dicho expresamente.** Los sorteos por rechazo que el
+    recorrido ya usa —la normal truncada del inserto y el índice uniforme— no
+    tienen cota superior de palabras de generador en el peor caso, y el
+    proyecto ya lo reconoce. Este trabajo no añade ningún sorteo por rechazo
+    nuevo; sí multiplica por el tope de intentos los sorteos de inserto de una
+    familia. La cota declara además que el recorrido regenera cada biblioteca
+    **dos veces**.
   - Se comprueba con: un contador de unidades instrumentado, solo en pruebas,
     sobre un fixture con intentos, tamaño máximo de familia, ciclos explícitos
     y número de tractos **en sus máximos de contrato** y una curva que rechace
@@ -1557,68 +2252,70 @@ cota resultante es lineal en `N`.
     control positivo de que el contador contó. **Debe fallar contra:** un
     mutante que suprima el término de los intentos de la fórmula. *Cuidado:*
     con curva neutra el tope de intentos **no se ejercita** y el mutante
-    sobrevive; sin el fixture saturado la prueba no discrimina, y la docstring
-    lo dice.
+    sobrevive; sin el fixture saturado la prueba no discrimina.
 
-- ☐ **F4.9.10.** Reducción al caso sin amplificar, y **rechazo temporal** de la
+- ☐ **F4.9.11.** Reducción al caso sin amplificar, y **rechazo temporal** de la
   combinación de preparación amplificada con loci de repetición declarados.
-  - Depende de: F4.9.9.
-  - Procede de: REQ-DAT-84 propuesto; supuesto **S-16**; restricción aritmética
+  - Depende de: F4.9.10.
+  - Procede de: REQ-DAT-84 propuesto; decisión **S-16**; restricción aritmética
     de §3.1.
   - Cambia: `src/configuration.rs`, `src/diagnostics.rs`.
   - **El rechazo, y por qué.** Mientras la entrega 4 no exista, una biblioteca
     amplificada sobre un escenario con loci declarados tartamudearía **solo con
-    la parte de base**, y por tanto por debajo de lo medido. Antes que publicar
-    una cifra que se sabe baja, la configuración **rechaza** esa combinación con
-    un diagnóstico que nombra el paso pendiente. El rechazo se levanta en
-    F4.10.6.
-  - Se comprueba con: **(a)** con preparación amplificada, parejas por molécula
-    a cero, curva neutra y tasas a cero, los FASTQ son **byte a byte** iguales
-    a los de la preparación sin PCR, y el manifiesto difiere solo en los campos
-    declarativos; **(b)** un generador instrumentado confirma **cero consumo**
-    en la etapa de amplificación con esos parámetros; **(c)** preparación
-    amplificada más un locus declarado se rechaza citando el paso F4.10.
-    **Debe fallar contra:** una implementación que consuma aleatoriedad con
-    parámetros neutros o que desplace los ordinales de plantilla (pruebas a y
-    b); una que acepte en silencio la combinación y publique una fracción de
-    tartamudeo entre un 14 % y un 28 % por debajo de la medida (prueba c).
+    la parte de base** y quedaría por debajo de lo medido —entre un 14 % y un
+    28 % en motivos de 1 a 5 pares de base—. Antes que publicar una cifra que
+    se sabe baja, la configuración **rechaza** esa combinación con un
+    diagnóstico que nombra el paso pendiente. Se levanta en F4.10.6.
+  - Se comprueba con: **(a)** con preparación amplificada, **fracción de
+    duplicados cero**, curva neutra y tasas a cero, los FASTQ son byte a byte
+    iguales a los de la preparación sin PCR, y el manifiesto difiere solo en
+    los campos declarativos; **(b)** un generador instrumentado confirma cero
+    consumo en la etapa de amplificación con esos parámetros; **(c)**
+    preparación amplificada más un locus declarado se rechaza citando el paso
+    pendiente. **Debe fallar contra:** una implementación que consuma
+    aleatoriedad con parámetros neutros o que desplace los ordinales de
+    plantilla (a y b); una inversión numérica que devuelva un `m` distinto de
+    cero para fracción cero, que rompería (a); una que acepte en silencio la
+    combinación (c).
 
-- ☐ **F4.9.11.** Validador independiente de la amplificación: rederiva desde la
+- ☐ **F4.9.12.** Validador independiente de la amplificación: rederiva desde la
   semilla y la configuración efectiva las familias, las copias de los primeros
-  ciclos y los tamaños de familia, **sin llamar al productor**, y coincide con
-  los recuentos del manifiesto.
-  - Depende de: F4.9.10.
+  ciclos y los tamaños de familia, **sin llamar al productor**.
+  - Depende de: F4.9.11.
   - Procede de: REQ-VAL-58 propuesto, arquitectura §11.
   - Cambia: validador nuevo bajo `tests/`.
   - Se comprueba con: coincidencia con el manifiesto sobre dos fixtures;
     `./scripts/check-independent-validators.sh evidence/pcr-f4-9` da **5 PASS**.
     **Debe fallar contra:** un oráculo que lea el histograma publicado en vez
-    de rederivarlo —se detecta mutando el histograma del manifiesto y exigiendo
-    que el validador lo rechace. *Nota:* la independencia algebraica de la
-    Poisson pinzada la da la prueba de pesos a mano de F4.9.5, no este oráculo.
+    de rederivarlo —se detecta mutando el histograma y exigiendo que el
+    validador lo rechace. *Nota:* la independencia algebraica de la Poisson
+    pinzada la da la prueba de pesos a mano de F4.9.6, no este oráculo; y la de
+    la inversión numérica, la comparación con el cálculo directo de F4.9.4.
 
-- ☐ **F4.9.12.** Interfaz Marimo de la preparación amplificada: selector de
-  preparación, ciclos, eficiencia, parejas por molécula, ciclos explícitos,
-  tamaño máximo de familia, intentos, curva de composición y clases de
-  eficiencia; y la **fracción esperada de duplicados** mostrada al usuario
-  según las parejas por molécula que elija.
-  - Depende de: F4.9.11.
-  - Procede de: REQ-UI-01/03/04/05, hoja de ruta §7; REQ-CONF-137 propuesto.
-  - Cambia: `ui/config_editor.py`, `ui/ui_panels.py`; prueba nueva en
-    `tests_ui/`.
+- ☐ **F4.9.13.** Interfaz Marimo de la preparación amplificada: selector de
+  preparación, **fracción de duplicados**, ciclos, eficiencia, ciclos
+  explícitos, tamaño máximo de familia, intentos, curva de composición y clases
+  de eficiencia; y la **`m` derivada** mostrada al usuario junto a la fracción
+  que ha declarado.
+  - Depende de: F4.9.12.
+  - Procede de: REQ-UI-01/03/04/05, hoja de ruta §7; decisión **S-19**.
+  - Cambia: `ui/config_editor.py`, `ui/ui_panels.py`; prueba en `tests_ui/`.
   - Se comprueba con: ida y vuelta completa; la tabla de amplificación no
-    aparece con preparación sin PCR; los límites de los controles coinciden con
-    las constantes de contrato, comprobado por el juez de F4.9.2;
-    `marimo check --strict` sin avisos. **Debe fallar contra:** un control cuyo
-    máximo no coincida con la constante; una tabla de amplificación editable
-    con preparación sin PCR.
+    aparece con preparación sin PCR; la `m` que la interfaz muestra coincide
+    con la que la configuración efectiva publica para la misma fracción; los
+    límites de los controles coinciden con las constantes de contrato,
+    comprobado por el juez de F4.9.2; `marimo check --strict` sin avisos.
+    **Debe fallar contra:** una interfaz que calcule la `m` con un método
+    distinto del de F4.9.4, que la comparación caza; un control cuyo máximo no
+    coincida con la constante.
 
-> **Revisión del hito de la entrega 3.** Comprobar familias, duplicados
-> contados por bytes, composición al elegir la molécula, tope de intentos, cota
-> publicada, reducción al caso sin PCR y el rechazo temporal. Ejecutar la
+> **Revisión del hito de la entrega 3.** Comprobar la inversión numérica y su
+> determinismo, las familias, los duplicados contados por bytes, la composición
+> al elegir la molécula, el tope de intentos por su recuento, la cota
+> publicada, la reducción al caso sin PCR y el rechazo temporal. Ejecutar la
 > batería completa con
 > `./scripts/check-independent-validators.sh evidence/pcr-f4-9`. Aplicar el
-> cambio de contrato de la sección 9 en su parte de preparación amplificada y
+> cambio de contrato de la sección 10 en su parte de preparación amplificada y
 > **repetir la evidencia de cierre de la fase de realismo técnico con
 > preparación sin PCR**, que debe dar los mismos bytes. No continuar hasta
 > confirmar el resultado.
@@ -1630,264 +2327,506 @@ cota resultante es lineal en `N`.
 Resultado: con preparación amplificada, el deslizamiento puede ocurrir en
 **cualquier ciclo**, y una copia que resbala transmite su número de unidades a
 **toda su descendencia**. Un resbalón en el primer ciclo alcanza a media
-familia; uno en el último, a una sola copia. El resultado observable es que una
-familia de duplicados puede mostrar dos o tres alelos distintos en proporciones
-que imitan a un heterocigoto, cuando procede de una sola molécula.
+familia; uno en el último, a una sola copia. Una familia de duplicados puede
+así mostrar dos o tres alelos en proporciones que imitan a un heterocigoto,
+cuando procede de una sola molécula.
 
 - ☐ **F4.10.1.** Extensión del catálogo de ámbitos aleatorios con las
   decisiones de linaje: progenitor, ciclo de divergencia, resbalón por ciclo y
   tracto, y paso; indexadas por **identificador de locus**, nunca por posición.
   - Depende de: cierre de las entregas 2 y 3.
-  - Procede de: REQ-DAT-85 propuesto, DTC-081, DTC-086; supuesto **S-11**.
+  - Procede de: REQ-DAT-85 propuesto, DTC-081, DTC-086; decisión **S-11**.
   - Cambia: `src/randomness.rs`.
-  - Se comprueba con: vectores congelados; las etapas ya existentes producen
-    exactamente las mismas subsemillas que antes; **añadir un locus en otro
-    cromosoma no cambia los resbalones de los loci previos**. **Debe fallar
-    contra:** un ámbito indexado por la posición del tracto dentro de la
-    molécula —la prueba del locus añadido en otro cromosoma es la única que lo
-    caza.
+  - Se comprueba con: vectores congelados; las etapas existentes producen las
+    mismas subsemillas que antes; **añadir un locus en otro cromosoma no cambia
+    los resbalones de los loci previos**. **Debe fallar contra:** un ámbito
+    indexado por la posición del tracto dentro de la molécula —la prueba del
+    locus añadido en otro cromosoma es la única que lo caza.
 
-- ☐ **F4.10.2.** Genealogía mínima de la familia: la primera pareja tiene un
-  linaje propio completo de un paso por ciclo; la pareja `i` elige un
+- ☐ **F4.10.2.** Genealogía mínima de la familia: la primera pareja tiene
+  linaje propio completo de un paso por ciclo; la pareja siguiente elige un
   **progenitor uniforme** entre las anteriores y un **ciclo de divergencia**
-  geométrico con `q = 1/(1+e)`, hereda los resbalones del progenitor en los
-  ciclos anteriores a la divergencia y sortea los posteriores.
+  geométrico, hereda los resbalones del progenitor **anteriores** a la
+  divergencia y sortea los posteriores.
   - Depende de: F4.10.1.
-  - Procede de: REQ-DAT-82 propuesto; supuesto **S-21**; diseño con PCR §5.7.
-  - **Declarado como aproximación.** Es una aproximación del coalescente del
-    proceso de ramificación, no el coalescente exacto; no se afirma tener una
-    forma cerrada de este último. La forma geométrica refleja que dos
-    descendientes de una amplificación eficiente divergen casi siempre pronto.
-  - Cambia: módulo `src/pcr_amplification.rs` o hermano.
-  - Se comprueba con: **fixture saturado** — un locus dentro de la molécula,
-    `m = 8` para forzar familias grandes, divergencia forzada al último ciclo
-    para todas las parejas y tasa de resbalón 1 en el primer ciclo y 0 en los
-    demás (sustitución por ciclo, solo en prueba): **todas** las parejas de
-    cada familia muestran el **mismo** número de unidades, distinto del
-    verdadero. Segunda variante con divergencia forzada a cero: las parejas son
-    **independientes**. **Debe fallar contra:** un tartamudeo sorteado por
-    pareja o por lectura; una herencia que copie los resbalones **posteriores**
-    a la divergencia en vez de los anteriores. *Cuidado, en la docstring:* sin
-    forzar la divergencia y sin tasa 1, algunas discordancias dentro de la
-    familia son legítimas y la aserción no discrimina.
+  - Procede de: REQ-DAT-82 propuesto; decisión **S-21**; diseño con PCR §5.7.
+  - **Declarado como aproximación**, no como el coalescente exacto del proceso
+    de ramificación, del que no se afirma tener forma cerrada.
+  - Cambia: `src/pcr_amplification.rs` o módulo hermano.
+  - Se comprueba con: **fixture saturado** —un locus dentro de la molécula,
+    fracción de duplicados alta para forzar familias grandes, divergencia
+    forzada al último ciclo para todas las parejas y probabilidad de resbalón 1
+    en el primer ciclo y 0 en los demás, por sustitución solo en prueba—:
+    **todas** las parejas de cada familia muestran el **mismo** número de
+    unidades, distinto del verdadero. Segunda variante con divergencia forzada
+    a cero: las parejas son **independientes**. **Debe fallar contra:** un
+    tartamudeo sorteado por pareja o por lectura; una herencia que copie los
+    resbalones **posteriores** a la divergencia en vez de los anteriores.
+    *Cuidado, en la docstring:* sin forzar la divergencia y sin probabilidad 1,
+    algunas discordancias dentro de la familia son legítimas y la aserción no
+    discrimina.
 
-- ☐ **F4.10.3.** Derivación de la tasa de resbalón por ciclo desde la
-  calibración: `r_pcr = 1 − (1 − r_con)/(1 − r_sin)` y
-  `p = 1 − (1 − r_pcr)^(1/c)`, con los tres insumos y la fórmula publicados en
-  la configuración efectiva, y sustitución directa admitida. Si `r_con ≤ r_sin`,
-  la tasa vale cero.
+- ☐ **F4.10.3.** Derivación de la probabilidad de resbalón por ciclo desde las
+  dos columnas de la calibración y el número de ciclos, con sustitución directa
+  admitida. Si la fracción con PCR no supera a la de sin PCR, la probabilidad
+  vale cero.
   - Depende de: F4.10.2.
-  - Procede de: REQ-CONF-138 propuesto; supuesto **S-24**; calibración §3.2.
+  - Procede de: REQ-CONF-138 propuesto; decisión **S-24**.
   - Cambia: `src/pcr_amplification.rs`, `src/technical_profile.rs`.
-  - Se comprueba con: con diez ciclos, las tasas por ciclo valen 0,0158 para
-    motivo de 1 pb; 0,00276 para 2 pb; 0,000815 para 3 pb; 0,000532 para 4 pb;
-    0,000593 para 5 pb y 0,00131 para 6 pb, comparadas con el cálculo a mano a
-    tres cifras; la configuración efectiva publica `r_con`, `r_sin`, el número
-    de ciclos y la fórmula; una sustitución directa del usuario prevalece y se
-    marca como suya. **Debe fallar contra:** una implementación que **sume** la
-    columna sin PCR a la columna con PCR, que es el error contrario y cuenta el
-    mismo fenómeno dos veces; una que use `r_con` directamente como tasa por
-    ciclo.
+  - **Honestidad sobre lo que esta resta puede y no puede afirmar.** Las dos
+    columnas proceden de **dos individuos distintos**, de proyectos distintos y
+    con coberturas distintas —no de las mismas células, como este plan afirmó
+    por error—. La resta sigue siendo el modo correcto de componer, porque cada
+    columna es un total; pero puede llevar dentro efectos de individuo y de
+    lote, de modo que **las tasas por ciclo derivadas son toscas**. El
+    manifiesto las publica marcadas como tales, y la documentación lo dice.
+  - Se comprueba con: con diez ciclos, las probabilidades por ciclo coinciden a
+    tres cifras con el cálculo hecho **a mano** desde las dos columnas; la
+    configuración efectiva publica las dos fracciones de entrada, el número de
+    ciclos, la fórmula y la marca de tosquedad; una sustitución directa del
+    usuario prevalece y se marca como suya; con fracción con PCR igual o menor
+    que la de sin PCR, la probabilidad vale cero y no se consume aleatoriedad.
+    **Debe fallar contra:** una implementación que **sume** la columna sin PCR
+    a la de con PCR, que contaría el mismo fenómeno dos veces; una que use la
+    fracción de extremo a extremo directamente como probabilidad por ciclo; una
+    publicación sin la marca de tosquedad, que presentaría como medida una
+    cifra que arrastra efectos de individuo y de lote.
 
 - ☐ **F4.10.4.** Aplicación en el recorrido: sobre la molécula ya quimérica si
   lo es, **primero** el paso neto heredado del linaje de PCR y **después** la
   decisión de base por pareja de la entrega 2. Los tractos se procesan en orden
-  canónico de inicio sobre la molécula. Las guardas de viabilidad se aplican al
-  paso **neto acumulado**, excluyendo antes de sortear y sin reintentar.
+  canónico de inicio sobre la molécula, y cada paso se aplica **en la tirada
+  ininterrumpida más larga** mediante la operación de F6.4.1.1. Las guardas de
+  viabilidad se aplican al **paso neto acumulado**, excluyendo antes de sortear
+  y sin reintentar.
   - Depende de: F4.10.3.
-  - Procede de: REQ-DAT-76 y REQ-DAT-82 propuestos; supuestos **S-13**,
-    **S-14**, **S-15**.
+  - Procede de: REQ-DAT-76 y REQ-DAT-82 propuestos; decisiones **S-07**,
+    **S-13**, **S-14**, **S-15**.
   - Cambia: `src/stutter.rs`, `src/pcr_amplification.rs`, `src/execution.rs`.
-  - Se comprueba con: el orden se observa sobre un fixture con paso de PCR
-    fijado y tasa de base 1 con paso fijado, cuyo resultado es la **suma** de
-    los dos; un paso neto que dejaría el tracto sin ninguna unidad completa
-    queda excluido y no consume; un corpus con tasa de quimera alta no produce
-    `ChimeraError::PairSourceMismatch`. **Debe fallar contra:** un orden
-    invertido que aplique la base antes que la de PCR y luego recalcule la
-    viabilidad sobre el tracto equivocado; una guarda aplicada a cada paso por
-    separado en vez de al neto.
+  - Se comprueba con: con el paso de PCR fijado y la tasa de base a 1 con paso
+    fijado, el resultado es la **suma** de los dos; un paso neto que dejaría el
+    tracto sin ninguna unidad completa queda excluido y no consume; un corpus
+    con tasa de quimera alta no produce `ChimeraError::PairSourceMismatch`; tras
+    dos pasos sucesivos, la **tirada más larga se recalcula** entre uno y otro,
+    de modo que el segundo puede caer en otra tirada. **Debe fallar contra:**
+    un orden invertido; una guarda aplicada a cada paso por separado en vez de
+    al neto; una implementación que calcule la tirada más larga **una sola vez**
+    y aplique los dos pasos en la misma, que la prueba de los dos pasos caza.
 
-- ☐ **F4.10.5.** **Comprobación aritmética de la composición**, que es la razón
-  de ser del orden de este plan: con las dos partes activas, la fracción de
-  lecturas afectadas por tartamudeo que un oráculo cuenta sobre los FASTQ
-  reproduce la fracción **medida** con PCR, `1 − (1−r_sin)(1−r_pcr) = r_con`,
-  dentro de la tolerancia muestral declarada.
+- ☐ **F4.10.5.** **Comprobación aritmética de la composición**: con las dos
+  partes activas, la fracción de lecturas afectadas por tartamudeo que un
+  oráculo cuenta sobre los FASTQ reproduce la fracción **medida** con PCR.
   - Depende de: F4.10.4.
-  - Procede de: calibración §3.2; restricción aritmética de §3.1.
+  - Procede de: la restricción aritmética de §3.1, que es la razón del orden de
+    todo este plan.
   - Cambia: prueba de sistema nueva bajo `tests/`.
-  - Se comprueba con: un corpus con un homopolímero declarado y un
-    dinucleótido, número de moléculas suficiente para que el intervalo de
-    confianza sea estrecho, y semilla congelada: la fracción observada con
-    preparación amplificada cae dentro de la tolerancia de 0,17 para el
-    homopolímero y 0,038 para el dinucleótido; con preparación sin PCR, dentro
-    de 0,027 y 0,011. **Debe fallar contra:** una entrega de la preparación
-    amplificada **sin** la parte de base, que daría 0,147 y 0,0273 —un 14 % y
-    un 28 % por debajo—; una implementación que sume las dos columnas, que
-    daría por encima. *Cuidado:* la tolerancia se calcula desde el número de
-    moléculas del corpus y se escribe en la docstring; una tolerancia holgada
-    dejaría pasar las dos variantes defectuosas y la prueba no discriminaría.
+  - **Qué valida exactamente, dicho sin adornos y obligatorio en su docstring.**
+    La recomposición `1 − (1−r_sin)(1−r_pcr) = r_con` es **exacta por
+    construcción**: la derivación de la probabilidad por ciclo se hizo
+    despejando justamente eso. Por tanto esta prueba comprueba que **la
+    implementación compone como el diseño dice**, no que el modelo sea
+    correcto. Es **tautológica respecto del modelo** y discriminante respecto
+    de la implementación, y se presenta así. Lo que sí caza, y es su razón de
+    ser, son los dos errores de implementación que el orden de este plan
+    existe para evitar.
+  - **Tamaño muestral, calculado y no estimado a ojo.** Para distinguir la
+    fracción correcta de la que produciría una entrega sin la parte de base
+    hace falta un número de moléculas que cubran el tracto igual a
+    `n ≈ (z_{α/2}·√(p₀(1−p₀)) + z_β·√(p₁(1−p₁)))² / (p₀−p₁)²`. Con α = 0,05 a
+    dos colas y potencia del 90 %: para el homopolímero, `p₀ = 0,17` frente a
+    `p₁ = 0,147`, **n ≈ 2700**; para el dinucleótido, `p₀ = 0,038` frente a
+    `p₁ = 0,0273`, **n ≈ 3000**. La docstring escribe α, la potencia, el `n`
+    empleado y la tolerancia que de ahí sale; **no** se escribe una tolerancia
+    a ojo, que es lo que hacía la primera versión y que habría dejado pasar las
+    dos variantes defectuosas.
+  - Se comprueba con: un corpus con un homopolímero y un dinucleótido
+    declarados, con al menos ese número de moléculas cubriendo cada tracto y
+    semilla congelada: con preparación amplificada la fracción observada cae
+    dentro del intervalo alrededor de 0,17 y 0,038; con preparación sin PCR,
+    alrededor de 0,027 y 0,011. **Debe fallar contra:** una entrega de la
+    preparación amplificada **sin** la parte de base, que daría 0,147 y 0,0273;
+    una implementación que sume las dos columnas, que daría por encima de lo
+    medido.
 
 - ☐ **F4.10.6.** Cierre: recuentos de resbalones y de resbalones heredados por
   locus en el manifiesto; validador independiente que rederiva los pasos netos
-  de linaje desde la semilla; control en la interfaz de la tabla de tartamudeo
-  con PCR; y **levantar el rechazo temporal** de F4.9.10.
+  de linaje desde la semilla; control en la interfaz; y **levantar el rechazo
+  temporal** de F4.9.11.
   - Depende de: F4.10.5.
   - Procede de: REQ-MAN-45 y REQ-VAL-58 propuestos, hoja de ruta §7.
   - Cambia: `src/event_manifest.rs`, `ui/`, validador bajo `tests/`,
     `src/configuration.rs`.
-  - Se comprueba con: los recuentos de resbalones heredados son mayores que
-    cero en el fixture de familias grandes y cero con familias de tamaño 1;
-    el validador coincide sin llamar al productor;
+  - Se comprueba con: los resbalones heredados son mayores que cero en el
+    fixture de familias grandes y **exactamente cero** con familias de tamaño
+    1; el validador coincide sin llamar al productor;
     `./scripts/check-independent-validators.sh evidence/clonal-f4-10` da **5
-    PASS**; la combinación antes rechazada ahora se acepta y produce la
-    fracción de F4.10.5; ida y vuelta de la interfaz. **Debe fallar contra:**
-    un recuento de resbalones heredados que cuente todos los resbalones; un
-    levantamiento del rechazo sin la prueba aritmética de F4.10.5 verde.
+    PASS**; la combinación antes rechazada se acepta y produce la fracción de
+    F4.10.5; ida y vuelta de la interfaz. **Debe fallar contra:** un recuento
+    de heredados que cuente **todos** los resbalones —la prueba de las familias
+    de tamaño 1 lo caza, porque ahí no puede heredarse nada—; un levantamiento
+    del rechazo sin la prueba de F4.10.5 verde.
 
 > **Revisión del hito de la entrega 4.** Comprobar la genealogía sobre el
-> fixture saturado, la derivación de tasas, el orden de aplicación, la
-> composición aritmética y el levantamiento del rechazo. Ejecutar la batería
+> fixture saturado, la derivación de probabilidades y su marca de tosquedad, el
+> orden de aplicación con recálculo de la tirada, la composición aritmética con
+> su tamaño muestral y el levantamiento del rechazo. Ejecutar la batería
 > completa con `./scripts/check-independent-validators.sh
-> evidence/clonal-f4-10`. Cerrar el cambio de contrato de la sección 9. No
+> evidence/clonal-f4-10`. Cerrar el cambio de contrato de la sección 10. No
 > continuar hasta confirmar el resultado.
 
 ---
 
-## 9. Cambio de contrato posterior al cierre de la fase de realismo técnico
+## 9. Entrega 5 — Generador de alelos por deslizamiento biológico
+
+**Condición de cierre, no ampliación aplazada.** Mientras esta entrega no
+exista, los alelos y sus frecuencias los escribe el usuario, y **la simulación
+de microsatélites no puede darse por cerrada**. Se le da entrega propia para
+que se vea, en vez de quedar escondida como un paso más.
+
+> **Esta entrega está parcialmente bloqueada, y las otras cuatro no.** El
+> responsable decidió **que exista** el generador, pero no fijó **cómo** un
+> servicio de pasos produce una distribución de frecuencias. Es el pendiente
+> **P-4**, y bloquea el paso F6.4.11 en su algoritmo —no en su ámbito de azar—
+> y, por dependencia, los dos que lo siguen. F6.4.4 **no** está bloqueado.
+> Las entregas 1 a 4 no dependen de P-4 en absoluto: mientras no se cierre, los
+> alelos y sus frecuencias los declara el usuario, que es lo que la entrega 1
+> ya entrega. Las cinco preguntas concretas están en el propio paso.
+
+**Qué es y qué no es.** Es **biología, no artefacto**: parte del alelo de la
+referencia, aplica pasos de una unidad y produce el abanico de alelos con sus
+frecuencias, que después se sortean entre los individuos. Va en la **verdad**.
+Es **una sola tirada para inicializar la diversidad**, no una simulación de
+generaciones: el modelo escalonado aplicado generación tras generación
+pertenece a la fase de evolución y no se invade.
+
+**Por qué no puede confundirse con el tartamudeo, aunque el mecanismo físico
+sea el mismo.** Uno crea variación real heredable y va en la verdad; el otro
+solo ensucia la medida y va en las lecturas. La prueba de que no son
+intercambiables: si los alelos verdaderos salieran del modelo de tartamudeo,
+**cambiar el número de ciclos de PCR cambiaría el genotipo real de los
+individuos** —un parámetro de laboratorio decidiendo la biología—.
+
+- ☐ **F6.4.4.** Modelo escalonado simple como **servicio reutilizable**: cada
+  evento añade o elimina exactamente **una unidad completa** según el sesgo
+  efectivo, con tasa y sesgo configurables; rechazo previo de otro modelo o de
+  un salto de varias unidades, con parámetro y valor.
+  - Depende de: cierre de la entrega 1.
+  - Procede de: REQ-CONF-61/62, REQ-IND-35, REQ-DIR-04, REQ-MUT-11,
+    REQ-VAL-48, ACE-32/109; DTF-015 mantiene fuera el salto múltiple. Es el
+    paso F6.4.4 del plan de la fase de variación compleja, **adelantado**.
+  - Cambia: módulo nuevo o hermano de `src/tandem_repeat.rs`; reutiliza la
+    operación de paso de F6.4.1.1, **incluida la regla de la tirada más
+    larga**.
+  - **Qué hace el servicio cuando el tracto se queda sin unidades**, que
+    hacía falta decir porque mil contracciones sobre un tracto finito lo
+    agotan. Se aplica **la misma regla que el tartamudeo** y por la misma
+    razón: un paso que dejaría menos de una unidad completa en la tirada más
+    larga **no es viable**, se excluye **antes** de sortear y no se reintenta;
+    si no queda ningún paso viable, el evento **no se aplica**, no consume
+    aleatoriedad y se **cuenta aparte** como evento no aplicado. No es un
+    error: un microsatélite que ha llegado a su mínimo es un resultado
+    biológico legítimo.
+  - Se comprueba con: mil eventos con sesgo 1 son todos expansiones y con sesgo
+    0 todas contracciones, sin consumo de aleatoriedad en los extremos, como
+    `bernoulli-v1` exige; cada evento **aplicado** cambia la longitud
+    exactamente en una unidad; **mil eventos con sesgo 0 sobre un tracto de
+    cinco unidades terminan con el tracto en una unidad, sin error, y el
+    recuento de eventos no aplicados vale exactamente 996**; un modelo distinto
+    del admitido y un salto de dos unidades se rechazan antes de simular; misma
+    semilla reproduce la secuencia de decisiones. **Debe fallar contra:** un
+    paso que cambie dos unidades; un sesgo interpretado al revés —el caso con
+    sesgo 1 exige solo expansiones—; un extremo que consuma aleatoriedad; **un
+    servicio que falle, que sature en silencio o que deje el tracto en cero
+    unidades al agotarlo**, que la prueba del recuento exacto de no aplicados
+    caza. *Cuidado:* sin fijar ese recuento, un servicio que simplemente
+    ignorase los eventos sobrantes y otro que los contase darían el mismo
+    tracto final y la prueba no discriminaría.
+
+- ☐ **F6.4.11.** **Generador del abanico de alelos**, con su **ámbito de azar
+  propio** separado del tartamudeo. **Algoritmo adoptado el 20/09/2026**; ya no
+  hay bloqueo.
+  - Depende de: F6.4.4, F6.4.3.2.
+  - Procede de: decisión **S-04** y su recuadro «Condición de cierre, no
+    ampliación aplazada»; REQ-DAT-15, DTC-037, DTC-072, DTC-081.
+  - Cambia: `src/randomness.rs` (ámbito nuevo), el módulo del generador,
+    `schemas/config-general-v4.schema.json`.
+
+  - **Algoritmo, adoptado el 20 de septiembre de 2026.** Se simulan **tantos
+    linajes independientes como copias haplotípicas** tenga la población. Cada
+    linaje parte del **alelo de la referencia** y recibe un **número de pasos
+    sorteado de una Poisson de media declarada**, con `poisson-count-v1`, que
+    es el único recuento normativo del proyecto; cada paso lo da el servicio
+    escalonado de F6.4.4 con su sesgo. La **frecuencia de cada alelo es la
+    proporción de linajes que terminan en él**. El alelo de la referencia entra
+    en el abanico **si algún linaje termina en él**, y no se fuerza su
+    presencia. Un linaje que rebasaría el tope de F6.4.3.1 **se detiene ahí**,
+    igual que el servicio hace al agotar el tracto.
+
+  - **Criterio del responsable sobre la pérdida del alelo original.** Que el
+    alelo de la referencia desaparezca del abanico **depende de los parámetros
+    que se den**, no del modelo: con una media de pasos baja la mayoría de los
+    linajes no se mueven y el alelo está; con una media alta puede perderse,
+    que es lo que ocurre en una población real. Por eso no se fuerza.
+
+  - **Tres limitaciones declaradas, porque son decisiones biológicas y no
+    detalles.** Deben ir en la documentación del generador y en el manifiesto:
+    1. **No hay ancestría compartida.** Cada copia deriva por su cuenta desde
+       el ancestro, de modo que dos individuos emparentados no comparten
+       historia en este locus. El espectro de frecuencias resultante es **más
+       plano** que el de una población real, donde la deriva concentra unos
+       pocos alelos. Importa si el conjunto se usa para probar herramientas de
+       estructura poblacional.
+    2. **El número de pasos no es un proceso en el tiempo.** Es un atajo: cada
+       copia acumula un número aleatorio de mutaciones sin decir en cuántas
+       generaciones. Es coherente con que esto sea **una sola tirada de
+       inicialización** y no una simulación de generaciones, que pertenece a la
+       fase de evolución.
+    3. **El genoma de referencia puede llevar un alelo que ningún individuo
+       tiene.** Es real y ocurre, pero conviene saberlo antes de encadenar un
+       análisis que lo dé por imposible.
+
+  - **Dos ámbitos separados, y esta parte no está bloqueada.** El deslizamiento
+    biológico y el tartamudeo comparten mecanismo físico y **no pueden
+    compartir ámbito de azar**, porque uno decide la verdad y el otro las
+    lecturas. El ámbito de este paso se identifica por el evento y el
+    **identificador de locus**, nunca por posición ni por orden.
+  - Se comprueba con: **vectores congelados de derivación de subsemilla** para
+    el ámbito nuevo, al estilo de los de F4.8.1; **una aserción directa de que
+    la subsemilla del deslizamiento biológico y la del tartamudeo son
+    distintas** para la misma terna de identidades; misma semilla, mismo
+    abanico; el abanico no contiene alelos con fracciones de unidad;
+    **insertar un locus que ordena antes que los existentes no cambia el
+    abanico de los previos**; con cero eventos el abanico es solo el alelo de
+    la referencia y **no se consume aleatoriedad**.
+  - **Debe fallar contra:** un generador que **comparta ámbito** con el
+    tartamudeo, que solo la aserción de subsemillas distintas y los vectores
+    congelados cazan; un abanico con alelos fraccionarios; un ámbito indexado
+    por posición.
+  - *Corregido, y es un error instructivo.* La versión anterior de este paso
+    ofrecía como discriminador «cambiar los ciclos de PCR no cambia ni un alelo
+    de la verdad». **No caza un ámbito compartido**, y conviene entender por
+    qué: en este proyecto compartir ámbito significa **derivar la misma
+    subsemilla**, y como DTC-081 exige que cada decisión arranque su propio
+    generador desde su clave y que no haya consumo acumulado, un consumidor no
+    desplaza al otro; además la verdad se genera **antes** que las lecturas, de
+    modo que ningún parámetro de estas puede alcanzarla. La aserción se cumple
+    sola. Lo que sí caza es comparar las dos subsemillas. La comprobación
+    antigua se conserva en la pausa del hito como prueba de sistema —es buena
+    contra un generador que leyera la configuración del tartamudeo por error—,
+    pero **no** como prueba del ámbito, y su docstring lo dice.
+
+- ☐ **F6.4.12.** Publicación: la configuración efectiva y el manifiesto
+  registran el **origen de cada alelo** —declarado por el usuario o generado
+  por deslizamiento—, los parámetros del generador, su versión de algoritmo y
+  su versión de catálogo de ámbitos, y las frecuencias **declaradas y
+  realizadas**.
+  - Depende de: F6.4.11. Su bloqueo por P-4 **quedó levantado el 20/09/2026**.
+  - Procede de: REQ-MAN-29/30, REQ-VAL-48; decisión **S-04**.
+  - Cambia: `src/event_manifest.rs`, `src/results.rs`, los esquemas nuevos.
+  - Se comprueba con: validación externa; un escenario con alelos declarados a
+    mano los marca como declarados y uno generado los marca como generados, en
+    el mismo documento si hay loci de los dos tipos; el número de eventos de
+    deslizamiento registrado coincide con el configurado. **Debe fallar
+    contra:** un manifiesto que marque todos los alelos con el mismo origen
+    —el escenario mixto lo caza, y uno de un solo tipo **no discrimina**, lo
+    que va en la docstring.
+
+- ☐ **F6.4.13.** Interfaz Marimo del generador y **cierre de la simulación de
+  microsatélites**: control para elegir entre declarar los alelos o generarlos,
+  con los parámetros del generador; y comprobación de que ya no queda ninguna
+  opción configurable de este trabajo sin control.
+  - Depende de: F6.4.12. Su bloqueo por P-4 **quedó levantado el 20/09/2026** en la parte del
+    generador; la comprobación de recorrido de opciones no está bloqueada.
+  - Procede de: REQ-UI-01/03/04/05, hoja de ruta §7; decisión **S-17**.
+  - Cambia: `ui/config_editor.py`, `ui/ui_panels.py`; prueba en `tests_ui/`.
+  - Se comprueba con: ida y vuelta completa; elegir «generar» oculta la tabla
+    de alelos y muestra los parámetros, y al revés; **una comprobación que
+    recorra la lista de opciones configurables publicadas en la configuración
+    efectiva por este trabajo y exija que cada una tenga control en la
+    interfaz**, con control positivo de que la lista no estaba vacía;
+    `marimo check --strict` sin avisos. **Debe fallar contra:** una opción
+    añadida en cualquiera de las cinco entregas sin control en la interfaz —la
+    comprobación de recorrido es la única que lo caza de forma sistemática, y
+    es la que permite declarar cerrada la regla de cierre de la hoja de ruta.
+
+> **Revisión del hito de la entrega 5, y cierre de la simulación de
+> microsatélites.** Comprobar el servicio escalonado, el abanico de alelos, la
+> separación demostrada de los dos ámbitos de azar, la publicación del origen
+> de cada alelo y el recorrido completo de opciones en la interfaz. Ejecutar la
+> batería completa con
+> `./scripts/check-independent-validators.sh evidence/slippage-f6-4-11`. Solo
+> al cerrar esta pausa puede declararse cerrada la simulación de
+> microsatélites. No continuar hasta confirmar el resultado.
+
+---
+
+## 10. Cambio de contrato posterior al cierre de dos fases
 
 Con la forma de la sección 11 del plan de la fase de población fundadora. **No
 es un añadido silencioso y no debe presentarse como tal.**
 
-### 9.1. Qué **no** se reabre
+La primera versión de este plan hablaba de reabrir el contrato de **una** fase,
+la de realismo técnico. Las decisiones del 20 de septiembre añaden **una
+segunda**: el generador de referencia simulada con regiones definidas y la
+publicación de la correspondencia de coordenadas caen en la fase del **núcleo
+reproducible**, también cerrada.
 
-Los hitos F4.0 a F4.5 y sus evidencias de cierre no se reabren. Ninguna
-decisión de la fase se revoca. Lo que cambia es un contrato posterior y
-acotado, por decisión expresa del usuario del 19 de septiembre de 2026:
-simular, además de la biblioteca sin amplificar que ya existe, una **biblioteca
-amplificada por PCR**, y reconocer el **tartamudeo** como artefacto del perfil
-vigente.
+### 10.1. Qué **no** se reabre
 
-### 9.2. Qué cambia, y por qué no es una contradicción
+Ningún hito de las dos fases se reabre, ni se revoca ninguna de sus decisiones,
+ni se rehace ninguna de sus evidencias salvo las que la sección 10.4 obliga a
+repetir. Lo que cambia son contratos posteriores y acotados, por decisión
+expresa del responsable del 19 y del 20 de septiembre de 2026.
 
+### 10.2. Qué cambia, y por qué no es una contradicción
+
+- **En la fase del núcleo reproducible.** El generador de referencia simulada
+  gana **regiones declaradas con su secuencia**, y la referencia con un tracto
+  insertado se publica como **derivada con identidad propia**, con su mapa de
+  correspondencia. Esto último es una **extensión** del mapa que la referencia
+  reducida ya publica —con intervalo de origen y derivado por segmento—, no
+  maquinaria nueva; el contrato que se amplía es el del mapa, no el de las
+  coordenadas.
 - **El tartamudeo sin PCR no contradice la preparación sin PCR.** Los cinco
   requisitos que declaran la preparación exclusivamente sin PCR hablan de la
-  **preparación de biblioteca**. El deslizamiento de la polimerasa ocurre
-  además en la amplificación en puente sobre la celda y en la síntesis de la
-  secuenciación, que existen en el perfil vigente. El requisito nuevo debe
-  decirlo, para que nadie lo lea como una grieta.
+  **preparación de biblioteca**. El deslizamiento ocurre además en la
+  amplificación en puente sobre la celda y en la síntesis, que existen en el
+  perfil vigente. El requisito nuevo debe decirlo para que nadie lo lea como
+  una grieta.
 - **La preparación amplificada sí reabre una ampliación aplazada.** DTF-056 se
   **divide**: salen de ella la preparación amplificada, los duplicados de PCR,
   el sesgo de composición **configurable**, la sobrerrepresentación estocástica
   y el tartamudeo heredable; **permanecen** el perfil de sesgo GC calibrado con
   datos reales, los duplicados ópticos y de agrupación, y la combinación con
-  excepciones regionales. DTF-055, el marcado de duplicados en BAM y CRAM, no
-  cambia.
+  excepciones regionales. DTF-055 no cambia.
+- **La especificación se corrige en un punto de fondo**, no solo se amplía: el
+  umbral de 50 pb deja de aplicarse a los alelos de repetición declarados sobre
+  loci declarados. Está en la sección 11.
 
-### 9.3. Dónde vive cada literal que hay que tocar
+### 10.3. Dónde vive cada literal que hay que tocar
 
 Una copia silenciosa de un literal es lo que sobrevive a un cambio de contrato.
-Los sitios conocidos, comprobados en `11d26e5`:
+Los sitios conocidos, comprobados en el árbol de partida:
 
 | Sitio | Papel | Qué dice hoy |
 |---|---|---|
 | `src/technical_profile.rs`, líneas 28–30 | canónico | `LibraryPreparation` con una sola variante, `PcrFree` |
 | `src/application.rs`, líneas 776–786 | constantes | duplicados de PCR no aplicables y ópticos a cero |
-| `src/event_manifest.rs`, líneas 1516–1531 | contrato | exige `pcr.applicable == false`, `gc.mode == "neutral"`, preparación sin PCR |
-| `schemas/effective-config-v4.schema.json`, líneas 312–313 | contrato | `const` del identificador del perfil, de su ruta, de su SHA-256, de la preparación, de `pcr.applicable` y de `gc.mode` |
-| `schemas/manifest-event-v2.schema.json`, líneas 115–118 y 157 | contrato | los mismos `const` |
+| `src/event_manifest.rs`, líneas 1516–1531 | contrato | exige preparación sin PCR, PCR no aplicable y composición neutra |
+| `schemas/effective-config-v4.schema.json`, líneas 312–313 | contrato | valores fijos del identificador del perfil, su ruta, su SHA-256, la preparación, la aplicabilidad de la PCR y el modo de composición |
+| `schemas/manifest-event-v2.schema.json`, líneas 115–118 y 157 | contrato | los mismos valores fijos |
 | `schemas/config-general-v2.schema.json`, `$defs/technical_event` | contrato | objeto cerrado de once claves; ninguna nombra la PCR, de modo que hoy una clave de PCR se rechaza **como campo desconocido**, no como capacidad aplazada |
-| `ui/config_editor.py`, `ui/ui_panels.py` | contrato | controles del evento técnico |
-| `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json` | recurso | perfil único, con su hash congelado |
+| `src/reference_generation.rs` | canónico | generador que **solo** sabe rellenar al azar |
+| `src/reference_reduction.rs` y `schemas/reference-reduction-map-v1.schema.json` | contrato | el mapa de coordenadas que hay que extender, con `source_interval` y `derived_interval` por segmento |
+| `ui/config_editor.py`, `ui/ui_panels.py` | contrato | controles del evento técnico y de la referencia |
+| `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json` | recurso | perfil único, con su huella congelada |
 
 **Regla:** los esquemas publicados **no se editan**. Las versiones nuevas
-—general v4, efectivo v6, manifiesto de evento v3— llevan la capacidad, y los
-`const` de las versiones heredadas se comparan byte a byte en cada hito. Un
-fichero general v2 sigue publicando efectivo v4 y manifiesto de evento v2.
+—general v4, efectivo v6, manifiesto de evento v3, manifiesto general v6,
+verdad v3 y mapa de coordenadas v2— llevan la capacidad, y los valores fijos de
+las versiones heredadas se comparan byte a byte en cada hito. Un fichero
+general v2 sigue publicando efectivo v4 y manifiesto de evento v2.
 
-### 9.4. Evidencia que hay que repetir
+### 10.4. Evidencia que hay que repetir
 
-Al cerrar la entrega 2 y otra vez al cerrar la entrega 3, se repite la
-evidencia de cierre de la fase de realismo técnico **con preparación sin PCR y
-sin loci de repetición declarados**, y debe dar los mismos bytes que la línea
-base de F6.4.0. Esa repetición es la que sostiene la afirmación de que el
-contrato se ha ampliado sin romperse.
+- Al cerrar la **entrega 1**, la evidencia de cierre de la fase del núcleo
+  reproducible que toque la generación de referencias, con un escenario **sin
+  regiones declaradas**, que debe dar los mismos bytes que la línea base.
+- Al cerrar la **entrega 2** y otra vez al cerrar la **entrega 3**, la
+  evidencia de cierre de la fase de realismo técnico **con preparación sin PCR
+  y sin loci declarados**, que debe dar los mismos bytes.
 
-### 9.5. Dónde se registra
+Esas repeticiones son las que sostienen la afirmación de que los contratos se
+han ampliado sin romperse.
 
-Sección **16 nueva** del plan de la fase de realismo técnico, titulada «Cambio
-de contrato posterior al cierre — tartamudeo y preparación amplificada
-(fecha)», que recoja: qué no se reabre, qué cambia y por decisión de quién,
-dónde vive cada literal, las pruebas nuevas con sus variantes defectuosas, los
-fixtures que se reabren y la repetición de la evidencia de cierre. Y una nota
-fechada en la sección de la fase de realismo técnico de la hoja de ruta.
+### 10.5. Dónde se registra
+
+- Sección **16 nueva** del plan de la fase de realismo técnico, titulada
+  «Cambio de contrato posterior al cierre — tartamudeo y preparación
+  amplificada (fecha)», con: qué no se reabre, qué cambia y por decisión de
+  quién, dónde vive cada literal, las pruebas nuevas con sus variantes
+  defectuosas, los fixtures que se reabren y la repetición de la evidencia.
+- Sección **14 nueva** del plan de la fase del núcleo reproducible, con la
+  misma forma, para el generador con regiones y el mapa de coordenadas.
+- Una nota fechada en las dos secciones correspondientes de la hoja de ruta.
 
 ---
 
-## 10. Correcciones que este plan **propone** a otros documentos
+## 11. Correcciones que este plan **propone** a otros documentos
 
-Ninguna está aplicada. Este plan no toca ningún otro fichero.
+Ninguna está aplicada, **salvo las del documento de calibración**, cuyos
+hechos falsos eran del propio proyecto y se han corregido a la vez que este
+plan, porque dejar publicada una afirmación que se sabe falsa no es una
+propuesta pendiente sino un defecto.
 
 | Documento | Dónde | Qué | Origen |
 |---|---|---|---|
-| `especificaciones-0.1.md` | §4.3, glosario de la repetición en tándem | Interrupciones declaradas, pureza realizada; rechazo de la pureza como entrada | S-06 |
-| `especificaciones-0.1.md` | §4.3, mismo párrafo | Las unidades se ganan o se pierden por el **extremo derecho** del tracto | S-07 |
+| `especificaciones-0.1.md` | §4.3, glosario de la repetición en tándem | La pureza es **siempre** una salida calculada, nunca una entrada; el alelo se define por su **secuencia** y no por un número de unidades; dos alelos de igual longitud y distinta interrupción son alelos distintos | S-02, S-06 |
+| `especificaciones-0.1.md` | §4.3, mismo párrafo | El resbalón y el paso de deslizamiento ocurren en la **tirada ininterrumpida más larga** del motivo, con desempate por la izquierda. **Sustituye a la redacción «por el extremo derecho» que la primera versión de este plan proponía y que la decisión S-07 rechazó** | S-07 |
+| **`especificaciones-0.1.md`** | **REQ-CONF-55 y REQ-IND-31** | **Corregir**: el umbral que separa inserciones y deleciones pequeñas de variantes estructurales se aplica a secuencia **nueva**; **un alelo de repetición en tándem declarado sobre un locus declarado no se somete a él**, ni al generar, ni al clasificar, ni al contar. La coherencia que REQ-IND-31 exige se conserva: se aplica igual en los tres momentos, y a las repeticiones no se aplica en ninguno | **S-05** |
+| **`especificaciones-0.1.md`** | **REQ-VER-20** | **Corregir**: hoy exige alelos explícitos «cuando su tamaño sea manejable» y **representación simbólica para tramos largos**. Para las repeticiones en tándem eso contradice lo decidido: el criterio del estándar es **si se conoce la secuencia exacta**, y un simulador siempre la conoce. Debe decir que los alelos de repetición se publican **siempre** de forma explícita, sin umbral de tamaño | **S-09** |
 | `especificaciones-0.1.md` | §4.4, frase de orden normativo, y REQ-DAT-17 | Insertar el tartamudeo entre la quimera y calidad y errores, y las familias de amplificación antes de la quimera | S-13, diseño con PCR §8 |
 | `especificaciones-0.1.md` | §4.4, tras REQ-DAT-73 | Añadir REQ-DAT-74 a 80 (tartamudeo) y REQ-DAT-81 a 85 (amplificación) | Expediente §10.2, diseño §9.2 |
-| `especificaciones-0.1.md` | **REQ-DAT-80** | **Reescribir**: la identidad byte a byte vale para los escenarios **que no declaran loci de repetición** | **C-1** |
+| `especificaciones-0.1.md` | **REQ-DAT-80** | **Reescribir**: la identidad byte a byte vale para los escenarios **que no declaran loci de repetición** | C-1 |
 | `especificaciones-0.1.md` | §4.1, tras REQ-CONF-130 | Añadir REQ-CONF-131 a 133 (tartamudeo) y 134 a 138 (amplificación) | Expediente §10.2, diseño §9.2 |
-| `especificaciones-0.1.md` | **REQ-CONF-132** | **Reescribir**: lo desactivado por omisión es el tartamudeo **heredable de PCR**; el de base se activa al declarar loci | **C-1** |
-| `especificaciones-0.1.md` | REQ-CONF-88/89/94/95, REQ-TEC-07/08, REQ-DAT-46/47/52/53, REQ-MAN-45/48/60 | Las redacciones de la sección 9.1 del diseño con PCR | Diseño §9.1 |
+| `especificaciones-0.1.md` | **REQ-CONF-132** | **Reescribir**: lo desactivado por omisión es el tartamudeo **heredable de PCR**; el de base se activa al declarar loci | C-1 |
+| `especificaciones-0.1.md` | REQ-CONF-88/89/94/95, REQ-TEC-07/08, REQ-DAT-46/47/52/53, REQ-MAN-45/48/60 | Las redacciones de la sección 9.1 del diseño con PCR, **con el cambio de que el parámetro declarado es la fracción de duplicados y no las parejas por molécula** | S-19, diseño §9.1 |
+| `especificaciones-0.1.md` | REQ-REF-19 y los de referencia derivada | Admitir regiones declaradas en la referencia simulada y la referencia derivada por inserción de tracto, con su mapa de correspondencia | S-03 |
 | `especificaciones-0.1.md` | §4.7, §4.6, §7 | Añadir REQ-MAN-93/94, REQ-VAL-57/58, ACE-118 y ACE-119; reescribir ACE-49/51/68 | Ambos documentos |
-| `decisiones-tecnicas-0.1.md` | Tabla | **DTC-090** (provisional): `stutter-v1`, catálogo `f4-technical-v4`, y la aclaración de que DTC-067 no prohíbe usar `bernoulli-v1` ni `categorical-f64-v1` aquí | S-11, S-14 |
-| `decisiones-tecnicas-0.1.md` | Tabla | **DTC-091** (provisional): `pcr-amplification-v1`, la programación dinámica de los primeros ciclos, la Poisson pinzada como categórico de una palabra, el rechazo con tope, la genealogía, las constantes de contrato y su juez, y la derivación de la tasa por ciclo | S-19 a S-28 |
-| `decisiones-tecnicas-0.1.md` | Tabla | Decisión sobre la realización de interrupciones y la pureza como salida | S-06 |
-| `plan-implementacion-f6-0.1.md` | §8, F6.4.3 | Corregir: **ya no depende** del primer paso del hito de variantes estructurales | S-02, C-4 |
-| `plan-implementacion-f6-0.1.md` | §8, F6.4.2 | Corregir: **no depende** de derivar una referencia estructural | S-03, C-4 |
-| `plan-implementacion-f6-0.1.md` | §3 | DP-F6-03, DP-F6-06 y DP-F6-07 quedan cerradas **en su parte de repeticiones** por S-08, S-09 y S-06; DP-F6-04 anota que el catálogo técnico nuevo lleva las etapas `stutter` y `amplification` | S-06/08/09/11 |
-| `plan-implementacion-f6-0.1.md` | §8 | Añadir un paso F6.4.10 «Tartamudeo heredable con PCR», que remite a la entrega 4 de este plan | Diseño §9.5 |
-| `plan-implementacion-f4-0.1.md` | Sección 16 nueva | El cambio de contrato de la sección 9 de este plan | S-18 |
-| `hoja-de-ruta-0.1.md` | Fases de realismo técnico y de variación compleja | Registrar el adelanto de los pasos de repeticiones y la reapertura acotada del contrato técnico, con fecha | S-18 |
-| `registro-ampliaciones-futuras-0.1.md` | DTF-056 | Dividir según §9.2; añadir **DTF-059**: errores de polimerasa heredables, quimeras de PCR heredadas, sesgo de longitud y genealogía exacta | Diseño §9.4 |
-| `calibracion-tartamudeo-0.1.md` | §2 y §5 | Anotar que la columna con PCR aplica a la preparación amplificada y se convierte en tasa por ciclo con la fórmula de §3.2; y **resolver C-2**, dejando dicho que el mecanismo adoptado es el de la ficha D-14 y que la forma de tres parámetros se conserva como referencia del sesgo, no como estructura de datos | **C-2** |
-| `expediente-decisiones-repeticiones-tandem-0.1.md` | D-14 | Anotar que su premisa «no existe ninguna calibración en el repositorio» **ya no es cierta**, y que por tanto su recomendación de valores cero queda sustituida | **C-2** |
-| `expediente-decisiones-repeticiones-tandem-0.1.md` | D-16 y D-17 | Anotar las correcciones **C-1** y **C-6** | C-1, C-6 |
-| `expediente-decisiones-repeticiones-tandem-0.1.md` | Parte B, encabezado | Identificar **cuáles** son las tres confirmaciones: hoy solo D-10 lleva la marca | Aviso de recuento, §2 |
-| `trazabilidad-requisitos-0.1.md` | Matriz | Filas nuevas para los requisitos nuevos; las filas que hoy apuntan a DTF-056 pasan a la sección 16 de la fase de realismo técnico | Ambos documentos |
+| `decisiones-tecnicas-0.1.md` | Tabla | **DTC-090** (provisional): `stutter-v1` con el predictor de la **tirada más larga** y la estructura asimétrica del paso, catálogo `f4-technical-v4`, y la aclaración de que DTC-067 no prohíbe usar `bernoulli-v1` ni `categorical-f64-v1` aquí | S-07, S-11, S-14 |
+| `decisiones-tecnicas-0.1.md` | Tabla | **DTC-091** (provisional): `pcr-amplification-v1`, la programación dinámica de los primeros ciclos, la Poisson pinzada, el rechazo con tope, la genealogía, las constantes y su juez, la derivación de la probabilidad por ciclo; y **el método de inversión numérica de la fracción de duplicados: bisección sobre `[0, 64]` con 64 iteraciones fijas, exponencial exclusivamente de `libm = =0.2.16` conforme a DTC-067 y DTC-072, retorno anticipado exacto para fracción cero y rechazo explícito de la fracción inalcanzable** | S-19 a S-28 |
+| `decisiones-tecnicas-0.1.md` | Tabla | Decisión sobre la realización del tracto: pureza como salida, alelo por secuencia, guarda de admisión con mínimo de pureza y de tirada | S-02, S-06 |
+| `decisiones-tecnicas-0.1.md` | DTC-089 | Anotar que el presupuesto de bytes de salida cuenta ahora las bases del tracto publicadas en la verdad y en el VCF | S-02 |
+| `plan-implementacion-f6-0.1.md` | §8, F6.4.3 | Corregir: **ya no depende** del primer paso del hito de variantes estructurales | S-02 |
+| `plan-implementacion-f6-0.1.md` | §8, F6.4.2 | Corregir: **no depende** de derivar una referencia estructural | S-03 |
+| `plan-implementacion-f6-0.1.md` | §8, F6.4.1 y F6.4.2 | Corregir el criterio de prueba: la pureza no se declara, y una realización con pureza 1 no es el caso que discrimina | S-06 |
+| `plan-implementacion-f6-0.1.md` | §3 | DP-F6-03, DP-F6-06 y DP-F6-07 quedan cerradas **en su parte de repeticiones**; DP-F6-04 anota que el catálogo técnico nuevo lleva las etapas `stutter` y `amplification`, y que hay ámbitos nuevos para el sorteo por frecuencias y para el deslizamiento biológico | S-06/08/09/11, S-04 |
+| `plan-implementacion-f6-0.1.md` | §8 | Añadir un paso F6.4.10, «Tartamudeo heredable con PCR», que remite a la entrega 4 de este plan; y anotar que F6.4.4 se adelanta en la entrega 5 | S-18, S-29 |
+| `plan-implementacion-f4-0.1.md` | Sección 16 nueva | El cambio de contrato de la sección 10 de este plan | S-18 |
+| `plan-implementacion-f1-0.1.md` | Sección 14 nueva | El cambio de contrato de la fase del núcleo reproducible: generador con regiones y mapa de coordenadas | S-03, S-18 |
+| `hoja-de-ruta-0.1.md` | Fases del núcleo reproducible, de realismo técnico y de variación compleja | Registrar el hito propio, con fecha, y la reapertura acotada de los dos contratos | S-18 |
+| `registro-ampliaciones-futuras-0.1.md` | DTF-056 | Dividir según §10.2; añadir **DTF-059**: errores de polimerasa heredables, quimeras de PCR heredadas, sesgo de longitud y genealogía exacta | Diseño §9.4 |
+| `calibracion-tartamudeo-0.1.md` | §2, §3, §3.1, §4, §5, §6, §7 y §8 | **Aplicado ya**: los dos conjuntos comparados **no** son las mismas células sino dos individuos distintos, y se retira el residuo que decía que la PCR era lo único que los distinguía; la fuente de la dependencia con la longitud del tracto **no** está tras muro de pago y su licencia es **CC BY-NC**; la forma del modelo pasa a citar a Raz y col. (2019) junto a la de tres parámetros; y la reducción media se corrige de 4,63× a **4,64×** | Hechos falsos 3 y 4 de §1.1, y menores |
+| `diseno-bibliotecas-pcr-0.1.md` | §5.2, §5.6, §5.9, §11 decisión 1 | **Propuesto**: el parámetro declarado es la **fracción de duplicados**, no las parejas por molécula; añadir la inversión numérica y su contrato de determinismo; corregir la licencia y la interpretación de las cifras de duplicados | S-19, hecho falso 5 |
+| `diseno-bibliotecas-pcr-0.1.md` | §1, §5.7 | **Propuesto**: corregir «los dos conjuntos pasaron por las mismas células», que se copió del documento de calibración | Hecho falso 3 |
+| `expediente-decisiones-repeticiones-tandem-0.1.md` | D-02, D-04, D-05, D-07, D-09, D-14, D-16, D-17 | **Propuesto**: anotar en cada ficha la decisión que la corrigió, sin reescribirlas, remitiendo a la sección «Decisiones confirmadas» de este plan | Todas las correcciones |
+| `expediente-decisiones-repeticiones-tandem-0.1.md` | Parte B, encabezado | **Propuesto**: identificar **cuáles** son las tres confirmaciones; hoy solo D-10 lleva la marca | Aviso de recuento, §2 |
+| `trazabilidad-requisitos-0.1.md` | Matriz | Filas nuevas para los requisitos nuevos; las que hoy apuntan a DTF-056 pasan a la sección 16 de la fase de realismo técnico | Ambos documentos |
 
 ---
 
-## 11. Matriz de cierre
+## 12. Matriz de cierre
 
 | Entrega | Resultado construido | Evidencia | Riesgo protegido |
 |---|---|---|---|
-| **1** (F6.4 adelantado) | Loci declarados, alelos por copia que difieren entre individuos, verdad v3, VCF 4.5 con campos de repetición, manifiesto e interfaz | Diploide 5/7 con secuencias, verdad y VCF comprobados; flancos byte a byte iguales con interrupción; umbral de 50 pb; hashes sin loci iguales a la línea base; validadores independientes 5 PASS | Que el alelo pierda el número de unidades; que la realización recoloque las interrupciones; que una ejecución sin repeticiones cambie de bytes |
-| **2** (F4.8) | Tartamudeo de base después de la quimera, por molécula y no por lectura, con tasas calibradas | Fixture saturado con el tracto dentro del solapamiento; corpus con quimera alta sin `PairSourceMismatch`; verdad idéntica y FASTQ distintos; consumo cero sin loci | Que el par salga incoherente; que el tartamudeo se aplique antes de la quimera y reviente la comparación byte a byte; que cambie la verdad |
-| **3** (F4.9) | Familias de amplificación, duplicados, composición al elegir la molécula, cota publicada | Duplicados contados por un oráculo que solo lee el FASTQ; fracción de familias en la mitad rica en GC; tope de intentos; contador de unidades bajo la cota; identidad byte a byte con parámetros neutros | Que los duplicados se cuenten esperados en vez de realizados; que la composición se aplique al tamaño de familia y no a la elección; que el rechazo no termine |
-| **4** (F4.10) | Tartamudeo heredable por linaje, y la fracción compuesta que reproduce lo medido | Fixture con divergencia forzada; tasas por ciclo contra el cálculo a mano; fracción observada dentro de la tolerancia de 0,17 y 0,038 | Que el tartamudeo clonal se sortee por pareja; que se sumen las dos columnas y se cuente dos veces; que la biblioteca amplificada subestime entre un 14 % y un 28 % |
+| **1** | Referencia con tractos y su mapa de coordenadas; loci con alelos que llevan **su secuencia**; sorteo por frecuencias; verdad v3; VCF explícito sin umbral; presupuesto de salida ajustado; interfaz | Dos inserciones seguidas con el mapa correcto; tractos impuros con tiradas distintas; guarda de admisión con su mínimo de pureza; dos alelos de igual longitud y distinta interrupción distinguibles; frecuencia realizada distinta de la declarada en corpus pequeño; hashes sin loci iguales a la línea base | Que el alelo se reduzca a un contador y pierda las interrupciones; que la guarda rechace tractos reales o no rechace nada; que el umbral de 50 pb sobreviva; que el sorteo dependa del orden de los individuos |
+| **2** | Tartamudeo de base después de la quimera, por molécula, en la tirada más larga, con tasas calibradas | Fixture de total igualado y tirada distinta; fixture saturado con el tracto en el solapamiento; corpus con quimera alta sin error de comparación; locus con alelo de referencia a frecuencia 1 | Que el predictor sea el número total de unidades; que el par salga incoherente; que el tartamudeo cambie la verdad; que la congelación se lea como absoluta |
+| **3** | Familias de amplificación, duplicados, composición al elegir la molécula, **fracción de duplicados invertida numéricamente**, cota publicada | Inversión comparada con el cálculo directo a mano y con contador de iteraciones constante; duplicados contados por un oráculo que solo lee el FASTQ; recuento de aceptadas al agotar el tope mayor que cero; identidad byte a byte con fracción cero | Que la inversión no sea reproducible entre plataformas; que la composición se aplique al tamaño de familia; que se publique lo esperado en vez de lo realizado; que el rechazo no tenga tope |
+| **4** | Tartamudeo heredable por linaje, y la fracción compuesta que reproduce lo medido | Fixture con divergencia forzada; probabilidades por ciclo contra el cálculo a mano; fracción observada con tamaño muestral calculado (≈2700 y ≈3000 moléculas) | Que el tartamudeo clonal se sortee por pareja; que se sumen las dos columnas; que la biblioteca amplificada subestime entre un 14 % y un 28 % en motivos de 1 a 5 pb |
+| **5** | Servicio escalonado con su regla de agotamiento; generador de alelos por deslizamiento biológico con ámbito propio; **cierre de la simulación de microsatélites**. Bloqueada en su algoritmo por **P-4** | Recuento exacto de eventos no aplicados al agotar el tracto; vectores congelados del ámbito nuevo y **aserción de que su subsemilla difiere de la del tartamudeo**; origen de cada alelo publicado; recorrido completo de opciones con control en la interfaz | Que la biología y el artefacto compartan ámbito de azar, de modo que un parámetro de laboratorio decidiera el genotipo real; que el servicio sature en silencio al agotar el tracto; que quede una opción configurable sin control |
 
 ---
 
-## 12. Lo que queda fuera a propósito, con destino
+## 13. Lo que queda fuera a propósito, con destino
 
 | Queda fuera | Destino |
 |---|---|
-| Duplicaciones, deleciones estructurales, inversiones y translocaciones | Hitos de referencias estructurales y de variantes estructurales de la fase de variación compleja |
-| Referencias estructurales derivadas, su mapa y su linaje | Mismo sitio |
+| Duplicaciones, deleciones estructurales, inversiones y translocaciones | Hitos de referencias estructurales y de variantes estructurales de la fase de variación compleja. **No entran tampoco en el generador de referencia con regiones**: van después de generar la secuencia |
+| **Microsatélites nuevos** que aparecen por inserción o duplicación | Trabajo estructural futuro. Este plan **varía tractos que ya existen y están declarados** |
 | Ploidía generalizada por secuencia | Hito de ploidía generalizada |
-| **Modelo escalonado simple de mutación**, que hace que las repeticiones **muten entre generaciones** | Paso F6.4.4. El usuario pidió que **varíen entre individuos**, que se consigue declarando alelos distintos; son cosas diferentes |
-| Mutaciones internas de pureza, interrupciones o motivo | Paso F6.4.5. REQ-CONF-63 las exige desactivadas por omisión, y desactivadas no cuestan nada |
-| Generación aleatoria de loci por regiones | Paso F6.4.6. Con loci declarados no se consume aleatoriedad ninguna |
-| Frecuencias alélicas por locus y población, que es lo que el usuario acabará usando | Segunda mitad de S-04, inmediatamente después de este trabajo; es la salida del límite C-5 |
-| Fichero complementario del VCF y catálogo de códigos de pérdida | Hito de variantes complejas. No hace falta: los campos del estándar 4.5 no pierden detalle |
-| Repeticiones cuyo alelo se separa 50 pb o más de la referencia | Hito de variantes complejas, con representación simbólica |
+| El modelo escalonado aplicado **generación tras generación** | Fase de evolución. La entrega 5 hace **una sola tirada** para inicializar la diversidad y no invade eso |
+| Mutaciones internas de pureza, interrupciones o motivo | Paso F6.4.5. REQ-CONF-63 las exige desactivadas por omisión |
+| Generación aleatoria de loci por regiones | Paso F6.4.6 |
+| Asignación **explícita de individuos concretos** con combinaciones de alelos específicas | Después de este trabajo; la decisión S-04 la invirtió respecto de las frecuencias, que son lo primero |
+| Fichero complementario del VCF y catálogo de códigos de pérdida | Hito de variantes complejas. No hace falta: el alelo explícito con su secuencia no pierde nada |
 | Conjuntos y matrices por referencia de mapeo, BAM, CRAM y mapeo real | Hito de conjuntos y matrices por referencia |
-| Fundadores de la fase de población inicial con alelos de repetición | El corte usa la vía directa |
-| **Errores de polimerasa heredables** por familia | DTF-059 nuevo. Kebschull y Zador (2015) midieron que apenas afectan a la distribución, lo que respalda aplazarlos |
-| **Quimeras formadas durante la PCR y heredadas** por la familia | DTF-059. La misma fuente las encuentra raras y limitadas a números de copia bajos |
+| Errores de polimerasa heredables por familia y quimeras de PCR heredadas | DTF-059 nuevo. Kebschull y Zador (2015) midieron que los primeros apenas afectan a la distribución y que las segundas son raras |
 | Sesgo de longitud de la amplificación y genealogía exacta del proceso de ramificación | DTF-059 |
 | Duplicados ópticos y de agrupación, y marcado de duplicados en BAM/CRAM | DTF-056 y DTF-055, sin cambios |
 | Perfil de sesgo GC **calibrado con datos reales** | DTF-056, que conserva esa parte |
-| **Mosaicismo somático** modelado aparte | No se modela: se queda dentro de la tasa sin PCR, porque la medición no permite separarlo. Si algún día se modelara, pertenecería a la **verdad** del individuo y no a las lecturas, y por tanto no cabe en una fase cuyo contrato prohíbe que los eventos técnicos alteren la verdad |
-| Imposición de la cota de recursos como rechazo previo | Fase de presupuesto de recursos. Aquí se **publica**, no se impone (S-27) |
-| Optimizar el coste del tope de intentos y el factor dos de las dos pasadas del recorrido | Fase de rendimiento. Se declaran y no se optimizan |
-| La deuda de `tests/test_process_adapter.py`, que aborta bajo la puerta canónica desde el commit `6139fe9` | Sigue registrada en el plan de la fase de población fundadora, sin destino asignado. Este plan no la toca ni la cita como puerta |
+| **Mosaicismo somático** modelado aparte | No se modela: se queda dentro de la tasa sin PCR, porque la medición no permite separarlo. Si algún día se modelara, pertenecería a la **verdad** y no a las lecturas, y por tanto no cabe en una fase cuyo contrato prohíbe que los eventos técnicos alteren la verdad |
+| Una tabla de tasas **por tipo de motivo** —distinguiendo `A` de `C`, `AC` de `AG`— como la que usa la fuente del modelo | Queda como desajuste conocido y anotado. La calibración del proyecto es por longitud de motivo y no se inventa una tabla por tipo que nadie ha medido para este uso |
+| **Digitalizar la curva** de la dependencia con la longitud de la tirada | Pendiente P-1. La fuente **sí** es accesible; falta extraer la curva de su figura y comprobar la licencia antes de reproducir nada |
+| Imposición de la cota de recursos como rechazo previo | Fase de presupuesto de recursos. Aquí se **publica**, no se impone |
+| Optimizar el coste del tope de intentos y el factor dos de las dos pasadas | Fase de rendimiento. Se declaran y no se optimizan |
+| La deuda de `tests/test_process_adapter.py`, que aborta bajo la puerta canónica | Sigue registrada en el plan de la fase de población fundadora, sin destino asignado. Este plan no la toca ni la cita como puerta |

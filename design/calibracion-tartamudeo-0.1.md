@@ -58,7 +58,7 @@ repetición. Fuente: Gymrek (2016), tabla 1.
 | 4 | 0,0069 | **0,0016** | 4,31× |
 | 5 | 0,0074 | **0,0015** | 4,93× |
 | 6 | 0,014 | **0,0010** | 14,0× |
-| Media | 0,051 | **0,011** | 4,63× |
+| Media | 0,051 | **0,011** | 4,64× |
 
 **La tasa decrece con la longitud del motivo**, y los homopolímeros son con
 diferencia los peores.
@@ -68,16 +68,41 @@ diferencia los peores.
 Es el malentendido más fácil de cometer con esta tabla, y llevaría a contar dos
 veces el mismo fenómeno.
 
-Los dos conjuntos que compara la fuente pasaron por las **mismas** células, la
-**misma** amplificación en puente sobre la celda y la **misma** síntesis
-durante la secuenciación. Lo único que los distingue es el paso de PCR de
-preparación. Por tanto:
+Cada uno de los dos conjuntos que compara la fuente pasó por una celda de flujo
+con su **amplificación en puente** y por la **síntesis** de la secuenciación. La
+diferencia **de protocolo** entre ellos es el paso de PCR de preparación,
+aunque, como advierte el recuadro de abajo, no es la única diferencia entre los
+dos conjuntos. Por tanto:
 
 - la **columna sin PCR** ya contiene, sumados y sin posibilidad de separarlos,
   el **mosaicismo somático** de las células de partida, el deslizamiento de la
   **amplificación en puente** y el de la **síntesis**;
 - la **columna con PCR** contiene todo lo anterior **más** la PCR de
   biblioteca.
+
+> ### Corrección del 20 de septiembre de 2026: no son las mismas células
+>
+> Hasta esta fecha, este documento afirmaba que «los dos conjuntos pasaron por
+> las **mismas** células, la **misma** amplificación en puente y la **misma**
+> síntesis», y que «lo único que los distingue es el paso de PCR». **Es falso**,
+> y conviene decirlo porque de ahí se derivan las tasas por ciclo del modelo con
+> PCR.
+>
+> Son **dos individuos distintos**, de proyectos distintos: uno de Papuasia
+> Nueva Guinea secuenciado **con** PCR a 25,9× y otro de Pakistán **sin** PCR a
+> 37,6×, y el primero además en una corrida agrupada con otras muestras.
+>
+> **Qué sigue en pie.** Que cada columna es un **total** y no un componente,
+> que es lo que obliga a **restar** en vez de sumar, y con ello toda la
+> aritmética de la sección 3.2 y la consecuencia de orden que cierra esta
+> sección.
+>
+> **Qué se debilita.** Atribuir la diferencia entre columnas **solo** a la PCR.
+> La resta puede llevar dentro efectos de individuo y de lote además del efecto
+> de la amplificación. En consecuencia, **las tasas por ciclo derivadas de esta
+> tabla son toscas**, y deben publicarse marcadas como tales en el manifiesto
+> de cualquier ejecución que las use. No se propone corregirlas: no hay con qué,
+> y una corrección inventada sería peor que una cifra tosca declarada como tal.
 
 **Decisión del proyecto (19 de septiembre de 2026):** el mosaicismo somático se
 queda **dentro** de la tasa sin PCR y **no se modela aparte**. Modelarlo por
@@ -138,19 +163,48 @@ ligeramente menor sin PCR. Es decir, entre biblioteca amplificada y sin
 amplificar cambia sobre todo **la frecuencia**, no la forma. Un modelo que
 comparta la distribución de tamaños y varíe solo la tasa cubre ambos casos.
 
-**Pendiente de fuente abierta:** la tasa también **crece con la longitud del
-tracto** hasta estabilizarse. Fungtammasan y colaboradores (2015) lo describen,
-pero el artículo está tras muro de pago y **no se ha podido extraer la curva
-ajustada**. Mientras no se consiga, la dependencia con la longitud del tracto
-queda como parámetro configurable sin valor por defecto derivado de fuente, y no
-debe inventarse uno.
+**Dependencia con la longitud del tracto: pendiente de digitalizar, no de
+acceso.** La tasa también **crece con la longitud del tracto** hasta
+estabilizarse, y Fungtammasan y colaboradores (2015) lo describen.
+
+> **Corrección del 20 de septiembre de 2026.** Este documento afirmaba que ese
+> artículo está «tras muro de pago» y que «no se ha podido extraer la curva
+> ajustada». **Es falso**: el artículo está en **acceso abierto** en Europe PMC
+> con el identificador **PMC4417121** y licencia **CC BY-NC**, y la curva **sí
+> se puede recuperar**, de su figura 1A. Lo único que falta es el trabajo de
+> digitalizarla, y la licencia no lo impide mientras el uso no sea comercial.
+
+Mientras no se haga, la dependencia con la longitud del tracto queda como
+parámetro configurable **sin valor por defecto derivado de fuente**, y no debe
+inventarse uno. Nótese además que el predictor que la literatura forense
+considera mejor no es la longitud total del tracto sino la **tirada
+ininterrumpida más larga** del motivo.
 
 ---
 
 ## 5. Forma del modelo
 
-Se propone la forma que usa HipSTR, herramienta ampliamente empleada para
-genotipar repeticiones a partir de secuenciación Illumina. Son tres parámetros:
+**Actualización del 20 de septiembre de 2026.** Existe un modelo **publicado y
+en licencia CC BY 4.0** que infiere la forma midiendo el ruido directamente, y
+es el que el proyecto adopta: **Raz O., Biezuner T., Spiro A. y col. (2019)**,
+*Short tandem repeat stutter model inferred from direct measurement of in vitro
+stutter noise*, Nucleic Acids Research 47(5):2436–2445,
+doi:10.1093/nar/gky1318. Es una cadena de Markov en la que **cada ciclo de PCR
+es un paso**, con probabilidades de transición **linealmente dependientes de la
+longitud actual del tracto**, contracciones de hasta tres unidades por ciclo y
+expansiones de una sola. **No publican los valores de los parámetros**, solo el
+método de ajuste: se toma la forma, no los números. Y sus predictores incluyen
+el **tipo** de motivo, no solo su longitud, lo que es un desajuste conocido con
+la tabla de la sección 3, que va por longitud.
+
+Ojo a una confusión fácil: la dependencia **lineal** es de la probabilidad **por
+ciclo**; la curva con meseta que describe la sección 4 es la **fracción
+observada de extremo a extremo**, que sale de acumular la primera sobre muchos
+ciclos. Las dos cosas son ciertas y no se contradicen.
+
+La descripción que sigue, la de HipSTR, se conserva porque es la forma en que
+la mayoría de las herramientas de genotipado expresan el mismo fenómeno y
+ayuda a leer sus salidas. Son tres parámetros:
 
 1. probabilidad de que el tartamudeo **añada** repeticiones;
 2. probabilidad de que las **quite**;
@@ -167,7 +221,8 @@ la caída rápida al alejarse del alelo verdadero.
 | Fuente | Qué se toma | Licencia | Obligación |
 |---|---|---|---|
 | Gymrek (2016), preprint en bioRxiv | **Las cifras** de la tabla 1 | **CC BY 4.0** | Atribuir |
-| Fungtammasan y col. (2015), *Genome Research* | Solo la afirmación cualitativa sobre la longitud del tracto | Artículo de pago | Citar; no se reproduce contenido |
+| Raz y col. (2019), *Nucleic Acids Research* | **La forma del modelo**: cadena de Markov por ciclo, dependencia lineal, asimetría del paso | **CC BY 4.0** | Atribuir |
+| Fungtammasan y col. (2015), *Genome Research* | La afirmación sobre la longitud del tracto y, en el futuro, la curva de su figura 1A | **Acceso abierto**, PMC4417121, bajo **CC BY-NC** (corregido el 20/09/2026: no es de pago, y la licencia sí se conoce) | Atribuir. La cláusula **no comercial** permite reproducir la curva en este proyecto mientras su uso no lo sea; si alguna vez lo fuera, hay que revisarlo |
 | HipSTR | **Solo la forma del modelo**, tres parámetros | Código bajo **GPL v2** | Citar el método |
 
 **Sobre HipSTR, para que conste.** Se comprobó su repositorio: **no distribuye
@@ -190,12 +245,18 @@ método.
   protocolo sin PCR de Illumina. Es la fuente de toda la sección 3 y de los
   hechos de la sección 4.
 
+- **Raz O., Biezuner T., Spiro A. y col. (2019).** *Short tandem repeat stutter
+  model inferred from direct measurement of in vitro stutter noise.* Nucleic
+  Acids Research 47(5):2436–2445. <https://doi.org/10.1093/nar/gky1318>
+  — **CC BY 4.0**. Origen de la **forma** del modelo que el proyecto adopta.
+
 - **Fungtammasan A. y col. (2015).** *Accurate typing of short tandem repeats
   from genome-wide sequencing data and its applications.* Genome Research.
-  PMID 25823460. <https://pubmed.ncbi.nlm.nih.gov/25823460/>
+  PMID 25823460. **Acceso abierto: PMC4417121, licencia CC BY-NC.**
+  <https://pubmed.ncbi.nlm.nih.gov/25823460/>
   Corrobora de forma independiente la ventaja del protocolo sin PCR («hasta
   nueve veces menos errores») y describe el crecimiento de la tasa con la
-  longitud del tracto.
+  longitud del tracto, con la curva en su figura 1A.
 
 - **HipSTR.** <https://hipstr-tool.github.io/HipSTR/> y
   <https://github.com/gymrek-lab/HipSTR> — código bajo GPL v2.
@@ -209,7 +270,9 @@ método.
   lecturas de un par deben coincidir. Las fuentes no lo zanjan: es una decisión
   de diseño del simulador y vive en el expediente de decisiones de repeticiones
   en tándem.
-- **La dependencia con la longitud del tracto**, sin valor por defecto derivado
-  de fuente abierta, como se explica en la sección 4.
+- **La dependencia con la longitud del tracto**, sin valor por defecto: la
+  fuente **sí** es accesible y su licencia **sí** se conoce, CC BY-NC; lo que
+  falta es digitalizar la curva de su figura 1A, como se explica en la
+  sección 4.
 - **Si estos valores valen para tomate**, más allá del argumento de la sección 1
   de que el artefacto depende del tracto y no del organismo.
