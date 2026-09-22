@@ -325,6 +325,14 @@ fn invaded_locus_error(
         SegmentError::RepeatIntervalNotIntact => {
             "una inserción o una deleción anterior ha partido, borrado o sustituido ese tramo"
         }
+        // **Ninguna prueba ejercita esta rama, y se cree inalcanzable.** Un
+        // cambio de base —declarado o de la matriz— fija su posición en
+        // coordenadas de la referencia, las mismas en las que está el
+        // intervalo del locus, de modo que la guarda de la frontera lo caza
+        // siempre antes de llegar aquí. Se conserva porque este módulo no
+        // debe fiarse de que esa guarda exista, pero no se finge que
+        // discrimine: medido el 22/09/2026 sustituyendo el texto, la batería
+        // entera pasó igual.
         SegmentError::RepeatIntervalAlreadyModified => {
             "un cambio de base anterior cae dentro de ese tramo"
         }

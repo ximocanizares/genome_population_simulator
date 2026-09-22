@@ -28,7 +28,15 @@ docker_build=$(docker --version | sed -n 's/^Docker version [^,]*, build \([^ ]*
 [[ "$htslib_version" == "1.21" ]] || { echo "unexpected htslib version: $htslib_version" >&2; exit 1; }
 [[ "$sha256sum_version" == "9.4" ]] || { echo "unexpected sha256sum version: $sha256sum_version" >&2; exit 1; }
 [[ "$tar_version" == "1.35" ]] || { echo "unexpected tar version: $tar_version" >&2; exit 1; }
-[[ "$python_version" == "3.12.3" ]] || { echo "unexpected CPython version: $python_version" >&2; exit 1; }
+# Dos versiones aprobadas, no un patrón: `python3` resuelve al intérprete del
+# entorno virtual del proyecto (3.12.7) cuando está activado, y al del sistema
+# (3.12.3) cuando no. Ambas se revalidaron el 22/09/2026 sobre el caso corrupto
+# de esquema y dieron el mismo código de salida, la misma salida vacía y el
+# mismo diagnóstico. La evidencia registra cuál corrió.
+case "$python_version" in
+    3.12.3 | 3.12.7) ;;
+    *) echo "unexpected CPython version: $python_version" >&2; exit 1 ;;
+esac
 [[ "$jsonschema_version" == "4.10.3" ]] || { echo "unexpected jsonschema version: $jsonschema_version" >&2; exit 1; }
 [[ "$docker_version" == "29.6.1" ]] || { echo "unexpected Docker version: $docker_version" >&2; exit 1; }
 [[ "$docker_build" == "8900f1d" ]] || { echo "unexpected Docker build: $docker_build" >&2; exit 1; }

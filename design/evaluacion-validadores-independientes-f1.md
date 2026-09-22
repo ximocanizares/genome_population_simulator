@@ -1,7 +1,8 @@
 # Evaluación de validadores independientes de F1
 
-- **Versión del registro:** 1.
+- **Versión del registro:** 2.
 - **Fecha de evaluación:** 8 de agosto de 2026.
+- **Revalidación:** 22 de septiembre de 2026 (CPython; ver más abajo).
 - **Ámbito:** pruebas, CI y aceptación; nunca el recorrido normal del producto.
 - **Plataforma observada:** Ubuntu 24.04 sobre WSL2, x86_64, repositorio en el
   sistema de ficheros Linux.
@@ -13,7 +14,7 @@
 | FASTA/FAI | samtools 1.21 con htslib 1.21 | MIT/BSD; proyecto HTSlib mantenido | `samtools faidx "$fasta"` | Valida estructura indexable y consultas FAI en pruebas. No sustituye la validación interna del alfabeto ni se instala para ejecutar el producto. |
 | Integridad | GNU `sha256sum` 9.4 | GPL-3.0-or-later; GNU coreutils mantenido por la distribución Ubuntu | `sha256sum --check "$checksums"` | Oráculo externo de SHA-256 sobre bytes completos. |
 | `.tar.gz` | GNU `tar` 1.35 | GPL-3.0-or-later; GNU tar mantenido por la distribución Ubuntu | `tar --list --gzip --file "$archive"` y `tar --extract --gzip --file "$archive" --directory "$destination"` | Comprueba listado y extracción; no define todavía el contenido de publicación de E12. |
-| JSON Schema | CPython 3.12.3 con `jsonschema` 4.10.3-2ubuntu1 | MIT; paquete mantenido por Ubuntu | `python3 -m jsonschema -i "$instance" "$schema"` | Implementación Draft 2020-12 ajena al futuro productor Rust. Es dependencia de prueba, no de Cargo ni del runtime. |
+| JSON Schema | CPython 3.12.3 **o** 3.12.7, con `jsonschema` 4.10.3 | MIT; paquete mantenido por Ubuntu | `python3 -m jsonschema -i "$instance" "$schema"` | Implementación Draft 2020-12 ajena al futuro productor Rust. Es dependencia de prueba, no de Cargo ni del runtime. |
 | OCI | Docker CLI 29.6.1, build 8900f1d | Apache-2.0; CLI mantenida por Docker | `docker image inspect "$image"` y `docker run --rm "$image" --version` | Inspección y arranque de aceptación. Requiere un daemon disponible en CI/publicación; no entra en el binario. |
 
 Las cinco opciones son herramientas externas y no filtran tipos ni errores al
@@ -38,6 +39,39 @@ imagen. En ese mismo cambio la primera línea fijará la base Ubuntu 24.04 media
 `FROM ...@sha256:<digest>` y la evidencia conservará el digest de la receta, del
 descriptor de índice o manifiesto, de la configuración y de cada capa. No se
 aceptará una etiqueta mutable ni un digest pendiente al cerrar E12.
+
+## Revalidación de CPython, 22 de septiembre de 2026
+
+El registro aprobaba una sola versión de CPython, la 3.12.3 que trae Ubuntu
+24.04. La puerta empezó a fallar con «unexpected CPython version: 3.12.7», y la
+causa **no era una actualización del sistema**: el intérprete del sistema sigue
+siendo el 3.12.3. Lo que ocurre es que `python3` resuelve al del **entorno
+virtual del proyecto**, que es 3.12.7, cuando ese entorno está activado, y al
+del sistema cuando no lo está. La puerta pasaba o fallaba según desde dónde se
+lanzara.
+
+Conforme a la regla de este mismo registro —«un cambio obliga a revalidar los
+casos válidos y corruptos»—, el caso corrupto de esquema se ejecutó con las dos
+versiones sobre la misma entrada:
+
+| | CPython 3.12.3 | CPython 3.12.7 |
+|---|---|---|
+| Código de salida | 1 | 1 |
+| Salida estándar | vacía | vacía |
+| Diagnóstico | `Additional properties are not allowed ('unknown_field' was unexpected)` | idéntico |
+
+Y la puerta completa se ejecutó por los dos caminos: **5 PASS** en ambos, con
+los `stderr` de las cuatro clases no-OCI idénticos byte a byte.
+
+Se aprueban por tanto **las dos versiones**, como lista explícita de dos y no
+como patrón de familia: una 3.12 futura no queda aprobada de antemano. Los
+metadatos de cada evidencia siguen registrando cuál corrió, de modo que la
+evidencia no pierde precisión.
+
+**Aviso para quien la ejecute.** El script crea el directorio de evidencia
+*antes* de comprobar las versiones, así que una ejecución que falle por versión
+deja el directorio creado y la siguiente se niega a continuar porque ya existe.
+Hay que usar un nombre nuevo.
 
 ## Formato obligatorio de evidencia
 

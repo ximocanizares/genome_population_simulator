@@ -227,6 +227,14 @@ comprobar que se midió con el entorno correcto.
   porque el validador de esquemas se lanza como proceso externo y no encuentra
   su módulo. La versión está **fijada a propósito** en la 4.10.3: las modernas
   retiran la pieza que el validador usa.
+- **La puerta de los validadores independientes se ejecuta con el `python3`
+  que encuentre el camino de búsqueda**, que es el del entorno virtual del
+  proyecto (3.12.7) si está activado y el del sistema (3.12.3) si no. Desde el
+  22 de septiembre de 2026 **las dos están aprobadas**, revalidadas sobre el
+  caso corrupto con resultado idéntico; antes solo lo estaba la del sistema y
+  la puerta fallaba según desde dónde se lanzara. Y el script **crea el
+  directorio de evidencia antes de comprobar las versiones**, así que un fallo
+  deja el directorio creado y obliga a usar un nombre nuevo.
 - **`bcftools` y `tabix` deben ser exactamente 1.24**, que es lo que DTC-066
   —la decisión que fija la puerta externa del formato VCF— exige. Se instalaron
   compiladas en `/usr/local` el 20 de septiembre de 2026, que va por delante de

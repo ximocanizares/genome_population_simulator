@@ -613,11 +613,21 @@ en los largos.
 **por longitud de motivo**, de modo que el suelo saliera de una tabla en vez de
 declararse locus a locus. Hoy no se hace.
 
-#### S-32 — un cambio de base dentro de un microsatélite rechaza el escenario (22/09/2026)
+#### S-32 — una modificación pequeña dentro de un microsatélite rechaza el escenario (22/09/2026)
 
 **Decidido.** Si un cambio de base, una inserción o una deleción declarados caen
 **dentro del intervalo de un locus de repetición**, el escenario se **rechaza
-antes de simular**, nombrando el locus y la modificación que lo invade.
+antes de simular**, nombrando el locus y:
+
+- **la modificación exacta**, cuando se declara en coordenadas de la
+  referencia: los cambios de base y las filas de la matriz de variantes;
+- **los candidatos**, cuando se declara en coordenadas vigentes: las
+  inserciones y las deleciones. El diagnóstico dice que **una** inserción o
+  deleción anterior rompió el tramo y **enumera las declaradas sobre esa
+  copia**, sin afirmar cuál de ellas fue.
+
+La precisión es del 22 de septiembre de 2026 y está justificada más abajo, en
+«por qué con un indel se nombran los candidatos».
 
 **Por qué.** El alelo de un microsatélite describe **el tracto tal como está en
 la referencia**: su motivo, su número de unidades, su pureza y su tirada más
@@ -633,8 +643,55 @@ cambio de base**: tiene que expresarlo como parte del alelo del locus, con su
 secuencia o con su lista de interrupciones. Es más restrictivo, y es
 deliberado — la alternativa es publicar anotaciones que no describen lo que hay.
 
-**Cómo se aplica.** El alelo de repetición se aplica **el último**, y exige que
-el intervalo del tracto llegue **intacto**. Dos errores propios nombran el caso.
+**Cómo se aplica.** En **dos sitios que cubren mitades distintas**, y ninguno
+basta solo:
+
+1. **En la frontera de configuración**, sobre lo que el usuario escribió y
+   antes de materializar a nadie. Ahí **no hay sorteo**, de modo que el rechazo
+   no puede depender de la semilla. Juzga los cambios de base y las filas de la
+   matriz, suministrada o generada.
+2. **En la cadena de segmentos**, consultada **para toda copia, se aplique o no
+   el alelo**, exigiendo que el intervalo del tracto llegue intacto. Juzga las
+   inserciones y las deleciones.
+
+La segunda condición es la que quita la dependencia de la semilla de raíz:
+comprobar solo al aplicar el alelo hacía que el escenario se aceptara o se
+rechazara **según qué alelo saliera sorteado**, y cuando se aceptaba la verdad
+publicaba que la copia «conserva el tracto de la referencia» sin conservarlo.
+
+**Por qué con un indel se nombran los candidatos.** Porque **no todas las
+modificaciones se cuentan con la misma regla de medir**. Un cambio de base
+declara su posición en **coordenadas de la referencia**; una inserción o una
+deleción declaran su punto en las **vigentes**, las de la secuencia después de
+los cambios anteriores. Una inserción cambia la longitud, así que a partir de
+la segunda las dos reglas se separan.
+
+Comparar el punto de un indel contra el intervalo del locus es entonces
+comparar dos reglas distintas, y **se equivoca en las dos direcciones**:
+reproducido el 22 de septiembre de 2026, con una inserción previa de 60 bases,
+un indel declarado en el punto 210 cae de verdad en la 150 —dentro del tracto—
+y la comparación lo dejaba pasar; y otro declarado en el punto 150 cae de
+verdad en la 90 —fuera— y la comparación **rechazaba un escenario válido**
+diciéndole al usuario que su cambio estaba dentro del microsatélite.
+
+De ahí que los indeles no se juzguen en la frontera, sino en la cadena de
+segmentos, que mira el resultado ya montado y **no tiene deriva posible**. El
+precio es que ahí ya no se distingue cuál de las modificaciones rompió el
+tramo, y por eso se enumeran los candidatos.
+
+**La alternativa que se descartó, y por qué.** Traducir el punto declarado a
+coordenadas de la referencia descontando los indeles anteriores. Es posible,
+pero significa **una segunda aritmética de coordenadas** conviviendo con la que
+la cadena de segmentos ya sostiene, y dos implementaciones del mismo concepto
+acaban separándose. La ronda de revisión anterior encontró justo eso en este
+mismo trabajo: la pregunta «¿lleva este documento alelos de repetición?»,
+escrita dos veces y respondiendo cosas distintas.
+
+**Ampliación posible, registrada y no hecha:** nombrar el indel exacto
+recomponiendo la copia modificación a modificación y comprobando la integridad
+después de cada una, para quedarse con la primera que la rompe. Solo costaría
+en el camino de error. Hoy no se hace: el usuario que recibe el diagnóstico
+tiene delante su propio fichero con los indeles que declaró.
 
 **Origen.** La regla la propuso el implementador al construir el alelo dentro
 del estado haplotípico, la declaró para confirmar por no estar en el plan, y el
