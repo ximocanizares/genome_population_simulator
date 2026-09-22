@@ -613,6 +613,33 @@ en los largos.
 **por longitud de motivo**, de modo que el suelo saliera de una tabla en vez de
 declararse locus a locus. Hoy no se hace.
 
+#### S-32 — un cambio de base dentro de un microsatélite rechaza el escenario (22/09/2026)
+
+**Decidido.** Si un cambio de base, una inserción o una deleción declarados caen
+**dentro del intervalo de un locus de repetición**, el escenario se **rechaza
+antes de simular**, nombrando el locus y la modificación que lo invade.
+
+**Por qué.** El alelo de un microsatélite describe **el tracto tal como está en
+la referencia**: su motivo, su número de unidades, su pureza y su tirada más
+larga se derivan de esas bases. Si otra modificación ya tocó ese tramo, el alelo
+seguiría describiendo un tracto que **ya no existe**, y la anotación publicada
+en la verdad y en el VCF sería **falsa**. No sería un error visible: sería un
+dato incorrecto que alguien se cree, que es la clase de fallo que este proyecto
+persigue.
+
+**Consecuencia práctica, dicha en voz alta.** Un usuario que quiera introducir
+una variante puntual dentro de un microsatélite **no puede hacerlo declarando un
+cambio de base**: tiene que expresarlo como parte del alelo del locus, con su
+secuencia o con su lista de interrupciones. Es más restrictivo, y es
+deliberado — la alternativa es publicar anotaciones que no describen lo que hay.
+
+**Cómo se aplica.** El alelo de repetición se aplica **el último**, y exige que
+el intervalo del tracto llegue **intacto**. Dos errores propios nombran el caso.
+
+**Origen.** La regla la propuso el implementador al construir el alelo dentro
+del estado haplotípico, la declaró para confirmar por no estar en el plan, y el
+responsable la confirmó el 22 de septiembre de 2026.
+
 #### Bloque «cómo se publica la verdad» — S-08 y S-05 (20/09/2026)
 
 **S-08, aceptado sin cambio.** El alelo se publica como un caso de inserción o
@@ -1634,15 +1661,28 @@ frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
     que una herramienta conforme rechaza. Segunda: el estándar dice que si ese
     campo **se omite** se asume **cero** fuera de los alelos simbólicos, de
     modo que omitirlo no es «no decir nada» sino **afirmar cero**. El proyecto
-    lo emite **explícito para cada alelo**, incluido el de referencia.
+    lo emite **explícito para cada alelo alternativo**.
+
+> **Retirado el 22/09/2026: la exigencia sobre el alelo de referencia.** Este
+> paso pedía que el número de copias se emitiera también para el **alelo de
+> referencia**. **No es expresable** con un locus de varios motivos: el número
+> de copias por bloque del tracto que hay en la referencia exigiría una
+> estructura en bloques, y la decisión S-30 declara que esa estructura **se
+> declara y no puede derivarse**. El tracto de la referencia no la declara en
+> ninguna parte. Queda por tanto **solo para los alelos alternativos**, que son
+> los que el usuario declara con su estructura. Falta además confirmar contra
+> la especificación si el campo que cuenta las secuencias repetidas es «uno por
+> alelo alternativo», en cuyo caso el alelo de referencia sencillamente no se
+> describe con estos campos y la exigencia sobraba por partida doble.
   - Se comprueba con: un diploide con dos alelos produce **un** registro con
     dos alternativas y genotipo faseado, alineado a la izquierda del tracto
     como DTC-064 obliga; la cabecera declara cada campo usado, con su número y
     su tipo, y ninguno más; el campo de número de copias se emite como decimal
     y un tracto con unidad parcial produce un valor no entero; **cada alelo
-    del registro, incluido el de referencia, lleva su número de copias
-    explícito**, y el oráculo comprueba que cada valor **se corresponde con la
-    longitud del alelo al que acompaña**, en su mismo orden; el oráculo
+    alternativo lleva su número de copias explícito** —el de referencia **no**,
+    por lo dicho en el recuadro de arriba—, y el oráculo comprueba que cada
+    valor **se corresponde con la longitud del alelo al que acompaña**, en su
+    mismo orden; el oráculo
     semántico propio reconstruye la secuencia del alelo desde `REF`/`ALT` y la
     compara con la verdad; **ningún registro usa representación simbólica**,
     comprobado con una búsqueda negativa con control positivo, ni siquiera con
@@ -1765,6 +1805,66 @@ no introduce duplicados y que el perfil sigue registrándose como sin PCR
     exactamente las mismas subsemillas que antes, comparadas con la línea base.
     **Debe fallar contra:** una extensión que renumere o reordene las etapas
     existentes.
+
+- ☐ **F4.8.1.1.** **Guarda de admisión: un locus que vaya a tartamudear exige
+  una tirada mínima efectiva de al menos 2 unidades.**
+  - Depende de: F4.8.1.
+  - Procede de: **decisión del responsable del 21/09/2026**, tomada sobre un
+    hallazgo de la segunda revisión adversarial de la entrega 1.
+  - Cambia: la admisión que cruza el evento técnico con los loci declarados.
+    **No** `src/tandem_repeat.rs`: el modelo no se toca.
+
+  **Qué exige.** Cuando un locus vaya a sufrir tartamudeo, su mínimo de tirada
+  **efectivo** —el suyo si lo declara, y si no el general— debe ser **2 o más**.
+  Si es 1, la configuración se rechaza nombrando el locus, el valor declarado y
+  el mínimo exigido.
+
+  **Por qué.** El paso de unidades no permite que una contracción vacíe su
+  tirada (ver la nota de `apply_unit_step` en `src/tandem_repeat.rs`). La
+  consecuencia es que **un tracto cuya tirada más larga sea de una sola copia no
+  puede contraerse nunca, mientras que expandirse sí puede**: una clase entera de
+  tractos queda congelada frente a la contracción con la expansión libre, lo que
+  **sesga el modelo hacia el alargamiento**. Hasta la decisión S-31 esa clase no
+  llegaba a entrar, porque la tirada mínima general es 3; desde que cada locus
+  puede declarar la suya, uno con tirada mínima 1 la admite. **La decisión S-31
+  abrió esa puerta sin querer y esta guarda la cierra.**
+
+  El responsable eligió esta salida en vez de tocar el modelo, y conviene
+  registrar por qué:
+
+  - **Lo que cierra:** desaparece la clase de microsatélites que no pueden
+    contraerse nunca. Todo alelo admitido podrá perder al menos una unidad.
+  - **Lo que no cierra, y está bien:** con una tirada de dos copias siguen
+    prohibidos los pasos de dos y tres unidades, porque la vaciarían. Esa
+    asimetría residual **es físicamente correcta** —en la realidad tampoco se
+    pueden perder tres unidades de una tirada que solo tiene dos— y además los
+    tramos cortos apenas tartamudean, porque la tasa crece con la longitud. La
+    opción convierte un **sesgo artificial del modelo** en una **restricción
+    física real**.
+  - **A quién afecta:** a casi nadie. El valor por omisión es 3. Solo toca a
+    quien baje deliberadamente el mínimo de su locus a 1, cosa que el esquema
+    hoy permite.
+
+  **Dónde hay que comprobarlo, y por qué no se pudo hacer antes.** El
+  microsatélite se declara **junto a la referencia** y el tartamudeo se
+  configura **en el evento técnico**: son dos sitios distintos del fichero. La
+  condición «si va a tartamudear, exige 2» **no se puede comprobar al leer el
+  locus**, porque en ese momento todavía no se sabe si habrá tartamudeo. Hay que
+  comprobarla **cuando las dos configuraciones están resueltas**. Por eso la
+  guarda no se escribió durante la entrega 1 pese a haberse decidido allí: una
+  guarda escrita entonces habría quedado sin efecto.
+
+  - Se comprueba con: un locus con tirada mínima 1 **y** tartamudeo activo se
+    rechaza nombrando el locus y los dos valores; el mismo locus **sin**
+    tartamudeo se admite, que es lo que demuestra que la guarda mira las dos
+    configuraciones y no solo el locus; con tirada mínima 2 y tartamudeo activo
+    se admite; y un locus que no declara mínimo propio hereda el general de 3 y
+    entra sin tocar nada.
+  - **Debe fallar contra:** una guarda que mire solo el locus y rechace la
+    tirada mínima 1 aunque no haya tartamudeo —la segunda comprobación la caza—;
+    una que no mire el mínimo **efectivo** sino solo el declarado, que dejaría
+    pasar un locus sin mínimo propio bajo un general de 1; y la ausencia de
+    guarda, que la primera comprobación caza.
 
 - ☐ **F4.8.2.** Modelo `stutter-v1`, puro, con la **forma publicada**: la
   probabilidad de resbalón por ciclo depende **linealmente de la longitud de la
@@ -1914,6 +2014,10 @@ no introduce duplicados y que el perfil sigue registrándose como sin PCR
   - Depende de: F4.8.5.
   - Procede de: REQ-DAT-80 propuesto con la acotación de **C-1**, DTC-081;
     decisión **S-16**.
+  - **Recordatorio:** declarar un locus activa el tartamudeo de base, y por eso
+    la guarda de F4.8.1.1 —tirada mínima efectiva de al menos 2 cuando el locus
+    vaya a tartamudear— tiene que estar en pie antes de que este paso pueda dar
+    por buena la acotación.
   - Cambia: nada; es una prueba de sistema y su evidencia.
   - Se comprueba con:
     **(a)** `sha256sum` de los dos FASTQ, la verdad, el VCF, la configuración

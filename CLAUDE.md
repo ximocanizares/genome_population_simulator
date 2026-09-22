@@ -58,7 +58,17 @@ documentación, puertas y seguimiento.
   contratos, límites y resultado esperado.
 - Historial completo solo si la tarea depende de decisiones conversacionales que
   no estén registradas en el repositorio.
-- **No más de un subagente Opus activo a la vez.**
+- **No más de dos subagentes Opus activos a la vez.** Confirmado por el
+  responsable el 22 de septiembre de 2026; hasta entonces el documento decía
+  uno, heredado literalmente de la política de Codex.
+- **Y nunca dos sobre el mismo estado mutable.** No es lo mismo que el límite
+  anterior y protege de otra cosa: dos agentes que trabajen a la vez sobre el
+  árbol de trabajo se pisan. El 21 de septiembre un revisor y un implementador
+  compartieron el directorio temporal y **por poco cruzan sus arneses de
+  mutación**, lo que habría hecho perseguir un fantasma. La forma de evitarlo
+  que funcionó: el que solo lee trabaja sobre una copia extraída de un commit
+  con `git archive`, con su propio directorio de compilación, y el encargo se
+  lo dice explícitamente.
 - No lanzar dos agentes para la misma pregunta. Las revisiones independientes se
   ejecutan en secuencia y sobre el estado ya corregido.
 - No crear un agente solo para esperar, consultar estado o ejecutar un comando.
@@ -170,6 +180,7 @@ declarado en los dos raíces de crate (`src/lib.rs` y `src/main.rs`).
 | Arquitectura | `design/arquitectura-0.1.md` |
 | Plan de la fase en curso | `design/plan-implementacion-fN-0.1.md` |
 | Ampliaciones aplazadas (DTF-xxx) | `design/registro-ampliaciones-futuras-0.1.md` |
+| **Deudas técnicas del código actual (DT-xxx)** | `design/registro-deudas-tecnicas-0.1.md` |
 | Skills del proyecto (diez, en castellano) | `.claude/skills/*/SKILL.md` |
 
 Ante un conflicto entre el código y un documento normativo, **manda el
@@ -236,7 +247,10 @@ F3/F4 —eran doce hasta que la de normalización con `bcftools` se encendió el
 
 ## 8. Entorno
 
-Disco WSL con techo duro de **256 GiB**, al 96 %. No crece solo, y liberar
-dentro no devuelve espacio a Windows sin compactar el `.vhdx`. `target/debug`
-ocupa 16 GB; `cargo clean` solo adelanta trabajo, porque se rellena en la
-siguiente compilación.
+Disco WSL. **El 21 de septiembre de 2026 el volumen se amplió**: hoy son 393 GB
+con 143 libres, al 62 %. Antes eran 256 GiB al 96 %, y esa cifra circuló en
+informes hasta que una revisión la encontró caducada — conviene volver a
+medirla antes de citarla. Sigue valiendo lo demás: el volumen **no crece solo**
+más allá de su techo, y liberar dentro no devuelve espacio a Windows sin
+compactar el `.vhdx`. `target/debug` ocupa 16 GB; `cargo clean` solo adelanta
+trabajo, porque se rellena en la siguiente compilación.
