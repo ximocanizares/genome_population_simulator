@@ -1082,7 +1082,12 @@ fn validate_effective_config_v3_against_manifest_bytes(
         fields.push("repeat_loci");
         fields.push("repeat_admission");
     }
-    validate_effective_closed_object(object, &fields, "effective-config.json", effective_path)?;
+    // El nombre del esquema que se denuncia es el de la versión que el documento
+    // declara. Antes se denunciaba siempre el de la versión 4, de modo que una
+    // configuración efectiva v6 defectuosa mandaba a mirar un esquema que no era
+    // el suyo.
+    validate_effective_closed_object(object, &fields, "effective-config.json", effective_path)
+        .map_err(|error| retag_format_schema(error, effective_schema_file_for(declared_version)))?;
     if object.get("effective_config_kind").and_then(Value::as_str) != Some("gps_effective_config")
         || !matches!(
             declared_version,
@@ -6669,6 +6674,18 @@ fn effective_schema_version(path: &Path, bytes: &[u8]) -> Result<&'static str, D
                 EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS
             ),
         )),
+    }
+}
+
+/// Nombre del esquema que le corresponde a una versión declarada.
+///
+/// Sale del propio tipo que decide qué versión se publica, de modo que el nombre
+/// no pueda desviarse de la versión emitida.
+fn effective_schema_file_for(version: Option<&str>) -> &'static str {
+    if version == Some(EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS) {
+        DeclaredDocumentVersion::V4.effective_config_schema_file()
+    } else {
+        DeclaredDocumentVersion::V2.effective_config_schema_file()
     }
 }
 

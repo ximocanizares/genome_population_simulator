@@ -1543,7 +1543,7 @@
           }
         }
       },
-      "description": "Las cuatro listas de bloque son PARALELAS y todas tienen la longitud que repeat_sequence_count declara. Es la forma que el VCF 4.5 define para una repetición compuesta."
+      "description": "Las cuatro listas de bloque —block_motifs, block_motif_lengths, block_unit_counts y block_bases— son PARALELAS y todas tienen la longitud que repeat_sequence_count declara. Es la forma que el VCF 4.5 define para una repetición compuesta. AVISO: este esquema NO puede comprobar esa correspondencia, porque comparar la longitud de varias propiedades hermanas entre sí y contra un entero no es expresable en JSON Schema; lo que el esquema comprueba es el tipo y el dominio de cada lista. La correspondencia la sostiene una prueba de Rust sobre el documento publicado, con un fixture cuyos bloques tienen longitud de motivo, copias y bases todas distintas, de modo que cualquier desalineación sea visible."
     },
     "effective_repeat_locus": {
       "type": "object",

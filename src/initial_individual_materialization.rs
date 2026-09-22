@@ -7,7 +7,7 @@
 //! se calculan después de integrar los cambios directos, sin modificar las
 //! copias sorteadas.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde_json::{Value, json};
@@ -26,7 +26,8 @@ use crate::materialization::{
 };
 use crate::population_snvs::{PreparedPopulationSnv, PreparedPopulationSnvs};
 use crate::reference::Reference;
-use crate::segments::CanonicalBase;
+use crate::repeat_genotypes::{RepeatAlleleDraw, apply_repeat_alleles};
+use crate::segments::{CanonicalBase, CurrentIndelPiece};
 use crate::small_event_composition::DeclaredSmallEvent;
 
 /// Fundador final. Sus copias se conservan únicamente como segmentos compactos
@@ -62,6 +63,7 @@ impl MaterializedInitialIndividual {
 pub struct InitialIndividualsMaterialization {
     individuals: Vec<MaterializedInitialIndividual>,
     statistics: Value,
+    repeat_draws: Vec<RepeatAlleleDraw>,
 }
 
 impl InitialIndividualsMaterialization {
@@ -74,6 +76,36 @@ impl InitialIndividualsMaterialization {
     #[must_use]
     pub const fn statistics(&self) -> &Value {
         &self.statistics
+    }
+
+    /// Identificadores de los loci que **han llegado a alguna copia**.
+    ///
+    /// No es lo mismo que los loci declarados: un locus cuyo único alelo es el
+    /// de la referencia no aplica nada, y por eso no aparece aquí. Es lo que
+    /// permite que la verdad de ese escenario siga siendo byte a byte la de
+    /// antes, cabecera incluida.
+    #[must_use]
+    pub fn applied_repeat_locus_ids(&self) -> BTreeSet<&str> {
+        self.individuals
+            .iter()
+            .flat_map(|individual| individual.individual.sequences())
+            .flat_map(crate::haplotype::SequenceGenotype::copies)
+            .flat_map(|copy| copy.segments().current_modifications())
+            .filter_map(|piece| match piece {
+                CurrentIndelPiece::RepeatAllele(allele) => Some(allele.locus_id().as_str()),
+                CurrentIndelPiece::Source(_) | CurrentIndelPiece::Inserted(_) => None,
+            })
+            .collect()
+    }
+
+    /// Lo que le tocó a cada copia en cada locus de repetición.
+    ///
+    /// Se conserva porque la **frecuencia realizada** que el manifiesto publica
+    /// es el recuento de esta lista, no la frecuencia declarada: si se copiara
+    /// la declarada, un corpus pequeño no lo delataría nunca.
+    #[must_use]
+    pub fn repeat_draws(&self) -> &[RepeatAlleleDraw] {
+        &self.repeat_draws
     }
 }
 
@@ -95,6 +127,13 @@ pub enum InitialIndividualsMaterializationError {
     },
     InvalidStatistics,
     Sampling(String),
+    /// Rechazo de un locus de repetición, **con su diagnóstico entero**.
+    ///
+    /// No se aplana a texto: aplanarlo metía un diagnóstico renderizado dentro
+    /// del campo de detalle de otro, y lo que el usuario acababa leyendo eran
+    /// comillas escapadas tres veces alrededor de un nombre de variante de
+    /// Rust. Es además el mensaje más probable de esta funcionalidad.
+    Repeat(crate::diagnostics::Diagnostic),
 }
 
 impl fmt::Display for InitialIndividualsMaterializationError {
@@ -127,6 +166,7 @@ pub fn materialize_initial_individuals(
     let mut populations = config.initial_populations().iter().collect::<Vec<_>>();
     populations.sort_by(|left, right| left.population_id().cmp(right.population_id()));
     let mut individuals = Vec::new();
+    let mut repeat_draws = Vec::new();
     for population in populations {
         let mut ids = population.individual_ids().iter().collect::<Vec<_>>();
         ids.sort();
@@ -148,10 +188,23 @@ pub fn materialize_initial_individuals(
                 ),
             )
             .map_err(InitialIndividualsMaterializationError::Integration)?;
-            validate_individual_materialization(integrated.individual(), reference)?;
+            // **Los alelos de repetición se aplican los últimos.** Su anotación
+            // describe el tracto de la referencia, de modo que el intervalo
+            // tiene que llegar intacto; comprobarlo antes de la matriz y de los
+            // cambios directos no valdría, porque todavía podrían tocarlo.
+            let applied = apply_repeat_alleles(
+                integrated.individual(),
+                reference,
+                config,
+                population.population_id(),
+            )
+            .map_err(InitialIndividualsMaterializationError::Repeat)?;
+            let (individual, draws) = applied.into_parts();
+            repeat_draws.extend(draws);
+            validate_individual_materialization(&individual, reference)?;
             individuals.push(MaterializedInitialIndividual {
                 population_id: population.population_id().clone(),
-                individual: integrated.individual().clone(),
+                individual,
                 explicit_snp_constraints: integrated.explicit_snp_constraints().to_vec(),
             });
         }
@@ -160,6 +213,7 @@ pub fn materialize_initial_individuals(
     Ok(InitialIndividualsMaterialization {
         individuals,
         statistics,
+        repeat_draws,
     })
 }
 

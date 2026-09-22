@@ -998,7 +998,9 @@ fn the_effective_config_v6_schema_requires_the_repeat_section() {
 // Decisión 1 del responsable: varios motivos por locus.
 // ---------------------------------------------------------------------------
 
-/// Locus compuesto `(TCTA)5(TCTG)5(TCTA)5`, declarado con sus tres motivos.
+/// Locus compuesto `(TCTA)5(TCTG)5(TCTA)5`, el caso biológico que motiva la
+/// decisión. Sirve para la **admisión**, no para las listas: sus tres bloques
+/// son indistinguibles entre sí.
 fn composite_locus(extra: &str) -> String {
     format!(
         r#"{}
@@ -1012,6 +1014,44 @@ motifs = ["TCTA", "TCTG", "TCTA"]
 
 [[reference.repeat_loci.alleles]]
 units = [5, 5, 5]
+frequency = 1.0
+"#,
+        header("4")
+    )
+}
+
+/// Locus compuesto **saturado**: `(CAG)4(CA)5`.
+///
+/// *Añadido tras la segunda revisión adversarial.* El fixture de arriba es
+/// **degenerado para las listas**: sus tres bloques tienen la misma longitud de
+/// motivo, las mismas copias y las mismas bases, y la lista de motivos es
+/// además simétrica, de modo que invertir, cruzar o colapsar las cuatro listas
+/// **da exactamente el mismo documento**. El revisor lo demostró publicando la
+/// longitud de motivo del primer bloque en todos: las 1198 pruebas pasaron.
+///
+/// Aquí las tres magnitudes son **todas distintas y asimétricas**:
+///
+/// | | bloque 0 | bloque 1 |
+/// |---|---|---|
+/// | motivo | `CAG` | `CA` |
+/// | longitud del motivo | 3 | 2 |
+/// | copias | 4 | 5 |
+/// | bases | 12 | 10 |
+///
+/// Ninguna permutación ni colapso de las listas sobrevive a comprobarlas contra
+/// estos valores literales.
+fn saturated_locus() -> String {
+    format!(
+        r#"{}
+[[reference.repeat_loci]]
+id = "STR-S"
+sequence = "chr1"
+start = 101
+end = 130
+motifs = ["CAG", "CA"]
+
+[[reference.repeat_loci.alleles]]
+units = [4, 5]
 frequency = 1.0
 "#,
         header("4")
@@ -1060,52 +1100,36 @@ frequency = 1.0
     assert!(rendered.contains("pureza 0.666"), "{rendered}");
 }
 
-/// La configuración efectiva publica los bloques como **listas paralelas**, con
-/// la forma que el VCF 4.5 define, y las listas se corresponden entre sí.
+/// **Las cuatro listas de bloque se comprueban contra sus valores literales.**
+///
+/// *Corregido tras la segunda revisión adversarial.* La versión anterior
+/// comprobaba que «copias por longitud de motivo son las bases», y eso **es una
+/// identidad circular**: el número de copias está *definido* como bases entre
+/// longitud del motivo, así que se cumple siempre, con listas alineadas o no.
+/// Aquí cada lista se compara con lo que tiene que valer, sobre un fixture donde
+/// las tres magnitudes son distintas entre bloques.
 #[test]
 fn the_effective_config_publishes_the_blocks_as_parallel_lists() {
-    let document = published_effective_config(&composite_locus(""));
+    let document = published_effective_config(&saturated_locus());
     let locus = &document["repeat_loci"][0];
-    assert_eq!(locus["motifs"], serde_json::json!(["TCTA", "TCTG", "TCTA"]));
-    assert_eq!(locus["motif_lengths"], serde_json::json!([4, 4, 4]));
+    assert_eq!(locus["motifs"], serde_json::json!(["CAG", "CA"]));
+    assert_eq!(locus["motif_lengths"], serde_json::json!([3, 2]));
 
     let allele = &locus["alleles"][0];
-    let count = allele["repeat_sequence_count"].as_u64().expect("recuento");
-    assert_eq!(count, 3);
-    let motifs = allele["block_motifs"].as_array().expect("motivos");
-    let lengths = allele["block_motif_lengths"]
-        .as_array()
-        .expect("longitudes");
-    let units = allele["block_unit_counts"].as_array().expect("copias");
-    let bases = allele["block_bases"].as_array().expect("bases");
-    for list in [motifs, lengths, units, bases] {
-        assert_eq!(
-            list.len() as u64,
-            count,
-            "las cuatro listas de bloque tienen que tener la longitud que el recuento declara"
-        );
-    }
-    // La correspondencia entre listas: copias por longitud del motivo son las
-    // bases del bloque, y el motivo tiene la longitud que la lista dice.
-    for index in 0..count as usize {
-        let motif = motifs[index].as_str().expect("motivo");
-        let length = lengths[index].as_u64().expect("longitud");
-        let unit_count = units[index].as_f64().expect("copias");
-        let block_bases = bases[index].as_u64().expect("bases");
-        assert_eq!(motif.len() as u64, length, "bloque {index}");
-        assert!(
-            (unit_count * length as f64 - block_bases as f64).abs() < f64::EPSILON,
-            "bloque {index} descuadrado"
-        );
-    }
-    let total: u64 = bases
-        .iter()
-        .map(|value| value.as_u64().expect("bases"))
-        .sum();
-    assert_eq!(
-        total as usize,
-        allele["sequence"].as_str().expect("secuencia").len()
-    );
+    assert_eq!(allele["repeat_sequence_count"], 2);
+    assert_eq!(allele["block_motifs"], serde_json::json!(["CAG", "CA"]));
+    assert_eq!(allele["block_motif_lengths"], serde_json::json!([3, 2]));
+    assert_eq!(allele["block_unit_counts"], serde_json::json!([4.0, 5.0]));
+    assert_eq!(allele["block_bases"], serde_json::json!([12, 10]));
+    assert_eq!(allele["sequence"], "CAG".repeat(4) + &"CA".repeat(5));
+    assert_eq!(allele["units"], 9.0);
+
+    // Y el orden importa: invertir cualquiera de las listas produce un documento
+    // distinto del que se publica, que es lo que el fixture degenerado no podía
+    // demostrar.
+    assert_ne!(allele["block_motif_lengths"], serde_json::json!([2, 3]));
+    assert_ne!(allele["block_unit_counts"], serde_json::json!([5.0, 4.0]));
+    assert_ne!(allele["block_bases"], serde_json::json!([10, 12]));
 }
 
 /// Las dos formas de declarar el motivo son excluyentes, y el número de
@@ -1280,6 +1304,201 @@ fn each_locus_publishes_its_own_minima() {
     assert_eq!(
         document["repeat_admission"]["min_purity"], 0.8,
         "el general sigue siendo el de omisión y se publica aparte"
+    );
+}
+
+/// **El tramo decisivo de la cascada: el general pone la pureza y el locus solo
+/// la tirada.**
+///
+/// *Añadido tras la segunda revisión adversarial.* Estaban cubiertos el locus
+/// que no declara nada y el que declara el mismo campo que el general; faltaba
+/// el **mixto**, que es donde la herencia se ejercita de verdad. Sustituyendo
+/// los dos valores de partida por los de omisión, las 54 pruebas de los dos
+/// ficheros pasaban.
+///
+/// Y el cambio va en la dirección peligrosa: con el general en 0,9 y un locus
+/// que solo declara la tirada, el comportamiento correcto rechaza con 0,9 y el
+/// defectuoso con 0,8. **La guarda se relajaría por debajo de lo que el usuario
+/// escribió.**
+#[test]
+fn a_locus_that_declares_only_the_run_still_inherits_the_general_purity() {
+    let body = format!(
+        r#"{}
+[reference.repeat_admission]
+min_purity = 0.9
+
+[[reference.repeat_loci]]
+id = "STR-MIX"
+sequence = "chr1"
+start = 101
+end = 116
+motif = "CA"
+min_longest_run_units = 5
+
+[[reference.repeat_loci.alleles]]
+sequence = "CACACACACACATTTT"
+frequency = 1.0
+"#,
+        header("4")
+    );
+    // Pureza 0,75: por debajo del 0,9 general, que el locus NO declara y por
+    // tanto hereda. El mensaje tiene que decir 0.9, no 0.8.
+    let error = load(&body).expect_err("la pureza heredada del general lo rechaza");
+    let rendered = format!("{error:?}");
+    assert!(rendered.contains("locus STR-MIX"), "{rendered}");
+    assert!(rendered.contains("pureza 0.75"), "{rendered}");
+    assert!(
+        rendered.contains("mínimo declarado es 0.9"),
+        "el locus hereda la pureza del general, no la de omisión: {rendered}"
+    );
+
+    // Con un alelo que sí llega al 0,9 heredado, el locus entra y se ve que la
+    // tirada declarada por él sí manda: la suya es 5 y la general sería 3.
+    let admitted = body.replace("sequence = \"CACACACACACATTTT\"", "units = 8");
+    let effective = load(&admitted).expect("alelo puro de ocho unidades");
+    let admission = effective.repeat_loci()[0].admission();
+    assert!(
+        (admission.min_purity() - 0.9).abs() < f64::EPSILON,
+        "la pureza se hereda del general"
+    );
+    assert_eq!(
+        admission.min_longest_run_units(),
+        5,
+        "la tirada es la que el locus declara"
+    );
+
+    // Y baja lo suficiente, la tirada propia del locus rechaza donde la general
+    // habría admitido: cuatro unidades pasan el 3 general y no el 5 del locus.
+    let short = admitted.replace("units = 8", "units = 4");
+    let error = load(&short).expect_err("cuatro unidades con la tirada propia en cinco");
+    assert!(
+        format!("{error:?}").contains("mínimo declarado es 5"),
+        "{error:?}"
+    );
+}
+
+/// Un mínimo inválido se denuncia **con el campo que el usuario escribió** y
+/// nombrando el locus.
+///
+/// *Añadido tras la segunda revisión adversarial.* `Diagnostic::with` sobrescribe
+/// la clave, de modo que el envoltorio que añadía `fields` pisaba el campo que el
+/// error interior había nombrado: con la tirada a cero, el diagnóstico mandaba a
+/// mirar `min_purity`, una clave que el usuario no ha escrito.
+#[test]
+fn an_invalid_minimum_names_the_field_that_was_written_and_the_locus() {
+    let locus_level = (header("4") + MINIMAL_LOCUS).replace(
+        "motif = \"CAG\"",
+        "motif = \"CAG\"\nmin_longest_run_units = 0",
+    );
+    let error = load(&locus_level).expect_err("tirada mínima cero en el locus");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("reference.repeat_loci.min_longest_run_units"),
+        "el campo denunciado es el que se escribió: {error:?}"
+    );
+    assert!(
+        format!("{error:?}").contains("locus STR-1"),
+        "el diagnóstico nombra el locus, como todos los demás de repeticiones: {error:?}"
+    );
+
+    let locus_purity = (header("4") + MINIMAL_LOCUS)
+        .replace("motif = \"CAG\"", "motif = \"CAG\"\nmin_purity = 1.5");
+    let error = load(&locus_purity).expect_err("pureza mínima fuera de rango");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("reference.repeat_loci.min_purity")
+    );
+    assert!(format!("{error:?}").contains("locus STR-1"), "{error:?}");
+
+    // Y el mismo error en los mínimos generales denuncia su propio campo y no
+    // nombra ningún locus, porque no pertenece a ninguno.
+    let general = (header("4") + MINIMAL_LOCUS).replace(
+        "[reference]",
+        "[reference.repeat_admission]\nmin_longest_run_units = 0\n\n[reference]",
+    );
+    let error = load(&general).expect_err("tirada mínima cero en los generales");
+    assert_eq!(
+        error.context().get("fields").map(String::as_str),
+        Some("reference.repeat_admission.min_longest_run_units")
+    );
+    assert!(!format!("{error:?}").contains("locus "), "{error:?}");
+}
+
+/// Las tres divergencias que la decisión de varios motivos abrió entre el
+/// esquema de autoría y el lector.
+///
+/// *Añadido tras la segunda revisión adversarial.* Dos se cierran en el esquema;
+/// la tercera —que la lista de unidades tenga la misma longitud que la de
+/// motivos— **no es expresable** en el formato, y por eso el esquema lo dice en
+/// su descripción y la fija esta prueba sobre el lector.
+#[test]
+fn the_authoring_schema_closes_what_it_can_of_the_multi_motif_frontier() {
+    let with_motifs = |allele: serde_json::Value| {
+        serde_json::json!({
+            "config_kind": "general",
+            "schema_version": "4",
+            "reference": {
+                "kind": "simulated",
+                "id": "ref-main",
+                "composition": {"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25},
+                "sequences": [{"id": "chr1", "class": "chromosome", "length": 1000}],
+                "repeat_loci": [{
+                    "id": "STR-1", "sequence": "chr1", "start": 101, "end": 160,
+                    "motifs": ["CAG", "CA"], "alleles": [allele]
+                }]
+            }
+        })
+    };
+    let schema = "config-general-v4.schema.json";
+
+    // Control positivo.
+    assert!(validates(
+        &with_motifs(serde_json::json!({"units": [4, 5], "frequency": 1.0})),
+        schema
+    ));
+
+    assert!(
+        !validates(
+            &with_motifs(serde_json::json!({"sequence": "CAGCAGCAG", "frequency": 1.0})),
+            schema
+        ),
+        "con varios motivos la secuencia exacta no vale, y el esquema ya lo cierra"
+    );
+    assert!(
+        !validates(
+            &with_motifs(serde_json::json!({"units": 4, "frequency": 1.0})),
+            schema
+        ),
+        "con varios motivos el escalar no vale, y el esquema ya lo cierra"
+    );
+
+    // La tercera: el esquema **admite** una lista de longitud distinta, porque
+    // no puede compararla con la de motivos. Lo dice en su descripción, y quien
+    // la rechaza es el lector, nombrando el locus.
+    let mismatched = with_motifs(serde_json::json!({"units": [4, 5, 6], "frequency": 1.0}));
+    assert!(
+        validates(&mismatched, schema),
+        "si algún día el formato permitiera expresarlo, este aviso sobra y hay que cerrarlo"
+    );
+    let body = format!(
+        r#"{}
+[[reference.repeat_loci]]
+id = "STR-1"
+sequence = "chr1"
+start = 101
+end = 160
+motifs = ["CAG", "CA"]
+
+[[reference.repeat_loci.alleles]]
+units = [4, 5, 6]
+frequency = 1.0
+"#,
+        header("4")
+    );
+    let error = load(&body).expect_err("tres valores para dos bloques");
+    assert!(
+        format!("{error:?}").contains("hace falta uno por bloque"),
+        "{error:?}"
     );
 }
 

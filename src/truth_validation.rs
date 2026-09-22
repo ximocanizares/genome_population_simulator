@@ -18,7 +18,8 @@ use crate::truth_schema::{
     HaplotypeCopyRecord, MatrixProvenance, ModificationProvenance, ModificationProvenanceKind,
     NamedDigest, SegmentSource, TruthAllele, TruthContractError, TruthCurrentPiece,
     TruthCurrentSnp, TruthDocument, TruthHeader, TruthHistoryEvent, TruthLocus, TruthModification,
-    TruthPieceLink, TruthRecord, TruthSourceKind, TruthSourceRef, TruthStructuralEvent,
+    TruthPieceLink, TruthRecord, TruthRepeatBlock, TruthSourceKind, TruthSourceRef,
+    TruthStructuralEvent,
 };
 
 /// Resultado reconstruido exclusivamente desde `truth.jsonl` y la referencia.
@@ -597,6 +598,30 @@ struct SourceSlice {
     /// Ordenado por posición; los cambios son escasos y se consultan por
     /// búsqueda binaria sobre el intervalo que sigue vigente.
     snps: Vec<TruthCurrentSnp>,
+    /// Cierto cuando el tramo lo ocupa un **tracto realizado** y no las bases
+    /// de la referencia.
+    ///
+    /// Sigue registrándose como tramo ocupado para que dos fragmentos no
+    /// puedan reclamar la misma coordenada, pero un caso SNP que cayera dentro
+    /// **no** puede leer de él la base: la copia no tiene ahí una base de
+    /// referencia que consultar, igual que no la tiene una copia que perdió la
+    /// coordenada en una deleción.
+    ///
+    /// # Es defensiva, y ninguna prueba la ejercita. Dicho sin adornos
+    ///
+    /// Desde que la decisión S-32 rechaza **antes de simular** cualquier
+    /// cambio pequeño dentro del intervalo de un locus, este programa no puede
+    /// producir un documento en el que un caso SNP caiga dentro de un tracto
+    /// sustituido. La marca no sobra por eso: **este módulo no produce la
+    /// verdad, la verifica**, y su trabajo es no fiarse de quien la escribió,
+    /// venga de esta versión, de otra o de otro productor. Sin ella, un
+    /// documento así leería en ese tramo la base de la referencia —que no es la
+    /// que la copia tiene— y el contraste de genotipos daría por bueno un dato
+    /// falso.
+    ///
+    /// Queda anotada como una de las comprobaciones de verificador que ninguna
+    /// prueba dispara, que es la primera deuda del registro de deudas técnicas.
+    replaced_by_repeat: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -609,13 +634,22 @@ enum ReplayPiece {
         bases: String,
         provenance: ModificationProvenance,
     },
+    RepeatAllele {
+        locus_id: String,
+        source: SegmentSource,
+        bases: String,
+        blocks: Vec<TruthRepeatBlock>,
+        provenance: ModificationProvenance,
+    },
 }
 
 impl ReplayPiece {
     fn len(&self) -> Option<u64> {
         match self {
             Self::Source { source, .. } => source.end.checked_sub(source.start),
-            Self::Inserted { bases, .. } => u64::try_from(bases.len()).ok(),
+            Self::Inserted { bases, .. } | Self::RepeatAllele { bases, .. } => {
+                u64::try_from(bases.len()).ok()
+            }
         }
     }
 
@@ -627,6 +661,19 @@ impl ReplayPiece {
             },
             Self::Inserted { bases, provenance } => TruthCurrentPiece::Inserted {
                 bases: bases.clone(),
+                provenance: provenance.clone(),
+            },
+            Self::RepeatAllele {
+                locus_id,
+                source,
+                bases,
+                blocks,
+                provenance,
+            } => TruthCurrentPiece::RepeatAllele {
+                locus_id: locus_id.clone(),
+                source: source.clone(),
+                bases: bases.clone(),
+                blocks: blocks.clone(),
                 provenance: provenance.clone(),
             },
         }
@@ -775,6 +822,83 @@ fn replay_event(
             }
             *pieces = retained;
         }
+        // **El alelo de repetición se replica en coordenadas de referencia**,
+        // no en las vigentes: sustituye el intervalo declarado del locus, que
+        // tiene que llegar entero dentro de un solo fragmento de fuente y sin
+        // ningún cambio de base dentro. Es la misma regla que impone el estado
+        // haplotípico, escrita aquí por segunda vez y a propósito: si las dos
+        // no coincidieran, la comparación de fragmentos vigentes lo diría.
+        TruthHistoryEvent::RepeatAllele {
+            locus_id,
+            start,
+            end,
+            bases,
+            blocks,
+            provenance,
+            ..
+        } => {
+            if start >= end || bases.is_empty() {
+                return Err(TruthValidationError::HistoryDoesNotReplay {
+                    identity: copy.identity.clone(),
+                });
+            }
+            let index = pieces
+                .iter()
+                .position(|piece| match piece {
+                    ReplayPiece::Source { source, snps } => {
+                        source.start <= *start
+                            && *end <= source.end
+                            && !snps
+                                .iter()
+                                .any(|snp| (*start..*end).contains(&snp.position))
+                    }
+                    ReplayPiece::Inserted { .. } | ReplayPiece::RepeatAllele { .. } => false,
+                })
+                .ok_or_else(|| TruthValidationError::HistoryDoesNotReplay {
+                    identity: copy.identity.clone(),
+                })?;
+            let ReplayPiece::Source { source, snps } = pieces[index].clone() else {
+                return Err(TruthValidationError::HistoryDoesNotReplay {
+                    identity: copy.identity.clone(),
+                });
+            };
+            let mut replacement = Vec::with_capacity(3);
+            if source.start < *start {
+                let mut left = source.clone();
+                left.end = *start;
+                replacement.push(ReplayPiece::Source {
+                    source: left,
+                    snps: snps
+                        .iter()
+                        .filter(|snp| snp.position < *start)
+                        .cloned()
+                        .collect(),
+                });
+            }
+            let mut replaced = source.clone();
+            replaced.start = *start;
+            replaced.end = *end;
+            replacement.push(ReplayPiece::RepeatAllele {
+                locus_id: locus_id.clone(),
+                source: replaced,
+                bases: bases.clone(),
+                blocks: blocks.clone(),
+                provenance: provenance.clone(),
+            });
+            if *end < source.end {
+                let mut right = source.clone();
+                right.start = *end;
+                replacement.push(ReplayPiece::Source {
+                    source: right,
+                    snps: snps
+                        .iter()
+                        .filter(|snp| snp.position >= *end)
+                        .cloned()
+                        .collect(),
+                });
+            }
+            pieces.splice(index..=index, replacement);
+        }
     }
     Ok(())
 }
@@ -880,6 +1004,11 @@ fn split_replay_at(
                         source: right_source,
                         snps: right_snps,
                     }
+                }
+                ReplayPiece::RepeatAllele { .. } => {
+                    return Err(TruthValidationError::HistoryDoesNotReplay {
+                        identity: copy.identity.clone(),
+                    });
                 }
                 ReplayPiece::Inserted { bases, provenance } => {
                     let split = usize::try_from(point - cursor).map_err(|_| {
@@ -1073,7 +1202,8 @@ fn validate_structural_event_ids(copy: &HaplotypeCopyRecord) -> Result<(), Truth
         let event_id = match event {
             TruthHistoryEvent::Snp { event_id, .. }
             | TruthHistoryEvent::Insertion { event_id, .. }
-            | TruthHistoryEvent::Deletion { event_id, .. } => event_id,
+            | TruthHistoryEvent::Deletion { event_id, .. }
+            | TruthHistoryEvent::RepeatAllele { event_id, .. } => event_id,
         };
         let Some(class) = inherited.get(event_id) else {
             continue;
@@ -1212,6 +1342,7 @@ fn materialize_replayed_copy(
                     start: source.start,
                     end: source.end,
                     snps: snps.clone(),
+                    replaced_by_repeat: false,
                 });
                 None
             }
@@ -1220,6 +1351,33 @@ fn materialize_replayed_copy(
                 provenance,
             } => {
                 bases.extend_from_slice(inserted.as_bytes());
+                Some(provenance.clone())
+            }
+            ReplayPiece::RepeatAllele {
+                source,
+                bases: tract,
+                provenance,
+                ..
+            } => {
+                // El tracto sustituye al intervalo, de modo que ese tramo de la
+                // referencia queda ocupado y ningún otro fragmento puede
+                // reclamarlo.
+                for prior in &source_slices {
+                    if prior.start < source.end && source.start < prior.end {
+                        return Err(TruthValidationError::DuplicateCurrentSourcePosition {
+                            identity: copy.identity.clone(),
+                            position: prior.start.max(source.start),
+                        });
+                    }
+                }
+                validated_source(copy, source, reference)?;
+                bases.extend_from_slice(tract.as_bytes());
+                source_slices.push(SourceSlice {
+                    start: source.start,
+                    end: source.end,
+                    snps: Vec::new(),
+                    replaced_by_repeat: true,
+                });
                 Some(provenance.clone())
             }
         };
@@ -1285,6 +1443,7 @@ fn validate_genotype_semantics(
     match genotype.case_kind {
         GenotypeCaseKind::Snp => validate_snp_genotype(genotype, reference, copies),
         GenotypeCaseKind::Indel => validate_indel_genotype(genotype, copies),
+        GenotypeCaseKind::Repeat => validate_repeat_genotype(genotype, reference, copies),
     }
 }
 
@@ -1313,6 +1472,7 @@ fn validate_snp_genotype(
             .source_slices
             .iter()
             .find(|slice| slice.start <= genotype.locus.start && genotype.locus.start < slice.end)
+            .filter(|slice| !slice.replaced_by_repeat)
         else {
             continue;
         };
@@ -1338,6 +1498,116 @@ fn validate_snp_genotype(
                 )
             })?;
         expected.insert(identity.clone(), allele_index);
+    }
+    carriers_match(genotype, expected)
+}
+
+/// Contrasta un caso de repetición con las copias reconstruidas.
+///
+/// El alelo de índice cero es el de la **referencia** y no lleva secuencia: en
+/// un caso de repetición significa «esta copia conserva el tracto que hay en la
+/// referencia». Los alternativos llevan su secuencia y su estructura en
+/// bloques, y se reconocen por ellas y no por ningún contador.
+fn validate_repeat_genotype(
+    genotype: &GenotypeRecord,
+    reference: &Reference,
+    copies: &BTreeMap<CopyIdentity, CopySummary<'_>>,
+) -> Result<(), TruthValidationError> {
+    let locus_id = genotype
+        .alleles
+        .iter()
+        .find_map(|allele| match allele {
+            TruthAllele::Repeat { locus_id, .. } => Some(locus_id),
+            // Enumerada y no con comodín: si mañana se añade una clase de
+            // alelo, el compilador obliga a decidir si pertenece a un caso de
+            // repetición en vez de absorberla en silencio.
+            TruthAllele::Reference
+            | TruthAllele::Snp { .. }
+            | TruthAllele::Insertion { .. }
+            | TruthAllele::Deletion { .. } => None,
+        })
+        .ok_or_else(|| {
+            mismatch(
+                genotype,
+                "un caso de repetición publica al menos un alelo alternativo",
+            )
+        })?;
+    if !genotype.alleles.iter().all(|allele| {
+        matches!(allele, TruthAllele::Reference)
+            || matches!(allele, TruthAllele::Repeat { locus_id: other, .. } if other == locus_id)
+    }) {
+        return Err(mismatch(
+            genotype,
+            "todos los alelos de un caso de repetición pertenecen a su locus",
+        ));
+    }
+    let sequence = reference
+        .sequences()
+        .iter()
+        .find(|sequence| sequence.id().as_str() == genotype.locus.sequence_id)
+        .ok_or_else(|| mismatch(genotype, "la secuencia del locus no existe"))?;
+    let start = usize::try_from(genotype.locus.start)
+        .map_err(|_| mismatch(genotype, "el locus de repetición sale de la referencia"))?;
+    let end = usize::try_from(genotype.locus.end)
+        .ok()
+        .filter(|end| *end <= sequence.length() as usize && start < *end)
+        .ok_or_else(|| mismatch(genotype, "el locus de repetición sale de la referencia"))?;
+    // Un alternativo que repitiera las bases de la referencia no sería un
+    // alelo: sería el mismo tracto publicado dos veces.
+    let reference_tract = &bases_of(sequence)?[start..end];
+    if genotype.alleles.iter().any(|allele| {
+        matches!(allele, TruthAllele::Repeat { bases, .. } if bases.as_bytes() == reference_tract)
+    }) {
+        return Err(mismatch(
+            genotype,
+            "un alelo alternativo repite el tracto de la referencia",
+        ));
+    }
+    let mut expected = BTreeMap::new();
+    for (identity, copy) in copies.iter().filter(|(identity, _)| {
+        identity.reference_id == genotype.reference_id
+            && identity.individual_id == genotype.individual_id
+            && identity.sequence_id == genotype.locus.sequence_id
+    }) {
+        let applied = copy.history.iter().find_map(|event| match event {
+            TruthHistoryEvent::RepeatAllele {
+                locus_id: applied_locus,
+                start,
+                end,
+                bases,
+                blocks,
+                ..
+            } if applied_locus == locus_id
+                && *start == genotype.locus.start
+                && *end == genotype.locus.end =>
+            {
+                Some((bases, blocks))
+            }
+            TruthHistoryEvent::RepeatAllele { .. }
+            | TruthHistoryEvent::Snp { .. }
+            | TruthHistoryEvent::Insertion { .. }
+            | TruthHistoryEvent::Deletion { .. } => None,
+        });
+        let index = match applied {
+            None => 0,
+            Some((bases, blocks)) => genotype
+                .alleles
+                .iter()
+                .position(|allele| {
+                    matches!(
+                        allele,
+                        TruthAllele::Repeat { bases: catalogued, blocks: catalogued_blocks, .. }
+                            if catalogued == bases && catalogued_blocks == blocks
+                    )
+                })
+                .ok_or_else(|| {
+                    mismatch(
+                        genotype,
+                        "la copia lleva un alelo de repetición que el caso no cataloga",
+                    )
+                })?,
+        };
+        expected.insert(identity.clone(), index);
     }
     carriers_match(genotype, expected)
 }
@@ -1580,6 +1850,71 @@ enum WireCurrentPiece {
         bases: String,
         provenance: WireProvenance,
     },
+    RepeatAllele {
+        locus_id: String,
+        source: WireSegmentSource,
+        bases: String,
+        blocks: Vec<WireRepeatBlock>,
+        provenance: WireProvenance,
+    },
+}
+
+/// Bloque leído del documento.
+///
+/// El documento publica cuatro campos y **dos de ellos son derivados**: la
+/// longitud del motivo es la de su secuencia y el número de unidades es las
+/// bases entre esa longitud. Aquí se **comprueban** en vez de ignorarse, y solo
+/// se conservan los dos que no se derivan de nada. Un documento cuyas listas
+/// estuvieran desalineadas —el error silencioso más probable de estos
+/// campos— se rechaza al leerlo.
+struct WireRepeatBlock {
+    motif: String,
+    bases: u64,
+}
+
+impl<'de> Deserialize<'de> for WireRepeatBlock {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            motif: String,
+            #[serde(deserialize_with = "deserialize_u64")]
+            motif_length: u64,
+            #[serde(deserialize_with = "deserialize_u64")]
+            bases: u64,
+            // `Number` y no `f64`: serde almacena el contenido de una
+            // enumeración etiquetada por dentro antes de repartirlo, y desde
+            // ese almacén un `f64` no se puede leer —falla con «invalid type:
+            // map»—. `serde_json::Number` sí, y es lo que el resto del lector
+            // usa para los enteros por la misma razón.
+            units: Number,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        let units = raw
+            .units
+            .as_f64()
+            .ok_or_else(|| D::Error::custom("el número de unidades no es un decimal"))?;
+        let observed = u64::try_from(raw.motif.len())
+            .map_err(|_| D::Error::custom("el motivo del bloque es inabarcable"))?;
+        if observed == 0 || raw.motif_length != observed {
+            return Err(D::Error::custom(
+                "la longitud declarada del motivo no es la de su secuencia",
+            ));
+        }
+        if raw.bases == 0 {
+            return Err(D::Error::custom("un bloque sin bases no es un bloque"));
+        }
+        let derived = raw.bases as f64 / observed as f64;
+        if (units - derived).abs() > 1e-9 * derived.max(1.0) {
+            return Err(D::Error::custom(
+                "el número de unidades no es las bases entre la longitud del motivo",
+            ));
+        }
+        Ok(Self {
+            motif: raw.motif,
+            bases: raw.bases,
+        })
+    }
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1598,6 +1933,17 @@ enum WireHistoryEvent {
         event_id: String,
         #[serde(deserialize_with = "deserialize_u64")]
         position: u64,
+        provenance: WireProvenance,
+    },
+    RepeatAllele {
+        event_id: String,
+        locus_id: String,
+        #[serde(deserialize_with = "deserialize_u64")]
+        start: u64,
+        #[serde(deserialize_with = "deserialize_u64")]
+        end: u64,
+        bases: String,
+        blocks: Vec<WireRepeatBlock>,
         provenance: WireProvenance,
     },
     Insertion {
@@ -1683,6 +2029,7 @@ struct WireGenotype {
 enum WireGenotypeKind {
     Snp,
     Indel,
+    Repeat,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1706,6 +2053,11 @@ enum WireAllele {
     Reference,
     Snp {
         base: String,
+    },
+    Repeat {
+        locus_id: String,
+        bases: String,
+        blocks: Vec<WireRepeatBlock>,
     },
     Insertion {
         event_id: String,
@@ -1970,6 +2322,27 @@ impl From<WireCurrentPiece> for TruthCurrentPiece {
                 bases,
                 provenance: provenance.into(),
             },
+            WireCurrentPiece::RepeatAllele {
+                locus_id,
+                source,
+                bases,
+                blocks,
+                provenance,
+            } => Self::RepeatAllele {
+                locus_id,
+                source: source.into(),
+                bases,
+                blocks: blocks.into_iter().map(Into::into).collect(),
+                provenance: provenance.into(),
+            },
+        }
+    }
+}
+impl From<WireRepeatBlock> for TruthRepeatBlock {
+    fn from(value: WireRepeatBlock) -> Self {
+        Self {
+            motif: value.motif,
+            bases: value.bases,
         }
     }
 }
@@ -2016,6 +2389,23 @@ impl From<WireHistoryEvent> for TruthHistoryEvent {
                 event_id,
                 start,
                 end,
+                provenance: provenance.into(),
+            },
+            WireHistoryEvent::RepeatAllele {
+                event_id,
+                locus_id,
+                start,
+                end,
+                bases,
+                blocks,
+                provenance,
+            } => Self::RepeatAllele {
+                event_id,
+                locus_id,
+                start,
+                end,
+                bases,
+                blocks: blocks.into_iter().map(Into::into).collect(),
                 provenance: provenance.into(),
             },
         }
@@ -2109,6 +2499,7 @@ impl From<WireGenotypeKind> for GenotypeCaseKind {
         match value {
             WireGenotypeKind::Snp => Self::Snp,
             WireGenotypeKind::Indel => Self::Indel,
+            WireGenotypeKind::Repeat => Self::Repeat,
         }
     }
 }
@@ -2134,6 +2525,15 @@ impl From<WireAllele> for TruthAllele {
         match value {
             WireAllele::Reference => Self::Reference,
             WireAllele::Snp { base } => Self::Snp { base },
+            WireAllele::Repeat {
+                locus_id,
+                bases,
+                blocks,
+            } => Self::Repeat {
+                locus_id,
+                bases,
+                blocks: blocks.into_iter().map(Into::into).collect(),
+            },
             WireAllele::Insertion {
                 event_id,
                 bases,

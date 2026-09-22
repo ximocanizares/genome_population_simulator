@@ -32,6 +32,7 @@ documenta mejor.
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | Abierta |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | Abierta |
+| DT-005 | La marca del lector de verdad que distingue un tramo sustituido por un tracto no la ejercita ninguna prueba | Baja | 22/09/2026 | Abierta |
 
 ---
 
@@ -184,3 +185,33 @@ puerta que se cita en los informes y no se ejecuta.
 De ahí la regla que el proyecto ya aplica a las regresiones y que conviene
 extender a la verificación entera: **no basta con que exista la comprobación;
 hay que demostrar que puede fallar**.
+
+---
+
+## DT-005. La marca de «este tramo lo ocupa un tracto» no se ejercita
+
+**Gravedad: baja.** Es un caso concreto de DT-001, y se registra aparte porque
+nace hoy y con una causa distinta: no es una guarda olvidada, es una guarda que
+**otra decisión dejó inalcanzable desde dentro**.
+
+**Qué es.** El lector independiente de la verdad anota, por cada tramo de
+referencia que una copia conserva, si lo ocupan las bases del genoma o un
+**tracto de repetición realizado**. La marca sirve para que un caso de cambio de
+base que cayera dentro de un tracto sustituido **no lea de ahí la base de la
+referencia**, que no es la que la copia tiene.
+
+**Por qué no se ejercita.** Desde que la decisión S-32 rechaza **antes de
+simular** cualquier cambio pequeño dentro del intervalo de un locus de
+repetición, este programa **no puede producir** un documento donde eso ocurra.
+Ninguna prueba la dispara porque ninguna ejecución la alcanza.
+
+**Por qué no se retira.** El lector **no produce la verdad: la verifica**, y su
+trabajo es no fiarse de quien la escribió —esta versión, otra anterior u otro
+productor—. Sin la marca, un documento así daría por bueno un dato falso en
+silencio, que es exactamente la clase de fallo que DT-001 describe.
+
+**Cómo se cerraría.** Construyendo a mano un documento de verdad que combine un
+fragmento de tracto sustituido con un caso de cambio de base dentro de él, y
+exigiendo que el lector lo rechace. Es la misma técnica que DT-001 propone para
+las demás: **demostrar que la comprobación puede fallar**, en vez de confiar en
+que existe.

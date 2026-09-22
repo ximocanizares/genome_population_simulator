@@ -69,6 +69,7 @@ use crate::small_event_composition::{
     DeclaredSmallEvent, TargetedCurrentDeletion, TargetedCurrentInsertion,
 };
 use crate::snp_application::{ApplicableSnp, TargetedSnp};
+use crate::tandem_repeat::observe_tract;
 use crate::technical_identity::derive_technical_identity_plan;
 use crate::technical_profile::resolve_f4_technical_profile;
 use crate::truth_projection::{TruthProjectionInput, project_truth, write_truth_artifact};
@@ -257,22 +258,22 @@ fn execute_validated_config_with_effective_document(
                 )?;
                 manifest_reductions[index].map_artifact_id = Some(map.id.clone());
                 let reparsed: serde_json::Value = serde_json::from_slice(
-                    &fs::read(workspace.root().join(&map.path)).map_err(|error| {
-                        io_error(
-                            &workspace.root().join(&map.path),
+ &fs::read(workspace.root().join(&map.path)).map_err(|error| {
+ io_error(
+ &workspace.root().join(&map.path),
                             "read_reduction_map",
-                            error,
-                        )
-                    })?,
-                )
-                .map_err(|error| {
-                    Diagnostic::format(
+ error,
+ )
+ })?,
+ )
+ .map_err(|error| {
+ Diagnostic::format(
                         "GPS-FMT-007",
                         "El mapa de reducción no permite reconstruir exactamente la referencia derivada.",
-                    )
-                    .with("path", &map.path)
-                    .with("detail", error.to_string())
-                })?;
+ )
+ .with("path", &map.path)
+ .with("detail", error.to_string())
+ })?;
                 validate_reduction_map_document(
                     source_for(reference_output.reference, Some(&source_fasta))?.as_ref(),
                     &authoritative_derived,
@@ -472,6 +473,19 @@ fn write_execution_truth(
                 named_digest(
                     TruthSourceKind::Explicit,
                     event.event_id().as_str(),
+                    &configuration_input.copy.digest,
+                )
+            }));
+            // El alelo de un locus de repetición lo **sortea** el simulador de
+            // las frecuencias declaradas, de modo que su procedencia es
+            // aleatoria y su huella es la del fichero que declaró esas
+            // frecuencias. Un escenario sin loci no añade ninguna fila, y por
+            // eso su cabecera sigue siendo byte a byte la de antes.
+            let applied_repeat_loci = individuals.applied_repeat_locus_ids();
+            source_digests.extend(applied_repeat_loci.iter().map(|locus_id| {
+                named_digest(
+                    TruthSourceKind::Random,
+                    locus_id,
                     &configuration_input.copy.digest,
                 )
             }));
@@ -1397,6 +1411,12 @@ fn preflight_prepared_config(
     preflight_reductions(effective, prepared_reference.reference())?;
     let prepared_population_snvs =
         prepare_population_snvs_for_execution(effective, authorizations, prepared_reference)?;
+    admit_repeat_loci_against_small_variants(
+        effective,
+        prepared_population_snvs
+            .as_ref()
+            .map(|prepared| &prepared.matrix),
+    )?;
     let initial_individuals = preflight_initial_individuals(
         effective,
         prepared_reference.reference(),
@@ -1681,7 +1701,13 @@ fn preflight_initial_individuals(
         },
     )
     .map(Some)
-    .map_err(|error| initial_individual_error("initial_individuals", error.to_string()))
+    .map_err(|error| match error {
+        // El rechazo de un locus de repetición viaja con su diagnóstico
+        // entero y se publica tal cual: envolverlo dentro del detalle de otro
+        // era lo que producía el mensaje ilegible.
+        InitialIndividualsMaterializationError::Repeat(diagnostic) => diagnostic,
+        other => initial_individual_error("initial_individuals", other.to_string()),
+    })
 }
 
 pub(crate) fn declared_small_event(
@@ -1904,28 +1930,271 @@ fn manifest_reduction_links(
 /// —matriz SNV, individuos, eventos directos, evento técnico o VCF— trabaja
 /// sobre la secuencia y obliga a materializarla.
 ///
-/// # Pendiente del paso F6.4.2, anotado aquí porque es donde se arregla
-///
-/// La guarda de admisión con referencia real —comprobar que en la posición
-/// declarada hay de verdad un tracto del motivo declarado— **todavía no
-/// existe**, y esta lista es la razón: **no menciona las repeticiones**, de modo
-/// que un escenario que solo declare loci llega con la referencia sin
-/// materializar y la guarda no tendría bases que mirar.
-///
-/// La corrección tiene nombre y es esta línea: añadir
-/// `|| !effective.repeat_loci().is_empty()`. Se deja sin añadir a propósito
-/// mientras no exista la guarda, porque materializar el genoma entero sin que
-/// nadie lo lea sería pagar la memoria por nada. Quien escriba F6.4.2 empieza
-/// por aquí.
+/// **Los loci de repetición también obligan.** La guarda de admisión tiene que
+/// leer el tramo declarado de la referencia para comprobar que allí hay de
+/// verdad un tracto de los motivos declarados, y sin bases no hay nada que
+/// mirar. Mientras la guarda no existió, esta línea se dejó fuera a propósito:
+/// materializar el genoma entero sin que nadie lo leyera habría sido pagar la
+/// memoria por nada.
 fn requires_materialized_bases(effective: &EffectiveConfig) -> bool {
     effective.population_snvs().is_some()
         || !effective.initial_populations().is_empty()
         || !effective.direct_events().is_empty()
         || effective.technical_event().is_some()
         || effective.vcf_output().is_some()
+        || !effective.repeat_loci().is_empty()
 }
 
 fn prepare_reference(effective: &EffectiveConfig) -> Result<PreparedReference, Diagnostic> {
+    let prepared = prepare_reference_without_repeat_admission(effective)?;
+    admit_declared_repeat_loci(effective, prepared.reference())?;
+    Ok(prepared)
+}
+
+/// **Guarda de admisión de los loci sobre una referencia real.**
+///
+/// Al declarar un locus sobre una referencia **suministrada o reducida** hay que
+/// comprobar que en esa posición hay realmente un tracto de los motivos
+/// declarados. Sin ella se anotaría como microsatélite un trozo cualquiera del
+/// genoma, y todo lo que viniera después —los alelos, la verdad, el VCF— hablaría
+/// de una repetición que no está ahí.
+///
+/// El criterio es el mismo par de mínimos que ya se aplica al alelo declarado:
+/// **pureza mínima** y **unidades mínimas en la tirada más larga**, los del locus
+/// si los declara y si no los generales. Los dos hacen falta y ninguno sobra: un
+/// tramo puede ser bastante puro y no tener ni una tirada aprovechable, y al
+/// revés.
+///
+/// **Con referencia simulada no se aplica, y es deliberado.** Allí el tracto no
+/// existe hasta que se crea: se declara qué insertar, de modo que no hay nada
+/// observado contra lo que contrastar. Es la decisión S-06, que distingue las dos
+/// situaciones según de dónde venga la referencia.
+fn admit_declared_repeat_loci(
+    effective: &EffectiveConfig,
+    reference: &Reference,
+) -> Result<(), Diagnostic> {
+    if effective.repeat_loci().is_empty()
+        || matches!(
+            effective.reference_source(),
+            EffectiveReferenceSource::Simulated
+        )
+    {
+        return Ok(());
+    }
+    for locus in effective.repeat_loci() {
+        let interval = locus.declaration().interval();
+        let sequence = reference
+            .sequences()
+            .iter()
+            .find(|sequence| sequence.id() == interval.sequence_id())
+            .ok_or_else(|| {
+                repeat_admission_error(
+                    locus.id(),
+                    format!(
+                        "la referencia no contiene la secuencia {}",
+                        interval.sequence_id()
+                    ),
+                )
+            })?;
+        let bases = sequence.sequence().as_bytes().map_err(|error| {
+            internal(
+                "admit_declared_repeat_loci",
+                format!("las bases de la referencia no están materializadas: {error:?}"),
+            )
+        })?;
+        let (start, end) = (interval.start() as usize, interval.end() as usize);
+        if end > bases.len() {
+            return Err(repeat_admission_error(
+                locus.id(),
+                format!(
+                    "el intervalo declarado rebasa las {} bases de {}",
+                    bases.len(),
+                    interval.sequence_id()
+                ),
+            ));
+        }
+        let observed = observe_tract(&bases[start..end], locus.motifs());
+        let admission = locus.admission();
+        if observed.purity_as_f64() < admission.min_purity() {
+            return Err(repeat_admission_error(
+                locus.id(),
+                format!(
+                    "el tramo declarado tiene pureza {} y el mínimo es {}",
+                    observed.purity_as_f64(),
+                    admission.min_purity()
+                ),
+            ));
+        }
+        if observed.longest_run_units() < admission.min_longest_run_units() {
+            return Err(repeat_admission_error(
+                locus.id(),
+                format!(
+                    "el tramo declarado tiene una tirada más larga de {} unidades y el mínimo es {}",
+                    observed.longest_run_units(),
+                    admission.min_longest_run_units()
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// **Un cambio pequeño dentro del intervalo de un locus rechaza el escenario**
+/// (decisión S-32), y se rechaza **antes de simular**.
+///
+/// # Por qué tiene que ser aquí y no en el estado
+///
+/// El alelo de un microsatélite describe el tracto **tal y como está en la
+/// referencia**. Si otra modificación ya tocó ese tramo, la anotación publicada
+/// describiría un tracto que ya no existe.
+///
+/// La cadena de segmentos tiene su propia guarda, pero **no basta por sí
+/// sola**: solo se consulta cuando hay un alelo que aplicar, y el alelo se
+/// sortea. Con el alelo de la referencia entre los declarados, que el escenario
+/// se aceptara o no acababa dependiendo de la semilla, y cuando se aceptaba la
+/// verdad publicaba que esa copia «conserva el tracto de la referencia» cuando
+/// no lo conserva. Por eso la decisión vive aquí, donde no hay sorteo ninguno,
+/// y la del estado queda como red interna.
+///
+/// # Qué se mira aquí, y por qué **no** las inserciones ni las deleciones
+///
+/// Se miran los **cambios de base** declarados y **cada fila de la matriz de
+/// variantes**, venga suministrada o generada. Las dos cosas declaran su
+/// posición en **coordenadas de la referencia**, que es el mismo espacio en el
+/// que vive el intervalo del locus, de modo que la comparación es exacta: ni
+/// deja pasar una invasión ni inventa una que no existe. Las generadas eligen
+/// su posición con un sorteo propio, así que sin esta comprobación declarar un
+/// microsatélite y pedir variantes generadas salía bien o mal según la suerte.
+///
+/// **Una inserción o una deleción no se juzgan aquí**, y es deliberado: su
+/// punto se declara en **coordenadas vigentes** —las de la secuencia después de
+/// los cambios anteriores de esa misma copia—, no en las de la referencia. Con
+/// un solo indel los dos espacios coinciden; encadenando varios se separan, y
+/// entonces compararlos contra el intervalo **se equivoca en las dos
+/// direcciones**: deja escapar una invasión real y rechaza un escenario
+/// legítimo diciendo que algo cae dentro del tracto cuando cae fuera.
+///
+/// Las dos direcciones están comprobadas con pruebas propias, y por eso este
+/// código no las mira. Quien sí las juzga con exactitud es la **cadena de
+/// segmentos**: allí el intervalo se busca en coordenadas de referencia sobre
+/// el estado ya compuesto, de modo que no hay deriva posible. Esa comprobación
+/// se consulta **para toda copia y todo locus**, se aplique o no un alelo, y
+/// por tanto tampoco depende de la semilla.
+///
+/// La alternativa era traducir aquí el punto declarado a coordenadas de la
+/// referencia descontando los indeles anteriores. Sería un **segundo modelo de
+/// coordenadas** junto al que la cadena de segmentos ya sostiene, y este
+/// proyecto ya ha pagado caro tener dos implementaciones del mismo concepto.
+fn admit_repeat_loci_against_small_variants(
+    effective: &EffectiveConfig,
+    matrix: Option<&crate::population_snvs::PreparedPopulationSnvs>,
+) -> Result<(), Diagnostic> {
+    if effective.repeat_loci().is_empty() {
+        return Ok(());
+    }
+    for locus in effective.repeat_loci() {
+        let interval = locus.declaration().interval();
+        let sequence_id = interval.sequence_id().as_str();
+        let (start, end) = (interval.start(), interval.end());
+        let invades = |other_sequence: &str, other_start: u64, other_end: u64| {
+            other_sequence == sequence_id && other_start < end && start < other_end
+        };
+        for event in effective.direct_events() {
+            // **El identificador del evento que coloca un alelo es el del
+            // propio locus**, de modo que un cambio directo llamado igual
+            // haría ambiguo el origen de la modificación en la verdad. Se
+            // rechaza aquí, sobre lo que el usuario escribió, en vez de morir
+            // al final con un error de formato sobre un documento producido.
+            if event.event_id().as_str() == locus.id() {
+                return Err(repeat_admission_error(
+                    locus.id(),
+                    format!(
+                        "el cambio directo {} lleva el mismo identificador que el locus, y el locus lo usa como identificador del evento que coloca su alelo",
+                        event.event_id()
+                    ),
+                ));
+            }
+            // Solo el cambio de base declara su posición en coordenadas de la
+            // referencia. La inserción y la deleción la declaran en las
+            // vigentes, y compararlas aquí se equivoca en las dos direcciones:
+            // las juzga la cadena de segmentos, que no tiene deriva posible.
+            let EffectiveDirectEvent::Snp {
+                sequence_id: event_sequence,
+                position_1based,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            if invades(
+                event_sequence.as_str(),
+                position_1based.saturating_sub(1),
+                *position_1based,
+            ) {
+                return Err(repeat_invasion_error(
+                    locus,
+                    &format!(
+                        "el cambio de base {} en {event_sequence}:{position_1based}",
+                        event.event_id()
+                    ),
+                ));
+            }
+        }
+        for row in matrix.map(|matrix| matrix.rows()).unwrap_or_default() {
+            if invades(
+                row.contig().as_str(),
+                row.position_1based().saturating_sub(1),
+                row.position_1based(),
+            ) {
+                return Err(repeat_invasion_error(
+                    locus,
+                    &format!(
+                        "la variante {} de la matriz en {}:{}",
+                        row.variant_id(),
+                        row.contig(),
+                        row.position_1based()
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// El diagnóstico que el usuario va a leer cuando invade un microsatélite.
+///
+/// Dice **qué** lo invade y **qué hacer en su lugar**, porque la decisión S-32
+/// deja al usuario sin la vía obvia: una variante puntual dentro de un
+/// microsatélite hay que expresarla como parte del alelo del locus.
+fn repeat_invasion_error(
+    locus: &crate::application::EffectiveRepeatLocus,
+    invader: &str,
+) -> Diagnostic {
+    let interval = locus.declaration().interval();
+    repeat_admission_error(
+        locus.id(),
+        format!(
+            "{invader} cae dentro del tracto declarado ({}:{} a {}). Un alelo de repetición describe el tracto que hay en la referencia, de modo que ninguna otra modificación puede tocarlo: exprésalo como parte de un alelo del locus, con su secuencia o con sus interrupciones",
+            interval.sequence_id(),
+            interval.start() + 1,
+            interval.end()
+        ),
+    )
+}
+
+fn repeat_admission_error(locus_id: &str, detail: impl Into<String>) -> Diagnostic {
+    Diagnostic::configuration(
+        "GPS-CONF-008",
+        "La configuración contiene una combinación de campos incompatible.",
+    )
+    .with("path", "effective-config")
+    .with("fields", "reference.repeat_loci")
+    .with("detail", format!("locus {locus_id}: {}", detail.into()))
+}
+
+fn prepare_reference_without_repeat_admission(
+    effective: &EffectiveConfig,
+) -> Result<PreparedReference, Diagnostic> {
     match effective.reference_source() {
         // Una ejecución que solo deriva referencias reducidas no necesita las
         // bases del genoma de partida: planifica con el catálogo y pide después
@@ -2252,32 +2521,32 @@ fn reduction_error(
     error: ReductionError,
 ) -> Diagnostic {
     match error {
-        ReductionError::AllocationFailed => Diagnostic::resource(
+ ReductionError::AllocationFailed => Diagnostic::resource(
             "GPS-RES-002",
             "Los recursos disponibles no permiten completar el plan sin degradar resultados obligatorios.",
-        )
-        .with("resource", "memory")
-        .with("required", "complete immutable reduction plan")
-        .with("available", "allocation rejected"),
-        ReductionError::ArithmeticOverflow
-        | ReductionError::TooManySegments
-        | ReductionError::Coordinate(_)
-        | ReductionError::SelectionDoesNotMatchCatalog => internal("plan_reduced_reference", error),
-        _ => Diagnostic::configuration(
+ )
+ .with("resource", "memory")
+ .with("required", "complete immutable reduction plan")
+ .with("available", "allocation rejected"),
+ ReductionError::ArithmeticOverflow
+ | ReductionError::TooManySegments
+ | ReductionError::Coordinate(_)
+ | ReductionError::SelectionDoesNotMatchCatalog => internal("plan_reduced_reference", error),
+ _ => Diagnostic::configuration(
             "GPS-CONF-022",
             "No existe una disposición completa de intervalos para la reducción solicitada.",
-        )
-        .with("reference", reference)
-        .with(
+ )
+ .with("reference", reference)
+ .with(
             "target_bases",
-            effective
-                .reduced_references()
-                .iter()
-                .find(|candidate| candidate.id() == reference)
-                .map_or_else(|| "unknown".to_owned(), |value| value.target_bases().to_string()),
-        )
-        .with("eligible_bases", effective.total_genome_size().to_string())
-        .with("detail", format!("{error:?}")),
+ effective
+ .reduced_references()
+ .iter()
+ .find(|candidate| candidate.id() == reference)
+ .map_or_else(|| "unknown".to_owned(), |value| value.target_bases().to_string()),
+ )
+ .with("eligible_bases", effective.total_genome_size().to_string())
+ .with("detail", format!("{error:?}")),
     }
 }
 
@@ -2449,10 +2718,10 @@ mod tests {
         assert_eq!(
             manifest["output_categories"],
             json!({
-                "minimum": ["config-general"],
-                "defaulted": [],
-                "requested": [],
-                "disabled": []
+                           "minimum": ["config-general"],
+                           "defaulted": [],
+                           "requested": [],
+                           "disabled": []
             })
         );
         assert!(
@@ -2559,8 +2828,8 @@ i5 = "TGCATGCA"
         assert_eq!(
             manifest["references"],
             json!([{
-                "id": "reference-main",
-                "fasta_artifact_id": "reference-fasta"
+                           "id": "reference-main",
+                           "fasta_artifact_id": "reference-fasta"
             }])
         );
         assert_eq!(manifest["reference_reductions"][0]["state"], "failed");
@@ -2794,8 +3063,8 @@ i5 = "TGCATGCA"
         )
         .expect("fixture");
         bytes.extend_from_slice(
-            b"\n[population_snvs]\nmode = \"generate\"\n[population_snvs.generate]\ncount_mode = \"exact\"\nlocus_count = 1\nspatial_mode = \"uniform\"\nsubstitution_profile = \"uniform_snv12_v1\"\n[[population_snvs.generate.populations]]\npopulation_id = \"P1\"\nfrequency_model = \"uniform\"\nmin_alt_af = 0.2\nmax_alt_af = 0.8\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"IND_01\"]\nploidy = 2\ngenotype_model = \"hwe\"\n[vcf_output]\nmode = \"bgzf\"\n",
-        );
+ b"\n[population_snvs]\nmode = \"generate\"\n[population_snvs.generate]\ncount_mode = \"exact\"\nlocus_count = 1\nspatial_mode = \"uniform\"\nsubstitution_profile = \"uniform_snv12_v1\"\n[[population_snvs.generate.populations]]\npopulation_id = \"P1\"\nfrequency_model = \"uniform\"\nmin_alt_af = 0.2\nmax_alt_af = 0.8\n[[initial_populations]]\npopulation_id = \"P1\"\nindividual_count = 1\nindividual_ids = [\"IND_01\"]\nploidy = 2\ngenotype_model = \"hwe\"\n[vcf_output]\nmode = \"bgzf\"\n",
+ );
         fs::write(&config, bytes).expect("VCF config");
         let effective = load_and_validate_config(&config).expect("valid VCF config");
         let injected = Diagnostic::io("GPS-IO-001", "Una operación de lectura o escritura falló.")

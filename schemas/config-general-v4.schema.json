@@ -1146,9 +1146,26 @@
           }
         },
         {
+          "description": "Con varios motivos, cada alelo tiene que declarar una LISTA de unidades, una por bloque, y no puede declarar una secuencia exacta: unas bases sueltas no pueden decir dónde acaba un bloque y empieza el siguiente. Lo que este formato NO puede exigir es que la lista de unidades tenga la misma longitud que la de motivos: comparar la longitud de dos propiedades hermanas no es expresable en JSON Schema. Esa correspondencia la comprueba el lector, que rechaza el documento nombrando el locus, y una prueba de Rust la fija.",
           "required": ["motifs"],
           "not": {
             "required": ["motif"]
+          },
+          "properties": {
+            "alleles": {
+              "items": {
+                "required": ["units"],
+                "not": {
+                  "required": ["sequence"]
+                },
+                "properties": {
+                  "units": {
+                    "type": "array",
+                    "minItems": 1
+                  }
+                }
+              }
+            }
           }
         }
       ]

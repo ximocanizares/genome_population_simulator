@@ -3,6 +3,7 @@
 Los ficheros `subseed-scopes-v1.tsv`, `subseed-scopes-v2.tsv`,
 `subseed-scopes-v3.tsv`, `subseed-scopes-v4.tsv`, `subseed-scopes-v5.tsv`,
 `subseed-scopes-v6.tsv`, `subseed-scopes-v7.tsv`, `subseed-scopes-v8.tsv`,
+`subseed-scopes-v9.tsv`,
 `id-classes-v1.tsv` e
 `id-classes-v2.tsv` e `id-classes-v3.tsv` fijan los contratos versionados
 de la codificación definida por DTC-037 y DTC-039. La versión 3 añade el ámbito
@@ -41,6 +42,16 @@ de `event_id` y `library_id`. Es el único flujo que resuelve el número Poisson
 de plantillas de una biblioteca WGS; queda separado de los sorteos de origen y
 orientación de cada plantilla, y por ello añadir o reordenar bibliotecas no
 altera el conteo ya existente.
+
+La v9 conserva literalmente la v8 y añade `initial_repeat_allele`, que sortea
+qué alelo de un locus de repetición en tándem le toca a una copia haplotípica.
+Sus componentes son identidades estables —escenario, referencia, población,
+individuo, **índice de copia** e **identificador del locus**—, y deliberadamente
+**no** incluyen la posición del locus en la referencia ni el orden en que
+individuos o loci aparecen declarados. Esa elección es la que hace que insertar
+un individuo al principio de la lista, reordenarla o añadir un locus en un
+cromosoma que ordene antes que los existentes no cambie ningún genotipo ya
+sorteado.
 
 Cada entero es `u32` big-endian. Los nombres de campo son ASCII y sus valores
 son UTF-8; ambos llevan delante su longitud en bytes. Las rutas, el reloj, los

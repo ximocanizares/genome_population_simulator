@@ -240,13 +240,133 @@ fn published_catalogs_are_immutable_and_v8_has_an_independent_oracle() {
             .is_some_and(|row| row.starts_with("technical_library_count|"))
     );
     verify_catalog_with_independent_oracle(v8, F2_DERIVATION_VERSION);
+
+    let v9 = include_str!("../catalogs/subseed-scopes-v9.tsv");
+    assert_eq!(
+        encode_hex(&Sha256::digest(v9.as_bytes())),
+        "f91db3043b16949ebcaa9a2db9d698006c1b26e5b8dda23c34a691d813251888"
+    );
+    assert!(v9.starts_with(
+        "# derivation_versions=1,2\n# catalog_version=9\n# context=genome_population_simulator/v1/subseed\n"
+    ));
+    let v9_rows = v9
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(&v9_rows[..v8_rows.len()], v8_rows);
+    assert_eq!(v9_rows.len(), v8_rows.len() + 1);
+    assert!(
+        v9_rows
+            .last()
+            .is_some_and(|row| row.starts_with("initial_repeat_allele|"))
+    );
+    verify_catalog_with_independent_oracle(v9, F2_DERIVATION_VERSION);
+}
+
+/// **El ámbito del sorteo de alelos de repetición deriva lo que su fila
+/// congelada dice, y no otra cosa.**
+///
+/// Sin esta prueba, el catálogo se comprobaba **consigo mismo**: la fila decía
+/// qué componentes tiene el ámbito y nadie contrastaba que el código los usara.
+/// Renombrar uno —lo que cambia todos los sorteos y deja la fila describiendo
+/// algo que el programa ya no hace— pasaba la batería entera sin un solo fallo.
+#[test]
+fn the_repeat_allele_scope_derives_exactly_what_its_frozen_row_says() {
+    let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
+    let row = include_str!("../catalogs/subseed-scopes-v9.tsv")
+        .lines()
+        .find(|row| row.starts_with("initial_repeat_allele|"))
+        .expect("fila congelada del ámbito");
+    let fields = row.split('|').collect::<Vec<_>>();
+    assert_eq!(fields.len(), 5, "la fila tiene sus cinco columnas");
+    assert_eq!(
+        fields[1],
+        "scenario_id=direct;reference_id=reference-main;population_id=population-main;\
+individual_id=individual-main;copy_index=1;locus_id=locus-main"
+    );
+    let derived = derive_subseed(
+        root,
+        RuntimeSubseedScope::InitialRepeatAllele {
+            scenario_id: "direct",
+            reference_id: "reference-main",
+            population_id: "population-main",
+            individual_id: "individual-main",
+            copy_index: 1,
+            locus_id: "locus-main",
+        },
+    )
+    .expect("subsemilla del sorteo")
+    .to_hex();
+    assert_eq!(derived, fields[4], "el código y su fila congelada divergen");
+
+    // **Y cada componente aísla de verdad.** Cambiar uno solo tiene que mover la
+    // subsemilla; si alguno no entrara en el material, la fila mentiría sobre
+    // qué separa un sorteo de otro.
+    let variants = [
+        ("individual_id", "individual-other"),
+        ("locus_id", "locus-other"),
+        ("population_id", "population-other"),
+        ("reference_id", "reference-other"),
+    ];
+    for (name, value) in variants {
+        let mutated = derive_subseed(
+            root,
+            RuntimeSubseedScope::InitialRepeatAllele {
+                scenario_id: "direct",
+                reference_id: if name == "reference_id" {
+                    value
+                } else {
+                    "reference-main"
+                },
+                population_id: if name == "population_id" {
+                    value
+                } else {
+                    "population-main"
+                },
+                individual_id: if name == "individual_id" {
+                    value
+                } else {
+                    "individual-main"
+                },
+                copy_index: 1,
+                locus_id: if name == "locus_id" {
+                    value
+                } else {
+                    "locus-main"
+                },
+            },
+        )
+        .expect("subsemilla")
+        .to_hex();
+        assert_ne!(
+            mutated, derived,
+            "cambiar {name} tiene que aislar la subsemilla"
+        );
+    }
+    let other_copy = derive_subseed(
+        root,
+        RuntimeSubseedScope::InitialRepeatAllele {
+            scenario_id: "direct",
+            reference_id: "reference-main",
+            population_id: "population-main",
+            individual_id: "individual-main",
+            copy_index: 0,
+            locus_id: "locus-main",
+        },
+    )
+    .expect("subsemilla")
+    .to_hex();
+    assert_ne!(
+        other_copy, derived,
+        "las dos copias de un diploide sortean aparte"
+    );
 }
 
 #[test]
-fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v8() {
+fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v9() {
     let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
     assert_eq!(DERIVATION_VERSION, 1);
-    assert_eq!(SUBSEED_CATALOG_VERSION, "8");
+    assert_eq!(SUBSEED_CATALOG_VERSION, "9");
     assert_eq!(
         derive_subseed(
             root,
@@ -270,7 +390,7 @@ fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v8() {
         .to_hex(),
         "20c4a19ada8e8cdfce862db5b3423fd8250be2a61cf83321b4a6fb9210963169"
     );
-    let active_row = include_str!("../catalogs/subseed-scopes-v8.tsv")
+    let active_row = include_str!("../catalogs/subseed-scopes-v9.tsv")
         .lines()
         .find(|row| row.starts_with("reference_reduction|"))
         .expect("active reduction catalog row");

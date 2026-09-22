@@ -32,9 +32,10 @@ use crate::truth_schema::{
     AlleleCarrier, CopyIdentity, CopyProvenance, GenotypeCaseKind, GenotypeRecord,
     HaplotypeCopyRecord, MatrixProvenance, ModificationProvenance, ModificationProvenanceKind,
     NamedDigest, SegmentSource, TRUTH_COORDINATE_CONVENTION, TRUTH_DOCUMENT_KIND,
-    TRUTH_SCHEMA_VERSION, TruthAllele, TruthContractError, TruthCurrentPiece, TruthCurrentSnp,
-    TruthDocument, TruthHeader, TruthHistoryEvent, TruthLocus, TruthModification, TruthPieceLink,
-    TruthRecord, TruthSegment, TruthSourceKind, TruthSourceRef, TruthStructuralEvent,
+    TRUTH_SCHEMA_VERSION, TRUTH_SCHEMA_VERSION_WITH_REPEATS, TruthAllele, TruthContractError,
+    TruthCurrentPiece, TruthCurrentSnp, TruthDocument, TruthHeader, TruthHistoryEvent, TruthLocus,
+    TruthModification, TruthPieceLink, TruthRecord, TruthRepeatBlock, TruthSegment,
+    TruthSourceKind, TruthSourceRef, TruthStructuralEvent, records_carry_repeat_alleles,
 };
 use crate::truth_validation::reference_content_sha256;
 
@@ -74,6 +75,19 @@ pub enum TruthProjectionError {
     Genotype(GenotypeQueryError),
     Materialization(MaterializationError),
     DuplicateCaseId(String),
+    /// El individuo no tiene copias de la secuencia que un locus nombra.
+    /// Es imposible con una referencia coherente y se declara en vez de
+    /// silenciarse.
+    MissingRepeatSequence(String),
+    /// Una copia lleva un alelo de repetición que el catálogo de su caso no
+    /// contiene.
+    ///
+    /// **Es inalcanzable por construcción**: el catálogo se arma recorriendo
+    /// las mismas copias que después se consultan, de modo que todo alelo
+    /// observado está en él. Se declara en vez de silenciarse, y se dice aquí
+    /// que ninguna prueba lo ejercita porque no hay forma de provocarlo desde
+    /// fuera.
+    RepeatAlleleOutsideItsCase(String),
     Contract(TruthContractError),
 }
 
@@ -140,7 +154,14 @@ pub fn project_truth(
     )?;
     project_direct_genotypes(&mut records, input.reference, input.individuals)?;
     project_active_indel_genotypes(&mut records, input.reference, input.individuals)?;
+    project_repeat_genotypes(&mut records, input.reference, input.individuals)?;
     records.sort_by(record_order);
+    // **Una sola definición de «lleva alelos de repetición».** Estaba escrita
+    // dos veces —aquí y en el contrato— y las dos versiones no miraban lo
+    // mismo: esta se olvidaba del historial. Con dos respuestas distintas a la
+    // misma pregunta, la versión que se publica y la que el contrato exige
+    // podían discrepar, y el documento se habría rechazado a sí mismo.
+    let carries_repeats = records_carry_repeat_alleles(&records);
     let copy_count = records
         .iter()
         .filter(|record| matches!(record, TruthRecord::HaplotypeCopy(_)))
@@ -152,7 +173,14 @@ pub fn project_truth(
     let document = TruthDocument {
         header: TruthHeader {
             document_kind: TRUTH_DOCUMENT_KIND.to_owned(),
-            schema_version: TRUTH_SCHEMA_VERSION.to_owned(),
+            // La versión la decide **lo publicado**: sube a la 3 cuando algún
+            // registro lleva un alelo de repetición y se queda en la 1 cuando
+            // no lleva ninguno, aunque la configuración declare loci.
+            schema_version: if carries_repeats {
+                TRUTH_SCHEMA_VERSION_WITH_REPEATS.to_owned()
+            } else {
+                TRUTH_SCHEMA_VERSION.to_owned()
+            },
             execution_id: input.execution_id.to_owned(),
             reference_id: input.reference.id().as_str().to_owned(),
             reference_content_sha256: reference_content_sha256(input.reference)
@@ -217,7 +245,8 @@ fn project_copy(
                     sources.insert(snp.provenance.source.clone());
                 }
             }
-            TruthCurrentPiece::Inserted { provenance, .. } => {
+            TruthCurrentPiece::Inserted { provenance, .. }
+            | TruthCurrentPiece::RepeatAllele { provenance, .. } => {
                 sources.insert(provenance.source.clone());
             }
         }
@@ -232,7 +261,8 @@ fn project_copy(
         let provenance = match event {
             TruthHistoryEvent::Snp { provenance, .. }
             | TruthHistoryEvent::Insertion { provenance, .. }
-            | TruthHistoryEvent::Deletion { provenance, .. } => provenance,
+            | TruthHistoryEvent::Deletion { provenance, .. }
+            | TruthHistoryEvent::RepeatAllele { provenance, .. } => provenance,
         };
         sources.insert(provenance.source.clone());
     }
@@ -264,6 +294,50 @@ fn project_current_piece(
                 provenance: domain_provenance(inserted.provenance(), source),
             })
         }
+        CurrentIndelPiece::RepeatAllele(allele) => {
+            let event_id = allele.provenance().event_id().as_str().to_owned();
+            let source = domain_source(allele.provenance());
+            require_digest(source_digests, &source)?;
+            let reference_source =
+                reference_source_from_id(allele.interval().reference_id().as_str());
+            require_digest(source_digests, &reference_source)?;
+            Ok(TruthCurrentPiece::RepeatAllele {
+                locus_id: allele.locus_id().as_str().to_owned(),
+                source: segment_source(&reference_source, allele.interval()),
+                bases: bytes_to_truth(&event_id, allele.tract().bases())?,
+                blocks: repeat_blocks(allele.tract()),
+                provenance: domain_provenance(allele.provenance(), source),
+            })
+        }
+    }
+}
+
+/// Estructura en bloques publicada: motivo y **bases**, nunca unidades.
+///
+/// El número de unidades es `bases / motivo`, y se calcula al serializar. Si
+/// se guardara junto a las bases podrían contradecirse.
+fn repeat_blocks(tract: &crate::tandem_repeat::TandemRepeatTract) -> Vec<TruthRepeatBlock> {
+    tract
+        .blocks()
+        .iter()
+        .map(|block| TruthRepeatBlock {
+            motif: block.motif().as_text(),
+            bases: block.length(),
+        })
+        .collect()
+}
+
+fn segment_source(
+    source: &TruthSourceRef,
+    interval: &crate::coordinates::GenomicInterval,
+) -> SegmentSource {
+    SegmentSource {
+        source: source.clone(),
+        reference_id: interval.reference_id().as_str().to_owned(),
+        sequence_id: interval.sequence_id().as_str().to_owned(),
+        start: interval.start(),
+        end: interval.end(),
+        sequence_length: interval.sequence_length(),
     }
 }
 
@@ -337,6 +411,20 @@ fn project_history_event(
                 start: *start,
                 end: *end,
                 provenance: domain_provenance(provenance, source),
+            })
+        }
+        CurrentIndelEvent::RepeatAllele { allele } => {
+            let event_id = allele.provenance().event_id().as_str().to_owned();
+            let source = domain_source(allele.provenance());
+            require_digest(source_digests, &source)?;
+            Ok(TruthHistoryEvent::RepeatAllele {
+                event_id: event_id.clone(),
+                locus_id: allele.locus_id().as_str().to_owned(),
+                start: allele.interval().start(),
+                end: allele.interval().end(),
+                bases: bytes_to_truth(&event_id, allele.tract().bases())?,
+                blocks: repeat_blocks(allele.tract()),
+                provenance: domain_provenance(allele.provenance(), source),
             })
         }
     }
@@ -733,7 +821,12 @@ fn project_active_indel_genotypes(
                 for event in copy.segments().small_event_history() {
                     let sequence_id = copy.id().sequence_id().as_str().to_owned();
                     let (event_id, locus, allele, active) = match event {
-                        CurrentIndelEvent::Snp { .. } => continue,
+                        // Los alelos de repetición tienen su propio caso, con
+                        // su locus, su motivo y su número de unidades: no son
+                        // una inserción ni una deleción anónima.
+                        CurrentIndelEvent::Snp { .. } | CurrentIndelEvent::RepeatAllele { .. } => {
+                            continue;
+                        }
                         CurrentIndelEvent::Insertion {
                             event_id,
                             point,
@@ -853,6 +946,128 @@ fn project_active_indel_genotypes(
     Ok(())
 }
 
+/// Publica un caso por locus de repetición con al menos una copia que **no**
+/// lleva el tracto de la referencia.
+///
+/// Un locus cuyas copias llevan todas el alelo de la referencia no produce
+/// ningún caso: no hay variante que publicar, y por eso su verdad sigue siendo
+/// byte a byte la de un escenario sin microsatélites.
+fn project_repeat_genotypes(
+    records: &mut Vec<TruthRecord>,
+    reference: &Reference,
+    individuals: &InitialIndividualsMaterialization,
+) -> Result<(), TruthProjectionError> {
+    for individual in individuals.individuals() {
+        // Clave: secuencia e intervalo del locus, que es lo que identifica al
+        // caso. El identificador del locus viaja dentro de cada alelo.
+        let mut cases = BTreeMap::<(String, u64, u64), Vec<TruthAllele>>::new();
+        for sequence in individual.individual().sequences() {
+            for copy in sequence.copies() {
+                for piece in copy.segments().current_modifications() {
+                    let CurrentIndelPiece::RepeatAllele(allele) = piece else {
+                        continue;
+                    };
+                    let key = (
+                        copy.id().sequence_id().as_str().to_owned(),
+                        allele.interval().start(),
+                        allele.interval().end(),
+                    );
+                    let catalogued = TruthAllele::Repeat {
+                        locus_id: allele.locus_id().as_str().to_owned(),
+                        bases: bytes_to_truth(allele.locus_id().as_str(), allele.tract().bases())?,
+                        blocks: repeat_blocks(allele.tract()),
+                    };
+                    let entry = cases
+                        .entry(key)
+                        .or_insert_with(|| vec![TruthAllele::Reference]);
+                    if !entry.contains(&catalogued) {
+                        entry.push(catalogued);
+                    }
+                }
+            }
+        }
+        for ((sequence_id, start, end), alleles) in cases {
+            let locus = TruthLocus {
+                sequence_id: sequence_id.clone(),
+                start,
+                end,
+            };
+            let case_id = case_id(
+                individual.population_id().as_str(),
+                individual.individual().id().as_str(),
+                &sequence_id,
+                start + 1,
+                &alleles,
+            );
+            let sequence_key = crate::identity::SequenceId::parse(&sequence_id, "truth projection")
+                .map_err(|_| TruthProjectionError::MissingRepeatSequence(sequence_id.clone()))?;
+            let copies = individual
+                .individual()
+                .copies_for(&sequence_key)
+                .ok_or_else(|| TruthProjectionError::MissingRepeatSequence(sequence_id.clone()))?;
+            let mut carriers = Vec::with_capacity(copies.len());
+            for copy in copies {
+                let observed = copy
+                    .segments()
+                    .current_modifications()
+                    .iter()
+                    .find_map(|piece| match piece {
+                        CurrentIndelPiece::RepeatAllele(allele)
+                            if allele.interval().start() == start
+                                && allele.interval().end() == end =>
+                        {
+                            Some(allele)
+                        }
+                        CurrentIndelPiece::RepeatAllele(_)
+                        | CurrentIndelPiece::Source(_)
+                        | CurrentIndelPiece::Inserted(_) => None,
+                    });
+                let allele_index = match observed {
+                    None => 0,
+                    Some(allele) => {
+                        let catalogued = TruthAllele::Repeat {
+                            locus_id: allele.locus_id().as_str().to_owned(),
+                            bases: bytes_to_truth(
+                                allele.locus_id().as_str(),
+                                allele.tract().bases(),
+                            )?,
+                            blocks: repeat_blocks(allele.tract()),
+                        };
+                        alleles
+                            .iter()
+                            .position(|value| value == &catalogued)
+                            .ok_or_else(|| {
+                                TruthProjectionError::RepeatAlleleOutsideItsCase(case_id.clone())
+                            })?
+                    }
+                };
+                carriers.push(AlleleCarrier {
+                    allele_index,
+                    copy: copy_identity(copy),
+                });
+            }
+            carriers.sort_by(|left, right| left.copy.cmp(&right.copy));
+            let mut allele_dosages = vec![0_u8; alleles.len()];
+            for carrier in &carriers {
+                allele_dosages[carrier.allele_index] = allele_dosages[carrier.allele_index]
+                    .checked_add(1)
+                    .expect("ploidy is at most ten");
+            }
+            records.push(TruthRecord::Genotype(GenotypeRecord {
+                case_id,
+                reference_id: reference.id().as_str().to_owned(),
+                individual_id: individual.individual().id().as_str().to_owned(),
+                case_kind: GenotypeCaseKind::Repeat,
+                locus,
+                alleles,
+                allele_dosages,
+                carriers,
+            }));
+        }
+    }
+    Ok(())
+}
+
 fn final_haplotype_bases(
     copy: &HaplotypeCopy,
     reference: &Reference,
@@ -878,6 +1093,7 @@ fn current_piece_links(copy: &HaplotypeCopy, event_id: &str) -> Vec<TruthPieceLi
                 CurrentIndelPiece::Inserted(inserted) => {
                     u64::try_from(inserted.bases().len()).expect("piece length fits u64")
                 }
+                CurrentIndelPiece::RepeatAllele(allele) => allele.tract().length(),
             };
             let start = cursor;
             cursor += len;
@@ -973,6 +1189,7 @@ fn genotype_case_kind_json(kind: GenotypeCaseKind) -> &'static str {
     match kind {
         GenotypeCaseKind::Snp => "snp",
         GenotypeCaseKind::Indel => "indel",
+        GenotypeCaseKind::Repeat => "repeat",
     }
 }
 fn allele_json(allele: &TruthAllele) -> Value {
@@ -998,7 +1215,26 @@ fn allele_json(allele: &TruthAllele) -> Value {
         } => json!({"kind":"deletion","event_id":event_id,"start":start,"end":end,
             "final_haplotype_bases":final_haplotype_bases,"source_event":structural_event_json(source_event),
             "piece_links":piece_links.iter().map(piece_link_json).collect::<Vec<_>>() }),
+        TruthAllele::Repeat {
+            locus_id,
+            bases,
+            blocks,
+        } => json!({"kind":"repeat","locus_id":locus_id,"bases":bases,
+            "blocks":blocks.iter().map(repeat_block_json).collect::<Vec<_>>() }),
     }
+}
+
+/// Un bloque publicado: su motivo, su longitud, sus bases y **su número de
+/// unidades derivado de las dos**, que es el campo que el VCF 4.5 pide como
+/// decimal porque un bloque puede terminar en una unidad parcial.
+fn repeat_block_json(block: &TruthRepeatBlock) -> Value {
+    let motif_length = block.motif.len() as u64;
+    json!({
+        "motif": block.motif,
+        "motif_length": motif_length,
+        "bases": block.bases,
+        "units": block.bases as f64 / motif_length as f64,
+    })
 }
 fn structural_event_json(event: &TruthStructuralEvent) -> Value {
     match event {
@@ -1028,6 +1264,19 @@ fn current_piece_json(piece: &TruthCurrentPiece) -> Value {
         TruthCurrentPiece::Inserted { bases, provenance } => {
             json!({"kind":"inserted","bases":bases,"provenance":provenance_json(provenance)})
         }
+        TruthCurrentPiece::RepeatAllele {
+            locus_id,
+            source,
+            bases,
+            blocks,
+            provenance,
+        } => json!({
+            "kind":"repeat_allele","locus_id":locus_id,
+            "source":{"source":source_json(&source.source),"reference_id":source.reference_id,"sequence_id":source.sequence_id,"start":source.start,"end":source.end,"sequence_length":source.sequence_length},
+            "bases":bases,
+            "blocks":blocks.iter().map(repeat_block_json).collect::<Vec<_>>(),
+            "provenance":provenance_json(provenance)
+        }),
     }
 }
 
@@ -1055,6 +1304,19 @@ fn history_event_json(event: &TruthHistoryEvent) -> Value {
             provenance,
         } => {
             json!({"kind":"deletion","event_id":event_id,"start":start,"end":end,"provenance":provenance_json(provenance)})
+        }
+        TruthHistoryEvent::RepeatAllele {
+            event_id,
+            locus_id,
+            start,
+            end,
+            bases,
+            blocks,
+            provenance,
+        } => {
+            json!({"kind":"repeat_allele","event_id":event_id,"locus_id":locus_id,"start":start,"end":end,
+                "bases":bases,"blocks":blocks.iter().map(repeat_block_json).collect::<Vec<_>>(),
+                "provenance":provenance_json(provenance)})
         }
     }
 }
@@ -1264,6 +1526,12 @@ fn allele_key(allele: &TruthAllele) -> String {
             end,
             ..
         } => format!("DEL:{event_id}:{start}:{end}"),
+        // La clave lleva **las bases**, no el número de unidades: dos alelos de
+        // igual longitud con la interrupción en sitio distinto son alelos
+        // distintos y no pueden compartir identificador de caso.
+        TruthAllele::Repeat {
+            locus_id, bases, ..
+        } => format!("STR:{locus_id}:{bases}"),
     }
 }
 fn contract_diagnostic(error: TruthContractError) -> Diagnostic {

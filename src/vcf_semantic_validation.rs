@@ -552,6 +552,12 @@ enum OraclePiece {
         anchor: u64,
         bases: Vec<u8>,
     },
+    /// Tracto de repetición: sustituye `[start, end)` por sus propias bases.
+    Replaced {
+        start: u64,
+        end: u64,
+        bases: Vec<u8>,
+    },
 }
 
 fn oracle_path(
@@ -594,6 +600,20 @@ fn oracle_path(
                     end: source.end,
                     bases,
                     snps: positions,
+                });
+                prior = Some(source.end);
+            }
+            TruthCurrentPiece::RepeatAllele { source, bases, .. } => {
+                if source.start >= source.end
+                    || source.end > u64::try_from(reference.len()).unwrap_or(u64::MAX)
+                    || prior.is_some_and(|end| source.start < end)
+                {
+                    return Err(oracle_error("piezas source truth no colineales"));
+                }
+                pieces.push(OraclePiece::Replaced {
+                    start: source.start,
+                    end: source.end,
+                    bases: bases.as_bytes().to_vec(),
                 });
                 prior = Some(source.end);
             }
@@ -640,6 +660,21 @@ impl OraclePath {
                     start: *anchor,
                     end: *anchor,
                 }),
+                OraclePiece::Replaced { start, end, .. } => {
+                    if let Some(previous) = prior
+                        && previous < *start
+                    {
+                        out.push(OracleSpan {
+                            start: previous,
+                            end: *start,
+                        });
+                    }
+                    out.push(OracleSpan {
+                        start: *start,
+                        end: *end,
+                    });
+                    prior = Some(*end);
+                }
             }
         }
         out
@@ -662,6 +697,16 @@ impl OraclePath {
                 }
                 OraclePiece::Inserted { anchor, bases } if start <= *anchor && *anchor <= end => {
                     out.extend_from_slice(bases)
+                }
+                OraclePiece::Replaced {
+                    start: left,
+                    end: right,
+                    bases,
+                } if *left < end && start < *right => {
+                    if *left < start || end < *right {
+                        return Err(oracle_error("la ventana parte un tracto de repetición"));
+                    }
+                    out.extend_from_slice(bases);
                 }
                 _ => {}
             }

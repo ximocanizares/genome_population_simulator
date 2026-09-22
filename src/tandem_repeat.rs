@@ -19,8 +19,9 @@
 //! # Definiciones exactas
 //!
 //! - **Número de unidades:** la longitud del tracto dividida por la del motivo.
-//!   Puede tener parte fraccionaria. Se expone como fracción exacta
-//!   (`units_numerator` / `units_denominator`) además de como `f64`.
+//!   Puede tener parte fraccionaria. Con un solo bloque se expone como fracción
+//!   exacta (`exact_units`) además de como `f64`; con varios, solo como `f64`,
+//!   porque cada bloque tiene su propio denominador.
 //! - **Pureza:** la proporción de **bases** del tracto que pertenecen a copias
 //!   completas y exactas del motivo. No es la proporción de unidades: contada
 //!   sobre unidades, `CACACATCACA` daría 5/6, y sobre bases da 10/11, que es lo
@@ -244,7 +245,12 @@ impl BlockAnnotation {
         &self.runs
     }
 
-    /// Interrupciones del bloque, con desplazamiento **absoluto** en el tracto.
+    /// Interrupciones **de este bloque**, con desplazamiento absoluto en el
+    /// tracto y cortadas en la frontera del bloque.
+    ///
+    /// Para la cuenta biológica —tramos maximales, sin partir en la frontera—
+    /// hay que usar [`TractAnnotation::interruptions`], que es la que se
+    /// publica.
     #[must_use]
     pub fn interruptions(&self) -> &[Interruption] {
         &self.interruptions
@@ -276,21 +282,19 @@ impl TractAnnotation {
         &self.blocks
     }
 
-    /// Numerador exacto del número de unidades **cuando hay un solo bloque**:
-    /// las bases del tracto.
+    /// Fracción exacta del número de unidades, **y solo cuando hay un bloque**.
     ///
-    /// Con varios bloques la fracción única no existe, porque cada bloque tiene
-    /// su propio denominador; se usa [`Self::units_as_f64`], que suma.
+    /// Devuelve `None` con varios bloques, porque entonces la fracción única no
+    /// existe: cada bloque tiene su propio denominador. Antes había dos métodos
+    /// que con varios bloques devolvían las bases totales y la longitud del
+    /// motivo del **primer** bloque: un número sin significado y sin aviso, y
+    /// una trampa puesta para quien fuera a publicar la verdad y el VCF.
     #[must_use]
-    pub fn units_numerator(&self) -> u64 {
-        self.total_bases
-    }
-
-    /// Denominador exacto del número de unidades con un solo bloque: la
-    /// longitud de su motivo.
-    #[must_use]
-    pub fn units_denominator(&self) -> u64 {
-        self.blocks.first().map_or(1, |block| block.motif.length())
+    pub fn exact_units(&self) -> Option<(u64, u64)> {
+        match self.blocks.as_slice() {
+            [only] => Some((self.total_bases, only.motif.length())),
+            _ => None,
+        }
     }
 
     /// Número **total** de unidades: la suma de las de cada bloque.
@@ -330,13 +334,36 @@ impl TractAnnotation {
         self.purity_numerator() as f64 / self.total_bases as f64
     }
 
-    /// Todas las interrupciones del tracto, en orden de izquierda a derecha.
+    /// Las interrupciones del tracto, **maximales**, en orden de izquierda a
+    /// derecha.
+    ///
+    /// Una interrupción que cruza la frontera entre dos bloques es **una**, no
+    /// dos. La contabilidad por bloque la parte en el punto donde el usuario
+    /// decidió cortar la estructura, y eso no es una propiedad de la secuencia:
+    /// el número de interrupciones de un microsatélite tiene significado
+    /// biológico y no puede depender de dónde se haya puesto la frontera. Por
+    /// eso aquí los tramos adyacentes se funden, y es esta lista —no la de cada
+    /// bloque— la que se publica.
+    ///
+    /// La lista de cada bloque, en [`BlockAnnotation::interruptions`], sigue
+    /// siendo la contabilidad **de ese bloque**: sirve para mirar un bloque por
+    /// separado, y ahí la frontera sí es el límite.
     #[must_use]
     pub fn interruptions(&self) -> Vec<Interruption> {
-        self.blocks
+        let mut merged: Vec<Interruption> = Vec::new();
+        for interruption in self
+            .blocks
             .iter()
-            .flat_map(|block| block.interruptions.iter().copied())
-            .collect()
+            .flat_map(|block| block.interruptions.iter())
+        {
+            match merged.last_mut() {
+                Some(previous) if previous.start + previous.length == interruption.start => {
+                    previous.length += interruption.length;
+                }
+                _ => merged.push(*interruption),
+            }
+        }
+        merged
     }
 
     /// Todas las tiradas del tracto, en orden de izquierda a derecha.
@@ -592,13 +619,37 @@ impl TandemRepeatTract {
     /// 2. **El motivo es que vaciar una tirada mueve la pureza por una decisión
     ///    nuestra y no por biología**, que es justo lo que la decisión S-07
     ///    retira al abandonar la convención del extremo derecho.
-    /// 3. **Tiene una frontera que hay que ver:** con esta regla un locus **no
-    ///    puede perder nunca una tirada entera**, de modo que el número de
-    ///    tiradas de un alelo nunca disminuye por deslizamiento. El generador de
-    ///    alelos por deslizamiento biológico de la entrega 5 heredará esa
-    ///    frontera. Si el responsable prefiere permitir que una tirada
-    ///    desaparezca, se cambia aquí y se reabre la pregunta de qué le pasa a la
-    ///    pureza cuando eso ocurre.
+    /// 3. **Tiene una frontera más grande de lo que parece, y hay que verla.**
+    ///    Una redacción anterior decía solo que «el número de tiradas nunca
+    ///    disminuye». Se queda corta. La consecuencia real es que **un tracto
+    ///    cuya tirada más larga sea de una sola copia no puede contraerse nunca,
+    ///    mientras que expandirse sí puede**: solo puede crecer. Y eso puede
+    ///    pasarle a un tracto con muchas copias completas, si están repartidas
+    ///    en tiradas de una. Es decir, **una clase entera de tractos queda
+    ///    congelada frente a la contracción con la expansión libre**, lo que
+    ///    sesga el modelo hacia el alargamiento.
+    ///
+    ///    Hasta la decisión S-31 esa clase no llegaba a entrar, porque la tirada
+    ///    mínima de admisión general es 3. Desde que **un locus puede declarar la
+    ///    suya**, uno con tirada mínima 1 la admite. El sesgo dejó de ser teórico
+    ///    el día que los mínimos pasaron a ser por locus.
+    ///
+    ///    **Salida acordada por el responsable el 21 de septiembre de 2026:**
+    ///    el modelo **no se toca**, y en su lugar la admisión exigirá que la
+    ///    tirada mínima efectiva de un locus sea **de al menos 2 unidades
+    ///    cuando ese locus vaya a sufrir tartamudeo**. Con eso desaparece la
+    ///    clase de tractos que no pueden contraerse nunca, y la asimetría que
+    ///    queda —con una tirada de dos copias siguen prohibidos los pasos de
+    ///    dos y tres— es **físicamente correcta**: en la realidad tampoco se
+    ///    pueden perder tres unidades de una tirada que solo tiene dos.
+    ///
+    ///    **Esa guarda no vive aquí y todavía no existe.** El microsatélite se
+    ///    declara junto a la referencia y el tartamudeo se configura en el
+    ///    evento técnico, de modo que la condición solo puede comprobarse
+    ///    cuando las dos configuraciones están resueltas, no al leer el locus.
+    ///    Está planificada como el paso **F4.8.1.1** de la entrega 2 del plan
+    ///    `design/plan-implementacion-repeticiones-pcr-0.1.md`, con su
+    ///    razonamiento completo y sus variantes defectuosas.
     pub fn apply_unit_step(&self, step: i64) -> Result<Self, TandemRepeatError> {
         if step == 0 {
             return Err(TandemRepeatError::ZeroStep);
@@ -727,6 +778,105 @@ fn validate_tract_alphabet(bases: &[u8]) -> Result<(), TandemRepeatError> {
         }
     }
     Ok(())
+}
+
+/// Lo que se **observa** en un tramo de una referencia real, sin estructura en
+/// bloques declarada.
+///
+/// # Por qué hace falta un tipo aparte
+///
+/// Un alelo declarado trae su estructura en bloques: el usuario dice qué motivo
+/// rige cada tramo. Un tracto **leído de una referencia** no la trae. La guarda
+/// de admisión tiene que decidir si en la posición declarada hay realmente un
+/// tracto de los motivos declarados, y para eso hay que mirar las bases sin
+/// saber dónde estarían las fronteras.
+///
+/// # La convención de atribución, que hay que fijar porque no es única
+///
+/// Se recorre el tramo **de izquierda a derecha**, y en cada posición se prueban
+/// los motivos declarados **en el orden en que se declararon**; el primero que
+/// encaje se anota como copia y se salta su longitud; si no encaja ninguno, se
+/// avanza una base. Es la misma descomposición voraz de siempre, extendida a
+/// varios motivos, y **con un solo motivo es exactamente la de siempre**.
+///
+/// Una **tirada** es una cadena de copias completas contiguas **del mismo
+/// motivo**: es donde la polimerasa resbala, y dos copias de motivos distintos
+/// pegadas no son una tirada de dos.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObservedTract {
+    total_bases: u64,
+    covered_bases: u64,
+    longest_run_units: u64,
+}
+
+impl ObservedTract {
+    #[must_use]
+    pub const fn total_bases(self) -> u64 {
+        self.total_bases
+    }
+
+    /// Bases que pertenecen a una copia completa de alguno de los motivos.
+    #[must_use]
+    pub const fn covered_bases(self) -> u64 {
+        self.covered_bases
+    }
+
+    /// Pureza **observada**, sobre bases, como en un alelo declarado.
+    #[must_use]
+    pub fn purity_as_f64(self) -> f64 {
+        if self.total_bases == 0 {
+            return 0.0;
+        }
+        self.covered_bases as f64 / self.total_bases as f64
+    }
+
+    /// Copias contiguas del mismo motivo en la tirada más larga observada.
+    #[must_use]
+    pub const fn longest_run_units(self) -> u64 {
+        self.longest_run_units
+    }
+}
+
+/// Observa un tramo de referencia contra los motivos de un locus.
+///
+/// No valida el alfabeto: las bases vienen de una referencia ya validada, y una
+/// `N` sencillamente no encaja con ningún motivo y cuenta como no cubierta.
+#[must_use]
+pub fn observe_tract(bases: &[u8], motifs: &[RepeatMotif]) -> ObservedTract {
+    let total = bases.len();
+    let mut covered = 0_u64;
+    let mut longest = 0_u64;
+    let mut current_run = 0_u64;
+    let mut current_motif: Option<&[u8]> = None;
+    let mut offset = 0_usize;
+    while offset < total {
+        let matched = motifs.iter().map(RepeatMotif::bases).find(|motif| {
+            offset + motif.len() <= total && &bases[offset..offset + motif.len()] == *motif
+        });
+        match matched {
+            Some(motif) => {
+                if current_motif == Some(motif) {
+                    current_run += 1;
+                } else {
+                    current_motif = Some(motif);
+                    current_run = 1;
+                }
+                longest = longest.max(current_run);
+                covered += motif.len() as u64;
+                offset += motif.len();
+            }
+            None => {
+                current_motif = None;
+                current_run = 0;
+                offset += 1;
+            }
+        }
+    }
+    ObservedTract {
+        total_bases: total as u64,
+        covered_bases: covered,
+        longest_run_units: longest,
+    }
 }
 
 /// Locus de repetición **declarado**: dónde está el tracto y con qué motivos.

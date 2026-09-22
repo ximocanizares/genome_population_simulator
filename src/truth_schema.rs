@@ -6,6 +6,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const TRUTH_SCHEMA_VERSION: &str = "1";
+/// Versión que estrena el **alelo de repetición en tándem**.
+///
+/// La verdad solo pasa a esta versión **cuando publica al menos un alelo de
+/// repetición**, no por el mero hecho de que la configuración declare loci: un
+/// escenario cuyo único alelo es el de la referencia no produce ninguna
+/// variante que publicar, y su verdad sigue siendo byte a byte la de antes.
+/// [`TruthDocument::validate_structure`] lo exige en las dos direcciones.
+pub const TRUTH_SCHEMA_VERSION_WITH_REPEATS: &str = "3";
 pub const TRUTH_DOCUMENT_KIND: &str = "gps_truth";
 pub const TRUTH_COORDINATE_CONVENTION: &str = "zero_based_half_open_v1";
 
@@ -91,6 +99,26 @@ pub enum TruthCurrentPiece {
         bases: String,
         provenance: ModificationProvenance,
     },
+    /// Tracto realizado de un locus de repetición, que sustituye al intervalo
+    /// de referencia que `source` nombra.
+    RepeatAllele {
+        locus_id: String,
+        source: SegmentSource,
+        bases: String,
+        blocks: Vec<TruthRepeatBlock>,
+        provenance: ModificationProvenance,
+    },
+}
+
+/// Un bloque del tracto: su motivo y **cuántas bases** ocupa.
+///
+/// El número de unidades del bloque no se almacena: es `bases` dividido por la
+/// longitud del motivo, y se calcula al serializar. Guardar los dos permitiría
+/// que se contradijeran, que es justo lo que la decisión S-02 prohíbe.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct TruthRepeatBlock {
+    pub motif: String,
+    pub bases: u64,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TruthCurrentSnp {
@@ -117,6 +145,15 @@ pub enum TruthHistoryEvent {
         event_id: String,
         start: u64,
         end: u64,
+        provenance: ModificationProvenance,
+    },
+    RepeatAllele {
+        event_id: String,
+        locus_id: String,
+        start: u64,
+        end: u64,
+        bases: String,
+        blocks: Vec<TruthRepeatBlock>,
         provenance: ModificationProvenance,
     },
 }
@@ -189,6 +226,11 @@ pub struct GenotypeRecord {
 pub enum GenotypeCaseKind {
     Snp,
     Indel,
+    /// Alelo de una repetición en tándem. Su locus es el **intervalo de
+    /// referencia** del tracto. Sus alelos **alternativos** llevan su secuencia
+    /// completa y su estructura en bloques; el de referencia se publica como
+    /// [`TruthAllele::Reference`], y el porqué está escrito allí.
+    Repeat,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum TruthAllele {
@@ -210,6 +252,20 @@ pub enum TruthAllele {
         final_haplotype_bases: String,
         source_event: TruthStructuralEvent,
         piece_links: Vec<TruthPieceLink>,
+    },
+    /// Alelo **alternativo** de una repetición: su secuencia completa y su
+    /// estructura en bloques.
+    ///
+    /// El alelo de referencia de un caso de repetición se publica como
+    /// [`TruthAllele::Reference`] y **sin** estructura en bloques, igual que en
+    /// un caso de inserción o deleción. No es un olvido: la estructura en
+    /// bloques **se declara y no puede derivarse** (decisión S-30), y el tracto
+    /// que hay en la referencia no la declara en ninguna parte. Sus bases están
+    /// en la referencia, que es de donde hay que leerlas.
+    Repeat {
+        locus_id: String,
+        bases: String,
+        blocks: Vec<TruthRepeatBlock>,
     },
 }
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -359,14 +415,57 @@ pub enum TruthContractError {
     },
 }
 
+/// **La única definición de «estos registros llevan alelos de repetición».**
+///
+/// La usan el contrato, que exige la versión 3 cuando es cierta, y la
+/// proyección, que decide con ella qué versión declarar. Escribirla dos veces
+/// ya produjo dos respuestas distintas —una miraba el historial y la otra
+/// no—, y con ellas el documento podía declarar una versión que su propio
+/// contrato rechazaba.
+///
+/// Mira los tres sitios donde un alelo de repetición puede asomar: los
+/// fragmentos vigentes de una copia, su historial y los casos genotípicos.
+#[must_use]
+pub fn records_carry_repeat_alleles(records: &[TruthRecord]) -> bool {
+    records.iter().any(|record| match record {
+        TruthRecord::HaplotypeCopy(copy) => {
+            copy.current_pieces
+                .iter()
+                .any(|piece| matches!(piece, TruthCurrentPiece::RepeatAllele { .. }))
+                || copy
+                    .history
+                    .iter()
+                    .any(|event| matches!(event, TruthHistoryEvent::RepeatAllele { .. }))
+        }
+        TruthRecord::Genotype(genotype) => matches!(genotype.case_kind, GenotypeCaseKind::Repeat),
+    })
+}
+
 impl TruthDocument {
+    /// Cierto cuando algún registro publica un alelo de repetición.
+    #[must_use]
+    pub fn carries_repeat_alleles(&self) -> bool {
+        records_carry_repeat_alleles(&self.records)
+    }
+
     pub fn validate_structure(&self) -> Result<(), TruthContractError> {
         let h = &self.header;
         validate_lexical_document(self)?;
         if h.document_kind != TRUTH_DOCUMENT_KIND {
             return Err(TruthContractError::UnsupportedDocumentKind);
         }
-        if h.schema_version != TRUTH_SCHEMA_VERSION {
+        // **La versión se promueve por lo que se publica, no por lo que se
+        // declara.** Un documento que lleve al menos un alelo de repetición es
+        // de la versión 3 y uno que no lleve ninguno sigue siendo de la 1. Se
+        // exige en las dos direcciones: sin la segunda, una promoción disparada
+        // por la mera declaración del locus pasaría inadvertida.
+        let carries_repeats = self.carries_repeat_alleles();
+        let expected = if carries_repeats {
+            TRUTH_SCHEMA_VERSION_WITH_REPEATS
+        } else {
+            TRUTH_SCHEMA_VERSION
+        };
+        if h.schema_version != expected {
             return Err(TruthContractError::UnsupportedVersion);
         }
         if h.coordinate_convention != TRUTH_COORDINATE_CONVENTION {
@@ -494,6 +593,19 @@ fn validate_lexical_document(document: &TruthDocument) -> Result<(), TruthContra
                             valid_bases("current_inserted_bases", bases)?;
                             valid_provenance(provenance)?
                         }
+                        TruthCurrentPiece::RepeatAllele {
+                            locus_id,
+                            source,
+                            bases,
+                            blocks,
+                            provenance,
+                        } => {
+                            valid_id("repeat_locus_id", locus_id)?;
+                            valid_segment_source(source)?;
+                            valid_bases("repeat_allele_bases", bases)?;
+                            valid_repeat_blocks(blocks, bases)?;
+                            valid_provenance(provenance)?;
+                        }
                     }
                 }
                 for event in &copy.history {
@@ -514,6 +626,20 @@ fn validate_lexical_document(document: &TruthDocument) -> Result<(), TruthContra
                             ..
                         } => {
                             valid_id("event_id", event_id)?;
+                            valid_provenance(provenance)?;
+                        }
+                        TruthHistoryEvent::RepeatAllele {
+                            event_id,
+                            locus_id,
+                            bases,
+                            blocks,
+                            provenance,
+                            ..
+                        } => {
+                            valid_id("event_id", event_id)?;
+                            valid_id("repeat_locus_id", locus_id)?;
+                            valid_bases("repeat_allele_bases", bases)?;
+                            valid_repeat_blocks(blocks, bases)?;
                             valid_provenance(provenance)?;
                         }
                     }
@@ -635,9 +761,68 @@ fn valid_modification_lexical(modification: &TruthModification) -> Result<(), Tr
         }
     }
 }
+/// Comprueba que los bloques publicados **cubren exactamente** las bases del
+/// tracto: sin esa suma, una lista de bloques podría describir un tracto de
+/// otro tamaño.
+///
+/// **No se exige que las bases de un bloque sean múltiplo de su motivo**, y no
+/// es un olvido: un bloque puede terminar en una **unidad parcial** —el propio
+/// estándar VCF trae `(CAG)5(CA)1(CAG)4` como ejemplo—, y por eso el número de
+/// unidades es decimal. Lo que sí se comprueba, al leer el documento, es que
+/// el decimal publicado sea exactamente las bases entre la longitud del
+/// motivo.
+fn valid_repeat_blocks(blocks: &[TruthRepeatBlock], bases: &str) -> Result<(), TruthContractError> {
+    if blocks.is_empty() {
+        return Err(TruthContractError::InvalidLexicalField {
+            field: "repeat_blocks",
+            value: String::new(),
+        });
+    }
+    let mut total = 0_u64;
+    for block in blocks {
+        valid_bases("repeat_block_motif", &block.motif)?;
+        let motif_length = u64::try_from(block.motif.len()).map_err(|_| {
+            TruthContractError::ArithmeticOverflow {
+                field: "repeat_block_motif_length",
+            }
+        })?;
+        if block.bases == 0 || motif_length == 0 {
+            return Err(TruthContractError::InvalidLexicalField {
+                field: "repeat_block_bases",
+                value: block.bases.to_string(),
+            });
+        }
+        total = total
+            .checked_add(block.bases)
+            .ok_or(TruthContractError::ArithmeticOverflow {
+                field: "repeat_block_bases",
+            })?;
+    }
+    let observed =
+        u64::try_from(bases.len()).map_err(|_| TruthContractError::ArithmeticOverflow {
+            field: "repeat_allele_bases_length",
+        })?;
+    if total != observed {
+        return Err(TruthContractError::InvalidLexicalField {
+            field: "repeat_blocks_total_bases",
+            value: total.to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn valid_allele_lexical(allele: &TruthAllele) -> Result<(), TruthContractError> {
     match allele {
         TruthAllele::Reference => Ok(()),
+        TruthAllele::Repeat {
+            locus_id,
+            bases,
+            blocks,
+        } => {
+            valid_id("repeat_locus_id", locus_id)?;
+            valid_bases("repeat_allele_bases", bases)?;
+            valid_repeat_blocks(blocks, bases)
+        }
         TruthAllele::Snp { base } => valid_base("snp_allele_base", base),
         TruthAllele::Insertion {
             event_id,
@@ -970,6 +1155,34 @@ fn validate_current_state(
                 }
                 validate_modification_provenance("inserted_piece", provenance, digests, groups)?;
             }
+            TruthCurrentPiece::RepeatAllele {
+                source,
+                bases,
+                provenance,
+                ..
+            } => {
+                if bases.is_empty()
+                    || source.start >= source.end
+                    || source.end > source.sequence_length
+                    || source.reference_id != copy.identity.reference_id
+                    || source.sequence_id != copy.identity.sequence_id
+                    || !matches!(
+                        source.source.kind,
+                        TruthSourceKind::Reference | TruthSourceKind::Founder
+                    )
+                {
+                    return Err(TruthContractError::InvalidCurrentPiece {
+                        identity: copy.identity.clone(),
+                    });
+                }
+                require_digest(digests, &source.source)?;
+                validate_modification_provenance(
+                    "repeat_allele_piece",
+                    provenance,
+                    digests,
+                    groups,
+                )?;
+            }
         }
     }
     let mut history = BTreeSet::new();
@@ -1000,6 +1213,14 @@ fn validate_current_state(
                 end,
                 provenance,
             } => (event_id, *start > 0 && start < end, provenance),
+            TruthHistoryEvent::RepeatAllele {
+                event_id,
+                start,
+                end,
+                bases,
+                provenance,
+                ..
+            } => (event_id, start < end && !bases.is_empty(), provenance),
         };
         if !valid {
             return Err(TruthContractError::InvalidCurrentPiece {
@@ -1216,6 +1437,16 @@ pub(crate) fn validate_genotype(
                     TruthAllele::Insertion { .. } | TruthAllele::Deletion { .. }
                 )
             }))
+        // Un caso de repetición empieza siempre por el alelo de referencia y
+        // lleva al menos un alelo de repetición: sin alternativo no habría
+        // nada que publicar, y sin referencia el índice cero dejaría de
+        // significar «el tracto que hay en la referencia».
+        || (matches!(g.case_kind, GenotypeCaseKind::Repeat)
+            && (!matches!(g.alleles.first(), Some(TruthAllele::Reference))
+                || !g
+                    .alleles
+                    .iter()
+                    .any(|allele| matches!(allele, TruthAllele::Repeat { .. }))))
     {
         return Err(TruthContractError::InvalidGenotypeAllele {
             case_id: g.case_id.clone(),
@@ -1235,7 +1466,8 @@ pub(crate) fn validate_genotype(
                 TruthAllele::Reference
                 | TruthAllele::Insertion { .. }
                 | TruthAllele::Deletion { .. },
-            ) => {}
+            )
+            | (GenotypeCaseKind::Repeat, TruthAllele::Reference | TruthAllele::Repeat { .. }) => {}
             _ => {
                 return Err(TruthContractError::InvalidGenotypeAllele {
                     case_id: g.case_id.clone(),

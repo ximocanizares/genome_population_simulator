@@ -13,7 +13,7 @@ use crate::identity::{F5BlockId, F5SiteId, IndividualId, PopulationId, ScenarioI
 pub const DERIVATION_VERSION: u32 = 1;
 pub const F2_DERIVATION_VERSION: u32 = 2;
 pub const SUBSEED_DERIVATION_VERSIONS: &[u32] = &[DERIVATION_VERSION, F2_DERIVATION_VERSION];
-pub const SUBSEED_CATALOG_VERSION: &str = "8";
+pub const SUBSEED_CATALOG_VERSION: &str = "9";
 pub const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 pub const RANDOM_ALGORITHM: &str = "ChaCha12";
 pub const REFERENCE_REDUCTION_SELECTOR: &str = "direct_proportional_selection";
@@ -248,6 +248,21 @@ pub enum RuntimeSubseedScope<'a> {
     TechnicalLibraryCount {
         event_id: &'a str,
         library_id: &'a str,
+    },
+    /// Sorteo del alelo de un locus de repetición en una copia haplotípica.
+    ///
+    /// Sus componentes son **identidades estables**: individuo, índice de copia
+    /// e identificador del locus. Ni la posición del locus en la referencia ni
+    /// el orden en que se declaró entran, de modo que insertar un individuo al
+    /// principio de la lista, reordenarla o añadir un locus que ordene antes no
+    /// cambia ningún genotipo ya sorteado.
+    InitialRepeatAllele {
+        scenario_id: &'a str,
+        reference_id: &'a str,
+        population_id: &'a str,
+        individual_id: &'a str,
+        copy_index: u8,
+        locus_id: &'a str,
     },
 }
 
@@ -560,6 +575,25 @@ pub fn derive_subseed(
                 ("event_id", event_id),
                 ("library_id", library_id),
                 ("template_ordinal", &template_ordinal.to_string()),
+            ],
+        )?,
+        RuntimeSubseedScope::InitialRepeatAllele {
+            scenario_id,
+            reference_id,
+            population_id,
+            individual_id,
+            copy_index,
+            locus_id,
+        } => canonical_material_v2(
+            root,
+            "initial_repeat_allele",
+            &[
+                ("scenario_id", scenario_id),
+                ("reference_id", reference_id),
+                ("population_id", population_id),
+                ("individual_id", individual_id),
+                ("copy_index", &copy_index.to_string()),
+                ("locus_id", locus_id),
             ],
         )?,
         RuntimeSubseedScope::TechnicalLibraryCount {
@@ -1230,6 +1264,8 @@ pub const POISSON_COUNT_MAX_LAMBDA: f64 = 4_503_599_627_370_496.0;
 pub const HWE_COMPOSITION_ALGORITHM: &str = "hwe-composition-v1";
 pub const F_DIPLOID_GENOTYPE_ALGORITHM: &str = "f-diploid-genotype-v1";
 pub const PHASE_PERMUTATION_ALGORITHM: &str = "phase-permutation-v1";
+/// Elección ponderada de una categoría entre varias (DTC-072).
+pub const CATEGORICAL_F64_ALGORITHM: &str = "categorical-f64-v1";
 pub const F4_UNIFORM_INDEX_ALGORITHM: &str = "uniform-index-v1";
 pub const F4_UNIFORM_OPEN_53_ALGORITHM: &str = "uniform-open-53-v1";
 pub const F4_UNIFORM_CLOSED_53_ALGORITHM: &str = "uniform-closed-53-bit-v1";
@@ -2068,7 +2104,7 @@ pub fn categorical_f64(rng: &mut LocalRng, weights: &[f64]) -> Result<usize, Ran
     categorical_f64_with_source(rng, weights)
 }
 
-fn categorical_f64_with_source(
+pub(crate) fn categorical_f64_with_source(
     rng: &mut impl RandomWordSource,
     weights: &[f64],
 ) -> Result<usize, RandomSamplingError> {

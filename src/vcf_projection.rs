@@ -358,6 +358,13 @@ enum PathPiece<'truth> {
         anchor: u64,
         bases: &'truth str,
     },
+    /// Tracto de repetición realizado: sustituye el intervalo
+    /// `[start, end)` de la referencia por sus propias bases.
+    Replaced {
+        start: u64,
+        end: u64,
+        bases: &'truth str,
+    },
 }
 
 impl<'truth> CopyPath<'truth> {
@@ -402,6 +409,23 @@ impl<'truth> CopyPath<'truth> {
                     })?;
                     pieces.push(PathPiece::Inserted { anchor, bases });
                 }
+                TruthCurrentPiece::RepeatAllele { source, bases, .. } => {
+                    if source.sequence_id != sequence.id().as_str()
+                        || source.start >= source.end
+                        || source.end > sequence.length()
+                        || prior_source_end.is_some_and(|end| source.start < end)
+                    {
+                        return Err(VcfProjectionError::SourceOutsideReference {
+                            copy: identity.clone(),
+                        });
+                    }
+                    pieces.push(PathPiece::Replaced {
+                        start: source.start,
+                        end: source.end,
+                        bases,
+                    });
+                    prior_source_end = Some(source.end);
+                }
             }
         }
         Ok(Self {
@@ -439,6 +463,21 @@ impl<'truth> CopyPath<'truth> {
                     start: *anchor,
                     end: *anchor,
                 }),
+                PathPiece::Replaced { start, end, .. } => {
+                    if let Some(previous) = prior_source_end
+                        && previous < *start
+                    {
+                        changes.push(ReferenceSpan {
+                            start: previous,
+                            end: *start,
+                        });
+                    }
+                    changes.push(ReferenceSpan {
+                        start: *start,
+                        end: *end,
+                    });
+                    prior_source_end = Some(*end);
+                }
             }
         }
         changes
@@ -482,6 +521,20 @@ impl<'truth> CopyPath<'truth> {
                     }
                 }
                 PathPiece::Inserted { anchor, bases } if start <= *anchor && *anchor <= end => {
+                    output.extend_from_slice(bases.as_bytes());
+                }
+                // El tracto se copia entero o no se copia: la ventana procede
+                // de fundir los intervalos que cambiaron, de modo que o
+                // contiene el tracto completo o no lo toca. Una ventana que lo
+                // cortara por la mitad produciría un ALT recortado y silencioso.
+                PathPiece::Replaced {
+                    start: piece_start,
+                    end: piece_end,
+                    bases,
+                } if *piece_start < end && start < *piece_end => {
+                    if *piece_start < start || end < *piece_end {
+                        return Err(VcfProjectionError::CoordinateOverflow);
+                    }
                     output.extend_from_slice(bases.as_bytes());
                 }
                 _ => {}

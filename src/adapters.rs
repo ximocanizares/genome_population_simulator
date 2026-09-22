@@ -1927,7 +1927,7 @@ fn parse_repeat_loci(
         // bloque y es lo que escribe todo documento que no sea compuesto.
         let singular = optional_located_string(admitted, locus, "motif")?;
         let plural = optional_array(admitted, locus, "motifs")?;
-        let (motifs, declared_as_list) = match (singular, plural) {
+        let motifs = match (singular, plural) {
             (Some(_), Some(_)) => {
                 return Err(semantic_error(
                     admitted,
@@ -1945,7 +1945,7 @@ fn parse_repeat_loci(
                     format!("el locus {} no declara ningún motivo", id.value()),
                 ));
             }
-            (Some(single), None) => (vec![single], false),
+            (Some(single), None) => vec![single],
             (None, Some(values)) => {
                 if values.is_empty() {
                     return Err(semantic_error(
@@ -1964,7 +1964,7 @@ fn parse_repeat_loci(
                         location(admitted, value.span()),
                     ));
                 }
-                (parsed, true)
+                parsed
             }
         };
         let admission = parse_locus_admission(admitted, locus)?;
@@ -2030,7 +2030,6 @@ fn parse_repeat_loci(
             start: required_u64(admitted, locus, "start")?,
             end: required_u64(admitted, locus, "end")?,
             motifs,
-            declared_as_list,
             max_units: optional_located_u64(admitted, locus, "max_units")?,
             admission,
             alleles,

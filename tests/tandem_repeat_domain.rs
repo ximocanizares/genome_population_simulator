@@ -28,8 +28,7 @@ fn tract(motif_text: &str, tract_text: &str) -> TandemRepeatTract {
 fn pure_acg_tract_annotates_five_units_unit_purity_and_a_run_of_five() {
     let annotation = tract("ACG", "ACGACGACGACGACG").annotation();
     assert_eq!(annotation.total_bases(), 15);
-    assert_eq!(annotation.units_numerator(), 15);
-    assert_eq!(annotation.units_denominator(), 3);
+    assert_eq!(annotation.exact_units(), Some((15, 3)));
     assert!((annotation.units_as_f64() - 5.0).abs() < f64::EPSILON);
     assert_eq!(annotation.purity_numerator(), 15);
     assert_eq!(annotation.purity_denominator(), 15);
@@ -47,8 +46,7 @@ fn pure_acg_tract_annotates_five_units_unit_purity_and_a_run_of_five() {
 fn impure_ac_tract_separates_the_longest_run_from_the_total_unit_count() {
     let annotation = tract("AC", "ACACACGGACAC").annotation();
     assert_eq!(annotation.total_bases(), 12);
-    assert_eq!(annotation.units_numerator(), 12);
-    assert_eq!(annotation.units_denominator(), 2);
+    assert_eq!(annotation.exact_units(), Some((12, 2)));
     assert!((annotation.units_as_f64() - 6.0).abs() < f64::EPSILON);
     assert_eq!(annotation.complete_copies(), 5);
     assert_eq!(annotation.purity_numerator(), 10);
@@ -74,8 +72,7 @@ fn the_vcf_standard_cag_example_is_admitted_with_a_fractional_unit_count() {
     assert_eq!(text.len(), 29);
     let annotation = tract("CAG", &text).annotation();
     assert_eq!(annotation.total_bases(), 29);
-    assert_eq!(annotation.units_numerator(), 29);
-    assert_eq!(annotation.units_denominator(), 3);
+    assert_eq!(annotation.exact_units(), Some((29, 3)));
     assert!((annotation.units_as_f64() - 29.0 / 3.0).abs() < 1e-12);
     assert!(
         annotation.units_as_f64().fract() > 0.0,
@@ -518,4 +515,97 @@ fn a_single_block_tract_behaves_exactly_as_before() {
         composite().motif().is_none(),
         "con varios bloques no existe «el motivo» del tracto"
     );
+}
+
+/// **El desempate de la tirada más larga ENTRE bloques.**
+///
+/// *Añadido tras la segunda revisión adversarial.* Los empates **dentro** de un
+/// bloque estaban probados; los de **entre** bloques, que son los que la
+/// decisión de varios motivos estrena, no los cubría nadie: recorriendo los
+/// bloques al revés sobrevivían las 54 pruebas de los dos ficheros, y el alelo
+/// resultante **sí cambia**.
+///
+/// Con dos bloques empatados a tres unidades y motivos distintos, gana el de la
+/// izquierda. Un recorrido inverso ganaría el de la derecha y produciría otro
+/// alelo; como el generador de la entrega 5 va a consumir esta operación, el no
+/// determinismo se propagaría.
+#[test]
+fn a_tie_between_blocks_breaks_towards_the_left_block() {
+    let before = TandemRepeatTract::pure_blocks(&[(motif("TCTA"), 3), (motif("TCTG"), 3)])
+        .expect("dos bloques empatados");
+    let annotation = before.annotation();
+    assert_eq!(annotation.blocks()[0].runs()[0].units(), 3);
+    assert_eq!(annotation.blocks()[1].runs()[0].units(), 3);
+    let run = annotation.longest_run().expect("hay tirada");
+    assert_eq!(
+        run.block_index(),
+        0,
+        "el empate lo gana el bloque de la izquierda"
+    );
+    assert_eq!(run.start(), 0);
+
+    let after = before.apply_unit_step(1).expect("expansión");
+    assert_eq!(
+        after.as_text(),
+        "TCTA".repeat(4) + &"TCTG".repeat(3),
+        "la unidad ganada es del motivo del bloque izquierdo"
+    );
+    let lengths: Vec<u64> = after.blocks().iter().map(|block| block.length()).collect();
+    assert_eq!(lengths, vec![16, 12]);
+    // Y con el desempate hacia la derecha el alelo sería este otro, que es la
+    // prueba de que los dos resultados son distinguibles.
+    assert_ne!(after.as_text(), "TCTA".repeat(3) + &"TCTG".repeat(4));
+}
+
+/// **Una interrupción que cruza la frontera entre dos bloques es una, no dos.**
+///
+/// *Añadido tras la segunda revisión adversarial.* El tipo está documentado como
+/// «bases contiguas que ninguna copia cubre», lo que implica tramos maximales, y
+/// con varios bloques la contabilidad por bloque partía el tramo en el punto
+/// donde el usuario decidió cortar la estructura. El número de interrupciones de
+/// un microsatélite tiene significado biológico y no puede depender de eso.
+#[test]
+fn an_interruption_crossing_a_block_boundary_counts_as_one() {
+    let blocks = vec![
+        TractBlock::new(motif("CA"), 8).expect("bloque"),
+        TractBlock::new(motif("GT"), 8).expect("bloque"),
+    ];
+    // `CACA` + `TTTT` | `TT` + `GTGTGT`: el tramo sin cubrir va de la 4 a la 10
+    // y cruza la frontera, que está en la 8.
+    let tract = TandemRepeatTract::from_blocks(blocks, b"CACATTTTTTGTGTGT".to_vec())
+        .expect("tracto de dos bloques");
+    let annotation = tract.annotation();
+
+    let merged = annotation.interruptions();
+    assert_eq!(merged.len(), 1, "la interrupción es una sola: {merged:?}");
+    assert_eq!(merged[0].start(), 4);
+    assert_eq!(merged[0].length(), 6);
+
+    // Y la contabilidad de cada bloque sigue siendo la suya, cortada en la
+    // frontera, que es lo que su documentación dice.
+    assert_eq!(annotation.blocks()[0].interruptions().len(), 1);
+    assert_eq!(annotation.blocks()[0].interruptions()[0].length(), 4);
+    assert_eq!(annotation.blocks()[1].interruptions().len(), 1);
+    assert_eq!(annotation.blocks()[1].interruptions()[0].start(), 8);
+    assert_eq!(annotation.blocks()[1].interruptions()[0].length(), 2);
+
+    // Dos interrupciones que NO se tocan siguen siendo dos.
+    let separated = TandemRepeatTract::from_blocks(
+        vec![
+            TractBlock::new(motif("CA"), 8).expect("bloque"),
+            TractBlock::new(motif("GT"), 8).expect("bloque"),
+        ],
+        b"CACATTCAGTGTTTGT".to_vec(),
+    )
+    .expect("tracto de dos bloques");
+    assert!(separated.annotation().interruptions().len() >= 2);
+}
+
+/// La fracción exacta de unidades solo existe con un bloque, y con varios se
+/// dice que no existe en vez de devolver un número sin significado.
+#[test]
+fn the_exact_unit_fraction_is_absent_when_there_are_several_blocks() {
+    let single = tract("CAG", "CAGCAGCAGCAGCAG");
+    assert_eq!(single.annotation().exact_units(), Some((15, 3)));
+    assert_eq!(composite().annotation().exact_units(), None);
 }

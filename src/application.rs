@@ -3037,8 +3037,13 @@ fn effective_repeat_loci(
         // valor de partida. El mismo número no significa lo mismo según el
         // motivo, y un umbral único o deja pasar basura en los motivos cortos o
         // rechaza loci legítimos en los largos.
-        let locus_admission = resolve_admission(general, locus.admission.as_ref(), admission)
-            .map_err(|diagnostic| diagnostic.with("fields", "reference.repeat_loci.min_purity"))?;
+        let locus_admission = resolve_admission(
+            general,
+            locus.admission.as_ref(),
+            admission,
+            "reference.repeat_loci",
+            Some(locus.id.value()),
+        )?;
         let max_units = locus
             .max_units
             .as_ref()
@@ -3317,13 +3322,26 @@ fn materialize_declared_allele(
 
 /// Resuelve unos mínimos declarados contra los que sirven de valor de partida.
 ///
-/// Es la misma función para los generales —cuyo valor de partida son los de
-/// omisión— y para los de cada locus, cuyo valor de partida son los generales.
+/// `scope` es el prefijo del campo que se denuncia —`reference.repeat_admission`
+/// para los generales, `reference.repeat_loci` para los de un locus— y `subject`
+/// identifica a quién pertenecen. Los recibe **aquí** en vez de envolver el
+/// diagnóstico fuera porque `Diagnostic::with` **sobrescribe** la clave: un
+/// envoltorio que añadiera `fields` pisaría el campo que el error interior ya
+/// había nombrado, y mandaría al usuario a mirar una clave que no ha escrito.
 fn resolve_admission(
     general: &DeclaredGeneralConfig,
     declared: Option<&crate::configuration::DeclaredRepeatAdmission>,
     fallback: EffectiveRepeatAdmission,
+    scope: &str,
+    subject: Option<&str>,
 ) -> Result<EffectiveRepeatAdmission, Diagnostic> {
+    let describe = |field: &str, detail: &str| {
+        let detail = subject.map_or_else(
+            || detail.to_owned(),
+            |subject| format!("locus {subject}: {detail}"),
+        );
+        config_error(general, &format!("{scope}.{field}"), detail)
+    };
     let Some(declared) = declared else {
         return Ok(fallback);
     };
@@ -3333,12 +3351,11 @@ fn resolve_admission(
             let parsed = value
                 .literal()
                 .parse::<f64>()
-                .map_err(|_| config_error(general, "min_purity", "debe ser un decimal válido"))?;
+                .map_err(|_| describe("min_purity", "debe ser un decimal válido"))?;
             if !parsed.is_finite() || !(0.0..=1.0).contains(&parsed) {
-                return Err(config_error(
-                    general,
+                return Err(describe(
                     "min_purity",
-                    "debe ser finito y pertenecer a [0,1]",
+                    "la pureza mínima debe ser finita y pertenecer a [0,1]",
                 ));
             }
             parsed
@@ -3349,10 +3366,9 @@ fn resolve_admission(
         .as_ref()
         .map_or(fallback.min_longest_run_units(), |value| *value.value());
     if min_longest_run_units == 0 {
-        return Err(config_error(
-            general,
+        return Err(describe(
             "min_longest_run_units",
-            "debe ser un entero positivo",
+            "la tirada mínima debe ser un entero positivo",
         ));
     }
     Ok(EffectiveRepeatAdmission {
@@ -3370,8 +3386,9 @@ fn effective_repeat_admission(
         general,
         general.reference().repeat_admission.as_ref(),
         EffectiveRepeatAdmission::DEFAULT,
+        "reference.repeat_admission",
+        None,
     )
-    .map_err(|diagnostic| diagnostic.with("fields", "reference.repeat_admission"))
 }
 
 fn repeat_error(

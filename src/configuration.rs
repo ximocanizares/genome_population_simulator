@@ -243,9 +243,6 @@ pub struct DeclaredRepeatLocus {
     /// la clave `motif`; un microsatélite compuesto declara varios con `motifs`,
     /// y entonces cada alelo da su número de unidades por bloque.
     pub motifs: Vec<Located<String>>,
-    /// Cierto cuando el usuario escribió la clave plural. Es lo que decide si
-    /// un alelo puede declarar su número de unidades como escalar.
-    pub declared_as_list: bool,
     /// Tope propio del tamaño del tracto, **en unidades** (F6.4.3.1).
     pub max_units: Option<Located<u64>>,
     /// Mínimos de admisión **propios de este locus**, que sustituyen a los

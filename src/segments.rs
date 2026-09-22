@@ -7,7 +7,8 @@
 use std::sync::Arc;
 
 use crate::coordinates::{BasePosition, GenomicInterval, InsertionAnchor, InternalDeletion};
-use crate::identity::{EventId, PopulationId, VariantId};
+use crate::identity::{EventId, PopulationId, RepeatLocusId, VariantId};
+use crate::tandem_repeat::TandemRepeatTract;
 
 /// Base concreta admitida como alelo de un SNP.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -331,6 +332,9 @@ pub enum CurrentIndelEvent {
         end: u64,
         provenance: ModificationProvenance,
     },
+    RepeatAllele {
+        allele: CurrentRepeatAllelePiece,
+    },
 }
 
 impl CurrentIndelEvent {
@@ -338,6 +342,7 @@ impl CurrentIndelEvent {
     pub const fn event_id(&self) -> &EventId {
         match self {
             Self::Snp { snp } => snp.provenance().event_id(),
+            Self::RepeatAllele { allele } => allele.provenance().event_id(),
             Self::Insertion { event_id, .. } | Self::Deletion { event_id, .. } => event_id,
         }
     }
@@ -350,6 +355,72 @@ impl CurrentIndelEvent {
 pub enum CurrentIndelPiece {
     Source(CurrentSourcePiece),
     Inserted(CurrentInsertedPiece),
+    RepeatAllele(CurrentRepeatAllelePiece),
+}
+
+/// **Alelo de una repetición en tándem realizado en una copia haplotípica.**
+///
+/// Es una clase propia de variante pequeña, hermana del cambio de base, la
+/// inserción y la deleción: sustituye el **intervalo de referencia** del locus
+/// declarado por la **secuencia realizada** del tracto. No guarda número de
+/// unidades, ni pureza, ni interrupciones: los tres se derivan de las bases
+/// cada vez que se piden, de modo que estructuralmente no pueden
+/// contradecirlas (decisión S-02).
+///
+/// # Por qué es una clase y no una inserción con una deleción al lado
+///
+/// Dos alelos con **el mismo número de unidades** y la interrupción en sitio
+/// distinto son alelos distintos; un contador no puede expresarlo y un par
+/// inserción/deleción perdería el locus y el motivo, que es lo que la verdad y
+/// el VCF necesitan anotar.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentRepeatAllelePiece {
+    locus_id: RepeatLocusId,
+    interval: GenomicInterval,
+    tract: TandemRepeatTract,
+    provenance: ModificationProvenance,
+}
+
+impl CurrentRepeatAllelePiece {
+    #[must_use]
+    pub const fn new(
+        locus_id: RepeatLocusId,
+        interval: GenomicInterval,
+        tract: TandemRepeatTract,
+        provenance: ModificationProvenance,
+    ) -> Self {
+        Self {
+            locus_id,
+            interval,
+            tract,
+            provenance,
+        }
+    }
+
+    #[must_use]
+    pub const fn locus_id(&self) -> &RepeatLocusId {
+        &self.locus_id
+    }
+
+    /// Intervalo de la **referencia** que el alelo sustituye.
+    #[must_use]
+    pub const fn interval(&self) -> &GenomicInterval {
+        &self.interval
+    }
+
+    #[must_use]
+    pub const fn tract(&self) -> &TandemRepeatTract {
+        &self.tract
+    }
+
+    #[must_use]
+    pub const fn provenance(&self) -> &ModificationProvenance {
+        &self.provenance
+    }
+
+    fn length(&self) -> u64 {
+        self.tract.length()
+    }
 }
 
 /// Fragmento de referencia en el espacio de coordenadas vigente.
@@ -406,6 +477,7 @@ impl CurrentIndelPiece {
         match self {
             Self::Source(source) => source.source.len(),
             Self::Inserted(inserted) => u64::try_from(inserted.bases.len()).unwrap_or(u64::MAX),
+            Self::RepeatAllele(allele) => allele.length(),
         }
     }
 }
@@ -702,6 +774,117 @@ impl SegmentChain {
         })
     }
 
+    /// Sustituye el intervalo de referencia de un locus de repetición por la
+    /// secuencia realizada de su alelo.
+    ///
+    /// # El intervalo tiene que llegar **intacto**, y por eso se aplica el último
+    ///
+    /// Un alelo de repetición describe el tracto **de la referencia**: su
+    /// número de unidades, su pureza y sus interrupciones se leen respecto de
+    /// esas bases. Si un cambio de base o un indel anterior ya tocó el tramo,
+    /// el alelo dejaría de describir lo que sustituye y publicaría una verdad
+    /// falsa. Por eso la operación exige que el intervalo entero viva dentro de
+    /// **un solo** fragmento de fuente y **sin ningún SNP dentro**, y rechaza
+    /// en otro caso identificando el conflicto.
+    ///
+    /// Es la razón de que en el recorrido los alelos de repetición se apliquen
+    /// **después** de la matriz y de los cambios directos: así lo que la guarda
+    /// ve es el estado final, y no un estado intermedio que todavía puede
+    /// cambiar.
+    pub fn with_current_repeat_allele(
+        &self,
+        allele: CurrentRepeatAllelePiece,
+    ) -> Result<Self, SegmentError> {
+        let state = self.current_indel_state()?;
+        let interval = allele.interval();
+        let index = self.intact_repeat_interval(interval)?;
+        let CurrentIndelPiece::Source(source) = &state.pieces[index] else {
+            return Err(SegmentError::RepeatIntervalNotIntact);
+        };
+        let mut pieces = Vec::with_capacity(state.pieces.len() + 2);
+        pieces.extend_from_slice(&state.pieces[..index]);
+        push_source_piece(
+            &mut pieces,
+            &source.source,
+            source.source.start(),
+            interval.start(),
+            &source
+                .snps
+                .iter()
+                .filter(|snp| snp.position().offset() < interval.start())
+                .cloned()
+                .collect::<Vec<_>>(),
+        )?;
+        pieces.push(CurrentIndelPiece::RepeatAllele(allele.clone()));
+        push_source_piece(
+            &mut pieces,
+            &source.source,
+            interval.end(),
+            source.source.end(),
+            &source
+                .snps
+                .iter()
+                .filter(|snp| snp.position().offset() >= interval.end())
+                .cloned()
+                .collect::<Vec<_>>(),
+        )?;
+        pieces.extend_from_slice(&state.pieces[index + 1..]);
+        let mut events = state.events.to_vec();
+        events.push(CurrentIndelEvent::RepeatAllele { allele });
+        Ok(Self {
+            segments: self.segments.clone(),
+            indel_state: Arc::new(CurrentIndelState {
+                pieces: Arc::from(pieces),
+                events: Arc::from(events),
+            }),
+        })
+    }
+
+    /// Comprueba que el intervalo de un locus llega **intacto** y devuelve el
+    /// fragmento que lo contiene.
+    ///
+    /// # Por qué es pública y se consulta aunque no haya nada que aplicar
+    ///
+    /// Cuando la copia sortea el alelo que coincide con el tracto de la
+    /// referencia no hay modificación que escribir, pero **la condición sigue
+    /// teniendo que cumplirse**: la verdad va a publicar que esa copia
+    /// «conserva el tracto de la referencia», y eso es falso si algo lo tocó.
+    /// Si la comprobación viviera solo dentro de la operación que aplica el
+    /// alelo, el rechazo dependería del sorteo y, con él, de la semilla.
+    pub fn intact_repeat_interval(
+        &self,
+        interval: &GenomicInterval,
+    ) -> Result<usize, SegmentError> {
+        let (index, source) = self
+            .indel_state
+            .pieces
+            .iter()
+            .enumerate()
+            .find_map(|(index, piece)| match piece {
+                CurrentIndelPiece::Source(source)
+                    if source.source.reference_id() == interval.reference_id()
+                        && source.source.sequence_id() == interval.sequence_id()
+                        && source.source.sequence_length() == interval.sequence_length()
+                        && source.source.start() <= interval.start()
+                        && interval.end() <= source.source.end() =>
+                {
+                    Some((index, source))
+                }
+                CurrentIndelPiece::Source(_)
+                | CurrentIndelPiece::Inserted(_)
+                | CurrentIndelPiece::RepeatAllele(_) => None,
+            })
+            .ok_or(SegmentError::RepeatIntervalNotIntact)?;
+        if source
+            .snps
+            .iter()
+            .any(|snp| (interval.start()..interval.end()).contains(&snp.position().offset()))
+        {
+            return Err(SegmentError::RepeatIntervalAlreadyModified);
+        }
+        Ok(index)
+    }
+
     fn current_indel_state(&self) -> Result<CurrentIndelState, SegmentError> {
         Ok((*self.indel_state).clone())
     }
@@ -836,10 +1019,14 @@ fn modification_matches_source(modification: &SmallModification, source: &Genomi
 /// Invariantes que evitan una cadena o una composición ambigua.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SegmentError {
-    NonCanonicalSnpBase { value: u8 },
+    NonCanonicalSnpBase {
+        value: u8,
+    },
     SnpDoesNotChangeBase,
     EmptyInsertion,
-    InvalidInsertedBase { base: u8 },
+    InvalidInsertedBase {
+        base: u8,
+    },
     EmptyChain,
     MixedSourceSpace,
     ModificationSourceMismatch,
@@ -851,10 +1038,28 @@ pub enum SegmentError {
     SnpPositionAlreadyModified,
     SnpPositionCoveredByDeletion,
     SmallIndelCompositionDeferred,
-    CurrentInsertionMustBeInternal { point: u64, length: u64 },
-    CurrentDeletionMustBeInternal { start: u64, end: u64, length: u64 },
+    CurrentInsertionMustBeInternal {
+        point: u64,
+        length: u64,
+    },
+    CurrentDeletionMustBeInternal {
+        start: u64,
+        end: u64,
+        length: u64,
+    },
     CurrentCoordinateMismatch,
     ArithmeticOverflow,
+    /// El intervalo del locus de repetición no llega entero dentro de un solo
+    /// fragmento de fuente: un indel anterior lo partió, lo borró o ya lo
+    /// sustituyó otro alelo.
+    RepeatIntervalNotIntact,
+    /// Un cambio de base anterior cae dentro del intervalo del locus, de modo
+    /// que el tracto que el alelo dice sustituir ya no es el de la referencia.
+    RepeatIntervalAlreadyModified,
+    /// Una inserción o una deleción posterior caería **dentro** del tracto
+    /// realizado. No se admite: partir el tracto dejaría dos mitades que ya no
+    /// son un alelo y la anotación no podría derivarse de ellas.
+    RepeatAlleleIsNotDivisible,
 }
 
 fn piece_length(pieces: &[CurrentIndelPiece]) -> Result<u64, SegmentError> {
@@ -1016,6 +1221,9 @@ fn split_pieces_at(
                         bases: Arc::from(&inserted.bases[left..]),
                         provenance: inserted.provenance.clone(),
                     }));
+                }
+                CurrentIndelPiece::RepeatAllele(_) => {
+                    return Err(SegmentError::RepeatAlleleIsNotDivisible);
                 }
             }
         } else {

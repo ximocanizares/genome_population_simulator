@@ -187,6 +187,21 @@ pub fn materialize_copy_interval(
                             .ok_or(MaterializationError::IndexOverflow)?,
                     );
                 }
+                // El tracto realizado es la única autoridad de sus bases: se
+                // copia tal cual, sin volver a la referencia.
+                CurrentIndelPiece::RepeatAllele(allele) => {
+                    let slice_start = usize::try_from(overlap_start - current_start)
+                        .map_err(|_| MaterializationError::IndexOverflow)?;
+                    let slice_end = usize::try_from(overlap_end - current_start)
+                        .map_err(|_| MaterializationError::IndexOverflow)?;
+                    result.extend_from_slice(
+                        allele
+                            .tract()
+                            .bases()
+                            .get(slice_start..slice_end)
+                            .ok_or(MaterializationError::IndexOverflow)?,
+                    );
+                }
             }
         }
         current_start = current_end;
@@ -203,6 +218,7 @@ fn current_piece_length(piece: &CurrentIndelPiece) -> Result<u64, Materializatio
         CurrentIndelPiece::Inserted(inserted) => {
             u64::try_from(inserted.bases().len()).map_err(|_| MaterializationError::IndexOverflow)
         }
+        CurrentIndelPiece::RepeatAllele(allele) => Ok(allele.tract().length()),
     }
 }
 
@@ -299,6 +315,9 @@ fn materialize_current_indel_pieces(
             }
             CurrentIndelPiece::Inserted(inserted) => {
                 materialized.extend_from_slice(inserted.bases());
+            }
+            CurrentIndelPiece::RepeatAllele(allele) => {
+                materialized.extend_from_slice(allele.tract().bases());
             }
         }
     }
@@ -446,7 +465,9 @@ pub fn observed_snp_allele(
             {
                 Some(source)
             }
-            CurrentIndelPiece::Source(_) | CurrentIndelPiece::Inserted(_) => None,
+            CurrentIndelPiece::Source(_)
+            | CurrentIndelPiece::Inserted(_)
+            | CurrentIndelPiece::RepeatAllele(_) => None,
         })
         .collect::<Vec<_>>();
     match matching.as_slice() {
