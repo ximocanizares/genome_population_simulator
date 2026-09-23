@@ -173,6 +173,7 @@ fn execute_validated_config_with_effective_document(
     let mut population_snvs = None;
     let mut vcf_outputs = Vec::new();
     let mut event_links: Option<Vec<ManifestEventLink>> = None;
+    let mut realized_tract_output = crate::results::RealizedTractOutput::default();
     let started = (|| -> Result<(), Diagnostic> {
         configuration_input = Some(copy_configuration_input(effective, &mut workspace)?);
         reference_artifact = Some(write_reference(
@@ -316,8 +317,13 @@ fn execute_validated_config_with_effective_document(
                 .ok_or_else(|| internal("execute", "missing configuration artifact"))?,
             effective,
         )?;
+        // Las bases de tracto realizadas se cuentan **donde se producen**: la
+        // de la verdad sobre el documento recién construido, la del VCF sobre
+        // los registros recién escritos. Ninguna de las dos pasa por la cota.
+        realized_tract_output.truth_bases = crate::results::realized_truth_tract_bases(&truth);
         if let Some(mode) = effective.vcf_output() {
             let published = publish_truth_vcf(&mut workspace, reference, &truth, mode)?;
+            realized_tract_output.vcf_bases = published.tract_bases;
             vcf_outputs.push(VcfManifestLink {
                 state: UnitState::Complete,
                 reference_id: published.reference_id,
@@ -367,6 +373,26 @@ fn execute_validated_config_with_effective_document(
         before_manifest(&mut workspace)?;
 
         let artifacts = workspace.artifacts().to_vec();
+        // El sorteo de los alelos de repetición ya ocurrió en el preflight; sus
+        // resultados son lo único que permite publicar la frecuencia
+        // **realizada** en vez de repetir la declarada.
+        //
+        // **La sección se construye desde la configuración, no desde el
+        // sorteo.** Un escenario puede declarar loci y no tener ninguna
+        // población inicial, y entonces no hay una sola copia sorteada; el
+        // manifiesto tiene que registrar igualmente los loci y sus parámetros,
+        // con cero copias y sin frecuencia realizada. Atarlo a que existieran
+        // individuos materializados dejaba ese escenario sin registro y
+        // emparejaba una configuración efectiva con loci contra un manifiesto
+        // sin ellos.
+        let repeat_loci = crate::results::repeat_loci_manifest_json(
+            effective,
+            prepared_execution
+                .initial_individuals
+                .as_ref()
+                .map_or(&[][..], InitialIndividualsMaterialization::repeat_draws),
+            realized_tract_output,
+        )?;
         let manifest = GeneralManifest {
             execution_id: execution_id.as_str(),
             state: UnitState::Complete,
@@ -380,6 +406,7 @@ fn execute_validated_config_with_effective_document(
             authorizations,
             artifacts: &artifacts,
             diagnostics: &[],
+            repeat_loci: repeat_loci.as_ref(),
         };
         let manifest_bytes = json_document_bytes(&general_manifest_document(&manifest))?;
         if let Err(error) = workspace.write_general_manifest(&manifest_bytes) {
@@ -1503,6 +1530,13 @@ fn publish_controlled_failure(
         original_path: effective.configuration_input().original_path().to_owned(),
         copy,
     });
+    // Una ejecución fallida no ha publicado tracto alguno: sus cifras
+    // realizadas son cero y la cota sigue siendo la que la configuración fijó.
+    let repeat_loci = crate::results::repeat_loci_manifest_json(
+        effective,
+        &[],
+        crate::results::RealizedTractOutput::default(),
+    )?;
     let manifest = GeneralManifest {
         execution_id,
         state: UnitState::Failed,
@@ -1516,6 +1550,12 @@ fn publish_controlled_failure(
         authorizations,
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(cause),
+        // Una ejecución fallida no ha sorteado nada, pero **sí ha declarado**
+        // los loci, y el manifiesto los registra igual que en un éxito: con
+        // cero copias sorteadas y sin frecuencia realizada. Lo que se registra
+        // es la configuración, que existe tanto si la ejecución terminó como
+        // si no.
+        repeat_loci: repeat_loci.as_ref(),
     };
     workspace.write_general_manifest(&json_document_bytes(&general_manifest_document(&manifest))?)
 }

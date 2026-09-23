@@ -1640,6 +1640,7 @@ fn parse_reference(
             "composition",
             "repeat_loci",
             "repeat_admission",
+            "max_tract_output_bases",
         ]
     } else {
         &["kind", "id", "fasta", "sequences", "composition"]
@@ -1745,12 +1746,18 @@ fn parse_reference(
     } else {
         None
     };
+    let max_tract_output_bases = if declares_repeats {
+        optional_located_u64(admitted, table, "max_tract_output_bases")?
+    } else {
+        None
+    };
     Ok(DeclaredReference {
         id,
         source,
         sequences,
         repeat_loci,
         repeat_admission,
+        max_tract_output_bases,
     })
 }
 

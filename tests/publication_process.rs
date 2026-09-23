@@ -371,6 +371,7 @@ fn write_failed_manifest(
         authorizations: genome_population_simulator::execution::ExecutionAuthorizations::default(),
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(diagnostic),
+        repeat_loci: None,
     };
     let bytes = json_document_bytes(&general_manifest_document(&manifest)).expect("manifest bytes");
     workspace

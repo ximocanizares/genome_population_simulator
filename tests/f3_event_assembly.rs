@@ -256,6 +256,7 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
         authorizations: ExecutionAuthorizations::default(),
         artifacts: &catalog,
         diagnostics: std::slice::from_ref(&failure),
+        repeat_loci: None,
     };
     workspace
         .write_general_manifest(

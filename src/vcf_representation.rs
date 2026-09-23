@@ -95,6 +95,24 @@ pub enum VcfRepresentationError {
         position: u64,
         sample: String,
     },
+    /// La lista de anotaciones de repetición no es paralela a la de ALT.
+    ///
+    /// El estándar liga cada valor a su alelo por **posición**: una lista que
+    /// no tenga exactamente un elemento por ALT desplazaría todos los motivos,
+    /// que es el error silencioso más probable de estos campos.
+    RepeatAnnotationMismatch {
+        sequence_id: String,
+        position: u64,
+    },
+    /// Una secuencia repetida que el VCF no puede expresar.
+    ///
+    /// El campo del motivo admite códigos de nucleótido y nada más, y una
+    /// secuencia repetida de cero bases no es una secuencia repetida.
+    InvalidRepeatSequence {
+        sequence_id: String,
+        position: u64,
+        motif: String,
+    },
 }
 
 impl std::fmt::Display for VcfRepresentationError {
@@ -169,8 +187,34 @@ fn validate_record(record: &GroupedVcfRecord) -> Result<(), VcfRepresentationErr
         });
     }
     validate_cases(record)?;
+    validate_repeat_annotations(record)?;
     for (sample, genotype) in &record.samples {
         validate_genotype(record, sample, genotype)?;
+    }
+    Ok(())
+}
+
+fn validate_repeat_annotations(record: &GroupedVcfRecord) -> Result<(), VcfRepresentationError> {
+    if record.alternate_repeats.len() != record.alternates.len() {
+        return Err(VcfRepresentationError::RepeatAnnotationMismatch {
+            sequence_id: record.sequence_id.clone(),
+            position: record.position,
+        });
+    }
+    for block in record.alternate_repeats.iter().flatten() {
+        if block.bases == 0
+            || block.motif.is_empty()
+            || !block
+                .motif
+                .bytes()
+                .all(|base| matches!(base, b'A' | b'C' | b'G' | b'T'))
+        {
+            return Err(VcfRepresentationError::InvalidRepeatSequence {
+                sequence_id: record.sequence_id.clone(),
+                position: record.position,
+                motif: block.motif.clone(),
+            });
+        }
     }
     Ok(())
 }
@@ -278,6 +322,9 @@ fn validate_genotype(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Solo las pruebas construyen una secuencia repetida por su nombre: la
+    // producción la recibe ya formada dentro del registro agrupado.
+    use crate::vcf_grouping::VcfRepeatSequence;
 
     fn record(reference: &str, alternates: &[&str]) -> GroupedVcfRecord {
         GroupedVcfRecord {
@@ -297,6 +344,7 @@ mod tests {
             )],
             gps_cases: vec!["CASE_A".into()],
             alternate_cases: vec![vec!["CASE_A".into()]],
+            alternate_repeats: vec![Vec::new(); alternates.len()],
         }
     }
 
@@ -358,6 +406,55 @@ mod tests {
         let output = prepare_conditional_vcf_records(vec![grouped.clone()]).expect("valid VCF");
         assert_eq!(output.records, [grouped]);
         assert!(output.complement().is_none());
+    }
+
+    /// **Una lista de anotaciones que no sea paralela a la de ALT se rechaza.**
+    ///
+    /// El estándar liga cada valor a su alelo por posición: una lista con un
+    /// elemento de más o de menos desplazaría todos los motivos. La producción
+    /// no puede construirla —el agrupador la crea siempre paralela—, de modo
+    /// que esta prueba ejercita la guarda desde la frontera, que es el único
+    /// sitio desde donde es alcanzable.
+    #[test]
+    fn rejects_a_repeat_annotation_that_is_not_parallel_to_the_alternates() {
+        let mut grouped = record("C", &["A"]);
+        grouped.alternate_repeats = Vec::new();
+        let error = prepare_conditional_vcf_records(vec![grouped])
+            .expect_err("la lista tiene que tener un elemento por ALT");
+        assert!(matches!(
+            error,
+            VcfRepresentationError::RepeatAnnotationMismatch { .. }
+        ));
+
+        // Control: la misma entrada con la lista paralela sí se acepta, de modo
+        // que el rechazo anterior no viene de otra comprobación.
+        let mut valid = record("C", &["A"]);
+        valid.alternate_repeats = vec![vec![VcfRepeatSequence {
+            motif: "CA".into(),
+            bases: 10,
+        }]];
+        prepare_conditional_vcf_records(vec![valid]).expect("lista paralela válida");
+    }
+
+    /// **Una secuencia repetida que el VCF no puede expresar se rechaza.**
+    ///
+    /// El campo del motivo admite códigos de nucleótido y nada más, y una
+    /// secuencia repetida de cero bases no es una secuencia repetida.
+    #[test]
+    fn rejects_a_repeat_sequence_with_an_impossible_motif_or_no_bases() {
+        for (motif, bases) in [("CN", 10_u64), ("", 10), ("CA", 0)] {
+            let mut grouped = record("C", &["A"]);
+            grouped.alternate_repeats = vec![vec![VcfRepeatSequence {
+                motif: motif.into(),
+                bases,
+            }]];
+            let error = prepare_conditional_vcf_records(vec![grouped])
+                .expect_err("motivo o bases imposibles");
+            assert!(
+                matches!(error, VcfRepresentationError::InvalidRepeatSequence { .. }),
+                "motivo {motif:?} con {bases} bases"
+            );
+        }
     }
 
     #[test]

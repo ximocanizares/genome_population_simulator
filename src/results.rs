@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::application::{
     DeclaredDocumentVersion, EffectiveConfig, EffectiveDirectEvent, EffectiveInitialGenotypeModel,
-    EffectiveReducedReference, EffectiveReferenceSource, EffectiveTechnicalEvent,
-    EffectiveTechnicalEventTarget, build_effective_config_with_entropy,
+    EffectiveReducedReference, EffectiveReferenceSource, EffectiveRepeatAllele,
+    EffectiveTechnicalEvent, EffectiveTechnicalEventTarget, build_effective_config_with_entropy,
 };
 use crate::biological_contamination::contamination_target_pair_count;
 use crate::configuration::ExpectedConfigKind;
@@ -52,6 +52,7 @@ use crate::reference_reduction_io::{
     REDUCTION_MAP_DOCUMENT_KIND, REDUCTION_MAP_SCHEMA_VERSION, ReductionMapParameters,
     build_reduced_reference, reduction_map_document, source_for, validate_reduction_map_document,
 };
+use crate::repeat_genotypes::RepeatAlleleDraw;
 use crate::tandem_repeat::{BlockAnnotation, RepeatMotif};
 use crate::technical_identity::derive_technical_identity_plan;
 use crate::vcf_contract::{TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfIndexKind, VcfOutputMode};
@@ -63,6 +64,15 @@ use crate::vcf_publication::{
 /// Versión vigente del manifiesto general. DTC-082 la activa junto con el
 /// primer productor PE y no mantiene lectores F3.
 pub const GENERAL_MANIFEST_SCHEMA_VERSION: &str = "4";
+
+/// Versión del manifiesto general que abre este trabajo, para las ejecuciones
+/// que publican repeticiones en tándem.
+///
+/// Es la **seis** y no la cinco porque la cinco ya la ocupa el manifiesto de
+/// la fase de población fundadora, que es otro documento con la misma clase.
+/// Una ejecución sin loci declarados sigue publicando la versión 4, byte a
+/// byte como antes.
+pub const GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS: &str = "6";
 
 /// Versión vigente de la configuración efectiva para el productor PE F4.
 pub const EFFECTIVE_CONFIG_SCHEMA_VERSION: &str = "4";
@@ -265,6 +275,13 @@ pub struct GeneralManifest<'a> {
     pub authorizations: crate::execution::ExecutionAuthorizations,
     pub artifacts: &'a [ArtifactRecord],
     pub diagnostics: &'a [Diagnostic],
+    /// Sección de repeticiones en tándem, tal y como la construye
+    /// [`repeat_loci_manifest_json`].
+    ///
+    /// Su presencia —y solo su presencia— promueve el documento a la versión
+    /// 6. Una ejecución sin loci declarados la deja en `None` y publica
+    /// exactamente el documento de antes.
+    pub repeat_loci: Option<&'a Value>,
 }
 
 pub fn effective_config_document_with_reference(
@@ -319,6 +336,7 @@ pub fn effective_config_document_with_reductions(
             "min_purity": config.repeat_admission().min_purity(),
             "min_longest_run_units": config.repeat_admission().min_longest_run_units(),
         });
+        document["repeat_output_budget"] = repeat_output_budget_json(config);
     }
     Ok(document)
 }
@@ -360,39 +378,407 @@ fn repeat_loci_json(config: &EffectiveConfig) -> Result<Value, Diagnostic> {
                 "effective_sum": normalization.effective_sum(),
                 "effective_delta": normalization.effective_delta(),
             },
-            "alleles": locus.alleles().iter().map(|allele| {
-                let annotation = allele.tract().annotation();
-                // Los bloques se publican como **listas paralelas**, que es la
-                // forma que el estándar VCF 4.5 define para una repetición
-                // compuesta: cuántas secuencias repetidas tiene el alelo, y por
-                // cada una su motivo, la longitud del motivo, el número de
-                // copias —decimal, porque puede acabar en unidad parcial— y las
-                // bases totales. Publicarlas aquí con la misma forma hace que la
-                // proyección al VCF sea un volcado y no una traducción.
-                json!({
-                    "sequence": allele.tract().as_text(),
-                    "declared_frequency": allele.declared_frequency(),
-                    "effective_frequency": allele.frequency(),
-                    "units": annotation.units_as_f64(),
-                    "purity": annotation.purity_as_f64(),
-                    "longest_run_units": annotation.longest_run_units(),
-                    "repeat_sequence_count": annotation.blocks().len(),
-                    "block_motifs": annotation.blocks().iter()
-                        .map(|block| block.motif().as_text()).collect::<Vec<_>>(),
-                    "block_motif_lengths": annotation.blocks().iter()
-                        .map(|block| block.motif().length()).collect::<Vec<_>>(),
-                    "block_unit_counts": annotation.blocks().iter()
-                        .map(BlockAnnotation::units_as_f64).collect::<Vec<_>>(),
-                    "block_bases": annotation.blocks().iter()
-                        .map(BlockAnnotation::length).collect::<Vec<_>>(),
-                    "interruptions": annotation.interruptions().iter().map(|interruption| {
-                        json!({"offset": interruption.start(), "length": interruption.length()})
-                    }).collect::<Vec<_>>(),
-                })
-            }).collect::<Vec<_>>(),
+            "alleles": locus.alleles().iter()
+                .map(|allele| Value::Object(repeat_allele_json(allele)))
+                .collect::<Vec<_>>(),
         }));
     }
     Ok(Value::Array(loci))
+}
+
+/// Juez independiente de la contabilidad de bases de tracto.
+///
+/// # Qué comprueba, y por qué no es un espejo
+///
+/// Vuelve a contar las bases de tracto **releyendo los bytes publicados**: el
+/// `truth.jsonl` como JSON línea a línea y el VCF como texto, sin tocar ni una
+/// estructura del productor. Con esas dos cifras exige tres cosas:
+///
+/// 1. que coincidan con las que el manifiesto publica —si el productor contó
+///    mal o mintió, aquí se ve—;
+/// 2. que la cota del manifiesto sea la de la configuración efectiva;
+/// 3. que lo realizado **no supere** la cota.
+///
+/// Las tres comparaciones enfrentan caminos distintos: la cota sale de lo
+/// declarado, la cifra del manifiesto del recorrido de las estructuras en
+/// memoria, y la de aquí de los bytes de los ficheros. Si los tres fueran la
+/// misma función, ninguna de las tres podría fallar.
+pub fn validate_published_tract_output_accounting(
+    effective_path: &Path,
+    effective_bytes: &[u8],
+    manifest_path: &Path,
+    manifest_bytes: &[u8],
+    truth_path: &Path,
+    vcf_path: Option<&Path>,
+) -> Result<(), Diagnostic> {
+    let manifest: Value = serde_json::from_slice(manifest_bytes)
+        .map_err(|error| manifest_error(manifest_path, format!("JSON no legible: {error}")))?;
+    let Some(section) = manifest.get("repeat_loci") else {
+        // Sin loci no hay contabilidad de tracto que juzgar, y exigirla sería
+        // inventar una obligación donde el manifiesto no promete nada.
+        return Ok(());
+    };
+    let accounting = section
+        .get("tract_output")
+        .and_then(Value::as_object)
+        .ok_or_else(|| repeat_section_error(manifest_path, "falta la contabilidad de tracto"))?;
+    let read = |key: &str| -> Result<u64, Diagnostic> {
+        accounting.get(key).and_then(Value::as_u64).ok_or_else(|| {
+            repeat_section_error(manifest_path, "una cifra de tracto no es un entero")
+        })
+    };
+
+    let effective: Value = serde_json::from_slice(effective_bytes)
+        .map_err(|error| effective_error(effective_path, format!("JSON no legible: {error}")))?;
+    let declared_bound = effective
+        .get("repeat_output_budget")
+        .and_then(|budget| budget.get("total_tract_bases_bound"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            effective_error(
+                effective_path,
+                "la configuración efectiva no publica la cota de bases de tracto",
+            )
+        })?;
+    if read("total_tract_bases_bound")? != declared_bound {
+        return Err(repeat_section_error(
+            manifest_path,
+            "la cota del manifiesto no es la de la configuración efectiva",
+        ));
+    }
+
+    let recomputed_truth = recount_truth_tract_bases(truth_path)?;
+    let recomputed_vcf = match vcf_path {
+        None => 0,
+        Some(path) => recount_vcf_tract_bases(path)?,
+    };
+    if recomputed_truth != read("realized_truth_tract_bases")?
+        || recomputed_vcf != read("realized_vcf_tract_bases")?
+    {
+        return Err(repeat_section_error(
+            manifest_path,
+            "las bases de tracto realizadas no son las que los documentos publicados llevan",
+        ));
+    }
+    let realized = recomputed_truth.saturating_add(recomputed_vcf);
+    if realized != read("realized_total_tract_bases")? {
+        return Err(repeat_section_error(
+            manifest_path,
+            "el total realizado no es la suma de sus dos términos",
+        ));
+    }
+    if realized > declared_bound {
+        return Err(repeat_section_error(
+            manifest_path,
+            "las bases de tracto realizadas superan la cota declarada",
+        ));
+    }
+    Ok(())
+}
+
+/// Recuenta las bases de tracto releyendo el `truth.jsonl` como JSON.
+fn recount_truth_tract_bases(path: &Path) -> Result<u64, Diagnostic> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| manifest_error(path, format!("verdad no legible: {error}")))?;
+    let mut total = 0_u64;
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let record: Value = serde_json::from_str(line)
+            .map_err(|error| manifest_error(path, format!("línea de verdad ilegible: {error}")))?;
+        let mut add = |value: Option<&Value>| {
+            if let Some(bases) = value.and_then(Value::as_str) {
+                total = total.saturating_add(bases.len() as u64);
+            }
+        };
+        for piece in record
+            .get("current_pieces")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .chain(
+                record
+                    .get("history")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten(),
+            )
+        {
+            if piece.get("kind").and_then(Value::as_str) == Some("repeat_allele") {
+                add(piece.get("bases"));
+            }
+        }
+        for allele in record
+            .get("alleles")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if allele.get("kind").and_then(Value::as_str) == Some("repeat") {
+                add(allele.get("bases"));
+            }
+        }
+    }
+    Ok(total)
+}
+
+/// Recuenta las bases de tracto releyendo el VCF como texto.
+///
+/// Un registro es de repetición si publica el recuento de secuencias
+/// repetidas; sus bases son las de `REF` más las de cada `ALT`, que desde la
+/// decisión S-09 llevan la secuencia completa del alelo.
+fn recount_vcf_tract_bases(path: &Path) -> Result<u64, Diagnostic> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| manifest_error(path, format!("VCF no legible: {error}")))?;
+    let text = if path.extension().is_some_and(|extension| extension == "gz") {
+        let mut reader = noodles_bgzf::io::Reader::new(std::io::Cursor::new(bytes));
+        let mut decoded = String::new();
+        std::io::Read::read_to_string(&mut reader, &mut decoded)
+            .map_err(|error| manifest_error(path, format!("VCF BGZF no legible: {error}")))?;
+        decoded
+    } else {
+        String::from_utf8(bytes).map_err(|_| manifest_error(path, "VCF no es UTF-8"))?
+    };
+    let mut total = 0_u64;
+    for line in text.lines().filter(|line| !line.starts_with('#')) {
+        let fields = line.split('\t').collect::<Vec<_>>();
+        let Some(info) = fields.get(7) else { continue };
+        if !info.split(';').any(|field| field.starts_with("RN=")) {
+            continue;
+        }
+        total = total.saturating_add(fields[3].len() as u64);
+        for alternate in fields[4].split(',') {
+            total = total.saturating_add(alternate.len() as u64);
+        }
+    }
+    Ok(total)
+}
+
+/// Bases de tracto que los documentos publicados llevan de verdad.
+///
+/// Las dos cifras se cuentan **sobre lo publicado**, cada una donde se produce:
+/// la de la verdad recorriendo el documento ya construido, la del VCF
+/// recorriendo los registros ya agrupados. Ninguna de las dos sabe nada de la
+/// cota.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RealizedTractOutput {
+    pub truth_bases: u64,
+    pub vcf_bases: u64,
+}
+
+impl RealizedTractOutput {
+    #[must_use]
+    pub const fn total_bases(self) -> u64 {
+        self.truth_bases.saturating_add(self.vcf_bases)
+    }
+}
+
+/// Cota superior de bases de tracto publicadas, tal y como la calculó la
+/// frontera de configuración.
+///
+/// Se publica **siempre** que el documento pueda declarar repeticiones, aunque
+/// no declare ninguna: quien lea el documento tiene que poder ver contra qué
+/// techo se admitió el escenario, y un techo ausente no se distingue de un
+/// techo infinito.
+fn repeat_output_budget_json(config: &EffectiveConfig) -> Value {
+    let budget = config.repeat_output_budget();
+    json!({
+        "truth_tract_bases_bound": budget.truth_bases(),
+        "vcf_tract_bases_bound": budget.vcf_bases(),
+        "total_tract_bases_bound": budget.total_bases(),
+        "declared_max_tract_output_bases": budget.declared_cap(),
+        "truth_copies_per_haplotype_copy":
+            crate::application::EffectiveRepeatOutputBudget::TRUTH_COPIES_PER_HAPLOTYPE_COPY,
+        "per_locus": budget.per_locus().iter().map(|locus| json!({
+            "id": locus.locus_id(),
+            "truth_tract_bases_bound": locus.truth_bases(),
+            "vcf_tract_bases_bound": locus.vcf_bases(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// Bases de secuencia de tracto que un documento de verdad **lleva de verdad**.
+///
+/// # Por qué se cuenta aquí y no se deriva de la cota
+///
+/// Esta función recorre el documento ya construido y suma las bases de cada
+/// tracto que publica: la vista vigente de cada copia, su historial y los
+/// alelos de cada caso genotípico. No sabe nada de alelos declarados, de
+/// individuos ni de ploidía, que es de lo único que se alimenta la cota. Son
+/// dos caminos que no se tocan, y por eso compararlos dice algo.
+#[must_use]
+pub fn realized_truth_tract_bases(truth: &crate::truth_schema::TruthDocument) -> u64 {
+    use crate::truth_schema::{TruthAllele, TruthCurrentPiece, TruthHistoryEvent, TruthRecord};
+
+    let mut total = 0_u64;
+    for record in &truth.records {
+        match record {
+            TruthRecord::HaplotypeCopy(copy) => {
+                for piece in &copy.current_pieces {
+                    if let TruthCurrentPiece::RepeatAllele { bases, .. } = piece {
+                        total = total.saturating_add(bases.len() as u64);
+                    }
+                }
+                for event in &copy.history {
+                    if let TruthHistoryEvent::RepeatAllele { bases, .. } = event {
+                        total = total.saturating_add(bases.len() as u64);
+                    }
+                }
+            }
+            TruthRecord::Genotype(genotype) => {
+                for allele in &genotype.alleles {
+                    if let TruthAllele::Repeat { bases, .. } = allele {
+                        total = total.saturating_add(bases.len() as u64);
+                    }
+                }
+            }
+        }
+    }
+    total
+}
+
+/// Un alelo de repetición: su secuencia, sus frecuencias declarada y efectiva
+/// y los **valores realizados** que se leen de su secuencia.
+///
+/// Los bloques se publican como **listas paralelas**, que es la forma que el
+/// estándar VCF 4.5 define para una repetición compuesta: cuántas secuencias
+/// repetidas tiene el alelo, y por cada una su motivo, la longitud del motivo,
+/// el número de copias —decimal, porque puede acabar en unidad parcial— y las
+/// bases totales. Publicarlas aquí con la misma forma hace que la proyección al
+/// VCF sea un volcado y no una traducción.
+///
+/// La pureza, las interrupciones y la tirada más larga **no se pueden
+/// declarar**: se calculan sobre la secuencia cada vez (decisión S-02). Por eso
+/// el manifiesto y la configuración efectiva comparten esta función en vez de
+/// escribirlas dos veces: dos copias podrían decir cosas distintas del mismo
+/// alelo.
+fn repeat_allele_json(allele: &EffectiveRepeatAllele) -> serde_json::Map<String, Value> {
+    let annotation = allele.tract().annotation();
+    let Value::Object(object) = json!({
+        "sequence": allele.tract().as_text(),
+        "declared_frequency": allele.declared_frequency(),
+        "effective_frequency": allele.frequency(),
+        "units": annotation.units_as_f64(),
+        "purity": annotation.purity_as_f64(),
+        "longest_run_units": annotation.longest_run_units(),
+        "repeat_sequence_count": annotation.blocks().len(),
+        "block_motifs": annotation.blocks().iter()
+            .map(|block| block.motif().as_text()).collect::<Vec<_>>(),
+        "block_motif_lengths": annotation.blocks().iter()
+            .map(|block| block.motif().length()).collect::<Vec<_>>(),
+        "block_unit_counts": annotation.blocks().iter()
+            .map(BlockAnnotation::units_as_f64).collect::<Vec<_>>(),
+        "block_bases": annotation.blocks().iter()
+            .map(BlockAnnotation::length).collect::<Vec<_>>(),
+        "interruptions": annotation.interruptions().iter().map(|interruption| {
+            json!({"offset": interruption.start(), "length": interruption.length()})
+        }).collect::<Vec<_>>(),
+    }) else {
+        unreachable!("json! de un objeto literal es un objeto");
+    };
+    object
+}
+
+/// Sección de repeticiones en tándem del manifiesto general.
+///
+/// # Qué añade respecto de la configuración efectiva, y por qué no basta con
+/// aquella
+///
+/// La configuración efectiva describe **lo que se pidió**: los loci, sus
+/// parámetros, sus alelos y las frecuencias declarada y normalizada. Lo que
+/// solo el manifiesto puede decir es **lo que salió**: cuántas copias recibió
+/// cada alelo en el sorteo y qué proporción representa. Copiar ahí la
+/// frecuencia declarada sería publicar una afirmación falsa con nombre de
+/// medida, y en un corpus pequeño la diferencia entre las dos es grande.
+///
+/// # Por qué la procedencia de la referencia va aquí
+///
+/// De ella depende el significado de todo lo demás: con una referencia real el
+/// tracto **ya estaba ahí** con las interrupciones que tuviera, y la pureza es
+/// un valor observado; con una simulada, el tracto lo puso el propio simulador
+/// (decisión S-06). Quien lea el manifiesto sin la configuración tiene que
+/// poder distinguir los dos casos.
+///
+/// Devuelve `None` cuando la configuración no declara ningún locus: sin loci no
+/// hay sección, el manifiesto conserva su versión anterior y sus bytes son los
+/// de siempre.
+pub fn repeat_loci_manifest_json(
+    config: &EffectiveConfig,
+    draws: &[RepeatAlleleDraw],
+    realized: RealizedTractOutput,
+) -> Result<Option<Value>, Diagnostic> {
+    if config.repeat_loci().is_empty() {
+        return Ok(None);
+    }
+    let mut loci = Vec::with_capacity(config.repeat_loci().len());
+    for locus in config.repeat_loci() {
+        let drawn = draws
+            .iter()
+            .filter(|draw| draw.locus_id() == locus.id())
+            .collect::<Vec<_>>();
+        let drawn_copies = drawn.len() as u64;
+        let alleles = locus
+            .alleles()
+            .iter()
+            .enumerate()
+            .map(|(index, allele)| {
+                let realized_copies = drawn
+                    .iter()
+                    .filter(|draw| draw.allele_index() == index)
+                    .count() as u64;
+                let mut object = repeat_allele_json(allele);
+                object.insert("realized_copies".to_owned(), json!(realized_copies));
+                // Sin copias sorteadas no hay proporción que publicar, y un
+                // cero sería tan falso como cualquier otra cifra inventada.
+                object.insert(
+                    "realized_frequency".to_owned(),
+                    if drawn_copies == 0 {
+                        Value::Null
+                    } else {
+                        json!(realized_copies as f64 / drawn_copies as f64)
+                    },
+                );
+                Value::Object(object)
+            })
+            .collect::<Vec<_>>();
+        loci.push(json!({
+            "id": locus.id(),
+            "sequence_id": locus.sequence_id(),
+            "start": locus.start()?,
+            "end": locus.end()?,
+            "motifs": locus.motifs().iter().map(RepeatMotif::as_text).collect::<Vec<_>>(),
+            "motif_lengths": locus.motifs().iter().map(RepeatMotif::length).collect::<Vec<_>>(),
+            "max_units": locus.max_units(),
+            "admission": {
+                "min_purity": locus.admission().min_purity(),
+                "min_longest_run_units": locus.admission().min_longest_run_units(),
+            },
+            "drawn_copies": drawn_copies,
+            "alleles": alleles,
+        }));
+    }
+    Ok(Some(json!({
+        "reference_id": config.reference_id(),
+        "reference_source": match config.reference_source() {
+            crate::application::EffectiveReferenceSource::Simulated => "simulated",
+            crate::application::EffectiveReferenceSource::Supplied { .. } => "supplied",
+        },
+        "admission_defaults": {
+            "min_purity": config.repeat_admission().min_purity(),
+            "min_longest_run_units": config.repeat_admission().min_longest_run_units(),
+        },
+        // La cota se repite aquí **desde la configuración efectiva**, no se
+        // recalcula: quien lea solo el manifiesto tiene que poder comparar las
+        // dos cifras sin abrir el otro documento, y el juez independiente
+        // comprueba que las dos coinciden.
+        "tract_output": {
+            "truth_tract_bases_bound": config.repeat_output_budget().truth_bases(),
+            "vcf_tract_bases_bound": config.repeat_output_budget().vcf_bases(),
+            "total_tract_bases_bound": config.repeat_output_budget().total_bases(),
+            "realized_truth_tract_bases": realized.truth_bases,
+            "realized_vcf_tract_bases": realized.vcf_bases,
+            "realized_total_tract_bases": realized.total_bases(),
+        },
+        "loci": loci,
+    })))
 }
 
 fn effective_initial_populations_json(config: &EffectiveConfig) -> Value {
@@ -623,7 +1009,11 @@ pub fn effective_config_document_with_population_snvs(
 pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
     let mut document = json!({
         "manifest_kind": "gps_execution_manifest",
-        "schema_version": GENERAL_MANIFEST_SCHEMA_VERSION,
+        "schema_version": if manifest.repeat_loci.is_some() {
+            GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS
+        } else {
+            GENERAL_MANIFEST_SCHEMA_VERSION
+        },
         "execution_id": manifest.execution_id,
         "state": manifest.state.as_str(),
         "configuration_input": manifest.configuration_input.map(|input| json!({
@@ -652,6 +1042,9 @@ pub fn general_manifest_document(manifest: &GeneralManifest<'_>) -> Value {
     });
     if let Some(events) = manifest.events {
         document["events"] = Value::Array(events.iter().map(manifest_event_json).collect());
+    }
+    if let Some(repeat_loci) = manifest.repeat_loci {
+        document["repeat_loci"] = repeat_loci.clone();
     }
     document
 }
@@ -1023,9 +1416,9 @@ fn validate_effective_config_v3_against_manifest_bytes(
     let manifest = manifest
         .as_object()
         .ok_or_else(|| manifest_error(manifest_path, "la raíz no es un objeto"))?;
-    if manifest.get("schema_version").and_then(Value::as_str)
-        != Some(GENERAL_MANIFEST_SCHEMA_VERSION)
-    {
+    if !is_supported_general_manifest_version(
+        manifest.get("schema_version").and_then(Value::as_str),
+    ) {
         return Err(effective_error(
             effective_path,
             "el manifiesto no usa la versión general vigente",
@@ -1081,6 +1474,7 @@ fn validate_effective_config_v3_against_manifest_bytes(
     if declared_version == Some(EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS) {
         fields.push("repeat_loci");
         fields.push("repeat_admission");
+        fields.push("repeat_output_budget");
     }
     // El nombre del esquema que se denuncia es el de la versión que el documento
     // declara. Antes se denunciaba siempre el de la versión 4, de modo que una
@@ -1088,6 +1482,30 @@ fn validate_effective_config_v3_against_manifest_bytes(
     // el suyo.
     validate_effective_closed_object(object, &fields, "effective-config.json", effective_path)
         .map_err(|error| retag_format_schema(error, effective_schema_file_for(declared_version)))?;
+    // **Los dos documentos tienen que decir lo mismo sobre las repeticiones.**
+    //
+    // La condición no es «configuración efectiva v6 exige manifiesto v6»: un
+    // documento general que **puede** declarar loci publica configuración
+    // efectiva v6 aunque no declare ninguno, y ese escenario no estrena
+    // sección en el manifiesto ni debe hacerlo. Lo que no puede existir es una
+    // configuración efectiva **con loci** frente a un manifiesto que no los
+    // registra, ni al revés, y eso es exactamente lo que se comprueba.
+    let effective_declares_loci = object
+        .get("repeat_loci")
+        .and_then(Value::as_array)
+        .is_some_and(|loci| !loci.is_empty());
+    let manifest_declares_loci = manifest.get("schema_version").and_then(Value::as_str)
+        == Some(GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS);
+    if effective_declares_loci != manifest_declares_loci {
+        return Err(effective_error(
+            effective_path,
+            if effective_declares_loci {
+                "la configuración efectiva declara loci de repetición y el manifiesto no los registra"
+            } else {
+                "el manifiesto registra loci de repetición que la configuración efectiva no declara"
+            },
+        ));
+    }
     if object.get("effective_config_kind").and_then(Value::as_str) != Some("gps_effective_config")
         || !matches!(
             declared_version,
@@ -2675,9 +3093,9 @@ fn validate_physical_vcf_output(
     let manifest = manifest
         .as_object()
         .ok_or_else(|| manifest_error(manifest_path, "la raíz no es un objeto"))?;
-    if manifest.get("schema_version").and_then(Value::as_str)
-        != Some(GENERAL_MANIFEST_SCHEMA_VERSION)
-    {
+    if !is_supported_general_manifest_version(
+        manifest.get("schema_version").and_then(Value::as_str),
+    ) {
         return Err(effective_error(
             effective_path,
             "el manifiesto no usa la versión general vigente",
@@ -3303,6 +3721,436 @@ fn physical_error(path: &Path, operation: &str, error: &Diagnostic) -> Diagnosti
     )
 }
 
+fn repeat_section_error(path: &Path, detail: &str) -> Diagnostic {
+    manifest_error_for_schema(path, "manifest-general-v6.schema.json", detail.to_owned())
+}
+
+/// Comprueba la sección de repeticiones con la misma severidad que el resto
+/// del documento.
+///
+/// # Por qué no basta con que exista
+///
+/// La primera versión de esta guarda solo exigía que la sección fuera un
+/// objeto, y con eso el lector de Rust admitía documentos que su propio
+/// esquema publicado rechaza —una sección vacía, por ejemplo— y no cazaba una
+/// frecuencia realizada que contradijera a su recuento de copias. El documento
+/// vecino, el de las estadísticas de la población inicial, sí comprueba ese
+/// par desde hace tiempo; esta sección tiene que ser igual de estricta y no
+/// más débil que la que tiene al lado.
+///
+/// # Lo que el esquema no puede comprobar y aquí sí
+///
+/// Las cuatro listas de bloque son **paralelas** y miden lo que el recuento de
+/// secuencias repetidas declara. Comparar la longitud de varias propiedades
+/// hermanas entre sí y contra un entero no es expresable en JSON Schema, de
+/// modo que esa correspondencia la sostiene esta función, y la frecuencia
+/// realizada se compara **bit a bit** contra copias realizadas entre copias
+/// sorteadas, igual que en el documento vecino.
+fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
+    let section = value
+        .as_object()
+        .ok_or("la sección repeat_loci no es un objeto")?;
+    const FIELDS: [&str; 5] = [
+        "reference_id",
+        "reference_source",
+        "admission_defaults",
+        "tract_output",
+        "loci",
+    ];
+    if section.len() != FIELDS.len() || section.keys().any(|key| !FIELDS.contains(&key.as_str())) {
+        return Err("la sección repeat_loci no tiene exactamente sus campos");
+    }
+    if !section
+        .get("reference_id")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.is_empty())
+    {
+        return Err("la sección repeat_loci no nombra su referencia");
+    }
+    if !matches!(
+        section.get("reference_source").and_then(Value::as_str),
+        Some("simulated" | "supplied")
+    ) {
+        return Err("la procedencia de la referencia no es simulada ni suministrada");
+    }
+    validate_repeat_admission(
+        section
+            .get("admission_defaults")
+            .ok_or("faltan los mínimos de omisión")?,
+    )?;
+    validate_repeat_tract_output(
+        section
+            .get("tract_output")
+            .ok_or("falta la contabilidad de bases de tracto")?,
+    )?;
+    let loci = section
+        .get("loci")
+        .and_then(Value::as_array)
+        .filter(|loci| !loci.is_empty())
+        .ok_or("la sección repeat_loci no publica ningún locus")?;
+    let mut identifiers = BTreeSet::new();
+    for locus in loci {
+        let locus = locus
+            .as_object()
+            .ok_or("un locus publicado no es un objeto")?;
+        const LOCUS_FIELDS: [&str; 10] = [
+            "id",
+            "sequence_id",
+            "start",
+            "end",
+            "motifs",
+            "motif_lengths",
+            "max_units",
+            "admission",
+            "drawn_copies",
+            "alleles",
+        ];
+        if locus.len() != LOCUS_FIELDS.len()
+            || locus
+                .keys()
+                .any(|key| !LOCUS_FIELDS.contains(&key.as_str()))
+        {
+            return Err("un locus publicado no tiene exactamente sus campos");
+        }
+        let identifier = locus
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or("un locus publicado no tiene identificador")?;
+        if !identifiers.insert(identifier) {
+            return Err("dos loci publicados comparten identificador");
+        }
+        if !locus
+            .get("sequence_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty())
+        {
+            return Err("un locus publicado no nombra su secuencia");
+        }
+        let start = locus
+            .get("start")
+            .and_then(Value::as_u64)
+            .filter(|start| *start >= 1)
+            .ok_or("el inicio del locus no es una coordenada de base uno")?;
+        let end = locus
+            .get("end")
+            .and_then(Value::as_u64)
+            .filter(|end| *end >= start)
+            .ok_or("el final del locus no llega a su inicio")?;
+        let _ = end;
+        if locus.get("max_units").and_then(Value::as_u64).unwrap_or(0) == 0 {
+            return Err("el tope del locus no es un entero positivo");
+        }
+        validate_repeat_admission(
+            locus
+                .get("admission")
+                .ok_or("faltan los mínimos del locus")?,
+        )?;
+        let motifs = repeat_motif_list(locus.get("motifs"))?;
+        let motif_lengths = repeat_u64_list(locus.get("motif_lengths"))?;
+        if motif_lengths.len() != motifs.len()
+            || motifs
+                .iter()
+                .zip(&motif_lengths)
+                .any(|(motif, length)| motif.len() as u64 != *length)
+        {
+            return Err("las longitudes de motivo del locus no son las de sus motivos");
+        }
+        let drawn = locus
+            .get("drawn_copies")
+            .and_then(Value::as_u64)
+            .ok_or("las copias sorteadas del locus no son un entero")?;
+        let alleles = locus
+            .get("alleles")
+            .and_then(Value::as_array)
+            .filter(|alleles| !alleles.is_empty())
+            .ok_or("el locus publicado no tiene alelos")?;
+        let mut realized_total = 0_u64;
+        for allele in alleles {
+            realized_total = realized_total
+                .checked_add(validate_repeat_allele(allele, drawn)?)
+                .ok_or("las copias realizadas del locus desbordan")?;
+        }
+        if realized_total != drawn {
+            return Err("las copias realizadas no suman las copias sorteadas del locus");
+        }
+    }
+    Ok(())
+}
+
+/// Comprueba la forma de la contabilidad de tracto.
+///
+/// Aquí solo se juzga lo que el documento puede decir de sí mismo: que las seis
+/// cifras existan, que cada total sea la suma de sus dos términos y que lo
+/// realizado no pase de la cota. **Que lo realizado sea lo que los ficheros
+/// llevan no se puede comprobar desde el manifiesto**, y no se finge que sí:
+/// eso lo hace el juez que relee el `truth.jsonl` y el VCF.
+fn validate_repeat_tract_output(value: &Value) -> Result<(), &'static str> {
+    let accounting = value
+        .as_object()
+        .ok_or("la contabilidad de tracto no es un objeto")?;
+    const FIELDS: [&str; 6] = [
+        "truth_tract_bases_bound",
+        "vcf_tract_bases_bound",
+        "total_tract_bases_bound",
+        "realized_truth_tract_bases",
+        "realized_vcf_tract_bases",
+        "realized_total_tract_bases",
+    ];
+    if accounting.len() != FIELDS.len()
+        || accounting.keys().any(|key| !FIELDS.contains(&key.as_str()))
+    {
+        return Err("la contabilidad de tracto no tiene exactamente sus campos");
+    }
+    let read = |key: &str| {
+        accounting
+            .get(key)
+            .and_then(Value::as_u64)
+            .ok_or("una cifra de la contabilidad de tracto no es un entero")
+    };
+    let truth_bound = read("truth_tract_bases_bound")?;
+    let vcf_bound = read("vcf_tract_bases_bound")?;
+    let total_bound = read("total_tract_bases_bound")?;
+    let truth = read("realized_truth_tract_bases")?;
+    let vcf = read("realized_vcf_tract_bases")?;
+    let total = read("realized_total_tract_bases")?;
+    if truth_bound.checked_add(vcf_bound) != Some(total_bound) {
+        return Err("la cota total no es la suma de sus dos términos");
+    }
+    if truth.checked_add(vcf) != Some(total) {
+        return Err("el total realizado no es la suma de sus dos términos");
+    }
+    if truth > truth_bound || vcf > vcf_bound {
+        return Err("las bases de tracto realizadas superan su cota");
+    }
+    Ok(())
+}
+
+fn validate_repeat_admission(value: &Value) -> Result<(), &'static str> {
+    let admission = value
+        .as_object()
+        .ok_or("unos mínimos de admisión no son un objeto")?;
+    const FIELDS: [&str; 2] = ["min_purity", "min_longest_run_units"];
+    if admission.len() != FIELDS.len()
+        || admission.keys().any(|key| !FIELDS.contains(&key.as_str()))
+    {
+        return Err("unos mínimos de admisión no tienen exactamente sus campos");
+    }
+    let purity = admission
+        .get("min_purity")
+        .and_then(Value::as_f64)
+        .ok_or("la pureza mínima no es un decimal")?;
+    if !purity.is_finite() || !(0.0..=1.0).contains(&purity) {
+        return Err("la pureza mínima no es finita ni pertenece a [0,1]");
+    }
+    if admission
+        .get("min_longest_run_units")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        == 0
+    {
+        return Err("la tirada mínima no es un entero positivo");
+    }
+    Ok(())
+}
+
+/// Valida un alelo publicado y devuelve sus copias realizadas.
+fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str> {
+    let allele = value
+        .as_object()
+        .ok_or("un alelo publicado no es un objeto")?;
+    const FIELDS: [&str; 14] = [
+        "sequence",
+        "declared_frequency",
+        "effective_frequency",
+        "realized_frequency",
+        "realized_copies",
+        "units",
+        "purity",
+        "longest_run_units",
+        "repeat_sequence_count",
+        "block_motifs",
+        "block_motif_lengths",
+        "block_unit_counts",
+        "block_bases",
+        "interruptions",
+    ];
+    if allele.len() != FIELDS.len() || allele.keys().any(|key| !FIELDS.contains(&key.as_str())) {
+        return Err("un alelo publicado no tiene exactamente sus campos");
+    }
+    if !allele
+        .get("sequence")
+        .and_then(Value::as_str)
+        .is_some_and(|sequence| !sequence.is_empty() && sequence.bytes().all(is_repeat_allele_base))
+    {
+        return Err("la secuencia del alelo no son bases");
+    }
+    for field in ["declared_frequency", "effective_frequency", "purity"] {
+        let value = allele
+            .get(field)
+            .and_then(Value::as_f64)
+            .ok_or("una proporción del alelo no es un decimal")?;
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            return Err("una proporción del alelo no es finita ni pertenece a [0,1]");
+        }
+    }
+    let units = allele
+        .get("units")
+        .and_then(Value::as_f64)
+        .ok_or("las unidades del alelo no son un decimal")?;
+    if !units.is_finite() || units <= 0.0 {
+        return Err("las unidades del alelo no son un decimal positivo");
+    }
+    if allele
+        .get("longest_run_units")
+        .and_then(Value::as_u64)
+        .is_none()
+    {
+        return Err("la tirada más larga del alelo no es un entero");
+    }
+    let copies = allele
+        .get("realized_copies")
+        .and_then(Value::as_u64)
+        .ok_or("las copias realizadas del alelo no son un entero")?;
+    if copies > drawn {
+        return Err("un alelo recibió más copias que las sorteadas del locus");
+    }
+    // **La misma comparación que el documento vecino**: bit a bit contra
+    // copias realizadas entre copias sorteadas. Sin sorteo no hay proporción, y
+    // publicar un cero afirmaría una medida que no se hizo.
+    let realized = allele
+        .get("realized_frequency")
+        .ok_or("falta la frecuencia realizada del alelo")?;
+    if drawn == 0 {
+        if !realized.is_null() {
+            return Err("sin copias sorteadas la frecuencia realizada tiene que ser nula");
+        }
+    } else {
+        let realized = realized
+            .as_f64()
+            .ok_or("la frecuencia realizada del alelo no es un decimal")?;
+        let expected = copies as f64 / drawn as f64;
+        if realized.to_bits() != expected.to_bits() {
+            return Err("la frecuencia realizada no es las copias realizadas entre las sorteadas");
+        }
+    }
+    let count = allele
+        .get("repeat_sequence_count")
+        .and_then(Value::as_u64)
+        .filter(|count| *count >= 1)
+        .and_then(|count| usize::try_from(count).ok())
+        .ok_or("el recuento de secuencias repetidas no es un entero positivo")?;
+    let motifs = repeat_motif_list(allele.get("block_motifs"))?;
+    let motif_lengths = repeat_u64_list(allele.get("block_motif_lengths"))?;
+    let bases = repeat_u64_list(allele.get("block_bases"))?;
+    let unit_counts = allele
+        .get("block_unit_counts")
+        .and_then(Value::as_array)
+        .ok_or("las copias por bloque no son una lista")?
+        .iter()
+        .map(|value| value.as_f64())
+        .collect::<Option<Vec<_>>>()
+        .ok_or("una cifra de copias por bloque no es un decimal")?;
+    if motifs.len() != count
+        || motif_lengths.len() != count
+        || bases.len() != count
+        || unit_counts.len() != count
+    {
+        return Err("las listas de bloque no miden lo que el recuento declara");
+    }
+    let mut total = 0_u64;
+    for index in 0..count {
+        if motifs[index].len() as u64 != motif_lengths[index] {
+            return Err("la longitud de un motivo de bloque no es la de su secuencia");
+        }
+        if bases[index] == 0 {
+            return Err("un bloque sin bases no es un bloque");
+        }
+        let derived = bases[index] as f64 / motif_lengths[index] as f64;
+        if !unit_counts[index].is_finite()
+            || (unit_counts[index] - derived).abs() > 1e-9 * derived.max(1.0)
+        {
+            return Err("las copias de un bloque no son sus bases entre la longitud del motivo");
+        }
+        total = total
+            .checked_add(bases[index])
+            .ok_or("las bases de los bloques desbordan")?;
+    }
+    if total
+        != allele
+            .get("sequence")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .len() as u64
+    {
+        return Err("las bases de los bloques no suman las de la secuencia del alelo");
+    }
+    for interruption in allele
+        .get("interruptions")
+        .and_then(Value::as_array)
+        .ok_or("las interrupciones del alelo no son una lista")?
+    {
+        let interruption = interruption
+            .as_object()
+            .ok_or("una interrupción publicada no es un objeto")?;
+        const INTERRUPTION_FIELDS: [&str; 2] = ["offset", "length"];
+        if interruption.len() != INTERRUPTION_FIELDS.len()
+            || interruption
+                .keys()
+                .any(|key| !INTERRUPTION_FIELDS.contains(&key.as_str()))
+        {
+            return Err("una interrupción publicada no tiene exactamente sus campos");
+        }
+        if interruption.get("offset").and_then(Value::as_u64).is_none()
+            || interruption
+                .get("length")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                == 0
+        {
+            return Err("una interrupción publicada no tiene desplazamiento y longitud válidos");
+        }
+    }
+    Ok(copies)
+}
+
+fn repeat_motif_list(value: Option<&Value>) -> Result<Vec<&str>, &'static str> {
+    let motifs = value
+        .and_then(Value::as_array)
+        .filter(|motifs| !motifs.is_empty())
+        .ok_or("una lista de motivos está ausente o vacía")?
+        .iter()
+        .map(Value::as_str)
+        .collect::<Option<Vec<_>>>()
+        .ok_or("un motivo publicado no es texto")?;
+    if motifs
+        .iter()
+        .any(|motif| motif.is_empty() || !motif.bytes().all(is_repeat_motif_base))
+    {
+        return Err("un motivo publicado no son bases A, C, G o T");
+    }
+    Ok(motifs)
+}
+
+fn repeat_u64_list(value: Option<&Value>) -> Result<Vec<u64>, &'static str> {
+    value
+        .and_then(Value::as_array)
+        .filter(|values| !values.is_empty())
+        .ok_or("una lista de enteros está ausente o vacía")?
+        .iter()
+        .map(Value::as_u64)
+        .collect::<Option<Vec<_>>>()
+        .ok_or("un entero publicado no lo es")
+}
+
+const fn is_repeat_motif_base(base: u8) -> bool {
+    matches!(base, b'A' | b'C' | b'G' | b'T')
+}
+
+const fn is_repeat_allele_base(base: u8) -> bool {
+    matches!(base, b'A' | b'C' | b'G' | b'T' | b'N')
+}
+
 pub(crate) fn parse_general_manifest_bytes(
     path: &Path,
     bytes: &[u8],
@@ -3316,8 +4164,11 @@ pub(crate) fn parse_general_manifest_bytes(
                 .map(str::to_owned)
         });
     parse_general_manifest_bytes_unretagged(path, bytes).map_err(|error| {
-        if schema_version.as_deref() == Some(GENERAL_MANIFEST_SCHEMA_VERSION) {
-            retag_format_schema(error, "manifest-general-v4.schema.json")
+        if is_supported_general_manifest_version(schema_version.as_deref()) {
+            retag_format_schema(
+                error,
+                general_manifest_schema_file_for(schema_version.as_deref()),
+            )
         } else {
             error
         }
@@ -3334,18 +4185,18 @@ fn parse_general_manifest_bytes_unretagged(
         .as_object()
         .ok_or_else(|| manifest_error(path, "la raíz no es un objeto"))?;
     let schema_version = object.get("schema_version").and_then(Value::as_str);
-    match schema_version {
-        Some(GENERAL_MANIFEST_SCHEMA_VERSION) => {}
-        observed => {
-            return Err(manifest_error_for_schema(
-                path,
-                "manifest-general-v4.schema.json",
-                format!(
-                    "versión de manifiesto no admitida: {:?}; se admite exclusivamente \"{}\"",
-                    observed, GENERAL_MANIFEST_SCHEMA_VERSION
-                ),
-            ));
-        }
+    if !is_supported_general_manifest_version(schema_version) {
+        return Err(manifest_error_for_schema(
+            path,
+            general_manifest_schema_file_for(schema_version),
+            format!(
+                "versión de manifiesto no admitida: {schema_version:?}; se admiten exclusivamente \"{GENERAL_MANIFEST_SCHEMA_VERSION}\" ({}) y \"{GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS}\" ({})",
+                general_manifest_schema_file_for(Some(GENERAL_MANIFEST_SCHEMA_VERSION)),
+                general_manifest_schema_file_for(Some(
+                    GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS
+                )),
+            ),
+        ));
     }
     const FIELDS: [&str; 16] = [
         "manifest_kind",
@@ -3365,11 +4216,26 @@ fn parse_general_manifest_bytes_unretagged(
         "events",
         "technical_events",
     ];
-    validate_closed_object(object, &FIELDS, "manifest.json", path)?;
-    if object.get("manifest_kind").and_then(Value::as_str) != Some("gps_execution_manifest")
-        || schema_version != Some(GENERAL_MANIFEST_SCHEMA_VERSION)
-    {
+    // La sección de repeticiones **pertenece a la versión 6 y solo a ella**: su
+    // presencia en un documento v4 y su ausencia en uno v6 son errores de
+    // forma, no un campo opcional. Se añade a la lista cerrada según la versión
+    // que el documento declara, no según si aparece.
+    let mut fields = FIELDS.to_vec();
+    if schema_version == Some(GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS) {
+        fields.push("repeat_loci");
+    }
+    validate_closed_object(object, &fields, "manifest.json", path).map_err(|error| {
+        retag_format_schema(error, general_manifest_schema_file_for(schema_version))
+    })?;
+    if object.get("manifest_kind").and_then(Value::as_str) != Some("gps_execution_manifest") {
         return Err(manifest_error(path, "clase o versión incompatible"));
+    }
+    if schema_version == Some(GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS) {
+        let section = object.get("repeat_loci").ok_or_else(|| {
+            repeat_section_error(path, "la versión 6 exige la sección repeat_loci")
+        })?;
+        validate_repeat_loci_section(section)
+            .map_err(|detail| repeat_section_error(path, detail))?;
     }
     required_non_empty_text(object, "execution_id", path)?;
     let state = match object.get("state").and_then(Value::as_str) {
@@ -6742,6 +7608,27 @@ fn retag_v1_pair_error(
 
 fn manifest_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
     manifest_error_for_schema(path, "manifest-general-v4.schema.json", detail)
+}
+
+/// Las dos versiones que un manifiesto general de este recorrido puede
+/// declarar: la de siempre y la que añade las repeticiones en tándem.
+#[must_use]
+pub fn is_supported_general_manifest_version(version: Option<&str>) -> bool {
+    matches!(
+        version,
+        Some(GENERAL_MANIFEST_SCHEMA_VERSION) | Some(GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS)
+    )
+}
+
+/// El esquema que hay que citar en un diagnóstico, según lo que el documento
+/// declare. Denunciar siempre el de la versión 4 mandaba a mirar un fichero
+/// que no era el suyo.
+fn general_manifest_schema_file_for(version: Option<&str>) -> &'static str {
+    if version == Some(GENERAL_MANIFEST_SCHEMA_VERSION_WITH_REPEATS) {
+        "manifest-general-v6.schema.json"
+    } else {
+        "manifest-general-v4.schema.json"
+    }
 }
 
 fn manifest_error_for_schema(

@@ -38,6 +38,35 @@ pub struct VcfPublication {
     pub index_kind: Option<VcfIndexKind>,
     pub reference_id: String,
     pub samples: Vec<String>,
+    /// Bases de secuencia de tracto que el VCF publicado lleva de verdad,
+    /// contadas sobre los registros que se acaban de escribir.
+    pub tract_bases: u64,
+}
+
+/// Bases de tracto de los registros de repetición: su `REF` y cada uno de sus
+/// `ALT`, que desde la decisión S-09 llevan la secuencia completa.
+///
+/// Cuenta **lo que se publica**, no lo que se declaró. No comparte nada con la
+/// cota, que se calcula en la frontera de configuración desde los alelos
+/// declarados, los individuos y la ploidía.
+#[must_use]
+pub fn realized_vcf_tract_bases(records: &[crate::vcf_grouping::GroupedVcfRecord]) -> u64 {
+    records
+        .iter()
+        .filter(|record| {
+            record
+                .alternate_repeats
+                .iter()
+                .any(|sequences| !sequences.is_empty())
+        })
+        .fold(0_u64, |total, record| {
+            let alternates = record.alternates.iter().fold(0_u64, |sum, alternate| {
+                sum.saturating_add(alternate.len() as u64)
+            });
+            total
+                .saturating_add(record.reference.len() as u64)
+                .saturating_add(alternates)
+        })
 }
 
 /// Construye y cataloga exactamente un VCF del conjunto actual.
@@ -75,6 +104,8 @@ pub fn publish_truth_vcf(
         conditional.complement().is_none(),
         "F2 cannot emit complement entries"
     );
+
+    let tract_bases = realized_vcf_tract_bases(&conditional.records);
 
     let (relative_path, vcf) = match mode {
         VcfOutputMode::Text => {
@@ -159,6 +190,7 @@ pub fn publish_truth_vcf(
         index_kind,
         reference_id: reference.id().as_str().to_owned(),
         samples,
+        tract_bases,
     })
 }
 
@@ -1043,6 +1075,7 @@ mod tests {
                 )],
                 gps_cases: vec![case.to_owned()],
                 alternate_cases: vec![vec![case.to_owned()]],
+                alternate_repeats: vec![Vec::new()],
             })
             .collect()
     }

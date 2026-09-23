@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from pathlib import Path
 import re
@@ -101,12 +101,67 @@ def read_fasta_sequence_rows(path: Path) -> list[SequenceRow]:
 
 
 @dataclass(eq=True)
+class RepeatInterruptionRow:
+    """Una interrupción declarada: dónde empieza y qué bases la forman.
+
+    Se declara y no se deriva: dadas unas bases sueltas no hay forma de saber
+    dónde el usuario quería la impureza. Por eso la interfaz la transporta tal
+    cual y no la reconstruye a partir del número de unidades.
+    """
+
+    offset: int
+    bases: str
+
+
+@dataclass(eq=True)
+class RepeatAlleleRow:
+    """Un alelo del locus: su tamaño, su frecuencia y sus interrupciones.
+
+    El tamaño se declara de una de dos formas excluyentes: ``units``, con un
+    valor por bloque del locus, o ``sequence``, con las bases exactas. La
+    pureza **no aparece**: es siempre un valor calculado sobre la secuencia y
+    declararla está prohibido.
+    """
+
+    frequency: str
+    units: list[int] | None = None
+    sequence: str | None = None
+    interruptions: list[RepeatInterruptionRow] = field(default_factory=list)
+
+
+@dataclass(eq=True)
+class RepeatLocusRow:
+    """Un locus de repetición: dónde está, con qué motivos y con qué alelos."""
+
+    id: str
+    sequence: str
+    start: int
+    end: int
+    motifs: list[str]
+    alleles: list[RepeatAlleleRow]
+    max_units: int | None = None
+    min_purity: str | None = None
+    min_longest_run_units: int | None = None
+
+
+@dataclass(eq=True)
+class RepeatAdmissionForm:
+    """Mínimos generales de la guarda de admisión."""
+
+    min_purity: str | None = None
+    min_longest_run_units: int | None = None
+
+
+@dataclass(eq=True)
 class ReferenceForm:
     kind: str
     id: str
     fasta: str | None
     composition: dict[str, str] | None
     sequences: list[SequenceRow]
+    repeat_loci: list[RepeatLocusRow] = field(default_factory=list)
+    repeat_admission: RepeatAdmissionForm | None = None
+    max_tract_output_bases: int | None = None
 
 
 @dataclass(eq=True)
@@ -363,6 +418,270 @@ def direct_event_from_editor_row(row: Mapping[str, Any], path: str) -> DirectEve
     raise EditorError(f"{path}.kind", "debe ser snp, insertion o deletion")
 
 
+# ---------------------------------------------------------------------------
+# Filas de los editores de repeticiones en tándem
+# ---------------------------------------------------------------------------
+#
+# La interfaz de Marimo edita tablas planas, de modo que un locus, sus alelos y
+# las interrupciones de cada alelo viven en tres tablas enlazadas por
+# identificador y por orden, igual que ya hacían las poblaciones y sus
+# espectros. Lo que **no** hay aquí es ninguna fila para la pureza objetivo ni
+# para generar loci al azar: ni una ni otra pertenecen a este corte, y una
+# columna que las pidiera sería una promesa que el simulador no cumple.
+
+
+def repeat_locus_editor_rows(loci: Sequence[RepeatLocusRow]) -> list[dict[str, Any]]:
+    return [
+        {
+            "order": order,
+            "id": locus.id,
+            "sequence": locus.sequence,
+            "start": locus.start,
+            "end": locus.end,
+            "motifs": ",".join(locus.motifs),
+            "max_units": "" if locus.max_units is None else str(locus.max_units),
+            "min_purity": locus.min_purity or "",
+            "min_longest_run_units": (
+                "" if locus.min_longest_run_units is None else str(locus.min_longest_run_units)
+            ),
+        }
+        for order, locus in enumerate(loci, start=1)
+    ]
+
+
+def repeat_allele_editor_rows(loci: Sequence[RepeatLocusRow]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for locus in loci:
+        for order, allele in enumerate(locus.alleles, start=1):
+            rows.append(
+                {
+                    "order": order,
+                    "locus_id": locus.id,
+                    "units": (
+                        "" if allele.units is None else ",".join(str(value) for value in allele.units)
+                    ),
+                    "sequence": allele.sequence or "",
+                    "frequency": allele.frequency,
+                }
+            )
+    return rows
+
+
+def repeat_interruption_editor_rows(
+    loci: Sequence[RepeatLocusRow],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for locus in loci:
+        for allele_order, allele in enumerate(locus.alleles, start=1):
+            for order, interruption in enumerate(allele.interruptions, start=1):
+                rows.append(
+                    {
+                        "order": order,
+                        "locus_id": locus.id,
+                        "allele_order": allele_order,
+                        "offset": interruption.offset,
+                        "bases": interruption.bases,
+                    }
+                )
+    return rows
+
+
+def repeat_loci_from_editor_rows(
+    locus_rows: Sequence[Mapping[str, Any]],
+    allele_rows: Sequence[Mapping[str, Any]],
+    interruption_rows: Sequence[Mapping[str, Any]],
+) -> list[RepeatLocusRow]:
+    """Reúne las tres tablas planas en los loci que el TOML declara.
+
+    Una fila sin identificador de locus se omite: es el borrador vacío con el
+    que la tabla arranca. Un alelo o una interrupción que nombren un locus
+    inexistente **no** se omiten, se denuncian: omitirlos en silencio perdería
+    justo lo que el usuario acaba de escribir.
+    """
+    loci: list[RepeatLocusRow] = []
+    ordered_loci = ordered_editor_rows(
+        [row for row in locus_rows if str(row.get("id", "")).strip()],
+        "reference.repeat_loci",
+    )
+    known = {str(row["id"]).strip() for row in ordered_loci}
+    for index, row in enumerate(ordered_loci):
+        path = f"reference.repeat_loci[{index}]"
+        locus_id = str(row["id"]).strip()
+        motifs = [
+            motif.strip()
+            for motif in str(row.get("motifs", "")).split(",")
+            if motif.strip()
+        ]
+        if not motifs:
+            raise EditorError(f"{path}.motifs", "se exige al menos un motivo")
+        alleles = _repeat_alleles_from_editor_rows(
+            locus_id, allele_rows, interruption_rows, f"{path}.alleles", len(motifs)
+        )
+        loci.append(
+            RepeatLocusRow(
+                id=locus_id,
+                sequence=_non_empty_string(
+                    str(row.get("sequence", "")).strip(), f"{path}.sequence"
+                ),
+                start=_checked_positive_u64(
+                    editor_integer(row.get("start"), f"{path}.start"), f"{path}.start"
+                ),
+                end=_checked_positive_u64(
+                    editor_integer(row.get("end"), f"{path}.end"), f"{path}.end"
+                ),
+                motifs=[_repeat_motif(motif, f"{path}.motifs") for motif in motifs],
+                alleles=alleles,
+                max_units=_optional_editor_u64(row.get("max_units"), f"{path}.max_units"),
+                min_purity=_optional_editor_literal(
+                    row.get("min_purity"), f"{path}.min_purity"
+                ),
+                min_longest_run_units=_optional_editor_u64(
+                    row.get("min_longest_run_units"), f"{path}.min_longest_run_units"
+                ),
+            )
+        )
+    for row in allele_rows:
+        locus_id = str(row.get("locus_id", "")).strip()
+        if locus_id and locus_id not in known:
+            raise EditorError(
+                "reference.repeat_loci.alleles",
+                f"el alelo nombra un locus que no existe: {locus_id}",
+            )
+    for row in interruption_rows:
+        locus_id = str(row.get("locus_id", "")).strip()
+        if locus_id and locus_id not in known:
+            raise EditorError(
+                "reference.repeat_loci.alleles.interruptions",
+                f"la interrupción nombra un locus que no existe: {locus_id}",
+            )
+    return loci
+
+
+def _repeat_alleles_from_editor_rows(
+    locus_id: str,
+    allele_rows: Sequence[Mapping[str, Any]],
+    interruption_rows: Sequence[Mapping[str, Any]],
+    path: str,
+    block_count: int,
+) -> list[RepeatAlleleRow]:
+    selected = ordered_editor_rows(
+        [
+            row
+            for row in allele_rows
+            if str(row.get("locus_id", "")).strip() == locus_id
+        ],
+        path,
+    )
+    if not selected:
+        raise EditorError(path, f"el locus {locus_id} no declara ningún alelo")
+    alleles: list[RepeatAlleleRow] = []
+    for index, row in enumerate(selected):
+        allele_path = f"{path}[{index}]"
+        allele_order = editor_integer(row["order"], f"{allele_path}.order")
+        units_text = str(row.get("units", "")).strip()
+        sequence_text = str(row.get("sequence", "")).strip().upper()
+        if bool(units_text) == bool(sequence_text):
+            raise EditorError(
+                allele_path, "se exige exactamente units o sequence"
+            )
+        units = None
+        if units_text:
+            values = [item.strip() for item in units_text.split(",") if item.strip()]
+            units = [
+                _checked_positive_u64(
+                    editor_integer(value, f"{allele_path}.units[{value_index}]"),
+                    f"{allele_path}.units[{value_index}]",
+                )
+                for value_index, value in enumerate(values)
+            ]
+            if len(units) != block_count:
+                raise EditorError(
+                    f"{allele_path}.units",
+                    f"se exige un valor por bloque: {block_count} esperados,"
+                    f" {len(units)} declarados",
+                )
+        interruptions = [
+            RepeatInterruptionRow(
+                offset=_checked_non_negative_u64(
+                    editor_integer(
+                        item.get("offset"), f"{allele_path}.interruptions.offset"
+                    ),
+                    f"{allele_path}.interruptions.offset",
+                ),
+                bases=_repeat_motif(
+                    str(item.get("bases", "")).strip().upper(),
+                    f"{allele_path}.interruptions.bases",
+                ),
+            )
+            for item in ordered_editor_rows(
+                [
+                    item
+                    for item in interruption_rows
+                    if str(item.get("locus_id", "")).strip() == locus_id
+                    and editor_integer(
+                        item.get("allele_order", 0),
+                        f"{allele_path}.interruptions.allele_order",
+                    )
+                    == allele_order
+                ],
+                f"{allele_path}.interruptions",
+            )
+        ]
+        if sequence_text and interruptions:
+            raise EditorError(
+                f"{allele_path}.interruptions",
+                "un alelo declarado por su secuencia ya lleva sus interrupciones dentro",
+            )
+        alleles.append(
+            RepeatAlleleRow(
+                frequency=_editor_non_negative_literal(
+                    row.get("frequency"), f"{allele_path}.frequency"
+                ),
+                units=units,
+                sequence=_repeat_allele_sequence(
+                    sequence_text, f"{allele_path}.sequence"
+                )
+                if sequence_text
+                else None,
+                interruptions=interruptions,
+            )
+        )
+    return alleles
+
+
+def _optional_editor_u64(value: Any, path: str) -> int | None:
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return None
+    return _checked_positive_u64(editor_integer(text, path), path)
+
+
+def _optional_editor_literal(value: Any, path: str) -> str | None:
+    text = "" if value is None else str(value).strip()
+    return None if not text else _editor_non_negative_literal(text, path)
+
+
+def _editor_non_negative_literal(value: Any, path: str) -> str:
+    """El literal decimal tal y como se escribió en la tabla.
+
+    Se conserva el texto y no su valor en coma flotante: el documento tiene que
+    publicar lo que el usuario escribió, que es lo que la configuración efectiva
+    llama frecuencia **declarada**.
+    """
+    text = "" if value is None else str(value).strip()
+    if not text:
+        raise EditorError(path, "falta el número")
+    try:
+        parsed = float(text)
+    except ValueError as error:
+        raise EditorError(
+            path, "debe ser un número finito mayor o igual que cero"
+        ) from error
+    if not math.isfinite(parsed) or parsed < 0:
+        raise EditorError(path, "debe ser un número finito mayor o igual que cero")
+    return text
+
+
 def parse_general_toml(text: str) -> GeneralForm:
     try:
         document = tomlkit.parse(text)
@@ -390,8 +709,9 @@ def parse_general_toml(text: str) -> GeneralForm:
     )
     if _string(document["config_kind"], "config_kind") != "general":
         raise EditorError("config_kind", 'debe ser "general"')
-    if _string(document["schema_version"], "schema_version") != "2":
-        raise EditorError("schema_version", 'debe ser "2"')
+    declared_version = _string(document["schema_version"], "schema_version")
+    if declared_version not in {"2", "4"}:
+        raise EditorError("schema_version", 'debe ser "2" o "4"')
     seed = _seed(document["seed"]) if "seed" in document else None
     ploidy = _ploidy(document["ploidy"]) if "ploidy" in document else 2
     normalization_tolerance = (
@@ -400,7 +720,9 @@ def parse_general_toml(text: str) -> GeneralForm:
         else "1e-9"
     )
     reference = _parse_reference(
-        _mapping(document["reference"], "reference"), "reference"
+        _mapping(document["reference"], "reference"),
+        "reference",
+        declares_repeats=declared_version == "4",
     )
     reductions = _parse_reductions(document.get("reduced_references", []))
     population_snvs = (
@@ -633,13 +955,26 @@ def _parse_technical_event(table: Mapping[str, Any]) -> TechnicalEventForm:
     )
 
 
-def _parse_reference(table: Mapping[str, Any], path: str) -> ReferenceForm:
+def _parse_reference(
+    table: Mapping[str, Any], path: str, declares_repeats: bool = False
+) -> ReferenceForm:
+    """Lee la referencia declarada.
+
+    Las claves de repetición pertenecen al documento **v4 y solo a él**: en un
+    v2 son campos desconocidos, exactamente igual que en el lector de Rust. Sin
+    esa condición la interfaz admitiría un documento que el simulador rechaza.
+    """
     kind = _string(table.get("kind"), f"{path}.kind")
     common = {"kind", "id", "sequences"}
+    repeat_keys: set[str] = (
+        {"repeat_loci", "repeat_admission", "max_tract_output_bases"}
+        if declares_repeats
+        else set()
+    )
     if kind == "simulated":
         _keys(
             table,
-            allowed=common | {"composition"},
+            allowed=common | {"composition"} | repeat_keys,
             required=common | {"composition"},
             path=path,
         )
@@ -664,7 +999,7 @@ def _parse_reference(table: Mapping[str, Any], path: str) -> ReferenceForm:
     elif kind == "supplied":
         _keys(
             table,
-            allowed=common | {"fasta"},
+            allowed=common | {"fasta"} | repeat_keys,
             required=common | {"fasta"},
             path=path,
         )
@@ -698,12 +1033,244 @@ def _parse_reference(table: Mapping[str, Any], path: str) -> ReferenceForm:
                 _positive_u64(row["length"], f"{row_path}.length"),
             )
         )
+    repeat_loci = (
+        _parse_repeat_loci(table.get("repeat_loci", []), f"{path}.repeat_loci")
+        if declares_repeats
+        else []
+    )
+    repeat_admission = (
+        _parse_repeat_admission(
+            _mapping(table["repeat_admission"], f"{path}.repeat_admission"),
+            f"{path}.repeat_admission",
+        )
+        if declares_repeats and "repeat_admission" in table
+        else None
+    )
     return ReferenceForm(
         kind=kind,
         id=_string(table["id"], f"{path}.id"),
         fasta=fasta,
         composition=composition,
         sequences=sequences,
+        repeat_loci=repeat_loci,
+        repeat_admission=repeat_admission,
+        max_tract_output_bases=(
+            _positive_u64(
+                table["max_tract_output_bases"], f"{path}.max_tract_output_bases"
+            )
+            if declares_repeats and "max_tract_output_bases" in table
+            else None
+        ),
+    )
+
+
+def _parse_repeat_admission(
+    table: Mapping[str, Any], path: str
+) -> RepeatAdmissionForm:
+    _keys(
+        table,
+        allowed={"min_purity", "min_longest_run_units"},
+        required=set(),
+        path=path,
+    )
+    return RepeatAdmissionForm(
+        min_purity=(
+            _number_literal(table["min_purity"], f"{path}.min_purity")
+            if "min_purity" in table
+            else None
+        ),
+        min_longest_run_units=(
+            _positive_u64(
+                table["min_longest_run_units"], f"{path}.min_longest_run_units"
+            )
+            if "min_longest_run_units" in table
+            else None
+        ),
+    )
+
+
+def _parse_repeat_loci(value: Any, path: str) -> list[RepeatLocusRow]:
+    rows = _sequence(value, path)
+    loci: list[RepeatLocusRow] = []
+    for index, entry in enumerate(rows):
+        locus_path = f"{path}[{index}]"
+        locus = _mapping(entry, locus_path)
+        _keys(
+            locus,
+            allowed={
+                "id",
+                "sequence",
+                "start",
+                "end",
+                "motif",
+                "motifs",
+                "max_units",
+                "min_purity",
+                "min_longest_run_units",
+                "alleles",
+            },
+            required={"id", "sequence", "start", "end", "alleles"},
+            path=locus_path,
+        )
+        motifs = _parse_repeat_motifs(locus, locus_path)
+        alleles = _parse_repeat_alleles(
+            locus["alleles"], f"{locus_path}.alleles", len(motifs)
+        )
+        loci.append(
+            RepeatLocusRow(
+                id=_non_empty_string(locus["id"], f"{locus_path}.id"),
+                sequence=_non_empty_string(locus["sequence"], f"{locus_path}.sequence"),
+                start=_positive_u64(locus["start"], f"{locus_path}.start"),
+                end=_positive_u64(locus["end"], f"{locus_path}.end"),
+                motifs=motifs,
+                alleles=alleles,
+                max_units=(
+                    _positive_u64(locus["max_units"], f"{locus_path}.max_units")
+                    if "max_units" in locus
+                    else None
+                ),
+                min_purity=(
+                    _number_literal(locus["min_purity"], f"{locus_path}.min_purity")
+                    if "min_purity" in locus
+                    else None
+                ),
+                min_longest_run_units=(
+                    _positive_u64(
+                        locus["min_longest_run_units"],
+                        f"{locus_path}.min_longest_run_units",
+                    )
+                    if "min_longest_run_units" in locus
+                    else None
+                ),
+            )
+        )
+    return loci
+
+
+def _parse_repeat_motifs(locus: Mapping[str, Any], path: str) -> list[str]:
+    """`motif` y `motifs` son excluyentes, igual que en el lector de Rust."""
+    singular = "motif" in locus
+    plural = "motifs" in locus
+    if singular and plural:
+        raise EditorError(f"{path}.motif", "motif y motifs son excluyentes")
+    if singular:
+        return [_repeat_motif(locus["motif"], f"{path}.motif")]
+    if not plural:
+        raise EditorError(f"{path}.motif", "se exige motif o motifs")
+    values = _sequence(locus["motifs"], f"{path}.motifs")
+    if not values:
+        raise EditorError(f"{path}.motifs", "la lista de motivos no puede estar vacía")
+    return [
+        _repeat_motif(value, f"{path}.motifs[{index}]")
+        for index, value in enumerate(values)
+    ]
+
+
+def _repeat_motif(value: Any, path: str) -> str:
+    """Un motivo son bases A, C, G o T. `N` queda fuera a propósito: un motivo
+    ambiguo no define ninguna copia exacta y ni la pureza ni la tirada más larga
+    serían computables."""
+    motif = _non_empty_string(value, path)
+    if any(base not in BASES for base in motif):
+        raise EditorError(path, "el motivo solo admite A, C, G o T")
+    return motif
+
+
+def _parse_repeat_alleles(
+    value: Any, path: str, block_count: int
+) -> list[RepeatAlleleRow]:
+    rows = _sequence(value, path)
+    if not rows:
+        raise EditorError(path, "el locus no declara ningún alelo")
+    alleles: list[RepeatAlleleRow] = []
+    for index, entry in enumerate(rows):
+        allele_path = f"{path}[{index}]"
+        allele = _mapping(entry, allele_path)
+        _keys(
+            allele,
+            allowed={"units", "sequence", "frequency", "interruptions"},
+            required={"frequency"},
+            path=allele_path,
+        )
+        units = (
+            _parse_repeat_units(allele["units"], f"{allele_path}.units", block_count)
+            if "units" in allele
+            else None
+        )
+        sequence = (
+            _repeat_allele_sequence(allele["sequence"], f"{allele_path}.sequence")
+            if "sequence" in allele
+            else None
+        )
+        if (units is None) == (sequence is None):
+            raise EditorError(
+                allele_path, "se exige exactamente units o sequence"
+            )
+        if sequence is not None and allele.get("interruptions"):
+            # Un alelo declarado por su secuencia exacta ya lleva dentro sus
+            # impurezas: declararlas además sería decir dos veces lo mismo y
+            # poder contradecirse. El lector de Rust lo rechaza igual.
+            raise EditorError(
+                f"{allele_path}.interruptions",
+                "un alelo declarado por su secuencia ya lleva sus interrupciones dentro",
+            )
+        interruptions = [
+            _parse_repeat_interruption(
+                item, f"{allele_path}.interruptions[{item_index}]"
+            )
+            for item_index, item in enumerate(
+                _sequence(allele.get("interruptions", []), f"{allele_path}.interruptions")
+            )
+        ]
+        alleles.append(
+            RepeatAlleleRow(
+                frequency=_non_negative_number_literal(
+                    allele["frequency"], f"{allele_path}.frequency"
+                ),
+                units=units,
+                sequence=sequence,
+                interruptions=interruptions,
+            )
+        )
+    return alleles
+
+
+def _parse_repeat_units(value: Any, path: str, block_count: int) -> list[int]:
+    """`units` admite un entero cuando el locus tiene un solo motivo y una lista
+    con un valor por bloque cuando tiene varios."""
+    if isinstance(value, (list, tuple)) or (
+        hasattr(value, "__iter__") and not isinstance(value, (str, bytes, int))
+    ):
+        units = [
+            _positive_u64(item, f"{path}[{index}]")
+            for index, item in enumerate(_sequence(value, path))
+        ]
+    else:
+        units = [_positive_u64(value, path)]
+    if len(units) != block_count:
+        raise EditorError(
+            path,
+            f"se exige un valor por bloque: {block_count} esperados, {len(units)} declarados",
+        )
+    return units
+
+
+def _repeat_allele_sequence(value: Any, path: str) -> str:
+    sequence = _non_empty_string(value, path)
+    if any(base not in BASES for base in sequence):
+        raise EditorError(path, "la secuencia del alelo solo admite A, C, G o T")
+    return sequence
+
+
+def _parse_repeat_interruption(value: Any, path: str) -> RepeatInterruptionRow:
+    table = _mapping(value, path)
+    _keys(table, allowed={"offset", "bases"}, required={"offset", "bases"}, path=path)
+    bases = _non_empty_string(table["bases"], f"{path}.bases")
+    if any(base not in BASES for base in bases):
+        raise EditorError(f"{path}.bases", "la interrupción solo admite A, C, G o T")
+    return RepeatInterruptionRow(
+        offset=_non_negative_u64(table["offset"], f"{path}.offset"),
+        bases=bases,
     )
 
 
@@ -749,10 +1316,84 @@ def _parse_reductions(value: Any) -> list[ReductionRow]:
     return reductions
 
 
+def normalize_repeat_frequencies(
+    literals: Sequence[str], tolerance_literal: str, path: str
+) -> list[float]:
+    """Normaliza el reparto de frecuencias de un locus y **rechaza el inválido**.
+
+    Es la misma regla que aplica el simulador (DTC-049): se suman los valores
+    con compensación de Neumaier en un orden estable, se exige que la distancia
+    a uno no pase de la tolerancia, y solo entonces se divide cada valor por la
+    suma. Aquí se hace **en la interfaz** para que un reparto imposible se vea
+    antes de lanzar nada, no para sustituir al lector: quien manda sigue siendo
+    Rust, y por eso el TOML conserva los literales que el usuario escribió.
+
+    **Se comprueba al escribir y no al leer, a propósito.** Importar un
+    documento con un reparto inválido tiene que funcionar: si la lectura lo
+    rechazara, el usuario no podría abrir en la interfaz precisamente el
+    fichero que necesita corregir, y tendría que arreglarlo en un editor de
+    texto. Como toda ida y vuelta pasa por la escritura, ningún documento
+    inválido llega a publicarse; lo que se gana es poder corregirlo donde se
+    ve.
+    """
+    try:
+        tolerance = float(tolerance_literal)
+    except (TypeError, ValueError) as error:
+        raise EditorError(path, "la tolerancia no es un decimal válido") from error
+    if not math.isfinite(tolerance) or not 0.0 <= tolerance <= 1e-6:
+        raise EditorError(path, "la tolerancia debe pertenecer a [0, 1e-6]")
+    if not literals:
+        raise EditorError(path, "el locus no declara ningún alelo")
+    values: list[float] = []
+    for index, literal in enumerate(literals):
+        try:
+            value = float(literal)
+        except (TypeError, ValueError) as error:
+            raise EditorError(
+                f"{path}[{index}].frequency", "no es un decimal válido"
+            ) from error
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise EditorError(
+                f"{path}[{index}].frequency", "debe ser finita y pertenecer a [0,1]"
+            )
+        values.append(value)
+    total = _neumaier_sum(values)
+    if not math.isfinite(total) or total <= 0.0:
+        raise EditorError(path, "la suma de las frecuencias no es positiva y finita")
+    if abs(total - 1.0) > tolerance:
+        raise EditorError(
+            path,
+            f"las frecuencias suman {total!r} y su distancia a uno supera la tolerancia {tolerance!r}",
+        )
+    return [value / total for value in values]
+
+
+def _neumaier_sum(values: Sequence[float]) -> float:
+    """Suma compensada de Neumaier, la misma que el simulador usa."""
+    total = 0.0
+    compensation = 0.0
+    for value in values:
+        candidate = total + value
+        if abs(total) >= abs(value):
+            compensation += (total - candidate) + value
+        else:
+            compensation += (value - candidate) + total
+        total = candidate
+    return total + compensation
+
+
 def render_general_toml(form: GeneralForm) -> str:
     document = tomlkit.document()
     document.add("config_kind", "general")
-    document.add("schema_version", "2")
+    # La versión del documento la decide **lo declarado**: un escenario sin
+    # loci de repetición sigue escribiendo el documento de siempre, byte a
+    # byte, y solo uno que los declare sube a la versión que los conoce.
+    declares_repeats = (
+        bool(form.reference.repeat_loci)
+        or form.reference.repeat_admission is not None
+        or form.reference.max_tract_output_bases is not None
+    )
+    document.add("schema_version", "4" if declares_repeats else "2")
     if form.seed is not None:
         document.add("seed", _seed(form.seed))
     document.add("ploidy", _ploidy(form.ploidy))
@@ -812,6 +1453,38 @@ def render_general_toml(form: GeneralForm) -> str:
         )
         sequences.append(row)
     reference.add("sequences", sequences)
+    if form.reference.repeat_admission is not None:
+        admission = form.reference.repeat_admission
+        table = tomlkit.table()
+        if admission.min_purity is not None:
+            table.add(
+                "min_purity",
+                _literal_item(admission.min_purity, "reference.repeat_admission.min_purity"),
+            )
+        if admission.min_longest_run_units is not None:
+            table.add(
+                "min_longest_run_units",
+                _checked_positive_u64(
+                    admission.min_longest_run_units,
+                    "reference.repeat_admission.min_longest_run_units",
+                ),
+            )
+        if not table:
+            raise EditorError(
+                "reference.repeat_admission",
+                "no declara ningún mínimo; omítala en vez de dejarla vacía",
+            )
+        reference.add("repeat_admission", table)
+    if form.reference.max_tract_output_bases is not None:
+        reference.add(
+            "max_tract_output_bases",
+            _checked_positive_u64(
+                form.reference.max_tract_output_bases,
+                "reference.max_tract_output_bases",
+            ),
+        )
+    if form.reference.repeat_loci:
+        reference.add("repeat_loci", _render_repeat_loci(form))
     document.add("reference", reference)
 
     if form.reduced_references:
@@ -983,6 +1656,129 @@ def render_general_toml(form: GeneralForm) -> str:
         vcf_output.add("mode", form.vcf_output_mode)
         document.add("vcf_output", vcf_output)
     return tomlkit.dumps(document)
+
+
+def _render_repeat_loci(form: GeneralForm) -> Any:
+    """Escribe los loci declarados.
+
+    El motivo se escribe en singular cuando hay uno solo, que es el atajo del
+    contrato y lo que escribe todo documento que no sea compuesto. La ida y la
+    vuelta conservan el significado, no la forma: `motifs = ["CA"]` vuelve como
+    `motif = "CA"`, y son el mismo locus.
+    """
+    loci = tomlkit.aot()
+    for index, locus in enumerate(form.reference.repeat_loci):
+        path = f"reference.repeat_loci[{index}]"
+        table = tomlkit.table()
+        table.add("id", _non_empty_string(locus.id, f"{path}.id"))
+        table.add("sequence", _non_empty_string(locus.sequence, f"{path}.sequence"))
+        table.add("start", _checked_positive_u64(locus.start, f"{path}.start"))
+        table.add("end", _checked_positive_u64(locus.end, f"{path}.end"))
+        if locus.start > locus.end:
+            raise EditorError(f"{path}.start", "el inicio no puede pasar del final")
+        if not locus.motifs:
+            raise EditorError(f"{path}.motif", "el locus no declara ningún motivo")
+        motifs = [
+            _repeat_motif(motif, f"{path}.motifs[{motif_index}]")
+            for motif_index, motif in enumerate(locus.motifs)
+        ]
+        if len(motifs) == 1:
+            table.add("motif", motifs[0])
+        else:
+            table.add("motifs", motifs)
+        if locus.max_units is not None:
+            table.add(
+                "max_units",
+                _checked_positive_u64(locus.max_units, f"{path}.max_units"),
+            )
+        if locus.min_purity is not None:
+            table.add(
+                "min_purity", _literal_item(locus.min_purity, f"{path}.min_purity")
+            )
+        if locus.min_longest_run_units is not None:
+            table.add(
+                "min_longest_run_units",
+                _checked_positive_u64(
+                    locus.min_longest_run_units, f"{path}.min_longest_run_units"
+                ),
+            )
+        if not locus.alleles:
+            raise EditorError(f"{path}.alleles", "el locus no declara ningún alelo")
+        # El reparto se comprueba **aquí**, antes de escribir nada: un TOML con
+        # frecuencias que no suman uno no llega a existir.
+        normalize_repeat_frequencies(
+            [allele.frequency for allele in locus.alleles],
+            form.normalization_tolerance,
+            f"{path}.alleles",
+        )
+        alleles = tomlkit.aot()
+        for allele_index, allele in enumerate(locus.alleles):
+            allele_path = f"{path}.alleles[{allele_index}]"
+            row = tomlkit.table()
+            if (allele.units is None) == (allele.sequence is None):
+                raise EditorError(
+                    allele_path, "se exige exactamente units o sequence"
+                )
+            if allele.units is not None:
+                if len(allele.units) != len(motifs):
+                    raise EditorError(
+                        f"{allele_path}.units",
+                        f"se exige un valor por bloque: {len(motifs)} esperados,"
+                        f" {len(allele.units)} declarados",
+                    )
+                if len(allele.units) == 1:
+                    row.add(
+                        "units",
+                        _checked_positive_u64(
+                            allele.units[0], f"{allele_path}.units"
+                        ),
+                    )
+                else:
+                    row.add(
+                        "units",
+                        [
+                            _checked_positive_u64(
+                                value, f"{allele_path}.units[{value_index}]"
+                            )
+                            for value_index, value in enumerate(allele.units)
+                        ],
+                    )
+            else:
+                if allele.interruptions:
+                    raise EditorError(
+                        f"{allele_path}.interruptions",
+                        "un alelo declarado por su secuencia ya lleva sus interrupciones dentro",
+                    )
+                row.add(
+                    "sequence",
+                    _repeat_allele_sequence(
+                        allele.sequence, f"{allele_path}.sequence"
+                    ),
+                )
+            row.add(
+                "frequency",
+                _non_negative_literal_item(
+                    allele.frequency, f"{allele_path}.frequency"
+                ),
+            )
+            if allele.interruptions:
+                interruptions = tomlkit.aot()
+                for item_index, interruption in enumerate(allele.interruptions):
+                    item_path = f"{allele_path}.interruptions[{item_index}]"
+                    item = tomlkit.table()
+                    item.add(
+                        "offset",
+                        _checked_non_negative_u64(
+                            interruption.offset, f"{item_path}.offset"
+                        ),
+                    )
+                    item.add("bases", _repeat_motif(interruption.bases, f"{item_path}.bases"))
+                    interruptions.append(item)
+                row.add("interruptions", interruptions)
+            alleles.append(row)
+        table.add("alleles", alleles)
+        loci.append(table)
+    return loci
 
 
 def validate_simulated_composition(composition: Mapping[str, Any]) -> None:

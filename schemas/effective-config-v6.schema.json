@@ -5,7 +5,20 @@
   "description": "Configuración efectiva de un documento general v4: la v4 más los loci de repetición en tándem y los mínimos de la guarda de admisión. Un documento general v2 sigue publicando effective-config-v4 sin cambiar un byte.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["effective_config_kind", "schema_version", "source_path", "ploidy", "normalization", "seed", "reference", "reduced_references", "authorizations", "initial_populations", "repeat_loci", "repeat_admission"],
+  "required": [
+    "effective_config_kind",
+    "schema_version",
+    "source_path",
+    "ploidy",
+    "normalization",
+    "seed",
+    "reference",
+    "reduced_references",
+    "authorizations",
+    "initial_populations",
+    "repeat_loci",
+    "repeat_admission"
+  ],
   "properties": {
     "effective_config_kind": {
       "const": "gps_effective_config"
@@ -25,7 +38,11 @@
     "normalization": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tolerance", "canonical_order", "sum_algorithm"],
+      "required": [
+        "tolerance",
+        "canonical_order",
+        "sum_algorithm"
+      ],
       "properties": {
         "tolerance": {
           "type": "number",
@@ -43,14 +60,20 @@
     "seed": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["root", "origin"],
+      "required": [
+        "root",
+        "origin"
+      ],
       "properties": {
         "root": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
         "origin": {
-          "enum": ["declared", "system_csprng"]
+          "enum": [
+            "declared",
+            "system_csprng"
+          ]
         }
       }
     },
@@ -83,10 +106,15 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode"],
+          "required": [
+            "mode"
+          ],
           "properties": {
             "mode": {
-              "enum": ["text", "bgzf"]
+              "enum": [
+                "text",
+                "bgzf"
+              ]
             }
           }
         }
@@ -100,10 +128,18 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode", "metadata_sha256", "normalization_audit"],
+          "required": [
+            "mode",
+            "metadata_sha256",
+            "normalization_audit"
+          ],
           "properties": {
             "mode": {
-              "enum": ["supplied", "generated", "reuse"]
+              "enum": [
+                "supplied",
+                "generated",
+                "reuse"
+              ]
             },
             "metadata_sha256": {
               "type": "string",
@@ -135,7 +171,9 @@
                     "const": "reuse"
                   }
                 },
-                "required": ["mode"]
+                "required": [
+                  "mode"
+                ]
               },
               "then": {
                 "properties": {
@@ -149,13 +187,20 @@
               "if": {
                 "properties": {
                   "mode": {
-                    "enum": ["supplied", "generated"]
+                    "enum": [
+                      "supplied",
+                      "generated"
+                    ]
                   }
                 },
-                "required": ["mode"]
+                "required": [
+                  "mode"
+                ]
               },
               "then": {
-                "required": ["metadata_artifact_id"],
+                "required": [
+                  "metadata_artifact_id"
+                ],
                 "properties": {
                   "metadata_artifact_id": {
                     "type": "string",
@@ -182,6 +227,9 @@
     },
     "repeat_admission": {
       "$ref": "#/$defs/effective_repeat_admission"
+    },
+    "repeat_output_budget": {
+      "$ref": "#/$defs/effective_repeat_output_budget"
     }
   },
   "allOf": [
@@ -194,10 +242,14 @@
                 "const": "simulated"
               }
             },
-            "required": ["source"]
+            "required": [
+              "source"
+            ]
           }
         },
-        "required": ["reference"]
+        "required": [
+          "reference"
+        ]
       },
       "then": {
         "properties": {
@@ -214,14 +266,20 @@
             "minItems": 1
           }
         },
-        "required": ["initial_populations"]
+        "required": [
+          "initial_populations"
+        ]
       },
       "then": {
-        "required": ["population_snvs"],
+        "required": [
+          "population_snvs"
+        ],
         "properties": {
           "population_snvs": {
             "type": "object",
-            "required": ["initial_population_statistics"]
+            "required": [
+              "initial_population_statistics"
+            ]
           }
         }
       }
@@ -231,7 +289,12 @@
     "initial_population_statistics": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "version", "provenance", "populations"],
+      "required": [
+        "kind",
+        "version",
+        "provenance",
+        "populations"
+      ],
       "properties": {
         "kind": {
           "const": "initial_population_statistics"
@@ -255,7 +318,14 @@
     "initial_population_statistics_provenance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["matrix_reference_id", "matrix_reference_fingerprint", "matrix_canonical_tsv_sha256", "genotype_algorithms", "missing_locus_policy", "explicit_snp_constraints"],
+      "required": [
+        "matrix_reference_id",
+        "matrix_reference_fingerprint",
+        "matrix_canonical_tsv_sha256",
+        "genotype_algorithms",
+        "missing_locus_policy",
+        "explicit_snp_constraints"
+      ],
       "properties": {
         "matrix_reference_id": {
           "type": "string",
@@ -300,7 +370,16 @@
     "explicit_snp_constraint": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["population_id", "individual_id", "event_id", "phase", "matrix_variant_id", "sampled_alternate", "explicit_alternate", "incompatible"],
+      "required": [
+        "population_id",
+        "individual_id",
+        "event_id",
+        "phase",
+        "matrix_variant_id",
+        "sampled_alternate",
+        "explicit_alternate",
+        "incompatible"
+      ],
       "properties": {
         "population_id": {
           "type": "string",
@@ -326,7 +405,12 @@
         "sampled_alternate": {
           "oneOf": [
             {
-              "enum": ["A", "C", "G", "T"]
+              "enum": [
+                "A",
+                "C",
+                "G",
+                "T"
+              ]
             },
             {
               "type": "null"
@@ -334,7 +418,12 @@
           ]
         },
         "explicit_alternate": {
-          "enum": ["A", "C", "G", "T"]
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T"
+          ]
         },
         "incompatible": {
           "type": "boolean"
@@ -344,7 +433,13 @@
     "initial_population_statistics_population": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["population_id", "genotype_model", "individual_count", "ploidy", "loci"],
+      "required": [
+        "population_id",
+        "genotype_model",
+        "individual_count",
+        "ploidy",
+        "loci"
+      ],
       "properties": {
         "population_id": {
           "type": "string",
@@ -374,7 +469,17 @@
     "initial_population_statistics_locus": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contig", "position_1based", "ref", "total_copies", "observed_copies", "missing_by_deletion", "alleles", "complete_genotype_observations", "genotypes"],
+      "required": [
+        "contig",
+        "position_1based",
+        "ref",
+        "total_copies",
+        "observed_copies",
+        "missing_by_deletion",
+        "alleles",
+        "complete_genotype_observations",
+        "genotypes"
+      ],
       "properties": {
         "contig": {
           "type": "string",
@@ -385,7 +490,12 @@
           "minimum": 1
         },
         "ref": {
-          "enum": ["A", "C", "G", "T"]
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T"
+          ]
         },
         "total_copies": {
           "type": "integer",
@@ -422,13 +532,27 @@
     "initial_population_statistics_allele": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allele", "kind", "requested_frequency", "realized_count", "realized_frequency"],
+      "required": [
+        "allele",
+        "kind",
+        "requested_frequency",
+        "realized_count",
+        "realized_frequency"
+      ],
       "properties": {
         "allele": {
-          "enum": ["A", "C", "G", "T"]
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T"
+          ]
         },
         "kind": {
-          "enum": ["ref", "alt"]
+          "enum": [
+            "ref",
+            "alt"
+          ]
         },
         "variant_id": {
           "type": "string",
@@ -460,16 +584,22 @@
                 "const": "ref"
               }
             },
-            "required": ["kind"]
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "not": {
               "anyOf": [
                 {
-                  "required": ["variant_id"]
+                  "required": [
+                    "variant_id"
+                  ]
                 },
                 {
-                  "required": ["source_id"]
+                  "required": [
+                    "source_id"
+                  ]
                 }
               ]
             }
@@ -482,10 +612,15 @@
                 "const": "alt"
               }
             },
-            "required": ["kind"]
+            "required": [
+              "kind"
+            ]
           },
           "then": {
-            "required": ["variant_id", "source_id"]
+            "required": [
+              "variant_id",
+              "source_id"
+            ]
           }
         }
       ]
@@ -493,7 +628,12 @@
     "initial_population_statistics_genotype": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allele_dosages", "expected_probability", "expected_count", "realized_count"],
+      "required": [
+        "allele_dosages",
+        "expected_probability",
+        "expected_count",
+        "realized_count"
+      ],
       "properties": {
         "allele_dosages": {
           "type": "array",
@@ -528,7 +668,22 @@
     "normalization_audit_group": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["population_id", "contig", "position", "ref", "tolerance", "canonical_order", "sum_algorithm", "original_sum", "original_delta", "effective_sum", "effective_delta", "reference_frequency", "decision", "values"],
+      "required": [
+        "population_id",
+        "contig",
+        "position",
+        "ref",
+        "tolerance",
+        "canonical_order",
+        "sum_algorithm",
+        "original_sum",
+        "original_delta",
+        "effective_sum",
+        "effective_delta",
+        "reference_frequency",
+        "decision",
+        "values"
+      ],
       "properties": {
         "population_id": {
           "type": "string",
@@ -543,7 +698,12 @@
           "pattern": "^[1-9][0-9]*$"
         },
         "ref": {
-          "enum": ["A", "C", "G", "T"]
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T"
+          ]
         },
         "tolerance": {
           "type": "number",
@@ -578,7 +738,10 @@
           "maximum": 1
         },
         "decision": {
-          "enum": ["reference_remainder", "normalized"]
+          "enum": [
+            "reference_remainder",
+            "normalized"
+          ]
         },
         "values": {
           "type": "array",
@@ -592,10 +755,21 @@
     "normalization_audit_value": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["alt", "variant_id", "source_id", "original", "effective"],
+      "required": [
+        "alt",
+        "variant_id",
+        "source_id",
+        "original",
+        "effective"
+      ],
       "properties": {
         "alt": {
-          "enum": ["A", "C", "G", "T"]
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T"
+          ]
         },
         "variant_id": {
           "type": "string",
@@ -619,7 +793,10 @@
     "authorizations": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allow_empty_snv_matrix", "allow_incompatible_genotypes"],
+      "required": [
+        "allow_empty_snv_matrix",
+        "allow_incompatible_genotypes"
+      ],
       "properties": {
         "allow_empty_snv_matrix": {
           "type": "boolean"
@@ -632,7 +809,13 @@
     "initial_population": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["population_id", "individual_count", "individual_ids", "ploidy", "genotype_model"],
+      "required": [
+        "population_id",
+        "individual_count",
+        "individual_ids",
+        "ploidy",
+        "genotype_model"
+      ],
       "properties": {
         "population_id": {
           "type": "string",
@@ -680,10 +863,14 @@
                     "const": "f_diploid"
                   }
                 },
-                "required": ["kind"]
+                "required": [
+                  "kind"
+                ]
               }
             },
-            "required": ["genotype_model"]
+            "required": [
+              "genotype_model"
+            ]
           },
           "then": {
             "properties": {
@@ -698,10 +885,15 @@
     "initial_genotype_model": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
         "kind": {
-          "enum": ["hwe", "f_diploid"]
+          "enum": [
+            "hwe",
+            "f_diploid"
+          ]
         },
         "inbreeding_coefficient": {
           "type": "number",
@@ -717,7 +909,9 @@
             }
           },
           "not": {
-            "required": ["inbreeding_coefficient"]
+            "required": [
+              "inbreeding_coefficient"
+            ]
           }
         },
         {
@@ -726,21 +920,35 @@
               "const": "f_diploid"
             }
           },
-          "required": ["inbreeding_coefficient"]
+          "required": [
+            "inbreeding_coefficient"
+          ]
         }
       ]
     },
     "reference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "source", "original_fasta_path", "canonical_format", "total_genome_size", "composition", "sequences", "fasta_artifact_id"],
+      "required": [
+        "id",
+        "source",
+        "original_fasta_path",
+        "canonical_format",
+        "total_genome_size",
+        "composition",
+        "sequences",
+        "fasta_artifact_id"
+      ],
       "properties": {
         "id": {
           "type": "string",
           "minLength": 1
         },
         "source": {
-          "enum": ["simulated", "supplied"]
+          "enum": [
+            "simulated",
+            "supplied"
+          ]
         },
         "original_fasta_path": {
           "oneOf": [
@@ -775,7 +983,12 @@
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["A", "C", "G", "T"],
+              "required": [
+                "A",
+                "C",
+                "G",
+                "T"
+              ],
               "properties": {
                 "A": {
                   "type": "number",
@@ -812,14 +1025,25 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "class", "length", "header", "description", "alphabet_validation", "unknown_base_count"],
+            "required": [
+              "id",
+              "class",
+              "length",
+              "header",
+              "description",
+              "alphabet_validation",
+              "unknown_base_count"
+            ],
             "properties": {
               "id": {
                 "type": "string",
                 "minLength": 1
               },
               "class": {
-                "enum": ["chromosome", "scaffold"]
+                "enum": [
+                  "chromosome",
+                  "scaffold"
+                ]
               },
               "length": {
                 "type": "integer",
@@ -904,7 +1128,12 @@
     "canonical_fasta": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "line_base_count", "line_ending", "base_case"],
+      "required": [
+        "version",
+        "line_base_count",
+        "line_ending",
+        "base_case"
+      ],
       "properties": {
         "version": {
           "const": "1"
@@ -923,7 +1152,13 @@
     "direct_event": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["event_id", "individual_id", "phase", "kind", "contig"],
+      "required": [
+        "event_id",
+        "individual_id",
+        "phase",
+        "kind",
+        "contig"
+      ],
       "properties": {
         "event_id": {
           "type": "string",
@@ -939,7 +1174,11 @@
           "maximum": 9
         },
         "kind": {
-          "enum": ["snp", "insertion", "deletion"]
+          "enum": [
+            "snp",
+            "insertion",
+            "deletion"
+          ]
         },
         "contig": {
           "type": "string",
@@ -950,10 +1189,20 @@
           "minimum": 1
         },
         "ref": {
-          "enum": ["A", "C", "G", "T"]
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T"
+          ]
         },
         "alt": {
-          "enum": ["A", "C", "G", "T"]
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T"
+          ]
         },
         "point": {
           "type": "integer",
@@ -979,7 +1228,11 @@
               "const": "snp"
             }
           },
-          "required": ["position_1based", "ref", "alt"]
+          "required": [
+            "position_1based",
+            "ref",
+            "alt"
+          ]
         },
         {
           "properties": {
@@ -987,7 +1240,10 @@
               "const": "insertion"
             }
           },
-          "required": ["point", "bases"]
+          "required": [
+            "point",
+            "bases"
+          ]
         },
         {
           "properties": {
@@ -995,14 +1251,30 @@
               "const": "deletion"
             }
           },
-          "required": ["start", "end"]
+          "required": [
+            "start",
+            "end"
+          ]
         }
       ]
     },
     "technical_event": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["event_id", "individual_ids", "libraries", "profile", "read_length", "quality", "sequencing_errors", "artifacts", "biological_contamination", "rng_catalog", "id_catalog", "target"],
+      "required": [
+        "event_id",
+        "individual_ids",
+        "libraries",
+        "profile",
+        "read_length",
+        "quality",
+        "sequencing_errors",
+        "artifacts",
+        "biological_contamination",
+        "rng_catalog",
+        "id_catalog",
+        "target"
+      ],
       "properties": {
         "event_id": {
           "type": "string",
@@ -1036,7 +1308,10 @@
         "quality": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["acgt_phred", "n_phred"],
+          "required": [
+            "acgt_phred",
+            "n_phred"
+          ],
           "properties": {
             "acgt_phred": {
               "const": 40
@@ -1049,13 +1324,23 @@
         "sequencing_errors": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["requested_mode", "effective_mode", "qualities_represent_realized_error_probability"],
+          "required": [
+            "requested_mode",
+            "effective_mode",
+            "qualities_represent_realized_error_probability"
+          ],
           "properties": {
             "requested_mode": {
-              "enum": ["enabled", "disabled"]
+              "enum": [
+                "enabled",
+                "disabled"
+              ]
             },
             "effective_mode": {
-              "enum": ["enabled", "disabled"]
+              "enum": [
+                "enabled",
+                "disabled"
+              ]
             },
             "qualities_represent_realized_error_probability": {
               "type": "boolean"
@@ -1069,7 +1354,9 @@
                     "const": "enabled"
                   }
                 },
-                "required": ["effective_mode"]
+                "required": [
+                  "effective_mode"
+                ]
               },
               "then": {
                 "properties": {
@@ -1089,7 +1376,9 @@
                     "const": "disabled"
                   }
                 },
-                "required": ["effective_mode"]
+                "required": [
+                  "effective_mode"
+                ]
               },
               "then": {
                 "properties": {
@@ -1119,7 +1408,9 @@
         "target": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["coverage_wgs"],
+          "required": [
+            "coverage_wgs"
+          ],
           "properties": {
             "coverage_wgs": {
               "type": "number",
@@ -1132,7 +1423,13 @@
     "technical_library": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["individual_id", "library_id", "i7", "i5", "is_contamination_recipient"],
+      "required": [
+        "individual_id",
+        "library_id",
+        "i7",
+        "i5",
+        "is_contamination_recipient"
+      ],
       "properties": {
         "individual_id": {
           "type": "string",
@@ -1158,7 +1455,13 @@
     "technical_profile": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "resource_path", "sha256", "preparation", "insert_length"],
+      "required": [
+        "id",
+        "resource_path",
+        "sha256",
+        "preparation",
+        "insert_length"
+      ],
       "properties": {
         "id": {
           "const": "gps-hiseqx-pcrfree-pe150-v1"
@@ -1175,7 +1478,10 @@
         "insert_length": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["minimum_bases", "maximum_bases"],
+          "required": [
+            "minimum_bases",
+            "maximum_bases"
+          ],
           "properties": {
             "minimum_bases": {
               "const": 250
@@ -1190,12 +1496,21 @@
     "technical_artifacts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["chimera", "index_hopping", "pcr", "optical_duplicates", "gc", "adapters"],
+      "required": [
+        "chimera",
+        "index_hopping",
+        "pcr",
+        "optical_duplicates",
+        "gc",
+        "adapters"
+      ],
       "properties": {
         "chimera": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["rate"],
+          "required": [
+            "rate"
+          ],
           "properties": {
             "rate": {
               "type": "number",
@@ -1207,7 +1522,9 @@
         "index_hopping": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["rate"],
+          "required": [
+            "rate"
+          ],
           "properties": {
             "rate": {
               "type": "number",
@@ -1219,7 +1536,9 @@
         "pcr": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["applicable"],
+          "required": [
+            "applicable"
+          ],
           "properties": {
             "applicable": {
               "const": false
@@ -1229,7 +1548,9 @@
         "optical_duplicates": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["realized_pairs"],
+          "required": [
+            "realized_pairs"
+          ],
           "properties": {
             "realized_pairs": {
               "const": 0
@@ -1239,7 +1560,9 @@
         "gc": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode"],
+          "required": [
+            "mode"
+          ],
           "properties": {
             "mode": {
               "const": "neutral"
@@ -1249,7 +1572,9 @@
         "adapters": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "properties": {
             "enabled": {
               "const": false
@@ -1261,12 +1586,18 @@
     "biological_contamination": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["percent_range", "recipient_ids"],
+      "required": [
+        "percent_range",
+        "recipient_ids"
+      ],
       "properties": {
         "percent_range": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["minimum", "maximum"],
+          "required": [
+            "minimum",
+            "maximum"
+          ],
           "properties": {
             "minimum": {
               "type": "number",
@@ -1294,7 +1625,10 @@
     "id_catalog": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "derivations"],
+      "required": [
+        "version",
+        "derivations"
+      ],
       "properties": {
         "version": {
           "const": "3"
@@ -1302,13 +1636,28 @@
         "derivations": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["v1", "v2"],
+          "required": [
+            "v1",
+            "v2"
+          ],
           "properties": {
             "v1": {
-              "const": ["execution", "reference", "individual", "event", "batch", "library", "read_group", "template"]
+              "const": [
+                "execution",
+                "reference",
+                "individual",
+                "event",
+                "batch",
+                "library",
+                "read_group",
+                "template"
+              ]
             },
             "v2": {
-              "const": ["PreHopInstanceId", "TechnicalPairId"]
+              "const": [
+                "PreHopInstanceId",
+                "TechnicalPairId"
+              ]
             }
           }
         }
@@ -1317,10 +1666,16 @@
     "reversible_text": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["encoding", "value"],
+      "required": [
+        "encoding",
+        "value"
+      ],
       "properties": {
         "encoding": {
-          "enum": ["utf-8", "bytes-hex"]
+          "enum": [
+            "utf-8",
+            "bytes-hex"
+          ]
         },
         "value": {
           "type": "string",
@@ -1335,7 +1690,9 @@
                 "const": "bytes-hex"
               }
             },
-            "required": ["encoding"]
+            "required": [
+              "encoding"
+            ]
           },
           "then": {
             "properties": {
@@ -1350,7 +1707,19 @@
     "reduction": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "source_reference_id", "region_size_bases", "target", "selection_subseed", "selection_order", "sequences", "state", "fasta_artifact_id", "map_artifact_id", "source_fasta_artifact_id"],
+      "required": [
+        "id",
+        "source_reference_id",
+        "region_size_bases",
+        "target",
+        "selection_subseed",
+        "selection_order",
+        "sequences",
+        "state",
+        "fasta_artifact_id",
+        "map_artifact_id",
+        "source_fasta_artifact_id"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -1367,10 +1736,17 @@
         "target": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["mode", "declared", "bases"],
+          "required": [
+            "mode",
+            "declared",
+            "bases"
+          ],
           "properties": {
             "mode": {
-              "enum": ["target_bases", "reduction_percent"]
+              "enum": [
+                "target_bases",
+                "reduction_percent"
+              ]
             },
             "declared": {
               "type": "string",
@@ -1421,14 +1797,25 @@
     "derived_sequence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "class", "length", "header", "description", "alphabet_validation", "n_count"],
+      "required": [
+        "id",
+        "class",
+        "length",
+        "header",
+        "description",
+        "alphabet_validation",
+        "n_count"
+      ],
       "properties": {
         "id": {
           "type": "string",
           "minLength": 1
         },
         "class": {
-          "enum": ["chromosome", "scaffold"]
+          "enum": [
+            "chromosome",
+            "scaffold"
+          ]
         },
         "length": {
           "type": "integer",
@@ -1459,7 +1846,20 @@
     "effective_repeat_allele": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["sequence", "declared_frequency", "effective_frequency", "units", "purity", "longest_run_units", "repeat_sequence_count", "block_motifs", "block_motif_lengths", "block_unit_counts", "block_bases", "interruptions"],
+      "required": [
+        "sequence",
+        "declared_frequency",
+        "effective_frequency",
+        "units",
+        "purity",
+        "longest_run_units",
+        "repeat_sequence_count",
+        "block_motifs",
+        "block_motif_lengths",
+        "block_unit_counts",
+        "block_bases",
+        "interruptions"
+      ],
       "properties": {
         "sequence": {
           "type": "string",
@@ -1529,7 +1929,10 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["offset", "length"],
+            "required": [
+              "offset",
+              "length"
+            ],
             "properties": {
               "offset": {
                 "type": "integer",
@@ -1548,7 +1951,18 @@
     "effective_repeat_locus": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "sequence_id", "start", "end", "motifs", "motif_lengths", "max_units", "admission", "frequency_normalization", "alleles"],
+      "required": [
+        "id",
+        "sequence_id",
+        "start",
+        "end",
+        "motifs",
+        "motif_lengths",
+        "max_units",
+        "admission",
+        "frequency_normalization",
+        "alleles"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -1604,7 +2018,10 @@
     "effective_repeat_admission": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["min_purity", "min_longest_run_units"],
+      "required": [
+        "min_purity",
+        "min_longest_run_units"
+      ],
       "properties": {
         "min_purity": {
           "type": "number",
@@ -1620,7 +2037,15 @@
     "effective_repeat_normalization": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tolerance", "sum_algorithm", "canonical_order", "original_sum", "original_delta", "effective_sum", "effective_delta"],
+      "required": [
+        "tolerance",
+        "sum_algorithm",
+        "canonical_order",
+        "original_sum",
+        "original_delta",
+        "effective_sum",
+        "effective_delta"
+      ],
       "properties": {
         "tolerance": {
           "type": "number",
@@ -1650,6 +2075,74 @@
           "minimum": 0
         }
       }
+    },
+    "effective_repeat_output_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "truth_tract_bases_bound",
+        "vcf_tract_bases_bound",
+        "total_tract_bases_bound",
+        "declared_max_tract_output_bases",
+        "truth_copies_per_haplotype_copy",
+        "per_locus"
+      ],
+      "properties": {
+        "truth_tract_bases_bound": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "vcf_tract_bases_bound": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "total_tract_bases_bound": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "declared_max_tract_output_bases": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "truth_copies_per_haplotype_copy": {
+          "const": 3
+        },
+        "per_locus": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "truth_tract_bases_bound",
+              "vcf_tract_bases_bound"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+              },
+              "truth_tract_bases_bound": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              },
+              "vcf_tract_bases_bound": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 18446744073709551615
+              }
+            }
+          }
+        }
+      },
+      "description": "Cota SUPERIOR de bases de secuencia de tracto que la ejecución llegará a publicar, calculada sobre lo DECLARADO —alelos, longitudes, individuos y ploidía— antes de materializar a nadie. La verdad publica el tracto de cada copia en TRES sitios: su vista vigente, su historial y el caso genotípico; de ahí el factor. Lo realizado será casi siempre MENOR, porque una copia que saque el alelo de la referencia no publica nada y un alelo que no le toque a nadie no produce ALT: esa diferencia es correcta y no hay que igualarla."
     }
   }
 }

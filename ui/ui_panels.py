@@ -110,3 +110,51 @@ def individuals_panel(
     if allow_incompatible_genotypes_control is not None:
         children.append(allow_incompatible_genotypes_control)
     return mo.vstack(children)
+
+
+def repeats_panel(
+    mo,
+    repeat_loci_editor,
+    repeat_alleles_editor,
+    repeat_interruptions_editor,
+    repeat_admission_controls,
+):
+    """Render the tandem repeat authoring controls; Rust stays the authority.
+
+    Lo que **no** hay aquí es tan normativo como lo que hay: no existe control
+    de pureza objetivo, porque la pureza no se declara nunca —se calcula sobre
+    la secuencia—, ni control para generar loci al azar, que pertenece a un
+    paso posterior. Una casilla que los ofreciera prometería algo que el
+    simulador rechaza.
+    """
+    return mo.vstack(
+        [
+            mo.md("## Repeticiones en tándem"),
+            mo.callout(
+                "Declare cada locus con su motivo y su posición, y sus alelos con "
+                "su tamaño y su frecuencia. La pureza no se declara: se calcula "
+                "sobre la secuencia de cada alelo. Las frecuencias de un locus "
+                "deben sumar uno dentro de la tolerancia de normalización.",
+                kind="info",
+            ),
+            mo.md("### Loci"),
+            repeat_loci_editor,
+            mo.md("### Alelos por locus"),
+            repeat_alleles_editor,
+            mo.callout(
+                "Cada alelo declara `units` —un valor por bloque, separados por "
+                "comas— o `sequence` con sus bases exactas; son excluyentes.",
+                kind="info",
+            ),
+            mo.md("### Interrupciones declaradas"),
+            repeat_interruptions_editor,
+            mo.callout(
+                "Una interrupción sustituye las bases del alelo desde `offset`. "
+                "Solo se admite en alelos declarados por `units`: uno declarado "
+                "por su secuencia ya las lleva dentro.",
+                kind="info",
+            ),
+            mo.md("### Mínimos generales de admisión"),
+            repeat_admission_controls,
+        ]
+    )

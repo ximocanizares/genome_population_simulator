@@ -25,7 +25,7 @@ use noodles_vcf::{
 };
 
 use crate::identity::{ExecutionId, ReferenceId, SequenceId};
-use crate::vcf_grouping::GroupedVcfRecord;
+use crate::vcf_grouping::{GroupedVcfRecord, VcfRepeatSequence};
 
 pub const VCF_FILE_FORMAT: &str = "VCFv4.5";
 pub const TBI_MAXIMUM_POSITION_EXCLUSIVE: u64 = 1 << 29;
@@ -259,7 +259,7 @@ pub fn write_vcf_records<W>(
 where
     W: Write,
 {
-    let header = build_header(contract)?;
+    let header = build_header(contract, records_carry_tandem_repeats(records))?;
     let mut writer = vcf::io::Writer::new(destination);
     writer.write_header(&header).map_err(io_error)?;
     for record in records {
@@ -300,7 +300,26 @@ where
     }
 }
 
-fn build_header(contract: &VcfHeaderContract) -> Result<vcf::Header, VcfContractError> {
+/// Hay que declarar los campos de repetición si algún registro los usa.
+///
+/// Se decide por lo **publicado**, no por lo declarado en la configuración,
+/// igual que la promoción de versión de la verdad: un escenario cuyo único
+/// alelo es el de la referencia no produce ningún registro de repetición y su
+/// VCF sigue siendo byte a byte el de antes.
+#[must_use]
+pub fn records_carry_tandem_repeats(records: &[GroupedVcfRecord]) -> bool {
+    records.iter().any(|record| {
+        record
+            .alternate_repeats
+            .iter()
+            .any(|sequences| !sequences.is_empty())
+    })
+}
+
+fn build_header(
+    contract: &VcfHeaderContract,
+    declares_tandem_repeats: bool,
+) -> Result<vcf::Header, VcfContractError> {
     let mut builder = vcf::Header::builder().set_file_format(FileFormat::new(4, 5));
     for contig in contract.contigs() {
         let length =
@@ -368,12 +387,114 @@ fn build_header(contract: &VcfHeaderContract) -> Result<vcf::Header, VcfContract
                 noodles_vcf::header::record::value::map::info::Type::String,
                 "Canonical truth case identifiers contributing an ALT allele",
             ),
-        )
-        .add_format(
-            "GT",
-            Map::<noodles_vcf::header::record::value::map::Format>::from("GT"),
         );
+    if declares_tandem_repeats {
+        builder = add_tandem_repeat_info(builder);
+    }
+    builder = builder.add_format(
+        "GT",
+        Map::<noodles_vcf::header::record::value::map::Format>::from("GT"),
+    );
     Ok(builder.build())
+}
+
+/// Declara los cinco campos de repetición en tándem del propio `VCFv4.5`.
+///
+/// Número, tipo y descripción son **literales de la especificación**, sección
+/// «INFO keys used for structural variants».
+///
+/// # De dónde salen estos campos, dicho sin adornos
+///
+/// El estándar los define **para el alelo simbólico de repetición en tándem**:
+/// su texto dice «Used by `<CNV:TR>` tandem repeat alleles». Aquí se emiten
+/// sobre alelos **no simbólicos**, porque un simulador siempre conoce la
+/// secuencia exacta y la decisión S-09 fija que la forma explícita aplica
+/// siempre. El estándar no lo prohíbe y contempla expresamente el caso —la
+/// regla de omisión del recuento habla de «los demás» alelos, que son los no
+/// simbólicos—, pero conviene que quede escrito: es el sustrato de la única
+/// pregunta abierta sobre esta proyección.
+///
+/// # Por qué se publica la longitud del motivo, que el estándar sugiere omitir
+///
+/// El estándar dice, literal, «RUL should be omitted when RUS is present (as
+/// it is redundant when RS is present)». Se publica igualmente, y por tres
+/// razones:
+///
+/// - **es una recomendación, no una obligación**, y está en las notas sobre
+///   los registros simbólicos de resumen; el propio estándar fija la regla de
+///   consistencia para cuando aparecen los dos —la longitud de cada motivo
+///   tiene que coincidir con la de su secuencia—, que es la que aquí se cumple;
+/// - **su motivo declarado es la redundancia**, y aquí la redundancia se
+///   quiere: es una comprobación viva que el oráculo ejerce. Conviene no
+///   confundir esta recomendación con la que la precede —«STRs should use RUS,
+///   whereas VNTRs should use RUL to ensure the VCF records are not
+///   excessively large»—, que es la que habla del tamaño del registro y que
+///   trata de elegir entre los dos campos, no de omitir este. Dicho eso, el
+///   tamaño tampoco es un problema: estos registros ya llevan el tracto entero
+///   en `REF` y `ALT`, de modo que al lado de un alelo de diez mil bases una
+///   lista de longitudes de motivo no pesa nada;
+/// - la decisión S-09 **enumera la longitud del motivo** entre los campos que
+///   se publican, y quitarla sería contradecir una decisión normativa para
+///   seguir una recomendación que no lo es. Además es una comprobación viva:
+///   el oráculo la compara contra la longitud de su motivo.
+///
+/// Dos precisiones que no se pueden perder:
+///
+/// - el número de copias (`RUC`) es **decimal**, porque un tracto puede
+///   terminar en una unidad parcial —`(CAG)5(CA)1(CAG)4` es el ejemplo del
+///   propio estándar—; declararlo entero produciría un VCF que una herramienta
+///   conforme rechaza;
+/// - el recuento de secuencias repetidas (`RN`) vale **uno por alelo
+///   alternativo**, y el estándar dice que si se omite se asume uno para los
+///   alelos simbólicos de repetición y **cero para los demás**. Omitirlo no
+///   sería callar, sino afirmar cero, de modo que se emite explícito para cada
+///   alelo alternativo. El alelo de referencia no se describe con estos
+///   campos: `RN` es de número `A` y no alcanza a `REF`.
+fn add_tandem_repeat_info(builder: vcf::header::Builder) -> vcf::header::Builder {
+    use noodles_vcf::header::record::value::map::Info;
+    use noodles_vcf::header::record::value::map::info::{Number, Type};
+
+    builder
+        .add_info(
+            "RN",
+            Map::<Info>::new(
+                Number::AlternateBases,
+                Type::Integer,
+                "Total number of repeat sequences in this allele",
+            ),
+        )
+        .add_info(
+            "RUS",
+            Map::<Info>::new(
+                Number::Unknown,
+                Type::String,
+                "Repeat unit sequence of the corresponding repeat sequence",
+            ),
+        )
+        .add_info(
+            "RUL",
+            Map::<Info>::new(
+                Number::Unknown,
+                Type::Integer,
+                "Repeat unit length of the corresponding repeat sequence",
+            ),
+        )
+        .add_info(
+            "RUC",
+            Map::<Info>::new(
+                Number::Unknown,
+                Type::Float,
+                "Repeat unit count of corresponding repeat sequence",
+            ),
+        )
+        .add_info(
+            "RB",
+            Map::<Info>::new(
+                Number::Unknown,
+                Type::Integer,
+                "Total number of bases in the corresponding repeat sequence",
+            ),
+        )
 }
 
 fn record_line(
@@ -422,15 +543,83 @@ fn record_line(
         })
         .collect::<Vec<_>>()
         .join("\t");
+    let mut info = format!("GPS_CASE={}", record.gps_cases.join(","));
+    info.push_str(&tandem_repeat_info(record));
     Ok(format!(
-        "{}\t{}\t.\t{}\t{}\t.\tPASS\tGPS_CASE={}\tGT\t{}\n",
+        "{}\t{}\t.\t{}\t{}\t.\tPASS\t{info}\tGT\t{}\n",
         record.sequence_id,
         position,
         record.reference,
         record.alternates.join(","),
-        record.gps_cases.join(","),
         samples,
     ))
+}
+
+/// Los cinco campos de repetición del registro, o la cadena vacía.
+///
+/// Las cuatro listas por secuencia repetida van **aplanadas y concatenadas en
+/// el orden de los alelos alternativos**, que es exactamente lo que el
+/// estándar define: el recuento de cada alelo dice cuántas entradas le
+/// corresponden, y la longitud total de cada lista es la suma de esos
+/// recuentos. Un alelo alternativo que no procede de un tracto aporta cero
+/// entradas y su recuento vale cero.
+fn tandem_repeat_info(record: &GroupedVcfRecord) -> String {
+    if record
+        .alternate_repeats
+        .iter()
+        .all(|sequences| sequences.is_empty())
+    {
+        return String::new();
+    }
+    let counts = record
+        .alternate_repeats
+        .iter()
+        .map(|sequences| sequences.len().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let flattened = record
+        .alternate_repeats
+        .iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let motifs = flattened
+        .iter()
+        .map(|sequence| sequence.motif.clone())
+        .collect::<Vec<_>>()
+        .join(",");
+    let motif_lengths = flattened
+        .iter()
+        .map(|sequence| motif_length(sequence).to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let unit_counts = flattened
+        .iter()
+        .map(|sequence| repeat_unit_count(sequence).to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let bases = flattened
+        .iter()
+        .map(|sequence| sequence.bases.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(";RN={counts};RUS={motifs};RUL={motif_lengths};RUC={unit_counts};RB={bases}")
+}
+
+/// La longitud del motivo, que el estándar exige igual a la de su secuencia.
+///
+/// La capa de representación ya ha rechazado el motivo vacío, de modo que
+/// nunca es cero.
+fn motif_length(sequence: &VcfRepeatSequence) -> u64 {
+    sequence.motif.len() as u64
+}
+
+/// El número de copias de una secuencia repetida: sus bases entre la longitud
+/// de su motivo.
+///
+/// Es decimal a propósito y la división se hace aquí, no se guarda: guardar el
+/// cociente junto a sus dos operandos permitiría que se contradijeran.
+fn repeat_unit_count(sequence: &VcfRepeatSequence) -> f64 {
+    sequence.bases as f64 / motif_length(sequence) as f64
 }
 
 fn write_tbi(vcf_path: &Path) -> Result<PathBuf, VcfContractError> {

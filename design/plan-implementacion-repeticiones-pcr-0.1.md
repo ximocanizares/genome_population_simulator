@@ -1715,10 +1715,13 @@ frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
     Primera: el campo que expresa el número de copias es de tipo **decimal
     (`Float`)**, no entero, porque un tracto puede terminar en una unidad
     parcial —lo que F6.4.1 ahora admite—. Declararlo entero produciría un VCF
-    que una herramienta conforme rechaza. Segunda: el estándar dice que si ese
-    campo **se omite** se asume **cero** fuera de los alelos simbólicos, de
-    modo que omitirlo no es «no decir nada» sino **afirmar cero**. El proyecto
-    lo emite **explícito para cada alelo alternativo**.
+    que una herramienta conforme rechaza. Segunda, **corregida el 23/09/2026**:
+    la regla de omisión **no es del número de copias sino del número de
+    secuencias repetidas**. El estándar dice, de ese campo y no del otro, que
+    si se omite se asume uno para los alelos simbólicos de repetición y **cero
+    para los demás**, de modo que omitirlo no es «no decir nada» sino
+    **afirmar cero**. El proyecto lo emite **explícito para cada alelo
+    alternativo**; el número de copias no tiene regla de omisión propia.
 
 > **Retirado el 22/09/2026: la exigencia sobre el alelo de referencia.** Este
 > paso pedía que el número de copias se emitiera también para el **alelo de
@@ -1764,8 +1767,13 @@ frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
   - Depende de: F6.5.1.1.
   - Procede de: REQ-MAN-29, REQ-VAL-48; decisiones **S-01**, **S-04**,
     **S-05**, **S-06**.
-  - Cambia: `src/event_manifest.rs`, `src/results.rs`,
-    `schemas/manifest-general-v6.schema.json`.
+  - Cambia: `src/results.rs`, `schemas/manifest-general-v6.schema.json`.
+    **Corregido el 23/09/2026:** la primera redacción nombraba también
+    `src/event_manifest.rs`, que describe un **evento técnico de
+    secuenciación** —bibliotecas, cobertura, quimeras—. Los loci de repetición
+    pertenecen a la referencia y a la población inicial, y una ejecución que
+    los declare puede no publicar ningún evento técnico: atar su registro a un
+    documento que a menudo no existe lo dejaría sin publicar. No se toca.
   - Se comprueba con: validación externa de los dos documentos; la pureza
     publicada por alelo coincide con la calculada a mano sobre su secuencia;
     **la frecuencia realizada difiere de la declarada** en un corpus pequeño y

@@ -1057,6 +1057,7 @@ mod tests {
             authorizations: crate::execution::ExecutionAuthorizations::default(),
             artifacts: &[],
             diagnostics: std::slice::from_ref(&diagnostic),
+            repeat_loci: None,
         };
         workspace
             .write_general_manifest(
@@ -1162,6 +1163,7 @@ mod tests {
             authorizations: crate::execution::ExecutionAuthorizations::default(),
             artifacts: &artifacts,
             diagnostics: &[],
+            repeat_loci: None,
         };
         let error = workspace
             .write_general_manifest(
@@ -1209,6 +1211,7 @@ mod tests {
             authorizations: crate::execution::ExecutionAuthorizations::default(),
             artifacts: &artifacts,
             diagnostics: std::slice::from_ref(&diagnostic),
+            repeat_loci: None,
         };
         workspace
             .write_general_manifest(
@@ -1350,6 +1353,7 @@ mod tests {
             authorizations: crate::execution::ExecutionAuthorizations::default(),
             artifacts: &catalog,
             diagnostics: std::slice::from_ref(&root_failure),
+            repeat_loci: None,
         };
         workspace
             .write_general_manifest(

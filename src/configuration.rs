@@ -222,6 +222,10 @@ pub struct DeclaredReference {
     /// declaran una sola vez para toda la referencia; si faltan, mandan los
     /// valores por omisión, que la configuración efectiva publica igualmente.
     pub repeat_admission: Option<DeclaredRepeatAdmission>,
+    /// Tope declarable de bases de tracto publicadas, en la verdad y en el
+    /// VCF juntas. Solo el documento general v4 puede traerlo. Quien no lo
+    /// declara no nota nada: sin tope no hay rechazo.
+    pub max_tract_output_bases: Option<Located<u64>>,
 }
 
 /// Un locus de repetición tal y como lo escribe el usuario.

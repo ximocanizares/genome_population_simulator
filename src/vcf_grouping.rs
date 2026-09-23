@@ -21,6 +21,18 @@ pub struct PhasedGenotype {
     pub allele_dosages: Vec<u8>,
 }
 
+/// Una secuencia repetida contenida en un alelo alternativo.
+///
+/// Es la unidad que el estándar `VCFv4.5` describe con sus listas paralelas:
+/// un motivo y cuántas bases ocupa. La longitud del motivo y el número de
+/// copias **no se guardan**, porque se derivan de estos dos y guardarlos
+/// permitiría que se contradijeran; el escritor los calcula al emitir.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VcfRepeatSequence {
+    pub motif: String,
+    pub bases: u64,
+}
+
 /// Registro lógico listo para que F2.5.5 lo materialice como una línea VCF.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GroupedVcfRecord {
@@ -36,6 +48,13 @@ pub struct GroupedVcfRecord {
     pub gps_cases: Vec<String>,
     /// Relación explícita, paralela a `alternates`, ALT↔casos fuente.
     pub alternate_cases: Vec<Vec<String>>,
+    /// Paralela a `alternates`: las secuencias repetidas de cada ALT.
+    ///
+    /// La lista de un ALT que no procede de ningún tracto declarado está
+    /// **vacía**, y eso es exactamente lo que el estándar entiende por «este
+    /// alelo tiene cero secuencias repetidas». El alelo de referencia no
+    /// aparece aquí: el campo que las cuenta es uno por alelo alternativo.
+    pub alternate_repeats: Vec<Vec<VcfRepeatSequence>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -91,6 +110,17 @@ pub enum VcfGroupingError {
         copy: CopyIdentity,
     },
     AlternateWithoutCase {
+        sequence_id: String,
+        position: u64,
+        alternate: String,
+    },
+    /// Dos copias producen el mismo ALT con estructuras en bloques distintas.
+    ///
+    /// El VCF solo puede publicar una anotación por alelo alternativo, y
+    /// elegir una de las dos en silencio publicaría un motivo que no es el que
+    /// esa copia declaró. Ocurre si dos alelos del mismo locus se declaran con
+    /// idénticas bases y distinta descomposición en bloques.
+    ConflictingRepeatAnnotation {
         sequence_id: String,
         position: u64,
         alternate: String,
@@ -477,6 +507,44 @@ fn validate_contiguous_copy_phases(
     Ok(())
 }
 
+/// Coloca en su sitio la anotación de repetición de cada ALT del registro.
+///
+/// Dos copias que producen el mismo ALT tienen que traer la misma estructura
+/// en bloques; si no, no hay una anotación que publicar y se rechaza en vez de
+/// quedarse con la primera. El resultado es paralelo a `alternates` y la lista
+/// de un ALT sin tracto queda vacía.
+fn align_repeat_annotations(
+    sequence_id: &str,
+    position: u64,
+    alternates: &[String],
+    annotations: impl IntoIterator<Item = (usize, Vec<VcfRepeatSequence>)>,
+) -> Result<Vec<Vec<VcfRepeatSequence>>, VcfGroupingError> {
+    let mut aligned = vec![None::<Vec<VcfRepeatSequence>>; alternates.len()];
+    for (index, blocks) in annotations {
+        match &aligned[index] {
+            Some(previous) if *previous != blocks => {
+                return Err(VcfGroupingError::ConflictingRepeatAnnotation {
+                    sequence_id: sequence_id.to_owned(),
+                    position,
+                    alternate: alternates[index].clone(),
+                });
+            }
+            _ => aligned[index] = Some(blocks),
+        }
+    }
+    Ok(aligned.into_iter().map(Option::unwrap_or_default).collect())
+}
+
+fn repeat_sequences(blocks: &[crate::truth_schema::TruthRepeatBlock]) -> Vec<VcfRepeatSequence> {
+    blocks
+        .iter()
+        .map(|block| VcfRepeatSequence {
+            motif: block.motif.clone(),
+            bases: block.bases,
+        })
+        .collect()
+}
+
 fn source_span_contains_locus(projected: &ProjectedCarrier, start: u64, end: u64) -> bool {
     if start == end {
         projected.source_start <= start && start <= projected.source_end
@@ -589,6 +657,17 @@ fn build_record(
         })
         .collect::<Result<Vec<_>, VcfGroupingError>>()?;
     let alternate_cases = vec![Vec::new(); alternates.len()];
+    let alternate_repeats = align_repeat_annotations(
+        &sequence_id,
+        position,
+        &alternates,
+        alleles.iter().map(|allele| {
+            (
+                alt_index[&alternate_by_copy[&allele.copy]],
+                repeat_sequences(&allele.repeat_blocks),
+            )
+        }),
+    )?;
     Ok((
         GroupedVcfRecord {
             sequence_id,
@@ -598,6 +677,7 @@ fn build_record(
             samples,
             gps_cases: Vec::new(),
             alternate_cases,
+            alternate_repeats,
         },
         copy_to_alt,
     ))
@@ -676,6 +756,24 @@ fn build_projected_record<'truth>(
 
     let samples = samples_for_record(sequence_id, &copy_to_alt, copies, alternates.len())?;
     let alternate_cases = vec![Vec::new(); alternates.len()];
+    let alternate_repeats = align_repeat_annotations(
+        sequence_id,
+        position,
+        &alternates,
+        alleles.iter().map(|allele| {
+            (
+                alt_index[&alternate_by_copy[allele.copy]],
+                allele
+                    .repeat_blocks
+                    .iter()
+                    .map(|block| VcfRepeatSequence {
+                        motif: block.motif.clone(),
+                        bases: block.bases,
+                    })
+                    .collect(),
+            )
+        }),
+    )?;
     Ok((
         GroupedVcfRecord {
             sequence_id: sequence_id.to_owned(),
@@ -685,6 +783,7 @@ fn build_projected_record<'truth>(
             samples,
             gps_cases: Vec::new(),
             alternate_cases,
+            alternate_repeats,
         },
         copy_to_alt,
     ))
@@ -744,7 +843,8 @@ mod tests {
         ModificationProvenance, ModificationProvenanceKind, NamedDigest, SegmentSource,
         TRUTH_COORDINATE_CONVENTION, TRUTH_DOCUMENT_KIND, TRUTH_SCHEMA_VERSION, TruthAllele,
         TruthCurrentPiece, TruthCurrentSnp, TruthHeader, TruthHistoryEvent, TruthLocus,
-        TruthModification, TruthPieceLink, TruthSourceKind, TruthSourceRef, TruthStructuralEvent,
+        TruthModification, TruthPieceLink, TruthRepeatBlock, TruthSourceKind, TruthSourceRef,
+        TruthStructuralEvent,
     };
     use crate::truth_validation::reference_content_sha256;
 
@@ -949,6 +1049,7 @@ mod tests {
                 source_start: 1,
                 source_end: 2,
                 copy: identity("IND_B", 0),
+                repeat_blocks: Vec::new(),
             },
             NormalizedAllele {
                 sequence_id: "chr1".into(),
@@ -958,6 +1059,7 @@ mod tests {
                 source_start: 1,
                 source_end: 2,
                 copy: identity("IND_A", 0),
+                repeat_blocks: Vec::new(),
             },
         ];
 
@@ -983,6 +1085,7 @@ mod tests {
                 source_start: 1,
                 source_end: 2,
                 copy: identity("IND_A", 0),
+                repeat_blocks: Vec::new(),
             },
             NormalizedAllele {
                 sequence_id: "chr1".into(),
@@ -992,6 +1095,7 @@ mod tests {
                 source_start: 1,
                 source_end: 2,
                 copy: identity("IND_B", 0),
+                repeat_blocks: Vec::new(),
             },
         ];
 
@@ -999,6 +1103,85 @@ mod tests {
         assert_eq!(records[0].alternates, ["T"]);
         assert_eq!(records[0].alternate_cases, [vec!["CASE_A", "CASE_B"]]);
         assert_eq!(records[0].gps_cases, ["CASE_A", "CASE_B"]);
+    }
+
+    /// **Dos copias que dan el mismo ALT con descomposiciones en bloques
+    /// distintas se rechazan.**
+    ///
+    /// *Por qué existe esta prueba:* el VCF publica **una** anotación por alelo
+    /// alternativo. Si dos copias llegan al mismo ALT con estructuras
+    /// distintas, quedarse con la primera publicaría un motivo que la otra
+    /// copia no declaró, en silencio. La producción no lo construye hoy —los
+    /// alelos de un locus comparten su lista de motivos—, de modo que sin esta
+    /// prueba la guarda podría desaparecer entera sin que nada lo notara.
+    ///
+    /// *Qué la hace discriminante:* lleva su control. Las mismas dos copias con
+    /// **los mismos** bloques se aceptan y publican esa anotación, de modo que
+    /// el rechazo no puede venir de que el agrupador rechace cualquier
+    /// anotación.
+    #[test]
+    fn rejects_two_copies_that_reach_the_same_alt_with_different_blocks() {
+        let reference = reference();
+        let truth = document(&reference, "T");
+        let allele = |copy: CopyIdentity, blocks: Vec<TruthRepeatBlock>| NormalizedAllele {
+            sequence_id: "chr1".into(),
+            position: 1,
+            reference: "C".into(),
+            alternate: "T".into(),
+            source_start: 1,
+            source_end: 2,
+            copy,
+            repeat_blocks: blocks,
+        };
+        let first = || {
+            vec![TruthRepeatBlock {
+                motif: "T".into(),
+                bases: 1,
+            }]
+        };
+        let second = || {
+            vec![TruthRepeatBlock {
+                motif: "A".into(),
+                bases: 1,
+            }]
+        };
+
+        let error = group_normalized_alleles(
+            &truth,
+            &reference,
+            &[
+                allele(identity("IND_A", 0), first()),
+                allele(identity("IND_B", 0), second()),
+            ],
+        )
+        .expect_err("el mismo ALT no puede traer dos anotaciones distintas");
+        assert_eq!(
+            error,
+            VcfGroupingError::ConflictingRepeatAnnotation {
+                sequence_id: "chr1".into(),
+                position: 1,
+                alternate: "T".into(),
+            }
+        );
+
+        // Control: con la **misma** anotación las dos copias se agrupan y la
+        // anotación se publica.
+        let records = group_normalized_alleles(
+            &truth,
+            &reference,
+            &[
+                allele(identity("IND_A", 0), first()),
+                allele(identity("IND_B", 0), first()),
+            ],
+        )
+        .expect("la misma anotación en las dos copias se agrupa");
+        assert_eq!(
+            records[0].alternate_repeats,
+            [vec![VcfRepeatSequence {
+                motif: "T".into(),
+                bases: 1,
+            }]]
+        );
     }
 
     #[test]
@@ -1178,6 +1361,7 @@ mod tests {
                     source_start: 0,
                     source_end: 1,
                     copy: identity("IND", 0),
+                    repeat_blocks: Vec::new(),
                 },
                 &NormalizedAllele {
                     sequence_id: "chr1".into(),
@@ -1187,6 +1371,7 @@ mod tests {
                     source_start: 0,
                     source_end: 2,
                     copy: identity("IND", 1),
+                    repeat_blocks: Vec::new(),
                 },
             ],
             &copies,
@@ -1223,6 +1408,7 @@ mod tests {
                     source_start: 1,
                     source_end: 2,
                     copy: identity("IND", 0),
+                    repeat_blocks: Vec::new(),
                 }],
                 &copies,
             )
@@ -1251,6 +1437,7 @@ mod tests {
                     source_start: 1,
                     source_end: 2,
                     copy: copy.clone(),
+                    repeat_blocks: Vec::new(),
                 },
                 &NormalizedAllele {
                     sequence_id: "chr1".into(),
@@ -1260,6 +1447,7 @@ mod tests {
                     source_start: 1,
                     source_end: 2,
                     copy: copy.clone(),
+                    repeat_blocks: Vec::new(),
                 },
             ],
             &copies,

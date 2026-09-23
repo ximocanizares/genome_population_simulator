@@ -8,7 +8,9 @@
 use std::collections::BTreeMap;
 
 use crate::reference::{Reference, ReferenceSequence};
-use crate::truth_schema::{CopyIdentity, TruthCurrentPiece, TruthDocument, TruthRecord};
+use crate::truth_schema::{
+    CopyIdentity, TruthCurrentPiece, TruthDocument, TruthRecord, TruthRepeatBlock,
+};
 use crate::truth_validation::{TruthValidationError, ValidatedTruthForVcf, validate_truth_for_vcf};
 
 /// Versión estable del algoritmo interno de DTC-064.
@@ -31,6 +33,14 @@ pub struct NormalizedAllele {
     pub source_start: u64,
     pub source_end: u64,
     pub copy: CopyIdentity,
+    /// Secuencias repetidas que este alelo contiene, en el orden del tracto.
+    ///
+    /// Está vacío cuando el alelo no procede de ningún tracto declarado. Un
+    /// alelo que sustituye un tracto lleva **los bloques tal y como la verdad
+    /// los publica**: la estructura en bloques se declara y no puede derivarse
+    /// de las bases (decisión S-30), de modo que aquí se transporta, no se
+    /// recalcula.
+    pub repeat_blocks: Vec<TruthRepeatBlock>,
 }
 
 /// Alelo normalizado de uso interno en la ruta de publicación.
@@ -48,6 +58,8 @@ pub(crate) struct ProjectedAllele<'truth> {
     pub(crate) source_start: u64,
     pub(crate) source_end: u64,
     pub(crate) copy: &'truth CopyIdentity,
+    /// Igual que en [`NormalizedAllele::repeat_blocks`], pero prestado.
+    pub(crate) repeat_blocks: Vec<&'truth TruthRepeatBlock>,
 }
 
 #[derive(Clone, Debug)]
@@ -124,6 +136,7 @@ impl<'truth> ProjectedAllele<'truth> {
             source_start: self.source_start,
             source_end: self.source_end,
             copy: self.copy.to_owned(),
+            repeat_blocks: self.repeat_blocks.into_iter().cloned().collect(),
         }
     }
 }
@@ -364,6 +377,9 @@ enum PathPiece<'truth> {
         start: u64,
         end: u64,
         bases: &'truth str,
+        /// Estructura en bloques declarada del tracto, que es lo que el VCF
+        /// publica como secuencias repetidas del alelo.
+        blocks: &'truth [TruthRepeatBlock],
     },
 }
 
@@ -409,7 +425,12 @@ impl<'truth> CopyPath<'truth> {
                     })?;
                     pieces.push(PathPiece::Inserted { anchor, bases });
                 }
-                TruthCurrentPiece::RepeatAllele { source, bases, .. } => {
+                TruthCurrentPiece::RepeatAllele {
+                    source,
+                    bases,
+                    blocks,
+                    ..
+                } => {
                     if source.sequence_id != sequence.id().as_str()
                         || source.start >= source.end
                         || source.end > sequence.length()
@@ -423,6 +444,7 @@ impl<'truth> CopyPath<'truth> {
                         start: source.start,
                         end: source.end,
                         bases,
+                        blocks,
                     });
                     prior_source_end = Some(source.end);
                 }
@@ -531,6 +553,7 @@ impl<'truth> CopyPath<'truth> {
                     start: piece_start,
                     end: piece_end,
                     bases,
+                    ..
                 } if *piece_start < end && start < *piece_end => {
                     if *piece_start < start || end < *piece_end {
                         return Err(VcfProjectionError::CoordinateOverflow);
@@ -541,6 +564,29 @@ impl<'truth> CopyPath<'truth> {
             }
         }
         Ok(output)
+    }
+
+    /// Bloques de los tractos que caen dentro de la ventana `[start, end)`.
+    ///
+    /// El orden es el de las piezas de la copia, que es el de la secuencia, de
+    /// modo que las listas paralelas que el VCF publica quedan en el mismo
+    /// orden que las bases del alelo. La condición de intersección es la misma
+    /// que usa [`Self::materialize_window`], que además rechaza una ventana que
+    /// partiera un tracto por la mitad: aquí no puede colarse media anotación.
+    fn repeat_blocks_in(&self, start: u64, end: u64) -> Vec<&'truth TruthRepeatBlock> {
+        self.pieces
+            .iter()
+            .filter_map(|piece| match piece {
+                PathPiece::Replaced {
+                    start: piece_start,
+                    end: piece_end,
+                    blocks,
+                    ..
+                } if *piece_start < end && start < *piece_end => Some(*blocks),
+                _ => None,
+            })
+            .flatten()
+            .collect()
     }
 
     fn direct_insertion_at(&self, anchor: u64) -> Option<&'truth str> {
@@ -865,9 +911,27 @@ fn normalize_path_window<'truth>(
         alternate = path.materialize_window(sequence, start, end)?;
     }
 
-    trim_common(&mut start, &mut reference, &mut alternate);
-    if reference.len() != alternate.len() {
-        left_align(reference_bases, &mut start, &mut reference, &mut alternate);
+    // **Los registros de repetición no se recortan.**
+    //
+    // DTC-064 manda recortar el prefijo y el sufijo comunes de todo alelo
+    // pequeño, y la decisión S-09 manda publicar los de repetición «con la
+    // secuencia completa en `REF` y `ALT`». Las dos no pueden cumplirse a la
+    // vez sobre el mismo registro, y el responsable resolvió a favor de S-09
+    // el 23 de septiembre de 2026: **para los registros de repetición manda
+    // S-09; para todos los demás, DTC-064 sigue intacta**.
+    //
+    // No es un capricho de formato: los campos de repetición que el registro
+    // publica dicen cuántas bases tiene el tracto, y recortar dejaba un `ALT`
+    // de una base anotado como si contuviera noventa. Con el tracto entero la
+    // anotación es verdadera, y es además una de las dos formas que el propio
+    // estándar ofrece —la de «reportar la secuencia completa de todos los
+    // alelos del locus en un único registro»—.
+    let repeat_blocks = path.repeat_blocks_in(span.start, span.end);
+    if repeat_blocks.is_empty() {
+        trim_common(&mut start, &mut reference, &mut alternate);
+        if reference.len() != alternate.len() {
+            left_align(reference_bases, &mut start, &mut reference, &mut alternate);
+        }
     }
     Ok(Some(ProjectedAllele {
         sequence_id: path.sequence_id,
@@ -881,6 +945,7 @@ fn normalize_path_window<'truth>(
         source_start: span.start,
         source_end: span.end,
         copy: path.identity,
+        repeat_blocks,
     }))
 }
 
@@ -939,6 +1004,9 @@ fn normalize_direct_insertion<'truth>(
         source_start: span.start,
         source_end: span.end,
         copy: path.identity,
+        // Una inserción directa es una frontera de anchura cero: no puede
+        // contener un tracto, que siempre sustituye un intervalo no vacío.
+        repeat_blocks: Vec::new(),
     })
 }
 

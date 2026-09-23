@@ -79,13 +79,38 @@ compare_exact_records() {
   cmp -- "$expected" "$observed" || fail "$description no coincide exactamente con $expected."
 }
 
+# Los registros de repetición en tándem quedan FUERA de esta comparación, y no
+# por comodidad: la decisión S-09 manda publicarlos con la secuencia completa en
+# REF y ALT, mientras que DTC-064 recorta todo lo demás. `bcftools norm` recorta
+# también los de repetición, de modo que exigir que no altere el fichero los
+# haría fallar siempre por una diferencia de codificación buscada a propósito.
+#
+# No se apaga la comprobación: lo que a ellos les corresponde lo verifica una
+# prueba de Rust —`the_external_normalizer_only_trims_the_repeat_record_without_
+# changing_its_alleles`— que ejecuta el mismo `bcftools norm` y exige que la
+# forma normalizada conserve la longitud de cada alelo respecto de su REF, es
+# decir, que el juez externo solo recorte y no cambie ningún alelo.
+records_without_tandem_repeats() {
+  grep -v $'\tRN=\|;RN=' -- "$1" || true
+}
+
 validate_complete_view_and_normalization() {
   local reference=$1 vcf=$2 label=$3
   local parsed="$temporary/${label}.parsed.vcf" normalized="$temporary/${label}.normalized.vcf"
   bcftools view --no-version --output-type v --output "$parsed" "$vcf"
   bcftools norm --no-version --check-ref e --fasta-ref "$reference" \
     --output-type v --output "$normalized" "$vcf"
-  cmp -- "$parsed" "$normalized" || fail "la normalización externa alteró $vcf; no se permite reparar ni descartar salida."
+  records_without_tandem_repeats "$parsed" >"$temporary/${label}.parsed.plain"
+  records_without_tandem_repeats "$normalized" >"$temporary/${label}.normalized.plain"
+  # Sin esta comprobación un fichero compuesto solo de registros de repetición
+  # dejaría la comparación reducida a las cabeceras, y la puerta pasaría en
+  # silencio sin haber comparado ningún registro.
+  local remaining
+  remaining=$(grep -c -v '^#' -- "$temporary/${label}.parsed.plain" || true)
+  [[ ${remaining:-0} -gt 0 ]] \
+    || fail "tras excluir los registros de repetición no queda ningún registro que comparar en $vcf; la comparación con el normalizador externo sería vacua."
+  cmp -- "$temporary/${label}.parsed.plain" "$temporary/${label}.normalized.plain" \
+    || fail "la normalización externa alteró un registro no repetitivo de $vcf; no se permite reparar ni descartar salida."
 }
 
 validate_fixture() {

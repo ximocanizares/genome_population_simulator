@@ -17,6 +17,7 @@ def _():
         REDUCTION_OBJECTIVE_KEEP_BASES,
         ReductionRow,
         ReferenceForm,
+        RepeatAdmissionForm,
         SequenceRow,
         default_form,
         direct_event_from_editor_row,
@@ -29,6 +30,10 @@ def _():
         reduction_editor_row,
         reduction_from_editor_row,
         render_general_toml,
+        repeat_allele_editor_rows,
+        repeat_interruption_editor_rows,
+        repeat_loci_from_editor_rows,
+        repeat_locus_editor_rows,
     )
     from f5_editor import (
         F5GeneralForm,
@@ -66,6 +71,7 @@ def _():
         effective_incompatible_genotype_authorization,
         explicit_snp_authorization_summary,
         individuals_panel,
+        repeats_panel,
     )
 
     return (
@@ -114,6 +120,12 @@ def _():
         individuals_panel,
         mo,
         ordered_editor_rows,
+        RepeatAdmissionForm,
+        repeats_panel,
+        repeat_allele_editor_rows,
+        repeat_interruption_editor_rows,
+        repeat_loci_from_editor_rows,
+        repeat_locus_editor_rows,
         parse_general_toml,
         population_snvs_population_from_editor_row,
         read_fasta_sequence_rows,
@@ -511,6 +523,109 @@ def _(
 
 @app.cell
 def _(
+    imported_form,
+    mo,
+    repeat_allele_editor_rows,
+    repeat_interruption_editor_rows,
+    repeat_locus_editor_rows,
+):
+    _imported_loci = imported_form.reference.repeat_loci
+    _imported_admission = imported_form.reference.repeat_admission
+    repeat_loci_editor = mo.ui.data_editor(
+        repeat_locus_editor_rows(_imported_loci)
+        or [
+            {
+                "order": 1,
+                "id": "",
+                "sequence": "",
+                "start": 1,
+                "end": 1,
+                "motifs": "",
+                "max_units": "",
+                "min_purity": "",
+                "min_longest_run_units": "",
+            }
+        ],
+        label=(
+            "Loci de repetición (motivo y posición; una fila sin `id` se omite."
+            " `motifs` admite varios separados por comas)"
+        ),
+        pagination=False,
+    )
+    repeat_alleles_editor = mo.ui.data_editor(
+        repeat_allele_editor_rows(_imported_loci)
+        or [
+            {
+                "order": 1,
+                "locus_id": "",
+                "units": "",
+                "sequence": "",
+                "frequency": "1.0",
+            }
+        ],
+        label=(
+            "Alelos por locus (`units` con un valor por bloque, o `sequence`;"
+            " son excluyentes)"
+        ),
+        pagination=False,
+    )
+    repeat_interruptions_editor = mo.ui.data_editor(
+        repeat_interruption_editor_rows(_imported_loci)
+        or [
+            {
+                "order": 1,
+                "locus_id": "",
+                "allele_order": 1,
+                "offset": 0,
+                "bases": "",
+            }
+        ],
+        label=(
+            "Interrupciones declaradas (`allele_order` es el `order` del alelo"
+            " dentro de su locus)"
+        ),
+        pagination=False,
+    )
+    repeat_min_purity_control = mo.ui.text(
+        value=(
+            ""
+            if _imported_admission is None or _imported_admission.min_purity is None
+            else _imported_admission.min_purity
+        ),
+        label="Pureza mínima general (vacío usa el valor de omisión)",
+    )
+    repeat_min_longest_run_control = mo.ui.text(
+        value=(
+            ""
+            if _imported_admission is None
+            or _imported_admission.min_longest_run_units is None
+            else str(_imported_admission.min_longest_run_units)
+        ),
+        label="Tirada mínima general en unidades (vacío usa el valor de omisión)",
+    )
+    repeat_max_tract_output_control = mo.ui.text(
+        value=(
+            ""
+            if imported_form.reference.max_tract_output_bases is None
+            else str(imported_form.reference.max_tract_output_bases)
+        ),
+        label=(
+            "Tope declarado de bases de tracto en la salida"
+            " (vacío no declara tope)"
+        ),
+    )
+    return (
+        repeat_alleles_editor,
+        repeat_interruptions_editor,
+        repeat_loci_editor,
+        repeat_max_tract_output_control,
+        repeat_min_longest_run_control,
+        repeat_min_purity_control,
+    )
+
+
+@app.cell
+def _(
     BASES,
     authored_editor_rows,
     EditorError,
@@ -537,6 +652,14 @@ def _(
     reference_id_control,
     reference_kind_control,
     render_general_toml,
+    RepeatAdmissionForm,
+    repeat_alleles_editor,
+    repeat_interruptions_editor,
+    repeat_loci_editor,
+    repeat_loci_from_editor_rows,
+    repeat_max_tract_output_control,
+    repeat_min_longest_run_control,
+    repeat_min_purity_control,
     ploidy_control,
     normalization_tolerance_control,
     population_snvs_input_path_control,
@@ -673,6 +796,36 @@ def _(
                 ),
             )
         )
+        authored_repeat_loci = repeat_loci_from_editor_rows(
+            repeat_loci_editor.value,
+            repeat_alleles_editor.value,
+            repeat_interruptions_editor.value,
+        )
+        _declared_min_purity = str(repeat_min_purity_control.value).strip()
+        _declared_min_run = str(repeat_min_longest_run_control.value).strip()
+        authored_repeat_admission = (
+            None
+            if not (_declared_min_purity or _declared_min_run)
+            else RepeatAdmissionForm(
+                min_purity=_declared_min_purity or None,
+                min_longest_run_units=(
+                    editor_integer(
+                        _declared_min_run,
+                        "reference.repeat_admission.min_longest_run_units",
+                    )
+                    if _declared_min_run
+                    else None
+                ),
+            )
+        )
+        _declared_tract_cap = str(repeat_max_tract_output_control.value).strip()
+        authored_max_tract_output_bases = (
+            editor_integer(
+                _declared_tract_cap, "reference.max_tract_output_bases"
+            )
+            if _declared_tract_cap
+            else None
+        )
         selected_kind = str(reference_kind_control.value)
         selected_population_mode = str(population_snvs_mode_control.value)
         population_snvs = (
@@ -713,6 +866,9 @@ def _(
                     else None
                 ),
                 sequences=authored_sequence_rows,
+                repeat_loci=authored_repeat_loci,
+                repeat_admission=authored_repeat_admission,
+                max_tract_output_bases=authored_max_tract_output_bases,
             ),
             reduced_references=authored_reductions,
             population_snvs=population_snvs,
@@ -1427,6 +1583,13 @@ def _(
     initial_populations_editor,
     individuals_panel,
     mo,
+    repeats_panel,
+    repeat_alleles_editor,
+    repeat_interruptions_editor,
+    repeat_loci_editor,
+    repeat_max_tract_output_control,
+    repeat_min_longest_run_control,
+    repeat_min_purity_control,
     output_directory_control,
     output_name_control,
     output_parent_directory_browser,
@@ -1929,6 +2092,19 @@ def _(
                 direct_events_editor,
                 incompatible_authorization,
                 incompatible_authorization_summary,
+            ),
+            "Repeticiones": repeats_panel(
+                mo,
+                repeat_loci_editor,
+                repeat_alleles_editor,
+                repeat_interruptions_editor,
+                mo.vstack(
+                    [
+                        repeat_min_purity_control,
+                        repeat_min_longest_run_control,
+                        repeat_max_tract_output_control,
+                    ]
+                ),
             ),
             "Poblaciones": populations_panel,
             "Evolución": unavailable("F7"),

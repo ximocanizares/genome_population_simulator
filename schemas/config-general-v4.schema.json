@@ -5,7 +5,11 @@
   "description": "Extensión del documento general v2 con los loci de repetición en tándem. Todo documento v2 válido sigue siéndolo al cambiar solo la versión: las claves nuevas son opcionales. El v2 publicado no se toca.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["config_kind", "schema_version", "reference"],
+  "required": [
+    "config_kind",
+    "schema_version",
+    "reference"
+  ],
   "properties": {
     "config_kind": {
       "const": "general",
@@ -88,10 +92,15 @@
     "vcf_output": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "properties": {
         "mode": {
-          "enum": ["text", "bgzf"],
+          "enum": [
+            "text",
+            "bgzf"
+          ],
           "x-gps-control": "select"
         }
       },
@@ -108,14 +117,21 @@
     "sequence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "class", "length"],
+      "required": [
+        "id",
+        "class",
+        "length"
+      ],
       "properties": {
         "id": {
           "$ref": "#/$defs/identifier"
         },
         "class": {
           "type": "string",
-          "enum": ["chromosome", "scaffold"],
+          "enum": [
+            "chromosome",
+            "scaffold"
+          ],
           "x-gps-control": "select"
         },
         "length": {
@@ -130,7 +146,12 @@
     "composition": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["A", "C", "G", "T"],
+      "required": [
+        "A",
+        "C",
+        "G",
+        "T"
+      ],
       "properties": {
         "A": {
           "$ref": "#/$defs/base_fraction"
@@ -160,7 +181,12 @@
     "simulated_reference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "id", "composition", "sequences"],
+      "required": [
+        "kind",
+        "id",
+        "composition",
+        "sequences"
+      ],
       "properties": {
         "kind": {
           "const": "simulated",
@@ -189,13 +215,23 @@
         },
         "repeat_admission": {
           "$ref": "#/$defs/repeat_admission"
+        },
+        "max_tract_output_bases": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Tope OPCIONAL de bases de secuencia de tracto publicadas, sumando las de la verdad y las del VCF. Si la cota calculada sobre lo declarado lo supera, el escenario se rechaza antes de simular, nombrando el tope, la cota y el locus que más aporta. Quien no lo declara no nota nada."
         }
       }
     },
     "supplied_reference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "id", "fasta", "sequences"],
+      "required": [
+        "kind",
+        "id",
+        "fasta",
+        "sequences"
+      ],
       "properties": {
         "kind": {
           "const": "supplied",
@@ -226,13 +262,22 @@
         },
         "repeat_admission": {
           "$ref": "#/$defs/repeat_admission"
+        },
+        "max_tract_output_bases": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Tope OPCIONAL de bases de secuencia de tracto publicadas, sumando las de la verdad y las del VCF. Si la cota calculada sobre lo declarado lo supera, el escenario se rechaza antes de simular, nombrando el tope, la cota y el locus que más aporta. Quien no lo declara no nota nada."
         }
       }
     },
     "reduced_reference": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "source_reference_id", "region_size_bases"],
+      "required": [
+        "id",
+        "source_reference_id",
+        "region_size_bases"
+      ],
       "properties": {
         "id": {
           "$ref": "#/$defs/identifier"
@@ -264,15 +309,23 @@
       },
       "oneOf": [
         {
-          "required": ["target_bases"],
+          "required": [
+            "target_bases"
+          ],
           "not": {
-            "required": ["reduction_percent"]
+            "required": [
+              "reduction_percent"
+            ]
           }
         },
         {
-          "required": ["reduction_percent"],
+          "required": [
+            "reduction_percent"
+          ],
           "not": {
-            "required": ["target_bases"]
+            "required": [
+              "target_bases"
+            ]
           }
         }
       ]
@@ -280,11 +333,17 @@
     "population_snvs": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["supplied", "reuse", "generate"],
+          "enum": [
+            "supplied",
+            "reuse",
+            "generate"
+          ],
           "x-gps-control": "select"
         },
         "input_path": {
@@ -308,14 +367,20 @@
               "const": "supplied"
             }
           },
-          "required": ["input_path"],
+          "required": [
+            "input_path"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["metadata_path"]
+                "required": [
+                  "metadata_path"
+                ]
               },
               {
-                "required": ["generate"]
+                "required": [
+                  "generate"
+                ]
               }
             ]
           }
@@ -326,14 +391,20 @@
               "const": "reuse"
             }
           },
-          "required": ["metadata_path"],
+          "required": [
+            "metadata_path"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["input_path"]
+                "required": [
+                  "input_path"
+                ]
               },
               {
-                "required": ["generate"]
+                "required": [
+                  "generate"
+                ]
               }
             ]
           }
@@ -344,14 +415,20 @@
               "const": "generate"
             }
           },
-          "required": ["generate"],
+          "required": [
+            "generate"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["input_path"]
+                "required": [
+                  "input_path"
+                ]
               },
               {
-                "required": ["metadata_path"]
+                "required": [
+                  "metadata_path"
+                ]
               }
             ]
           }
@@ -361,10 +438,18 @@
     "population_snvs_generate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["count_mode", "spatial_mode", "substitution_profile", "populations"],
+      "required": [
+        "count_mode",
+        "spatial_mode",
+        "substitution_profile",
+        "populations"
+      ],
       "properties": {
         "count_mode": {
-          "enum": ["exact", "poisson"]
+          "enum": [
+            "exact",
+            "poisson"
+          ]
         },
         "locus_count": {
           "type": "integer",
@@ -379,10 +464,16 @@
           "minimum": 0
         },
         "spatial_mode": {
-          "enum": ["uniform", "weighted_regions"]
+          "enum": [
+            "uniform",
+            "weighted_regions"
+          ]
         },
         "substitution_profile": {
-          "enum": ["uniform_snv12_v1", "human_harris2017_snv12_approx_v1"]
+          "enum": [
+            "uniform_snv12_v1",
+            "human_harris2017_snv12_approx_v1"
+          ]
         },
         "outside_weight": {
           "type": "number",
@@ -411,14 +502,20 @@
                   "const": "exact"
                 }
               },
-              "required": ["locus_count"],
+              "required": [
+                "locus_count"
+              ],
               "not": {
                 "anyOf": [
                   {
-                    "required": ["mean_loci"]
+                    "required": [
+                      "mean_loci"
+                    ]
                   },
                   {
-                    "required": ["mean_density_per_base"]
+                    "required": [
+                      "mean_density_per_base"
+                    ]
                   }
                 ]
               }
@@ -430,7 +527,9 @@
                 }
               },
               "not": {
-                "required": ["locus_count"]
+                "required": [
+                  "locus_count"
+                ]
               }
             }
           ]
@@ -438,15 +537,23 @@
         {
           "oneOf": [
             {
-              "required": ["mean_loci"],
+              "required": [
+                "mean_loci"
+              ],
               "not": {
-                "required": ["mean_density_per_base"]
+                "required": [
+                  "mean_density_per_base"
+                ]
               }
             },
             {
-              "required": ["mean_density_per_base"],
+              "required": [
+                "mean_density_per_base"
+              ],
               "not": {
-                "required": ["mean_loci"]
+                "required": [
+                  "mean_loci"
+                ]
               }
             },
             {
@@ -458,10 +565,14 @@
               "not": {
                 "anyOf": [
                   {
-                    "required": ["mean_loci"]
+                    "required": [
+                      "mean_loci"
+                    ]
                   },
                   {
-                    "required": ["mean_density_per_base"]
+                    "required": [
+                      "mean_density_per_base"
+                    ]
                   }
                 ]
               }
@@ -479,10 +590,14 @@
               "not": {
                 "anyOf": [
                   {
-                    "required": ["outside_weight"]
+                    "required": [
+                      "outside_weight"
+                    ]
                   },
                   {
-                    "required": ["regions"]
+                    "required": [
+                      "regions"
+                    ]
                   }
                 ]
               }
@@ -493,7 +608,9 @@
                   "const": "weighted_regions"
                 }
               },
-              "required": ["outside_weight"]
+              "required": [
+                "outside_weight"
+              ]
             }
           ]
         }
@@ -502,7 +619,12 @@
     "population_snvs_region": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["contig", "start", "end", "weight"],
+      "required": [
+        "contig",
+        "start",
+        "end",
+        "weight"
+      ],
       "properties": {
         "contig": {
           "$ref": "#/$defs/identifier"
@@ -524,16 +646,26 @@
     "population_snvs_population": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["population_id", "frequency_model"],
+      "required": [
+        "population_id",
+        "frequency_model"
+      ],
       "properties": {
         "population_id": {
           "$ref": "#/$defs/identifier"
         },
         "frequency_model": {
-          "enum": ["uniform", "spectrum", "human_1000g_global_sfs_approx_v1"]
+          "enum": [
+            "uniform",
+            "spectrum",
+            "human_1000g_global_sfs_approx_v1"
+          ]
         },
         "frequency_mode": {
-          "enum": ["stochastic", "exact"],
+          "enum": [
+            "stochastic",
+            "exact"
+          ],
           "default": "stochastic"
         },
         "min_alt_af": {
@@ -562,14 +694,21 @@
               "const": "uniform"
             }
           },
-          "required": ["min_alt_af", "max_alt_af"],
+          "required": [
+            "min_alt_af",
+            "max_alt_af"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["spectrum"]
+                "required": [
+                  "spectrum"
+                ]
               },
               {
-                "required": ["frequency_mode"]
+                "required": [
+                  "frequency_mode"
+                ]
               }
             ]
           }
@@ -580,14 +719,20 @@
               "const": "spectrum"
             }
           },
-          "required": ["spectrum"],
+          "required": [
+            "spectrum"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["min_alt_af"]
+                "required": [
+                  "min_alt_af"
+                ]
               },
               {
-                "required": ["max_alt_af"]
+                "required": [
+                  "max_alt_af"
+                ]
               }
             ]
           }
@@ -601,13 +746,19 @@
           "not": {
             "anyOf": [
               {
-                "required": ["min_alt_af"]
+                "required": [
+                  "min_alt_af"
+                ]
               },
               {
-                "required": ["max_alt_af"]
+                "required": [
+                  "max_alt_af"
+                ]
               },
               {
-                "required": ["spectrum"]
+                "required": [
+                  "spectrum"
+                ]
               }
             ]
           }
@@ -617,10 +768,16 @@
     "frequency_spectrum_component": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "weight"],
+      "required": [
+        "kind",
+        "weight"
+      ],
       "properties": {
         "kind": {
-          "enum": ["fixed", "interval"]
+          "enum": [
+            "fixed",
+            "interval"
+          ]
         },
         "fixed_alt_af": {
           "type": "number",
@@ -642,7 +799,10 @@
           "minimum": 0
         },
         "sampling": {
-          "enum": ["linear_uniform", "log_uniform"]
+          "enum": [
+            "linear_uniform",
+            "log_uniform"
+          ]
         }
       },
       "oneOf": [
@@ -652,17 +812,25 @@
               "const": "fixed"
             }
           },
-          "required": ["fixed_alt_af"],
+          "required": [
+            "fixed_alt_af"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["min_alt_af"]
+                "required": [
+                  "min_alt_af"
+                ]
               },
               {
-                "required": ["max_alt_af"]
+                "required": [
+                  "max_alt_af"
+                ]
               },
               {
-                "required": ["sampling"]
+                "required": [
+                  "sampling"
+                ]
               }
             ]
           }
@@ -673,9 +841,15 @@
               "const": "interval"
             }
           },
-          "required": ["min_alt_af", "max_alt_af", "sampling"],
+          "required": [
+            "min_alt_af",
+            "max_alt_af",
+            "sampling"
+          ],
           "not": {
-            "required": ["fixed_alt_af"]
+            "required": [
+              "fixed_alt_af"
+            ]
           }
         }
       ]
@@ -683,7 +857,12 @@
     "initial_population": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["population_id", "individual_count", "ploidy", "genotype_model"],
+      "required": [
+        "population_id",
+        "individual_count",
+        "ploidy",
+        "genotype_model"
+      ],
       "properties": {
         "population_id": {
           "$ref": "#/$defs/identifier"
@@ -699,7 +878,10 @@
           "maximum": 10
         },
         "genotype_model": {
-          "enum": ["hwe", "f_diploid"]
+          "enum": [
+            "hwe",
+            "f_diploid"
+          ]
         },
         "inbreeding_coefficient": {
           "type": "number",
@@ -731,11 +913,15 @@
                 "const": "hwe"
               }
             },
-            "required": ["genotype_model"]
+            "required": [
+              "genotype_model"
+            ]
           },
           "then": {
             "not": {
-              "required": ["inbreeding_coefficient"]
+              "required": [
+                "inbreeding_coefficient"
+              ]
             }
           }
         },
@@ -746,10 +932,14 @@
                 "const": "f_diploid"
               }
             },
-            "required": ["genotype_model"]
+            "required": [
+              "genotype_model"
+            ]
           },
           "then": {
-            "required": ["inbreeding_coefficient"],
+            "required": [
+              "inbreeding_coefficient"
+            ],
             "properties": {
               "ploidy": {
                 "const": 2
@@ -760,15 +950,23 @@
         {
           "oneOf": [
             {
-              "required": ["individual_ids"],
+              "required": [
+                "individual_ids"
+              ],
               "not": {
-                "required": ["founder_keys"]
+                "required": [
+                  "founder_keys"
+                ]
               }
             },
             {
-              "required": ["founder_keys"],
+              "required": [
+                "founder_keys"
+              ],
               "not": {
-                "required": ["individual_ids"]
+                "required": [
+                  "individual_ids"
+                ]
               }
             }
           ]
@@ -778,7 +976,12 @@
     "technical_event": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["event_id", "individual_ids", "target_coverage_wgs", "libraries"],
+      "required": [
+        "event_id",
+        "individual_ids",
+        "target_coverage_wgs",
+        "libraries"
+      ],
       "properties": {
         "event_id": {
           "$ref": "#/$defs/identifier"
@@ -796,7 +999,10 @@
           "minimum": 0
         },
         "sequencing_errors": {
-          "enum": ["enabled", "disabled"],
+          "enum": [
+            "enabled",
+            "disabled"
+          ],
           "default": "enabled",
           "description": "disabled conserva las calidades de perfil, que se publican como no probabilísticas."
         },
@@ -856,7 +1062,11 @@
     "technical_library": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["individual_id", "i7", "i5"],
+      "required": [
+        "individual_id",
+        "i7",
+        "i5"
+      ],
       "properties": {
         "individual_id": {
           "$ref": "#/$defs/identifier"
@@ -876,7 +1086,13 @@
     "direct_event": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["event_id", "individual_id", "phase", "kind", "contig"],
+      "required": [
+        "event_id",
+        "individual_id",
+        "phase",
+        "kind",
+        "contig"
+      ],
       "properties": {
         "event_id": {
           "$ref": "#/$defs/identifier"
@@ -890,7 +1106,11 @@
           "maximum": 9
         },
         "kind": {
-          "enum": ["snp", "insertion", "deletion"]
+          "enum": [
+            "snp",
+            "insertion",
+            "deletion"
+          ]
         },
         "contig": {
           "$ref": "#/$defs/identifier"
@@ -900,10 +1120,28 @@
           "minimum": 1
         },
         "ref": {
-          "enum": ["A", "C", "G", "T", "a", "c", "g", "t"]
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T",
+            "a",
+            "c",
+            "g",
+            "t"
+          ]
         },
         "alt": {
-          "enum": ["A", "C", "G", "T", "a", "c", "g", "t"]
+          "enum": [
+            "A",
+            "C",
+            "G",
+            "T",
+            "a",
+            "c",
+            "g",
+            "t"
+          ]
         },
         "point": {
           "type": "integer",
@@ -929,20 +1167,32 @@
               "const": "snp"
             }
           },
-          "required": ["position_1based", "ref", "alt"],
+          "required": [
+            "position_1based",
+            "ref",
+            "alt"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["point"]
+                "required": [
+                  "point"
+                ]
               },
               {
-                "required": ["bases"]
+                "required": [
+                  "bases"
+                ]
               },
               {
-                "required": ["start"]
+                "required": [
+                  "start"
+                ]
               },
               {
-                "required": ["end"]
+                "required": [
+                  "end"
+                ]
               }
             ]
           }
@@ -953,23 +1203,36 @@
               "const": "insertion"
             }
           },
-          "required": ["point", "bases"],
+          "required": [
+            "point",
+            "bases"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["position_1based"]
+                "required": [
+                  "position_1based"
+                ]
               },
               {
-                "required": ["ref"]
+                "required": [
+                  "ref"
+                ]
               },
               {
-                "required": ["alt"]
+                "required": [
+                  "alt"
+                ]
               },
               {
-                "required": ["start"]
+                "required": [
+                  "start"
+                ]
               },
               {
-                "required": ["end"]
+                "required": [
+                  "end"
+                ]
               }
             ]
           }
@@ -980,23 +1243,36 @@
               "const": "deletion"
             }
           },
-          "required": ["start", "end"],
+          "required": [
+            "start",
+            "end"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["position_1based"]
+                "required": [
+                  "position_1based"
+                ]
               },
               {
-                "required": ["ref"]
+                "required": [
+                  "ref"
+                ]
               },
               {
-                "required": ["alt"]
+                "required": [
+                  "alt"
+                ]
               },
               {
-                "required": ["point"]
+                "required": [
+                  "point"
+                ]
               },
               {
-                "required": ["bases"]
+                "required": [
+                  "bases"
+                ]
               }
             ]
           }
@@ -1006,7 +1282,10 @@
     "repeat_interruption": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["offset", "bases"],
+      "required": [
+        "offset",
+        "bases"
+      ],
       "properties": {
         "offset": {
           "type": "integer",
@@ -1021,7 +1300,9 @@
     "repeat_allele": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["frequency"],
+      "required": [
+        "frequency"
+      ],
       "properties": {
         "units": {
           "description": "Número de unidades. Un entero cuando el locus declara un solo motivo; una lista con un valor por bloque, en el orden de los motivos, cuando declara varios.",
@@ -1059,20 +1340,30 @@
       },
       "oneOf": [
         {
-          "required": ["units"],
+          "required": [
+            "units"
+          ],
           "not": {
-            "required": ["sequence"]
+            "required": [
+              "sequence"
+            ]
           }
         },
         {
-          "required": ["sequence"],
+          "required": [
+            "sequence"
+          ],
           "not": {
             "anyOf": [
               {
-                "required": ["units"]
+                "required": [
+                  "units"
+                ]
               },
               {
-                "required": ["interruptions"]
+                "required": [
+                  "interruptions"
+                ]
               }
             ]
           }
@@ -1083,7 +1374,13 @@
     "repeat_locus": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "sequence", "start", "end", "alleles"],
+      "required": [
+        "id",
+        "sequence",
+        "start",
+        "end",
+        "alleles"
+      ],
       "properties": {
         "id": {
           "$ref": "#/$defs/identifier"
@@ -1140,23 +1437,35 @@
       },
       "oneOf": [
         {
-          "required": ["motif"],
+          "required": [
+            "motif"
+          ],
           "not": {
-            "required": ["motifs"]
+            "required": [
+              "motifs"
+            ]
           }
         },
         {
           "description": "Con varios motivos, cada alelo tiene que declarar una LISTA de unidades, una por bloque, y no puede declarar una secuencia exacta: unas bases sueltas no pueden decir dónde acaba un bloque y empieza el siguiente. Lo que este formato NO puede exigir es que la lista de unidades tenga la misma longitud que la de motivos: comparar la longitud de dos propiedades hermanas no es expresable en JSON Schema. Esa correspondencia la comprueba el lector, que rechaza el documento nombrando el locus, y una prueba de Rust la fija.",
-          "required": ["motifs"],
+          "required": [
+            "motifs"
+          ],
           "not": {
-            "required": ["motif"]
+            "required": [
+              "motif"
+            ]
           },
           "properties": {
             "alleles": {
               "items": {
-                "required": ["units"],
+                "required": [
+                  "units"
+                ],
                 "not": {
-                  "required": ["sequence"]
+                  "required": [
+                    "sequence"
+                  ]
                 },
                 "properties": {
                   "units": {

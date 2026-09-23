@@ -202,6 +202,113 @@ impl RepeatFrequencyNormalization {
 }
 
 /// Un locus de repetición ya resuelto.
+/// Cota **superior** de las bases de secuencia de tracto que una ejecución
+/// llegará a publicar, calculada sobre lo declarado y antes de materializar a
+/// nadie.
+///
+/// # De dónde sale cada término, en forma cerrada
+///
+/// - **Verdad.** Un documento de verdad publica el tracto de una copia en
+///   **tres** sitios: la vista vigente de la copia, su historial, y la lista de
+///   alelos del caso genotípico. Los dos primeros son uno por copia; el tercero
+///   enumera los alelos **distintos** del caso, a lo sumo la ploidía por
+///   individuo, que sumada sobre los individuos no pasa del número de copias.
+///   De ahí `3 * copias * alelo más largo` por locus.
+/// - **VCF.** Un locus produce como mucho un registro con el tracto de la
+///   referencia en `REF` y cada alelo declarado distinto en un `ALT`, cada uno
+///   con su secuencia completa. De ahí `bases del tracto de referencia + suma
+///   de las longitudes de los alelos distintos`.
+///
+/// # Por qué es superior y no exacta, y por qué eso está bien
+///
+/// Supone que **toda** copia saca el alelo más largo y que **todos** los alelos
+/// declarados llegan a sortearse. Lo realizado será casi siempre menor: una
+/// copia que saque el alelo de la referencia no publica nada, y un alelo que no
+/// le toque a nadie no produce `ALT`. Esa diferencia es el comportamiento
+/// correcto, no un defecto que haya que «arreglar» igualando las dos cifras.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectiveRepeatOutputBudget {
+    per_locus: Vec<RepeatLocusOutputBound>,
+    declared_cap: Option<u64>,
+}
+
+/// Lo que un locus concreto aporta a la cota.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RepeatLocusOutputBound {
+    locus_id: String,
+    truth_bases: u64,
+    vcf_bases: u64,
+}
+
+impl RepeatLocusOutputBound {
+    #[must_use]
+    pub fn locus_id(&self) -> &str {
+        &self.locus_id
+    }
+
+    #[must_use]
+    pub const fn truth_bases(&self) -> u64 {
+        self.truth_bases
+    }
+
+    #[must_use]
+    pub const fn vcf_bases(&self) -> u64 {
+        self.vcf_bases
+    }
+
+    #[must_use]
+    pub const fn total_bases(&self) -> u64 {
+        self.truth_bases.saturating_add(self.vcf_bases)
+    }
+}
+
+impl EffectiveRepeatOutputBudget {
+    /// Las tres copias del tracto que un documento de verdad publica por copia
+    /// haplotípica: la vista vigente, el historial y el caso genotípico.
+    pub const TRUTH_COPIES_PER_HAPLOTYPE_COPY: u64 = 3;
+
+    #[must_use]
+    pub fn per_locus(&self) -> &[RepeatLocusOutputBound] {
+        &self.per_locus
+    }
+
+    #[must_use]
+    pub const fn declared_cap(&self) -> Option<u64> {
+        self.declared_cap
+    }
+
+    #[must_use]
+    pub fn truth_bases(&self) -> u64 {
+        self.per_locus
+            .iter()
+            .fold(0, |total, locus| total.saturating_add(locus.truth_bases))
+    }
+
+    #[must_use]
+    pub fn vcf_bases(&self) -> u64 {
+        self.per_locus
+            .iter()
+            .fold(0, |total, locus| total.saturating_add(locus.vcf_bases))
+    }
+
+    #[must_use]
+    pub fn total_bases(&self) -> u64 {
+        self.truth_bases().saturating_add(self.vcf_bases())
+    }
+
+    /// El locus que más aporta, que es lo que un rechazo tiene que nombrar
+    /// para ser accionable. El identificador desempata para que el mensaje no
+    /// dependa del orden de recorrido; se compara prestado, sin copiarlo.
+    #[must_use]
+    pub fn heaviest_locus(&self) -> Option<&RepeatLocusOutputBound> {
+        self.per_locus.iter().max_by(|left, right| {
+            left.total_bases()
+                .cmp(&right.total_bases())
+                .then_with(|| left.locus_id.cmp(&right.locus_id))
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct EffectiveRepeatLocus {
     /// El locus del dominio, con su identificador tipado, su intervalo en el
@@ -455,6 +562,7 @@ pub struct EffectiveConfig {
     document_version: DeclaredDocumentVersion,
     repeat_loci: Vec<EffectiveRepeatLocus>,
     repeat_admission: EffectiveRepeatAdmission,
+    repeat_output_budget: EffectiveRepeatOutputBudget,
 }
 
 /// Configuración F5 ya resuelta entre sus dos documentos de autoría y el
@@ -1178,6 +1286,13 @@ impl EffectiveConfig {
     #[must_use]
     pub const fn repeat_admission(&self) -> EffectiveRepeatAdmission {
         self.repeat_admission
+    }
+
+    /// Cota superior de bases de tracto publicadas, calculada sobre lo
+    /// declarado.
+    #[must_use]
+    pub const fn repeat_output_budget(&self) -> &EffectiveRepeatOutputBudget {
+        &self.repeat_output_budget
     }
 
     #[must_use]
@@ -1949,6 +2064,9 @@ pub fn build_effective_config_with_entropy(
             }
         }
     }
+    // La cota se calcula **antes** de ceder las poblaciones al documento
+    // efectivo, y su rechazo ocurre aquí: antes de materializar a nadie.
+    let repeat_output_budget = repeat_output_budget(general, &repeat_loci, &initial_populations)?;
     Ok(EffectiveConfig {
         source_path: general.source().path().display().to_string(),
         reference_id: general.reference().id.value().clone(),
@@ -1973,9 +2091,96 @@ pub fn build_effective_config_with_entropy(
             "4" => DeclaredDocumentVersion::V4,
             _ => DeclaredDocumentVersion::V2,
         },
+        repeat_output_budget,
         repeat_loci,
         repeat_admission,
     })
+}
+
+/// Calcula la cota de bases de tracto y **rechaza el escenario** si supera el
+/// tope declarado.
+///
+/// Se hace aquí, en la frontera de configuración, antes de materializar a
+/// nadie: el rechazo tiene que llegar antes de gastar una sola copia.
+///
+/// # Lo que esta función **no** hace
+///
+/// No cuenta nada de lo publicado. Su aritmética sale entera de lo declarado
+/// —alelos, longitudes, individuos y ploidía— y no comparte ni una línea con
+/// el contador de lo realizado. Que sean dos caminos distintos es lo único que
+/// hace que compararlos signifique algo; si uno llamara al otro, la
+/// comprobación sería un espejo incapaz de fallar.
+fn repeat_output_budget(
+    general: &DeclaredGeneralConfig,
+    loci: &[EffectiveRepeatLocus],
+    populations: &[EffectiveInitialPopulation],
+) -> Result<EffectiveRepeatOutputBudget, Diagnostic> {
+    let copies = populations.iter().try_fold(0_u64, |total, population| {
+        u64::try_from(population.individual_count())
+            .ok()
+            .and_then(|individuals| {
+                individuals.checked_mul(u64::from(population.ploidy().copy_count()))
+            })
+            .and_then(|copies| total.checked_add(copies))
+            .ok_or_else(|| {
+                config_error(
+                    general,
+                    "initial_populations",
+                    "el número de copias haplotípicas desborda el recuento",
+                )
+            })
+    })?;
+    let mut per_locus = Vec::with_capacity(loci.len());
+    for locus in loci {
+        let longest = locus
+            .alleles()
+            .iter()
+            .map(|allele| allele.tract().length())
+            .max()
+            .unwrap_or(0);
+        let interval = locus.declaration().interval();
+        let reference_tract = interval.end().saturating_sub(interval.start());
+        let mut distinct = BTreeSet::new();
+        let mut vcf_bases = reference_tract;
+        for allele in locus.alleles() {
+            if distinct.insert(allele.tract().as_text()) {
+                vcf_bases = vcf_bases.saturating_add(allele.tract().length());
+            }
+        }
+        per_locus.push(RepeatLocusOutputBound {
+            locus_id: locus.id().to_owned(),
+            truth_bases: EffectiveRepeatOutputBudget::TRUTH_COPIES_PER_HAPLOTYPE_COPY
+                .saturating_mul(copies)
+                .saturating_mul(longest),
+            vcf_bases,
+        });
+    }
+    let declared_cap = general
+        .reference()
+        .max_tract_output_bases
+        .as_ref()
+        .map(|declared| *declared.value());
+    let budget = EffectiveRepeatOutputBudget {
+        per_locus,
+        declared_cap,
+    };
+    if let Some(cap) = declared_cap
+        && budget.total_bases() > cap
+    {
+        let heaviest = budget.heaviest_locus().map_or_else(
+            || "ninguno".to_owned(),
+            |locus| format!("{} con {} bases", locus.locus_id(), locus.total_bases()),
+        );
+        return Err(config_error(
+            general,
+            "reference.max_tract_output_bases",
+            format!(
+                "la cota de bases de tracto publicadas es {} y el tope declarado es {cap}; el locus que más aporta es {heaviest}",
+                budget.total_bases()
+            ),
+        ));
+    }
+    Ok(budget)
 }
 
 fn effective_technical_event(

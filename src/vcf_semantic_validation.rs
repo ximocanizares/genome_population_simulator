@@ -13,7 +13,9 @@ use crate::identity::{ReferenceId, SequenceId};
 use crate::reference::{
     DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
 };
-use crate::truth_schema::{CopyIdentity, TruthCurrentPiece, TruthDocument, TruthRecord};
+use crate::truth_schema::{
+    CopyIdentity, TruthCurrentPiece, TruthDocument, TruthRecord, TruthRepeatBlock,
+};
 use crate::truth_validation::{
     TruthValidationError, read_truth_jsonl, validate_and_reconstruct_truth,
 };
@@ -112,6 +114,7 @@ pub fn validate_vcf_against_truth(
     let mut pass_filter_declarations = 0_u8;
     let mut gt_declarations = 0_u8;
     let mut gps_case_declarations = 0_u8;
+    let mut tandem_repeat_declarations = BTreeSet::<&'static str>::new();
     let mut records_started = false;
     loop {
         line.clear();
@@ -189,6 +192,20 @@ pub fn validate_vcf_against_truth(
                 || content.starts_with("##INFO=<ID=GPS_COMPLEMENT,")
             {
                 return vcf_error(line_number, "F2 prohíbe declarar GPS_LOSS y GPS_COMPLEMENT");
+            }
+            if let Some(key) = tandem_repeat_declaration_key(content) {
+                if content != canonical_tandem_repeat_declaration(key) {
+                    return vcf_error(
+                        line_number,
+                        "declaración INFO de repetición distinta de la del estándar VCFv4.5",
+                    );
+                }
+                if !tandem_repeat_declarations.insert(key) {
+                    return vcf_error(
+                        line_number,
+                        "declaración INFO de repetición duplicada en la cabecera",
+                    );
+                }
             }
             continue;
         }
@@ -298,6 +315,7 @@ pub fn validate_vcf_against_truth(
             );
         }
         validate_reference_allele(reference, fields[0], position, fields[3], line_number)?;
+        validate_tandem_repeat_info(expected_record, fields[7], line_number)?;
         let gps_cases = parse_gps_case(fields[7], line_number)?;
         if gps_cases != expected_record.gps_cases || !strictly_sorted(&gps_cases) {
             return vcf_error(
@@ -342,6 +360,25 @@ pub fn validate_vcf_against_truth(
             "debe existir exactamente una declaración INFO/GPS_CASE canónica",
         );
     }
+    // La cabecera declara **cada campo usado y ninguno más**: los cinco si
+    // algún registro publica un tracto, ninguno si no lo publica ninguno.
+    let expects_tandem_repeats = expected.values().any(|record| {
+        record
+            .alternate_repeats
+            .iter()
+            .any(|blocks| !blocks.is_empty())
+    });
+    let expected_declarations = if expects_tandem_repeats {
+        TANDEM_REPEAT_INFO_KEYS.len()
+    } else {
+        0
+    };
+    if tandem_repeat_declarations.len() != expected_declarations {
+        return vcf_error(
+            0,
+            "la cabecera no declara exactamente los campos de repetición que los registros usan",
+        );
+    }
     if seen.len() != expected.len() {
         return vcf_error(line_number, "faltan registros VCF que exige la verdad");
     }
@@ -354,6 +391,8 @@ struct ExpectedRecord {
     alternates: Vec<String>,
     gps_cases: Vec<String>,
     copies: BTreeMap<String, Vec<(u8, CopyIdentity, String)>>,
+    /// Paralela a `alternates`: los bloques que cada ALT debe publicar.
+    alternate_repeats: Vec<Vec<TruthRepeatBlock>>,
 }
 
 fn expected_records(
@@ -428,7 +467,8 @@ fn expected_records(
                 .max_by_key(|value| value.len())
                 .ok_or_else(|| oracle_error("registro esperado sin alelos"))?
                 .to_owned();
-            let mut per_copy = BTreeMap::<CopyIdentity, (String, OracleSpan)>::new();
+            let mut per_copy = BTreeMap::<CopyIdentity, OracleCarrier>::new();
+            let mut repeats_by_alternate = BTreeMap::<String, Vec<TruthRepeatBlock>>::new();
             for allele in &alleles {
                 if !common_reference.starts_with(&allele.reference) {
                     return Err(oracle_error(
@@ -440,9 +480,21 @@ fn expected_records(
                     allele.alternate,
                     &common_reference[allele.reference.len()..]
                 );
-                if let Some((previous, _)) =
-                    per_copy.insert(allele.copy.clone(), (alternate.clone(), allele.source))
-                    && previous != alternate
+                if let Some(previous) =
+                    repeats_by_alternate.insert(alternate.clone(), allele.repeat_blocks.clone())
+                    && previous != allele.repeat_blocks
+                {
+                    return Err(oracle_error(
+                        "dos copias dan el mismo ALT con tractos distintos",
+                    ));
+                }
+                if let Some(previous) = per_copy.insert(
+                    allele.copy.clone(),
+                    OracleCarrier {
+                        alternate: alternate.clone(),
+                        source: allele.source,
+                    },
+                ) && previous.alternate != alternate
                 {
                     return Err(oracle_error(
                         "una copia produce ALT incompatibles al mismo CHROM+POS",
@@ -451,9 +503,18 @@ fn expected_records(
             }
             let alternates = per_copy
                 .values()
-                .map(|(alternate, _)| alternate.clone())
+                .map(|carrier| carrier.alternate.clone())
                 .collect::<BTreeSet<_>>()
                 .into_iter()
+                .collect::<Vec<_>>();
+            let alternate_repeats = alternates
+                .iter()
+                .map(|alternate| {
+                    repeats_by_alternate
+                        .get(alternate)
+                        .cloned()
+                        .unwrap_or_default()
+                })
                 .collect::<Vec<_>>();
             let mut alt_cases = BTreeMap::<String, BTreeSet<String>>::new();
             for genotype in truth.records.iter().filter_map(|record| {
@@ -468,12 +529,16 @@ fn expected_records(
                     .iter()
                     .filter(|carrier| carrier.allele_index != 0)
                 {
-                    if let Some((alternate, span)) = per_copy.get(&carrier.copy)
+                    if let Some(carrier_allele) = per_copy.get(&carrier.copy)
                         && carrier.copy.sequence_id == key.0
-                        && oracle_span_contains(*span, genotype.locus.start, genotype.locus.end)
+                        && oracle_span_contains(
+                            carrier_allele.source,
+                            genotype.locus.start,
+                            genotype.locus.end,
+                        )
                     {
                         alt_cases
-                            .entry(alternate.clone())
+                            .entry(carrier_allele.alternate.clone())
                             .or_default()
                             .insert(genotype.case_id.clone());
                     }
@@ -497,7 +562,7 @@ fn expected_records(
                 if path.sequence_id == key.0 {
                     let alternate = per_copy
                         .get(&path.identity)
-                        .map_or_else(String::new, |(alternate, _)| alternate.clone());
+                        .map_or_else(String::new, |carrier| carrier.alternate.clone());
                     copies
                         .entry(path.identity.individual_id.clone())
                         .or_default()
@@ -514,10 +579,18 @@ fn expected_records(
                     alternates,
                     gps_cases,
                     copies,
+                    alternate_repeats,
                 },
             ))
         })
         .collect()
+}
+
+/// Lo que una copia aporta a un registro: su ALT y el tramo que lo compuso.
+#[derive(Clone, Debug)]
+struct OracleCarrier {
+    alternate: String,
+    source: OracleSpan,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -533,6 +606,8 @@ struct OracleAllele {
     alternate: String,
     source: OracleSpan,
     copy: CopyIdentity,
+    /// Bloques declarados de los tractos contenidos en la ventana.
+    repeat_blocks: Vec<TruthRepeatBlock>,
 }
 #[derive(Clone, Debug)]
 struct OraclePath {
@@ -557,6 +632,8 @@ enum OraclePiece {
         start: u64,
         end: u64,
         bases: Vec<u8>,
+        /// Estructura en bloques que la verdad declara para este tracto.
+        blocks: Vec<TruthRepeatBlock>,
     },
 }
 
@@ -603,7 +680,12 @@ fn oracle_path(
                 });
                 prior = Some(source.end);
             }
-            TruthCurrentPiece::RepeatAllele { source, bases, .. } => {
+            TruthCurrentPiece::RepeatAllele {
+                source,
+                bases,
+                blocks,
+                ..
+            } => {
                 if source.start >= source.end
                     || source.end > u64::try_from(reference.len()).unwrap_or(u64::MAX)
                     || prior.is_some_and(|end| source.start < end)
@@ -614,6 +696,7 @@ fn oracle_path(
                     start: source.start,
                     end: source.end,
                     bases: bases.as_bytes().to_vec(),
+                    blocks: blocks.clone(),
                 });
                 prior = Some(source.end);
             }
@@ -702,6 +785,7 @@ impl OraclePath {
                     start: left,
                     end: right,
                     bases,
+                    ..
                 } if *left < end && start < *right => {
                     if *left < start || end < *right {
                         return Err(oracle_error("la ventana parte un tracto de repetición"));
@@ -796,23 +880,35 @@ fn oracle_normalize_window(
             .to_vec();
         alternate = path.window(start, end)?;
     }
-    while reference.len() > 1 && alternate.len() > 1 && reference.last() == alternate.last() {
-        reference.pop();
-        alternate.pop();
-    }
-    while reference.len() > 1 && alternate.len() > 1 && reference.first() == alternate.first() {
-        reference.remove(0);
-        alternate.remove(0);
-        start += 1;
-    }
-    while reference.len() != alternate.len() && start > 0 && reference.last() == alternate.last() {
-        start -= 1;
-        let base = reference_bases
-            [usize::try_from(start).map_err(|_| oracle_error("posición fuera de rango"))?];
-        reference.insert(0, base);
-        alternate.insert(0, base);
-        reference.pop();
-        alternate.pop();
+    // **El registro de repetición no se recorta**, igual que en el productor y
+    // por la misma razón: la decisión S-09 manda publicar la secuencia
+    // completa en `REF` y `ALT`, y DTC-064 sigue mandando en todos los demás
+    // registros. El oráculo aplica la regla por su cuenta —esta es su copia,
+    // no la del productor—, que es lo que hace que la comparación signifique
+    // algo.
+    let repeat_blocks = path.repeats_in(span.start, span.end);
+    if repeat_blocks.is_empty() {
+        while reference.len() > 1 && alternate.len() > 1 && reference.last() == alternate.last() {
+            reference.pop();
+            alternate.pop();
+        }
+        while reference.len() > 1 && alternate.len() > 1 && reference.first() == alternate.first() {
+            reference.remove(0);
+            alternate.remove(0);
+            start += 1;
+        }
+        while reference.len() != alternate.len()
+            && start > 0
+            && reference.last() == alternate.last()
+        {
+            start -= 1;
+            let base = reference_bases
+                [usize::try_from(start).map_err(|_| oracle_error("posición fuera de rango"))?];
+            reference.insert(0, base);
+            alternate.insert(0, base);
+            reference.pop();
+            alternate.pop();
+        }
     }
     Ok(Some(OracleAllele {
         sequence_id: path.sequence_id.clone(),
@@ -821,7 +917,214 @@ fn oracle_normalize_window(
         alternate: String::from_utf8(alternate).map_err(|_| oracle_error("ALT no UTF-8"))?,
         source: span,
         copy: path.identity.clone(),
+        repeat_blocks,
     }))
+}
+
+impl OraclePath {
+    /// Bloques declarados de los tractos contenidos en la ventana, en el orden
+    /// en que aparecen en la secuencia.
+    fn repeats_in(&self, start: u64, end: u64) -> Vec<TruthRepeatBlock> {
+        self.pieces
+            .iter()
+            .filter_map(|piece| match piece {
+                OraclePiece::Replaced {
+                    start: left,
+                    end: right,
+                    blocks,
+                    ..
+                } if *left < end && start < *right => Some(blocks.iter().cloned()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+}
+
+/// Los cinco campos de repetición en tándem, en el orden en que la cabecera
+/// los declara.
+const TANDEM_REPEAT_INFO_KEYS: [&str; 5] = ["RN", "RUS", "RUL", "RUC", "RB"];
+
+/// Las declaraciones canónicas, **transcritas del estándar** y no importadas
+/// del productor.
+///
+/// Compartir la constante con quien escribe el VCF convertiría esta
+/// comprobación en un espejo: el oráculo aceptaría cualquier cosa que el
+/// productor decidiera emitir. Por eso están copiadas aquí, igual que ya lo
+/// estaban las de `FILTER`, `FORMAT` y `GPS_CASE`.
+fn canonical_tandem_repeat_declaration(key: &str) -> &'static str {
+    match key {
+        "RN" => {
+            "##INFO=<ID=RN,Number=A,Type=Integer,Description=\"Total number of repeat sequences in this allele\">"
+        }
+        "RUS" => {
+            "##INFO=<ID=RUS,Number=.,Type=String,Description=\"Repeat unit sequence of the corresponding repeat sequence\">"
+        }
+        "RUL" => {
+            "##INFO=<ID=RUL,Number=.,Type=Integer,Description=\"Repeat unit length of the corresponding repeat sequence\">"
+        }
+        "RUC" => {
+            "##INFO=<ID=RUC,Number=.,Type=Float,Description=\"Repeat unit count of corresponding repeat sequence\">"
+        }
+        "RB" => {
+            "##INFO=<ID=RB,Number=.,Type=Integer,Description=\"Total number of bases in the corresponding repeat sequence\">"
+        }
+        _ => unreachable!("solo se consultan los cinco campos del estándar"),
+    }
+}
+
+fn tandem_repeat_declaration_key(content: &str) -> Option<&'static str> {
+    TANDEM_REPEAT_INFO_KEYS
+        .into_iter()
+        .find(|key| content.starts_with(&format!("##INFO=<ID={key},")))
+}
+
+/// Valor de una clave `INFO` de la línea, sin interpretar.
+fn info_value<'line>(info: &'line str, key: &str) -> Option<&'line str> {
+    info.split(';').find_map(|field| {
+        field
+            .strip_prefix(key)
+            .and_then(|rest| rest.strip_prefix('='))
+    })
+}
+
+/// Comprueba los campos de repetición de un registro contra la verdad.
+///
+/// # Qué discrimina y qué no
+///
+/// Las cuatro listas por secuencia repetida se comparan **posición a
+/// posición** contra los bloques que este oráculo ha reconstruido para cada
+/// alelo alternativo, en el orden de los alelos. Eso es lo que caza el error
+/// silencioso más probable de estos campos —una lista desplazada respecto de
+/// la de alelos—, y lo caza lista por lista: desplazar solo el número de
+/// copias, o solo las bases, falla igual.
+///
+/// **No se comprueba aparte que las bases publicadas sumen la longitud del
+/// tracto.** Esa suma ya está implicada por la comparación bloque a bloque y
+/// por la validación de la verdad, que exige que los bloques sumen las bases
+/// del alelo: una aserción más no podría fallar, y aquí no se finge que
+/// discrimine.
+///
+/// # Por qué aquí no se trocea, y qué queda sin ejercitar
+///
+/// Esta función **no reparte las listas entre los alelos**: compara el
+/// recuento de cada alelo contra los bloques que la verdad le da, y después
+/// las cuatro listas aplanadas posición a posición. Las dos comprobaciones
+/// juntas fijan lo mismo que un troceado y no pueden desalinearse entre sí.
+///
+/// Lo que la producción no ha llegado a construir es un registro con
+/// **recuentos distintos entre alelos**: los alelos de un locus comparten su
+/// lista de motivos, de modo que todos traen el mismo número de bloques. Para
+/// que ese camino no quedara sin recorrer hay una prueba unitaria en este
+/// mismo módulo que lo alimenta a mano con dos bloques, ninguno y uno.
+fn validate_tandem_repeat_info(
+    expected: &ExpectedRecord,
+    info: &str,
+    line: u64,
+) -> Result<(), VcfSemanticValidationError> {
+    let expected_blocks = expected
+        .alternate_repeats
+        .iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let present = TANDEM_REPEAT_INFO_KEYS
+        .into_iter()
+        .filter(|key| info_value(info, key).is_some())
+        .count();
+    if expected_blocks.is_empty() {
+        if present != 0 {
+            return vcf_error(line, "un registro sin tracto publica campos de repetición");
+        }
+        return Ok(());
+    }
+    if present != TANDEM_REPEAT_INFO_KEYS.len() {
+        return vcf_error(
+            line,
+            "un registro con tracto no publica los cinco campos de repetición",
+        );
+    }
+    let counts = parse_u64_list(info_value(info, "RN"), line, "RN")?;
+    if counts.len() != expected.alternates.len() {
+        return vcf_error(
+            line,
+            "RN no trae exactamente un valor por alelo alternativo",
+        );
+    }
+    for (observed, blocks) in counts.iter().zip(&expected.alternate_repeats) {
+        if usize::try_from(*observed).ok() != Some(blocks.len()) {
+            return vcf_error(
+                line,
+                "RN no cuenta las secuencias repetidas que la verdad da a ese alelo",
+            );
+        }
+    }
+    let motifs = info_value(info, "RUS")
+        .unwrap_or_default()
+        .split(',')
+        .collect::<Vec<_>>();
+    let motif_lengths = parse_u64_list(info_value(info, "RUL"), line, "RUL")?;
+    let unit_counts = parse_f64_list(info_value(info, "RUC"), line, "RUC")?;
+    let bases = parse_u64_list(info_value(info, "RB"), line, "RB")?;
+    let total = expected_blocks.len();
+    if motifs.len() != total
+        || motif_lengths.len() != total
+        || unit_counts.len() != total
+        || bases.len() != total
+    {
+        return vcf_error(
+            line,
+            "las listas de repetición no suman los recuentos declarados en RN",
+        );
+    }
+    for (index, block) in expected_blocks.iter().enumerate() {
+        let motif_length = block.motif.len() as u64;
+        if motifs[index] != block.motif {
+            return vcf_error(line, "RUS no es el motivo que la verdad declara");
+        }
+        if motif_lengths[index] != motif_length {
+            return vcf_error(line, "RUL no es la longitud del motivo que la acompaña");
+        }
+        if bases[index] != block.bases {
+            return vcf_error(line, "RB no son las bases que la verdad declara");
+        }
+        let derived = block.bases as f64 / motif_length as f64;
+        if (unit_counts[index] - derived).abs() > 1e-9 * derived.max(1.0) {
+            return vcf_error(line, "RUC no son las bases entre la longitud del motivo");
+        }
+    }
+    Ok(())
+}
+
+fn parse_u64_list(
+    value: Option<&str>,
+    line: u64,
+    key: &str,
+) -> Result<Vec<u64>, VcfSemanticValidationError> {
+    value
+        .unwrap_or_default()
+        .split(',')
+        .map(|item| item.parse::<u64>().ok())
+        .collect::<Option<Vec<_>>>()
+        .map_or_else(
+            || vcf_error(line, format!("{key} trae un valor que no es un entero")),
+            Ok,
+        )
+}
+
+fn parse_f64_list(
+    value: Option<&str>,
+    line: u64,
+    key: &str,
+) -> Result<Vec<f64>, VcfSemanticValidationError> {
+    value
+        .unwrap_or_default()
+        .split(',')
+        .map(|item| item.parse::<f64>().ok().filter(|value| value.is_finite()))
+        .collect::<Option<Vec<_>>>()
+        .map_or_else(
+            || vcf_error(line, format!("{key} trae un valor que no es un decimal")),
+            Ok,
+        )
 }
 
 fn merge_oracle_spans(mut spans: Vec<OracleSpan>) -> Vec<OracleSpan> {
@@ -1008,15 +1311,46 @@ fn samples_from_truth(truth: &TruthDocument) -> Vec<String> {
         .collect()
 }
 
+/// `GPS_CASE` es el **primer** campo de `INFO` y, tras él, solo pueden venir
+/// los campos de repetición en tándem del estándar.
+///
+/// La comprobación era antes «`INFO` es exactamente `GPS_CASE`», que rechazaba
+/// una clave repetida por el mero hecho de que sobraba. Al ampliarla a una
+/// lista cerrada esa propiedad se perdió sin querer: una línea con dos veces el
+/// mismo campo pasaba y el lector se quedaba con la primera aparición. Aquí se
+/// exige otra vez, porque el estándar no define qué significa una clave
+/// duplicada y quedarse con una de las dos es elegir en silencio. Cualquier
+/// otra clave sigue siendo un rechazo, que es lo que impide que un productor
+/// cuele un campo propio sin declararlo.
 fn parse_gps_case(info: &str, line: u64) -> Result<Vec<String>, VcfSemanticValidationError> {
-    let Some(value) = info.strip_prefix("GPS_CASE=") else {
-        return vcf_error(line, "INFO debe declarar GPS_CASE");
+    let mut seen = BTreeSet::new();
+    for field in info.split(';') {
+        let key = field.split_once('=').map_or(field, |(key, _)| key);
+        if !seen.insert(key) {
+            return vcf_error(line, "INFO repite una clave");
+        }
+    }
+    let mut fields = info.split(';');
+    let Some(value) = fields
+        .next()
+        .and_then(|first| first.strip_prefix("GPS_CASE="))
+    else {
+        return vcf_error(line, "INFO debe declarar GPS_CASE en primer lugar");
     };
-    if value.is_empty() || value.contains(';') || value.split(',').any(str::is_empty) {
+    if value.is_empty() || value.split(',').any(str::is_empty) {
         return vcf_error(
             line,
-            "INFO debe contener exclusivamente GPS_CASE canónico sin valores vacíos",
+            "INFO debe contener GPS_CASE canónico sin valores vacíos",
         );
+    }
+    for field in fields {
+        let key = field.split_once('=').map_or(field, |(key, _)| key);
+        if !TANDEM_REPEAT_INFO_KEYS.contains(&key) {
+            return vcf_error(
+                line,
+                "INFO solo admite GPS_CASE y los campos de repetición del estándar",
+            );
+        }
     }
     Ok(value.split(',').map(str::to_owned).collect())
 }
@@ -1150,7 +1484,67 @@ fn vcf_error<T>(line: u64, detail: impl Into<String>) -> Result<T, VcfSemanticVa
 
 #[cfg(test)]
 mod tests {
-    use super::merge_oracle_spans;
+    use super::{ExpectedRecord, merge_oracle_spans, validate_tandem_repeat_info};
+    use crate::truth_schema::TruthRepeatBlock;
+    use std::collections::BTreeMap;
+
+    fn block(motif: &str, bases: u64) -> TruthRepeatBlock {
+        TruthRepeatBlock {
+            motif: motif.to_owned(),
+            bases,
+        }
+    }
+
+    /// Registro con **recuentos distintos por alelo**, incluido uno sin
+    /// tracto: dos bloques, ninguno y uno.
+    fn heterogeneous_record() -> ExpectedRecord {
+        ExpectedRecord {
+            reference: "A".to_owned(),
+            alternates: vec!["AA".to_owned(), "AC".to_owned(), "AG".to_owned()],
+            gps_cases: Vec::new(),
+            copies: BTreeMap::new(),
+            alternate_repeats: vec![
+                vec![block("CA", 10), block("GGG", 9)],
+                Vec::new(),
+                vec![block("TTTT", 12)],
+            ],
+        }
+    }
+
+    /// **Recuentos distintos entre alelos, que la producción no construye.**
+    ///
+    /// Los alelos de un locus comparten su lista de motivos, de modo que todos
+    /// traen el mismo número de bloques: el camino en el que un alelo tiene
+    /// dos, otro ninguno y otro uno no lo recorre ninguna prueba de extremo a
+    /// extremo. Aquí se alimenta a mano. La primera aserción fija que la forma
+    /// correcta se acepta —sin ella, un oráculo que rechazara todo pasaría las
+    /// demás—.
+    #[test]
+    fn slicing_the_lists_per_allele_catches_a_shift_with_heterogeneous_counts() {
+        let expected = heterogeneous_record();
+        let correct = "GPS_CASE=C;RN=2,0,1;RUS=CA,GGG,TTTT;RUL=2,3,4;RUC=5,3,3;RB=10,9,12";
+        validate_tandem_repeat_info(&expected, correct, 1).expect("la forma correcta se acepta");
+
+        for (reason, info) in [
+            (
+                "recuentos desplazados entre alelos",
+                "GPS_CASE=C;RN=1,0,2;RUS=CA,GGG,TTTT;RUL=2,3,4;RUC=5,3,3;RB=10,9,12",
+            ),
+            (
+                "bases desplazadas dentro de la lista aplanada",
+                "GPS_CASE=C;RN=2,0,1;RUS=CA,GGG,TTTT;RUL=2,3,4;RUC=5,3,3;RB=9,12,10",
+            ),
+            (
+                "un alelo sin tracto al que se le da uno",
+                "GPS_CASE=C;RN=2,1,1;RUS=CA,GGG,TTTT,TTTT;RUL=2,3,4,4;RUC=5,3,3,3;RB=10,9,12,12",
+            ),
+        ] {
+            assert!(
+                validate_tandem_repeat_info(&expected, info, 1).is_err(),
+                "el oráculo tiene que rechazar «{reason}»"
+            );
+        }
+    }
 
     #[test]
     fn independently_merges_overlapping_or_inserted_components() {

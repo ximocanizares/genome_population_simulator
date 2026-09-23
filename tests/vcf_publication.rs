@@ -347,6 +347,7 @@ fn golden_grouped_record(
         ],
         gps_cases: vec![case.to_owned()],
         alternate_cases: vec![vec![case.to_owned()]],
+        alternate_repeats: vec![Vec::new()],
     }
 }
 
@@ -525,6 +526,7 @@ fn csi_indexes_real_records_and_is_queryable_by_region() {
         )],
         gps_cases: vec!["CASE_1".to_owned()],
         alternate_cases: vec![vec!["CASE_1".to_owned()]],
+        alternate_repeats: vec![Vec::new()],
     }];
     let vcf = root.join("truth.vcf.gz");
     let writer = noodles_bgzf::io::Writer::new(fs::File::create(&vcf).expect("VCF"));

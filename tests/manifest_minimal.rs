@@ -317,6 +317,7 @@ fn source_and_derived_fasta_cannot_alias_across_output_categories() {
         authorizations: genome_population_simulator::execution::ExecutionAuthorizations::default(),
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(&diagnostic),
+        repeat_loci: None,
     };
     assert_rejected(
         "source-derived-fasta-alias",
@@ -396,6 +397,7 @@ fn failed_reduction_keeps_reached_links_and_requested_classification() {
         authorizations: genome_population_simulator::execution::ExecutionAuthorizations::default(),
         artifacts: &artifacts,
         diagnostics: std::slice::from_ref(&diagnostic),
+        repeat_loci: None,
     };
     let document = general_manifest_document(&manifest);
     assert_eq!(
@@ -553,7 +555,7 @@ fn assert_external_bytes(name: &str, bytes: &[u8], expected_success: bool) {
         })
         .as_deref()
     {
-        Some("4") => "manifest-general-v4.schema.json",
+        Some("6") => "manifest-general-v6.schema.json",
         _ => "manifest-general-v4.schema.json",
     };
     let output = Command::new("python3")
