@@ -2066,6 +2066,37 @@ fn the_closure_audit_cannot_derive_an_identity_by_its_signature() {
         );
     }
     assert!(source.contains("File::open"), "pero sí abre para leer");
+
+    // Y la prohibición **no se elude por una indirección**. Desde que la
+    // clausura participa en el barrido de guardas llama a otro módulo, y ese
+    // otro módulo sí abre un fichero cuando su variable de entorno está
+    // puesta. La búsqueda de arriba es léxica y no ve eso, de modo que aquí se
+    // acota la única indirección que existe: la clausura nombra el barrido una
+    // sola vez y solo para anotar, y el barrido no ofrece ninguna otra vía.
+    let code_only = source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        code_only.matches("guard_trace").count(),
+        1,
+        "fuera de los comentarios, la clausura solo puede nombrar el barrido una vez"
+    );
+    assert!(
+        code_only.contains("crate::guard_trace::record();"),
+        "y esa única mención tiene que ser la de anotar"
+    );
+    let barrido = include_str!("../src/guard_trace.rs");
+    assert_eq!(
+        barrido.matches("\npub fn ").count(),
+        1,
+        "el barrido solo puede ofrecer una función, y es la que anota"
+    );
+    assert!(barrido.contains("\npub fn record()"));
+    // Control positivo: la misma búsqueda sí ve una segunda función pública
+    // donde la hay.
+    assert_eq!("\npub fn a()\npub fn b()".matches("\npub fn ").count(), 2);
 }
 
 /// La posición que la auditoría indexa es la de `f5-founders.tsv`.
@@ -2250,5 +2281,226 @@ fn the_closure_audit_peak_fits_the_sealed_budget_and_holds_one_record_at_a_time(
         large_peak.saturating_sub(small_peak) <= explained,
         "el pico creció {} bytes al doblar el censo y el mayor registro solo explica {explained}",
         large_peak.saturating_sub(small_peak)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 9. Los bytes que la auditoría lee, y que ninguna prueba había estropeado
+//
+// Las seis corrupciones siguientes rompen el **formato** de los dos ficheros
+// que la clausura lee, no su contenido lógico. Cada una cae por una guarda
+// distinta y cada aserción fija la causa, el campo y el motivo, porque varias
+// de ellas comparten causa tipada.
+// ---------------------------------------------------------------------------
+
+/// Una copia cuyo índice no es un entero.
+#[test]
+fn a_copy_index_that_is_not_an_integer_is_rejected() {
+    let package = publish("copy-index-text", &wide_fixture());
+    let rejection = package.audit_after(|root| {
+        rewrite_founder_field(root, 0, 3, "dos");
+    });
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::ByteContract,
+        "copy_index",
+        "no es un entero",
+    );
+}
+
+/// Un `FCP_` de la clase correcta cuya sintaxis no es la de un identificador.
+///
+/// Es la guarda que va **después** de la de clase: `FCP_no@valido` supera la
+/// comprobación de prefijo y muere en el análisis tipado. Sin el carácter
+/// prohibido la prueba caería por otra comprobación y no diría nada de esta.
+#[test]
+fn a_founder_copy_identifier_with_forbidden_syntax_is_rejected() {
+    let package = publish("copy-id-syntax", &wide_fixture());
+    let rejection = package.audit_after(|root| {
+        assert!(rewrite_founder_field(root, 0, 5, "FCP_no@valido").starts_with("FCP_"));
+    });
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::ByteContract,
+        "founder_copy_id",
+        "no es una identidad tipada",
+    );
+}
+
+/// Una fila de `f5-founders.tsv` que no es texto.
+///
+/// La cabecera sigue intacta, de modo que el rechazo no puede venir de ella:
+/// lo que falla es la lectura de la línea siguiente.
+#[test]
+fn a_founders_row_that_is_not_utf8_is_rejected() {
+    let package = publish("founders-encoding", &wide_fixture());
+    let rejection = package.audit_after(|root| {
+        let path = root.join(F5_TSV_CONTRACTS[FOUNDERS].path());
+        let mut bytes = fs::read(&path).expect("leer");
+        let after_header = bytes
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .expect("la cabecera termina en LF")
+            + 1;
+        bytes.insert(after_header, 0xFF);
+        assert!(
+            String::from_utf8(bytes.clone()).is_err(),
+            "la corrupción tiene que dejar el fichero fuera de UTF-8"
+        );
+        fs::write(&path, &bytes).expect("escribir");
+    });
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::ByteContract,
+        "encoding",
+        "UTF-8",
+    );
+}
+
+/// Una cabecera de `truth.jsonl` que no es JSON.
+///
+/// Se distingue de «la primera línea no es la cabecera»: aquí la línea ni
+/// siquiera se deja leer, y el motivo lo dice.
+#[test]
+fn an_unreadable_truth_header_is_rejected() {
+    let package = publish("truth-header-broken", &Fixture::default());
+    let rejection = package.audit_after(|root| {
+        let mut lines = truth_lines(root);
+        assert!(lines[0].contains(r#""record_type":"header""#));
+        lines[0] = "{ esto no es JSON".to_owned();
+        write_truth(root, &lines);
+    });
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::ByteContract,
+        "header",
+        "cabecera ilegible",
+    );
+}
+
+/// Un registro de copia de `truth.jsonl` que no es JSON.
+#[test]
+fn an_unreadable_truth_record_is_rejected() {
+    let package = publish("truth-record-broken", &wide_fixture());
+    let rejection = package.audit_after(|root| {
+        let mut lines = truth_lines(root);
+        let index = copy_record_indices(&lines)[0];
+        lines[index] = "{ esto tampoco es JSON".to_owned();
+        write_truth(root, &lines);
+    });
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::ByteContract,
+        "row",
+        "registro ilegible",
+    );
+}
+
+/// Una pertenencia publicada con un `FCP_` de sintaxis prohibida.
+///
+/// Es la hermana de la del TSV, sobre el otro fichero: la clausura analiza el
+/// identificador dos veces porque lo lee de dos sitios, y hasta ahora ninguna
+/// prueba ejercitaba la segunda.
+#[test]
+fn a_truth_membership_identifier_with_forbidden_syntax_is_rejected() {
+    let package = publish("truth-id-syntax", &wide_fixture());
+    let rejection = package.audit_after(|root| {
+        let lines = truth_lines(root);
+        let index = copy_record_indices(&lines)[0];
+        let key = r#""founder_copy_id":""#;
+        let start = lines[index].find(key).expect("la copia declara su FCP_") + key.len();
+        let end = start
+            + lines[index][start..]
+                .find('"')
+                .expect("el valor termina en comillas");
+        let published = lines[index][start..end].to_owned();
+        assert!(published.starts_with("FCP_"), "{published}");
+        substitute_in_record(
+            root,
+            F5_TRUTH_PATH,
+            index,
+            &format!("{key}{published}\""),
+            &format!("{key}FCP_no@valido\""),
+        );
+    });
+    assert_rejection(
+        &rejection,
+        F5ClosureCause::ByteContract,
+        "founder_copy_id",
+        "no es una identidad tipada",
+    );
+}
+
+/// **Nadie puede publicar con una admisión sellada que no es la suya, y por eso
+/// no existe un testigo que no clasifique.**
+///
+/// La clase fundadora —aportada o derivada— viaja congelada en el testigo para
+/// que no pueda entrar después por un objeto suelto, y el testigo la deja en
+/// `None` si la configuración que publicó no es la que su admisión sella. La
+/// clausura tiene una guarda para ese testigo mudo.
+///
+/// *Esta prueba demuestra que esa guarda es inalcanzable*, que es distinto de
+/// suponerlo: publicar con la admisión de **otra** configuración —idéntica
+/// salvo en un parámetro que el material sellado cubre— no produce un testigo
+/// mudo, sino que **no publica**. Si alguien retirase esa atadura de la
+/// publicación, esta prueba moriría y señalaría la guarda que entonces sí
+/// haría falta ejercitar.
+#[test]
+fn no_publication_can_consume_an_admission_that_does_not_seal_its_configuration() {
+    let root = temporary("foreign-seal");
+    fs::create_dir_all(&root).expect("raíz");
+    let mut chain = build_chain(&root, &wide_fixture());
+    let other_root = temporary("foreign-seal-other");
+    fs::create_dir_all(&other_root).expect("raíz");
+    let other = build_chain(
+        &other_root,
+        &Fixture {
+            max_swap_proposals: 2048,
+            ..wide_fixture()
+        },
+    );
+
+    let destination = chain.root.join("published");
+    let workspace = ExecutionWorkspace::create(&destination).expect("provisional");
+    let execution = ExecutionId::parse(EXECUTION, "test").expect("ejecución");
+    let refusal = {
+        let request = F5PublicationRequest::new(
+            &chain.config,
+            // La admisión sellada de la **otra** configuración.
+            &other.sealed,
+            &execution,
+            &chain.layout,
+            &chain.search,
+            &chain.assignment,
+        )
+        .expect("solicitud de publicación");
+        seal_and_publish_f5_success(
+            workspace,
+            &request,
+            &mut chain.identities,
+            |payload, declaration| {
+                audit_f5_package(payload, declaration)
+                    .map(|report| report.initialization_summaries().to_vec())
+                    .map_err(|rejection| rejection.diagnostic().clone())
+            },
+        )
+        .map_err(|failure| failure.into_diagnostic())
+        .expect_err("publicar con una admisión ajena tiene que estar prohibido")
+    };
+    assert_eq!(refusal.code(), "GPS-CONF-101");
+    assert_eq!(
+        refusal.context().get("detail").map(String::as_str),
+        Some("la admisión sellada no corresponde a esta configuración")
+    );
+
+    // Control positivo: la misma cadena, con **su** admisión, sí publica y su
+    // testigo sí clasifica. Sin esto, la prueba pasaría aunque la publicación
+    // estuviera rota por cualquier otra razón.
+    let package = publish("foreign-seal-control", &wide_fixture());
+    let report = package.audit().expect("clausura auditada");
+    assert_eq!(
+        report.derived_individuals() + report.supplied_individuals(),
+        report.individuals(),
+        "el testigo del control tiene que clasificar todos sus individuos"
     );
 }

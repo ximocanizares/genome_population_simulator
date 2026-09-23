@@ -47,6 +47,7 @@ pub mod f5_publication;
 pub mod f5_search;
 pub mod fastq_output;
 pub mod fastq_validation;
+pub mod guard_trace;
 pub mod haplotype;
 pub mod identity;
 pub mod indel_application;

@@ -118,13 +118,9 @@ pub fn validate_vcf_against_truth(
     let mut records_started = false;
     loop {
         line.clear();
-        let count =
-            reader
-                .read_line(&mut line)
-                .map_err(|error| VcfSemanticValidationError::Io {
-                    path: "VCF".to_owned(),
-                    detail: error.to_string(),
-                })?;
+        let count = reader
+            .read_line(&mut line)
+            .map_err(|error| io_reject("VCF", error.to_string()))?;
         if count == 0 {
             break;
         }
@@ -214,6 +210,13 @@ pub fn validate_vcf_against_truth(
                 return vcf_error(line_number, "una línea # no puede aparecer tras #CHROM");
             }
             if content.starts_with("#CHROM\t") {
+                // Ninguna prueba ejercita esta rama y se cree inalcanzable
+                // porque `samples` y `records_started` se asignan en la misma
+                // línea de más abajo y en ningún otro sitio: un segundo
+                // `#CHROM` ya ha caído arriba por «una línea # no puede
+                // aparecer tras #CHROM». Se conserva porque es la condición
+                // que el contrato enuncia, y desaparecería sin aviso si
+                // alguien separase las dos asignaciones.
                 if samples.is_some() {
                     return vcf_error(line_number, "cabecera #CHROM duplicada");
                 }
@@ -248,10 +251,7 @@ pub fn validate_vcf_against_truth(
         }
         let samples = samples
             .as_ref()
-            .ok_or_else(|| VcfSemanticValidationError::Vcf {
-                line: line_number,
-                detail: "registro VCF antes de #CHROM".to_owned(),
-            })?;
+            .ok_or_else(|| vcf_reject(line_number, "registro VCF antes de #CHROM"))?;
         let fields = content.split('\t').collect::<Vec<_>>();
         if fields.len() != 9 + samples.len() {
             return vcf_error(
@@ -275,10 +275,7 @@ pub fn validate_vcf_against_truth(
             .parse::<u64>()
             .ok()
             .filter(|position| *position > 0)
-            .ok_or_else(|| VcfSemanticValidationError::Vcf {
-                line: line_number,
-                detail: "POS debe ser un entero positivo".to_owned(),
-            })?;
+            .ok_or_else(|| vcf_reject(line_number, "POS debe ser un entero positivo"))?;
         let key = (fields[0].to_owned(), position);
         let Some(expected_record) = expected.get(&key) else {
             return vcf_error(line_number, "registro CHROM+POS ausente de la verdad");
@@ -287,12 +284,13 @@ pub fn validate_vcf_against_truth(
             return vcf_error(line_number, "CHROM+POS está duplicado");
         }
         let order = (
-            *sequence_order
-                .get(fields[0])
-                .ok_or_else(|| VcfSemanticValidationError::Vcf {
-                    line: line_number,
-                    detail: "CHROM no existe en el FASTA autoritativo".to_owned(),
-                })?,
+            // Inalcanzable: un CHROM que el FASTA no tiene no llega hasta aquí,
+            // porque la búsqueda del registro esperado de unas líneas más
+            // arriba ya ha rechazado por «registro CHROM+POS ausente de la
+            // verdad». Ninguna prueba la ejercita.
+            *sequence_order.get(fields[0]).ok_or_else(|| {
+                vcf_reject(line_number, "CHROM no existe en el FASTA autoritativo")
+            })?,
             position,
         );
         if previous.is_some_and(|previous| order <= previous) {
@@ -399,6 +397,12 @@ fn expected_records(
     reference: &Reference,
     truth: &TruthDocument,
 ) -> Result<BTreeMap<(String, u64), ExpectedRecord>, VcfSemanticValidationError> {
+    // Las dos lecturas de bases de esta función rechazan si la referencia no
+    // las conserva. **Ninguna prueba las ejercita y se creen inalcanzables por
+    // la frontera con rutas**, que construye la referencia leyendo el FASTA y
+    // por tanto siempre con bases; solo un llamador de
+    // `validate_vcf_against_truth` podría entregar una referencia validada sin
+    // ellas, y la batería no tiene ninguna.
     let mut paths = Vec::new();
     for record in &truth.records {
         let TruthRecord::HaplotypeCopy(copy) = record else {
@@ -417,7 +421,7 @@ fn expected_records(
                 sequence
                     .sequence()
                     .as_bytes()
-                    .map_err(|_| VcfSemanticValidationError::BasesNotMaterialized)?,
+                    .map_err(|_| bases_not_materialized())?,
             )?,
         ));
     }
@@ -435,6 +439,10 @@ fn expected_records(
             .sequences()
             .iter()
             .find(|sequence| sequence.id().as_str() == sequence_id)
+            // Ninguna prueba ejercita este rechazo y se cree inalcanzable
+            // porque las claves de `spans` salen de los caminos ya
+            // construidos, y construir cada uno exigió encontrar su secuencia
+            // en el FASTA unas líneas más arriba.
             .ok_or_else(|| oracle_error("secuencia FASTA ausente durante composición"))?;
         let components = merge_oracle_spans(changes);
         for (_, path) in paths
@@ -446,7 +454,7 @@ fn expected_records(
                 sequence
                     .sequence()
                     .as_bytes()
-                    .map_err(|_| VcfSemanticValidationError::BasesNotMaterialized)?,
+                    .map_err(|_| bases_not_materialized())?,
                 &components,
             )?);
         }
@@ -465,11 +473,22 @@ fn expected_records(
                 .iter()
                 .map(|allele| allele.reference.as_str())
                 .max_by_key(|value| value.len())
+                // Ninguna prueba ejercita este rechazo y se cree inalcanzable
+                // porque cada entrada de `by_record` nace al empujar su primer
+                // alelo: el vector nunca está vacío y `max_by_key` nunca da
+                // `None`.
                 .ok_or_else(|| oracle_error("registro esperado sin alelos"))?
                 .to_owned();
             let mut per_copy = BTreeMap::<CopyIdentity, OracleCarrier>::new();
             let mut repeats_by_alternate = BTreeMap::<String, Vec<TruthRepeatBlock>>::new();
             for allele in &alleles {
+                // Ninguna prueba ejercita este rechazo y se cree inalcanzable
+                // porque todos los alelos de un registro comparten `position`
+                // y cada `reference` es la rebanada del FASTA que empieza
+                // ahí: el más corto es siempre prefijo del más largo, que es
+                // el que `common_reference` elige. Se conserva porque es la
+                // premisa de la línea siguiente, que rebana
+                // `common_reference` por la longitud del alelo.
                 if !common_reference.starts_with(&allele.reference) {
                     return Err(oracle_error(
                         "REF incompatibles tras composición independiente",
@@ -653,6 +672,14 @@ fn oracle_path(
                 {
                     return Err(oracle_error("piezas source truth no colineales"));
                 }
+                // Las conversiones de coordenada de esta función y de las tres
+                // siguientes —`window`, `normalize_oracle_components` y
+                // `oracle_normalize_window`— **no las ejercita ninguna prueba y
+                // se creen inalcanzables** en los objetivos de 64 bits que el
+                // proyecto compila: la guarda de colinealidad de arriba acota
+                // ya cada coordenada por `reference.len()`, que es un `usize`.
+                // Se conservan porque el tipo del documento es `u64` y en un
+                // objetivo de 32 bits dejarían de serlo.
                 let start = usize::try_from(source.start)
                     .map_err(|_| oracle_error("coordenada source demasiado grande"))?;
                 let end = usize::try_from(source.end)
@@ -913,6 +940,13 @@ fn oracle_normalize_window(
     Ok(Some(OracleAllele {
         sequence_id: path.sequence_id.clone(),
         position: start,
+        // Ninguna prueba ejercita estos dos rechazos y se creen inalcanzables,
+        // pero **no** por el alfabeto: este lector no comprueba en ninguna
+        // parte qué bases trae una pieza insertada de la verdad. Lo que los
+        // hace inalcanzables es el recorte de arriba, que solo quita un byte
+        // cuando coincide con uno del FASTA —que sí es ASCII—, de modo que
+        // nunca puede partir un carácter de varios bytes: si la entrada era
+        // texto válido, la salida también lo es.
         reference: String::from_utf8(reference).map_err(|_| oracle_error("REF no UTF-8"))?,
         alternate: String::from_utf8(alternate).map_err(|_| oracle_error("ALT no UTF-8"))?,
         source: span,
@@ -1258,13 +1292,78 @@ fn validate_declared_copy_phases(truth: &TruthDocument) -> Result<(), VcfSemanti
     }
     Ok(())
 }
-fn oracle_error(detail: impl Into<String>) -> VcfSemanticValidationError {
+// ---------------------------------------------------------------------------
+// Las cinco constructoras de rechazo, y por qué son las únicas
+//
+// Todo rechazo que **este** verificador decide nace en una de ellas. No es una
+// manía de estilo: son el punto por el que pasa el barrido de guardas de
+// [`crate::guard_trace`], de modo que un rechazo construido a mano queda
+// **fuera de la puerta** y podría romperse sin que nadie lo notase. Ocurrió:
+// trece rechazos se construían a mano y el denominador que la puerta publicaba
+// se quedaba corto, uno de ellos dentro de la propia función que ata la
+// columna de referencia al genoma real.
+//
+// La prueba léxica `the_vcf_oracle_builds_every_rejection_through_its_constructors`
+// de `tests/vcf_semantic_validation.rs` impide que el agujero se reabra.
+//
+// La única variante que no tiene constructora es `Truth`, y a propósito: no es
+// un rechazo que decida este verificador, sino el veredicto del lector
+// independiente de la verdad, que se reenvía tal cual con sus propias guardas.
+// ---------------------------------------------------------------------------
+
+/// Rechazo del contrato VCF, con la línea examinada.
+///
+/// La anotación `#[track_caller]` y la llamada a `record` son el barrido de
+/// guardas: anotan **desde qué línea** se rechazó, no esta.
+#[track_caller]
+fn vcf_reject(line: u64, detail: impl Into<String>) -> VcfSemanticValidationError {
+    crate::guard_trace::record();
     VcfSemanticValidationError::Vcf {
-        line: 0,
+        line,
         detail: detail.into(),
     }
 }
 
+/// Rechazo del contrato VCF sin línea, para lo que no se juzga sobre una.
+#[track_caller]
+fn oracle_error(detail: impl Into<String>) -> VcfSemanticValidationError {
+    vcf_reject(0, detail)
+}
+
+/// Rechazo del FASTA autoritativo.
+#[track_caller]
+fn fasta_reject(detail: impl Into<String>) -> VcfSemanticValidationError {
+    crate::guard_trace::record();
+    VcfSemanticValidationError::Fasta {
+        detail: detail.into(),
+    }
+}
+
+/// Rechazo de entrada y salida, con el fichero al que se refiere.
+#[track_caller]
+fn io_reject(path: impl Into<String>, detail: impl Into<String>) -> VcfSemanticValidationError {
+    crate::guard_trace::record();
+    VcfSemanticValidationError::Io {
+        path: path.into(),
+        detail: detail.into(),
+    }
+}
+
+/// Rechazo por pedir bases de una referencia validada que no las conserva.
+#[track_caller]
+fn bases_not_materialized() -> VcfSemanticValidationError {
+    crate::guard_trace::record();
+    VcfSemanticValidationError::BasesNotMaterialized
+}
+
+/// El genotipo que la verdad exige para una muestra en un registro.
+///
+/// Sus dos rechazos —la muestra sin copias en el contig y el alelo alternativo
+/// que no aparece entre los del registro— **no los ejercita ninguna prueba y no
+/// se ha demostrado que sean inalcanzables**. Los dos exigirían una verdad en
+/// la que un individuo no tuviera copias en una secuencia que otro sí publica,
+/// o en la que un portador llevara un alelo que la composición no ha recogido,
+/// y no he construido ninguna de las dos. Queda pendiente.
 fn expected_gt(
     record: &ExpectedRecord,
     sample: &str,
@@ -1272,10 +1371,7 @@ fn expected_gt(
     let copies = record
         .copies
         .get(sample)
-        .ok_or_else(|| VcfSemanticValidationError::Vcf {
-            line: 0,
-            detail: "muestra VCF no tiene copias truth para el contig".to_owned(),
-        })?;
+        .ok_or_else(|| oracle_error("muestra VCF no tiene copias truth para el contig"))?;
     copies
         .iter()
         .map(|(_, _, alternate)| {
@@ -1288,10 +1384,7 @@ fn expected_gt(
                     .position(|candidate| candidate == alternate)
                     .and_then(|index| index.checked_add(1))
                     .map(|index| index.to_string())
-                    .ok_or_else(|| VcfSemanticValidationError::Vcf {
-                        line: 0,
-                        detail: "ALT truth no aparece en el registro esperado".to_owned(),
-                    })
+                    .ok_or_else(|| oracle_error("ALT truth no aparece en el registro esperado"))
             }
         })
         .collect::<Result<Vec<_>, _>>()
@@ -1366,10 +1459,7 @@ fn validate_reference_allele(
         .sequences()
         .iter()
         .find(|sequence| sequence.id().as_str() == chrom)
-        .ok_or_else(|| VcfSemanticValidationError::Vcf {
-            line,
-            detail: "CHROM no existe en el FASTA autoritativo".to_owned(),
-        })?;
+        .ok_or_else(|| vcf_reject(line, "CHROM no existe en el FASTA autoritativo"))?;
     let start = position
         .checked_sub(1)
         .and_then(|value| usize::try_from(value).ok());
@@ -1416,77 +1506,464 @@ fn read_oracle_fasta(
                 bases.push(base.to_ascii_uppercase());
             }
         } else {
-            return Err(VcfSemanticValidationError::Fasta {
-                detail: "bases antes de la primera cabecera FASTA".to_owned(),
-            });
+            return Err(fasta_reject("bases antes de la primera cabecera FASTA"));
         }
     }
     if let Some((header, bases)) = current {
         records.push(oracular_sequence(&header, bases, reference_id)?);
     }
     Reference::new(
-        ReferenceId::parse(reference_id, "oráculo VCF").map_err(|error| {
-            VcfSemanticValidationError::Fasta {
-                detail: format!("{error:?}"),
-            }
-        })?,
+        // Inalcanzable por la frontera con rutas, y demostrado ejecutándolo:
+        // la identidad de referencia sale de la cabecera de la verdad, que se
+        // lee y valida **antes** de abrir el FASTA, y el lector de la verdad
+        // rechaza una identidad que no lo sea. Se conserva porque esta función
+        // no se fía de quién le pasa el nombre.
+        ReferenceId::parse(reference_id, "oráculo VCF")
+            .map_err(|error| fasta_reject(format!("{error:?}")))?,
         ReferenceOrigin::Generated,
         records,
     )
-    .map_err(|error| VcfSemanticValidationError::Fasta {
-        detail: format!("{error:?}"),
-    })
+    // Este otro sí se ejercita: un FASTA con dos secuencias del mismo nombre
+    // produce piezas individualmente válidas y un conjunto que no lo es.
+    .map_err(|error| fasta_reject(format!("{error:?}")))
 }
 
+/// Traduce un registro FASTA leído a una secuencia de referencia.
+///
+/// De sus cuatro rechazos, la batería ejercita dos —la cabecera ilegible y las
+/// bases que no son ADN—. Los otros dos, el de la identidad de secuencia y el
+/// de la construcción final, **no los ejercita ninguna prueba y no se ha
+/// demostrado que sean inalcanzables**: no he conseguido una cabecera que el
+/// analizador acepte y cuya identidad rechace después, ni una secuencia cuyas
+/// tres piezas sean válidas y cuya construcción falle. Queda pendiente, y se
+/// dice aquí en vez de fingir que están cubiertos.
 fn oracular_sequence(
     header: &str,
     bases: Vec<u8>,
     reference_id: &str,
 ) -> Result<ReferenceSequence, VcfSemanticValidationError> {
-    let fasta = FastaHeader::parse(header.as_bytes()).map_err(|error| {
-        VcfSemanticValidationError::Fasta {
-            detail: format!("{error:?}"),
-        }
-    })?;
-    let id = SequenceId::parse(fasta.id_text(), reference_id).map_err(|error| {
-        VcfSemanticValidationError::Fasta {
-            detail: format!("{error:?}"),
-        }
-    })?;
+    let fasta = FastaHeader::parse(header.as_bytes())
+        .map_err(|error| fasta_reject(format!("{error:?}")))?;
+    let id = SequenceId::parse(fasta.id_text(), reference_id)
+        .map_err(|error| fasta_reject(format!("{error:?}")))?;
     let dna =
-        DnaSequence::try_from_bytes(&bases).map_err(|error| VcfSemanticValidationError::Fasta {
-            detail: format!("{error:?}"),
-        })?;
-    ReferenceSequence::new(id, fasta, SequenceClass::Chromosome, &dna).map_err(|error| {
-        VcfSemanticValidationError::Fasta {
-            detail: format!("{error:?}"),
-        }
-    })
+        DnaSequence::try_from_bytes(&bases).map_err(|error| fasta_reject(format!("{error:?}")))?;
+    ReferenceSequence::new(id, fasta, SequenceClass::Chromosome, &dna)
+        .map_err(|error| fasta_reject(format!("{error:?}")))
 }
 
 fn strictly_sorted(values: &[String]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
 }
 
+#[track_caller]
 fn io_error(path: &Path, error: std::io::Error) -> VcfSemanticValidationError {
-    VcfSemanticValidationError::Io {
-        path: path.display().to_string(),
-        detail: error.to_string(),
-    }
+    io_reject(path.display().to_string(), error.to_string())
 }
 
+/// Igual que [`oracle_error`], pero devolviendo ya el `Err` y conservando el
+/// número de línea del VCF examinado. También participa en el barrido.
+#[track_caller]
 fn vcf_error<T>(line: u64, detail: impl Into<String>) -> Result<T, VcfSemanticValidationError> {
-    Err(VcfSemanticValidationError::Vcf {
-        line,
-        detail: detail.into(),
-    })
+    Err(vcf_reject(line, detail))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ExpectedRecord, merge_oracle_spans, validate_tandem_repeat_info};
-    use crate::truth_schema::TruthRepeatBlock;
+    use super::{
+        ExpectedRecord, OraclePath, OraclePiece, OracleSpan, VcfSemanticValidationError,
+        expected_records, merge_oracle_spans, oracle_normalize_window, oracle_path,
+        validate_oracle_phases, validate_reference_allele, validate_tandem_repeat_info,
+    };
+    use crate::identity::{ReferenceId, SequenceId};
+    use crate::reference::{
+        DnaSequence, FastaHeader, Reference, ReferenceOrigin, ReferenceSequence, SequenceClass,
+    };
+    use crate::truth_schema::{
+        CopyIdentity, ModificationProvenance, ModificationProvenanceKind, SegmentSource,
+        TruthCurrentPiece, TruthCurrentSnp, TruthDocument, TruthRecord, TruthRepeatBlock,
+        TruthSourceKind, TruthSourceRef,
+    };
+    use crate::truth_validation::read_truth_jsonl;
     use std::collections::BTreeMap;
+    use std::io::Cursor;
+
+    // -----------------------------------------------------------------------
+    // Guardas de **segunda opinión**
+    //
+    // Las comprobaciones que siguen no las alcanza ninguna corrupción del VCF
+    // publicado, y no porque falten pruebas: **otra comprobación anterior caza
+    // antes la discrepancia**. Son el segundo par de ojos del oráculo sobre su
+    // propia reconstrucción, y el único modo honrado de ejercitarlas es
+    // llamarlas directamente con una entrada que solo ellas puedan rechazar.
+    // Cada prueba dice, en su documentación, quién caza antes.
+    // -----------------------------------------------------------------------
+
+    /// Referencia mínima de una sola secuencia `chr1`.
+    fn tiny_reference(bases: &[u8]) -> Reference {
+        let sequence = ReferenceSequence::new(
+            SequenceId::parse("chr1", "prueba del oráculo VCF").expect("identidad de secuencia"),
+            FastaHeader::parse(b"chr1").expect("cabecera FASTA"),
+            SequenceClass::Chromosome,
+            &DnaSequence::try_from_bytes(bases).expect("ADN"),
+        )
+        .expect("secuencia de referencia");
+        Reference::new(
+            ReferenceId::parse("REF_main", "prueba del oráculo VCF")
+                .expect("identidad de referencia"),
+            ReferenceOrigin::Generated,
+            vec![sequence],
+        )
+        .expect("referencia")
+    }
+
+    fn source_ref() -> TruthSourceRef {
+        TruthSourceRef {
+            kind: TruthSourceKind::Reference,
+            source_id: "REF_main".to_owned(),
+        }
+    }
+
+    fn provenance() -> ModificationProvenance {
+        ModificationProvenance {
+            kind: ModificationProvenanceKind::Explicit,
+            version: "1".to_owned(),
+            source: source_ref(),
+            matrix: None,
+        }
+    }
+
+    fn span(start: u64, end: u64) -> SegmentSource {
+        SegmentSource {
+            source: source_ref(),
+            reference_id: "REF_main".to_owned(),
+            sequence_id: "chr1".to_owned(),
+            start,
+            end,
+            sequence_length: 8,
+        }
+    }
+
+    fn identity(copy_index: u8) -> CopyIdentity {
+        CopyIdentity {
+            reference_id: "REF_main".to_owned(),
+            individual_id: "IND_01".to_owned(),
+            sequence_id: "chr1".to_owned(),
+            copy_index,
+        }
+    }
+
+    /// El motivo exacto del rechazo, o el pánico de la prueba.
+    fn detail(error: &VcfSemanticValidationError) -> String {
+        match error {
+            VcfSemanticValidationError::Vcf { detail, .. } => detail.clone(),
+            other => panic!("se esperaba un rechazo del contrato VCF y llegó {other:?}"),
+        }
+    }
+
+    /// **La columna REF está atada al genoma real, no a la derivación.**
+    ///
+    /// *Quién caza antes, y por eso esta prueba es unitaria.* De extremo a
+    /// extremo, `validate_vcf_against_truth` compara la columna REF contra su
+    /// propia composición —«REF o ALT no coincide con la derivación
+    /// independiente»— **antes** de llamar aquí, y esa composición sale de
+    /// rebanar el FASTA. Las dos comparaciones no pueden discrepar sin un
+    /// defecto **dentro** del oráculo, que es justo lo que esta guarda vigila.
+    /// Ninguna corrupción del VCF la alcanza; llamarla directamente sí.
+    ///
+    /// *Qué hace que pueda fallar:* el primer caso fija que la columna correcta
+    /// se acepta —sin él, una guarda que rechazara todo pasaría el resto—, y
+    /// los tres siguientes cambian una base, desplazan la posición y se salen
+    /// del final de la secuencia.
+    #[test]
+    fn the_reference_column_is_tied_to_the_real_genome() {
+        let reference = tiny_reference(b"ACGTACGT");
+        validate_reference_allele(&reference, "chr1", 3, "GT", 7)
+            .expect("la columna que el FASTA dice se acepta");
+
+        for (reason, position, allele) in [
+            ("una base cambiada", 3_u64, "GA"),
+            ("la misma base una posición más allá", 4, "GT"),
+            ("una columna que se sale del final", 8, "TT"),
+        ] {
+            let error = validate_reference_allele(&reference, "chr1", position, allele, 7)
+                .expect_err(reason);
+            assert_eq!(
+                detail(&error),
+                "REF no coincide con el FASTA autoritativo",
+                "«{reason}» se rechazó por otra razón"
+            );
+        }
+
+        let error = validate_reference_allele(&reference, "chr2", 3, "GT", 7)
+            .expect_err("una secuencia que el FASTA no tiene");
+        assert_eq!(detail(&error), "CHROM no existe en el FASTA autoritativo");
+    }
+
+    /// **Las fases que el oráculo recompone también tienen que ser contiguas.**
+    ///
+    /// *Quién caza antes.* `validate_declared_copy_phases` hace la misma
+    /// comprobación sobre las fases **declaradas** y corre antes, de modo que
+    /// ningún documento llega aquí con fases rotas. Esta es la comprobación
+    /// sobre las fases que el oráculo ha vuelto a leer de la verdad: existe
+    /// para que una reconstrucción que perdiera o duplicara una copia no
+    /// pasara inadvertida.
+    #[test]
+    fn the_recomputed_copy_phases_must_be_contiguous() {
+        let path = |copy_index| OraclePath {
+            identity: identity(copy_index),
+            sequence_id: "chr1".to_owned(),
+            pieces: Vec::new(),
+        };
+        validate_oracle_phases(&[(0, path(0)), (1, path(1))]).expect("dos fases contiguas");
+
+        for (reason, phases) in [
+            ("un hueco entre las fases", vec![0_u8, 2]),
+            ("una fase repetida", vec![0, 0]),
+            ("una fase que no empieza en cero", vec![1, 2]),
+        ] {
+            let paths = phases
+                .iter()
+                .enumerate()
+                .map(|(index, phase)| (*phase, path(u8::try_from(index).expect("índice pequeño"))))
+                .collect::<Vec<_>>();
+            let error = validate_oracle_phases(&paths).expect_err(reason);
+            assert_eq!(
+                detail(&error),
+                "fases de copia no contiguas para IND_01/chr1",
+                "«{reason}» se rechazó por otra razón"
+            );
+        }
+    }
+
+    /// **La reconstrucción independiente rechaza una verdad mal enhebrada.**
+    ///
+    /// *Quién caza antes.* `validate_and_reconstruct_truth` valida el documento
+    /// entero contra el FASTA antes de que `expected_records` lo mire, así que
+    /// ninguna de estas formas llega hasta aquí en una ejecución completa. El
+    /// oráculo las recomprueba de todos modos porque **no se fía de quien
+    /// escribió la verdad**, y esa desconfianza es su razón de ser.
+    ///
+    /// *Qué hace que pueda fallar:* el primer caso fija que la forma correcta
+    /// se acepta y reproduce las bases esperadas.
+    #[test]
+    fn the_independent_path_rejects_a_badly_threaded_truth() {
+        let reference = b"ACGTACGT";
+        let good = oracle_path(
+            identity(0),
+            &[
+                TruthCurrentPiece::Source {
+                    source: span(0, 4),
+                    snps: vec![TruthCurrentSnp {
+                        event_id: "EVT_01".to_owned(),
+                        position: 2,
+                        reference: "G".to_owned(),
+                        alternate: "T".to_owned(),
+                        provenance: provenance(),
+                    }],
+                },
+                TruthCurrentPiece::Inserted {
+                    bases: "CC".to_owned(),
+                    provenance: provenance(),
+                },
+                TruthCurrentPiece::Source {
+                    source: span(4, 8),
+                    snps: Vec::new(),
+                },
+            ],
+            reference,
+        )
+        .expect("la forma correcta se acepta");
+        assert_eq!(
+            good.window(0, 8).expect("ventana entera"),
+            b"ACTTCCACGT".to_vec(),
+            "el SNP y la inserción tienen que aparecer en la secuencia reconstruida"
+        );
+
+        for (reason, expected_detail, pieces) in [
+            (
+                "un tramo source vacío",
+                "piezas source truth no colineales",
+                vec![TruthCurrentPiece::Source {
+                    source: span(4, 4),
+                    snps: Vec::new(),
+                }],
+            ),
+            (
+                "un tramo source que se sale del FASTA",
+                "piezas source truth no colineales",
+                vec![TruthCurrentPiece::Source {
+                    source: span(0, 9),
+                    snps: Vec::new(),
+                }],
+            ),
+            (
+                "dos tramos source que retroceden",
+                "piezas source truth no colineales",
+                vec![
+                    TruthCurrentPiece::Source {
+                        source: span(2, 6),
+                        snps: Vec::new(),
+                    },
+                    TruthCurrentPiece::Source {
+                        source: span(1, 4),
+                        snps: Vec::new(),
+                    },
+                ],
+            ),
+            (
+                "un SNP anterior al tramo que lo contiene",
+                "SNP fuera de source",
+                vec![TruthCurrentPiece::Source {
+                    source: span(4, 8),
+                    snps: vec![TruthCurrentSnp {
+                        event_id: "EVT_01".to_owned(),
+                        position: 1,
+                        reference: "C".to_owned(),
+                        alternate: "T".to_owned(),
+                        provenance: provenance(),
+                    }],
+                }],
+            ),
+            (
+                "un SNP posterior al tramo que lo contiene",
+                "SNP fuera de source",
+                vec![TruthCurrentPiece::Source {
+                    source: span(0, 4),
+                    snps: vec![TruthCurrentSnp {
+                        event_id: "EVT_01".to_owned(),
+                        position: 6,
+                        reference: "C".to_owned(),
+                        alternate: "T".to_owned(),
+                        provenance: provenance(),
+                    }],
+                }],
+            ),
+            (
+                "un tracto de repetición que retrocede",
+                "piezas source truth no colineales",
+                vec![
+                    TruthCurrentPiece::Source {
+                        source: span(0, 4),
+                        snps: Vec::new(),
+                    },
+                    TruthCurrentPiece::RepeatAllele {
+                        locus_id: "LOC_01".to_owned(),
+                        source: span(2, 6),
+                        bases: "CACACA".to_owned(),
+                        blocks: vec![TruthRepeatBlock {
+                            motif: "CA".to_owned(),
+                            bases: 6,
+                        }],
+                        provenance: provenance(),
+                    },
+                ],
+            ),
+            (
+                "una inserción sin ningún tramo delante",
+                "inserción truth sin source precedente",
+                vec![TruthCurrentPiece::Inserted {
+                    bases: "CC".to_owned(),
+                    provenance: provenance(),
+                }],
+            ),
+        ] {
+            let error = oracle_path(identity(0), &pieces, reference).expect_err(reason);
+            assert_eq!(
+                detail(&error),
+                expected_detail,
+                "«{reason}» se rechazó por otra razón"
+            );
+        }
+    }
+
+    /// **Una ventana no puede partir un tracto de repetición realizado.**
+    ///
+    /// *Quién caza antes, y por qué esta prueba es unitaria.* Las ventanas que
+    /// el oráculo se pide a sí mismo salen de `changes`, que empuja el tracto
+    /// **entero** como un solo tramo, y de fusiones que solo pueden agrandarlo.
+    /// Ninguna ejecución pide, pues, media ventana de un tracto. La guarda
+    /// existe porque leer la mitad de un tracto realizado daría bases que no
+    /// son de nadie, y se ejercita llamando a `window` con la ventana que la
+    /// producción no construye.
+    #[test]
+    fn a_window_may_not_split_a_realized_repeat_tract() {
+        let path = OraclePath {
+            identity: identity(0),
+            sequence_id: "chr1".to_owned(),
+            pieces: vec![OraclePiece::Replaced {
+                start: 2,
+                end: 6,
+                bases: b"CACACA".to_vec(),
+                blocks: vec![TruthRepeatBlock {
+                    motif: "CA".to_owned(),
+                    bases: 6,
+                }],
+            }],
+        };
+        assert_eq!(
+            path.window(2, 6).expect("el tracto entero se lee"),
+            b"CACACA".to_vec()
+        );
+        assert_eq!(
+            path.window(0, 8)
+                .expect("una ventana que lo envuelve también"),
+            b"CACACA".to_vec()
+        );
+        for (reason, start, end) in [
+            ("una ventana que empieza dentro", 3_u64, 6_u64),
+            ("una ventana que termina dentro", 2, 5),
+        ] {
+            let error = path.window(start, end).expect_err(reason);
+            assert_eq!(
+                detail(&error),
+                "la ventana parte un tracto de repetición",
+                "«{reason}» se rechazó por otra razón"
+            );
+        }
+    }
+
+    /// **Una inserción pegada al primer par de bases no tiene ancla izquierda.**
+    ///
+    /// *Quién caza antes.* La producción no publica una inserción antes de la
+    /// primera base: el formato VCF exige un ancla, y la admisión la rechaza
+    /// antes de simular. La guarda existe porque el oráculo lee documentos que
+    /// no ha escrito él, y sin ella el cálculo del ancla restaría por debajo de
+    /// cero. Se ejercita normalizando la ventana vacía en la posición cero.
+    #[test]
+    fn an_insertion_at_the_very_start_has_no_left_anchor() {
+        let reference = b"ACGTACGT";
+        let inserted_at = |anchor| OraclePath {
+            identity: identity(0),
+            sequence_id: "chr1".to_owned(),
+            pieces: vec![
+                OraclePiece::Source {
+                    start: 0,
+                    end: 4,
+                    bases: b"ACGT".to_vec(),
+                    snps: Vec::new(),
+                },
+                OraclePiece::Inserted {
+                    anchor,
+                    bases: b"TT".to_vec(),
+                },
+            ],
+        };
+        let path = inserted_at(0);
+        let error = oracle_normalize_window(&path, reference, OracleSpan { start: 0, end: 0 })
+            .expect_err("una inserción en la posición cero no tiene ancla");
+        assert_eq!(detail(&error), "indel sin ancla izquierda");
+
+        // Control positivo: la misma inserción una base más allá sí normaliza,
+        // y lo hace anclando en la base anterior.
+        let anchored = inserted_at(1);
+        let allele = oracle_normalize_window(&anchored, reference, OracleSpan { start: 1, end: 1 })
+            .expect("con ancla sí normaliza")
+            .expect("hay alelo");
+        assert_eq!(allele.position, 0);
+        assert_eq!(allele.reference, "A");
+        assert_eq!(allele.alternate, "ATT");
+    }
 
     fn block(motif: &str, bases: u64) -> TruthRepeatBlock {
         TruthRepeatBlock {
@@ -1544,6 +2021,131 @@ mod tests {
                 "el oráculo tiene que rechazar «{reason}»"
             );
         }
+    }
+
+    /// La verdad mínima de F2 que el corpus independiente ya usa.
+    fn fixture_truth() -> TruthDocument {
+        read_truth_jsonl(&mut Cursor::new(include_str!(
+            "../tests/fixtures/truth-v1/valid.jsonl"
+        )))
+        .expect("verdad de referencia")
+    }
+
+    /// **La composición de los registros esperados no se fía de la verdad.**
+    ///
+    /// *Quién caza antes.* `validate_and_reconstruct_truth` corre antes y
+    /// rechazaría una verdad que nombrase una secuencia ausente, de modo que
+    /// ninguna ejecución completa llega aquí con ella. La segunda mitad —un
+    /// alelo alternativo que ningún caso de la verdad respalda— tampoco se
+    /// alcanza desde fuera: la verdad publicada siempre trae sus genotipos.
+    ///
+    /// *Qué hace que pueda fallar:* el control positivo compone los registros
+    /// de la verdad íntegra, y cada caso exige el motivo exacto.
+    #[test]
+    fn the_expected_records_do_not_trust_the_truth_they_read() {
+        let reference = tiny_reference(b"AAAAAAAA");
+        let truth = fixture_truth();
+        assert!(
+            !expected_records(&reference, &truth)
+                .expect("la verdad íntegra compone sus registros")
+                .is_empty(),
+            "el control positivo tiene que producir algún registro"
+        );
+
+        let mut renamed = truth.clone();
+        for record in &mut renamed.records {
+            if let TruthRecord::HaplotypeCopy(copy) = record {
+                copy.identity.sequence_id = "chr9".to_owned();
+            }
+        }
+        let error = expected_records(&reference, &renamed)
+            .expect_err("una copia que nombra una secuencia ausente");
+        assert_eq!(
+            detail(&error),
+            "copia truth nombra una secuencia FASTA ausente"
+        );
+
+        let mut without_genotypes = truth.clone();
+        without_genotypes
+            .records
+            .retain(|record| matches!(record, TruthRecord::HaplotypeCopy(_)));
+        let error = expected_records(&reference, &without_genotypes)
+            .expect_err("un ALT que ningún caso respalda");
+        assert_eq!(detail(&error), "ALT compuesto sin caso truth fuente");
+
+        // Dos copias que realizan el **mismo** tracto y lo descomponen en
+        // bloques distintos: el ALT coincide y la estructura declarada no.
+        let mut contradictory = truth.clone();
+        let mut blocks = [
+            vec![TruthRepeatBlock {
+                motif: "AC".to_owned(),
+                bases: 4,
+            }],
+            vec![TruthRepeatBlock {
+                motif: "ACAC".to_owned(),
+                bases: 4,
+            }],
+        ]
+        .into_iter();
+        for record in &mut contradictory.records {
+            if let TruthRecord::HaplotypeCopy(copy) = record {
+                copy.current_pieces = vec![
+                    TruthCurrentPiece::Source {
+                        source: span(0, 2),
+                        snps: Vec::new(),
+                    },
+                    TruthCurrentPiece::RepeatAllele {
+                        locus_id: "LOC_01".to_owned(),
+                        source: span(2, 6),
+                        bases: "ACAC".to_owned(),
+                        blocks: blocks.next().expect("dos copias, dos descomposiciones"),
+                        provenance: provenance(),
+                    },
+                    TruthCurrentPiece::Source {
+                        source: span(6, 8),
+                        snps: Vec::new(),
+                    },
+                ];
+            }
+        }
+        let error = expected_records(&reference, &contradictory)
+            .expect_err("el mismo ALT con dos descomposiciones");
+        assert_eq!(
+            detail(&error),
+            "dos copias dan el mismo ALT con tractos distintos"
+        );
+
+        // La **misma copia** declarada dos veces con contenidos que no
+        // coinciden: dos alelos distintos en el mismo CHROM+POS para una sola
+        // identidad. Las fases siguen siendo contiguas, de modo que la
+        // comprobación de fases no lo caza antes.
+        let mut duplicated = truth.clone();
+        let mut twin = duplicated
+            .records
+            .iter()
+            .find_map(|record| match record {
+                TruthRecord::HaplotypeCopy(copy) if copy.phase == 0 => Some(copy.clone()),
+                _ => None,
+            })
+            .expect("la verdad trae la copia de fase cero");
+        twin.phase = 1;
+        for piece in &mut twin.current_pieces {
+            if let TruthCurrentPiece::Source { snps, .. } = piece {
+                for snp in snps {
+                    snp.alternate = "T".to_owned();
+                }
+            }
+        }
+        duplicated.records.retain(
+            |record| !matches!(record, TruthRecord::HaplotypeCopy(copy) if copy.phase == 1),
+        );
+        duplicated.records.push(TruthRecord::HaplotypeCopy(twin));
+        let error = expected_records(&reference, &duplicated)
+            .expect_err("una copia declarada dos veces con contenidos distintos");
+        assert_eq!(
+            detail(&error),
+            "una copia produce ALT incompatibles al mismo CHROM+POS"
+        );
     }
 
     #[test]

@@ -1,0 +1,1060 @@
+{
+ "mutations": [
+  {
+   "id": "vcf_semantic_validation.rs:174 validate_vcf_against_truth :: FORMAT!=GT fijo -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "if content != \"##FORMAT=<ID=GT,Number=1,Type=String,Description=\\\"Genotype\\\">\" {",
+   "new": "if false {",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:187 validate_vcf_against_truth :: GPS_LOSS en cabecera -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "if content.starts_with(\"##INFO=<ID=GPS_LOSS,\")\n                || content.starts_with(\"##INFO=<ID=GPS_COMPLEMENT,\")\n            {",
+   "new": "if false {",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:209 validate_vcf_against_truth :: # tras #CHROM -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "if records_started {\n                return vcf_error(line_number, \"una línea # no puede aparecer tras #CHROM\");",
+   "new": "if false {\n                return vcf_error(line_number, \"una línea # no puede aparecer tras #CHROM\");",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:224 validate_vcf_against_truth :: cabecera de columnas -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "if fields.len() < 9\n                    || fields[..9]\n                        != [\n                            \"#CHROM\", \"POS\", \"ID\", \"REF\", \"ALT\", \"QUAL\", \"FILTER\", \"INFO\", \"FORMAT\",\n                        ]\n                {",
+   "new": "if false {",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:247 validate_vcf_against_truth :: cabecera no reconocida -> rechazo suprimido",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "            } else {\n                return vcf_error(line_number, \"línea de cabecera VCF no reconocida\");\n            }",
+   "new": "            } else {\n            }",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:256 validate_vcf_against_truth :: número de columnas -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "if fields.len() != 9 + samples.len() {",
+   "new": "if false {",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:280 validate_vcf_against_truth :: CHROM+POS ausente -> búsqueda relajada a cualquier registro",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "let Some(expected_record) = expected.get(&key) else {",
+   "new": "let Some(expected_record) = expected.get(&key).or_else(|| expected.values().next()) else {",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:380 validate_vcf_against_truth :: faltan registros -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "if seen.len() != expected.len() {",
+   "new": "if false {",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1427 parse_gps_case :: GPS_CASE no es el primero -> guarda retirada con valor por defecto",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "    let Some(value) = fields\n        .next()\n        .and_then(|first| first.strip_prefix(\"GPS_CASE=\"))\n    else {\n        return vcf_error(line, \"INFO debe declarar GPS_CASE en primer lugar\");\n    };",
+   "new": "    let value = fields\n        .next()\n        .and_then(|first| first.strip_prefix(\"GPS_CASE=\"))\n        .unwrap_or_default();",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1433 parse_gps_case :: GPS_CASE vacío -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "if value.is_empty() || value.split(',').any(str::is_empty) {",
+   "new": "if false {",
+   "target": "vcf_semantic_validation",
+   "test": "the_header_and_column_contract_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1467 validate_reference_allele :: REF vs FASTA -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "    if start.zip(end).and_then(|(start, end)| {\n        sequence\n            .sequence()\n            .as_bytes()\n            .ok()\n            .and_then(|bases| bases.get(start..end))\n    }) != Some(allele.as_bytes())\n    {",
+   "new": "    if false\n    {",
+   "target": "lib",
+   "test": "the_reference_column_is_tied_to_the_real_genome"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1463 validate_reference_allele :: REF vs FASTA -> POS deja de ser 1-based",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "    let start = position\n        .checked_sub(1)\n        .and_then(|value| usize::try_from(value).ok());",
+   "new": "    let start = position\n        .checked_sub(0)\n        .and_then(|value| usize::try_from(value).ok());",
+   "target": "lib",
+   "test": "the_reference_column_is_tied_to_the_real_genome"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1252 validate_oracle_phases :: fases recompuestas -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "        if !(1..=10).contains(&phases.len())\n            || phases\n                .iter()\n                .enumerate()\n                .any(|(index, phase)| usize::from(*phase) != index)\n        {\n            return Err(oracle_error(format!(\n                \"fases de copia no contiguas para {sample}/{sequence}\"\n            )));",
+   "new": "        if false\n        {\n            return Err(oracle_error(format!(\n                \"fases de copia no contiguas para {sample}/{sequence}\"\n            )));",
+   "target": "lib",
+   "test": "the_recomputed_copy_phases_must_be_contiguous"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:669 oracle_path :: tramos source no colineales -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "                if source.start >= source.end\n                    || source.end > u64::try_from(reference.len()).unwrap_or(u64::MAX)\n                    || prior.is_some_and(|end| source.start < end)\n                {\n                    return Err(oracle_error(\"piezas source truth no colineales\"));\n                }\n                // Las conversiones de coordenada de esta función",
+   "new": "                if false\n                {\n                    return Err(oracle_error(\"piezas source truth no colineales\"));\n                }\n                // Las conversiones de coordenada de esta función",
+   "target": "lib",
+   "test": "the_independent_path_rejects_a_badly_threaded_truth"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:716 oracle_path :: tracto no colineal -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "                if source.start >= source.end\n                    || source.end > u64::try_from(reference.len()).unwrap_or(u64::MAX)\n                    || prior.is_some_and(|end| source.start < end)\n                {\n                    return Err(oracle_error(\"piezas source truth no colineales\"));\n                }\n                pieces.push(OraclePiece::Replaced {",
+   "new": "                if false\n                {\n                    return Err(oracle_error(\"piezas source truth no colineales\"));\n                }\n                pieces.push(OraclePiece::Replaced {",
+   "target": "lib",
+   "test": "the_independent_path_rejects_a_badly_threaded_truth"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:692 oracle_path :: SNP antes del tramo -> resta saturada en vez de rechazo",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "                            .checked_sub(source.start)\n                            .ok_or_else(|| oracle_error(\"SNP fuera de source\"))?,",
+   "new": "                            .checked_sub(source.start)\n                            .unwrap_or_default(),",
+   "target": "lib",
+   "test": "the_independent_path_rejects_a_badly_threaded_truth"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:696 oracle_path :: SNP tras el tramo -> el tramo se agranda en vez de rechazar",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "                    if offset >= bases.len() {\n                        return Err(oracle_error(\"SNP fuera de source\"));\n                    }",
+   "new": "                    if offset >= bases.len() {\n                        bases.resize(offset + 1, b'N');\n                    }",
+   "target": "lib",
+   "test": "the_independent_path_rejects_a_badly_threaded_truth"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:732 oracle_path :: inserción sin tramo previo -> ancla por defecto",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "                    anchor: prior\n                        .ok_or_else(|| oracle_error(\"inserción truth sin source precedente\"))?,",
+   "new": "                    anchor: prior.unwrap_or_default(),",
+   "target": "lib",
+   "test": "the_independent_path_rejects_a_badly_threaded_truth"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:817 window :: ventana que parte un tracto -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "                    if *left < start || end < *right {\n                        return Err(oracle_error(\"la ventana parte un tracto de repetición\"));\n                    }",
+   "new": "                    if false {\n                        return Err(oracle_error(\"la ventana parte un tracto de repetición\"));\n                    }",
+   "target": "lib",
+   "test": "a_window_may_not_split_a_realized_repeat_tract"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:901 oracle_normalize_window :: indel sin ancla izquierda -> resta saturada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "        start = start\n            .checked_sub(1)\n            .ok_or_else(|| oracle_error(\"indel sin ancla izquierda\"))?;",
+   "new": "        start = start.saturating_sub(1);",
+   "target": "lib",
+   "test": "an_insertion_at_the_very_start_has_no_left_anchor"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:414 expected_records :: secuencia FASTA ausente -> se toma la primera secuencia",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "            .find(|sequence| sequence.id().as_str() == copy.identity.sequence_id)\n            .ok_or_else(|| oracle_error(\"copia truth nombra una secuencia FASTA ausente\"))?;",
+   "new": "            .find(|sequence| sequence.id().as_str() == copy.identity.sequence_id)\n            .or_else(|| reference.sequences().first())\n            .ok_or_else(|| oracle_error(\"copia truth nombra una secuencia FASTA ausente\"))?;",
+   "target": "lib",
+   "test": "the_expected_records_do_not_trust_the_truth_they_read"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:566 expected_records :: ALT sin caso fuente -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "            if alternates\n                .iter()\n                .any(|alternate| alt_cases.get(alternate).is_none_or(BTreeSet::is_empty))\n            {\n                return Err(oracle_error(\"ALT compuesto sin caso truth fuente\"));\n            }",
+   "new": "            if false\n            {\n                return Err(oracle_error(\"ALT compuesto sin caso truth fuente\"));\n            }",
+   "target": "lib",
+   "test": "the_expected_records_do_not_trust_the_truth_they_read"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:502 expected_records :: mismo ALT con tractos distintos -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "                if let Some(previous) =\n                    repeats_by_alternate.insert(alternate.clone(), allele.repeat_blocks.clone())\n                    && previous != allele.repeat_blocks\n                {\n                    return Err(oracle_error(\n                        \"dos copias dan el mismo ALT con tractos distintos\",\n                    ));\n                }",
+   "new": "                if false\n                {\n                    return Err(oracle_error(\n                        \"dos copias dan el mismo ALT con tractos distintos\",\n                    ));\n                }",
+   "target": "lib",
+   "test": "the_expected_records_do_not_trust_the_truth_they_read"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:516 expected_records :: una copia con ALT incompatibles -> condición neutralizada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "                ) && previous.alternate != alternate\n                {\n                    return Err(oracle_error(\n                        \"una copia produce ALT incompatibles al mismo CHROM+POS\",\n                    ));\n                }",
+   "new": "                ) && false\n                {\n                    return Err(oracle_error(\n                        \"una copia produce ALT incompatibles al mismo CHROM+POS\",\n                    ));\n                }",
+   "target": "lib",
+   "test": "the_expected_records_do_not_trust_the_truth_they_read"
+  },
+  {
+   "id": "f5_closure.rs:874 walk_founders :: copy_index no entero -> se toma cero",
+   "file": "src/f5_closure.rs",
+   "old": "        let copy_index = fields[3].parse::<u64>().map_err(|_| {\n            reject(\n                F5ClosureCause::ByteContract,\n                path,\n                \"copy_index\",\n                format!(\"{} no es un entero\", fields[3]),\n            )\n        })?;",
+   "new": "        let copy_index = fields[3].parse::<u64>().unwrap_or_default();",
+   "target": "f5_closure",
+   "test": "a_copy_index_that_is_not_an_integer_is_rejected"
+  },
+  {
+   "id": "f5_closure.rs:886 walk_founders :: FCP_ del TSV sin sintaxis tipada -> análisis relajado",
+   "file": "src/f5_closure.rs",
+   "old": "        let founder_copy_id = FounderCopyId::parse(fields[5], \"f5-founders.tsv\").map_err(|_| {\n            reject(\n                F5ClosureCause::ByteContract,\n                path,\n                \"founder_copy_id\",\n                format!(\"{} no es una identidad tipada\", fields[5]),\n            )\n        })?;",
+   "new": "        let founder_copy_id = FounderCopyId::parse(fields[5], \"f5-founders.tsv\")\n            .or_else(|_| FounderCopyId::parse(\"FCP_relajado\", \"f5-founders.tsv\"))\n            .map_err(|_| {\n                reject(\n                    F5ClosureCause::ByteContract,\n                    path,\n                    \"founder_copy_id\",\n                    format!(\"{} no es una identidad tipada\", fields[5]),\n                )\n            })?;",
+   "target": "f5_closure",
+   "test": "a_founder_copy_identifier_with_forbidden_syntax_is_rejected"
+  },
+  {
+   "id": "f5_closure.rs:1324 read_line :: lectura no UTF-8 -> el error de lectura se traga",
+   "file": "src/f5_closure.rs",
+   "old": "fn read_line(reader: &mut BufReader<File>, line: &mut String, path: &str) -> Checked<usize> {\n    line.clear();\n    reader.read_line(line).map_err(|error| {\n        reject(\n            F5ClosureCause::ByteContract,\n            path,\n            \"encoding\",\n            error.to_string(),\n        )\n    })\n}",
+   "new": "fn read_line(reader: &mut BufReader<File>, line: &mut String, path: &str) -> Checked<usize> {\n    line.clear();\n    let _ = path;\n    Ok(reader.read_line(line).unwrap_or_default())\n}",
+   "target": "f5_closure",
+   "test": "a_founders_row_that_is_not_utf8_is_rejected"
+  },
+  {
+   "id": "f5_closure.rs:1163 walk_truth_membership :: cabecera de verdad ilegible -> cabecera por defecto",
+   "file": "src/f5_closure.rs",
+   "old": "    let header: TruthHeaderLine =\n        serde_json::from_str(strip_lf(&line, path)?).map_err(|error| {\n            reject(\n                F5ClosureCause::ByteContract,\n                path,\n                \"header\",\n                format!(\"cabecera ilegible: {error}\"),\n            )\n        })?;",
+   "new": "    let header: TruthHeaderLine = serde_json::from_str(strip_lf(&line, path)?)\n        .unwrap_or(TruthHeaderLine {\n            record_type: \"header\".to_owned(),\n            document_kind: Some(\"gps_truth\".to_owned()),\n        });",
+   "target": "f5_closure",
+   "test": "an_unreadable_truth_header_is_rejected"
+  },
+  {
+   "id": "f5_closure.rs:1191 walk_truth_membership :: registro de verdad ilegible -> registro por defecto",
+   "file": "src/f5_closure.rs",
+   "old": "        let record: TruthRecord = serde_json::from_str(body).map_err(|error| {\n            reject(\n                F5ClosureCause::ByteContract,\n                path,\n                \"row\",\n                format!(\"registro ilegible: {error}\"),\n            )\n        })?;",
+   "new": "        let record: TruthRecord = serde_json::from_str(body).unwrap_or(TruthRecord {\n            record_type: \"genotype\".to_owned(),\n            identity: None,\n            founder_membership: None,\n        });",
+   "target": "f5_closure",
+   "test": "an_unreadable_truth_record_is_rejected"
+  },
+  {
+   "id": "f5_closure.rs:1232 walk_truth_membership :: FCP_ de la verdad sin sintaxis tipada -> análisis relajado",
+   "file": "src/f5_closure.rs",
+   "old": "        let founder_copy_id = FounderCopyId::parse(published_copy_id.clone(), \"truth.jsonl\")\n            .map_err(|_| {\n                reject(\n                    F5ClosureCause::ByteContract,\n                    path,\n                    \"founder_copy_id\",\n                    format!(\"{published_copy_id} no es una identidad tipada\"),\n                )\n            })?;",
+   "new": "        let founder_copy_id = FounderCopyId::parse(published_copy_id.clone(), \"truth.jsonl\")\n            .or_else(|_| FounderCopyId::parse(\"FCP_relajado\", \"truth.jsonl\"))\n            .map_err(|_| {\n                reject(\n                    F5ClosureCause::ByteContract,\n                    path,\n                    \"founder_copy_id\",\n                    format!(\"{published_copy_id} no es una identidad tipada\"),\n                )\n            })?;",
+   "target": "f5_closure",
+   "test": "a_truth_membership_identifier_with_forbidden_syntax_is_rejected"
+  },
+  {
+   "id": "f5_oracle.rs:1723 read_truth_header :: cabecera ilegible -> JSON nulo en vez de rechazo",
+   "file": "src/f5_oracle.rs",
+   "old": "    let value: Value = serde_json::from_str(line)\n        .map_err(|error| truth_reject(\"header\", format!(\"cabecera ilegible: {error}\")))?;",
+   "new": "    let value: Value = serde_json::from_str(line).unwrap_or(Value::Null);",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1649 exact_object :: no es un objeto -> mensaje alterado",
+   "file": "src/f5_oracle.rs",
+   "old": "        .ok_or_else(|| truth_reject(what, \"no es un objeto\"))?;",
+   "new": "        .ok_or_else(|| truth_reject(what, \"tiene otra forma\"))?;",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1650 exact_object :: claves distintas -> condición neutralizada",
+   "file": "src/f5_oracle.rs",
+   "old": "    if object.len() != keys.len() || !keys.iter().all(|key| object.contains_key(*key)) {",
+   "new": "    if false {",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1743 read_truth_header :: record_type -> condición neutralizada",
+   "file": "src/f5_oracle.rs",
+   "old": "    if text(object, \"header\", \"record_type\")? != \"header\" {",
+   "new": "    if false {",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1746 read_truth_header :: document_kind -> condición neutralizada",
+   "file": "src/f5_oracle.rs",
+   "old": "    if text(object, \"header\", \"document_kind\")? != \"gps_truth\" {",
+   "new": "    if false {",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1756 read_truth_header :: convenio de coordenadas -> condición neutralizada",
+   "file": "src/f5_oracle.rs",
+   "old": "    if text(object, \"header\", \"coordinate_convention\")? != \"zero_based_half_open_v1\" {",
+   "new": "    if false {",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1793 read_truth_header :: populations no es lista -> mensaje alterado",
+   "file": "src/f5_oracle.rs",
+   "old": "        .ok_or_else(|| truth_reject(\"header\", \"populations no es una lista\"))?;",
+   "new": "        .ok_or_else(|| truth_reject(\"header\", \"populations con otra forma\"))?;",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1794 read_truth_header :: populations vacía -> condición neutralizada",
+   "file": "src/f5_oracle.rs",
+   "old": "    if listed.is_empty() {\n        return Err(truth_reject(\"header\", \"populations vacía\"));\n    }",
+   "new": "    if false {\n        return Err(truth_reject(\"header\", \"populations vacía\"));\n    }",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1810 read_truth_header :: populations desordenada -> condición neutralizada",
+   "file": "src/f5_oracle.rs",
+   "old": "    if populations\n        .windows(2)\n        .any(|pair| pair[0].population_id >= pair[1].population_id)\n    {",
+   "new": "    if false {",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1822 read_truth_header :: source_digests no es lista -> mensaje alterado",
+   "file": "src/f5_oracle.rs",
+   "old": "        .ok_or_else(|| truth_reject(\"header\", \"source_digests no es una lista\"))?;",
+   "new": "        .ok_or_else(|| truth_reject(\"header\", \"source_digests con otra forma\"))?;",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1823 read_truth_header :: source_digests vacía -> condición neutralizada",
+   "file": "src/f5_oracle.rs",
+   "old": "    if listed_digests.is_empty() {\n        return Err(truth_reject(\"header\", \"source_digests vacía\"));\n    }",
+   "new": "    if false {\n        return Err(truth_reject(\"header\", \"source_digests vacía\"));\n    }",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1839 read_truth_header :: sha256 de fuente -> condición neutralizada",
+   "file": "src/f5_oracle.rs",
+   "old": "        if !is_lowercase_sha256(&digest) {\n            return Err(truth_reject(\n                \"source_digests\",\n                \"sha256 no es hex minúscula de 64\",\n            ));\n        }",
+   "new": "        if false {\n            return Err(truth_reject(\n                \"source_digests\",\n                \"sha256 no es hex minúscula de 64\",\n            ));\n        }",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1716 matrix_source_id :: matriz de la cabecera -> se acepta cualquier fuente",
+   "file": "src/f5_oracle.rs",
+   "old": "            .find(|(kind, _, _)| kind == \"matrix\")",
+   "new": "            .find(|(_, _, _)| true)",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1660 text :: text no es una cadena -> cadena vacía por defecto",
+   "file": "src/f5_oracle.rs",
+   "old": "fn text(object: &Map<String, Value>, what: &str, key: &str) -> Checked<String> {\n    object\n        .get(key)\n        .and_then(Value::as_str)\n        .map(str::to_owned)\n        .ok_or_else(|| truth_reject(what, format!(\"{key} no es una cadena\")))\n}",
+   "new": "fn text(object: &Map<String, Value>, what: &str, key: &str) -> Checked<String> {\n    let _ = what;\n    Ok(object\n        .get(key)\n        .and_then(Value::as_str)\n        .map(str::to_owned)\n        .unwrap_or_default())\n}",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1668 number :: number no es entero -> cero por defecto",
+   "file": "src/f5_oracle.rs",
+   "old": "fn number(object: &Map<String, Value>, what: &str, key: &str) -> Checked<u64> {\n    object\n        .get(key)\n        .and_then(Value::as_u64)\n        .ok_or_else(|| truth_reject(what, format!(\"{key} no es un entero no negativo\")))\n}",
+   "new": "fn number(object: &Map<String, Value>, what: &str, key: &str) -> Checked<u64> {\n    let _ = what;\n    Ok(object.get(key).and_then(Value::as_u64).unwrap_or_default())\n}",
+   "target": "f5_oracle",
+   "test": "the_truth_header_rejects_each_corruption_by_its_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1680 single_base :: \"{key} no es una base canónica\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"{key} no es una base canónica\"",
+   "new": "\"MUTADO-1680\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1926 read_snp_provenance :: \"un SNP fundador no procede de una matriz\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"un SNP fundador no procede de una matriz\"",
+   "new": "\"MUTADO-1916\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1932 read_snp_provenance :: \"versión de procedencia ajena\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"versión de procedencia ajena\"",
+   "new": "\"MUTADO-1922\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1949 read_snp_provenance :: \"la fuente del SNP no es la matriz que la cabecera declara",
+   "file": "src/f5_oracle.rs",
+   "old": "\"la fuente del SNP no es la matriz que la cabecera declara\"",
+   "new": "\"MUTADO-1937\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:1964 read_snp_provenance :: \"la procedencia no nombra el sitio de su evento\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"la procedencia no nombra el sitio de su evento\"",
+   "new": "\"MUTADO-1950\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2006 read_segment_source :: \"el segmento no pertenece a la copia\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el segmento no pertenece a la copia\"",
+   "new": "\"MUTADO-1990\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2015 read_segment_source :: \"el segmento no cubre la secuencia completa\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el segmento no cubre la secuencia completa\"",
+   "new": "\"MUTADO-1999\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2062 read_truth_copy :: \"la pertenencia nombra {population_id}, ausente de la cabe",
+   "file": "src/f5_oracle.rs",
+   "old": "\"la pertenencia nombra {population_id}, ausente de la cabecera\"",
+   "new": "\"MUTADO-2042\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2077 read_truth_copy :: \"origin ajeno a F5\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"origin ajeno a F5\"",
+   "new": "\"MUTADO-2057\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2082 read_truth_copy :: \"sources no es una lista\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"sources no es una lista\"",
+   "new": "\"MUTADO-2062\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2100 read_truth_copy :: \"las fuentes {declared_sources:?} no son las {expected_sou",
+   "file": "src/f5_oracle.rs",
+   "old": "\"las fuentes {declared_sources:?} no son las {expected_sources:?} de la cabecera\"",
+   "new": "\"MUTADO-2077\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2109 read_truth_copy :: \"segments no es una lista\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"segments no es una lista\"",
+   "new": "\"MUTADO-2089\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2131 read_truth_copy :: \"modifications no es una lista\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"modifications no es una lista\"",
+   "new": "\"MUTADO-2109\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2148 read_truth_copy :: \"F5 solo publica modificaciones SNP\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"F5 solo publica modificaciones SNP\"",
+   "new": "\"MUTADO-2124\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2164 read_truth_copy :: \"un SNP publica el mismo alelo dos veces\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"un SNP publica el mismo alelo dos veces\"",
+   "new": "\"MUTADO-2140\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2178 read_truth_copy :: \"las modificaciones no llegan por posición ascendente\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"las modificaciones no llegan por posición ascendente\"",
+   "new": "\"MUTADO-2154\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2198 read_truth_copy :: \"current_pieces no es una lista\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"current_pieces no es una lista\"",
+   "new": "\"MUTADO-2176\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2209 read_truth_copy :: \"el fragmento vigente no procede de la referencia\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el fragmento vigente no procede de la referencia\"",
+   "new": "\"MUTADO-2185\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2223 read_truth_copy :: \"el fragmento vigente no cubre la misma secuencia\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el fragmento vigente no cubre la misma secuencia\"",
+   "new": "\"MUTADO-2197\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2229 read_truth_copy :: \"snps no es una lista\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"snps no es una lista\"",
+   "new": "\"MUTADO-2205\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2233 read_truth_copy :: \"el fragmento vigente y las modificaciones no traen los mi",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el fragmento vigente y las modificaciones no traen los mismos SNP\"",
+   "new": "\"MUTADO-2207\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2273 read_truth_copy :: \"history no es una lista\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"history no es una lista\"",
+   "new": "\"MUTADO-2249\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2287 read_truth_copy :: \"F5 solo publica hitos SNP\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"F5 solo publica hitos SNP\"",
+   "new": "\"MUTADO-2263\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2304 read_truth_copy :: \"el historial no repite la procedencia de su modificación\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el historial no repite la procedencia de su modificación\"",
+   "new": "\"MUTADO-2278\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2519 recount_f5_man70 :: \"las subpoblaciones no declaran la misma ploidía\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"las subpoblaciones no declaran la misma ploidía\"",
+   "new": "\"MUTADO-2493\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2523 recount_f5_man70 :: \"la ploidía declarada no cabe en u8\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"la ploidía declarada no cabe en u8\"",
+   "new": "\"MUTADO-2499\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2525 recount_f5_man70 :: \"la ploidía declarada es cero\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"la ploidía declarada es cero\"",
+   "new": "\"MUTADO-2501\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2571 recount_f5_man70 :: \"registro sin record_type\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"registro sin record_type\"",
+   "new": "\"MUTADO-2544\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2577 recount_f5_man70 :: \"una copia aparece después de un genotipo\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"una copia aparece después de un genotipo\"",
+   "new": "\"MUTADO-2548\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2591 recount_f5_man70 :: \"las copias no llegan por referencia, población, individuo",
+   "file": "src/f5_oracle.rs",
+   "old": "\"las copias no llegan por referencia, población, individuo, secuencia y fase\"",
+   "new": "\"MUTADO-2562\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2602 recount_f5_man70 :: \"un founder_copy_id se repite\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"un founder_copy_id se repite\"",
+   "new": "\"MUTADO-2575\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2640 recount_f5_man70 :: \"los genotipos no llegan por subpoblación y bloque ascende",
+   "file": "src/f5_oracle.rs",
+   "old": "\"los genotipos no llegan por subpoblación y bloque ascendentes\"",
+   "new": "\"MUTADO-2611\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2651 recount_f5_man70 :: \"dentro de un bloque los genotipos no llegan por site_id e",
+   "file": "src/f5_oracle.rs",
+   "old": "\"dentro de un bloque los genotipos no llegan por site_id e individuo\"",
+   "new": "\"MUTADO-2622\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2717 recount_f5_man70 :: \"record_type desconocido {other:?}\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"record_type desconocido {other:?}\"",
+   "new": "\"MUTADO-2681\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2825 recount_genotype :: \"F5 solo publica casos SNP\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"F5 solo publica casos SNP\"",
+   "new": "\"MUTADO-2788\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2831 recount_genotype :: \"un genotipo nombra otra referencia que la cabecera\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"un genotipo nombra otra referencia que la cabecera\"",
+   "new": "\"MUTADO-2792\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2849 recount_genotype :: \"el locus SNP no mide una base\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el locus SNP no mide una base\"",
+   "new": "\"MUTADO-2808\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2870 recount_genotype :: \"f5_locus repite el alelo\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"f5_locus repite el alelo\"",
+   "new": "\"MUTADO-2827\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2876 recount_genotype :: \"subpoblación {population_id} no declarada\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"subpoblación {population_id} no declarada\"",
+   "new": "\"MUTADO-2833\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2884 recount_genotype :: \"alleles no es una lista\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"alleles no es una lista\"",
+   "new": "\"MUTADO-2843\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2890 recount_genotype :: \"alelo sin kind\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"alelo sin kind\"",
+   "new": "\"MUTADO-2849\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2900 recount_genotype :: \"el alelo tipado no es el ALT del locus\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el alelo tipado no es el ALT del locus\"",
+   "new": "\"MUTADO-2857\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2906 recount_genotype :: \"dos alelos alternativos en un sitio bialélico\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"dos alelos alternativos en un sitio bialélico\"",
+   "new": "\"MUTADO-2863\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2913 recount_genotype :: \"alelo {other:?} ajeno a F5\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"alelo {other:?} ajeno a F5\"",
+   "new": "\"MUTADO-2870\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2921 recount_genotype :: \"el sitio no publica su alelo alternativo\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el sitio no publica su alelo alternativo\"",
+   "new": "\"MUTADO-2878\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2928 recount_genotype :: \"allele_dosages no es una lista\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"allele_dosages no es una lista\"",
+   "new": "\"MUTADO-2887\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2933 recount_genotype :: \"dosis no entera\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"dosis no entera\"",
+   "new": "\"MUTADO-2892\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2939 recount_genotype :: \"las dosis no acompañan a los alelos\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"las dosis no acompañan a los alelos\"",
+   "new": "\"MUTADO-2896\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2950 recount_genotype :: \"carriers no es una lista\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"carriers no es una lista\"",
+   "new": "\"MUTADO-2909\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2960 recount_genotype :: \"allele_index fuera de la lista de alelos\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"allele_index fuera de la lista de alelos\"",
+   "new": "\"MUTADO-2915\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2977 recount_genotype :: \"un portador no es una copia de su individuo\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"un portador no es una copia de su individuo\"",
+   "new": "\"MUTADO-2930\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2981 recount_genotype :: \"un portador no tiene copia publicada\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"un portador no tiene copia publicada\"",
+   "new": "\"MUTADO-2936\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:3011 recount_genotype :: \"los portadores no son las copias de la ploidía\"",
+   "file": "src/f5_oracle.rs",
+   "old": "\"los portadores no son las copias de la ploidía\"",
+   "new": "\"MUTADO-2964\"",
+   "target": "f5_oracle",
+   "test": "each_truth_genotype_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2274 read_truth_copy :: historial de otra longitud",
+   "file": "src/f5_oracle.rs",
+   "old": "    if history.len() != snps.len() {\n        return Err(truth_reject(\n            \"copy.history\",\n            \"el historial no coincide con las modificaciones\",\n        ));\n    }",
+   "new": "    if history.len() != snps.len() {\n        return Err(truth_reject(\"copy.history\", \"MUTADO-2251\"));\n    }",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2292 read_truth_copy :: hito que no casa con su modificación",
+   "file": "src/f5_oracle.rs",
+   "old": "            || number(event, \"copy.history\", \"position\")? + 1 != expected.position_1based\n        {\n            return Err(truth_reject(\n                \"copy.history\",\n                \"el historial no coincide con las modificaciones\",\n            ));",
+   "new": "            || number(event, \"copy.history\", \"position\")? + 1 != expected.position_1based\n        {\n            return Err(truth_reject(\"copy.history\", \"MUTADO-2270\"));",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2493 recount_f5_man70 :: documento de verdad ausente",
+   "file": "src/f5_oracle.rs",
+   "old": "            F5OracleCause::ArtifactMissing,\n            F5_TRUTH_PATH,\n            \"path\",",
+   "new": "            F5OracleCause::Truth,\n            F5_TRUTH_PATH,\n            \"path\",",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_the_document_as_bytes"
+  },
+  {
+   "id": "f5_oracle.rs:2505 recount_f5_man70 :: documento vacío",
+   "file": "src/f5_oracle.rs",
+   "old": "        return Err(truth_reject(\"header\", \"documento vacío\"));\n    }\n    if !line.ends_with('\\n') {",
+   "new": "        return Err(truth_reject(\"header\", \"MUTADO-2481\"));\n    }\n    if !line.ends_with('\\n') {",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_the_document_as_bytes"
+  },
+  {
+   "id": "f5_oracle.rs:2507 recount_f5_man70 :: cabecera sin LF",
+   "file": "src/f5_oracle.rs",
+   "old": "    if !line.ends_with('\\n') {\n        return Err(truth_reject(\"eol\", \"falta el LF final\"));\n    }\n    let header = read_truth_header(",
+   "new": "    if !line.ends_with('\\n') {\n        return Err(truth_reject(\"eol\", \"MUTADO-2484\"));\n    }\n    let header = read_truth_header(",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_the_document_as_bytes"
+  },
+  {
+   "id": "f5_oracle.rs:2564 recount_f5_man70 :: línea vacía en el cuerpo",
+   "file": "src/f5_oracle.rs",
+   "old": "            return Err(truth_reject(\"row\", \"línea vacía prohibida\"));\n        }\n        let value: Value = serde_json::from_str(body)\n            .map_err(|error| truth_reject(\"row\", format!(\"registro ilegible: {error}\")))?;\n        let kind = value",
+   "new": "            return Err(truth_reject(\"row\", \"MUTADO-2537\"));\n        }\n        let value: Value = serde_json::from_str(body)\n            .map_err(|error| truth_reject(\"row\", format!(\"registro ilegible: {error}\")))?;\n        let kind = value",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2567 recount_f5_man70 :: registro ilegible en el cuerpo",
+   "file": "src/f5_oracle.rs",
+   "old": "            .map_err(|error| truth_reject(\"row\", format!(\"registro ilegible: {error}\")))?;\n        let kind = value",
+   "new": "            .map_err(|error| truth_reject(\"row\", format!(\"MUTADO-2540 {error}\")))?;\n        let kind = value",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2595 recount_f5_man70 :: copy_index fuera de la ploidía",
+   "file": "src/f5_oracle.rs",
+   "old": "                if u64::from(ploidy) <= copy.identity.copy_index {\n                    return Err(truth_reject(\n                        \"copy.identity\",\n                        \"copy_index fuera de 0..ploidy-1\",\n                    ));\n                }",
+   "new": "                if u64::from(ploidy) <= copy.identity.copy_index {\n                    return Err(truth_reject(\"copy.identity\", \"MUTADO-2569\"));\n                }",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2722 recount_f5_man70 :: documento sin LF final",
+   "file": "src/f5_oracle.rs",
+   "old": "    if !closed_with_lf {\n        return Err(truth_reject(\"eol\", \"falta el LF final\"));\n    }\n    if copies != header.copies || genotypes != header.genotypes {",
+   "new": "    if !closed_with_lf {\n        return Err(truth_reject(\"eol\", \"MUTADO-2689\"));\n    }\n    if copies != header.copies || genotypes != header.genotypes {",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_the_document_as_bytes"
+  },
+  {
+   "id": "f5_oracle.rs:2113 read_truth_copy :: dos segmentos en una copia",
+   "file": "src/f5_oracle.rs",
+   "old": "\"una copia fundadora publica un segmento por secuencia\"",
+   "new": "\"MUTADO-2091\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2202 read_truth_copy :: dos fragmentos vigentes",
+   "file": "src/f5_oracle.rs",
+   "old": "\"una copia fundadora publica un fragmento vigente\"",
+   "new": "\"MUTADO-2178\"",
+   "target": "f5_oracle",
+   "test": "each_truth_copy_rejects_its_corruptions_by_their_own_reason"
+  },
+  {
+   "id": "f5_oracle.rs:2634 recount_f5_man70 :: grupo repetido",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el grupo {}×{} vuelve a aparecer\"",
+   "new": "\"MUTADO-2605 {}{}\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2702 recount_f5_man70 :: sitio que cambia de forma",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el sitio {} cambia de bloque, secuencia, posición o alelos\"",
+   "new": "\"MUTADO-2667 {}\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2742 recount_f5_man70 :: recuento del locus contra los individuos declarados",
+   "file": "src/f5_oracle.rs",
+   "old": "\"el locus {}×{} reconta {total} individuos y la cabecera declara {}\"",
+   "new": "\"MUTADO-2703 {}{}{}\"",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_each_document_level_corruption"
+  },
+  {
+   "id": "f5_oracle.rs:2501 recount_f5_man70 :: cabecera con codificación inválida (mensaje sustituido entero)",
+   "file": "src/f5_oracle.rs",
+   "old": "    let read = reader\n        .read_line(&mut line)\n        .map_err(|error| truth_reject(\"encoding\", error.to_string()))?;\n    if read == 0 {\n        return Err(truth_reject(\"header\", \"documento vacío\"));",
+   "new": "    let read = reader\n        .read_line(&mut line)\n        .map_err(|_| truth_reject(\"encoding\", \"MUTADO-2479\"))?;\n    if read == 0 {\n        return Err(truth_reject(\"header\", \"documento vacío\"));",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_the_document_as_bytes"
+  },
+  {
+   "id": "f5_oracle.rs:2551 recount_f5_man70 :: cuerpo con codificación inválida (mensaje sustituido entero)",
+   "file": "src/f5_oracle.rs",
+   "old": "            .map_err(|error| truth_reject(\"encoding\", error.to_string()))?;\n        if read == 0 {\n            break;\n        }",
+   "new": "            .map_err(|_| truth_reject(\"encoding\", \"MUTADO-2527\"))?;\n        if read == 0 {\n            break;\n        }",
+   "target": "f5_oracle",
+   "test": "the_recount_rejects_the_document_as_bytes"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:254 validate_vcf_against_truth :: un rechazo construido a mano vuelve a colarse",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "            .ok_or_else(|| vcf_reject(line_number, \"registro VCF antes de #CHROM\"))?;",
+   "new": "            .ok_or_else(|| VcfSemanticValidationError::Vcf {\n                line: line_number,\n                detail: \"registro VCF antes de #CHROM\".to_owned(),\n            })?;",
+   "target": "vcf_semantic_validation",
+   "test": "the_vcf_oracle_builds_every_rejection_through_its_constructors"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1334 oracle_error :: una constructora pierde la anotación que la ata al barrido",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "#[track_caller]\nfn fasta_reject(detail: impl Into<String>) -> VcfSemanticValidationError {",
+   "new": "fn fasta_reject(detail: impl Into<String>) -> VcfSemanticValidationError {",
+   "target": "vcf_semantic_validation",
+   "test": "the_vcf_oracle_builds_every_rejection_through_its_constructors"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1344 io_reject :: una constructora deja de anotar su disparo",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "fn io_reject(path: impl Into<String>, detail: impl Into<String>) -> VcfSemanticValidationError {\n    crate::guard_trace::record();",
+   "new": "fn io_reject(path: impl Into<String>, detail: impl Into<String>) -> VcfSemanticValidationError {",
+   "target": "vcf_semantic_validation",
+   "test": "the_vcf_oracle_builds_every_rejection_through_its_constructors"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:58 validate_published_vcf_semantics :: la verdad no se puede abrir -> se reporta como otra clase",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "let truth_file = File::open(truth_path).map_err(|error| io_error(truth_path, error))?;",
+   "new": "let truth_file = File::open(truth_path).map_err(|_| oracle_error(\"MUTADO-58\"))?;",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:73 validate_published_vcf_semantics :: el VCF comprimido no se puede abrir -> otra clase",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "        let file = File::open(vcf_path).map_err(|error| io_error(vcf_path, error))?;\n        validate_vcf_against_truth(&reference, &truth, &mut noodles_bgzf::io::Reader::new(file))",
+   "new": "        let file = File::open(vcf_path).map_err(|_| oracle_error(\"MUTADO-73\"))?;\n        validate_vcf_against_truth(&reference, &truth, &mut noodles_bgzf::io::Reader::new(file))",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:76 validate_published_vcf_semantics :: el VCF de texto no se puede abrir -> otra clase",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "        let file = File::open(vcf_path).map_err(|error| io_error(vcf_path, error))?;\n        validate_vcf_against_truth(&reference, &truth, &mut BufReader::new(file))",
+   "new": "        let file = File::open(vcf_path).map_err(|_| oracle_error(\"MUTADO-76\"))?;\n        validate_vcf_against_truth(&reference, &truth, &mut BufReader::new(file))",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:123 validate_vcf_against_truth :: el VCF no es texto -> se culpa a otro fichero",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": ".map_err(|error| io_reject(\"VCF\", error.to_string()))?;",
+   "new": ".map_err(|error| io_reject(\"MUTADO-123\", error.to_string()))?;",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:254 validate_vcf_against_truth :: registro antes de #CHROM -> otro motivo",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": ".ok_or_else(|| vcf_reject(line_number, \"registro VCF antes de #CHROM\"))?;",
+   "new": ".ok_or_else(|| vcf_reject(line_number, \"MUTADO-254\"))?;",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:278 validate_vcf_against_truth :: POS que no es entero positivo -> otro motivo",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": ".ok_or_else(|| vcf_reject(line_number, \"POS debe ser un entero positivo\"))?;",
+   "new": ".ok_or_else(|| vcf_reject(line_number, \"MUTADO-278\"))?;",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1462 validate_reference_allele :: CHROM ausente del FASTA en la atadura de la columna REF -> otro motiv",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": ".ok_or_else(|| vcf_reject(line, \"CHROM no existe en el FASTA autoritativo\"))?;",
+   "new": ".ok_or_else(|| vcf_reject(line, \"MUTADO-1462\"))?;",
+   "target": "lib",
+   "test": "the_reference_column_is_tied_to_the_real_genome"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1484 read_oracle_fasta :: el FASTA no se puede abrir -> otra clase",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "let file = File::open(path).map_err(|error| io_error(path, error))?;",
+   "new": "let file = File::open(path).map_err(|_| fasta_reject(\"MUTADO-1484\"))?;",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1492 read_oracle_fasta :: el FASTA no es texto -> otra clase",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "            .read_line(&mut line)\n            .map_err(|error| io_error(path, error))?",
+   "new": "            .read_line(&mut line)\n            .map_err(|_| fasta_reject(\"MUTADO-1493\"))?",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1508 read_oracle_fasta :: bases antes de la primera cabecera -> guarda retirada",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "        } else {\n            return Err(fasta_reject(\"bases antes de la primera cabecera FASTA\"));\n        }",
+   "new": "        } else {\n        }",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1526 read_oracle_fasta :: conjunto de secuencias inválido -> otra clase",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "    // Este otro sí se ejercita: un FASTA con dos secuencias del mismo nombre\n    // produce piezas individualmente válidas y un conjunto que no lo es.\n    .map_err(|error| fasta_reject(format!(\"{error:?}\")))\n}",
+   "new": "    .map_err(|error| oracle_error(format!(\"{error:?}\")))\n}",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1545 oracular_sequence :: cabecera FASTA ilegible -> otra clase",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "    let fasta = FastaHeader::parse(header.as_bytes())\n        .map_err(|error| fasta_reject(format!(\"{error:?}\")))?;",
+   "new": "    let fasta = FastaHeader::parse(header.as_bytes())\n        .map_err(|error| oracle_error(format!(\"{error:?}\")))?;",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "vcf_semantic_validation.rs:1550 oracular_sequence :: bases que no son ADN -> otra clase",
+   "file": "src/vcf_semantic_validation.rs",
+   "old": "DnaSequence::try_from_bytes(&bases).map_err(|error| fasta_reject(format!(\"{error:?}\")))?;",
+   "new": "DnaSequence::try_from_bytes(&bases).map_err(|error| oracle_error(format!(\"{error:?}\")))?;",
+   "target": "vcf_semantic_validation",
+   "test": "the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta"
+  },
+  {
+   "id": "guard_trace.rs:101 :: el barrido ofrece una segunda función pública",
+   "file": "src/guard_trace.rs",
+   "old": "#[track_caller]\npub fn record() {",
+   "new": "/// Otra vía pública cualquiera.\npub fn otra_via() {}\n\n#[track_caller]\npub fn record() {",
+   "target": "f5_closure",
+   "test": "the_closure_audit_cannot_derive_an_identity_by_its_signature"
+  },
+  {
+   "id": "f5_closure.rs:218 :: la clausura nombra el barrido por una segunda vía",
+   "file": "src/f5_closure.rs",
+   "old": "    crate::guard_trace::record();\n",
+   "new": "    crate::guard_trace::record();\n    let _ = crate::guard_trace::GUARD_TRACE_DIR_ENV;\n",
+   "target": "f5_closure",
+   "test": "the_closure_audit_cannot_derive_an_identity_by_its_signature"
+  }
+ ]
+}

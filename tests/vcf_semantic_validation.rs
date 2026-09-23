@@ -841,3 +841,359 @@ fn path_oracle_accepts_the_published_text_and_bgzf_forms() {
     validate_published_vcf_semantics(&fasta, &truth_path, &bgzf).expect("BGZF VCF");
     fs::remove_dir_all(root).expect("cleanup");
 }
+
+// ---------------------------------------------------------------------------
+// Corpus de corrupciones **con motivo exacto**
+//
+// El corpus de `isolated_mutations_reject_each_f2_semantic_invariant` exige
+// solo que el oráculo rechace, no **por qué**. Eso basta para lo que aquel
+// cubre —cada corrupción cae por una guarda distinta y ninguna otra la caza
+// antes—, pero no sirve para las guardas que este corpus añade: varias de
+// ellas conviven con otras que rechazarían el mismo documento por otro motivo,
+// y una prueba que solo mirase `is_err()` no distinguiría cuál trabajó.
+//
+// Por eso este corpus imita al de `tests/repeat_vcf_projection.rs`: afirma que
+// la corrupción **cambió el documento** y exige el **motivo exacto** del
+// rechazo.
+// ---------------------------------------------------------------------------
+
+/// Exige que cada corrupción cambie el documento y se rechace **por su motivo**.
+fn reject_each_vcf(original: &str, corrupted: &[(&str, &str, String)]) {
+    for (reason, expected_detail, content) in corrupted {
+        assert_ne!(
+            content, original,
+            "la corrupción «{reason}» tiene que cambiar el documento"
+        );
+        let error = validate_vcf_against_truth(
+            &reference(),
+            &parsed_truth(),
+            &mut Cursor::new(content.clone()),
+        )
+        .expect_err("el oráculo tiene que rechazar la corrupción");
+        let VcfSemanticValidationError::Vcf { detail, .. } = &error else {
+            panic!("«{reason}» se rechazó fuera del contrato VCF: {error:?}");
+        };
+        assert_eq!(
+            detail, expected_detail,
+            "«{reason}» se rechazó por otra razón"
+        );
+    }
+}
+
+/// **El contrato de cabecera y de columnas del VCF, guarda por guarda.**
+///
+/// *Qué hace que pueda fallar:* el documento de partida se acepta —la primera
+/// aserción lo fija, para que un oráculo que rechazara todo no pasara—, y cada
+/// fila exige el **motivo exacto**. Si una de estas guardas se borrase,
+/// invirtiese o mirase otro campo, la fila correspondiente dejaría de citar su
+/// motivo y la prueba moriría.
+#[test]
+fn the_header_and_column_contract_rejects_each_corruption_by_its_own_reason() {
+    let original = valid_vcf();
+    validate_vcf_against_truth(
+        &reference(),
+        &parsed_truth(),
+        &mut Cursor::new(original.clone()),
+    )
+    .expect("el documento de partida se acepta");
+
+    reject_each_vcf(
+        &original,
+        &[
+            (
+                "declaración FORMAT con otra descripción",
+                "declaración FORMAT distinta de GT fijo en F2",
+                original.replacen("Description=\"Genotype\"", "Description=\"Genotipo\"", 1),
+            ),
+            (
+                "GPS_LOSS declarado en la cabecera",
+                "F2 prohíbe declarar GPS_LOSS y GPS_COMPLEMENT",
+                original.replacen(
+                    "#CHROM",
+                    "##INFO=<ID=GPS_LOSS,Number=.,Type=String,Description=\"x\">\n#CHROM",
+                    1,
+                ),
+            ),
+            (
+                "línea de una sola almohadilla tras #CHROM",
+                "una línea # no puede aparecer tras #CHROM",
+                format!("{original}#cola\n"),
+            ),
+            (
+                "cabecera de columnas con FORMAT mal escrito",
+                "cabecera de columnas VCF distinta del contrato F2",
+                original.replacen("\tINFO\tFORMAT\t", "\tINFO\tFORMATO\t", 1),
+            ),
+            (
+                "línea de una sola almohadilla antes de #CHROM",
+                "línea de cabecera VCF no reconocida",
+                original.replacen("#CHROM", "#comentario\n#CHROM", 1),
+            ),
+            (
+                "registro con una columna de muestra de más",
+                "número de columnas VCF incompatible con las muestras",
+                original.replacen("\tGT\t1|0\n", "\tGT\t1|0\t1|0\n", 1),
+            ),
+            (
+                "registro en una posición que la verdad no declara",
+                "registro CHROM+POS ausente de la verdad",
+                original.replacen("chr1\t3\t", "chr1\t5\t", 1),
+            ),
+            (
+                "INFO que no empieza por GPS_CASE",
+                "INFO debe declarar GPS_CASE en primer lugar",
+                original.replacen("GPS_CASE=CASE_01", "GPS_CASEX=CASE_01", 1),
+            ),
+            (
+                "GPS_CASE sin ningún caso",
+                "INFO debe contener GPS_CASE canónico sin valores vacíos",
+                original.replacen("GPS_CASE=CASE_01", "GPS_CASE=", 1),
+            ),
+        ],
+    );
+
+    // Un VCF con la cabecera entera y **ningún registro** no cae por ninguna
+    // de las guardas anteriores: su rechazo es el recuento final.
+    reject_each_vcf(
+        &original,
+        &[(
+            "cabecera completa sin ningún registro",
+            "faltan registros VCF que exige la verdad",
+            canonical_vcf("IND_01", ""),
+        )],
+    );
+}
+
+/// El cuerpo de una función, desde su firma hasta la llave de cierre de
+/// columna cero.
+fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
+    let start = source
+        .find(signature)
+        .unwrap_or_else(|| panic!("{signature} tiene que existir"));
+    let rest = &source[start..];
+    let end = rest
+        .find("\n}\n")
+        .unwrap_or_else(|| panic!("{signature} tiene que terminar"));
+    &rest[..end]
+}
+
+/// **Todo rechazo que este verificador decide nace en una de sus constructoras.**
+///
+/// *Por qué existe.* Las constructoras son el punto por el que pasa el barrido
+/// de guardas, de modo que un rechazo construido a mano queda **fuera de la
+/// puerta**: no se cuenta en el denominador y no se anota cuando se dispara,
+/// así que podría romperse sin que nadie lo notase. Trece rechazos de este
+/// módulo estaban así, uno de ellos dentro de la propia función que ata la
+/// columna de referencia al genoma real.
+///
+/// *Guarda léxica, no semántica*: lee el texto del módulo, igual que las que la
+/// auditoría de identidad usa para lo suyo. Su valor entero está en los
+/// controles positivos, que impiden que pase por estar mal escrita.
+///
+/// *Lo que esta prueba NO cubre, dicho sin adornos.* La variante que envuelve
+/// el veredicto del lector independiente de la verdad queda fuera a propósito:
+/// no es un rechazo que decida este verificador, sino uno ajeno que se
+/// reenvía, y sus guardas viven en el otro módulo. Quien quisiera colar un
+/// rechazo propio por ahí tendría que fabricar antes un error del otro tipo.
+#[test]
+fn the_vcf_oracle_builds_every_rejection_through_its_constructors() {
+    let source = include_str!("../src/vcf_semantic_validation.rs");
+    let module = source
+        .split("\n#[cfg(test)]\n")
+        .next()
+        .expect("el módulo tiene una parte que no es de pruebas");
+    for (variant, constructor) in [
+        ("VcfSemanticValidationError::Vcf {", "fn vcf_reject("),
+        ("VcfSemanticValidationError::Fasta {", "fn fasta_reject("),
+        ("VcfSemanticValidationError::Io {", "fn io_reject("),
+        (
+            "VcfSemanticValidationError::BasesNotMaterialized",
+            "fn bases_not_materialized(",
+        ),
+    ] {
+        assert_eq!(
+            module.matches(variant).count(),
+            1,
+            "«{variant}» solo puede construirse en {constructor}"
+        );
+        assert!(
+            function_body(module, constructor).contains(variant),
+            "la única construcción de «{variant}» tiene que estar dentro de {constructor}"
+        );
+        // Y esa constructora tiene que participar en el barrido: sin la
+        // anotación, la posición anotada sería la suya y no la de la guarda.
+        let declaration = module
+            .split(constructor)
+            .next()
+            .expect("la constructora existe");
+        assert!(
+            declaration.ends_with("#[track_caller]\n"),
+            "{constructor} tiene que llevar #[track_caller] justo encima"
+        );
+    }
+    // Control positivo 1: el instrumento encuentra el cuerpo correcto y
+    // distingue una constructora de otra.
+    assert!(function_body(module, "fn vcf_reject(").contains("line,"));
+    assert!(!function_body(module, "fn vcf_reject(").contains("Fasta"));
+    // Control positivo 2: la misma búsqueda sí ve una construcción a mano
+    // donde la hay.
+    assert_eq!(
+        "let x = VcfSemanticValidationError::Vcf { line: 1, detail: d };"
+            .matches("VcfSemanticValidationError::Vcf {")
+            .count(),
+        1
+    );
+    // Control positivo 3: las cinco constructoras existen y llaman al barrido.
+    for constructor in [
+        "fn vcf_reject(",
+        "fn fasta_reject(",
+        "fn io_reject(",
+        "fn bases_not_materialized(",
+    ] {
+        assert!(
+            function_body(module, constructor).contains("crate::guard_trace::record();"),
+            "{constructor} tiene que anotar su disparo"
+        );
+    }
+    // Y las tres que delegan lo hacen sin construir nada por su cuenta.
+    for (delegating, target) in [
+        ("fn oracle_error(", "vcf_reject(0, detail)"),
+        ("fn vcf_error<T>(", "Err(vcf_reject(line, detail))"),
+        ("fn io_error(", "io_reject("),
+    ] {
+        assert!(
+            function_body(module, delegating).contains(target),
+            "{delegating} tiene que delegar en su constructora"
+        );
+    }
+}
+
+/// **Los rechazos que hasta ahora se construían a mano, y por eso quedaban
+/// fuera del barrido: ficheros ausentes, ilegibles y FASTA roto.**
+///
+/// *Por qué no existían.* No es que nadie hubiera querido escribirlos: el
+/// enumerador de la puerta solo contaba los rechazos que pasan por una
+/// constructora, y estos se construían en el sitio. No se contaban en el
+/// denominador y no se anotaban al dispararse, de modo que romperlos no habría
+/// movido ninguna cifra.
+///
+/// *Qué hace que pueda fallar:* la primera aserción fija que el trío íntegro se
+/// acepta, y cada fila exige la clase de rechazo y, cuando el rechazo la fija,
+/// su motivo exacto.
+#[test]
+fn the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta() {
+    let root = temporary("path-rejections");
+    fs::create_dir_all(&root).expect("directorio");
+    let fasta = root.join("reference.fa");
+    let truth_path = root.join("truth.jsonl");
+    let vcf = root.join("truth.vcf");
+    let bgzf = root.join("truth.vcf.gz");
+    fs::write(&fasta, ">chr1\nAAAAAAAA\n").expect("FASTA");
+    fs::write(&truth_path, truth()).expect("verdad");
+    fs::write(&vcf, valid_vcf()).expect("VCF");
+    let mut writer = noodles_bgzf::io::Writer::new(fs::File::create(&bgzf).expect("BGZF"));
+    writer
+        .write_all(valid_vcf().as_bytes())
+        .expect("escribir BGZF");
+    writer.finish().expect("cerrar BGZF");
+    validate_published_vcf_semantics(&fasta, &truth_path, &vcf).expect("el trío íntegro se acepta");
+
+    let missing = root.join("no-existe");
+    for (reason, arguments) in [
+        ("la verdad no está", (&fasta, &missing, &vcf)),
+        ("el FASTA no está", (&missing, &truth_path, &vcf)),
+        ("el VCF de texto no está", (&fasta, &truth_path, &missing)),
+    ] {
+        let error = validate_published_vcf_semantics(arguments.0, arguments.1, arguments.2)
+            .expect_err(reason);
+        assert!(
+            matches!(error, VcfSemanticValidationError::Io { .. }),
+            "«{reason}» tiene que ser un rechazo de entrada y salida: {error:?}"
+        );
+    }
+    // El VCF comprimido lo abre otra rama, con su propio rechazo.
+    let missing_bgzf = root.join("no-existe.gz");
+    let error = validate_published_vcf_semantics(&fasta, &truth_path, &missing_bgzf)
+        .expect_err("el VCF comprimido no está");
+    assert!(matches!(error, VcfSemanticValidationError::Io { .. }));
+
+    // Ficheros que existen pero no son texto.
+    let broken_fasta = root.join("no-texto.fa");
+    fs::write(&broken_fasta, b">chr1\n\xFFAAAAAAA\n".as_slice()).expect("FASTA no texto");
+    let error = validate_published_vcf_semantics(&broken_fasta, &truth_path, &vcf)
+        .expect_err("el FASTA no es texto");
+    assert!(
+        matches!(error, VcfSemanticValidationError::Io { .. }),
+        "{error:?}"
+    );
+
+    let broken_vcf = root.join("no-texto.vcf");
+    let mut bytes = valid_vcf().into_bytes();
+    bytes.insert(1, 0xFF);
+    fs::write(&broken_vcf, &bytes).expect("VCF no texto");
+    let error = validate_published_vcf_semantics(&fasta, &truth_path, &broken_vcf)
+        .expect_err("el VCF no es texto");
+    let VcfSemanticValidationError::Io { path, .. } = &error else {
+        panic!("tenía que ser un rechazo de entrada y salida: {error:?}");
+    };
+    assert_eq!(
+        path, "VCF",
+        "y el que falla es el lector del VCF, no un fichero"
+    );
+
+    // FASTA sintácticamente roto, de cuatro formas distintas.
+    for (reason, contents) in [
+        (
+            "bases antes de la primera cabecera",
+            "AAAA\n>chr1\nAAAAAAAA\n",
+        ),
+        ("cabecera FASTA vacía", ">\nAAAAAAAA\n"),
+        ("bases que no son ADN", ">chr1\nAAAAZAAA\n"),
+        ("una secuencia sin ninguna base", ">chr1\n"),
+    ] {
+        let path = root.join("roto.fa");
+        fs::write(&path, contents).expect("FASTA roto");
+        let error = validate_published_vcf_semantics(&path, &truth_path, &vcf).expect_err(reason);
+        assert!(
+            matches!(error, VcfSemanticValidationError::Fasta { .. }),
+            "«{reason}» tiene que ser un rechazo del FASTA: {error:?}"
+        );
+    }
+
+    // Una forma más de FASTA roto que no es de sintaxis de línea, sino del
+    // conjunto: dos secuencias con el mismo nombre.
+    let duplicated = root.join("duplicada.fa");
+    fs::write(&duplicated, ">chr1\nAAAAAAAA\n>chr1\nAAAAAAAA\n").expect("FASTA duplicado");
+    let error = validate_published_vcf_semantics(&duplicated, &truth_path, &vcf)
+        .expect_err("dos secuencias con el mismo nombre");
+    assert!(
+        matches!(error, VcfSemanticValidationError::Fasta { .. }),
+        "{error:?}"
+    );
+
+    // Y dos rechazos del contrato VCF que tampoco pasaban por la constructora.
+    for (reason, expected_detail, contents) in [
+        (
+            "un registro antes de #CHROM",
+            "registro VCF antes de #CHROM",
+            valid_vcf().replacen("#CHROM", "chr1\t3\t.\tA\tG\t.\tPASS\tX\tGT\t1|0\n#CHROM", 1),
+        ),
+        (
+            "POS que no es un entero positivo",
+            "POS debe ser un entero positivo",
+            valid_vcf().replacen("chr1\t3\t", "chr1\t0\t", 1),
+        ),
+    ] {
+        let path = root.join("roto.vcf");
+        fs::write(&path, &contents).expect("VCF roto");
+        let error = validate_published_vcf_semantics(&fasta, &truth_path, &path).expect_err(reason);
+        let VcfSemanticValidationError::Vcf { detail, .. } = &error else {
+            panic!("«{reason}» se rechazó fuera del contrato VCF: {error:?}");
+        };
+        assert_eq!(
+            detail, expected_detail,
+            "«{reason}» se rechazó por otra razón"
+        );
+    }
+    fs::remove_dir_all(root).expect("limpieza");
+}

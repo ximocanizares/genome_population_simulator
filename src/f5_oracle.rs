@@ -301,12 +301,17 @@ impl From<F5OracleRejection> for Diagnostic {
     }
 }
 
+/// La anotación `#[track_caller]` y la llamada a `record` son el barrido de
+/// guardas descrito en [`crate::guard_trace`]: apagado no cuesta nada, y
+/// encendido anota **desde qué línea** se rechazó, no esta.
+#[track_caller]
 fn reject(
     cause: F5OracleCause,
     path: &str,
     field: &str,
     detail: impl Into<String>,
 ) -> F5OracleRejection {
+    crate::guard_trace::record();
     let diagnostic = Diagnostic::format(
         "GPS-FMT-101",
         "El paquete de perfiles F5 no satisface su formato, versión, orden o identidad declarada.",
@@ -318,7 +323,9 @@ fn reject(
     F5OracleRejection { cause, diagnostic }
 }
 
+#[track_caller]
 fn resource_reject(path: &str, detail: impl Into<String>) -> F5OracleRejection {
+    crate::guard_trace::record();
     let diagnostic = Diagnostic::resource(
         "GPS-RES-101",
         "Las dimensiones o presupuestos F5 exceden el límite declarado o duro.",
@@ -332,7 +339,9 @@ fn resource_reject(path: &str, detail: impl Into<String>) -> F5OracleRejection {
     }
 }
 
+#[track_caller]
 fn catalog_reject(detail: impl Into<String>) -> F5OracleRejection {
+    crate::guard_trace::record();
     let diagnostic = Diagnostic::internal(
         "GPS-INTERNAL-101",
         "Una operación F5 posterior a un preflight válido produjo overflow o un resultado numérico no finito pese a sus cotas verificadas.",
@@ -1623,6 +1632,9 @@ fn measure_artifact(root: &Path, path: &str) -> Checked<(u64, String)> {
 // Lector estricto de `truth.jsonl` v2
 // ---------------------------------------------------------------------------
 
+/// Envoltorio puro sobre [`reject`]. Lleva `#[track_caller]` para que el
+/// barrido anote el punto de rechazo real y no esta línea.
+#[track_caller]
 fn truth_reject(field: &str, detail: impl Into<String>) -> F5OracleRejection {
     reject(F5OracleCause::Truth, F5_TRUTH_PATH, field, detail)
 }
@@ -1754,6 +1766,8 @@ fn read_truth_header(line: &str) -> Checked<TruthHeader> {
     let projection = exact_object(
         object
             .get("projection")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("header", "sin projection"))?,
         "projection",
         &["kind", "projection_version", "scenario_id"],
@@ -1767,6 +1781,8 @@ fn read_truth_header(line: &str) -> Checked<TruthHeader> {
     let counts = exact_object(
         object
             .get("counts")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("header", "sin counts"))?,
         "counts",
         &["copies", "genotypes"],
@@ -1813,6 +1829,8 @@ fn read_truth_header(line: &str) -> Checked<TruthHeader> {
         let source = exact_object(
             entry
                 .get("source")
+                // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+                // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
                 .ok_or_else(|| truth_reject("source_digests", "sin source"))?,
             "source_digests.source",
             &["kind", "source_id"],
@@ -1896,6 +1914,8 @@ fn read_snp_provenance(
     let provenance = exact_object(
         object
             .get("provenance")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("copy.snp", "SNP sin procedencia"))?,
         "copy.snp.provenance",
         &["kind", "version", "source", "matrix"],
@@ -1915,6 +1935,8 @@ fn read_snp_provenance(
     let source = exact_object(
         provenance
             .get("source")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("copy.snp.provenance", "sin source"))?,
         "copy.snp.provenance.source",
         &["kind", "source_id"],
@@ -1930,6 +1952,8 @@ fn read_snp_provenance(
     let matrix = exact_object(
         provenance
             .get("matrix")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("copy.snp.provenance", "sin matrix"))?,
         "copy.snp.provenance.matrix",
         &["matrix_source_id", "population_id", "variant_id"],
@@ -1968,6 +1992,8 @@ fn read_segment_source(value: &Value, identity: &CopyKey) -> Checked<u64> {
     exact_object(
         source
             .get("source")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("copy.segment.source", "sin source"))?,
         "copy.segment.source.source",
         &["kind", "source_id"],
@@ -2011,6 +2037,8 @@ fn read_truth_copy(value: &Value, header: &TruthHeader) -> Checked<TruthCopy> {
     let identity = read_copy_identity(
         object
             .get("identity")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("copy", "sin identity"))?,
         "copy.identity",
     )?;
@@ -2021,6 +2049,8 @@ fn read_truth_copy(value: &Value, header: &TruthHeader) -> Checked<TruthCopy> {
     let membership = exact_object(
         object
             .get("founder_membership")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("copy", "sin founder_membership"))?,
         "copy.founder_membership",
         &["population_id", "founder_copy_id"],
@@ -2037,6 +2067,8 @@ fn read_truth_copy(value: &Value, header: &TruthHeader) -> Checked<TruthCopy> {
     let provenance = exact_object(
         object
             .get("provenance")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("copy", "sin provenance"))?,
         "copy.provenance",
         &["origin", "sources"],
@@ -2085,6 +2117,8 @@ fn read_truth_copy(value: &Value, header: &TruthHeader) -> Checked<TruthCopy> {
     let sequence_length = read_segment_source(
         segment
             .get("source")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("copy.segment", "sin source"))?,
         &identity,
     )?;
@@ -2178,6 +2212,8 @@ fn read_truth_copy(value: &Value, header: &TruthHeader) -> Checked<TruthCopy> {
     if read_segment_source(
         piece
             .get("source")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("copy.piece", "sin source"))?,
         &identity,
     )? != sequence_length
@@ -2517,6 +2553,9 @@ pub fn recount_f5_man70(truth_path: &Path) -> Checked<F5Man70Recount> {
             break;
         }
         if !closed_with_lf {
+            // Inalcanzable: una línea sin LF solo puede ser la última del fichero,
+            // y entonces la lectura siguiente devuelve cero y sale por el `break`. El
+            // documento sin LF final lo caza la comprobación homónima del cierre.
             return Err(truth_reject("eol", "falta el LF final"));
         }
         closed_with_lf = line.ends_with('\n');
@@ -2618,6 +2657,9 @@ pub fn recount_f5_man70(truth_path: &Path) -> Checked<F5Man70Recount> {
                 previous_locus = Some(key);
                 let population = header
                     .population(&placed.population_id)
+                    // Inalcanzable: `recount_genotype` acaba de resolver esta misma
+                    // subpoblación contra la misma cabecera y rechaza si falta. Ninguna
+                    // prueba la ejercita.
                     .ok_or_else(|| truth_reject("f5_locus", "subpoblación no declarada"))?;
                 if new_site {
                     if !placed_key(&mut placed_sites, placed) {
@@ -2644,6 +2686,8 @@ pub fn recount_f5_man70(truth_path: &Path) -> Checked<F5Man70Recount> {
                 }
                 let locus = loci
                     .last_mut()
+                    // Inalcanzable: `loci` solo está vacío antes del primer genotipo, y el
+                    // primero siempre abre locus porque `previous_locus` es `None`.
                     .ok_or_else(|| truth_reject("order", "un genotipo sin locus abierto"))?;
                 if locus.site_id != placed.site_id
                     || locus.sequence_id != placed.sequence_id
@@ -2661,6 +2705,8 @@ pub fn recount_f5_man70(truth_path: &Path) -> Checked<F5Man70Recount> {
                     ));
                 }
                 locus.counts[usize::try_from(placed.alternate_dosage).map_err(|_| {
+                    // Inalcanzable en 64 bits: la dosis está acotada por la ploidía, que ya
+                    // cabe en un byte. Se conserva por el tipo del documento.
                     truth_reject("carriers", "la dosis alternativa no cabe en usize")
                 })?] += 1;
                 genotypes += 1;
@@ -2712,6 +2758,9 @@ pub fn recount_f5_man70(truth_path: &Path) -> Checked<F5Man70Recount> {
         (&pair[0].population_id, &pair[0].block_id, &pair[0].site_id)
             >= (&pair[1].population_id, &pair[1].block_id, &pair[1].site_id)
     }) {
+        // Inalcanzable: lo implican las dos comprobaciones de orden de arriba —los
+        // grupos no se reabren y dentro de cada bloque el `site_id` crece—. Ninguna
+        // prueba la ejercita.
         return Err(truth_reject(
             "order",
             "los loci recontados no crecen por subpoblación, bloque y sitio",
@@ -2786,6 +2835,8 @@ fn recount_genotype(
     let locus = exact_object(
         object
             .get("locus")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("genotype", "sin locus"))?,
         "genotype.locus",
         &["sequence_id", "start", "end"],
@@ -2802,6 +2853,8 @@ fn recount_genotype(
     let f5_locus = exact_object(
         object
             .get("f5_locus")
+            // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+            // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
             .ok_or_else(|| truth_reject("genotype", "sin f5_locus"))?,
         "genotype.f5_locus",
         &["population_id", "block_id", "site_id", "ref", "alt"],
@@ -2898,6 +2951,8 @@ fn recount_genotype(
     {
         let carrier = exact_object(value, "genotype.carrier", &["allele_index", "copy"])?;
         let index = usize::try_from(number(carrier, "genotype.carrier", "allele_index")?)
+            // Inalcanzable en 64 bits: `allele_index` lo acota la lista de alelos, que
+            // ya está en memoria. Se conserva por el tipo del documento.
             .map_err(|_| truth_reject("genotype.carrier", "allele_index desbordado"))?;
         if index >= alleles.len() {
             return Err(truth_reject(
@@ -2908,6 +2963,8 @@ fn recount_genotype(
         let copy = read_copy_identity(
             carrier
                 .get("copy")
+                // Inalcanzable: el `exact_object` de arriba ya exigió esta clave, de modo
+                // que `get` nunca devuelve `None`. Ninguna prueba la ejercita.
                 .ok_or_else(|| truth_reject("genotype.carrier", "sin copy"))?,
             "genotype.carrier.copy",
         )?;

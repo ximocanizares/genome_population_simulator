@@ -1,0 +1,20 @@
+# Techo de guardas sin disparar por juez independiente.
+#
+# Lo comprueba scripts/check-guard-coverage.sh. La segunda columna es el número
+# de comprobaciones y **no es decorativa**: si baja, la puerta falla, porque
+# borrar una guarda baja a la vez las dos cifras y sin esta comparación pasaría
+# por una mejora. Si sube, avisa: significa que hay comprobaciones nuevas que
+# nadie ejercita todavía.
+#
+# La tercera columna es el techo de guardas sin disparar. Bajarla es el
+# objetivo; subirla exige justificarlo.
+#
+# La puerta mide si una guarda **se dispara**, no si una prueba fallaría en
+# caso de que la guarda estuviera mal escrita. Es un suelo, no un techo de
+# calidad.
+#
+# Medido el 23/09/2026.
+# modulo	comprobaciones	techo_sin_disparar
+src/f5_oracle.rs	365	168
+src/vcf_semantic_validation.rs	98	25
+src/f5_closure.rs	42	5

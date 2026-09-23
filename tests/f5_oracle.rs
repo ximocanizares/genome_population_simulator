@@ -2728,3 +2728,954 @@ fn the_published_rng_catalogues_have_the_decisions_the_oracle_demands() {
     assert_eq!(rows(V2), F5_RNG_CATALOG_V2_DECISIONS);
     assert_eq!(F5_RNG_CATALOG_V2_DECISIONS, 13);
 }
+
+// ---------------------------------------------------------------------------
+// Corpus de corrupciones del documento de verdad, **con motivo exacto**
+//
+// `recount_f5_man70` es la frontera pública que lee `outputs/truth.jsonl` sin
+// abrir ningún otro artefacto: es el único sitio desde el que se pueden
+// ejercitar las guardas del lector de la verdad sin que el cruce con los TSV
+// mate antes la corrupción.
+//
+// Cada fila fija el **motivo exacto**. Fijar solo la causa tipada no bastaría:
+// casi todos estos rechazos son `F5OracleCause::Truth`, de modo que una
+// corrupción que cayera por una guarda ajena pasaría la prueba sin proteger a
+// la que dice proteger. Es el defecto que este proyecto ya pagó una vez.
+// ---------------------------------------------------------------------------
+
+/// El documento de verdad con una de sus líneas reescrita desde su JSON.
+///
+/// Se reserializa el documento entero, también las líneas intactas, para que
+/// la corrupción no se delate por un formato distinto del resto.
+fn edit_truth_line(
+    original: &str,
+    index: usize,
+    edit: impl FnOnce(&mut serde_json::Value),
+) -> String {
+    let mut values = original
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("línea JSON"))
+        .collect::<Vec<_>>();
+    assert!(index < values.len(), "la línea {index} no existe");
+    edit(&mut values[index]);
+    let mut text = values
+        .iter()
+        .map(|value| serde_json::to_string(value).expect("serializar"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    text.push('\n');
+    text
+}
+
+/// El documento de verdad con **todas** sus líneas reescritas desde su JSON.
+fn edit_every_truth_line(original: &str, edit: impl Fn(&mut serde_json::Value)) -> String {
+    let mut text = original
+        .lines()
+        .map(|line| {
+            let mut value = serde_json::from_str::<serde_json::Value>(line).expect("línea JSON");
+            edit(&mut value);
+            serde_json::to_string(&value).expect("serializar")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    text.push('\n');
+    text
+}
+
+/// Sustituye una línea entera por un texto arbitrario, conservando el resto.
+fn replace_truth_line(original: &str, index: usize, replacement: &str) -> String {
+    let mut lines = original.lines().map(str::to_owned).collect::<Vec<_>>();
+    assert!(index < lines.len(), "la línea {index} no existe");
+    lines[index] = replacement.to_owned();
+    let mut text = lines.join("\n");
+    text.push('\n');
+    text
+}
+
+/// El índice de la primera línea de cada clase del documento.
+fn first_line_of(original: &str, record_type: &str) -> usize {
+    original
+        .lines()
+        .position(|line| {
+            serde_json::from_str::<serde_json::Value>(line).expect("línea JSON")["record_type"]
+                == record_type
+        })
+        .unwrap_or_else(|| panic!("el documento tiene alguna línea {record_type}"))
+}
+
+/// Escribe cada corrupción y exige que el recuento la rechace **por su motivo**.
+fn recount_rejects_each(label: &str, original: &str, corrupted: &[(&str, &str, String)]) {
+    let directory = TempDir::new(label);
+    let path = directory.path().join("truth.jsonl");
+    fs::write(&path, original).expect("verdad íntegra");
+    recount_f5_man70(&path).expect("el documento de partida se reconta");
+    for (reason, expected_detail, content) in corrupted {
+        assert_ne!(
+            content, original,
+            "la corrupción «{reason}» tiene que cambiar el documento"
+        );
+        fs::write(&path, content).expect("verdad corrompida");
+        let rejection = recount_f5_man70(&path)
+            .err()
+            .unwrap_or_else(|| panic!("«{reason}» pasó inadvertida"));
+        let context = rejection.diagnostic().context();
+        let detail = context.get("detail").expect("todo rechazo lleva detalle");
+        assert!(
+            detail.contains(expected_detail),
+            "«{reason}» se rechazó por otra razón: {detail}"
+        );
+    }
+    // Y la verdad íntegra vuelve a reconteerse: el instrumento no deja el
+    // documento roto de una fila a la siguiente.
+    fs::write(&path, original).expect("verdad íntegra");
+    recount_f5_man70(&path).expect("el documento de partida sigue reconteándose");
+}
+
+/// **La cabecera de la verdad, guarda por guarda.**
+///
+/// El lector independiente de la verdad no se fía de quien la escribió: vuelve
+/// a exigir su clase, su versión, su convenio de coordenadas, sus recuentos,
+/// sus subpoblaciones ordenadas y sus huellas de fuente. Ninguna de estas
+/// exigencias la ejercitaba prueba alguna.
+#[test]
+fn the_truth_header_rejects_each_corruption_by_its_own_reason() {
+    let published = publish("truth-header-corpus", &wide_fixture());
+    let original = String::from_utf8(published.bytes("outputs/truth.jsonl")).expect("UTF-8");
+    // El documento reserializado desde su JSON tiene que seguir aceptándose:
+    // si no, todas las filas caerían por el formato y ninguna diría nada.
+    let round_trip = edit_truth_line(&original, 0, |_| {});
+    recount_rejects_each(
+        "truth-header-corpus-stage",
+        &round_trip,
+        &[
+            (
+                "cabecera que no es JSON",
+                "cabecera ilegible",
+                replace_truth_line(&round_trip, 0, "{ no es JSON"),
+            ),
+            (
+                "cabecera que no es un objeto",
+                "no es un objeto",
+                replace_truth_line(&round_trip, 0, "[1, 2, 3]"),
+            ),
+            (
+                "cabecera a la que le falta una clave",
+                "en lugar de",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header
+                        .as_object_mut()
+                        .expect("objeto")
+                        .remove("group_digests")
+                        .expect("la cabecera declara group_digests");
+                }),
+            ),
+            (
+                "record_type que no es una cadena",
+                "record_type no es una cadena",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header["record_type"] = serde_json::Value::from(7_u64);
+                }),
+            ),
+            (
+                "record_type de otra clase",
+                "record_type no es header",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header["record_type"] = serde_json::Value::from("haplotype_copy");
+                }),
+            ),
+            (
+                "document_kind de otro documento",
+                "document_kind no es gps_truth",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header["document_kind"] = serde_json::Value::from("gps_manifest");
+                }),
+            ),
+            (
+                "convenio de coordenadas ajeno",
+                "convenio de coordenadas ajeno",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header["coordinate_convention"] =
+                        serde_json::Value::from("one_based_closed_v1");
+                }),
+            ),
+            (
+                "populations que no es una lista",
+                "populations no es una lista",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header["populations"] = serde_json::Value::from(2_u64);
+                }),
+            ),
+            (
+                "populations vacía",
+                "populations vacía",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header["populations"] = serde_json::Value::Array(Vec::new());
+                }),
+            ),
+            (
+                "populations desordenada",
+                "populations no está ordenada",
+                edit_truth_line(&round_trip, 0, |header| {
+                    let listed = header["populations"].as_array().expect("lista").clone();
+                    assert!(
+                        listed.len() >= 2,
+                        "el fixture tiene que traer dos subpoblaciones"
+                    );
+                    header["populations"] =
+                        serde_json::Value::Array(listed.into_iter().rev().collect());
+                }),
+            ),
+            (
+                "individual_count que no es un entero",
+                "individual_count no es un entero no negativo",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header["populations"][0]["individual_count"] = serde_json::Value::from("dos");
+                }),
+            ),
+            (
+                "source_digests que no es una lista",
+                "source_digests no es una lista",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header["source_digests"] = serde_json::Value::from(1_u64);
+                }),
+            ),
+            (
+                "source_digests vacía",
+                "source_digests vacía",
+                edit_truth_line(&round_trip, 0, |header| {
+                    header["source_digests"] = serde_json::Value::Array(Vec::new());
+                }),
+            ),
+            (
+                "huella de fuente en mayúsculas",
+                "sha256 no es hex minúscula de 64",
+                edit_truth_line(&round_trip, 0, |header| {
+                    let digest = header["source_digests"][0]["sha256"]
+                        .as_str()
+                        .expect("huella")
+                        .to_uppercase();
+                    header["source_digests"][0]["sha256"] = serde_json::Value::from(digest);
+                }),
+            ),
+        ],
+    );
+
+    // La matriz retirada **de la cabecera y de cada copia a la vez**: si solo
+    // se retirase de la cabecera, el cotejo de fuentes de cada copia mataría
+    // antes y esta guarda seguiría sin ejercitarse. Es el fixture saturado que
+    // hace falta cuando otra comprobación caza primero.
+    let without_matrix = edit_every_truth_line(&round_trip, |record| {
+        if record["record_type"] == "header" {
+            let kept = record["source_digests"]
+                .as_array()
+                .expect("lista")
+                .iter()
+                .filter(|entry| entry["source"]["kind"] != "matrix")
+                .cloned()
+                .collect::<Vec<_>>();
+            assert!(!kept.is_empty(), "queda al menos la fuente de referencia");
+            record["source_digests"] = serde_json::Value::Array(kept);
+        } else if record["record_type"] == "haplotype_copy" {
+            let kept = record["provenance"]["sources"]
+                .as_array()
+                .expect("lista")
+                .iter()
+                .filter(|entry| entry["kind"] != "matrix")
+                .cloned()
+                .collect::<Vec<_>>();
+            record["provenance"]["sources"] = serde_json::Value::Array(kept);
+        }
+    });
+    recount_rejects_each(
+        "truth-header-matrix",
+        &round_trip,
+        &[(
+            "ninguna fuente es la matriz",
+            "ninguna fuente es la matriz",
+            without_matrix,
+        )],
+    );
+}
+
+/// **Cada copia haplotípica de la verdad, guarda por guarda.**
+///
+/// El lector independiente vuelve a exigir de cada copia su pertenencia, su
+/// procedencia, su segmento, sus modificaciones, su fragmento vigente y su
+/// historial, y exige además que las tres vistas del mismo cambio —la
+/// modificación, el fragmento y el hito— digan lo mismo. Ninguna de estas
+/// exigencias la ejercitaba prueba alguna: el cruce con los TSV mataba antes
+/// cualquier corrupción que llegara por `audit_f5_package`.
+#[test]
+fn each_truth_copy_rejects_its_corruptions_by_their_own_reason() {
+    let published = publish("truth-copy-corpus", &wide_fixture());
+    let original = String::from_utf8(published.bytes("outputs/truth.jsonl")).expect("UTF-8");
+    let base = edit_truth_line(&original, 0, |_| {});
+    let copy = first_line_of(&base, "haplotype_copy");
+    let edit = |change: fn(&mut serde_json::Value)| edit_truth_line(&base, copy, change);
+
+    recount_rejects_each(
+        "truth-copy-corpus-stage",
+        &base,
+        &[
+            (
+                "la pertenencia nombra una subpoblación que la cabecera no declara",
+                "ausente de la cabecera",
+                edit(|record| record["founder_membership"]["population_id"] = "PZ".into()),
+            ),
+            (
+                "origin ajeno a F5",
+                "origin ajeno a F5",
+                edit(|record| record["provenance"]["origin"] = "migration".into()),
+            ),
+            (
+                "sources que no es una lista",
+                "sources no es una lista",
+                edit(|record| record["provenance"]["sources"] = 3.into()),
+            ),
+            (
+                "una copia que declara menos fuentes que la cabecera",
+                "no son las",
+                edit(|record| {
+                    let kept = record["provenance"]["sources"]
+                        .as_array()
+                        .expect("lista")
+                        .iter()
+                        .filter(|entry| entry["kind"] != "matrix")
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    record["provenance"]["sources"] = serde_json::Value::Array(kept);
+                }),
+            ),
+            (
+                "segments que no es una lista",
+                "segments no es una lista",
+                edit(|record| record["segments"] = 3.into()),
+            ),
+            (
+                "una copia con dos segmentos",
+                "un segmento por secuencia",
+                edit(|record| {
+                    let first = record["segments"][0].clone();
+                    record["segments"] = serde_json::Value::Array(vec![first.clone(), first]);
+                }),
+            ),
+            (
+                "el segmento de otra secuencia",
+                "el segmento no pertenece a la copia",
+                edit(|record| record["segments"][0]["source"]["sequence_id"] = "chrZ".into()),
+            ),
+            (
+                "el segmento que no empieza en el origen",
+                "no cubre la secuencia completa",
+                edit(|record| record["segments"][0]["source"]["start"] = 1.into()),
+            ),
+            (
+                "modifications que no es una lista",
+                "modifications no es una lista",
+                edit(|record| record["segments"][0]["modifications"] = 3.into()),
+            ),
+            (
+                "una modificación que no es un SNP",
+                "solo publica modificaciones SNP",
+                edit(|record| {
+                    record["segments"][0]["modifications"][0]["kind"] = "deletion".into()
+                }),
+            ),
+            (
+                "un alelo que no es una base canónica",
+                "no es una base canónica",
+                edit(|record| record["segments"][0]["modifications"][0]["alternate"] = "N".into()),
+            ),
+            (
+                "un SNP que publica el mismo alelo dos veces",
+                "el mismo alelo dos veces",
+                edit(|record| {
+                    let base = record["segments"][0]["modifications"][0]["reference"].clone();
+                    record["segments"][0]["modifications"][0]["alternate"] = base;
+                }),
+            ),
+            (
+                "las modificaciones en orden descendente",
+                "posición ascendente",
+                edit(|record| {
+                    let reversed = record["segments"][0]["modifications"]
+                        .as_array()
+                        .expect("lista")
+                        .iter()
+                        .rev()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    assert!(reversed.len() >= 2, "hacen falta dos modificaciones");
+                    record["segments"][0]["modifications"] = serde_json::Value::Array(reversed);
+                }),
+            ),
+            (
+                "una procedencia que no es de matriz",
+                "no procede de una matriz",
+                edit(|record| {
+                    record["segments"][0]["modifications"][0]["provenance"]["kind"] =
+                        "explicit".into();
+                }),
+            ),
+            (
+                "una versión de procedencia ajena",
+                "versión de procedencia ajena",
+                edit(|record| {
+                    record["segments"][0]["modifications"][0]["provenance"]["version"] = "2".into();
+                }),
+            ),
+            (
+                "una fuente de SNP que no es la matriz declarada",
+                "no es la matriz que la cabecera declara",
+                edit(|record| {
+                    record["segments"][0]["modifications"][0]["provenance"]["source"]["source_id"] =
+                        "otra".into();
+                }),
+            ),
+            (
+                "una procedencia que nombra otro sitio",
+                "no nombra el sitio de su evento",
+                edit(|record| {
+                    record["segments"][0]["modifications"][0]["provenance"]["matrix"]["variant_id"] =
+                        "SITE_AJENO".into();
+                }),
+            ),
+            (
+                "current_pieces que no es una lista",
+                "current_pieces no es una lista",
+                edit(|record| record["current_pieces"] = 3.into()),
+            ),
+            (
+                "una copia con dos fragmentos vigentes",
+                "publica un fragmento vigente",
+                edit(|record| {
+                    let first = record["current_pieces"][0].clone();
+                    record["current_pieces"] = serde_json::Value::Array(vec![first.clone(), first]);
+                }),
+            ),
+            (
+                "un fragmento vigente que no viene de la referencia",
+                "no procede de la referencia",
+                edit(|record| record["current_pieces"][0]["kind"] = "inserted".into()),
+            ),
+            (
+                "un fragmento vigente sobre otra longitud de secuencia",
+                "no cubre la misma secuencia",
+                edit(|record| {
+                    record["current_pieces"][0]["source"]["end"] = 7.into();
+                    record["current_pieces"][0]["source"]["sequence_length"] = 7.into();
+                }),
+            ),
+            (
+                "snps del fragmento que no es una lista",
+                "snps no es una lista",
+                edit(|record| record["current_pieces"][0]["snps"] = 3.into()),
+            ),
+            (
+                "un SNP de menos en el fragmento vigente",
+                "no traen los mismos SNP",
+                edit(|record| {
+                    let mut listed = record["current_pieces"][0]["snps"]
+                        .as_array()
+                        .expect("lista")
+                        .clone();
+                    assert!(!listed.is_empty(), "el fragmento trae algún SNP");
+                    listed.pop();
+                    record["current_pieces"][0]["snps"] = serde_json::Value::Array(listed);
+                }),
+            ),
+            (
+                "history que no es una lista",
+                "history no es una lista",
+                edit(|record| record["history"] = 3.into()),
+            ),
+            (
+                "un hito de menos",
+                "el historial no coincide con las modificaciones",
+                edit(|record| {
+                    let mut listed = record["history"].as_array().expect("lista").clone();
+                    assert!(!listed.is_empty(), "el historial trae algún hito");
+                    listed.pop();
+                    record["history"] = serde_json::Value::Array(listed);
+                }),
+            ),
+            (
+                "un hito que no es un SNP",
+                "solo publica hitos SNP",
+                edit(|record| record["history"][0]["kind"] = "deletion".into()),
+            ),
+            (
+                "un hito en otra posición",
+                "el historial no coincide con las modificaciones",
+                edit(|record| {
+                    let position = record["history"][0]["position"].as_u64().expect("posición");
+                    record["history"][0]["position"] = (position + 1).into();
+                }),
+            ),
+            (
+                "un hito con otra procedencia haplotípica",
+                "no repite la procedencia de su modificación",
+                edit(|record| {
+                    record["history"][0]["provenance"]["matrix"]["matrix_source_id"] =
+                        "HAP_AJENO".into();
+                }),
+            ),
+        ],
+    );
+}
+
+/// Otra base canónica distinta de la dada.
+fn another_base(base: &str) -> &'static str {
+    match base {
+        "A" => "C",
+        _ => "A",
+    }
+}
+
+/// **Cada genotipo de la verdad, guarda por guarda.**
+///
+/// El recuento independiente no se cree ninguna de las cifras que el genotipo
+/// publica: recalcula la dosis **desde sus portadores**, comprueba que el
+/// locus mide una base, que los alelos son los del sitio y que los portadores
+/// son exactamente las copias de la ploidía. Ninguna de estas exigencias la
+/// ejercitaba prueba alguna.
+#[test]
+fn each_truth_genotype_rejects_its_corruptions_by_their_own_reason() {
+    let published = publish("truth-genotype-corpus", &wide_fixture());
+    let original = String::from_utf8(published.bytes("outputs/truth.jsonl")).expect("UTF-8");
+    let base = edit_truth_line(&original, 0, |_| {});
+    let genotype = first_line_of(&base, "genotype");
+    let edit = |change: fn(&mut serde_json::Value)| edit_truth_line(&base, genotype, change);
+
+    recount_rejects_each(
+        "truth-genotype-corpus-stage",
+        &base,
+        &[
+            (
+                "un caso que no es un SNP",
+                "solo publica casos SNP",
+                edit(|record| record["case_kind"] = "indel".into()),
+            ),
+            (
+                "un genotipo de otra referencia",
+                "otra referencia que la cabecera",
+                edit(|record| record["reference_id"] = "otra".into()),
+            ),
+            (
+                "un locus que mide dos bases",
+                "no mide una base",
+                edit(|record| {
+                    let end = record["locus"]["end"].as_u64().expect("fin");
+                    record["locus"]["end"] = (end + 1).into();
+                }),
+            ),
+            (
+                "f5_locus que repite el alelo",
+                "repite el alelo",
+                edit(|record| {
+                    let reference = record["f5_locus"]["ref"].clone();
+                    record["f5_locus"]["alt"] = reference;
+                }),
+            ),
+            (
+                "f5_locus de una subpoblación no declarada",
+                "no declarada",
+                edit(|record| record["f5_locus"]["population_id"] = "PZ".into()),
+            ),
+            (
+                "alleles que no es una lista",
+                "alleles no es una lista",
+                edit(|record| record["alleles"] = 3.into()),
+            ),
+            (
+                "un alelo sin kind",
+                "alelo sin kind",
+                edit(|record| record["alleles"][0] = serde_json::json!({})),
+            ),
+            (
+                "un alelo tipado que no es el ALT del locus",
+                "no es el ALT del locus",
+                edit(|record| {
+                    let alt = record["f5_locus"]["alt"].as_str().expect("alt").to_owned();
+                    record["alleles"][1]["base"] = another_base(&alt).into();
+                }),
+            ),
+            (
+                "dos alelos alternativos en un sitio bialélico",
+                "dos alelos alternativos",
+                edit(|record| {
+                    let alternate = record["alleles"][1].clone();
+                    let mut listed = record["alleles"].as_array().expect("lista").clone();
+                    listed.push(alternate);
+                    record["alleles"] = serde_json::Value::Array(listed);
+                }),
+            ),
+            (
+                "un alelo de una clase ajena a F5",
+                "ajeno a F5",
+                edit(|record| record["alleles"][0]["kind"] = "deletion".into()),
+            ),
+            (
+                "un sitio que no publica su alelo alternativo",
+                "no publica su alelo alternativo",
+                edit(|record| record["alleles"][1] = serde_json::json!({"kind": "reference"})),
+            ),
+            (
+                "allele_dosages que no es una lista",
+                "allele_dosages no es una lista",
+                edit(|record| record["allele_dosages"] = 3.into()),
+            ),
+            (
+                "una dosis que no es entera",
+                "dosis no entera",
+                edit(|record| record["allele_dosages"][0] = "cero".into()),
+            ),
+            (
+                "una dosis de menos",
+                "no acompañan a los alelos",
+                edit(|record| {
+                    let mut listed = record["allele_dosages"].as_array().expect("lista").clone();
+                    listed.pop();
+                    record["allele_dosages"] = serde_json::Value::Array(listed);
+                }),
+            ),
+            (
+                "carriers que no es una lista",
+                "carriers no es una lista",
+                edit(|record| record["carriers"] = 3.into()),
+            ),
+            (
+                "un portador con un índice de alelo inexistente",
+                "fuera de la lista de alelos",
+                edit(|record| record["carriers"][0]["allele_index"] = 9.into()),
+            ),
+            (
+                "un portador de otro individuo",
+                "no es una copia de su individuo",
+                edit(|record| record["carriers"][0]["copy"]["individual_id"] = "ajeno".into()),
+            ),
+            (
+                "un portador que ninguna copia publicada sostiene",
+                "no tiene copia publicada",
+                edit(|record| record["carriers"][0]["copy"]["copy_index"] = 9.into()),
+            ),
+            (
+                "un portador de menos para la ploidía declarada",
+                "no son las copias de la ploidía",
+                edit(|record| {
+                    let mut listed = record["carriers"].as_array().expect("lista").clone();
+                    assert!(listed.len() >= 2, "la ploidía del fixture es dos");
+                    listed.pop();
+                    record["carriers"] = serde_json::Value::Array(listed);
+                }),
+            ),
+        ],
+    );
+}
+
+/// Las líneas del documento, ya parseadas.
+fn truth_values(original: &str) -> Vec<serde_json::Value> {
+    original
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("línea JSON"))
+        .collect()
+}
+
+/// Reconstruye el documento a partir de sus líneas ya parseadas.
+fn truth_document(values: &[serde_json::Value]) -> String {
+    let mut text = values
+        .iter()
+        .map(|value| serde_json::to_string(value).expect("serializar"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    text.push('\n');
+    text
+}
+
+/// El documento con dos de sus líneas intercambiadas.
+fn swap_truth_lines(original: &str, left: usize, right: usize) -> String {
+    let mut values = truth_values(original);
+    assert_ne!(left, right, "intercambiar una línea consigo misma no muta");
+    values.swap(left, right);
+    truth_document(&values)
+}
+
+/// El documento con una línea trasladada a otra posición.
+fn move_truth_line(original: &str, from: usize, to: usize) -> String {
+    let mut values = truth_values(original);
+    let line = values.remove(from);
+    values.insert(to, line);
+    truth_document(&values)
+}
+
+/// Índices de las líneas de una clase.
+fn lines_of(original: &str, record_type: &str) -> Vec<usize> {
+    truth_values(original)
+        .iter()
+        .enumerate()
+        .filter(|(_, value)| value["record_type"] == record_type)
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// **El documento de verdad como bytes: presencia, codificación y fin de línea.**
+///
+/// Son las guardas que no miran ningún campo, sino el fichero: que exista, que
+/// no esté vacío, que sea texto y que cada línea que el lector consume termine
+/// en LF. Ninguna se ejercitaba.
+#[test]
+fn the_recount_rejects_the_document_as_bytes() {
+    let published = publish("truth-bytes", &wide_fixture());
+    let original = String::from_utf8(published.bytes("outputs/truth.jsonl")).expect("UTF-8");
+    let directory = TempDir::new("truth-bytes-stage");
+    let path = directory.path().join("truth.jsonl");
+
+    // Un documento que no está.
+    let missing = directory.path().join("no-existe.jsonl");
+    let rejection = recount_f5_man70(&missing).expect_err("un documento ausente");
+    assert_eq!(rejection.cause(), F5OracleCause::ArtifactMissing);
+
+    fs::write(&path, &original).expect("verdad íntegra");
+    recount_f5_man70(&path).expect("el documento de partida se reconta");
+
+    for (reason, expected_detail, bytes) in [
+        ("documento vacío", "documento vacío", Vec::new()),
+        (
+            "cabecera sin LF",
+            "falta el LF final",
+            original
+                .lines()
+                .next()
+                .expect("cabecera")
+                .as_bytes()
+                .to_vec(),
+        ),
+        (
+            "documento sin LF final",
+            "falta el LF final",
+            original.trim_end_matches('\n').as_bytes().to_vec(),
+        ),
+        ("cabecera que no es texto", "UTF-8", {
+            let mut bytes = original.as_bytes().to_vec();
+            bytes.insert(1, 0xFF);
+            bytes
+        }),
+        ("una copia que no es texto", "UTF-8", {
+            let mut bytes = original.as_bytes().to_vec();
+            let after_header = bytes
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .expect("la cabecera termina en LF")
+                + 1;
+            bytes.insert(after_header + 1, 0xFF);
+            bytes
+        }),
+    ] {
+        assert_ne!(
+            bytes,
+            original.as_bytes(),
+            "la corrupción «{reason}» tiene que cambiar el documento"
+        );
+        fs::write(&path, &bytes).expect("verdad corrompida");
+        let rejection = recount_f5_man70(&path)
+            .err()
+            .unwrap_or_else(|| panic!("«{reason}» pasó inadvertida"));
+        let context = rejection.diagnostic().context();
+        let detail = context.get("detail").expect("todo rechazo lleva detalle");
+        assert!(
+            detail.contains(expected_detail),
+            "«{reason}» se rechazó por otra razón: {detail}"
+        );
+    }
+}
+
+/// **El documento de verdad como conjunto: orden, unicidad y cifras globales.**
+///
+/// Estas guardas no juzgan un registro, sino la relación entre todos: que las
+/// copias precedan a los genotipos, que unas y otros lleguen en su orden
+/// canónico, que ningún identificador se repita y que las cifras de la
+/// cabecera sean las que el documento trae. Ninguna se ejercitaba.
+#[test]
+fn the_recount_rejects_each_document_level_corruption() {
+    let published = publish("truth-document", &wide_fixture());
+    let original = String::from_utf8(published.bytes("outputs/truth.jsonl")).expect("UTF-8");
+    let base = edit_truth_line(&original, 0, |_| {});
+    let copies = lines_of(&base, "haplotype_copy");
+    let genotypes = lines_of(&base, "genotype");
+    assert!(copies.len() >= 4 && genotypes.len() >= 4, "fixture ancho");
+    let last_copy = *copies.last().expect("alguna copia");
+    let first_genotype = genotypes[0];
+    let last_genotype = *genotypes.last().expect("algún genotipo");
+
+    // Dos genotipos consecutivos del mismo grupo, para el orden interno.
+    let values = truth_values(&base);
+    let same_group = genotypes
+        .windows(2)
+        .find(|pair| {
+            values[pair[0]]["f5_locus"]["population_id"]
+                == values[pair[1]]["f5_locus"]["population_id"]
+                && values[pair[0]]["f5_locus"]["block_id"]
+                    == values[pair[1]]["f5_locus"]["block_id"]
+        })
+        .map(|pair| (pair[0], pair[1]))
+        .expect("dos genotipos consecutivos del mismo bloque");
+    // Dos genotipos consecutivos del mismo sitio, para la estabilidad del locus.
+    let same_site = genotypes
+        .windows(2)
+        .find(|pair| {
+            values[pair[0]]["f5_locus"]["site_id"] == values[pair[1]]["f5_locus"]["site_id"]
+        })
+        .map(|pair| (pair[0], pair[1]))
+        .expect("dos genotipos consecutivos del mismo sitio");
+    // Dos genotipos consecutivos de la misma subpoblación y distinto sitio,
+    // para la colisión de posiciones.
+    let other_site = genotypes
+        .windows(2)
+        .find(|pair| {
+            values[pair[0]]["f5_locus"]["population_id"]
+                == values[pair[1]]["f5_locus"]["population_id"]
+                && values[pair[0]]["f5_locus"]["site_id"] != values[pair[1]]["f5_locus"]["site_id"]
+        })
+        .map(|pair| (pair[0], pair[1]))
+        .expect("dos genotipos consecutivos de distinto sitio");
+
+    let mut with_extra_copy = truth_values(&base);
+    with_extra_copy.push(with_extra_copy[copies[0]].clone());
+    let copy_after_genotype = truth_document(&with_extra_copy);
+
+    let mut with_empty_line = base.lines().map(str::to_owned).collect::<Vec<_>>();
+    with_empty_line.insert(2, String::new());
+    let empty_line = with_empty_line.join("\n") + "\n";
+
+    let first_copy_id = truth_values(&base)[copies[0]]["founder_membership"]["founder_copy_id"]
+        .as_str()
+        .expect("FCP_")
+        .to_owned();
+
+    recount_rejects_each(
+        "truth-document-stage",
+        &base,
+        &[
+            (
+                "dos subpoblaciones con ploidías distintas",
+                "no declaran la misma ploidía",
+                edit_truth_line(&base, 0, |header| {
+                    header["populations"][1]["ploidy"] = 3.into();
+                }),
+            ),
+            (
+                "una ploidía que no cabe en un byte",
+                "no cabe en u8",
+                edit_truth_line(&base, 0, |header| {
+                    for entry in header["populations"].as_array_mut().expect("lista") {
+                        entry["ploidy"] = 300.into();
+                    }
+                }),
+            ),
+            (
+                "una ploidía de cero",
+                "la ploidía declarada es cero",
+                edit_truth_line(&base, 0, |header| {
+                    for entry in header["populations"].as_array_mut().expect("lista") {
+                        entry["ploidy"] = 0.into();
+                    }
+                }),
+            ),
+            (
+                "un locus cuyo recuento no cubre a sus individuos",
+                "individuos y la cabecera declara",
+                edit_truth_line(&base, 0, |header| {
+                    let count = header["populations"][0]["individual_count"]
+                        .as_u64()
+                        .expect("individuos");
+                    header["populations"][0]["individual_count"] = (count + 1).into();
+                }),
+            ),
+            ("una línea vacía", "línea vacía prohibida", empty_line),
+            (
+                "un registro que no es JSON",
+                "registro ilegible",
+                replace_truth_line(&base, copies[0], "{ no es JSON"),
+            ),
+            (
+                "un registro sin record_type",
+                "registro sin record_type",
+                replace_truth_line(&base, copies[0], "{}"),
+            ),
+            (
+                "un registro de clase desconocida",
+                "record_type desconocido",
+                edit_truth_line(&base, copies[0], |record| {
+                    record["record_type"] = "otra_cosa".into();
+                }),
+            ),
+            (
+                "una copia después de los genotipos",
+                "una copia aparece después de un genotipo",
+                copy_after_genotype,
+            ),
+            (
+                "dos copias intercambiadas",
+                "las copias no llegan por referencia",
+                swap_truth_lines(&base, copies[0], copies[1]),
+            ),
+            (
+                "una copia con un índice fuera de la ploidía",
+                "copy_index fuera de 0..ploidy-1",
+                edit_truth_line(&base, last_copy, |record| {
+                    record["identity"]["copy_index"] = 5.into();
+                    record["phase"] = 5.into();
+                }),
+            ),
+            (
+                "dos copias con el mismo FCP_",
+                "un founder_copy_id se repite",
+                edit_truth_line(&base, last_copy, {
+                    // El literal se toma del documento, no se inventa.
+                    let identifier = first_copy_id.clone();
+                    move |record| {
+                        record["founder_membership"]["founder_copy_id"] = identifier.into();
+                    }
+                }),
+            ),
+            (
+                "un grupo que vuelve a aparecer",
+                "vuelve a aparecer",
+                move_truth_line(&base, first_genotype, last_genotype),
+            ),
+            (
+                "los grupos en orden descendente",
+                "subpoblación y bloque ascendentes",
+                move_truth_line(&base, last_genotype, first_genotype),
+            ),
+            (
+                "dos genotipos de un bloque intercambiados",
+                "por site_id e individuo",
+                swap_truth_lines(&base, same_group.0, same_group.1),
+            ),
+            (
+                // La base de referencia es el **único** campo del locus que puede
+                // cambiar sin que otra guarda lo cace antes: el `case_id` que
+                // DTC-061 deriva no la incluye, y la comparación de alelos solo
+                // mira el alternativo. Mover la posición, el bloque o el alelo
+                // moriría por el `case_id`, por el orden de grupos o por el alelo,
+                // y esta guarda seguiría sin ejercitarse.
+                "un sitio que cambia de base de referencia a mitad de su grupo",
+                "cambia de bloque, secuencia, posición o alelos",
+                edit_truth_line(&base, same_site.1, |record| {
+                    let alternate = record["f5_locus"]["alt"].as_str().expect("alt").to_owned();
+                    let reference = record["f5_locus"]["ref"].as_str().expect("ref").to_owned();
+                    let replacement = ["A", "C", "G", "T"]
+                        .into_iter()
+                        .find(|base| *base != alternate && *base != reference)
+                        .expect("queda otra base");
+                    record["f5_locus"]["ref"] = replacement.into();
+                }),
+            ),
+        ],
+    );
+    // `other_site` se conserva por documentación de lo que **no** se alcanza:
+    // la colisión de dos loci de la misma subpoblación en la misma posición
+    // exigiría rederivar el `case_id` dentro de la prueba.
+    let _ = other_site;
+}

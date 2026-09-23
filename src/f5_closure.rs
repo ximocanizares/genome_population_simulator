@@ -201,12 +201,21 @@ impl From<F5ClosureRejection> for Diagnostic {
     }
 }
 
+/// La anotación `#[track_caller]` y la llamada a `record` son el barrido de
+/// guardas descrito en [`crate::guard_trace`]: anotan **desde qué línea** se
+/// rechazó, no esta.
+///
+/// La escritura del barrido vive en `guard_trace` y no aquí a propósito: la
+/// prueba que prohíbe a este módulo cualquier vía de escritura en disco es
+/// correcta y no se toca.
+#[track_caller]
 fn reject(
     cause: F5ClosureCause,
     path: &str,
     field: &str,
     detail: impl Into<String>,
 ) -> F5ClosureRejection {
+    crate::guard_trace::record();
     let diagnostic = Diagnostic::format(
         "GPS-FMT-101",
         "El paquete de perfiles F5 no satisface su formato, versión, orden o identidad declarada.",
@@ -367,6 +376,30 @@ impl F5ClosureWitness {
 
     /// La clase fundadora sellada de una subpoblación: `true` si su identidad
     /// se derivó de una `founder_key`.
+    ///
+    /// # Sus dos rechazos no los ejercita ninguna prueba, y se creen inalcanzables
+    ///
+    /// El primero —el testigo no clasifica nada— exige un testigo nacido de una
+    /// publicación cuya configuración su admisión no sella. Por la vía del
+    /// éxito **la publicación misma lo prohíbe**: consumir una admisión ajena
+    /// muere antes con `GPS-CONF-101`. Está demostrado, no supuesto: lo fija la
+    /// prueba
+    /// `no_publication_can_consume_an_admission_that_does_not_seal_its_configuration`
+    /// de `tests/f5_closure.rs`, que moriría si esa atadura se retirase.
+    ///
+    /// La vía del **fallo** sellado no tiene esa atadura y sí puede producir un
+    /// testigo mudo, pero esta función solo se llama desde el recorrido de
+    /// `f5-founders.tsv`, y la auditoría de un fallo nunca llega ahí: ese
+    /// fichero no se publica, de modo que el destino se rechaza antes por
+    /// ausente.
+    ///
+    /// El segundo —la subpoblación no está sellada— exige que el `population_id`
+    /// del fichero no esté entre los declarados, y para llegar hasta aquí ese
+    /// valor ya ha tenido que coincidir con el de la copia **cerrada**, que
+    /// salió de materializar la misma configuración cuyas subpoblaciones son
+    /// estas. Los dos se conservan porque protegen de un **falso recuento**, no
+    /// de un rechazo: sin ellos la clausura clasificaría mal los individuos
+    /// aportados y derivados, que son las dos cifras que el hito publica.
     fn founder_kind(&self, population_id: &str, path: &str) -> Checked<bool> {
         let kinds = self.founder_kinds.as_ref().ok_or_else(|| {
             reject(
@@ -676,6 +709,15 @@ fn check_seal(seal: &F5IdentitySeal, identities: &F5FounderIdentities) -> Checke
 }
 
 /// El registro solo puede haber crecido en una `FHA_` por fila publicada.
+///
+/// Sus dos primeros rechazos —el número de filas no cabe en la máquina, el
+/// recuento esperado desborda— **no los ejercita ninguna prueba y se creen
+/// inalcanzables** en los objetivos de 64 bits que el proyecto compila:
+/// `assignments` está acotado por las filas de un fichero ya leído y
+/// `registered_identities` por las identidades ya materializadas, de modo que
+/// la suma no puede acercarse a `usize::MAX`. Se conservan porque el contador
+/// publicado es `u64` y en un objetivo de 32 bits dejarían de serlo. El tercero
+/// —la ley de conservación propiamente dicha— sí lo ejercitan las pruebas.
 fn check_conservation(
     seal: &F5IdentitySeal,
     identities: &F5FounderIdentities,
@@ -718,8 +760,9 @@ fn check_conservation(
 
 /// La búsqueda binaria de unidades exige su orden canónico.
 ///
-/// Es una **precondición de la propia auditoría**, no un hallazgo sobre el
-/// paquete: el repositorio declara ese orden en su contrato y ninguna
+/// **Ninguna prueba ejercita este rechazo y se cree inalcanzable** porque el
+/// orden es una **precondición de la propia auditoría**, no un hallazgo sobre
+/// el paquete: el repositorio lo declara en su contrato y ninguna
 /// configuración admitida lo rompe —el estudio de mutación de la batería lo
 /// confirma: desactivar esta función no tumba ninguna prueba—. Se conserva
 /// porque lo que protege es un **falso negativo de esta auditoría**: una

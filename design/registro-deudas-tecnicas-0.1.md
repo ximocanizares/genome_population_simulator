@@ -28,7 +28,7 @@ documenta mejor.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (23/09/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | Abierta |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | Abierta |
@@ -38,94 +38,133 @@ documenta mejor.
 
 ## DT-001. Los verificadores independientes están casi sin probar
 
-**Gravedad: grave.** Es la deuda más importante del proyecto hoy.
+**Gravedad: grave.** Sigue siendo la deuda más importante del proyecto, pero el
+23 de septiembre de 2026 se cerró su mitad más peligrosa y se puso una puerta
+que impide que vuelva a crecer sin que nadie se entere.
 
 ### Qué pasa
 
 Los tres módulos que actúan como **jueces independientes** —los que permiten
-afirmar que la verdad publicada es correcta— tienen la mayoría de sus
-comprobaciones **sin ejercitar por ninguna prueba**:
+afirmar que la verdad publicada es correcta— tenían la mayoría de sus
+comprobaciones **sin ejercitar por ninguna prueba**. Estas son las dos
+mediciones, hechas con el mismo método y con la misma regla de recuento:
 
-| Verificador | Comprobaciones | Nunca se disparan |
-|---|---|---|
-| Oráculo de aceptación del paquete de haplotipos (`src/f5_oracle.rs`) | 366 | **253 (69 %)** |
-| Oráculo semántico del formato VCF (`src/vcf_semantic_validation.rs`) | 58 | **36 (62 %)** |
-| Auditoría de identidad y publicación (`src/f5_closure.rs`) | 42 | 11 (26 %) |
+| Verificador | Comprobaciones | Nunca se disparaban (21/09) | Comprobaciones hoy | Nunca se disparan hoy |
+|---|---|---|---|---|
+| Oráculo de aceptación del paquete (`src/f5_oracle.rs`) | 365 | 252 | 365 | **168** |
+| Oráculo semántico del VCF (`src/vcf_semantic_validation.rs`) | 77 | 39 | 98 | **25** |
+| Auditoría de identidad y publicación (`src/f5_closure.rs`) | 42 | 11 | 42 | **5** |
 
-De las 253 del primero, 21 son autocomprobaciones contra catálogos compilados
-—inalcanzables a propósito— y 4 están declaradas en el código como defensa
-inalcanzable. **Quedan 228 comprobaciones de contrato ordinarias que nadie ha
-probado nunca.**
+Tres advertencias sobre la comparación, para que nadie la lea mal:
 
-### Por qué importa más que un fallo corriente
+- **El verificador del VCF creció dos veces.** Tenía 58 comprobaciones el 21 de
+  septiembre y 77 el 23: los microsatélites le añadieron veinte, de las que
+  diecisiete ya nacían ejercitadas y tres no. Y después pasó a 98, que es lo
+  que **siempre** tuvo: trece rechazos se construían a mano en vez de pasar por
+  una constructora, y con ellos otros ocho quedaban sin contar. La revisión
+  adversarial lo encontró. Al enderezarlos, las guardas sin disparar saltaron
+  de 17 a 37 —de modo que veinte estaban muertas y nadie podía saberlo— y
+  bajaron a 25 al cubrirlas.
+- **El oráculo grande mide 365 y no 366.** La cifra anterior contaba también
+  la llamada que hace el envoltorio `truth_reject` a `reject`, que no es un
+  punto de rechazo sino un renombre. El resto de las cifras coincide
+  exactamente, de modo que las dos mediciones son comparables.
+- **Un rechazo fuera de la constructora es invisible para la puerta**: no se
+  cuenta en el denominador y no se anota al dispararse. Por eso hay ahora una
+  prueba léxica que prohíbe construir el error del verificador del VCF fuera
+  de sus cinco constructoras, y una que exige que cada constructora lleve la
+  anotación que la ata al barrido.
 
-Estos módulos **no producen datos: los verifican**. Si una de esas
-comprobaciones estuviera mal escrita —invertida, mirando la columna equivocada,
-comparando algo consigo mismo—, la batería entera no lo notaría. El resultado no
-sería un error visible, sino **un dato incorrecto que alguien se cree**.
+En la auditoría de identidad, **todas** las comprobaciones que quedan sin
+disparar están documentadas en su propio código como inalcanzables, con su
+porqué. En el verificador del VCF lo están veintiuna de las veinticinco; las
+**cuatro** restantes llevan escrito que **no se ha demostrado que sean
+inalcanzables** y que quedan pendientes, que es más honrado que suponerlo: las
+dos del cálculo del genotipo esperado y dos del análisis de una secuencia
+FASTA.
 
-Las peor cubiertas son precisamente las que vigilan la verdad publicada:
+### La puerta
 
-| Función | Puntos de rechazo | Muertos |
-|---|---|---|
-| `recount_f5_man70`, recuento independiente desde la verdad | 30 | **30** |
-| `read_truth_copy`, validación de cada copia haplotípica | 26 | **26** |
-| `recount_genotype`, validación de cada genotipo | 25 | **24** |
-| `read_truth_header`, cabecera de la verdad | 13 | **13** |
+`scripts/check-guard-coverage.sh <directorio-nuevo>` corre la batería con el
+barrido encendido y compara el resultado con `scripts/guard-coverage-baseline.tsv`,
+que declara por juez **cuántas comprobaciones tiene** y **cuántas pueden quedar
+sin disparar**. Las dos columnas se comprueban: sin la primera, borrar una
+guarda bajaría las dos cifras a la vez y la puerta lo tomaría por una mejora.
+Si el número de comprobaciones baja, la puerta falla; si sube, avisa. Las piezas son tres: la anotación
+`#[track_caller]` en las constructoras de error de cada juez,
+`src/guard_trace.rs`, que anota la línea de cada rechazo cuando la variable de
+entorno `GPS_GUARD_TRACE_DIR` nombra un directorio, y `scripts/guard-sites.awk`,
+que enumera los puntos de rechazo del texto fuente.
 
-Y en el verificador del formato VCF está muerta **la comprobación que ata la
-columna de referencia al genoma real** (`validate_reference_allele`, el rechazo
-«REF no coincide con el FASTA autoritativo»). Verificado de forma independiente:
-esa frase **solo aparece en su propio módulo**; ninguna prueba la provoca.
-También están muertas las dos direcciones de «el VCF dice exactamente lo que
-dice la verdad, ni más ni menos», y **todo el contrato de cabecera del VCF**.
+**Qué mide esa puerta y qué no**, dicho sin adornos: mide si una guarda **se
+dispara**, no si una prueba **fallaría** en caso de que la guarda estuviera mal
+escrita. Son cosas distintas y la segunda es la que importa. Una prueba que
+provoca un rechazo sin exigir **cuál** rechazo satisface la puerta igual que
+una que exige el motivo exacto. Por eso la puerta es un **suelo** y no un
+techo: impide que la cobertura caiga sin aviso, y nada más. Lo que demuestra
+que una guarda está probada sigue siendo mutarla y ver morir la prueba.
 
-Además, el mecanismo que impone que cada unidad bloque×subpoblación aparezca
-**exactamente una vez y en orden ascendente** en cuatro de los siete ficheros
-publicados tiene sus cuatro rechazos muertos. La batería de corrupciones sí
-intercambia filas, pero siempre **dentro de la misma unidad**, que es justo lo
-que ese mecanismo no vigila.
+### Lo que se cubrió, y cómo se demostró
 
-### Cómo se midió, y cómo rehacerlo
+Las guardas nuevas se cubrieron con corpus de corrupciones que exigen el
+**motivo exacto** del rechazo, no solo que haya rechazo, porque casi todas
+comparten causa tipada. Cada una se verificó **mutando la guarda una sola vez y
+comprobando que la prueba muere**, con la huella del fichero antes y después y
+la copia de seguridad fuera de git. **132 mutaciones en total y ninguna
+sobrevivió**: 127 sobre comprobaciones concretas —126 distintas, porque la que
+ata la columna de referencia al genoma real se comprobó de dos maneras— y cinco
+sobre las dos guardas léxicas nuevas, que también tienen que poder fallar.
 
-No se leyeron siete mil líneas buscando sospechas: **se midió**. Los tres
-verificadores canalizan todos sus rechazos por dos o tres funciones
-constructoras. Se les puso la anotación `#[track_caller]` de Rust —que hace que
-la función sepa desde qué línea la han llamado— y una línea que registra esa
-llamada. Con eso, **una sola ejecución de la batería dice qué guardas llegan a
-dispararse y cuáles no**.
+Las peor cubiertas eran las que vigilan la verdad publicada, y son las que más
+bajaron:
 
-Después se confirmó borrándolas: desactivar **trece** comprobaciones a la vez
-—entre ellas «el sitio cae fuera de las coordenadas de su bloque», «los pesos
-haplotípicos no suman 1» y «el recuento independiente halla otro número de
-copias»— deja la batería en **1198 pasan, 0 fallan**, cifra por cifra idéntica a
-la línea base. Lo mismo con cuatro del verificador del VCF.
+| Función | Puntos de rechazo | Muertos antes | Muertos ahora |
+|---|---|---|---|
+| `recount_f5_man70`, recuento independiente desde la verdad | 31 | 30 | 8 |
+| `read_truth_copy`, validación de cada copia haplotípica | 30 | 26 | 5 |
+| `recount_genotype`, validación de cada genotipo | 29 | 24 | 5 |
+| `read_truth_header`, cabecera de la verdad | 17 | 13 | 3 |
 
-### Qué hacer
+De los 21 que quedan en esas cuatro funciones, **18 están documentados como
+inalcanzables**, cada uno con su porqué escrito en el módulo —unos junto a la
+línea y otros en la documentación de la función que los contiene, cuando una
+misma razón cubre a varios—: once porque
+la comprobación de claves exactas que los precede ya exigió esa clave, uno
+porque el lector de genotipos acaba de resolver esa misma subpoblación, dos
+porque son conversiones que no pueden fallar en 64 bits, uno porque una línea
+sin salto solo puede ser la última del fichero, uno porque el primer genotipo
+siempre abre locus, uno porque las dos comprobaciones de orden anteriores lo
+implican, y uno que ya estaba declarado inalcanzable desde antes. Y **tres
+siguen sin cubrir**: que un sitio aparezca dos veces dentro de la misma copia, que una
+copia aparezca dos veces, y que una subpoblación publique dos loci en la misma
+posición. Las tres exigen un documento saturado que hay que construir a mano.
 
-**Lo primero, y es barato: convertir el barrido en una puerta.** Una anotación,
-una función de cinco líneas y una ejecución de la batería bastan para medir en
-cada cambio qué fracción de las comprobaciones del verificador se ejercita de
-verdad. Sin esa puerta, la cobertura volverá a caer sin que nadie lo note.
+Y en el verificador del VCF se cubrió **la comprobación que ata la columna de
+referencia al genoma real**, que la medición anterior señalaba por su nombre.
+No se alcanza corrompiendo el VCF —la comparación contra la derivación
+independiente la caza antes—, de modo que se ejercita con una prueba unitaria
+en el propio módulo que la llama directamente, y su documentación dice quién
+caza antes y por qué esa prueba tiene que ser unitaria.
 
-**Después, cubrir.** Conviene empezar por el **verificador del formato VCF**, que
-es el más pequeño —58 comprobaciones— y contiene la que ata la referencia al
-genoma real.
+### Lo que queda
 
-Un aviso del propio hallazgo: la auditoría de identidad y publicación es **el
-módulo mejor probado de los tres**, y no por casualidad. Tiene tres pruebas que
-leen su propio texto fuente **con control positivo**, y una de ellas —la que
-prohíbe que el módulo contenga cualquier vía de escritura en disco— **cazó la
-instrumentación del revisor** en cuanto la introdujo. Ese es el patrón a imitar.
+**168 comprobaciones del oráculo grande y 4 del verificador del VCF.** Las
+cuatro del VCF son las únicas de ese módulo de las que no se ha demostrado
+nada: la muestra sin copias en el contig, el alelo alternativo ausente del
+registro esperado, la identidad de secuencia que el analizador de cabeceras
+acepta y el constructor rechaza, y el fallo de construcción de una secuencia
+cuyas tres piezas son válidas.
 
-### Lo que quedó sin medir
+De las del oráculo grande, 21 son autocomprobaciones
+contra catálogos compilados —inalcanzables a propósito, y las veintiuna
+muertas— y las 147 restantes se
+reparten sobre todo entre la evaluación del desequilibrio de ligamiento (13),
+la auditoría del paquete fallido (11), la lectura del reparto físico (10), el
+recorrido de fundadores y copias, la lectura de haplotipos y la auditoría del
+muestreo.
 
-Las fases 3 y 4 al completo —salida y validación de lecturas, errores y
-calidades, quimeras, contaminación, multiplexado, pares y muestreo—; la admisión
-del productor; y el contrato de la primera versión de la verdad, que no tiene un
-punto único de construcción del error y exigiría otro enfoque.
-
----
+Sigue sin medirse lo mismo que entonces: las fases 3 y 4 al completo, la
+admisión del productor y el contrato de la primera versión de la verdad.
 
 ## DT-002. Dos pruebas ignoradas están vaciadas, no solo apagadas
 
@@ -177,7 +216,7 @@ recoge aquí porque es transversal. Quien la cierre debe decidir entre declarar
 
 ## 3. Lección transversal
 
-Las cuatro deudas comparten una forma: **algo que parece cubierto y no lo
+Estas deudas comparten una forma: **algo que parece cubierto y no lo
 está**. Una guarda que existe pero no se ejercita, una prueba que conserva su
 nombre pero no su cuerpo, una prueba apagada que nadie sabe si importa, una
 puerta que se cita en los informes y no se ejecuta.

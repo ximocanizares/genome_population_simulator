@@ -211,6 +211,7 @@ cargo test --workspace --all-targets --locked
 cargo test --workspace --doc --locked
 cargo build --release --locked --target x86_64-unknown-linux-gnu
 ./scripts/check-independent-validators.sh <directorio-nuevo>   # 5 PASS; falla si ya existe
+./scripts/check-guard-coverage.sh <directorio-nuevo>           # cobertura de los jueces; falla si ya existe
 MARIMO_SKIP_UPDATE_CHECK=1 uv run --frozen marimo check --strict ui/gps_app.py
 uv run --frozen python -m unittest discover -s tests_ui
 ```
@@ -241,6 +242,25 @@ comprobar que se midió con el entorno correcto.
   `/usr/bin` sin tocar el `.bashrc` ni desinstalar las del sistema, de las que
   depende `vcftools`. Con ellas, la prueba que comparaba la normalización
   contra ese juez externo dejó de estar ignorada.
+
+**La puerta de cobertura de los jueces.** `check-guard-coverage.sh` mide, en
+los tres módulos que verifican que los datos publicados son correctos, cuántas
+de sus comprobaciones internas ejercita de verdad alguna prueba. Existe desde
+el 23 de septiembre de 2026, cuando una medición encontró que **dos tercios no
+las ejercitaba nadie**: comprobaciones escritas, ejecutadas y jamás probadas,
+de modo que si una estuviera mal escrita nadie lo notaría y el simulador daría
+por bueno un fichero incorrecto.
+
+Compara contra `scripts/guard-coverage-baseline.tsv`, que declara por juez
+cuántas comprobaciones tiene y cuántas pueden quedar sin ejercitar. **Se
+comprueban las dos columnas**: sin la primera, borrar una comprobación bajaría
+las dos cifras a la vez y la puerta lo tomaría por una mejora.
+
+**Lo que esta puerta mide y lo que no**, porque confundirlo sería peor que no
+tenerla: mide si una comprobación **llega a dispararse**, no si una prueba
+**fallaría** en caso de que estuviera mal escrita. Es un suelo, no un techo. Lo
+que demuestra que una comprobación está probada de verdad sigue siendo
+**mutarla y ver morir la prueba**. Ver DT-001 en el registro de deudas.
 
 **Trampa de `pytest`:** no está instalado ni declarado en `pyproject.toml`. La
 puerta canónica es `unittest`, y bajo ella `tests/test_process_adapter.py`
