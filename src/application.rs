@@ -13,8 +13,8 @@ use crate::biological_contamination::BiologicalContaminationSettings;
 use crate::chimera::ChimeraSettings;
 use crate::configuration::{
     DeclaredF5GeneralConfig, DeclaredF5Scenario, DeclaredGeneralConfig, DeclaredPopulationSnvs,
-    DeclaredReductionTarget, DeclaredReferenceSource, DeclaredTechnicalEventTarget,
-    ExpectedConfigKind, SequenceClass,
+    DeclaredReductionTarget, DeclaredReferenceSource, DeclaredStutter,
+    DeclaredTechnicalEventTarget, ExpectedConfigKind, SequenceClass,
 };
 use crate::coordinates::{ClosedInterval1, GenomicInterval};
 use crate::diagnostics::Diagnostic;
@@ -45,6 +45,7 @@ use crate::randomness::{
     derive_subseed, neumaier_sum, resolve_root_seed,
 };
 use crate::reference_generation::normalize_composition_probabilities;
+use crate::stutter::{StutterError, StutterMotifLengthRates, StutterSettings, StutterStepWeights};
 use crate::tandem_repeat::{RepeatMotif, TandemRepeatLocus, TandemRepeatTract};
 use crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1;
 use crate::vcf_contract::VcfOutputMode;
@@ -1014,6 +1015,7 @@ pub struct EffectiveTechnicalEvent {
     chimera_rate: f64,
     index_hopping_rate: f64,
     biological_contamination: BiologicalContaminationSettings,
+    stutter: StutterSettings,
     libraries: Vec<EffectiveTechnicalLibrary>,
 }
 
@@ -1092,6 +1094,12 @@ impl EffectiveTechnicalEvent {
     #[must_use]
     pub const fn biological_contamination(&self) -> &BiologicalContaminationSettings {
         &self.biological_contamination
+    }
+
+    /// Parámetros efectivos del tartamudeo de base. Por omisión, apagado.
+    #[must_use]
+    pub const fn stutter(&self) -> &StutterSettings {
+        &self.stutter
     }
 
     /// Ajuste tipado que se entrega al muestreador PE sin volver a interpretar
@@ -1286,6 +1294,31 @@ impl EffectiveConfig {
     #[must_use]
     pub const fn repeat_admission(&self) -> EffectiveRepeatAdmission {
         self.repeat_admission
+    }
+
+    /// Lo que el evento técnico necesita para tartamudear: los parámetros
+    /// efectivos y los loci declarados, en un solo objeto.
+    ///
+    /// Sin evento técnico o sin loci el plan queda apagado, y un plan apagado
+    /// no abre la etapa `stutter` ni consume una sola palabra aleatoria.
+    #[must_use]
+    pub fn stutter_plan(&self) -> crate::stutter::StutterPlan {
+        let settings = self
+            .technical_event
+            .as_ref()
+            .map_or_else(StutterSettings::default, |event| event.stutter().clone());
+        let loci = self
+            .repeat_loci
+            .iter()
+            .map(|locus| {
+                crate::stutter::StutterLocus::new(
+                    locus.declaration().id().clone(),
+                    locus.declaration().interval().clone(),
+                    locus.declaration().motifs().to_vec(),
+                )
+            })
+            .collect();
+        crate::stutter::StutterPlan::new(settings, loci)
     }
 
     /// Cota superior de bases de tracto publicadas, calculada sobre lo
@@ -2067,6 +2100,7 @@ pub fn build_effective_config_with_entropy(
     // La cota se calcula **antes** de ceder las poblaciones al documento
     // efectivo, y su rechazo ocurre aquí: antes de materializar a nadie.
     let repeat_output_budget = repeat_output_budget(general, &repeat_loci, &initial_populations)?;
+    admit_loci_against_stutter(general, technical_event.as_ref(), &repeat_loci)?;
     Ok(EffectiveConfig {
         source_path: general.source().path().display().to_string(),
         reference_id: general.reference().id.value().clone(),
@@ -2095,6 +2129,119 @@ pub fn build_effective_config_with_entropy(
         repeat_loci,
         repeat_admission,
     })
+}
+
+/// **Guarda de admisión que cruza el evento técnico con los loci declarados.**
+///
+/// # Qué exige
+///
+/// Un locus que vaya a tartamudear necesita una tirada mínima **efectiva** de
+/// al menos dos unidades: la suya si la declara, y si no la general. Si es 1,
+/// la configuración se rechaza nombrando el locus, el valor declarado y el
+/// mínimo exigido.
+///
+/// # Por qué
+///
+/// El paso de unidades no permite que una contracción vacíe su tirada. La
+/// consecuencia es que **un tracto cuya tirada más larga sea de una sola copia
+/// no puede contraerse nunca, mientras que expandirse sí puede**: una clase
+/// entera de tractos quedaría congelada frente a la contracción con la
+/// expansión libre, lo que **sesga el modelo hacia el alargamiento**. Hasta que
+/// cada locus pudo declarar su propia tirada mínima esa clase no llegaba a
+/// entrar, porque la general es 3; desde entonces un locus con tirada mínima 1
+/// la admite. Esta guarda cierra esa puerta.
+///
+/// Lo que **no** cierra, y está bien: con una tirada de dos copias siguen
+/// prohibidos los pasos de dos y tres unidades, porque la vaciarían. Esa
+/// asimetría residual es **físicamente correcta** —en la realidad tampoco se
+/// pueden perder tres unidades de una tirada que solo tiene dos— y convierte un
+/// sesgo artificial del modelo en una restricción física real.
+///
+/// # Por qué aquí y no al leer el locus
+///
+/// El microsatélite se declara **junto a la referencia** y el tartamudeo se
+/// configura **en el evento técnico**: son dos sitios distintos del fichero. La
+/// condición «si va a tartamudear, exige 2» no puede comprobarse al leer el
+/// locus, porque en ese momento todavía no se sabe si habrá tartamudeo. Solo
+/// puede comprobarse cuando las dos configuraciones están resueltas, que es
+/// aquí.
+fn admit_loci_against_stutter(
+    general: &DeclaredGeneralConfig,
+    technical_event: Option<&EffectiveTechnicalEvent>,
+    repeat_loci: &[EffectiveRepeatLocus],
+) -> Result<(), Diagnostic> {
+    let Some(event) = technical_event else {
+        return Ok(());
+    };
+    // **Una sustitución que nombre un locus inexistente se rechaza.** Sin esta
+    // guarda se aceptaba y se tiraba en silencio: el usuario declaraba una tasa
+    // propia, no ocurría nada y nadie se enteraba. Un identificador mal escrito
+    // es exactamente la forma que toma ese error.
+    let declared_locus_ids = repeat_loci
+        .iter()
+        .map(EffectiveRepeatLocus::id)
+        .collect::<std::collections::BTreeSet<_>>();
+    for locus_id in event.stutter().locus_rates().keys() {
+        if !declared_locus_ids.contains(locus_id.as_str()) {
+            return Err(config_error(
+                general,
+                "technical_event.stutter.locus_rates.locus_id",
+                format!(
+                    "la sustitución de tasa nombra el locus {locus_id}, que no está declarado en \
+                     reference.repeat_loci; los declarados son {}",
+                    declared_locus_ids
+                        .iter()
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            ));
+        }
+    }
+    // Lo que sigue solo tiene sentido si el tartamudeo va a ocurrir. La
+    // comprobación de arriba, en cambio, vale siempre: un identificador mal
+    // escrito lo está con el interruptor encendido y con él apagado.
+    if !event.stutter().enabled() {
+        return Ok(());
+    }
+    const MINIMUM_LONGEST_RUN_UNITS: u64 = 2;
+    for locus in repeat_loci {
+        let declared = locus.admission().min_longest_run_units();
+        if declared < MINIMUM_LONGEST_RUN_UNITS {
+            return Err(config_error(
+                general,
+                "reference.repeat_loci.min_longest_run_units,technical_event.stutter",
+                format!(
+                    "el locus {} declara una tirada mínima efectiva de {declared} unidad(es) y el \
+                     tartamudeo exige al menos {MINIMUM_LONGEST_RUN_UNITS}: una tirada de una sola \
+                     copia no puede contraerse nunca y el modelo quedaría sesgado hacia el \
+                     alargamiento",
+                    locus.id()
+                ),
+            ));
+        }
+        for motif in locus.motifs() {
+            let length = motif.length();
+            if event
+                .stutter()
+                .motif_length_rates()
+                .rate_for_motif_length(length)
+                .is_none()
+            {
+                return Err(config_error(
+                    general,
+                    "reference.repeat_loci.motif,technical_event.stutter.motif_length_rates",
+                    format!(
+                        "el locus {} declara un motivo de {length} pb y la calibración del \
+                         tartamudeo solo cubre de 1 a {} pb; no se extrapola",
+                        locus.id(),
+                        crate::stutter::STUTTER_MOTIF_LENGTH_MAX
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Calcula la cota de bases de tracto y **rechaza el escenario** si supera el
@@ -2449,6 +2596,7 @@ fn effective_technical_event(
         ));
     }
     libraries.sort_by(|left, right| left.individual_id.cmp(&right.individual_id));
+    let stutter = effective_stutter(general, declared.stutter.as_ref())?;
     Ok(Some(EffectiveTechnicalEvent {
         event_id,
         individual_ids,
@@ -2458,8 +2606,195 @@ fn effective_technical_event(
         chimera_rate,
         index_hopping_rate,
         biological_contamination,
+        stutter,
         libraries,
     }))
+}
+
+/// Resuelve `[technical_event.stutter]` a los parámetros efectivos.
+///
+/// # Qué se configura y qué no
+///
+/// La **estructura** del paso no se configura: la fija el algoritmo. Lo que se
+/// declara son los **pesos relativos** dentro de esa estructura, y son
+/// **obligatorios y sin valor por omisión** cuando el tartamudeo está activo,
+/// porque la fuente publica el método de ajuste pero no los valores
+/// (pendiente P-3). El **coeficiente de la tirada** arranca en cero y se
+/// publica como no calibrado (pendiente P-1).
+fn effective_stutter(
+    general: &DeclaredGeneralConfig,
+    declared: Option<&DeclaredStutter>,
+) -> Result<StutterSettings, Diagnostic> {
+    let Some(declared) = declared else {
+        return Ok(StutterSettings::default());
+    };
+    let enabled = declared
+        .enabled
+        .as_ref()
+        .is_some_and(|value| *value.value());
+    let mut rates = crate::stutter::STUTTER_DEFAULT_MOTIF_LENGTH_RATES;
+    let mut seen_lengths = std::collections::BTreeSet::new();
+    for entry in &declared.motif_length_rates {
+        let length = *entry.motif_length_bases.value();
+        let index = usize::try_from(length)
+            .ok()
+            .filter(|length| (1..=crate::stutter::STUTTER_MOTIF_LENGTH_MAX).contains(length))
+            .ok_or_else(|| {
+                config_error(
+                    general,
+                    "technical_event.stutter.motif_length_rates.motif_length_bases",
+                    format!(
+                        "la longitud de motivo {length} está fuera del tramo calibrado 1..={}",
+                        crate::stutter::STUTTER_MOTIF_LENGTH_MAX
+                    ),
+                )
+            })?;
+        if !seen_lengths.insert(length) {
+            return Err(config_error(
+                general,
+                "technical_event.stutter.motif_length_rates.motif_length_bases",
+                format!("la longitud de motivo {length} se declara dos veces"),
+            ));
+        }
+        rates[index - 1] = parse_stutter_number(
+            general,
+            &entry.rate,
+            "technical_event.stutter.motif_length_rates.rate",
+        )?;
+    }
+    let rates = StutterMotifLengthRates::new(rates).map_err(|error| {
+        stutter_config_error(
+            general,
+            "technical_event.stutter.motif_length_rates",
+            &error,
+        )
+    })?;
+    let coefficient = declared.run_length_coefficient.as_ref().map_or(
+        Ok(crate::stutter::STUTTER_DEFAULT_RUN_LENGTH_COEFFICIENT),
+        |value| {
+            parse_stutter_number(
+                general,
+                value,
+                "technical_event.stutter.run_length_coefficient",
+            )
+        },
+    )?;
+    let weights = if declared.steps.is_empty() {
+        None
+    } else {
+        let mut resolved = [0.0_f64; crate::stutter::STUTTER_ADMITTED_STEPS.len()];
+        let mut seen = std::collections::BTreeSet::new();
+        for step in &declared.steps {
+            let units = *step.units.value();
+            let position = crate::stutter::STUTTER_ADMITTED_STEPS
+                .iter()
+                .position(|admitted| *admitted == units)
+                .ok_or_else(|| {
+                    config_error(
+                        general,
+                        "technical_event.stutter.steps.units",
+                        format!(
+                            "el paso {units} no pertenece a la estructura del algoritmo, que es \
+                             exactamente {:?} en unidades enteras",
+                            crate::stutter::STUTTER_ADMITTED_STEPS
+                        ),
+                    )
+                })?;
+            if !seen.insert(units) {
+                return Err(config_error(
+                    general,
+                    "technical_event.stutter.steps.units",
+                    format!("el paso {units} se declara dos veces"),
+                ));
+            }
+            resolved[position] = parse_stutter_number(
+                general,
+                &step.weight,
+                "technical_event.stutter.steps.weight",
+            )?;
+        }
+        if seen.len() != crate::stutter::STUTTER_ADMITTED_STEPS.len() {
+            return Err(config_error(
+                general,
+                "technical_event.stutter.steps",
+                format!(
+                    "hay que declarar el peso de los cuatro pasos admitidos {:?}; faltan {}",
+                    crate::stutter::STUTTER_ADMITTED_STEPS,
+                    crate::stutter::STUTTER_ADMITTED_STEPS
+                        .iter()
+                        .filter(|admitted| !seen.contains(*admitted))
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            ));
+        }
+        Some(StutterStepWeights::new(resolved).map_err(|error| {
+            stutter_config_error(general, "technical_event.stutter.steps.weight", &error)
+        })?)
+    };
+    let mut locus_rates = std::collections::BTreeMap::new();
+    for entry in &declared.locus_rates {
+        let locus_id = entry.locus_id.value().clone();
+        let rate = parse_stutter_number(
+            general,
+            &entry.rate,
+            "technical_event.stutter.locus_rates.rate",
+        )?;
+        if locus_rates.insert(locus_id.clone(), rate).is_some() {
+            return Err(config_error(
+                general,
+                "technical_event.stutter.locus_rates.locus_id",
+                format!("el locus {locus_id} se sustituye dos veces"),
+            ));
+        }
+    }
+    StutterSettings::new(enabled, rates, coefficient, weights, locus_rates)
+        .map_err(|error| stutter_config_error(general, "technical_event.stutter", &error))
+}
+
+fn parse_stutter_number(
+    general: &DeclaredGeneralConfig,
+    value: &crate::configuration::DeclaredNumber,
+    field: &str,
+) -> Result<f64, Diagnostic> {
+    value
+        .literal()
+        .parse::<f64>()
+        .map_err(|_| config_error(general, field, "debe ser un f64 válido"))
+}
+
+/// Traduce el rechazo del modelo puro a un diagnóstico que nombra el parámetro
+/// y su valor, que es lo que permite corregir la configuración sin adivinar.
+fn stutter_config_error(
+    general: &DeclaredGeneralConfig,
+    field: &str,
+    error: &StutterError,
+) -> Diagnostic {
+    let detail = match error {
+        StutterError::InvalidRate { motif_length, rate } => format!(
+            "la tasa {rate} del motivo de {motif_length} pb debe ser una fracción finita entre 0 y 1"
+        ),
+        StutterError::InvalidLocusRate { locus_id, rate } => format!(
+            "la tasa {rate} sustituida para el locus {locus_id} debe ser una fracción finita entre 0 y 1"
+        ),
+        StutterError::InvalidStepWeight { step, weight } => {
+            format!("el peso {weight} del paso {step} debe ser finito y no negativo")
+        }
+        StutterError::InvalidRunLengthCoefficient { coefficient } => {
+            format!("el coeficiente de la tirada {coefficient} debe ser finito y no negativo")
+        }
+        StutterError::NoPositiveStepWeight => {
+            "al menos uno de los cuatro pesos tiene que ser positivo".to_owned()
+        }
+        StutterError::MissingStepWeights => {
+            "technical_event.stutter.steps es obligatorio cuando el tartamudeo está activo y no \
+             tiene valor por omisión: la fuente publica el método de ajuste, no los valores"
+                .to_owned()
+        }
+        other => format!("{other:?}"),
+    };
+    config_error(general, field, detail)
 }
 
 fn effective_direct_events(

@@ -856,7 +856,10 @@
           }
         },
         "rng_catalog": {
-          "const": "f4-technical-v3"
+          "enum": [
+            "f4-technical-v3",
+            "f4-technical-v4"
+          ]
         },
         "id_catalog": {
           "$ref": "#/$defs/f4_id_catalog"

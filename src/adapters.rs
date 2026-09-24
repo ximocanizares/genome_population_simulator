@@ -13,6 +13,7 @@ use crate::configuration::{
     DeclaredPopulationSnvsPopulation, DeclaredPopulationSnvsRegion, DeclaredReducedReference,
     DeclaredReductionTarget, DeclaredReference, DeclaredReferenceSource, DeclaredRepeatAdmission,
     DeclaredRepeatAllele, DeclaredRepeatInterruption, DeclaredRepeatLocus, DeclaredSequence,
+    DeclaredStutter, DeclaredStutterLocusRate, DeclaredStutterMotifRate, DeclaredStutterStep,
     DeclaredTechnicalEvent, DeclaredTechnicalEventTarget, DeclaredTechnicalLibrary,
     DeclaredVcfOutput, ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
 };
@@ -228,7 +229,7 @@ pub fn parse_declared_config(admitted: AdmittedToml) -> Result<DeclaredGeneralCo
     let initial_populations = parse_initial_populations(&admitted, table)?;
     let direct_events = parse_direct_events(&admitted, table)?;
     let vcf_output = parse_vcf_output(&admitted, table)?;
-    let technical_event = parse_technical_event(&admitted, table)?;
+    let technical_event = parse_technical_event(&admitted, table, declares_repeats)?;
     Ok(DeclaredGeneralConfig::new(
         admitted,
         seed,
@@ -960,13 +961,32 @@ fn require_limit(
 fn parse_technical_event(
     admitted: &AdmittedToml,
     table: &DeTable<'_>,
+    declares_repeats: bool,
 ) -> Result<Option<DeclaredTechnicalEvent>, Diagnostic> {
     let Some(event) = optional_table(admitted, table, "technical_event")? else {
         return Ok(None);
     };
-    check_unknown(
-        admitted,
-        event,
+    // La tabla del tartamudeo solo existe en el documento que puede declarar
+    // microsatélites. En uno anterior la clave es desconocida, exactamente
+    // igual que para el esquema publicado de esa versión: si el lector la
+    // admitiera y el esquema no, los dos jueces dirían cosas distintas del
+    // mismo fichero.
+    let known: &[&str] = if declares_repeats {
+        &[
+            "event_id",
+            "individual_ids",
+            "target_coverage_wgs",
+            "sequencing_errors",
+            "read_length_bases",
+            "chimera_rate",
+            "index_hopping_rate",
+            "contamination_min_percent",
+            "contamination_max_percent",
+            "contamination_recipient_ids",
+            "stutter",
+            "libraries",
+        ]
+    } else {
         &[
             "event_id",
             "individual_ids",
@@ -979,8 +999,9 @@ fn parse_technical_event(
             "contamination_max_percent",
             "contamination_recipient_ids",
             "libraries",
-        ],
-    )?;
+        ]
+    };
+    check_unknown(admitted, event, known)?;
     let target = optional_number(admitted, event, "target_coverage_wgs")?
         .map(DeclaredTechnicalEventTarget::CoverageWgs)
         .ok_or_else(|| {
@@ -1067,7 +1088,92 @@ fn parse_technical_event(
         contamination_min_percent: optional_number(admitted, event, "contamination_min_percent")?,
         contamination_max_percent: optional_number(admitted, event, "contamination_max_percent")?,
         contamination_recipient_ids,
+        stutter: parse_stutter(admitted, event)?,
         libraries,
+    }))
+}
+
+/// Lee `[technical_event.stutter]`.
+///
+/// La tabla **no** admite claves desconocidas, y eso es lo que rechaza un paso
+/// expresado en bases: `bases` no es una clave del contrato.
+fn parse_stutter(
+    admitted: &AdmittedToml,
+    event: &DeTable<'_>,
+) -> Result<Option<DeclaredStutter>, Diagnostic> {
+    let Some(table) = optional_table(admitted, event, "stutter")? else {
+        return Ok(None);
+    };
+    check_unknown(
+        admitted,
+        table,
+        &[
+            "enabled",
+            "motif_length_rates",
+            "run_length_coefficient",
+            "steps",
+            "locus_rates",
+        ],
+    )?;
+    let enabled = optional_located_bool(admitted, table, "enabled")?;
+    let motif_length_rates = optional_array(admitted, table, "motif_length_rates")?
+        .unwrap_or_default()
+        .iter()
+        .map(|value| {
+            let entry = value.get_ref().as_table().ok_or_else(|| {
+                wrong_type(
+                    admitted,
+                    "technical_event.stutter.motif_length_rates",
+                    value,
+                    "table",
+                )
+            })?;
+            check_unknown(admitted, entry, &["motif_length_bases", "rate"])?;
+            Ok(DeclaredStutterMotifRate {
+                motif_length_bases: required_u64(admitted, entry, "motif_length_bases")?,
+                rate: required_number(admitted, entry, "rate")?,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    let steps = optional_array(admitted, table, "steps")?
+        .unwrap_or_default()
+        .iter()
+        .map(|value| {
+            let entry = value.get_ref().as_table().ok_or_else(|| {
+                wrong_type(admitted, "technical_event.stutter.steps", value, "table")
+            })?;
+            check_unknown(admitted, entry, &["units", "weight"])?;
+            Ok(DeclaredStutterStep {
+                units: required_i64(admitted, entry, "units")?,
+                weight: required_number(admitted, entry, "weight")?,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    let locus_rates = optional_array(admitted, table, "locus_rates")?
+        .unwrap_or_default()
+        .iter()
+        .map(|value| {
+            let entry = value.get_ref().as_table().ok_or_else(|| {
+                wrong_type(
+                    admitted,
+                    "technical_event.stutter.locus_rates",
+                    value,
+                    "table",
+                )
+            })?;
+            check_unknown(admitted, entry, &["locus_id", "rate"])?;
+            Ok(DeclaredStutterLocusRate {
+                locus_id: required_string(admitted, entry, "locus_id")?,
+                rate: required_number(admitted, entry, "rate")?,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    Ok(Some(DeclaredStutter {
+        enabled,
+        motif_length_rates,
+        run_length_coefficient: optional_number(admitted, table, "run_length_coefficient")?,
+        steps,
+        locus_rates,
     }))
 }
 
@@ -2294,6 +2400,38 @@ fn optional_located_u64(
         .contains_key(field)
         .then(|| required_u64(admitted, table, field))
         .transpose()
+}
+
+fn optional_located_bool(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+    field: &str,
+) -> Result<Option<Located<bool>>, Diagnostic> {
+    let Some(value) = table.get(field) else {
+        return Ok(None);
+    };
+    match value.get_ref() {
+        DeValue::Boolean(flag) => Ok(Some(Located::new(*flag, location(admitted, value.span())))),
+        _ => Err(wrong_type(admitted, field, value, "boolean")),
+    }
+}
+
+/// Un paso en unidades enteras admite signo, de modo que no puede leerse con
+/// el lector de enteros no negativos.
+fn required_i64(
+    admitted: &AdmittedToml,
+    table: &DeTable<'_>,
+    field: &str,
+) -> Result<Located<i64>, Diagnostic> {
+    let value = required_value(admitted, table, field)?;
+    let number = value
+        .get_ref()
+        .as_integer()
+        .filter(|integer| integer.radix() == 10)
+        .and_then(|integer| integer.as_str().parse::<i64>().ok());
+    number
+        .map(|number| Located::new(number, location(admitted, value.span())))
+        .ok_or_else(|| wrong_type(admitted, field, value, "integer"))
 }
 
 fn optional_number(

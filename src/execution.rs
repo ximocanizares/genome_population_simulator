@@ -749,10 +749,17 @@ fn publish_technical_event(
     // repetir el identificador de su individua un millón de veces.
     let roster = crate::identity::IndividualRoster::new(individuals.keys().cloned())
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+    // El plan de tartamudeo se resuelve **una vez** y se presta a cada
+    // muestreador. Las parejas se regeneran varias veces —por la
+    // contaminación—, y un plan reconstruido en cada pasada podría no ser el
+    // mismo objeto pero sí tendría que dar la misma decisión; resolverlo aquí
+    // hace que esa igualdad no dependa de nadie.
+    let stutter_plan = effective.stutter_plan();
     // La primera pasada conserva exclusivamente las claves PH y los hechos de
     // quimera; las secuencias se regeneran bajo demanda en la materialización.
     let mut clean_libraries = Vec::with_capacity(libraries.len());
     let mut realized_chimera_pairs = 0_u64;
+    let mut stutter_accumulator = crate::stutter::StutterAccumulator::default();
     for library in &libraries {
         let (individual, population_id) =
             individuals.get(library.individual_id()).ok_or_else(|| {
@@ -773,8 +780,15 @@ fn publish_technical_event(
                 link: None,
             })
         })?;
-        let mut sampler = paired_sampler(reference, individual, &identities, profile, event)
-            .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        let mut sampler = paired_sampler(
+            reference,
+            individual,
+            &identities,
+            profile,
+            event,
+            &stutter_plan,
+        )
+        .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         let mut keys = Vec::new();
         for pair in &mut sampler {
             let pair = pair.map_err(|error| {
@@ -789,6 +803,17 @@ fn publish_technical_event(
                 )?,
             );
         }
+        // El informe del tartamudeo se recoge **de la primera pasada**, igual
+        // que el de la quimera: las regeneraciones posteriores repiten las
+        // mismas decisiones y contarlas otra vez las duplicaría.
+        stutter_accumulator
+            .merge(&sampler.stutter_report())
+            .map_err(|error| {
+                Box::new(TechnicalEventAssemblyFailure {
+                    cause: technical_event_error("stutter", format!("{error:?}")),
+                    link: None,
+                })
+            })?;
         realized_chimera_pairs = realized_chimera_pairs
             .checked_add(sampler.chimera_report().realized_pairs())
             .ok_or_else(|| {
@@ -906,6 +931,7 @@ fn publish_technical_event(
             profile,
             event,
             effective.reproducibility().root_seed(),
+            &stutter_plan,
         )
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         donor_pairs.insert(*seat, collected);
@@ -928,6 +954,7 @@ fn publish_technical_event(
             profile,
             event,
             effective.reproducibility().root_seed(),
+            &stutter_plan,
         )
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         let report = materializer
@@ -1023,6 +1050,7 @@ fn publish_technical_event(
             profile,
             event,
             effective.reproducibility().root_seed(),
+            &stutter_plan,
         )
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         for key in clean.own_pairs() {
@@ -1154,6 +1182,29 @@ fn publish_technical_event(
         demultiplexing,
         realized_chimera_pairs,
         &biological_manifest,
+        // La sección solo existe cuando el evento abre de verdad la etapa
+        // `stutter`: con el tartamudeo apagado, o sin loci declarados, el
+        // manifiesto sale idéntico al de antes de esta ampliación.
+        stutter_plan
+            .is_active()
+            .then(|| crate::event_manifest::EventManifestStutter {
+                settings: stutter_plan.settings().clone(),
+                report: stutter_accumulator.report(),
+                loci: stutter_plan
+                    .loci()
+                    .iter()
+                    .map(|locus| {
+                        (
+                            locus.id().as_str().to_owned(),
+                            locus
+                                .motifs()
+                                .iter()
+                                .map(crate::tandem_repeat::RepeatMotif::length)
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            }),
     )
     .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))
 }
@@ -1187,6 +1238,7 @@ fn paired_sampler<'a>(
     identities: &'a crate::technical_identity::TechnicalIdentityPlan,
     profile: crate::technical_profile::F4TechnicalProfile,
     event: &crate::application::EffectiveTechnicalEvent,
+    stutter: &crate::stutter::StutterPlan,
 ) -> Result<WgsPairedEndSampler<'a>, Diagnostic> {
     let sampler = match event.target() {
         EffectiveTechnicalEventTarget::CoverageWgs(target) => {
@@ -1214,7 +1266,11 @@ fn paired_sampler<'a>(
         }
     };
     sampler
-        .map(|sampler| sampler.with_effective_technical_event(event))
+        .map(|sampler| {
+            sampler
+                .with_effective_technical_event(event)
+                .with_stutter_plan(stutter.clone())
+        })
         .map_err(|error| technical_event_error("wgs_paired_sampler", format!("{error:?}")))
 }
 
@@ -1234,6 +1290,7 @@ struct RegeneratedPairs {
 }
 
 impl RegeneratedPairs {
+    #[allow(clippy::too_many_arguments)] // los mismos hechos cerrados de F4 que `collect`.
     fn build(
         clean: &CleanLibraryPairs,
         reference: &Reference,
@@ -1248,6 +1305,7 @@ impl RegeneratedPairs {
         profile: crate::technical_profile::F4TechnicalProfile,
         event: &crate::application::EffectiveTechnicalEvent,
         root_seed: crate::randomness::RootSeed,
+        stutter: &crate::stutter::StutterPlan,
     ) -> Result<Self, Diagnostic> {
         let wanted = clean
             .own_pairs()
@@ -1264,6 +1322,7 @@ impl RegeneratedPairs {
                 profile,
                 event,
                 root_seed,
+                stutter,
             )?,
         })
     }
@@ -1286,6 +1345,7 @@ impl RegeneratedPairs {
         profile: crate::technical_profile::F4TechnicalProfile,
         event: &crate::application::EffectiveTechnicalEvent,
         root_seed: crate::randomness::RootSeed,
+        stutter: &crate::stutter::StutterPlan,
     ) -> Result<
         BTreeMap<crate::identity::CompactPreHopInstanceId, ObservedPairTransformation>,
         Diagnostic,
@@ -1296,7 +1356,7 @@ impl RegeneratedPairs {
             .ok_or_else(|| {
                 technical_event_error("biological_contamination", "individuo ausente")
             })?;
-        let sampler = paired_sampler(reference, individual, identities, profile, event)?;
+        let sampler = paired_sampler(reference, individual, identities, profile, event, stutter)?;
         let mut pairs = BTreeMap::new();
         for pair in sampler {
             let pair = pair.map_err(|error| {
@@ -1344,7 +1404,9 @@ fn write_event_manifest(
     demultiplexing: EventManifestDemultiplexing,
     realized_chimera_pairs: u64,
     biological_contamination: &[crate::biological_contamination::BiologicalContaminationManifestRecipient],
+    stutter: Option<crate::event_manifest::EventManifestStutter>,
 ) -> Result<ManifestEventLink, Diagnostic> {
+    let stutter_present = stutter.is_some();
     let artifacts = outputs
         .iter()
         .map(|output| EventManifestArtifact {
@@ -1374,6 +1436,7 @@ fn write_event_manifest(
         chimera_rate: event.chimera_rate(),
         realized_chimera_pairs,
         biological_contamination,
+        stutter,
         diagnostics: &[],
     };
     let bytes = event_manifest_bytes(&document)?;
@@ -1399,6 +1462,11 @@ fn write_event_manifest(
         manifest_artifact_id: artifact.id,
         chimera_rate: event.chimera_rate(),
         realized_chimera_pairs,
+        rng_catalog: if stutter_present {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
+        } else {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
+        },
     })
 }
 

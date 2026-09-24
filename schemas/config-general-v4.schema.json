@@ -1049,6 +1049,125 @@
             "$ref": "#/$defs/identifier"
           }
         },
+        "stutter": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Tartamudeo de base de la polimerasa sobre los microsatélites declarados. No es una preparación amplificada: no introduce duplicados y el perfil se sigue registrando como sin PCR.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "x-gps-control": "switch"
+            },
+            "motif_length_rates": {
+              "type": "array",
+              "maxItems": 6,
+              "uniqueItems": true,
+              "x-gps-control": "table",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "motif_length_bases",
+                  "rate"
+                ],
+                "properties": {
+                  "motif_length_bases": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 6,
+                    "x-gps-unit": "bases"
+                  },
+                  "rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "x-gps-unit": "fraction"
+                  }
+                }
+              }
+            },
+            "run_length_coefficient": {
+              "type": "number",
+              "minimum": 0,
+              "default": 0,
+              "description": "Pendiente por unidad de la tirada ininterrumpida más larga. Arranca en cero porque no está calibrada."
+            },
+            "steps": {
+              "type": "array",
+              "minItems": 4,
+              "maxItems": 4,
+              "uniqueItems": true,
+              "x-gps-control": "table",
+              "description": "Pesos relativos de los cuatro pasos admitidos, en unidades enteras. Obligatorios cuando el tartamudeo está activo y sin valor por omisión.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "units",
+                  "weight"
+                ],
+                "properties": {
+                  "units": {
+                    "enum": [
+                      -3,
+                      -2,
+                      -1,
+                      1
+                    ]
+                  },
+                  "weight": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "locus_rates": {
+              "type": "array",
+              "uniqueItems": true,
+              "x-gps-control": "table",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "locus_id",
+                  "rate"
+                ],
+                "properties": {
+                  "locus_id": {
+                    "$ref": "#/$defs/identifier"
+                  },
+                  "rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "x-gps-unit": "fraction"
+                  }
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              },
+              "then": {
+                "required": [
+                  "steps"
+                ]
+              }
+            }
+          ]
+        },
         "libraries": {
           "type": "array",
           "minItems": 1,

@@ -263,6 +263,48 @@ class TechnicalLibraryRow:
     i5: str
 
 
+# Los cuatro pasos admitidos, en orden canónico. **La estructura no se
+# configura**: la fija el algoritmo. La interfaz no ofrece ningún control para
+# un paso `+2` ni para un modelo distinto, porque declararlo se rechaza.
+STUTTER_ADMITTED_STEPS = (-3, -2, -1, 1)
+# Tramo de longitud de motivo que la calibración cubre, en pares de base.
+STUTTER_MOTIF_LENGTHS = (1, 2, 3, 4, 5, 6)
+
+
+@dataclass(eq=True)
+class StutterMotifRateRow:
+    motif_length_bases: int
+    rate: str
+
+
+@dataclass(eq=True)
+class StutterStepRow:
+    units: int
+    weight: str
+
+
+@dataclass(eq=True)
+class StutterLocusRateRow:
+    locus_id: str
+    rate: str
+
+
+@dataclass(eq=True)
+class StutterForm:
+    """Tartamudeo de base declarado desde la interfaz.
+
+    Los **pesos de los cuatro pasos** son obligatorios cuando el tartamudeo
+    está activo y no tienen valor por omisión: la fuente publica el método de
+    ajuste, no los valores. La interfaz no los rellena sola.
+    """
+
+    enabled: bool = False
+    motif_length_rates: list[StutterMotifRateRow] = field(default_factory=list)
+    run_length_coefficient: str | None = None
+    steps: list[StutterStepRow] = field(default_factory=list)
+    locus_rates: list[StutterLocusRateRow] = field(default_factory=list)
+
+
 @dataclass(eq=True)
 class TechnicalEventForm:
     event_id: str
@@ -270,6 +312,7 @@ class TechnicalEventForm:
     coverage_wgs: str
     libraries: list[TechnicalLibraryRow]
     read_length_bases: int | None = None
+    stutter: StutterForm | None = None
 
 
 @dataclass(eq=True)
@@ -917,6 +960,7 @@ def _parse_technical_event(table: Mapping[str, Any]) -> TechnicalEventForm:
             "individual_ids",
             "target_coverage_wgs",
             "read_length_bases",
+            "stutter",
             "libraries",
         },
         required={"event_id", "individual_ids", "target_coverage_wgs", "libraries"},
@@ -952,6 +996,101 @@ def _parse_technical_event(table: Mapping[str, Any]) -> TechnicalEventForm:
             if "read_length_bases" in table
             else None
         ),
+        stutter=(
+            _parse_stutter(_mapping(table["stutter"], "technical_event.stutter"))
+            if "stutter" in table
+            else None
+        ),
+    )
+
+
+def _parse_stutter(table: Mapping[str, Any]) -> StutterForm:
+    path = "technical_event.stutter"
+    _keys(
+        table,
+        allowed={
+            "enabled",
+            "motif_length_rates",
+            "run_length_coefficient",
+            "steps",
+            "locus_rates",
+        },
+        required=set(),
+        path=path,
+    )
+    enabled = bool(table.get("enabled", False))
+    rates: list[StutterMotifRateRow] = []
+    for index, value in enumerate(
+        _sequence(table.get("motif_length_rates", []), f"{path}.motif_length_rates")
+    ):
+        row_path = f"{path}.motif_length_rates[{index}]"
+        row = _mapping(value, row_path)
+        _keys(
+            row,
+            allowed={"motif_length_bases", "rate"},
+            required={"motif_length_bases", "rate"},
+            path=row_path,
+        )
+        length = _positive_u64(row["motif_length_bases"], f"{row_path}.motif_length_bases")
+        if length not in STUTTER_MOTIF_LENGTHS:
+            raise EditorError(
+                f"{row_path}.motif_length_bases",
+                "la calibración solo cubre longitudes de motivo de 1 a 6 pb",
+            )
+        rates.append(
+            StutterMotifRateRow(length, _fraction_literal(row["rate"], f"{row_path}.rate"))
+        )
+    steps: list[StutterStepRow] = []
+    for index, value in enumerate(_sequence(table.get("steps", []), f"{path}.steps")):
+        row_path = f"{path}.steps[{index}]"
+        row = _mapping(value, row_path)
+        _keys(row, allowed={"units", "weight"}, required={"units", "weight"}, path=row_path)
+        units = row["units"]
+        if not isinstance(units, Integer):
+            raise EditorError(f"{row_path}.units", "se esperaba un entero de unidades")
+        units = int(units)
+        if units not in STUTTER_ADMITTED_STEPS:
+            raise EditorError(
+                f"{row_path}.units",
+                "la estructura del paso la fija el algoritmo: solo -3, -2, -1 y +1",
+            )
+        steps.append(
+            StutterStepRow(
+                units, _non_negative_number_literal(row["weight"], f"{row_path}.weight")
+            )
+        )
+    if enabled and {row.units for row in steps} != set(STUTTER_ADMITTED_STEPS):
+        raise EditorError(
+            f"{path}.steps",
+            "con el tartamudeo activo hay que declarar el peso de los cuatro pasos admitidos",
+        )
+    locus_rates: list[StutterLocusRateRow] = []
+    for index, value in enumerate(
+        _sequence(table.get("locus_rates", []), f"{path}.locus_rates")
+    ):
+        row_path = f"{path}.locus_rates[{index}]"
+        row = _mapping(value, row_path)
+        _keys(
+            row, allowed={"locus_id", "rate"}, required={"locus_id", "rate"}, path=row_path
+        )
+        locus_rates.append(
+            StutterLocusRateRow(
+                _non_empty_string(row["locus_id"], f"{row_path}.locus_id"),
+                _fraction_literal(row["rate"], f"{row_path}.rate"),
+            )
+        )
+    return StutterForm(
+        enabled=enabled,
+        motif_length_rates=rates,
+        run_length_coefficient=(
+            _non_negative_number_literal(
+                table["run_length_coefficient"], f"{path}.run_length_coefficient"
+            )
+            if "run_length_coefficient" in table
+            else None
+        ),
+        steps=steps,
+        locus_rates=locus_rates,
     )
 
 
@@ -1639,6 +1778,8 @@ def render_general_toml(form: GeneralForm) -> str:
                     event.read_length_bases, "technical_event.read_length_bases"
                 ),
             )
+        if event.stutter is not None:
+            technical_event.add("stutter", _render_stutter(event.stutter))
         libraries = tomlkit.aot()
         for index, library in enumerate(event.libraries):
             path = f"technical_event.libraries[{index}]"
@@ -1656,6 +1797,73 @@ def render_general_toml(form: GeneralForm) -> str:
         vcf_output.add("mode", form.vcf_output_mode)
         document.add("vcf_output", vcf_output)
     return tomlkit.dumps(document)
+
+
+def _render_stutter(stutter: StutterForm) -> Any:
+    """Vuelca el tartamudeo al TOML conservando los literales declarados.
+
+    Los pesos se escriben **tal cual se declararon**, sin reordenar ni
+    completar: si faltara alguno, la ida y la vuelta lo delataría en vez de
+    taparlo con un reparto implícito.
+    """
+
+    path = "technical_event.stutter"
+    if stutter.enabled and {row.units for row in stutter.steps} != set(
+        STUTTER_ADMITTED_STEPS
+    ):
+        raise EditorError(
+            f"{path}.steps",
+            "con el tartamudeo activo hay que declarar el peso de los cuatro pasos admitidos",
+        )
+    table = tomlkit.table()
+    table.add("enabled", stutter.enabled)
+    if stutter.motif_length_rates:
+        rates = tomlkit.aot()
+        for index, row in enumerate(stutter.motif_length_rates):
+            row_path = f"{path}.motif_length_rates[{index}]"
+            if row.motif_length_bases not in STUTTER_MOTIF_LENGTHS:
+                raise EditorError(
+                    f"{row_path}.motif_length_bases",
+                    "la calibración solo cubre longitudes de motivo de 1 a 6 pb",
+                )
+            entry = tomlkit.table()
+            entry.add("motif_length_bases", row.motif_length_bases)
+            entry.add("rate", _fraction_literal_item(row.rate, f"{row_path}.rate"))
+            rates.append(entry)
+        table.add("motif_length_rates", rates)
+    if stutter.run_length_coefficient is not None:
+        table.add(
+            "run_length_coefficient",
+            _non_negative_literal_item(
+                stutter.run_length_coefficient, f"{path}.run_length_coefficient"
+            ),
+        )
+    if stutter.steps:
+        steps = tomlkit.aot()
+        for index, row in enumerate(stutter.steps):
+            row_path = f"{path}.steps[{index}]"
+            if row.units not in STUTTER_ADMITTED_STEPS:
+                raise EditorError(
+                    f"{row_path}.units",
+                    "la estructura del paso la fija el algoritmo: solo -3, -2, -1 y +1",
+                )
+            entry = tomlkit.table()
+            entry.add("units", row.units)
+            entry.add(
+                "weight", _non_negative_literal_item(row.weight, f"{row_path}.weight")
+            )
+            steps.append(entry)
+        table.add("steps", steps)
+    if stutter.locus_rates:
+        locus_rates = tomlkit.aot()
+        for index, row in enumerate(stutter.locus_rates):
+            row_path = f"{path}.locus_rates[{index}]"
+            entry = tomlkit.table()
+            entry.add("locus_id", _required_text(row.locus_id, f"{row_path}.locus_id"))
+            entry.add("rate", _fraction_literal_item(row.rate, f"{row_path}.rate"))
+            locus_rates.append(entry)
+        table.add("locus_rates", locus_rates)
+    return table
 
 
 def _render_repeat_loci(form: GeneralForm) -> Any:
@@ -1926,6 +2134,21 @@ def _non_negative_number_literal(value: Any, path: str) -> str:
     if not math.isfinite(parsed) or parsed < 0:
         raise EditorError(path, "debe ser un número finito mayor o igual que cero")
     return literal
+
+
+def _fraction_literal(value: Any, path: str) -> str:
+    """Una fracción declarada: finita y dentro de `[0,1]`."""
+
+    literal = _non_negative_number_literal(value, path)
+    if float(literal) > 1:
+        raise EditorError(path, "debe ser una fracción entre 0 y 1")
+    return literal
+
+
+def _fraction_literal_item(literal: str | None, path: str) -> Integer | Float:
+    item = _non_negative_literal_item(literal, path)
+    _fraction_literal(item, path)
+    return item
 
 
 def _non_negative_literal_item(literal: str | None, path: str) -> Integer | Float:

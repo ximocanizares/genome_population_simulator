@@ -1400,7 +1400,10 @@
           "$ref": "#/$defs/biological_contamination"
         },
         "rng_catalog": {
-          "const": "f4-technical-v3"
+          "enum": [
+            "f4-technical-v3",
+            "f4-technical-v4"
+          ]
         },
         "id_catalog": {
           "$ref": "#/$defs/id_catalog"
@@ -1417,8 +1420,187 @@
               "minimum": 0
             }
           }
+        },
+        "stutter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "algorithm",
+            "rng_catalog",
+            "calibration",
+            "motif_length_rates",
+            "run_length_coefficient",
+            "step_weights",
+            "locus_rates"
+          ],
+          "properties": {
+            "enabled": {
+              "const": true
+            },
+            "algorithm": {
+              "const": "stutter-v1"
+            },
+            "rng_catalog": {
+              "const": "f4-technical-v4"
+            },
+            "calibration": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "species",
+                "technology",
+                "column",
+                "known_mismatch"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "species": {
+                  "const": "human"
+                },
+                "technology": {
+                  "const": "illumina"
+                },
+                "column": {
+                  "const": "pcr_free"
+                },
+                "known_mismatch": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "motif_length_rates": {
+              "type": "array",
+              "minItems": 6,
+              "maxItems": 6,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "motif_length_bases",
+                  "rate"
+                ],
+                "properties": {
+                  "motif_length_bases": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 6
+                  },
+                  "rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            },
+            "run_length_coefficient": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "value",
+                "calibrated"
+              ],
+              "properties": {
+                "value": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "calibrated": {
+                  "const": false
+                }
+              }
+            },
+            "step_weights": {
+              "type": "array",
+              "minItems": 4,
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "units",
+                  "weight"
+                ],
+                "properties": {
+                  "units": {
+                    "enum": [
+                      -3,
+                      -2,
+                      -1,
+                      1
+                    ]
+                  },
+                  "weight": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                }
+              }
+            },
+            "locus_rates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "locus_id",
+                  "rate"
+                ],
+                "properties": {
+                  "locus_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+                  },
+                  "rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "stutter"
+            ]
+          },
+          "then": {
+            "properties": {
+              "rng_catalog": {
+                "const": "f4-technical-v4"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "rng_catalog": {
+                "const": "f4-technical-v4"
+              }
+            },
+            "required": [
+              "rng_catalog"
+            ]
+          },
+          "then": {
+            "required": [
+              "stutter"
+            ]
+          }
+        }
+      ]
     },
     "technical_library": {
       "type": "object",

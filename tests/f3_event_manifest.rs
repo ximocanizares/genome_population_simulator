@@ -386,6 +386,7 @@ fn complete_manifest() -> (EventManifest<'static>, &'static str) {
             chimera_rate: event.chimera_rate(),
             realized_chimera_pairs: 0,
             biological_contamination: &[],
+            stutter: None,
             diagnostics: &[],
         },
         "reads-main",

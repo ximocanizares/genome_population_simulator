@@ -71,6 +71,7 @@ pub mod results;
 pub mod segments;
 pub mod small_event_composition;
 pub mod snp_application;
+pub mod stutter;
 pub mod tandem_repeat;
 pub mod technical_identity;
 pub mod technical_profile;

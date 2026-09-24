@@ -336,7 +336,48 @@ pub struct DeclaredTechnicalEvent {
     pub contamination_min_percent: Option<DeclaredNumber>,
     pub contamination_max_percent: Option<DeclaredNumber>,
     pub contamination_recipient_ids: Option<Vec<Located<String>>>,
+    /// Tartamudeo de base de la polimerasa sobre los microsatélites
+    /// declarados. Ausente significa **desactivado**, que es lo que hace que
+    /// una ejecución anterior a este trabajo publique los mismos bytes.
+    pub stutter: Option<DeclaredStutter>,
     pub libraries: Vec<DeclaredTechnicalLibrary>,
+}
+
+/// Tartamudeo declarado por el autor del escenario.
+///
+/// La **estructura** del paso no se declara: la fija el algoritmo. Lo que se
+/// declara son los **pesos relativos** dentro de esa estructura, que son
+/// obligatorios cuando el tartamudeo está activo y no tienen valor por
+/// omisión, y opcionalmente las tasas por longitud de motivo y el coeficiente
+/// de la tirada.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredStutter {
+    pub enabled: Option<Located<bool>>,
+    /// Tasas por longitud de motivo, en pares de base, declaradas una a una.
+    pub motif_length_rates: Vec<DeclaredStutterMotifRate>,
+    pub run_length_coefficient: Option<DeclaredNumber>,
+    pub steps: Vec<DeclaredStutterStep>,
+    pub locus_rates: Vec<DeclaredStutterLocusRate>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredStutterMotifRate {
+    pub motif_length_bases: Located<u64>,
+    pub rate: DeclaredNumber,
+}
+
+/// Un paso declarado, **en unidades enteras**. Un paso expresado en bases no
+/// existe en este contrato y su clave se rechaza.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredStutterStep {
+    pub units: Located<i64>,
+    pub weight: DeclaredNumber,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredStutterLocusRate {
+    pub locus_id: Located<String>,
+    pub rate: DeclaredNumber,
 }
 
 /// UDI de la única biblioteca de un individuo dentro de la tanda F4.

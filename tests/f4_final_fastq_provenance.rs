@@ -219,6 +219,7 @@ fn final_paired_fastq_is_gzip_hashed_paired_and_manifested_without_individual_pr
         chimera_rate: event.chimera_rate(),
         realized_chimera_pairs: 0,
         biological_contamination: &[],
+        stutter: None,
         diagnostics: &[],
     };
     let document = event_manifest_document(&manifest).expect("event manifest");

@@ -27,6 +27,13 @@ use crate::technical_identity::TechnicalMate;
 
 /// DTC-082 activa esta versión junto con effective-config v4 y manifest v4.
 pub const EVENT_MANIFEST_SCHEMA_VERSION: &str = "2";
+/// Versión que estrena la sección del tartamudeo.
+///
+/// Solo la publica un evento que **de verdad** abre la etapa `stutter`. Un
+/// evento sin tartamudeo sigue publicando la v2, y eso es lo que mantiene byte
+/// a byte los manifiestos anteriores a esta ampliación: subir la versión en
+/// todos habría cambiado cada uno de ellos sin que nada cambiara dentro.
+pub const EVENT_MANIFEST_SCHEMA_VERSION_V3: &str = "3";
 /// F4 publica manifiestos de evento bajo el catálogo diagnóstico v3. F5
 /// estrenará su propio documento v5 con el catálogo v4.
 const EVENT_MANIFEST_DIAGNOSTIC_CATALOG_VERSION: &str = "3";
@@ -225,7 +232,86 @@ pub struct EventManifest<'a> {
     /// Vista agregada del plan y la materialización F4.4. No contiene claves
     /// de pareja, IDs de instancia ni datos materializables individuales.
     pub biological_contamination: &'a [BiologicalContaminationManifestRecipient],
+    /// Sección del tartamudeo. `None` cuando el evento no abre la etapa
+    /// `stutter`, y entonces el documento no la menciona.
+    pub stutter: Option<EventManifestStutter>,
     pub diagnostics: &'a [Diagnostic],
+}
+
+/// Lo que el manifiesto publica del tartamudeo: sus parámetros efectivos con su
+/// procedencia y sus **recuentos agregados**.
+///
+/// Nada por lectura ni por pareja. Lo más fino que aparece es un locus, que es
+/// una entidad de la configuración, no de la salida.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EventManifestStutter {
+    pub settings: crate::stutter::StutterSettings,
+    pub report: crate::stutter::StutterReport,
+    /// Los loci declarados, en orden canónico, con las longitudes de motivo que
+    /// cada uno usa. De aquí salen los parámetros efectivos por locus.
+    pub loci: Vec<(String, Vec<u64>)>,
+}
+
+impl EventManifestStutter {
+    fn document(&self) -> Value {
+        let locus_parameters = self
+            .loci
+            .iter()
+            .map(|(locus_id, motif_lengths)| {
+                json!({
+                    "locus_id": locus_id,
+                    "base_rates": motif_lengths
+                        .iter()
+                        .map(|length| json!({
+                            "motif_length_bases": length,
+                            "rate": self
+                                .settings
+                                .base_rate_for(locus_id, *length)
+                                .unwrap_or(0.0),
+                        }))
+                        .collect::<Vec<_>>(),
+                    "rate_substituted": self.settings.locus_rates().contains_key(locus_id),
+                })
+            })
+            .collect::<Vec<_>>();
+        let steps_by_locus = self
+            .report
+            .steps_by_locus()
+            .iter()
+            .map(|(locus_id, steps)| {
+                json!({
+                    "locus_id": locus_id,
+                    "steps": steps
+                        .iter()
+                        .map(|(units, count)| json!({"units": units, "count": count}))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect::<Vec<_>>();
+        // El bloque de parámetros es **el mismo** que publica la configuración
+        // efectiva; aquí solo se le añaden los loci y los recuentos realizados.
+        let mut document = crate::stutter::effective_settings_document(&self.settings);
+        if let Some(object) = document.as_object_mut() {
+            // `locus_rates` es la sustitución declarada; `locus_parameters` es
+            // el parámetro **efectivo** de cada locus. El manifiesto publica el
+            // segundo, que es lo que de verdad se usó.
+            object.remove("locus_rates");
+            object.insert(
+                "locus_parameters".to_owned(),
+                Value::Array(locus_parameters),
+            );
+            object.insert(
+                "evaluated_tracts".to_owned(),
+                Value::from(self.report.evaluated_tracts()),
+            );
+            object.insert(
+                "stuttered_tracts".to_owned(),
+                Value::from(self.report.stuttered_tracts()),
+            );
+            object.insert("steps_by_locus".to_owned(), Value::Array(steps_by_locus));
+        }
+        document
+    }
 }
 
 /// Ruta canónica del manifiesto dentro de la raíz de una ejecución.
@@ -323,11 +409,11 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
         .collect::<Vec<_>>();
     let document = json!({
         "manifest_kind": EVENT_MANIFEST_KIND,
-        "schema_version": EVENT_MANIFEST_SCHEMA_VERSION,
+        "schema_version": event_manifest_schema_version(manifest),
         "event_id": manifest.event.event_id().as_str(),
         "event_type": TECHNICAL_SEQUENCING_EVENT_TYPE,
         "technology": ILLUMINA_SHORT_READ_TECHNOLOGY_V1,
-        "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
+        "rng_catalog": event_manifest_rng_catalog(manifest),
         "id_catalog": f4_id_catalog(),
         "state": manifest.state.as_str(),
         "profile": {
@@ -405,6 +491,23 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
         "outputs": artifacts,
         "diagnostics": canonical_diagnostics(manifest.diagnostics),
     });
+    // La sección se **añade** en vez de escribirse siempre con un nulo: un
+    // manifiesto de un evento sin tartamudeo tiene que salir con los mismos
+    // bytes que antes de que el tartamudeo existiera, y una clave con `null`
+    // ya sería un byte distinto.
+    let mut document = document;
+    if let Some(stutter) = manifest.stutter.as_ref() {
+        let artifacts = document
+            .get_mut("artifacts")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| {
+                event_error(
+                    &event_manifest_relative_path(manifest.event.event_id()),
+                    "el documento del manifiesto no conserva su sección de artefactos",
+                )
+            })?;
+        artifacts.insert("stutter".to_owned(), stutter.document());
+    }
     validate_event_manifest_bytes(
         &event_manifest_relative_path(manifest.event.event_id()),
         &json_document_bytes(&document)?,
@@ -426,7 +529,24 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
     let root = required_object(&document, "raíz", path)?;
     validate_closed(root, ROOT_FIELDS, "raíz", path)?;
     require_text(root, "manifest_kind", path, EVENT_MANIFEST_KIND)?;
-    require_text(root, "schema_version", path, EVENT_MANIFEST_SCHEMA_VERSION)?;
+    // La versión del documento y el catálogo de ámbitos **van juntos**: el v4
+    // solo existe porque la etapa `stutter` existe, y la sección del
+    // tartamudeo solo cabe en la v3. Comprobarlos por separado dejaría pasar
+    // un documento que dijera v3 y catálogo v3, o v2 con sección.
+    let declared_version = required_string(root, "schema_version", path)?;
+    let expects_stutter = match declared_version {
+        EVENT_MANIFEST_SCHEMA_VERSION => false,
+        EVENT_MANIFEST_SCHEMA_VERSION_V3 => true,
+        other => {
+            return Err(event_error(
+                path,
+                format!(
+                    "schema_version debe ser {EVENT_MANIFEST_SCHEMA_VERSION} o \
+                     {EVENT_MANIFEST_SCHEMA_VERSION_V3}, se encontró {other}"
+                ),
+            ));
+        }
+    };
     let event_id = parse_id::<EventId>(required_string(root, "event_id", path)?, "event", path)?;
     require_text(root, "event_type", path, TECHNICAL_SEQUENCING_EVENT_TYPE)?;
     require_text(root, "technology", path, ILLUMINA_SHORT_READ_TECHNOLOGY_V1)?;
@@ -434,7 +554,11 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
         root,
         "rng_catalog",
         path,
-        crate::randomness::F4_TECHNICAL_RNG_CATALOG,
+        if expects_stutter {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
+        } else {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
+        },
     )?;
     validate_f4_id_catalog(required_value(root, "id_catalog", path)?, path)?;
     let state = parse_state(required_string(root, "state", path)?, path)?;
@@ -487,7 +611,11 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
         path,
     )?;
     let diagnostics = validate_diagnostics(required_value(root, "diagnostics", path)?, path)?;
-    validate_technical_artifacts(required_value(root, "artifacts", path)?, path)?;
+    validate_technical_artifacts(
+        required_value(root, "artifacts", path)?,
+        expects_stutter,
+        path,
+    )?;
     let artifact_states = validate_outputs(
         required_value(root, "outputs", path)?,
         &event_id,
@@ -552,6 +680,25 @@ const ROOT_FIELDS: &[&str] = &[
     "outputs",
     "diagnostics",
 ];
+
+/// Versión del documento: la v3 solo cuando el evento abre la etapa `stutter`.
+fn event_manifest_schema_version(manifest: &EventManifest<'_>) -> &'static str {
+    if manifest.stutter.is_some() {
+        EVENT_MANIFEST_SCHEMA_VERSION_V3
+    } else {
+        EVENT_MANIFEST_SCHEMA_VERSION
+    }
+}
+
+/// Catálogo de ámbitos aleatorios del que salen **las decisiones de este
+/// evento**, no el más alto que el binario conoce.
+fn event_manifest_rng_catalog(manifest: &EventManifest<'_>) -> &'static str {
+    if manifest.stutter.is_some() {
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
+    } else {
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
+    }
+}
 
 fn validate_writer_facts(manifest: &EventManifest<'_>) -> Result<(), Diagnostic> {
     let path = event_manifest_relative_path(manifest.event.event_id());
@@ -1459,21 +1606,40 @@ fn validate_diagnostics(value: &Value, path: &Path) -> Result<BTreeSet<String>, 
 /// Valida los únicos artefactos técnicos agregados activos en F4.3. El
 /// contrato es deliberadamente cerrado para que no se filtren listas de
 /// parejas, identificadores o coordenadas al manifiesto durable.
-fn validate_technical_artifacts(value: &Value, path: &Path) -> Result<(), Diagnostic> {
+fn validate_technical_artifacts(
+    value: &Value,
+    expects_stutter: bool,
+    path: &Path,
+) -> Result<(), Diagnostic> {
     let artifacts = required_object(value, "artifacts", path)?;
     validate_closed(
         artifacts,
-        &[
-            "chimera",
-            "biological_contamination",
-            "pcr",
-            "optical_duplicates",
-            "gc",
-            "adapters",
-        ],
+        if expects_stutter {
+            &[
+                "chimera",
+                "biological_contamination",
+                "pcr",
+                "optical_duplicates",
+                "gc",
+                "adapters",
+                "stutter",
+            ]
+        } else {
+            &[
+                "chimera",
+                "biological_contamination",
+                "pcr",
+                "optical_duplicates",
+                "gc",
+                "adapters",
+            ]
+        },
         "artifacts",
         path,
     )?;
+    if expects_stutter {
+        validate_stutter_manifest(required_value(artifacts, "stutter", path)?, path)?;
+    }
     let chimera = required_object(
         required_value(artifacts, "chimera", path)?,
         "artifacts.chimera",
@@ -1948,6 +2114,182 @@ fn validate_hex(value: &str, field: &str, path: &Path) -> Result<(), Diagnostic>
         return Err(event_error(
             path,
             format!("{field} debe ser SHA-256 hexadecimal minúsculo"),
+        ));
+    }
+    Ok(())
+}
+
+/// Comprueba la sección del tartamudeo: lo que JSON Schema no puede expresar.
+///
+/// La comprobación que importa es la **identidad contable**: la suma de la
+/// distribución de pasos por locus tiene que valer exactamente lo mismo que el
+/// número de moléculas que tartamudearon. Un manifiesto que publicara el número
+/// **esperado** en vez del realizado la rompe, y esta es la única comprobación
+/// del documento que lo caza.
+fn validate_stutter_manifest(value: &Value, path: &Path) -> Result<(), Diagnostic> {
+    let stutter = required_object(value, "artifacts.stutter", path)?;
+    validate_closed(
+        stutter,
+        &[
+            "enabled",
+            "algorithm",
+            "rng_catalog",
+            "calibration",
+            "motif_length_rates",
+            "run_length_coefficient",
+            "step_weights",
+            "locus_parameters",
+            "evaluated_tracts",
+            "stuttered_tracts",
+            "steps_by_locus",
+        ],
+        "artifacts.stutter",
+        path,
+    )?;
+    require_text(
+        stutter,
+        "algorithm",
+        path,
+        crate::stutter::STUTTER_ALGORITHM,
+    )?;
+    require_text(
+        stutter,
+        "rng_catalog",
+        path,
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4,
+    )?;
+    if stutter.get("enabled").and_then(Value::as_bool) != Some(true) {
+        return Err(event_error(
+            path,
+            "un manifiesto que publica la sección de tartamudeo la publica activa",
+        ));
+    }
+    let coefficient = required_object(
+        required_value(stutter, "run_length_coefficient", path)?,
+        "artifacts.stutter.run_length_coefficient",
+        path,
+    )?;
+    validate_closed(
+        coefficient,
+        &["value", "calibrated"],
+        "artifacts.stutter.run_length_coefficient",
+        path,
+    )?;
+    // **La marca de no calibrado no es decorativa.** Sin ella, un coeficiente
+    // que nadie ha medido pasaría por medido.
+    if coefficient.get("calibrated").and_then(Value::as_bool)
+        != Some(crate::stutter::STUTTER_RUN_LENGTH_COEFFICIENT_CALIBRATED)
+    {
+        return Err(event_error(
+            path,
+            "el coeficiente de la tirada tiene que publicarse como no calibrado",
+        ));
+    }
+    let calibration = required_object(
+        required_value(stutter, "calibration", path)?,
+        "artifacts.stutter.calibration",
+        path,
+    )?;
+    validate_closed(
+        calibration,
+        &[
+            "source",
+            "species",
+            "technology",
+            "column",
+            "known_mismatch",
+        ],
+        "artifacts.stutter.calibration",
+        path,
+    )?;
+    require_text(
+        calibration,
+        "known_mismatch",
+        path,
+        crate::stutter::STUTTER_KNOWN_CALIBRATION_MISMATCH,
+    )?;
+    let step_weights = required_array(
+        required_value(stutter, "step_weights", path)?,
+        "artifacts.stutter.step_weights",
+        path,
+    )?;
+    let declared_steps = step_weights
+        .iter()
+        .map(|entry| {
+            let entry = required_object(entry, "artifacts.stutter.step_weights", path)?;
+            validate_closed(
+                entry,
+                &["units", "weight"],
+                "artifacts.stutter.step_weights",
+                path,
+            )?;
+            entry
+                .get("units")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| event_error(path, "un paso publicado no declara sus unidades"))
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    if declared_steps != crate::stutter::STUTTER_ADMITTED_STEPS {
+        return Err(event_error(
+            path,
+            "los pesos publicados no cubren exactamente la estructura del algoritmo",
+        ));
+    }
+    let stuttered = required_u64(stutter, "stuttered_tracts", path)?;
+    let evaluated = required_u64(stutter, "evaluated_tracts", path)?;
+    if stuttered > evaluated {
+        return Err(event_error(
+            path,
+            "no pueden tartamudear más moléculas de las evaluadas",
+        ));
+    }
+    let mut total = 0_u64;
+    for entry in required_array(
+        required_value(stutter, "steps_by_locus", path)?,
+        "artifacts.stutter.steps_by_locus",
+        path,
+    )? {
+        let entry = required_object(entry, "artifacts.stutter.steps_by_locus", path)?;
+        validate_closed(
+            entry,
+            &["locus_id", "steps"],
+            "artifacts.stutter.steps_by_locus",
+            path,
+        )?;
+        for step in required_array(
+            required_value(entry, "steps", path)?,
+            "artifacts.stutter.steps_by_locus.steps",
+            path,
+        )? {
+            let step = required_object(step, "artifacts.stutter.steps_by_locus.steps", path)?;
+            validate_closed(
+                step,
+                &["units", "count"],
+                "artifacts.stutter.steps_by_locus.steps",
+                path,
+            )?;
+            let units = step
+                .get("units")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| event_error(path, "un paso realizado no declara sus unidades"))?;
+            if !crate::stutter::STUTTER_ADMITTED_STEPS.contains(&units) {
+                return Err(event_error(
+                    path,
+                    format!("el paso realizado {units} no pertenece a la estructura"),
+                ));
+            }
+            total = total
+                .checked_add(required_u64(step, "count", path)?)
+                .ok_or_else(|| event_error(path, "la distribución de pasos desborda"))?;
+        }
+    }
+    if total != stuttered {
+        return Err(event_error(
+            path,
+            format!(
+                "la distribución de pasos suma {total} y las moléculas que tartamudearon son \
+                 {stuttered}"
+            ),
         ));
     }
     Ok(())

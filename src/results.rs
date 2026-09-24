@@ -260,6 +260,10 @@ pub struct ManifestEventLink {
     /// documento de evento. No transporta procedencia por pareja.
     pub chimera_rate: f64,
     pub realized_chimera_pairs: u64,
+    /// Catálogo del que salieron **las decisiones de este evento**. El
+    /// inventario del manifiesto general repite el mismo nombre que el
+    /// manifiesto del evento, en vez de deducirlo otra vez.
+    pub rng_catalog: &'static str,
 }
 
 pub struct GeneralManifest<'a> {
@@ -859,7 +863,8 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
         EffectiveTechnicalEventTarget::CoverageWgs(value) => json!({"coverage_wgs": value}),
         EffectiveTechnicalEventTarget::ReadCount(value) => json!({"read_count": value}),
     };
-    json!({
+    let stutter_active = config.stutter_plan().is_active();
+    let mut document = json!({
         "event_id": event.event_id().as_str(),
         "individual_ids": event.individual_ids().iter().map(|id| id.as_str()).collect::<Vec<_>>(),
         "profile": {
@@ -900,11 +905,25 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
             },
             "recipient_ids": resolved_contamination_recipients(event),
         },
-        "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
+        "rng_catalog": if stutter_active {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
+        } else {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
+        },
         "id_catalog": f4_id_catalog_value(),
         "libraries": resolved_technical_libraries(config, event),
         "target": target,
-    })
+    });
+    // La clave se **añade** solo cuando el evento abre de verdad la etapa
+    // `stutter`. Escribirla siempre, aunque fuera con el interruptor apagado,
+    // cambiaría los bytes de toda configuración efectiva ya publicada.
+    if stutter_active && let Some(object) = document.as_object_mut() {
+        object.insert(
+            "stutter".to_owned(),
+            crate::stutter::effective_settings_document(event.stutter()),
+        );
+    }
+    document
 }
 
 fn resolved_technical_libraries(
@@ -1064,7 +1083,7 @@ fn technical_event_manifest_json(
             "id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
             "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
         },
-        "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG,
+        "rng_catalog": link.rng_catalog,
         "id_catalog": f4_id_catalog_value(),
         "artifacts": {
             "chimera": {
@@ -1570,6 +1589,8 @@ fn validate_effective_config_v3_against_manifest_bytes(
             object,
             &initial_individual_ids,
             &direct_event_ids,
+            object.get("schema_version").and_then(Value::as_str)
+                == Some(EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS),
             effective_path,
         )?;
     }
@@ -4851,8 +4872,13 @@ fn validate_manifest_technical_events(
                 != Some(
                     &json!({"id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1, "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256}),
                 )
-            || object.get("rng_catalog").and_then(Value::as_str)
-                != Some(crate::randomness::F4_TECHNICAL_RNG_CATALOG)
+            || !matches!(
+                object.get("rng_catalog").and_then(Value::as_str),
+                Some(
+                    crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
+                        | crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
+                )
+            )
             || object.get("id_catalog") != Some(&f4_id_catalog_value())
         {
             return Err(manifest_error(path, "inventario técnico F4 incompatible"));
@@ -5992,10 +6018,112 @@ fn validate_effective_direct_events(
     Ok(event_ids)
 }
 
+/// Comprueba la sección del tartamudeo de la configuración efectiva.
+///
+/// Lo que de verdad discrimina aquí es que la **procedencia** viaje con los
+/// valores: unas cifras embebidas sin fuente, sin especie y sin tecnología no
+/// se distinguen de unas inventadas, y un coeficiente sin la marca de no
+/// calibrado pasaría por medido.
+fn validate_effective_stutter(
+    stutter: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    validate_effective_closed_object(
+        stutter,
+        &[
+            "enabled",
+            "algorithm",
+            "rng_catalog",
+            "calibration",
+            "motif_length_rates",
+            "run_length_coefficient",
+            "step_weights",
+            "locus_rates",
+        ],
+        "technical_event.stutter",
+        path,
+    )?;
+    if effective_non_empty_text(stutter, "algorithm", path)? != crate::stutter::STUTTER_ALGORITHM
+        || effective_non_empty_text(stutter, "rng_catalog", path)?
+            != crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
+    {
+        return Err(effective_error(path, "algoritmo de tartamudeo inválido"));
+    }
+    let calibration = effective_object(stutter, "calibration", path)?;
+    validate_effective_closed_object(
+        calibration,
+        &[
+            "source",
+            "species",
+            "technology",
+            "column",
+            "known_mismatch",
+        ],
+        "technical_event.stutter.calibration",
+        path,
+    )?;
+    if effective_non_empty_text(calibration, "source", path)?
+        != crate::stutter::STUTTER_CALIBRATION_SOURCE
+        || effective_non_empty_text(calibration, "species", path)?
+            != crate::stutter::STUTTER_CALIBRATION_SPECIES
+        || effective_non_empty_text(calibration, "technology", path)?
+            != crate::stutter::STUTTER_CALIBRATION_TECHNOLOGY
+        || effective_non_empty_text(calibration, "column", path)?
+            != crate::stutter::STUTTER_CALIBRATION_COLUMN
+    {
+        return Err(effective_error(
+            path,
+            "la procedencia de la calibración del tartamudeo no es la publicada",
+        ));
+    }
+    let coefficient = effective_object(stutter, "run_length_coefficient", path)?;
+    validate_effective_closed_object(
+        coefficient,
+        &["value", "calibrated"],
+        "technical_event.stutter.run_length_coefficient",
+        path,
+    )?;
+    if coefficient.get("calibrated").and_then(Value::as_bool)
+        != Some(crate::stutter::STUTTER_RUN_LENGTH_COEFFICIENT_CALIBRATED)
+    {
+        return Err(effective_error(
+            path,
+            "el coeficiente de la tirada tiene que publicarse como no calibrado",
+        ));
+    }
+    let rates = stutter
+        .get("motif_length_rates")
+        .and_then(Value::as_array)
+        .ok_or_else(|| effective_error(path, "faltan las tasas por longitud de motivo"))?;
+    if rates.len() != crate::stutter::STUTTER_MOTIF_LENGTH_MAX {
+        return Err(effective_error(
+            path,
+            "la calibración publica exactamente seis tasas por longitud de motivo",
+        ));
+    }
+    let steps = stutter
+        .get("step_weights")
+        .and_then(Value::as_array)
+        .ok_or_else(|| effective_error(path, "faltan los pesos de los pasos"))?;
+    let declared = steps
+        .iter()
+        .map(|entry| entry.get("units").and_then(Value::as_i64))
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| effective_error(path, "un peso publicado no declara sus unidades"))?;
+    if declared != crate::stutter::STUTTER_ADMITTED_STEPS {
+        return Err(effective_error(
+            path,
+            "los pesos publicados no cubren exactamente la estructura del algoritmo",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_effective_technical_event(
     effective: &serde_json::Map<String, Value>,
     initial_individual_ids: &BTreeSet<IndividualId>,
     direct_event_ids: &BTreeSet<EventId>,
+    may_declare_repeats: bool,
     path: &Path,
 ) -> Result<(), Diagnostic> {
     let event = effective_object(effective, "technical_event", path)?;
@@ -6013,7 +6141,46 @@ fn validate_effective_technical_event(
         "id_catalog",
         "target",
     ];
-    validate_effective_closed_object(event, &FIELDS, "technical_event", path)?;
+    const FIELDS_WITH_STUTTER: [&str; 13] = [
+        "event_id",
+        "individual_ids",
+        "profile",
+        "read_length",
+        "quality",
+        "sequencing_errors",
+        "artifacts",
+        "biological_contamination",
+        "libraries",
+        "rng_catalog",
+        "id_catalog",
+        "target",
+        "stutter",
+    ];
+    // La sección del tartamudeo y el catálogo v4 **van juntos**, igual que en
+    // el manifiesto del evento: uno sin el otro sería un documento que dice
+    // haber tartamudeado bajo un catálogo que no tiene esa etapa, o al revés.
+    let declares_stutter = event.contains_key("stutter");
+    // La sección del tartamudeo **solo cabe en la versión que admite
+    // repeticiones**: sin loci declarados no hay nada que tartamudear, y sin
+    // repeticiones no hay loci. Admitirla en una versión anterior dejaría al
+    // lector de Rust diciendo algo distinto del esquema publicado, que la
+    // rechaza como campo desconocido.
+    if declares_stutter && !may_declare_repeats {
+        return Err(effective_error(
+            path,
+            "la sección de tartamudeo no pertenece a esta versión de configuración efectiva",
+        ));
+    }
+    validate_effective_closed_object(
+        event,
+        if declares_stutter {
+            &FIELDS_WITH_STUTTER
+        } else {
+            &FIELDS
+        },
+        "technical_event",
+        path,
+    )?;
     let event_id = EventId::parse(
         effective_non_empty_text(event, "event_id", path)?,
         "effective_config",
@@ -6032,11 +6199,18 @@ fn validate_effective_technical_event(
     {
         return Err(effective_error(path, "perfil técnico mínimo inválido"));
     }
-    if effective_non_empty_text(event, "rng_catalog", path)?
-        != crate::randomness::F4_TECHNICAL_RNG_CATALOG
+    let expected_catalog = if declares_stutter {
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
+    } else {
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
+    };
+    if effective_non_empty_text(event, "rng_catalog", path)? != expected_catalog
         || event.get("id_catalog") != Some(&f4_id_catalog_value())
     {
         return Err(effective_error(path, "catálogo técnico F4 inválido"));
+    }
+    if declares_stutter {
+        validate_effective_stutter(effective_object(event, "stutter", path)?, path)?;
     }
     let contamination = effective_object(event, "biological_contamination", path)?;
     validate_effective_closed_object(

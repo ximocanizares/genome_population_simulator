@@ -7,7 +7,7 @@ use rand_chacha::ChaCha12Rng;
 use rand_chacha::rand_core::{Rng, SeedableRng};
 
 use crate::diagnostics::Diagnostic;
-use crate::identity::{EventId, LibraryId};
+use crate::identity::{EventId, LibraryId, RepeatLocusId};
 use crate::identity::{F5BlockId, F5SiteId, IndividualId, PopulationId, ScenarioId};
 
 pub const DERIVATION_VERSION: u32 = 1;
@@ -1273,7 +1273,35 @@ pub const F4_BERNOULLI_ALGORITHM: &str = "bernoulli-v1";
 pub const F4_PARTIAL_FISHER_YATES_ALGORITHM: &str = "partial-fisher-yates-v1";
 pub const F4_TRUNCATED_NORMAL_ALGORITHM: &str = "normal-truncated-box-muller-v1";
 /// Catálogo normativo de claves técnicas F4 de DTC-086.
-pub const F4_TECHNICAL_RNG_CATALOG: &str = "f4-technical-v3";
+///
+/// **Es además el ámbito de derivación** de cada una de sus trece decisiones:
+/// el nombre entra literalmente en el material que `canonical_material_v2`
+/// amasa. Por eso no puede reescribirse al subir de versión sin reescribir
+/// todas las subsemillas ya publicadas.
+pub const F4_TECHNICAL_RNG_CATALOG_V3: &str = "f4-technical-v3";
+/// Catálogo que **extiende** el anterior con la etapa `stutter` (DTC-090).
+///
+/// # Por qué la extensión no desplaza nada
+///
+/// Un catálogo nuevo podría entenderse de dos maneras: como un ámbito de
+/// derivación nuevo para **todas** las decisiones, o como el vigente **más**
+/// una etapa. Aquí es lo segundo, y no por comodidad: DTC-081 exige que cada
+/// sorteo arranque de su propia clave y que «no existe consumo acumulado entre
+/// decisiones», y la decisión S-11 saca de ahí la consecuencia explícita de que
+/// **añadir el tartamudeo no puede desplazar ninguna decisión anterior**.
+///
+/// En consecuencia, las trece decisiones heredadas siguen derivándose bajo
+/// [`F4_TECHNICAL_RNG_CATALOG_V3`] y solo las dos decisiones de la etapa
+/// `stutter` usan este nombre como ámbito. Lo que cambia al subir de versión es
+/// **qué claves existen**, no qué produce ninguna de las que ya existían.
+///
+/// Una ejecución publica el catálogo del que salen **sus** decisiones, como ya
+/// hace F5 con `f5-rng-catalog-v1`/`v2`: un evento técnico sin tartamudeo
+/// activo no abre la etapa `stutter` y publica el v3, que es lo que mantiene
+/// byte a byte los paquetes anteriores a esta ampliación.
+pub const F4_TECHNICAL_RNG_CATALOG_V4: &str = "f4-technical-v4";
+/// Catálogo vigente para una ejecución que no abre la etapa `stutter`.
+pub const F4_TECHNICAL_RNG_CATALOG: &str = F4_TECHNICAL_RNG_CATALOG_V3;
 /// Catálogo inmutable de ámbitos aleatorios de F5 (DTC-089).
 ///
 /// Este catálogo no amplía `subseed-scopes-v8`: F5 publica sus decisiones en
@@ -1445,6 +1473,18 @@ enum F4TechnicalDecisionKind<'a> {
         event_id: &'a EventId,
         pre_hop_library_id: &'a LibraryId,
         pre_hop_instance_id: F4IndexHopInstance<'a>,
+    },
+    StutterBernoulli {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        locus_id: &'a RepeatLocusId,
+    },
+    StutterStep {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        locus_id: &'a RepeatLocusId,
     },
 }
 
@@ -1628,6 +1668,74 @@ impl<'a> F4TechnicalDecision<'a> {
         })
     }
 
+    /// Ensayo binario «¿resbala la polimerasa sobre este tracto?».
+    ///
+    /// Se indexa por **identificador de locus**, nunca por la posición del
+    /// tracto dentro de la molécula: así, declarar un locus nuevo en otro
+    /// cromosoma no desplaza las decisiones de los que ya había (S-11).
+    #[must_use]
+    pub const fn stutter_bernoulli(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        locus_id: &'a RepeatLocusId,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::StutterBernoulli {
+            event_id,
+            library_id,
+            template_ordinal,
+            locus_id,
+        })
+    }
+
+    /// Elección del paso en unidades enteras entre los candidatos **ya
+    /// filtrados**. No es un recuento, de modo que DTC-067 no le aplica.
+    #[must_use]
+    pub const fn stutter_step(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        locus_id: &'a RepeatLocusId,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::StutterStep {
+            event_id,
+            library_id,
+            template_ordinal,
+            locus_id,
+        })
+    }
+
+    /// Catálogo del que sale **esta** decisión, que es su ámbito de derivación.
+    ///
+    /// Las trece decisiones de DTC-086 conservan el v3 para que una etapa nueva
+    /// no reescriba ninguna subsemilla ya publicada; solo las dos del
+    /// tartamudeo nacen en el v4.
+    /// **Las trece heredadas se enumeran una a una, sin comodín.** Con un
+    /// comodín al final, una decisión **nueva de la familia del tartamudeo**
+    /// caería en el v3 en silencio, que es exactamente el error que toda esta
+    /// pieza existe para evitar. Enumerándolas, añadir una variante no compila
+    /// hasta que alguien decide a qué catálogo pertenece.
+    #[must_use]
+    pub const fn catalog(self) -> &'static str {
+        match self.0 {
+            F4TechnicalDecisionKind::StutterBernoulli { .. }
+            | F4TechnicalDecisionKind::StutterStep { .. } => F4_TECHNICAL_RNG_CATALOG_V4,
+            F4TechnicalDecisionKind::FragmentInsertLength { .. }
+            | F4TechnicalDecisionKind::FragmentCopy { .. }
+            | F4TechnicalDecisionKind::FragmentStart { .. }
+            | F4TechnicalDecisionKind::ChimeraBernoulli { .. }
+            | F4TechnicalDecisionKind::ChimeraBreakpoint { .. }
+            | F4TechnicalDecisionKind::ChimeraSecondSource { .. }
+            | F4TechnicalDecisionKind::ErrorBernoulli { .. }
+            | F4TechnicalDecisionKind::ErrorSubstitution { .. }
+            | F4TechnicalDecisionKind::ContaminationPercent { .. }
+            | F4TechnicalDecisionKind::ContaminationDonors { .. }
+            | F4TechnicalDecisionKind::ContaminationRecipients { .. }
+            | F4TechnicalDecisionKind::IndexHopBernoulli { .. }
+            | F4TechnicalDecisionKind::IndexHopDestination { .. } => F4_TECHNICAL_RNG_CATALOG_V3,
+        }
+    }
+
     fn canonical_components(self) -> Vec<(&'static str, String)> {
         match self.0 {
             F4TechnicalDecisionKind::FragmentInsertLength {
@@ -1784,6 +1892,24 @@ impl<'a> F4TechnicalDecision<'a> {
                 pre_hop_instance_id,
                 "destination",
             ),
+            F4TechnicalDecisionKind::StutterBernoulli {
+                event_id,
+                library_id,
+                template_ordinal,
+                locus_id,
+            } => f4_stutter_components(
+                event_id,
+                library_id,
+                template_ordinal,
+                locus_id,
+                "bernoulli",
+            ),
+            F4TechnicalDecisionKind::StutterStep {
+                event_id,
+                library_id,
+                template_ordinal,
+                locus_id,
+            } => f4_stutter_components(event_id, library_id, template_ordinal, locus_id, "step"),
         }
     }
 }
@@ -1824,6 +1950,25 @@ fn f4_error_components(
         ("template_ordinal", template_ordinal.to_string()),
         ("mate", mate.canonical_value().to_owned()),
         ("cycle", cycle.to_string()),
+        ("decision", decision.to_owned()),
+    ]
+}
+
+/// Componentes de la etapa `stutter`, en el orden literal de DTC-090:
+/// `[event_id, library_id, stutter, template_ordinal, locus_id, decision]`.
+fn f4_stutter_components(
+    event_id: &EventId,
+    library_id: &LibraryId,
+    template_ordinal: u64,
+    locus_id: &RepeatLocusId,
+    decision: &'static str,
+) -> Vec<(&'static str, String)> {
+    vec![
+        ("event_id", event_id.as_str().to_owned()),
+        ("library_id", library_id.as_str().to_owned()),
+        ("stage", "stutter".to_owned()),
+        ("template_ordinal", template_ordinal.to_string()),
+        ("locus_id", locus_id.as_str().to_owned()),
         ("decision", decision.to_owned()),
     ]
 }
@@ -1870,10 +2015,15 @@ fn f4_index_hop_components(
 /// El nombre del catálogo constituye el ámbito de derivación v2; los
 /// componentes posteriores siguen el orden literal de DTC-086. Cada llamada
 /// devuelve una nueva semilla ChaCha12 y nunca avanza un flujo compartido.
+///
+/// El ámbito lo elige **la decisión**, no el binario: las heredadas conservan
+/// el v3 y las del tartamudeo nacen en el v4. Ver
+/// [`F4_TECHNICAL_RNG_CATALOG_V4`].
 pub fn derive_f4_technical_subseed(
     root: RootSeed,
     decision: F4TechnicalDecision<'_>,
 ) -> Result<Subseed, Diagnostic> {
+    let catalog = decision.catalog();
     let components = decision.canonical_components();
     let components = components
         .iter()
@@ -1881,7 +2031,7 @@ pub fn derive_f4_technical_subseed(
         .collect::<Vec<_>>();
     Ok(Subseed(blake3::derive_key(
         DERIVATION_CONTEXT,
-        &canonical_material_v2(root, F4_TECHNICAL_RNG_CATALOG, &components)?,
+        &canonical_material_v2(root, catalog, &components)?,
     )))
 }
 

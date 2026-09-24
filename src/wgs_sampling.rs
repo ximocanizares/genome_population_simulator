@@ -18,6 +18,7 @@ use crate::randomness::{
     f4_uniform_index, poisson_count, uniform_u64_below,
 };
 use crate::reference::{Reference, ReferenceSequence};
+use crate::stutter::{StutterAccumulator, StutterPlan, StutterReport};
 use crate::technical_identity::{
     F4TechnicalIdentityDeriver, TechnicalIdentityPlan, TechnicalTemplateIdentity, TemplateOrdinal,
 };
@@ -193,7 +194,9 @@ impl WgsReadPlan {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+// `Eq` decae a `PartialEq` porque el rechazo del tartamudeo nombra el valor
+// numérico que lo causó, y un `f64` no admite igualdad total.
+#[derive(Clone, Debug, PartialEq)]
 pub enum WgsSamplingError {
     TechnicalPlanReferenceMismatch,
     IndividualReferenceMismatch,
@@ -207,6 +210,7 @@ pub enum WgsSamplingError {
     TechnicalIdentity(Diagnostic),
     Materialization(MaterializationError),
     Chimera(crate::chimera::ChimeraError),
+    Stutter(crate::stutter::StutterError),
 }
 
 /// Resuelve la cobertura F4 a parejas Illumina PE completas.
@@ -564,6 +568,11 @@ pub struct WgsPairedEndSampler<'a> {
     identity_deriver: F4TechnicalIdentityDeriver,
     chimera_settings: ChimeraSettings,
     chimera_accumulator: ChimeraAccumulator,
+    /// Plan de tartamudeo del evento. El plan por omisión está apagado, de
+    /// modo que un muestreador construido sin él se comporta exactamente como
+    /// antes de que el tartamudeo existiera.
+    stutter_plan: StutterPlan,
+    stutter_accumulator: StutterAccumulator,
     failed: bool,
 }
 
@@ -726,6 +735,8 @@ impl<'a> WgsPairedEndSampler<'a> {
             ),
             chimera_settings,
             chimera_accumulator: ChimeraAccumulator::default(),
+            stutter_plan: StutterPlan::default(),
+            stutter_accumulator: StutterAccumulator::default(),
             failed: false,
         })
     }
@@ -747,10 +758,23 @@ impl<'a> WgsPairedEndSampler<'a> {
         self
     }
 
+    /// Conecta el plan de tartamudeo del evento al productor PE.
+    #[must_use]
+    pub fn with_stutter_plan(mut self, plan: StutterPlan) -> Self {
+        self.stutter_plan = plan;
+        self
+    }
+
     /// Recuento agregado de quimeras ya emitidas por este flujo.
     #[must_use]
     pub const fn chimera_report(&self) -> ChimeraReport {
         self.chimera_accumulator.report()
+    }
+
+    /// Recuentos agregados del tartamudeo de este flujo.
+    #[must_use]
+    pub fn stutter_report(&self) -> StutterReport {
+        self.stutter_accumulator.clone().report()
     }
 
     fn sample_next_pair(&mut self, ordinal: u64) -> Result<PairedEndPair, WgsSamplingError> {
@@ -821,7 +845,22 @@ impl<'a> WgsPairedEndSampler<'a> {
         self.chimera_accumulator
             .record(&transformation)
             .map_err(WgsSamplingError::Chimera)?;
-        Ok(transformation.into_pair())
+        // **Después de la quimera y antes de calidad y errores.** La quimera
+        // compara byte a byte el prefijo del fragmento contra la copia
+        // haplotípica: un fragmento ya tartamudeado rompería esa comprobación.
+        let stuttered = crate::stutter::transform_paired_end(
+            self.identities.root_seed(),
+            event_id,
+            self.individual,
+            &self.stutter_plan,
+            transformation.into_pair(),
+            self.read_length,
+        )
+        .map_err(WgsSamplingError::Stutter)?;
+        self.stutter_accumulator
+            .record(&stuttered)
+            .map_err(WgsSamplingError::Stutter)?;
+        Ok(stuttered.into_pair())
     }
 }
 

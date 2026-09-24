@@ -807,6 +807,8 @@ pub struct ObservedTract {
     total_bases: u64,
     covered_bases: u64,
     longest_run_units: u64,
+    longest_run_start: u64,
+    longest_run_motif_length: u64,
 }
 
 impl ObservedTract {
@@ -835,6 +837,22 @@ impl ObservedTract {
     pub const fn longest_run_units(self) -> u64 {
         self.longest_run_units
     }
+
+    /// Desplazamiento de la primera base de esa tirada dentro del tramo
+    /// observado. Vale cero cuando no hay ninguna copia completa, y entonces
+    /// no significa «al principio»: significa que no hay tirada.
+    #[must_use]
+    pub const fn longest_run_start(self) -> u64 {
+        self.longest_run_start
+    }
+
+    /// Longitud en pares de base del motivo de esa tirada. Cero si no hay
+    /// tirada. Hace falta aparte porque con varios motivos declarados la
+    /// tirada más larga no tiene por qué ser la del primero.
+    #[must_use]
+    pub const fn longest_run_motif_length(self) -> u64 {
+        self.longest_run_motif_length
+    }
 }
 
 /// Observa un tramo de referencia contra los motivos de un locus.
@@ -846,7 +864,10 @@ pub fn observe_tract(bases: &[u8], motifs: &[RepeatMotif]) -> ObservedTract {
     let total = bases.len();
     let mut covered = 0_u64;
     let mut longest = 0_u64;
+    let mut longest_start = 0_u64;
+    let mut longest_motif_length = 0_u64;
     let mut current_run = 0_u64;
+    let mut current_start = 0_u64;
     let mut current_motif: Option<&[u8]> = None;
     let mut offset = 0_usize;
     while offset < total {
@@ -860,8 +881,18 @@ pub fn observe_tract(bases: &[u8], motifs: &[RepeatMotif]) -> ObservedTract {
                 } else {
                     current_motif = Some(motif);
                     current_run = 1;
+                    current_start = offset as u64;
                 }
-                longest = longest.max(current_run);
+                // **Estrictamente mayor**, igual que `TractAnnotation::longest_run`:
+                // el empate conserva la tirada de más a la izquierda. Con
+                // `max` la cifra saldría igual, pero el desplazamiento
+                // guardado sería el de la última empatada y las dos
+                // convenciones dejarían de coincidir.
+                if current_run > longest {
+                    longest = current_run;
+                    longest_start = current_start;
+                    longest_motif_length = motif.len() as u64;
+                }
                 covered += motif.len() as u64;
                 offset += motif.len();
             }
@@ -876,6 +907,8 @@ pub fn observe_tract(bases: &[u8], motifs: &[RepeatMotif]) -> ObservedTract {
         total_bases: total as u64,
         covered_bases: covered,
         longest_run_units: longest,
+        longest_run_start: longest_start,
+        longest_run_motif_length: longest_motif_length,
     }
 }
 

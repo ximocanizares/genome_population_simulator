@@ -33,6 +33,7 @@ documenta mejor.
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | Abierta |
 | DT-005 | La marca del lector de verdad que distingue un tramo sustituido por un tracto no la ejercita ninguna prueba | Baja | 22/09/2026 | Abierta |
+| DT-006 | El sorteo del inserto por rechazo es inutilizable cuando la copia más larga acerca el máximo al mínimo del perfil | Media | 24/09/2026 | Abierta |
 
 ---
 
@@ -254,3 +255,53 @@ fragmento de tracto sustituido con un caso de cambio de base dentro de él, y
 exigiendo que el lector lo rechace. Es la misma técnica que DT-001 propone para
 las demás: **demostrar que la comprobación puede fallar**, en vez de confiar en
 que existe.
+
+---
+
+## DT-006. El sorteo del inserto por rechazo se vuelve inutilizable en el extremo corto
+
+**Gravedad: media.** No da un resultado incorrecto: da el correcto tardando
+tanto que parece un cuelgue, y un fixture escrito de buena fe cae dentro sin
+avisar.
+
+### Qué pasa
+
+El perfil técnico vigente sortea la longitud del inserto de una **normal de
+media 350 y desviación 20**, truncada al intervalo `[250, 450]` **por
+rechazo**: se generan pares de uniformes y se descarta el valor hasta que cae
+dentro. El muestreador, además, **condiciona el máximo a la copia más larga**
+del individuo, para que no salga un inserto que ninguna copia pueda alojar.
+
+Las dos cosas juntas tienen una consecuencia que no está escrita en ningún
+sitio: **cuando la copia más larga se acerca al mínimo del perfil, el intervalo
+admitido queda entero en la cola de la normal y la aceptación se desploma**. El
+mínimo, 250, está a **cinco desviaciones** de la media.
+
+| Copia más larga | Intervalo admitido | Sorteos por pareja, del orden de |
+|---|---|---|
+| 450 pb o más | `[250, 450]` | 1 |
+| 350 pb | `[250, 350]` | 2 |
+| 280 pb | `[250, 280]` | 4 000 |
+| 250 pb | `[250, 250]` | 13 000 000 |
+
+### Cómo se detectó
+
+Escribiendo el fixture saturado del tartamudeo (F4.8.4), que el plan pedía con
+una copia de **exactamente 250 pb** para forzar el inserto mínimo. Una ejecución
+de **dos parejas** tardó **111 segundos** medidos. Con doscientas parejas el
+proceso llevaba veinticuatro minutos girando cuando se interrumpió.
+
+### Qué se hizo y qué queda
+
+El fixture se rehízo con una copia de 280 pb y el tracto colocado de modo que
+los dos mates lo cubran entero; la propiedad que la prueba necesita se conserva
+y el coste baja a milisegundos. La aritmética está escrita en
+`tests/stutter_pipeline.rs`.
+
+**Lo que no se ha hecho** es tocar el muestreador, y es una decisión del
+responsable: cambiar el rechazo por un método de inversión cambiaría los
+vectores congelados de F4 y todas las salidas ya publicadas. Mientras tanto, lo
+que falta es una **guarda barata**: rechazar antes de simular una combinación de
+copia y perfil cuya probabilidad de aceptación caiga por debajo de un umbral, o
+al menos acotar el número de rechazos y fallar con un diagnóstico en vez de
+girar. Hoy no existe ninguna de las dos.
