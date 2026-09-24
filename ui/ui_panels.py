@@ -158,3 +158,69 @@ def repeats_panel(
             repeat_admission_controls,
         ]
     )
+
+
+def stutter_panel(
+    mo,
+    stutter_mode_control,
+    stutter_run_length_coefficient_control,
+    stutter_motif_rates_editor,
+    stutter_steps_editor,
+    stutter_locus_rates_editor,
+):
+    """Render the base stutter controls; Rust stays the authority.
+
+    Lo que **no** hay aquí es tan normativo como lo que hay: no existe control
+    para un paso de dos unidades ni para ningún modelo distinto del admitido,
+    porque la estructura del paso la fija el algoritmo y declarar otra cosa se
+    rechaza. Tampoco hay reparto sugerido de pesos: son obligatorios y no
+    tienen valor por omisión, y rellenarlos aquí afirmaría una calibración que
+    nadie ha hecho.
+    """
+    return mo.vstack(
+        [
+            mo.md("## Tartamudeo de base"),
+            mo.callout(
+                "Una molécula que contiene un microsatélite puede mostrar un "
+                "número de repeticiones distinto del que el individuo tiene, "
+                "porque la polimerasa resbala al copiarla. Es un artefacto de la "
+                "lectura: la verdad del individuo no cambia. No es una "
+                "preparación amplificada, no introduce duplicados y el perfil se "
+                "sigue registrando como sin PCR.",
+                kind="info",
+            ),
+            stutter_mode_control,
+            mo.md("### Tasa por longitud de motivo"),
+            stutter_motif_rates_editor,
+            mo.callout(
+                "Las cifras que vienen puestas proceden de la columna sin PCR de "
+                "la calibración publicada, para humano e Illumina. Solo se cubren "
+                "longitudes de 1 a 6 pares de base: un locus con un motivo más "
+                "largo se rechaza en vez de extrapolarse.",
+                kind="info",
+            ),
+            stutter_run_length_coefficient_control,
+            mo.callout(
+                "El coeficiente multiplica la tirada ininterrumpida más larga, "
+                "que es el predictor del resbalón. Arranca en cero y se publica "
+                "como no calibrado: la curva que lo fijaría está publicada pero "
+                "sin digitalizar.",
+                kind="warn",
+            ),
+            mo.md("### Pesos de los cuatro pasos admitidos"),
+            stutter_steps_editor,
+            mo.callout(
+                "Contracciones de hasta tres unidades y expansión de una sola. "
+                "La estructura no se configura: solo sus pesos relativos, que son "
+                "obligatorios con el tartamudeo activo.",
+                kind="info",
+            ),
+            mo.md("### Sustitución de la tasa por locus"),
+            stutter_locus_rates_editor,
+            mo.callout(
+                "Una sustitución tiene que nombrar un locus declarado en la "
+                "referencia; un identificador que no exista se rechaza.",
+                kind="info",
+            ),
+        ]
+    )

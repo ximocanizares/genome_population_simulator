@@ -34,6 +34,10 @@ def _():
         repeat_interruption_editor_rows,
         repeat_loci_from_editor_rows,
         repeat_locus_editor_rows,
+        stutter_from_editor_rows,
+        stutter_locus_rate_editor_rows,
+        stutter_motif_rate_editor_rows,
+        stutter_step_editor_rows,
     )
     from f5_editor import (
         F5GeneralForm,
@@ -72,6 +76,7 @@ def _():
         explicit_snp_authorization_summary,
         individuals_panel,
         repeats_panel,
+        stutter_panel,
     )
 
     return (
@@ -133,6 +138,11 @@ def _():
         reduction_from_editor_row,
         render_general_toml,
         run_toml,
+        stutter_from_editor_rows,
+        stutter_locus_rate_editor_rows,
+        stutter_motif_rate_editor_rows,
+        stutter_panel,
+        stutter_step_editor_rows,
         validate_toml,
     )
 
@@ -196,7 +206,14 @@ def _(
 
 
 @app.cell
-def _(BASES, imported_form, mo):
+def _(
+    BASES,
+    imported_form,
+    mo,
+    stutter_locus_rate_editor_rows,
+    stutter_motif_rate_editor_rows,
+    stutter_step_editor_rows,
+):
     seed_control = mo.ui.text(
         value=imported_form.seed or "",
         label="Semilla raíz opcional (64 hexadecimales minúsculos)",
@@ -271,6 +288,41 @@ def _(BASES, imported_form, mo):
     technical_libraries_editor = mo.ui.data_editor(
         technical_library_rows,
         label="Bibliotecas UDI (i7/i5: exactamente 8 bases A/C/G/T; library_id se deriva en Rust)",
+        pagination=False,
+    )
+    _selected_stutter = (
+        selected_technical_event.stutter if selected_technical_event else None
+    )
+    stutter_mode_control = mo.ui.dropdown(
+        options=["disabled", "enabled"],
+        value="enabled" if (_selected_stutter and _selected_stutter.enabled) else "disabled",
+        label="Tartamudeo de base sobre microsatélites",
+    )
+    stutter_run_length_coefficient_control = mo.ui.text(
+        value=(_selected_stutter.run_length_coefficient if _selected_stutter else "") or "",
+        label="Coeficiente de la tirada (vacío = 0; hoy sin calibrar)",
+        full_width=True,
+    )
+    stutter_motif_rates_editor = mo.ui.data_editor(
+        stutter_motif_rate_editor_rows(_selected_stutter),
+        label=(
+            "Tasa por longitud de motivo, en pares de base. Vienen con la cifra"
+            " calibrada de la columna sin PCR; vaciar una fila la deja en su valor"
+            " de omisión"
+        ),
+        pagination=False,
+    )
+    stutter_steps_editor = mo.ui.data_editor(
+        stutter_step_editor_rows(_selected_stutter),
+        label=(
+            "Pesos relativos de los cuatro pasos admitidos, en unidades enteras."
+            " Son obligatorios con el tartamudeo activo y no tienen valor de omisión"
+        ),
+        pagination=False,
+    )
+    stutter_locus_rates_editor = mo.ui.data_editor(
+        stutter_locus_rate_editor_rows(_selected_stutter),
+        label="Sustitución de la tasa para un locus concreto (una fila sin `locus_id` se omite)",
         pagination=False,
     )
     population_snvs_mode_control = mo.ui.dropdown(
@@ -470,6 +522,11 @@ def _(BASES, imported_form, mo):
         technical_event_coverage_control,
         technical_event_read_length_control,
         technical_libraries_editor,
+        stutter_mode_control,
+        stutter_run_length_coefficient_control,
+        stutter_motif_rates_editor,
+        stutter_steps_editor,
+        stutter_locus_rates_editor,
         vcf_output_mode_control,
         read_fasta_headers_button,
     )
@@ -645,6 +702,12 @@ def _(
     technical_event_coverage_control,
     technical_event_read_length_control,
     technical_libraries_editor,
+    stutter_from_editor_rows,
+    stutter_mode_control,
+    stutter_run_length_coefficient_control,
+    stutter_motif_rates_editor,
+    stutter_steps_editor,
+    stutter_locus_rates_editor,
     editor_integer,
     fasta_control,
     fasta_browser,
@@ -793,6 +856,19 @@ def _(
                         technical_event_read_length_control.value,
                         "technical_event.read_length_bases",
                     )
+                ),
+                # **Este campo faltaba, y su ausencia no la notaba nadie.** Un
+                # fichero con tartamudeo se importaba, se volvía a exportar y
+                # salía sin él, en silencio. La reconstrucción del bloque vive
+                # ahora en `config_editor.stutter_from_editor_rows`, que sí
+                # puede probarse, y `tests_ui/test_stutter_ui.py` comprueba que
+                # **todos** los campos del formulario llegan hasta aquí.
+                stutter=stutter_from_editor_rows(
+                    str(stutter_mode_control.value) == "enabled",
+                    str(stutter_run_length_coefficient_control.value),
+                    stutter_motif_rates_editor.value,
+                    stutter_steps_editor.value,
+                    stutter_locus_rates_editor.value,
                 ),
             )
         )
@@ -1590,6 +1666,12 @@ def _(
     repeat_max_tract_output_control,
     repeat_min_longest_run_control,
     repeat_min_purity_control,
+    stutter_panel,
+    stutter_mode_control,
+    stutter_run_length_coefficient_control,
+    stutter_motif_rates_editor,
+    stutter_steps_editor,
+    stutter_locus_rates_editor,
     output_directory_control,
     output_name_control,
     output_parent_directory_browser,
@@ -2105,6 +2187,14 @@ def _(
                         repeat_max_tract_output_control,
                     ]
                 ),
+            ),
+            "Tartamudeo": stutter_panel(
+                mo,
+                stutter_mode_control,
+                stutter_run_length_coefficient_control,
+                stutter_motif_rates_editor,
+                stutter_steps_editor,
+                stutter_locus_rates_editor,
             ),
             "Poblaciones": populations_panel,
             "Evolución": unavailable("F7"),

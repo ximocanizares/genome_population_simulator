@@ -685,7 +685,13 @@ su asignación por fase está en la matriz de trazabilidad.
   Si no se solicitan, esos archivos intermedios no deben generarse.
 - **REQ-CONF-55.** El fichero general debe permitir modificar el umbral de
   longitud que distingue inserciones y deleciones pequeñas de variantes
-  estructurales. Si no se indica, el sistema debe usar 50 pares de bases.
+  estructurales. Si no se indica, el sistema debe usar 50 pares de bases. El
+  umbral se aplica a la **secuencia nueva** de una inserción o una deleción;
+  **un alelo de repetición en tándem declarado sobre un locus declarado no se
+  somete a él**, ni al generar, ni al clasificar, ni al contar. Un alelo de
+  repetición no es secuencia nueva: es la realización de un tracto que la
+  referencia ya tiene, y someterlo al umbral convertiría en estructural un
+  microsatélite corriente (decisión S-05).
 - **REQ-CONF-56.** La configuración debe permitir definir loci concretos de
   repeticiones en tándem y generarlos al azar mediante
   las mismas reglas globales, regionales, individuales y reproducibles de la
@@ -1232,7 +1238,13 @@ su asignación por fase está en la matriz de trazabilidad.
 - **REQ-REF-19.** Una referencia simulada debe poder incluir repeticiones en tándem
   definidas en loci concretos o generadas según la configuración aleatoria y
   regional, y su secuencia FASTA debe reflejar los motivos, copias e
-  interrupciones realizados.
+  interrupciones realizados. Para ello, el generador de referencia simulada debe
+  admitir **regiones declaradas con su secuencia exacta** además del relleno
+  aleatorio, en el orden secuencias y tamaño → regiones declaradas → relleno.
+  Con la lista de regiones vacía, el consumo aleatorio y los bytes publicados
+  deben ser idénticos a los de una referencia sin esta capacidad (decisión
+  S-03).
+
 - **REQ-REF-20.** Las referencias deben poder contener regiones repetitivas,
   duplicadas o altamente homólogas definidas o generadas para evaluar baja
   mapeabilidad, incluidas las originadas por repeticiones o variantes
@@ -1315,6 +1327,14 @@ su asignación por fase está en la matriz de trazabilidad.
   la copia autoritativa del FASTA de origen, el mapa, los parámetros efectivos,
   la semilla y la versión del algoritmo de selección. El mapa y el manifiesto
   no pueden depender de recordar el orden en que el generador sorteó candidatos.
+- **REQ-REF-37.** Una referencia **real suministrada** debe poder recibir la
+  inserción de tractos de repetición en las posiciones declaradas, y el
+  resultado debe publicarse como **referencia derivada con identidad propia**,
+  nunca atribuido al fichero suministrado. Las posiciones que el usuario declara
+  se refieren al **genoma de partida**, y el sistema debe publicar la tabla de
+  correspondencia entre las coordenadas del genoma de partida y las del final.
+  Sin esa regla, declarar dos inserciones seguidas sería ambiguo (decisión
+  S-03).
 
 **Decisión funcional cerrada el 14 de agosto de 2026.** `reduction_percent`
 expresa el porcentaje eliminado, usa el cálculo decimal exacto y el redondeo de
@@ -1488,7 +1508,11 @@ expansión frente a contracción, pero no el tamaño del salto.
   cambios las `N` incluidas en un segmento estructuralmente válido.
 - **REQ-IND-31.** El sistema debe aplicar el umbral efectivo de longitud de forma
   coherente al generar y clasificar inserciones y deleciones y al calcular sus
-  cantidades y estadísticas por clase.
+  cantidades y estadísticas por clase. La coherencia que este requisito exige se
+  conserva con la exención de REQ-CONF-55: el umbral se aplica igual en los tres
+  momentos, y a los alelos de repetición en tándem declarados **no se aplica en
+  ninguno**. Aplicarlo en unos sí y en otros no sería justo lo que este
+  requisito prohíbe.
 - **REQ-IND-32.** Los individuos deben poder diferir de su referencia y entre sí
   en el número de copias, la longitud total, la pureza y las interrupciones de
   las repeticiones en tándem configuradas.
@@ -3268,8 +3292,12 @@ ejemplo principal de lecturas cortas admitidas en la primera versión. Las
 lecturas largas, incluido PacBio HiFi, quedan aplazadas en DTF-049.
 
 F4 sigue este orden normativo: calcula las parejas de cobertura, sortea el
-fragmento biológico, forma una quimera cuando corresponda, realiza calidad y
-errores de R1/R2, aplica contaminación biológica y finalmente demultiplexa.
+fragmento biológico, forma una quimera cuando corresponda, **aplica el
+tartamudeo cuando corresponda**, realiza calidad y errores de R1/R2, aplica
+contaminación biológica y finalmente demultiplexa. Cuando una molécula sea
+quimérica, el tartamudeo se aplica a la molécula quimérica **ya formada**:
+antes de la quimera rompería su comparación byte a byte del prefijo contra la
+copia haplotípica (decisión S-13).
 El demultiplexado puede transferir una pareja ya contaminante. El manifiesto conserva solo estadísticas agregadas de
 procedencia, nunca un registro por lectura ni pareja. El modo directo de
 alineamientos sintéticos queda aplazado en DTF-051.
@@ -3335,9 +3363,9 @@ a una probabilidad mayor de error.
   tecnología, el perfil y los parámetros efectivos con los que se generaron sus
   lecturas o alineamientos.
 - **REQ-DAT-17.** En el modo realista, el sistema debe guardar como salida los
-  FASTQ finales después de formar el fragmento, la quimera opcional y sus
-  calidades/errores, y de aplicar después contaminación biológica y errores de
-  demultiplexado. Una reasignación puede afectar a una pareja ya contaminante.
+  FASTQ finales después de formar el fragmento, la quimera opcional, **el
+  tartamudeo opcional** y sus calidades/errores, y de aplicar después
+  contaminación biológica y errores de demultiplexado. Una reasignación puede afectar a una pareja ya contaminante.
   F4 no genera BAM ni CRAM; fases posteriores podrán usar esas mismas lecturas.
   No debe reconstruir esos FASTQ a partir de los archivos de alineamiento.
   En F4, cada pareja final se publica como
@@ -3589,6 +3617,124 @@ a una probabilidad mayor de error.
   que ninguna `N` de plantilla se resolvió silenciosamente y que el modelo de
   error no creó nuevas `N`. Deben registrar el número o la proporción de `N` en
   las lecturas por biblioteca y ámbito pertinente.
+
+- **REQ-DAT-74.** F4 debe poder aplicar tartamudeo a las repeticiones en tándem
+  **declaradas**. El tartamudeo cambia el número de unidades del tracto
+  contenido en una molécula, en unidades completas del motivo, y no modifica en
+  ningún caso el estado genotípico del individuo, la verdad publicada ni el VCF
+  de verdad. F4 no detecta tractos no declarados: una región repetitiva que no
+  corresponda a un locus de repetición en tándem configurado no produce
+  tartamudeo.
+
+- **REQ-DAT-75.** El tartamudeo es una **propiedad de la molécula, no de la
+  lectura**. Para cada molécula y cada tracto declarado contenido en ella, el
+  sistema debe tomar una única decisión y aplicarla a la molécula completa antes
+  de volver a formar sus dos lecturas. Cuando las dos lecturas de una pareja
+  cubran el mismo tracto, deben mostrar **el mismo** número de unidades. El
+  sistema no debe aplicar decisiones independientes a R1 y a R2.
+
+- **REQ-DAT-76.** El orden normativo de F4 pasa a ser: calcular las parejas de
+  cobertura, sortear el fragmento biológico, formar una quimera cuando
+  corresponda, **aplicar el tartamudeo cuando corresponda**, realizar calidad y
+  errores de R1/R2, aplicar contaminación biológica y demultiplexar. Cuando una
+  molécula sea quimérica, el tartamudeo se aplica a la molécula quimérica ya
+  formada.
+
+- **REQ-DAT-77.** La decisión de tartamudeo debe ser reproducible y derivarse de
+  un ámbito de semilla propio, identificado por el evento, la biblioteca, la
+  plantilla y el **identificador del locus** —nunca por la posición del tracto
+  dentro de la molécula—, y nunca del orden físico de generación ni de un flujo
+  aleatorio compartido. Debe constar de dos decisiones: si la molécula
+  tartamudea y, en caso afirmativo, cuántas unidades gana o pierde. La
+  probabilidad de resbalón **por ciclo** debe depender linealmente de la
+  **tirada ininterrumpida más larga** del motivo contenida en la molécula, con
+  desempate por la izquierda, y de la **longitud del motivo**; no del número
+  total de unidades del tracto (decisión S-07). La elección entre expansión y
+  contracción debe ser configurable. Los pasos que no dejarían al menos una
+  unidad completa en la tirada, o que dejarían la molécula más corta que la
+  longitud de lectura, deben excluirse **antes** de sortear; el sistema no debe
+  reintentar. Si ningún paso es viable, la molécula no tartamudea y no consume
+  ninguna decisión aleatoria.
+
+- **REQ-DAT-78.** Cuando una molécula gana o pierde unidades, **su longitud
+  cambia** en el número de unidades multiplicado por la longitud del motivo, y
+  con ella el tamaño de inserto observado de la pareja. El sistema no debe
+  compensar ese cambio materializando secuencia flanqueante adicional ni
+  recortando la molécula para conservar la longitud sorteada, ni descartar la
+  molécula. Las dos lecturas conservan la longitud del perfil.
+
+- **REQ-DAT-79.** Una molécula que contiene solo parte de un tracto puede
+  tartamudear si contiene al menos una tirada ininterrumpida completa del
+  motivo; sin ninguna copia completa no tartamudea y no consume ninguna decisión
+  aleatoria. Una lectura que cubre parcialmente el tracto, o que lo toca por un
+  extremo, muestra la parte del tracto ya modificado que le corresponda: no se
+  aplica ninguna corrección por lectura.
+
+- **REQ-DAT-80.** El tartamudeo **no altera la verdad**. Dos ejecuciones
+  idénticas salvo en la tasa de tartamudeo deben publicar **la verdad y el VCF
+  de verdad** iguales, salvo por el identificador de ejecución, que cambia por
+  contrato al cambiar los bytes del documento de configuración. Lo que sí
+  difiere legítimamente, y conviene enumerarlo en vez de decir «únicamente»:
+  los **FASTQ finales**; los **recuentos técnicos agregados** del manifiesto de
+  evento; la **configuración efectiva**, que publica la tasa declarada; y el
+  **manifiesto general**, que resume las huellas de todo lo anterior. *(La
+  primera redacción de este requisito hablaba de «los manifiestos de verdad»,
+  que no nombra ningún artefacto que el sistema publique, y afirmaba un
+  «únicamente» que es falso. Corregido el 24/09/2026.)* La identidad **byte a byte** con
+  una ejecución anterior a la existencia del tartamudeo vale para los escenarios
+  **que no declaran loci de repetición**: declarar un locus sube de versión el
+  documento general y, con él, la configuración efectiva y el manifiesto
+  general, de modo que exigir su identidad sería pedir lo imposible
+  (contradicción C-1). La verdad y el VCF sí deben ser idénticos también con un
+  locus declarado cuyo único alelo sea el de la referencia.
+
+- **REQ-CONF-131.** La configuración del evento técnico debe permitir activar el
+  tartamudeo y definir, **por longitud de motivo**, la probabilidad de resbalón;
+  el coeficiente de la tirada; y los **pesos relativos** de los pasos admitidos,
+  expresados en unidades enteras. Debe permitir **sustituciones por locus** de la
+  tasa, y una sustitución que nombre un locus no declarado debe rechazarse. La
+  **estructura** del paso no se configura: la fija el algoritmo. Los pesos son
+  **obligatorios y sin valor por omisión** cuando el tartamudeo está activo,
+  porque la fuente publica el método de ajuste pero no los valores; el
+  coeficiente de la tirada arranca en cero y se registra como no calibrado.
+
+- **REQ-CONF-132.** El tartamudeo de base debe estar **desactivado de forma
+  predeterminada** mediante un **interruptor explícito** del evento técnico:
+  declarar un microsatélite **no** lo activa. Quien quiera tartamudeo tiene que
+  encenderlo y aportar sus parámetros. Una
+  configuración que seleccione un modelo distinto del admitido, un paso
+  expresado en bases en vez de unidades, un paso ajeno a la estructura o un
+  parámetro fuera de su dominio debe rechazarse antes de simular, identificando
+  el parámetro y el valor.
+
+> **Decisión del responsable, 24/09/2026 — activación del tartamudeo de base.**
+> «Si el usuario mete el microsatélite, tiene que encender el tartamudeo y
+> aportar los parámetros.» Queda así fijado el **interruptor explícito**, y
+> **descartada** la redacción que la sección 11 del plan de microsatélites y
+> amplificación proponía, según la cual el tartamudeo de base se activaría al
+> declarar loci.
+>
+> Se conserva el razonamiento que llevó a plantearla, porque es la
+> justificación de la decisión:
+>
+> - Con la activación implícita **no habría forma de expresar «este locus, sin
+>   tartamudeo»**, y el propio plan exige una prueba que lo compruebe: el paso
+>   F4.8.1.1 pide que un locus con tirada mínima 1 **se admita cuando no hay
+>   tartamudeo** y se rechace cuando lo hay. Sin ella desaparecería la única
+>   comprobación que distingue una guarda que mira las dos configuraciones de
+>   una que mira solo el locus.
+> - Los pesos de los pasos son obligatorios con el tartamudeo activo. Con la
+>   activación implícita, **todo escenario que declarara un microsatélite
+>   quedaría obligado a declarar cuatro pesos que nadie ha calibrado**,
+>   incluidos los de la entrega anterior, que hoy no los declaran.
+
+- **REQ-CONF-133.** El tartamudeo no constituye una preparación de biblioteca
+  amplificada: **no introduce duplicados de PCR ni sesgos de amplificación**, y
+  el perfil de preparación sigue registrándose como sin PCR conforme a
+  REQ-TEC-07. El deslizamiento que este requisito describe ocurre en la
+  amplificación en puente sobre la celda de flujo y en la secuenciación por
+  síntesis, que existen en el perfil vigente. La preparación amplificada y su
+  tasa de tartamudeo propia siguen aplazadas en DTF-056.
 
 - **REQ-WGS-01.** En F4, el evento debe declarar exactamente una cobertura media
   objetivo común. Un objetivo por número de lecturas o parejas, la ausencia de
@@ -3848,8 +3994,12 @@ suele necesitar dos registros BND relacionados.
   complemento enlazado; ninguna limitación debe provocar una pérdida silenciosa
   de la verdad.
 - **REQ-VER-20.** Los alelos de repeticiones en tándem deben usar REF y ALT
-  explícitos cuando su tamaño sea manejable y una representación simbólica para
-  tramos largos o complejos.
+  **explícitos siempre**, sin umbral de tamaño y sin representación simbólica.
+  El criterio del estándar para recurrir a un alelo simbólico es **no conocer la
+  secuencia exacta**, y un simulador siempre la conoce: la ha construido él. Una
+  representación simbólica aquí perdería información que el sistema tiene
+  (decisión S-09). El tope de tamaño del tracto sigue existiendo como contrato
+  de recursos, no como criterio de representación.
 - **REQ-VER-21.** El VCF de verdad debe reflejar los cambios de copias y, cuando
   estén activadas, las mutaciones internas de interrupciones, pureza o motivo en
   el haplotipo afectado.
@@ -4425,6 +4575,18 @@ comparten una política de aceptación.
   proyección, tamaño y SHA-256 debe invalidar la publicación. También debe
   recomputar las cuatro auditorías físicas DTC-049 y las tres cotas de recursos,
   incluidas sus fronteras exactas, sin ejecutar un perfil de rendimiento.
+
+- **REQ-VAL-57.** La validación interna debe poder **reproducir las decisiones
+  de tartamudeo desde la semilla de la ejecución, sin reutilizar el código
+  productor**, y comprobar sobre los FASTQ finales que las dos lecturas de cada
+  pareja que cubren un mismo tracto muestran el mismo número de unidades. La
+  reproducción debe además **atarse a los bytes publicados**: no basta con
+  rederivar el flujo de decisiones, hay que comprobar que cada paso rederivado
+  aparece escrito en el número de lecturas que le corresponde. Esta validación
+  vale para escenarios **sin contaminación biológica**: con ella, las parejas
+  publicadas dejan de ser las moléculas muestreadas y la correspondencia de uno
+  a uno se rompe.
+
 ### 4.7. Manifiestos de la ejecución y de sus eventos
 
 Los manifiestos son ficheros estructurados de salida que registran lo que el
@@ -4932,6 +5094,18 @@ Los manifiestos usan JSON y los esquemas versionados de DTC-035; DTC-089 fija
 el objeto y los enlaces F5. Cambiar su formato o semántica exige una nueva
 decisión y versión, no una elección durante la implementación.
 
+- **REQ-MAN-93.** El manifiesto del evento debe registrar la activación del
+  tartamudeo, los parámetros efectivos **por longitud de motivo y por locus**,
+  la versión del algoritmo, la versión del catálogo de ámbitos aleatorios y,
+  como **recuentos agregados**, los tractos evaluados, los que resbalaron y la
+  distribución de los pasos aplicados por locus. No debe registrar procedencia
+  por lectura ni por pareja, conforme a REQ-DAT-56. Los parámetros deben
+  registrarse **con su procedencia** —fuente, especie y tecnología de la
+  calibración— y el coeficiente de la tirada **marcado como no calibrado**, de
+  modo que nadie lo confunda con una cifra medida. Debe registrar además el
+  desajuste conocido de que la fuente del modelo distingue el *tipo* de motivo
+  mientras la calibración adoptada va por **longitud** de motivo.
+
 ### 4.8. Resultado mínimo de una ejecución
 
 - **REQ-SAL-01.** Toda ejecución válida debe producir un único FASTA por cada
@@ -5375,3 +5549,4 @@ pendientes.
 | **ACE-115. Ejecución segura y accesible desde Marimo** | La aplicación nunca ejecuta automáticamente ni usa shell. Una acción explícita tras validación vigente lanza `run` con argumentos separados y destino no-clobber revisado. Muestra estado, código, logs, diagnósticos y enlaces/resúmenes sin cargar artefactos genómicos grandes. Funciona localmente en Ubuntu/WSL2 Linux y ofrece teclado, foco, etiquetas, ayuda y estados no basados solo en color. Cada capacidad F2–F9 añade controles antes de cerrar | Proceso falso y binario real; cambio posterior a validar; destino existente; logs grandes y artefacto grande; revisión de teclado/foco/color; puerta transversal por hito |
 | **ACE-116. Población inicial desde frecuencias SNV** | La ejecución prepara, genera o reutiliza el par canónico TSV+JSON enlazado a una referencia exacta. Solo admite `alt_af`; genera loci bialélicos candidatos sin reemplazo mediante espacio, sustituciones y espectro explícitos y acepta multialelia suministrada. Las poblaciones asignan frecuencias independientemente, permiten 0/1 solo mediante `fixed`, usan siempre intervalos continuos `[min,max)` que no producen esos extremos, eliminan `ALT` globalmente ausentes sin reemplazo y conservan fijados. En modo `exact`, mayores restos fija las cuotas y una permutación reproducible independiente por población asocia las filas a todos los `variant_id`; el valor usa otro flujo, sin consumo para `fixed` ni cuotas cero, y nunca se asigna por coordenada. HWE es predeterminado y `F` solo diploide; cada individuo pertenece a una población y recibe genotipo/fase reproducibles sin LD ni corrección por muestra finita. Los dos perfiles humanos incorporados son aproximaciones descriptivas explícitas, nunca predeterminadas, exactas por superpoblación ni tasas universales; los perfiles suministrados pueden diferir por población. Las dos excepciones de ejecución son específicas, visibles y trazadas | Preparación y hashes; tabla y VCF rechazado; modos exacto con cuotas, permutación y flujo de valor separados, y estocástico; fronteras 0/1; ausencia de correlación espacial; aislamiento poblacional; consumo cero `fixed`/cuota cero; regiones/pesos; 12 sustituciones y Ti/Tv; perfiles uniforme/SFS 1000G aproximado/SNV12 Harris aproximado; receta compacta, fuente CC BY y SHA-256; ceros/fijados; matriz vacía; multialélico; HWE/F; subsemillas y reordenación; flags limitados; errores de suma, duplicado, referencia y `N` |
 | **ACE-117. Haplotipos sintéticos y LD F5** | Un lector independiente valida el único general v3+escenario F5 v1, los cinco perfiles y sus hashes, el decimal racional de cobertura, elegibilidad A/C/G/T, factibilidad exacta y límites. Reconstruye los siete TSV y `truth.jsonl` v2: H×S, q, marginales, D/`r²`, bins, signos, propuestas, mejor intento, cuotas, F, copias, pertenencia, fase, genotipos y fundadores. Recuenta MAN-70 solo desde la verdad estructurada por locus×subpoblación, recalcula las auditorías DTC-049 y las cotas deterministas de operaciones/memoria/bytes 2^32/2^33/2^31, incluidas filas de perfil/normalización, bins y la cota de sitios previa al RNG; comprueba la igualdad de `f5.seed`, modo/tolerancia por bloque×subpoblación, coste acotado sin `2^H`, BLAKE3, RNG, enlaces/versiones/hashes y paridad Marimo→TOML→Rust. No acepta panel externo, SV, repeticiones, mosaicos ni recombinación F5 | Fixtures de cardinalidad/versiones, decimal extremo, objetivo no representable, perfiles/hash, H/S/celdas, D/`r²` degenerado, modos/tolerancias, fronteras de recursos, DTC-049, MAN-70 solo desde verdad v2, `f5.seed`, empate/agote, cuota imposible, F/P, cada artefacto/hashes, vectores ID/RNG y fallo sin artefactos biológicos |
+| **ACE-118. Tartamudeo de repeticiones en tándem** | El tartamudeo se aplica **por molécula y tracto declarado, nunca por lectura**: las dos lecturas de una pareja que cubren el mismo tracto muestran el mismo número de unidades. Está desactivado de forma predeterminada y, desactivado, un escenario **sin loci declarados** publica los mismos bytes que antes de que la capacidad existiera. La probabilidad de resbalón por ciclo depende de la **tirada ininterrumpida más larga** del motivo contenida en la molécula y de la **longitud del motivo**, no del número total de unidades; las contracciones y la expansión se ponderan por configuración, con la estructura `{−3,−2,−1,+1}` fijada por el algoritmo y los pesos obligatorios. Los pasos inviables se excluyen **antes** de sortear y con un solo candidato no se consume aleatoriedad. La molécula cambia de longitud y con ella el inserto observado, sin compensar ni descartar. **La verdad, el VCF y sus manifiestos no cambian con la tasa.** Cada decisión se deriva de un ámbito propio indexado por identificador de locus, y el tartamudeo **no es una preparación amplificada**: no introduce duplicados y el perfil se sigue registrando como sin PCR | Vectores congelados de la etapa nueva y los heredados intactos; fixture impuro con el total de unidades igualado; mononucleótido contra tetranucleótido de igual longitud en pares de base; generador instrumentado sobre el candidato único; tracto impuro con la tirada corta a la derecha; quimera y tartamudeo a la vez sin descuadre de origen; dos loci del mismo motivo con sustituciones opuestas; identidad byte a byte con tasa cero y sin loci; comparación de verdad y VCF entre tasas; validador independiente que rederiva desde la semilla y ata cada paso a las unidades escritas |

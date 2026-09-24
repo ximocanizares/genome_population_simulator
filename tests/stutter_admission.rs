@@ -266,6 +266,28 @@ fn enabled_stutter_without_declared_weights_is_rejected() {
         rendered.contains("technical_event.stutter.steps"),
         "nombra el parámetro: {rendered}"
     );
+
+    // **El rechazo tiene que traer el ejemplo.** Quien tropieza aquí no puede
+    // seguir sin cuatro números que nadie ha medido para este uso, y sin el
+    // ejemplo no sabe por dónde empezar. Se exigen los cuatro pesos **y** la
+    // advertencia, porque dar la tabla sin decir que no es una calibración
+    // sería peor que no darla: alguien la copiaría creyéndola medida.
+    // **Las parejas enteras, no fragmentos.** «peso 1» y «peso 10» son
+    // subcadenas de «peso 100»: comprobarlas sueltas dejaba borrar la mitad
+    // del ejemplo sin que la prueba se enterase. Lo destapó la revisión de
+    // cierre, y es la forma «aserción implicada por una condición anterior».
+    for fragmento in [
+        "-1 con peso 100",
+        "+1 con peso 20",
+        "-2 con peso 10",
+        "-3 con peso 1",
+        "ILUSTRATIVO",
+    ] {
+        assert!(
+            rendered.contains(fragmento),
+            "el rechazo tiene que traer el ejemplo y su advertencia, y le falta {fragmento:?}: {rendered}"
+        );
+    }
 }
 
 /// Un paso `+2` no pertenece a la estructura y se rechaza antes de simular.

@@ -598,3 +598,91 @@ presupuestos. Ninguno justifica adelantar su implementación a F4.
   `enabled` y escala efectiva 1. No se añaden escalas TOML en esta extensión.
   - Se comprueba con: `tests/f4_error_quality.rs`, la ejecución PE F4 y los
     validadores de configuración efectiva y manifiesto v4/v2.
+
+---
+
+## 16. Cambio de contrato posterior al cierre — tartamudeo y preparación amplificada (24/09/2026)
+
+Esta sección existe porque la fase de realismo técnico estaba **cerrada con su
+evidencia aprobada** y se le ha añadido un paso. La escribe el punto 10.5 del
+plan de microsatélites y amplificación
+(`design/plan-implementacion-repeticiones-pcr-0.1.md`), que la exige con esta
+forma exacta. La parte de la preparación amplificada se anota aquí por
+completitud del contrato, pero **no está implementada**: pertenece a la entrega
+3 y este documento no la da por hecha.
+
+### 16.1. Qué **no** se reabre
+
+- **Ninguna clave aleatoria heredada.** Las trece decisiones de `f4-technical-v3`
+  conservan su ámbito de derivación y sus vectores literales. La etapa `stutter`
+  nace en `f4-technical-v4` y **solo ella** usa ese nombre como ámbito, de modo
+  que añadirla no desplaza una sola subsemilla ya publicada.
+- **Ningún esquema publicado se edita.** Las versiones nuevas llevan la
+  capacidad; los valores fijos de las heredadas se comparan byte a byte.
+- **Ningún artefacto de un escenario sin loci declarados.** Es la acotación de
+  la contradicción C-1, y se comprueba en cada hito.
+- **El perfil técnico y su huella.** El recurso vigente no se toca.
+- **La preparación de biblioteca sigue registrándose como sin PCR.**
+
+### 16.2. Qué cambia, y por decisión de quién
+
+| Qué | Por qué no contradice lo cerrado | Decisión |
+|---|---|---|
+| Una molécula puede mostrar un número de repeticiones distinto del que el individuo tiene | Los cinco requisitos que declaran la preparación sin PCR hablan de la **preparación de biblioteca**. El deslizamiento ocurre además en la amplificación en puente sobre la celda y en la síntesis, que existen en el perfil vigente | **S-12**, responsable |
+| El predictor es la **tirada ininterrumpida más larga**, no el número total de unidades | En genética forense está establecido que predice mejor, y es coherente con que las interrupciones estabilicen el tracto | **S-07**, responsable |
+| El tartamudeo se intercala **entre la quimera y calidad y errores** | Antes de la quimera rompería su comparación byte a byte del prefijo; después, la molécula sigue disponible | **S-13**, responsable |
+| La molécula cambia de longitud y no se compensa ni se descarta | Es lo que ocurre físicamente; compensar sería falso y descartar sesgaría la cobertura del locus | **S-15**, responsable |
+| Un locus que vaya a tartamudear exige tirada mínima efectiva de **2** | Una tirada de una sola copia no podría contraerse nunca mientras que expandirse sí, y el modelo saldría sesgado hacia el alargamiento | Responsable, 21/09/2026 |
+| La preparación amplificada deja de estar aplazada entera | DTF-056 se **divide**: salen la preparación amplificada, los duplicados de PCR, el sesgo de composición configurable, la sobrerrepresentación estocástica y el tartamudeo heredable; **permanecen** el perfil de sesgo GC calibrado con datos reales, los duplicados ópticos y de agrupación, y la combinación con excepciones regionales. DTF-055 no cambia | **S-25**, responsable |
+
+### 16.3. Dónde vive cada literal
+
+La regla es que **una copia silenciosa de un literal es lo que sobrevive a un
+cambio de contrato**. Los sitios, comprobados en el árbol de esta entrega:
+
+| Sitio | Papel | Qué dice hoy |
+|---|---|---|
+| `src/technical_profile.rs` | canónico | `LibraryPreparation` con una sola variante, `PcrFree` |
+| `src/randomness.rs` | canónico | los dos catálogos y el ámbito de cada decisión, enumerada una a una |
+| `src/stutter.rs` | canónico | el modelo, la estructura del paso, la tabla calibrada y su procedencia |
+| `src/application.rs` | contrato | la guarda que cruza el evento técnico con los loci declarados |
+| `src/event_manifest.rs` | contrato | exige preparación sin PCR, PCR no aplicable y composición neutra; elige la versión del documento y su catálogo |
+| `schemas/effective-config-v4.schema.json` | contrato heredado | valores fijos del perfil, la preparación y la aplicabilidad de la PCR |
+| `schemas/effective-config-v6.schema.json` | contrato nuevo | los mismos, más la sección del tartamudeo atada a su catálogo |
+| `schemas/manifest-event-v2.schema.json` | contrato heredado | los mismos valores fijos, sin tartamudeo |
+| `schemas/manifest-event-v3.schema.json` | contrato nuevo | los mismos, con la sección del tartamudeo obligatoria |
+| `schemas/config-general-v4.schema.json` | contrato | la tabla del tartamudeo, cerrada y con la estructura del paso fija |
+| `ui/config_editor.py`, `ui/gps_app.py`, `ui/ui_panels.py` | contrato | los controles del evento técnico y del tartamudeo |
+| `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json` | recurso | perfil único, con su huella congelada |
+
+**Los esquemas publicados no se editan.** Un fichero general v2 sigue
+publicando configuración efectiva v4 y manifiesto de evento v2.
+
+### 16.4. Pruebas nuevas y su variante defectuosa
+
+| Prueba | Contra qué muere |
+|---|---|
+| El predictor sobre un fixture **impuro con el total de unidades igualado** | un modelo cuyo predictor sea el número total de unidades |
+| Mononucleótido contra tetranucleótido con la misma longitud en pares de base | un modelo que dependa solo de los pares de base |
+| El candidato único con generador instrumentado | sortear entre los cuatro pasos y descartar después |
+| El paso sobre un tracto impuro con la tirada corta a la derecha | aplicar el paso por el extremo derecho |
+| Quimera y tartamudeo a la vez | modificar el fragmento **antes** de la quimera, con `ChimeraError::PairSourceMismatch` |
+| Dos loci del mismo motivo, uno sustituido a uno y otro a cero | ignorar la sustitución de tasa por locus |
+| La distribución de pasos contra las unidades escritas en las lecturas | aplicar el paso dos veces, o cualquier decisión que no llegue a los bytes |
+| La reconstrucción del evento técnico en el cuaderno, campo a campo | que la interfaz pierda un campo al importar y exportar |
+| La congelación acotada | consumir aleatoriedad con la tasa a cero, o desplazar el ordinal de plantilla |
+
+### 16.5. Fixtures que se reabren
+
+Ninguno de los ya congelados. Los del tartamudeo son nuevos, y uno de ellos
+**no pudo escribirse como el plan lo pedía**: el fixture saturado con una copia
+de exactamente 250 pares de base es inejecutable, porque el inserto mínimo del
+perfil queda a cinco desviaciones de la media de su normal truncada por
+rechazo. Está registrado como **DT-006** en el registro de deudas técnicas, con
+su medición y la aritmética del fixture que lo sustituye.
+
+### 16.6. Evidencia que hay que repetir
+
+Al cerrar la entrega 2 y otra vez al cerrar la entrega 3: la evidencia de cierre
+de esta fase **con preparación sin PCR y sin loci declarados**, artefacto a
+artefacto contra la línea base. Archivada en `evidence/stutter-f4-8-congelacion`.

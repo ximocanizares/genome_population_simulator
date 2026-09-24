@@ -1,0 +1,14 @@
+93d7fb149e75b759451d55815dbc84e86a6eb102c24fe1153f6eb50b1115e709  ./effective-config.json
+bec35a47c733fb0ab46deb02424d47b323aa2cf321508288eccaa5a9d0e78eab  ./events/reads-main/manifest.json
+a29b9767fd86de18ad79c3955df10a10b14b22525e9712a5fc3c43bf14dfd1c6  ./inputs/config/general.toml
+4b590197e640f9bb70d3959711245323c957bc07346ab78ff68a810ed3e5e2dd  ./manifest.json
+3c5e6bb66cd2aa449c5d3090ef5e566c2ae350e480cf67a590372236b741ab6a  ./outputs/fastq/reads-main/sample-A_R1.fastq.gz
+31d88419bf37e266b63c43359ae0b607a71c19ac265ebd28104a84a235491a66  ./outputs/fastq/reads-main/sample-A_R2.fastq.gz
+5b217c243c1c811a1fa33444777b0891a04939c928ff7d901977d34300b5373d  ./outputs/fastq/reads-main/sample-B_R1.fastq.gz
+6234ef3567f5e66fbb896627001bda4444bda10529503ffac238310e34e4d2a3  ./outputs/fastq/reads-main/sample-B_R2.fastq.gz
+efebb4688b6d9b28c41830296a54a7a209417fd81a9c4d57ef24777dc5e83f86  ./outputs/truth.jsonl
+36d92fbd4d0a4c5c64aac9491526423998511326b72d659993d9d76a7fc53baf  ./outputs/truth.vcf.gz
+a971481e705ff48f8c11a953dc992b6f8be5dccc2d4d87673724f614cfd35098  ./outputs/truth.vcf.gz.tbi
+80d7917a0cccaf1cfbb626b42330d96d95eceb3310f36d748940e4bcb10efa89  ./population_snvs.metadata.json
+deff835e240480fb8cbdb51c3a63ff0e919ee48542b568431a4d6d9f647193d2  ./population_snvs.tsv
+7310c2a5b5c032e35c4bb13b65afc8974622d3b60bbb55e4a53cc8d3e6d543e3  ./resources/references/ref-main.fa

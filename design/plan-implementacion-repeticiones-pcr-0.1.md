@@ -245,11 +245,29 @@ queda solo con el incremento despejado y **subestima** el tartamudeo entre un
 14 % y un 28 % según el motivo.
 
 *Resolución adoptada:* manda la corrección. La congelación se acota a los
-escenarios sin loci declarados. Con loci declarados, el tartamudeo de base está
-**activo** con las tasas de la calibración, y lo que sigue desactivado por
-omisión es el **tartamudeo heredable de PCR**, que solo existe con preparación
-amplificada. REQ-DAT-80 y REQ-CONF-132 deben reescribirse con esa acotación
-antes de aprobarse; la redacción está en la sección 11.
+escenarios sin loci declarados.
+
+> **Nota del 24 de septiembre de 2026: la segunda mitad de esta resolución
+> quedó superada.** Decía que con loci declarados el tartamudeo de base estaría
+> **activo** por omisión y que lo desactivado sería el heredable de PCR. **El
+> responsable lo descartó**, y en su lugar el tartamudeo de base se activa con
+> un **interruptor explícito del evento técnico, apagado por omisión**: quien
+> declara el microsatélite decide también si tartamudea y aporta sus
+> parámetros.
+>
+> Las dos razones, registradas en la nota de REQ-CONF-132 de la
+> especificación. Con activación implícita no existiría «este locus, **sin**
+> tartamudeo», y con esa configuración desaparece la única prueba que el paso
+> F4.8.1.1 exige para distinguir una guarda que mira las dos configuraciones de
+> una que mira solo el locus. Y los pesos del paso son **obligatorios y sin
+> valor por omisión**, de modo que todo escenario con un microsatélite quedaría
+> obligado a declarar cuatro cifras que nadie ha calibrado, incluidos los de la
+> entrega 1, que hoy no las declaran.
+>
+> **La primera mitad sigue vigente**: la congelación acotada a los escenarios
+> sin loci declarados es la que se comprueba y la que la evidencia archivada
+> sostiene. Y **REQ-DAT-80 y REQ-CONF-132 ya están escritos y aprobados**; la
+> fila que los proponía en la sección 11 queda tachada como superada.
 
 **C-2. Dos formas distintas del mismo modelo.** La calibración §5 propone la
 forma de tres parámetros de HipSTR —probabilidad de añadir, probabilidad de
@@ -483,10 +501,15 @@ donde entran los microsatélites** → relleno al azar con los parámetros de
 composición. **Los cambios estructurales quedan fuera de este trabajo** y van
 con el hito estructural, **después** de generar la secuencia.
 
-> **Aviso de coste, comprobado.** El generador actual
-> (`src/reference_generation.rs`) **solo sabe rellenar al azar**: no tiene
+> **Aviso de coste, comprobado.** El generador **de partida**
+> (`src/reference_generation.rs`) **solo sabía rellenar al azar**: no tenía
 > regiones definidas ni orden. Lo anterior es un generador **nuevo**, en una
 > fase cerrada (F1), no una reordenación de lo existente.
+>
+> *Cumplido el 23/09/2026 con la entrega 1.* El generador ya coloca regiones
+> declaradas antes del relleno, y con la lista vacía produce los mismos bytes
+> que antes. La reapertura está registrada en la sección 14 del plan del núcleo
+> reproducible.
 
 **Con referencia real** se admite **insertar** el tracto en la posición
 indicada, además del caso en que ya esté. Dos consecuencias que hay que
@@ -956,8 +979,9 @@ se aprovechaban pasos del plan de la fase de variación compleja, y en parte
 sigue siendo cierto. Pero hoy se han añadido **tres piezas que no existían en
 ningún plan**, y las tres tocan fases cerradas:
 
-1. el **generador de referencia simulada con regiones definidas** —el actual
-   solo sabe rellenar al azar (`src/reference_generation.rs`)—;
+1. el **generador de referencia simulada con regiones definidas** —el de
+   partida solo sabía rellenar al azar (`src/reference_generation.rs`);
+   **cumplido el 23/09/2026**—;
 2. la **tabla de correspondencia de coordenadas** entre el genoma suministrado
    y el genoma final con el tracto insertado. **Corregido el 20/09/2026:** la
    primera redacción decía que la reducción «nunca ha movido coordenadas», y es
@@ -1314,10 +1338,12 @@ frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
   - Procede de: REQ-REF-19, REQ-CONF-56; decisión **S-03**.
   - Cambia: `src/reference_generation.rs`; escribe por el escritor FASTA
     canónico `src/reference_fasta.rs`, que no cambia.
-  - **Por qué es trabajo nuevo y no una reordenación.** El generador actual
-    **solo sabe rellenar al azar**: no tiene regiones declaradas ni orden entre
-    ellas. Cae en la fase del núcleo reproducible, que está cerrada, y por eso
-    lleva coordenada propia y entra en el cambio de contrato de la sección 10.
+  - **Por qué es trabajo nuevo y no una reordenación.** El generador **de
+    partida** solo sabía rellenar al azar: no tenía regiones declaradas ni orden
+    entre ellas. Cae en la fase del núcleo reproducible, que está cerrada, y por
+    eso lleva coordenada propia y entra en el cambio de contrato de la sección
+    10. *Cumplido el 23/09/2026; la reapertura está registrada en la sección 14
+    del plan del núcleo reproducible.*
   - **Qué queda fuera, dicho aquí para que no se cuele:** los cambios
     estructurales —duplicaciones, inversiones, translocaciones— **no** entran.
     Van con el hito estructural y **después** de generar la secuencia.
@@ -2101,8 +2127,13 @@ no introduce duplicados y que el perfil sigue registrándose como sin PCR
     este paso, era pedir lo imposible. La verdad y el VCF sí pueden ser
     idénticos, y lo son gracias a la regla de promoción que fija F6.4.3.3:
     sin alelo de repetición publicado, la verdad no sube de versión.
-    **(d)** dos ejecuciones idénticas salvo en la tasa de tartamudeo difieren
-    solo en los FASTQ y en los recuentos técnicos agregados.
+    **(d)** dos ejecuciones idénticas salvo en la tasa de tartamudeo conservan
+    **la verdad y el VCF de verdad**, salvo por el identificador de ejecución,
+    que cambia por contrato al cambiar los bytes del documento. *Corregido el
+    24/09/2026:* la redacción anterior decía «difieren **solo** en los FASTQ y
+    en los recuentos agregados», y eso es falso — también difieren la
+    configuración efectiva, que publica la tasa, y el manifiesto general, que
+    resume las huellas. Lo que hay que enumerar es lo que **no** cambia.
     **Debe fallar contra:** una implementación que consuma aleatoriedad con la
     tasa a cero o que desplace el ordinal de plantilla (a y b); una que aplique
     el tartamudeo a la **copia haplotípica** en vez de a la molécula, es decir,
@@ -2946,9 +2977,9 @@ Los sitios conocidos, comprobados en el árbol de partida:
 | `schemas/effective-config-v4.schema.json`, líneas 312–313 | contrato | valores fijos del identificador del perfil, su ruta, su SHA-256, la preparación, la aplicabilidad de la PCR y el modo de composición |
 | `schemas/manifest-event-v2.schema.json`, líneas 115–118 y 157 | contrato | los mismos valores fijos |
 | `schemas/config-general-v2.schema.json`, `$defs/technical_event` | contrato | objeto cerrado de once claves; ninguna nombra la PCR, de modo que hoy una clave de PCR se rechaza **como campo desconocido**, no como capacidad aplazada |
-| `src/reference_generation.rs` | canónico | generador que **solo** sabe rellenar al azar |
+| `src/reference_generation.rs` | canónico | generador que sabe **rellenar al azar y colocar regiones declaradas**, en ese orden. *Corregido el 24/09/2026: decía «solo sabe rellenar al azar», y dejó de ser cierto al cerrar la entrega 1; ver la sección 14 del plan del núcleo reproducible* |
 | `src/reference_reduction.rs` y `schemas/reference-reduction-map-v1.schema.json` | contrato | el mapa de coordenadas que hay que extender, con `source_interval` y `derived_interval` por segmento |
-| `ui/config_editor.py`, `ui/ui_panels.py` | contrato | controles del evento técnico y de la referencia |
+| `ui/config_editor.py`, `ui/gps_app.py`, `ui/ui_panels.py` | contrato | controles del evento técnico y de la referencia. *Corregido el 24/09/2026: la fila nombraba dos ficheros y son tres; el cuaderno `gps_app.py` es el que reconstruye el formulario, y omitirlo de esta lista es exactamente cómo el tartamudeo llegó al lector del TOML y no a la interfaz* |
 | `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json` | recurso | perfil único, con su huella congelada |
 
 **Regla:** los esquemas publicados **no se editan**. Las versiones nuevas
@@ -2999,7 +3030,7 @@ propuesta pendiente sino un defecto.
 | `especificaciones-0.1.md` | §4.4, tras REQ-DAT-73 | Añadir REQ-DAT-74 a 80 (tartamudeo) y REQ-DAT-81 a 85 (amplificación) | Expediente §10.2, diseño §9.2 |
 | `especificaciones-0.1.md` | **REQ-DAT-80** | **Reescribir**: la identidad byte a byte vale para los escenarios **que no declaran loci de repetición** | C-1 |
 | `especificaciones-0.1.md` | §4.1, tras REQ-CONF-130 | Añadir REQ-CONF-131 a 133 (tartamudeo) y 134 a 138 (amplificación) | Expediente §10.2, diseño §9.2 |
-| `especificaciones-0.1.md` | **REQ-CONF-132** | **Reescribir**: lo desactivado por omisión es el tartamudeo **heredable de PCR**; el de base se activa al declarar loci | C-1 |
+| ~~`especificaciones-0.1.md`~~ | ~~**REQ-CONF-132**~~ | ~~**Reescribir**: lo desactivado por omisión es el tartamudeo **heredable de PCR**; el de base se activa al declarar loci~~ — **SUPERADA el 24/09/2026 por decisión del responsable**: «si el usuario mete el microsatélite, tiene que encender el tartamudeo y aportar los parámetros». El tartamudeo de base lleva **interruptor explícito** y declarar un locus **no** lo activa. El registro de la decisión, con su justificación, está junto a REQ-CONF-132 en la especificación | C-1 |
 | `especificaciones-0.1.md` | REQ-CONF-88/89/94/95, REQ-TEC-07/08, REQ-DAT-46/47/52/53, REQ-MAN-45/48/60 | Las redacciones de la sección 9.1 del diseño con PCR, **con el cambio de que el parámetro declarado es la fracción de duplicados y no las parejas por molécula** | S-19, diseño §9.1 |
 | `especificaciones-0.1.md` | REQ-REF-19 y los de referencia derivada | Admitir regiones declaradas en la referencia simulada y la referencia derivada por inserción de tracto, con su mapa de correspondencia | S-03 |
 | `especificaciones-0.1.md` | §4.7, §4.6, §7 | Añadir REQ-MAN-93/94, REQ-VAL-57/58, ACE-118 y ACE-119; reescribir ACE-49/51/68 | Ambos documentos |
@@ -3047,6 +3078,7 @@ propuesta pendiente sino un defecto.
 | El modelo escalonado aplicado **generación tras generación** | Fase de evolución. La entrega 5 hace **una sola tirada** para inicializar la diversidad y no invade eso |
 | Mutaciones internas de pureza, interrupciones o motivo | Paso F6.4.5. REQ-CONF-63 las exige desactivadas por omisión |
 | Generación aleatoria de loci por regiones | Paso F6.4.6 |
+| **Localizar los microsatélites que un genoma suministrado ya contiene**, en vez de exigir que se declaren | **Hito F6.4.a**, anotado en la hoja de ruta el 24/09/2026 a instancia del responsable. Este plan **comprueba** que un locus declarado existe de verdad donde se dice (F6.4.2), pero no descubre ninguno. Con descubrimiento automático aparecería una clase de locus que el usuario no pidió, y habría que decidir su régimen de tartamudeo por omisión |
 | **Mínimos de admisión ajustados por longitud de motivo**, en vez de declarados locus a locus | Registrado por el responsable el 20/09/2026 junto a la decisión S-31. Hoy el suelo se declara por locus, con el general como valor de partida; derivarlo de la longitud del motivo es una ampliación posible y **no se hace** |
 | Asignación **explícita de individuos concretos** con combinaciones de alelos específicas | Después de este trabajo; la decisión S-04 la invirtió respecto de las frecuencias, que son lo primero |
 | Fichero complementario del VCF y catálogo de códigos de pérdida | Hito de variantes complejas. No hace falta: el alelo explícito con su secuencia no pierde nada |

@@ -2788,8 +2788,17 @@ fn stutter_config_error(
             "al menos uno de los cuatro pesos tiene que ser positivo".to_owned()
         }
         StutterError::MissingStepWeights => {
+            // **El rechazo trae el ejemplo a propósito.** Sin él, quien tropieza
+            // aquí no sabe por dónde empezar y el ejemplo ilustrativo se queda
+            // enterrado en el plan. Lo que no se hace es darle valor por
+            // omisión: el coeficiente puede arrancar en cero porque el cero es
+            // neutro, pero **ningún reparto de pesos lo es** —cualquiera afirma
+            // algo sobre la biología—, así que el usuario tiene que mirarlo.
             "technical_event.stutter.steps es obligatorio cuando el tartamudeo está activo y no \
-             tiene valor por omisión: la fuente publica el método de ajuste, no los valores"
+             tiene valor por omisión: la fuente publica el método de ajuste, no los valores, y \
+             ningún reparto es neutro. A modo ILUSTRATIVO, sin calibrar, un reparto compatible \
+             con la estructura sería -1 con peso 100, +1 con peso 20, -2 con peso 10 y -3 con \
+             peso 1"
                 .to_owned()
         }
         other => format!("{other:?}"),

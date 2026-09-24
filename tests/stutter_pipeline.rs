@@ -175,7 +175,12 @@ impl Scenario {
         let text =
             fs::read_to_string(self.destination.join("outputs/truth.vcf")).expect("VCF publicado");
         text.lines()
-            .filter(|line| !line.contains("RUN_"))
+            // Se descarta **la línea de cabecera concreta** que lleva el
+            // identificador, no cualquiera que contenga cierta subcadena. Hoy
+            // las dos formas caen sobre la misma línea, pero un filtro por
+            // subcadena se lleva por delante cualquier registro futuro que la
+            // mencione, y este documento puede crecer.
+            .filter(|line| !line.starts_with("##gps_execution_id="))
             .map(str::to_owned)
             .collect()
     }
@@ -587,6 +592,20 @@ fn the_reads_keep_their_length_and_no_molecule_is_discarded() {
 /// ninguna variante que publicar. Eso es lo que hace la comparación posible.
 /// Con un locus polimórfico la verdad cambiaría legítimamente y exigir su
 /// identidad sería pedir lo imposible.
+///
+/// # Qué mitad de esta prueba puede fallar, y cuál no
+///
+/// La igualdad de la verdad y del VCF **no puede fallar por ningún defecto de
+/// `src/stutter.rs`**, y conviene decirlo aquí igual que se dice en la
+/// coherencia del par. El transformador recibe el individuo **prestado e
+/// inmutable**: nada dentro del módulo puede escribir en el estado genotípico
+/// ni en lo que de él se publica. La invariante está sostenida por el tipo, no
+/// por esta comparación. Medido: con el tartamudeo anulado, esta prueba muere
+/// **solo** en la desigualdad de los ficheros de lecturas.
+///
+/// Lo que sí discrimina es esa desigualdad —que el tartamudeo ocurra de
+/// verdad— y los dos controles positivos, que impiden que la igualdad se
+/// cumpla sobre documentos vacíos.
 #[test]
 fn stutter_changes_the_reads_and_leaves_the_truth_untouched() {
     let without = saturated_scenario(&"CA".repeat(5), 135, "", 100);

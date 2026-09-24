@@ -269,6 +269,18 @@ class TechnicalLibraryRow:
 STUTTER_ADMITTED_STEPS = (-3, -2, -1, 1)
 # Tramo de longitud de motivo que la calibración cubre, en pares de base.
 STUTTER_MOTIF_LENGTHS = (1, 2, 3, 4, 5, 6)
+# Las cifras calibradas de la columna sin PCR, **las mismas que Rust lleva
+# dentro**. Aquí solo sirven para que la tabla del cuaderno aparezca rellena con
+# lo que el simulador usaría de todos modos; la autoridad sigue siendo Rust, y
+# `tests_ui/test_stutter_ui.py` comprueba que las dos copias coinciden.
+STUTTER_CALIBRATED_MOTIF_LENGTH_RATES = {
+    1: 0.027,
+    2: 0.011,
+    3: 0.0029,
+    4: 0.0016,
+    5: 0.0015,
+    6: 0.0010,
+}
 
 
 @dataclass(eq=True)
@@ -471,6 +483,134 @@ def direct_event_from_editor_row(row: Mapping[str, Any], path: str) -> DirectEve
 # espectros. Lo que **no** hay aquí es ninguna fila para la pureza objetivo ni
 # para generar loci al azar: ni una ni otra pertenecen a este corte, y una
 # columna que las pidiera sería una promesa que el simulador no cumple.
+
+
+def stutter_motif_rate_editor_rows(
+    stutter: StutterForm | None,
+) -> list[dict[str, Any]]:
+    """Las seis longitudes de motivo calibradas, **siempre las seis**.
+
+    La tabla no crece ni encoge: la calibración cubre de 1 a 6 pares de base y
+    ninguna otra longitud tiene tasa. Presentarlas todas, con la calibrada ya
+    puesta, evita que alguien declare una fila de 7 pb que el simulador
+    rechazará después.
+    """
+
+    declared = {row.motif_length_bases: row.rate for row in (stutter.motif_length_rates if stutter else [])}
+    return [
+        {
+            "order": order,
+            "motif_length_bases": length,
+            "rate": declared.get(length, str(STUTTER_CALIBRATED_MOTIF_LENGTH_RATES[length])),
+        }
+        for order, length in enumerate(STUTTER_MOTIF_LENGTHS, start=1)
+    ]
+
+
+def stutter_step_editor_rows(stutter: StutterForm | None) -> list[dict[str, Any]]:
+    """Los cuatro pasos admitidos, **siempre los cuatro y solo esos**.
+
+    La estructura la fija el algoritmo, así que la tabla no admite añadir ni
+    quitar filas: lo que el usuario declara son los pesos. No hay fila para un
+    paso `+2` porque declararlo se rechaza.
+
+    El peso llega **vacío** cuando no se ha declarado, y no con un reparto
+    sugerido: los pesos son obligatorios y no tienen valor por omisión, y
+    rellenarlos aquí sería inventar una calibración que nadie ha hecho.
+    """
+
+    declared = {row.units: row.weight for row in (stutter.steps if stutter else [])}
+    return [
+        {"order": order, "units": units, "weight": declared.get(units, "")}
+        for order, units in enumerate(STUTTER_ADMITTED_STEPS, start=1)
+    ]
+
+
+def stutter_locus_rate_editor_rows(
+    stutter: StutterForm | None,
+) -> list[dict[str, Any]]:
+    rows = [
+        {"order": order, "locus_id": row.locus_id, "rate": row.rate}
+        for order, row in enumerate(stutter.locus_rates if stutter else [], start=1)
+    ]
+    return rows or [{"order": 1, "locus_id": "", "rate": ""}]
+
+
+def _is_calibrated_stutter_rate(row: StutterMotifRateRow) -> bool:
+    """¿Esta fila repite, sin tocarla, la cifra que la calibración ya fija?"""
+
+    calibrated = STUTTER_CALIBRATED_MOTIF_LENGTH_RATES.get(row.motif_length_bases)
+    if calibrated is None:
+        return False
+    try:
+        return float(row.rate) == calibrated
+    except ValueError:
+        return False
+
+
+def stutter_from_editor_rows(
+    enabled: bool,
+    run_length_coefficient: str,
+    motif_rate_rows: Sequence[Mapping[str, Any]],
+    step_rows: Sequence[Mapping[str, Any]],
+    locus_rate_rows: Sequence[Mapping[str, Any]],
+) -> StutterForm | None:
+    """Reconstruye el tartamudeo desde las tablas del cuaderno.
+
+    Vive aquí, y no dentro del cuaderno, **a propósito**: la reconstrucción del
+    evento técnico se escribía campo a campo dentro de una celda de Marimo, y
+    así fue como el tartamudeo se quedó fuera sin que nada lo notara. Una
+    función con nombre puede probarse; una expresión dentro de una celda, no.
+    """
+
+    # **Una tasa que coincide con la calibrada no cuenta como declarada.** La
+    # tabla del cuaderno viene con las seis cifras ya escritas, para que quien
+    # la mire sepa qué usará el simulador; si eso bastara para dar el bloque
+    # por declarado, **todo** escenario importado saldría con tartamudeo, y un
+    # documento sin microsatélites saldría con un bloque que el lector rechaza.
+    # Declarar la cifra calibrada a mano no cambia nada: el resultado efectivo
+    # es el mismo con ella y sin ella.
+    motif_length_rates = [
+        row_value
+        for row_value in (
+            StutterMotifRateRow(
+                motif_length_bases=int(row["motif_length_bases"]),
+                rate=str(row.get("rate", "")).strip(),
+            )
+            for row in motif_rate_rows
+            if str(row.get("rate", "")).strip()
+        )
+        if not _is_calibrated_stutter_rate(row_value)
+    ]
+    steps = [
+        StutterStepRow(units=int(row["units"]), weight=str(row.get("weight", "")).strip())
+        for row in step_rows
+        if str(row.get("weight", "")).strip()
+    ]
+    locus_rates = [
+        StutterLocusRateRow(
+            locus_id=str(row.get("locus_id", "")).strip(),
+            rate=str(row.get("rate", "")).strip(),
+        )
+        for row in locus_rate_rows
+        if str(row.get("locus_id", "")).strip()
+    ]
+    coefficient = str(run_length_coefficient).strip() or None
+    if (
+        not enabled
+        and not motif_length_rates
+        and not steps
+        and not locus_rates
+        and coefficient is None
+    ):
+        return None
+    return StutterForm(
+        enabled=enabled,
+        motif_length_rates=motif_length_rates,
+        run_length_coefficient=coefficient,
+        steps=steps,
+        locus_rates=locus_rates,
+    )
 
 
 def repeat_locus_editor_rows(loci: Sequence[RepeatLocusRow]) -> list[dict[str, Any]]:
@@ -1531,6 +1671,15 @@ def render_general_toml(form: GeneralForm) -> str:
         bool(form.reference.repeat_loci)
         or form.reference.repeat_admission is not None
         or form.reference.max_tract_output_bases is not None
+        # **El bloque de tartamudeo cuenta.** La tabla del evento técnico solo
+        # existe en el documento que puede declarar microsatélites, así que un
+        # documento que la lleve y salga en la versión anterior es un fichero
+        # que el simulador rechaza como campo desconocido. Mirarlo aquí es lo
+        # que impide escribir ese fichero.
+        or (
+            form.technical_event is not None
+            and form.technical_event.stutter is not None
+        )
     )
     document.add("schema_version", "4" if declares_repeats else "2")
     if form.seed is not None:

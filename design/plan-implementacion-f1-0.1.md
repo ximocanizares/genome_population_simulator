@@ -850,3 +850,74 @@ Antes de aprobar este documento se ejecutan las comprobaciones disponibles de
 - `noodles-fasta` 0.66.0 solo se incorpora tras superar E1;
 - los catálogos A4–A6 preceden a sus consumidores;
 - los comandos Cargo se declaran futuros y no ejecutados.
+
+---
+
+## 14. Cambio de contrato posterior al cierre — referencia con regiones declaradas y mapa de coordenadas (24/09/2026)
+
+Esta sección existe porque la fase del núcleo reproducible estaba **cerrada con
+su evidencia aprobada** y se le ha añadido capacidad. La escribe el punto 10.5
+del plan de microsatélites y amplificación
+(`design/plan-implementacion-repeticiones-pcr-0.1.md`), que la exige con esta
+forma exacta.
+
+### 14.1. Qué **no** se reabre
+
+- **Ninguna subsemilla ni ningún vector congelado.** El generador con la lista
+  de regiones **vacía** consume exactamente lo mismo y produce exactamente los
+  mismos bytes que antes: es la condición que hace admisible la ampliación, y
+  se comprueba con un escenario sin regiones declaradas contra la línea base.
+- **El mapa de reducción publicado.** `reference-reduction-map-v1` no se edita;
+  la operación nueva estrena `reference-coordinate-map-v2`.
+- **La identidad de las referencias ya publicadas.**
+- **La regla de que una referencia derivada tiene identidad propia**, que ya
+  regía para la reducción y que la inserción hereda sin excepción.
+
+### 14.2. Qué cambia, y por decisión de quién
+
+| Qué | Por qué no contradice lo cerrado | Decisión |
+|---|---|---|
+| El generador admite **regiones declaradas con su secuencia exacta**, además del relleno al azar | El orden es secuencias y tamaño → regiones declaradas → relleno; con la lista vacía el recorrido es el de siempre | **S-03**, responsable |
+| Una referencia real admite la **inserción de tractos**, y el resultado se publica como referencia derivada con identidad propia | Es la misma maquinaria de reubicación que la reducción ya tenía, con una clase de segmento más | **S-03**, responsable |
+| Las posiciones que el usuario declara se refieren al **genoma de partida**, y el sistema publica la correspondencia con el final | Sin esa regla, declarar dos inserciones seguidas es ambiguo | **S-03**, responsable |
+
+### 14.3. Dónde vive cada literal
+
+| Sitio | Papel | Qué dice hoy |
+|---|---|---|
+| `src/reference_generation.rs` | canónico | generador que sabe **rellenar al azar y colocar regiones declaradas**, en ese orden |
+| `src/reference_tract_insertion.rs` | canónico | la inserción de tractos y la referencia derivada con su identidad |
+| `src/reference_reduction.rs` | canónico | la reubicación de segmentos que la inserción reutiliza |
+| `schemas/reference-reduction-map-v1.schema.json` | contrato heredado | el mapa de la reducción, con `source_interval` y `derived_interval` por segmento |
+| `schemas/reference-coordinate-map-v2.schema.json` | contrato nuevo | el mismo mapa extendido a la inserción, con su clase de segmento propia |
+
+**Corrección de una fila caducada.** La tabla 10.3 del plan de microsatélites
+decía que `src/reference_generation.rs` «solo sabe rellenar al azar». Dejó de
+ser cierto al cerrar la entrega 1, y la fila queda corregida en ese documento a
+la vez que se escribe esta sección.
+
+### 14.4. Pruebas nuevas y su variante defectuosa
+
+| Prueba | Contra qué muere |
+|---|---|
+| Un escenario **sin regiones declaradas** produce los mismos bytes que la línea base | un generador que consuma aleatoriedad de más al abrir el camino de las regiones |
+| Una región declarada aparece en la referencia con su secuencia exacta | un generador que la rellene al azar y la ignore |
+| El mapa de coordenadas traduce las posiciones del genoma de partida al final | un mapa que publique las del intermedio, que es lo que hace ambiguas dos inserciones seguidas |
+| La referencia derivada se publica con identidad propia | atribuir el resultado al fichero suministrado |
+
+### 14.5. Fixtures que se reabren
+
+Ninguno. Los de las regiones y la inserción son nuevos.
+
+### 14.6. Evidencia que hay que repetir
+
+Al cerrar la entrega 1: la evidencia de cierre de esta fase que toque la
+generación de referencias, con un escenario **sin regiones declaradas**,
+artefacto a artefacto contra la línea base.
+
+> **Pendiente a 24/09/2026.** Esa comparación **no está archivada**. La prueba
+> `tests/reference_generation_regions.rs` comprueba que un escenario sin
+> regiones consume y produce lo mismo, de modo que la propiedad está cubierta
+> por la batería; lo que falta es el **directorio de evidencia** con las dos
+> listas de huellas, al estilo de `evidence/stutter-f4-8-congelacion/`. Se dice
+> aquí para que nadie lea esta sección y dé por hecho que se hizo.

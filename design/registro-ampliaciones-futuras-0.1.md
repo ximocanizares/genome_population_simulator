@@ -70,7 +70,7 @@ resultados ni errores pertenecen a DTP/DTPD en
 | DTF-053 | Matriz empírica de sustituciones de secuenciación | REQ-DAT-37 y DTPD-106 | F4 elige uniformemente una de las tres bases alternativas tras un error para no atribuir una matriz no publicada al perfil inicial | Desarrollo posterior a F4, con fuente empírica adecuada | Matriz por plataforma, ciclo, mate o contexto; interpolación, configuración, validación estadística y versión del perfil |
 | DTF-054 | Perfil de fragmentos cortos y adaptadores | REQ-CONF-91–93, REQ-DAT-50–51 y ACE-50 | F4 usa insertos de 250–450 pb con lecturas máximas de 150 pb y no añade adaptadores; no se introduce una tasa artificial | Desarrollo posterior a F4, con perfil de biblioteca que incluya fragmentos menores que la lectura | Distribución de inserto, secuencias de adaptador, extremos, reglas de sobrepaso, configuración, resumen agregado y pruebas |
 | DTF-055 | BAM/CRAM, mapeo real y anomalías PE observables | F6.6, DTPD-104/105, REQ-DAT-65–67 y requisitos de alineamiento | F4 produce exclusivamente FASTQ comprimido; F5 solo población fundadora y LD; ninguno invoca mapeadores ni crea BAM/CRAM | F6.6, tras consolidar FASTQ F4 y referencias F6 | Herramienta, versión, parámetros, índices, cabeceras, grupos de lectura, validación, métricas de alineamiento y modelo de anomalías PE |
-| DTF-056 | Preparación amplificada, duplicados y sesgo GC no neutro | REQ-CONF-88–95, REQ-DAT-46–49/52–53 y REQ-MAN-45–48 | F4 usa exclusivamente el perfil HiSeq X PCR-free: duplicados PCR no aplicables, ópticos a cero y GC neutro. No se inventan tasas, curvas ni modelos sin calibración aprobada | Desarrollo posterior a F4, con perfiles WGS adicionales | Evidencia empírica, distribución/modelo, parámetros, procedencia agregada, validación y, si procede, marcado en BAM/CRAM |
+| DTF-056 | Preparación amplificada, duplicados y sesgo GC no neutro — **dividida el 24/09/2026 (S-25)**; ver la nota de abajo | REQ-CONF-88–95, REQ-DAT-46–49/52–53 y REQ-MAN-45–48 | F4 usa exclusivamente el perfil HiSeq X PCR-free: duplicados PCR no aplicables, ópticos a cero y GC neutro. No se inventan tasas, curvas ni modelos sin calibración aprobada | Desarrollo posterior a F4, con perfiles WGS adicionales | Evidencia empírica, distribución/modelo, parámetros, procedencia agregada, validación y, si procede, marcado en BAM/CRAM |
 | DTF-057 | Perfil Illumina *single-end* | REQ-CONF-66, REQ-DAT-14, REQ-TEC-09 y ACE-37 | F4 solo implementa Illumina PE para mantener un recorrido único de pares, contaminación y demultiplexado verificable; SE se rechaza sin inferir parámetros a partir de PE | Desarrollo posterior a F4, con consumidor SE explícito | Perfil cuantitativo y recurso versionado, parámetros y orientación SE, cobertura en lecturas, identidad/cabecera, contaminación compatible, validación y interfaz |
 | DTF-058 | Perfil humano de LD incorporado `human_ld_ragsdale_approx_v1` | DTC-089 «Paquete de perfiles»; F5.6.2 de [plan-implementacion-f5-0.1.md](./plan-implementacion-f5-0.1.md) | Aplazado el 13 de septiembre de 2026: la fuente publica la caída de `r²_÷` en centimorgans, desde 0,03 cM, y `ld_profile.tsv` la necesita en pares de base desde 1, de modo que completar el rango exigiría una tasa de recombinación supuesta que ningún contrato fija y una extrapolación por debajo del primer punto medido. **No es un problema de licencia ni de precisión:** el preprint es CC BY 4.0 y la digitalización estaba autorizada. F5 se cierra sin perfil incorporado; un perfil suministrado cubre el mismo contrato y atraviesa el mismo validador | Post-v1, con una fuente que publique la caída en pares de base, o con una tasa de recombinación acordada y declarada como supuesto del perfil | Los dos SHA-256 —fuente y recurso—, receta de medias reproducible desde la fuente, ausencia de `kappa` en la ruta de cálculo, selección exclusivamente explícita, y las cuatro decisiones materiales abiertas: procedencia de los otros cuatro TSV del paquete, acoplamiento con `Lmax`, identidades poblacionales sin remapeo, y licencia y cita |
 
@@ -128,3 +128,34 @@ centimorgans y el perfil la necesita en pares de base desde 1. Ninguna fila
 posterior a la auditoría entra en los recuentos históricos de la tabla: ni las
 doce anteriores, ni DTF-049–057 —añadidas el 28 de agosto de 2026 con los
 contratos F4—, ni DTF-058.
+
+---
+
+## DTF-056 dividida — 24 de septiembre de 2026
+
+La decisión **S-25**, tomada por el responsable y registrada en la sección 16.2
+del plan de la fase de realismo técnico, **divide** esta ampliación aplazada.
+
+**Salen de DTF-056** y pasan a planificarse como trabajo de la entrega 3 del
+plan de microsatélites y amplificación:
+
+- la **preparación de biblioteca amplificada** y su perfil hermano;
+- los **duplicados de PCR** y las familias de amplificación;
+- el **sesgo de composición configurable**;
+- la **sobrerrepresentación estocástica** entre moléculas;
+- el **tartamudeo heredable** de la amplificación.
+
+**Permanecen aplazados en DTF-056**, sin cambio:
+
+- el **perfil de sesgo GC calibrado con datos reales**, que sigue exigiendo
+  evidencia empírica que el proyecto no tiene;
+- los **duplicados ópticos y de agrupación**, que son de la química de la celda
+  y no de la PCR;
+- la **combinación con excepciones regionales**.
+
+**DTF-055 no cambia.**
+
+Lo que ya está implementado y **no** pertenece a esta ampliación es el
+**tartamudeo de base** de la entrega 2: ocurre en la amplificación en puente y
+en la síntesis, que existen en el perfil vigente, **no introduce duplicados** y
+el perfil se sigue registrando como sin PCR (REQ-CONF-133).

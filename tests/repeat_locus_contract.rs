@@ -1502,12 +1502,33 @@ frequency = 1.0
     );
 }
 
-/// **Los esquemas heredados no cambian ni un byte.** La regla de la sección
-/// 10.3 del plan: los esquemas publicados no se editan; la capacidad nueva va
-/// en una versión nueva.
+/// **Los esquemas heredados no cambian ni un byte, y la lista es exhaustiva.**
+///
+/// La regla de la sección 10.3 del plan: los esquemas publicados no se editan;
+/// la capacidad nueva va en una versión nueva.
+///
+/// # Por qué la lista se compara con el directorio
+///
+/// La versión anterior de esta prueba enumeraba seis esquemas y dejaba fuera
+/// los manifiestos de evento v1 y v2, el manifiesto general v5, el mapa de
+/// reducción y el documento general v3 — dos de ellos, contratos que la propia
+/// tabla 10.3 nombra. Ninguno estaba roto, pero **editarlos no lo habría
+/// notado nadie**, que es exactamente lo que una lista de huellas existe para
+/// impedir.
+///
+/// Ahora la lista **se compara con el contenido del directorio**: cada esquema
+/// publicado está o congelado con su huella, o declarado como una de las
+/// versiones que el trabajo en curso estrena. Añadir un fichero sin
+/// clasificarlo rompe la prueba, de modo que la lista no puede volver a
+/// quedarse atrás en silencio.
 #[test]
 fn the_inherited_schemas_are_byte_for_byte_unchanged() {
-    let expected = [
+    // Congelados: su huella no puede moverse.
+    let frozen = [
+        (
+            "config-f5-scenario-v1.schema.json",
+            "bf410a5c55e6d5a952f8a5b3f06f3c4f36d5b23172a601133f27e7ca2e3a57e4",
+        ),
         (
             "config-general-v1.schema.json",
             "dbe5d16813612bdede5fb65a97d8646129322b174cf1a637841312657cd81b57",
@@ -1515,6 +1536,26 @@ fn the_inherited_schemas_are_byte_for_byte_unchanged() {
         (
             "config-general-v2.schema.json",
             "29bd4aeec6663f7a7f08095a075e4a71ffca216a803d8aa4f35c0d5130c84740",
+        ),
+        (
+            "config-general-v3.schema.json",
+            "e7ac2d90b36370e3a0f7cf694892b4826601e172fb65da060ff4ceae0ad02211",
+        ),
+        (
+            "diagnostics-v1.schema.json",
+            "ab2b9f2cd41aa1fb28e7de3b0e72b5e8132031bd83b1adc72b09ee8b49d1855a",
+        ),
+        (
+            "effective-config-v1.schema.json",
+            "e5a399a1c67925065ec5972942997d31876f05bd2734437f4f29bad6099ca437",
+        ),
+        (
+            "effective-config-v2.schema.json",
+            "0f251b7671ebd9e70663f44c8e9018b2e79c5c07c11f7502d49270918589d95c",
+        ),
+        (
+            "effective-config-v3.schema.json",
+            "f78ddd1f8a5d60f5e3320168eb163c62e1ddf7b2bfe661b9cd681c2a10a7a48a",
         ),
         (
             "effective-config-v4.schema.json",
@@ -1525,6 +1566,50 @@ fn the_inherited_schemas_are_byte_for_byte_unchanged() {
             "71f3758fbae8603103aecb7c1851812e6571d7627ce07c50f56748db88e8d9e5",
         ),
         (
+            "f5-failure-v1.schema.json",
+            "e8ac22740fba751fe90598c5308448625c1d3ca4c6a8d8c19c128b31149dd6b3",
+        ),
+        (
+            "manifest-event-v1.schema.json",
+            "3ddf93655ff8351a258c46cf4bf01b8d0e1f10e8a4005d5c47a1cc0f206c8955",
+        ),
+        (
+            "manifest-event-v2.schema.json",
+            "5a9c57b228e6b5929a2562617347f4812fe5f3fe730044c78badc438b0339a59",
+        ),
+        (
+            "manifest-general-v1.schema.json",
+            "37ebd3899041560d662b11d35122cb6751a2546ea0df4f8ef5c6ac834c6c3a2c",
+        ),
+        (
+            "manifest-general-v2.schema.json",
+            "936b745e8f900882a1794d3c17e831e6d0d587e4ea6c8dd803475fc9f4893b51",
+        ),
+        (
+            "manifest-general-v3.schema.json",
+            "d5de555a1fd419fcb32e5d746f08a0cb565d00a31dc16312a0cdd74af6d0a022",
+        ),
+        (
+            "manifest-general-v4.schema.json",
+            "ada06880f5766c835a8f29609e3af1a969b40ff4423e0723f4829efb148f7b41",
+        ),
+        (
+            "manifest-general-v5.schema.json",
+            "aad34baa98c7b4d3c0c39863582f2574364f5e3ec4f175cac1c15fde0428f036",
+        ),
+        (
+            "profile-metadata-f5-v1.schema.json",
+            "dd37390bba5cafe6e557082bbada84a31f8f9ca4bb59314931add950a12fef0f",
+        ),
+        (
+            "profile-metadata-f5-v2.schema.json",
+            "c9966c583682016f0347f6499060e20b98a87038e1afa39d84c672415f6cc6b3",
+        ),
+        (
+            "reference-reduction-map-v1.schema.json",
+            "30e3924a78915ce75b86b929976bac7ca07a7a72d2e09ae16a68c15382f4d027",
+        ),
+        (
             "truth-v1.schema.json",
             "e3d49abd11447370d34e4acf29b755a288fb310641474218086ed60099233fd7",
         ),
@@ -1533,8 +1618,20 @@ fn the_inherited_schemas_are_byte_for_byte_unchanged() {
             "be53a6b32eb04689bcb4113731bb97f84e57f3566116e98fa2a2500313ba647b",
         ),
     ];
+    // Estrenados por el trabajo de repeticiones y tartamudeo: llevan la
+    // capacidad nueva y por eso no se congelan aquí. Enumerarlos es lo que
+    // permite exigir que la unión cubra el directorio entero.
+    let current = [
+        "config-general-v4.schema.json",
+        "effective-config-v6.schema.json",
+        "manifest-event-v3.schema.json",
+        "manifest-general-v6.schema.json",
+        "reference-coordinate-map-v2.schema.json",
+        "truth-v3.schema.json",
+    ];
+
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    for (name, digest) in expected {
+    for (name, digest) in frozen {
         let identity = genome_population_simulator::integrity::identify_file(
             &root.join("schemas").join(name),
             name,
@@ -1542,6 +1639,30 @@ fn the_inherited_schemas_are_byte_for_byte_unchanged() {
         .expect("huella del esquema");
         assert_eq!(identity.digest(), digest, "el esquema {name} ha cambiado");
     }
+
+    let classified = frozen
+        .iter()
+        .map(|(name, _)| (*name).to_owned())
+        .chain(current.iter().map(|name| (*name).to_owned()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let published = std::fs::read_dir(root.join("schemas"))
+        .expect("directorio de esquemas")
+        .map(|entry| {
+            entry
+                .expect("entrada")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name.ends_with(".schema.json"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        published, classified,
+        "todo esquema publicado tiene que estar congelado o declarado como versión en curso"
+    );
+    // Control positivo: la comparación mira un conjunto no vacío. Sin esto, un
+    // filtro que no encontrara nada daría dos conjuntos vacíos e iguales.
+    assert!(published.len() >= 20);
 }
 
 /// Publica de verdad la ejecución y devuelve el `effective-config.json` que

@@ -126,6 +126,17 @@ cree una ejecución identificada y produzca resultados trazables y repetibles.
 `66ad8b2`. La implementación anterior queda como checkpoint recuperable, no
 como base que deba conservarse íntegramente.
 
+> **Reapertura acotada, 23/09/2026.** Esta fase estaba cerrada y se le añadió
+> capacidad: el generador de referencia simulada admite **regiones declaradas**
+> además del relleno al azar, y una referencia real admite la **inserción de
+> tractos** con su tabla de correspondencia de coordenadas. Lo que **no** se
+> reabrió: ninguna subsemilla, ningún vector congelado y ningún esquema
+> publicado. Con la lista de regiones vacía, los bytes son los de antes. El
+> registro completo —qué no se reabre, qué cambia y por decisión de quién,
+> dónde vive cada literal, las pruebas con su variante defectuosa y la
+> evidencia repetida— está en la **sección 14** de
+> `design/plan-implementacion-f1-0.1.md`.
+
 **Depende de:** F0.
 
 **Hitos:**
@@ -304,6 +315,20 @@ de WGS confirmados, sin alterar la verdad genotípica.
 de F2. Las fases biológicas posteriores deberán demostrar que sus individuos y
 poblaciones pueden alimentar este mismo recorrido sin crear otra implementación.
 
+> **Reapertura acotada, 24/09/2026.** Esta fase estaba cerrada con su evidencia
+> aprobada y se le añadió un paso: el **tartamudeo de base** de la polimerasa
+> sobre los microsatélites declarados, intercalado entre la quimera y calidad y
+> errores. **No es una preparación amplificada**, no introduce duplicados y el
+> perfil se sigue registrando como sin PCR: el deslizamiento ocurre en la
+> amplificación en puente sobre la celda y en la síntesis, que existen en el
+> perfil vigente. **La verdad del individuo no cambia.** Lo que **no** se
+> reabrió: ninguna clave aleatoria heredada —la etapa nueva estrena catálogo y
+> solo ella lo usa—, ningún esquema publicado y ningún artefacto de un
+> escenario sin loci declarados, que sigue dando los mismos bytes. El registro
+> completo está en la **sección 16** de
+> `design/plan-implementacion-f4-0.1.md`. La preparación amplificada por PCR
+> **sigue aplazada** y pertenece a la entrega 3.
+
 **Hitos:**
 
 - **F4.0. Catálogo RNG técnico.** Fijar y probar las claves, consumidores y
@@ -385,6 +410,29 @@ estructurales.** **F6.3. Ploidía generalizada.** **F6.4. Repeticiones.**
 por referencia.** F6 no hereda
 panel ni recombinación de F5. Su cierre demuestra reconstrucción, límites,
 solapamientos y aislamiento entre referencias.
+
+**Hito nuevo, sin desarrollar (24/09/2026):**
+
+- **F6.4.a. Localizar los microsatélites de un genoma suministrado.** Barrer una
+  referencia real y **descubrir** los tractos que ya contiene, en vez de exigir
+  que el usuario los declare uno a uno. Hoy el simulador **no lo hace**: solo
+  sabe comprobar que un locus declarado existe de verdad donde se dice (paso
+  F6.4.2, hecho) y, cuando se desarrolle F6.4.6, generar loci nuevos al azar por
+  regiones. Descubrir los que ya están es la capacidad hermana de esa última y
+  falta por completo.
+
+  **Por qué importa más allá de la comodidad.** Sin ella, todo microsatélite es
+  declarado por el usuario, y por eso el tartamudeo tiene un interruptor
+  explícito: quien declara el locus decide también si tartamudea y aporta sus
+  parámetros. Con descubrimiento automático aparecería una clase nueva de locus
+  —el que el simulador encontró y el usuario no pidió— y habría que decidir su
+  régimen por omisión. El responsable lo anticipó el 24 de septiembre de 2026.
+
+  **Lo que hay que decidir cuando se desarrolle**, y que este hito no resuelve:
+  el criterio de descubrimiento —qué pureza y qué tirada mínima hacen que un
+  tramo cuente como microsatélite—, qué pasa si el usuario declara uno que el
+  barrido no encontró o al revés, el coste de barrer un genoma completo, y el
+  régimen por omisión del tartamudeo para los descubiertos.
 
 **Subpaso diferido:**
 
