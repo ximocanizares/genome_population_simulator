@@ -33,7 +33,8 @@ documenta mejor.
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | Abierta |
 | DT-005 | La marca del lector de verdad que distingue un tramo sustituido por un tracto no la ejercita ninguna prueba | Baja | 22/09/2026 | Abierta |
-| DT-006 | El sorteo del inserto por rechazo es inutilizable cuando la copia más larga acerca el máximo al mínimo del perfil | Media | 24/09/2026 | Abierta |
+| DT-006 | El sorteo del inserto por rechazo es inutilizable cuando la copia más larga acerca el máximo al mínimo del perfil | Media | 24/09/2026 | Abierta, con guarda de admisión (25/09/2026) |
+| DT-007 | Ningún diagnóstico público nuevo puede publicarse en un manifiesto del recorrido general | Baja | 25/09/2026 | Abierta |
 
 ---
 
@@ -300,8 +301,120 @@ y el coste baja a milisegundos. La aritmética está escrita en
 
 **Lo que no se ha hecho** es tocar el muestreador, y es una decisión del
 responsable: cambiar el rechazo por un método de inversión cambiaría los
-vectores congelados de F4 y todas las salidas ya publicadas. Mientras tanto, lo
-que falta es una **guarda barata**: rechazar antes de simular una combinación de
-copia y perfil cuya probabilidad de aceptación caiga por debajo de un umbral, o
-al menos acotar el número de rechazos y fallar con un diagnóstico en vez de
-girar. Hoy no existe ninguna de las dos.
+vectores congelados de F4 y todas las salidas ya publicadas. Queda registrado
+como ampliación futura DTF-060.
+
+### La guarda de admisión (25/09/2026, corregida el mismo día)
+
+La primera versión de la guarda predecía el coste **por la forma de la
+distribución**: comparaba la copia más larga admisible contra la media y la
+desviación del perfil, en desviaciones típicas, y rechazaba por debajo de un
+umbral fijo. Una revisión adversarial encontró que eso **mide la magnitud
+equivocada**. Lo que cuesta tiempo de verdad es el número de parejas pedidas
+dividido por la probabilidad de acertar en cada sorteo, no la probabilidad
+sola:
+
+- una copia de 260 pb con **una sola pareja** pedida se resolvía en 81 ms sin
+  guarda, y la primera versión la rechazaba igualmente, prohibiendo una
+  ejecución que acababa en menos de un décimo de segundo;
+- un panel de 60 tramos de 271 pb a 30x —muchas parejas, cada una barata—
+  tardaba 78 segundos, cinco veces más que el mismo panel con tramos de 350
+  pb, y la primera versión lo admitía sin más porque solo miraba la forma, no
+  el volumen pedido.
+
+Un umbral por forma, además, es en la práctica un límite de tamaño de
+secuencia codificado, y la especificación exige que ese tamaño no tenga
+límites codificados y que un escenario grande y legítimo solo pueda advertir,
+nunca rechazar.
+
+**El criterio vigente cuenta intentos de verdad**, en vez de predecirlos.
+`f4_truncated_normal`, en `src/randomness.rs`, cuenta sus propios intentos de
+rechazo y aborta ese único sorteo con
+`RandomSamplingError::TruncatedNormalAttemptsExhausted` si agota
+`F4_TRUNCATED_NORMAL_MAX_ATTEMPTS` (un millón) sin acertar en el intervalo
+admitido; no consume ni un número de la cinta de azar de más al abortar, y
+para cualquier sorteo que sí termina, el resultado y el consumo son idénticos
+a los de antes de que el contador existiera —comprobado byte a byte contra un
+binario del commit anterior, compilado aparte, sobre un escenario congelado
+que completa sin agotar la cota—. En `src/wgs_sampling.rs`,
+`WgsPairedEndSampler::insert_sampling_error` traduce ese fallo concreto —y
+solo ese— al mismo diagnóstico público de siempre,
+`WgsSamplingError::ImpracticalInsertSampling`, con el individuo, su copia más
+larga y el mínimo del perfil.
+
+Medido: una copia de 271 pb necesita del orden de **23 000** intentos por
+sorteo, el peor caso legítimo conocido; 280 pb, unos 4 000; 250 pb, el propio
+mínimo del perfil, unos **13 000 000**. Un millón deja unas cuarenta veces de
+margen sobre el peor caso legítimo y sigue cazando el desbocamiento de trece
+millones muy por debajo de su coste real. No hay cota agregada sobre el total
+de intentos de una biblioteca entera: cada sorteo se acota por separado, así
+que un panel grande y proporcionado a lo que pidió la persona usuaria —muchas
+parejas, cada una barata— no se rechaza por volumen; solo se rechaza el
+sorteo concreto que de verdad se desboca.
+
+Las pruebas viven en `tests/f4_insert_sampling_guard.rs` (nivel de biblioteca,
+con dos de la revisión adversarial que comprueban que la guarda mira la copia
+haplotípica realizada y no la secuencia de referencia) y, para el contador en
+sí, en `src/randomness.rs` (dos pruebas unitarias con una fuente de azar
+controlada: una agota la cota exactamente y sin un intento de más, la otra
+demuestra que el último intento permitido todavía puede acertar).
+
+**Lo que queda:** DTF-060, el método de muestreo sin rechazo, sigue aplazado
+y no es de esta guarda. Y el diagnóstico reutiliza `GPS-DOMAIN-003` en vez de
+un código propio, por la limitación que registra DT-007.
+
+---
+
+## DT-007. Ningún diagnóstico público nuevo puede publicarse en un manifiesto del recorrido general
+
+**Gravedad: baja.** No es un defecto que afecte a ningún resultado publicado
+hoy: es un techo que hay que conocer antes de intentar cerrar el siguiente.
+
+### Qué pasa
+
+Todo diagnóstico público lleva un código estable de un catálogo versionado
+(DTC-044), publicado en `catalogs/diagnostics-v4.tsv`. Pero ese fichero no es
+el que de verdad rige cuando un fallo controlado publica un **manifiesto del
+recorrido general** —el general y el de cada evento técnico, los documentos
+de F1 a F4—: esos tres puntos de anclaje están **fijados en el código** a la
+versión histórica **`"3"`** del catálogo, la que existía antes de que F5
+añadiera sus propios códigos:
+
+- `src/results.rs`, dos veces, dentro de `validate_diagnostics(diagnostics,
+  "3", path)`: una en `parse_general_manifest_bytes_unretagged`, la lectura
+  vigente y alcanzable del manifiesto general; la otra en
+  `parse_general_manifest_v1_object`, marcada `#[allow(dead_code)]` y sin
+  ninguna llamada hoy —el contrato v1 archivado que describe DTC-036—, así
+  que hoy solo la primera se ejercita de verdad;
+- `src/event_manifest.rs`, la constante `EVENT_MANIFEST_DIAGNOSTIC_CATALOG_VERSION
+  = "3"` — valida el manifiesto de cada evento técnico.
+
+Esto es coherente con DTC-036: el manifiesto general conserva su versión de
+esquema `"2"` desde F2, cerrada, y por eso solo puede citar los códigos que
+existían cuando se cerró. F5 introdujo su propia familia de códigos
+(`GPS-DOMAIN-101` en adelante, `GPS-CONF-101`, `GPS-RES-101`) sin tocar esa
+frontera, porque sus fallos se publican en un documento propio —el de fallo
+F5, con su propio esquema— y no en el manifiesto general. Hay una prueba que
+demuestra justo esto por el lado negativo: `tests/f3_event_manifest.rs`, el
+caso `f4-event-f5-diagnostic`, construye un manifiesto de evento con el código
+F5 `GPS-CONF-101` y comprueba que **tanto el validador Rust interno como el
+externo lo rechazan**.
+
+**La consecuencia práctica:** ningún código nuevo puede añadirse al catálogo y
+usarse en un fallo del recorrido general —F1 a F4, y ahora F6— sin que la
+publicación del propio fallo controlado se rompa contra su propio manifiesto.
+Se descubrió así, no por inspección: la primera versión de la guarda de
+DT-006 iba a abrir `GPS-DOMAIN-107`, y al escribir la prueba de extremo a
+extremo, el intento de publicar el fallo controlado se rechazaba a sí mismo
+con `GPS-FMT-006` («el diagnóstico GPS-DOMAIN-107 no coincide con
+diagnostics-v3.tsv»). La guarda de DT-006 reutiliza `GPS-DOMAIN-003`, un
+código ya presente en la versión histórica, para esquivarlo.
+
+### Qué se hizo y qué queda
+
+Nada, todavía: es un techo conocido, no un arreglo. Cualquier defecto nuevo
+del recorrido general que necesite nombrar algo que el catálogo histórico no
+distingue tendrá que reutilizar un código existente y llevar el matiz en
+`detail`, exactamente como hizo DT-006, o abrir una versión nueva del esquema
+del manifiesto general y del de evento técnico —una decisión de arquitectura,
+no de implementación, porque cambia un contrato que DTC-036 declaró cerrado—.

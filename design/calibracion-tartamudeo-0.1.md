@@ -323,11 +323,30 @@ diferencias esperables entre muestras y profundidades distintas.
    partir de una imagen de 680 píxeles de ancho. La incertidumbre es de unas
    **±0,15 unidades logarítmicas**, que en lineal es del orden del ±40 %. Sirven
    para la forma y el orden de magnitud, **no como calibración fina**.
-2. **Los números exactos existen y son accesibles.** Los autores publican los
-   ficheros de tasas de error en un historial de Galaxy enlazado desde el
-   artículo. No se pudieron descargar automáticamente porque la página es una
-   aplicación interactiva, pero **quien quiera precisión debe bajarlos de ahí**
-   en vez de usar esta tabla.
+2. **Los números exactos ya NO son accesibles.** *(Corregido el 25 de
+   septiembre de 2026; lo que esta advertencia decía antes era cierto cuando se
+   escribió y ha dejado de serlo.)* El artículo enlaza los ficheros de tasas de
+   error a un historial de Galaxy —`usegalaxy.org/u/guru%40psu.edu/h/error-rates-files`,
+   la URL literal del artículo—, y **ese historial ha desaparecido**. Tres
+   comprobaciones independientes, hechas el 25/09/2026:
+
+   - la interfaz de programación de Galaxy responde y lista **9426 historiales
+     publicados**; buscando por el nombre del nuestro devuelve **vacío**, y
+     ninguno de los 9426 lo menciona;
+   - los accesos directos por usuario y nombre devuelven **404**;
+   - el archivo de internet tiene tres capturas, de 2022 en adelante, y **las
+     tres son redirecciones** (301 y 302): nunca llegó a guardar contenido.
+
+   Se buscó también por otras dos vías, sin éxito: el repositorio de las
+   herramientas del artículo contiene los programas pero **ningún fichero de
+   tasas**, y el índice de material suplementario de la revista está tras una
+   página intermedia de descarga que no se pudo atravesar. Las tablas
+   suplementarias que el artículo sí cita cubren otras cosas —sensibilidad de
+   detección, recuentos por motivo, rangos de longitud fiables— y **no los
+   valores de la figura 1A**.
+
+   **Consecuencia:** la tabla de arriba, leída a ojo, es hoy **lo mejor que
+   tenemos de esta fuente**, y no porque no se haya intentado.
 3. **El artículo no dice cuántos ciclos de PCR usó.** Y esto es lo decisivo:
    estas cifras son **de extremo a extremo**, y nuestro modelo necesita la
    **pendiente por ciclo**. Convertir unas en otra exige conocer el número de

@@ -2048,6 +2048,10 @@ pub enum RandomSamplingError {
     NumericFailure,
     InsufficientCandidates,
     InvalidMatrix,
+    /// DT-006: un sorteo de la normal truncada F4 agotó
+    /// [`F4_TRUNCATED_NORMAL_MAX_ATTEMPTS`] intentos sin acertar en el
+    /// intervalo admitido.
+    TruncatedNormalAttemptsExhausted,
 }
 
 /// Uniforme abierto normativo, compartido por los consumidores F2.
@@ -2191,7 +2195,28 @@ fn f4_partial_fisher_yates_with_source<T>(
     Ok(())
 }
 
+/// Cota de intentos de un único sorteo de la normal truncada F4 (DT-006).
+///
+/// `f4_truncated_normal` sortea por rechazo: genera un candidato y lo
+/// descarta hasta que cae en el intervalo admitido. Cuando ese intervalo
+/// queda hundido en la cola de la distribución, el número de intentos se
+/// dispara. Medido sobre el perfil vigente (`gps-hiseqx-pcrfree-pe150-v1`,
+/// media 350 pb, desviación 20 pb): un techo efectivo de 271 pb necesita del
+/// orden de **23 000** intentos por sorteo, el peor caso legítimo medido; un
+/// techo de 250 pb, el propio mínimo del perfil, necesita del orden de
+/// **13 000 000** —dos parejas tardaron 111 segundos antes de que existiera
+/// esta cota—. Un millón deja unas **cuarenta veces** de margen sobre el
+/// peor caso legítimo conocido y sigue cazando el desbocamiento de trece
+/// millones muy por debajo de su coste real.
+const F4_TRUNCATED_NORMAL_MAX_ATTEMPTS: u32 = 1_000_000;
+
 /// Normal truncada F4 de DTC-088, redondeada al entero más próximo.
+///
+/// Un único sorteo que agote [`F4_TRUNCATED_NORMAL_MAX_ATTEMPTS`] intentos
+/// sin acertar en el intervalo admitido se aborta con
+/// [`RandomSamplingError::TruncatedNormalAttemptsExhausted`] en vez de seguir
+/// girando (DT-006). El corte no consume ningún número de la cinta de azar
+/// que un intento no hubiera consumido ya: cuenta, no sortea.
 pub fn f4_truncated_normal(
     rng: &mut LocalRng,
     mean: f64,
@@ -2216,7 +2241,12 @@ fn f4_truncated_normal_with_source(
     {
         return Err(RandomSamplingError::InvalidInterval);
     }
+    let mut attempts: u32 = 0;
     loop {
+        attempts += 1;
+        if attempts > F4_TRUNCATED_NORMAL_MAX_ATTEMPTS {
+            return Err(RandomSamplingError::TruncatedNormalAttemptsExhausted);
+        }
         let first = f4_uniform_open_53_with_source(rng);
         let second = f4_uniform_open_53_with_source(rng);
         let z = libm::sqrt(-2.0 * libm::log(first)) * libm::cos(2.0 * F4_PI * second);
@@ -2633,15 +2663,15 @@ fn poisson_count_with_source(
 #[cfg(test)]
 mod tests {
     use super::{
-        F4_FIFTY_THREE_BIT_MAX, RandomSamplingError, RandomWordSource, categorical_f64_with_source,
-        f4_bernoulli_with_source, f4_partial_fisher_yates_with_source,
-        f4_truncated_normal_with_source, f4_uniform_closed_with_source,
-        f4_uniform_index_with_source, f4_uniform_open_53_with_source, f5_bernoulli_with_source,
-        f5_fisher_yates_with_source, f5_matrix_bytes, f5_placed_layout_bytes,
-        f5_uniform_index_with_source, fisher_yates_with_source, linear_uniform_with_source,
-        log_uniform_with_source, neumaier_sum, open_unit_f64_with_source,
-        poisson_count_with_source, uniform_u64_below_with_source,
-        weighted_without_replacement_with_source,
+        F4_FIFTY_THREE_BIT_MAX, F4_TRUNCATED_NORMAL_MAX_ATTEMPTS, RandomSamplingError,
+        RandomWordSource, categorical_f64_with_source, f4_bernoulli_with_source,
+        f4_partial_fisher_yates_with_source, f4_truncated_normal_with_source,
+        f4_uniform_closed_with_source, f4_uniform_index_with_source,
+        f4_uniform_open_53_with_source, f5_bernoulli_with_source, f5_fisher_yates_with_source,
+        f5_matrix_bytes, f5_placed_layout_bytes, f5_uniform_index_with_source,
+        fisher_yates_with_source, linear_uniform_with_source, log_uniform_with_source,
+        neumaier_sum, open_unit_f64_with_source, poisson_count_with_source,
+        uniform_u64_below_with_source, weighted_without_replacement_with_source,
     };
 
     struct Scripted {
@@ -2663,6 +2693,53 @@ mod tests {
             let value = self.words[self.consumed];
             self.consumed += 1;
             value
+        }
+    }
+
+    /// Fuente sin fin para el corte de intentos de DT-006: cada intento
+    /// produce el par `(0, 0)`, que con `mean=0.0, standard_deviation=1.0,
+    /// minimum=1, maximum=1` cae siempre fuera del intervalo admitido, salvo
+    /// en el intento `succeed_at_attempt` (si lo hay), donde produce el par
+    /// `(half, 0)` que sí acierta. No asigna un vector gigante: calcula cada
+    /// palabra a partir de cuántas lleva consumidas.
+    struct ExhaustingSource {
+        consumed: usize,
+        succeed_at_attempt: Option<u32>,
+    }
+
+    impl ExhaustingSource {
+        const HALF: u64 = 1_u64 << 52;
+
+        fn never_succeeds() -> Self {
+            Self {
+                consumed: 0,
+                succeed_at_attempt: None,
+            }
+        }
+
+        fn succeeding_on_attempt(attempt: u32) -> Self {
+            Self {
+                consumed: 0,
+                succeed_at_attempt: Some(attempt),
+            }
+        }
+    }
+
+    impl RandomWordSource for ExhaustingSource {
+        fn next_word(&mut self) -> u64 {
+            let word_index = self.consumed;
+            self.consumed += 1;
+            let attempt_is_one_based = (word_index / 2) as u32 + 1;
+            let is_first_word_of_attempt = word_index.is_multiple_of(2);
+            if self.succeed_at_attempt == Some(attempt_is_one_based) {
+                if is_first_word_of_attempt {
+                    Self::HALF
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
         }
     }
 
@@ -2802,6 +2879,45 @@ mod tests {
             Err(RandomSamplingError::InvalidInterval)
         );
         assert_eq!(invalid_normal.consumed, 0);
+    }
+
+    /// DT-006: un sorteo que nunca acertaría se aborta exactamente en la cota
+    /// de intentos, sin consumir ni un número de más.
+    ///
+    /// Regresión: sin el corte, esta llamada no terminaría nunca (el arnés
+    /// que descubrió DT-006 midió 111 s para dos parejas con el mismo
+    /// intervalo degenerado). La aserción sobre `consumed` es la que
+    /// realmente ejercita el corte: sin él, la prueba no terminaría en vez de
+    /// fallar, así que cualquier prueba de integración que solo comprobara
+    /// `is_err()` bajo un límite de tiempo generoso no lo demostraría.
+    #[test]
+    fn f4_truncated_normal_aborts_at_the_attempt_cap_without_one_extra_draw() {
+        let mut source = ExhaustingSource::never_succeeds();
+        assert_eq!(
+            f4_truncated_normal_with_source(&mut source, 0.0, 1.0, 1, 1),
+            Err(RandomSamplingError::TruncatedNormalAttemptsExhausted)
+        );
+        // Exactamente dos palabras por intento, ni una palabra del intento
+        // que habría seguido al que agotó la cota.
+        assert_eq!(
+            source.consumed,
+            2 * F4_TRUNCATED_NORMAL_MAX_ATTEMPTS as usize
+        );
+    }
+
+    /// El intento número `F4_TRUNCATED_NORMAL_MAX_ATTEMPTS`, el último
+    /// permitido, todavía puede acertar: la cota no le roba su oportunidad.
+    #[test]
+    fn f4_truncated_normal_still_admits_a_success_on_the_last_allowed_attempt() {
+        let mut source = ExhaustingSource::succeeding_on_attempt(F4_TRUNCATED_NORMAL_MAX_ATTEMPTS);
+        assert_eq!(
+            f4_truncated_normal_with_source(&mut source, 0.0, 1.0, 1, 1),
+            Ok(1)
+        );
+        assert_eq!(
+            source.consumed,
+            2 * F4_TRUNCATED_NORMAL_MAX_ATTEMPTS as usize
+        );
     }
 
     #[test]

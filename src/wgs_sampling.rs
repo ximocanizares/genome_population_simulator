@@ -201,11 +201,24 @@ pub enum WgsSamplingError {
     TechnicalPlanReferenceMismatch,
     IndividualReferenceMismatch,
     MissingTechnicalLibrary,
-    NoEligibleSequence { read_length: u64 },
+    NoEligibleSequence {
+        read_length: u64,
+    },
     LengthOverflow,
     InvalidCoverageMean,
     InvalidPairedEndCoverage,
     PairCountOverflow,
+    /// DT-006: un sorteo del inserto de este individuo agotó la cota de
+    /// intentos de `f4_truncated_normal` sin acertar en el intervalo
+    /// admitido. Se traduce desde
+    /// [`RandomSamplingError::TruncatedNormalAttemptsExhausted`] en vez de
+    /// dejarlo como un fallo aleatorio genérico, para nombrar al individuo,
+    /// su copia más larga y el mínimo del perfil.
+    ImpracticalInsertSampling {
+        individual: IndividualId,
+        longest_copy_bases: u64,
+        minimum_insert_bases: u16,
+    },
     Random(RandomSamplingError),
     TechnicalIdentity(Diagnostic),
     Materialization(MaterializationError),
@@ -777,6 +790,22 @@ impl<'a> WgsPairedEndSampler<'a> {
         self.stutter_accumulator.clone().report()
     }
 
+    /// Traduce el fallo del sorteo del inserto de DT-006 a un diagnóstico que
+    /// nombra el individuo, su copia más larga y el mínimo del perfil; deja
+    /// pasar sin tocar cualquier otro fallo aleatorio, que sigue su vía
+    /// genérica de siempre.
+    fn insert_sampling_error(&self, error: RandomSamplingError) -> WgsSamplingError {
+        if matches!(error, RandomSamplingError::TruncatedNormalAttemptsExhausted) {
+            WgsSamplingError::ImpracticalInsertSampling {
+                individual: self.individual.id().clone(),
+                longest_copy_bases: u64::from(self.effective_insert_maximum_bases),
+                minimum_insert_bases: self.profile.insert_length().minimum_bases(),
+            }
+        } else {
+            WgsSamplingError::Random(error)
+        }
+    }
+
     fn sample_next_pair(&mut self, ordinal: u64) -> Result<PairedEndPair, WgsSamplingError> {
         let template = self
             .identities
@@ -797,7 +826,7 @@ impl<'a> WgsPairedEndSampler<'a> {
             i64::from(distribution.minimum_bases()),
             i64::from(self.effective_insert_maximum_bases),
         )
-        .map_err(WgsSamplingError::Random)?;
+        .map_err(|error| self.insert_sampling_error(error))?;
         let insert = u64::try_from(insert).map_err(|_| WgsSamplingError::LengthOverflow)?;
         let candidates = fragment_candidates(self.reference, self.individual, insert)?;
         let total = candidates.iter().try_fold(0_u64, |sum, candidate| {

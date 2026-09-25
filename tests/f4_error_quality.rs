@@ -20,6 +20,15 @@ use genome_population_simulator::wgs_sampling::WgsPairedEndSampler;
 
 const ROOT: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
+/// Construye la única pareja que necesitan estos oráculos de calidad/error.
+///
+/// La referencia mide 300 pb, no el mínimo de 250 pb del perfil: a 250 pb la
+/// copia queda a -5 desviaciones típicas de la media del inserto y la guarda
+/// de admisión de DT-006 la rechaza porque el sorteo por rechazo de
+/// `f4_truncated_normal` sería impracticable (del orden de 13 000 000 de
+/// intentos esperados por pareja). 300 pb queda a -2.5 desviaciones, muy por
+/// encima del umbral, y el contenido uniforme de `bases` hace que el número
+/// exacto de bases no afecte a ninguna aserción de este fichero.
 fn pair_from(
     bases: &[u8],
 ) -> (
@@ -73,7 +82,7 @@ fn pair_from(
 
 #[test]
 fn quality_is_pure_piecewise_half_up_and_needs_no_rng_source() {
-    let (_, _, _, profile) = pair_from(&vec![b'A'; 250]);
+    let (_, _, _, profile) = pair_from(&vec![b'A'; 300]);
     let neutral = ErrorQualitySettings::default();
 
     // Oráculo independiente: los tramos son 36→36, 36→32 y 32→28 en R1;
@@ -115,7 +124,7 @@ fn quality_is_pure_piecewise_half_up_and_needs_no_rng_source() {
 
 #[test]
 fn forced_errors_substitute_only_other_acgt_and_publish_mate_aggregates() {
-    let (root, event, pair, profile) = pair_from(&vec![b'A'; 250]);
+    let (root, event, pair, profile) = pair_from(&vec![b'A'; 300]);
     // Q=0 implica p=10^0×1=1, de modo que el oráculo no depende de suerte.
     let settings = ErrorQualitySettings::new(-36, -35, 1.0, 1.0).expect("settings");
     let transformed =
@@ -142,7 +151,7 @@ fn forced_errors_substitute_only_other_acgt_and_publish_mate_aggregates() {
 
 #[test]
 fn n_is_preserved_at_phred_zero_without_an_error_opportunity() {
-    let (root, event, pair, profile) = pair_from(&vec![b'N'; 250]);
+    let (root, event, pair, profile) = pair_from(&vec![b'N'; 300]);
     let settings = ErrorQualitySettings::new(-36, -35, 1.0, 1.0).expect("settings");
     let transformed =
         transform_paired_end(root, &event, &pair, profile, settings).expect("transform");
@@ -159,7 +168,7 @@ fn n_is_preserved_at_phred_zero_without_an_error_opportunity() {
 
 #[test]
 fn disabled_mode_preserves_truth_and_profile_quality_with_zero_errors_per_mate() {
-    let (root, event, pair, profile) = pair_from(&vec![b'A'; 250]);
+    let (root, event, pair, profile) = pair_from(&vec![b'A'; 300]);
     let disabled =
         ErrorQualitySettings::default().with_sequencing_errors(SequencingErrorsMode::Disabled);
     let transformed =
@@ -206,7 +215,7 @@ fn disabled_mode_preserves_truth_and_profile_quality_with_zero_errors_per_mate()
 
 #[test]
 fn mate_error_streams_are_isolated_from_r1_adjustments() {
-    let (root, event, pair, profile) = pair_from(&vec![b'A'; 250]);
+    let (root, event, pair, profile) = pair_from(&vec![b'A'; 300]);
     let lower_r1_scale = ErrorQualitySettings::new(-35, -35, 0.5, 1.0).expect("settings");
     let neutral_r1_scale = ErrorQualitySettings::new(-35, -35, 1.0, 1.0).expect("settings");
     let left = transform_paired_end(root, &event, &pair, profile, lower_r1_scale).expect("left");
@@ -219,7 +228,7 @@ fn mate_error_streams_are_isolated_from_r1_adjustments() {
 
 #[test]
 fn error_scale_recalculates_the_emitted_fastq_phred_from_final_probability() {
-    let (root, event, pair, profile) = pair_from(&vec![b'A'; 250]);
+    let (root, event, pair, profile) = pair_from(&vec![b'A'; 300]);
     let doubled = ErrorQualitySettings::new(0, 0, 2.0, 2.0).expect("settings");
     let transformed =
         transform_paired_end(root, &event, &pair, profile, doubled).expect("transform");
@@ -237,7 +246,7 @@ fn error_scale_recalculates_the_emitted_fastq_phred_from_final_probability() {
 
 #[test]
 fn final_probability_and_emitted_phred_boundaries_are_rejected_without_saturation() {
-    let (root, event, pair, profile) = pair_from(&vec![b'A'; 250]);
+    let (root, event, pair, profile) = pair_from(&vec![b'A'; 300]);
 
     // Q36 con escala 10^-5.7 da exactamente Q93 tras la conversión inversa.
     let maximum_representable =

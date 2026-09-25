@@ -79,7 +79,7 @@ use crate::truth_schema::{
 };
 use crate::truth_validation::reference_content_sha256;
 use crate::vcf_publication::publish_truth_vcf;
-use crate::wgs_sampling::WgsPairedEndSampler;
+use crate::wgs_sampling::{WgsPairedEndSampler, WgsSamplingError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutionOutcome {
@@ -793,7 +793,7 @@ fn publish_technical_event(
         for pair in &mut sampler {
             let pair = pair.map_err(|error| {
                 Box::new(TechnicalEventAssemblyFailure {
-                    cause: technical_event_error("wgs_paired_sampler", format!("{error:?}")),
+                    cause: wgs_paired_sampler_error(error),
                     link: None,
                 })
             })?;
@@ -1271,7 +1271,54 @@ fn paired_sampler<'a>(
                 .with_effective_technical_event(event)
                 .with_stutter_plan(stutter.clone())
         })
+        // El rechazo de admisión de DT-006 (`ImpracticalInsertSampling`) nunca
+        // llega aquí: se dispara dentro de `sample_next_pair`, al iterar, no
+        // al construir el muestreador. Los dos puntos donde sí se puede
+        // alcanzar usan `wgs_paired_sampler_error`.
         .map_err(|error| technical_event_error("wgs_paired_sampler", format!("{error:?}")))
+}
+
+/// Traduce el fallo de una iteración del muestreador PE a un diagnóstico
+/// público; es el único punto de conversión para las dos pasadas que
+/// consumen el iterador (la de claves y la de regeneración final), de modo
+/// que las dos ven el mismo tratamiento de DT-006.
+///
+/// El rechazo de admisión de DT-006 —`ImpracticalInsertSampling`, un sorteo
+/// del inserto que agotó su cota de intentos— necesita un diagnóstico claro
+/// que nombre al individuo, su copia más larga, el mínimo del perfil y la
+/// salida disponible, en vez de volcar la variante de Rust que la produjo.
+/// El resto de variantes de `WgsSamplingError` no debería alcanzarse nunca en
+/// una ejecución con configuración ya validada, así que conservan el
+/// tratamiento uniforme de invariante interna.
+///
+/// Reutiliza `GPS-DOMAIN-003` en vez de abrir un código nuevo: el manifiesto
+/// general valida sus diagnósticos contra el catálogo histórico congelado en
+/// `diagnostics-v3.tsv` (DTC-036 fija su esquema en la versión `"2"`), que no
+/// conoce ningún código añadido después de F5. Un código nuevo se vería
+/// rechazado al publicar precisamente el fallo controlado que debía informar
+/// —la limitación en sí está registrada aparte, en DT-007—.
+fn wgs_paired_sampler_error(error: WgsSamplingError) -> Diagnostic {
+    match error {
+        WgsSamplingError::ImpracticalInsertSampling {
+            individual,
+            longest_copy_bases,
+            minimum_insert_bases,
+        } => Diagnostic::domain(
+            "GPS-DOMAIN-003",
+            "Una invariante del estado biológico o técnico válido no se cumple.",
+        )
+        .with("entity", individual.as_str())
+        .with("invariant", "inserto_practicable")
+        .with(
+            "detail",
+            format!(
+                "el individuo {individual} tiene su copia haplotípica más larga en {longest_copy_bases} pb, \
+y el perfil técnico exige un inserto mínimo de {minimum_insert_bases} pb: ese margen hace impracticable el \
+sorteo del inserto. Usa una referencia más larga para este individuo."
+            ),
+        ),
+        other => technical_event_error("wgs_paired_sampler", format!("{other:?}")),
+    }
 }
 
 /// Reproduce en una sola pasada las parejas de una biblioteca, indexadas por
@@ -1359,9 +1406,7 @@ impl RegeneratedPairs {
         let sampler = paired_sampler(reference, individual, identities, profile, event, stutter)?;
         let mut pairs = BTreeMap::new();
         for pair in sampler {
-            let pair = pair.map_err(|error| {
-                technical_event_error("wgs_paired_sampler", format!("{error:?}"))
-            })?;
+            let pair = pair.map_err(wgs_paired_sampler_error)?;
             let instance = crate::identity::CompactPreHopInstanceId::new(
                 pair.pre_hop_identity().pre_hop_instance_id(),
             )?;
