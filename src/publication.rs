@@ -1308,6 +1308,7 @@ mod tests {
             realized_chimera_pairs: 0,
             biological_contamination: &[],
             stutter: None,
+            pcr: None,
             diagnostics: &[],
         };
         let event_path = event_manifest_relative_path(event.event_id());
@@ -1335,6 +1336,8 @@ mod tests {
             manifest_artifact_id: event_record.id.clone(),
             chimera_rate: event.chimera_rate(),
             realized_chimera_pairs: 0,
+            profile_id: crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
+            profile_sha256: crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
             rng_catalog: crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3,
         }];
         let references = [ManifestReferenceLink {
@@ -1405,6 +1408,7 @@ mod tests {
             realized_chimera_pairs: 0,
             biological_contamination: &[],
             stutter: None,
+            pcr: None,
             diagnostics: std::slice::from_ref(&event_failure),
         };
         let replacement = event_manifest_bytes(&failed_event).expect("tampered event bytes");

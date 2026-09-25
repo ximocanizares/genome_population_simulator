@@ -34,6 +34,16 @@ def _():
         repeat_interruption_editor_rows,
         repeat_loci_from_editor_rows,
         repeat_locus_editor_rows,
+        LIBRARY_PREPARATIONS,
+        PCR_MAXIMUM_CYCLES,
+        PCR_MAXIMUM_EARLY_CYCLES,
+        PCR_MAXIMUM_EFFICIENCY_CLASSES,
+        PCR_MAXIMUM_FAMILY_SIZE,
+        PCR_MAXIMUM_GC_ATTEMPTS,
+        efficiency_class_editor_rows,
+        gc_curve_editor_rows,
+        pcr_from_editor_rows,
+        pcr_mean_pairs_per_molecule,
         stutter_from_editor_rows,
         stutter_locus_rate_editor_rows,
         stutter_motif_rate_editor_rows,
@@ -76,6 +86,7 @@ def _():
         explicit_snp_authorization_summary,
         individuals_panel,
         repeats_panel,
+        pcr_panel,
         stutter_panel,
     )
 
@@ -138,6 +149,17 @@ def _():
         reduction_from_editor_row,
         render_general_toml,
         run_toml,
+        LIBRARY_PREPARATIONS,
+        PCR_MAXIMUM_CYCLES,
+        PCR_MAXIMUM_EARLY_CYCLES,
+        PCR_MAXIMUM_EFFICIENCY_CLASSES,
+        PCR_MAXIMUM_FAMILY_SIZE,
+        PCR_MAXIMUM_GC_ATTEMPTS,
+        efficiency_class_editor_rows,
+        gc_curve_editor_rows,
+        pcr_from_editor_rows,
+        pcr_mean_pairs_per_molecule,
+        pcr_panel,
         stutter_from_editor_rows,
         stutter_locus_rate_editor_rows,
         stutter_motif_rate_editor_rows,
@@ -213,6 +235,14 @@ def _(
     stutter_locus_rate_editor_rows,
     stutter_motif_rate_editor_rows,
     stutter_step_editor_rows,
+    LIBRARY_PREPARATIONS,
+    PCR_MAXIMUM_CYCLES,
+    PCR_MAXIMUM_EARLY_CYCLES,
+    PCR_MAXIMUM_EFFICIENCY_CLASSES,
+    PCR_MAXIMUM_FAMILY_SIZE,
+    PCR_MAXIMUM_GC_ATTEMPTS,
+    efficiency_class_editor_rows,
+    gc_curve_editor_rows,
 ):
     seed_control = mo.ui.text(
         value=imported_form.seed or "",
@@ -323,6 +353,84 @@ def _(
     stutter_locus_rates_editor = mo.ui.data_editor(
         stutter_locus_rate_editor_rows(_selected_stutter),
         label="Sustitución de la tasa para un locus concreto (una fila sin `locus_id` se omite)",
+        pagination=False,
+    )
+    _selected_pcr = selected_technical_event.pcr if selected_technical_event else None
+    library_preparation_control = mo.ui.dropdown(
+        options=list(LIBRARY_PREPARATIONS),
+        value=(
+            (selected_technical_event.library_preparation if selected_technical_event else None)
+            or "pcr_free"
+        ),
+        label="Preparación de biblioteca",
+    )
+    pcr_duplicate_fraction_control = mo.ui.text(
+        value=(_selected_pcr.duplicate_fraction if _selected_pcr else "") or "",
+        label=(
+            "Fracción de duplicados ESPERADA de una biblioteca homogénea"
+            " (obligatoria con PCR, sin valor de omisión)"
+        ),
+        full_width=True,
+    )
+    pcr_cycles_control = mo.ui.number(
+        start=1,
+        stop=PCR_MAXIMUM_CYCLES,
+        step=1,
+        value=(_selected_pcr.cycles if _selected_pcr else 10),
+        label=f"Ciclos de PCR (1 a {PCR_MAXIMUM_CYCLES})",
+    )
+    pcr_efficiency_control = mo.ui.text(
+        value=(_selected_pcr.efficiency if _selected_pcr else "") or "",
+        label="Eficiencia por ciclo, en (0, 1] (obligatoria con PCR, sin valor de omisión)",
+        full_width=True,
+    )
+    pcr_early_cycles_control = mo.ui.number(
+        start=0,
+        stop=PCR_MAXIMUM_EARLY_CYCLES,
+        step=1,
+        value=(
+            _selected_pcr.early_cycles
+            if _selected_pcr and _selected_pcr.early_cycles is not None
+            else 3
+        ),
+        label=f"Ciclos explícitos (0 a {PCR_MAXIMUM_EARLY_CYCLES})",
+    )
+    pcr_max_family_size_control = mo.ui.number(
+        start=1,
+        stop=PCR_MAXIMUM_FAMILY_SIZE,
+        step=1,
+        value=(
+            _selected_pcr.max_family_size
+            if _selected_pcr and _selected_pcr.max_family_size is not None
+            else 64
+        ),
+        label=f"Tamaño máximo de familia (1 a {PCR_MAXIMUM_FAMILY_SIZE})",
+    )
+    pcr_gc_max_attempts_control = mo.ui.number(
+        start=1,
+        stop=PCR_MAXIMUM_GC_ATTEMPTS,
+        step=1,
+        value=(
+            _selected_pcr.gc_max_attempts
+            if _selected_pcr and _selected_pcr.gc_max_attempts is not None
+            else 8
+        ),
+        label=f"Intentos de aceptación por composición (1 a {PCR_MAXIMUM_GC_ATTEMPTS})",
+    )
+    pcr_gc_curve_editor = mo.ui.data_editor(
+        gc_curve_editor_rows(_selected_pcr),
+        label=(
+            "Curva de composición: eficiencia relativa por fracción de GC, en tramos"
+            " lineales. Los dos nudos neutros son el valor de omisión"
+        ),
+        pagination=False,
+    )
+    pcr_efficiency_classes_editor = mo.ui.data_editor(
+        efficiency_class_editor_rows(_selected_pcr),
+        label=(
+            f"Clases de eficiencia (opcionales, como mucho"
+            f" {PCR_MAXIMUM_EFFICIENCY_CLASSES}; sus pesos suman 1)"
+        ),
         pagination=False,
     )
     population_snvs_mode_control = mo.ui.dropdown(
@@ -527,6 +635,15 @@ def _(
         stutter_motif_rates_editor,
         stutter_steps_editor,
         stutter_locus_rates_editor,
+        library_preparation_control,
+        pcr_duplicate_fraction_control,
+        pcr_cycles_control,
+        pcr_efficiency_control,
+        pcr_early_cycles_control,
+        pcr_max_family_size_control,
+        pcr_gc_max_attempts_control,
+        pcr_gc_curve_editor,
+        pcr_efficiency_classes_editor,
         vcf_output_mode_control,
         read_fasta_headers_button,
     )
@@ -708,6 +825,16 @@ def _(
     stutter_motif_rates_editor,
     stutter_steps_editor,
     stutter_locus_rates_editor,
+    pcr_from_editor_rows,
+    library_preparation_control,
+    pcr_duplicate_fraction_control,
+    pcr_cycles_control,
+    pcr_efficiency_control,
+    pcr_early_cycles_control,
+    pcr_max_family_size_control,
+    pcr_gc_max_attempts_control,
+    pcr_gc_curve_editor,
+    pcr_efficiency_classes_editor,
     editor_integer,
     fasta_control,
     fasta_browser,
@@ -869,6 +996,25 @@ def _(
                     stutter_motif_rates_editor.value,
                     stutter_steps_editor.value,
                     stutter_locus_rates_editor.value,
+                ),
+                # La preparación sin amplificar **no se escribe**: es el valor
+                # de omisión, y escribirla cambiaría los bytes de todo
+                # documento ya publicado sin cambiar nada del resultado.
+                library_preparation=(
+                    str(library_preparation_control.value)
+                    if str(library_preparation_control.value) == "pcr"
+                    else None
+                ),
+                pcr=pcr_from_editor_rows(
+                    str(library_preparation_control.value),
+                    str(pcr_duplicate_fraction_control.value),
+                    int(pcr_cycles_control.value),
+                    str(pcr_efficiency_control.value),
+                    int(pcr_early_cycles_control.value),
+                    int(pcr_max_family_size_control.value),
+                    int(pcr_gc_max_attempts_control.value),
+                    pcr_gc_curve_editor.value,
+                    pcr_efficiency_classes_editor.value,
                 ),
             )
         )
@@ -1672,6 +1818,17 @@ def _(
     stutter_motif_rates_editor,
     stutter_steps_editor,
     stutter_locus_rates_editor,
+    pcr_panel,
+    pcr_mean_pairs_per_molecule,
+    library_preparation_control,
+    pcr_duplicate_fraction_control,
+    pcr_cycles_control,
+    pcr_efficiency_control,
+    pcr_early_cycles_control,
+    pcr_max_family_size_control,
+    pcr_gc_max_attempts_control,
+    pcr_gc_curve_editor,
+    pcr_efficiency_classes_editor,
     output_directory_control,
     output_name_control,
     output_parent_directory_browser,
@@ -1967,6 +2124,22 @@ def _(
             ),
         ]
     )
+    # La `m` derivada, mostrada junto a la fracción que el usuario declara.
+    # Se calcula con **el mismo método** que Rust —bisección sobre [0, 64] con
+    # 64 iteraciones fijas y retorno anticipado exacto para la fracción cero—,
+    # y una prueba compara este número con el que la configuración efectiva
+    # publica para la misma fracción.
+    _derived_mean_pairs = pcr_mean_pairs_per_molecule(
+        str(pcr_duplicate_fraction_control.value)
+    )
+    _derived_mean_pairs_view = mo.ui.text(
+        value=(
+            "" if _derived_mean_pairs is None else repr(_derived_mean_pairs)
+        ),
+        label="Parejas por molécula derivadas de la fracción declarada (m)",
+        disabled=True,
+        full_width=True,
+    )
     populations_panel = mo.vstack(
         [
             mo.md("## Poblaciones"),
@@ -2195,6 +2368,19 @@ def _(
                 stutter_motif_rates_editor,
                 stutter_steps_editor,
                 stutter_locus_rates_editor,
+            ),
+            "Preparación PCR": pcr_panel(
+                mo,
+                library_preparation_control,
+                pcr_duplicate_fraction_control,
+                _derived_mean_pairs_view,
+                pcr_cycles_control,
+                pcr_efficiency_control,
+                pcr_early_cycles_control,
+                pcr_max_family_size_control,
+                pcr_gc_max_attempts_control,
+                pcr_gc_curve_editor,
+                pcr_efficiency_classes_editor,
             ),
             "Poblaciones": populations_panel,
             "Evolución": unavailable("F7"),

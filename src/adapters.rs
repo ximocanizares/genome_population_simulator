@@ -7,13 +7,14 @@ use toml::de::{DeTable, DeValue};
 
 use crate::configuration::{
     AdmittedToml, ConfigKind, DeclaredCompositionValue, DeclaredDirectEvent,
-    DeclaredF5GeneralConfig, DeclaredF5SamplingOverride, DeclaredF5Scenario,
-    DeclaredF5Subpopulation, DeclaredF5Target, DeclaredGeneralConfig, DeclaredInitialPopulation,
-    DeclaredNumber, DeclaredPopulationSnvs, DeclaredPopulationSnvsGeneration,
-    DeclaredPopulationSnvsPopulation, DeclaredPopulationSnvsRegion, DeclaredReducedReference,
-    DeclaredReductionTarget, DeclaredReference, DeclaredReferenceSource, DeclaredRepeatAdmission,
-    DeclaredRepeatAllele, DeclaredRepeatInterruption, DeclaredRepeatLocus, DeclaredSequence,
-    DeclaredStutter, DeclaredStutterLocusRate, DeclaredStutterMotifRate, DeclaredStutterStep,
+    DeclaredEfficiencyClass, DeclaredF5GeneralConfig, DeclaredF5SamplingOverride,
+    DeclaredF5Scenario, DeclaredF5Subpopulation, DeclaredF5Target, DeclaredGcCurveKnot,
+    DeclaredGeneralConfig, DeclaredInitialPopulation, DeclaredNumber, DeclaredPcr,
+    DeclaredPopulationSnvs, DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
+    DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
+    DeclaredReference, DeclaredReferenceSource, DeclaredRepeatAdmission, DeclaredRepeatAllele,
+    DeclaredRepeatInterruption, DeclaredRepeatLocus, DeclaredSequence, DeclaredStutter,
+    DeclaredStutterLocusRate, DeclaredStutterMotifRate, DeclaredStutterStep,
     DeclaredTechnicalEvent, DeclaredTechnicalEventTarget, DeclaredTechnicalLibrary,
     DeclaredVcfOutput, ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
 };
@@ -971,6 +972,11 @@ fn parse_technical_event(
     // igual que para el esquema publicado de esa versión: si el lector la
     // admitiera y el esquema no, los dos jueces dirían cosas distintas del
     // mismo fichero.
+    // La preparación amplificada y el tartamudeo nacen en el mismo documento
+    // que puede declarar microsatélites. En uno anterior sus claves son
+    // desconocidas, exactamente igual que para el esquema publicado de esa
+    // versión: si el lector las admitiera y el esquema no, los dos jueces
+    // dirían cosas distintas del mismo fichero.
     let known: &[&str] = if declares_repeats {
         &[
             "event_id",
@@ -984,6 +990,8 @@ fn parse_technical_event(
             "contamination_max_percent",
             "contamination_recipient_ids",
             "stutter",
+            "library_preparation",
+            "pcr",
             "libraries",
         ]
     } else {
@@ -1089,7 +1097,86 @@ fn parse_technical_event(
         contamination_max_percent: optional_number(admitted, event, "contamination_max_percent")?,
         contamination_recipient_ids,
         stutter: parse_stutter(admitted, event)?,
+        library_preparation: optional_located_string(admitted, event, "library_preparation")?,
+        pcr: parse_pcr(admitted, event)?,
         libraries,
+    }))
+}
+
+/// Lee `[technical_event.pcr]`.
+///
+/// La tabla **no** admite claves desconocidas. Los tres parámetros
+/// obligatorios se exigen aquí, sin valor por omisión, porque un valor por
+/// omisión para la fracción de duplicados afirmaría una calibración que nadie
+/// ha hecho.
+fn parse_pcr(
+    admitted: &AdmittedToml,
+    event: &DeTable<'_>,
+) -> Result<Option<DeclaredPcr>, Diagnostic> {
+    let Some(table) = optional_table(admitted, event, "pcr")? else {
+        return Ok(None);
+    };
+    check_unknown(
+        admitted,
+        table,
+        &[
+            "duplicate_fraction",
+            "cycles",
+            "efficiency",
+            "early_cycles",
+            "max_family_size",
+            "gc_max_attempts",
+            "gc_relative_efficiency",
+            "efficiency_classes",
+        ],
+    )?;
+    let gc_relative_efficiency = optional_array(admitted, table, "gc_relative_efficiency")?
+        .unwrap_or_default()
+        .iter()
+        .map(|value| {
+            let entry = value.get_ref().as_table().ok_or_else(|| {
+                wrong_type(
+                    admitted,
+                    "technical_event.pcr.gc_relative_efficiency",
+                    value,
+                    "table",
+                )
+            })?;
+            check_unknown(admitted, entry, &["gc_fraction", "relative_efficiency"])?;
+            Ok(DeclaredGcCurveKnot {
+                gc_fraction: required_number(admitted, entry, "gc_fraction")?,
+                relative_efficiency: required_number(admitted, entry, "relative_efficiency")?,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    let efficiency_classes = optional_array(admitted, table, "efficiency_classes")?
+        .unwrap_or_default()
+        .iter()
+        .map(|value| {
+            let entry = value.get_ref().as_table().ok_or_else(|| {
+                wrong_type(
+                    admitted,
+                    "technical_event.pcr.efficiency_classes",
+                    value,
+                    "table",
+                )
+            })?;
+            check_unknown(admitted, entry, &["efficiency", "weight"])?;
+            Ok(DeclaredEfficiencyClass {
+                efficiency: required_number(admitted, entry, "efficiency")?,
+                weight: required_number(admitted, entry, "weight")?,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    Ok(Some(DeclaredPcr {
+        duplicate_fraction: required_number(admitted, table, "duplicate_fraction")?,
+        cycles: required_u64(admitted, table, "cycles")?,
+        efficiency: required_number(admitted, table, "efficiency")?,
+        early_cycles: optional_located_u64(admitted, table, "early_cycles")?,
+        max_family_size: optional_located_u64(admitted, table, "max_family_size")?,
+        gc_max_attempts: optional_located_u64(admitted, table, "gc_max_attempts")?,
+        gc_relative_efficiency,
+        efficiency_classes,
     }))
 }
 

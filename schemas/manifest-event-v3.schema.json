@@ -43,7 +43,11 @@
    "const": "illumina-short-read-pe-v1"
   },
   "rng_catalog": {
-   "const": "f4-technical-v4"
+   "enum": [
+    "f4-technical-v3",
+    "f4-technical-v4",
+    "f4-technical-v5"
+   ]
   },
   "id_catalog": {
    "$ref": "#/$defs/id_catalog"
@@ -245,6 +249,127 @@
      ]
     }
    }
+  },
+  {
+   "$comment": "La amplificación estrena el v5 y manda sobre el v4.",
+   "if": {
+    "properties": {
+     "artifacts": {
+      "properties": {
+       "pcr": {
+        "required": [
+         "applicable"
+        ],
+        "properties": {
+         "applicable": {
+          "const": true
+         }
+        }
+       }
+      },
+      "required": [
+       "pcr"
+      ]
+     }
+    },
+    "required": [
+     "artifacts"
+    ]
+   },
+   "then": {
+    "properties": {
+     "rng_catalog": {
+      "const": "f4-technical-v5"
+     }
+    }
+   }
+  },
+  {
+   "$comment": "Y al revés: el v5 solo lo publica un evento que amplifica.",
+   "if": {
+    "properties": {
+     "rng_catalog": {
+      "const": "f4-technical-v5"
+     }
+    },
+    "required": [
+     "rng_catalog"
+    ]
+   },
+   "then": {
+    "properties": {
+     "artifacts": {
+      "properties": {
+       "pcr": {
+        "required": [
+         "applicable"
+        ],
+        "properties": {
+         "applicable": {
+          "const": true
+         }
+        }
+       }
+      },
+      "required": [
+       "pcr"
+      ]
+     }
+    },
+    "required": [
+     "artifacts"
+    ]
+   }
+  },
+  {
+   "$comment": "La sección de tartamudeo exige un catálogo con esa etapa y la versión 3 del documento.",
+   "if": {
+    "properties": {
+     "artifacts": {
+      "required": [
+       "stutter"
+      ]
+     }
+    },
+    "required": [
+     "artifacts"
+    ]
+   },
+   "then": {
+    "properties": {
+     "rng_catalog": {
+      "enum": [
+       "f4-technical-v4",
+       "f4-technical-v5"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "$comment": "El v4 sigue significando exactamente tartamudeo sin amplificación.",
+   "if": {
+    "properties": {
+     "rng_catalog": {
+      "const": "f4-technical-v4"
+     }
+    },
+    "required": [
+     "rng_catalog"
+    ]
+   },
+   "then": {
+    "properties": {
+     "artifacts": {
+      "required": [
+       "stutter"
+      ]
+     }
+    },
+    "required": [
+     "artifacts"
+    ]
+   }
   }
  ],
  "$defs": {
@@ -371,51 +496,103 @@
    ]
   },
   "profile": {
-   "type": "object",
-   "additionalProperties": false,
-   "required": [
-    "id",
-    "resource_path",
-    "sha256",
-    "preparation",
-    "read_length",
-    "quality"
-   ],
-   "properties": {
-    "id": {
-     "const": "gps-hiseqx-pcrfree-pe150-v1"
-    },
-    "read_length": {
-     "type": "integer",
-     "minimum": 1,
-     "maximum": 150
-    },
-    "resource_path": {
-     "const": "resources/f4/gps-hiseqx-pcrfree-pe150-v1.json"
-    },
-    "sha256": {
-     "const": "3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea"
-    },
-    "preparation": {
-     "const": "pcr_free"
-    },
-    "quality": {
+   "$comment": "Los dos perfiles hermanos, cada uno con su terna cerrada. Con enum sueltos un documento podría publicar el identificador de uno con la huella del otro.",
+   "oneOf": [
+    {
      "type": "object",
      "additionalProperties": false,
      "required": [
-      "acgt_phred",
-      "n_phred"
+      "id",
+      "resource_path",
+      "sha256",
+      "preparation",
+      "read_length",
+      "quality"
      ],
      "properties": {
-      "acgt_phred": {
-       "const": 40
+      "id": {
+       "const": "gps-hiseqx-pcrfree-pe150-v1"
       },
-      "n_phred": {
-       "const": 0
+      "read_length": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 150
+      },
+      "resource_path": {
+       "const": "resources/f4/gps-hiseqx-pcrfree-pe150-v1.json"
+      },
+      "sha256": {
+       "const": "3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea"
+      },
+      "preparation": {
+       "const": "pcr_free"
+      },
+      "quality": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "acgt_phred",
+        "n_phred"
+       ],
+       "properties": {
+        "acgt_phred": {
+         "const": 40
+        },
+        "n_phred": {
+         "const": 0
+        }
+       }
+      }
+     }
+    },
+    {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "id",
+      "resource_path",
+      "sha256",
+      "preparation",
+      "read_length",
+      "quality"
+     ],
+     "properties": {
+      "id": {
+       "const": "gps-hiseqx-pcr-pe150-v1"
+      },
+      "read_length": {
+       "type": "integer",
+       "minimum": 1,
+       "maximum": 150
+      },
+      "resource_path": {
+       "const": "resources/f4/gps-hiseqx-pcr-pe150-v1.json"
+      },
+      "sha256": {
+       "const": "83b00fb8d084df8f6aef0464fd2b0260cfefe3f89fc523b135da6bbf6595a03c"
+      },
+      "preparation": {
+       "const": "pcr"
+      },
+      "quality": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "acgt_phred",
+        "n_phred"
+       ],
+       "properties": {
+        "acgt_phred": {
+         "const": 40
+        },
+        "n_phred": {
+         "const": 0
+        }
+       }
       }
      }
     }
-   }
+   ]
   },
   "selected_individual": {
    "type": "object",
@@ -810,8 +987,7 @@
     "pcr",
     "optical_duplicates",
     "gc",
-    "adapters",
-    "stutter"
+    "adapters"
    ],
    "properties": {
     "chimera": {
@@ -861,16 +1037,252 @@
      }
     },
     "pcr": {
-     "type": "object",
-     "additionalProperties": false,
-     "required": [
-      "applicable"
-     ],
-     "properties": {
-      "applicable": {
-       "const": false
+     "oneOf": [
+      {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "applicable"
+       ],
+       "properties": {
+        "applicable": {
+         "const": false
+        }
+       }
+      },
+      {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "applicable",
+        "algorithm",
+        "rng_catalog",
+        "cycles",
+        "efficiency",
+        "early_cycles",
+        "declared_duplicate_fraction",
+        "expected_duplicate_fraction",
+        "mean_pairs_per_molecule",
+        "duplicate_fraction_inversion",
+        "max_family_size",
+        "gc_max_attempts",
+        "gc_relative_efficiency",
+        "efficiency_classes",
+        "families",
+        "pairs",
+        "duplicate_pairs",
+        "realized_duplicate_fraction",
+        "family_size_histogram",
+        "families_truncated_at_end",
+        "gc_attempts_total",
+        "gc_attempts_exhausted_families",
+        "unique_molecule_coverage_x",
+        "resource_bound"
+       ],
+       "properties": {
+        "applicable": {
+         "const": true
+        },
+        "algorithm": {
+         "const": "pcr-amplification-v1"
+        },
+        "rng_catalog": {
+         "const": "f4-technical-v5"
+        },
+        "cycles": {
+         "type": "integer",
+         "minimum": 1,
+         "maximum": 30
+        },
+        "efficiency": {
+         "type": "number",
+         "exclusiveMinimum": 0,
+         "maximum": 1
+        },
+        "early_cycles": {
+         "type": "integer",
+         "minimum": 0,
+         "maximum": 6
+        },
+        "declared_duplicate_fraction": {
+         "type": "number",
+         "minimum": 0,
+         "exclusiveMaximum": 1
+        },
+        "expected_duplicate_fraction": {
+         "type": "number",
+         "minimum": 0,
+         "exclusiveMaximum": 1
+        },
+        "mean_pairs_per_molecule": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 64
+        },
+        "duplicate_fraction_inversion": {
+         "type": "object",
+         "additionalProperties": false,
+         "required": [
+          "method",
+          "iterations"
+         ],
+         "properties": {
+          "method": {
+           "const": "bisection-64-fixed-v1"
+          },
+          "iterations": {
+           "type": "integer",
+           "minimum": 0,
+           "maximum": 64
+          }
+         }
+        },
+        "max_family_size": {
+         "type": "integer",
+         "minimum": 1,
+         "maximum": 256
+        },
+        "gc_max_attempts": {
+         "type": "integer",
+         "minimum": 1,
+         "maximum": 16
+        },
+        "gc_relative_efficiency": {
+         "type": "array",
+         "minItems": 2,
+         "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+           "gc_fraction",
+           "relative_efficiency"
+          ],
+          "properties": {
+           "gc_fraction": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+           },
+           "relative_efficiency": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+           }
+          }
+         }
+        },
+        "efficiency_classes": {
+         "type": "array",
+         "minItems": 1,
+         "maxItems": 4,
+         "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+           "efficiency",
+           "weight"
+          ],
+          "properties": {
+           "efficiency": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+           },
+           "weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+           }
+          }
+         },
+         "description": "Cuando se declaran clases de eficiencia, la eficiencia escalar de arriba DEJA DE INTERVENIR en el modelo: cada familia usa la de su clase. La escalar sigue siendo obligatoria y se publica, pero quien declare eficiencia 0,9 y clases 0,95 y 0,5 verá publicado un 0,9 que no cambia nada."
+        },
+        "families": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "pairs": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "duplicate_pairs": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "realized_duplicate_fraction": {
+         "type": "number",
+         "minimum": 0,
+         "exclusiveMaximum": 1
+        },
+        "family_size_histogram": {
+         "type": "array",
+         "description": "Familias por tamaño REALMENTE emitido. La suma ponderada por el tamaño vale exactamente el número de parejas, que es lo que impide que una celda cuente familias en vez de parejas.",
+         "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+           "family_size",
+           "families"
+          ],
+          "properties": {
+           "family_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 256
+           },
+           "families": {
+            "type": "integer",
+            "minimum": 1
+           }
+          }
+         }
+        },
+        "families_truncated_at_end": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "gc_attempts_total": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "gc_attempts_exhausted_families": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "unique_molecule_coverage_x": {
+         "type": "number",
+         "minimum": 0
+        },
+        "resource_bound": {
+         "type": "object",
+         "additionalProperties": false,
+         "description": "Cota PUBLICADA, no impuesta, y CALCULADA sin ejecutar: la fase de secuenciación nunca ha tenido control de recursos, de modo que imponer aquí un rechazo estrenaría algo que no le corresponde.",
+         "required": [
+          "operation_units",
+          "memory_bytes",
+          "regeneration_passes",
+          "measured"
+         ],
+         "properties": {
+          "operation_units": {
+           "type": "integer",
+           "minimum": 0
+          },
+          "memory_bytes": {
+           "type": "integer",
+           "minimum": 0
+          },
+          "regeneration_passes": {
+           "const": 2
+          },
+          "measured": {
+           "const": false
+          }
+         }
+        }
+       }
       }
-     }
+     ]
     },
     "optical_duplicates": {
      "type": "object",
@@ -892,7 +1304,10 @@
      ],
      "properties": {
       "mode": {
-       "const": "neutral"
+       "enum": [
+        "neutral",
+        "curve"
+       ]
       }
      }
     },
@@ -1132,7 +1547,40 @@
       }
      }
     }
-   }
+   },
+   "allOf": [
+    {
+     "$comment": "El modo curve solo existe con amplificación: publicarlo sin ella afirmaría un sesgo por composición que nadie aplicó.",
+     "if": {
+      "properties": {
+       "gc": {
+        "properties": {
+         "mode": {
+          "const": "curve"
+         }
+        }
+       }
+      },
+      "required": [
+       "gc"
+      ]
+     },
+     "then": {
+      "properties": {
+       "pcr": {
+        "required": [
+         "applicable"
+        ],
+        "properties": {
+         "applicable": {
+          "const": true
+         }
+        }
+       }
+      }
+     }
+    }
+   ]
   },
   "biological_contamination_recipient": {
    "type": "object",

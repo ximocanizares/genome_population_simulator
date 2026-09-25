@@ -340,7 +340,46 @@ pub struct DeclaredTechnicalEvent {
     /// declarados. Ausente significa **desactivado**, que es lo que hace que
     /// una ejecución anterior a este trabajo publique los mismos bytes.
     pub stutter: Option<DeclaredStutter>,
+    /// Preparación de biblioteca declarada. Ausente significa `pcr_free`, que
+    /// es la única que existía y la que conserva los bytes publicados.
+    pub library_preparation: Option<Located<String>>,
+    /// Tabla de la amplificación. Solo se admite con preparación `pcr`, y con
+    /// ella es **obligatoria**.
+    pub pcr: Option<DeclaredPcr>,
     pub libraries: Vec<DeclaredTechnicalLibrary>,
+}
+
+/// Amplificación declarada por el autor del escenario.
+///
+/// Los tres primeros parámetros son **obligatorios y sin valor por omisión**:
+/// la fracción de duplicados depende de la masa de ADN de entrada, del número
+/// de ciclos y del laboratorio, de modo que ningún valor por omisión sería
+/// defendible. La mejor fuente para ese número son los informes de calidad del
+/// propio laboratorio, no una media de genomas humanos ajenos.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredPcr {
+    pub duplicate_fraction: DeclaredNumber,
+    pub cycles: Located<u64>,
+    pub efficiency: DeclaredNumber,
+    pub early_cycles: Option<Located<u64>>,
+    pub max_family_size: Option<Located<u64>>,
+    pub gc_max_attempts: Option<Located<u64>>,
+    pub gc_relative_efficiency: Vec<DeclaredGcCurveKnot>,
+    pub efficiency_classes: Vec<DeclaredEfficiencyClass>,
+}
+
+/// Un nudo de la curva de composición: fracción de GC y eficiencia relativa.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredGcCurveKnot {
+    pub gc_fraction: DeclaredNumber,
+    pub relative_efficiency: DeclaredNumber,
+}
+
+/// Una clase de eficiencia declarada, con su peso relativo.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredEfficiencyClass {
+    pub efficiency: DeclaredNumber,
+    pub weight: DeclaredNumber,
 }
 
 /// Tartamudeo declarado por el autor del escenario.

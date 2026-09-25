@@ -160,6 +160,108 @@ def repeats_panel(
     )
 
 
+def pcr_panel(
+    mo,
+    library_preparation_control,
+    pcr_duplicate_fraction_control,
+    pcr_derived_mean_pairs,
+    pcr_cycles_control,
+    pcr_efficiency_control,
+    pcr_early_cycles_control,
+    pcr_max_family_size_control,
+    pcr_gc_max_attempts_control,
+    pcr_gc_curve_editor,
+    pcr_efficiency_classes_editor,
+):
+    """Render the amplified-preparation controls; Rust stays the authority.
+
+    Lo importante de este panel es lo que **advierte**: la fracción que el
+    usuario declara es la esperada de una biblioteca homogénea, y la realizada
+    será mayor. Sin ese aviso, quien compare las dos no las verá cuadrar nunca
+    y creerá que el simulador se equivoca.
+
+    La `m` derivada se muestra junto a la fracción declarada porque es el
+    parámetro que de verdad entra en el modelo: enseñarla evita que el usuario
+    pida una fracción sin ver qué está pidiendo.
+    """
+    return mo.vstack(
+        [
+            mo.md("## Preparación de biblioteca"),
+            library_preparation_control,
+            mo.callout(
+                "Sin PCR, cada fragmento da una pareja. Con PCR, cada molécula "
+                "da una FAMILIA de parejas: de ahí salen los duplicados, la "
+                "sobrerrepresentación de unas moléculas frente a otras y el "
+                "sesgo por composición de bases.",
+                kind="info",
+            ),
+            mo.md("### Fracción de duplicados"),
+            pcr_duplicate_fraction_control,
+            pcr_derived_mean_pairs,
+            mo.callout(
+                "Es la fracción ESPERADA de una biblioteca homogénea, no la "
+                "realizada. La realizada es MAYOR por tres motivos que se suman: "
+                "las clases de eficiencia, la curva de composición y la "
+                "desigualdad de los primeros ciclos, que actúa ya por omisión. "
+                "El manifiesto publica la realizada aparte. Y tampoco es la "
+                "fracción que marca una herramienta de análisis contando parejas "
+                "que caen en el mismo sitio: esa incluye además las copias de la "
+                "química de agrupación, que no son PCR.",
+                kind="warn",
+            ),
+            mo.callout(
+                "No hay valor por omisión, y no es un descuido: depende de la "
+                "masa de ADN de entrada, del número de ciclos y del laboratorio. "
+                "La mejor fuente son los informes de calidad del propio "
+                "laboratorio, no una media de genomas ajenos.",
+                kind="info",
+            ),
+            mo.md("### Ciclos y eficiencia"),
+            pcr_cycles_control,
+            pcr_efficiency_control,
+            pcr_early_cycles_control,
+            mo.callout(
+                "Los ciclos explícitos son los que se simulan uno a uno para "
+                "capturar la desigualdad de los primeros; los posteriores entran "
+                "como un factor determinista. Con pocos ciclos explícitos ya se "
+                "alcanza casi toda la desigualdad.",
+                kind="info",
+            ),
+            mo.md("### Topes de la familia y de la composición"),
+            pcr_max_family_size_control,
+            pcr_gc_max_attempts_control,
+            mo.callout(
+                "Agotado el tope de intentos se acepta el último y se CUENTA: el "
+                "manifiesto publica cuántas veces ocurrió, para que el usuario "
+                "juzgue si el sesgo le afecta.",
+                kind="info",
+            ),
+            mo.md("### Curva de composición"),
+            pcr_gc_curve_editor,
+            mo.callout(
+                "Eficiencia relativa por fracción de GC, en tramos lineales. La "
+                "curva neutra —eficiencia 1 en todo el intervalo— es el valor de "
+                "omisión y no consume aleatoriedad. Ninguna curva calibrada se "
+                "incorpora.",
+                kind="info",
+            ),
+            mo.md("### Clases de eficiencia"),
+            pcr_efficiency_classes_editor,
+            mo.callout(
+                "Opcionales y sin valores por omisión. Si se declaran, sus pesos "
+                "tienen que sumar 1 dentro de la tolerancia de normalización.",
+                kind="info",
+            ),
+            mo.callout(
+                "OJO: si declara clases, la eficiencia por ciclo de arriba DEJA DE "
+                "INTERVENIR. Cada familia usa la de su clase. La escalar sigue "
+                "siendo obligatoria y se publica, pero ya no cambia nada.",
+                kind="warn",
+            ),
+        ]
+    )
+
+
 def stutter_panel(
     mo,
     stutter_mode_control,

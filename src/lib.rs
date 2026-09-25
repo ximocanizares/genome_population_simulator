@@ -57,6 +57,7 @@ pub mod initial_individual_materialization;
 pub mod integrity;
 pub mod materialization;
 pub mod paired_end;
+pub mod pcr_amplification;
 pub mod population_snvs;
 pub mod publication;
 pub mod randomness;

@@ -260,6 +260,11 @@ pub struct ManifestEventLink {
     /// documento de evento. No transporta procedencia por pareja.
     pub chimera_rate: f64,
     pub realized_chimera_pairs: u64,
+    /// Perfil incorporado que usó el evento, con su huella. El inventario del
+    /// manifiesto general repite lo que el manifiesto del evento ya publicó,
+    /// en vez de deducirlo otra vez.
+    pub profile_id: &'static str,
+    pub profile_sha256: &'static str,
     /// Catálogo del que salieron **las decisiones de este evento**. El
     /// inventario del manifiesto general repite el mismo nombre que el
     /// manifiesto del evento, en vez de deducirlo otra vez.
@@ -864,17 +869,22 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
         EffectiveTechnicalEventTarget::ReadCount(value) => json!({"read_count": value}),
     };
     let stutter_active = config.stutter_plan().is_active();
+    // **Sin `expect` y sin recalcular la huella.** La escritura del documento
+    // no puede entrar en pánico porque el recurso esté alterado —eso lo caza la
+    // admisión, que sí lo comprueba—, y volver a digerir el recurso en cada
+    // llamada era trabajo gratis: los hechos salen de las constantes.
+    let profile = crate::technical_profile::f4_profile_facts(event.preparation());
     let mut document = json!({
         "event_id": event.event_id().as_str(),
         "individual_ids": event.individual_ids().iter().map(|id| id.as_str()).collect::<Vec<_>>(),
         "profile": {
-            "id": event.profile(),
-            "resource_path": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
-            "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
-            "preparation": "pcr_free",
+            "id": profile.id(),
+            "resource_path": profile.resource_path(),
+            "sha256": profile.sha256(),
+            "preparation": profile.preparation().as_str(),
             "insert_length": {
-                "minimum_bases": 250,
-                "maximum_bases": 450,
+                "minimum_bases": profile.insert_length().minimum_bases(),
+                "maximum_bases": profile.insert_length().maximum_bases(),
             },
         },
         "read_length": event.read_length(),
@@ -891,11 +901,18 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
             "index_hopping": {
                 "rate": event.index_hopping_rate(),
             },
-            "pcr": {"applicable": event.pcr_duplicates_applicable()},
+            "pcr": event.pcr().map_or_else(
+                || json!({"applicable": event.pcr_duplicates_applicable()}),
+                crate::pcr_amplification::effective_settings_document,
+            ),
             "optical_duplicates": {
                 "realized_pairs": event.realized_optical_duplicate_pairs(),
             },
-            "gc": {"mode": "neutral"},
+            "gc": {
+                "mode": event
+                    .pcr()
+                    .map_or("neutral", crate::pcr_amplification::PcrSettings::gc_mode),
+            },
             "adapters": {"enabled": false},
         },
         "biological_contamination": {
@@ -905,7 +922,12 @@ fn technical_event_json(config: &EffectiveConfig, event: &EffectiveTechnicalEven
             },
             "recipient_ids": resolved_contamination_recipients(event),
         },
-        "rng_catalog": if stutter_active {
+        // El catálogo es el **más alto** cuya etapa abre este evento. La
+        // amplificación estrena el v5 y no desplaza ninguna decisión: las
+        // trece heredadas siguen en el v3 y las dos del tartamudeo en el v4.
+        "rng_catalog": if event.pcr().is_some() {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+        } else if stutter_active {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
         } else {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
@@ -983,17 +1005,23 @@ fn f4_id_catalog_value() -> Value {
     })
 }
 
-fn f4_technical_profile_object() -> Value {
-    json!({
-        "id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
-        "resource_path": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
-        "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
-        "preparation": "pcr_free",
+/// Bloque `profile` que corresponde a un perfil incorporado.
+///
+/// Se construye **desde el perfil resuelto**, no desde literales repetidos:
+/// así la ruta, la huella y la preparación que el documento publica son las
+/// mismas que el validador del recurso ya comprobó, y no pueden separarse.
+fn f4_technical_profile_object(profile_id: &str) -> Option<Value> {
+    let profile = crate::technical_profile::f4_profile_facts_by_id(profile_id)?;
+    Some(json!({
+        "id": profile.id(),
+        "resource_path": profile.resource_path(),
+        "sha256": profile.sha256(),
+        "preparation": profile.preparation().as_str(),
         "insert_length": {
-            "minimum_bases": 250,
-            "maximum_bases": 450,
+            "minimum_bases": profile.insert_length().minimum_bases(),
+            "maximum_bases": profile.insert_length().maximum_bases(),
         },
-    })
+    }))
 }
 
 pub fn effective_config_document_with_population_snvs(
@@ -1080,8 +1108,8 @@ fn technical_event_manifest_json(
         "event_id": link.event_id,
         "effective_config": manifest.effective_config.map(ArtifactRecord::to_json),
         "profile": {
-            "id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
-            "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
+            "id": link.profile_id,
+            "sha256": link.profile_sha256,
         },
         "rng_catalog": link.rng_catalog,
         "id_catalog": f4_id_catalog_value(),
@@ -4868,15 +4896,22 @@ fn validate_manifest_technical_events(
         ];
         validate_closed_object(object, &FIELDS, "technical_events[]", path)?;
         if required_non_empty_text(object, "event_id", path)? != event_id
-            || object.get("profile")
-                != Some(
-                    &json!({"id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1, "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256}),
-                )
+            || !matches!(
+                object.get("profile"),
+                Some(profile) if *profile == json!({
+                    "id": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
+                    "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
+                }) || *profile == json!({
+                    "id": crate::technical_profile::GPS_HISEQX_PCR_PE150_V1,
+                    "sha256": crate::technical_profile::GPS_HISEQX_PCR_PE150_SHA256,
+                })
+            )
             || !matches!(
                 object.get("rng_catalog").and_then(Value::as_str),
                 Some(
                     crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
                         | crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
+                        | crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
                 )
             )
             || object.get("id_catalog") != Some(&f4_id_catalog_value())
@@ -6119,6 +6154,118 @@ fn validate_effective_stutter(
     Ok(())
 }
 
+/// Comprueba la sección de amplificación de la configuración efectiva.
+///
+/// Lo que de verdad discrimina aquí es que la **derivación** viaje con los
+/// valores: una `m` publicada sin el método ni las iteraciones que la
+/// produjeron no se distingue de una inventada, y quien quiera repetir la
+/// ejecución en otra máquina no tendría con qué comprobarla. Se comprueba
+/// además que la `m` publicada reproduzca de verdad la fracción declarada, que
+/// es lo que convierte la ida y vuelta en una afirmación verificable.
+fn validate_effective_pcr(
+    pcr: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    validate_effective_closed_object(
+        pcr,
+        &[
+            "applicable",
+            "algorithm",
+            "rng_catalog",
+            "cycles",
+            "efficiency",
+            "early_cycles",
+            "declared_duplicate_fraction",
+            "expected_duplicate_fraction",
+            "mean_pairs_per_molecule",
+            "duplicate_fraction_inversion",
+            "max_family_size",
+            "gc_max_attempts",
+            "gc_relative_efficiency",
+            "efficiency_classes",
+        ],
+        "technical_event.artifacts.pcr",
+        path,
+    )?;
+    if effective_non_empty_text(pcr, "algorithm", path)?
+        != crate::pcr_amplification::PCR_AMPLIFICATION_ALGORITHM
+        || effective_non_empty_text(pcr, "rng_catalog", path)?
+            != crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+    {
+        return Err(effective_error(path, "algoritmo de amplificación inválido"));
+    }
+    let inversion = effective_object(pcr, "duplicate_fraction_inversion", path)?;
+    validate_effective_closed_object(
+        inversion,
+        &["method", "iterations"],
+        "technical_event.artifacts.pcr.duplicate_fraction_inversion",
+        path,
+    )?;
+    if effective_non_empty_text(inversion, "method", path)?
+        != crate::pcr_amplification::PCR_DUPLICATE_FRACTION_INVERSION_METHOD
+    {
+        return Err(effective_error(
+            path,
+            "método de inversión de la fracción de duplicados inválido",
+        ));
+    }
+    let declared = pcr
+        .get("declared_duplicate_fraction")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| effective_error(path, "falta la fracción de duplicados declarada"))?;
+    let mean_pairs = pcr
+        .get("mean_pairs_per_molecule")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| effective_error(path, "falta la m derivada"))?;
+    let iterations = effective_nonnegative_u64(inversion, "iterations", path)?;
+    // Con fracción cero la inversión **no itera**: devuelve cero exacto por
+    // retorno anticipado, y un residuo minúsculo cambiaría todos los FASTQ.
+    let expected_iterations = if declared == 0.0 {
+        0
+    } else {
+        u64::from(crate::pcr_amplification::PCR_DUPLICATE_FRACTION_INVERSION_ITERATIONS)
+    };
+    if iterations != expected_iterations || (declared == 0.0 && mean_pairs != 0.0) {
+        return Err(effective_error(
+            path,
+            "la inversión publicada no corresponde a la fracción declarada",
+        ));
+    }
+    let expected = pcr
+        .get("expected_duplicate_fraction")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| effective_error(path, "falta la fracción esperada"))?;
+    if expected != crate::pcr_amplification::expected_duplicate_fraction(mean_pairs) {
+        return Err(effective_error(
+            path,
+            "la fracción esperada publicada no sale de la m publicada",
+        ));
+    }
+    let classes = pcr
+        .get("efficiency_classes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| effective_error(path, "faltan las clases de eficiencia"))?;
+    if classes.is_empty()
+        || classes.len() > crate::technical_profile::PCR_MAXIMUM_EFFICIENCY_CLASSES as usize
+    {
+        return Err(effective_error(
+            path,
+            "las clases de eficiencia publicadas están fuera del contrato",
+        ));
+    }
+    let knots = pcr
+        .get("gc_relative_efficiency")
+        .and_then(Value::as_array)
+        .ok_or_else(|| effective_error(path, "falta la curva de composición"))?;
+    if knots.len() < 2 {
+        return Err(effective_error(
+            path,
+            "la curva de composición publicada necesita al menos dos nudos",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_effective_technical_event(
     effective: &serde_json::Map<String, Value>,
     initial_individual_ids: &BTreeSet<IndividualId>,
@@ -6194,12 +6341,26 @@ fn validate_effective_technical_event(
     }
     let read_length = effective_nonnegative_u64(event, "read_length", path)?;
     let profile = effective_object(event, "profile", path)?;
-    if Value::Object(profile.clone()) != f4_technical_profile_object()
+    let expected_profile = profile
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(f4_technical_profile_object);
+    if expected_profile.as_ref() != Some(&Value::Object(profile.clone()))
         || !(1..=150).contains(&read_length)
     {
         return Err(effective_error(path, "perfil técnico mínimo inválido"));
     }
-    let expected_catalog = if declares_stutter {
+    // La amplificación estrena el v5, y **manda sobre el v4**: un evento que
+    // amplifica y además tartamudea abre las dos etapas y publica el más alto.
+    let declares_pcr = effective_object(event, "artifacts", path)
+        .ok()
+        .and_then(|artifacts| artifacts.get("pcr"))
+        .and_then(Value::as_object)
+        .and_then(|pcr| pcr.get("applicable"))
+        == Some(&Value::Bool(true));
+    let expected_catalog = if declares_pcr {
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+    } else if declares_stutter {
         crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
     } else {
         crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
@@ -6315,7 +6476,22 @@ fn validate_effective_technical_event(
         ));
     }
     let pcr = effective_object(artifacts, "pcr", path)?;
-    validate_effective_closed_object(pcr, &["applicable"], "technical_event.artifacts.pcr", path)?;
+    if declares_pcr {
+        validate_effective_pcr(pcr, path)?;
+    } else {
+        validate_effective_closed_object(
+            pcr,
+            &["applicable"],
+            "technical_event.artifacts.pcr",
+            path,
+        )?;
+        if pcr.get("applicable") != Some(&Value::Bool(false)) {
+            return Err(effective_error(
+                path,
+                "artefactos de duplicación del perfil PCR-free inválidos",
+            ));
+        }
+    }
     let optical_duplicates = effective_object(artifacts, "optical_duplicates", path)?;
     validate_effective_closed_object(
         optical_duplicates,
@@ -6323,9 +6499,7 @@ fn validate_effective_technical_event(
         "technical_event.artifacts.optical_duplicates",
         path,
     )?;
-    if pcr.get("applicable") != Some(&Value::Bool(false))
-        || effective_nonnegative_u64(optical_duplicates, "realized_pairs", path)? != 0
-    {
+    if effective_nonnegative_u64(optical_duplicates, "realized_pairs", path)? != 0 {
         return Err(effective_error(
             path,
             "artefactos de duplicación del perfil PCR-free inválidos",
@@ -6340,9 +6514,15 @@ fn validate_effective_technical_event(
         "technical_event.artifacts.adapters",
         path,
     )?;
-    if gc.get("mode").and_then(Value::as_str) != Some("neutral")
-        || adapters.get("enabled") != Some(&Value::Bool(false))
-    {
+    let gc_mode = gc.get("mode").and_then(Value::as_str);
+    // El modo `curve` solo existe con amplificación: sin ella nadie declara
+    // una curva y publicarlo sería afirmar un sesgo que no se aplicó.
+    let gc_mode_valid = match gc_mode {
+        Some("neutral") => true,
+        Some("curve") => declares_pcr,
+        _ => false,
+    };
+    if !gc_mode_valid || adapters.get("enabled") != Some(&Value::Bool(false)) {
         return Err(effective_error(
             path,
             "artefactos GC o adaptadores del perfil inicial inválidos",

@@ -235,7 +235,38 @@ pub struct EventManifest<'a> {
     /// Sección del tartamudeo. `None` cuando el evento no abre la etapa
     /// `stutter`, y entonces el documento no la menciona.
     pub stutter: Option<EventManifestStutter>,
+    /// Sección de la amplificación. `None` con preparación sin PCR, y entonces
+    /// `artifacts.pcr` conserva exactamente los bytes de antes de F4.9.
+    pub pcr: Option<EventManifestPcr>,
     pub diagnostics: &'a [Diagnostic],
+}
+
+/// Lo que el manifiesto publica de la amplificación: sus parámetros efectivos
+/// y sus **recuentos agregados**, más la cota de recursos calculada.
+///
+/// Nada por pareja. Lo más fino que aparece es un tamaño de familia, que es un
+/// número y no una identidad: el manifiesto **no** publica qué parejas forman
+/// familia, y un validador puede rederivarlo desde la semilla.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EventManifestPcr {
+    pub settings: crate::pcr_amplification::PcrSettings,
+    pub report: crate::pcr_amplification::PcrReport,
+    pub bound: crate::pcr_amplification::PcrResourceBound,
+    /// Cobertura básica antes de artefactos, sumada sobre las bibliotecas. De
+    /// ella y de la fracción realizada sale la cobertura de moléculas
+    /// distintas.
+    pub basic_wgs_coverage_x: f64,
+}
+
+impl EventManifestPcr {
+    fn document(&self) -> Value {
+        crate::pcr_amplification::manifest_document(
+            &self.settings,
+            &self.report,
+            self.bound,
+            self.basic_wgs_coverage_x,
+        )
+    }
 }
 
 /// Lo que el manifiesto publica del tartamudeo: sus parámetros efectivos con su
@@ -418,9 +449,9 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
         "state": manifest.state.as_str(),
         "profile": {
             "id": manifest.event.profile(),
-            "resource_path": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
-            "sha256": crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
-            "preparation": "pcr_free",
+            "resource_path": manifest_profile_resource_path(manifest),
+            "sha256": manifest_profile_sha256(manifest),
+            "preparation": manifest.event.preparation().as_str(),
             "read_length": manifest.event.read_length(),
             "quality": {
                 "acgt_phred": manifest.event.acgt_phred(),
@@ -483,9 +514,14 @@ pub fn event_manifest_document(manifest: &EventManifest<'_>) -> Result<Value, Di
                     "pairs": count,
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
-            "pcr": {"applicable": manifest.event.pcr_duplicates_applicable()},
+            "pcr": manifest.pcr.as_ref().map_or_else(
+                || json!({"applicable": manifest.event.pcr_duplicates_applicable()}),
+                EventManifestPcr::document,
+            ),
             "optical_duplicates": {"realized_pairs": manifest.event.realized_optical_duplicate_pairs()},
-            "gc": {"mode": "neutral"},
+            "gc": {
+                "mode": manifest.pcr.as_ref().map_or("neutral", |pcr| pcr.settings.gc_mode()),
+            },
             "adapters": {"enabled": false},
         },
         "outputs": artifacts,
@@ -534,7 +570,7 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
     // tartamudeo solo cabe en la v3. Comprobarlos por separado dejaría pasar
     // un documento que dijera v3 y catálogo v3, o v2 con sección.
     let declared_version = required_string(root, "schema_version", path)?;
-    let expects_stutter = match declared_version {
+    let opens_new_stage = match declared_version {
         EVENT_MANIFEST_SCHEMA_VERSION => false,
         EVENT_MANIFEST_SCHEMA_VERSION_V3 => true,
         other => {
@@ -547,6 +583,23 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
             ));
         }
     };
+    // Las dos etapas nuevas se leen **del propio documento**, no de la versión:
+    // la v3 cabe para el tartamudeo, para la amplificación o para las dos, y
+    // cada una tiene su catálogo. Lo que la versión decide es si cabe alguna.
+    let artifacts_object =
+        required_object(required_value(root, "artifacts", path)?, "artifacts", path)?;
+    let expects_stutter = artifacts_object.contains_key("stutter");
+    let expects_pcr = artifacts_object
+        .get("pcr")
+        .and_then(Value::as_object)
+        .and_then(|pcr| pcr.get("applicable"))
+        == Some(&Value::Bool(true));
+    if (expects_stutter || expects_pcr) != opens_new_stage {
+        return Err(event_error(
+            path,
+            "la versión del documento no corresponde a las etapas que declara",
+        ));
+    }
     let event_id = parse_id::<EventId>(required_string(root, "event_id", path)?, "event", path)?;
     require_text(root, "event_type", path, TECHNICAL_SEQUENCING_EVENT_TYPE)?;
     require_text(root, "technology", path, ILLUMINA_SHORT_READ_TECHNOLOGY_V1)?;
@@ -554,7 +607,9 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
         root,
         "rng_catalog",
         path,
-        if expects_stutter {
+        if expects_pcr {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+        } else if expects_stutter {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
         } else {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
@@ -614,6 +669,7 @@ pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Di
     validate_technical_artifacts(
         required_value(root, "artifacts", path)?,
         expects_stutter,
+        expects_pcr,
         path,
     )?;
     let artifact_states = validate_outputs(
@@ -681,9 +737,33 @@ const ROOT_FIELDS: &[&str] = &[
     "diagnostics",
 ];
 
-/// Versión del documento: la v3 solo cuando el evento abre la etapa `stutter`.
+/// Ruta y huella del recurso del perfil que este evento usó.
+fn manifest_profile_resource_path(manifest: &EventManifest<'_>) -> &'static str {
+    match manifest.event.preparation() {
+        crate::technical_profile::LibraryPreparation::PcrFree => {
+            crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE
+        }
+        crate::technical_profile::LibraryPreparation::Pcr => {
+            crate::technical_profile::GPS_HISEQX_PCR_PE150_RESOURCE
+        }
+    }
+}
+
+fn manifest_profile_sha256(manifest: &EventManifest<'_>) -> &'static str {
+    match manifest.event.preparation() {
+        crate::technical_profile::LibraryPreparation::PcrFree => {
+            crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256
+        }
+        crate::technical_profile::LibraryPreparation::Pcr => {
+            crate::technical_profile::GPS_HISEQX_PCR_PE150_SHA256
+        }
+    }
+}
+
+/// Versión del documento: la v3 cuando el evento abre la etapa `stutter` o la
+/// etapa `amplification`. Las dos secciones nuevas solo caben en ella.
 fn event_manifest_schema_version(manifest: &EventManifest<'_>) -> &'static str {
-    if manifest.stutter.is_some() {
+    if manifest.stutter.is_some() || manifest.pcr.is_some() {
         EVENT_MANIFEST_SCHEMA_VERSION_V3
     } else {
         EVENT_MANIFEST_SCHEMA_VERSION
@@ -693,7 +773,9 @@ fn event_manifest_schema_version(manifest: &EventManifest<'_>) -> &'static str {
 /// Catálogo de ámbitos aleatorios del que salen **las decisiones de este
 /// evento**, no el más alto que el binario conoce.
 fn event_manifest_rng_catalog(manifest: &EventManifest<'_>) -> &'static str {
-    if manifest.stutter.is_some() {
+    if manifest.pcr.is_some() {
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+    } else if manifest.stutter.is_some() {
         crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
     } else {
         crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3
@@ -939,25 +1021,25 @@ fn validate_profile(value: &Value, path: &Path) -> Result<u64, Diagnostic> {
         "profile",
         path,
     )?;
-    require_text(
-        profile,
-        "id",
-        path,
-        crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
-    )?;
-    require_text(
-        profile,
-        "resource_path",
-        path,
-        crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
-    )?;
-    require_text(
-        profile,
-        "sha256",
-        path,
-        crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
-    )?;
-    require_text(profile, "preparation", path, "pcr_free")?;
+    // **La terna va junta.** Comprobar el identificador, la ruta, la huella y
+    // la preparación por separado dejaría pasar un documento que publicara el
+    // identificador de un perfil con la huella del otro.
+    let (resource_path, sha256, preparation) = match required_string(profile, "id", path)? {
+        crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1 => (
+            crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_RESOURCE,
+            crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
+            crate::technical_profile::LibraryPreparation::PcrFree.as_str(),
+        ),
+        crate::technical_profile::GPS_HISEQX_PCR_PE150_V1 => (
+            crate::technical_profile::GPS_HISEQX_PCR_PE150_RESOURCE,
+            crate::technical_profile::GPS_HISEQX_PCR_PE150_SHA256,
+            crate::technical_profile::LibraryPreparation::Pcr.as_str(),
+        ),
+        _ => return Err(event_error(path, "id incompatible")),
+    };
+    require_text(profile, "resource_path", path, resource_path)?;
+    require_text(profile, "sha256", path, sha256)?;
+    require_text(profile, "preparation", path, preparation)?;
     let read_length = profile
         .get("read_length")
         .and_then(Value::as_u64)
@@ -1609,6 +1691,7 @@ fn validate_diagnostics(value: &Value, path: &Path) -> Result<BTreeSet<String>, 
 fn validate_technical_artifacts(
     value: &Value,
     expects_stutter: bool,
+    expects_pcr: bool,
     path: &Path,
 ) -> Result<(), Diagnostic> {
     let artifacts = required_object(value, "artifacts", path)?;
@@ -1679,7 +1762,14 @@ fn validate_technical_artifacts(
         "artifacts.adapters",
         path,
     )?;
-    validate_closed(pcr, &["applicable"], "artifacts.pcr", path)?;
+    if expects_pcr {
+        validate_pcr_manifest(pcr, path)?;
+    } else {
+        validate_closed(pcr, &["applicable"], "artifacts.pcr", path)?;
+        if pcr.get("applicable") != Some(&Value::Bool(false)) {
+            return Err(event_error(path, "artefactos técnicos fijos inválidos"));
+        }
+    }
     validate_closed(
         optical,
         &["realized_pairs"],
@@ -1688,12 +1778,195 @@ fn validate_technical_artifacts(
     )?;
     validate_closed(gc, &["mode"], "artifacts.gc", path)?;
     validate_closed(adapters, &["enabled"], "artifacts.adapters", path)?;
-    if pcr.get("applicable") != Some(&Value::Bool(false))
-        || optical.get("realized_pairs").and_then(Value::as_u64) != Some(0)
-        || gc.get("mode").and_then(Value::as_str) != Some("neutral")
+    // El modo `curve` solo existe con amplificación: publicarlo sin ella
+    // afirmaría un sesgo por composición que nadie aplicó.
+    let gc_mode_valid = match gc.get("mode").and_then(Value::as_str) {
+        Some("neutral") => true,
+        Some("curve") => expects_pcr,
+        _ => false,
+    };
+    if optical.get("realized_pairs").and_then(Value::as_u64) != Some(0)
+        || !gc_mode_valid
         || adapters.get("enabled") != Some(&Value::Bool(false))
     {
         return Err(event_error(path, "artefactos técnicos fijos inválidos"));
+    }
+    Ok(())
+}
+
+/// Comprueba la sección de amplificación del manifiesto de evento.
+///
+/// Las relaciones que se comprueban aquí son las que JSON Schema no puede
+/// expresar y las que de verdad discriminan un manifiesto inventado:
+///
+/// - la suma del histograma **ponderada por su índice** vale exactamente el
+///   número de parejas, que es lo que impide que una celda cuente familias en
+///   vez de parejas;
+/// - las parejas duplicadas son `parejas − familias`;
+/// - la fracción realizada es `1 − familias/parejas`, de modo que no puede ser
+///   una copia de la declarada;
+/// - la derivación de `m` viaja con el método y las iteraciones.
+fn validate_pcr_manifest(
+    pcr: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    validate_closed(
+        pcr,
+        &[
+            "applicable",
+            "algorithm",
+            "rng_catalog",
+            "cycles",
+            "efficiency",
+            "early_cycles",
+            "declared_duplicate_fraction",
+            "expected_duplicate_fraction",
+            "mean_pairs_per_molecule",
+            "duplicate_fraction_inversion",
+            "max_family_size",
+            "gc_max_attempts",
+            "gc_relative_efficiency",
+            "efficiency_classes",
+            "families",
+            "pairs",
+            "duplicate_pairs",
+            "realized_duplicate_fraction",
+            "family_size_histogram",
+            "families_truncated_at_end",
+            "gc_attempts_total",
+            "gc_attempts_exhausted_families",
+            "unique_molecule_coverage_x",
+            "resource_bound",
+        ],
+        "artifacts.pcr",
+        path,
+    )?;
+    require_text(
+        pcr,
+        "algorithm",
+        path,
+        crate::pcr_amplification::PCR_AMPLIFICATION_ALGORITHM,
+    )?;
+    require_text(
+        pcr,
+        "rng_catalog",
+        path,
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5,
+    )?;
+    let inversion = required_object(
+        required_value(pcr, "duplicate_fraction_inversion", path)?,
+        "artifacts.pcr.duplicate_fraction_inversion",
+        path,
+    )?;
+    validate_closed(
+        inversion,
+        &["method", "iterations"],
+        "artifacts.pcr.duplicate_fraction_inversion",
+        path,
+    )?;
+    require_text(
+        inversion,
+        "method",
+        path,
+        crate::pcr_amplification::PCR_DUPLICATE_FRACTION_INVERSION_METHOD,
+    )?;
+    let bound = required_object(
+        required_value(pcr, "resource_bound", path)?,
+        "artifacts.pcr.resource_bound",
+        path,
+    )?;
+    validate_closed(
+        bound,
+        &[
+            "operation_units",
+            "memory_bytes",
+            "regeneration_passes",
+            "measured",
+        ],
+        "artifacts.pcr.resource_bound",
+        path,
+    )?;
+    // La cota es un valor **calculado sin ejecutar**, no una medida. Decirlo en
+    // el documento evita que alguien la lea como consumo observado.
+    if bound.get("measured") != Some(&Value::Bool(false)) {
+        return Err(event_error(
+            path,
+            "la cota de recursos se publica calculada, no medida",
+        ));
+    }
+    let families = required_u64(pcr, "families", path)?;
+    let pairs = required_u64(pcr, "pairs", path)?;
+    let duplicate_pairs = required_u64(pcr, "duplicate_pairs", path)?;
+    if families > pairs || duplicate_pairs != pairs - families {
+        return Err(event_error(
+            path,
+            "los recuentos de familias y duplicados no cuadran",
+        ));
+    }
+    let histogram = required_array(
+        required_value(pcr, "family_size_histogram", path)?,
+        "artifacts.pcr.family_size_histogram",
+        path,
+    )?;
+    let mut histogram_families = 0_u64;
+    let mut histogram_pairs = 0_u64;
+    let mut previous: Option<u64> = None;
+    for entry in histogram {
+        let entry = required_object(entry, "artifacts.pcr.family_size_histogram[]", path)?;
+        validate_closed(
+            entry,
+            &["family_size", "families"],
+            "artifacts.pcr.family_size_histogram[]",
+            path,
+        )?;
+        let size = required_u64(entry, "family_size", path)?;
+        let count = required_u64(entry, "families", path)?;
+        if size == 0 || count == 0 || previous.is_some_and(|previous| previous >= size) {
+            return Err(event_error(
+                path,
+                "el histograma de tamaños de familia no está en orden estricto",
+            ));
+        }
+        previous = Some(size);
+        histogram_families = histogram_families
+            .checked_add(count)
+            .ok_or_else(|| event_error(path, "el histograma de familias desborda"))?;
+        histogram_pairs = histogram_pairs
+            .checked_add(
+                size.checked_mul(count)
+                    .ok_or_else(|| event_error(path, "el histograma de familias desborda"))?,
+            )
+            .ok_or_else(|| event_error(path, "el histograma de familias desborda"))?;
+    }
+    if histogram_families != families || histogram_pairs != pairs {
+        return Err(event_error(
+            path,
+            "el histograma de tamaños de familia no suma las familias y parejas publicadas",
+        ));
+    }
+    let realized = pcr
+        .get("realized_duplicate_fraction")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| event_error(path, "falta la fracción realizada de duplicados"))?;
+    let expected_realized = if pairs == 0 {
+        0.0
+    } else {
+        1.0 - (families as f64) / (pairs as f64)
+    };
+    if realized != expected_realized {
+        return Err(event_error(
+            path,
+            "la fracción realizada de duplicados no sale de los recuentos publicados",
+        ));
+    }
+    let exhausted = required_u64(pcr, "gc_attempts_exhausted_families", path)?;
+    let attempts = required_u64(pcr, "gc_attempts_total", path)?;
+    let truncated = required_u64(pcr, "families_truncated_at_end", path)?;
+    if exhausted > families || attempts < families || truncated > families {
+        return Err(event_error(
+            path,
+            "los recuentos de intentos de composición o de familias truncadas no cuadran",
+        ));
     }
     Ok(())
 }

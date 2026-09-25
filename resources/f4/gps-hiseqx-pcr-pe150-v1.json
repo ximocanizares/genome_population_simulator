@@ -1,0 +1,61 @@
+{
+  "schema_version": "1",
+  "profile_id": "gps-hiseqx-pcr-pe150-v1",
+  "classification": "approximate_synthetic_not_empirical_calibration",
+  "description": "Perfil propio, explícito y reproducible de WGS Illumina PE150 con preparación amplificada por PCR. Es hermano del perfil sin PCR: idéntico en lectura, inserto, calidad y error, y distinto solo en la preparación y en los dominios de la amplificación. Es una aproximación de trabajo y no declara representar una corrida o instrumento real.",
+  "external_reference": {
+    "name": "ART HSXn",
+    "use": "comparative_reference_only_not_incorporated_or_redistributed"
+  },
+  "preparation": "pcr",
+  "read": {
+    "layout": "paired_end",
+    "orientation": "FR",
+    "common_length_bases": 150,
+    "minimum_supported_length_bases": 1,
+    "maximum_supported_length_bases": 150
+  },
+  "insert": {
+    "distribution": "normal_truncated_box_muller_v1",
+    "mean_bases": 350,
+    "standard_deviation_bases": 20,
+    "minimum_bases": 250,
+    "maximum_bases": 450,
+    "integer_rounding": "nearest_ties_away_from_zero",
+    "uniform": "open_53_bit_v1",
+    "no_cached_normal_variate": true
+  },
+  "quality": {
+    "curve_kind": "piecewise_linear_phred_integer_round_half_up_v1",
+    "r1": [
+      {"first_cycle": 1, "last_cycle": 10, "first_phred": 36, "last_phred": 36},
+      {"first_cycle": 11, "last_cycle": 100, "first_phred": 36, "last_phred": 32},
+      {"first_cycle": 101, "last_cycle": 150, "first_phred": 32, "last_phred": 28}
+    ],
+    "r2": [
+      {"first_cycle": 1, "last_cycle": 10, "first_phred": 35, "last_phred": 35},
+      {"first_cycle": 11, "last_cycle": 100, "first_phred": 35, "last_phred": 30},
+      {"first_cycle": 101, "last_cycle": 150, "first_phred": 30, "last_phred": 25}
+    ]
+  },
+  "error": {
+    "probability_from_phred": "10^(-Q/10)",
+    "alternate_base": "uniform_among_other_acgt",
+    "substitution_matrix": "deferred_dtf_053"
+  },
+  "amplification": {
+    "algorithm": "pcr-amplification-v1",
+    "duplicate_fraction_inversion": "bisection-64-fixed-v1",
+    "duplicate_fraction_inversion_iterations": 64,
+    "maximum_cycles": 30,
+    "maximum_early_cycles": 6,
+    "maximum_family_size": 256,
+    "maximum_gc_attempts": 16,
+    "maximum_efficiency_classes": 4,
+    "maximum_mean_pairs_per_molecule": 64
+  },
+  "reproducibility": {
+    "rng_catalog": "f4-technical-v5",
+    "profile_algorithm_version": "1"
+  }
+}

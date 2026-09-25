@@ -1300,6 +1300,28 @@ pub const F4_TECHNICAL_RNG_CATALOG_V3: &str = "f4-technical-v3";
 /// activo no abre la etapa `stutter` y publica el v3, que es lo que mantiene
 /// byte a byte los paquetes anteriores a esta ampliación.
 pub const F4_TECHNICAL_RNG_CATALOG_V4: &str = "f4-technical-v4";
+/// Catálogo que **extiende** los anteriores con la etapa `amplification`
+/// (F4.9).
+///
+/// # Por qué una versión nueva y no más claves dentro del v4
+///
+/// Por la misma razón que el v4 no se metió dentro del v3: una ejecución
+/// **publica el catálogo del que salen sus decisiones**, y ese nombre es
+/// además el ámbito de derivación. Si la amplificación naciera en el v4, una
+/// biblioteca amplificada sin tartamudeo publicaría un catálogo que el
+/// contrato ata al tartamudeo, y un lector no podría distinguir qué etapa abrió
+/// de verdad. El propio diseño con PCR lo dejó escrito: «`f4-technical-v4` si
+/// se hace junto con `stutter`, **la siguiente si después**».
+///
+/// Como en la ampliación anterior, **ninguna decisión ya publicada se mueve**:
+/// las trece heredadas siguen en el v3, las dos del tartamudeo en el v4, y solo
+/// las claves que nacen con la amplificación usan este nombre como ámbito.
+/// Entre ellas están las tres claves de `fragment` **con componente `attempt`**,
+/// que solo existen cuando la aceptación por composición rechaza un intento: el
+/// intento `0` conserva literalmente las claves de hoy, y eso es lo que permite
+/// que una biblioteca amplificada con parámetros neutros produzca exactamente
+/// los mismos bytes que una sin amplificar.
+pub const F4_TECHNICAL_RNG_CATALOG_V5: &str = "f4-technical-v5";
 /// Catálogo vigente para una ejecución que no abre la etapa `stutter`.
 pub const F4_TECHNICAL_RNG_CATALOG: &str = F4_TECHNICAL_RNG_CATALOG_V3;
 /// Catálogo inmutable de ámbitos aleatorios de F5 (DTC-089).
@@ -1486,6 +1508,57 @@ enum F4TechnicalDecisionKind<'a> {
         template_ordinal: u64,
         locus_id: &'a RepeatLocusId,
     },
+    /// Sorteo de `fragment` de un intento de aceptación `a >= 1`. El intento
+    /// `0` usa las tres variantes heredadas, sin componente `attempt`.
+    FragmentRetry {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        decision: FragmentRetryDecision,
+        attempt: NonZeroU64,
+    },
+    AmplificationEfficiencyClass {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+    },
+    AmplificationEarlyCopies {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+    },
+    AmplificationGcAccept {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        attempt: u64,
+    },
+    AmplificationFamilySize {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+    },
+}
+
+/// Cuál de los tres sorteos de `fragment` se repite en un reintento.
+///
+/// Es una enumeración y no una cadena para que no pueda inventarse un nombre
+/// de decisión que el catálogo no contiene.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FragmentRetryDecision {
+    InsertLength,
+    Copy,
+    Start,
+}
+
+impl FragmentRetryDecision {
+    const fn canonical_value(self) -> &'static str {
+        match self {
+            Self::InsertLength => "insert_length",
+            Self::Copy => "copy",
+            Self::Start => "start",
+        }
+    }
 }
 
 impl<'a> F4TechnicalDecision<'a> {
@@ -1705,6 +1778,84 @@ impl<'a> F4TechnicalDecision<'a> {
         })
     }
 
+    /// Sorteo de `fragment` repetido en el intento `attempt >= 1` de la
+    /// aceptación por composición.
+    #[must_use]
+    pub const fn fragment_retry(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        template_ordinal: u64,
+        decision: FragmentRetryDecision,
+        attempt: NonZeroU64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::FragmentRetry {
+            event_id,
+            library_id,
+            template_ordinal,
+            decision,
+            attempt,
+        })
+    }
+
+    /// Clase de eficiencia de la molécula que da origen a una familia.
+    #[must_use]
+    pub const fn amplification_efficiency_class(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::AmplificationEfficiencyClass {
+            event_id,
+            library_id,
+            family_ordinal,
+        })
+    }
+
+    /// Copias tras los primeros ciclos, sorteadas de la distribución sesgada
+    /// por tamaño.
+    #[must_use]
+    pub const fn amplification_early_copies(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::AmplificationEarlyCopies {
+            event_id,
+            library_id,
+            family_ordinal,
+        })
+    }
+
+    /// Aceptación por composición de un intento concreto.
+    #[must_use]
+    pub const fn amplification_gc_accept(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        attempt: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::AmplificationGcAccept {
+            event_id,
+            library_id,
+            family_ordinal,
+            attempt,
+        })
+    }
+
+    /// Tamaño de la familia.
+    #[must_use]
+    pub const fn amplification_family_size(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::AmplificationFamilySize {
+            event_id,
+            library_id,
+            family_ordinal,
+        })
+    }
+
     /// Catálogo del que sale **esta** decisión, que es su ámbito de derivación.
     ///
     /// Las trece decisiones de DTC-086 conservan el v3 para que una etapa nueva
@@ -1720,6 +1871,13 @@ impl<'a> F4TechnicalDecision<'a> {
         match self.0 {
             F4TechnicalDecisionKind::StutterBernoulli { .. }
             | F4TechnicalDecisionKind::StutterStep { .. } => F4_TECHNICAL_RNG_CATALOG_V4,
+            F4TechnicalDecisionKind::FragmentRetry { .. }
+            | F4TechnicalDecisionKind::AmplificationEfficiencyClass { .. }
+            | F4TechnicalDecisionKind::AmplificationEarlyCopies { .. }
+            | F4TechnicalDecisionKind::AmplificationGcAccept { .. }
+            | F4TechnicalDecisionKind::AmplificationFamilySize { .. } => {
+                F4_TECHNICAL_RNG_CATALOG_V5
+            }
             F4TechnicalDecisionKind::FragmentInsertLength { .. }
             | F4TechnicalDecisionKind::FragmentCopy { .. }
             | F4TechnicalDecisionKind::FragmentStart { .. }
@@ -1910,8 +2068,99 @@ impl<'a> F4TechnicalDecision<'a> {
                 template_ordinal,
                 locus_id,
             } => f4_stutter_components(event_id, library_id, template_ordinal, locus_id, "step"),
+            F4TechnicalDecisionKind::FragmentRetry {
+                event_id,
+                library_id,
+                template_ordinal,
+                decision,
+                attempt,
+            } => {
+                let mut components = f4_template_components(
+                    event_id,
+                    library_id,
+                    "fragment",
+                    template_ordinal,
+                    decision.canonical_value(),
+                    None,
+                );
+                components.push(("attempt", attempt.get().to_string()));
+                components
+            }
+            F4TechnicalDecisionKind::AmplificationEfficiencyClass {
+                event_id,
+                library_id,
+                family_ordinal,
+            } => f4_amplification_components(
+                event_id,
+                library_id,
+                family_ordinal,
+                "efficiency_class",
+                None,
+            ),
+            F4TechnicalDecisionKind::AmplificationEarlyCopies {
+                event_id,
+                library_id,
+                family_ordinal,
+            } => f4_amplification_components(
+                event_id,
+                library_id,
+                family_ordinal,
+                "early_copies",
+                None,
+            ),
+            F4TechnicalDecisionKind::AmplificationGcAccept {
+                event_id,
+                library_id,
+                family_ordinal,
+                attempt,
+            } => f4_amplification_components(
+                event_id,
+                library_id,
+                family_ordinal,
+                "gc_accept",
+                Some(attempt),
+            ),
+            F4TechnicalDecisionKind::AmplificationFamilySize {
+                event_id,
+                library_id,
+                family_ordinal,
+            } => f4_amplification_components(
+                event_id,
+                library_id,
+                family_ordinal,
+                "family_size",
+                None,
+            ),
         }
     }
+}
+
+/// Componentes de la etapa `amplification`, en el orden literal de DTC-086:
+/// `[event_id, library_id, amplification, family_ordinal, decision]`, con el
+/// `attempt` detrás cuando la decisión lo distingue.
+///
+/// El **ordinal de familia** es el ordinal de plantilla de su primera pareja.
+/// Eso hace que la clave de una familia no dependa de cuántas parejas emitió
+/// ninguna familia anterior más allá de lo que ya fija el recorrido, y que
+/// añadir una biblioteca no mueva nada de las demás.
+fn f4_amplification_components(
+    event_id: &EventId,
+    library_id: &LibraryId,
+    family_ordinal: u64,
+    decision: &'static str,
+    attempt: Option<u64>,
+) -> Vec<(&'static str, String)> {
+    let mut components = vec![
+        ("event_id", event_id.as_str().to_owned()),
+        ("library_id", library_id.as_str().to_owned()),
+        ("stage", "amplification".to_owned()),
+        ("family_ordinal", family_ordinal.to_string()),
+        ("decision", decision.to_owned()),
+    ];
+    if let Some(attempt) = attempt {
+        components.push(("attempt", attempt.to_string()));
+    }
+    components
 }
 
 fn f4_template_components(

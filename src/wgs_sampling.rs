@@ -13,9 +13,11 @@ use crate::haplotype::{HaplotypeCopy, HaplotypeCopyId, Individual};
 use crate::identity::{EventId, IndividualId, LibraryId, SequenceId};
 use crate::materialization::{MaterializationError, materialize_copy_interval};
 use crate::paired_end::{PairedEndFragment, PairedEndPair, emit_paired_end};
+use crate::pcr_amplification::{PcrAccumulator, PcrPlan, PcrReport};
 use crate::randomness::{
-    F4TechnicalDecision, RandomSamplingError, derive_f4_technical_subseed, f4_truncated_normal,
-    f4_uniform_index, poisson_count, uniform_u64_below,
+    F4TechnicalDecision, FragmentRetryDecision, RandomSamplingError, categorical_f64_with_source,
+    derive_f4_technical_subseed, f4_bernoulli, f4_truncated_normal, f4_uniform_index,
+    poisson_count, uniform_u64_below,
 };
 use crate::reference::{Reference, ReferenceSequence};
 use crate::stutter::{StutterAccumulator, StutterPlan, StutterReport};
@@ -586,7 +588,47 @@ pub struct WgsPairedEndSampler<'a> {
     /// antes de que el tartamudeo existiera.
     stutter_plan: StutterPlan,
     stutter_accumulator: StutterAccumulator,
+    /// Plan de amplificación del evento. Apagado por omisión, y con él apagado
+    /// **no se abre ni una sola decisión nueva**: es lo que conserva byte a
+    /// byte los paquetes anteriores a F4.9.
+    pcr_plan: PcrPlan,
+    pcr_accumulator: PcrAccumulator,
+    /// Molécula original de la familia en curso y parejas que le quedan por
+    /// emitir. Es todo el estado que la amplificación añade entre llamadas, y
+    /// no crece con el número de parejas ni con el genoma.
+    family: Option<FamilyState>,
     failed: bool,
+}
+
+/// Molécula original de una familia y lo que queda por emitir de ella.
+#[derive(Clone, Debug)]
+struct FamilyState {
+    molecule: SampledMolecule,
+    remaining: u64,
+}
+
+/// Lo que una familia recién abierta deja anotado para el acumulador.
+#[derive(Clone, Copy, Debug)]
+struct FamilyAccounting {
+    attempts: u64,
+    attempts_exhausted: bool,
+    emitted_pairs: u32,
+    truncated: bool,
+    operation_units: u64,
+}
+
+/// Una molécula original ya materializada: es lo que hoy produce el tramo de
+/// `fragment` del muestreador, extraído a un tipo propio para que una familia
+/// entera pueda emitirse desde **la misma** molécula sin volver a sortearla.
+#[derive(Clone, Debug)]
+struct SampledMolecule {
+    copy_id: HaplotypeCopyId,
+    start: u64,
+    sequence: Vec<u8>,
+    /// Copias candidatas enumeradas para elegir esta molécula, y bases del
+    /// inserto. Solo alimentan el contador de unidades de la cota publicada.
+    candidate_count: u64,
+    insert_bases: u64,
 }
 
 struct PairCountConstruction {
@@ -750,6 +792,9 @@ impl<'a> WgsPairedEndSampler<'a> {
             chimera_accumulator: ChimeraAccumulator::default(),
             stutter_plan: StutterPlan::default(),
             stutter_accumulator: StutterAccumulator::default(),
+            pcr_plan: PcrPlan::default(),
+            pcr_accumulator: PcrAccumulator::default(),
+            family: None,
             failed: false,
         })
     }
@@ -776,6 +821,29 @@ impl<'a> WgsPairedEndSampler<'a> {
     pub fn with_stutter_plan(mut self, plan: StutterPlan) -> Self {
         self.stutter_plan = plan;
         self
+    }
+
+    /// Conecta el plan de amplificación del evento al productor PE.
+    ///
+    /// Las unidades que costó construir las tablas de los primeros ciclos se
+    /// anotan **aquí y una sola vez**, que es donde se pagan: el plan se
+    /// resuelve una vez por evento y las tablas viajan con él. Contarlas por
+    /// familia era justo la discrepancia entre el código y la cota que ninguna
+    /// prueba podía ver.
+    #[must_use]
+    pub fn with_pcr_plan(mut self, plan: PcrPlan) -> Self {
+        if let Some(settings) = plan.settings() {
+            self.pcr_accumulator
+                .record_operation_units(settings.early_copy_build_units());
+        }
+        self.pcr_plan = plan;
+        self
+    }
+
+    /// Recuentos agregados de la amplificación de este flujo.
+    #[must_use]
+    pub fn pcr_report(&self) -> PcrReport {
+        self.pcr_accumulator.clone().report()
     }
 
     /// Recuento agregado de quimeras ya emitidas por este flujo.
@@ -806,19 +874,38 @@ impl<'a> WgsPairedEndSampler<'a> {
         }
     }
 
-    fn sample_next_pair(&mut self, ordinal: u64) -> Result<PairedEndPair, WgsSamplingError> {
-        let template = self
+    /// Sortea una molécula original con las claves de `fragment`.
+    ///
+    /// El intento `0` usa **literalmente** las claves de hoy; a partir del `1`,
+    /// que solo existe cuando la aceptación por composición rechazó, las claves
+    /// llevan además el componente `attempt` y nacen en el catálogo v5. Es esa
+    /// separación la que hace que una biblioteca amplificada con curva neutra
+    /// consuma exactamente lo mismo que una sin amplificar.
+    fn sample_molecule(
+        &self,
+        ordinal: u64,
+        attempt: u64,
+    ) -> Result<SampledMolecule, WgsSamplingError> {
+        let library_id = self
             .identities
-            .derive_template(self.individual.id(), TemplateOrdinal::new(ordinal))
-            .map_err(WgsSamplingError::TechnicalIdentity)?;
-        let library_id = template.library_id();
+            .library(self.individual.id())
+            .ok_or(WgsSamplingError::MissingTechnicalLibrary)?
+            .library_id();
         let event_id = self.identities.event_id();
         let distribution = self.profile.insert_length();
-        let insert_seed = derive_f4_technical_subseed(
-            self.identities.root_seed(),
-            F4TechnicalDecision::fragment_insert_length(event_id, library_id, ordinal),
-        )
-        .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let retry = std::num::NonZeroU64::new(attempt);
+        let insert_decision = match retry {
+            None => F4TechnicalDecision::fragment_insert_length(event_id, library_id, ordinal),
+            Some(attempt) => F4TechnicalDecision::fragment_retry(
+                event_id,
+                library_id,
+                ordinal,
+                FragmentRetryDecision::InsertLength,
+                attempt,
+            ),
+        };
+        let insert_seed = derive_f4_technical_subseed(self.identities.root_seed(), insert_decision)
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
         let insert = f4_truncated_normal(
             &mut insert_seed.local_rng(),
             f64::from(distribution.mean_bases()),
@@ -833,19 +920,33 @@ impl<'a> WgsPairedEndSampler<'a> {
             sum.checked_add(candidate.start_count)
                 .ok_or(WgsSamplingError::LengthOverflow)
         })?;
-        let copy_seed = derive_f4_technical_subseed(
-            self.identities.root_seed(),
-            F4TechnicalDecision::fragment_copy(event_id, library_id, ordinal),
-        )
-        .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let copy_decision = match retry {
+            None => F4TechnicalDecision::fragment_copy(event_id, library_id, ordinal),
+            Some(attempt) => F4TechnicalDecision::fragment_retry(
+                event_id,
+                library_id,
+                ordinal,
+                FragmentRetryDecision::Copy,
+                attempt,
+            ),
+        };
+        let copy_seed = derive_f4_technical_subseed(self.identities.root_seed(), copy_decision)
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
         let selected = f4_uniform_index(&mut copy_seed.local_rng(), total)
             .map_err(WgsSamplingError::Random)?;
         let candidate = select_fragment_candidate(&candidates, selected)?;
-        let start_seed = derive_f4_technical_subseed(
-            self.identities.root_seed(),
-            F4TechnicalDecision::fragment_start(event_id, library_id, ordinal),
-        )
-        .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let start_decision = match retry {
+            None => F4TechnicalDecision::fragment_start(event_id, library_id, ordinal),
+            Some(attempt) => F4TechnicalDecision::fragment_retry(
+                event_id,
+                library_id,
+                ordinal,
+                FragmentRetryDecision::Start,
+                attempt,
+            ),
+        };
+        let start_seed = derive_f4_technical_subseed(self.identities.root_seed(), start_decision)
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
         let start = f4_uniform_index(&mut start_seed.local_rng(), candidate.start_count)
             .map_err(WgsSamplingError::Random)?;
         let end = start
@@ -853,9 +954,234 @@ impl<'a> WgsPairedEndSampler<'a> {
             .ok_or(WgsSamplingError::LengthOverflow)?;
         let sequence = materialize_copy_interval(candidate.copy, self.reference, start, end)
             .map_err(WgsSamplingError::Materialization)?;
-        let fragment =
-            PairedEndFragment::new(template, candidate.copy.id().clone(), start, sequence)
-                .map_err(WgsSamplingError::TechnicalIdentity)?;
+        Ok(SampledMolecule {
+            copy_id: candidate.copy.id().clone(),
+            start,
+            sequence,
+            candidate_count: candidates.len() as u64,
+            insert_bases: insert,
+        })
+    }
+
+    /// Molécula de la que sale la pareja de este ordinal.
+    ///
+    /// Sin amplificación es la de hoy, sorteada una por pareja. Con
+    /// amplificación, la de la familia en curso; si la familia se agotó, abre
+    /// una nueva en este mismo ordinal, que pasa a ser su **ordinal de
+    /// familia**.
+    fn molecule_for(&mut self, ordinal: u64) -> Result<SampledMolecule, WgsSamplingError> {
+        if !self.pcr_plan.is_active() {
+            return self.sample_molecule(ordinal, 0);
+        }
+        if self
+            .family
+            .as_ref()
+            .is_none_or(|family| family.remaining == 0)
+        {
+            let (family, accounting) = self.open_family(ordinal)?;
+            self.pcr_accumulator
+                .record_gc_attempts(accounting.attempts, accounting.attempts_exhausted);
+            self.pcr_accumulator
+                .record_family(accounting.emitted_pairs, accounting.truncated);
+            self.pcr_accumulator
+                .record_operation_units(accounting.operation_units);
+            self.family = Some(family);
+        }
+        let exhausts = self
+            .family
+            .as_ref()
+            .is_some_and(|family| family.remaining == 1);
+        if exhausts {
+            // La última pareja de la familia se lleva la molécula en vez de
+            // copiarla. Con familias de tamaño 1 —el caso normal con pocos
+            // duplicados— eso significa que la amplificación no añade ni una
+            // copia de secuencia por pareja.
+            let family = self.family.take().ok_or(WgsSamplingError::LengthOverflow)?;
+            return Ok(family.molecule);
+        }
+        let family = self
+            .family
+            .as_mut()
+            .ok_or(WgsSamplingError::LengthOverflow)?;
+        family.remaining -= 1;
+        Ok(family.molecule.clone())
+    }
+
+    /// Abre una familia: clase de eficiencia, copias tras los primeros ciclos,
+    /// molécula aceptada por composición y tamaño.
+    ///
+    /// **La aceptación por composición va al elegir la molécula**, no al
+    /// repartir sus copias. Con pocas parejas por molécula —el caso normal—
+    /// casi todas las familias tienen tamaño 1 tanto en regiones ricas como
+    /// pobres en GC, de modo que meter el sesgo en el tamaño de familia no
+    /// produciría infrarrepresentación ninguna. Lo que la produce de verdad son
+    /// las moléculas que **no llegan a observarse**, y eso solo puede
+    /// expresarse aquí.
+    ///
+    /// No toca el acumulador: devuelve lo que hay que anotar para que el
+    /// llamador lo haga y esta función pueda trabajar con `&self`, sin clonar
+    /// los ajustes una vez por pareja.
+    fn open_family(
+        &self,
+        ordinal: u64,
+    ) -> Result<(FamilyState, FamilyAccounting), WgsSamplingError> {
+        let settings = self
+            .pcr_plan
+            .settings()
+            .ok_or(WgsSamplingError::LengthOverflow)?;
+        let library_id = self
+            .identities
+            .library(self.individual.id())
+            .ok_or(WgsSamplingError::MissingTechnicalLibrary)?
+            .library_id();
+        let event_id = self.identities.event_id();
+        let root = self.identities.root_seed();
+        let mut units = 0_u64;
+
+        // 1. Clase de eficiencia. Con una sola clase no se consume nada.
+        let classes = settings.efficiency_classes();
+        units = units.saturating_add(classes.len() as u64);
+        let class_index = if classes.len() == 1 {
+            0
+        } else {
+            let weights: Vec<f64> = classes.iter().map(|class| class.weight()).collect();
+            let seed = derive_f4_technical_subseed(
+                root,
+                F4TechnicalDecision::amplification_efficiency_class(event_id, library_id, ordinal),
+            )
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
+            categorical_f64_with_source(&mut seed.local_rng(), &weights)
+                .map_err(WgsSamplingError::Random)?
+        };
+        let efficiency = classes[class_index].efficiency();
+        // La tabla de esta clase está **precalculada**: el triángulo de Pascal
+        // y la propagación ciclo a ciclo se pagaron una vez al construir el
+        // plan, no una vez por familia. Aquí solo se recorre.
+        let early_table = settings
+            .early_copy_table(class_index)
+            .ok_or(WgsSamplingError::LengthOverflow)?;
+
+        // 2. Copias tras los primeros ciclos, de la distribución **sesgada por
+        //    tamaño**: una familia observada es más probable cuantas más copias
+        //    tenga su molécula.
+        let mean_pairs = settings.mean_pairs_per_molecule();
+        let early_copies = if settings.early_cycles() == 0 || mean_pairs == 0.0 {
+            1_u64
+        } else {
+            let weights = early_table.size_biased_weights();
+            units = units.saturating_add(weights.len() as u64);
+            let seed = derive_f4_technical_subseed(
+                root,
+                F4TechnicalDecision::amplification_early_copies(event_id, library_id, ordinal),
+            )
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
+            let index = categorical_f64_with_source(&mut seed.local_rng(), weights)
+                .map_err(WgsSamplingError::Random)?;
+            (index as u64) + 1
+        };
+
+        // 3. Molécula original, con aceptación por composición.
+        let mut attempt = 0_u64;
+        let mut attempts_exhausted = false;
+        let (molecule, composition) = loop {
+            let molecule = self.sample_molecule(ordinal, attempt)?;
+            if attempt > 0 {
+                // Solo el trabajo **añadido** entra en el contador: el primer
+                // intento es la materialización que F4 ya hacía, y está en el
+                // coste por pareja que esta cota deja fuera a propósito.
+                units = units.saturating_add(
+                    molecule
+                        .candidate_count
+                        .saturating_add(3_u64.saturating_mul(molecule.insert_bases)),
+                );
+            }
+            let relative = settings
+                .gc_curve()
+                .evaluate(crate::pcr_amplification::gc_fraction(&molecule.sequence));
+            let factor = crate::pcr_amplification::composition_factor(
+                efficiency,
+                relative,
+                settings.cycles(),
+            );
+            attempt += 1;
+            if factor == 1.0 {
+                // Curva neutra: el ensayo de Bernoulli no se abre siquiera, de
+                // modo que no se deriva ni una subsemilla.
+                break (molecule, factor);
+            }
+            let seed = derive_f4_technical_subseed(
+                root,
+                F4TechnicalDecision::amplification_gc_accept(
+                    event_id,
+                    library_id,
+                    ordinal,
+                    attempt - 1,
+                ),
+            )
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
+            if f4_bernoulli(&mut seed.local_rng(), factor).map_err(WgsSamplingError::Random)? {
+                break (molecule, factor);
+            }
+            if attempt >= u64::from(settings.gc_max_attempts()) {
+                // Agotado el tope **se acepta el último intento y se cuenta**.
+                // El recuento es lo que hace honesto el atajo: el usuario ve
+                // cuántas veces ocurrió y juzga si el sesgo le afecta.
+                attempts_exhausted = true;
+                break (molecule, factor);
+            }
+        };
+
+        // 4. Tamaño de familia.
+        let mean_early = crate::pcr_amplification::EarlyCopyTable::mean_copies(early_table);
+        let lambda = mean_pairs * ((early_copies as f64) / mean_early) * composition;
+        let drawn = if lambda == 0.0 {
+            1_u64
+        } else {
+            let weights =
+                crate::pcr_amplification::family_size_weights(lambda, settings.max_family_size());
+            units = units.saturating_add(2_u64.saturating_mul(weights.len() as u64));
+            let seed = derive_f4_technical_subseed(
+                root,
+                F4TechnicalDecision::amplification_family_size(event_id, library_id, ordinal),
+            )
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
+            let index = categorical_f64_with_source(&mut seed.local_rng(), &weights)
+                .map_err(WgsSamplingError::Random)?;
+            (index as u64) + 1
+        };
+        // `remaining_pairs` cuenta esta pareja, de modo que aquí nunca vale
+        // cero: el iterador no habría llegado hasta aquí.
+        let emitted = drawn.min(self.remaining_pairs.max(1));
+        let emitted_pairs = u32::try_from(emitted).map_err(|_| WgsSamplingError::LengthOverflow)?;
+        Ok((
+            FamilyState {
+                molecule,
+                remaining: emitted,
+            },
+            FamilyAccounting {
+                attempts: attempt,
+                attempts_exhausted,
+                emitted_pairs,
+                truncated: emitted < drawn,
+                operation_units: units,
+            },
+        ))
+    }
+
+    fn sample_next_pair(&mut self, ordinal: u64) -> Result<PairedEndPair, WgsSamplingError> {
+        let template = self
+            .identities
+            .derive_template(self.individual.id(), TemplateOrdinal::new(ordinal))
+            .map_err(WgsSamplingError::TechnicalIdentity)?;
+        let event_id = self.identities.event_id();
+        let molecule = self.molecule_for(ordinal)?;
+        let fragment = PairedEndFragment::new(
+            template,
+            molecule.copy_id.clone(),
+            molecule.start,
+            molecule.sequence,
+        )
+        .map_err(WgsSamplingError::TechnicalIdentity)?;
         let pre_hop_identity = self
             .identity_deriver
             .derive_own_pre_hop_pair(fragment.template().clone())

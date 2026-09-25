@@ -283,6 +283,22 @@ STUTTER_CALIBRATED_MOTIF_LENGTH_RATES = {
 }
 
 
+# Constantes de contrato de la amplificación, **las mismas que Rust lleva
+# dentro**. Aquí solo acotan los controles del cuaderno; la autoridad sigue
+# siendo Rust, y `tests/pcr_contract.rs` compara las dos copias junto con las
+# de los tres esquemas. Una copia decimal silenciosa en un solo sitio es lo que
+# sobrevivió al cambio de contrato la vez anterior.
+PCR_MAXIMUM_CYCLES = 30
+PCR_MAXIMUM_EARLY_CYCLES = 6
+PCR_MAXIMUM_FAMILY_SIZE = 256
+PCR_MAXIMUM_GC_ATTEMPTS = 16
+PCR_MAXIMUM_EFFICIENCY_CLASSES = 4
+PCR_MAXIMUM_MEAN_PAIRS_PER_MOLECULE = 64.0
+# Las dos preparaciones admitidas, en orden canónico. Ausente significa la
+# primera, que es la única que existía.
+LIBRARY_PREPARATIONS = ("pcr_free", "pcr")
+
+
 @dataclass(eq=True)
 class StutterMotifRateRow:
     motif_length_bases: int
@@ -318,6 +334,42 @@ class StutterForm:
 
 
 @dataclass(eq=True)
+class GcCurveKnotRow:
+    gc_fraction: str
+    relative_efficiency: str
+
+
+@dataclass(eq=True)
+class EfficiencyClassRow:
+    efficiency: str
+    weight: str
+
+
+@dataclass(eq=True)
+class PcrForm:
+    """Preparación amplificada declarada desde la interfaz.
+
+    Los tres primeros campos son **obligatorios y sin valor por omisión**: la
+    fracción de duplicados depende de la masa de ADN de entrada, del número de
+    ciclos y del laboratorio. La interfaz no los rellena sola, y la mejor
+    fuente para el primero son los informes de calidad del propio laboratorio.
+
+    Y lo que se declara es la fracción **esperada de una biblioteca
+    homogénea**, no la realizada: la realizada es mayor, y el manifiesto la
+    publica aparte.
+    """
+
+    duplicate_fraction: str
+    cycles: int
+    efficiency: str
+    early_cycles: int | None = None
+    max_family_size: int | None = None
+    gc_max_attempts: int | None = None
+    gc_relative_efficiency: list[GcCurveKnotRow] = field(default_factory=list)
+    efficiency_classes: list[EfficiencyClassRow] = field(default_factory=list)
+
+
+@dataclass(eq=True)
 class TechnicalEventForm:
     event_id: str
     individual_ids: list[str]
@@ -325,6 +377,9 @@ class TechnicalEventForm:
     libraries: list[TechnicalLibraryRow]
     read_length_bases: int | None = None
     stutter: StutterForm | None = None
+    # `None` conserva la omisión normativa: la preparación sin amplificar.
+    library_preparation: str | None = None
+    pcr: PcrForm | None = None
 
 
 @dataclass(eq=True)
@@ -534,6 +589,155 @@ def stutter_locus_rate_editor_rows(
         for order, row in enumerate(stutter.locus_rates if stutter else [], start=1)
     ]
     return rows or [{"order": 1, "locus_id": "", "rate": ""}]
+
+
+def gc_curve_editor_rows(pcr: PcrForm | None) -> list[dict[str, Any]]:
+    """Nudos de la curva de composición.
+
+    Arranca con los **dos nudos neutros**, que es la curva que no distingue
+    ninguna composición y con la que la aceptación no consume aleatoriedad.
+    Presentarlos evita que alguien declare un solo nudo, que el simulador
+    rechaza porque una curva necesita al menos dos.
+    """
+
+    rows = [
+        {
+            "order": order,
+            "gc_fraction": row.gc_fraction,
+            "relative_efficiency": row.relative_efficiency,
+        }
+        for order, row in enumerate(pcr.gc_relative_efficiency if pcr else [], start=1)
+    ]
+    return rows or [
+        {"order": 1, "gc_fraction": "0.0", "relative_efficiency": "1.0"},
+        {"order": 2, "gc_fraction": "1.0", "relative_efficiency": "1.0"},
+    ]
+
+
+def efficiency_class_editor_rows(pcr: PcrForm | None) -> list[dict[str, Any]]:
+    """Clases de eficiencia declaradas.
+
+    Llegan **vacías** cuando no se han declarado, no con un reparto sugerido:
+    la heterogeneidad entre moléculas es opcional y no tiene valores por
+    omisión.
+    """
+
+    rows = [
+        {"order": order, "efficiency": row.efficiency, "weight": row.weight}
+        for order, row in enumerate(pcr.efficiency_classes if pcr else [], start=1)
+    ]
+    return rows or [{"order": 1, "efficiency": "", "weight": ""}]
+
+
+def pcr_from_editor_rows(
+    library_preparation: str,
+    duplicate_fraction: str,
+    cycles: int,
+    efficiency: str,
+    early_cycles: int | None,
+    max_family_size: int | None,
+    gc_max_attempts: int | None,
+    gc_curve_rows: Sequence[Mapping[str, Any]],
+    efficiency_class_rows: Sequence[Mapping[str, Any]],
+) -> PcrForm | None:
+    """Reconstruye la amplificación desde las tablas del cuaderno.
+
+    Vive aquí, y no dentro del cuaderno, por la misma razón que la del
+    tartamudeo: una función con nombre puede probarse; una expresión dentro de
+    una celda de Marimo, no, y así fue como el tartamudeo se quedó fuera sin
+    que nada lo notara.
+
+    Con preparación sin amplificar devuelve `None` **aunque haya filas
+    escritas**: la tabla solo se admite con preparación amplificada, y
+    escribirla con la otra se rechaza al leer el documento.
+    """
+
+    if library_preparation != "pcr":
+        return None
+    knots = [
+        GcCurveKnotRow(
+            gc_fraction=str(row.get("gc_fraction", "")).strip(),
+            relative_efficiency=str(row.get("relative_efficiency", "")).strip(),
+        )
+        for row in gc_curve_rows
+        if str(row.get("gc_fraction", "")).strip()
+        and str(row.get("relative_efficiency", "")).strip()
+    ]
+    classes = [
+        EfficiencyClassRow(
+            efficiency=str(row.get("efficiency", "")).strip(),
+            weight=str(row.get("weight", "")).strip(),
+        )
+        for row in efficiency_class_rows
+        if str(row.get("efficiency", "")).strip() and str(row.get("weight", "")).strip()
+    ]
+    # La curva neutra **no se declara**: es el valor por omisión, y escribirla
+    # cambiaría los bytes del documento sin cambiar nada del resultado.
+    if _is_neutral_gc_curve(knots):
+        knots = []
+    return PcrForm(
+        duplicate_fraction=str(duplicate_fraction).strip(),
+        cycles=int(cycles),
+        efficiency=str(efficiency).strip(),
+        early_cycles=None if early_cycles is None else int(early_cycles),
+        max_family_size=None if max_family_size is None else int(max_family_size),
+        gc_max_attempts=None if gc_max_attempts is None else int(gc_max_attempts),
+        gc_relative_efficiency=knots,
+        efficiency_classes=classes,
+    )
+
+
+def _is_neutral_gc_curve(knots: Sequence[GcCurveKnotRow]) -> bool:
+    """¿Esta curva repite, sin tocarla, la neutra que ya es el valor omitido?"""
+
+    if not knots:
+        return True
+    try:
+        return all(float(knot.relative_efficiency) == 1.0 for knot in knots)
+    except ValueError:
+        return False
+
+
+def pcr_mean_pairs_per_molecule(duplicate_fraction: str) -> float | None:
+    """La `m` derivada, **con el mismo método que Rust**.
+
+    Bisección sobre `[0, 64]` con 64 iteraciones fijas y retorno anticipado
+    exacto para la fracción cero. La interfaz la muestra junto a la fracción
+    declarada para que el usuario vea qué parámetro interno está pidiendo; la
+    autoridad sigue siendo Rust, y una prueba compara este número con el que la
+    configuración efectiva publica para la misma fracción.
+
+    Devuelve `None` cuando la fracción no es un número o está fuera de
+    dominio, en vez de inventar un valor.
+    """
+
+    try:
+        target = float(duplicate_fraction)
+    except (TypeError, ValueError):
+        return None
+    if not 0.0 <= target < 1.0:
+        return None
+    if target == 0.0:
+        return 0.0
+    if target > _pcr_expected_duplicate_fraction(PCR_MAXIMUM_MEAN_PAIRS_PER_MOLECULE):
+        return None
+    low = 0.0
+    high = PCR_MAXIMUM_MEAN_PAIRS_PER_MOLECULE
+    for _ in range(64):
+        midpoint = 0.5 * (low + high)
+        if _pcr_expected_duplicate_fraction(midpoint) < target:
+            low = midpoint
+        else:
+            high = midpoint
+    return high
+
+
+def _pcr_expected_duplicate_fraction(mean_pairs_per_molecule: float) -> float:
+    """`f(m) = 1 - (1 - e^-m)/m`, con `f(0) = 0`."""
+
+    if mean_pairs_per_molecule <= 0.0:
+        return 0.0
+    return 1.0 - (1.0 - math.exp(-mean_pairs_per_molecule)) / mean_pairs_per_molecule
 
 
 def _is_calibrated_stutter_rate(row: StutterMotifRateRow) -> bool:
@@ -1101,6 +1305,8 @@ def _parse_technical_event(table: Mapping[str, Any]) -> TechnicalEventForm:
             "target_coverage_wgs",
             "read_length_bases",
             "stutter",
+            "library_preparation",
+            "pcr",
             "libraries",
         },
         required={"event_id", "individual_ids", "target_coverage_wgs", "libraries"},
@@ -1141,7 +1347,136 @@ def _parse_technical_event(table: Mapping[str, Any]) -> TechnicalEventForm:
             if "stutter" in table
             else None
         ),
+        library_preparation=(
+            _library_preparation(table["library_preparation"])
+            if "library_preparation" in table
+            else None
+        ),
+        pcr=(
+            _parse_pcr(_mapping(table["pcr"], "technical_event.pcr"))
+            if "pcr" in table
+            else None
+        ),
     )
+
+
+def _library_preparation(value: Any) -> str:
+    preparation = _string(value, "technical_event.library_preparation")
+    if preparation not in LIBRARY_PREPARATIONS:
+        raise EditorError(
+            "technical_event.library_preparation",
+            "las preparaciones admitidas son " + " y ".join(LIBRARY_PREPARATIONS),
+        )
+    return preparation
+
+
+def _parse_pcr(table: Mapping[str, Any]) -> PcrForm:
+    path = "technical_event.pcr"
+    _keys(
+        table,
+        allowed={
+            "duplicate_fraction",
+            "cycles",
+            "efficiency",
+            "early_cycles",
+            "max_family_size",
+            "gc_max_attempts",
+            "gc_relative_efficiency",
+            "efficiency_classes",
+        },
+        required={"duplicate_fraction", "cycles", "efficiency"},
+        path=path,
+    )
+    knots: list[GcCurveKnotRow] = []
+    for index, value in enumerate(
+        _sequence(table.get("gc_relative_efficiency", []), f"{path}.gc_relative_efficiency")
+    ):
+        row_path = f"{path}.gc_relative_efficiency[{index}]"
+        row = _mapping(value, row_path)
+        _keys(
+            row,
+            allowed={"gc_fraction", "relative_efficiency"},
+            required={"gc_fraction", "relative_efficiency"},
+            path=row_path,
+        )
+        knots.append(
+            GcCurveKnotRow(
+                _fraction_literal(row["gc_fraction"], f"{row_path}.gc_fraction"),
+                _fraction_literal(
+                    row["relative_efficiency"], f"{row_path}.relative_efficiency"
+                ),
+            )
+        )
+    classes: list[EfficiencyClassRow] = []
+    for index, value in enumerate(
+        _sequence(table.get("efficiency_classes", []), f"{path}.efficiency_classes")
+    ):
+        row_path = f"{path}.efficiency_classes[{index}]"
+        row = _mapping(value, row_path)
+        _keys(
+            row,
+            allowed={"efficiency", "weight"},
+            required={"efficiency", "weight"},
+            path=row_path,
+        )
+        classes.append(
+            EfficiencyClassRow(
+                _fraction_literal(row["efficiency"], f"{row_path}.efficiency"),
+                _fraction_literal(row["weight"], f"{row_path}.weight"),
+            )
+        )
+    if len(classes) > PCR_MAXIMUM_EFFICIENCY_CLASSES:
+        raise EditorError(
+            f"{path}.efficiency_classes",
+            f"el máximo de clases de eficiencia es {PCR_MAXIMUM_EFFICIENCY_CLASSES}",
+        )
+    return PcrForm(
+        duplicate_fraction=_fraction_literal(
+            table["duplicate_fraction"], f"{path}.duplicate_fraction"
+        ),
+        cycles=_bounded_count(table["cycles"], f"{path}.cycles", 1, PCR_MAXIMUM_CYCLES),
+        efficiency=_fraction_literal(table["efficiency"], f"{path}.efficiency"),
+        early_cycles=(
+            _bounded_count(
+                table["early_cycles"], f"{path}.early_cycles", 0, PCR_MAXIMUM_EARLY_CYCLES
+            )
+            if "early_cycles" in table
+            else None
+        ),
+        max_family_size=(
+            _bounded_count(
+                table["max_family_size"],
+                f"{path}.max_family_size",
+                1,
+                PCR_MAXIMUM_FAMILY_SIZE,
+            )
+            if "max_family_size" in table
+            else None
+        ),
+        gc_max_attempts=(
+            _bounded_count(
+                table["gc_max_attempts"],
+                f"{path}.gc_max_attempts",
+                1,
+                PCR_MAXIMUM_GC_ATTEMPTS,
+            )
+            if "gc_max_attempts" in table
+            else None
+        ),
+        gc_relative_efficiency=knots,
+        efficiency_classes=classes,
+    )
+
+
+def _bounded_count(value: Any, path: str, minimum: int, maximum: int) -> int:
+    """Un entero dentro de su dominio de contrato, nombrando los extremos."""
+
+    if not isinstance(value, Integer):
+        raise EditorError(path, "se esperaba un entero")
+    number = int(value)
+    if not minimum <= number <= maximum:
+        raise EditorError(path, f"tiene que estar entre {minimum} y {maximum}")
+    return number
 
 
 def _parse_stutter(table: Mapping[str, Any]) -> StutterForm:
@@ -1680,6 +2015,18 @@ def render_general_toml(form: GeneralForm) -> str:
             form.technical_event is not None
             and form.technical_event.stutter is not None
         )
+        # **Y la preparación amplificada también.** Sus dos claves viven en la
+        # misma versión que el tartamudeo, por la misma razón: el lector de
+        # Rust las admite solo en el documento que puede declarar
+        # microsatélites, y escribirlas en el anterior produce un fichero que
+        # el simulador rechaza como campo desconocido.
+        or (
+            form.technical_event is not None
+            and (
+                form.technical_event.library_preparation is not None
+                or form.technical_event.pcr is not None
+            )
+        )
     )
     document.add("schema_version", "4" if declares_repeats else "2")
     if form.seed is not None:
@@ -1929,6 +2276,26 @@ def render_general_toml(form: GeneralForm) -> str:
             )
         if event.stutter is not None:
             technical_event.add("stutter", _render_stutter(event.stutter))
+        if event.library_preparation is not None:
+            if event.library_preparation not in LIBRARY_PREPARATIONS:
+                raise EditorError(
+                    "technical_event.library_preparation",
+                    "las preparaciones admitidas son " + " y ".join(LIBRARY_PREPARATIONS),
+                )
+            technical_event.add("library_preparation", event.library_preparation)
+        if event.pcr is not None:
+            if event.library_preparation != "pcr":
+                raise EditorError(
+                    "technical_event.pcr",
+                    "la tabla de amplificación solo se admite con library_preparation = \"pcr\"",
+                )
+            technical_event.add("pcr", _render_pcr(event.pcr))
+        elif event.library_preparation == "pcr":
+            raise EditorError(
+                "technical_event.pcr",
+                "la preparación pcr exige la tabla technical_event.pcr, cuyos tres primeros "
+                "parámetros son obligatorios y no tienen valor por omisión",
+            )
         libraries = tomlkit.aot()
         for index, library in enumerate(event.libraries):
             path = f"technical_event.libraries[{index}]"
@@ -2013,6 +2380,97 @@ def _render_stutter(stutter: StutterForm) -> Any:
             locus_rates.append(entry)
         table.add("locus_rates", locus_rates)
     return table
+
+
+def _render_pcr(pcr: PcrForm) -> Any:
+    """Vuelca la amplificación al TOML conservando los literales declarados.
+
+    Lo que no se declaró **no se escribe**: los cuatro parámetros opcionales y
+    las dos tablas solo aparecen si el usuario los puso. Escribirlos con su
+    valor por omisión cambiaría los bytes del documento sin cambiar nada del
+    resultado, y la ida y la vuelta dejaría de ser una identidad.
+    """
+
+    path = "technical_event.pcr"
+    table = tomlkit.table()
+    table.add(
+        "duplicate_fraction",
+        _fraction_literal_item(pcr.duplicate_fraction, f"{path}.duplicate_fraction"),
+    )
+    table.add("cycles", _checked_count(pcr.cycles, f"{path}.cycles", 1, PCR_MAXIMUM_CYCLES))
+    table.add("efficiency", _fraction_literal_item(pcr.efficiency, f"{path}.efficiency"))
+    if pcr.early_cycles is not None:
+        table.add(
+            "early_cycles",
+            _checked_count(
+                pcr.early_cycles, f"{path}.early_cycles", 0, PCR_MAXIMUM_EARLY_CYCLES
+            ),
+        )
+    if pcr.max_family_size is not None:
+        table.add(
+            "max_family_size",
+            _checked_count(
+                pcr.max_family_size,
+                f"{path}.max_family_size",
+                1,
+                PCR_MAXIMUM_FAMILY_SIZE,
+            ),
+        )
+    if pcr.gc_max_attempts is not None:
+        table.add(
+            "gc_max_attempts",
+            _checked_count(
+                pcr.gc_max_attempts,
+                f"{path}.gc_max_attempts",
+                1,
+                PCR_MAXIMUM_GC_ATTEMPTS,
+            ),
+        )
+    if pcr.gc_relative_efficiency:
+        if len(pcr.gc_relative_efficiency) < 2:
+            raise EditorError(
+                f"{path}.gc_relative_efficiency",
+                "una curva de composición necesita al menos dos nudos",
+            )
+        knots = tomlkit.aot()
+        for index, row in enumerate(pcr.gc_relative_efficiency):
+            row_path = f"{path}.gc_relative_efficiency[{index}]"
+            entry = tomlkit.table()
+            entry.add(
+                "gc_fraction",
+                _fraction_literal_item(row.gc_fraction, f"{row_path}.gc_fraction"),
+            )
+            entry.add(
+                "relative_efficiency",
+                _fraction_literal_item(
+                    row.relative_efficiency, f"{row_path}.relative_efficiency"
+                ),
+            )
+            knots.append(entry)
+        table.add("gc_relative_efficiency", knots)
+    if pcr.efficiency_classes:
+        if len(pcr.efficiency_classes) > PCR_MAXIMUM_EFFICIENCY_CLASSES:
+            raise EditorError(
+                f"{path}.efficiency_classes",
+                f"el máximo de clases de eficiencia es {PCR_MAXIMUM_EFFICIENCY_CLASSES}",
+            )
+        classes = tomlkit.aot()
+        for index, row in enumerate(pcr.efficiency_classes):
+            row_path = f"{path}.efficiency_classes[{index}]"
+            entry = tomlkit.table()
+            entry.add(
+                "efficiency", _fraction_literal_item(row.efficiency, f"{row_path}.efficiency")
+            )
+            entry.add("weight", _fraction_literal_item(row.weight, f"{row_path}.weight"))
+            classes.append(entry)
+        table.add("efficiency_classes", classes)
+    return table
+
+
+def _checked_count(value: int, path: str, minimum: int, maximum: int) -> int:
+    if not minimum <= value <= maximum:
+        raise EditorError(path, f"tiene que estar entre {minimum} y {maximum}")
+    return value
 
 
 def _render_repeat_loci(form: GeneralForm) -> Any:

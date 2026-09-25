@@ -11,6 +11,11 @@ use std::fmt;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::pcr_amplification::{
+    PCR_AMPLIFICATION_ALGORITHM, PCR_DUPLICATE_FRACTION_INVERSION_ITERATIONS,
+    PCR_DUPLICATE_FRACTION_INVERSION_METHOD,
+};
+
 /// Identificador del único perfil incorporado inicialmente en F4.
 pub const GPS_HISEQX_PCRFREE_PE150_V1: &str = "gps-hiseqx-pcrfree-pe150-v1";
 /// Versión semántica del perfil, separada de la versión de su recurso JSON.
@@ -21,12 +26,55 @@ pub const GPS_HISEQX_PCRFREE_PE150_RESOURCE: &str = "resources/f4/gps-hiseqx-pcr
 pub const GPS_HISEQX_PCRFREE_PE150_SHA256: &str =
     "3d8878ab920237dae03705276a26dbb0823941830d531374d35aa1c540f6deea";
 
-const RESOURCE_BYTES: &[u8] = include_bytes!("../resources/f4/gps-hiseqx-pcrfree-pe150-v1.json");
+/// Identificador del perfil **hermano** con preparación amplificada (F4.9.1).
+///
+/// # Por qué es un recurso aparte y no una preparación más dentro del vigente
+///
+/// El nombre `pcrfree` del recurso vigente es **literal** en tres esquemas
+/// publicados y su SHA-256 está congelado en el código y en los documentos ya
+/// emitidos. Meter las dos preparaciones en un solo recurso cambiaría esos
+/// bytes y rompería los valores fijos de los esquemas. La decisión S-25 lo
+/// resuelve con un hermano: el vigente no se toca ni en un byte.
+pub const GPS_HISEQX_PCR_PE150_V1: &str = "gps-hiseqx-pcr-pe150-v1";
+/// Versión semántica del perfil amplificado.
+pub const GPS_HISEQX_PCR_PE150_PROFILE_VERSION: u8 = 1;
+/// Ruta reproducible del recurso amplificado dentro del árbol fuente.
+pub const GPS_HISEQX_PCR_PE150_RESOURCE: &str = "resources/f4/gps-hiseqx-pcr-pe150-v1.json";
+/// SHA-256 normativo del recurso amplificado.
+pub const GPS_HISEQX_PCR_PE150_SHA256: &str =
+    "83b00fb8d084df8f6aef0464fd2b0260cfefe3f89fc523b135da6bbf6595a03c";
 
-/// Preparación de biblioteca fija para el perfil inicial.
+// ---------------------------------------------------------------------------
+// Constantes de contrato de la amplificación (F4.9.2).
+//
+// **Una sola constante de Rust por cada una.** El recurso hermano, los dos
+// esquemas y la interfaz repiten estos mismos números en forma de `maximum`, y
+// un juez —`tests/pcr_contract.rs`— compara cada copia con su
+// constante. La copia decimal silenciosa de un máximo en un solo esquema es lo
+// que sobrevivió al cambio de contrato la vez anterior.
+// ---------------------------------------------------------------------------
+
+/// `C_MAX`: ciclos de PCR admitidos como máximo.
+pub const PCR_MAXIMUM_CYCLES: u32 = 30;
+/// `E_MAX`: ciclos explícitos admitidos como máximo.
+pub const PCR_MAXIMUM_EARLY_CYCLES: u32 = 6;
+/// `K_MAX`: tamaño máximo de familia admitido como máximo.
+pub const PCR_MAXIMUM_FAMILY_SIZE: u32 = 256;
+/// `A_MAX`: intentos de aceptación por composición admitidos como máximo.
+pub const PCR_MAXIMUM_GC_ATTEMPTS: u32 = 16;
+/// `Q_MAX`: clases de eficiencia admitidas como máximo.
+pub const PCR_MAXIMUM_EFFICIENCY_CLASSES: u32 = 4;
+/// `M_MAX`: parejas por molécula que la inversión numérica puede alcanzar.
+pub const PCR_MAXIMUM_MEAN_PAIRS_PER_MOLECULE: f64 = 64.0;
+
+const RESOURCE_BYTES: &[u8] = include_bytes!("../resources/f4/gps-hiseqx-pcrfree-pe150-v1.json");
+const PCR_RESOURCE_BYTES: &[u8] = include_bytes!("../resources/f4/gps-hiseqx-pcr-pe150-v1.json");
+
+/// Preparación de biblioteca de un perfil incorporado.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LibraryPreparation {
     PcrFree,
+    Pcr,
 }
 
 impl LibraryPreparation {
@@ -34,6 +82,26 @@ impl LibraryPreparation {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::PcrFree => "pcr_free",
+            Self::Pcr => "pcr",
+        }
+    }
+
+    /// Lee la preparación declarada por el autor del escenario.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "pcr_free" => Some(Self::PcrFree),
+            "pcr" => Some(Self::Pcr),
+            _ => None,
+        }
+    }
+
+    /// Identificador del perfil incorporado que corresponde a la preparación.
+    #[must_use]
+    pub const fn profile_id(self) -> &'static str {
+        match self {
+            Self::PcrFree => GPS_HISEQX_PCRFREE_PE150_V1,
+            Self::Pcr => GPS_HISEQX_PCR_PE150_V1,
         }
     }
 }
@@ -314,6 +382,106 @@ const INITIAL_PROFILE: F4TechnicalProfile = F4TechnicalProfile {
     },
 };
 
+/// Perfil hermano con preparación amplificada.
+///
+/// **Comparte literalmente** las curvas de calidad y la distribución de
+/// inserto del vigente: son las mismas constantes de Rust, no copias, de modo
+/// que no pueden separarse por descuido.
+const PCR_PROFILE: F4TechnicalProfile = F4TechnicalProfile {
+    id: GPS_HISEQX_PCR_PE150_V1,
+    version: GPS_HISEQX_PCR_PE150_PROFILE_VERSION,
+    resource_path: GPS_HISEQX_PCR_PE150_RESOURCE,
+    resource_sha256: GPS_HISEQX_PCR_PE150_SHA256,
+    preparation: LibraryPreparation::Pcr,
+    layout: ReadLayout::PairedEnd,
+    orientation: PairOrientation::Fr,
+    common_read_length: INITIAL_PROFILE.common_read_length,
+    insert_length: INITIAL_PROFILE.insert_length,
+    quality_r1: INITIAL_PROFILE.quality_r1,
+    quality_r2: INITIAL_PROFILE.quality_r2,
+};
+
+/// Hechos publicables de un perfil incorporado, **sin recalcular su huella**.
+///
+/// # Por qué existe aparte de [`resolve_f4_technical_profile`]
+///
+/// Resolver un perfil vuelve a leer el recurso incorporado y a calcular su
+/// SHA-256 entero. Eso está bien cuando hay que **comprobarlo**, que es al
+/// admitir la configuración, y está mal cuando solo hay que **publicar** su
+/// identificador y su ruta, que es lo que hacen el documento efectivo y el
+/// manifiesto cada vez que se escriben. Esta función devuelve los literales
+/// desde las constantes, sin tocar el recurso ni poder fallar.
+#[must_use]
+pub const fn f4_profile_facts(preparation: LibraryPreparation) -> F4ProfileFacts {
+    match preparation {
+        LibraryPreparation::PcrFree => F4ProfileFacts {
+            id: GPS_HISEQX_PCRFREE_PE150_V1,
+            resource_path: GPS_HISEQX_PCRFREE_PE150_RESOURCE,
+            sha256: GPS_HISEQX_PCRFREE_PE150_SHA256,
+            preparation: LibraryPreparation::PcrFree,
+            insert_length: INITIAL_PROFILE.insert_length,
+        },
+        LibraryPreparation::Pcr => F4ProfileFacts {
+            id: GPS_HISEQX_PCR_PE150_V1,
+            resource_path: GPS_HISEQX_PCR_PE150_RESOURCE,
+            sha256: GPS_HISEQX_PCR_PE150_SHA256,
+            preparation: LibraryPreparation::Pcr,
+            insert_length: PCR_PROFILE.insert_length,
+        },
+    }
+}
+
+/// Los mismos hechos, a partir del identificador publicado. `None` cuando el
+/// identificador no es el de ningún perfil incorporado.
+#[must_use]
+pub fn f4_profile_facts_by_id(profile_id: &str) -> Option<F4ProfileFacts> {
+    match profile_id {
+        GPS_HISEQX_PCRFREE_PE150_V1 => Some(f4_profile_facts(LibraryPreparation::PcrFree)),
+        GPS_HISEQX_PCR_PE150_V1 => Some(f4_profile_facts(LibraryPreparation::Pcr)),
+        _ => None,
+    }
+}
+
+/// La terna que identifica un perfil incorporado, siempre junta.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct F4ProfileFacts {
+    id: &'static str,
+    resource_path: &'static str,
+    sha256: &'static str,
+    preparation: LibraryPreparation,
+    insert_length: InsertLengthDistribution,
+}
+
+impl F4ProfileFacts {
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        self.id
+    }
+
+    #[must_use]
+    pub const fn resource_path(self) -> &'static str {
+        self.resource_path
+    }
+
+    #[must_use]
+    pub const fn sha256(self) -> &'static str {
+        self.sha256
+    }
+
+    #[must_use]
+    pub const fn preparation(self) -> LibraryPreparation {
+        self.preparation
+    }
+
+    /// La distribución de inserto, tomada del **mismo** perfil que el
+    /// validador del recurso comprueba: no es una copia con sus propios
+    /// literales.
+    #[must_use]
+    pub const fn insert_length(self) -> InsertLengthDistribution {
+        self.insert_length
+    }
+}
+
 /// Fallo estable al resolver o comprobar un perfil incorporado.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum F4TechnicalProfileError {
@@ -345,21 +513,35 @@ impl fmt::Display for F4TechnicalProfileError {
 
 impl std::error::Error for F4TechnicalProfileError {}
 
-/// Resuelve el único perfil de F4 después de comprobar el recurso incorporado.
+/// Resuelve un perfil incorporado de F4 después de comprobar su recurso.
 ///
 /// La frontera no interpreta aún un campo de configuración: permite que F4.1.2
 /// y F4.1.3 reciban un perfil tipado sin hacer del identificador una cadena
-/// implícita en sus algoritmos.
+/// implícita en sus algoritmos. Desde F4.9.1 hay **dos** perfiles hermanos, y
+/// el identificador elige entre ellos.
 pub fn resolve_f4_technical_profile(
     profile_id: &str,
 ) -> Result<F4TechnicalProfile, F4TechnicalProfileError> {
-    if profile_id != GPS_HISEQX_PCRFREE_PE150_V1 {
-        return Err(F4TechnicalProfileError::UnknownProfile {
+    match profile_id {
+        GPS_HISEQX_PCRFREE_PE150_V1 => {
+            verify_initial_profile_resource()?;
+            Ok(INITIAL_PROFILE)
+        }
+        GPS_HISEQX_PCR_PE150_V1 => {
+            verify_pcr_profile_resource()?;
+            Ok(PCR_PROFILE)
+        }
+        _ => Err(F4TechnicalProfileError::UnknownProfile {
             requested: profile_id.to_owned(),
-        });
+        }),
     }
-    verify_initial_profile_resource()?;
-    Ok(INITIAL_PROFILE)
+}
+
+/// Resuelve el perfil incorporado que corresponde a una preparación.
+pub fn resolve_f4_technical_profile_for(
+    preparation: LibraryPreparation,
+) -> Result<F4TechnicalProfile, F4TechnicalProfileError> {
+    resolve_f4_technical_profile(preparation.profile_id())
 }
 
 /// Comprueba el recurso literal y su SHA-256 antes de que un consumidor F4 lo
@@ -376,6 +558,20 @@ pub fn verify_initial_profile_resource() -> Result<(), F4TechnicalProfileError> 
         }
     })?;
     validate_resource(&value)
+}
+
+/// Comprueba el recurso hermano de la preparación amplificada.
+pub fn verify_pcr_profile_resource() -> Result<(), F4TechnicalProfileError> {
+    let observed = format!("{:x}", Sha256::digest(PCR_RESOURCE_BYTES));
+    if observed != GPS_HISEQX_PCR_PE150_SHA256 {
+        return Err(F4TechnicalProfileError::ResourceDigestMismatch { observed });
+    }
+    let value: Value = serde_json::from_slice(PCR_RESOURCE_BYTES).map_err(|_| {
+        F4TechnicalProfileError::InvalidResource {
+            detail: "JSON no legible",
+        }
+    })?;
+    validate_pcr_resource(&value)
 }
 
 fn validate_resource(value: &Value) -> Result<(), F4TechnicalProfileError> {
@@ -408,7 +604,113 @@ fn validate_resource(value: &Value) -> Result<(), F4TechnicalProfileError> {
     validate_insert(required(root, "insert")?)?;
     validate_quality(required(root, "quality")?)?;
     validate_error(required(root, "error")?)?;
-    validate_reproducibility(required(root, "reproducibility")?)
+    validate_reproducibility(required(root, "reproducibility")?, "f4-technical-v3")
+}
+
+/// Valida el recurso hermano.
+///
+/// Las cuatro secciones que el plan exige **idénticas** —lectura, inserto,
+/// calidad y error— se comprueban con las **mismas** funciones que el recurso
+/// vigente, no con copias: si alguien tocara un valor de una de ellas en el
+/// hermano, este validador lo rechazaría aquí, que es exactamente lo que
+/// significa «idéntico» en el contrato.
+fn validate_pcr_resource(value: &Value) -> Result<(), F4TechnicalProfileError> {
+    let root = object(value, "raíz")?;
+    exact_fields(
+        root,
+        &[
+            "schema_version",
+            "profile_id",
+            "classification",
+            "description",
+            "external_reference",
+            "preparation",
+            "read",
+            "insert",
+            "quality",
+            "error",
+            "amplification",
+            "reproducibility",
+        ],
+        "raíz",
+    )?;
+    required_text(root, "schema_version", "1")?;
+    required_text(root, "profile_id", GPS_HISEQX_PCR_PE150_V1)?;
+    required_text(
+        root,
+        "classification",
+        "approximate_synthetic_not_empirical_calibration",
+    )?;
+    required_text(root, "preparation", LibraryPreparation::Pcr.as_str())?;
+    validate_external_reference(required(root, "external_reference")?)?;
+    validate_read(required(root, "read")?)?;
+    validate_insert(required(root, "insert")?)?;
+    validate_quality(required(root, "quality")?)?;
+    validate_error(required(root, "error")?)?;
+    validate_amplification(required(root, "amplification")?)?;
+    validate_reproducibility(required(root, "reproducibility")?, "f4-technical-v5")
+}
+
+/// Los dominios de la amplificación, comparados **contra las constantes de
+/// contrato**, nunca contra literales repetidos aquí.
+fn validate_amplification(value: &Value) -> Result<(), F4TechnicalProfileError> {
+    let object = object(value, "amplification")?;
+    exact_fields(
+        object,
+        &[
+            "algorithm",
+            "duplicate_fraction_inversion",
+            "duplicate_fraction_inversion_iterations",
+            "maximum_cycles",
+            "maximum_early_cycles",
+            "maximum_family_size",
+            "maximum_gc_attempts",
+            "maximum_efficiency_classes",
+            "maximum_mean_pairs_per_molecule",
+        ],
+        "amplification",
+    )?;
+    required_text(object, "algorithm", PCR_AMPLIFICATION_ALGORITHM)?;
+    required_text(
+        object,
+        "duplicate_fraction_inversion",
+        PCR_DUPLICATE_FRACTION_INVERSION_METHOD,
+    )?;
+    required_u64(
+        object,
+        "duplicate_fraction_inversion_iterations",
+        u64::from(PCR_DUPLICATE_FRACTION_INVERSION_ITERATIONS),
+    )?;
+    required_u64(object, "maximum_cycles", u64::from(PCR_MAXIMUM_CYCLES))?;
+    required_u64(
+        object,
+        "maximum_early_cycles",
+        u64::from(PCR_MAXIMUM_EARLY_CYCLES),
+    )?;
+    required_u64(
+        object,
+        "maximum_family_size",
+        u64::from(PCR_MAXIMUM_FAMILY_SIZE),
+    )?;
+    required_u64(
+        object,
+        "maximum_gc_attempts",
+        u64::from(PCR_MAXIMUM_GC_ATTEMPTS),
+    )?;
+    required_u64(
+        object,
+        "maximum_efficiency_classes",
+        u64::from(PCR_MAXIMUM_EFFICIENCY_CLASSES),
+    )?;
+    // El máximo de parejas por molécula es el único dominio con parte
+    // fraccionaria posible, de modo que se compara como número, no como entero.
+    let declared = object
+        .get("maximum_mean_pairs_per_molecule")
+        .and_then(Value::as_f64);
+    if declared != Some(PCR_MAXIMUM_MEAN_PAIRS_PER_MOLECULE) {
+        return invalid("amplification.maximum_mean_pairs_per_molecule no coincide con M_MAX");
+    }
+    Ok(())
 }
 
 fn validate_external_reference(value: &Value) -> Result<(), F4TechnicalProfileError> {
@@ -540,14 +842,17 @@ fn validate_error(value: &Value) -> Result<(), F4TechnicalProfileError> {
     required_text(object, "substitution_matrix", "deferred_dtf_053")
 }
 
-fn validate_reproducibility(value: &Value) -> Result<(), F4TechnicalProfileError> {
+fn validate_reproducibility(
+    value: &Value,
+    catalog: &'static str,
+) -> Result<(), F4TechnicalProfileError> {
     let object = object(value, "reproducibility")?;
     exact_fields(
         object,
         &["rng_catalog", "profile_algorithm_version"],
         "reproducibility",
     )?;
-    required_text(object, "rng_catalog", "f4-technical-v3")?;
+    required_text(object, "rng_catalog", catalog)?;
     required_text(object, "profile_algorithm_version", "1")
 }
 

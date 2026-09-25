@@ -409,6 +409,7 @@ impl Fixture {
             realized_chimera_pairs: 0,
             biological_contamination: &[],
             stutter: None,
+            pcr: None,
             diagnostics: &[],
         };
         let event_path = output.join(event_manifest_relative_path(event.event_id()));

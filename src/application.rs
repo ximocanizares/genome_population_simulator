@@ -34,6 +34,7 @@ use crate::identity::{
     AutomaticIdRequest, EventId, ExecutionId, FounderKey, IdClass, IdentityRegistry, IndividualId,
     PopulationId, ReferenceId, RepeatLocusId, SequenceId,
 };
+use crate::pcr_amplification::PcrSettings;
 use crate::population_snvs::{
     FrequencyAssignmentMode, FrequencySampling, FrequencySpectrumComponent,
     GeneratedFrequencySpectrum, GeneratedLocusCount, GeneratedPopulationFrequency,
@@ -47,7 +48,7 @@ use crate::randomness::{
 use crate::reference_generation::normalize_composition_probabilities;
 use crate::stutter::{StutterError, StutterMotifLengthRates, StutterSettings, StutterStepWeights};
 use crate::tandem_repeat::{RepeatMotif, TandemRepeatLocus, TandemRepeatTract};
-use crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1;
+use crate::technical_profile::LibraryPreparation;
 use crate::vcf_contract::VcfOutputMode;
 
 /// Antes de poder resolver el límite declarado por el escenario, el TOML
@@ -1016,6 +1017,11 @@ pub struct EffectiveTechnicalEvent {
     index_hopping_rate: f64,
     biological_contamination: BiologicalContaminationSettings,
     stutter: StutterSettings,
+    /// Preparación efectiva de la biblioteca. Por omisión, sin amplificar.
+    preparation: LibraryPreparation,
+    /// Parámetros efectivos de la amplificación. `None` con preparación sin
+    /// PCR, y entonces ni el documento efectivo ni el manifiesto la mencionan.
+    pcr: Option<PcrSettings>,
     libraries: Vec<EffectiveTechnicalLibrary>,
 }
 
@@ -1067,9 +1073,31 @@ impl EffectiveTechnicalEvent {
         &self.libraries
     }
 
+    /// Identificador del perfil incorporado que corresponde a la preparación.
     #[must_use]
     pub const fn profile(&self) -> &'static str {
-        GPS_HISEQX_PCRFREE_PE150_V1
+        self.preparation.profile_id()
+    }
+
+    /// Preparación efectiva de la biblioteca.
+    #[must_use]
+    pub const fn preparation(&self) -> LibraryPreparation {
+        self.preparation
+    }
+
+    /// Parámetros efectivos de la amplificación, si la hay.
+    #[must_use]
+    pub const fn pcr(&self) -> Option<&PcrSettings> {
+        self.pcr.as_ref()
+    }
+
+    /// Plan tipado que se entrega al muestreador PE. Apagado sin amplificación.
+    #[must_use]
+    pub fn pcr_plan(&self) -> crate::pcr_amplification::PcrPlan {
+        self.pcr.clone().map_or_else(
+            crate::pcr_amplification::PcrPlan::default,
+            crate::pcr_amplification::PcrPlan::new,
+        )
     }
 
     #[must_use]
@@ -1123,7 +1151,7 @@ impl EffectiveTechnicalEvent {
     /// PCR efectiva que pueda configurar o materializar F4.
     #[must_use]
     pub const fn pcr_duplicates_applicable(&self) -> bool {
-        false
+        self.pcr.is_some()
     }
 
     /// El perfil inicial tampoco modela duplicados ópticos. El recuento es un
@@ -1319,6 +1347,20 @@ impl EffectiveConfig {
             })
             .collect();
         crate::stutter::StutterPlan::new(settings, loci)
+    }
+
+    /// Plan de amplificación del evento técnico de esta ejecución.
+    ///
+    /// Sin evento técnico, o con preparación sin PCR, el plan está **apagado**
+    /// y el recorrido no abre la etapa `amplification` ni consume una sola
+    /// palabra aleatoria.
+    #[must_use]
+    pub fn pcr_plan(&self) -> crate::pcr_amplification::PcrPlan {
+        self.technical_event
+            .as_ref()
+            .map_or_else(crate::pcr_amplification::PcrPlan::default, |event| {
+                event.pcr_plan()
+            })
     }
 
     /// Cota superior de bases de tracto publicadas, calculada sobre lo
@@ -2101,6 +2143,7 @@ pub fn build_effective_config_with_entropy(
     // efectivo, y su rechazo ocurre aquí: antes de materializar a nadie.
     let repeat_output_budget = repeat_output_budget(general, &repeat_loci, &initial_populations)?;
     admit_loci_against_stutter(general, technical_event.as_ref(), &repeat_loci)?;
+    admit_amplified_preparation_against_loci(general, technical_event.as_ref(), &repeat_loci)?;
     Ok(EffectiveConfig {
         source_path: general.source().path().display().to_string(),
         reference_id: general.reference().id.value().clone(),
@@ -2165,6 +2208,52 @@ pub fn build_effective_config_with_entropy(
 /// locus, porque en ese momento todavía no se sabe si habrá tartamudeo. Solo
 /// puede comprobarse cuando las dos configuraciones están resueltas, que es
 /// aquí.
+/// **Rechazo temporal** de la preparación amplificada sobre un escenario con
+/// microsatélites declarados.
+///
+/// # Por qué se rechaza en vez de publicar
+///
+/// El tartamudeo clonal heredable por linaje todavía no existe. Mientras no
+/// exista, una biblioteca amplificada sobre un escenario con loci declarados
+/// tartamudearía **solo con la parte de base** —la de la química de agrupación
+/// y la síntesis— y quedaría **por debajo de lo medido**: entre un 14 % y un
+/// 28 % menos en motivos de uno a cinco pares de base. Antes que publicar una
+/// cifra que se sabe baja, la configuración rechaza la combinación y nombra el
+/// paso pendiente. El rechazo se levanta cuando ese paso exista.
+///
+/// Reutiliza el código de diagnóstico de configuración que ya existe, en vez
+/// de abrir uno nuevo: el manifiesto del recorrido general valida sus
+/// diagnósticos contra el catálogo histórico congelado, y un código nuevo se
+/// vería rechazado al publicar precisamente el fallo que debía informar. La
+/// limitación está registrada aparte, en DT-007.
+fn admit_amplified_preparation_against_loci(
+    general: &DeclaredGeneralConfig,
+    technical_event: Option<&EffectiveTechnicalEvent>,
+    repeat_loci: &[EffectiveRepeatLocus],
+) -> Result<(), Diagnostic> {
+    let Some(event) = technical_event else {
+        return Ok(());
+    };
+    if event.preparation() != LibraryPreparation::Pcr || repeat_loci.is_empty() {
+        return Ok(());
+    }
+    Err(config_error(
+        general,
+        "technical_event.library_preparation,reference.repeat_loci",
+        format!(
+            "la preparación amplificada por PCR todavía no puede combinarse con loci de \
+             repetición declarados ({} declarados, el primero es {}): el tartamudeo clonal \
+             heredable por linaje está pendiente, y sin él una biblioteca amplificada \
+             subestimaría el tartamudeo entre un 14 % y un 28 % según la longitud del motivo. \
+             Se levanta cuando ese paso exista; hasta entonces, o se quitan los loci o se usa \
+             library_preparation = \"{}\"",
+            repeat_loci.len(),
+            repeat_loci.first().map_or("", EffectiveRepeatLocus::id),
+            LibraryPreparation::PcrFree.as_str()
+        ),
+    ))
+}
+
 fn admit_loci_against_stutter(
     general: &DeclaredGeneralConfig,
     technical_event: Option<&EffectiveTechnicalEvent>,
@@ -2597,6 +2686,7 @@ fn effective_technical_event(
     }
     libraries.sort_by(|left, right| left.individual_id.cmp(&right.individual_id));
     let stutter = effective_stutter(general, declared.stutter.as_ref())?;
+    let (preparation, pcr) = effective_pcr(general, declared)?;
     Ok(Some(EffectiveTechnicalEvent {
         event_id,
         individual_ids,
@@ -2607,8 +2697,278 @@ fn effective_technical_event(
         index_hopping_rate,
         biological_contamination,
         stutter,
+        preparation,
+        pcr,
         libraries,
     }))
+}
+
+/// Resuelve `[technical_event.library_preparation]` y `[technical_event.pcr]`.
+///
+/// # Las tres reglas que gobiernan esta tabla
+///
+/// 1. La tabla **solo** se admite con preparación `pcr`. Presente con la
+///    preparación sin amplificar, se rechaza: aceptarla en silencio dejaría al
+///    usuario creyendo que declaró una amplificación que nadie iba a hacer.
+/// 2. Con preparación `pcr` la tabla es **obligatoria**, y dentro de ella lo
+///    son la fracción de duplicados, los ciclos y la eficiencia. Ninguno tiene
+///    valor por omisión.
+/// 3. Todo dominio se comprueba **antes** de simular, nombrando parámetro y
+///    valor.
+fn effective_pcr(
+    general: &DeclaredGeneralConfig,
+    declared: &crate::configuration::DeclaredTechnicalEvent,
+) -> Result<(LibraryPreparation, Option<PcrSettings>), Diagnostic> {
+    let preparation = match declared.library_preparation.as_ref() {
+        None => LibraryPreparation::PcrFree,
+        Some(value) => LibraryPreparation::parse(value.value()).ok_or_else(|| {
+            config_error(
+                general,
+                "technical_event.library_preparation",
+                format!(
+                    "la preparación {} no existe; las admitidas son {} y {}",
+                    value.value(),
+                    LibraryPreparation::PcrFree.as_str(),
+                    LibraryPreparation::Pcr.as_str()
+                ),
+            )
+        })?,
+    };
+    let Some(table) = declared.pcr.as_ref() else {
+        if preparation == LibraryPreparation::Pcr {
+            return Err(config_error(
+                general,
+                "technical_event.pcr",
+                "la preparación pcr exige la tabla technical_event.pcr con la fracción de \
+                 duplicados esperada, los ciclos y la eficiencia por ciclo, que son obligatorios \
+                 y no tienen valor por omisión",
+            ));
+        }
+        return Ok((preparation, None));
+    };
+    if preparation != LibraryPreparation::Pcr {
+        return Err(config_error(
+            general,
+            "technical_event.pcr",
+            format!(
+                "la tabla technical_event.pcr solo se admite con library_preparation = \"{}\"; \
+                 la declarada es \"{}\"",
+                LibraryPreparation::Pcr.as_str(),
+                preparation.as_str()
+            ),
+        ));
+    }
+    let cycles = u32::try_from(*declared_cycles(table)).map_err(|_| {
+        config_error(
+            general,
+            "technical_event.pcr.cycles",
+            format!(
+                "los ciclos deben ser un entero entre 1 y {}",
+                crate::technical_profile::PCR_MAXIMUM_CYCLES
+            ),
+        )
+    })?;
+    let parameters = crate::pcr_amplification::DeclaredPcrParameters {
+        duplicate_fraction: parse_pcr_number(
+            general,
+            &table.duplicate_fraction,
+            "technical_event.pcr.duplicate_fraction",
+        )?,
+        cycles,
+        efficiency: parse_pcr_number(general, &table.efficiency, "technical_event.pcr.efficiency")?,
+        early_cycles: optional_pcr_count(
+            general,
+            table.early_cycles.as_ref(),
+            "technical_event.pcr.early_cycles",
+        )?,
+        max_family_size: optional_pcr_count(
+            general,
+            table.max_family_size.as_ref(),
+            "technical_event.pcr.max_family_size",
+        )?,
+        gc_max_attempts: optional_pcr_count(
+            general,
+            table.gc_max_attempts.as_ref(),
+            "technical_event.pcr.gc_max_attempts",
+        )?,
+        gc_curve: if table.gc_relative_efficiency.is_empty() {
+            None
+        } else {
+            Some(
+                table
+                    .gc_relative_efficiency
+                    .iter()
+                    .map(|knot| {
+                        Ok((
+                            parse_pcr_number(
+                                general,
+                                &knot.gc_fraction,
+                                "technical_event.pcr.gc_relative_efficiency.gc_fraction",
+                            )?,
+                            parse_pcr_number(
+                                general,
+                                &knot.relative_efficiency,
+                                "technical_event.pcr.gc_relative_efficiency.relative_efficiency",
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Diagnostic>>()?,
+            )
+        },
+        efficiency_classes: table
+            .efficiency_classes
+            .iter()
+            .map(|class| {
+                Ok((
+                    parse_pcr_number(
+                        general,
+                        &class.efficiency,
+                        "technical_event.pcr.efficiency_classes.efficiency",
+                    )?,
+                    parse_pcr_number(
+                        general,
+                        &class.weight,
+                        "technical_event.pcr.efficiency_classes.weight",
+                    )?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?,
+    };
+    let tolerance = effective_normalization_tolerance(general)?;
+    let settings = PcrSettings::new(&parameters, tolerance)
+        .map_err(|error| pcr_config_error(general, &error))?;
+    Ok((preparation, Some(settings)))
+}
+
+const fn declared_cycles(table: &crate::configuration::DeclaredPcr) -> &u64 {
+    table.cycles.value()
+}
+
+fn parse_pcr_number(
+    general: &DeclaredGeneralConfig,
+    value: &crate::configuration::DeclaredNumber,
+    field: &str,
+) -> Result<f64, Diagnostic> {
+    value
+        .literal()
+        .parse::<f64>()
+        .map_err(|_| config_error(general, field, "debe ser un f64 válido"))
+}
+
+fn optional_pcr_count(
+    general: &DeclaredGeneralConfig,
+    value: Option<&crate::configuration::Located<u64>>,
+    field: &str,
+) -> Result<Option<u32>, Diagnostic> {
+    value
+        .map(|located| {
+            u32::try_from(*located.value())
+                .map_err(|_| config_error(general, field, "está fuera del dominio del contrato"))
+        })
+        .transpose()
+}
+
+/// Traduce el rechazo del modelo puro a un diagnóstico que nombra el parámetro
+/// y su valor, que es lo que permite corregir la configuración sin adivinar.
+fn pcr_config_error(
+    general: &DeclaredGeneralConfig,
+    error: &crate::pcr_amplification::PcrAmplificationError,
+) -> Diagnostic {
+    use crate::pcr_amplification::PcrAmplificationError as Error;
+    let (field, detail) = match error {
+        Error::InvalidDuplicateFraction { value } => (
+            "technical_event.pcr.duplicate_fraction",
+            format!(
+                "la fracción de duplicados {value} debe ser finita y estar en [0, 1); es la \
+                 fracción ESPERADA de una biblioteca homogénea, no la realizada, y no tiene \
+                 valor por omisión"
+            ),
+        ),
+        Error::UnreachableDuplicateFraction {
+            value,
+            maximum_reachable,
+            maximum_mean_pairs_per_molecule,
+        } => (
+            "technical_event.pcr.duplicate_fraction",
+            format!(
+                "la fracción de duplicados {value} está por encima de la máxima alcanzable \
+                 {maximum_reachable}, que es la que produce el tope de \
+                 {maximum_mean_pairs_per_molecule} parejas por molécula; no se pinza en silencio"
+            ),
+        ),
+        Error::InvalidCycles { value, maximum } => (
+            "technical_event.pcr.cycles",
+            format!("los ciclos {value} deben ser un entero entre 1 y {maximum}"),
+        ),
+        Error::InvalidEfficiency { value } => (
+            "technical_event.pcr.efficiency",
+            format!("la eficiencia por ciclo {value} debe estar en (0, 1]"),
+        ),
+        Error::InvalidEarlyCycles {
+            value,
+            maximum,
+            cycles,
+        } => (
+            "technical_event.pcr.early_cycles",
+            format!(
+                "los ciclos explícitos {value} deben estar entre 0 y {maximum} y no superar los \
+                 {cycles} ciclos declarados"
+            ),
+        ),
+        Error::InvalidMaxFamilySize { value, maximum } => (
+            "technical_event.pcr.max_family_size",
+            format!("el tamaño máximo de familia {value} debe estar entre 1 y {maximum}"),
+        ),
+        Error::InvalidGcAttempts { value, maximum } => (
+            "technical_event.pcr.gc_max_attempts",
+            format!("los intentos de composición {value} deben estar entre 1 y {maximum}"),
+        ),
+        Error::InvalidGcCurveKnot {
+            gc_fraction,
+            relative_efficiency,
+        } => (
+            "technical_event.pcr.gc_relative_efficiency",
+            format!(
+                "el nudo de fracción {gc_fraction} con eficiencia relativa \
+                 {relative_efficiency} está fuera de dominio: la fracción va en [0, 1] y la \
+                 eficiencia relativa en (0, 1]"
+            ),
+        ),
+        Error::NonIncreasingGcCurveKnots { previous, found } => (
+            "technical_event.pcr.gc_relative_efficiency",
+            format!(
+                "los nudos de la curva deben ser estrictamente crecientes: tras {previous} llega \
+                 {found}"
+            ),
+        ),
+        Error::ShortGcCurve { knots } => (
+            "technical_event.pcr.gc_relative_efficiency",
+            format!("la curva declara {knots} nudos y necesita al menos dos"),
+        ),
+        Error::TooManyEfficiencyClasses { value, maximum } => (
+            "technical_event.pcr.efficiency_classes",
+            format!("se declaran {value} clases de eficiencia y el máximo es {maximum}"),
+        ),
+        Error::InvalidEfficiencyClass { efficiency, weight } => (
+            "technical_event.pcr.efficiency_classes",
+            format!(
+                "la clase de eficiencia {efficiency} con peso {weight} está fuera de dominio: la \
+                 eficiencia va en (0, 1] y el peso no puede ser negativo"
+            ),
+        ),
+        Error::EfficiencyClassWeightsNotNormalized { sum, tolerance } => (
+            "technical_event.pcr.efficiency_classes",
+            format!(
+                "los pesos de las clases de eficiencia suman {sum} y deben sumar 1 dentro de la \
+                 tolerancia de normalización {tolerance}"
+            ),
+        ),
+        Error::NumericFailure => (
+            "technical_event.pcr",
+            "la derivación de los parámetros de amplificación falló numéricamente".to_owned(),
+        ),
+    };
+    config_error(general, field, detail)
 }
 
 /// Resuelve `[technical_event.stutter]` a los parámetros efectivos.

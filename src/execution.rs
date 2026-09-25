@@ -755,11 +755,20 @@ fn publish_technical_event(
     // mismo objeto pero sí tendría que dar la misma decisión; resolverlo aquí
     // hace que esa igualdad no dependa de nadie.
     let stutter_plan = effective.stutter_plan();
+    // El plan de amplificación se resuelve **una vez**, por la misma razón que
+    // el de tartamudeo: las parejas se regeneran varias veces y las dos
+    // pasadas tienen que abrir exactamente las mismas familias.
+    let pcr_plan = effective.pcr_plan();
     // La primera pasada conserva exclusivamente las claves PH y los hechos de
     // quimera; las secuencias se regeneran bajo demanda en la materialización.
     let mut clean_libraries = Vec::with_capacity(libraries.len());
     let mut realized_chimera_pairs = 0_u64;
     let mut stutter_accumulator = crate::stutter::StutterAccumulator::default();
+    let mut pcr_accumulator = crate::pcr_amplification::PcrAccumulator::default();
+    // La cota se acumula **antes de iterar** cada muestreador, desde la
+    // configuración y la geometría ya conocidas: es un valor calculado sin
+    // ejecutar, no una medida.
+    let mut pcr_bound = crate::pcr_amplification::PcrResourceBound::empty();
     for library in &libraries {
         let (individual, population_id) =
             individuals.get(library.individual_id()).ok_or_else(|| {
@@ -787,8 +796,29 @@ fn publish_technical_event(
             profile,
             event,
             &stutter_plan,
+            &pcr_plan,
         )
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
+        if let Some(settings) = pcr_plan.settings() {
+            let haplotype_copies = individual
+                .sequences()
+                .iter()
+                .map(|genotype| genotype.copies().len() as u64)
+                .sum::<u64>();
+            pcr_bound = pcr_bound.combine(crate::pcr_amplification::resource_bound(
+                settings,
+                sampler
+                    .coverage_plan()
+                    .map_or(0, crate::wgs_sampling::WgsPairedEndPlan::pair_count),
+                haplotype_copies,
+                u64::from(profile.insert_length().maximum_bases()),
+                // Los tractos de repetición **no cuentan todavía**: la
+                // preparación amplificada rechaza por ahora los escenarios que
+                // declaran loci, así que este término es cero hasta que el
+                // tartamudeo clonal exista.
+                0,
+            ));
+        }
         let mut keys = Vec::new();
         for pair in &mut sampler {
             let pair = pair.map_err(|error| {
@@ -814,6 +844,11 @@ fn publish_technical_event(
                     link: None,
                 })
             })?;
+        // Los recuentos de la amplificación se recogen **de la primera
+        // pasada**, igual que los de quimera y tartamudeo: las regeneraciones
+        // posteriores repiten las mismas familias y contarlas otra vez las
+        // duplicaría.
+        pcr_accumulator.merge(&sampler.pcr_report());
         realized_chimera_pairs = realized_chimera_pairs
             .checked_add(sampler.chimera_report().realized_pairs())
             .ok_or_else(|| {
@@ -932,6 +967,7 @@ fn publish_technical_event(
             event,
             effective.reproducibility().root_seed(),
             &stutter_plan,
+            &pcr_plan,
         )
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         donor_pairs.insert(*seat, collected);
@@ -955,6 +991,7 @@ fn publish_technical_event(
             event,
             effective.reproducibility().root_seed(),
             &stutter_plan,
+            &pcr_plan,
         )
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         let report = materializer
@@ -1051,6 +1088,7 @@ fn publish_technical_event(
             event,
             effective.reproducibility().root_seed(),
             &stutter_plan,
+            &pcr_plan,
         )
         .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))?;
         for key in clean.own_pairs() {
@@ -1205,6 +1243,21 @@ fn publish_technical_event(
                     })
                     .collect(),
             }),
+        // La sección solo existe con preparación amplificada: con la
+        // preparación sin PCR, `artifacts.pcr` conserva exactamente los bytes
+        // de antes de esta ampliación.
+        event.pcr().map(|settings| {
+            let report = pcr_accumulator.clone().report();
+            crate::event_manifest::EventManifestPcr {
+                settings: settings.clone(),
+                report,
+                bound: pcr_bound,
+                basic_wgs_coverage_x: coverage
+                    .iter()
+                    .map(|entry| entry.report.basic_wgs_x())
+                    .sum(),
+            }
+        }),
     )
     .map_err(|cause| Box::new(TechnicalEventAssemblyFailure { cause, link: None }))
 }
@@ -1239,6 +1292,7 @@ fn paired_sampler<'a>(
     profile: crate::technical_profile::F4TechnicalProfile,
     event: &crate::application::EffectiveTechnicalEvent,
     stutter: &crate::stutter::StutterPlan,
+    pcr: &crate::pcr_amplification::PcrPlan,
 ) -> Result<WgsPairedEndSampler<'a>, Diagnostic> {
     let sampler = match event.target() {
         EffectiveTechnicalEventTarget::CoverageWgs(target) => {
@@ -1270,6 +1324,7 @@ fn paired_sampler<'a>(
             sampler
                 .with_effective_technical_event(event)
                 .with_stutter_plan(stutter.clone())
+                .with_pcr_plan(pcr.clone())
         })
         // El rechazo de admisión de DT-006 (`ImpracticalInsertSampling`) nunca
         // llega aquí: se dispara dentro de `sample_next_pair`, al iterar, no
@@ -1353,6 +1408,7 @@ impl RegeneratedPairs {
         event: &crate::application::EffectiveTechnicalEvent,
         root_seed: crate::randomness::RootSeed,
         stutter: &crate::stutter::StutterPlan,
+        pcr: &crate::pcr_amplification::PcrPlan,
     ) -> Result<Self, Diagnostic> {
         let wanted = clean
             .own_pairs()
@@ -1370,6 +1426,7 @@ impl RegeneratedPairs {
                 event,
                 root_seed,
                 stutter,
+                pcr,
             )?,
         })
     }
@@ -1393,6 +1450,7 @@ impl RegeneratedPairs {
         event: &crate::application::EffectiveTechnicalEvent,
         root_seed: crate::randomness::RootSeed,
         stutter: &crate::stutter::StutterPlan,
+        pcr: &crate::pcr_amplification::PcrPlan,
     ) -> Result<
         BTreeMap<crate::identity::CompactPreHopInstanceId, ObservedPairTransformation>,
         Diagnostic,
@@ -1403,7 +1461,9 @@ impl RegeneratedPairs {
             .ok_or_else(|| {
                 technical_event_error("biological_contamination", "individuo ausente")
             })?;
-        let sampler = paired_sampler(reference, individual, identities, profile, event, stutter)?;
+        let sampler = paired_sampler(
+            reference, individual, identities, profile, event, stutter, pcr,
+        )?;
         let mut pairs = BTreeMap::new();
         for pair in sampler {
             let pair = pair.map_err(wgs_paired_sampler_error)?;
@@ -1450,8 +1510,19 @@ fn write_event_manifest(
     realized_chimera_pairs: u64,
     biological_contamination: &[crate::biological_contamination::BiologicalContaminationManifestRecipient],
     stutter: Option<crate::event_manifest::EventManifestStutter>,
+    pcr: Option<crate::event_manifest::EventManifestPcr>,
 ) -> Result<ManifestEventLink, Diagnostic> {
     let stutter_present = stutter.is_some();
+    let pcr_present = pcr.is_some();
+    let profile_id = event.profile();
+    let profile_sha256 = match event.preparation() {
+        crate::technical_profile::LibraryPreparation::PcrFree => {
+            crate::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256
+        }
+        crate::technical_profile::LibraryPreparation::Pcr => {
+            crate::technical_profile::GPS_HISEQX_PCR_PE150_SHA256
+        }
+    };
     let artifacts = outputs
         .iter()
         .map(|output| EventManifestArtifact {
@@ -1482,6 +1553,7 @@ fn write_event_manifest(
         realized_chimera_pairs,
         biological_contamination,
         stutter,
+        pcr,
         diagnostics: &[],
     };
     let bytes = event_manifest_bytes(&document)?;
@@ -1507,7 +1579,11 @@ fn write_event_manifest(
         manifest_artifact_id: artifact.id,
         chimera_rate: event.chimera_rate(),
         realized_chimera_pairs,
-        rng_catalog: if stutter_present {
+        profile_id,
+        profile_sha256,
+        rng_catalog: if pcr_present {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+        } else if stutter_present {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
         } else {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V3

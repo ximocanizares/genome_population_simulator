@@ -205,6 +205,7 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
         realized_chimera_pairs: 0,
         biological_contamination: &[],
         stutter: None,
+        pcr: None,
         diagnostics: std::slice::from_ref(&failure),
     };
     let bytes = event_manifest_bytes(&event_document).expect("failed event bytes");
@@ -238,6 +239,9 @@ fn controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest() {
         manifest_artifact_id: event_record.id,
         chimera_rate: event.chimera_rate(),
         realized_chimera_pairs: 0,
+        profile_id: genome_population_simulator::technical_profile::GPS_HISEQX_PCRFREE_PE150_V1,
+        profile_sha256:
+            genome_population_simulator::technical_profile::GPS_HISEQX_PCRFREE_PE150_SHA256,
         rng_catalog: genome_population_simulator::randomness::F4_TECHNICAL_RNG_CATALOG_V3,
     }];
     let references = [ManifestReferenceLink {
