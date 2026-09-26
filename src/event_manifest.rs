@@ -1904,7 +1904,7 @@ fn validate_pcr_manifest(
     if present != 0 && present != lineage_fields.len() {
         return Err(event_error(
             path,
-            "la sección de tartamudeo clonal y sus dos recuentos de linaje van juntos o no van",
+            "la sección de tartamudeo clonal y sus tres recuentos de linaje van juntos o no van",
         ));
     }
     let opens_lineage = present == lineage_fields.len();
@@ -2075,7 +2075,7 @@ fn validate_pcr_manifest(
     Ok(())
 }
 
-/// Comprueba los dos recuentos de linaje del manifiesto.
+/// Comprueba los tres recuentos de linaje del manifiesto.
 ///
 /// # La relación que de verdad discrimina
 ///

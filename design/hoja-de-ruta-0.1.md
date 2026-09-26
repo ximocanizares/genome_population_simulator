@@ -342,11 +342,43 @@ poblaciones pueden alimentar este mismo recorrido sin crear otra implementación
 > `f4-technical-v5` y solo ella lo usa—, ningún esquema publicado, y ningún
 > artefacto de un escenario que no la declare, anclado desde ahora por una
 > **huella congelada** y no solo por comparar dos ejecuciones entre sí. Lo que
-> **sigue pendiente** es el **tartamudeo heredable por linaje**, de la entrega
-> 4: hasta que exista, la preparación amplificada **rechaza** los escenarios que
-> declaran loci de repetición, porque tartamudearían solo con la parte de base y
-> subestimarían lo medido entre un 14 % y un 28 %. El modelo queda fijado por
-> **DTC-091**.
+> **quedaba pendiente** era el **tartamudeo heredable por linaje**, de la
+> entrega 4, y mientras no existió la preparación amplificada **rechazaba** los
+> escenarios que declaraban loci de repetición. **Ese rechazo se levantó el 26
+> de septiembre de 2026**; ver la nota de esa fecha, más abajo. El modelo queda
+> fijado por **DTC-091**.
+
+> **Nota del 26 de septiembre de 2026 — tartamudeo clonal heredable por
+> linaje.** Con preparación amplificada, el deslizamiento puede ocurrir en
+> **cualquier ciclo** de la PCR, y una copia que resbala transmite su número de
+> unidades a **toda su descendencia**. Un resbalón en el primer ciclo alcanza a
+> media familia; uno en el último, a una sola copia. De ahí sale el fenómeno que
+> importa: **una familia de duplicados puede mostrar dos o tres alelos en
+> proporciones que imitan a un heterocigoto**, cuando procede de una sola
+> molécula. En genética forense ese artefacto se confunde con un genotipo real.
+>
+> La genealogía es **mínima y declarada como aproximación**, no como el
+> coalescente exacto del proceso de ramificación: progenitor uniforme entre las
+> copias anteriores, ciclo de divergencia geométrico pinzado en el último, y
+> herencia de los resbalones **anteriores** a la divergencia. Las tasas por
+> ciclo se **despejan** de las dos columnas de la calibración —restando, nunca
+> sumando, porque cada columna es un total— y se publican **marcadas como
+> toscas**: las dos columnas proceden de dos individuos distintos, de proyectos
+> distintos y a coberturas distintas.
+>
+> **El rechazo temporal de la entrega 3 queda levantado.** En su lugar hay una
+> condición permanente: con loci declarados, la preparación amplificada **exige
+> el tartamudeo de base activo**, porque el clonal solo despeja el incremento de
+> la amplificación y sin la parte de base la biblioteca subestimaría lo medido
+> entre un 14 % y un 28 %.
+>
+> Lo que **no** se reabrió: ninguna clave aleatoria heredada —la etapa de
+> linaje estrena el catálogo `f4-technical-v6` y **solo ella** lo usa, de modo
+> que una biblioteca amplificada sin microsatélites sigue publicando el v5 byte
+> a byte—, ningún esquema de una fase cerrada, y ningún artefacto de un
+> escenario que no declare loci. **La verdad del individuo sigue sin cambiar**:
+> el tartamudeo vive solo en las moléculas que se secuencian. El modelo queda
+> fijado por **DTC-092**.
 
 **Hitos:**
 

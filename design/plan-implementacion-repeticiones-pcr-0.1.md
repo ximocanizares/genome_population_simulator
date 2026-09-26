@@ -3025,10 +3025,21 @@ han ampliado sin romperse.
 
 ## 11. Correcciones que este plan **propone** a otros documentos
 
-Ninguna está aplicada, **salvo las del documento de calibración**, cuyos
-hechos falsos eran del propio proyecto y se han corregido a la vez que este
-plan, porque dejar publicada una afirmación que se sabe falsa no es una
-propuesta pendiente sino un defecto.
+**Estado al 26 de septiembre de 2026.** Esta sección se escribió cuando ninguna
+corrección estaba aplicada, y esa frase ha caducado. Hoy:
+
+- las del **documento de calibración** están aplicadas desde el principio, y lo
+  estaban por un motivo distinto del de las demás: sus hechos falsos eran del
+  propio proyecto, y dejar publicada una afirmación que se sabe falsa no es una
+  propuesta pendiente sino un defecto;
+- las de las **entregas 2 y 3** están aplicadas al cerrar cada hito, con sus
+  decisiones normativas escritas —el modelo del tartamudeo de base y el de la
+  preparación amplificada—;
+- las de la **entrega 4** se aplican al cerrar este hito, con su decisión
+  normativa propia y las notas fechadas en la hoja de ruta y en el plan de la
+  fase de realismo técnico.
+
+Lo que sigue pendiente es lo que cada fila diga, no la sección entera.
 
 | Documento | Dónde | Qué | Origen |
 |---|---|---|---|

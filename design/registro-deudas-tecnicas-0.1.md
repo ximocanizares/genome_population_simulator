@@ -103,14 +103,27 @@ que enumera los puntos de rechazo del texto fuente.
 Se anota aquí el 26 de septiembre de 2026 porque la entrega 4 de microsatélites
 añadió dos más que **no** están en la línea base ni los mide nadie: las guardas
 de `validate_lineage_counts` en `src/event_manifest.rs` —que comprueban que los
-dos recuentos de linaje nombran los mismos loci y que los heredados no superan
-a los resbalones— y las de `validate_effective_clonal_stutter` en
-`src/results.rs` —que comprueban que la probabilidad por ciclo publicada sale
-de las dos fracciones publicadas y del número de ciclos, y que la marca de
-tosquedad está—. Ninguna prueba construye hoy un manifiesto ni una
-configuración efectiva malformados por ese lado, de modo que ninguna de esas
-guardas llega a dispararse y la puerta no lo ve. Lo encontró la revisión
-adversarial de la entrega 4.
+tres recuentos de linaje nombran los mismos loci, que los heredados no superan
+a los resbalones y que los pasos escritos no superan a las parejas— y las de
+`validate_effective_clonal_stutter` en `src/results.rs` —que comprueban que la
+probabilidad por ciclo publicada sale de las dos fracciones publicadas y del
+número de ciclos, y que la marca de tosquedad está—.
+
+**Medido, no supuesto.** La revisión independiente de cierre las neutralizó una
+a una y ejecutó la batería completa: **1449 pasan, 0 fallan, 11 ignoradas** con
+tres guardas de los recuentos de linaje y dos de la configuración efectiva
+desactivadas. Ninguna prueba construye un manifiesto ni una configuración
+efectiva malformados por ese lado.
+
+**La excepción, que conviene no exagerar la desnudez.** De las guardas de los
+recuentos de linaje, la que exige que no haya más pasos escritos que parejas
+**sí se dispara**: se comprobó mutando el contador para que sumara dos en vez
+de uno, y la publicación se rechazó a sí misma con el mensaje exacto. Y parte
+de lo que las demás comprueban —la forma de las listas, los dominios de cada
+campo, que no haya claves desconocidas— lo cubre además el validador externo de
+Python contra los esquemas publicados, que sí corre en la batería. Lo que queda
+de verdad sin cubrir son las relaciones entre campos que un esquema JSON no
+puede expresar.
 
 **Qué mide esa puerta y qué no**, dicho sin adornos: mide si una guarda **se
 dispara**, no si una prueba **fallaría** en caso de que la guarda estuviera mal

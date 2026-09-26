@@ -1366,15 +1366,15 @@ pub fn resource_bound(
                 .saturating_mul(8),
         )
         .saturating_add(8_u64.saturating_mul(family_slots.saturating_add(1)))
-        // Los dos recuentos de linaje por locus, los de la familia en curso y
-        // los del evento entero. Son **cuatro** mapas con a lo sumo `T`
+        // Los recuentos de linaje por locus, los de la familia en curso y
+        // los del evento entero. Son **cinco** mapas con a lo sumo `T`
         // entradas cada uno, y su clave es un `RepeatLocusId`, que comparte la
         // cadena con el locus declarado en vez de copiarla: veinticuatro bytes
         // por entrada y no la longitud del nombre que el autor del escenario
         // haya elegido. Se cuentan aquí para que la frase «el estado añadido no
         // depende de N ni del genoma» siga siendo cierta término a término y no
         // por absorción.
-        .saturating_add(4_u64.saturating_mul(tracts_per_insert).saturating_mul(24));
+        .saturating_add(5_u64.saturating_mul(tracts_per_insert).saturating_mul(24));
     PcrResourceBound {
         operation_units,
         memory_bytes,

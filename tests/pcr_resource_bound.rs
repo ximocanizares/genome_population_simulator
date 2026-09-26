@@ -260,7 +260,11 @@ fn the_bound_has_the_exact_value_its_formula_says() {
     let copies = 1_u64; // una copia haplotípica
     let family_slots = u64::from(PCR_MAXIMUM_FAMILY_SIZE); // 256
     let cycles = 10_u64;
-    let tracts = 0_u64; // hoy no puede haber tractos con amplificación
+    // Cero porque **este fixture** no declara ninguno: su individuo se
+    // construye a mano, sin alelos de repetición. Desde la entrega 4 la
+    // amplificación sí admite tractos, y la igualdad exacta de más abajo con
+    // `tracts = 3` es la que sujeta su término.
+    let tracts = 0_u64;
     let per_pair = classes
         + early_states
         + attempts * (copies + 3 * MAXIMUM_INSERT_BASES)
@@ -300,7 +304,7 @@ fn the_bound_has_the_exact_value_its_formula_says() {
         + 8 * (classes * early_states + family_slots + cycles + 1)
         + u64::from(PCR_MAXIMUM_FAMILY_SIZE) * tracts * (cycles + 1) * 8
         + 8 * (family_slots + 1)
-        + 4 * tracts * 24;
+        + 5 * tracts * 24;
     assert_eq!(
         resource_bound(&settings, PAIRS, copies, MAXIMUM_INSERT_BASES, tracts).memory_bytes(),
         memory,
@@ -313,7 +317,7 @@ fn the_bound_has_the_exact_value_its_formula_says() {
             + 8 * (classes * early_states + family_slots + cycles + 1)
             + u64::from(PCR_MAXIMUM_FAMILY_SIZE) * tracts * 8
             + 8 * (family_slots + 1)
-            + 4 * tracts * 24
+            + 5 * tracts * 24
     );
     // Y control positivo del término de los recuentos por locus, que es el que
     // hace cierta la frase «no depende del genoma»: sin él la cifra también es

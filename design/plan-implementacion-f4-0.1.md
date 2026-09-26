@@ -607,11 +607,22 @@ Esta sección existe porque la fase de realismo técnico estaba **cerrada con su
 evidencia aprobada** y se le ha añadido un paso. La escribe el punto 10.5 del
 plan de microsatélites y amplificación
 (`design/plan-implementacion-repeticiones-pcr-0.1.md`), que la exige con esta
-forma exacta. Se escribió para la entrega 2 y se **actualizó el 25 de
-septiembre de 2026** al cerrar la entrega 3: la preparación amplificada **ya
-está implementada**, y lo único que queda pendiente de ella es el **tartamudeo
-heredable por linaje**, de la entrega 4. Hasta que ese exista, la preparación
-amplificada **rechaza** los escenarios que declaran loci de repetición.
+forma exacta. Se escribió para la entrega 2, se actualizó el 25 de septiembre
+de 2026 al cerrar la entrega 3 y se **actualiza el 26 de septiembre de 2026** al
+cerrar la entrega 4.
+
+**Lo que ha cambiado hoy, y deja sin efecto lo que esta sección decía.** El
+**tartamudeo clonal heredable por linaje** ya existe, de modo que **el rechazo
+temporal está levantado**: la preparación amplificada **acepta** los escenarios
+que declaran loci de repetición. Hasta el 26 de septiembre esta sección decía lo
+contrario, y quedaba caducada en cuanto la entrega 4 entró.
+
+En su lugar queda una condición **permanente y más estrecha**: con loci
+declarados, la preparación amplificada **exige el tartamudeo de base activo**.
+El tartamudeo clonal solo despeja el **incremento** de la amplificación, de modo
+que sin la parte de base la biblioteca quedaría entre un 14 % y un 28 % por
+debajo de lo medido, según la longitud del motivo. No es una preferencia de
+configuración: es que la aritmética no cierra.
 
 ### 16.1. Qué **no** se reabre
 
@@ -644,6 +655,13 @@ amplificada **rechaza** los escenarios que declaran loci de repetición.
 | Existe un **segundo perfil incorporado**, `gps-hiseqx-pcr-pe150-v1` | Es un **hermano**, idéntico al vigente en lectura, inserto, calidad y error. El nombre `pcrfree` del vigente es literal en tres esquemas publicados y su huella está congelada: meter las dos preparaciones en un recurso los rompería | **S-25**, responsable |
 | El usuario declara la **fracción de duplicados**, no las parejas por molécula | Es lo que un biólogo ve en su informe de calidad; el parámetro del modelo se deriva por inversión numérica, cuya reproducibilidad fija DTC-091 | **S-19**, responsable |
 | La etapa `amplification` nace en un catálogo **nuevo**, `f4-technical-v5` | El diseño lo previó: «`f4-technical-v4` si se hace junto con `stutter`, la siguiente si después». Si naciera en el v4, una biblioteca amplificada sin tartamudeo publicaría un catálogo que el contrato ata al tartamudeo | Implementación de F4.9, 25/09/2026 |
+| Con preparación amplificada, una copia que resbala **transmite su número de unidades a toda su descendencia** | El deslizamiento ocurre en cada ciclo de la PCR, no una vez por molécula. Es lo que hace que una familia de duplicados pueda mostrar dos o tres alelos imitando a un heterocigoto viniendo de una sola molécula | **S-11** y diseño con PCR §5.7, responsable |
+| La genealogía de la familia se declara **APROXIMACIÓN**, no coalescente exacto | Progenitor uniforme entre las copias anteriores y divergencia geométrica pinzada en el último ciclo. No se afirma tener forma cerrada del coalescente del proceso de ramificación, y decirlo evita que se lea como exacto lo que no lo es | **S-21**, responsable |
+| La probabilidad de resbalón **por ciclo se despeja de las dos columnas**, restando y nunca sumando | Cada columna de la calibración es un **total**: la de sin PCR ya contiene el mosaicismo, el puente y la síntesis. Sumarlas contaría dos veces el mismo fenómeno. De la resta sale además el orden forzoso de todo el plan | **S-24**, responsable |
+| Esas tasas por ciclo se publican **marcadas como toscas** | Las dos columnas proceden de **dos individuos distintos**, de proyectos distintos y a coberturas distintas: la resta puede llevar dentro efectos de individuo y de lote. Publicarlas sin la marca las haría leer como una medida | **S-24** con la corrección del 20/09/2026, responsable |
+| El **rechazo temporal** de la entrega 3 queda **levantado** | El tartamudeo clonal ya existe. En su lugar queda una condición permanente y más estrecha: con loci declarados, la preparación amplificada **exige el tartamudeo de base activo**, porque el clonal solo despeja el incremento | Implementación de F4.10, 26/09/2026 |
+| Las decisiones de linaje nacen en un catálogo **nuevo**, `f4-technical-v6` | Por la misma razón que el v5 no cupo en el v4: el nombre **es el ámbito de derivación**. Una biblioteca amplificada **sin** loci declarados no abre ninguna decisión de linaje y sigue publicando el v5 **byte a byte** | Implementación de F4.10, 26/09/2026 |
+| El paso neto se sortea sobre la molécula **original de la familia** y se **reverifica** al escribirlo | Con una quimera, la molécula que se emite puede no ser aquella sobre la que se sorteó. Se midió: con tasa de quimera 1, la reverificación descarta uno de cada seis pasos | Implementación de F4.10, 26/09/2026 |
 
 ### 16.3. Dónde vive cada literal
 
@@ -655,7 +673,8 @@ cambio de contrato**. Los sitios, comprobados en el árbol de esta entrega:
 | `src/technical_profile.rs` | canónico | `LibraryPreparation` con **dos** variantes, `PcrFree` y `Pcr`; los dos perfiles hermanos y las **seis constantes de contrato** de la amplificación |
 | `src/pcr_amplification.rs` | canónico | el modelo de amplificación, la inversión numérica, la programación dinámica de los primeros ciclos, la Poisson pinzada, la curva de composición y la cota publicada |
 | `src/wgs_sampling.rs` | canónico | el muestreo por familias dentro del muestreador PE, que conserva su contrato externo de `N` parejas con ordinales `0..N-1` |
-| `src/randomness.rs` | canónico | los **tres** catálogos y el ámbito de cada decisión, enumerada una a una |
+| `src/randomness.rs` | canónico | los **cuatro** catálogos técnicos —v3, v4, v5 y v6— y el ámbito de cada decisión, enumerada una a una y sin comodín |
+| `src/clonal_stutter.rs` | canónico | el modelo clonal entero: la derivación de la probabilidad por ciclo con su marca de tosquedad, los pesos de la divergencia, la genealogía de la familia y los pasos netos por copia |
 | `src/stutter.rs` | canónico | el modelo, la estructura del paso, la tabla calibrada y su procedencia |
 | `src/application.rs` | contrato | la guarda que cruza el evento técnico con los loci declarados |
 | `src/event_manifest.rs` | contrato | exige que la terna del perfil vaya junta, valida la sección de amplificación y sus identidades, y elige la versión del documento y su catálogo |
@@ -697,6 +716,19 @@ publicando configuración efectiva v4 y manifiesto de evento v2.
 | Los pesos de dos clases de eficiencia intercambiados | anular el resultado del sorteo de clase |
 | La búsqueda léxica sobre el muestreador | reconstruir la tabla de los primeros ciclos una vez por familia en vez de una por clase |
 | El validador independiente contra un histograma mutado | un oráculo que leyera lo publicado en vez de rederivarlo |
+| **La entrega 4**, abajo | |
+| Las seis probabilidades por ciclo contra el cálculo hecho **a mano** desde las dos columnas | usar la columna con PCR como si fuera el incremento, que sobrepasa lo medido |
+| El fixture **saturado** con la divergencia forzada al último ciclo, donde todas las copias de una familia muestran el mismo número de unidades | un tartamudeo sorteado por pareja, y una herencia que copie los resbalones **posteriores** a la divergencia |
+| El mismo fixture con la divergencia forzada a cero, donde las copias son **independientes** | un modelo que diera siempre el mismo paso a toda la familia, por ejemplo ignorando el índice de copia en la clave |
+| Treinta ciclos con solo la contracción de una unidad con peso | aplicar la guarda de viabilidad a cada paso por separado en vez de al **neto acumulado** |
+| El locus añadido **a la izquierda del anterior, dentro de la misma molécula** | un ámbito indexado por la **posición** del tracto. La del locus en otro cromosoma **no** lo caza, y se midió |
+| El tracto **impuro** con los dos pasos forzados a `−3` | calcular la tirada más larga **una sola vez** y aplicar los dos pasos en la misma, que borra la interrupción |
+| El tracto **corto** con los pesos cargados a la contracción, donde ninguna lectura se queda en una unidad | **el orden invertido**: aplicar la decisión de base antes del paso de linaje deja 237 de 300 lecturas en una unidad |
+| La fracción que un oráculo cuenta **sobre los FASTQ** con **6000 moléculas** y tolerancia calculada | una amplificada **sin la parte de base**, que da 0,146 en vez de 0,17; y una que sume las dos columnas, que da 0,190 |
+| Los resbalones heredados **exactamente cero** con familias de tamaño 1 y mayores que cero con familias grandes | un recuento de heredados que cuente **todos** los resbalones |
+| El validador independiente que rederiva **las familias enteras** y ata cada predicción a **su** lectura por el identificador de pareja técnica | repartir a todas las parejas de una familia el linaje de la copia `0`, que hace desaparecer el artefacto y que la batería entera no veía |
+| Los pasos escritos **congelados** con quimera —248 con contracciones, 274 con expansiones— frente a los 300 sin quimera | **las dos mitades** de la reverificación del paso neto contra la molécula que se va a emitir, cada una con su cifra; y un contador que sumara los resbalones **sorteados** en vez de los escritos. La desigualdad sola **no** basta: se midió que sobrevive a suprimir la mitad de la viabilidad |
+| El recuento de pasos escritos contra las unidades que las lecturas muestran | un contador que no llegue a los bytes; uno que doble la cuenta muere además por el tope del manifiesto, que exige que no haya más pasos escritos que parejas |
 
 ### 16.5. Fixtures que se reabren
 
@@ -715,3 +747,10 @@ artefacto contra la línea base. La de la entrega 2 está archivada en
 `evidence/stutter-f4-8-congelacion`; la de la entrega 3, en
 `evidence/pcr-f4-9-congelacion`, con la salvedad que esa carpeta documenta sobre
 dos huellas de la evidencia anterior.
+
+Al cerrar la **entrega 4** no hace falta repetirla por un motivo que conviene
+dejar escrito en vez de suponerlo: el tartamudeo clonal **solo abre decisiones
+cuando el escenario declara loci de repetición**, y la evidencia de cierre de
+esta fase es precisamente la de un escenario **sin** loci. La prueba que lo
+ancla es la huella congelada del FASTQ sin PCR, que no se ha movido, y la
+reducción al caso sin amplificar, que sigue dando los mismos bytes.

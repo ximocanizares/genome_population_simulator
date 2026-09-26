@@ -430,7 +430,7 @@ fn the_unamplified_run_reproduces_the_measured_pcr_free_fractions() {
 }
 
 /// **El manifiesto de la ejecución amplificada publica el catálogo v6, la
-/// derivación con su marca de tosquedad y los dos recuentos de linaje.**
+/// derivación con su marca de tosquedad y los tres recuentos de linaje.**
 ///
 /// Y los heredados valen **exactamente cero**, porque con fracción de
 /// duplicados cero todas las familias tienen una sola copia y no hay de quién

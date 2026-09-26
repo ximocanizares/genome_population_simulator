@@ -663,6 +663,14 @@ fn declaring_a_locus_to_the_left_of_another_does_not_move_its_slips() {
         together.lineage_slips("STR-DI"),
         "declarar un locus a la izquierda ha movido los resbalones del de la derecha"
     );
+    // **El locus añadido tiene que entrar de verdad en la genealogía.** Sin
+    // este control la igualdad de arriba no afirma nada: si el homopolímero se
+    // quedara fuera —por caer donde no hay tirada, o por no llegar a la etapa—
+    // las dos ejecuciones serían la misma y la igualdad se cumpliría sola.
+    assert!(
+        together.lineage_slips("STR-HOMO") > 0,
+        "el locus añadido a la izquierda tiene que producir sus propios resbalones"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -816,17 +824,26 @@ fn the_lineage_step_goes_before_the_base_decision() {
     for read in &reads {
         *counts.entry(longest_run_units(read, b"CA")).or_insert(0) += 1;
     }
+    // **La aserción que discrimina, y por qué va sola.** El orden invertido
+    // deja 237 de 300 lecturas en una unidad; el vigente, ninguna.
     assert_eq!(
         counts.get(&1).copied().unwrap_or(0),
         0,
         "con el linaje primero ninguna lectura puede quedarse en una unidad: {counts:?}"
     );
-    // Controles positivos: el corpus es el que la aritmética predice y la
-    // guarda se ejercitó de verdad.
+    // **Esta de aquí es más fuerte que la anterior y la implica**, porque un
+    // corpus que solo muestre dos o seis unidades no puede tener ninguna de
+    // una. No es un control positivo, aunque lo pareciera: queda dicho para que
+    // nadie borre la de arriba creyendo que sobra. Se conservan las dos porque
+    // la primera nombra **el** valor que el orden invertido produce, y un
+    // fallo que la señale a ella se lee de un vistazo.
     assert!(
         counts.keys().all(|units| *units == 2 || *units == 6),
         "el fixture solo admite dos o seis unidades: {counts:?}"
     );
+    // Controles positivos de verdad: la rama que estrecha la guarda dominó, de
+    // modo que el régimen en el que las dos partes dejan de conmutar se
+    // ejercitó, y el linaje llegó a escribir.
     let two = counts.get(&2).copied().unwrap_or(0);
     assert!(
         two * 10 >= (reads.len() as u64) * 9,
@@ -879,6 +896,146 @@ fn a_high_chimera_rate_does_not_break_the_pair_source_check() {
     );
 }
 
+/// **Un paso neto que no cabe en la molécula quimérica no se escribe.**
+///
+/// # Qué guarda ata esta prueba, y por qué no la ataba ninguna
+///
+/// El paso neto del linaje se sortea sobre **la molécula original de la
+/// familia**; al aplicarlo se vuelve a comprobar contra **la molécula que se va
+/// a emitir**, que con una quimera puede no ser la misma. Esa reverificación no
+/// la ejercitaba nadie.
+///
+/// # Por qué este fixture la dispara, y por qué hacen falta menos condiciones
+/// de las que la primera versión de esta entrega supuso
+///
+/// Se creyó que hacían falta tres cosas a la vez: un locus heterocigoto, un
+/// punto de rotura dentro del tracto y una tirada resultante demasiado corta.
+/// **Con dos basta.** El sufijo de una quimera viene de un desplazamiento **al
+/// azar** sobre la copia hermana, de modo que en cuanto el punto de rotura cae
+/// dentro del tracto la tirada queda cortada; no hace falta que los dos alelos
+/// midan distinto.
+///
+/// Los números del fixture: dinucleótido de **cuatro** unidades —para que una
+/// contracción de tres deje la tirada al borde—, un ciclo con probabilidad de
+/// resbalón 1 —todas las copias resbalan—, **todo** el peso en la contracción
+/// de tres unidades, tartamudeo de base apagado y tasa de quimera 1.
+///
+/// # El control es la mitad que hace que esto signifique algo
+///
+/// La misma ejecución **sin quimeras**: ahí los pasos escritos tienen que valer
+/// exactamente los resbalones sorteados. Sin ese control, una implementación
+/// que simplemente perdiera pasos por cualquier motivo satisfaría la
+/// desigualdad de arriba y nadie sabría que la diferencia no era de la quimera.
+///
+/// # Por qué la desigualdad NO basta, y por qué hacen falta dos escenarios
+///
+/// Todo medido, nada razonado. La reverificación tiene **dos mitades**: que el
+/// tracto siga estando en la ventana —`run_units > 0`— y que el paso neto
+/// **quepa** en la tirada que queda. Se instrumentó el descarte y las dos
+/// disparan por igual con contracciones: veintiséis parejas por pasada cada
+/// una.
+///
+/// Una primera versión se quedaba en `escritos < sorteados` y **sobrevivía a
+/// suprimir la mitad de la viabilidad**, porque los descartes de la otra mitad
+/// bastaban para que la desigualdad siguiera cumpliéndose. Con las dos mitades
+/// se escriben **248** de 300; suprimiendo la viabilidad, **274**. De ahí la
+/// cifra congelada.
+///
+/// Y con contracciones la otra mitad **tampoco se distingue**, porque
+/// `step_is_viable` ya excluye por su cuenta una contracción sobre una tirada
+/// de cero unidades. La mitad del tracto ausente solo manda con **expansiones**,
+/// donde la viabilidad no filtra nada y lo único que impide insertar copias de
+/// un motivo que no está es esa comprobación. De ahí el **segundo escenario**,
+/// con todo el peso en `+1`: **274** de 300 con quimera y **300** sin ella.
+///
+/// **Ninguno de los dos literales se actualiza sin más si algún día cambian**:
+/// o el cambio mueve la aleatoriedad de estos escenarios —y entonces hay que
+/// decidirlo por escrito— o es un defecto.
+#[test]
+fn a_net_step_that_does_not_fit_the_chimeric_molecule_is_not_written() {
+    let tract = "CA".repeat(4);
+    let sequences = [("chr1", bases_with_tract(&tract))];
+    let scenario = |chimera_rate: f64| Scenario {
+        sequences: &sequences,
+        loci: locus_block("STR-1", "chr1", 60, "CA", &tract),
+        coverage: 300,
+        ploidy: 2,
+        event_extra: format!(
+            "chimera_rate = {chimera_rate}\n{}{}",
+            amplified(0.0, 1, Some(1.0)),
+            base_stutter_with_weights(0.0, [1.0, 0.0, 0.0, 0.0])
+        ),
+    };
+    let chimeric = run(&scenario(1.0));
+    let clean = run(&scenario(0.0));
+
+    let chimeric_slips = chimeric.lineage_slips("STR-1");
+    let chimeric_written = chimeric.applied_steps("STR-1");
+    let clean_slips = clean.lineage_slips("STR-1");
+    let clean_written = clean.applied_steps("STR-1");
+
+    // Controles positivos: las quimeras ocurrieron de verdad en una ejecución y
+    // en la otra no, y en las dos se sortearon resbalones.
+    assert!(
+        chimeric.realized_chimera_pairs() > 0,
+        "con tasa 1 tiene que haber quimeras realizadas"
+    );
+    assert_eq!(
+        clean.realized_chimera_pairs(),
+        0,
+        "el control no puede tener quimeras"
+    );
+    assert!(chimeric_slips > 0 && clean_slips > 0, "control positivo");
+
+    // **Sin quimeras, todo paso sorteado se escribe.**
+    assert_eq!(
+        clean_written, clean_slips,
+        "sin quimeras la reverificación no puede descartar ningún paso"
+    );
+    // **Con quimeras, algunos no caben y la reverificación los descarta.**
+    assert!(
+        chimeric_written < chimeric_slips,
+        "la reverificación tiene que descartar algún paso: sorteados {chimeric_slips}, \
+         escritos {chimeric_written}"
+    );
+    // **Y la cifra exacta**, que es lo que distingue la mitad de la viabilidad.
+    // Ver la nota de la documentación: la desigualdad sola sobrevive a
+    // suprimirla, y entonces da 274.
+    assert_eq!(
+        chimeric_written, 248,
+        "pasos escritos congelados de este escenario; ver la documentación antes de tocar \
+         este número"
+    );
+
+    // ------------------------------------------------------------------
+    // Segundo escenario: **expansiones**, que es donde manda la otra mitad.
+    // ------------------------------------------------------------------
+    let expanding = |chimera_rate: f64| Scenario {
+        sequences: &sequences,
+        loci: locus_block("STR-1", "chr1", 60, "CA", &tract),
+        coverage: 300,
+        ploidy: 2,
+        event_extra: format!(
+            "chimera_rate = {chimera_rate}\n{}{}",
+            amplified(0.0, 1, Some(1.0)),
+            base_stutter_with_weights(0.0, [0.0, 0.0, 0.0, 1.0])
+        ),
+    };
+    let grown = run(&expanding(1.0));
+    let grown_clean = run(&expanding(0.0));
+    assert_eq!(
+        grown_clean.applied_steps("STR-1"),
+        grown_clean.lineage_slips("STR-1"),
+        "sin quimeras ninguna expansión puede descartarse"
+    );
+    assert_eq!(
+        grown.applied_steps("STR-1"),
+        274,
+        "expansiones escritas congeladas: con la comprobación del tracto ausente suprimida \
+         se escribirían las 300, porque la viabilidad no filtra una expansión"
+    );
+}
+
 /// **El recuento de pasos de linaje escritos cuenta lo escrito, no lo
 /// sorteado.**
 ///
@@ -887,11 +1044,14 @@ fn a_high_chimera_rate_does_not_break_the_pair_source_check() {
 /// unidad: el recuento publicado tiene que valer el número de parejas, y todas
 /// las lecturas tienen que mostrar nueve unidades de las diez verdaderas.
 ///
-/// Lo que esto ata es el recuento **a los bytes**: un contador que sumara
-/// resbalones sorteados en vez de pasos escritos coincidiría aquí —hay un
-/// resbalón por copia— pero dejaría de coincidir en cuanto una copia resbalara
-/// dos veces, y por eso el validador del manifiesto exige además que no supere
-/// el número de parejas.
+/// Lo que esto ata es el recuento **a los bytes**, y solo eso. **Lo que NO
+/// caza, medido:** un contador que sumara los resbalones **sorteados** en vez
+/// de los escritos pasa por aquí sin inmutarse, porque en este fixture
+/// coinciden —un resbalón por copia y todos se escriben—. Quien lo caza es
+/// `a_net_step_that_does_not_fit_the_chimeric_molecule_is_not_written`, donde
+/// la quimera hace que dejen de coincidir. Y un contador que doblara la cuenta
+/// muere por el tope del manifiesto, que exige que no haya más pasos escritos
+/// que parejas.
 #[test]
 fn the_applied_lineage_count_matches_what_the_reads_show() {
     let sequences = [("chr1", bases_with_tract(&"CA".repeat(10)))];
