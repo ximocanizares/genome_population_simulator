@@ -236,15 +236,20 @@ fn with_a_neutral_curve_the_attempts_term_is_never_exercised() {
 /// Aquí el valor está escrito a mano, término a término, de modo que quitar
 /// cualquiera de ellos mata la prueba aunque la desigualdad siga cumpliéndose.
 ///
-/// # Los términos que este árbol **no puede ejercitar**, dicho sin adornos
+/// # Los términos que este fixture **no** ejercita, dicho sin adornos
 ///
 /// `2·c·T` —los tractos de repetición— y `c + 1` —la divergencia de linaje y el
-/// progenitor— corresponden a trabajo que **todavía no existe**: el primero
-/// porque la preparación amplificada rechaza por ahora los escenarios con loci
-/// declarados, y el segundo porque el tartamudeo heredable por linaje es de la
-/// entrega 4. El contador nunca los suma, así que **ninguna desigualdad puede
-/// ver si desaparecen de la fórmula**. Lo único que los sujeta hasta entonces es
-/// esta igualdad exacta.
+/// progenitor— corresponden a trabajo que **desde la entrega 4 sí existe**: la
+/// preparación amplificada ya admite escenarios con loci declarados y el
+/// tartamudeo clonal los gasta de verdad. Lo que pasa es que **este fixture no
+/// declara ninguno**: su individuo se construye a mano, sin alelos de
+/// repetición, de modo que su contador nunca suma esos términos y ninguna
+/// desigualdad de este fichero puede ver si desaparecen de la fórmula.
+///
+/// Es un hueco residual y queda dicho: lo único que sujeta esos dos términos
+/// aquí sigue siendo **esta igualdad exacta**, escrita a mano. Quien quiera la
+/// desigualdad con tractos de verdad tiene que montar un individuo con un
+/// alelo de repetición, que es trabajo de otro fixture.
 #[test]
 fn the_bound_has_the_exact_value_its_formula_says() {
     let settings = saturated_settings(0.01);
@@ -283,6 +288,42 @@ fn the_bound_has_the_exact_value_its_formula_says() {
         resource_bound(&settings, PAIRS, copies, MAXIMUM_INSERT_BASES, 3).operation_units(),
         expected,
         "el término de los tractos tiene que mover la cota cuando T deja de ser cero"
+    );
+
+    // **La memoria del linaje, también escrita a mano.** Lleva un factor
+    // `c + 1` que la primera redacción de la cota no tenía: para que una copia
+    // herede el prefijo de su progenitor hacen falta sus pasos **ciclo a
+    // ciclo**, no solo su suma. Sin esta igualdad, quitar ese factor dejaría
+    // la cota publicada por debajo del gasto real sin que nada muriera.
+    let tracts = 3_u64;
+    let memory = MAXIMUM_INSERT_BASES
+        + 8 * (classes * early_states + family_slots + cycles + 1)
+        + u64::from(PCR_MAXIMUM_FAMILY_SIZE) * tracts * (cycles + 1) * 8
+        + 8 * (family_slots + 1)
+        + 4 * tracts * 24;
+    assert_eq!(
+        resource_bound(&settings, PAIRS, copies, MAXIMUM_INSERT_BASES, tracts).memory_bytes(),
+        memory,
+        "la cota de memoria tiene que ser exactamente la de su fórmula"
+    );
+    // Control positivo del factor nuevo: sin él la cifra es otra.
+    assert_ne!(
+        memory,
+        MAXIMUM_INSERT_BASES
+            + 8 * (classes * early_states + family_slots + cycles + 1)
+            + u64::from(PCR_MAXIMUM_FAMILY_SIZE) * tracts * 8
+            + 8 * (family_slots + 1)
+            + 4 * tracts * 24
+    );
+    // Y control positivo del término de los recuentos por locus, que es el que
+    // hace cierta la frase «no depende del genoma»: sin él la cifra también es
+    // otra.
+    assert_ne!(
+        memory,
+        MAXIMUM_INSERT_BASES
+            + 8 * (classes * early_states + family_slots + cycles + 1)
+            + u64::from(PCR_MAXIMUM_FAMILY_SIZE) * tracts * (cycles + 1) * 8
+            + 8 * (family_slots + 1)
     );
 }
 

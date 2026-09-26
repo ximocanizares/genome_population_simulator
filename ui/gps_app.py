@@ -43,6 +43,7 @@ def _():
         efficiency_class_editor_rows,
         gc_curve_editor_rows,
         pcr_from_editor_rows,
+        per_cycle_slip_editor_rows,
         pcr_mean_pairs_per_molecule,
         stutter_from_editor_rows,
         stutter_locus_rate_editor_rows,
@@ -158,6 +159,7 @@ def _():
         efficiency_class_editor_rows,
         gc_curve_editor_rows,
         pcr_from_editor_rows,
+        per_cycle_slip_editor_rows,
         pcr_mean_pairs_per_molecule,
         pcr_panel,
         stutter_from_editor_rows,
@@ -243,6 +245,7 @@ def _(
     PCR_MAXIMUM_GC_ATTEMPTS,
     efficiency_class_editor_rows,
     gc_curve_editor_rows,
+    per_cycle_slip_editor_rows,
 ):
     seed_control = mo.ui.text(
         value=imported_form.seed or "",
@@ -430,6 +433,17 @@ def _(
         label=(
             f"Clases de eficiencia (opcionales, como mucho"
             f" {PCR_MAXIMUM_EFFICIENCY_CLASSES}; sus pesos suman 1)"
+        ),
+        pagination=False,
+    )
+    pcr_per_cycle_slip_editor = mo.ui.data_editor(
+        per_cycle_slip_editor_rows(_selected_pcr),
+        label=(
+            "Tartamudeo clonal: probabilidad de resbalón de UN ciclo por longitud"
+            " de motivo. Opcional; en blanco se despeja de las dos columnas de la"
+            " calibración y del número de ciclos. NO es la fracción de extremo a"
+            " extremo: con diez ciclos, la del homopolímero vale 0,0158 y su"
+            " fracción de extremo a extremo 0,17"
         ),
         pagination=False,
     )
@@ -1015,6 +1029,7 @@ def _(
                     int(pcr_gc_max_attempts_control.value),
                     pcr_gc_curve_editor.value,
                     pcr_efficiency_classes_editor.value,
+                    pcr_per_cycle_slip_editor.value,
                 ),
             )
         )
@@ -2381,6 +2396,7 @@ def _(
                 pcr_gc_max_attempts_control,
                 pcr_gc_curve_editor,
                 pcr_efficiency_classes_editor,
+                pcr_per_cycle_slip_editor,
             ),
             "Poblaciones": populations_panel,
             "Evolución": unavailable("F7"),

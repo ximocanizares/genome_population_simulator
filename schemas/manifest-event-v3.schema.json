@@ -46,7 +46,8 @@
    "enum": [
     "f4-technical-v3",
     "f4-technical-v4",
-    "f4-technical-v5"
+    "f4-technical-v5",
+    "f4-technical-v6"
    ]
   },
   "id_catalog": {
@@ -251,7 +252,7 @@
    }
   },
   {
-   "$comment": "La amplificación estrena el v5 y manda sobre el v4.",
+   "$comment": "La amplificación estrena el v5 y manda sobre el v4; con tartamudeo clonal sube al v6.",
    "if": {
     "properties": {
      "artifacts": {
@@ -279,7 +280,10 @@
    "then": {
     "properties": {
      "rng_catalog": {
-      "const": "f4-technical-v5"
+      "enum": [
+       "f4-technical-v5",
+       "f4-technical-v6"
+      ]
      }
     }
    }
@@ -322,6 +326,70 @@
    }
   },
   {
+   "$comment": "El tartamudeo clonal estrena el v6: el bloque stutter de la amplificación y ese catálogo son la misma cosa.",
+   "if": {
+    "properties": {
+     "artifacts": {
+      "properties": {
+       "pcr": {
+        "required": [
+         "stutter"
+        ]
+       }
+      },
+      "required": [
+       "pcr"
+      ]
+     }
+    },
+    "required": [
+     "artifacts"
+    ]
+   },
+   "then": {
+    "properties": {
+     "rng_catalog": {
+      "const": "f4-technical-v6"
+     }
+    }
+   }
+  },
+  {
+   "$comment": "Y al revés: el v6 solo lo publica una amplificación con tartamudeo clonal, con sus dos recuentos de linaje.",
+   "if": {
+    "properties": {
+     "rng_catalog": {
+      "const": "f4-technical-v6"
+     }
+    },
+    "required": [
+     "rng_catalog"
+    ]
+   },
+   "then": {
+    "properties": {
+     "artifacts": {
+      "properties": {
+       "pcr": {
+        "required": [
+         "stutter",
+         "lineage_slips_by_locus",
+         "lineage_inherited_slips_by_locus",
+         "lineage_applied_steps_by_locus"
+        ]
+       }
+      },
+      "required": [
+       "pcr"
+      ]
+     }
+    },
+    "required": [
+     "artifacts"
+    ]
+   }
+  },
+  {
    "$comment": "La sección de tartamudeo exige un catálogo con esa etapa y la versión 3 del documento.",
    "if": {
     "properties": {
@@ -340,7 +408,8 @@
      "rng_catalog": {
       "enum": [
        "f4-technical-v4",
-       "f4-technical-v5"
+       "f4-technical-v5",
+       "f4-technical-v6"
       ]
      }
     }
@@ -373,6 +442,50 @@
   }
  ],
  "$defs": {
+  "lineage_applied_counts": {
+   "type": "array",
+   "description": "Pasos netos de linaje que de verdad se escribieron en una molecula, por locus. No es lo mismo que los resbalones: entre el sorteo y la escritura un paso puede quedarse fuera porque no quepa en la molecula que se va a emitir, o salir cero por cancelacion.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "locus_id",
+     "steps"
+    ],
+    "properties": {
+     "locus_id": {
+      "type": "string",
+      "minLength": 1
+     },
+     "steps": {
+      "type": "integer",
+      "minimum": 0
+     }
+    }
+   }
+  },
+  "lineage_slip_counts": {
+   "type": "array",
+   "description": "Recuento de resbalones del linaje por locus. Es una lista y no un objeto con el locus de clave porque el identificador lo elige el autor del escenario, y un objeto con claves libres no podria cerrarse con additionalProperties: false.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "locus_id",
+     "slips"
+    ],
+    "properties": {
+     "locus_id": {
+      "type": "string",
+      "minLength": 1
+     },
+     "slips": {
+      "type": "integer",
+      "minimum": 0
+     }
+    }
+   }
+  },
   "id_catalog": {
    "type": "object",
    "additionalProperties": false,
@@ -1087,7 +1200,10 @@
          "const": "pcr-amplification-v1"
         },
         "rng_catalog": {
-         "const": "f4-technical-v5"
+         "enum": [
+          "f4-technical-v5",
+          "f4-technical-v6"
+         ]
         },
         "cycles": {
          "type": "integer",
@@ -1252,6 +1368,121 @@
         "unique_molecule_coverage_x": {
          "type": "number",
          "minimum": 0
+        },
+        "stutter": {
+         "type": "object",
+         "additionalProperties": false,
+         "description": "Tartamudeo clonal heredable por linaje. Solo aparece cuando el escenario declara loci de repeticion; sin ellos una biblioteca amplificada publica exactamente el documento de antes de F4.10.",
+         "required": [
+          "algorithm",
+          "cycles",
+          "formula",
+          "coarse",
+          "coarse_reason",
+          "calibration",
+          "per_cycle_slip"
+         ],
+         "properties": {
+          "algorithm": {
+           "const": "clonal-stutter-v1"
+          },
+          "cycles": {
+           "type": "integer",
+           "minimum": 1,
+           "maximum": 30
+          },
+          "formula": {
+           "type": "string",
+           "minLength": 1
+          },
+          "coarse": {
+           "const": true,
+           "description": "SIEMPRE cierto, y no es un adorno: las dos columnas de la calibracion proceden de dos individuos distintos, de proyectos distintos y a coberturas distintas, de modo que la resta puede llevar dentro efectos de individuo y de lote ademas del de la amplificacion. Las tasas por ciclo derivadas son toscas y se publican marcadas como tales."
+          },
+          "coarse_reason": {
+           "type": "string",
+           "minLength": 1
+          },
+          "calibration": {
+           "type": "object",
+           "additionalProperties": false,
+           "required": [
+            "source",
+            "species",
+            "technology"
+           ],
+           "properties": {
+            "source": {
+             "type": "string",
+             "minLength": 1
+            },
+            "species": {
+             "type": "string",
+             "minLength": 1
+            },
+            "technology": {
+             "type": "string",
+             "minLength": 1
+            }
+           }
+          },
+          "per_cycle_slip": {
+           "type": "array",
+           "minItems": 6,
+           "maxItems": 6,
+           "description": "Las dos fracciones de entrada, la probabilidad por ciclo despejada de ellas y de que lado viene. Publicar los tres numeros juntos es lo que permite rehacer la derivacion sin este programa.",
+           "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+             "motif_length_bases",
+             "with_pcr_fraction",
+             "without_pcr_fraction",
+             "probability",
+             "source"
+            ],
+            "properties": {
+             "motif_length_bases": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+             },
+             "with_pcr_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+             },
+             "without_pcr_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMaximum": 1
+             },
+             "probability": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+             },
+             "source": {
+              "enum": [
+               "derived",
+               "declared"
+              ]
+             }
+            }
+           }
+          }
+         }
+        },
+        "lineage_slips_by_locus": {
+         "$ref": "#/$defs/lineage_slip_counts",
+         "description": "TODOS los ciclos con paso distinto de cero, heredados o propios."
+        },
+        "lineage_inherited_slips_by_locus": {
+         "$ref": "#/$defs/lineage_slip_counts",
+         "description": "De los anteriores, los que una copia recibio de su progenitor. Con familias de tamano 1 vale exactamente cero, porque ahi no hay de quien heredar."
+        },
+        "lineage_applied_steps_by_locus": {
+         "$ref": "#/$defs/lineage_applied_counts"
         },
         "resource_bound": {
          "type": "object",

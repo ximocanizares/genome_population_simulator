@@ -535,6 +535,41 @@ fn the_new_schema_tables_are_closed_and_bounded() {
                     bounded += 1;
                 }
             }
+            // La tabla del tartamudeo clonal es una tabla **dentro** de la
+            // tabla, de modo que hay que cerrarla en los dos niveles: si solo
+            // se cerrara el de fuera, una clave inventada dentro pasaría.
+            "stutter" => {
+                assert_eq!(
+                    schema.get("additionalProperties"),
+                    Some(&Value::Bool(false)),
+                    "la tabla del tartamudeo clonal no puede admitir claves desconocidas"
+                );
+                let items = schema
+                    .get("properties")
+                    .and_then(|properties| properties.get("per_cycle_slip"))
+                    .and_then(|slips| slips.get("items"))
+                    .expect("filas de per_cycle_slip");
+                assert_eq!(
+                    items.get("additionalProperties"),
+                    Some(&Value::Bool(false)),
+                    "las filas de per_cycle_slip no pueden admitir claves desconocidas"
+                );
+                for (field, row) in items
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .expect("filas")
+                {
+                    let has_low =
+                        row.get("minimum").is_some() || row.get("exclusiveMinimum").is_some();
+                    let has_high =
+                        row.get("maximum").is_some() || row.get("exclusiveMaximum").is_some();
+                    assert!(
+                        has_low && has_high,
+                        "stutter.per_cycle_slip.{field} tiene un dominio abierto"
+                    );
+                    bounded += 1;
+                }
+            }
             _ => {
                 let has_low =
                     schema.get("minimum").is_some() || schema.get("exclusiveMinimum").is_some();
@@ -547,8 +582,8 @@ fn the_new_schema_tables_are_closed_and_bounded() {
     }
     assert_eq!(
         bounded,
-        10,
-        "se esperaban diez dominios acotados: {:?}",
+        12,
+        "se esperaban doce dominios acotados: {:?}",
         properties.keys().collect::<Vec<_>>()
     );
     // **Ningún valor por omisión materializado para la fracción de

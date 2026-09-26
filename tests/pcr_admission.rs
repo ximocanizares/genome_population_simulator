@@ -6,14 +6,18 @@
 //! mismo escenario sin el defecto tiene que admitirse. Sin él, una guarda que
 //! rechazara todo satisfaría la mitad de las pruebas sin discriminar nada.
 //!
-//! # El rechazo temporal de la combinación con microsatélites
+//! # La combinación con microsatélites, antes y ahora
 //!
-//! Mientras el tartamudeo clonal heredable por linaje no exista, una
-//! biblioteca amplificada sobre un escenario con loci declarados tartamudearía
-//! **solo con la parte de base** y quedaría por debajo de lo medido —entre un
-//! 14 % y un 28 % en motivos de uno a cinco pares de base—. Antes que publicar
-//! una cifra que se sabe baja, la configuración rechaza esa combinación y
-//! nombra el paso pendiente.
+//! Hasta la entrega 4, una biblioteca amplificada sobre un escenario con loci
+//! declarados se rechazaba **en bloque**, porque el tartamudeo clonal
+//! heredable por linaje no existía. Ya existe, y ese rechazo temporal está
+//! levantado.
+//!
+//! Lo que queda en su sitio es una condición permanente y más estrecha: el
+//! tartamudeo clonal solo despeja el **incremento** de la amplificación, de
+//! modo que sin el tartamudeo de base la biblioteca quedaría por debajo de lo
+//! medido —entre un 14 % y un 28 % en motivos de uno a cinco pares de base—.
+//! La configuración exige entonces que el tartamudeo de base esté activo.
 
 use std::fs;
 use std::path::PathBuf;
@@ -492,18 +496,53 @@ fn an_invented_library_preparation_is_rejected() {
     assert_rejects(&attempt, "technical_event.library_preparation", "no existe");
 }
 
-/// **La preparación amplificada sobre un escenario con microsatélites se
-/// rechaza, y el rechazo nombra el paso pendiente.**
+/// **F4.10.6. El rechazo temporal está levantado: la combinación se acepta.**
 ///
-/// Falla contra una implementación que acepte la combinación en silencio.
+/// Hasta la entrega 4 esta combinación se rechazaba en bloque, porque el
+/// tartamudeo clonal heredable por linaje no existía. Ya existe, y lo que
+/// queda es la condición permanente que comprueba la prueba siguiente.
+///
+/// **Debe fallar contra** un levantamiento a medias que deje el rechazo en pie.
+///
+/// # Lo que esta prueba **no** comprueba, dicho sin adornos
+///
+/// Solo mira que la configuración se **acepte**. No comprueba que el
+/// levantamiento venga acompañado del bloque de tartamudeo clonal: una
+/// implementación que aceptara la combinación y no abriera ninguna decisión de
+/// linaje pasaría por aquí sin inmutarse. Quien caza eso son otras tres, y se
+/// nombran para que nadie crea que esta las cubre:
+/// `the_amplified_run_reproduces_the_measured_with_pcr_fractions` y
+/// `the_amplified_manifest_publishes_the_derivation_and_the_lineage_counts`,
+/// las dos en `tests/clonal_composition.rs`, y
+/// `the_two_parts_add_up_on_every_published_read` en `tests/clonal_lineage.rs`.
 #[test]
-fn the_amplified_preparation_with_declared_repeat_loci_is_rejected_for_now() {
+fn the_amplified_preparation_with_declared_repeat_loci_is_now_accepted() {
+    let attempt = validate(&amplified(&stutter_block()), "STR-1");
+    assert!(
+        attempt.accepted(),
+        "la combinación ya no se rechaza: {:?}",
+        attempt.result
+    );
+}
+
+/// **Lo que queda en pie: con loci declarados, la amplificación exige el
+/// tartamudeo de base.**
+///
+/// El tartamudeo clonal solo despeja el **incremento** de la amplificación.
+/// Sin la parte de base la aritmética no cierra y la biblioteca quedaría entre
+/// un 14 % y un 28 % por debajo de lo medido. El rechazo lo dice con esas
+/// cifras.
+///
+/// **Debe fallar contra** un levantamiento que acepte la combinación sin
+/// comprobar que el tartamudeo de base está activo.
+#[test]
+fn amplification_over_declared_loci_demands_the_base_stutter() {
     let attempt = validate(&amplified(""), "STR-1");
     let rejection = attempt.rejection();
     let rendered = format!("{rejection:?}");
     assert_eq!(rejection.code(), "GPS-CONF-008", "{rendered}");
     assert!(
-        rendered.contains("technical_event.library_preparation,reference.repeat_loci"),
+        rendered.contains("technical_event.library_preparation,technical_event.stutter.enabled"),
         "nombra los dos campos que se cruzan: {rendered}"
     );
     assert!(
@@ -511,13 +550,107 @@ fn the_amplified_preparation_with_declared_repeat_loci_is_rejected_for_now() {
         "nombra el locus declarado: {rendered}"
     );
     assert!(
-        rendered.contains("tartamudeo clonal heredable por linaje"),
-        "nombra el paso pendiente: {rendered}"
-    );
-    assert!(
         rendered.contains("14 %") && rendered.contains("28 %"),
         "explica cuánto se subestimaría: {rendered}"
     );
+    // Control positivo del **mismo** escenario: con el interruptor apagado
+    // explícitamente también se rechaza, de modo que la guarda mira el valor y
+    // no la mera presencia de la tabla.
+    let switched_off = validate(
+        &amplified("\n[technical_event.stutter]\nenabled = false\n"),
+        "STR-1",
+    );
+    assert!(
+        switched_off.result.is_err(),
+        "una tabla presente con el interruptor apagado no basta: {:?}",
+        switched_off.result
+    );
+}
+
+/// **La sustitución directa de la probabilidad por ciclo se valida.**
+///
+/// Las dos comprobaciones miran cosas distintas: una longitud de motivo fuera
+/// del tramo calibrado y una probabilidad fuera de dominio. Cada una lleva su
+/// control positivo con el mismo escenario, que es lo que impide que una
+/// guarda que rechazara toda la tabla las satisficiera a las dos.
+#[test]
+fn a_declared_per_cycle_slip_is_checked_against_its_domain() {
+    let out_of_range = validate(
+        &amplified(&format!(
+            "{}\n[[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 7\nprobability = 0.01\n",
+            stutter_block()
+        )),
+        "STR-1",
+    );
+    assert_rejects(
+        &out_of_range,
+        "technical_event.pcr.stutter.per_cycle_slip.motif_length_bases",
+        "fuera del tramo calibrado",
+    );
+    let out_of_domain = validate(
+        &amplified(&format!(
+            "{}\n[[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 2\nprobability = 1.5\n",
+            stutter_block()
+        )),
+        "STR-1",
+    );
+    assert_rejects(
+        &out_of_domain,
+        "technical_event.pcr.stutter.per_cycle_slip.probability",
+        "es la probabilidad de UN ciclo",
+    );
+    let duplicated = validate(
+        &amplified(&format!(
+            "{}\n[[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 2\nprobability = 0.01\n\
+             \n[[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 2\nprobability = 0.02\n",
+            stutter_block()
+        )),
+        "STR-1",
+    );
+    assert_rejects(
+        &duplicated,
+        "technical_event.pcr.stutter.per_cycle_slip.motif_length_bases",
+        "se declara dos veces",
+    );
+    // Control positivo: una sustitución legítima se admite.
+    let accepted = validate(
+        &amplified(&format!(
+            "{}\n[[technical_event.pcr.stutter.per_cycle_slip]]\nmotif_length_bases = 2\nprobability = 0.02\n",
+            stutter_block()
+        )),
+        "STR-1",
+    );
+    assert!(
+        accepted.accepted(),
+        "una sustitución dentro de dominio es legítima: {:?}",
+        accepted.result
+    );
+}
+
+/// Bloque de tartamudeo de base mínimo y admisible: interruptor y pesos, que
+/// son obligatorios cuando está activo.
+fn stutter_block() -> String {
+    r#"
+[technical_event.stutter]
+enabled = true
+
+[[technical_event.stutter.steps]]
+units = -3
+weight = 0.05
+
+[[technical_event.stutter.steps]]
+units = -2
+weight = 0.15
+
+[[technical_event.stutter.steps]]
+units = -1
+weight = 0.6
+
+[[technical_event.stutter.steps]]
+units = 1
+weight = 0.2
+"#
+    .to_owned()
 }
 
 /// **El mismo locus sin preparación amplificada se admite**, y la misma

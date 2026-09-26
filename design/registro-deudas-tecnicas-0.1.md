@@ -35,6 +35,7 @@ documenta mejor.
 | DT-005 | La marca del lector de verdad que distingue un tramo sustituido por un tracto no la ejercita ninguna prueba | Baja | 22/09/2026 | Abierta |
 | DT-006 | El sorteo del inserto por rechazo es inutilizable cuando la copia más larga acerca el máximo al mínimo del perfil | Media | 24/09/2026 | Abierta, con guarda de admisión (25/09/2026) |
 | DT-007 | Ningún diagnóstico público nuevo puede publicarse en un manifiesto del recorrido general | Baja | 25/09/2026 | Abierta |
+| DT-008 | El orden entre el paso de linaje y la decisión de base no lo separaba ninguna prueba | Baja | 26/09/2026 | **Cerrada (26/09/2026)** |
 
 ---
 
@@ -97,6 +98,19 @@ Si el número de comprobaciones baja, la puerta falla; si sube, avisa. Las pieza
 `src/guard_trace.rs`, que anota la línea de cada rechazo cuando la variable de
 entorno `GPS_GUARD_TRACE_DIR` nombra un directorio, y `scripts/guard-sites.awk`,
 que enumera los puntos de rechazo del texto fuente.
+
+**La puerta solo mira tres módulos, y eso deja verificadores fuera del radar.**
+Se anota aquí el 26 de septiembre de 2026 porque la entrega 4 de microsatélites
+añadió dos más que **no** están en la línea base ni los mide nadie: las guardas
+de `validate_lineage_counts` en `src/event_manifest.rs` —que comprueban que los
+dos recuentos de linaje nombran los mismos loci y que los heredados no superan
+a los resbalones— y las de `validate_effective_clonal_stutter` en
+`src/results.rs` —que comprueban que la probabilidad por ciclo publicada sale
+de las dos fracciones publicadas y del número de ciclos, y que la marca de
+tosquedad está—. Ninguna prueba construye hoy un manifiesto ni una
+configuración efectiva malformados por ese lado, de modo que ninguna de esas
+guardas llega a dispararse y la puerta no lo ve. Lo encontró la revisión
+adversarial de la entrega 4.
 
 **Qué mide esa puerta y qué no**, dicho sin adornos: mide si una guarda **se
 dispara**, no si una prueba **fallaría** en caso de que la guarda estuviera mal
@@ -362,6 +376,56 @@ demuestra que el último intento permitido todavía puede acertar).
 **Lo que queda:** DTF-060, el método de muestreo sin rechazo, sigue aplazado
 y no es de esta guarda. Y el diagnóstico reutiliza `GPS-DOMAIN-003` en vez de
 un código propio, por la limitación que registra DT-007.
+
+---
+
+## DT-008. El orden entre las dos partes del tartamudeo no lo separaba ninguna prueba
+
+**Cerrada el 26 de septiembre de 2026.** Se abrió ese mismo día con un
+razonamiento **equivocado**, y la revisión adversarial lo refutó ejecutando. Se
+deja escrita entera porque el error es instructivo.
+
+### Qué se afirmó, y por qué era falso
+
+Se dijo que ningún fixture podía separar el orden entre el paso neto heredado
+del linaje y la decisión de tartamudeo de base, «por una razón estructural: las
+dos sortean su paso del mismo reparto de pesos y lo filtran con la misma guarda
+de viabilidad, de modo que intercambiarlas deja el mismo par de pasos aplicados
+sobre el mismo par de tiradas».
+
+**La guarda no es fija: depende del estado que deja el primer paso.** La parte
+de base calcula sus candidatos con la tirada que **encuentra**, es decir con la
+que el paso de linaje le deja. Si el primero deja la tirada corta, el segundo
+pierde alternativas. Las dos partes **dejan de conmutar en cuanto la guarda
+muerde**, y ese régimen es el de los tractos cortos con los pesos cargados a la
+contracción.
+
+El error de la medición que llevó a la afirmación fue elegir un fixture con los
+dos pasos forzados **al mismo valor**. Ahí, y solo ahí, los dos órdenes
+escriben los mismos bytes.
+
+### Cómo se cierra
+
+Con la prueba `the_lineage_step_goes_before_the_base_decision`, en
+`tests/clonal_lineage.rs`: dinucleótido de **cuatro** unidades, un ciclo con
+probabilidad de resbalón 1, tasa de base 1 y pesos `−3 → 0,9` y `+1 → 0,1`.
+
+- Orden vigente: el linaje contrae de cuatro a una unidad, y la parte de base
+  ya solo puede expandir. **Ninguna lectura muestra una unidad.**
+- Orden invertido: la base contrae primero, el paso neto del linaje ya no cabe
+  y se descarta. **237 de 300 lecturas muestran una unidad.**
+
+La aserción es «cero lecturas con una unidad», y está verificada por mutación.
+
+### Lo que queda anotado, por si vuelve a aparecer
+
+Hay un segundo camino por el que el orden se observa y que la primera versión
+también descartó mal: `slip_probability` recibe la tirada **posterior** al paso
+de linaje, de modo que con
+`technical_event.stutter.run_length_coefficient` distinto de cero —un campo que
+el autor del escenario puede declarar— la propia probabilidad de la parte de
+base depende del orden. Hoy ninguna prueba lo ejercita, porque el coeficiente
+arranca en cero y no está calibrado (pendiente P-1).
 
 ---
 

@@ -655,6 +655,14 @@ pub struct PcrSettings {
     /// `Q × c_early × 4^c_early` de la cota, y se contabiliza **una vez**,
     /// porque una vez es lo que se paga.
     early_copy_build_units: u64,
+    /// Tartamudeo clonal heredable por linaje, si el escenario declara loci de
+    /// repetición.
+    ///
+    /// Va **dentro** de los ajustes de la amplificación y no aparte porque es
+    /// la amplificación la que lo produce: sin ciclos de PCR no hay linaje en
+    /// el que heredar nada. Sin loci declarados vale `None` y una biblioteca
+    /// amplificada publica exactamente los mismos bytes que antes de F4.10.
+    clonal: Option<crate::clonal_stutter::ClonalStutterSettings>,
 }
 
 /// Lo que el autor del escenario declara, ya leído del TOML pero sin validar.
@@ -755,7 +763,43 @@ impl PcrSettings {
             efficiency_classes,
             early_copy_tables,
             early_copy_build_units,
+            clonal: None,
         })
+    }
+
+    /// Conecta el tartamudeo clonal, que solo existe cuando el escenario
+    /// declara loci de repetición.
+    ///
+    /// Es un paso aparte de [`Self::new`] porque los dos hechos que lo
+    /// deciden viven en sitios distintos del fichero: la amplificación se
+    /// declara en el evento técnico y los microsatélites junto a la
+    /// referencia. Solo cuando las dos configuraciones están resueltas puede
+    /// saberse si hay linaje que heredar.
+    #[must_use]
+    pub fn with_clonal_stutter(
+        mut self,
+        clonal: crate::clonal_stutter::ClonalStutterSettings,
+    ) -> Self {
+        self.clonal = Some(clonal);
+        self
+    }
+
+    /// Parámetros del tartamudeo clonal de este evento, si los hay.
+    #[must_use]
+    pub const fn clonal_stutter(&self) -> Option<&crate::clonal_stutter::ClonalStutterSettings> {
+        self.clonal.as_ref()
+    }
+
+    /// Catálogo de ámbitos aleatorios del que salen las decisiones de **esta**
+    /// amplificación: el v6 en cuanto abre las decisiones de linaje, y el v5
+    /// mientras no lo haga.
+    #[must_use]
+    pub const fn rng_catalog(&self) -> &'static str {
+        if self.clonal.is_some() {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V6
+        } else {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+        }
     }
 
     /// Tabla precalculada de la clase de eficiencia con este índice.
@@ -930,6 +974,29 @@ pub struct PcrReport {
     families_truncated_at_end: u64,
     gc_attempts_total: u64,
     gc_attempts_exhausted_families: u64,
+    /// Resbalones del linaje por locus: **todos** los ciclos con paso distinto
+    /// de cero, de todas las copias de todas las familias.
+    lineage_slips_by_locus: std::collections::BTreeMap<crate::identity::RepeatLocusId, u64>,
+    /// De los anteriores, los que una copia **recibió de su progenitor**.
+    ///
+    /// Con familias de tamaño 1 vale exactamente cero, y esa es la prueba que
+    /// distingue este recuento de uno que contara todos los resbalones.
+    lineage_inherited_slips_by_locus:
+        std::collections::BTreeMap<crate::identity::RepeatLocusId, u64>,
+    /// Pasos netos de linaje que de verdad **llegaron a escribirse** en una
+    /// molécula, por locus.
+    ///
+    /// # Por qué hace falta un tercer recuento y no basta con los dos de
+    /// arriba
+    ///
+    /// Los dos de arriba cuentan lo que la genealogía **sorteó**. Entre el
+    /// sorteo y la escritura hay dos filtros: un paso neto que no quepa en la
+    /// molécula que se va a emitir —cosa que puede pasar con una quimera, que
+    /// deja de ser la molécula sobre la que se sorteó— y un paso neto que salga
+    /// cero por cancelación. Sin este recuento, un paso descartado al aplicarlo
+    /// es **invisible**: los dos primeros seguirían diciendo que hubo
+    /// resbalones y nadie podría saber cuántos llegaron a la lectura.
+    lineage_applied_steps_by_locus: std::collections::BTreeMap<crate::identity::RepeatLocusId, u64>,
     /// Unidades de operación realmente gastadas por la amplificación, por
     /// encima del coste que F4 ya tenía. Existe para que una prueba pueda
     /// comparar el gasto real con la cota publicada; no se publica.
@@ -984,6 +1051,27 @@ impl PcrReport {
     }
 
     #[must_use]
+    pub const fn lineage_slips_by_locus(
+        &self,
+    ) -> &std::collections::BTreeMap<crate::identity::RepeatLocusId, u64> {
+        &self.lineage_slips_by_locus
+    }
+
+    #[must_use]
+    pub const fn lineage_inherited_slips_by_locus(
+        &self,
+    ) -> &std::collections::BTreeMap<crate::identity::RepeatLocusId, u64> {
+        &self.lineage_inherited_slips_by_locus
+    }
+
+    #[must_use]
+    pub const fn lineage_applied_steps_by_locus(
+        &self,
+    ) -> &std::collections::BTreeMap<crate::identity::RepeatLocusId, u64> {
+        &self.lineage_applied_steps_by_locus
+    }
+
+    #[must_use]
     pub const fn operation_units(&self) -> u64 {
         self.operation_units
     }
@@ -1023,6 +1111,49 @@ impl PcrAccumulator {
         self.0.operation_units = self.0.operation_units.saturating_add(units);
     }
 
+    /// Registra los resbalones de la genealogía de una familia.
+    ///
+    /// Los dos recuentos van **por separado** a propósito: el segundo es un
+    /// subconjunto del primero, y publicarlos así es lo que permite ver si la
+    /// herencia está ocurriendo de verdad. Un solo número no lo diría.
+    pub fn record_lineage(&mut self, lineage: &crate::clonal_stutter::FamilyLineage) {
+        for (locus_id, count) in lineage.slips_by_locus() {
+            *self
+                .0
+                .lineage_slips_by_locus
+                .entry(locus_id.clone())
+                .or_insert(0) += count;
+        }
+        for (locus_id, count) in lineage.inherited_slips_by_locus() {
+            *self
+                .0
+                .lineage_inherited_slips_by_locus
+                .entry(locus_id.clone())
+                .or_insert(0) += count;
+        }
+        // Los loci que nunca llegaron a escribir un paso aparecen con cero, no
+        // faltan: un recuento ausente y un cero se leen igual de mal, y solo
+        // uno de los dos dice que el locus estuvo y no llegó nada.
+        for locus_id in lineage.slips_by_locus().keys() {
+            self.0
+                .lineage_applied_steps_by_locus
+                .entry(locus_id.clone())
+                .or_insert(0);
+        }
+    }
+
+    /// Registra los pasos netos de linaje que **se escribieron** en una
+    /// molécula. Los recibe ya filtrados por quien los aplica.
+    pub fn record_applied_lineage(&mut self, applications: &[crate::stutter::StutterApplication]) {
+        for application in applications {
+            *self
+                .0
+                .lineage_applied_steps_by_locus
+                .entry(application.locus_id().clone())
+                .or_insert(0) += 1;
+        }
+    }
+
     pub fn merge(&mut self, report: &PcrReport) {
         self.0.families += report.families;
         self.0.pairs += report.pairs;
@@ -1032,6 +1163,27 @@ impl PcrAccumulator {
         self.0.families_truncated_at_end += report.families_truncated_at_end;
         self.0.gc_attempts_total += report.gc_attempts_total;
         self.0.gc_attempts_exhausted_families += report.gc_attempts_exhausted_families;
+        for (locus_id, count) in &report.lineage_slips_by_locus {
+            *self
+                .0
+                .lineage_slips_by_locus
+                .entry(locus_id.clone())
+                .or_insert(0) += count;
+        }
+        for (locus_id, count) in &report.lineage_inherited_slips_by_locus {
+            *self
+                .0
+                .lineage_inherited_slips_by_locus
+                .entry(locus_id.clone())
+                .or_insert(0) += count;
+        }
+        for (locus_id, count) in &report.lineage_applied_steps_by_locus {
+            *self
+                .0
+                .lineage_applied_steps_by_locus
+                .entry(locus_id.clone())
+                .or_insert(0) += count;
+        }
         self.0.operation_units = self
             .0
             .operation_units
@@ -1135,6 +1287,10 @@ pub const PCR_REGENERATION_PASSES: u32 = 2;
 /// `L_max` el inserto máximo del perfil y `T` los tractos declarados que caben
 /// en un inserto.
 ///
+/// El término por pareja `2·c·T + c + 1` es el del **linaje**: dos decisiones
+/// por ciclo y tracto —el resbalón y, como mucho, su paso—, más los `c + 1`
+/// pesos de la divergencia y la elección del progenitor.
+///
 /// # Dos holguras declaradas, para que nadie las descubra por sorpresa
 ///
 /// - El término de la programación dinámica queda **fuera** del producto por
@@ -1196,12 +1352,29 @@ pub fn resource_bound(
                     .saturating_add(1),
             ),
         )
+        // Los pasos del linaje de la familia en curso. **Lleva un factor
+        // `c + 1` que la primera redacción de esta cota no tenía**: para que
+        // una copia herede el prefijo de su progenitor hacen falta los pasos
+        // de este **ciclo a ciclo**, no solo su suma, y eso son `c` valores
+        // por copia y tracto más el neto que sobrevive al cálculo. Declararlo
+        // con un solo valor por copia y tracto habría dejado la cota por
+        // debajo del gasto real.
         .saturating_add(
             u64::from(crate::technical_profile::PCR_MAXIMUM_FAMILY_SIZE)
                 .saturating_mul(tracts_per_insert)
+                .saturating_mul(cycles.saturating_add(1))
                 .saturating_mul(8),
         )
-        .saturating_add(8_u64.saturating_mul(family_slots.saturating_add(1)));
+        .saturating_add(8_u64.saturating_mul(family_slots.saturating_add(1)))
+        // Los dos recuentos de linaje por locus, los de la familia en curso y
+        // los del evento entero. Son **cuatro** mapas con a lo sumo `T`
+        // entradas cada uno, y su clave es un `RepeatLocusId`, que comparte la
+        // cadena con el locus declarado en vez de copiarla: veinticuatro bytes
+        // por entrada y no la longitud del nombre que el autor del escenario
+        // haya elegido. Se cuentan aquí para que la frase «el estado añadido no
+        // depende de N ni del genoma» siga siendo cierta término a término y no
+        // por absorción.
+        .saturating_add(4_u64.saturating_mul(tracts_per_insert).saturating_mul(24));
     PcrResourceBound {
         operation_units,
         memory_bytes,
@@ -1225,10 +1398,10 @@ pub fn resource_bound(
 /// está aquí para que la ida y vuelta se vea sin tener que rehacerla.
 #[must_use]
 pub fn effective_settings_document(settings: &PcrSettings) -> serde_json::Value {
-    serde_json::json!({
+    let mut document = serde_json::json!({
         "applicable": true,
         "algorithm": PCR_AMPLIFICATION_ALGORITHM,
-        "rng_catalog": crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5,
+        "rng_catalog": settings.rng_catalog(),
         "cycles": settings.cycles(),
         "efficiency": settings.efficiency(),
         "early_cycles": settings.early_cycles(),
@@ -1259,7 +1432,16 @@ pub fn effective_settings_document(settings: &PcrSettings) -> serde_json::Value 
                 "weight": class.weight(),
             }))
             .collect::<Vec<_>>(),
-    })
+    });
+    if let Some(clonal) = settings.clonal_stutter()
+        && let Some(object) = document.as_object_mut()
+    {
+        object.insert(
+            "stutter".to_owned(),
+            crate::clonal_stutter::effective_settings_document(clonal),
+        );
+    }
+    document
 }
 
 /// Bloque que publica el **manifiesto de evento**: los mismos parámetros más
@@ -1338,6 +1520,23 @@ pub fn manifest_document(
             "unique_molecule_coverage_x".to_owned(),
             serde_json::json!(unique_molecule_coverage_x),
         );
+        // Los dos recuentos del linaje solo aparecen cuando hay linaje. Una
+        // biblioteca amplificada sin loci de repetición publica el mismo
+        // documento que antes de F4.10, byte a byte.
+        if settings.clonal_stutter().is_some() {
+            object.insert(
+                "lineage_slips_by_locus".to_owned(),
+                locus_counts_document(report.lineage_slips_by_locus(), "slips"),
+            );
+            object.insert(
+                "lineage_inherited_slips_by_locus".to_owned(),
+                locus_counts_document(report.lineage_inherited_slips_by_locus(), "slips"),
+            );
+            object.insert(
+                "lineage_applied_steps_by_locus".to_owned(),
+                locus_counts_document(report.lineage_applied_steps_by_locus(), "steps"),
+            );
+        }
         object.insert(
             "resource_bound".to_owned(),
             serde_json::json!({
@@ -1349,4 +1548,23 @@ pub fn manifest_document(
         );
     }
     document
+}
+
+/// Un recuento por locus, como lista ordenada de objetos con su nombre.
+///
+/// Se publica como lista y no como objeto con el locus de clave porque un
+/// identificador de locus lo elige el autor del escenario, y un esquema con
+/// claves libres no podría cerrarse con `additionalProperties: false`.
+fn locus_counts_document(
+    counts: &std::collections::BTreeMap<crate::identity::RepeatLocusId, u64>,
+    field: &str,
+) -> serde_json::Value {
+    serde_json::Value::Array(
+        counts
+            .iter()
+            .map(|(locus_id, count)| {
+                serde_json::json!({"locus_id": locus_id.as_str(), field: count})
+            })
+            .collect(),
+    )
 }

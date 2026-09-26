@@ -6207,6 +6207,124 @@ fn validate_effective_stutter(
     Ok(())
 }
 
+/// Comprueba la sección del tartamudeo clonal de la configuración efectiva.
+///
+/// # Lo que de verdad discrimina aquí
+///
+/// Que **la probabilidad publicada salga de las dos fracciones publicadas y
+/// del número de ciclos publicado**. Sin esta comprobación, el documento
+/// podría llevar tres números que no tienen nada que ver entre sí y nadie
+/// podría distinguirlo de uno correcto. Y que la marca de tosquedad esté: una
+/// tasa que arrastra efectos de individuo y de lote presentada sin ella se
+/// leería como una medida.
+fn validate_effective_clonal_stutter(
+    stutter: &serde_json::Map<String, Value>,
+    path: &Path,
+) -> Result<(), Diagnostic> {
+    validate_effective_closed_object(
+        stutter,
+        &[
+            "algorithm",
+            "cycles",
+            "formula",
+            "coarse",
+            "coarse_reason",
+            "calibration",
+            "per_cycle_slip",
+        ],
+        "technical_event.artifacts.pcr.stutter",
+        path,
+    )?;
+    if effective_non_empty_text(stutter, "algorithm", path)?
+        != crate::clonal_stutter::CLONAL_STUTTER_ALGORITHM
+        || effective_non_empty_text(stutter, "formula", path)?
+            != crate::clonal_stutter::CLONAL_STUTTER_FORMULA
+    {
+        return Err(effective_error(
+            path,
+            "algoritmo o fórmula del tartamudeo clonal inválidos",
+        ));
+    }
+    if stutter.get("coarse") != Some(&Value::Bool(true)) {
+        return Err(effective_error(
+            path,
+            "las tasas por ciclo se publican marcadas como toscas",
+        ));
+    }
+    let cycles = effective_nonnegative_u64(stutter, "cycles", path)?;
+    let cycles =
+        u32::try_from(cycles).map_err(|_| effective_error(path, "ciclos fuera de dominio"))?;
+    let entries = stutter
+        .get("per_cycle_slip")
+        .and_then(Value::as_array)
+        .ok_or_else(|| effective_error(path, "falta la tabla de probabilidades por ciclo"))?;
+    if entries.len() != crate::stutter::STUTTER_MOTIF_LENGTH_MAX {
+        return Err(effective_error(
+            path,
+            "la tabla de probabilidades por ciclo no cubre el tramo calibrado",
+        ));
+    }
+    for (index, entry) in entries.iter().enumerate() {
+        let entry = entry
+            .as_object()
+            .ok_or_else(|| effective_error(path, "una fila de la tabla por ciclo no es objeto"))?;
+        validate_effective_closed_object(
+            entry,
+            &[
+                "motif_length_bases",
+                "with_pcr_fraction",
+                "without_pcr_fraction",
+                "probability",
+                "source",
+            ],
+            "technical_event.artifacts.pcr.stutter.per_cycle_slip",
+            path,
+        )?;
+        if effective_nonnegative_u64(entry, "motif_length_bases", path)? != (index as u64) + 1 {
+            return Err(effective_error(
+                path,
+                "la tabla por ciclo no va en orden de longitud de motivo",
+            ));
+        }
+        let source = effective_non_empty_text(entry, "source", path)?;
+        let with_pcr = entry
+            .get("with_pcr_fraction")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| effective_error(path, "falta la fracción con PCR"))?;
+        let without_pcr = entry
+            .get("without_pcr_fraction")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| effective_error(path, "falta la fracción sin PCR"))?;
+        let probability = entry
+            .get("probability")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| effective_error(path, "falta la probabilidad por ciclo"))?;
+        match source {
+            "declared" => {}
+            "derived" => {
+                let expected = crate::clonal_stutter::per_cycle_slip_probability(
+                    with_pcr,
+                    without_pcr,
+                    cycles,
+                );
+                if probability != expected {
+                    return Err(effective_error(
+                        path,
+                        "una probabilidad por ciclo no sale de las fracciones publicadas",
+                    ));
+                }
+            }
+            _ => {
+                return Err(effective_error(
+                    path,
+                    "la procedencia de una probabilidad por ciclo no es ni derivada ni declarada",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Comprueba la sección de amplificación de la configuración efectiva.
 ///
 /// Lo que de verdad discrimina aquí es que la **derivación** viaje con los
@@ -6219,33 +6337,47 @@ fn validate_effective_pcr(
     pcr: &serde_json::Map<String, Value>,
     path: &Path,
 ) -> Result<(), Diagnostic> {
-    validate_effective_closed_object(
-        pcr,
-        &[
-            "applicable",
-            "algorithm",
-            "rng_catalog",
-            "cycles",
-            "efficiency",
-            "early_cycles",
-            "declared_duplicate_fraction",
-            "expected_duplicate_fraction",
-            "mean_pairs_per_molecule",
-            "duplicate_fraction_inversion",
-            "max_family_size",
-            "gc_max_attempts",
-            "gc_relative_efficiency",
-            "efficiency_classes",
-        ],
-        "technical_event.artifacts.pcr",
-        path,
-    )?;
+    // El catálogo que se publica es el de las decisiones que esta
+    // amplificación abre: el v6 en cuanto lleva tartamudeo clonal, el v5
+    // mientras no lo lleve. Un v6 sin la sección, o un v5 con ella, sería un
+    // documento en el que el catálogo y el contenido se contradicen. Y sin
+    // loci de repetición la sección **no aparece**, de modo que una
+    // biblioteca amplificada sin microsatélites publica exactamente el
+    // documento de antes de F4.10.
+    let opens_lineage = pcr.contains_key("stutter");
+    let mut fields = vec![
+        "applicable",
+        "algorithm",
+        "rng_catalog",
+        "cycles",
+        "efficiency",
+        "early_cycles",
+        "declared_duplicate_fraction",
+        "expected_duplicate_fraction",
+        "mean_pairs_per_molecule",
+        "duplicate_fraction_inversion",
+        "max_family_size",
+        "gc_max_attempts",
+        "gc_relative_efficiency",
+        "efficiency_classes",
+    ];
+    if opens_lineage {
+        fields.push("stutter");
+    }
+    validate_effective_closed_object(pcr, &fields, "technical_event.artifacts.pcr", path)?;
+    let expected_catalog = if opens_lineage {
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V6
+    } else {
+        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+    };
     if effective_non_empty_text(pcr, "algorithm", path)?
         != crate::pcr_amplification::PCR_AMPLIFICATION_ALGORITHM
-        || effective_non_empty_text(pcr, "rng_catalog", path)?
-            != crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+        || effective_non_empty_text(pcr, "rng_catalog", path)? != expected_catalog
     {
         return Err(effective_error(path, "algoritmo de amplificación inválido"));
+    }
+    if opens_lineage {
+        validate_effective_clonal_stutter(effective_object(pcr, "stutter", path)?, path)?;
     }
     let inversion = effective_object(pcr, "duplicate_fraction_inversion", path)?;
     validate_effective_closed_object(

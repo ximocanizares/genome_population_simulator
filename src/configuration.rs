@@ -366,6 +366,28 @@ pub struct DeclaredPcr {
     pub gc_max_attempts: Option<Located<u64>>,
     pub gc_relative_efficiency: Vec<DeclaredGcCurveKnot>,
     pub efficiency_classes: Vec<DeclaredEfficiencyClass>,
+    /// Tartamudeo clonal heredable. Ausente significa que las probabilidades
+    /// por ciclo se **derivan** de las dos columnas de la calibración y del
+    /// número de ciclos, que es lo normal; la tabla solo existe para
+    /// sustituirlas.
+    pub stutter: Option<DeclaredPcrStutter>,
+}
+
+/// Sustituciones directas de la probabilidad de resbalón **por ciclo**.
+///
+/// Solo tiene efecto con loci de repetición declarados. Lo que se declara es
+/// la probabilidad de un **ciclo**, no la fracción de extremo a extremo: son
+/// dos magnitudes distintas y confundirlas cambiaría el resultado en un orden
+/// de magnitud.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredPcrStutter {
+    pub per_cycle_slip: Vec<DeclaredPerCycleSlip>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredPerCycleSlip {
+    pub motif_length_bases: Located<u64>,
+    pub probability: DeclaredNumber,
 }
 
 /// Un nudo de la curva de composición: fracción de GC y eficiencia relativa.

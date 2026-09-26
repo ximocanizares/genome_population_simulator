@@ -97,6 +97,24 @@ pub const STUTTER_ADMITTED_STEPS: [i64; 4] = [-3, -2, -1, 1];
 pub const STUTTER_DEFAULT_MOTIF_LENGTH_RATES: [f64; STUTTER_MOTIF_LENGTH_MAX] =
     [0.027, 0.011, 0.0029, 0.0016, 0.0015, 0.0010];
 
+/// Fracción de lecturas afectadas por longitud de motivo, **columna con PCR**.
+///
+/// Mismo índice y misma fuente que la columna sin PCR de arriba: es la otra
+/// mitad de la misma tabla. Vive aquí, junto a su hermana, porque separarlas
+/// invitaría a componerlas mal.
+///
+/// # Las dos columnas son **totales**, no componentes
+///
+/// Cada conjunto pasó por una celda de flujo con su amplificación en puente y
+/// por la síntesis de la secuenciación, de modo que la columna sin PCR **ya
+/// contiene** el mosaicismo somático, el deslizamiento del puente y el de la
+/// síntesis, y esta contiene todo eso **más** la PCR de biblioteca. Por eso lo
+/// correcto es **restar** para despejar el incremento propio de la
+/// amplificación, nunca sumar: sumar contaría dos veces el mismo fenómeno.
+/// Quien la use es [`crate::clonal_stutter`].
+pub const STUTTER_WITH_PCR_MOTIF_LENGTH_RATES: [f64; STUTTER_MOTIF_LENGTH_MAX] =
+    [0.17, 0.038, 0.011, 0.0069, 0.0074, 0.0140];
+
 /// Procedencia de esas cifras. Viaja con los valores a la configuración
 /// efectiva y al manifiesto: unos números embebidos sin su fuente no se
 /// distinguen de unos inventados.
@@ -502,6 +520,16 @@ pub struct StutterTransformation {
     pair: PairedEndPair,
     evaluated: u64,
     applied: Vec<StutterApplication>,
+    /// Pasos netos del linaje de PCR aplicados a esta molécula, **aparte** de
+    /// los de la parte de base.
+    ///
+    /// Van separados porque cuentan cosas distintas y un recuento agregado que
+    /// los sumara mentiría en las dos direcciones: la fracción realizada del
+    /// tartamudeo de base dejaría de compararse con su esperada, y el número
+    /// de resbalones del linaje no es el número de moléculas que acabaron
+    /// desplazadas —varios resbalones de una misma copia dan **un** paso neto,
+    /// y dos que se cancelan dan **ninguno**—.
+    lineage_applied: Vec<StutterApplication>,
 }
 
 impl StutterTransformation {
@@ -513,6 +541,12 @@ impl StutterTransformation {
     #[must_use]
     pub fn applied(&self) -> &[StutterApplication] {
         &self.applied
+    }
+
+    /// Pasos netos de linaje que de verdad se escribieron en esta molécula.
+    #[must_use]
+    pub fn lineage_applied(&self) -> &[StutterApplication] {
+        &self.lineage_applied
     }
 
     /// Tractos declarados de esta molécula que llegaron al ensayo de Bernoulli.
@@ -713,6 +747,7 @@ pub fn transform_paired_end(
     event_id: &EventId,
     individual: &Individual,
     plan: &StutterPlan,
+    lineage: Option<&crate::clonal_stutter::LineageNetSteps>,
     pair: PairedEndPair,
     read_length: u16,
 ) -> Result<StutterTransformation, StutterError> {
@@ -721,21 +756,13 @@ pub fn transform_paired_end(
             pair,
             evaluated: 0,
             applied: Vec::new(),
+            lineage_applied: Vec::new(),
         });
     }
     let template = pair.fragment().template();
     let ordinal = template.template_ordinal().get();
     let library_id = template.library_id().clone();
     let copy_id = pair.fragment().haplotype_copy_id().clone();
-    let Some(copy) = individual
-        .copies_for(copy_id.sequence_id())
-        .and_then(|copies| copies.iter().find(|candidate| *candidate.id() == copy_id))
-    else {
-        return Err(StutterError::CopyNotFound {
-            sequence_id: copy_id.sequence_id().as_str().to_owned(),
-            copy_index: copy_id.copy_index(),
-        });
-    };
 
     // La secuencia solo se copia **cuando de verdad hay que reescribirla**. Con
     // la tasa calibrada del dinucleótido, 0,011, la inmensa mayoría de las
@@ -744,51 +771,105 @@ pub fn transform_paired_end(
     let mut rewritten: Option<Vec<u8>> = None;
     let mut evaluated = 0_u64;
     let mut applied = Vec::new();
+    let mut lineage_applied = Vec::new();
+    let original_length = u64::try_from(pair.fragment().sequence().len())
+        .map_err(|_| StutterError::LengthOverflow)?;
     // Los tractos se recorren en **orden canónico de inicio sobre la
     // molécula**, con desempate por identificador de locus. El orden importa
     // porque un paso desplaza todo lo que queda a su derecha.
-    let mut placements = Vec::new();
-    for locus in plan.loci() {
-        if locus.sequence_id() != copy_id.sequence_id() {
-            continue;
-        }
-        if let Some(placement) = locate_tract_in_copy(copy, locus)? {
-            placements.push((locus, placement));
-        }
-    }
-    placements.sort_by(|(left_locus, left), (right_locus, right)| {
-        (left.start, left_locus.id().as_str()).cmp(&(right.start, right_locus.id().as_str()))
-    });
+    let placements = place_tracts(
+        individual,
+        plan,
+        &copy_id,
+        pair.fragment().start(),
+        original_length,
+    )?;
 
-    let original_length = u64::try_from(pair.fragment().sequence().len())
-        .map_err(|_| StutterError::LengthOverflow)?;
     // Desplazamiento acumulado por los pasos ya aplicados. Todos caen **a la
     // izquierda** del tracto siguiente, porque los tractos se recorren en
     // orden, de modo que basta con sumarlo a la ventana.
     let mut shift = 0_i64;
-    for (locus, placement) in placements {
-        let fragment_start = pair.fragment().start();
+    for placed in placements {
+        let locus = placed.locus();
+        let (raw_start, raw_end) = placed.window();
+        let window_start = usize::try_from(
+            raw_start
+                .checked_add_signed(shift)
+                .ok_or(StutterError::LengthOverflow)?,
+        )
+        .map_err(|_| StutterError::LengthOverflow)?;
+        let mut window_end = usize::try_from(
+            raw_end
+                .checked_add_signed(shift)
+                .ok_or(StutterError::LengthOverflow)?,
+        )
+        .map_err(|_| StutterError::LengthOverflow)?;
+
+        // ------------------------------------------------------------------
+        // 1. **Primero** el paso neto heredado del linaje de PCR.
+        // ------------------------------------------------------------------
+        let net = lineage.map_or(0, |steps| steps.step_for(locus.id().as_str()));
+        if net != 0 {
+            let sequence: &[u8] = rewritten
+                .as_deref()
+                .unwrap_or_else(|| pair.fragment().sequence());
+            let length = u64::try_from(sequence.len()).map_err(|_| StutterError::LengthOverflow)?;
+            if window_end > sequence.len() {
+                return Err(StutterError::LengthOverflow);
+            }
+            let observed = observe_tract(&sequence[window_start..window_end], locus.motifs());
+            let run_units = observed.longest_run_units();
+            let motif_length = observed.longest_run_motif_length();
+            // El paso se sorteó sobre la molécula original de la familia. Aquí
+            // se vuelve a comprobar contra la molécula **que se va a emitir**,
+            // que con una quimera puede no ser la misma. Si no cabe, no se
+            // aplica; no hay nada que devolver al generador porque en este
+            // punto ya no se consume aleatoriedad.
+            if run_units > 0
+                && step_is_viable(run_units, motif_length, length, u64::from(read_length), net)
+            {
+                let run_start = window_start
+                    + usize::try_from(observed.longest_run_start())
+                        .map_err(|_| StutterError::LengthOverflow)?;
+                let target = match rewritten {
+                    Some(ref mut sequence) => sequence,
+                    None => rewritten.insert(pair.fragment().sequence().to_vec()),
+                };
+                apply_step_to_molecule(target, run_start, run_units, motif_length, net)?;
+                let delta = net
+                    .checked_mul(
+                        i64::try_from(motif_length).map_err(|_| StutterError::LengthOverflow)?,
+                    )
+                    .ok_or(StutterError::LengthOverflow)?;
+                // La ventana de **este** tracto crece o mengua con su propio
+                // paso, además de desplazar todo lo que queda a su derecha.
+                window_end = usize::try_from(
+                    u64::try_from(window_end)
+                        .map_err(|_| StutterError::LengthOverflow)?
+                        .checked_add_signed(delta)
+                        .ok_or(StutterError::LengthOverflow)?,
+                )
+                .map_err(|_| StutterError::LengthOverflow)?;
+                shift = shift
+                    .checked_add(delta)
+                    .ok_or(StutterError::LengthOverflow)?;
+                lineage_applied.push(StutterApplication {
+                    locus_id: locus.id().clone(),
+                    step_units: net,
+                });
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // 2. **Después** la decisión de base por pareja, sobre la molécula ya
+        //    actualizada. La tirada más larga se vuelve a leer aquí: el paso
+        //    de linaje puede haberla movido, y con un tracto impuro puede
+        //    incluso haber dejado otra tirada como la más larga.
+        // ------------------------------------------------------------------
         let sequence: &[u8] = rewritten
             .as_deref()
             .unwrap_or_else(|| pair.fragment().sequence());
         let length = u64::try_from(sequence.len()).map_err(|_| StutterError::LengthOverflow)?;
-        let Some(window) = clip_to_molecule(placement, fragment_start, original_length) else {
-            continue;
-        };
-        let window_start = usize::try_from(
-            window
-                .0
-                .checked_add_signed(shift)
-                .ok_or(StutterError::LengthOverflow)?,
-        )
-        .map_err(|_| StutterError::LengthOverflow)?;
-        let window_end = usize::try_from(
-            window
-                .1
-                .checked_add_signed(shift)
-                .ok_or(StutterError::LengthOverflow)?,
-        )
-        .map_err(|_| StutterError::LengthOverflow)?;
         if window_end > sequence.len() {
             return Err(StutterError::LengthOverflow);
         }
@@ -874,6 +955,7 @@ pub fn transform_paired_end(
             pair,
             evaluated,
             applied,
+            lineage_applied,
         });
     };
     let fragment =
@@ -885,6 +967,7 @@ pub fn transform_paired_end(
         pair: transformed,
         evaluated,
         applied,
+        lineage_applied,
     })
 }
 
@@ -962,19 +1045,103 @@ pub fn viable_steps(
 ) -> Vec<i64> {
     STUTTER_ADMITTED_STEPS
         .into_iter()
-        .filter(|step| {
-            if *step > 0 {
-                return true;
-            }
-            let removed = step.unsigned_abs();
-            if removed >= run_units {
-                return false;
-            }
-            molecule_length
-                .checked_sub(removed.saturating_mul(motif_length))
-                .is_some_and(|length| length >= read_length)
-        })
+        .filter(|step| step_is_viable(run_units, motif_length, molecule_length, read_length, *step))
         .collect()
+}
+
+/// La regla de viabilidad, para un paso de **cualquier** tamaño.
+///
+/// [`viable_steps`] la aplica a los cuatro pasos de un ciclo; el tartamudeo
+/// clonal la aplica al **paso neto acumulado** de un linaje, que puede valer
+/// cualquier entero. **Es una sola función a propósito**: con dos copias, un
+/// día una admitiría lo que la otra prohíbe y el modelo tendría dos reglas
+/// distintas para el mismo fenómeno.
+#[must_use]
+pub fn step_is_viable(
+    run_units: u64,
+    motif_length: u64,
+    molecule_length: u64,
+    read_length: u64,
+    step: i64,
+) -> bool {
+    if step >= 0 {
+        return true;
+    }
+    let removed = step.unsigned_abs();
+    if removed >= run_units {
+        return false;
+    }
+    molecule_length
+        .checked_sub(removed.saturating_mul(motif_length))
+        .is_some_and(|length| length >= read_length)
+}
+
+/// Un tracto declarado ya situado dentro de una molécula concreta.
+///
+/// Los desplazamientos son los de la molécula **antes** de aplicar ningún
+/// paso, y el orden de la lista es el canónico de inicio con desempate por
+/// identificador de locus.
+#[derive(Clone, Copy, Debug)]
+pub struct PlacedTract<'a> {
+    locus: &'a StutterLocus,
+    start: u64,
+    end: u64,
+}
+
+impl<'a> PlacedTract<'a> {
+    #[must_use]
+    pub const fn locus(&self) -> &'a StutterLocus {
+        self.locus
+    }
+
+    /// Ventana `[inicio, fin)` dentro de la molécula.
+    #[must_use]
+    pub const fn window(&self) -> (u64, u64) {
+        (self.start, self.end)
+    }
+}
+
+/// Sitúa en una molécula los tractos declarados que contiene, en orden
+/// canónico.
+///
+/// Vive aquí y no duplicado en el tartamudeo clonal porque las dos partes
+/// tienen que ver **los mismos tractos en el mismo orden**: si el linaje
+/// ordenara de otra manera, el paso neto y la decisión de base caerían sobre
+/// tractos distintos en cuanto hubiera dos.
+pub fn place_tracts<'a>(
+    individual: &Individual,
+    plan: &'a StutterPlan,
+    copy_id: &crate::haplotype::HaplotypeCopyId,
+    fragment_start: u64,
+    fragment_length: u64,
+) -> Result<Vec<PlacedTract<'a>>, StutterError> {
+    let Some(copy) = individual
+        .copies_for(copy_id.sequence_id())
+        .and_then(|copies| copies.iter().find(|candidate| *candidate.id() == *copy_id))
+    else {
+        return Err(StutterError::CopyNotFound {
+            sequence_id: copy_id.sequence_id().as_str().to_owned(),
+            copy_index: copy_id.copy_index(),
+        });
+    };
+    let mut placements = Vec::new();
+    for locus in plan.loci() {
+        if locus.sequence_id() != copy_id.sequence_id() {
+            continue;
+        }
+        let Some(placement) = locate_tract_in_copy(copy, locus)? else {
+            continue;
+        };
+        let Some((start, end)) = clip_to_molecule(placement, fragment_start, fragment_length)
+        else {
+            continue;
+        };
+        placements.push(PlacedTract { locus, start, end });
+    }
+    placements.sort_by(|left, right| {
+        (left.start, left.locus.id().as_str()).cmp(&(right.start, right.locus.id().as_str()))
+    });
+    Ok(placements)
 }
 
 /// Dónde cae el tracto dentro de la copia haplotípica.

@@ -2092,7 +2092,8 @@ pub fn build_effective_config_with_entropy(
     let initial_populations = effective_initial_populations(general, root_seed)?;
     let population_snvs = effective_population_snvs(general)?;
     let direct_events = effective_direct_events(general, &initial_populations, &sequences)?;
-    let technical_event = effective_technical_event(general, &initial_populations, &direct_events)?;
+    let mut technical_event =
+        effective_technical_event(general, &initial_populations, &direct_events)?;
     let vcf_output = general
         .vcf_output()
         .map(|output| match output.mode.value().as_str() {
@@ -2144,6 +2145,7 @@ pub fn build_effective_config_with_entropy(
     let repeat_output_budget = repeat_output_budget(general, &repeat_loci, &initial_populations)?;
     admit_loci_against_stutter(general, technical_event.as_ref(), &repeat_loci)?;
     admit_amplified_preparation_against_loci(general, technical_event.as_ref(), &repeat_loci)?;
+    attach_clonal_stutter(general, technical_event.as_mut(), &repeat_loci)?;
     Ok(EffectiveConfig {
         source_path: general.source().path().display().to_string(),
         reference_id: general.reference().id.value().clone(),
@@ -2208,18 +2210,28 @@ pub fn build_effective_config_with_entropy(
 /// locus, porque en ese momento todavía no se sabe si habrá tartamudeo. Solo
 /// puede comprobarse cuando las dos configuraciones están resueltas, que es
 /// aquí.
-/// **Rechazo temporal** de la preparación amplificada sobre un escenario con
-/// microsatélites declarados.
+/// **La preparación amplificada sobre microsatélites exige el tartamudeo de
+/// base.**
 ///
-/// # Por qué se rechaza en vez de publicar
+/// # Qué cambió aquí, y por qué no es el mismo rechazo
 ///
-/// El tartamudeo clonal heredable por linaje todavía no existe. Mientras no
-/// exista, una biblioteca amplificada sobre un escenario con loci declarados
-/// tartamudearía **solo con la parte de base** —la de la química de agrupación
-/// y la síntesis— y quedaría **por debajo de lo medido**: entre un 14 % y un
-/// 28 % menos en motivos de uno a cinco pares de base. Antes que publicar una
-/// cifra que se sabe baja, la configuración rechaza la combinación y nombra el
-/// paso pendiente. El rechazo se levanta cuando ese paso exista.
+/// Hasta la entrega 4 esta guarda rechazaba **toda** combinación de
+/// preparación amplificada con loci de repetición declarados, porque el
+/// tartamudeo clonal heredable por linaje no existía. Ya existe, y ese rechazo
+/// temporal está levantado. Lo que queda en su sitio es una condición
+/// permanente y más estrecha: la combinación se admite **si el tartamudeo de
+/// base está activo**, y solo entonces.
+///
+/// # Por qué la condición sigue haciendo falta
+///
+/// Las dos columnas de la calibración son totales. El tartamudeo clonal
+/// **despeja** el incremento propio de la amplificación,
+/// `r_pcr = 1 − (1−r_con)/(1−r_sin)`, y lo compone con la parte de base para
+/// devolver `r_con`, la fracción medida. Sin la parte de base, una biblioteca
+/// amplificada se quedaría en el incremento despejado y quedaría **por debajo
+/// de lo medido**: entre un 14 % y un 28 % menos en motivos de uno a cinco
+/// pares de base. No es una preferencia de configuración: es que la aritmética
+/// no cierra.
 ///
 /// Reutiliza el código de diagnóstico de configuración que ya existe, en vez
 /// de abrir uno nuevo: el manifiesto del recorrido general valida sus
@@ -2234,24 +2246,132 @@ fn admit_amplified_preparation_against_loci(
     let Some(event) = technical_event else {
         return Ok(());
     };
-    if event.preparation() != LibraryPreparation::Pcr || repeat_loci.is_empty() {
+    if event.preparation() != LibraryPreparation::Pcr
+        || repeat_loci.is_empty()
+        || event.stutter().enabled()
+    {
         return Ok(());
     }
     Err(config_error(
         general,
-        "technical_event.library_preparation,reference.repeat_loci",
+        "technical_event.library_preparation,technical_event.stutter.enabled",
         format!(
-            "la preparación amplificada por PCR todavía no puede combinarse con loci de \
-             repetición declarados ({} declarados, el primero es {}): el tartamudeo clonal \
-             heredable por linaje está pendiente, y sin él una biblioteca amplificada \
-             subestimaría el tartamudeo entre un 14 % y un 28 % según la longitud del motivo. \
-             Se levanta cuando ese paso exista; hasta entonces, o se quitan los loci o se usa \
-             library_preparation = \"{}\"",
+            "la preparación amplificada por PCR con loci de repetición declarados ({} \
+             declarados, el primero es {}) exige technical_event.stutter.enabled = true: el \
+             tartamudeo clonal de la PCR solo despeja el incremento de la amplificación, y sin \
+             la parte de base la biblioteca subestimaría el tartamudeo entre un 14 % y un 28 % \
+             según la longitud del motivo. O se activa el tartamudeo de base, o se quitan los \
+             loci, o se usa library_preparation = \"{}\"",
             repeat_loci.len(),
             repeat_loci.first().map_or("", EffectiveRepeatLocus::id),
             LibraryPreparation::PcrFree.as_str()
         ),
     ))
+}
+
+/// Conecta el tartamudeo clonal al evento cuando hay amplificación **y** loci.
+///
+/// # Por qué aquí y no al leer la tabla de la amplificación
+///
+/// Los dos hechos que lo deciden viven en sitios distintos del fichero: la
+/// amplificación se declara en el evento técnico y los microsatélites junto a
+/// la referencia. Al leer `[technical_event.pcr]` todavía no se sabe si habrá
+/// loci, exactamente igual que pasa con la guarda de la tirada mínima.
+///
+/// Sin loci no se conecta nada, y una biblioteca amplificada publica entonces
+/// los mismos bytes que antes de esta entrega.
+fn attach_clonal_stutter(
+    general: &DeclaredGeneralConfig,
+    technical_event: Option<&mut EffectiveTechnicalEvent>,
+    repeat_loci: &[EffectiveRepeatLocus],
+) -> Result<(), Diagnostic> {
+    let Some(event) = technical_event else {
+        return Ok(());
+    };
+    if event.preparation != LibraryPreparation::Pcr || repeat_loci.is_empty() {
+        return Ok(());
+    }
+    let substitutions = declared_per_cycle_slips(general)?;
+    let Some(settings) = event.pcr.take() else {
+        return Ok(());
+    };
+    let cycles = settings.cycles();
+    let clonal = crate::clonal_stutter::ClonalStutterSettings::new(cycles, &substitutions)
+        .map_err(|error| clonal_config_error(general, &error))?;
+    event.pcr = Some(settings.with_clonal_stutter(clonal));
+    Ok(())
+}
+
+/// Sustituciones directas de la probabilidad por ciclo, ya leídas del TOML.
+///
+/// Una longitud de motivo declarada **dos veces** se rechaza en vez de dejar
+/// que gane la última: dos valores para la misma fila son una contradicción
+/// del autor, no una preferencia.
+fn declared_per_cycle_slips(
+    general: &DeclaredGeneralConfig,
+) -> Result<std::collections::BTreeMap<u64, f64>, Diagnostic> {
+    let mut substitutions = std::collections::BTreeMap::new();
+    let Some(event) = general.technical_event() else {
+        return Ok(substitutions);
+    };
+    let Some(pcr) = event.pcr.as_ref() else {
+        return Ok(substitutions);
+    };
+    let Some(stutter) = pcr.stutter.as_ref() else {
+        return Ok(substitutions);
+    };
+    for entry in &stutter.per_cycle_slip {
+        let motif_length = *entry.motif_length_bases.value();
+        let probability = entry.probability.literal().parse::<f64>().map_err(|_| {
+            config_error(
+                general,
+                "technical_event.pcr.stutter.per_cycle_slip.probability",
+                "debe ser un f64 válido",
+            )
+        })?;
+        if substitutions.insert(motif_length, probability).is_some() {
+            return Err(config_error(
+                general,
+                "technical_event.pcr.stutter.per_cycle_slip.motif_length_bases",
+                format!(
+                    "la longitud de motivo {motif_length} se declara dos veces; cada longitud \
+                     admite una sola probabilidad por ciclo"
+                ),
+            ));
+        }
+    }
+    Ok(substitutions)
+}
+
+/// Traduce el rechazo del modelo clonal a un diagnóstico que nombra el
+/// parámetro y su valor.
+fn clonal_config_error(
+    general: &DeclaredGeneralConfig,
+    error: &crate::clonal_stutter::ClonalStutterError,
+) -> Diagnostic {
+    use crate::clonal_stutter::ClonalStutterError as Error;
+    let (field, detail) = match error {
+        Error::UnknownMotifLength { motif_length } => (
+            "technical_event.pcr.stutter.per_cycle_slip.motif_length_bases",
+            format!(
+                "la longitud de motivo {motif_length} está fuera del tramo calibrado, que va de \
+                 1 a {}; no se extrapola",
+                crate::stutter::STUTTER_MOTIF_LENGTH_MAX
+            ),
+        ),
+        Error::InvalidProbability {
+            motif_length,
+            value,
+        } => (
+            "technical_event.pcr.stutter.per_cycle_slip.probability",
+            format!(
+                "la probabilidad por ciclo {value} de la longitud de motivo {motif_length} debe \
+                 ser finita y estar en [0, 1]; es la probabilidad de UN ciclo, no la fracción de \
+                 extremo a extremo"
+            ),
+        ),
+    };
+    config_error(general, field, detail)
 }
 
 fn admit_loci_against_stutter(

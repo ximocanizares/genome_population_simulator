@@ -38,11 +38,13 @@ from config_editor import (  # noqa: E402
     EfficiencyClassRow,
     GcCurveKnotRow,
     PcrForm,
+    PerCycleSlipRow,
     efficiency_class_editor_rows,
     gc_curve_editor_rows,
     parse_general_toml,
     pcr_from_editor_rows,
     pcr_mean_pairs_per_molecule,
+    per_cycle_slip_editor_rows,
     render_general_toml,
 )
 from process_adapter import SUPPORTED_BINARY_NAME, run_toml, validate_toml  # noqa: E402
@@ -452,6 +454,131 @@ class NotebookControlsTest(unittest.TestCase):
             self.assertIsInstance(stop[0], ast.Name, target.id)
             found[target.id] = stop[0].id
         self.assertEqual(found, expected)
+
+
+class ClonalStutterEditorTest(unittest.TestCase):
+    """F4.10.6: el control del tartamudeo clonal en la interfaz.
+
+    Lo que se declara aquí es la probabilidad de **un ciclo**, no la fracción
+    de extremo a extremo. La interfaz no la deriva ni la comprueba: la
+    autoridad es Rust. Lo que sí tiene que hacer es **conservarla** en la ida y
+    la vuelta y no inventarla cuando no se declaró.
+    """
+
+    def _scenario_with_slips(self) -> str:
+        return SCENARIO.replace(
+            "[[technical_event.libraries]]",
+            "[[technical_event.pcr.stutter.per_cycle_slip]]\n"
+            "motif_length_bases = 1\n"
+            "probability = 0.0158\n"
+            "\n"
+            "[[technical_event.pcr.stutter.per_cycle_slip]]\n"
+            "motif_length_bases = 2\n"
+            "probability = 0.00276\n"
+            "\n"
+            "[[technical_event.libraries]]",
+            1,
+        )
+
+    def test_round_trip_keeps_the_declared_per_cycle_slips(self) -> None:
+        form = parse_general_toml(self._scenario_with_slips())
+        pcr = form.technical_event.pcr
+        self.assertEqual(
+            pcr.per_cycle_slip,
+            [PerCycleSlipRow(1, "0.0158"), PerCycleSlipRow(2, "0.00276")],
+        )
+        # La vuelta conserva el formulario entero, no solo este campo.
+        self.assertEqual(parse_general_toml(render_general_toml(form)), form)
+        # Y el literal declarado sobrevive tal cual: un `0.00276` que volviera
+        # como `0.00276000000001` cambiaría los bytes del documento.
+        self.assertIn("probability = 0.00276", render_general_toml(form))
+
+    def test_an_undeclared_table_is_not_written(self) -> None:
+        """Sin sustituciones, la tabla **no se escribe**.
+
+        Escribir las seis derivadas cambiaría los bytes de todo documento ya
+        publicado y, peor, el manifiesto las publicaría marcadas como del
+        usuario en vez de como despejadas.
+        """
+
+        form = parse_general_toml(SCENARIO)
+        self.assertEqual(form.technical_event.pcr.per_cycle_slip, [])
+        self.assertNotIn("per_cycle_slip", render_general_toml(form))
+        # Control positivo: con una sustitución declarada sí se escribe.
+        form.technical_event.pcr.per_cycle_slip = [PerCycleSlipRow(2, "0.01")]
+        self.assertIn(
+            "[[technical_event.pcr.stutter.per_cycle_slip]]", render_general_toml(form)
+        )
+
+    def test_the_editor_rows_carry_the_declared_slips(self) -> None:
+        form = parse_general_toml(self._scenario_with_slips())
+        pcr = form.technical_event.pcr
+        rebuilt = pcr_from_editor_rows(
+            "pcr",
+            pcr.duplicate_fraction,
+            pcr.cycles,
+            pcr.efficiency,
+            pcr.early_cycles,
+            pcr.max_family_size,
+            pcr.gc_max_attempts,
+            gc_curve_editor_rows(pcr),
+            efficiency_class_editor_rows(pcr),
+            per_cycle_slip_editor_rows(pcr),
+        )
+        self.assertEqual(rebuilt, pcr)
+
+    def test_the_editor_rows_do_not_invent_a_substitution(self) -> None:
+        """Una fila en blanco no es una sustitución.
+
+        La variante defectuosa sería tomar la fila vacía que el editor presenta
+        como una probabilidad declarada de cero, que apagaría el tartamudeo
+        clonal de esa longitud de motivo sin que nadie lo pidiera.
+        """
+
+        rows = per_cycle_slip_editor_rows(None)
+        self.assertEqual(rows, [{"order": 1, "motif_length_bases": 1, "probability": ""}])
+        rebuilt = pcr_from_editor_rows(
+            "pcr",
+            "0.2",
+            10,
+            "0.9",
+            3,
+            64,
+            8,
+            gc_curve_editor_rows(None),
+            efficiency_class_editor_rows(None),
+            rows,
+        )
+        self.assertEqual(rebuilt.per_cycle_slip, [])
+
+    def test_a_motif_length_outside_the_calibrated_range_is_rejected(self) -> None:
+        scenario = self._scenario_with_slips().replace(
+            "motif_length_bases = 1", "motif_length_bases = 7", 1
+        )
+        with self.assertRaises(EditorError) as raised:
+            parse_general_toml(scenario)
+        self.assertIn("motif_length_bases", str(raised.exception))
+
+    def test_a_repeated_motif_length_is_rejected(self) -> None:
+        scenario = self._scenario_with_slips().replace(
+            "motif_length_bases = 1", "motif_length_bases = 2", 1
+        )
+        with self.assertRaises(EditorError) as raised:
+            parse_general_toml(scenario)
+        self.assertIn("una sola probabilidad por ciclo", str(raised.exception))
+
+    def test_the_panel_shows_the_control(self) -> None:
+        """El control llega al panel, no solo al formulario.
+
+        Sin esta comprobación, un control construido y nunca colocado pasaría
+        desapercibido: es exactamente lo que le ocurrió al tartamudeo de base.
+        """
+
+        notebook = NOTEBOOK.read_text(encoding="utf-8")
+        panels = PANELS.read_text(encoding="utf-8")
+        self.assertIn("pcr_per_cycle_slip_editor = mo.ui.data_editor", notebook)
+        self.assertIn("pcr_per_cycle_slip_editor,", panels)
+        self.assertIn("pcr_per_cycle_slip_editor.value", notebook)
 
 
 if __name__ == "__main__":

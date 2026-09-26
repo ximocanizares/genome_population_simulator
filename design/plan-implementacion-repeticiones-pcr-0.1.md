@@ -2599,10 +2599,20 @@ cuando procede de una sola molécula.
   - Procede de: REQ-DAT-85 propuesto, DTC-081, DTC-086; decisión **S-11**.
   - Cambia: `src/randomness.rs`.
   - Se comprueba con: vectores congelados; las etapas existentes producen las
-    mismas subsemillas que antes; **añadir un locus en otro cromosoma no cambia
-    los resbalones de los loci previos**. **Debe fallar contra:** un ámbito
-    indexado por la posición del tracto dentro de la molécula —la prueba del
-    locus añadido en otro cromosoma es la única que lo caza.
+    mismas subsemillas que antes; **añadir un locus no cambia los resbalones de
+    los loci previos**, ni en otro cromosoma ni —y esta es la que importa— **a
+    la izquierda del anterior dentro de la misma molécula**. **Debe fallar
+    contra:** un ámbito indexado por la posición del tracto dentro de la
+    molécula.
+  - **Corrección del 26/09/2026.** Este paso decía que «la prueba del locus
+    añadido en otro cromosoma es la única que lo caza». **Es falso, y se midió
+    mutando el ámbito para que usara la posición del tracto dentro de la
+    molécula: esa prueba pasó sin inmutarse.** Dos tractos de cromosomas
+    distintos nunca comparten molécula, de modo que una implementación por
+    posición le sigue dando el índice cero a los dos. La que lo caza es la del
+    locus añadido **a la izquierda**, que es donde el tracto anterior deja de
+    ser el primero. Las dos pruebas existen; la afirmación de arriba queda
+    corregida para que nadie borre la buena creyendo que sobra.
 
 - ☐ **F4.10.2.** Genealogía mínima de la familia: la primera pareja tiene
   linaje propio completo de un paso por ciclo; la pareja siguiente elige un

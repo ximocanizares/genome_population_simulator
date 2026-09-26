@@ -346,6 +346,20 @@ class EfficiencyClassRow:
 
 
 @dataclass(eq=True)
+class PerCycleSlipRow:
+    """Sustitución directa de la probabilidad de resbalón de **un ciclo**.
+
+    No es la fracción de extremo a extremo: son dos magnitudes distintas y
+    confundirlas cambia el resultado en un orden de magnitud. Con diez ciclos,
+    la derivada del homopolímero vale 0,0158 y su fracción de extremo a extremo
+    0,17.
+    """
+
+    motif_length_bases: int
+    probability: str
+
+
+@dataclass(eq=True)
 class PcrForm:
     """Preparación amplificada declarada desde la interfaz.
 
@@ -367,6 +381,9 @@ class PcrForm:
     gc_max_attempts: int | None = None
     gc_relative_efficiency: list[GcCurveKnotRow] = field(default_factory=list)
     efficiency_classes: list[EfficiencyClassRow] = field(default_factory=list)
+    # Vacía significa que las probabilidades por ciclo se **derivan** de las dos
+    # columnas de la calibración y del número de ciclos, que es lo normal.
+    per_cycle_slip: list[PerCycleSlipRow] = field(default_factory=list)
 
 
 @dataclass(eq=True)
@@ -629,6 +646,26 @@ def efficiency_class_editor_rows(pcr: PcrForm | None) -> list[dict[str, Any]]:
     return rows or [{"order": 1, "efficiency": "", "weight": ""}]
 
 
+def per_cycle_slip_editor_rows(pcr: PcrForm | None) -> list[dict[str, Any]]:
+    """Sustituciones directas de la probabilidad por ciclo.
+
+    Llegan **vacías** cuando no se han declarado, no con las derivadas
+    escritas: presentarlas ya rellenas invitaría a guardarlas como si fueran
+    del usuario, y el manifiesto dejaría de poder distinguir una cifra
+    despejada de una declarada.
+    """
+
+    rows = [
+        {
+            "order": order,
+            "motif_length_bases": row.motif_length_bases,
+            "probability": row.probability,
+        }
+        for order, row in enumerate(pcr.per_cycle_slip if pcr else [], start=1)
+    ]
+    return rows or [{"order": 1, "motif_length_bases": 1, "probability": ""}]
+
+
 def pcr_from_editor_rows(
     library_preparation: str,
     duplicate_fraction: str,
@@ -639,6 +676,7 @@ def pcr_from_editor_rows(
     gc_max_attempts: int | None,
     gc_curve_rows: Sequence[Mapping[str, Any]],
     efficiency_class_rows: Sequence[Mapping[str, Any]],
+    per_cycle_slip_rows: Sequence[Mapping[str, Any]] = (),
 ) -> PcrForm | None:
     """Reconstruye la amplificación desde las tablas del cuaderno.
 
@@ -675,6 +713,14 @@ def pcr_from_editor_rows(
     # cambiaría los bytes del documento sin cambiar nada del resultado.
     if _is_neutral_gc_curve(knots):
         knots = []
+    slips = [
+        PerCycleSlipRow(
+            motif_length_bases=int(row.get("motif_length_bases", 0)),
+            probability=str(row.get("probability", "")).strip(),
+        )
+        for row in per_cycle_slip_rows
+        if str(row.get("probability", "")).strip()
+    ]
     return PcrForm(
         duplicate_fraction=str(duplicate_fraction).strip(),
         cycles=int(cycles),
@@ -684,6 +730,7 @@ def pcr_from_editor_rows(
         gc_max_attempts=None if gc_max_attempts is None else int(gc_max_attempts),
         gc_relative_efficiency=knots,
         efficiency_classes=classes,
+        per_cycle_slip=slips,
     )
 
 
@@ -1389,10 +1436,45 @@ def _parse_pcr(table: Mapping[str, Any]) -> PcrForm:
             "gc_max_attempts",
             "gc_relative_efficiency",
             "efficiency_classes",
+            "stutter",
         },
         required={"duplicate_fraction", "cycles", "efficiency"},
         path=path,
     )
+    slips: list[PerCycleSlipRow] = []
+    if "stutter" in table:
+        clonal = _mapping(table["stutter"], f"{path}.stutter")
+        _keys(clonal, allowed={"per_cycle_slip"}, required=set(), path=f"{path}.stutter")
+        for index, value in enumerate(
+            _sequence(clonal.get("per_cycle_slip", []), f"{path}.stutter.per_cycle_slip")
+        ):
+            row_path = f"{path}.stutter.per_cycle_slip[{index}]"
+            row = _mapping(value, row_path)
+            _keys(
+                row,
+                allowed={"motif_length_bases", "probability"},
+                required={"motif_length_bases", "probability"},
+                path=row_path,
+            )
+            length = _bounded_count(
+                row["motif_length_bases"],
+                f"{row_path}.motif_length_bases",
+                min(STUTTER_MOTIF_LENGTHS),
+                max(STUTTER_MOTIF_LENGTHS),
+            )
+            slips.append(
+                PerCycleSlipRow(
+                    motif_length_bases=length,
+                    probability=_fraction_literal(
+                        row["probability"], f"{row_path}.probability"
+                    ),
+                )
+            )
+        if len({row.motif_length_bases for row in slips}) != len(slips):
+            raise EditorError(
+                f"{path}.stutter.per_cycle_slip",
+                "cada longitud de motivo admite una sola probabilidad por ciclo",
+            )
     knots: list[GcCurveKnotRow] = []
     for index, value in enumerate(
         _sequence(table.get("gc_relative_efficiency", []), f"{path}.gc_relative_efficiency")
@@ -1471,6 +1553,7 @@ def _parse_pcr(table: Mapping[str, Any]) -> PcrForm:
         ),
         gc_relative_efficiency=knots,
         efficiency_classes=classes,
+        per_cycle_slip=slips,
     )
 
 
@@ -2470,6 +2553,32 @@ def _render_pcr(pcr: PcrForm) -> Any:
             entry.add("weight", _fraction_literal_item(row.weight, f"{row_path}.weight"))
             classes.append(entry)
         table.add("efficiency_classes", classes)
+    # La tabla del tartamudeo clonal solo se escribe si el usuario sustituyó
+    # alguna probabilidad: sin sustituciones, las seis se **derivan** y
+    # escribirlas cambiaría los bytes del documento sin cambiar el resultado, y
+    # además las publicaría marcadas como suyas.
+    if pcr.per_cycle_slip:
+        slips = tomlkit.aot()
+        for index, row in enumerate(pcr.per_cycle_slip):
+            row_path = f"{path}.stutter.per_cycle_slip[{index}]"
+            entry = tomlkit.table()
+            entry.add(
+                "motif_length_bases",
+                _checked_count(
+                    row.motif_length_bases,
+                    f"{row_path}.motif_length_bases",
+                    min(STUTTER_MOTIF_LENGTHS),
+                    max(STUTTER_MOTIF_LENGTHS),
+                ),
+            )
+            entry.add(
+                "probability",
+                _fraction_literal_item(row.probability, f"{row_path}.probability"),
+            )
+            slips.append(entry)
+        clonal = tomlkit.table()
+        clonal.add("per_cycle_slip", slips)
+        table.add("stutter", clonal)
     return table
 
 

@@ -1322,6 +1322,30 @@ pub const F4_TECHNICAL_RNG_CATALOG_V4: &str = "f4-technical-v4";
 /// que una biblioteca amplificada con parámetros neutros produzca exactamente
 /// los mismos bytes que una sin amplificar.
 pub const F4_TECHNICAL_RNG_CATALOG_V5: &str = "f4-technical-v5";
+/// Catálogo que **extiende** los anteriores con las cuatro decisiones del
+/// **tartamudeo clonal heredable por linaje** (F4.10).
+///
+/// # Qué añade, en una frase
+///
+/// Con preparación amplificada el deslizamiento puede ocurrir en **cualquier
+/// ciclo** de la PCR, y una copia que resbala transmite su número de unidades
+/// a toda su descendencia. Eso exige cuatro decisiones nuevas —progenitor,
+/// ciclo de divergencia, resbalón por ciclo y paso— que antes no existían.
+///
+/// # Por qué una versión nueva y no más claves dentro del v5
+///
+/// Por la misma razón que el v5 no cupo dentro del v4: el nombre del catálogo
+/// **es el ámbito de derivación**, y una ejecución publica el catálogo del que
+/// salen **sus** decisiones. Una biblioteca amplificada **sin** loci de
+/// repetición declarados no abre ninguna decisión de linaje y sigue publicando
+/// el v5, byte a byte como antes de esta ampliación; solo una que declare loci
+/// publica el v6.
+///
+/// Como en las dos ampliaciones anteriores, **ninguna decisión ya publicada se
+/// mueve**: las trece heredadas siguen en el v3, las dos del tartamudeo de base
+/// en el v4, las cinco de la amplificación en el v5, y solo las cuatro que
+/// nacen con el linaje usan este nombre como ámbito.
+pub const F4_TECHNICAL_RNG_CATALOG_V6: &str = "f4-technical-v6";
 /// Catálogo vigente para una ejecución que no abre la etapa `stutter`.
 pub const F4_TECHNICAL_RNG_CATALOG: &str = F4_TECHNICAL_RNG_CATALOG_V3;
 /// Catálogo inmutable de ámbitos aleatorios de F5 (DTC-089).
@@ -1537,6 +1561,38 @@ enum F4TechnicalDecisionKind<'a> {
         event_id: &'a EventId,
         library_id: &'a LibraryId,
         family_ordinal: u64,
+    },
+    /// Progenitor de la copia `copy_index` dentro de su familia.
+    LineageParent {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        copy_index: u64,
+    },
+    /// Ciclo en el que la copia `copy_index` se separa de su progenitor.
+    LineageDivergence {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        copy_index: u64,
+    },
+    /// Ensayo «¿resbala la polimerasa en este ciclo, sobre este tracto?».
+    LineageSlip {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        copy_index: u64,
+        cycle: u64,
+        locus_id: &'a RepeatLocusId,
+    },
+    /// Paso en unidades enteras de un resbalón concreto del linaje.
+    LineageStep {
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        copy_index: u64,
+        cycle: u64,
+        locus_id: &'a RepeatLocusId,
     },
 }
 
@@ -1856,6 +1912,89 @@ impl<'a> F4TechnicalDecision<'a> {
         })
     }
 
+    /// Progenitor de una copia dentro de su familia, uniforme entre las
+    /// anteriores.
+    ///
+    /// No lleva `locus_id`: la genealogía de una copia es **una sola** y la
+    /// comparten todos los tractos de su molécula. Lo que se indexa por locus
+    /// son los resbalones, que sí son independientes entre tractos.
+    #[must_use]
+    pub const fn lineage_parent(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        copy_index: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::LineageParent {
+            event_id,
+            library_id,
+            family_ordinal,
+            copy_index,
+        })
+    }
+
+    /// Ciclo de divergencia respecto del progenitor, de la geométrica pinzada.
+    #[must_use]
+    pub const fn lineage_divergence(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        copy_index: u64,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::LineageDivergence {
+            event_id,
+            library_id,
+            family_ordinal,
+            copy_index,
+        })
+    }
+
+    /// Ensayo binario de resbalón en un ciclo concreto sobre un tracto
+    /// concreto.
+    ///
+    /// **Se indexa por identificador de locus, nunca por la posición del
+    /// tracto dentro de la molécula.** Es la misma razón que en el tartamudeo
+    /// de base (S-11): declarar un locus nuevo en otro cromosoma no puede
+    /// desplazar los resbalones de los que ya había.
+    #[must_use]
+    pub const fn lineage_slip(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        copy_index: u64,
+        cycle: u64,
+        locus_id: &'a RepeatLocusId,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::LineageSlip {
+            event_id,
+            library_id,
+            family_ordinal,
+            copy_index,
+            cycle,
+            locus_id,
+        })
+    }
+
+    /// Elección del paso del resbalón entre los candidatos **ya filtrados**.
+    #[must_use]
+    pub const fn lineage_step(
+        event_id: &'a EventId,
+        library_id: &'a LibraryId,
+        family_ordinal: u64,
+        copy_index: u64,
+        cycle: u64,
+        locus_id: &'a RepeatLocusId,
+    ) -> Self {
+        Self(F4TechnicalDecisionKind::LineageStep {
+            event_id,
+            library_id,
+            family_ordinal,
+            copy_index,
+            cycle,
+            locus_id,
+        })
+    }
+
     /// Catálogo del que sale **esta** decisión, que es su ámbito de derivación.
     ///
     /// Las trece decisiones de DTC-086 conservan el v3 para que una etapa nueva
@@ -1878,6 +2017,10 @@ impl<'a> F4TechnicalDecision<'a> {
             | F4TechnicalDecisionKind::AmplificationFamilySize { .. } => {
                 F4_TECHNICAL_RNG_CATALOG_V5
             }
+            F4TechnicalDecisionKind::LineageParent { .. }
+            | F4TechnicalDecisionKind::LineageDivergence { .. }
+            | F4TechnicalDecisionKind::LineageSlip { .. }
+            | F4TechnicalDecisionKind::LineageStep { .. } => F4_TECHNICAL_RNG_CATALOG_V6,
             F4TechnicalDecisionKind::FragmentInsertLength { .. }
             | F4TechnicalDecisionKind::FragmentCopy { .. }
             | F4TechnicalDecisionKind::FragmentStart { .. }
@@ -2131,8 +2274,108 @@ impl<'a> F4TechnicalDecision<'a> {
                 "family_size",
                 None,
             ),
+            F4TechnicalDecisionKind::LineageParent {
+                event_id,
+                library_id,
+                family_ordinal,
+                copy_index,
+            } => f4_lineage_components(
+                event_id,
+                library_id,
+                family_ordinal,
+                "lineage_parent",
+                copy_index,
+                None,
+            ),
+            F4TechnicalDecisionKind::LineageDivergence {
+                event_id,
+                library_id,
+                family_ordinal,
+                copy_index,
+            } => f4_lineage_components(
+                event_id,
+                library_id,
+                family_ordinal,
+                "lineage_divergence",
+                copy_index,
+                None,
+            ),
+            F4TechnicalDecisionKind::LineageSlip {
+                event_id,
+                library_id,
+                family_ordinal,
+                copy_index,
+                cycle,
+                locus_id,
+            } => f4_lineage_components(
+                event_id,
+                library_id,
+                family_ordinal,
+                "lineage_slip",
+                copy_index,
+                Some((cycle, locus_id)),
+            ),
+            F4TechnicalDecisionKind::LineageStep {
+                event_id,
+                library_id,
+                family_ordinal,
+                copy_index,
+                cycle,
+                locus_id,
+            } => f4_lineage_components(
+                event_id,
+                library_id,
+                family_ordinal,
+                "lineage_step",
+                copy_index,
+                Some((cycle, locus_id)),
+            ),
         }
     }
+}
+
+/// Componentes de las cuatro decisiones de linaje, que **extienden** las de la
+/// etapa `amplification` con la copia de la familia y, cuando la decisión lo
+/// exige, con el ciclo y el locus:
+/// `[event_id, library_id, amplification, family_ordinal, decision, copy_index
+/// (, cycle, locus_id)]`.
+///
+/// # Lo que el orden de estos componentes protege
+///
+/// El `locus_id` entra como **identificador**, no como posición. Si el tracto
+/// se identificara por dónde cae dentro de la molécula, declarar un locus
+/// nuevo movería el índice de los que ya había y con él todas sus decisiones.
+///
+/// **Cuál es la prueba que caza ese defecto, medido y no supuesto.** Es la que
+/// añade el locus nuevo **a la izquierda del anterior, dentro de la misma
+/// molécula**: solo ahí el tracto que ya estaba pasa de ser el primero a ser el
+/// segundo. La prueba del locus añadido en **otro cromosoma** —que es la que el
+/// plan de la entrega 4 nombraba como «la única que lo caza»— **no sirve para
+/// esto**, y se comprobó mutando el ámbito para que usara la posición: esa
+/// prueba pasó sin inmutarse, porque dos tractos de cromosomas distintos nunca
+/// comparten molécula y los dos siguen siendo el índice cero. Las dos viven en
+/// `tests/clonal_lineage.rs` y la segunda lo dice en su propia documentación.
+fn f4_lineage_components(
+    event_id: &EventId,
+    library_id: &LibraryId,
+    family_ordinal: u64,
+    decision: &'static str,
+    copy_index: u64,
+    cycle_and_locus: Option<(u64, &RepeatLocusId)>,
+) -> Vec<(&'static str, String)> {
+    let mut components = vec![
+        ("event_id", event_id.as_str().to_owned()),
+        ("library_id", library_id.as_str().to_owned()),
+        ("stage", "amplification".to_owned()),
+        ("family_ordinal", family_ordinal.to_string()),
+        ("decision", decision.to_owned()),
+        ("copy_index", copy_index.to_string()),
+    ];
+    if let Some((cycle, locus_id)) = cycle_and_locus {
+        components.push(("cycle", cycle.to_string()));
+        components.push(("locus_id", locus_id.as_str().to_owned()));
+    }
+    components
 }
 
 /// Componentes de la etapa `amplification`, en el orden literal de DTC-086:

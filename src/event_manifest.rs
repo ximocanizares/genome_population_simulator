@@ -658,11 +658,12 @@ fn validate_event_manifest_document(path: &Path, bytes: &[u8]) -> Result<(), Dia
     let artifacts_object =
         required_object(required_value(root, "artifacts", path)?, "artifacts", path)?;
     let expects_stutter = artifacts_object.contains_key("stutter");
-    let expects_pcr = artifacts_object
-        .get("pcr")
-        .and_then(Value::as_object)
-        .and_then(|pcr| pcr.get("applicable"))
-        == Some(&Value::Bool(true));
+    let pcr_object = artifacts_object.get("pcr").and_then(Value::as_object);
+    let expects_pcr = pcr_object.and_then(|pcr| pcr.get("applicable")) == Some(&Value::Bool(true));
+    // La amplificación abre las decisiones de linaje **solo** cuando publica
+    // su bloque de tartamudeo clonal, que es lo mismo que decir cuando el
+    // escenario declara loci de repetición.
+    let expects_lineage = expects_pcr && pcr_object.is_some_and(|pcr| pcr.contains_key("stutter"));
     if (expects_stutter || expects_pcr) != opens_new_stage {
         return Err(event_error(
             path,
@@ -676,7 +677,9 @@ fn validate_event_manifest_document(path: &Path, bytes: &[u8]) -> Result<(), Dia
         root,
         "rng_catalog",
         path,
-        if expects_pcr {
+        if expects_lineage {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V6
+        } else if expects_pcr {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
         } else if expects_stutter {
             crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
@@ -842,8 +845,11 @@ fn event_manifest_schema_version(manifest: &EventManifest<'_>) -> &'static str {
 /// Catálogo de ámbitos aleatorios del que salen **las decisiones de este
 /// evento**, no el más alto que el binario conoce.
 fn event_manifest_rng_catalog(manifest: &EventManifest<'_>) -> &'static str {
-    if manifest.pcr.is_some() {
-        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+    if let Some(pcr) = manifest.pcr.as_ref() {
+        // El v6 solo cuando la amplificación abre de verdad las decisiones de
+        // linaje. Una biblioteca amplificada sin loci de repetición sigue
+        // publicando el v5, byte a byte como antes de F4.10.
+        pcr.settings.rng_catalog()
     } else if manifest.stutter.is_some() {
         crate::randomness::F4_TECHNICAL_RNG_CATALOG_V4
     } else {
@@ -1879,37 +1885,59 @@ fn validate_pcr_manifest(
     pcr: &serde_json::Map<String, Value>,
     path: &Path,
 ) -> Result<(), Diagnostic> {
-    validate_closed(
-        pcr,
-        &[
-            "applicable",
-            "algorithm",
-            "rng_catalog",
-            "cycles",
-            "efficiency",
-            "early_cycles",
-            "declared_duplicate_fraction",
-            "expected_duplicate_fraction",
-            "mean_pairs_per_molecule",
-            "duplicate_fraction_inversion",
-            "max_family_size",
-            "gc_max_attempts",
-            "gc_relative_efficiency",
-            "efficiency_classes",
-            "families",
-            "pairs",
-            "duplicate_pairs",
-            "realized_duplicate_fraction",
-            "family_size_histogram",
-            "families_truncated_at_end",
-            "gc_attempts_total",
-            "gc_attempts_exhausted_families",
-            "unique_molecule_coverage_x",
-            "resource_bound",
-        ],
-        "artifacts.pcr",
-        path,
-    )?;
+    // Los tres campos del linaje **van juntos o no van**: publicar la
+    // derivación sin los recuentos, o al revés, dejaría un documento en el que
+    // no se puede saber si el tartamudeo clonal llegó a ocurrir. Y solo
+    // aparecen cuando el escenario declara loci de repetición, de modo que una
+    // biblioteca amplificada sin microsatélites tiene que seguir publicando
+    // **exactamente** los mismos campos que antes de F4.10.
+    let lineage_fields = [
+        "stutter",
+        "lineage_slips_by_locus",
+        "lineage_inherited_slips_by_locus",
+        "lineage_applied_steps_by_locus",
+    ];
+    let present = lineage_fields
+        .iter()
+        .filter(|field| pcr.contains_key(**field))
+        .count();
+    if present != 0 && present != lineage_fields.len() {
+        return Err(event_error(
+            path,
+            "la sección de tartamudeo clonal y sus dos recuentos de linaje van juntos o no van",
+        ));
+    }
+    let opens_lineage = present == lineage_fields.len();
+    let mut fields = vec![
+        "applicable",
+        "algorithm",
+        "rng_catalog",
+        "cycles",
+        "efficiency",
+        "early_cycles",
+        "declared_duplicate_fraction",
+        "expected_duplicate_fraction",
+        "mean_pairs_per_molecule",
+        "duplicate_fraction_inversion",
+        "max_family_size",
+        "gc_max_attempts",
+        "gc_relative_efficiency",
+        "efficiency_classes",
+        "families",
+        "pairs",
+        "duplicate_pairs",
+        "realized_duplicate_fraction",
+        "family_size_histogram",
+        "families_truncated_at_end",
+        "gc_attempts_total",
+        "gc_attempts_exhausted_families",
+        "unique_molecule_coverage_x",
+        "resource_bound",
+    ];
+    if opens_lineage {
+        fields.extend_from_slice(&lineage_fields);
+    }
+    validate_closed(pcr, &fields, "artifacts.pcr", path)?;
     require_text(
         pcr,
         "algorithm",
@@ -1920,8 +1948,15 @@ fn validate_pcr_manifest(
         pcr,
         "rng_catalog",
         path,
-        crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5,
+        if opens_lineage {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V6
+        } else {
+            crate::randomness::F4_TECHNICAL_RNG_CATALOG_V5
+        },
     )?;
+    if opens_lineage {
+        validate_lineage_counts(pcr, path, required_u64(pcr, "pairs", path)?)?;
+    }
     let inversion = required_object(
         required_value(pcr, "duplicate_fraction_inversion", path)?,
         "artifacts.pcr.duplicate_fraction_inversion",
@@ -2038,6 +2073,86 @@ fn validate_pcr_manifest(
         ));
     }
     Ok(())
+}
+
+/// Comprueba los dos recuentos de linaje del manifiesto.
+///
+/// # La relación que de verdad discrimina
+///
+/// Los heredados son un **subconjunto** de los resbalones, y los dos listados
+/// nombran **los mismos loci**. Un recuento de heredados que contara todos los
+/// resbalones daría las dos listas iguales locus a locus, cosa que aquí no se
+/// prohíbe —puede ocurrir legítimamente si todo se heredó—, pero uno que los
+/// contara **de más** rompe la desigualdad y muere aquí.
+fn validate_lineage_counts(
+    pcr: &serde_json::Map<String, Value>,
+    path: &Path,
+    pairs: u64,
+) -> Result<(), Diagnostic> {
+    let slips = locus_slip_counts(pcr, "lineage_slips_by_locus", "slips", path)?;
+    let inherited = locus_slip_counts(pcr, "lineage_inherited_slips_by_locus", "slips", path)?;
+    let applied = locus_slip_counts(pcr, "lineage_applied_steps_by_locus", "steps", path)?;
+    if slips.keys().ne(inherited.keys()) || slips.keys().ne(applied.keys()) {
+        return Err(event_error(
+            path,
+            "los tres recuentos de linaje no nombran los mismos loci",
+        ));
+    }
+    for (locus_id, count) in &inherited {
+        if slips.get(locus_id).copied().unwrap_or(0) < *count {
+            return Err(event_error(
+                path,
+                "hay más resbalones heredados que resbalones en un locus",
+            ));
+        }
+    }
+    // Un paso neto escrito es **uno por molécula y locus**, de modo que no
+    // puede haber más que parejas. Sin esta cota, un recuento que sumara
+    // resbalones en vez de pasos aplicados pasaría desapercibido en cuanto una
+    // sola copia resbalara dos veces.
+    for count in applied.values() {
+        if *count > pairs {
+            return Err(event_error(
+                path,
+                "hay más pasos de linaje escritos que parejas en un locus",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Lee una lista de recuentos por locus, comprobando que cada fila está
+/// cerrada y que ningún locus aparece dos veces.
+fn locus_slip_counts(
+    pcr: &serde_json::Map<String, Value>,
+    field: &str,
+    count_field: &str,
+    path: &Path,
+) -> Result<BTreeMap<String, u64>, Diagnostic> {
+    let entries = required_array(
+        required_value(pcr, field, path)?,
+        &format!("artifacts.pcr.{field}"),
+        path,
+    )?;
+    let mut counts = BTreeMap::new();
+    for entry in entries {
+        let entry = required_object(entry, &format!("artifacts.pcr.{field}[]"), path)?;
+        validate_closed(
+            entry,
+            &["locus_id", count_field],
+            &format!("artifacts.pcr.{field}[]"),
+            path,
+        )?;
+        let locus_id = required_string(entry, "locus_id", path)?.to_owned();
+        let slips = required_u64(entry, count_field, path)?;
+        if counts.insert(locus_id, slips).is_some() {
+            return Err(event_error(
+                path,
+                "un locus aparece dos veces en un recuento de linaje",
+            ));
+        }
+    }
+    Ok(counts)
 }
 
 fn validate_biological_contamination_manifest(

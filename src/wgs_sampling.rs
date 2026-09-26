@@ -8,6 +8,7 @@ use crate::application::{
     EffectiveTechnicalEvent, EffectiveTechnicalEventTarget, ILLUMINA_SE_MINIMAL_READ_LENGTH,
 };
 use crate::chimera::{ChimeraAccumulator, ChimeraReport, ChimeraSettings, transform_paired_end};
+use crate::clonal_stutter::LineageNetSteps;
 use crate::diagnostics::Diagnostic;
 use crate::haplotype::{HaplotypeCopy, HaplotypeCopyId, Individual};
 use crate::identity::{EventId, IndividualId, LibraryId, SequenceId};
@@ -600,11 +601,43 @@ pub struct WgsPairedEndSampler<'a> {
     failed: bool,
 }
 
-/// Molécula original de una familia y lo que queda por emitir de ella.
+/// Unidades de operación que cuesta la genealogía de una familia.
+///
+/// Es el término `K × (2·c·T + c + 1)` de la cota publicada: por cada copia,
+/// dos decisiones por ciclo y tracto —el resbalón y, como mucho, su paso—, más
+/// el recorrido de los `c + 1` pesos de la divergencia y la elección del
+/// progenitor. Se cuenta **en el peor caso**, no en el realizado: la cota que
+/// se publica tiene que seguir siendo una cota cuando todos los ciclos
+/// resbalen.
+fn lineage_units(cycles: u32, family_size: u64, tracts: u64) -> u64 {
+    if tracts == 0 {
+        return 0;
+    }
+    let cycles = u64::from(cycles);
+    family_size.saturating_mul(
+        2_u64
+            .saturating_mul(cycles)
+            .saturating_mul(tracts)
+            .saturating_add(cycles)
+            .saturating_add(1),
+    )
+}
+
+/// Molécula original de una familia, su genealogía y lo que queda por emitir.
 #[derive(Clone, Debug)]
 struct FamilyState {
     molecule: SampledMolecule,
     remaining: u64,
+    /// Índice de la **copia siguiente** dentro de la familia. Es el que entra
+    /// en las claves del linaje, de modo que la primera pareja de cada familia
+    /// es siempre la copia `0` y no depende de cuántas parejas emitieran las
+    /// familias anteriores.
+    next_member: usize,
+    /// Pasos netos de tartamudeo clonal de cada copia. Vacía cuando el
+    /// escenario no declara loci de repetición, que es lo que hace que una
+    /// biblioteca amplificada sin microsatélites no abra ni una decisión
+    /// nueva.
+    lineage: crate::clonal_stutter::FamilyLineage,
 }
 
 /// Lo que una familia recién abierta deja anotado para el acumulador.
@@ -969,9 +1002,12 @@ impl<'a> WgsPairedEndSampler<'a> {
     /// amplificación, la de la familia en curso; si la familia se agotó, abre
     /// una nueva en este mismo ordinal, que pasa a ser su **ordinal de
     /// familia**.
-    fn molecule_for(&mut self, ordinal: u64) -> Result<SampledMolecule, WgsSamplingError> {
+    fn molecule_for(
+        &mut self,
+        ordinal: u64,
+    ) -> Result<(SampledMolecule, Option<LineageNetSteps>), WgsSamplingError> {
         if !self.pcr_plan.is_active() {
-            return self.sample_molecule(ordinal, 0);
+            return Ok((self.sample_molecule(ordinal, 0)?, None));
         }
         if self
             .family
@@ -985,6 +1021,7 @@ impl<'a> WgsPairedEndSampler<'a> {
                 .record_family(accounting.emitted_pairs, accounting.truncated);
             self.pcr_accumulator
                 .record_operation_units(accounting.operation_units);
+            self.pcr_accumulator.record_lineage(&family.lineage);
             self.family = Some(family);
         }
         let exhausts = self
@@ -997,14 +1034,17 @@ impl<'a> WgsPairedEndSampler<'a> {
             // duplicados— eso significa que la amplificación no añade ni una
             // copia de secuencia por pareja.
             let family = self.family.take().ok_or(WgsSamplingError::LengthOverflow)?;
-            return Ok(family.molecule);
+            let steps = family.lineage.member(family.next_member);
+            return Ok((family.molecule, steps));
         }
         let family = self
             .family
             .as_mut()
             .ok_or(WgsSamplingError::LengthOverflow)?;
         family.remaining -= 1;
-        Ok(family.molecule.clone())
+        let steps = family.lineage.member(family.next_member);
+        family.next_member += 1;
+        Ok((family.molecule.clone(), steps))
     }
 
     /// Abre una familia: clase de eficiencia, copias tras los primeros ciclos,
@@ -1153,10 +1193,25 @@ impl<'a> WgsPairedEndSampler<'a> {
         // cero: el iterador no habría llegado hasta aquí.
         let emitted = drawn.min(self.remaining_pairs.max(1));
         let emitted_pairs = u32::try_from(emitted).map_err(|_| WgsSamplingError::LengthOverflow)?;
+
+        // 5. Genealogía de la familia y pasos netos de tartamudeo clonal.
+        //
+        //    Se resuelve **aquí y para la familia entera** porque la herencia
+        //    de una copia necesita el linaje de su progenitor, que es otra
+        //    copia de esta misma familia. Resolverlo pareja a pareja obligaría
+        //    a rehacer el árbol en cada una.
+        let lineage = self.resolve_lineage(ordinal, efficiency, emitted, &molecule)?;
+        units = units.saturating_add(lineage_units(
+            settings.cycles(),
+            emitted,
+            lineage.loci_count() as u64,
+        ));
         Ok((
             FamilyState {
                 molecule,
                 remaining: emitted,
+                next_member: 0,
+                lineage,
             },
             FamilyAccounting {
                 attempts: attempt,
@@ -1168,13 +1223,115 @@ impl<'a> WgsPairedEndSampler<'a> {
         ))
     }
 
+    /// Resuelve la genealogía de una familia sobre su molécula original.
+    ///
+    /// # Qué molécula se mira, y por qué esa
+    ///
+    /// La **original de la familia**, la misma de la que salen todas sus
+    /// parejas. Es lo que hace que las guardas de viabilidad sean coherentes
+    /// entre una copia y su progenitor: los dos descienden de la misma
+    /// molécula y tienen la misma tirada de partida. Si una pareja resulta
+    /// **quimérica**, el paso neto se vuelve a comprobar al aplicarlo, y ahí
+    /// puede no caber; eso se decide en `crate::stutter`, no aquí.
+    ///
+    /// Sin loci declarados, sin tartamudeo de base activo o sin tasas por
+    /// ciclo, devuelve la genealogía vacía **sin consumir una sola palabra**.
+    fn resolve_lineage(
+        &self,
+        ordinal: u64,
+        efficiency: f64,
+        family_size: u64,
+        molecule: &SampledMolecule,
+    ) -> Result<crate::clonal_stutter::FamilyLineage, WgsSamplingError> {
+        let Some(settings) = self.pcr_plan.settings() else {
+            return Ok(crate::clonal_stutter::FamilyLineage::default());
+        };
+        let Some(clonal) = settings.clonal_stutter() else {
+            return Ok(crate::clonal_stutter::FamilyLineage::default());
+        };
+        if !self.stutter_plan.is_active() {
+            return Ok(crate::clonal_stutter::FamilyLineage::default());
+        }
+        let Some(weights) = self.stutter_plan.settings().step_weights() else {
+            return Ok(crate::clonal_stutter::FamilyLineage::default());
+        };
+        let length =
+            u64::try_from(molecule.sequence.len()).map_err(|_| WgsSamplingError::LengthOverflow)?;
+        let placements = crate::stutter::place_tracts(
+            self.individual,
+            &self.stutter_plan,
+            &molecule.copy_id,
+            molecule.start,
+            length,
+        )
+        .map_err(WgsSamplingError::Stutter)?;
+        let mut tracts = Vec::with_capacity(placements.len());
+        for placed in &placements {
+            let (start, end) = placed.window();
+            let start = usize::try_from(start).map_err(|_| WgsSamplingError::LengthOverflow)?;
+            let end = usize::try_from(end).map_err(|_| WgsSamplingError::LengthOverflow)?;
+            if end > molecule.sequence.len() {
+                return Err(WgsSamplingError::LengthOverflow);
+            }
+            let observed = crate::tandem_repeat::observe_tract(
+                &molecule.sequence[start..end],
+                placed.locus().motifs(),
+            );
+            if observed.longest_run_units() == 0 {
+                // Sin ninguna copia completa dentro de la molécula no hay
+                // tirada donde resbalar, y este tracto no abre ni una
+                // decisión.
+                continue;
+            }
+            let motif_length = observed.longest_run_motif_length();
+            let Some(probability) = clonal.probability_for_motif_length(motif_length) else {
+                // Longitud de motivo fuera del tramo calibrado. No se
+                // extrapola; la admisión ya lo rechaza antes de llegar aquí.
+                continue;
+            };
+            tracts.push(crate::clonal_stutter::LineageTract::new(
+                placed.locus().id(),
+                observed.longest_run_units(),
+                motif_length,
+                probability,
+            ));
+        }
+        if tracts.is_empty() {
+            return Ok(crate::clonal_stutter::FamilyLineage::default());
+        }
+        let library_id = self
+            .identities
+            .library(self.individual.id())
+            .ok_or(WgsSamplingError::MissingTechnicalLibrary)?
+            .library_id();
+        let divergence = crate::clonal_stutter::divergence_weights(clonal.cycles(), efficiency);
+        crate::clonal_stutter::resolve_family_lineage(
+            crate::clonal_stutter::LineageKey {
+                root: self.identities.root_seed(),
+                event_id: self.identities.event_id(),
+                library_id,
+                family_ordinal: ordinal,
+            },
+            family_size,
+            &divergence,
+            clonal.cycles(),
+            &tracts,
+            weights,
+            crate::clonal_stutter::LineageMolecule {
+                length_bases: length,
+                read_length_bases: u64::from(self.read_length),
+            },
+        )
+        .map_err(WgsSamplingError::Stutter)
+    }
+
     fn sample_next_pair(&mut self, ordinal: u64) -> Result<PairedEndPair, WgsSamplingError> {
         let template = self
             .identities
             .derive_template(self.individual.id(), TemplateOrdinal::new(ordinal))
             .map_err(WgsSamplingError::TechnicalIdentity)?;
         let event_id = self.identities.event_id();
-        let molecule = self.molecule_for(ordinal)?;
+        let (molecule, lineage) = self.molecule_for(ordinal)?;
         let fragment = PairedEndFragment::new(
             template,
             molecule.copy_id.clone(),
@@ -1208,6 +1365,7 @@ impl<'a> WgsPairedEndSampler<'a> {
             event_id,
             self.individual,
             &self.stutter_plan,
+            lineage.as_ref(),
             transformation.into_pair(),
             self.read_length,
         )
@@ -1215,6 +1373,12 @@ impl<'a> WgsPairedEndSampler<'a> {
         self.stutter_accumulator
             .record(&stuttered)
             .map_err(WgsSamplingError::Stutter)?;
+        // Los pasos de linaje que **de verdad se escribieron**. Se cuentan
+        // aquí, después de aplicarlos, y no al sortearlos: entre una cosa y la
+        // otra un paso puede quedarse fuera porque no quepa en la molécula que
+        // se va a emitir.
+        self.pcr_accumulator
+            .record_applied_lineage(stuttered.lineage_applied());
         Ok(stuttered.into_pair())
     }
 }

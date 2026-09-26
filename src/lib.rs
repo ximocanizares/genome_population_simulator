@@ -23,6 +23,7 @@ pub mod adapters;
 pub mod application;
 pub mod biological_contamination;
 pub mod chimera;
+pub mod clonal_stutter;
 pub mod configuration;
 pub mod coordinates;
 pub mod demultiplexing;

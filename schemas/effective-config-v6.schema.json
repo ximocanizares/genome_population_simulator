@@ -1403,7 +1403,8 @@
           "enum": [
             "f4-technical-v3",
             "f4-technical-v4",
-            "f4-technical-v5"
+            "f4-technical-v5",
+            "f4-technical-v6"
           ]
         },
         "id_catalog": {
@@ -1599,7 +1600,10 @@
           "then": {
             "properties": {
               "rng_catalog": {
-                "const": "f4-technical-v5"
+                "enum": [
+                  "f4-technical-v5",
+                  "f4-technical-v6"
+                ]
               }
             }
           }
@@ -1642,6 +1646,67 @@
           }
         },
         {
+          "$comment": "El tartamudeo clonal estrena el v6: el bloque stutter de la amplificación y ese catálogo son la misma cosa.",
+          "if": {
+            "properties": {
+              "artifacts": {
+                "properties": {
+                  "pcr": {
+                    "required": [
+                      "stutter"
+                    ]
+                  }
+                },
+                "required": [
+                  "pcr"
+                ]
+              }
+            },
+            "required": [
+              "artifacts"
+            ]
+          },
+          "then": {
+            "properties": {
+              "rng_catalog": {
+                "const": "f4-technical-v6"
+              }
+            }
+          }
+        },
+        {
+          "$comment": "Y al revés: el v6 solo lo publica una amplificación con tartamudeo clonal.",
+          "if": {
+            "properties": {
+              "rng_catalog": {
+                "const": "f4-technical-v6"
+              }
+            },
+            "required": [
+              "rng_catalog"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifacts": {
+                "properties": {
+                  "pcr": {
+                    "required": [
+                      "stutter"
+                    ]
+                  }
+                },
+                "required": [
+                  "pcr"
+                ]
+              }
+            },
+            "required": [
+              "artifacts"
+            ]
+          }
+        },
+        {
           "$comment": "La sección de tartamudeo exige un catálogo que tenga esa etapa: el v4 si no amplifica, el v5 si además amplifica.",
           "if": {
             "required": [
@@ -1653,7 +1718,8 @@
               "rng_catalog": {
                 "enum": [
                   "f4-technical-v4",
-                  "f4-technical-v5"
+                  "f4-technical-v5",
+                  "f4-technical-v6"
                 ]
               }
             }
@@ -1853,7 +1919,10 @@
                   "const": "pcr-amplification-v1"
                 },
                 "rng_catalog": {
-                  "const": "f4-technical-v5"
+                  "enum": [
+                    "f4-technical-v5",
+                    "f4-technical-v6"
+                  ]
                 },
                 "cycles": {
                   "type": "integer",
@@ -1933,6 +2002,109 @@
                         "type": "number",
                         "exclusiveMinimum": 0,
                         "maximum": 1
+                      }
+                    }
+                  }
+                },
+                "stutter": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "Tartamudeo clonal heredable por linaje. Solo aparece cuando el escenario declara loci de repeticion; sin ellos una biblioteca amplificada publica exactamente el documento de antes de F4.10.",
+                  "required": [
+                    "algorithm",
+                    "cycles",
+                    "formula",
+                    "coarse",
+                    "coarse_reason",
+                    "calibration",
+                    "per_cycle_slip"
+                  ],
+                  "properties": {
+                    "algorithm": {
+                      "const": "clonal-stutter-v1"
+                    },
+                    "cycles": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 30
+                    },
+                    "formula": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "coarse": {
+                      "const": true,
+                      "description": "SIEMPRE cierto: las dos columnas de la calibracion proceden de dos individuos distintos, de proyectos distintos y a coberturas distintas, de modo que la resta puede llevar dentro efectos de individuo y de lote ademas del de la amplificacion."
+                    },
+                    "coarse_reason": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "calibration": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "source",
+                        "species",
+                        "technology"
+                      ],
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "species": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "technology": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "per_cycle_slip": {
+                      "type": "array",
+                      "minItems": 6,
+                      "maxItems": 6,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "motif_length_bases",
+                          "with_pcr_fraction",
+                          "without_pcr_fraction",
+                          "probability",
+                          "source"
+                        ],
+                        "properties": {
+                          "motif_length_bases": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 6
+                          },
+                          "with_pcr_fraction": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "without_pcr_fraction": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMaximum": 1
+                          },
+                          "probability": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "source": {
+                            "enum": [
+                              "derived",
+                              "declared"
+                            ]
+                          }
+                        }
                       }
                     }
                   }

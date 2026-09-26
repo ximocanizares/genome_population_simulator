@@ -172,6 +172,7 @@ def pcr_panel(
     pcr_gc_max_attempts_control,
     pcr_gc_curve_editor,
     pcr_efficiency_classes_editor,
+    pcr_per_cycle_slip_editor,
 ):
     """Render the amplified-preparation controls; Rust stays the authority.
 
@@ -259,6 +260,39 @@ def pcr_panel(
                 "INTERVENIR. Cada familia usa la de su clase. La escalar sigue "
                 "siendo obligatoria y se publica, pero ya no cambia nada.",
                 kind="warn",
+            ),
+            mo.md("### Tartamudeo clonal heredable"),
+            pcr_per_cycle_slip_editor,
+            mo.callout(
+                "Con PCR, el deslizamiento puede ocurrir en CUALQUIER ciclo, y "
+                "una copia que resbala transmite su número de unidades a toda su "
+                "descendencia. De ahí sale el artefacto que importa: una familia "
+                "de duplicados puede mostrar dos o tres alelos en proporciones "
+                "que imitan a un heterocigoto, procediendo de una sola molécula.",
+                kind="info",
+            ),
+            mo.callout(
+                "Lo que se declara aquí es la probabilidad de UN CICLO, no la "
+                "fracción de extremo a extremo: son dos magnitudes distintas. Con "
+                "diez ciclos, la del homopolímero vale 0,0158 y su fracción de "
+                "extremo a extremo 0,17. En blanco se despeja de las dos columnas "
+                "de la calibración, que es lo normal.",
+                kind="warn",
+            ),
+            mo.callout(
+                "Las tasas por ciclo derivadas son TOSCAS, y el manifiesto las "
+                "publica marcadas como tales: las dos columnas de la calibración "
+                "proceden de dos individuos distintos, de proyectos distintos y a "
+                "coberturas distintas, de modo que la resta puede llevar dentro "
+                "efectos de individuo y de lote además del de la amplificación.",
+                kind="warn",
+            ),
+            mo.callout(
+                "Solo tiene efecto con loci de repetición declarados. Y con ellos, "
+                "la preparación amplificada EXIGE el tartamudeo de base: sin él la "
+                "biblioteca subestimaría el tartamudeo entre un 14 % y un 28 % "
+                "según la longitud del motivo.",
+                kind="info",
             ),
         ]
     )

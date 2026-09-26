@@ -1276,6 +1276,42 @@
                 }
               },
               "description": "Cuando se declaran clases de eficiencia, la eficiencia escalar de arriba DEJA DE INTERVENIR en el modelo: cada familia usa la de su clase. La escalar sigue siendo obligatoria y se publica, pero quien declare eficiencia 0,9 y clases 0,95 y 0,5 verá publicado un 0,9 que no cambia nada."
+            },
+            "stutter": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Tartamudeo clonal heredable por linaje. Solo tiene efecto con loci de repetición declarados. La tabla es OPCIONAL: sin ella las probabilidades por ciclo se despejan de las dos columnas de la calibración y del número de ciclos, que es lo normal.",
+              "properties": {
+                "per_cycle_slip": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 6,
+                  "uniqueItems": true,
+                  "x-gps-control": "table",
+                  "description": "Sustitución directa de la probabilidad de resbalón de UN ciclo, no de la fracción de extremo a extremo: son dos magnitudes distintas y confundirlas cambia el resultado en un orden de magnitud. Con diez ciclos, la derivada del homopolímero vale 0,0158 y su fracción de extremo a extremo 0,17.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "motif_length_bases",
+                      "probability"
+                    ],
+                    "properties": {
+                      "motif_length_bases": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 6
+                      },
+                      "probability": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "x-gps-unit": "fraction"
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         },

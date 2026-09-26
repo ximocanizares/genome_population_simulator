@@ -10,7 +10,8 @@ use crate::configuration::{
     DeclaredEfficiencyClass, DeclaredF5GeneralConfig, DeclaredF5SamplingOverride,
     DeclaredF5Scenario, DeclaredF5Subpopulation, DeclaredF5Target, DeclaredGcCurveKnot,
     DeclaredGeneralConfig, DeclaredInitialPopulation, DeclaredNumber, DeclaredPcr,
-    DeclaredPopulationSnvs, DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
+    DeclaredPcrStutter, DeclaredPerCycleSlip, DeclaredPopulationSnvs,
+    DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
     DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
     DeclaredReference, DeclaredReferenceSource, DeclaredRepeatAdmission, DeclaredRepeatAllele,
     DeclaredRepeatInterruption, DeclaredRepeatLocus, DeclaredSequence, DeclaredStutter,
@@ -1128,6 +1129,7 @@ fn parse_pcr(
             "gc_max_attempts",
             "gc_relative_efficiency",
             "efficiency_classes",
+            "stutter",
         ],
     )?;
     let gc_relative_efficiency = optional_array(admitted, table, "gc_relative_efficiency")?
@@ -1177,7 +1179,44 @@ fn parse_pcr(
         gc_max_attempts: optional_located_u64(admitted, table, "gc_max_attempts")?,
         gc_relative_efficiency,
         efficiency_classes,
+        stutter: parse_pcr_stutter(admitted, table)?,
     }))
+}
+
+/// Lee `[technical_event.pcr.stutter]`.
+///
+/// La tabla **no** admite claves desconocidas, y eso es lo que rechaza una
+/// sustitución escrita como fracción de extremo a extremo: `motif_length_rates`
+/// no es una clave de este contrato, porque aquí lo que se declara es la
+/// probabilidad de **un ciclo**.
+fn parse_pcr_stutter(
+    admitted: &AdmittedToml,
+    pcr: &DeTable<'_>,
+) -> Result<Option<DeclaredPcrStutter>, Diagnostic> {
+    let Some(table) = optional_table(admitted, pcr, "stutter")? else {
+        return Ok(None);
+    };
+    check_unknown(admitted, table, &["per_cycle_slip"])?;
+    let per_cycle_slip = optional_array(admitted, table, "per_cycle_slip")?
+        .unwrap_or_default()
+        .iter()
+        .map(|value| {
+            let entry = value.get_ref().as_table().ok_or_else(|| {
+                wrong_type(
+                    admitted,
+                    "technical_event.pcr.stutter.per_cycle_slip",
+                    value,
+                    "table",
+                )
+            })?;
+            check_unknown(admitted, entry, &["motif_length_bases", "probability"])?;
+            Ok(DeclaredPerCycleSlip {
+                motif_length_bases: required_u64(admitted, entry, "motif_length_bases")?,
+                probability: required_number(admitted, entry, "probability")?,
+            })
+        })
+        .collect::<Result<Vec<_>, Diagnostic>>()?;
+    Ok(Some(DeclaredPcrStutter { per_cycle_slip }))
 }
 
 /// Lee `[technical_event.stutter]`.
