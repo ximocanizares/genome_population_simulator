@@ -607,9 +607,11 @@ Esta sección existe porque la fase de realismo técnico estaba **cerrada con su
 evidencia aprobada** y se le ha añadido un paso. La escribe el punto 10.5 del
 plan de microsatélites y amplificación
 (`design/plan-implementacion-repeticiones-pcr-0.1.md`), que la exige con esta
-forma exacta. La parte de la preparación amplificada se anota aquí por
-completitud del contrato, pero **no está implementada**: pertenece a la entrega
-3 y este documento no la da por hecha.
+forma exacta. Se escribió para la entrega 2 y se **actualizó el 25 de
+septiembre de 2026** al cerrar la entrega 3: la preparación amplificada **ya
+está implementada**, y lo único que queda pendiente de ella es el **tartamudeo
+heredable por linaje**, de la entrega 4. Hasta que ese exista, la preparación
+amplificada **rechaza** los escenarios que declaran loci de repetición.
 
 ### 16.1. Qué **no** se reabre
 
@@ -621,8 +623,13 @@ completitud del contrato, pero **no está implementada**: pertenece a la entrega
   capacidad; los valores fijos de las heredadas se comparan byte a byte.
 - **Ningún artefacto de un escenario sin loci declarados.** Es la acotación de
   la contradicción C-1, y se comprueba en cada hito.
-- **El perfil técnico y su huella.** El recurso vigente no se toca.
-- **La preparación de biblioteca sigue registrándose como sin PCR.**
+- **El perfil técnico y su huella.** El recurso vigente no se toca: la
+  preparación amplificada estrena un **perfil hermano**, y el `pcrfree` conserva
+  sus diez campos y su SHA-256 congelado.
+- **La preparación registrada es la que el evento declara.** Un evento que no
+  declare nada sigue registrándose como sin PCR, y sus artefactos son byte a
+  byte los de siempre; lo comprueba una **huella congelada**, no una comparación
+  entre dos ejecuciones del mismo binario.
 
 ### 16.2. Qué cambia, y por decisión de quién
 
@@ -634,6 +641,9 @@ completitud del contrato, pero **no está implementada**: pertenece a la entrega
 | La molécula cambia de longitud y no se compensa ni se descarta | Es lo que ocurre físicamente; compensar sería falso y descartar sesgaría la cobertura del locus | **S-15**, responsable |
 | Un locus que vaya a tartamudear exige tirada mínima efectiva de **2** | Una tirada de una sola copia no podría contraerse nunca mientras que expandirse sí, y el modelo saldría sesgado hacia el alargamiento | Responsable, 21/09/2026 |
 | La preparación amplificada deja de estar aplazada entera | DTF-056 se **divide**: salen la preparación amplificada, los duplicados de PCR, el sesgo de composición configurable, la sobrerrepresentación estocástica y el tartamudeo heredable; **permanecen** el perfil de sesgo GC calibrado con datos reales, los duplicados ópticos y de agrupación, y la combinación con excepciones regionales. DTF-055 no cambia | **S-25**, responsable |
+| Existe un **segundo perfil incorporado**, `gps-hiseqx-pcr-pe150-v1` | Es un **hermano**, idéntico al vigente en lectura, inserto, calidad y error. El nombre `pcrfree` del vigente es literal en tres esquemas publicados y su huella está congelada: meter las dos preparaciones en un recurso los rompería | **S-25**, responsable |
+| El usuario declara la **fracción de duplicados**, no las parejas por molécula | Es lo que un biólogo ve en su informe de calidad; el parámetro del modelo se deriva por inversión numérica, cuya reproducibilidad fija DTC-091 | **S-19**, responsable |
+| La etapa `amplification` nace en un catálogo **nuevo**, `f4-technical-v5` | El diseño lo previó: «`f4-technical-v4` si se hace junto con `stutter`, la siguiente si después». Si naciera en el v4, una biblioteca amplificada sin tartamudeo publicaría un catálogo que el contrato ata al tartamudeo | Implementación de F4.9, 25/09/2026 |
 
 ### 16.3. Dónde vive cada literal
 
@@ -642,18 +652,21 @@ cambio de contrato**. Los sitios, comprobados en el árbol de esta entrega:
 
 | Sitio | Papel | Qué dice hoy |
 |---|---|---|
-| `src/technical_profile.rs` | canónico | `LibraryPreparation` con una sola variante, `PcrFree` |
-| `src/randomness.rs` | canónico | los dos catálogos y el ámbito de cada decisión, enumerada una a una |
+| `src/technical_profile.rs` | canónico | `LibraryPreparation` con **dos** variantes, `PcrFree` y `Pcr`; los dos perfiles hermanos y las **seis constantes de contrato** de la amplificación |
+| `src/pcr_amplification.rs` | canónico | el modelo de amplificación, la inversión numérica, la programación dinámica de los primeros ciclos, la Poisson pinzada, la curva de composición y la cota publicada |
+| `src/wgs_sampling.rs` | canónico | el muestreo por familias dentro del muestreador PE, que conserva su contrato externo de `N` parejas con ordinales `0..N-1` |
+| `src/randomness.rs` | canónico | los **tres** catálogos y el ámbito de cada decisión, enumerada una a una |
 | `src/stutter.rs` | canónico | el modelo, la estructura del paso, la tabla calibrada y su procedencia |
 | `src/application.rs` | contrato | la guarda que cruza el evento técnico con los loci declarados |
-| `src/event_manifest.rs` | contrato | exige preparación sin PCR, PCR no aplicable y composición neutra; elige la versión del documento y su catálogo |
+| `src/event_manifest.rs` | contrato | exige que la terna del perfil vaya junta, valida la sección de amplificación y sus identidades, y elige la versión del documento y su catálogo |
 | `schemas/effective-config-v4.schema.json` | contrato heredado | valores fijos del perfil, la preparación y la aplicabilidad de la PCR |
-| `schemas/effective-config-v6.schema.json` | contrato nuevo | los mismos, más la sección del tartamudeo atada a su catálogo |
+| `schemas/effective-config-v6.schema.json` | contrato nuevo | los mismos, más la sección del tartamudeo y la de **amplificación**, cada una atada a su catálogo |
 | `schemas/manifest-event-v2.schema.json` | contrato heredado | los mismos valores fijos, sin tartamudeo |
-| `schemas/manifest-event-v3.schema.json` | contrato nuevo | los mismos, con la sección del tartamudeo obligatoria |
-| `schemas/config-general-v4.schema.json` | contrato | la tabla del tartamudeo, cerrada y con la estructura del paso fija |
-| `ui/config_editor.py`, `ui/gps_app.py`, `ui/ui_panels.py` | contrato | los controles del evento técnico y del tartamudeo |
-| `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json` | recurso | perfil único, con su huella congelada |
+| `schemas/manifest-event-v3.schema.json` | contrato nuevo | los dos perfiles hermanos como alternativa cerrada, y las secciones de tartamudeo y de **amplificación** atadas a su catálogo |
+| `schemas/config-general-v4.schema.json` | contrato | la tabla del tartamudeo y la de **amplificación**, las dos cerradas y con todos sus dominios acotados |
+| `ui/config_editor.py`, `ui/gps_app.py`, `ui/ui_panels.py` | contrato | los controles del evento técnico, del tartamudeo y de la **amplificación**, con las constantes de contrato acotando sus límites |
+| `resources/f4/gps-hiseqx-pcrfree-pe150-v1.json` | recurso | perfil sin PCR, con su huella congelada y sus diez campos |
+| `resources/f4/gps-hiseqx-pcr-pe150-v1.json` | recurso | perfil hermano amplificado, con su huella y los dominios de la amplificación |
 
 **Los esquemas publicados no se editan.** Un fichero general v2 sigue
 publicando configuración efectiva v4 y manifiesto de evento v2.
@@ -671,6 +684,19 @@ publicando configuración efectiva v4 y manifiesto de evento v2.
 | La distribución de pasos contra las unidades escritas en las lecturas | aplicar el paso dos veces, o cualquier decisión que no llegue a los bytes |
 | La reconstrucción del evento técnico en el cuaderno, campo a campo | que la interfaz pierda un campo al importar y exportar |
 | La congelación acotada | consumir aleatoriedad con la tasa a cero, o desplazar el ordinal de plantilla |
+| **La huella congelada del FASTQ sin PCR y de la primera pareja del muestreador** | cualquier cambio que mueva **las dos** ejecuciones que se comparaban entre sí; se midió que una edición de una línea del muestreador reescribía seis ficheros con la batería entera en verde |
+| La inversión numérica contra el cálculo directo hecho a mano | una inversión validada contra sí misma |
+| La búsqueda negativa de trascendentes sobre el módulo de amplificación | usar la exponencial de la matemática estándar, que en una sola plataforma ninguna prueba numérica distingue |
+| El contador constante de iteraciones | una bisección con criterio de parada por tolerancia |
+| `m = 0` exacto para fracción cero | suprimir el retorno anticipado, que deja un residuo de `10⁻¹⁸` y cambia todos los FASTQ |
+| Los pesos de la Poisson contra los calculados a mano, con el valor de la variante sin pinzar escrito aparte | no pinzar la cola |
+| La enumeración exhaustiva de caminos del proceso de ramificación | olvidar el término «no se copia», o no sesgar por tamaño |
+| El recuento de familias aceptadas **al agotar el tope** | un rechazo por composición sin tope |
+| El par de ejecuciones con cero y con tres ciclos explícitos | publicar la fracción declarada en el campo de la realizada |
+| Los duplicados contados por un oráculo que **solo lee el FASTQ** | sortear el tamaño de familia y emitir una sola pareja |
+| Los pesos de dos clases de eficiencia intercambiados | anular el resultado del sorteo de clase |
+| La búsqueda léxica sobre el muestreador | reconstruir la tabla de los primeros ciclos una vez por familia en vez de una por clase |
+| El validador independiente contra un histograma mutado | un oráculo que leyera lo publicado en vez de rederivarlo |
 
 ### 16.5. Fixtures que se reabren
 
@@ -685,4 +711,7 @@ su medición y la aritmética del fixture que lo sustituye.
 
 Al cerrar la entrega 2 y otra vez al cerrar la entrega 3: la evidencia de cierre
 de esta fase **con preparación sin PCR y sin loci declarados**, artefacto a
-artefacto contra la línea base. Archivada en `evidence/stutter-f4-8-congelacion`.
+artefacto contra la línea base. La de la entrega 2 está archivada en
+`evidence/stutter-f4-8-congelacion`; la de la entrega 3, en
+`evidence/pcr-f4-9-congelacion`, con la salvedad que esa carpeta documenta sobre
+dos huellas de la evidencia anterior.

@@ -367,7 +367,8 @@ reducen a formas cerradas:
 | Ciclos de PCR | `c` | entero en `1..=C_MAX` (`C_MAX = 30`) | **sin valor**: obligatorio con `pcr` | Los protocolos Illumina con PCR usan del orden de 6 a 12 ciclos según el DNA de entrada; cifra de memoria, sin fuente en el repositorio, por eso no se fija |
 | Eficiencia por ciclo | `e` | `f64` en `(0, 1]` | **sin valor**: obligatorio | Diseño; la literatura da valores altos, típicamente por encima de 0,8, para PCR de biblioteca |
 | Ciclos explícitos | `c_early` | entero en `0..=E_MAX` (`E_MAX = 6`), `c_early ≤ c` | `min(3, c)` | Diseño; la varianza relativa del proceso de ramificación satura en pocos ciclos (fórmula en 5.5) |
-| Parejas por molécula | `m` | `f64` en `[0, M_MAX]` (`M_MAX = 64`) | **sin valor**: obligatorio | `m = N / C`; es el cociente entre parejas secuenciadas y moléculas distintas, que fija la fracción de duplicados |
+| **Fracción de duplicados esperada** | `f` | `f64` en `[0, 1)`, alcanzable con `M_MAX` | **sin valor**: obligatorio | **Lo que el usuario declara** (S-19): es lo que un biólogo ve en su informe de calidad |
+| Parejas por molécula | `m` | `f64` en `[0, M_MAX]` (`M_MAX = 64`) | **derivado**, no declarado | `m = N / C`; se obtiene invirtiendo `f(m) = 1 − (1 − e^(−m))/m` por bisección de 64 pasos fijos (S-19, DTC-091) |
 | Tamaño máximo de familia | `k_max` | entero en `1..=K_MAX` (`K_MAX = 256`) | `64` | Diseño; tope de pinzamiento |
 | Curva de composición | `g(GC)` | tabla por tramos lineales de `(fracción GC, eficiencia relativa)` con eficiencia en `(0, 1]` y nudos crecientes en `[0, 1]` | neutra: `[[0, 1], [1, 1]]` | Diseño de la forma; ninguna curva calibrada se incorpora (queda en DTF-056) |
 | Intentos de aceptación | `A` | entero en `1..=A_MAX` (`A_MAX = 16`) | `8` | Diseño; tope de rechazo de 5.4 |
@@ -628,10 +629,10 @@ Propuesta de forma, en el evento técnico del TOML general:
 library_preparation = "pcr"          # predeterminado "pcr_free"
 
 [technical_event.pcr]
+duplicate_fraction = 0.05            # la ESPERADA de una biblioteca homogénea
 cycles = 10
 efficiency = 0.9
 early_cycles = 3
-mean_pairs_per_molecule = 0.1
 max_family_size = 64
 gc_max_attempts = 8
 gc_relative_efficiency = [[0.0, 0.3], [0.3, 0.9], [0.45, 1.0], [0.6, 0.9], [1.0, 0.3]]
@@ -644,7 +645,8 @@ cycles_source = "profile"               # las tasas por ciclo se derivan de la c
 
 Reglas: la tabla `[technical_event.pcr]` solo se admite con
 `library_preparation = "pcr"` y es obligatoria en ese caso; `cycles`,
-`efficiency` y `mean_pairs_per_molecule` no tienen predeterminado; toda
+`efficiency` y `duplicate_fraction` no tienen predeterminado —y
+`mean_pairs_per_molecule` **no se declara**, se deriva—; toda
 clave desconocida, todo valor fuera de dominio y toda tabla presente con
 `pcr_free` se rechazan antes de simular, con parámetro y valor. La interfaz
 Marimo añade los controles correspondientes y muestra la fracción esperada de
@@ -664,7 +666,7 @@ hash está congelado.
 
 **Configuración efectiva.** `technical_profile.preparation` pasa a admitir
 `pcr_free | pcr`; `technical_artifacts.pcr` pasa de `{applicable: false}` a
-`{applicable: bool, cycles, efficiency, early_cycles, mean_pairs_per_molecule,
+`{applicable: bool, cycles, efficiency, early_cycles, declared_duplicate_fraction, mean_pairs_per_molecule,
 max_family_size, gc_max_attempts, gc_relative_efficiency, efficiency_classes,
 expected_duplicate_fraction, stutter: {per_cycle_slip por motivo, fuente}}`,
 con `applicable: false` y ningún otro campo cuando es `pcr_free`. `gc.mode`
@@ -853,10 +855,10 @@ esta se desplaza.
 | Requisito | Redacción propuesta |
 |---|---|
 | **§3, alcance de F4** | «La preparación de biblioteca predeterminada es sin PCR. F4 admite además, por elección expresa, una preparación WGS amplificada por PCR con sus duplicados, su sobrerrepresentación estocástica, su sesgo de composición configurable y su tartamudeo heredable; el perfil de sesgo GC calibrado con datos reales, los duplicados ópticos y el marcado de duplicados quedan aplazados en DTF-056 y DTF-055.» |
-| **REQ-CONF-88** | «F4 admite dos preparaciones WGS, `pcr_free`, predeterminada, y `pcr`. Con `pcr_free` rechaza cualquier parámetro de amplificación, de duplicados o de composición no neutra. Con `pcr` exige ciclos, eficiencia y parejas por molécula, y admite los parámetros de REQ-CONF-134 a 138. Las tasas de duplicados ópticos siguen rechazadas.» |
+| **REQ-CONF-88** | «F4 admite dos preparaciones WGS, `pcr_free`, predeterminada, y `pcr`. Con `pcr_free` rechaza cualquier parámetro de amplificación, de duplicados o de composición no neutra. Con `pcr` exige **la fracción de duplicados esperada**, los ciclos y la eficiencia por ciclo, y admite los parámetros de REQ-CONF-134 a 138. Las tasas de duplicados ópticos siguen rechazadas.» |
 | **REQ-CONF-89** | «Cada perfil declara su preparación. El perfil `pcr_free` declara duplicados PCR no aplicables; el perfil `pcr` declara los dominios y constantes de contrato de su amplificación. Los duplicados ópticos valen cero en ambos y no pueden sustituirse.» |
 | **REQ-CONF-94** | «Con `pcr_free`, F4 usa una relación GC neutra y rechaza curvas o intensidades no nulas. Con `pcr`, admite una curva por tramos lineales de eficiencia relativa por fracción GC del fragmento, neutra por omisión. Un perfil con curva calibrada queda aplazado en DTF-056.» |
-| **REQ-CONF-95** | «La composición actúa exclusivamente al elegir la molécula original de cada familia y con un número máximo de intentos declarado; no existen excepciones regionales ni combinación con la cobertura objetivo, que conserva su valor.» |
+| **REQ-CONF-95** | «La composición actúa **al elegir la molécula original** de cada familia, con un número máximo de intentos declarado, y **además** entra como factor en la media del tamaño de esa familia; no existen excepciones regionales ni combinación con la cobertura objetivo, que conserva su valor.» **Corregida el 25/09/2026:** la redacción anterior decía «exclusivamente al elegir la molécula original» y es **falsa**, porque el paso 4 de la sección 5.3 de este mismo documento hace entrar el factor en `λ_f`. Lo que esa palabra defendía es que el sesgo **no puede vivir solo** en el tamaño de familia, no que no aparezca en él. |
 | **REQ-TEC-07** | «F4 registra la preparación de cada biblioteca, `pcr_free` o `pcr`. Con `pcr_free` rechaza todo parámetro de amplificación e indica DTF-056 solo para lo que sigue aplazado.» |
 | **REQ-TEC-08** | «El perfil WGS amplificado `pcr` es un perfil de preparación de biblioteca WGS; F4 no lo representa como secuenciación dirigida por PCR, que sigue en DTF-002.» |
 | **REQ-DAT-46** | «Con `pcr_free`, F4 no genera duplicados. Con `pcr`, genera duplicados de PCR como parejas de una misma familia de amplificación, antes de calidad y errores; la tasa óptica es cero en ambos casos.» |
@@ -874,17 +876,19 @@ esta se desplaza.
 
 - **REQ-CONF-134.** La configuración del evento admite `library_preparation`
   con valores `pcr_free`, predeterminado, y `pcr`.
-- **REQ-CONF-135.** Con `pcr`, la tabla de amplificación debe declarar
-  ciclos, eficiencia por ciclo y parejas por molécula, sin predeterminados, y
+- **REQ-CONF-135.** Con `pcr`, la tabla de amplificación debe declarar la
+  **fracción de duplicados esperada**, los ciclos y la eficiencia por ciclo, sin
+  predeterminados, y
   puede declarar ciclos explícitos, tamaño máximo de familia, intentos de
   composición, curva de composición y clases de eficiencia dentro de los
   dominios y constantes de contrato del perfil.
 - **REQ-CONF-136.** Una configuración con `pcr_free` y cualquier parámetro
   de amplificación, o con `pcr` y un parámetro fuera de dominio, se rechaza
   antes de simular identificando parámetro y valor.
-- **REQ-CONF-137.** La configuración efectiva publica la fracción esperada de
-  duplicados para una biblioteca homogénea, calculada desde las parejas por
-  molécula, como orientación y no como objetivo.
+- **REQ-CONF-137.** El parámetro interno —parejas por molécula— se **deriva**
+  de la fracción declarada por inversión numérica, y la configuración efectiva
+  publica la fracción declarada, la esperada recalculada desde el parámetro
+  derivado, el propio parámetro, el método de inversión y sus iteraciones.
 - **REQ-CONF-138.** Con `pcr` y loci de repetición declarados, las tasas de
   resbalón por ciclo se derivan por longitud de motivo de las fracciones con y
   sin PCR de la calibración y del número de ciclos, y pueden sustituirse
@@ -909,7 +913,7 @@ esta se desplaza.
 - **REQ-DAT-84.** Con `pcr_free`, todos los artefactos publicados son byte a
   byte iguales a los de una ejecución equivalente anterior a la existencia de
   la preparación amplificada. Con `pcr` y todos sus parámetros neutros
-  —parejas por molécula cero, curva neutra, tasas de resbalón cero—, los FASTQ
+  —**fracción de duplicados cero**, curva neutra, tasas de resbalón cero—, los FASTQ
   finales son byte a byte iguales a los de `pcr_free` y solo difieren los
   campos declarativos del manifiesto.
 - **REQ-DAT-85.** Toda decisión de amplificación y linaje se deriva de un
@@ -931,7 +935,9 @@ esta se desplaza.
 
 ### 9.3. Decisión técnica nueva
 
-Una fila **DTC-091** (provisional) que fije: el algoritmo
+**Añadida el 25 de septiembre de 2026** al cerrar la entrega 3. La fila
+**DTC-091** de `design/decisiones-tecnicas-0.1.md` fija, además del catálogo
+`f4-technical-v5` que esta sección no previó —daba por hecho el cuarto—: el algoritmo
 `pcr-amplification-v1` con los pasos de 5.3; la DP de los primeros ciclos y
 su sesgo por tamaño; la Poisson truncada y pinzada como categórico de una
 palabra, con la aclaración expresa de que DTC-067 no prohíbe construirla así;
@@ -1011,7 +1017,7 @@ comprobada byte a byte.
 | 11 | **Juez de constantes.** `C_MAX`, `E_MAX`, `K_MAX`, `A_MAX`, `Q_MAX` iguales a los `maximum` de los tres esquemas y a los de la UI | Un `maximum` cambiado en un esquema | Nueve comparaciones con control positivo, como en el plan F5 §11.4 |
 | 12 | **Reproducibilidad y ámbitos.** Misma semilla, mismo SHA; añadir un locus en otro cromosoma no cambia los resbalones de los loci previos; añadir una biblioteca no cambia las familias de las demás | Un ámbito indexado por posición o por orden de biblioteca | — |
 | 13 | **Validador independiente.** El oráculo rederiva familias, `Z`, `K` y pasos netos desde la semilla y la configuración efectiva sin llamar al productor, y coincide con los recuentos del manifiesto; `./scripts/check-independent-validators.sh` sobre un directorio nuevo | Un oráculo que lea el histograma publicado en vez de rederivarlo | La independencia algebraica de la Poisson truncada es la de sus pesos a mano (prueba 9), no la del oráculo |
-| 14 | **Rechazos de configuración.** `pcr_free` con tabla `pcr`; `pcr` sin `cycles`; `cycles = 31`; `efficiency = 0`; `mean_pairs_per_molecule = -1`; curva con eficiencia 0 o nudos decrecientes; clases con pesos que no suman 1 fuera de tolerancia | Un esquema con `additionalProperties: true` o un dominio abierto | Cada caso cita parámetro y valor en el diagnóstico |
+| 14 | **Rechazos de configuración.** `pcr_free` con tabla `pcr`; `pcr` sin `cycles`; `cycles = 31`; `efficiency = 0`; `duplicate_fraction = -1`; curva con eficiencia 0 o nudos decrecientes; clases con pesos que no suman 1 fuera de tolerancia | Un esquema con `additionalProperties: true` o un dominio abierto | Cada caso cita parámetro y valor en el diagnóstico |
 
 ---
 
@@ -1019,7 +1025,7 @@ comprobada byte a byte.
 
 | # | Decisión | Opciones | Recomendación |
 |---|---|---|---|
-| 1 | **Cómo se expresa la cantidad de material de partida** | (a) `mean_pairs_per_molecule` `m`, con la fracción esperada de duplicados publicada como orientación; (b) una fracción objetivo de duplicados que el sistema invierta numéricamente; (c) número absoluto de moléculas `C` | **(a).** Es la magnitud física, la fórmula es cerrada y no exige una inversión numérica cuya reproducibilidad habría que fijar. La UI muestra la fracción esperada |
+| 1 | **Cómo se expresa la cantidad de material de partida** | (a) `mean_pairs_per_molecule` `m`, con la fracción esperada de duplicados publicada como orientación; (b) una fracción objetivo de duplicados que el sistema invierta numéricamente; (c) número absoluto de moléculas `C` | **(b), decidido por el responsable el 20/09/2026 (S-19).** La recomendación original era (a), y se cambió: `m` es la variable del modelo, no la del usuario, que piensa en el porcentaje de duplicados de su informe de calidad. El obstáculo que (a) alegaba —«una inversión numérica cuya reproducibilidad habría que fijar»— se resolvió fijándola: bisección sobre `[0, 64]` con 64 pasos fijos y exponencial exclusivamente de la librería fijada (DTC-091) |
 | 2 | **Aceptación por composición** | (a) rechazo con tope `A` y aceptación del último intento, contada; (b) muestreo ponderado por ventanas con un recorrido previo del genoma | **(a)** para la primera versión: GC del fragmento, sin consumidor nuevo ni memoria por genoma; la distorsión del tope se publica. (b) si el coste `A×` resulta prohibitivo en genomas grandes; entonces F9 |
 | 3 | **Genealogía dentro de la familia** | (a) la de 5.7: progenitor uniforme y divergencia geométrica; (b) estrella: todas las parejas divergen del linaje de la pareja 0; (c) coalescente exacto del proceso de ramificación por simulación | **(a).** (b) no representa resbalones compartidos por una rama sin la pareja 0; (c) es la alternativa A en pequeño y no tiene forma cerrada conocida |
 | 4 | **Heterogeneidad de eficiencia entre moléculas** | (a) incluir las clases de eficiencia opcionales desde el principio, sin valores; (b) dejarlas a DTF-059 | **(a).** Cuesta un categórico y `Q` tablas; sin valores predeterminados no afirma nada |

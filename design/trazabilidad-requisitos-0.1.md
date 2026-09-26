@@ -129,14 +129,14 @@ las enumera sin duplicados e incluye expresamente `REQ-VAL-54`, `REQ-MAN-70` y
 | REQ-CONF-85 | ACE-48, ACE-01 | F4.7 | Planificada — TEST-REQ-CONF-85: presentar el caso límite «Antes de iniciar cualquier simulación, la configuración debe rechazar todo FASTQ, referencia u otro campo declarado» y comprobar rechazo previo y diagnóstico identificable. |
 | REQ-CONF-86 | ACE-48, ACE-01 | F4.7 | Planificada — TEST-REQ-CONF-86: presentar el caso límite «Antes de iniciar cualquier simulación, la configuración debe rechazar toda solicitud de estimar, inferir o generar» y comprobar rechazo previo y diagnóstico identificable. |
 | REQ-CONF-87 | ACE-48, ACE-01 | F4.7 | Planificada — TEST-REQ-CONF-87: presentar el caso límite «Antes de iniciar cualquier simulación, la configuración debe rechazar la selección o reutilización de un fichero» y comprobar rechazo previo y diagnóstico identificable. |
-| REQ-CONF-88 | ACE-68, ACE-01 | F4.3 | Planificada — TEST-REQ-CONF-88: declarar «La preparación WGS predeterminada debe ser sin PCR» y comprobar aceptación, valor efectivo y ámbito de aplicación. |
-| REQ-CONF-89 | ACE-49, ACE-68, ACE-01 | F4.3 | Planificada — TEST-REQ-CONF-89: declarar «Cada perfil predeterminado debe aportar valores habituales para los mecanismos de duplicación que le correspondan, y» y comprobar aceptación, valor efectivo y ámbito de aplicación. |
+| REQ-CONF-88 | ACE-68, ACE-119, ACE-01 | F4.3/F4.9.3 | Implementada — `tests/pcr_admission.rs` admite las dos preparaciones y rechaza la tabla de amplificación con `pcr_free`, la preparación `pcr` sin su tabla y una preparación inventada. |
+| REQ-CONF-89 | ACE-49, ACE-68, ACE-119, ACE-01 | F4.3/F4.9.1 | Implementada — `tests/pcr_contract.rs` comprueba que el recurso sin PCR conserva su huella congelada y sus diez campos, y que el perfil hermano declara su preparación y sus dominios. |
 | REQ-CONF-90 | ACE-49, ACE-01 | F4.3/DTF-055/DTF-056 | F4 rechaza marcado y configuración de duplicados; BAM/CRAM y modelos de duplicación se recuperan en sus DTF. |
 | REQ-CONF-91 | ACE-50, ACE-01 | F4.3/DTF-054 | F4 rechaza activar adaptadores; la opción activa se implementa en DTF-054. |
 | REQ-CONF-92 | ACE-50, ACE-01 | F4.3/DTF-054 | F4 rechaza perfil, secuencia, frecuencia, proporción o longitud de adaptador; DTF-054 implementa la vía positiva. |
 | REQ-CONF-93 | ACE-50, ACE-01 | DTF-054 | Aplazada — parámetros de adaptadores pertenecen a perfiles de fragmentos cortos. |
-| REQ-CONF-94 | ACE-51, ACE-01 | F4.3/DTF-056 | F4 fija GC neutro y rechaza curva/intensidad no nula; DTF-056 implementa perfil no neutro. |
-| REQ-CONF-95 | ACE-51, ACE-01 | F4.3/DTF-056 | F4 rechaza combinaciones o excepciones regionales de GC; DTF-056 implementa su modelo. |
+| REQ-CONF-94 | ACE-51, ACE-119, ACE-01 | F4.3/F4.9.3/DTF-056 | Implementada — con `pcr_free` se rechaza toda curva; con `pcr` se admite la curva por tramos y se rechazan la eficiencia relativa cero y los nudos decrecientes. La curva **calibrada con datos reales** sigue en DTF-056. |
+| REQ-CONF-95 | ACE-51, ACE-119, ACE-01 | F4.3/F4.9.7 | Implementada — `tests/pcr_pipeline.rs` mide sobre las lecturas escritas que la mitad penalizada cae muy por debajo de la mitad, con control positivo de curva neutra. Las excepciones regionales siguen en DTF-056. |
 | REQ-CONF-96 | ACE-52, ACE-01 | F6.1 | Planificada — TEST-REQ-CONF-96: declarar «permitir definir o generar por regiones secuencias repetitivas, duplicadas o altamente homólogas destinadas a producir baja» y comprobar aceptación, valor efectivo y ámbito de aplicación. |
 | REQ-CONF-97 | ACE-53, ACE-01 | F4.3/DTF-051 | F4 rechaza parámetros de categorías sintéticas directas; DTF-051 incorpora la vía positiva. |
 | REQ-CONF-98 | ACE-53, ACE-01 | F4.3/DTF-051 | F4 rechaza solicitudes de alineamiento directo e identifica el campo; DTF-051 incorpora la vía positiva. |
@@ -181,8 +181,8 @@ las enumera sin duplicados e incluye expresamente `REQ-VAL-54`, `REQ-MAN-70` y
 | REQ-TEC-04 | ACE-39 | F6.6 | Planificada — TEST-REQ-TEC-04: ejecutar el escenario «El mapeador, el *preset* y sus parámetros deben ser compatibles con la única tecnología del experimento» y comparar el resultado observable con el REQ. |
 | REQ-TEC-05 | ACE-37, ACE-47 | F4.1 | Planificada — TEST-REQ-TEC-05: ejecutar el escenario «Dos perfiles que requieran modelos de error, calidades o parámetros de mapeo distintos deben considerarse tecnologías» y comparar el resultado observable con el REQ. |
 | REQ-TEC-06 | ACE-68 | F4.3 | Planificada — TEST-REQ-TEC-06: presentar el caso límite «Todo experimento de la primera versión debe representar WGS de DNA genómico» y comprobar rechazo previo y diagnóstico identificable. |
-| REQ-TEC-07 | ACE-68 | F4.3/DTF-056 | F4 acepta exclusivamente PCR-free y rechaza preparación amplificada; su distinción completa queda en DTF-056. |
-| REQ-TEC-08 | ACE-68 | DTF-056 | Aplazada — perfil amplificado, duplicados y sesgos asociados. |
+| REQ-TEC-07 | ACE-68, ACE-119 | F4.3/F4.9.1 | Implementada — la preparación se registra en la configuración efectiva y en el manifiesto de evento, y con `pcr_free` se rechaza todo parámetro de amplificación. |
+| REQ-TEC-08 | ACE-68, ACE-119 | F4.9.1 | Implementada — el perfil `gps-hiseqx-pcr-pe150-v1` es de preparación de biblioteca; la secuenciación **dirigida** por PCR sigue en DTF-002. |
 | REQ-TEC-09 | ACE-37 | F4.1/DTF-057 | F4 acepta solo Illumina PE y rechaza SE con destino DTF-057, además de las tecnologías largas con sus destinos declarados. |
 | REQ-TEC-10 | ACE-68, ACE-22 | F4.1 | Planificada — TEST-REQ-TEC-10: ejecutar «La configuración efectiva y el manifiesto deben registrar el tipo de preparación WGS, el perfil, sus» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-FMT-01 | ACE-59 | F6.6 | Planificada — TEST-REQ-FMT-01: omitir el formato y comprobar CRAM; elegir BAM y comprobar la alternativa por individuo. |
@@ -580,14 +580,14 @@ las enumera sin duplicados e incluye expresamente `REQ-VAL-54`, `REQ-MAN-70` y
 | REQ-DAT-43 | ACE-48 | F4.7 | Planificada — TEST-REQ-DAT-43: solicitar «Conversión de un perfil empírico estimado en perfil efectivo» y comprobar su rechazo o ausencia por estar retirada. |
 | REQ-DAT-44 | ACE-48 | F4.7 | Planificada — TEST-REQ-DAT-44: solicitar «Generación de un fichero estructurado de perfil empírico» y comprobar su rechazo o ausencia por estar retirada. |
 | REQ-DAT-45 | ACE-48 | F4.7 | Planificada — TEST-REQ-DAT-45: solicitar «Reutilización de un perfil empírico sin sus FASTQ originales» y comprobar su rechazo o ausencia por estar retirada. |
-| REQ-DAT-46 | ACE-49 | F4.3/DTF-056 | F4 declara PCR no aplicable y ópticos cero; modelo no nulo aplazado. |
-| REQ-DAT-47 | ACE-49 | DTF-056 | Aplazada — duplicación de parejas completas. |
+| REQ-DAT-46 | ACE-49, ACE-119 | F4.3/F4.9.8 | Implementada — los duplicados nacen antes de calidad y errores; un oráculo que solo lee el FASTQ cuenta los mismos que el manifiesto declara realizados. Los ópticos siguen a cero. |
+| REQ-DAT-47 | ACE-49, ACE-119 | F4.9.8 | Implementada — cada pareja de una familia tiene identidad técnica propia y sus propios errores, calidades, quimera y contaminación. |
 | REQ-DAT-48 | ACE-49 | DTF-056 | Aplazada — procedencia individual de duplicados. |
 | REQ-DAT-49 | ACE-49 | DTF-055/DTF-056 | Aplazada — marcado de duplicados en alineamientos. |
 | REQ-DAT-50 | ACE-50 | F4.3/DTF-054 | F4 rechaza la activación de adaptadores; su generación por insertos cortos queda en DTF-054. |
 | REQ-DAT-51 | ACE-50 | F4.3/DTF-054 | F4 comprueba rechazo y recuento cero; la identificación individual de adaptadores pertenece a DTF-054. |
-| REQ-DAT-52 | ACE-51 | F4.3/DTF-056 | F4 conserva GC neutro; sesgo no nulo aplazado. |
-| REQ-DAT-53 | ACE-51 | DTF-056 | Aplazada — combinación y métricas de sesgo GC. |
+| REQ-DAT-52 | ACE-51, ACE-119 | F4.3/F4.9.7 | Implementada — el factor de composición multiplica la probabilidad de que un fragmento origine familia y entra además en la media del tamaño de familia. |
+| REQ-DAT-53 | ACE-51, ACE-119 | F4.9.9 | Implementada — la cobertura objetivo no se corrige; el manifiesto publica la básica, la de moléculas distintas y la final. |
 | REQ-DAT-54 | ACE-52 | F4.2/DTF-055 | F4 genera los FASTQ desde haplotipos reales; DTF-055 comprobará el mapeo en baja mapeabilidad. |
 | REQ-DAT-55 | ACE-52, ACE-12 | DTF-055 | Aplazada — MAPQ observable sin sobrescritura artificial. |
 | REQ-DAT-56 | ACE-52, ACE-12 | F4.2/DTF-055 | F4 no publica posición ni haplotipo por lectura; DTF-055 definirá la evaluación de ambigüedad sin añadir una verdad técnica individual persistente. |
@@ -815,10 +815,10 @@ las enumera sin duplicados e incluye expresamente `REQ-VAL-54`, `REQ-MAN-70` y
 | REQ-MAN-42 | ACE-47 | F4.2 | Planificada — TEST-REQ-MAN-42: ejecutar «Para los errores de secuenciación, el manifiesto debe registrar la tecnología, el nombre y la versión» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-MAN-43 | ACE-48, ACE-22 | F4.7 | Planificada — TEST-REQ-MAN-43: solicitar «Registro en el manifiesto de entradas y resultados de calibración empírica» y comprobar su rechazo o ausencia por estar retirada. |
 | REQ-MAN-44 | ACE-48 | F4.7 | Planificada — TEST-REQ-MAN-44: solicitar «Enlace desde el manifiesto a un fichero de perfil empírico» y comprobar su rechazo o ausencia por estar retirada. |
-| REQ-MAN-45 | ACE-49 | F4.3/DTF-056 | F4 registra PCR no aplicable y ópticos cero; detalle aplazado. |
+| REQ-MAN-45 | ACE-49, ACE-119 | F4.3/F4.9.9 | Implementada — el manifiesto publica familias, parejas, duplicadas, fracción realizada, histograma, truncadas e intentos; el validador interno comprueba sus identidades. |
 | REQ-MAN-46 | ACE-49 | DTF-055/DTF-056 | Aplazada — marcado de duplicados. |
 | REQ-MAN-47 | ACE-50 | F4.3/DTF-054 | F4 registra adaptadores desactivados y rechazo de su configuración; parámetros activos quedan en DTF-054. |
-| REQ-MAN-48 | ACE-51 | F4.3/DTF-056 | F4 registra GC neutro; curva e intensidad no nulas aplazadas. |
+| REQ-MAN-48 | ACE-51, ACE-119 | F4.3/F4.9.9 | Implementada — el manifiesto declara `neutral` o `curve` y publica la curva efectiva; la intensidad y las métricas de corrección siguen en DTF-056. |
 | REQ-MAN-49 | ACE-52 | DTF-055 | Aplazada — baja mapeabilidad observable y su evaluación requieren mapeo real. |
 | REQ-MAN-50 | ACE-53 | DTF-051 | Aplazada — manifiesto de categorías directas. |
 | REQ-MAN-51 | ACE-54 | F4.3 | Planificada — TEST-REQ-MAN-51: ejecutar «Para las lecturas quiméricas, el manifiesto debe registrar el perfil, la frecuencia predeterminada o sustituida, la» y comprobar el registro y su procedencia en la salida exigida. |
@@ -830,7 +830,7 @@ las enumera sin duplicados e incluye expresamente `REQ-VAL-54`, `REQ-MAN-70` y
 | REQ-MAN-57 | ACE-60 | F2.5 | Implementada localmente F2.5 — `tests/vcf_publication.rs::effective_vcf_request_manifest_and_catalog_are_bound_bidirectionally` y `tests/vcf_semantic_validation.rs::independent_oracle_accepts_ref_alt_gt_phase_dosage_samples_and_gps_case` enlazan el único VCF, referencia y muestras canónicas en manifiesto. |
 | REQ-MAN-58 | ACE-61 | F9.5 | Planificada — F2 registra VCF 4.5, algoritmo de normalización, modo texto/BGZF, TBI/CSI/ausencia, rutas y validación/publicación atómica; TEST-REQ-MAN-58 cierra en F9.5. |
 | REQ-MAN-59 | ACE-64 | F6.6 | Planificada — TEST-REQ-MAN-59: ejecutar «enlazar cada resultado estructurado de la validación interna con los FASTQ, BAM o CRAM, muestras, grupos» y comprobar el registro y su procedencia en la salida exigida. |
-| REQ-MAN-60 | ACE-69 | F4.1 | Planificada — TEST-REQ-MAN-60: registrar preparación PCR-free y rechazar la amplificada; parámetros de amplificación quedan en DTF-056. |
+| REQ-MAN-60 | ACE-69, ACE-119 | F4.1/F4.9.9 | Implementada — el manifiesto registra la preparación, el objetivo, las parejas derivadas y realizadas y, con `pcr`, la cobertura de moléculas distintas. |
 | REQ-MAN-61 | ACE-41 | F4.2 | Planificada — TEST-REQ-MAN-61: ejecutar «registrar la definición de cobertura usada, la referencia estructural y la longitud haploide del denominador, la» y comprobar el registro y su procedencia en la salida exigida. |
 | REQ-MAN-62 | ACE-42 | F4.4 | Planificada — registrar el rango, porcentaje sorteado, donantes aleatorios elegibles y aportes realizados; matriz y pesos quedan en DTF-052. |
 | REQ-MAN-63 | ACE-71 | DTF-050 | Aplazada — un evento de control adicional requiere cardinalidad de eventos posterior a F4. |

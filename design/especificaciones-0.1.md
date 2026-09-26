@@ -126,9 +126,14 @@ como objetivo comparar mapeadores.
 La primera entrega técnica F4 simulará exclusivamente secuenciación del genoma
 completo (WGS, *whole-genome sequencing*) de DNA genómico con el perfil corto
 Illumina *paired-end* incorporado. El modo Illumina *single-end* queda aplazado
-en DTF-057. La preparación de biblioteca será exclusivamente sin PCR; la
-preparación WGS amplificada y sus duplicados o sesgos quedan aplazados en
-DTF-056. PacBio HiFi, Oxford Nanopore y PacBio CLR quedan para
+en DTF-057. La preparación de biblioteca **predeterminada** es sin PCR; F4
+admite además, por elección expresa, una preparación WGS **amplificada por
+PCR** con sus duplicados, su sobrerrepresentación estocástica y su sesgo de
+composición configurable. El perfil de sesgo GC calibrado con datos reales, los
+duplicados ópticos y de agrupación y el marcado de duplicados quedan aplazados
+en DTF-056 y DTF-055; el tartamudeo heredable por linaje está pendiente y, hasta
+que exista, la preparación amplificada se rechaza sobre escenarios que declaran
+loci de repetición. PacBio HiFi, Oxford Nanopore y PacBio CLR quedan para
 futuras ampliaciones con el fin de reducir el alcance inicial y aplazar perfiles
 de error más complejos. Esta
 decisión de alcance no presupone que una tecnología moderna sea incapaz de
@@ -848,11 +853,16 @@ su asignación por fase está en la matriz de trazabilidad.
   perfil efectivo. Este rechazo no debe impedir seleccionar los perfiles
   tecnológicos incorporados para Illumina ni aplicar las
   sustituciones explícitas permitidas a sus parámetros.
-- **REQ-CONF-88.** F4 admite exclusivamente preparación WGS sin PCR. Rechaza un
-  perfil amplificado y cualquier tasa de duplicados PCR u ópticos; el modelo
-  correspondiente queda aplazado en DTF-056.
-- **REQ-CONF-89.** El perfil inicial declara explícitamente duplicados PCR no
-  aplicables y ópticos a cero. F4 no permite sustituir esos valores.
+- **REQ-CONF-88.** F4 admite dos preparaciones WGS: `pcr_free`, predeterminada,
+  y `pcr`. Con `pcr_free` rechaza cualquier parámetro de amplificación, de
+  duplicados o de composición no neutra. Con `pcr` exige **la fracción de
+  duplicados esperada**, los ciclos y la eficiencia por ciclo, y admite los
+  parámetros de REQ-CONF-134 a 137. Las tasas de duplicados ópticos siguen
+  rechazadas en ambas.
+- **REQ-CONF-89.** Cada perfil incorporado declara su preparación. El perfil
+  `pcr_free` declara duplicados PCR no aplicables; el perfil `pcr` declara los
+  dominios y las constantes de contrato de su amplificación. Los duplicados
+  ópticos valen cero en los dos y no pueden sustituirse.
 - **REQ-CONF-90.** El marcado de duplicados en BAM o CRAM queda aplazado en
   DTF-055 y DTF-056; F4 no ofrece esta elección.
 - **REQ-CONF-91.** La configuración debe permitir activar o desactivar la
@@ -866,10 +876,55 @@ su asignación por fase está en la matriz de trazabilidad.
 - **REQ-CONF-93.** Un perfil futuro puede aportar secuencia o perfil de adaptador
   y solo generarlo por sobrepasar el inserto, nunca como degradación aleatoria
   implícita.
-- **REQ-CONF-94.** F4 usa una relación GC neutra y rechaza curvas o intensidades
-  no nulas. Un perfil con sesgo GC calibrado queda aplazado en DTF-056.
-- **REQ-CONF-95.** En F4 no hay combinación de sesgo GC ni excepciones
-  regionales: el muestreo WGS básico conserva su cobertura objetivo común.
+- **REQ-CONF-94.** Con `pcr_free`, F4 usa una relación GC neutra y rechaza
+  curvas o intensidades no nulas. Con `pcr`, admite una curva por tramos
+  lineales de eficiencia relativa por fracción de GC **del fragmento completo**,
+  neutra por omisión. Un perfil con curva calibrada con datos reales queda
+  aplazado en DTF-056.
+- **REQ-CONF-95.** Con `pcr`, la composición actúa **al elegir la molécula
+  original** de cada familia, con un número máximo de intentos declarado, y
+  **además** entra como factor en la media del tamaño de esa familia. No hay
+  excepciones regionales ni combinación con la cobertura objetivo, que conserva
+  su valor.
+
+  > **Corrección respecto de la redacción propuesta en el diseño con PCR.**
+  > Aquella decía que la composición actúa «exclusivamente al elegir la molécula
+  > original», y **es falso**: el propio diseño hace entrar el factor en la
+  > media del tamaño de familia. Lo que el diseño defiende con la palabra
+  > «exclusivamente» es que el sesgo **no puede vivir solo** en el tamaño de
+  > familia —ahí no produciría infrarrepresentación con pocos duplicados—, no
+  > que no aparezca en él.
+- **REQ-CONF-134.** La configuración del evento técnico admite
+  `library_preparation` con los valores `pcr_free`, predeterminado, y `pcr`.
+  Ausente significa `pcr_free`.
+- **REQ-CONF-135.** Con `pcr`, la tabla de amplificación es **obligatoria** y
+  debe declarar **la fracción de duplicados esperada**, los ciclos y la
+  eficiencia por ciclo, **ninguno con valor por omisión**; y puede declarar
+  ciclos explícitos, tamaño máximo de familia, intentos de composición, curva de
+  composición y clases de eficiencia, dentro de los dominios y las constantes de
+  contrato del perfil. La fracción de duplicados no tiene valor por omisión
+  porque depende de la masa de ADN de entrada, del número de ciclos y del
+  laboratorio.
+- **REQ-CONF-136.** Una configuración con `pcr_free` y cualquier parámetro de
+  amplificación, o con `pcr` y un parámetro fuera de dominio, se rechaza antes
+  de simular identificando el parámetro y su valor. Una fracción de duplicados
+  por encima de la que el tope de parejas por molécula puede producir se rechaza
+  nombrando el máximo alcanzable; **no se pinza en silencio**.
+- **REQ-CONF-137.** El parámetro interno del modelo —parejas por molécula— se
+  **deriva** de la fracción declarada por inversión numérica, y la configuración
+  efectiva publica la fracción declarada, la fracción esperada recalculada desde
+  el parámetro derivado, el propio parámetro, el método de inversión y su número
+  de iteraciones. La fracción declarada es la **esperada para una biblioteca
+  homogénea**, no la realizada: la realizada es mayor por las clases de
+  eficiencia, por la curva de composición y por la desigualdad de los primeros
+  ciclos, que actúa ya por omisión. Cuando se declaran clases de eficiencia, la
+  eficiencia escalar deja de intervenir en el modelo y solo se publica.
+- **REQ-CONF-138 (pendiente).** Con `pcr` y loci de repetición declarados, las
+  tasas de resbalón por ciclo se derivarán por longitud de motivo de las
+  fracciones con y sin PCR de la calibración y del número de ciclos. **Mientras
+  ese modelo no exista, la combinación se rechaza**: una biblioteca amplificada
+  tartamudearía solo con la parte de base y subestimaría lo medido entre un 14 %
+  y un 28 % según la longitud del motivo.
 - **REQ-CONF-96.** La configuración debe permitir definir o generar por regiones
   secuencias repetitivas, duplicadas o altamente homólogas destinadas a producir
   baja mapeabilidad. También debe poder aprovechar las repeticiones y variantes
@@ -1139,11 +1194,12 @@ su asignación por fase está en la matriz de trazabilidad.
 - **REQ-TEC-06.** Todo experimento de la primera versión debe representar WGS de
   DNA genómico. La configuración debe rechazar paneles dirigidos, amplicones,
   GBS y otros protocolos de captura o reducción de representación.
-- **REQ-TEC-07.** F4 usa exclusivamente preparación WGS sin PCR y la registra
-  como tal. Debe rechazar una preparación con amplificación e indicar DTF-056.
-- **REQ-TEC-08.** El perfil WGS amplificado, sus duplicados PCR y sus sesgos
-  propios quedan aplazados en DTF-056; F4 no acepta sus parámetros ni los
-  representa como secuenciación dirigida por PCR.
+- **REQ-TEC-07.** F4 registra la preparación de cada biblioteca, `pcr_free` o
+  `pcr`. Con `pcr_free` rechaza todo parámetro de amplificación e indica DTF-056
+  solo para lo que sigue aplazado.
+- **REQ-TEC-08.** El perfil WGS amplificado `pcr` es un perfil de **preparación
+  de biblioteca** WGS; F4 no lo representa como secuenciación dirigida por PCR,
+  que sigue aplazada en DTF-002.
 - **REQ-TEC-09.** F4 solo debe admitir lecturas cortas Illumina *paired-end*.
   Debe rechazar Illumina *single-end* e indicar DTF-057, y rechazar PacBio HiFi,
   Oxford Nanopore y PacBio CLR como tecnologías de simulación con destino
@@ -3291,10 +3347,13 @@ de extremo único (*single-end*) se observa un extremo; en pares de extremos
 ejemplo principal de lecturas cortas admitidas en la primera versión. Las
 lecturas largas, incluido PacBio HiFi, quedan aplazadas en DTF-049.
 
-F4 sigue este orden normativo: calcula las parejas de cobertura, sortea el
-fragmento biológico, forma una quimera cuando corresponda, **aplica el
-tartamudeo cuando corresponda**, realiza calidad y errores de R1/R2, aplica
-contaminación biológica y finalmente demultiplexa. Cuando una molécula sea
+F4 sigue este orden normativo: calcula las parejas de cobertura, **abre una
+familia de amplificación cuando la preparación es amplificada y elige su
+molécula original**, sortea el fragmento biológico —que con preparación sin PCR
+es uno por pareja y con preparación amplificada es el mismo para toda la
+familia—, forma una quimera cuando corresponda, **aplica el tartamudeo cuando
+corresponda**, realiza calidad y errores de R1/R2, aplica contaminación
+biológica y finalmente demultiplexa. Cuando una molécula sea
 quimérica, el tartamudeo se aplica a la molécula quimérica **ya formada**:
 antes de la quimera rompería su comparación byte a byte del prefijo contra la
 copia haplotípica (decisión S-13).
@@ -3518,9 +3577,12 @@ a una probabilidad mayor de error.
   empírico; artefacto excluido de v1.
 - **REQ-DAT-45 (retirado).** Reutilización de un perfil empírico sin sus FASTQ
   originales; capacidad aplazada fuera de v1.
-- **REQ-DAT-46.** F4 no genera duplicados: PCR no aplica al perfil inicial y la
-  tasa óptica es cero. Los modelos de duplicación quedan aplazados en DTF-056.
-- **REQ-DAT-47.** La duplicación de parejas completas queda aplazada en DTF-056.
+- **REQ-DAT-46.** Con `pcr_free`, F4 no genera duplicados. Con `pcr`, genera
+  duplicados de PCR como parejas de una misma **familia de amplificación**,
+  antes de calidad y errores. La tasa óptica es cero en los dos casos.
+- **REQ-DAT-47.** Una pareja duplicada es una pareja **completa**, con identidad
+  técnica propia, el mismo fragmento que su familia y errores, calidades,
+  quimera y contaminación propios.
 - **REQ-DAT-48.** La procedencia individual de duplicados queda aplazada en
   DTF-056.
 - **REQ-DAT-49.** El marcado de duplicados en BAM o CRAM queda aplazado en
@@ -3530,11 +3592,40 @@ a una probabilidad mayor de error.
   generación derivada de fragmentos cortos queda en DTF-054.
 - **REQ-DAT-51.** La identificación de intervalos de adaptador por lectura queda
   aplazada en DTF-054; F4 solo informa recuento cero en su resumen agregado.
-- **REQ-DAT-52.** F4 no aplica sesgo GC: toda pareja elegible conserva la
-  probabilidad del muestreo WGS básico. La relación no neutra queda aplazada en
-  DTF-056.
-- **REQ-DAT-53.** La combinación reproducible de sesgo GC con cobertura y sus
-  métricas queda aplazada en DTF-056.
+- **REQ-DAT-52.** Con `pcr`, la probabilidad de que un fragmento llegue a
+  originar una familia se multiplica por `((1 + e·g(GC)) / (1 + e))^c`, donde
+  `g` es la eficiencia relativa de la curva en la fracción de GC del fragmento,
+  `e` la eficiencia por ciclo y `c` los ciclos; con `pcr_free`, toda pareja
+  elegible conserva la probabilidad del muestreo WGS básico.
+- **REQ-DAT-53.** La cobertura objetivo **no se corrige** por composición. El
+  manifiesto registra la cobertura básica, la de **moléculas distintas** y la
+  final.
+- **REQ-DAT-81.** Con `pcr`, las `N` parejas de una biblioteca se organizan en
+  **familias de amplificación** consecutivas por ordinal de plantilla. Cada
+  familia sortea una molécula original, un número de copias tras los ciclos
+  explícitos **sesgado por tamaño** y un tamaño de familia de una Poisson
+  condicionada a uno y **pinzada** en el máximo declarado. La molécula original
+  se acepta con probabilidad igual a su factor de composición, con un número
+  máximo de intentos; agotado el tope, se acepta el último intento y **se
+  cuenta**. El muestreador conserva su contrato externo: sigue produciendo
+  exactamente `N` parejas con ordinales `0..N-1`.
+- **REQ-DAT-82 (pendiente).** El tartamudeo heredable por linaje, en el que cada
+  pareja hereda de un progenitor de su familia los resbalones anteriores a su
+  ciclo de divergencia, **no está implementado**. Ver REQ-CONF-138.
+- **REQ-DAT-83.** Ningún parámetro de amplificación altera el estado genotípico,
+  la verdad publicada ni el VCF de verdad. Dos ejecuciones idénticas salvo en la
+  preparación o en sus parámetros publican verdad, VCF y manifiestos de verdad
+  byte a byte iguales.
+- **REQ-DAT-84.** Con `pcr_free`, todos los artefactos publicados son byte a
+  byte iguales a los de una ejecución equivalente anterior a la existencia de la
+  preparación amplificada. Con `pcr` y todos sus parámetros neutros —**fracción
+  de duplicados cero** y curva neutra—, los FASTQ finales son byte a byte
+  iguales a los de `pcr_free` y solo difieren los campos declarativos del
+  manifiesto y de la configuración efectiva.
+- **REQ-DAT-85.** Toda decisión de amplificación se deriva de un ámbito propio
+  del catálogo técnico, indexado por evento, biblioteca, **ordinal de familia**
+  y, cuando corresponda, número de intento; nunca por posición, por orden físico
+  ni por el número de bibliotecas de la tanda.
 - **REQ-DAT-54.** En F4, las lecturas de regiones de baja mapeabilidad deben
   generarse desde sus posiciones y haplotipos verdaderos, sin publicar esa
   procedencia por lectura. El mapeo y sus alineamientos observados quedan
@@ -3634,11 +3725,14 @@ a una probabilidad mayor de error.
   sistema no debe aplicar decisiones independientes a R1 y a R2.
 
 - **REQ-DAT-76.** El orden normativo de F4 pasa a ser: calcular las parejas de
-  cobertura, sortear el fragmento biológico, formar una quimera cuando
-  corresponda, **aplicar el tartamudeo cuando corresponda**, realizar calidad y
-  errores de R1/R2, aplicar contaminación biológica y demultiplexar. Cuando una
-  molécula sea quimérica, el tartamudeo se aplica a la molécula quimérica ya
-  formada.
+  cobertura, **abrir una familia de amplificación y elegir su molécula original
+  cuando la preparación sea amplificada**, sortear el fragmento biológico,
+  formar una quimera cuando corresponda, **aplicar el tartamudeo cuando
+  corresponda**, realizar calidad y errores de R1/R2, aplicar contaminación
+  biológica y demultiplexar. Cuando una molécula sea quimérica, el tartamudeo se
+  aplica a la molécula quimérica ya formada. La quimera se sigue decidiendo
+  **por pareja** y sobre la molécula sin modificar, también dentro de una
+  familia, de modo que su comparación byte a byte se conserva intacta.
 
 - **REQ-DAT-77.** La decisión de tartamudeo debe ser reproducible y derivarse de
   un ámbito de semilla propio, identificado por el evento, la biblioteca, la
@@ -3728,13 +3822,16 @@ a una probabilidad mayor de error.
 >   quedaría obligado a declarar cuatro pesos que nadie ha calibrado**,
 >   incluidos los de la entrega anterior, que hoy no los declaran.
 
-- **REQ-CONF-133.** El tartamudeo no constituye una preparación de biblioteca
-  amplificada: **no introduce duplicados de PCR ni sesgos de amplificación**, y
-  el perfil de preparación sigue registrándose como sin PCR conforme a
-  REQ-TEC-07. El deslizamiento que este requisito describe ocurre en la
-  amplificación en puente sobre la celda de flujo y en la secuenciación por
-  síntesis, que existen en el perfil vigente. La preparación amplificada y su
-  tasa de tartamudeo propia siguen aplazadas en DTF-056.
+- **REQ-CONF-133.** El tartamudeo de base no constituye una preparación de
+  biblioteca amplificada: **no introduce duplicados de PCR ni sesgos de
+  amplificación**, y **no cambia la preparación registrada**, que sigue siendo
+  la que el evento declare. El deslizamiento que este requisito describe ocurre
+  en la amplificación en puente sobre la celda de flujo y en la secuenciación
+  por síntesis, que existen en los dos perfiles. La preparación amplificada
+  existe desde F4.9 y se declara aparte (REQ-CONF-88 y REQ-CONF-134); lo que
+  sigue pendiente es su **tasa de tartamudeo heredable por linaje**, y hasta que
+  exista la combinación de preparación amplificada con loci de repetición
+  declarados se rechaza (REQ-CONF-138).
 
 - **REQ-WGS-01.** En F4, el evento debe declarar exactamente una cobertura media
   objetivo común. Un objetivo por número de lecturas o parejas, la ausencia de
@@ -4586,6 +4683,26 @@ comparten una política de aceptación.
   vale para escenarios **sin contaminación biológica**: con ella, las parejas
   publicadas dejan de ser las moléculas muestreadas y la correspondencia de uno
   a uno se rompe.
+- **REQ-VAL-58.** Con `pcr`, la validación de cierre debe **contar sobre los
+  FASTQ finales**, con los errores de secuenciación desactivados y la quimera a
+  cero, el número de parejas cuyas secuencias R1 y R2 coinciden con las de otra,
+  y comprobar que ese recuento es el de parejas duplicadas que el manifiesto
+  declara realizadas. Y debe **rederivar desde la semilla, sin reutilizar el
+  código productor**, las familias, las copias de los primeros ciclos y los
+  tamaños de familia, atando lo rederivado a los **grupos de parejas idénticas
+  escritos**. Un oráculo que leyera el histograma publicado en vez de
+  rederivarlo sería un espejo y no podría fallar nunca. Vale para escenarios sin
+  contaminación biológica, con curva de composición neutra y una sola clase de
+  eficiencia, y el validador debe **comprobar ese alcance en el documento
+  publicado antes de empezar**.
+- **REQ-VAL-59.** La reproducibilidad del recorrido técnico debe estar anclada a
+  una **huella congelada** de artefactos publicados por un escenario sin
+  amplificación, y no solo a la comparación de dos ejecuciones del mismo
+  binario. Dos ejecuciones del mismo binario se mueven juntas ante cualquier
+  cambio que afecte a las dos, de modo que una comparación entre ellas es una
+  **simetría** y no una identidad; se midió que una edición de una sola línea
+  del muestreador reescribía los FASTQ y los manifiestos de un escenario sin
+  amplificación con la batería entera en verde.
 
 ### 4.7. Manifiestos de la ejecución y de sus eventos
 
@@ -4814,16 +4931,26 @@ VCF y no constituya un experimento de secuenciación.
   de calibración empírica; capacidad aplazada fuera de v1.
 - **REQ-MAN-44 (retirado).** Enlace desde el manifiesto a un fichero de perfil
   empírico; artefacto excluido de v1.
-- **REQ-MAN-45.** En F4, el manifiesto declara duplicados PCR no aplicables y
-  ópticos a cero. Tasas, cantidades y relaciones de duplicados quedan aplazadas
-  en DTF-056.
+- **REQ-MAN-45.** En F4, el manifiesto declara la preparación y, con `pcr`, los
+  parámetros efectivos y los recuentos agregados de familias, parejas, parejas
+  duplicadas, fracción realizada de duplicados, histograma de tamaños de
+  familia, familias truncadas al final e intentos de composición totales y
+  agotados. Con `pcr_free` declara duplicados PCR no aplicables. Los ópticos son
+  cero en los dos casos.
+- **REQ-MAN-94.** Con `pcr`, el manifiesto de evento registra además la
+  **cota** de operaciones y de memoria derivada de la configuración y de la
+  geometría conocidas antes de abrir el primer ámbito aleatorio, marcada como
+  valor **calculado sin ejecutar** y no como medida, junto con el número de
+  pasadas que el recorrido hace sobre cada biblioteca. La cota se **publica, no
+  se impone**: la fase de secuenciación nunca ha tenido control de recursos.
 - **REQ-MAN-46.** El marcado de duplicados queda aplazado en DTF-055 y DTF-056.
 - **REQ-MAN-47.** En F4, el manifiesto declara adaptadores desactivados y
   recuento cero; toda solicitud de activarlos se rechaza. El perfil de
   fragmentos cortos y sus parámetros o lecturas afectadas quedan en DTF-054.
-- **REQ-MAN-48.** En F4, el manifiesto declara relación GC neutra. Curvas,
-  intensidad, combinación con cobertura y métricas de corrección GC quedan
-  aplazadas en DTF-056.
+- **REQ-MAN-48.** En F4, el manifiesto declara la relación de composición como
+  `neutral` o `curve`, y con `curve` publica la curva efectiva. La intensidad,
+  la combinación con cobertura y las métricas de corrección GC quedan aplazadas
+  en DTF-056.
 - **REQ-MAN-49.** La identificación de regiones para baja mapeabilidad, su
   relación con repeticiones o variantes estructurales y el mapeador, referencia
   y MAPQ observados quedan aplazados en DTF-055.
@@ -4871,8 +4998,9 @@ VCF y no constituya un experimento de secuenciación.
   registrar «no evaluable» y la causa. También debe identificar los conjuntos
   que no se marcaron como completos por una incoherencia determinista.
 - **REQ-MAN-60.** Para cada biblioteca WGS de F4, el manifiesto debe registrar
-  la preparación sin PCR, el objetivo original de cobertura, el número de
-  parejas derivado y realizado y el perfil y las
+  **la preparación de la biblioteca**, el objetivo original de cobertura, el
+  número de parejas derivado y realizado, la **cobertura de moléculas
+  distintas** cuando la preparación sea amplificada, y el perfil y las
   sustituciones aplicados.
 - **REQ-MAN-61.** El manifiesto debe registrar la definición de cobertura usada,
   la referencia estructural y la longitud haploide del denominador, la cobertura
@@ -5480,9 +5608,9 @@ pendientes.
 | **ACE-46. FASTQ final y resumen técnico** | Existe un FASTQ final, o pareja *paired-end*, por individuo y evento después de contaminación y demultiplexado. Corresponde a la única biblioteca del individuo y a la única tanda, sin concatenación ni copia limpia adicional. El manifiesto conserva semilla, perfil, cobertura, contaminación y aportes por donante, quimeras, duplicados, descartes, hashes y tamaños como recuentos agregados. No conserva origen, diferencias, secuencias, calidades ni identificadores por lectura o pareja | FASTQ final, resumen agregado y ausencia de fichero individual |
 | **ACE-47. Perfiles de error y calidades** | F4 usa el perfil identificado y versionado `gps-hiseqx-pcrfree-pe150-v1`, homogéneo para el evento salvo desplazamiento de calidad y escala de error globales por mate. Las calidades FASTQ son probabilísticamente coherentes con los errores; selectores por individuo, secuencia o región se rechazan. La salida conserva perfil, ajustes efectivos y recuentos agregados, no diferencias por lectura | Perfil literal, coherencia calidad-error, rechazos de selectores y casos estadísticos |
 | **ACE-48. Calibración empírica fuera de v1** | Una configuración que aporte FASTQ o referencia para calibración, solicite estimar o inferir un perfil o seleccione un perfil empírico reutilizable se rechaza antes de simular. El error identifica el campo y explica que la capacidad queda fuera de v1. Una ejecución válida con un perfil incorporado de Illumina y ajustes explícitos permitidos no genera un fichero de perfil empírico ni lo enlaza desde el manifiesto; PacBio HiFi permanece aplazado en DTF-049 | Casos por clase de campo rechazado y comprobación de ausencia del artefacto |
-| **ACE-49. Duplicados de PCR y ópticos** | F4 declara PCR no aplicable y duplicados ópticos a cero; no genera duplicados ni admite sus tasas. Un perfil amplificado y el modelo de duplicados quedan en DTF-056 | Evidencia, modelo y marcado posterior |
+| **ACE-49. Duplicados de PCR y ópticos** | Con `pcr_free`, F4 declara PCR no aplicable y no genera duplicados. Con `pcr`, cada duplicado comparte fragmento con su familia y difiere en errores y calidades; la fracción realizada se publica y coincide con la que un oráculo cuenta sobre los FASTQ con los errores desactivados. Ópticos a cero en los dos casos; su modelo y el marcado quedan en DTF-056 y DTF-055 | Oráculo de duplicados sobre los FASTQ, recuentos agregados y marcado posterior |
 | **ACE-50. Restos de adaptadores** | El perfil HiSeq X inicial no produce adaptadores: todos sus insertos son mayores que sus lecturas. F4 rechaza activarlos y conserva recuento cero. Un perfil futuro de fragmentos cortos podrá generarlos únicamente por sobrepasar el inserto, conforme a DTF-054 | Rechazo y recuento cero en F4; perfil futuro |
-| **ACE-51. Sesgo de cobertura por GC** | F4 usa GC neutro y rechaza una curva o intensidad no nulas. El perfil con sesgo GC calibrado queda en DTF-056 | Curvas, regla de combinación e intervalos de resumen concretos |
+| **ACE-51. Sesgo de cobertura por GC** | Con `pcr_free`, F4 usa GC neutro y rechaza una curva o intensidad no nulas. Con `pcr`, una curva no neutra reduce las familias en las regiones de composición desfavorable en la proporción configurada, dentro del tope de intentos declarado. El perfil con sesgo GC calibrado con datos reales queda en DTF-056 | Fixture de dos mitades con composición distinta, recuento de intentos agotados y regla de combinación |
 | **ACE-52. Baja mapeabilidad realista** | Las lecturas de regiones repetitivas, duplicadas u homólogas parten de posiciones y haplotipos verdaderos. En F4 se publican solo FASTQ y métricas agregadas; el mapeador, sus alineamientos y la evaluación de ambigüedad o posiciones incorrectas quedan para DTF-055, sin sobrescritura artificial de MAPQ | Casos de prueba por tipo de región y referencia cuando exista mapeo |
 | **ACE-53. Alineamientos sintéticos coherentes** | Queda aplazado en DTF-051 el modo directo, incluidas sus categorías, MAPQ, campos y validación propios | Decisión posterior de modo directo |
 | **ACE-54. Lecturas quiméricas** | Una tasa configurable transforma parejas limpias en quimeras sin cambiar su número. Para inserto `L`, el primer segmento es el prefijo de longitud `b`, con `b` uniforme en `1..L-1`; el segundo es un intervalo uniforme de longitud `L-b` de la lista canónica del mismo individuo y biblioteca. En la misma copia se excluyen intervalos que solapen o toquen el prefijo; ambos segmentos se leen en orientación directa antes de aplicar PE. Una falta de candidata detiene antes de publicar. F4 publica FASTQ y recuentos agregados, no procedencia individual ni alineamientos | Vector literal de fuentes, uniones, exclusiones y fallo sin candidata |
@@ -5499,7 +5627,7 @@ pendientes.
 | **ACE-65. Consecuencias de la validación** | Un archivo, formato, índice o cabecera inválidos, una referencia o identificadores incompatibles, un genotipo imposible, una procedencia o haplotipo imposible o un artefacto sin explicación trazada detienen la ejecución e impiden completar el ámbito afectado. Una cobertura u otra magnitud aleatoria desviada se informa y permite completar, sin tolerancia de aceptación ni opción de elevarla a error. N desviado conserva un aviso no invalidante. Ne realizado no tiene objetivo; N realizado=0 aplica su política específica | Cobertura desviada que completa, procedencia imposible que falla, medida no evaluable y aviso de N |
 | **ACE-66. Contenido genotípico del VCF verdadero** | En cada locus incluido, `GT` coincide con el genotipo real simulado y conserva fase y ploidía aunque la cobertura sea cero o las lecturas estén degradadas. El VCF no contiene `DP`, `AD`, `GQ`, `PL` ni ningún otro campo `FORMAT` derivado de observaciones o inferencias. La cobertura, el soporte alélico, las calidades y métricas equivalentes aparecen en los resultados de validación de FASTQ/BAM/CRAM, no en el VCF | Casos con distintas ploidías, cobertura cero y degradaciones; inspección de campos `FORMAT` |
 | **ACE-67. QUAL y FILTER del VCF verdadero** | Todos los registros válidos usan `QUAL=.` y `FILTER=PASS`. La cabecera explica que no se estima una calidad probabilística y que `PASS` identifica un registro verdadero validado estructuralmente. Si un registro no puede representarse mediante el VCF y su complemento cuando corresponda, o no puede validarse, se produce un error estructural, se detiene la creación del conjunto, este no se marca como completo y el registro no se emite como `PASS` | Casos de cabecera válida, complemento enlazado, registro no representable y fallo de validación |
-| **ACE-68. Alcance WGS y preparación** | F4 acepta exclusivamente WGS de DNA genómico con Illumina PE y preparación sin PCR. Rechaza preparación amplificada, PacBio HiFi, Oxford Nanopore, PacBio CLR, paneles, amplicones, GBS y captura o reducción de representación. La preparación amplificada, duplicados PCR y sesgos asociados quedan en DTF-056 | Casos de rechazo por tecnología y protocolo |
+| **ACE-68. Alcance WGS y preparación** | F4 acepta exclusivamente WGS de DNA genómico con Illumina PE, en preparación `pcr_free` o `pcr`. Rechaza PacBio HiFi, Oxford Nanopore, PacBio CLR, paneles, amplicones, GBS y captura o reducción de representación. El perfil de sesgo GC calibrado, los duplicados ópticos y de agrupación y el marcado quedan en DTF-056 y DTF-055 | Casos de rechazo por tecnología y protocolo, y admisión de las dos preparaciones |
 | **ACE-69. Objetivo y muestreo de bibliotecas WGS** | En F4, cada biblioteca declara exclusivamente cobertura; rechaza un número de lecturas o parejas como objetivo y deriva el número entero de parejas PE. La cobertura usa bases de lectura divididas por la longitud haploide de la referencia estructural, sumando cada secuencia una vez; `N` cuenta tanto en longitud como en bases y posiciones muestreadas y se resume por separado. Las posiciones se muestrean uniformemente y de forma reproducible y la profundidad previa a artefactos es aproximadamente Poisson, sin profundidad exacta por base. Mapeo y cobertura alineada se incorporan desde DTF-055 y no redefinen el objetivo | Prueba de conversión desde cobertura, rechazo numérico, casos con `N` y distribución de muestreo |
 | **ACE-70. Ploidía, copias y soporte alélico WGS** | Sin excepciones, las lecturas se reparten por longitud y número de copias, cada copia recibe cobertura semejante y la profundidad cromosómica total es proporcional a su ploidía. Los alelos contribuyen según dosis; la validación admite variación aleatoria y no exige balance exacto. No existen parámetros de sesgo alélico o *allele dropout* forzados | Métricas y resúmenes por copia o haplotipo |
 | **ACE-71. Un único alineamiento final** | F4 no genera BAM/CRAM ni un evento de control. Tras DTF-050 y DTF-055, cada evento conservará solo su BAM/CRAM final con las degradaciones configuradas; un control sin degradaciones será otro evento con misma verdad, referencias y muestras, pero subsemilla, lecturas y archivos propios, enlazado por manifiestos | Rechazo F4 y futuros identificadores técnicos de eventos relacionados |
@@ -5520,6 +5648,7 @@ pendientes.
 | **ACE-86. Linaje detallado de individuos muestreados** | Solo los individuos incluidos en muestreos o materializaciones adicionales solicitados exportan puntos de recombinación y origen de cada segmento. Cada segmento alcanza al individuo y copia haplotípica fundadores y las mutaciones de novo forman capas separadas. La ejecución conserva internamente lo necesario aunque no exporte antepasados intermedios; los resúmenes no enumeran ese detalle | Evolución muestreada/no muestreada y reconstrucción a través de un antepasado no materializado |
 | **ACE-87. Trazabilidad y límites estructurales** | Las coordenadas actuales se relacionan con las fundadoras cuando existe correspondencia, conservando orientación. Cada copia duplicada y cada inserción nueva tiene identificador estable; las deleciones conservan el intervalo fundador ausente. En una copia haplotípica se permiten eventos estructurales no solapados, incluso adyacentes, pero se rechaza solapamiento, anidamiento o modificación de una estructura previa. La única excepción entre fuente y destino de un mismo evento es la duplicación cuya fuente abarca la secuencia completa. Haplotipos distintos pueden solaparse. SNP e indels se permiten en segmentos modificados, salvo si solapan o atraviesan un punto de ruptura; la adyacencia se permite. Historias distintas pueden producir el mismo estado estructural canónico sin perder su trazabilidad | Formato de relaciones y equivalencia canónica; casos de historias distintas |
 | **ACE-88. Modelos de población inicial** | Cada locus o bloque y subpoblación usa modo probabilístico predeterminado o controlado explícito sin mezclarlos dentro de la unidad. Admite Hardy-Weinberg en ploidías 1–10: binomial por dosis en loci bialélicos y multinomial por composición en multialélicos. También admite frecuencias explícitas de genotipo o dosis y genotipos multilocus faseados. En Hardy-Weinberg controlado se fijan recuentos alélicos, pero los genotipos se distribuyen aleatoriamente condicionados al modelo, sin exigir recuentos genotípicos exactos salvo configuración explícita. Frecuencias y recuentos suman, respectivamente, 1 y el total aplicable; los datos incompatibles se rechazan | Casos HWE haploide, diploide y poliploide, bialélico y multialélico, por modo |
+| **ACE-119. Preparación amplificada por PCR** | Con `pcr`, las parejas de una biblioteca se organizan en familias de amplificación; los duplicados nacen antes de los errores y de las calidades; la composición actúa al elegir la molécula original y además en la media del tamaño de familia; la verdad del individuo, su VCF y el manifiesto de verdad quedan intactos; con todos los parámetros neutros los FASTQ son byte a byte los de `pcr_free`; y el manifiesto publica la cota de operaciones y memoria como valor calculado sin ejecutar. El tartamudeo heredable por linaje está pendiente, y hasta que exista la combinación con loci de repetición declarados se rechaza | Huella congelada del FASTQ sin PCR, oráculo de duplicados sobre los bytes, par de ejecuciones que aísla la desigualdad de los primeros ciclos y validador independiente que rederiva desde la semilla |
 | **ACE-89. LD y fase iniciales** | F5 genera por bloque×subpoblación una distribución haplotípica SNP-only desde marginales y un perfil de media `r²(d)`, sin panel ni haplotipos aportados. La tabla H×S y q son la fuente de verdad; desde ellas se reconstruyen marginales, D, `r²`, signos y frecuencias. El probabilístico muestrea q y el controlado usa únicamente cuotas enteras factibles que suman C. Los bloques conservan fase e identidad y permanecen intactos hasta la primera meiosis de F7.1 | Oráculo H×S/q/D/`r²`, fijos, bins, signos, cuotas y ausencia de panel/recombinación |
 | **ACE-90. Endogamia inicial** | F automático se configura para la población completa o se sustituye por subpoblación exclusivamente diploide, siempre entre 0 y 1 y nunca por locus, región o bloque. Usa las fórmulas bialélica o multialélica de REQ-EVO-47/48: F=0 coincide con Hardy-Weinberg, un valor intermedio modifica las probabilidades según esas fórmulas y F=1 produce homocigosis completa. F en ploidía 1 o mayor que 2 se rechaza antes de simular con ámbito y ploidía. En poliploides se usa HWE sin F o una distribución explícita local, que prevalece. F realizado se calcula solo en diploides, puede ser negativo sin constituir error y figura como «no aplicable» en las demás ploidías | Casos F=0, intermedio y 1; rechazo P=1 y P>2; distribución explícita poliploide; F realizado no aplicable |
 | **ACE-91. Fundadores trazables** | Todos los individuos de la población inicial son fundadores con identificadores estables propios. Cada copia haplotípica también tiene identificador propio aunque su secuencia coincida con otra, y toda traza posterior alcanza una copia fundadora concreta | Formato de identificadores y casos de reconstrucción |

@@ -699,13 +699,19 @@ def _is_neutral_gc_curve(knots: Sequence[GcCurveKnotRow]) -> bool:
 
 
 def pcr_mean_pairs_per_molecule(duplicate_fraction: str) -> float | None:
-    """La `m` derivada, **con el mismo método que Rust**.
+    """La `m` derivada, con **el mismo algoritmo** que Rust pero no su exponencial.
 
     Bisección sobre `[0, 64]` con 64 iteraciones fijas y retorno anticipado
-    exacto para la fracción cero. La interfaz la muestra junto a la fracción
-    declarada para que el usuario vea qué parámetro interno está pidiendo; la
-    autoridad sigue siendo Rust, y una prueba compara este número con el que la
-    configuración efectiva publica para la misma fracción.
+    exacto para la fracción cero: eso sí es idéntico. Lo que **no** es idéntico
+    es la exponencial: aquí es la de Python, que llama a la del sistema, y Rust
+    usa la de la librería fijada. Se midió: de sesenta fracciones barridas,
+    **dieciocho difieren en los últimos bits**. Por eso la prueba que compara
+    los dos números usa una tolerancia y no igualdad exacta.
+
+    **La autoridad es el número que la configuración efectiva publica**, no
+    este. Este existe para que el usuario vea, mientras escribe, qué parámetro
+    interno está pidiendo; el que gobierna la ejecución y su reproducibilidad es
+    el publicado.
 
     Devuelve `None` cuando la fracción no es un número o está fuera de
     dominio, en vez de inventar un valor.

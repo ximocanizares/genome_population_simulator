@@ -560,6 +560,75 @@ pub fn event_manifest_bytes(manifest: &EventManifest<'_>) -> Result<Vec<u8>, Dia
 /// Valida el esquema propio y las relaciones internas que JSON Schema no puede
 /// expresar (identidades, orden estable y enlaces entre bibliotecas y FASTQ).
 pub fn validate_event_manifest_bytes(path: &Path, bytes: &[u8]) -> Result<(), Diagnostic> {
+    // El esquema que el diagnóstico cita sale de la versión que el documento
+    // **declara**, no de una constante. Denunciar siempre el de la versión 2
+    // mandaba a mirar un fichero que no era el suyo en cuanto el evento abría
+    // el tartamudeo o la amplificación. Se retiqueta **al salir**, que es el
+    // único sitio donde la versión ya se conoce con seguridad y donde no hay
+    // que tocar las ciento treinta y seis llamadas de dentro.
+    validate_event_manifest_document(path, bytes).map_err(|error| {
+        retag_event_manifest_schema(error, event_manifest_schema_file_for_bytes(bytes))
+    })
+}
+
+/// El esquema que hay que citar, según lo que el documento declare.
+///
+/// Un documento cuya versión no se pueda leer —JSON ilegible, raíz que no es un
+/// objeto, `schema_version` ausente— se queda con el de la versión 2, que es la
+/// base: es la única respuesta honesta cuando el documento no dice de cuál
+/// pretende ser.
+fn event_manifest_schema_file_for(version: Option<&str>) -> &'static str {
+    if version == Some(EVENT_MANIFEST_SCHEMA_VERSION_V3) {
+        "manifest-event-v3.schema.json"
+    } else {
+        "manifest-event-v2.schema.json"
+    }
+}
+
+/// Lee la versión declarada sin exigir que el documento sea válido.
+///
+/// Se hace **solo en el camino del error**, de modo que una validación que pasa
+/// no vuelve a analizar el documento.
+fn event_manifest_schema_file_for_bytes(bytes: &[u8]) -> &'static str {
+    let declarada = serde_json::from_slice::<Value>(bytes)
+        .ok()
+        .and_then(|documento| {
+            documento
+                .get("schema_version")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+    event_manifest_schema_file_for(declarada.as_deref())
+}
+
+/// Reescribe el esquema citado por un diagnóstico de formato ya construido.
+fn retag_event_manifest_schema(error: Diagnostic, schema: &'static str) -> Diagnostic {
+    if error.code() != "GPS-FMT-006" {
+        return error;
+    }
+    let context = error.context();
+    Diagnostic::format(
+        "GPS-FMT-006",
+        "Un documento JSON producido no satisface su esquema publicado.",
+    )
+    .with(
+        "path",
+        context
+            .get("path")
+            .cloned()
+            .unwrap_or_else(|| "documento JSON".to_owned()),
+    )
+    .with("schema", schema)
+    .with(
+        "detail",
+        context
+            .get("detail")
+            .cloned()
+            .unwrap_or_else(|| "documento inválido".to_owned()),
+    )
+}
+
+fn validate_event_manifest_document(path: &Path, bytes: &[u8]) -> Result<(), Diagnostic> {
     let document: Value = serde_json::from_slice(bytes)
         .map_err(|error| event_error(path, format!("JSON no legible: {error}")))?;
     let root = required_object(&document, "raíz", path)?;
@@ -2648,6 +2717,10 @@ fn event_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
         "Un documento JSON producido no satisface su esquema publicado.",
     )
     .with("path", path.display().to_string())
+    // Nombre **provisional**: `validate_event_manifest_bytes` lo retiqueta al
+    // salir con el que corresponde a la versión que el documento declara. Aquí
+    // no se conoce, y las ciento treinta y seis llamadas de este módulo no
+    // tienen por qué conocerlo.
     .with("schema", "manifest-event-v2.schema.json")
     .with("detail", detail.into())
 }

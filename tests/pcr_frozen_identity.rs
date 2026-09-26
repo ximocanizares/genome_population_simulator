@@ -67,6 +67,24 @@ static NONCE: AtomicU64 = AtomicU64::new(0);
 const FROZEN_R1_SHA256: &str = "098b4bf54744c0b6cbe8f7888a3ee3e3c1be2b97b1db7c9d68a85ffcff481f6b";
 /// SHA-256 del FASTQ R2 publicado por [`FROZEN_SCENARIO`].
 const FROZEN_R2_SHA256: &str = "4564c492605722641aa243f12db87b91fddbdf3b681d0c639c3b198a044013b1";
+/// SHA-256 del **contenido descomprimido** de los dos FASTQ, concatenados.
+///
+/// # Por qué hace falta además de la huella del fichero
+///
+/// La huella de arriba es la del `.fastq.gz`, es decir, la del **fichero
+/// comprimido**, y el compresor elige rutina según las instrucciones que tenga
+/// el procesador. Esas rutinas están escritas para dar el mismo resultado por
+/// cualquier camino, así que **probablemente** salga igual en otra máquina —
+/// pero «probablemente» es la palabra que esta disciplina no admite. Esta
+/// segunda huella no depende del compresor: es la del texto FASTQ, que solo
+/// contiene bases y caracteres de calidad, sin un solo decimal formateado, y
+/// cuyas trascendentes salen todas de la librería fijada.
+///
+/// Con las dos, el argumento de estabilidad pasa de probable a completo: si
+/// alguna vez fallara solo la primera, el compresor es el culpable y el
+/// contenido está intacto.
+const FROZEN_CONTENT_SHA256: &str =
+    "69dcc6aaac442687ead7eefcd5bb4f2f1fde63bda587f99b981a33eec5c1e47b";
 /// SHA-256 de las secuencias de la primera pareja que el muestreador produce
 /// por su camino real, sin pasar por la publicación.
 const FROZEN_FIRST_PAIR_SHA256: &str =
@@ -179,6 +197,15 @@ fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// El texto FASTQ entero, ya descomprimido.
+fn decompressed(path: &Path) -> Vec<u8> {
+    let mut text = Vec::new();
+    bgzf::io::Reader::new(fs::File::open(path).expect("FASTQ"))
+        .read_to_end(&mut text)
+        .expect("legible");
+    text
+}
+
 fn read_sequences(path: &Path) -> Vec<Vec<u8>> {
     let mut text = Vec::new();
     bgzf::io::Reader::new(fs::File::open(path).expect("FASTQ"))
@@ -217,7 +244,20 @@ fn the_unamplified_scenario_keeps_its_frozen_fastq_digest() {
     );
     let observed_r1 = digest(&first);
     let observed_r2 = digest(&second);
+    // La huella del **contenido**, que no pasa por el compresor.
+    let mut content = Vec::new();
+    for mate in ["R1", "R2"] {
+        content.extend_from_slice(&decompressed(
+            &destination.join(format!("outputs/fastq/reads-main/sample-A_{mate}.fastq.gz")),
+        ));
+    }
+    let observed_content = digest(&content);
     let _ = fs::remove_dir_all(&root);
+    assert_eq!(
+        observed_content, FROZEN_CONTENT_SHA256,
+        "el CONTENIDO del FASTQ sin amplificar ha cambiado: esto no lo puede explicar el \
+         compresor, es el productor"
+    );
     assert_eq!(
         observed_r1, FROZEN_R1_SHA256,
         "el R1 del escenario sin amplificar ha cambiado de bytes; NO se actualiza el literal \

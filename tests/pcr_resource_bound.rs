@@ -223,6 +223,69 @@ fn with_a_neutral_curve_the_attempts_term_is_never_exercised() {
     );
 }
 
+/// **El valor exacto de la cota, congelado.**
+///
+/// # Qué agujero cierra
+///
+/// Todas las demás pruebas de este fichero comparan la cota con **desigualdades**:
+/// que las unidades reales quepan dentro, que la mutante sea menor. Ninguna
+/// mira su **valor**. Se midió que borrando los términos `+ c + 1` de la fórmula
+/// —los de la divergencia de linaje y el progenitor— la batería entera seguía
+/// pasando con 1413 pruebas y cero fallos.
+///
+/// Aquí el valor está escrito a mano, término a término, de modo que quitar
+/// cualquiera de ellos mata la prueba aunque la desigualdad siga cumpliéndose.
+///
+/// # Los términos que este árbol **no puede ejercitar**, dicho sin adornos
+///
+/// `2·c·T` —los tractos de repetición— y `c + 1` —la divergencia de linaje y el
+/// progenitor— corresponden a trabajo que **todavía no existe**: el primero
+/// porque la preparación amplificada rechaza por ahora los escenarios con loci
+/// declarados, y el segundo porque el tartamudeo heredable por linaje es de la
+/// entrega 4. El contador nunca los suma, así que **ninguna desigualdad puede
+/// ver si desaparecen de la fórmula**. Lo único que los sujeta hasta entonces es
+/// esta igualdad exacta.
+#[test]
+fn the_bound_has_the_exact_value_its_formula_says() {
+    let settings = saturated_settings(0.01);
+    // Los términos, escritos a mano y por separado.
+    let classes = 1_u64; // una sola clase de eficiencia
+    let early_states = 1_u64 << PCR_MAXIMUM_EARLY_CYCLES; // 2^6 = 64
+    let attempts = u64::from(PCR_MAXIMUM_GC_ATTEMPTS); // 16
+    let copies = 1_u64; // una copia haplotípica
+    let family_slots = u64::from(PCR_MAXIMUM_FAMILY_SIZE); // 256
+    let cycles = 10_u64;
+    let tracts = 0_u64; // hoy no puede haber tractos con amplificación
+    let per_pair = classes
+        + early_states
+        + attempts * (copies + 3 * MAXIMUM_INSERT_BASES)
+        + family_slots
+        + 2 * cycles * tracts
+        + cycles
+        + 1
+        + family_slots;
+    let dynamic_programming =
+        classes * u64::from(PCR_MAXIMUM_EARLY_CYCLES) * early_states * early_states;
+    let expected = PAIRS * per_pair + dynamic_programming;
+    let bound = resource_bound(&settings, PAIRS, copies, MAXIMUM_INSERT_BASES, tracts);
+    assert_eq!(
+        bound.operation_units(),
+        expected,
+        "la cota publicada tiene que ser exactamente la de su fórmula"
+    );
+    // Control positivo de los dos términos que ninguna desigualdad ve: quitarlos
+    // cambia el valor, de modo que la igualdad de arriba los sujeta de verdad.
+    assert_ne!(
+        expected,
+        PAIRS * (per_pair - cycles - 1) + dynamic_programming
+    );
+    assert_ne!(
+        resource_bound(&settings, PAIRS, copies, MAXIMUM_INSERT_BASES, 3).operation_units(),
+        expected,
+        "el término de los tractos tiene que mover la cota cuando T deja de ser cero"
+    );
+}
+
 /// La cota de memoria es **independiente del número de parejas**, y la de
 /// operaciones crece con él.
 #[test]
@@ -257,6 +320,15 @@ fn the_memory_bound_does_not_grow_with_the_pair_count() {
 /// El ancla estructural es esta: el muestreador **no nombra** las funciones que
 /// construyen la tabla. Si alguien volviera a llamarlas desde la familia,
 /// aparecerían en su texto y esta prueba moriría.
+///
+/// # Esta prueba es la segunda red, no la primera, y hay que decirlo
+///
+/// Es una búsqueda **léxica** y por tanto **se evade importando la función con
+/// otro nombre**: se midió, y con esa evasión esta prueba sobrevive tan campante
+/// mientras la tabla se reconstruye una vez por familia. La red que de verdad
+/// cierra el hueco es el **contador** de `tests/pcr_dp_build_count.rs`, que
+/// cuenta construcciones y no nombres. Esta se conserva porque es instantánea y
+/// cuesta cero, no porque baste.
 #[test]
 fn the_sampler_never_rebuilds_the_early_copy_tables() {
     const SOURCE: &str = include_str!("../src/wgs_sampling.rs");

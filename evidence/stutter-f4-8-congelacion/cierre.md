@@ -51,6 +51,17 @@ y el manifiesto general, que resume su huella— sin que nada del simulador haya
 cambiado. Siguiendo la receta al pie de la letra desde otro sitio, las huellas
 archivadas no salen.
 
+> **Corrección del 25/09/2026, al rehacer esta evidencia para la entrega 3.**
+> La receta de abajo **no reproduce las huellas archivadas**: da doce iguales y
+> dos distintas, `effective-config.json` y `manifest.json`. No es un defecto del
+> simulador —cuatro commits distintos dan las catorce iguales entre sí—, sino de
+> la receta: la ejecución archivada **no** copió el escenario a `inputs/`, sino
+> que lo invocó por su ruta real dentro del directorio de evidencia,
+> `evidence/stutter-f4-8-congelacion/inputs/general.toml`. Con esa ruta, las
+> catorce salen. Es justo lo que el párrafo de arriba advierte y esta receta no
+> aplicaba. La receta correcta está en
+> `evidence/pcr-f4-9-congelacion/cierre.md`.
+
 ```text
 git archive c4a55f3~1 | tar -x -C <copia>
 cd <copia> && CARGO_TARGET_DIR=<copia-target> cargo build --locked --bin genome-population-simulator

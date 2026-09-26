@@ -1,4 +1,0 @@
-
-gzip: stdin: not in gzip format
-tar: Child returned status 1
-tar: Error is not recoverable: exiting now

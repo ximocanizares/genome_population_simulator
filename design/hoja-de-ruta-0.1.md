@@ -326,8 +326,27 @@ poblaciones pueden alimentar este mismo recorrido sin crear otra implementación
 > solo ella lo usa—, ningún esquema publicado y ningún artefacto de un
 > escenario sin loci declarados, que sigue dando los mismos bytes. El registro
 > completo está en la **sección 16** de
-> `design/plan-implementacion-f4-0.1.md`. La preparación amplificada por PCR
-> **sigue aplazada** y pertenece a la entrega 3.
+> `design/plan-implementacion-f4-0.1.md`.
+
+> **Segunda reapertura acotada, 25/09/2026.** La misma fase recibió un segundo
+> paso: la **preparación de biblioteca amplificada por PCR**, por elección
+> expresa y con la preparación sin PCR como predeterminada. Con ella, el
+> recorrido deja de producir una pareja por fragmento y pasa a producir
+> **familias**: de ahí salen los duplicados, la sobrerrepresentación de unas
+> moléculas frente a otras y el sesgo por composición. El usuario declara **la
+> fracción de duplicados** que ve en su informe de calidad, no el parámetro del
+> modelo, que se deriva por inversión numérica. **La verdad del individuo sigue
+> sin cambiar.** Lo que **no** se reabrió: el recurso del perfil sin PCR y su
+> huella —la amplificación estrena un perfil **hermano**—, ninguna clave
+> aleatoria heredada —la etapa `amplification` estrena el catálogo
+> `f4-technical-v5` y solo ella lo usa—, ningún esquema publicado, y ningún
+> artefacto de un escenario que no la declare, anclado desde ahora por una
+> **huella congelada** y no solo por comparar dos ejecuciones entre sí. Lo que
+> **sigue pendiente** es el **tartamudeo heredable por linaje**, de la entrega
+> 4: hasta que exista, la preparación amplificada **rechaza** los escenarios que
+> declaran loci de repetición, porque tartamudearían solo con la parte de base y
+> subestimarían lo medido entre un 14 % y un 28 %. El modelo queda fijado por
+> **DTC-091**.
 
 **Hitos:**
 

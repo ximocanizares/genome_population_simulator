@@ -336,9 +336,10 @@ class DerivedMeanPairsTest(unittest.TestCase):
 
         Se compara con una tolerancia y no con igualdad exacta a propósito: la
         interfaz usa la exponencial del sistema y el simulador la de la
-        librería fijada, y el contrato solo obliga a la segunda. Lo que la
-        comparación caza es un **método distinto**, que se desviaría muchísimo
-        más que esto.
+        librería fijada, y el contrato solo obliga a la segunda. **Se midió**:
+        de sesenta fracciones barridas, dieciocho difieren en los últimos bits.
+        Lo que la comparación caza es un **algoritmo distinto**, que se
+        desviaría muchísimo más que esto. La autoridad es el número publicado.
         """
 
         toml = render_general_toml(parse_general_toml(RUNNABLE))

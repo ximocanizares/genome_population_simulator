@@ -182,7 +182,9 @@ def pcr_panel(
 
     La `m` derivada se muestra junto a la fracción declarada porque es el
     parámetro que de verdad entra en el modelo: enseñarla evita que el usuario
-    pida una fracción sin ver qué está pidiendo.
+    pida una fracción sin ver qué está pidiendo. **Es orientativa**: la calcula
+    la interfaz con el mismo algoritmo pero con la exponencial del sistema, y
+    la que gobierna la ejecución es la que publica la configuración efectiva.
     """
     return mo.vstack(
         [

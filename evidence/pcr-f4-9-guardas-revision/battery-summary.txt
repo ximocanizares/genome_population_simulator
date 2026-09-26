@@ -1,2 +1,0 @@
-passed=1413 failed=0 ignored=11
-exit=0

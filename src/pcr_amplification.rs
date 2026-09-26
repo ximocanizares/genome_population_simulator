@@ -272,6 +272,7 @@ pub fn invert_duplicate_fraction(
 /// `libm`: no hay ni factoriales ni potencias.
 #[must_use]
 pub fn early_copy_distribution(early_cycles: u32, efficiency: f64) -> Vec<f64> {
+    EARLY_COPY_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let states = 1_usize << early_cycles;
     let mut distribution = vec![0.0_f64; states];
     distribution[0] = 1.0;
@@ -295,6 +296,29 @@ pub fn early_copy_distribution(early_cycles: u32, efficiency: f64) -> Vec<f64> {
         distribution = next;
     }
     distribution
+}
+
+/// Cuántas veces se ha construido la distribución de los primeros ciclos.
+///
+/// # Por qué un contador de verdad y no una búsqueda en el texto
+///
+/// La primera guarda de esta propiedad era **léxica**: comprobaba que el
+/// muestreador no nombrara estas funciones. Se midió que **se evade importando
+/// la función con otro nombre**, con las dos baterías en verde; es decir, el
+/// defecto que la guarda existía para impedir podía volver sin que muriera
+/// nada. Un contador no se evade renombrando: cuenta construcciones, se llamen
+/// como se llamen.
+///
+/// La tabla depende **solo** de los ciclos explícitos y de la eficiencia, y la
+/// eficiencia toma a lo sumo `Q_MAX` valores, de modo que una tanda entera no
+/// puede construirla más veces que clases tenga.
+static EARLY_COPY_BUILDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Lectura del contador de construcciones. Vive para que una prueba pueda
+/// comprobar que la tabla se construye una vez por clase y no una por familia.
+#[must_use]
+pub fn early_copy_build_count() -> u64 {
+    EARLY_COPY_BUILDS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Triángulo de Pascal ponderado: `rows[n][k] = C(n,k)·e^k·(1−e)^(n−k)`.

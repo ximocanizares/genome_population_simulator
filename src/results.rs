@@ -1438,7 +1438,12 @@ pub fn validate_effective_config_against_manifest_bytes(
     manifest_path: &Path,
     manifest_bytes: &[u8],
 ) -> Result<(), Diagnostic> {
-    match effective_schema_version(effective_path, effective_bytes)? {
+    // El esquema que el diagnóstico cita sale de la versión que el documento
+    // **declara**, no de una constante. Denunciar siempre el de la versión 4
+    // mandaba a mirar un fichero que no era el suyo en cuanto el escenario
+    // declaraba repeticiones.
+    let version = effective_schema_version(effective_path, effective_bytes)?;
+    match version {
         EFFECTIVE_CONFIG_SCHEMA_VERSION | EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS => {
             validate_effective_config_v3_against_manifest_bytes(
                 effective_path,
@@ -1446,8 +1451,56 @@ pub fn validate_effective_config_against_manifest_bytes(
                 manifest_path,
                 manifest_bytes,
             )
+            .map_err(|error| {
+                retag_effective_config_schema(
+                    error,
+                    effective_config_schema_file_for(version),
+                    effective_path,
+                )
+            })
         }
         _ => unreachable!("effective_schema_version only returns supported versions"),
+    }
+}
+
+/// El esquema que hay que citar en un diagnóstico de la configuración
+/// efectiva, según la versión que el documento declara.
+fn effective_config_schema_file_for(version: &str) -> &'static str {
+    if version == EFFECTIVE_CONFIG_SCHEMA_VERSION_WITH_REPEATS {
+        "effective-config-v6.schema.json"
+    } else {
+        "effective-config-v4.schema.json"
+    }
+}
+
+/// Reescribe el esquema citado, **solo** si el diagnóstico habla de la
+/// configuración efectiva.
+///
+/// # Por qué las dos condiciones y no solo una
+///
+/// Esta validación mira **dos** documentos, y sus dos familias de diagnóstico
+/// viajan por el mismo `Result`. Retiquetar por el código solo convertiría un
+/// rechazo del manifiesto general en uno que cita el esquema de la
+/// configuración efectiva: cambiaría un destino equivocado por otro. Se exige
+/// que coincidan la **ruta** y la **familia** del esquema ya citado.
+fn retag_effective_config_schema(
+    error: Diagnostic,
+    schema: &'static str,
+    effective_path: &Path,
+) -> Diagnostic {
+    if error.code() != "GPS-FMT-006" {
+        return error;
+    }
+    let context = error.context();
+    let habla_de_la_efectiva = context.get("path").map(String::as_str)
+        == Some(effective_path.display().to_string().as_str())
+        && context
+            .get("schema")
+            .is_some_and(|nombre| nombre.starts_with("effective-config-"));
+    if habla_de_la_efectiva {
+        retag_format_schema(error, schema)
+    } else {
+        error
     }
 }
 
