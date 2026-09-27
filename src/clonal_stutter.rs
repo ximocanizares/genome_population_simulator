@@ -59,7 +59,7 @@ use crate::stutter::{
 /// Versión del algoritmo, publicada en la configuración efectiva y en el
 /// manifiesto. Cambiar la genealogía o la derivación obliga a estrenar
 /// versión.
-pub const CLONAL_STUTTER_ALGORITHM: &str = "clonal-stutter-v1";
+pub const CLONAL_STUTTER_ALGORITHM: &str = "clonal-stutter-v2";
 
 /// La derivación, escrita tal cual para que viaje con los números.
 pub const CLONAL_STUTTER_FORMULA: &str =
@@ -208,14 +208,57 @@ impl ClonalStutterSettings {
         self.cycles
     }
 
-    /// Probabilidad por ciclo de una longitud de motivo, o `None` fuera del
-    /// tramo calibrado. No se extrapola.
+    /// Probabilidad por ciclo de una longitud de motivo **a la longitud de
+    /// tracto de referencia**, o `None` fuera del tramo calibrado.
+    ///
+    /// Es la que publica el manifiesto, y la que se usaba antes de que el
+    /// modelo dependiera de la longitud del tracto. El sorteo usa
+    /// [`Self::probability_for`], que es esta modulada.
     #[must_use]
     pub fn probability_for_motif_length(&self, motif_length: u64) -> Option<f64> {
         usize::try_from(motif_length)
             .ok()
             .filter(|length| (1..=STUTTER_MOTIF_LENGTH_MAX).contains(length))
             .map(|length| self.per_cycle[length - 1])
+    }
+
+    /// **La probabilidad por ciclo que el sorteo usa de verdad**, ya modulada
+    /// por la longitud del tracto.
+    ///
+    /// # Por qué se modulan las DOS columnas con el MISMO factor
+    ///
+    /// Porque de la diferencia entre ellas es de donde sale esta
+    /// probabilidad, y esa derivación es un modelo ya cerrado. Modular las dos
+    /// por el mismo factor `m` deja el cociente entre columnas **independiente
+    /// de la longitud**, que es lo que la derivación supone, y hace que la
+    /// composición siga cerrando **exactamente** a cualquier longitud:
+    ///
+    /// ```text
+    /// 1 − (1 − r_sin·m)(1 − r_pcr(m)) = r_con·m
+    /// ```
+    ///
+    /// Modular solo la parte de base rompería esa identidad en todas las
+    /// longitudes salvo la de referencia.
+    ///
+    /// # La sustitución del autor prevalece, y no se modula
+    ///
+    /// Misma regla que la tasa de base: quien sustituye la probabilidad por
+    /// ciclo la ha elegido él, y la curva no tiene nada que corregirle.
+    #[must_use]
+    pub fn probability_for(&self, motif_length: u64, run_units: u64) -> Option<f64> {
+        let index = usize::try_from(motif_length)
+            .ok()
+            .filter(|length| (1..=STUTTER_MOTIF_LENGTH_MAX).contains(length))?
+            - 1;
+        if self.source[index] == PerCycleSlipSource::Declared {
+            return Some(self.per_cycle[index]);
+        }
+        let factor = crate::stutter::tract_length_factor(motif_length, run_units);
+        Some(per_cycle_slip_probability(
+            STUTTER_WITH_PCR_MOTIF_LENGTH_RATES[index] * factor,
+            STUTTER_DEFAULT_MOTIF_LENGTH_RATES[index] * factor,
+            self.cycles,
+        ))
     }
 }
 
@@ -673,10 +716,127 @@ fn draw_cycle_step(
 #[cfg(test)]
 mod tests {
     use super::{
-        ClonalStutterSettings, divergence_weights, effective_settings_document,
+        ClonalStutterSettings, STUTTER_DEFAULT_MOTIF_LENGTH_RATES,
+        STUTTER_WITH_PCR_MOTIF_LENGTH_RATES, divergence_weights, effective_settings_document,
         per_cycle_slip_probability,
     };
     use std::collections::BTreeMap;
+
+    /// **La composición sigue cerrando EXACTAMENTE a cualquier longitud de
+    /// tracto, no solo en la de referencia.**
+    ///
+    /// # Qué propiedad se comprueba y por qué importa
+    ///
+    /// El modelo se apoya en que la parte de base y la de PCR se compongan
+    /// devolviendo la fracción medida: `1 − (1−r_sin)(1−r_pcr) = r_con`. Al
+    /// añadir la dependencia con la longitud del tracto esa identidad podía
+    /// romperse en todas las longitudes salvo una. No se rompe **porque las
+    /// dos columnas se modulan con el mismo factor**, y eso es exactamente lo
+    /// que esta prueba fija.
+    ///
+    /// **Debe fallar contra** una entrega que module solo la columna de base,
+    /// solo la de con PCR, o que use factores distintos para cada una: en los
+    /// tres casos la recomposición se separa de `r_con · m`.
+    ///
+    /// La tolerancia es de **redondeo puro**, `1e-9` relativo, y no de modelo:
+    /// la identidad pasa dos veces por la potencia de `libm` —una al repartir
+    /// el incremento entre los ciclos y otra al volver a acumularlo—, y ese
+    /// viaje de ida y vuelta deja un residuo medido de unas `5e-11`. No es
+    /// holgura para el modelo: las entregas que esta prueba caza se separan por
+    /// órdenes de magnitud, no por decimales.
+    #[test]
+    fn the_composition_closes_at_every_tract_length_not_only_at_the_reference() {
+        let cycles = 10_u32;
+        let settings = ClonalStutterSettings::new(cycles, &BTreeMap::new()).expect("parámetros");
+        let mut checked = 0_u32;
+        let mut moved = 0_u32;
+        let mut worst = 0.0_f64;
+        for (motif_length, units_range) in [(1_u64, 3..=18_u64), (2, 3..=20)] {
+            for units in units_range {
+                let index = motif_length as usize - 1;
+                let factor = crate::stutter::tract_length_factor(motif_length, units);
+                let modulated_with = STUTTER_WITH_PCR_MOTIF_LENGTH_RATES[index] * factor;
+                let modulated_without = STUTTER_DEFAULT_MOTIF_LENGTH_RATES[index] * factor;
+                let per_cycle = settings
+                    .probability_for(motif_length, units)
+                    .expect("probabilidad por ciclo");
+                // Acumular la probabilidad por ciclo sobre los ciclos devuelve
+                // el incremento propio de la PCR...
+                let accumulated = 1.0 - libm::pow(1.0 - per_cycle, f64::from(cycles));
+                // ...y componerlo con la parte de base tiene que devolver la
+                // fracción medida, ya modulada.
+                let recomposed = 1.0 - (1.0 - modulated_without) * (1.0 - accumulated);
+                let relative = (recomposed - modulated_with).abs() / modulated_with;
+                assert!(
+                    relative <= 1e-9,
+                    "motivo de {motif_length} pb, {units} unidades: recompone {recomposed} \
+                     y lo medido modulado es {modulated_with}, error relativo {relative}"
+                );
+                worst = worst.max(relative);
+                checked += 1;
+                if factor < 1.0 {
+                    moved += 1;
+                }
+            }
+        }
+        // **Control positivo.** Si la modulación no moviera nada, la identidad
+        // se cumpliría sola y esta prueba no distinguiría ninguna entrega.
+        assert!(checked >= 30, "el barrido tiene que ser amplio: {checked}");
+        assert!(
+            moved >= 20,
+            "la mayoría de las longitudes tienen que estar moduladas de verdad: {moved}"
+        );
+        // Y la tolerancia no está tapando nada: el peor error medido queda muy
+        // por debajo de ella, y las entregas que esta prueba tiene que cazar se
+        // separan por **factores**, no por decimales. Modular solo la columna
+        // con PCR, por ejemplo, la deja por debajo de la de sin PCR en los
+        // tractos cortos, con lo que el incremento se anula y la recomposición
+        // devuelve **1,43·10⁻⁶** donde tendría que devolver **9,03·10⁻⁶**: un
+        // **factor 6,3**, siete órdenes de magnitud por encima de la
+        // tolerancia. (Las cifras de este comentario están medidas; una
+        // versión anterior decía «0,027 frente a 0,0000090, un factor 3000» y
+        // era falsa, porque olvidaba que la recomposición usa la columna sin
+        // PCR **ya modulada**.)
+        assert!(
+            worst < 1e-9,
+            "el peor error relativo medido es {worst}, que ya no es redondeo"
+        );
+    }
+
+    /// **La sustitución de la probabilidad por ciclo PREVALECE y NO se
+    /// modula.**
+    ///
+    /// Es la gemela clonal de la prueba del camino de base. Existía la del
+    /// camino de base y esta no, de modo que la prevalencia del lado clonal
+    /// solo moría **de rebote**, y una entrega que modulara la sustitución
+    /// declarada podía pasar sin que ninguna prueba la nombrara.
+    ///
+    /// **Debe fallar contra** una entrega que aplique la curva también a la
+    /// probabilidad declarada: con cinco unidades de dinucleótido el factor
+    /// vale 0,0038 y el 0,5 declarado se quedaría en 0,0019.
+    #[test]
+    fn a_declared_per_cycle_probability_prevails_and_is_not_modulated() {
+        let mut declared = BTreeMap::new();
+        declared.insert(2_u64, 0.5);
+        let settings = ClonalStutterSettings::new(10, &declared).expect("parámetros");
+        for units in [1_u64, 5, 13, 17, 40] {
+            assert_eq!(
+                settings.probability_for(2, units).expect("probabilidad"),
+                0.5,
+                "la sustitución vale lo mismo mida lo que mida el tracto"
+            );
+        }
+        // **Control positivo**: la longitud de motivo **no** sustituida sí se
+        // modula, y a cinco unidades queda muy por debajo de su valor en el
+        // ancla. Sin este control, una entrega que no modulara nada pasaría el
+        // bucle de arriba.
+        let anchor = settings.probability_for(1, 15).expect("en el ancla");
+        let short = settings.probability_for(1, 5).expect("tracto corto");
+        assert!(
+            short < anchor / 100.0,
+            "la longitud de motivo sin sustituir sí tiene que modularse:              {short} frente a {anchor}"
+        );
+    }
 
     /// **F4.10.3 (a). Las probabilidades por ciclo coinciden a tres cifras con
     /// el cálculo hecho a mano desde las dos columnas.**

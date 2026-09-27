@@ -36,6 +36,7 @@ documenta mejor.
 | DT-006 | El sorteo del inserto por rechazo es inutilizable cuando la copia más larga acerca el máximo al mínimo del perfil | Media | 24/09/2026 | Abierta, con guarda de admisión (25/09/2026) |
 | DT-007 | Ningún diagnóstico público nuevo puede publicarse en un manifiesto del recorrido general | Baja | 25/09/2026 | Abierta |
 | DT-008 | El orden entre el paso de linaje y la decisión de base no lo separaba ninguna prueba | Baja | 26/09/2026 | **Cerrada (26/09/2026)** |
+| DT-009 | Las dos fuentes de la calibración discrepan en cuánto multiplica la PCR el tartamudeo de los homopolímeros | Media | 27/09/2026 | Abierta |
 
 ---
 
@@ -57,6 +58,15 @@ mediciones, hechas con el mismo método y con la misma regla de recuento:
 | Oráculo de aceptación del paquete (`src/f5_oracle.rs`) | 365 | 252 | 365 | **168** |
 | Oráculo semántico del VCF (`src/vcf_semantic_validation.rs`) | 77 | 39 | 98 | **25** |
 | Auditoría de identidad y publicación (`src/f5_closure.rs`) | 42 | 11 | 42 | **5** |
+
+**La puerta solo mira estos tres módulos**, y conviene tenerlo presente al
+leer las cifras: no mira `src/results.rs` ni `src/event_manifest.rs`, que son
+los que comprueban la configuración efectiva y el manifiesto de evento. El
+27/09/2026 una revisión adversarial encontró ahí ciento treinta líneas de
+guarda **sin ejercitar como rechazo por ninguna prueba** —sustituirlas enteras
+por una línea dejaba pasar la batería completa—, y esta puerta no podía
+enterarse porque no mira ese fichero. Se cubrieron con una prueba de mutación;
+ampliar la puerta a esos dos módulos sigue sin decidir.
 
 Tres advertencias sobre la comparación, para que nadie la lea mal:
 
@@ -495,3 +505,48 @@ distingue tendrá que reutilizar un código existente y llevar el matiz en
 `detail`, exactamente como hizo DT-006, o abrir una versión nueva del esquema
 del manifiesto general y del de evento técnico —una decisión de arquitectura,
 no de implementación, porque cambia un contrato que DTC-036 declaró cerrado—.
+
+---
+
+## DT-009. Las dos fuentes discrepan en cuánto multiplica la PCR el tartamudeo de los homopolímeros
+
+**Detectada el 27 de septiembre de 2026**, al ir a las fuentes originales para
+decidir la longitud de tracto de referencia de la dependencia con la longitud
+del tracto. No se ha cambiado nada por ella: queda registrada para decidirse
+aparte, porque toca un modelo ya commiteado.
+
+### Las dos cifras, y quién dice cada una
+
+| Motivo | Gymrek (2016), tabla 1 | Fungtammasan y col. (2015), texto del artículo |
+|---|---|---|
+| Mononucleótido | **6,30×** (0,17 frente a 0,027) | **~2,5×** («la diferencia aumenta hasta ~11 pb, tras lo cual se estabiliza en una diferencia de ~2,5 veces») |
+| Dinucleótido | **3,45×** (0,038 frente a 0,011) | **~3,6×** («aumenta hasta ~16 pb, estabilizándose en ~3,6 veces») |
+
+En dinucleótidos concuerdan bien. En mononucleótidos difieren por un factor
+**2,5**, y no es una lectura a ojo de una figura: las dos cifras están escritas
+con todas las letras en el texto de sus artículos.
+
+### Por qué importa
+
+Porque el tartamudeo clonal —DTC-092, el modelo que reparte entre los ciclos de
+la PCR el incremento que la amplificación añade— **despeja su probabilidad por
+ciclo exactamente de esa diferencia**, con
+`r_pcr = 1 − (1−r_con)/(1−r_sin)`. Si el multiplicador real de los
+homopolímeros fuera 2,5 y no 6,30, la probabilidad por ciclo que el simulador
+usa hoy para los homopolímeros estaría sobrestimada.
+
+### Qué no se ha hecho, y por qué
+
+**No se ha tocado nada.** El proyecto adopta las cifras de Gymrek porque son las
+que la calibración declara como fuente de la tabla por longitud de motivo, y
+cambiarlas sería rehacer un modelo cerrado a partir de una frase de otro
+artículo, medida sobre otra muestra y con otro programa de genotipado. La
+elección corresponde al responsable, no a quien encontró la discrepancia.
+
+### Qué haría falta para cerrarla
+
+Decidir cuál de las dos fuentes manda en el multiplicador de los homopolímeros,
+o declarar que la discrepancia entra dentro de la tosquedad ya declarada de las
+tasas por ciclo. Si se decidiera por Fungtammasan, habría que rehacer la
+columna sin PCR de los mononucleótidos o la de con PCR, y con ella las seis
+probabilidades por ciclo publicadas.

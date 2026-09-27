@@ -1284,7 +1284,9 @@ impl<'a> WgsPairedEndSampler<'a> {
                 continue;
             }
             let motif_length = observed.longest_run_motif_length();
-            let Some(probability) = clonal.probability_for_motif_length(motif_length) else {
+            let Some(probability) =
+                clonal.probability_for(motif_length, observed.longest_run_units())
+            else {
                 // Longitud de motivo fuera del tramo calibrado. No se
                 // extrapola; la admisión ya lo rechaza antes de llegar aquí.
                 continue;

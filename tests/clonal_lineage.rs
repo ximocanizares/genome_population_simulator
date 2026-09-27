@@ -541,6 +541,20 @@ fn base_stutter_with_weights(rate: f64, weights: [f64; 4]) -> String {
     )
 }
 
+/// Sustitución de la tasa de un locus, que **prevalece sin modular**.
+///
+/// Hace falta en los fixtures cuyo tracto es corto **a propósito** —el régimen
+/// en el que la guarda de viabilidad muerde y las dos partes dejan de
+/// conmutar—. Desde que el modelo depende de la longitud del tracto, poner la
+/// tabla por longitud de motivo a uno ya no significa «siempre»: en un tracto
+/// de cuatro o cinco unidades la curva vale unas 266 veces menos que en su
+/// referencia. La sustitución por locus es la forma que el modelo tiene de
+/// decir «este locus tartamudea con probabilidad `rate`, mida lo que mida», y
+/// es justo lo que estos fixtures quieren decir.
+fn locus_rate(locus_id: &str, rate: f64) -> String {
+    format!("\n[[technical_event.stutter.locus_rates]]\nlocus_id = \"{locus_id}\"\nrate = {rate}\n")
+}
+
 /// Bloque de la amplificación con la probabilidad por ciclo sustituida.
 fn amplified(duplicate_fraction: f64, cycles: u32, per_cycle: Option<f64>) -> String {
     let substitution = per_cycle.map_or_else(String::new, |probability| {
@@ -682,17 +696,32 @@ fn declaring_a_locus_to_the_left_of_another_does_not_move_its_slips() {
 ///
 /// Un ciclo con probabilidad 1 da un resbalón de linaje; la tasa de base a 1
 /// da otro; los dos pesos dejan una sola alternativa, `−1`. El tracto
-/// verdadero tiene diez unidades y **todas** las lecturas tienen que mostrar
-/// ocho.
+/// verdadero tiene **dieciocho unidades** y **todas** las lecturas tienen que
+/// mostrar dieciséis.
+///
+/// # Por qué dieciocho y no diecisiete
+///
+/// Porque el paso de base se decide **después** del de linaje y **sobre la
+/// molécula ya actualizada**: cuando le toca, el tracto tiene una unidad
+/// menos. Con dieciocho verdaderas, la decisión de base cae sobre diecisiete,
+/// que son 34 pares de base, la **longitud de tracto de referencia** de los
+/// dinucleótidos, donde el factor de modulación vale exactamente `1.0`. Así la
+/// tasa de base a uno significa de verdad «siempre».
+///
+/// Con diecisiete verdaderas la decisión de base caía sobre dieciséis, donde
+/// el factor vale 0,794, y una de cada cinco lecturas se quedaba sin el
+/// segundo paso. Se midió: la prueba falló exactamente así. Es un recordatorio
+/// útil de que la modulación se lee **en el momento de decidir**, no al
+/// principio.
 ///
 /// **Debe fallar contra** una entrega que aplique solo una de las dos partes,
-/// que daría nueve.
+/// que daría diecisiete.
 #[test]
 fn the_two_parts_add_up_on_every_published_read() {
-    let sequences = [("chr1", bases_with_tract(&"CA".repeat(10)))];
+    let sequences = [("chr1", bases_with_tract(&"CA".repeat(18)))];
     let published = run(&Scenario {
         sequences: &sequences,
-        loci: locus_block("STR-1", "chr1", 60, "CA", &"CA".repeat(10)),
+        loci: locus_block("STR-1", "chr1", 60, "CA", &"CA".repeat(18)),
         coverage: 300,
         ploidy: 1,
         event_extra: format!("{}{}", amplified(0.0, 1, Some(1.0)), base_stutter(1.0, -1)),
@@ -705,8 +734,8 @@ fn the_two_parts_add_up_on_every_published_read() {
     for read in &reads {
         assert_eq!(
             longest_run_units(read, b"CA"),
-            8,
-            "diez unidades menos el paso de linaje menos el de base son ocho"
+            16,
+            "dieciocho unidades menos el paso de linaje menos el de base son dieciséis"
         );
     }
 }
@@ -749,7 +778,12 @@ fn the_longest_run_is_recomputed_between_the_two_steps() {
         loci: locus_block("STR-1", "chr1", 60, "CA", &tract),
         coverage: 300,
         ploidy: 1,
-        event_extra: format!("{}{}", amplified(0.0, 1, Some(1.0)), base_stutter(1.0, -3)),
+        event_extra: format!(
+            "{}{}{}",
+            amplified(0.0, 1, Some(1.0)),
+            base_stutter(1.0, -3),
+            locus_rate("STR-1", 1.0)
+        ),
     });
     let reads = published.first_reads();
     assert!(!reads.is_empty());
@@ -810,9 +844,10 @@ fn the_lineage_step_goes_before_the_base_decision() {
         coverage: 300,
         ploidy: 1,
         event_extra: format!(
-            "{}{}",
+            "{}{}{}",
             amplified(0.0, 1, Some(1.0)),
-            base_stutter_with_weights(1.0, [0.9, 0.0, 0.0, 0.1])
+            base_stutter_with_weights(1.0, [0.9, 0.0, 0.0, 0.1]),
+            locus_rate("STR-1", 1.0)
         ),
     });
     let reads = published.first_reads();
@@ -1091,10 +1126,14 @@ fn the_applied_lineage_count_matches_what_the_reads_show() {
 /// con familias de tamaño 1.
 #[test]
 fn large_families_inherit_slips() {
-    let sequences = [("chr1", bases_with_tract(&"CA".repeat(10)))];
+    // Diecisiete unidades: la longitud de tracto de referencia, donde el
+    // factor de modulación vale 1. Esta prueba usa la probabilidad por ciclo
+    // **derivada** de las dos columnas, no una sustituida, y con un tracto más
+    // corto la modulación la reduciría hasta dejar sin resbalones el corpus.
+    let sequences = [("chr1", bases_with_tract(&"CA".repeat(17)))];
     let published = run(&Scenario {
         sequences: &sequences,
-        loci: locus_block("STR-1", "chr1", 60, "CA", &"CA".repeat(10)),
+        loci: locus_block("STR-1", "chr1", 60, "CA", &"CA".repeat(17)),
         coverage: 600,
         ploidy: 1,
         event_extra: format!("{}{}", amplified(0.5, 10, None), base_stutter(0.011, -1)),

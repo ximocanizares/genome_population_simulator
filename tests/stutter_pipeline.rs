@@ -373,7 +373,37 @@ fn roomy_scenario(tract: &str, tract_offset: usize, stutter: &str, coverage: u32
     scenario_with_length(tract, tract_offset, stutter, coverage, 1200)
 }
 
-/// Bloque de tartamudeo con la tasa del dinucleótido sustituida.
+/// Bloque de tartamudeo que fija la tasa del locus del fixture a `rate`.
+///
+/// # Por qué la sustitución por locus y no solo la tabla por longitud de motivo
+///
+/// Estos fixtures necesitan que el tartamudeo sea **cierto**, o imposible, para
+/// poder ejercitar otra cosa: que los dos mates coincidan, que el paso caiga en
+/// la tirada más larga, que la verdad no cambie. Desde que el modelo depende de
+/// la longitud del tracto, poner la **tabla** a uno ya no significa «siempre»:
+/// el tracto de estos fixtures es `(CA)5`, diez pares de base, el extremo
+/// inferior del tramo medido, donde la curva vale unas 266 veces menos que en
+/// la referencia. Una tabla a uno daría ahí 0,0038, y estas pruebas dejarían de
+/// ejercitar lo que dicen cubrir sin que nadie lo notara.
+///
+/// La sustitución por locus es la forma que el modelo tiene de decir «este
+/// locus tartamudea con probabilidad `rate`, sea cual sea su longitud», y
+/// **prevalece sin modular** a propósito. La tabla se deja declarada en el
+/// mismo valor para que el bloque siga siendo legible, pero la que manda es la
+/// sustitución.
+///
+/// **Una de las pruebas que usa este ayudante sí trata sobre la tasa**, y no
+/// es una excepción menor: la que comprueba que el manifiesto publica
+/// recuentos **realizados** y no esperados necesita el valor intermedio 0,5
+/// para que las dos cifras se separen de verdad. Sin la sustitución, su tracto
+/// se quedaría en un factor 0,0038 y la prueba se volvería **vacía**: no
+/// tartamudearía nada y la identidad entre la distribución de pasos y el
+/// recuento realizado se cumpliría con los dos lados a cero. La sustitución la
+/// rescata, y está bien que lo haga.
+///
+/// Quien quiera ver la tabla y su modulación ejercitadas tiene las pruebas de
+/// `tract_length_dependence` en `src/stutter.rs` y en
+/// `tests/stutter_tract_length.rs`.
 fn stutter_block(rate: f64, steps: &str) -> String {
     format!(
         r#"
@@ -382,6 +412,10 @@ enabled = true
 
 [[technical_event.stutter.motif_length_rates]]
 motif_length_bases = 2
+rate = {rate}
+
+[[technical_event.stutter.locus_rates]]
+locus_id = "STR-1"
 rate = {rate}
 {steps}"#
     )
@@ -717,7 +751,7 @@ fn the_event_manifest_publishes_realized_counts_with_their_provenance() {
     assert_eq!(event["schema_version"], "3");
     assert_eq!(event["rng_catalog"], "f4-technical-v4");
     let stutter = &event["artifacts"]["stutter"];
-    assert_eq!(stutter["algorithm"], "stutter-v1");
+    assert_eq!(stutter["algorithm"], "stutter-v2");
     assert_eq!(stutter["run_length_coefficient"]["calibrated"], false);
     assert_eq!(stutter["run_length_coefficient"]["value"], 0.0);
     assert_eq!(stutter["calibration"]["species"], "human");

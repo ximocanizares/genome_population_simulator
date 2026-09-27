@@ -65,8 +65,19 @@ static NONCE: AtomicU64 = AtomicU64::new(0);
 /// Moléculas que cubren cada tracto. Ver la nota de tamaño muestral de arriba.
 const MOLECULES: u64 = 6_000;
 /// Unidades verdaderas del homopolímero y del dinucleótido.
-const TRUE_HOMOPOLYMER_UNITS: u64 = 12;
-const TRUE_DINUCLEOTIDE_UNITS: u64 = 10;
+///
+/// **Son exactamente las longitudes de tracto de referencia**, y eso es lo que
+/// convierte esta prueba en la demostración de que el modelo **no cuenta dos
+/// veces** la longitud del tracto. A la referencia el factor de modulación vale
+/// exactamente `1.0`, de modo que las fracciones que las lecturas muestran
+/// tienen que salir **idénticas a las medidas** —0,17 y 0,038 con PCR, 0,027 y
+/// 0,011 sin ella—. Si alguien multiplicara la curva encima de la tasa en vez
+/// de normalizarla, o la sumara, estas cuatro cifras se moverían.
+///
+/// Quince unidades en el homopolímero son 15 pares de base; diecisiete en el
+/// dinucleótido son 34. Las dos son el tope del tramo medido de su curva.
+const TRUE_HOMOPOLYMER_UNITS: u64 = 15;
+const TRUE_DINUCLEOTIDE_UNITS: u64 = 17;
 /// `z` de la cola del 2,5 %.
 const Z_TWO_SIDED: f64 = 1.959_964;
 
@@ -183,9 +194,9 @@ fn stuttered_fraction(reads: &[Vec<u8>], motif: &[u8], truth: u64) -> (u64, u64)
 /// `s ∈ [0, 300−I]`, de modo que `s ≤ 50`. La lectura R1 es
 /// `copia[s, s+150)`. Un tracto que ocupa `[a, a+T)` cabe entera en R1 para
 /// **todo** comienzo posible exactamente cuando `a ≥ 50` y `a + T ≤ 150`.
-/// Los dos tractos empiezan en 60 y en 76 y acaban, con la mayor expansión
-/// posible, en 73 y en 98. Ninguno de los dos números es redondo por
-/// casualidad.
+/// Los dos tractos empiezan en 60 y en 79 y acaban, con la mayor expansión
+/// posible —una unidad más—, en 76 y en 115. Ninguno de los dos números es
+/// redondo por casualidad.
 fn reference_bases() -> String {
     let homopolymer = "A".repeat(TRUE_HOMOPOLYMER_UNITS as usize);
     let dinucleotide = "CA".repeat(TRUE_DINUCLEOTIDE_UNITS as usize);
@@ -264,7 +275,7 @@ length = 300
 id = "STR-HOMO"
 sequence = "chr1"
 start = 61
-end = 72
+end = 75
 motif = "A"
 
 [[reference.repeat_loci.alleles]]
@@ -274,8 +285,8 @@ frequency = 1.0
 [[reference.repeat_loci]]
 id = "STR-DI"
 sequence = "chr1"
-start = 77
-end = 96
+start = 80
+end = 113
 motif = "CA"
 
 [[reference.repeat_loci.alleles]]
@@ -444,7 +455,7 @@ fn the_amplified_manifest_publishes_the_derivation_and_the_lineage_counts() {
     let pcr = &event["artifacts"]["pcr"];
     assert_eq!(pcr["rng_catalog"], "f4-technical-v6");
     let clonal = &pcr["stutter"];
-    assert_eq!(clonal["algorithm"], "clonal-stutter-v1");
+    assert_eq!(clonal["algorithm"], "clonal-stutter-v2");
     assert_eq!(clonal["cycles"], 10);
     assert_eq!(
         clonal["coarse"], true,

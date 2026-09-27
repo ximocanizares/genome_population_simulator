@@ -1384,7 +1384,7 @@
          ],
          "properties": {
           "algorithm": {
-           "const": "clonal-stutter-v1"
+           "const": "clonal-stutter-v2"
           },
           "cycles": {
            "type": "integer",
@@ -1564,6 +1564,7 @@
       "rng_catalog",
       "calibration",
       "motif_length_rates",
+      "tract_length_dependence",
       "run_length_coefficient",
       "step_weights",
       "locus_parameters",
@@ -1576,7 +1577,7 @@
        "const": true
       },
       "algorithm": {
-       "const": "stutter-v1"
+       "const": "stutter-v2"
       },
       "rng_catalog": {
        "const": "f4-technical-v4"
@@ -1632,6 +1633,110 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+         }
+        }
+       }
+      },
+      "tract_length_dependence": {
+       "type": "object",
+       "additionalProperties": false,
+       "description": "Dependencia con la longitud del tracto. Es el efecto mas fuerte que hay sobre el tartamudeo y NO es lineal: a lo largo del tramo medido de los mononucleotidos la fraccion sube cerca de 19000 veces. Por eso es una tabla interpolada en escala logaritmica, normalizada en el tope del tramo medido para que module la tasa por longitud de motivo solo hacia abajo y nunca por encima de ella.",
+       "required": [
+        "source",
+        "coarse",
+        "coarse_reason",
+        "extrapolated",
+        "by_motif_length"
+       ],
+       "properties": {
+        "source": {
+         "type": "string",
+         "minLength": 1
+        },
+        "coarse": {
+         "const": true,
+         "description": "SIEMPRE cierto: la curva se leyo a ojo de una figura en escala logaritmica, con una incertidumbre de unas +/-0,15 unidades logaritmicas, que en lineal es del orden del +/-40 por ciento."
+        },
+        "coarse_reason": {
+         "type": "string",
+         "minLength": 1
+        },
+        "extrapolated": {
+         "const": false,
+         "description": "SIEMPRE falso: fuera del tramo medido se mantiene el valor del extremo. Como el ancla es el extremo superior, un tracto de 30 unidades no tartamudea mas que uno de 15."
+        },
+        "by_motif_length": {
+         "type": "array",
+         "minItems": 6,
+         "maxItems": 6,
+         "description": "Por longitud de motivo: si tiene curva medida, su longitud de tracto de referencia y su tramo medido en unidades. Los motivos de tres a seis pares de base NO tienen curva medida y por tanto no tienen dependencia ninguna con la longitud del tracto.",
+         "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+           "motif_length_bases",
+           "measured",
+           "reference_tract_bases",
+           "measured_units_min",
+           "measured_units_max",
+           "factors"
+          ],
+          "properties": {
+           "motif_length_bases": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6
+           },
+           "measured": {
+            "type": "boolean"
+           },
+           "reference_tract_bases": {
+            "type": [
+             "integer",
+             "null"
+            ],
+            "minimum": 1
+           },
+           "measured_units_min": {
+            "type": [
+             "integer",
+             "null"
+            ],
+            "minimum": 1
+           },
+           "measured_units_max": {
+            "type": [
+             "integer",
+             "null"
+            ],
+            "minimum": 1
+           },
+           "factors": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 64,
+            "description": "La curva entera, un factor por numero de unidades dentro del tramo medido. Se publica completa para que la modulacion pueda rehacerse sin este programa. Vacia cuando esa longitud de motivo no tiene curva medida.",
+            "items": {
+             "type": "object",
+             "additionalProperties": false,
+             "required": [
+              "units",
+              "factor"
+             ],
+             "properties": {
+              "units": {
+               "type": "integer",
+               "minimum": 1
+              },
+              "factor": {
+               "type": "number",
+               "minimum": 0,
+               "maximum": 1
+              }
+             }
+            }
+           }
+          }
          }
         }
        }

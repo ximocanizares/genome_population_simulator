@@ -2593,6 +2593,7 @@ fn validate_stutter_manifest(value: &Value, path: &Path) -> Result<(), Diagnosti
             "rng_catalog",
             "calibration",
             "motif_length_rates",
+            "tract_length_dependence",
             "run_length_coefficient",
             "step_weights",
             "locus_parameters",
@@ -2665,6 +2666,148 @@ fn validate_stutter_manifest(value: &Value, path: &Path) -> Result<(), Diagnosti
         path,
         crate::stutter::STUTTER_KNOWN_CALIBRATION_MISMATCH,
     )?;
+    // **La marca de tosquedad de la curva tampoco es decorativa.** Una curva
+    // leída a ojo de una figura, publicada sin ella, se leería como una
+    // medida; y sin `extrapolated` en falso nadie sabría que por encima del
+    // tramo medido se mantiene el extremo.
+    let dependence = required_object(
+        required_value(stutter, "tract_length_dependence", path)?,
+        "artifacts.stutter.tract_length_dependence",
+        path,
+    )?;
+    validate_closed(
+        dependence,
+        &[
+            "source",
+            "coarse",
+            "coarse_reason",
+            "extrapolated",
+            "by_motif_length",
+        ],
+        "artifacts.stutter.tract_length_dependence",
+        path,
+    )?;
+    require_text(
+        dependence,
+        "source",
+        path,
+        crate::stutter::STUTTER_TRACT_LENGTH_SOURCE,
+    )?;
+    require_text(
+        dependence,
+        "coarse_reason",
+        path,
+        crate::stutter::STUTTER_TRACT_LENGTH_COARSE_REASON,
+    )?;
+    if dependence.get("coarse").and_then(Value::as_bool)
+        != Some(crate::stutter::STUTTER_TRACT_LENGTH_COARSE)
+    {
+        return Err(event_error(
+            path,
+            "la dependencia con la longitud del tracto se publica marcada como tosca",
+        ));
+    }
+    if dependence.get("extrapolated").and_then(Value::as_bool) != Some(false) {
+        return Err(event_error(
+            path,
+            "fuera del tramo medido se mantiene el extremo y no se extrapola",
+        ));
+    }
+    let by_motif_length = required_array(
+        required_value(dependence, "by_motif_length", path)?,
+        "artifacts.stutter.tract_length_dependence.by_motif_length",
+        path,
+    )?;
+    if by_motif_length.len() != crate::stutter::STUTTER_MOTIF_LENGTH_MAX {
+        return Err(event_error(
+            path,
+            "la tabla de longitudes de referencia no cubre el tramo calibrado",
+        ));
+    }
+    for (index, entry) in by_motif_length.iter().enumerate() {
+        let entry = required_object(
+            entry,
+            "artifacts.stutter.tract_length_dependence.by_motif_length",
+            path,
+        )?;
+        validate_closed(
+            entry,
+            &[
+                "motif_length_bases",
+                "measured",
+                "reference_tract_bases",
+                "measured_units_min",
+                "measured_units_max",
+                "factors",
+            ],
+            "artifacts.stutter.tract_length_dependence.by_motif_length",
+            path,
+        )?;
+        let expected = crate::stutter::STUTTER_TRACT_LENGTH_REFERENCE_BASES[index];
+        let published = entry.get("reference_tract_bases").and_then(|value| {
+            if value.is_null() {
+                None
+            } else {
+                value.as_u64()
+            }
+        });
+        if published != expected
+            || entry.get("measured").and_then(Value::as_bool) != Some(expected.is_some())
+        {
+            return Err(event_error(
+                path,
+                "una longitud de tracto de referencia no es la del algoritmo",
+            ));
+        }
+        let motif_length = (index as u64) + 1;
+        // **El tramo medido se compara contra el algoritmo, no solo se exige
+        // que las claves estén.** Faltaba, y era una asimetría con la guarda
+        // de la configuración efectiva: un manifiesto podía declarar un tramo
+        // medido que no era el suyo y nadie lo distinguía de uno correcto.
+        let range = crate::stutter::tract_length_measured_units(motif_length);
+        if entry.get("measured_units_min").and_then(Value::as_u64) != range.map(|(min, _)| min)
+            || entry.get("measured_units_max").and_then(Value::as_u64) != range.map(|(_, max)| max)
+        {
+            return Err(event_error(
+                path,
+                "el tramo medido publicado no es el del algoritmo",
+            ));
+        }
+        let factors = required_array(
+            required_value(entry, "factors", path)?,
+            "artifacts.stutter.tract_length_dependence.by_motif_length.factors",
+            path,
+        )?;
+        if factors.len() != range.map_or(0, |(min, max)| (max - min + 1) as usize) {
+            return Err(event_error(
+                path,
+                "la tabla de factores no cubre el tramo medido",
+            ));
+        }
+        for (offset, factor) in factors.iter().enumerate() {
+            let factor = required_object(
+                factor,
+                "artifacts.stutter.tract_length_dependence.by_motif_length.factors",
+                path,
+            )?;
+            validate_closed(
+                factor,
+                &["units", "factor"],
+                "artifacts.stutter.tract_length_dependence.by_motif_length.factors",
+                path,
+            )?;
+            let units = range.map_or(0, |(min, _)| min) + offset as u64;
+            if factor.get("units").and_then(Value::as_u64) != Some(units)
+                || factor.get("factor").and_then(Value::as_f64)
+                    != Some(crate::stutter::tract_length_factor(motif_length, units))
+            {
+                return Err(event_error(
+                    path,
+                    "un factor de la curva no es el del algoritmo",
+                ));
+            }
+        }
+    }
     let step_weights = required_array(
         required_value(stutter, "step_weights", path)?,
         "artifacts.stutter.step_weights",

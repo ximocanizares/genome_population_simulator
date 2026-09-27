@@ -317,7 +317,7 @@ satura. Las dos literaturas no se contradicen.
 15 pb. Y 0,027 sin PCR es `−1,57`, frente a −1,3 leído. Mismo orden, con las
 diferencias esperables entre muestras y profundidades distintas.
 
-### Tres advertencias, y la tercera impide cerrar el pendiente del todo
+### Tres advertencias, y lo que quedó de cada una
 
 1. **Estos valores se leyeron a ojo de una figura**, en escala logarítmica y a
    partir de una imagen de 680 píxeles de ancho. La incertidumbre es de unas
@@ -346,13 +346,76 @@ diferencias esperables entre muestras y profundidades distintas.
    valores de la figura 1A**.
 
    **Consecuencia:** la tabla de arriba, leída a ojo, es hoy **lo mejor que
-   tenemos de esta fuente**, y no porque no se haya intentado.
-3. **El artículo no dice cuántos ciclos de PCR usó.** Y esto es lo decisivo:
-   estas cifras son **de extremo a extremo**, y nuestro modelo necesita la
-   **pendiente por ciclo**. Convertir unas en otra exige conocer el número de
-   ciclos, que no está. Por tanto el coeficiente **sigue arrancando en cero** y
-   el pendiente sigue abierto en su parte cuantitativa, aunque ya no por falta
-   de acceso.
+   tenemos de esta fuente** para las tasas de la figura, y no porque no se haya
+   intentado.
+
+   > **Corrección del 27 de septiembre de 2026: el material suplementario sí se
+   > recupera entero.** Lo que ha desaparecido es el historial de Galaxy con
+   > los ficheros de tasas, y eso sigue siendo cierto. Pero el material
+   > suplementario del artículo —dieciocho cuadros y diecisiete figuras— se
+   > descarga completo por la interfaz de programación de Europe PMC, en
+   > `https://www.ebi.ac.uk/europepmc/webservices/rest/PMC4417121/supplementaryFiles`,
+   > junto con el texto completo en
+   > `.../PMC4417121/fullTextXML`. Se comprobó cuadro por cuadro: **ninguno
+   > contiene las tasas de error por longitud**, que viven solo en las figuras,
+   > de modo que la lectura a ojo sigue siendo lo mejor que hay para ellas.
+   >
+   > **Lo que sí aparece, y el proyecto no tenía:** los cuadros suplementarios
+   > **noveno y décimo** dan el **número de lecturas por cada longitud de
+   > tracto**, separado por motivo y por protocolo. Con ellos se puede calcular
+   > la composición de longitudes de la muestra, que es lo que se necesitó para
+   > estudiar dónde anclar la curva. De ahí salió un hallazgo que conviene
+   > tener escrito: el **70 %** de las lecturas de mononucleótidos de este
+   > artículo son de tractos de cinco pares de base, y la tasa agregada que su
+   > propia curva implica sobre su propia muestra es de **0,00024** con PCR,
+   > **706 veces** por debajo del 0,17 de Gymrek. Las dos mediciones no son
+   > comparables en nivel porque **no miran los mismos loci**: Gymrek solo mira
+   > los que su programa llega a genotipar, que son mucho más largos.
+3. **El artículo no dice cuántos ciclos de PCR usó.** Estas cifras son **de
+   extremo a extremo**, y convertirlas en una pendiente por ciclo exige conocer
+   el número de ciclos, que no está.
+
+   > **Confirmación del 27 de septiembre de 2026, todo lo limpia que puede
+   > ser:** se buscó en el **texto completo** del artículo, recuperado de
+   > Europe PMC, y la palabra «ciclo» —`cycle`— aparece **cero veces**. No es
+   > que no se haya encontrado: es que no está. La pregunta queda cerrada.
+   >
+   > **Y lo que esto bloquea es menos de lo que parecía.** Se midió probando de
+   > 6 a 30 ciclos: la **pendiente con la longitud sale idéntica**, factor 2,77
+   > por par de base con el mismo error cuadrático, y lo único que se mueve es
+   > el **nivel**. El número de ciclos que falta afecta al nivel, no a la
+   > forma. Y el nivel se trata aquí igual que en las tasas de Gymrek, que
+   > también son de extremo a extremo y se reparten entre los ciclos que
+   > declara el escenario, marcadas como toscas. Por eso el 27 de septiembre de
+   > 2026 el responsable pudo adoptar la curva como **tabla normalizada**, que
+   > usa solo su forma y no su nivel: ver la sección 11.
+
+### Comprobación independiente de la digitalización (27/09/2026)
+
+El texto del propio artículo declara, con todas las letras, cuánto separa a las
+dos curvas allí donde la separación se estabiliza: «para los STR
+mononucleotídicos, la diferencia en las tasas de error **aumenta hasta ~11 pb,
+tras lo cual se estabiliza en una diferencia de ~2,5 veces**. Para los
+dinucleotídicos, la diferencia aumenta hasta ~16 pb, **estabilizándose en ~3,6
+veces**». Es una cifra de texto, no leída de una figura, y sirve para comprobar
+la digitalización de arriba.
+
+| | Lo que dice el texto del artículo | Lo que dan los valores leídos a ojo |
+|---|---|---|
+| Mononucleótidos, a partir de 11 pb | ~2,5× | **2,51×** a 11 y a 13 pb, 2,82× a 15 |
+| Dinucleótidos, a partir de 16 pb | ~3,6× | **1,78× a 2,24×**, nunca más |
+
+**La digitalización de los mononucleótidos queda corroborada**: da 2,51 donde el
+texto dice 2,5. **La de los dinucleótidos no.** La separación entre las dos
+curvas de dinucleótidos se leyó **sistemáticamente demasiado pequeña**, por unas
+0,21 a 0,31 unidades logarítmicas. Está en el borde de lo que la incertidumbre
+declarada de ±0,15 por punto puede explicar para una diferencia de dos puntos,
+pero **nadie debe usar esos cuatro pares de valores creyendo que la separación
+entre columnas está corroborada**: no lo está.
+
+Esto no afecta al modelo que el proyecto adoptó, y conviene decir por qué: la
+sección 11 usa **una sola forma para las dos columnas**, de modo que la
+separación entre ellas no interviene. Justamente por esto.
 
 **Condiciones de la medición**, que conviene tener presentes: los datos con PCR
 son de un varón humano a 150× y los de sin PCR de la muestra NA12882 a 245×,
@@ -417,3 +480,125 @@ número correcto es el del informe de calidad del laboratorio.
 **Nota de licencia:** el programa que acompaña al artículo está bajo licencia
 GPL versión 3; de aquí no se toma código, solo los anclajes numéricos y el
 resultado teórico, que se citan.
+
+---
+
+## 11. La curva adoptada: tabla normalizada en el tope del tramo medido (27/09/2026)
+
+**Decisión del responsable del 27 de septiembre de 2026.** Los valores
+digitalizados de la sección 9 se adoptan como **tabla interpolada en escala
+logarítmica**, marcada como tosca, **sin extrapolar fuera del tramo medido**.
+Se descartaron expresamente tres alternativas: ajustar una fórmula, dejar la
+dependencia apagada y exigírsela al usuario.
+
+Queda en DTC-093, la decisión que fija el modelo. Aquí se explica de dónde sale
+cada pieza.
+
+### Por qué una tabla y no un coeficiente
+
+Porque la dependencia **no es una recta**. A lo largo del tramo medido de los
+mononucleótidos —de 5 a 15 pares de base— la fracción de lecturas erróneas sube
+unas **19 000 veces**. La forma lineal que el modelo tenía suponía crecimiento
+en línea recta, que en ese mismo tramo daría un factor **3**. Son cuatro
+órdenes de magnitud de diferencia, y por eso la forma anterior no servía.
+
+### El problema de verdad: no contar dos veces
+
+Las tasas por longitud de motivo de la sección 3 —0,17 en homopolímeros con
+PCR, 0,038 en dinucleótidos, y las demás— son **promedios sobre los tractos de
+aquella muestra**: **ya llevan dentro** el efecto de la longitud del tracto,
+promediado. Multiplicarlas por la curva contaría dos veces el mismo fenómeno,
+que es el error contra el que avisa DTC-092 con las dos columnas.
+
+Por eso la curva **modula alrededor** de la tasa vigente en vez de sumarse a
+ella: se **normaliza** dividiéndola por su valor en una longitud de referencia,
+de modo que a esa longitud el factor vale exactamente `1.0` y la tasa medida
+sale intacta.
+
+### La longitud de referencia, y por qué es el tope del tramo medido
+
+**Quince pares de base en mononucleótidos y treinta y cuatro en
+dinucleótidos**: el extremo superior de cada curva medida.
+
+Se buscó primero una longitud de referencia **en las fuentes**, y no la hay.
+Los tres caminos que se recorrieron el 27 de septiembre de 2026:
+
+- **Gymrek no publica ninguna longitud de tracto.** Se leyó el preprint entero:
+  ni media, ni mediana, ni distribución.
+- **La distribución de longitudes de Fungtammasan no sirve para anclar las
+  tasas de Gymrek**, porque son poblaciones de loci distintas: su agregado
+  propio es 706 veces menor, y anclar ahí daría probabilidad **1,0** a todo
+  homopolímero de nueve pares de base o más.
+- **Invertir la curva sobre las tasas de Gymrek** da cuatro longitudes que no
+  se parecen —13,46, 21,90 y 25,14 pares de base— y **ninguna** para los
+  homopolímeros con PCR, porque su 0,17 está por encima del máximo que la curva
+  alcanza dentro del tramo medido.
+
+Con eso delante, el responsable eligió el tope del tramo medido por tres
+razones:
+
+1. **Es la única elección que no satura en ningún punto.** Cualquier ancla por
+   debajo de unos 11,7 pares de base llevaría la probabilidad de los
+   homopolímeros con PCR a 1 —resbalón seguro en todas las moléculas— dentro
+   del propio tramo medido.
+2. Es el punto que la sección 9 **ya usó** para su contraste con la tabla de la
+   sección 3.
+3. Deja la modulación actuando **solo hacia abajo**: ningún tracto tartamudea
+   más de lo que la tabla medida ya autoriza.
+
+**Su defecto, dicho con la misma claridad:** un tracto de treinta unidades **no
+tartamudea más** que uno de quince, porque por encima del tramo medido se
+mantiene el valor del extremo, que es el ancla. Es la consecuencia honesta de
+no extrapolar, no un error del modelo, y se aceptó sabiéndolo.
+
+### Una sola forma para las dos columnas
+
+La tabla se obtiene de la **media logarítmica de las dos columnas**, con PCR y
+sin ella, y **la misma forma se aplica a las dos**. Dos motivos:
+
+- el cociente entre columnas es de donde DTC-092 despeja la probabilidad por
+  ciclo, y hacerlo dependiente de la longitud cambiaría un modelo ya cerrado;
+- la separación entre las dos curvas de dinucleótidos es justamente la parte de
+  la digitalización que **no** está corroborada por el texto del artículo, como
+  explica la comprobación independiente de la sección 9.
+
+Con la misma forma en las dos, la composición del tartamudeo de base con el de
+la PCR sigue cerrando **exactamente** a cualquier longitud de tracto:
+`1 − (1−r_sin·m)(1−r_pcr) = r_con·m`.
+
+Lo que esta elección **no** modela, y conviene saberlo: el artículo describe que
+la separación entre protocolos **crece** con la longitud hasta estabilizarse.
+Aquí se toma constante.
+
+### Los motivos sin curva medida
+
+**Solo hay curva medida para mononucleótidos y dinucleótidos.** Las tasas por
+longitud de motivo llegan hasta seis pares de base. Para los motivos de **tres
+a seis**, el modelo declara que **no hay dependencia ninguna** con la longitud
+del tracto, y lo publica dicho en vez de extrapolar desde las otras dos curvas.
+
+### La tabla, tal como el programa la lleva
+
+Factores ya normalizados, uno por número de unidades. El último de cada columna
+vale exactamente `1.0` porque es el ancla.
+
+| Unidades | Mononucleótidos (= pb) | Dinucleótidos (pb) | Factor dinucleótido |
+|---|---|---|---|
+| 5 | 0,0000531 | 10 | 0,00376 |
+| 6 | 0,000266 | 12 | 0,00818 |
+| 7 | 0,00133 | 14 | 0,0178 |
+| 8 | 0,00473 | 16 | 0,0387 |
+| 9 | 0,0168 | 18 | 0,0841 |
+| 10 | 0,0447 | 20 | 0,124 |
+| 11 | 0,119 | 22 | 0,183 |
+| 12 | 0,224 | 24 | 0,270 |
+| 13 | 0,422 | 26 | 0,398 |
+| 14 | 0,649 | 28 | 0,501 |
+| 15 | **1,000** | 30 | 0,631 |
+| 16 | — | 32 | 0,794 |
+| 17 | — | 34 | **1,000** |
+
+**Marcada como tosca**, y el motivo viaja entero con ella en cada ejecución: la
+curva se leyó a ojo de una figura en escala logarítmica, con una incertidumbre
+de unas ±0,15 unidades logarítmicas.
+

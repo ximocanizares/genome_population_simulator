@@ -36,6 +36,37 @@
 //! **acumular** esa probabilidad por ciclo sobre muchos ciclos. Las dos
 //! afirmaciones son ciertas a la vez y no se contradicen.
 //!
+//! # La longitud del tracto modula, no suma
+//!
+//! El efecto más fuerte que hay sobre el tartamudeo es la longitud del tracto:
+//! a lo largo del tramo medido de los mononucleótidos la fracción de lecturas
+//! erróneas sube cerca de **19 000 veces**. Una recta no puede con eso, y por
+//! eso esta dependencia es una **tabla interpolada en escala logarítmica** y
+//! no un coeficiente.
+//!
+//! Lo delicado no es la tabla sino **dónde se ancla**. Las tasas por longitud
+//! de motivo que este módulo ya usaba son promedios sobre los tractos de
+//! aquella muestra: **ya llevan dentro** el efecto de la longitud. Si encima
+//! se multiplicaran por la curva se contaría dos veces el mismo fenómeno. Por
+//! eso la curva está **normalizada**: a la longitud de referencia el factor
+//! vale exactamente `1.0` y la tasa medida sale intacta. La referencia es el
+//! **tope del tramo medido**, de modo que la modulación solo actúa hacia
+//! abajo y ningún tracto tartamudea más de lo que la tabla medida autoriza.
+//!
+//! Tres cosas que hay que saber antes de usarla, y que están dichas también en
+//! el documento que publica cada ejecución:
+//!
+//! - **Solo hay curva medida para mononucleótidos y dinucleótidos.** Los
+//!   motivos de tres a seis pares de base **no tienen dependencia ninguna**
+//!   con la longitud del tracto. No se extrapola: una extrapolación aquí sería
+//!   una cifra inventada con apariencia de medida.
+//! - **Fuera del tramo medido se mantiene el valor del extremo.** Como el
+//!   ancla es el extremo superior, un tracto de 30 unidades **no tartamudea
+//!   más** que uno de 15. Es la consecuencia honesta de no extrapolar.
+//! - **La sustitución del autor del escenario prevalece y no se modula.**
+//!   Quien declara la tasa de un locus la ha elegido para ese locus, con su
+//!   longitud dentro.
+//!
 //! # Por qué DTC-067 no aplica aquí, dicho por escrito
 //!
 //! DTC-067 obliga a que los **recuentos** aleatorios salgan de
@@ -73,7 +104,7 @@ use crate::tandem_repeat::{RepeatMotif, observe_tract};
 /// Versión del algoritmo, publicada en la configuración efectiva y en el
 /// manifiesto. Cambiar la forma de la probabilidad o la estructura del paso
 /// obliga a estrenar versión.
-pub const STUTTER_ALGORITHM: &str = "stutter-v1";
+pub const STUTTER_ALGORITHM: &str = "stutter-v2";
 
 /// Longitud de motivo mayor que la calibración cubre, en pares de base.
 pub const STUTTER_MOTIF_LENGTH_MAX: usize = 6;
@@ -149,11 +180,160 @@ pub const STUTTER_RUN_LENGTH_COEFFICIENT_CALIBRATED: bool = false;
 pub const STUTTER_KNOWN_CALIBRATION_MISMATCH: &str =
     "the source distinguishes motif type while this calibration is indexed by motif length";
 
+// ---------------------------------------------------------------------------
+// Dependencia con la longitud del tracto
+// ---------------------------------------------------------------------------
+
+/// **De dónde sale la curva de la longitud del tracto.**
+pub const STUTTER_TRACT_LENGTH_SOURCE: &str =
+    "Fungtammasan et al. (2015), Genome Research 25(5):736-749, figure 1A, CC BY-NC";
+
+/// **La dependencia con la longitud del tracto es TOSCA**, y se publica así.
+pub const STUTTER_TRACT_LENGTH_COARSE: bool = true;
+
+/// Por qué es tosca, dicho entero para que nadie tenga que ir a buscarlo.
+///
+/// Son cuatro cosas distintas y las cuatro importan: cómo se obtuvo la curva,
+/// dónde se ancló, qué se hace fuera del tramo medido y para qué motivos no
+/// hay curva ninguna.
+pub const STUTTER_TRACT_LENGTH_COARSE_REASON: &str = "the tract-length curve was read by eye from a figure plotted in logarithmic scale, with an \
+     uncertainty of about +/-0.15 log10 units (about +/-40 percent in linear scale); it is \
+     normalised at the top of the measured range, so it only modulates the measured motif-length \
+     rate downwards and never above it; outside the measured range the end value is held and \
+     nothing is extrapolated; and only mononucleotides and dinucleotides have a measured curve, so \
+     motifs of three to six bases carry no tract-length dependence at all";
+
+/// **La longitud de tracto de referencia, en pares de base, por longitud de
+/// motivo.** `None` significa que esa longitud de motivo no tiene curva medida
+/// y por tanto **no tiene dependencia ninguna** con la longitud del tracto.
+///
+/// # De dónde sale, porque es la decisión entera
+///
+/// Es el **tope del tramo medido** de cada curva: 15 pares de base en
+/// mononucleótidos y 34 en dinucleótidos. El responsable lo adoptó el 27 de
+/// septiembre de 2026, y las tres razones son estas:
+///
+/// 1. Es la única elección que **no satura en ningún punto**. La curva sube
+///    cerca de 19 000 veces a lo largo del tramo medido de los
+///    mononucleótidos, y la tasa medida con PCR ya vale 0,17: cualquier ancla
+///    por debajo de unos 11,7 pares de base llevaría la probabilidad a 1 —
+///    resbalón seguro en todas las moléculas— dentro del propio tramo medido.
+/// 2. Es el punto que el documento de calibración **ya usó** para contrastar
+///    la curva con la tabla de tasas por longitud de motivo.
+/// 3. Deja la modulación actuando **solo hacia abajo**: ningún tracto
+///    tartamudea más de lo que la tabla medida ya autoriza.
+///
+/// # Su defecto, dicho con la misma claridad
+///
+/// **Un tracto de 30 unidades no tartamudea más que uno de 15.** Por encima
+/// del tramo medido se mantiene el valor del extremo, que es el ancla, de modo
+/// que la modulación vale exactamente 1 para todo lo que sea más largo. Es la
+/// consecuencia honesta de no extrapolar, no un error del modelo, y el
+/// responsable la aceptó sabiéndolo.
+pub const STUTTER_TRACT_LENGTH_REFERENCE_BASES: [Option<u64>; STUTTER_MOTIF_LENGTH_MAX] =
+    [Some(15), Some(34), None, None, None, None];
+
+/// Primera entrada tabulada de las dos curvas, en **unidades**.
+///
+/// Las dos empiezan en cinco unidades porque ahí empieza el tramo medido:
+/// 5 pares de base en mononucleótidos y 10 en dinucleótidos.
+const TRACT_FACTOR_FIRST_UNITS: u64 = 5;
+
+/// Factores de los **mononucleótidos**, de 5 a 15 unidades.
+///
+/// Uno por unidad, ya normalizados: el último vale exactamente `1.0` porque es
+/// el ancla. Salen de interpolar en **escala logarítmica** la media de las dos
+/// columnas digitalizadas y restarles el valor del ancla. La prueba
+/// `the_tract_length_table_is_the_published_curve_normalised_at_the_anchor`
+/// los rederiva desde los valores publicados sin mirar esta tabla.
+const MONONUCLEOTIDE_TRACT_FACTORS: [f64; 11] = [
+    5.30884444230989e-05,  // 5 unidades = 5 pb
+    0.0002660725059798814, // 6 unidades = 6 pb
+    0.001333521432163324,  // 7 unidades = 7 pb
+    0.0047315125896148025, // 8 unidades = 8 pb
+    0.016788040181225598,  // 9 unidades = 9 pb
+    0.04466835921509633,   // 10 unidades = 10 pb
+    0.11885022274370183,   // 11 unidades = 11 pb
+    0.2238721138568339,    // 12 unidades = 12 pb
+    0.4216965034285822,    // 13 unidades = 13 pb
+    0.6493816315762113,    // 14 unidades = 14 pb
+    1.0,                   // 15 unidades = 15 pb, el ancla
+];
+
+/// Factores de los **dinucleótidos**, de 5 a 17 unidades, es decir de 10 a 34
+/// pares de base. Mismo origen y misma normalización que los de arriba.
+const DINUCLEOTIDE_TRACT_FACTORS: [f64; 13] = [
+    0.003758374042884443, // 5 unidades = 10 pb
+    0.008175230379436493, // 6 unidades = 12 pb
+    0.01778279410038922,  // 7 unidades = 14 pb
+    0.03868120546330523,  // 8 unidades = 16 pb
+    0.08413951416451952,  // 9 unidades = 18 pb
+    0.12409377607517195,  // 10 unidades = 20 pb
+    0.18302061063110558,  // 11 unidades = 22 pb
+    0.26992928231542934,  // 12 unidades = 24 pb
+    0.39810717055349715,  // 13 unidades = 26 pb
+    0.5011872336272722,   // 14 unidades = 28 pb
+    0.6309573444801934,   // 15 unidades = 30 pb
+    0.7943282347242814,   // 16 unidades = 32 pb
+    1.0,                  // 17 unidades = 34 pb, el ancla
+];
+
+/// La tabla de una longitud de motivo, o `None` si no hay curva medida.
+#[must_use]
+const fn tract_factors(motif_length: u64) -> Option<&'static [f64]> {
+    match motif_length {
+        1 => Some(&MONONUCLEOTIDE_TRACT_FACTORS),
+        2 => Some(&DINUCLEOTIDE_TRACT_FACTORS),
+        _ => None,
+    }
+}
+
+/// **Cuánto multiplica la longitud del tracto a la tasa por longitud de
+/// motivo.**
+///
+/// Devuelve exactamente `1.0` —ninguna dependencia— cuando esa longitud de
+/// motivo no tiene curva medida, que es el caso de los motivos de tres a seis
+/// pares de base. **No se extrapola**: por debajo y por encima del tramo
+/// medido se mantiene el valor del extremo, y como el ancla es el extremo
+/// superior, el factor nunca pasa de `1.0`.
+///
+/// Es una función pura y no consume aleatoriedad. Vive aparte para que una
+/// prueba pueda comparar dos tractos sin montar una ejecución.
+#[must_use]
+pub fn tract_length_factor(motif_length: u64, run_units: u64) -> f64 {
+    let Some(factors) = tract_factors(motif_length) else {
+        return 1.0;
+    };
+    let index = run_units.saturating_sub(TRACT_FACTOR_FIRST_UNITS);
+    let last = factors.len() - 1;
+    let index = usize::try_from(index).unwrap_or(last).min(last);
+    factors[index]
+}
+
+/// El tramo medido de una longitud de motivo, **en unidades**, o `None` si no
+/// hay curva. Lo publica el documento efectivo para que quien lea un número
+/// sepa dónde deja de estar medido.
+#[must_use]
+pub fn tract_length_measured_units(motif_length: u64) -> Option<(u64, u64)> {
+    tract_factors(motif_length).map(|factors| {
+        (
+            TRACT_FACTOR_FIRST_UNITS,
+            TRACT_FACTOR_FIRST_UNITS + factors.len() as u64 - 1,
+        )
+    })
+}
+
 /// **Probabilidad de resbalón por ciclo**, acotada a `[0,1]`.
 ///
-/// `base_rate` es la fracción calibrada de la longitud de motivo de la tirada;
-/// `coefficient` es el coeficiente de la tirada (cero mientras no esté
-/// calibrado) y `longest_run_units` es el predictor.
+/// `base_rate` es la tasa **ya modulada por la longitud del tracto** que
+/// devuelve [`StutterSettings::modulated_rate_for`]; `coefficient` es el
+/// coeficiente de la tirada (cero mientras no esté calibrado) y
+/// `longest_run_units` es el predictor.
+///
+/// **La modulación no se hace aquí a propósito.** Se hace un paso antes,
+/// porque depende de si el autor del escenario sustituyó la tasa de ese locus
+/// —en cuyo caso su sustitución prevalece sin modular—, y esa es una decisión
+/// de los parámetros, no de la aritmética.
 ///
 /// Es una función pura y no consume aleatoriedad: existe aparte para que una
 /// prueba pueda comparar dos tractos sin montar una ejecución.
@@ -349,6 +529,11 @@ impl StutterSettings {
 
     /// Tasa base efectiva de un locus para una longitud de motivo dada: la
     /// sustitución del locus si la declara, y si no la de la calibración.
+    ///
+    /// **Sin modular por la longitud del tracto.** Quien quiera la tasa que el
+    /// modelo usa de verdad tiene [`Self::modulated_rate_for`]; esta existe
+    /// para publicar la tabla y para que la modulación se vea aplicarse en un
+    /// solo sitio.
     #[must_use]
     pub fn base_rate_for(&self, locus_id: &str, motif_length: u64) -> Option<f64> {
         self.locus_rates.get(locus_id).copied().map_or_else(
@@ -356,6 +541,92 @@ impl StutterSettings {
             Some,
         )
     }
+
+    /// **La tasa que el modelo usa**: la de la calibración modulada por la
+    /// longitud del tracto, o la del autor del escenario tal cual.
+    ///
+    /// # La sustitución del autor prevalece, y no se modula
+    ///
+    /// Es la misma regla que la probabilidad por ciclo del tartamudeo clonal,
+    /// y por el mismo motivo. Quien declara la tasa de un locus concreto la
+    /// ha medido —o elegido— **para ese locus**, de modo que la longitud de
+    /// su tracto ya está dentro. Multiplicarla encima por la curva contaría
+    /// dos veces el mismo efecto, que es exactamente el error contra el que
+    /// existe esta función.
+    ///
+    /// # Por qué modular y no sumar
+    ///
+    /// Las tasas por longitud de motivo de la calibración son **promedios
+    /// sobre los tractos de aquella muestra**: ya llevan dentro el efecto de
+    /// la longitud del tracto, promediado. La curva solo puede repartir ese
+    /// promedio entre tractos largos y cortos, nunca añadirse a él. Por eso
+    /// está normalizada: a la longitud de referencia el factor vale
+    /// exactamente `1.0` y la tasa sale intacta.
+    #[must_use]
+    pub fn modulated_rate_for(
+        &self,
+        locus_id: &str,
+        motif_length: u64,
+        run_units: u64,
+    ) -> Option<f64> {
+        if let Some(rate) = self.locus_rates.get(locus_id) {
+            return Some(*rate);
+        }
+        let base = self
+            .motif_length_rates
+            .rate_for_motif_length(motif_length)?;
+        Some(base * tract_length_factor(motif_length, run_units))
+    }
+}
+
+/// **Lo que se publica de la dependencia con la longitud del tracto.**
+///
+/// Sale de aquí y no de dos sitios para que la configuración efectiva y el
+/// manifiesto no puedan discrepar. Lleva la marca de tosquedad con su motivo
+/// entero, la fuente, y **por cada longitud de motivo** su longitud de
+/// referencia y su tramo medido — o la declaración explícita de que no tiene
+/// curva y por tanto no tiene dependencia ninguna.
+#[must_use]
+pub fn tract_length_dependence_document() -> serde_json::Value {
+    let by_motif_length = (1..=STUTTER_MOTIF_LENGTH_MAX)
+        .map(|motif_length| {
+            let motif_length = motif_length as u64;
+            let measured = tract_length_measured_units(motif_length);
+            // **La tabla entera se publica**, no solo sus extremos. Es lo que
+            // permite rehacer la modulación sin este programa, exactamente
+            // igual que la derivación del tartamudeo clonal publica sus dos
+            // fracciones de entrada y no solo su resultado. Un validador
+            // independiente que tuviera que llevar su propia copia de estas
+            // cifras dejaría de ser independiente el día que una de las dos
+            // se moviera.
+            let factors = measured.map_or_else(Vec::new, |(first, last)| {
+                (first..=last)
+                    .map(|units| {
+                        serde_json::json!({
+                            "units": units,
+                            "factor": tract_length_factor(motif_length, units),
+                        })
+                    })
+                    .collect()
+            });
+            serde_json::json!({
+                "motif_length_bases": motif_length,
+                "measured": measured.is_some(),
+                "reference_tract_bases":
+                    STUTTER_TRACT_LENGTH_REFERENCE_BASES[motif_length as usize - 1],
+                "measured_units_min": measured.map(|(first, _)| first),
+                "measured_units_max": measured.map(|(_, last)| last),
+                "factors": factors,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "source": STUTTER_TRACT_LENGTH_SOURCE,
+        "coarse": STUTTER_TRACT_LENGTH_COARSE,
+        "coarse_reason": STUTTER_TRACT_LENGTH_COARSE_REASON,
+        "extrapolated": false,
+        "by_motif_length": by_motif_length,
+    })
 }
 
 /// Documento común de los parámetros efectivos del tartamudeo.
@@ -401,6 +672,7 @@ pub fn effective_settings_document(settings: &StutterSettings) -> serde_json::Va
             "known_mismatch": STUTTER_KNOWN_CALIBRATION_MISMATCH,
         },
         "motif_length_rates": motif_length_rates,
+        "tract_length_dependence": tract_length_dependence_document(),
         "run_length_coefficient": {
             "value": settings.run_length_coefficient(),
             "calibrated": STUTTER_RUN_LENGTH_COEFFICIENT_CALIBRATED,
@@ -881,9 +1153,9 @@ pub fn transform_paired_end(
             continue;
         }
         let motif_length = observed.longest_run_motif_length();
-        let Some(base_rate) = plan
-            .settings()
-            .base_rate_for(locus.id().as_str(), motif_length)
+        let Some(base_rate) =
+            plan.settings()
+                .modulated_rate_for(locus.id().as_str(), motif_length, run_units)
         else {
             // Longitud de motivo fuera del tramo calibrado. No se extrapola y
             // no se consume aleatoriedad; la admisión ya lo rechaza antes de
@@ -991,7 +1263,11 @@ pub fn observed_slip_probability(
     if observed.longest_run_units() == 0 {
         return None;
     }
-    let base_rate = settings.base_rate_for(locus_id, observed.longest_run_motif_length())?;
+    let base_rate = settings.modulated_rate_for(
+        locus_id,
+        observed.longest_run_motif_length(),
+        observed.longest_run_units(),
+    )?;
     Some(slip_probability(
         base_rate,
         settings.run_length_coefficient(),
@@ -1495,6 +1771,333 @@ mod tests {
         let before = sequence.len();
         apply_step_to_molecule(&mut sequence, 4, 5, 4, 1).expect("expansión");
         assert_eq!(sequence.len() - before, 4);
+    }
+
+    // -----------------------------------------------------------------
+    // Dependencia con la longitud del tracto
+    // -----------------------------------------------------------------
+
+    /// Los valores digitalizados de la figura, **copiados aquí a mano** desde
+    /// la sección 9 del documento de calibración.
+    ///
+    /// Son el oráculo independiente de la tabla del módulo: viven aquí como
+    /// literales, no se importan de `super`, y por eso la prueba que los usa
+    /// puede distinguir una tabla mal generada. Si se importaran, la
+    /// comparación sería circular y no cazaría nada.
+    const PUBLISHED_MONONUCLEOTIDE_BASES: [u64; 6] = [5, 7, 9, 11, 13, 15];
+    const PUBLISHED_MONONUCLEOTIDE_WITHOUT_PCR: [f64; 6] = [-5.4, -4.1, -3.0, -2.2, -1.65, -1.3];
+    const PUBLISHED_MONONUCLEOTIDE_WITH_PCR: [f64; 6] = [-5.3, -3.8, -2.7, -1.8, -1.25, -0.85];
+    const PUBLISHED_DINUCLEOTIDE_BASES: [u64; 4] = [10, 18, 26, 34];
+    const PUBLISHED_DINUCLEOTIDE_WITHOUT_PCR: [f64; 4] = [-3.6, -2.3, -1.6, -1.25];
+    const PUBLISHED_DINUCLEOTIDE_WITH_PCR: [f64; 4] = [-3.4, -2.0, -1.35, -0.9];
+
+    /// Interpola en escala logarítmica, escrito aquí aparte del módulo.
+    fn published_log10(grid: &[u64], values: &[f64], bases: u64) -> f64 {
+        let bases = bases as f64;
+        if bases <= grid[0] as f64 {
+            return values[0];
+        }
+        if bases >= grid[grid.len() - 1] as f64 {
+            return values[values.len() - 1];
+        }
+        for window in 0..grid.len() - 1 {
+            let (low, high) = (grid[window] as f64, grid[window + 1] as f64);
+            if low <= bases && bases <= high {
+                let fraction = (bases - low) / (high - low);
+                return fraction.mul_add(values[window + 1] - values[window], values[window]);
+            }
+        }
+        unreachable!("la rejilla cubre todo el tramo")
+    }
+
+    /// **La tabla del módulo es la curva publicada, normalizada en el ancla.**
+    ///
+    /// Rederiva **cada** entrada desde los valores de la figura escritos a
+    /// mano arriba: media logarítmica de las dos columnas, interpolación
+    /// lineal en escala logarítmica y resta del valor del ancla.
+    ///
+    /// **Debe fallar contra** una tabla generada con otra ancla, con una sola
+    /// columna, con interpolación lineal en escala lineal, o con una entrada
+    /// cambiada a mano.
+    #[test]
+    fn the_tract_length_table_is_the_published_curve_normalised_at_the_anchor() {
+        for (motif_length, grid, without_pcr, with_pcr, anchor_bases) in [
+            (
+                1_u64,
+                &PUBLISHED_MONONUCLEOTIDE_BASES[..],
+                &PUBLISHED_MONONUCLEOTIDE_WITHOUT_PCR[..],
+                &PUBLISHED_MONONUCLEOTIDE_WITH_PCR[..],
+                15_u64,
+            ),
+            (
+                2,
+                &PUBLISHED_DINUCLEOTIDE_BASES[..],
+                &PUBLISHED_DINUCLEOTIDE_WITHOUT_PCR[..],
+                &PUBLISHED_DINUCLEOTIDE_WITH_PCR[..],
+                34,
+            ),
+        ] {
+            assert_eq!(
+                super::STUTTER_TRACT_LENGTH_REFERENCE_BASES[motif_length as usize - 1],
+                Some(anchor_bases),
+                "el ancla publicada tiene que ser el tope del tramo medido"
+            );
+            let mean = |bases: u64| {
+                (published_log10(grid, without_pcr, bases) + published_log10(grid, with_pcr, bases))
+                    / 2.0
+            };
+            let anchor = mean(anchor_bases);
+            let (first, last) =
+                super::tract_length_measured_units(motif_length).expect("tramo medido");
+            for units in first..=last {
+                let expected = 10_f64.powf(mean(units * motif_length) - anchor);
+                let observed = super::tract_length_factor(motif_length, units);
+                assert!(
+                    (observed - expected).abs() <= expected * 1e-12,
+                    "motivo de {motif_length} pb, {units} unidades: \
+                     la tabla dice {observed} y la curva publicada {expected}"
+                );
+            }
+        }
+    }
+
+    /// **La modulación toma la TIRADA ININTERRUMPIDA MÁS LARGA, no el total de
+    /// unidades del tracto.**
+    ///
+    /// # Por qué es esa y no la otra, y por qué importa
+    ///
+    /// Porque es lo que la fuente midió. Fungtammasan y colaboradores dicen
+    /// en sus métodos que **«solo se consideraron STR ininterrumpidos
+    /// (perfectos)»**, de modo que el eje de su figura es la longitud de una
+    /// tirada sin interrupciones. Aplicar su curva al total de unidades de un
+    /// tracto impuro le atribuiría una medida que no hizo. Y coincide con el
+    /// predictor que DTC-090 ya había fijado para la parte lineal, de modo que
+    /// el modelo no tiene dos predictores distintos para el mismo fenómeno.
+    ///
+    /// # El fixture es IMPURO a propósito
+    ///
+    /// Con un tracto puro el total de unidades y la tirada más larga
+    /// **coinciden**, y ninguna prueba con tractos puros puede distinguir las
+    /// dos lecturas del modelo. Aquí los dos fixtures tienen **las mismas diez
+    /// unidades completas y las mismas veinte bases cubiertas**; lo único que
+    /// los separa es que en uno van seguidas y en el otro partidas en cinco y
+    /// cinco.
+    ///
+    /// **El coeficiente va en cero**, que es su valor por omisión, y ahí está
+    /// lo interesante: antes de la modulación la probabilidad no dependía de
+    /// la longitud en absoluto con el coeficiente en cero. Que ahora se separen
+    /// treinta y tres veces es la modulación y solo la modulación.
+    ///
+    /// **Debe fallar contra** una entrega que module por el total de unidades
+    /// del tracto o por sus bases cubiertas: las dos darían a los dos fixtures
+    /// exactamente el mismo número.
+    #[test]
+    fn the_modulation_takes_the_longest_run_and_not_the_total_units() {
+        let settings = settings(0.0);
+        let motifs = motifs("CA");
+        let single_run = "CA".repeat(10);
+        let split = format!("{}TT{}", "CA".repeat(5), "CA".repeat(5));
+        // **Los dos totales son idénticos**, que es lo que hace impuro al
+        // fixture y lo que le da poder de discriminación.
+        let observed_single = crate::tandem_repeat::observe_tract(single_run.as_bytes(), &motifs);
+        let observed_split = crate::tandem_repeat::observe_tract(split.as_bytes(), &motifs);
+        assert_eq!(
+            observed_single.covered_bases(),
+            observed_split.covered_bases(),
+            "el fixture solo discrimina si los dos cubren las mismas bases"
+        );
+        assert_ne!(
+            observed_single.longest_run_units(),
+            observed_split.longest_run_units(),
+            "y solo discrimina si las tiradas más largas difieren"
+        );
+        let single = observed_slip_probability(&settings, "STR-1", single_run.as_bytes(), &motifs)
+            .expect("tirada seguida");
+        let partida = observed_slip_probability(&settings, "STR-1", split.as_bytes(), &motifs)
+            .expect("tirada partida");
+        assert!(
+            single > partida * 30.0,
+            "diez unidades seguidas frente a cinco y cinco: la curva las separa \
+             treinta y tres veces, y {single} frente a {partida} no lo hace"
+        );
+    }
+
+    /// **A la longitud de referencia se reproduce EXACTAMENTE la tasa medida.**
+    ///
+    /// Es la prueba de que el modelo **no cuenta dos veces** la longitud del
+    /// tracto. La igualdad es exacta, bit a bit, y no aproximada: el factor
+    /// vale `1.0` y multiplicar por uno no puede mover un `f64`.
+    ///
+    /// **Debe fallar contra** una normalización anclada en cualquier otro
+    /// punto, contra una curva que se sume en vez de multiplicar, y contra una
+    /// que multiplique sin normalizar.
+    #[test]
+    fn at_the_reference_length_the_measured_motif_rate_is_reproduced_exactly() {
+        let settings = settings(0.0);
+        for (motif_length, reference_bases) in [(1_u64, 15_u64), (2, 34)] {
+            let units = reference_bases / motif_length;
+            assert_eq!(
+                super::tract_length_factor(motif_length, units),
+                1.0,
+                "en el ancla el factor vale exactamente uno"
+            );
+            let modulated = settings
+                .modulated_rate_for("STR-sin-sustituir", motif_length, units)
+                .expect("tasa modulada");
+            assert_eq!(
+                modulated,
+                STUTTER_DEFAULT_MOTIF_LENGTH_RATES[motif_length as usize - 1],
+                "a la longitud de referencia la tasa medida tiene que salir intacta"
+            );
+        }
+    }
+
+    /// **Un tracto largo tartamudea mucho más que uno corto del mismo motivo.**
+    ///
+    /// No basta con «más»: se exige el orden de magnitud, porque un modelo que
+    /// dependiera de la longitud de forma **lineal** también daría «más» y
+    /// pasaría una aserción de mera desigualdad. A lo largo del tramo medido
+    /// de los mononucleótidos la curva sube más de diez mil veces, y una recta
+    /// solo daría tres.
+    ///
+    /// **Debe fallar contra** el modelo lineal anterior y contra una tabla
+    /// plana.
+    #[test]
+    fn a_long_tract_slips_far_more_than_a_short_one_of_the_same_motif() {
+        let settings = settings(0.0);
+        let short = settings
+            .modulated_rate_for("STR-1", 1, 5)
+            .expect("tracto corto");
+        let long = settings
+            .modulated_rate_for("STR-1", 1, 15)
+            .expect("tracto largo");
+        assert!(long > short, "el largo tiene que tartamudear más");
+        assert!(
+            long / short > 10_000.0,
+            "de 5 a 15 pb la curva sube cuatro órdenes de magnitud, no un factor 3: {}",
+            long / short
+        );
+        // Y el corto no es cero: si lo fuera, el cociente sería infinito y la
+        // aserción de arriba pasaría sin decir nada.
+        assert!(short > 0.0, "el extremo corto tiene que ser positivo");
+    }
+
+    /// **Fuera del tramo medido se mantiene el valor del extremo.**
+    ///
+    /// Por debajo y por encima. Es lo que la decisión llama «no extrapolar», y
+    /// tiene una consecuencia que conviene ver escrita: **un tracto de 30
+    /// unidades no tartamudea más que uno de 15**.
+    ///
+    /// **Debe fallar contra** una implementación que prolongue la recta
+    /// logarítmica más allá del último punto medido, que daría al tracto de 30
+    /// unidades un factor muy superior a uno.
+    #[test]
+    fn outside_the_measured_range_the_end_value_is_held() {
+        // Por encima del ancla, que es el extremo superior.
+        for units in [16_u64, 20, 30, 100] {
+            assert_eq!(
+                super::tract_length_factor(1, units),
+                1.0,
+                "{units} unidades están por encima del tramo medido: se mantiene el extremo"
+            );
+        }
+        // Por debajo del primer punto medido.
+        let floor = super::tract_length_factor(1, 5);
+        for units in [1_u64, 2, 3, 4] {
+            assert_eq!(
+                super::tract_length_factor(1, units),
+                floor,
+                "{units} unidades están por debajo del tramo medido"
+            );
+        }
+        // Y el extremo inferior **no** es el mismo número que el superior: sin
+        // esto, una tabla constante satisfaría las dos aserciones anteriores.
+        assert!(floor < 1.0, "los dos extremos tienen que ser distintos");
+    }
+
+    /// **Un motivo sin curva medida no tiene dependencia ninguna.**
+    ///
+    /// Los motivos de tres a seis pares de base no aparecen en la figura, y no
+    /// se extrapola nada desde las otras dos curvas. Su factor vale
+    /// exactamente uno para **cualquier** longitud de tracto.
+    ///
+    /// **Debe fallar contra** una implementación que reutilizara la curva de
+    /// los dinucleótidos para los demás motivos, o que interpolara entre
+    /// longitudes de motivo.
+    #[test]
+    fn a_motif_without_a_measured_curve_has_no_tract_length_dependence() {
+        let settings = settings(0.0);
+        for motif_length in 3_u64..=6 {
+            assert_eq!(
+                super::tract_length_measured_units(motif_length),
+                None,
+                "el motivo de {motif_length} pb no tiene curva medida"
+            );
+            assert_eq!(
+                super::STUTTER_TRACT_LENGTH_REFERENCE_BASES[motif_length as usize - 1],
+                None,
+                "y por tanto tampoco tiene longitud de referencia"
+            );
+            let table = STUTTER_DEFAULT_MOTIF_LENGTH_RATES[motif_length as usize - 1];
+            for units in [1_u64, 5, 12, 40] {
+                assert_eq!(super::tract_length_factor(motif_length, units), 1.0);
+                assert_eq!(
+                    settings
+                        .modulated_rate_for("STR-1", motif_length, units)
+                        .expect("tasa"),
+                    table,
+                    "la tasa de un motivo sin curva no cambia con la longitud"
+                );
+            }
+        }
+        // Control: los dos motivos que **sí** tienen curva no salen ilesos de
+        // la misma comprobación. Sin él, un `tract_length_factor` que
+        // devolviera siempre uno pasaría el bucle de arriba.
+        for motif_length in 1_u64..=2 {
+            assert!(super::tract_length_factor(motif_length, 5) < 1.0);
+        }
+    }
+
+    /// **La sustitución del autor del escenario gana, y no se modula.**
+    ///
+    /// Quien declara la tasa de un locus la ha elegido para ese locus, con su
+    /// longitud dentro. Modularla encima contaría dos veces lo mismo.
+    ///
+    /// **Debe fallar contra** una implementación que aplicara la curva también
+    /// a la tasa sustituida: con cinco unidades de dinucleótido el factor vale
+    /// 0,0038 y la tasa declarada se quedaría en 0,0019 en vez de en 0,5.
+    #[test]
+    fn a_declared_locus_rate_prevails_and_is_not_modulated() {
+        let mut declared = std::collections::BTreeMap::new();
+        declared.insert("STR-SUYO".to_owned(), 0.5);
+        let settings = StutterSettings::new(
+            true,
+            StutterMotifLengthRates::default(),
+            0.0,
+            Some(StutterStepWeights::new([0.05, 0.15, 0.6, 0.2]).expect("pesos")),
+            declared,
+        )
+        .expect("parámetros");
+        for units in [1_u64, 5, 13, 17, 40] {
+            assert_eq!(
+                settings
+                    .modulated_rate_for("STR-SUYO", 2, units)
+                    .expect("tasa declarada"),
+                0.5,
+                "la sustitución vale lo mismo mida lo que mida el tracto"
+            );
+        }
+        // Control positivo: el locus **no** sustituido sí se modula, y con
+        // cinco unidades queda muy por debajo de su tasa de tabla. Sin este
+        // control, una implementación que no modulara nada pasaría el bucle.
+        let table = STUTTER_DEFAULT_MOTIF_LENGTH_RATES[1];
+        let other = settings
+            .modulated_rate_for("STR-AJENO", 2, 5)
+            .expect("tasa de tabla");
+        assert!(
+            other < table / 100.0,
+            "el locus sin sustituir sí tiene que modularse: {other} frente a {table}"
+        );
     }
 
     /// El paso se aplica **en la tirada más larga**, por su extremo derecho, y

@@ -192,6 +192,13 @@ struct Recomputed {
 /// evento, la biblioteca, el locus, la tasa efectiva, los pesos y cuántas
 /// parejas hay—, nunca los recuentos realizados, que son justo lo que va a
 /// comprobar.
+/// Unidades del tracto del fixture. **Trece, y no es indiferente**: veintiséis
+/// pares de base caen dentro del tramo medido de la curva de dinucleótidos y
+/// fuera de su ancla, de modo que el factor de modulación vale 0,398. Un
+/// validador que se saltara la modulación predeciría unos cinco veces más
+/// tartamudeos de los que hay.
+const TRACT_UNITS: u64 = 13;
+
 fn recompute(effective: &Value, event: &Value, longest_run_units: u64) -> Recomputed {
     let root = decode_hex(
         effective["seed"]["root"]
@@ -208,12 +215,81 @@ fn recompute(effective: &Value, event: &Value, longest_run_units: u64) -> Recomp
     let probability = event["artifacts"]["stutter"]["locus_parameters"][0]["base_rates"][0]["rate"]
         .as_f64()
         .expect("tasa base");
+    let motif_length =
+        event["artifacts"]["stutter"]["locus_parameters"][0]["base_rates"][0]["motif_length_bases"]
+            .as_u64()
+            .expect("longitud de motivo");
     let coefficient = event["artifacts"]["stutter"]["run_length_coefficient"]["value"]
         .as_f64()
         .expect("coeficiente");
-    // La forma del modelo, reescrita aquí: dependencia **lineal por ciclo** de
-    // la tirada ininterrumpida más larga, acotada a [0,1].
-    let probability = (probability + coefficient * longest_run_units as f64).clamp(0.0, 1.0);
+    // **Qué comprueba este validador de la curva y qué NO, dicho sin
+    // adornos.** Lee los factores **del documento publicado**, que es lo mismo
+    // que el programa usó, de modo que para los **valores** de la curva es un
+    // espejo y no puede distinguir una tabla mal generada: permutar dos
+    // factores del dinucleótido no lo mata. Es deliberado, y la alternativa
+    // sería peor: si llevara su propia copia de las cifras, dejaría de ser
+    // independiente del documento el día que una de las dos se moviera, y el
+    // documento es justamente lo que aquí se valida. **Quien fija los valores
+    // de la curva es otra prueba**, la que los rederiva desde los datos
+    // publicados en la fuente escritos a mano:
+    // `the_tract_length_table_is_the_published_curve_normalised_at_the_anchor`
+    // en `src/stutter.rs`. Lo que este validador sí comprueba es que el
+    // programa **use** la curva que **publica**, y la regla de los extremos.
+    //
+    // **La modulación por la longitud del tracto, rederivada desde el
+    // documento publicado y no desde las constantes del programa.** El
+    // manifiesto publica la curva entera; aquí se busca la entrada de esta
+    // longitud de motivo y se aplica la regla de los extremos: por debajo y
+    // por encima del tramo medido se mantiene el valor del extremo, nunca se
+    // extrapola. Un motivo sin curva no modula nada.
+    let dependence = &event["artifacts"]["stutter"]["tract_length_dependence"];
+    assert_eq!(
+        dependence["extrapolated"], false,
+        "el documento tiene que declarar que no se extrapola"
+    );
+    assert_eq!(
+        dependence["coarse"], true,
+        "la curva se publica marcada como tosca"
+    );
+    let row = dependence["by_motif_length"]
+        .as_array()
+        .expect("tabla por longitud de motivo")
+        .iter()
+        .find(|entry| entry["motif_length_bases"].as_u64() == Some(motif_length))
+        .expect("fila de esta longitud de motivo");
+    let factors: Vec<(u64, f64)> = row["factors"]
+        .as_array()
+        .expect("factores")
+        .iter()
+        .map(|entry| {
+            (
+                entry["units"].as_u64().expect("unidades"),
+                entry["factor"].as_f64().expect("factor"),
+            )
+        })
+        .collect();
+    let factor = if factors.is_empty() {
+        1.0
+    } else {
+        let (first_units, first_factor) = factors[0];
+        let (last_units, last_factor) = factors[factors.len() - 1];
+        if longest_run_units <= first_units {
+            first_factor
+        } else if longest_run_units >= last_units {
+            last_factor
+        } else {
+            factors
+                .iter()
+                .find(|(units, _)| *units == longest_run_units)
+                .map(|(_, factor)| *factor)
+                .expect("la tabla cubre todo el tramo medido, unidad a unidad")
+        }
+    };
+    // La forma del modelo, reescrita aquí: la tasa por longitud de motivo
+    // **modulada por la longitud del tracto**, más la dependencia lineal de la
+    // tirada ininterrumpida más larga, acotada a [0,1].
+    let probability =
+        (probability * factor + coefficient * longest_run_units as f64).clamp(0.0, 1.0);
     let weights: Vec<f64> = ADMITTED_STEPS
         .iter()
         .map(|step| {
@@ -349,9 +425,32 @@ fn read_sequences(path: &Path) -> Vec<Vec<u8>> {
 fn run(rate: f64) -> Published {
     let root = temporary();
     fs::create_dir_all(&root).expect("directorio");
-    let tract = "CA".repeat(5);
-    let bases = format!("{}{tract}{}", "G".repeat(135), "G".repeat(135));
-    assert_eq!(bases.len(), 280);
+    // **Trece unidades, no cinco.** Veintiséis pares de base caen **dentro**
+    // del tramo medido de la curva de dinucleótidos y **no** en su ancla, de
+    // modo que el factor de modulación vale 0,398 y no 1: si el validador
+    // independiente no lo aplicara, o lo aplicara mal, sus recuentos dejarían
+    // de coincidir con los publicados. Con el tracto de cinco unidades que
+    // tenía antes, el factor valía 0,0038 y con la tasa a 0,5 no tartamudeaba
+    // ninguna molécula: los controles positivos de esta batería lo cazaron.
+    //
+    // # La aritmética que mete el tracto en el solapamiento de los dos mates
+    //
+    // La copia mide `L` y la molécula es `copia[s, s+I)` con inserto
+    // `I ∈ [250, L]`, de modo que `s ≤ L − 250`. R1 es `molécula[0, 150)` y R2
+    // es `molécula[I−150, I)`. Un tracto en `[a, a+T)` cabe entero en **los
+    // dos** para cualquier `s` e `I` exactamente cuando `a ≥ L − 150` y
+    // `a + T ≤ 150`, es decir cuando cabe en una ventana de `300 − L` bases.
+    // Con la copia de 280 que tenía este fixture esa ventana medía 20 bases y
+    // no daba para trece unidades; con 264 mide 36, y el tracto más su mayor
+    // expansión —una unidad más, 28 bases— entra con holgura por los dos
+    // lados.
+    let tract = "CA".repeat(13);
+    let bases = format!(
+        "{}{tract}{}",
+        "G".repeat(116),
+        "G".repeat(264 - 116 - tract.len())
+    );
+    assert_eq!(bases.len(), 264);
     fs::write(root.join("reference.fa"), format!(">chr1\n{bases}\n")).expect("FASTA");
     fs::write(
         root.join("population-snvs.tsv"),
@@ -378,12 +477,12 @@ fasta = "reference.fa"
 [[reference.sequences]]
 id = "chr1"
 class = "chromosome"
-length = 280
+length = 264
 
 [[reference.repeat_loci]]
 id = "STR-1"
 sequence = "chr1"
-start = 136
+start = 120
 end = 145
 motif = "CA"
 
@@ -483,7 +582,7 @@ fn reverse_complement(sequence: &[u8]) -> Vec<u8> {
 fn the_independent_recomputation_matches_the_published_aggregates() {
     let published_run = run(0.5);
     let event = published_run.event();
-    let recomputed = recompute(&published_run.effective(), &event, 5);
+    let recomputed = recompute(&published_run.effective(), &event, TRACT_UNITS);
     assert!(
         recomputed.stuttered > 0,
         "con la tasa a 0,5 tiene que haber tartamudeos, o la comparación no compara nada"
@@ -510,7 +609,7 @@ fn a_mutated_manifest_count_is_rejected() {
     let original = published(&event);
     let inflated = original.stuttered + 1;
     event["artifacts"]["stutter"]["stuttered_tracts"] = Value::from(inflated);
-    let recomputed = recompute(&published_run.effective(), &event, 5);
+    let recomputed = recompute(&published_run.effective(), &event, TRACT_UNITS);
     assert_ne!(
         recomputed,
         published(&event),
@@ -547,7 +646,7 @@ fn both_mates_of_every_published_pair_agree_on_the_unit_count() {
 fn a_zero_rate_recomputes_to_no_stutter_at_all() {
     let published_run = run(0.0);
     let event = published_run.event();
-    let recomputed = recompute(&published_run.effective(), &event, 5);
+    let recomputed = recompute(&published_run.effective(), &event, TRACT_UNITS);
     assert_eq!(recomputed.stuttered, 0);
     assert_eq!(recomputed, published(&event));
 }
@@ -563,10 +662,10 @@ fn a_zero_rate_recomputes_to_no_stutter_at_all() {
 /// molécula— las satisfaría todas. Se ha medido: esa edición sobrevive a las
 /// otras cuatro pruebas.
 ///
-/// Aquí se cierra el lazo. El tracto tiene **cinco unidades** y el paso se
+/// Aquí se cierra el lazo. El tracto tiene **trece unidades** y el paso se
 /// elige entre `{−3,−2,−1,+1}`, de modo que una molécula publicada solo puede
-/// mostrar 2, 3, 4, 5 o 6 unidades, y cada tamaño corresponde a un paso y solo
-/// a uno. Se cuenta cada tamaño en los ficheros de lecturas y se compara con la
+/// mostrar 10, 11, 12, 13 o 14 unidades, y cada tamaño corresponde a un paso y
+/// solo a uno. Se cuenta cada tamaño en los ficheros de lecturas y se compara con la
 /// distribución de pasos **rederivada**, no con la publicada.
 ///
 /// *Vale para escenarios sin contaminación biológica*, y este lo es: con
@@ -574,9 +673,12 @@ fn a_zero_rate_recomputes_to_no_stutter_at_all() {
 /// muestreadas y la correspondencia de uno a uno se rompe.
 #[test]
 fn the_recomputed_decisions_match_the_units_written_in_the_reads() {
-    const REFERENCE_UNITS: i64 = 5;
     let published_run = run(0.5);
-    let recomputed = recompute(&published_run.effective(), &published_run.event(), 5);
+    let recomputed = recompute(
+        &published_run.effective(),
+        &published_run.event(),
+        TRACT_UNITS,
+    );
     let (r1, _) = published_run.mates();
     assert!(!r1.is_empty());
 
@@ -584,7 +686,7 @@ fn the_recomputed_decisions_match_the_units_written_in_the_reads() {
     let mut observed: std::collections::BTreeMap<i64, u64> = std::collections::BTreeMap::new();
     for read in &r1 {
         let seen = i64::try_from(units(read, b"CA")).expect("unidades");
-        *observed.entry(seen - REFERENCE_UNITS).or_insert(0) += 1;
+        *observed.entry(seen - TRACT_UNITS as i64).or_insert(0) += 1;
     }
 
     // Lo que las decisiones rederivadas predicen que debería haber, con el

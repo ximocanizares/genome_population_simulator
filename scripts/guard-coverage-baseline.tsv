@@ -13,6 +13,14 @@
 # caso de que la guarda estuviera mal escrita. Es un suelo, no un techo de
 # calidad.
 #
+# **Y solo mira estos tres módulos.** No mira `src/results.rs` ni
+# `src/event_manifest.rs`, que son los que comprueban la configuración
+# efectiva y el manifiesto de evento. Anotado el 27/09/2026, porque eso es
+# exactamente lo que permitió que ciento treinta líneas de guarda del
+# manifiesto vivieran sin que ninguna prueba las ejercitara como rechazo:
+# sustituirlas enteras por una línea dejaba pasar la batería y esta puerta no
+# se enteraba. Ampliar la puerta a esos dos módulos está sin decidir.
+#
 # Medido el 23/09/2026.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	168
