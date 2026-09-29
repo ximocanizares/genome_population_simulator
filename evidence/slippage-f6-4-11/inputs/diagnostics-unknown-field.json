@@ -1,0 +1,7 @@
+{
+  "diagnostic_kind": "gps_diagnostics",
+  "schema_version": "1",
+  "exit_code": 0,
+  "diagnostics": [],
+  "unknown_field": true
+}

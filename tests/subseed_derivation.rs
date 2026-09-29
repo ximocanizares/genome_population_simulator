@@ -1,7 +1,10 @@
+use genome_population_simulator::identity::{EventId, LibraryId, RepeatLocusId};
 use genome_population_simulator::randomness::{
     DERIVATION_CONTEXT, DERIVATION_VERSION, F1_ACTIVE_SUBSEED_SCOPES, F2_DERIVATION_VERSION,
-    RootSeed, RuntimeSubseedScope, SUBSEED_CATALOG_VERSION, derive_subseed,
+    F4TechnicalDecision, RootSeed, RuntimeSubseedScope, SUBSEED_CATALOG_VERSION,
+    derive_f4_technical_subseed, derive_subseed,
 };
+use genome_population_simulator::repeat_slippage::slippage_subseed;
 use sha2::{Digest, Sha256};
 
 const ROOT: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -261,6 +264,137 @@ fn published_catalogs_are_immutable_and_v8_has_an_independent_oracle() {
             .is_some_and(|row| row.starts_with("initial_repeat_allele|"))
     );
     verify_catalog_with_independent_oracle(v9, F2_DERIVATION_VERSION);
+
+    let v10 = include_str!("../catalogs/subseed-scopes-v10.tsv");
+    assert_eq!(
+        encode_hex(&Sha256::digest(v10.as_bytes())),
+        "9509f6930124f09c27ba78498b79c68b8e6bcb4308c6bf163d1b346101057ee0"
+    );
+    assert!(v10.starts_with(
+        "# derivation_versions=1,2\n# catalog_version=10\n# context=genome_population_simulator/v1/subseed\n"
+    ));
+    let v10_rows = v10
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    assert_eq!(&v10_rows[..v9_rows.len()], v9_rows);
+    assert_eq!(v10_rows.len(), v9_rows.len() + 1);
+    assert!(
+        v10_rows
+            .last()
+            .is_some_and(|row| row.starts_with("initial_repeat_slippage|"))
+    );
+    verify_catalog_with_independent_oracle(v10, F2_DERIVATION_VERSION);
+}
+
+/// **El ámbito del deslizamiento biológico deriva lo que su fila congelada
+/// dice, y no otra cosa.**
+///
+/// Sin esta prueba el catálogo se comprobaría **consigo mismo**: la fila diría
+/// qué componentes tiene el ámbito y nadie contrastaría que el generador los
+/// usa. Renombrar uno —lo que cambia todos los abanicos y deja la fila
+/// describiendo algo que el programa ya no hace— pasaría la batería entera.
+///
+/// La subsemilla se pide por [`slippage_subseed`], que es **la que el generador
+/// usa de verdad**, no por una derivación escrita a mano junto a la aserción:
+/// esa segunda forma comprobaría el catálogo contra sí mismo otra vez.
+#[test]
+fn the_biological_slippage_scope_derives_exactly_what_its_frozen_row_says() {
+    let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
+    let row = include_str!("../catalogs/subseed-scopes-v10.tsv")
+        .lines()
+        .find(|row| row.starts_with("initial_repeat_slippage|"))
+        .expect("fila congelada del ámbito");
+    let fields = row.split('|').collect::<Vec<_>>();
+    assert_eq!(fields.len(), 5, "la fila tiene sus cinco columnas");
+    assert_eq!(
+        fields[1],
+        "scenario_id=direct;reference_id=reference-main;locus_id=locus-main"
+    );
+    let derived = slippage_subseed(root, "reference-main", "locus-main")
+        .expect("subsemilla del generador")
+        .to_hex();
+    assert_eq!(derived, fields[4], "el código y su fila congelada divergen");
+
+    // **Y cada componente aísla de verdad.** Si alguno no entrara en el
+    // material, la fila mentiría sobre qué separa un abanico de otro.
+    for (name, reference_id, locus_id) in [
+        ("reference_id", "reference-other", "locus-main"),
+        ("locus_id", "reference-main", "locus-other"),
+    ] {
+        let mutated = slippage_subseed(root, reference_id, locus_id)
+            .expect("subsemilla")
+            .to_hex();
+        assert_ne!(
+            mutated, derived,
+            "cambiar {name} tiene que aislar la subsemilla"
+        );
+    }
+}
+
+/// **El deslizamiento biológico y el tartamudeo no comparten ámbito de azar**,
+/// y esta es la prueba que lo demuestra.
+///
+/// # Por qué esta comparación y no otra
+///
+/// La comprobación que parece natural —«cambiar los ciclos de PCR no cambia ni
+/// un alelo de la verdad»— **no caza un ámbito compartido**: se cumple sola,
+/// porque DTC-081 exige que cada decisión arranque su propio generador desde su
+/// clave, de modo que un consumidor no desplaza al otro, y porque la verdad se
+/// genera **antes** que las lecturas. Lo que sí caza el ámbito compartido es
+/// comparar **las dos subsemillas**, que es lo que se hace aquí.
+///
+/// El fixture está **saturado a propósito**: la misma semilla raíz, el mismo
+/// identificador para el evento y para la referencia, y el mismo locus. Con
+/// todo lo demás indistinguible, lo único que puede separar las dos
+/// subsemillas es el ámbito, que es justo lo que se quiere medir. Si el
+/// generador pasara a derivar por el ámbito del tartamudeo, las dos coincidirían
+/// y esta aserción moriría.
+#[test]
+fn biological_slippage_and_stutter_never_share_a_subseed() {
+    let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
+    let shared = "shared-identity";
+    let event = EventId::parse(shared, "technical_event").expect("identificador de evento");
+    let library =
+        LibraryId::parse("LIB_EB6VHCIWUACHDO7B5IVJ5RXTCQ", "library").expect("biblioteca");
+    let locus = RepeatLocusId::parse(shared, "repeat_locus").expect("locus");
+
+    let biological = slippage_subseed(root, shared, shared).expect("subsemilla del generador");
+    let stutter_bernoulli = derive_f4_technical_subseed(
+        root,
+        F4TechnicalDecision::stutter_bernoulli(&event, &library, 0, &locus),
+    )
+    .expect("subsemilla del ensayo de tartamudeo");
+    let stutter_step = derive_f4_technical_subseed(
+        root,
+        F4TechnicalDecision::stutter_step(&event, &library, 0, &locus),
+    )
+    .expect("subsemilla del paso de tartamudeo");
+
+    assert_ne!(
+        biological.to_hex(),
+        stutter_bernoulli.to_hex(),
+        "la verdad y el ensayo de tartamudeo comparten subsemilla"
+    );
+    assert_ne!(
+        biological.to_hex(),
+        stutter_step.to_hex(),
+        "la verdad y el paso de tartamudeo comparten subsemilla"
+    );
+    // **Control positivo**: las dos del tartamudeo sí se derivan por el mismo
+    // camino y difieren solo en su decisión. Sin él, una comparación que
+    // devolviera siempre «distintas» pasaría igual.
+    assert_ne!(stutter_bernoulli.to_hex(), stutter_step.to_hex());
+    assert_eq!(
+        derive_f4_technical_subseed(
+            root,
+            F4TechnicalDecision::stutter_step(&event, &library, 0, &locus),
+        )
+        .expect("subsemilla")
+        .to_hex(),
+        stutter_step.to_hex(),
+        "la derivación del tartamudeo tiene que ser estable"
+    );
 }
 
 /// **El ámbito del sorteo de alelos de repetición deriva lo que su fila
@@ -363,10 +497,10 @@ individual_id=individual-main;copy_index=1;locus_id=locus-main"
 }
 
 #[test]
-fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v9() {
+fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v10() {
     let root = RootSeed::parse("root", ROOT).expect("frozen 256-bit root");
     assert_eq!(DERIVATION_VERSION, 1);
-    assert_eq!(SUBSEED_CATALOG_VERSION, "9");
+    assert_eq!(SUBSEED_CATALOG_VERSION, "10");
     assert_eq!(
         derive_subseed(
             root,
@@ -390,7 +524,7 @@ fn f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v9() {
         .to_hex(),
         "20c4a19ada8e8cdfce862db5b3423fd8250be2a61cf83321b4a6fb9210963169"
     );
-    let active_row = include_str!("../catalogs/subseed-scopes-v9.tsv")
+    let active_row = include_str!("../catalogs/subseed-scopes-v10.tsv")
         .lines()
         .find(|row| row.starts_with("reference_reduction|"))
         .expect("active reduction catalog row");

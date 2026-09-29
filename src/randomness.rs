@@ -13,7 +13,7 @@ use crate::identity::{F5BlockId, F5SiteId, IndividualId, PopulationId, ScenarioI
 pub const DERIVATION_VERSION: u32 = 1;
 pub const F2_DERIVATION_VERSION: u32 = 2;
 pub const SUBSEED_DERIVATION_VERSIONS: &[u32] = &[DERIVATION_VERSION, F2_DERIVATION_VERSION];
-pub const SUBSEED_CATALOG_VERSION: &str = "9";
+pub const SUBSEED_CATALOG_VERSION: &str = "10";
 pub const DERIVATION_CONTEXT: &str = "genome_population_simulator/v1/subseed";
 pub const RANDOM_ALGORITHM: &str = "ChaCha12";
 pub const REFERENCE_REDUCTION_SELECTOR: &str = "direct_proportional_selection";
@@ -262,6 +262,25 @@ pub enum RuntimeSubseedScope<'a> {
         population_id: &'a str,
         individual_id: &'a str,
         copy_index: u8,
+        locus_id: &'a str,
+    },
+    /// Generación del abanico de alelos de un locus por **deslizamiento
+    /// biológico** (F6.4.11).
+    ///
+    /// **No puede compartir ámbito con el tartamudeo**, aunque el mecanismo
+    /// físico sea el mismo: este decide la **verdad** y aquel las **lecturas**.
+    /// Se identifica por el evento —que es el nombre del propio ámbito— y por
+    /// el **identificador del locus**, nunca por la posición del tracto ni por
+    /// el orden en que los loci se declararon. La consecuencia observable es
+    /// que insertar un locus que ordene antes que los existentes no cambia el
+    /// abanico de los previos.
+    ///
+    /// Es **un ámbito por locus**, no por copia: el abanico y sus frecuencias
+    /// son una propiedad de la población entera, y el reparto entre copias lo
+    /// decide después `initial_repeat_allele`, que sí es por copia.
+    InitialRepeatSlippage {
+        scenario_id: &'a str,
+        reference_id: &'a str,
         locus_id: &'a str,
     },
 }
@@ -603,6 +622,19 @@ pub fn derive_subseed(
             root,
             "technical_library_count",
             &[("event_id", event_id), ("library_id", library_id)],
+        )?,
+        RuntimeSubseedScope::InitialRepeatSlippage {
+            scenario_id,
+            reference_id,
+            locus_id,
+        } => canonical_material_v2(
+            root,
+            "initial_repeat_slippage",
+            &[
+                ("scenario_id", scenario_id),
+                ("reference_id", reference_id),
+                ("locus_id", locus_id),
+            ],
         )?,
     };
     Ok(Subseed(blake3::derive_key(DERIVATION_CONTEXT, &material)))
@@ -2608,7 +2640,7 @@ pub fn f4_bernoulli(rng: &mut LocalRng, probability: f64) -> Result<bool, Random
     f4_bernoulli_with_source(rng, probability)
 }
 
-fn f4_bernoulli_with_source(
+pub(crate) fn f4_bernoulli_with_source(
     rng: &mut impl RandomWordSource,
     probability: f64,
 ) -> Result<bool, RandomSamplingError> {
@@ -3098,7 +3130,7 @@ pub fn poisson_count(rng: &mut LocalRng, lambda: f64) -> Result<u64, RandomSampl
     poisson_count_with_source(rng, lambda, None)
 }
 
-fn poisson_count_with_source(
+pub(crate) fn poisson_count_with_source(
     rng: &mut impl RandomWordSource,
     lambda: f64,
     candidate_override: Option<f64>,
@@ -3135,8 +3167,24 @@ fn poisson_count_with_source(
         let us = 0.5 - u.abs();
         let candidate = candidate_override
             .unwrap_or_else(|| libm::floor((2.0 * a / us + b) * u + lambda + 0.43));
-        if !(0.0..=9_007_199_254_740_991.0).contains(&candidate) {
+        // **Un candidato negativo se RECHAZA y se repite**, que es lo que el
+        // método pide. Antes devolvía error, y eso convertía una media
+        // perfectamente legal en un fallo interno que dependía de dónde cayera
+        // la secuencia de azar: el mismo valor aceptaba sobre un tracto y
+        // abortaba sobre otro. Ver DT-010.
+        //
+        // Un candidato **no numérico** sigue siendo error: no se puede repetir
+        // lo que no tiene valor, y reintentarlo sería un bucle sin salida. El
+        // candidato forzado tampoco se repite, por la misma razón: es un gancho
+        // de prueba y tiene que terminar.
+        if candidate.is_nan() || candidate > 9_007_199_254_740_991.0 {
             return Err(RandomSamplingError::NumericFailure);
+        }
+        if candidate < 0.0 {
+            if candidate_override.is_some() {
+                return Err(RandomSamplingError::NumericFailure);
+            }
+            continue;
         }
         if us >= 0.07 && v <= vr {
             return Ok(candidate as u64);
@@ -3525,6 +3573,36 @@ mod tests {
         let mut rng = Scripted::new(&[1 << 63, u64::MAX, 1 << 63, 0]);
         assert_eq!(poisson_count_with_source(&mut rng, 10.0, None), Ok(10));
         assert_eq!(rng.consumed, 4);
+    }
+
+    /// **Un candidato negativo se rechaza y se repite; no aborta la ejecución.**
+    ///
+    /// # La aritmética, para que se pueda seguir sin ejecutar nada
+    ///
+    /// Con media 10 el método usa `b = 8,93` y `a = 0,163`. La primera palabra
+    /// se elige para que el uniforme valga `0,02`, de modo que `u = −0,48` y
+    /// `us = 0,02`: el candidato sale `floor(−12,1 + 10,43) = −2`, **negativo**.
+    /// Y `us` queda por encima de `0,013`, que es lo que hace que la iteración
+    /// llegue a la comprobación de dominio en vez de salir por el rechazo
+    /// ordinario que ya existía.
+    ///
+    /// La segunda pareja de palabras acepta por el camino corto —`us ≈ 0,5` y
+    /// `v ≈ 0`— y devuelve `10`. Cuatro palabras en total.
+    ///
+    /// **Contra qué muere:** contra la versión anterior, que devolvía
+    /// `NumericFailure` en vez de repetir, y convertía una media legal en un
+    /// fallo interno que dependía de dónde cayera la secuencia de azar. Es
+    /// DT-007.
+    #[test]
+    fn ptrs_negative_candidate_is_rejected_and_retried_instead_of_failing() {
+        // Uniforme 0,02: `((palabra >> 12) + 0,5) / 2^52 = 0,02`.
+        let negative_word = (((0.02_f64 * 4_503_599_627_370_496.0) - 0.5) as u64) << 12;
+        let mut rng = Scripted::new(&[negative_word, 1 << 62, 1 << 63, 0]);
+        assert_eq!(poisson_count_with_source(&mut rng, 10.0, None), Ok(10));
+        assert_eq!(
+            rng.consumed, 4,
+            "el candidato negativo consume su pareja y se repite"
+        );
     }
 
     #[test]

@@ -1,7 +1,8 @@
 # Registro de decisiones técnicas del simulador
 
 - **Versión:** 0.2
-- **Estado:** F1 cerrado; DTC-089 cierra las decisiones técnicas F5
+- **Estado:** F1 cerrado; DTC-089 cierra las decisiones técnicas F5;
+  DTC-094 a DTC-097 cierran el deslizamiento biológico de los microsatélites
 - **Fecha:** 1 de septiembre de 2026
 - **Especificación de origen:**
   [especificaciones-0.1.md](./especificaciones-0.1.md)
@@ -2081,3 +2082,222 @@ tolerancia inclusiva efectiva de cada bloque×subpoblación en `[0,0.5/C]`, con
 del RNG propio de cuotas. Las
 distribuciones de reproducción posteriores se deciden en sus fases y no
 bloquean F5.
+
+<a id="dtc-094"></a>
+
+## DTC-094 — Modelo escalonado de deslizamiento como servicio reutilizable
+
+El simulador tiene **un solo** modelo de deslizamiento de la polimerasa sobre
+un microsatélite, y se declara aquí una vez para los dos consumidores que lo
+usan: el deslizamiento **biológico**, que decide la verdad, y el **tartamudeo**,
+que ensucia las lecturas. Que el mecanismo físico sea el mismo no los convierte
+en el mismo componente, y DTC-096 fija por qué no pueden compartir azar.
+
+**Cada evento añade o elimina exactamente una unidad completa** del motivo,
+nunca una fracción ni un salto de varias unidades. El modelo se identifica por
+el literal `stepwise` y el tamaño de paso por el literal `1`; cualquier otro
+modelo y cualquier otro tamaño de paso **se rechazan antes de simular**,
+nombrando el parámetro y el valor rechazado. El salto de varias unidades queda
+fuera por DTF-015 y no se reabre aquí.
+
+La unidad se gana o se pierde **en la tirada ininterrumpida más larga** del
+tracto, con desempate por la izquierda, que es la misma regla que fija
+`TandemRepeatTract::apply_unit_step` y la misma que aplica el tartamudeo. No se
+escribe dos veces: es una sola operación del dominio con dos consumidores.
+
+**Regla del borde.** Un paso que dejaría **menos de una unidad completa en la
+tirada más larga** no es viable, y tampoco lo es uno que rebasaría el **tope de
+unidades** del locus. Cuando falta alguno de los dos pasos admitidos, el linaje
+ha llegado a un **borde** y **se detiene ahí**: el evento **no se aplica**, **no
+consume aleatoriedad** y **se cuenta aparte**, y los eventos que le quedaban
+tampoco se aplican. No es un error: un microsatélite que ha llegado a su mínimo
+es un resultado biológico legítimo.
+
+**El borde no empuja, y esto se decidió con las dos opciones delante.** La
+primera implementación aplicaba el paso que quedaba, de modo que un linaje que
+tocaba el tope se iba contrayendo paso a paso, todos sus eventos se contaban
+como aplicados, ninguno como no aplicado, y el documento publicaba un sesgo
+intermedio cuando no había habido ni una expansión: **el borde decidía la
+biología en lugar del sesgo**. El responsable lo resolvió el 27 de septiembre de
+2026 y descartó expresamente dejar que el borde empujara. Rige **en el tope y en
+el suelo**, con el signo cambiado.
+
+*Cuidado con el fixture.* Con un sesgo de exactamente 0 o exactamente 1 las dos
+conductas son **indistinguibles**, porque el paso que el borde deja fuera es
+justo el que el sesgo ya anulaba. Toda comprobación de esta regla necesita un
+**sesgo intermedio**.
+
+El recuento de eventos no aplicados **se publica**. Sin él, un servicio que
+ignorase en silencio los eventos sobrantes y otro que los contase producirían el
+mismo tracto final y ninguna comprobación podría distinguirlos.
+
+El ensayo que elige entre expandir y contraer es `bernoulli-v1` sobre el sesgo
+de expansión declarado, y **las probabilidades exactas 0 y 1 no consumen
+aleatoriedad**: un sesgo extremo no puede desplazar la secuencia de azar de
+nada.
+
+<a id="dtc-095"></a>
+
+## DTC-095 — Generador del abanico de alelos por deslizamiento biológico
+
+Es **condición de cierre** de la simulación de microsatélites: mientras no
+exista, los alelos de un locus y sus frecuencias los escribe el usuario a mano.
+El algoritmo lo adoptó el responsable el 20 de septiembre de 2026 y es el
+siguiente, sin variantes.
+
+Se simulan **tantos linajes independientes como copias haplotípicas** tenga la
+población: una copia, un linaje. Cada linaje parte del **alelo que el genoma de
+referencia lleva en el locus** y recibe un **número de pasos sorteado de una
+Poisson de media declarada**, con `poisson-count-v1`, que es el único recuento
+normativo del proyecto (DTC-067). Cada paso lo da el servicio escalonado de
+DTC-094 con el sesgo declarado. **La frecuencia de cada alelo es la proporción
+de linajes que terminan en él**, y las frecuencias se auditan con la suma
+compensada de DTC-049 en vez de darse por uno.
+
+El alelo de la referencia entra en el abanico **si algún linaje termina en él**,
+y **su presencia no se fuerza**. Que desaparezca depende de los parámetros que
+se den, no del modelo: con una media de pasos baja la mayoría de los linajes no
+se mueven y el alelo está; con una media alta puede perderse, que es lo que
+ocurre en una población real.
+
+Es **una sola tirada de inicialización de la diversidad**, no una simulación de
+generaciones. El modelo escalonado aplicado generación tras generación pertenece
+a la fase de evolución y este trabajo no la invade.
+
+**Alcance.** El generador solo admite un locus de **un motivo**: sin fronteras de
+bloque declaradas no hay forma de partir el tracto de la referencia en bloques,
+y un microsatélite compuesto se rechaza nombrando el locus. El tramo de la
+referencia tiene que contener **al menos una copia completa** del motivo, o no
+hay alelo ancestral del que partir. Y el escenario tiene que declarar **al menos
+una copia haplotípica**, porque sin linajes no hay abanico.
+
+**El tramo de la referencia tiene que caber bajo el tope del locus**, y se
+rechaza si no cabe, nombrando el parámetro y el valor. Mirando el tope solo al
+expandir se convertía en un «no crezcas más» y dejaba pasar un tramo que ya lo
+rebasaba: el mismo alelo escrito a mano se rechazaba desde la entrega 1 y
+generado se admitía. Peor aún, desde encima del tope la expansión nunca es
+viable, de modo que el generador quedaba **unidireccional** y el sesgo declarado
+dejaba de significar nada.
+
+**La media de pasos tiene techo declarado**, mil por linaje, en el código y en el
+esquema publicado. `poisson-count-v1` admite hasta `2^52` como primitiva, pero
+aquí el parámetro lo escribe el usuario: sin techo se va de las manos el coste
+—cada paso clona el tracto— y el sentido, porque un tracto tiene a lo sumo
+`max_units` unidades y un linaje se detiene al tocar un borde, de modo que por
+encima de unos pocos cientos de pasos la media deja de cambiar el resultado y
+solo cambia lo que se tarda. Mil está holgadamente por encima de cualquier
+tracto que este simulador admita: **solo rechaza, y no cambia el resultado de
+ningún escenario aceptado**.
+
+**Excluyente con los alelos declarados.** Un locus o declara sus alelos con sus
+frecuencias, o declara el generador. Las dos cosas a la vez dejarían sin
+respuesta la pregunta que el manifiesto contesta por cada alelo: de dónde salió.
+
+**Tres limitaciones declaradas, que son decisiones biológicas y no detalles.**
+Viajan en la documentación del generador **y en cada documento publicado**,
+palabra por palabra:
+
+1. **No hay ancestría compartida.** Cada copia deriva por su cuenta desde el
+   ancestro, de modo que dos individuos emparentados no comparten historia en
+   este locus. El espectro de frecuencias resultante es **más plano** que el de
+   una población real, donde la deriva concentra unos pocos alelos. Importa si
+   el conjunto se usa para probar herramientas de estructura poblacional.
+2. **El número de pasos no es un proceso en el tiempo.** Cada copia acumula un
+   número aleatorio de mutaciones sin decir en cuántas generaciones. Es coherente
+   con que esto sea una sola tirada de inicialización.
+3. **El genoma de referencia puede llevar un alelo que ningún individuo tiene.**
+   Es real y ocurre, pero conviene saberlo antes de encadenar un análisis que lo
+   dé por imposible.
+
+**Cuándo se ejecuta.** El alelo ancestral son bases de la referencia, de modo que
+el generador corre **después de preparar la referencia y antes de publicar
+nada**: un rechazo suyo no deja un solo byte escrito. Corre igual en `validate`
+y en `run`, para que los dos vean lo mismo.
+
+**El juez rehace el abanico y lo contrasta**, y esto es una obligación y no una
+descripción. El juez que relee los documentos publicados **vuelve a recorrer los
+linajes por su cuenta** —con su propio filtro de viabilidad, su propia regla del
+borde, su propio recuento por alelo y su propio orden canónico— desde la
+referencia, los parámetros y la semilla **publicados**, y compara alelo a alelo.
+Reconstruir la configuración llamando al productor **no cuenta**: eso compara el
+abanico consigo mismo. Se midió por qué importa: emparejando cada alelo con la
+frecuencia del simétrico de la lista, el espectro se publicaba del revés y toda
+la batería seguía en verde.
+
+La versión del algoritmo es `biological-slippage-v1` y se publica con cada
+abanico.
+
+<a id="dtc-096"></a>
+
+## DTC-096 — Ámbito de azar propio del deslizamiento biológico
+
+El deslizamiento biológico y el tartamudeo comparten mecanismo físico y **no
+pueden compartir ámbito de azar**, porque uno decide la **verdad** y el otro las
+**lecturas**. Si los alelos verdaderos salieran del modelo de tartamudeo,
+cambiar el número de ciclos de PCR cambiaría el genotipo real de los individuos:
+un parámetro de laboratorio decidiendo la biología.
+
+El ámbito del generador es `initial_repeat_slippage`, nace en la versión **10**
+del catálogo de ámbitos —`catalogs/subseed-scopes-v10.tsv`, que conserva
+literalmente las filas de la versión 9— y se identifica por el **evento**, que es
+el nombre del propio ámbito, y por el **identificador del locus**, junto al
+escenario y la referencia. **Ni la posición del tracto ni el orden en que los
+loci se declararon entran.** La consecuencia observable es la que importa:
+insertar un locus que ordene antes que los existentes **no cambia el abanico de
+los previos**.
+
+Es **un ámbito por locus**, no por copia: el abanico y sus frecuencias son una
+propiedad de la población entera, y el reparto entre copias lo decide después
+`initial_repeat_allele`, que sí es por copia.
+
+**Lo que no demuestra la separación, y conviene dejarlo escrito porque parece
+que sí.** La comprobación «cambiar los ciclos de PCR no cambia ni un alelo de la
+verdad» **no caza un ámbito compartido**: se cumple sola. Compartir ámbito en
+este proyecto significa derivar la misma subsemilla, y DTC-081 exige que cada
+decisión arranque su propio generador desde su clave y que no haya consumo
+acumulado, de modo que un consumidor no desplaza al otro; además la verdad se
+genera **antes** que las lecturas. Lo que sí caza un ámbito compartido es
+**comparar las dos subsemillas** para la misma terna de identidades. La
+comprobación antigua se conserva como prueba de sistema —es buena contra un
+generador que leyera la configuración del tartamudeo por error— y su
+documentación dice que no es la prueba del ámbito.
+
+<a id="dtc-097"></a>
+
+## DTC-097 — Publicación del origen de cada alelo de repetición
+
+La configuración efectiva y el manifiesto general publican, **por alelo y no por
+locus**, su **origen**: `declared` cuando lo escribió el usuario y `generated`
+cuando lo produjo el generador de DTC-095. Va por alelo porque un documento con
+loci de los dos tipos tiene que poder distinguirlos sin volver a la
+configuración, y porque quien encadene un análisis necesita saber si una
+frecuencia la escribió una persona o la produjo un modelo. El origen del alelo y
+el del locus tienen que concordar: un locus con generador no publica alelos
+declarados, ni al revés.
+
+Un locus generado publica además su bloque `slippage` con, exactamente: el
+modelo y el tamaño de paso —literales fijos—, la media de pasos y el sesgo de
+expansión declarados, la **versión del algoritmo**, las de los dos algoritmos de
+azar que consume, el **nombre del ámbito de azar** y la **versión del catálogo de
+ámbitos**, las **tres limitaciones** del modelo palabra por palabra, y la
+contabilidad de la generación: linajes, pasos sorteados, pasos aplicados y
+**pasos no aplicados al agotar el tracto**. Los pasos aplicados más los no
+aplicados tienen que sumar exactamente los sorteados, y el lector de los
+documentos publicados lo comprueba, porque sumar dos campos y compararlos con un
+tercero no es expresable en JSON Schema.
+
+Las frecuencias **declarada** y **realizada** conservan su significado de
+siempre: la declarada es la que el modelo o la persona fijó, y la realizada la
+proporción de copias que el sorteo dio a ese alelo. Para un alelo generado la
+declarada es la proporción de linajes que terminaron en él, y el origen que
+viaja a su lado deja claro que nadie la escribió.
+
+La **cota de bases de tracto** se recomputa después de generar: sale de los
+alelos, y los alelos acaban de nacer. Dejarla como estaba publicaría una cota
+falsa y el juez independiente encontraría lo realizado por encima de lo acotado.
+El tope declarado se vuelve a aplicar en ese momento, que sigue siendo antes de
+publicar nada.
+
+Un escenario que **no** use el generador conserva sus bytes: sin loci de
+repetición el documento no estrena sección ninguna, y con loci declarados lo
+único que cambia es el marcador `origin` que esta decisión exige.

@@ -112,14 +112,33 @@ def individuals_panel(
     return mo.vstack(children)
 
 
+# Los dos valores del selector de procedencia de los alelos. Viven aquí, junto
+# al panel que los usa, para que la interfaz y sus pruebas no puedan discrepar.
+REPEAT_ALLELE_SOURCE_DECLARED = "Declarar los alelos"
+REPEAT_ALLELE_SOURCE_GENERATED = "Generarlos por deslizamiento"
+REPEAT_ALLELE_SOURCES = (
+    REPEAT_ALLELE_SOURCE_DECLARED,
+    REPEAT_ALLELE_SOURCE_GENERATED,
+)
+
+
 def repeats_panel(
     mo,
     repeat_loci_editor,
+    repeat_allele_source_control,
     repeat_alleles_editor,
     repeat_interruptions_editor,
+    repeat_slippage_editor,
     repeat_admission_controls,
 ):
     """Render the tandem repeat authoring controls; Rust stays the authority.
+
+    **El selector de procedencia decide qué se ve.** Con «declarar» se muestran
+    la tabla de alelos y la de interrupciones y **no** la del generador; con
+    «generar» se muestra la del generador y **no** las otras dos. No es un
+    adorno: declarar los alelos y pedir además que se generen es excluyente, y
+    una interfaz que enseñara las dos cosas a la vez invitaría a escribir un
+    documento que el lector rechaza.
 
     Lo que **no** hay aquí es tan normativo como lo que hay: no existe control
     de pureza objetivo, porque la pureza no se declara nunca —se calcula sobre
@@ -127,37 +146,63 @@ def repeats_panel(
     paso posterior. Una casilla que los ofreciera prometería algo que el
     simulador rechaza.
     """
-    return mo.vstack(
-        [
-            mo.md("## Repeticiones en tándem"),
-            mo.callout(
-                "Declare cada locus con su motivo y su posición, y sus alelos con "
-                "su tamaño y su frecuencia. La pureza no se declara: se calcula "
-                "sobre la secuencia de cada alelo. Las frecuencias de un locus "
-                "deben sumar uno dentro de la tolerancia de normalización.",
-                kind="info",
-            ),
-            mo.md("### Loci"),
-            repeat_loci_editor,
-            mo.md("### Alelos por locus"),
-            repeat_alleles_editor,
-            mo.callout(
-                "Cada alelo declara `units` —un valor por bloque, separados por "
-                "comas— o `sequence` con sus bases exactas; son excluyentes.",
-                kind="info",
-            ),
-            mo.md("### Interrupciones declaradas"),
-            repeat_interruptions_editor,
-            mo.callout(
-                "Una interrupción sustituye las bases del alelo desde `offset`. "
-                "Solo se admite en alelos declarados por `units`: uno declarado "
-                "por su secuencia ya las lleva dentro.",
-                kind="info",
-            ),
-            mo.md("### Mínimos generales de admisión"),
-            repeat_admission_controls,
-        ]
+    generating = getattr(repeat_allele_source_control, "value", None) == (
+        REPEAT_ALLELE_SOURCE_GENERATED
     )
+    children = [
+        mo.md("## Repeticiones en tándem"),
+        mo.callout(
+            "Declare cada locus con su motivo y su posición. Después elija si "
+            "sus alelos los escribe usted o los genera el simulador partiendo "
+            "del alelo que la referencia lleva en ese locus. La pureza no se "
+            "declara nunca: se calcula sobre la secuencia de cada alelo.",
+            kind="info",
+        ),
+        mo.md("### Loci"),
+        repeat_loci_editor,
+        mo.md("### Procedencia de los alelos"),
+        repeat_allele_source_control,
+    ]
+    if generating:
+        children.extend(
+            [
+                mo.md("### Generador por deslizamiento"),
+                repeat_slippage_editor,
+                mo.callout(
+                    "Cada copia haplotípica deriva por su cuenta desde el alelo "
+                    "de la referencia, con un número de pasos sorteado de una "
+                    "Poisson de media `mean_events`. La frecuencia de cada alelo "
+                    "es la proporción de copias que terminan en él. El alelo de "
+                    "la referencia entra si alguna copia termina en él, y su "
+                    "presencia no se fuerza.",
+                    kind="info",
+                ),
+            ]
+        )
+    else:
+        children.extend(
+            [
+                mo.md("### Alelos por locus"),
+                repeat_alleles_editor,
+                mo.callout(
+                    "Cada alelo declara `units` —un valor por bloque, separados "
+                    "por comas— o `sequence` con sus bases exactas; son "
+                    "excluyentes. Las frecuencias de un locus deben sumar uno "
+                    "dentro de la tolerancia de normalización.",
+                    kind="info",
+                ),
+                mo.md("### Interrupciones declaradas"),
+                repeat_interruptions_editor,
+                mo.callout(
+                    "Una interrupción sustituye las bases del alelo desde "
+                    "`offset`. Solo se admite en alelos declarados por `units`: "
+                    "uno declarado por su secuencia ya las lleva dentro.",
+                    kind="info",
+                ),
+            ]
+        )
+    children.extend([mo.md("### Mínimos generales de admisión"), repeat_admission_controls])
+    return mo.vstack(children)
 
 
 def pcr_panel(

@@ -3,7 +3,7 @@
 Los ficheros `subseed-scopes-v1.tsv`, `subseed-scopes-v2.tsv`,
 `subseed-scopes-v3.tsv`, `subseed-scopes-v4.tsv`, `subseed-scopes-v5.tsv`,
 `subseed-scopes-v6.tsv`, `subseed-scopes-v7.tsv`, `subseed-scopes-v8.tsv`,
-`subseed-scopes-v9.tsv`,
+`subseed-scopes-v9.tsv`, `subseed-scopes-v10.tsv`,
 `id-classes-v1.tsv` e
 `id-classes-v2.tsv` e `id-classes-v3.tsv` fijan los contratos versionados
 de la codificación definida por DTC-037 y DTC-039. La versión 3 añade el ámbito
@@ -94,3 +94,14 @@ abrir ese ámbito y publica v1, con su ruta y su huella intactas.
 `sequence_id` y `phase_id`; `FHA_` identifica una asignación de bloque separada
 que enlaza `founder_copy_id` con `haplotype_id`. Los catálogos
 `id-classes-v1.tsv` a `id-classes-v3.tsv` permanecen inmutables.
+
+La v10 conserva literalmente las filas de la v9 y añade
+`initial_repeat_slippage`, el ámbito del **generador de alelos por
+deslizamiento biológico** (DTC-095 y DTC-096). Se identifica por escenario,
+referencia e **identificador de locus**: ni la posición del tracto ni el orden
+de declaración entran, de modo que insertar un locus que ordene antes que los
+existentes no cambia el abanico de los previos. Es **un ámbito por locus**, no
+por copia, porque el abanico es una propiedad de la población entera; el
+reparto entre copias sigue siendo de `initial_repeat_allele`. **No comparte
+ámbito con el tartamudeo**, que vive en el catálogo técnico F4: uno decide la
+verdad y el otro las lecturas.

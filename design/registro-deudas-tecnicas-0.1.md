@@ -550,3 +550,112 @@ o declarar que la discrepancia entra dentro de la tosquedad ya declarada de las
 tasas por ciclo. Si se decidiera por Fungtammasan, habría que rehacer la
 columna sin PCR de los mononucleótidos o la de con PCR, y con ella las seis
 probabilidades por ciclo publicadas.
+
+---
+
+## DT-010. El recuento de Poisson devolvía error donde el método pide repetir
+
+**Encontrada** el 27 de septiembre de 2026 por la revisión de cierre del
+generador de alelos. **Corregida el mismo día.** Se registra igualmente, porque
+tuvo alcance más allá de quien la destapó y porque conviene que conste cuánto
+tiempo vivió.
+
+### Qué pasaba
+
+`poisson-count-v1` usa, para medias de diez o más, el método de rechazo con
+transformación. Cuando el candidato que propone cae **fuera del dominio**, el
+método canónico **lo rechaza y repite**. Esta implementación **devolvía un
+error interno**. El resultado era que un parámetro perfectamente legal abortaba
+la ejecución con `NumericFailure`, y lo hacía **según dónde cayera la secuencia
+de azar**: el mismo valor aceptaba sobre un tracto y fallaba sobre otro.
+
+La revisión lo reprodujo con una media de veinte pasos sobre un tracto de tres
+unidades.
+
+### Desde cuándo, y a quién afecta
+
+El cuerpo era **idéntico byte a byte al del commit anterior** al generador de
+alelos, de modo que la deficiencia es anterior a ese trabajo. Lo que el
+generador añadió fue **exponerla a un parámetro que escribe el usuario** y cuyo
+esquema no ponía techo; los demás consumidores del recuento —la composición
+genotípica y el recuento estocástico por biblioteca del recorrido técnico—
+alimentan la media desde valores acotados por otras guardas, y por eso nadie se
+había tropezado con ella.
+
+### Qué se hizo
+
+Un candidato **negativo** se rechaza y se repite, que es lo que el método pide.
+Un candidato **no numérico** sigue siendo error: no se puede repetir lo que no
+tiene valor, y reintentarlo sería un bucle sin salida. Y la media de pasos del
+generador tiene ahora **techo declarado** en el esquema y en el código, mil
+pasos por linaje, holgadamente por encima de cualquier tracto que este
+simulador admita.
+
+**Ninguna ejecución que antes terminara cambia de resultado.** La rama nueva
+solo se toma donde la anterior devolvía error, de modo que un recorrido que
+acabó consumió las mismas palabras y obtuvo lo mismo. Las huellas congeladas del
+recorrido técnico no se mueven, y se comprobó.
+
+### Qué queda abierto
+
+Nada de esta deficiencia. Queda anotado, eso sí, que **el techo de la media es
+una guarda de la frontera y no del método**: `poisson-count-v1` sigue admitiendo
+medias hasta `2^52` para sus demás consumidores.
+
+---
+
+## DT-011. Dos rechazos del generador de alelos no se alcanzan desde una configuración
+
+**Anotada** el 27 de septiembre de 2026 por la revisión de cierre. No es un
+defecto: es una laguna de cobertura **declarada**, con la forma que este
+proyecto ya usó para otras.
+
+Los dos rechazos son:
+
+- **El tramo de la referencia sin ni una copia completa del motivo.** Con
+  referencia suministrada lo caza antes la guarda de admisión de los loci, que
+  exige una tirada mínima —tres unidades por omisión—; con referencia simulada
+  esa guarda no corre, pero el tracto lo pone el propio simulador.
+- **Las frecuencias generadas degeneradas.** Son proporciones de linajes con
+  denominador positivo, de modo que su suma solo podría no ser finita si el
+  recuento de eventos desbordara, y eso lo caza antes su propio rechazo.
+
+**Los dos se conservan y ninguno se borra**: son el contrato del generador y no
+pueden depender de que otra guarda siga existiendo donde está hoy. Los dos se
+ejercitan por las pruebas del módulo, que llaman al generador directamente; lo
+que **no** existe es un escenario de configuración que los alcance, y así se
+dice en la documentación de cada uno en vez de dejar creer que discriminan algo
+que nadie puede provocar desde fuera.
+
+### Qué haría falta para cerrarla
+
+Decidir si la guarda de admisión de los loci debe aplicarse también con
+referencia simulada. Es una decisión del responsable —la decisión S-06 la
+excluye a propósito— y no se toma aquí.
+
+---
+
+## DT-012. El barrido de opciones comprueba que el control existe, no que atienda a la opción
+
+**Anotada** el 27 de septiembre de 2026 por la revisión de cierre, que la
+demostró: añadió una opción al esquema del documento general, la apuntó en la
+tabla a un **control ajeno que ya existía**, y el barrido pasó.
+
+### Qué mide de verdad
+
+El barrido recorre las opciones declarables que el trabajo de microsatélites y
+amplificación añadió al esquema, y exige que **la tabla de controles cubra el
+esquema entero** y que el nombre de cada control aparezca en el cuaderno o en su
+panel. Eso impide lo que existe para impedir: **añadir una opción y olvidarse de
+darle control**, porque una opción sin fila en la tabla rompe la prueba.
+
+Lo que **no** demuestra es que el control apuntado **atienda** a esa opción. Es
+un suelo contra el olvido, no una demostración de que la interfaz hace lo que su
+fila dice.
+
+### Qué haría falta para cerrarla
+
+Ejecutar el cuaderno y observar el formulario que produce, opción a opción, en
+vez de buscar nombres en el texto de los ficheros. Es trabajo de otra clase —una
+prueba de la interfaz viva, no de su fuente— y no estaba en el alcance de esta
+entrega.

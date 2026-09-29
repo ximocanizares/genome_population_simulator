@@ -130,6 +130,12 @@ pub fn preflight_validated_config_with_authorizations(
     authorizations: ExecutionAuthorizations,
 ) -> Result<(), Diagnostic> {
     let prepared_reference = prepare_reference(effective)?;
+    // `validate` tiene que ver **lo mismo** que `run`, y eso incluye el abanico
+    // que el deslizamiento biológico genera: sin generarlo aquí, un escenario
+    // con loci generados pasaba la validación con los loci vacíos y solo
+    // fallaba al ejecutar, que es tarde.
+    let generated = effective.with_generated_repeat_alleles(prepared_reference.reference())?;
+    let effective: &EffectiveConfig = generated.as_ref().unwrap_or(effective);
     preflight_prepared_config(effective, authorizations, &prepared_reference).map(|_| ())
 }
 
@@ -143,6 +149,17 @@ fn execute_validated_config_with_effective_document(
 ) -> Result<ExecutionOutcome, Diagnostic> {
     let mut prepared_reference = prepare_reference(effective)?;
     after_prepare_reference(&mut prepared_reference)?;
+    // **El generador de alelos por deslizamiento corre aquí, y no antes.** El
+    // alelo del que parte cada linaje son las bases que la referencia lleva en
+    // el locus, y la referencia no existe hasta ahora. De aquí en adelante
+    // manda la configuración con los alelos dentro; si ningún locus declara
+    // generador, `generated` es `None` y se sigue usando la original, que es lo
+    // que garantiza que un escenario que no lo usa publique los mismos bytes.
+    //
+    // Sigue siendo **antes** de crear el provisional, de modo que un rechazo
+    // del generador no deja nada escrito.
+    let generated = effective.with_generated_repeat_alleles(prepared_reference.reference())?;
+    let effective: &EffectiveConfig = generated.as_ref().unwrap_or(effective);
     // Todo error de dominio o preflight ocurre antes de crear el provisional y
     // antes de que exista cualquier RNG local de selección.
     let prepared_execution =

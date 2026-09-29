@@ -2782,7 +2782,7 @@ intercambiables: si los alelos verdaderos salieran del modelo de tartamudeo,
 **cambiar el número de ciclos de PCR cambiaría el genotipo real de los
 individuos** —un parámetro de laboratorio decidiendo la biología—.
 
-- ☐ **F6.4.4.** Modelo escalonado simple como **servicio reutilizable**: cada
+- ☑ **F6.4.4.** Modelo escalonado simple como **servicio reutilizable**: cada
   evento añade o elimina exactamente **una unidad completa** según el sesgo
   efectivo, con tasa y sesgo configurables; rechazo previo de otro modelo o de
   un salto de varias unidades, con parámetro y valor.
@@ -2818,7 +2818,7 @@ individuos** —un parámetro de laboratorio decidiendo la biología—.
     ignorase los eventos sobrantes y otro que los contase darían el mismo
     tracto final y la prueba no discriminaría.
 
-- ☐ **F6.4.11.** **Generador del abanico de alelos**, con su **ámbito de azar
+- ☑ **F6.4.11.** **Generador del abanico de alelos**, con su **ámbito de azar
   propio** separado del tartamudeo. **Algoritmo adoptado el 20/09/2026**; ya no
   hay bloqueo.
   - Depende de: F6.4.4, F6.4.3.2.
@@ -2891,7 +2891,7 @@ individuos** —un parámetro de laboratorio decidiendo la biología—.
     contra un generador que leyera la configuración del tartamudeo por error—,
     pero **no** como prueba del ámbito, y su docstring lo dice.
 
-- ☐ **F6.4.12.** Publicación: la configuración efectiva y el manifiesto
+- ☑ **F6.4.12.** Publicación: la configuración efectiva y el manifiesto
   registran el **origen de cada alelo** —declarado por el usuario o generado
   por deslizamiento—, los parámetros del generador, su versión de algoritmo y
   su versión de catálogo de ámbitos, y las frecuencias **declaradas y
@@ -2907,7 +2907,7 @@ individuos** —un parámetro de laboratorio decidiendo la biología—.
     —el escenario mixto lo caza, y uno de un solo tipo **no discrimina**, lo
     que va en la docstring.
 
-- ☐ **F6.4.13.** Interfaz Marimo del generador y **cierre de la simulación de
+- ☑ **F6.4.13.** Interfaz Marimo del generador y **cierre de la simulación de
   microsatélites**: control para elegir entre declarar los alelos o generarlos,
   con los parámetros del generador; y comprobación de que ya no queda ninguna
   opción configurable de este trabajo sin control.
@@ -3119,3 +3119,111 @@ Lo que sigue pendiente es lo que cada fila diga, no la sección entera.
 | Imposición de la cota de recursos como rechazo previo | Fase de presupuesto de recursos. Aquí se **publica**, no se impone |
 | Optimizar el coste del tope de intentos y el factor dos de las dos pasadas | Fase de rendimiento. Se declaran y no se optimizan |
 | La deuda de `tests/test_process_adapter.py`, que aborta bajo la puerta canónica | Sigue registrada en el plan de la fase de población fundadora, sin destino asignado. Este plan no la toca ni la cita como puerta |
+
+---
+
+## 14. Cambio de contrato posterior al cierre — el origen de cada alelo de repetición (27/09/2026)
+
+Esta sección existe porque la **entrega 1 ya estaba cerrada y publicada** cuando
+la entrega 5 añadió el generador de alelos, y esa adición **cambia bytes** en
+documentos que escenarios ya existentes venían publicando. No es un añadido
+silencioso y no debe presentarse como tal. Tiene la forma de la sección 14 del
+plan del núcleo reproducible y de la sección 16 del plan de realismo técnico.
+
+**Quién lo decide.** El responsable, el 27 de septiembre de 2026, con la
+medición delante. El implementador de la entrega 5 había planteado la tensión
+entre dos instrucciones: una cláusula de reproducibilidad pedía que un escenario
+que **no** use el generador publicara exactamente los mismos bytes, y el paso
+F6.4.12 de este plan exige marcar el **origen de cada alelo** y ofrece el
+escenario mixto como discriminador. Las dos no caben a la vez. **Manda el plan**,
+que es la autoridad, y la cláusula queda acotada por esta sección.
+
+### 14.1. Qué **no** se reabre
+
+- **Ninguna subsemilla, ningún vector congelado y ningún catálogo de azar
+  publicado.** El ámbito nuevo nace en la versión 10 del catálogo de ámbitos,
+  que conserva literalmente las filas de la 9, y la versión del catálogo **no se
+  publica en ningún documento**: solo la comparan dos aserciones de prueba.
+- **Las huellas congeladas de `tests/pcr_frozen_identity.rs` no se mueven.** Son
+  el ancla absoluta de la reproducibilidad del recorrido técnico y siguen
+  valiendo lo que valían.
+- **Ningún esquema publicado se edita.** La capacidad va en las versiones que ya
+  la llevaban abiertas —general v4, efectivo v6 y manifiesto general v6—, que
+  son las que este mismo trabajo estrenó.
+- **Ninguna decisión de las entregas 1 a 4 se revoca**, ni se rehace ninguna de
+  sus evidencias.
+- **El significado de las frecuencias no cambia.** La declarada sigue siendo la
+  que se fijó y la realizada la proporción que el sorteo dio.
+
+### 14.2. Qué cambia, y por decisión de quién
+
+| Qué | Por qué no contradice lo cerrado | Decisión |
+|---|---|---|
+| Cada alelo de repetición publica su **origen**, `declared` o `generated`, en la configuración efectiva y en el manifiesto | Va **por alelo y no por locus** porque un documento con loci de los dos tipos tiene que poder distinguirlos sin volver a la configuración. Un escenario de un solo tipo **no discrimina** un productor que marcara todos igual, y ese es justamente el discriminador que F6.4.12 exige | **S-04** y F6.4.12; responsable, 27/09/2026 |
+| Un locus generado publica además su bloque `slippage` con parámetros, versiones, ámbito, las tres limitaciones y la contabilidad | El bloque **solo existe** cuando el abanico lo generó el simulador; un locus con alelos declarados no lo lleva y su documento no cambia por esto | **DTC-097** |
+| La cota de bases de tracto se **recomputa** después de generar | Sale de los alelos, y los alelos acaban de nacer. Dejarla como estaba publicaría una cota falsa y el juez independiente encontraría lo realizado por encima de lo acotado | **DTC-097** |
+
+### 14.3. Qué bytes se mueven exactamente, medido
+
+No se razona: se midió el 27/09/2026 compilando el binario del commit anterior
+en un árbol aparte extraído con `git archive`, ejecutando los mismos escenarios
+con los dos binarios y comparando los ficheros publicados.
+
+| Escenario | Diferencias |
+|---|---|
+| **Sin loci de repetición** | **Ninguna. Byte a byte idéntico**, todos los ficheros. Es lo que sostiene que el contrato se ha ampliado sin romperse |
+| **Con loci de repetición declarados a mano** | **Dos campos `origin`, uno por alelo**, en la configuración efectiva y los mismos dos en el manifiesto; y, derivados de ellos, el `size_bytes` y el `sha256` del artefacto de la configuración efectiva dentro del manifiesto. **Nada más** |
+| **Con un locus generado** | No aplica: ese escenario no existía antes de la entrega 5 |
+
+**La medición se repitió entera el 27 de septiembre de 2026**, después de las
+correcciones de la revisión de cierre, y **da lo mismo hasta el byte**. Conviene
+decir por qué dos de esas correcciones no mueven nada publicado:
+
+- **La regla del borde** —que un linaje detenido no se deje empujar por el tope
+  ni por el suelo— solo cambia el resultado de un **locus generado**, y esos no
+  existían antes de esta entrega.
+- **El recuento de Poisson que ahora repite en vez de abortar** (DT-010) solo
+  toma la rama nueva **donde la anterior devolvía error**, de modo que ninguna
+  ejecución que antes terminara consume palabras distintas ni obtiene un
+  resultado distinto. Lo que sí cambió es una **prueba** que había congelado la
+  tasa del defecto —veintisiete fallos numéricos sobre un corpus de 4096
+  semillas— y que ahora exige cero; el cambio y su motivo están en DT-010.
+
+### 14.4. Dónde vive cada literal
+
+| Sitio | Papel | Qué dice hoy |
+|---|---|---|
+| `src/application.rs`, `RepeatAlleleOrigin` | canónico | las dos únicas procedencias, `declared` y `generated`, y su texto publicado |
+| `src/repeat_slippage.rs` | canónico | el servicio escalonado, el generador, el ámbito y las tres limitaciones publicadas |
+| `src/results.rs`, `repeat_allele_json` | contrato | el alelo publicado, compartido por la configuración efectiva y el manifiesto para que los dos no puedan decir cosas distintas |
+| `src/results.rs`, `validate_repeat_slippage` | juez | lo que el esquema no puede comprobar: que los pasos aplicados más los no aplicados sumen los sorteados, y que el origen del alelo concuerde con el del locus |
+| `schemas/effective-config-v6.schema.json` y `schemas/manifest-general-v6.schema.json` | contrato | `origin` obligatorio en cada alelo y el bloque `slippage` opcional del locus |
+| `catalogs/subseed-scopes-v10.tsv` | contrato | la fila del ámbito nuevo, con las de la versión 9 intactas |
+
+### 14.5. Pruebas nuevas y su variante defectuosa
+
+Las de la entrega 5 están en `tests/repeat_slippage.rs`, en las pruebas del
+módulo y en `tests/subseed_derivation.rs`. Las que sostienen **esta sección** en
+concreto:
+
+| Prueba | Contra qué muere |
+|---|---|
+| Un escenario **mixto** marca cada alelo con su origen, en los dos documentos | un productor que marque todos los alelos con el mismo origen; un escenario de un solo tipo **no lo caza**, y así se dice en su docstring |
+| El lector del manifiesto rechaza un origen inventado y uno que contradiga al del locus | borrar la comprobación de coherencia, o borrar el bloque del generador entero |
+| El lector rechaza una contabilidad en la que los aplicados y los no aplicados no suman los sorteados | un servicio que pierda eventos por el camino o que los cuente dos veces |
+| Las huellas congeladas del recorrido técnico siguen en su sitio | cualquier cambio que desplace la secuencia de azar de una ejecución sin microsatélites |
+
+### 14.6. Fixtures que se reabren
+
+Ninguno. Los fixtures de la entrega 1 siguen valiendo: sus aserciones miran
+campos concretos y ninguna exige el conjunto cerrado de claves del alelo, de
+modo que el marcador nuevo entra sin tocarlos. El conjunto cerrado sí lo exige
+el **juez** del manifiesto, y ahí el campo está declarado.
+
+### 14.7. Evidencia que hay que repetir
+
+Al cerrar la entrega 5: la comparación de bytes de la sección 14.3, que es la
+que sostiene la afirmación de que el contrato se ha ampliado sin romperse. Se
+ejecutó el 27/09/2026 con el resultado que esa tabla recoge, y **debe repetirse
+si alguna vez se toca el alelo publicado**, porque es la única comprobación que
+distingue una ampliación acotada de una reescritura silenciosa.

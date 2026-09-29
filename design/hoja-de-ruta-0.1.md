@@ -348,6 +348,46 @@ poblaciones pueden alimentar este mismo recorrido sin crear otra implementación
 > de septiembre de 2026**; ver la nota de esa fecha, más abajo. El modelo queda
 > fijado por **DTC-091**.
 
+> **Nota del 27 de septiembre de 2026 — generador de alelos por deslizamiento
+> biológico, y cierre de la simulación de microsatélites.** Hasta ahora los
+> alelos de un microsatélite y sus frecuencias **los escribía el usuario a
+> mano**. El simulador puede generarlos: parte del alelo que el genoma de
+> referencia lleva en el locus, simula **un linaje independiente por copia
+> haplotípica** de la población, da a cada uno un número de pasos sorteado de una
+> Poisson de media declarada, y **la frecuencia de cada alelo es la proporción de
+> linajes que terminan en él**. Va en la **verdad**, no en las lecturas.
+>
+> **Es una sola tirada para inicializar la diversidad**, no una simulación de
+> generaciones: el modelo escalonado aplicado generación tras generación
+> pertenece a la fase de evolución y no se ha invadido.
+>
+> **El alelo de la referencia no tiene la presencia garantizada.** Entra en el
+> abanico si algún linaje termina en él; que desaparezca depende de los
+> parámetros que se den, no del modelo, y con una media alta perderse es lo que
+> ocurre en una población real.
+>
+> **Tres limitaciones viajan declaradas con cada ejecución**, porque son
+> decisiones biológicas y no detalles: no hay ancestría compartida, de modo que
+> el espectro sale más plano que el de una población real y eso importa si el
+> conjunto se usa para probar herramientas de estructura poblacional; el número
+> de pasos no es un proceso en el tiempo; y el genoma de referencia puede llevar
+> un alelo que ningún individuo tiene.
+>
+> **El deslizamiento biológico y el tartamudeo no comparten azar**, aunque
+> compartan mecanismo físico: uno decide la verdad y el otro las lecturas. Si los
+> alelos verdaderos salieran del modelo de tartamudeo, cambiar el número de
+> ciclos de PCR cambiaría el genotipo real de los individuos.
+>
+> Las decisiones son **DTC-094** a **DTC-097**. Con esto se cierra la regla de
+> cierre de la interfaz para este trabajo: toda opción configurable que ha
+> añadido tiene control en Marimo, y una comprobación recorre la lista entera.
+>
+> **Lo que el cambio mueve en documentos ya publicados** está medido y
+> registrado en la sección 14 del plan de microsatélites y amplificación: un
+> escenario **sin** microsatélites no mueve un solo byte, y uno con
+> microsatélites **declarados a mano** gana únicamente el marcador de origen de
+> cada alelo.
+
 > **Nota del 26 de septiembre de 2026 — tartamudeo clonal heredable por
 > linaje.** Con preparación amplificada, el deslizamiento puede ocurrir en
 > **cualquier ciclo** de la PCR, y una copia que resbala transmite su número de

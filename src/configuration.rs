@@ -254,7 +254,33 @@ pub struct DeclaredRepeatLocus {
     /// unidades de un mononucleótido son tres bases, que salen por azar a cada
     /// paso; tres de un tetranucleótido son doce, que no.
     pub admission: Option<DeclaredRepeatAdmission>,
+    /// Generador de alelos por **deslizamiento biológico** (F6.4.11).
+    ///
+    /// Es **excluyente** con `alleles`: o el usuario escribe los alelos y sus
+    /// frecuencias, o los genera el simulador partiendo del alelo que el genoma
+    /// de referencia lleva en este locus. Declarar los dos sería ambiguo sobre
+    /// el origen de cada alelo, que es justo lo que el manifiesto publica.
+    pub slippage: Option<DeclaredRepeatSlippage>,
     pub alleles: Vec<DeclaredRepeatAllele>,
+}
+
+/// Parámetros del generador de alelos por deslizamiento, tal y como se
+/// escriben.
+///
+/// No se validan aquí: la frontera de configuración solo los lee. Quien
+/// rechaza un modelo distinto del escalonado o un salto de varias unidades es
+/// `repeat_slippage::SlippageSettings::new`, que nombra el parámetro y el
+/// valor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeclaredRepeatSlippage {
+    /// El modelo. Solo se admite el escalonado.
+    pub model: Located<String>,
+    /// Media de la Poisson que decide cuántos pasos recibe cada linaje.
+    pub mean_events: DeclaredNumber,
+    /// Probabilidad de que un paso sea una expansión. Si falta, es simétrico.
+    pub expansion_bias: Option<DeclaredNumber>,
+    /// Unidades por paso. Si falta, una. Cualquier otro valor se rechaza.
+    pub step_units: Option<Located<u64>>,
 }
 
 /// Un alelo declarado del locus, con su frecuencia.

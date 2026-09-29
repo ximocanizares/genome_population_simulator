@@ -505,6 +505,23 @@ fn every_runtime_scope_component_mutation_reaches_production_derivation() {
     }
 }
 
+/// **Los momentos empíricos y la función de masa del recuento de Poisson
+/// coinciden con un oráculo independiente.**
+///
+/// # Lo que esta prueba dejó de afirmar el 27 de septiembre de 2026
+///
+/// Hasta esa fecha exigía que el corpus congelado de 4096 semillas con media
+/// cien produjera **exactamente 27 fallos numéricos**. Esa cifra no era una
+/// propiedad del método: era la **tasa de un defecto**. El método de rechazo
+/// con transformación, cuando el candidato cae fuera del dominio, **lo rechaza
+/// y repite**; la implementación devolvía error, de modo que una media
+/// perfectamente legal abortaba según dónde cayera la secuencia de azar. Es
+/// DT-010, corregida ese día.
+///
+/// Ahora se exige lo contrario y es más fuerte: **ninguna de las 4096 semillas
+/// falla**, y las 27 que antes se caían entran en los momentos y en la función
+/// de masa como las demás. Un fallo numérico aquí volvería a significar lo que
+/// tiene que significar: un candidato **no numérico**, que no se puede repetir.
 #[test]
 fn poisson_empirical_moments_and_small_pmf_match_an_independent_oracle() {
     let lambda = 1.0;
@@ -568,9 +585,12 @@ fn poisson_empirical_moments_and_small_pmf_match_an_independent_oracle() {
             Err(error) => panic!("unexpected PTRS error: {error:?}"),
         }
     }
-    assert_eq!(numeric_failures, 27, "frozen 4096-seed corpus");
+    assert_eq!(
+        numeric_failures, 0,
+        "el candidato fuera de dominio se rechaza y se repite, no aborta (DT-010)"
+    );
     let n = values.len() as f64;
-    assert!(n > 4_000.0, "PTRS numeric failures must remain exceptional");
+    assert_eq!(n, 4_096.0, "ninguna semilla del corpus congelado se pierde");
     let mean = values.iter().sum::<f64>() / n;
     let variance = values
         .iter()

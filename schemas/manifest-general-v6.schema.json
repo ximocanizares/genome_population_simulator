@@ -1461,6 +1461,7 @@
       "additionalProperties": false,
       "required": [
         "sequence",
+        "origin",
         "declared_frequency",
         "effective_frequency",
         "realized_frequency",
@@ -1479,6 +1480,13 @@
         "sequence": {
           "type": "string",
           "pattern": "^[ACGTN]+$"
+        },
+        "origin": {
+          "enum": [
+            "declared",
+            "generated"
+          ],
+          "description": "De donde salio este alelo: lo escribio el usuario, o lo produjo el generador de deslizamiento biologico partiendo del alelo de la referencia. Va por ALELO y no por locus para que un documento con loci de los dos tipos pueda distinguirlos sin volver a la configuracion."
         },
         "declared_frequency": {
           "type": "number",
@@ -1636,6 +1644,9 @@
           "items": {
             "$ref": "#/$defs/repeat_allele"
           }
+        },
+        "slippage": {
+          "$ref": "#/$defs/repeat_slippage"
         }
       },
       "description": "El locus con sus parámetros configurados: el intervalo en base uno cerrada, sus motivos, el TOPE de tamaño del tracto que se configuró y los MÍNIMOS de la guarda de admisión que se le aplicaron, que pueden ser los del locus o los generales."
@@ -1708,6 +1719,100 @@
         }
       },
       "description": "Contabilidad de bases de tracto. La COTA se repite aquí desde la configuración efectiva, donde se calculó sobre lo declarado. Lo REALIZADO se cuenta sobre lo publicado. AVISO: este esquema NO puede comprobar que lo realizado no supere la cota ni que sea lo que los documentos llevan; eso lo hace un juez independiente que recuenta releyendo el truth.jsonl y el VCF, sin tocar ninguna estructura del productor."
+    },
+    "repeat_slippage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "step_units",
+        "mean_events",
+        "expansion_bias",
+        "algorithm",
+        "count_algorithm",
+        "bias_algorithm",
+        "rng_scope",
+        "rng_scope_catalog_version",
+        "limitations",
+        "lineages",
+        "drawn_events",
+        "applied_events",
+        "unapplied_events"
+      ],
+      "description": "El generador de alelos por deslizamiento biologico de este locus: sus parametros, sus versiones y la contabilidad de la generacion. El bloque existe SOLO cuando el abanico lo genero el simulador; un locus con alelos declarados no lo lleva. AVISO: este esquema NO puede comprobar que applied_events mas unapplied_events sea drawn_events, porque sumar dos campos y compararlos con un tercero no es expresable en JSON Schema; lo sostiene el lector de Rust de este documento.",
+      "properties": {
+        "model": {
+          "enum": [
+            "stepwise"
+          ]
+        },
+        "step_units": {
+          "enum": [
+            1
+          ]
+        },
+        "mean_events": {
+          "type": "number",
+          "minimum": 0
+        },
+        "expansion_bias": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "algorithm": {
+          "enum": [
+            "biological-slippage-v1"
+          ]
+        },
+        "count_algorithm": {
+          "enum": [
+            "poisson-count-v1"
+          ]
+        },
+        "bias_algorithm": {
+          "enum": [
+            "bernoulli-v1"
+          ]
+        },
+        "rng_scope": {
+          "enum": [
+            "initial_repeat_slippage"
+          ],
+          "description": "Ambito de azar PROPIO, separado del tartamudeo: uno decide la verdad y el otro las lecturas. Se identifica por el evento y el identificador de locus, nunca por posicion ni por orden."
+        },
+        "rng_scope_catalog_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limitations": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Las TRES limitaciones declaradas del modelo, que son decisiones biologicas y no detalles: no hay ancestria compartida, el numero de pasos no es un proceso en el tiempo, y el genoma de referencia puede llevar un alelo que ningun individuo tiene."
+        },
+        "lineages": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "drawn_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "applied_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unapplied_events": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Eventos que NO se aplicaron porque ningun paso viable tenia peso positivo: el tracto llego a su minimo de una unidad completa en la tirada mas larga, o el linaje toco el tope. No es un error, es un resultado biologico legitimo, y es la cifra que distingue un servicio que ignora los eventos sobrantes de uno que los cuenta."
+        }
+      }
     }
   }
 }

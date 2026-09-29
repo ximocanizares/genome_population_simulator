@@ -490,6 +490,30 @@ simuladas y en haplotipos; el modelo escalonado simple como servicio
 reutilizable; mutaciones internas desactivadas por defecto; rechazo de todo lo
 relativo a elementos transponibles.
 
+> **Nota del 27 de septiembre de 2026 — cinco pasos de este hito se han
+> adelantado y están hechos.** El plan
+> `design/plan-implementacion-repeticiones-pcr-0.1.md`, que cruza tres fases,
+> ha implementado **F6.4.1, F6.4.2, F6.4.3, F6.4.4 y F6.4.8**, y ha abierto
+> coordenadas nuevas **F6.4.11 a F6.4.13** para el generador de alelos por
+> deslizamiento biológico, que aquel plan llama su entrega 5. Este documento
+> **no los replanifica**: lo que aquí queda de F6.4 es lo que sigue sin hacer.
+>
+> Dos avisos para quien lea las casillas de abajo sin haber leído aquel plan:
+>
+> 1. **F6.4.4 está hecho con menos alcance del que esta casilla describe.** El
+>    servicio escalonado existe, con su sesgo, su regla del borde y su recuento
+>    de eventos no aplicados, pero **la tasa y el sesgo se declaran por locus y
+>    no por región**, y su consumo desde F7.2 y F8 sigue sin ocurrir porque esas
+>    fases no existen. Lo que sí está fijado es el contrato, en **DTC-094**.
+> 2. **El generador de alelos es una sola tirada de inicialización.** Aplicar el
+>    modelo escalonado **generación tras generación** sigue perteneciendo a la
+>    fase de evolución y **no** se ha invadido. Lo fija **DTC-095**.
+>
+> Las decisiones normativas del trabajo adelantado son **DTC-094** —el servicio
+> escalonado—, **DTC-095** —el generador—, **DTC-096** —su ámbito de azar
+> propio, separado del tartamudeo— y **DTC-097** —la publicación del origen de
+> cada alelo—.
+
 - ☐ **F6.4.1.** Modelo de dominio del locus de repetición: motivo A/C/G/T no
   vacío, longitud de unidad coincidente con el motivo, número de copias o
   longitud total, pureza y patrón de interrupciones, y su secuencia

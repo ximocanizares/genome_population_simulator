@@ -925,6 +925,64 @@ su asignación por fase está en la matriz de trazabilidad.
   ese modelo no exista, la combinación se rechaza**: una biblioteca amplificada
   tartamudearía solo con la parte de base y subestimaría lo medido entre un 14 %
   y un 28 % según la longitud del motivo.
+- **REQ-CONF-139.** La configuración debe permitir que los alelos de un locus de
+  repetición, en vez de escribirse a mano, los **genere el simulador por
+  deslizamiento biológico** partiendo del alelo que el genoma de referencia lleva
+  en ese locus. Declarar los alelos y pedir además que se generen son
+  **excluyentes**, y un locus que no haga ninguna de las dos cosas debe
+  rechazarse: en los dos casos el documento no diría de dónde salen sus alelos.
+  El generador declara su **modelo** —solo el escalonado—, la **media de pasos**
+  por copia haplotípica, el **sesgo de expansión** —simétrico si falta— y el
+  **tamaño de paso** —una unidad completa si falta—. Un modelo distinto, un salto
+  de varias unidades y una media por encima del techo declarado deben rechazarse
+  **antes de simular**, nombrando el parámetro y el valor.
+- **REQ-CONF-140.** El generador debe rechazar, antes de simular, un locus cuyo
+  **tramo de referencia rebase el tope de unidades** que ese mismo locus declara,
+  igual que se rechaza un alelo escrito a mano que lo rebase. Sin ese rechazo el
+  tope actuaría solo como «no crezcas más» y el generador quedaría
+  unidireccional, con el sesgo declarado sin efecto. Debe rechazar también un
+  locus de **varios motivos**, porque sin fronteras de bloque declaradas no hay
+  forma de partir el tramo de la referencia, y un escenario **sin copias
+  haplotípicas**, porque no habría ningún linaje que simular.
+- **REQ-IND-66.** El abanico de alelos generado debe simular **tantos linajes
+  independientes como copias haplotípicas** tenga la población: una copia, un
+  linaje. Cada linaje parte del alelo de la referencia y recibe un número de
+  pasos sorteado de una Poisson de la media declarada; cada paso añade o quita
+  **una unidad completa** según el sesgo. **La frecuencia de cada alelo debe ser
+  la proporción de linajes que terminan en él.** El alelo de la referencia entra
+  en el abanico **si algún linaje termina en él**, y su presencia **no se
+  fuerza**: que desaparezca depende de los parámetros, no del modelo.
+- **REQ-IND-67.** Un linaje que llegue a un **borde** —el mínimo de una unidad
+  completa en la tirada más larga, o el tope de unidades del locus— debe
+  **detenerse ahí**. Los eventos que le quedaban **no se aplican**, no consumen
+  aleatoriedad y se **cuentan aparte**. El borde no puede empujar al linaje en el
+  sentido que queda libre: eso haría que el borde decidiera la biología en lugar
+  del sesgo declarado. No es un error: un microsatélite en su mínimo es un
+  resultado biológico legítimo.
+- **REQ-IND-68.** La generación es **una sola tirada de inicialización de la
+  diversidad**, no una simulación de generaciones. El modelo escalonado aplicado
+  generación tras generación pertenece a la fase de evolución.
+- **REQ-MAN-95.** La configuración efectiva y el manifiesto general deben
+  publicar, **por alelo y no por locus**, el **origen** de cada alelo de
+  repetición: declarado por el usuario o generado por deslizamiento. El origen
+  del alelo y el del locus deben concordar.
+- **REQ-MAN-96.** Un locus generado debe publicar además sus **parámetros**, la
+  **versión de su algoritmo**, las de los algoritmos de azar que consume, el
+  **nombre de su ámbito de azar** y la **versión del catálogo de ámbitos**, las
+  **tres limitaciones declaradas del modelo palabra por palabra**, y la
+  contabilidad de la generación: linajes, pasos sorteados, pasos aplicados y
+  **pasos no aplicados al detenerse en un borde**. Los aplicados más los no
+  aplicados deben sumar exactamente los sorteados.
+- **REQ-VAL-60.** Un juez independiente debe **rehacer el abanico publicado** —
+  desde la referencia publicada, los parámetros publicados y la semilla
+  publicada— y contrastarlo con el escrito, alelo a alelo. No basta con
+  reconstruir la configuración llamando al productor: eso compara el abanico
+  consigo mismo y no puede fallar.
+- **REQ-UI-16.** La interfaz debe ofrecer un **control para elegir** entre
+  declarar los alelos de un locus y generarlos, y **enseñar solo la tabla que
+  corresponda**: con «declarar», las de alelos e interrupciones; con «generar»,
+  la de los parámetros del generador. Enseñar las dos a la vez invitaría a
+  escribir un documento que el lector rechaza.
 - **REQ-CONF-96.** La configuración debe permitir definir o generar por regiones
   secuencias repetitivas, duplicadas o altamente homólogas destinadas a producir
   baja mapeabilidad. También debe poder aprovechar las repeticiones y variantes

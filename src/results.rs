@@ -11,7 +11,8 @@ use crate::adapters::{admit_toml_header, parse_declared_config};
 use crate::application::{
     DeclaredDocumentVersion, EffectiveConfig, EffectiveDirectEvent, EffectiveInitialGenotypeModel,
     EffectiveReducedReference, EffectiveReferenceSource, EffectiveRepeatAllele,
-    EffectiveTechnicalEvent, EffectiveTechnicalEventTarget, build_effective_config_with_entropy,
+    EffectiveRepeatSlippage, EffectiveTechnicalEvent, EffectiveTechnicalEventTarget,
+    build_effective_config_with_entropy,
 };
 use crate::biological_contamination::contamination_target_pair_count;
 use crate::configuration::ExpectedConfigKind;
@@ -53,7 +54,7 @@ use crate::reference_reduction_io::{
     build_reduced_reference, reduction_map_document, source_for, validate_reduction_map_document,
 };
 use crate::repeat_genotypes::RepeatAlleleDraw;
-use crate::tandem_repeat::{BlockAnnotation, RepeatMotif};
+use crate::tandem_repeat::{BlockAnnotation, RepeatMotif, TandemRepeatTract};
 use crate::technical_identity::derive_technical_identity_plan;
 use crate::vcf_contract::{TBI_MAXIMUM_POSITION_EXCLUSIVE, VcfIndexKind, VcfOutputMode};
 use crate::vcf_publication::{
@@ -391,6 +392,19 @@ fn repeat_loci_json(config: &EffectiveConfig) -> Result<Value, Diagnostic> {
                 .map(|allele| Value::Object(repeat_allele_json(allele)))
                 .collect::<Vec<_>>(),
         }));
+        if let Some(slippage) = locus.slippage() {
+            loci.last_mut()
+                .ok_or_else(|| {
+                    Diagnostic::internal_invariant("results", "repeat_locus_slippage")
+                        .with("detail", "el locus recién insertado desapareció")
+                })?
+                .as_object_mut()
+                .ok_or_else(|| {
+                    Diagnostic::internal_invariant("results", "repeat_locus_slippage")
+                        .with("detail", "el locus publicado no es un objeto")
+                })?
+                .insert("slippage".to_owned(), slippage_json(slippage));
+        }
     }
     Ok(Value::Array(loci))
 }
@@ -663,6 +677,10 @@ fn repeat_allele_json(allele: &EffectiveRepeatAllele) -> serde_json::Map<String,
     let annotation = allele.tract().annotation();
     let Value::Object(object) = json!({
         "sequence": allele.tract().as_text(),
+        // **El origen va por alelo, no por locus.** Un documento con loci
+        // declarados y loci generados tiene que poder distinguirlos alelo a
+        // alelo sin volver a la configuración.
+        "origin": allele.origin().as_str(),
         "declared_frequency": allele.declared_frequency(),
         "effective_frequency": allele.frequency(),
         "units": annotation.units_as_f64(),
@@ -684,6 +702,45 @@ fn repeat_allele_json(allele: &EffectiveRepeatAllele) -> serde_json::Map<String,
         unreachable!("json! de un objeto literal es un objeto");
     };
     object
+}
+
+/// El generador de alelos por deslizamiento de un locus, tal y como se publica.
+///
+/// # Qué lleva y por qué cada cosa
+///
+/// - **Los parámetros** del generador, que dicen qué se pidió.
+/// - **La versión del algoritmo** y **la del catálogo de ámbitos de azar**, sin
+///   las cuales dos ejecuciones con la misma semilla y resultados distintos
+///   serían indistinguibles de un defecto.
+/// - **La contabilidad de la generación**: linajes, pasos sorteados, pasos
+///   aplicados y, sobre todo, **eventos no aplicados al agotar el tracto**. Sin
+///   esa última cifra, un servicio que ignorase en silencio los eventos
+///   sobrantes y otro que los contase producirían el mismo tracto final y nadie
+///   notaría la diferencia.
+/// - **Las tres limitaciones declaradas del modelo**, palabra por palabra.
+///   Son decisiones biológicas, no detalles: quien encadene un análisis sobre
+///   estos datos tiene que leerlas sin abrir el código.
+fn slippage_json(slippage: &EffectiveRepeatSlippage) -> Value {
+    let settings = slippage.settings();
+    let mut document = json!({
+        "model": crate::repeat_slippage::SLIPPAGE_MODEL_STEPWISE,
+        "step_units": crate::repeat_slippage::SLIPPAGE_STEP_UNITS,
+        "mean_events": settings.mean_events(),
+        "expansion_bias": settings.expansion_bias(),
+        "algorithm": crate::repeat_slippage::SLIPPAGE_ALGORITHM,
+        "count_algorithm": crate::repeat_slippage::SLIPPAGE_COUNT_ALGORITHM,
+        "bias_algorithm": crate::repeat_slippage::SLIPPAGE_BIAS_ALGORITHM,
+        "rng_scope": crate::repeat_slippage::SLIPPAGE_SCOPE,
+        "rng_scope_catalog_version": crate::repeat_slippage::SLIPPAGE_SCOPE_CATALOG_VERSION,
+        "limitations": crate::repeat_slippage::SLIPPAGE_LIMITATIONS,
+    });
+    if let Some(generation) = slippage.generation() {
+        document["lineages"] = json!(generation.lineages());
+        document["drawn_events"] = json!(generation.drawn_events());
+        document["applied_events"] = json!(generation.applied_events());
+        document["unapplied_events"] = json!(generation.unapplied_events());
+    }
+    document
 }
 
 /// Sección de repeticiones en tándem del manifiesto general.
@@ -763,6 +820,19 @@ pub fn repeat_loci_manifest_json(
             "drawn_copies": drawn_copies,
             "alleles": alleles,
         }));
+        if let Some(slippage) = locus.slippage() {
+            loci.last_mut()
+                .ok_or_else(|| {
+                    Diagnostic::internal_invariant("results", "manifest_locus_slippage")
+                        .with("detail", "el locus recién insertado desapareció")
+                })?
+                .as_object_mut()
+                .ok_or_else(|| {
+                    Diagnostic::internal_invariant("results", "manifest_locus_slippage")
+                        .with("detail", "el locus publicado no es un objeto")
+                })?
+                .insert("slippage".to_owned(), slippage_json(slippage));
+        }
     }
     Ok(Some(json!({
         "reference_id": config.reference_id(),
@@ -1914,6 +1984,25 @@ fn validate_published_resources_v3(
             CatalogBases::SummaryOnly
         },
     )?;
+    // **El generador de alelos por deslizamiento corre también aquí.** Este
+    // juez reconstruye la configuración desde el TOML copiado, donde un locus
+    // generado **no trae alelos**: son el resultado de aplicar el modelo a las
+    // bases de la referencia. Sin regenerarlos, el juez compararía las
+    // estadísticas publicadas contra una configuración sin un solo alelo y no
+    // contrastaría nada.
+    //
+    // Y es la comparación correcta por sí misma: el abanico se rehace desde la
+    // **referencia publicada** y la semilla publicada, de modo que un productor
+    // que hubiera escrito otros alelos en el documento muere aquí.
+    // **Primero el juez, y después la reconstrucción.** El orden importa: la
+    // reconstrucción llama al productor, de modo que si fuera lo único que hay
+    // el abanico se estaría comparando consigo mismo. El juez de abajo rehace
+    // el abanico **por su cuenta**, desde los bytes publicados, y contrasta lo
+    // escrito con lo rehecho.
+    validate_published_slippage_fans(effective, &source_reference, root_seed, effective_path)?;
+    let physical_config = physical_config
+        .with_generated_repeat_alleles(&source_reference)?
+        .unwrap_or(physical_config);
     validate_physical_technical_event(
         root,
         effective,
@@ -3907,12 +3996,19 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
             "drawn_copies",
             "alleles",
         ];
-        if locus.len() != LOCUS_FIELDS.len()
+        // `slippage` es el único campo **opcional** del locus: está cuando el
+        // abanico lo generó el deslizamiento biológico y no está cuando los
+        // alelos los escribió el usuario. Por eso el recuento se comprueba
+        // contra los obligatorios más ese, y no contra un número fijo.
+        if LOCUS_FIELDS.iter().any(|field| !locus.contains_key(*field))
             || locus
                 .keys()
-                .any(|key| !LOCUS_FIELDS.contains(&key.as_str()))
+                .any(|key| !LOCUS_FIELDS.contains(&key.as_str()) && key != "slippage")
         {
             return Err("un locus publicado no tiene exactamente sus campos");
+        }
+        if let Some(slippage) = locus.get("slippage") {
+            validate_repeat_slippage(slippage)?;
         }
         let identifier = locus
             .get("id")
@@ -3967,15 +4063,453 @@ fn validate_repeat_loci_section(value: &Value) -> Result<(), &'static str> {
             .and_then(Value::as_array)
             .filter(|alleles| !alleles.is_empty())
             .ok_or("el locus publicado no tiene alelos")?;
+        let generated = locus.contains_key("slippage");
+        // **Cada linaje termina en exactamente un alelo**, de modo que no puede
+        // haber más alelos que linajes. Es la única relación aritmética que ata
+        // la cifra de linajes con la lista de alelos, y sin ella esa cifra se
+        // publicaba sin que nada la usara.
+        if let Some(lineages) = locus
+            .get("slippage")
+            .and_then(|slippage| slippage.get("lineages"))
+            .and_then(Value::as_u64)
+            && alleles.len() as u64 > lineages
+        {
+            return Err("el abanico publica más alelos que linajes simulados");
+        }
         let mut realized_total = 0_u64;
         for allele in alleles {
+            // El alelo se juzga **primero** por sí mismo —que su origen sea uno
+            // de los dos que existen, entre lo demás— y solo después se compara
+            // con el del locus. Al revés, la comparación cazaba antes cualquier
+            // texto inventado y la guarda del dominio no llegaba a dispararse
+            // nunca.
+            let copies = validate_repeat_allele(allele, drawn)?;
+            // **El origen del alelo y el del locus tienen que concordar.** Un
+            // locus con generador no puede publicar alelos «declarados», ni al
+            // revés: sería una procedencia inventada sobre datos reales.
+            let origin = allele
+                .get("origin")
+                .and_then(Value::as_str)
+                .ok_or("un alelo publicado no declara su origen")?;
+            if generated != (origin == "generated") {
+                return Err("el origen del alelo contradice al del locus");
+            }
             realized_total = realized_total
-                .checked_add(validate_repeat_allele(allele, drawn)?)
+                .checked_add(copies)
                 .ok_or("las copias realizadas del locus desbordan")?;
         }
         if realized_total != drawn {
             return Err("las copias realizadas no suman las copias sorteadas del locus");
         }
+    }
+    Ok(())
+}
+
+/// **Juez independiente del abanico de alelos generado por deslizamiento.**
+///
+/// # Por qué existe, dicho sin rodeos
+///
+/// La afirmación central del generador es que **la frecuencia de cada alelo es
+/// la proporción de linajes que terminan en él**. Antes de que esto existiera,
+/// lo único que miraba el abanico publicado era la reconstrucción de la
+/// configuración, que **llama al productor**: era el espejo que este proyecto
+/// prohíbe por escrito. Se midió con una mutación que emparejaba cada alelo con
+/// la frecuencia del simétrico de la lista —el conjunto de alelos no cambia, las
+/// frecuencias siguen sumando uno, la contabilidad sigue cuadrando, solo cambia
+/// a qué alelo le toca qué— y la batería entera seguía en verde con el espectro
+/// publicado del revés.
+///
+/// # Qué rehace por su cuenta, y qué comparte
+///
+/// Rehace **el recorrido entero**: su filtro de viabilidad, su regla del borde,
+/// su regla de peso, su recuento por alelo y su orden canónico están escritos
+/// aquí, aparte del productor. Lee el tramo ancestral de la **referencia
+/// publicada**, los parámetros del **documento publicado** y la semilla
+/// **publicada**, y después compara.
+///
+/// **Lo que comparte se dice, en vez de fingir que no lo comparte**: las
+/// primitivas de azar —la derivación de la subsemilla, el recuento de Poisson y
+/// el ensayo binario— y la operación de paso del dominio con su anotación. Las
+/// primitivas tienen sus propios vectores congelados y su propio oráculo
+/// independiente; la operación de paso tiene su fichero de pruebas del dominio.
+/// Lo que este juez cubre y aquello no es **qué alelo recibe qué linaje**, que
+/// es justo lo que la mutación del espectro invertido atacaba.
+fn validate_published_slippage_fans(
+    effective: &serde_json::Map<String, Value>,
+    reference: &Reference,
+    root_seed: RootSeed,
+    effective_path: &Path,
+) -> Result<(), Diagnostic> {
+    let Some(loci) = effective.get("repeat_loci").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    let reference_id = effective
+        .get("reference")
+        .and_then(Value::as_object)
+        .and_then(|reference| reference.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| effective_error(effective_path, "la referencia publicada no tiene id"))?;
+    for locus in loci {
+        let Some(slippage) = locus.get("slippage") else {
+            continue;
+        };
+        let reject = |detail: &str| {
+            effective_error(
+                effective_path,
+                format!(
+                    "abanico generado de {}: {detail}",
+                    locus
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("locus sin id")
+                ),
+            )
+        };
+        let locus_id = locus
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| reject("el locus no tiene identificador"))?;
+        let ancestral = published_ancestral_tract(locus, reference, &reject)?;
+        let max_units = locus
+            .get("max_units")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| reject("el tope del locus no es un entero"))?;
+        let mean_events = slippage
+            .get("mean_events")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| reject("la media de pasos no es un decimal"))?;
+        let expansion_bias = slippage
+            .get("expansion_bias")
+            .and_then(Value::as_f64)
+            .ok_or_else(|| reject("el sesgo de expansión no es un decimal"))?;
+        let lineages = slippage
+            .get("lineages")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| reject("los linajes no son un entero"))?;
+        let mut rng = crate::repeat_slippage::slippage_subseed(root_seed, reference_id, locus_id)
+            .map_err(|error| reject(&error.detail()))?
+            .local_rng();
+        let recomputed = recompute_slippage_fan(
+            &mut rng,
+            &ancestral,
+            max_units,
+            mean_events,
+            expansion_bias,
+            lineages,
+        )
+        .map_err(|detail| reject(&detail))?;
+        compare_published_fan_against_oracle(locus, slippage, &recomputed, lineages, &reject)?;
+    }
+    Ok(())
+}
+
+/// El tramo que la **referencia publicada** lleva en el intervalo del locus, ya
+/// estructurado como tracto de su motivo.
+fn published_ancestral_tract(
+    locus: &Value,
+    reference: &Reference,
+    reject: &dyn Fn(&str) -> Diagnostic,
+) -> Result<TandemRepeatTract, Diagnostic> {
+    let sequence_id = locus
+        .get("sequence_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| reject("el locus no nombra su secuencia"))?;
+    let start = locus
+        .get("start")
+        .and_then(Value::as_u64)
+        .filter(|start| *start >= 1)
+        .ok_or_else(|| reject("el inicio no es una coordenada de base uno"))?;
+    let end = locus
+        .get("end")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| reject("el final no es una coordenada"))?;
+    let motifs = locus
+        .get("motifs")
+        .and_then(Value::as_array)
+        .ok_or_else(|| reject("el locus no publica sus motivos"))?;
+    let [motif] = motifs.as_slice() else {
+        return Err(reject("un locus generado tiene que tener un solo motivo"));
+    };
+    let motif = motif
+        .as_str()
+        .ok_or_else(|| reject("el motivo publicado no es texto"))?;
+    let motif = RepeatMotif::new(motif.as_bytes()).map_err(|error| reject(&error.detail()))?;
+    let sequence = reference
+        .sequences()
+        .iter()
+        .find(|sequence| sequence.id().as_str() == sequence_id)
+        .ok_or_else(|| reject("la referencia publicada no contiene esa secuencia"))?;
+    let bases = sequence
+        .sequence()
+        .as_bytes()
+        .map_err(|_| reject("las bases de la referencia publicada no están materializadas"))?;
+    // El intervalo publicado es de base uno cerrada; el corte, de base cero
+    // semiabierta. La conversión se escribe aquí una sola vez y a la vista.
+    let from = usize::try_from(start - 1).map_err(|_| reject("el inicio desborda"))?;
+    let to = usize::try_from(end).map_err(|_| reject("el final desborda"))?;
+    let slice = bases
+        .get(from..to)
+        .ok_or_else(|| reject("el intervalo rebasa la secuencia publicada"))?;
+    TandemRepeatTract::new(motif, slice).map_err(|error| reject(&error.detail()))
+}
+
+/// El recorrido **escrito aparte del productor**: cada linaje parte del
+/// ancestro, recibe su número de pasos y camina hasta detenerse en un borde.
+///
+/// Devuelve los alelos en orden canónico —por longitud del tracto y, a igual
+/// longitud, por sus bases— con los linajes que terminaron en cada uno, y la
+/// contabilidad de los eventos.
+fn recompute_slippage_fan(
+    rng: &mut crate::randomness::LocalRng,
+    ancestral: &TandemRepeatTract,
+    max_units: u64,
+    mean_events: f64,
+    expansion_bias: f64,
+    lineages: u64,
+) -> Result<RecomputedFan, String> {
+    let mut counts: BTreeMap<(usize, Vec<u8>), u64> = BTreeMap::new();
+    let mut drawn = 0_u64;
+    let mut applied = 0_u64;
+    let mut unapplied = 0_u64;
+    for _ in 0..lineages {
+        let events = crate::randomness::poisson_count(rng, mean_events)
+            .map_err(|error| format!("el recuento de pasos falló: {error:?}"))?;
+        drawn = drawn
+            .checked_add(events)
+            .ok_or_else(|| "el recuento de pasos desborda".to_owned())?;
+        let mut current = ancestral.clone();
+        let mut stopped = false;
+        for _ in 0..events {
+            if stopped {
+                unapplied += 1;
+                continue;
+            }
+            // Viabilidad, escrita aquí: la contracción exige dos unidades en la
+            // tirada más larga y la expansión tiene que caber bajo el tope.
+            let annotation = current.annotation();
+            let can_contract = annotation.longest_run_units() >= 2;
+            let can_expand = annotation.units_as_f64() + 1.0 <= max_units as f64;
+            if !(can_contract && can_expand) {
+                stopped = true;
+                unapplied += 1;
+                continue;
+            }
+            let step = if expansion_bias == 1.0 {
+                1
+            } else if expansion_bias == 0.0 {
+                -1
+            } else if crate::randomness::f4_bernoulli(rng, expansion_bias)
+                .map_err(|error| format!("el ensayo del sesgo falló: {error:?}"))?
+            {
+                1
+            } else {
+                -1
+            };
+            current = current
+                .apply_unit_step(step)
+                .map_err(|error| format!("el paso falló: {}", error.detail()))?;
+            applied += 1;
+        }
+        *counts
+            .entry((current.bases().len(), current.bases().to_vec()))
+            .or_insert(0) += 1;
+    }
+    Ok(RecomputedFan {
+        alleles: counts
+            .into_iter()
+            .map(|((_, bases), count)| (bases, count))
+            .collect(),
+        drawn,
+        applied,
+        unapplied,
+    })
+}
+
+struct RecomputedFan {
+    alleles: Vec<(Vec<u8>, u64)>,
+    drawn: u64,
+    applied: u64,
+    unapplied: u64,
+}
+
+/// Contrasta el abanico **escrito** contra el **rehecho**, alelo a alelo.
+fn compare_published_fan_against_oracle(
+    locus: &Value,
+    slippage: &Value,
+    recomputed: &RecomputedFan,
+    lineages: u64,
+    reject: &dyn Fn(&str) -> Diagnostic,
+) -> Result<(), Diagnostic> {
+    let published = locus
+        .get("alleles")
+        .and_then(Value::as_array)
+        .ok_or_else(|| reject("el locus no publica alelos"))?;
+    if published.len() != recomputed.alleles.len() {
+        return Err(reject(
+            "el número de alelos publicados no es el que el modelo produce",
+        ));
+    }
+    for (index, (expected_bases, expected_lineages)) in recomputed.alleles.iter().enumerate() {
+        let allele = &published[index];
+        let sequence = allele
+            .get("sequence")
+            .and_then(Value::as_str)
+            .ok_or_else(|| reject("un alelo publicado no tiene secuencia"))?;
+        if sequence.as_bytes() != expected_bases.as_slice() {
+            return Err(reject(
+                "la secuencia de un alelo publicado no es la que el modelo produce, o el orden \
+canónico no es el suyo",
+            ));
+        }
+        // **Aquí muere el espectro emparejado al revés.** La frecuencia se
+        // compara bit a bit contra los linajes que este juez contó terminando
+        // en ESTE alelo, no contra el conjunto de frecuencias.
+        let expected_frequency = *expected_lineages as f64 / lineages as f64;
+        let published_frequency = allele.get("declared_frequency").and_then(Value::as_f64);
+        if published_frequency != Some(expected_frequency) {
+            // El diagnóstico lleva las dos cifras: sin ellas, quien lo lea sabe
+            // que algo no cuadra y no **qué**.
+            return Err(reject(&format!(
+                "la frecuencia de un alelo no es la proporción de linajes que terminan en él \
+(alelo {index}: publicada {published_frequency:?}, rehecha {expected_frequency} = \
+{expected_lineages}/{lineages})"
+            )));
+        }
+    }
+    for (field, expected) in [
+        ("drawn_events", recomputed.drawn),
+        ("applied_events", recomputed.applied),
+        ("unapplied_events", recomputed.unapplied),
+    ] {
+        if slippage.get(field).and_then(Value::as_u64) != Some(expected) {
+            return Err(reject(
+                "la contabilidad publicada del generador no es la que el modelo produce",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Comprueba el bloque del generador de alelos por deslizamiento.
+///
+/// # Qué exige, y por qué cada cosa
+///
+/// El modelo y el tamaño de paso son **literales fijos**: cualquier otro valor
+/// describiría un modelo que el simulador no tiene. La media y el sesgo son
+/// decimales en su dominio. Las dos versiones —la del algoritmo y la del
+/// catálogo de ámbitos— y el nombre del ámbito tienen que estar, porque sin
+/// ellas dos ejecuciones con la misma semilla y resultados distintos serían
+/// indistinguibles de un defecto.
+///
+/// La contabilidad se comprueba **entre sí**: los pasos aplicados más los no
+/// aplicados tienen que sumar exactamente los sorteados. Un servicio que
+/// perdiera eventos por el camino, o que contase dos veces, muere aquí y no en
+/// una cifra suelta que nadie puede contrastar.
+///
+/// Las tres limitaciones se exigen **una a una y con su texto**: son decisiones
+/// biológicas del modelo, y un documento que las recortara dejaría a quien lo
+/// lea creyendo que el conjunto sirve para lo que no sirve.
+fn validate_repeat_slippage(value: &Value) -> Result<(), &'static str> {
+    let slippage = value
+        .as_object()
+        .ok_or("el bloque del generador no es un objeto")?;
+    const FIELDS: [&str; 14] = [
+        "model",
+        "step_units",
+        "mean_events",
+        "expansion_bias",
+        "algorithm",
+        "count_algorithm",
+        "bias_algorithm",
+        "rng_scope",
+        "rng_scope_catalog_version",
+        "limitations",
+        "lineages",
+        "drawn_events",
+        "applied_events",
+        "unapplied_events",
+    ];
+    if slippage.len() != FIELDS.len() || slippage.keys().any(|key| !FIELDS.contains(&key.as_str()))
+    {
+        return Err("el bloque del generador no tiene exactamente sus campos");
+    }
+    if slippage.get("model").and_then(Value::as_str)
+        != Some(crate::repeat_slippage::SLIPPAGE_MODEL_STEPWISE)
+    {
+        return Err("el modelo del generador no es el escalonado");
+    }
+    if slippage.get("step_units").and_then(Value::as_u64)
+        != Some(crate::repeat_slippage::SLIPPAGE_STEP_UNITS)
+    {
+        return Err("el paso del generador no es de una unidad completa");
+    }
+    let mean = slippage
+        .get("mean_events")
+        .and_then(Value::as_f64)
+        .ok_or("la media de pasos no es un decimal")?;
+    if !mean.is_finite() || mean < 0.0 {
+        return Err("la media de pasos no es un decimal no negativo");
+    }
+    let bias = slippage
+        .get("expansion_bias")
+        .and_then(Value::as_f64)
+        .ok_or("el sesgo de expansión no es un decimal")?;
+    if !bias.is_finite() || !(0.0..=1.0).contains(&bias) {
+        return Err("el sesgo de expansión no pertenece a [0,1]");
+    }
+    for (field, expected) in [
+        ("algorithm", crate::repeat_slippage::SLIPPAGE_ALGORITHM),
+        (
+            "count_algorithm",
+            crate::repeat_slippage::SLIPPAGE_COUNT_ALGORITHM,
+        ),
+        (
+            "bias_algorithm",
+            crate::repeat_slippage::SLIPPAGE_BIAS_ALGORITHM,
+        ),
+        ("rng_scope", crate::repeat_slippage::SLIPPAGE_SCOPE),
+        (
+            "rng_scope_catalog_version",
+            crate::repeat_slippage::SLIPPAGE_SCOPE_CATALOG_VERSION,
+        ),
+    ] {
+        if slippage.get(field).and_then(Value::as_str) != Some(expected) {
+            return Err("una versión o un ámbito del generador no es el normativo");
+        }
+    }
+    let limitations = slippage
+        .get("limitations")
+        .and_then(Value::as_array)
+        .ok_or("las limitaciones del generador no son una lista")?;
+    if limitations.len() != crate::repeat_slippage::SLIPPAGE_LIMITATIONS.len()
+        || limitations
+            .iter()
+            .zip(crate::repeat_slippage::SLIPPAGE_LIMITATIONS)
+            .any(|(published, expected)| published.as_str() != Some(expected))
+    {
+        return Err("las limitaciones del generador no son las tres declaradas");
+    }
+    if slippage
+        .get("lineages")
+        .and_then(Value::as_u64)
+        .is_none_or(|lineages| lineages == 0)
+    {
+        return Err("los linajes del generador no son un entero positivo");
+    }
+    let drawn = slippage
+        .get("drawn_events")
+        .and_then(Value::as_u64)
+        .ok_or("los pasos sorteados no son un entero")?;
+    let applied = slippage
+        .get("applied_events")
+        .and_then(Value::as_u64)
+        .ok_or("los pasos aplicados no son un entero")?;
+    let unapplied = slippage
+        .get("unapplied_events")
+        .and_then(Value::as_u64)
+        .ok_or("los pasos no aplicados no son un entero")?;
+    if applied.checked_add(unapplied) != Some(drawn) {
+        return Err("los pasos aplicados y los no aplicados no suman los sorteados");
     }
     Ok(())
 }
@@ -4061,8 +4595,9 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
     let allele = value
         .as_object()
         .ok_or("un alelo publicado no es un objeto")?;
-    const FIELDS: [&str; 14] = [
+    const FIELDS: [&str; 15] = [
         "sequence",
+        "origin",
         "declared_frequency",
         "effective_frequency",
         "realized_frequency",
@@ -4086,6 +4621,12 @@ fn validate_repeat_allele(value: &Value, drawn: u64) -> Result<u64, &'static str
         .is_some_and(|sequence| !sequence.is_empty() && sequence.bytes().all(is_repeat_allele_base))
     {
         return Err("la secuencia del alelo no son bases");
+    }
+    if !matches!(
+        allele.get("origin").and_then(Value::as_str),
+        Some("declared" | "generated")
+    ) {
+        return Err("el origen del alelo no es declarado ni generado");
     }
     for field in ["declared_frequency", "effective_frequency", "purity"] {
         let value = allele

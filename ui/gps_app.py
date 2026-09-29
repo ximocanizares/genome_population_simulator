@@ -34,6 +34,7 @@ def _():
         repeat_interruption_editor_rows,
         repeat_loci_from_editor_rows,
         repeat_locus_editor_rows,
+        repeat_slippage_editor_rows,
         LIBRARY_PREPARATIONS,
         PCR_MAXIMUM_CYCLES,
         PCR_MAXIMUM_EARLY_CYCLES,
@@ -82,6 +83,9 @@ def _():
         validate_toml,
     )
     from ui_panels import (
+        REPEAT_ALLELE_SOURCES,
+        REPEAT_ALLELE_SOURCE_DECLARED,
+        REPEAT_ALLELE_SOURCE_GENERATED,
         authored_editor_rows,
         effective_incompatible_genotype_authorization,
         explicit_snp_authorization_summary,
@@ -138,11 +142,15 @@ def _():
         mo,
         ordered_editor_rows,
         RepeatAdmissionForm,
+        REPEAT_ALLELE_SOURCES,
+        REPEAT_ALLELE_SOURCE_DECLARED,
+        REPEAT_ALLELE_SOURCE_GENERATED,
         repeats_panel,
         repeat_allele_editor_rows,
         repeat_interruption_editor_rows,
         repeat_loci_from_editor_rows,
         repeat_locus_editor_rows,
+        repeat_slippage_editor_rows,
         parse_general_toml,
         population_snvs_population_from_editor_row,
         read_fasta_sequence_rows,
@@ -711,11 +719,15 @@ def _(
 
 @app.cell
 def _(
+    REPEAT_ALLELE_SOURCES,
+    REPEAT_ALLELE_SOURCE_DECLARED,
+    REPEAT_ALLELE_SOURCE_GENERATED,
     imported_form,
     mo,
     repeat_allele_editor_rows,
     repeat_interruption_editor_rows,
     repeat_locus_editor_rows,
+    repeat_slippage_editor_rows,
 ):
     _imported_loci = imported_form.reference.repeat_loci
     _imported_admission = imported_form.reference.repeat_admission
@@ -737,6 +749,38 @@ def _(
         label=(
             "Loci de repetición (motivo y posición; una fila sin `id` se omite."
             " `motifs` admite varios separados por comas)"
+        ),
+        pagination=False,
+    )
+    repeat_allele_source_control = mo.ui.radio(
+        options=list(REPEAT_ALLELE_SOURCES),
+        value=(
+            REPEAT_ALLELE_SOURCE_GENERATED
+            if any(locus.slippage is not None for locus in _imported_loci)
+            else REPEAT_ALLELE_SOURCE_DECLARED
+        ),
+        label=(
+            "Procedencia de los alelos: escribirlos a mano, o generarlos por"
+            " deslizamiento partiendo del alelo que la referencia lleva en el"
+            " locus. Son excluyentes, y el panel enseña solo la tabla que toca"
+        ),
+    )
+    repeat_slippage_editor = mo.ui.data_editor(
+        repeat_slippage_editor_rows(_imported_loci)
+        or [
+            {
+                "order": 1,
+                "locus_id": "",
+                "model": "stepwise",
+                "mean_events": "1.0",
+                "expansion_bias": "",
+                "step_units": "",
+            }
+        ],
+        label=(
+            "Generador por deslizamiento (`model` y `mean_events` son"
+            " obligatorios; `expansion_bias` vacío es 0.5 y `step_units` vacío"
+            " es 1)"
         ),
         pagination=False,
     )
@@ -803,12 +847,14 @@ def _(
         ),
     )
     return (
+        repeat_allele_source_control,
         repeat_alleles_editor,
         repeat_interruptions_editor,
         repeat_loci_editor,
         repeat_max_tract_output_control,
         repeat_min_longest_run_control,
         repeat_min_purity_control,
+        repeat_slippage_editor,
     )
 
 
@@ -864,6 +910,7 @@ def _(
     repeat_max_tract_output_control,
     repeat_min_longest_run_control,
     repeat_min_purity_control,
+    repeat_slippage_editor,
     ploidy_control,
     normalization_tolerance_control,
     population_snvs_input_path_control,
@@ -1037,6 +1084,7 @@ def _(
             repeat_loci_editor.value,
             repeat_alleles_editor.value,
             repeat_interruptions_editor.value,
+            repeat_slippage_editor.value,
         )
         _declared_min_purity = str(repeat_min_purity_control.value).strip()
         _declared_min_run = str(repeat_min_longest_run_control.value).strip()
@@ -1821,12 +1869,14 @@ def _(
     individuals_panel,
     mo,
     repeats_panel,
+    repeat_allele_source_control,
     repeat_alleles_editor,
     repeat_interruptions_editor,
     repeat_loci_editor,
     repeat_max_tract_output_control,
     repeat_min_longest_run_control,
     repeat_min_purity_control,
+    repeat_slippage_editor,
     stutter_panel,
     stutter_mode_control,
     stutter_run_length_coefficient_control,
@@ -2366,8 +2416,10 @@ def _(
             "Repeticiones": repeats_panel(
                 mo,
                 repeat_loci_editor,
+                repeat_allele_source_control,
                 repeat_alleles_editor,
                 repeat_interruptions_editor,
+                repeat_slippage_editor,
                 mo.vstack(
                     [
                         repeat_min_purity_control,

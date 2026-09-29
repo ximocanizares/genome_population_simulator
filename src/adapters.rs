@@ -14,8 +14,8 @@ use crate::configuration::{
     DeclaredPopulationSnvsGeneration, DeclaredPopulationSnvsPopulation,
     DeclaredPopulationSnvsRegion, DeclaredReducedReference, DeclaredReductionTarget,
     DeclaredReference, DeclaredReferenceSource, DeclaredRepeatAdmission, DeclaredRepeatAllele,
-    DeclaredRepeatInterruption, DeclaredRepeatLocus, DeclaredSequence, DeclaredStutter,
-    DeclaredStutterLocusRate, DeclaredStutterMotifRate, DeclaredStutterStep,
+    DeclaredRepeatInterruption, DeclaredRepeatLocus, DeclaredRepeatSlippage, DeclaredSequence,
+    DeclaredStutter, DeclaredStutterLocusRate, DeclaredStutterMotifRate, DeclaredStutterStep,
     DeclaredTechnicalEvent, DeclaredTechnicalEventTarget, DeclaredTechnicalLibrary,
     DeclaredVcfOutput, ExpectedConfigKind, Located, SequenceClass, SourceLocation, semantic_error,
 };
@@ -2009,6 +2009,32 @@ fn parse_locus_admission(
     }))
 }
 
+/// Lee el bloque del generador de alelos por deslizamiento, si lo hay.
+///
+/// Aquí no se juzga nada: el modelo, el tamaño de paso, la media y el sesgo los
+/// valida `repeat_slippage::SlippageSettings::new`, que es quien nombra el
+/// parámetro y el valor rechazados. Lo único que esta función exige es que el
+/// bloque traiga sus dos campos obligatorios.
+fn parse_locus_slippage(
+    admitted: &AdmittedToml,
+    locus: &DeTable<'_>,
+) -> Result<Option<DeclaredRepeatSlippage>, Diagnostic> {
+    let Some(table) = optional_table(admitted, locus, "slippage")? else {
+        return Ok(None);
+    };
+    check_unknown(
+        admitted,
+        table,
+        &["model", "mean_events", "expansion_bias", "step_units"],
+    )?;
+    Ok(Some(DeclaredRepeatSlippage {
+        model: required_string(admitted, table, "model")?,
+        mean_events: required_number(admitted, table, "mean_events")?,
+        expansion_bias: optional_number(admitted, table, "expansion_bias")?,
+        step_units: optional_located_u64(admitted, table, "step_units")?,
+    }))
+}
+
 /// Lee el número de unidades del alelo, escalar o por bloque.
 fn parse_allele_units(
     admitted: &AdmittedToml,
@@ -2151,6 +2177,7 @@ fn parse_repeat_loci(
                 "max_units",
                 "min_purity",
                 "min_longest_run_units",
+                "slippage",
                 "alleles",
             ],
         )?;
@@ -2207,8 +2234,27 @@ fn parse_repeat_loci(
             }
         };
         let admission = parse_locus_admission(admitted, locus)?;
-        let alleles_values = required_array(admitted, locus, "alleles")?;
-        if alleles_values.is_empty() {
+        let slippage = parse_locus_slippage(admitted, locus)?;
+        // **O se declaran los alelos, o se generan.** Las dos cosas a la vez
+        // dejarían sin respuesta la pregunta que el manifiesto tiene que
+        // contestar por cada alelo: de dónde salió.
+        let declared_alleles = optional_array(admitted, locus, "alleles")?;
+        if slippage.is_some() && declared_alleles.is_some() {
+            return Err(semantic_error(
+                admitted,
+                "reference.repeat_loci.alleles,reference.repeat_loci.slippage",
+                format!(
+                    "el locus {} declara alelos y además pide generarlos por deslizamiento; son excluyentes",
+                    id.value()
+                ),
+            ));
+        }
+        let alleles_values = match declared_alleles {
+            Some(values) => values,
+            None if slippage.is_some() => &[],
+            None => required_array(admitted, locus, "alleles")?,
+        };
+        if alleles_values.is_empty() && slippage.is_none() {
             return Err(semantic_error(
                 admitted,
                 "reference.repeat_loci.alleles",
@@ -2271,6 +2317,7 @@ fn parse_repeat_loci(
             motifs,
             max_units: optional_located_u64(admitted, locus, "max_units")?,
             admission,
+            slippage,
             alleles,
         });
     }

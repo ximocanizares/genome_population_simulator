@@ -45,7 +45,9 @@ use crate::randomness::{
     EntropySource, ReproducibilityMetadata, RuntimeSubseedScope, Subseed, SystemEntropy,
     derive_subseed, neumaier_sum, resolve_root_seed,
 };
+use crate::reference::Reference;
 use crate::reference_generation::normalize_composition_probabilities;
+use crate::repeat_slippage::{SlippageSettings, generate_allele_fan};
 use crate::stutter::{StutterError, StutterMotifLengthRates, StutterSettings, StutterStepWeights};
 use crate::tandem_repeat::{RepeatMotif, TandemRepeatLocus, TandemRepeatTract};
 use crate::technical_profile::LibraryPreparation;
@@ -136,12 +138,45 @@ pub struct EffectiveRepeatAllele {
     tract: TandemRepeatTract,
     declared_frequency: f64,
     frequency: f64,
+    origin: RepeatAlleleOrigin,
+}
+
+/// De dónde salió un alelo de repetición.
+///
+/// Se publica **por alelo**, no por locus, aunque hoy un locus tenga todos sus
+/// alelos del mismo origen: un documento con loci de los dos tipos tiene que
+/// poder distinguirlos alelo a alelo sin volver a la configuración, y quien
+/// encadene un análisis necesita saber si una frecuencia la escribió una
+/// persona o la produjo un modelo.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RepeatAlleleOrigin {
+    /// Lo escribió el usuario, con su frecuencia.
+    Declared,
+    /// Lo produjo el generador de deslizamiento biológico partiendo del alelo
+    /// de la referencia.
+    Generated,
+}
+
+impl RepeatAlleleOrigin {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Declared => "declared",
+            Self::Generated => "generated",
+        }
+    }
 }
 
 impl EffectiveRepeatAllele {
     #[must_use]
     pub const fn tract(&self) -> &TandemRepeatTract {
         &self.tract
+    }
+
+    /// Origen del alelo: declarado por el usuario o generado por deslizamiento.
+    #[must_use]
+    pub const fn origin(&self) -> RepeatAlleleOrigin {
+        self.origin
     }
 
     /// Frecuencia **tal y como el usuario la escribió**, sin normalizar.
@@ -322,8 +357,70 @@ pub struct EffectiveRepeatLocus {
     declaration: TandemRepeatLocus,
     max_units: u64,
     admission: EffectiveRepeatAdmission,
+    slippage: Option<EffectiveRepeatSlippage>,
     alleles: Vec<EffectiveRepeatAllele>,
     normalization: RepeatFrequencyNormalization,
+}
+
+/// El generador de alelos por deslizamiento biológico de un locus.
+///
+/// Guarda **los parámetros** que el usuario declaró y, una vez generado el
+/// abanico, **la contabilidad de esa generación**. Las dos cosas se publican:
+/// los parámetros dicen qué se pidió y la contabilidad qué salió, incluidos los
+/// eventos que **no se aplicaron** al agotar el tracto, que es la cifra que
+/// distingue un servicio que los ignora de uno que los cuenta.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EffectiveRepeatSlippage {
+    settings: SlippageSettings,
+    generation: Option<EffectiveSlippageGeneration>,
+}
+
+impl EffectiveRepeatSlippage {
+    #[must_use]
+    pub const fn settings(&self) -> SlippageSettings {
+        self.settings
+    }
+
+    /// La contabilidad de la generación, o `None` mientras no se haya generado.
+    #[must_use]
+    pub const fn generation(&self) -> Option<EffectiveSlippageGeneration> {
+        self.generation
+    }
+}
+
+/// Lo que la generación de un abanico consumió y produjo.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EffectiveSlippageGeneration {
+    lineages: u64,
+    drawn_events: u64,
+    applied_events: u64,
+    unapplied_events: u64,
+}
+
+impl EffectiveSlippageGeneration {
+    /// Linajes simulados: una copia haplotípica, un linaje.
+    #[must_use]
+    pub const fn lineages(self) -> u64 {
+        self.lineages
+    }
+
+    /// Pasos **sorteados** por la Poisson, sumados sobre todos los linajes.
+    #[must_use]
+    pub const fn drawn_events(self) -> u64 {
+        self.drawn_events
+    }
+
+    /// Pasos que llegaron a cambiar el tracto.
+    #[must_use]
+    pub const fn applied_events(self) -> u64 {
+        self.applied_events
+    }
+
+    /// Pasos que **no se aplicaron** al agotar el tracto o al topar.
+    #[must_use]
+    pub const fn unapplied_events(self) -> u64 {
+        self.unapplied_events
+    }
 }
 
 impl EffectiveRepeatLocus {
@@ -388,6 +485,12 @@ impl EffectiveRepeatLocus {
     #[must_use]
     pub fn alleles(&self) -> &[EffectiveRepeatAllele] {
         &self.alleles
+    }
+
+    /// El generador de este locus, si lo declara.
+    #[must_use]
+    pub const fn slippage(&self) -> Option<&EffectiveRepeatSlippage> {
+        self.slippage.as_ref()
     }
 
     #[must_use]
@@ -1317,6 +1420,154 @@ impl EffectiveConfig {
     #[must_use]
     pub fn repeat_loci(&self) -> &[EffectiveRepeatLocus] {
         &self.repeat_loci
+    }
+
+    /// Genera el abanico de alelos de los loci que lo piden, partiendo del
+    /// **alelo que el genoma de referencia lleva** en cada uno.
+    ///
+    /// # Por qué no puede hacerse al resolver la configuración
+    ///
+    /// El alelo ancestral son bases de la referencia, y la referencia no existe
+    /// hasta que se prepara. Por eso el generador se aplica aquí, sobre una
+    /// configuración ya resuelta, y devuelve **otra** configuración con los
+    /// alelos dentro; la original no se toca.
+    ///
+    /// Devuelve `None` cuando **ningún locus declara generador**. No es una
+    /// optimización: es lo que garantiza que un escenario que no lo usa siga
+    /// publicando exactamente los mismos bytes.
+    ///
+    /// # La cota de bases de tracto se recomputa
+    ///
+    /// La cota sale de los alelos, y los alelos acaban de nacer. Dejarla como
+    /// estaba publicaría una cota falsa —cero bases para un locus que sí va a
+    /// escribir tracto— y el juez independiente encontraría lo realizado por
+    /// encima de lo acotado. El tope declarado se vuelve a aplicar aquí, que
+    /// sigue siendo antes de publicar nada.
+    pub fn with_generated_repeat_alleles(
+        &self,
+        reference: &Reference,
+    ) -> Result<Option<Self>, Diagnostic> {
+        if self
+            .repeat_loci
+            .iter()
+            .all(|locus| locus.slippage.is_none())
+        {
+            return Ok(None);
+        }
+        let lineages = self.haplotype_copy_count()?;
+        let mut resolved = self.clone();
+        for locus in &mut resolved.repeat_loci {
+            let Some(slippage) = locus.slippage else {
+                continue;
+            };
+            let ancestral = reference_repeat_tract(reference, locus)?;
+            let fan = generate_allele_fan(
+                self.reproducibility.root_seed(),
+                &self.reference_id,
+                locus.declaration.id().as_str(),
+                &ancestral,
+                locus.max_units,
+                slippage.settings(),
+                lineages,
+            )
+            .map_err(|error| {
+                error.into_diagnostic(&self.source_path, locus.declaration.id().as_str())
+            })?;
+            locus.slippage = Some(EffectiveRepeatSlippage {
+                settings: slippage.settings(),
+                generation: Some(EffectiveSlippageGeneration {
+                    lineages: fan.lineages(),
+                    drawn_events: fan.drawn_events(),
+                    applied_events: fan.applied_events(),
+                    unapplied_events: fan.unapplied_events(),
+                }),
+            });
+            // Las frecuencias generadas ya suman uno por construcción, pero la
+            // auditoría se **recomputa** con la suma compensada de DTC-049 en
+            // vez de darlo por hecho: es lo que el resto del proyecto hace y lo
+            // que hace publicable la normalización.
+            let declared: Vec<f64> = fan
+                .alleles()
+                .iter()
+                .map(crate::repeat_slippage::SlippageAllele::frequency)
+                .collect();
+            let original_sum = neumaier_sum(declared.iter().copied());
+            let effective: Vec<f64> = declared
+                .iter()
+                .map(|weight| weight / original_sum)
+                .collect();
+            let effective_sum = neumaier_sum(effective.iter().copied());
+            locus.normalization = RepeatFrequencyNormalization {
+                tolerance: self.normalization.tolerance(),
+                original_sum,
+                original_delta: (original_sum - 1.0).abs(),
+                effective_sum,
+                effective_delta: (effective_sum - 1.0).abs(),
+            };
+            locus.alleles = fan
+                .into_alleles()
+                .into_iter()
+                .zip(effective)
+                .map(|(allele, frequency)| {
+                    let (tract, _, declared_frequency) = allele.into_parts();
+                    EffectiveRepeatAllele {
+                        tract,
+                        declared_frequency,
+                        frequency,
+                        origin: RepeatAlleleOrigin::Generated,
+                    }
+                })
+                .collect();
+        }
+        resolved.repeat_output_budget = recompute_repeat_output_budget(
+            &resolved.repeat_loci,
+            lineages,
+            resolved.repeat_output_budget.declared_cap(),
+        );
+        if let Some(cap) = resolved.repeat_output_budget.declared_cap()
+            && resolved.repeat_output_budget.total_bases() > cap
+        {
+            let heaviest = resolved.repeat_output_budget.heaviest_locus().map_or_else(
+                || "ninguno".to_owned(),
+                |locus| format!("{} con {} bases", locus.locus_id(), locus.total_bases()),
+            );
+            return Err(Diagnostic::configuration(
+                "GPS-CONF-008",
+                "La configuración contiene una combinación de campos incompatible.",
+            )
+            .with("path", &self.source_path)
+            .with("fields", "reference.max_tract_output_bases")
+            .with(
+                "detail",
+                format!(
+                    "los alelos generados por deslizamiento elevan la cota a {} bases y el tope \
+declarado es {cap}; el locus que más aporta es {heaviest}",
+                    resolved.repeat_output_budget.total_bases()
+                ),
+            ));
+        }
+        Ok(Some(resolved))
+    }
+
+    /// Copias haplotípicas de todas las poblaciones iniciales juntas.
+    ///
+    /// Es el número de **linajes** que el generador simula: una copia, un
+    /// linaje.
+    pub fn haplotype_copy_count(&self) -> Result<u64, Diagnostic> {
+        self.initial_populations
+            .iter()
+            .try_fold(0_u64, |total, population| {
+                u64::try_from(population.individual_count())
+                    .ok()
+                    .and_then(|individuals| {
+                        individuals.checked_mul(u64::from(population.ploidy().copy_count()))
+                    })
+                    .and_then(|copies| total.checked_add(copies))
+                    .ok_or_else(|| {
+                        Diagnostic::internal_invariant("application", "haplotype_copy_count")
+                            .with("detail", "el recuento de copias haplotípicas desborda")
+                    })
+            })
     }
 
     #[must_use]
@@ -2486,40 +2737,12 @@ fn repeat_output_budget(
                 )
             })
     })?;
-    let mut per_locus = Vec::with_capacity(loci.len());
-    for locus in loci {
-        let longest = locus
-            .alleles()
-            .iter()
-            .map(|allele| allele.tract().length())
-            .max()
-            .unwrap_or(0);
-        let interval = locus.declaration().interval();
-        let reference_tract = interval.end().saturating_sub(interval.start());
-        let mut distinct = BTreeSet::new();
-        let mut vcf_bases = reference_tract;
-        for allele in locus.alleles() {
-            if distinct.insert(allele.tract().as_text()) {
-                vcf_bases = vcf_bases.saturating_add(allele.tract().length());
-            }
-        }
-        per_locus.push(RepeatLocusOutputBound {
-            locus_id: locus.id().to_owned(),
-            truth_bases: EffectiveRepeatOutputBudget::TRUTH_COPIES_PER_HAPLOTYPE_COPY
-                .saturating_mul(copies)
-                .saturating_mul(longest),
-            vcf_bases,
-        });
-    }
     let declared_cap = general
         .reference()
         .max_tract_output_bases
         .as_ref()
         .map(|declared| *declared.value());
-    let budget = EffectiveRepeatOutputBudget {
-        per_locus,
-        declared_cap,
-    };
+    let budget = recompute_repeat_output_budget(loci, copies, declared_cap);
     if let Some(cap) = declared_cap
         && budget.total_bases() > cap
     {
@@ -4086,6 +4309,60 @@ fn effective_repeat_loci(
             ));
         }
 
+        // **El generador se valida aquí, antes de simular.** Un modelo distinto
+        // del escalonado o un salto de varias unidades se rechazan nombrando el
+        // parámetro y el valor, sin haber gastado una sola copia.
+        let slippage = match &locus.slippage {
+            None => None,
+            Some(declared) => {
+                let settings = SlippageSettings::new(
+                    declared.model.value().as_str(),
+                    declared
+                        .step_units
+                        .as_ref()
+                        .map_or(crate::repeat_slippage::SLIPPAGE_STEP_UNITS, |value| {
+                            *value.value()
+                        }),
+                    parse_slippage_number(
+                        general,
+                        locus.id.value(),
+                        "mean_events",
+                        &declared.mean_events,
+                    )?,
+                    match &declared.expansion_bias {
+                        None => crate::repeat_slippage::SLIPPAGE_DEFAULT_EXPANSION_BIAS,
+                        Some(value) => parse_slippage_number(
+                            general,
+                            locus.id.value(),
+                            "expansion_bias",
+                            value,
+                        )?,
+                    },
+                )
+                .map_err(|error| {
+                    error.into_diagnostic(
+                        &general.source().path().display().to_string(),
+                        locus.id.value(),
+                    )
+                })?;
+                // Sin fronteras de bloque declaradas no hay forma de partir el
+                // tracto de la referencia, de modo que el generador solo admite
+                // un motivo. El rechazo llega aquí, no al generar.
+                if motifs.len() != 1 {
+                    return Err(crate::repeat_slippage::SlippageError::CompositeLocus {
+                        motifs: motifs.len(),
+                    }
+                    .into_diagnostic(
+                        &general.source().path().display().to_string(),
+                        locus.id.value(),
+                    ));
+                }
+                Some(EffectiveRepeatSlippage {
+                    settings,
+                    generation: None,
+                })
+            }
+        };
         let mut declared_weights = Vec::with_capacity(locus.alleles.len());
         let mut tracts = Vec::with_capacity(locus.alleles.len());
         for (index, allele) in locus.alleles.iter().enumerate() {
@@ -4165,6 +4442,25 @@ fn effective_repeat_loci(
         // DTC-049: suma compensada con **el mismo** algoritmo que consume el
         // sorteo categórico, y auditoría recomputada después de normalizar.
         let original_sum = neumaier_sum(declared_weights.iter().copied());
+        if slippage.is_some() {
+            // Un locus generado no trae frecuencias que normalizar: la
+            // auditoría se recomputa sobre el abanico, cuando exista.
+            resolved.push(EffectiveRepeatLocus {
+                declaration,
+                max_units,
+                admission: locus_admission,
+                slippage,
+                alleles: Vec::new(),
+                normalization: RepeatFrequencyNormalization {
+                    tolerance,
+                    original_sum: 0.0,
+                    original_delta: 0.0,
+                    effective_sum: 0.0,
+                    effective_delta: 0.0,
+                },
+            });
+            continue;
+        }
         if !original_sum.is_finite()
             || original_sum <= 0.0
             || (original_sum - 1.0).abs() > tolerance
@@ -4201,6 +4497,7 @@ fn effective_repeat_loci(
                     tract,
                     declared_frequency,
                     frequency,
+                    origin: RepeatAlleleOrigin::Declared,
                 },
             )
             .collect();
@@ -4208,6 +4505,7 @@ fn effective_repeat_loci(
             declaration,
             max_units,
             admission: locus_admission,
+            slippage,
             alleles,
             normalization,
         });
@@ -4418,6 +4716,115 @@ fn effective_repeat_admission(
         "reference.repeat_admission",
         None,
     )
+}
+
+/// La cota de bases de tracto a partir de los loci ya resueltos.
+///
+/// Vive aparte porque **se calcula dos veces**: al resolver la configuración,
+/// con los alelos declarados, y otra vez cuando el generador de deslizamiento
+/// crea los suyos. Dos copias de esta aritmética acabarían diciendo cosas
+/// distintas del mismo escenario.
+fn recompute_repeat_output_budget(
+    loci: &[EffectiveRepeatLocus],
+    copies: u64,
+    declared_cap: Option<u64>,
+) -> EffectiveRepeatOutputBudget {
+    let mut per_locus = Vec::with_capacity(loci.len());
+    for locus in loci {
+        let longest = locus
+            .alleles()
+            .iter()
+            .map(|allele| allele.tract().length())
+            .max()
+            .unwrap_or(0);
+        let interval = locus.declaration().interval();
+        let reference_tract = interval.end().saturating_sub(interval.start());
+        let mut distinct = BTreeSet::new();
+        let mut vcf_bases = reference_tract;
+        for allele in locus.alleles() {
+            if distinct.insert(allele.tract().as_text()) {
+                vcf_bases = vcf_bases.saturating_add(allele.tract().length());
+            }
+        }
+        per_locus.push(RepeatLocusOutputBound {
+            locus_id: locus.id().to_owned(),
+            truth_bases: EffectiveRepeatOutputBudget::TRUTH_COPIES_PER_HAPLOTYPE_COPY
+                .saturating_mul(copies)
+                .saturating_mul(longest),
+            vcf_bases,
+        });
+    }
+    EffectiveRepeatOutputBudget {
+        per_locus,
+        declared_cap,
+    }
+}
+
+/// El **alelo ancestral** de un locus: las bases que el genoma de referencia
+/// lleva hoy en su intervalo, ya estructuradas como tracto de su motivo.
+///
+/// Es de donde parte cada linaje del generador. Que la referencia lleve un
+/// alelo que después ningún individuo tenga es una de las tres limitaciones
+/// declaradas del modelo, no un defecto.
+fn reference_repeat_tract(
+    reference: &Reference,
+    locus: &EffectiveRepeatLocus,
+) -> Result<TandemRepeatTract, Diagnostic> {
+    let interval = locus.declaration().interval();
+    let sequence = reference
+        .sequences()
+        .iter()
+        .find(|sequence| sequence.id() == interval.sequence_id())
+        .ok_or_else(|| {
+            slippage_reference_error(
+                locus.id(),
+                format!("la referencia no contiene {}", interval.sequence_id()),
+            )
+        })?;
+    let bases = sequence.sequence().as_bytes().map_err(|error| {
+        slippage_reference_error(
+            locus.id(),
+            format!("las bases de la referencia no están materializadas: {error:?}"),
+        )
+    })?;
+    let start = usize::try_from(interval.start())
+        .map_err(|_| slippage_reference_error(locus.id(), "el inicio del intervalo desborda"))?;
+    let end = usize::try_from(interval.end())
+        .map_err(|_| slippage_reference_error(locus.id(), "el final del intervalo desborda"))?;
+    let slice = bases
+        .get(start..end)
+        .ok_or_else(|| slippage_reference_error(locus.id(), "el intervalo rebasa la secuencia"))?;
+    let motif = locus.single_motif().ok_or_else(|| {
+        slippage_reference_error(locus.id(), "el generador solo admite un locus de un motivo")
+    })?;
+    TandemRepeatTract::new(motif.clone(), slice)
+        .map_err(|error| slippage_reference_error(locus.id(), error.detail()))
+}
+
+fn slippage_reference_error(locus_id: &str, detail: impl Into<String>) -> Diagnostic {
+    Diagnostic::configuration(
+        "GPS-CONF-008",
+        "La configuración contiene una combinación de campos incompatible.",
+    )
+    .with("fields", "reference.repeat_loci.slippage")
+    .with("detail", format!("locus {locus_id}: {}", detail.into()))
+}
+
+/// Lee un decimal del bloque del generador sin perder el literal escrito.
+fn parse_slippage_number(
+    general: &DeclaredGeneralConfig,
+    locus_id: &str,
+    field: &str,
+    declared: &crate::configuration::DeclaredNumber,
+) -> Result<f64, Diagnostic> {
+    declared.literal().parse::<f64>().map_err(|_| {
+        repeat_error(
+            general,
+            "reference.repeat_loci.slippage",
+            locus_id,
+            format!("{field} no es un decimal válido: {}", declared.literal()),
+        )
+    })
 }
 
 fn repeat_error(

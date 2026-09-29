@@ -1682,8 +1682,7 @@
         "id",
         "sequence",
         "start",
-        "end",
-        "alleles"
+        "end"
       ],
       "properties": {
         "id": {
@@ -1737,6 +1736,9 @@
           "description": "Tirada mínima propia del locus. Si falta, manda la general.",
           "type": "integer",
           "minimum": 1
+        },
+        "slippage": {
+          "$ref": "#/$defs/repeat_slippage"
         }
       },
       "oneOf": [
@@ -1781,6 +1783,33 @@
             }
           }
         }
+      ],
+      "allOf": [
+        {
+          "description": "O el locus declara sus alelos, o declara el generador de deslizamiento. Ni las dos cosas ni ninguna.",
+          "oneOf": [
+            {
+              "required": [
+                "alleles"
+              ],
+              "not": {
+                "required": [
+                  "slippage"
+                ]
+              }
+            },
+            {
+              "required": [
+                "slippage"
+              ],
+              "not": {
+                "required": [
+                  "alleles"
+                ]
+              }
+            }
+          ]
+        }
       ]
     },
     "repeat_admission": {
@@ -1795,6 +1824,41 @@
         "min_longest_run_units": {
           "type": "integer",
           "minimum": 1
+        }
+      }
+    },
+    "repeat_slippage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "mean_events"
+      ],
+      "description": "Generador de alelos por DESLIZAMIENTO BIOLOGICO. Es EXCLUYENTE con alleles: o el usuario escribe los alelos y sus frecuencias, o los genera el simulador partiendo del alelo que el genoma de referencia lleva en este locus. Simula un linaje por copia haplotipica de la poblacion; cada linaje recibe un numero de pasos sorteado de una Poisson de media mean_events y cada paso anade o quita UNA unidad completa segun expansion_bias. La frecuencia de cada alelo es la proporcion de linajes que terminan en el, y el alelo de la referencia entra solo si algun linaje termina en el: su presencia NO se fuerza.",
+      "properties": {
+        "model": {
+          "enum": [
+            "stepwise"
+          ],
+          "description": "Unico modelo admitido. DTF-015 mantiene fuera el salto de varias unidades y cualquier otro modelo."
+        },
+        "mean_events": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Media de la Poisson que decide cuantos pasos recibe cada linaje. Cero significa que ningun linaje se mueve y el abanico es solo el alelo de la referencia. El TECHO de mil acota el trabajo por linaje: un tracto tiene a lo sumo max_units unidades y un linaje se detiene en cuanto toca un borde, de modo que por encima de unos pocos cientos de pasos la media deja de cambiar el resultado y solo cambia lo que se tarda.",
+          "maximum": 1000
+        },
+        "expansion_bias": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Probabilidad de que un paso viable sea una expansion. Si falta, 0.5. Los valores exactos 0 y 1 no consumen aleatoriedad."
+        },
+        "step_units": {
+          "enum": [
+            1
+          ],
+          "description": "Unidades por paso. Solo se admite una unidad completa."
         }
       }
     }

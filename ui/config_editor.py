@@ -130,6 +130,23 @@ class RepeatAlleleRow:
 
 
 @dataclass(eq=True)
+class RepeatSlippageForm:
+    """Generador de alelos por **deslizamiento biológico** de un locus.
+
+    Es excluyente con los alelos escritos a mano: o el usuario los declara, o
+    los genera el simulador partiendo del alelo que el genoma de referencia
+    lleva en este locus. Los números se conservan como **literales**, igual que
+    el resto de decimales de este editor, para que la ida y la vuelta no los
+    reescriba.
+    """
+
+    model: str = "stepwise"
+    mean_events: str = "1.0"
+    expansion_bias: str | None = None
+    step_units: int | None = None
+
+
+@dataclass(eq=True)
 class RepeatLocusRow:
     """Un locus de repetición: dónde está, con qué motivos y con qué alelos."""
 
@@ -142,6 +159,7 @@ class RepeatLocusRow:
     max_units: int | None = None
     min_purity: str | None = None
     min_longest_run_units: int | None = None
+    slippage: RepeatSlippageForm | None = None
 
 
 @dataclass(eq=True)
@@ -889,6 +907,30 @@ def repeat_locus_editor_rows(loci: Sequence[RepeatLocusRow]) -> list[dict[str, A
     ]
 
 
+def repeat_slippage_editor_rows(loci: Sequence[RepeatLocusRow]) -> list[dict[str, Any]]:
+    """Los parámetros del generador, una fila por locus que lo declare.
+
+    Va en **tabla propia**, como los alelos y las interrupciones, porque el
+    selector de procedencia enseña una u otra: mezclarlos en la fila del locus
+    obligaba a enseñar siempre las dos cosas.
+    """
+    return [
+        {
+            "order": order,
+            "locus_id": locus.id,
+            "model": locus.slippage.model,
+            "mean_events": locus.slippage.mean_events,
+            "expansion_bias": locus.slippage.expansion_bias or "",
+            "step_units": (
+                "" if locus.slippage.step_units is None else str(locus.slippage.step_units)
+            ),
+        }
+        for order, locus in enumerate(
+            [locus for locus in loci if locus.slippage is not None], start=1
+        )
+    ]
+
+
 def repeat_allele_editor_rows(loci: Sequence[RepeatLocusRow]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for locus in loci:
@@ -930,6 +972,7 @@ def repeat_loci_from_editor_rows(
     locus_rows: Sequence[Mapping[str, Any]],
     allele_rows: Sequence[Mapping[str, Any]],
     interruption_rows: Sequence[Mapping[str, Any]],
+    slippage_rows: Sequence[Mapping[str, Any]] = (),
 ) -> list[RepeatLocusRow]:
     """Reúne las tres tablas planas en los loci que el TOML declara.
 
@@ -954,9 +997,32 @@ def repeat_loci_from_editor_rows(
         ]
         if not motifs:
             raise EditorError(f"{path}.motifs", "se exige al menos un motivo")
-        alleles = _repeat_alleles_from_editor_rows(
-            locus_id, allele_rows, interruption_rows, f"{path}.alleles", len(motifs)
+        slippage = _repeat_slippage_from_editor_rows(
+            locus_id, slippage_rows, f"{path}.slippage"
         )
+        # Un locus **generado** no tiene tabla de alelos que reunir, y pedirle
+        # una la rechazaría por vacía antes de llegar a la comprobación de
+        # exclusión, que es la que sabe explicar lo que pasa.
+        alleles = (
+            []
+            if slippage is not None and not _has_allele_rows(locus_id, allele_rows)
+            else _repeat_alleles_from_editor_rows(
+                locus_id, allele_rows, interruption_rows, f"{path}.alleles", len(motifs)
+            )
+        )
+        # **O se declaran los alelos, o se generan**, igual que en el lector de
+        # Rust: las dos cosas a la vez dejarían sin respuesta la pregunta que el
+        # manifiesto tiene que contestar por cada alelo, de dónde salió.
+        if slippage is not None and alleles:
+            raise EditorError(
+                f"{path}.slippage",
+                "un locus no puede declarar alelos y pedir además que se generen",
+            )
+        if slippage is None and not alleles:
+            raise EditorError(
+                f"{path}.alleles",
+                "el locus no declara ningún alelo ni pide generarlos",
+            )
         loci.append(
             RepeatLocusRow(
                 id=locus_id,
@@ -978,6 +1044,7 @@ def repeat_loci_from_editor_rows(
                 min_longest_run_units=_optional_editor_u64(
                     row.get("min_longest_run_units"), f"{path}.min_longest_run_units"
                 ),
+                slippage=slippage,
             )
         )
     for row in allele_rows:
@@ -993,6 +1060,13 @@ def repeat_loci_from_editor_rows(
             raise EditorError(
                 "reference.repeat_loci.alleles.interruptions",
                 f"la interrupción nombra un locus que no existe: {locus_id}",
+            )
+    for row in slippage_rows:
+        locus_id = str(row.get("locus_id", "")).strip()
+        if locus_id and locus_id not in known:
+            raise EditorError(
+                "reference.repeat_loci.slippage",
+                f"el generador nombra un locus que no existe: {locus_id}",
             )
     return loci
 
@@ -1087,6 +1161,56 @@ def _repeat_alleles_from_editor_rows(
             )
         )
     return alleles
+
+
+def _has_allele_rows(locus_id: str, allele_rows: Sequence[Mapping[str, Any]]) -> bool:
+    """Si alguna fila de la tabla de alelos nombra a este locus."""
+    return any(
+        str(row.get("locus_id", "")).strip() == locus_id for row in allele_rows
+    )
+
+
+def _repeat_slippage_from_editor_rows(
+    locus_id: str, slippage_rows: Sequence[Mapping[str, Any]], path: str
+) -> RepeatSlippageForm | None:
+    """El generador de este locus, si su tabla lo declara.
+
+    Sin fila no hay generador y el locus declara sus alelos. Con **más de una**
+    se denuncia: un locus tiene un generador o ninguno, y quedarse con la
+    primera perdería en silencio lo que el usuario acaba de escribir.
+
+    Un modelo sin media no dice cuántos pasos dar, y una media sin modelo no
+    dice qué modelo los da: falte la que falte, se denuncia en vez de
+    inventarla.
+    """
+    selected = [
+        row
+        for row in slippage_rows
+        if str(row.get("locus_id", "")).strip() == locus_id
+        and (
+            str(row.get("model", "") or "").strip()
+            or str(row.get("mean_events", "") or "").strip()
+        )
+    ]
+    if not selected:
+        return None
+    if len(selected) > 1:
+        raise EditorError(path, f"el locus {locus_id} declara más de un generador")
+    row = selected[0]
+    model = str(row.get("model", "") or "").strip()
+    mean = str(row.get("mean_events", "") or "").strip()
+    if not model:
+        raise EditorError(f"{path}.model", "el generador no declara modelo")
+    if not mean:
+        raise EditorError(f"{path}.mean_events", "el generador no declara media de pasos")
+    return RepeatSlippageForm(
+        model=model,
+        mean_events=_editor_non_negative_literal(mean, f"{path}.mean_events"),
+        expansion_bias=_optional_editor_literal(
+            row.get("expansion_bias"), f"{path}.expansion_bias"
+        ),
+        step_units=_optional_editor_u64(row.get("step_units"), f"{path}.step_units"),
+    )
 
 
 def _optional_editor_u64(value: Any, path: str) -> int | None:
@@ -1810,14 +1934,30 @@ def _parse_repeat_loci(value: Any, path: str) -> list[RepeatLocusRow]:
                 "max_units",
                 "min_purity",
                 "min_longest_run_units",
+                "slippage",
                 "alleles",
             },
-            required={"id", "sequence", "start", "end", "alleles"},
+            required={"id", "sequence", "start", "end"},
             path=locus_path,
         )
         motifs = _parse_repeat_motifs(locus, locus_path)
-        alleles = _parse_repeat_alleles(
-            locus["alleles"], f"{locus_path}.alleles", len(motifs)
+        slippage = (
+            _parse_repeat_slippage(locus["slippage"], f"{locus_path}.slippage")
+            if "slippage" in locus
+            else None
+        )
+        if ("alleles" in locus) == (slippage is not None):
+            raise EditorError(
+                f"{locus_path}.alleles",
+                "se exige exactamente alleles o slippage: o se declaran los alelos"
+                " o se generan por deslizamiento",
+            )
+        alleles = (
+            _parse_repeat_alleles(
+                locus["alleles"], f"{locus_path}.alleles", len(motifs)
+            )
+            if "alleles" in locus
+            else []
         )
         loci.append(
             RepeatLocusRow(
@@ -1845,9 +1985,35 @@ def _parse_repeat_loci(value: Any, path: str) -> list[RepeatLocusRow]:
                     if "min_longest_run_units" in locus
                     else None
                 ),
+                slippage=slippage,
             )
         )
     return loci
+
+
+def _parse_repeat_slippage(value: Any, path: str) -> RepeatSlippageForm:
+    """Lee el bloque del generador tal y como el TOML lo escribe."""
+    table = _mapping(value, path)
+    _keys(
+        table,
+        allowed={"model", "mean_events", "expansion_bias", "step_units"},
+        required={"model", "mean_events"},
+        path=path,
+    )
+    return RepeatSlippageForm(
+        model=_non_empty_string(table["model"], f"{path}.model"),
+        mean_events=_number_literal(table["mean_events"], f"{path}.mean_events"),
+        expansion_bias=(
+            _number_literal(table["expansion_bias"], f"{path}.expansion_bias")
+            if "expansion_bias" in table
+            else None
+        ),
+        step_units=(
+            _positive_u64(table["step_units"], f"{path}.step_units")
+            if "step_units" in table
+            else None
+        ),
+    )
 
 
 def _parse_repeat_motifs(locus: Mapping[str, Any], path: str) -> list[str]:
@@ -2632,6 +2798,18 @@ def _render_repeat_loci(form: GeneralForm) -> Any:
                     locus.min_longest_run_units, f"{path}.min_longest_run_units"
                 ),
             )
+        # **O el generador, o los alelos.** Un locus generado no escribe tabla
+        # de alelos: el abanico lo produce el simulador partiendo del alelo de
+        # la referencia, que no existe hasta que la referencia está preparada.
+        if locus.slippage is not None:
+            if locus.alleles:
+                raise EditorError(
+                    f"{path}.slippage",
+                    "un locus no puede declarar alelos y pedir además que se generen",
+                )
+            table.add("slippage", _render_repeat_slippage(locus.slippage, f"{path}.slippage"))
+            loci.append(table)
+            continue
         if not locus.alleles:
             raise EditorError(f"{path}.alleles", "el locus no declara ningún alelo")
         # El reparto se comprueba **aquí**, antes de escribir nada: un TOML con
@@ -2709,6 +2887,34 @@ def _render_repeat_loci(form: GeneralForm) -> Any:
         table.add("alleles", alleles)
         loci.append(table)
     return loci
+
+
+def _render_repeat_slippage(slippage: RepeatSlippageForm, path: str) -> Any:
+    """Escribe el bloque del generador.
+
+    El modelo y la media son obligatorios; el sesgo y el tamaño de paso solo se
+    escriben si el usuario los dio, de modo que un documento que no los declara
+    vuelve tal y como entró.
+    """
+    table = tomlkit.table()
+    table.add("model", _non_empty_string(slippage.model, f"{path}.model"))
+    table.add(
+        "mean_events",
+        _non_negative_literal_item(slippage.mean_events, f"{path}.mean_events"),
+    )
+    if slippage.expansion_bias is not None:
+        table.add(
+            "expansion_bias",
+            _non_negative_literal_item(
+                slippage.expansion_bias, f"{path}.expansion_bias"
+            ),
+        )
+    if slippage.step_units is not None:
+        table.add(
+            "step_units",
+            _checked_positive_u64(slippage.step_units, f"{path}.step_units"),
+        )
+    return table
 
 
 def validate_simulated_composition(composition: Mapping[str, Any]) -> None:
