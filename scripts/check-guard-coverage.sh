@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Puerta del barrido de guardas de los tres jueces independientes.
+# Puerta del barrido de guardas de los jueces independientes y de los dos
+# verificadores de configuración efectiva y manifiesto de evento.
 #
 # QUÉ MIDE, Y QUÉ NO. Mide **si una guarda llega a dispararse** durante la
 # batería. No mide si la prueba que la dispara **fallaría** en caso de que la
@@ -32,11 +33,13 @@ evidence_dir=$(cd -- "$evidence_dir" && pwd)
 
 baseline="$project_root/scripts/guard-coverage-baseline.tsv"
 
-# Cada juez con las constructoras de error por las que canaliza sus rechazos.
+# Cada módulo vigilado con las constructoras de error por las que canaliza sus rechazos.
 judges=(
     "src/f5_oracle.rs|reject|resource_reject|catalog_reject|truth_reject"
     "src/vcf_semantic_validation.rs|vcf_reject|oracle_error|vcf_error|fasta_reject|io_reject|io_error|bases_not_materialized"
     "src/f5_closure.rs|reject"
+    "src/results.rs|effective_error|effective_error_for_schema"
+    "src/event_manifest.rs|event_error"
 )
 
 echo "== batería con el barrido encendido ==" >&2

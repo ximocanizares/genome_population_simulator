@@ -8899,15 +8899,24 @@ fn manifest_error_for_schema(
     .with("detail", detail.into())
 }
 
+/// Envoltorio puro sobre [`effective_error_for_schema`]. Lleva
+/// `#[track_caller]` para que el barrido de guardas ([`crate::guard_trace`])
+/// anote el punto de rechazo real y no esta línea.
+#[track_caller]
 fn effective_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
     effective_error_for_schema(path, "effective-config-v4.schema.json", detail)
 }
 
+/// La anotación `#[track_caller]` y la llamada a `record` son el barrido de
+/// guardas descrito en [`crate::guard_trace`]: apagado no cuesta nada, y
+/// encendido anota **desde qué línea** se rechazó, no esta.
+#[track_caller]
 fn effective_error_for_schema(
     path: &Path,
     schema: &'static str,
     detail: impl Into<String>,
 ) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::format(
         "GPS-FMT-006",
         "Un documento JSON producido no satisface su esquema publicado.",

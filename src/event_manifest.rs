@@ -2969,7 +2969,12 @@ fn validate_closed(
         Err(event_error(path, format!("campos inválidos en {context}")))
     }
 }
+/// La anotación `#[track_caller]` y la llamada a `record` son el barrido de
+/// guardas descrito en [`crate::guard_trace`]: apagado no cuesta nada, y
+/// encendido anota **desde qué línea** se rechazó, no esta.
+#[track_caller]
 fn event_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::format(
         "GPS-FMT-006",
         "Un documento JSON producido no satisface su esquema publicado.",

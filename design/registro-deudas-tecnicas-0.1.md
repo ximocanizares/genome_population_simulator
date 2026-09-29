@@ -59,14 +59,48 @@ mediciones, hechas con el mismo método y con la misma regla de recuento:
 | Oráculo semántico del VCF (`src/vcf_semantic_validation.rs`) | 77 | 39 | 98 | **22** |
 | Auditoría de identidad y publicación (`src/f5_closure.rs`) | 42 | 11 | 42 | **5** |
 
-**La puerta solo mira estos tres módulos**, y conviene tenerlo presente al
-leer las cifras: no mira `src/results.rs` ni `src/event_manifest.rs`, que son
-los que comprueban la configuración efectiva y el manifiesto de evento. El
-27/09/2026 una revisión adversarial encontró ahí ciento treinta líneas de
-guarda **sin ejercitar como rechazo por ninguna prueba** —sustituirlas enteras
-por una línea dejaba pasar la batería completa—, y esta puerta no podía
-enterarse porque no mira ese fichero. Se cubrieron con una prueba de mutación;
-ampliar la puerta a esos dos módulos sigue sin decidir.
+**Desde el 29/09/2026 la puerta vigila también `src/results.rs` y
+`src/event_manifest.rs`**, que comprueban la configuración efectiva y el
+manifiesto de evento. El 27/09/2026 una revisión adversarial había encontrado
+ahí ciento treinta líneas de guarda **sin ejercitar como rechazo por ninguna
+prueba** —sustituirlas enteras por una línea dejaba pasar la batería completa—
+y la puerta no podía enterarse porque no miraba esos ficheros. Se cubrieron con
+una prueba de mutación; ahora la puerta los mide. Primera medición, sin cubrir
+nada a propósito:
+
+| Módulo vigilado | Comprobaciones | Nunca se disparan |
+|---|---|---|
+| Configuración efectiva y resultados (`src/results.rs`) | 364 | **311** |
+| Manifiesto de evento (`src/event_manifest.rs`) | 147 | **117** |
+
+**Es decir: de 511 comprobaciones que cuenta la puerta en estos dos módulos,
+428 no las ejercita ninguna prueba** (el 84 %). El techo de la línea base es
+esa cifra y el objetivo de esta entrega es solo que no crezca; cubrirlas es un
+trabajo aparte, pendiente de decisión. Las cifras de los tres jueces no se
+movieron (365/52, 98/22, 42/5).
+
+**Y 364 y 147 son un mínimo, no el total.** La puerta solo ve los rechazos que
+pasan por las constructoras `effective_error`, `effective_error_for_schema` y
+`event_error`. En `src/results.rs` **quedan fuera del denominador**, y por
+tanto invisibles, dos familias:
+
+- los rechazos del **manifiesto general** (`manifest_error` y
+  `manifest_error_for_schema`, unas 138 llamadas), que es otro validador del
+  mismo fichero;
+- los validadores auxiliares que devuelven `Err("texto")` en vez de un
+  diagnóstico (catorce funciones que devuelven `Result<_, &'static str>`,
+  con setenta y seis `Err("texto")` a pelo, y además guardas con `ok_or("texto")`):
+  su texto lo convierte, en el llamante, **una sola llamada** a `effective_error` o
+  `repeat_section_error` así que decenas de guardas cuentan
+  como un único punto, que basta que se dispare una vez para darlas por
+  cubiertas.
+
+En `src/event_manifest.rs` no hay este segundo problema (no tiene ningún
+`Err("...")` a pelo), y su única construcción de diagnóstico fuera de la
+constructora es `retag_event_manifest_schema`, que reetiqueta un error ya
+rechazado. Una prueba léxica (`tests/guard_constructors.rs`) prohíbe construir
+un `GPS-FMT-006` fuera de las constructoras de ambos módulos; **no cubre** las
+dos familias anteriores.
 
 Tres advertencias sobre la comparación, para que nadie la lea mal:
 
@@ -106,8 +140,8 @@ Si el número de comprobaciones baja, la puerta falla; si sube, avisa. Las pieza
 entorno `GPS_GUARD_TRACE_DIR` nombra un directorio, y `scripts/guard-sites.awk`,
 que enumera los puntos de rechazo del texto fuente.
 
-**La puerta solo mira tres módulos, y eso deja verificadores fuera del radar.**
-Se anota aquí el 26 de septiembre de 2026 porque la entrega 4 de microsatélites
+**Histórico: hasta el 29/09/2026 la puerta solo miraba tres módulos.**
+Se anotó aquí el 26 de septiembre de 2026 porque la entrega 4 de microsatélites
 añadió dos más que **no** están en la línea base ni los mide nadie: las guardas
 de `validate_lineage_counts` en `src/event_manifest.rs` —que comprueban que los
 tres recuentos de linaje nombran los mismos loci, que los heredados no superan

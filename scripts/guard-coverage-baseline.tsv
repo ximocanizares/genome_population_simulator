@@ -13,17 +13,21 @@
 # caso de que la guarda estuviera mal escrita. Es un suelo, no un techo de
 # calidad.
 #
-# **Y solo mira estos tres módulos.** No mira `src/results.rs` ni
-# `src/event_manifest.rs`, que son los que comprueban la configuración
-# efectiva y el manifiesto de evento. Anotado el 27/09/2026, porque eso es
-# exactamente lo que permitió que ciento treinta líneas de guarda del
-# manifiesto vivieran sin que ninguna prueba las ejercitara como rechazo:
-# sustituirlas enteras por una línea dejaba pasar la batería y esta puerta no
-# se enteraba. Ampliar la puerta a esos dos módulos está sin decidir.
+# **Desde el 29/09/2026 mira cinco módulos**, incluidos `src/results.rs` y
+# `src/event_manifest.rs`, que comprueban la configuración efectiva y el
+# manifiesto de evento. **Su cifra es un suelo del suelo**: la puerta solo ve
+# los rechazos que pasan por sus constructoras (`effective_error`,
+# `effective_error_for_schema` y `event_error`). En `results.rs` quedan fuera
+# los validadores que devuelven `Err("texto")` y los rechazos del manifiesto
+# general (`manifest_error`); véase DT-001. El techo de los dos módulos nuevos
+# es lo medido hoy, sin cubrir nada: el objetivo es que no crezca.
 #
 # Medido el 23/09/2026; oráculo y verificador del VCF remedidos el 29/09/2026
-# (168 a 52 y 25 a 22, con el mismo número de comprobaciones).
+# (168 a 52 y 25 a 22, con el mismo número de comprobaciones); `results.rs` y
+# `event_manifest.rs` medidos por primera vez el 29/09/2026.
 # modulo	comprobaciones	techo_sin_disparar
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	98	22
 src/f5_closure.rs	42	5
+src/results.rs	364	311
+src/event_manifest.rs	147	117
