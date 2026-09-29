@@ -32,8 +32,9 @@ use genome_population_simulator::f5_oracle::{
     F5_RNG_CATALOG_DECISIONS, F5_RNG_CATALOG_V2_DECISIONS, F5DeclaredAttemptSummary,
     F5DeclaredBounds, F5DeclaredHaplotypeCount, F5DeclaredHaplotypeCountDistribution,
     F5DeclaredLdBin, F5DeclaredLink, F5DeclaredMode, F5DeclaredRealizedF, F5DeclaredSampling,
-    F5DeclaredSpectrumBand, F5DeclaredSubpopulation, F5DeclaredTruthLink, F5GenotypeModel,
-    F5OracleCause, F5PackageDeclaration, audit_f5_package, recount_f5_man70,
+    F5DeclaredSpectrumBand, F5DeclaredSubpopulation, F5DeclaredTruthLink, F5FailureDeclaration,
+    F5GenotypeModel, F5OracleCause, F5OracleRejection, F5PackageDeclaration,
+    audit_f5_failure_package, audit_f5_package, recount_f5_man70,
 };
 use genome_population_simulator::f5_preflight::{
     F5_DEFAULT_MAX_HAPLOTYPE_ATTEMPTS, F5_DEFAULT_MAX_SWAP_PROPOSALS, F5OtherResources,
@@ -654,7 +655,13 @@ fn declaration_for(published: &Published) -> F5PackageDeclaration {
             output_limit_bytes: sealed.output_limit_bytes(),
         },
         id_catalog_id: "id-catalog-v4".to_owned(),
-        rng_catalog_id: "f5-rng-catalog-v1".to_owned(),
+        // v2 exactamente cuando el perfil declara una distribución de recuentos.
+        rng_catalog_id: if profile.haplotype_count_distribution().is_some() {
+            "f5-rng-catalog-v2"
+        } else {
+            "f5-rng-catalog-v1"
+        }
+        .to_owned(),
         attempt_summary: F5DeclaredAttemptSummary {
             layout_attempts_used: chain.layout.successful_attempt_index() + 1,
             haplotype_attempts_total: chain.search.haplotype_attempts_total(),
@@ -1932,6 +1939,10 @@ const DECLARATION_MUTATIONS: &[DeclarationMutation] = &[
     DeclarationMutation {
         name: "catálogo RNG ajeno",
         cause: F5OracleCause::Randomness,
+        // OJO: fija el literal de la versión 2 y se prueba con el fixture ancho, que
+        // no declara distribución de recuentos. Si alguien añadiera a esta tabla un
+        // fixture con distribución, el literal sería el correcto y esta mutación
+        // dejaría de discriminar en silencio.
         apply: |declaration| declaration.rng_catalog_id = "f5-rng-catalog-v2".to_owned(),
     },
     // --- identidad de la ejecución ---
@@ -3678,4 +3689,2130 @@ fn the_recount_rejects_each_document_level_corruption() {
     // la colisión de dos loci de la misma subpoblación en la misma posición
     // exigiría rederivar el `case_id` dentro de la prueba.
     let _ = other_site;
+}
+
+// ---------------------------------------------------------------------------
+// Guardas que ninguna prueba disparaba (DT-001): cada una, por su motivo exacto
+// ---------------------------------------------------------------------------
+//
+// La puerta de cobertura mide si una guarda **se dispara**, no si una prueba
+// **fallaría** si la guarda estuviera mal escrita. Por eso cada caso de aquí
+// exige tres cosas a la vez: la **causa** tipada, un **fragmento del detalle**
+// que solo esa guarda escribe, y que la corrupción **cambie** de verdad el
+// paquete. Con solo la causa, muchas guardas de una misma tabla son
+// intercambiables: quitar una deja que otra cace el caso con la misma causa.
+
+impl Staged {
+    /// Como [`Staged::rewrite`], pero con bytes que pueden no ser UTF-8.
+    fn rewrite_bytes(&mut self, relative: &str, contents: &[u8]) {
+        fs::write(self.root.join(relative), contents).expect("artefacto reescrito");
+        let size = contents.len() as u64;
+        let digest = sha256(contents);
+        if relative == TRUTH_PATH {
+            self.declaration.truth.size_bytes = size;
+            self.declaration.truth.sha256 = digest;
+            return;
+        }
+        let link = self
+            .declaration
+            .artifacts
+            .iter_mut()
+            .find(|link| link.path == relative)
+            .expect("enlace del artefacto");
+        link.size_bytes = size;
+        link.sha256 = digest;
+    }
+
+    /// Reescribe un artefacto de texto con una función de su contenido.
+    fn edit(&mut self, relative: &str, change: impl FnOnce(&str) -> String) {
+        let original = self.text(relative);
+        let corrupted = change(&original);
+        self.rewrite(relative, &corrupted);
+    }
+
+    /// Huella del paquete entero y de su declaración: si una corrupción no la
+    /// mueve, no ha corrompido nada.
+    fn fingerprint(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(format!("{:?}", self.declaration).as_bytes());
+        for path in [
+            LAYOUT_PATH,
+            SITES_PATH,
+            HAPLOTYPES_PATH,
+            FREQUENCIES_PATH,
+            LD_PATH,
+            FOUNDERS_PATH,
+            ATTEMPTS_PATH,
+            TRUTH_PATH,
+        ] {
+            hasher.update(fs::read(self.root.join(path)).unwrap_or_default());
+        }
+        format!("{:x}", hasher.finalize())
+    }
+}
+
+fn detail_of(rejection: &F5OracleRejection) -> String {
+    rejection
+        .diagnostic()
+        .context()
+        .get("detail")
+        .expect("todo rechazo lleva detalle")
+        .clone()
+}
+
+/// Una corrupción, la causa con la que debe morir y el fragmento de detalle
+/// que identifica a **su** guarda.
+struct GuardCase {
+    name: &'static str,
+    cause: F5OracleCause,
+    detail: &'static str,
+    corrupt: Box<dyn Fn(&mut Staged)>,
+}
+
+fn guard_case(
+    name: &'static str,
+    cause: F5OracleCause,
+    detail: &'static str,
+    corrupt: impl Fn(&mut Staged) + 'static,
+) -> GuardCase {
+    GuardCase {
+        name,
+        cause,
+        detail,
+        corrupt: Box::new(corrupt),
+    }
+}
+
+/// Aplica cada corrupción a una copia limpia del paquete y exige que el
+/// oráculo la rechace con su causa y su detalle.
+fn assert_each_guard_fires(published: &Published, cases: Vec<GuardCase>) {
+    assert!(!cases.is_empty(), "un corpus vacío no prueba nada");
+    for case in cases {
+        let mut staged = Staged::new(published, "guard-case");
+        staged.audit().expect("el paquete íntegro es válido");
+        let before = staged.fingerprint();
+        (case.corrupt)(&mut staged);
+        assert_ne!(
+            staged.fingerprint(),
+            before,
+            "«{}»: la corrupción no cambió el paquete",
+            case.name
+        );
+        let rejection = audit_f5_package(&staged.root, &staged.declaration)
+            .err()
+            .unwrap_or_else(|| panic!("«{}» pasó inadvertida", case.name));
+        let detail = detail_of(&rejection);
+        assert_eq!(
+            rejection.cause(),
+            case.cause,
+            "«{}» murió por {:?} ({detail}) y le corresponde {:?}",
+            case.name,
+            rejection.cause(),
+            case.cause
+        );
+        assert!(
+            detail.contains(case.detail),
+            "«{}» se rechazó por otra razón: {detail}",
+            case.name
+        );
+    }
+}
+
+/// El texto con la fila `row` (0 = primera fila de datos) reescrita.
+fn map_row(text: &str, row: usize, change: impl FnOnce(&mut Vec<String>)) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let mut columns: Vec<String> = lines[row + 1].split('\t').map(str::to_owned).collect();
+    change(&mut columns);
+    lines[row + 1] = columns.join("\t");
+    format!("{}\n", lines.join("\n"))
+}
+
+/// El texto sin la fila `row`.
+fn remove_row(text: &str, row: usize) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    lines.remove(row + 1);
+    format!("{}\n", lines.join("\n"))
+}
+
+/// El texto con una fila copiada de otra e insertada tras ella.
+fn duplicate_row_after(text: &str, row: usize) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let copy = lines[row + 1].clone();
+    lines.insert(row + 2, copy);
+    format!("{}\n", lines.join("\n"))
+}
+
+/// **Los bytes de un TSV: codificación, fin de línea, columnas y números.**
+///
+/// Son las guardas del lector de filas que no miran el contenido de ninguna
+/// celda sino su forma. Ninguna se disparaba nunca con una fila corrupta.
+#[test]
+fn the_tsv_reader_refuses_each_malformed_row_by_its_own_reason() {
+    let published = publish("tsv-shape", &wide_fixture());
+    assert_each_guard_fires(
+        &published,
+        vec![
+            guard_case(
+                "cabecera que no es texto",
+                F5OracleCause::ByteContract,
+                "UTF-8",
+                |staged| {
+                    let mut bytes = staged.text(LAYOUT_PATH).into_bytes();
+                    bytes.insert(1, 0xFF);
+                    staged.rewrite_bytes(LAYOUT_PATH, &bytes);
+                },
+            ),
+            guard_case(
+                "un artefacto vacío",
+                F5OracleCause::ByteContract,
+                "está vacío",
+                |staged| staged.rewrite(SITES_PATH, ""),
+            ),
+            guard_case(
+                "una fila que no es texto",
+                F5OracleCause::ByteContract,
+                "UTF-8",
+                |staged| {
+                    let mut bytes = staged.text(SITES_PATH).into_bytes();
+                    let after_header =
+                        bytes.iter().position(|byte| *byte == b'\n').expect("LF") + 1;
+                    bytes.insert(after_header + 1, 0xFF);
+                    staged.rewrite_bytes(SITES_PATH, &bytes);
+                },
+            ),
+            guard_case(
+                "un CR al final de una fila de datos",
+                F5OracleCause::ByteContract,
+                "CR prohibido",
+                |staged| {
+                    staged.edit(SITES_PATH, |text| {
+                        let first = text.find('\n').expect("cabecera") + 1;
+                        let second = first + text[first..].find('\n').expect("fila");
+                        format!("{}\r{}", &text[..second], &text[second..])
+                    });
+                },
+            ),
+            guard_case(
+                "una fila con una columna de más",
+                F5OracleCause::ByteContract,
+                "columnas",
+                |staged| {
+                    staged.edit(SITES_PATH, |text| {
+                        map_row(text, 0, |columns| columns.push("extra".to_owned()))
+                    });
+                },
+            ),
+            guard_case(
+                "un entero con cero a la izquierda",
+                F5OracleCause::BlockLayout,
+                "no es un entero decimal canónico",
+                |staged| {
+                    staged.edit(LAYOUT_PATH, |text| set_cell(text, 0, 2, "01"));
+                },
+            ),
+            guard_case(
+                "un entero que no cabe en u64",
+                F5OracleCause::BlockLayout,
+                "no cabe en u64",
+                |staged| {
+                    staged.edit(LAYOUT_PATH, |text| {
+                        set_cell(text, 0, 2, "99999999999999999999")
+                    });
+                },
+            ),
+            guard_case(
+                "una probabilidad por encima de uno",
+                F5OracleCause::Marginal,
+                "[0,1]",
+                |staged| {
+                    staged.edit(FREQUENCIES_PATH, |text| set_cell(text, 0, 4, "1.5"));
+                },
+            ),
+            guard_case(
+                "una base que no es canónica",
+                F5OracleCause::Site,
+                "no es una base canónica",
+                |staged| {
+                    staged.edit(SITES_PATH, |text| set_cell(text, 0, 5, "N"));
+                },
+            ),
+        ],
+    );
+}
+
+/// **El layout y los sitios: geometría, orden y cotas.**
+///
+/// Cada caso rompe una sola propiedad del reparto físico y exige el detalle de
+/// la guarda que la vigila: varias comparten causa, de modo que sin el detalle
+/// una podría desaparecer sin que ninguna prueba muriera.
+#[test]
+fn the_layout_and_the_sites_refuse_each_broken_property_by_its_own_reason() {
+    let published = publish("layout-sites", &wide_fixture());
+    assert_each_guard_fires(
+        &published,
+        vec![
+            guard_case(
+                "dos longitudes que suman más que u64",
+                F5OracleCause::ResourceBound,
+                "desborda u64",
+                |staged| {
+                    staged.edit(LAYOUT_PATH, |text| {
+                        let huge = "9223372036854775808";
+                        let text = map_row(text, 0, |columns| {
+                            columns[3] = huge.to_owned();
+                            columns[4] = huge.to_owned();
+                        });
+                        set_cell(&text, 1, 4, huge)
+                    });
+                },
+            ),
+            guard_case(
+                "dos bloques con las coordenadas intercambiadas: rompen el orden",
+                F5OracleCause::BlockLayout,
+                "rompe el orden FASTA",
+                |staged| {
+                    // Se intercambian las coordenadas y no las filas enteras:
+                    // con la fila entera movida, el identificador que ya no
+                    // corresponde a su ordinal moriría antes por identidad.
+                    staged.edit(LAYOUT_PATH, |text| {
+                        let text = map_row(text, 0, |columns| {
+                            columns[2] = "4".to_owned();
+                            columns[3] = "6".to_owned();
+                        });
+                        map_row(&text, 1, |columns| {
+                            columns[2] = "1".to_owned();
+                            columns[3] = "3".to_owned();
+                        })
+                    });
+                },
+            ),
+            guard_case(
+                "una secuencia que reaparece tras otra, sin solaparse con nada",
+                F5OracleCause::BlockLayout,
+                "rompe el orden FASTA",
+                |staged| {
+                    // El último bloque vuelve a `chr1`, más allá de todo lo
+                    // colocado: no solapa con ninguno, y solo el orden de secuencias
+                    // lo delata.
+                    staged.edit(LAYOUT_PATH, |text| {
+                        map_row(text, 3, |columns| {
+                            columns[1] = "chr1".to_owned();
+                            columns[2] = "7".to_owned();
+                            columns[3] = "9".to_owned();
+                        })
+                    });
+                },
+            ),
+            guard_case(
+                "dos bloques de una secuencia que se solapan",
+                F5OracleCause::BlockLayout,
+                "rompe el orden FASTA",
+                |staged| {
+                    staged.edit(LAYOUT_PATH, |text| {
+                        // El segundo bloque de chr1 empieza en la última base del
+                        // primero: el orden por inicio sigue creciendo y solo la
+                        // ausencia de solape lo delata.
+                        let text = set_cell(text, 1, 2, "3");
+                        set_cell(&text, 1, 4, "4")
+                    });
+                },
+            ),
+            guard_case(
+                "un layout sin ningún bloque",
+                F5OracleCause::BlockLayout,
+                "no coloca ningún bloque",
+                |staged| {
+                    staged.edit(LAYOUT_PATH, |text| {
+                        format!("{}\n", text.lines().next().expect("cabecera"))
+                    });
+                },
+            ),
+            guard_case(
+                "un layout que coloca más bases que las elegibles selladas",
+                F5OracleCause::ResourceBound,
+                "elegibles",
+                |staged| staged.declaration.bounds.eligible_bases = 1,
+            ),
+            guard_case(
+                "un sitio en un bloque que el layout no tiene",
+                F5OracleCause::Site,
+                "no existe en el layout",
+                |staged| {
+                    staged.edit(SITES_PATH, |text| set_cell(text, 0, 0, "BLK_INEXISTENTE"));
+                },
+            ),
+            guard_case(
+                "los bloques de los sitios en orden descendente",
+                F5OracleCause::Site,
+                "no llegan por block_id ascendente",
+                |staged| staged.edit(SITES_PATH, |text| swap_rows(text, 0, 3)),
+            ),
+            guard_case(
+                "un sitio que nombra la secuencia de otro bloque",
+                F5OracleCause::Site,
+                "no nombra la secuencia de su bloque",
+                |staged| {
+                    staged.edit(SITES_PATH, |text| set_cell(text, 0, 3, "chr2"));
+                },
+            ),
+            guard_case(
+                "un sitio fuera de su bloque",
+                F5OracleCause::Site,
+                "cae fuera de su bloque",
+                |staged| {
+                    staged.edit(SITES_PATH, |text| set_cell(text, 0, 4, "9"));
+                },
+            ),
+            guard_case(
+                "un bloque sin ningún sitio",
+                F5OracleCause::Site,
+                "no publica ningún sitio",
+                |staged| {
+                    staged.edit(SITES_PATH, |text| {
+                        // El último bloque por identificador son las tres últimas filas.
+                        let rows = text.lines().count() - 1;
+                        let mut text = text.to_owned();
+                        for row in (rows - 3..rows).rev() {
+                            text = remove_row(&text, row);
+                        }
+                        text
+                    });
+                },
+            ),
+        ],
+    );
+}
+
+/// **Las unidades bloque×subpoblación y los intentos.**
+///
+/// El recorrido por unidades lo comparten cuatro ficheros; se ejercita con el de
+/// haplotipos y con el de intentos, y cada caso exige el detalle propio.
+#[test]
+fn the_unit_walk_and_the_attempts_refuse_each_broken_property_by_its_own_reason() {
+    let published = publish("units-attempts", &wide_fixture());
+    assert_each_guard_fires(
+        &published,
+        vec![
+            guard_case(
+                "unidades de haplotipos fuera de orden",
+                F5OracleCause::Haplotype,
+                "no llegan por subpoblación y block_id ascendentes",
+                |staged| {
+                    // La primera fila pasa a ser la de la tercera unidad: la
+                    // segunda vuelve a una unidad anterior.
+                    staged.edit(HAPLOTYPES_PATH, |text| swap_rows(text, 0, 2));
+                },
+            ),
+            guard_case(
+                "una unidad de haplotipos que nunca se publica",
+                F5OracleCause::Haplotype,
+                "falta alguna unidad",
+                |staged| {
+                    staged.edit(HAPLOTYPES_PATH, |text| {
+                        let rows = text.lines().count() - 1;
+                        remove_row(&remove_row(text, rows - 1), rows - 2)
+                    });
+                },
+            ),
+            guard_case(
+                "una fila de intentos de una subpoblación que no existe",
+                F5OracleCause::Attempt,
+                "no es una subpoblación declarada",
+                |staged| staged.edit(ATTEMPTS_PATH, |text| set_cell(text, 0, 0, "PZ")),
+            ),
+            guard_case(
+                "una fila de intentos de un bloque que no existe",
+                F5OracleCause::Attempt,
+                "no existe en el layout",
+                |staged| {
+                    staged.edit(ATTEMPTS_PATH, |text| {
+                        set_cell(text, 0, 1, "BLK_INEXISTENTE")
+                    });
+                },
+            ),
+            guard_case(
+                "dos intentos de una unidad con el mismo índice",
+                F5OracleCause::Attempt,
+                "no llegan por índice ascendente",
+                |staged| {
+                    // Las filas 1..=3 son los intentos 0, 1 y 2 de una unidad.
+                    staged.edit(ATTEMPTS_PATH, |text| set_cell(text, 2, 2, "0"));
+                },
+            ),
+            guard_case(
+                "la última unidad sin ningún intento marcado como mejor",
+                F5OracleCause::Attempt,
+                "marca 0 intentos como mejor",
+                |staged| {
+                    staged.edit(ATTEMPTS_PATH, |text| {
+                        let last = text.lines().count() - 2;
+                        set_cell(text, last, 11, "false")
+                    });
+                },
+            ),
+            guard_case(
+                "el mejor intento publica un máximo marginal que los marginales no dan",
+                F5OracleCause::Attempt,
+                "los marginales dan",
+                |staged| {
+                    staged.edit(ATTEMPTS_PATH, |text| {
+                        // Se toma la fila marcada como mejor de la primera unidad y
+                        // se le pone un máximo que no es el observado.
+                        let row = text
+                            .lines()
+                            .skip(1)
+                            .position(|line| line.ends_with("\ttrue"))
+                            .expect("un mejor intento");
+                        let observed = cell(text, row, 10);
+                        let moved = if observed == "0.5" { "0.25" } else { "0.5" };
+                        set_cell(text, row, 10, moved)
+                    });
+                },
+            ),
+        ],
+    );
+}
+
+/// **Los haplotipos y las marginales: rangos, `q`, filas de más y de menos.**
+#[test]
+fn the_haplotype_and_marginal_tables_refuse_each_broken_property_by_its_own_reason() {
+    let published = publish("haplotypes-marginals", &wide_fixture());
+    assert_each_guard_fires(
+        &published,
+        vec![
+            guard_case(
+                "una unidad con una fila haplotípica de más",
+                F5OracleCause::Haplotype,
+                "más filas que el recuento rederivado admite",
+                |staged| {
+                    staged.edit(HAPLOTYPES_PATH, |text| {
+                        let text = duplicate_row_after(text, 1);
+                        set_cell(&text, 2, 3, "2")
+                    });
+                },
+            ),
+            guard_case(
+                "una q igual a cero",
+                F5OracleCause::Haplotype,
+                "no pertenece a (0,1]",
+                |staged| {
+                    staged.edit(HAPLOTYPES_PATH, |text| set_cell(text, 0, 4, "0"));
+                },
+            ),
+            guard_case(
+                "una q por encima de uno",
+                F5OracleCause::Haplotype,
+                "no pertenece a (0,1]",
+                |staged| {
+                    staged.edit(HAPLOTYPES_PATH, |text| set_cell(text, 0, 4, "2"));
+                },
+            ),
+            guard_case(
+                "una unidad con menos filas haplotípicas que su recuento",
+                F5OracleCause::Haplotype,
+                "publica 1 filas y el recuento rederivado es 2",
+                |staged| staged.edit(HAPLOTYPES_PATH, |text| remove_row(text, 1)),
+            ),
+            guard_case(
+                "una unidad marginal con un sitio de más",
+                F5OracleCause::Marginal,
+                "más sitios que su bloque",
+                |staged| {
+                    // La última fila de la primera unidad, repetida.
+                    staged.edit(FREQUENCIES_PATH, |text| duplicate_row_after(text, 2));
+                },
+            ),
+            guard_case(
+                "un sitio marginal repetido",
+                F5OracleCause::Marginal,
+                "estrictamente creciente",
+                |staged| {
+                    staged.edit(FREQUENCIES_PATH, |text| {
+                        let first = cell(text, 0, 2);
+                        set_cell(text, 1, 2, &first)
+                    });
+                },
+            ),
+            guard_case(
+                "un error absoluto que no es |realizado - objetivo|",
+                F5OracleCause::Marginal,
+                "abs_error no es",
+                |staged| {
+                    staged.edit(FREQUENCIES_PATH, |text| set_cell(text, 0, 6, "0"));
+                },
+            ),
+        ],
+    );
+}
+
+/// El texto con cada grupo consecutivo de `group` filas de datos permutado
+/// intercambiando sus dos primeras filas.
+fn swap_first_two_rows_of_every_group(text: &str, group: usize) -> String {
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let rows = lines.len() - 1;
+    assert_eq!(rows % group, 0, "las filas no forman grupos completos");
+    for start in (0..rows).step_by(group) {
+        lines.swap(start + 1, start + 2);
+    }
+    format!("{}\n", lines.join("\n"))
+}
+
+/// **La evaluación del desequilibrio de ligamiento, guarda por guarda.**
+///
+/// Con el perfil disperso, dos bins de cada unidad son `not_applicable` y dos
+/// `evaluated`: las dos ramas del estado se ejercitan sobre un paquete real.
+#[test]
+fn the_ld_evaluation_refuses_each_broken_property_by_its_own_reason() {
+    let published = publish("ld-evaluation", &sparse_fixture());
+    let ld = F5OracleCause::LinkageDisequilibrium;
+    assert_each_guard_fires(
+        &published,
+        vec![
+            guard_case(
+                "una subpoblación sin bins LD en el perfil declarado",
+                ld,
+                "no declara bins LD para P1",
+                |staged| staged.declaration.ld_bins.clear(),
+            ),
+            guard_case(
+                "una unidad que publica un bin de más",
+                ld,
+                "más bins que su perfil",
+                |staged| staged.edit(LD_PATH, |text| duplicate_row_after(text, 3)),
+            ),
+            guard_case(
+                "bins que no llegan por inicio ascendente",
+                ld,
+                "no llegan por inicio ascendente",
+                |staged| {
+                    // Los dos documentos —la tabla y el perfil declarado— cambian
+                    // a la vez el orden de sus dos primeros bins: con solo uno
+                    // moriría por no ser el bin que el perfil declara.
+                    staged.edit(LD_PATH, |text| swap_first_two_rows_of_every_group(text, 4));
+                    staged.declaration.ld_bins.swap(0, 1);
+                },
+            ),
+            guard_case(
+                "un objetivo que no es el del perfil",
+                ld,
+                "no son los del perfil",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 0, 7, "0.5"));
+                },
+            ),
+            guard_case(
+                "una tolerancia que no es la del perfil",
+                ld,
+                "no son los del perfil",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 0, 8, "0.25"));
+                },
+            ),
+            guard_case(
+                "un bin evaluado sin ninguna pareja",
+                ld,
+                "no puede tener cero parejas",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 0, 4, "evaluated"));
+                },
+            ),
+            guard_case(
+                "un bin evaluado con la media en NA",
+                ld,
+                "NA fuera de un bin no aplicable",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 1, 6, "NA"));
+                },
+            ),
+            guard_case(
+                "un bin evaluado con el error en NA",
+                ld,
+                "NA fuera de un bin no aplicable",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 1, 9, "NA"));
+                },
+            ),
+            guard_case(
+                "un error absoluto que no es |media - objetivo|",
+                ld,
+                "abs_error no es",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 1, 9, "0.03"));
+                },
+            ),
+            guard_case(
+                "un estado que no es ninguno de los dos",
+                ld,
+                "ajeno",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 0, 4, "pendiente"));
+                },
+            ),
+            guard_case(
+                "un bin no aplicable con parejas",
+                ld,
+                "un bin no aplicable tiene parejas",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 1, 4, "not_applicable"));
+                },
+            ),
+            guard_case(
+                "un bin no aplicable con la media distinta de NA",
+                ld,
+                "un bin no aplicable debe usar NA",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 0, 6, "0.5"));
+                },
+            ),
+            guard_case(
+                "un bin no aplicable con el error distinto de NA",
+                ld,
+                "un bin no aplicable debe usar NA",
+                |staged| {
+                    staged.edit(LD_PATH, |text| set_cell(text, 0, 9, "0.5"));
+                },
+            ),
+            guard_case(
+                "una unidad que publica un bin de menos y da paso a la siguiente",
+                ld,
+                "publica 3 bins y su perfil declara 4",
+                |staged| staged.edit(LD_PATH, |text| remove_row(text, 3)),
+            ),
+            guard_case(
+                "la última unidad que publica un bin de menos",
+                ld,
+                "publica 3 bins y su perfil declara 4",
+                |staged| {
+                    staged.edit(LD_PATH, |text| remove_row(text, text.lines().count() - 2));
+                },
+            ),
+            guard_case(
+                "el mejor intento publica otros bins fuera de tolerancia",
+                F5OracleCause::Attempt,
+                "el mejor intento publica bins_outside=",
+                |staged| {
+                    staged.edit(ATTEMPTS_PATH, |text| set_cell(text, 0, 6, "1"));
+                },
+            ),
+            guard_case(
+                "el mejor intento publica otro error máximo de r²",
+                F5OracleCause::Attempt,
+                "el mejor intento publica bins_outside=",
+                |staged| {
+                    staged.edit(ATTEMPTS_PATH, |text| set_cell(text, 0, 8, "0.5"));
+                },
+            ),
+            guard_case(
+                "el mejor intento publica otra suma de errores de r²",
+                F5OracleCause::Attempt,
+                "el mejor intento publica bins_outside=",
+                |staged| {
+                    staged.edit(ATTEMPTS_PATH, |text| set_cell(text, 0, 9, "0.5"));
+                },
+            ),
+        ],
+    );
+}
+
+/// El documento de verdad reescrito con la línea `index` editada.
+fn truth_with(staged: &Staged, index: usize, edit: impl FnOnce(&mut serde_json::Value)) -> String {
+    edit_truth_line(&staged.text(TRUTH_PATH), index, edit)
+}
+
+/// Las líneas `haplotype_copy` de la verdad, sin su cabecera ni sus genotipos.
+fn truth_header_and_copies(text: &str) -> Vec<String> {
+    text.lines()
+        .filter(|line| !line.contains("\"record_type\":\"genotype\""))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// **El cruce de `f5-founders.tsv` con las copias de la verdad.**
+///
+/// Las guardas del recorrido acompasado: la forma de cada fila fundadora, el
+/// reparto de copias entre las dos fuentes y la lectura de las copias.
+#[test]
+fn the_founder_walk_refuses_each_broken_property_by_its_own_reason() {
+    let published = publish("founder-walk", &wide_fixture());
+    let base_truth = String::from_utf8(published.bytes(TRUTH_PATH)).expect("UTF-8");
+    let first_copy = first_line_of(&base_truth, "haplotype_copy");
+    let last_copy = *lines_of(&base_truth, "haplotype_copy")
+        .last()
+        .expect("alguna copia");
+    assert_each_guard_fires(
+        &published,
+        vec![
+            guard_case(
+                "una fila fundadora con un índice de copia fuera de la ploidía",
+                F5OracleCause::Assignment,
+                "copy_index fuera de 0..ploidy-1",
+                |staged| {
+                    staged.edit(FOUNDERS_PATH, |text| set_cell(text, 0, 3, "5"));
+                },
+            ),
+            guard_case(
+                "una fila fundadora de otra secuencia que la de su bloque",
+                F5OracleCause::Assignment,
+                "no pertenece a la secuencia de su bloque",
+                |staged| {
+                    staged.edit(FOUNDERS_PATH, |text| set_cell(text, 0, 2, "chr2"));
+                },
+            ),
+            guard_case(
+                "la verdad publica una copia que los fundadores no asignan",
+                F5OracleCause::Truth,
+                "publica una copia que f5-founders.tsv no asigna",
+                |staged| {
+                    staged.edit(FOUNDERS_PATH, |text| {
+                        let rows = text.lines().count() - 1;
+                        remove_row(&remove_row(text, rows - 1), rows - 2)
+                    });
+                },
+            ),
+            guard_case(
+                "los fundadores asignan una copia que la verdad no publica",
+                F5OracleCause::Truth,
+                "asigna una copia que truth.jsonl no publica",
+                move |staged| {
+                    let mut lines: Vec<String> =
+                        staged.text(TRUTH_PATH).lines().map(str::to_owned).collect();
+                    lines.remove(last_copy);
+                    staged.rewrite(TRUTH_PATH, &format!("{}\n", lines.join("\n")));
+                },
+            ),
+            guard_case(
+                "una copia que publica un SNP menos que sus bloques asignan",
+                F5OracleCause::Truth,
+                "sus bloques asignan",
+                move |staged| {
+                    let text = truth_with(staged, first_copy, |record| {
+                        record["segments"][0]["modifications"]
+                            .as_array_mut()
+                            .expect("lista")
+                            .remove(0);
+                        record["current_pieces"][0]["snps"]
+                            .as_array_mut()
+                            .expect("lista")
+                            .remove(0);
+                        record["history"].as_array_mut().expect("lista").remove(0);
+                    });
+                    staged.rewrite(TRUTH_PATH, &text);
+                },
+            ),
+            guard_case(
+                "una verdad vacía",
+                F5OracleCause::Truth,
+                "documento vacío",
+                |staged| staged.rewrite(TRUTH_PATH, ""),
+            ),
+            guard_case(
+                "una cabecera de verdad sin LF",
+                F5OracleCause::Truth,
+                "falta el LF final",
+                |staged| {
+                    staged.edit(TRUTH_PATH, |text| {
+                        text.lines().next().expect("cabecera").to_owned()
+                    });
+                },
+            ),
+            guard_case(
+                "una cabecera de verdad que no es texto",
+                F5OracleCause::Truth,
+                "UTF-8",
+                |staged| {
+                    let mut bytes = staged.text(TRUTH_PATH).into_bytes();
+                    bytes.insert(1, 0xFF);
+                    staged.rewrite_bytes(TRUTH_PATH, &bytes);
+                },
+            ),
+            guard_case(
+                "una copia que no es texto",
+                F5OracleCause::Truth,
+                "UTF-8",
+                |staged| {
+                    let mut bytes = staged.text(TRUTH_PATH).into_bytes();
+                    let after_header =
+                        bytes.iter().position(|byte| *byte == b'\n').expect("LF") + 1;
+                    bytes.insert(after_header + 1, 0xFF);
+                    staged.rewrite_bytes(TRUTH_PATH, &bytes);
+                },
+            ),
+            // SOMBREADA: esta caso dispara la guarda de `TruthCopies::next_copy`,
+            // pero el recuento MAN-70 rechaza después el mismo defecto con el mismo
+            // texto, de modo que la prueba **no puede demostrar** que muera si esa
+            // guarda desapareciera (mutada, sobrevive). Consta en el registro de
+            // deudas.
+            guard_case(
+                "una verdad que acaba en las copias sin LF final",
+                F5OracleCause::Truth,
+                "falta el LF final",
+                |staged| {
+                    // Sin genotipos que cierren la sección de copias, el lector
+                    // llega al final del fichero mientras las lee.
+                    staged.edit(TRUTH_PATH, |text| truth_header_and_copies(text).join("\n"));
+                },
+            ),
+            guard_case(
+                "una línea vacía entre las copias",
+                F5OracleCause::Truth,
+                "línea vacía prohibida",
+                |staged| {
+                    staged.edit(TRUTH_PATH, |text| {
+                        let mut lines: Vec<&str> = text.lines().collect();
+                        lines.insert(2, "");
+                        format!("{}\n", lines.join("\n"))
+                    });
+                },
+            ),
+            guard_case(
+                "una copia que no es JSON",
+                F5OracleCause::Truth,
+                "registro ilegible",
+                move |staged| {
+                    let text =
+                        replace_truth_line(&staged.text(TRUTH_PATH), first_copy, "{ no es JSON");
+                    staged.rewrite(TRUTH_PATH, &text);
+                },
+            ),
+            guard_case(
+                "un registro de clase desconocida entre las copias",
+                F5OracleCause::Truth,
+                "registro sin record_type reconocible",
+                move |staged| {
+                    let text = truth_with(staged, first_copy, |record| {
+                        record["record_type"] = "otra_cosa".into();
+                    });
+                    staged.rewrite(TRUTH_PATH, &text);
+                },
+            ),
+            guard_case(
+                "una cabecera que declara menos subpoblaciones que la declaración",
+                F5OracleCause::Truth,
+                "declara menos subpoblaciones",
+                |staged| {
+                    let text = truth_with(staged, 0, |header| {
+                        header["populations"].as_array_mut().expect("lista").pop();
+                    });
+                    staged.rewrite(TRUTH_PATH, &text);
+                },
+            ),
+            guard_case(
+                "una cabecera que declara más subpoblaciones que la declaración",
+                F5OracleCause::Truth,
+                "publica más subpoblaciones",
+                |staged| {
+                    let text = truth_with(staged, 0, |header| {
+                        header["populations"].as_array_mut().expect("lista").push(
+                            serde_json::json!({
+                                "population_id": "PZ",
+                                "individual_count": 1,
+                                "ploidy": 2
+                            }),
+                        );
+                    });
+                    staged.rewrite(TRUTH_PATH, &text);
+                },
+            ),
+        ],
+    );
+}
+
+/// La primera fila de muestreo con el modo efectivo dado.
+fn first_sampling_row(
+    declaration: &mut F5PackageDeclaration,
+    mode: F5DeclaredMode,
+) -> &mut F5DeclaredSampling {
+    declaration
+        .sampling
+        .iter_mut()
+        .find(|row| row.effective_mode == mode)
+        .expect("una unidad de ese modo")
+}
+
+/// **La declaración: enlaces, subpoblaciones, espectro, muestreo y censo.**
+///
+/// Corrupciones de lo que la ejecución declara, con el paquete intacto. Cada
+/// una cae en una guarda distinta de las que comparten causa.
+#[test]
+fn the_declaration_refuses_each_broken_term_by_its_own_reason() {
+    let published = publish("declaration-terms", &wide_fixture());
+    assert_each_guard_fires(
+        &published,
+        vec![
+            guard_case(
+                "un enlace de menos",
+                F5OracleCause::Link,
+                "se declaran 6 enlaces",
+                |staged| {
+                    staged.declaration.artifacts.pop();
+                },
+            ),
+            guard_case(
+                "el enlace de la verdad con otro identificador",
+                F5OracleCause::Link,
+                "no es el literal de DTC-089",
+                |staged| staged.declaration.truth.artifact_id = "otra-cosa".to_owned(),
+            ),
+            guard_case(
+                "el enlace de la verdad con otra clase de artefacto",
+                F5OracleCause::Link,
+                "no es el literal de DTC-089",
+                |staged| staged.declaration.truth.artifact_kind = "otra".to_owned(),
+            ),
+            guard_case(
+                "el enlace de la verdad con otra versión de esquema",
+                F5OracleCause::Link,
+                "no es el literal de DTC-089",
+                |staged| staged.declaration.truth.schema_version = "9".to_owned(),
+            ),
+            guard_case(
+                "el enlace de la verdad con otra versión de proyección",
+                F5OracleCause::Link,
+                "no es el literal de DTC-089",
+                |staged| staged.declaration.truth.projection_version = "otra".to_owned(),
+            ),
+            guard_case(
+                "el enlace de la verdad con otra ruta",
+                F5OracleCause::Link,
+                "no es el literal de DTC-089",
+                |staged| staged.declaration.truth.path = "outputs/otra.jsonl".to_owned(),
+            ),
+            guard_case(
+                "ninguna subpoblación declarada",
+                F5OracleCause::Assignment,
+                "no se declara ninguna subpoblación",
+                |staged| staged.declaration.subpopulations.clear(),
+            ),
+            guard_case(
+                "una banda de espectro de más",
+                F5OracleCause::Normalization,
+                "bandas de espectro",
+                |staged| {
+                    let band = staged.declaration.snp_spectrum[0];
+                    staged.declaration.snp_spectrum.push(band);
+                },
+            ),
+            guard_case(
+                "una banda de espectro con otro mínimo que su auditoría",
+                F5OracleCause::Normalization,
+                "no es la fila",
+                |staged| staged.declaration.snp_spectrum[0].alt_af_min = 0.3,
+            ),
+            guard_case(
+                "una banda de espectro con otro peso que su auditoría",
+                F5OracleCause::Normalization,
+                "no es la fila",
+                |staged| staged.declaration.snp_spectrum[0].weight = 0.5,
+            ),
+            guard_case(
+                "una banda de espectro cuyo máximo es menor que su mínimo",
+                F5OracleCause::Normalization,
+                "no son intervalos disjuntos y crecientes",
+                |staged| staged.declaration.snp_spectrum[0].alt_af_max = 0.1,
+            ),
+            guard_case(
+                "una banda de espectro cuyo máximo pasa de uno",
+                F5OracleCause::Normalization,
+                "no son intervalos disjuntos y crecientes",
+                |staged| staged.declaration.snp_spectrum[0].alt_af_max = 1.5,
+            ),
+            guard_case(
+                "una unidad con dos filas de muestreo",
+                F5OracleCause::Sampling,
+                "aparece dos veces",
+                |staged| {
+                    // Se conserva el número de filas: una fila pasa a nombrar la
+                    // unidad de la primera, y la suya se queda sin declarar.
+                    let (population, block) = {
+                        let first = &staged.declaration.sampling[0];
+                        (first.population_id.clone(), first.block_id.clone())
+                    };
+                    let last = staged.declaration.sampling.last_mut().expect("fila");
+                    last.population_id = population;
+                    last.block_id = block;
+                },
+            ),
+            guard_case(
+                "una unidad sin fila de muestreo",
+                F5OracleCause::Sampling,
+                "no declara modo de muestreo",
+                |staged| {
+                    staged
+                        .declaration
+                        .sampling
+                        .last_mut()
+                        .expect("fila")
+                        .block_id = "BLK_INEXISTENTE".to_owned();
+                },
+            ),
+            guard_case(
+                "una unidad controlada sin tolerancia efectiva",
+                F5OracleCause::Sampling,
+                "debe declarar su tolerancia efectiva",
+                |staged| {
+                    first_sampling_row(&mut staged.declaration, F5DeclaredMode::Controlled)
+                        .controlled_max_abs_error_effective = None;
+                },
+            ),
+            guard_case(
+                "una tolerancia efectiva distinta de 0.5/C sin tolerancia declarada",
+                F5OracleCause::Sampling,
+                "debe ser 0.5/C",
+                |staged| {
+                    let row =
+                        first_sampling_row(&mut staged.declaration, F5DeclaredMode::Controlled);
+                    row.controlled_max_abs_error_declared = None;
+                    row.controlled_max_abs_error_effective = Some(0.0);
+                },
+            ),
+            guard_case(
+                "una unidad controlada con F efectivo distinto de cero",
+                F5OracleCause::Inbreeding,
+                "exige F efectivo igual a cero",
+                |staged| staged.declaration.subpopulations[1].inbreeding_f = Some(0.25),
+            ),
+            guard_case(
+                "una fila de F realizado de menos",
+                F5OracleCause::Inbreeding,
+                "filas de F realizado",
+                |staged| {
+                    staged.declaration.f_realized.pop();
+                },
+            ),
+            guard_case(
+                "un censo declarado que la verdad, con la cabecera igual, no alcanza",
+                F5OracleCause::Assignment,
+                "el censo declara 3",
+                |staged| {
+                    // La cabecera y la declaración coinciden en tres individuos y
+                    // `f5-founders.tsv` solo trae dos: la coincidencia entre las
+                    // dos primeras deja pasar el cruce de censos de la cabecera y
+                    // solo el recuento de individuos por unidad lo delata.
+                    staged.declaration.subpopulations[0].individual_count = 3;
+                    let text = truth_with(staged, 0, |header| {
+                        header["populations"][0]["individual_count"] = 3.into();
+                    });
+                    staged.rewrite(TRUTH_PATH, &text);
+                },
+            ),
+        ],
+    );
+}
+
+/// **El F efectivo y el espectro de dos bandas, con paquetes que el fixture
+/// ancho no puede dar.**
+///
+/// El fixture ancho tiene una sola banda y mezcla unidades controladas, que
+/// exigen F igual a cero antes de que la auditoría de F llegue a mirarlo. Aquí
+/// se usan un escenario probabilístico diploide, uno haploide y uno de dos
+/// bandas.
+#[test]
+fn the_effective_f_and_the_spectrum_bands_refuse_each_broken_term() {
+    let diploid = publish("f-diploid", &Fixture::default());
+    assert_each_guard_fires(
+        &diploid,
+        vec![
+            guard_case(
+                "un F efectivo por encima de uno",
+                F5OracleCause::Inbreeding,
+                "no pertenece a [0,1]",
+                |staged| staged.declaration.subpopulations[0].inbreeding_f = Some(1.5),
+            ),
+            guard_case(
+                "un F efectivo negativo",
+                F5OracleCause::Inbreeding,
+                "no pertenece a [0,1]",
+                |staged| staged.declaration.subpopulations[0].inbreeding_f = Some(-0.25),
+            ),
+            // NO DISCRIMINA: `!value.is_finite()` es redundante con
+            // `!(0.0..=1.0).contains(&value)`, que ya es falso para NaN y para los
+            // infinitos. Quitar la primera mitad no cambia ningún resultado; este
+            // caso solo fija que un NaN se rechaza.
+            guard_case(
+                "un F efectivo que no es un número",
+                F5OracleCause::Inbreeding,
+                "no pertenece a [0,1]",
+                |staged| staged.declaration.subpopulations[0].inbreeding_f = Some(f64::NAN),
+            ),
+        ],
+    );
+    let haploid = publish(
+        "f-haploid",
+        &Fixture {
+            ploidy: 1,
+            ..Fixture::default()
+        },
+    );
+    assert_each_guard_fires(
+        &haploid,
+        vec![guard_case(
+            "un F efectivo en una subpoblación haploide",
+            F5OracleCause::Inbreeding,
+            "F solo se admite con ploidía 2",
+            |staged| staged.declaration.subpopulations[0].inbreeding_f = Some(0.1),
+        )],
+    );
+    let two_bands = publish(
+        "two-bands",
+        &Fixture {
+            spectrum: "alt_af_min\talt_af_max\tweight\n0.4\t0.5\t0.5\n0.6\t0.7\t0.5\n",
+            ..Fixture::default()
+        },
+    );
+    assert_each_guard_fires(
+        &two_bands,
+        vec![
+            guard_case(
+                "dos bandas de espectro que se solapan",
+                F5OracleCause::Normalization,
+                "no son intervalos disjuntos y crecientes",
+                |staged| staged.declaration.snp_spectrum[0].alt_af_max = 0.65,
+            ),
+            guard_case(
+                "dos bandas de espectro que se tocan en un extremo",
+                F5OracleCause::Normalization,
+                "no son intervalos disjuntos y crecientes",
+                |staged| staged.declaration.snp_spectrum[0].alt_af_max = 0.6,
+            ),
+        ],
+    );
+}
+
+/// **El recuento haplotípico declarado por bloque.**
+///
+/// Con distribución declarada, el oráculo rederiva el H de cada unidad y lo
+/// cruza con la lista que la declaración trae: aquí, una lista donde una
+/// unidad queda sin fila aunque el número de filas sea el correcto.
+#[test]
+fn a_haplotype_count_list_that_skips_a_unit_is_refused() {
+    let published = publish(
+        "haplotype-counts",
+        &Fixture {
+            weights: vec!["0.5", "0.5"],
+            haplotype_count_distribution: Some(("2.0", 2, 2)),
+            max_haplotype_attempts: 512,
+            max_swap_proposals: 2048,
+            ..Fixture::default()
+        },
+    );
+    assert_each_guard_fires(
+        &published,
+        vec![guard_case(
+            "dos filas de recuento para el mismo bloque y ninguna para otro",
+            F5OracleCause::Haplotype,
+            "no se declara recuento haplotípico para",
+            |staged| {
+                // El número de filas no cambia: la primera pasa a nombrar el bloque
+                // de la segunda, y la unidad de la primera se queda sin declarar.
+                let counts = &mut staged.declaration.haplotype_counts;
+                assert!(counts.len() >= 2, "hacen falta dos unidades");
+                counts[0].block_id = counts[1].block_id.clone();
+                counts[0].population_id = counts[1].population_id.clone();
+            },
+        )],
+    );
+}
+
+// ---------------------------------------------------------------------------
+// El paquete de fallo, guarda por guarda
+// ---------------------------------------------------------------------------
+
+/// Un paquete de fallo mínimo y válido, escrito a mano: el diagnóstico, el
+/// manifiesto que lo acompaña y la declaración que lo sostiene.
+///
+/// No hace falta ejecutar la cadena productiva: el auditor lee bytes y una
+/// declaración, y lo que cada caso necesita es tocar **un** término de uno u
+/// otro.
+struct FailurePackage {
+    directory: TempDir,
+    declaration: F5FailureDeclaration,
+}
+
+const FAILURE_PATH: &str = "outputs/f5-failure.json";
+
+impl FailurePackage {
+    fn new(label: &str) -> Self {
+        let directory = TempDir::new(label);
+        fs::create_dir_all(directory.path().join("outputs")).expect("outputs");
+        fs::write(directory.path().join("manifest.json"), b"{}\n").expect("manifiesto");
+        let mut package = Self {
+            directory,
+            declaration: F5FailureDeclaration {
+                code: "GPS-DOMAIN-103".to_owned(),
+                stage: "founders".to_owned(),
+                scenario_id: "scenario".to_owned(),
+                population_id: None,
+                block_id: None,
+                limits: [8, 32, 256, 65_536, 1_000, 1_000_000, 1_000_000],
+                counters: [1, 2, 10, 3],
+                best_layout: serde_json::Value::Null,
+                best_attempt: serde_json::Value::Null,
+                link: F5DeclaredLink {
+                    artifact_id: "f5-00-failure-v1".to_owned(),
+                    artifact_kind: "f5_failure".to_owned(),
+                    schema_version: "1".to_owned(),
+                    path: FAILURE_PATH.to_owned(),
+                    size_bytes: 0,
+                    sha256: String::new(),
+                },
+            },
+        };
+        let document = package.document();
+        package.write_document(&document);
+        package
+    }
+
+    /// El diagnóstico que corresponde a la declaración actual.
+    fn document(&self) -> serde_json::Value {
+        let names = |keys: &[&str], values: &[u64]| {
+            keys.iter()
+                .zip(values)
+                .map(|(key, value)| ((*key).to_owned(), serde_json::Value::from(*value)))
+                .collect::<serde_json::Map<_, _>>()
+        };
+        serde_json::json!({
+            "diagnostic_kind": "f5_failure",
+            "schema_version": "1",
+            "code": self.declaration.code,
+            "stage": self.declaration.stage,
+            "scenario_id": self.declaration.scenario_id,
+            "population_id": self.declaration.population_id,
+            "block_id": self.declaration.block_id,
+            "limits": names(
+                &[
+                    "max_layout_attempts",
+                    "max_haplotype_attempts",
+                    "max_swap_proposals",
+                    "max_haplotype_cells",
+                    "max_operation_units",
+                    "max_working_memory_bytes",
+                    "max_output_bytes",
+                ],
+                &self.declaration.limits,
+            ),
+            "counters": names(
+                &[
+                    "layout_attempts_used",
+                    "haplotype_attempts_used",
+                    "swap_proposals",
+                    "swap_accepted",
+                ],
+                &self.declaration.counters,
+            ),
+            "best_layout": self.declaration.best_layout,
+            "best_attempt": self.declaration.best_attempt,
+            "artifacts": [],
+        })
+    }
+
+    /// Escribe el diagnóstico y **rehace el enlace** con sus bytes.
+    fn write_document(&mut self, document: &serde_json::Value) {
+        let bytes = serde_json::to_vec(document).expect("serializar");
+        self.write_bytes(&bytes);
+    }
+
+    fn write_bytes(&mut self, bytes: &[u8]) {
+        fs::write(self.directory.path().join(FAILURE_PATH), bytes).expect("diagnóstico");
+        self.declaration.link.size_bytes = bytes.len() as u64;
+        self.declaration.link.sha256 = sha256(bytes);
+    }
+
+    fn audit(&self) -> Result<(), F5OracleRejection> {
+        audit_f5_failure_package(self.directory.path(), &self.declaration)
+    }
+}
+
+/// Una corrupción del paquete de fallo y la guarda exacta que debe cazarla.
+struct FailureCase {
+    name: &'static str,
+    cause: F5OracleCause,
+    detail: &'static str,
+    corrupt: Box<dyn Fn(&mut FailurePackage)>,
+}
+
+fn failure_case(
+    name: &'static str,
+    cause: F5OracleCause,
+    detail: &'static str,
+    corrupt: impl Fn(&mut FailurePackage) + 'static,
+) -> FailureCase {
+    FailureCase {
+        name,
+        cause,
+        detail,
+        corrupt: Box::new(corrupt),
+    }
+}
+
+/// Edita el diagnóstico y lo reescribe con su enlace al día.
+fn edit_failure_document(package: &mut FailurePackage, edit: impl FnOnce(&mut serde_json::Value)) {
+    let mut document = package.document();
+    edit(&mut document);
+    package.write_document(&document);
+}
+
+/// **El auditor del paquete fallido, guarda por guarda.**
+///
+/// Se ejercita sobre un paquete de fallo escrito a mano y **válido**, al que
+/// cada caso le rompe un solo término del diagnóstico, de la declaración o del
+/// árbol. Solo dos casos ya estaban cubiertos por el orquestador real; los
+/// demás no se disparaban nunca.
+#[test]
+fn the_failure_package_auditor_refuses_each_broken_term_by_its_own_reason() {
+    FailurePackage::new("failure-intact")
+        .audit()
+        .expect("el paquete de fallo íntegro se acepta");
+    let cases = vec![
+        failure_case(
+            "un código fuera del catálogo cerrado",
+            F5OracleCause::ByteContract,
+            "no pertenece al catálogo cerrado",
+            |package| package.declaration.code = "GPS-XXX-999".to_owned(),
+        ),
+        failure_case(
+            "una etapa que no es ninguna de las cinco",
+            F5OracleCause::ByteContract,
+            "no es una de las cinco etapas",
+            |package| package.declaration.stage = "otra".to_owned(),
+        ),
+        failure_case(
+            "una clase de diagnóstico que no es una cadena",
+            F5OracleCause::ByteContract,
+            "falta o no es cadena",
+            |package| {
+                edit_failure_document(package, |document| document["diagnostic_kind"] = 3.into())
+            },
+        ),
+        failure_case(
+            "un diagnóstico que no es JSON",
+            F5OracleCause::ByteContract,
+            "no es un documento JSON legible",
+            |package| package.write_bytes(b"{ no es JSON"),
+        ),
+        failure_case(
+            "un diagnóstico cuya raíz no es un objeto",
+            F5OracleCause::ByteContract,
+            "la raíz no es un objeto",
+            |package| package.write_bytes(b"[1, 2]"),
+        ),
+        failure_case(
+            "unos límites que no son un objeto",
+            F5OracleCause::ByteContract,
+            "falta o no es objeto",
+            |package| edit_failure_document(package, |document| document["limits"] = 3.into()),
+        ),
+        failure_case(
+            "unos límites con otra clave",
+            F5OracleCause::ByteContract,
+            "el objeto cerrado exige",
+            |package| {
+                edit_failure_document(package, |document| {
+                    let limits = document["limits"].as_object_mut().expect("objeto");
+                    let value = limits.remove("max_output_bytes").expect("clave");
+                    limits.insert("otra_clave".to_owned(), value);
+                });
+            },
+        ),
+        failure_case(
+            "un límite que no es un entero",
+            F5OracleCause::ByteContract,
+            "no es un u64",
+            |package| {
+                edit_failure_document(package, |document| {
+                    document["limits"]["max_layout_attempts"] = "ocho".into();
+                });
+            },
+        ),
+        failure_case(
+            "un objeto opcional que no es null ni un objeto, igual en los dos lados",
+            F5OracleCause::ByteContract,
+            "null u objeto cerrado",
+            |package| {
+                // Coinciden el diagnóstico y la declaración, de modo que la
+                // igualdad entre los dos no lo caza y solo el contrato de forma
+                // lo hace.
+                package.declaration.best_layout = serde_json::json!("cadena");
+                let document = package.document();
+                package.write_document(&document);
+            },
+        ),
+        failure_case(
+            "más intentos de layout que su límite",
+            F5OracleCause::ResourceBound,
+            "layout_attempts_used=9 excede",
+            |package| {
+                package.declaration.counters[0] = 9;
+                let document = package.document();
+                package.write_document(&document);
+            },
+        ),
+        failure_case(
+            "más intentos haplotípicos que su límite",
+            F5OracleCause::ResourceBound,
+            "haplotype_attempts_used=33 excede",
+            |package| {
+                package.declaration.counters[1] = 33;
+                let document = package.document();
+                package.write_document(&document);
+            },
+        ),
+        failure_case(
+            "una cota de propuestas que desborda u64",
+            F5OracleCause::ResourceBound,
+            "la cota de propuestas desborda",
+            |package| {
+                let huge = 1_u64 << 33;
+                package.declaration.limits[1] = huge;
+                package.declaration.limits[2] = huge;
+                package.declaration.counters[1] = huge;
+                let document = package.document();
+                package.write_document(&document);
+            },
+        ),
+        failure_case(
+            "más propuestas aceptadas que hechas",
+            F5OracleCause::Attempt,
+            "se aceptan más propuestas de las que se hicieron",
+            |package| {
+                package.declaration.counters[2] = 1;
+                package.declaration.counters[3] = 2;
+                let document = package.document();
+                package.write_document(&document);
+            },
+        ),
+        failure_case(
+            "un enlace que declara otro identificador",
+            F5OracleCause::Link,
+            "el enlace declara",
+            |package| package.declaration.link.artifact_id = "otro-v1".to_owned(),
+        ),
+        failure_case(
+            "un enlace simbólico dentro de la carga útil",
+            F5OracleCause::Link,
+            "no es un fichero regular ni un directorio",
+            |package| {
+                std::os::unix::fs::symlink(
+                    package.directory.path().join("manifest.json"),
+                    package.directory.path().join("outputs/enlace"),
+                )
+                .expect("enlace simbólico");
+            },
+        ),
+    ];
+    for case in cases {
+        let mut package = FailurePackage::new("failure-case");
+        (case.corrupt)(&mut package);
+        let rejection = package
+            .audit()
+            .err()
+            .unwrap_or_else(|| panic!("«{}» pasó inadvertida", case.name));
+        let detail = detail_of(&rejection);
+        assert_eq!(
+            rejection.cause(),
+            case.cause,
+            "«{}» murió por {:?} ({detail}) y le corresponde {:?}",
+            case.name,
+            rejection.cause(),
+            case.cause
+        );
+        assert!(
+            detail.contains(case.detail),
+            "«{}» se rechazó por otra razón: {detail}",
+            case.name
+        );
+    }
+}
+
+/// Un directorio que el auditor no puede recorrer se rechaza, en vez de darse
+/// por vacío.
+///
+/// La prueba quita los permisos del subdirectorio, de modo que **solo puede
+/// ejercitar la guarda si se ejecuta sin privilegios**: con `root`, `read_dir`
+/// sigue funcionando y la prueba lo dice y no afirma nada. La batería del
+/// proyecto corre como usuario normal. Si el proceso muriera entre quitar y
+/// restaurar los permisos, quedaría en el directorio temporal un subdirectorio
+/// sin permisos; no toca el repositorio.
+#[test]
+fn an_unreadable_directory_in_a_failure_package_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let package = FailurePackage::new("failure-unreadable");
+    let hidden = package.directory.path().join("outputs/oculto");
+    fs::create_dir(&hidden).expect("subdirectorio");
+    fs::set_permissions(&hidden, fs::Permissions::from_mode(0o000)).expect("sin permisos");
+    let result = package.audit();
+    let readable_anyway = fs::read_dir(&hidden).is_ok();
+    // Se restauran los permisos antes de cualquier aserción: sin ello, un fallo
+    // deja un directorio que ni la limpieza puede borrar.
+    fs::set_permissions(&hidden, fs::Permissions::from_mode(0o755)).expect("permisos");
+    if readable_anyway {
+        eprintln!("ejecutada con privilegios: no se puede ejercitar la guarda");
+        return;
+    }
+    let rejection = result.expect_err("un directorio ilegible no puede darse por vacío");
+    assert_eq!(rejection.cause(), F5OracleCause::ArtifactMissing);
+    assert!(
+        detail_of(&rejection).contains("no se pudo recorrer"),
+        "{}",
+        detail_of(&rejection)
+    );
+}
+
+/// Inserta en una lista JSON de la copia una réplica de su **primera** entrada
+/// con otra posición, en el índice dado.
+fn duplicate_first_entry_at(list: &mut serde_json::Value, at: usize, position: u64) {
+    let array = list.as_array_mut().expect("lista");
+    let mut duplicate = array[0].clone();
+    duplicate["position"] = position.into();
+    array.insert(at, duplicate);
+}
+
+/// Añade a un grupo de genotipos un **locus más**, en un sitio que ninguna
+/// copia lleva, y ajusta el recuento de la cabecera.
+///
+/// Se clona la última fila de cada individuo del último sitio del grupo y se
+/// deja el nuevo sitio sin portadores alternativos: el registro queda
+/// coherente consigo mismo y con sus copias, de modo que solo lo delata lo que
+/// los otros ficheros dicen del reparto físico. `start` es la coordenada
+/// 0-based del nuevo locus.
+fn with_extra_locus(
+    text: &str,
+    population: &str,
+    block: &str,
+    new_site: &str,
+    start: u64,
+) -> String {
+    let mut values = truth_values(text);
+    let in_group = |value: &serde_json::Value| {
+        value["record_type"] == "genotype"
+            && value["f5_locus"]["population_id"] == population
+            && value["f5_locus"]["block_id"] == block
+    };
+    let members: Vec<usize> = (0..values.len())
+        .filter(|index| in_group(&values[*index]))
+        .collect();
+    let last_site = values[*members.last().expect("un grupo")]["f5_locus"]["site_id"].clone();
+    let template: Vec<serde_json::Value> = members
+        .iter()
+        .filter(|index| values[**index]["f5_locus"]["site_id"] == last_site)
+        .map(|index| values[*index].clone())
+        .collect();
+    let inserted = template.len();
+    let mut extra = Vec::new();
+    for mut record in template {
+        let alternate = record["f5_locus"]["alt"].as_str().expect("alt").to_owned();
+        let reference_index = record["alleles"]
+            .as_array()
+            .expect("alelos")
+            .iter()
+            .position(|allele| allele["kind"] == "reference")
+            .expect("alelo de referencia");
+        let ploidy = record["carriers"].as_array().expect("portadores").len();
+        for carrier in record["carriers"].as_array_mut().expect("portadores") {
+            carrier["allele_index"] = reference_index.into();
+        }
+        let alleles = record["alleles"].as_array().expect("alelos").len();
+        record["allele_dosages"] = serde_json::Value::Array(
+            (0..alleles)
+                .map(|position| {
+                    serde_json::Value::from(if position == reference_index {
+                        ploidy as u64
+                    } else {
+                        0
+                    })
+                })
+                .collect(),
+        );
+        record["f5_locus"]["site_id"] = new_site.into();
+        record["locus"]["start"] = start.into();
+        record["locus"]["end"] = (start + 1).into();
+        record["case_id"] = oracle_case_id(
+            population,
+            record["individual_id"].as_str().expect("individuo"),
+            record["locus"]["sequence_id"].as_str().expect("secuencia"),
+            start + 1,
+            alternate.chars().next().expect("base"),
+        )
+        .into();
+        extra.push(record);
+    }
+    let at = *members.last().expect("un grupo") + 1;
+    for (offset, record) in extra.into_iter().enumerate() {
+        values.insert(at + offset, record);
+    }
+    let genotypes = values[0]["counts"]["genotypes"].as_u64().expect("recuento");
+    values[0]["counts"]["genotypes"] = (genotypes + inserted as u64).into();
+    truth_document(&values)
+}
+
+/// **Repetir un sitio o una posición dentro del documento de verdad.**
+///
+/// Las dos guardas exigen un documento que el productor jamás escribiría y que
+/// sigue siendo coherente consigo mismo en todo lo demás; con un documento
+/// corriente otra comprobación caza antes la discrepancia.
+#[test]
+fn the_recount_refuses_a_repeated_site_and_a_repeated_position() {
+    let published = publish("truth-repeats", &wide_fixture());
+    let original = String::from_utf8(published.bytes(TRUTH_PATH)).expect("UTF-8");
+    let base = edit_truth_line(&original, 0, |_| {});
+    let first_copy = first_line_of(&base, "haplotype_copy");
+    let block = truth_values(&base)[lines_of(&base, "genotype")[0]]["f5_locus"]["block_id"]
+        .as_str()
+        .expect("bloque")
+        .to_owned();
+    let population = "PA";
+    let taken = truth_values(&base)[lines_of(&base, "genotype")[0]]["locus"]["start"]
+        .as_u64()
+        .expect("inicio");
+    recount_rejects_each(
+        "truth-repeats-stage",
+        &base,
+        &[
+            (
+                "un sitio que aparece dos veces en la misma copia",
+                "un sitio aparece dos veces en la misma copia",
+                edit_truth_line(&base, first_copy, |record| {
+                    // Las posiciones 0-based de la copia dejan un hueco: la réplica
+                    // del primer SNP se coloca en él, de modo que el orden por
+                    // posición sigue siendo estricto y el sitio se repite.
+                    let positions: Vec<u64> = record["segments"][0]["modifications"]
+                        .as_array()
+                        .expect("lista")
+                        .iter()
+                        .map(|entry| entry["position"].as_u64().expect("posición"))
+                        .collect();
+                    let gap = positions
+                        .windows(2)
+                        .position(|pair| pair[0] + 1 < pair[1])
+                        .expect("un hueco entre dos SNP de la copia");
+                    let position = positions[gap] + 1;
+                    duplicate_first_entry_at(
+                        &mut record["segments"][0]["modifications"],
+                        gap + 1,
+                        position,
+                    );
+                    duplicate_first_entry_at(
+                        &mut record["current_pieces"][0]["snps"],
+                        gap + 1,
+                        position,
+                    );
+                    duplicate_first_entry_at(&mut record["history"], gap + 1, position);
+                }),
+            ),
+            (
+                "dos loci de la misma subpoblación en la misma posición",
+                "publica dos loci en",
+                with_extra_locus(
+                    &base,
+                    population,
+                    &block,
+                    "SITE_ZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+                    taken,
+                ),
+            ),
+        ],
+    );
+    // Control: el mismo locus de más, en una posición que nadie ocupa, es un
+    // documento aceptable para el recuento. Sin este control, la prueba de arriba
+    // podría estar cayendo por cualquier otro defecto del locus fabricado.
+    let directory = TempDir::new("truth-repeats-control");
+    let path = directory.path().join("truth.jsonl");
+    fs::write(&path, &base).expect("verdad íntegra");
+    let intact_loci = recount_f5_man70(&path).expect("íntegra").loci().len();
+    fs::write(
+        &path,
+        with_extra_locus(
+            &base,
+            population,
+            &block,
+            "SITE_ZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+            taken + 90,
+        ),
+    )
+    .expect("verdad con un locus más");
+    let recount = recount_f5_man70(&path).expect("un locus más en una posición libre se reconta");
+    assert_eq!(
+        recount.loci().len(),
+        intact_loci + 1,
+        "el control tiene que añadir exactamente un locus"
+    );
+}
+
+/// Reescribe **todas** las líneas de genotipo de un sitio con `edit`.
+fn edit_genotypes_of_site(
+    text: &str,
+    site_id: &str,
+    edit: impl Fn(&mut serde_json::Value),
+) -> String {
+    let mut values = truth_values(text);
+    let mut touched = 0_usize;
+    for value in &mut values {
+        if value["record_type"] == "genotype" && value["f5_locus"]["site_id"] == site_id {
+            edit(value);
+            touched += 1;
+        }
+    }
+    assert!(touched > 0, "el sitio {site_id} no tiene genotipos");
+    truth_document(&values)
+}
+
+/// **La verdad recontada contra el reparto físico de `f5-sites.tsv`.**
+///
+/// El recuento MAN-70 lee solo `truth.jsonl`; la auditoría lo cruza después con
+/// los sitios que los TSV publican. Cada caso cambia un campo del locus en el
+/// documento de verdad —de forma coherente consigo mismo, recalculando el
+/// `case_id` cuando lo necesita— y deja intacto el reparto físico.
+#[test]
+fn the_recounted_loci_must_be_the_sites_the_tsv_files_publish() {
+    let published = publish("recount-vs-sites", &wide_fixture());
+    let base = edit_truth_line(
+        &String::from_utf8(published.bytes(TRUTH_PATH)).expect("UTF-8"),
+        0,
+        |_| {},
+    );
+    let first_genotype = truth_values(&base)[lines_of(&base, "genotype")[0]].clone();
+    let site_id = first_genotype["f5_locus"]["site_id"]
+        .as_str()
+        .expect("sitio")
+        .to_owned();
+    let last_group_block = truth_values(&base)
+        [*lines_of(&base, "genotype").last().expect("genotipo")]["f5_locus"]["block_id"]
+        .as_str()
+        .expect("bloque")
+        .to_owned();
+    let last_population = truth_values(&base)
+        [*lines_of(&base, "genotype").last().expect("genotipo")]["f5_locus"]["population_id"]
+        .as_str()
+        .expect("población")
+        .to_owned();
+    let recount_cause = F5OracleCause::Man70;
+    let not_the_sites = "no es el de f5-sites.tsv";
+    let with_site = site_id.clone();
+    let with_block = last_group_block.clone();
+    let with_population = last_population.clone();
+    assert_each_guard_fires(
+        &published,
+        vec![
+            guard_case(
+                "la base de referencia de un sitio distinta de la de f5-sites.tsv",
+                recount_cause,
+                not_the_sites,
+                move |staged| {
+                    let text =
+                        edit_genotypes_of_site(&staged.text(TRUTH_PATH), &with_site, |record| {
+                            let reference =
+                                record["f5_locus"]["ref"].as_str().expect("ref").to_owned();
+                            let alternate =
+                                record["f5_locus"]["alt"].as_str().expect("alt").to_owned();
+                            record["f5_locus"]["ref"] = other_base(&reference, &alternate).into();
+                        });
+                    staged.rewrite(TRUTH_PATH, &text);
+                },
+            ),
+            guard_case(
+                "el alelo alternativo de un sitio, solo en la verdad, distinto del de f5-sites.tsv",
+                recount_cause,
+                not_the_sites,
+                {
+                    let site = site_id.clone();
+                    move |staged| {
+                        let text =
+                            edit_genotypes_of_site(&staged.text(TRUTH_PATH), &site, |record| {
+                                let reference =
+                                    record["f5_locus"]["ref"].as_str().expect("ref").to_owned();
+                                let alternate =
+                                    record["f5_locus"]["alt"].as_str().expect("alt").to_owned();
+                                let replacement = other_base(&reference, &alternate);
+                                record["f5_locus"]["alt"] = replacement.clone().into();
+                                for allele in record["alleles"].as_array_mut().expect("alelos") {
+                                    if allele["kind"] == "snp" {
+                                        allele["base"] = replacement.clone().into();
+                                    }
+                                }
+                                record["case_id"] = oracle_case_id(
+                                    record["f5_locus"]["population_id"]
+                                        .as_str()
+                                        .expect("población"),
+                                    record["individual_id"].as_str().expect("individuo"),
+                                    record["locus"]["sequence_id"].as_str().expect("secuencia"),
+                                    record["locus"]["start"].as_u64().expect("inicio") + 1,
+                                    replacement.chars().next().expect("base"),
+                                )
+                                .into();
+                            });
+                        staged.rewrite(TRUTH_PATH, &text);
+                    }
+                },
+            ),
+            guard_case(
+                "la posición de un sitio, solo en la verdad, distinta de la de f5-sites.tsv",
+                recount_cause,
+                not_the_sites,
+                {
+                    let site = site_id.clone();
+                    move |staged| {
+                        let text =
+                            edit_genotypes_of_site(&staged.text(TRUTH_PATH), &site, |record| {
+                                let start = 90_u64;
+                                record["locus"]["start"] = start.into();
+                                record["locus"]["end"] = (start + 1).into();
+                                record["case_id"] = oracle_case_id(
+                                    record["f5_locus"]["population_id"]
+                                        .as_str()
+                                        .expect("población"),
+                                    record["individual_id"].as_str().expect("individuo"),
+                                    record["locus"]["sequence_id"].as_str().expect("secuencia"),
+                                    start + 1,
+                                    record["f5_locus"]["alt"]
+                                        .as_str()
+                                        .expect("alt")
+                                        .chars()
+                                        .next()
+                                        .expect("base"),
+                                )
+                                .into();
+                            });
+                        staged.rewrite(TRUTH_PATH, &text);
+                    }
+                },
+            ),
+            guard_case(
+                "el bloque del último grupo de genotipos distinto del de f5-sites.tsv",
+                recount_cause,
+                not_the_sites,
+                move |staged| {
+                    let mut values = truth_values(&staged.text(TRUTH_PATH));
+                    for value in &mut values {
+                        if value["record_type"] == "genotype"
+                            && value["f5_locus"]["block_id"] == with_block.as_str()
+                            && value["f5_locus"]["population_id"] == with_population.as_str()
+                        {
+                            value["f5_locus"]["block_id"] = "BLK_ZZZZZZZZZZZZZZZZZZZZZZZZZZ".into();
+                        }
+                    }
+                    staged.rewrite(TRUTH_PATH, &truth_document(&values));
+                },
+            ),
+            guard_case(
+                "un locus más en la verdad que sitios hay en los TSV",
+                recount_cause,
+                "la verdad reconta",
+                {
+                    let block = last_group_block.clone();
+                    let population = last_population.clone();
+                    move |staged| {
+                        let text = with_extra_locus(
+                            &staged.text(TRUTH_PATH),
+                            &population,
+                            &block,
+                            "SITE_ZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+                            90,
+                        );
+                        staged.rewrite(TRUTH_PATH, &text);
+                    }
+                },
+            ),
+        ],
+    );
+}
+
+/// El mismo cruce, cuando lo único que difiere es la **subpoblación**.
+///
+/// Con dos subpoblaciones del mismo censo y los mismos bloques, quitar el
+/// grupo de la primera desplaza el cursor a los loci de la segunda: el bloque,
+/// el sitio y el censo coinciden y solo la subpoblación delata el
+/// desplazamiento.
+#[test]
+fn a_recounted_locus_of_another_subpopulation_is_refused() {
+    let published = publish(
+        "recount-population",
+        &Fixture {
+            subpopulations: vec![Subpopulation::new("PA", 1), Subpopulation::new("PB", 1)],
+            ..Fixture::default()
+        },
+    );
+    assert_each_guard_fires(
+        &published,
+        vec![guard_case(
+            "los genotipos de la primera subpoblación ausentes",
+            F5OracleCause::Man70,
+            "no es el de f5-sites.tsv",
+            |staged| {
+                let mut values = truth_values(&staged.text(TRUTH_PATH));
+                let before = values.len();
+                values.retain(|value| {
+                    !(value["record_type"] == "genotype"
+                        && value["f5_locus"]["population_id"] == "PA")
+                });
+                let removed = (before - values.len()) as u64;
+                assert!(removed > 0, "la primera subpoblación tiene genotipos");
+                let genotypes = values[0]["counts"]["genotypes"].as_u64().expect("recuento");
+                values[0]["counts"]["genotypes"] = (genotypes - removed).into();
+                staged.rewrite(TRUTH_PATH, &truth_document(&values));
+            },
+        )],
+    );
+}
+
+/// Un artefacto que existe pero que no se puede leer se rechaza por su causa.
+#[test]
+fn an_artifact_that_is_a_directory_cannot_be_measured() {
+    let published = publish("artifact-directory", &wide_fixture());
+    assert_each_guard_fires(
+        &published,
+        vec![guard_case(
+            "un artefacto que es un directorio",
+            F5OracleCause::ArtifactMissing,
+            "os error 21",
+            |staged| {
+                // `File::open` abre un directorio; la lectura es la que falla.
+                let path = staged.root.join(LAYOUT_PATH);
+                fs::remove_file(&path).expect("artefacto retirado");
+                fs::create_dir(&path).expect("directorio en su lugar");
+            },
+        )],
+    );
+}
+
+/// Una unidad controlada sin ninguna copia no tiene cuota que auditar.
+///
+/// Se declara una subpoblación de **cero individuos**, coherente en la
+/// declaración, en la cabecera de la verdad y en los fundadores: el censo por
+/// unidad se cumple y la única guarda que queda es la de la cuota.
+#[test]
+fn a_controlled_unit_without_copies_has_no_quota() {
+    let published = publish("controlled-empty", &wide_fixture());
+    assert_each_guard_fires(
+        &published,
+        vec![guard_case(
+            "una subpoblación controlada de cero individuos",
+            F5OracleCause::Sampling,
+            "sin copias no tiene cuota",
+            |staged| {
+                staged.declaration.subpopulations[1].individual_count = 0;
+                staged.edit(FOUNDERS_PATH, |text| {
+                    let mut lines = text.lines();
+                    let header = lines.next().expect("cabecera");
+                    let kept: Vec<&str> = lines.filter(|line| !line.starts_with("PB\t")).collect();
+                    format!("{header}\n{}\n", kept.join("\n"))
+                });
+                let mut values = truth_values(&staged.text(TRUTH_PATH));
+                let before = values.len();
+                values.retain(|value| {
+                    !(value["record_type"] == "haplotype_copy"
+                        && value["founder_membership"]["population_id"] == "PB")
+                });
+                let removed = (before - values.len()) as u64;
+                assert!(removed > 0, "la subpoblación PB tiene copias");
+                let copies = values[0]["counts"]["copies"].as_u64().expect("recuento");
+                values[0]["counts"]["copies"] = (copies - removed).into();
+                values[0]["populations"][1]["individual_count"] = 0.into();
+                staged.rewrite(TRUTH_PATH, &truth_document(&values));
+            },
+        )],
+    );
+}
+
+/// **Dos copias con la misma identidad en subpoblaciones distintas.**
+///
+/// La clave del orden de copias tiene cinco campos, con la subpoblación en
+/// segundo lugar; la identidad que entra en el mapa de copias tiene cuatro,
+/// sin ella. Dos subpoblaciones de un individuo cada una, con el mismo
+/// identificador de individuo en las copias de la segunda, hacen crecer
+/// estrictamente el orden y repiten la identidad: es la única defensa del mapa.
+#[test]
+fn two_subpopulations_sharing_an_individual_identifier_cannot_share_a_copy_identity() {
+    let published = publish(
+        "shared-individual",
+        &Fixture {
+            subpopulations: vec![Subpopulation::new("PA", 1), Subpopulation::new("PB", 1)],
+            ..Fixture::default()
+        },
+    );
+    let base = edit_truth_line(
+        &String::from_utf8(published.bytes(TRUTH_PATH)).expect("UTF-8"),
+        0,
+        |_| {},
+    );
+    let copies = lines_of(&base, "haplotype_copy");
+    let first_individual = truth_values(&base)[copies[0]]["identity"]["individual_id"]
+        .as_str()
+        .expect("individuo")
+        .to_owned();
+    let mut values = truth_values(&base);
+    let mut renamed = 0;
+    for index in &copies {
+        if values[*index]["founder_membership"]["population_id"] == "PB" {
+            values[*index]["identity"]["individual_id"] = first_individual.clone().into();
+            renamed += 1;
+        }
+    }
+    assert!(renamed > 0, "la segunda subpoblación tiene copias");
+    recount_rejects_each(
+        "shared-individual-stage",
+        &base,
+        &[(
+            "el mismo individuo, secuencia y fase en dos subpoblaciones",
+            "una copia aparece dos veces",
+            truth_document(&values),
+        )],
+    );
+}
+
+/// El orden de copias es **estricto**: dos copias consecutivas con exactamente
+/// la misma clave se rechazan por el orden, no por otra guarda posterior.
+///
+/// La réplica lleva otro `founder_copy_id`, de modo que si la comparación fuese
+/// `>` en vez de `>=` la copia pasaría el orden y caería por la del mapa de
+/// copias, con otro texto.
+#[test]
+fn two_consecutive_copies_with_the_same_key_break_the_order() {
+    let published = publish("repeated-copy", &wide_fixture());
+    let base = edit_truth_line(
+        &String::from_utf8(published.bytes(TRUTH_PATH)).expect("UTF-8"),
+        0,
+        |_| {},
+    );
+    let first = first_line_of(&base, "haplotype_copy");
+    let mut values = truth_values(&base);
+    let mut twin = values[first].clone();
+    twin["founder_membership"]["founder_copy_id"] = "FCP_REPETIDA".into();
+    values.insert(first + 1, twin);
+    // El recuento de copias de la cabecera acompaña al documento.
+    values[0]["counts"]["copies"] =
+        (values[0]["counts"]["copies"].as_u64().expect("recuento") + 1).into();
+    let document = truth_document(&values);
+    recount_rejects_each(
+        "repeated-copy-stage",
+        &base,
+        &[(
+            "dos copias consecutivas con la misma clave",
+            "las copias no llegan por referencia",
+            document,
+        )],
+    );
+}
+
+/// Un bloque que empieza en la coordenada cero no es un bloque: las
+/// coordenadas del layout son de base 1.
+#[test]
+fn a_block_starting_at_coordinate_zero_is_refused() {
+    let published = publish("layout-zero", &wide_fixture());
+    assert_each_guard_fires(
+        &published,
+        vec![guard_case(
+            "un bloque de longitud correcta que empieza en cero",
+            F5OracleCause::BlockLayout,
+            "no satisface length_bp=end-start+1",
+            |staged| {
+                // 0..2 mide tres bases: `start > end` y la longitud no lo delatan,
+                // solo la coordenada cero.
+                staged.edit(LAYOUT_PATH, |text| {
+                    map_row(text, 0, |columns| {
+                        columns[2] = "0".to_owned();
+                        columns[3] = "2".to_owned();
+                    })
+                });
+            },
+        )],
+    );
 }

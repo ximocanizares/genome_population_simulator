@@ -781,6 +781,12 @@ fn neumaier_total(values: impl IntoIterator<Item = f64>) -> f64 {
 // ---------------------------------------------------------------------------
 
 fn push_component(material: &mut Vec<u8>, name: &str, value: &str) -> Checked<()> {
+    // Los dos rechazos siguientes son inalcanzables: exigen un nombre o un valor
+    // de más de 4 GiB, que es lo que cabe en el `u32` del formato del material.
+    // Los nombres son literales de este módulo y los valores son identificadores,
+    // cifras o bases que los lectores ya han materializado línea a línea; ninguna
+    // prueba construye una cadena así. Se conservan porque una conversión que
+    // truncara en silencio cambiaría el identificador derivado.
     let name_length =
         u32::try_from(name.len()).map_err(|_| catalog_reject("un nombre de componente no cabe"))?;
     let value_length =
@@ -793,6 +799,10 @@ fn push_component(material: &mut Vec<u8>, name: &str, value: &str) -> Checked<()
 }
 
 fn canonical_material(root: &[u8; 32], components: &[(&str, String)]) -> Checked<Vec<u8>> {
+    // Inalcanzable: `components` lo arma cada llamador de este módulo con menos de
+    // diez entradas, o lo lee de una fila del catálogo compilado, y solo una
+    // cuenta por encima de `u32::MAX` haría fallar la conversión. Se conserva por
+    // el mismo motivo que los dos rechazos de `push_component`.
     let count = u32::try_from(components.len())
         .map_err(|_| catalog_reject("el recuento de componentes no cabe"))?;
     let mut material = Vec::new();
@@ -984,9 +994,19 @@ fn catalog_material(root: &[u8; 32], components: &[(&str, String)]) -> Checked<V
 }
 
 /// Reproduce los cinco vectores F5 congelados de `id-catalog-v4.tsv`.
+///
+/// Sus seis rechazos se ejercitan con catálogos dañados a través de
+/// `validate_id_catalog_text`.
 fn validate_id_catalog() -> Checked<()> {
+    validate_id_catalog_text(ID_CATALOG_TSV)
+}
+
+/// El cuerpo de [`validate_id_catalog`], sobre el texto que se le dé: es lo que
+/// permite probar cada rechazo con un catálogo dañado, como ya se hace con
+/// `validate_frozen_rng_catalog`.
+fn validate_id_catalog_text(catalog: &str) -> Checked<()> {
     let mut seen = 0_usize;
-    for line in ID_CATALOG_TSV.lines() {
+    for line in catalog.lines() {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
@@ -1139,6 +1159,10 @@ impl SubseedOracle {
             .filter(|base| *base != reference_base)
             .collect();
         let choice = uniform_index(&mut rng, 3);
+        // Los dos rechazos siguientes son inalcanzables: `uniform_index(rng, 3)`
+        // devuelve un valor menor que 3, que cabe en cualquier `usize`, y
+        // `alternatives` conserva al menos tres de las cuatro bases (solo se quita
+        // la de referencia), de modo que `get` nunca da `None`.
         let position = usize::try_from(choice)
             .map_err(|_| catalog_reject("el índice ALT no cabe en usize"))?;
         alternatives
@@ -2613,6 +2637,14 @@ pub fn recount_f5_man70(truth_path: &Path) -> Checked<F5Man70Recount> {
                         "un sitio aparece dos veces en la misma copia",
                     ));
                 }
+                // **Alcanzable**, y es la única defensa de este mapa: la clave que
+                // se compara con `previous_copy` tiene cinco campos, con la
+                // subpoblación en segundo lugar, y la identidad que entra en
+                // `state.copies` tiene cuatro, **sin** subpoblación. Dos copias de
+                // subpoblaciones distintas con el mismo individuo, secuencia y fase
+                // hacen crecer la primera y repiten la segunda, y nada ata el
+                // identificador de individuo a su subpoblación. Sin esta guarda el
+                // mapa sobrescribiría una entrada en silencio.
                 if state
                     .copies
                     .insert(copy.identity, (copy.population_id, indices))
@@ -2689,6 +2721,10 @@ pub fn recount_f5_man70(truth_path: &Path) -> Checked<F5Man70Recount> {
                     // Inalcanzable: `loci` solo está vacío antes del primer genotipo, y el
                     // primero siempre abre locus porque `previous_locus` es `None`.
                     .ok_or_else(|| truth_reject("order", "un genotipo sin locus abierto"))?;
+                // La comparación de `block_id` de abajo es redundante: el bloque
+                // define el grupo, y un genotipo de otro bloque abre un grupo nuevo,
+                // reinicia `previous_locus` y por tanto nunca llega aquí con un locus
+                // abierto de otro bloque. Ninguna prueba puede aislarla.
                 if locus.site_id != placed.site_id
                     || locus.sequence_id != placed.sequence_id
                     || locus.position_1based != placed.position_1based
@@ -3218,6 +3254,11 @@ fn read_layout(
             ));
         }
         let block_id = cursor.field(0).to_owned();
+        // Inalcanzable: el `BLK_` de cada fila se acaba de exigir igual al que se
+        // deriva de su ordinal, y el ordinal es distinto en cada fila, de modo que
+        // dos filas con el mismo identificador solo podrían darse por una colisión
+        // de 128 bits de BLAKE3. Se conserva porque `block_index_of` no debe
+        // sobrescribir una entrada en silencio.
         if block_index_of
             .insert(block_id.clone(), block_index)
             .is_some()
@@ -3774,6 +3815,9 @@ fn expected_haplotype_counts(
                 ),
             ));
         }
+        // Inalcanzable en 64 bits: `redrawn` está pinzado en `[h_min, h_max]` y
+        // `usize` tiene 64 bits en los objetivos del proyecto. Se conserva por el
+        // tipo de la conversión.
         expected.push(usize::try_from(redrawn).map_err(|_| {
             reject(
                 F5OracleCause::Haplotype,
@@ -3796,6 +3840,13 @@ fn read_haplotypes(
 ) -> Checked<u64> {
     let path = F5_TSV_CONTRACTS[HAPLOTYPES].path();
     let declared_weights = &declaration.haplotype_weights;
+    // Los dos rechazos siguientes son inalcanzables. `audit_normalizations` corre
+    // antes que esta función y exige que `declaration.haplotype_weights` sea,
+    // valor a valor, `effective_values` de la auditoría DTC-049 de los pesos; y
+    // `check_normalization` exige de esa auditoría que no esté vacía y que su
+    // suma de salida esté a distancia de uno menor o igual que la misma
+    // tolerancia que se usa abajo. Se conservan porque esta función no se fía del
+    // orden de sus llamadores.
     if declared_weights.is_empty() {
         return Err(reject(
             F5OracleCause::Haplotype,
@@ -3848,6 +3899,8 @@ fn read_haplotypes(
                 "haplotype_rank no es consecutivo desde 0",
             ));
         }
+        // Inalcanzable: `rank` acaba de compararse con `haplotype_ids.len()`, que
+        // es un `usize`, de modo que cabe. Se conserva por el tipo de la conversión.
         let position = usize::try_from(rank).map_err(|_| {
             reject(
                 F5OracleCause::Haplotype,
@@ -4094,6 +4147,9 @@ fn read_frequencies(
                 "abs_error no es |realizado-objetivo|",
             ));
         }
+        // Inalcanzable: `read_attempts` corre antes, exige que cada unidad que
+        // recorre marque exactamente un intento como mejor y `walk.finish` que las
+        // recorra todas, de modo que todas tienen mejor intento.
         let best_attempt = units[index].best_attempt.ok_or_else(|| {
             reject(
                 F5OracleCause::Attempt,
@@ -4303,6 +4359,9 @@ fn read_ld_evaluation(
             bin_position = 0;
             previous_start = None;
         }
+        // Inalcanzable: la primera fila abre siempre una unidad —`walk.visit`
+        // devuelve `true` cuando no hay unidad actual— y `recomputed` se asigna al
+        // abrirla; las siguientes filas heredan ese valor.
         let evaluation = recomputed.as_ref().ok_or_else(|| {
             reject(
                 F5OracleCause::LinkageDisequilibrium,
@@ -4381,6 +4440,9 @@ fn read_ld_evaluation(
                 }
                 let mean = cursor.probability(F5OracleCause::LinkageDisequilibrium, 6)?;
                 let error = cursor.probability(F5OracleCause::LinkageDisequilibrium, 9)?;
+                // Inalcanzable: `pairs` acaba de igualarse a las parejas de la
+                // recomputación y arriba se exigió que no fueran cero; con parejas, la
+                // recomputación tiene media.
                 let expected_mean = evaluation.mean_r2[bin_position].ok_or_else(|| {
                     reject(
                         F5OracleCause::LinkageDisequilibrium,
@@ -4444,6 +4506,8 @@ fn read_ld_evaluation(
         }
         bin_position += 1;
         if bin_position == bins.len() {
+            // Inalcanzable: por la misma razón que en `read_frequencies`, todas las
+            // unidades tienen mejor intento cuando llegan aquí.
             let counters = units[index].best_counters.ok_or_else(|| {
                 reject(
                     F5OracleCause::Attempt,
@@ -4573,6 +4637,13 @@ impl TruthCopies {
             .map_err(|error| truth_reject("encoding", error.to_string()))?;
         if read == 0 {
             self.exhausted = true;
+            // Sombreada: cuando esta comprobación se dispara, el recuento MAN-70
+            // —que corre después sobre el mismo fichero— rechaza el mismo defecto
+            // con el mismo campo y el mismo texto, de modo que desde
+            // `audit_f5_package` no se puede distinguir cuál de las dos ha
+            // hablado. La prueba la dispara (consta en el barrido) pero no puede
+            // demostrar que sea ella la que rechaza; quitarla no cambia ningún
+            // resultado observable.
             if !self.closed_with_lf {
                 return Err(truth_reject("eol", "falta el LF final"));
             }
@@ -4767,6 +4838,8 @@ fn walk_founders_and_copies(
             founder_copy_id,
             haplotype_id,
             unit,
+            // Inalcanzable: `rank` es la posición del haplotipo dentro de los de su
+            // unidad, y `f5-haplotypes.tsv` lleva una fila de texto por rango.
             rank: u32::try_from(rank).map_err(|_| {
                 reject(
                     F5OracleCause::Assignment,
@@ -5175,6 +5248,10 @@ fn audit_normalizations(declaration: &F5PackageDeclaration) -> Checked<()> {
         .iter()
         .zip(spectrum.effective_values())
     {
+        // Inalcanzable: `F5NormalizationAudit` no tiene constructor público. La
+        // única forma de obtener una es el cargador del perfil, que escribe cada
+        // clave del espectro como el texto de un `f64` que él mismo leyó, de modo
+        // que una prueba no puede fabricar una auditoría con una clave ilegible.
         let key: f64 = effective.key().parse().map_err(|_| {
             reject(
                 F5OracleCause::Normalization,
@@ -5356,6 +5433,9 @@ fn audit_sampling(
             }
             let tolerance_copies = effective * copies as f64;
             for (rank, count) in unit.rank_counts.iter().enumerate() {
+                // Inalcanzable: `rank_counts` se crea con `unit.haplotypes` entradas y
+                // `read_haplotypes` fija `unit.weights` con el mismo número, de modo
+                // que todo rango tiene peso.
                 let target = unit.weights.get(rank).copied().ok_or_else(|| {
                     reject(
                         F5OracleCause::Sampling,
@@ -5426,6 +5506,8 @@ fn audit_inbreeding(declaration: &F5PackageDeclaration, units: &[Unit]) -> Check
                     ),
                 ));
             }
+            // `!value.is_finite()` es redundante: `contains` ya es falso para NaN y
+            // para los infinitos, de modo que ninguna prueba puede aislarla.
             (2, Some(value)) if !value.is_finite() || !(0.0..=1.0).contains(&value) => {
                 return Err(reject(
                     F5OracleCause::Inbreeding,
@@ -5585,6 +5667,8 @@ fn root_seed_bytes(seed: &str) -> Checked<[u8; 32]> {
             "la semilla declarada no es hex minúscula de 64",
         ));
     }
+    // Inalcanzable: `is_lowercase_sha256` acaba de exigir 64 dígitos hexadecimales
+    // minúsculos, que `decode_hex` siempre decodifica en 32 bytes.
     decode_hex(seed)
         .and_then(|bytes| bytes.try_into().ok())
         .ok_or_else(|| {
@@ -5768,6 +5852,8 @@ pub fn audit_f5_package(
     // Los contadores del mejor intento que solo dependen de la matriz se
     // comprueban aquí; los que dependen de los bins, al cerrar cada unidad LD.
     for unit in &units {
+        // Inalcanzable: `read_attempts` ya exigió que toda unidad tenga un único
+        // mejor intento.
         let counters = unit.best_counters.ok_or_else(|| {
             reject(
                 F5OracleCause::Attempt,
@@ -5812,6 +5898,7 @@ pub fn audit_f5_package(
     // `max_marginal_error` del mejor intento es el máximo de los errores que
     // `f5-frequencies.tsv` acaba de publicar.
     for unit in &units {
+        // Inalcanzable, por la misma razón que el bucle anterior.
         let counters = unit.best_counters.ok_or_else(|| {
             reject(
                 F5OracleCause::Attempt,
@@ -5845,6 +5932,8 @@ pub fn audit_f5_package(
 
     // Censo y cuota por unidad, ya con los asientos recorridos.
     for unit in &units {
+        // Inalcanzable: `units` se construye desde `declaration.subpopulations` y
+        // cada unidad lleva el `population_id` de una de ellas.
         let census = declaration
             .subpopulations
             .iter()
@@ -5902,6 +5991,11 @@ pub fn audit_f5_package(
     // El recuento MAN-70 abre `truth.jsonl` **por su cuenta** y no recibe nada
     // de lo anterior.
     let recount = recount_f5_man70(&payload_root.join(F5_TRUTH_PATH))?;
+    // Inalcanzable: `recount.copies` es el número de líneas `haplotype_copy` que
+    // `recount_f5_man70` acaba de igualar a `counts.copies` de la cabecera, y
+    // `walk_founders_and_copies` igualó `copies` a ese mismo campo de esa misma
+    // cabecera: los dos son iguales a él. Se conserva porque el recuento es una
+    // frontera pública propia.
     if recount.copies != copies {
         return Err(reject(
             F5OracleCause::Man70,
@@ -6017,6 +6111,8 @@ fn build_summaries(
     let mut summaries = Vec::new();
     let mut cursor = 0_usize;
     for (position, unit) in units.iter().enumerate() {
+        // Inalcanzable, por la misma razón que el censo de `audit_f5_package`: las
+        // unidades salen de `declaration.subpopulations`.
         let census = declaration
             .subpopulations
             .iter()
@@ -6065,13 +6161,17 @@ fn build_summaries(
                     ),
                 ));
             }
-            // La igualdad que REQ-MAN-70 obliga. Es **redundante por
-            // construcción** —las dos cadenas terminan en el mismo registro de
-            // copia, de modo que ninguna mutación aislada puede separarlas— y
-            // se conserva a propósito: es el disparador que queda si alguna
-            // vez se debilita un eslabón de cualquiera de las dos. Al sustituir
-            // el recuento por `allele_dosages` en una variante defectuosa, la
-            // mutación «dosis alterada» dejó de morir por MAN-70.
+            // La igualdad que REQ-MAN-70 obliga. Es **inalcanzable**: los
+            // portadores de cada genotipo son las `ploidy` copias del individuo
+            // en esa secuencia, cada copia lleva exactamente los sitios que
+            // `close_copy_group` la obligó a llevar según los TSV, y el locus ya
+            // coincide en sitio y secuencia con el de `f5-sites.tsv` (comprobación
+            // anterior), de modo que las dosis recontadas desde la verdad son las
+            // realizadas desde los TSV. Ninguna mutación aislada puede separarlas.
+            // Se conserva a propósito: es el disparador que queda si alguna vez se
+            // debilita un eslabón de cualquiera de las dos cadenas. Al sustituir el
+            // recuento por `allele_dosages` en una variante defectuosa, la mutación
+            // «dosis alterada» dejó de morir por MAN-70.
             let realized_counts = realized_counts(unit, site_index, ploidy);
             if realized_counts != locus.counts {
                 return Err(reject(
@@ -7038,6 +7138,9 @@ fn collect_failure_files(
         )
     })?;
     for entry in entries {
+        // Inalcanzable en la práctica: `ReadDir` solo da error de iteración ante un
+        // fallo de entrada y salida del sistema de ficheros a mitad de un listado,
+        // que una prueba no puede provocar de forma determinista.
         let entry = entry.map_err(|error| {
             reject(
                 F5OracleCause::ArtifactMissing,
@@ -7049,6 +7152,11 @@ fn collect_failure_files(
         let child = entry.path();
         // `file_type` no sigue enlaces; `is_dir` sí. Un paquete declarado por
         // huella no admite un enlace en su árbol.
+        // Inalcanzable en la práctica: en Linux `file_type` sale del tipo que el
+        // propio listado ya trae y solo consulta el disco si el sistema de ficheros
+        // no lo rellena; falla si el fichero desaparece entre el listado y la
+        // consulta, una carrera que una prueba no puede provocar de forma
+        // determinista.
         let kind = entry.file_type().map_err(|error| {
             reject(
                 F5OracleCause::ArtifactMissing,
@@ -7072,6 +7180,9 @@ fn collect_failure_files(
                 ),
             ));
         }
+        // Inalcanzable: `child` sale de un listado de `directory`, y `directory` es
+        // `payload_root` o uno de sus descendientes, de modo que siempre cuelga de
+        // él.
         let relative = child.strip_prefix(payload_root).map_err(|_| {
             reject(
                 F5OracleCause::ArtifactMissing,
@@ -7083,4 +7194,422 @@ fn collect_failure_files(
         found.insert(relative.to_string_lossy().replace('\\', "/"));
     }
     Ok(())
+}
+
+/// Pruebas de la deuda de cobertura de los jueces (DT-001): cada guarda del
+/// oráculo que ninguna prueba disparaba, con su motivo exacto.
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+
+    /// El texto del detalle de un rechazo de catálogo.
+    fn detail_of(rejection: &F5OracleRejection) -> String {
+        rejection
+            .diagnostic()
+            .context()
+            .get("detail")
+            .expect("todo rechazo lleva detalle")
+            .clone()
+    }
+
+    /// El catálogo v1 con una fila reescrita: `edit` recibe los nueve campos de
+    /// la primera fila de decisión (`layout_length`) y los deja como quiera.
+    fn catalog_with_first_row_edited(edit: impl FnOnce(&mut Vec<String>)) -> String {
+        let mut edit = Some(edit);
+        let mut lines = Vec::new();
+        for line in RNG_CATALOG_TSV.lines() {
+            match edit.take() {
+                Some(edit) if !line.is_empty() && !line.starts_with('#') => {
+                    let mut fields: Vec<String> = line.split('|').map(str::to_owned).collect();
+                    edit(&mut fields);
+                    lines.push(fields.join("|"));
+                }
+                other => {
+                    edit = other;
+                    lines.push(line.to_owned());
+                }
+            }
+        }
+        assert!(edit.is_none(), "el catálogo tiene alguna fila de decisión");
+        lines.join("\n") + "\n"
+    }
+
+    /// **La autovalidación del catálogo RNG, guarda por guarda.**
+    ///
+    /// El oráculo se prueba contra el catálogo congelado antes de juzgar a
+    /// nadie, pero con el catálogo íntegro todas sus comprobaciones pasan, de
+    /// modo que ninguna había dicho nunca «no». Aquí cada una recibe un
+    /// catálogo dañado en **exactamente** el campo que ella vigila, y la
+    /// prueba exige el motivo exacto: quitar la comprobación o cambiar su
+    /// condición deja pasar el catálogo o lo rechaza por otra razón.
+    ///
+    /// Las siete pasan por el mismo camino porque la función es la misma que el
+    /// oráculo usa con el catálogo real: no se prueba una réplica.
+    #[test]
+    fn the_frozen_rng_catalog_check_refuses_each_damaged_field() {
+        validate_frozen_rng_catalog(RNG_CATALOG_TSV, F5_RNG_CATALOG_DECISIONS)
+            .expect("el catálogo íntegro se reproduce");
+        let flip = |field: &mut String| {
+            // Cambia el primer carácter hexadecimal por otro distinto.
+            let first = field.remove(0);
+            field.insert(0, if first == '0' { '1' } else { '0' });
+        };
+        type RowEdit = Box<dyn Fn(&mut Vec<String>)>;
+        let cases: [(&str, RowEdit, &str); 7] = [
+            (
+                "una fila con ocho campos",
+                Box::new(|fields| {
+                    fields.pop();
+                }),
+                "no tiene 9 campos",
+            ),
+            (
+                "una raíz que no es hexadecimal",
+                Box::new(|fields| fields[2] = "zz".to_owned()),
+                "raíz del catálogo RNG ilegible",
+            ),
+            (
+                "una raíz hexadecimal de 31 bytes",
+                Box::new(|fields| {
+                    fields[2].truncate(62);
+                }),
+                "raíz del catálogo RNG ilegible",
+            ),
+            (
+                "un material que no es el de sus componentes",
+                Box::new(move |fields| flip(&mut fields[3])),
+                "el material rederivado",
+            ),
+            (
+                "una subsemilla que no es la del material",
+                Box::new(move |fields| flip(&mut fields[4])),
+                "la subsemilla rederivada",
+            ),
+            (
+                "una palabra que no es hexadecimal",
+                Box::new(|fields| fields[6] = "no-es-hex".to_owned()),
+                "palabra del catálogo RNG ilegible",
+            ),
+            (
+                "una palabra que no es la que el ChaCha12 produce",
+                Box::new(move |fields| flip(&mut fields[7])),
+                "la palabra 2 de",
+            ),
+        ];
+        for (name, edit, expected) in cases {
+            let catalog = catalog_with_first_row_edited(edit);
+            assert_ne!(catalog, RNG_CATALOG_TSV, "«{name}» no cambió el catálogo");
+            let rejection = validate_frozen_rng_catalog(&catalog, F5_RNG_CATALOG_DECISIONS)
+                .err()
+                .unwrap_or_else(|| panic!("«{name}» pasó inadvertido"));
+            assert_eq!(rejection.cause(), F5OracleCause::Randomness, "{name}");
+            let detail = detail_of(&rejection);
+            assert!(
+                detail.contains(expected),
+                "«{name}» se rechazó por otra razón: {detail}"
+            );
+        }
+        // El número de decisiones se exige exacto en las dos direcciones: un
+        // catálogo recortado y uno ampliado se rechazan por su propio recuento.
+        for declared in [F5_RNG_CATALOG_DECISIONS - 1, F5_RNG_CATALOG_DECISIONS + 1] {
+            let rejection = validate_frozen_rng_catalog(RNG_CATALOG_TSV, declared)
+                .expect_err("un recuento de decisiones que no es el del catálogo");
+            assert!(
+                detail_of(&rejection).contains("el contrato fija"),
+                "{}",
+                detail_of(&rejection)
+            );
+        }
+    }
+
+    /// Los componentes de una fila de catálogo son pares `nombre=valor`: un par
+    /// sin `=` no es una fila legible.
+    ///
+    /// La comprobación pasa por `catalog_components`, la misma que lee las
+    /// filas del catálogo real, y se ejercita también a través de la validación
+    /// completa para que la prueba muera si esa validación dejara de llamarla.
+    #[test]
+    fn a_catalog_component_without_an_equals_sign_is_refused() {
+        let rejection = catalog_components("scenario_id=s;stage")
+            .expect_err("un componente sin `=` no es legible");
+        assert!(
+            detail_of(&rejection).contains("componente sin `=`"),
+            "{}",
+            detail_of(&rejection)
+        );
+        assert_eq!(
+            catalog_components("a=1;b=2").expect("dos pares legibles"),
+            vec![("a", "1".to_owned()), ("b", "2".to_owned())]
+        );
+        let catalog =
+            catalog_with_first_row_edited(|fields| fields[1] = "scenario_id;stage".to_owned());
+        let rejection = validate_frozen_rng_catalog(&catalog, F5_RNG_CATALOG_DECISIONS)
+            .expect_err("una fila con un componente sin `=`");
+        assert!(
+            detail_of(&rejection).contains("componente sin `=`"),
+            "{}",
+            detail_of(&rejection)
+        );
+    }
+
+    /// Un espectro sin bandas no tiene marginal objetivo que sortear.
+    #[test]
+    fn a_marginal_target_needs_at_least_one_spectrum_band() {
+        let oracle = SubseedOracle::new([7_u8; 32], "scenario-f5").expect("oráculo validado");
+        let band = F5DeclaredSpectrumBand {
+            alt_af_min: 0.25,
+            alt_af_max: 0.75,
+            weight: 1.0,
+        };
+        oracle
+            .target_alt_af("P1", "BLK_a", "SITE_a", &[band])
+            .expect("una banda basta");
+        let rejection = oracle
+            .target_alt_af("P1", "BLK_a", "SITE_a", &[])
+            .expect_err("sin bandas no hay marginal que sortear");
+        assert!(
+            detail_of(&rejection).contains("no trae ninguna banda"),
+            "{}",
+            detail_of(&rejection)
+        );
+    }
+
+    /// Una lambda fuera del dominio del muestreador de recuentos no se sortea:
+    /// se rechaza en vez de pinzar un resultado inventado.
+    #[test]
+    fn a_haplotype_count_needs_a_lambda_the_sampler_admits() {
+        let oracle = SubseedOracle::new([7_u8; 32], "scenario-f5").expect("oráculo validado");
+        let with_lambda = |lambda: f64| F5DeclaredHaplotypeCountDistribution {
+            lambda,
+            minimum: 2,
+            maximum: 8,
+        };
+        oracle
+            .block_haplotype_count("P1", "BLK_a", with_lambda(3.0))
+            .expect("una lambda del dominio");
+        for lambda in [-1.0, f64::NAN, f64::INFINITY] {
+            let rejection = oracle
+                .block_haplotype_count("P1", "BLK_a", with_lambda(lambda))
+                .expect_err("una lambda fuera del dominio");
+            assert!(
+                detail_of(&rejection).contains("no admite el muestreador"),
+                "lambda={lambda}: {}",
+                detail_of(&rejection)
+            );
+        }
+    }
+
+    /// La auditoría DTC-049 con cifras internamente coherentes, para que cada
+    /// caso rompa una sola cosa.
+    fn audit_of(
+        keys: &[&str],
+        input: &[f64],
+        effective_keys: &[&str],
+        effective: &[f64],
+    ) -> Checked<()> {
+        let input_sum = neumaier_total(input.iter().copied());
+        let output_sum = neumaier_total(effective.iter().copied());
+        check_normalization(
+            F5NormalizationSet::HaplotypeWeights,
+            F5_PROFILE_NORMALIZATION_ALGORITHM,
+            F5_PROFILE_NORMALIZATION_TOLERANCE,
+            keys,
+            input,
+            input_sum,
+            (input_sum - 1.0).abs(),
+            effective_keys,
+            effective,
+            output_sum,
+            (output_sum - 1.0).abs(),
+        )
+    }
+
+    /// **La auditoría DTC-049, guardas de forma y de dominio.**
+    ///
+    /// Las seis cifras perturbadas ya morían; estas tres guardas miran otra
+    /// cosa: que haya valores de entrada, que la entrada se pueda normalizar
+    /// y que la salida conserve todas las claves. Cada caso deja coherentes
+    /// las cifras que no toca, de modo que solo su guarda puede cazarlo.
+    #[test]
+    fn the_normalization_audit_refuses_a_malformed_shape_by_its_own_reason() {
+        let keys = ["0", "1"];
+        audit_of(&keys, &[0.5, 0.5], &keys, &[0.5, 0.5]).expect("la auditoría íntegra se acepta");
+        let cases: [(&str, Checked<()>, &str); 5] = [
+            (
+                "sin valores de entrada",
+                audit_of(&[], &[], &[], &[]),
+                "no declara sus valores de entrada",
+            ),
+            (
+                "menos claves de entrada que valores",
+                audit_of(&["0"], &[0.5, 0.5], &keys, &[0.5, 0.5]),
+                "no declara sus valores de entrada",
+            ),
+            (
+                "una entrada que no suma uno dentro de la tolerancia",
+                audit_of(&keys, &[0.5, 0.25], &keys, &[2.0 / 3.0, 1.0 / 3.0]),
+                "no se normaliza bajo DTC-049",
+            ),
+            (
+                "una salida con una clave de menos",
+                audit_of(&keys, &[0.5, 0.5], &["0"], &[0.5, 0.5]),
+                "pierde o inventa claves",
+            ),
+            (
+                "una salida con un valor de menos",
+                audit_of(&keys, &[0.5, 0.5], &keys, &[0.5]),
+                "pierde o inventa claves",
+            ),
+        ];
+        for (name, outcome, expected) in cases {
+            let rejection = outcome
+                .err()
+                .unwrap_or_else(|| panic!("«{name}» pasó inadvertida"));
+            assert_eq!(rejection.cause(), F5OracleCause::Normalization, "{name}");
+            let detail = detail_of(&rejection);
+            assert!(
+                detail.contains(expected),
+                "«{name}» se rechazó por otra razón: {detail}"
+            );
+        }
+    }
+
+    /// **Los pesos de un bloque: cuántos rangos admite el perfil y qué suman.**
+    ///
+    /// Un bloque publica entre dos filas y tantas como pesos declara el perfil,
+    /// y el prefijo que se renormaliza tiene que sumar algo positivo y finito.
+    #[test]
+    fn the_block_weights_refuse_a_rank_count_and_a_prefix_the_profile_cannot_give() {
+        // Un prefijo válido se renormaliza y el vector completo se devuelve tal cual.
+        assert_eq!(
+            oracle_block_weights(&[0.5, 0.25, 0.25], 3).expect("el vector completo"),
+            vec![0.5, 0.25, 0.25]
+        );
+        let renormalized =
+            oracle_block_weights(&[0.5, 0.25, 0.25], 2).expect("un prefijo renormalizado");
+        assert_eq!(renormalized, vec![0.5 / 0.75, 0.25 / 0.75]);
+        let cases: [(&str, Checked<Vec<f64>>, &str); 4] = [
+            (
+                "un solo rango",
+                oracle_block_weights(&[0.5, 0.5], 1),
+                "publica 1 filas",
+            ),
+            (
+                "más rangos que pesos",
+                oracle_block_weights(&[0.5, 0.5], 3),
+                "publica 3 filas",
+            ),
+            (
+                "un prefijo que suma cero",
+                oracle_block_weights(&[0.0, 0.0, 1.0], 2),
+                "el prefijo de 2 pesos suma 0",
+            ),
+            (
+                "un prefijo que no es finito",
+                oracle_block_weights(&[f64::INFINITY, 0.5, 0.5], 2),
+                "el prefijo de 2 pesos suma",
+            ),
+        ];
+        for (name, outcome, expected) in cases {
+            let rejection = outcome
+                .err()
+                .unwrap_or_else(|| panic!("«{name}» pasó inadvertida"));
+            assert_eq!(rejection.cause(), F5OracleCause::Haplotype, "{name}");
+            let detail = detail_of(&rejection);
+            assert!(
+                detail.contains(expected),
+                "«{name}» se rechazó por otra razón: {detail}"
+            );
+        }
+    }
+
+    /// El catálogo de identidades con una fila F5 reescrita (`edit` recibe los
+    /// nueve campos de la primera) o con una fila F5 menos si `edit` es `None`.
+    type RowEditRef<'a> = Option<&'a dyn Fn(&mut Vec<String>)>;
+    fn id_catalog_with_first_f5_row(edit: RowEditRef<'_>) -> String {
+        let mut done = false;
+        let mut lines = Vec::new();
+        for line in ID_CATALOG_TSV.lines() {
+            if !done && line.starts_with("f5_") {
+                done = true;
+                if let Some(edit) = edit {
+                    let mut fields: Vec<String> = line.split('|').map(str::to_owned).collect();
+                    edit(&mut fields);
+                    lines.push(fields.join("|"));
+                }
+            } else {
+                lines.push(line.to_owned());
+            }
+        }
+        assert!(done, "el catálogo tiene alguna fila F5");
+        lines.join("\n") + "\n"
+    }
+
+    /// **La autovalidación del catálogo de identidades, guarda por guarda.**
+    ///
+    /// Cada rechazo recibe un catálogo dañado en exactamente el campo que vigila
+    /// y la prueba exige el motivo exacto, como con el catálogo RNG.
+    #[test]
+    fn the_id_catalog_check_refuses_each_damaged_field() {
+        validate_id_catalog_text(ID_CATALOG_TSV).expect("el catálogo íntegro se reproduce");
+        let flip = |field: &mut String| {
+            let first = field.remove(0);
+            field.insert(0, if first == '0' { '1' } else { '0' });
+        };
+        type RowEdit = Box<dyn Fn(&mut Vec<String>)>;
+        let cases: [(&str, RowEdit, &str); 6] = [
+            (
+                "una fila con ocho campos",
+                Box::new(|fields| {
+                    fields.pop();
+                }),
+                "no tiene 9 campos",
+            ),
+            (
+                "una raíz que no es hexadecimal",
+                Box::new(|fields| fields[5] = "zz".to_owned()),
+                "raíz del catálogo de IDs ilegible",
+            ),
+            (
+                "un material que no es el de sus componentes",
+                Box::new(move |fields| flip(&mut fields[6])),
+                "el material rederivado",
+            ),
+            (
+                "un digest que no es el del material",
+                Box::new(move |fields| flip(&mut fields[7])),
+                "el digest rederivado",
+            ),
+            (
+                "un identificador que no es el del digest",
+                Box::new(|fields| fields[8].push('X')),
+                "el identificador rederivado",
+            ),
+            (
+                "unos componentes sin `=`",
+                Box::new(|fields| fields[4] = "class;otra".to_owned()),
+                "componente sin `=`",
+            ),
+        ];
+        for (name, edit, expected) in cases {
+            let catalog = id_catalog_with_first_f5_row(Some(&*edit));
+            assert_ne!(catalog, ID_CATALOG_TSV, "«{name}» no cambió el catálogo");
+            let rejection = validate_id_catalog_text(&catalog)
+                .err()
+                .unwrap_or_else(|| panic!("«{name}» pasó inadvertido"));
+            assert_eq!(rejection.cause(), F5OracleCause::Randomness, "{name}");
+            assert!(
+                detail_of(&rejection).contains(expected),
+                "«{name}» se rechazó por otra razón: {}",
+                detail_of(&rejection)
+            );
+        }
+        let short = id_catalog_with_first_f5_row(None);
+        let rejection = validate_id_catalog_text(&short).expect_err("una clase F5 de menos");
+        assert!(
+            detail_of(&rejection).contains("declara 4 clases F5"),
+            "{}",
+            detail_of(&rejection)
+        );
+    }
 }

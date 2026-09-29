@@ -28,7 +28,7 @@ documenta mejor.
 
 | ID | Deuda | Gravedad | Detectada | Estado |
 |---|---|---|---|---|
-| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (23/09/2026) |
+| DT-001 | Dos tercios de las comprobaciones de los verificadores independientes no las ejercita ninguna prueba | **Grave** | 21/09/2026 | Abierta, muy reducida (29/09/2026) |
 | DT-002 | Dos pruebas ignoradas están vaciadas, no solo apagadas | Media | 21/09/2026 | Abierta |
 | DT-003 | Ocho pruebas ignoradas corresponden a contratos que ya no existen | Baja | 20/09/2026 | Abierta |
 | DT-004 | La puerta de Python no corre desde el 25/08/2026 | Media | 19/09/2026 | Abierta |
@@ -55,8 +55,8 @@ mediciones, hechas con el mismo método y con la misma regla de recuento:
 
 | Verificador | Comprobaciones | Nunca se disparaban (21/09) | Comprobaciones hoy | Nunca se disparan hoy |
 |---|---|---|---|---|
-| Oráculo de aceptación del paquete (`src/f5_oracle.rs`) | 365 | 252 | 365 | **168** |
-| Oráculo semántico del VCF (`src/vcf_semantic_validation.rs`) | 77 | 39 | 98 | **25** |
+| Oráculo de aceptación del paquete (`src/f5_oracle.rs`) | 365 | 252 | 365 | **52** |
+| Oráculo semántico del VCF (`src/vcf_semantic_validation.rs`) | 77 | 39 | 98 | **22** |
 | Auditoría de identidad y publicación (`src/f5_closure.rs`) | 42 | 11 | 42 | **5** |
 
 **La puerta solo mira estos tres módulos**, y conviene tenerlo presente al
@@ -90,11 +90,8 @@ Tres advertencias sobre la comparación, para que nadie la lea mal:
 
 En la auditoría de identidad, **todas** las comprobaciones que quedan sin
 disparar están documentadas en su propio código como inalcanzables, con su
-porqué. En el verificador del VCF lo están veintiuna de las veinticinco; las
-**cuatro** restantes llevan escrito que **no se ha demostrado que sean
-inalcanzables** y que quedan pendientes, que es más honrado que suponerlo: las
-dos del cálculo del genotipo esperado y dos del análisis de una secuencia
-FASTA.
+porqué. En el verificador del VCF, tras la medición del 29/09/2026, también
+todas las que quedan (22). Lo que queda del oráculo grande se detalla más abajo.
 
 ### La puerta
 
@@ -187,23 +184,64 @@ caza antes y por qué esa prueba tiene que ser unitaria.
 
 ### Lo que queda
 
-**168 comprobaciones del oráculo grande y 4 del verificador del VCF.** Las
-cuatro del VCF son las únicas de ese módulo de las que no se ha demostrado
-nada: la muestra sin copias en el contig, el alelo alternativo ausente del
-registro esperado, la identidad de secuencia que el analizador de cabeceras
-acepta y el constructor rechaza, y el fallo de construcción de una secuencia
-cuyas tres piezas son válidas.
+**Medición del 29/09/2026 (tras la revisión adversarial): 52 comprobaciones del oráculo grande (antes 168) y
+22 del verificador del VCF (antes 25), con el mismo número de comprobaciones en
+los dos, de modo que la mejora es real y no borra guardas.** Se añadieron 28
+pruebas (1523 pasan, 0 fallan, 11 ignoradas). Cada prueba nueva exige la causa
+tipada **y** un fragmento del detalle que solo escribe su guarda, y se verificó
+**mutando la guarda sobre una copia** con huella SHA antes y después: 109
+comprobaciones del oráculo (ninguna sobrevivió salvo la que se dice abajo), 20
+mutaciones adicionales sobre disyunciones sueltas de condiciones compuestas y
+las 3 del VCF. Al comprobarlo aparecieron dos huecos que se cerraron: una
+disyunción del orden del layout que otra cubría por solapamiento, y las tres
+comprobaciones de brazos de `match` que el mutador automático no sabía aplicar.
 
-De las del oráculo grande, 21 son autocomprobaciones
-contra catálogos compilados —inalcanzables a propósito, y las veintiuna
-muertas— y las 147 restantes se
-reparten sobre todo entre la evaluación del desequilibrio de ligamiento (13),
-la auditoría del paquete fallido (11), la lectura del reparto físico (10), el
-recorrido de fundadores y copias, la lectura de haplotipos y la auditoría del
-muestreo.
+**Lo que sigue sin dispararse, y por qué (52 + 22):**
+
+- **Oráculo grande, 52.** 51 están documentadas en su código como
+  inalcanzables, cada una con su porqué: conversiones a `u32`/`usize` que no
+  fallan, claves que un `exact_object` anterior ya exigió, implicaciones entre
+  comprobaciones que corren antes, errores de entrada y salida que una prueba no
+  puede provocar de forma determinista, y la construcción de una auditoría
+  DTC-049 que ningún llamador externo puede fabricar. Una, la de
+  `TruthCopies::next_copy` sobre un fichero de copias sin salto de línea final, la
+  **dispara** una prueba pero está **sombreada**: el recuento MAN-70 rechaza el
+  mismo defecto con el mismo texto después, y mutada sobrevive.
+- **Corregido por la revisión.** La guarda «una copia aparece dos veces» se
+  había declarado inalcanzable con un razonamiento falso: la clave del orden
+  tiene cinco campos y la identidad del mapa cuatro, sin subpoblación; dos
+  subpoblaciones que compartan identificador de individuo la alcanzan. Ahora
+  tiene prueba. También se cubrieron el bloque que empieza en la coordenada cero
+  y el orden estricto de copias (`>=` frente a `>`), y `validate_id_catalog` se
+  parametrizó (`validate_id_catalog_text`), con lo que sus seis rechazos tienen
+  prueba.
+- **Redundantes, dichas en el código:** `locus.block_id != placed.block_id` (un
+  genotipo de otro bloque abre grupo nuevo) y `!value.is_finite()` en el F
+  efectivo (`contains` ya es falso para NaN e infinitos).
+- **Aviso:** la mutación «catálogo RNG ajeno» fija el literal de la versión 2 y
+  solo discrimina con fixtures sin distribución de recuentos.
+- **Verificador del VCF, 22.** Las 21 que ya estaban documentadas como
+  inalcanzables, más la construcción final de una secuencia FASTA, que se
+  demostró inalcanzable: `ReferenceSequence::new` solo rechaza que la identidad
+  difiera del texto de la cabecera, y la identidad sale de ese mismo texto. Se
+  ejercitaron las otras tres que llevaban «no se ha demostrado»: la identidad de
+  secuencia que el analizador de cabeceras acepta y el tipo de identidad rechaza
+  (`chr#1`), y las dos de `expected_gt` con una prueba unitaria sobre un registro
+  armado a mano. De estas dos, el alelo ausente es inalcanzable desde
+  `expected_records`, y la muestra sin copias en el contig **sigue sin
+  demostrarse inalcanzable de extremo a extremo**.
+- **Disyunciones no aisladas**, dicho para que nadie las crea cubiertas: en
+  la comprobación del locus recontado contra `f5-sites.tsv` (6058) no se aisló la
+  del sitio, la de la secuencia ni la del censo (esta última es inalcanzable: la
+  cabecera ya se cruzó con el censo declarado); en el espectro, la de que el
+  mínimo esté en [0,1] la implica la clave de la auditoría, y la de que el valor
+  sea finito la implica la pertenencia al intervalo.
 
 Sigue sin medirse lo mismo que entonces: las fases 3 y 4 al completo, la
-admisión del productor y el contrato de la primera versión de la verdad.
+admisión del productor, el contrato de la primera versión de la verdad, y
+`src/results.rs` y `src/event_manifest.rs`.
+
+---
 
 ## DT-002. Dos pruebas ignoradas están vaciadas, no solo apagadas
 

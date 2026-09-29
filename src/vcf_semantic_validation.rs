@@ -1358,12 +1358,19 @@ fn bases_not_materialized() -> VcfSemanticValidationError {
 
 /// El genotipo que la verdad exige para una muestra en un registro.
 ///
-/// Sus dos rechazos —la muestra sin copias en el contig y el alelo alternativo
-/// que no aparece entre los del registro— **no los ejercita ninguna prueba y no
-/// se ha demostrado que sean inalcanzables**. Los dos exigirían una verdad en
-/// la que un individuo no tuviera copias en una secuencia que otro sí publica,
-/// o en la que un portador llevara un alelo que la composición no ha recogido,
-/// y no he construido ninguna de las dos. Queda pendiente.
+/// Sus dos rechazos los ejercita una prueba unitaria que llama a esta función
+/// con un registro armado a mano (`the_expected_genotype_refuses_a_sample_without_copies_and_an_unknown_alternate`),
+/// y de extremo a extremo se sabe esto de cada uno:
+///
+/// - **El alelo alternativo que no aparece entre los del registro es
+///   inalcanzable desde `expected_records`**, que es quien construye el
+///   registro: `alternates` es el conjunto de los ALT de cada copia, y cada
+///   tupla de `copies` lleva el ALT de su copia o vacío, de modo que todo ALT no
+///   vacío está en `alternates`.
+/// - **La muestra sin copias en el contig sigue sin demostrarse inalcanzable**:
+///   exigiría una verdad en la que un individuo no publicara copias en una
+///   secuencia donde otro sí las publica, y ninguna verdad de la batería lo
+///   hace. No se ha construido una de extremo a extremo.
 fn expected_gt(
     record: &ExpectedRecord,
     sample: &str,
@@ -1530,13 +1537,14 @@ fn read_oracle_fasta(
 
 /// Traduce un registro FASTA leído a una secuencia de referencia.
 ///
-/// De sus cuatro rechazos, la batería ejercita dos —la cabecera ilegible y las
-/// bases que no son ADN—. Los otros dos, el de la identidad de secuencia y el
-/// de la construcción final, **no los ejercita ninguna prueba y no se ha
-/// demostrado que sean inalcanzables**: no he conseguido una cabecera que el
-/// analizador acepte y cuya identidad rechace después, ni una secuencia cuyas
-/// tres piezas sean válidas y cuya construcción falle. Queda pendiente, y se
-/// dice aquí en vez de fingir que están cubiertos.
+/// De sus cuatro rechazos, tres se ejercitan: la cabecera ilegible, las bases
+/// que no son ADN y la identidad de secuencia que el analizador de cabeceras
+/// acepta y `SequenceId::parse` rechaza (`chr#1`, o más de 64 caracteres; la
+/// prueba unitaria `a_fasta_header_the_parser_accepts_but_the_identity_type_refuses_is_rejected`).
+/// El cuarto, la construcción final, es **inalcanzable**: el único error de
+/// `ReferenceSequence::new` es que la identidad difiera del texto de la
+/// cabecera, y la identidad acaba de salir de `SequenceId::parse` sobre ese
+/// mismo texto, que la conserva tal cual.
 fn oracular_sequence(
     header: &str,
     bases: Vec<u8>,
@@ -1548,6 +1556,10 @@ fn oracular_sequence(
         .map_err(|error| fasta_reject(format!("{error:?}")))?;
     let dna =
         DnaSequence::try_from_bytes(&bases).map_err(|error| fasta_reject(format!("{error:?}")))?;
+    // Inalcanzable: `ReferenceSequence::new` solo rechaza que `id` no sea el texto
+    // de la cabecera, y `id` acaba de salir de `SequenceId::parse` sobre ese
+    // texto, que conserva tal cual. Se conserva porque esta función no se fía de
+    // lo que haga `new` mañana.
     ReferenceSequence::new(id, fasta, SequenceClass::Chromosome, &dna)
         .map_err(|error| fasta_reject(format!("{error:?}")))
 }
@@ -1572,8 +1584,9 @@ fn vcf_error<T>(line: u64, detail: impl Into<String>) -> Result<T, VcfSemanticVa
 mod tests {
     use super::{
         ExpectedRecord, OraclePath, OraclePiece, OracleSpan, VcfSemanticValidationError,
-        expected_records, merge_oracle_spans, oracle_normalize_window, oracle_path,
-        validate_oracle_phases, validate_reference_allele, validate_tandem_repeat_info,
+        expected_gt, expected_records, merge_oracle_spans, oracle_normalize_window, oracle_path,
+        oracular_sequence, validate_oracle_phases, validate_reference_allele,
+        validate_tandem_repeat_info,
     };
     use crate::identity::{ReferenceId, SequenceId};
     use crate::reference::{
@@ -2157,5 +2170,89 @@ mod tests {
             ]),
             [super::OracleSpan { start: 2, end: 3 }]
         );
+    }
+
+    /// **El genotipo esperado de una muestra: qué exige y qué rechaza.**
+    ///
+    /// *Quién caza antes, y por qué esta prueba es unitaria.* `expected_gt` solo
+    /// la llama la comparación de cada columna de muestra, con un
+    /// `ExpectedRecord` que construye `expected_records`, y esa construcción
+    /// hace que sus dos rechazos no se alcancen desde un VCF:
+    ///
+    /// - **El ALT ausente del registro.** `alternates` es el conjunto de los ALT
+    ///   de `per_copy`, y cada tupla de `copies` lleva exactamente el ALT que
+    ///   `per_copy` da a su copia, o vacío. Todo ALT no vacío de `copies` está
+    ///   por tanto en `alternates`, y `position` nunca da `None`. Es
+    ///   **inalcanzable desde `expected_records`**: solo un registro armado a
+    ///   mano, como el de aquí, lo dispara.
+    /// - **La muestra sin copias en el contig.** Un individuo que no publicara
+    ///   ninguna copia en una secuencia donde otro sí las publica no lo
+    ///   construye ninguna verdad de la batería. Queda sin demostrarse que sea
+    ///   inalcanzable de extremo a extremo; aquí se ejercita el rechazo mismo.
+    ///
+    /// *Qué hace que pueda fallar:* el caso íntegro fija el genotipo que se
+    /// acepta —una guarda que rechazara todo pasaría el resto—, y cada rechazo
+    /// exige su motivo exacto.
+    #[test]
+    fn the_expected_genotype_refuses_a_sample_without_copies_and_an_unknown_alternate() {
+        let record = |alternate_of_second_copy: &str| ExpectedRecord {
+            reference: "A".to_owned(),
+            alternates: vec!["T".to_owned()],
+            gps_cases: Vec::new(),
+            copies: BTreeMap::from([(
+                "IND_01".to_owned(),
+                vec![
+                    (0, identity(0), String::new()),
+                    (1, identity(1), alternate_of_second_copy.to_owned()),
+                ],
+            )]),
+            alternate_repeats: vec![Vec::new()],
+        };
+        assert_eq!(
+            expected_gt(&record("T"), "IND_01").expect("un genotipo de dos copias"),
+            "0|1"
+        );
+        let error =
+            expected_gt(&record("T"), "IND_02").expect_err("una muestra sin copias en el contig");
+        assert_eq!(
+            detail(&error),
+            "muestra VCF no tiene copias truth para el contig"
+        );
+        let error = expected_gt(&record("G"), "IND_01")
+            .expect_err("un ALT que el registro esperado no tiene");
+        assert_eq!(
+            detail(&error),
+            "ALT truth no aparece en el registro esperado"
+        );
+    }
+
+    /// **La identidad de una secuencia FASTA que el analizador de cabeceras
+    /// acepta y el tipo de identidad rechaza.**
+    ///
+    /// `FastaHeader::parse` toma como identidad cualquier texto sin espacios;
+    /// `SequenceId::parse` exige de 1 a 64 caracteres ASCII, alfanumérico el
+    /// primero y `.`, `_` o `-` después. Entre los dos cabe, por ejemplo,
+    /// `chr#1`, y esa diferencia es lo que esta guarda vigila. La medición
+    /// anterior no había encontrado una cabecera así: basta una con un carácter
+    /// fuera del alfabeto de identidades.
+    ///
+    /// El rechazo lleva el diagnóstico de identidad (`GPS-DOMAIN-001`), que es
+    /// lo que la distingue de los otros tres rechazos de esta función: cabecera
+    /// ilegible y bases que no son ADN.
+    #[test]
+    fn a_fasta_header_the_parser_accepts_but_the_identity_type_refuses_is_rejected() {
+        oracular_sequence("chr1 descripción", b"ACGT".to_vec(), "REF_main")
+            .expect("una cabecera con identidad válida se acepta");
+        for header in ["chr#1", "-chr", &"c".repeat(65)] {
+            let error = oracular_sequence(header, b"ACGT".to_vec(), "REF_main")
+                .expect_err("una identidad fuera del alfabeto o del largo admitido");
+            let VcfSemanticValidationError::Fasta { detail } = error else {
+                panic!("se esperaba un rechazo del FASTA");
+            };
+            assert!(
+                detail.contains("GPS-DOMAIN-001"),
+                "«{header}» se rechazó por otra razón: {detail}"
+            );
+        }
     }
 }
