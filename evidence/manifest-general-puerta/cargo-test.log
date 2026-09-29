@@ -1,0 +1,2365 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running unittests src/lib.rs (target/debug/deps/genome_population_simulator-18ec6db111841b0f)
+
+running 321 tests
+test application::profile_resource_tests::human_1000g_spectrum_matches_its_versioned_resource_literals ... ok
+test clonal_stutter::tests::a_declared_per_cycle_probability_prevails_and_is_not_modulated ... ok
+test clonal_stutter::tests::a_declared_substitution_wins_and_is_published_as_the_users ... ok
+test clonal_stutter::tests::the_composition_closes_at_every_tract_length_not_only_at_the_reference ... ok
+test clonal_stutter::tests::a_with_pcr_fraction_that_does_not_exceed_the_other_gives_zero ... ok
+test clonal_stutter::tests::composing_the_two_parts_returns_the_measured_with_pcr_fraction ... ok
+test clonal_stutter::tests::adding_the_two_columns_instead_of_subtracting_them_overshoots_the_measurement ... ok
+test clonal_stutter::tests::the_divergence_weights_are_geometric_and_clamped_at_the_last_cycle ... ok
+test clonal_stutter::tests::the_per_cycle_probabilities_match_the_hand_computation_to_three_figures ... ok
+test coordinates::tests::accepts_both_interbase_boundaries_but_not_an_outside_point ... ok
+test coordinates::tests::base_one_positions_convert_at_both_sequence_extremes ... ok
+test coordinates::tests::converts_first_base_and_complete_sequence_exactly ... ok
+test coordinates::tests::insertion_anchor_requires_a_real_preceding_and_following_base ... ok
+test coordinates::tests::internal_deletion_leaves_bases_at_both_sequence_extremes ... ok
+test coordinates::tests::rejects_empty_out_of_bounds_and_zero_based_one_intervals ... ok
+test coordinates::tests::positions_from_different_spaces_cannot_form_an_interval ... ok
+test exact_decimal::tests::exact_boundary_does_not_round_through_f64 ... ok
+test execution::tests::controlled_failure_after_event_discards_derived_references_with_failed_reductions ... ignored, F4.5.2 sustituye la ruta SE histórica; la vía PE se cubre en f3_event_assembly
+test execution::tests::failed_independent_fastq_validation_discards_fastq_before_failed_event_manifest ... ignored, F4.5.2 elimina la validación SE histórica; la publicación PE valida ambos mates
+test exact_decimal::tests::equivalent_literals_produce_the_same_exact_target ... ok
+test exact_decimal::tests::supports_precision_beyond_fixed_width_integers ... ok
+test exact_decimal::tests::floors_once_after_the_exact_product ... ok
+test exact_decimal::tests::enforces_toml_decimal_grammar_before_removing_separators ... ok
+test application::bounded_toml_tests::bounded_toml_reader_observes_only_the_excess_byte_and_never_materializes_it ... ok
+test f5_admission::tests::a_receipt_requires_the_contractual_role_order_and_the_closed_phase_order ... ok
+test diagnostics::tests::versioned_catalog_validation_does_not_backport_f5_diagnostics ... ok
+test exact_decimal::tests::exact_floor_product_does_not_overflow_before_division ... ok
+test f5_admission::tests::injected_buffer_reservation_failure_is_atomic_and_terminal ... ok
+test exact_decimal::tests::rejects_endpoints_negative_and_values_above_hundred ... ok
+test f5_admission::tests::a_declared_identity_that_contradicts_the_observed_bytes_is_refused ... ok
+test f5_admission::tests::only_the_final_formula_can_seal_and_it_seals_once ... ok
+test f5_admission::tests::input_headroom_uses_live_retention_not_the_historical_peak ... ok
+test f5_admission::tests::restoring_a_checkpoint_also_reverts_the_live_phase_peak ... ok
+test f5_admission::tests::zero_input_limit_reports_the_limiting_divided_dimension_and_is_terminal ... ok
+test f5_founders::tests::a_broken_diploid_pairing_is_rejected_instead_of_counted ... ok
+test f5_admission::tests::physical_read_reservation_precedes_io_and_restores_unused_eof_capacity ... ok
+test f5_founders::tests::a_founder_in_two_subpopulations_is_a_duplicated_membership ... ok
+test f5_founders::tests::a_founder_repeated_inside_one_roster_is_also_rejected ... ok
+test f5_founders::tests::a_group_without_a_boundary_never_opens_its_scope ... ok
+test f5_founders::tests::a_null_expected_heterozygosity_is_not_applicable ... ok
+test f5_founders::tests::a_null_weight_is_unreachable_by_the_prefix_walk ... ok
+test f5_founders::tests::a_null_weight_keeps_a_zero_quota ... ok
+test f5_founders::tests::a_single_group_can_span_the_whole_residual ... ok
+test f5_founders::tests::an_empty_unit_is_not_applicable ... ok
+test f5_founders::tests::an_invalid_weight_is_rejected_instead_of_sampled ... ok
+test f5_founders::tests::declaring_f_outside_a_diploid_is_an_error ... ok
+test f5_founders::tests::disjoint_rosters_have_no_membership_conflict ... ok
+test f5_founders::tests::groups_included_or_excluded_in_full_leave_no_boundary ... ok
+test f5_founders::tests::the_boundary_group_is_rejected_when_only_one_of_its_two_states_fits ... ok
+test f5_founders::tests::only_the_second_copy_of_the_same_individual_can_reuse_a_row ... ok
+test f5_founders::tests::the_diploid_f_resolves_its_three_consumption_regimes ... ok
+test f5_founders::tests::the_effective_f_of_each_resolution_is_its_declared_value ... ok
+test f5_founders::tests::only_the_second_copy_index_can_inherit_a_row ... ok
+test f5_founders::tests::the_extreme_f_values_never_open_the_f_scope ... ok
+test f5_founders::tests::the_f_bernoulli_follows_the_catalogue_vector ... ok
+test f5_founders::tests::the_f_scope_is_consumed_before_the_second_copy_sample ... ok
+test f5_founders::tests::the_feasibility_check_rejects_without_any_random_source ... ok
+test f5_founders::tests::the_first_copy_never_opens_the_f_scope ... ok
+test f5_founders::tests::the_prefix_table_costs_at_most_a_logarithm_per_copy ... ok
+test f5_founders::tests::the_prefix_walk_consumes_one_word_per_copy ... ok
+test f5_founders::tests::the_prefix_walk_switches_rank_at_the_exact_threshold ... ok
+test f5_founders::tests::the_realized_f_matches_its_rational_oracle ... ok
+test f5_founders::tests::zero_copies_are_an_internal_invariant ... ok
+test f5_haplotypes::tests::a_fixed_target_builds_a_constant_column_without_touching_the_source ... ok
+test f5_founders::tests::the_prefix_table_agrees_with_the_sequential_walk ... ok
+test f5_haplotypes::tests::a_target_above_the_total_weight_takes_every_row ... ok
+test f5_haplotypes::tests::the_bit_matrix_packs_the_canonical_dtc_089_bytes ... ok
+test f5_haplotypes::tests::non_uniform_weights_match_the_integer_oracle ... ok
+test f5_haplotypes::tests::a_variable_column_without_an_open_scope_is_refused ... ok
+test f5_haplotypes::tests::an_exact_tie_keeps_the_previous_prefix ... ok
+test f5_haplotypes::tests::a_variable_column_consumes_exactly_h_minus_one_bounded_integers ... ok
+test f5_haplotypes::tests::initial_column_and_polarity_reproduce_their_published_catalog_vectors ... ok
+test f5_haplotypes::tests::the_first_site_is_positive_without_rng_and_the_rest_draw_one_u53 ... ok
+test f5_haplotypes::tests::the_marginal_bound_is_the_largest_weight ... ok
+test f5_haplotypes::tests::duplicate_rows_count_every_repetition_without_merging_them ... ok
+test f5_founders::tests::the_largest_remainder_split_matches_the_integer_oracle ... ok
+test f5_layout::tests::a_failure_before_the_first_attempt_publishes_no_attempts ... ok
+test f5_haplotypes::tests::the_prefix_walk_is_compensated_and_a_naive_sum_would_choose_another_prefix ... ok
+test f5_layout::tests::a_failure_inside_the_attempt_loop_publishes_the_attempts_it_consumed ... ok
+test f5_haplotypes::tests::uniform_weights_match_the_integer_oracle_over_permutation_and_prefix ... ok
+test f5_layout::tests::adjacent_and_fragmented_tracts_never_overlap_and_preserve_attempt_invariance ... ok
+test f5_layout::tests::conditioned_lengths_have_exact_sum_and_final_residual ... ok
+test f5_layout::tests::block_count_mode_is_stochastic_and_has_no_target_sum ... ok
+test f5_layout::tests::distribution_rejects_non_probability_or_discontinuous_weights ... ok
+test f5_layout::tests::failed_length_vector_reservation_is_a_resource_failure ... ok
+test f5_layout::tests::feasibility_oracle_uses_exact_integer_bounds_and_rejects_overflow ... ok
+test f5_layout::tests::gap_distribution_accepts_disjoint_support_without_post_preflight_domain_error ... ok
+test f5_layout::tests::literal_integer_categorical_has_frozen_u53_and_neumaier_vector ... ok
+test f5_layout::tests::exhausted_layout_keeps_the_normative_best_layout_value_without_text_parsing ... ok
+test f5_layout::tests::conditioned_sampling_restricts_early_values_to_a_feasible_residual ... ok
+test f5_layout::tests::fewer_than_two_sites_discards_the_complete_layout_and_reports_exhaustion ... ok
+test f5_layout::tests::last_tract_winner_uses_the_two_preflighted_tract_queries ... ok
+test f5_layout::tests::post_preflight_numeric_failure_is_typed_f5_internal_with_scenario ... ok
+test f5_layout::tests::prefix_resolution_is_uniform_over_all_tract_starts_not_over_tracts ... ok
+test f5_ld::tests::a_fixed_column_is_not_evaluable_and_never_r_squared_zero ... ok
+test f5_ld::tests::a_marginal_above_one_is_not_evaluable_instead_of_aborting ... ok
+test f5_ld::tests::a_published_column_must_match_its_recomputation_bit_for_bit ... ok
+test f5_layout::tests::physical_layout_uses_preflight_tracts_and_emits_canonical_blocks_sites_and_ids ... ok
+test f5_haplotypes::tests::the_column_cost_grows_linearly_in_h_and_never_enumerates_subsets ... ok
+test f5_layout::tests::site_bound_is_enforced_even_when_preflight_input_is_internally_inconsistent ... ok
+test f5_layout::tests::retries_are_transactional_and_can_succeed_after_a_failed_attempt ... ok
+test f5_ld::tests::an_exact_rational_oracle_reproduces_every_four_by_two_matrix ... ok
+test f5_ld::tests::coupling_repulsion_and_independence_have_the_expected_d_and_r_squared ... ok
+test f5_ld::tests::perfect_coupling_never_publishes_r_squared_above_one ... ok
+test f5_ld::tests::the_bin_tolerance_is_inclusive_at_the_exact_boundary ... ok
+test f5_ld::tests::the_sign_rule_is_strict_and_rejects_zero ... ok
+test f5_ld::tests::the_shape_errors_name_their_cause ... ok
+test f5_marginals::tests::a_single_row_never_consumes_the_row_uniform ... ok
+test f5_marginals::tests::a_degenerate_interval_never_consumes_the_value_uniform ... ok
+test f5_marginals::tests::row_choice_matches_an_exact_integer_oracle_over_every_boundary ... ok
+test f5_ld::tests::the_compensated_sum_differs_from_a_naive_one_with_non_dyadic_weights ... ok
+test f5_marginals::tests::spectrum_rejects_rows_outside_the_normative_domain ... ok
+test f5_marginals::tests::every_draw_stays_inside_its_row_and_inside_zero_one ... ok
+test f5_marginals::tests::the_compensated_sum_differs_from_the_naive_one_with_inexact_weights ... ok
+test f5_marginals::tests::unnormalized_weights_are_rejected ... ok
+test f5_marginals::tests::the_value_uniform_is_the_literal_dtc_089_affine_map ... ok
+test f5_marginals::tests::the_rule_compares_u_with_the_prefix_without_rescaling_by_the_total ... ok
+test f5_oracle::guard_tests::a_catalog_component_without_an_equals_sign_is_refused ... ok
+test f5_oracle::guard_tests::the_block_weights_refuse_a_rank_count_and_a_prefix_the_profile_cannot_give ... ok
+test f5_ld::tests::the_exact_rational_oracle_also_covers_non_uniform_weights ... ok
+test f5_layout::tests::fragmented_full_layout_accounts_for_interior_last_residues_and_retry ... ok
+test f5_marginals::tests::zero_and_one_survive_the_continuous_draw ... ok
+test f5_oracle::tests::the_conditioned_hypergeometric_is_a_distribution ... ok
+test f5_oracle::tests::the_diploid_f_model_spans_its_extremes ... ok
+test f5_oracle::guard_tests::the_normalization_audit_refuses_a_malformed_shape_by_its_own_reason ... ok
+test f5_oracle::tests::every_perturbed_dtc_049_figure_is_rejected ... ok
+test f5_oracle::guard_tests::a_marginal_target_needs_at_least_one_spectrum_band ... ok
+test f5_oracle::tests::the_realized_f_reproduces_three_exact_rational_cases ... ok
+test f5_oracle::tests::the_rejection_sampling_bound_is_the_one_dtc_089_fixes ... ok
+test f5_oracle::tests::the_identity_oracle_reproduces_the_frozen_block_identifier ... ok
+test f5_oracle::guard_tests::a_haplotype_count_needs_a_lambda_the_sampler_admits ... ok
+test execution::tests::invalid_effective_document_is_removed_before_failed_fallback_publication ... ok
+test f5_oracle::guard_tests::the_id_catalog_check_refuses_each_damaged_field ... ok
+test f5_oracle::tests::the_subseed_oracle_draws_the_frozen_alternate_base ... ok
+test f5_oracle::tests::the_subseed_oracle_draws_the_frozen_polarity ... ok
+test f5_oracle::tests::the_oracle_reproduces_the_two_frozen_catalogs ... ok
+test f5_profile::tests::each_population_ld_range_must_end_at_lmax_minus_one ... ok
+test f5_oracle::guard_tests::the_frozen_rng_catalog_check_refuses_each_damaged_field ... ok
+test f5_profile::tests::a_v2_profile_carries_the_haplotype_count_distribution ... ok
+test execution::tests::physical_resource_failure_marks_reduction_failed_without_partial_artifacts ... ok
+test execution::tests::vcf_index_io_failure_publishes_only_the_controlled_failed_result ... ok
+test f5_layout::tests::production_v9_instrumentation_covers_fragmentation_interior_last_residues_and_retry ... ok
+test f5_profile::tests::first_table_rejection_does_not_open_a_later_table ... ok
+test f5_profile::tests::preserves_the_typed_dtc_049_audit_before_and_after_normalization ... ok
+test f5_profile::tests::profile_budget_is_exact_sequential_and_minus_one_stops_before_tables ... ok
+test f5_profile::tests::profile_identity_contract_uses_the_six_ordered_observations ... ok
+test f5_profile::tests::reads_the_single_valid_canonical_profile_corpus ... ok
+test f5_publication::tests::a_cause_outside_the_closed_catalogue_is_published_as_the_internal_code ... ok
+test f5_profile::tests::the_weight_table_must_have_exactly_h_max_rows ... ok
+test f5_profile::tests::tsv_dominant_memory_limit_is_exact_and_minus_one_with_live_retention ... ok
+test f5_profile::tests::normalization_audit_retention_is_charged_before_allocation ... ok
+test f5_profile::tests::metadata_and_table_oversize_are_rejected_by_the_derived_bounds ... ok
+test f5_publication::tests::an_artifact_the_manifest_does_not_link_blocks_the_closing_gate ... ok
+test f5_search::tests::a_divergence_is_attributable_only_at_the_exact_boundary ... ok
+test f5_profile::tests::known_later_tsv_transient_is_reserved_before_opening_the_first_table ... ok
+test f5_search::tests::a_proposal_consumes_four_bounded_integers_in_the_contract_order ... ok
+test f5_search::tests::a_proposal_orders_each_pair_after_incrementing ... ok
+test f5_profile::tests::the_metadata_version_decides_whether_the_distribution_may_appear ... ok
+test f5_search::tests::canonical_cmp_agrees_with_the_materialised_encoding ... ok
+test f5_search::tests::no_proposal_can_name_the_same_row_or_the_same_site_twice ... ok
+test f5_search::tests::only_the_two_crossed_configurations_are_candidates ... ok
+test f5_search::tests::termination_needs_validity_and_every_tolerance ... ok
+test f5_search::tests::pair_index_enumerates_the_upper_triangle_without_collisions ... ok
+test f5_search::tests::the_duplicate_index_contrasts_bytes_when_hashes_collide ... ok
+test f5_search::tests::the_divergence_guard_reports_what_no_boundary_explains ... ok
+test f5_search::tests::the_duplicate_index_matches_the_direct_count_after_every_swap ... ok
+test f5_search::tests::the_last_tiebreak_is_the_smallest_attempt_index ... ok
+test f5_search::tests::the_matrix_bytes_tiebreak_matches_the_materialised_encoding ... ok
+test f5_search::tests::the_seventh_field_decides_and_a_tie_is_never_accepted ... ok
+test f5_search::tests::the_selection_orders_matrix_bytes_and_not_their_digest ... ok
+test f5_search::tests::the_swap_is_its_own_inverse_and_touches_four_cells ... ok
+test f5_profile::tests::each_tsv_excess_is_an_identity_rejection_before_the_next_open ... ok
+test f5_search::tests::the_tuple_accepts_only_a_strict_improvement ... ok
+test f5_search::tests::the_swap_scope_depends_on_all_four_components ... ok
+test fastq_output::tests::an_abandoned_paired_stream_publishes_nothing ... ok
+test fastq_validation::final_header_tests::final_headers_require_gps_identity_and_matching_pair_components ... ok
+test identity::f5_collision_tests::distinct_f5_causes_reject_a_forced_digest_collision ... ok
+test identity::shared_text_tests::a_derived_instance_is_registered_by_its_digest_and_still_detects_a_collision ... ok
+test identity::shared_text_tests::a_provided_identifier_keeps_its_text ... ok
+test identity::shared_text_tests::a_provided_identifier_with_the_derived_shape_collides_with_the_derivation ... ok
+test identity::shared_text_tests::only_a_canonical_text_decodes_to_its_digest ... ok
+test fastq_output::tests::paired_publication_rolls_back_on_injected_r2_or_joint_validation_failure ... ok
+test population_snvs::profile_resource_tests::harris_profile_weights_read_by_rust_match_the_independent_versioned_resource ... ok
+test identity::shared_text_tests::a_cloned_identity_shares_its_text ... ok
+test f5_publication::tests::an_intact_synthetic_package_reaches_its_destination ... ok
+test fastq_output::tests::workspace_rejects_invalid_fastq_and_removes_its_temporary_file ... ok
+test f5_publication::tests::publication_revalidates_the_f5_package_immediately_before_the_rename ... ok
+test fastq_output::tests::temporary_fastq_validation_rejects_each_contract_violation ... ok
+test publication::tests::an_open_stream_reserves_its_name_and_leaves_no_temporary_when_abandoned ... ok
+test publication::tests::a_root_document_claims_its_name_and_never_enters_the_catalog ... ok
+test publication::tests::publication_revalidates_event_manifests_immediately_before_rename ... ignored, F4.1 retira la publicación FASTQ SE; F4.2/F4.5 cubrirán la pareja publicada
+test publication::tests::unsupported_no_clobber_rename_maps_to_gps_io_004_and_exit_five ... ok
+test publication::tests::crash_after_payload_rename_never_exposes_incomplete_in_final_tree ... ok
+test publication::tests::incomplete_marker_name_is_reserved_outside_the_payload ... ok
+test randomness::tests::categorical_uses_neumaier_total_for_adversarial_canonical_weights ... ok
+test randomness::tests::f4_primitives_follow_dtc088_values_bounds_and_consumption ... ok
+test f5_profile::tests::the_declared_interval_and_lambda_are_bounded ... ok
+test f5_profile::tests::excessive_tsv_columns_use_a_fixed_field_array_under_a_reduced_limit ... ok
+test randomness::tests::f5_primitives_follow_dtc089_rejection_consumption_and_canonical_bytes ... ok
+test randomness::tests::poisson_frozen_boundary_vectors_have_exact_output_and_consumption ... ok
+test randomness::tests::ptrs_ordinary_rejection_then_acceptance_consumes_four_words ... ok
+test randomness::tests::frozen_rng_utility_vectors_cover_values_rejection_and_consumption ... ok
+test randomness::tests::ptrs_negative_candidate_is_rejected_and_retried_instead_of_failing ... ok
+test publication::tests::publication_rereads_and_rejects_invalid_effective_config ... ok
+test publication::tests::discarding_all_artifacts_empties_the_catalog_and_the_tree ... ok
+test reference::tests::owned_dna_constructor_normalizes_in_place_and_counts_unknown_bases ... ok
+test publication::tests::publication_rejects_an_artifact_mutated_after_manifest_finalization ... ok
+test randomness::tests::ptrs_out_of_domain_candidate_fails_after_its_two_uniforms ... ok
+test reference_reduction::tests::exact_multiple_has_no_residual ... ok
+test reference_reduction::tests::canonical_selector_reproduces_the_frozen_direct_vector ... ok
+test reference_reduction::tests::direct_layout_handles_hundred_megabases_with_ten_blocks_without_per_base_work ... ok
+test reference_reduction::tests::boundaries_are_rejected_without_consuming_rng ... ok
+test f5_profile::tests::rejects_each_isolated_profile_mutation ... ok
+test reference_reduction::tests::direct_selector_is_deterministic_non_overlapping_and_has_one_residual ... ok
+test execution::tests::reduction_selection_uses_reloaded_copy_not_the_stale_origin_object ... ok
+test reference::tests::owned_dna_constructor_preserves_the_public_validation_error ... ok
+test repeat_slippage::tests::a_mean_above_the_ceiling_is_rejected_and_the_ceiling_itself_is_accepted ... ok
+test repeat_slippage::tests::a_hand_computed_fixture_produces_exactly_the_expected_fan ... ok
+test repeat_slippage::tests::a_population_without_haplotype_copies_is_rejected ... ok
+test repeat_slippage::tests::a_thousand_contractions_stop_at_one_unit_and_count_the_rest_apart ... ok
+test repeat_genotypes::tests::a_single_positive_weight_consumes_no_randomness ... ok
+test repeat_slippage::tests::a_zero_mean_returns_only_the_reference_allele_without_consuming_randomness ... ok
+test repeat_slippage::tests::an_ancestral_tract_above_the_locus_cap_is_rejected ... ok
+test repeat_slippage::tests::an_ancestral_without_a_complete_unit_is_rejected ... ok
+test repeat_slippage::tests::another_model_and_a_two_unit_jump_are_rejected_naming_parameter_and_value ... ok
+test f5_profile::tests::rejects_every_non_probability_endpoint_and_weight_before_normalization ... ok
+test repeat_slippage::tests::at_the_cap_the_lineage_stops_instead_of_being_pushed_down ... ok
+test repeat_slippage::tests::at_the_floor_the_lineage_stops_instead_of_being_pushed_up ... ok
+test repeat_slippage::tests::every_applied_event_moves_the_tract_by_exactly_one_unit ... ok
+test repeat_slippage::tests::the_unit_cap_stops_expansion_and_counts_the_event_apart ... ok
+test segments::tests::cloned_chains_share_segments_instead_of_reference_or_segment_copies ... ok
+test segments::tests::keeps_each_small_edit_typed_and_its_provenance ... ok
+test segments::tests::preserves_the_declared_order_of_a_short_known_composition ... ok
+test segments::tests::rejects_ambiguous_or_overlapping_modifications ... ok
+test segments::tests::retains_an_intact_source_segment_without_reference_bases ... ok
+test stutter::tests::a_contraction_shortens_the_molecule_by_the_motif_length ... ok
+test stutter::tests::a_declared_locus_rate_prevails_and_is_not_modulated ... ok
+test stutter::tests::a_long_tract_slips_far_more_than_a_short_one_of_the_same_motif ... ok
+test stutter::tests::a_motif_without_a_measured_curve_has_no_tract_length_dependence ... ok
+test stutter::tests::a_single_viable_step_is_chosen_without_consuming_randomness ... ok
+test stutter::tests::at_the_reference_length_the_measured_motif_rate_is_reproduced_exactly ... ok
+test stutter::tests::longest_run_predicts_more_slippage_than_a_split_tract_of_equal_total_units ... ok
+test stutter::tests::outside_the_measured_range_the_end_value_is_held ... ok
+test stutter::tests::motif_length_drives_the_rate_beyond_the_tract_length_in_base_pairs ... ok
+test stutter::tests::several_viable_steps_do_consume_randomness ... ok
+test stutter::tests::the_admitted_step_structure_is_asymmetric_and_closed ... ok
+test stutter::tests::the_step_is_applied_at_the_longest_run_and_leaves_the_rest_untouched ... ok
+test stutter::tests::viable_steps_exclude_contractions_that_empty_the_run_or_shorten_the_molecule ... ok
+test stutter::tests::the_tract_length_table_is_the_published_curve_normalised_at_the_anchor ... ok
+test stutter::tests::the_modulation_takes_the_longest_run_and_not_the_total_units ... ok
+test stutter::tests::the_stage_only_opens_with_the_switch_on_and_a_declared_locus ... ok
+test truth_projection::tests::jsonl_bytes_are_deterministic_ordered_and_hashed ... ok
+test truth_projection::tests::projection_keeps_authorized_empty_matrix_canonical_identity ... ok
+test truth_projection::tests::projection_from_f2_3_state_is_ordered_and_counts_copies ... ok
+test truth_projection::tests::projection_accepts_mixed_row_sources_and_retains_catalog_alleles ... ok
+test truth_projection::tests::artifact_uses_f1_path_identity_and_complete_bytes ... ok
+test repeat_slippage::tests::no_generated_allele_carries_a_fractional_unit ... ok
+test repeat_slippage::tests::the_same_seed_produces_the_same_fan ... ok
+test vcf_grouping::tests::expands_to_a_common_ref_and_preserves_phase_and_dosage ... ok
+test truth_projection::tests::projection_preserves_random_indel_provenance ... ok
+test truth_projection::tests::writer_reports_truncation_or_failure_to_its_caller ... ok
+test vcf_grouping::tests::groups_multiple_alts_cases_and_reordered_projection_canonically ... ok
+test vcf_contract::tests::tbi_finalization_error_is_propagated ... ok
+test truth_projection::tests::workspace_discards_partial_truth_when_its_actual_writer_fails ... ok
+test vcf_grouping::tests::rejects_a_duplicate_copy_at_one_locus ... ok
+test vcf_grouping::tests::keeps_all_source_cases_when_one_alt_has_multiple_cases ... ok
+test vcf_grouping::tests::rejects_noncontiguous_copy_phases_before_gt_construction ... ok
+test vcf_grouping::tests::keeps_all_cases_of_a_composed_final_allele ... ok
+test truth_projection::tests::projection_requires_reference_matrix_row_and_group_digests ... ok
+test vcf_grouping::tests::supports_haploid_diploid_and_decaploid_gt_dosages ... ok
+test vcf_grouping::tests::rejects_two_copies_that_reach_the_same_alt_with_different_blocks ... ok
+test vcf_projection::tests::direct_insertion_left_alignment_replaces_the_rotated_anchor ... ok
+test vcf_projection::tests::direct_insertions_match_historical_left_alignment_in_homopolymers ... ok
+test truth_projection::tests::write_truth_artifact_keeps_catalog_empty_when_finalization_fails ... ok
+test vcf_projection::tests::insertion_at_a_boundary_bridges_two_snps_into_one_final_allele_once ... ok
+test vcf_projection::tests::keeps_adjacent_snps_as_two_ordered_components ... ok
+test truth_projection::tests::projection_retains_nested_partial_indel_links_and_final_bytes ... ok
+test vcf_projection::tests::orders_projected_alleles_by_reference_catalog_and_coordinate ... ok
+test vcf_projection::tests::expands_overlapping_changes_to_one_common_reference_interval_before_trimming ... ok
+test vcf_projection::tests::projects_a_snp_from_final_truth_pieces ... ok
+test vcf_projection::tests::left_aligns_insertions_and_deletions ... ok
+test vcf_projection::tests::recomposes_a_snp_and_left_aligned_deletion_when_normalized_ref_intervals_overlap ... ok
+test vcf_projection::tests::recomposes_nonoverlapping_insertions_that_collide_after_left_alignment ... ok
+test vcf_projection::tests::recomposition_absorbs_a_snp_crossed_while_left_aligning_a_deletion ... ok
+test vcf_projection::tests::validated_compact_view_rejects_a_mixed_reference_at_its_effective_boundary ... ok
+test vcf_projection::tests::recomposition_absorbs_an_interior_snp_after_distant_insertions_collide ... ok
+test vcf_projection::tests::direct_insertions_match_historical_normalization_for_short_repeats ... ok
+test vcf_publication::tests::corrupt_truth_is_rejected_before_creating_a_vcf_artifact ... ok
+test vcf_publication::tests::corrupted_index_or_missing_coverage_is_an_io_failure ... ok
+test truth_projection::tests::f2_3_projection_writer_and_independent_readers_replay_all_small_event_classes ... ok
+test vcf_publication::tests::header_contract_keeps_precedence_over_a_reference_id_mismatch ... ok
+test vcf_publication::tests::failing_index_writer_maps_to_the_public_io_contract ... ok
+test vcf_representation::tests::keeps_n_in_explicit_indel_ref_and_alt_without_a_complement ... ok
+test vcf_representation::tests::rejects_a_repeat_annotation_that_is_not_parallel_to_the_alternates ... ok
+test vcf_representation::tests::rejects_a_multiallelic_n_record_when_any_alt_is_a_snp ... ok
+test vcf_representation::tests::rejects_a_snp_with_unknown_reference_without_resolving_n ... ok
+test vcf_representation::tests::rejects_a_repeat_sequence_with_an_impossible_motif_or_no_bases ... ok
+test vcf_representation::tests::rejects_noncanonical_case_relationships_before_writing ... ok
+test vcf_representation::tests::representable_records_preserve_alt_gt_and_canonical_gps_case ... ok
+test vcf_semantic_validation::tests::a_fasta_header_the_parser_accepts_but_the_identity_type_refuses_is_rejected ... ok
+test vcf_publication::tests::semantic_truth_failures_keep_project_diagnostic_and_write_nothing ... ok
+test vcf_semantic_validation::tests::independently_merges_overlapping_or_inserted_components ... ok
+test vcf_semantic_validation::tests::an_insertion_at_the_very_start_has_no_left_anchor ... ok
+test vcf_publication::tests::regional_validation_seeks_and_reads_all_records_for_tbi_and_csi ... ok
+test vcf_semantic_validation::tests::a_window_may_not_split_a_realized_repeat_tract ... ok
+test vcf_projection::tests::external_bcftools_norm_oracle_matches_frozen_small_allele_vectors_without_repair ... ok
+test vcf_semantic_validation::tests::the_expected_genotype_refuses_a_sample_without_copies_and_an_unknown_alternate ... ok
+test vcf_semantic_validation::tests::slicing_the_lists_per_allele_catches_a_shift_with_heterogeneous_counts ... ok
+test vcf_publication::tests::empty_bgzf_still_rejects_a_corrupt_tbi_or_csi_before_publication ... ok
+test truth_projection::tests::projection_direct_snp_and_deletion_cases_cover_p1_p2_and_p10 ... ok
+test vcf_semantic_validation::tests::the_independent_path_rejects_a_badly_threaded_truth ... ok
+test vcf_semantic_validation::tests::the_recomputed_copy_phases_must_be_contiguous ... ok
+test vcf_semantic_validation::tests::the_reference_column_is_tied_to_the_real_genome ... ok
+test vcf_semantic_validation::tests::the_expected_records_do_not_trust_the_truth_they_read ... ok
+test vcf_projection::tests::source_paths_retain_sparse_metadata_and_materialize_only_the_requested_window ... ok
+test vcf_projection::tests::large_direct_insertions_are_borrowed_for_ten_and_twenty_copies ... ok
+test repeat_slippage::tests::a_thousand_events_with_full_expansion_bias_only_expand_and_consume_nothing ... ok
+test randomness::tests::f4_truncated_normal_still_admits_a_success_on_the_last_allowed_attempt ... ok
+test randomness::tests::f4_truncated_normal_aborts_at_the_attempt_cap_without_one_extra_draw ... ok
+test diagnostics::tests::every_active_runtime_diagnostic_matches_active_catalog_v4 ... ok
+test vcf_publication::tests::large_identical_direct_insertions_materialize_once_per_vcf_alt ... ok
+
+test result: ok. 318 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 14.40s
+
+     Running unittests src/main.rs (target/debug/deps/genome_population_simulator-ebb232e7fc687efb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/authoring_schemas.rs (target/debug/deps/authoring_schemas-43f3427774f7e268)
+
+running 1 test
+test active_authoring_schema_is_v2_and_scenario_schema_is_documental_only ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli_config_diagnostics.rs (target/debug/deps/cli_config_diagnostics-8966bcd51483211d)
+
+running 7 tests
+test root_scenario_field_is_rejected_by_run_before_opening_links ... ok
+test simulated_reduction_is_rejected_by_run_without_publication ... ok
+test validation_is_read_only ... ok
+test f5_validate_executes_physical_admission_without_destination ... ok
+test f5_validate_rejects_missing_corrupt_or_mismatched_profile_before_reference ... ok
+test invalid_header_and_future_fields_have_equivalent_diagnostics_without_publication ... ok
+test cli_dispatches_general_v3_from_an_unrelated_three_level_working_directory ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/cli_smoke.rs (target/debug/deps/cli_smoke-c9fcae801d36ae60)
+
+running 7 tests
+test incompatible_genotype_authorization_is_named_and_force_is_not_a_cli_option ... ok
+test help_and_version_are_successful_cli_queries ... ok
+test empty_population_matrix_requires_and_records_its_explicit_authorization ... ok
+test cli_publishes_founder_keys_when_it_derives_initial_individual_ids ... ok
+test normalized_multiallelic_matrix_keeps_zero_ref_through_validate_and_run ... ok
+test direct_events_are_preflighted_before_publication_and_the_narrow_flag_is_traced ... ok
+test globally_absent_alt_is_omitted_from_active_projection_for_supplied_and_reused_cli ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/clonal_catalog.rs (target/debug/deps/clonal_catalog-8bf9152d8b312588)
+
+running 4 tests
+test only_the_lineage_decisions_belong_to_the_new_catalog ... ok
+test every_component_of_the_lineage_scope_separates ... ok
+test the_four_lineage_decisions_do_not_share_a_key ... ok
+test the_lineage_stage_has_literal_subseed_vectors ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/clonal_composition.rs (target/debug/deps/clonal_composition-badf7b41d8593aa1)
+
+running 3 tests
+test the_unamplified_run_reproduces_the_measured_pcr_free_fractions ... ok
+test the_amplified_manifest_publishes_the_derivation_and_the_lineage_counts ... ok
+test the_amplified_run_reproduces_the_measured_with_pcr_fractions ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 29.09s
+
+     Running tests/clonal_independent_validator.rs (target/debug/deps/clonal_independent_validator-6d044aa5c7a34910)
+
+running 4 tests
+test every_copy_of_a_family_carries_its_own_lineage_to_its_read ... ok
+test the_published_lineage_count_matches_the_recomputed_one ... ok
+test the_validator_predicts_the_tract_of_every_published_read ... ok
+test a_mutated_lineage_count_is_rejected ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.53s
+
+     Running tests/clonal_lineage.rs (target/debug/deps/clonal_lineage-ccdb342240e526e8)
+
+running 13 tests
+test with_divergence_at_the_last_cycle_every_copy_of_the_family_shows_the_same_units ... ok
+test the_viability_guard_applies_to_the_accumulated_net_step ... ok
+test with_divergence_at_cycle_zero_the_copies_are_independent ... ok
+test inherited_slips_are_counted_apart_from_the_rest ... ok
+test the_applied_lineage_count_matches_what_the_reads_show ... ok
+test the_longest_run_is_recomputed_between_the_two_steps ... ok
+test the_two_parts_add_up_on_every_published_read ... ok
+test the_lineage_step_goes_before_the_base_decision ... ok
+test a_high_chimera_rate_does_not_break_the_pair_source_check ... ok
+test large_families_inherit_slips ... ok
+test a_net_step_that_does_not_fit_the_chimeric_molecule_is_not_written ... ok
+test declaring_a_locus_to_the_left_of_another_does_not_move_its_slips ... ok
+test declaring_a_locus_on_another_chromosome_does_not_move_the_previous_slips ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.59s
+
+     Running tests/config_admission.rs (target/debug/deps/config_admission-12c5b2c5370d51a9)
+
+running 4 tests
+test admitted_document_keeps_exact_bytes_path_and_class ... ok
+test invalid_version_wins_before_unknown_semantic_content ... ok
+test malformed_and_duplicate_toml_are_localizable ... ok
+test class_and_version_rejections_are_stable_and_exit_two ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/config_validation.rs (target/debug/deps/config_validation-0a410040c4817efc)
+
+running 10 tests
+test composition_uses_fixed_tolerance_and_effective_values_are_normalized ... ok
+test multiple_sequences_preserve_order_classes_lengths_and_total_size ... ok
+test reduced_reference_requires_a_supplied_source_reference ... ok
+test global_ploidy_is_effective_and_limited_to_one_through_ten ... ok
+test future_root_and_nested_fields_are_rejected ... ok
+test simulated_reference_accepts_an_independent_unknown_base_fraction ... ok
+test simulated_reference_preserves_sequence_count_lengths_classes_and_composition ... ok
+test reference_source_fields_are_mutually_exclusive ... ok
+test total_size_overflow_is_rejected_without_wrapping ... ok
+test supplied_reference_paths_trim_accidental_edges_preserve_internal_spaces_and_resolve_relatives ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/declared_config.rs (target/debug/deps/declared_config-ec87167613c80a10)
+
+running 4 tests
+test unknown_fields_are_rejected_with_location ... ok
+test population_snv_modes_are_exclusive_at_the_toml_boundary ... ok
+test reordered_toml_has_the_same_declared_semantics_but_keeps_its_own_bytes ... ok
+test dtc049_tolerance_defaults_and_is_limited_in_the_general_toml ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/diagnostic_rendering.rs (target/debug/deps/diagnostic_rendering-029876624cc2509f)
+
+running 2 tests
+test json_rendering_escapes_path_control_characters_without_emitting_jsonl ... ok
+test human_and_json_are_rendered_from_the_same_structured_diagnostic ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/diagnostic_schema_version.rs (target/debug/deps/diagnostic_schema_version-c50a88aaf69c2faa)
+
+running 3 tests
+test a_general_manifest_rejection_keeps_its_own_schema ... ok
+test an_effective_config_diagnostic_cites_the_schema_of_its_declared_version ... ok
+test an_event_manifest_diagnostic_cites_the_schema_of_its_declared_version ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.04s
+
+     Running tests/effective_config.rs (target/debug/deps/effective_config-5df20e23f0805e0f)
+
+running 1 test
+test changing_a_toml_parameter_changes_the_effective_value_without_code_changes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/effective_config_runtime_validation.rs (target/debug/deps/effective_config_runtime_validation-41139b9dc8911ce3)
+
+running 5 tests
+test reference_composition_and_total_size_are_recomputed ... ok
+test runtime_rejects_effective_initial_population_ids_that_violate_the_typed_contract ... ok
+test runtime_rejects_corrupt_effective_initial_population_cardinality_duplicates_and_f_model ... ok
+test runtime_rejects_truncation_unknown_class_absent_id_and_wrong_artifact_kind ... ok
+test every_reduction_field_and_exact_reference_set_are_cross_checked ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/effective_config_schema.rs (target/debug/deps/effective_config_schema-26126142cd01e503)
+
+running 15 tests
+test externally_validates_the_published_f4_3_2_effective_document ... ok
+test simulated_reference_cannot_claim_a_reduced_reference ... ok
+test effective_selection_order_is_strictly_one_based ... ok
+test effective_reduction_rejects_removed_selection_algorithm ... ok
+test real_effective_shapes_keep_their_two_valid_source_modes ... ok
+test initial_populations_publish_only_resolved_ids_and_validated_hwe_or_f_models ... ok
+test population_snvs_effective_link_is_discriminated_by_mode ... ok
+test effective_ploidy_is_required_and_limited_to_the_f2_domain ... ok
+test reference_origin_and_reversible_metadata_are_closed_and_source_specific ... ok
+test every_effective_artifact_link_is_a_non_empty_catalog_id ... ok
+test semantic_ids_source_path_and_selection_order_cannot_be_empty ... ok
+test effective_initial_population_schema_enforces_local_bounds_and_f_diploidy ... ok
+test initial_population_statistics_schema_is_closed_and_typed ... ok
+test derived_sequence_catalog_is_required_closed_and_reversible ... ok
+test v4_effective_technical_event_is_closed_and_keeps_the_paired_profile_fixed ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.12s
+
+     Running tests/f1_2_traceability.rs (target/debug/deps/f1_2_traceability-cf606cd8062e456e)
+
+running 1 test
+test f1_2_audits_exactly_36_test_req_cases_without_claiming_future_biology ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/f1_3_traceability.rs (target/debug/deps/f1_3_traceability-4171d050621b78bc)
+
+running 6 tests
+test test_req_rep_23_requires_exact_simulator_and_rng_contract_versions ... ok
+test partial_test_req_conf_27_active_scope_derivation_is_logically_repeatable ... ok
+test partial_test_req_rep_22_effective_metadata_identifies_the_rng_contract ... ok
+test partial_test_req_conf_26_root_is_effective_before_any_f1_rng_scope ... ok
+test f1_3_matrix_closes_one_requirement_and_marks_three_results_as_partial ... ok
+test f1_runtime_has_no_preparatory_rng_scope_or_event_comparator ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+     Running tests/f1_4_traceability.rs (target/debug/deps/f1_4_traceability-553813afc80572ae)
+
+running 1 test
+test f1_4_closes_six_requirements_and_every_evidence_symbol_exists ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f1_5_acceptance.rs (target/debug/deps/f1_5_acceptance-8e1a05797ff72807)
+
+running 6 tests
+test partial_ac_composition_is_rejected_before_cli_execution ... ok
+test generated_composition_rejects_unknown_and_duplicate_keys_at_admission ... ok
+test generated_composition_accepts_an_independent_n_fraction ... ok
+test declared_and_system_csprng_roots_are_effective_before_reference_generation ... ok
+test simulated_cli_runs_repeat_logically_and_pass_independent_oracles ... ok
+test supplied_cli_preserves_n_and_exact_input_while_invalid_input_has_no_destination ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+     Running tests/f1_5_traceability.rs (target/debug/deps/f1_5_traceability-cd40cf4c83bccaf4)
+
+running 1 test
+test f1_5_closes_exactly_22_requirements_with_existing_test_symbols ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f1_6_acceptance.rs (target/debug/deps/f1_6_acceptance-b77d1692a317de8f)
+
+running 8 tests
+test one_invalid_reduction_prevents_any_partial_publication ... ok
+test one_block_reduction_omits_unselected_sequences_without_empty_records ... ok
+test future_consumers_are_rejected_instead_of_silently_changing_the_reduction_stream ... ok
+test reduction_publishes_a_reproducible_map_without_algorithm_metadata ... ok
+test percentage_mode_is_exact_and_infeasible_layout_never_creates_a_derived_artifact ... ok
+test serialized_map_validator_rejects_truncation_overlap_and_out_of_range ... ok
+test target_reduction_publishes_reconstructible_fasta_map_and_manifest ... ok
+test output_categories_cover_zero_one_and_multiple_reductions ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.04s
+
+     Running tests/f1_6_traceability.rs (target/debug/deps/f1_6_traceability-f2996180229ab090)
+
+running 1 test
+test simplified_f1_expedient_closes_exactly_54_requirements_with_real_symbols ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/f1_document_compatibility.rs (target/debug/deps/f1_document_compatibility-869492c03162d4e0)
+
+running 3 tests
+test archived_e14705a_f1_documents_are_rejected_without_a_legacy_reader ... ok
+test version_dispatch_is_closed_and_reports_the_schema_selected_by_the_document ... ok
+test old_pairs_and_physical_validation_report_the_current_schema_on_rejection ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f2_0_1_authoring_contract.rs (target/debug/deps/f2_0_1_authoring_contract-e13e8059df2b6c75)
+
+running 2 tests
+test authoring_resources_are_versioned_and_keep_rust_as_semantic_authority ... ok
+test f2_1_authoring_schema_exposes_exactly_the_fields_accepted_by_rust ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f2_2_6_profile_resources.rs (target/debug/deps/f2_2_6_profile_resources-45bc36092e5a80ea)
+
+running 1 test
+test independent_oracle_validates_f2_2_6_versioned_profile_resources ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/f2_2_integration.rs (target/debug/deps/f2_2_integration-6cc1cae566746539)
+
+running 2 tests
+test supplied_matrix_provenance_reaches_an_explicit_snp_before_reproducible_random_indels ... ok
+test matrix_sources_are_reproducible_canonical_and_reusable_without_republication ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/f2_4_integration.rs (target/debug/deps/f2_4_integration-dd752506c5cede0f)
+
+running 1 test
+test publication_catalogs_truth_with_its_complete_identity_and_a_broken_link_is_rejected ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/f2_5_traceability.rs (target/debug/deps/f2_5_traceability-dbb1687bcea4f45b)
+
+running 4 tests
+test dtc_066_claim_and_pending_are_mutually_exclusive ... ok
+test evidence_symbols_must_have_a_test_attribute ... ok
+test local_f2_5_closure_has_no_planned_steps_or_requirements ... ok
+test conditional_closure_keeps_external_acceptance_and_next_action_pending ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/f2_rng.rs (target/debug/deps/f2_rng-e654989956b75f7f)
+
+running 7 tests
+test zero_consumers_preserve_the_local_stream ... ok
+test v4_scope_name_separates_each_previously_colliding_pair ... ok
+test primitive_rng_utilities_obey_preflight_ranges_and_stream_consumption ... ok
+test shuffle_and_poisson_cover_contract_boundaries_without_hidden_consumption ... ok
+test every_f2_runtime_scope_changes_when_its_production_components_change ... ok
+test every_runtime_scope_component_mutation_reaches_production_derivation ... ok
+test poisson_empirical_moments_and_small_pmf_match_an_independent_oracle ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running tests/f3_end_to_end.rs (target/debug/deps/f3_end_to_end-acd73b2c557fbcc0)
+
+running 1 test
+test valid_matrix_contamination_and_hopping_publish_only_final_paired_fastq ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+
+     Running tests/f3_event_admission.rs (target/debug/deps/f3_event_admission-d9e42f951d95bc8a)
+
+running 4 tests
+test f3_minimal_technical_event_resolves_fixed_profile_and_exactly_one_target ... ignored, F4.1 sustituye el contrato SE F3; F4.2/F4.5 cubrirán la admisión/publicación PE
+test f3_technical_event_is_written_to_and_revalidated_from_effective_v3 ... ignored, F4.1 sustituye el contrato SE F3; F4.2/F4.5 cubrirán la admisión/publicación PE
+test f3_technical_event_rejects_f4_fields_and_shared_event_id_collision ... ignored, F4.1 sustituye el contrato SE F3; F4.2/F4.5 cubrirán la admisión/publicación PE
+test f3_technical_event_rejects_invalid_target_selection_and_individuals ... ignored, F4.1 sustituye el contrato SE F3; F4.2/F4.5 cubrirán la admisión/publicación PE
+
+test result: ok. 0 passed; 0 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f3_event_assembly.rs (target/debug/deps/f3_event_assembly-5143d1a99a597f88)
+
+running 2 tests
+test controlled_failed_event_keeps_only_closed_fastq_and_its_failed_manifest ... ignored, F4.1 retira el ensamblado/publicación FASTQ SE de F3
+test complete_execution_assembles_and_links_the_validated_event_manifest ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/f3_event_manifest.rs (target/debug/deps/f3_event_manifest-c11cc81084920e72)
+
+running 7 tests
+test each_selected_library_has_one_canonical_fastq_result ... ok
+test complete_technical_event_manifest_is_written_and_accepted_by_both_validators ... ok
+test complete_fastq_path_has_the_canonical_shape_and_correlates_to_its_event_and_individual ... ok
+test invalid_schema_and_invalid_library_link_are_rejected ... ok
+test error_quality_adjustments_are_fixed_for_each_mate_in_rust_and_schema ... ok
+test chimera_summary_is_closed_and_rejects_invalid_rate_counter_or_provenance ... ok
+test state_diagnostics_and_artifact_coherence_is_checked_externally ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.31s
+
+     Running tests/f3_fastq_output.rs (target/debug/deps/f3_fastq_output-8cee2e4a3c30b028)
+
+running 3 tests
+test failed_temporary_validation_removes_the_unfinalized_artifact ... ok
+test fastq_stream_preserves_literal_unknown_bases_technical_ids_and_phred_values ... ok
+test fastq_bytes_are_reproducible_and_the_stream_keeps_only_aggregate_output_state ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/f3_fastq_validation.rs (target/debug/deps/f3_fastq_validation-3299c0b3081a8aaa)
+
+running 6 tests
+test independently_frozen_haplotypic_origins_detect_copy_start_and_orientation_regressions ... ok
+test validation_replays_synthetic_truth_and_reports_coverage_without_a_tolerance ... ok
+test validation_binds_exact_artifact_record_and_opening_errors ... ok
+test validation_rejects_a_physically_truncated_bgzf_eof_marker ... ok
+test validation_rejects_missing_extra_truncated_and_malformed_records ... ok
+test structural_mutations_of_id_origin_sequence_and_quality_fail_without_repairing_fastq ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/f3_technical_identity.rs (target/debug/deps/f3_technical_identity-3bf3b64aee19747d)
+
+running 7 tests
+test invalid_reference_text_is_rejected_before_the_typed_frontier ... ok
+test technical_event_subseed_matches_historical_vector_and_isolates_causes ... ok
+test existing_template_is_invariant_to_individual_addition_and_reordering ... ok
+test technical_identifiers_are_valid_and_template_ids_are_unique_by_construction ... ok
+test technical_library_count_subseed_is_separate_and_invariant_to_other_libraries ... ok
+test technical_identities_and_template_subseed_are_repeatable ... ok
+test template_derivation_keeps_no_per_template_registry ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.24s
+
+     Running tests/f3_wgs_sampling.rs (target/debug/deps/f3_wgs_sampling-74b3fa8a1958e44e)
+
+running 12 tests
+test release_materialization_and_sampling_experiment_with_representative_snv_density ... ignored, experimento de rendimiento: ejecutar en release y con --nocapture
+test coverage_is_poisson_per_library_with_a_haploid_denominator ... ok
+test sampled_origin_vector_is_frozen_for_the_template_rng_order ... ok
+test sampler_rejects_a_plan_for_a_different_reference_before_sampling ... ok
+test sampling_reads_the_current_phased_haplotype_without_truth_materialization ... ok
+test short_references_have_no_eligible_interval ... ok
+test sampling_uses_haploid_eligible_denominator_and_exact_read_count ... ok
+test zero_target_yields_an_empty_stream ... ok
+test unknown_bases_are_eligible_and_preserved_through_both_orientations ... ok
+test sampling_is_reproducible_and_invariant_to_individual_order_or_addition ... ok
+test copies_contribute_by_dose_and_eligible_starts ... ok
+test sampling_many_ordinals_does_not_append_candidates ... ok
+
+test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.70s
+
+     Running tests/f4_biological_contamination.rs (target/debug/deps/f4_biological_contamination-df4f98bf29f160b8)
+
+running 13 tests
+test literal_oracle_covers_closed_extremes_and_the_assignment_permutation ... ok
+test materialization_replaces_recipient_pairs_with_new_recipient_instances_without_retaining_links ... ok
+test manifest_record_requires_successful_materialization_and_records_realized_aggregates ... ok
+test materialization_report_cannot_certify_another_recipient_with_equal_counts ... ok
+test materialization_preserves_paired_donor_bytes_at_zero_and_hundred_percent ... ok
+test materialization_keeps_only_one_payload_live_at_a_time_with_retained_and_contaminant_pairs ... ok
+test preflight_rejects_missing_donor_and_insufficient_capacity_before_any_materialization ... ok
+test one_clean_source_can_be_reused_by_different_recipients_but_never_from_contaminated_output ... ok
+test reused_clean_source_materializes_as_distinct_recipient_instances ... ok
+test plan_uses_only_same_population_clean_pairs_without_replacement_or_chains ... ok
+test percentage_is_closed_reproducible_and_rounds_clean_pairs_nearest_ties_up ... ok
+test configuration_resolves_default_or_explicit_recipients_and_rejects_external_matrix_and_weights ... ok
+test positive_contamination_and_hopping_publish_reconciled_aggregate_manifest ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/f4_chimeras_pairs.rs (target/debug/deps/f4_chimeras_pairs-50f2da79a98e0a82)
+
+running 5 tests
+test initial_profile_exposes_the_zero_chimera_rate ... ok
+test selected_chimera_without_a_second_source_fails_and_default_rate_keeps_pairs_clean ... ok
+test chimera_uses_a_manual_canonical_second_source_list_and_orients_pe_after_composition ... ok
+test sampler_keeps_pair_cardinality_and_exposes_only_an_aggregate_chimera_count ... ok
+test configured_chimera_rate_is_defaulted_validated_and_reaches_the_pair_sampler ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f4_coverage_reporting.rs (target/debug/deps/f4_coverage_reporting-1bd5b2b28d9c7bf1)
+
+running 1 test
+test target_basic_and_final_own_contaminant_coverages_are_published_separately ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f4_demultiplexing.rs (target/debug/deps/f4_demultiplexing-0c5d2cf84b1f9ca6)
+
+running 12 tests
+test release_scale_hopping_keeps_each_pair_once_with_canonical_destinations ... ignored, manual release performance regression check
+test rate_one_transfers_each_post_contamination_pair_once_to_another_library ... ok
+test rate_zero_retains_each_pair_in_its_declared_udi_without_copying_content ... ok
+test prevalidates_pre_hop_identity_and_declared_observed_udi_at_rate_zero ... ok
+test nonzero_rate_needs_another_library_and_duplicate_components_are_rejected ... ok
+test decisions_and_final_ids_are_invariant_to_library_and_input_permutations ... ok
+test hopping_destination_matches_the_canonical_candidate_list ... ok
+test udi_requires_two_literal_eight_base_acgt_components_and_preserves_i5_orientation ... ok
+test positive_index_hopping_rate_requires_two_libraries_during_effective_resolution ... ok
+test unexpected_udi_is_defensively_discarded_and_only_aggregate_counts_remain ... ok
+test repeated_final_cause_is_a_technical_id_collision_not_a_silent_rename ... ok
+test configuration_defaults_and_validates_index_hopping_rate_and_udi_components ... ok
+
+test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/f4_error_quality.rs (target/debug/deps/f4_error_quality-6991942592a99ff3)
+
+running 7 tests
+test disabled_mode_preserves_truth_and_profile_quality_with_zero_errors_per_mate ... ok
+test quality_is_pure_piecewise_half_up_and_needs_no_rng_source ... ok
+test final_probability_and_emitted_phred_boundaries_are_rejected_without_saturation ... ok
+test forced_errors_substitute_only_other_acgt_and_publish_mate_aggregates ... ok
+test mate_error_streams_are_isolated_from_r1_adjustments ... ok
+test error_scale_recalculates_the_emitted_fastq_phred_from_final_probability ... ok
+test n_is_preserved_at_phred_zero_without_an_error_opportunity ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f4_final_fastq_provenance.rs (target/debug/deps/f4_final_fastq_provenance-14800f9831c29221)
+
+running 1 test
+test final_paired_fastq_is_gzip_hashed_paired_and_manifested_without_individual_provenance ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/f4_insert_sampling_guard.rs (target/debug/deps/f4_insert_sampling_guard-e2e397b1780d6a1d)
+
+running 9 tests
+test the_guard_does_not_apply_when_no_pair_is_requested ... ok
+test the_guard_admits_even_when_the_reference_alone_would_have_exhausted_the_budget ... ok
+test the_guard_admits_a_copy_grown_past_the_reference_by_insertion ... ok
+test the_known_safe_fixture_copy_length_from_the_stutter_test_remains_admitted ... ok
+test a_costly_but_survivable_case_is_admitted ... ok
+test the_guard_rejects_the_realized_copy_not_the_reference_sequence ... ok
+test a_catastrophic_case_exhausts_the_attempt_budget_and_is_rejected ... ok
+test a_large_legitimate_panel_with_moderate_per_pair_cost_is_not_rejected_by_volume ... ok
+test the_rejection_names_the_individual_the_lengths_and_a_real_remedy_without_rust_identifiers ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.95s
+
+     Running tests/f4_paired_end.rs (target/debug/deps/f4_paired_end-ab0bfd48f598e984)
+
+running 3 tests
+test paired_end_uses_two_distinct_final_fastq_paths_without_a_single_end_alias ... ok
+test paired_end_rejects_an_internal_pair_count_as_a_configuration_concept ... ok
+test paired_end_fragments_have_manual_fr_orientation_shared_template_and_no_orphans ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f4_physical_technical_manifest.rs (target/debug/deps/f4_physical_technical_manifest-13156ce734be62dd)
+
+running 2 tests
+test physical_reader_rederives_the_neutral_contamination_summary_and_rejects_mutations ... ok
+test physical_reader_accepts_coherent_f4_documents_and_rejects_independent_chimera_mutations ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+     Running tests/f4_profile_rejections.rs (target/debug/deps/f4_profile_rejections-81c22208d8767fcf)
+
+running 4 tests
+test initial_profile_has_only_neutral_non_configurable_artifacts ... ok
+test unsupported_profile_artifact_configuration_is_rejected_before_effective_resolution ... ok
+test published_f4_effective_config_rejects_mutated_duplicate_artifacts ... ok
+test observable_pe_categories_and_direct_alignment_are_rejected_before_publication ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/f4_profiles.rs (target/debug/deps/f4_profiles-7881e373bdf845ed)
+
+running 4 tests
+test single_end_long_read_and_unknown_profiles_are_rejected_without_output ... ok
+test independent_resource_oracle_confirms_dtpd_106_literals_and_digest ... ok
+test public_profile_constants_match_the_independent_dtpd_106_literals ... ok
+test only_the_approved_profile_resolves_to_typed_f4_facts ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f4_rng_catalog.rs (target/debug/deps/f4_rng_catalog-ef5a6b6283510dd8)
+
+running 5 tests
+test decisions_regenerate_and_are_isolated_from_component_changes ... ok
+test f4_uniform_closed_extreme_interval_with_interior_numerator_stays_finite ... ok
+test f4_technical_v3_has_literal_subseed_and_chacha12_vectors ... ok
+test reordering_other_decisions_does_not_change_a_key ... ok
+test index_hop_instance_requires_the_canonical_ph_category ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f4_rng_isolation.rs (target/debug/deps/f4_rng_isolation-d932b9810ec4ccaf)
+
+running 2 tests
+test index_hop_fixture_applies_a_snapshot_simultaneously_without_chains ... ok
+test f4_decisions_regenerate_and_remain_isolated_from_library_order_and_threads ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f4_sequencing_errors.rs (target/debug/deps/f4_sequencing_errors-e78756fe29ed550f)
+
+running 3 tests
+test invalid_or_ambiguous_sequencing_error_modes_are_rejected ... ok
+test default_mode_remains_enabled ... ok
+test disabled_mode_preserves_truth_and_marks_effective_and_event_manifest ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/f4_technical_identity.rs (target/debug/deps/f4_technical_identity-fb5572b449f03802)
+
+running 6 tests
+test f4_technical_identity_matches_literal_blake3_vectors ... ok
+test final_pair_identity_always_exposes_both_mates_with_the_same_pair_id ... ok
+test paired_pre_hop_identity_reuses_the_f3_template_without_cross_library_mismatch ... ok
+test technical_id_derivation_is_repeatable_and_independent_of_call_order ... ok
+test technical_identity_collisions_fail_for_both_new_classes ... ok
+test technical_ids_have_fixed_valid_encoding_and_distinct_recipient_copies ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f4_wgs_profiles.rs (target/debug/deps/f4_wgs_profiles-76e795e5d55ff5db)
+
+running 6 tests
+test f4_configuration_rejects_coverage_substitutions_before_sampling ... ok
+test paired_end_coverage_plan_uses_full_haploid_denominator_and_rounds_half_up ... ok
+test sequences_shorter_than_the_minimum_insert_are_reported_zero_without_aborting ... ok
+test mixed_length_copies_filter_candidates_after_each_conditioned_insert ... ok
+test intermediate_length_conditions_insert_sampling_and_realizes_every_planned_pair ... ok
+test coverage_sampler_preserves_copy_proportions_and_keeps_n_eligible ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/f5_0_1_config_admission.rs (target/debug/deps/f5_0_1_config_admission-6a938d8b4fc771b5)
+
+running 9 tests
+test admits_minimal_closed_f5_pair ... ok
+test rejects_legacy_general_and_noncanonical_paths ... ok
+test rejects_unknown_fields_duplicate_founders_and_noncanonical_seed ... ok
+test scenario_u64_fields_accept_max_and_reject_max_plus_one_in_toml ... ok
+test approved_versioned_contract_artifacts_remain_byte_for_byte_pinned ... ok
+test rejects_target_mask_founder_and_f_inconsistencies ... ok
+test the_three_budget_ceilings_admit_their_value_and_reject_the_next_one ... ok
+test coverage_fraction_uses_the_exact_decimal_literal_and_override_is_u32 ... ok
+test all_f5_links_reject_noncanonical_path_spellings_in_toml ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/f5_0_1_external_schemas.rs (target/debug/deps/f5_0_1_external_schemas-cce96c0a6e565bca)
+
+running 8 tests
+test the_three_hard_budget_ceilings_are_the_three_schema_maxima ... ok
+test failure_limits_and_codes_use_exact_f5_contract ... ok
+test truth_v2_validates_standalone_with_historical_closed_definitions ... ok
+test authoring_schemas_match_u64_and_normalized_path_boundaries ... ok
+test effective_and_manifest_copy_the_sealed_preflight_scalar_and_positionally ... ok
+test effective_profile_and_catalog_links_are_closed_and_instantiable ... ok
+test externally_validates_general_scenario_and_profile_in_isolated_bundles ... ok
+test manifest_success_and_failure_branches_are_closed_and_literal ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.49s
+
+     Running tests/f5_6_closure.rs (target/debug/deps/f5_6_closure-7d738dc7b8bfc090)
+
+running 16 tests
+test the_citation_reader_discriminates_tests_from_helpers ... ok
+test the_projection_discriminates_a_changed_matrix ... ok
+test the_closure_record_cites_real_tests_and_declares_the_inherited_failures ... ok
+test the_f5_admission_rejects_a_ploidy_outside_one_to_ten ... ok
+test no_f5_6_publication_path_calls_the_bare_publishers ... ok
+test the_failure_package_auditor_accepts_the_renamed_destination_and_dies_of_each_mutation ... ok
+test the_failure_auditor_rejects_a_scenario_id_the_admission_never_sealed ... ok
+test the_composition_bounds_the_population_id_to_the_admitted_subpopulations ... ok
+test the_f5_projection_of_the_matrix_is_exactly_forty_six_unique_requirements ... ok
+test the_orchestrator_composes_the_failure_package_auditor ... ok
+test every_f5_row_states_what_f5_did_and_cites_tests_that_exist ... ok
+test the_failure_package_auditor_accepts_an_exhausted_search_package ... ok
+test a_closure_rejection_after_the_rename_leaves_no_complete_package ... ok
+test an_interrupted_f5_run_leaves_its_provisional_and_creates_no_destination ... ok
+test no_f5_source_or_schema_names_a_panel_sv_repeat_alignment_or_recombination ... ok
+test two_concurrent_f5_runs_have_one_winner_and_never_clobber_the_destination ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.53s
+
+     Running tests/f5_artifacts.rs (target/debug/deps/f5_artifacts-ef47df2c65441d04)
+
+running 35 tests
+test a_zero_length_or_repeated_sequence_is_not_accepted_by_the_declaration ... ok
+test a_block_that_does_not_fit_its_declared_sequence_is_refused ... ok
+test a_sequence_without_a_declared_length_cannot_be_published ... ok
+test both_ld_states_appear_and_only_the_inapplicable_one_uses_na ... ok
+test a_haploid_execution_publishes_one_copy_per_founder_and_sequence ... ok
+test deriving_the_assignments_twice_is_refused ... ok
+test a_sequence_declaration_wider_than_the_sealed_reference_is_refused ... ok
+test a_triploid_execution_publishes_three_phases_per_founder_and_sequence ... ok
+test publishing_under_an_execution_other_than_the_one_that_derived_the_identities_is_refused ... ok
+test the_independent_id_oracle_reproduces_the_frozen_catalog_vectors ... ok
+test a_controlled_only_and_a_probabilistic_only_execution_both_publish ... ok
+test published_rows_fit_their_envelope_and_no_decimal_exceeds_its_canonical_width ... ok
+test a_success_publishes_exactly_the_seven_tsv_and_the_founder_truth ... ok
+test provided_and_derived_founder_identifiers_publish_the_same_contract ... ok
+test every_link_declares_the_literal_path_size_and_digest_of_its_bytes ... ok
+test a_barren_sequence_contributes_no_copy_and_no_genotype ... ok
+test the_published_ld_rows_are_the_producers_own_bins ... ok
+test a_declared_population_f_changes_the_published_genotypes ... ok
+test the_block_order_is_the_layout_and_not_the_lexicographic_identifier ... ok
+test every_copy_carries_its_membership_and_every_genotype_its_locus ... ok
+test the_polarity_column_is_not_constant_and_is_the_one_each_site_received ... ok
+test the_published_attempts_are_the_producers_own_records ... ok
+test a_missing_artifact_is_detected ... ok
+test the_published_founder_rows_are_the_single_assignment_traversal ... ok
+test the_published_layout_and_sites_are_the_producers_own_geometry ... ok
+test the_published_package_satisfies_its_whole_contract ... ok
+test the_published_truth_carries_the_digests_the_trace_and_the_cases_it_received ... ok
+test the_truth_header_publishes_the_exact_projection_and_populations ... ok
+test the_recount_by_locus_and_subpopulation_comes_only_from_truth ... ok
+test the_same_seed_publishes_the_same_bytes ... ok
+test the_writer_peak_fits_the_sealed_budget_and_does_not_grow_with_the_block_count ... ok
+test the_canonical_decimal_is_bounded_by_construction_and_round_trips ... ok
+test the_published_weights_are_the_effective_profile_weights ... ok
+test every_isolated_corruption_is_detected_by_an_independent_reader ... ok
+test every_published_truth_line_validates_against_the_external_schema ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+
+     Running tests/f5_bootstrap_dispatch.rs (target/debug/deps/f5_bootstrap_dispatch-267dc872371257bf)
+
+running 9 tests
+test dispatcher_preserves_relative_v2_authoring_path_while_opening_the_normalized_path ... ok
+test bootstrap_rejects_invalid_final_toml_before_profile_reference_mask_destination_or_rng ... ok
+test dispatcher_classifies_discriminators_after_4096_bytes_and_preserves_non_f5 ... ok
+test dispatcher_rejects_scenario_limit_plus_one_and_very_large_after_only_two_opens ... ok
+test oversized_documents_are_neutral_before_v2_v3_or_invalid_classification ... ok
+test fixed_width_bootstrap_memory_limit_is_inclusive_and_minus_one_stops_before_profile_and_rng ... ok
+test dispatcher_opens_each_bootstrap_toml_once_and_records_identity_from_written_bytes ... ok
+test bootstrap_accepts_exact_general_and_scenario_limits_and_rejects_byte_65537 ... ok
+test every_public_general_loader_applies_the_v3_bound_before_classification_or_materialization ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/f5_bounded_input.rs (target/debug/deps/f5_bounded_input-58910f82888f258e)
+
+running 8 tests
+test fragmented_reader_reaches_exact_eof_and_hashes_the_same_literal_bytes ... ok
+test ledger_is_cumulative_and_rejection_does_not_reserve_above_the_limit ... ok
+test intermediate_reader_error_is_preserved ... ok
+test ledger_role_or_phase_mismatch_does_not_touch_the_reader ... ok
+test non_bootstrap_read_without_ledger_does_not_touch_the_reader ... ok
+test directed_overflow_is_rejected_without_changing_accumulated_ledger ... ok
+test excess_byte_is_observed_only_to_reject_and_never_enters_the_identity ... ok
+test metadata_size_is_not_an_admission_authority_and_file_oracle_recomputes_identity ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f5_cli_run.rs (target/debug/deps/f5_cli_run-c96bbbbeb04225e5)
+
+running 9 tests
+test the_orchestrator_publishes_only_through_the_sealing_wrappers ... ok
+test the_execution_identity_is_the_seed_over_the_general_then_scenario_digests ... ok
+test an_unpublishable_general_name_is_rejected_by_validate_and_by_run ... ok
+test the_orchestrator_composes_both_audits ... ok
+test a_controlled_publication_failure_publishes_a_failed_package ... ok
+test the_productive_chain_publishes_and_both_auditors_count_the_package ... ok
+test an_exhausted_haplotype_search_publishes_a_failed_package ... ok
+test the_narrow_f2_authorizations_are_rejected_by_f5_validate_and_run ... ok
+test the_execution_identity_covers_both_authored_documents ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+     Running tests/f5_closure.rs (target/debug/deps/f5_closure-9047eb455af38fbd)
+
+running 54 tests
+test a_closure_over_a_vanished_package_is_missing ... ok
+test a_copy_record_with_another_identity_is_rejected ... ok
+test a_copy_identifier_of_another_class_is_rejected ... ok
+test a_copy_record_without_membership_is_rejected ... ok
+test a_copy_repeated_in_the_founders_file_is_rejected ... ok
+test a_block_repeated_within_a_copy_is_rejected ... ok
+test a_copy_moved_to_another_subpopulation_is_rejected ... ok
+test a_copy_index_that_is_not_an_integer_is_rejected ... ok
+test a_copy_record_without_identity_is_rejected ... ok
+test a_closed_copy_missing_from_the_package_is_rejected ... ok
+test a_copy_published_with_another_copy_index_is_rejected ... ok
+test a_failure_closure_over_a_vanished_package_is_missing ... ok
+test a_copy_published_on_another_sequence_is_rejected ... ok
+test a_copy_the_repository_never_closed_is_rejected ... ok
+test a_deleted_truth_projection_is_missing ... ok
+test a_founders_file_without_its_final_lf_is_rejected ... ok
+test a_deleted_artifact_of_the_published_package_is_missing ... ok
+test a_failed_package_publishes_no_founder_identity ... ok
+test a_row_with_an_extra_column_is_rejected ... ok
+test a_row_with_a_missing_column_is_rejected ... ok
+test a_duplicated_membership_record_is_rejected ... ok
+test a_founder_copy_identifier_with_forbidden_syntax_is_rejected ... ok
+test a_truth_document_without_its_header_is_rejected ... ok
+test a_founder_renamed_to_another_closed_founder_is_rejected ... ok
+test a_haplotype_the_repository_never_closed_is_rejected ... ok
+test a_haplotype_identifier_of_another_class_is_rejected ... ok
+test a_founders_row_that_is_not_utf8_is_rejected ... ok
+test deriving_identities_after_a_failure_breaks_the_conservation_law ... ok
+test a_missing_membership_record_is_rejected ... ok
+test an_unreadable_truth_header_is_rejected ... ok
+test a_truth_copy_the_repository_never_closed_is_rejected ... ok
+test a_membership_record_moved_to_another_subpopulation_is_rejected ... ok
+test the_closure_audit_cannot_derive_an_identity_by_its_signature ... ok
+test a_membership_identifier_of_another_class_is_rejected ... ok
+test the_closure_audit_takes_no_census ... ok
+test a_truth_membership_identifier_with_forbidden_syntax_is_rejected ... ok
+test the_closure_module_names_no_migration_selection_or_genealogy ... ok
+test an_empty_truth_document_is_rejected ... ok
+test the_founders_contract_is_the_one_the_audit_indexes ... ok
+test a_witness_from_another_execution_is_rejected ... ok
+test a_unit_the_repository_never_closed_is_rejected ... ok
+test an_unreadable_truth_record_is_rejected ... ok
+test an_assignment_identifier_cannot_take_the_place_of_a_copy ... ok
+test the_exact_header_of_the_founders_file_is_required ... ok
+test a_repository_rebuilt_after_publication_cannot_accredit_the_package ... ok
+test two_repositories_with_different_censuses_do_not_share_a_witness ... ok
+test no_identity_can_be_derived_after_publication ... ok
+test an_unconsumed_equivalent_repository_breaks_the_conservation_law ... ok
+test the_closure_audit_never_writes_a_byte_of_the_published_package ... ok
+test the_founder_kind_is_sealed_and_cannot_be_supplied_by_a_later_object ... ok
+test the_published_package_only_names_identities_closed_in_f5_3 ... ok
+test no_publication_can_consume_an_admission_that_does_not_seal_its_configuration ... ok
+test every_ploidy_mode_and_f_extreme_keeps_the_closure ... ok
+test the_closure_audit_peak_fits_the_sealed_budget_and_holds_one_record_at_a_time ... ok
+
+test result: ok. 54 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.15s
+
+     Running tests/f5_founders.rs (target/debug/deps/f5_founders-eb3048640e837f4c)
+
+running 76 tests
+test a_duplicated_substitution_is_rejected_by_admission ... ok
+test a_layout_from_another_execution_is_rejected ... ok
+test a_null_expected_heterozygosity_is_published_as_not_applicable ... ok
+test a_positive_f_is_incompatible_with_the_controlled_mode ... ok
+test a_foreign_sealed_admission_cannot_assign_founders ... ok
+test a_half_integer_ideal_is_accepted_because_the_bound_is_evaluated_in_copies ... ok
+test a_literal_founder_id_equal_to_a_derived_one_is_rejected ... ok
+test a_layout_with_coordinates_outside_the_own_tracts_is_rejected ... ok
+test a_substitution_for_an_unknown_population_is_rejected_by_admission ... ok
+test a_layout_of_another_reference_in_the_same_execution_is_rejected ... ok
+test a_substitution_out_of_range_is_rejected_before_any_layout ... ok
+test a_reused_row_never_collapses_two_copies_into_one_identity ... ok
+test a_subpopulation_f_overrides_the_population_f ... ok
+test a_layout_with_another_block_count_is_rejected ... ok
+test a_retained_sequence_without_blocks_publishes_no_copy ... ok
+test a_unit_f_produces_complete_homozygosity ... ok
+test a_zero_f_is_compatible_with_the_controlled_mode ... ok
+test a_non_diploid_publishes_a_not_applicable_realized_f ... ok
+test an_individual_declared_in_two_subpopulations_is_rejected_before_any_identity ... ok
+test a_winning_matrix_with_another_site_count_is_rejected ... ok
+test an_assignment_from_another_execution_is_rejected ... ok
+test a_zero_f_reproduces_hardy_weinberg_copy_by_copy ... ok
+test an_individual_has_one_copy_identity_per_sequence ... ok
+test a_sealed_admission_from_another_configuration_is_rejected ... ok
+test an_intermediate_f_reuses_exactly_when_its_bernoulli_says_so ... ok
+test an_absent_substitution_keeps_the_subpopulation_default ... ok
+test a_traversal_with_another_assignment_is_rejected ... ok
+test assignments_are_canonical_and_cover_every_copy_once ... ok
+test f5_never_computes_a_reproductive_ne ... ok
+test declaring_f_outside_a_diploid_is_rejected_before_founders ... ok
+test every_published_founder_identity_is_rederivable_by_an_independent_reader ... ok
+test every_copy_has_exactly_one_membership_and_every_membership_one_copy ... ok
+test every_published_table_is_ordered_by_its_own_key ... ok
+test founder_keys_derive_their_individual_identity ... ok
+test one_copy_keeps_a_single_identity_across_every_block_of_its_sequence ... ok
+test probabilistic_units_publish_null_tolerances_and_no_quota ... ok
+test the_assignment_traversal_can_only_be_consumed_once ... ok
+test provided_and_derived_individual_ids_produce_the_same_copy_contract ... ok
+test founder_keys_also_work_in_controlled_mode ... ok
+test the_copy_identities_follow_the_effective_ploidy ... ok
+test a_mixed_repartition_publishes_a_realized_f_per_block ... ok
+test the_boundary_tie_is_reproducible_from_its_published_scope ... ok
+test the_controlled_mode_materializes_its_links ... ok
+test the_default_copy_tolerance_is_exactly_one_half_and_not_a_rescaled_one ... ok
+test the_founder_f_scope_is_opened_exactly_once_in_the_module ... ok
+test six_copies_split_the_dyadic_profile_without_rejection ... ok
+test the_independent_id_oracle_reproduces_the_frozen_catalog_vectors ... ok
+test the_copy_permutation_is_reproducible_and_assigns_the_sorted_multiset ... ok
+test the_last_legal_block_index_is_accepted ... ok
+test the_minimal_haploid_case_meets_its_bound_exactly ... ok
+test the_module_never_names_a_haplotype_process_a_cross_a_mosaic_or_a_map ... ok
+test a_declared_zero_tolerance_admits_only_an_exact_quota ... ok
+test the_integer_quota_oracle_accepts_non_dyadic_profiles ... ok
+test the_profile_rejects_a_null_weight_before_founders ... ok
+test the_population_level_f_governs_a_subpopulation_without_its_own ... ok
+test the_controlled_mode_works_outside_diploids ... ok
+test the_haplotype_rows_publish_every_rank_with_the_alleles_of_the_winning_matrix ... ok
+test the_same_founder_key_in_two_subpopulations_yields_two_founders ... ok
+test the_retained_repository_does_not_grow_with_the_block_count ... ok
+test the_sealed_budget_grows_exactly_with_the_founder_structures_it_retains ... ok
+test the_sequence_key_is_lexicographic_and_not_the_fasta_order ... ok
+test the_visitor_error_stops_the_traversal ... ok
+test two_blocks_and_two_subpopulations_resolve_their_own_mode ... ok
+test two_subpopulations_receive_their_own_f ... ok
+test rows_are_ordered_by_population_and_block_id ... ok
+test an_impossible_quota_is_rejected_with_its_own_diagnostic ... ok
+test the_default_bound_is_inclusive_and_a_stricter_one_rejects_the_same_quota ... ok
+test a_group_included_in_full_never_opens_a_tie ... ok
+test the_realized_count_is_added_to_the_published_unit_cost ... ok
+test controlled_quotas_sum_c_and_match_the_integer_oracle ... ok
+test every_probabilistic_copy_reproduces_its_own_scope ... ok
+test the_realized_f_matches_its_rational_oracle_in_both_modes ... ok
+test the_assignment_is_reproducible_under_its_seed ... ok
+test every_legal_copy_count_accepts_its_quota ... ok
+test the_counted_cost_stays_linear_in_the_copy_count ... ok
+test the_multiallelic_f_formulas_hold_end_to_end ... ok
+
+test result: ok. 76 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.75s
+
+     Running tests/f5_haplotypes.rs (target/debug/deps/f5_haplotypes-8664522ca1b50330)
+
+running 18 tests
+test duplicate_rows_are_counted_and_never_merged ... ok
+test every_column_matches_the_integer_oracle_with_uniform_weights ... ok
+test an_exact_tie_keeps_the_previous_prefix_through_the_whole_chain ... ok
+test non_uniform_and_non_dyadic_weights_match_the_integer_oracle ... ok
+test admission_rejects_h_max_beyond_two_pow_v_even_when_every_draw_would_fit ... ok
+test an_undeclared_distribution_keeps_the_profile_weights_bit_for_bit ... ok
+test fixed_targets_build_constant_columns_without_error ... ok
+test several_attempts_share_one_marginal_table ... ok
+test the_first_cardinality_bound_also_uses_h_max_and_not_the_draw ... ok
+test more_haplotypes_than_the_block_can_represent_is_rejected_before_the_attempt ... ok
+test the_attempt_index_changes_the_matrix_because_it_changes_the_scope ... ok
+test the_block_weights_are_the_rank_prefix_renormalized ... ok
+test the_h_max_bound_dominates_the_rows_every_block_builds ... ok
+test the_drawn_count_is_reproducible_with_its_seed_and_moves_with_another ... ok
+test every_drawn_count_lands_inside_the_declared_interval_and_both_clamps_bite ... ok
+test the_per_block_builder_reproduces_the_whole_attempt_under_a_declared_distribution ... ok
+test the_declared_cost_doubles_with_h_instead_of_squaring_the_search_space ... ok
+test four_thousand_ninety_six_haplotypes_stay_linear_in_h ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running tests/f5_identity.rs (target/debug/deps/f5_identity-d5fe7ba39f6ad552)
+
+running 2 tests
+test f5_id_catalog_v4_derives_distinct_typed_prefixes_for_founder_outputs ... ok
+test f5_founder_ids_are_sensitive_to_copy_index_and_assignment_links ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f5_ld.rs (target/debug/deps/f5_ld-d45877ac930e0ef6)
+
+running 10 tests
+test a_bin_without_pairs_is_not_applicable_and_never_zero ... ok
+test fixed_sites_are_not_evaluable_and_can_invalidate_the_attempt ... ok
+test two_subpopulations_are_evaluated_independently ... ok
+test pairs_and_bins_reproduce_an_exact_rational_oracle ... ok
+test a_profile_whose_weights_overshoot_one_does_not_abort_the_evaluation ... ok
+test a_realized_zero_marginal_is_not_evaluable_without_being_fixed ... ok
+test each_bin_receives_only_the_intrablock_pairs_at_its_distance ... ok
+test wide_bins_split_exactly_at_their_boundary ... ok
+test non_dyadic_weights_match_the_exact_rational_marginals ... ok
+test a_layout_with_another_geometry_is_refused ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/f5_marginals.rs (target/debug/deps/f5_marginals-c4814eb9f3a0b0db)
+
+running 6 tests
+test marginal_spectrum_reproduces_the_published_catalog_vector_and_its_first_two_words ... ok
+test more_haplotypes_than_the_block_can_represent_are_rejected_before_sampling ... ok
+test a_layout_from_another_admission_cannot_produce_marginals ... ok
+test the_same_configuration_regenerates_the_same_marginals ... ok
+test the_table_covers_every_block_and_site_of_every_subpopulation_in_canonical_order ... ok
+test reordering_or_adding_a_subpopulation_leaves_the_other_marginals_untouched ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/f5_oracle.rs (target/debug/deps/f5_oracle-dac14a67f9cfc9a1)
+
+running 43 tests
+test a_haplotype_count_list_that_skips_a_unit_is_refused ... ok
+test an_unreadable_directory_in_a_failure_package_is_refused ... ok
+test a_genotype_record_round_trips_through_serde_json_byte_for_byte ... ok
+test a_copy_snp_outside_its_sequence_is_refused_by_the_recount ... ok
+test both_ld_states_pass_the_oracle ... ok
+test a_barren_sequence_contributes_nothing ... ok
+test a_missing_artifact_is_refused ... ok
+test a_link_that_does_not_describe_its_bytes_is_refused ... ok
+test a_block_starting_at_coordinate_zero_is_refused ... ok
+test a_recounted_locus_of_another_subpopulation_is_refused ... ok
+test a_coherently_substituted_alternate_base_is_refused ... ok
+test the_failure_package_auditor_refuses_each_broken_term_by_its_own_reason ... ok
+test a_controlled_unit_without_copies_has_no_quota ... ok
+test an_artifact_that_is_a_directory_cannot_be_measured ... ok
+test provided_and_derived_founder_identifiers_are_both_accepted ... ok
+test the_effective_f_and_the_spectrum_bands_refuse_each_broken_term ... ok
+test the_man70_recount_needs_only_the_founder_truth ... ok
+test the_oracle_accepts_a_whole_published_package_and_summarises_it ... ok
+test the_oracle_accepts_every_covered_ploidy ... ok
+test the_published_rng_catalogues_have_the_decisions_the_oracle_demands ... ok
+test a_controlled_quota_outside_its_tolerance_is_refused ... ok
+test a_dyadic_profile_publishes_four_distinct_weights ... ok
+test a_bin_whose_error_exceeds_its_tolerance_is_refused ... ok
+test the_ld_evaluation_refuses_each_broken_property_by_its_own_reason ... ok
+test each_truth_genotype_rejects_its_corruptions_by_their_own_reason ... ok
+test the_haplotype_and_marginal_tables_refuse_each_broken_property_by_its_own_reason ... ok
+test the_recount_rejects_the_document_as_bytes ... ok
+test the_two_extremes_of_f_choose_their_own_model ... ok
+test the_recount_refuses_a_repeated_site_and_a_repeated_position ... ok
+test each_truth_copy_rejects_its_corruptions_by_their_own_reason ... ok
+test two_subpopulations_sharing_an_individual_identifier_cannot_share_a_copy_identity ... ok
+test two_consecutive_copies_with_the_same_key_break_the_order ... ok
+test the_layout_and_the_sites_refuse_each_broken_property_by_its_own_reason ... ok
+test the_truth_header_rejects_each_corruption_by_its_own_reason ... ok
+test the_recount_rejects_each_document_level_corruption ... ok
+test the_tsv_reader_refuses_each_malformed_row_by_its_own_reason ... ok
+test the_unit_walk_and_the_attempts_refuse_each_broken_property_by_its_own_reason ... ok
+test the_recounted_loci_must_be_the_sites_the_tsv_files_publish ... ok
+test the_founder_walk_refuses_each_broken_property_by_its_own_reason ... ok
+test the_declaration_refuses_each_broken_term_by_its_own_reason ... ok
+test every_isolated_declaration_mutation_dies_of_its_own_cause ... ok
+test the_oracle_peak_keeps_a_bounded_ratio_to_the_record_it_holds ... ok
+test every_isolated_byte_mutation_dies_of_its_own_cause ... ok
+
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.91s
+
+     Running tests/f5_publication.rs (target/debug/deps/f5_publication-9e6c71ea6523fb5f)
+
+running 34 tests
+test a_general_whose_name_is_not_publishable_is_rejected_by_admission ... ok
+test a_failure_cannot_publish_a_surviving_root_document ... ok
+test an_exhausted_search_publishes_its_best_attempt_and_counters ... ok
+test an_exhausted_layout_publishes_the_attempts_it_really_consumed ... ok
+test a_rejected_recount_publishes_no_destination ... ok
+test a_rejected_recount_publishes_a_failed_package_instead_of_an_incomplete_provisional ... ok
+test a_preflight_rejection_opens_no_destination ... ok
+test an_interrupted_execution_leaves_the_provisional_marked_incomplete ... ok
+test every_byte_mutation_of_a_failed_package_dies_of_its_own_cause ... ok
+test a_profile_without_a_distribution_keeps_its_published_bytes_and_its_v1_catalogue ... ok
+test a_controlled_failure_publishes_the_diagnostic_and_no_biological_artifact ... ok
+test the_gate_rejects_a_diagnostic_that_contradicts_its_own_manifest ... ok
+test an_undeclared_file_never_reaches_the_destination_in_either_state ... ok
+test the_independent_oracle_accepts_a_whole_failed_package ... ok
+test the_budget_derived_from_h_max_still_dominates_what_the_package_publishes ... ok
+test published_counts_without_the_distribution_that_produces_them_are_rejected ... ok
+test a_successful_publication_links_seven_artifacts_and_the_truth ... ok
+test the_payload_inventory_refuses_a_symbolic_link ... ok
+test the_sealed_admission_carries_every_sequence_length_the_fasta_declares ... ok
+test the_effective_configuration_and_the_manifest_publish_the_same_objects ... ok
+test the_oracle_rejects_a_published_count_that_its_own_draw_does_not_produce ... ok
+test the_published_documents_cover_both_sampling_modes_and_both_identity_origins ... ok
+test the_published_preflight_carries_the_scalars_the_contract_enumerates ... ok
+test eligible_bases_and_the_attempt_summary_are_now_contrasted ... ok
+test the_three_ploidies_publish_a_conforming_package ... ok
+test the_four_normalizations_travel_complete_and_in_their_closed_order ... ok
+test both_provenances_of_the_inbreeding_coefficient_reach_the_two_documents ... ok
+test every_failure_stage_publishes_a_document_its_own_schema_accepts ... ok
+test a_declared_distribution_publishes_its_decision_the_v2_catalogue_and_renormalised_weights ... ok
+test every_divergence_between_the_two_copies_is_rejected_by_its_own_term ... ok
+test the_independent_oracle_accepts_the_manifest_it_reads_from_the_package ... ok
+test the_published_documents_validate_against_their_external_schemas ... ok
+test the_verification_peak_fits_the_sealed_budget_and_does_not_grow_with_the_block_count ... ok
+test the_whole_publication_stays_within_twice_the_sealed_budget_without_the_oracle ... ok
+
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.25s
+
+     Running tests/f5_resource_preflight.rs (target/debug/deps/f5_resource_preflight-b643ab91205a2dcb)
+
+running 56 tests
+test disjoint_gap_profile_flows_from_preflight_to_reproducible_layout ... ok
+test block_length_plan_rejects_a_preflight_crossed_with_another_profile ... ok
+test hard_resource_bounds_are_inclusive_and_the_next_byte_is_rejected ... ok
+test exact_fraction_avoids_intermediate_overflow_and_floors_once ... ok
+test block_length_plan_binds_same_profile_preflights_to_the_declared_objective ... ok
+test covered_bases_reserves_its_known_formula_before_opening_reference ... ok
+test gap_support_cardinality_is_discontinuous_bounded_and_inclusive_before_rng ... ok
+test invalid_covered_bases_and_site_bounds_win_before_absent_reference ... ok
+test layout_request_binds_other_resource_contributions ... ok
+test known_external_exhaustion_rejects_before_reference_or_mask_and_entropy ... ok
+test layout_request_rejects_preflight_from_other_reference_before_layout_rng ... ok
+test effective_and_manifest_are_rejected_when_one_published_copy_diverges ... ok
+test impossible_targets_and_override_outside_resolved_blocks_are_rejected ... ok
+test cli_validate_executes_point_four_without_creating_a_destination ... ok
+test maximum_singleton_gap_exhausts_layout_normally_without_overflow ... ok
+test literal_byte_oracle_accepts_exact_operation_formula_and_rejects_minus_one ... ok
+test preflight_identity_binds_seed_and_seed_origin_before_layout_rng ... ok
+test preflight_binding_rejects_equal_capacity_masks_and_changed_resource_limits ... ok
+test cli_enforces_the_physical_toml_limit_before_materializing_a_comment ... ok
+test public_preflight_reuses_the_initial_other_binding_without_late_io ... ok
+test preflight_identity_binds_semantic_subpopulations_and_overrides_before_layout_rng ... ok
+test public_layout_preserves_configured_scenario_in_plan_subseed_and_ids ... ok
+test retained_sequence_id_peak_is_persisted_in_the_published_memory_bound ... ok
+test resource_limit_includes_other_outputs_and_rejects_before_any_destination ... ok
+test profile_padding_changes_its_phase_without_summing_noncoexistent_peaks ... ok
+test sealed_phases_follow_the_closed_admission_order_and_close_the_totals ... ok
+test sealed_receipt_binds_every_input_in_contractual_role_order_with_mask ... ok
+test sealed_receipt_without_a_declared_mask_stops_at_the_reference ... ok
+test sealed_receipt_rejects_semantically_equal_toml_with_different_comments ... ok
+test second_fasta_pass_accepts_the_exact_sealed_size ... ok
+test second_fasta_pass_rejects_modified_truncated_and_grown_references ... ok
+test site_and_cell_bounds_bins_and_checked_formula_overflow_are_accounted ... ok
+test site_bound_covers_one_and_the_inclusive_4096_boundary ... ok
+test swapped_profile_tables_are_rejected_on_load_and_never_cross_a_sealed_receipt ... ok
+test seedless_entropy_is_resolved_only_after_complete_physical_admission ... ok
+test the_sealed_reference_identity_is_reused_without_reopening_the_fasta ... ok
+test the_site_summary_envelope_tracks_the_declared_ploidy ... ok
+test the_haplotype_row_envelope_tracks_the_site_bound ... ok
+test the_truth_bound_charges_each_snp_once_per_copy_not_once_per_sequence ... ok
+test trillion_wide_gap_support_is_rejected_without_enumeration ... ok
+test two_contigs_with_interior_n_reach_layout_through_the_production_path ... ok
+test wide_literal_length_support_is_rejected_by_preflight_before_enumeration ... ok
+test zero_fractional_target_is_a_domain_failure_without_rng ... ok
+test valid_mask_identity_changes_are_input_mismatches_before_entropy_or_destination ... ok
+test mask_bytes_raise_v8_operation_budget_with_equal_geometry_and_exact_limit ... ok
+test mask_scanner_is_ordered_across_sequences_and_has_a_bounded_row ... ok
+test public_v8_preflight_serializes_gap_terms_and_validates_both_contracts ... ok
+test sealed_projection_publishes_identities_and_phases_in_receipt_order ... ok
+test fragmented_tracts_are_budgeted_before_vector_growth ... ok
+test an_independent_oracle_reconstructs_the_whole_v8_projection_from_inputs ... ok
+test fragmented_mask_changes_only_tract_terms_and_is_bounded_inclusively ... ok
+test layout_streams_large_fasta_and_keeps_the_admitted_working_bound ... ok
+test large_fasta_with_small_budget_is_rejected_without_materializing_all_bases ... ok
+test long_fasta_description_is_discarded_under_a_bounded_address_space ... ok
+test maximum_length_sequence_ids_are_budgeted_before_metadata_growth ... ok
+test fasta_descriptions_raise_v8_operation_budget_and_preserve_productive_rng_path ... ok
+
+test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.75s
+
+     Running tests/f5_rng_catalog.rs (target/debug/deps/f5_rng_catalog-632d7ae5a23e9759)
+
+running 6 tests
+test f5_layout_and_matrix_bytes_are_canonical_independent_of_later_writers ... ok
+test f5_rng_catalog_v2_extends_v1_without_rewriting_a_single_frozen_row ... ok
+test f5_rng_catalog_constants_name_the_frozen_contract ... ok
+test f5_runtime_primitives_preserve_extreme_consumption_contracts ... ok
+test f5_rng_catalog_v1_has_literal_subseed_and_chacha12_vectors ... ok
+test f5_uniform_53_is_the_normative_high_bit_quotient_closed_in_zero_and_open_in_one ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f5_search.rs (target/debug/deps/f5_search-6474d040e0ea5183)
+
+running 26 tests
+test a_terminated_block_consumes_no_proposal ... ok
+test a_fully_fixed_spectrum_proves_no_pair_can_be_evaluable ... ok
+test an_empty_bin_reaches_not_applicable_through_the_search ... ok
+test a_degenerate_block_neither_terminates_nor_is_selected ... ok
+test one_sterile_block_among_valid_ones_stops_the_scenario ... ok
+test exhaustion_does_not_relax_the_problem ... ok
+test exhaustion_keeps_the_best_attempt_without_claiming_impossibility ... ok
+test the_cell_budget_is_enforced_before_the_search_can_run ... ok
+test every_attempt_draws_from_its_own_swap_scope ... ok
+test most_proposals_are_discarded_without_applying_the_swap ... ok
+test only_crossed_swaps_are_applied_so_every_row_and_column_count_survives ... ok
+test accepted_proposals_never_leave_the_tuple_worse_than_it_started ... ok
+test every_unit_runs_exactly_the_attempts_it_needs ... ok
+test non_uniform_weights_survive_every_accepted_swap ... ok
+test rebuilding_the_maximum_visits_only_the_active_bins ... ok
+test two_variable_columns_are_enough_to_open_the_search ... ok
+test the_per_block_builder_reproduces_the_whole_attempt ... ok
+test the_attempt_index_tiebreak_is_reachable_end_to_end ... ok
+test the_measured_cost_separates_the_canonical_pass_from_the_proposals ... ok
+test sixteen_independent_units_are_all_resolved ... ok
+test the_proposal_loop_cost_does_not_depend_on_the_bin_count ... ok
+test stopping_before_the_budget_can_only_mean_termination ... ok
+test the_search_is_reproducible_under_its_seed ... ok
+test the_search_never_degrades_the_discrete_fields_it_started_from ... ok
+test the_published_tuple_matches_an_independent_rational_oracle ... ok
+test the_incremental_score_never_diverges_from_the_canonical_one ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running tests/fasta_validation.rs (target/debug/deps/fasta_validation-6905b8c453ffdac8)
+
+running 8 tests
+test reference_fasta_summary_matches_full_read ... ok
+test reference_fasta_summary_rejects_the_same_invalid_symbol ... ok
+test reference_fasta_summary_rejects_the_same_declared_length ... ok
+test supplied_fasta_preserves_n_case_crlf_and_non_utf8_header_bytes ... ok
+test supplied_fasta_rejects_empty_and_duplicate_ids ... ok
+test supplied_fasta_rejects_empty_file_and_empty_sequence ... ok
+test supplied_fasta_rejects_sequence_catalog_or_length_mismatch ... ok
+test supplied_fasta_rejects_gzip_gap_iupac_and_other_symbol ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/guard_constructors.rs (target/debug/deps/guard_constructors-e3c7a86a9260ae63)
+
+running 2 tests
+test the_lexical_scan_sees_a_hand_built_rejection ... ok
+test format_rejections_of_results_and_event_manifest_are_built_only_in_their_constructors ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/haplotype_integration.rs (target/debug/deps/haplotype_integration-4b314499c0fed922)
+
+running 1 test
+test haplotype_state_reconstructs_known_truth_preserves_n_and_derives_phase_and_dose ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/haplotype_state.rs (target/debug/deps/haplotype_state-4fd150fb342d2826)
+
+running 3 tests
+test ploidy_accepts_every_contract_boundary_and_rejects_values_outside_it ... ok
+test individual_has_every_sequence_and_one_distinct_phased_copy_per_ploidy_index ... ok
+test building_copies_keeps_unknown_bases_only_in_the_shared_reference ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/identity.rs (target/debug/deps/identity-31c923e691dc3f3b)
+
+running 6 tests
+test matrix_variant_id_is_stable_and_excludes_population_and_row_order ... ok
+test all_a6_vectors_match_material_and_identifier ... ok
+test automatic_collision_is_rejected_and_types_remain_distinct ... ok
+test identity_uses_the_active_v3_catalog ... ok
+test registry_separates_categories_but_rejects_reuse_in_the_same_scope ... ok
+test provided_ids_accept_the_exact_ascii_boundary_and_labels_are_unicode ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/indel_application.rs (target/debug/deps/indel_application-ac7b9507dc58f72e)
+
+running 11 tests
+test a_two_base_deletion_has_exact_length_and_leaves_both_terminal_bases ... ok
+test deletion_reenumeration_eliminates_opportunities_and_rolls_back_the_full_class ... ok
+test exact_indel_lengths_are_independent_and_stay_below_the_effective_threshold ... ok
+test joint_entrypoint_always_applies_insertions_before_deletions ... ok
+test insertion_reenumerates_the_current_state_and_can_use_an_anchor_it_created ... ok
+test later_calls_keep_inserted_provenance_distinct_and_a_deleted_source_locus_is_absent ... ok
+test joint_sampled_path_uses_the_insertion_state_to_create_a_deletion_opportunity ... ok
+test terminal_deletions_and_n_anchors_are_not_opportunities_but_insertion_content_is_acgt ... ok
+test threshold_minus_one_is_applied_as_an_exact_insertion_length ... ok
+test zero_rate_leaves_the_state_unchanged_without_a_count_or_position_consumer ... ok
+test random_indel_classes_are_reproducible_with_their_own_count_and_position_scopes ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/initial_genotypes.rs (target/debug/deps/initial_genotypes-fd2309925aa0dac2)
+
+running 16 tests
+test f_degenerate_and_invalid_vectors_preserve_the_rng_sentinel ... ok
+test f_multiallelic_normative_word_vectors_cover_f_categories_and_consumption ... ok
+test hwe_and_f_preflight_degenerate_loci_and_formulas_without_poisson ... ok
+test hwe_multiallelic_normative_word_vectors_cover_ploidies_and_consumption ... ok
+test phase_permutation_assigns_multiallelic_c_a_g_once_per_copy_and_preserves_polyploid_doses ... ok
+test phase_permutation_has_a_frozen_initial_phase_locus_subseed_vector ... ok
+test phase_permutation_degenerate_and_invalid_cases_consume_no_words ... ok
+test phase_permutation_word_vectors_preserve_complete_compositions_for_every_ploidy ... ok
+test compositions_cover_hwe_ploidies_one_two_and_ten_with_frozen_doses ... ok
+test multiallelic_f_uses_one_canonical_locus_key_and_preserves_all_doses ... ok
+test phase_assignment_retains_complete_composition_and_is_reproducible_and_rng_isolated ... ok
+test sampling_requires_the_reference_bound_to_the_prepared_matrix ... ok
+test composition_keeps_the_prepared_reference_contig_order ... ok
+test sampling_rejects_same_id_with_a_different_reference_fingerprint_before_rng ... ok
+test composition_is_reproducible_and_isolated_from_population_and_row_changes ... ok
+test hwe_empirical_dosage_statistics_are_frozen_and_match_binomial_expectation ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+
+     Running tests/initial_individual_integration.rs (target/debug/deps/initial_individual_integration-8aadcdd7eb82a118)
+
+running 8 tests
+test phased_loci_reject_a_matrix_with_different_frequency_fingerprint ... ok
+test authorization_never_relaxes_the_matrix_allele_catalog ... ok
+test projected_matrix_snps_and_declared_indel_change_only_the_targeted_phased_copies ... ok
+test direct_event_list_cannot_relabel_a_matrix_snp_as_explicit ... ok
+test later_invalid_indel_rejects_the_complete_batch_without_publishing_matrix_snps ... ok
+test f_equal_one_rejects_a_forced_heterozygote_before_applying_any_copy_change ... ok
+test positive_probability_multiallelic_hwe_constraint_needs_no_authorization ... ok
+test phase_views_are_strictly_scoped_per_individual_across_cohorts ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/initial_individual_materialization.rs (target/debug/deps/initial_individual_materialization-ca2c6c7f980b0217)
+
+running 4 tests
+test preflight_materialization_accepts_indels_without_retaining_their_bases ... ok
+test deletion_is_explicitly_missing_and_uses_only_observed_copies_for_frequencies ... ok
+test adding_or_reordering_entities_does_not_change_an_existing_individual ... ok
+test independent_hwe_and_f_oracles_cover_models_ploidies_and_zero_observations ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/initial_populations_config.rs (target/debug/deps/initial_populations_config-b64e6ec20af1341f)
+
+running 6 tests
+test provided_ids_replace_derivation_only_with_exact_cardinality_and_global_uniqueness ... ok
+test f_diploid_is_exclusive_to_diploids_and_validates_its_coefficient ... ok
+test omitted_ids_require_unique_founder_keys_and_derive_from_them ... ok
+test hwe_accepts_every_effective_ploidy_and_derives_stable_unique_ids ... ok
+test invalid_local_initial_cohort_stops_run_before_creating_destination ... ok
+test authoring_schema_and_rust_accept_the_same_initial_cohort_shape ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.51s
+
+     Running tests/integrity.rs (target/debug/deps/integrity-8e600d1291cbfcff)
+
+running 2 tests
+test sha256_matches_literal_vectors_incrementally ... ok
+test file_identity_matches_sha256sum_and_detects_change_or_truncation ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/manifest_minimal.rs (target/debug/deps/manifest_minimal-d729f2428740eed7)
+
+running 14 tests
+test v4_manifest_validation_reports_the_v4_schema_label ... ok
+test source_and_derived_fasta_cannot_alias_across_output_categories ... ok
+test output_categories_cannot_be_swapped_while_preserving_a_partition ... ok
+test failed_reduction_keeps_reached_links_and_requested_classification ... ok
+test v4_complete_manifest_requires_complete_event_links_in_rust_and_external_schema ... ok
+test v4_failed_manifest_rejects_f5_only_diagnostic_in_rust_and_external_validator ... ok
+test complete_manifest_requires_the_canonical_truth_artifact_and_minimum_category ... ok
+test complete_and_failed_minimal_manifests_pass_rust_and_external_validators ... ok
+test truncation_unknown_field_and_absent_link_fail_both_validators ... ok
+test failed_diagnostics_must_exist_in_catalog_v2_with_canonical_meaning ... ok
+test population_snvs_link_is_discriminated_by_mode_in_rust_and_schema ... ok
+test duplicate_ids_paths_and_output_categories_are_rejected ... ok
+test initial_population_statistics_are_closed_in_rust_and_schema ... ok
+test artifact_paths_are_canonical_and_digests_are_lowercase_sha256 ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.41s
+
+     Running tests/materialization.rs (target/debug/deps/materialization-551b19c6ffc374fb)
+
+running 8 tests
+test derives_diploid_phase_in_copy_order_and_dose_from_canonical_edits ... ok
+test materializes_a_haploid_copy_from_manual_snp_indel_truth_and_preserves_n ... ok
+test interval_materialization_matches_the_manual_full_truth_across_edits_and_edges ... ok
+test derives_polyploid_dose_as_the_number_of_carrier_copies ... ok
+test rejects_a_chain_with_the_right_ids_but_the_wrong_source_length ... ok
+test rejects_equal_snp_alleles_before_any_genotype_or_dose_is_derived ... ok
+test rejects_a_locus_deleted_from_one_copy ... ok
+test rejects_reference_and_sequence_incompatibilities_instead_of_reinterpreting_coordinates ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/minimal_execution.rs (target/debug/deps/minimal_execution-db23c87d5ba62ded)
+
+running 1 test
+test minimal_cli_never_publishes_resolution_evidence_or_event_units ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/normative_catalogs.rs (target/debug/deps/normative_catalogs-d714c8e76e5c9a29)
+
+running 12 tests
+test diagnostic_catalog_rejects_duplicate_unknown_and_empty_entries ... ok
+test every_f1_consumer_hito_has_a_planned_diagnostic ... ok
+test every_identifier_named_by_a_vector_is_derived_by_another_row_of_the_catalog ... ok
+test human_and_json_fixtures_describe_the_same_diagnostic ... ok
+test id_catalog_v3_preserves_v2_rows_and_adds_f4_v2_derivations ... ok
+test id_catalog_v4_is_a_literal_v3_superset_with_five_f5_classes ... ok
+test id_vectors_separate_classes_and_encode_the_first_128_digest_bits ... ok
+test subseed_vectors_publish_exact_canonical_material ... ok
+test f5_rng_catalog_v1_publishes_independent_blake3_and_chacha12_vectors ... ok
+test published_diagnostic_catalog_is_well_formed_and_covers_every_category ... ok
+test variant_id_catalog_has_an_independent_review_fingerprint ... ok
+test published_contracts_match_their_reviewed_content ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/pcr_admission.rs (target/debug/deps/pcr_admission-6c3d3e96c040c9f1)
+
+running 21 tests
+test a_composition_curve_with_zero_efficiency_is_rejected ... ok
+test an_unknown_key_inside_the_amplification_table_is_rejected ... ok
+test a_composition_curve_with_decreasing_knots_is_rejected ... ok
+test a_zero_efficiency_is_rejected ... ok
+test an_amplification_table_without_the_amplified_preparation_is_rejected ... ok
+test an_unreachable_duplicate_fraction_is_rejected_instead_of_being_clamped ... ok
+test early_cycles_above_the_declared_cycles_are_rejected ... ok
+test the_amplified_preparation_without_its_table_is_rejected ... ok
+test the_baseline_amplified_scenario_is_admitted ... ok
+test the_amplified_preparation_with_declared_repeat_loci_is_now_accepted ... ok
+test more_efficiency_classes_than_the_contract_allows_are_rejected ... ok
+test an_amplification_without_cycles_is_rejected ... ok
+test an_amplification_without_the_duplicate_fraction_is_rejected ... ok
+test an_invented_library_preparation_is_rejected ... ok
+test amplification_over_declared_loci_demands_the_base_stutter ... ok
+test a_declared_per_cycle_slip_is_checked_against_its_domain ... ok
+test efficiency_classes_whose_weights_do_not_sum_to_one_are_rejected ... ok
+test thirty_one_cycles_are_rejected_naming_the_maximum ... ok
+test either_half_alone_is_admitted ... ok
+test the_optional_caps_are_checked_against_their_contract_maximum ... ok
+test a_duplicate_fraction_outside_its_domain_is_rejected ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/pcr_catalog.rs (target/debug/deps/pcr_catalog-c95f9c700667e4c0)
+
+running 4 tests
+test only_the_amplification_stage_belongs_to_the_new_catalog ... ok
+test the_first_attempt_keeps_the_inherited_fragment_keys ... ok
+test the_amplification_keys_match_their_frozen_vectors ... ok
+test every_amplification_decision_opens_a_distinct_key ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/pcr_contract.rs (target/debug/deps/pcr_contract-8e7b817a579da87a)
+
+running 8 tests
+test a_preparation_resolves_its_own_profile_and_an_unknown_id_is_rejected ... ok
+test the_fast_profile_facts_agree_with_the_verified_profile ... ok
+test the_pcr_free_resource_keeps_its_frozen_digest_and_fields ... ok
+test the_sibling_profile_loads_and_declares_its_preparation ... ok
+test the_new_schema_tables_are_closed_and_bounded ... ok
+test the_notebook_controls_repeat_the_same_contract_constants ... ok
+test the_algorithm_and_inversion_names_match_across_resource_and_schemas ... ok
+test every_schema_and_resource_maximum_matches_its_rust_constant ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running tests/pcr_dp_build_count.rs (target/debug/deps/pcr_dp_build_count-28a5834b105ab2ce)
+
+running 1 test
+test the_early_copy_table_is_built_once_per_efficiency_class ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.37s
+
+     Running tests/pcr_frozen_identity.rs (target/debug/deps/pcr_frozen_identity-24d3e08adb1947fd)
+
+running 2 tests
+test the_first_pair_the_sampler_produces_keeps_its_frozen_digest ... ok
+test the_unamplified_scenario_keeps_its_frozen_fastq_digest ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+     Running tests/pcr_independent_validator.rs (target/debug/deps/pcr_independent_validator-a18b957eb9007375)
+
+running 3 tests
+test a_mutated_manifest_histogram_is_rejected ... ok
+test the_recomputed_family_sizes_match_the_groups_written_in_the_reads ... ok
+test the_independent_recomputation_matches_the_published_aggregates ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.75s
+
+     Running tests/pcr_model.rs (target/debug/deps/pcr_model-8a38112818950b78)
+
+running 14 tests
+test a_neutral_relative_efficiency_gives_exactly_one ... ok
+test an_unreachable_duplicate_fraction_is_rejected_naming_the_maximum ... ok
+test a_zero_duplicate_fraction_returns_exactly_zero_without_iterating ... ok
+test the_direct_fraction_is_strictly_increasing_over_a_hundred_point_mesh ... ok
+test inverting_the_worked_fractions_recovers_their_mean_pairs_per_molecule ... ok
+test the_early_copy_distribution_matches_a_hand_written_path_enumeration ... ok
+test the_family_size_weights_match_the_hand_computed_clamped_poisson ... ok
+test a_zero_lambda_family_size_consumes_no_randomness ... ok
+test the_family_size_weights_never_exceed_the_declared_maximum ... ok
+test the_gc_fraction_ignores_bases_outside_acgt ... ok
+test the_size_biased_distribution_has_the_mean_the_hand_enumeration_predicts ... ok
+test zero_early_cycles_leave_a_single_copy ... ok
+test the_iteration_count_is_constant_for_every_non_zero_target ... ok
+test the_module_never_calls_the_standard_library_transcendentals ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/pcr_pipeline.rs (target/debug/deps/pcr_pipeline-cf3bfbb4933a37ba)
+
+running 13 tests
+test the_aggregate_counts_are_internally_consistent ... ok
+test the_neutral_amplified_manifest_shows_no_amplification_decisions ... ok
+test the_published_duplicate_count_is_the_one_written_in_the_reads ... ok
+test the_pairs_of_a_family_are_not_adjacent_in_the_published_file ... ok
+test adding_a_library_does_not_change_the_families_of_the_others ... ok
+test exhausting_the_attempt_cap_is_counted_and_shrinks_with_a_larger_cap ... ok
+test the_published_documents_pass_their_external_schema_validation ... ok
+test the_unique_molecule_coverage_adds_up_across_two_libraries ... ok
+test the_early_cycles_inequality_raises_the_realized_fraction_above_the_declared_one ... ok
+test the_composition_curve_underrepresents_the_penalised_half ... ok
+test the_efficiency_class_draw_decides_which_class_a_family_gets ... ok
+test the_scalar_efficiency_is_only_published_when_classes_are_declared ... ok
+test the_neutral_amplified_run_writes_the_same_bytes_as_the_unamplified_one ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.15s
+
+     Running tests/pcr_resource_bound.rs (target/debug/deps/pcr_resource_bound-25ab7a788d095235)
+
+running 7 tests
+test the_memory_bound_does_not_grow_with_the_pair_count ... ok
+test the_dynamic_programming_cost_scales_with_the_classes_and_not_the_families ... ok
+test the_bound_has_the_exact_value_its_formula_says ... ok
+test the_sampler_never_rebuilds_the_early_copy_tables ... ok
+test with_a_neutral_curve_the_attempts_term_is_never_exercised ... ok
+test the_real_units_fit_inside_the_published_bound_on_a_saturated_fixture ... ok
+test removing_the_attempts_term_makes_the_bound_too_small_on_a_saturated_fixture ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.78s
+
+     Running tests/population_snvs_config.rs (target/debug/deps/population_snvs_config-b38ef7f46d8b8f72)
+
+running 6 tests
+test generate_requires_the_closed_f2_2_5_contract ... ok
+test f2_2_6_accepts_explicit_spectra_and_approved_profiles ... ok
+test uniform_frequency_model_rejects_an_ignored_frequency_mode ... ok
+test generate_rejects_incompatible_count_and_frequency_contracts ... ok
+test supplied_and_reuse_paths_must_not_be_empty ... ok
+test effective_config_rejects_generation_domain_errors_before_generation ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/population_snvs_formats.rs (target/debug/deps/population_snvs_formats-535b0c526f810e91)
+
+running 6 tests
+test alt_sum_keeps_reference_remainder_and_rejects_excess_or_non_finite_values ... ok
+test metadata_requires_the_closed_v1_envelope ... ok
+test canonical_tsv_preserves_the_frozen_eight_column_shape ... ok
+test multiallelic_alt_sum_uses_canonical_neumaier_audit_and_normalizes_at_the_inclusive_boundary ... ok
+test normalized_alt_sum_has_an_exact_zero_reference_frequency_after_rounding ... ok
+test tsv_rejects_vcf_and_noncanonical_columns ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/population_snvs_generation.rs (target/debug/deps/population_snvs_generation-6df0716477f58993)
+
+running 18 tests
+test streaming_selector_gumbel_top_k_keeps_the_two_highest_frozen_scores ... ok
+test streaming_selector_keeps_canonical_order_across_contigs_and_reports_empty_space ... ok
+test spectrum_allows_adjacent_semiopen_intervals ... ok
+test generation_rejects_empty_or_insufficient_space_and_poisson_zero_is_empty ... ok
+test generation_excludes_n_is_repeatable_and_populations_are_isolated ... ok
+test spectrum_exact_uses_largest_remainders_and_fixed_extremes ... ok
+test resolved_and_direct_validated_reference_share_the_same_generation_contract ... ok
+test exact_spectrum_uses_fractional_largest_remainders_and_stable_tie_order ... ok
+test spectrum_rejects_overlapping_intervals_in_isolation ... ok
+test population_frequency_streams_are_invariant_to_population_order_and_addition ... ok
+test exact_frequency_assignment_is_variant_id_stable_across_population_order_and_addition ... ok
+test rejects_overlapping_or_zero_weight_spectra ... ok
+test poisson_positive_density_and_semiopen_frequency_ranges_are_observable ... ok
+test weighted_regions_reject_unknown_contigs_and_out_of_reference_coordinates ... ok
+test weighted_regions_select_only_positive_bases ... ok
+test spectrum_rejects_all_zero_negative_and_nonfinite_weights_in_isolation ... ok
+test spectrum_rejects_invalid_log_and_fixed_components_in_isolation ... ok
+test streaming_selector_matches_known_weighted_distribution_and_is_seed_repeatable ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.28s
+
+     Running tests/population_snvs_preparation.rs (target/debug/deps/population_snvs_preparation-c01c1fe7187a18db)
+
+running 8 tests
+test supplied_parser_accepts_only_six_or_seven_columns ... ok
+test preparation_preserves_nonlexical_fasta_order_and_nonutf8_description ... ok
+test manifest_resolution_rejects_changed_fasta_bytes ... ok
+test preparation_rejects_duplicate_and_incomplete_multiallelic_coverage ... ok
+test preparation_normalizes_and_filters_zero_without_dropping_fixed_or_authorization ... ok
+test preparation_uses_independent_fasta_truth_and_canonical_order ... ok
+test preparation_treats_every_negative_zero_alt_frequency_as_globally_absent ... ok
+test manifest_resolution_rejects_corrupted_reduction_map_with_intact_fasta_and_hashes ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/population_snvs_publication.rs (target/debug/deps/population_snvs_publication-78e59ecb257338ed)
+
+running 3 tests
+test discarded_variant_requires_every_declared_population_in_reuse_and_physical_validation ... ok
+test supplied_matrix_is_prepared_into_the_same_closed_resource_shape ... ok
+test generation_publishes_the_closed_canonical_pair_and_reuse_only_consumes_it ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/publication_process.rs (target/debug/deps/publication_process-8fcbec58a9de54d1)
+
+running 6 tests
+test process_child ... ignored, subprocess helper
+test invalid_configuration_exits_two_without_destination_or_provisional ... ok
+test destination_is_never_clobbered_and_two_processes_have_one_winner ... ok
+test configuration_copy_is_byte_exact_linked_and_matches_external_sha256 ... ok
+test catalog_files_are_unique_resolvable_and_match_external_sha256 ... ok
+test complete_failed_and_incomplete_are_real_minimal_trees ... ok
+
+test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/published_resource_validation.rs (target/debug/deps/published_resource_validation-ac4168c17de678c5)
+
+running 6 tests
+test execution_id_is_bound_to_csprng_seed_and_exact_toml_digest ... ok
+test published_founder_keys_are_revalidated_against_the_toml_contract ... ok
+test hostile_genotype_dosage_overflow_is_a_controlled_revalidation_error ... ok
+test every_derived_sequence_catalog_field_is_checked_independently ... ok
+test direct_events_must_match_the_typed_toml_resolution_exactly ... ok
+test correlated_documents_cannot_replace_physical_authority ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.70s
+
+     Running tests/reduction_source_parity.rs (target/debug/deps/reduction_source_parity-1bf7be96dafaa098)
+
+running 3 tests
+test both_sources_reject_an_interval_outside_the_sequence ... ok
+test both_sources_reject_an_unknown_sequence ... ok
+test indexed_and_materialized_sources_return_the_same_bases ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/reference_copy.rs (target/debug/deps/reference_copy-76a532675ba30c7f)
+
+running 5 tests
+test effective_document_rejects_a_reference_with_an_origin_different_from_the_config ... ok
+test invalid_supplied_fasta_is_rejected_before_creating_a_destination ... ok
+test a_source_change_between_validation_and_copy_cannot_be_cataloged ... ok
+test authoritative_representation_is_loaded_from_the_copy_and_keeps_original_provenance ... ok
+test supplied_run_copies_the_validated_fasta_byte_for_byte ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/reference_domain.rs (target/debug/deps/reference_domain-403ab2e6af6c4488)
+
+running 8 tests
+test dna_reports_the_exact_one_based_position_and_raw_symbol ... ok
+test fasta_header_preserves_description_boundary_whitespace_reversibly ... ok
+test fasta_header_preserves_non_utf8_description_reversibly ... ok
+test reference_preserves_sequence_order_origin_and_zero_or_one_f1_index ... ok
+test fasta_header_keeps_raw_bytes_and_a_utf8_description_separately ... ok
+test reference_rejects_empty_and_duplicate_sequence_catalogs ... ok
+test dna_accepts_both_cases_and_normalizes_only_the_internal_value ... ok
+test reference_sequence_retains_the_validated_normalized_bases ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/reference_generation.rs (target/debug/deps/reference_generation-6c3fbf68723a9dea)
+
+running 6 tests
+test generated_reference_can_mark_an_independent_fraction_as_unknown ... ok
+test generated_reference_is_repeated_by_seed_and_changes_with_another_seed ... ok
+test generated_fasta_v1_has_literal_headers_lf_order_and_eighty_base_lines ... ok
+test generated_reference_rejects_an_acgt_catalog_whose_sum_is_outside_tolerance ... ok
+test generated_reference_rejects_a_non_acgt_catalog ... ok
+test generated_reference_respects_order_lengths_classes_and_degenerate_composition ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/reference_generation_regions.rs (target/debug/deps/reference_generation_regions-9429117ac9859a6c)
+
+running 9 tests
+test a_region_on_an_unknown_sequence_is_rejected ... ok
+test a_region_that_runs_past_the_end_of_the_sequence_is_rejected ... ok
+test the_random_fill_consumes_one_word_per_undeclared_base_only ... ok
+test a_region_declared_on_one_sequence_does_not_leak_into_another ... ok
+test two_overlapping_declared_regions_are_rejected_naming_both_intervals ... ok
+test the_same_seed_yields_the_same_fasta_byte_for_byte_with_regions ... ok
+test the_random_fill_honours_the_composition_outside_the_declared_region ... ok
+test a_declared_region_lands_at_its_coordinate_according_to_external_grep ... ok
+test without_declared_regions_the_output_matches_the_frozen_digest ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/reference_index_acceptance.rs (target/debug/deps/reference_index_acceptance-66f8237c98dceb84)
+
+running 1 test
+test normal_f1_run_has_zero_indexes_and_acceptance_query_creates_fai_on_demand ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/reference_reduction_config.rs (target/debug/deps/reference_reduction_config-d720ddd85ad94a96)
+
+running 5 tests
+test declared_reduction_preserves_target_variant_literal_and_location ... ok
+test effective_reduction_uses_exact_decimal_and_own_subseed ... ok
+test selection_algorithm_is_rejected_at_the_toml_boundary ... ok
+test exactly_one_target_and_known_fields_are_required ... ok
+test zero_endpoints_source_mismatch_and_non_reduction_are_rejected ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/reference_tract_insertion.rs (target/debug/deps/reference_tract_insertion-1ee7b9c48d542c57)
+
+running 8 tests
+test an_insertion_declared_on_one_sequence_does_not_leak_into_another ... ok
+test the_existing_reduction_map_schema_is_untouched ... ok
+test the_derived_reference_carries_its_own_identity ... ok
+test an_insertion_outside_the_genome_is_rejected ... ok
+test one_insertion_shifts_the_map_and_the_bases_follow ... ok
+test the_second_declared_position_still_refers_to_the_original_genome ... ok
+test the_published_map_validates_against_its_schema ... ok
+test the_coordinate_map_schema_rejects_the_documents_that_violate_its_conditionals ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.79s
+
+     Running tests/repeat_admission_guard.rs (target/debug/deps/repeat_admission_guard-20f1f657e03dec8d)
+
+running 7 tests
+test a_region_without_a_single_repeat_is_rejected ... ok
+test each_of_the_two_minima_rejects_something_the_other_admits ... ok
+test a_pure_tract_in_the_reference_is_admitted ... ok
+test a_composite_locus_is_observed_against_every_one_of_its_motifs ... ok
+test a_real_impure_tract_above_the_minimum_is_admitted ... ok
+test the_guard_does_not_apply_to_a_simulated_reference ... ok
+test just_below_the_purity_minimum_is_rejected_and_just_above_is_admitted ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/repeat_allele_state.rs (target/debug/deps/repeat_allele_state-3dd854f3a73a7c69)
+
+running 6 tests
+test a_second_repeat_allele_on_the_same_tract_is_rejected ... ok
+test a_base_change_inside_the_interval_blocks_the_allele_and_one_outside_does_not ... ok
+test an_independent_reader_recovers_the_units_and_the_purity_from_the_bases ... ok
+test two_copies_with_different_repeat_alleles_materialize_different_sequences ... ok
+test the_windowed_reconstruction_agrees_with_the_complete_one ... ok
+test two_alleles_of_equal_length_with_the_interruption_elsewhere_stay_distinct ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/repeat_genotype_draw.rs (target/debug/deps/repeat_genotype_draw-9567e781763ee786)
+
+running 8 tests
+test a_frequency_of_one_gives_every_copy_the_same_allele ... ok
+test the_draw_has_frozen_vectors_for_each_individual_copy_and_locus ... ok
+test inserting_an_individual_at_the_front_leaves_every_other_genotype_alone ... ok
+test adding_a_locus_that_sorts_before_the_existing_ones_leaves_them_alone ... ok
+test two_loci_at_the_same_position_on_different_chromosomes_draw_independently ... ok
+test the_same_seed_draws_the_same_genotypes ... ok
+test reordering_the_individual_list_leaves_every_genotype_alone ... ok
+test two_alleles_at_nine_to_one_stay_inside_the_binomial_interval ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/repeat_locus_contract.rs (target/debug/deps/repeat_locus_contract-973d853e20aa0c5c)
+
+running 37 tests
+test a_max_bases_key_is_rejected_as_an_unknown_field ... ok
+test a_negative_frequency_is_rejected_naming_its_allele ... ok
+test a_repeat_locus_in_a_v2_document_is_rejected_as_an_unknown_field ... ok
+test a_single_motif_locus_keeps_the_scalar_form ... ok
+test a_composite_microsatellite_needs_its_blocks_to_be_admitted ... ok
+test a_locus_can_declare_a_stricter_minimum_than_the_general_one ... ok
+test a_declared_target_purity_is_rejected_naming_the_locus_and_the_parameter ... ok
+test a_locus_that_declares_only_the_run_still_inherits_the_general_purity ... ok
+test an_unknown_key_inside_a_repeat_locus_is_rejected ... ok
+test a_locus_identifier_with_invalid_syntax_is_rejected_when_it_is_read ... ok
+test a_repeated_locus_identifier_is_rejected ... ok
+test an_interval_shorter_than_its_motif_is_rejected ... ok
+test an_allele_without_frequency_and_a_frequency_without_allele_are_rejected ... ok
+test an_invalid_minimum_names_the_field_that_was_written_and_the_locus ... ok
+test rejecting_an_oversized_allele_allocates_nothing ... ok
+test the_cap_is_decided_on_the_declaration_and_not_on_the_materialized_tract ... ok
+test frequencies_outside_the_tolerance_are_rejected_naming_the_locus ... ok
+test the_declared_cap_is_read_and_not_hardcoded ... ok
+test the_admission_minima_reject_a_declared_allele_that_does_not_meet_them ... ok
+test a_legitimate_document_of_65536_bytes_is_admitted_and_65537_is_rejected ... ok
+test a_general_v2_document_without_loci_still_publishes_effective_config_v4 ... ok
+test a_general_v4_document_without_loci_still_publishes_effective_config_v6 ... ok
+test two_loci_in_the_same_run_need_different_minima ... ok
+test the_two_motif_forms_are_exclusive_and_the_units_must_match_the_blocks ... ok
+test the_inherited_schemas_are_byte_for_byte_unchanged ... ok
+test two_loci_with_overlapping_intervals_are_rejected ... ok
+test a_minimal_v4_pair_is_admitted_and_publishes_effective_config_v6 ... ok
+test the_effective_config_publishes_the_blocks_as_parallel_lists ... ok
+test each_locus_publishes_its_own_minima ... ok
+test the_frequency_normalization_audit_is_published_and_recomputed ... ok
+test five_hundred_individuals_and_five_loci_fit_well_inside_the_ceiling ... ok
+test the_general_v4_authoring_schema_accepts_the_declared_document ... ok
+test the_published_effective_configs_validate_against_their_schemas_externally ... ok
+test the_authoring_schema_closes_what_it_can_of_the_multi_motif_frontier ... ok
+test the_effective_config_v6_schema_requires_the_repeat_section ... ok
+test the_authoring_schema_closes_the_two_motif_forms ... ok
+test the_authoring_schema_rejects_what_the_reader_rejects ... ok
+
+test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.64s
+
+     Running tests/repeat_locus_invasion.rs (target/debug/deps/repeat_locus_invasion-e750d950c0ef695b)
+
+running 9 tests
+test the_rejection_reads_like_spanish_and_not_like_a_debug_dump ... ok
+test an_insertion_that_drifts_into_the_tract_is_still_rejected ... ok
+test an_insertion_inside_the_tract_is_rejected_when_no_previous_indel_shifts_it ... ok
+test a_direct_event_named_like_the_locus_is_rejected_before_simulating ... ok
+test a_supplied_matrix_row_inside_the_tract_is_rejected ... ok
+test a_direct_base_change_inside_the_tract_is_rejected_with_any_seed ... ok
+test the_boundary_of_the_tract_is_where_the_rejection_starts ... ok
+test an_insertion_that_drifts_out_of_the_tract_is_admitted ... ok
+test generated_variants_inside_a_declared_tract_are_rejected ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.01s
+
+     Running tests/repeat_manifest.rs (target/debug/deps/repeat_manifest-af8d03bad7ce7174)
+
+running 9 tests
+test the_published_purity_matches_the_one_computed_by_hand_over_the_sequence ... ok
+test the_published_cap_and_minimums_are_the_configured_ones_not_the_defaults ... ok
+test the_realized_frequency_differs_from_the_declared_one_in_a_small_corpus ... ok
+test an_effective_configuration_with_loci_demands_a_manifest_that_records_them ... ok
+test the_rust_reader_rejects_a_repeat_section_as_strictly_as_its_schema ... ok
+test a_scenario_without_loci_keeps_the_previous_manifest_version ... ok
+test a_scenario_with_loci_and_no_initial_populations_still_registers_them ... ok
+test both_published_documents_validate_externally_and_carry_the_loci ... ok
+test the_realized_frequency_converges_to_the_declared_one_in_a_large_corpus ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.42s
+
+     Running tests/repeat_slippage.rs (target/debug/deps/repeat_slippage-513633614eee38a0)
+
+running 14 tests
+test declaring_alleles_and_asking_for_generation_at_once_is_rejected ... ok
+test a_composite_locus_cannot_be_generated ... ok
+test another_model_and_a_multi_unit_jump_are_rejected_naming_parameter_and_value ... ok
+test a_zero_mean_publishes_only_the_reference_allele ... ok
+test the_three_limitations_are_published_word_for_word ... ok
+test the_whole_fan_matches_its_frozen_table_allele_by_allele ... ok
+test exhausting_the_tract_stops_the_lineage_and_the_lost_events_are_counted_apart ... ok
+test the_rust_reader_rejects_every_corruption_of_the_generated_section ... ok
+test changing_the_pcr_cycles_does_not_move_a_single_generated_allele ... ok
+test the_same_seed_publishes_the_same_fan ... ok
+test the_generated_alleles_raise_the_tract_budget_and_a_tight_cap_rejects_them ... ok
+test a_mixed_scenario_marks_declared_and_generated_alleles_in_the_same_document ... ok
+test the_generated_fan_is_published_with_its_origin_parameters_and_accounting ... ok
+test the_fan_follows_the_locus_identifier_and_neither_its_position_nor_its_order ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.84s
+
+     Running tests/repeat_tract_budget.rs (target/debug/deps/repeat_tract_budget-6aef42178a0cce70)
+
+running 6 tests
+test a_declared_cap_rejects_the_scenario_before_simulating_and_its_pair_admits_it ... ok
+test a_run_without_a_vcf_reports_zero_realized_vcf_bases ... ok
+test the_effective_configuration_publishes_the_bound_derived_from_the_declaration ... ok
+test the_realized_figures_stay_strictly_below_the_bound ... ok
+test the_judge_rejects_a_tampered_accounting ... ok
+test the_independent_judge_and_a_foreign_counter_agree_with_the_manifest ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/repeat_truth_v3.rs (target/debug/deps/repeat_truth_v3-460c45272883ff14)
+
+running 11 tests
+test the_inherited_truth_schemas_are_byte_for_byte_unchanged ... ok
+test the_repeat_allele_already_reaches_the_vcf_as_an_explicit_multiallelic_record ... ok
+test a_composite_locus_publishes_its_three_blocks_without_mixing_them ... ok
+test two_alleles_of_equal_length_with_the_interruption_elsewhere_are_distinguishable ... ok
+test the_independent_validator_replays_a_truth_with_repeat_alleles ... ok
+test an_allele_ending_in_a_partial_unit_publishes_a_fractional_count ... ok
+test the_published_truth_carries_the_locus_the_motif_the_units_and_the_sequence ... ok
+test a_heterozygous_reference_over_alternative_case_is_published_and_replayed ... ok
+test the_independent_vcf_oracle_accepts_a_truth_with_repeat_alleles ... ok
+test a_locus_whose_only_allele_is_the_reference_one_does_not_promote_the_truth ... ok
+test every_published_line_validates_against_the_external_v3_schema ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+
+     Running tests/repeat_vcf_projection.rs (target/debug/deps/repeat_vcf_projection-b2ed48fc57b3ebf1)
+
+running 8 tests
+test a_diploid_with_two_repeat_alleles_yields_one_untrimmed_multiallelic_record ... ok
+test the_oracle_rejects_two_copies_carrying_the_same_tract_with_different_blocks ... ok
+test the_repeat_unit_count_is_a_decimal_and_a_partial_unit_is_not_an_integer ... ok
+test the_external_normalizer_only_trims_the_repeat_record_without_changing_its_alleles ... ok
+test the_header_declares_every_tandem_repeat_field_used_and_no_other ... ok
+test no_record_uses_a_symbolic_representation_not_even_with_a_ten_thousand_base_tract ... ok
+test every_alternate_allele_carries_repeat_counts_matching_its_own_length ... ok
+test the_independent_oracle_accepts_the_vcf_and_rejects_its_characteristic_corruptions ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+     Running tests/root_seed.rs (target/debug/deps/root_seed-dcb5242e266ae717)
+
+running 4 tests
+test resolve_root_seed_reports_the_declared_origin_without_using_entropy ... ok
+test root_seed_accepts_exactly_64_lowercase_hex_characters_and_round_trips_all_bytes ... ok
+test declared_seed_bypasses_entropy_and_enters_immutable_effective_config ... ok
+test missing_seed_uses_injected_csprng_before_build_and_records_value_and_origin ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/small_event_composition.rs (target/debug/deps/small_event_composition-bcab6c6d8215ada1)
+
+running 8 tests
+test conflicting_or_incompatible_events_name_the_declared_element_and_leave_input_intact ... ok
+test declared_insertions_are_composed_before_a_later_snp_on_the_same_copy ... ok
+test deletion_then_snp_is_an_indexed_explicit_conflict ... ok
+test declared_snp_then_deletion_removes_the_snp_without_publishing_a_prefix ... ok
+test random_blocks_run_only_after_the_full_explicit_prefix ... ok
+test short_chains_reject_an_explicit_deletion_during_preflight ... ok
+test matrix_snp_batches_preserve_explicit_event_boundaries_and_scalar_result ... ok
+test third_matrix_snp_in_a_batch_reports_its_declared_index_without_publishing_prefix ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/snp_application.rs (target/debug/deps/snp_application-885fa5200ab23000)
+
+running 12 tests
+test explicit_snp_rejects_a_declared_ref_that_disagrees_with_the_authoritative_reference ... ok
+test explicit_snp_preflights_then_updates_only_the_target_phase ... ok
+test matrix_rejects_a_declared_ref_that_disagrees_with_the_authoritative_fasta ... ok
+test preflight_rejects_an_explicit_snp_on_unknown_reference_base ... ok
+test preflight_accepts_first_and_last_base_without_mutating_the_input ... ok
+test one_canonical_matrix_row_can_target_fixed_individuals_and_phases_without_rng ... ok
+test preflight_rejects_conflicts_without_partially_updating_a_copy ... ok
+test preflight_rejects_incompatible_individual_and_locus_references_transactionally ... ok
+test preflight_rejects_missing_ambiguous_and_conflicting_loci_transactionally ... ok
+test matrix_snp_preserves_canonical_variant_and_population_provenance ... ok
+test preflight_rejects_missing_copy_and_preserves_the_input ... ok
+test matrix_snp_batch_matches_sequential_application_across_sequences_and_phases ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/stutter_admission.rs (target/debug/deps/stutter_admission-d8b4fadf33a7cd66)
+
+running 11 tests
+test a_minimum_run_of_two_is_admitted_with_stutter ... ok
+test a_minimum_run_of_one_is_admitted_without_stutter ... ok
+test a_locus_without_its_own_minimum_inherits_the_general_three_and_is_admitted ... ok
+test a_minimum_run_of_one_is_rejected_when_the_locus_will_stutter ... ok
+test a_motif_longer_than_the_calibration_is_rejected_instead_of_extrapolated ... ok
+test a_negative_step_weight_is_rejected ... ok
+test a_step_expressed_in_base_pairs_is_rejected ... ok
+test a_rate_outside_the_unit_interval_is_rejected ... ok
+test enabled_stutter_without_declared_weights_is_rejected ... ok
+test a_step_outside_the_admitted_structure_is_rejected ... ok
+test the_guard_looks_at_the_effective_minimum_and_not_at_the_declared_one ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/stutter_catalog.rs (target/debug/deps/stutter_catalog-23f898404d39998c)
+
+running 4 tests
+test only_the_stutter_stage_belongs_to_the_new_catalog ... ok
+test the_scope_is_indexed_by_locus_and_not_by_position ... ok
+test the_stutter_stage_has_literal_subseed_vectors ... ok
+test the_trial_and_the_step_do_not_share_a_key ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/stutter_independent_validator.rs (target/debug/deps/stutter_independent_validator-8bd6cd58df63009e)
+
+running 5 tests
+test the_independent_recomputation_matches_the_published_aggregates ... ok
+test the_recomputed_decisions_match_the_units_written_in_the_reads ... ok
+test both_mates_of_every_published_pair_agree_on_the_unit_count ... ok
+test a_zero_rate_recomputes_to_no_stutter_at_all ... ok
+test a_mutated_manifest_count_is_rejected ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 45.49s
+
+     Running tests/stutter_pipeline.rs (target/debug/deps/stutter_pipeline-f7fe2c4fb5ddc375)
+
+running 9 tests
+test a_substitution_naming_an_undeclared_locus_is_rejected ... ok
+test a_high_chimera_rate_together_with_a_high_stutter_rate_publishes_without_error ... ok
+test the_step_lands_on_the_longest_run_and_not_on_the_rightmost_one ... ok
+test both_mates_of_a_pair_show_the_same_unit_count ... ok
+test a_per_locus_rate_substitution_reaches_the_simulation ... ok
+test the_event_manifest_publishes_realized_counts_with_their_provenance ... ok
+test the_reads_keep_their_length_and_no_molecule_is_discarded ... ok
+test stutter_changes_the_reads_and_leaves_the_truth_untouched ... ok
+test two_runs_that_differ_only_in_the_rate_differ_only_in_reads_and_aggregates ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.55s
+
+     Running tests/stutter_tract_length.rs (target/debug/deps/stutter_tract_length-6697b9df22d361af)
+
+running 4 tests
+test the_published_document_carries_the_curve_with_its_coarseness_mark ... ok
+test the_guard_rejects_a_document_that_loses_the_mark_or_moves_the_curve ... ok
+test a_long_tract_stutters_far_more_than_a_short_one_of_the_same_motif ... ok
+test the_clonal_per_cycle_probability_depends_on_the_tract_length ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.94s
+
+     Running tests/subseed_derivation.rs (target/debug/deps/subseed_derivation-364d0ddc6fb0d3ae)
+
+running 9 tests
+test biological_slippage_and_stutter_never_share_a_subseed ... ok
+test derivation_is_repeatable_and_generation_and_reduction_are_isolated ... ok
+test every_f2_runtime_scope_matches_its_frozen_v4_or_v5_vector ... ok
+test f1_runtime_scopes_remain_on_derivation_v1_and_match_active_catalog_v10 ... ok
+test the_biological_slippage_scope_derives_exactly_what_its_frozen_row_says ... ok
+test the_repeat_allele_scope_derives_exactly_what_its_frozen_row_says ... ok
+test every_active_scope_owns_a_fresh_local_chacha12_stream ... ok
+test the_f1_runtime_catalog_is_closed_to_exactly_two_consumers ... ok
+test published_catalogs_are_immutable_and_v8_has_an_independent_oracle ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/tandem_repeat_domain.rs (target/debug/deps/tandem_repeat_domain-547bce9f5978a46d)
+
+running 23 tests
+test a_composite_microsatellite_is_pure_by_blocks_and_impure_read_as_one_motif ... ok
+test a_single_base_interruption_gives_five_and_a_half_units_and_purity_over_bases ... ok
+test a_tie_between_blocks_breaks_towards_the_left_block ... ok
+test a_step_that_would_empty_the_longest_run_is_rejected ... ok
+test an_empty_motif_and_a_motif_with_n_are_rejected ... ok
+test a_single_block_tract_behaves_exactly_as_before ... ok
+test an_interruption_crossing_a_block_boundary_counts_as_one ... ok
+test equal_length_alleles_with_the_interruption_elsewhere_are_distinguishable ... ok
+test blocks_that_do_not_cover_the_tract_are_rejected ... ok
+test impure_ac_tract_separates_the_longest_run_from_the_total_unit_count ... ok
+test plus_one_then_minus_one_restores_the_original_bytes ... ok
+test pure_acg_tract_annotates_five_units_unit_purity_and_a_run_of_five ... ok
+test purity_sums_the_complete_copies_of_every_block_over_the_whole_tract ... ok
+test removing_one_unit_from_a_pure_tract_is_a_clean_contiguous_deletion ... ok
+test the_annotation_is_recomputed_from_the_bytes_after_a_step ... ok
+test the_block_annotation_carries_the_parallel_lists_the_vcf_defines ... ok
+test the_exact_unit_fraction_is_absent_when_there_are_several_blocks ... ok
+test the_greedy_scan_runs_left_to_right_and_a_periodic_motif_proves_it ... ok
+test the_longest_run_wins_across_blocks_whatever_its_motif ... ok
+test the_step_lands_on_the_block_of_the_longest_run ... ok
+test the_step_lands_on_the_longest_run_even_when_it_is_not_the_rightmost ... ok
+test the_vcf_standard_cag_example_is_admitted_with_a_fractional_unit_count ... ok
+test tied_runs_break_towards_the_left_and_the_result_is_reproducible ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/toml_dependency.rs (target/debug/deps/toml_dependency-c0f0a79abf74c930)
+
+running 2 tests
+test selected_parser_preserves_key_spans_for_localizable_unknown_fields ... ok
+test selected_parser_rejects_duplicate_keys_with_a_source_span ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/truth_schema.rs (target/debug/deps/truth_schema-d3c9dce95a737b0a)
+
+running 13 tests
+test modification_order_resets_per_segment_and_keeps_the_domain_boundary_rules ... ok
+test rejects_broken_copy_genotype_relations_and_dosage ... ok
+test rejects_declared_counts_and_duplicate_digests ... ok
+test rejects_missing_and_unknown_versions ... ok
+test focal_contract_regressions_cover_boundaries_segments_and_groups ... ok
+test structural_alleles_allow_partial_insertion_survival_but_reject_domain_boundaries ... ok
+test rejects_duplicate_copy_and_out_of_canonical_order ... ok
+test validates_local_segment_invariants_and_typed_modification_provenance ... ok
+test valid_fixture_shape_has_all_required_external_fields ... ok
+test external_parser_rejects_duplicate_keys_in_each_record_discriminator ... ok
+test manual_fixture_lines_are_valid_against_the_external_schema ... ok
+test external_schema_rejects_missing_fields_and_unknown_record_keys ... ok
+test external_schema_and_wire_reader_share_u64_integer_boundaries ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.11s
+
+     Running tests/truth_validation.rs (target/debug/deps/truth_validation-3539f00e8a56f1fd)
+
+running 10 tests
+test reconstructs_known_sequences_and_genotype_with_vcf_disabled ... ok
+test schema_reader_rejects_isolated_json_schema_corruption ... ok
+test reconstructs_known_insertion_and_validates_piece_links_without_vcf ... ok
+test streaming_rejects_structural_genotype_corruption_before_semantics ... ok
+test replay_accepts_nested_insertion_with_partial_survival_after_deletion ... ok
+test numeric_grammar_preserves_exact_json_lexemes_and_u64_bounds ... ok
+test replay_accepts_inherited_snp_without_history_and_a_later_deleted_snp ... ok
+test semantic_reconstructor_rejects_each_independent_relation_corruption ... ok
+test replay_rejects_permuted_or_out_of_range_history_and_changed_reference_digest ... ok
+test streaming_validator_releases_each_copy_without_a_contract_invalid_line_cap ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/vcf_contract.rs (target/debug/deps/vcf_contract-00e059b6ff52d2de)
+
+running 7 tests
+test index_selection_considers_every_contig_not_only_the_first ... ok
+test sequence_id_backed_contigs_admit_the_project_identifier_domain ... ok
+test contract_rejects_ambiguous_or_invalid_headers ... ok
+test text_mode_has_exact_vcf_45_header_and_no_index ... ok
+test bgzf_csi_is_selected_at_normative_limit_and_is_compressed ... ok
+test bgzf_tbi_is_selected_below_normative_limit_and_is_readable ... ok
+test external_validator_probe_is_informative_and_never_an_acceptance_gate ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/vcf_publication.rs (target/debug/deps/vcf_publication-b6375fc78020188b)
+
+running 12 tests
+test frozen_pre_compaction_vcf_fixture_covers_snp_insertion_deletion_samples_phase_gt_and_gps_case ... ok
+test requested_text_vcf_without_populations_rejects_before_destination_or_manifest ... ok
+test csi_indexes_real_records_and_is_queryable_by_region ... ok
+test existing_destination_prevents_requested_vcf_publication ... ok
+test index_write_failure_is_reported_before_any_publication_step ... ok
+test explicit_bgzf_vcf_has_one_readable_tbi_and_cataloged_sha ... ok
+test explicit_text_vcf_is_complete_and_has_no_index ... ok
+test toml_without_vcf_cannot_claim_an_effective_vcf_request ... ok
+test vcf_is_disabled_by_default_and_not_cataloged ... ok
+test zero_variant_publication_is_complete_in_text_and_bgzf_modes ... ok
+test fixed_fixture_keeps_the_text_vcf_byte_and_semantic_contract ... ok
+test effective_vcf_request_manifest_and_catalog_are_bound_bidirectionally ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/vcf_semantic_validation.rs (target/debug/deps/vcf_semantic_validation-d5d16932899e2004)
+
+running 17 tests
+test independent_oracle_allows_one_case_to_repeat_on_several_records ... ok
+test independent_oracle_accepts_ref_alt_gt_phase_dosage_samples_and_gps_case ... ok
+test fully_deleted_snp_is_absent_from_truth_and_vcf ... ok
+test independent_oracle_checks_two_alt_two_case_mapping_and_sample_dosages ... ok
+test path_oracle_reads_truth_before_opening_vcf ... ok
+test parser_rejects_a_gps_case_declaration_after_a_record ... ok
+test independent_phase_check_rejects_noncontiguous_copy_indices_before_truth_reconstruction ... ok
+test independent_oracle_composes_final_haplotype_components_before_case_mapping ... ok
+test path_oracle_reconstructs_truth_against_fasta_before_opening_vcf ... ok
+test independent_oracle_keeps_an_insertion_bridge_until_all_three_changes_compose ... ok
+test independent_oracle_rejects_sample_order_record_order_and_disordered_gps_case ... ok
+test independent_oracle_accepts_fixed_alt_for_haploid_diploid_and_decaploid_truth ... ok
+test path_oracle_accepts_the_published_text_and_bgzf_forms ... ok
+test the_vcf_oracle_builds_every_rejection_through_its_constructors ... ok
+test the_header_and_column_contract_rejects_each_corruption_by_its_own_reason ... ok
+test the_path_oracle_rejects_missing_files_broken_encodings_and_broken_fasta ... ok
+test isolated_mutations_reject_each_f2_semantic_invariant ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+

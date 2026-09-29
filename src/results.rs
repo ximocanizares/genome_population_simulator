@@ -8860,6 +8860,10 @@ fn retag_v1_pair_error(
     }
 }
 
+/// Envoltorio puro sobre [`manifest_error_for_schema`]. Lleva
+/// `#[track_caller]` para que el barrido de guardas ([`crate::guard_trace`])
+/// anote el punto de rechazo real y no esta línea.
+#[track_caller]
 fn manifest_error(path: &Path, detail: impl Into<String>) -> Diagnostic {
     manifest_error_for_schema(path, "manifest-general-v4.schema.json", detail)
 }
@@ -8885,11 +8889,19 @@ fn general_manifest_schema_file_for(version: Option<&str>) -> &'static str {
     }
 }
 
+/// Constructora de los rechazos del **manifiesto general**, el documento que
+/// resume la ejecución entera.
+///
+/// La anotación `#[track_caller]` y la llamada a `record` son el barrido de
+/// guardas descrito en [`crate::guard_trace`]: apagado no cuesta nada, y
+/// encendido anota **desde qué línea** se rechazó, no esta.
+#[track_caller]
 fn manifest_error_for_schema(
     path: &Path,
     schema: &'static str,
     detail: impl Into<String>,
 ) -> Diagnostic {
+    crate::guard_trace::record();
     Diagnostic::format(
         "GPS-FMT-006",
         "Un documento JSON producido no satisface su esquema publicado.",

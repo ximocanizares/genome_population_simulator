@@ -79,14 +79,20 @@ esa cifra y el objetivo de esta entrega es solo que no crezca; cubrirlas es un
 trabajo aparte, pendiente de decisión. Las cifras de los tres jueces no se
 movieron (365/52, 98/22, 42/5).
 
-**Y 364 y 147 son un mínimo, no el total.** La puerta solo ve los rechazos que
-pasan por las constructoras `effective_error`, `effective_error_for_schema` y
-`event_error`. En `src/results.rs` **quedan fuera del denominador**, y por
-tanto invisibles, dos familias:
+**El validador del manifiesto general entró el 29/09/2026, y confirmó el
+pronóstico.** Era la primera de las dos familias que quedaban fuera del
+denominador: otro validador del mismo fichero, con sus propias constructoras,
+que nadie vigilaba sin que se hubiera decidido. Al anotar `manifest_error` y
+`manifest_error_for_schema` y meterlas en la puerta, `src/results.rs` pasa de
+**364 a 499 comprobaciones** y de **311 a 424 sin ejercitar**: de las 135 que
+estaban en la sombra, **113 no las toca ninguna prueba** y 22 sí. La cifra no
+empeora porque el código empeore, sino porque antes no se veía — el mismo
+efecto que cuando se enderezaron los trece rechazos construidos a mano del
+verificador del VCF y las guardas sin disparar subieron de 17 a 37.
 
-- los rechazos del **manifiesto general** (`manifest_error` y
-  `manifest_error_for_schema`, unas 138 llamadas), que es otro validador del
-  mismo fichero;
+**Y 499 y 147 siguen siendo un mínimo, no el total**, porque queda la segunda
+familia, que es estructural:
+
 - los validadores auxiliares que devuelven `Err("texto")` en vez de un
   diagnóstico (catorce funciones que devuelven `Result<_, &'static str>`,
   con setenta y seis `Err("texto")` a pelo, y además guardas con `ok_or("texto")`):

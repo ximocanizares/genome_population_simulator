@@ -38,7 +38,7 @@ judges=(
     "src/f5_oracle.rs|reject|resource_reject|catalog_reject|truth_reject"
     "src/vcf_semantic_validation.rs|vcf_reject|oracle_error|vcf_error|fasta_reject|io_reject|io_error|bases_not_materialized"
     "src/f5_closure.rs|reject"
-    "src/results.rs|effective_error|effective_error_for_schema"
+    "src/results.rs|effective_error|effective_error_for_schema|manifest_error|manifest_error_for_schema"
     "src/event_manifest.rs|event_error"
 )
 

@@ -18,9 +18,17 @@
 # manifiesto de evento. **Su cifra es un suelo del suelo**: la puerta solo ve
 # los rechazos que pasan por sus constructoras (`effective_error`,
 # `effective_error_for_schema` y `event_error`). En `results.rs` quedan fuera
-# los validadores que devuelven `Err("texto")` y los rechazos del manifiesto
-# general (`manifest_error`); véase DT-001. El techo de los dos módulos nuevos
-# es lo medido hoy, sin cubrir nada: el objetivo es que no crezca.
+# los validadores que devuelven `Err("texto")`; véase DT-001. El techo de los
+# dos módulos nuevos es lo medido hoy, sin cubrir nada: el objetivo es que no
+# crezca.
+#
+# **El validador del manifiesto general entró el 29/09/2026.** Vive en el mismo
+# fichero que el de la configuración efectiva y tiene constructoras propias, de
+# modo que estaba fuera del radar sin que nadie lo hubiera decidido. Al meterlo,
+# las comprobaciones de `src/results.rs` pasan de 364 a 499 y las que no
+# ejercita nadie de 311 a 424: **de las 135 que estaban en la sombra, 113 no las
+# toca ninguna prueba**. La cifra no empeora porque el código empeore, sino
+# porque antes no se veía.
 #
 # Medido el 23/09/2026; oráculo y verificador del VCF remedidos el 29/09/2026
 # (168 a 52 y 25 a 22, con el mismo número de comprobaciones); `results.rs` y
@@ -29,5 +37,5 @@
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	98	22
 src/f5_closure.rs	42	5
-src/results.rs	364	311
+src/results.rs	499	424
 src/event_manifest.rs	147	117
