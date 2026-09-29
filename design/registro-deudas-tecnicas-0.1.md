@@ -37,6 +37,10 @@ documenta mejor.
 | DT-007 | Ningún diagnóstico público nuevo puede publicarse en un manifiesto del recorrido general | Baja | 25/09/2026 | Abierta |
 | DT-008 | El orden entre el paso de linaje y la decisión de base no lo separaba ninguna prueba | Baja | 26/09/2026 | **Cerrada (26/09/2026)** |
 | DT-009 | Las dos fuentes de la calibración discrepan en cuánto multiplica la PCR el tartamudeo de los homopolímeros | Media | 27/09/2026 | Abierta |
+| DT-010 | El recuento de Poisson devolvía error donde el método pide repetir | Media | 27/09/2026 | **Cerrada (27/09/2026)** |
+| DT-011 | Dos rechazos del generador de alelos no se alcanzan desde una configuración | Baja | 27/09/2026 | Abierta |
+| DT-012 | El barrido de opciones comprueba que el control existe, no que atienda a la opción | Baja | 27/09/2026 | Abierta |
+| DT-013 | El generador de alelos no se puede usar sobre una referencia que construye el propio programa | Media | 29/09/2026 | Abierta |
 
 ---
 
@@ -737,3 +741,58 @@ Ejecutar el cuaderno y observar el formulario que produce, opción a opción, en
 vez de buscar nombres en el texto de los ficheros. Es trabajo de otra clase —una
 prueba de la interfaz viva, no de su fuente— y no estaba en el alcance de esta
 entrega.
+
+---
+
+## DT-013. El generador de alelos no se puede usar sobre una referencia que construye el propio programa
+
+**Gravedad: media.** No hay ningún resultado incorrecto: el programa rechaza y
+lo dice. Lo que falta es una combinación que el usuario espera y que no existe.
+
+### Qué pasa
+
+Un microsatélite se puede declarar sobre los dos tipos de referencia, la que
+aporta el usuario y la que construye el propio programa. Con **alelos
+declarados a mano** las dos funcionan. Con el **generador de alelos por
+deslizamiento**, la referencia construida por el programa **se rechaza
+siempre**:
+
+```
+detail="locus STR-1: el tramo de la referencia no contiene ni una copia
+completa del motivo, de modo que no hay alelo ancestral del que partir"
+```
+
+El motivo es correcto y la guarda hace bien en saltar: el generador **lee el
+alelo de partida de las bases de la referencia**, y una referencia construida
+por el programa lleva bases sorteadas al azar, de modo que en la ventana
+declarada no hay ninguna copia del motivo. No es un fallo del generador: es que
+nadie planta el tracto.
+
+Lo llamativo es la asimetría: **cuando los alelos se declaran, el programa sí
+sabe materializar el tracto** sobre una referencia construida por él; cuando se
+generan, no.
+
+### Cómo se reprodujo
+
+El 29 de septiembre de 2026, al preparar la primera simulación de uso real —un
+cromosoma de 2000 bases con `(AGAT)₁₂`, seis individuos diploides—. El mismo
+escenario, cambiando **solo** el bloque del generador por dos alelos
+declarados, valida con código de salida 0; con el generador, se rechaza con el
+mensaje de arriba. Se resolvió construyendo el FASTA a mano con el tracto
+dentro, y con él la simulación corre entera.
+
+### Qué haría falta
+
+Una de dos, y es decisión del responsable:
+
+1. **Que el generador plante el tracto ancestral**, con las unidades que se
+   declaren, igual que ya se hace cuando los alelos vienen declarados. Haría
+   falta decir de dónde salen esas unidades: hoy el locus no tiene ningún campo
+   que las diga cuando no hay alelos.
+2. **Dejarlo como está y que el mensaje lo diga**: que con el generador la
+   referencia tiene que traer el tracto, y que eso significa aportar un FASTA.
+   Es lo barato, y quita la sorpresa sin añadir modelo.
+
+Mientras no se decida, **quien quiera generar alelos tiene que aportar una
+referencia que ya contenga el tracto**.
+
