@@ -37,7 +37,7 @@ documenta mejor.
 | DT-007 | Ningún diagnóstico público nuevo puede publicarse en un manifiesto del recorrido general | Baja | 25/09/2026 | Abierta |
 | DT-008 | El orden entre el paso de linaje y la decisión de base no lo separaba ninguna prueba | Baja | 26/09/2026 | **Cerrada (26/09/2026)** |
 | DT-009 | Las dos fuentes de la calibración discrepan en cuánto multiplica la PCR el tartamudeo de los homopolímeros | Media | 27/09/2026 | Abierta |
-| DT-010 | El recuento de Poisson devolvía error donde el método pide repetir | Media | 27/09/2026 | **Cerrada (27/09/2026)** |
+| DT-010 | El recuento de Poisson devolvía error donde el método pide repetir | Media | 27/09/2026 | **Cerrada (27/09/2026; el oráculo, el 30/09/2026)** |
 | DT-011 | Dos rechazos del generador de alelos no se alcanzan desde una configuración | Baja | 27/09/2026 | Abierta |
 | DT-012 | El barrido de opciones comprueba que el control existe, no que atienda a la opción | Baja | 27/09/2026 | Abierta |
 | DT-013 | El generador de alelos no se puede usar sobre una referencia que construye el propio programa | Media | 29/09/2026 | Abierta |
@@ -678,11 +678,55 @@ solo se toma donde la anterior devolvía error, de modo que un recorrido que
 acabó consumió las mismas palabras y obtuvo lo mismo. Las huellas congeladas del
 recorrido técnico no se mueven, y se comprobó.
 
+### La corrección dejó atrás al juez (30 de septiembre de 2026)
+
+El arreglo del 27 de septiembre tocó solo el productor. **El oráculo de
+aceptación de F5**, que reimplementa el mismo muestreador para rederivar desde
+la semilla lo que se publicó, **conservó la regla vieja**: ante un candidato
+negativo devolvía «sin valor», y de ahí salía el rechazo «la lambda declarada no
+admite el muestreador de recuentos». La revisión adversarial del 30 de
+septiembre lo descubrió y lo reprodujo de dos maneras. Con la misma cinta
+aleatoria, el productor daba un recuento donde el oráculo daba nada en 8 de 256
+cintas con media 12 y en 7 de 256 con media 20 (cintas derivadas de las
+semillas por otro procedimiento que el de la prueba de regresión, que da 7 de
+256 en las dos medias). Y de extremo a extremo, 3 de 61
+semillas de un escenario F5 correcto, con el recuento de haplotipos de media
+12, acababan en `GPS-INTERNAL-101` y un paquete en estado `failed`: el productor
+publicaba bien y el juez rechazaba lo que acababa de publicarse.
+
+**Corregido el mismo 30 de septiembre.** El oráculo aplica ahora la misma
+regla que el productor: un candidato no numérico o por encima de `2^53` se
+rechaza, y uno negativo se descarta y se vuelve a tirar. Sigue siendo una
+reimplementación propia, sin llamar al productor. La prueba de regresión da la
+misma cinta, derivada de 256 semillas, a los dos muestreadores con medias 12 y
+20 y exige que coincidan en el recuento y en las palabras consumidas; y **cuenta
+las cintas con candidato negativo** (7 de 256 en cada media, y son las mismas
+siete semillas en las dos: no son dos comprobaciones independientes) para que no
+sea un vector donde el efecto pasa inadvertido. Se comprobó que falla, en la
+semilla 69 de la media 12, con la regla vieja.
+
+Una segunda prueba cubre el límite superior, con la media máxima admitida, `2^52`,
+que es donde un candidato por encima de `2^53` se alcanza de verdad (del orden de
+`2^-30` por vuelta): las semillas 0 a 7 coinciden en productor y oráculo, y la
+semilla 1 392 399 649 hace que el productor dé `NumericFailure` y el oráculo
+nada. Mata dos mutantes que antes sobrevivían a la batería entera: el oráculo
+sin cota superior y el oráculo con la cota bajada a `2^52`.
+
+La lección es la habitual de este proyecto: una corrección en un productor que
+tiene un juez independiente se hace **en los dos**, y se busca el juez antes de
+cerrar la deuda.
+
 ### Qué queda abierto
 
 Nada de esta deficiencia. Queda anotado, eso sí, que **el techo de la media es
 una guarda de la frontera y no del método**: `poisson-count-v1` sigue admitiendo
 medias hasta `2^52` para sus demás consumidores.
+
+Una cautela sobre el alcance de ese límite: con medias pequeñas el candidato por
+encima de `2^53` es inalcanzable en la práctica (del orden de `2^-50` por vuelta
+para medias entre 270 y mil), y solo se vuelve probable con medias enormes. El
+perfil F5 admite hasta `2^52`, así que el rechazo es alcanzable desde un
+escenario, aunque con una media que ningún uso razonable escribe.
 
 ---
 

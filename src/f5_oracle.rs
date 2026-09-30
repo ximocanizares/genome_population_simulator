@@ -1249,7 +1249,10 @@ fn open_unit(rng: &mut ChaCha12Rng) -> f64 {
 
 /// Reimplementación de `poisson-count-v1` sin llamar al productor.
 ///
-/// Devuelve `None` cuando la lambda no pertenece al dominio del muestreador.
+/// Devuelve `None` cuando la lambda no pertenece al dominio del muestreador,
+/// cuando un candidato no es numérico o pasa de 2^53, o cuando el contador de
+/// la rama de medias pequeñas desborda. Un candidato negativo no da `None`: se
+/// repite.
 fn poisson_count(rng: &mut ChaCha12Rng, lambda: f64) -> Option<u64> {
     const MAX_LAMBDA: f64 = 4_503_599_627_370_496.0;
     if !lambda.is_finite() || !(0.0..=MAX_LAMBDA).contains(&lambda) {
@@ -1281,8 +1284,14 @@ fn poisson_count(rng: &mut ChaCha12Rng, lambda: f64) -> Option<u64> {
         let v = open_unit(rng);
         let us = 0.5 - u.abs();
         let candidate = libm::floor((2.0 * a / us + b) * u + lambda + 0.43);
-        if !(0.0..=9_007_199_254_740_991.0).contains(&candidate) {
+        // Misma regla que el productor (DT-010): un candidato no numérico o
+        // por encima de 2^53 no tiene valor que repetir y se rechaza; uno
+        // **negativo** se descarta y se vuelve a tirar.
+        if candidate.is_nan() || candidate > 9_007_199_254_740_991.0 {
             return None;
+        }
+        if candidate < 0.0 {
+            continue;
         }
         if us >= 0.07 && v <= vr {
             return Some(candidate as u64);
@@ -7376,6 +7385,14 @@ mod guard_tests {
 
     /// Una lambda fuera del dominio del muestreador de recuentos no se sortea:
     /// se rechaza en vez de pinzar un resultado inventado.
+    ///
+    /// Ejercita solo el rechazo **por la lambda** (negativa, no numérica,
+    /// infinita). El otro camino que acaba en este mismo mensaje, un candidato
+    /// por encima de 2^53, se prueba llamando a `poisson_count` directamente
+    /// en `poisson_count_rejects_a_candidate_above_two_to_the_53` (desde aquí
+    /// haría falta encontrar un identificador de bloque cuya subsemilla lo
+    /// produzca). Desde DT-010 un candidato negativo no llega a este mensaje:
+    /// se repite.
     #[test]
     fn a_haplotype_count_needs_a_lambda_the_sampler_admits() {
         let oracle = SubseedOracle::new([7_u8; 32], "scenario-f5").expect("oráculo validado");
@@ -7395,6 +7412,145 @@ mod guard_tests {
                 detail_of(&rejection).contains("no admite el muestreador"),
                 "lambda={lambda}: {}",
                 detail_of(&rejection)
+            );
+        }
+    }
+
+    /// Fuente de palabras que apunta lo que entrega: alimenta al productor y
+    /// deja la cinta para saber cuántas vueltas dio.
+    struct RecordingTape {
+        rng: ChaCha12Rng,
+        words: Vec<u64>,
+    }
+
+    impl crate::randomness::RandomWordSource for RecordingTape {
+        fn next_word(&mut self) -> u64 {
+            let word = self.rng.next_u64();
+            self.words.push(word);
+            word
+        }
+    }
+
+    /// Cuántas de las vueltas que dio el muestreador (dos palabras cada una)
+    /// propusieron un candidato negativo. Rederiva el candidato de la cinta con
+    /// la fórmula del método, sin pasar por ninguno de los dos muestreadores.
+    fn negative_candidates_on(words: &[u64], lambda: f64) -> usize {
+        let open_unit = |word: u64| (((word >> 12) as f64) + 0.5) * (1.0 / 4_503_599_627_370_496.0);
+        let b = 0.931 + 2.53 * libm::sqrt(lambda);
+        let a = -0.059 + 0.02483 * b;
+        words
+            .chunks_exact(2)
+            .filter(|pair| {
+                let u = open_unit(pair[0]) - 0.5;
+                let us = 0.5 - u.abs();
+                libm::floor((2.0 * a / us + b) * u + lambda + 0.43) < 0.0
+            })
+            .count()
+    }
+
+    /// DT-010: un candidato negativo del método de rechazo se **repite**, igual
+    /// que hace el productor. El oráculo lo devolvía como `None` y convertía un
+    /// escenario correcto en un rechazo de la lambda.
+    ///
+    /// La misma cinta (derivada de la semilla) alimenta al productor y al
+    /// oráculo, con la media 12 y la 20 (la de DT-010), y deben coincidir en
+    /// todas. La prueba exige además que **haya habido** casos con candidato
+    /// negativo: sin ellos la coincidencia no probaría nada sobre la regla.
+    /// Las dos medias no son comprobaciones independientes: con las 256
+    /// semillas, las cintas con candidato negativo resultan ser las mismas en
+    /// ambas (69, 86, 89, 113, 160, 193 y 233).
+    #[test]
+    fn poisson_count_repeats_a_negative_candidate_like_the_producer() {
+        for lambda in [12.0_f64, 20.0] {
+            let mut with_negative_candidate = 0_usize;
+            for seed in 0_u64..256 {
+                let mut tape = RecordingTape {
+                    rng: ChaCha12Rng::seed_from_u64(seed),
+                    words: Vec::new(),
+                };
+                let produced =
+                    crate::randomness::poisson_count_with_source(&mut tape, lambda, None)
+                        .expect("el productor repite el candidato negativo, no falla");
+                assert_eq!(
+                    tape.words.len() % 2,
+                    0,
+                    "lambda={lambda} seed={seed}: la rama de rejilla consume palabras por pares"
+                );
+                if negative_candidates_on(&tape.words, lambda) > 0 {
+                    with_negative_candidate += 1;
+                }
+                let mut rng = ChaCha12Rng::seed_from_u64(seed);
+                assert_eq!(
+                    poisson_count(&mut rng, lambda),
+                    Some(produced),
+                    "lambda={lambda} seed={seed}: el oráculo debe coincidir con el productor"
+                );
+                // Mismo consumo de palabras: la repetición no cambia la cinta.
+                assert_eq!(
+                    rng.next_u64(),
+                    tape.rng.next_u64(),
+                    "lambda={lambda} seed={seed}: el oráculo consumió otra cantidad de palabras"
+                );
+            }
+            assert!(
+                with_negative_candidate >= 1,
+                "lambda={lambda}: ninguna cinta propuso un candidato negativo; el vector no ejercita la regla"
+            );
+            eprintln!(
+                "lambda={lambda}: {with_negative_candidate}/256 cintas con candidato negativo"
+            );
+        }
+    }
+
+    /// El límite superior del candidato (2^53) se aplica igual en el productor
+    /// y en el oráculo. Hace falta la media máxima, 2^52: con ella la
+    /// probabilidad de pasar de 2^53 por vuelta es de orden 2^-30, y con medias
+    /// pequeñas es inalcanzable en la práctica.
+    ///
+    /// Dos grupos de semillas, encontrados por búsqueda fuera de línea. Las
+    /// semillas 0 a 7 **coinciden** en productor y oráculo con un candidato
+    /// dentro del límite; la semilla 0 lo da por encima de 2^52 (mata una cota
+    /// bajada a 2^52). La semilla 1_392_399_649 propone en su primera vuelta un
+    /// candidato por encima de 2^53: el oráculo debe dar `None` y el productor
+    /// `Err(NumericFailure)` (mata un oráculo sin cota superior).
+    #[test]
+    fn poisson_count_rejects_a_candidate_above_two_to_the_53() {
+        const MAX_LAMBDA: f64 = 4_503_599_627_370_496.0;
+        for seed in 0_u64..8 {
+            let mut tape = RecordingTape {
+                rng: ChaCha12Rng::seed_from_u64(seed),
+                words: Vec::new(),
+            };
+            let produced =
+                crate::randomness::poisson_count_with_source(&mut tape, MAX_LAMBDA, None)
+                    .expect("estas semillas no proponen un candidato por encima de 2^53");
+            let mut rng = ChaCha12Rng::seed_from_u64(seed);
+            assert_eq!(
+                poisson_count(&mut rng, MAX_LAMBDA),
+                Some(produced),
+                "seed={seed}: el oráculo debe coincidir con el productor"
+            );
+        }
+        for seed in [1_392_399_649_u64, 2_723_730_605, 3_350_934_628] {
+            let mut tape = RecordingTape {
+                rng: ChaCha12Rng::seed_from_u64(seed),
+                words: Vec::new(),
+            };
+            assert_eq!(
+                crate::randomness::poisson_count_with_source(&mut tape, MAX_LAMBDA, None),
+                Err(crate::randomness::RandomSamplingError::NumericFailure),
+                "seed={seed}: el productor rechaza el candidato por encima de 2^53"
+            );
+            assert_eq!(
+                tape.words.len(),
+                2,
+                "seed={seed}: falla en la primera vuelta"
+            );
+            let mut rng = ChaCha12Rng::seed_from_u64(seed);
+            assert_eq!(
+                poisson_count(&mut rng, MAX_LAMBDA),
+                None,
+                "seed={seed}: el oráculo rechaza el candidato por encima de 2^53"
             );
         }
     }
