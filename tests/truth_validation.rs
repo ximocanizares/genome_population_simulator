@@ -33,7 +33,7 @@ fn reference_with_bases(bases: &[u8]) -> Reference {
 }
 
 fn fixture() -> String {
-    include_str!("fixtures/truth-v1/valid.jsonl").replacen(
+    include_str!("fixtures/truth-v4/valid.jsonl").replacen(
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         &reference_content_sha256(&reference()).expect("huella"),
         1,
@@ -79,7 +79,7 @@ fn insertion_fixture() -> String {
         "case_kind":"indel","locus":{"sequence_id":"chr1","start":2,"end":2},
         "alleles":[
             {"kind":"reference"},
-            {"kind":"insertion","event_id":"INS_01","bases":"CT","final_haplotype_bases":"AACTAAAAAA",
+            {"kind":"insertion","event_id":"INS_01","bases":"CT",
              "source_event":{"kind":"insertion","event_id":"INS_01","point":2,"bases":"CT"},
              "piece_links":[{"piece_index":1,"start":2,"end":4}]}
         ],
@@ -274,6 +274,114 @@ fn semantic_reconstructor_rejects_each_independent_relation_corruption() {
         validate_and_reconstruct_truth_jsonl(&mut Cursor::new(bad_link), &reference(),).is_err(),
         "insertion links must identify the surviving inserted piece"
     );
+    // Antes lo cazaba también la estructura, contra la longitud de
+    // `final_haplotype_bases`; sin ese campo, solo la copia reconstruida
+    // —que mide 10 bases— puede decir que el enlace se sale de ella.
+    let beyond_copy = insertion_fixture().replacen(
+        "\"piece_links\":[{\"end\":4,\"piece_index\":1,\"start\":2}]",
+        "\"piece_links\":[{\"end\":11,\"piece_index\":1,\"start\":2}]",
+        1,
+    );
+    assert_ne!(
+        beyond_copy,
+        insertion_fixture(),
+        "the corruption must apply"
+    );
+    read_truth_jsonl(&mut Cursor::new(beyond_copy.clone()))
+        .expect("the structure alone cannot see past the end of the copy");
+    assert!(
+        matches!(
+            validate_and_reconstruct_truth_jsonl(&mut Cursor::new(beyond_copy), &reference()),
+            Err(TruthValidationError::GenotypeMismatch { .. })
+        ),
+        "insertion link beyond the reconstructed copy"
+    );
+    // Una deleción no deja fragmentos propios, así que no puede enlazar
+    // ninguno. La estructura no lo prohíbe; solo la reconstrucción lo sabe.
+    let mut lines = deletion_fixture()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("fixture JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(lines[3]["alleles"][1]["kind"], "deletion");
+    lines[3]["alleles"][1]["piece_links"] = json!([{"piece_index":0,"start":0,"end":1}]);
+    let linked_deletion = lines_to_jsonl(&lines);
+    read_truth_jsonl(&mut Cursor::new(linked_deletion.clone()))
+        .expect("the structure alone admits a deletion link");
+    assert!(
+        matches!(
+            validate_and_reconstruct_truth_jsonl(&mut Cursor::new(linked_deletion), &reference()),
+            Err(TruthValidationError::GenotypeMismatch { .. })
+        ),
+        "a deletion that links a piece of the reconstructed copy"
+    );
+}
+
+/// **El lector no admite la copia entera del haplotipo en un alelo.**
+///
+/// El mismo documento sin el campo se reconstruye entero (la prueba de la
+/// inserción conocida), de modo que el rechazo solo puede deberse al campo.
+/// Se prueba en la inserción y en la deleción, cada una en su documento.
+#[test]
+fn reader_rejects_a_current_document_carrying_the_copied_final_haplotype() {
+    for (name, document, copied) in [
+        ("insertion", insertion_fixture(), "AACTAAAAAA"),
+        ("deletion", deletion_fixture(), "AAAAAAA"),
+    ] {
+        validate_and_reconstruct_truth_jsonl(&mut Cursor::new(document.clone()), &reference())
+            .unwrap_or_else(|error| panic!("without the field the {name} is valid: {error:?}"));
+        let mut lines = document
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("fixture JSON"))
+            .collect::<Vec<_>>();
+        assert_eq!(lines[3]["alleles"][1]["kind"], name);
+        lines[3]["alleles"][1]["final_haplotype_bases"] = json!(copied);
+        assert!(
+            matches!(
+                read_truth_jsonl(&mut Cursor::new(lines_to_jsonl(&lines))),
+                Err(TruthValidationError::Schema { line: 4, .. })
+            ),
+            "{name}"
+        );
+    }
+}
+
+/// Una deleción de una base en la copia 0, con su caso genotípico.
+fn deletion_fixture() -> String {
+    let mut lines = fixture()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("fixture JSON"))
+        .collect::<Vec<_>>();
+    lines[0]["source_digests"]
+        .as_array_mut()
+        .expect("digests")
+        .push(json!({
+            "source":{"kind":"explicit","source_id":"DEL_01"},
+            "sha256":"d".repeat(64),
+        }));
+    let provenance =
+        json!({"kind":"explicit","version":"1","source":{"kind":"explicit","source_id":"DEL_01"}});
+    lines[1]["segments"][0]["modifications"] = json!([]);
+    let source = lines[1]["current_pieces"][0]["source"].clone();
+    lines[1]["current_pieces"] = json!([source_piece(&source, 0, 3), source_piece(&source, 4, 8)]);
+    lines[1]["history"] = json!([{
+        "kind":"deletion","event_id":"DEL_01","start":3,"end":4,"provenance":provenance,
+    }]);
+    lines[3] = json!({
+        "record_type":"genotype","case_id":"CASE_DEL","reference_id":"REF_main","individual_id":"IND_01",
+        "case_kind":"indel","locus":{"sequence_id":"chr1","start":3,"end":4},
+        "alleles":[
+            {"kind":"reference"},
+            {"kind":"deletion","event_id":"DEL_01","start":3,"end":4,
+             "source_event":{"kind":"deletion","event_id":"DEL_01","start":3,"end":4},
+             "piece_links":[]}
+        ],
+        "allele_dosages":[1,1],
+        "carriers":[
+            {"allele_index":1,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":0}},
+            {"allele_index":0,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":1}}
+        ]
+    });
+    lines_to_jsonl(&lines)
 }
 
 #[test]
@@ -432,7 +540,6 @@ fn replay_accepts_nested_insertion_with_partial_survival_after_deletion() {
         {"kind":"insertion","event_id":"INS_02","point":3,"bases":"G","provenance":nested_provenance.clone()},
         {"kind":"deletion","event_id":"DEL_01","start":3,"end":5,"provenance":nested_provenance},
     ]);
-    lines[3]["alleles"][1]["final_haplotype_bases"] = json!("AACAAAAAA");
     lines[3]["alleles"][1]["piece_links"] = json!([{"piece_index":1,"start":2,"end":3}]);
     validate_and_reconstruct_truth_jsonl(&mut Cursor::new(lines_to_jsonl(&lines)), &reference())
         .expect("nested insertion and partial deletion replay exactly");

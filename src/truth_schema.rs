@@ -1,19 +1,28 @@
-//! Contrato externo v1 de `truth.jsonl`, independiente del dominio Rust.
+//! Contrato externo de `truth.jsonl` (versiones 4 y 5), independiente del
+//! dominio Rust.
 //!
 //! Solo comprueba estructura en memoria. Proyección, E/S y reconstrucción son
 //! responsabilidades posteriores (F2.4.2 y F2.4.3).
 
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const TRUTH_SCHEMA_VERSION: &str = "1";
-/// Versión que estrena el **alelo de repetición en tándem**.
+/// Versión vigente de la verdad **sin alelos de repetición**.
 ///
-/// La verdad solo pasa a esta versión **cuando publica al menos un alelo de
+/// Sustituye a la `"1"`, que es histórica y ya no se lee: aquella copiaba en
+/// cada alelo de inserción o deleción la secuencia final entera de la copia
+/// portadora (`final_haplotype_bases`), y el fichero crecía como *indels* ×
+/// longitud del genoma. Esta no la lleva; la secuencia se reconstruye desde
+/// `current_pieces` y la referencia (`schemas/truth-v4.md`).
+pub const TRUTH_SCHEMA_VERSION: &str = "4";
+/// Versión vigente de la verdad **con algún alelo de repetición publicado**.
+///
+/// Sustituye a la `"3"`, histórica por el mismo motivo que la `"1"`. La verdad
+/// solo pasa a esta versión **cuando publica al menos un alelo de
 /// repetición**, no por el mero hecho de que la configuración declare loci: un
 /// escenario cuyo único alelo es el de la referencia no produce ninguna
-/// variante que publicar, y su verdad sigue siendo byte a byte la de antes.
+/// variante de repetición y sigue en [`TRUTH_SCHEMA_VERSION`].
 /// [`TruthDocument::validate_structure`] lo exige en las dos direcciones.
-pub const TRUTH_SCHEMA_VERSION_WITH_REPEATS: &str = "3";
+pub const TRUTH_SCHEMA_VERSION_WITH_REPEATS: &str = "5";
 pub const TRUTH_DOCUMENT_KIND: &str = "gps_truth";
 pub const TRUTH_COORDINATE_CONVENTION: &str = "zero_based_half_open_v1";
 
@@ -238,18 +247,19 @@ pub enum TruthAllele {
     Snp {
         base: String,
     },
+    /// Inserción estructural. No lleva la secuencia final de la copia
+    /// portadora: se reconstruye desde sus `current_pieces` y la referencia.
     Insertion {
         event_id: String,
         bases: String,
-        final_haplotype_bases: String,
         source_event: TruthStructuralEvent,
         piece_links: Vec<TruthPieceLink>,
     },
+    /// Deleción estructural, sin la secuencia final de la copia portadora.
     Deletion {
         event_id: String,
         start: u64,
         end: u64,
-        final_haplotype_bases: String,
         source_event: TruthStructuralEvent,
         piece_links: Vec<TruthPieceLink>,
     },
@@ -417,7 +427,7 @@ pub enum TruthContractError {
 
 /// **La única definición de «estos registros llevan alelos de repetición».**
 ///
-/// La usan el contrato, que exige la versión 3 cuando es cierta, y la
+/// La usan el contrato, que exige la versión con repeticiones cuando es cierta, y la
 /// proyección, que decide con ella qué versión declarar. Escribirla dos veces
 /// ya produjo dos respuestas distintas —una miraba el historial y la otra
 /// no—, y con ellas el documento podía declarar una versión que su propio
@@ -456,7 +466,7 @@ impl TruthDocument {
         }
         // **La versión se promueve por lo que se publica, no por lo que se
         // declara.** Un documento que lleve al menos un alelo de repetición es
-        // de la versión 3 y uno que no lleve ninguno sigue siendo de la 1. Se
+        // de la versión 5 y uno que no lleve ninguno sigue siendo de la 4. Se
         // exige en las dos direcciones: sin la segunda, una promoción disparada
         // por la mera declaración del locus pasaría inadvertida.
         let carries_repeats = self.carries_repeat_alleles();
@@ -824,24 +834,20 @@ fn valid_allele_lexical(allele: &TruthAllele) -> Result<(), TruthContractError> 
             valid_repeat_blocks(blocks, bases)
         }
         TruthAllele::Snp { base } => valid_base("snp_allele_base", base),
+        // Que los `piece_links` no se salgan de la copia no se comprueba
+        // aquí: la estructura no reconstruye copias. Lo implica el validador
+        // semántico, que exige que sean exactamente los fragmentos de la copia
+        // reconstruida.
         TruthAllele::Insertion {
             event_id,
             bases,
-            final_haplotype_bases,
             source_event,
             piece_links,
         } => {
             valid_id("indel_event_id", event_id)?;
             valid_bases("insertion_allele_bases", bases)?;
-            valid_bases("final_haplotype_bases", final_haplotype_bases)?;
-            let final_length = u64::try_from(final_haplotype_bases.len()).map_err(|_| {
-                TruthContractError::ArithmeticOverflow {
-                    field: "final_haplotype_bases_length",
-                }
-            })?;
             if !matches!(source_event, TruthStructuralEvent::Insertion { point, bases: event_bases, .. } if *point > 0 && event_bases == bases)
                 || piece_links.is_empty()
-                || piece_links.iter().any(|link| link.end > final_length)
             {
                 return Err(TruthContractError::InvalidGenotypeAllele {
                     case_id: event_id.clone(),
@@ -853,24 +859,12 @@ fn valid_allele_lexical(allele: &TruthAllele) -> Result<(), TruthContractError> 
             event_id,
             start,
             end,
-            final_haplotype_bases,
             source_event,
             piece_links,
             ..
         } => {
             valid_id("indel_event_id", event_id)?;
-            valid_bases("final_haplotype_bases", final_haplotype_bases)?;
-            let final_length = u64::try_from(final_haplotype_bases.len()).map_err(|_| {
-                TruthContractError::ArithmeticOverflow {
-                    field: "final_haplotype_bases_length",
-                }
-            })?;
             if *start >= 1 && *end >= 2 && start < end {
-                if piece_links.iter().any(|link| link.end > final_length) {
-                    return Err(TruthContractError::InvalidGenotypeAllele {
-                        case_id: event_id.clone(),
-                    });
-                }
                 if !matches!(source_event, TruthStructuralEvent::Deletion { start: source_start, end: source_end, .. } if source_start == start && source_end == end && *source_start >= 1 && *source_end >= 2)
                 {
                     return Err(TruthContractError::InvalidGenotypeAllele {

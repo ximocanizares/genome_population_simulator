@@ -37,7 +37,9 @@ use crate::truth_schema::{
     TruthModification, TruthPieceLink, TruthRecord, TruthRepeatBlock, TruthSegment,
     TruthSourceKind, TruthSourceRef, TruthStructuralEvent, records_carry_repeat_alleles,
 };
-use crate::truth_validation::reference_content_sha256;
+use crate::truth_validation::{
+    TruthValidationError, reconstructed_copy_sha256, reference_content_sha256,
+};
 
 pub const TRUTH_ARTIFACT_ID: &str = "truth-jsonl";
 pub const TRUTH_ARTIFACT_KIND: &str = "truth_jsonl";
@@ -74,6 +76,19 @@ pub enum TruthProjectionError {
     },
     Genotype(GenotypeQueryError),
     Materialization(MaterializationError),
+    /// El validador independiente no pudo reconstruir una copia publicada.
+    IndependentReconstruction {
+        identity: CopyIdentity,
+        error: Box<TruthValidationError>,
+    },
+    /// La copia que reconstruye el validador independiente desde la verdad no
+    /// es la que el productor materializa desde su estado interno. Es un
+    /// defecto interno: la verdad no describiría el genoma simulado.
+    ReconstructionMismatch {
+        identity: CopyIdentity,
+    },
+    /// Hay una copia en el estado interno sin registro publicado, o al revés.
+    CopySetMismatch,
     DuplicateCaseId(String),
     /// El individuo no tiene copias de la secuencia que un locus nombra.
     /// Es imposible con una referencia coherente y se declara en vez de
@@ -173,8 +188,8 @@ pub fn project_truth(
     let document = TruthDocument {
         header: TruthHeader {
             document_kind: TRUTH_DOCUMENT_KIND.to_owned(),
-            // La versión la decide **lo publicado**: sube a la 3 cuando algún
-            // registro lleva un alelo de repetición y se queda en la 1 cuando
+            // La versión la decide **lo publicado**: sube a la 5 cuando algún
+            // registro lleva un alelo de repetición y se queda en la 4 cuando
             // no lleva ninguno, aunque la configuración declare loci.
             schema_version: if carries_repeats {
                 TRUTH_SCHEMA_VERSION_WITH_REPEATS.to_owned()
@@ -196,7 +211,69 @@ pub fn project_truth(
     document
         .validate_structure()
         .map_err(TruthProjectionError::Contract)?;
+    verify_copies_against_independent_reconstruction(
+        &document,
+        input.reference,
+        input.individuals,
+    )?;
     Ok(document)
+}
+
+/// **Cada copia publicada es la copia simulada.**
+///
+/// Compara, para **todas** las copias —lleven o no *indels*—, la huella
+/// SHA-256 de la secuencia que el productor materializa desde su estado
+/// interno con la de la que el validador independiente reconstruye desde el
+/// registro publicado. No escribe nada en la verdad: es un contraste en
+/// memoria, una copia cada vez, que se libera antes de pasar a la siguiente.
+///
+/// Hasta el 30/09/2026 este contraste lo hacía, de rebote y solo para las
+/// copias con *indels*, la secuencia final que cada alelo estructural copiaba
+/// en `final_haplotype_bases`. Sin él, una proyección que publicara bases
+/// distintas de las simuladas, pero coherentes en todos sus registros, pasaría
+/// todas las demás comprobaciones: las lecturas saldrían de una secuencia y la
+/// verdad y el VCF describirían otra.
+pub(crate) fn verify_copies_against_independent_reconstruction(
+    document: &TruthDocument,
+    reference: &Reference,
+    individuals: &InitialIndividualsMaterialization,
+) -> Result<(), TruthProjectionError> {
+    let simulated = individuals
+        .individuals()
+        .iter()
+        .flat_map(|individual| individual.individual().sequences())
+        .flat_map(|sequence| sequence.copies())
+        .map(|copy| (copy_identity(copy), copy))
+        .collect::<BTreeMap<_, _>>();
+    let mut published = 0_usize;
+    for record in &document.records {
+        let TruthRecord::HaplotypeCopy(record) = record else {
+            continue;
+        };
+        published += 1;
+        let copy = simulated
+            .get(&record.identity)
+            .ok_or(TruthProjectionError::CopySetMismatch)?;
+        let reconstructed = reconstructed_copy_sha256(record, reference).map_err(|error| {
+            TruthProjectionError::IndependentReconstruction {
+                identity: record.identity.clone(),
+                error: Box::new(error),
+            }
+        })?;
+        let materialized: [u8; 32] = Sha256::digest(
+            materialize_copy(copy, reference).map_err(TruthProjectionError::Materialization)?,
+        )
+        .into();
+        if reconstructed != materialized {
+            return Err(TruthProjectionError::ReconstructionMismatch {
+                identity: record.identity.clone(),
+            });
+        }
+    }
+    if published != simulated.len() {
+        return Err(TruthProjectionError::CopySetMismatch);
+    }
+    Ok(())
 }
 
 fn project_copy(
@@ -835,7 +912,6 @@ fn project_active_indel_genotypes(
                         } => {
                             let event_id = event_id.as_str().to_owned();
                             let bases = bytes_to_truth(&event_id, bases)?;
-                            let final_haplotype_bases = final_haplotype_bases(copy, reference)?;
                             (
                                 event_id.clone(),
                                 TruthLocus {
@@ -846,7 +922,6 @@ fn project_active_indel_genotypes(
                                 TruthAllele::Insertion {
                                     event_id: event_id.clone(),
                                     bases: bases.clone(),
-                                    final_haplotype_bases,
                                     source_event: TruthStructuralEvent::Insertion {
                                         event_id: event_id.clone(),
                                         point: *point,
@@ -864,7 +939,6 @@ fn project_active_indel_genotypes(
                             ..
                         } => {
                             let event_id = event_id.as_str().to_owned();
-                            let final_haplotype_bases = final_haplotype_bases(copy, reference)?;
                             (
                                 event_id.clone(),
                                 TruthLocus {
@@ -876,7 +950,6 @@ fn project_active_indel_genotypes(
                                     event_id: event_id.clone(),
                                     start: *start,
                                     end: *end,
-                                    final_haplotype_bases,
                                     source_event: TruthStructuralEvent::Deletion {
                                         event_id: event_id.clone(),
                                         start: *start,
@@ -1068,14 +1141,6 @@ fn project_repeat_genotypes(
     Ok(())
 }
 
-fn final_haplotype_bases(
-    copy: &HaplotypeCopy,
-    reference: &Reference,
-) -> Result<String, TruthProjectionError> {
-    let bases = materialize_copy(copy, reference).map_err(TruthProjectionError::Materialization)?;
-    bytes_to_truth("final-haplotype", &bases)
-}
-
 /// Enlaces a los fragmentos vigentes que todavía proceden de una inserción.
 /// Las coordenadas son offsets de la secuencia final de la copia y hacen
 /// explícita una inserción dividida por cambios posteriores.
@@ -1199,21 +1264,19 @@ fn allele_json(allele: &TruthAllele) -> Value {
         TruthAllele::Insertion {
             event_id,
             bases,
-            final_haplotype_bases,
             source_event,
             piece_links,
         } => json!({"kind":"insertion","event_id":event_id,"bases":bases,
-            "final_haplotype_bases":final_haplotype_bases,"source_event":structural_event_json(source_event),
+            "source_event":structural_event_json(source_event),
             "piece_links":piece_links.iter().map(piece_link_json).collect::<Vec<_>>() }),
         TruthAllele::Deletion {
             event_id,
             start,
             end,
-            final_haplotype_bases,
             source_event,
             piece_links,
         } => json!({"kind":"deletion","event_id":event_id,"start":start,"end":end,
-            "final_haplotype_bases":final_haplotype_bases,"source_event":structural_event_json(source_event),
+            "source_event":structural_event_json(source_event),
             "piece_links":piece_links.iter().map(piece_link_json).collect::<Vec<_>>() }),
         TruthAllele::Repeat {
             locus_id,
@@ -1573,8 +1636,8 @@ mod tests {
     };
     use crate::snp_application::{ApplicableSnp, TargetedSnp};
     use crate::truth_validation::{
-        TruthValidationError, reference_content_sha256, validate_and_reconstruct_truth_jsonl,
-        validate_truth_jsonl_streaming,
+        TruthValidationError, reference_content_sha256, validate_and_reconstruct_truth,
+        validate_and_reconstruct_truth_jsonl, validate_truth_jsonl_streaming,
     };
 
     static NONCE: AtomicU64 = AtomicU64::new(0);
@@ -1904,21 +1967,17 @@ genotype_model = "hwe""#
                     }) => alleles.iter().find_map(|allele| match allele {
                         TruthAllele::Insertion {
                             event_id: observed,
-                            final_haplotype_bases,
                             source_event,
                             piece_links,
                             ..
-                        } if observed == event_id => {
-                            Some((final_haplotype_bases, source_event, piece_links))
-                        }
+                        } if observed == event_id => Some((source_event, piece_links)),
                         _ => None,
                     }),
                     _ => None,
                 })
                 .expect("insertion case")
         };
-        let (final_bases, source_event, links) = insertion("INS_01");
-        assert_eq!(final_bases, "ATTGT");
+        let (source_event, links) = insertion("INS_01");
         assert!(
             matches!(source_event, TruthStructuralEvent::Insertion { event_id, point: 1, bases } if event_id == "INS_01" && bases == "ACGT")
         );
@@ -1938,6 +1997,125 @@ genotype_model = "hwe""#
             TruthRecord::HaplotypeCopy(copy)
             if copy.history.iter().any(|event| matches!(event, TruthHistoryEvent::Insertion { event_id, .. } if event_id == "INS_02"))
         )));
+        // Los bytes finales ya no viajan en el alelo: se exigen a la copia que
+        // el validador independiente reconstruye desde la verdad, y que sean
+        // también los que el productor materializa desde su estado.
+        let reconstructed =
+            validate_and_reconstruct_truth(document, &reference).expect("independent replay");
+        let (identity, bases) = reconstructed
+            .copies
+            .iter()
+            .find(|(identity, _)| identity.copy_index == 0)
+            .expect("copy 0");
+        assert_eq!(bases.as_slice(), b"ATTGT");
+        let simulated = state
+            .individuals()
+            .iter()
+            .flat_map(|individual| individual.individual().sequences())
+            .flat_map(|sequence| sequence.copies())
+            .find(|copy| &copy_identity(copy) == identity)
+            .expect("simulated copy 0");
+        assert_eq!(
+            materialize_copy(simulated, &reference).expect("materialized copy 0"),
+            b"ATTGT"
+        );
+    }
+
+    /// **La verdad publicada tiene que ser la copia simulada, copia a copia.**
+    ///
+    /// El contraste compara la reconstrucción independiente de cada registro
+    /// con la materialización del estado interno. Se prueba con dos verdades
+    /// que se reconstruyen sin error pero no describen el estado:
+    ///
+    /// - la de un estado cuya inserción lleva otras bases, contrastada con el
+    ///   estado verdadero: falla la copia 0, la del *indel*;
+    /// - la verdadera con el SNP de la **copia 1**, que no tiene ningún
+    ///   *indel*, cambiado de forma coherente en sus segmentos y en sus
+    ///   fragmentos vigentes: la copia 0 pasa y falla la 1. Así se ve que el
+    ///   contraste no se limita a las copias con *indels*.
+    ///
+    /// Lo que esta prueba **no** puede ver es que `project_truth` deje de
+    /// llamar al contraste: sin una proyección defectuosa no hay discrepancia
+    /// que cazar, y la batería no tiene ninguna. Quitar la llamada solo se nota
+    /// junto con un defecto de la proyección; el de la revisión lo caza, con o
+    /// sin contraste, `tests/truth_matches_simulation.rs`.
+    #[test]
+    fn publication_rejects_a_truth_that_does_not_describe_the_simulated_copies() {
+        let reference = reference();
+        let phase = HaplotypePhase::from_copy_index(0).expect("phase");
+        let sequence = SequenceId::parse("chr1", "test").expect("sequence");
+        let insertion = |bases: &[u8]| {
+            DeclaredSmallEvent::Insertion(TargetedCurrentInsertion::new(
+                sequence.clone(),
+                phase,
+                1,
+                std::sync::Arc::<[u8]>::from(bases),
+                DomainModificationProvenance::new(EventId::parse("INS_01", "test").expect("event")),
+            ))
+        };
+        let (state, matrix) = f2_3_state(&reference, vec![insertion(b"ACGT")]);
+        let (other_state, _) = f2_3_state(&reference, vec![insertion(b"ACGG")]);
+        let sources = required_source_digests(
+            &reference,
+            &matrix,
+            [TruthSourceRef {
+                kind: TruthSourceKind::Explicit,
+                source_id: "INS_01".to_owned(),
+            }],
+        );
+        let groups = required_group_digests(&matrix);
+        let document = project_truth(TruthProjectionInput {
+            execution_id: "RUN_AGREEMENT",
+            reference: &reference,
+            individuals: &state,
+            matrix: &matrix,
+            source_digests: &sources,
+            group_digests: &groups,
+        })
+        .expect("the true projection agrees with its own state");
+
+        assert!(matches!(
+            verify_copies_against_independent_reconstruction(&document, &reference, &other_state),
+            Err(TruthProjectionError::ReconstructionMismatch { identity }) if identity.copy_index == 0
+        ));
+
+        let mut tampered = document.clone();
+        let mut changed = 0;
+        for record in &mut tampered.records {
+            let TruthRecord::HaplotypeCopy(copy) = record else {
+                continue;
+            };
+            if copy.identity.copy_index != 1 {
+                continue;
+            }
+            assert!(
+                copy.history
+                    .iter()
+                    .all(|event| matches!(event, TruthHistoryEvent::Snp { .. })),
+                "copy 1 carries no indel"
+            );
+            for segment in &mut copy.segments {
+                for modification in &mut segment.modifications {
+                    if let TruthModification::Snp { alternate, .. } = modification {
+                        *alternate = "G".to_owned();
+                        changed += 1;
+                    }
+                }
+            }
+            for piece in &mut copy.current_pieces {
+                if let TruthCurrentPiece::Source { snps, .. } = piece {
+                    for snp in snps {
+                        snp.alternate = "G".to_owned();
+                        changed += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(changed, 2, "the SNP of copy 1 must change in both views");
+        assert!(matches!(
+            verify_copies_against_independent_reconstruction(&tampered, &reference, &state),
+            Err(TruthProjectionError::ReconstructionMismatch { identity }) if identity.copy_index == 1
+        ));
     }
 
     #[test]
@@ -2411,6 +2589,17 @@ genotype_model = "hwe""#
         assert!(first.ends_with(b"\n"));
         assert_eq!(
             format!("{:x}", Sha256::digest(&first)),
+            "4db6f76dc244b5bdefcd3fc140c8db784b841317776cbd8db32a91b56f578b07"
+        );
+        // Sin indels, lo único que cambió al pasar de la versión 1 a la 4 es
+        // el número de versión: con él devuelto, los bytes son los de antes.
+        let as_version_one = std::str::from_utf8(&first).expect("UTF-8").replacen(
+            "\"schema_version\":\"4\"",
+            "\"schema_version\":\"1\"",
+            1,
+        );
+        assert_eq!(
+            format!("{:x}", Sha256::digest(as_version_one.as_bytes())),
             "af91d7f472b3bb9db4369e0c383c687adae2a733f6d958a654a4d237c20c617e"
         );
         let lines = std::str::from_utf8(&first)

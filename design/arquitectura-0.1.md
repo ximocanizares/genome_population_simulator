@@ -445,7 +445,8 @@ La **verdad biológica** comprende referencias, haplotipos, genotipos,
 parentescos, poblaciones, transmisiones, mutaciones y observaciones. Es la única
 fuente autorizada para generar el fichero obligatorio de verdad y los VCF.
 
-El fichero obligatorio es `truth.jsonl` v1, UTF-8 sin comprimir. Se escribe y
+El fichero obligatorio es `truth.jsonl` v4 (v5 cuando publica algún alelo de
+repetición; `schemas/truth-v4.md`), UTF-8 sin comprimir. Se escribe y
 lee por flujo. La primera línea es siempre la cabecera versionada con clase,
 ejecución, referencia, convenio de coordenadas, recuentos y digests; las líneas
 siguientes son registros tipados de copia haplotípica o genotipo. Cada copia
@@ -1400,7 +1401,7 @@ externo ni recombinación fundadora. Ninguna fuente puede poseer o reescribir la
 verdad resultante; F6 añade SV y F7.1 meiosis.
 
 DTC-061 resuelve DTPD-102 con la representación interna híbrida y su proyección
-obligatoria `truth.jsonl` v1, validada por esquemas de registro y reconstrucción
+obligatoria `truth.jsonl` v4/v5, validada por esquemas de registro y reconstrucción
 semántica independiente. DTC-062 fija VCF 4.5 como única versión de salida, la
 cabecera `##fileformat=VCFv4.5` y validación externa basada en htslib. DTC-063
 fija `.vcf.gz` BGZF con exactamente un índice TBI o CSI como salida

@@ -1,5 +1,11 @@
 # Contrato `truth.jsonl` v1
 
+> **Histórico desde el 30 de septiembre de 2026.** Este texto describe la
+> versión `"1"`, que ya no se escribe ni se lee. Las versiones vigentes son la
+> `"4"` y la `"5"`, descritas en `truth-v4.md`: la 4 es esta misma versión sin
+> `final_haplotype_bases`, y la 5 es la `"3"` sin ese campo. El resto del texto
+> se conserva tal cual.
+
 `truth.jsonl` es UTF-8 sin compresión y cada línea contiene un objeto JSON que
 cumple `truth-v1.schema.json`. La primera línea es `header`; las posteriores son
 `haplotype_copy` y después `genotype`. La versión es textual (`"1"`) y una

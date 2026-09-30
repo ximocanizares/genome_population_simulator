@@ -41,6 +41,8 @@ documenta mejor.
 | DT-011 | Dos rechazos del generador de alelos no se alcanzan desde una configuración | Baja | 27/09/2026 | Abierta |
 | DT-012 | El barrido de opciones comprueba que el control existe, no que atienda a la opción | Baja | 27/09/2026 | Abierta |
 | DT-013 | El generador de alelos no se puede usar sobre una referencia que construye el propio programa | Media | 29/09/2026 | Abierta |
+| DT-014 | El esquema de la verdad de F5 admite todavía la copia entera del haplotipo en un alelo que F5 nunca publica | Baja | 30/09/2026 | Abierta |
+| DT-015 | El validador de la verdad por flujo rechaza toda verdad con alelos de repetición | Baja | 30/09/2026 | Abierta |
 
 ---
 
@@ -840,3 +842,90 @@ Una de dos, y es decisión del responsable:
 Mientras no se decida, **quien quiera generar alelos tiene que aportar una
 referencia que ya contenga el tracto**.
 
+---
+
+## DT-014. El esquema de la verdad de F5 admite todavía la copia entera del haplotipo
+
+**Gravedad: baja.** Es una holgura del esquema publicado, no un resultado
+incorrecto: ningún fichero real la aprovecha y el único lector la rechaza.
+
+### Qué pasa
+
+Hasta el 30 de septiembre de 2026, cada alelo de inserción o de deleción de la
+verdad estructurada llevaba en `final_haplotype_bases` **la secuencia entera de
+la copia portadora**. Eso hacía crecer `truth.jsonl` como el número de *indels*
+por la longitud del genoma, y ese día se quitó del recorrido general: las
+versiones `"1"` y `"3"` pasaron a la `"4"` y la `"5"`, sin el campo.
+
+La verdad de F5, la de los fundadores sintéticos, es otra versión, la `"2"`, y
+**se dejó como estaba**. Su esquema, `truth-v2.schema.json`, fija que todo caso
+genotípico es un SNP, pero su definición de alelo sigue enumerando también los
+alelos de inserción y de deleción, con el campo dentro. Un documento que metiera
+un alelo de inserción con la copia entera dentro de un caso SNP **pasaría ese
+esquema**.
+
+### Por qué es inofensiva
+
+- **Nadie la escribe.** El productor de la verdad de F5
+  (`src/f5_artifacts.rs`) solo emite casos SNP con alelos de referencia y SNP.
+- **El único lector la rechaza.** El oráculo de F5 (`src/f5_oracle.rs`)
+  rechaza un caso que no sea SNP («F5 solo publica casos SNP») y todo alelo que
+  no sea de referencia o SNP («alelo ... ajeno a F5»). Lo demuestra, fallando
+  por su motivo, la prueba del oráculo que corrompe cada campo de un genotipo
+  publicado.
+
+### Por qué no se toca ahora
+
+Cambiar el esquema obliga a cambiar la versión, y la versión de la verdad de F5
+está fijada en dos contratos más: el manifiesto de F5
+(`manifest-general-v5.schema.json`) la exige como constante `"2"`, y DTC-089,
+la decisión que fija el F5 sintético reproducible, la escribe literalmente y
+prohíbe ampliar después sus esquemas. Quitar una rama muerta costaría una
+versión nueva del manifiesto de F5, con su lector y su oráculo, sin ahorrar un
+solo byte en ningún fichero.
+
+### Qué haría falta para cerrarla
+
+Aprovechar la próxima vez que haya que cambiar la verdad o el manifiesto de F5
+por otro motivo para quitar de la definición de alelo de su esquema las ramas
+de inserción y de deleción.
+
+---
+
+## DT-015. El validador de la verdad por flujo rechaza toda verdad con alelos de repetición
+
+**Gravedad: baja.** Hoy no afecta a ninguna ejecución: esa vía solo la usan
+las pruebas. Pero es una función pública que dice validar cualquier verdad y no
+lo hace.
+
+### Qué pasa
+
+El validador de la verdad tiene dos formas de leer `truth.jsonl`: una que carga
+el documento entero y otra **por flujo**, que lee copia a copia y las libera
+(`validate_truth_jsonl_streaming`, en `src/truth_validation.rs`). La segunda
+comprueba la cabecera **como si fuera un documento sin registros**, antes de
+haber leído ninguno. Y la regla de versiones dice que un documento sin alelos
+de repetición tiene que declarar la versión general. Así que toda verdad que
+declare la versión con repeticiones —la `"5"`, y antes la `"3"`— se rechaza
+por versión no admitida, aunque sea correcta.
+
+### Cómo se comprobó
+
+El 30 de septiembre de 2026, sobre una verdad con alelos de repetición
+publicada por el propio programa: la lectura completa la acepta y la lectura
+por flujo la rechaza con `Contract(UnsupportedVersion)`. Se reprodujo igual
+sobre el código anterior a la versión 5, con la verdad `"3"`: la deuda no la
+introdujo el cambio de versiones.
+
+### Por qué no se arregla ahora
+
+Ninguna ejecución la usa, y arreglarla obliga a decidir cómo se comprueba por
+flujo una regla que depende de registros que todavía no se han leído: aplazar
+la comprobación de versión al final de la lectura, o exigirla por registro. Es
+un cambio del validador que merece su propio encargo.
+
+### Qué haría falta para cerrarla
+
+Que la lectura por flujo compruebe la cabecera sin la regla de promoción,
+acumule si ha visto algún alelo de repetición y aplique la regla al terminar,
+con una prueba que lea por flujo una verdad `"5"` publicada.

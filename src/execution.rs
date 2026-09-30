@@ -72,7 +72,9 @@ use crate::snp_application::{ApplicableSnp, TargetedSnp};
 use crate::tandem_repeat::observe_tract;
 use crate::technical_identity::derive_technical_identity_plan;
 use crate::technical_profile::resolve_f4_technical_profile;
-use crate::truth_projection::{TruthProjectionInput, project_truth, write_truth_artifact};
+use crate::truth_projection::{
+    TruthProjectionError, TruthProjectionInput, project_truth, write_truth_artifact,
+};
 use crate::truth_schema::{
     NamedDigest, TRUTH_COORDINATE_CONVENTION, TRUTH_DOCUMENT_KIND, TRUTH_SCHEMA_VERSION,
     TruthDocument, TruthHeader, TruthSourceKind, TruthSourceRef,
@@ -554,9 +556,14 @@ fn write_execution_truth(
                 source_digests: &source_digests,
                 group_digests: &group_digests,
             })
-            .map_err(|error| {
-                Diagnostic::format("GPS-FMT-006", "No se pudo proyectar la verdad genómica.")
-                    .with("detail", error.to_string())
+            .map_err(|error| match error {
+                // Que la verdad no describa la copia simulada es un defecto
+                // del programa, no un fallo de formato de la entrada.
+                TruthProjectionError::IndependentReconstruction { .. }
+                | TruthProjectionError::ReconstructionMismatch { .. }
+                | TruthProjectionError::CopySetMismatch => internal("truth_reconstruction", error),
+                _ => Diagnostic::format("GPS-FMT-006", "No se pudo proyectar la verdad genómica.")
+                    .with("detail", error.to_string()),
             })?
         }
         (Some(prepared), None) => empty_truth_document(

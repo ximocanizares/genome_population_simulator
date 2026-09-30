@@ -141,7 +141,6 @@ fn structural_alleles_allow_partial_insertion_survival_but_reject_domain_boundar
             // El evento original es largo, pero el enlace muestra que solo
             // una parte sigue viva después de una deleción posterior.
             bases: "ACGT".into(),
-            final_haplotype_bases: "AC".into(),
             source_event: TruthStructuralEvent::Insertion {
                 event_id: "INS_01".into(),
                 point: 2,
@@ -182,13 +181,11 @@ fn structural_alleles_allow_partial_insertion_survival_but_reject_domain_boundar
     }
     assert!(duplicate_link.validate_structure().is_err());
 
-    let mut out_of_range = document.clone();
-    if let TruthRecord::Genotype(genotype) = out_of_range.records.last_mut().expect("genotype")
-        && let TruthAllele::Insertion { piece_links, .. } = &mut genotype.alleles[1]
-    {
-        piece_links[0].end = 3;
-    }
-    assert!(out_of_range.validate_structure().is_err());
+    // Que un enlace no se salga de la copia ya no es asunto de la estructura:
+    // se comprobaba contra `final_haplotype_bases`, que la versión 4 no
+    // lleva. Lo exige el validador semántico contra la copia reconstruida
+    // (`tests/truth_validation.rs`, caso «insertion link beyond the
+    // reconstructed copy»).
 
     let mut invalid_deletion = document;
     let TruthRecord::Genotype(genotype) = invalid_deletion.records.last_mut().expect("genotype")
@@ -206,7 +203,6 @@ fn structural_alleles_allow_partial_insertion_survival_but_reject_domain_boundar
             event_id: "DEL_01".into(),
             start: 0,
             end: 1,
-            final_haplotype_bases: "AC".into(),
             source_event: TruthStructuralEvent::Deletion {
                 event_id: "DEL_01".into(),
                 start: 0,
@@ -221,16 +217,16 @@ fn structural_alleles_allow_partial_insertion_survival_but_reject_domain_boundar
 #[test]
 fn manual_fixture_lines_are_valid_against_the_external_schema() {
     let schema: Value =
-        serde_json::from_str(include_str!("../schemas/truth-v1.schema.json")).expect("schema JSON");
+        serde_json::from_str(include_str!("../schemas/truth-v4.schema.json")).expect("schema JSON");
     assert_eq!(
         schema["$schema"],
         "https://json-schema.org/draft/2020-12/schema"
     );
-    let lines = include_str!("fixtures/truth-v1/valid.jsonl")
+    let lines = include_str!("fixtures/truth-v4/valid.jsonl")
         .lines()
         .collect::<Vec<_>>();
     assert_eq!(lines.len(), 4);
-    assert!(include_str!("fixtures/truth-v1/valid.jsonl").ends_with('\n'));
+    assert!(include_str!("fixtures/truth-v4/valid.jsonl").ends_with('\n'));
     for (index, line) in lines.iter().copied().enumerate() {
         let value: Value = serde_json::from_str(line).expect("manual fixture JSON");
         assert!(value["record_type"].is_string());
@@ -256,7 +252,7 @@ fn manual_fixture_lines_are_valid_against_the_external_schema() {
 
 #[test]
 fn external_schema_and_wire_reader_share_u64_integer_boundaries() {
-    let header = include_str!("fixtures/truth-v1/valid.jsonl")
+    let header = include_str!("fixtures/truth-v4/valid.jsonl")
         .lines()
         .next()
         .expect("fixture header");
@@ -284,7 +280,7 @@ fn external_schema_and_wire_reader_share_u64_integer_boundaries() {
 #[test]
 fn external_schema_rejects_missing_fields_and_unknown_record_keys() {
     let mut header: Value = serde_json::from_str(
-        include_str!("fixtures/truth-v1/valid.jsonl")
+        include_str!("fixtures/truth-v4/valid.jsonl")
             .lines()
             .next()
             .expect("header fixture"),
@@ -298,7 +294,7 @@ fn external_schema_rejects_missing_fields_and_unknown_record_keys() {
     assert_schema_result("header-missing-execution", &header, false);
 
     let mut copy: Value = serde_json::from_str(
-        include_str!("fixtures/truth-v1/valid.jsonl")
+        include_str!("fixtures/truth-v4/valid.jsonl")
             .lines()
             .nth(1)
             .expect("copy fixture"),
@@ -321,7 +317,7 @@ fn external_schema_rejects_missing_fields_and_unknown_record_keys() {
     assert_schema_result(
         "deletion-boundary",
         &structural(json!({
-            "kind":"deletion","event_id":"DEL_01","start":0,"end":1,"final_haplotype_bases":"AC",
+            "kind":"deletion","event_id":"DEL_01","start":0,"end":1,
             "source_event":{"kind":"deletion","event_id":"DEL_01","start":1,"end":2},"piece_links":[]
         })),
         false,
@@ -329,7 +325,7 @@ fn external_schema_rejects_missing_fields_and_unknown_record_keys() {
     assert_schema_result(
         "insertion-empty-links",
         &structural(json!({
-            "kind":"insertion","event_id":"INS_01","bases":"A","final_haplotype_bases":"AC",
+            "kind":"insertion","event_id":"INS_01","bases":"A",
             "source_event":{"kind":"insertion","event_id":"INS_01","point":1,"bases":"A"},"piece_links":[]
         })),
         false,
@@ -337,16 +333,94 @@ fn external_schema_rejects_missing_fields_and_unknown_record_keys() {
     assert_schema_result(
         "outer-source-kind-mismatch",
         &structural(json!({
-            "kind":"insertion","event_id":"INS_01","bases":"A","final_haplotype_bases":"AC",
+            "kind":"insertion","event_id":"INS_01","bases":"A",
             "source_event":{"kind":"deletion","event_id":"INS_01","start":1,"end":2},"piece_links":[{"piece_index":0,"start":0,"end":1}]
         })),
         false,
     );
 }
 
+/// **La copia entera del haplotipo no vuelve a los alelos estructurales.**
+///
+/// Las versiones 1 y 3 copiaban en cada alelo de inserción o deleción la
+/// secuencia final de la copia portadora (`final_haplotype_bases`). Los
+/// esquemas vigentes lo rechazan como propiedad desconocida. Cada alelo se
+/// prueba primero **sin** el campo, y debe pasar: así el rechazo con el campo
+/// no puede deberse a otra cosa del alelo. Y el esquema vigente tampoco
+/// admite una cabecera de las versiones históricas.
+#[test]
+fn current_schemas_reject_the_copied_final_haplotype_as_an_unknown_property() {
+    let genotype = |allele: Value| {
+        json!({
+            "record_type":"genotype","case_id":"CASE_02","reference_id":"REF_main","individual_id":"IND_01",
+            "case_kind":"indel","locus":{"sequence_id":"chr1","start":1,"end":2},
+            "alleles":[{"kind":"reference"},allele],"allele_dosages":[1,1],
+            "carriers":[
+                {"allele_index":0,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":0}},
+                {"allele_index":1,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":1}}
+            ]
+        })
+    };
+    let deletion = json!({
+        "kind":"deletion","event_id":"DEL_01","start":1,"end":2,
+        "source_event":{"kind":"deletion","event_id":"DEL_01","start":1,"end":2},"piece_links":[]
+    });
+    let insertion = json!({
+        "kind":"insertion","event_id":"INS_01","bases":"A",
+        "source_event":{"kind":"insertion","event_id":"INS_01","point":1,"bases":"A"},
+        "piece_links":[{"piece_index":1,"start":1,"end":2}]
+    });
+    for schema in ["truth-v4.schema.json", "truth-v5.schema.json"] {
+        for (name, allele) in [("deletion", &deletion), ("insertion", &insertion)] {
+            assert_schema_result_against(schema, name, &genotype(allele.clone()), true);
+            let mut with_copy = allele.clone();
+            with_copy["final_haplotype_bases"] = json!("AAAA");
+            assert_schema_result_against(
+                schema,
+                &format!("{name}-with-final-haplotype"),
+                &genotype(with_copy),
+                false,
+            );
+        }
+    }
+    let header: Value = serde_json::from_str(
+        include_str!("fixtures/truth-v4/valid.jsonl")
+            .lines()
+            .next()
+            .expect("header fixture"),
+    )
+    .expect("header JSON");
+    assert_schema_result("header-v4", &header, true);
+    for historical in ["1", "3"] {
+        let mut old = header.clone();
+        old["schema_version"] = json!(historical);
+        assert_schema_result(&format!("header-v{historical}"), &old, false);
+    }
+}
+
+/// **Los registros de copia y de genotipo están cerrados en los dos esquemas
+/// vigentes.** Cada registro del ejemplo pasa tal cual y se rechaza con una
+/// propiedad desconocida; hasta ahora solo se probaba el de copia, y solo en
+/// un esquema.
+#[test]
+fn current_schemas_close_copy_and_genotype_records_to_unknown_properties() {
+    let lines = include_str!("fixtures/truth-v4/valid.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("fixture JSON"))
+        .collect::<Vec<_>>();
+    for schema in ["truth-v4.schema.json", "truth-v5.schema.json"] {
+        for (name, record) in [("copy", &lines[1]), ("genotype", &lines[3])] {
+            assert_schema_result_against(schema, name, record, true);
+            let mut open = record.clone();
+            open["unexpected"] = json!(true);
+            assert_schema_result_against(schema, &format!("{name}-unknown-field"), &open, false);
+        }
+    }
+}
+
 #[test]
 fn external_parser_rejects_duplicate_keys_in_each_record_discriminator() {
-    let lines = include_str!("fixtures/truth-v1/valid.jsonl")
+    let lines = include_str!("fixtures/truth-v4/valid.jsonl")
         .lines()
         .collect::<Vec<_>>();
     for (name, line, needle, duplicate) in [
@@ -375,11 +449,11 @@ fn external_parser_rejects_duplicate_keys_in_each_record_discriminator() {
 
 #[test]
 fn valid_fixture_shape_has_all_required_external_fields() {
-    let records: Vec<Value> = include_str!("fixtures/truth-v1/valid.jsonl")
+    let records: Vec<Value> = include_str!("fixtures/truth-v4/valid.jsonl")
         .lines()
         .map(|line| serde_json::from_str(line).expect("JSON"))
         .collect();
-    assert_eq!(records[0]["schema_version"], "1");
+    assert_eq!(records[0]["schema_version"], "4");
     assert!(records[1]["identity"]["copy_index"].is_u64());
     assert!(records[1]["provenance"]["sources"].is_array());
     assert_eq!(
@@ -403,6 +477,77 @@ fn rejects_missing_and_unknown_versions() {
     future.header.schema_version = "2".into();
     assert_eq!(
         future.validate_structure(),
+        Err(TruthContractError::UnsupportedVersion)
+    );
+    // Las versiones 1 y 3, que copiaban la secuencia final de la copia en
+    // cada alelo estructural, son históricas: no se leen ni se migran.
+    for historical in ["1", "3"] {
+        let mut old = valid_document();
+        old.header.schema_version = historical.into();
+        assert_eq!(
+            old.validate_structure(),
+            Err(TruthContractError::UnsupportedVersion),
+            "version {historical}"
+        );
+    }
+}
+
+/// El documento válido de siempre con su caso SNP convertido en un caso de
+/// repetición: el único alelo de repetición del documento.
+fn document_with_a_repeat_allele(version: &str) -> TruthDocument {
+    let mut document = valid_document();
+    document.header.schema_version = version.into();
+    let TruthRecord::Genotype(genotype) = document.records.last_mut().expect("genotype") else {
+        panic!("genotype record");
+    };
+    genotype.case_kind = GenotypeCaseKind::Repeat;
+    genotype.locus = TruthLocus {
+        sequence_id: "chr1".into(),
+        start: 2,
+        end: 6,
+    };
+    genotype.alleles = vec![
+        TruthAllele::Reference,
+        TruthAllele::Repeat {
+            locus_id: "STR_1".into(),
+            bases: "ACACAC".into(),
+            blocks: vec![TruthRepeatBlock {
+                motif: "AC".into(),
+                bases: 6,
+            }],
+        },
+    ];
+    document
+}
+
+/// **Con un alelo de repetición publicado, la versión tiene que ser la 5.**
+///
+/// El mismo documento pasa con la 5, así que el rechazo con la 4 solo puede
+/// deberse a la promoción.
+#[test]
+fn a_document_carrying_a_repeat_allele_must_declare_the_repeat_version() {
+    document_with_a_repeat_allele(TRUTH_SCHEMA_VERSION_WITH_REPEATS)
+        .validate_structure()
+        .expect("a repeat allele under the repeat version");
+    assert_eq!(
+        document_with_a_repeat_allele(TRUTH_SCHEMA_VERSION).validate_structure(),
+        Err(TruthContractError::UnsupportedVersion)
+    );
+}
+
+/// **Sin ningún alelo de repetición, la versión tiene que ser la 4.**
+///
+/// El documento válido de siempre pasa con la 4; declarar la 5 sin publicar
+/// ninguna repetición es la promoción por declaración que el contrato prohíbe.
+#[test]
+fn a_document_without_repeat_alleles_must_not_declare_the_repeat_version() {
+    valid_document()
+        .validate_structure()
+        .expect("no repeat allele under the general version");
+    let mut promoted = valid_document();
+    promoted.header.schema_version = TRUTH_SCHEMA_VERSION_WITH_REPEATS.into();
+    assert_eq!(
+        promoted.validate_structure(),
         Err(TruthContractError::UnsupportedVersion)
     );
 }
@@ -742,13 +887,26 @@ fn assert_schema_result(name: &str, value: &Value, expected_valid: bool) {
 }
 
 fn assert_raw_schema_result(name: &str, json: &str, expected_valid: bool) {
+    assert_raw_schema_result_against("truth-v4.schema.json", name, json, expected_valid);
+}
+
+fn assert_schema_result_against(schema: &str, name: &str, value: &Value, expected_valid: bool) {
+    assert_raw_schema_result_against(
+        schema,
+        name,
+        &serde_json::to_string(value).expect("JSON text"),
+        expected_valid,
+    );
+}
+
+fn assert_raw_schema_result_against(schema: &str, name: &str, json: &str, expected_valid: bool) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let nonce = NONCE.fetch_add(1, Ordering::Relaxed);
-    let instance = std::env::temp_dir().join(format!("gps-truth-v1-{name}-{nonce}.json"));
+    let instance = std::env::temp_dir().join(format!("gps-truth-{name}-{nonce}.json"));
     fs::write(&instance, json).expect("instance write");
     let status = Command::new("python3")
         .arg(root.join("tests/external_jsonschema_validator.py"))
-        .arg(root.join("schemas/truth-v1.schema.json"))
+        .arg(root.join("schemas").join(schema))
         .arg(&instance)
         .stderr(Stdio::null())
         .status()
@@ -757,6 +915,6 @@ fn assert_raw_schema_result(name: &str, json: &str, expected_valid: bool) {
     assert_eq!(
         status.success(),
         expected_valid,
-        "unexpected schema result for {name}"
+        "unexpected schema result for {name} against {schema}"
     );
 }

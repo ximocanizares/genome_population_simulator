@@ -1,4 +1,6 @@
-//! F6.4.3.3: la verdad publicada con alelos de repetición, versión **3**.
+//! F6.4.3.3: la verdad publicada con alelos de repetición, versión **3**
+//! hasta el 30/09/2026 y **5** desde entonces (la 5 es la 3 sin la copia
+//! entera del haplotipo en los alelos estructurales).
 //!
 //! # Cómo están elegidos los fixtures
 //!
@@ -195,7 +197,7 @@ fn the_published_truth_carries_the_locus_the_motif_the_units_and_the_sequence() 
     let lines = truth_lines(&destination);
     let header = &lines[0];
     assert_eq!(header["record_type"], "header");
-    assert_eq!(header["schema_version"], "3");
+    assert_eq!(header["schema_version"], "5");
 
     let pieces: Vec<&Value> = lines
         .iter()
@@ -298,7 +300,7 @@ fn two_alleles_of_equal_length_with_the_interruption_elsewhere_are_distinguishab
 ///
 /// *Sobre el número de versión:* el plan escribió «versión 2», pero la verdad
 /// que publica este recorrido —el de la fase de población inicial— es la
-/// **versión 1**; la 2 es la de la fase de población fundadora, que tiene su
+/// **versión 4** (la 1 hasta el 30/09/2026); la 2 es la de la fase de población fundadora, que tiene su
 /// propio publicador. Lo que el paso pide es que no se promueva, y eso es lo
 /// que se comprueba.
 ///
@@ -317,7 +319,7 @@ fn a_locus_whose_only_allele_is_the_reference_one_does_not_promote_the_truth() {
         fs::read_to_string(with_locus.join("outputs/truth.jsonl")).expect("verdad con locus");
     assert_eq!(
         truth_lines(&with_locus)[0]["schema_version"],
-        "1",
+        "4",
         "sin alelo publicado no hay promoción"
     );
     // El identificador de ejecución se deriva de los bytes del fichero de
@@ -366,17 +368,19 @@ fn the_independent_validator_replays_a_truth_with_repeat_alleles() {
     fs::remove_dir_all(&root).ok();
 }
 
-/// Cada línea publicada valida contra `truth-v3.schema.json` con un validador
+/// Cada línea publicada valida contra `truth-v5.schema.json` con un validador
 /// **externo**, y la misma línea de cabecera **no** valida contra el esquema de
-/// la versión 1.
+/// la versión 4 ni contra el histórico de la 3.
 #[test]
-fn every_published_line_validates_against_the_external_v3_schema() {
+fn every_published_line_validates_against_the_external_v5_schema() {
     let (root, destination) = publish(POLYMORPHIC);
     let lines = truth_lines(&destination);
-    assert_external(&lines, "truth-v3.schema.json", true);
-    // Control negativo: la cabecera declara la versión 3, que el esquema
-    // heredado rechaza. Sin él, un esquema que aceptara cualquier cosa pasaría.
-    assert_external(&lines[..1], "truth-v1.schema.json", false);
+    assert_external(&lines, "truth-v5.schema.json", true);
+    // Control negativo: la cabecera declara la versión 5, que el esquema sin
+    // repeticiones y el histórico rechazan. Sin él, un esquema que aceptara
+    // cualquier cosa pasaría.
+    assert_external(&lines[..1], "truth-v4.schema.json", false);
+    assert_external(&lines[..1], "truth-v3.schema.json", false);
     fs::remove_dir_all(&root).ok();
 }
 
@@ -459,6 +463,10 @@ fn the_inherited_truth_schemas_are_byte_for_byte_unchanged() {
         (
             "truth-v2.schema.json",
             "be53a6b32eb04689bcb4113731bb97f84e57f3566116e98fa2a2500313ba647b",
+        ),
+        (
+            "truth-v3.schema.json",
+            "09dcd19b6e764e83c72549fd6c8c0b3b9ff485fc249547a97a3bfc9af31b12bf",
         ),
     ];
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));

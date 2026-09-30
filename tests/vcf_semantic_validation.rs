@@ -44,7 +44,7 @@ fn reference() -> Reference {
 }
 
 fn truth() -> String {
-    include_str!("fixtures/truth-v1/valid.jsonl").replacen(
+    include_str!("fixtures/truth-v4/valid.jsonl").replacen(
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         &reference_content_sha256(&reference()).expect("huella"),
         1,
@@ -107,7 +107,6 @@ fn truth_with_fully_deleted_snp() -> genome_population_simulator::truth_schema::
         "alleles":[
             {"kind":"reference"},
             {"kind":"deletion", "event_id":"DEL_01", "start":2, "end":3,
-             "final_haplotype_bases":"AAAAAAA",
              "source_event":{"kind":"deletion", "event_id":"DEL_01", "start":2, "end":3},
              "piece_links":[]}
         ],
@@ -223,7 +222,7 @@ fn composed_truth() -> (
         vec![sequence],
     )
     .expect("reference");
-    let mut lines = include_str!("fixtures/truth-v1/valid.jsonl")
+    let mut lines = include_str!("fixtures/truth-v4/valid.jsonl")
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON"))
         .collect::<Vec<_>>();
@@ -258,7 +257,7 @@ fn composed_truth() -> (
     lines[3]["alleles"] = serde_json::json!([{"kind":"reference"},{"kind":"snp","base":"T"}]);
     let deletion = serde_json::json!({
         "record_type":"genotype","case_id":"CASE_DEL","reference_id":"REF_main","individual_id":"IND_01","case_kind":"indel","locus":{"sequence_id":"chr1","start":6,"end":7},
-        "alleles":[{"kind":"reference"},{"kind":"deletion","event_id":"DEL_67","start":6,"end":7,"final_haplotype_bases":"CAATAAA","source_event":{"kind":"deletion","event_id":"DEL_67","start":6,"end":7},"piece_links":[]}],
+        "alleles":[{"kind":"reference"},{"kind":"deletion","event_id":"DEL_67","start":6,"end":7,"source_event":{"kind":"deletion","event_id":"DEL_67","start":6,"end":7},"piece_links":[]}],
         "allele_dosages":[1,1],"carriers":[{"allele_index":1,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":0}},{"allele_index":0,"copy":{"reference_id":"REF_main","individual_id":"IND_01","sequence_id":"chr1","copy_index":1}}]
     });
     lines.push(deletion);
@@ -340,7 +339,7 @@ fn insertion_bridge_truth() -> (
         vec![sequence],
     )
     .expect("reference");
-    let mut lines = include_str!("fixtures/truth-v1/valid.jsonl")
+    let mut lines = include_str!("fixtures/truth-v4/valid.jsonl")
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON"))
         .collect::<Vec<_>>();
@@ -383,7 +382,7 @@ fn insertion_bridge_truth() -> (
         genotype(
             "CASE_INS",
             serde_json::json!({"sequence_id":"chr1","start":2,"end":2}),
-            serde_json::json!({"kind":"insertion","event_id":"INS_02","bases":"A","final_haplotype_bases":"ATAA","source_event":{"kind":"insertion","event_id":"INS_02","point":2,"bases":"A"},"piece_links":[{"piece_index":1,"start":2,"end":3}]}),
+            serde_json::json!({"kind":"insertion","event_id":"INS_02","bases":"A","source_event":{"kind":"insertion","event_id":"INS_02","point":2,"bases":"A"},"piece_links":[{"piece_index":1,"start":2,"end":3}]}),
         ),
         genotype(
             "CASE_SNP2",
@@ -391,7 +390,7 @@ fn insertion_bridge_truth() -> (
             serde_json::json!({"kind":"snp","base":"A"}),
         ),
     ];
-    lines.insert(0, serde_json::json!({"record_type":"header","document_kind":"gps_truth","schema_version":"1","execution_id":"RUN_01","reference_id":"REF_main","reference_content_sha256":reference_content_sha256(&reference).expect("huella"),"coordinate_convention":"zero_based_half_open_v1","counts":{"copies":1,"genotypes":3},"source_digests":[{"source":{"kind":"reference","source_id":"REF_main"},"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"source":{"kind":"matrix","source_id":"MATRIX_01"},"sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"group_digests":[{"source":{"kind":"matrix","source_id":"POP_01"},"sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}]}));
+    lines.insert(0, serde_json::json!({"record_type":"header","document_kind":"gps_truth","schema_version":"4","execution_id":"RUN_01","reference_id":"REF_main","reference_content_sha256":reference_content_sha256(&reference).expect("huella"),"coordinate_convention":"zero_based_half_open_v1","counts":{"copies":1,"genotypes":3},"source_digests":[{"source":{"kind":"reference","source_id":"REF_main"},"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},{"source":{"kind":"matrix","source_id":"MATRIX_01"},"sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}],"group_digests":[{"source":{"kind":"matrix","source_id":"POP_01"},"sha256":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}]}));
     let jsonl = lines
         .into_iter()
         .map(|line| serde_json::to_string(&line).expect("serialize"))

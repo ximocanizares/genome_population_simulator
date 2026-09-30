@@ -2039,7 +2039,7 @@ mod tests {
     /// La verdad mínima de F2 que el corpus independiente ya usa.
     fn fixture_truth() -> TruthDocument {
         read_truth_jsonl(&mut Cursor::new(include_str!(
-            "../tests/fixtures/truth-v1/valid.jsonl"
+            "../tests/fixtures/truth-v4/valid.jsonl"
         )))
         .expect("verdad de referencia")
     }

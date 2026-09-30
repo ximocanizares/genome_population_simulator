@@ -1294,7 +1294,6 @@ mod tests {
                             event_id: "DEL_67".into(),
                             start: 6,
                             end: 7,
-                            final_haplotype_bases: "CAATAAA".into(),
                             source_event: TruthStructuralEvent::Deletion {
                                 event_id: "DEL_67".into(),
                                 start: 6,

@@ -904,10 +904,6 @@ mod tests {
             } else {
                 shared_inserted.clone()
             };
-            let mut final_bases = String::with_capacity(inserted.len() + 5);
-            final_bases.push_str("CA");
-            final_bases.push_str(&inserted);
-            final_bases.push_str("AAA");
             copy_records.push(TruthRecord::HaplotypeCopy(HaplotypeCopyRecord {
                 identity: identity.clone(),
                 phase: 0,
@@ -958,7 +954,6 @@ mod tests {
                     TruthAllele::Insertion {
                         event_id: event_id.clone(),
                         bases: inserted.clone(),
-                        final_haplotype_bases: final_bases.clone(),
                         source_event: TruthStructuralEvent::Insertion {
                             event_id,
                             point: 2,

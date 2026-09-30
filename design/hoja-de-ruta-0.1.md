@@ -237,7 +237,8 @@ individuos directos, SNP e inserciones o deleciones pequeñas no ambiguas.
   reconstruir cada haplotipo. REQ-IND-02/03 aportan aquí evidencia parcial sobre
   una referencia estructural por individuo y cierran en F6.2. Activar preparación/generación/reutilización,
   perfiles, población y modelo en la pestaña `Individuos`.
-- **F2.4. Verdad estructurada.** Publicar `truth.jsonl` v1 obligatorio, UTF-8
+- **F2.4. Verdad estructurada.** Publicar `truth.jsonl` obligatorio (v1 en F2;
+  v4, o v5 con alelos de repetición, desde el 30/09/2026), UTF-8
   sin comprimir, con cabecera, copias/genotipos tipados, orden e integridad;
   reconstruirlo y contrastar genotipos/haplotipos independientemente del VCF.
 - **F2.5. VCF de verdad mínimo.** Producir exactamente un VCF 4.5 multimuesta

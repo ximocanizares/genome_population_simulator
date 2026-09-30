@@ -399,6 +399,11 @@ sin pérdida, sobre la vía directa y sobre los fundadores de F5 intactos.
   - Cambia: `src/truth_schema.rs`, `src/truth_projection.rs`,
     `src/truth_validation.rs`, `schemas/truth-v3.schema.json`; v1 y v2 no
     cambian.
+  - **Nota (30/09/2026).** Las versiones `"1"` y `"3"` de la verdad son
+    ya históricas: las vigentes del recorrido general son la `"4"` y la `"5"`
+    (`schemas/truth-v4.md`), sin `final_haplotype_bases`. Donde este plan dice
+    «verdad v3» para las variantes estructurales, léase una versión nueva sobre
+    la `"5"`, que tampoco puede copiar la secuencia final de la copia.
   - Se comprueba con: validación externa de cada línea; reconstrucción de la
     secuencia final de cada copia igual a la materializada por el productor
     **sin usar su código**; una mutación aislada por invariante (orientación,

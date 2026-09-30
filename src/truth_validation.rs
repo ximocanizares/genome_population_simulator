@@ -532,7 +532,6 @@ pub fn validate_and_reconstruct_truth(
             let result = reconstruct_copy(copy, reference)?;
             let ReconstructedCopy {
                 bases,
-                final_sha256,
                 source_slices,
                 pieces,
             } = result;
@@ -540,7 +539,6 @@ pub fn validate_and_reconstruct_truth(
             details.insert(
                 copy.identity.clone(),
                 CopySummary {
-                    final_sha256,
                     source_slices,
                     pieces,
                     history: Cow::Borrowed(&copy.history),
@@ -562,7 +560,6 @@ pub fn validate_and_reconstruct_truth(
 #[derive(Clone, Debug)]
 struct ReconstructedCopy {
     bases: Vec<u8>,
-    final_sha256: [u8; 32],
     /// Cortes de referencia y SNPs dispersos. Nunca se conserva un mapa por
     /// base para el contraste posterior de genotipos en modo streaming.
     source_slices: Vec<SourceSlice>,
@@ -571,7 +568,6 @@ struct ReconstructedCopy {
 
 #[derive(Clone, Debug)]
 struct CopySummary<'truth> {
-    final_sha256: [u8; 32],
     source_slices: Vec<SourceSlice>,
     pieces: Vec<PieceLayout>,
     history: Cow<'truth, [TruthHistoryEvent]>,
@@ -583,7 +579,6 @@ impl<'truth> CopySummary<'truth> {
         history: Cow<'truth, [TruthHistoryEvent]>,
     ) -> Self {
         Self {
-            final_sha256: value.final_sha256,
             source_slices: value.source_slices,
             pieces: value.pieces,
             history,
@@ -1045,6 +1040,21 @@ struct PieceLayout {
     inserted_provenance: Option<ModificationProvenance>,
 }
 
+/// SHA-256 de la secuencia final de una copia **reconstruida desde su
+/// registro publicado**, sin usar el estado del productor.
+///
+/// Es la mitad independiente del contraste que la proyección hace al publicar
+/// con la copia que ella misma materializa: la verdad ya no copia la secuencia
+/// final en ningún registro, y sin este contraste una proyección que publicara
+/// bases distintas de las del estado interno —de modo coherente en todos sus
+/// registros— no la detectaría nadie. La secuencia se libera al volver.
+pub(crate) fn reconstructed_copy_sha256(
+    copy: &HaplotypeCopyRecord,
+    reference: &Reference,
+) -> Result<[u8; 32], TruthValidationError> {
+    Ok(Sha256::digest(reconstruct_copy(copy, reference)?.bases).into())
+}
+
 fn reconstruct_copy(
     copy: &HaplotypeCopyRecord,
     reference: &Reference,
@@ -1393,7 +1403,6 @@ fn materialize_replayed_copy(
         });
     }
     Ok(ReconstructedCopy {
-        final_sha256: Sha256::digest(&bases).into(),
         bases,
         source_slices,
         pieces: layouts,
@@ -1649,12 +1658,11 @@ fn validate_indel_genotype(
                 event_id,
                 start,
                 end,
-                final_haplotype_bases,
                 source_event,
                 piece_links,
             } => {
                 let history = copy.history.iter().any(|event| matches!(event, TruthHistoryEvent::Deletion { event_id: historical, start: historical_start, end: historical_end, .. } if historical == event_id && historical_start == start && historical_end == end));
-                history && deletion_matches(copy, final_haplotype_bases, source_event, piece_links)
+                history && deletion_matches(source_event, piece_links)
             }
             _ => false,
         };
@@ -1671,7 +1679,6 @@ fn active_insertion_matches(
     let TruthAllele::Insertion {
         event_id,
         bases,
-        final_haplotype_bases,
         source_event,
         piece_links,
     } = allele
@@ -1689,7 +1696,6 @@ fn active_insertion_matches(
     };
     if historical_bases != bases
         || !matches!(source_event, TruthStructuralEvent::Insertion { event_id: source_id, point: source_point, bases: source_bases } if source_id == event_id && *source_point == *point && source_bases == bases)
-        || Sha256::digest(final_haplotype_bases.as_bytes()).as_slice() != copy.final_sha256
     {
         return false;
     }
@@ -1708,15 +1714,10 @@ fn active_insertion_matches(
     expected.as_slice() == piece_links.as_slice()
 }
 
-fn deletion_matches(
-    copy: &CopySummary<'_>,
-    final_haplotype_bases: &str,
-    source_event: &TruthStructuralEvent,
-    piece_links: &[TruthPieceLink],
-) -> bool {
-    Sha256::digest(final_haplotype_bases.as_bytes()).as_slice() == copy.final_sha256
-        && matches!(source_event, TruthStructuralEvent::Deletion { .. })
-        && piece_links.is_empty()
+/// Una deleción no deja fragmentos propios en la copia reconstruida, de modo
+/// que no puede enlazar ninguno.
+fn deletion_matches(source_event: &TruthStructuralEvent, piece_links: &[TruthPieceLink]) -> bool {
+    matches!(source_event, TruthStructuralEvent::Deletion { .. }) && piece_links.is_empty()
 }
 
 fn carriers_match(
@@ -2062,7 +2063,6 @@ enum WireAllele {
     Insertion {
         event_id: String,
         bases: String,
-        final_haplotype_bases: String,
         source_event: WireStructuralEvent,
         piece_links: Vec<WirePieceLink>,
     },
@@ -2072,7 +2072,6 @@ enum WireAllele {
         start: u64,
         #[serde(deserialize_with = "deserialize_u64")]
         end: u64,
-        final_haplotype_bases: String,
         source_event: WireStructuralEvent,
         piece_links: Vec<WirePieceLink>,
     },
@@ -2537,13 +2536,11 @@ impl From<WireAllele> for TruthAllele {
             WireAllele::Insertion {
                 event_id,
                 bases,
-                final_haplotype_bases,
                 source_event,
                 piece_links,
             } => Self::Insertion {
                 event_id,
                 bases,
-                final_haplotype_bases,
                 source_event: source_event.into(),
                 piece_links: piece_links.into_iter().map(Into::into).collect(),
             },
@@ -2551,14 +2548,12 @@ impl From<WireAllele> for TruthAllele {
                 event_id,
                 start,
                 end,
-                final_haplotype_bases,
                 source_event,
                 piece_links,
             } => Self::Deletion {
                 event_id,
                 start,
                 end,
-                final_haplotype_bases,
                 source_event: source_event.into(),
                 piece_links: piece_links.into_iter().map(Into::into).collect(),
             },

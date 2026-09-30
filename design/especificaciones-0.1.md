@@ -5320,10 +5320,15 @@ decisión y versión, no una elección durante la implementación.
   forma predeterminada o por solicitud expresa, y todos sus eventos y conjuntos
   obligatorios estén completos conforme a REQ-SAL-21 a REQ-SAL-26.
 - **REQ-SAL-06.** Si no se solicita VCF, la verdad genotípica debe seguir siendo
-  accesible y reconstruible mediante el fichero de verdad obligatorio. Las
-  ejecuciones históricas F2–F4 conservan `truth.jsonl` v1 y DTC-061; F5 usa
-  `truth.jsonl` v2 y la proyección cerrada por DTC-089. Una versión no se
-  reinterpreta como la otra.
+  accesible y reconstruible mediante el fichero de verdad obligatorio. El
+  recorrido general publica `truth.jsonl` v4, o v5 cuando publica algún alelo
+  de repetición, conforme a DTC-061; F5 usa `truth.jsonl` v2 y la proyección
+  cerrada por DTC-089. Una versión no se reinterpreta como la otra. Las
+  versiones v1 y v3, que el recorrido general publicó hasta el 30 de septiembre
+  de 2026 y que copiaban en cada alelo de inserción o deleción la secuencia
+  final entera de la copia portadora, son históricas: **los paquetes que las
+  contienen ya no pueden volver a validarse con el programa actual**, que no
+  las lee ni las migra.
 - **REQ-SAL-07.** Cuando se use un FASTQ externo como fuente de contaminación,
   su copia en el directorio de resultados debe formar parte de las salidas
   activadas necesarias para que el experimento sea autocontenido y exportable.

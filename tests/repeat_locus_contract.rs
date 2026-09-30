@@ -1617,17 +1617,25 @@ fn the_inherited_schemas_are_byte_for_byte_unchanged() {
             "truth-v2.schema.json",
             "be53a6b32eb04689bcb4113731bb97f84e57f3566116e98fa2a2500313ba647b",
         ),
+        // Histórica desde el 30/09/2026: la sustituye la 5, sin la copia
+        // entera del haplotipo en los alelos estructurales.
+        (
+            "truth-v3.schema.json",
+            "09dcd19b6e764e83c72549fd6c8c0b3b9ff485fc249547a97a3bfc9af31b12bf",
+        ),
     ];
-    // Estrenados por el trabajo de repeticiones y tartamudeo: llevan la
-    // capacidad nueva y por eso no se congelan aquí. Enumerarlos es lo que
-    // permite exigir que la unión cubra el directorio entero.
+    // Versiones en curso, que por eso no se congelan aquí: las estrenadas por
+    // el trabajo de repeticiones y tartamudeo, y las dos de la verdad que el
+    // 30/09/2026 sustituyeron a la 1 y la 3. Enumerarlos es lo que permite
+    // exigir que la unión cubra el directorio entero.
     let current = [
         "config-general-v4.schema.json",
         "effective-config-v6.schema.json",
         "manifest-event-v3.schema.json",
         "manifest-general-v6.schema.json",
         "reference-coordinate-map-v2.schema.json",
-        "truth-v3.schema.json",
+        "truth-v4.schema.json",
+        "truth-v5.schema.json",
     ];
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
