@@ -896,6 +896,19 @@ decía que `src/reference_generation.rs` «solo sabe rellenar al azar». Dejó d
 ser cierto al cerrar la entrega 1, y la fila queda corregida en ese documento a
 la vez que se escribe esta sección.
 
+**Corrección del 01/10/2026.** El generador sabía colocar regiones, pero
+**ninguna ejecución se las pasaba**: la preparación de la referencia en
+`src/execution.rs` lo llamaba sin regiones, y el tramo de un microsatélite en
+una referencia simulada salía al azar. Desde ese día la preparación coloca el
+tracto de cada locus —de un solo motivo, repitiéndolo sobre el tramo; compuesto,
+bloque a bloque con las unidades que declara `reference_units`—, y el juez de
+`src/results.rs` que regenera la referencia simulada coloca los mismos tractos
+por su cuenta, leyéndolos de la configuración efectiva publicada. Lo
+que esta sección promete de la lista vacía sigue en pie y ahora lo ancla
+también una huella congelada del FASTA de una ejecución completa, tomada con el commit
+`7dd1fbe`, en `tests/simulated_reference_repeat_tract.rs`. El detalle está en
+la decisión S-03 del plan de microsatélites y en DT-013.
+
 ### 14.4. Pruebas nuevas y su variante defectuosa
 
 | Prueba | Contra qué muere |

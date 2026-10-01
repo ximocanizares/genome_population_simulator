@@ -2739,6 +2739,15 @@
             "minimum": 1
           }
         },
+        "reference_units": {
+          "description": "Unidades enteras de cada bloque del tracto que la referencia SIMULADA lleva colocado, en el orden de motifs. Solo aparece en un locus compuesto sobre referencia simulada, y es de donde el juez que regenera la referencia lee los bloques. La correspondencia con motifs y la suma contra el tramo no son expresables en JSON Schema; las sostienen el lector y el juez de Rust.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
         "max_units": {
           "type": "integer",
           "minimum": 1
@@ -2758,6 +2767,20 @@
         },
         "slippage": {
           "$ref": "#/$defs/effective_repeat_slippage"
+        }
+      },
+      "if": {
+        "properties": {
+          "motifs": {
+            "maxItems": 1
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "reference_units"
+          ]
         }
       }
     },

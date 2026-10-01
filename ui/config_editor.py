@@ -160,6 +160,10 @@ class RepeatLocusRow:
     min_purity: str | None = None
     min_longest_run_units: int | None = None
     slippage: RepeatSlippageForm | None = None
+    # Unidades de cada bloque del tracto en una referencia simulada, en el
+    # orden de los motivos. Solo en un locus compuesto; quien juzga si el
+    # campo tiene sentido y si cuadra con el tramo es el lector de Rust.
+    reference_units: list[int] | None = None
 
 
 @dataclass(eq=True)
@@ -897,6 +901,11 @@ def repeat_locus_editor_rows(loci: Sequence[RepeatLocusRow]) -> list[dict[str, A
             "start": locus.start,
             "end": locus.end,
             "motifs": ",".join(locus.motifs),
+            "reference_units": (
+                ""
+                if locus.reference_units is None
+                else ",".join(str(value) for value in locus.reference_units)
+            ),
             "max_units": "" if locus.max_units is None else str(locus.max_units),
             "min_purity": locus.min_purity or "",
             "min_longest_run_units": (
@@ -1036,6 +1045,9 @@ def repeat_loci_from_editor_rows(
                     editor_integer(row.get("end"), f"{path}.end"), f"{path}.end"
                 ),
                 motifs=[_repeat_motif(motif, f"{path}.motifs") for motif in motifs],
+                reference_units=_editor_reference_units(
+                    row.get("reference_units"), f"{path}.reference_units"
+                ),
                 alleles=alleles,
                 max_units=_optional_editor_u64(row.get("max_units"), f"{path}.max_units"),
                 min_purity=_optional_editor_literal(
@@ -1069,6 +1081,19 @@ def repeat_loci_from_editor_rows(
                 f"el generador nombra un locus que no existe: {locus_id}",
             )
     return loci
+
+
+def _editor_reference_units(value: Any, path: str) -> list[int] | None:
+    """Las unidades por bloque de la celda, separadas por comas, o nada."""
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return None
+    return [
+        _checked_positive_u64(
+            editor_integer(item.strip(), f"{path}[{index}]"), f"{path}[{index}]"
+        )
+        for index, item in enumerate(text.split(","))
+    ]
 
 
 def _repeat_alleles_from_editor_rows(
@@ -1931,6 +1956,7 @@ def _parse_repeat_loci(value: Any, path: str) -> list[RepeatLocusRow]:
                 "end",
                 "motif",
                 "motifs",
+                "reference_units",
                 "max_units",
                 "min_purity",
                 "min_longest_run_units",
@@ -1966,6 +1992,18 @@ def _parse_repeat_loci(value: Any, path: str) -> list[RepeatLocusRow]:
                 start=_positive_u64(locus["start"], f"{locus_path}.start"),
                 end=_positive_u64(locus["end"], f"{locus_path}.end"),
                 motifs=motifs,
+                reference_units=(
+                    [
+                        _positive_u64(item, f"{locus_path}.reference_units[{index}]")
+                        for index, item in enumerate(
+                            _sequence(
+                                locus["reference_units"], f"{locus_path}.reference_units"
+                            )
+                        )
+                    ]
+                    if "reference_units" in locus
+                    else None
+                ),
                 alleles=alleles,
                 max_units=(
                     _positive_u64(locus["max_units"], f"{locus_path}.max_units")
@@ -2029,6 +2067,13 @@ def _parse_repeat_motifs(locus: Mapping[str, Any], path: str) -> list[str]:
     values = _sequence(locus["motifs"], f"{path}.motifs")
     if not values:
         raise EditorError(f"{path}.motifs", "la lista de motivos no puede estar vacía")
+    if len(values) == 1:
+        # Igual que el lector de Rust: un locus de un solo motivo se declara
+        # con `motif`, y `motifs` es solo para los compuestos.
+        raise EditorError(
+            f"{path}.motifs",
+            "un locus de un solo motivo se declara con motif, no con motifs",
+        )
     return [
         _repeat_motif(value, f"{path}.motifs[{index}]")
         for index, value in enumerate(values)
@@ -2758,9 +2803,9 @@ def _render_repeat_loci(form: GeneralForm) -> Any:
     """Escribe los loci declarados.
 
     El motivo se escribe en singular cuando hay uno solo, que es el atajo del
-    contrato y lo que escribe todo documento que no sea compuesto. La ida y la
-    vuelta conservan el significado, no la forma: `motifs = ["CA"]` vuelve como
-    `motif = "CA"`, y son el mismo locus.
+    contrato y lo que escribe todo documento que no sea compuesto. Desde el
+    01/10/2026 es además la única forma: `motifs` con un solo motivo se rechaza
+    al leer, igual que en el lector de Rust.
     """
     loci = tomlkit.aot()
     for index, locus in enumerate(form.reference.repeat_loci):
@@ -2782,6 +2827,14 @@ def _render_repeat_loci(form: GeneralForm) -> Any:
             table.add("motif", motifs[0])
         else:
             table.add("motifs", motifs)
+        if locus.reference_units is not None:
+            table.add(
+                "reference_units",
+                [
+                    _checked_positive_u64(value, f"{path}.reference_units[{value_index}]")
+                    for value_index, value in enumerate(locus.reference_units)
+                ],
+            )
         if locus.max_units is not None:
             table.add(
                 "max_units",

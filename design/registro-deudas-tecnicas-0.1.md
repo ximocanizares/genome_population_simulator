@@ -40,9 +40,11 @@ documenta mejor.
 | DT-010 | El recuento de Poisson devolvía error donde el método pide repetir | Media | 27/09/2026 | **Cerrada (27/09/2026; el oráculo, el 30/09/2026)** |
 | DT-011 | Dos rechazos del generador de alelos no se alcanzan desde una configuración | Baja | 27/09/2026 | Abierta |
 | DT-012 | El barrido de opciones comprueba que el control existe, no que atienda a la opción | Baja | 27/09/2026 | Abierta |
-| DT-013 | El generador de alelos no se puede usar sobre una referencia que construye el propio programa | Media | 29/09/2026 | Abierta |
+| DT-013 | El generador de alelos no se puede usar sobre una referencia que construye el propio programa | Media | 29/09/2026 | **Cerrada (01/10/2026)** |
 | DT-014 | El esquema de la verdad de F5 admite todavía la copia entera del haplotipo en un alelo que F5 nunca publica | Baja | 30/09/2026 | Abierta |
 | DT-015 | El validador de la verdad por flujo rechaza toda verdad con alelos de repetición | Baja | 30/09/2026 | Abierta |
+| DT-016 | El tracto de un microsatélite compuesto no se coloca en una referencia simulada | Media | 01/10/2026 | **Cerrada (01/10/2026)** |
+| DT-017 | El juez de los recursos publicados cita el esquema efectivo v4 en sus rechazos aunque el documento sea v6 | Baja | 01/10/2026 | Abierta, corregida para la regeneración de la referencia simulada |
 
 ---
 
@@ -743,7 +745,15 @@ Los dos rechazos son:
 - **El tramo de la referencia sin ni una copia completa del motivo.** Con
   referencia suministrada lo caza antes la guarda de admisión de los loci, que
   exige una tirada mínima —tres unidades por omisión—; con referencia simulada
-  esa guarda no corre, pero el tracto lo pone el propio simulador.
+  esa guarda no corre, pero el tracto lo pone el propio simulador. *Corregido
+  el 01/10/2026:* esto último era falso hasta ese día —el tracto no se ponía y
+  el rechazo **sí** se alcanzaba desde una configuración, que es DT-013—. Desde
+  la corrección es cierto para los loci de un motivo, los únicos que el
+  generador admite: el tramo declarado mide al menos un motivo y se rellena con
+  él. Y desde el mismo día la guarda de admisión **también corre** con
+  referencia simulada, sobre el tracto colocado (corrección de S-06), de modo
+  que este rechazo vuelve a estar detrás de ella en los dos tipos de
+  referencia.
 - **Las frecuencias generadas degeneradas.** Son proporciones de linajes con
   denominador positivo, de modo que su suma solo podría no ser finita si el
   recuento de eventos desbordara, y eso lo caza antes su propio rechazo.
@@ -792,55 +802,88 @@ entrega.
 
 ## DT-013. El generador de alelos no se puede usar sobre una referencia que construye el propio programa
 
-**Gravedad: media.** No hay ningún resultado incorrecto: el programa rechaza y
-lo dice. Lo que falta es una combinación que el usuario espera y que no existe.
+**Cerrada el 1 de octubre de 2026.** Se conserva la descripción, corregida: la
+original contenía una afirmación falsa que escondía la causa.
 
-### Qué pasa
+**Gravedad: media**, y era más grave de lo que decía. La entrada original
+afirmaba que «no hay ningún resultado incorrecto: el programa rechaza y lo
+dice». No lo era para los alelos declarados a mano, que publicaban resultados
+incorrectos sin avisar, ni siempre para el generador, que a veces aceptaba
+(las dos cosas, más abajo).
+
+### Qué pasaba
 
 Un microsatélite se puede declarar sobre los dos tipos de referencia, la que
-aporta el usuario y la que construye el propio programa. Con **alelos
-declarados a mano** las dos funcionan. Con el **generador de alelos por
-deslizamiento**, la referencia construida por el programa **se rechaza
-siempre**:
+aporta el usuario y la que construye el propio programa. Con el **generador de
+alelos por deslizamiento**, la entrada decía que la referencia construida por
+el programa **se rechazaba siempre**:
 
 ```
 detail="locus STR-1: el tramo de la referencia no contiene ni una copia
 completa del motivo, de modo que no hay alelo ancestral del que partir"
 ```
 
-El motivo es correcto y la guarda hace bien en saltar: el generador **lee el
-alelo de partida de las bases de la referencia**, y una referencia construida
-por el programa lleva bases sorteadas al azar, de modo que en la ventana
-declarada no hay ninguna copia del motivo. No es un fallo del generador: es que
-nadie planta el tracto.
+El generador **lee el alelo de partida de las bases de la referencia**, y una
+referencia construida por el programa llevaba bases sorteadas al azar en la
+ventana declarada.
 
-Lo llamativo es la asimetría: **cuando los alelos se declaran, el programa sí
-sabe materializar el tracto** sobre una referencia construida por él; cuando se
-generan, no.
+**Y tampoco se rechazaba siempre**, como decía la entrada: el rechazo solo
+saltaba si en esas bases al azar no aparecía ni una copia del motivo. Con un
+motivo corto casi siempre aparece alguna. El 01/10/2026, con `CA` sobre treinta
+bases al azar que contenían algún `CA` suelto, el programa de antes de la
+corrección **aceptó** el escenario y publicó como alelo ancestral el tramo al
+azar, con pureza 0,27, sin avisar de nada.
 
 ### Cómo se reprodujo
 
 El 29 de septiembre de 2026, al preparar la primera simulación de uso real —un
 cromosoma de 2000 bases con `(AGAT)₁₂`, seis individuos diploides—. El mismo
 escenario, cambiando **solo** el bloque del generador por dos alelos
-declarados, valida con código de salida 0; con el generador, se rechaza con el
-mensaje de arriba. Se resolvió construyendo el FASTA a mano con el tracto
-dentro, y con él la simulación corre entera.
+declarados, validaba con código de salida 0; con el generador, se rechazaba con
+el mensaje de arriba. Se resolvió entonces construyendo el FASTA a mano con el
+tracto dentro.
 
-### Qué haría falta
+### La afirmación falsa, corregida
 
-Una de dos, y es decisión del responsable:
+La entrada decía: «cuando los alelos se declaran, el programa sí sabe
+materializar el tracto sobre una referencia construida por él». **No lo
+sabía.** Lo que hacía era **sobrescribir el intervalo en las copias** de los
+individuos con el alelo sorteado; la **referencia** seguía llevando bases al
+azar en ese tramo. Las consecuencias, que nadie había visto porque no había
+rechazo que las delatara: el FASTA publicado no tenía el microsatélite, **todas
+las copias** recibían un alelo alternativo —ningún alelo declarado coincidía
+con las bases al azar— y el alelo de la referencia no lo podía tener nadie.
 
-1. **Que el generador plante el tracto ancestral**, con las unidades que se
-   declaren, igual que ya se hace cuando los alelos vienen declarados. Haría
-   falta decir de dónde salen esas unidades: hoy el locus no tiene ningún campo
-   que las diga cuando no hay alelos.
-2. **Dejarlo como está y que el mensaje lo diga**: que con el generador la
-   referencia tiene que traer el tracto, y que eso significa aportar un FASTA.
-   Es lo barato, y quita la sorpresa sin añadir modelo.
+### La causa de fondo
 
-Mientras no se decida, **quien quiera generar alelos tiene que aportar una
-referencia que ya contenga el tracto**.
+La preparación de la referencia (`prepare_reference`, en `src/execution.rs`)
+llamaba al generador de referencia **sin regiones**. El generador sabía colocar
+regiones declaradas antes del relleno desde el 23 de septiembre de 2026, pero
+esa capacidad no tenía ningún llamador fuera de sus propias pruebas. Lo
+encontró la revisión adversarial del 30 de septiembre de 2026.
+
+### Cómo se cerró
+
+Por decisión del responsable del 1 de octubre de 2026: en un locus de **un solo
+motivo**, la preparación coloca en la referencia el motivo repetido desde su
+primera base sobre el tramo declarado, de `start` a `end` inclusive, **antes**
+del relleno al azar; si el tramo no es múltiplo del motivo, la última copia
+queda parcial. No hace falta campo nuevo: el tramo ya dice cuánto mide el
+tracto. El juez que regenera la referencia simulada desde la configuración
+efectiva coloca los mismos tractos con su propio cálculo, de modo que una
+ejecución que dejara de pasarlos se rechaza al publicar.
+
+Con eso el generador de alelos parte del tracto colocado, y la combinación
+funciona para **todo locus que el generador admite**: el generador solo admite
+loci de un motivo, con cualquier tipo de referencia. Lo prueban
+`tests/simulated_reference_repeat_tract.rs` y, para la reproducibilidad, una
+huella congelada de una referencia simulada **sin** microsatélites tomada con
+el commit `7dd1fbe`, anterior a la corrección.
+
+### Lo que no cerraba
+
+El tracto de un locus **compuesto** sobre una referencia simulada. Se anotó
+como DT-016 y se cerró el mismo día.
 
 ---
 
@@ -929,3 +972,91 @@ un cambio del validador que merece su propio encargo.
 Que la lectura por flujo compruebe la cabecera sin la regla de promoción,
 acumule si ha visto algún alelo de repetición y aplique la regla al terminar,
 con una prueba que lea por flujo una verdad `"5"` publicada.
+
+---
+
+## DT-016. El tracto de un microsatélite compuesto no se coloca en una referencia simulada
+
+**Cerrada el 1 de octubre de 2026, el mismo día en que se anotó.**
+
+**Gravedad: media.** Era el mismo defecto que DT-013 describía, en la parte que
+su primer cierre no cubría: un resultado incorrecto que no avisaba.
+
+### Qué pasaba
+
+Con referencia simulada, el tracto de un locus de **varios motivos**
+(`motifs`, como `(TCTA)n(TCTG)n`) seguía siendo **relleno al azar** en el FASTA
+publicado. Ningún alelo declarado coincidía con esas bases: todas las copias
+recibían un alelo alternativo y el de la referencia no lo tenía nadie.
+
+### Por qué no bastaba el tramo
+
+Con un solo motivo el tramo basta para construir el tracto. Con varios, no: hay
+que saber cuántas unidades lleva **cada bloque** en la referencia.
+
+### Cómo se cerró
+
+Por decisión del responsable del 1 de octubre de 2026, que eligió implementar
+el campo entero y no un rechazo provisional:
+
+- **`reference_units`**, la lista de unidades de cada bloque en la referencia,
+  en el orden de los motivos. Obligatoria en un compuesto sobre referencia
+  simulada; se rechaza en un locus de un solo motivo y con referencia
+  suministrada. Cada valor es un entero de al menos una unidad, como el número
+  de unidades por bloque de un alelo compuesto.
+- La suma de unidades por longitud de cada motivo tiene que ser exactamente la
+  longitud del tramo, o la configuración se rechaza antes de simular nombrando
+  el locus, la suma y el tramo.
+- La preparación de la referencia coloca cada bloque con su motivo repetido, en
+  orden, antes del relleno al azar.
+- La configuración efectiva v6 publica el campo en el locus, y el juez que
+  regenera la referencia simulada **lee de ahí** la geometría de cada tracto
+  —secuencia, tramo, motivos y unidades por bloque— y lo coloca con su propio
+  cálculo. Un productor que coloque mal los bloques, que ignore el campo o que
+  lo publique distinto de como lo usó, se rechaza al publicar.
+- El esquema del documento general v4 y el de la efectiva v6 lo declaran, y el
+  editor de loci de la interfaz lo ofrece y lo conserva en la ida y la vuelta.
+
+Cabe en las versiones abiertas sin versión nueva por la decisión S-26 del plan
+de repeticiones. Lo prueban `tests/simulated_reference_repeat_tract.rs` y
+`tests_ui/test_repeat_loci_ui.py`.
+
+### Lo que el esquema no puede comprobar
+
+Que la lista tenga tantos valores como motivos y que la suma cuadre con el
+tramo: comparar propiedades hermanas entre sí no es expresable en JSON Schema.
+Lo dice la descripción del campo y lo comprueban el lector de Rust y sus
+pruebas.
+
+---
+
+## DT-017. El juez de los recursos publicados cita el esquema efectivo v4 aunque el documento sea v6
+
+**Gravedad: baja.** No acepta nada que deba rechazar: lo que falla es el
+**nombre del esquema** que el diagnóstico manda a mirar.
+
+### Qué pasa
+
+La función que construye los rechazos de la configuración efectiva en
+`src/results.rs` (`effective_error`) escribe fijo `effective-config-v4.schema.json`.
+El lector cerrado de la cabecera del documento ya corrige el nombre según la
+versión declarada, pero el juez que relee los recursos publicados
+(`validate_published_resources`) tiene cientos de rechazos que pasan por esa
+función, y con un documento v6 todos mandan a mirar el esquema v4.
+
+### Qué se hizo y qué queda
+
+Lo encontró la revisión adversarial del 1 de octubre de 2026 en el rechazo de
+«FASTA físico … no coincide base a base». Ese rechazo, y todos los de la
+regeneración de la referencia simulada, se reetiquetan ya con el esquema de la
+versión declarada; lo comprueba
+`the_reference_judge_reads_the_blocks_from_the_effective_config`. El resto de
+rechazos del juez sigue citando v4.
+
+### Qué haría falta para cerrarla
+
+Que el juez de recursos publicados reetiquete sus rechazos de la configuración
+efectiva con el esquema de la versión declarada, sin tocar los del manifiesto,
+que comparten código de diagnóstico y no deben reetiquetarse con un esquema
+efectivo. No es una línea: hay que separar los dos tipos de rechazo antes de
+reetiquetar.

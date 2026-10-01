@@ -1357,7 +1357,19 @@ su asignación por fase está en la matriz de trazabilidad.
   aleatorio, en el orden secuencias y tamaño → regiones declaradas → relleno.
   Con la lista de regiones vacía, el consumo aleatorio y los bytes publicados
   deben ser idénticos a los de una referencia sin esta capacidad (decisión
-  S-03).
+  S-03). En un locus declarado con **un solo motivo**, el tracto que la
+  referencia simulada lleva ocupa exactamente el tramo declarado, de `start` a
+  `end` inclusive, y es el motivo repetido desde su primera base; si la
+  longitud del tramo no es múltiplo de la del motivo, la última copia queda
+  parcial (decisión del responsable, 01/10/2026). En un locus **compuesto**,
+  la configuración declara en `reference_units` cuántas unidades enteras lleva
+  cada bloque en la referencia, en el orden de sus motivos; es obligatorio con
+  referencia simulada, se rechaza en un locus de un solo motivo y con
+  referencia suministrada, y la suma de unidades por longitud de cada motivo
+  tiene que ser exactamente la longitud del tramo, o la configuración se
+  rechaza antes de simular nombrando el locus, la suma y el tramo. Cada bloque
+  se coloca con su motivo repetido, en orden (decisión del responsable,
+  01/10/2026).
 
 - **REQ-REF-20.** Las referencias deben poder contener regiones repetitivas,
   duplicadas o altamente homólogas definidas o generadas para evaluar baja

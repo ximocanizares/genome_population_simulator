@@ -741,6 +741,7 @@ def _(
                 "start": 1,
                 "end": 1,
                 "motifs": "",
+                "reference_units": "",
                 "max_units": "",
                 "min_purity": "",
                 "min_longest_run_units": "",
@@ -748,7 +749,9 @@ def _(
         ],
         label=(
             "Loci de repetición (motivo y posición; una fila sin `id` se omite."
-            " `motifs` admite varios separados por comas)"
+            " `motifs` admite varios separados por comas; con referencia simulada,"
+            " un compuesto declara en `reference_units` las unidades de cada bloque"
+            " en la referencia, también separadas por comas)"
         ),
         pagination=False,
     )

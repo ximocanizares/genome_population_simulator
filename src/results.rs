@@ -392,6 +392,15 @@ fn repeat_loci_json(config: &EffectiveConfig) -> Result<Value, Diagnostic> {
                 .map(|allele| Value::Object(repeat_allele_json(allele)))
                 .collect::<Vec<_>>(),
         }));
+        if let Some(units) = locus.reference_units() {
+            loci.last_mut()
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| {
+                    Diagnostic::internal_invariant("results", "repeat_locus_reference_units")
+                        .with("detail", "el locus recién insertado no es un objeto")
+                })?
+                .insert("reference_units".to_owned(), json!(units));
+        }
         if let Some(slippage) = locus.slippage() {
             loci.last_mut()
                 .ok_or_else(|| {
@@ -2049,7 +2058,16 @@ fn validate_published_resources_v3(
             root_seed,
             &source_reference,
             effective_path,
-        )?;
+            effective.get("repeat_loci"),
+        )
+        // DT-017: el rechazo cita el esquema de la versión que el documento
+        // declara, no el v4 que la constructora escribe fijo.
+        .map_err(|error| {
+            retag_format_schema(
+                error,
+                effective_schema_file_for(effective.get("schema_version").and_then(Value::as_str)),
+            )
+        })?;
     }
     let mut references =
         BTreeMap::from([(source_reference.id().as_str().to_owned(), source_reference)]);
@@ -2743,11 +2761,14 @@ fn validate_published_resources_v1(
         },
     )?;
     if reference_value.get("source").and_then(Value::as_str) == Some("simulated") {
+        // Las versiones de este lector no conocen los microsatélites: no hay
+        // tracto que colocar.
         validate_generated_reference(
             reference_value,
             root_seed,
             &source_reference,
             effective_path,
+            None,
         )?;
     }
     let mut references =
@@ -3802,12 +3823,189 @@ fn read_reference_with_expected(
     Ok(observed)
 }
 
+/// Un tracto de la referencia simulada tal y como lo publica la configuración
+/// efectiva: secuencia, inicio en base cero y bases.
+type PublishedTract<'a> = (&'a str, u64, Vec<u8>);
+
+/// Los tractos de una referencia simulada tal y como los publica la
+/// configuración efectiva: secuencia, inicio en base cero y bases.
+///
+/// Un locus de un motivo repite el motivo sobre el tramo, con la última copia
+/// parcial si no es múltiplo; uno compuesto concatena cada bloque con su motivo
+/// repetido tantas veces como diga `reference_units`, y la suma tiene que
+/// cubrir el tramo exactamente.
+///
+/// **Cada rechazo llama a la constructora en su propia rama**, para que la
+/// puerta de cobertura de los jueces los cuente uno a uno: con una sola
+/// llamada compartida contaba nueve rechazos como uno y dos mutantes de esta
+/// función sobrevivían a la batería entera. Las ramas que este juez puede
+/// alcanzar desde un documento publicado las ejercita
+/// `every_corruption_of_a_published_tract_is_rejected_by_its_own_branch`.
+fn published_simulated_tracts<'a>(
+    repeat_loci: Option<&'a Value>,
+    effective_path: &Path,
+) -> Result<Vec<PublishedTract<'a>>, Diagnostic> {
+    let Some(loci) = repeat_loci else {
+        return Ok(Vec::new());
+    };
+    // **No se alcanza desde un documento publicado**: la comprobación de que la
+    // configuración efectiva y el manifiesto registran los mismos loci rechaza
+    // antes un `repeat_loci` que no sea una lista. Se conserva porque este
+    // lector no puede depender de que esa otra comprobación siga donde está.
+    let loci = loci.as_array().ok_or_else(|| {
+        effective_error(
+            effective_path,
+            "tractos de la referencia simulada: repeat_loci no es una lista",
+        )
+    })?;
+    let mut tracts = Vec::with_capacity(loci.len());
+    for locus in loci {
+        let id = locus.get("id").and_then(Value::as_str).unwrap_or("sin id");
+        let detail =
+            |what: &str| format!("tracto del locus {id} en la referencia simulada: {what}");
+        let sequence_id = locus
+            .get("sequence_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| effective_error(effective_path, detail("sin secuencia")))?;
+        let start = locus
+            .get("start")
+            .and_then(Value::as_u64)
+            .filter(|start| *start >= 1)
+            .ok_or_else(|| {
+                effective_error(
+                    effective_path,
+                    detail("el inicio no es una coordenada de base uno"),
+                )
+            })?;
+        let end = locus
+            .get("end")
+            .and_then(Value::as_u64)
+            .filter(|end| *end >= start)
+            .ok_or_else(|| {
+                effective_error(effective_path, detail("el final no es posterior al inicio"))
+            })?;
+        let motifs = locus
+            .get("motifs")
+            .and_then(Value::as_array)
+            .and_then(|motifs| {
+                motifs
+                    .iter()
+                    .map(|motif| motif.as_str().filter(|motif| !motif.is_empty()))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .filter(|motifs| !motifs.is_empty())
+            .ok_or_else(|| {
+                effective_error(
+                    effective_path,
+                    detail("los motivos no son una lista de textos no vacíos"),
+                )
+            })?;
+        let units = match locus.get("reference_units") {
+            None => None,
+            Some(value) => Some(
+                value
+                    .as_array()
+                    .and_then(|units| units.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+                    .ok_or_else(|| {
+                        effective_error(
+                            effective_path,
+                            detail("reference_units no es una lista de enteros"),
+                        )
+                    })?,
+            ),
+        };
+        let length = end - start + 1;
+        let bases = match (motifs.as_slice(), units) {
+            ([motif], None) => repeat_motif_over(motif.as_bytes(), length),
+            ([_], Some(_)) => {
+                return Err(effective_error(
+                    effective_path,
+                    detail("un locus de un solo motivo publica reference_units"),
+                ));
+            }
+            (_, None) => {
+                return Err(effective_error(
+                    effective_path,
+                    detail(
+                        "un locus compuesto sobre referencia simulada no publica reference_units",
+                    ),
+                ));
+            }
+            (motifs, Some(units)) => {
+                if units.len() != motifs.len() {
+                    return Err(effective_error(
+                        effective_path,
+                        detail("reference_units no tiene un valor por motivo"),
+                    ));
+                }
+                let mut bases = Vec::new();
+                for (motif, units) in motifs.iter().zip(units) {
+                    let block = units.saturating_mul(motif.len() as u64);
+                    if block == 0 || bases.len() as u64 + block > length {
+                        return Err(effective_error(
+                            effective_path,
+                            detail("un bloque de reference_units está vacío o se sale del tramo"),
+                        ));
+                    }
+                    bases.extend(repeat_motif_over(motif.as_bytes(), block));
+                }
+                if bases.len() as u64 != length {
+                    return Err(effective_error(
+                        effective_path,
+                        detail("los bloques de reference_units no cubren el tramo entero"),
+                    ));
+                }
+                bases
+            }
+        };
+        tracts.push((sequence_id, start - 1, bases));
+    }
+    Ok(tracts)
+}
+
+/// `length` bases del motivo repetido desde su primera base: cada una es la
+/// del motivo en la posición que le toca por módulo.
+fn repeat_motif_over(motif: &[u8], length: u64) -> Vec<u8> {
+    (0..length)
+        .map(|offset| motif[(offset % motif.len() as u64) as usize])
+        .collect()
+}
+
+/// Regenera la referencia simulada desde lo publicado y la compara, base a
+/// base, con el FASTA publicado.
+///
+/// # Los tractos se colocan aquí por cuenta propia
+///
+/// Desde el 01/10/2026 la referencia simulada lleva colocado el tracto de cada
+/// microsatélite antes del relleno al azar (DT-013 y DT-016). Este juez lee la
+/// geometría de cada tracto **de la configuración efectiva publicada** —la
+/// secuencia, el tramo, los motivos y, en un compuesto, `reference_units`— y lo
+/// construye **con su propio cálculo**, sin llamar a la función del productor.
+/// Así muere aquí un productor que deje de colocar los tractos, que los
+/// desplace, que coloque mal un bloque, que ignore `reference_units` o que lo
+/// publique distinto de como lo usó.
+///
+/// **Lo que sí comparte, dicho:** el relleno lo hace el mismo generador de
+/// referencia. Lo que este juez juzga es la colocación de los tractos, no el
+/// relleno, que tiene sus propias pruebas y su huella congelada.
 fn validate_generated_reference(
     reference: &serde_json::Map<String, Value>,
     root_seed: RootSeed,
     physical: &Reference,
     effective_path: &Path,
+    repeat_loci: Option<&Value>,
 ) -> Result<(), Diagnostic> {
+    let tracts = published_simulated_tracts(repeat_loci, effective_path)?;
+    let regions = tracts
+        .iter()
+        .map(
+            |(sequence_id, start, bases)| crate::reference_generation::DeclaredRegion {
+                sequence_id,
+                start: *start,
+                bases,
+            },
+        )
+        .collect::<Vec<_>>();
     let sequences = effective_array(reference, "sequences", effective_path)?;
     let mut specs = Vec::with_capacity(sequences.len());
     for sequence in sequences {
@@ -3838,12 +4036,13 @@ fn validate_generated_reference(
             .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
             .ok_or_else(|| effective_error(effective_path, "fracción N efectiva inválida"))
     })?;
-    let expected = crate::reference_generation::generate_reference_with_unknown_fraction(
+    let expected = crate::reference_generation::generate_reference_with_regions(
         effective_non_empty_text(reference, "id", effective_path)?,
         root_seed,
         &specs,
         &frequencies,
         unknown_base_fraction,
+        &regions,
     )
     .map_err(|error| physical_error(effective_path, "regenerate_reference", &error))?;
     compare_reference_bases(&expected, physical, effective_path, expected.id().as_str())

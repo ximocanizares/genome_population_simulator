@@ -30,6 +30,24 @@
 # toca ninguna prueba**. La cifra no empeora porque el código empeore, sino
 # porque antes no se veía.
 #
+# **El 01/10/2026 `src/results.rs` pasa de 499 a 500 comprobaciones.** La
+# nueva es el único punto de rechazo del lector que saca de la configuración
+# efectiva la geometría de los tractos de una referencia simulada (DT-016), y
+# la dispara la prueba que borra `reference_units` de un compuesto publicado.
+# El techo de sin disparar no se mueve: sigue en 424. Se sube la primera
+# columna para que borrar esa guarda vuelva a notarse.
+#
+# **Corregido el mismo día tras la revisión adversarial: 510 y 425.** Aquella
+# única llamada era compartida por nueve rechazos, y la puerta los contaba como
+# uno; dos mutantes de ese lector sobrevivían a la batería entera. Ahora cada
+# rechazo llama a la constructora en su propia rama: se quita la llamada
+# compartida y entran once, una por rama (500 − 1 + 11 = 510). Diez las
+# dispara `every_corruption_of_a_published_tract_is_rejected_by_its_own_branch`.
+# La undécima, «repeat_loci no es una lista», **no se alcanza** desde un
+# documento publicado: la comprobación de que la configuración efectiva y el
+# manifiesto registran los mismos loci la rechaza antes, y la misma prueba lo
+# ejecuta y exige ese otro rechazo. Por ella el techo sube de 424 a 425.
+#
 # Medido el 23/09/2026; oráculo y verificador del VCF remedidos el 29/09/2026
 # (168 a 52 y 25 a 22, con el mismo número de comprobaciones); `results.rs` y
 # `event_manifest.rs` medidos por primera vez el 29/09/2026.
@@ -37,5 +55,5 @@
 src/f5_oracle.rs	365	52
 src/vcf_semantic_validation.rs	98	22
 src/f5_closure.rs	42	5
-src/results.rs	499	424
+src/results.rs	510	425
 src/event_manifest.rs	147	117

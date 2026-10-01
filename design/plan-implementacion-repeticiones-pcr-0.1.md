@@ -450,6 +450,22 @@ declaran: se declara **la posición del locus y su motivo**, y la secuencia se
 **Con referencia simulada** el tracto no existe hasta que se crea, así que se
 declara qué insertar, **pudiendo dar la secuencia exacta** con sus impurezas.
 
+> **Corrección del 01/10/2026: la guarda de admisión corre también con
+> referencia simulada.** Hasta ese día se saltaba con el argumento de arriba,
+> «el tracto no existe hasta que se crea». Desde que la preparación de la
+> referencia coloca el tracto (S-03, corrección del mismo día), el tracto
+> **sí existe** antes de simular, y saltarse la guarda dejaba publicar tractos
+> que el propio programa rechaza en cualquier otro sitio: `ACG` sobre ocho
+> bases coloca `ACGACGAC`, de pureza 0,75, que se publicaba aunque un alelo
+> declarado idéntico se rechazara con el mínimo de 0,8 y aunque el mismo FASTA
+> usado como referencia suministrada no pasara la guarda; y con el generador,
+> `AGAT` sobre siete bases publicaba como alelo ancestral `AGATAGA`, de pureza
+> 0,57, sin aviso. Ahora la misma guarda —pureza mínima y tirada más larga
+> mínima, con los mínimos del locus o los generales— juzga el tracto colocado,
+> antes de simular y nombrando el locus. Un tracto de un motivo sin copia
+> parcial, y uno compuesto con sus bloques enteros, tienen pureza 1 y la
+> tirada que declaran, de modo que solo se rechaza lo que de verdad no cumple.
+
 **Lo común, que es la decisión de fondo: la pureza es siempre una salida, nunca
 una entrada.** En el caso real se calcula de lo que hay; en el simulado, de lo
 que se escribió. En ninguno hace falta inventar una regla de colocación, que
@@ -510,6 +526,56 @@ con el hito estructural, **después** de generar la secuencia.
 > declaradas antes del relleno, y con la lista vacía produce los mismos bytes
 > que antes. La reapertura está registrada en la sección 14 del plan del núcleo
 > reproducible.
+>
+> **Corrección del 01/10/2026: el generador existía, pero el producto no lo
+> usaba.** Hasta ese día la preparación de la referencia
+> (`prepare_reference`, en `src/execution.rs`) llamaba al generador **sin
+> regiones**: el generador con regiones y su tipo de región declarada solo
+> tenían llamadores en sus propias pruebas. Con referencia simulada, el FASTA
+> publicado llevaba **bases al azar** en el tramo de cada microsatélite
+> declarado, todas las copias recibían un alelo alternativo y el alelo de la
+> referencia no lo podía tener nadie. Lo encontró la revisión adversarial del
+> 30/09/2026. Desde el 01/10/2026 la preparación coloca el tracto de cada
+> locus **de un solo motivo** antes del relleno: el tramo declarado, de
+> `start` a `end` inclusive, se rellena con el motivo repetido desde su primera
+> base, y si su longitud no es múltiplo del motivo la última copia queda
+> parcial. Es decisión del responsable de ese día; el tramo ya fija cuánto mide
+> el tracto, así que no hace falta campo nuevo. **Los loci compuestos
+> (`motifs`) declaran `reference_units`**, también por decisión del
+> responsable del mismo día: la lista de unidades de cada bloque en la
+> referencia, en el orden de los motivos, **obligatoria** en un compuesto
+> sobre referencia simulada. Cada valor es un entero de al menos una unidad, y
+> la suma de unidades por longitud de cada motivo tiene que ser **exactamente**
+> la longitud del tramo; si no, la configuración se rechaza antes de simular
+> nombrando el locus, la suma y el tramo. Cada bloque se coloca con su motivo
+> repetido, en orden. El campo **se rechaza** en un locus de un solo motivo y
+> con referencia suministrada, donde no haría nada. Las unidades son enteras
+> en todos los bloques por la misma razón por la que lo son en los alelos
+> compuestos: el número de unidades por bloque de un alelo se declara entero
+> (`DeclaredRepeatAllele::units` en `src/configuration.rs`, leído como entero
+> no negativo en `src/adapters.rs`) y el tracto de bloques se materializa con
+> `TandemRepeatTract::pure_blocks`, que recibe copias enteras y rechaza el
+> bloque vacío. Una unidad fraccionaria solo aparece **derivada** de unas bases
+> declaradas, y en un compuesto las bases no se pueden declarar. El campo se
+> publica en la configuración efectiva v6, de donde lo lee el juez que
+> regenera la referencia simulada, y lo ofrece el editor de loci de la
+> interfaz. Cabe en la general v4 y la efectiva v6 sin versión nueva por la
+> decisión S-26.
+>
+> **La guarda de admisión juzga también el tracto colocado.** Un tramo que no
+> es múltiplo del motivo deja una copia parcial que baja la pureza; si la baja
+> por debajo del mínimo, o si el tramo no llega a la tirada mínima, la
+> configuración se rechaza antes de simular, como con una referencia real. Ver
+> la corrección de S-06 del mismo día.
+>
+> **Lo que cambia en el consumo de azar**, dicho porque es observable: el
+> relleno consume una palabra por base **no declarada**, y el flujo de azar es
+> uno solo para todas las secuencias, en su orden. Un tracto de `L` bases hace
+> que todo lo que viene **después** de él —el resto de su secuencia y las
+> secuencias siguientes— salga desplazado `L` palabras respecto de la
+> referencia de antes; lo que viene **antes** no cambia. Una referencia
+> simulada **sin** microsatélites no coloca nada y sale idéntica byte a byte a
+> la de antes de la corrección.
 
 **Con referencia real** se admite **insertar** el tracto en la posición
 indicada, además del caso en que ya esté. Dos consecuencias que hay que
@@ -1343,7 +1409,16 @@ frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
     entre ellas. Cae en la fase del núcleo reproducible, que está cerrada, y por
     eso lleva coordenada propia y entra en el cambio de contrato de la sección
     10. *Cumplido el 23/09/2026; la reapertura está registrada en la sección 14
-    del plan del núcleo reproducible.*
+    del plan del núcleo reproducible.* **Corregido el 01/10/2026: cumplido en
+    el generador, no en el producto.** Hasta ese día ninguna ejecución pasaba
+    regiones al generador, y el tramo de un microsatélite en una referencia
+    simulada salía al azar; ver la corrección del mismo día en S-03. Desde
+    entonces la preparación de la referencia coloca el tracto de cada locus de
+    un solo motivo, y el juez que regenera la referencia simulada desde la
+    configuración efectiva coloca los mismos tractos por su cuenta, de modo
+    que un producto que dejara de pasarlos se rechaza al publicar. Los loci
+    compuestos se colocan bloque a bloque con las unidades que declara
+    `reference_units`, también desde el 01/10/2026.
   - **Qué queda fuera, dicho aquí para que no se cuele:** los cambios
     estructurales —duplicaciones, inversiones, translocaciones— **no** entran.
     Van con el hito estructural y **después** de generar la secuencia.
@@ -1500,6 +1575,10 @@ frecuencias; y **no hay umbral de 50 pb**, sino un tope propio configurable.
   su número de unidades y sus interrupciones si las tiene, o con su secuencia
   exacta cuando la referencia es simulada; las **frecuencias** de esos alelos;
   y el **tope propio configurable** de tamaño del tracto.
+  - **Ampliado el 01/10/2026, dentro de la misma versión (S-26):** un locus
+    compuesto sobre referencia simulada declara `reference_units`, las
+    unidades enteras de cada bloque en la referencia, y la configuración
+    efectiva v6 las publica en el locus. Ver la corrección de S-03 de ese día.
   - **El usuario declara el intervalo entero, inicio y final, y no solo el
     inicio.** Hacía falta decirlo: la pureza y la tirada más larga se miden
     **dentro de un intervalo**, y sin final no hay dónde medirlas. La

@@ -355,6 +355,10 @@ pub struct EffectiveRepeatLocus {
     /// con campos crudos: había dos del mismo concepto y una de ellas, la
     /// tipada, no tenía usuarios.
     declaration: TandemRepeatLocus,
+    /// Unidades enteras de cada bloque del tracto que la referencia simulada
+    /// lleva colocado. Solo existe en un locus compuesto sobre referencia
+    /// simulada, ya validado contra el tramo.
+    reference_units: Option<Vec<u64>>,
     max_units: u64,
     admission: EffectiveRepeatAdmission,
     slippage: Option<EffectiveRepeatSlippage>,
@@ -427,6 +431,14 @@ impl EffectiveRepeatLocus {
     #[must_use]
     pub const fn declaration(&self) -> &TandemRepeatLocus {
         &self.declaration
+    }
+
+    /// Las unidades por bloque del tracto que la referencia simulada lleva
+    /// colocado, en el orden de los motivos. Solo en un locus compuesto sobre
+    /// referencia simulada; la suma ya cuadra con el tramo.
+    #[must_use]
+    pub fn reference_units(&self) -> Option<&[u64]> {
+        self.reference_units.as_deref()
     }
 
     #[must_use]
@@ -4363,6 +4375,11 @@ fn effective_repeat_loci(
                 })
             }
         };
+        // **Después del generador, no antes.** Un compuesto que pide el
+        // generador se rechaza porque el generador solo admite un motivo; pedirle
+        // antes `reference_units` mandaba al usuario a declarar un campo que,
+        // una vez declarado, no evitaba el rechazo.
+        let reference_units = resolve_reference_units(general, locus, &declaration)?;
         let mut declared_weights = Vec::with_capacity(locus.alleles.len());
         let mut tracts = Vec::with_capacity(locus.alleles.len());
         for (index, allele) in locus.alleles.iter().enumerate() {
@@ -4447,6 +4464,7 @@ fn effective_repeat_loci(
             // auditoría se recomputa sobre el abanico, cuando exista.
             resolved.push(EffectiveRepeatLocus {
                 declaration,
+                reference_units,
                 max_units,
                 admission: locus_admission,
                 slippage,
@@ -4503,6 +4521,7 @@ fn effective_repeat_loci(
             .collect();
         resolved.push(EffectiveRepeatLocus {
             declaration,
+            reference_units,
             max_units,
             admission: locus_admission,
             slippage,
@@ -4511,6 +4530,114 @@ fn effective_repeat_loci(
         });
     }
     Ok(resolved)
+}
+
+/// **Las unidades por bloque del tracto de una referencia simulada**
+/// (decisión del responsable del 01/10/2026, DT-016).
+///
+/// Un locus **compuesto** sobre referencia **simulada** tiene que decir cuántas
+/// unidades lleva cada bloque en la referencia: sin eso no hay forma de
+/// construir su tracto, y el tramo sería relleno al azar. Por eso el campo es
+/// obligatorio ahí, y por eso se rechaza donde no haría nada —en un locus de un
+/// solo motivo, cuyo tramo ya fija el tracto, y con referencia suministrada,
+/// cuyo tracto se lee del FASTA—: un campo que no hace nada y se acepta en
+/// silencio hace creer al usuario que algo cambió.
+///
+/// Las unidades son **enteras** y de al menos una por bloque, como el número
+/// de unidades por bloque de un alelo compuesto, que se materializa con
+/// [`TandemRepeatTract::pure_blocks`]. La suma de unidades por longitud de cada
+/// motivo tiene que ser **exactamente** la longitud del tramo: un tracto más
+/// corto dejaría bases al azar dentro del locus y uno más largo invadiría el
+/// flanco.
+fn resolve_reference_units(
+    general: &DeclaredGeneralConfig,
+    locus: &crate::configuration::DeclaredRepeatLocus,
+    declaration: &TandemRepeatLocus,
+) -> Result<Option<Vec<u64>>, Diagnostic> {
+    const FIELD: &str = "reference.repeat_loci.reference_units";
+    let simulated = matches!(
+        general.reference().source,
+        crate::configuration::DeclaredReferenceSource::Simulated { .. }
+    );
+    let motifs = declaration.motifs();
+    let Some(declared) = &locus.reference_units else {
+        if simulated && motifs.len() > 1 {
+            return Err(repeat_error(
+                general,
+                FIELD,
+                locus.id.value(),
+                format!(
+                    "el locus es compuesto ({} motivos) y la referencia es simulada: declare reference_units con las unidades de cada bloque en la referencia, en el orden de los motivos",
+                    motifs.len()
+                ),
+            ));
+        }
+        return Ok(None);
+    };
+    if motifs.len() == 1 {
+        return Err(repeat_error(
+            general,
+            FIELD,
+            locus.id.value(),
+            "reference_units solo se declara en un locus compuesto: con un solo motivo el tramo declarado ya fija el tracto",
+        ));
+    }
+    if !simulated {
+        return Err(repeat_error(
+            general,
+            FIELD,
+            locus.id.value(),
+            "reference_units solo se declara con referencia simulada: con referencia suministrada el tracto se lee del FASTA",
+        ));
+    }
+    if declared.len() != motifs.len() {
+        return Err(repeat_error(
+            general,
+            FIELD,
+            locus.id.value(),
+            format!(
+                "reference_units declara {} valores y el locus tiene {} motivos: hace falta uno por bloque",
+                declared.len(),
+                motifs.len()
+            ),
+        ));
+    }
+    let units = declared
+        .iter()
+        .map(|value| *value.value())
+        .collect::<Vec<_>>();
+    if let Some(block) = units.iter().position(|value| *value == 0) {
+        return Err(repeat_error(
+            general,
+            FIELD,
+            locus.id.value(),
+            format!(
+                "reference_units declara cero unidades en el bloque {block}: cada bloque lleva al menos una"
+            ),
+        ));
+    }
+    // En u128 no hay desbordamiento posible: cada término cabe en 128 bits y
+    // hay un término por motivo.
+    let sum: u128 = units
+        .iter()
+        .zip(motifs)
+        .map(|(units, motif)| u128::from(*units) * u128::from(motif.length()))
+        .sum();
+    let interval = declaration.interval();
+    if sum != u128::from(interval.len()) {
+        return Err(repeat_error(
+            general,
+            FIELD,
+            locus.id.value(),
+            format!(
+                "reference_units suma {sum} bases (unidades por longitud de cada motivo) y el tramo declarado {}..{} mide {}",
+                locus.start.value(),
+                locus.end.value(),
+                interval.len()
+            ),
+        ));
+    }
+    Ok(Some(units))
 }
 
 /// Número **total** de unidades que la declaración implica, sin materializar

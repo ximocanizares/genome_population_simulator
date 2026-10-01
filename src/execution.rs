@@ -48,7 +48,7 @@ use crate::reference_fasta::{
     write_generated_fasta,
 };
 use crate::reference_generation::{
-    BaseFrequency, GeneratedSequenceSpec, generate_reference_with_unknown_fraction,
+    BaseFrequency, DeclaredRegion, GeneratedSequenceSpec, generate_reference_with_regions,
 };
 use crate::reference_reduction::{
     EligibleSequence, MaterializedPlan, ReductionError, materialize_selection,
@@ -69,7 +69,7 @@ use crate::small_event_composition::{
     DeclaredSmallEvent, TargetedCurrentDeletion, TargetedCurrentInsertion,
 };
 use crate::snp_application::{ApplicableSnp, TargetedSnp};
-use crate::tandem_repeat::observe_tract;
+use crate::tandem_repeat::{TandemRepeatTract, observe_tract};
 use crate::technical_identity::derive_technical_identity_plan;
 use crate::technical_profile::resolve_f4_technical_profile;
 use crate::truth_projection::{
@@ -2204,7 +2204,7 @@ fn prepare_reference(effective: &EffectiveConfig) -> Result<PreparedReference, D
     Ok(prepared)
 }
 
-/// **Guarda de admisión de los loci sobre una referencia real.**
+/// **Guarda de admisión de los loci sobre la referencia.**
 ///
 /// Al declarar un locus sobre una referencia **suministrada o reducida** hay que
 /// comprobar que en esa posición hay realmente un tracto de los motivos
@@ -2218,20 +2218,20 @@ fn prepare_reference(effective: &EffectiveConfig) -> Result<PreparedReference, D
 /// tramo puede ser bastante puro y no tener ni una tirada aprovechable, y al
 /// revés.
 ///
-/// **Con referencia simulada no se aplica, y es deliberado.** Allí el tracto no
-/// existe hasta que se crea: se declara qué insertar, de modo que no hay nada
-/// observado contra lo que contrastar. Es la decisión S-06, que distingue las dos
-/// situaciones según de dónde venga la referencia.
+/// **Con referencia simulada también se aplica, desde el 01/10/2026**, sobre el
+/// tracto que la preparación acaba de colocar. Hasta ese día se saltaba con el
+/// argumento de la decisión S-06, «el tracto no existe hasta que se crea»; pero
+/// desde que la preparación lo coloca (S-03) sí existe antes de simular, y
+/// saltarse la guarda publicaba tractos que el programa rechaza en cualquier
+/// otro sitio: `ACG` sobre ocho bases coloca `ACGACGAC`, de pureza 0,75, que la
+/// misma referencia suministrada no pasaría. Un tracto de un motivo sin copia
+/// parcial, o uno compuesto de bloques enteros, tiene pureza 1 y la tirada que
+/// declara: solo se rechaza lo que de verdad no cumple.
 fn admit_declared_repeat_loci(
     effective: &EffectiveConfig,
     reference: &Reference,
 ) -> Result<(), Diagnostic> {
-    if effective.repeat_loci().is_empty()
-        || matches!(
-            effective.reference_source(),
-            EffectiveReferenceSource::Simulated
-        )
-    {
+    if effective.repeat_loci().is_empty() {
         return Ok(());
     }
     for locus in effective.repeat_loci() {
@@ -2502,16 +2502,109 @@ fn prepare_reference_without_repeat_admission(
                     probability: *probability,
                 })
                 .collect::<Vec<_>>();
-            generate_reference_with_unknown_fraction(
+            let tracts = simulated_repeat_tracts(effective)?;
+            let regions = tracts
+                .iter()
+                .map(|tract| DeclaredRegion {
+                    sequence_id: tract.sequence_id,
+                    start: tract.start,
+                    bases: &tract.bases,
+                })
+                .collect::<Vec<_>>();
+            generate_reference_with_regions(
                 effective.reference_id(),
                 effective.reproducibility().root_seed(),
                 &specs,
                 &frequencies,
                 composition.unknown_base_fraction(),
+                &regions,
             )
             .map(PreparedReference::Generated)
         }
     }
+}
+
+/// El tracto que un locus coloca en una referencia simulada, en base cero.
+struct SimulatedRepeatTract<'a> {
+    sequence_id: &'a str,
+    start: u64,
+    bases: Vec<u8>,
+}
+
+/// **Los tractos que la referencia simulada lleva antes del relleno al azar**
+/// (decisión S-03, con la forma que fijó el responsable el 01/10/2026).
+///
+/// En un locus de **un solo motivo**, el tramo declarado es el tracto mismo
+/// —de `start` a `end` inclusive, sin flancos: es el tramo que la guarda de
+/// admisión mide sobre una referencia real y del que el generador de alelos
+/// lee el ancestral— y se rellena con el motivo repetido desde su primera
+/// base. Si el tramo no es múltiplo del motivo, la última copia queda parcial.
+/// El tipo del locus garantiza que cabe al menos una copia entera.
+///
+/// En un locus **compuesto**, cada bloque se coloca con su motivo repetido
+/// tantas veces como diga `reference_units`, en el orden de los motivos
+/// (DT-016). La resolución de la configuración ya comprobó que el campo existe
+/// y que su suma es exactamente la longitud del tramo.
+///
+/// Hasta el 01/10/2026 esta función no existía y la preparación llamaba al
+/// generador **sin regiones**: el FASTA publicado llevaba bases al azar en el
+/// tramo de cada locus y ningún alelo declarado coincidía con la referencia
+/// (DT-013). Sin loci la lista sale vacía, y con la lista vacía el generador
+/// consume y escribe exactamente lo mismo que antes.
+fn simulated_repeat_tracts(
+    effective: &EffectiveConfig,
+) -> Result<Vec<SimulatedRepeatTract<'_>>, Diagnostic> {
+    let mut tracts = Vec::with_capacity(effective.repeat_loci().len());
+    for locus in effective.repeat_loci() {
+        let interval = locus.declaration().interval();
+        let bases = match (locus.single_motif(), locus.reference_units()) {
+            (Some(motif), _) => {
+                let length = usize::try_from(interval.len()).map_err(|_| {
+                    internal(
+                        "simulated_repeat_tracts",
+                        format!("el tramo del locus {} no cabe en memoria", locus.id()),
+                    )
+                })?;
+                motif.bases().iter().copied().cycle().take(length).collect()
+            }
+            (None, Some(units)) => {
+                let blocks = locus
+                    .motifs()
+                    .iter()
+                    .cloned()
+                    .zip(units.iter().copied())
+                    .collect::<Vec<_>>();
+                TandemRepeatTract::pure_blocks(&blocks)
+                    .map_err(|error| {
+                        internal(
+                            "simulated_repeat_tracts",
+                            format!("el tracto del locus {}: {}", locus.id(), error.detail()),
+                        )
+                    })?
+                    .bases()
+                    .to_vec()
+            }
+            // La resolución de la configuración exige `reference_units` a todo
+            // locus compuesto sobre referencia simulada, de modo que aquí no se
+            // llega desde una configuración. Si se llegara, colocar nada
+            // dejaría el tramo al azar en silencio, que es justo DT-016.
+            (None, None) => {
+                return Err(internal(
+                    "simulated_repeat_tracts",
+                    format!(
+                        "el locus compuesto {} llega sin unidades por bloque",
+                        locus.id()
+                    ),
+                ));
+            }
+        };
+        tracts.push(SimulatedRepeatTract {
+            sequence_id: interval.sequence_id().as_str(),
+            start: interval.start(),
+            bases,
+        });
+    }
+    Ok(tracts)
 }
 
 fn prepare_reductions(

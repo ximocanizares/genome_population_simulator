@@ -922,6 +922,7 @@ fn the_authoring_schema_closes_the_two_motif_forms() {
     assert!(validates(
         &locus(serde_json::json!({
             "motifs": ["TCTA", "TCTG", "TCTA"],
+            "reference_units": [5, 5, 5],
             "alleles": [{"units": [5, 5, 5], "frequency": 1.0}]
         })),
         schema
@@ -1010,6 +1011,7 @@ sequence = "chr1"
 start = 101
 end = 160
 motifs = ["TCTA", "TCTG", "TCTA"]
+reference_units = [5, 5, 5]
 {extra}
 
 [[reference.repeat_loci.alleles]]
@@ -1049,6 +1051,7 @@ sequence = "chr1"
 start = 101
 end = 130
 motifs = ["CAG", "CA"]
+reference_units = [4, 9]
 
 [[reference.repeat_loci.alleles]]
 units = [4, 5]
@@ -1145,7 +1148,7 @@ fn the_two_motif_forms_are_exclusive_and_the_units_must_match_the_blocks() {
             .contains("son excluyentes")
     );
 
-    let scalar = composite_locus("").replace("units = [5, 5, 5]", "units = 5");
+    let scalar = composite_locus("").replace("\nunits = [5, 5, 5]", "\nunits = 5");
     assert!(
         format!(
             "{:?}",
@@ -1154,7 +1157,7 @@ fn the_two_motif_forms_are_exclusive_and_the_units_must_match_the_blocks() {
         .contains("un número de unidades por bloque"),
     );
 
-    let short = composite_locus("").replace("units = [5, 5, 5]", "units = [5, 5]");
+    let short = composite_locus("").replace("\nunits = [5, 5, 5]", "\nunits = [5, 5]");
     assert!(
         format!(
             "{:?}",
@@ -1165,8 +1168,10 @@ fn the_two_motif_forms_are_exclusive_and_the_units_must_match_the_blocks() {
 
     // Y la secuencia exacta no se admite con varios motivos: unas bases sueltas
     // no pueden decir dónde acaba un bloque y empieza el siguiente.
-    let exact =
-        composite_locus("").replace("units = [5, 5, 5]", "sequence = \"TCTATCTATCTATCTATCTA\"");
+    let exact = composite_locus("").replace(
+        "\nunits = [5, 5, 5]",
+        "\nsequence = \"TCTATCTATCTATCTATCTA\"",
+    );
     assert!(
         format!(
             "{:?}",
@@ -1444,7 +1449,7 @@ fn the_authoring_schema_closes_what_it_can_of_the_multi_motif_frontier() {
                 "sequences": [{"id": "chr1", "class": "chromosome", "length": 1000}],
                 "repeat_loci": [{
                     "id": "STR-1", "sequence": "chr1", "start": 101, "end": 160,
-                    "motifs": ["CAG", "CA"], "alleles": [allele]
+                    "motifs": ["CAG", "CA"], "reference_units": [10, 15], "alleles": [allele]
                 }]
             }
         })
@@ -1488,6 +1493,7 @@ sequence = "chr1"
 start = 101
 end = 160
 motifs = ["CAG", "CA"]
+reference_units = [10, 15]
 
 [[reference.repeat_loci.alleles]]
 units = [4, 5, 6]
@@ -1499,6 +1505,147 @@ frequency = 1.0
     assert!(
         format!("{error:?}").contains("hace falta uno por bloque"),
         "{error:?}"
+    );
+}
+
+/// **`reference_units` en los dos esquemas** (DT-016).
+///
+/// El de autoría lo exige en un compuesto sobre referencia simulada y lo cierra
+/// en un locus de un motivo y con referencia suministrada; el de la
+/// configuración efectiva admite el documento que el programa publica con el
+/// campo dentro. Lo que ninguno de los dos puede expresar —un valor por motivo
+/// y la suma contra el tramo— lo dice su descripción y lo comprueba el lector.
+///
+/// Cada rechazo lleva su control positivo al lado, que solo cambia lo que el
+/// rechazo juzga: sin él, un esquema que rechazara todo pasaría.
+#[test]
+fn the_schemas_carry_reference_units_where_they_mean_something() {
+    let document = |kind: &str, locus: serde_json::Value| {
+        let mut reference = serde_json::json!({
+            "kind": kind,
+            "id": "ref-main",
+            "sequences": [{"id": "chr1", "class": "chromosome", "length": 1000}],
+            "repeat_loci": [locus]
+        });
+        if kind == "simulated" {
+            reference["composition"] =
+                serde_json::json!({"A": 0.25, "C": 0.25, "G": 0.25, "T": 0.25});
+        } else {
+            reference["fasta"] = serde_json::json!("reference.fa");
+        }
+        serde_json::json!({"config_kind": "general", "schema_version": "4", "reference": reference})
+    };
+    let composite = |units: Option<serde_json::Value>| {
+        let mut locus = serde_json::json!({
+            "id": "STR-1", "sequence": "chr1", "start": 101, "end": 160,
+            "motifs": ["CAG", "CA"],
+            "alleles": [{"units": [10, 15], "frequency": 1.0}]
+        });
+        if let Some(units) = units {
+            locus["reference_units"] = units;
+        }
+        locus
+    };
+    let simple = |units: Option<serde_json::Value>| {
+        let mut locus = serde_json::json!({
+            "id": "STR-1", "sequence": "chr1", "start": 101, "end": 130, "motif": "CA",
+            "alleles": [{"units": 15, "frequency": 1.0}]
+        });
+        if let Some(units) = units {
+            locus["reference_units"] = units;
+        }
+        locus
+    };
+    let schema = "config-general-v4.schema.json";
+    let units = || Some(serde_json::json!([10, 15]));
+
+    assert!(validates(
+        &document("simulated", composite(units())),
+        schema
+    ));
+    assert!(
+        !validates(&document("simulated", composite(None)), schema),
+        "un compuesto sobre referencia simulada sin reference_units"
+    );
+    assert!(
+        !validates(
+            &document("simulated", composite(Some(serde_json::json!([10, 0])))),
+            schema
+        ),
+        "un bloque de cero unidades"
+    );
+    assert!(validates(&document("supplied", composite(None)), schema));
+    assert!(
+        !validates(&document("supplied", composite(units())), schema),
+        "reference_units con referencia suministrada"
+    );
+    assert!(validates(&document("simulated", simple(None)), schema));
+    assert!(
+        !validates(
+            &document("simulated", simple(Some(serde_json::json!([15])))),
+            schema
+        ),
+        "reference_units en un locus de un solo motivo"
+    );
+
+    // `motifs` con un solo motivo ya no es una forma admitida: un locus simple
+    // se declara con `motif`, y es lo que deja de contradecir al lector.
+    let mut one = simple(None);
+    one.as_object_mut().expect("locus").remove("motif");
+    one["motifs"] = serde_json::json!(["CA"]);
+    assert!(
+        !validates(&document("simulated", one.clone()), schema),
+        "motifs de un solo elemento con referencia simulada"
+    );
+    assert!(
+        !validates(&document("supplied", one), schema),
+        "motifs de un solo elemento con referencia suministrada"
+    );
+
+    // Con el generador, el esquema no exige el campo: el compuesto lo rechaza
+    // el generador, que solo admite un motivo.
+    let mut generated = composite(None);
+    generated.as_object_mut().expect("locus").remove("alleles");
+    generated["slippage"] = serde_json::json!({"model": "stepwise", "mean_events": 1.0});
+    assert!(validates(&document("simulated", generated), schema));
+
+    // La configuración efectiva que el programa publica con el campo.
+    let effective = published_effective_config(&format!(
+        r#"{}
+[[reference.repeat_loci]]
+id = "STR-1"
+sequence = "chr1"
+start = 101
+end = 160
+motifs = ["CAG", "CA"]
+reference_units = [10, 15]
+
+[[reference.repeat_loci.alleles]]
+units = [10, 15]
+frequency = 1.0
+"#,
+        header("4")
+    ));
+    assert_eq!(
+        effective["repeat_loci"][0]["reference_units"],
+        serde_json::json!([10, 15])
+    );
+    assert!(validates(&effective, "effective-config-v6.schema.json"));
+    let mut corrupt = effective.clone();
+    corrupt["repeat_loci"][0]["reference_units"] = serde_json::json!([10, 0]);
+    assert!(
+        !validates(&corrupt, "effective-config-v6.schema.json"),
+        "el esquema efectivo rechaza un bloque de cero unidades"
+    );
+
+    // Y rechaza el campo en un locus de un solo motivo, con su pareja válida.
+    let single = published_effective_config(&(header("4") + MINIMAL_LOCUS));
+    assert!(validates(&single, "effective-config-v6.schema.json"));
+    let mut with_units = single.clone();
+    with_units["repeat_loci"][0]["reference_units"] = serde_json::json!([10]);
+    assert!(
+        !validates(&with_units, "effective-config-v6.schema.json"),
+        "el esquema efectivo rechaza reference_units en un locus de un motivo"
     );
 }
 

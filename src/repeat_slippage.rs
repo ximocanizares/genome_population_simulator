@@ -671,8 +671,9 @@ pub enum SlippageError {
     /// **No se alcanza desde una configuración, y se dice en vez de fingir que
     /// sí.** Con referencia suministrada, la guarda de admisión de F6.4.2 exige
     /// una tirada mínima —tres unidades por omisión— y caza antes el tramo que
-    /// no es un microsatélite; con referencia simulada esa guarda no corre
-    /// (decisión S-06), pero el tracto lo pone el propio simulador. Se conserva
+    /// no es un microsatélite. Con referencia simulada, desde el 01/10/2026, el
+    /// simulador coloca el tracto y la misma guarda lo juzga después (S-06
+    /// corregida, DT-011). Se conserva
     /// porque es el contrato del generador y no puede depender de que otra
     /// guarda siga existiendo, y lo ejercita la prueba del módulo, que llama al
     /// generador directamente. Anotado como DT-011.

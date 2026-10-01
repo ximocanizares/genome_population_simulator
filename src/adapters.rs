@@ -2092,6 +2092,38 @@ fn parse_allele_units(
     }
 }
 
+/// Lee las unidades por bloque del tracto de referencia, si el locus las trae.
+///
+/// Solo se lee la forma: una lista de enteros no negativos. Si el campo tiene
+/// sentido en este locus, si hay uno por bloque y si cuadra con el tramo lo
+/// decide la resolución de la configuración efectiva, que conoce el tipo de
+/// referencia y nombra el locus.
+fn parse_reference_units(
+    admitted: &AdmittedToml,
+    locus: &DeTable<'_>,
+) -> Result<Option<Vec<Located<u64>>>, Diagnostic> {
+    let Some(values) = optional_array(admitted, locus, "reference_units")? else {
+        return Ok(None);
+    };
+    let mut units = Vec::with_capacity(values.len());
+    for item in values {
+        let parsed = item
+            .get_ref()
+            .as_integer()
+            .and_then(|integer| u64::from_str_radix(integer.as_str(), integer.radix()).ok())
+            .ok_or_else(|| {
+                wrong_type(
+                    admitted,
+                    "reference.repeat_loci.reference_units",
+                    item,
+                    "non-negative integer",
+                )
+            })?;
+        units.push(Located::new(parsed, location(admitted, item.span())));
+    }
+    Ok(Some(units))
+}
+
 fn parse_repeat_admission(
     admitted: &AdmittedToml,
     table: &DeTable<'_>,
@@ -2174,6 +2206,7 @@ fn parse_repeat_loci(
                 "end",
                 "motif",
                 "motifs",
+                "reference_units",
                 "max_units",
                 "min_purity",
                 "min_longest_run_units",
@@ -2218,6 +2251,22 @@ fn parse_repeat_loci(
                         admitted,
                         "reference.repeat_loci.motifs",
                         format!("el locus {} declara una lista de motivos vacía", id.value()),
+                    ));
+                }
+                // Una lista de un solo motivo **no** es un locus compuesto, y
+                // admitirla como simple dejaba al lector y al esquema en
+                // contradicción: el esquema exige `reference_units` en cuanto
+                // aparece `motifs` con referencia simulada, y el lector lo
+                // rechaza en un locus de un motivo. Hay una sola forma de
+                // escribir un locus simple, y es `motif`.
+                if values.len() == 1 {
+                    return Err(semantic_error(
+                        admitted,
+                        "reference.repeat_loci.motifs",
+                        format!(
+                            "el locus {} declara motifs con un solo motivo; un locus de un solo motivo se declara con motif",
+                            id.value()
+                        ),
                     ));
                 }
                 let mut parsed = Vec::with_capacity(values.len());
@@ -2315,6 +2364,7 @@ fn parse_repeat_loci(
             start: required_u64(admitted, locus, "start")?,
             end: required_u64(admitted, locus, "end")?,
             motifs,
+            reference_units: parse_reference_units(admitted, locus)?,
             max_units: optional_located_u64(admitted, locus, "max_units")?,
             admission,
             slippage,

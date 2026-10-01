@@ -247,6 +247,15 @@ pub struct DeclaredRepeatLocus {
     /// la clave `motif`; un microsatélite compuesto declara varios con `motifs`,
     /// y entonces cada alelo da su número de unidades por bloque.
     pub motifs: Vec<Located<String>>,
+    /// Unidades **enteras** de cada bloque del tracto que una referencia
+    /// **simulada** lleva colocado, en el orden de `motifs`.
+    ///
+    /// Solo tiene sentido en un locus compuesto sobre referencia simulada,
+    /// donde es obligatorio: con un solo motivo el tramo ya fija el tracto, y
+    /// con referencia suministrada el tracto se lee del FASTA. Aquí solo se
+    /// lee; quien rechaza el campo donde no hace nada, o una suma que no cuadra
+    /// con el tramo, es la resolución de la configuración efectiva.
+    pub reference_units: Option<Vec<Located<u64>>>,
     /// Tope propio del tamaño del tracto, **en unidades** (F6.4.3.1).
     pub max_units: Option<Located<u64>>,
     /// Mínimos de admisión **propios de este locus**, que sustituyen a los

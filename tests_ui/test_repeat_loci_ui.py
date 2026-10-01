@@ -61,6 +61,7 @@ LOCUS_ROWS = [
         "start": 101,
         "end": 200,
         "motifs": "CA",
+        "reference_units": "",
         "max_units": "120",
         "min_purity": "0.9",
         "min_longest_run_units": "",
@@ -75,10 +76,30 @@ GENERATED_LOCUS_ROWS = [
         "start": 101,
         "end": 200,
         "motifs": "CA",
+        "reference_units": "",
         "max_units": "120",
         "min_purity": "",
         "min_longest_run_units": "",
     }
+]
+
+# Compuesto `(CA)9(CAG)4` sobre las bases 101..130 de la secuencia del
+# formulario por omisión, que es una referencia simulada.
+COMPOSITE_LOCUS_ROW = {
+    "order": 1,
+    "id": "STR-C",
+    "sequence": "chr1",
+    "start": 101,
+    "end": 130,
+    "motifs": "CA,CAG",
+    "reference_units": "9,4",
+    "max_units": "",
+    "min_purity": "",
+    "min_longest_run_units": "",
+}
+COMPOSITE_ALLELE_ROWS = [
+    {"order": 1, "locus_id": "STR-C", "units": "9,4", "sequence": "", "frequency": "0.5"},
+    {"order": 2, "locus_id": "STR-C", "units": "10,4", "sequence": "", "frequency": "0.5"},
 ]
 
 SLIPPAGE_ROWS = [
@@ -654,6 +675,95 @@ class RepeatLociUiTests(unittest.TestCase):
         for allele in published["alleles"]:
             self.assertEqual(allele["origin"], "generated")
 
+    # -----------------------------------------------------------------------
+    # DT-016 — las unidades por bloque de un compuesto en referencia simulada
+    # -----------------------------------------------------------------------
+
+    def test_reference_units_survive_the_round_trip_through_toml_and_back(
+        self,
+    ) -> None:
+        """La celda `reference_units` va al TOML como lista y vuelve igual.
+
+        El fixture tiene dos bloques con unidades **distintas**, `9,4` al revés
+        de su orden natural, para que una ida y vuelta que las reordenara, las
+        perdiera o las fundiera en una sola no pasara.
+        """
+        locus_rows = [dict(COMPOSITE_LOCUS_ROW)]
+        loci = repeat_loci_from_editor_rows(locus_rows, COMPOSITE_ALLELE_ROWS, [])
+        self.assertEqual(loci[0].reference_units, [9, 4])
+        form = default_form()
+        form.reference.repeat_loci = loci
+        rendered = render_general_toml(form)
+        self.assertIn("reference_units = [9, 4]", rendered)
+        parsed = parse_general_toml(rendered)
+        self.assertEqual(parsed.reference.repeat_loci, loci)
+        self.assertEqual(repeat_locus_editor_rows(parsed.reference.repeat_loci), locus_rows)
+
+        # Y sin la celda no aparece la clave: un locus que no la declara no
+        # puede volver declarándola.
+        empty = dict(COMPOSITE_LOCUS_ROW, reference_units="")
+        without = repeat_loci_from_editor_rows([empty], COMPOSITE_ALLELE_ROWS, [])
+        self.assertIsNone(without[0].reference_units)
+        form.reference.repeat_loci = without
+        self.assertNotIn("reference_units", render_general_toml(form))
+
+    def test_a_one_element_motifs_list_is_rejected_like_in_rust(self) -> None:
+        """`motifs` con un solo motivo se rechaza al leer, como en Rust.
+
+        Lleva su pareja válida al lado: el mismo documento con `motif` se lee.
+        """
+        loci = repeat_loci_from_editor_rows(LOCUS_ROWS, ALLELE_ROWS, INTERRUPTION_ROWS)
+        rendered = render_general_toml(supplied_form(loci))
+        self.assertIn('motif = "CA"', rendered)
+        parse_general_toml(rendered)
+        with self.assertRaises(EditorError) as raised:
+            parse_general_toml(rendered.replace('motif = "CA"', 'motifs = ["CA"]'))
+        self.assertIn("motifs", raised.exception.path)
+
+    def test_a_non_integer_reference_unit_is_rejected_in_the_interface(self) -> None:
+        bad = dict(COMPOSITE_LOCUS_ROW, reference_units="9,4.5")
+        with self.assertRaises(EditorError) as raised:
+            repeat_loci_from_editor_rows([bad], COMPOSITE_ALLELE_ROWS, [])
+        self.assertIn("reference_units", raised.exception.path)
+
+    def test_the_authored_reference_units_reach_the_simulated_reference(self) -> None:
+        """El TOML que escribe la interfaz coloca los bloques en la referencia.
+
+        Se ejecuta el simulador sobre ese TOML y se leen el FASTA publicado y la
+        configuración efectiva: si la interfaz perdiera el campo, Rust
+        rechazaría el compuesto; si lo reordenara, el tracto no sería este.
+        """
+        loci = repeat_loci_from_editor_rows(
+            [dict(COMPOSITE_LOCUS_ROW)], COMPOSITE_ALLELE_ROWS, []
+        )
+        form = default_form()
+        form.reference.repeat_loci = loci
+        toml = render_general_toml(form)
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            validation, session = validate_toml(self.BINARY, toml, base)
+            self.assertTrue(validation.succeeded, validation.stdout or validation.stderr)
+            self.assertIsNotNone(session)
+            execution = run_toml(session, toml, self.BINARY, base, base / "result")
+            self.assertTrue(execution.succeeded, execution.stdout or execution.stderr)
+            effective = json.loads(
+                (base / "result" / "effective-config.json").read_text(encoding="utf-8")
+            )
+            fasta = (
+                base / "result" / "resources" / "references" / f"{form.reference.id}.fa"
+            ).read_text(encoding="utf-8")
+        self.assertEqual(effective["repeat_loci"][0]["reference_units"], [9, 4])
+        sequences: dict[str, str] = {}
+        current = None
+        for line in fasta.splitlines():
+            if line.startswith(">"):
+                current = line[1:].split()[0]
+                sequences[current] = ""
+            else:
+                sequences[current] += line
+        sequence = sequences[COMPOSITE_LOCUS_ROW["sequence"]]
+        self.assertEqual(sequence[100:130], "CA" * 9 + "CAG" * 4)
+
     def test_every_option_this_work_added_to_the_schema_has_a_control(self) -> None:
         """**Recorrido completo de opciones configurables, y regla de cierre.**
 
@@ -726,6 +836,7 @@ class RepeatLociUiTests(unittest.TestCase):
             "end": '"end"',
             "motif": '"motifs"',
             "motifs": '"motifs"',
+            "reference_units": '"reference_units"',
             "max_units": '"max_units"',
             "min_purity": '"min_purity"',
             "min_longest_run_units": '"min_longest_run_units"',

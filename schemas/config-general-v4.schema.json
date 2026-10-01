@@ -209,7 +209,29 @@
         "repeat_loci": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/repeat_locus"
+            "allOf": [
+              {
+                "$ref": "#/$defs/repeat_locus"
+              },
+              {
+                "description": "Con referencia simulada, un locus compuesto declara reference_units: sin ellas no hay forma de construir su tracto. No se exige cuando el locus pide el generador por deslizamiento, que solo admite un motivo y rechaza el compuesto por sí mismo.",
+                "if": {
+                  "required": [
+                    "motifs"
+                  ],
+                  "not": {
+                    "required": [
+                      "slippage"
+                    ]
+                  }
+                },
+                "then": {
+                  "required": [
+                    "reference_units"
+                  ]
+                }
+              }
+            ]
           },
           "x-gps-control": "table"
         },
@@ -256,7 +278,19 @@
         "repeat_loci": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/repeat_locus"
+            "allOf": [
+              {
+                "$ref": "#/$defs/repeat_locus"
+              },
+              {
+                "description": "Con referencia suministrada el tracto se lee del FASTA, y reference_units no haría nada.",
+                "not": {
+                  "required": [
+                    "reference_units"
+                  ]
+                }
+              }
+            ]
           },
           "x-gps-control": "table"
         },
@@ -1692,10 +1726,12 @@
           "$ref": "#/$defs/identifier"
         },
         "start": {
+          "description": "Primera base del tracto, en base uno e inclusiva. El tramo de start a end es el tracto mismo, sin flancos.",
           "type": "integer",
           "minimum": 1
         },
         "end": {
+          "description": "Última base del tracto, en base uno e inclusiva. Con referencia simulada, el programa coloca el tracto en la referencia antes del relleno al azar: con un solo motivo, el motivo repetido desde su primera base sobre todo el tramo, con la última copia parcial si el tramo no es múltiplo del motivo; con varios motivos, cada bloque con su motivo repetido tantas veces como diga reference_units.",
           "type": "integer",
           "minimum": 1
         },
@@ -1705,12 +1741,22 @@
           "description": "Motivo único. Excluyente con motifs."
         },
         "motifs": {
-          "description": "Motivos del locus, en orden, para un microsatélite compuesto como (TCTA)n(TCTG)n(TCTA)n. Excluyente con motif.",
+          "description": "Motivos del locus, en orden, para un microsatélite compuesto como (TCTA)n(TCTG)n(TCTA)n: al menos dos. Un locus de un solo motivo se declara con motif. Excluyente con motif.",
           "type": "array",
-          "minItems": 1,
+          "minItems": 2,
           "items": {
             "type": "string",
             "pattern": "^[ACGT]+$"
+          },
+          "x-gps-control": "table"
+        },
+        "reference_units": {
+          "description": "Unidades ENTERAS de cada bloque del tracto en la referencia, en el orden de motifs. Solo en un locus compuesto y solo con referencia simulada, donde es obligatorio: se rechaza en un locus de un solo motivo, cuyo tramo ya fija el tracto, y con referencia suministrada, donde el tracto se lee del FASTA. La suma de unidades por longitud de cada motivo tiene que ser exactamente la longitud del tramo de start a end. Lo que este formato NO puede exigir es que haya tantos valores como motivos ni que la suma cuadre con el tramo: comparar propiedades hermanas no es expresable en JSON Schema. Lo comprueba el lector, que rechaza el documento nombrando el locus, la suma y el tramo.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 1
           },
           "x-gps-control": "table"
         },
@@ -1747,10 +1793,20 @@
             "motif"
           ],
           "not": {
-            "required": [
-              "motifs"
+            "anyOf": [
+              {
+                "required": [
+                  "motifs"
+                ]
+              },
+              {
+                "required": [
+                  "reference_units"
+                ]
+              }
             ]
-          }
+          },
+          "description": "Un solo motivo: ni motifs ni reference_units, porque el tramo ya fija el tracto."
         },
         {
           "description": "Con varios motivos, cada alelo tiene que declarar una LISTA de unidades, una por bloque, y no puede declarar una secuencia exacta: unas bases sueltas no pueden decir dónde acaba un bloque y empieza el siguiente. Lo que este formato NO puede exigir es que la lista de unidades tenga la misma longitud que la de motivos: comparar la longitud de dos propiedades hermanas no es expresable en JSON Schema. Esa correspondencia la comprueba el lector, que rechaza el documento nombrando el locus, y una prueba de Rust la fija.",
